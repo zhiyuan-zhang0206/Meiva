@@ -40,6 +40,7 @@ import time
 import urllib.error
 import urllib.request
 from collections.abc import Callable
+from dataclasses import dataclass
 from functools import partial
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -48,6 +49,7 @@ from urllib.parse import urlsplit
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot, settings
+from base.host.net.ports import SYSTEM_URL_OPENER, UrlOpener
 from base.log import logger
 from base.paths import meiva_home
 
@@ -140,6 +142,11 @@ def classify_probe_error(exc: BaseException) -> str:
     return PROBE_FAIL_APPLICATION
 
 
+@dataclass(frozen=True)
+class GateConfig:
+    probe_timeout_s: float = PROBE_TIMEOUT_S
+
+
 class Gate:
     """Request-agnostic gate behavior; the HTTP handler is a thin shell."""
 
@@ -149,10 +156,14 @@ class Gate:
         gateway_base: str,
         app_base: str,
         static_dir: Path,
+        open_url: UrlOpener,
+        config: GateConfig,
         browser_origin: str = "",
     ) -> None:
         self.gateway_base = gateway_base.rstrip("/")
         self.app_base = app_base.rstrip("/")
+        self._open_url = open_url
+        self._config = config
         # Every request is answered with one whole page, so a browser never gets
         # a chance to fetch a stylesheet — the shared look and the theme
         # bootstrap have to travel inside the document. Holding them in their
@@ -188,9 +199,7 @@ class Gate:
         )
         started = time.monotonic()
         try:
-            with urllib.request.urlopen(  # noqa: S310 — operator-declared internal URL
-                req, timeout=PROBE_TIMEOUT_S
-            ) as resp:
+            with self._open_url(req, self._config.probe_timeout_s) as resp:
                 body = json.loads(resp.read())
                 return "up" if body.get("authenticated") else "login"
         except Exception as exc:  # any probe failure means "not serving"; never crash a request
@@ -240,7 +249,7 @@ class Gate:
                 length = int(handler.headers.get("Content-Length") or 0)
                 req.data = handler.rfile.read(length) if length else b""
             try:
-                with urllib.request.urlopen(req, timeout=PROBE_TIMEOUT_S) as resp:  # noqa: S310
+                with self._open_url(req, self._config.probe_timeout_s) as resp:
                     status, headers, body = resp.status, resp.headers, resp.read()
             except urllib.error.HTTPError as e:  # app up, answered with an error status
                 status, headers, body = e.code, e.headers, e.read()
@@ -344,7 +353,7 @@ def _app_base() -> str:
     return f"http://127.0.0.1:{app_port()}"
 
 
-def gateway_base(*, local_host: Callable[[], str]) -> str:
+def gateway_base(*, local_host: Callable[[], str], port: int) -> str:
     """The gateway API base the gate probes and the login page posts to.
 
     The host must be one the user's browser can dial: the login page posts the
@@ -360,17 +369,19 @@ def gateway_base(*, local_host: Callable[[], str]) -> str:
     host = local_host()
     if ":" in host and not host.startswith("["):
         host = f"[{host}]"  # IPv6 literal — netloc needs brackets
-    return f"http://{host}:{settings.gateway.gateway_port}"
+    return f"http://{host}:{port}"
 
 
 def _serve_http(args: argparse.Namespace, *, local_host: Callable[[], str]) -> None:
     static_dir = args.static_dir or (Path(__file__).parent / "static")
     port = args.port or entry_port()
     gate = Gate(
-        gateway_base=gateway_base(local_host=local_host),
+        gateway_base=gateway_base(local_host=local_host, port=settings.gateway.gateway_port),
         browser_origin=settings.gateway.browser_origin,
         app_base=_app_base(),
         static_dir=static_dir,
+        open_url=SYSTEM_URL_OPENER,
+        config=GateConfig(),
     )
     server = ThreadingHTTPServer(("0.0.0.0", port), Handler)  # noqa: S104 — the entry must be reachable off-box
     server.gate = gate  # type: ignore[attr-defined]  # handler reads it off the instance

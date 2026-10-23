@@ -10,7 +10,6 @@ from __future__ import annotations
 import json
 import threading
 import time
-import types
 import urllib.error
 import urllib.request
 from collections.abc import Iterator
@@ -21,8 +20,10 @@ from typing import Any, ClassVar, TypedDict
 import pytest
 
 import services.entrypoints.gate.daemon as gate_daemon
-from base import paths
-from services.entrypoints.gate.daemon import Gate, Handler
+from base.host.net.ports import SYSTEM_URL_OPENER
+from base.host.net.tests.fake_url_opener import FakeUrlOpener
+from base.paths.tests.homes import unit_home as unit_home
+from services.entrypoints.gate.daemon import Gate, GateConfig, Handler
 
 STATIC = (
     Path(__file__).parent.parent.parent.parent.parent
@@ -38,6 +39,8 @@ def test_login_template_carries_explicit_browser_entry() -> None:
         gateway_base="http://192.0.2.2:20016",
         app_base="http://127.0.0.1:20031",
         static_dir=STATIC,
+        open_url=FakeUrlOpener(),
+        config=GateConfig(),
         browser_origin="https://console.example",
     )
     assert "/*__BROWSER_ORIGIN__*/" not in gate.login_page
@@ -176,7 +179,12 @@ class Servers(TypedDict):
 
 
 @pytest.fixture
-def servers(tmp_path: Path) -> Iterator[Servers]:
+def probe_timeout_s() -> float:
+    return gate_daemon.PROBE_TIMEOUT_S
+
+
+@pytest.fixture
+def servers(unit_home: Path, probe_timeout_s: float) -> Iterator[Servers]:
     FakeGateway.requests = 0
     FakeGateway.auth_hook = None
     FakeGateway.auth_status = None
@@ -190,11 +198,13 @@ def servers(tmp_path: Path) -> Iterator[Servers]:
     app = ThreadingHTTPServer(("127.0.0.1", 0), FakeApp)
     gate_server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
     # Where the retired updater wrote its UI marker; Gate never reads it.
-    marker = tmp_path / "deploy-state.json"
+    marker = unit_home / "deploy-state.json"
     gate = Gate(
         gateway_base=f"http://127.0.0.1:{gw.server_port}",
         app_base=f"http://127.0.0.1:{app.server_port}",
         static_dir=STATIC,
+        open_url=SYSTEM_URL_OPENER,
+        config=GateConfig(probe_timeout_s=probe_timeout_s),
     )
     gate_server.gate = gate  # type: ignore[attr-defined]
     for s in (gw, app, gate_server):
@@ -287,15 +297,15 @@ def test_probe_auth_failure_serves_down_and_emits_auth_event(
     assert event["status"] == 401
 
 
+@pytest.mark.parametrize("probe_timeout_s", [0.2])
 def test_probe_timeout_serves_down_and_emits_timeout_event(
     servers: Servers,
     probe_events: list[dict[str, object]],
-    monkeypatch: pytest.MonkeyPatch,
+    probe_timeout_s: float,
 ) -> None:
     """A probe that outlives its budget is a TIMEOUT, not a network outage —
     the distinction the audit needed (a slow gateway needs different surgery
     than a dead one)."""
-    monkeypatch.setattr(gate_daemon, "PROBE_TIMEOUT_S", 0.2)
     FakeGateway.auth_hook = lambda: time.sleep(1.0)
 
     status, body = _get(servers["gate"] + "/")
@@ -582,14 +592,11 @@ def test_unauthenticated_serves_static_login(servers) -> None:
     assert "login" in body.lower()
 
 
-def test_a_leftover_update_marker_never_owns_the_entry(
-    servers: Servers, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_a_leftover_update_marker_never_owns_the_entry(servers: Servers) -> None:
     """No lifecycle produces Gate's update marker, and a stop takes Gate down
     with the rest of root. A marker file left by the retired updater in the
     home must not pin the entry on "System updating": Gate answers from the live
     gateway/app."""
-    monkeypatch.setattr(paths, "meiva_home", lambda: servers["flag"].parent)
     _write_v2(servers["flag"])
     FakeGateway.authenticated = True
     FakeGateway.down = True
@@ -664,7 +671,7 @@ def test_pages_ship_self_contained(servers, page: str) -> None:
         assert external not in body, f"page reaches outside itself: {external}"
 
 
-def test_gateway_base_uses_reachable_host(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_gateway_base_uses_reachable_host() -> None:
     """The login page posts to the gateway origin, so the host must be one a
     remote browser can dial — the operator-declared reachable address, not
     loopback (a remote browser resolving 127.0.0.1 hits itself; regression for
@@ -673,16 +680,13 @@ def test_gateway_base_uses_reachable_host(monkeypatch: pytest.MonkeyPatch) -> No
     """
     from services.entrypoints.gate import daemon
 
-    monkeypatch.setattr(
-        daemon, "settings", types.SimpleNamespace(gateway=types.SimpleNamespace(gateway_port=8123))
-    )
-    assert daemon.gateway_base(local_host=lambda: "10.0.0.2") == "http://10.0.0.2:8123"
+    assert daemon.gateway_base(local_host=lambda: "10.0.0.2", port=8123) == "http://10.0.0.2:8123"
 
     # Single box: the localhost fallback keeps local browsers working verbatim.
-    assert daemon.gateway_base(local_host=lambda: "localhost") == "http://localhost:8123"
+    assert daemon.gateway_base(local_host=lambda: "localhost", port=8123) == "http://localhost:8123"
 
     # IPv6 literals need brackets in a netloc.
-    assert daemon.gateway_base(local_host=lambda: "fd00::1") == "http://[fd00::1]:8123"
+    assert daemon.gateway_base(local_host=lambda: "fd00::1", port=8123) == "http://[fd00::1]:8123"
 
 
 # ── one-time login link on the static login page ─────────────────────────
@@ -740,6 +744,8 @@ def _ticket_gate() -> Gate:
         gateway_base="http://localhost:8000",
         app_base="http://127.0.0.1:20031",
         static_dir=STATIC,
+        open_url=FakeUrlOpener(),
+        config=GateConfig(),
     )
 
 
