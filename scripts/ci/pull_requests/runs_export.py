@@ -187,11 +187,16 @@ def trunk_merge_pr_number(branch: object) -> int | None:
     return int(match[1]) if match else None
 
 
-def _run_gh(args: list[str], stats: FetchStats) -> str:
+def _run_gh(
+    args: list[str],
+    stats: FetchStats,
+    *,
+    run_fn: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
+) -> str:
     """Issue one read-only gh command with bounded transient-error retries."""
     for attempt in range(_MAX_GH_ATTEMPTS):
         try:
-            result = subprocess.run(  # noqa: S603 - fixed gh argv, no shell
+            result = run_fn(
                 ["gh", "api", "--method", "GET", *args],
                 capture_output=True,
                 text=True,
@@ -225,7 +230,13 @@ def _json_list(output: str, description: str) -> list[dict[str, Any]]:
 
 
 def fetch_runs(
-    repo: str, since: datetime, until: datetime, stats: FetchStats
+    repo: str,
+    since: datetime,
+    until: datetime,
+    stats: FetchStats,
+    *,
+    max_pages: int = _MAX_RUN_PAGES_PER_CURSOR,
+    run_fn: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
 ) -> list[dict[str, Any]]:
     """Walk runs newest-first using created<= cursors and id deduplication."""
     cursor = until
@@ -236,12 +247,12 @@ def fetch_runs(
     )
     while cursor >= since:
         oldest: datetime | None = None
-        for page in range(1, _MAX_RUN_PAGES_PER_CURSOR + 1):
+        for page in range(1, max_pages + 1):
             stamp = cursor.strftime("%Y-%m-%dT%H:%M:%SZ")
             path = (
                 f"repos/{repo}/actions/runs?created=%3C%3D{stamp}&per_page={_PAGE_SIZE}&page={page}"
             )
-            batch = _json_list(_run_gh([path, "--jq", jq], stats), "workflow runs")
+            batch = _json_list(_run_gh([path, "--jq", jq], stats, run_fn=run_fn), "workflow runs")
             if not batch:
                 return list(seen.values())
             for run in batch:
@@ -355,12 +366,12 @@ def save_json(path: Path, payload: dict[str, Any]) -> None:
 def _runs_in_days(
     runs: Iterable[dict[str, Any]], days: set[date], tz: ZoneInfo
 ) -> list[dict[str, Any]]:
-    result: list[dict[str, Any]] = []
-    for run in runs:
-        created = parse_timestamp(run.get("created_at"))
-        if created is not None and created.astimezone(tz).date() in days:
-            result.append(run)
-    return result
+    return [
+        run
+        for run in runs
+        if (c := parse_timestamp(run.get("created_at"))) is not None
+        and c.astimezone(tz).date() in days
+    ]
 
 
 def _candidate_prs(
@@ -453,15 +464,12 @@ def _abandoned_shas(prs: list[dict[str, Any]]) -> set[str]:
     }
 
 
+_WORKFLOW_FLAG_COUNTS = ("failed", "self_healed", "retried_failed", "superseded", "instant_skip")
 _DAY_FLAG_COUNTS = (
-    "instant_skip",
+    *_WORKFLOW_FLAG_COUNTS,
     "watchdog",
     "proof",
-    "superseded",
     "superseded_zero",
-    "failed",
-    "retried_failed",
-    "self_healed",
     "abandoned",
     "zombie",
 )
@@ -470,13 +478,12 @@ _DAY_FLAG_COUNTS = (
 def _day_counts(
     group: list[dict[str, Any]], flags: dict[int, dict[str, bool]], prs_completed: int
 ) -> dict[str, Any]:
-    counts: dict[str, Any] = {
-        f"{name}_runs": sum(value[name] for value in flags.values()) for name in _DAY_FLAG_COUNTS
+    return {
+        **{f"{name}_runs": sum(v[name] for v in flags.values()) for name in _DAY_FLAG_COUNTS},
+        "runs": len(group),
+        "cancelled_runs": sum(run.get("conclusion") == "cancelled" for run in group),
+        "prs_completed": prs_completed,
     }
-    counts["runs"] = len(group)
-    counts["cancelled_runs"] = sum(run.get("conclusion") == "cancelled" for run in group)
-    counts["prs_completed"] = prs_completed
-    return counts
 
 
 def _day_shares(group: list[dict[str, Any]], flags: dict[int, dict[str, bool]]) -> dict[str, float]:
@@ -535,8 +542,7 @@ def _by_day(
 ) -> dict[date, list[dict[str, Any]]]:
     grouped: dict[date, list[dict[str, Any]]] = {day: [] for day in days}
     for item in items:
-        moment = stamp(item)
-        if moment is not None and (day := moment.astimezone(tz).date()) in grouped:
+        if (m := stamp(item)) is not None and (day := m.astimezone(tz).date()) in grouped:
             grouped[day].append(item)
     return grouped
 
@@ -602,9 +608,6 @@ def workflow_aggregates(
     return result
 
 
-_WORKFLOW_FLAG_COUNTS = ("failed", "self_healed", "retried_failed", "superseded", "instant_skip")
-
-
 def _workflow_entry(
     group: list[dict[str, Any]],
     flags: list[dict[str, bool]],
@@ -612,21 +615,20 @@ def _workflow_entry(
     completed_with_runs: set[int],
 ) -> dict[str, Any]:
     entry: dict[str, Any] = {
-        f"{name}_runs": sum(value[name] for value in flags) for name in _WORKFLOW_FLAG_COUNTS
+        **{f"{name}_runs": sum(v[name] for v in flags) for name in _WORKFLOW_FLAG_COUNTS},
+        "runs": len(group),
+        "cancelled_runs": sum(run.get("conclusion") == "cancelled" for run in group),
+        "prs_appeared_on": len(appeared),
     }
-    entry["runs"] = len(group)
-    entry["cancelled_runs"] = sum(run.get("conclusion") == "cancelled" for run in group)
-    entry["prs_appeared_on"] = len(appeared)
     if completed_with_runs:
         entry["pr_appearance_share"] = round(len(appeared) / len(completed_with_runs), 3)
     if group:
         retried = sum(int(run.get("run_attempt") or 0) >= 2 for run in group)
         entry["retry_share"] = round(retried / len(group), 3)
     execution = [
-        wall
-        for run in group
-        if not is_zombie(run)
-        if (wall := wall_seconds(run)) is not None and wall > _INSTANT_SKIP_SECONDS
+        w
+        for r in group
+        if not is_zombie(r) and (w := wall_seconds(r)) is not None and w > _INSTANT_SKIP_SECONDS
     ]
     if execution:
         entry["exec_median_seconds"] = percentile(execution, 0.5)
@@ -640,6 +642,9 @@ def collect_repo(
     now: datetime,
     tz: ZoneInfo,
     state_dir: Path,
+    *,
+    fetch_runs_fn: Callable[..., list[dict[str, Any]]] = fetch_runs,
+    fetch_prs_fn: Callable[..., list[dict[str, Any]]] = fetch_closed_prs,
 ) -> RepoCollection:
     """Fetch, merge, and recompute one repo without persisting partial state."""
     window_start = datetime.combine(days[0], day_time.min, tzinfo=tz).astimezone(UTC)
@@ -650,15 +655,9 @@ def collect_repo(
         cache_start if watermark is None else max(cache_start, watermark - _INCREMENTAL_OVERLAP)
     )
     stats = FetchStats()
-    fresh_runs = fetch_runs(repo, fetch_start, now, stats)
-    fresh_prs = fetch_closed_prs(repo, fetch_start, stats)
-    merged = merge_cache(
-        cache,
-        fresh_runs,
-        fresh_prs,
-        cache_start=cache_start,
-        fetched_end=now,
-    )
+    fresh_runs = fetch_runs_fn(repo, fetch_start, now, stats)
+    fresh_prs = fetch_prs_fn(repo, fetch_start, stats)
+    merged = merge_cache(cache, fresh_runs, fresh_prs, cache_start=cache_start, fetched_end=now)
     runs = _runs_in_days(merged["runs"].values(), set(days), tz)
     prs = list(merged["prs"].values())
     attribution = attribute_runs(runs, prs)
@@ -748,43 +747,45 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     return args
 
 
-def main(argv: list[str] | None = None, *, producer: Callable[[], Any] | None = None) -> int:
+def main(
+    argv: list[str] | None = None,
+    *,
+    producer: Callable[[], Any] | None = None,
+    capture_fn: Callable[[Path], Any] | None = None,
+    collect_fn: Callable[..., RepoCollection] = collect_repo,
+    save_fn: Callable[[Path, dict[str, Any]], None] = save_json,
+    emit_fn: Callable[..., None] = emit_snapshot,
+    **pipeline_kwargs: Any,
+) -> int:
     """Run the sampler, returning one on authoritative fetch failure."""
+    from base.native_process.loaded_commit import LoadedCommit
+    from base.paths import meiva_home
+    from scripts.ci.pull_requests.export_process import owned_event_pipeline
+
     args = _parse_args(argv)
     repos = args.repo or [DEFAULT_REPO]
-    image = None
-    if not args.dry_run and producer is None:
-        from base.native_process.loaded_commit import LoadedCommit
-
-        image = LoadedCommit.capture(_REPO_ROOT)
-    tz = cluster_tz()
-    now = datetime.now(UTC)
+    cap = capture_fn or LoadedCommit.capture
+    image = None if args.dry_run or producer is not None else cap(_REPO_ROOT)
+    tz, now = cluster_tz(), datetime.now(UTC)
     days = complete_days(now, args.window_days, tz)
-    if args.state_dir is None:
-        from base.paths import meiva_home
-
-        state_dir = meiva_home() / _STATE_DIR_RELATIVE
-    else:
-        state_dir = args.state_dir
+    state_dir = args.state_dir or (meiva_home() / _STATE_DIR_RELATIVE)
     try:
-        collections = [collect_repo(repo, days, now, tz, state_dir) for repo in repos]
+        collections = [collect_fn(repo, days, now, tz, state_dir) for repo in repos]
     except CiRunsError as exc:
         print(f"ci-runs-export: {exc}", file=sys.stderr)
         return 1
     snapshot = build_snapshot(collections, days, now, tz)
     if not args.dry_run:
         for item in collections:
-            save_json(_cache_path(state_dir, item.repo), item.cache)
-        save_json(state_dir / "snapshot.json", snapshot)
-        from scripts.ci.pull_requests.export_process import owned_event_pipeline
-
+            save_fn(_cache_path(state_dir, item.repo), item.cache)
+        save_fn(state_dir / "snapshot.json", snapshot)
         lifetime = (
             nullcontext(producer())
             if producer is not None
-            else owned_event_pipeline(PROCESS_NAME, image=image)
+            else owned_event_pipeline(PROCESS_NAME, image=image, **pipeline_kwargs)
         )
         with lifetime as pipeline:
-            emit_snapshot(snapshot, pipeline=pipeline)
+            emit_fn(snapshot, pipeline=pipeline)
     if args.dry_run or args.print_snapshot:
         print(json.dumps(snapshot, indent=1, sort_keys=True))
     else:

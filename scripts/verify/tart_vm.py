@@ -24,6 +24,7 @@ import json
 import subprocess
 import sys
 import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -79,7 +80,7 @@ TOOLCHAIN = guest_script(
 PYTHON = guest_script(f'cd "{GUEST_SOURCE}" && uv sync --locked')
 
 
-def export_commit(repo: Path, commit: str, destination: Path) -> Path:
+def export_commit(repo: Path, commit: str, destination: Path, *, home: Path | None = None) -> Path:
     """A bare repository under `destination` holding only that commit's history.
 
     Built by a fresh fetch, so every file in it is new and unlinked from the host's own
@@ -91,16 +92,25 @@ def export_commit(repo: Path, commit: str, destination: Path) -> Path:
         ["git", "init", "--bare", "-q", str(bare)], check=True, capture_output=True
     )
     git(bare, "fetch", "--no-tags", "-q", str(repo), f"{commit}:refs/heads/{EXPORT_BRANCH}")
-    refuse_host_state(destination)
+    refuse_host_state(destination, home=home)
     return destination
 
 
 class Tart:
     """One Tart binary. With `dry_run`, commands are printed and never run."""
 
-    def __init__(self, binary: str, *, dry_run: bool = False) -> None:
+    def __init__(
+        self,
+        binary: str,
+        *,
+        dry_run: bool = False,
+        home: Path | None = None,
+        sleep_fn: Callable[[float], None] = time.sleep,
+    ) -> None:
         self.binary = binary
         self.dry_run = dry_run
+        self._home = home
+        self._sleep = sleep_fn
 
     def argv(self, *args: str) -> list[str]:
         return [self.binary, *args]
@@ -150,14 +160,21 @@ class Tart:
 
     # ------------------------------------------------------------------------ boot
 
-    def boot_argv(self, name: str, *, share: Path | None, graphics: bool) -> list[str]:
+    def boot_argv(
+        self,
+        name: str,
+        *,
+        share: Path | None,
+        graphics: bool,
+        home: Path | None = None,
+    ) -> list[str]:
         """`tart run` with no clipboard, audio or USB passthrough and, at most, one
         read-only share: the commit's export."""
         argv = ["run", "--no-audio", "--no-clipboard", "--no-usb-accessories"]
         if not graphics:
             argv.append("--no-graphics")
         if share is not None:
-            refuse_host_state(share)
+            refuse_host_state(share, home=home or self._home)
             argv.append(f"--dir={SHARE_NAME}:{share}:ro")
         return self.argv(*argv, name)
 
@@ -197,7 +214,7 @@ class Tart:
                 raise RunFailedError(f"`tart run` for {name} exited early ({proc.returncode})")
             if self.run("exec", name, "true", check=False).returncode == 0:
                 return
-            time.sleep(3)
+            self._sleep(3)
         raise RunFailedError(f"the guest agent of {name} did not answer in {READY_TIMEOUT_S}s")
 
     # -------------------------------------------------------------------- shutdown

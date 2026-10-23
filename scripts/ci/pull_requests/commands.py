@@ -23,13 +23,16 @@ from __future__ import annotations
 import argparse
 import json
 import os
+from collections.abc import Callable, Mapping
+from pathlib import Path
+from typing import Any
 
 from base.clock import Clock
 from base.host.net.ports import UrlOpener
 from base.host.system.hostport import Host
-from scripts.ci.pull_requests import monitor
+from scripts.ci.pull_requests import monitor, status
 from scripts.ci.pull_requests.accounting import DEFAULT_LEDGER, load_ledger, report_rows
-from scripts.ci.pull_requests.status import DEFAULT_REPO, POLL_INTERVAL
+from scripts.ci.pull_requests.status import DEFAULT_REPO, POLL_INTERVAL, CIResult
 
 # CLI metadata does not import the queue operations module.
 _QUEUE_CHOICES = ("trunk",)
@@ -46,7 +49,12 @@ def _validate_common_args(args: argparse.Namespace, parser: argparse.ArgumentPar
         parser.error("--json and --wait are mutually exclusive")
 
 
-def _ci_usage_command(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int | None:
+def _ci_usage_command(
+    args: argparse.Namespace,
+    parser: argparse.ArgumentParser,
+    *,
+    ledger_path: Path = DEFAULT_LEDGER,
+) -> int | None:
     """Dispatch --ci-usage when set; None when not set.
     Reads the repo ledger (scripts/ci/ci_usage/ledger.jsonl, produced by scripts/ci/pull_requests/accounting.py
     --append-ledger) and prints per-agent rollups — the read side of the CI cost attribution
@@ -68,9 +76,7 @@ def _ci_usage_command(args: argparse.Namespace, parser: argparse.ArgumentParser)
         )
     if args.pr is not None:
         parser.error("--ci-usage takes no PR number")
-    rows = report_rows(
-        load_ledger(DEFAULT_LEDGER), days=args.ci_usage_days, agent=args.ci_usage_agent
-    )
+    rows = report_rows(load_ledger(ledger_path), days=args.ci_usage_days, agent=args.ci_usage_agent)
     if args.json:
         print(json.dumps(rows, indent=2))
         return 0
@@ -92,6 +98,7 @@ def _diagnose_command(
     *,
     host: Host,
     open_url: UrlOpener,
+    env: Mapping[str, str] = os.environ,
 ) -> int | None:
     """Dispatch --diagnose when set; None when not set."""
     if not args.diagnose:
@@ -107,7 +114,7 @@ def _diagnose_command(
     diag = diagnose_pr(
         args.pr,
         args.repo,
-        token=os.environ.get("TRUNK_API_TOKEN"),
+        token=env.get("TRUNK_API_TOKEN"),
         host=host,
         open_url=open_url,
     )
@@ -124,6 +131,10 @@ def main(
     host: Host,
     clock: Clock,
     open_url: UrlOpener,
+    env: Mapping[str, str] = os.environ,
+    ledger_path: Path = DEFAULT_LEDGER,
+    check_ci_fn: Callable[..., CIResult] = status.check_ci,
+    **owner_kwargs: Any,
 ) -> int:
     """CLI entry. Default: one-shot query (legacy behavior). `--wait`: poll
     until the verdict settles with the monitor exit-code contract; `--merge`
@@ -238,22 +249,44 @@ def main(
     args = p.parse_args(argv)
     _validate_common_args(args, p)
 
-    ci_usage_rc = _ci_usage_command(args, p)
+    ci_usage_rc = _ci_usage_command(args, p, ledger_path=ledger_path)
     if ci_usage_rc is not None:
         return ci_usage_rc
 
-    diagnose_rc = _diagnose_command(args, p, host=host, open_url=open_url)
+    diagnose_rc = _diagnose_command(args, p, host=host, open_url=open_url, env=env)
     if diagnose_rc is not None:
         return diagnose_rc
 
     if args.merge or args.queue_status or args.evict or args.rerun_failed_jobs:
         from scripts.ci.pull_requests.owner_operations import dispatch
 
-        return dispatch(args, p, host=host, clock=clock, open_url=open_url)
+        return dispatch(
+            args,
+            p,
+            host=host,
+            clock=clock,
+            open_url=open_url,
+            env=env,
+            check_ci_fn=check_ci_fn,
+            **owner_kwargs,
+        )
     if args.pr is None:
         p.error("PR number is required")
     if args.wait:
         return monitor.wait_for_verdict(
-            args.pr, args.repo, args.every, args.timeout, host=host, clock=clock
+            args.pr,
+            args.repo,
+            args.every,
+            args.timeout,
+            host=host,
+            clock=clock,
+            check_ci_fn=check_ci_fn,
         )
-    return monitor.query_once(args.pr, args.repo, as_json=args.json, host=host, clock=clock)
+    return monitor.query_once(
+        args.pr,
+        args.repo,
+        as_json=args.json,
+        host=host,
+        clock=clock,
+        check_ci_fn=check_ci_fn,
+    )

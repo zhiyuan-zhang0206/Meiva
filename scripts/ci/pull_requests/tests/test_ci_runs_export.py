@@ -61,9 +61,8 @@ def _gh_queue(responses: list[tuple[str, str, int]]) -> Any:
     return run
 
 
-def test_created_cursor_walk_deduplicates_run_ids(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_created_cursor_walk_deduplicates_run_ids() -> None:
     module = runs_export
-    monkeypatch.setattr(module, "_MAX_RUN_PAGES_PER_CURSOR", 1)
     page = [_run(id=9, created_at="2026-09-02T00:00:00Z")] * 100
     commands: list[str] = []
 
@@ -72,12 +71,13 @@ def test_created_cursor_walk_deduplicates_run_ids(monkeypatch: pytest.MonkeyPatc
         output = json.dumps(page if len(commands) == 1 else [])
         return subprocess.CompletedProcess(command, 0, output, "")
 
-    monkeypatch.setattr(module.subprocess, "run", record)
     rows = module.fetch_runs(
         "owner/repo",
         datetime(2026, 9, 1, tzinfo=UTC),
         datetime(2026, 9, 3, tzinfo=UTC),
         module.FetchStats(),
+        max_pages=1,
+        run_fn=record,
     )
 
     assert [row["id"] for row in rows] == [9]
@@ -192,7 +192,7 @@ def test_cache_merge_is_idempotent_prunes_old_records_and_moves_watermark() -> N
 
 
 def test_dry_run_prints_snapshot_without_writes_or_emission(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     module = runs_export
     collection = module.RepoCollection(
@@ -204,27 +204,40 @@ def test_dry_run_prints_snapshot_without_writes_or_emission(
         window_prs=0,
         api_requests=1,
     )
-    monkeypatch.setattr(module, "collect_repo", lambda *_a, **_k: collection)  # pyright: ignore[reportUnknownArgumentType]
     writes: list[Path] = []
-    monkeypatch.setattr(module, "save_json", lambda path, *_a: writes.append(path))  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(module, "emit_snapshot", lambda *_a: pytest.fail("dry run emitted"))  # pyright: ignore[reportUnknownArgumentType]
 
-    assert module.main(["--repo", "owner/repo", "--state-dir", str(tmp_path), "--dry-run"]) == 0
+    assert (
+        module.main(
+            ["--repo", "owner/repo", "--state-dir", str(tmp_path), "--dry-run"],
+            collect_fn=lambda *_a, **_k: collection,  # pyright: ignore[reportUnknownArgumentType]
+            save_fn=lambda path, *_a: writes.append(path),  # pyright: ignore[reportUnknownArgumentType]
+            emit_fn=lambda *_a, **_k: pytest.fail("dry run emitted"),  # pyright: ignore[reportUnknownArgumentType]
+        )
+        == 0
+    )
     assert writes == []
     assert '"owner/repo"' in capsys.readouterr().out
 
 
 def test_failed_authoritative_pr_walk_aborts_before_emission(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    tmp_path: Path,
 ) -> None:
     module = runs_export
-    monkeypatch.setattr(module, "fetch_runs", lambda *_a: [])  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(
-        module,
-        "fetch_closed_prs",
-        lambda *_a: (_ for _ in ()).throw(module.CiRunsError("down")),  # pyright: ignore[reportUnknownArgumentType]
-    )
-    monkeypatch.setattr(module, "emit_snapshot", lambda *_a: pytest.fail("failed walk emitted"))  # pyright: ignore[reportUnknownArgumentType]
 
-    assert module.main(["--state-dir", str(tmp_path)]) == 1
+    assert (
+        module.main(
+            ["--state-dir", str(tmp_path)],
+            collect_fn=lambda repo, days, now, tz, state_dir: module.collect_repo(
+                repo,
+                days,
+                now,
+                tz,
+                state_dir,
+                fetch_runs_fn=lambda *_a: [],  # pyright: ignore[reportUnknownArgumentType]
+                fetch_prs_fn=lambda *_a: (_ for _ in ()).throw(module.CiRunsError("down")),  # pyright: ignore[reportUnknownArgumentType]
+            ),
+            emit_fn=lambda *_a, **_k: pytest.fail("failed walk emitted"),  # pyright: ignore[reportUnknownArgumentType]
+        )
+        == 1
+    )
     assert not list(tmp_path.iterdir())

@@ -168,9 +168,7 @@ def test_collect_records_falls_back_to_cache_then_partial_on_fetch_failure() -> 
 # ── fetchers: pagination, stops, failure paths ──────────────────────────────
 
 
-def test_fetch_closed_prs_stops_when_a_page_tail_predates_the_window(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_fetch_closed_prs_stops_when_a_page_tail_predates_the_window() -> None:
     since = datetime(2026, 8, 15, tzinfo=UTC)  # time-bomb-ok: explicit fixture window input
     recent = [_meta(n, updated="2026-09-12T03:00:00Z") for n in range(100, 200)]
     tail_old = [_meta(n, updated="2026-09-12T03:00:00Z") for n in range(99)]
@@ -183,14 +181,13 @@ def test_fetch_closed_prs_stops_when_a_page_tail_predates_the_window(
         fetched.append(page_no)
         return json.dumps(pages[page_no])
 
-    monkeypatch.setattr(pr_flow, "run_gh", run_gh)
     stats = pr_flow.RunStats()
-    prs = pr_flow.fetch_closed_prs("r/x", since, stats)
+    prs = pr_flow.fetch_closed_prs("r/x", since, stats, run_gh_fn=run_gh)
     assert fetched == [1, 2]
     assert len(prs) == 200
 
 
-def test_fetch_closed_prs_returns_on_a_short_page(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_fetch_closed_prs_returns_on_a_short_page() -> None:
     pages = {1: [_meta(2, updated="2026-09-12T03:00:00Z")]}
     fetched: list[int] = []
 
@@ -199,35 +196,37 @@ def test_fetch_closed_prs_returns_on_a_short_page(monkeypatch: pytest.MonkeyPatc
         fetched.append(page_no)
         return json.dumps(pages[page_no])
 
-    monkeypatch.setattr(pr_flow, "run_gh", run_gh)
-    prs = pr_flow.fetch_closed_prs("r/x", datetime(2026, 8, 15, tzinfo=UTC), pr_flow.RunStats())
+    prs = pr_flow.fetch_closed_prs(
+        "r/x", datetime(2026, 8, 15, tzinfo=UTC), pr_flow.RunStats(), run_gh_fn=run_gh
+    )
     assert fetched == [1]
     assert len(prs) == 1
 
 
-def test_fetch_closed_prs_raises_when_the_walk_exceeds_its_budget(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_fetch_closed_prs_raises_when_the_walk_exceeds_its_budget() -> None:
     page = [_meta(n, updated="2026-09-12T03:00:00Z") for n in range(100)]
 
     def run_gh(_args: list[str], **_kw: object) -> str:
         return json.dumps(page)
 
-    monkeypatch.setattr(pr_flow, "run_gh", run_gh)
-    monkeypatch.setattr(pr_flow, "MAX_LIST_PAGES", 2)
     with pytest.raises(pr_flow.PrFlowError, match="budget"):
-        pr_flow.fetch_closed_prs("r/x", datetime(2026, 8, 15, tzinfo=UTC), pr_flow.RunStats())
+        pr_flow.fetch_closed_prs(
+            "r/x",
+            datetime(2026, 8, 15, tzinfo=UTC),
+            pr_flow.RunStats(),
+            run_gh_fn=run_gh,
+            max_pages=2,
+        )
 
 
-def test_fetch_timeline_bounds_pagination(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_fetch_timeline_bounds_pagination() -> None:
     page = [{"event": "committed", "sha": "a" * 40, "commit_date": "2026-09-12T02:00:00Z"}] * 100
 
     def run_gh(_args: list[str], **_kw: object) -> str:
         return json.dumps(page)
 
-    monkeypatch.setattr(pr_flow, "run_gh", run_gh)
     stats = pr_flow.RunStats()
-    events = pr_flow.fetch_timeline("r/x", 5, stats)
+    events = pr_flow.fetch_timeline("r/x", 5, stats, run_gh_fn=run_gh)
     assert len(events) == pr_flow.MAX_TIMELINE_PAGES * 100
     assert stats.gh_api_calls == pr_flow.MAX_TIMELINE_PAGES
 
@@ -302,7 +301,7 @@ def test_save_json_failed_replace_keeps_the_prior_file_and_no_tmp(tmp_path: Path
     assert list(target.parent.glob("*.tmp")) == []
 
 
-def test_emit_snapshot_skips_the_pipeline_in_dry_run(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_emit_snapshot_skips_the_pipeline_in_dry_run() -> None:
     emitted: list[object] = []
 
     def emit(snapshot: object, *, pipeline: object) -> None:
@@ -310,11 +309,10 @@ def test_emit_snapshot_skips_the_pipeline_in_dry_run(monkeypatch: pytest.MonkeyP
         emitted.append(snapshot)
 
     writer = object()
-    monkeypatch.setattr(pr_flow, "emit_events", emit)
 
     snapshot: dict[str, Any] = {"days": {}, "run": {}}
-    pr_flow.emit_snapshot(snapshot, dry_run=True, pipeline=writer)
+    pr_flow.emit_snapshot(snapshot, dry_run=True, pipeline=writer, emit_fn=emit)
     assert emitted == []
 
-    pr_flow.emit_snapshot(snapshot, dry_run=False, pipeline=writer)
+    pr_flow.emit_snapshot(snapshot, dry_run=False, pipeline=writer, emit_fn=emit)
     assert emitted == [snapshot]

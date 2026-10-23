@@ -8,7 +8,6 @@ from typing import Any
 
 import pytest
 
-from base import paths
 from base.clock import Clock, ClockConfig
 from base.clock.tests.manual_timers import ManualTimers
 from base.host.system.tests.fake_commands import fake_host
@@ -113,8 +112,6 @@ def _run_watcher(
     def workspace_for_test(_agent_id: int) -> Path:
         return tmp_path
 
-    monkeypatch.setattr(paths, "workspace_dir", workspace_for_test)
-
     code = _TEMPLATE.read_text()
     substitutions = (
         ('REPO_ROOT = ""', f'REPO_ROOT = "{tmp_path}"'),
@@ -125,6 +122,7 @@ def _run_watcher(
         ("import meiva\n", ""),
         ("from base.clock import Clock\n", ""),
         ("from base.host.system.hostport import Host\n", ""),
+        ("from base.paths import workspace_dir\n", ""),
         ("from scripts.ci.pull_requests.status import CIStatus, check_ci  # noqa: E402\n", ""),
     )
     for old, new in substitutions:
@@ -141,6 +139,7 @@ def _run_watcher(
                 "meiva": fake_meiva,
                 "Clock": types.SimpleNamespace(from_settings=lambda: clock),
                 "Host": types.SimpleNamespace(system=lambda: host),
+                "workspace_dir": workspace_for_test,
                 "CIStatus": CIStatus,
                 "check_ci": _check_ci,
             },

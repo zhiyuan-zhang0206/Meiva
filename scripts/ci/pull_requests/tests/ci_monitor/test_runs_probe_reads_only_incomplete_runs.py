@@ -82,13 +82,15 @@ def test_parse_ts(value: str | None, expected: float | None) -> None:
 @pytest.mark.parametrize(
     ("last", "now", "expected"), [(90.0, 100.0, 290), (0.0, 400.0, 0), (None, 100.0, 0)]
 )
-def test_queue_cooldown_seconds(
-    monkeypatch: pytest.MonkeyPatch, last: float | None, now: float, expected: int
-) -> None:
-    monkeypatch.setattr(owner_operations, "last_head_update", lambda *_a, **_k: last)
+def test_queue_cooldown_seconds(last: float | None, now: float, expected: int) -> None:
     clock = make_clock(wall_start=datetime.fromtimestamp(now, tz=UTC))
     host = gh_runner([])
-    assert owner_operations.queue_cooldown_seconds("7", "o/r", host=host, clock=clock) == expected
+    assert (
+        owner_operations.queue_cooldown_seconds(
+            "7", "o/r", host=host, clock=clock, last_update_fn=lambda *_a, **_k: last
+        )
+        == expected
+    )
 
 
 @pytest.mark.parametrize(
@@ -126,14 +128,16 @@ def test_last_head_update(replies: list[Any], expected: float | None) -> None:
     assert "/pulls/7/commits" in " ".join(seen[1])
 
 
-def test_wait_all_passed_exits_zero(no_sleep, poll, capsys) -> None:
-    poll(CIStatus.ALL_PASSED)
-    assert (
-        ci_utils.main(
-            ["1243", "--wait"], clock=no_sleep, host=fake_host(), open_url=FakeUrlOpener()
-        )
-        == 0
+def _run_cli(
+    argv: list[str], *, clock: Any = TEST_CLOCK, host: Any = None, open_url: Any = None, **kw: Any
+) -> int:
+    return ci_utils.main(
+        argv, clock=clock, host=host or fake_host(), open_url=open_url or FakeUrlOpener(), **kw
     )
+
+
+def test_wait_all_passed_exits_zero(no_sleep, poll, capsys) -> None:
+    assert _run_cli(["1243", "--wait"], clock=no_sleep, check_ci_fn=poll(CIStatus.ALL_PASSED)) == 0
     assert "CI green" in capsys.readouterr().out
 
 
@@ -142,103 +146,58 @@ def test_wait_all_passed_exits_zero(no_sleep, poll, capsys) -> None:
     [CIStatus.FAILED, CIStatus.MERGE_CONFLICT, CIStatus.NO_WORKFLOW_RUNS, CIStatus.NOT_READY],
 )
 def test_wait_not_green_exits_one(no_sleep, poll, capsys, verdict) -> None:
-    poll(verdict)
-    assert (
-        ci_utils.main(
-            ["1243", "--wait"], clock=no_sleep, host=fake_host(), open_url=FakeUrlOpener()
-        )
-        == 1
-    )
+    assert _run_cli(["1243", "--wait"], clock=no_sleep, check_ci_fn=poll(verdict)) == 1
     assert "NOT green" in capsys.readouterr().err
 
 
 def test_wait_not_ready_names_draft_gating(no_sleep, poll, capsys) -> None:
-    poll(CIStatus.NOT_READY)
-    assert (
-        ci_utils.main(
-            ["1243", "--wait"], clock=no_sleep, host=fake_host(), open_url=FakeUrlOpener()
-        )
-        == 1
-    )
+    assert _run_cli(["1243", "--wait"], clock=no_sleep, check_ci_fn=poll(CIStatus.NOT_READY)) == 1
     assert "draft gating" in capsys.readouterr().err
 
 
 def test_wait_failed_lists_failed_checks(no_sleep, poll, capsys) -> None:
-    poll(CIStatus.FAILED)
-    assert (
-        ci_utils.main(
-            ["1243", "--wait"], clock=no_sleep, host=fake_host(), open_url=FakeUrlOpener()
-        )
-        == 1
-    )
+    assert _run_cli(["1243", "--wait"], clock=no_sleep, check_ci_fn=poll(CIStatus.FAILED)) == 1
     assert "lint" in capsys.readouterr().err
 
 
 def test_wait_pending_then_green(no_sleep, poll) -> None:
-    poll(CIStatus.PENDING, CIStatus.PENDING, CIStatus.ALL_PASSED)
-    assert (
-        ci_utils.main(
-            ["1243", "--wait"], clock=no_sleep, host=fake_host(), open_url=FakeUrlOpener()
-        )
-        == 0
-    )
+    check_fn = poll(CIStatus.PENDING, CIStatus.PENDING, CIStatus.ALL_PASSED)
+    assert _run_cli(["1243", "--wait"], clock=no_sleep, check_ci_fn=check_fn) == 0
 
 
 def test_wait_no_checks_then_green(no_sleep, poll, capsys) -> None:
-    poll(CIStatus.NO_CHECKS, CIStatus.ALL_PASSED)
-    assert (
-        ci_utils.main(
-            ["1243", "--wait"], clock=no_sleep, host=fake_host(), open_url=FakeUrlOpener()
-        )
-        == 0
-    )
+    check_fn = poll(CIStatus.NO_CHECKS, CIStatus.ALL_PASSED)
+    assert _run_cli(["1243", "--wait"], clock=no_sleep, check_ci_fn=check_fn) == 0
     assert "no checks yet" in capsys.readouterr().err
 
 
 def test_wait_transient_error_then_green(no_sleep, poll) -> None:
     # One gh/network hiccup must not kill the poll — only 3 consecutive do.
-    poll(CIStatus.ERROR, CIStatus.PENDING, CIStatus.ALL_PASSED)
-    assert (
-        ci_utils.main(
-            ["1243", "--wait"], clock=no_sleep, host=fake_host(), open_url=FakeUrlOpener()
-        )
-        == 0
-    )
+    check_fn = poll(CIStatus.ERROR, CIStatus.PENDING, CIStatus.ALL_PASSED)
+    assert _run_cli(["1243", "--wait"], clock=no_sleep, check_ci_fn=check_fn) == 0
 
 
 def test_wait_three_consecutive_errors_exit_three(no_sleep, poll, capsys) -> None:
-    poll(CIStatus.ERROR)
-    assert (
-        ci_utils.main(
-            ["1243", "--wait"], clock=no_sleep, host=fake_host(), open_url=FakeUrlOpener()
-        )
-        == 3
-    )
+    assert _run_cli(["1243", "--wait"], clock=no_sleep, check_ci_fn=poll(CIStatus.ERROR)) == 3
     assert "boom" in capsys.readouterr().err
 
 
 def test_wait_timeout_while_pending_exits_one(no_sleep, poll, capsys) -> None:
     # --timeout bounds the wait for run_background use (no watchdog there);
     # a still-pending PR at the deadline is a failed watch, not a silent hang.
-    poll(CIStatus.PENDING)
     assert (
-        ci_utils.main(
-            ["1243", "--wait", "--timeout", "1"],
-            clock=no_sleep,
-            host=fake_host(),
-            open_url=FakeUrlOpener(),
+        _run_cli(
+            ["1243", "--wait", "--timeout", "1"], clock=no_sleep, check_ci_fn=poll(CIStatus.PENDING)
         )
         == 1
     )
     assert "timed out" in capsys.readouterr().err
 
 
-def test_wait_merge_trunk_submits_and_lands_when_green(no_sleep, poll, monkeypatch, capsys) -> None:
-    poll(CIStatus.ALL_PASSED)
+def test_wait_merge_trunk_submits_and_lands_when_green(no_sleep, poll, capsys) -> None:
+    check_fn = poll(CIStatus.ALL_PASSED)
     gh_calls: list[list[str]] = []
     requests: list[urllib.request.Request] = []
-    monkeypatch.setattr(owner_operations, "queue_cooldown_seconds", lambda *_a, **_k: 0)
-    monkeypatch.setenv("TRUNK_API_TOKEN", "test-token")
     open_url = urlopen_sequence(
         [
             TrunkResponse({"accepted": True}),
@@ -251,7 +210,13 @@ def test_wait_merge_trunk_submits_and_lands_when_green(no_sleep, poll, monkeypat
     # then wait for the queue to land it.
     assert (
         ci_utils.main(
-            ["1243", "--merge"], host=gh_runner(gh_calls), clock=no_sleep, open_url=open_url
+            ["1243", "--merge"],
+            host=gh_runner(gh_calls),
+            clock=no_sleep,
+            open_url=open_url,
+            env={"TRUNK_API_TOKEN": "test-token"},
+            check_ci_fn=check_fn,
+            cooldown_fn=lambda *_a, **_k: 0,
         )
         == 0
     )
@@ -270,16 +235,12 @@ def test_wait_merge_trunk_submits_and_lands_when_green(no_sleep, poll, monkeypat
     assert gh_calls[0][:4] == ["gh", "pr", "view", "1243"]
 
 
-def test_wait_merge_trunk_failed_state_prints_full_payload(
-    no_sleep, poll, monkeypatch, capsys
-) -> None:
+def test_wait_merge_trunk_failed_state_prints_full_payload(no_sleep, poll, capsys) -> None:
     """Task #2541: a failed/cancelled Trunk submission often carries an empty
     `reason`, so the old one-line print was undiagnosable (five first-submit
     failures 2026-09-06 left no trace). The full getSubmittedPullRequest
     payload must be printed on the terminal branch."""
-    poll(CIStatus.ALL_PASSED)
-    monkeypatch.setattr(owner_operations, "queue_cooldown_seconds", lambda *_a, **_k: 0)
-    monkeypatch.setenv("TRUNK_API_TOKEN", "test-token")
+    check_fn = poll(CIStatus.ALL_PASSED)
     open_url = urlopen_sequence(
         [
             TrunkResponse({"accepted": True}),
@@ -293,6 +254,9 @@ def test_wait_merge_trunk_failed_state_prints_full_payload(
             host=gh_runner([]),
             clock=no_sleep,
             open_url=open_url,
+            env={"TRUNK_API_TOKEN": "test-token"},
+            check_ci_fn=check_fn,
+            cooldown_fn=lambda *_a, **_k: 0,
         )
         == 1
     )
@@ -303,10 +267,8 @@ def test_wait_merge_trunk_failed_state_prints_full_payload(
     assert '"batch rejected"' in err
 
 
-def test_wait_merge_trunk_submit_failure_exits_four(no_sleep, poll, monkeypatch, capsys) -> None:
-    poll(CIStatus.ALL_PASSED)
-    monkeypatch.setattr(owner_operations, "queue_cooldown_seconds", lambda *_a, **_k: 0)
-    monkeypatch.setenv("TRUNK_API_TOKEN", "test-token")
+def test_wait_merge_trunk_submit_failure_exits_four(no_sleep, poll, capsys) -> None:
+    check_fn = poll(CIStatus.ALL_PASSED)
     open_url = urlopen_sequence(
         [
             urllib.error.URLError("network down"),
@@ -321,6 +283,9 @@ def test_wait_merge_trunk_submit_failure_exits_four(no_sleep, poll, monkeypatch,
             host=gh_runner([]),
             clock=no_sleep,
             open_url=open_url,
+            env={"TRUNK_API_TOKEN": "test-token"},
+            check_ci_fn=check_fn,
+            cooldown_fn=lambda *_a, **_k: 0,
         )
         == 4
     )
@@ -438,27 +403,24 @@ def test_json_probe_pending_is_not_terminal(gh: Any, has_workflows: Any, capsys)
     assert payload["terminal"] is False
 
 
-def test_rerun_failed_jobs_dry_run_lists_jobs(monkeypatch: pytest.MonkeyPatch, capsys) -> None:
+def test_rerun_failed_jobs_dry_run_lists_jobs(capsys) -> None:
     """--dry-run lists the failed jobs and exits 0 without re-running anything."""
-    monkeypatch.setattr(
-        owner_operations,
-        "list_failed_jobs",
-        lambda _pr, _repo, **_k: [
-            {
-                "name": "e2e shard (3/4)",
-                "job_id": 102,
-                "run_id": 11,
-                "conclusion": "FAILURE",
-                "run_status": "completed",
-            }
-        ],
-    )
+    jobs = [
+        {
+            "name": "e2e shard (3/4)",
+            "job_id": 102,
+            "run_id": 11,
+            "conclusion": "FAILURE",
+            "run_status": "completed",
+        }
+    ]
     assert (
         ci_utils.main(
             ["42", "--rerun-failed-jobs", "--dry-run"],
             clock=TEST_CLOCK,
             host=fake_host(),
             open_url=FakeUrlOpener(),
+            list_failed_jobs_fn=lambda _pr, _repo, **_k: jobs,
         )
         == 0
     )
@@ -466,91 +428,69 @@ def test_rerun_failed_jobs_dry_run_lists_jobs(monkeypatch: pytest.MonkeyPatch, c
     assert "e2e shard (3/4)" in out and "102" in out and "[run completed]" in out
 
 
-def test_rerun_failed_jobs_nothing_to_do(monkeypatch: pytest.MonkeyPatch, capsys) -> None:
-    monkeypatch.setattr(owner_operations, "list_failed_jobs", lambda _pr, _repo, **_k: [])
+def test_rerun_failed_jobs_nothing_to_do(capsys) -> None:
     assert (
         ci_utils.main(
             ["42", "--rerun-failed-jobs", "--dry-run"],
             clock=TEST_CLOCK,
             host=fake_host(),
             open_url=FakeUrlOpener(),
+            list_failed_jobs_fn=lambda _pr, _repo, **_k: [],
         )
         == 0
     )
     assert "No failed jobs" in capsys.readouterr().out
 
 
-def test_rerun_failed_jobs_forwards_and_reports_errors(
-    monkeypatch: pytest.MonkeyPatch, capsys
-) -> None:
+def test_rerun_failed_jobs_forwards_and_reports_errors(capsys) -> None:
     """A rejected rerun request is printed and flips the exit code to 3."""
-    monkeypatch.setattr(
-        owner_operations,
-        "rerun_failed_jobs",
-        lambda _pr, _repo, **_k: ([], [], ["lint: gh: rate limited"]),
-    )
     assert (
         ci_utils.main(
             ["42", "--rerun-failed-jobs"],
             clock=TEST_CLOCK,
             host=fake_host(),
             open_url=FakeUrlOpener(),
+            rerun_failed_jobs_fn=lambda _pr, _repo, **_k: ([], [], ["lint: gh: rate limited"]),
         )
         == 3
     )
     assert "Re-run failed: lint: gh: rate limited" in capsys.readouterr().out
 
 
-def test_rerun_failed_jobs_success_exits_zero(monkeypatch: pytest.MonkeyPatch, capsys) -> None:
-    monkeypatch.setattr(
-        owner_operations,
-        "rerun_failed_jobs",
-        lambda _pr, _repo, **_k: (
-            [{"name": "lint", "job_id": 104, "run_id": 11, "conclusion": "FAILURE"}],
-            [],
-            [],
-        ),
-    )
+def test_rerun_failed_jobs_success_exits_zero(capsys) -> None:
+    reran = [{"name": "lint", "job_id": 104, "run_id": 11, "conclusion": "FAILURE"}]
     assert (
         ci_utils.main(
             ["42", "--rerun-failed-jobs"],
             clock=TEST_CLOCK,
             host=fake_host(),
             open_url=FakeUrlOpener(),
+            rerun_failed_jobs_fn=lambda _pr, _repo, **_k: (reran, [], []),
         )
         == 0
     )
     assert "Re-ran lint" in capsys.readouterr().out
 
 
-def test_rerun_failed_jobs_waits_for_still_running_run(
-    monkeypatch: pytest.MonkeyPatch, capsys
-) -> None:
+def test_rerun_failed_jobs_waits_for_still_running_run(capsys) -> None:
     """Failures waiting on a still-running run are reported with the recovery
     action and exit 5, never forwarded as a 403 (task #3764)."""
-    monkeypatch.setattr(
-        owner_operations,
-        "rerun_failed_jobs",
-        lambda _pr, _repo, **_k: (
-            [],
-            [
-                {
-                    "name": "backend shard (8/16)",
-                    "job_id": 105093815208,
-                    "run_id": 35187743815,
-                    "conclusion": "failure",
-                    "run_status": "in_progress",
-                }
-            ],
-            [],
-        ),
-    )
+    waiting = [
+        {
+            "name": "backend shard (8/16)",
+            "job_id": 105093815208,
+            "run_id": 35187743815,
+            "conclusion": "failure",
+            "run_status": "in_progress",
+        }
+    ]
     assert (
         ci_utils.main(
             ["42", "--rerun-failed-jobs"],
             clock=TEST_CLOCK,
             host=fake_host(),
             open_url=FakeUrlOpener(),
+            rerun_failed_jobs_fn=lambda _pr, _repo, **_k: ([], waiting, []),
         )
         == 5
     )
@@ -560,32 +500,26 @@ def test_rerun_failed_jobs_waits_for_still_running_run(
     assert "Re-run this command once the run finishes." in out
 
 
-def test_rerun_failed_jobs_reports_mixed_outcomes(monkeypatch: pytest.MonkeyPatch, capsys) -> None:
+def test_rerun_failed_jobs_reports_mixed_outcomes(capsys) -> None:
     """A rerun that partly lands and partly waits prints both lines and exits
     5: the waiting remainder governs the exit (task #3764)."""
-    monkeypatch.setattr(
-        owner_operations,
-        "rerun_failed_jobs",
-        lambda _pr, _repo, **_k: (
-            [{"name": "lint", "job_id": 104, "run_id": 11, "conclusion": "FAILURE"}],
-            [
-                {
-                    "name": "backend shard (8/16)",
-                    "job_id": 105093815208,
-                    "run_id": 35187743815,
-                    "conclusion": "failure",
-                    "run_status": "in_progress",
-                }
-            ],
-            [],
-        ),
-    )
+    reran = [{"name": "lint", "job_id": 104, "run_id": 11, "conclusion": "FAILURE"}]
+    waiting = [
+        {
+            "name": "backend shard (8/16)",
+            "job_id": 105093815208,
+            "run_id": 35187743815,
+            "conclusion": "failure",
+            "run_status": "in_progress",
+        }
+    ]
     assert (
         ci_utils.main(
             ["42", "--rerun-failed-jobs"],
             clock=TEST_CLOCK,
             host=fake_host(),
             open_url=FakeUrlOpener(),
+            rerun_failed_jobs_fn=lambda _pr, _repo, **_k: (reran, waiting, []),
         )
         == 5
     )
@@ -594,22 +528,20 @@ def test_rerun_failed_jobs_reports_mixed_outcomes(monkeypatch: pytest.MonkeyPatc
     assert "Waiting: backend shard (8/16)" in out
 
 
-def test_rerun_failed_jobs_query_failure_is_an_error(
-    monkeypatch: pytest.MonkeyPatch, capsys
-) -> None:
+def test_rerun_failed_jobs_query_failure_is_an_error(capsys) -> None:
     """A failed GitHub query must not read as "no failed jobs" (issue #1945):
     the error is reported on stderr and the exit code flips to 1."""
 
     def _boom(_pr: Any, _repo: Any, **_k: Any) -> list[dict]:
         raise owner_operations.CiJobRerunError("gh api runs failed: rate limited")
 
-    monkeypatch.setattr(owner_operations, "list_failed_jobs", _boom)
     assert (
         ci_utils.main(
             ["42", "--rerun-failed-jobs", "--dry-run"],
             clock=TEST_CLOCK,
             host=fake_host(),
             open_url=FakeUrlOpener(),
+            list_failed_jobs_fn=_boom,
         )
         == 1
     )
@@ -618,21 +550,19 @@ def test_rerun_failed_jobs_query_failure_is_an_error(
     assert "No failed jobs" not in captured.out
 
 
-def test_rerun_failed_jobs_query_failure_non_dry_run_exits_one(
-    monkeypatch: pytest.MonkeyPatch, capsys
-) -> None:
+def test_rerun_failed_jobs_query_failure_non_dry_run_exits_one(capsys) -> None:
     """The non-dry-run path reports the same query failure instead of exiting 0."""
 
     def _boom(_pr: Any, _repo: Any, **_k: Any) -> list[dict]:
         raise owner_operations.CiJobRerunError("gh pr view failed: not found")
 
-    monkeypatch.setattr(owner_operations, "rerun_failed_jobs", _boom)
     assert (
         ci_utils.main(
             ["42", "--rerun-failed-jobs"],
             clock=TEST_CLOCK,
             host=fake_host(),
             open_url=FakeUrlOpener(),
+            rerun_failed_jobs_fn=_boom,
         )
         == 1
     )
@@ -649,8 +579,7 @@ def test_rerun_failed_jobs_exclusive_with_wait() -> None:
         )
 
 
-def test_queue_status_prints_state_and_items(monkeypatch, capsys) -> None:
-    monkeypatch.setenv("TRUNK_API_TOKEN", "test-token")
+def test_queue_status_prints_state_and_items(capsys) -> None:
     requests: list[urllib.request.Request] = []
     open_url = urlopen_sequence(
         [
@@ -680,7 +609,13 @@ def test_queue_status_prints_state_and_items(monkeypatch, capsys) -> None:
         requests,
     )
     assert (
-        ci_utils.main(["--queue-status"], clock=TEST_CLOCK, open_url=open_url, host=fake_host())
+        ci_utils.main(
+            ["--queue-status"],
+            clock=TEST_CLOCK,
+            open_url=open_url,
+            host=fake_host(),
+            env={"TRUNK_API_TOKEN": "test-token"},
+        )
         == 0
     )
     out = capsys.readouterr().out
@@ -695,26 +630,34 @@ def test_queue_status_prints_state_and_items(monkeypatch, capsys) -> None:
     }
 
 
-def test_queue_status_empty_queue(monkeypatch, capsys) -> None:
-    monkeypatch.setenv("TRUNK_API_TOKEN", "test-token")
-    open_url = urlopen_sequence(
-        [TrunkResponse({"state": "running", "enqueuedPullRequests": []})], []
-    )
-    assert (
-        ci_utils.main(["--queue-status"], clock=TEST_CLOCK, open_url=open_url, host=fake_host())
-        == 0
-    )
-    assert "No PRs in the queue" in capsys.readouterr().out
-
-
-def test_queue_status_json_prints_raw_payload(monkeypatch, capsys) -> None:
-    monkeypatch.setenv("TRUNK_API_TOKEN", "test-token")
+def test_queue_status_empty_queue(capsys) -> None:
     open_url = urlopen_sequence(
         [TrunkResponse({"state": "running", "enqueuedPullRequests": []})], []
     )
     assert (
         ci_utils.main(
-            ["--queue-status", "--json"], clock=TEST_CLOCK, open_url=open_url, host=fake_host()
+            ["--queue-status"],
+            clock=TEST_CLOCK,
+            open_url=open_url,
+            host=fake_host(),
+            env={"TRUNK_API_TOKEN": "test-token"},
+        )
+        == 0
+    )
+    assert "No PRs in the queue" in capsys.readouterr().out
+
+
+def test_queue_status_json_prints_raw_payload(capsys) -> None:
+    open_url = urlopen_sequence(
+        [TrunkResponse({"state": "running", "enqueuedPullRequests": []})], []
+    )
+    assert (
+        ci_utils.main(
+            ["--queue-status", "--json"],
+            clock=TEST_CLOCK,
+            open_url=open_url,
+            host=fake_host(),
+            env={"TRUNK_API_TOKEN": "test-token"},
         )
         == 0
     )
@@ -722,33 +665,46 @@ def test_queue_status_json_prints_raw_payload(monkeypatch, capsys) -> None:
     assert payload["state"] == "running"
 
 
-def test_queue_status_api_error_exits_three(monkeypatch, capsys) -> None:
-    monkeypatch.setenv("TRUNK_API_TOKEN", "test-token")
+def test_queue_status_api_error_exits_three(capsys) -> None:
     open_url = urlopen_sequence([urllib.error.URLError("network down")], [])
     assert (
-        ci_utils.main(["--queue-status"], clock=TEST_CLOCK, open_url=open_url, host=fake_host())
+        ci_utils.main(
+            ["--queue-status"],
+            clock=TEST_CLOCK,
+            open_url=open_url,
+            host=fake_host(),
+            env={"TRUNK_API_TOKEN": "test-token"},
+        )
         == 3
     )
     assert "Trunk queue status error" in capsys.readouterr().err
 
 
-def test_queue_status_requires_token(monkeypatch, capsys) -> None:
-    monkeypatch.delenv("TRUNK_API_TOKEN", raising=False)
+def test_queue_status_requires_token(capsys) -> None:
     assert (
         ci_utils.main(
-            ["--queue-status"], clock=TEST_CLOCK, host=fake_host(), open_url=FakeUrlOpener()
+            ["--queue-status"],
+            clock=TEST_CLOCK,
+            host=fake_host(),
+            open_url=FakeUrlOpener(),
+            env={},
         )
         == 3
     )
     assert "TRUNK_API_TOKEN is required" in capsys.readouterr().err
 
 
-def test_evict_success_exits_zero(monkeypatch, capsys) -> None:
-    monkeypatch.setenv("TRUNK_API_TOKEN", "test-token")
+def test_evict_success_exits_zero(capsys) -> None:
     requests: list[urllib.request.Request] = []
     open_url = urlopen_sequence([TrunkResponse({})], requests)
     assert (
-        ci_utils.main(["1877", "--evict"], clock=TEST_CLOCK, open_url=open_url, host=fake_host())
+        ci_utils.main(
+            ["1877", "--evict"],
+            clock=TEST_CLOCK,
+            open_url=open_url,
+            host=fake_host(),
+            env={"TRUNK_API_TOKEN": "test-token"},
+        )
         == 0
     )
     assert "PR #1877 cancelled from the Trunk merge queue" in capsys.readouterr().err
@@ -760,10 +716,9 @@ def test_evict_success_exits_zero(monkeypatch, capsys) -> None:
     }
 
 
-def test_evict_not_in_queue_exits_one(monkeypatch, capsys) -> None:
+def test_evict_not_in_queue_exits_one(capsys) -> None:
     """cancelPullRequest answers 404 when the PR is not in the queue; a
     nonzero exit keeps a typo'd PR number from reading as a clean evict."""
-    monkeypatch.setenv("TRUNK_API_TOKEN", "test-token")
     responses: list[TrunkResponse | urllib.error.URLError] = []
     responses.append(
         urllib.error.HTTPError(
@@ -776,17 +731,28 @@ def test_evict_not_in_queue_exits_one(monkeypatch, capsys) -> None:
     )
     open_url = urlopen_sequence(responses, [])
     assert (
-        ci_utils.main(["1877", "--evict"], clock=TEST_CLOCK, open_url=open_url, host=fake_host())
+        ci_utils.main(
+            ["1877", "--evict"],
+            clock=TEST_CLOCK,
+            open_url=open_url,
+            host=fake_host(),
+            env={"TRUNK_API_TOKEN": "test-token"},
+        )
         == 1
     )
     assert "not in the Trunk merge queue" in capsys.readouterr().err
 
 
-def test_evict_api_error_exits_four(monkeypatch, capsys) -> None:
-    monkeypatch.setenv("TRUNK_API_TOKEN", "test-token")
+def test_evict_api_error_exits_four(capsys) -> None:
     open_url = urlopen_sequence([urllib.error.URLError("network down")], [])
     assert (
-        ci_utils.main(["1877", "--evict"], clock=TEST_CLOCK, open_url=open_url, host=fake_host())
+        ci_utils.main(
+            ["1877", "--evict"],
+            clock=TEST_CLOCK,
+            open_url=open_url,
+            host=fake_host(),
+            env={"TRUNK_API_TOKEN": "test-token"},
+        )
         == 4
     )
     assert "Trunk queue cancel error" in capsys.readouterr().err

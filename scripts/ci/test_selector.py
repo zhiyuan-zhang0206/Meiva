@@ -183,14 +183,14 @@ _SUBSET_BUDGET_SHARE = 0.5
 _SUBSET_JOB_SECONDS = 20 * 60 * 4
 
 
-def selection_mode() -> str:
+def selection_mode(*, env: dict[str, str] | os._Environ[str] = os.environ) -> str:
     """The mode CI is running: the ci.yml TEST_SELECTION_MODE value.
 
     The selector itself behaves identically in either mode — the mode only
     decides how CI routes its decision — so this is audit metadata for the
     recorded payload, defaulting to the repository's enforce default.
     """
-    return os.environ.get("TEST_SELECTION_MODE", "enforce")
+    return env.get("TEST_SELECTION_MODE", "enforce")
 
 
 def _is_test_dir_path(path: str, hosts: tuple[str, ...]) -> bool:
