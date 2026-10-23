@@ -23,7 +23,9 @@ discover another checkout implicitly. The CLI composes that fact from its source
 root; the watcher uses CI_UTILS rather than the queried REPO_ROOT. The ledger path
 is configurable data. Timeouts preserve failed-read and unconfirmed-write outcomes. Stdlib-only tools stay dependency-free.
 Coverage reports require integer line counts with `0 <= covered <= total`;
-malformed report objects fail before any coverage verdict is printed.
+malformed report objects fail before any coverage verdict is printed. The script entry
+composes the canonical floor table and workflow environment; gate/table functions
+require explicit floors, and the entry parser requires the supplied environment.
 Visual baseline refresh uses the workflow's 45-minute child budget and restores
 moved references on failure. Demo and deployment probes share the passed opener.
 

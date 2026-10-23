@@ -45,6 +45,14 @@ production finding, stay actionable.
 
 A finding is dev-only when every lockfile node carries dev:true, and has no forward fix when npm reports none or suggests a change that is not newer than the installed package; only both together exempt it.
 
+The direct `python3 scripts/ci/dependency_audit.py` entry remains standard-library
+only. It supplies command and HTTP transports to the real audit, binary discovery,
+report and issue owners; nested transports are required. Type-only port imports
+do not load application dependencies. Audit commands keep their 600-second bound,
+GitHub commands 60 seconds and HTTP requests 30 seconds. A nonzero GitHub command
+raises with its captured output; audit commands retain their distinct complete
+findings policy. HTTP adaptation passes the timeout by keyword to `urlopen`.
+
 Each pinned-binary row reads its version constant from its owning file by an exact regex; a renamed, moved or ambiguous constant raises instead of silently dropping the row.
 
 Parent: [[scripts/docs/scripts.meiva.okf.md]].

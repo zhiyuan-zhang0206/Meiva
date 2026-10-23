@@ -1,26 +1,28 @@
 from __future__ import annotations
 
+import json
+import os
 import subprocess
+import sys
 import urllib.error
 from pathlib import Path
-from subprocess import CompletedProcess
 
 import pytest
-from pytest import MonkeyPatch
 
 from base.host.brew_pin import UV_VERSION
+from base.host.net.tests.fake_url_opener import Answer, FakeUrlOpener
+from base.host.proc import run_bounded
+from base.host.system.tests.fake_commands import FakeCommands, Reply
 from scripts.ci import dependency_audit as audit
 
 
 @pytest.mark.parametrize("exit_code", [0, 1])
-def test_audit_accepts_complete_findings(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, exit_code: int
-) -> None:
-    def run(*args: object, **kwargs: object) -> CompletedProcess[str]:
-        return CompletedProcess(["npm", "audit"], exit_code, '{"vulnerabilities": {}}', "")
-
-    monkeypatch.setattr(audit.subprocess, "run", run)
-    assert audit.run_json(["npm", "audit"], tmp_path) == {"vulnerabilities": {}}
+def test_audit_accepts_complete_findings(tmp_path: Path, exit_code: int) -> None:
+    commands = FakeCommands()
+    commands.on(["npm", "audit"], Reply(returncode=exit_code, stdout='{"vulnerabilities": {}}'))
+    assert audit.run_json(["npm", "audit"], tmp_path, run=commands) == {"vulnerabilities": {}}
+    assert commands.calls[0].timeout == 600
+    assert commands.calls[0].kwargs["cwd"] == tmp_path
 
 
 @pytest.mark.parametrize(
@@ -28,14 +30,15 @@ def test_audit_accepts_complete_findings(
     [(1, '{"error": {"code": "ENOAUDIT"}}'), (2, '{"vulnerabilities": {}}')],
 )
 def test_audit_rejects_registry_and_tool_errors(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, exit_code: int, stdout: str
+    tmp_path: Path, exit_code: int, stdout: str
 ) -> None:
-    def run(*args: object, **kwargs: object) -> CompletedProcess[str]:
-        return CompletedProcess(["npm", "audit"], exit_code, stdout, "private registry details")
-
-    monkeypatch.setattr(audit.subprocess, "run", run)
+    commands = FakeCommands()
+    commands.on(
+        ["npm", "audit"],
+        Reply(returncode=exit_code, stdout=stdout, stderr="private registry details"),
+    )
     with pytest.raises(RuntimeError, match="npm reported an audit error") as error:
-        audit.run_json(["npm", "audit"], tmp_path)
+        audit.run_json(["npm", "audit"], tmp_path, run=commands)
     assert "private registry details" not in str(error.value)
 
 
@@ -173,22 +176,51 @@ def test_every_pinned_binary_constant_is_found_in_the_tree() -> None:
         assert audit.pinned_version(path, pattern), name
 
 
-def test_report_runs_the_canonical_uv_pin(monkeypatch: MonkeyPatch, tmp_path: Path) -> None:
-    commands: list[list[str]] = []
-
-    def run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
-        commands.append(command)
-        return subprocess.CompletedProcess(command, 0, stdout='{"vulnerabilities": {}}')
-
-    def no_binaries(*_args: object) -> list[audit.Binary]:
-        return []
-
-    monkeypatch.setattr(audit.subprocess, "run", run)
-    monkeypatch.setattr(audit, "latest_binaries", no_binaries)
+def test_report_runs_the_canonical_uv_pin(tmp_path: Path) -> None:
+    commands = FakeCommands()
+    commands.on(
+        "uvx",
+        Reply(
+            stdout=json.dumps(
+                {
+                    "vulnerabilities": [
+                        {
+                            "dependency": {"name": "sample", "version": "1"},
+                            "id": "GHSA-sample",
+                            "display_id": "GHSA-sample",
+                            "aliases": [],
+                            "summary": "sample finding",
+                            "fix_versions": ["2"],
+                        }
+                    ]
+                }
+            )
+        ),
+    )
+    commands.on("npm", Reply(stdout='{"vulnerabilities": {}}'))
+    pins = {name: audit.pinned_version(path, pattern) for name, path, pattern in audit.PINS}
+    commands.on(
+        ["gh", "api", "repos/pgvector/pgvector/tags?per_page=100"],
+        Reply(stdout=json.dumps([{"name": "v" + pins["pgvector"]}])),
+    )
+    for repo, name in (
+        ("wal-g/wal-g", "wal-g"),
+        ("open-telemetry/opentelemetry-collector-releases", "otelcol-contrib"),
+        ("astral-sh/uv", "uv"),
+        ("grafana/grafana", "Grafana"),
+    ):
+        commands.on(
+            ["gh", "api", f"repos/{repo}/releases/latest"],
+            Reply(stdout=json.dumps({"tag_name": pins[name]})),
+        )
+    opener = FakeUrlOpener()
+    opener.on(
+        "https://api.osv.dev/", Answer(json.dumps({"database_specific": {"severity": "HIGH"}}))
+    )
+    opener.on("https://repo1.maven.org/", Answer(f"<version>{pins['zonky Postgres']}</version>"))
     output = tmp_path / "report.md"
-
-    assert audit.main(["--out", str(output)]) == 0
-    assert commands[0] == [
+    assert audit.main(["--out", str(output)], run=commands, open_url=opener) == 0
+    assert list(commands.argvs[0]) == [
         "uvx",
         "--from",
         f"uv=={UV_VERSION}",
@@ -198,7 +230,14 @@ def test_report_runs_the_canonical_uv_pin(monkeypatch: MonkeyPatch, tmp_path: Pa
         "--output-format",
         "json",
     ]
-    assert output.read_text().startswith(audit.MARKER)
+    report = output.read_text()
+    assert report.startswith(audit.MARKER)
+    assert "| high | sample |" in report
+    for name in pins:
+        assert f"| {name} |" in report
+    assert all(call.timeout == 600 for call in commands.calls[:2])
+    assert all(call.timeout == 60 for call in commands.calls[2:])
+    assert [call.timeout for call in opener.calls] == [30, 30]
 
 
 def test_zonky_latest_stays_on_the_pinned_major() -> None:
@@ -274,3 +313,41 @@ def test_issue_lookup_filters_on_the_marker_and_skips_pull_requests() -> None:
     audit.sync_issue("o/r", "body", actionable=False, gh=gh)
     jq = gh.calls[0][gh.calls[0].index("--jq") + 1]
     assert audit.MARKER in jq and 'has("pull_request") | not' in jq
+
+
+def test_bare_stdlib_script_help_requires_no_repository_or_site_imports(tmp_path: Path) -> None:
+    script = Path(audit.__file__).resolve()
+    env = {
+        key: value
+        for key, value in os.environ.items()
+        if key != "PYTHONPATH" and not key.startswith("MEIVA_")
+    }
+    result = run_bounded(
+        [sys.executable, "-S", str(script), "--help"],
+        timeout=10,
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "Weekly dependency audit report" in result.stdout
+    assert "--sync-issue" in result.stdout
+
+
+def test_github_failure_preserves_command_error_before_report_or_http(tmp_path: Path) -> None:
+    commands = FakeCommands()
+    commands.on("uvx", Reply(stdout='{"vulnerabilities": []}'))
+    commands.on("npm", Reply(stdout='{"vulnerabilities": {}}'))
+    commands.on("gh", Reply(returncode=2, stdout="partial response", stderr="gh refused"))
+    opener = FakeUrlOpener()
+    output = tmp_path / "report.md"
+    with pytest.raises(subprocess.CalledProcessError) as error:
+        audit.main(["--out", str(output)], run=commands, open_url=opener)
+    assert error.value.returncode == 2
+    assert error.value.stdout == "partial response"
+    assert error.value.stderr == "gh refused"
+    assert error.value.cmd == list(commands.argvs[-1])
+    assert commands.calls[-1].timeout == 60
+    assert not output.exists()
+    assert opener.calls == []
