@@ -227,7 +227,7 @@ def create_blocking(
     *,
     finish_receipt: Callable[
         [psycopg.Connection[Any], str | None, creation_receipts.Creation], None
-    ] = creation_receipts.finish,
+    ],
 ) -> tuple[Any, ...]:
 
     _validate_script(body.script)
@@ -277,7 +277,11 @@ def create_blocking(
 async def create_schedule(request: Request, body: ScheduleCreate) -> ScheduleView:
 
     row = await asyncio.to_thread(
-        create_blocking, request.app.state.db_pool, body, creation_receipts.operation_key(request)
+        create_blocking,
+        request.app.state.db_pool,
+        body,
+        creation_receipts.operation_key(request),
+        finish_receipt=request.app.state.schedule_receipt_finisher,
     )
 
     return _view(row)

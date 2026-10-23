@@ -23,7 +23,6 @@ from gateway.schemas import PageRegisterRequest
 from ops.pages import (
     PagePortConflictError,
     PageTargetChangedError,
-    assert_port_free,
     close_all_agent_pages_in_transaction,
     close_observed_page_in_transaction,
     lock_page_agent,
@@ -74,7 +73,7 @@ def _begin(conn: Connection, key: str, payload: dict[str, object]) -> tuple[str,
     return digest, PageRow.model_validate(row[1])
 
 
-def _finish(conn: Connection, key: str, digest: str, record: PageRow) -> None:
+def finish_receipt(conn: Connection, key: str, digest: str, record: PageRow) -> None:
     conn.execute(
         "INSERT INTO page_operation_receipts (operation_key, request_hash, acceptance) VALUES (%s,%s,%s)",
         (key, digest, Jsonb(record.model_dump(mode="json"))),
@@ -105,11 +104,9 @@ def register(
     absolute_base: str,
     validate_target: Callable[[Connection], None],
     *,
-    port_free_checker: Callable[[Connection, int, str, int], None] | None = None,
-    finish_receipt: Callable[[Connection, str, str, PageRow], None] | None = None,
+    port_free_checker: Callable[[Connection, int, str, int], None],
+    save_receipt: Callable[[Connection, str, str, PageRow], None],
 ) -> PageAcceptance:
-    check_port_free = assert_port_free if port_free_checker is None else port_free_checker
-    save_receipt = _finish if finish_receipt is None else finish_receipt
     try:
         with write_transaction(pool) as conn:
             digest, replay = _begin(conn, key, body.model_dump(mode="json"))
@@ -117,7 +114,7 @@ def register(
                 return PageAcceptance(replay, [], replayed=True)
             _target(conn, agent_id, register=True)
             validate_target(conn)
-            check_port_free(conn, agent_id, body.host, body.port)
+            port_free_checker(conn, agent_id, body.host, body.port)
             closed = close_all_agent_pages_in_transaction(conn, agent_id)
             record = register_page_in_transaction(
                 conn,
@@ -154,7 +151,7 @@ def close(
                 conn, agent_id, name, expected_page_id
             )
             record = record.model_copy(update={"url": absolute_base + record.url})
-            _finish(conn, key, digest, record)
+            finish_receipt(conn, key, digest, record)
             return PageAcceptance(record, [name] if changed else [], replayed=False)
     except PageTargetChangedError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc

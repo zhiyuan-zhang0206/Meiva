@@ -12,10 +12,8 @@ not evaluate the credential at all.
 from __future__ import annotations
 
 from collections.abc import Iterator
-from functools import partial
 
 import pytest
-from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from base import config
@@ -23,11 +21,10 @@ from base.cluster import rate_limit
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.cluster.rate_limit import LoginRateLimitConfig
-from gateway.app import lifespan
-from gateway.http.auth.router import router
 from gateway.http.config import gateway_config_from_boot
 from gateway.tests.auth.gateway_config import (
     gateway_config_fields,
+    gateway_test_app,
     gateway_test_client,
     gateway_test_process,
 )
@@ -140,12 +137,8 @@ def test_login_lockout_is_isolated_between_application_lifespans(
 ) -> None:
     with gateway_test_process(machine=machine_identity) as process:
         app_config = gateway_config_from_boot(process.config)
-        first = FastAPI(lifespan=partial(lifespan, process=process, process_ownership="borrowed"))
-        second = FastAPI(lifespan=partial(lifespan, process=process, process_ownership="borrowed"))
-        first.state.gateway_config = app_config
-        second.state.gateway_config = app_config
-        first.include_router(router)
-        second.include_router(router)
+        first = gateway_test_app(process=process, config=app_config)
+        second = gateway_test_app(process=process, config=app_config)
         with (
             gateway_test_client(first) as attacker,
             gateway_test_client(second) as independent,

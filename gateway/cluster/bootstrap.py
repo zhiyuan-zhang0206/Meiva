@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Header, HTTPException, Request
 
-from base import config
 from base.packages.plugins.config_registration import plugin_bootstrap_config
 from gateway.http.auth.request_principal import cluster_credential
 from gateway.http.model_catalog import require_model_catalog
@@ -18,12 +17,7 @@ def get_bootstrap(
     request: Request, authorization: str | None = Header(default=None)
 ) -> dict[str, str]:
 
-    gateway_process = getattr(request.app.state, "gateway_process", None)
-    secret = (
-        gateway_process.config.view.data_plane.cluster_secret
-        if gateway_process is not None
-        else config.settings.data_plane.cluster_secret
-    )
+    secret = request.app.state.gateway_config.cluster_secret
     if (
         cluster_credential(
             authorization,
