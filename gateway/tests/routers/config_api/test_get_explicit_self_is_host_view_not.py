@@ -44,9 +44,7 @@ def test_put_remote_rejects_cluster_key(clean_overrides: Path) -> None:
     assert "machine-independent" in resp.json()["detail"]
 
 
-def test_put_remote_host_field_dispatches_config_write(
-    monkeypatch: pytest.MonkeyPatch, clean_overrides: Path
-) -> None:
+def test_put_remote_host_field_dispatches_config_write(clean_overrides: Path) -> None:
     seed_machine(REMOTE)
     stub_result = {
         "machine": REMOTE,
@@ -55,9 +53,9 @@ def test_put_remote_host_field_dispatches_config_write(
         "restart_required": ["ops"],
     }
     enqueue = AsyncMock(return_value=stub_result)
-    monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", enqueue)
 
     with gateway_test_client() as client:
+        client.app.state.config_rpc_dispatcher = enqueue
         resp = client.put(f"/api/config?machine={REMOTE}", json={"ops_concurrency": 12})
     assert resp.status_code == 200, resp.text
     body = resp.json()
@@ -77,13 +75,11 @@ def test_put_remote_host_field_dispatches_config_write(
     assert isinstance(payload["trace_id"], str) and payload["trace_id"]
 
 
-def test_put_remote_rejects_writable_non_remote_host_field(
-    monkeypatch: pytest.MonkeyPatch, clean_overrides: Path
-) -> None:
+def test_put_remote_rejects_writable_non_remote_host_field(clean_overrides: Path) -> None:
     seed_machine(REMOTE)
     dispatched = AsyncMock()
-    monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", dispatched)
     with gateway_test_client() as client:
+        client.app.state.config_rpc_dispatcher = dispatched
         resp = client.put(
             f"/api/config?machine={REMOTE}", json={"cross_machine_transfer_backend": "none"}
         )
@@ -92,13 +88,11 @@ def test_put_remote_rejects_writable_non_remote_host_field(
     dispatched.assert_not_awaited()
 
 
-def test_put_remote_rejects_oss_credential_fields(
-    monkeypatch: pytest.MonkeyPatch, clean_overrides: Path
-) -> None:
+def test_put_remote_rejects_oss_credential_fields(clean_overrides: Path) -> None:
     seed_machine(REMOTE)
     dispatched = AsyncMock()
-    monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", dispatched)
     with gateway_test_client() as client:
+        client.app.state.config_rpc_dispatcher = dispatched
         resp = client.put(
             f"/api/config?machine={REMOTE}",
             json={
@@ -112,23 +106,23 @@ def test_put_remote_rejects_oss_credential_fields(
     dispatched.assert_not_awaited()
 
 
-def test_put_remote_offline_503(monkeypatch: pytest.MonkeyPatch, clean_overrides: Path) -> None:
+def test_put_remote_offline_503(clean_overrides: Path) -> None:
     seed_machine(REMOTE)
     enqueue = AsyncMock(side_effect=cluster_rpc.ClusterOpUnreachable("no ack"))
-    monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", enqueue)
 
     with gateway_test_client() as client:
+        client.app.state.config_rpc_dispatcher = enqueue
         resp = client.put(f"/api/config?machine={REMOTE}", json={"ops_concurrency": 12})
     assert resp.status_code == 503, resp.text
     assert REMOTE in resp.json()["detail"]
 
 
-def test_put_remote_failed_503(monkeypatch: pytest.MonkeyPatch, clean_overrides: Path) -> None:
+def test_put_remote_failed_503(clean_overrides: Path) -> None:
     seed_machine(REMOTE)
     enqueue = AsyncMock(side_effect=cluster_rpc.ClusterOpFailed({"error": "boom"}))
-    monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", enqueue)
 
     with gateway_test_client() as client:
+        client.app.state.config_rpc_dispatcher = enqueue
         resp = client.put(f"/api/config?machine={REMOTE}", json={"ops_concurrency": 12})
     assert resp.status_code == 503, resp.text
     assert REMOTE in resp.json()["detail"]
@@ -202,8 +196,6 @@ def test_get_config_audit_default_last_comes_from_display_config(
     def _unregistered(_db: object, _name: str) -> list[str]:
         raise MachineNotRegistered(_name)
 
-    monkeypatch.setattr(machines, "lookup_role", _unregistered)
-
     env_path = dotenv_file.env_file_path()
     env_path.write_text("MEIVA_MODEL=audit-one\n")
     audit.record_env_write(
@@ -223,20 +215,20 @@ def test_get_config_audit_default_last_comes_from_display_config(
 
     monkeypatch.setattr(settings.display, "config_audit_default_last", 1)
     with gateway_test_client() as client:
+        client.app.state.config_role_lookup = _unregistered
         resp = client.get("/api/config/audit")
     assert resp.status_code == 200, resp.text
     assert len(resp.json()["records"]) == 1
 
 
 def test_get_config_audit_reads_own_records(
-    clean_overrides: Path, monkeypatch: pytest.MonkeyPatch, *, machine_identity: MachineIdentity
+    clean_overrides: Path, *, machine_identity: MachineIdentity
 ) -> None:
     from base.api_contracts.agent_contract import MachineNotRegistered
 
     def _unregistered(_db: object, _name: str) -> list[str]:
         raise MachineNotRegistered(_name)
 
-    monkeypatch.setattr(machines, "lookup_role", _unregistered)
     env_path = dotenv_file.env_file_path()
     env_path.write_text("MEIVA_MODEL=audit-self\n")
     audit.record_env_write(
@@ -248,6 +240,7 @@ def test_get_config_audit_reads_own_records(
     )
 
     with gateway_test_client(machine=machine_identity) as client:
+        client.app.state.config_role_lookup = _unregistered
         resp = client.get("/api/config/audit")
 
     assert resp.status_code == 200, resp.text
@@ -285,15 +278,14 @@ async def test_get_config_audit_all_merges_runners_newest_first(
     def _roles(_db: object, _target: str) -> list[str]:
         return ["agent-runner"]
 
-    monkeypatch.setattr(machines, "lookup_role", _roles)
-    monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", _fake_dispatch)
-
     def _runners(_db: object) -> list[tuple[str, str | None]]:
         return [("m1", None), ("m2", None)]
 
     monkeypatch.setattr(machines, "list_agent_runners", _runners)
 
     with gateway_test_client(machine=machine_identity) as client:
+        client.app.state.config_role_lookup = _roles
+        client.app.state.config_rpc_dispatcher = _fake_dispatch
         resp = client.get("/api/config/audit?machine=all&last=2")
 
     assert resp.status_code == 200, resp.text

@@ -17,12 +17,10 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from psycopg import Cursor
 from psycopg_pool import ConnectionPool
 
-from base.agents.impersonation.wake import publish_inbound_wake
 from base.agents.messages.inbound import InboundKind
 from base.agents.tasks.delivery import (
     TaskNoteReceipt,
     emit_task_note_events,
-    enqueue_task_notifications,
     supersede_task_assignments,
 )
 from base.agents.tasks.owner_notifications import (
@@ -33,7 +31,7 @@ from base.agents.tasks.rules import first_open_child, is_closed, open_title_hold
 from base.db.transaction import write_transaction
 from gateway.agents.eval_guard import deny_isolated_result_read
 from gateway.http.auth.request_principal import PrincipalScopeError, request_key
-from gateway.routers.receipts.task import existing_task_receipt, save_task_receipt
+from gateway.routers.receipts.task import existing_task_receipt
 from gateway.schemas.tasks import (
     TaskGraphRow,
     TaskListResponse,
@@ -41,7 +39,6 @@ from gateway.schemas.tasks import (
     TaskSummaryRow,
     TaskUpdateRequest,
 )
-from ops import lifecycle as _ops
 
 router = APIRouter()
 
@@ -351,18 +348,14 @@ def patch_task_blocking(
     operation_key: str,
     operation_path: str | None = None,
     *,
-    enqueue_notifications_fn: Callable[..., list[TaskNoteReceipt]] | None = None,
-    save_receipt_fn: Callable[..., None] | None = None,
+    enqueue_notifications_fn: Callable[..., list[TaskNoteReceipt]],
+    save_receipt_fn: Callable[..., None],
 ) -> tuple[TaskRow, list[TaskNoteReceipt]]:
     """Commit the task and its owner-change inbounds in the same transaction.
 
     The route awaits task-note delivery after this function returns, so no
     network or process wake can roll back the owner assignment.
     """
-    enqueue_fn = (
-        enqueue_task_notifications if enqueue_notifications_fn is None else enqueue_notifications_fn
-    )
-    save_fn = save_task_receipt if save_receipt_fn is None else save_receipt_fn
     path = operation_path if operation_path is not None else f"/api/tasks/{task_id}"
     request_body = body.model_dump(mode="json", exclude_unset=True)
     with write_transaction(pool) as conn, conn.cursor() as cur:
@@ -431,7 +424,7 @@ def patch_task_blocking(
         receipts: list[TaskNoteReceipt] = []
         if "owner" in body.model_fields_set and previous_owner != task.owner:
             supersede_task_assignments(cur, task_id)
-            receipts = enqueue_fn(
+            receipts = enqueue_notifications_fn(
                 cur,
                 task_id,
                 owner_change_notifications(
@@ -444,7 +437,7 @@ def patch_task_blocking(
                 ),
                 "user",
             )
-        save_fn(cur, path, operation_key, request_body, task)
+        save_receipt_fn(cur, path, operation_key, request_body, task)
     emit_task_note_events(receipts)
     return task, receipts
 
@@ -490,11 +483,11 @@ async def patch_task(
         body,
         operation_key,
         request.url.path,
-        enqueue_notifications_fn=getattr(request.app.state, "task_notifications_enqueuer", None),
-        save_receipt_fn=getattr(request.app.state, "task_receipt_saver", None),
+        enqueue_notifications_fn=request.app.state.task_notifications_enqueuer,
+        save_receipt_fn=request.app.state.task_receipt_saver,
     )
-    wake_publisher = getattr(request.app.state, "task_wake_publisher", publish_inbound_wake)
-    resurrect_fn = getattr(request.app.state, "task_resurrector", _ops.resurrect_if_terminated)
+    wake_publisher = request.app.state.task_wake_publisher
+    resurrect_fn = request.app.state.task_resurrector
     for note in notes:
         await asyncio.to_thread(
             wake_publisher,

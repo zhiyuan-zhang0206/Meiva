@@ -1,8 +1,9 @@
 import asyncio
 import logging
 import time
-from collections.abc import AsyncGenerator, Awaitable, Callable
+from collections.abc import AsyncGenerator, Awaitable, Callable, Coroutine
 from contextlib import AsyncExitStack, asynccontextmanager, nullcontext
+from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
 from typing import Any, Literal
@@ -14,16 +15,21 @@ from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from base import paths, telemetry
+from base.agents.impersonation.wake import publish_inbound_wake
+from base.agents.tasks.delivery import enqueue_task_notifications
 from base.api_contracts.agent_contract import MeivaAgentError
+from base.cluster import machines
 from base.cluster.machine.boot import machine_from_boot
 from base.cluster.rate_limit import LoginRateLimitConfig, LoginRateLimiter
-from base.config import ConfigBoot, Settings, settings
+from base.config import ConfigBoot, Settings, runtime_config, settings
+from base.config.admin.candidate import validate_env_patch_for_write
 from base.config.service_read import ConfigAuthority
 from base.events.live.bus import EventBus, event_bus_config_from_config
 from base.host.db_authority.api import AcceptanceCache
 from base.host.net.auth import cookie_name
 from base.host.system.cron import register_os_cron
 from base.host.system.hostport import Host
+from base.packages.composer_commands import CommandCatalog, load_skill_names
 from base.packages.plugin_providers import build_model_catalog
 from gateway.agents import launch_retry as agents_launch_retry_router
 from gateway.agents import lifecycle as agents_lifecycle_router
@@ -112,6 +118,7 @@ from gateway.routers import (
 from gateway.routers import (
     notifications as notifications_router,
 )
+from gateway.routers import page_acceptance
 from gateway.routers import (
     pages as pages_router,
 )
@@ -126,12 +133,41 @@ from gateway.routers import (
 )
 from gateway.routers.configuration import default_model as default_model_router
 from gateway.routers.configuration import runtime as config_router
+from gateway.routers.receipts import creation as creation_receipts
+from gateway.routers.receipts.task import save_task_receipt
 from gateway.routers.upload import router as uploads_router
 from gateway.schedules import router as schedules_router
 from gateway.upload_delivery import router as upload_delivery_router
 from gateway.upload_delivery.worker import UploadRecovery
+from ops import lifecycle
+from ops.cluster import rpc as cluster_rpc
+from ops.pages import assert_port_free
 
 _log = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class LifespanServices:
+    insights_client: Callable[[Path], Any]
+    register_cron: Callable[..., None]
+    flush_latency: Callable[[], Coroutine[Any, Any, None]]
+    flush_auth: Callable[[rejection_log.AuthRejectionLog], Coroutine[Any, Any, None]]
+
+
+def _request_operations(app: FastAPI) -> None:
+    app.state.command_catalog_discoverer = CommandCatalog(skills=load_skill_names).discover
+    app.state.command_rpc_dispatcher = cluster_rpc.dispatch_to_machine
+    app.state.config_role_lookup = machines.lookup_role
+    app.state.config_rpc_dispatcher = cluster_rpc.dispatch_to_machine
+    app.state.config_candidate_validator = validate_env_patch_for_write
+    app.state.config_cluster_field_writer = runtime_config.write_fields
+    app.state.page_port_free_checker = assert_port_free
+    app.state.page_receipt_finisher = page_acceptance.finish_receipt
+    app.state.task_notifications_enqueuer = enqueue_task_notifications
+    app.state.task_receipt_saver = save_task_receipt
+    app.state.task_wake_publisher = publish_inbound_wake
+    app.state.task_resurrector = lifecycle.resurrect_if_terminated
+    app.state.schedule_receipt_finisher = creation_receipts.finish
 
 
 def _closer(resource: Any, method: str) -> Callable[[], Any]:
@@ -157,7 +193,7 @@ async def _startup_releases() -> AsyncGenerator[AsyncExitStack]:
 
 
 def _build_request_resources(
-    app: FastAPI, process: GatewayProcess, releases: AsyncExitStack
+    app: FastAPI, process: GatewayProcess, releases: AsyncExitStack, services: LifespanServices
 ) -> None:
 
     config = process.config
@@ -206,10 +242,7 @@ def _build_request_resources(
         clock=getattr(app.state, "login_limiter_clock", None),
     )
 
-    insights_client_factory = getattr(
-        app.state, "insights_client_factory", insights_router.build_client
-    )
-    insights_client: Any = insights_client_factory(process.home)
+    insights_client: Any = services.insights_client(process.home)
     app.state.insights_client = insights_client
     releases.push_async_callback(_closer(insights_client, "aclose"))
 
@@ -220,6 +253,7 @@ async def lifespan(
     *,
     process: GatewayProcess,
     process_ownership: Literal["borrowed", "owned"],
+    services: LifespanServices,
 ) -> AsyncGenerator[None]:
 
     if process_ownership not in {"borrowed", "owned"}:
@@ -266,16 +300,15 @@ async def lifespan(
             app.state.control_db_pool = control_db_pool
             releases.callback(_closer(control_db_pool, "close"))
 
-            _build_request_resources(app, process, releases)
+            _build_request_resources(app, process, releases, services)
 
             grafana_client: Any = grafana_router.build_proxy_client()
             app.state.grafana_client = grafana_client
             releases.push_async_callback(_closer(grafana_client, "aclose"))
 
-            cron_registrar = getattr(app.state, "os_cron_registrar", register_os_cron)
             try:
                 await asyncio.to_thread(
-                    cron_registrar,
+                    services.register_cron,
                     enabled_reader=lambda: config.view.general.os_jobs_enabled,
                     host=process.host,
                 )
@@ -295,13 +328,13 @@ async def lifespan(
             )
             app.state.upload_recovery = upload_recovery
 
-            async with _background_lifetime(app, upload_recovery):
+            async with _background_lifetime(app, upload_recovery, services):
                 yield
 
 
 @asynccontextmanager
 async def _background_lifetime(
-    app: FastAPI, upload_recovery: UploadRecovery
+    app: FastAPI, upload_recovery: UploadRecovery, services: LifespanServices
 ) -> AsyncGenerator[None]:
 
     mcp_manager = None
@@ -311,11 +344,9 @@ async def _background_lifetime(
         app.state.mcp_manager = mcp_manager
 
     try:
-        latency_flusher_fn = getattr(app.state, "latency_flusher", latency.latency_flusher)
-        auth401_flusher_fn = getattr(app.state, "auth401_flusher", rejection_log.auth401_flusher)
         async with asyncio.TaskGroup() as background:
-            latency_flusher = background.create_task(latency_flusher_fn())
-            auth401_flusher = background.create_task(auth401_flusher_fn(app.state.auth401_log))
+            latency_flusher = background.create_task(services.flush_latency())
+            auth401_flusher = background.create_task(services.flush_auth(app.state.auth401_log))
             outbox = background.create_task(
                 notification_outbox.run(
                     app.state.db_pool,
@@ -486,14 +517,24 @@ def create_app(
 
     if process_ownership not in {"borrowed", "owned"}:
         raise ValueError("gateway process ownership must be borrowed or owned")
+    services = LifespanServices(
+        insights_client=insights_router.build_client,
+        register_cron=register_os_cron,
+        flush_latency=latency.latency_flusher,
+        flush_auth=rejection_log.auth401_flusher,
+    )
     app = FastAPI(
         title="Meiva",
-        lifespan=partial(lifespan, process=process, process_ownership=process_ownership),
+        lifespan=partial(
+            lifespan, process=process, process_ownership=process_ownership, services=services
+        ),
         docs_url=None,
         redoc_url=None,
         openapi_url=None,
     )
     app.state.gateway_config = config
+    app.state.lifespan_services = services
+    _request_operations(app)
     app.state.memory_unreadable_reports = memory_router.unreadable_reports()
     app.state.gateway_process = process
     machine_token_acceptance: AcceptanceCache = {}

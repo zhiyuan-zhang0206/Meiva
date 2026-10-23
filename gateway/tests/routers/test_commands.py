@@ -4,16 +4,14 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from base.packages.composer_commands import Command, CommandCatalog
+from base.packages.composer_commands import Command
 from gateway.tests.auth.gateway_config import gateway_test_client
 from ops.cluster import rpc as cluster_rpc
 
 
-def _one_command(
-    name: str, description: str, hint: str, body: str
-) -> Callable[[CommandCatalog], list[Command]]:
+def _one_command(name: str, description: str, hint: str, body: str) -> Callable[[], list[Command]]:
 
-    def discover(_catalog: CommandCatalog) -> list[Command]:
+    def discover() -> list[Command]:
         return [
             {
                 "name": name,

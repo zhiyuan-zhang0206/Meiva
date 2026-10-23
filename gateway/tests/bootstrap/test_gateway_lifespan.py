@@ -2,6 +2,7 @@ import asyncio
 import threading
 from collections.abc import Callable
 from contextlib import AsyncExitStack
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -19,7 +20,7 @@ from gateway import app as gateway_app
 from gateway.cluster.process_boot import LOADED_IMAGE, GatewayProcess
 from gateway.http.config import gateway_config_from_boot
 from gateway.routers import insights as insights_router
-from gateway.tests.auth.gateway_config import gateway_test_process
+from gateway.tests.auth.gateway_config import gateway_test_app, gateway_test_process
 
 
 @pytest.fixture
@@ -45,9 +46,12 @@ def _configure_lifespan_app(
         del enabled_reader, host
 
     app.state.gateway_config = gateway_config_from_boot(process.config)
-    app.state.latency_flusher = flush
-    app.state.auth401_flusher = flush
-    app.state.os_cron_registrar = register_cron
+    app.state.lifespan_services = replace(
+        gateway_test_app(process=process).state.lifespan_services,
+        flush_latency=flush,
+        flush_auth=flush,
+        register_cron=register_cron,
+    )
 
 
 async def test_overlapping_lifespans_join_their_original_flushers(
@@ -61,7 +65,12 @@ async def test_overlapping_lifespans_join_their_original_flushers(
     with gateway_test_process(machine=machine_identity) as process:
         _configure_lifespan_app(app, process, flusher_tasks)
         async with asyncio.timeout(5), AsyncExitStack() as cleanup:
-            async with gateway_app.lifespan(app, process=process, process_ownership="borrowed"):
+            async with gateway_app.lifespan(
+                app,
+                process=process,
+                process_ownership="borrowed",
+                services=app.state.lifespan_services,
+            ):
                 pipeline = process.event_pipeline()
                 assert app.state.gateway_process is process
                 assert app.state.machine is machine_identity
@@ -72,7 +81,12 @@ async def test_overlapping_lifespans_join_their_original_flushers(
                 cleanup.push_async_callback(app.state.insights_client.aclose)
                 cleanup.callback(app.state.db_pool.close)
                 cleanup.callback(app.state.control_db_pool.close)
-                async with gateway_app.lifespan(app, process=process, process_ownership="borrowed"):
+                async with gateway_app.lifespan(
+                    app,
+                    process=process,
+                    process_ownership="borrowed",
+                    services=app.state.lifespan_services,
+                ):
                     assert app.state.gateway_process is process
                     assert process.event_pipeline() is pipeline
                     assert app.state.process_image is process.image
@@ -114,12 +128,19 @@ async def test_client_close_failure_still_joins_flushers_before_pool_close(
         return _FailingInsightsClient(insights_router.build_client(home))
 
     _configure_lifespan_app(app, process, flusher_tasks)
-    app.state.insights_client_factory = build_failing_insights_client
+    app.state.lifespan_services = replace(
+        app.state.lifespan_services, insights_client=build_failing_insights_client
+    )
 
     with process.lifetime():
         async with asyncio.timeout(5):
             with pytest.raises(RuntimeError) as raised:
-                async with gateway_app.lifespan(app, process=process, process_ownership="borrowed"):
+                async with gateway_app.lifespan(
+                    app,
+                    process=process,
+                    process_ownership="borrowed",
+                    services=app.state.lifespan_services,
+                ):
                     tasks.extend([await flusher_tasks.get(), await flusher_tasks.get()])
 
     assert raised.value is failure
@@ -143,7 +164,10 @@ async def test_process_ownership_borrowed_vs_owned_controls_client_close_count(
         async with (
             asyncio.timeout(5),
             gateway_app.lifespan(
-                borrowed_app, process=borrowed_process, process_ownership="borrowed"
+                borrowed_app,
+                process=borrowed_process,
+                process_ownership="borrowed",
+                services=borrowed_app.state.lifespan_services,
             ),
         ):
             _ = [await flusher_tasks.get(), await flusher_tasks.get()]
@@ -162,7 +186,12 @@ async def test_process_ownership_borrowed_vs_owned_controls_client_close_count(
     _configure_lifespan_app(owned_app, owned_process, flusher_tasks)
     async with (
         asyncio.timeout(5),
-        gateway_app.lifespan(owned_app, process=owned_process, process_ownership="owned"),
+        gateway_app.lifespan(
+            owned_app,
+            process=owned_process,
+            process_ownership="owned",
+            services=owned_app.state.lifespan_services,
+        ),
     ):
         _ = [await flusher_tasks.get(), await flusher_tasks.get()]
         assert owned_process.clients.exports_deferred() is not None
@@ -213,8 +242,14 @@ async def test_owned_process_startup_failure_closes_clients_and_preserves_primar
     owned_process = _FailingOwnedProcess()
     app = FastAPI()
     app.state.gateway_config = gateway_config_from_boot(owned_process.config)
+    app.state.lifespan_services = gateway_test_app(process=owned_process).state.lifespan_services
     with pytest.raises(RuntimeError, match="event pipeline failed during owned startup") as caught:
-        async with gateway_app.lifespan(app, process=owned_process, process_ownership="owned"):
+        async with gateway_app.lifespan(
+            app,
+            process=owned_process,
+            process_ownership="owned",
+            services=app.state.lifespan_services,
+        ):
             pass
 
     assert caught.value is primary
@@ -326,7 +361,12 @@ async def test_control_pool_construction_failure_closes_the_data_pool_once(
     with process.lifetime():
         async with asyncio.timeout(5):
             with pytest.raises(RuntimeError) as raised:
-                async with gateway_app.lifespan(app, process=process, process_ownership="borrowed"):
+                async with gateway_app.lifespan(
+                    app,
+                    process=process,
+                    process_ownership="borrowed",
+                    services=app.state.lifespan_services,
+                ):
                     pytest.fail("lifespan served without its control pool")
 
     assert raised.value is failure
@@ -378,7 +418,12 @@ async def test_failure_after_monitor_closes_started_resources(
     with process.lifetime():
         async with asyncio.timeout(5):
             with pytest.raises(RuntimeError) as raised:
-                async with gateway_app.lifespan(app, process=process, process_ownership="borrowed"):
+                async with gateway_app.lifespan(
+                    app,
+                    process=process,
+                    process_ownership="borrowed",
+                    services=app.state.lifespan_services,
+                ):
                     pytest.fail("lifespan served after the post-monitor failure")
 
     assert raised.value is failure
@@ -411,7 +456,12 @@ async def test_failing_pool_release_still_closes_the_remaining_resources(
     with process.lifetime():
         async with asyncio.timeout(5):
             with pytest.raises(RuntimeError) as raised:
-                async with gateway_app.lifespan(app, process=process, process_ownership="borrowed"):
+                async with gateway_app.lifespan(
+                    app,
+                    process=process,
+                    process_ownership="borrowed",
+                    services=app.state.lifespan_services,
+                ):
                     tasks.extend([await flusher_tasks.get(), await flusher_tasks.get()])
 
     assert raised.value is failure
@@ -440,7 +490,9 @@ async def test_cancelled_lifespan_joins_flushers_before_pool_close(
     entered = asyncio.Event()
 
     async def serve() -> None:
-        async with gateway_app.lifespan(app, process=process, process_ownership="borrowed"):
+        async with gateway_app.lifespan(
+            app, process=process, process_ownership="borrowed", services=app.state.lifespan_services
+        ):
             tasks.extend([await flusher_tasks.get(), await flusher_tasks.get()])
             entered.set()
             await asyncio.Event().wait()

@@ -1,6 +1,7 @@
 import asyncio
 import threading
 from collections.abc import Callable
+from dataclasses import replace
 from typing import Any
 
 import psycopg
@@ -16,7 +17,7 @@ from base.paths import meiva_home
 from gateway import app as gateway_app
 from gateway.cluster.process_boot import LOADED_IMAGE, GatewayProcess
 from gateway.http.config import gateway_config_from_boot
-from gateway.tests.auth.gateway_config import gateway_test_process
+from gateway.tests.auth.gateway_config import gateway_test_app, gateway_test_process
 
 
 class _CheckedPool:
@@ -80,10 +81,18 @@ async def test_lifespan_waits_for_cancelled_request_sql_before_pool_close(
 
     with process.lifetime():
         app.state.gateway_config = gateway_config_from_boot(process.config)
-        app.state.os_cron_registrar = fake_register_os_cron
+        app.state.lifespan_services = replace(
+            gateway_test_app(process=process).state.lifespan_services,
+            register_cron=fake_register_os_cron,
+        )
 
         async def service() -> None:
-            async with gateway_app.lifespan(app, process=process, process_ownership="borrowed"):
+            async with gateway_app.lifespan(
+                app,
+                process=process,
+                process_ownership="borrowed",
+                services=app.state.lifespan_services,
+            ):
                 ready.set()
                 await asyncio.Event().wait()
 
@@ -144,10 +153,18 @@ async def test_native_sql_error_does_not_cancel_gateway_service(
 
     with gateway_test_process() as process:
         app.state.gateway_config = gateway_config_from_boot(process.config)
-        app.state.os_cron_registrar = fake_register_os_cron
+        app.state.lifespan_services = replace(
+            gateway_test_app(process=process).state.lifespan_services,
+            register_cron=fake_register_os_cron,
+        )
 
         async def service() -> None:
-            async with gateway_app.lifespan(app, process=process, process_ownership="borrowed"):
+            async with gateway_app.lifespan(
+                app,
+                process=process,
+                process_ownership="borrowed",
+                services=app.state.lifespan_services,
+            ):
                 ready.set()
                 await stop.wait()
 

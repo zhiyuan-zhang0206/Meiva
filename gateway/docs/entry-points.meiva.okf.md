@@ -30,6 +30,19 @@ unwinds them in reverse order: telemetry flushers, the MCP manager, upload
 recovery, the runtime monitor, HTTP clients and the inspector cache finish
 before the pools close, and one failing release never skips the rest.
 
+`create_app` also assembles the request operations for configuration RPCs, command
+catalog discovery and task/page/schedule receipt writes. Routes read those handles
+from their own application; transactional helpers require the collaborators as
+arguments and retain transaction ownership. A missing handle is an assembly error,
+not a reason to select a process-global implementation. The lifespan receives a
+frozen `LifespanServices` bundle from the same root for its HTTP client construction,
+cron registration and telemetry flushers. Their replacement does not replace the
+startup/cleanup sequence or the process ownership contract.
+
+Bootstrap credential validation reads the app's captured `GatewayConfig`, just like
+request authentication. Page URL construction reads its serving process config;
+neither path falls back to the ambient process settings.
+
 The snapshot's required `memory_root` supplies search, graph, note, pool and refresh
 routes. The composition boundary resolves the existing `base.paths.gateway_memory_dir`
 from the current process home and the startup config's machine roles: a combined

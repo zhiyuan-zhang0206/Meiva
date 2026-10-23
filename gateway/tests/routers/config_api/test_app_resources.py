@@ -12,12 +12,13 @@ from fastapi.testclient import TestClient
 from base.cluster import machines
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
+from base.config import runtime_config
+from base.config.admin.candidate import validate_env_patch_for_write
 from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.host.system.tests.fake_commands import fake_host
 from base.packages.plugin_config_admin import panel_metadata
 from gateway.routers.configuration import runtime
-from ops.cluster import rpc
 from ops.rpc_schemas import ConfigReadResult, HostConfigField
 
 
@@ -91,9 +92,12 @@ def clients(
             "restart_required": ["ops"] if index == 0 else [],
         }
 
-    monkeypatch.setattr(machines, "lookup_role", roles)
+    for app in apps:
+        app.state.config_role_lookup = roles
+        app.state.config_rpc_dispatcher = dispatch
+        app.state.config_candidate_validator = validate_env_patch_for_write
+        app.state.config_cluster_field_writer = runtime_config.write_fields
     monkeypatch.setattr(machines, "list_agent_runners", runners)
-    monkeypatch.setattr(rpc, "dispatch_to_machine", dispatch)
 
     def check_integrity(*, machine_reader: Callable[[], str]) -> None:
         assert machine_reader() == machine_identity.name()
