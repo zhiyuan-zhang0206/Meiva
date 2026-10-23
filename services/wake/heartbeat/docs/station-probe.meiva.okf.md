@@ -55,3 +55,6 @@ tokens and explicit HTTP responses. They assert method, URL, body, bearer and
 timeout, plus no database/network work for missing credentials. Standalone
 healthy, failed and missing-token rounds preserve the same local-business
 boundary; startup composition retains the shared captured image and DB gate.
+The direct probe scenarios isolate process logging and background writer construction.
+The separate shared-factory case observes their image, database closure and producer
+arguments; isolation alone does not prove a real logger or writer lifetime.
