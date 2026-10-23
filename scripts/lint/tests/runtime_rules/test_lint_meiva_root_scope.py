@@ -179,15 +179,13 @@ def test_explicit_missing_target_is_an_error(
     assert gate.main([str(good), str(missing)]) == 1
 
 
-def test_default_scan_root_is_meiva_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(gate, "_REPO_ROOT", tmp_path)
+def test_default_scan_root_is_meiva_root(tmp_path: Path) -> None:
     _write(tmp_path, "services/supervision/meiva_root/ok.py", "value = 1\n")
-    assert gate.main([]) == 0
+    assert gate.main([], repo_root=tmp_path) == 0
     _write(tmp_path, "services/supervision/meiva_root/bad.py", "value = 'launchd'\n")
-    assert gate.main([]) == 1
+    assert gate.main([], repo_root=tmp_path) == 1
 
 
-def test_other_services_are_not_scanned(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(gate, "_REPO_ROOT", tmp_path)
+def test_other_services_are_not_scanned(tmp_path: Path) -> None:
     _write(tmp_path, "services/other/neighbour.py", "value = 'launchd'\n")
-    assert gate.main([]) == 0
+    assert gate.main([], repo_root=tmp_path) == 0

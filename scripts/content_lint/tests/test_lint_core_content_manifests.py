@@ -22,9 +22,8 @@ _COMMIT_DATE = "2026-01-02T12:00:00+00:00"
 
 
 @pytest.fixture
-def repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+def repo(tmp_path: Path) -> Path:
     """A scratch repo root with one commit (derived version 2026.1.2)."""
-    monkeypatch.setattr(lint, "_REPO_ROOT", tmp_path)
     subprocess.run(  # noqa: S603 — fixed argv, test-local fixture repo
         ["git", "init", "-q", "-b", "main", str(tmp_path)], check=True, capture_output=True
     )
@@ -85,7 +84,7 @@ def test_valid_core_manifest_passes(repo: Path) -> None:
         "meiva_builtins/skills/foo/meiva-plugin.json",
         {"apiVersion": 2, "name": "foo", "version": "1.0.0", "engines": {"meiva": ">=2026.1.1"}},
     )
-    assert lint.main([]) == 0
+    assert lint.main([], repo_root=repo) == 0
 
 
 def _write_plugin(repo: Path, name: str, *, manifest: bool) -> None:
@@ -108,7 +107,7 @@ def _write_plugin(repo: Path, name: str, *, manifest: bool) -> None:
 
 def test_builtin_plugin_with_a_manifest_passes(repo: Path) -> None:
     _write_plugin(repo, "foo", manifest=True)
-    assert lint.main([]) == 0
+    assert lint.main([], repo_root=repo) == 0
 
 
 def test_builtin_plugin_without_a_manifest_is_red(
@@ -116,7 +115,7 @@ def test_builtin_plugin_without_a_manifest_is_red(
 ) -> None:
     _write_plugin(repo, "foo", manifest=True)
     _write_plugin(repo, "bar", manifest=False)
-    assert lint.main([]) == 1
+    assert lint.main([], repo_root=repo) == 1
     out = capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
     assert "meiva_builtins/plugins/bar: builtin plugin ships no meiva-plugin.json" in out
     assert "meiva_builtins/plugins/foo" not in out
@@ -128,12 +127,12 @@ def test_core_manifest_excluding_current_version_is_red(repo: Path) -> None:
         "meiva_builtins/skills/foo/meiva-plugin.json",
         {"apiVersion": 2, "name": "foo", "version": "1.0.0", "engines": {"meiva": ">=0.1.0,<1"}},
     )
-    assert lint.main([]) == 1
+    assert lint.main([], repo_root=repo) == 1
 
 
 def test_core_manifest_invalid_is_red(repo: Path) -> None:
     _write(repo, "meiva_builtins/skills/foo/meiva-plugin.json", {"apiVersion": 2})
-    assert lint.main([]) == 1
+    assert lint.main([], repo_root=repo) == 1
 
 
 def test_core_requires_commit_ancestor_passes(repo: Path) -> None:
@@ -147,7 +146,7 @@ def test_core_requires_commit_ancestor_passes(repo: Path) -> None:
             "requires_commit": _head(repo),
         },
     )
-    assert lint.main([]) == 0
+    assert lint.main([], repo_root=repo) == 0
 
 
 def test_core_requires_commit_unresolvable_is_red(repo: Path) -> None:
@@ -156,7 +155,7 @@ def test_core_requires_commit_unresolvable_is_red(repo: Path) -> None:
         "meiva_builtins/skills/foo/meiva-plugin.json",
         {"apiVersion": 2, "name": "foo", "version": "1.0.0", "requires_commit": "f" * 40},
     )
-    assert lint.main([]) == 1
+    assert lint.main([], repo_root=repo) == 1
 
 
 def test_non_core_manifest_is_audited_not_failed(
@@ -169,7 +168,7 @@ def test_non_core_manifest_is_audited_not_failed(
         "examples/thing/meiva-plugin.json",
         {"apiVersion": 2, "name": "thing", "version": "1.0.0", "engines": {"meiva": "<1"}},
     )
-    assert lint.main([]) == 0
+    assert lint.main([], repo_root=repo) == 0
     out = capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
     assert "audit examples/thing/meiva-plugin.json" in out
     assert "derived 2026.1.2: FAIL" in out

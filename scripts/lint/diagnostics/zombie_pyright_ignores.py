@@ -27,7 +27,7 @@ import sys
 import tempfile
 import tokenize
 import tomllib
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Literal, cast
@@ -543,10 +543,15 @@ def pyright_errors(path: Path) -> frozenset[tuple[int, str]]:
     return frozenset(errors)
 
 
-def verify_file(path: Path, candidates: frozenset[PyrightIgnore]) -> Verification:
+def verify_file(
+    path: Path,
+    candidates: frozenset[PyrightIgnore],
+    *,
+    errors_fn: Callable[[Path], frozenset[tuple[int, str]]] = pyright_errors,
+) -> Verification:
     if not candidates:
         return Verification(frozenset(), frozenset())  # nothing to certify — skip the Pyright run
-    baseline_errors = pyright_errors(path)
+    baseline_errors = errors_fn(path)
     try:
         source = path.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError):
@@ -569,7 +574,7 @@ def verify_file(path: Path, candidates: frozenset[PyrightIgnore]) -> Verificatio
                 frozenset({candidate}),
                 preserve_line_numbers=True,
             )
-            if pyright_errors(temporary_path) - baseline_errors:
+            if errors_fn(temporary_path) - baseline_errors:
                 rejected.add(candidate)
     finally:
         temporary_path.unlink(missing_ok=True)
@@ -589,22 +594,29 @@ def _verification_json(results: Mapping[str, Verification]) -> str:
     return json.dumps(payload, indent=2, sort_keys=True)
 
 
-def _selected_ignores(files: Sequence[str]) -> dict[str, tuple[Path, list[PyrightIgnore]]]:
+def _selected_ignores(
+    files: Sequence[str], *, repo_root: Path = _REPO_ROOT
+) -> dict[str, tuple[Path, list[PyrightIgnore]]]:
     selected: dict[str, tuple[Path, list[PyrightIgnore]]] = {}
     for file_arg in files:
-        absolute, relative = _relative_file(file_arg, _REPO_ROOT)
+        absolute, relative = _relative_file(file_arg, repo_root)
         selected[relative] = (absolute, scan_file(absolute, relative))
     return selected
 
 
-def _verify_selected(files: Sequence[str]) -> tuple[dict[str, Verification], ScanResult]:
-    selected = _selected_ignores(files)
+def _verify_selected(
+    files: Sequence[str],
+    *,
+    repo_root: Path = _REPO_ROOT,
+    errors_fn: Callable[[Path], frozenset[tuple[int, str]]] = pyright_errors,
+) -> tuple[dict[str, Verification], ScanResult]:
+    selected = _selected_ignores(files, repo_root=repo_root)
     all_ignores = [ignore for _, ignores in selected.values() for ignore in ignores]
     scan = classify_ignores(all_ignores, _TIER_CONFIG)
     results: dict[str, Verification] = {}
     for relative, (path, ignores) in selected.items():
         candidates = frozenset(ignore for ignore in ignores if ignore.rule in _ALL_PYRIGHT_RULES)
-        results[relative] = verify_file(path, candidates)
+        results[relative] = verify_file(path, candidates, errors_fn=errors_fn)
     return results, scan
 
 
@@ -631,17 +643,24 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def changed_python(only: list[str] | None) -> list[str] | None:
+def changed_python(only: list[str] | None, *, repo_root: Path | None = None) -> list[str] | None:
     """The `--only` changed `.py` files to check, or None for every tracked file.
 
     The tier configuration the ignores are judged against is an input: editing it
     re-checks everything.
     """
-    scope = lint_common.changed_scope(only, _REPO_ROOT, inputs=("pyproject.toml",))
+    root = _REPO_ROOT if repo_root is None else repo_root
+    scope = lint_common.changed_scope(only, root, inputs=("pyproject.toml",))
     return None if scope is None else sorted(rel for rel in scope if rel.endswith(".py"))
 
 
-def main(argv: Sequence[str] | None = None) -> int:
+def main(
+    argv: Sequence[str] | None = None,
+    *,
+    repo_root: Path | None = None,
+    errors_fn: Callable[[Path], frozenset[tuple[int, str]]] = pyright_errors,
+) -> int:
+    root = _REPO_ROOT if repo_root is None else repo_root
     # `--only FILE...` (the commit hook) checks just the changed files, unless the tier
     # configuration they are judged against changed too.
     arguments, only = lint_common.split_only(list(sys.argv[1:] if argv is None else argv))
@@ -650,14 +669,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         build_parser().error("--all-tier requires --strip")
 
     if args.verify is not None:
-        verification, scan = _verify_selected(cast(list[str], args.verify))
+        verification, scan = _verify_selected(
+            cast(list[str], args.verify), repo_root=root, errors_fn=errors_fn
+        )
         _print_entries(scan.invalid, "invalid")
         print(_verification_json(verification))
         return 0
 
     if args.strip is not None:
         files = cast(list[str], args.strip)
-        selected = _selected_ignores(files)
+        selected = _selected_ignores(files, repo_root=root)
         if args.all_tier:
             all_ignores = [ignore for _, ignores in selected.values() for ignore in ignores]
             scan = classify_ignores(all_ignores, _TIER_CONFIG)
@@ -667,7 +688,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 for relative, (_, ignores) in selected.items()
             }
         else:
-            verification, scan = _verify_selected(files)
+            verification, scan = _verify_selected(files, repo_root=root, errors_fn=errors_fn)
             _print_entries(scan.invalid, "invalid")
             certified_by_path = {
                 relative: result.certified for relative, result in verification.items()
@@ -682,7 +703,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         return 0
 
-    scan = classify_ignores(scan_repository(files=changed_python(only)), _TIER_CONFIG)
+    scan = classify_ignores(
+        scan_repository(files=changed_python(only, repo_root=root), repo_root=root), _TIER_CONFIG
+    )
     return check_scan(scan)
 
 

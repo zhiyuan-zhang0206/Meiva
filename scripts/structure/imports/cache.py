@@ -41,9 +41,10 @@ def production_imports(
     tops: Sequence[str],
     *,
     read_source: Callable[[Path], str],
+    cache_path: str | Path = CACHE_PATH,
 ) -> dict[str, str]:
     """Repo-relative path -> the file's first-party import statements (one per line)."""
-    cache_file = repo_root / CACHE_PATH
+    cache_file = Path(cache_path) if Path(cache_path).is_absolute() else repo_root / cache_path
     cached = _load(cache_file)
     found: dict[str, Entry] = {}
     for rel, path in _source_files(repo_root, tops):

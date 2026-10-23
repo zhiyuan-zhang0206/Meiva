@@ -5,7 +5,7 @@ from typing import Any, LiteralString, cast
 import psycopg
 import pytest
 
-from tests.e2e._truncate import truncate_with_deadlock_retry
+from tests.e2e.process_support import truncate_with_deadlock_retry
 
 _STATEMENT: LiteralString = "TRUNCATE inbound_messages CASCADE"
 

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from scripts.content_lint import lint_doc_anchors as mod
@@ -29,11 +31,19 @@ class Holder:
 """
 
 
+class _ScopedLint:
+    def __init__(self, repo_root: Path) -> None:
+        self._repo_root = repo_root
+
+    def check(self) -> int:
+        return mod.check(repo_root=self._repo_root)
+
+
 @pytest.fixture
-def lint(monkeypatch, tmp_path):
+def lint(tmp_path: Path):
     """A throwaway repo: both doc scan roots AND the resolution root.
 
-    `_REPO_ROOT` is redirected too, so a case can write the target `.py` it
+    `repo_root` is redirected too, so a case can write the target `.py` it
     anchors at. Leaving it pointed at the real repo would make every assertion
     here depend on whatever `base/` happens to define today.
     """
@@ -45,11 +55,7 @@ def lint(monkeypatch, tmp_path):
     builtin.mkdir(parents=True)
     (tmp_path / "pkg").mkdir()
     (tmp_path / "pkg" / "mod.py").write_text(_TARGET)
-    monkeypatch.setattr(mod, "_REPO_ROOT", tmp_path)
-    monkeypatch.setattr(mod, "DOCS_CONVENTIONS", docs)
-    monkeypatch.setattr(mod, "DEV_SKILLS", skills)
-    monkeypatch.setattr(mod, "BUILTIN_SKILLS", builtin)
-    return mod, docs, skills, builtin
+    return _ScopedLint(tmp_path), docs, skills, builtin
 
 
 def test_dangling_symbol_is_flagged(lint):

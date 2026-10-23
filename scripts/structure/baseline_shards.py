@@ -108,19 +108,21 @@ def read_worktree(repo_root: Path) -> dict[str, str]:
     }
 
 
-def _tree_listing(repo_root: Path, rev: str, *, recursive: bool) -> bytes:
+def _tree_listing(
+    repo_root: Path, rev: str, *, recursive: bool, git_executable: str = "git"
+) -> bytes:
     options = ["-r", "--name-only"] if recursive else []
     return subprocess.run(  # noqa: S603 — local git query, no shell
-        ["git", "-C", str(repo_root), "ls-tree", "-z", *options, rev, "--", SHARD_DIR],
+        [git_executable, "-C", str(repo_root), "ls-tree", "-z", *options, rev, "--", SHARD_DIR],
         capture_output=True,
         check=True,
     ).stdout
 
 
-def _historical_paths(repo_root: Path, rev: str) -> list[str]:
-    listing = _tree_listing(repo_root, rev, recursive=True)
+def _historical_paths(repo_root: Path, rev: str, *, git_executable: str = "git") -> list[str]:
+    listing = _tree_listing(repo_root, rev, recursive=True, git_executable=git_executable)
     if not listing:
-        entry = _tree_listing(repo_root, rev, recursive=False)
+        entry = _tree_listing(repo_root, rev, recursive=False, git_executable=git_executable)
         if not entry:
             raise ValueError(f"baseline directory missing at {rev}: {SHARD_DIR}")
         metadata, _, name = entry.partition(b"\t")
@@ -161,7 +163,7 @@ def _batch_texts(data: bytes, filenames: list[str]) -> dict[str, str]:
     return texts
 
 
-def read_at(repo_root: Path, rev: str) -> dict[str, str]:
+def read_at(repo_root: Path, rev: str, *, git_executable: str = "git") -> dict[str, str]:
     """Every shard (`*.json`) at a revision, by name.
 
     The shard directory must exist at the revision: its README.md keeps it tracked
@@ -173,7 +175,7 @@ def read_at(repo_root: Path, rev: str) -> dict[str, str]:
 
     filenames = [
         name
-        for name in _historical_paths(repo_root, rev)
+        for name in _historical_paths(repo_root, rev, git_executable=git_executable)
         if name.endswith(".json") and name != RULES_FILE
     ]
     if not filenames:
@@ -181,7 +183,7 @@ def read_at(repo_root: Path, rev: str) -> dict[str, str]:
     # One `cat-file --batch` for every shard: a process per shard costs ~30ms each, and the
     # baseline has dozens of them.
     batch = subprocess.run(  # noqa: S603 — local git query, no shell
-        ["git", "-C", str(repo_root), "cat-file", "--batch"],
+        [git_executable, "-C", str(repo_root), "cat-file", "--batch"],
         input="".join(f"{rev}:{SHARD_DIR}/{name}\n" for name in filenames).encode(),
         capture_output=True,
         check=True,
@@ -206,15 +208,15 @@ def read_rules_worktree(repo_root: Path) -> dict[str, int]:
     return parse_rules(path.read_text(encoding="utf-8")) if path.is_file() else {}
 
 
-def read_rules_at(repo_root: Path, rev: str) -> dict[str, int]:
+def read_rules_at(repo_root: Path, rev: str, *, git_executable: str = "git") -> dict[str, int]:
     """Rule versions at a valid revision; a missing file means version 1.
 
     Revision resolution and Git reads must succeed before absence is accepted.
     """
-    if RULES_FILE not in _historical_paths(repo_root, rev):
+    if RULES_FILE not in _historical_paths(repo_root, rev, git_executable=git_executable):
         return {}
     shown = subprocess.run(  # noqa: S603 — local git query, no shell
-        ["git", "-C", str(repo_root), "show", f"{rev}:{SHARD_DIR}/{RULES_FILE}"],
+        [git_executable, "-C", str(repo_root), "show", f"{rev}:{SHARD_DIR}/{RULES_FILE}"],
         capture_output=True,
         text=True,
         check=True,

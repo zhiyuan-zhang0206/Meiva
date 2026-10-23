@@ -12,13 +12,8 @@ from scripts.lint import async_no_sync_blocking as _lint
 
 
 @pytest.fixture()
-def tree(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+def tree(tmp_path: Path) -> Path:
     """A scratch source tree with one repo helper defined in `base/`."""
-    monkeypatch.setattr(_lint, "_ROOT", tmp_path)
-    monkeypatch.setattr(_lint, "DEFINITION_DIRS", ("base",))
-    monkeypatch.setattr(_lint, "SCAN_DIRS", ("gateway",))
-    monkeypatch.setattr(_lint, "REPO_BLOCKING_HELPERS", {"sync_op"})
-    monkeypatch.setattr(_lint, "BLOCKING_NAMES", _lint.LIBRARY_BLOCKING_NAMES | {"sync_op"})
     _write(tmp_path, "base/ops.py", "def sync_op() -> None:\n    pass\n")
     (tmp_path / "gateway").mkdir()
     return tmp_path
@@ -30,27 +25,40 @@ def _write(root: Path, rel: str, body: str) -> None:
     path.write_text(textwrap.dedent(body), encoding="utf-8")
 
 
+def _run_main(root: Path, helpers: set[str] | None = None) -> int:
+    return _lint.main(
+        [],
+        repo_root=root,
+        definition_dirs=("base",),
+        scan_dirs=("gateway",),
+        repo_blocking_helpers={"sync_op"} if helpers is None else helpers,
+    )
+
+
+def _stale(root: Path, helpers: set[str]) -> list[str]:
+    return _lint.stale_repo_helpers(
+        repo_root=root,
+        definition_dirs=("base",),
+        repo_blocking_helpers=helpers,
+    )
+
+
 def test_real_repo_helpers_are_all_defined() -> None:
     assert _lint.stale_repo_helpers() == []
 
 
-def test_a_retired_helper_name_is_stale(tree: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(_lint, "REPO_BLOCKING_HELPERS", {"sync_op", "cluster_rollout_op"})
-    assert _lint.stale_repo_helpers() == ["cluster_rollout_op"]
+def test_a_retired_helper_name_is_stale(tree: Path) -> None:
+    assert _stale(tree, {"sync_op", "cluster_rollout_op"}) == ["cluster_rollout_op"]
 
 
-def test_a_stale_helper_fails_the_lint(
-    tree: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    monkeypatch.setattr(_lint, "REPO_BLOCKING_HELPERS", {"sync_op", "cluster_update_op"})
-    assert _lint.main() == 1
+def test_a_stale_helper_fails_the_lint(tree: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    assert _run_main(tree, {"sync_op", "cluster_update_op"}) == 1
     assert "stale REPO_BLOCKING_HELPERS entry 'cluster_update_op'" in capsys.readouterr().out
 
 
-def test_async_helper_definitions_count(tree: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_async_helper_definitions_count(tree: Path) -> None:
     _write(tree, "base/aio.py", "async def async_op[T](value: T) -> T:\n    return value\n")
-    monkeypatch.setattr(_lint, "REPO_BLOCKING_HELPERS", {"sync_op", "async_op"})
-    assert _lint.stale_repo_helpers() == []
+    assert _stale(tree, {"sync_op", "async_op"}) == []
 
 
 def test_unthreaded_repo_helper_in_async_body_is_flagged(tree: Path) -> None:
@@ -62,7 +70,7 @@ def test_unthreaded_repo_helper_in_async_body_is_flagged(tree: Path) -> None:
             sync_op()
         """,
     )
-    assert _lint.main() == 1
+    assert _run_main(tree) == 1
 
 
 def test_threaded_repo_helper_is_clean(tree: Path) -> None:
@@ -76,4 +84,4 @@ def test_threaded_repo_helper_is_clean(tree: Path) -> None:
             await asyncio.to_thread(sync_op)
         """,
     )
-    assert _lint.main() == 0
+    assert _run_main(tree) == 0

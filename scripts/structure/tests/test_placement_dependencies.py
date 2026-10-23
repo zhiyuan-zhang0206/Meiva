@@ -132,19 +132,28 @@ def test_a_cache_hit_still_resolves_against_the_current_tree(cache_root: pathlib
 
 
 def test_a_cached_graph_is_the_graph_of_a_fresh_read_file_by_file(
-    cache_root: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+    cache_root: pathlib.Path,
 ) -> None:
-    monkeypatch.setattr(cache, "CACHE_PATH", str(cache_root / "real-tree-cache.json"))
+    real_cache = cache_root / "real-tree-cache.json"
     cold = cache.production_imports(
-        REPO_ROOT, TOPS, read_source=lambda path: path.read_text(encoding="utf-8")
+        REPO_ROOT,
+        TOPS,
+        read_source=lambda path: path.read_text(encoding="utf-8"),
+        cache_path=real_cache,
     )
     warm = cache.production_imports(
-        REPO_ROOT, TOPS, read_source=lambda path: path.read_text(encoding="utf-8")
+        REPO_ROOT,
+        TOPS,
+        read_source=lambda path: path.read_text(encoding="utf-8"),
+        cache_path=real_cache,
     )
     assert cold == warm
-    monkeypatch.setattr(cache, "CACHE_PATH", str(cache_root / "fresh-tree-cache.json"))
+    fresh_cache = cache_root / "fresh-tree-cache.json"
     assert warm == cache.production_imports(
-        REPO_ROOT, TOPS, read_source=lambda path: path.read_text(encoding="utf-8")
+        REPO_ROOT,
+        TOPS,
+        read_source=lambda path: path.read_text(encoding="utf-8"),
+        cache_path=fresh_cache,
     )
 
 

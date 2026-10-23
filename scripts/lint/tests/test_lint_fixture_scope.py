@@ -238,9 +238,8 @@ def test_setup_env_keys_covers_pop_as_well_as_assignment() -> None:
 
 
 def test_directory_with_unreadable_member_is_skipped(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    monkeypatch.setattr(_lint, "_REPO_ROOT", tmp_path)
     (tmp_path / "pyproject.toml").write_text(
         '[tool.pytest.ini_options]\ntestpaths = ["tests"]\n', encoding="utf-8"
     )
@@ -249,9 +248,9 @@ def test_directory_with_unreadable_member_is_skipped(
     (tests / "ok.py").write_text("value = 1\n", encoding="utf-8")
     (tests / "bad_utf8.py").write_bytes(b"\xff\xfe\x00bad")
     (tests / "dangling.py").symlink_to(tests / "missing.py")
-    assert _lint.main([str(tests / "bad_utf8.py")]) == 0
-    assert _lint.main([str(tests)]) == 0
-    assert _lint.main([]) == 0
+    assert _lint.main([str(tests / "bad_utf8.py")], repo_root=tmp_path) == 0
+    assert _lint.main([str(tests)], repo_root=tmp_path) == 0
+    assert _lint.main([], repo_root=tmp_path) == 0
     (tests / "sub").mkdir()
     (tests / "sub" / "conftest.py").write_text(
         '@pytest.fixture(scope="session")\n'
@@ -260,7 +259,7 @@ def test_directory_with_unreadable_member_is_skipped(
         "    yield\n",
         encoding="utf-8",
     )
-    assert _lint.main([str(tests)]) == 1
+    assert _lint.main([str(tests)], repo_root=tmp_path) == 1
     assert "MEIVA_HOME" in capsys.readouterr().out
 
 
@@ -276,9 +275,8 @@ def test_explicit_missing_target_is_an_error(
 
 
 def test_configured_new_host_joins_the_default_fixture_scan(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    monkeypatch.setattr(_lint, "_REPO_ROOT", tmp_path)
     (tmp_path / "pyproject.toml").write_text(
         '[tool.pytest.ini_options]\ntestpaths = ["new_component/**/tests"]\n', encoding="utf-8"
     )
@@ -289,31 +287,27 @@ def test_configured_new_host_joins_the_default_fixture_scan(
         'def leaky():\n    os.environ["MEIVA_SCOPE_PROOF"] = "1"\n',
         encoding="utf-8",
     )
-    assert _lint.main([]) == 1
+    assert _lint.main([], repo_root=tmp_path) == 1
     assert "new_component/nested/tests/conftest.py" in capsys.readouterr().out
-    assert _lint.main(["--only", "pyproject.toml"]) == 1
+    assert _lint.main(["--only", "pyproject.toml"], repo_root=tmp_path) == 1
     assert "new_component/nested/tests/conftest.py" in capsys.readouterr().out
 
 
 @pytest.mark.parametrize("testpaths", ["[]", '"tests"', "[1]", '["../**/tests"]', '["base/tests"]'])
 def test_fixture_scan_rejects_invalid_test_scope_configuration(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, testpaths: str
+    tmp_path: Path, testpaths: str
 ) -> None:
-    monkeypatch.setattr(_lint, "_REPO_ROOT", tmp_path)
     (tmp_path / "pyproject.toml").write_text(
         f"[tool.pytest.ini_options]\ntestpaths = {testpaths}\n", encoding="utf-8"
     )
     with pytest.raises((ValueError, TypeError), match="pytest testpaths"):
-        _lint.main([])
+        _lint.main([], repo_root=tmp_path)
 
 
-def test_fixture_scan_requires_the_pytest_configuration(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setattr(_lint, "_REPO_ROOT", tmp_path)
+def test_fixture_scan_requires_the_pytest_configuration(tmp_path: Path) -> None:
     (tmp_path / "pyproject.toml").write_text("[tool.other]\n", encoding="utf-8")
     with pytest.raises(ValueError, match="must configure"):
-        _lint.main([])
+        _lint.main([], repo_root=tmp_path)
     (tmp_path / "pyproject.toml").unlink()
     with pytest.raises(FileNotFoundError):
-        _lint.main([])
+        _lint.main([], repo_root=tmp_path)

@@ -41,6 +41,8 @@ from __future__ import annotations
 import ast
 import re
 import sys
+from collections.abc import Sequence
+from collections.abc import Set as AbstractSet
 from pathlib import Path
 
 _ROOT = Path(__file__).resolve().parent.parent.parent
@@ -125,10 +127,11 @@ _EXEMPT_COMMENT = "# async-blocking-ok"
 
 
 class _Linter(ast.NodeVisitor):
-    def __init__(self, path: Path) -> None:
+    def __init__(self, path: Path, blocking_names: AbstractSet[str] | None = None) -> None:
         self.path = path
         self.errors: list[tuple[int, str]] = []
         self._lines = path.read_text().splitlines()
+        self._blocking_names = BLOCKING_NAMES if blocking_names is None else blocking_names
 
     def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
         for stmt in node.body:
@@ -165,7 +168,7 @@ class _Linter(ast.NodeVisitor):
             return
 
         reason: str | None = None
-        if name in BLOCKING_NAMES:
+        if name in self._blocking_names:
             reason = f"sync call {name}()"
         elif name.endswith("_blocking"):
             reason = f"{name}() is a sync helper — must run via asyncio.to_thread"
@@ -184,13 +187,21 @@ class _Linter(ast.NodeVisitor):
         self.errors.append((line, f"{reason}: {snippet}"))
 
 
-def stale_repo_helpers() -> list[str]:
+def stale_repo_helpers(
+    *,
+    repo_root: Path | None = None,
+    definition_dirs: Sequence[str] | None = None,
+    repo_blocking_helpers: AbstractSet[str] | None = None,
+) -> list[str]:
     """`REPO_BLOCKING_HELPERS` names no longer defined anywhere in the source tree."""
-    remaining = set(REPO_BLOCKING_HELPERS)
+    root = _ROOT if repo_root is None else repo_root
+    dirs = DEFINITION_DIRS if definition_dirs is None else definition_dirs
+    helpers = REPO_BLOCKING_HELPERS if repo_blocking_helpers is None else repo_blocking_helpers
+    remaining = set(helpers)
     pattern = re.compile(r"^\s*(?:async\s+)?def\s+(\w+)\s*[\[(]", re.MULTILINE)
-    for directory in DEFINITION_DIRS:
-        for path in (_ROOT / directory).rglob("*.py"):
-            if "__pycache__" in path.parts or lint_common.is_repo_test_file(path, _ROOT):
+    for directory in dirs:
+        for path in (root / directory).rglob("*.py"):
+            if "__pycache__" in path.parts or lint_common.is_repo_test_file(path, root):
                 continue
             try:
                 text = path.read_text(encoding="utf-8")
@@ -202,27 +213,63 @@ def stale_repo_helpers() -> list[str]:
     return sorted(remaining)
 
 
-def _scanned_files(scope: frozenset[str] | None) -> list[Path]:
+def _scanned_files(
+    scope: frozenset[str] | None,
+    *,
+    repo_root: Path | None = None,
+    scan_dirs: Sequence[str] | None = None,
+) -> list[Path]:
     """The source files of the scanned dirs (all of them, or the `--only` changed ones)."""
+    root = _ROOT if repo_root is None else repo_root
+    dirs = SCAN_DIRS if scan_dirs is None else scan_dirs
     return sorted(
         lint_common.restrict(
             (
                 p
-                for d in SCAN_DIRS
-                for p in (_ROOT / d).rglob("*.py")
-                if "__pycache__" not in p.parts and not lint_common.is_repo_test_file(p, _ROOT)
+                for d in dirs
+                for p in (root / d).rglob("*.py")
+                if "__pycache__" not in p.parts and not lint_common.is_repo_test_file(p, root)
             ),
             scope,
-            _ROOT,
+            root,
         )
     )
 
 
-def main(argv: list[str] | None = None) -> int:
+def _collect_errors(
+    files: Sequence[Path],
+    blocking_names: AbstractSet[str],
+) -> list[tuple[Path, list[tuple[int, str]]]]:
+    all_errors: list[tuple[Path, list[tuple[int, str]]]] = []
+    for path in files:
+        try:
+            tree = ast.parse(path.read_text())
+        except SyntaxError:
+            continue
+        linter = _Linter(path, blocking_names=blocking_names)
+        linter.visit(tree)
+        if linter.errors:
+            all_errors.append((path, linter.errors))
+    return all_errors
+
+
+def main(
+    argv: list[str] | None = None,
+    *,
+    repo_root: Path | None = None,
+    definition_dirs: Sequence[str] | None = None,
+    scan_dirs: Sequence[str] | None = None,
+    repo_blocking_helpers: AbstractSet[str] | None = None,
+) -> int:
+    root = _ROOT if repo_root is None else repo_root
     argv = argv if argv is not None else sys.argv[1:]
     _, only = lint_common.split_only(argv)
-    scope = lint_common.changed_scope(only, _ROOT)
-    stale = stale_repo_helpers()
+    scope = lint_common.changed_scope(only, root)
+    stale = stale_repo_helpers(
+        repo_root=root,
+        definition_dirs=definition_dirs,
+        repo_blocking_helpers=repo_blocking_helpers,
+    )
     if stale:
         for name in stale:
             print(
@@ -231,23 +278,18 @@ def main(argv: list[str] | None = None) -> int:
                 "drop it"
             )
         return 1
-    files = _scanned_files(scope)
-    all_errors: list[tuple[Path, list[tuple[int, str]]]] = []
-    for path in files:
-        try:
-            tree = ast.parse(path.read_text())
-        except SyntaxError:
-            continue
-        linter = _Linter(path)
-        linter.visit(tree)
-        if linter.errors:
-            all_errors.append((path, linter.errors))
-
+    files = _scanned_files(scope, repo_root=root, scan_dirs=scan_dirs)
+    blocking_names = (
+        BLOCKING_NAMES
+        if repo_blocking_helpers is None
+        else (LIBRARY_BLOCKING_NAMES | set(repo_blocking_helpers))
+    )
+    all_errors = _collect_errors(files, blocking_names)
     if not all_errors:
         print(f"async-blocking lint: {len(files)} files clean")
         return 0
     for path, errors in all_errors:
-        print(f"{path.relative_to(_ROOT)}:")
+        print(f"{path.relative_to(root)}:")
         for line, reason in errors:
             print(f"  {line}: {reason}")
     print(

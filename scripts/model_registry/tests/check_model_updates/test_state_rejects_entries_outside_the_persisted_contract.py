@@ -51,9 +51,7 @@ def test_state_rejects_entries_outside_the_persisted_contract(
         bare_tracker._load_state(state_path)
 
 
-def test_qwen_envelope_paginates_until_total(
-    monkeypatch: pytest.MonkeyPatch, bare_tracker: Any
-) -> None:
+def test_qwen_envelope_paginates_until_total(bare_tracker: Any) -> None:
     calls: list[dict[str, str | int]] = []
     first_page = [f"qwen3.8-model-{index}" for index in range(100)]
     responses = {
@@ -78,9 +76,9 @@ def test_qwen_envelope_paginates_until_total(
         calls.append(params)
         return responses[params["page_no"]]  # type: ignore[index]
 
-    monkeypatch.setattr(bare_tracker, "fetch_json", fetch_json)
-
-    assert bare_tracker.fetch_provider_models(bare_tracker.SOURCES["qwen"], "test-key") == [
+    assert bare_tracker.fetch_provider_models(
+        bare_tracker.SOURCES["qwen"], "test-key", fetcher=fetch_json
+    ) == [
         *first_page,
         "qwen3.8-model-100",
     ]
@@ -90,9 +88,7 @@ def test_qwen_envelope_paginates_until_total(
     ]
 
 
-def test_qwen_total_must_match_the_collected_models(
-    monkeypatch: pytest.MonkeyPatch, bare_tracker: Any
-) -> None:
+def test_qwen_total_must_match_the_collected_models(bare_tracker: Any) -> None:
 
     def short_response(
         url: str, *, headers: dict[str, str], params: dict[str, str | int]
@@ -100,18 +96,14 @@ def test_qwen_total_must_match_the_collected_models(
         del url, headers, params
         return {"output": {"models": [], "total": 1}}
 
-    monkeypatch.setattr(
-        bare_tracker,
-        "fetch_json",
-        short_response,
-    )
-
     with pytest.raises(ValueError, match="total does not match"):
-        bare_tracker.fetch_provider_models(bare_tracker.SOURCES["qwen"], "test-key")
+        bare_tracker.fetch_provider_models(
+            bare_tracker.SOURCES["qwen"], "test-key", fetcher=short_response
+        )
 
 
 def test_single_round_transient_error_and_its_recovery_stay_silent(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, bare_tracker: Any
+    tmp_path: Path, bare_tracker: Any
 ) -> None:
     """2026-09-14: one SSL EOF towards gemini announced an error, and the next
     morning's recovery announced a second time. A one-round blip must stay
@@ -119,41 +111,42 @@ def test_single_round_transient_error_and_its_recovery_stay_silent(
     been announced."""
     env_file = tmp_path / ".env"
     write_env_file(bare_tracker, env_file)
-    monkeypatch.setattr(bare_tracker, "_environment_value", missing_environment_value)
-    monkeypatch.setattr(bare_tracker, "fetch_provider_models", stub_fetcher(bare_tracker))
+    fetcher = stub_fetcher(bare_tracker)
     args = ["--env-file", str(env_file), "--state-dir", str(tmp_path / "state")]
 
-    assert bare_tracker.main(args) == 0
+    assert bare_tracker.main(args, env_lookup=missing_environment_value, model_fetcher=fetcher) == 0
     write_env_file(bare_tracker, env_file, missing="GEMINI_API_KEY")
-    assert bare_tracker.main(args) == 0
+    assert bare_tracker.main(args, env_lookup=missing_environment_value, model_fetcher=fetcher) == 0
     state = json.loads((tmp_path / "state" / "state.json").read_text())
     assert state["providers"]["gemini"]["pending"]["rounds"] == 1
     assert state["providers"]["gemini"]["announced"] == "ok"
 
     write_env_file(bare_tracker, env_file)
-    assert bare_tracker.main(args) == 0
+    assert bare_tracker.main(args, env_lookup=missing_environment_value, model_fetcher=fetcher) == 0
     state = json.loads((tmp_path / "state" / "state.json").read_text())
     assert state["providers"]["gemini"]["status"] == "ok"
     assert "pending" not in state["providers"]["gemini"]
 
 
 def test_persistent_status_change_announces_once_and_recovery_announces_too(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, bare_tracker: Any
+    tmp_path: Path, bare_tracker: Any
 ) -> None:
     env_file = tmp_path / ".env"
     write_env_file(bare_tracker, env_file)
-    monkeypatch.setattr(bare_tracker, "_environment_value", missing_environment_value)
-    monkeypatch.setattr(bare_tracker, "fetch_provider_models", stub_fetcher(bare_tracker))
+    fetcher = stub_fetcher(bare_tracker)
     args = ["--env-file", str(env_file), "--state-dir", str(tmp_path / "state")]
 
-    assert bare_tracker.main(args) == 0
+    def run_tracker() -> int:
+        return bare_tracker.main(args, env_lookup=missing_environment_value, model_fetcher=fetcher)
+
+    assert run_tracker() == 0
     write_env_file(bare_tracker, env_file, missing="XAI_API_KEY")
-    assert bare_tracker.main(args) == 0  # first failing round: pending, not announced
-    assert bare_tracker.main(args) == 2  # second failing round: announced once
-    assert bare_tracker.main(args) == 0  # a continuing error never re-announces
+    assert run_tracker() == 0  # first failing round: pending, not announced
+    assert run_tracker() == 2  # second failing round: announced once
+    assert run_tracker() == 0  # a continuing error never re-announces
     write_env_file(bare_tracker, env_file)
-    assert bare_tracker.main(args) == 0  # the first healthy round is pending too
-    assert bare_tracker.main(args) == 2  # the recovery is announced
+    assert run_tracker() == 0  # the first healthy round is pending too
+    assert run_tracker() == 2  # the recovery is announced
     state = json.loads((tmp_path / "state" / "state.json").read_text())
     assert state["providers"]["grok"]["status"] == "ok"
     assert state["providers"]["grok"]["announced"] == "ok"
@@ -161,7 +154,7 @@ def test_persistent_status_change_announces_once_and_recovery_announces_too(
 
 
 def test_legacy_state_upgrade_baselines_the_loaded_status(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, bare_tracker: Any
+    tmp_path: Path, bare_tracker: Any
 ) -> None:
     """A state file written before `announced` existed (like a live one
     left in error by the 2026-09-16 proxy outage) baselines on the status
@@ -169,8 +162,7 @@ def test_legacy_state_upgrade_baselines_the_loaded_status(
     still walks the two-round window."""
     env_file = tmp_path / ".env"
     write_env_file(bare_tracker, env_file)
-    monkeypatch.setattr(bare_tracker, "_environment_value", missing_environment_value)
-    monkeypatch.setattr(bare_tracker, "fetch_provider_models", stub_fetcher(bare_tracker))
+    fetcher = stub_fetcher(bare_tracker)
     state_dir = tmp_path / "state"
     state_dir.mkdir()
     (state_dir / "state.json").write_text(
@@ -178,44 +170,42 @@ def test_legacy_state_upgrade_baselines_the_loaded_status(
     )
     args = ["--env-file", str(env_file), "--state-dir", str(state_dir)]
 
-    assert bare_tracker.main(args) == 0  # the first healthy round is pending, silent
+    def run_tracker() -> int:
+        return bare_tracker.main(args, env_lookup=missing_environment_value, model_fetcher=fetcher)
+
+    assert run_tracker() == 0  # the first healthy round is pending, silent
     state = json.loads((state_dir / "state.json").read_text())
     assert state["providers"]["gemini"]["announced"] == "error: old outage"
-    assert bare_tracker.main(args) == 2  # the second announces the recovery
+    assert run_tracker() == 2  # the second announces the recovery
     state = json.loads((state_dir / "state.json").read_text())
     assert state["providers"]["gemini"]["announced"] == "ok"
     assert "pending" not in state["providers"]["gemini"]
 
 
 def test_empty_fetch_error_still_produces_a_valid_persisted_status(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, bare_tracker: Any
+    tmp_path: Path, bare_tracker: Any
 ) -> None:
     env_file = tmp_path / ".env"
     write_env_file(bare_tracker, env_file)
-    monkeypatch.setattr(bare_tracker, "_environment_value", missing_environment_value)
 
     def fetch(source: Any, api_key: str) -> list[str]:
         if source.provider == "glm":
             raise ValueError
         return known_models(bare_tracker, source)
 
-    monkeypatch.setattr(bare_tracker, "fetch_provider_models", fetch)
     args = ["--env-file", str(env_file), "--state-dir", str(tmp_path / "state")]
 
-    assert bare_tracker.main(args) == 0
+    assert bare_tracker.main(args, env_lookup=missing_environment_value, model_fetcher=fetch) == 0
     state = json.loads((tmp_path / "state" / "state.json").read_text())
     assert state["providers"]["glm"]["status"] == "error: ValueError"
-    assert bare_tracker.main(args) == 2
+    assert bare_tracker.main(args, env_lookup=missing_environment_value, model_fetcher=fetch) == 2
 
 
-def test_write_report_persists_markdown_and_json(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, bare_tracker: Any
-) -> None:
+def test_write_report_persists_markdown_and_json(tmp_path: Path, bare_tracker: Any) -> None:
     env_file = tmp_path / ".env"
     report_dir = tmp_path / "reports"
     write_env_file(bare_tracker, env_file)
-    monkeypatch.setattr(bare_tracker, "_environment_value", missing_environment_value)
-    monkeypatch.setattr(bare_tracker, "fetch_provider_models", stub_fetcher(bare_tracker))
+    fetcher = stub_fetcher(bare_tracker)
 
     assert (
         bare_tracker.main(
@@ -226,7 +216,9 @@ def test_write_report_persists_markdown_and_json(
                 str(tmp_path / "state"),
                 "--write-report",
                 str(report_dir),
-            ]
+            ],
+            env_lookup=missing_environment_value,
+            model_fetcher=fetcher,
         )
         == 0
     )

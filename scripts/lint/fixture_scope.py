@@ -431,14 +431,15 @@ def _iter_py_files(roots: list[Path]) -> list[Path]:
     return [f for f in files if "__pycache__" not in f.parts]
 
 
-def _default_targets() -> list[Path]:
+def _default_targets(*, repo_root: Path = _REPO_ROOT) -> list[Path]:
     hosts = lint_common.pytest_test_hosts(
-        (_REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8")
+        (repo_root / "pyproject.toml").read_text(encoding="utf-8")
     )
-    return [_REPO_ROOT / host for host in hosts if (_REPO_ROOT / host).is_dir()]
+    return [repo_root / host for host in hosts if (repo_root / host).is_dir()]
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: list[str] | None = None, *, repo_root: Path | None = None) -> int:
+    root = _REPO_ROOT if repo_root is None else repo_root
     argv = argv if argv is not None else sys.argv[1:]
     argv, only = lint_common.split_only(argv)
     if argv:
@@ -446,13 +447,13 @@ def main(argv: list[str] | None = None) -> int:
         if missing:
             print(f"error: target path(s) not found: {', '.join(missing)}", file=sys.stderr)
             return 1
-    targets = [Path(a).resolve() for a in argv] if argv else _default_targets()
-    scope = lint_common.changed_scope(only, _REPO_ROOT, inputs=("pyproject.toml",))
+    targets = [Path(a).resolve() for a in argv] if argv else _default_targets(repo_root=root)
+    scope = lint_common.changed_scope(only, root, inputs=("pyproject.toml",))
 
     total = 0
-    for path in sorted(lint_common.restrict(_iter_py_files(targets), scope, _REPO_ROOT)):
+    for path in sorted(lint_common.restrict(_iter_py_files(targets), scope, root)):
         try:
-            rel = path.relative_to(_REPO_ROOT).as_posix()
+            rel = path.relative_to(root).as_posix()
         except ValueError:
             continue  # outside the repo: not one of its tests
         if not lint_common.is_test_path(rel):
