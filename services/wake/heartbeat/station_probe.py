@@ -37,7 +37,7 @@ from collections.abc import Callable
 
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.machine.boot import machine_from_boot
-from base.config import ConfigBoot, settings
+from base.config import ConfigBoot
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.host.db_authority.api import read_telemetry_token
@@ -129,11 +129,10 @@ def station_answers(url: str, *, token: str | None, open_url: UrlOpener) -> bool
         return False
 
 
-def main(*, open_url: UrlOpener) -> None:
+def main(*, process_config: ConfigBoot, open_url: UrlOpener) -> None:
     image = LoadedCommit.capture()
-    machine_config = ConfigBoot()
-    machine_config.boot()
-    machine = machine_from_boot(machine_config)
+    process_config.boot()
+    machine = machine_from_boot(process_config)
     process_home = meiva_home().resolve()
     version = CodeVersion(image)
     gate = ProcessDbGate(version=version.get, process="station")
@@ -152,8 +151,8 @@ def main(*, open_url: UrlOpener) -> None:
         image=image,
     )
     config = StationEndpointConfig(
-        observability_url=settings.observability.observability_url,
-        otlp_port=settings.observability.observability_otlp_port,
+        observability_url=process_config.view.observability.observability_url,
+        otlp_port=process_config.view.observability.observability_otlp_port,
     )
     target = resolve_target(database=database, config=config)
     if target is None:
@@ -171,4 +170,4 @@ if __name__ == "__main__":
     from base.log import prepare_process_logging
 
     prepare_process_logging()
-    main(open_url=SYSTEM_URL_OPENER)
+    main(process_config=ConfigBoot(), open_url=SYSTEM_URL_OPENER)

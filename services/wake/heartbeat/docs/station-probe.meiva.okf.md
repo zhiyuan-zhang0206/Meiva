@@ -9,6 +9,12 @@ tags:
 
 # Remote station probe
 
+The standalone entry receives its existing concrete `ConfigBoot` owner. Its
+constructor performs no environment delivery or model build; the module wrapper
+only constructs it. `main` captures the loaded image before booting that owner,
+then derives the lazy machine identity and frozen endpoint inputs from its view.
+It retains the same home, version gate and work/telemetry factory composition.
+
 `services/wake/heartbeat/station_probe.py` resolves the remote observatory from
 its frozen `StationEndpointConfig`. An unset or malformed URL skips the round
 before database discovery. The shared `base.telemetry.station_endpoint` owner
