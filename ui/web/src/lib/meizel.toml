@@ -1,7 +1,7 @@
 exports = ["agents", "auth", "composer", "context", "context-colors.ts", "contracts", "fleet", "fold", "format", "harness", "inspector", "layout", "markdown", "notifications", "plugins", "state", "telemetry", "timeline", "transport"]
 
 [uses]
-"agents" = ["auth", "context", "contracts", "fold", "format", "harness", "layout", "state", "telemetry", "transport"]
+"agents" = ["auth", "context", "contracts", "fold", "format", "layout", "state", "telemetry", "transport"]
 "auth" = ["transport"]
 "composer" = ["contracts", "layout", "transport"]
 "context" = ["transport"]

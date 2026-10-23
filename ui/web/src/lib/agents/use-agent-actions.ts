@@ -10,8 +10,7 @@ import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { ApiError, api } from "../transport/api";
-import type { Harness } from "@/lib/harness/harness";
-
+import type { Harness } from "../contracts/models";
 import { errMsg } from "../contracts/errors";
 import { AGENTS_QUERY_KEY, AGENT_DETAIL_QUERY_KEY } from "../fold/agents";
 import { track } from "../telemetry/telemetry";

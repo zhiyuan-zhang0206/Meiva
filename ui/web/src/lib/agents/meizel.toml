@@ -74,9 +74,5 @@ exports = ["agent-reconcile.ts", "agent-tree.ts", "sidebar.ts", "use-agent-pages
 "use-all-pages.test.ts#vi.spyOn queryClient.invalidateQueries" = 1
 "use-all-pages.test.ts#vi.stubGlobal EventSource" = 1
 
-[debt.unfrozen-value]
-"use-pending-messages.ts#IMMEDIATE_REFETCH_ROLES" = 1
-"use-pending-messages.ts#TURN_START_ROLES" = 1
-
 [debt.wide-exports]
 "meizel.toml#exports" = 1
