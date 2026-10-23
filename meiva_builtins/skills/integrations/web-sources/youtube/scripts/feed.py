@@ -406,7 +406,7 @@ def _render_markdown(post: dict[str, Any]) -> str:
 def to_s1(post: dict[str, Any], *, matrix_entity: str | None = None) -> dict[str, Any]:
     """Project a fetched post onto the cross-platform S1 item schema."""
     ch = post["channel"]
-    media = []
+    media: list[dict[str, Any]] = []
     if post.get("video_path"):
         media.append({"kind": "video", "path": post["video_path"]})
     return {
@@ -474,7 +474,7 @@ def sync(
 
     `do_fetch=False` is a non-mutating preview (enumerate only)."""
     source = resolve_source(spec)
-    seen = None if backfill else (lambda vid: _is_mirrored(vid, root))
+    seen: Callable[[str], bool] | None = None if backfill else (lambda vid: _is_mirrored(vid, root))
     items, hit_watermark = enum(source, seen=seen, max_scan=max_scan)
     if not backfill and not hit_watermark:
         items = items[:initial_limit]

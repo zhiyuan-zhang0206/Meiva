@@ -7,6 +7,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 SCRIPT = (
     Path(__file__).resolve().parent.parent.parent.parent
     / "meiva_builtins"
@@ -95,6 +97,36 @@ def test_missing_section_fails() -> None:
     res = _run(state)
     assert res.returncode == 1
     assert "missing required section" in res.stdout
+
+
+@pytest.mark.parametrize(
+    "section,value,problem",
+    [
+        ("question", None, "question must be an object"),
+        ("question", {"three_part": 42, "so_what": []}, "question.three_part"),
+        ("plan", None, "plan must be a non-empty list"),
+        ("plan", [None], "plan[0]: missing sub_question"),
+        ("sources", [None], "sources[0]: must be an object"),
+        ("learnings", [None], "learnings[0]: must be an object"),
+        ("claims", [None], "claims[0]: must be an object"),
+    ],
+)
+def test_malformed_section_reports_a_problem(section: str, value: object, problem: str) -> None:
+    state = _good_state()
+    state[section] = value
+    result = _run(state)
+    assert result.returncode == 1
+    assert problem in result.stdout
+    assert "Traceback" not in result.stderr
+
+
+def test_unhashable_source_id_is_reported() -> None:
+    state = _good_state()
+    state["learnings"][0]["source_ids"] = [1, []]
+    result = _run(state)
+    assert result.returncode == 1
+    assert "source_id [] not in sources" in result.stdout
+    assert "Traceback" not in result.stderr
 
 
 def test_learning_without_source_fails() -> None:

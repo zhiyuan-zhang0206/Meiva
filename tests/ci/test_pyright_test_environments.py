@@ -119,6 +119,18 @@ def test_the_real_configuration_names_all_seven_rules_globally() -> None:
     assert all(rule in _PYRIGHT for rule in TESTS_STANDARD)
 
 
+@pytest.mark.parametrize(
+    "root",
+    [
+        "meiva_builtins/plugins/lm_deepseek",
+        "meiva_builtins/skills/integrations/web-ai",
+        "meiva_builtins/skills/integrations/web-sources/rss/scripts",
+    ],
+)
+def test_builtin_production_environments_enforce_all_seven_rules(root: str) -> None:
+    assert set(effective_rules(_PYRIGHT, root).values()) == {"error"}
+
+
 @pytest.mark.parametrize("environment", _PYRIGHT["executionEnvironments"])
 def test_an_environment_root_that_exists_names_a_directory(environment: dict[str, Any]) -> None:
     """A stale root (a directory that moved or was deleted) configures nothing."""

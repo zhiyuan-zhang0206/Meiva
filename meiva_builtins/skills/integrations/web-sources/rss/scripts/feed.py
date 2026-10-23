@@ -42,8 +42,9 @@ import subprocess
 import sys
 import time
 import urllib.parse
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import feedparser
 from feedparser.exceptions import ThingsNobodyCaresAboutButMe
@@ -171,13 +172,12 @@ def parse_feed(feed_url: str) -> tuple[str, list[Any]]:
     exception is not a benign ``ThingsNobodyCaresAboutButMe`` like
     ``CharacterEncodingOverride`` — the feed is still valid, just has encoding
     quirks)."""
-    parsed = feedparser.parse(_fetch_bytes(feed_url))
-    # feedparser's stub types .feed/.entries loosely (FeedParserDict supports both
-    # attr and key access); pin to Any so the dict access below is clean.
-    feed_meta: Any = parsed.feed
-    entries: list[Any] = parsed.entries
+    parse = cast(Callable[[bytes], dict[str, Any]], feedparser.parse)
+    parsed = parse(_fetch_bytes(feed_url))
+    feed_meta: dict[str, Any] = parsed["feed"]
+    entries: list[Any] = parsed["entries"]
     if not entries:
-        cause = getattr(parsed, "bozo_exception", None)
+        cause = parsed.get("bozo_exception")
         fatal_bozo = parsed.get("bozo") and not isinstance(cause, ThingsNobodyCaresAboutButMe)
         if fatal_bozo or not parsed.get("version"):
             raise RssError(

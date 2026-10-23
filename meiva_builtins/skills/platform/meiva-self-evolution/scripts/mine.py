@@ -88,7 +88,7 @@ def _oneline(text: str, limit: int = 140) -> str:
 
 
 def _signals(rec: dict[str, Any]) -> str:
-    bits = []
+    bits: list[str] = []
     if rec["last_exec_failed"]:
         bits.append("ended-on-exec-fail")
     if rec["exec_failed"]:

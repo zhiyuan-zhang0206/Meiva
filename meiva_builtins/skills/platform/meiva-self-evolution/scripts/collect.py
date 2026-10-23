@@ -188,7 +188,7 @@ def _group_by_agent(
     return out
 
 
-def _builtin_help_counts(events: list[tuple]) -> tuple[int, int]:
+def _builtin_help_counts(events: list[tuple[str, dict[str, Any]]]) -> tuple[int, int]:
     """Count builtin help() calls and the subset targeting meiva.* objects."""
     calls = 0
     on_meiva = 0
@@ -201,7 +201,7 @@ def _builtin_help_counts(events: list[tuple]) -> tuple[int, int]:
     return calls, on_meiva
 
 
-def _subprocess_call_count(events: list[tuple]) -> int:
+def _subprocess_call_count(events: list[tuple[str, dict[str, Any]]]) -> int:
     """Count raw subprocess calls across executed code blocks with a regex.
 
     This includes matching names in comments, docstrings, and string literals.
@@ -408,7 +408,7 @@ def _task_receipts_by_agent(cur: psycopg.Cursor, ids: list[int]) -> dict[int, di
     }
 
 
-def _meta_by_agent(cur: psycopg.Cursor, ids: list[int]) -> dict[int, tuple]:
+def _meta_by_agent(cur: psycopg.Cursor, ids: list[int]) -> dict[int, tuple[Any, ...]]:
     cur.execute(
         "SELECT id, spawner, status, last_message_text FROM agents_meta WHERE id = ANY(%s)",
         [ids],
@@ -474,8 +474,8 @@ def collect_with_counts(
         inbounds = _inbounds_by_agent(cur, ids, window_from, window_to)
         meta = _meta_by_agent(cur, ids)
         receipts = _task_receipts_by_agent(cur, ids)
-        test_ids = set() if include_test else _test_label_ids(cur, ids)
-    records = []
+        test_ids: set[int] = set() if include_test else _test_label_ids(cur, ids)
+    records: list[dict[str, Any]] = []
     excluded_test = 0
     skipped_meta = 0
     for agent_id in ids:
@@ -550,12 +550,12 @@ def collect_one(
     window_from = now - timedelta(days=7)
     telemetry = _fetch_events_window("telemetry", window_from, now, agent_id=agent_id)
     audit = _fetch_events_window("audit", window_from, now, agent_id=agent_id)
-    events = [
+    events: list[tuple[str, dict[str, Any]]] = [
         (r["event_name"], r.get("attributes") or {})
         for r in telemetry
         if r.get("agent_id") == agent_id
     ]
-    log_events = [
+    log_events: list[tuple[str, dict[str, Any]]] = [
         (r["event_name"], r.get("attributes") or {}) for r in audit if r.get("agent_id") == agent_id
     ]
     with database.connect() as conn, conn.cursor() as cur:

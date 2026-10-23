@@ -9,8 +9,9 @@ surface module carries only the description (task #3633).
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import Any
 
-from langchain_core.messages import AIMessage
+from langchain_core.messages import AIMessage, AnyMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 
@@ -25,7 +26,7 @@ from base.packages.plugins.extensions import PluginContributions
 _NUDGE = "The previous turn produced reasoning but no output. You must now produce either text or a tool call. If your task is complete, state so in text — do not end a turn with reasoning alone."
 
 
-def _tail_is_silent_idle(messages: list) -> bool:
+def _tail_is_silent_idle(messages: list[AnyMessage]) -> bool:
     """True when the last message is a reasoning-only AIMessage — no text and no
     tool_call. That is exactly the message the kernel commits on a silent-idle
     continue-loop (see module docstring for why the tail check is sufficient)."""
@@ -49,7 +50,7 @@ class _SilentIdleContinueHook(Hook):
         runtime: Runtime[MeivaContext],
         _config: RunnableConfig,
         /,
-    ) -> dict | None:
+    ) -> dict[str, Any] | None:
         if not _tail_is_silent_idle(state.messages):
             return None
 

@@ -128,7 +128,8 @@ def launch(skill: str, tasks: list[dict[str, Any]], *, model: str | None = None)
     the agents finish. Must run inside an agent process."""
     import meiva
 
-    runs, skipped = [], []
+    runs: list[dict[str, Any]] = []
+    skipped: list[dict[str, Any]] = []
     for task in tasks:
         safe, why = is_replay_safe(task)
         if not safe:
@@ -150,7 +151,7 @@ def launch(skill: str, tasks: list[dict[str, Any]], *, model: str | None = None)
             }
         )
     stamp = datetime.now(UTC).strftime("%Y-%m-%dT%H-%M-%SZ")
-    state = {"skill": skill, "stamp": stamp, "runs": runs, "skipped": skipped}
+    state: dict[str, Any] = {"skill": skill, "stamp": stamp, "runs": runs, "skipped": skipped}
     path = _state_path(skill, stamp)
     path.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
     state["path"] = str(path)
@@ -211,7 +212,7 @@ def gather(state: dict[str, Any], *, database: Database) -> dict[str, Any]:
     are excluded from the mean and `n`.
     """
     progress = poll(state, database=database)
-    per_task = []
+    per_task: list[dict[str, Any]] = []
     for run in state["runs"]:
         if run["eval_agent_id"] not in progress["done"]:
             continue
@@ -267,7 +268,7 @@ def latest_state(skill: str) -> dict[str, Any]:
 # ─────────────── debrief (the backward pass) ───────────────
 
 
-def debrief(state: dict, skill_name: str, *, database: Database) -> list[dict]:
+def debrief(state: dict[str, Any], skill_name: str, *, database: Database) -> list[dict[str, Any]]:
     """Ask each eval agent that just ran a task: "what would you change?"
 
     This is the backward pass of the evaluation loop — the agent that actually
@@ -277,7 +278,7 @@ def debrief(state: dict, skill_name: str, *, database: Database) -> list[dict]:
 
     Returns one record per debriefed agent: {eval_agent_id, prompt, debrief_sent}.
     """
-    results: list[dict] = []
+    results: list[dict[str, Any]] = []
     status = _status_of([entry["eval_agent_id"] for entry in state["runs"]], database=database)
     for entry in state["runs"]:
         eval_agent_id = entry["eval_agent_id"]

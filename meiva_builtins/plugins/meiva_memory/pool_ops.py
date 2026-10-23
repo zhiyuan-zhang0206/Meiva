@@ -86,7 +86,7 @@ def repo_slug(pool: Path) -> str:
 
 def run(
     cmd: list[str], cwd: str | None = None, *, check: bool = True
-) -> subprocess.CompletedProcess:
+) -> subprocess.CompletedProcess[str]:
     r = subprocess.run(  # noqa: S603 — caller-constructed argv, static args, not shell-interpolated
         cmd, capture_output=True, text=True, cwd=cwd, check=False
     )

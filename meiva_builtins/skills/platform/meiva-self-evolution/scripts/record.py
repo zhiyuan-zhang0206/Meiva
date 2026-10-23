@@ -12,7 +12,7 @@ import sys
 import warnings
 from collections import Counter
 from pathlib import Path
-from typing import Any, NamedTuple
+from typing import Any, NamedTuple, cast
 
 from pydantic import ValidationError
 
@@ -161,12 +161,13 @@ def _msg_text(content: Any) -> str:
     if isinstance(content, str):
         return content
     if isinstance(content, list):
-        parts = []
-        for block in content:
+        parts: list[str] = []
+        for block in cast(list[Any], content):
             if isinstance(block, dict):
-                if block.get("type") in {"thinking", "tool_use"}:
+                b_dict = cast(dict[str, Any], block)
+                if b_dict.get("type") in {"thinking", "tool_use"}:
                     continue
-                parts.append(block.get("text") or block.get("type") or "")
+                parts.append(b_dict.get("text") or b_dict.get("type") or "")
             else:
                 parts.append(str(block))
         return " ".join(part for part in parts if part)
@@ -181,7 +182,7 @@ def _transcript(agent_id: int, *, database: Database) -> list[dict[str, str]]:
     return [{"type": message.type, "content": _msg_text(message.content)} for message in messages]
 
 
-def _skills_touched(log_events: list[tuple]) -> list[str]:
+def _skills_touched(log_events: list[tuple[str, dict[str, Any]]]) -> list[str]:
     loaded: set[str] = set()
     for event_type, payload in log_events:
         if event_type != "skill_invoked":
@@ -193,13 +194,13 @@ def _skills_touched(log_events: list[tuple]) -> list[str]:
     return sorted(loaded)
 
 
-def _plugins_activated(events: list[tuple]) -> tuple[dict[str, int], int]:
+def _plugins_activated(events: list[tuple[str, dict[str, Any]]]) -> tuple[dict[str, int], int]:
     fired: Counter[str] = Counter()
     skipped = 0
     for event_type, payload in events:
         if event_type != "plugin_activation":
             continue
-        data = payload or {}
+        data: dict[str, Any] = payload or {}
         plugin, surface, identifier = (
             data.get("plugin"),
             data.get("surface"),
@@ -291,7 +292,7 @@ class _EventStats(NamedTuple):
     duration_s: float
 
 
-def _event_stats(events: list[tuple]) -> _EventStats:
+def _event_stats(events: list[tuple[str, dict[str, Any]]]) -> _EventStats:
     turns = exec_ok = exec_failed = tokens_in = tokens_out = 0
     models: list[str] = []
     code_bodies: list[str] = []
@@ -372,8 +373,8 @@ def _grade(ev: dict[str, Any]) -> tuple[str, str | None]:
 
 
 def _evidence_block(
-    events: list[tuple],
-    log_events: list[tuple],
+    events: list[tuple[str, dict[str, Any]]],
+    log_events: list[tuple[str, dict[str, Any]]],
     inbounds: list[dict[str, Any]],
     stats: _EventStats,
     *,
@@ -410,10 +411,10 @@ def _evidence_block(
 def build_record(
     agent_id: int,
     week: str,
-    events: list[tuple],
-    log_events: list[tuple],
+    events: list[tuple[str, dict[str, Any]]],
+    log_events: list[tuple[str, dict[str, Any]]],
     inbounds: list[dict[str, Any]],
-    meta: tuple,
+    meta: tuple[Any, ...],
     *,
     database: Database,
     transcript: list[dict[str, str]] | None = None,

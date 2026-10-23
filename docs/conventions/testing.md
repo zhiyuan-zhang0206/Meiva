@@ -49,12 +49,22 @@ Postgres/Redis and accepts its owned component directories, descendant paths
 and node IDs; other tests keep the native default. CI runs it in the required
 backend static job and excludes the same paths from native shards. See [fixture environments](../../tests/fixtures/docs/static-environment.meiva.okf.md).
 
-Check changed Python files with pyright:
+Check changed Python files with BasedPyright:
 
 ```bash
 git diff --name-only --diff-filter=ACMR -z origin/main...HEAD -- '*.py' \
-  | xargs -0 -r .venv/bin/pyright
+  | xargs -0 -r .venv/bin/basedpyright
 ```
+
+`pyproject.toml` owns the type-checking ladder. Production code in `base`,
+`ops`, `services`, `agent`, `cli`, `gateway`, `meizel`, `meiva` and
+`meiva_builtins` enforces all seven unknown/missing-type rules as errors.
+Package test directories retain their generated two-rule standard; the
+web integration skill environments preserve their sibling import paths and
+the production rules. Explicit `Any` remains allowed for existing dynamic
+payloads, so passing this ladder is not proof of complete runtime validation.
+For an incompletely typed dependency, describe the callable surface actually
+used rather than casting its entire module or receiver to `Any`.
 
 The `tool.pytest.ini_options.testpaths` configuration in `pyproject.toml` owns
 the test host directories. The CI selector, generated pyright test environments

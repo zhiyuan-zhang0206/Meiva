@@ -3,7 +3,9 @@ from __future__ import annotations
 import stat
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
+from langchain_core.messages import BaseMessage
 from langgraph.runtime import Runtime
 
 from agent.hooks import Hook
@@ -33,11 +35,11 @@ class _InjectCwdNotesAfterExecHook(Hook):
         _runtime: object,
         _config: object,
         /,
-    ) -> dict | None:
+    ) -> dict[str, Any] | None:
 
         current = state_handle().view(state)
-        notes: list = []
-        update: dict = {}
+        notes: list[BaseMessage] = []
+        update: dict[str, Any] = {}
 
         if current.cwd_note is not None:
             notes.append(
