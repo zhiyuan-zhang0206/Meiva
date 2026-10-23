@@ -52,6 +52,35 @@ def test_the_tree_own_host_predicates_are_findings(read: str) -> None:
     assert read.rsplit(".", maxsplit=1)[-1] in found[0]
 
 
+@pytest.mark.parametrize(
+    "read", ["system()", "platform()", "uname()", "release()", "mac_ver()", "win32_ver()"]
+)
+def test_the_bounded_platform_module_calls_are_findings(read: str) -> None:
+    # meiva:note
+    # `platform` is a closed set: these six answer "what host is this", so the vocabulary
+    # is finite and the rule has no ceiling here.
+    found = _findings(f"import platform\n\n\ndef test_x():\n    assert platform.{read}\n")
+    assert len(found) == 1 and f"`platform.{read}`" in found[0]
+
+
+@pytest.mark.parametrize("read", ["python_version()", "python_implementation()", "machine()"])
+def test_the_interpreter_and_architecture_calls_are_not_findings(read: str) -> None:
+    # meiva:note
+    # The interpreter version is not a host fact, and `machine()` is the architecture —
+    # no marker carries that dimension, so counting it would only produce noise.
+    assert _findings(f"import platform\n\n\ndef test_x():\n    return platform.{read}\n") == []
+
+
+def test_a_dynamic_attribute_read_is_outside_the_rule() -> None:
+    # meiva:note
+    # The documented boundary, kept in step with the document: `getattr` hides the name
+    # from any static rule, so a passing test here is the honest state, not a gap.
+    assert (
+        _findings("import platform\n\n\ndef test_x():\n    return getattr(platform, 'system')()\n")
+        == []
+    )
+
+
 def test_os_name_is_a_finding() -> None:
     found = _findings("import os\n\n\ndef test_x():\n    assert os.name == 'posix'\n")
     assert len(found) == 1 and "`os.name`" in found[0]
