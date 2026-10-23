@@ -12,14 +12,12 @@ from __future__ import annotations
 
 import asyncio
 import json
-from collections.abc import Awaitable, Callable
 from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
 from base.host.exit_codes import IDLE_EXIT_CODE, SYSTEM_HALT_EXIT_CODE
 from base.log import logger
-from base.paths import meiva_home
 
 __all__ = [
     "AgentRestart",
@@ -28,7 +26,6 @@ __all__ = [
     "SystemHalt",
     "release_agent_chrome_pages",
     "release_browser_pages",
-    "release_default_chrome_pages",
 ]
 
 _RELEASE_STREAM_LIMIT = 64 * 1024 * 1024
@@ -122,20 +119,10 @@ async def release_agent_chrome_pages(agent_id: int, home: Path) -> bool:
 
 
 # meiva:note
-# Release this agent's browser-mcp pages in the active Meiva home.
-async def release_default_chrome_pages(agent_id: int) -> bool:
-    return await release_agent_chrome_pages(agent_id, meiva_home())
-
-
-# meiva:note
-# Best-effort close of this agent's browser-mcp pages after termination commits.
-async def release_browser_pages(
-    agent_id: int,
-    *,
-    page_releaser: Callable[[int], Awaitable[object]] = release_default_chrome_pages,
-) -> None:
+# Best-effort close of this agent's browser-mcp pages in `home` after termination commits.
+async def release_browser_pages(agent_id: int, *, home: Path) -> None:
     try:
-        released = await page_releaser(agent_id)
+        released = await release_agent_chrome_pages(agent_id, home)
         if not released:
             logger.debug(
                 "agent {agent_id} browser-page release skipped (no service / failed)",

@@ -33,6 +33,7 @@ from base.events.live.announce import publish_agent_updated_sync
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 from base.lm.registry import normalize_overlay_llm_model
+from base.paths import meiva_home
 from ops.agents import (
     get_agent_machine,
     get_agent_status,
@@ -135,7 +136,7 @@ async def terminate_agent_op(
             terminate_force_blocking, db, bus, agent_id, body, db_pool
         )
         await cancel_turn(agent_id)
-        await release_browser_pages(agent_id)
+        await release_browser_pages(agent_id, home=meiva_home())
         for page_name in killed_page_names:
             await publish_page_closed(bus, agent_id, page_name)
         _log.info(

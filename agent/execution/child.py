@@ -121,9 +121,18 @@ def apply_framework_overlay(
     applied = False
     for value in (birth, overlay):
         if value:
-            from base.packages.plugins.config_registration import apply_config_overlay
+            from pydantic import ValidationError
 
-            apply_config_overlay(value, scope="framework", set_framework_field=config.set_field)
+            from base.packages.plugins.config_registration import plan_config_overlay
+            from base.packages.plugins.plugin_errors import InvalidConfigOverlay
+
+            for field, field_value in plan_config_overlay(value).framework_fields:
+                try:
+                    config.set_field(field, field_value)
+                except ValidationError as error:
+                    raise InvalidConfigOverlay(
+                        f"overlay field type validation failed (framework): {error}"
+                    ) from error
             applied = True
     return applied
 

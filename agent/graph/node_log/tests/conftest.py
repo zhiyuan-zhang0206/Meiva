@@ -1,7 +1,7 @@
 import pytest
 
 from agent.graph import node_log
-from agent.graph.node_log.tests.live_events import live_events as live_events
+from base.events.live.tests.live_capture import live_events as live_events
 from base.log.tests.log_records import loguru_records as loguru_records
 
 

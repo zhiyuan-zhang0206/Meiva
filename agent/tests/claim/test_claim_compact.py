@@ -19,7 +19,6 @@ from agent.graph.claim.tests.claim_support import (
 )
 from agent.graph.claim.tests.cursor_fixture import fresh_snapshot_cursor as fresh_snapshot_cursor
 from agent.graph.hooks.compact import compose_summary_message
-from agent.graph.node_log.tests.live_events import LiveEvents
 from agent.state import AgentState, CompactState
 from agent.tests.claim.claim_status_support import (
     await_status,
@@ -37,6 +36,7 @@ from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
+from base.events.live.tests.live_capture import LiveEvents
 from base.lm.catalog import ModelCatalog
 
 

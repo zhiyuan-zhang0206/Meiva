@@ -322,9 +322,7 @@ def apply_config_overlay(overlay: dict[str, object]) -> None:
     current = installed()
     if current is None:
         raise RuntimeError("the SDK surface must be installed before applying plugin config")
-    configs = config_registration.apply_config_overlay(
-        overlay, configs=current.configs, scope="plugin"
-    )
+    configs = config_registration.plan_config_overlay(overlay, current.configs).plugin_configs
     setattr(meiva_module(), SLOT, replace(current, configs=MappingProxyType(configs)))
 
 

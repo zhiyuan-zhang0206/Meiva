@@ -9,7 +9,6 @@ from psycopg_pool import AsyncConnectionPool
 from agent.execution.protocol import ResultPayload
 from agent.graph.exec._child_boundary import ParentFacts, read_parent_facts
 from agent.graph.exec.node import ExecDone, ExecOutputChunkPublisher, ExecResult
-from agent.graph.exec.tests.event_capture import idle_publisher
 from base.agents.context import MeivaContext
 from base.clock import Clock
 from base.config.tests.configuration import defaults
@@ -17,6 +16,7 @@ from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.events.live.publisher import AgentEventPublisher
+from base.events.live.tests.live_capture import idle_publisher
 from base.host.env.agent_slices import AgentSlices
 from base.native_process.turn_identity import HostedTurnResources
 from base.packages.plugin_providers import build_model_catalog

@@ -15,4 +15,4 @@ exports = ["claim", "exec", "hooks", "interrupt", "llm", "llm_errors.py", "node_
 "interrupt" = ["node_log"]
 "llm" = ["_callbacks.py", "claim", "hooks", "interrupt", "llm_errors.py", "node_log", "tool_calls.py"]
 "recall" = ["prompt"]
-"tests" = ["__init__.py", "_attach_drain.py", "_attach_merge.py", "_callbacks.py", "_init_context.py", "_shared.py", "agent_traceback.py", "claim", "exec", "hooks", "interrupt", "llm", "llm_errors.py", "node_log", "prompt", "recall"]
+"tests" = ["__init__.py", "_attach_drain.py", "_attach_merge.py", "_callbacks.py", "_init_context.py", "_shared.py", "agent_traceback.py", "claim", "exec", "hooks", "interrupt", "llm", "llm_errors.py", "prompt", "recall"]

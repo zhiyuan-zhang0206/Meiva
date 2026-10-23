@@ -26,7 +26,6 @@ from psycopg_pool import AsyncConnectionPool
 from agent.graph.claim.node import claim_node
 from agent.graph.exec._result import ExecDone
 from agent.graph.exec.node import exec_node
-from agent.graph.exec.tests.event_capture import idle_publisher
 from agent.graph.exec.tests.process_inputs import ScriptedExecProcess
 from agent.messages import NoteTag
 from agent.state import AgentState
@@ -42,6 +41,7 @@ from base.config.tests.configuration import defaults
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
+from base.events.live.tests.live_capture import idle_publisher
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
 from base.native_process.turn_identity import HostedTurnResources

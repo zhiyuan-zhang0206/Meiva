@@ -6,11 +6,11 @@ from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, System
 
 from agent.graph import node_log
 from agent.graph.node_log import StallConfig, node_lifecycle
-from agent.graph.node_log.tests.live_events import LiveEvents
 from base.agents.history.timeline_inputs import TimelineReadInputs
 from base.agents.messages.kwargs import MeivaMsgType
 from base.agents.observation.turn_progress import TurnProgress
 from base.clock import Clock
+from base.events.live.tests.live_capture import LiveEvents
 from base.log.tests.log_records import LogRecords
 
 _TIMELINE_INPUTS = TimelineReadInputs(Clock.from_settings, lambda: False)
