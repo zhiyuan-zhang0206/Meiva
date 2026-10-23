@@ -1,41 +1,19 @@
-from typing import Any
+# meiva:note
+# Unknown errors retain identity and never enter retry waiting, even with a provider cause.
+# meiva:link base/packages/tests/lm/docs/contracts.meiva.okf.md
 
-import httpx2
-import openai
+from pathlib import Path
+
 import pytest
 
-from base.lm.call import invoke_response
-from base.lm.catalog import ModelCatalog
+from base.packages.tests.lm.providers.lm_process import run_fail_fast
 
 
 @pytest.mark.parametrize("error", [TypeError("bad code"), ValueError("bad input")])
 @pytest.mark.parametrize("provider_cause", [False, True])
 def test_unknown_runnable_error_is_not_retried_or_wrapped(
-    model_catalog: ModelCatalog,
-    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
     error: Exception,
     provider_cause: bool,
 ) -> None:
-    calls: list[list[Any]] = []
-    sleeps: list[float] = []
-    if provider_cause:
-        response = httpx2.Response(429, request=httpx2.Request("POST", "https://audit.invalid"))
-        error.__cause__ = openai.RateLimitError("limited", response=response, body=None)
-
-    class BrokenRunnable:
-        def invoke(self, messages: list[Any]) -> Any:
-            calls.append(messages)
-            raise error
-
-    monkeypatch.setattr("time.sleep", sleeps.append)
-    with pytest.raises(type(error)) as raised:
-        invoke_response(
-            BrokenRunnable(),
-            [],
-            desc="audit",
-            error_type=RuntimeError,
-            retry_attempts=2,
-            catalog=model_catalog,
-        )
-    assert raised.value is error
-    assert len(calls) == 1 and sleeps == []
+    run_fail_fast(tmp_path, type(error).__name__, str(provider_cause))
