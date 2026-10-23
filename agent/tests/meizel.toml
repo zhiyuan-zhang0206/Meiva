@@ -12,10 +12,6 @@ exports = ["agent_tests.py", "claim"]
 "test_external.py" = ["impersonation"]
 
 [debt.env-patch]
-"agent_tests.py#monkeypatch.setitem os.environ.MEIVA_DB_URL" = 1
-"test_exec_subprocess.py#monkeypatch.setenv os.environ.PYTHONIOENCODING" = 1
-"test_exec_subprocess.py#monkeypatch.setenv os.environ.PYTHONPATH" = 1
-"test_exec_subprocess.py#monkeypatch.setenv os.environ.PYTHONUTF8" = 1
 "test_external.py#monkeypatch.setenv os.environ.MEIVA_CALLER_IDENTITY" = 1
 
 [debt.first-party-patch]
@@ -27,12 +23,8 @@ exports = ["agent_tests.py", "claim"]
 "test_external.py#monkeypatch.setattr meiva.gateway_client.send_message" = 2
 "test_external.py#monkeypatch.setattr meiva.impersonation.attachment.control.require_active" = 3
 
-[debt.stdlib-patch]
-"test_exec_subprocess.py#monkeypatch.setattr time.monotonic" = 1
-
 [debt.third-party-patch]
 "test_checkpoint_serde.py#monkeypatch.setattr langgraph.checkpoint.serde.jsonplus._warned_unregistered_types" = 1
-"test_exec_subprocess.py#monkeypatch.setattr psutil.Process" = 2
 
 [debt.unresolved-patch]
 "test_external.py#monkeypatch.setattr attachment.flush" = 4
