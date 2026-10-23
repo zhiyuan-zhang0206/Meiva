@@ -26,5 +26,10 @@ for name in sys.argv[1:]:
     else:
         outcome[name] = "replaced"
 json.dump(
-    {"seen": sorted(env_bootstrap.AMBIENT_CREDENTIAL_DIGESTS), "outcome": outcome}, sys.stdout
+    {
+        "seen": sorted(env_bootstrap.AMBIENT_CREDENTIAL_DIGESTS),
+        "survived": env_bootstrap.survived_credential_names(),
+        "outcome": outcome,
+    },
+    sys.stdout,
 )

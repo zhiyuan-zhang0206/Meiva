@@ -112,3 +112,25 @@ def test_a_leaked_credential_does_not_survive_the_bootstrap() -> None:
     assert not missing, f"the child never carried these values: {missing}"
     leaked = sorted(name for name, state in outcome.items() if state == "LEAKED")
     assert not leaked, f"the bootstrap handed these straight through: {leaked}"
+    assert report["survived"] == [], report
+
+
+# meiva:note
+# The sharded shape (#5532, shard 5/8): `xdist` workers are children of a controller whose own
+# import of the bootstrap already cleaned the environment, so a worker arrives carrying this
+# suite's sentinels. A child in that state must report nothing survived - the sentinel is the
+# state the run is supposed to have, and a check that calls it a launcher secret fails exactly
+# where the suite is most isolated.
+def test_a_child_that_arrives_with_the_suites_sentinels_reports_no_survivor() -> None:
+    env = {**os.environ, **env_bootstrap.SENTINELS}
+    result = run_bounded(
+        [sys.executable, str(_PROBE), *env_bootstrap.SENTINELS],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    report = json.loads(result.stdout)
+    assert report["survived"] == [], report
+    assert set(report["outcome"].values()) == {"replaced"}, report
