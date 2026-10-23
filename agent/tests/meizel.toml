@@ -34,9 +34,6 @@ exports = ["agent_tests.py", "claim"]
 "test_state_slot.py#assignment meiva.state.messages" = 3
 "test_state_slot.py#assignment meiva.state_update" = 5
 
-[debt.restricted-python]
-"test_compact.py#string patch target 'agent.graph.hooks.compact.resolve_context_budget'" = 1
-
 [debt.stdlib-patch]
 "test_exec_subprocess.py#monkeypatch.setattr time.monotonic" = 1
 

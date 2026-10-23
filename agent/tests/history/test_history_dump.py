@@ -41,7 +41,6 @@ from langgraph.runtime import Runtime
 from psycopg_pool import AsyncConnectionPool
 
 from agent.graph import claim_node
-from agent.graph.hooks import compact
 from agent.graph.hooks.compact import auto_compact_for_llm, compose_summary_message
 from agent.hooks import history_dump
 from agent.messages import NoteTag, system_note_message
@@ -57,42 +56,26 @@ from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
-from base.host.env.agent_slices import AgentSlices, ModelOverrides
+from base.host.env.agent_slices import AgentSlices, HistoryDump
 from base.lm.catalog import ModelCatalog
-from base.lm.context_budget import ContextBudget
 from base.packages.plugin_providers import build_model_catalog
 
 # ── helpers ──
 
 
-def _patch_dump_enabled(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Any,
-    *,
-    enabled: bool = True,
-    keep: int = 5,
-) -> Any:
-    """Enable the dump and redirect the workspace to a tmp dir, so tests never
-    write into the real per-agent workspace. Returns the fake workspace root."""
-    monkeypatch.setattr(settings.agent, "history_dump_enabled", enabled)
-    monkeypatch.setattr(settings.agent, "history_dump_keep", keep)
+def _patch_workspace(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
     ws = tmp_path / "workspace"
 
-    def _fake_workspace_dir(_aid: int) -> Any:
+    def _fake_workspace_dir(_aid: int) -> Path:
         return ws
 
     monkeypatch.setattr(history_dump, "workspace_dir", _fake_workspace_dir)
     return ws
 
 
-def _dump(messages: list[AnyMessage]) -> Any:
-    """`dump_history` with the slice the patched settings resolve to."""
+def _dump(messages: list[AnyMessage], *, enabled: bool = True, keep: int = 5) -> Any:
     return history_dump.dump_history(
-        messages,
-        1,
-        AgentSlices.resolve(
-            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
-        ).history_dump,
+        messages, 1, HistoryDump(history_dump_enabled=enabled, history_dump_keep=keep)
     )
 
 
@@ -167,22 +150,6 @@ def _compact_tail(update: Any) -> list[AnyMessage]:
     return update["context_reset"].tail
 
 
-def _patch_compact_config(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Pin compact thresholds so any message exceeds the force ceiling."""
-    budget = ContextBudget(
-        max_context_tokens=1_000_000,
-        soft_compact_tokens=1,
-        hard_compact_tokens=1,
-    )
-
-    def fixed_budget(
-        _model: str, _overrides: ModelOverrides, *, catalog: ModelCatalog
-    ) -> ContextBudget:
-        return budget
-
-    monkeypatch.setattr(compact, "resolve_context_budget", fixed_budget)
-
-
 def _fake_llm(summary_text: str) -> Any:
     llm = MagicMock()
     llm.bind_tools.return_value.ainvoke = AsyncMock(return_value=AIMessage(content=summary_text))
@@ -192,14 +159,22 @@ def _fake_llm(summary_text: str) -> Any:
 _LONG_SUMMARY = "## Requests\nfollow the template. " * 60
 
 
-def _runtime_with_llm(llm: Any, database_gate: ProcessDbGate) -> Runtime[MeivaContext]:
+def _runtime_with_llm(
+    llm: Any, database_gate: ProcessDbGate, *, enabled: bool = True
+) -> Runtime[MeivaContext]:
     return Runtime(
         context=MeivaContext(
             ops_pool=None,
             llm=llm,
             event_publisher=MagicMock(),
             agent=AgentSlices.resolve(
-                default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
+                {
+                    "history_dump_enabled": enabled,
+                    "history_dump_keep": 5,
+                    "auto_compact_fraction": 1e-6,
+                    "compact_reminder_fraction": 1e-6,
+                },
+                default_reader=lambda domain, field: getattr(getattr(settings, domain), field),
             ),
             db=Database.from_settings(gate=database_gate),
             bus=EventBus.from_settings(),
@@ -228,13 +203,15 @@ def _make_runtime(
     ops_pool: AsyncConnectionPool | None = None,
     llm: Any | None = None,
     database_gate: ProcessDbGate,
+    enabled: bool = True,
 ) -> Runtime[MeivaContext]:
     ctx = MeivaContext(
         ops_pool=ops_pool,
         llm=llm if llm is not None else _fake_llm("synthetic summary"),
         event_publisher=MagicMock(),
         agent=AgentSlices.resolve(
-            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
+            {"history_dump_enabled": enabled, "history_dump_keep": 5},
+            default_reader=lambda domain, field: getattr(getattr(settings, domain), field),
         ),
         db=Database.from_settings(gate=database_gate),
         bus=EventBus.from_settings(),
@@ -274,15 +251,15 @@ def test_dump_enabled_by_default() -> None:
 
 def test_dump_disabled_returns_none(monkeypatch: pytest.MonkeyPatch, tmp_path: Any):
     """Config off → dump_history returns None and creates nothing."""
-    ws = _patch_dump_enabled(monkeypatch, tmp_path, enabled=False)
-    assert _dump(_sample_messages()) is None
+    ws = _patch_workspace(monkeypatch, tmp_path)
+    assert _dump(_sample_messages(), enabled=False) is None
     assert not (ws / "message-history").exists()
 
 
 def test_dump_enabled_writes_file(monkeypatch: pytest.MonkeyPatch, tmp_path: Any):
     """Config on → the dump is written under <workspace>/message-history/ and
     the path is returned."""
-    ws = _patch_dump_enabled(monkeypatch, tmp_path)
+    ws = _patch_workspace(monkeypatch, tmp_path)
     path = _dump(_sample_messages())
     assert path is not None
     assert path.parent == ws / "message-history"
@@ -298,7 +275,7 @@ def test_dump_filename_is_start_and_end(monkeypatch: pytest.MonkeyPatch, tmp_pat
     end = the write moment (here the fake clock's first tick)."""
     _FakeClock._counter = 0
     _patch_clock(monkeypatch)
-    _patch_dump_enabled(monkeypatch, tmp_path)
+    _patch_workspace(monkeypatch, tmp_path)
     messages: list[AnyMessage] = [
         SystemMessage(content="<sys>"),
         HumanMessage(
@@ -322,7 +299,7 @@ def test_dump_filename_falls_back_to_write_moment(monkeypatch: pytest.MonkeyPatc
     stays well-formed and every dump remains parseable/sortable."""
     _FakeClock._counter = 0
     _patch_clock(monkeypatch)
-    _patch_dump_enabled(monkeypatch, tmp_path)
+    _patch_workspace(monkeypatch, tmp_path)
     messages: list[AnyMessage] = [
         HumanMessage(content="no stamp", additional_kwargs={"meiva_created_at": "not-a-date"}),
         SystemMessage(content="<sys>"),
@@ -340,7 +317,7 @@ def test_dump_is_replayable_jsonl(monkeypatch: pytest.MonkeyPatch, tmp_path: Any
     """One JSON line per message, each line a raw BaseMessage model_dump that
     round-trips through langchain load — type, content, and meiva_* kwargs all
     survive, SystemMessage and ToolMessages included (full-history snapshot)."""
-    _patch_dump_enabled(monkeypatch, tmp_path)
+    _patch_workspace(monkeypatch, tmp_path)
     messages = _sample_messages()
     path = _dump(messages)
     assert path is not None
@@ -380,10 +357,10 @@ def test_dump_rotates_to_newest_keep(monkeypatch: pytest.MonkeyPatch, tmp_path: 
     growth is bounded (each dump is a full conversation snapshot)."""
     _FakeClock._counter = 0
     _patch_clock(monkeypatch)
-    _patch_dump_enabled(monkeypatch, tmp_path, keep=2)
+    _patch_workspace(monkeypatch, tmp_path)
     messages: list[AnyMessage] = [HumanMessage(content="old")]  # no stamps → start == end tick
     for _ in range(4):
-        _dump(messages)
+        _dump(messages, keep=2)
     dump_dir = tmp_path / "workspace" / "message-history"
     dumps = sorted(p.name for p in dump_dir.glob("*.jsonl"))
     assert len(dumps) == 2
@@ -394,7 +371,7 @@ def test_dump_rotates_to_newest_keep(monkeypatch: pytest.MonkeyPatch, tmp_path: 
 def test_dump_failure_is_best_effort(monkeypatch: pytest.MonkeyPatch, tmp_path: Any):
     """A write failure must never raise — the dump is forensics, the compaction
     is the critical path. Returns None and the caller injects no note."""
-    _patch_dump_enabled(monkeypatch, tmp_path)
+    _patch_workspace(monkeypatch, tmp_path)
 
     def _boom(aid: int) -> Any:
         raise OSError("disk full")
@@ -413,8 +390,7 @@ async def test_auto_compact_injects_dump_note_after_summary(
     the note in the fresh-context tail AFTER the summary. The live `messages`
     update carries only the REMOVE_ALL sentinel — the note is never in the
     pre-compact channel and never between an AIMessage and its ToolMessage."""
-    ws = _patch_dump_enabled(monkeypatch, tmp_path)
-    _patch_compact_config(monkeypatch)
+    ws = _patch_workspace(monkeypatch, tmp_path)
     state = _over_threshold_state()
 
     result = await auto_compact_for_llm(
@@ -442,13 +418,12 @@ async def test_auto_compact_no_note_when_disabled(
 ):
     """Config off → the auto-compact transition is exactly the old shape:
     tail = the summary alone, no note (and no dump file)."""
-    _patch_dump_enabled(monkeypatch, tmp_path, enabled=False)
-    _patch_compact_config(monkeypatch)
+    _patch_workspace(monkeypatch, tmp_path)
     state = _over_threshold_state()
 
     result = await auto_compact_for_llm(
         state,
-        _runtime_with_llm(_fake_llm(_LONG_SUMMARY), database_gate=database_gate),
+        _runtime_with_llm(_fake_llm(_LONG_SUMMARY), database_gate=database_gate, enabled=False),
         _fake_config(),
     )
     assert result is not None
@@ -461,8 +436,7 @@ async def test_auto_compact_proceeds_when_dump_fails(
 ):
     """A dump failure degrades to today's behavior: compaction still applies,
     no note is injected."""
-    _patch_dump_enabled(monkeypatch, tmp_path)
-    _patch_compact_config(monkeypatch)
+    _patch_workspace(monkeypatch, tmp_path)
 
     def _boom(aid: int) -> Any:
         raise OSError("disk full")
@@ -500,7 +474,7 @@ async def test_claim_compact_summary_parks_dump_note_after_summary(
     fresh-context tail. The messages update is the REMOVE_ALL sentinel alone:
     no note, no AIMessage — nothing that could sit between a tool_use and its
     tool_result on the wire."""
-    _patch_dump_enabled(monkeypatch, tmp_path)
+    _patch_workspace(monkeypatch, tmp_path)
     tid = spawn_agent(
         catalog=model_catalog,
         authority=config_authority,
@@ -552,7 +526,7 @@ async def test_claim_compact_summary_no_note_when_disabled(
     machine_identity: MachineIdentity,
 ):
     """Config off → claim-path compact tail is exactly today's (summary only)."""
-    _patch_dump_enabled(monkeypatch, tmp_path, enabled=False)
+    _patch_workspace(monkeypatch, tmp_path)
     tid = spawn_agent(
         catalog=model_catalog,
         authority=config_authority,
@@ -571,6 +545,7 @@ async def test_claim_compact_summary_no_note_when_disabled(
             ops_pool=aops_pool,
             llm=_fake_llm("LLM should not be called"),
             database_gate=database_gate,
+            enabled=False,
         ),
         _config(tid),
     )
