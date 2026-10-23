@@ -623,8 +623,8 @@ class MainDeps:
     version_factory: Callable[[LoadedCommit], CodeVersion] = CodeVersion
     database_cls: Callable[..., Any] = Database
     build_pipeline_fn: Callable[..., Any] = build_pipeline
-    init_logging_fn: Callable[..., None] = init_gateway_process
-    install_shutdown_fn: Callable[[str], None] = install_graceful_shutdown
+    init_gateway_process: Callable[..., None] = init_gateway_process
+    install_graceful_shutdown: Callable[[str], None] = install_graceful_shutdown
     runner_factory: Callable[[], Any] = asyncio.Runner
     run_fn: Callable[..., Coroutine[Any, Any, None]] | None = None
 
@@ -658,13 +658,13 @@ def main(
         )
 
     pipeline = deps.build_pipeline_fn(database=database, machine=machine, home=process_home)
-    deps.init_logging_fn(
+    deps.init_gateway_process(
         name="page_server",
         producer=lambda: pipeline,
         machine_reader=machine.name,
         image=image,
     )
-    deps.install_shutdown_fn("page_server")
+    deps.install_graceful_shutdown("page_server")
     code = 0
     # `asyncio.Runner`, not `asyncio.run`: `run` closes in a `finally` that
     # awaits `shutdown_default_executor`, joining the default executor's

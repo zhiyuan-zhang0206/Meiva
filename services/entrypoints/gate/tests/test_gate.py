@@ -10,18 +10,17 @@ from __future__ import annotations
 import json
 import threading
 import time
-import types
 import urllib.error
 import urllib.request
 from collections.abc import Iterator
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any, ClassVar, TypedDict
+from typing import Any, ClassVar, TypedDict, cast
 
 import pytest
 
 import services.entrypoints.gate.daemon as gate_daemon
-from base import paths
+from base.paths.tests.homes import unit_home as unit_home
 from services.entrypoints.gate.daemon import Gate, Handler
 
 STATIC = (
@@ -176,7 +175,7 @@ class Servers(TypedDict):
 
 
 @pytest.fixture
-def servers(tmp_path: Path) -> Iterator[Servers]:
+def servers(unit_home: Path) -> Iterator[Servers]:
     FakeGateway.requests = 0
     FakeGateway.auth_hook = None
     FakeGateway.auth_status = None
@@ -190,7 +189,7 @@ def servers(tmp_path: Path) -> Iterator[Servers]:
     app = ThreadingHTTPServer(("127.0.0.1", 0), FakeApp)
     gate_server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
     # Where the retired updater wrote its UI marker; Gate never reads it.
-    marker = tmp_path / "deploy-state.json"
+    marker = unit_home / "deploy-state.json"
     gate = Gate(
         gateway_base=f"http://127.0.0.1:{gw.server_port}",
         app_base=f"http://127.0.0.1:{app.server_port}",
@@ -290,12 +289,11 @@ def test_probe_auth_failure_serves_down_and_emits_auth_event(
 def test_probe_timeout_serves_down_and_emits_timeout_event(
     servers: Servers,
     probe_events: list[dict[str, object]],
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A probe that outlives its budget is a TIMEOUT, not a network outage —
     the distinction the audit needed (a slow gateway needs different surgery
     than a dead one)."""
-    monkeypatch.setattr(gate_daemon, "PROBE_TIMEOUT_S", 0.2)
+    cast(Any, servers["gate_server"]).gate.probe_timeout_s = 0.2
     FakeGateway.auth_hook = lambda: time.sleep(1.0)
 
     status, body = _get(servers["gate"] + "/")
@@ -583,13 +581,12 @@ def test_unauthenticated_serves_static_login(servers) -> None:
 
 
 def test_a_leftover_update_marker_never_owns_the_entry(
-    servers: Servers, monkeypatch: pytest.MonkeyPatch
+    servers: Servers,
 ) -> None:
     """No lifecycle produces Gate's update marker, and a stop takes Gate down
     with the rest of root. A marker file left by the retired updater in the
     home must not pin the entry on "System updating": Gate answers from the live
     gateway/app."""
-    monkeypatch.setattr(paths, "meiva_home", lambda: servers["flag"].parent)
     _write_v2(servers["flag"])
     FakeGateway.authenticated = True
     FakeGateway.down = True
@@ -664,7 +661,7 @@ def test_pages_ship_self_contained(servers, page: str) -> None:
         assert external not in body, f"page reaches outside itself: {external}"
 
 
-def test_gateway_base_uses_reachable_host(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_gateway_base_uses_reachable_host() -> None:
     """The login page posts to the gateway origin, so the host must be one a
     remote browser can dial — the operator-declared reachable address, not
     loopback (a remote browser resolving 127.0.0.1 hits itself; regression for
@@ -673,16 +670,22 @@ def test_gateway_base_uses_reachable_host(monkeypatch: pytest.MonkeyPatch) -> No
     """
     from services.entrypoints.gate import daemon
 
-    monkeypatch.setattr(
-        daemon, "settings", types.SimpleNamespace(gateway=types.SimpleNamespace(gateway_port=8123))
+    assert (
+        daemon.gateway_base(local_host=lambda: "10.0.0.2", gateway_port=8123)
+        == "http://10.0.0.2:8123"
     )
-    assert daemon.gateway_base(local_host=lambda: "10.0.0.2") == "http://10.0.0.2:8123"
 
     # Single box: the localhost fallback keeps local browsers working verbatim.
-    assert daemon.gateway_base(local_host=lambda: "localhost") == "http://localhost:8123"
+    assert (
+        daemon.gateway_base(local_host=lambda: "localhost", gateway_port=8123)
+        == "http://localhost:8123"
+    )
 
     # IPv6 literals need brackets in a netloc.
-    assert daemon.gateway_base(local_host=lambda: "fd00::1") == "http://[fd00::1]:8123"
+    assert (
+        daemon.gateway_base(local_host=lambda: "fd00::1", gateway_port=8123)
+        == "http://[fd00::1]:8123"
+    )
 
 
 # ── one-time login link on the static login page ─────────────────────────

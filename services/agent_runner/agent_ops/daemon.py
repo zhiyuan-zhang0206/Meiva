@@ -496,15 +496,15 @@ async def serve_ops_daemon(
     local_machine: MachineIdentity,
     config: ConfigBoot,
     host: Host,
-    is_running: Callable[..., bool] = boot.is_running,
-    write_pidfile: Callable[..., None] = boot.write_pidfile,
+    is_running: Callable[..., bool] | None = None,
+    write_pidfile: Callable[..., None] | None = None,
     remove_pidfile: Callable[..., None] = boot.remove_pidfile,
     check_schema_current: Callable[[str], None] = _assert_schema_current,
     open_db_pool: Callable[..., Any] = boot.open_db_pool,
     ops_acceptance: Callable[[], frozenset[str]] = boot.ops_acceptance,
     ops_bind_host: Callable[..., str] = boot.ops_bind_host,
     register_boot: Callable[..., None] = boot.register_boot,
-    start_health: Callable[..., Any] = start_health_server,
+    start_health_server: Callable[..., Any] = start_health_server,
     stop_health: Callable[..., Any] = stop_health_server,
 ) -> None:
     runtime = config.ensure_eager()
@@ -519,13 +519,21 @@ async def serve_ops_daemon(
     requests: in_flight.RequestTokens = set()
     workers: in_flight.WorkerFutures = set()
     runtime_dir = paths.run_dir(paths.meiva_home())
-    if is_running(config, runtime=runtime_dir):
+    if (
+        is_running(config, runtime=runtime_dir)
+        if is_running is not None
+        else boot.is_running(config, runtime=runtime_dir)
+    ):
         _log.info(
             "meiva-ops pidfile %s indicates another instance is alive — exiting",
             boot.pidfile(config, runtime=runtime_dir),
         )
         sys.exit(1)
-    write_pidfile(config, runtime=runtime_dir)
+    (
+        write_pidfile(config, runtime=runtime_dir)
+        if write_pidfile is not None
+        else boot.write_pidfile(config, runtime=runtime_dir)
+    )
 
     dispatch_sem = asyncio.Semaphore(config.view.services.ops_concurrency)
 
@@ -552,7 +560,7 @@ async def serve_ops_daemon(
                 bind_host, config.view.data_plane.transport_encryption, authenticated=True
             )
         endpoint = boot.endpoint(config, runtime=runtime_dir)
-        server = await start_health(
+        server = await start_health_server(
             "ops",
             endpoint.health_port,
             host=bind_host,
@@ -631,8 +639,8 @@ def main(
     database_cls: Callable[..., Database] = Database,
     client_set_cls: Callable[..., Any] = ClientSet,
     pipeline_builder: Callable[..., Any] = build_pipeline,
-    init_process: Callable[..., None] = init_gateway_process,
-    install_shutdown: Callable[[str], None] = install_graceful_shutdown,
+    init_gateway_process: Callable[..., None] = init_gateway_process,
+    install_graceful_shutdown: Callable[[str], None] = install_graceful_shutdown,
     runner_factory: Callable[[], asyncio.Runner] = asyncio.Runner,
     serve_daemon: Callable[..., Any] = serve_ops_daemon,
 ) -> None:
@@ -662,10 +670,10 @@ def main(
     primary: BaseException | None = None
 
     try:
-        init_process(
+        init_gateway_process(
             name="ops", producer=clients.event_pipeline, machine_reader=machine.name, image=image
         )
-        install_shutdown("ops")
+        install_graceful_shutdown("ops")
         runner = runner_factory()
         try:
             runner.run(

@@ -1,6 +1,5 @@
 import asyncio
 import time
-from types import SimpleNamespace
 
 import psycopg
 import pytest
@@ -25,7 +24,6 @@ from services.wake.heartbeat.tests.machine_probe_setup import pool as pool
 async def test_failed_checkin_is_retried_after_backoff_across_ticks(
     pool: ConnectionPool,
     db_conn: psycopg.Connection,
-    monkeypatch: pytest.MonkeyPatch,
     database: Database,
     event_bus: EventBus,
     *,
@@ -74,10 +72,6 @@ async def test_failed_checkin_is_retried_after_backoff_across_ticks(
     def skip_sweep(_pool: ConnectionPool) -> None:
         pass
 
-    monkeypatch.setattr(heartbeat_daemon, "time", SimpleNamespace(time=lambda: clock[0]))
-    monkeypatch.setattr(heartbeat_daemon, "sleep_with_liveness", next_tick)
-    monkeypatch.setattr(heartbeat_daemon, "send_heartbeat_checkin", record_checkin)
-
     with pytest.raises(asyncio.CancelledError):
         await heartbeat_daemon.dispatch_loop(
             pool,
@@ -85,6 +79,11 @@ async def test_failed_checkin_is_retried_after_backoff_across_ticks(
             event_bus,
             LoopProgress("dispatch", 60.0),
             sweep_resets=skip_sweep,
+            deps=heartbeat_daemon.DispatchLoopDeps(
+                sleep_fn=next_tick,
+                send_checkin_fn=record_checkin,
+                now_fn=lambda: clock[0],
+            ),
         )
 
     assert sent_on_ticks == [0, 3]

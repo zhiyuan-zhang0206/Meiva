@@ -145,8 +145,8 @@ def test_entry_shares_the_captured_gate_with_logging_health_and_work(sha: str | 
         version_factory=lambda loaded: _FakeCodeVersion(loaded, reads),
         database_cls=Store,
         build_pipeline_fn=build,
-        init_logging_fn=initialize,
-        install_shutdown_fn=no_signals,
+        init_gateway_process=initialize,
+        install_graceful_shutdown=no_signals,
         run_fn=work,
     )
     _run_main(deps=deps, exit_process=exit_process)
