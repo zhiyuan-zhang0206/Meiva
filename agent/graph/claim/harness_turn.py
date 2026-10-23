@@ -22,7 +22,7 @@ from agent.graph.interrupt import (
     subscribe_interrupt,
 )
 from agent.graph.llm_errors import FatalLLMStreamError
-from agent.graph.node_log import node_lifecycle
+from agent.graph.node_log import StallConfig, node_lifecycle
 from agent.messages import exec_output_message
 from agent.nodes import CLAIM, HARNESS_TURN
 from base.agents.context import MeivaContext, agent_id_from_config
@@ -555,12 +555,12 @@ async def harness_turn_node(
         event_publisher=event_publisher,
         agent_id=agent_id,
         turn_progress=ctx.turn_progress,
-        read_stall_seconds=lambda: ctx.require_agent().read("agent", "node_stall_dump_seconds"),
+        stall=StallConfig(ctx.require_agent().read("agent", "node_stall_dump_seconds")),
         timeline_inputs=TimelineReadInputs(
             ctx.require_clock,
             lambda: ctx.require_agent().read("general", "message_timestamps"),
         ),
-        limit_reader=lambda: ctx.require_agent().read("display", "timeline_default_limit"),
+        timeline_limit=ctx.require_agent().read("display", "timeline_default_limit"),
     ):
         return await _run_harness_turn(
             state,

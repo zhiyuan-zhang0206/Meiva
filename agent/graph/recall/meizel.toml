@@ -1,8 +1,9 @@
-exports = ["conversation_query.py", "memory_recall.py", "skill_recall.py"]
+exports = ["conversation_query.py", "memory_note.py", "memory_recall.py", "skill_recall.py"]
 
 [uses]
-"memory_recall.py" = ["conversation_query.py"]
+"memory_recall.py" = ["conversation_query.py", "memory_note.py"]
 "skill_recall.py" = ["conversation_query.py"]
 
 [purity]
 "__init__.py" = "strict"
+"memory_note.py" = "strict"

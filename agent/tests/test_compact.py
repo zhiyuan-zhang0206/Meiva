@@ -1,4 +1,3 @@
-import json
 from collections.abc import Mapping
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
@@ -24,22 +23,20 @@ from agent.graph.hooks.compact import (
     auto_compact_for_llm,
     compose_summary_message,
 )
+from agent.graph.node_log.tests.live_events import LiveEvents
 from agent.hooks import Hook
 from agent.state import AgentState, CompactState
+from agent.tests.scripted_model import ScriptedChatModel
 from base.agents.context import MeivaContext
 from base.clock import Clock
-from base.config import settings
 from base.config.tests.configuration import defaults
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
+from base.events.live.publisher import AgentEventPublisher
 from base.host.env.agent_slices import AgentSlices
 from base.packages.plugin_providers import build_model_catalog
 from base.packages.plugins.extensions import EMPTY
-
-
-def read_agent_field(field: str):
-    return getattr(settings.agent, field)
 
 
 def pinned_slices(pins: Mapping[str, Any] | None = None) -> AgentSlices:
@@ -71,36 +68,32 @@ def compact_slices(
     )
 
 
-def make_fake_llm(summary_text: str = "fake summary", *, response: AIMessage | None = None) -> Any:
-    llm = MagicMock()
-    llm.bind_tools.return_value.ainvoke = AsyncMock(
-        return_value=response if response is not None else AIMessage(content=summary_text)
+def make_fake_llm(
+    summary_text: str = "fake summary", *, response: AIMessage | None = None
+) -> ScriptedChatModel:
+    return ScriptedChatModel(
+        replies=[response if response is not None else AIMessage(content=summary_text)]
     )
-    return llm
-
-
-def compaction_ainvoke(llm: Any) -> AsyncMock:
-    return llm.bind_tools.return_value.ainvoke
 
 
 LONG_SUMMARY = "## Requests\nfollow the template. " * 60
 
 
-def _fake_llm_seq(*summaries: str) -> Any:
-    llm = MagicMock()
-    llm.bind_tools.return_value.ainvoke = AsyncMock(
-        side_effect=[AIMessage(content=s) for s in summaries]
-    )
-    return llm
+def _fake_llm_seq(*summaries: str) -> ScriptedChatModel:
+    return ScriptedChatModel(replies=[AIMessage(content=s) for s in summaries])
 
 
 def runtime_with_llm(
-    llm: Any, database_gate: ProcessDbGate, *, slices: AgentSlices
+    llm: Any,
+    database_gate: ProcessDbGate,
+    *,
+    slices: AgentSlices,
+    event_publisher: AgentEventPublisher | None = None,
 ) -> Runtime[MeivaContext]:
     ctx = MeivaContext(
         ops_pool=None,
         llm=llm,
-        event_publisher=MagicMock(),
+        event_publisher=event_publisher if event_publisher is not None else MagicMock(),
         agent=slices,
         db=Database.from_settings(gate=database_gate),
         bus=EventBus.from_settings(),
@@ -214,7 +207,7 @@ async def test_auto_compact_hook_clears_history_and_parks_summary(
     )
 
     assert result is not None
-    compaction_ainvoke(fake_llm).assert_called_once()
+    assert len(fake_llm.requests) == 1
     new_msgs = result["messages"]
     assert len(new_msgs) == 1
     assert isinstance(new_msgs[0], RemoveMessage)
@@ -252,7 +245,7 @@ async def test_auto_compact_hook_skips_when_no_conversation(database_gate: Proce
         state, runtime_with_llm(llm, database_gate=database_gate, slices=slices), fake_config()
     )
     assert result is None
-    compaction_ainvoke(llm).assert_not_called()
+    assert llm.requests == []
 
 
 async def test_auto_compact_hook_raises_when_summary_empty_every_attempt(
@@ -266,32 +259,30 @@ async def test_auto_compact_hook_raises_when_summary_empty_every_attempt(
         await auto_compact_for_llm(
             state, runtime_with_llm(llm, database_gate=database_gate, slices=slices), fake_config()
         )
-    assert compaction_ainvoke(llm).call_count == COMPACT_MAX_ATTEMPTS
+    assert len(llm.requests) == COMPACT_MAX_ATTEMPTS
 
 
 async def test_auto_compact_hook_raises_when_summary_short_every_attempt(
-    database_gate: ProcessDbGate,
+    database_gate: ProcessDbGate, live_events: LiveEvents
 ):
     slices = compact_slices(auto_compact_tokens=1)
     llm = make_fake_llm("too short")
     state = _over_threshold_state()
-    publisher = MagicMock()
-    ctx = MeivaContext(
-        ops_pool=None,
-        llm=llm,
-        event_publisher=publisher,
-        agent=slices,
-        db=Database.from_settings(gate=database_gate),
-        bus=EventBus.from_settings(),
-        catalog=build_model_catalog(),
-        clock_factory=Clock.from_settings,
-    )
 
     with pytest.raises(CompactionFailedError, match="no usable summary across"):
-        await auto_compact_for_llm(state, Runtime(context=ctx), fake_config())
+        await auto_compact_for_llm(
+            state,
+            runtime_with_llm(
+                llm,
+                database_gate=database_gate,
+                slices=slices,
+                event_publisher=live_events.publisher,
+            ),
+            fake_config(),
+        )
 
-    assert compaction_ainvoke(llm).call_count == COMPACT_MAX_ATTEMPTS
-    events = [json.loads(c.args[0]) for c in publisher.emit.call_args_list]
+    assert len(llm.requests) == COMPACT_MAX_ATTEMPTS
+    events = await live_events.events()
     assert [e["role"] for e in events] == ["compact_started", "compact_finished"]
     assert events[1]["status"] == "failure"
     assert events[0]["compact_id"] == events[1]["compact_id"]
@@ -307,30 +298,27 @@ async def test_auto_compact_hook_retries_short_then_accepts_long(database_gate: 
     )
 
     assert result is not None
-    assert compaction_ainvoke(llm).call_count == 2
+    assert len(llm.requests) == 2
     assert result["context_reset"].tail[0].content == compose_summary_message(LONG_SUMMARY)
 
 
-async def test_auto_compact_hook_emits_compact_done_on_success(database_gate: ProcessDbGate):
+async def test_auto_compact_hook_emits_compact_done_on_success(
+    database_gate: ProcessDbGate, live_events: LiveEvents
+):
     slices = compact_slices(auto_compact_tokens=1)
-    publisher = MagicMock()
     llm = make_fake_llm(LONG_SUMMARY)
-    ctx = MeivaContext(
-        ops_pool=None,
-        llm=llm,
-        event_publisher=publisher,
-        agent=slices,
-        db=Database.from_settings(gate=database_gate),
-        bus=EventBus.from_settings(),
-        catalog=build_model_catalog(),
-        clock_factory=Clock.from_settings,
-    )
     state = _over_threshold_state()
 
-    result = await auto_compact_for_llm(state, Runtime(context=ctx), fake_config())
+    result = await auto_compact_for_llm(
+        state,
+        runtime_with_llm(
+            llm, database_gate=database_gate, slices=slices, event_publisher=live_events.publisher
+        ),
+        fake_config(),
+    )
 
     assert result is not None
-    events = [json.loads(c.args[0]) for c in publisher.emit.call_args_list]
+    events = await live_events.events()
     assert [e["role"] for e in events] == [
         "compact_started",
         "compact_done",

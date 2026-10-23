@@ -6,31 +6,6 @@
 "test_lazy_child_telemetry.py" = ["child_lazy_telemetry.py"]
 "test_telemetry_otlp_exit_delivery_agent.py" = ["child_external_cli.py"]
 
-[debt.env-patch]
-"test_exec_child.py#monkeypatch.setenv os.environ.MEIVA_AGENT_BIRTH_CONFIG" = 1
-"test_exec_child.py#monkeypatch.setenv os.environ.MEIVA_AGENT_CONFIG_OVERLAY" = 1
-"test_exec_child.py#monkeypatch.setenv os.environ.MEIVA_EXEC_REQUEST_FILE" = 1
-"test_exec_child.py#monkeypatch.setenv os.environ.MEIVA_EXEC_RESULT_FILE" = 1
-"test_exec_child.py#patch.dict os.environ" = 1
-
 [debt.first-party-patch]
 "child_external_cli.py#assignment base.agents.context.external_attachment.plugin_state_codec.load_snapshot" = 1
 "child_external_cli.py#assignment meiva.impersonation.attachment.control.require_active" = 1
-"test_exec_child.py#monkeypatch.setattr agent.execution.child.apply_overlay_scope" = 1
-"test_exec_child.py#monkeypatch.setattr agent.execution.child.build_state_slot" = 1
-"test_exec_child.py#monkeypatch.setattr agent.execution.child.init_logger" = 1
-"test_exec_child.py#monkeypatch.setattr agent.execution.child.run_code" = 1
-"test_exec_child.py#monkeypatch.setattr agent.execution.child.time.perf_counter" = 1
-"test_exec_child.py#monkeypatch.setattr agent.execution.protocol.read_request" = 1
-"test_exec_child.py#monkeypatch.setattr agent.execution.protocol.write_result" = 2
-"test_exec_child.py#monkeypatch.setattr agent.process_boot.apply_per_agent_eval_isolation" = 1
-"test_exec_child.py#monkeypatch.setattr agent.process_boot.apply_per_agent_sdk_disable" = 1
-"test_exec_child.py#monkeypatch.setattr meiva.boot.ensure_plugins_loaded" = 1
-"test_exec_child_signals.py#monkeypatch.setattr agent.execution.child.apply_overlay_scope" = 1
-"test_exec_child_signals.py#monkeypatch.setattr agent.execution.child.build_state_slot" = 1
-"test_exec_child_signals.py#monkeypatch.setattr agent.execution.child.line_buffered_output" = 1
-"test_exec_child_signals.py#monkeypatch.setattr agent.execution.child.pop_overlay_env" = 1
-"test_exec_child_signals.py#monkeypatch.setattr agent.execution.child.run_code" = 1
-"test_exec_child_signals.py#monkeypatch.setattr agent.execution.protocol.read_request" = 1
-"test_exec_child_signals.py#monkeypatch.setattr agent.execution.protocol.write_result" = 1
-"test_exec_child_signals.py#monkeypatch.setattr meiva.ensure_plugins_loaded" = 1

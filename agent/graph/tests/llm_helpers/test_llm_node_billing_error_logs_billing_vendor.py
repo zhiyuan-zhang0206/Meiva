@@ -13,7 +13,7 @@ from langchain_core.messages import AIMessageChunk, HumanMessage
 from langgraph.types import Command
 
 from agent.graph import llm_node
-from agent.graph.llm.node import Attempt, llm_attempt, retry_wait
+from agent.graph.llm.node import Attempt, llm_attempt
 from agent.graph.llm_errors import LlmLedger
 from agent.graph.tests.test_llm_helpers import (
     CONFIG,
@@ -32,8 +32,8 @@ from base.config import settings
 from base.config.tests.configuration import defaults
 from base.db.code_version_gate import ProcessDbGate
 from base.host.env.agent_slices import AgentSlices
+from base.lm.errors import is_retryable_provider_error
 from base.native_process.turn_identity import HostedTurnResources
-from base.packages.plugin_providers import build_model_catalog
 from meiva.tests.fixtures.pin_agent import hosted_resources as hosted_resources
 
 
@@ -97,20 +97,7 @@ async def test_llm_node_transient_provider_error_propagates_for_retry(
     with pytest.raises(FakeProviderStatusError) as exc_info:
         await llm_attempt(state, runtime, CONFIG, Attempt(1, time.time()), ledger=ledger)
     assert not isinstance(exc_info.value, FatalProviderError)
-    assert (
-        retry_wait(
-            exc_info.value,
-            1,
-            model="deepseek-flash",
-            agent_id=7,
-            catalog=build_model_catalog(),
-            max_attempts_pin=AgentSlices.resolve(default_reader=defaults()).read(
-                "lm", "llm_retry_max_attempts"
-            ),
-            read_lm=lambda field: getattr(settings.lm, field),
-        )
-        is not None
-    )
+    assert is_retryable_provider_error(exc_info.value)
 
 
 async def test_llm_node_configured_fatal_error_type_fails_fast(
@@ -158,7 +145,6 @@ async def test_silent_idle_guard_halts_at_cumulative_output_token_cap(
     database_gate: ProcessDbGate,
 ) -> None:
     """Silent-idle output consumes one token budget and reports its cost."""
-    from base.config import settings
 
     cap = settings.lm.llm_silent_idle_max_output_tokens
     assert cap == 2048

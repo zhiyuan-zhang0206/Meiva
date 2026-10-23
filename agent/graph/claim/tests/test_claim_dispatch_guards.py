@@ -6,13 +6,12 @@ from langchain_core.messages import SystemMessage
 from langgraph.graph import END
 from psycopg_pool import AsyncConnectionPool
 
-from agent.graph.claim import node
-from agent.graph.claim.node import claim_node
+from agent.db import ClaimedInbound
+from agent.graph.claim.node import settle_claimed_batch
 from agent.graph.claim.tests.claim_support import (
     await_inbound_visible,
     insert_inbound_kind,
     make_runtime,
-    thread_config,
 )
 from agent.state import AgentState
 from base.agents.inbox.insert import insert_inbound_message
@@ -24,29 +23,22 @@ from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
-from base.native_process.runtime_incarnation import RuntimeIncarnation
 
 
+# meiva:note
+# Unrecognized inbound kind = framework / DB schema desync: raise at once, never silently default
+# to chat processing. The DB CHECK constraint keeps an unknown kind out of production rows, so the
+# test hands the dispatch a claimed batch by value to reach its `case _:` fallback.
 async def test_claim_unknown_kind_raises(
     redis_url: str,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
-    monkeypatch: pytest.MonkeyPatch,
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
 ):
-    """Unrecognized inbound kind = framework / DB schema desync — immediately raise,
-    do not silently swallow bugs by 'defaulting to chat processing'.
-
-    The DB CHECK constraint prevents production unknown kind, so it cannot be constructed
-    via INSERT path; use monkeypatch to directly feed ClaimedInbound to claim_node to verify
-    the dispatch's `case _:` fallback branch.
-    """
-    from agent.db import ClaimedInbound
-
     tid = spawn_agent(
         catalog=model_catalog,
         authority=config_authority,
@@ -54,34 +46,21 @@ async def test_claim_unknown_kind_raises(
         machine=machine_identity,
     )
     runtime = make_runtime(ops_pool=aops_pool, database_gate=database_gate)
-
-    async def fake_claim(
-        _db: object,
-        _tid: int,
-        *,
-        incarnation: RuntimeIncarnation | None,
-        lifecycle_only: bool = False,
-    ):
-        assert incarnation is runtime.context.original_incarnation
-        assert not lifecycle_only
-        return [ClaimedInbound(id=99, agent_id=tid, content="x", kind="bogus", source="system")]
-
-    monkeypatch.setattr(node, "claim_inbound_batch", fake_claim)  # pyright: ignore[reportUnknownArgumentType]
+    batch = [ClaimedInbound(id=99, agent_id=tid, content="x", kind="bogus", source="system")]
 
     with pytest.raises(ValueError, match="Unknown inbound kind"):
-        await claim_node(
-            AgentState(),
-            runtime,
-            thread_config(
-                tid,
-            ),
-        )
+        await settle_claimed_batch(runtime.context, AgentState(), tid, batch)
 
 
+# meiva:note
+# The other half of the race: the batch (terminate alone) is claimed, but a message lands in the
+# queue before the exit is committed. The final recheck must veto the death and re-enter claim so
+# the fresh message is dispatched: the terminate row is already consumed ('done'), no marker, no
+# END, and the chat stays pending for the re-entered claim to pick up. The claim's grab marks the
+# lifecycle row 'done' atomically, which the test does for the row it hands over.
 async def test_claim_terminate_vetoed_by_pending_inbound_after_claim(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
-    monkeypatch: pytest.MonkeyPatch,
     database: Database,
     event_bus: EventBus,
     *,
@@ -90,16 +69,6 @@ async def test_claim_terminate_vetoed_by_pending_inbound_after_claim(
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
 ):
-    """The other half of the race: the batch (terminate alone) is claimed, but a
-    message lands in the queue before the exit is committed. The claim node's
-    final recheck must veto the death and re-enter claim so the fresh message is
-    dispatched — the terminate row is already consumed ('done'), no marker, no
-    END, and the chat stays pending for the re-entered claim to pick up. The
-    message arrives after claim_inbound_batch returns, which is simulated by
-    monkeypatching claim to return only the terminate row while a newer chat
-    stays pending in the table."""
-    from agent.db import ClaimedInbound
-
     tid = spawn_agent(
         catalog=model_catalog,
         authority=config_authority,
@@ -107,41 +76,19 @@ async def test_claim_terminate_vetoed_by_pending_inbound_after_claim(
         machine=machine_identity,
     )
     terminate_id = insert_inbound_kind(db_conn, tid, "", "terminate", source="self")
+    db_conn.execute("UPDATE inbound_messages SET status = 'done' WHERE id = %s", (terminate_id,))
+    db_conn.commit()
     chat_id = insert_inbound_message(
         db_conn, tid, "message after the claim", source="user", bus=event_bus, database=database
     )
     await await_inbound_visible(aops_pool, chat_id)
     runtime = make_runtime(ops_pool=aops_pool, database_gate=database_gate)
+    claimed = [
+        ClaimedInbound(id=terminate_id, agent_id=tid, content="", kind="terminate", source="self")
+    ]
 
-    async def fake_claim(
-        _pool: AsyncConnectionPool,
-        _agent_id: int,
-        *,
-        incarnation: RuntimeIncarnation | None,
-        lifecycle_only: bool = False,
-    ):
-        assert incarnation is runtime.context.original_incarnation
-        assert not lifecycle_only
-        # Faithful to claim_inbound_batch: the grab marks lifecycle rows 'done'
-        # atomically, so the vetoed terminate is consumed and never retried.
-        async with _pool.connection() as conn, conn.cursor() as cur:  # pyright: ignore[reportUnknownMemberType]
-            await cur.execute(  # pyright: ignore[reportUnknownMemberType]
-                "UPDATE inbound_messages SET status = 'done' WHERE id = %s", (terminate_id,)
-            )
-        return [
-            ClaimedInbound(
-                id=terminate_id, agent_id=tid, content="", kind="terminate", source="self"
-            )
-        ]
-
-    monkeypatch.setattr(node, "claim_inbound_batch", fake_claim)  # pyright: ignore[reportUnknownArgumentType]
-
-    cmd = await claim_node(
-        AgentState(messages=[SystemMessage(content="sys")]),
-        runtime,
-        thread_config(
-            tid,
-        ),
+    cmd = await settle_claimed_batch(
+        runtime.context, AgentState(messages=[SystemMessage(content="sys")]), tid, claimed
     )
 
     # re-enter claim to dispatch the fresh message — not END, not a wake
@@ -167,10 +114,11 @@ async def test_claim_terminate_vetoed_by_pending_inbound_after_claim(
         assert term_row[0] == "done"
 
 
+# meiva:note
+# Veto half 1: a same-batch chat newer than the terminate keeps the agent alive.
 async def test_claim_same_batch_newer_chat_vetoes_the_terminate(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
-    monkeypatch: pytest.MonkeyPatch,
     database: Database,
     event_bus: EventBus,
     *,
@@ -179,10 +127,6 @@ async def test_claim_same_batch_newer_chat_vetoes_the_terminate(
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
 ):
-    """Veto half 1: a same-batch chat newer than the terminate keeps the agent
-    alive."""
-    from agent.db import ClaimedInbound
-
     tid = spawn_agent(
         catalog=model_catalog,
         authority=config_authority,
@@ -195,37 +139,15 @@ async def test_claim_same_batch_newer_chat_vetoes_the_terminate(
     )
     await await_inbound_visible(aops_pool, chat_id)
     runtime = make_runtime(ops_pool=aops_pool, database_gate=database_gate)
-
-    async def fake_claim(
-        _pool: AsyncConnectionPool,
-        _agent_id: int,
-        *,
-        incarnation: RuntimeIncarnation | None,
-        lifecycle_only: bool = False,
-    ):
-        assert incarnation is runtime.context.original_incarnation
-        assert not lifecycle_only
-        return [
-            ClaimedInbound(
-                id=terminate_id, agent_id=tid, content="", kind="terminate", source="user"
-            ),
-            ClaimedInbound(
-                id=chat_id,
-                agent_id=tid,
-                content="message in the batch",
-                kind="chat",
-                source="user",
-            ),
-        ]
-
-    monkeypatch.setattr(node, "claim_inbound_batch", fake_claim)  # pyright: ignore[reportUnknownArgumentType]
-
-    cmd = await claim_node(
-        AgentState(messages=[SystemMessage(content="sys")]),
-        runtime,
-        thread_config(
-            tid,
+    claimed = [
+        ClaimedInbound(id=terminate_id, agent_id=tid, content="", kind="terminate", source="user"),
+        ClaimedInbound(
+            id=chat_id, agent_id=tid, content="message in the batch", kind="chat", source="user"
         ),
+    ]
+
+    cmd = await settle_claimed_batch(
+        runtime.context, AgentState(messages=[SystemMessage(content="sys")]), tid, claimed
     )
 
     assert cmd.goto != END

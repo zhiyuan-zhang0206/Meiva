@@ -1,72 +1,52 @@
 # pyright: reportOptionalSubscript=false
 # Command.update is dict | None; tests always have an update field, narrowing is too verbose
-"""Cancel + timeout path tests (exec subprocess model).
-
-Under the cycling topology, cancel goto="after_exec" — after_exec sees halted=True
-and routes to claim waiting for the next inbound (cancel does not exit the process,
-the agent continues to stand by).
-
-Coverage (cancel/timeout behavior inside nodes):
-- `llm_node` cancels the entire partial generation: returns halted Command(goto=after_exec)
-  without committing any message — generation has no side effects, and since no complete
-  tool_use is committed, no tool_result debt is owed; history remains clean (exec cancel
-  is the opposite: already-committed tool_use must be supplemented with a [cancelled by user]
-  tool_result by exec_node)
-- `llm_node` cancel does not raise CancelledError (that is BaseException, which would
-  silently exit the process via asyncio.run)
-- `exec_node` cancel stops the turn; timeout returns a marker and continues to the next LLM round
-- cancel_event race: tests use a `fake_cancel_event` fixture to monkeypatch
-  replace `subscribe_interrupt`, allowing external `event.set()` to trigger cancel —
-  not relying on the real DB inbound watcher race (slow + flaky). The production path
-  has no test backdoor; signatures are clean.
-"""
+# meiva:note
+# Cancel and timeout paths of the exec node. Under the cycling topology a cancel goes to
+# after_exec with halted=True, and claim then waits for the next inbound: the agent stands by.
+# The durable interrupt case runs the real watcher against a pending inbound row; every other
+# case runs a turn without an inbound queue (`ops_pool=None`), whose exec is uninterruptible,
+# and scripts the child's outcome. Which outcome halts, what the envelope says and what is
+# written back is `plan_dispatch`'s decision, tested without a node in `test_exec_plans.py`.
 
 import asyncio
+import threading
 from typing import cast
-from unittest.mock import MagicMock
 
 import psycopg
 import pytest
-from langchain_core.messages import ToolMessage
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.types import Command
 from psycopg_pool import AsyncConnectionPool
 
+from agent.execution.protocol import ResultPayload
+from agent.graph.exec._result import LifecycleKind
+from agent.graph.exec._stream import ExecOutputChunkPublisher
 from agent.graph.exec.node import (
     ExecCancelled,
     ExecCrashed,
     ExecDone,
+    ExecGoto,
     ExecLifecycle,
     ExecResult,
     ExecTimedOut,
     exec_node,
+    exec_node_impl,
 )
-from agent.graph.exec.protocol import ResultPayload
-from agent.graph.exec.tests.cancel_fixture import (
-    ai_with_code,
-    has_cancelled_event,
-    make_runtime,
-)
-from agent.graph.exec.tests.process_inputs import ScriptedExecProcess
+from agent.graph.exec.tests.cancel_fixture import ai_with_code
+from agent.graph.exec.tests.event_capture import EventCapture
+from agent.graph.exec.tests.process_inputs import ProcessCall, ScriptedExecProcess, exec_runtime
 from agent.state import AgentState
-
-# meiva:note
-# Scripted child outcomes isolate graph dispatch; the durable interrupt case
-# retains its real watcher and pending inbound row.
-# meiva:link agent/graph/exec/docs/exec.meiva.okf.md
+from base.config.tests.configuration import defaults
 from base.db import create_agent
 from base.db.code_version_gate import ProcessDbGate
-from base.events.live.projection import EVENT_ADAPTER
+from base.host.env.agent_slices import AgentSlices
+from base.log.tests.log_records import LogRecords
 from base.native_process.stop_timing import RESTART_INTERRUPT_GRACE_S
 from base.native_process.turn_identity import HostedTurnResources
 from meiva.tests.fixtures.pin_agent import hosted_resources as hosted_resources
 
 _CONFIG: RunnableConfig = {"configurable": {"thread_id": "7"}}
-
-
-# ---------------------------------------------------------------------------
-# llm_node cancel_event race paths
-# ---------------------------------------------------------------------------
 
 
 # meiva:note
@@ -102,10 +82,10 @@ async def test_exec_node_preserves_durable_interrupt_attribution(
     db_conn.commit()
 
     class InterruptedProcess(ScriptedExecProcess):
-        async def _resolve(
-            self, outcome: tuple[ExecResult, ResultPayload | None]
+        async def answer(
+            self, call: ProcessCall, outcome: tuple[ExecResult, ResultPayload | None]
         ) -> tuple[ExecResult, ResultPayload | None]:
-            await asyncio.wait_for(self.calls[-1].cancel_event.wait(), timeout=5)
+            await asyncio.wait_for(call.cancel_event.wait(), timeout=5)
             return outcome
 
     process = InterruptedProcess(
@@ -114,13 +94,12 @@ async def test_exec_node_preserves_durable_interrupt_attribution(
 
     result = await exec_node(
         AgentState(messages=[ai_with_code("pass")], halted=False),
-        make_runtime(
+        exec_runtime(
             hosted_resources=hosted_resources, ops_pool=aops_pool, database_gate=database_gate
         ),
         {"configurable": {"thread_id": str(agent_id)}},
         process=process,
     )
-    assert len(process.calls) == 1
     assert result.goto == "after_exec"
     assert result.update["halted"] is True
     message = cast(ToolMessage, result.update["messages"][0])
@@ -134,332 +113,247 @@ async def test_exec_node_preserves_durable_interrupt_attribution(
     ).fetchone() == ("pending", None)
 
 
+def _tool_content(command: Command[ExecGoto]) -> str:
+    update = cast(dict[str, list[ToolMessage]], command.update)
+    return str(update["messages"][0].content)
+
+
 async def test_exec_node_cancel_event_returns_cancelled_command(
-    hosted_resources: HostedTurnResources,
-    fake_cancel_event: asyncio.Event,
-    database_gate: ProcessDbGate,
+    database_gate: ProcessDbGate, event_capture: EventCapture
 ) -> None:
     process = ScriptedExecProcess([(ExecCancelled(output="partial work\n"), None)])
-
-    pub = MagicMock()
     state = AgentState(messages=[ai_with_code('print("x")')], halted=False)
+    runtime = exec_runtime(event_publisher=event_capture.publisher, database_gate=database_gate)
 
-    runtime = make_runtime(
-        hosted_resources=hosted_resources, event_publisher=pub, database_gate=database_gate
-    )
     result = await exec_node(state, runtime, _CONFIG, process=process)
 
-    assert isinstance(result, Command)
     assert result.goto == "after_exec"
-    update = result.update
-    assert update is not None
-    msg = update["messages"][0]
-    content = msg.content
+    content = _tool_content(result)
     assert "Code execution output" in content
     assert "[cancelled by user]" in content
     assert "partial work" in content
-    assert update["halted"] is True
-    assert has_cancelled_event(pub, agent_id=7)
+    assert cast(dict[str, object], result.update)["halted"] is True
+    roles = [event["role"] for event in await event_capture.events()]
+    assert [role for role in roles if role in {"exec_start", "cancelled", "exec_output"}] == [
+        "exec_start",
+        "cancelled",
+        "exec_output",
+    ]
 
 
-async def test_exec_node_cancel_event_race_normal_completion(
-    hosted_resources: HostedTurnResources,
-    fake_cancel_event: asyncio.Event,
+async def test_exec_node_completes_normally_when_nothing_cancels(
     database_gate: ProcessDbGate,
 ) -> None:
-    """cancel_event not set, the exec completes normally → exec_node returns Command with
-    wrap_code_output format ('Code execution output:')."""
-
     process = ScriptedExecProcess([(ExecDone(output="hello\n"), None)])
-
     state = AgentState(messages=[ai_with_code('print("hello")')], halted=False)
 
-    runtime = make_runtime(hosted_resources=hosted_resources, database_gate=database_gate)
-    result = await exec_node(state, runtime, _CONFIG, process=process)
+    result = await exec_node(
+        state, exec_runtime(database_gate=database_gate), _CONFIG, process=process
+    )
 
-    assert isinstance(result, Command)
-    msg = result.update["messages"][0]
-    content = msg.content  # pyright: ignore[reportUnknownMemberType]
+    content = _tool_content(result)
     assert "Code execution output" in content
     assert "hello" in content
     assert "[exit" not in content
 
 
-# ---------------------------------------------------------------------------
-# timeout dispatch paths (mock returns the timed-out variant)
-# ---------------------------------------------------------------------------
-
-
-# A timeout-preserves-meiva.shell-partial-output test is deliberately absent: the old test
-# old `meiva.shell.bash` feature that manually forwarded subprocess pipe contents to parent
-# stdout on timeout. The new `meiva.shell.run` uses stdlib `subprocess.run`, subprocess pipe
-# contents are only on `TimeoutExpired.{output,stderr}`, no longer forwarded. Agents wanting
-# partial output can use `subprocess.Popen` + read pipes themselves.
-
-
-async def test_exec_node_timeout_path(
-    hosted_resources: HostedTurnResources,
-    fake_cancel_event: asyncio.Event,
+async def test_exec_node_timeout_returns_a_marker_and_does_not_halt(
     database_gate: ProcessDbGate,
 ) -> None:
-    """When timeout triggers, exec_node returns a marker but does not halt — the next
-    LLM round reads the feedback and changes strategy."""
-
     process = ScriptedExecProcess([(ExecTimedOut(output="partial work\n"), None)])
-
     state = AgentState(messages=[ai_with_code('print("long task")')], halted=False)
 
-    runtime = make_runtime(hosted_resources=hosted_resources, database_gate=database_gate)
-    result = await exec_node(state, runtime, _CONFIG, process=process)
+    result = await exec_node(
+        state, exec_runtime(database_gate=database_gate), _CONFIG, process=process
+    )
 
-    assert isinstance(result, Command)
     assert result.goto == "after_exec"
-    update = result.update
-    assert update is not None
-    msg = update["messages"][0]
-    content = msg.content
+    content = _tool_content(result)
     assert "Code execution output" in content
     assert "[timeout after 60s]" in content
     assert "[cancelled by user]" not in content
-    assert update["halted"] is False
+    assert cast(dict[str, object], result.update)["halted"] is False
 
 
-async def test_exec_node_timeout_empty_output(
-    hosted_resources: HostedTurnResources,
-    fake_cancel_event: asyncio.Event,
-    database_gate: ProcessDbGate,
-) -> None:
-    """timeout triggers and the thread has no output → (no output) marker still appears."""
-
+async def test_exec_node_timeout_empty_output(database_gate: ProcessDbGate) -> None:
     process = ScriptedExecProcess([(ExecTimedOut(output=""), None)])
-
     state = AgentState(messages=[ai_with_code('print("x")')], halted=False)
 
-    runtime = make_runtime(hosted_resources=hosted_resources, database_gate=database_gate)
-    result = await exec_node(state, runtime, _CONFIG, process=process)
+    result = await exec_node(
+        state, exec_runtime(database_gate=database_gate), _CONFIG, process=process
+    )
 
-    msg = result.update["messages"][0]
-    content = msg.content  # pyright: ignore[reportUnknownMemberType]
+    content = _tool_content(result)
     assert "[timeout after 60s]" in content
     assert "(no output)" in content
 
 
-# ---------------------------------------------------------------------------
-# StreamingTextIO + ExecOutputChunkPublisher: streaming contract
-# ---------------------------------------------------------------------------
-
-
 def test_streaming_textio_concurrent_writes() -> None:
-    """Multiple writer threads writing simultaneously, take_pending pulling concurrently —
-    the total content in _buf counts correctly, no characters lost and no interleaving
-    breaking single write invocations (the string within a single write remains intact)."""
-    import threading as _th
-
     from agent.graph.exec._stream import StreamingTextIO
 
     stream = StreamingTextIO(max_chars=1_000_000)
     n_writers = 4
     writes_per = 200
-    payload = "x" * 100  # single write 100 chars
+    payload = "x" * 100
 
     def writer() -> None:
         for _ in range(writes_per):
             stream.write(payload)
 
-    threads = [_th.Thread(target=writer) for _ in range(n_writers)]
+    threads = [threading.Thread(target=writer) for _ in range(n_writers)]
     for t in threads:
         t.start()
     for t in threads:
         t.join()
 
     full = stream.getvalue()
-    expected_len = n_writers * writes_per * len(payload)
-    assert len(full) == expected_len, f"characters lost: got {len(full)}, want {expected_len}"
-    # The 100 'x's within a single write must be contiguous, not sliced by another write
-    assert "x" * 100 in full
-    # No garbled characters (under lock protection, StringIO write is atomic)
+    assert len(full) == n_writers * writes_per * len(payload)
     assert all(c == "x" for c in full)
 
 
-async def test_streaming_textio_take_pending_increments() -> None:
-    """After take_pending pulls once, the next pull only returns the newly added
-    content (no duplicates)."""
+def test_streaming_textio_take_pending_increments() -> None:
     from agent.graph.exec._stream import StreamingTextIO
 
     stream = StreamingTextIO(max_chars=1_000_000)
     stream.write("aaa")
     assert stream.take_pending() == "aaa"
-    assert stream.take_pending() == ""  # all published
+    assert stream.take_pending() == ""
     stream.write("bbb")
     stream.write("ccc")
     assert stream.take_pending() == "bbbccc"
-    assert stream.getvalue() == "aaabbbccc"  # full content preserved
+    assert stream.getvalue() == "aaabbbccc"
 
 
-async def test_chunk_publisher_uses_correct_item_id() -> None:
-    """ExecOutputChunkPublisher.publish(text) wraps text into an ExecOutputChunk
-    SSE event, with agent_id + item_id matching the constructor; empty text early-
-    returns and does not emit. The frontend relies on item_id to append streaming
-    chunks to the same code_output item; the final ExecOutput upserts with the same
-    id — item_id drift would cause duplicate rendering on the frontend."""
-    from agent.graph.exec._stream import ExecOutputChunkPublisher
-
-    emitter = MagicMock()
-    pub = ExecOutputChunkPublisher(emitter, agent_id=42, item_id="7.0")
+async def test_chunk_publisher_uses_correct_item_id(event_capture: EventCapture) -> None:
+    pub = ExecOutputChunkPublisher(event_capture.publisher, agent_id=42, item_id="7.0")
 
     pub.publish("hello")
-    pub.publish("")  # empty text not emitted
+    pub.keepalive()
     pub.publish(" world")
 
-    # Should have 2 emits (empty text skipped)
-    assert emitter.emit.call_count == 2
-    # Parse each payload to verify item_id + agent_id
-    import json as _json
-
-    for i, expected_text in enumerate(["hello", " world"]):
-        (payload,) = emitter.emit.call_args_list[i].args
-        ev = _json.loads(payload)
-        assert ev["agent_id"] == 42, f"call {i}: agent_id {ev['agent_id']}"
-        assert ev["item_id"] == "7.0", f"call {i}: item_id {ev['item_id']}"
-        assert ev["content"] == expected_text
+    events = await event_capture.events()
+    assert [(event["content"], event["keepalive"]) for event in events] == [
+        ("hello", False),
+        ("", True),
+        (" world", False),
+    ]
+    assert all(event["agent_id"] == 42 and event["item_id"] == "7.0" for event in events)
 
 
-# ---------------------------------------------------------------------------
-# Halt exception dispatch (exec_node isinstance path coverage)
-# ---------------------------------------------------------------------------
-
-
-async def test_exec_node_dispatch_system_halt(
-    hosted_resources: HostedTurnResources,
-    fake_cancel_event: asyncio.Event,
-    database_gate: ProcessDbGate,
+async def test_exec_node_compaction_writes_nothing_back(
+    database_gate: ProcessDbGate, event_capture: EventCapture
 ) -> None:
-    """ExecLifecycle(SystemHalt) → halted=True + NO output write-back.
-
-    meiva.self.compact commits the compact_summary inbound before raising
-    SystemHalt, and the claim node applies it in the same turn — REMOVE_ALL
-    wipes the whole history. Writing the exec output back (ToolMessage +
-    ExecOutput SSE) is dead weight: the ToolMessage would be wiped anyway, and
-    the SSE event resurfaced as a ghost code_output item in the frontend after
-    the compact refresh. So the compact path appends no ToolMessage and emits
-    no ExecOutput (only the ExecStart placeholder, which the compact refresh
-    clears)."""
-    from base.agents.lifecycle import SystemHalt
-
     process = ScriptedExecProcess(
-        [(ExecLifecycle(output="user prep work\n", exc=SystemHalt()), None)]
+        [(ExecLifecycle(output="user prep work\n", kind=LifecycleKind.SYSTEM_HALT), None)]
     )
-
-    emitter = MagicMock()
-
     state = AgentState(messages=[ai_with_code('meiva.self.compact("s")')], halted=False)
-    runtime = make_runtime(
-        hosted_resources=hosted_resources, event_publisher=emitter, database_gate=database_gate
-    )
+    runtime = exec_runtime(event_publisher=event_capture.publisher, database_gate=database_gate)
+
     result = await exec_node(state, runtime, _CONFIG, process=process)
 
-    assert result.update["halted"] is True
-    # No ToolMessage write-back — the compact claim wipes the history right
-    # after this turn, so inserting the exec output back would only feed a
-    # ghost item to the frontend.
-    assert result.update["messages"] == []
-    # No ExecOutput SSE write-back either — only the ExecStart placeholder.
-    roles = [EVENT_ADAPTER.validate_json(call.args[0]).role for call in emitter.emit.call_args_list]
+    update = cast(dict[str, object], result.update)
+    assert update["halted"] is True
+    assert update["messages"] == []
+    roles = [event["role"] for event in await event_capture.events()]
     assert "exec_start" in roles
     assert "exec_output" not in roles
 
 
-async def test_exec_node_dispatch_agent_termination(
-    hosted_resources: HostedTurnResources,
-    fake_cancel_event: asyncio.Event,
-    database_gate: ProcessDbGate,
+@pytest.mark.parametrize("kind", [LifecycleKind.TERMINATION, LifecycleKind.RESTART])
+async def test_exec_node_terminate_and_restart_halt_without_a_marker(
+    kind: LifecycleKind, database_gate: ProcessDbGate
 ) -> None:
-    """ExecLifecycle(AgentTermination) → halted=True + no envelope marker."""
-    from meiva.self import AgentTermination
-
-    process = ScriptedExecProcess([(ExecLifecycle(output="", exc=AgentTermination()), None)])
-
+    process = ScriptedExecProcess([(ExecLifecycle(output="", kind=kind), None)])
     state = AgentState(messages=[ai_with_code("meiva.self.terminate()")], halted=False)
-    runtime = make_runtime(hosted_resources=hosted_resources, database_gate=database_gate)
-    result = await exec_node(state, runtime, _CONFIG, process=process)
 
-    assert result.update["halted"] is True
-    msg = result.update["messages"][0]
-    assert "[cancelled by user]" not in msg.content  # pyright: ignore[reportUnknownMemberType]
-    assert "[timeout after 60s]" not in msg.content  # pyright: ignore[reportUnknownMemberType]
-    assert "[system halt]" not in msg.content  # pyright: ignore[reportUnknownMemberType]
+    result = await exec_node(
+        state, exec_runtime(database_gate=database_gate), _CONFIG, process=process
+    )
+
+    assert cast(dict[str, object], result.update)["halted"] is True
+    content = _tool_content(result)
+    assert "[cancelled by user]" not in content
+    assert "[timeout after 60s]" not in content
+    assert "[system halt]" not in content
 
 
-async def test_exec_node_dispatch_agent_restart(
-    hosted_resources: HostedTurnResources,
-    fake_cancel_event: asyncio.Event,
-    database_gate: ProcessDbGate,
+async def test_exec_node_ordinary_exception_logs_exec_failed_at_info(
+    loguru_records: LogRecords, database_gate: ProcessDbGate
 ) -> None:
-    """ExecLifecycle(AgentRestart) → halted=True + no envelope marker (symmetric
-    with AgentTermination path)."""
-    from meiva.self import AgentRestart
-
-    process = ScriptedExecProcess([(ExecLifecycle(output="", exc=AgentRestart()), None)])
-
-    state = AgentState(messages=[ai_with_code("meiva.self.restart()")], halted=False)
-    runtime = make_runtime(hosted_resources=hosted_resources, database_gate=database_gate)
-    result = await exec_node(state, runtime, _CONFIG, process=process)
-
-    assert result.update["halted"] is True
-
-
-async def test_exec_node_dispatch_ordinary_exception(
-    hosted_resources: HostedTurnResources,
-    fake_cancel_event: asyncio.Event,
-    loguru_records,
-    database_gate: ProcessDbGate,
-) -> None:
-    """ExecCrashed → halted=False + event=exec_failed at INFO (agent
-    trial-and-error is not an operator alert; metrics aggregate by event)."""
-
     process = ScriptedExecProcess(
         [
             (
-                ExecCrashed(
-                    output="Traceback...\nValueError: boom\n",
-                    exc=ValueError("boom"),
-                ),
+                ExecCrashed(output="Traceback...\nValueError: boom\n", exc=ValueError("boom")),
                 None,
             )
         ]
     )
-
     state = AgentState(messages=[ai_with_code('raise ValueError("boom")')], halted=False)
-    runtime = make_runtime(hosted_resources=hosted_resources, database_gate=database_gate)
-    result = await exec_node(state, runtime, _CONFIG, process=process)
 
-    assert result.update["halted"] is False
-    # INFO level — a failed execute_code is ordinary dev feedback, not an
-    # operator alert (the event name still feeds per-event metrics).
-    failed = [r for r in loguru_records if r["extra"].get("event") == "exec_failed"]  # pyright: ignore[reportUnknownMemberType]
-    assert len(failed) == 1  # pyright: ignore[reportUnknownArgumentType]
-    assert failed[0]["level"].name == "INFO"  # pyright: ignore[reportUnknownMemberType]
+    result = await exec_node(
+        state, exec_runtime(database_gate=database_gate), _CONFIG, process=process
+    )
+
+    assert cast(dict[str, object], result.update)["halted"] is False
+    failed = [r for r in loguru_records if r["extra"].get("event") == "exec_failed"]
+    assert len(failed) == 1
+    assert failed[0]["level"].name == "INFO"
     assert "ValueError" in failed[0]["message"]
 
 
-async def test_exec_node_dispatch_unknown_lifecycle_subclass_raises(
-    hosted_resources: HostedTurnResources,
-    fake_cancel_event: asyncio.Event,
+_TOOL_CALL_AIMESSAGE = AIMessage(
+    content="",
+    tool_calls=[
+        {"name": "execute_code", "args": {"code": "x = 1"}, "id": "tc-1", "type": "tool_call"}
+    ],
+    response_metadata={"model_provider": "anthropic", "stop_reason": "tool_use"},
+    usage_metadata={"input_tokens": 1, "output_tokens": 1, "total_tokens": 2},
+)
+
+
+async def test_exec_node_shield_turns_a_hung_process_into_a_timeout_result(
     database_gate: ProcessDbGate,
 ) -> None:
-    """A future new LifecycleExit subclass that is not handled in the match ladder
-    → must fallthrough raise TypeError, not silently land on halted=False (AGENTS.md
-    enumeration dispatch must be exhaustive)."""
-    from base.agents.lifecycle import LifecycleExit
+    class HangingProcess(ScriptedExecProcess):
+        async def answer(
+            self, call: ProcessCall, outcome: tuple[ExecResult, ResultPayload | None]
+        ) -> tuple[ExecResult, ResultPayload | None]:
+            await asyncio.Future[None]()
+            raise AssertionError("unreachable")
 
-    class _MysteryLifecycle(LifecycleExit):
-        def __init__(self) -> None:
-            super().__init__(0)
+    state = AgentState(messages=[HumanMessage(content="hi"), _TOOL_CALL_AIMESSAGE], halted=False)
+    runtime = exec_runtime(
+        agent=AgentSlices.resolve(default_reader=defaults(sandbox__exec_node_timeout_seconds=0.05)),
+        database_gate=database_gate,
+    )
 
-    process = ScriptedExecProcess([(ExecLifecycle(output="", exc=_MysteryLifecycle()), None)])
+    result = await exec_node_impl(
+        state, runtime, _CONFIG, process=HangingProcess([(ExecDone(output=""), None)])
+    )
 
-    state = AgentState(messages=[ai_with_code("...")], halted=False)
-    runtime = make_runtime(hosted_resources=hosted_resources, database_gate=database_gate)
+    update = cast(dict[str, list[ToolMessage]], result.update)
+    assert "timeout" in str(update["messages"][-1].content).lower()
 
-    with pytest.raises(TypeError, match="Unrecognized LifecycleExit subclass"):
-        await exec_node(state, runtime, _CONFIG, process=process)
+
+async def test_exec_node_shield_does_not_fire_when_the_process_is_fast(
+    database_gate: ProcessDbGate,
+) -> None:
+    state = AgentState(messages=[HumanMessage(content="hi"), _TOOL_CALL_AIMESSAGE], halted=False)
+    runtime = exec_runtime(
+        agent=AgentSlices.resolve(
+            default_reader=defaults(
+                sandbox__exec_node_timeout_seconds=10.0, sandbox__exec_timeout_seconds=30.0
+            )
+        ),
+        database_gate=database_gate,
+    )
+
+    result = await exec_node_impl(
+        state,
+        runtime,
+        _CONFIG,
+        process=ScriptedExecProcess([(ExecDone(output="hello"), None)]),
+    )
+
+    update = cast(dict[str, list[ToolMessage]], result.update)
+    assert "hello" in str(update["messages"][-1].content)

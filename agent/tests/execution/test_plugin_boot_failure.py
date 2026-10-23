@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from agent.graph.exec.protocol import read_result, write_request
+from agent.execution.protocol import read_result, write_request
 from base.native_process.tests.host_pipe import live_host_control
 from meiva.tests.fixtures.pin_agent import exec_context
 

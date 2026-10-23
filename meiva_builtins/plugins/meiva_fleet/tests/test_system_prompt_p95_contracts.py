@@ -4,7 +4,9 @@ from collections.abc import Iterator
 
 import pytest
 
+from agent.graph.prompt.live import read_live_sdk
 from agent.graph.prompt.system_prompt import sdk_expand_section
+from base.agents.sdk.call_policy import SamplingPolicy, SamplingPolicyOwner
 from base.config import FIELD_INFOS
 from base.config.service_read import ConfigAuthority
 from base.config.tests.config_authority import config_authority as config_authority
@@ -38,18 +40,12 @@ def _no_plugin_expansions() -> Iterator[None]:
 
 
 def test_p95_contracts_leave_rare_namespaces_on_demand(
-    monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
 ) -> None:
-    from base.agents.sdk import call_policy
     from meiva_builtins.plugins.meiva_fleet import plugin as fleet
 
-    def _policy_for_test(_owner: call_policy.SamplingPolicyOwner) -> call_policy.SamplingPolicy:
-        return call_policy.SamplingPolicy()
-
-    monkeypatch.setattr(call_policy, "policy", _policy_for_test)
     factory = FIELD_INFOS["sdk_expand_in_system_prompt"].default_factory
     assert factory is not None
     install.install(
@@ -57,12 +53,14 @@ def test_p95_contracts_leave_rare_namespaces_on_demand(
         catalog=model_catalog,
         authority=config_authority,
         config_images=DiskPluginConfigImages(resolve_meiva_home()),
+        sampling=SamplingPolicyOwner(reader=SamplingPolicy),
     )
 
-    text = sdk_expand_section(
-        AgentSlices.resolve(default_reader=defaults(agent__sdk_expand_in_system_prompt=factory())),
-        catalog=model_catalog,
+    slices = AgentSlices.resolve(
+        default_reader=defaults(agent__sdk_expand_in_system_prompt=factory())
     )
+
+    text = sdk_expand_section(slices, catalog=model_catalog, live=read_live_sdk(slices.prompt))
 
     for module in ["shell", "files", "agents", "tasks"]:
         assert f"## meiva.{module}\n" in text

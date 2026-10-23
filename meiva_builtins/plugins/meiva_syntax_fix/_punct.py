@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import io
 import tokenize
-from collections.abc import Callable, Iterable
 
 # ---------------------------------------------------------------------------
 # 1. Chinese punctuation -> ASCII
@@ -132,18 +131,12 @@ unchanged (downstream compile() / LLM repair still run)."""
 #
 # utf-8 encode rejects lone surrogates before the C tokenizer sees them; paired surrogates
 # (e.g. emoji) round-trip unchanged.
-def tokenize_fix_safe(
-    code: str,
-    *,
-    tokenize_lines: Callable[
-        [Callable[[], str]], Iterable[tokenize.TokenInfo]
-    ] = tokenize.generate_tokens,
-) -> list[tokenize.TokenInfo] | None:
+def tokenize_fix_safe(code: str) -> list[tokenize.TokenInfo] | None:
     if any(len(line) > MAX_TOKENIZE_LINE_LENGTH for line in code.split("\n")):
         return None
     try:
         code.encode("utf-8")
-        return list(tokenize_lines(io.StringIO(code).readline))
+        return list(tokenize.generate_tokens(io.StringIO(code).readline))
     except (
         tokenize.TokenError,
         IndentationError,
@@ -159,15 +152,8 @@ def tokenize_fix_safe(
 # Translate characters via charmap everywhere except inside string / f-string literals and
 # comments. Returns (new_code, num_changes), or (code, 0) when tokenization fails (broken syntax —
 # leave it for compile()).
-def translate_outside_strings(
-    code: str,
-    charmap: dict[int, int | str],
-    *,
-    tokenize_lines: Callable[
-        [Callable[[], str]], Iterable[tokenize.TokenInfo]
-    ] = tokenize.generate_tokens,
-) -> tuple[str, int]:
-    tokens = tokenize_fix_safe(code, tokenize_lines=tokenize_lines)
+def translate_outside_strings(code: str, charmap: dict[int, int | str]) -> tuple[str, int]:
+    tokens = tokenize_fix_safe(code)
     if tokens is None:
         return code, 0
 

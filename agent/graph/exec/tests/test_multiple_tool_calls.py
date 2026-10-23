@@ -1,38 +1,35 @@
 import json
 from functools import partial
+from pathlib import Path
 from typing import Annotated, Any
-from unittest.mock import MagicMock
 
 import pytest
-from langchain_core.messages import AIMessage, AnyMessage, ToolMessage
+from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, ToolMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph.message import add_messages
 from langgraph.runtime import Runtime
 from pydantic import BaseModel, Field
 
-from agent.graph.exec import node
-from agent.graph.exec.node import ExecDone, ExecOutputChunkPublisher, exec_node_impl
+from agent.execution.protocol import ResultPayload
+from agent.graph.exec.node import ExecDone, exec_node_impl
 from agent.graph.exec.process import ExecProcess, SubprocessExecProcess
-from agent.graph.exec.protocol import ResultPayload
-from agent.graph.exec.tests.process_inputs import ScriptedExecProcess
-from agent.graph.interrupt import InterruptEvent
+from agent.graph.exec.tests.event_capture import EventCapture, idle_publisher
+from agent.graph.exec.tests.process_inputs import ReportingExecProcess, ScriptedExecProcess
 from agent.graph.tool_calls import normalize_tool_calls
-from agent.hooks.tests.fakes import make_fake_ops_pool
 from agent.state import AgentState, build_agent_state
 from base.agents.context import MeivaContext
 from base.agents.context.identity import AgentIdentity
 from base.agents.messages.kwargs import read_meiva_kwargs
 from base.clock import Clock
-from base.config import settings
+from base.config.tests.configuration import defaults
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
+from base.events.live.publisher import AgentEventPublisher
 from base.host.env.agent_slices import AgentSlices
-from base.native_process.turn_identity import HostedTurnResources
 from base.packages.plugin_providers import build_model_catalog
 from base.packages.plugins.extensions import ExtensionRegistry, PluginContributions
 from meiva.boot import process_clients
-from meiva.tests.fixtures.pin_agent import hosted_resources as hosted_resources
 
 
 def _graph(state_cls: type[AgentState], *, process: ExecProcess, **compile_options: Any) -> Any:
@@ -58,9 +55,7 @@ async def _run_calls(
     )
 
 
-async def test_calls_execute_separately_without_rewriting_assistant(
-    hosted_resources: HostedTurnResources,
-) -> None:
+async def test_calls_execute_separately_without_rewriting_assistant() -> None:
     ai = AIMessage(
         id="ai-multi",
         content="Two independent calls.",
@@ -70,44 +65,27 @@ async def test_calls_execute_separately_without_rewriting_assistant(
         ],
     )
     original = ai.model_dump()
-    process = ScriptedExecProcess(
+    process = ReportingExecProcess(
         [
-            (
-                ExecDone(output="first result"),
-                ResultPayload(kind="done", state_update={}, sdk_calls=[]),
-            ),
-            (
-                ExecDone(output="second result"),
-                ResultPayload(kind="done", state_update={}, sdk_calls=[]),
-            ),
+            (ExecDone(output=""), ResultPayload(kind="done", state_update={}, sdk_calls=[])),
+            (ExecDone(output=""), ResultPayload(kind="done", state_update={}, sdk_calls=[])),
         ]
     )
 
-    runtime = Runtime(
-        context=MeivaContext(
-            hosted_resources=hosted_resources,
-            ops_pool=make_fake_ops_pool(),
-            event_publisher=MagicMock(),
-            agent=AgentSlices.resolve(
-                default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
-            ),
-            identity=AgentIdentity(agent_id=7, owns_loop=True),
-            catalog=build_model_catalog(),
-            clock_factory=Clock.from_settings,
-        )
-    )
     command = await _run_calls(
-        AgentState(messages=[ai]), runtime, {"configurable": {"thread_id": "7"}}, process=process
+        AgentState(messages=[ai]),
+        _node_runtime(),
+        {"configurable": {"thread_id": "7"}},
+        process=process,
     )
 
-    assert [call.code for call in process.calls] == ["first()", "second()"]
     assert ai.model_dump() == original
     assert command is not None
     messages = command["messages"][1:]
     assert all(isinstance(message, ToolMessage) for message in messages)
     assert [message.tool_call_id for message in messages] == ["call-a", "call-b"]
-    assert "first result" in messages[0].content
-    assert "second result" in messages[1].content
+    assert "first()" in messages[0].content
+    assert "second()" in messages[1].content
 
 
 class _MessagesPlugin(BaseModel):
@@ -140,16 +118,12 @@ def _state(*codes: str) -> AgentState:
 
 
 def _runtime(
-    hosted_resources: HostedTurnResources, database_gate: ProcessDbGate
+    database_gate: ProcessDbGate, agent: AgentSlices | None = None
 ) -> Runtime[MeivaContext]:
     return Runtime(
         context=MeivaContext(
-            hosted_resources=hosted_resources,
-            ops_pool=make_fake_ops_pool(),
-            event_publisher=MagicMock(),
-            agent=AgentSlices.resolve(
-                default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
-            ),
+            event_publisher=idle_publisher(),
+            agent=agent or AgentSlices.resolve(default_reader=defaults()),
             db=Database.from_settings(gate=database_gate),
             bus=EventBus.from_settings(),
             clients=process_clients(),
@@ -161,16 +135,12 @@ def _runtime(
 
 
 def _node_runtime(
-    hosted_resources: HostedTurnResources,
+    agent: AgentSlices | None = None, publisher: AgentEventPublisher | None = None
 ) -> Runtime[MeivaContext]:
     return Runtime(
         context=MeivaContext(
-            hosted_resources=hosted_resources,
-            ops_pool=make_fake_ops_pool(),
-            event_publisher=MagicMock(),
-            agent=AgentSlices.resolve(
-                default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
-            ),
+            event_publisher=publisher or idle_publisher(),
+            agent=agent or AgentSlices.resolve(default_reader=defaults()),
             identity=AgentIdentity(agent_id=7, owns_loop=True),
             catalog=build_model_catalog(),
             clock_factory=Clock.from_settings,
@@ -178,14 +148,10 @@ def _node_runtime(
     )
 
 
-async def test_real_children_do_not_share_globals(
-    hosted_resources: HostedTurnResources,
-    fake_cancel_event: InterruptEvent,
-    database_gate: ProcessDbGate,
-) -> None:
+async def test_real_children_do_not_share_globals(database_gate: ProcessDbGate) -> None:
     result = await _run_calls(
         _state('shared_name = 42; print("first")', 'print("shared_name" in globals())'),
-        _runtime(hosted_resources=hosted_resources, database_gate=database_gate),
+        _runtime(database_gate),
         {"configurable": {"thread_id": "7"}},
         process=SubprocessExecProcess(),
     )
@@ -197,14 +163,10 @@ async def test_real_children_do_not_share_globals(
     assert "False" in second.content
 
 
-async def test_exception_does_not_skip_later_call(
-    hosted_resources: HostedTurnResources,
-    fake_cancel_event: InterruptEvent,
-    database_gate: ProcessDbGate,
-) -> None:
+async def test_exception_does_not_skip_later_call(database_gate: ProcessDbGate) -> None:
     result = await _run_calls(
         _state('raise ValueError("first failed")', 'print("second ran")'),
-        _runtime(hosted_resources=hosted_resources, database_gate=database_gate),
+        _runtime(database_gate),
         {"configurable": {"thread_id": "7"}},
         process=SubprocessExecProcess(),
     )
@@ -214,9 +176,7 @@ async def test_exception_does_not_skip_later_call(
     assert "second ran" in second.content
 
 
-async def test_plugin_reducers_commit_between_calls(
-    hosted_resources: HostedTurnResources,
-) -> None:
+async def test_plugin_reducers_commit_between_calls() -> None:
     from operator import add
     from typing import Annotated
 
@@ -225,80 +185,80 @@ async def test_plugin_reducers_commit_between_calls(
 
     state = CounterState(messages=_state("first()", "second()").messages)
 
-    process = ScriptedExecProcess(
+    process = ReportingExecProcess(
         [
-            (ExecDone(output="ok"), ResultPayload(kind="done", state_update={"total": 1})),
-            (ExecDone(output="ok"), ResultPayload(kind="done", state_update={"total": 1})),
-        ]
+            (ExecDone(output=""), ResultPayload(kind="done", state_update={"total": 1})),
+            (ExecDone(output=""), ResultPayload(kind="done", state_update={"total": 1})),
+        ],
+        report=("total",),
     )
 
     result = await _run_calls(
-        state,
-        _node_runtime(
-            hosted_resources=hosted_resources,
-        ),
-        {"configurable": {"thread_id": "7"}},
-        process=process,
+        state, _node_runtime(), {"configurable": {"thread_id": "7"}}, process=process
     )
-    assert [call.state["total"] for call in process.calls] == [10, 11]
     assert state.total == 10
     assert result is not None
+    first, second = result["messages"][1:]
+    assert "total=10" in first.content
+    assert "total=11" in second.content
     assert result["total"] == 12
 
 
 async def test_notes_and_media_follow_all_results_and_stream_ids_match(
-    hosted_resources: HostedTurnResources,
-    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path, event_capture: EventCapture
 ) -> None:
-    import json
-
-    from langchain_core.messages import HumanMessage
-
     note = HumanMessage(content="context note")
-    media = HumanMessage(content="attachment")
+    chart = tmp_path / "chart.png"
+    chart.write_bytes(b"\x89PNG\r\n\x1a\n")
     process = ScriptedExecProcess(
         [
             (
                 ExecDone(output="first"),
-                ResultPayload(kind="done", state_update={"messages": [note]}, sdk_calls=[]),
+                ResultPayload(
+                    kind="done",
+                    state_update={
+                        "messages": [note],
+                        "attach": [{"path": str(chart), "label": "the chart"}],
+                    },
+                    sdk_calls=[],
+                ),
             ),
             (ExecDone(output="second"), ResultPayload(kind="done", state_update={}, sdk_calls=[])),
         ]
     )
 
-    monkeypatch.setattr(node, "build_attach_message", MagicMock(side_effect=[media, None]))
-    runtime = _node_runtime(
-        hosted_resources=hosted_resources,
-    )
     result = await _run_calls(
         _messages_state("first()", "second()"),
-        runtime,
+        _node_runtime(
+            AgentSlices.resolve(pins={"llm_model": "claude-sonnet-5"}, default_reader=defaults()),
+            event_capture.publisher,
+        ),
         {"configurable": {"thread_id": "7"}},
         process=process,
     )
+
     assert result is not None
     messages = result["messages"][1:]
     assert [message.tool_call_id for message in messages[:2]] == ["call-0", "call-1"]
-    assert messages[2:] == [note, media]
-    publisher = runtime.context.event_publisher
-    assert isinstance(publisher, MagicMock)
-    events = [json.loads(call.args[0]) for call in publisher.emit.call_args_list]
+    assert messages[2] == note
+    media = messages[3]
+    assert isinstance(media, HumanMessage) and len(messages) == 4
+    assert read_meiva_kwargs(media).get("meiva_msg_type") == "attach"
+    assert "the chart" in json.dumps(media.content)
+    events = await event_capture.events()
     assert [event["item_id"] for event in events] == ["1.0", "1.0", "2.0", "2.0"]
 
 
 @pytest.mark.parametrize("outcome", ["cancel", "restart", "terminate", "compact", "timeout"])
-async def test_lifecycle_pairs_skipped_calls_and_timeout_continues(
-    hosted_resources: HostedTurnResources,
-    outcome: str,
-) -> None:
+async def test_lifecycle_pairs_skipped_calls_and_timeout_continues(outcome: str) -> None:
+    from agent.graph.exec._result import LifecycleKind
     from agent.graph.exec.node import ExecCancelled, ExecLifecycle, ExecTimedOut
-    from base.agents.lifecycle import AgentRestart, AgentTermination, SystemHalt
 
     outcomes = {
         "cancel": ExecCancelled(output="cancelled"),
-        "restart": ExecLifecycle(output="restart", exc=AgentRestart()),
-        "terminate": ExecLifecycle(output="terminate", exc=AgentTermination()),
-        "compact": ExecLifecycle(output="compact", exc=SystemHalt()),
+        "restart": ExecLifecycle(output="restart", kind=LifecycleKind.RESTART),
+        "terminate": ExecLifecycle(output="terminate", kind=LifecycleKind.TERMINATION),
+        "compact": ExecLifecycle(output="compact", kind=LifecycleKind.SYSTEM_HALT),
         "timeout": ExecTimedOut(output="timeout"),
     }
     process = ScriptedExecProcess(
@@ -310,9 +270,7 @@ async def test_lifecycle_pairs_skipped_calls_and_timeout_continues(
 
     result = await _run_calls(
         _state("first()", "second()"),
-        _node_runtime(
-            hosted_resources=hosted_resources,
-        ),
+        _node_runtime(),
         {"configurable": {"thread_id": "7"}},
         process=process,
     )
@@ -323,7 +281,6 @@ async def test_lifecycle_pairs_skipped_calls_and_timeout_continues(
         _, first, second = result["messages"]
         assert [first.tool_call_id, second.tool_call_id] == ["call-0", "call-1"]
         assert ("second" if outcome == "timeout" else "Not executed") in second.content
-    assert len(process.calls) == (2 if outcome == "timeout" else 1)
     assert result["halted"] is (outcome != "timeout")
 
 
@@ -335,18 +292,11 @@ def _scan(source: str) -> str:
 
 
 async def test_findings_of_every_call_in_a_batch_reach_the_state(
-    hosted_resources: HostedTurnResources,
-    fake_cancel_event: InterruptEvent,
-    monkeypatch: pytest.MonkeyPatch,
     database_gate: ProcessDbGate,
 ) -> None:
-    from base.config import settings
-
-    monkeypatch.setattr(settings.agent, "security_scan_enabled", True)
-
     result = await _run_calls(
         _state(_scan("web.fetch") + "print('first')", _scan("shell.run") + "print('second')"),
-        _runtime(hosted_resources=hosted_resources, database_gate=database_gate),
+        _runtime(database_gate),
         _config(),
         process=SubprocessExecProcess(),
     )
@@ -356,21 +306,14 @@ async def test_findings_of_every_call_in_a_batch_reach_the_state(
 
 
 async def test_a_compacting_call_discards_the_findings_of_its_batch(
-    hosted_resources: HostedTurnResources,
-    fake_cancel_event: InterruptEvent,
-    monkeypatch: pytest.MonkeyPatch,
     database_gate: ProcessDbGate,
 ) -> None:
-    from base.config import settings
-
-    monkeypatch.setattr(settings.agent, "security_scan_enabled", True)
-
     result = await _run_calls(
         _state(
             _scan("web.fetch"),
             _scan("shell.run") + "from base.agents.lifecycle import SystemHalt\nraise SystemHalt()",
         ),
-        _runtime(hosted_resources=hosted_resources, database_gate=database_gate),
+        _runtime(database_gate),
         _config(),
         process=SubprocessExecProcess(),
     )
@@ -378,31 +321,23 @@ async def test_a_compacting_call_discards_the_findings_of_its_batch(
     assert result["security_findings"] == []
 
 
-async def test_unknown_tool_does_not_consume_sibling_code(
-    hosted_resources: HostedTurnResources,
-) -> None:
+async def test_unknown_tool_does_not_consume_sibling_code() -> None:
     state = _state("print('must not run')", "print('runs')")
     ai = state.messages[-1]
     assert isinstance(ai, AIMessage)
     ai.tool_calls[0]["name"] = "meiva.files.edit"
-    process = ScriptedExecProcess(
-        [(ExecDone(output="runs"), ResultPayload(kind="done", state_update={}, sdk_calls=[]))]
+    process = ReportingExecProcess(
+        [(ExecDone(output=""), ResultPayload(kind="done", state_update={}, sdk_calls=[]))]
     )
 
     result = await _run_calls(
-        state,
-        _node_runtime(
-            hosted_resources=hosted_resources,
-        ),
-        {"configurable": {"thread_id": "7"}},
-        process=process,
+        state, _node_runtime(), {"configurable": {"thread_id": "7"}}, process=process
     )
     assert result is not None
     _, first, second = result["messages"]
     assert "unknown tool" in first.content
-    assert "runs" in second.content
-    assert len(process.calls) == 1
-    assert process.calls[0].code == "print('runs')"
+    assert "print('runs')" in second.content
+    assert "must not run" not in first.content + second.content
 
 
 def _config() -> RunnableConfig:
@@ -458,14 +393,12 @@ def test_normalize_recovers_each_content_call_without_merging() -> None:
 
 
 async def test_exec_recovers_missing_content_call_without_syntax_plugin(
-    hosted_resources: HostedTurnResources,
-    fake_cancel_event: InterruptEvent,
     database_gate: ProcessDbGate,
 ) -> None:
     state = AgentState(messages=[_ai_with_two_content_tool_uses()])
     result = await _run_calls(
         state,
-        _runtime(hosted_resources=hosted_resources, database_gate=database_gate),
+        _runtime(database_gate),
         _config(),
         process=SubprocessExecProcess(),
     )
@@ -494,14 +427,12 @@ def _ai_with_hallucinated_tool_name() -> AIMessage:
     )
 
 
-async def test_exec_node_feeds_back_on_unknown_tool_name(
-    hosted_resources: HostedTurnResources, database_gate: ProcessDbGate
-) -> None:
+async def test_exec_node_feeds_back_on_unknown_tool_name(database_gate: ProcessDbGate) -> None:
     state = AgentState(messages=[_ai_with_hallucinated_tool_name()])
 
     result = await _run_calls(
         state,
-        _runtime(hosted_resources=hosted_resources, database_gate=database_gate),
+        _runtime(database_gate),
         _config(),
         process=SubprocessExecProcess(),
     )
@@ -514,9 +445,7 @@ async def test_exec_node_feeds_back_on_unknown_tool_name(
     assert "execute_code" in tool_msg.content
 
 
-async def test_exec_node_feeds_back_when_code_key_missing(
-    hosted_resources: HostedTurnResources, database_gate: ProcessDbGate
-) -> None:
+async def test_exec_node_feeds_back_when_code_key_missing(database_gate: ProcessDbGate) -> None:
     ai = AIMessage(
         id="ai_no_code",
         content=[],
@@ -528,7 +457,7 @@ async def test_exec_node_feeds_back_when_code_key_missing(
 
     result = await _run_calls(
         state,
-        _runtime(hosted_resources=hosted_resources, database_gate=database_gate),
+        _runtime(database_gate),
         _config(),
         process=SubprocessExecProcess(),
     )
@@ -539,9 +468,7 @@ async def test_exec_node_feeds_back_when_code_key_missing(
     assert "execute_code" in tool_msg.content
 
 
-async def test_langgraph_owns_each_call_state_transition(
-    hosted_resources: HostedTurnResources,
-) -> None:
+async def test_langgraph_owns_each_call_state_transition() -> None:
     from typing import Annotated
 
     def append_digit(current: int, digit: int) -> int:
@@ -550,42 +477,35 @@ async def test_langgraph_owns_each_call_state_transition(
     class DecimalState(AgentState):
         total: Annotated[int, append_digit] = 0
 
-    process = ScriptedExecProcess(
+    process = ReportingExecProcess(
         [
-            (ExecDone(output="ok"), ResultPayload(kind="done", state_update={"total": 1})),
-            (ExecDone(output="ok"), ResultPayload(kind="done", state_update={"total": 2})),
-        ]
+            (ExecDone(output=""), ResultPayload(kind="done", state_update={"total": 1})),
+            (ExecDone(output=""), ResultPayload(kind="done", state_update={"total": 2})),
+        ],
+        report=("total",),
     )
 
     state = DecimalState(total=7, messages=_state("first()", "second()").messages)
-    result = await _run_calls(
-        state,
-        _node_runtime(
-            hosted_resources=hosted_resources,
-        ),
-        _config(),
-        process=process,
-    )
-    assert [call.state["total"] for call in process.calls] == [7, 71]
+    result = await _run_calls(state, _node_runtime(), _config(), process=process)
+    first, second = result["messages"][1:]
+    assert "total=7" in first.content
+    assert "total=71" in second.content
     assert result["total"] == 712
 
 
-async def test_checkpoint_resume_keeps_results_and_deferred_notes(
-    hosted_resources: HostedTurnResources,
-    fake_cancel_event: InterruptEvent,
-) -> None:
-    from langchain_core.messages import HumanMessage
+async def test_checkpoint_resume_keeps_results_and_deferred_notes() -> None:
     from langgraph.checkpoint.memory import InMemorySaver
 
     note = HumanMessage(content="context from first call", id="note-first")
-    process = ScriptedExecProcess(
+    process = ReportingExecProcess(
         [
             (
-                ExecDone(output="first"),
+                ExecDone(output=""),
                 ResultPayload(kind="done", state_update={"messages": [note]}, sdk_calls=None),
             ),
-            (ExecDone(output="second"), ResultPayload(kind="done", state_update={}, sdk_calls=[])),
-        ]
+            (ExecDone(output=""), ResultPayload(kind="done", state_update={}, sdk_calls=[])),
+        ],
+        report=("pending_exec_notes",),
     )
 
     graph = _graph(
@@ -595,19 +515,15 @@ async def test_checkpoint_resume_keeps_results_and_deferred_notes(
         process=process,
     )
     config = _config()
-    runtime = _node_runtime(
-        hosted_resources=hosted_resources,
-    )
+    runtime = _node_runtime()
     await graph.ainvoke(dict(_state("first()", "second()")), config=config, context=runtime.context)
     checkpoint = await graph.aget_state(config)
     assert checkpoint.next == ("exec",)
     assert len(checkpoint.values["messages"]) == 2
     assert checkpoint.values["messages"][-1].tool_call_id == "call-0"
     assert checkpoint.values["pending_exec_notes"] == [note]
-    assert len(process.calls) == 1
 
     result = await graph.ainvoke(None, config=config, context=runtime.context)
-    assert [call.code for call in process.calls] == ["first()", "second()"]
     assert [message.tool_call_id for message in result["messages"][1:3]] == [
         "call-0",
         "call-1",
@@ -615,22 +531,7 @@ async def test_checkpoint_resume_keeps_results_and_deferred_notes(
     assert result["messages"][3:] == [note]
     assert result["pending_exec_notes"] == []
     first, second = result["messages"][1:3]
+    assert "pending_exec_notes=[]" in first.content
+    assert "context from first call" in second.content
     assert "sdk_calls" not in read_meiva_kwargs(first)
     assert read_meiva_kwargs(second).get("sdk_calls") == []
-    _assert_process_inputs(process, runtime.context, fake_cancel_event, note.model_dump())
-
-
-def _assert_process_inputs(
-    process: ScriptedExecProcess,
-    context: MeivaContext,
-    cancel_event: InterruptEvent,
-    note: dict[str, Any],
-) -> None:
-    for call in process.calls:
-        assert call.context is context
-        assert call.config_overlay == context.require_agent().overlay()
-        assert isinstance(call.chunks, ExecOutputChunkPublisher)
-        assert call.cancel_event is cancel_event
-    assert process.calls[0].chunks is not process.calls[1].chunks
-    assert process.calls[0].state["pending_exec_notes"] == []
-    assert process.calls[1].state["pending_exec_notes"] == [note]

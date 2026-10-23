@@ -5,7 +5,6 @@ from __future__ import annotations
 from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
 
 from langchain_core.messages import HumanMessage
 
@@ -15,8 +14,20 @@ from base.agents.to_user import read_document
 from base.api_contracts.agent_contract import Harness
 from base.log import logger
 from base.packages.plugins.extensions import ContextNote, ExtensionRegistry
-from base.packages.skills.tree import identifier, target
+from base.packages.skills.tree import Skill, identifier, target
 from base.paths import workspace_dir
+
+from .live import effective_sdk_disable, read_skills, read_view, warn_unresolved
+from .note_text import (
+    Workspace,
+    agent_id_text,
+    exec_timeout_text,
+    label_from_row,
+    machine_name_text,
+    timezone_text,
+    workspace_display,
+)
+from .skill_selection import SkillView, resolve_prompt_skills
 
 RANK_EXEC_TIMEOUT = 10
 RANK_TIMEZONE = 15
@@ -68,52 +79,17 @@ def _established_agent_id(ctx: MeivaContext, note: str) -> int | None:
     return aid
 
 
-_EXEC_TIMEOUT_FRAMING = (
-    "Your execute_code call has a hard wall-clock timeout of "
-    "{timeout_s:.0f} seconds ({timeout_display}). "
-    "If your code exceeds this, it will be killed."
-)
-
-
-def _format_timeout_display(timeout_s: float) -> str:
-
-    minutes = timeout_s / 60
-    if minutes == int(minutes):
-        n = int(minutes)
-        return f"{n} minute" if n == 1 else f"{n} minutes"
-    return f"{timeout_s:.0f} seconds"
-
-
 def exec_timeout_note(ctx: MeivaContext) -> HumanMessage | None:
 
     if ctx.harness is not Harness.MEIVA:
         return None
     if _established_agent_id(ctx, "exec-timeout") is None:
         return None
-    timeout_s = ctx.require_agent().read("sandbox", "exec_timeout_seconds")
     return system_note_message(
-        content=_EXEC_TIMEOUT_FRAMING.format(
-            timeout_s=timeout_s,
-            timeout_display=_format_timeout_display(timeout_s),
-        ),
+        content=exec_timeout_text(ctx.require_agent().read("sandbox", "exec_timeout_seconds")),
         tag=NoteTag.EXEC_TIMEOUT,
         created_at=datetime.now(UTC),
     )
-
-
-_TIMEZONE_FRAMING = (
-    "Conversation timezone: {name} (UTC{offset}). Conversation timestamps "
-    "without an offset use this timezone. Tool output, files and source "
-    "messages may use other timezones; honor any explicit offset. When you "
-    "record a time anywhere outside this conversation (a file, a memory note, "
-    "a message to another machine), write ISO-8601 with an offset instead."
-)
-
-
-def _utc_offset(moment: datetime) -> str:
-
-    raw = moment.strftime("%z")
-    return f"{raw[:3]}:{raw[3:]}"
 
 
 def timezone_note(ctx: MeivaContext) -> HumanMessage | None:
@@ -121,9 +97,8 @@ def timezone_note(ctx: MeivaContext) -> HumanMessage | None:
     if _established_agent_id(ctx, "timezone") is None:
         return None
     clock = ctx.require_clock()
-    now = datetime.now(clock.explicit_zone())
     return system_note_message(
-        content=_TIMEZONE_FRAMING.format(name=clock.timezone, offset=_utc_offset(now)),
+        content=timezone_text(clock.timezone, clock.now().astimezone(clock.explicit_zone())),
         tag=NoteTag.TIMEZONE,
         created_at=datetime.now(UTC),
     )
@@ -133,10 +108,7 @@ def own_label(ctx: MeivaContext, agent_id: int) -> str | None:
 
     with ctx.sql.cursor() as cur:
         cur.execute("SELECT label FROM agents WHERE id=%s", (agent_id,))
-        row = cur.fetchone()
-    if row is None or not row[0]:
-        return None
-    return " ".join(str(row[0]).split())
+        return label_from_row(cur.fetchone())
 
 
 def machine_clause(ctx: MeivaContext) -> str | None:
@@ -149,18 +121,17 @@ def machine_clause(ctx: MeivaContext) -> str | None:
         name = ctx.machine.name()
     except MachineNameMissing:
         return None
-    return " ".join(name.split()) or None
+    return machine_name_text(name)
 
 
-def _workspace_path(agent_id: int, *, enabled: bool) -> str | None:
+def workspace_facts(workspace: Path, home: Path) -> Workspace:
 
-    if not enabled:
-        return None
-    ws = workspace_dir(agent_id)
+    display = workspace_display(workspace, home)
     try:
-        return f"~/{ws.relative_to(Path.home())}"
-    except ValueError:
-        return str(ws)
+        document = read_document(workspace)
+    except (OSError, ValueError) as exc:
+        return Workspace(display, None, str(exc))
+    return Workspace(display, document.content, None)
 
 
 def agent_id_note(ctx: MeivaContext) -> HumanMessage | None:
@@ -168,33 +139,15 @@ def agent_id_note(ctx: MeivaContext) -> HumanMessage | None:
     aid = _established_agent_id(ctx, "agent-id")
     if aid is None:
         return None
-    clauses: list[str] = []
     label = own_label(ctx, aid)
-    if label:
-        clauses.append(f"label: {label}")
     machine = machine_clause(ctx)
-    if machine:
-        clauses.append(f"machine: {machine}")
-    detail = f" ({', '.join(clauses)})" if clauses else ""
-    workspace = _workspace_path(
-        aid, enabled=ctx.require_agent().read("agent", "workspace_in_system_prompt")
+    workspace = (
+        workspace_facts(workspace_dir(aid), Path.home())
+        if ctx.require_agent().read("agent", "workspace_in_system_prompt")
+        else None
     )
-    tail = f" Your workspace is {workspace}." if workspace else ""
-    if workspace:
-        try:
-            document = read_document(workspace_dir(aid))
-        except (OSError, ValueError) as exc:
-            tail += (
-                f"\nThe shared context file could not be read: {exc}. Repair it in your workspace."
-            )
-        else:
-            if document.content:
-                tail += (
-                    "\n\nCurrent shared context displayed beside your messages:\n"
-                    + document.content
-                )
     return system_note_message(
-        content=f"Your Agent ID is {aid}{detail}.{tail}",
+        content=agent_id_text(aid, label=label, machine=machine, workspace=workspace),
         tag=NoteTag.AGENT_ID,
         created_at=datetime.now(UTC),
     )
@@ -207,35 +160,6 @@ _PRELOADED_SKILLS_FRAMING = (
     "meiva.help(meiva.skills.<path>) or meiva.files.read."
 )
 
-
-def preloaded_skills_note(ctx: MeivaContext) -> HumanMessage | None:
-
-    from agent.graph.prompt.capabilities import resolve_prompt_skills
-
-    slices = ctx.require_agent()
-    skills = resolve_prompt_skills(
-        slices.prompt.skills_to_expand_at_start,
-        slices.prompt.sdk_disable,
-        config_field="skills_to_expand_at_start",
-    )
-    if not skills:
-        return None
-    rendered = _render_skill_bodies(skills, label="preloaded-skills")
-    if rendered is None:
-        return None
-    sections, _injected = rendered
-    framing = _PRELOADED_SKILLS_FRAMING
-    if ctx.harness is not Harness.MEIVA:
-        framing = framing.replace(
-            "meiva.help(meiva.skills.<path>) or meiva.files.read.",
-            "meiva.help(meiva.skills.<path>) or your native file-reading tool.",
-        )
-    content = framing + "\n\n" + "\n\n---\n\n".join(sections)
-    return system_note_message(
-        content=content, tag=NoteTag.PRELOADED_SKILLS, created_at=datetime.now(UTC)
-    )
-
-
 _FORK_TAIL_SKILLS_FRAMING = (
     "Additional skills for you — each section below contains a skill's complete "
     "SKILL.md. Follow these instructions as standing guidance alongside the "
@@ -243,7 +167,9 @@ _FORK_TAIL_SKILLS_FRAMING = (
 )
 
 
-def _render_skill_bodies(skills: list[Any], *, label: str) -> tuple[list[str], list[str]] | None:
+def _render_skill_bodies(
+    skills: Sequence[Skill], *, label: str
+) -> tuple[list[str], list[str]] | None:
 
     sections: list[str] = []
     injected: list[str] = []
@@ -267,20 +193,49 @@ def _render_skill_bodies(skills: list[Any], *, label: str) -> tuple[list[str], l
     return sections, injected
 
 
+def _skill_bodies_note(skills: Sequence[Skill], *, framing: str, label: str) -> HumanMessage | None:
+    rendered = _render_skill_bodies(skills, label=label)
+    if rendered is None:
+        return None
+    sections, _injected = rendered
+    return system_note_message(
+        content=framing + "\n\n" + "\n\n---\n\n".join(sections),
+        tag=NoteTag.PRELOADED_SKILLS,
+        created_at=datetime.now(UTC),
+    )
+
+
+def preloaded_note(skills: Sequence[Skill], *, harness: Harness) -> HumanMessage | None:
+
+    framing = _PRELOADED_SKILLS_FRAMING
+    if harness is not Harness.MEIVA:
+        framing = framing.replace(
+            "meiva.help(meiva.skills.<path>) or meiva.files.read.",
+            "meiva.help(meiva.skills.<path>) or your native file-reading tool.",
+        )
+    return _skill_bodies_note(skills, framing=framing, label="preloaded-skills")
+
+
+def preloaded_skills_note(ctx: MeivaContext) -> HumanMessage | None:
+
+    prompt = ctx.require_agent().prompt
+    view = read_view((), prompt.skills_to_expand_at_start, prompt.sdk_disable)
+    selection = resolve_prompt_skills(view.expand, view)
+    warn_unresolved("skills_to_expand_at_start", selection.unresolved)
+    if not selection.skills:
+        return None
+    return preloaded_note(selection.skills, harness=ctx.harness)
+
+
 def fork_tail_skills_note(names: list[str], sdk_disable: Sequence[str]) -> HumanMessage | None:
 
     if not names:
         return None
-    from agent.graph.prompt.capabilities import resolve_prompt_skills
-
-    skills = resolve_prompt_skills(names, sdk_disable, config_field="fork_tail_skills")
-    rendered = _render_skill_bodies(skills, label="fork-tail-skills")
-    if rendered is None:
-        return None
-    sections, _injected = rendered
-    content = _FORK_TAIL_SKILLS_FRAMING + "\n\n" + "\n\n---\n\n".join(sections)
-    return system_note_message(
-        content=content, tag=NoteTag.PRELOADED_SKILLS, created_at=datetime.now(UTC)
+    disabled = effective_sdk_disable(sdk_disable)
+    selection = resolve_prompt_skills(names, SkillView((), (), disabled, read_skills(disabled)))
+    warn_unresolved("fork_tail_skills", selection.unresolved)
+    return _skill_bodies_note(
+        selection.skills, framing=_FORK_TAIL_SKILLS_FRAMING, label="fork-tail-skills"
     )
 
 

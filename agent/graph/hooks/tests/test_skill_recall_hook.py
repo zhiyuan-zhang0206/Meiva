@@ -13,7 +13,6 @@ from collections.abc import Mapping
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
-from unittest.mock import MagicMock
 
 import pytest
 from langchain_core.messages import AIMessage, AnyMessage, HumanMessage
@@ -21,7 +20,6 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.runtime import Runtime
 from langgraph.types import Overwrite
 
-from agent.graph.hooks import skill_recall
 from agent.graph.hooks.framework import framework_hooks
 from agent.graph.hooks.skill_recall import SkillRecallHook
 from agent.graph.recall.skill_recall import (
@@ -36,7 +34,7 @@ from base import paths
 from base.agents.context import MeivaContext
 from base.agents.messages.kwargs import NoteTag, read_meiva_kwargs
 from base.clock import Clock
-from base.config import settings
+from base.config.tests.configuration import defaults
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
@@ -50,6 +48,7 @@ from base.lm.provider_api import (
     YesNo,
 )
 from base.packages.extensions import install_registry
+from base.packages.extensions.install_registry import InstalledPackage
 from base.packages.plugin_providers import build_model_catalog
 from base.packages.plugins.extensions import EMPTY
 
@@ -105,17 +104,17 @@ def _catalog(binding: _Scorer, *, spec: DecisionModelSpec | None = None) -> Mode
     )
 
 
-def _reader(domain: str, field: str) -> Any:
-    return getattr(getattr(settings, domain), field)
-
-
 def _runtime(database: Database, catalog: ModelCatalog, **pins: Any) -> Runtime[MeivaContext]:
     return Runtime(
         context=MeivaContext(
-            ops_pool=MagicMock(),
-            llm=MagicMock(),
-            event_publisher=MagicMock(),
-            agent=AgentSlices.resolve(pins, default_reader=_reader),
+            agent=AgentSlices.resolve(
+                {
+                    "skills_to_inject_into_system_prompt": ["*"],
+                    "skills_to_expand_at_start": [],
+                    **pins,
+                },
+                default_reader=defaults(),
+            ),
             db=database,
             bus=EventBus.from_settings(),
             catalog=catalog,
@@ -125,16 +124,9 @@ def _runtime(database: Database, catalog: ModelCatalog, **pins: Any) -> Runtime[
 
 
 @pytest.fixture
-def skills_dir(unit_home: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+def skills_dir(unit_home: Path) -> Path:
     d = paths.skills_dir(paths.meiva_home())
     d.mkdir()
-    monkeypatch.setattr(
-        install_registry,
-        "loadable_skill_names",
-        lambda: {p.name for p in d.iterdir() if p.is_dir()},
-    )
-    monkeypatch.setattr(settings.agent, "skills_to_inject_into_system_prompt", ["*"])
-    monkeypatch.setattr(settings.agent, "skills_to_expand_at_start", [])
     return d
 
 
@@ -144,6 +136,8 @@ def _install(root: Path, name: str, desc: str = "") -> None:
         f"---\nname: {name}\ndescription: {desc or name + ' desc'}\n---\n\nBODY\n",
         encoding="utf-8",
     )
+    group = root.relative_to(paths.skills_dir(paths.meiva_home())).parts
+    install_registry.register(InstalledPackage(name=group[0] if group else name, type="skill"))
 
 
 @pytest.fixture
@@ -151,19 +145,6 @@ def three_skills(skills_dir: Path) -> Path:
     for name in ("alpha", "beta", "gamma"):
         _install(skills_dir, name)
     return skills_dir
-
-
-def _compaction_predicted(*_args: object, **_kwargs: object) -> bool:
-    return True
-
-
-def _compaction_not_predicted(*_args: object, **_kwargs: object) -> bool:
-    return False
-
-
-@pytest.fixture(autouse=True)
-def _no_compaction(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(skill_recall, "auto_compact_will_fire", _compaction_not_predicted)
 
 
 def _tail(source: str, text: str = "please draft the release notes") -> list[AnyMessage]:
@@ -268,13 +249,12 @@ async def test_an_exec_tail_without_a_new_inbound_does_not_fire(
     assert scorer.calls == []
 
 
-async def test_defers_when_auto_compact_will_fire(
-    three_skills: Path, monkeypatch: pytest.MonkeyPatch, database: Database
-) -> None:
-    monkeypatch.setattr(skill_recall, "auto_compact_will_fire", _compaction_predicted)
+async def test_defers_when_auto_compact_will_fire(three_skills: Path, database: Database) -> None:
     scorer = _Scorer({"beta": 0.9})
 
-    assert await _run(database, _state(_tail("user")), scorer) is None
+    update = await _run(database, _state(_tail("user")), scorer, auto_compact_fraction=1e-6)
+
+    assert update is None
     assert scorer.calls == []
 
 
@@ -329,11 +309,10 @@ async def test_the_description_is_the_one_line_the_index_quotes(
 
 
 async def test_a_read_an_offered_and_a_preloaded_skill_are_not_candidates(
-    three_skills: Path, monkeypatch: pytest.MonkeyPatch, database: Database
+    three_skills: Path, database: Database
 ) -> None:
     _install(three_skills, "delta")
     _install(three_skills, "epsilon")
-    monkeypatch.setattr(settings.agent, "skills_to_expand_at_start", ["epsilon"])
     scorer = _Scorer({})
     state = _state(
         _tail("user"),
@@ -341,7 +320,7 @@ async def test_a_read_an_offered_and_a_preloaded_skill_are_not_candidates(
         skill_recall=SkillRecallState(prompted={"beta"}),
     )
 
-    await _run(database, state, scorer)
+    await _run(database, state, scorer, skills_to_expand_at_start=["epsilon"])
 
     assert set(scorer.calls[0][1]) == {"gamma", "delta"}
 

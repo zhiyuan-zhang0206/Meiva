@@ -1,232 +1,124 @@
+# meiva:note
+# The task-maintenance daemon's run loop over real resources: a pidfile and healthz port of its own
+# under a temp directory, the throwaway Postgres and Redis the fixtures provision, and a separate
+# process that holds the pidfile the way a running daemon does.
 from __future__ import annotations
 
-from collections.abc import Callable
+import asyncio
+import http.client
+import os
+import socket
+import subprocess
+import sys
+from collections.abc import Iterator
+from contextlib import closing
 from pathlib import Path
-from typing import Any, cast
-from unittest.mock import patch
+from time import monotonic
 
 import pytest
-from psycopg_pool import ConnectionPool
 
-from base.cluster.dataplane.direct_url import ClusterDirectUrl
-from base.cluster.machine import MachineIdentity
-from base.config import ConfigBoot
 from base.daemon.endpoints import ServiceEndpoint
-from base.daemon.health import Liveness
 from base.db import Database
-from base.db.code_version_gate import ProcessDbGate
-from base.db.config import DbConfig
 from base.events.live.bus import EventBus
-from base.native_process import code_version
 from base.native_process.loaded_commit import LoadedCommit
 from meiva_builtins.plugins.meiva_fleet.default_config import FleetConfig
 from meiva_builtins.plugins.meiva_fleet.task_maintenance import daemon
 
+_HOLDER = Path(__file__).with_name("pidfile_holder.py")
 
-def _assert_gate_matches_image(
-    gates: list[ProcessDbGate], reads: list[tuple[Path, str]], image: LoadedCommit
+
+def _free_port() -> int:
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        return probe.getsockname()[1]
+
+
+def _endpoint(directory: Path) -> ServiceEndpoint:
+    return ServiceEndpoint("task_maintenance", _free_port(), directory / "task_maintenance.pid")
+
+
+def _healthz_status(endpoint: ServiceEndpoint) -> int | None:
+    connection = http.client.HTTPConnection("127.0.0.1", endpoint.health_port, timeout=2)
+    try:
+        connection.request("GET", "/healthz")
+        return connection.getresponse().status
+    except OSError:
+        return None
+    finally:
+        connection.close()
+
+
+async def _until_healthy(endpoint: ServiceEndpoint) -> None:
+    deadline = monotonic() + 30
+    while await asyncio.to_thread(_healthz_status, endpoint) != 200:
+        assert monotonic() < deadline, "the daemon never reported healthy"
+        await asyncio.sleep(0.1)
+
+
+# meiva:note
+# A real process whose argv names the daemon module, which is how the pidfile guard recognizes a
+# running daemon.
+@pytest.fixture
+def running_daemon_process(tmp_path: Path) -> Iterator[subprocess.Popen[bytes]]:
+    holder = subprocess.Popen(  # noqa: S603
+        [sys.executable, str(_HOLDER), daemon.__name__]
+    )
+    try:
+        yield holder
+    finally:
+        holder.kill()
+        holder.wait()
+
+
+async def test_run_serves_health_and_holds_its_pidfile_until_stopped(
+    tmp_path: Path, database: Database, event_bus: EventBus
 ) -> None:
-    assert len(gates) == 2 and gates[0] is gates[1]
-    if image.sha is None:
-        with pytest.raises(code_version.CodeVersionError, match="loaded commit"):
-            gates[0].application_name()
-        assert reads == []
-    else:
-        assert (
-            gates[0].application_name()
-            == gates[1].application_name()
-            == "meiva:task_maintenance:v42"
+    endpoint = _endpoint(tmp_path)
+    serving = asyncio.create_task(
+        daemon.run(
+            FleetConfig(),
+            database=lambda: database,
+            bus=event_bus,
+            image=LoadedCommit.capture(),
+            endpoint=endpoint,
         )
-        assert reads == [(image.source_root, image.sha)]
+    )
+    try:
+        await _until_healthy(endpoint)
+        assert endpoint.pidfile.read_text().strip() == str(os.getpid())
+    finally:
+        serving.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await serving
+
+    assert not endpoint.pidfile.exists()
+    with (
+        pytest.raises(OSError),
+        closing(socket.create_connection(("127.0.0.1", endpoint.health_port), 1)),
+    ):
+        pass
 
 
-def _patch_fleet_config(
-    monkeypatch: pytest.MonkeyPatch, config: FleetConfig, delivered: bool
+def test_run_refuses_to_start_while_a_daemon_holds_the_pidfile(
+    tmp_path: Path, running_daemon_process: subprocess.Popen[bytes]
 ) -> None:
-    def service(name: str, model: type[FleetConfig]) -> FleetConfig | None:
-        assert name == "meiva_fleet" and model is FleetConfig
-        return config if delivered else None
-
-    def read_image(model: type[FleetConfig], path: Path) -> FleetConfig:
-        assert (model, path) == (FleetConfig, Path("/fleet-image.json"))
-        return config
-
-    def image_path(_name: str) -> Path:
-        return Path("/fleet-image.json")
-
-    monkeypatch.setattr(daemon, "read_service_config", service)
-    monkeypatch.setattr(daemon, "read_config_image", read_image)
-    monkeypatch.setattr(daemon, "disk_image_path", image_path)
-
-
-def _entry_config() -> ConfigBoot:
-    owner = ConfigBoot()
-    owner.set_field("machine_name", "fleet-entry")
-    return owner
-
-
-def _ignore_signals(_name: str) -> None:
-    pass
-
-
-@pytest.mark.parametrize("sha", ["captured-task-maintenance", None])
-def test_entry_shares_the_image_gate_and_fleet_config(
-    monkeypatch: pytest.MonkeyPatch, sha: str | None
-) -> None:
-    from base.deploy.schema import migrations
-
-    image = LoadedCommit(Path("/entry-task-maintenance"), sha)
-    config = FleetConfig()
-    stages: list[str] = []
-    gates: list[ProcessDbGate] = []
-    reads: list[tuple[Path, str]] = []
-    factories: list[Callable[[], Database]] = []
-    pipeline = object()
-
-    machines: list[MachineIdentity] = []
-
-    class Store:
-        def __init__(
-            self, config: DbConfig, *, gate: ProcessDbGate, direct_url: ClusterDirectUrl
-        ) -> None:
-            gates.append(gate)
-            assert direct_url.local_host == machines[0].host
-
-    def capture() -> LoadedCommit:
-        stages.append("capture")
-        return image
-
-    def count(root: Path, commit: str) -> int:
-        reads.append((root, commit))
-        return 42
-
-    def build(*, database: Callable[[], Database], machine: MachineIdentity, home: Path) -> object:
-        stages.append("producer")
-        machines.append(machine)
-        assert gates == []
-        factories.append(database)
-        return pipeline
-
-    def initialize(**inputs: Any) -> None:
-        stages.append("logging")
-        assert inputs["name"] == "task_maintenance"
-        assert inputs["image"] is image
-        assert inputs["producer"]() is pipeline
-        assert inputs["machine_reader"]() == "fleet-entry"
-        factories[0]()
-
-    async def work(
-        fleet: FleetConfig, *, database: Callable[[], Database], image: LoadedCommit
-    ) -> None:
-        stages.append("run")
-        assert fleet is config and image is captured
-        assert database is factories[0]
-        database()
-
-    def check_schema(_url: str) -> None:
-        stages.append("schema")
-
-    captured = image
-    monkeypatch.setattr(daemon, "ConfigBoot", _entry_config)
-    monkeypatch.setattr(daemon.LoadedCommit, "capture", capture)
-    monkeypatch.setattr(code_version, "first_parent_count", count)
-    monkeypatch.setattr(daemon, "Database", Store)
-    monkeypatch.setattr(daemon.telemetry, "build_pipeline", build)
-    monkeypatch.setattr(daemon, "init_gateway_process", initialize)
-    monkeypatch.setattr(migrations, "assert_schema_current", check_schema)
-    monkeypatch.setattr(daemon, "install_graceful_shutdown", _ignore_signals)
-    _patch_fleet_config(monkeypatch, config, sha is not None)
-    monkeypatch.setattr(daemon, "run", work)
-    with patch.dict("os.environ"):
-        daemon.main(cleanup_pidfile=lambda: stages.append("pidfile"))
-    assert stages == ["capture", "schema", "producer", "logging", "run", "pidfile"]
-    _assert_gate_matches_image(gates, reads, image)
-
-
-@pytest.mark.parametrize("failure", [None, TypeError("invalid dispatch")])
-async def test_run_keeps_health_before_pool_and_closes_after_dispatch(
-    monkeypatch: pytest.MonkeyPatch, failure: Exception | None
-) -> None:
-    image = LoadedCommit(Path("/task-maintenance-work"), None)
-    config = FleetConfig()
-    bus = cast(EventBus, object())
-    stages: list[str] = []
-
-    class Pool:
-        def close(self) -> None:
-            stages.append("pool-close")
-
-    pool = cast(ConnectionPool, Pool())
-
-    class Store:
-        def pool(self) -> ConnectionPool:
-            stages.append("pool")
-            return pool
-
-    db = cast(Database, Store())
+    endpoint = _endpoint(tmp_path)
+    endpoint.pidfile.write_text(f"{running_daemon_process.pid}\n", encoding="utf-8")
 
     def database() -> Database:
-        stages.append("database")
-        return db
+        raise AssertionError("a refused daemon must not open its database")
 
-    async def start(_name: str, _port: int, *, liveness: Liveness, image: LoadedCommit) -> object:
-        assert image is captured and liveness is not None
-        stages.append("health")
-        return object()
-
-    async def stop(_health: object) -> None:
-        stages.append("health-close")
-
-    async def dispatch(
-        received_pool: ConnectionPool,
-        received_db: Database,
-        received_bus: EventBus,
-        _liveness: Liveness,
-        *,
-        config: FleetConfig,
-    ) -> None:
-        assert (received_pool, received_db, received_bus) == (pool, db, bus)
-        assert config is fleet
-        stages.append("dispatch")
-        if failure is not None:
-            raise failure
-
-    captured, fleet = image, config
-    monkeypatch.setattr(daemon, "write_pidfile", lambda: stages.append("pidfile"))
-    monkeypatch.setattr(
-        daemon,
-        "task_maintenance_endpoint",
-        lambda: ServiceEndpoint("task_maintenance", 1, Path("/pid")),
-    )
-    monkeypatch.setattr(daemon, "start_health_server", start)
-    monkeypatch.setattr(daemon, "stop_health_server", stop)
-    monkeypatch.setattr(daemon.EventBus, "from_settings", lambda: bus)
-    monkeypatch.setattr(daemon, "dispatch_loop", dispatch)
-    if failure is None:
-        await daemon.run(
-            config,
-            database=database,
-            image=image,
-            check_running=lambda: False,
-            cleanup_pidfile=lambda: stages.append("pidfile-close"),
-        )
-    else:
-        with pytest.raises(TypeError, match="invalid dispatch") as raised:
-            await daemon.run(
-                config,
+    with pytest.raises(SystemExit) as refused:
+        asyncio.run(
+            daemon.run(
+                FleetConfig(),
                 database=database,
-                image=image,
-                check_running=lambda: False,
-                cleanup_pidfile=lambda: stages.append("pidfile-close"),
+                bus=EventBus.from_settings(),
+                image=LoadedCommit.capture(),
+                endpoint=endpoint,
             )
-        assert raised.value is failure
-    assert stages == [
-        "pidfile",
-        "health",
-        "database",
-        "pool",
-        "dispatch",
-        "pool-close",
-        "health-close",
-        "pidfile-close",
-    ]
+        )
+
+    assert refused.value.code == 1
+    assert endpoint.pidfile.read_text().strip() == str(running_daemon_process.pid)
+    assert _healthz_status(endpoint) is None

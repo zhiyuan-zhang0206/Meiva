@@ -26,9 +26,7 @@ from base.db.code_version_gate import ProcessDbGate
 from meiva.sdk_surface import process_context
 
 
-async def test_exec_node_preserves_state_update_on_lifecycle(
-    fake_cancel_event, *, database_gate: ProcessDbGate
-):
+async def test_exec_node_preserves_state_update_on_lifecycle(*, database_gate: ProcessDbGate):
     """Lifecycle (terminate) path: plugin's state_update written before raising still merges.
 
     Directly raise AgentTermination to avoid `meiva.self.terminate()`'s internal db INSERT
@@ -60,9 +58,7 @@ async def test_exec_node_preserves_state_update_on_lifecycle(
     assert not process_context.in_exec_turn()
 
 
-async def test_exec_node_commits_security_finding_to_graph_state(
-    fake_cancel_event, *, database_gate: ProcessDbGate
-):
+async def test_exec_node_commits_security_finding_to_graph_state(*, database_gate: ProcessDbGate):
     """A finding raised inside the exec child rides the state update into
     `state.security_findings`; the exec node itself adds no note to its messages
     delta (the after_exec hook delivers it) and the host keeps no findings of its own."""
@@ -83,7 +79,7 @@ async def test_exec_node_commits_security_finding_to_graph_state(
 
 
 async def test_exec_node_keeps_plugin_notes_after_toolmessage_beside_findings(
-    fake_cancel_event, *, database_gate: ProcessDbGate
+    *, database_gate: ProcessDbGate
 ):
     """Order in the exec's messages delta: ToolMessage, then the plugin's context
     notes — the tool_use adjacency is preserved — while the finding for the same
@@ -112,7 +108,7 @@ async def test_exec_node_keeps_plugin_notes_after_toolmessage_beside_findings(
 
 
 async def test_exec_node_checkpoints_child_attachment(
-    fake_cancel_event, tmp_path: Path, *, database_gate: ProcessDbGate
+    tmp_path: Path, *, database_gate: ProcessDbGate
 ):
     """A normal child registration drains into a media message in the exec update.
 
@@ -157,7 +153,7 @@ async def test_exec_node_checkpoints_child_attachment(
 
 
 async def test_exec_node_compact_path_drops_notes_and_findings(
-    fake_cancel_event, tmp_path: Path, *, database_gate: ProcessDbGate
+    tmp_path: Path, *, database_gate: ProcessDbGate
 ):
     """The compact path (SystemHalt) writes nothing back — claim REMOVE_ALLs
     the whole history — so neither plugin notes nor the child's findings may

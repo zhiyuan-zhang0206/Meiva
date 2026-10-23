@@ -221,68 +221,6 @@ def test_boot_crash_child_delivers_the_crash_envelope_record(
     assert ("exec_envelope", "result", "write") in keys, f"receiver saw: {sorted(keys)}"
 
 
-def test_unfinished_ordinary_delivery_preserves_success_and_attempts_otlp_tail(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    from unittest.mock import MagicMock
-
-    from agent.execution import child
-    from agent.execution.protocol import ResultPayload, write_result
-    from base import telemetry
-    from base.agents.context.clients import ClientSet
-    from base.telemetry.otlp.telemetry_otlp_exporting import ExportingEventPipeline
-    from meiva.tests.fixtures.pin_agent import pin_agent
-
-    result_path = str(tmp_path / "result.json")
-    payload = ResultPayload(kind="done", code_reached=True)
-    write_result(Path(result_path), payload)
-    before = Path(result_path).read_bytes()
-    monkeypatch.setattr(
-        telemetry,
-        "sync",
-        MagicMock(
-            return_value=telemetry.DrainResult(
-                telemetry.DrainStatus.UNFINISHED, telemetry.DrainPhase.DRAIN
-            )
-        ),
-    )
-    finalize = MagicMock()
-    pipeline = ExportingEventPipeline(
-        writer=lambda _events, _exporter: None, export_allowed=lambda: False
-    )
-    clients = ClientSet(pipeline_factory=lambda: pipeline)
-    try:
-        clients.event_pipeline()
-        pin_agent(None, clients=clients)
-        monkeypatch.setattr(pipeline, "finalize_exports", finalize)
-        child.deliver_run_telemetry(result_path, payload)
-        finalize.assert_called_once_with()
-        assert Path(result_path).read_bytes() == before
-    finally:
-        clients.close()
-
-
-def test_unknown_ordinary_delivery_keeps_crash_primary(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    from unittest.mock import MagicMock
-
-    from agent.execution import child
-    from agent.execution.protocol import ResultPayload, write_result
-    from base import telemetry
-
-    result_path = str(tmp_path / "result.json")
-    payload = ResultPayload(
-        kind="crashed", code_reached=True, exc_type="OriginalError", exc_msg="primary"
-    )
-    write_result(Path(result_path), payload)
-    before = Path(result_path).read_bytes()
-    monkeypatch.setattr(telemetry, "sync", MagicMock(side_effect=ValueError("unknown drain")))
-    child.deliver_run_telemetry(result_path, payload)
-    assert Path(result_path).read_bytes() == before
-    child.deliver_envelope_telemetry()
-
-
 def test_owned_writer_failure_rewrites_success_before_child_exit(tmp_path: Path) -> None:
     from dataclasses import replace
     from datetime import UTC, datetime

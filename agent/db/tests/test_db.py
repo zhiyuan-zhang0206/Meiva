@@ -18,7 +18,6 @@ Semantics: compact modifies messages in-place, **does not create a new agent** â
 from datetime import UTC, datetime
 
 import psycopg
-import pytest
 from psycopg_pool import AsyncConnectionPool
 
 from agent import db as agent_db
@@ -97,7 +96,6 @@ class TestFatalProviderReport:
         self,
         db_conn: psycopg.Connection,
         aops_pool: AsyncConnectionPool,
-        monkeypatch: pytest.MonkeyPatch,
         database: Database,
         event_bus: EventBus,
     ) -> None:
@@ -123,11 +121,6 @@ class TestFatalProviderReport:
                 (failed, f"agent:{folded_parent}"),
             )
         db_conn.commit()
-
-        def _no_wake(_db: object, _bus: object, *_args: object) -> None:
-            return None
-
-        monkeypatch.setattr(agent_db, "publish_inbound_wake", _no_wake)
 
         recipient = await agent_db.enqueue_fatal_provider_report_to_nearest_alive_ancestor(
             aops_pool,

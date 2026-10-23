@@ -44,7 +44,6 @@ Redis. `process_chunk` / `finish` are therefore synchronous.
 """
 
 import json
-import time
 from typing import Any, cast
 
 from langchain_core.messages import AIMessageChunk
@@ -122,6 +121,10 @@ class RedisStreamHandler:
         # follows all narration/reasoning (it terminates the turn), so by the
         # time a tool_call_chunk arrives this set is final.
         self._content_block_indices: set[int] = set()
+        # meiva:note
+        # Monotonic arrival time of the chunk being fanned out. finish() flushes the code
+        # remainder of what already arrived, so it stamps with the last chunk's time.
+        self._arrived_at = 0.0
         # tool_call grouping key -> resolved code block_idx. The key groups the
         # fragments of one tool call: anthropic streams args across many chunks
         # sharing an `index`; gemini sends one chunk per call with `index=None`
@@ -171,7 +174,11 @@ class RedisStreamHandler:
         for merge matching."""
         return f"{self._msg_idx}.{block_idx}"
 
-    def process_chunk(self, chunk: AIMessageChunk) -> None:
+    # meiva:note
+    # `now` is the monotonic arrival time of the chunk. Every first/last-token stamp of this
+    # chunk is taken from it, so the per-block "thought for X seconds" is a function of the
+    # arrival times the caller measured, not of when the fan-out ran.
+    def process_chunk(self, chunk: AIMessageChunk, now: float) -> None:
         """Dispatch one streaming chunk to the SSE fan-out.
 
         text / reasoning / code judged independently along three paths: when
@@ -190,6 +197,7 @@ class RedisStreamHandler:
         # budget — no node completes, no LLM step finishes — would read as
         # "no progress" and be aborted by the hosted stall guard mid-stream.
         self._turn_progress.mark(self._agent_id)
+        self._arrived_at = now
         self._process_content(chunk.content)  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
         self._process_additional_reasoning(chunk.additional_kwargs)  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
         # tool_call_chunks is list[ToolCallChunk] TypedDict (not list[dict]),
@@ -396,7 +404,7 @@ class RedisStreamHandler:
         return self._total_reasoning_chars
 
     def _publish_reasoning_delta(self, block_idx: int, frag: str) -> None:
-        now = time.monotonic()
+        now = self._arrived_at
         if block_idx not in self._reasoning_first_ts:
             self._reasoning_first_ts[block_idx] = now
         self._reasoning_last_ts[block_idx] = now
@@ -433,7 +441,7 @@ class RedisStreamHandler:
         delta = code_so_far[published:]
         if not delta:
             return
-        now = time.monotonic()
+        now = self._arrived_at
         if block_idx not in self._code_first_ts:
             self._code_first_ts[block_idx] = now
         self._code_last_ts[block_idx] = now

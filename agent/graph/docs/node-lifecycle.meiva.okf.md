@@ -7,7 +7,7 @@ tags: [agent, graph]
 
 # Node lifecycle events and timeline snapshots
 
-`agent/graph/node_log.py` wraps every graph node with one `node_lifecycle`
+`agent/graph/node_log/` wraps every graph node with one `node_lifecycle`
 context: `node_enter` / `node_exit` records for death observability, and the
 frontend's `TimelineSnapshot` publish on enter. All outcomes log at INFO (user
 ruling 2026-08-04: node transitions are lifecycle flow, never WARNING; fatal
@@ -56,9 +56,13 @@ Snapshots are incremental per agent: cursor 0, a shrunk history and an explicit 
 
 ## Stall probe
 
-`_stall_dump_guard` arms a one-shot diagnostic when a node body outlasts
-`agent.node_stall_dump_seconds`: faulthandler dumps every thread's frames, and a
-loop timer dumps every asyncio task's full await chain — `dump_async_tasks`
+`stall_guard` arms a one-shot diagnostic when a node body outlasts the threshold the node
+passes as `StallConfig` (read from `agent.node_stall_dump_seconds` of the turn's frozen agent
+configuration; `thread_dump_stagger_s` is the 2s stagger, a tuning default). Whether a body
+gets a probe, and when each half fires, is `stall_probe` in `_plan.py`, a strict function of the
+node name and the config; the shell in `_stall.py` arms faulthandler and the loop timer. The
+probe: faulthandler dumps every thread's frames, and a
+loop timer dumps every asyncio task's full await chain — `render_task_dump`
 walks `cr_await` / `ag_await` past the `get_stack()` frame to the leaf awaited
 line, which a thread dump cannot show. It fires at the threshold and faulthandler
 2s later (different threads on one stderr; together they interleave garbage),
@@ -68,3 +72,7 @@ is exempt (it parks in the idle wait for hours), and nodes run one at a time, so
 the one global timer never collides.
 
 The stall dump arms only above a positive threshold and never for an exempt node; the task dump fires at the threshold, faulthandler 2s later, and both are disarmed on the way out. Dumps target the interpreter's original stderr descriptor (a process without one skips the dump), and the task dump renders each task's full await chain down to the leaf awaited line.
+
+The probe's tests run `stall_guard` in a child process with small thresholds and read the child's
+stderr, so the real faulthandler timer and the real descriptor are exercised, including a leaked
+`redirect_stderr` and the disarm on a normal or failing exit.

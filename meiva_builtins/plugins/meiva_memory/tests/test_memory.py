@@ -17,6 +17,7 @@ import pytest
 
 import meiva
 from base.agents.context.gateway_client.memory_search import MemorySearchResult
+from base.agents.sdk.call_policy import SamplingPolicy, SamplingPolicyOwner
 from base.packages.plugin_config_images import DiskPluginConfigImages
 from base.packages.plugins.extensions import ExtensionRegistry
 from base.paths.home import resolve_meiva_home
@@ -28,17 +29,11 @@ from meiva_builtins.plugins.meiva_memory import plugin as memory_plugin
 
 
 @pytest.fixture(autouse=True)
-def _install_memory_sdk(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
-    """Install the meiva_memory SDK surface the plugin declares in the agent process."""
-    from base.agents.sdk import call_policy
-
-    def _policy_for_test(_owner: call_policy.SamplingPolicyOwner) -> call_policy.SamplingPolicy:
-        return call_policy.SamplingPolicy()
-
-    monkeypatch.setattr(call_policy, "policy", _policy_for_test)
+def _install_memory_sdk() -> Iterator[None]:
     install.install(
         ExtensionRegistry((("meiva_memory", memory_plugin.contribute()),)),
         config_images=DiskPluginConfigImages(resolve_meiva_home()),
+        sampling=SamplingPolicyOwner(reader=SamplingPolicy),
     )
     yield
     install.uninstall()

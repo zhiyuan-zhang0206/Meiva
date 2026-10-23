@@ -12,36 +12,25 @@ import pytest
 
 from meiva.gateway_client import use_client
 from meiva.tests.fixtures.pin_agent import pin_agent
+from meiva_builtins.plugins.meiva_fleet.tests.task_registry.seeds import (
+    root_task_id as root_task_id,
+)
+from meiva_builtins.plugins.meiva_fleet.tests.task_registry.seeds import seed_agent
 
 
 class TestTasksEntries:
     def test_create_title_unwraps(
-        self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+        self, db_conn: psycopg.Connection, redis_url: str, root_task_id: int
     ) -> None:
         """Single-element title tuple lands as the unwrapped string (DB round-trip)."""
         from meiva_builtins.plugins.meiva_fleet import task_registry
 
-        with db_conn.cursor() as cur:
-            cur.execute(
-                "INSERT INTO agent_tasks (title, description, status, created_by, is_root) "
-                "VALUES ('Root', 'root', 'in_progress', 'system', TRUE) RETURNING id"
-            )
-            row = cur.fetchone()
-            assert row is not None
-            root_id = row[0]  # pyright: ignore[reportOptionalSubscript]
-        db_conn.commit()
-        pin_agent(900001)
-        with db_conn.cursor() as cur:
-            cur.execute("INSERT INTO agents (id) VALUES (900001) ON CONFLICT (id) DO NOTHING")
-        db_conn.commit()
-        from base.events.live import announce
-
-        monkeypatch.setattr(announce, "publish_task_created_sync", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownArgumentType]
+        pin_agent(seed_agent(db_conn))
 
         inputs: dict[str, Any] = {
             "title": ("My Task",),
             "description": "d",
-            "parent": root_id,
+            "parent": root_task_id,
             "operation_key": str(uuid4()),
         }
         task = task_registry.create(**inputs)
@@ -71,13 +60,20 @@ class TestTasksEntries:
             }
             task_registry.create(**inputs)
 
-    def test_log_message_unwraps(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_log_message_unwraps(
+        self, db_conn: psycopg.Connection, redis_url: str, root_task_id: int
+    ) -> None:
         from meiva_builtins.plugins.meiva_fleet import task_registry
 
-        seen: dict[str, Any] = {}
-        monkeypatch.setattr(task_registry, "update", lambda *_a, **_kw: seen.update(_kw))  # pyright: ignore[reportUnknownArgumentType]
-        task_registry.log(7, ("note",), operation_key=str(uuid4()))  # pyright: ignore[reportArgumentType]
-        assert seen["note"] == "note"
+        pin_agent(seed_agent(db_conn))
+        task = task_registry.create(
+            "log target", "d", parent=root_task_id, operation_key=str(uuid4())
+        )
+
+        message: Any = ("note",)
+        task_registry.log(task.id, message, operation_key=str(uuid4()))
+
+        assert (task_registry.get(task.id).results or "").endswith(" note\n")
 
     def test_log_multi_element_type_errors(self) -> None:
         from meiva_builtins.plugins.meiva_fleet import task_registry
@@ -85,7 +81,7 @@ class TestTasksEntries:
         with pytest.raises(TypeError, match="message must be a string"):
             task_registry.log(7, ("a", "b"), operation_key=str(uuid4()))  # pyright: ignore[reportArgumentType]
 
-    def test_update_status_unwraps(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_update_status_unwraps(self) -> None:
         from meiva_builtins.plugins.meiva_fleet import task_registry
 
         # Coercion fires before the DB write: a status tuple unwraps, then the
@@ -93,7 +89,7 @@ class TestTasksEntries:
         with pytest.raises(ValueError, match="status must be one of"):
             task_registry.update(7, status=("not-a-status",), operation_key=str(uuid4()))  # pyright: ignore[reportArgumentType]
 
-    def test_update_owner_never_unwraps(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_update_owner_never_unwraps(self) -> None:
         from meiva_builtins.plugins.meiva_fleet import task_registry
 
         with pytest.raises(TypeError, match="owner must be int"):

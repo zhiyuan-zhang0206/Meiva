@@ -6,10 +6,8 @@ from unittest.mock import MagicMock
 from uuid import uuid4
 
 import psycopg
-import pytest
 from psycopg_pool import AsyncConnectionPool
 
-from agent import impersonation_process
 from agent.ownership.hosted import admit_hosted_runtime
 from base.agents import impersonation as leases
 from base.agents.impersonation.tests.impersonation_support import recorded_tree
@@ -28,7 +26,6 @@ from services.agent_runner.agent_host.tests.host_policy import configured_machin
 async def test_replacement_host_admission_ends_the_takeover_without_respawning_its_relay(
     db_conn: psycopg.Connection[Any],
     aops_pool: AsyncConnectionPool[Any],
-    monkeypatch: pytest.MonkeyPatch,
     database: Database,
     event_bus: EventBus,
     model_catalog: ModelCatalog,
@@ -70,8 +67,6 @@ async def test_replacement_host_admission_ends_the_takeover_without_respawning_i
         local_machine=machine_identity.name(),
     )
     leases.activate(database, event_bus, lease["id"], owner)
-    spawn = MagicMock(return_value=MagicMock(poll=MagicMock(return_value=None)))
-    monkeypatch.setattr(impersonation_process, "spawn_codex_relay", spawn)
     graph = _HandoffGraph()
     host = AgentHost(
         policy=configured_policy(),
@@ -97,7 +92,7 @@ async def test_replacement_host_admission_ends_the_takeover_without_respawning_i
     )
     assert ended["status"] == "expired"
     assert ended["rejection_reason"] == "aborted: native runtime restarted"
-    spawn.assert_not_called()
+    assert not host.relays.children
 
 
 # meiva:note

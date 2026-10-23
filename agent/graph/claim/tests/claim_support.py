@@ -5,6 +5,7 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import psycopg
+from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
@@ -18,6 +19,7 @@ from base.config.tests.configuration import defaults
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
+from base.events.live.publisher import AgentEventPublisher
 from base.host.env.agent_slices import AgentSlices
 from base.packages.composer_commands import CommandCatalog
 from base.packages.plugin_providers import build_model_catalog
@@ -34,24 +36,20 @@ def make_fake_llm(summary: str = "synthetic compaction summary") -> Any:
     return llm
 
 
+# meiva:note
+# Assembles a claim Runtime borrowing the test SDK root's clients and machine. `ops_pool=None`
+# takes the container early-return path. SSE fan-out goes through `ctx.event_publisher.emit`; the
+# default is a sink so the node's `assert ctx.event_publisher` passes, and a test that reads the
+# published events passes `live_events.publisher`.
 def make_runtime(
     *,
     ops_pool: AsyncConnectionPool | None = None,
-    llm: Any | None = None,
-    event_publisher: Any | None = None,
+    llm: BaseChatModel | None = None,
+    event_publisher: AgentEventPublisher | None = None,
     extensions: ExtensionRegistry = EMPTY,
     agent_id: int | None = None,
     database_gate: ProcessDbGate,
 ) -> Runtime[MeivaContext]:
-    """Assemble a claim Runtime borrowing the test SDK root's clients and machine.
-
-    `ops_pool=None` takes the container early-return path;
-
-    InboundCommitted SSE fan-out goes through `ctx.event_publisher.emit`; default to a MagicMock
-    so the node's `assert ctx.event_publisher` passes; tests verifying InboundCommitted pass their own
-    mock to assert `pub.emit.call_args_list`.
-
-    """
     retained = meiva.context
     ctx = MeivaContext(
         clients=retained.clients,

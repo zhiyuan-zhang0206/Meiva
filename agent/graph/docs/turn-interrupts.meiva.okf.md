@@ -14,7 +14,7 @@ and idle and its next input starts a fresh turn. See
 [[agent/graph/exec/docs/hosted-turn-cancel.meiva.okf.md]].
 
 Terminate remains a durable inbound. The two-second DB poll in
-`agent/graph/interrupt.py` observes a pending cancel/terminate row during
+`agent/graph/interrupt/` (`watch_for_interrupt`, cadence `INTERRUPT_POLL_S`) observes a pending cancel/terminate row during
 LLM/exec, halts and returns to claim; claim routes termination to `END` while a
 `kind='cancel'` inbound keeps the agent alive and idle. No public route writes a
 `cancel` row today; the consumer remains for external controllers. A pending
@@ -50,7 +50,10 @@ database clock; `pending_interrupt_reason` reads the row's `created_at`. Most co
 runs end inside the grace and the restart then takes effect at the next turn
 boundary with nothing cut short. Cancel and terminate need no grace. The watcher's
 poll (`INTERRUPT_POLL_S`) bounds how soon past the grace the node notices, and the
-graceful exit's drain is held above grace, poll and one unwind by the clock lattice.
+graceful exit's drain is held above grace, poll and one unwind by the clock lattice. The
+production cadence and the five-second exit bound are the defaults of
+`subscribe_interrupt(..., poll_s=, exit_timeout_s=)`; the nodes call it with those defaults,
+and the package's own tests pass small values against a real database.
 
 An interrupted node returns `interrupt_halt(reason)`: `halted`, and for a restart
 also `interrupted_by_restart`. That mark exists because `halted` cannot say whether

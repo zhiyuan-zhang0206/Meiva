@@ -1,52 +1,24 @@
-"""`llm_node` turn_end finally-path unit tests — ok=False MUST carry a traceback.
-
-161 incident: turn_end ok=False but neither events nor stderr had exception info —
-`logger.info` in the finally block emitted but didn't capture exc_info, so from the
-framework's perspective "why it failed" was completely invisible. Fix:
-`logger.opt(exception=True).warning(...)` on the ok=False path, together with
-`base.telemetry.process_logging._event_sink` automatically injecting traceback / exception_type /
-exception_value into events.payload.
-
-Tests focus on the two branches of the finally block (ok=True / ok=False), without
-re-testing _llm_node_impl internals — use monkeypatch to make _llm_node_impl
-immediately raise / return a mock.
-"""
+# meiva:note
+# `llm_node` turn_end finally-path unit tests — ok=False MUST carry a traceback. 161 incident: turn_end ok=False but neither events nor stderr had exception info — `logger.info` in the finally block emitted but didn't capture exc_info, so from the framework's perspective "why it failed" was completely invisible. Fix: `logger.opt(exception=True).warning(...)` on the ok=False path, together with `base.telemetry.process_logging._event_sink` automatically injecting traceback / exception_type / exception_value into events.payload. Tests focus on the two branches of the finally block (ok=True / ok=False): the model the node streams from fails, or answers.
 
 from __future__ import annotations
 
 import time
-from unittest.mock import MagicMock
 
 import pytest
+from langchain_core.messages import HumanMessage
 from langchain_core.runnables import RunnableConfig
 
-from agent.graph.llm._retry import Attempt
+from agent.graph.llm._backoff import Attempt
 from agent.graph.llm.node import llm_attempt, llm_node
+from agent.graph.llm.tests.llm_support import ScriptedModel, end_turn_chunk, llm_runtime
 from agent.graph.llm_errors import LlmLedger
-from agent.hooks.tests.fakes import make_fake_ops_pool
-from base.agents.context import MeivaContext
-from base.clock import Clock
-from base.config.tests.configuration import defaults
-from base.host.env.agent_slices import AgentSlices
+from agent.state import AgentState
+from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
-from base.native_process.turn_identity import HostedTurnResources
-from meiva.tests.fixtures.pin_agent import hosted_resources as hosted_resources
+from base.log.tests.log_records import LogRecords
 
-
-def _runtime_with_redis(hosted_resources: HostedTurnResources, catalog: ModelCatalog):
-    """MagicMock runtime + functional ops_pool (subscribe_interrupt's watcher
-    reads pending interrupts)."""
-    runtime = MagicMock()
-    runtime.execution_info = None
-    runtime.context = MeivaContext(
-        hosted_resources=hosted_resources,
-        ops_pool=make_fake_ops_pool(),
-        event_publisher=MagicMock(),
-        agent=AgentSlices.resolve(default_reader=defaults()),
-        catalog=catalog,
-        clock_factory=Clock.from_settings,
-    )
-    return runtime
+_STATE = AgentState(messages=[HumanMessage(content="hi")], halted=False)
 
 
 def _config_with_thread() -> RunnableConfig:
@@ -54,29 +26,24 @@ def _config_with_thread() -> RunnableConfig:
     return {"configurable": {"thread_id": "1"}}
 
 
+# meiva:note
+# The model fails; the finally path uses logger.opt(exception=True) so that record["exception"] is not None, allowing downstream _event_sink to inject the traceback.
 async def test_turn_end_ok_false_record_carries_exception(
-    hosted_resources: HostedTurnResources,
-    loguru_records,
-    model_catalog: ModelCatalog,
+    loguru_records: LogRecords, model_catalog: ModelCatalog, database_gate: ProcessDbGate
 ) -> None:
-    """`_llm_node_impl` raises → finally uses logger.opt(exception=True) so that
-    record["exception"] is not None, allowing downstream _event_sink to inject the traceback."""
-
-    async def _boom(*_a: object, **_k: object):
-        raise RuntimeError("simulated LLM timeout 39s")
+    model = ScriptedModel(scripts=[[RuntimeError("simulated LLM timeout 39s")]])
 
     with pytest.raises(RuntimeError, match="simulated LLM timeout"):
         await llm_attempt(
-            state=MagicMock(messages=[]),
-            runtime=_runtime_with_redis(hosted_resources=hosted_resources, catalog=model_catalog),
-            config=_config_with_thread(),
-            attempt=Attempt(1, time.time()),
-            ledger=LlmLedger(),
-            impl=_boom,
+            _STATE,
+            llm_runtime(model, model_catalog=model_catalog, database_gate=database_gate),
+            _config_with_thread(),
+            Attempt(1, time.time()),
+            LlmLedger(),
         )
 
-    turn_end_records = [r for r in loguru_records if r["extra"].get("event") == "turn_end"]  # pyright: ignore[reportUnknownMemberType]
-    assert len(turn_end_records) == 1  # pyright: ignore[reportUnknownArgumentType]
+    turn_end_records = loguru_records.events("turn_end")
+    assert len(turn_end_records) == 1
     rec = turn_end_records[0]
     assert rec["extra"]["ok"] is False
     assert (
@@ -90,28 +57,22 @@ async def test_turn_end_ok_false_record_carries_exception(
 
 
 async def test_turn_end_ok_true_record_no_exception(
-    hosted_resources: HostedTurnResources,
-    loguru_records,
-    model_catalog: ModelCatalog,
+    loguru_records: LogRecords, model_catalog: ModelCatalog, database_gate: ProcessDbGate
 ) -> None:
     """Normal path ok=True: uses logger.info without exc_info, record["exception"] is None,
     payload must not bloat with traceback/exception_* fields."""
-    sentinel = MagicMock()
-
-    async def _ok(*_a: object, **_k: object):
-        return sentinel
+    model = ScriptedModel(scripts=[[end_turn_chunk()]])
 
     result = await llm_node(
-        state=MagicMock(),
-        runtime=_runtime_with_redis(hosted_resources=hosted_resources, catalog=model_catalog),
-        config=_config_with_thread(),
+        _STATE,
+        llm_runtime(model, model_catalog=model_catalog, database_gate=database_gate),
+        _config_with_thread(),
         ledger=LlmLedger(),
-        impl=_ok,
     )
-    assert result is sentinel
 
-    turn_end_records = [r for r in loguru_records if r["extra"].get("event") == "turn_end"]  # pyright: ignore[reportUnknownMemberType]
-    assert len(turn_end_records) == 1  # pyright: ignore[reportUnknownArgumentType]
+    assert result.update is not None and result.update["messages"][0].content == "ok"
+    turn_end_records = loguru_records.events("turn_end")
+    assert len(turn_end_records) == 1
     rec = turn_end_records[0]
     assert rec["extra"]["ok"] is True
     assert rec["level"].name == "INFO"  # pyright: ignore[reportUnknownMemberType]

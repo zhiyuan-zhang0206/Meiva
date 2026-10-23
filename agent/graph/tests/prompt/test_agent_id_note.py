@@ -1,67 +1,79 @@
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from pathlib import Path
+from typing import Any
 
+import psycopg
 import pytest
 from psycopg import OperationalError
 
-from agent.graph.prompt import context_notes
-from agent.graph.prompt.context_notes import agent_id_note, machine_clause, own_label
+from agent.graph.prompt.context_notes import (
+    agent_id_note,
+    machine_clause,
+    own_label,
+    workspace_facts,
+)
+from agent.graph.prompt.note_text import (
+    Workspace,
+    agent_id_text,
+    label_from_row,
+    machine_name_text,
+    workspace_display,
+)
 from base.agents.context import MeivaContext
+from base.agents.context.clients import ClientSet
 from base.agents.context.identity import AgentIdentity
 from base.agents.messages.kwargs import NoteTag
-from base.clock import Clock
-from base.config import settings
+from base.cluster import machine
+from base.cluster.machine import MachineIdentity
+from base.config.tests.configuration import defaults
+from base.db import Database
 from base.host.env.agent_slices import AgentSlices
-from base.packages.plugin_providers import build_model_catalog
-from meiva.tests.fixtures.pin_agent import pin_agent, pin_no_identity
 
 
-@pytest.fixture(autouse=True)
-def _agent_identity(monkeypatch: pytest.MonkeyPatch) -> None:
-
-    pin_agent(29)
-
-
-def _context(agent_id: int | None = 29) -> MeivaContext:
-    return MeivaContext(
-        identity=AgentIdentity(agent_id=agent_id, owns_loop=True) if agent_id is not None else None,
-        agent=AgentSlices.resolve(
-            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
-        ),
-        catalog=build_model_catalog(),
-        clock_factory=Clock.from_settings,
+def _machine(reader: Callable[[], str]) -> MachineIdentity:
+    return MachineIdentity(
+        name=reader,
+        role=lambda: frozenset({"agent-runner"}),
+        host=lambda: "localhost",
+        description=lambda: None,
     )
 
 
-def _no_label(_ctx: MeivaContext, _agent_id: int) -> str | None:
-    return None
+def _context(
+    clients: ClientSet,
+    *,
+    agent_id: int | None = 29,
+    runner: MachineIdentity | None = None,
+    workspace: bool = False,
+) -> MeivaContext:
+    return MeivaContext(
+        identity=AgentIdentity(agent_id=agent_id, owns_loop=True) if agent_id is not None else None,
+        agent=AgentSlices.resolve(
+            {"workspace_in_system_prompt": workspace}, default_reader=defaults()
+        ),
+        machine=runner,
+        clients=clients,
+    )
 
 
-def _no_machine(_ctx: MeivaContext) -> str | None:
-    return None
+@pytest.fixture
+def labelled_agent(db_conn: psycopg.Connection[Any]) -> None:
+    db_conn.execute("INSERT INTO agents (id, label) VALUES (29, '  memory\n  steward ')")
+    db_conn.commit()
 
 
-@pytest.fixture(autouse=True)
-def _no_optional_clauses(monkeypatch: pytest.MonkeyPatch) -> None:
-
-    monkeypatch.setattr(context_notes, "own_label", _no_label)
-    monkeypatch.setattr(context_notes, "machine_clause", _no_machine)
-    monkeypatch.setattr(settings.agent, "workspace_in_system_prompt", False)
-
-
-def _steward_label(_ctx: MeivaContext, _agent_id: int) -> str | None:
-    return "memory steward"
+@pytest.fixture
+def clients(database: Database) -> Iterator[ClientSet]:
+    owned = ClientSet(database=lambda: database)
+    try:
+        yield owned
+    finally:
+        owned.close()
 
 
-def _runner_machine(_ctx: MeivaContext) -> str | None:
-    return "runner-a"
-
-
-def _content() -> str:
-
-    note = agent_id_note(_context())
+def _content(note: Any) -> str:
     assert note is not None
     assert note.additional_kwargs["meiva_note_tag"] == NoteTag.AGENT_ID
     content = str(note.content)
@@ -69,181 +81,199 @@ def _content() -> str:
     return content[len("<system_note>\n") : -len("\n</system_note>")]
 
 
-def test_states_the_id_label_and_machine(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_states_the_id_label_and_machine() -> None:
+    text = agent_id_text(29, label="memory steward", machine="runner-a", workspace=None)
 
-    monkeypatch.setattr(context_notes, "own_label", _steward_label)
-    monkeypatch.setattr(context_notes, "machine_clause", _runner_machine)
-
-    assert _content().startswith("Your Agent ID is 29 (label: memory steward, machine: runner-a).")
+    assert text == "Your Agent ID is 29 (label: memory steward, machine: runner-a)."
 
 
 def test_id_only_when_no_optional_clauses() -> None:
-
-    assert _content() == "Your Agent ID is 29."
-
-
-def test_partial_clauses_render_alone(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(context_notes, "own_label", _steward_label)
-    assert _content() == "Your Agent ID is 29 (label: memory steward)."
-
-    monkeypatch.setattr(context_notes, "own_label", _no_label)
-    monkeypatch.setattr(context_notes, "machine_clause", _runner_machine)
-    assert _content() == "Your Agent ID is 29 (machine: runner-a)."
+    assert agent_id_text(29, label=None, machine=None, workspace=None) == "Your Agent ID is 29."
 
 
-def test_workspace_clause_carries_the_concrete_path(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-
-    monkeypatch.setattr(settings.agent, "workspace_in_system_prompt", True)
-    ws = tmp_path / "workspaces" / "29"
-
-    def _fake_workspace_dir(_agent_id: int) -> Path:
-        return ws
-
-    monkeypatch.setattr(context_notes, "workspace_dir", _fake_workspace_dir)
-    assert _content().endswith(f" Your workspace is {ws}.")
-    ws.mkdir(parents=True)
-    document = ws / "to_user.md"
-    document.write_text("<p>Waiting on a decision</p>")
-    assert document.read_text() in _content()
-    document.write_text("<p>The decision has arrived</p>")
-    assert document.read_text() in _content()
-    assert "Waiting on a decision" not in _content()
+def test_partial_clauses_render_alone() -> None:
+    assert (
+        agent_id_text(29, label="memory steward", machine=None, workspace=None)
+        == "Your Agent ID is 29 (label: memory steward)."
+    )
+    assert (
+        agent_id_text(29, label=None, machine="runner-a", workspace=None)
+        == "Your Agent ID is 29 (machine: runner-a)."
+    )
 
 
-def test_workspace_clause_respects_the_section_gate(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_workspace_clause_carries_the_path_and_the_current_document() -> None:
+    waiting = Workspace("/ws/29", "Waiting on a decision", None)
+    decided = Workspace("/ws/29", "The decision has arrived", None)
 
-    monkeypatch.setattr(settings.agent, "workspace_in_system_prompt", False)
+    first = agent_id_text(29, label=None, machine=None, workspace=waiting)
+    second = agent_id_text(29, label=None, machine=None, workspace=decided)
 
-    def _fake_workspace_dir(_agent_id: int) -> Path:
-        return tmp_path / "workspaces" / "29"
-
-    monkeypatch.setattr(context_notes, "workspace_dir", _fake_workspace_dir)
-    assert _content() == "Your Agent ID is 29."
-
-
-def test_renders_under_a_hosted_turn_identity(monkeypatch: pytest.MonkeyPatch) -> None:
-
-    context = _context(31)
-    pin_no_identity()
-    monkeypatch.delenv("MEIVA_AGENT_ID", raising=False)
-    note = agent_id_note(context)
-
-    assert note is not None
-    assert "Your Agent ID is 31" in str(note.content)
+    assert first.startswith("Your Agent ID is 29. Your workspace is /ws/29.")
+    assert first.endswith("beside your messages:\nWaiting on a decision")
+    assert "The decision has arrived" in second
+    assert "Waiting on a decision" not in second
 
 
-def test_opts_out_without_any_identity(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_workspace_without_a_document_states_only_the_path() -> None:
+    bare = Workspace("~/workspaces/29", None, None)
 
-    context = _context(None)
-    pin_no_identity()
-    monkeypatch.delenv("MEIVA_AGENT_ID", raising=False)
-    assert agent_id_note(context) is None
-
-
-class _FakeCursor:
-    def __init__(self, row: tuple[object, ...] | None) -> None:
-        self._row = row
-
-    def __enter__(self) -> _FakeCursor:
-        return self
-
-    def __exit__(self, *exc: object) -> bool:
-        return False
-
-    def execute(self, *args: object, **kwargs: object) -> None:
-        return None
-
-    def fetchone(self) -> tuple[object, ...] | None:
-        return self._row
+    assert (
+        agent_id_text(29, label=None, machine=None, workspace=bare)
+        == "Your Agent ID is 29. Your workspace is ~/workspaces/29."
+    )
 
 
-class _FakeDB:
-    def __init__(self, row: tuple[object, ...] | None) -> None:
-        self._row = row
+def test_unreadable_document_is_reported_for_repair() -> None:
+    broken = Workspace("/ws/29", None, "To user workspace must not be a symlink")
 
-    def cursor(self) -> _FakeCursor:
-        return _FakeCursor(self._row)
+    text = agent_id_text(29, label=None, machine=None, workspace=broken)
 
-
-def _fake_sql(monkeypatch: pytest.MonkeyPatch, fake: object) -> MeivaContext:
-
-    ctx = _context()
-    monkeypatch.setattr(ctx.clients, "_sql", fake)
-    return ctx
-
-
-def test_own_label_normalizes_whitespace(monkeypatch: pytest.MonkeyPatch) -> None:
-
-    ctx = _fake_sql(monkeypatch, _FakeDB(("  memory\n  steward ",)))
-    assert own_label(ctx, 29) == "memory steward"
+    assert text.endswith(
+        "\nThe shared context file could not be read: To user workspace must not be a symlink. "
+        "Repair it in your workspace."
+    )
 
 
 @pytest.mark.parametrize("row", [None, (None,), ("",)])
-def test_own_label_omits_missing_data(
-    monkeypatch: pytest.MonkeyPatch, row: tuple[object, ...] | None
+def test_label_omits_missing_data(row: tuple[object, ...] | None) -> None:
+    assert label_from_row(row) is None
+
+
+def test_label_normalizes_whitespace() -> None:
+    assert label_from_row(("  memory\n  steward ",)) == "memory steward"
+
+
+def test_machine_name_normalizes_whitespace_and_drops_blank() -> None:
+    assert machine_name_text("  runner \n a ") == "runner a"
+    assert machine_name_text("   ") is None
+
+
+def test_workspace_display_is_home_relative_only_under_home() -> None:
+    home = Path("/home/zed")
+
+    assert workspace_display(home / ".meiva" / "workspaces" / "29", home) == (
+        "~/.meiva/workspaces/29"
+    )
+    assert workspace_display(Path("/srv/ws/29"), home) == "/srv/ws/29"
+
+
+def test_workspace_facts_follow_the_document_on_disk(tmp_path: Path) -> None:
+    ws = tmp_path / "workspaces" / "29"
+    ws.mkdir(parents=True)
+
+    assert workspace_facts(ws, tmp_path) == Workspace("~/workspaces/29", None, None)
+
+    (ws / "to_user.md").write_text("Waiting on a decision")
+    assert workspace_facts(ws, tmp_path).document == "Waiting on a decision"
+
+    (ws / "to_user.md").write_text("The decision has arrived")
+    assert workspace_facts(ws, tmp_path).document == "The decision has arrived"
+
+
+def test_workspace_facts_report_a_workspace_that_cannot_be_read(tmp_path: Path) -> None:
+    real = tmp_path / "real"
+    real.mkdir()
+    link = tmp_path / "link"
+    link.symlink_to(real)
+
+    facts = workspace_facts(link, tmp_path)
+
+    assert facts.document is None
+    assert facts.error == "To user workspace must not be a symlink"
+
+
+@pytest.mark.usefixtures("labelled_agent")
+def test_note_states_the_stored_label_and_the_machine(clients: ClientSet) -> None:
+    context = _context(clients, runner=_machine(lambda: "runner-a"))
+
+    note = agent_id_note(context)
+
+    assert _content(note) == "Your Agent ID is 29 (label: memory steward, machine: runner-a)."
+
+
+@pytest.mark.usefixtures("labelled_agent")
+def test_note_states_the_workspace_when_the_section_is_on(
+    clients: ClientSet, unit_home: Path
 ) -> None:
-    ctx = _fake_sql(monkeypatch, _FakeDB(row))
-    assert own_label(ctx, 29) is None
+    ws = unit_home / "workspaces" / "29"
+    ws.mkdir(parents=True)
+    (ws / "to_user.md").write_text("Waiting on a decision")
+    context = _context(clients, workspace=True)
+
+    content = _content(agent_id_note(context))
+
+    assert content.startswith("Your Agent ID is 29 (label: memory steward). Your workspace is ")
+    assert content.endswith("beside your messages:\nWaiting on a decision")
 
 
-@pytest.mark.parametrize("error_type", [OperationalError, RuntimeError])
-def test_own_label_propagates_cursor_failure(
-    monkeypatch: pytest.MonkeyPatch, error_type: type[Exception]
+@pytest.mark.usefixtures("labelled_agent")
+def test_note_leaves_the_workspace_out_when_the_section_is_off(
+    clients: ClientSet, unit_home: Path
 ) -> None:
-    failure = error_type("label connection is unavailable")
+    context = _context(clients, workspace=False)
 
-    class _Boom:
-        def cursor(self) -> object:
-            raise failure
-
-    ctx = _fake_sql(monkeypatch, _Boom())
-    with pytest.raises(error_type) as raised:
-        own_label(ctx, 29)
-    assert raised.value is failure
+    assert _content(agent_id_note(context)) == "Your Agent ID is 29 (label: memory steward)."
+    assert not (unit_home / "workspaces").exists()
 
 
-def test_agent_id_note_propagates_query_failure(monkeypatch: pytest.MonkeyPatch) -> None:
-    failure = OperationalError("label query failed")
+def test_note_renders_under_a_hosted_turn_identity(clients: ClientSet) -> None:
+    note = agent_id_note(_context(clients, agent_id=31))
 
-    class _BrokenCursor(_FakeCursor):
-        def execute(self, *args: object, **kwargs: object) -> None:
-            raise failure
-
-    class _BrokenDB:
-        def cursor(self) -> _BrokenCursor:
-            return _BrokenCursor(None)
-
-    ctx = _fake_sql(monkeypatch, _BrokenDB())
-    monkeypatch.setattr(context_notes, "own_label", own_label)
-    with pytest.raises(OperationalError) as raised:
-        agent_id_note(ctx)
-    assert raised.value is failure
+    assert _content(note) == "Your Agent ID is 31."
 
 
-def test_unset_machine_name_drops_only_the_machine_clause(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_note_opts_out_without_any_identity() -> None:
+    assert agent_id_note(_context(ClientSet(), agent_id=None)) is None
 
-    from base.cluster import machine
 
-    def _unset() -> str:
+@pytest.mark.usefixtures("labelled_agent")
+def test_own_label_reads_the_stored_label(clients: ClientSet) -> None:
+    assert own_label(_context(clients), 29) == "memory steward"
+
+
+def test_own_label_omits_an_agent_without_a_row(clients: ClientSet) -> None:
+    assert own_label(_context(clients), 404) is None
+
+
+def _unreachable() -> Database:
+    raise OperationalError("label connection is unavailable")
+
+
+def test_own_label_propagates_a_connection_failure() -> None:
+    context = _context(ClientSet(database=_unreachable))
+
+    with pytest.raises(OperationalError, match="label connection is unavailable"):
+        own_label(context, 29)
+
+
+def test_own_label_propagates_a_context_without_a_database() -> None:
+    with pytest.raises(RuntimeError, match="no database handle factory"):
+        own_label(_context(ClientSet()), 29)
+
+
+def test_note_propagates_a_label_failure() -> None:
+    with pytest.raises(OperationalError, match="label connection is unavailable"):
+        agent_id_note(_context(ClientSet(database=_unreachable)))
+
+
+def test_machine_clause_states_the_machine_name() -> None:
+    context = _context(ClientSet(), runner=_machine(lambda: "runner-a"))
+
+    assert machine_clause(context) == "runner-a"
+
+
+def test_context_without_a_machine_has_no_machine_clause() -> None:
+    assert machine_clause(_context(ClientSet())) is None
+
+
+def test_unset_machine_name_drops_only_the_machine_clause() -> None:
+    def unset() -> str:
         raise machine.MachineNameMissing("unset")
 
-    def _broken() -> str:
+    def broken() -> str:
         raise RuntimeError("settings unreadable")
 
-    def context(reader: Callable[[], str]) -> MeivaContext:
-        return MeivaContext(
-            machine=machine.MachineIdentity(
-                name=reader,
-                role=lambda: frozenset({"agent-runner"}),
-                host=lambda: "localhost",
-                description=lambda: None,
-            )
-        )
-
-    assert machine_clause(context(_unset)) is None
+    assert machine_clause(_context(ClientSet(), runner=_machine(unset))) is None
     with pytest.raises(RuntimeError, match="settings unreadable"):
-        machine_clause(context(_broken))
+        machine_clause(_context(ClientSet(), runner=_machine(broken)))

@@ -8,9 +8,8 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.graph.state import CompiledStateGraph
 from psycopg_pool import AsyncConnectionPool
 
-from agent.impersonation import settle_checkpoint
+from agent.impersonation import process_host, settle_checkpoint
 from agent.impersonation_handoff import flush_checkpoint, resume_note_pending
-from agent.ownership.hosted import apply_hosted_lifecycle
 from agent.state import BaseAgentState
 from agent.turn.runloop import PendingTurnFailure, publish_turn_failure, settle_turn_failure
 from agent.turn.trace_checkpoint import attach_trace_checkpoint_ref
@@ -22,6 +21,7 @@ from base.events.live.bus import EventBus
 from base.log import logger
 from services.agent_runner.agent_host.db_recovery import database_phase
 from services.agent_runner.agent_host.invocation.checkpoints import TurnCheckpoints
+from services.agent_runner.agent_host.lifecycle.shells import apply_lifecycle_command
 from services.agent_runner.agent_host.runtime import TurnOutcome
 
 
@@ -46,13 +46,13 @@ class HandoffSettlement:
     bus: EventBus
     relays: RelaySupervision
     notes: HandoffNotes
+    local_machine: str
 
 
 @dataclass(frozen=True)
 class InvocationHooks:
     settlement: HandoffSettlement
     drop_agent: Callable[[int], None]
-    kill_shell_sessions: Callable[[int, int], None]
     wake_resumed: Callable[[int], object]
 
 
@@ -76,7 +76,7 @@ async def settle_handoff_before_invocation(
             activate_accepted=False,
             incarnation=ctx.original_incarnation,
             notes=settlement.notes,
-            read_local_machine=lambda: ctx.require_machine().name(),
+            host=process_host(settlement.local_machine),
         )
         if not fresh_input or ctx.original_incarnation is None:
             return False
@@ -134,12 +134,8 @@ async def finish_completed_invocation(
         # meiva:link agent/graph/docs/turn-interrupts.meiva.okf.md
         resume_turn = bool(pending.result["restart_requested"]) and not pending.result["halted"]
         async with database_phase():
-            kind = await apply_hosted_lifecycle(
-                pool,
-                incarnation,
-                bus=hooks.settlement.bus,
-                resume_turn=resume_turn,
-                kill_shell_sessions=hooks.kill_shell_sessions,
+            kind = await apply_lifecycle_command(
+                pool, incarnation, bus=hooks.settlement.bus, resume_turn=resume_turn
             )
         logger.info(
             "hosted lifecycle return settled",
@@ -166,7 +162,7 @@ async def finish_completed_invocation(
                 hooks.settlement.relays,
                 incarnation=ctx.original_incarnation,
                 notes=hooks.settlement.notes,
-                read_local_machine=lambda: ctx.require_machine().name(),
+                host=process_host(hooks.settlement.local_machine),
             )
         return TurnOutcome(exited=False, crashed=False)
     return None

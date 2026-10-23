@@ -1,16 +1,5 @@
-exports = ["runner_exec_env.py"]
+exports = ["runner_login.py"]
 
 [uses]
-"path_scopes.toml" = ["runner_exec_env.py"]
-
-[debt.env-patch]
-"runner_exec_env.py#monkeypatch.setitem os.environ.MEIVA_DB_URL" = 1
-"test_exec_subprocess.py#monkeypatch.setenv os.environ.PYTHONIOENCODING" = 1
-"test_exec_subprocess.py#monkeypatch.setenv os.environ.PYTHONPATH" = 1
-"test_exec_subprocess.py#monkeypatch.setenv os.environ.PYTHONUTF8" = 1
-
-[debt.stdlib-patch]
-"test_exec_subprocess.py#monkeypatch.setattr time.monotonic" = 1
-
-[debt.third-party-patch]
-"test_exec_subprocess.py#monkeypatch.setattr psutil.Process" = 2
+"path_scopes.toml" = ["runner_login.py"]
+"test_exec_subprocess.py" = ["sleep_child.py"]

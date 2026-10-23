@@ -1,7 +1,7 @@
-exports = ["agent_tests.py", "claim"]
+exports = ["agent_tests.py", "claim", "scripted_model.py"]
 
 [uses]
-"claim" = ["agent_tests.py"]
+"claim" = ["agent_tests.py", "scripted_model.py"]
 "compact" = ["agent_tests.py", "claim", "test_compact.py"]
 "execution" = ["agent_tests.py"]
 "history" = ["agent_tests.py"]
@@ -9,6 +9,7 @@ exports = ["agent_tests.py", "claim"]
 "path_scopes.toml" = ["agent_tests.py"]
 "plugins" = ["agent_tests.py"]
 "state_slot" = ["agent_tests.py", "test_state_slot.py"]
+"test_compact.py" = ["scripted_model.py"]
 "test_external.py" = ["impersonation"]
 
 [debt.env-patch]

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import sys
+import time
 from collections.abc import Callable
 from typing import Any
 
@@ -32,7 +33,6 @@ def identity_child_record() -> dict[str, Any]:
     first drain tick. A writer receipt observes that tick; the exporter's public flush reports the
     retained tail.
     """
-    import time
 
     import agent.execution.child as exec_child
     from base.agents.context.clients import ClientSet
@@ -59,7 +59,7 @@ def identity_child_record() -> dict[str, Any]:
         meiva=None,  # pyright: ignore[reportArgumentType]
         boot_started_at=time.perf_counter(),
     )
-    exec_child.emit_child_boot_timing(child, clients=clients)
+    exec_child.emit_child_boot_timing(child, clients=clients, now=time.perf_counter())
     assert pipeline.sync(timeout=5.0).status is DrainStatus.COMPLETED
     assert backends
     unfinished = backends[0].flush(timeout=0).status is DrainStatus.UNFINISHED

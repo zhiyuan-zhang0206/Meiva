@@ -20,36 +20,37 @@ import asyncio
 import contextlib
 import signal
 import subprocess
-import sys
 import time
-from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
 import psutil
 
+from agent.execution.protocol import (
+    ResultPayload,
+    make_request_path,
+    make_result_path,
+    write_request,
+)
 from base.agents.context import MeivaContext
 from base.deploy.release import editable_install
 from base.log import logger
 from base.native_process.exec_domain import KILL_GRACE_S, ExecProcessDomain
 from base.native_process.exec_kill_notice import read_notice
 from base.native_process.process_control import SYSTEM_PROCESS_CONTROL
-from base.paths import exec_run_dir, meiva_home
 
-from ._child_boundary import build_child_env, read_result_envelope, result_from_payload
+from ._child_boundary import (
+    ChildLaunch,
+    ParentFacts,
+    plan_child_launch,
+    read_result_envelope,
+    result_from_payload,
+)
+from ._guard import inspection_refusal, violation_refusal
 from ._output_pipe import ExecOutputPipe
-from ._result import (
-    ExecChildError,
-    ExecCrashed,
-    ExecResult,
-)
+from ._poll import Stop, plan_poll
+from ._result import ExecCrashed, ExecResult
 from ._stream import ExecOutputChunkPublisher, StreamingTextIO
-from .protocol import (
-    ResultPayload,
-    make_request_path,
-    make_result_path,
-    write_request,
-)
 
 # Same cadence as the old worker-thread poll loop: near-free, and cancel /
 # timeout response latency stays <= 50ms + signal delivery.
@@ -61,42 +62,19 @@ _POLL_INTERVAL_S = 0.05
 _OUTPUT_DRAIN_TIMEOUT_S = 5.0
 
 
-def _default_editable_guard() -> tuple[str, ...]:
-    """Inspect the interpreter source before user code; never repair it here."""
-    source_root = editable_install.current_interpreter_source_root()
-    if source_root is None:
-        return ()
-    return editable_install.editable_install_violations(
-        source_root, allowed_roots=(Path.home() / "Meiva",)
-    )
-
-
-def _editable_guard_failure(
-    editable_guard: Callable[[], tuple[str, ...]] | None,
-) -> ExecCrashed | None:
-    """Return the agent-visible guard failure before any exec artifacts exist."""
-    try:
-        violations = (editable_guard or _default_editable_guard)()
-    except Exception as exc:
-        return ExecCrashed(
-            output=(
-                f"exec editable-install guard could not inspect the interpreter: {exc}\n\n"
-                "Do not retry this execute_code call. Report the error to the operator."
-            ),
-            exc=exc,
-        )
-    if not violations:
+# meiva:note
+# Inspect the interpreter source before user code; never repair it here. A system interpreter
+# has no checkout authority, so there is nothing to inspect.
+def _editable_guard_failure(parent: ParentFacts) -> ExecCrashed | None:
+    if parent.source_root is None:
         return None
-    output = (
-        "exec editable install is invalid and no child was started. "
-        "Do not retry this execute_code call. Ask the operator to run meiva converge "
-        "on this host and inspect the source records before starting new work.\n\n"
-        "Invalid records:\n" + "\n".join(f"- {violation}" for violation in violations)
-    )
-    return ExecCrashed(
-        output=output,
-        exc=ExecChildError("exec_editable_install_poisoned", output, None),
-    )
+    try:
+        violations = editable_install.editable_install_violations(
+            parent.source_root, allowed_roots=parent.editable_roots
+        )
+    except Exception as exc:
+        return inspection_refusal(exc)
+    return violation_refusal(violations)
 
 
 # meiva:note
@@ -104,29 +82,15 @@ def _editable_guard_failure(
 # write end of its stdin pipe until the leader is reaped; the child kills its own
 # group when that end closes. Persistent ``meiva.shell.sessions`` are backend-hosted
 # and outside the group.
-def spawn_exec_child(
-    request_path: Path,
-    result_path: Path,
-    agent_id: int | None,
-    *,
-    config_overlay: dict[str, object] | None = None,
-    birth_config: dict[str, object] | None = None,
-) -> tuple[subprocess.Popen[bytes], ExecProcessDomain]:
-    env = build_child_env(
-        agent_id,
-        request_path,
-        result_path,
-        config_overlay=config_overlay,
-        birth_config=birth_config,
-    )
-    argv = [sys.executable, "-I", "-B", "-X", "utf8", "-m", "agent.execution.child"]
+def spawn_exec_child(launch: ChildLaunch) -> tuple[subprocess.Popen[bytes], ExecProcessDomain]:
     return ExecProcessDomain.launch_posix(
-        argv,
+        list(launch.argv),
         process_control=SYSTEM_PROCESS_CONTROL,
+        cwd=launch.cwd,
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
-        env=env,
+        env=dict(launch.env),
     )
 
 
@@ -142,6 +106,7 @@ def _leader_exited(leader: psutil.Process) -> bool:
 # meiva:note
 # Poll every 50ms and publish chunks. Signals SIGINT to the group on cancel and
 # SIGTERM on deadline. Returns (cancelled, timed_out); on a same-tick race cancel wins.
+# What each beat does is `plan_poll`'s decision.
 async def _poll_child(
     domain: ExecProcessDomain,
     leader: psutil.Process,
@@ -151,20 +116,30 @@ async def _poll_child(
     timeout: float,
     reader: ExecOutputPipe,
 ) -> tuple[bool, bool]:
-    deadline = time.monotonic() + timeout
+    started = time.monotonic()
+    deadline = started + timeout
+    last_activity = started
     while not _leader_exited(leader):
         reader.pump()
-        # Incrementally publish accumulated stream chunks to frontend.
-        if chunk_publisher is not None:
-            pending = stream.take_pending()
-            if pending:
-                chunk_publisher.publish(pending)
-            chunk_publisher.maybe_keepalive()
-
-        if cancel_event.is_set():
+        pending = stream.take_pending() if chunk_publisher is not None else ""
+        now = time.monotonic()
+        plan = plan_poll(
+            pending=bool(pending),
+            now=now,
+            last_activity=last_activity,
+            deadline=deadline,
+            cancel_requested=cancel_event.is_set(),
+        )
+        if chunk_publisher is not None and plan.forward:
+            chunk_publisher.publish(pending)
+            last_activity = now
+        elif chunk_publisher is not None and plan.keepalive:
+            chunk_publisher.keepalive()
+            last_activity = now
+        if plan.stop is Stop.CANCEL:
             domain.signal(signal.SIGINT)
             return True, False
-        if time.monotonic() > deadline:
+        if plan.stop is Stop.DEADLINE:
             domain.signal(signal.SIGTERM)
             return False, True
         await asyncio.sleep(_POLL_INTERVAL_S)
@@ -246,18 +221,16 @@ async def run_in_subprocess(
     chunk_publisher: ExecOutputChunkPublisher | None = None,
     *,
     accumulation_max_chars: int,
+    parent: ParentFacts,
+    exec_dir: Path,
     state: dict[str, Any] | None = None,
-    exec_dir: Path | None = None,
     config_overlay: dict[str, object] | None = None,
     birth_config: dict[str, object] | None = None,
-    editable_guard: Callable[[], tuple[str, ...]] | None = None,
 ) -> tuple[ExecResult, ResultPayload | None]:
-    guard_failure = _editable_guard_failure(editable_guard)
+    guard_failure = _editable_guard_failure(parent)
     if guard_failure is not None:
         return guard_failure, None
     agent_id = context.require_identity().agent_id
-    if exec_dir is None:
-        exec_dir = exec_run_dir(meiva_home())
     request_path = make_request_path(exec_dir, agent_id)
     result_path = make_result_path(exec_dir, agent_id)
 
@@ -270,13 +243,15 @@ async def run_in_subprocess(
     reader: ExecOutputPipe | None = None
     try:
         try:
-            proc, domain = spawn_exec_child(
+            launch = plan_child_launch(
+                parent,
+                agent_id,
                 request_path,
                 result_path,
-                agent_id,
                 config_overlay=config_overlay,
                 birth_config=birth_config,
             )
+            proc, domain = spawn_exec_child(launch)
         except OSError as exc:
             return ExecCrashed(
                 output=f"exec subprocess could not be spawned: {exc}",

@@ -8,24 +8,20 @@ Coverage:
 - syntax_fix_before_exec: full pipeline (Chinese punctuation → import → ruff → compile)
 """
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from typing import Any
 
-import pytest
 from langchain_core.messages import AIMessage
 from langchain_core.runnables import RunnableConfig
-from langgraph.runtime import Runtime
 
 from agent.state import AgentState
-from base.agents.context import MeivaContext
-from base.config.tests.configuration import defaults
-from base.db import Database
-from base.db.code_version_gate import ProcessDbGate
-from base.events.live.bus import EventBus
-from base.host.env.agent_slices import AgentSlices
 from base.log.tests.log_records import LogRecords
-from meiva_builtins.plugins.meiva_syntax_fix import agent_runtime
 from meiva_builtins.plugins.meiva_syntax_fix.agent_runtime import (
     syntax_fix_before_exec,
+)
+from meiva_builtins.plugins.meiva_syntax_fix.tests.hook_support import (
+    REPAIRED,
+    REPAIRS_UNTERMINATED_STRING,
+    make_runtime,
 )
 
 # --- _fix_chinese_punctuation ---
@@ -101,59 +97,40 @@ class TestSyntaxFixEvents:
     lands in the event's `attributes`."""
 
     @staticmethod
-    def _runtime(database_gate: ProcessDbGate):
-        ctx = MeivaContext(
-            ops_pool=AsyncMock(),
-            llm=MagicMock(),
-            agent=AgentSlices.resolve(
-                default_reader=defaults(),
-            ),
-            db=Database.from_settings(gate=database_gate),
-            bus=EventBus.from_settings(),
-        )
-        return Runtime(context=ctx)
-
-    @staticmethod
     def _config() -> RunnableConfig:
         return {"configurable": {"thread_id": "7"}}
 
-    async def test_rough_fix_emits_before_only(
-        self, monkeypatch: pytest.MonkeyPatch, database_gate: ProcessDbGate
-    ):
-        """A deterministic (rough) fix records fix_type=rough with the original
-        source as `before` and no `after` — the after state is replayable via
-        apply_fix_pipeline(before)."""
-        from meiva_builtins.plugins.meiva_syntax_fix import agent_runtime as _plugin
-
-        events: list[dict] = []
-        monkeypatch.setattr(_plugin, "emit_syntax_fix_event", lambda **kw: events.append(kw))  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
-        # Chinese comma -> deterministic fix fires
-        original = "print(1\uff0c2)"
-        state = AgentState(
+    @staticmethod
+    def _state(code: str) -> AgentState:
+        return AgentState(
             messages=[
                 AIMessage(
                     content="",
-                    tool_calls=[
-                        {
-                            "name": "execute_code",
-                            "args": {"code": original},
-                            "id": "1",
-                        }
-                    ],
+                    tool_calls=[{"name": "execute_code", "args": {"code": code}, "id": "1"}],
                 )
             ]
         )
-        result = await syntax_fix_before_exec(
-            state, self._runtime(database_gate=database_gate), self._config()
-        )
+
+    @staticmethod
+    def _fix_events(loguru_records: LogRecords) -> list[dict[str, Any]]:
+        return [
+            record["extra"]
+            for record in loguru_records.events("syntax_fix")
+            if "fix_type" in record["extra"]
+        ]
+
+    async def test_rough_fix_emits_before_only(self, loguru_records: LogRecords):
+        original = "print(1\uff0c2)"
+
+        result = await syntax_fix_before_exec(self._state(original), make_runtime(), self._config())
+
         assert result is not None
-        assert len(events) == 1  # pyright: ignore[reportUnknownArgumentType]
-        ev = events[0]
+        [ev] = self._fix_events(loguru_records)
         assert ev["fix_type"] == "rough"
         assert ev["before"] == original
-        assert ev["after"] is None
+        assert "after" not in ev
         assert ev["fixes"], "deterministic fixes must be listed"
-        assert "chinese_punct" in ",".join(ev["fixes"])  # pyright: ignore[reportUnknownArgumentType]
+        assert "chinese_punct" in ",".join(ev["fixes"])
 
     async def test_rough_fix_event_logger_payload_shape(self, loguru_records: LogRecords):
         """The real emit path: a loguru record with event='syntax_fix' whose
@@ -176,72 +153,28 @@ class TestSyntaxFixEvents:
         assert captured["fixes"] == ["chinese_punct(1)"]
         assert "after" not in captured
 
-    async def test_lm_fix_emits_before_and_after(
-        self, monkeypatch: pytest.MonkeyPatch, database_gate: ProcessDbGate
-    ):
+    async def test_lm_fix_emits_before_and_after(self, loguru_records: LogRecords):
         """An LLM repair records fix_type=lm with both before (the
         deterministic-fixed source the LLM saw) and after (the repair)."""
-        from meiva_builtins.plugins.meiva_syntax_fix import agent_runtime as _plugin
-
-        events: list[dict] = []
-        monkeypatch.setattr(_plugin, "emit_syntax_fix_event", lambda **kw: events.append(kw))  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
         broken = "x = 'unterminated\nprint(x)"
-        repaired = "x = 'fixed'\nprint(x)"
-        with patch.object(
-            agent_runtime,
-            "llm_repair_syntax",
-            new=AsyncMock(return_value=repaired),
-        ):
-            result = await syntax_fix_before_exec(
-                TestSyntaxFixEvents._broken_state(broken),
-                self._runtime(database_gate=database_gate),
-                self._config(),
-            )
+
+        result = await syntax_fix_before_exec(
+            self._state(broken),
+            make_runtime(llm_override=REPAIRS_UNTERMINATED_STRING),
+            self._config(),
+        )
+
         assert result is not None
-        assert len(events) == 1  # pyright: ignore[reportUnknownArgumentType]
-        ev = events[0]
+        [ev] = self._fix_events(loguru_records)
         assert ev["fix_type"] == "lm"
         assert ev["before"] == broken  # no deterministic fix fired -> LLM saw the original
-        assert ev["after"] == repaired
+        assert ev["after"] == REPAIRED
 
-    @staticmethod
-    def _broken_state(code: str) -> AgentState:
-        return AgentState(
-            messages=[
-                AIMessage(
-                    content="",
-                    tool_calls=[{"name": "execute_code", "args": {"code": code}, "id": "1"}],
-                )
-            ]
-        )
-
-    async def test_no_event_when_nothing_changed(
-        self, monkeypatch: pytest.MonkeyPatch, database_gate: ProcessDbGate
-    ):
+    async def test_no_event_when_nothing_changed(self, loguru_records: LogRecords):
         """Clean code that compiles as-is emits no syntax_fix event — the event
         stream records mutations only."""
-        from meiva_builtins.plugins.meiva_syntax_fix import agent_runtime as _plugin
+        runtime = make_runtime(syntax_fix_ruff_format=False)
 
-        events: list[dict] = []
-        monkeypatch.setattr(_plugin, "emit_syntax_fix_event", lambda **kw: events.append(kw))  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
-        # Force the pipeline to be a no-op (nothing to fix, nothing formatted)
-        # so the event decision is what is under test — not ruff's formatting.
-        monkeypatch.setattr(_plugin, "apply_fix_pipeline", lambda code, **_kw: (code, []))  # pyright: ignore[reportUnknownArgumentType]
-        state = AgentState(
-            messages=[
-                AIMessage(
-                    content="",
-                    tool_calls=[
-                        {
-                            "name": "execute_code",
-                            "args": {"code": "x = 1\nprint(x)"},
-                            "id": "1",
-                        }
-                    ],
-                )
-            ]
-        )
-        await syntax_fix_before_exec(
-            state, self._runtime(database_gate=database_gate), self._config()
-        )
-        assert events == []
+        await syntax_fix_before_exec(self._state("x = 1\nprint(x)"), runtime, self._config())
+
+        assert self._fix_events(loguru_records) == []

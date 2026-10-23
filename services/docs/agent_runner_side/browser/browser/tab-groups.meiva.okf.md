@@ -21,7 +21,7 @@ The shared Chrome shows one tab group per agent, titled `Meiva #<id>` (ids are u
 
 ## Removal is Chrome's, not ours
 
-Nothing deletes a group. Chrome removes a tab group, and its saved-group record, when the group's last tab closes. Every path that closes an agent's pages goes through the upstream `close_page`: `release_agent_page` (called on hosted termination via `agent/ownership/hosted_cleanup.py`, closing every page the agent created) and the hard-TTL sweep (see `page_lifecycle.py`), and tests assert each one. An agent's group therefore disappears with its last page; the hard TTL bounds how long any page, and so any group, can live. Chrome leaves one orphaned saved-tab record per group in the profile; it is not visible.
+Nothing deletes a group. Chrome removes a tab group, and its saved-group record, when the group's last tab closes. Every path that closes an agent's pages goes through the upstream `close_page`: `release_agent_page` (called on hosted termination via `services/agent_runner/agent_host/lifecycle/shells.py`, closing every page the agent created) and the hard-TTL sweep (see `page_lifecycle.py`), and tests assert each one. An agent's group therefore disappears with its last page; the hard TTL bounds how long any page, and so any group, can live. Chrome leaves one orphaned saved-tab record per group in the profile; it is not visible.
 
 ## Failure policy
 

@@ -17,17 +17,17 @@ parent's accumulator; the child ships raw chunks).
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
+from datetime import datetime
 from pathlib import Path
 
-import pytest
-
-from agent.graph.exec._stream import StreamCap, StreamingTextIO
-from agent.graph.exec.output import wrap_code_output
-from agent.graph.exec.tests.output_inputs import CropConfig
-from base.clock import Clock
+from agent.graph.exec._result import StreamCap
+from agent.graph.exec._stream import StreamingTextIO
+from agent.graph.exec.output import OutputLimits, wrap_code_output
+from agent.graph.exec.tests.process_inputs import real_parent
 from base.db import Database
 from base.log.tests.log_records import LogRecords
-from meiva.tests.fixtures.pin_agent import exec_context, pin_agent
+from meiva.tests.fixtures.pin_agent import exec_context
 
 # ---------------------------------------------------------------------------
 # The accumulator: head + rolling tail under a fixed budget
@@ -137,14 +137,8 @@ def test_live_stream_is_bounded_and_says_so_exactly_once() -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.fixture
-def _overflow(unit_home: Path) -> Path:
-    pin_agent(7)
-    return unit_home / "workspaces" / "7" / ".exec_output"
-
-
 def test_envelope_still_has_both_ends_after_the_accumulation_cap(
-    _overflow: Path, crop_config: CropConfig, output_clock: Clock
+    limits: OutputLimits, output_now: datetime
 ) -> None:
     """The compatibility contract: the accumulator keeps budget/2 at each end
     and `truncate_both_ends` slices max_chars/2 off each end, so with the
@@ -157,12 +151,9 @@ def test_envelope_still_has_both_ends_after_the_accumulation_cap(
 
     out = wrap_code_output(
         stream.getvalue(),
-        agent_id=7,
-        max_chars=1000,
         stream_cap=stream.cap(),
-        crop_config=crop_config,
-        clock=output_clock,
-        timeout_seconds=60,
+        limits=replace(limits, max_chars=1000),
+        now=output_now,
         elapsed_seconds=1.0,
     ).text
 
@@ -172,7 +163,7 @@ def test_envelope_still_has_both_ends_after_the_accumulation_cap(
 
 
 def test_envelope_banner_reports_the_true_produced_length(
-    _overflow: Path, crop_config: CropConfig, output_clock: Clock
+    limits: OutputLimits, output_now: datetime
 ) -> None:
     """Without this the agent reads the capped length as the real one and has no
     idea how much output it actually generated."""
@@ -181,12 +172,9 @@ def test_envelope_banner_reports_the_true_produced_length(
 
     out = wrap_code_output(
         stream.getvalue(),
-        agent_id=7,
-        max_chars=1000,
         stream_cap=stream.cap(),
-        crop_config=crop_config,
-        clock=output_clock,
-        timeout_seconds=60,
+        limits=replace(limits, max_chars=1000),
+        now=output_now,
         elapsed_seconds=1.0,
     ).text
 
@@ -196,7 +184,7 @@ def test_envelope_banner_reports_the_true_produced_length(
 
 
 def test_envelope_still_promises_the_full_output_when_uncapped(
-    _overflow: Path, crop_config: CropConfig, output_clock: Clock
+    limits: OutputLimits, output_now: datetime
 ) -> None:
     """The uncapped path is unchanged: the archive really is complete, so the
     banner keeps saying so (and the meiva_code plugin's reuse of
@@ -204,22 +192,19 @@ def test_envelope_still_promises_the_full_output_when_uncapped(
     big = "HEAD_START" + ("M" * 5000) + "TAIL_END"
     out = wrap_code_output(
         big,
-        agent_id=7,
-        max_chars=1000,
-        crop_config=crop_config,
-        clock=output_clock,
-        timeout_seconds=60,
+        limits=replace(limits, max_chars=1000),
+        now=output_now,
         elapsed_seconds=1.0,
     ).text
 
     assert "full output at" in out
     assert "produced" not in out
-    (archived,) = list(_overflow.glob("exec_*.txt"))
+    (archived,) = list(limits.archive_dir.glob("exec_*.txt"))
     assert archived.read_text(encoding="utf-8") == big
 
 
 def test_overflow_archive_says_it_is_not_the_full_output(
-    _overflow: Path, crop_config: CropConfig, output_clock: Clock
+    limits: OutputLimits, output_now: datetime
 ) -> None:
     """An agent that greps the archive and finds nothing must be able to tell
     "never printed" from "dropped mid-run" — otherwise the miss reads as proof."""
@@ -228,16 +213,13 @@ def test_overflow_archive_says_it_is_not_the_full_output(
 
     wrap_code_output(
         stream.getvalue(),
-        agent_id=7,
-        max_chars=1000,
         stream_cap=stream.cap(),
-        crop_config=crop_config,
-        clock=output_clock,
-        timeout_seconds=60,
+        limits=replace(limits, max_chars=1000),
+        now=output_now,
         elapsed_seconds=1.0,
     )
 
-    (archived,) = list(_overflow.glob("exec_*.txt"))
+    (archived,) = list(limits.archive_dir.glob("exec_*.txt"))
     text = archived.read_text(encoding="utf-8")
     assert text.startswith("[archive note:")
     assert "NOT the full output" in text
@@ -246,9 +228,8 @@ def test_overflow_archive_says_it_is_not_the_full_output(
 
 
 def test_instrumentation_logs_the_true_length_not_the_capped_one(
-    _overflow: Path,
-    crop_config: CropConfig,
-    output_clock: Clock,
+    limits: OutputLimits,
+    output_now: datetime,
     loguru_records: LogRecords,
 ) -> None:
     """`[exec output chars]` is how max_chars gets tuned from a real
@@ -258,12 +239,9 @@ def test_instrumentation_logs_the_true_length_not_the_capped_one(
     stream.write("X" * 250_000)
     wrap_code_output(
         stream.getvalue(),
-        agent_id=7,
-        max_chars=1000,
         stream_cap=stream.cap(),
-        crop_config=crop_config,
-        clock=output_clock,
-        timeout_seconds=60,
+        limits=replace(limits, max_chars=1000),
+        now=output_now,
         elapsed_seconds=1.0,
     )
 
@@ -276,8 +254,7 @@ def test_instrumentation_logs_the_true_length_not_the_capped_one(
 
 
 async def test_runaway_print_loop_is_truncated_and_the_run_completes(
-    monkeypatch: pytest.MonkeyPatch,
-    database: Database,
+    tmp_path: Path, database: Database
 ) -> None:
     """The whole point of truncate-over-kill: a runaway loop comes back as a
     normal `ExecDone` with bounded output and an explicit marker, so the model
@@ -296,6 +273,8 @@ async def test_runaway_print_loop_is_truncated_and_the_run_completes(
         timeout=60.0,
         chunk_publisher=None,
         accumulation_max_chars=budget,
+        parent=real_parent(),
+        exec_dir=tmp_path / "exec",
     )
 
     assert isinstance(result, ExecDone), f"the run must not be killed, got {type(result).__name__}"

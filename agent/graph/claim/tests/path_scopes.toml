@@ -2,4 +2,5 @@
 "agent.graph.claim.tests.cursor_fixture" = [
     "test_claim_dispatch_guards.py",
     "test_claim_multimodal.py",
+    "test_inbound_findings.py",
 ]

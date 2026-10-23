@@ -74,6 +74,16 @@ sdk_reminder_agent_reply_before_llm = _SdkReminderAgentReplyHook()
 - `sdk_nameerror_hint_enabled`: enables the precise assumed-persistence NameError hint by default; `false` disables it
 - `agent_reply_reminder_cadence`: independent cadence for agent-reply hints with the same values and default
 
+## Where the decisions live
+
+`hint_selection.py` is the strict pure half of the after_exec hook: `select_hints` chooses the
+categories that hint for one cell (the cadence arrives as `every_time: bool`, the watcher-wait
+silence and the once-per-name NameError key are decided there), `rearmed_reminded` is the
+compaction re-arm of the reminded set, and `assumed_persistence_name` finds the variable a NameError
+names that an earlier cell defined. The hook in `agent_runtime.py` reads the agent's `sdk_reminders`
+slice, extracts the code strings and the output text from the messages, and writes the state update.
+The tests run the pure half on literal values and the hooks with the slices a test builds.
+
 ## Notes
 
 - The default cadence avoids repeated reminders within a context window; agents that need stronger reinforcement can opt into `every_time`

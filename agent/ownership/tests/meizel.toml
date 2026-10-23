@@ -1,3 +1,5 @@
 exports = ["ownership_support.py"]
 
 [uses]
+"conftest.py" = ["ownership_support.py"]
+"test_hosted_ownership.py" = ["ownership_support.py"]

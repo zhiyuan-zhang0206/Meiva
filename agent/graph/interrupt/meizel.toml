@@ -1,0 +1,9 @@
+exports = ["__init__.py", "tests"]
+
+[uses]
+"__init__.py" = ["_model.py", "_watch.py"]
+"_watch.py" = ["_model.py", "_plan.py"]
+"tests" = ["__init__.py", "_plan.py", "_watch.py"]
+
+[purity]
+"_plan.py" = "strict"

@@ -3,20 +3,17 @@ import signal
 import subprocess
 import sys
 import time
-from collections.abc import Callable
 from pathlib import Path
 
 import pytest
 
-import meiva
-from agent.graph.exec.protocol import (
+from agent.execution.protocol import (
     make_request_path,
     make_result_path,
     read_result,
     write_request,
 )
 from agent.tests.execution.test_exec_child import AGENT_ID, child_env
-from meiva.sdk_surface.installation import Installation
 from meiva.tests.fixtures.pin_agent import exec_context
 
 
@@ -59,80 +56,46 @@ def test_child_sigterm_writes_timed_out_envelope(tmp_path: Path) -> None:
     assert payload.kind == "timed_out"
 
 
-def test_child_installs_signal_handlers_before_reading_request(
-    monkeypatch: pytest.MonkeyPatch,
-    sdk_model_owner: Installation,
-) -> None:
-    from agent.execution import child as exec_child
-    from agent.execution import protocol
-    from agent.execution.protocol import RequestPayload, ResultPayload
-
-    old_sigint = signal.getsignal(signal.SIGINT)
-    old_sigterm = signal.getsignal(signal.SIGTERM)
-
-    def fake_read_request(_path: Path) -> RequestPayload:
-        handler = signal.getsignal(signal.SIGTERM)
-        assert getattr(handler, "__name__", None) == "_raise_timeout_error"
-        return RequestPayload(
-            code="pass", context=exec_context(None).describe(), timeout_s=0.0, state=None
-        )
-
-    def fake_apply_scope(
-        _birth: dict[str, object] | None,
-        _overlay: dict[str, object] | None,
-        *,
-        scope: str,
-        set_framework_field: object = None,
-    ) -> bool:
-        return False
-
-    def fake_build_state_slot(_child: exec_child.ChildContext, _payload: RequestPayload) -> None:
-        return None
-
-    def fake_run_code(_code: str, _payload: ResultPayload) -> None:
-        return None
-
-    def fake_write_result(_path: Path, _payload: ResultPayload) -> None:
-        return None
-
-    def fake_ensure_plugins_loaded(
-        *,
-        surface: bool = True,
-        context: object,
-        config: object,
-        clock_factory: object,
-        producer: Callable[[], object],
-        machine: object,
-    ) -> None:
-        assert surface is True
-        assert context is meiva.context
-        assert callable(producer)
-        assert meiva.context.clock_factory is clock_factory
-        assert meiva.context.machine is machine
-
-    monkeypatch.setattr(exec_child, "line_buffered_output", lambda: None)
-    monkeypatch.setattr(protocol, "read_request", fake_read_request)
-    monkeypatch.setattr(exec_child, "pop_overlay_env", lambda: (None, None))
-    monkeypatch.setattr(exec_child, "apply_overlay_scope", fake_apply_scope)
-    monkeypatch.setattr(exec_child, "build_state_slot", fake_build_state_slot)
-    monkeypatch.setattr(exec_child, "run_code", fake_run_code)
-    monkeypatch.setattr(protocol, "write_result", fake_write_result)
-    monkeypatch.setattr(meiva, "ensure_plugins_loaded", fake_ensure_plugins_loaded)
-
+def test_child_turns_a_sigterm_during_boot_into_a_crash_envelope(tmp_path: Path) -> None:
+    exec_dir = tmp_path / "exec"
+    request_path = make_request_path(exec_dir, agent_id=AGENT_ID)
+    result_path = make_result_path(exec_dir, agent_id=AGENT_ID)
+    os.mkfifo(request_path)
+    # meiva:note
+    # The request file is a pipe nobody writes to, so the child blocks reading its request.
+    # Opening the write end without blocking succeeds only once the child holds the read end,
+    # which proves it is past boot and waiting there.
+    proc = subprocess.Popen(
+        [sys.executable, "-I", "-X", "utf8", "-m", "agent.execution.child"],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        env=child_env(tmp_path, request_path, result_path),
+    )
+    writer = -1
+    deadline = time.monotonic() + 60
     try:
-        from base.agents.context import MeivaContext
-        from base.cluster.machine.boot import machine_from_boot
-        from base.config.tests.configuration import snapshot_process_config
-        from meiva.boot import process_clients
-
-        config = snapshot_process_config()
-        machine = machine_from_boot(config)
-        clients = process_clients(config=config, machine=machine)
-        context = MeivaContext(clients=clients, machine=machine)
-        try:
-            exec_child.run_child("request.json", "result.json", 0.0, config=config, context=context)
-        finally:
-            clients.close()
+        while writer < 0:
+            try:
+                writer = os.open(request_path, os.O_WRONLY | os.O_NONBLOCK)
+            except OSError:
+                assert proc.poll() is None, "the child exited before reading its request"
+                assert time.monotonic() < deadline, "the child never reached its request"
+                time.sleep(0.05)
+        os.kill(proc.pid, signal.SIGTERM)
+        assert proc.wait(timeout=60) == 0
     finally:
-        signal.signal(signal.SIGINT, old_sigint)
-        signal.signal(signal.SIGTERM, old_sigterm)
+        if writer >= 0:
+            os.close(writer)
+        if proc.poll() is None:
+            proc.kill()
+        if proc.stdin is not None:
+            proc.stdin.close()
+        if proc.stdout is not None:
+            proc.stdout.close()
+
+    payload = read_result(result_path)
+    assert payload.kind == "crashed"
+    assert payload.exc_type == "TimeoutError"
+    assert payload.code_reached is False

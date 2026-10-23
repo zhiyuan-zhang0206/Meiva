@@ -40,7 +40,7 @@ RESTART_INTERRUPT_GRACE_S = 10.0
 # Poll cadence of the interrupt watcher: how soon an in-flight model call or code run
 # notices a durable cancel, terminate or (once past its grace) restart. The watcher reads
 # Postgres instead of sharing the claim node's Redis listener; see
-# agent/graph/interrupt.py.
+# agent/graph/interrupt/.
 INTERRUPT_POLL_S = 2.0
 
 # meiva:note

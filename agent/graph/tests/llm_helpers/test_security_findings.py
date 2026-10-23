@@ -20,16 +20,14 @@ from langgraph.types import Overwrite
 from agent.graph.exec.node import exec_node_impl
 from agent.graph.exec.process import SubprocessExecProcess
 from agent.graph.hooks.framework import framework_hooks
-from agent.graph.interrupt import InterruptEvent
 from agent.hooks.security import deliver_security_findings
-from agent.hooks.tests.fakes import make_fake_ops_pool
 from agent.state import AgentState, build_agent_state
 from base.agents.context import MeivaContext
 from base.agents.context.identity import AgentIdentity
 from base.agents.messages.kwargs import NoteTag, read_meiva_kwargs
 from base.agents.messages.security_finding import SecurityFindingEntry
 from base.clock import Clock
-from base.config import settings
+from base.config.tests.configuration import defaults
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
@@ -47,8 +45,7 @@ async def _run_hook(state: AgentState, *, enabled: bool = True) -> dict[str, Any
     runtime = Runtime(
         context=MeivaContext(
             agent=AgentSlices.resolve(
-                {"security_scan_enabled": enabled},
-                default_reader=lambda domain, field: getattr(getattr(settings, domain), field),
+                {"security_scan_enabled": enabled}, default_reader=defaults()
             ),
             clock_factory=Clock.from_settings,
         )
@@ -120,7 +117,7 @@ async def test_findings_flow_through_a_real_graph_and_are_consumed_once() -> Non
 
 
 async def test_a_real_childs_finding_reaches_the_model_through_the_hook(
-    fake_cancel_event: InterruptEvent, database_gate: ProcessDbGate
+    database_gate: ProcessDbGate,
 ) -> None:
     """End to end on real graph state: agent code in a real exec child scans flagged content,
     the exec node commits the finding to `state.security_findings`, and the framework's
@@ -128,16 +125,8 @@ async def test_a_real_childs_finding_reaches_the_model_through_the_hook(
     channel — the next LLM call sees the warning exactly once."""
     runtime = Runtime(
         context=MeivaContext(
-            ops_pool=make_fake_ops_pool(),
             event_publisher=MagicMock(),
-            agent=AgentSlices.resolve(
-                None,
-                default_reader=lambda domain, field: (
-                    True
-                    if field == "security_scan_enabled"
-                    else getattr(getattr(settings, domain), field)
-                ),
-            ),
+            agent=AgentSlices.resolve(default_reader=defaults(agent__security_scan_enabled=True)),
             db=Database.from_settings(gate=database_gate),
             bus=EventBus.from_settings(),
             clients=process_clients(),

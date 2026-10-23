@@ -10,7 +10,6 @@ from base.agents import impersonation as leases
 from base.agents.history.timeline_inputs import TimelineReadInputs
 from base.agents.impersonation import history as history
 from base.agents.impersonation import sessions as sessions
-from base.agents.impersonation.notes import HandoffNotes
 from base.agents.impersonation.tests.impersonation_support import recorded_tree
 from base.clock import Clock
 from base.cluster.machine import MachineIdentity
@@ -25,10 +24,6 @@ from base.native_process.runtime_incarnation import RuntimeIncarnation
 _TIMELINE_INPUTS = TimelineReadInputs(
     Clock.from_settings, lambda: settings.general.message_timestamps
 )
-
-
-def _handoff_notes() -> HandoffNotes:
-    return HandoffNotes(Clock.from_settings, lambda: settings.general.message_timestamps)
 
 
 @pytest.fixture
@@ -111,7 +106,7 @@ def test_timeline_pages_inside_a_session_using_existing_numeric_cursors(
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
 ) -> None:
-    from agent.impersonation_handoff import start_marker
+    from agent.impersonation_handoff import note_stamp, start_update
     from base.agents.history.timeline import build_timeline_items
     from base.agents.history.timeline_item import hydrate
     from gateway.agents.history.timeline import window_before
@@ -122,7 +117,8 @@ def test_timeline_pages_inside_a_session_using_existing_numeric_cursors(
         database_gate=database_gate,
         local_machine=machine_identity.name(),
     )
-    marker = start_marker(lease, notes=_handoff_notes())
+    stamp = note_stamp(Clock.from_settings(), timestamps=settings.general.message_timestamps)
+    [marker] = start_update(lease, introduced=True, stamp=stamp)["messages"]
     for number in range(15):
         history.say(
             database,

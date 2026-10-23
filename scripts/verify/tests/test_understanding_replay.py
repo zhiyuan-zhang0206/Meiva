@@ -1,24 +1,15 @@
 from __future__ import annotations
 
-from typing import Any, cast
-from unittest.mock import MagicMock
+from typing import cast
 
-import pytest
 from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, SystemMessage
 
-from agent.hooks import understanding_chunks as uc
+from agent.hooks.chunk_turn import Baseline, EnqueueChunk, plan_turn
 from agent.state_channels import CompactState
 from base.agents.history.checkpoint import FullHistory
 from base.agents.history.hierarchy.chunk_plan import plan_history, plan_replay
-from base.config import settings
-from base.host.env.agent_slices import ModelOverrides
-from base.lm.catalog import ModelCatalog
 
 _THRESHOLD = 1000
-
-
-def _read_agent(field: str):
-    return getattr(settings.agent, field)
 
 
 def _segment() -> list[AnyMessage]:
@@ -43,42 +34,18 @@ def _segment() -> list[AnyMessage]:
     return msgs
 
 
-async def test_live_chunks_match_the_hook_turn_by_turn(
-    monkeypatch: pytest.MonkeyPatch, *, model_catalog: ModelCatalog
-) -> None:
-    monkeypatch.setattr(settings.agent, "understanding_enabled", True)
-
-    def _threshold(
-        _model: str, _overrides: ModelOverrides, _ratio: float, *, catalog: ModelCatalog
-    ) -> int:
-        assert catalog is model_catalog
-        return _THRESHOLD
-
-    monkeypatch.setattr(uc, "chunk_threshold", _threshold)
+def test_live_chunks_match_the_hook_turn_by_turn() -> None:
     enqueued: list[tuple[int, int, str | None]] = []
-
-    async def fake_enqueue(pool: Any, agent_id: int, **kwargs: Any) -> bool:
-        chunk = kwargs["chunk"]
-        enqueued.append((chunk.start_index, chunk.end_index, kwargs["end_msg_id"]))
-        return True
-
-    monkeypatch.setattr(uc, "enqueue_chunk", fake_enqueue)
     msgs = _segment()
     compact = CompactState()
     for i, msg in enumerate(msgs):
         if isinstance(msg, AIMessage):
-            update = await uc.due_chunk_update(
-                compact,
-                msgs[:i],
-                msg,
-                pool=MagicMock(),
-                agent_id=1,
-                model="m",
-                overrides=ModelOverrides.from_pins({}),
-                catalog=model_catalog,
-                read_agent=_read_agent,
-            )
-            compact = update.get("compact", compact)
+            plan = plan_turn(compact, msgs[:i], msg, threshold=_THRESHOLD)
+            if isinstance(plan, Baseline):
+                compact = plan.state
+            elif isinstance(plan, EnqueueChunk):
+                enqueued.append((plan.chunk.start_index, plan.chunk.end_index, plan.end_msg_id))
+                compact = plan.moved
 
     planned = plan_replay(msgs, threshold=_THRESHOLD)
     live = [p for p in planned if not p.closing]

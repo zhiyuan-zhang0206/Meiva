@@ -3,7 +3,6 @@
 from collections.abc import Callable
 from dataclasses import replace
 from typing import Any, cast
-from unittest.mock import MagicMock
 
 import psycopg
 import pytest
@@ -20,6 +19,7 @@ from agent.graph.claim.tests.claim_support import (
     thread_config,
 )
 from agent.graph.claim.tests.cursor_fixture import fresh_snapshot_cursor as fresh_snapshot_cursor
+from agent.graph.node_log.tests.live_events import LiveEvents
 from agent.state import AgentState
 from agent.tests.claim.claim_status_support import await_status, set_agent_status
 from agent.tests.claim.claim_status_support import running_agent as running_agent
@@ -27,11 +27,12 @@ from base.agents.inbox.insert import insert_inbound_message
 from base.agents.tests.units import spawn_agent
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
-from base.config import settings
 from base.config.service_read import ConfigAuthority
+from base.config.tests.configuration import defaults
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
+from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
 
 
@@ -227,6 +228,7 @@ async def test_claim_cancel_kind_halts_to_idle_without_marker(
     redis_url: str,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
+    live_events: LiveEvents,
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
@@ -243,11 +245,12 @@ async def test_claim_cancel_kind_halts_to_idle_without_marker(
         machine=machine_identity,
     )
     insert_inbound_kind(db_conn, tid, "", "cancel", source="user")
-    pub = MagicMock()
 
     cmd = await claim_node(
         AgentState(messages=[SystemMessage(content="sys")]),
-        make_runtime(ops_pool=aops_pool, event_publisher=pub, database_gate=database_gate),
+        make_runtime(
+            ops_pool=aops_pool, event_publisher=live_events.publisher, database_gate=database_gate
+        ),
         thread_config(tid),
     )
     # re-enter claim to idle (alive), not END (dead)
@@ -257,8 +260,7 @@ async def test_claim_cancel_kind_halts_to_idle_without_marker(
     # no marker appended — pause is silent (state.messages already had the sys msg)
     assert cmd.update["messages"] == []  # type: ignore[index]
     # Cancelled emitted for the live view
-    assert pub.emit.call_count >= 1
-    assert any("cancelled" in str(c.args[0]).lower() for c in pub.emit.call_args_list)
+    assert any("cancelled" in payload.lower() for payload in await live_events.payloads())
 
 
 async def test_claim_cancel_with_chat_cobatch_wakes_to_process_chat(
@@ -266,6 +268,7 @@ async def test_claim_cancel_with_chat_cobatch_wakes_to_process_chat(
     aops_pool: AsyncConnectionPool,
     database: Database,
     event_bus: EventBus,
+    live_events: LiveEvents,
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
@@ -294,13 +297,14 @@ async def test_claim_cancel_with_chat_cobatch_wakes_to_process_chat(
     )
     cancel_id = insert_inbound_kind(db_conn, tid, "", "cancel", source="user")
     await await_inbound_visible(aops_pool, cancel_id)
-    pub = MagicMock()
 
     cmd = await claim_node(
         # non-empty state = an in-flight turn (not cold start); the exec/llm
         # node already aborted and returned here with halted=True.
         AgentState(messages=[SystemMessage(content="sys"), HumanMessage(content="earlier")]),
-        make_runtime(ops_pool=aops_pool, event_publisher=pub, database_gate=database_gate),
+        make_runtime(
+            ops_pool=aops_pool, event_publisher=live_events.publisher, database_gate=database_gate
+        ),
         thread_config(
             tid,
         ),
@@ -315,7 +319,7 @@ async def test_claim_cancel_with_chat_cobatch_wakes_to_process_chat(
     assert isinstance(msgs[0], HumanMessage)
     assert "please also do X" in msgs[0].content  # pyright: ignore[reportUnknownMemberType]
     # Cancelled still emitted so the live UI clears the interrupted turn's state
-    assert any("cancelled" in str(c.args[0]).lower() for c in pub.emit.call_args_list)
+    assert any("cancelled" in payload.lower() for payload in await live_events.payloads())
 
 
 async def test_claim_cancel_before_chat_cobatch_wakes_to_process_chat(
@@ -402,7 +406,6 @@ async def test_claim_lifecycle_marker_drops_timestamp_when_disabled(
     running_agent: Callable[[], int],
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
-    monkeypatch: pytest.MonkeyPatch,
     *,
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
@@ -410,13 +413,19 @@ async def test_claim_lifecycle_marker_drops_timestamp_when_disabled(
     # meiva:note
     # message_timestamps=False → no timestamp: the open tag leads, then the text, no stray space.
     # meiva:link agent/messages/docs/message-format.meiva.okf.md
-    monkeypatch.setattr(settings.general, "message_timestamps", False)
     tid = running_agent()
     insert_inbound_kind(db_conn, tid, "", "terminate", source="user")
+    runtime = make_runtime(ops_pool=aops_pool, database_gate=database_gate)
+    runtime = Runtime(
+        context=replace(
+            runtime.context,
+            agent=AgentSlices.resolve({"message_timestamps": False}, default_reader=defaults()),
+        )
+    )
 
     cmd = await claim_node(
         AgentState(),
-        make_runtime(ops_pool=aops_pool, database_gate=database_gate),
+        runtime,
         thread_config(
             tid,
         ),
@@ -668,6 +677,7 @@ async def test_claim_cancel_batched_with_restart_idle_restart_silent(
     running_agent: Callable[[], int],
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
+    live_events: LiveEvents,
     *,
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
@@ -680,11 +690,12 @@ async def test_claim_cancel_batched_with_restart_idle_restart_silent(
     insert_inbound_kind(db_conn, tid, "", "cancel", source="user")
     restart_id = insert_inbound_kind(db_conn, tid, "", "restart", source="user")
     await await_inbound_visible(aops_pool, restart_id)
-    pub = MagicMock()
 
     cmd = await claim_node(
         AgentState(messages=[SystemMessage(content="sys")], halted=True),
-        make_runtime(ops_pool=aops_pool, event_publisher=pub, database_gate=database_gate),
+        make_runtime(
+            ops_pool=aops_pool, event_publisher=live_events.publisher, database_gate=database_gate
+        ),
         thread_config(
             tid,
         ),
@@ -695,7 +706,7 @@ async def test_claim_cancel_batched_with_restart_idle_restart_silent(
     # idle before restart (halted=True) + external → silent after restart
     assert cmd.update["halted"] is True  # type: ignore[index]
     # No phantom cancellation: the successor will consume the still-pending command.
-    assert not any("cancelled" in str(c.args[0]).lower() for c in pub.emit.call_args_list)
+    assert not any("cancelled" in payload.lower() for payload in await live_events.payloads())
     assert db_conn.execute(
         "SELECT status FROM inbound_messages WHERE agent_id=%s AND kind='cancel'", (tid,)
     ).fetchone() == ("pending",)
