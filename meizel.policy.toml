@@ -511,3 +511,23 @@ max-exports = ["4"]
 max-public-symbols = ["6"]
 max-params = ["6"]
 max-attr-hops = ["3"]
+
+[typescript]
+scopes = [
+    "ui/web/src/i18n",
+    "ui/web/src/lib",
+    "ui/web/src/test-support",
+    "ui/web/tests",
+]
+import-sources = [
+    "ui/web/src/app",
+    "ui/web/src/components",
+    "ui/web/src/proxy.ts",
+]
+aliases = [
+    "@/=ui/web/src/",
+]
+extensions = [
+    ".ts",
+    ".tsx",
+]

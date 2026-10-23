@@ -20,7 +20,7 @@ from meizel.contracts.manifest_text import add_exports, add_uses
 from meizel.contracts.rule import Projection, is_private
 from meizel.graph.graphs import reachable
 from meizel.graph.model import Fact, MeizelError
-from meizel.graph.universe import is_private_module
+from meizel.graph.universe import Universe, is_private_module
 
 __all__ = ["changed_files", "declare"]
 
@@ -67,7 +67,7 @@ def _unfixable(proj: Projection) -> str | None:
         return f"uses private name {', '.join(names)}: use a public name"
     last = len(proj.steps) - 1
     for position, (directory, child) in enumerate(proj.steps):
-        if is_private_module(child) and not (child == "__init__.py" and position == last):
+        if is_private_module(child) and not (child in Universe.DOOR_FILES and position == last):
             return f"goes through the underscore module {child!r} of {directory or '.'}: use its package door"
     return None
 
@@ -81,7 +81,7 @@ def _missing_exports(analysis: Analysis, plan: Plan, proj: Projection) -> list[t
     last = len(proj.steps) - 1
     missing: list[tuple[str, str]] = []
     for position, (directory, child) in enumerate(proj.steps):
-        if child == "__init__.py" and position == last:
+        if child in Universe.DOOR_FILES and position == last:
             continue
         manifest = analysis.manifests.get(directory)
         listed: set[str] = set(manifest.exports) if manifest is not None else set()

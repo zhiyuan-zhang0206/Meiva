@@ -1,9 +1,9 @@
 import { act, renderHook } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("@/lib/state/use-user-settings", () => import("@/test-support/user-settings-mock"));
+vi.mock("@/lib/state/use-user-settings", () => import("@/lib/state/user-settings-mock"));
 
-import { resetMockSettings, setMockSetting } from "@/test-support/user-settings-mock";
+import { resetMockSettings, setMockSetting } from "@/lib/state/user-settings-mock";
 
 import { useTimeFormat } from "./use-time-format";
 

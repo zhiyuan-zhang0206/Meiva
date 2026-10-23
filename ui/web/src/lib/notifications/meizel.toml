@@ -1,0 +1,59 @@
+exports = ["notices.ts", "task-notify.ts", "use-alerts.tsx", "use-cluster-health.ts", "use-notices.ts", "use-tasks.ts"]
+
+[uses]
+"task-notify.test.ts" = ["task-notify.ts"]
+"use-alerts.test.tsx" = ["use-alerts.tsx"]
+"use-cluster-health.test.tsx" = ["use-cluster-health.ts"]
+"use-tasks.test.ts" = ["use-tasks.ts"]
+
+[purity]
+"." = "strict-to-be"
+"notices.ts" = "strict"
+"task-notify.ts" = "strict"
+
+[debt.first-party-patch]
+"use-alerts.test.tsx#vi.mock ui/web/src/lib/transport/api.ts" = 1
+"use-cluster-health.test.tsx#vi.mock ui/web/src/lib/transport/api.ts" = 1
+"use-notices.test.ts#vi.mock ui/web/src/lib/transport/api.ts" = 1
+"use-tasks.test.ts#vi.mock ui/web/src/lib/transport/api.ts" = 1
+"use-tasks.test.ts#vi.mock ui/web/src/lib/transport/useEventStream.tsx" = 1
+
+[debt.impure-call]
+"use-alerts.tsx#AlertsProvider#EventSource" = 1
+"use-alerts.tsx#AlertsProvider#new EventSource" = 1
+"use-alerts.tsx#AlertsProvider#useEffect" = 1
+"use-alerts.tsx#AlertsProvider#useQuery" = 1
+"use-alerts.tsx#AlertsProvider#useQueryClient" = 1
+"use-alerts.tsx#AlertsProvider#useRef" = 1
+"use-alerts.tsx#AlertsProvider#useState" = 1
+"use-alerts.tsx#useAlerts#useQuery" = 1
+"use-alerts.tsx#useAlertsSection#useQuery" = 1
+"use-cluster-health.ts#useClusterHealth#useEffect" = 1
+"use-cluster-health.ts#useClusterHealth#useQuery" = 1
+"use-cluster-health.ts#useClusterHealth#useQueryClient" = 1
+"use-cluster-health.ts#useClusterHealth#useRef" = 1
+"use-notices.ts#dropOpenNotices#Date.now" = 1
+"use-notices.ts#useNotices#useInfiniteQuery" = 1
+"use-notices.ts#useNotices#useQuery" = 1
+"use-notices.ts#withoutDroppedRows#Date.now" = 1
+"use-tasks.ts#useTasks#useQuery" = 1
+
+[debt.private-name]
+"use-notices.test.ts -> use-notices.ts#__dropTombstonesResetForTest" = 1
+
+[debt.stdlib-patch]
+"use-alerts.test.tsx#vi.spyOn queryClient.invalidateQueries" = 2
+"use-alerts.test.tsx#vi.stubGlobal EventSource" = 2
+"use-cluster-health.test.tsx#vi.spyOn client.refetchQueries" = 1
+"use-notices.test.ts#vi.spyOn Date.now" = 1
+"use-notices.test.ts#vi.spyOn queryClient.invalidateQueries" = 2
+"use-notices.test.ts#vi.stubGlobal EventSource" = 1
+
+[debt.undeclared-edge]
+"use-notices.test.ts -> use-notices.ts" = 1
+
+[debt.unfrozen-value]
+"use-notices.ts#dropTombstones" = 1
+
+[debt.wide-exports]
+"meizel.toml#exports" = 1

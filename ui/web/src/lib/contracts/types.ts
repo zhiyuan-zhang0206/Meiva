@@ -8,8 +8,69 @@
 // pick up the new schema (re-export names here are stable). The
 // pre-commit hook enforces codegen ↔ schema sync; drift fails the commit.
 
-import { TIMELINE_COLOR_ITEMS } from "../timeline/timeline-colors";
+import type { TimelineResponse } from "./types-events";
 import type { components } from "./types-generated";
+
+export {
+  type AgentSnapshot,
+  type AgentSpawnedEvent,
+  type AgentUpdatedEvent,
+  type BackendTimelineItem,
+  type CancelledEvent,
+  type ChatDeltaEvent,
+  type ChatStartEvent,
+  type CodeDeltaEvent,
+  type CodeStartEvent,
+  type CompactDoneEvent,
+  type CompactFinishedEvent,
+  type CompactRequestEvent,
+  type CompactStartedEvent,
+  type ConnectionEvent,
+  type ConnectionState,
+  type ErrorEvent,
+  type ExecOutputChunkEvent,
+  type ExecOutputEvent,
+  type ExecStartEvent,
+  type ImpersonationChangedEvent,
+  type InboundArrivedEvent,
+  type InboundCommittedEvent,
+  type LLMDoneEvent,
+  type LabelUpdatedEvent,
+  type NoticePostedEvent,
+  type NoticeResolvedEvent,
+  type NotificationEvent,
+  type PageClosedEvent,
+  type PageOpenedEvent,
+  type ReasoningDeltaEvent,
+  type ReasoningStartEvent,
+  type SystemEvent,
+  type TaskCreatedEvent,
+  type TaskUpdatedEvent,
+  type TimelineResponse,
+  type TimelineSnapshotEvent,
+  type ToUserChangedEvent,
+  type TokenUsageEvent,
+} from "./types-events";
+
+export {
+  COLOR_FAMILIES,
+  COLOR_SLOT_IDS,
+  TIMELINE_COLOR_ITEMS,
+  USER_SETTING_DEFAULTS,
+  type ColorFamily,
+  type ColorItemSpec,
+  type ColorShape,
+  type ColorSlotId,
+  type ContextMeterWidth,
+  type DateFormat,
+  type FamilyClasses,
+  type NotificationCategoriesResponse,
+  type NotificationCategoryItem,
+  type TimeMode,
+  type ToUserDocument,
+  type UserSettingListResponse,
+  type UserSettingRow,
+} from "./types-settings";
 
 // --- HTTP schemas (gateway/schemas.py) — re-export from generated ---
 
@@ -224,83 +285,15 @@ export type HeartbeatLastPause = Schemas["HeartbeatLastPause"];
 export type InspectWidget = Schemas["InspectWidgetResult"];
 export type InspectWidgetTask = Schemas["InspectWidgetTask"];
 
+export const inspectLiveQueryKey = (agentId: number) =>
+  ["agent-inspect-live", agentId] as const;
+
 // --- Shell monitor page (GET /api/agents/{id}/shell/{sid}) ---
 //
 // --- meiva.ui.show panel ---
 
 export type PageRow = Schemas["PageRow"];
 export type PageRegisterRequest = Schemas["PageRegisterRequest"];
-
-// --- Each item from GET /api/agents/{id}/timeline ---
-//
-// `BackendTimelineItem` is based on `Schemas["TimelineItem"]`:
-// - adds a frontend-only `partial` field — the backend doesn't send it;
-//   the reducer adds it locally when a `*_delta` arrives before a
-//   *_start (a fallback for users joining mid-stream and missing the
-//   start). The renderer uses it to add a visual hint (ellipsis + italic).
-// - adds a frontend-only `interrupted` field — when SSE disconnects
-//   (network flap / gateway restart / server error), still-streaming
-//   items are marked interrupted to distinguish "the message simply
-//   ends here" from "streaming interrupted, content may be incomplete".
-//   The reducer applies it to all partial items on
-//   processConnectionEvent("closed").
-// - narrows `source` / `created_at` / `inbound_id` from `T | null |
-//   undefined` to `T | null` — Pydantic emits every field by default
-//   (default None serializes to null), so they never get omitted on
-//   the wire; undefined doesn't appear at runtime. This override aligns
-//   the TS type with runtime so callers don't need defensive `??` fallbacks.
-export type BackendTimelineItem = Omit<
-  Schemas["TimelineItem"],
-  "source" | "created_at" | "inbound_id"
-> & {
-  readonly source: string | null;
-  readonly created_at: string | null;
-  readonly inbound_id: number | null;
-  readonly partial?: boolean;
-  readonly interrupted?: boolean;
-  // Frontend-only: Date.now() stamped when a reasoning item is first created
-  // from a reasoning_start/delta SSE event. The thinking toggle chip ticks
-  // "Thinking for Xs" off it while the block streams; on commit the snapshot
-  // replaces the item with the backend version carrying the authoritative
-  // reasoning_ms, so this is only read pre-commit. Absent on committed items.
-  readonly reasoningStartedAt?: number;
-  // Frontend-only: the block's elapsed (Date.now() − reasoningStartedAt) frozen
-  // the moment its live clock stops — when a later block starts or the turn
-  // ends (timeline.freezeReasoningClocks). The chip shows this frozen "Thought
-  // for Xs" in the window between the clock stopping and the snapshot
-  // committing the authoritative backend reasoning_ms (which then replaces the
-  // whole item, dropping this stamp). Absent on committed items.
-  readonly reasoningElapsedMs?: number;
-  // Frontend-only: Date.now() stamped when an agent_code item is first
-  // created from a code_start SSE event. The code toggle chip ticks
-  // "writing code for Xs" off it while the code streams; on commit the
-  // snapshot replaces the item with the backend version (no committed
-  // code_ms yet), clearing this stamp so the live clock stops.
-  readonly codeStartedAt?: number;
-  /** Frontend-frozen elapsed while the agent was writing code; cleared when the
-   *  backend commits code_ms. Set by clearCodeClocks when code writing finishes. */
-  readonly codeElapsedMs?: number;
-  // Frontend-only: Date.now() stamped when a code_output item is first
-  // created from an exec_start / exec_output_chunk SSE event. The output
-  // toggle chip ticks "Running for Xs" off it while the execution streams;
-  // on commit the snapshot replaces the item with the backend version
-  // carrying the authoritative exec_ms, so this is only read pre-commit.
-  readonly execStartedAt?: number;
-  readonly execElapsedMs?: number;
-};
-
-
-// GET /api/agents/{id}/timeline response: one tail window of rendered items +
-// the authoritative `msg_count` (len(state.messages)) + `has_more`. msg_count
-// is sent by the server rather than inferred from max rendered msg_idx, so the
-// streaming future-partial merge uses the exact boundary even if a trailing
-// message renders to nothing. `has_more` reports whether older items exist
-// before this window (drives scroll-up load).
-export interface TimelineResponse {
-  readonly items: BackendTimelineItem[];
-  readonly msg_count: number;
-  readonly has_more: boolean;
-}
 
 // GET /api/agents/{id}/conversation-snapshot response (task #3900 batch 2) —
 // the three conversation read models composed into one switch-refresh read
@@ -311,240 +304,6 @@ export interface ConversationSnapshotResponse {
   readonly token_usage: TokenUsageResponse;
   readonly pending: PendingInbound[];
 }
-
-// --- SystemEvent (events.py) — hand-written mirror ---
-//
-// All events flow through a single SSE channel `/api/agents/{id}/system`.
-// OpenAPI can't precisely express a Pydantic Annotated discriminator
-// union (it collapses to anyOf without a narrowing discriminator), so
-// openapi-typescript's output is unusable — hand-written + kept in sync
-// via the task #11 Python ↔ TS roundtrip equivalence tests (the
-// backend adding a field to events.py forces a fixture update; the
-// frontend failing to parse it fails the test and catches drift).
-//
-// readonly fields mirror the Python `_Base(BaseModel, frozen=True)` —
-// consumers (useEventStream → reducer) must not mutate, blocked at
-// compile time.
-
-interface BaseEvent {
-  readonly agent_id: number;
-}
-
-export interface ChatStartEvent extends BaseEvent {
-  readonly role: "chat_start";
-  readonly item_id: string;
-}
-export interface ChatDeltaEvent extends BaseEvent {
-  readonly role: "chat_delta";
-  readonly item_id: string;
-  readonly content: string;
-}
-export interface CompactRequestEvent extends BaseEvent {
-  readonly role: "compact_request";
-  readonly content: string;
-}
-export interface CompactDoneEvent extends BaseEvent {
-  readonly role: "compact_done";
-}
-export interface CompactStartedEvent extends BaseEvent {
-  readonly role: "compact_started";
-  readonly compact_id: string;
-  readonly started_at: string;
-  readonly mode: "request" | "auto";
-}
-export interface CompactFinishedEvent extends BaseEvent {
-  readonly role: "compact_finished";
-  readonly compact_id: string;
-  readonly status: "success" | "failure" | "replaced";
-  readonly finished_at: string;
-}
-export interface CodeStartEvent extends BaseEvent {
-  readonly role: "code_start";
-  readonly item_id: string;
-}
-export interface CodeDeltaEvent extends BaseEvent {
-  readonly role: "code_delta";
-  readonly item_id: string;
-  readonly content: string;
-}
-export interface ReasoningStartEvent extends BaseEvent {
-  readonly role: "reasoning_start";
-  readonly item_id: string;
-}
-export interface ReasoningDeltaEvent extends BaseEvent {
-  readonly role: "reasoning_delta";
-  readonly item_id: string;
-  readonly content: string;
-}
-export interface ExecStartEvent extends BaseEvent {
-  readonly role: "exec_start";
-  /** Stable item_id shared with ExecOutputChunk / ExecOutput — the frontend
-   *  creates a code_output placeholder on exec_start so the output block
-   *  appears immediately, before any chunk arrives. */
-  readonly item_id: string;
-}
-export interface ExecOutputChunkEvent extends BaseEvent {
-  readonly role: "exec_output_chunk";
-  readonly item_id: string;
-  readonly content: string;
-  readonly keepalive?: boolean;
-}
-export interface ExecOutputEvent extends BaseEvent {
-  readonly role: "exec_output";
-  readonly item_id: string;
-  readonly content: string;
-}
-export interface ErrorEvent extends BaseEvent {
-  readonly role: "error";
-  readonly content: string;
-  readonly error_class?: string | null;
-  readonly provider?: string | null;
-  readonly status?: number | null;
-  readonly reason?: string | null;
-  readonly blocked?: boolean;
-  readonly recovery?: string | null;
-}
-export interface CancelledEvent extends BaseEvent {
-  readonly role: "cancelled";
-}
-export interface ImpersonationChangedEvent extends BaseEvent {
-  readonly role: "impersonation_changed";
-}
-export interface InboundArrivedEvent extends BaseEvent {
-  readonly role: "inbound_arrived";
-  readonly inbound_id: number;
-  readonly kind: string;
-  readonly source: string;
-  readonly content: string;
-}
-export interface TokenUsageEvent extends BaseEvent {
-  readonly role: "token_usage";
-  readonly input_tokens: number;
-  readonly output_tokens: number;
-  readonly reasoning_tokens?: number;
-}
-export interface LLMDoneEvent extends BaseEvent {
-  readonly role: "llm_done";
-}
-export interface InboundCommittedEvent extends BaseEvent {
-  readonly role: "inbound_committed";
-  readonly inbound_id: number;
-}
-export interface LabelUpdatedEvent extends BaseEvent {
-  readonly role: "label_updated";
-  readonly label: string | null;
-}
-export interface ToUserChangedEvent extends BaseEvent {
-  role: "to_user_changed";
-}
-
-export interface PageOpenedEvent extends BaseEvent {
-  readonly role: "page_opened";
-  readonly page_id: number;
-  readonly name: string;
-  readonly port: number;
-  readonly title: string | null;
-  readonly url: string;
-}
-export interface PageClosedEvent extends BaseEvent {
-  readonly role: "page_closed";
-  readonly name: string;
-}
-
-
-export interface TimelineSnapshotEvent extends BaseEvent {
-  readonly role: "timeline_snapshot";
-  readonly items: readonly BackendTimelineItem[];
-  /** Length of LangGraph state.messages at snapshot time — the frontend
-   * uses partial.msg_idx == msg_count to detect a future single position. */
-  readonly msg_count: number;
-}
-
-// AgentSnapshot is structurally identical to WireAgentRow (the HTTP schema)
-// — see base/agents/observation/snapshot.py for the canonical Python definition.
-// Only selected detail reads use it; lifecycle SSE events carry ID hints.
-export type AgentSnapshot = WireAgentRow;
-
-export interface AgentSpawnedEvent extends BaseEvent {
-  readonly role: "agent_spawned";
-}
-export interface AgentUpdatedEvent extends BaseEvent {
-  readonly role: "agent_updated";
-}
-export interface NoticePostedEvent extends BaseEvent {
-  readonly role: "notice_posted";
-  readonly notice_id: number;
-  readonly priority: string;
-  readonly title: string;
-  /** The task this notice belongs to, or null — lets the FYI feed group by task. */
-  readonly task_id: number | null;
-}
-export interface NoticeResolvedEvent extends BaseEvent {
-  readonly role: "notice_resolved";
-  readonly notice_id: number;
-  readonly resolution?: string | null;
-  readonly require_response?: boolean | null;
-  readonly age_seconds?: number | null;
-  readonly had_reply?: boolean | null;
-}
-export interface TaskCreatedEvent extends BaseEvent {
-  readonly role: "task_created";
-  readonly task_id: number;
-}
-export interface TaskUpdatedEvent extends BaseEvent {
-  readonly role: "task_updated";
-  readonly task_id: number;
-}
-// meiva:note
-// One notification the gateway's spine delivered. The console renders its inbox
-// from notices; this role exists so every client sees the same delivered set the
-// device transports render.
-// meiva:link base/events/notifications/docs/notifications.meiva.okf.md
-export interface NotificationEvent extends BaseEvent {
-  readonly role: "notification";
-  readonly notification_id: number;
-  readonly category: string;
-  readonly subject: string;
-  readonly body: string | null;
-  readonly href: string | null;
-  readonly importance: string;
-}
-
-export type SystemEvent =
-  | ChatStartEvent
-  | ChatDeltaEvent
-  | CompactRequestEvent
-  | CompactDoneEvent
-  | CompactStartedEvent
-  | CompactFinishedEvent
-  | CodeStartEvent
-  | CodeDeltaEvent
-  | ReasoningStartEvent
-  | ReasoningDeltaEvent
-  | ExecStartEvent
-  | ExecOutputChunkEvent
-  | ExecOutputEvent
-  | ErrorEvent
-  | CancelledEvent
-  | ImpersonationChangedEvent
-  | InboundArrivedEvent
-  | InboundCommittedEvent
-  | LabelUpdatedEvent
-  | ToUserChangedEvent
-  | PageOpenedEvent
-  | PageClosedEvent
-  | TokenUsageEvent
-  | LLMDoneEvent
-  | TimelineSnapshotEvent
-  | AgentSpawnedEvent
-  | AgentUpdatedEvent
-  | NoticePostedEvent
-  | NoticeResolvedEvent
-  | TaskCreatedEvent
-  | TaskUpdatedEvent
-  | NotificationEvent;
-
-
 
 // --- Config (runtime config panel) ---
 //
@@ -787,158 +546,3 @@ export type TaskFields = "full" | "summary" | "graph";
 export interface TaskListResponse<T extends TaskSummaryRow = TaskSummaryRow> {
   readonly tasks: readonly T[];
 }
-
-
-// --- User Settings (GET/PUT /api/settings) ---
-//
-// Persistent key-value preferences stored in the user_settings DB table.
-// The frontend owns the shape and validation of each key's value; the
-// gateway treats values as opaque JSONB.
-
-export interface UserSettingRow {
-  readonly key: string;
-  readonly value: unknown;
-  readonly updated_at: string;
-}
-
-// meiva:note
-// One delivery category the cluster can notify about, with the user's switch
-// already applied by the gateway (`enabled` includes the category default).
-// meiva:link base/events/notifications/docs/notifications.meiva.okf.md
-export interface NotificationCategoryItem {
-  readonly id: string;
-  readonly label: string;
-  readonly description: string;
-  readonly importance: string;
-  readonly enabled: boolean;
-}
-export interface NotificationCategoriesResponse {
-  readonly categories: NotificationCategoryItem[];
-}
-
-export interface UserSettingListResponse {
-  readonly settings: readonly UserSettingRow[];
-}
-
-/** Known settings keys and their value shapes. Add a key here when you
- *  introduce a new setting — this is the single source of defaults and
- *  types for the whole frontend. */
-// Quiet-by-default (RCS — reduce context switch): anything that leaks dynamic
-// change into the user's periphery (status colors, activity lines, awaiting-reply
-// badges) defaults OFF; showing it is an explicit opt-in. Static presence
-// (agent ID / label) is always shown.
-export const USER_SETTING_DEFAULTS: Record<string, unknown> = {
-  // UI language for the interface ("en" | "zh"). Drives next-intl's active
-  // locale via the LanguageProvider bridge; agent content and other data
-  // surfaces stay untranslated. Default "en" — English UI until the user opts
-  // into another locale in Display settings.
-  "display.language": "en",
-  "behavior.navFallbackMs": 5000,
-  "display.time_mode": "last_active",
-  "display.show_terminated": false,
-  "display.date_format": "relative",
-  "display.show_activity_line": false,
-  "display.show_agent_status": false,
-  "display.show_timestamp_weekday": true,
-  "display.clock_format": "24h",
-  "display.show_timezone": false,
-  // Render agent reasoning content as markdown in the timeline; off shows raw text.
-  "display.render_reasoning_markdown": true,
-  // Width tier of the composer's collapsed context-usage bar (ContextMeter).
-  // "comfortable" is one notch above the original fixed size — a bare dot at
-  // tens of thousands of tokens was unreadable at the old width.
-  "display.context_meter_width": "comfortable",
-  // Max width of the timeline content column as a fraction of the viewport
-  // (see lib/timeline-width.ts for clamping + the 1280px ceiling). 0.4 =
-  // 768px on a 1920px screen — the pre-setting fixed width from #714.
-  "display.timeline_width_ratio": 0.4,
-  "display.expand_runs_mode": "none",
-  "display.composer_context_meter": false,
-  // Inspector side-panel open/closed — a workspace preference shared by the
-  // composer's toggle and the timeline layout. Default CLOSED (user ruling
-  // 2026-08-23, superseding the 2026-08-05 floating desktop panel); the
-  // composer's toggle opens it.
-  "display.inspector_open": false,
-  // How many older pages to restore automatically when a compact rewrites the
-  // active timeline (task #3698, user ruling 2026-09-17). 0 skips automatic
-  // history reads, 1 restores one page (default), and -1 restores all pages
-  // available under the gateway's separate compact-history depth setting.
-  "display.compact_history_sessions": 1,
-  // Sidebar layout. The homepage split ratio is device-local state owned by
-  // react-resizable-panels.
-  "display.sidebar_collapsed": false,
-  "display.sidebar_view_mode": "flat",
-  // Flat-list sort: { key: "id" | "last_active" | "status", dir: "asc" | "desc" }.
-  "display.sidebar_sort": { key: "id", dir: "desc" },
-  // Sidebar stats aggregation window (`?hours=`). Must stay within STATS_WINDOWS.
-  "display.stats_window_hours": 24,
-  // Fleet view surfaces.
-  "display.fleet_left_view": "graph",
-  "display.fleet_queue_collapsed": false,
-  "display.task_graph_mode": "graph",
-  "display.task_show_done": false,
-  "display.task_show_canceled": false,
-  // Task graph time filter — last-activity window ("24h" | "7d" | "30d" | "all").
-  "display.task_window": "24h",
-  // Shell tail page terminal theme: "system" | "light" | "dark".
-  "display.shell_terminal_theme": "system",
-  // Plugin-contributed skin, as "<plugin>/<theme>" (themePackId). null = the
-  // console's own palette. A pack re-values the :root color tokens on the root
-  // element, so it applies over whichever of light/dark is active — a plugin
-  // that wants both ships one pack per mode.
-  "display.theme_pack": null,
-  // Timeline block colors — one family per block kind; the valid values, the
-  // class mapping and the approved defaults live in timeline-colors.ts (the
-  // Display settings panel writes these keys only when a user changes a family).
-  "display.color.agent_chat": TIMELINE_COLOR_ITEMS.agent_chat.default,
-  "display.color.agent_code": TIMELINE_COLOR_ITEMS.agent_code.default,
-  "display.color.code_output": TIMELINE_COLOR_ITEMS.code_output.default,
-  "display.color.reasoning": TIMELINE_COLOR_ITEMS.reasoning.default,
-  "display.color.inbound_human": TIMELINE_COLOR_ITEMS.inbound_human.default,
-  "display.color.inbound_agent": TIMELINE_COLOR_ITEMS.inbound_agent.default,
-  "display.color.inbound_system": TIMELINE_COLOR_ITEMS.inbound_system.default,
-  "display.color.system_prompt": TIMELINE_COLOR_ITEMS.system_prompt.default,
-  "display.color.attach": TIMELINE_COLOR_ITEMS.attach.default,
-  "display.color.note": TIMELINE_COLOR_ITEMS.note.default,
-  "display.color.memory": TIMELINE_COLOR_ITEMS.memory.default,
-  "display.color.lifecycle_terminate": TIMELINE_COLOR_ITEMS.lifecycle_terminate.default,
-  "display.color.lifecycle_restart": TIMELINE_COLOR_ITEMS.lifecycle_restart.default,
-  "display.color.lifecycle_resurrect": TIMELINE_COLOR_ITEMS.lifecycle_resurrect.default,
-  "display.color.lifecycle_fork": TIMELINE_COLOR_ITEMS.lifecycle_fork.default,
-  "behavior.confirm_terminate": true,
-  "behavior.confirm_restart": true,
-  "behavior.confirm_force_kill": true,
-  // Draft a reply into the empty composer after the agent's turn ends (grey ghost
-  // text, accepted with the right arrow). Default ON (user ruling 2026-10-11): it is a
-  // static-placement hint inside the input the user is already looking at.
-  "behavior.replySuggestions": true,
-  "behavior.spawn_model": null,
-  "behavior.spawn_reasoning_effort": null,
-  "notification.awaiting_reply": false,
-  "web.sseSingleStream": false,
-  // Model picker visibility: model names the user has hidden from the spawn
-  // model select. An empty list means all models are visible.
-  "models.hidden": [],
-  // meiva:note
-  // Provider-level switch for the same picker: a provider listed here contributes
-  // no models at all, and its per-model rows stop being editable in Control >
-  // Display. An empty list means every provider is on.
-  // meiva:link ui/web/src/docs/frontend-components/creation-availability.meiva.okf.md
-  "models.hidden_providers": [],
-  // Force-directed layout knobs for the fleet Graph / Task Graph
-  // (display.graph_force_params / display.task_force_params.v2) are DB-backed too,
-  // but their default objects differ per view and live with those views — the
-  // useForceParams hook merges settings over the view's passed defaults, so the
-  // full ForceParams objects are intentionally not enumerated here.
-} as const;
-
-/** Time display mode for agent rows. `hidden` renders no timestamp at all. */
-export type TimeMode = "last_active" | "spawned" | "hidden";
-
-/** Width tier for the composer's collapsed context-usage bar. */
-export type ContextMeterWidth = "compact" | "comfortable" | "wide";
-
-/** Date format mode. */
-export type DateFormat = "relative" | "absolute";
-
-export type ToUserDocument = Schemas["ToUserDocument"];

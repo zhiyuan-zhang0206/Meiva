@@ -26,7 +26,20 @@ import {
 } from "d3-force";
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import type { ForceParams } from "@/components/fleet/force-controls";
+export interface ForceParams {
+  nodeSizeMin: number;
+  nodeSizeMax: number;
+  linkDistance: number;
+  linkStrength: number;
+  repulsion: number;
+  centerStrength: number;
+  centerForceX: number;
+  centerForceY: number;
+  collidePadding: number;
+  alphaDecay: number;
+  zoomPadding: number;
+  zoomFitRatio: number;
+}
 
 // ── Generic simulation types ──
 

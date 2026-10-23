@@ -1,0 +1,18 @@
+exports = ["language-provider.tsx"]
+
+[uses]
+"language-provider.test.tsx" = ["language-provider.tsx"]
+
+[purity]
+"." = "strict-to-be"
+"language-provider.tsx" = "strict-to-be"
+
+[debt.first-party-patch]
+"language-provider.test.tsx#vi.mock ui/web/src/lib/state/use-user-settings.ts" = 1
+
+[debt.impure-call]
+"language-provider.tsx#LanguageProvider#document" = 1
+"language-provider.tsx#LanguageProvider#useEffect" = 1
+
+[debt.third-party-patch]
+"language-provider.test.tsx#vi.mock next-intl" = 1

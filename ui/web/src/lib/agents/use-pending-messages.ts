@@ -26,7 +26,7 @@ import { api } from "../transport/api";
 import { useAgentReconcile } from "./agent-reconcile";
 import { useAgentReadRepair } from "./use-agent-read-repair";
 import { CONVERSATION_RETENTION_MS } from "../layout/switch-budget";
-import { isEventForThread } from "../timeline/timeline";
+import { isEventForThread } from "../fold";
 import type { PendingInbound, SystemEvent } from "../contracts/types";
 import type { ConnectionEvent } from "../transport/useEventStream";
 import { useAgentEventStream } from "../transport/useEventStream";

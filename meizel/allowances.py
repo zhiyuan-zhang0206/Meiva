@@ -63,6 +63,14 @@ RULES: dict[str, dict[str, str]] = {
         "max-params": NAMES,
         "max-attr-hops": NAMES,
     },
+    "typescript": {
+        "scopes": NAMES,
+        "import-sources": NAMES,
+        "aliases": NAMES,
+        "extensions": NAMES,
+        "impure-calls": NAMES,
+        "impure-hooks": NAMES,
+    },
 }
 PER_NAME = frozenset({"single-owner"})
 

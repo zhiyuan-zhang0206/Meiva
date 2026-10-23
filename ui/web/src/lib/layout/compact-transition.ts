@@ -1,5 +1,8 @@
-import { parseItemIdParts } from "../fold/timeline";
-import { isReattachedTimelineContext, standingHeadNoteIds } from "../timeline/timeline";
+import {
+  isReattachedTimelineContext,
+  parseItemIdParts,
+  standingHeadNoteIds,
+} from "../fold";
 import type { BackendTimelineItem } from "../contracts/types";
 
 /** A displayed row waiting for its post-compact, checkpoint-prefixed identity. */

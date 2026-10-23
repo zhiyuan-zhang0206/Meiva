@@ -1,0 +1,55 @@
+exports = ["clipboard.ts", "display-limits.ts", "format-number.ts", "format-price.ts", "inbound-source.ts", "interaction-timing.ts", "item-summary.ts", "time.ts", "use-now.ts", "use-time-format.ts", "utils.ts"]
+
+[uses]
+"display-limits.test.ts" = ["display-limits.ts"]
+"format-number.test.ts" = ["format-number.ts"]
+"format-price.test.ts" = ["format-price.ts"]
+"inbound-source.test.ts" = ["inbound-source.ts"]
+"item-summary.test.ts" = ["item-summary.ts"]
+"time.test.ts" = ["time.ts"]
+"time.ts" = ["utils.ts"]
+"use-time-format.test.tsx" = ["use-time-format.ts"]
+"use-time-format.ts" = ["time.ts"]
+
+[purity]
+"." = "strict-to-be"
+"format-number.ts" = "strict"
+"format-price.ts" = "strict"
+"inbound-source.ts" = "strict"
+"item-summary.ts" = "strict"
+"utils.ts" = "strict"
+
+[debt.first-party-patch]
+"display-limits.test.ts#vi.mock ui/web/src/lib/transport/api.ts" = 1
+"interaction-timing.test.ts#vi.mock ui/web/src/lib/telemetry/telemetry.ts" = 1
+"use-time-format.test.tsx#vi.mock ui/web/src/lib/state/use-user-settings.ts" = 1
+
+[debt.impure-call]
+"clipboard.ts#copyToClipboard#document" = 1
+"clipboard.ts#copyToClipboard#navigator" = 1
+"display-limits.ts#useDisplayLimit#useQuery" = 1
+"interaction-timing.ts#markMessageSent#performance.now" = 1
+"interaction-timing.ts#noteTurnStart#performance.now" = 1
+"time.ts#formatRelative#new Date()" = 1
+"time.ts#formatUpcoming#new Date()" = 1
+"use-now.ts#useNow#clearInterval" = 1
+"use-now.ts#useNow#new Date()" = 1
+"use-now.ts#useNow#setInterval" = 1
+"use-now.ts#useNow#useEffect" = 1
+"use-now.ts#useNow#useState" = 1
+"use-time-format.ts#useTimeFormat#new Date()" = 1
+
+[debt.private-name]
+"interaction-timing.test.ts -> interaction-timing.ts#__interactionTimingResetForTest" = 1
+
+[debt.stdlib-patch]
+"interaction-timing.test.ts#vi.spyOn performance.now" = 3
+
+[debt.undeclared-edge]
+"interaction-timing.test.ts -> interaction-timing.ts" = 1
+
+[debt.unfrozen-value]
+"interaction-timing.ts#pendingMessageSentAt" = 1
+
+[debt.wide-exports]
+"meizel.toml#exports" = 1

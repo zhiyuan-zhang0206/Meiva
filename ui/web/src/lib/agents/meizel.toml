@@ -1,0 +1,85 @@
+exports = ["agent-reconcile.ts", "agent-tree.ts", "sidebar.ts", "use-agent-pages.ts", "use-agent-read-repair.ts", "use-agents.ts", "use-all-pages.ts", "use-fleet-agents.ts", "use-pending-messages.ts"]
+
+[uses]
+"agent-reconcile.test.ts" = ["agent-reconcile.ts"]
+"agent-tree.test.ts" = ["agent-tree.ts"]
+"sidebar.test.ts" = ["sidebar.ts"]
+"use-agent-actions.test.tsx" = ["use-agent-actions.ts"]
+"use-agent-pages.test.ts" = ["use-agent-pages.ts"]
+"use-agents.test.ts" = ["use-agents.ts"]
+"use-agents.ts" = ["use-agent-actions.ts"]
+"use-all-pages.test.ts" = ["use-all-pages.ts"]
+"use-fleet-agents.test.tsx" = ["use-agents.ts", "use-fleet-agents.ts"]
+"use-fleet-agents.ts" = ["use-agents.ts"]
+"use-pending-messages.test.ts" = ["use-pending-messages.ts"]
+"use-pending-messages.ts" = ["agent-reconcile.ts", "use-agent-read-repair.ts"]
+
+[purity]
+"." = "strict-to-be"
+"agent-tree.ts" = "strict"
+"use-fleet-agents.ts" = "strict"
+
+[debt.first-party-patch]
+"agent-reconcile.test.ts#vi.mock ui/web/src/lib/transport/api.ts" = 1
+"sidebar.test.ts#vi.mock ui/web/src/lib/state/use-user-settings.ts" = 1
+"sidebar.test.ts#vi.mock ui/web/src/lib/transport/api.ts" = 1
+"use-agent-actions.test.tsx#vi.spyOn ui/web/src/lib/transport/api.ts.compact" = 1
+"use-agent-actions.test.tsx#vi.spyOn ui/web/src/lib/transport/api.ts.spawnAgent" = 3
+"use-agent-pages.test.ts#vi.mock ui/web/src/lib/transport/api.ts" = 1
+"use-agents.test.ts#vi.mock ui/web/src/lib/transport/api.ts" = 1
+"use-all-pages.test.ts#vi.mock ui/web/src/lib/transport/api.ts" = 1
+"use-fleet-agents.test.tsx#vi.mock ui/web/src/lib/agents/use-agents.ts" = 1
+
+[debt.impure-call]
+"agent-reconcile.ts#<module>#useEffect" = 1
+"agent-reconcile.ts#<module>#useQueryClient" = 1
+"agent-reconcile.ts#<module>#useSyncExternalStore" = 1
+"agent-reconcile.ts#createAgentReconcile#clearTimeout" = 1
+"agent-reconcile.ts#createAgentReconcile#setTimeout" = 1
+"message-delivery.ts#<module>#setTimeout" = 1
+"sidebar.ts#<module>#useEffect" = 1
+"sidebar.ts#<module>#useQuery" = 1
+"sidebar.ts#<module>#useQueryClient" = 1
+"sidebar.ts#subscribeStatsPoll#clearTimeout" = 1
+"sidebar.ts#subscribeStatsPoll#setTimeout" = 1
+"use-agent-actions.ts#useAgentActions#useEffect" = 1
+"use-agent-actions.ts#useAgentActions#useMutation" = 1
+"use-agent-actions.ts#useAgentActions#useQueryClient" = 1
+"use-agent-actions.ts#useAgentActions#useState" = 1
+"use-agent-pages.ts#useAgentPages#console.warn" = 1
+"use-agent-pages.ts#useAgentPages#useEffect" = 1
+"use-agent-pages.ts#useAgentPages#useQuery" = 1
+"use-agent-read-repair.ts#useAgentReadRepair#useEffect" = 1
+"use-agent-read-repair.ts#useAgentReadRepair#useQueryClient" = 1
+"use-agents.ts#readRememberedAgent#localStorage" = 1
+"use-agents.ts#rememberAgent#localStorage" = 1
+"use-agents.ts#useAgentRoster#useQuery" = 1
+"use-agents.ts#useAgents#useEffect" = 1
+"use-agents.ts#useAgents#useQuery" = 1
+"use-agents.ts#useAgents#useQueryClient" = 1
+"use-agents.ts#useAgents#useRef" = 1
+"use-agents.ts#useAgents#window" = 1
+"use-all-pages.ts#useAllPages#console.warn" = 1
+"use-all-pages.ts#useAllPages#useEffect" = 1
+"use-all-pages.ts#useAllPages#useQuery" = 1
+"use-pending-messages.ts#usePendingMessages#useQuery" = 1
+"use-pending-messages.ts#usePendingMessages#useRef" = 1
+
+[debt.stdlib-patch]
+"agent-reconcile.test.ts#vi.spyOn client.invalidateQueries" = 1
+"use-agent-actions.test.tsx#vi.spyOn client.invalidateQueries" = 1
+"use-agent-actions.test.tsx#vi.stubGlobal crypto" = 1
+"use-agent-pages.test.ts#vi.spyOn queryClient.invalidateQueries" = 1
+"use-agent-pages.test.ts#vi.stubGlobal EventSource" = 1
+"use-all-pages.test.ts#vi.spyOn queryClient.invalidateQueries" = 1
+"use-all-pages.test.ts#vi.stubGlobal EventSource" = 1
+
+[debt.unfrozen-value]
+"use-pending-messages.ts#IMMEDIATE_REFETCH_ROLES" = 1
+"use-pending-messages.ts#TURN_START_ROLES" = 1
+
+[debt.wide-exports]
+"meizel.toml#exports" = 1
+
+[debt.wide-public-surface]
+"sidebar.ts#__all__" = 1

@@ -12,7 +12,7 @@ from meizel.contracts.manifest import manifest_path
 from meizel.contracts.rule import Projection
 from meizel.graph.graphs import cycle_through, strongly_connected, transitive_reduction_size
 from meizel.graph.model import Fact
-from meizel.graph.universe import is_private_module, parent_of
+from meizel.graph.universe import Universe, is_private_module, parent_of
 
 __all__ = ["bootstrap", "is_test_path", "render_manifest"]
 
@@ -21,7 +21,16 @@ Edges = dict[tuple[str, str], list[Fact]]
 
 def is_test_path(path: str) -> bool:
     parts = path.split("/")
-    return "tests" in parts[:-1] or parts[-1].startswith("test_") or parts[-1] == "conftest.py"
+    name = parts[-1]
+    return (
+        "tests" in parts[:-1]
+        or "test-support" in parts[:-1]
+        or name.startswith("test_")
+        or name == "conftest.py"
+        or name.endswith(
+            ("_test.py", ".test.ts", ".test.tsx", ".spec.ts", ".spec.tsx", "-mock.ts", "-mock.tsx")
+        )
+    )
 
 
 def render_manifest(
@@ -70,7 +79,7 @@ def _exports(projections: list[Projection]) -> tuple[dict[str, set[str]], list[d
         if proj.exempt:
             continue
         for position, (directory, child) in enumerate(proj.steps):
-            if child == "__init__.py" and position == len(proj.steps) - 1:
+            if child in Universe.DOOR_FILES and position == len(proj.steps) - 1:
                 continue
             if is_private_module(child):
                 blocked.setdefault((directory, child), proj.fact)

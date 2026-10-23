@@ -3,7 +3,7 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useRef } from "react";
 
-import { createQueryRepairScheduler } from "../fold/repair";
+import { createQueryRepairScheduler } from "../fold";
 import { useDocumentVisible } from "../layout/use-document-visible";
 
 /** The three selected-stream readers share the same ownership boundary:

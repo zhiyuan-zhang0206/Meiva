@@ -19,7 +19,7 @@ decision and its rationale live in
 
 The checker uses only the standard library and never imports the source. The
 node universe is `git ls-files -z`; facts come from tracked first-party `.py`
-files. Run from the repository root.
+files and configured TypeScript (`.ts` / `.tsx`) scopes. Run from the repository root.
 
 ```
 python -m meizel check [paths... | --changed files...] [--limit N]
@@ -77,7 +77,7 @@ For a fact edge `f -> t`, `L` is the deepest directory containing both; `cf` and
 
 1. `L`'s `[uses]` declares `cf -> ct`.
 2. Every directory from `ct` down to `t`'s parent exports the next child on the
-   path. `__init__.py` is the door, no export needed; a child whose name starts
+   path. `__init__.py`, `index.ts` and `index.tsx` are package doors, no export needed; a child whose name starts
    with an underscore (not a dunder) can never be exported.
 3. Every name used from `t` is public. A leading underscore (dunders excepted)
    makes a name private to its defining file, tests and fixtures included: a

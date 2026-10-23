@@ -23,7 +23,7 @@ from meizel.graph.model import (
     Restricted,
 )
 from meizel.graph.universe import Universe
-from meizel.language import fixtures, purity
+from meizel.language import fixtures, purity, typescript
 from meizel.language.bindings import is_imported_binding, module_bindings, provides
 from meizel.language.mounts import mount_facts
 from meizel.language.python_commands import PythonCommands
@@ -617,6 +617,16 @@ class Scanner(PythonCommands):
 
 def scan_source(universe: Universe, path: str, source: bytes) -> FileScan:
     """Scan `source` as if it were the file at `path` (a version that is not in the working tree)."""
+    if path.endswith((".ts", ".tsx")):
+        ts = typescript.scan_typescript(path, source.decode("utf-8", errors="replace"), universe)
+        return FileScan(
+            path,
+            facts=list(ts.facts),
+            patches=list(ts.patches),
+            problems=list(ts.problems),
+            imported=set(ts.external),
+            purity=list(ts.purity),
+        )
     try:
         tree = ast.parse(source, filename=path)
     except SyntaxError as error:

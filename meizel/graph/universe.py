@@ -60,6 +60,8 @@ def toplevel(cwd: Path) -> Path:
 class Universe:
     """Tracked regular files, every directory above them, and module resolution."""
 
+    DOOR_FILES: frozenset[str] = frozenset({"__init__.py", "index.ts", "index.tsx"})
+
     def __init__(self, root: Path, tracked: list[str]) -> None:
         self.root = root
         self.files: frozenset[str] = frozenset(tracked)
@@ -74,6 +76,9 @@ class Universe:
             parent_of(p) for p in tracked if p.rsplit("/", 1)[-1] == MANIFEST
         )
         self.python_files: tuple[str, ...] = tuple(sorted(p for p in tracked if p.endswith(".py")))
+        self.typescript_files: tuple[str, ...] = tuple(
+            sorted(p for p in tracked if p.endswith((".ts", ".tsx")) and not p.endswith(".d.ts"))
+        )
         self.roots: frozenset[str] = frozenset(
             name.removesuffix(".py") for name in self.children.get("", ())
         )
@@ -109,6 +114,18 @@ class Universe:
 
     def is_first_party_name(self, dotted: str) -> bool:
         return dotted.split(".", 1)[0] in self.roots
+
+    def source_files(
+        self, ts_scopes: tuple[str, ...] = (), ts_extensions: tuple[str, ...] = (".ts", ".tsx")
+    ) -> tuple[str, ...]:
+        if not ts_scopes:
+            return self.python_files
+        ts = tuple(
+            p
+            for p in self.typescript_files
+            if p.endswith(ts_extensions) and any(p == s or p.startswith(f"{s}/") for s in ts_scopes)
+        )
+        return (*self.python_files, *ts)
 
 
 def _is_regular(root: Path, rel: str) -> bool:

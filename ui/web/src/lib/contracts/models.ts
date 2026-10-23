@@ -3,9 +3,25 @@
 // provider-grouped model list, one as a selectable dropdown, the other as
 // per-model visibility toggles.
 
-import { DEFAULT_HARNESS, type Harness } from "@/lib/harness/harness";
-
+import type { components } from "./types-generated";
 import type { ModelsResponse } from "./types";
+
+// meiva:note
+// The runtime loop an agent is born on, fixed for its whole life: `meiva` is the built-in runtime, the others run the loop on an external CLI. The spawn form offers this choice and never changes it afterwards; a fork keeps its source's value. `launchable` is the platform's own answer to "can this machine actually start a session on it" - a harness can be installed (available) and still not launchable, and the UI says so rather than letting the choice look usable.
+// meiva:link base/agents/docs/harness/harness.meiva.okf.md
+
+export type Harness = components["schemas"]["Harness"];
+
+// meiva:note
+// One machine's row: the probe's verdict plus what this build can start.
+// meiva:link ui/web/src/docs/frontend-components/creation-availability.meiva.okf.md
+export type HarnessAvailability = components["schemas"]["HarnessAvailability"];
+
+export type HarnessStatus = HarnessAvailability["status"];
+
+export const HARNESSES: readonly Harness[] = ["meiva", "claude_code", "codex", "antigravity"];
+
+export const DEFAULT_HARNESS: Harness = "meiva";
 
 // Display label for a provider key. `ModelsResponse.providers` is the
 // source of truth for *which* providers/models exist and their order

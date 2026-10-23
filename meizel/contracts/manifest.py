@@ -421,14 +421,19 @@ def load_manifests(universe: Universe) -> tuple[dict[str, Manifest], list[Diagno
     return manifests, diagnostics
 
 
+_TEST_DIRS = frozenset({"tests", "test-support"})
+
+
 def _is_test_path(path: str) -> bool:
     parts = path.split("/")
     name = parts[-1]
     return (
-        "tests" in parts[:-1]
+        bool(_TEST_DIRS.intersection(parts[:-1]))
         or name == "conftest.py"
         or name.startswith("test_")
-        or name.endswith("_test.py")
+        or name.endswith(
+            ("_test.py", ".test.ts", ".test.tsx", ".spec.ts", ".spec.tsx", "-mock.ts", "-mock.tsx")
+        )
     )
 
 
@@ -442,10 +447,10 @@ def effective_purity(
         child = first(rel)
         manifest = manifests.get(directory)
         if manifest is not None:
-            if child in manifest.purity and (not is_test or child in {rel, "tests"}):
+            if child in manifest.purity and (not is_test or child == rel or child in _TEST_DIRS):
                 return manifest.purity[child]
             if manifest.purity_default is not None and (
-                not is_test or directory.rsplit("/", 1)[-1] == "tests"
+                not is_test or directory.rsplit("/", 1)[-1] in _TEST_DIRS
             ):
                 return manifest.purity_default
         if not directory:

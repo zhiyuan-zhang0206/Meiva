@@ -1,0 +1,4 @@
+exports = ["user-settings-mock.ts"]
+
+[purity]
+"." = "strict"

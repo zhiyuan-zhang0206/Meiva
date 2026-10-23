@@ -55,7 +55,16 @@ class FixtureState:
 
 
 def is_test_file(path: str) -> bool:
-    name = path.rsplit("/", 1)[-1]
+    parts = path.split("/")
+    name = parts[-1]
+    if name.endswith((".ts", ".tsx")):
+        return (
+            name.endswith(
+                (".test.ts", ".test.tsx", ".spec.ts", ".spec.tsx", "-mock.ts", "-mock.tsx")
+            )
+            or "tests" in parts[:-1]
+            or "test-support" in parts[:-1]
+        )
     return name == "conftest.py" or name.startswith("test_") or name.endswith("_test.py")
 
 

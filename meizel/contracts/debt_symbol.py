@@ -8,6 +8,7 @@ symbol's lines in the old file at the base, and inside the same symbol in the ne
 from __future__ import annotations
 
 import ast
+import re
 from collections import Counter
 from dataclasses import dataclass
 
@@ -31,29 +32,57 @@ class SymbolMove:
     new: str
 
 
+_EXTENSIONS = (".py", ".ts", ".tsx")
+
+
 def parse_symbol_moves(specs: list[str]) -> list[SymbolMove]:
-    """`OLD_FILE::NAME=NEW_FILE` moves, each side a Python file and NAME a plain identifier."""
     moves: list[SymbolMove] = []
     for spec in specs:
         head, _, new = spec.partition("=")
         old, _, name = head.partition("::")
-        if not (old.endswith(".py") and new.endswith(".py") and name.isidentifier()) or old == new:
+        if (
+            not (old.endswith(_EXTENSIONS) and new.endswith(_EXTENSIONS) and name.isidentifier())
+            or old == new
+        ):
             raise MeizelError(
                 f"{spec!r}: a symbol move is written OLD_FILE::NAME=NEW_FILE with two different "
-                "Python files and the name of a top-level function or class"
+                "Python or TypeScript files and the name of a top-level function or class"
             )
         moves.append(SymbolMove(old, name, new))
     return moves
 
 
-def _span(tree: ast.Module, name: str) -> tuple[int, int] | None:
-    """The first and last line of the top-level function or class `name`, decorators included."""
+def _py_span(tree: ast.Module, name: str) -> tuple[int, int] | None:
     for node in tree.body:
         if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef) and (
             node.name == name
         ):
             first = min([node.lineno, *(d.lineno for d in node.decorator_list)])
             return first, node.end_lineno or node.lineno
+    return None
+
+
+def _ts_span(source: str, name: str) -> tuple[int, int] | None:
+    pattern = re.compile(
+        rf"^[ \t]*(?:export\s+)?(?:async\s+)?(?:function|class)\s+{re.escape(name)}\b",
+        re.MULTILINE,
+    )
+    match = pattern.search(source)
+    if match is None:
+        return None
+    brace = source.find("{", match.end())
+    if brace == -1:
+        return None
+    depth = 0
+    for idx in range(brace, len(source)):
+        if source[idx] == "{":
+            depth += 1
+        elif source[idx] == "}":
+            depth -= 1
+            if depth == 0:
+                start_line = source.count("\n", 0, match.start()) + 1
+                end_line = source.count("\n", 0, idx) + 1
+                return start_line, end_line
     return None
 
 
@@ -64,9 +93,15 @@ def _parse(path: str, source: bytes) -> ast.Module:
         raise MeizelError(f"{path}: cannot parse: {error}") from error
 
 
+def _source_span(path: str, source: bytes, name: str) -> tuple[int, int] | None:
+    if path.endswith((".ts", ".tsx")):
+        return _ts_span(source.decode("utf-8", errors="replace"), name)
+    return _py_span(_parse(path, source), name)
+
+
 def defines(path: str, source: bytes, name: str) -> bool:
     """Whether the source of `path` defines the top-level function or class `name`."""
-    return _span(_parse(path, source), name) is not None
+    return _source_span(path, source, name) is not None
 
 
 def symbol_debt(
@@ -77,7 +112,7 @@ def symbol_debt(
     name: str,
 ) -> Found:
     """The violations inside `name` in this version of `path`, counted per `(code, owner, key)`."""
-    span = _span(_parse(path, source), name)
+    span = _source_span(path, source, name)
     if span is None:
         raise MeizelError(f"{path} defines no top-level function or class {name}")
     found: Counter[tuple[Code, str, str]] = Counter()

@@ -1,21 +1,103 @@
 // SSE reduction and compact-envelope detection for the selected timeline.
 // Store actions own notifications, buffer release, and epoch changes.
 
-import { captureCompactTransition } from "../layout/compact-transition";
+import {
+  captureCompactTransition,
+  type CompactTransitionBuffer,
+} from "../layout/compact-transition";
+import { isEventForThread } from "../fold";
 import { foldEvent } from "../fold/timeline";
-import { isEventForThread } from "./timeline";
-import type { LiveCompact, TimelineState } from "./timeline-store";
-import type { BackendTimelineItem, SystemEvent } from "../contracts/types";
+import type { BackendTimelineItem, ConnectionState, SystemEvent } from "../contracts/types";
 
-/**
- * The timeline kinds that mark a history rewrite — the compact envelope rows
- * (`inbound_compact_request` = UI-triggered force compact,
- * `inbound_compact_summary` = agent-initiated `meiva.self.compact`).
- */
-const COMPACT_ENVELOPE_KINDS: ReadonlySet<string> = new Set([
-  "inbound_compact_request",
-  "inbound_compact_summary",
-]);
+
+export interface LiveCompact {
+  compactId: string;
+
+  startedAt: string | null;
+  mode: "request" | "auto" | null;
+
+  status: "success" | "failure" | "replaced" | null;
+
+  finishedAt: string | null;
+}
+
+export interface TimelineState {
+  items: BackendTimelineItem[];
+
+  compactBuffer: CompactTransitionBuffer | null;
+
+  compactEpoch: number;
+
+  compactHistoryPages: number;
+  streamingCode: boolean;
+  turnActive: boolean;
+  connectionState: ConnectionState;
+  tokenUsage: number;
+
+  reasoningTokens: number;
+
+  maxContextTokens: number;
+
+  softCompactTokens: number;
+  hardCompactTokens: number;
+
+  activeThreadId: number | null;
+
+  streamingIds: Set<string>;
+
+  resetPending: boolean;
+
+  compactReplaceSeq: number;
+  compactReplaceAgent: number | null;
+
+  liveCompact: LiveCompact | null;
+
+  hasMoreOlder: boolean;
+
+  loadingOlder: boolean;
+
+  olderFetchCount: number;
+
+  scrollToBottomRequest: number;
+  requestScrollToBottom: () => void;
+  setCompactHistoryPages: (pages: number) => void;
+  invalidateCompactEpoch: () => void;
+  finishCompactTransition: (threadId: number, epoch: number) => void;
+
+  processSseEvent: (ev: SystemEvent) => void;
+
+  processSseEventBatch: (events: SystemEvent[]) => void;
+
+  processConnectionEvent: (ev: { type: ConnectionState }) => void;
+
+  reloadSnapshot: (snapshot: BackendTimelineItem[], msg_count: number, hasMoreOlder: boolean) => void;
+
+  switchThread: (agentId: number | null, cached: BackendTimelineItem[] | null, hasMoreOlder: boolean, buffer?: CompactTransitionBuffer | null) => void;
+
+  applyTokenUsage: (
+    input: number,
+    reasoning: number,
+    maxContext: number,
+    softCompact: number,
+    hardCompact: number,
+  ) => void;
+
+  beginLoadOlder: () => void;
+
+  settleTurn: () => void;
+
+  prependOlder: (older: BackendTimelineItem[], hasMoreOlder: boolean) => void;
+
+  trimOldestWhileFollowing: (maxItems: number) => void;
+
+  incrementOlderFetchCount: () => void;
+
+  clearPartialFlags: () => void;
+}
+
+function isCompactEnvelopeKind(kind: string): boolean {
+  return kind === "inbound_compact_request" || kind === "inbound_compact_summary";
+}
 
 /** Detect an unseen compact envelope by its stable rendered identity.
  * This is not a directional checkpoint revision; the ordering redesign must
@@ -25,7 +107,7 @@ export function crossedUnseenCompact(
   incoming: BackendTimelineItem[],
 ): boolean {
   return incoming.some((env) => {
-    if (!COMPACT_ENVELOPE_KINDS.has(env.kind)) return false;
+    if (!isCompactEnvelopeKind(env.kind)) return false;
     const localEnv = local.find((it) => it.item_id === env.item_id);
     if (localEnv === undefined) return true;
     return localEnv.kind !== env.kind || localEnv.created_at !== env.created_at;

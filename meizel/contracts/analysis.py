@@ -73,6 +73,13 @@ class Analysis:
         )
 
 
+def _all_source_files(universe: Universe) -> tuple[str, ...]:
+    policy, _ = load_policy(universe)
+    scopes = (*policy.names("typescript", "scopes"), *policy.names("typescript", "import-sources"))
+    exts = policy.names("typescript", "extensions") or (".ts", ".tsx")
+    return universe.source_files(scopes, exts)
+
+
 def _init_worker(universe: Universe) -> None:
     _WORKER["universe"] = universe
 
@@ -84,7 +91,7 @@ def _scan_in_worker(path: str) -> FileScan:
 def scan_all(
     universe: Universe, jobs: int | None = None, paths: Sequence[str] | None = None
 ) -> dict[str, FileScan]:
-    paths = universe.python_files if paths is None else paths
+    paths = _all_source_files(universe) if paths is None else paths
     workers = jobs if jobs is not None else min(os.cpu_count() or 1, 8)
     if workers <= 1 or len(paths) < _PARALLEL_FROM:
         return {p: scan_file(universe, p) for p in paths}
@@ -309,7 +316,7 @@ def _scan_changed(
     universe: Universe, changed: Collection[str], jobs: int | None
 ) -> dict[str, FileScan]:
     """The changed Python files, plus what resolving their fixture requests needs."""
-    wanted = {p for p in universe.python_files if p in changed or p.endswith("conftest.py")}
+    wanted = {p for p in _all_source_files(universe) if p in changed or p.endswith("conftest.py")}
     scans = scan_all(universe, jobs, sorted(wanted))
     while True:
         modules = (

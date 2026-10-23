@@ -12,9 +12,9 @@ const { getStatsDashboard } = vi.hoisted(() => ({
   getStatsDashboard: vi.fn(),
 }));
 vi.mock("@/lib/transport/api", () => ({ api: { getStatsDashboard } }));
-vi.mock("@/lib/state/use-user-settings", () => import("@/test-support/user-settings-mock"));
+vi.mock("@/lib/state/use-user-settings", () => import("@/lib/state/user-settings-mock"));
 
-import { mockSetSettingCalls, resetMockSettings, setMockSetting } from "@/test-support/user-settings-mock";
+import { mockSetSettingCalls, resetMockSettings, setMockSetting } from "@/lib/state/user-settings-mock";
 
 import {
   SIDEBAR_SORT_DEFAULT,

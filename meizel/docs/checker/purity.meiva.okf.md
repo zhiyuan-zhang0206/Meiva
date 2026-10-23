@@ -30,7 +30,7 @@ child under `[purity]`, with `"."` as the directory default:
 "scopes.py" = "strict"
 ```
 
-Every Python file resolves to its nearest enclosing declaration (`none` by default):
+Every Python or TypeScript file resolves to its nearest enclosing declaration (`none` by default):
 
 - **`none`**: only locality and patch-recording rules apply.
 - **`strict-to-be`**: all 15 purity and container-budget rules are evaluated. Existing

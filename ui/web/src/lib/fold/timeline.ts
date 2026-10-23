@@ -58,66 +58,9 @@
 // import ../timeline (cycle).
 
 import type { BackendTimelineItem, SystemEvent } from "../contracts/types";
-/**
- * Parse a backend item_id (format: "{msg_idx}.{block_idx}") into a
- * sortable tuple. Unparseable inputs return null — ephemeral markers
- * (`_marker.*`) and anything that's not "<number>.<number>" go through
- * the null path and land at the end.
- *
- * `_marker.*` is filtered out by `Number("_marker") = NaN` failing
- * Number.isFinite; no separate startsWith guard needed (would duplicate
- * the split + finite check).
- */
-export function parseItemId(itemId: string): [number, number] | null {
-  const parts = itemId.split(".");
-  if (parts.length !== 2) return null;
-  const msgIdx = Number(parts[0]);
-  const blockIdx = Number(parts[1]);
-  if (!Number.isFinite(msgIdx) || !Number.isFinite(blockIdx)) return null;
-  return [msgIdx, blockIdx];
-}
+import { parseItemId, sortByItemId } from "./item-id";
 
-export interface ItemIdParts {
-  /** 0 is the live/current segment; positive ranks are compact boundaries. */
-  rank: number;
-  checkpointId: string | null;
-  msg: number;
-  block: number;
-}
-
-/**
- * Parse both stable-id wire shapes without widening parseItemId's current-
- * segment-only contract. Historical ids carry their exact boundary identity;
- * rank is only their presentational order and may shift after another compact.
- */
-export function parseItemIdParts(itemId: string): ItemIdParts | null {
-  const current = parseItemId(itemId);
-  if (current !== null) {
-    const [msg, block] = current;
-    if (!Number.isInteger(msg) || !Number.isInteger(block) || msg < 0 || block < 0) {
-      return null;
-    }
-    return { rank: 0, checkpointId: null, msg, block };
-  }
-
-  const parts = itemId.split(".");
-  if (parts.length !== 4) return null;
-  const [segment, checkpointId, msgPart, blockPart] = parts;
-  if (!/^s[1-9]\d*$/.test(segment) || checkpointId.length === 0) return null;
-  const rank = Number(segment.slice(1));
-  const msg = Number(msgPart);
-  const block = Number(blockPart);
-  if (
-    !Number.isSafeInteger(rank) ||
-    !Number.isSafeInteger(msg) ||
-    !Number.isSafeInteger(block) ||
-    msg < 0 ||
-    block < 0
-  ) {
-    return null;
-  }
-  return { rank, checkpointId, msg, block };
-}
+export { parseItemId, parseItemIdParts, sortByItemId, type ItemIdParts } from "./item-id";
 
 /**
  * Stable insert for a NEW item by its numeric item_id — used by the
@@ -142,24 +85,6 @@ function insertItemById(items: BackendTimelineItem[], newItem: BackendTimelineIt
     }
   }
   return [...items.slice(0, idx), newItem, ...items.slice(idx)];
-}
-
-/**
- * Sort historical ranks oldest-first (sN ... s1), then the current segment;
- * within each segment sort by msg/block. Ephemeral markers land at the end.
- */
-export function sortByItemId(items: BackendTimelineItem[]): BackendTimelineItem[] {
-  return [...items].sort((a, b) => {
-    const pa = parseItemIdParts(a.item_id);
-    const pb = parseItemIdParts(b.item_id);
-    // null (ephemeral) goes last; both null → 0 preserves relative order
-    if (pa === null) return pb === null ? 0 : 1;
-    if (pb === null) return -1;
-    // Higher ranks are older and render first; current rank 0 renders last.
-    if (pa.rank !== pb.rank) return pb.rank - pa.rank;
-    if (pa.msg !== pb.msg) return pa.msg - pb.msg;
-    return pa.block - pb.block;
-  });
 }
 
 // =============================================================

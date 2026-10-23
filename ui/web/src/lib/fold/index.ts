@@ -42,6 +42,16 @@ export { AGENTS_QUERY_KEY, AGENT_DIRECTORY_QUERY_KEY, AGENT_DETAIL_QUERY_KEY } f
 export { NOTICES_QUERY_KEY, NOTICES_RESOLVED_QUERY_KEY } from "./notices";
 export { TASKS_QUERY_KEY } from "./tasks";
 export { FLEET_GRAPH_KEY_PREFIX } from "./graph";
+export {
+  isEventForThread,
+  isReattachedTimelineContext,
+  parseItemId,
+  parseItemIdParts,
+  sortByItemId,
+  standingHeadNoteIds,
+  type ItemIdParts,
+} from "./item-id";
+export { createQueryRepairScheduler } from "./repair";
 
 export interface FoldContext {
   /** Current cache value for a key (undefined = never fetched — never seed). */

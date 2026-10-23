@@ -1,0 +1,32 @@
+exports = ["auth-context.tsx", "content-security-policy.ts", "nonce-context.tsx"]
+
+[uses]
+"auth-context.test.tsx" = ["auth-context.tsx"]
+"auth-context.tsx" = ["login-ticket.ts"]
+"content-security-policy.test.ts" = ["content-security-policy.ts"]
+
+[purity]
+"." = "strict-to-be"
+"content-security-policy.ts" = "strict"
+
+[debt.first-party-patch]
+"auth-context.test.tsx#vi.mock ui/web/src/lib/transport/api.ts" = 1
+
+[debt.impure-call]
+"auth-context.tsx#<module>#createContext" = 1
+"auth-context.tsx#AuthProvider#useEffect" = 1
+"auth-context.tsx#AuthProvider#useState" = 1
+"auth-context.tsx#AuthProvider#window" = 1
+"auth-context.tsx#useAuth#useContext" = 1
+"login-ticket.ts#redeem#fetch" = 1
+"login-ticket.ts#takeTicketFromLocation#window" = 1
+"nonce-context.tsx#<module>#createContext" = 1
+"nonce-context.tsx#useNonce#useContext" = 1
+
+[debt.stdlib-patch]
+"auth-context.test.tsx#vi.spyOn console.error" = 1
+"auth-context.test.tsx#vi.stubGlobal fetch" = 1
+
+[debt.unfrozen-value]
+"auth-context.tsx#sessionInvalidHandler" = 1
+"login-ticket.ts#inFlight" = 1
