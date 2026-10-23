@@ -317,7 +317,7 @@ ALLOWED: dict[str, tuple[Category, str]] = {
     ),
     "tests/contracts/test_lint_marker_contract.py": (
         "contract",
-        "keeps the backend NoteTag enum in step with ui/web/src/components/timeline/markers.tsx",
+        "keeps the backend NoteTag enum in step with ui/web/src/components/timeline/model/marker-classify.ts",
     ),
     "tests/contracts/test_lint_truncate_isolation.py": (
         "contract",

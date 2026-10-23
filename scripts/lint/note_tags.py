@@ -1,16 +1,17 @@
 #!/usr/bin/env python3
-"""Lint the bidirectional ``NoteTag`` / frontend system_marker contract.
-
-Every NoteTag enum value must have a branch in the frontend dispatch sets, or
-the tag falls through to ``UnknownMarkerChip``. Conversely, every string in
-``LIFECYCLE_TAGS``, ``MEMORY_SOURCES``, or ``NOTE_SOURCES`` must be a live
-NoteTag value; otherwise a removed or renamed backend tag leaves stale frontend
-behaviour. Both directions fail the hook with a clear message.
-
-Trigger: runs on either ``base/agents/messages/kwargs.py`` or ``markers.tsx``
-changes (see ``.pre-commit-config.yaml``). No filenames passed; the script
-reads both files at their canonical paths from the repo root.
-"""
+# meiva:note
+# Lint the bidirectional ``NoteTag`` / frontend system_marker contract.
+#
+# Every NoteTag enum value must have a branch in the frontend dispatch sets, or
+# the tag falls through to ``UnknownMarkerChip``. Conversely, every string in
+# ``LIFECYCLE_TAGS``, ``MEMORY_SOURCES``, or ``NOTE_SOURCES`` must be a live
+# NoteTag value; otherwise a removed or renamed backend tag leaves stale frontend
+# behaviour. Both directions fail the hook with a clear message.
+#
+# Trigger: runs on either ``base/agents/messages/kwargs.py`` or ``model/marker-classify.ts``
+# changes (see ``.pre-commit-config.yaml``). No filenames passed; the script
+# reads both files at their canonical paths from the repo root.
+# meiva:link base/agents/messages/docs/metadata-contracts.meiva.okf.md
 
 from __future__ import annotations
 
@@ -21,7 +22,9 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 
 PYTHON_SRC = REPO_ROOT / "base" / "agents" / "messages" / "kwargs.py"
-TS_SRC = REPO_ROOT / "ui" / "web" / "src" / "components" / "timeline" / "markers.tsx"
+TS_SRC = (
+    REPO_ROOT / "ui" / "web" / "src" / "components" / "timeline" / "model" / "marker-classify.ts"
+)
 
 
 def extract_note_tags(path: Path) -> list[str]:
@@ -104,7 +107,7 @@ def main() -> None:
     missing = check_coverage(note_tags, TS_SRC)
     if missing:
         print(
-            f"ERROR: {len(missing)} NoteTag value(s) not found in markers.tsx dispatch:",
+            f"ERROR: {len(missing)} NoteTag value(s) not found in model/marker-classify.ts dispatch:",
             file=sys.stderr,
         )
         for tag in missing:
@@ -137,7 +140,9 @@ def main() -> None:
         )
         sys.exit(1)
 
-    print(f"OK: NoteTag and markers.tsx dispatch sets agree on {len(note_tags)} values")
+    print(
+        f"OK: NoteTag and model/marker-classify.ts dispatch sets agree on {len(note_tags)} values"
+    )
 
 
 if __name__ == "__main__":

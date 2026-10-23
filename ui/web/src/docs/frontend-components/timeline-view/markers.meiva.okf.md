@@ -1,17 +1,18 @@
 ---
 type: doc
 title: System markers
-description: "The system-marker dispatch in components/timeline/markers.tsx — card families, the fail-loud unrecognized alarm and the ephemeral payload markers."
+description: "The system-marker dispatch in components/timeline/model/marker-classify.ts — card families, the fail-loud unrecognized alarm and the ephemeral payload markers."
 tags:
 - frontend
 ---
 
 # System markers
 
-`components/timeline/markers.tsx` classifies a `system_marker` item by its
+`components/timeline/model/marker-classify.ts` classifies a `system_marker` item by its
 `source` (a backend `NoteTag`) into three card-rendered families — lifecycle
 transitions, memory recall, guidance notes — plus the bare-rendered ephemeral
-catch-all. Card visuals resolve from the timeline-colors slot chosen in Display
+catch-all. `components/timeline/markers.tsx` owns rendered marker bodies and
+visuals. Card visuals resolve from the timeline-colors slot chosen in Display
 settings and are composed at call time, so one family swap restyles every
 marker; titles are i18n keys under the `markers` namespace with an English
 fallback.

@@ -1,11 +1,11 @@
 import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ChatMarkdownMock, ScrollAreaMock, cleanupTimelineTest, makeItem, render, revealCollapsedCards, setToggleState } from "./timeline-test-harness";
+import { ChatMarkdownMock, ScrollAreaMock, cleanupTimelineTest, makeItem, render, revealCollapsedCards, setToggleState } from "./timeline-test-mock";
 vi.mock("@/components/content/markdown", () => ({ ChatMarkdown: ChatMarkdownMock }));
 vi.mock("@/components/ui/scroll-area", () => ({ ScrollArea: ScrollAreaMock }));
 import { TimelineView } from "..";
 import { streamingParseIntervalMs } from "../item";
-import { LIFECYCLE_TAGS, MEMORY_SOURCES, NOTE_SOURCES } from "../markers";
+import { LIFECYCLE_TAGS, MEMORY_SOURCES, NOTE_SOURCES } from "../model/marker-classify";
 afterEach(cleanupTimelineTest);
 describe("detail-block duration display (Last mode)", () => {
   const runToggle = () => screen.getByTestId("turn-toggle");
