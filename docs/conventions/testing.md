@@ -119,8 +119,18 @@ on, the `ci_job` that runs it, and whether it selects the whole suite or
 lane whose job is missing, lands on another host, or carries
 `continue-on-error` (it runs the tests and judges none of them) covers nothing;
 the gaps that predate the lanes are listed in `UNRUN_ALLOWED` in that module and
-the tuple only shrinks. The marker is for that case only: "this test is about the host",
-never "this test is hard to port".
+the tuple only shrinks - it is empty now that both hosts have a lane. A `marked`
+lane must also run `-m requires_host` in a `run` step: a job that ran the whole
+suite instead would satisfy every other check while testing a set the registry
+does not describe, and the gate reads the workflow's steps to refuse it.
+
+Two lanes hold the promise today, one per host: the Linux shards run the whole
+suite, and `host-marks` (`macos-15`) runs `-m requires_host` so the darwin
+declarations execute somewhere. That job censuses the selection before it runs
+(`scripts/ci/host_marks_census.py`, uploaded as the `host-marks-census`
+artifact) and fails on an empty selection, because a green lane that collected
+nothing reads exactly like a green lane that ran everything. The marker is for
+that case only: "this test is about the host", never "this test is hard to port".
 
 Every skip in the tree is counted, whatever asks for it — `@pytest.mark.skipif`,
 `@pytest.mark.skip`, `pytest.skip(...)`, `pytest.importorskip(...)`.

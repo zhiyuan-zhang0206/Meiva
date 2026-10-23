@@ -53,6 +53,7 @@ from psycopg.conninfo import conninfo_to_dict, make_conninfo
 
 from base.clock import Clock
 from base.cluster.dataplane.pg_admin import local_owner_authority
+from base.cluster.dataplane.pg_tools import has_pg_tool as has_pg_tool
 from base.cluster.dataplane.pg_tools import pg_tool
 from base.db import Database, connect_url
 from base.host.private_storage import ensure_private_file
