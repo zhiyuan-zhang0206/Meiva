@@ -9,9 +9,10 @@ from typing import Any
 import pytest
 
 from base.host.net.tests.fake_url_opener import FakeUrlOpener
-from base.host.system.tests.fake_commands import fake_host
+from base.host.system.tests.fake_commands import FakeCommands, fake_host
 from scripts.ci.pull_requests import commands as ci_utils
-from scripts.ci.pull_requests import monitor, owner_operations, status
+from scripts.ci.pull_requests import monitor, status
+from scripts.ci.pull_requests.tests.ci_evidence import monitor_host, probe, rollup
 from scripts.ci.pull_requests.tests.test_ci_monitor import (
     TEST_CLOCK,
     CIStatus,
@@ -23,7 +24,6 @@ from scripts.ci.pull_requests.tests.test_ci_monitor import (
     diag_pr_view,
     diag_runs,
     install_probe,
-    install_results_poller,
     limbo_result,
     status_check_rollup_entry,
     urlopen_sequence,
@@ -33,9 +33,6 @@ from scripts.ci.pull_requests.tests.test_ci_monitor import (
 )
 from scripts.ci.pull_requests.tests.test_ci_monitor import (
     gh as gh,
-)
-from scripts.ci.pull_requests.tests.test_ci_monitor import (
-    has_workflows as has_workflows,
 )
 from scripts.ci.pull_requests.tests.test_ci_monitor import (
     no_sleep as no_sleep,
@@ -52,6 +49,8 @@ def test_queue_ops_exclusive_with_merge_wait() -> None:
             clock=TEST_CLOCK,
             host=fake_host(),
             open_url=FakeUrlOpener(),
+            workflows=True,
+            env={},
         )
     with pytest.raises(SystemExit):
         ci_utils.main(
@@ -59,6 +58,8 @@ def test_queue_ops_exclusive_with_merge_wait() -> None:
             clock=TEST_CLOCK,
             host=fake_host(),
             open_url=FakeUrlOpener(),
+            workflows=True,
+            env={},
         )
     with pytest.raises(SystemExit):
         ci_utils.main(
@@ -66,6 +67,8 @@ def test_queue_ops_exclusive_with_merge_wait() -> None:
             clock=TEST_CLOCK,
             host=fake_host(),
             open_url=FakeUrlOpener(),
+            workflows=True,
+            env={},
         )
     with pytest.raises(SystemExit):
         ci_utils.main(
@@ -73,6 +76,8 @@ def test_queue_ops_exclusive_with_merge_wait() -> None:
             clock=TEST_CLOCK,
             host=fake_host(),
             open_url=FakeUrlOpener(),
+            workflows=True,
+            env={},
         )
 
 
@@ -88,7 +93,14 @@ def test_diagnose_merge_conflict(diag_gh: Any, capsys: pytest.CaptureFixture[str
         ]
     )
     assert (
-        ci_utils.main(["1871", "--diagnose"], host=host, clock=TEST_CLOCK, open_url=FakeUrlOpener())
+        ci_utils.main(
+            ["1871", "--diagnose"],
+            host=host,
+            clock=TEST_CLOCK,
+            open_url=FakeUrlOpener(),
+            workflows=True,
+            env={},
+        )
         == 0
     )
     out = capsys.readouterr().out
@@ -111,7 +123,14 @@ def test_diagnose_lint_hard_limit(diag_gh: Any, capsys: pytest.CaptureFixture[st
         ]
     )
     assert (
-        ci_utils.main(["1871", "--diagnose"], host=host, clock=TEST_CLOCK, open_url=FakeUrlOpener())
+        ci_utils.main(
+            ["1871", "--diagnose"],
+            host=host,
+            clock=TEST_CLOCK,
+            open_url=FakeUrlOpener(),
+            workflows=True,
+            env={},
+        )
         == 0
     )
     out = capsys.readouterr().out
@@ -139,7 +158,14 @@ def test_diagnose_truncate_lint_delta_case(
         ]
     )
     assert (
-        ci_utils.main(["1871", "--diagnose"], host=host, clock=TEST_CLOCK, open_url=FakeUrlOpener())
+        ci_utils.main(
+            ["1871", "--diagnose"],
+            host=host,
+            clock=TEST_CLOCK,
+            open_url=FakeUrlOpener(),
+            workflows=True,
+            env={},
+        )
         == 0
     )
     assert "truncate-isolation lint" in capsys.readouterr().out
@@ -162,17 +188,23 @@ def test_diagnose_clock_lattice_gateway_case(
         ]
     )
     assert (
-        ci_utils.main(["1871", "--diagnose"], host=host, clock=TEST_CLOCK, open_url=FakeUrlOpener())
+        ci_utils.main(
+            ["1871", "--diagnose"],
+            host=host,
+            clock=TEST_CLOCK,
+            open_url=FakeUrlOpener(),
+            workflows=True,
+            env={},
+        )
         == 0
     )
     assert "clock-lattice lint" in capsys.readouterr().out
 
 
 def test_diagnose_test_failure_uses_native_evidence(
-    diag_gh: Any, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    diag_gh: Any, capsys: pytest.CaptureFixture[str]
 ) -> None:
     check = "backend shard (4/16)"
-    monkeypatch.setenv("TRUNK_API_TOKEN", "test-token")
     calls: list[urllib.request.Request] = []
     open_url = urlopen_sequence([TrunkResponse({"state": "testing"})], calls)
     host = diag_gh(
@@ -191,7 +223,15 @@ def test_diagnose_test_failure_uses_native_evidence(
         ]
     )
     assert (
-        ci_utils.main(["1871", "--diagnose"], host=host, clock=TEST_CLOCK, open_url=open_url) == 0
+        ci_utils.main(
+            ["1871", "--diagnose"],
+            host=host,
+            clock=TEST_CLOCK,
+            open_url=open_url,
+            workflows=True,
+            env={"TRUNK_API_TOKEN": "test-token"},
+        )
+        == 0
     )
     out = capsys.readouterr().out
     assert "unclassified CI failure" in out
@@ -219,7 +259,14 @@ def test_diagnose_runner_install_reads_as_infrastructure(
         ]
     )
     assert (
-        ci_utils.main(["1871", "--diagnose"], host=host, clock=TEST_CLOCK, open_url=FakeUrlOpener())
+        ci_utils.main(
+            ["1871", "--diagnose"],
+            host=host,
+            clock=TEST_CLOCK,
+            open_url=FakeUrlOpener(),
+            workflows=True,
+            env={},
+        )
         == 0
     )
     out = capsys.readouterr().out
@@ -254,7 +301,14 @@ def test_diagnose_reports_synthetic_test_pr(
         ]
     )
     assert (
-        ci_utils.main(["1871", "--diagnose"], host=host, clock=TEST_CLOCK, open_url=FakeUrlOpener())
+        ci_utils.main(
+            ["1871", "--diagnose"],
+            host=host,
+            clock=TEST_CLOCK,
+            open_url=FakeUrlOpener(),
+            workflows=True,
+            env={},
+        )
         == 0
     )
     out = capsys.readouterr().out
@@ -274,7 +328,14 @@ def test_diagnose_stale_base(diag_gh: Any, capsys: pytest.CaptureFixture[str]) -
         ]
     )
     assert (
-        ci_utils.main(["1871", "--diagnose"], host=host, clock=TEST_CLOCK, open_url=FakeUrlOpener())
+        ci_utils.main(
+            ["1871", "--diagnose"],
+            host=host,
+            clock=TEST_CLOCK,
+            open_url=FakeUrlOpener(),
+            workflows=True,
+            env={},
+        )
         == 0
     )
     assert "stale_base" in capsys.readouterr().out
@@ -293,7 +354,12 @@ def test_diagnose_json_machine_readable(diag_gh: Any, capsys: pytest.CaptureFixt
     )
     assert (
         ci_utils.main(
-            ["1871", "--diagnose", "--json"], host=host, clock=TEST_CLOCK, open_url=FakeUrlOpener()
+            ["1871", "--diagnose", "--json"],
+            host=host,
+            clock=TEST_CLOCK,
+            open_url=FakeUrlOpener(),
+            workflows=True,
+            env={},
         )
         == 0
     )
@@ -310,9 +376,18 @@ def test_diagnose_exclusive_and_requires_pr() -> None:
             clock=TEST_CLOCK,
             host=fake_host(),
             open_url=FakeUrlOpener(),
+            workflows=True,
+            env={},
         )
     with pytest.raises(SystemExit):
-        ci_utils.main(["--diagnose"], clock=TEST_CLOCK, host=fake_host(), open_url=FakeUrlOpener())
+        ci_utils.main(
+            ["--diagnose"],
+            clock=TEST_CLOCK,
+            host=fake_host(),
+            open_url=FakeUrlOpener(),
+            workflows=True,
+            env={},
+        )
 
 
 def test_diagnose_merged_pr_reports_no_conflict_or_stale_base(
@@ -329,7 +404,14 @@ def test_diagnose_merged_pr_reports_no_conflict_or_stale_base(
         ]
     )
     assert (
-        ci_utils.main(["1871", "--diagnose"], host=host, clock=TEST_CLOCK, open_url=FakeUrlOpener())
+        ci_utils.main(
+            ["1871", "--diagnose"],
+            host=host,
+            clock=TEST_CLOCK,
+            open_url=FakeUrlOpener(),
+            workflows=True,
+            env={},
+        )
         == 0
     )
     out = capsys.readouterr().out
@@ -338,7 +420,7 @@ def test_diagnose_merged_pr_reports_no_conflict_or_stale_base(
 
 
 def test_ci_usage_prints_per_agent_rollup(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     ledger = tmp_path / "ledger.jsonl"
     ledger.write_text(
@@ -353,9 +435,16 @@ def test_ci_usage_prints_per_agent_rollup(
         )
         + "\n"
     )
-    monkeypatch.setattr(ci_utils, "DEFAULT_LEDGER", ledger)
     assert (
-        ci_utils.main(["--ci-usage"], clock=TEST_CLOCK, host=fake_host(), open_url=FakeUrlOpener())
+        ci_utils.main(
+            ["--ci-usage"],
+            clock=TEST_CLOCK,
+            host=fake_host(),
+            open_url=FakeUrlOpener(),
+            workflows=True,
+            env={},
+            ledger_path=ledger,
+        )
         == 0
     )
     out = capsys.readouterr().out
@@ -363,9 +452,7 @@ def test_ci_usage_prints_per_agent_rollup(
     assert "est $1.22" in out
 
 
-def test_ci_usage_json_machine_readable(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_ci_usage_json_machine_readable(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     ledger = tmp_path / "ledger.jsonl"
     ledger.write_text(
         json.dumps(
@@ -379,10 +466,15 @@ def test_ci_usage_json_machine_readable(
         )
         + "\n"
     )
-    monkeypatch.setattr(ci_utils, "DEFAULT_LEDGER", ledger)
     assert (
         ci_utils.main(
-            ["--ci-usage", "--json"], clock=TEST_CLOCK, host=fake_host(), open_url=FakeUrlOpener()
+            ["--ci-usage", "--json"],
+            clock=TEST_CLOCK,
+            host=fake_host(),
+            open_url=FakeUrlOpener(),
+            workflows=True,
+            env={},
+            ledger_path=ledger,
         )
         == 0
     )
@@ -394,11 +486,21 @@ def test_ci_usage_json_machine_readable(
 def test_ci_usage_exclusive_and_no_pr() -> None:
     with pytest.raises(SystemExit):
         ci_utils.main(
-            ["42", "--ci-usage"], clock=TEST_CLOCK, host=fake_host(), open_url=FakeUrlOpener()
+            ["42", "--ci-usage"],
+            clock=TEST_CLOCK,
+            host=fake_host(),
+            open_url=FakeUrlOpener(),
+            workflows=True,
+            env={},
         )
     with pytest.raises(SystemExit):
         ci_utils.main(
-            ["--ci-usage", "--wait"], clock=TEST_CLOCK, host=fake_host(), open_url=FakeUrlOpener()
+            ["--ci-usage", "--wait"],
+            clock=TEST_CLOCK,
+            host=fake_host(),
+            open_url=FakeUrlOpener(),
+            workflows=True,
+            env={},
         )
 
 
@@ -460,70 +562,63 @@ def test_limbo_runs_skips_unparseable_created_at_and_non_int_id() -> None:
     assert len(calls) == 1
 
 
-def test_check_ci_attaches_limbo_to_pending(
-    gh: Any, has_workflows: Any, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_check_ci_attaches_limbo_to_pending(gh: Any) -> None:
     host = gh(
         [status_check_rollup_entry("backend (pytest + pyright)", "SUCCESS")],
         scheduled=["Example proof A"],
+        stuck=[{"id": 91, "name": "Example proof A", "age_s": 1500}],
     )
-    has_workflows(True)
-    stuck: list[status.LimboRun] = [{"id": 91, "name": "Example proof A", "age_s": 1500}]
 
-    def fake_limbo(*_a: object, **_k: object) -> list[status.LimboRun]:
-        return stuck
-
-    monkeypatch.setattr(status, "limbo_runs", fake_limbo)
-    r = status.check_ci("1", host=host, clock=TEST_CLOCK)
+    r = status.check_ci("1", host=host, clock=TEST_CLOCK, workflows=True)
     assert r.verdict is CIStatus.PENDING
     assert r.pending == ["Example proof A"]
-    assert r.limbo == stuck
+    assert r.limbo == [{"id": 91, "name": "Example proof A", "age_s": 1500}]
     assert "GitHub limbo" in r.summary()
 
 
-def test_check_ci_empty_rollup_with_scheduled_run_probes_limbo(
-    gh: Any, has_workflows: Any, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    host = gh([], scheduled=["CI"])
-    has_workflows(True)
+def test_check_ci_empty_rollup_with_scheduled_run_probes_limbo(gh: Any) -> None:
+    host = gh([], scheduled=["CI"], stuck=[{"id": 92, "name": "CI", "age_s": 1200}])
 
-    def fake_limbo(*_a: object, **_k: object) -> list[status.LimboRun]:
-        return [{"id": 92, "name": "CI", "age_s": 1200}]
-
-    monkeypatch.setattr(status, "limbo_runs", fake_limbo)
-    r = status.check_ci("1", host=host, clock=TEST_CLOCK)
+    r = status.check_ci("1", host=host, clock=TEST_CLOCK, workflows=True)
     assert r.verdict is CIStatus.PENDING
     assert r.limbo == [{"id": 92, "name": "CI", "age_s": 1200}]
 
 
-def test_check_ci_limbo_probe_none_stays_plain_pending(
-    gh: Any, has_workflows: Any, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    host = gh([status_check_rollup_entry("backend", "SUCCESS")], scheduled=["CI"])
-    has_workflows(True)
+def test_check_ci_limbo_probe_none_stays_plain_pending(gh: Any) -> None:
+    host = gh([status_check_rollup_entry("backend", "SUCCESS")], scheduled=["CI"], limbo_rc=1)
 
-    def fake_limbo(*_a: object, **_k: object) -> None:
-        return None
-
-    monkeypatch.setattr(status, "limbo_runs", fake_limbo)
-    r = status.check_ci("1", host=host, clock=TEST_CLOCK)
+    r = status.check_ci("1", host=host, clock=TEST_CLOCK, workflows=True)
     assert r.verdict is CIStatus.PENDING
     assert r.limbo == []
 
 
-def test_query_once_json_includes_limbo(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    def fake_check_ci(*_a: object, **_k: object) -> status.CIResult:
-        return limbo_result(pending=["CI"], limbo=[{"id": 91, "name": "CI", "age_s": 700}])
-
-    monkeypatch.setattr(status, "check_ci", fake_check_ci)
+def test_query_once_json_includes_limbo(capsys: pytest.CaptureFixture[str]) -> None:
+    host = monitor_host(
+        rollup(
+            [
+                {
+                    "name": "test",
+                    "status": "COMPLETED",
+                    "conclusion": "SUCCESS",
+                    "workflowName": "CI",
+                }
+            ],
+            scheduled=["CI"],
+            stuck=[{"id": 91, "name": "CI", "age_s": 700}],
+        )
+    )
     assert (
-        ci_utils.main(["1", "--json"], clock=TEST_CLOCK, host=fake_host(), open_url=FakeUrlOpener())
+        ci_utils.main(
+            ["1", "--json"],
+            clock=TEST_CLOCK,
+            host=host,
+            open_url=FakeUrlOpener(),
+            workflows=True,
+            env={},
+        )
         == 0
     )
-    payload = json.loads(capsys.readouterr().out)
-    assert payload["limbo"] == [{"id": 91, "name": "CI", "age_s": 700}]
+    assert json.loads(capsys.readouterr().out)["limbo"] == [{"id": 91, "name": "CI", "age_s": 700}]
 
 
 def test_report_limbo_names_once_per_key(capsys: pytest.CaptureFixture[str]) -> None:
@@ -538,18 +633,31 @@ def test_report_limbo_names_once_per_key(capsys: pytest.CaptureFixture[str]) -> 
 
 
 def test_wait_names_limbo_runs_and_says_the_block(
-    no_sleep: Any, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    no_sleep: Any, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    install_results_poller(
-        monkeypatch,
-        limbo_result(pending=["CI"], limbo=[{"id": 91, "name": "CI", "age_s": 1500}]),
+    open_url = FakeUrlOpener()
+    host = monitor_host(
+        rollup(
+            [
+                {
+                    "name": "test",
+                    "status": "COMPLETED",
+                    "conclusion": "SUCCESS",
+                    "workflowName": "CI",
+                }
+            ],
+            scheduled=["CI"],
+            stuck=[{"id": 91, "name": "CI", "age_s": 1500}],
+        )
     )
     assert (
         ci_utils.main(
             ["1243", "--wait", "--timeout", "1"],
             clock=no_sleep,
-            host=fake_host(),
-            open_url=FakeUrlOpener(),
+            host=host,
+            open_url=open_url,
+            workflows=True,
+            env={},
         )
         == 1
     )
@@ -565,7 +673,12 @@ def test_removed_force_flag_is_rejected(
 ) -> None:
     with pytest.raises(SystemExit) as error:
         ci_utils.main(
-            ["42", *mode, "--force"], clock=TEST_CLOCK, host=fake_host(), open_url=FakeUrlOpener()
+            ["42", *mode, "--force"],
+            clock=TEST_CLOCK,
+            host=fake_host(),
+            open_url=FakeUrlOpener(),
+            workflows=True,
+            env={},
         )
     assert error.value.code == 2
     assert "unrecognized arguments: --force" in capsys.readouterr().err
@@ -574,32 +687,37 @@ def test_removed_force_flag_is_rejected(
 @pytest.mark.parametrize("pending", [["CI"], ["CI", "docs lint"]])
 def test_limbo_never_enqueues_or_claims_green(
     no_sleep: Any,
-    monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     pending: list[str],
 ) -> None:
-    monkeypatch.setenv("TRUNK_API_TOKEN", "test-token")
-    install_results_poller(
-        monkeypatch,
-        limbo_result(pending=pending, limbo=[{"id": 91, "name": "CI", "age_s": 1500}]),
+
+    open_url = FakeUrlOpener()
+    host = monitor_host(
+        rollup(
+            [
+                {
+                    "name": "test",
+                    "status": "COMPLETED",
+                    "conclusion": "SUCCESS",
+                    "workflowName": "CI",
+                }
+            ],
+            scheduled=pending,
+            stuck=[{"id": 91, "name": "CI", "age_s": 1500}],
+        )
     )
-    submissions: list[tuple[Any, ...]] = []
-
-    def fake_submit_trunk(*a: object, **_k: object) -> int:
-        submissions.append(a)
-        return 0
-
-    monkeypatch.setattr(owner_operations, "submit_trunk", fake_submit_trunk)
     assert (
         ci_utils.main(
             ["42", "--merge", "--timeout", "1"],
             clock=no_sleep,
-            host=fake_host(),
-            open_url=FakeUrlOpener(),
+            host=host,
+            open_url=open_url,
+            workflows=True,
+            env={"TRUNK_API_TOKEN": "test-token"},
         )
         == 1
     )
-    assert submissions == []
+    assert open_url.urls == []
     output = capsys.readouterr()
     assert "CI green" not in output.out
     assert "GitHub limbo" in output.err
@@ -610,46 +728,37 @@ def test_limbo_never_enqueues_or_claims_green(
     "next_verdict", [CIStatus.PENDING, CIStatus.NO_WORKFLOW_RUNS, CIStatus.ERROR]
 )
 def test_owner_rechecks_genuine_green_before_submission(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], next_verdict: CIStatus
+    capsys: pytest.CaptureFixture[str], next_verdict: CIStatus
 ) -> None:
-    monkeypatch.setenv("TRUNK_API_TOKEN", "test-token")
-    install_results_poller(
-        monkeypatch, status.CIResult(CIStatus.ALL_PASSED), status.CIResult(next_verdict)
-    )
-
-    def fake_cooldown(*_a: object, **_k: object) -> int:
-        return 0
-
-    monkeypatch.setattr(owner_operations, "queue_cooldown_seconds", fake_cooldown)
-    submissions: list[tuple[Any, ...]] = []
-
-    def fake_submit_trunk(*a: object, **_k: object) -> int:
-        submissions.append(a)
-        return 0
-
-    monkeypatch.setattr(owner_operations, "submit_trunk", fake_submit_trunk)
+    host = monitor_host(probe(CIStatus.ALL_PASSED), probe(next_verdict))
+    open_url = FakeUrlOpener()
     assert ci_utils.main(
-        ["42", "--merge"], clock=TEST_CLOCK, host=fake_host(), open_url=FakeUrlOpener()
+        ["42", "--merge"],
+        clock=TEST_CLOCK,
+        host=host,
+        open_url=open_url,
+        workflows=True,
+        env={"TRUNK_API_TOKEN": "test-token"},
     ) == (3 if next_verdict is CIStatus.ERROR else 1)
-    assert submissions == []
+    assert open_url.urls == []
     assert "submitted" not in capsys.readouterr().out
 
 
 def test_merge_and_rerun_conflict_is_rejected_before_polling(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
-    monkeypatch.setenv("TRUNK_API_TOKEN", "test-token")
-
-    def unexpected_poll(*_a: Any, **_k: Any) -> status.CIResult:
-        raise AssertionError("invalid owner command polled CI")
-
-    monkeypatch.setattr(status, "check_ci", unexpected_poll)
+    runner = FakeCommands()
+    open_url = FakeUrlOpener()
     with pytest.raises(SystemExit) as error:
         ci_utils.main(
             ["42", "--merge", "--rerun-failed-jobs"],
             clock=TEST_CLOCK,
-            host=fake_host(),
-            open_url=FakeUrlOpener(),
+            host=fake_host(runner),
+            open_url=open_url,
+            workflows=True,
+            env={"TRUNK_API_TOKEN": "test-token"},
         )
     assert error.value.code == 2
     assert "exclusive" in capsys.readouterr().err
+    assert runner.calls == []
+    assert open_url.urls == []

@@ -50,6 +50,7 @@ Usage:
 import atexit
 import os
 import sys
+from pathlib import Path
 
 from pydantic import ValidationError
 
@@ -76,7 +77,7 @@ VERDICT_PATH = (workspace_dir(WATCHER_ID) / VERDICT_FILE).resolve()
 
 os.chdir(REPO_ROOT)
 sys.path.insert(0, CI_UTILS)
-from scripts.ci.pull_requests.status import CIStatus, check_ci  # noqa: E402
+from scripts.ci.pull_requests.status import CIStatus, check_ci, repo_has_workflows  # noqa: E402
 
 
 def persistent_config_cause(exc: Exception) -> str | None:
@@ -133,11 +134,12 @@ def finish(message: str) -> bool:
 
 clock = Clock.from_settings()
 host = Host.system()
+workflows = repo_has_workflows(Path(CI_UTILS))
 start = clock.monotonic()
 no_checks_retries = 0
 while clock.monotonic() - start < TIMEOUT_S:
     try:
-        status = check_ci(PR_NUMBER, host=host, clock=clock)
+        status = check_ci(PR_NUMBER, host=host, clock=clock, workflows=workflows)
     except Exception as e:  # gh / network / JSON failure — report, do not hang
         # Exit 1 — the probe itself failed; persist + echo happen first, so
         # the error survives even when the wake cannot land (exit 2 is for
