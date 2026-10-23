@@ -61,7 +61,7 @@ def test_child_sigterm_writes_timed_out_envelope(tmp_path: Path) -> None:
 
 def test_child_installs_signal_handlers_before_reading_request(
     monkeypatch: pytest.MonkeyPatch,
-    model_installation: Installation,
+    sdk_model_owner: Installation,
 ) -> None:
     from agent.execution import child as exec_child
     from agent.execution import protocol
@@ -118,7 +118,6 @@ def test_child_installs_signal_handlers_before_reading_request(
     monkeypatch.setattr(exec_child, "run_code", fake_run_code)
     monkeypatch.setattr(protocol, "write_result", fake_write_result)
     monkeypatch.setattr(meiva, "ensure_plugins_loaded", fake_ensure_plugins_loaded)
-    monkeypatch.setattr(meiva, "__plugin_installation__", model_installation, raising=False)
 
     try:
         from base.agents.context import MeivaContext

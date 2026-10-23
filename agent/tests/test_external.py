@@ -180,7 +180,7 @@ def _assert_detached() -> None:
 def test_attach_refuses_inside_an_exec_turn(
     attached_runtime: tuple[dict[str, Any], Any, list[dict[str, Any]]],
 ) -> None:
-    meiva.state = ExampleState(sample__seen={"prior"})
+    process_context.set_state(ExampleState(sample__seen={"prior"}))
     with pytest.raises(RuntimeError, match="exec turn cannot attach"):
         impersonation.attach("lease")
     assert _borrowed_agent_id() is None
@@ -527,7 +527,7 @@ def test_external_attachment_refuses_to_journal_a_full_history_reset(
     _, snapshot, staged = attached_runtime
     snapshot.messages = [HumanMessage(content="Native history", id="native")]
     attachment = impersonation.attach("lease")
-    meiva.state_update = {"messages": [RemoveMessage(id=REMOVE_ALL_MESSAGES)]}
+    process_context.set_state_update({"messages": [RemoveMessage(id=REMOVE_ALL_MESSAGES)]})
     with pytest.raises(ValueError, match=r"REMOVE_ALL.*native compaction"):
         attachment.close()
     assert not staged

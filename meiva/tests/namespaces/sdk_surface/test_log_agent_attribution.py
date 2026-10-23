@@ -16,6 +16,7 @@ from base.native_process import loaded_commit
 from base.native_process.loaded_commit import LoadedCommit
 from base.telemetry.delivery.pipeline import EventPipeline
 from base.telemetry.process_logging import message_to_params
+from meiva.sdk_surface import process_context
 
 
 class _FakeMessage:
@@ -39,12 +40,12 @@ def _agent_id_of(extra: dict[str, object]) -> int | None:
 
 
 def test_unannotated_log_has_no_agent() -> None:
-    meiva.context = replace(meiva.context, identity=AgentIdentity(42, True))
+    process_context.bind_context(replace(meiva.context, identity=AgentIdentity(42, True)))
     assert _agent_id_of({"agent_id": "-", "event": "log"}) is None
 
 
 def test_explicit_agent_id_is_preserved() -> None:
-    meiva.context = replace(meiva.context, identity=AgentIdentity(42, True))
+    process_context.bind_context(replace(meiva.context, identity=AgentIdentity(42, True)))
     assert _agent_id_of({"agent_id": "99", "event": "log"}) == 99
 
 
@@ -76,7 +77,7 @@ def test_gateway_boot_retains_process_generation_evidence(monkeypatch: pytest.Mo
         raise AssertionError("the mocked sink must not construct a pipeline")
 
     monkeypatch.setattr(slog, "init_done", False)
-    meiva.context = replace(meiva.context, identity=AgentIdentity(42, True))
+    process_context.bind_context(replace(meiva.context, identity=AgentIdentity(42, True)))
     with (
         mock.patch.object(slog.logger, "add"),
         mock.patch.object(slog, "add_file_sink"),

@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 
-import os
 import subprocess
 from collections.abc import Callable
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 
@@ -29,7 +27,7 @@ from meiva_builtins.plugins.meiva_code.tests.test_meiva_code_plugin import (
 )
 
 
-def test_read_wrap_corrupted_state_field_raises(tmp_path: Path):
+def test_read_wrap_corrupted_state_field_raises(tmp_path: Path, default_home: Path):
     """sibling mutates meiva.state.meiva_code__injected_paths to non-valid type → handle.read()
     Pydantic validation raises (handle.read goes through cls.model_validate, schema type error explodes on the spot)."""
     repo = tmp_path / "repo"
@@ -38,15 +36,13 @@ def test_read_wrap_corrupted_state_field_raises(tmp_path: Path):
     (repo / "AGENTS.md").write_text("X")
     (repo / "foo.py").write_text("")
 
-    process_context.set_state(make_state_with_cwd(str(repo)))
-    # pyright type=ignore: deliberately mutate field to wrong type, simulating sibling plugin / framework bug.
-    meiva.state.meiva_code__injected_paths = 42  # type: ignore[assignment]
+    state = make_state_with_cwd(str(repo))
+    object.__setattr__(state, "meiva_code__injected_paths", 42)
+    process_context.set_state(state)
     process_context.set_state_update({})
     try:
-        with patch.dict(os.environ, {"HOME": str(tmp_path / "fake-home")}):
-            (tmp_path / "fake-home").mkdir()
-            with pytest.raises(Exception, match=r"injected_paths"):
-                meiva.files.read("foo.py")
+        with pytest.raises(Exception, match=r"injected_paths"):
+            meiva.files.read("foo.py")
     finally:
         process_context.unbind_exec_turn()
 
@@ -67,21 +63,18 @@ def test_set_cwd_relative_resolves_against_current_cwd(tmp_path: Path):
         process_context.unbind_exec_turn()
 
 
-def test_set_cwd_expanduser_supported(tmp_path: Path):
+def test_set_cwd_expanduser_supported(tmp_path: Path, default_home: Path):
     """set_cwd accepts `~/...` uses expanduser, resolves via $HOME."""
-    fake_home = tmp_path / "fake-home"
-    fake_home.mkdir()
-    sub = fake_home / "project"
+    sub = default_home / "project"
     sub.mkdir()
 
-    with patch.dict(os.environ, {"HOME": str(fake_home)}):
-        process_context.set_state(make_state_with_cwd(str(tmp_path)))
-        process_context.set_state_update({})
-        try:
-            meiva.cwd.set("~/project")
-            assert meiva.state_update["meiva_code__cwd"] == str(sub.resolve())
-        finally:
-            process_context.unbind_exec_turn()
+    process_context.set_state(make_state_with_cwd(str(tmp_path)))
+    process_context.set_state_update({})
+    try:
+        meiva.cwd.set("~/project")
+        assert meiva.state_update["meiva_code__cwd"] == str(sub.resolve())
+    finally:
+        process_context.unbind_exec_turn()
 
 
 def test_uninstall_restores_original(tmp_path: Path):
@@ -515,7 +508,7 @@ def test_understand_wrap_forwards_max_concurrent(tmp_path: Path, monkeypatch):
         process_context.unbind_exec_turn()
 
 
-def test_read_wrap_dedup_by_content_hash_across_paths(tmp_path: Path):
+def test_read_wrap_dedup_by_content_hash_across_paths(tmp_path: Path, default_home: Path):
     """Two AGENTS.md at different paths with identical content → only the first
     is auto-injected; the second is skipped by content-hash dedup. This is the
     worktree case: the worktree copy and the main repo copy share the same
@@ -538,9 +531,7 @@ def test_read_wrap_dedup_by_content_hash_across_paths(tmp_path: Path):
     process_context.set_state(make_state_with_cwd(str(wt / "src")))
     process_context.set_state_update({})
     try:
-        with patch.dict(os.environ, {"HOME": str(tmp_path / "fake-home")}):
-            (tmp_path / "fake-home").mkdir()
-            meiva.files.read("foo.py")
+        meiva.files.read("foo.py")
 
         notes = get_injected_context_notes(meiva.state_update)
         # Only ONE injection — the second AGENTS.md has the same content hash
@@ -585,7 +576,7 @@ def test_set_cwd_with_skills_stores_project_skills_note(tmp_path: Path):
         process_context.unbind_exec_turn()
 
 
-def test_read_wrap_hash_dedup_respects_different_content(tmp_path: Path):
+def test_read_wrap_hash_dedup_respects_different_content(tmp_path: Path, default_home: Path):
     """Two AGENTS.md at different paths with different content → both are
     injected. Hash dedup must not collapse distinct files."""
     repo = tmp_path / "repo"
@@ -603,9 +594,7 @@ def test_read_wrap_hash_dedup_respects_different_content(tmp_path: Path):
     process_context.set_state(make_state_with_cwd(str(wt / "src")))
     process_context.set_state_update({})
     try:
-        with patch.dict(os.environ, {"HOME": str(tmp_path / "fake-home")}):
-            (tmp_path / "fake-home").mkdir()
-            meiva.files.read("foo.py")
+        meiva.files.read("foo.py")
 
         notes = get_injected_context_notes(meiva.state_update)
         # Both injected — content differs

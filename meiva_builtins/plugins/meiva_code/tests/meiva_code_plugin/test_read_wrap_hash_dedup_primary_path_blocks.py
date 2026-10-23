@@ -3,11 +3,9 @@
 from __future__ import annotations
 
 import asyncio
-import os
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any, cast
-from unittest.mock import patch
 
 import pytest
 from langchain_core.runnables import RunnableConfig
@@ -99,7 +97,9 @@ async def test_after_init_no_agent_initializes_home(has_identity: bool, no_sdk_c
     assert not hasattr(meiva, "context")
 
 
-def test_read_wrap_hash_dedup_primary_path_blocks_identical_copy(tmp_path: Path):
+def test_read_wrap_hash_dedup_primary_path_blocks_identical_copy(
+    tmp_path: Path, default_home: Path
+):
     """Agent reads AGENTS.md directly (primary path) → its content hash is
     recorded. A subsequent sibling read that walks past a different-path copy
     with the same content skips it via hash dedup."""
@@ -118,25 +118,23 @@ def test_read_wrap_hash_dedup_primary_path_blocks_identical_copy(tmp_path: Path)
     process_context.set_state(make_state_with_cwd(str(wt / "src")))
     process_context.set_state_update({})
     try:
-        with patch.dict(os.environ, {"HOME": str(tmp_path / "fake-home")}):
-            (tmp_path / "fake-home").mkdir()
-            # Step 1: agent reads AGENTS.md directly
-            content1 = meiva.files.read("../AGENTS.md")
-            assert content1 == "SHARED"
-            # Primary path marked in injected_paths + hash recorded
-            assert str(agents_wt.resolve()) in meiva.state_update["meiva_code__injected_paths"]
-            assert len(meiva.state_update["meiva_code__injected_hashes"]) == 1
-            # The walk's farthest-first order surfaces the main-repo copy
-            # before the target itself (pre-existing walk behavior); its hash
-            # then blocks the worktree copy.
-            notes = get_injected_context_notes(meiva.state_update)
-            assert len(notes) == 1
+        # Step 1: agent reads AGENTS.md directly
+        content1 = meiva.files.read("../AGENTS.md")
+        assert content1 == "SHARED"
+        # Primary path marked in injected_paths + hash recorded
+        assert str(agents_wt.resolve()) in meiva.state_update["meiva_code__injected_paths"]
+        assert len(meiva.state_update["meiva_code__injected_hashes"]) == 1
+        # The walk's farthest-first order surfaces the main-repo copy
+        # before the target itself (pre-existing walk behavior); its hash
+        # then blocks the worktree copy.
+        notes = get_injected_context_notes(meiva.state_update)
+        assert len(notes) == 1
 
-            # Step 2: sibling file read — walk finds main AGENTS.md again
-            meiva.files.read("foo.py")
+        # Step 2: sibling file read — walk finds main AGENTS.md again
+        meiva.files.read("foo.py")
 
-            # Zero NEW auto-injections: both copies are hash/path-deduped now
-            assert len(get_injected_context_notes(meiva.state_update)) == 1
+        # Zero NEW auto-injections: both copies are hash/path-deduped now
+        assert len(get_injected_context_notes(meiva.state_update)) == 1
     finally:
         process_context.unbind_exec_turn()
 
@@ -144,10 +142,11 @@ def test_read_wrap_hash_dedup_primary_path_blocks_identical_copy(tmp_path: Path)
 def test_set_cwd_no_skills_clears_project_skills_note(tmp_path: Path):
     """set_cwd into a directory with no project skills sets
     project_skills_note to None (clears any previous note)."""
-    process_context.set_state(make_state_with_cwd(str(tmp_path)))
+    state = make_state_with_cwd(str(tmp_path))
     # Pre-set project_skills_note to mimic a previous cwd with skills
-    meiva.state.meiva_code__project_skills_note = "stale note"  # type: ignore[assignment]
-    meiva.state.meiva_code__project_skills_seen_compact = 0  # type: ignore[assignment]
+    object.__setattr__(state, "meiva_code__project_skills_note", "stale note")
+    object.__setattr__(state, "meiva_code__project_skills_seen_compact", 0)
+    process_context.set_state(state)
     process_context.set_state_update({})
     try:
         meiva.cwd.set(tmp_path)
@@ -376,7 +375,7 @@ async def test_after_init_keeps_own_workspace_and_its_subdirectories(unit_home: 
     )
 
 
-def test_read_wrap_flagged_agents_md_writes_security_finding(tmp_path: Path):
+def test_read_wrap_flagged_agents_md_writes_security_finding(tmp_path: Path, default_home: Path):
     """A context file carrying injection patterns is scanned: the content note
     is injected as usual AND a SECURITY finding is written to the turn's state
     update for the after_exec hook to deliver as a warning note (no file, no
@@ -391,9 +390,7 @@ def test_read_wrap_flagged_agents_md_writes_security_finding(tmp_path: Path):
     process_context.set_state(make_state_with_cwd(str(repo)))
     process_context.set_state_update({})
     try:
-        with patch.dict(os.environ, {"HOME": str(tmp_path / "fake-home")}):
-            (tmp_path / "fake-home").mkdir()
-            meiva.files.read("foo.py")
+        meiva.files.read("foo.py")
 
         # CONTEXT note carries the clean content
         notes = get_injected_context_notes(meiva.state_update)

@@ -102,11 +102,12 @@ def test_handle_update_accumulates_reducer_deltas_within_turn():
 
     handle = PluginStateHandle(_PluginState, "delta_test")
 
-    meiva.state = MagicMock()
-    meiva.state_update = {}
+    state = MagicMock()
     # Model the working copy the exec node installed: channel key
     # "delta_test__seen" starts as the checkpoint value.
-    meiva.state.delta_test__seen = set()
+    state.delta_test__seen = set()
+    process_context.set_state(state)
+    process_context.set_state_update({})
 
     handle.update({"seen": {"a"}})
     handle.update({"seen": {"b"}})
@@ -126,9 +127,10 @@ def test_handle_update_last_value_field_still_collapses_to_latest():
 
     handle = PluginStateHandle(_PluginState, "delta_test")
 
-    meiva.state = MagicMock()
-    meiva.state_update = {}
-    meiva.state.delta_test__counter = 0
+    state = MagicMock()
+    state.delta_test__counter = 0
+    process_context.set_state(state)
+    process_context.set_state_update({})
 
     handle.update({"counter": 1})
     handle.update({"counter": 2})
@@ -156,10 +158,11 @@ def test_handle_update_rejects_targeted_removal_of_checkpoint_message():
 
     handle = PluginStateHandle(_PluginState, "delta_test")
 
-    meiva.state = MagicMock()
-    meiva.state_update = {}
+    state = MagicMock()
     # Checkpoint value the exec node installed into the working copy.
-    meiva.state.messages = [m1, m2]
+    state.messages = [m1, m2]
+    process_context.set_state(state)
+    process_context.set_state_update({})
 
     # Appending is fine...
     handle.update({"messages": [HumanMessage(content="c", id="m3")]})
@@ -185,9 +188,10 @@ def test_handle_update_remove_all_marker_survives_accumulation():
 
     handle = PluginStateHandle(_PluginState, "delta_test")
 
-    meiva.state = MagicMock()
-    meiva.state_update = {}
-    meiva.state.messages = [m1, m2]
+    state = MagicMock()
+    state.messages = [m1, m2]
+    process_context.set_state(state)
+    process_context.set_state_update({})
 
     handle.update({"messages": [m3]})
     handle.update({"messages": [RemoveMessage(id=REMOVE_ALL_MESSAGES)]})
@@ -213,9 +217,10 @@ def test_handle_update_add_messages_plain_appends_unchanged():
 
     handle = PluginStateHandle(_PluginState, "delta_test")
 
-    meiva.state = MagicMock()
-    meiva.state_update = {}
-    meiva.state.messages = []
+    state = MagicMock()
+    state.messages = []
+    process_context.set_state(state)
+    process_context.set_state_update({})
 
     handle.update({"messages": [m1]})
     handle.update({"messages": [m2]})
@@ -331,7 +336,9 @@ def test_namespace_view_strips_prefix():
         "meiva_code__token_count": 42,
         "other_plugin__data": "x",
     }
-    meiva.state = state_cls(messages=[], halted=False, **plugin_fields)  # pyright: ignore[reportUnknownArgumentType]
+    process_context.set_state(
+        state_cls(messages=[], halted=False, **plugin_fields)  # pyright: ignore[reportUnknownArgumentType]
+    )
 
     ns = meiva.state.meiva_code  # type: ignore[attr-defined]
     assert ns.injected_paths == {"/a/AGENTS.md", "/b/AGENTS.md"}  # pyright: ignore[reportUnknownMemberType]
@@ -355,7 +362,7 @@ def test_namespace_view_typo_name_raises_attribute_error():
         y: str = ""
 
     state_cls = build_agent_state(_registry(meiva_code=Foo, other=Bar))
-    meiva.state = state_cls(messages=[], halted=False)
+    process_context.set_state(state_cls(messages=[], halted=False))
 
     with pytest.raises(AttributeError, match=r"meiva_code.*other"):
         _ = meiva.state.nonexistent  # type: ignore[attr-defined]
@@ -370,7 +377,9 @@ def test_namespace_view_mutation_does_not_persist():
 
     state_cls = build_agent_state(_registry(plugin=P))
     plugin_fields: dict = {"plugin__counter": 1}
-    meiva.state = state_cls(messages=[], halted=False, **plugin_fields)  # pyright: ignore[reportUnknownArgumentType]
+    process_context.set_state(
+        state_cls(messages=[], halted=False, **plugin_fields)  # pyright: ignore[reportUnknownArgumentType]
+    )
 
     ns = meiva.state.plugin  # type: ignore[attr-defined]
     assert ns.counter == 1  # pyright: ignore[reportUnknownMemberType]

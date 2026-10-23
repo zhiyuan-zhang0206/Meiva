@@ -24,6 +24,7 @@ import meiva
 import meiva.sdk_surface.agent_identity
 from base.sessions.pty.tests.job_wait import wait_for_foreground, wait_for_job
 from meiva import shell
+from meiva.sdk_surface import process_context
 
 pytestmark = [
     # `_isolated_agent` is opt-in (mutates global meiva.self.AGENT_ID); only the
@@ -174,12 +175,12 @@ def test_run_default_cwd_is_home_before_identity() -> None:
     still finds its fake agent."""
     original_env = os.environ.pop("MEIVA_AGENT_ID", None)
     try:
-        original_context = meiva.context
-        del meiva.context
+        original_context = process_context.unbind_context()
         try:
             out = meiva.shell.run("pwd")
         finally:
-            meiva.context = original_context
+            if original_context is not None:
+                process_context.bind_context(original_context)
     finally:
         if original_env is not None:
             os.environ["MEIVA_AGENT_ID"] = original_env

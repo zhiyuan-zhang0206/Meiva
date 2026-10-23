@@ -29,7 +29,7 @@ def _set_union(current: set[str], new: set[str]) -> set[str]:
 
 def test_in_exec_turn_follows_the_bound_slot():
     assert process_context.in_exec_turn() is False
-    meiva.state = BaseAgentState()
+    process_context.set_state(BaseAgentState())
     assert process_context.in_exec_turn() is True
     process_context.unbind_exec_turn()
     assert process_context.in_exec_turn() is False
@@ -47,8 +47,8 @@ def test_state_slots_do_not_exist_outside_an_exec_turn():
 
 
 def test_state_slots_are_readable_once_bound_and_gone_after_unbind():
-    meiva.state = BaseAgentState()
-    meiva.state_update = {}
+    process_context.set_state(BaseAgentState())
+    process_context.set_state_update({})
     assert meiva.state_update == {}
     process_context.unbind_exec_turn()
     with pytest.raises(process_context.PluginStateOutsideTurnError):
@@ -59,13 +59,13 @@ def test_state_slots_are_readable_once_bound_and_gone_after_unbind():
 
 def test_state_cannot_be_assigned_none():
     with pytest.raises(TypeError, match="unbind_exec_turn"):
-        meiva.state = None
+        process_context.set_state(None)
 
 
 def test_compact_version_reads_the_bound_snapshot_and_refuses_outside_a_turn():
     with pytest.raises(process_context.PluginStateOutsideTurnError):
         compact_version()
-    meiva.state = BaseAgentState(compact=CompactState(version=3))
+    process_context.set_state(BaseAgentState(compact=CompactState(version=3)))
     assert compact_version() == 3
 
 

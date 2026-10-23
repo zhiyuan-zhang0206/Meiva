@@ -32,7 +32,6 @@ exports = ["child_sdk_probes.py"]
 "test_mcp_config_enable_filter.py#monkeypatch.setattr base.packages.mcp_config.plugin_config_paths" = 1
 "test_mcps_help.py#monkeypatch.setattr base.packages.mcp_config.builtin_mcp_paths" = 1
 "test_packages_refresh_meiva.py#monkeypatch.setattr base.paths.repo_root" = 1
-"test_plugin_config_meiva.py#monkeypatch.setattr meiva.__plugin_installation__" = 1
 "test_session_venv_projection.py#monkeypatch.setattr base.host.env.bootstrap.config_source_is_local" = 3
 "test_session_venv_projection.py#monkeypatch.setattr meiva.shell.sessions.create_session" = 1
 "test_session_venv_projection.py#monkeypatch.setattr meiva.shell.sessions.forward_env_dict" = 1

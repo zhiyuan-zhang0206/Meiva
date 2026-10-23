@@ -4,11 +4,9 @@ through `agent_runtime.contribute()`.
 """
 
 import io
-import os
 import subprocess
 from contextlib import redirect_stdout
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 
@@ -217,7 +215,7 @@ def make_git_repo(root: Path) -> None:
     subprocess.run(["git", "init", "-q"], cwd=root, check=True)
 
 
-def test_read_wrap_injects_agents_md(tmp_path: Path):
+def test_read_wrap_injects_agents_md(tmp_path: Path, default_home: Path):
     """meiva.files.read("foo.py") walks up cwd path looking for AGENTS.md and
     appends its content as a CONTEXT system note to the exec's messages delta
     (in-memory — no side-channel file)."""
@@ -231,9 +229,7 @@ def test_read_wrap_injects_agents_md(tmp_path: Path):
     process_context.set_state(make_state_with_cwd(str(repo)))
     process_context.set_state_update({})
     try:
-        with patch.dict(os.environ, {"HOME": str(tmp_path / "fake-home")}):
-            (tmp_path / "fake-home").mkdir()
-            content = meiva.files.read("foo.py")
+        content = meiva.files.read("foo.py")
 
         assert content == "# code"
         # The note rides the exec's messages delta, not a file / stdout
@@ -248,7 +244,7 @@ def test_read_wrap_injects_agents_md(tmp_path: Path):
         process_context.unbind_exec_turn()
 
 
-def test_read_wrap_injects_agents_and_claude(tmp_path: Path):
+def test_read_wrap_injects_agents_and_claude(tmp_path: Path, default_home: Path):
     """Same directory has both AGENTS.md and CLAUDE.md → both injected, each with its own prefix (path)."""
     repo = tmp_path / "repo"
     repo.mkdir()
@@ -260,9 +256,7 @@ def test_read_wrap_injects_agents_and_claude(tmp_path: Path):
     process_context.set_state(make_state_with_cwd(str(repo)))
     process_context.set_state_update({})
     try:
-        with patch.dict(os.environ, {"HOME": str(tmp_path / "fake-home")}):
-            (tmp_path / "fake-home").mkdir()
-            meiva.files.read("foo.py")
+        meiva.files.read("foo.py")
 
         notes = get_injected_context_notes(meiva.state_update)
         assert len(notes) == 2
@@ -279,7 +273,7 @@ def test_read_wrap_injects_agents_and_claude(tmp_path: Path):
         process_context.unbind_exec_turn()
 
 
-def test_read_wrap_no_emoji_in_marker(tmp_path: Path):
+def test_read_wrap_no_emoji_in_marker(tmp_path: Path, default_home: Path):
     """marker without emoji — plain `Project <file> from <path>:` text."""
     repo = tmp_path / "repo"
     repo.mkdir()
@@ -290,17 +284,15 @@ def test_read_wrap_no_emoji_in_marker(tmp_path: Path):
     process_context.set_state(make_state_with_cwd(str(repo)))
     process_context.set_state_update({})
     try:
-        with patch.dict(os.environ, {"HOME": str(tmp_path / "fake-home")}):
-            (tmp_path / "fake-home").mkdir()
-            buf = io.StringIO()
-            with redirect_stdout(buf):
-                meiva.files.read("foo.py")
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            meiva.files.read("foo.py")
         assert "📎" not in buf.getvalue()  # emoji-ok: asserts the marker is emoji-free
     finally:
         process_context.unbind_exec_turn()
 
 
-def test_read_wrap_dedup_via_injected_paths(tmp_path: Path):
+def test_read_wrap_dedup_via_injected_paths(tmp_path: Path, default_home: Path):
     """AGENTS.md already recorded in injected_paths, sibling file read does not re-inject."""
     repo = tmp_path / "repo"
     repo.mkdir()
@@ -312,11 +304,9 @@ def test_read_wrap_dedup_via_injected_paths(tmp_path: Path):
     process_context.set_state(make_state_with_cwd(str(repo), injected={str(agents_md.resolve())}))
     process_context.set_state_update({})
     try:
-        with patch.dict(os.environ, {"HOME": str(tmp_path / "fake-home")}):
-            (tmp_path / "fake-home").mkdir()
-            buf = io.StringIO()
-            with redirect_stdout(buf):
-                meiva.files.read("foo.py")
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            meiva.files.read("foo.py")
 
         assert "PROJECT" not in buf.getvalue()
         assert "Project AGENTS.md from" not in buf.getvalue()
@@ -351,7 +341,7 @@ def test_read_wrap_forwards_line_range_fast_path(tmp_path: Path):
     assert meiva.files.read(str(p)) == "one\ntwo\nthree\nfour\nfive\n"
 
 
-def test_read_wrap_forwards_line_range_in_turn(tmp_path: Path):
+def test_read_wrap_forwards_line_range_in_turn(tmp_path: Path, default_home: Path):
     """In-turn (meiva.state set), the wrapper forwards the paging params through
     the cwd-resolved read so agents can page large files / get line numbers."""
     repo = tmp_path / "repo"
@@ -360,19 +350,17 @@ def test_read_wrap_forwards_line_range_in_turn(tmp_path: Path):
     process_context.set_state(make_state_with_cwd(str(repo)))
     process_context.set_state_update({})
     try:
-        with patch.dict(os.environ, {"HOME": str(tmp_path / "fake-home")}):
-            (tmp_path / "fake-home").mkdir()
-            assert meiva.files.read("f.txt", start=2, end=3) == "two\nthree\n"
-            assert meiva.files.read("f.txt", start=2, limit=2) == "two\nthree\n"
-            assert (
-                meiva.files.read("f.txt", start=3, with_line_numbers=True)
-                == "3: three\n4: four\n5: five\n"
-            )
+        assert meiva.files.read("f.txt", start=2, end=3) == "two\nthree\n"
+        assert meiva.files.read("f.txt", start=2, limit=2) == "two\nthree\n"
+        assert (
+            meiva.files.read("f.txt", start=3, with_line_numbers=True)
+            == "3: three\n4: four\n5: five\n"
+        )
     finally:
         process_context.unbind_exec_turn()
 
 
-def test_read_wrap_target_is_agents_md_marks_but_not_prints(tmp_path: Path):
+def test_read_wrap_target_is_agents_md_marks_but_not_prints(tmp_path: Path, default_home: Path):
     """agent directly reads AGENTS.md (primary path) → content returned as value, no longer print marker
     (which would double content in messages); also mark into injected_paths so sibling read
     no longer auto-inject.
@@ -388,11 +376,9 @@ def test_read_wrap_target_is_agents_md_marks_but_not_prints(tmp_path: Path):
     process_context.set_state(make_state_with_cwd(str(repo)))
     process_context.set_state_update({})
     try:
-        with patch.dict(os.environ, {"HOME": str(tmp_path / "fake-home")}):
-            (tmp_path / "fake-home").mkdir()
-            buf = io.StringIO()
-            with redirect_stdout(buf):
-                content = meiva.files.read("AGENTS.md")
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            content = meiva.files.read("AGENTS.md")
 
         assert content == "PROJECT"  # content returned as value
         assert (
@@ -403,7 +389,7 @@ def test_read_wrap_target_is_agents_md_marks_but_not_prints(tmp_path: Path):
         process_context.unbind_exec_turn()
 
 
-def test_read_wrap_target_is_claude_md_marks_but_not_prints(tmp_path: Path):
+def test_read_wrap_target_is_claude_md_marks_but_not_prints(tmp_path: Path, default_home: Path):
     """agent directly reads CLAUDE.md (primary path) → same as AGENTS.md: content returns as value,
     no re-print marker, but marks into injected_paths. Verify that samefile suppression also works for the second filename."""
     repo = tmp_path / "repo"
@@ -415,11 +401,9 @@ def test_read_wrap_target_is_claude_md_marks_but_not_prints(tmp_path: Path):
     process_context.set_state(make_state_with_cwd(str(repo)))
     process_context.set_state_update({})
     try:
-        with patch.dict(os.environ, {"HOME": str(tmp_path / "fake-home")}):
-            (tmp_path / "fake-home").mkdir()
-            buf = io.StringIO()
-            with redirect_stdout(buf):
-                content = meiva.files.read("CLAUDE.md")
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            content = meiva.files.read("CLAUDE.md")
 
         assert content == "CLAUDE PROJECT"  # content returned as value
         assert "Project CLAUDE.md from" not in buf.getvalue()  # no re-print marker
@@ -428,7 +412,7 @@ def test_read_wrap_target_is_claude_md_marks_but_not_prints(tmp_path: Path):
         process_context.unbind_exec_turn()
 
 
-def test_read_wrap_target_agents_md_via_symlink_still_primary(tmp_path: Path):
+def test_read_wrap_target_agents_md_via_symlink_still_primary(tmp_path: Path, default_home: Path):
     """agent reads AGENTS.md through symlink → samefile recognizes same inode, primary path hit,
     no re-print marker. Lock case-insensitive FS / symlink / hardlink behavior — `==` path comparison
     would fail due to different path strings causing double-surface, samefile compares inode so doesn't."""
@@ -443,12 +427,10 @@ def test_read_wrap_target_agents_md_via_symlink_still_primary(tmp_path: Path):
     process_context.set_state(make_state_with_cwd(str(repo)))
     process_context.set_state_update({})
     try:
-        with patch.dict(os.environ, {"HOME": str(tmp_path / "fake-home")}):
-            (tmp_path / "fake-home").mkdir()
-            buf = io.StringIO()
-            with redirect_stdout(buf):
-                # read via symlink — target resolves to AGENTS.md, should recognize as primary
-                content = meiva.files.read("agents-link.md")
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            # read via symlink — target resolves to AGENTS.md, should recognize as primary
+            content = meiva.files.read("agents-link.md")
         assert content == "PROJECT"
         # primary path → no print marker (content already returned as value)
         assert "Project AGENTS.md from" not in buf.getvalue()
@@ -458,7 +440,7 @@ def test_read_wrap_target_agents_md_via_symlink_still_primary(tmp_path: Path):
         process_context.unbind_exec_turn()
 
 
-def test_read_wrap_target_agents_md_then_sibling_no_reinject(tmp_path: Path):
+def test_read_wrap_target_agents_md_then_sibling_no_reinject(tmp_path: Path, default_home: Path):
     """primary path (agent directly reads AGENTS.md) → subsequent sibling file read no longer auto-injects."""
     repo = tmp_path / "repo"
     repo.mkdir()
@@ -470,12 +452,10 @@ def test_read_wrap_target_agents_md_then_sibling_no_reinject(tmp_path: Path):
     process_context.set_state(make_state_with_cwd(str(repo)))
     process_context.set_state_update({})
     try:
-        with patch.dict(os.environ, {"HOME": str(tmp_path / "fake-home")}):
-            (tmp_path / "fake-home").mkdir()
-            buf = io.StringIO()
-            with redirect_stdout(buf):
-                meiva.files.read("AGENTS.md")  # mark
-                meiva.files.read("foo.py")  # no re-inject
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            meiva.files.read("AGENTS.md")  # mark
+            meiva.files.read("foo.py")  # no re-inject
 
         # whole stdout has no marker — AGENTS.md.read doesn't print, foo.py.read sees
         # injected_paths already has this AGENTS.md → skip auto-inject
@@ -485,7 +465,7 @@ def test_read_wrap_target_agents_md_then_sibling_no_reinject(tmp_path: Path):
         process_context.unbind_exec_turn()
 
 
-def test_read_wrap_compact_resets_injected_paths(tmp_path: Path):
+def test_read_wrap_compact_resets_injected_paths(tmp_path: Path, default_home: Path):
     """compact.version grows past meiva_code's last_seen_compact →
     wrap entry lazy clears injected_paths, letting AGENTS.md re-surface to agent.
 
@@ -508,9 +488,7 @@ def test_read_wrap_compact_resets_injected_paths(tmp_path: Path):
     )
     process_context.set_state_update({})
     try:
-        with patch.dict(os.environ, {"HOME": str(tmp_path / "fake-home")}):
-            (tmp_path / "fake-home").mkdir()
-            meiva.files.read("foo.py")
+        meiva.files.read("foo.py")
 
         # injected_paths reset → AGENTS.md re-injected into the messages delta
         notes = get_injected_context_notes(meiva.state_update)
@@ -521,7 +499,7 @@ def test_read_wrap_compact_resets_injected_paths(tmp_path: Path):
         process_context.unbind_exec_turn()
 
 
-def test_read_wrap_compact_not_advanced_keeps_dedup(tmp_path: Path):
+def test_read_wrap_compact_not_advanced_keeps_dedup(tmp_path: Path, default_home: Path):
     """compact.version in sync with bookmark (e.g. already processed by this plugin) → no reset."""
     repo = tmp_path / "repo"
     repo.mkdir()
@@ -540,11 +518,9 @@ def test_read_wrap_compact_not_advanced_keeps_dedup(tmp_path: Path):
     )
     process_context.set_state_update({})
     try:
-        with patch.dict(os.environ, {"HOME": str(tmp_path / "fake-home")}):
-            (tmp_path / "fake-home").mkdir()
-            buf = io.StringIO()
-            with redirect_stdout(buf):
-                meiva.files.read("foo.py")
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            meiva.files.read("foo.py")
 
         # bookmark == compact.version → no reset, injected_paths preserved,
         # no re-injection into the messages delta
@@ -556,7 +532,7 @@ def test_read_wrap_compact_not_advanced_keeps_dedup(tmp_path: Path):
         process_context.unbind_exec_turn()
 
 
-def test_read_wrap_dedup_within_same_turn(tmp_path: Path):
+def test_read_wrap_dedup_within_same_turn(tmp_path: Path, default_home: Path):
     """Multiple reads of different sibling files within same turn, same AGENTS.md injected only once.
 
     state_handle.update synchronously mutates meiva.state working copy, next handle.read()
@@ -571,10 +547,8 @@ def test_read_wrap_dedup_within_same_turn(tmp_path: Path):
     process_context.set_state(make_state_with_cwd(str(repo)))
     process_context.set_state_update({})
     try:
-        with patch.dict(os.environ, {"HOME": str(tmp_path / "fake-home")}):
-            (tmp_path / "fake-home").mkdir()
-            meiva.files.read("foo.py")
-            meiva.files.read("bar.py")
+        meiva.files.read("foo.py")
+        meiva.files.read("bar.py")
 
         # same AGENTS.md only injected once
         notes = get_injected_context_notes(meiva.state_update)
@@ -584,7 +558,7 @@ def test_read_wrap_dedup_within_same_turn(tmp_path: Path):
         process_context.unbind_exec_turn()
 
 
-def test_read_wrap_resolves_relative_to_cwd(tmp_path: Path):
+def test_read_wrap_resolves_relative_to_cwd(tmp_path: Path, default_home: Path):
     """Relative path resolved via meiva.cwd maintained cwd — not system cwd."""
     repo = tmp_path / "repo"
     repo.mkdir()
@@ -596,10 +570,8 @@ def test_read_wrap_resolves_relative_to_cwd(tmp_path: Path):
     process_context.set_state(make_state_with_cwd(str(repo)))
     process_context.set_state_update({})
     try:
-        with patch.dict(os.environ, {"HOME": str(tmp_path / "fake-home")}):
-            (tmp_path / "fake-home").mkdir()
-            # using relative path
-            content = meiva.files.read("foo.py")
+        # using relative path
+        content = meiva.files.read("foo.py")
         assert content == "# code"
         # AGENTS.md injected (plugin uses plugin cwd to resolve path)
         notes = get_injected_context_notes(meiva.state_update)
@@ -609,7 +581,7 @@ def test_read_wrap_resolves_relative_to_cwd(tmp_path: Path):
         process_context.unbind_exec_turn()
 
 
-def test_read_wrap_no_agents_md_no_op(tmp_path: Path):
+def test_read_wrap_no_agents_md_no_op(tmp_path: Path, default_home: Path):
     """target path neither in git repo nor under $HOME → walk returns [], no print."""
     isolated = tmp_path / "isolated"
     isolated.mkdir()
@@ -619,11 +591,9 @@ def test_read_wrap_no_agents_md_no_op(tmp_path: Path):
     process_context.set_state(make_state_with_cwd(str(isolated)))
     process_context.set_state_update({})
     try:
-        with patch.dict(os.environ, {"HOME": str(tmp_path / "fake-home")}):
-            (tmp_path / "fake-home").mkdir()
-            buf = io.StringIO()
-            with redirect_stdout(buf):
-                meiva.files.read(str(target))
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            meiva.files.read(str(target))
         assert buf.getvalue() == ""  # no injection
         assert "messages" not in meiva.state_update
     finally:
@@ -656,7 +626,7 @@ def test_read_wrap_outside_turn_passthrough(tmp_path: Path):
     assert buf.getvalue() == ""  # no injection (wrap fast-path passthrough)
 
 
-def test_read_wrap_target_missing_still_injects(tmp_path: Path):
+def test_read_wrap_target_missing_still_injects(tmp_path: Path, default_home: Path):
     """target doesn't exist → _orig_read raises FileNotFoundError, but AGENTS.md walk +
     inject runs before _orig_read → marker still recorded.
 
@@ -673,10 +643,8 @@ def test_read_wrap_target_missing_still_injects(tmp_path: Path):
     process_context.set_state(make_state_with_cwd(str(repo)))
     process_context.set_state_update({})
     try:
-        with patch.dict(os.environ, {"HOME": str(tmp_path / "fake-home")}):
-            (tmp_path / "fake-home").mkdir()
-            with pytest.raises(FileNotFoundError):
-                meiva.files.read("foo.py")
+        with pytest.raises(FileNotFoundError):
+            meiva.files.read("foo.py")
         # target doesn't exist, but AGENTS.md walk + inject runs before _orig_read
         notes = get_injected_context_notes(meiva.state_update)
         assert len(notes) == 1
@@ -725,7 +693,9 @@ def stub_understand_text_path(monkeypatch: pytest.MonkeyPatch) -> dict:
 # ── oversized context file: truncate + archive (user ruling 2026-08-11) ─────
 
 
-def test_read_wrap_oversized_agents_md_truncates_and_archives(tmp_path: Path, monkeypatch):
+def test_read_wrap_oversized_agents_md_truncates_and_archives(
+    tmp_path: Path, monkeypatch, default_home: Path
+):
     """A context file over exec_output_max_chars is injected truncated
     (head + tail) with the full text archived to the workspace .exec_output/
     ring — same logic as exec output overflow; the archive path rides in the
@@ -747,9 +717,7 @@ def test_read_wrap_oversized_agents_md_truncates_and_archives(tmp_path: Path, mo
     process_context.set_state(make_state_with_cwd(str(repo)))
     process_context.set_state_update({})
     try:
-        with patch.dict(os.environ, {"HOME": str(tmp_path / "fake-home")}):
-            (tmp_path / "fake-home").mkdir()
-            meiva.files.read("foo.py")
+        meiva.files.read("foo.py")
         notes = get_injected_context_notes(meiva.state_update)
         assert len(notes) == 1
         assert "HEAD_MARKER" in notes[0]["content"], "head must survive"
