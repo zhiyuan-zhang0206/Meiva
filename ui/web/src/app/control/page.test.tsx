@@ -24,7 +24,7 @@ vi.mock("@/lib/transport/api", () => ({
 }));
 
 import ControlPage from "./page";
-import { CONTROL_SCROLL_ID, CONTROL_SECTIONS } from "./_sections";
+import { CONTROL_SCROLL_ID, CONTROL_SECTIONS } from "./sections";
 
 afterEach(cleanup);
 

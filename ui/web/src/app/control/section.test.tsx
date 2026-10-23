@@ -6,7 +6,7 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
-import { ControlSection } from "./_section";
+import { ControlSection } from "./section";
 
 describe("ControlSection deferred body", () => {
   it("paints the heading with the route and mounts the body after it", async () => {

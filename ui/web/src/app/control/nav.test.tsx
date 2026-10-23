@@ -1,3 +1,4 @@
+// meiva:note
 // Scroll-spy anchor selection — the pure core of the two-level nav highlight.
 // The regression this pins: a sub-anchor must be able to win over its wrapping
 // parent section (config-gateway over config), which the old intersection-set
@@ -5,12 +6,13 @@
 
 import { describe, expect, it } from "vitest";
 
-import { pickActiveAnchor } from "./_nav";
+import { pickActiveAnchor } from "./nav";
 
 const IDS = ["status", "config", "config-gateway", "config-agent-runner", "config-common", "schedules"];
 
 describe("pickActiveAnchor", () => {
   it("picks the last anchor whose top is at/above the line", () => {
+    // meiva:note
     // Scrolled so status + config + config-gateway tops have passed the line,
     // the rest are still below it.
     const tops: Record<string, number> = {
@@ -25,6 +27,7 @@ describe("pickActiveAnchor", () => {
   });
 
   it("advances from the parent section to a sub-anchor as it scrolls past", () => {
+    // meiva:note
     // At the top of Config: only config's own top has crossed → parent active.
     const atSectionTop: Record<string, number> = {
       status: -200,
@@ -35,6 +38,7 @@ describe("pickActiveAnchor", () => {
       schedules: 1000,
     };
     expect(pickActiveAnchor(IDS, 96, (id) => atSectionTop[id])).toBe("config");
+    // meiva:note
     // Scroll down into the agent-runner zone → the sub-anchor wins over config.
     const inAgentRunner: Record<string, number> = {
       status: -900,
@@ -63,7 +67,9 @@ describe("pickActiveAnchor", () => {
     const tops: Record<string, number | null> = {
       status: -100,
       config: 40,
-      "config-gateway": null, // not in the DOM (e.g. hidden on a remote config view)
+      // meiva:note
+      // A hidden remote-config anchor has no DOM position.
+      "config-gateway": null,
       "config-agent-runner": 500,
       "config-common": 700,
       schedules: 900,

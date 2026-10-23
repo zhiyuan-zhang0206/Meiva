@@ -19,7 +19,7 @@ import { type ReactNode } from "react";
 
 import { useDeferredMount } from "@/lib/layout/use-client-ready";
 
-import { SectionVisibilityProvider, useInView } from "./_visibility";
+import { SectionVisibilityProvider, useInView } from "./visibility";
 
 export function ControlSection({
   id,
@@ -35,6 +35,7 @@ export function ControlSection({
   const [ref, inView] = useInView();
   const mounted = useDeferredMount();
   return (
+    // meiva:note
     // scroll-mt keeps the heading off the very top edge when jumped to by anchor.
     <section id={id} ref={ref} className="scroll-mt-4">
       <header className="mb-3 border-b border-border pb-1">

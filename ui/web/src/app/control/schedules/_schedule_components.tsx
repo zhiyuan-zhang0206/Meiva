@@ -26,7 +26,7 @@ import { FLEX } from "@/lib/layout/layout";
 import { useStore } from "@/lib/state/store";
 import { api } from "@/lib/transport/api";
 
-import { useSectionVisible } from "../_visibility";
+import { useSectionVisible } from "../visibility";
 
 const STATUS_DOT: Record<string, string> = {
   running: "bg-green-500",

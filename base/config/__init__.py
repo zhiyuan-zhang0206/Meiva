@@ -1,113 +1,136 @@
-"""Unified runtime config — per-domain sub-models aggregated into one `settings`.
+# meiva:note
+# Unified runtime config — per-domain sub-models aggregated into one `settings`.
+# meiva:link base/docs/configuration/configuration.meiva.okf.md
 
-pydantic-settings validates types at startup (format errors blow up immediately),
-centralizes defaults in one place, and replaces scattered `os.environ.get()` with
-attribute access.
+# meiva:note
+# pydantic-settings validates types at startup (format errors blow up immediately),
+# centralizes defaults in one place, and replaces scattered `os.environ.get()` with
+# attribute access.
+# meiva:link base/docs/configuration/configuration.meiva.okf.md
 
-The former flat `Settings` god object is split by owning domain into sub-models
-(`LmSettings`, `AgentSettings`, `DataPlaneSettings`, …), each its own
-`BaseSettings` that populates from the flat `os.environ` through its fields' env
-aliases. `Settings` aggregates one instance of each; access is nested
-(`settings.lm.llm_model`). The split is invisible to `.env`: every MEIVA_* alias is
-unchanged, so `.env` files, `_enforce_cluster_env_authority`, the bootstrap
-payload, and the config PUT keep working byte-for-byte.
+# meiva:note
+# The former flat `Settings` god object is split by owning domain into sub-models
+# (`LmSettings`, `AgentSettings`, `DataPlaneSettings`, …), each its own
+# `BaseSettings` that populates from the flat `os.environ` through its fields' env
+# aliases. `Settings` aggregates one instance of each; access is nested
+# (`settings.lm.llm_model`). The split is invisible to `.env`: every MEIVA_* alias is
+# unchanged, so `.env` files, `_enforce_cluster_env_authority`, the bootstrap
+# payload, and the config PUT keep working byte-for-byte.
+# meiva:link base/docs/configuration/configuration.meiva.okf.md
 
-Layout: the sub-models live in `base/config/domains/` (grouped by owner:
-`agent`, `daemon`, `services`, `channels`, `storage`, `observability`, plus the
-single-module domains) and the write path (edit policy, candidate validation, panel
-metadata) in `base/config/admin/`. Grouping is by folder only: the registry stays
-the flat `DOMAIN_MODELS` / `model_classes()` in `base/config/config_registry.py`, and a
-component's own config slice belongs in that component's package, not here.
+# meiva:note
+# Layout: the sub-models live in `base/config/domains/` (grouped by owner:
+# `agent`, `daemon`, `services`, `channels`, `storage`, `observability`, plus the
+# single-module domains) and the write path (edit policy, candidate validation, panel
+# metadata) in `base/config/admin/`. Grouping is by folder only: the registry stays
+# the flat `DOMAIN_MODELS` / `model_classes()` in `base/config/config_registry.py`, and a
+# component's own config slice belongs in that component's package, not here.
+# meiva:link base/docs/configuration/configuration.meiva.okf.md
 
-Precedence: env var > Field default. `$MEIVA_HOME/.env` is the single source of
-truth — the config panel and `meiva config set` write edits straight into it
-(`set_key` / `unset_key` by alias; see `base/config/runtime_config.py`), and
-pydantic-settings reads it at startup. There is no separate override layer: a
-value lives in exactly one place.
+# meiva:note
+# Precedence: env var > Field default. `$MEIVA_HOME/.env` is the single source of
+# truth — the config panel and `meiva config set` write edits straight into it
+# (`set_key` / `unset_key` by alias; see `base/config/runtime_config.py`), and
+# pydantic-settings reads it at startup. There is no separate override layer: a
+# value lives in exactly one place.
+# meiva:link base/docs/configuration/configuration.meiva.okf.md
 
-## Boot-lite boot (task #3621)
+# meiva:note
+# Boot-lite boot (task #3621)
+# `import base.config` does NOT construct `Settings`. It prepares the boot-lite
+# state — the `.env` load, the config-source decision, fail-fast validation of the
+# boot-path fields, the cluster clock — and serves reads from the generated static
+# index (`base/host/env/config_lite_table.py`) through `settings`. The first touch of
+# anything outside that surface upgrades the process to the eager chain
+# (`base/config/_lite.py` holds the state machine, `base/config/_full.py` the
+# assembly) exactly once; overlay writes made before the upgrade are replayed onto
+# the singleton. `MEIVA_CONFIG_BOOT=eager` (read at import) restores the eager boot,
+# and `ensure_eager()` is the explicit entry point for processes that must
+# construct every domain at boot. Settings-lite maintenance verbs
+# (`MEIVA_CONFIG_FETCH=skip`) keep their deferred load — a broken `.env` stays
+# repairable.
+# meiva:link base/docs/configuration/configuration.meiva.okf.md
 
-`import base.config` does NOT construct `Settings`. It prepares the boot-lite
-state — the `.env` load, the config-source decision, fail-fast validation of the
-boot-path fields, the cluster clock — and serves reads from the generated static
-index (`base/host/env/config_lite_table.py`) through `settings`. The first touch of
-anything outside that surface upgrades the process to the eager chain
-(`base/config/_lite.py` holds the state machine, `base/config/_full.py` the
-assembly) exactly once; overlay writes made before the upgrade are replayed onto
-the singleton. `MEIVA_CONFIG_BOOT=eager` (read at import) restores the eager boot,
-and `ensure_eager()` is the explicit entry point for processes that must
-construct every domain at boot. Settings-lite maintenance verbs
-(`MEIVA_CONFIG_FETCH=skip`) keep their deferred load — a broken `.env` stays
-repairable.
+# meiva:note
+# Third-party-library-consumed secrets (ANTHROPIC_API_KEY, ...) are modeled
+# as fields — our own Python code accesses via `settings.<domain>.X.get_secret_value()`;
+# the LangChain SDK still reads `os.environ` itself (we do not prevent it).
+# meiva:link base/docs/configuration/configuration.meiva.okf.md
 
-Third-party-library-consumed secrets (ANTHROPIC_API_KEY, ...) are modeled
-as fields — our own Python code accesses via `settings.<domain>.X.get_secret_value()`;
-the LangChain SDK still reads `os.environ` itself (we do not prevent it).
+# meiva:note
+# The metadata machinery (`get_config_metadata`, `BOOTSTRAP_FIELDS`,
+# `bootstrap_config_values`, …) walks the sub-models and keys everything by the flat
+# field NAME — field names stay globally unique across sub-models, so the wire /
+# `.env` / bootstrap surfaces are unchanged. The frontend's config-panel display
+# grouping is NOT this metadata: the top-level display sections are the frontend's
+# own static regrouping (`ui/web/src/app/control/config-group-defs.ts`); the second
+# level is the owning sub-model's `group` label. `capability` below is conceptual
+# ownership + the remote-view field filter, not panel grouping (default capability
+# per domain in `DOMAIN_MODELS`). Each Field's json_schema_extra carries the
+# remaining metadata the frontend and distribution logic need:
+# - restart_required: "agent" | "ops" | "gateway" | "all" | "schedule" | "" — which process must restart after a change; "gateway" names the gateway process AND every gateway-profile daemon that consumes the field (im_bridge / memory_indexer / memory_search / ... — an `meiva restart` bounces all of them); "schedule" = the gateway-hosted schedule runner
+# - writable: whether the frontend allows editing
+# - sensitive: whether the frontend masks the display
+# - scope: cluster-pinned | cluster-default | host | agent — drives BOOTSTRAP_FIELDS + write routing
+# - capability (optional, else the domain default): gateway | agent-runner | common —
+#   conceptual ownership + remote-view filter (agent-runner views show only agent-runner
+#   + common fields), orthogonal to scope; NOT panel grouping. `common` = not owned by
+#   a single capability (cluster-wide policy or the shared host identity).
+# - per_agent: whether a spawn/restart `config_overlay` may override the field
+# - lifecycle: frozen | live — REQUIRED on every per_agent field (see below)
+# meiva:link base/docs/configuration/configuration.meiva.okf.md
 
-The metadata machinery (`get_config_metadata`, `BOOTSTRAP_FIELDS`,
-`bootstrap_config_values`, …) walks the sub-models and keys everything by the flat
-field NAME — field names stay globally unique across sub-models, so the wire /
-`.env` / bootstrap surfaces are unchanged. The frontend's config-panel display
-grouping is NOT this metadata: the top-level display sections are the frontend's
-own static regrouping (`ui/web/src/app/control/_config_groups.ts`); the second
-level is the owning sub-model's `group` label. `capability` below is conceptual
-ownership + the remote-view field filter, not panel grouping (default capability
-per domain in `DOMAIN_MODELS`). Each Field's json_schema_extra carries the
-remaining metadata the frontend and distribution logic need:
-- restart_required: "agent" | "ops" | "gateway" | "all" | "schedule" | "" — which process must restart after a change; "gateway" names the gateway process AND every gateway-profile daemon that consumes the field (im_bridge / memory_indexer / memory_search / ... — an `meiva restart` bounces all of them); "schedule" = the gateway-hosted schedule runner
-- writable: whether the frontend allows editing
-- sensitive: whether the frontend masks the display
-- scope: cluster-pinned | cluster-default | host | agent — drives BOOTSTRAP_FIELDS + write routing
-- capability (optional, else the domain default): gateway | agent-runner | common —
-  conceptual ownership + remote-view filter (agent-runner views show only agent-runner
-  + common fields), orthogonal to scope; NOT panel grouping. `common` = not owned by
-  a single capability (cluster-wide policy or the shared host identity).
-- per_agent: whether a spawn/restart `config_overlay` may override the field
-- lifecycle: frozen | live — REQUIRED on every per_agent field (see below)
+# meiva:note
+# The per-agent config lifecycle axis (`lifecycle`)
+# `per_agent=True` says a field CAN be overridden for one agent. `lifecycle` says
+# what happens to that field when NOBODY overrode it — i.e. how a running agent
+# tracks a later change to the cluster default:
+# meiva:link base/docs/configuration/configuration.meiva.okf.md
 
-## The per-agent config lifecycle axis (`lifecycle`)
+# meiva:note
+# - **frozen** — resolved ONCE at the spawn boundary from the then-current default,
+#   persisted on the agent's own row (`agents_meta.birth_config`), and replayed on
+#   every restart / respawn / resurrect / compact for the rest of that agent's life.
+#   Flipping the cluster default afterwards moves nobody who already exists. This is
+#   the agent's *identity material*: the brain (model / effort / thinking budget) and
+#   everything that shapes the system prompt. Compact rebuilds the system prompt from
+#   current config, so a live default here would silently swap a living agent's
+#   identity mid-life.
+# - **live** — re-read from current cluster config at every process start. A cluster
+#   edit reaches every agent on its next restart. This is the right class for
+#   operational knobs (compaction thresholds, stream timeouts, recall tuning): they
+#   tune the runtime around the agent, they do not define it.
+# meiva:link base/docs/configuration/configuration.meiva.okf.md
 
-`per_agent=True` says a field CAN be overridden for one agent. `lifecycle` says
-what happens to that field when NOBODY overrode it — i.e. how a running agent
-tracks a later change to the cluster default:
+# meiva:note
+# An explicit `config_overlay` is ORTHOGONAL to this axis and always wins:
+# `config_overlay > birth_config > current default`. The two stores are deliberately
+# separate so provenance survives — "the user chose this for this agent" and "this
+# was merely the cluster default the day it was born" must stay distinguishable.
+# meiva:link base/docs/configuration/configuration.meiva.okf.md
 
-- **frozen** — resolved ONCE at the spawn boundary from the then-current default,
-  persisted on the agent's own row (`agents_meta.birth_config`), and replayed on
-  every restart / respawn / resurrect / compact for the rest of that agent's life.
-  Flipping the cluster default afterwards moves nobody who already exists. This is
-  the agent's *identity material*: the brain (model / effort / thinking budget) and
-  everything that shapes the system prompt. Compact rebuilds the system prompt from
-  current config, so a live default here would silently swap a living agent's
-  identity mid-life.
-- **live** — re-read from current cluster config at every process start. A cluster
-  edit reaches every agent on its next restart. This is the right class for
-  operational knobs (compaction thresholds, stream timeouts, recall tuning): they
-  tune the runtime around the agent, they do not define it.
+# meiva:note
+# **Boundary**: `lifecycle` applies only to `per_agent=True` fields. A field that is
+# not per-agent has no per-agent instance to freeze — cluster-scope config is by
+# definition read live by whatever process next starts, so declaring `lifecycle` on
+# one is a category error and the registry rejects it. Plugin `Config` fields
+# (`base/packages/plugins/config_registration.py`) are outside this registry and are not part of
+# the frozen set; they behave as `live` and only an explicit overlay pins them.
+# meiva:link base/docs/configuration/configuration.meiva.okf.md
 
-An explicit `config_overlay` is ORTHOGONAL to this axis and always wins:
-`config_overlay > birth_config > current default`. The two stores are deliberately
-separate so provenance survives — "the user chose this for this agent" and "this
-was merely the cluster default the day it was born" must stay distinguishable.
+# meiva:note
+# Resolution + stamping mechanics: `base/agents/model/birth_config.py`.
+# meiva:link base/docs/configuration/configuration.meiva.okf.md
 
-**Boundary**: `lifecycle` applies only to `per_agent=True` fields. A field that is
-not per-agent has no per-agent instance to freeze — cluster-scope config is by
-definition read live by whatever process next starts, so declaring `lifecycle` on
-one is a category error and the registry rejects it. Plugin `Config` fields
-(`base/packages/plugins/config_registration.py`) are outside this registry and are not part of
-the frozen set; they behave as `live` and only an explicit overlay pins them.
-
-Resolution + stamping mechanics: `base/agents/model/birth_config.py`.
-
-## Reading per-agent fields from turn-scoped code
-
-Turn-scoped code (`agent/`, `meiva_builtins/`, `base/lm/`) reads `per_agent`
-fields from the agent's slices (`base/host/env/agent_slices.py`, on
-`runtime.context.agent`) — never the bare singleton, which holds the cluster
-default. The exec child and the SDK (`meiva/`) run one agent per process, so
-their settings carry that agent's overlay. Enforced by
-`scripts/lint/turn_scoped_config.py`.
-"""
-
+# meiva:note
+# Reading per-agent fields from turn-scoped code
+# Turn-scoped code (`agent/`, `meiva_builtins/`, `base/lm/`) reads `per_agent`
+# fields from the agent's slices (`base/host/env/agent_slices.py`, on
+# `runtime.context.agent`) — never the bare singleton, which holds the cluster
+# default. The exec child and the SDK (`meiva/`) run one agent per process, so
+# their settings carry that agent's overlay. Enforced by
+# `scripts/lint/turn_scoped_config.py`.
+# meiva:link base/docs/configuration/configuration.meiva.okf.md
 from __future__ import annotations
 
 import os

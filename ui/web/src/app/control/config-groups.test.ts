@@ -1,4 +1,5 @@
-// Display-grouping table invariants for the Config section (_config_groups.ts).
+// meiva:note
+// Display-grouping table invariants for the Config section (config-groups.ts).
 //
 // The page buckets fields into 17 semantic display groups by env var, and
 // hides a small editorial list (HIDDEN_ENV_VARS) entirely. The two tables must
@@ -11,7 +12,8 @@ import { describe, expect, it } from "vitest";
 
 import type { ConfigFieldView } from "@/lib/contracts/types";
 
-import { GROUP_ENV_VARS, HIDDEN_ENV_VARS, displayGroupId } from "./_config_groups";
+import { GROUP_ENV_VARS, HIDDEN_ENV_VARS } from "./config-group-defs";
+import { displayGroupId } from "./config-groups";
 
 describe("config display grouping tables", () => {
   it("keeps hidden env vars out of every display group", () => {
