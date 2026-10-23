@@ -5,20 +5,7 @@
 
 [debt.first-party-patch]
 "test_export_process.py#monkeypatch.setattr base.db.Database.from_settings" = 1
-"test_export_process.py#monkeypatch.setattr base.native_process.code_version.first_parent_count" = 1
 "test_export_process.py#monkeypatch.setattr base.native_process.loaded_commit.LoadedCommit.capture" = 1
 "test_export_process.py#monkeypatch.setattr scripts.ci.pull_requests.export_process.ConfigBoot" = 1
 "test_export_process.py#monkeypatch.setattr scripts.ci.pull_requests.export_process.build_pipeline" = 3
 "test_export_process.py#monkeypatch.setattr scripts.ci.pull_requests.export_process.meiva_home" = 1
-"test_export_process.py#monkeypatch.setattr scripts.ci.pull_requests.runs_export.collect_repo" = 1
-"test_export_process.py#monkeypatch.setattr scripts.ci.pull_requests.runs_export.emit_snapshot" = 1
-"test_export_process.py#monkeypatch.setattr scripts.ci.pull_requests.runs_export.save_json" = 1
-
-[debt.unresolved-patch]
-"test_ci_runs_export.py#monkeypatch.setattr module._MAX_RUN_PAGES_PER_CURSOR" = 1
-"test_ci_runs_export.py#monkeypatch.setattr module.collect_repo" = 1
-"test_ci_runs_export.py#monkeypatch.setattr module.emit_snapshot" = 2
-"test_ci_runs_export.py#monkeypatch.setattr module.fetch_closed_prs" = 1
-"test_ci_runs_export.py#monkeypatch.setattr module.fetch_runs" = 1
-"test_ci_runs_export.py#monkeypatch.setattr module.save_json" = 1
-"test_ci_runs_export.py#monkeypatch.setattr module.subprocess.run" = 1

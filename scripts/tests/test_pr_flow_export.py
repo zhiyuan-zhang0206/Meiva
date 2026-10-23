@@ -3,17 +3,38 @@
 from __future__ import annotations
 
 import json
+import subprocess
+from collections.abc import Sequence
 from datetime import UTC, date, datetime
 from pathlib import Path
-from typing import Any, NoReturn
+from typing import Any
 from zoneinfo import ZoneInfo
 
 import pytest
 
 from base.host.net.tests.fake_url_opener import Answer, FakeUrlOpener
+from base.telemetry import Event, EventPipeline
 from scripts.ci.pull_requests import pr_flow_export as pr_flow
 
 _TZ = ZoneInfo("Asia/Shanghai")
+
+
+class GhReplies:
+    def __init__(self, payloads: list[object], *, code: int = 0) -> None:
+        self.payloads = payloads
+        self.code = code
+        self.commands: list[list[str]] = []
+
+    def __call__(
+        self, argv: Sequence[str], *, timeout: float, capture_output: bool, text: bool
+    ) -> subprocess.CompletedProcess[str]:
+        assert timeout == 60 and capture_output and text
+        assert list(argv[:2]) == ["gh", "api"]
+        self.commands.append(list(argv))
+        assert self.payloads, f"unmatched: {argv}"
+        return subprocess.CompletedProcess(
+            argv, self.code, json.dumps(self.payloads.pop(0)), "gh down" if self.code else ""
+        )
 
 
 def _meta(
@@ -115,23 +136,22 @@ def test_collect_records_reuses_cache_only_when_updated_at_is_unchanged() -> Non
         }
     }
     stats = pr_flow.RunStats()
-    records = pr_flow.collect_records([meta], days, _TZ, "r/x", cached, stats)
+    records = pr_flow.collect_records(
+        [meta], days, _TZ, "r/x", cached, stats, run_process=GhReplies([])
+    )
     assert stats.timeline_cache_hits == 1
     assert stats.timeline_fetches == 0
     assert records[0].ready_at == meta["created_at"]
 
     moved = _meta(7, updated="2026-09-12T09:00:00Z")
-    fetched: list[int] = []
-
-    def fetch(_repo: str, number: int, _stats: object) -> list[dict[str, Any]]:
-        fetched.append(number)
-        return []
+    fetched = GhReplies([[]])
 
     stats2 = pr_flow.RunStats()
     records2 = pr_flow.collect_records(
-        [moved], days, _TZ, "r/x", cached, stats2, fetch_timeline_fn=fetch
+        [moved], days, _TZ, "r/x", cached, stats2, run_process=fetched
     )
-    assert fetched == [7]
+    assert len(fetched.commands) == 1
+    assert "/issues/7/timeline?" in fetched.commands[0][2]
     assert stats2.timeline_fetches == 1
     assert records2[0].updated_at == "2026-09-12T09:00:00Z"
 
@@ -149,18 +169,15 @@ def test_collect_records_falls_back_to_cache_then_partial_on_fetch_failure() -> 
         }
     }
 
-    def boom(_repo: str, _number: int, _stats: object) -> NoReturn:
-        raise pr_flow.PrFlowError("gh down")
+    boom = GhReplies([None, None], code=1)
 
     stats = pr_flow.RunStats()
-    records = pr_flow.collect_records(
-        [meta], days, _TZ, "r/x", cached, stats, fetch_timeline_fn=boom
-    )
+    records = pr_flow.collect_records([meta], days, _TZ, "r/x", cached, stats, run_process=boom)
     assert stats.timeline_failures == 1
     assert records[0].ready_at == meta["created_at"]  # stale cached record kept
     assert records[0].partial is False
 
-    records2 = pr_flow.collect_records([meta], days, _TZ, "r/x", {}, stats, fetch_timeline_fn=boom)
+    records2 = pr_flow.collect_records([meta], days, _TZ, "r/x", {}, stats, run_process=boom)
     assert records2[0].partial is True
     assert records2[0].ready_at == ""
 
@@ -168,68 +185,58 @@ def test_collect_records_falls_back_to_cache_then_partial_on_fetch_failure() -> 
 # ── fetchers: pagination, stops, failure paths ──────────────────────────────
 
 
-def test_fetch_closed_prs_stops_when_a_page_tail_predates_the_window(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_fetch_closed_prs_stops_when_a_page_tail_predates_the_window() -> None:
     since = datetime(2026, 8, 15, tzinfo=UTC)  # time-bomb-ok: explicit fixture window input
     recent = [_meta(n, updated="2026-09-12T03:00:00Z") for n in range(100, 200)]
     tail_old = [_meta(n, updated="2026-09-12T03:00:00Z") for n in range(99)]
     tail_old.append(_meta(1, updated="2026-08-01T03:00:00Z"))
-    pages = {1: recent, 2: tail_old, 3: "MUST NOT FETCH"}
-    fetched: list[int] = []
-
-    def run_gh(args: list[str], **_kwargs: object) -> str:
-        page_no = int(args[1].rsplit("page=", 1)[1])
-        fetched.append(page_no)
-        return json.dumps(pages[page_no])
-
-    monkeypatch.setattr(pr_flow, "run_gh", run_gh)
+    replies = GhReplies([recent, tail_old, "MUST NOT FETCH"])
     stats = pr_flow.RunStats()
-    prs = pr_flow.fetch_closed_prs("r/x", since, stats)
-    assert fetched == [1, 2]
+    prs = pr_flow.fetch_closed_prs(
+        "r/x", since, stats, run_process=replies, max_pages=pr_flow.MAX_LIST_PAGES
+    )
+    assert [int(argv[2].rsplit("page=", 1)[1]) for argv in replies.commands] == [1, 2]
     assert len(prs) == 200
+    assert replies.payloads == ["MUST NOT FETCH"]
 
 
-def test_fetch_closed_prs_returns_on_a_short_page(monkeypatch: pytest.MonkeyPatch) -> None:
-    pages = {1: [_meta(2, updated="2026-09-12T03:00:00Z")]}
-    fetched: list[int] = []
-
-    def run_gh(args: list[str], **_kwargs: object) -> str:
-        page_no = int(args[1].rsplit("page=", 1)[1])
-        fetched.append(page_no)
-        return json.dumps(pages[page_no])
-
-    monkeypatch.setattr(pr_flow, "run_gh", run_gh)
-    prs = pr_flow.fetch_closed_prs("r/x", datetime(2026, 8, 15, tzinfo=UTC), pr_flow.RunStats())
-    assert fetched == [1]
+def test_fetch_closed_prs_returns_on_a_short_page() -> None:
+    replies = GhReplies([[_meta(2, updated="2026-09-12T03:00:00Z")]])
+    prs = pr_flow.fetch_closed_prs(
+        "r/x",
+        datetime(2026, 8, 15, tzinfo=UTC),
+        pr_flow.RunStats(),
+        run_process=replies,
+        max_pages=pr_flow.MAX_LIST_PAGES,
+    )
+    assert [int(argv[2].rsplit("page=", 1)[1]) for argv in replies.commands] == [1]
     assert len(prs) == 1
 
 
-def test_fetch_closed_prs_raises_when_the_walk_exceeds_its_budget(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_fetch_closed_prs_raises_when_the_walk_exceeds_its_budget() -> None:
     page = [_meta(n, updated="2026-09-12T03:00:00Z") for n in range(100)]
-
-    def run_gh(_args: list[str], **_kw: object) -> str:
-        return json.dumps(page)
-
-    monkeypatch.setattr(pr_flow, "run_gh", run_gh)
-    monkeypatch.setattr(pr_flow, "MAX_LIST_PAGES", 2)
+    replies = GhReplies([page, page])
     with pytest.raises(pr_flow.PrFlowError, match="budget"):
-        pr_flow.fetch_closed_prs("r/x", datetime(2026, 8, 15, tzinfo=UTC), pr_flow.RunStats())
+        pr_flow.fetch_closed_prs(
+            "r/x",
+            datetime(2026, 8, 15, tzinfo=UTC),
+            pr_flow.RunStats(),
+            run_process=replies,
+            max_pages=2,
+        )
+    assert len(replies.commands) == 2 and replies.payloads == []
 
 
-def test_fetch_timeline_bounds_pagination(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_fetch_timeline_bounds_pagination() -> None:
     page = [{"event": "committed", "sha": "a" * 40, "commit_date": "2026-09-12T02:00:00Z"}] * 100
-
-    def run_gh(_args: list[str], **_kw: object) -> str:
-        return json.dumps(page)
-
-    monkeypatch.setattr(pr_flow, "run_gh", run_gh)
+    replies = GhReplies([page] * pr_flow.MAX_TIMELINE_PAGES)
     stats = pr_flow.RunStats()
-    events = pr_flow.fetch_timeline("r/x", 5, stats)
+    events = pr_flow.fetch_timeline(
+        "r/x", 5, stats, run_process=replies, max_pages=pr_flow.MAX_TIMELINE_PAGES
+    )
     assert len(events) == pr_flow.MAX_TIMELINE_PAGES * 100
     assert stats.gh_api_calls == pr_flow.MAX_TIMELINE_PAGES
+    assert replies.payloads == []
 
 
 def test_fetch_queue_depth_returns_none_on_trunk_error() -> None:
@@ -302,19 +309,15 @@ def test_save_json_failed_replace_keeps_the_prior_file_and_no_tmp(tmp_path: Path
     assert list(target.parent.glob("*.tmp")) == []
 
 
-def test_emit_snapshot_skips_the_pipeline_in_dry_run(monkeypatch: pytest.MonkeyPatch) -> None:
-    emitted: list[object] = []
-
-    def emit(snapshot: object, *, pipeline: object) -> None:
-        assert pipeline is writer
-        emitted.append(snapshot)
-
-    writer = object()
-    monkeypatch.setattr(pr_flow, "emit_events", emit)
-
+def test_emit_snapshot_skips_the_pipeline_in_dry_run() -> None:
+    emitted: list[Event] = []
+    writer = EventPipeline(writer=emitted.extend)
     snapshot: dict[str, Any] = {"days": {}, "run": {}}
-    pr_flow.emit_snapshot(snapshot, dry_run=True, pipeline=writer)
-    assert emitted == []
-
-    pr_flow.emit_snapshot(snapshot, dry_run=False, pipeline=writer)
-    assert emitted == [snapshot]
+    try:
+        pr_flow.emit_snapshot(snapshot, dry_run=True, pipeline=writer)
+        assert emitted == []
+        pr_flow.emit_snapshot(snapshot, dry_run=False, pipeline=writer)
+        assert [event.event_name for event in emitted] == ["pr_flow_run"]
+        assert all(event.process == pr_flow.PROCESS_NAME for event in emitted)
+    finally:
+        writer.stop(timeout=2)

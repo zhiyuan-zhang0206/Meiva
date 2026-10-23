@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+from collections.abc import Sequence
 from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
@@ -11,7 +12,10 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from scripts.ci.pull_requests import runs_export
+from base.clock.tests.manual_timers import ManualTimers
+from base.telemetry import EventPipeline
+from scripts.ci.pull_requests import runs_api, runs_export
+from scripts.ci.pull_requests.export_process import GhProcess
 
 
 def _run(**overrides: object) -> dict[str, Any]:
@@ -47,37 +51,44 @@ def _pr(**overrides: object) -> dict[str, Any]:
     return row
 
 
-def _gh_queue(responses: list[tuple[str, str, int]]) -> Any:
-    """Return the first matching command response, as accounting does."""
-
-    def run(command: list[str], *_a: object, **_k: object) -> subprocess.CompletedProcess[str]:
+def _gh_queue(responses: list[tuple[str, str, int]]) -> GhProcess:
+    def run(
+        command: Sequence[str], *, timeout: float, capture_output: bool, text: bool
+    ) -> subprocess.CompletedProcess[str]:
+        assert timeout == 60 and capture_output and text
+        assert list(command[:4]) == ["gh", "api", "--method", "GET"]
         joined = " ".join(command)
         for index, (key, output, code) in enumerate(responses):
             if key in joined:
                 responses.pop(index)
-                return subprocess.CompletedProcess(command, code, output, "failure" if code else "")
-        return subprocess.CompletedProcess(command, 1, "", f"unmatched: {joined}")
+                return subprocess.CompletedProcess(
+                    command, code, output, (output or "failure") if code else ""
+                )
+        raise AssertionError(f"unmatched: {joined}")
 
     return run
 
 
-def test_created_cursor_walk_deduplicates_run_ids(monkeypatch: pytest.MonkeyPatch) -> None:
-    module = runs_export
-    monkeypatch.setattr(module, "_MAX_RUN_PAGES_PER_CURSOR", 1)
+def test_created_cursor_walk_deduplicates_run_ids() -> None:
     page = [_run(id=9, created_at="2026-09-02T00:00:00Z")] * 100
     commands: list[str] = []
 
-    def record(command: list[str], *_a: object, **_k: object) -> subprocess.CompletedProcess[str]:
+    def record(
+        command: Sequence[str], *, timeout: float, capture_output: bool, text: bool
+    ) -> subprocess.CompletedProcess[str]:
+        assert timeout == 60 and capture_output and text
         commands.append(" ".join(command))
         output = json.dumps(page if len(commands) == 1 else [])
         return subprocess.CompletedProcess(command, 0, output, "")
 
-    monkeypatch.setattr(module.subprocess, "run", record)
-    rows = module.fetch_runs(
+    rows = runs_api.fetch_runs(
         "owner/repo",
         datetime(2026, 9, 1, tzinfo=UTC),
         datetime(2026, 9, 3, tzinfo=UTC),
-        module.FetchStats(),
+        runs_api.FetchStats(),
+        run_process=record,
+        timers=ManualTimers(),
+        max_pages=1,
     )
 
     assert [row["id"] for row in rows] == [9]
@@ -192,39 +203,65 @@ def test_cache_merge_is_idempotent_prunes_old_records_and_moves_watermark() -> N
 
 
 def test_dry_run_prints_snapshot_without_writes_or_emission(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    module = runs_export
-    collection = module.RepoCollection(
-        repo="owner/repo",
-        cache={"runs": {}, "prs": {}, "last_fetch_end": None},
-        daily={},
-        workflows={},
-        window_runs=0,
-        window_prs=0,
-        api_requests=1,
+    replies = [("actions/runs?", "[]", 0), ("pulls?", "[]", 0)]
+    observed: list[object] = []
+    pipeline = EventPipeline(writer=observed.extend)
+    try:
+        assert (
+            runs_export.main(
+                ["--repo", "owner/repo", "--state-dir", str(tmp_path), "--dry-run"],
+                run_process=_gh_queue(replies),
+                timers=ManualTimers(),
+                producer=lambda: pipeline,
+            )
+            == 0
+        )
+        assert replies == []
+        assert list(tmp_path.iterdir()) == []
+        assert observed == [] and not pipeline.stopped
+        assert '"owner/repo"' in capsys.readouterr().out
+    finally:
+        pipeline.stop(timeout=2)
+
+
+def test_failed_authoritative_pr_walk_aborts_before_emission(tmp_path: Path) -> None:
+    replies = [("actions/runs?", "[]", 0), ("pulls?", "", 1)]
+    observed: list[object] = []
+    pipeline = EventPipeline(writer=observed.extend)
+    try:
+        assert (
+            runs_export.main(
+                ["--state-dir", str(tmp_path)],
+                run_process=_gh_queue(replies),
+                timers=ManualTimers(),
+                producer=lambda: pipeline,
+            )
+            == 1
+        )
+        assert replies == []
+        assert not list(tmp_path.iterdir())
+        assert observed == [] and not pipeline.stopped
+    finally:
+        pipeline.stop(timeout=2)
+
+
+def test_transient_gh_errors_retry_raw_commands_with_existing_budget() -> None:
+    replies = [("actions/runs", "HTTP 503", 1), ("actions/runs", "[]", 0)]
+    timers = ManualTimers()
+    stats = runs_api.FetchStats()
+    assert (
+        runs_api.fetch_runs(
+            "owner/repo",
+            datetime(2026, 9, 1, tzinfo=UTC),
+            datetime(2026, 9, 3, tzinfo=UTC),
+            stats,
+            run_process=_gh_queue(replies),
+            timers=timers,
+            max_pages=1,
+        )
+        == []
     )
-    monkeypatch.setattr(module, "collect_repo", lambda *_a, **_k: collection)  # pyright: ignore[reportUnknownArgumentType]
-    writes: list[Path] = []
-    monkeypatch.setattr(module, "save_json", lambda path, *_a: writes.append(path))  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(module, "emit_snapshot", lambda *_a: pytest.fail("dry run emitted"))  # pyright: ignore[reportUnknownArgumentType]
-
-    assert module.main(["--repo", "owner/repo", "--state-dir", str(tmp_path), "--dry-run"]) == 0
-    assert writes == []
-    assert '"owner/repo"' in capsys.readouterr().out
-
-
-def test_failed_authoritative_pr_walk_aborts_before_emission(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    module = runs_export
-    monkeypatch.setattr(module, "fetch_runs", lambda *_a: [])  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(
-        module,
-        "fetch_closed_prs",
-        lambda *_a: (_ for _ in ()).throw(module.CiRunsError("down")),  # pyright: ignore[reportUnknownArgumentType]
-    )
-    monkeypatch.setattr(module, "emit_snapshot", lambda *_a: pytest.fail("failed walk emitted"))  # pyright: ignore[reportUnknownArgumentType]
-
-    assert module.main(["--state-dir", str(tmp_path)]) == 1
-    assert not list(tmp_path.iterdir())
+    assert timers.sleeps == [2] and replies == []
+    assert stats.api_requests == 2 and stats.retries == 1
