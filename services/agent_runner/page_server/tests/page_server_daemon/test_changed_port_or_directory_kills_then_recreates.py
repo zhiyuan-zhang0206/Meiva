@@ -11,7 +11,6 @@ import time
 from pathlib import Path
 
 import psycopg
-import pytest
 from psycopg_pool import ConnectionPool
 
 import services.agent_runner.page_server.daemon as psd
@@ -82,7 +81,6 @@ def test_daemon_restart_adopts_a_healthy_live_page_session(
     sync_pool: ConnectionPool,
     db_conn: psycopg.Connection,
     backend: PageShellBackend,
-    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     *,
     model_catalog: ModelCatalog,
@@ -107,10 +105,9 @@ def test_daemon_restart_adopts_a_healthy_live_page_session(
         token=secrets.token_hex(16),
         session=page_session,
     )
-    monkeypatch.setattr(psd, "server_is_healthy", lambda *_args: True)  # pyright: ignore[reportUnknownArgumentType]
     managed: dict[tuple[int, str], psd.ServerHandle] = {}
 
-    reconcile(sync_pool, managed)
+    reconcile(sync_pool, managed, server_healthy_fn=lambda *_args: True)
 
     assert set(managed) == {(agent_id, "adopted")}
     assert backend.new_calls == []
@@ -123,7 +120,6 @@ def test_reclaim_preserves_in_session_server_and_kills_detached_orphan(
     sync_pool: ConnectionPool,
     db_conn: psycopg.Connection,
     backend: PageShellBackend,
-    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     *,
     model_catalog: ModelCatalog,
@@ -149,25 +145,24 @@ def test_reclaim_preserves_in_session_server_and_kills_detached_orphan(
         token=secrets.token_hex(16),
         session=page_session,
     )
-    monkeypatch.setattr(
-        psd,
-        "page_server_occupants",
-        lambda: {
+    killed: list[int] = []
+
+    reconcile(
+        sync_pool,
+        {},
+        occupants_fn=lambda: {
             12010: (5010, str(psd.meiva_home())),
             12011: (5011, str(psd.meiva_home())),
         },
+        session_owner_fn=lambda pid, _pids: key if pid == 5010 else None,
+        kill_pid_fn=killed.append,
+        server_healthy_fn=lambda *_args: True,
     )
-    monkeypatch.setattr(psd, "page_session_owner", lambda pid, _pids: key if pid == 5010 else None)  # pyright: ignore[reportUnknownArgumentType]
-    killed: list[int] = []
-    monkeypatch.setattr(psd, "kill_pid", killed.append)
-    monkeypatch.setattr(psd, "server_is_healthy", lambda *_args: True)  # pyright: ignore[reportUnknownArgumentType]
-
-    reconcile(sync_pool, {})
 
     assert killed == [5011]
 
 
-def test_page_session_owner_walks_process_ancestry(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_page_session_owner_walks_process_ancestry() -> None:
     class _Parent:
         def __init__(self, pid: int) -> None:
             self.pid = pid
@@ -177,11 +172,18 @@ def test_page_session_owner_walks_process_ancestry(monkeypatch: pytest.MonkeyPat
         def parents() -> list[_Parent]:
             return [_Parent(11), _Parent(12)]
 
-    monkeypatch.setattr(psd.psutil, "Process", lambda _pid: _Proc())  # pyright: ignore[reportUnknownArgumentType]
-    assert psd.page_session_owner(99, {12: (7, "page")}) == (7, "page")
-    assert psd.page_session_owner(99, {11: (8, "near"), 12: (7, "page")}) == (8, "near")
+    def process_factory(_pid: int) -> _Proc:
+        return _Proc()
+
+    assert psd.page_session_owner(99, {12: (7, "page")}, process_factory=process_factory) == (
+        7,
+        "page",
+    )
+    assert psd.page_session_owner(
+        99, {11: (8, "near"), 12: (7, "page")}, process_factory=process_factory
+    ) == (8, "near")
     # Unrelated host ancestry must not acquire a managed page's ownership.
-    assert psd.page_session_owner(99, {77: (7, "page")}) is None
+    assert psd.page_session_owner(99, {77: (7, "page")}, process_factory=process_factory) is None
 
 
 def test_server_module_still_serves_a_tokenized_health_endpoint(tmp_path: Path) -> None:

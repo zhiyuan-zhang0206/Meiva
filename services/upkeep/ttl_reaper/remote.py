@@ -9,6 +9,8 @@ loop's next round, never a page expiry.
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable, Coroutine
+from typing import Any
 
 from psycopg_pool import ConnectionPool
 
@@ -23,10 +25,18 @@ _log = logging.getLogger(__name__)
 
 
 async def remote_round(
-    pool: ConnectionPool, db: Database, bus: EventBus, progress: LoopProgress
+    pool: ConnectionPool,
+    db: Database,
+    bus: EventBus,
+    progress: LoopProgress,
+    *,
+    reap_shells_fn: Callable[
+        [ConnectionPool, Database, EventBus, LoopProgress],
+        Coroutine[Any, Any, list[tuple[int, int]]],
+    ] = shells.reap_expired_shells,
 ) -> None:
     """One pass: reclaim expired shells."""
-    reaped = await shells.reap_expired_shells(pool, db, bus, progress)
+    reaped = await reap_shells_fn(pool, db, bus, progress)
     progress.beat()
     if reaped:
         _log.info("[ttl-reaper] reclaimed %d shell(s)", len(reaped))

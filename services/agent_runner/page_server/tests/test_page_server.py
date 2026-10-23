@@ -5,6 +5,7 @@ from __future__ import annotations
 import functools
 import http.client
 import threading
+from collections.abc import Iterator
 from pathlib import Path
 from types import TracebackType
 
@@ -17,14 +18,13 @@ _TOKEN = "page-server-test-token"  # noqa: S105 - test-only liveness value
 
 
 @pytest.fixture(autouse=True)
-def _configure_page_handler(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(
-        page_server.PageHandler,
-        "extensions_map",
-        page_server.PageHandler.extensions_map.copy(),
-    )
-    monkeypatch.setattr(page_server.PageHandler, "token", _TOKEN)
+def _configure_page_handler() -> Iterator[None]:
+    prev_token = page_server.PageHandler.token
     page_server.configure_handler(_TOKEN)
+    try:
+        yield
+    finally:
+        page_server.configure_handler(prev_token)
 
 
 class _RunningPageServer:

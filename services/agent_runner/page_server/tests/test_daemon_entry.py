@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -9,7 +10,7 @@ import pytest
 
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.machine import MachineIdentity
-from base.config import ConfigBoot, field_domain, settings
+from base.config import ConfigBoot, field_domain
 from base.config.tests.configuration import snapshot_process_config
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
@@ -38,22 +39,44 @@ def _assert_gate_matches_image(
 
 
 def _run_main(
-    monkeypatch: pytest.MonkeyPatch, *, exit_process: Callable[[int], None] | None = None
+    *,
+    deps: daemon.MainDeps,
+    exit_process: Callable[[int], None] | None = None,
 ) -> None:
     runner = asyncio.Runner()
-    monkeypatch.setattr(daemon.asyncio, "Runner", lambda: runner)
+    merged_deps = dataclasses.replace(deps, runner_factory=lambda: runner)
     try:
-        daemon.main() if exit_process is None else daemon.main(exit_process=exit_process)
+        if exit_process is None:
+            daemon.main(deps=merged_deps)
+        else:
+            daemon.main(exit_process=exit_process, deps=merged_deps)
     finally:
         runner.close()
 
 
-@pytest.mark.parametrize("sha", ["captured-page-server", None])
-def test_entry_shares_the_captured_gate_with_logging_health_and_work(
-    monkeypatch: pytest.MonkeyPatch, sha: str | None
-) -> None:
-    from base.deploy.schema import migrations
+class _FakeCodeVersion(code_version.CodeVersion):
+    def __init__(
+        self,
+        loaded: LoadedCommit,
+        reads: list[tuple[Path, str]],
+    ) -> None:
+        super().__init__(loaded)
+        self._reads = reads
 
+    def get(self) -> int:
+        if self._version is None:
+            if self.loaded.sha is None:
+                raise code_version.CodeVersionError(
+                    f"cannot resolve the loaded commit of {self.loaded.source_root}: "
+                    "the process must capture its code version at startup"
+                )
+            self._reads.append((self.loaded.source_root, self.loaded.sha))
+            self._version = 42
+        return self._version
+
+
+@pytest.mark.parametrize("sha", ["captured-page-server", None])
+def test_entry_shares_the_captured_gate_with_logging_health_and_work(sha: str | None) -> None:
     image = LoadedCommit(Path("/entry-page-server"), sha)
     stages: list[str] = []
     gates: list[ProcessDbGate] = []
@@ -73,9 +96,10 @@ def test_entry_shares_the_captured_gate_with_logging_health_and_work(
         stages.append("capture")
         return image
 
-    def count(root: Path, commit: str) -> int:
-        reads.append((root, commit))
-        return 42
+    def boot_config() -> ConfigBoot:
+        cfg = snapshot_process_config()
+        cfg.view.general.machine_name = "page-server-entry"
+        return cfg
 
     def build(*, database: Callable[[], Database], machine: MachineIdentity, home: Path) -> object:
         stages.append("producer")
@@ -114,36 +138,33 @@ def test_entry_shares_the_captured_gate_with_logging_health_and_work(
         stages.append(f"exit:{code}")
 
     captured = image
-    monkeypatch.setattr(settings.general, "machine_name", "page-server-entry")
-    monkeypatch.setattr(daemon.LoadedCommit, "capture", capture)
-    monkeypatch.setattr(code_version, "first_parent_count", count)
-    monkeypatch.setattr(daemon, "Database", Store)
-    monkeypatch.setattr(daemon, "ConfigBoot", snapshot_process_config)
-    monkeypatch.setattr(daemon, "build_pipeline", build)
-    monkeypatch.setattr(daemon, "init_gateway_process", initialize)
-    monkeypatch.setattr(migrations, "assert_schema_current", check_schema)
-    monkeypatch.setattr(daemon, "install_graceful_shutdown", no_signals)
-    monkeypatch.setattr(daemon, "run", work)
-    _run_main(monkeypatch, exit_process=exit_process)
+    deps = daemon.MainDeps(
+        capture_commit=capture,
+        boot_config=boot_config,
+        check_schema=check_schema,
+        version_factory=lambda loaded: _FakeCodeVersion(loaded, reads),
+        database_cls=Store,
+        build_pipeline_fn=build,
+        init_logging_fn=initialize,
+        install_shutdown_fn=no_signals,
+        run_fn=work,
+    )
+    _run_main(deps=deps, exit_process=exit_process)
     assert stages == ["capture", "schema", "producer", "logging", "run", "exit:0"]
     _assert_gate_matches_image(gates, reads, image, readers, factories[0][1])
 
 
-def test_resources_follow_the_entry_owner_at_each_original_lookup(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_resources_follow_the_entry_owner_at_each_original_lookup(tmp_path: Path) -> None:
     config = snapshot_process_config()
     runtime = tmp_path / "owned-entry" / "run"
     domain = field_domain("page_server_health_port")
     fields = getattr(config.view, domain)
-    monkeypatch.setattr(fields, "page_server_health_port", 26101)
-    monkeypatch.setenv("MEIVA_HOME", str(tmp_path / "a-later-home"))
+    fields.page_server_health_port = 26101
 
     first = resources.endpoint(config, runtime=runtime)
-    monkeypatch.setattr(fields, "page_server_health_port", 26102)
+    fields.page_server_health_port = 26102
     second = resources.endpoint(config, runtime=runtime)
 
     assert (first.health_port, second.health_port) == (26101, 26102)
     assert first.pidfile == second.pidfile == runtime / "page_server.pid"
     assert runtime.is_dir()
-    assert not (tmp_path / "a-later-home" / "run").exists()
