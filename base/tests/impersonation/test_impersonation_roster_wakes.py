@@ -17,9 +17,8 @@ def test_impersonation_wake_reconciles_roster_only_for_status_changes(
     def no_wake(_db: Database, _bus: EventBus, _agent_id: int, _reason: str) -> None:
         pass
 
-    monkeypatch.setattr(wake, "publish_inbound_wake", no_wake)
     patch_announcements(monkeypatch, wake, changed=timeline, updated=roster)
-    wake.wake_agent(database, event_bus, 7)
-    wake.wake_agent(database, event_bus, 7, roster_changed=True)
+    wake.wake_agent(database, event_bus, 7, publish_wake=no_wake)
+    wake.wake_agent(database, event_bus, 7, roster_changed=True, publish_wake=no_wake)
     assert timeline == [7, 7]
     assert roster == [7]

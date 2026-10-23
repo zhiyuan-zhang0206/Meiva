@@ -121,15 +121,15 @@ def test_ended_notice_is_submitted_once_to_the_recorded_destination(
     active: tuple[dict[str, Any], RuntimeIncarnation],
     database: Database,
     event_bus: EventBus,
-    monkeypatch: pytest.MonkeyPatch,
     *,
     machine_identity: MachineIdentity,
 ) -> None:
     session, _ = active
     end(database, event_bus, session, local_machine=machine_identity.name())
     submitted = Mock(return_value=None)
-    monkeypatch.setattr(host_transport, "live_submit", submitted)
-    assert terminal_notices.send_ended_notice(database, session["id"]) is None
+    assert (
+        terminal_notices.send_ended_notice(database, session["id"], submit_codex=submitted) is None
+    )
     submitted.assert_called_once()
     assert submitted.call_args.args[0] == session["relay_thread_id"]
     assert submitted.call_args.kwargs["endpoint"] == session["relay_codex_remote"]
@@ -142,16 +142,14 @@ def test_ended_notice_failure_is_reported_and_leaves_no_retry_state(
     database: Database,
     event_bus: EventBus,
     db_conn: psycopg.Connection,
-    monkeypatch: pytest.MonkeyPatch,
     *,
     machine_identity: MachineIdentity,
 ) -> None:
     session, _ = active
     end(database, event_bus, session, local_machine=machine_identity.name())
     submitted = Mock(return_value="TimeoutError: ambiguous acceptance")
-    monkeypatch.setattr(host_transport, "live_submit", submitted)
     assert (
-        terminal_notices.send_ended_notice(database, session["id"])
+        terminal_notices.send_ended_notice(database, session["id"], submit_codex=submitted)
         == "TimeoutError: ambiguous acceptance"
     )
     submitted.assert_called_once()
@@ -167,7 +165,6 @@ def test_controller_session_destination_gets_no_host_submission(
     database: Database,
     event_bus: EventBus,
     db_conn: psycopg.Connection,
-    monkeypatch: pytest.MonkeyPatch,
     *,
     machine_identity: MachineIdentity,
 ) -> None:
@@ -178,12 +175,10 @@ def test_controller_session_destination_gets_no_host_submission(
     )
     db_conn.commit()
     end(database, event_bus, session, local_machine=machine_identity.name())
-    monkeypatch.setattr(
-        host_transport,
-        "live_submit",
-        Mock(side_effect=AssertionError("Unsupported destination must not submit")),
+    submitted = Mock(side_effect=AssertionError("Unsupported destination must not submit"))
+    assert (
+        terminal_notices.send_ended_notice(database, session["id"], submit_codex=submitted) is None
     )
-    assert terminal_notices.send_ended_notice(database, session["id"]) is None
 
 
 def test_old_notice_keeps_destination_after_replacement_takeover(
@@ -191,7 +186,6 @@ def test_old_notice_keeps_destination_after_replacement_takeover(
     database: Database,
     event_bus: EventBus,
     db_conn: psycopg.Connection,
-    monkeypatch: pytest.MonkeyPatch,
     *,
     machine_identity: MachineIdentity,
     config_authority: ConfigAuthority,
@@ -235,8 +229,9 @@ def test_old_notice_keeps_destination_after_replacement_takeover(
     )
     db_conn.commit()
     submitted = Mock(return_value=None)
-    monkeypatch.setattr(host_transport, "live_submit", submitted)
-    assert terminal_notices.send_ended_notice(database, session["id"]) is None
+    assert (
+        terminal_notices.send_ended_notice(database, session["id"], submit_codex=submitted) is None
+    )
     assert submitted.call_args.args[0] == session["relay_thread_id"]
     assert submitted.call_args.kwargs["endpoint"] == session["relay_codex_remote"]
     assert session["id"] in submitted.call_args.args[1]
@@ -255,7 +250,6 @@ def test_terminated_agent_notice_names_the_termination(
     active: tuple[dict[str, Any], RuntimeIncarnation],
     database: Database,
     db_conn: psycopg.Connection,
-    monkeypatch: pytest.MonkeyPatch,
     *,
     machine_identity: MachineIdentity,
 ) -> None:
@@ -263,8 +257,9 @@ def test_terminated_agent_notice_names_the_termination(
     db_conn.execute("UPDATE agents_meta SET status='terminated' WHERE id=%s", (owner.agent_id,))
     db_conn.commit()
     submitted = Mock(return_value=None)
-    monkeypatch.setattr(host_transport, "live_submit", submitted)
-    assert terminal_notices.send_ended_notice(database, session["id"]) is None
+    assert (
+        terminal_notices.send_ended_notice(database, session["id"], submit_codex=submitted) is None
+    )
     assert "terminated: agent was terminated" in submitted.call_args.args[1]
 
 

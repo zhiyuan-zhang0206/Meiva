@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import pytest
 
-from base.cluster import rate_limit
 from base.cluster.rate_limit import Entry, LoginRateLimitConfig, LoginRateLimiter
 from base.config import ConfigBoot, settings
 
@@ -51,9 +50,7 @@ def test_sweep_stale_removed_first() -> None:
     assert "active-ip" in limiter._entries
 
 
-def test_policy_readers_are_lazy_and_read_in_order_for_each_failure(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_policy_readers_are_lazy_and_read_in_order_for_each_failure() -> None:
     calls: list[str] = []
 
     def now() -> float:
@@ -68,9 +65,11 @@ def test_policy_readers_are_lazy_and_read_in_order_for_each_failure(
         calls.append("lockout_seconds")
         return 17.5
 
-    monkeypatch.setattr(rate_limit.time, "time", now)
     limiter = LoginRateLimiter(
-        max_failures_reader=maximum, lockout_seconds_reader=window, config=LoginRateLimitConfig()
+        max_failures_reader=maximum,
+        lockout_seconds_reader=window,
+        config=LoginRateLimitConfig(),
+        clock=now,
     )
     assert calls == []
     limiter.record_failure("ip")
@@ -83,26 +82,25 @@ def test_policy_readers_are_lazy_and_read_in_order_for_each_failure(
     assert calls == []
 
 
-def test_independent_config_owners_update_policy_at_failure_time(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_independent_config_owners_update_policy_at_failure_time() -> None:
     first, second = ConfigBoot(), ConfigBoot()
     first.set_field("login_max_failures", 2)
     first.set_field("login_lockout_seconds", 100)
     second.set_field("login_max_failures", 3)
     second.set_field("login_lockout_seconds", 30)
+    now = [1000.0]
     left = LoginRateLimiter(
         max_failures_reader=lambda: first.view.gateway.login_max_failures,
         lockout_seconds_reader=lambda: first.view.gateway.login_lockout_seconds,
         config=LoginRateLimitConfig(),
+        clock=lambda: now[0],
     )
     right = LoginRateLimiter(
         max_failures_reader=lambda: second.view.gateway.login_max_failures,
         lockout_seconds_reader=lambda: second.view.gateway.login_lockout_seconds,
         config=LoginRateLimitConfig(),
+        clock=lambda: now[0],
     )
-    now = [1000.0]
-    monkeypatch.setattr(rate_limit.time, "time", lambda: now[0])
     for limiter in (left, right):
         limiter.record_failure("ip")
         limiter.record_failure("ip")

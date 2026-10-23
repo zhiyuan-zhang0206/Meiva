@@ -21,7 +21,7 @@ import hashlib
 import hmac
 import os
 from base64 import urlsafe_b64encode
-from collections.abc import Collection
+from collections.abc import Collection, Mapping
 from secrets import token_bytes
 
 # The launch-environment key carrying this process's machine API token
@@ -43,9 +43,10 @@ def bearer_header(secret: str) -> dict[str, str]:
     return {"Authorization": f"{_SCHEME}{secret}"}
 
 
-def delivered_token() -> str | None:
+def delivered_token(env: Mapping[str, str] | None = None) -> str | None:
     """This process's machine API token from its launch environment, if any."""
-    return os.environ.get(API_TOKEN_ENV) or None
+    source = os.environ if env is None else env
+    return source.get(API_TOKEN_ENV) or None
 
 
 class ClusterSecretMissingError(RuntimeError):

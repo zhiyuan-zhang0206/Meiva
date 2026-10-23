@@ -88,13 +88,15 @@ def test_explicit_builder_failure_is_not_replaced_by_a_default() -> None:
     assert not clients._made
 
 
-def test_close_closes_the_connections_it_made_and_keeps_going_past_a_failure(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    clients = ClientSet()
+def test_close_closes_the_connections_it_made_and_keeps_going_past_a_failure() -> None:
+    from types import SimpleNamespace
+    from typing import cast
+
+    from base.db import Database
+
     sql, redis = _Closable(), _Closable()
-    monkeypatch.setattr(clients, "_connect_sql", lambda: sql)
-    monkeypatch.setattr(clients, "_connect_redis", lambda: redis)
+    fake_db = cast("Database", SimpleNamespace(connect=lambda *, autocommit: (autocommit, sql)[1]))
+    clients = ClientSet(database=lambda: fake_db, redis=lambda: redis)
     assert clients.sql._get() is sql
     assert clients.redis._get() is redis
 

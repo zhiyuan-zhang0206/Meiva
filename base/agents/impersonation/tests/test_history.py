@@ -186,7 +186,6 @@ def test_concurrent_requests_cannot_share_control(
 def test_say_ack_and_file_preserve_all_message_bodies(
     db_conn: psycopg.Connection[Any],
     owner: RuntimeIncarnation,
-    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     database: Database,
     event_bus: EventBus,
@@ -196,11 +195,6 @@ def test_say_ack_and_file_preserve_all_message_bodies(
     machine_identity: MachineIdentity,
 ) -> None:
     local_machine = machine_identity.name()
-
-    def workspace_for_agent(_agent_id: int) -> Path:
-        return tmp_path
-
-    monkeypatch.setattr(history, "workspace_dir", workspace_for_agent)
     lease = start(
         owner, authority=config_authority, database_gate=database_gate, local_machine=local_machine
     )
@@ -257,7 +251,7 @@ def test_say_ack_and_file_preserve_all_message_bodies(
         local_machine=local_machine,
     )
     lease = history.resolve(database, owner.agent_id, 0, local_machine=local_machine)
-    document, path = history.export_handoff(lease, db_conn)
+    document, path = history.export_handoff(lease, db_conn, workspace=tmp_path)
     assert Path(path) == tmp_path / "impersonation" / "0.json"
     assert json.loads(Path(path).read_text()) == document
     assert [m["payload"]["content"] for m in document["messages"]] == [
@@ -322,7 +316,6 @@ def test_export_handoff_rebuilds_a_cached_v1_document(
     db_conn: psycopg.Connection[Any],
     owner: RuntimeIncarnation,
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
     database: Database,
     event_bus: EventBus,
     *,
@@ -333,10 +326,6 @@ def test_export_handoff_rebuilds_a_cached_v1_document(
     local_machine = machine_identity.name()
     from psycopg.types.json import Jsonb
 
-    def workspace_for_agent(_agent_id: int) -> Path:
-        return tmp_path
-
-    monkeypatch.setattr(history, "workspace_dir", workspace_for_agent)
     lease = legacy_session(db_conn, owner, local_machine=local_machine)
     leases.release(
         database,
@@ -352,7 +341,9 @@ def test_export_handoff_rebuilds_a_cached_v1_document(
     db_conn.commit()
 
     document, _ = history.export_handoff(
-        history.resolve(database, owner.agent_id, 0, local_machine=local_machine), db_conn
+        history.resolve(database, owner.agent_id, 0, local_machine=local_machine),
+        db_conn,
+        workspace=tmp_path,
     )
 
     assert document["version"] == 2

@@ -5,5 +5,4 @@ exports = ["fakes.py", "manual_timers.py"]
 "test_timers.py" = ["manual_timers.py"]
 
 [debt.first-party-patch]
-"fakes.py#monkeypatch.setattr base.clock.Clock.now_timestamp" = 1
 "fakes.py#monkeypatch.setattr base.clock.Clock.zone" = 1

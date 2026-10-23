@@ -17,7 +17,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import UTC, datetime
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -30,28 +32,38 @@ from base.agents.messages.envelope import (
     validate_source,
     wrap_inbound,
 )
-from base.clock import Clock
-from base.clock.tests.fakes import fix_now_timestamp
+from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
 from base.config import settings
 from base.lm.system_note import unwrap_system_note, wrap_system_note
 
-_ENVELOPE_INPUTS = EnvelopeReadInputs(
-    Clock.from_settings, lambda: settings.general.message_timestamps
-)
-
-_REAL_NOW_TIMESTAMP = Clock.now_timestamp
 _TIMESTAMP = "[2026-05-06 14:32:05]"
 _TS = _TIMESTAMP  # shorthand
 
 
+def _fixed_now() -> datetime:
+    return datetime(2026, 5, 6, 14, 32, 5, tzinfo=ZoneInfo(settings.general.timezone)).astimezone(
+        UTC
+    )
+
+
+def _make_clock(*, weekday: bool = False, now: Callable[[], datetime] = _fixed_now) -> Clock:
+    return Clock(
+        ClockConfig(
+            timezone=settings.general.timezone,
+            authoritative_timezone=None,
+            message_timestamp_weekday=weekday,
+        ),
+        timers=SYSTEM_TIMERS,
+        now=now,
+    )
+
+
+_ENVELOPE_INPUTS = EnvelopeReadInputs(_make_clock, lambda: True)
+_NO_TIMESTAMPS_INPUTS = EnvelopeReadInputs(_make_clock, lambda: False)
+
+
 def _note(body: str) -> str:
     return f"<system_note>\n{body}\n</system_note>"
-
-
-@pytest.fixture(autouse=True)
-def _freeze_timestamp(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Mock now_timestamp to a fixed value for all tests."""
-    fix_now_timestamp(monkeypatch, _TIMESTAMP)
 
 
 class TestUserSource:
@@ -261,27 +273,23 @@ class TestMessageTimestampsOff:
     source prefixes, with no trailing space before the colon; the user envelope
     has no label behind the timestamp, so its header disappears entirely."""
 
-    @pytest.fixture(autouse=True)
-    def _disable(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        from base.config import settings
-
-        monkeypatch.setattr(settings.general, "message_timestamps", False)
-
     def test_user_no_timestamp(self) -> None:
-        assert wrap_inbound("hi", "user", inputs=_ENVELOPE_INPUTS) == "hi"
+        assert wrap_inbound("hi", "user", inputs=_NO_TIMESTAMPS_INPUTS) == "hi"
 
     def test_page_no_timestamp(self) -> None:
-        assert wrap_inbound("hi", "ui:page:compare", inputs=_ENVELOPE_INPUTS) == "hi"
+        assert wrap_inbound("hi", "ui:page:compare", inputs=_NO_TIMESTAMPS_INPUTS) == "hi"
 
     def test_agent_no_timestamp(self) -> None:
-        assert wrap_inbound("hi", "agent:5", inputs=_ENVELOPE_INPUTS) == "Agent 5:\n\nhi"
+        assert wrap_inbound("hi", "agent:5", inputs=_NO_TIMESTAMPS_INPUTS) == "Agent 5:\n\nhi"
 
     def test_watcher_no_timestamp(self) -> None:
-        assert wrap_inbound("hi", "watcher:7", inputs=_ENVELOPE_INPUTS) == "Watcher (id 7):\n\nhi"
+        assert (
+            wrap_inbound("hi", "watcher:7", inputs=_NO_TIMESTAMPS_INPUTS) == "Watcher (id 7):\n\nhi"
+        )
 
     def test_system_unchanged(self) -> None:
-        assert wrap_inbound("raw", "system", inputs=_ENVELOPE_INPUTS) == _note("raw")
-        assert wrap_inbound("raw", "system:rollback", inputs=_ENVELOPE_INPUTS) == _note("raw")
+        assert wrap_inbound("raw", "system", inputs=_NO_TIMESTAMPS_INPUTS) == _note("raw")
+        assert wrap_inbound("raw", "system:rollback", inputs=_NO_TIMESTAMPS_INPUTS) == _note("raw")
 
 
 def _local_ts(created: datetime, *, weekday: bool = False) -> str:
@@ -349,24 +357,18 @@ class TestCreatedAtParameter:
 class TestCreatedAtWithTimestampsOff:
     """When message_timestamps is off, created_at doesn't add a ts either."""
 
-    @pytest.fixture(autouse=True)
-    def _disable(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        from base.config import settings
-
-        monkeypatch.setattr(settings.general, "message_timestamps", False)
-
     def test_user_no_ts_even_with_created_at(self) -> None:
         from datetime import datetime
 
         created = datetime(2026, 6, 21, 10, 0, 0, tzinfo=UTC)
-        assert wrap_inbound("hi", "user", created_at=created, inputs=_ENVELOPE_INPUTS) == "hi"
+        assert wrap_inbound("hi", "user", created_at=created, inputs=_NO_TIMESTAMPS_INPUTS) == "hi"
 
     def test_agent_no_ts_even_with_created_at(self) -> None:
         from datetime import datetime
 
         created = datetime(2026, 6, 21, 10, 0, 0, tzinfo=UTC)
         assert (
-            wrap_inbound("hi", "agent:5", created_at=created, inputs=_ENVELOPE_INPUTS)
+            wrap_inbound("hi", "agent:5", created_at=created, inputs=_NO_TIMESTAMPS_INPUTS)
             == "Agent 5:\n\nhi"
         )
 
@@ -382,44 +384,40 @@ class TestWeekdayFlag:
     """
 
     @staticmethod
-    def _wrap(monkeypatch: pytest.MonkeyPatch, *, weekday: bool) -> str:
+    def _wrap(*, weekday: bool) -> str:
         from datetime import datetime
 
-        from base.config import settings
-
-        monkeypatch.setattr(settings.general, "message_timestamp_weekday", weekday)
         # UTC 10:30 on a Sunday — the weekday name is Sunday in every zone
         # within +-11h of UTC, so this exercises the %a slot regardless of
         # the configured timezone.
         created = datetime(2026, 6, 21, 10, 30, 0, tzinfo=UTC)
-        return wrap_inbound("hi", "user", created_at=created, inputs=_ENVELOPE_INPUTS)
+        inputs = EnvelopeReadInputs(lambda: _make_clock(weekday=weekday), lambda: True)
+        return wrap_inbound("hi", "user", created_at=created, inputs=inputs)
 
-    def test_weekday_on(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_weekday_on(self) -> None:
         from datetime import datetime
 
         created = datetime(2026, 6, 21, 10, 30, 0, tzinfo=UTC)
-        assert (
-            self._wrap(monkeypatch, weekday=True) == f"[{_local_ts(created, weekday=True)}]\n\nhi"
-        )
+        assert self._wrap(weekday=True) == f"[{_local_ts(created, weekday=True)}]\n\nhi"
 
-    def test_weekday_off(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_weekday_off(self) -> None:
         from datetime import datetime
 
         created = datetime(2026, 6, 21, 10, 30, 0, tzinfo=UTC)
-        assert self._wrap(monkeypatch, weekday=False) == f"[{_local_ts(created)}]\n\nhi"
+        assert self._wrap(weekday=False) == f"[{_local_ts(created)}]\n\nhi"
 
-    def test_no_timezone_suffix_either_way(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_no_timezone_suffix_either_way(self) -> None:
         """No `%Z` in either shape — the timezone is declared once, in the
         standing context note (`agent.graph.prompt.context_notes.timezone_note`),
         not repeated on every stamp. `settings.general.timezone` is
         cluster-pinned, so the suffix was a constant, and an ambiguous one
         (`PDT` vs `PST` for one unchanged setting; `CST` for two zones)."""
         for weekday in (True, False):
-            out = self._wrap(monkeypatch, weekday=weekday)
+            out = self._wrap(weekday=weekday)
             assert "PDT" not in out and "PST" not in out
             assert out.endswith(":00]\n\nhi")
 
-    def test_created_at_and_now_agree(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_created_at_and_now_agree(self) -> None:
         """Both producers render one shape — the docstring claim, enforced.
 
         `now_timestamp` is unmocked here (the autouse freeze is undone) so the
@@ -428,16 +426,16 @@ class TestWeekdayFlag:
         import re
         from datetime import datetime
 
-        from base.config import settings
-
-        monkeypatch.setattr(Clock, "now_timestamp", _REAL_NOW_TIMESTAMP)
         for weekday in (True, False):
-            monkeypatch.setattr(settings.general, "message_timestamp_weekday", weekday)
+            inputs = EnvelopeReadInputs(
+                lambda w=weekday: _make_clock(weekday=w, now=lambda: datetime.now(UTC)),
+                lambda: True,
+            )
             day = r"[A-Z][a-z]{2} " if weekday else ""
             shape = rf"^\[\d{{4}}-\d{{2}}-\d{{2}} {day}\d{{2}}:\d{{2}}:\d{{2}}\]$"
             for out in (
-                wrap_inbound("hi", "user", inputs=_ENVELOPE_INPUTS),
-                wrap_inbound("hi", "user", created_at=datetime.now(UTC), inputs=_ENVELOPE_INPUTS),
+                wrap_inbound("hi", "user", inputs=inputs),
+                wrap_inbound("hi", "user", created_at=datetime.now(UTC), inputs=inputs),
             ):
                 assert re.match(shape, out.split("\n")[0]), out
 

@@ -90,16 +90,21 @@ class LoginRateLimiter:
         max_failures_reader: Callable[[], int],
         lockout_seconds_reader: Callable[[], float],
         config: LoginRateLimitConfig,
+        clock: Callable[[], float] | None = None,
     ) -> None:
         self._max_failures_reader = max_failures_reader
         self._config = config
         self._lockout_seconds_reader = lockout_seconds_reader
+        self._clock = clock
         self._entries: dict[str, Entry] = {}
         self._lock = threading.Lock()
 
+    def _now(self) -> float:
+        return self._clock() if self._clock is not None else time.time()
+
     def lockout_remaining(self, ip: str) -> int:
         """Whole seconds until ``ip``'s lockout expires; 0 when not locked."""
-        now = time.time()
+        now = self._now()
         with self._lock:
             entry = self._entries.get(ip)
             if entry is None or entry.locked_until <= now:
@@ -114,7 +119,7 @@ class LoginRateLimiter:
         ``gateway.login_lockout_seconds`` window) restarts from one — failures
         are only "consecutive" while they keep coming.
         """
-        now = time.time()
+        now = self._now()
         max_failures = self._max_failures_reader()
         lockout_seconds = self._lockout_seconds_reader()
         with self._lock:

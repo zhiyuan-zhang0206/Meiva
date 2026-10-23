@@ -4,6 +4,8 @@ It lives with the impersonation relay because every wake first runs the relay li
 impersonation publishes through it and so does the inbox.
 """
 
+from collections.abc import Callable
+
 from redis.exceptions import ConnectionError as RedisConnectionError
 from redis.exceptions import ResponseError
 from redis.exceptions import TimeoutError as RedisTimeoutError
@@ -106,8 +108,15 @@ def relay_liveness_alert(db: Database, agent_id: int) -> None:
         logger.exception("impersonation relay liveness check failed", agent_id=agent_id)
 
 
-def wake_agent(db: Database, bus: EventBus, agent_id: int, *, roster_changed: bool = False) -> None:
-    publish_inbound_wake(db, bus, agent_id, "impersonation")
+def wake_agent(
+    db: Database,
+    bus: EventBus,
+    agent_id: int,
+    *,
+    roster_changed: bool = False,
+    publish_wake: Callable[[Database, EventBus, int, str], object] = publish_inbound_wake,
+) -> None:
+    publish_wake(db, bus, agent_id, "impersonation")
     publish_impersonation_changed_sync(bus, agent_id)
     if roster_changed:
         publish_agent_updated_sync(bus, agent_id)

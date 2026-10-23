@@ -29,6 +29,7 @@ import contextlib
 import json
 import os
 import time
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
@@ -62,8 +63,9 @@ class EnvBootResult:
 # boot pass reached through a CLI still knows the launcher context (#4334).
 # None when the tree has no launcher context at all — a plain shell or test
 # process — and the projection exemptions stay off.
-def launcher_context() -> str | None:
-    return os.environ.get("MEIVA_PROCESS_PROFILE") or os.environ.get(LAUNCHER_PROFILE_ENV_KEY)
+def launcher_context(env: Mapping[str, str] | None = None) -> str | None:
+    source = os.environ if env is None else env
+    return source.get("MEIVA_PROCESS_PROFILE") or source.get(LAUNCHER_PROFILE_ENV_KEY)
 
 
 # meiva:note
@@ -216,7 +218,7 @@ _TRUTHY = frozenset({"1", "true", "yes", "on"})
 _FALSY = frozenset({"0", "false", "no", "off"})
 
 
-def _serve_flag(env_key: str) -> bool:
+def _serve_flag(env_key: str, *, env: Mapping[str, str] | None = None) -> bool:
     """Settings-free mirror of one capability flag's resolution: env
     `MEIVA_MACHINE_SERVE_*` > `$MEIVA_HOME/.env` > False.
 
@@ -232,9 +234,12 @@ def _serve_flag(env_key: str) -> bool:
     The `.env` read resolves `$MEIVA_HOME` through `base.paths.home.resolve_meiva_home()`: at
     this point in boot the env var may not be pinned yet (see above).
     """
-    raw = os.environ.get(env_key)
+    source = os.environ if env is None else env
+    raw = source.get(env_key)
     if raw is not None and raw.strip():
         return raw.strip().lower() in _TRUTHY
+    if env is not None:
+        return False
     from base.host.env import dotenv_file
 
     raw = dotenv_file.read_env_aliases().get(env_key)
@@ -243,7 +248,7 @@ def _serve_flag(env_key: str) -> bool:
     return False
 
 
-def config_source_is_local() -> bool:
+def config_source_is_local(*, env: Mapping[str, str] | None = None) -> bool:
     """Whether this unit's config source is its own `$MEIVA_HOME/.env`.
 
     Role-derived (MEIVA_CONFIG_SOURCE deleted 2026-08-01): a unit that serves the
@@ -260,7 +265,7 @@ def config_source_is_local() -> bool:
     MEIVA_CONFIG_FETCH=skip (see CONFIG_FETCH_ENV); that is orthogonal to this
     derivation.
     """
-    return _serve_flag("MEIVA_MACHINE_SERVE_GATEWAY")
+    return _serve_flag("MEIVA_MACHINE_SERVE_GATEWAY", env=env)
 
 
 def should_fetch_from_gateway() -> bool:

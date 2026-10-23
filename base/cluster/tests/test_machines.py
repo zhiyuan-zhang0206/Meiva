@@ -24,20 +24,16 @@ from base.config import settings
 from base.db.code_version_gate import ProcessDbGate
 
 
-def test_gateway_url_comes_from_settings(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    monkeypatch.setenv("MEIVA_HOME", str(tmp_path))
+def test_gateway_url_comes_from_settings(tmp_path: Path) -> None:
     (tmp_path / "gateway_url").write_text("http://from-file:8000")
-    monkeypatch.setattr(settings.gateway, "gateway_url", "http://from-env:8000/")
-    assert machines.gateway_url(settings.gateway.gateway_url) == "http://from-env:8000"
-    monkeypatch.setattr(settings.gateway, "gateway_url", "")
+    assert machines.gateway_url("http://from-env:8000/") == "http://from-env:8000"
     with pytest.raises(machines.GatewayUrlMissing):
-        machines.gateway_url(settings.gateway.gateway_url)
+        machines.gateway_url("")
 
 
-def test_gateway_url_raises_when_blank(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(settings.gateway, "gateway_url", "   ")
+def test_gateway_url_raises_when_blank() -> None:
     with pytest.raises(machines.GatewayUrlMissing):
-        machines.gateway_url(settings.gateway.gateway_url)
+        machines.gateway_url("   ")
 
 
 def test_register_self_and_lookup_roundtrip(
@@ -86,7 +82,7 @@ def test_register_self_agent_runner_stores_null(
 
 
 def test_register_self_station_only_composes_row(
-    machine_setup: MachineSetup, monkeypatch: pytest.MonkeyPatch, database_gate: ProcessDbGate
+    machine_setup: MachineSetup, database_gate: ProcessDbGate
 ) -> None:
     machine_setup.machine.set(host="10.0.0.9")
     machine_setup(name="station-a", role="observability-station")
@@ -265,11 +261,14 @@ def test_the_stop_stamp_is_the_first_stop_not_the_latest_recompute(
 
 
 def test_register_self_does_not_fall_back_to_gateway_url_when_url_none(
-    machine_setup: MachineSetup, monkeypatch: pytest.MonkeyPatch, database_gate: ProcessDbGate
+    machine_setup: MachineSetup, database_gate: ProcessDbGate
 ) -> None:
     machine_setup(name="test-no-fallback", role="agent-runner")
-    monkeypatch.setattr(settings.gateway, "gateway_url", "http://should-be-ignored:8000")
-    machine_setup.register(machines_test_db(database_gate=database_gate), url=None)
+    machine_setup.register(
+        machines_test_db(database_gate=database_gate),
+        url=None,
+        gateway="http://should-be-ignored:8000",
+    )
     assert machines.list_all(machines_test_db(database_gate=database_gate)) == [
         ("test-no-fallback", None)
     ]
@@ -608,25 +607,27 @@ def test_colocated_restart_unit_recomposes_union(
 
 
 def test_register_self_rejects_loopback_ops_url_when_gateway_remote(
-    machine_setup: MachineSetup, monkeypatch: pytest.MonkeyPatch, database_gate: ProcessDbGate
+    machine_setup: MachineSetup, database_gate: ProcessDbGate
 ) -> None:
     machine_setup(name="runner-a", role="agent-runner")
-    monkeypatch.setattr(settings.gateway, "gateway_url", "https://gw.example.com:8000")
     with pytest.raises(machines.LoopbackDialUrlRefused):
         machine_setup.register(
-            machines_test_db(database_gate=database_gate), url="http://localhost:8600"
+            machines_test_db(database_gate=database_gate),
+            url="http://localhost:8600",
+            gateway="https://gw.example.com:8000",
         )
     assert machines.list_all(machines_test_db(database_gate=database_gate)) == []
 
 
 def test_register_self_rejects_loopback_station_url_when_gateway_remote(
-    machine_setup: MachineSetup, monkeypatch: pytest.MonkeyPatch, database_gate: ProcessDbGate
+    machine_setup: MachineSetup, database_gate: ProcessDbGate
 ) -> None:
     machine_setup(name="station-a", role="observability-station")
-    monkeypatch.setattr(settings.gateway, "gateway_url", "https://gw.example.com:8000")
     with pytest.raises(machines.LoopbackDialUrlRefused):
         machine_setup.register(
-            machines_test_db(database_gate=database_gate), url="http://localhost:4318"
+            machines_test_db(database_gate=database_gate),
+            url="http://localhost:4318",
+            gateway="https://gw.example.com:8000",
         )
     assert machines.list_all(machines_test_db(database_gate=database_gate)) == []
 
@@ -644,12 +645,13 @@ def test_register_self_allows_loopback_station_url_when_gateway_colocated(
 
 
 def test_register_self_allows_loopback_ops_url_when_gateway_colocated(
-    machine_setup: MachineSetup, monkeypatch: pytest.MonkeyPatch, database_gate: ProcessDbGate
+    machine_setup: MachineSetup, database_gate: ProcessDbGate
 ) -> None:
     machine_setup(name="box", role="agent-runner")
-    monkeypatch.setattr(settings.gateway, "gateway_url", "http://localhost:8000")
     machine_setup.register(
-        machines_test_db(database_gate=database_gate), url="http://localhost:8600"
+        machines_test_db(database_gate=database_gate),
+        url="http://localhost:8600",
+        gateway="http://localhost:8000",
     )
     assert machines.list_all(machines_test_db(database_gate=database_gate)) == [
         ("box", "http://localhost:8600")
@@ -657,12 +659,13 @@ def test_register_self_allows_loopback_ops_url_when_gateway_colocated(
 
 
 def test_register_self_allows_loopback_ops_url_when_also_gateway(
-    machine_setup: MachineSetup, monkeypatch: pytest.MonkeyPatch, database_gate: ProcessDbGate
+    machine_setup: MachineSetup, database_gate: ProcessDbGate
 ) -> None:
     machine_setup(name="single", role="gateway,agent-runner")
-    monkeypatch.setattr(settings.gateway, "gateway_url", "https://gw.example.com:8000")
     machine_setup.register(
-        machines_test_db(database_gate=database_gate), url="http://localhost:8600"
+        machines_test_db(database_gate=database_gate),
+        url="http://localhost:8600",
+        gateway="https://gw.example.com:8000",
     )
     assert machines.list_all(machines_test_db(database_gate=database_gate)) == [
         ("single", "http://localhost:8600")

@@ -3,7 +3,6 @@
 
 [debt.env-patch]
 "test_machine.py#monkeypatch.setenv os.environ.MEIVA_HOME" = 1
-"test_machines.py#monkeypatch.setenv os.environ.MEIVA_HOME" = 1
 "test_native_layout.py#monkeypatch.setenv os.environ.MEIVA_HOME" = 1
 
 [debt.first-party-patch]
@@ -12,7 +11,6 @@
 "test_listener_discovery_failure.py#monkeypatch.setattr base.cluster.port_preflight.os.access" = 1
 "test_listener_discovery_failure.py#monkeypatch.setattr base.cluster.port_preflight.shutil.which" = 1
 "test_listener_discovery_failure.py#monkeypatch.setattr base.host.proc.run_bounded" = 3
-"test_machines.py#monkeypatch.setattr base.config.settings.gateway.gateway_url" = 8
 "test_port_preflight.py#monkeypatch.setattr base.cluster.port_preflight.lsof_argv" = 4
 "test_port_preflight.py#monkeypatch.setattr base.cluster.port_preflight.os.access" = 3
 "test_port_preflight.py#monkeypatch.setattr base.cluster.port_preflight.shutil.which" = 3

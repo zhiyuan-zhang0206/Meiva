@@ -70,24 +70,25 @@ class AntigravityServer:
     csrf_token: str
 
 
-def default_control_socket() -> Path:
+def default_control_socket(*, env: Mapping[str, str] | None = None) -> Path:
     """The local codex daemon's control socket path.
 
     A bare ``--listen unix://`` binds here (verified on codex 0.153.4), and
     ``CODEX_HOME`` overrides ``~/.codex`` exactly as it does for codex itself.
     """
-    home = os.environ.get("CODEX_HOME")
+    source_env = os.environ if env is None else env
+    home = source_env.get("CODEX_HOME")
     base = Path(home).expanduser() if home else Path("~/.codex").expanduser()
     return base / "app-server-control" / "app-server-control.sock"
 
 
-def default_control_endpoint() -> str | None:
+def default_control_endpoint(*, env: Mapping[str, str] | None = None) -> str | None:
     """The local daemon's endpoint once its socket exists, else None.
 
     Resolution does not prove the daemon owns the target thread. The request
     records this endpoint; the relay's first submission must still succeed.
     """
-    socket_path = default_control_socket()
+    socket_path = default_control_socket(env=env)
     return f"unix://{socket_path}" if socket_path.exists() else None
 
 
@@ -109,6 +110,7 @@ def live_submit(
     *,
     endpoint: str,
     timeout: float = LIVE_SUBMIT_TIMEOUT_SECONDS,
+    default_socket: Callable[[], Path] = default_control_socket,
 ) -> str | None:
     """Try to hand one message to a running codex app server, live.
 
@@ -126,7 +128,7 @@ def live_submit(
     deadline = time.monotonic() + timeout
     conn: ClientConnection | None = None
     try:
-        conn = _open(endpoint, deadline)
+        conn = _open(endpoint, deadline, default_socket=default_socket)
         _initialize(conn, deadline)
         response = _request(
             conn,
@@ -384,10 +386,15 @@ def antigravity_live_submit(
         return _clip(f"{type(exc).__name__}: {exc}")
 
 
-def _open(endpoint: str, deadline: float) -> ClientConnection:
+def _open(
+    endpoint: str,
+    deadline: float,
+    *,
+    default_socket: Callable[[], Path] = default_control_socket,
+) -> ClientConnection:
     remaining = _remaining(deadline)
     if endpoint.startswith("unix://"):
-        path = endpoint.removeprefix("unix://") or str(default_control_socket())
+        path = endpoint.removeprefix("unix://") or str(default_socket())
         return unix_connect(
             path=path,
             open_timeout=remaining,

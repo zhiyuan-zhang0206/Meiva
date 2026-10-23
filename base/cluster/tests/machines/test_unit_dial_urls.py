@@ -1,49 +1,42 @@
-import pytest
-
 from base.cluster import machines
 from base.config import settings
 
 
-def test_unit_dial_url_pure_station_is_otlp_ingress(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(settings.gateway, "gateway_url", "")
+def test_unit_dial_url_pure_station_is_otlp_ingress() -> None:
     assert machines.unit_dial_url(
         frozenset({"observability-station"}),
         host="10.0.0.9",
         ops_port=8600,
         gateway_port=settings.gateway.gateway_port,
         telemetry_otlp_port=settings.observability.telemetry_otlp_port,
-        gateway=settings.gateway.gateway_url,
+        gateway="",
     ) == ("http://10.0.0.9:4318")
 
 
-def test_unit_dial_url_gateway_station_is_reachable_host(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(settings.gateway, "gateway_url", "http://gw:8000")
+def test_unit_dial_url_gateway_station_is_reachable_host() -> None:
     assert machines.unit_dial_url(
         frozenset({"gateway", "observability-station"}),
         host="10.0.0.5",
         ops_port=8600,
         gateway_port=settings.gateway.gateway_port,
         telemetry_otlp_port=settings.observability.telemetry_otlp_port,
-        gateway=settings.gateway.gateway_url,
+        gateway="http://gw:8000",
     ) == ("http://10.0.0.5:8000")
 
 
-def test_unit_dial_url_runner_station_is_ops_url(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(settings.gateway, "gateway_url", "http://gw:8000")
+def test_unit_dial_url_runner_station_is_ops_url() -> None:
     url = machines.unit_dial_url(
         frozenset({"agent-runner", "observability-station"}),
         host="10.0.0.5",
         ops_port=8600,
         gateway_port=settings.gateway.gateway_port,
         telemetry_otlp_port=settings.observability.telemetry_otlp_port,
-        gateway=settings.gateway.gateway_url,
+        gateway="http://gw:8000",
     )
     assert url is not None and url.startswith("http://10.0.0.5:")
 
 
-def test_unit_dial_url_single_box_is_loopback_ops(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_unit_dial_url_single_box_is_loopback_ops() -> None:
     assert (
         machines.unit_dial_url(
             frozenset({"gateway", "agent-runner"}),
@@ -57,9 +50,7 @@ def test_unit_dial_url_single_box_is_loopback_ops(monkeypatch: pytest.MonkeyPatc
     )
 
 
-def test_unit_dial_url_gateway_runner_uses_reachable_host(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_unit_dial_url_gateway_runner_uses_reachable_host() -> None:
     assert (
         machines.unit_dial_url(
             frozenset({"gateway", "agent-runner"}),
@@ -73,7 +64,7 @@ def test_unit_dial_url_gateway_runner_uses_reachable_host(
     )
 
 
-def test_unit_dial_url_split_runner_is_reachable_ops(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_unit_dial_url_split_runner_is_reachable_ops() -> None:
     assert (
         machines.unit_dial_url(
             frozenset({"agent-runner"}),
@@ -87,8 +78,7 @@ def test_unit_dial_url_split_runner_is_reachable_ops(monkeypatch: pytest.MonkeyP
     )
 
 
-def test_unit_dial_url_gateway_only_is_reachable_host(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(settings.gateway, "gateway_url", "https://meiva.example:8000")
+def test_unit_dial_url_gateway_only_is_reachable_host() -> None:
     assert (
         machines.unit_dial_url(
             frozenset({"gateway"}),
@@ -96,31 +86,27 @@ def test_unit_dial_url_gateway_only_is_reachable_host(monkeypatch: pytest.Monkey
             ops_port=8600,
             gateway_port=settings.gateway.gateway_port,
             telemetry_otlp_port=settings.observability.telemetry_otlp_port,
-            gateway=settings.gateway.gateway_url,
+            gateway="https://meiva.example:8000",
         )
         == "http://10.0.0.2:8000"
     )
 
 
-def test_unit_dial_url_gateway_only_defaults_port_when_url_unresolvable(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(settings.gateway, "gateway_url", "")
-    monkeypatch.setattr(settings.gateway, "gateway_port", 8000)
+def test_unit_dial_url_gateway_only_defaults_port_when_url_unresolvable() -> None:
     assert (
         machines.unit_dial_url(
             frozenset({"gateway"}),
             host="10.0.0.2",
             ops_port=8600,
-            gateway_port=settings.gateway.gateway_port,
+            gateway_port=8000,
             telemetry_otlp_port=settings.observability.telemetry_otlp_port,
-            gateway=settings.gateway.gateway_url,
+            gateway="",
         )
         == "http://10.0.0.2:8000"
     )
 
 
-def test_unit_dial_url_agrees_across_both_writers(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_unit_dial_url_agrees_across_both_writers() -> None:
     from base.cluster.machine.boot import machine_from_boot
     from base.config.tests.configuration import snapshot_process_config
 

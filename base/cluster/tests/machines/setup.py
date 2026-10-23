@@ -15,6 +15,7 @@ class MachineSetup:
     def __init__(self, machine: MachineIdentity) -> None:
         self.machine = machine
         self.home = "~/.meiva"
+        self.gateway = "http://localhost:8000"
 
     def __call__(self, *, name: str, role: str = "gateway", home: str = "~/.meiva") -> None:
         self.machine.set(name=name, role=role)
@@ -23,7 +24,10 @@ class MachineSetup:
     def set_home(self, home: str) -> None:
         self.home = home
 
-    def register(self, database: Database, url: str | None = None) -> None:
+    def register(
+        self, database: Database, url: str | None = None, *, gateway: str | None = None
+    ) -> None:
+        effective_gateway = self.gateway if gateway is None else gateway
         register_self(
             database,
             url=url,
@@ -31,7 +35,7 @@ class MachineSetup:
             roles=self.machine.role(),
             description=self.machine.description(),
             home=self.home,
-            gateway=settings.gateway.gateway_url.strip() or None,
+            gateway=effective_gateway.strip() or None,
         )
 
 
@@ -49,9 +53,8 @@ def truncate_machines(db_conn: None) -> None:
 
 
 @pytest.fixture
-def machine_setup(monkeypatch: pytest.MonkeyPatch, process_config: ConfigBoot) -> MachineSetup:
+def machine_setup(process_config: ConfigBoot) -> MachineSetup:
     """Provide one explicit registration owner; no process identity slot is changed."""
-    monkeypatch.setattr(settings.gateway, "gateway_url", "http://localhost:8000")
     return MachineSetup(machine_from_boot(process_config))
 
 
