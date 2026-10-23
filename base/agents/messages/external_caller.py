@@ -9,14 +9,16 @@ from __future__ import annotations
 
 import os
 import shlex
+from collections.abc import Mapping
 
 from base.api_contracts.caller_identity import CallerIdentity
 
 
-def external_caller() -> CallerIdentity | None:
+def external_caller(*, env: Mapping[str, str] | None = None) -> CallerIdentity | None:
     """Read a strictly validated explicit external profile, or no opt-in."""
     # env-ok: external subprocess provenance handoff, not cluster configuration
-    raw = os.environ.get("MEIVA_CALLER_IDENTITY")
+    source_env = os.environ if env is None else env
+    raw = source_env.get("MEIVA_CALLER_IDENTITY")
     if raw is None:
         return None
     return CallerIdentity.model_validate_json(raw)

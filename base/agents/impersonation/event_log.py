@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from datetime import datetime
+from pathlib import Path
 from typing import Any, cast
 
 import psycopg
@@ -91,7 +92,8 @@ def refresh_completed_export(conn: psycopg.Connection, lease_id: str) -> None:
     """Rewrite an already delivered hand-off file once its event log completes."""
     lease = lock_lease(conn, lease_id)
     if lease["events_completed_at"] is not None and lease["handoff_path"] is not None:
-        document, _ = export_handoff(lease, conn)
+        workspace = Path(str(lease["handoff_path"])).parents[1]
+        document, _ = export_handoff(lease, conn, workspace=workspace)
         conn.execute(
             "UPDATE agent_impersonations SET handoff_document=%s WHERE id=%s",
             (Jsonb(document), lease_id),

@@ -40,6 +40,7 @@ which lands with it.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -102,7 +103,11 @@ def last_written_hash(name: str) -> str | None:
 
 
 def materialize_skills(
-    conn: psycopg.Connection, *, dest_root: Path, dry_run: bool = False
+    conn: psycopg.Connection,
+    *,
+    dest_root: Path,
+    dry_run: bool = False,
+    last_written: Callable[[str], str | None] = last_written_hash,
 ) -> MaterializeResult:
     """Bring `dest_root` in line with the cluster's enabled `kind='skill'` rows.
 
@@ -120,7 +125,7 @@ def materialize_skills(
         if ext.content_hash is None:  # pragma: no cover — the schema forbids it
             continue
         dest = dest_root / ext.name
-        verdict = _classify(ext.name, ext.content_hash, dest)
+        verdict = _classify(ext.name, ext.content_hash, dest, last_written=last_written)
         if verdict == "unchanged":
             result.unchanged.append(ext.name)
             continue
@@ -149,7 +154,13 @@ def materialize_skills(
     return result
 
 
-def _classify(name: str, row_hash: str, dest: Path) -> str:
+def _classify(
+    name: str,
+    row_hash: str,
+    dest: Path,
+    *,
+    last_written: Callable[[str], str | None] = last_written_hash,
+) -> str:
     """`absent` | `unchanged` | `stale` | `local-edit` for one extension.
 
     Split out so the decision is testable without a filesystem write and
@@ -162,7 +173,7 @@ def _classify(name: str, row_hash: str, dest: Path) -> str:
         return "unchanged"
     # The row and the disk disagree. Only the per-machine record of what WE last
     # wrote can say whether the disk moved or the row did.
-    return "stale" if last_written_hash(name) == local else "local-edit"
+    return "stale" if last_written(name) == local else "local-edit"
 
 
 def _replace_tree(archive: bytes, dest: Path) -> None:

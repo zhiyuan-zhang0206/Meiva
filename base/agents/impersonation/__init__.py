@@ -1,6 +1,7 @@
 """Cooperative same-machine leases; the native agent remains the checkpoint owner."""
 
 import secrets
+from collections.abc import Callable
 from typing import Any
 from uuid import uuid4
 
@@ -221,6 +222,7 @@ def get(
     lease_id: str,
     *,
     local_machine: str,
+    wake: Callable[..., None] = wake_agent,
 ) -> dict[str, Any]:
     with db.write_transaction() as conn:
         lease = lock_lease(conn, lease_id)
@@ -231,7 +233,7 @@ def get(
         was_open = lease["status"] in OPEN
         result = public(expire(conn, lease))
     if was_open and result["status"] == ImpersonationStatus.EXPIRED:
-        wake_agent(db, bus, lease["agent_id"], roster_changed=True)
+        wake(db, bus, lease["agent_id"], roster_changed=True)
     return result
 
 
@@ -523,6 +525,7 @@ def ack(
     message_ids: list[int],
     *,
     local_machine: str,
+    wake: Callable[..., None] = wake_agent,
 ) -> None:
     with db.write_transaction() as conn:
         lease = lock_lease(conn, lease_id)
@@ -568,7 +571,7 @@ def ack(
     # Consuming a page exposes previously hidden pending IDs to the relay.
     # Publish after real progress so its next page does not wait for DB catchup.
     if acknowledged:
-        wake_agent(db, bus, lease["agent_id"])
+        wake(db, bus, lease["agent_id"])
 
 
 def merge_plugin_delta(

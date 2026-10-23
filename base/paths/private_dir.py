@@ -18,17 +18,17 @@ def private_path_error(path: Path, reason: str) -> RuntimeError:
     return RuntimeError(f"private storage path {path} {reason}")
 
 
-def is_foreign_owned(current: os.stat_result) -> bool:
+def is_foreign_owned(current: os.stat_result, *, euid: int | None = None) -> bool:
     """Return whether a path is not owned by this process on POSIX.
 
     chmod honors the owner (uid) alone, not the group — a uid-ours file
     with a foreign gid (chgrp'd leftover) is still repairable, and skipping
     it would strand a 0o644 file as group-readable.
     """
-    return current.st_uid != os.geteuid()
+    return current.st_uid != (os.geteuid() if euid is None else euid)
 
 
-def dir_refusal(current: os.stat_result) -> str | None:
+def dir_refusal(current: os.stat_result, *, euid: int | None = None) -> str | None:
     """Why a private-directory candidate is unusable, or None.
 
     One definition for the three readers of the rule: the writer
@@ -40,24 +40,24 @@ def dir_refusal(current: os.stat_result) -> str | None:
         return "is a symlink"
     if not stat.S_ISDIR(current.st_mode):
         return "is not a directory"
-    if is_foreign_owned(current):
+    if is_foreign_owned(current, euid=euid):
         return "is not owned by the current user"
     return None
 
 
-def ensure_private_dir(path: Path) -> Path:
+def ensure_private_dir(path: Path, *, euid: int | None = None) -> Path:
     """Create `path` if needed, then require an owner-only real directory."""
     try:
         before = path.lstat()
     except FileNotFoundError:
         path.mkdir(parents=True, mode=0o700, exist_ok=True)
     else:
-        refusal = dir_refusal(before)
+        refusal = dir_refusal(before, euid=euid)
         if refusal is not None:
             raise private_path_error(path, refusal)
 
     current = path.lstat()
-    refusal = dir_refusal(current)
+    refusal = dir_refusal(current, euid=euid)
     if refusal is not None:
         raise private_path_error(path, refusal)
     path.chmod(0o700)

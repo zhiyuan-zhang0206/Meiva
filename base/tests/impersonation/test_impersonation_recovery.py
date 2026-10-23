@@ -251,7 +251,6 @@ def test_operator_force_expire_closes_only_observed_session(
     def record_wake(_db: Database, _bus: EventBus, agent_id: int, _reason: str) -> None:
         wakes.append(agent_id)
 
-    monkeypatch.setattr(maintenance, "publish_inbound_wake", record_wake)
     patch_announcements(
         monkeypatch, maintenance, changed=announcements, updated=roster_announcements
     )
@@ -264,6 +263,7 @@ def test_operator_force_expire_closes_only_observed_session(
                 owner.agent_id,
                 lease["session_id"] + 1,
                 "user_session:administrator",
+                publish_wake=record_wake,
             )
             == "not_open"
         )
@@ -275,6 +275,7 @@ def test_operator_force_expire_closes_only_observed_session(
                 owner.agent_id,
                 lease["session_id"],
                 "user_session:administrator",
+                publish_wake=record_wake,
             )
             == "expired"
         )
@@ -286,6 +287,7 @@ def test_operator_force_expire_closes_only_observed_session(
                 owner.agent_id,
                 lease["session_id"],
                 "user_session:administrator",
+                publish_wake=record_wake,
             )
             == "not_open"
         )

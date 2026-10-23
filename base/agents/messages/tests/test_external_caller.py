@@ -5,18 +5,19 @@ import pytest
 from base.agents.messages.external_caller import external_caller, launch_caller_assignment
 
 
-def test_absence_stays_absent_not_human(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("MEIVA_CALLER_IDENTITY", raising=False)
-    assert external_caller() is None
+def test_absence_stays_absent_not_human() -> None:
+    assert external_caller(env={}) is None
 
 
-def test_explicit_profile_is_read_as_the_external_agent(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv(
-        "MEIVA_CALLER_IDENTITY",
-        json.dumps({"kind": "external_agent", "subject": "codex", "instance": "run-42"}),
+def test_explicit_profile_is_read_as_the_external_agent() -> None:
+    caller = external_caller(
+        env={
+            "MEIVA_CALLER_IDENTITY": json.dumps(
+                {"kind": "external_agent", "subject": "codex", "instance": "run-42"}
+            ),
+            "MEIVA_AGENT_ID": "405",
+        }
     )
-    monkeypatch.setenv("MEIVA_AGENT_ID", "405")
-    caller = external_caller()
     assert caller is not None
     assert caller.source() == "external_agent:codex:run-42"
 
@@ -32,12 +33,9 @@ def test_explicit_profile_is_read_as_the_external_agent(monkeypatch: pytest.Monk
         '{"kind":"external_agent","subject":"codex","scopes":["kill"]}',
     ],
 )
-def test_invalid_profile_fails_without_fallback(
-    monkeypatch: pytest.MonkeyPatch, profile: str
-) -> None:
-    monkeypatch.setenv("MEIVA_CALLER_IDENTITY", profile)
+def test_invalid_profile_fails_without_fallback(profile: str) -> None:
     with pytest.raises(ValueError):
-        external_caller()
+        external_caller(env={"MEIVA_CALLER_IDENTITY": profile})
 
 
 @pytest.mark.parametrize("tool", ["codex", "claude_code"])

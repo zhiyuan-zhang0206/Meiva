@@ -47,6 +47,7 @@ def send_ended_notice(
     resolve_antigravity: Callable[..., AntigravityServer] = (
         host_transport.resolve_antigravity_endpoint
     ),
+    submit_codex: Callable[..., str | None] = host_transport.live_submit,
 ) -> str | None:
     """Submit the ended lease's notice to its recorded Codex or Antigravity thread, once.
 
@@ -82,7 +83,7 @@ def send_ended_notice(
         or not endpoint.startswith(("unix://", "ws://", "wss://"))
     ):
         return "the recorded Codex destination is not deliverable"
-    return host_transport.live_submit(thread_id, notice_text(snapshot), endpoint=endpoint)
+    return submit_codex(thread_id, notice_text(snapshot), endpoint=endpoint)
 
 
 # meiva:note

@@ -13,7 +13,7 @@ invalid capability tokens retain their explicit errors. Gateway URL and bearer
 helpers validate the existing client credential policy independently of identity.
 """
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 
 from base.cluster.machine.identity import (
@@ -108,7 +108,7 @@ class GatewayAccess:
 _TOKEN_ONLY_PROFILES = frozenset({"agent", "runner"})
 
 
-def gateway_bearer(access: GatewayAccess) -> str:
+def gateway_bearer(access: GatewayAccess, *, env: Mapping[str, str] | None = None) -> str:
     """The bearer this process presents to the gateway API.
 
     The machine API token of the active write generation first: delivered by
@@ -127,10 +127,10 @@ def gateway_bearer(access: GatewayAccess) -> str:
             human secret (the API always authenticates).
     """
     return resolve_gateway_bearer(
-        token_reader=delivered_token,
+        token_reader=lambda: delivered_token(env),
         secret_reader=lambda: access.cluster_secret,
-        profile_reader=launcher_context,
-        no_tokens_reader=lambda: _plane_delivers_no_tokens(access),
+        profile_reader=lambda: launcher_context(env),
+        no_tokens_reader=lambda: _plane_delivers_no_tokens(access, env=env),
     )
 
 
@@ -165,7 +165,9 @@ def resolve_gateway_bearer(
     return secret
 
 
-def _plane_delivers_no_tokens(access: GatewayAccess) -> bool:
+def _plane_delivers_no_tokens(
+    access: GatewayAccess, *, env: Mapping[str, str] | None = None
+) -> bool:
     """Whether this unit is a gateway home on a remote-managed data plane.
 
     The one case where `api_delivery` hands out no token although the API is
@@ -173,7 +175,7 @@ def _plane_delivers_no_tokens(access: GatewayAccess) -> bool:
     """
     from base.host.env.bootstrap import config_source_is_local
 
-    return config_source_is_local() and access.remote_plane
+    return config_source_is_local(env=env) and access.remote_plane
 
 
 def daemon_acceptance(access: GatewayAccess) -> frozenset[str]:
@@ -210,7 +212,9 @@ def daemon_acceptance(access: GatewayAccess) -> frozenset[str]:
     return frozenset(acceptance(home).values())
 
 
-def gateway_auth_headers(access: GatewayAccess) -> dict[str, str]:
+def gateway_auth_headers(
+    access: GatewayAccess, *, env: Mapping[str, str] | None = None
+) -> dict[str, str]:
     """Auth headers a client presents to the cluster's authenticated surfaces.
 
     The Bearer paired with `gateway_api_base(access.gateway_url)` for every client-side call to an
@@ -221,4 +225,4 @@ def gateway_auth_headers(access: GatewayAccess) -> dict[str, str]:
     Raises:
         GatewayApiTokenMissing: see `gateway_bearer`.
     """
-    return bearer_header(gateway_bearer(access))
+    return bearer_header(gateway_bearer(access, env=env))

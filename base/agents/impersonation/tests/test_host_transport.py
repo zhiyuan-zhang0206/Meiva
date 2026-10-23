@@ -233,19 +233,17 @@ def test_live_submit_reports_an_unsupported_endpoint() -> None:
     assert "unsupported" in reason
 
 
-def test_default_control_endpoint_follows_codex_home(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setenv("CODEX_HOME", str(tmp_path))
-    assert codex_app_server.default_control_endpoint() is None
+def test_default_control_endpoint_follows_codex_home(tmp_path: Path) -> None:
+    env = {"CODEX_HOME": str(tmp_path)}
+    assert codex_app_server.default_control_endpoint(env=env) is None
     sock = tmp_path / "app-server-control" / "app-server-control.sock"
     sock.parent.mkdir(parents=True)
     sock.touch()
-    assert codex_app_server.default_control_endpoint() == f"unix://{sock}"
+    assert codex_app_server.default_control_endpoint(env=env) == f"unix://{sock}"
 
 
 def test_live_submit_treats_a_bare_unix_endpoint_as_the_default_socket(
-    short_socket: Path, monkeypatch: pytest.MonkeyPatch
+    short_socket: Path,
 ) -> None:
     """A bare ``unix://`` resolves through ``default_control_socket()``.
 
@@ -257,11 +255,16 @@ def test_live_submit_treats_a_bare_unix_endpoint_as_the_default_socket(
     def short_default_socket() -> Path:
         return short_socket
 
-    monkeypatch.setattr(codex_app_server, "default_control_socket", short_default_socket)
     server = FakeAppServer()
     server.start(short_socket)
     try:
-        reason = codex_app_server.live_submit(str(THREAD_ID), "hi", endpoint="unix://", timeout=3.0)
+        reason = codex_app_server.live_submit(
+            str(THREAD_ID),
+            "hi",
+            endpoint="unix://",
+            timeout=3.0,
+            default_socket=short_default_socket,
+        )
     finally:
         server.stop()
     assert reason is None

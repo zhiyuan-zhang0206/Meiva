@@ -402,7 +402,6 @@ def test_a_capture_failure_keeps_the_lease_pending_for_good(
     db_conn: psycopg.Connection[Any],
     owner: RuntimeIncarnation,
     lease: dict[str, Any],
-    monkeypatch: pytest.MonkeyPatch,
     database: Database,
     event_bus: EventBus,
     loguru_records: list[dict[str, Any]],
@@ -411,7 +410,11 @@ def test_a_capture_failure_keeps_the_lease_pending_for_good(
     machine_identity: MachineIdentity,
 ) -> None:
     local_machine = machine_identity.name()
-    monkeypatch.setattr(event_log, "MAX_LOG_ENTRIES", 1)
+    db_conn.execute(
+        "UPDATE agent_impersonations SET next_entry=%s WHERE id=%s",
+        (event_log.MAX_LOG_ENTRIES, lease["id"]),
+    )
+    db_conn.commit()
     participant = _participant(owner, lease, "capped", database_gate=database_gate)
     with pytest.raises(RuntimeError, match="entry cap"):
         _capture(participant, [_sdk_event(owner.agent_id, "over-cap")])
@@ -532,7 +535,6 @@ def test_a_late_seal_rewrites_the_already_delivered_handoff_file(
     db_conn: psycopg.Connection[Any],
     owner: RuntimeIncarnation,
     lease: dict[str, Any],
-    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     database: Database,
     database_gate: ProcessDbGate,
@@ -542,14 +544,10 @@ def test_a_late_seal_rewrites_the_already_delivered_handoff_file(
     local_machine = machine_identity.name()
     from psycopg.types.json import Jsonb
 
-    def workspace_for_agent(_agent_id: int) -> Path:
-        return tmp_path
-
-    monkeypatch.setattr(history, "workspace_dir", workspace_for_agent)
     participant = _participant(owner, lease, "late-export", database_gate=database_gate)
     _expire(db_conn, lease, database_gate=database_gate, local_machine=local_machine)
     ended = history.resolve(database, owner.agent_id, 0, local_machine=local_machine)
-    document, path = history.export_handoff(ended, db_conn)
+    document, path = history.export_handoff(ended, db_conn, workspace=tmp_path)
     assert document["statistics"]["event_delivery"]["state"] == "pending"
     db_conn.execute(
         "UPDATE agent_impersonations SET handoff_document=%s,handoff_path=%s,"

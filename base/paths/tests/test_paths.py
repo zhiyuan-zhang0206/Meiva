@@ -2,53 +2,43 @@
 
 from pathlib import Path
 
-import pytest
-
 from base import paths
 from base.paths.home import default_home, is_default_home, is_prod_install
 
 
-@pytest.fixture(autouse=True)
-def _isolate_meiva_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    """Each test points MEIVA_HOME at tmp_path to avoid polluting ~/.meiva."""
-    monkeypatch.setenv("MEIVA_HOME", str(tmp_path / "meiva"))
+def test_meiva_home_reads_settings(unit_home: Path):
+    assert paths.meiva_home() == unit_home
 
 
-def test_meiva_home_reads_settings(tmp_path: Path):
-    assert paths.meiva_home() == tmp_path / "meiva"
-
-
-def test_meiva_home_auto_mkdirs(tmp_path: Path):
-    target = tmp_path / "meiva"
-    assert not target.exists()
+def test_meiva_home_auto_mkdirs(unit_home: Path):
+    unit_home.rmdir()
+    assert not unit_home.exists()
     paths.meiva_home()
-    assert target.is_dir()
+    assert unit_home.is_dir()
 
 
-def test_meiva_home_repairs_owner_only_mode(tmp_path: Path):
+def test_meiva_home_repairs_owner_only_mode(unit_home: Path):
     """The unit root cannot retain permissions inherited from a lax umask."""
-    target = tmp_path / "meiva"
-    target.mkdir()
-    target.chmod(0o755)
+    unit_home.chmod(0o755)
 
-    assert paths.meiva_home() == target
-    assert target.stat().st_mode & 0o777 == 0o700
+    assert paths.meiva_home() == unit_home
+    assert unit_home.stat().st_mode & 0o777 == 0o700
 
 
-def test_plugins_dir_under_meiva_home(tmp_path: Path):
-    assert paths.plugins_dir() == tmp_path / "meiva" / "plugins"
+def test_plugins_dir_under_meiva_home(unit_home: Path):
+    assert paths.plugins_dir() == unit_home / "plugins"
 
 
-def test_plugins_dir_auto_mkdirs(tmp_path: Path):
-    target = tmp_path / "meiva" / "plugins"
+def test_plugins_dir_auto_mkdirs(unit_home: Path):
+    target = unit_home / "plugins"
     assert not target.exists()
     paths.plugins_dir()
     assert target.is_dir()
 
 
-def test_workspace_paths_derive_from_the_workspaces_root(tmp_path: Path):
+def test_workspace_paths_derive_from_the_workspaces_root(unit_home: Path):
     root = paths.workspaces_root()
-    assert root == tmp_path / "meiva" / "workspaces"
+    assert root == unit_home / "workspaces"
     assert paths.workspace_dir_readonly(7) == root / "7"
     assert paths.workspace_dir(7) == root / "7"
 

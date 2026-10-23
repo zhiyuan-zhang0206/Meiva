@@ -24,19 +24,18 @@ def test_private_dir_rejects_symlink(tmp_path: Path) -> None:
     assert not destination.exists()
 
 
-def test_private_dir_rejects_foreign_owner(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_private_dir_rejects_foreign_owner(tmp_path: Path) -> None:
     target = tmp_path / "private"
     target.mkdir()
     owner = os.geteuid()
-    monkeypatch.setattr(private_dir.os, "geteuid", lambda: owner + 1)
 
     with pytest.raises(
         RuntimeError, match=rf"{re.escape(str(target))}.*not owned by the current user"
     ):
-        private_dir.ensure_private_dir(target)
+        private_dir.ensure_private_dir(target, euid=owner + 1)
 
 
-def test_is_foreign_owned_is_uid_only(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_is_foreign_owned_is_uid_only() -> None:
     def _stat(uid: int, gid: int) -> os.stat_result:
         return os.stat_result((0o100644, 0, 0, 1, uid, gid, 0, 0, 0, 0))
 

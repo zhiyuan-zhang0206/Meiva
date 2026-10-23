@@ -1,7 +1,0 @@
-[debt.env-patch]
-"test_gateway_bearer.py#monkeypatch.delenv os.environ" = 1
-"test_gateway_bearer.py#monkeypatch.setenv os.environ" = 1
-
-[debt.first-party-patch]
-"test_gateway_bearer.py#monkeypatch.setattr base.host.env.bootstrap.config_source_is_local" = 1
-"test_rate_limit_trim.py#monkeypatch.setattr base.cluster.rate_limit.time.time" = 2

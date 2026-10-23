@@ -4,7 +4,6 @@ from collections.abc import Callable
 from pathlib import Path
 
 import psycopg
-import pytest
 
 from base.packages.extensions import materialize as mat
 from base.packages.extensions import registry as reg
@@ -61,46 +60,45 @@ class TestTheThreeVerdicts:
         assert second.updated == []
 
     def test_a_moved_row_updates_an_untouched_copy(
-        self, db_conn: psycopg.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+        self, db_conn: psycopg.Connection, tmp_path: Path
     ) -> None:
         dest_root = tmp_path / "skills"
         with db_conn.transaction(force_rollback=True):
             v1 = _register(db_conn, "alpha", _tree(tmp_path / "v1", {"SKILL.md": "one"}))
             mat.materialize_skills(db_conn, dest_root=dest_root)
-            monkeypatch.setattr(mat, "last_written_hash", _returns(v1))
 
             _register(db_conn, "alpha", _tree(tmp_path / "v2", {"SKILL.md": "two"}))
-            result = mat.materialize_skills(db_conn, dest_root=dest_root)
+            result = mat.materialize_skills(db_conn, dest_root=dest_root, last_written=_returns(v1))
 
         assert result.updated == ["alpha"]
         assert (dest_root / "alpha" / "SKILL.md").read_text() == "two"
 
     def test_a_local_edit_is_never_overwritten(
-        self, db_conn: psycopg.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+        self, db_conn: psycopg.Connection, tmp_path: Path
     ) -> None:
         dest_root = tmp_path / "skills"
         with db_conn.transaction(force_rollback=True):
             v1 = _register(db_conn, "alpha", _tree(tmp_path / "v1", {"SKILL.md": "one"}))
             mat.materialize_skills(db_conn, dest_root=dest_root)
-            monkeypatch.setattr(mat, "last_written_hash", _returns(v1))
 
             (dest_root / "alpha" / "SKILL.md").write_text("MY EDIT")
             _register(db_conn, "alpha", _tree(tmp_path / "v2", {"SKILL.md": "two"}))
-            result = mat.materialize_skills(db_conn, dest_root=dest_root)
+            result = mat.materialize_skills(db_conn, dest_root=dest_root, last_written=_returns(v1))
 
         assert result.kept_local_edits == ["alpha"]
         assert result.updated == []
         assert (dest_root / "alpha" / "SKILL.md").read_text() == "MY EDIT"
 
     def test_an_untracked_local_copy_is_treated_as_edited(
-        self, db_conn: psycopg.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+        self, db_conn: psycopg.Connection, tmp_path: Path
     ) -> None:
         dest_root = tmp_path / "skills"
         _tree(dest_root / "alpha", {"SKILL.md": "pre-existing, provenance unknown"})
-        monkeypatch.setattr(mat, "last_written_hash", _returns(None))
         with db_conn.transaction(force_rollback=True):
             _register(db_conn, "alpha", _tree(tmp_path / "v1", {"SKILL.md": "cluster version"}))
-            result = mat.materialize_skills(db_conn, dest_root=dest_root)
+            result = mat.materialize_skills(
+                db_conn, dest_root=dest_root, last_written=_returns(None)
+            )
         assert result.kept_local_edits == ["alpha"]
         assert (dest_root / "alpha" / "SKILL.md").read_text() == "pre-existing, provenance unknown"
 
@@ -182,15 +180,14 @@ class TestFailureStates:
         assert not (dest_root / "alpha").exists()
 
     def test_replacing_leaves_no_staging_directories_behind(
-        self, db_conn: psycopg.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+        self, db_conn: psycopg.Connection, tmp_path: Path
     ) -> None:
         dest_root = tmp_path / "skills"
         with db_conn.transaction(force_rollback=True):
             v1 = _register(db_conn, "alpha", _tree(tmp_path / "v1", {"SKILL.md": "one"}))
             mat.materialize_skills(db_conn, dest_root=dest_root)
-            monkeypatch.setattr(mat, "last_written_hash", _returns(v1))
             _register(db_conn, "alpha", _tree(tmp_path / "v2", {"SKILL.md": "two"}))
-            mat.materialize_skills(db_conn, dest_root=dest_root)
+            mat.materialize_skills(db_conn, dest_root=dest_root, last_written=_returns(v1))
 
         assert sorted(p.name for p in dest_root.iterdir()) == ["alpha"]
 
