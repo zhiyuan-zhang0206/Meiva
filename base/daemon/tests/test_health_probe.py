@@ -7,17 +7,17 @@ import asyncio
 import json
 import logging
 import os
-import urllib.error
-import urllib.request
+import socket
 from pathlib import Path
 
 import pytest
 
-from base.config import get_field
+from base.config import ConfigBoot, get_field
 from base.daemon import health
 from base.daemon.health_schema import DEGRADED, component
 from base.daemon.tests._health_helpers import find_free_port, http_get, probe_url
 from base.daemon.tests.health_support import unknown_image
+from base.daemon.tests.probe_resources import commit_source, json_response, wire_response
 from base.host.env.health_ports import health_port
 from base.native_process import loaded_commit
 from base.paths import meiva_home
@@ -31,7 +31,7 @@ from base.paths import meiva_home
 # element of the identity at a time.
 
 
-async def _probe(name: str, port: int, pidfile: Path, **kw: object) -> health.DaemonProbe:
+async def _probe(name: str, port: int, pidfile: Path) -> health.DaemonProbe:
     """Run the (blocking) probe off the event loop.
 
     `probe_daemon` is sync by design — its callers are cron-invoked healthchecks
@@ -43,7 +43,6 @@ async def _probe(name: str, port: int, pidfile: Path, **kw: object) -> health.Da
         name,
         probe_url(port),
         pidfile=pidfile,
-        **kw,  # type: ignore[arg-type]
     )
 
 
@@ -60,33 +59,24 @@ async def test_healthz_body_carries_home(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_healthz_body_carries_the_daemons_own_commit(monkeypatch: pytest.MonkeyPatch) -> None:
-    """`sha` is answered by the daemon process itself, so a plain curl tells a
-    daemon still holding pre-rollout code from one that restarted onto it — the
-    per-daemon view the machine-level roster row cannot give (it speaks only for
-    whichever process answers the status probe)."""
-    image = loaded_commit.LoadedCommit(Path.cwd(), "c0ffee1234")
+async def test_healthz_body_carries_the_daemons_own_commit(tmp_path: Path) -> None:
+    sha = commit_source(tmp_path, "loaded image")
+    image = loaded_commit.LoadedCommit.capture(tmp_path)
     port = find_free_port()
     server = await health.start_health_server("agent_host", port=port, image=image)
     try:
         _status, body = await http_get(port, "/healthz")
-        assert json.loads(body)["sha"] == "c0ffee1234"
-
-        def later_capture(_root: Path) -> str:
-            return "checkout-advanced"
-
-        monkeypatch.setattr(loaded_commit, "capture_commit", later_capture)
+        assert json.loads(body)["sha"] == sha
+        assert commit_source(tmp_path, "checkout advanced") != sha
         status, body = await http_get(port, "/healthz")
         assert status == 200
-        assert json.loads(body)["sha"] == "c0ffee1234"
+        assert json.loads(body)["sha"] == sha
     finally:
         await health.stop_health_server(server)
 
 
 @pytest.mark.asyncio
-async def test_healthz_reports_an_unfrozen_process_as_unknown(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+async def test_healthz_reports_an_unfrozen_process_as_unknown() -> None:
     """A daemon that froze no commit says so rather than omitting the key — an
     absent field reads to a probe as an old daemon that predates this payload,
     a null reads as "this process cannot vouch for its code"."""
@@ -103,21 +93,13 @@ async def test_healthz_reports_an_unfrozen_process_as_unknown(
 @pytest.mark.asyncio
 @pytest.mark.parametrize("sha", ["c0ffee1234", None])
 async def test_healthz_retains_explicit_loaded_image_after_source_changes(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, sha: str | None
+    tmp_path: Path, sha: str | None
 ) -> None:
     """A bound server reports its captured image, including an honest unknown."""
 
-    def initial_capture(source_root: Path) -> str | None:
-        assert source_root == tmp_path
-        return sha
-
-    monkeypatch.setattr(loaded_commit, "capture_commit", initial_capture)
+    sha = commit_source(tmp_path, "captured image") if sha is not None else None
     image = loaded_commit.LoadedCommit.capture(tmp_path)
-
-    def unexpected_capture(_root: Path) -> str | None:
-        raise AssertionError("health requests must not reread the checkout")
-
-    monkeypatch.setattr(loaded_commit, "capture_commit", unexpected_capture)
+    assert commit_source(tmp_path, "replacement image") != sha
     port = find_free_port()
     pidfile = tmp_path / "agent_host.pid"
     pidfile.write_text(str(os.getpid()))
@@ -141,9 +123,7 @@ async def test_healthz_retains_explicit_loaded_image_after_source_changes(
 
 
 @pytest.mark.asyncio
-async def test_probe_reports_the_commit_without_judging_it(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+async def test_probe_reports_the_commit_without_judging_it(tmp_path: Path) -> None:
     """The commit rides in the detail, never in the verdict.
 
     A daemon on stale code is alive. Failing the probe on a commit mismatch
@@ -240,34 +220,16 @@ async def test_an_unavailable_listener_lookup_leaves_the_detail_usable(tmp_path:
         await health.stop_health_server(server)
 
 
-@pytest.mark.asyncio
-async def test_probe_rejects_daemon_from_another_home(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """A daemon of another UNIT (different `$MEIVA_HOME`) holding our port is not
-    our daemon, even with a matching name and a pid we would accept.
-
-    Verdict PORT_TAKEN — terminal. This is the shared-loopback case: the foreign daemon
-    runs under its own home's socket, so no respawn this unit can
-    perform frees the port, and the 2026-07-29 loop respawned into that wall every
-    60s for hours. The two units there were in the SAME cluster (#977), which is
-    why the detail must say unit — and why the sentence is asserted here, on the
-    string the probe really emits, rather than only where a stub fabricates it."""
-    port = find_free_port()
+def test_probe_rejects_daemon_from_another_home(tmp_path: Path) -> None:
     pidfile = tmp_path / "agent_host.pid"
     pidfile.write_text(str(os.getpid()))
-    server = await health.start_health_server("agent_host", port=port, image=unknown_image())
-    try:
-        # The server answered with the real home; make the PROBE side believe it
-        # belongs to a different unit — the same asymmetry a foreign daemon has.
-        monkeypatch.setattr(health, "meiva_home", lambda: tmp_path / "other-home")
-        probe = await _probe("agent_host", port, pidfile)
-        assert probe.verdict is health.ProbeVerdict.PORT_TAKEN
-        assert probe.terminal is True
-        assert "home=" in probe.detail
-        assert "another unit's daemon holds this port" in probe.detail
-    finally:
-        await health.stop_health_server(server)
+    payload = {"name": "agent_host", "pid": os.getpid(), "home": str(tmp_path / "other-home")}
+    with wire_response(json_response(payload)) as url:
+        probe = health.probe_daemon("agent_host", url, pidfile=pidfile)
+    assert probe.verdict is health.ProbeVerdict.PORT_TAKEN
+    assert probe.terminal is True
+    assert "home=" in probe.detail
+    assert "another unit's daemon holds this port" in probe.detail
 
 
 @pytest.mark.asyncio
@@ -380,15 +342,11 @@ async def test_probe_includes_degraded_component_reasons(tmp_path: Path) -> None
         await health.stop_health_server(server)
 
 
-def test_health_port_env_override(monkeypatch: pytest.MonkeyPatch) -> None:
-    # Settings is a one-shot BaseSettings loaded at module import; monkeypatch.setenv
-    # cannot change the already-imported settings.services.agent_host_health_port — use
-    # monkeypatch.setattr directly on the Settings instance field, consistent with other
-    # tests that migrated to Settings (see meiva/tests/namespaces/web/test_web.py, test_vision.py for the same pattern).
-    from base.config import settings
-
-    monkeypatch.setattr(settings.services, "agent_host_health_port", 9999)
-    assert health_port("agent_host", read_field=get_field) == 9999
+def test_health_port_env_override() -> None:
+    config = ConfigBoot()
+    config.read_process_environment()
+    config.view.services.agent_host_health_port = 9999
+    assert health_port("agent_host", read_field=config.get_field) == 9999
 
 
 def test_health_port_unknown_raises_key_error() -> None:
@@ -408,72 +366,43 @@ def test_health_port_unknown_raises_key_error() -> None:
 
 
 def test_probe_daemon_survives_an_http_exception(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """`http.client.HTTPException` is NOT an OSError, so the inner probe's narrow
-    catch misses it — a malformed status line or truncated body from whatever
-    holds the port reaches the wrapper."""
-    import http.client
-
-    def _boom(*_a: object, **_k: object) -> None:
-        raise http.client.BadStatusLine("garbage on the wire")
-
-    monkeypatch.setattr(health.urllib.request, "urlopen", _boom)
     pidfile = tmp_path / "agent_host.pid"
     pidfile.write_text(str(os.getpid()))
-    with caplog.at_level(logging.ERROR, logger="base.daemon.health"):
-        probe = health.probe_daemon("agent_host", probe_url(9), pidfile=pidfile)
+    with (
+        wire_response(b"garbage on the wire\r\n") as url,
+        caplog.at_level(logging.ERROR, logger="base.daemon.health"),
+    ):
+        probe = health.probe_daemon("agent_host", url, pidfile=pidfile)
     assert probe.alive is False
     assert "BadStatusLine" in probe.detail
     assert any("raised unexpectedly" in r.getMessage() for r in caplog.records)
 
 
-def test_probe_daemon_survives_a_pidfile_oserror(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """`_recorded_pid` catches FileNotFoundError/ValueError but runs OUTSIDE the
-    inner probe's try — a PermissionError or IsADirectoryError on the pidfile
-    would have escaped."""
-    monkeypatch.setattr(
-        health,
-        "probe_daemon_identity",
-        lambda *_a, **_k: (_ for _ in ()).throw(PermissionError("pidfile unreadable")),  # pyright: ignore[reportUnknownArgumentType]
-    )
-    probe = health.probe_daemon("agent_host", probe_url(9), pidfile=tmp_path / "x.pid")
+def test_probe_daemon_survives_a_pidfile_oserror(tmp_path: Path) -> None:
+    pidfile = tmp_path / "x.pid"
+    pidfile.mkdir()
+    payload = {"name": "agent_host", "home": str(meiva_home()), "pid": os.getpid()}
+    with wire_response(json_response(payload)) as url:
+        probe = health.probe_daemon("agent_host", url, pidfile=pidfile)
     assert probe.alive is False
-    assert "PermissionError" in probe.detail
+    assert "IsADirectoryError" in probe.detail
 
 
-def test_probe_daemon_verdict_is_down_never_up_on_failure(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """The wrapper must fail CLOSED. Reporting alive on an unreadable probe would
-    make the watchdog skip a genuinely dead daemon forever.
-
-    It reports DOWN, never terminal: an unforeseen probe failure is not evidence
-    that a foreign process holds the port, and calling it terminal would stop the
-    revival of a daemon a respawn could have saved."""
-    monkeypatch.setattr(
-        health,
-        "probe_daemon_identity",
-        lambda *_a, **_k: (_ for _ in ()).throw(RuntimeError("nobody predicted this")),  # pyright: ignore[reportUnknownArgumentType]
-    )
-    probe = health.probe_daemon("labeler", probe_url(9), pidfile=tmp_path / "x.pid")
+def test_probe_daemon_verdict_is_down_never_up_on_failure(tmp_path: Path) -> None:
+    with wire_response(b"garbage on the wire\r\n") as url:
+        probe = health.probe_daemon("labeler", url, pidfile=tmp_path / "x.pid")
     assert probe.verdict is health.ProbeVerdict.DOWN
     assert probe.terminal is False
 
 
-def test_probe_daemon_passes_through_a_normal_verdict(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """The wrapper is transparent when the probe answers — it adds a floor, not a
-    behaviour change."""
-    monkeypatch.setattr(
-        health,
-        "probe_daemon_identity",
-        lambda *_a, **_k: health.DaemonProbe.up("pid 42"),  # pyright: ignore[reportUnknownArgumentType]
-    )
-    probe = health.probe_daemon("ops", probe_url(9), pidfile=tmp_path / "x.pid")
+def test_probe_daemon_passes_through_a_normal_verdict(tmp_path: Path) -> None:
+    pidfile = tmp_path / "x.pid"
+    pidfile.write_text("42")
+    payload = {"name": "ops", "home": str(meiva_home()), "pid": 42}
+    with wire_response(json_response(payload)) as url:
+        probe = health.probe_daemon("ops", url, pidfile=pidfile)
     assert probe.alive is True
     assert probe.detail == "pid 42"
 
@@ -490,113 +419,54 @@ def test_probe_daemon_passes_through_a_normal_verdict(
 # different things about the same port.
 
 
-class _Resp:
-    def __init__(self, status: int, body: bytes) -> None:
-        self.status = status
-        self._body = body
-
-    def read(self, _n: int = -1) -> bytes:
-        return self._body
-
-    def __enter__(self) -> _Resp:
-        return self
-
-    def __exit__(self, *_a: object) -> None:
-        return None
-
-
-def _answer(monkeypatch: pytest.MonkeyPatch, status: int, body: bytes) -> None:
-    monkeypatch.setattr(urllib.request, "urlopen", lambda _url, **_kw: _Resp(status, body))  # pyright: ignore[reportUnknownArgumentType]
-
-
-def test_probe_home_alive_when_home_matches(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Also the rollout-tolerance pin: this body is what a gateway that predates
-    the `name` field answers with, and during a rolling upgrade a runner on new
-    code probes exactly such a gateway. A `name` mismatch is PORT_TAKEN, which is
-    terminal, so the moment this stops reading ALIVE every not-yet-updated
-    gateway in the fleet is terminal-failed by its own watchdog."""
-    _answer(monkeypatch, 200, json.dumps({"status": "ok", "home": str(meiva_home())}).encode())
-    probe = health.probe_home("http://127.0.0.1:9/api/health")
+def test_probe_home_alive_when_home_matches() -> None:
+    with wire_response(json_response({"status": "ok", "home": str(meiva_home())})) as url:
+        probe = health.probe_home(url)
     assert probe.verdict is health.ProbeVerdict.ALIVE
 
 
-def test_probe_home_alive_on_a_payload_carrying_name(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The other half of the same window: an updated gateway's body, read by a
-    probe that does not yet know the field. The extra key must be inert — the
-    expand half of expand-contract is only safe if old readers ignore it."""
-    _answer(
-        monkeypatch,
-        200,
-        json.dumps({"status": "ok", "name": "gateway", "home": str(meiva_home())}).encode(),
-    )
-    probe = health.probe_home("http://127.0.0.1:9/api/health")
+def test_probe_home_alive_on_a_payload_carrying_name() -> None:
+    payload = {"status": "ok", "name": "gateway", "home": str(meiva_home())}
+    with wire_response(json_response(payload)) as url:
+        probe = health.probe_home(url)
     assert probe.verdict is health.ProbeVerdict.ALIVE
 
 
-def test_probe_home_rejects_another_units_home(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The impostor case, and it is TERMINAL: this unit cannot kill a session on
-    another UNIT's socket — the socket lives under `$MEIVA_HOME`, so a foreign
-    unit is exactly as unkillable as a foreign cluster — and respawning into the
-    bound port is a loop.
-
-    The emitted sentence is pinned here, not just the home it names: `home` is the
-    unit identity, and calling it a cluster is what sent #977's first diagnosis
-    hunting an allocation bug that did not exist."""
-    _answer(monkeypatch, 200, json.dumps({"home": "/home/meiva/.meiva"}).encode())
-    probe = health.probe_home("http://127.0.0.1:9/api/health")
+def test_probe_home_rejects_another_units_home() -> None:
+    with wire_response(json_response({"home": "/home/meiva/.meiva"})) as url:
+        probe = health.probe_home(url)
     assert probe.verdict is health.ProbeVerdict.PORT_TAKEN
     assert "/home/meiva/.meiva" in probe.detail
     assert "another unit's daemon holds this port" in probe.detail
 
 
-def test_probe_home_rejects_a_body_with_no_identity(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A 200 that says nothing about who answered is not evidence it is ours."""
-    _answer(monkeypatch, 200, b'{"status": "ok"}')
-    assert health.probe_home("http://127.0.0.1:9/api/health").alive is False
+def test_probe_home_rejects_a_body_with_no_identity() -> None:
+    with wire_response(json_response({"status": "ok"})) as url:
+        assert health.probe_home(url).alive is False
 
 
-def test_probe_home_unreachable_is_down_not_terminal(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Nothing on the port is the respawnable case, exactly as for probe_daemon."""
-
-    def _refuse(*_a: object, **_k: object) -> _Resp:
-        raise urllib.error.URLError("connection refused")
-
-    monkeypatch.setattr(urllib.request, "urlopen", _refuse)
-    probe = health.probe_home("http://127.0.0.1:9/api/health")
+def test_probe_home_unreachable_is_down_not_terminal() -> None:
+    with socket.socket() as listener:
+        listener.bind(("127.0.0.1", 0))
+        probe = health.probe_home(probe_url(listener.getsockname()[1]))
     assert probe.verdict is health.ProbeVerdict.DOWN
     assert probe.terminal is False
 
 
-def test_probe_home_always_returns_a_verdict(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Fail CLOSED — an unreadable probe is reported down, never alive."""
-    monkeypatch.setattr(
-        health,
-        "probe_unit_home",
-        lambda *_a, **_k: (_ for _ in ()).throw(RuntimeError("nobody predicted this")),  # pyright: ignore[reportUnknownArgumentType]
-    )
-    probe = health.probe_home("http://127.0.0.1:9/api/health")
+def test_probe_home_always_returns_a_verdict() -> None:
+    with wire_response(b"garbage on the wire\r\n") as url:
+        probe = health.probe_home(url)
     assert probe.verdict is health.ProbeVerdict.DOWN
-    assert "RuntimeError" in probe.detail
+    assert "BadStatusLine" in probe.detail
 
 
-def test_probe_fails_closed_on_any_unexpected_exception(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Fail CLOSED — reporting alive on an unreadable probe would make the
-    watchdog skip a genuinely dead gateway forever."""
-    monkeypatch.setattr(
-        health,
-        "probe_unit_home",
-        lambda *_a, **_kw: (_ for _ in ()).throw(RuntimeError("unpredicted")),  # pyright: ignore[reportUnknownArgumentType]
-    )
-    assert health.probe_home("http://gateway.example/api/health").alive is False
+def test_probe_fails_closed_on_any_unexpected_exception() -> None:
+    with wire_response(b"garbage on the wire\r\n") as url:
+        assert health.probe_home(url).alive is False
 
 
-def test_probe_passes_through_a_normal_verdict(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The wrapper adds a floor, not a behaviour change."""
-    monkeypatch.setattr(
-        health,
-        "probe_unit_home",
-        lambda *_a, **_kw: health.DaemonProbe.up("home /x"),  # pyright: ignore[reportUnknownArgumentType]
-    )
-    probe = health.probe_home("http://gateway.example/api/health")
+def test_probe_passes_through_a_normal_verdict() -> None:
+    with wire_response(json_response({"home": str(meiva_home())})) as url:
+        probe = health.probe_home(url)
     assert probe.alive is True
-    assert probe.detail == "home /x"
+    assert probe.detail == f"home {meiva_home()}"

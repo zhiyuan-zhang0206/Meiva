@@ -74,3 +74,21 @@ as the source of truth.
 
 Both human and peer-agent chat pass through this expansion. The envelope owns
 sender attribution, so the expansion must not inject a human-specific actor.
+
+## Explicit discovery inputs
+
+`CommandCatalog` requires its skill reader and a `CommandEnvironment` that owns
+live enabled state and command sources. `CommandCatalog.system(...)` supplies
+the process profile reader and canonical path resolvers without reading either
+at construction. Plain text returns before those reads; disabled discovery
+returns before skills or source directories are read. Enabled discovery resolves
+sources after reading its active skills, so the existing live-install behavior
+is retained.
+
+`CommandSources` carries four required paths: built-in commands, unit commands,
+built-in plugins and installed plugins. `command_dirs` walks only those inputs
+and the supplied skills; `discover_commands` retains the same precedence and
+sorting. Tests bind an independent `ConfigBoot` and real directories to the
+same environment interface, so changing that owner's enabled state remains
+observable after catalog construction without changing process-wide settings.
+System roots continue to use the profile-aware enabled reader described above.

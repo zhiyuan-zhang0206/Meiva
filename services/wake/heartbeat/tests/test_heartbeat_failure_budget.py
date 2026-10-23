@@ -48,7 +48,7 @@ class _Liveness:
 def _drive(loop: str, script: _Script) -> Awaitable[None]:
     timers = ManualTimers()
     clock = Clock(ClockConfig("UTC", "UTC", False), timers=timers, now=timers.now)
-    progress = LoopProgress(loop, 60.0)
+    progress = LoopProgress(loop, 60.0, timers=clock)
     if loop == "poll":
         return loops.dispatch_loop(_Dispatch(script), progress, clock=clock)
     return loops.liveness_loop(_Liveness(script), progress, clock=clock)

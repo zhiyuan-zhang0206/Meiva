@@ -88,7 +88,7 @@ async def test_host_trace_reads_final_messages_after_nstep_flush(
                 bus=EventBus.from_settings(),
                 db=Database.from_settings(gate=database_gate),
                 catalog=model_catalog,
-                commands=CommandCatalog(skills=list),
+                commands=CommandCatalog.system(skills=list),
             )
             assert not (
                 await host._invoke_until_done(

@@ -670,7 +670,7 @@ def commands() -> list[CommandInfo]:
         CommandInfo(
             name=c["name"], description=c["description"], instruction_hint=c["instruction_hint"]
         )
-        for c in CommandCatalog(skills=skills.names).discover()
+        for c in CommandCatalog.system(skills=skills.names).discover()
     ]
 
 

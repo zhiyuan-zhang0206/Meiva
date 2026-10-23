@@ -79,7 +79,7 @@ async def _claim(
                 bus=EventBus.from_settings(),
                 catalog=build_model_catalog(),
                 clock_factory=Clock.from_settings,
-                commands=CommandCatalog(skills=list),
+                commands=CommandCatalog.system(skills=list),
             )
         ),
         {"configurable": {"thread_id": str(agent_id)}},

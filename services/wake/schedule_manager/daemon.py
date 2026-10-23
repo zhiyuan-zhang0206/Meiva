@@ -159,7 +159,7 @@ async def run(
         sys.exit(1)
     _log.info("[schedule-manager] pidfile written: %s", _pidfile(process_config, runtime=runtime))
 
-    liveness = LivenessGroup()
+    liveness = LivenessGroup(timers=SYSTEM_TIMERS)
     endpoint = _endpoint(process_config, runtime=runtime)
     health = await start_health_server(
         "schedule_manager", endpoint.health_port, liveness=liveness, image=image

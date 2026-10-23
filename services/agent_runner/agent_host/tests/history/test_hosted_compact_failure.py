@@ -121,7 +121,7 @@ def _build_host_driving_invoke_until_done(
         bus=EventBus.from_settings(),
         db=Database.from_settings(gate=database_gate),
         catalog=ctx.require_catalog(),
-        commands=CommandCatalog(skills=list),
+        commands=CommandCatalog.system(skills=list),
     )
     monkeypatch.setattr(host, "_runtime_for", AsyncMock(return_value=object()))
     monkeypatch.setattr(
@@ -252,7 +252,7 @@ async def test_compaction_failure_is_visible_durable_and_recovers_on_new_inbound
         bus=turn_bus,
         catalog=build_model_catalog(),
         clock_factory=configured_policy().clock_factory,
-        commands=CommandCatalog(skills=list),
+        commands=CommandCatalog.system(skills=list),
     )
     host = _build_host_driving_invoke_until_done(
         aops_pool, saver, graph, ctx, monkeypatch, database_gate=database_gate

@@ -521,7 +521,7 @@ async def test_auto_compaction_cancels_at_llm_node_without_replacing_context(
             bus=EventBus.from_settings(),
             catalog=build_model_catalog(),
             clock_factory=Clock.from_settings,
-            commands=CommandCatalog(skills=list),
+            commands=CommandCatalog.system(skills=list),
         )
     )
     invocation = asyncio.create_task(
@@ -659,7 +659,7 @@ async def test_compaction_returns_through_claim_then_generates_before_compacting
             bus=EventBus.from_settings(),
             catalog=build_model_catalog(),
             clock_factory=Clock.from_settings,
-            commands=CommandCatalog(skills=list),
+            commands=CommandCatalog.system(skills=list),
         )
     )
     state = AgentState(messages=[HumanMessage(content="old work " * 100)], halted=False)

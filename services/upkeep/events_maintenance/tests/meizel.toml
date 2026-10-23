@@ -31,7 +31,6 @@
 "test_events_maintenance_daemon.py#monkeypatch.setattr services.upkeep.events_maintenance.daemon.sleep_with_liveness" = 2
 "test_events_maintenance_daemon.py#monkeypatch.setattr services.upkeep.events_maintenance.daemon.start_health_server" = 3
 "test_events_maintenance_daemon.py#monkeypatch.setattr services.upkeep.events_maintenance.daemon.stop_health_server" = 3
-"test_events_maintenance_daemon.py#monkeypatch.setattr services.upkeep.events_maintenance.daemon.time.monotonic" = 4
 "test_events_maintenance_daemon.py#monkeypatch.setattr services.upkeep.events_maintenance.daemon.time.time" = 1
 "test_events_maintenance_failure_budget.py#monkeypatch.setattr services.upkeep.events_maintenance.daemon.maintenance_with_liveness" = 1
 "test_events_maintenance_failure_budget.py#monkeypatch.setattr services.upkeep.events_maintenance.daemon.sleep_with_liveness" = 1

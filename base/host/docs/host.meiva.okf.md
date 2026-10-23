@@ -67,3 +67,14 @@ real client starts a listener on port 0; none patches `urlopen` or `socket`.
 The private-storage live Unix-socket test uses a short `/tmp` root so macOS's
 AF_UNIX path limit does not fail at bind before the test reaches socket skipping
 and ordinary-file mode repair.
+
+`jittered` samples the process phase and random noise; `jitter_delay` owns the
+mode arithmetic and nonnegative clamp from explicit numeric values. The existing
+unknown-mode agent fallback and none-mode behavior remain unchanged. Deterministic
+integration tests seed only a fresh child process and compare its actual retry
+wait with an independently computed random sample. Existing hook late binding is
+verified with retry closures constructed before the shared wait fixture replaces
+the hooks. A separate child runs the actual async retry through a standard event
+loop that records `call_later` delays; those observations prove scheduling values
+and attempt counts, not that one or two real seconds elapsed. Other retry
+consumers and their existing wait contracts retain their interfaces.

@@ -8,6 +8,7 @@ import psycopg
 import pytest
 from psycopg_pool import ConnectionPool
 
+from base.clock import SYSTEM_TIMERS
 from base.config import ConfigBoot
 from base.daemon.loop_health import LoopProgress
 from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
@@ -110,7 +111,10 @@ async def test_each_resolution_loop_owns_a_fresh_daily_scan(
         async with asyncio.TaskGroup() as tasks:
             with pytest.raises(asyncio.CancelledError):
                 await daemon.resolution_loop(
-                    pool, LoopProgress("test", timeout_s=5), config, tasks=tasks
+                    pool,
+                    LoopProgress("test", timeout_s=5, timers=SYSTEM_TIMERS),
+                    config,
+                    tasks=tasks,
                 )
         assert connection.scans == expected_scans
     assert passes == 4

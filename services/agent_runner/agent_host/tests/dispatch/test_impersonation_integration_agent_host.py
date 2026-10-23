@@ -82,7 +82,7 @@ async def test_replacement_host_admission_ends_the_takeover_without_respawning_i
         bus=EventBus.from_settings(),
         db=Database.from_settings(gate=database_gate),
         catalog=model_catalog,
-        commands=CommandCatalog(skills=list),
+        commands=CommandCatalog.system(skills=list),
     )
     await host.run_turn(agent_id)
     assert db_conn.execute(
@@ -174,7 +174,7 @@ async def test_restarted_host_settles_the_ended_takeover_without_an_external_mes
         bus=EventBus.from_settings(),
         db=Database.from_settings(gate=database_gate),
         catalog=model_catalog,
-        commands=CommandCatalog(skills=list),
+        commands=CommandCatalog.system(skills=list),
     )
 
     await host.run_turn(agent_id)
@@ -246,7 +246,7 @@ async def test_lease_controls_settle_the_handoff_of_a_dead_relays_lease(
         bus=EventBus.from_settings(),
         db=Database.from_settings(gate=database_gate),
         catalog=model_catalog,
-        commands=CommandCatalog(skills=list),
+        commands=CommandCatalog.system(skills=list),
     )
     owner = await admit_hosted_runtime(aops_pool, agent_id, machine, host._owner, db=database)
     assert owner is not None
@@ -359,7 +359,7 @@ def _handoff_host(
         bus=EventBus.from_settings(),
         db=Database.from_settings(gate=database_gate),
         catalog=model_catalog,
-        commands=CommandCatalog(skills=list),
+        commands=CommandCatalog.system(skills=list),
     )
 
 

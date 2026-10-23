@@ -112,7 +112,7 @@ async def test_fatal_provider_error_emits_blocked_recovery_details(
         bus=EventBus.from_settings(),
         catalog=build_model_catalog(),
         clock_factory=configured_policy().clock_factory,
-        commands=CommandCatalog(skills=list),
+        commands=CommandCatalog.system(skills=list),
     )
     exc = FatalProviderError(
         "provider permanently rejected (HTTP 400): Content Exists Risk",
@@ -210,7 +210,7 @@ async def test_permanent_provider_error_reports_metadata_to_nearest_alive_ancest
             bus=EventBus.from_settings(),
             catalog=model_catalog,
             clock_factory=configured_policy().clock_factory,
-            commands=CommandCatalog(skills=list),
+            commands=CommandCatalog.system(skills=list),
         ),
         agent_id=child_id,
         occurred_at=occurred_at,
@@ -288,7 +288,7 @@ async def test_context_overflow_halts_background_wakes_and_reports_to_an_ancesto
             bus=EventBus.from_settings(),
             catalog=model_catalog,
             clock_factory=configured_policy().clock_factory,
-            commands=CommandCatalog(skills=list),
+            commands=CommandCatalog.system(skills=list),
         ),
         agent_id=child_id,
     )
