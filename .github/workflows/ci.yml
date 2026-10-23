@@ -560,6 +560,27 @@ jobs:
         # Pyright rejects --stats with --threads; time retains elapsed/CPU cost.
         run: time uv run basedpyright --threads 2
 
+  backend-static-tests:
+    name: backend static tests (no native data plane)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    needs: [classify]
+    if: ${{ needs.classify.outputs.backend == 'true' }}
+    env:
+      MEIVA_DB_URL: postgresql://unused@127.0.0.1:1/unused
+      MEIVA_REDIS_URL: redis://127.0.0.1:1/0
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: 0.13.1
+          enable-cache: true
+
+      - name: Install Python deps
+        uses: ./.github/actions/uv-sync
+
       - name: Run static pytest contracts
         id: pytest-static
         if: needs.classify.outputs.backend == 'true'
@@ -1532,7 +1553,7 @@ jobs:
     name: backend (pytest + pyright)
     runs-on: ubuntu-24.04
     timeout-minutes: 10
-    needs: [classify, backend-static, backend-structure, backend-shard, backend-selected, backend-serial, backend-pgvector-smoke, helper-signing-smoke]
+    needs: [classify, backend-static, backend-static-tests, backend-structure, backend-shard, backend-selected, backend-serial, backend-pgvector-smoke, helper-signing-smoke]
     if: ${{ !cancelled() && (needs.classify.result == 'failure' || (needs.classify.result == 'success' && (needs.classify.outputs.backend == 'true' || needs.backend-structure.result != 'success'))) }}
     env:
       # Every coverage-data file the combine expects: all backend-shard matrix
@@ -1563,6 +1584,7 @@ jobs:
             failure|cancelled) fail "test selector: ${{ needs.classify.outputs.selector }}";;
           esac
           check backend-static "${{ needs.backend-static.result }}"
+          check backend-static-tests "${{ needs.backend-static-tests.result }}"
           check backend-serial "${{ needs.backend-serial.result }}"
           check backend-pgvector-smoke "${{ needs.backend-pgvector-smoke.result }}"
           check helper-signing-smoke "${{ needs.helper-signing-smoke.result }}"
@@ -1577,7 +1599,7 @@ jobs:
             check backend-shard "${{ needs.backend-shard.result }}"
           fi
           if [ "$ok" = "false" ]; then
-            echo "a backend job did not succeed: static=${{ needs.backend-static.result }} structure=${{ needs.backend-structure.result }} shards=${{ needs.backend-shard.result }} selected=${{ needs.backend-selected.result }} serial=${{ needs.backend-serial.result }} pgvector-smoke=${{ needs.backend-pgvector-smoke.result }} helper-signing-smoke=${{ needs.helper-signing-smoke.result }} mode=$TEST_SELECTION_MODE decision=$DECISION"
+            echo "a backend job did not succeed: static=${{ needs.backend-static.result }} static-tests=${{ needs.backend-static-tests.result }} structure=${{ needs.backend-structure.result }} shards=${{ needs.backend-shard.result }} selected=${{ needs.backend-selected.result }} serial=${{ needs.backend-serial.result }} pgvector-smoke=${{ needs.backend-pgvector-smoke.result }} helper-signing-smoke=${{ needs.helper-signing-smoke.result }} mode=$TEST_SELECTION_MODE decision=$DECISION"
             exit 1
           fi
           echo "backend jobs verified (mode=$TEST_SELECTION_MODE decision=$DECISION)"
@@ -1664,7 +1686,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     continue-on-error: true
-    needs: [classify, backend-static, backend-shard, backend-serial]
+    needs: [classify, backend-static-tests, backend-shard, backend-serial]
     if: ${{ !cancelled() && needs.classify.outputs.backend == 'true' && (needs.classify.outputs.mode != 'enforce' || needs.classify.outputs.decision != 'SELECTED') }}
     permissions:
       contents: read
