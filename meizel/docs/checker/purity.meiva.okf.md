@@ -1,7 +1,7 @@
 ---
 type: doc
 title: "meizel/ — Purity and Bounded Container Budgets"
-description: "The three-level purity contract (none, strict-to-be, strict), the 15 deterministic purity and bounded-container rules, test purity inheritance, and policy configuration."
+description: "The finite purity and container rules, their evidence limits, test inheritance, and policy configuration."
 tags:
   - locality
   - tool
@@ -11,12 +11,27 @@ tags:
 
 ## Why mechanical purity and container budgets
 
-An agentic coding workflow optimizes for the shortest path to green tests. Without hard
-structural boundaries, that pressure produces module-level patching (`monkeypatch`), wide
-hub modules, pass-through wrappers, and bloated parameter lists. Ratios and heuristic scores
-are gamed by splitting functions into private helpers within the same file; only bounded
-container budgets and deterministic AST/graph rules force genuine decomposition into pure
-value transformations and thin imperative shells.
+The goal is understandable, changeable code and trustworthy feedback. Bounded interfaces
+and explicit effects can help, but passing AST/graph checks does not establish cohesive
+design. Review actual owners, consumers and meaningful assertions; avoid forwarding layers
+or callback bags created only to satisfy a budget.
+
+## What the evidence means
+
+A successful `check`, including `strict`, means the implemented checks passed for the
+reported scope. It is not a semantic purity proof or a test-resource assessment. A path
+filter or `--changed` does not turn that scoped result into a whole-repository judgment.
+
+| Dimension | Evidence and limit |
+|---|---|
+| Recognized syntax | `impure-call` and related diagnostics name matched imports, calls or writes. An import or async declaration is a rule observation, not observed runtime execution. |
+| Unresolved or unmeasured behavior | Unresolved imports/patches are reported where recognized. No diagnostic does not establish absence of callback effects, input mutation or transitive effects; those are not comprehensively analyzed. |
+| Structure | Container budgets and frozen-shape rules bound forms and sizes, not semantic effects. A frozen dataclass can contain a mutable list; a frozen JS holder or Set is not proof against nested mutation. |
+| Test resources | Fixture diagnostics recognize configured requests. They do not measure bootstrap cost or authorize a lightweight runner. Explicit [[tests/fixtures/docs/static-environment.meiva.okf.md|static ownership and refusal canaries]] govern that boundary. |
+
+Passing observed values can separate decisions from effects. Injecting a callable makes
+its operation explicit but does not remove its effects. Use the existing `explain` graph
+to trace owners and consumers, then verify observable behavior at the actual boundary.
 
 ## Three purity modes
 

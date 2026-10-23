@@ -127,8 +127,10 @@ def test_unfrozen_value_requires_frozen_dataclass(make_repo: RepoFactory) -> Non
             "pkg/meizel.toml": 'purity = "strict-to-be"\n',
         }
     )
-    keys = sorted(d.debt.key for d in diagnostics(root, "unfrozen-value") if d.debt is not None)
+    found = diagnostics(root, "unfrozen-value")
+    keys = sorted(d.debt.key for d in found if d.debt is not None)
     assert keys == ["a.py#class AlsoBad", "a.py#class Bad"]
+    assert all("does not freeze nested values" in d.render() for d in found)
 
 
 def test_untyped_export_rejects_any_and_bare_dict_on_public_functions(

@@ -99,6 +99,7 @@ def _report(universe: Universe) -> dict[str, Any]:
             top["by_code"][code.value] += sum(rows.values())
     judged = _judged_directories(universe)
     return {
+        "basis": "recorded manifest debt only; no source, semantic purity, or test-resource analysis",
         "total": sum(total(t) for t in baselines.values()),
         "by_code": {c.value: n for c, n in sorted(_by_code(baselines).items(), key=str)},
         "by_top_level": {
@@ -116,8 +117,9 @@ def _text(data: dict[str, Any]) -> str:
     modes = data["directories"]
     lines = [
         f"meizel debt: {data['total']} recorded locality debts in "
-        f"{modes['strict_to_be']} strict-to-be directories "
-        f"({modes['strict']} strict directories carry none)",
+        f"{modes['strict_to_be']} directories with recorded debt "
+        f"({modes['strict']} directories without recorded debt)",
+        data["basis"],
         "",
         "by code:",
         *(f"  {code:<20}{count:>8}" for code, count in data["by_code"].items()),

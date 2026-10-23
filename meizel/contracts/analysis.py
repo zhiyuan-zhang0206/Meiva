@@ -69,7 +69,9 @@ class Analysis:
         )
         return (
             f"meizel: ok ({scope}{len(self.facts)} fact edges, "
-            f"{len(self.manifests)} manifests{carried})"
+            f"{len(self.manifests)} manifests{carried}); "
+            "implemented checks passed for the reported scope; "
+            "not a semantic purity proof or test-resource assessment"
         )
 
 

@@ -27,6 +27,9 @@ A directory's mode follows from its baseline:
   repaid by `debt prune`). The baseline can therefore only go down, and a
   directory whose baseline reaches zero is strict again.
 
+These are debt states, separate from manifest `purity` modes. An empty baseline
+does not establish semantic purity, effect freedom or test-resource requirements.
+
 There is no lenient mode and no per-directory switch. A violation in a
 strict-to-be directory says so: it names the directory, how many debts it
 carries, and that the fix is to repair the violation, since `debt record` is for
@@ -68,9 +71,11 @@ errors cannot be recorded.
 
 ## Commands
 
-- `debt` reads only the manifests (no analysis, about a second) and prints the
-  totals by code, by top-level directory and the number of strict-to-be and
-  strict directories; `--json` for tools.
+- `debt` inventories manifests without source analysis, even for unparsable code.
+  Text labels directories with/without recorded debt. JSON adds `basis` describing
+  that limit and retains its numeric schema: legacy `directories.strict_to_be`
+  and `strict` mean with/without recorded debt, not manifest purity modes.
+  `by_top_level.*.strict_to_be_directories` also counts baseline owners only.
 - `debt record <paths...>` writes the current violations under the paths into
   their owners' manifests, creating a manifest where there is none (stage it:
   `check` reads tracked files). It is the only way a baseline grows: `check`
