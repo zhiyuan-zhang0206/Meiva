@@ -23,6 +23,7 @@ from base.sessions.pty.tests.pty_service import pty_service as pty_service
 from base.telemetry.tests.capture.event_capture import EmittedEvents
 from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
 from ops.lifecycle import termination
+from ops.lifecycle.tests.termination_faults import reject_chat, reject_pair_after_insert
 from ops.rpc_schemas import TerminateAgentRequest
 
 
@@ -70,45 +71,20 @@ def test_termination_inbounds_are_atomic_and_fall_back_to_pending_message(
     database: Database,
     event_bus: EventBus,
 ) -> None:
-    real_insert = termination.insert_termination_pair
-    failed_pair = False
-
-    def _fail_after_pair(
-        conn: psycopg.Connection,
-        agent_id: int,
-        *,
-        source: str,
-        message: str | None,
-        kill_all_shell_sessions: bool = False,
-    ) -> tuple[int | None, int]:
-        nonlocal failed_pair
-        result = real_insert(
-            conn,
-            agent_id,
-            source=source,
-            message=message,
-            kill_all_shell_sessions=kill_all_shell_sessions,
+    with reject_pair_after_insert(db_conn, running_agent_id):
+        terminate_id, _cutoff = termination.enqueue_termination_inbounds(
+            database,
+            event_bus,
+            running_agent_id,
+            db_pool,
+            source="user",
+            message="final note",
         )
-        if message is not None and not failed_pair:
-            failed_pair = True
-            raise RuntimeError("injected pair failure")
-        return result
-
-    terminate_id, _cutoff = termination.enqueue_termination_inbounds(
-        database,
-        event_bus,
-        running_agent_id,
-        db_pool,
-        source="user",
-        message="final note",
-        insert_pair_fn=_fail_after_pair,
-    )
 
     rows = db_conn.execute(
         "SELECT id,content,kind,source,status FROM inbound_messages WHERE agent_id=%s ORDER BY id",
         (running_agent_id,),
     ).fetchall()
-    assert failed_pair
     assert rows == [
         (terminate_id, "", "terminate", "user", "pending"),
         (rows[1][0], "final note", "chat", "user", "pending"),
@@ -122,39 +98,15 @@ def test_termination_survives_failed_message_retry(
     database: Database,
     event_bus: EventBus,
 ) -> None:
-    real_insert = termination.insert_termination_pair
-
-    def _fail_pair(
-        conn: psycopg.Connection,
-        agent_id: int,
-        *,
-        source: str,
-        message: str | None,
-        kill_all_shell_sessions: bool = False,
-    ) -> tuple[int | None, int]:
-        if message is not None:
-            raise RuntimeError("injected pair failure")
-        return real_insert(
-            conn,
-            agent_id,
-            source=source,
-            message=message,
-            kill_all_shell_sessions=kill_all_shell_sessions,
+    with reject_chat(db_conn, running_agent_id):
+        terminate_id, _cutoff = termination.enqueue_termination_inbounds(
+            database,
+            event_bus,
+            running_agent_id,
+            db_pool,
+            source="user",
+            message="final note",
         )
-
-    def _fail_retry(*_args: object, **_kwargs: object) -> int:
-        raise RuntimeError("injected retry failure")
-
-    terminate_id, _cutoff = termination.enqueue_termination_inbounds(
-        database,
-        event_bus,
-        running_agent_id,
-        db_pool,
-        source="user",
-        message="final note",
-        insert_pair_fn=_fail_pair,
-        insert_retry_fn=_fail_retry,
-    )
 
     assert db_conn.execute(
         "SELECT id,content,kind,status FROM inbound_messages WHERE agent_id=%s",
@@ -167,43 +119,18 @@ def test_force_termination_retries_command_before_message(
     db_pool: ConnectionPool,
     running_agent_id: int,
 ) -> None:
-    real_insert = termination.insert_termination_pair
-    failed_pair = False
-
-    def _fail_after_pair(
-        conn: psycopg.Connection,
-        agent_id: int,
-        *,
-        source: str,
-        message: str | None,
-        kill_all_shell_sessions: bool = False,
-    ) -> tuple[int | None, int]:
-        nonlocal failed_pair
-        result = real_insert(
-            conn,
-            agent_id,
-            source=source,
-            message=message,
-            kill_all_shell_sessions=kill_all_shell_sessions,
+    with reject_pair_after_insert(db_conn, running_agent_id):
+        old_status, _, terminate_id, _cutoff = termination.force_terminate_transaction(
+            running_agent_id,
+            db_pool,
+            source="user",
+            message="final force note",
         )
-        if message is not None and not failed_pair:
-            failed_pair = True
-            raise RuntimeError("injected force pair failure")
-        return result
-
-    old_status, _, terminate_id, _cutoff = termination.force_terminate_transaction(
-        running_agent_id,
-        db_pool,
-        source="user",
-        message="final force note",
-        insert_pair_fn=_fail_after_pair,
-    )
 
     rows = db_conn.execute(
         "SELECT id,content,kind,status FROM inbound_messages WHERE agent_id=%s ORDER BY id",
         (running_agent_id,),
     ).fetchall()
-    assert failed_pair
     assert old_status.value == "running"
     assert rows == [
         (terminate_id, "", "terminate", "done"),
@@ -277,8 +204,8 @@ class TestKillAllShellSessions:
             running_agent_id,
             TerminateAgentRequest(kill_all_shell_sessions=True),
             db_pool,
-            kill_shells_fn=self._make_kill_fn(kills),
-            cancel_turn_fn=self._noop_cancel,
+            kill_shells=self._make_kill_fn(kills),
+            cancel_turn=self._noop_cancel,
         )
 
         assert resp.status == "enqueued"
@@ -310,8 +237,8 @@ class TestKillAllShellSessions:
             running_agent_id,
             TerminateAgentRequest(),
             db_pool,
-            kill_shells_fn=self._make_kill_fn(kills),
-            cancel_turn_fn=self._noop_cancel,
+            kill_shells=self._make_kill_fn(kills),
+            cancel_turn=self._noop_cancel,
         )
         forced = await lifecycle.terminate_agent_op(
             database,
@@ -319,8 +246,8 @@ class TestKillAllShellSessions:
             running_agent_id,
             TerminateAgentRequest(force=True),
             db_pool,
-            kill_shells_fn=self._make_kill_fn(kills),
-            cancel_turn_fn=self._noop_cancel,
+            kill_shells=self._make_kill_fn(kills),
+            cancel_turn=self._noop_cancel,
         )
 
         assert (graceful.status, graceful.shell_sessions) == ("enqueued", None)
@@ -352,8 +279,8 @@ class TestKillAllShellSessions:
             running_agent_id,
             TerminateAgentRequest(force=True, kill_all_shell_sessions=True),
             db_pool,
-            kill_shells_fn=self._make_kill_fn(kills),
-            cancel_turn_fn=self._noop_cancel,
+            kill_shells=self._make_kill_fn(kills),
+            cancel_turn=self._noop_cancel,
         )
 
         assert resp.status == "enqueued"
@@ -381,8 +308,8 @@ class TestKillAllShellSessions:
             running_agent_id,
             TerminateAgentRequest(kill_all_shell_sessions=True),
             db_pool,
-            kill_shells_fn=self._make_kill_fn(kills),
-            cancel_turn_fn=self._noop_cancel,
+            kill_shells=self._make_kill_fn(kills),
+            cancel_turn=self._noop_cancel,
         )
         resp = await lifecycle.terminate_agent_op(
             database,
@@ -390,8 +317,8 @@ class TestKillAllShellSessions:
             running_agent_id,
             TerminateAgentRequest(force=True),
             db_pool,
-            kill_shells_fn=self._make_kill_fn(kills),
-            cancel_turn_fn=self._noop_cancel,
+            kill_shells=self._make_kill_fn(kills),
+            cancel_turn=self._noop_cancel,
         )
 
         assert resp.shell_sessions is None
@@ -423,8 +350,8 @@ class TestKillAllShellSessions:
             agent_id,
             TerminateAgentRequest(kill_all_shell_sessions=True),
             db_pool,
-            kill_shells_fn=self._make_kill_fn(kills),
-            cancel_turn_fn=self._noop_cancel,
+            kill_shells=self._make_kill_fn(kills),
+            cancel_turn=self._noop_cancel,
         )
 
         assert resp.status == "already_terminated"
@@ -435,7 +362,7 @@ class TestKillAllShellSessions:
         assert _terminate_payloads(db_conn, agent_id) == []
 
     @pytest.mark.asyncio
-    async def test_termination_racing_the_request_is_killed_now(
+    async def test_newly_committed_termination_is_killed_now(
         self,
         db_conn: psycopg.Connection,
         db_pool: ConnectionPool,
@@ -444,11 +371,7 @@ class TestKillAllShellSessions:
         database: Database,
         event_bus: EventBus,
     ) -> None:
-        from base.api_contracts.agent_contract import AgentStatus
         from ops import lifecycle
-
-        def _stale_read(_db: object, _aid: int) -> AgentStatus:
-            return AgentStatus.RUNNING
 
         db_conn.execute(
             "UPDATE agents_meta SET status='terminated', termination_source='exit' WHERE id=%s",
@@ -462,9 +385,8 @@ class TestKillAllShellSessions:
             running_agent_id,
             TerminateAgentRequest(kill_all_shell_sessions=True),
             db_pool,
-            status_fn=_stale_read,
-            kill_shells_fn=self._make_kill_fn(kills),
-            cancel_turn_fn=self._noop_cancel,
+            kill_shells=self._make_kill_fn(kills),
+            cancel_turn=self._noop_cancel,
         )
 
         assert resp.status == "already_terminated"
@@ -496,8 +418,8 @@ class TestKillAllShellSessions:
                     running_agent_id,
                     TerminateAgentRequest(kill_all_shell_sessions=True),
                     db_pool,
-                    kill_shells_fn=self._make_kill_fn(kills),
-                    cancel_turn_fn=self._noop_cancel,
+                    kill_shells=self._make_kill_fn(kills),
+                    cancel_turn=self._noop_cancel,
                 )
             )
             await _until_blocked_or_done(op, apply_conn.info.backend_pid)
@@ -526,7 +448,7 @@ class TestKillAllShellSessions:
     ) -> None:
         from ops import lifecycle
 
-        def _fail(_aid: int, *, before_session_index: int) -> list[int]:
+        def _fail(agent_id: int, *, before_session_index: int) -> list[int]:
             raise RuntimeError("failed to kill shell session(s) [2]")
 
         with pytest.raises(RuntimeError, match="failed to kill"):
@@ -536,8 +458,8 @@ class TestKillAllShellSessions:
                 running_agent_id,
                 TerminateAgentRequest(force=True, kill_all_shell_sessions=True),
                 db_pool,
-                kill_shells_fn=_fail,
-                cancel_turn_fn=self._noop_cancel,
+                kill_shells=_fail,
+                cancel_turn=self._noop_cancel,
             )
         assert db_conn.execute(
             "SELECT status FROM agents_meta WHERE id=%s", (running_agent_id,)
@@ -606,7 +528,8 @@ async def test_kill_terminates_only_the_owners_real_shell_sessions(
         running_agent_id,
         TerminateAgentRequest(force=True, kill_all_shell_sessions=True),
         db_pool,
-        cancel_turn_fn=_allocate_after_acceptance,
+        cancel_turn=_allocate_after_acceptance,
+        kill_shells=lifecycle.kill_agent_shells,
     )
 
     assert resp.shell_sessions == ShellSessionsKill(when=ShellSessionKillTiming.NOW, killed=[0, 1])

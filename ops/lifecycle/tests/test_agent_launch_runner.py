@@ -1,14 +1,17 @@
 from __future__ import annotations
 
+from typing import cast
 from uuid import uuid4
 
 import psycopg
 import pytest
 from psycopg_pool import ConnectionPool
+from redis.client import PubSub
 
 from base.agents.birth.harness import LAUNCHABLE_HARNESSES
 from base.agents.birth.spawn import create_agent_row
 from base.api_contracts.agent_contract import Harness
+from base.cluster import inbound_channel
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import settings
@@ -72,19 +75,18 @@ async def test_new_launch_attempt_is_repeatable_without_prompt_insertion(
         catalog=build_model_catalog(),
         authority=config_authority,
     )
-    wakes: list[tuple[int, str]] = []
-
-    def _wake(_db: object, _bus: object, agent_id: int, payload: str) -> None:
-        wakes.append((agent_id, payload))
-
-    def _validate_model(**_kwargs: object) -> None:
-        return None
-
     body = LaunchAgentRequest(
         agent_id=agent_id, launch_attempt_id=attempt, birth_config=birth_config
     )
     pool: ConnectionPool = ConnectionPool(settings.data_plane.db_url, min_size=1, max_size=1)
-    with pool:
+    with (
+        pool,
+        event_bus.sync_redis(decode_responses=True) as redis,
+        PubSub(redis.connection_pool) as received,
+    ):
+        received.subscribe(inbound_channel(agent_id, event_bus.channel))
+        subscribed = cast(dict[str, object] | None, received.get_message(timeout=2))
+        assert subscribed is not None and subscribed["type"] == "subscribe"
         await lifecycle.launch_agent_op(
             database,
             event_bus,
@@ -92,8 +94,6 @@ async def test_new_launch_attempt_is_repeatable_without_prompt_insertion(
             pool,
             catalog=build_model_catalog(),
             local_machine=machine_identity.name(),
-            validate_model_fn=_validate_model,
-            publish_wake_fn=_wake,
         )
         await lifecycle.launch_agent_op(
             database,
@@ -102,8 +102,6 @@ async def test_new_launch_attempt_is_repeatable_without_prompt_insertion(
             pool,
             catalog=build_model_catalog(),
             local_machine=machine_identity.name(),
-            validate_model_fn=_validate_model,
-            publish_wake_fn=_wake,
         )
         stale = body.model_copy(update={"launch_attempt_id": uuid4()})
         with pytest.raises(ValueError, match="stale or misplaced"):
@@ -114,8 +112,6 @@ async def test_new_launch_attempt_is_repeatable_without_prompt_insertion(
                 pool,
                 catalog=build_model_catalog(),
                 local_machine=machine_identity.name(),
-                validate_model_fn=_validate_model,
-                publish_wake_fn=_wake,
             )
         db_conn.execute("UPDATE agents_meta SET machine='later-placement' WHERE id=%s", (agent_id,))
         db_conn.commit()
@@ -127,10 +123,11 @@ async def test_new_launch_attempt_is_repeatable_without_prompt_insertion(
                 pool,
                 catalog=build_model_catalog(),
                 local_machine=machine_identity.name(),
-                validate_model_fn=_validate_model,
-                publish_wake_fn=_wake,
             )
-    assert wakes == [(agent_id, "0"), (agent_id, "0")]
+        for _ in range(2):
+            wake = cast(dict[str, object] | None, received.get_message(timeout=2))
+            assert wake is not None and wake["data"] == "0"
+        assert received.get_message(timeout=0.1) is None
     assert db_conn.execute(
         "SELECT id, content, status FROM inbound_messages WHERE agent_id=%s", (agent_id,)
     ).fetchall() == [(inbound_id, "one goal", "pending")]
