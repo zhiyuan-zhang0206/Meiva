@@ -1,17 +1,8 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-
 import { api } from "@/lib/transport/api";
-import {
-  ComposerMock,
-  hooksState,
-  inspectorMockState,
-  makeAgent,
-  resetHomePageTestState,
-  wrap,
-} from "./_page_test_harness";
-
+import { ComposerMock, hooksState, inspectorMockState, makeAgent, resetHomePageTestState, wrap } from "./_page_test_harness";
 vi.mock("@/lib/agents/use-agents", () => ({
   useAgents: () => ({
     agents: hooksState.agents,
@@ -29,7 +20,6 @@ vi.mock("@/lib/agents/use-agents", () => ({
     refresh: vi.fn(),
   }),
 }));
-
 vi.mock("@/lib/timeline/use-timeline", () => ({
   useTimeline: () => ({
     items: hooksState.timelineItems,
@@ -43,7 +33,6 @@ vi.mock("@/lib/timeline/use-timeline", () => ({
     retryTimeline: hooksState.retryTimeline,
   }),
 }));
-
 vi.mock("@/lib/inspector/use-token-usage", () => ({
   useTokenUsage: () => ({
     contextTokens: 0,
@@ -52,7 +41,6 @@ vi.mock("@/lib/inspector/use-token-usage", () => ({
     hardCompactTokens: 0,
   }),
 }));
-
 vi.mock("@/lib/state/use-user-settings", () => ({
   useUserSettings: () => ({
     settings: hooksState.settings,
@@ -60,14 +48,12 @@ vi.mock("@/lib/state/use-user-settings", () => ({
     isLoading: false,
   }),
 }));
-
 vi.mock("@/lib/transport/useEventStream", () => ({
   EventStreamProvider: ({ children }: { children: React.ReactNode }) => children,
   AgentEventStreamProvider: ({ children }: { children: React.ReactNode }) => children,
   useEventStream: vi.fn(),
   useAgentEventStream: vi.fn(),
 }));
-
 vi.mock("@/lib/state/store", () => ({
   useStore: <T,>(selector: (s: unknown) => T): T => {
     const fakeState = {
@@ -87,7 +73,6 @@ vi.mock("@/lib/state/store", () => ({
     return selector(fakeState);
   },
 }));
-
 vi.mock("@/lib/layout/breakpoint", () => ({
   useBreakpoint: () => ({
     tier: hooksState.isDesktop ? "xl" : "xs",
@@ -95,12 +80,10 @@ vi.mock("@/lib/layout/breakpoint", () => ({
     isLarge: hooksState.isLarge,
   }),
 }));
-
 vi.mock("@/lib/timeline/timeline-store", () => ({
   useTimelineStore: <T,>(selector: (s: unknown) => T): T =>
     selector({ requestScrollToBottom: hooksState.requestScrollToBottom }),
 }));
-
 vi.mock("@/lib/transport/api", () => ({
   API_BASE: "",
   MessageDeliveryUnknownError: class MessageDeliveryUnknownError extends Error {
@@ -117,17 +100,14 @@ vi.mock("@/lib/transport/api", () => ({
     getReplySuggestion: vi.fn(),
   },
 }));
-
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ bfcacheId: "_b_test_" }),
 }));
-
 vi.mock("@/components/agent-sidebar", () => ({
   AgentSidebar: ({ onSpawn }: { onSpawn: (opts: { machine?: string; model?: string }) => void }) => (
     <button data-testid="sidebar-spawn" onClick={() => { onSpawn({}); }}>spawn</button>
   ),
 }));
-
 vi.mock("@/components/shell/header-bar", () => ({
   HeaderBar: ({
     label,
@@ -143,7 +123,6 @@ vi.mock("@/components/shell/header-bar", () => ({
     </header>
   ),
 }));
-
 vi.mock("@/components/timeline", () => ({
   TimelineView: ({ turnActive, maxWidthCss, items }: { turnActive?: boolean; maxWidthCss?: string; items: unknown[] }) => (
     <div
@@ -154,21 +133,17 @@ vi.mock("@/components/timeline", () => ({
     />
   ),
 }));
-
 vi.mock("@/components/conversation/composer", () => ({
   Composer: ComposerMock,
 }));
-
 vi.mock("@/components/conversation/upload-button", () => ({
   UploadButton: ({ agentId }: { agentId: number | null }) => (
     <div data-testid="upload-button" data-agent-id={agentId ?? "null"} />
   ),
 }));
-
 vi.mock("@/components/content/content-toggle", () => ({
   ContentToggle: () => <div data-testid="content-toggle" />,
 }));
-
 vi.mock("@/components/inspector/inspector-panel", async () => {
   const React = await import("react");
   return {
@@ -183,12 +158,9 @@ vi.mock("@/components/inspector/inspector-panel", async () => {
     },
   };
 });
-
 import HomePage from "./page";
-
 afterEach(cleanup);
 beforeEach(resetHomePageTestState);
-
 
 describe("sidebar app-entry reset", () => {
   it("resets a loaded collapsed preference when the home surface is entered", () => {
@@ -196,15 +168,12 @@ describe("sidebar app-entry reset", () => {
       "display.timeline_width_ratio": 0.4,
       "display.sidebar_collapsed": true,
     };
-
     wrap(<HomePage />);
-
     expect(hooksState.setSetting).toHaveBeenCalledWith(
       "display.sidebar_collapsed",
       false,
     );
   });
-
   it("preserves a collapse that happens after the home surface has mounted", () => {
     const queryClient = new QueryClient({
       defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
@@ -215,7 +184,6 @@ describe("sidebar app-entry reset", () => {
       </QueryClientProvider>,
     );
     expect(hooksState.setSetting).not.toHaveBeenCalled();
-
     hooksState.settings = {
       "display.timeline_width_ratio": 0.4,
       "display.sidebar_collapsed": true,
@@ -225,7 +193,6 @@ describe("sidebar app-entry reset", () => {
         <HomePage />
       </QueryClientProvider>,
     );
-
     expect(hooksState.setSetting).not.toHaveBeenCalled();
   });
 });
@@ -239,7 +206,6 @@ describe("composerMode derivation", () => {
     wrap(<HomePage />);
     expect(screen.getByTestId("composer").getAttribute("data-mode")).toBe("idle");
   });
-
   it("activeId + turnActive=true → busy", () => {
     hooksState.activeId = 5;
     hooksState.agents = [
@@ -249,7 +215,6 @@ describe("composerMode derivation", () => {
     wrap(<HomePage />);
     expect(screen.getByTestId("composer").getAttribute("data-mode")).toBe("busy");
   });
-
   it("activeId + not terminated + turnActive=false → idle", () => {
     hooksState.activeId = 5;
     hooksState.agents = [
@@ -258,7 +223,6 @@ describe("composerMode derivation", () => {
     wrap(<HomePage />);
     expect(screen.getByTestId("composer").getAttribute("data-mode")).toBe("idle");
   });
-
   it("status='running' + turnActive=false → busy (Stop available between actions)", () => {
     hooksState.activeId = 5;
     hooksState.agents = [
@@ -268,7 +232,6 @@ describe("composerMode derivation", () => {
     wrap(<HomePage />);
     expect(screen.getByTestId("composer").getAttribute("data-mode")).toBe("busy");
   });
-
   it("TimelineView receives busy=true while status='running' even when turnActive=false", () => {
     hooksState.activeId = 5;
     hooksState.agents = [makeAgent({ agent_id: 5, status: "running" })];
@@ -276,7 +239,6 @@ describe("composerMode derivation", () => {
     wrap(<HomePage />);
     expect(screen.getByTestId("timeline").getAttribute("data-turn-active")).toBe("1");
   });
-
   it("TimelineView receives busy=false when idle and no turn in flight", () => {
     hooksState.activeId = 5;
     hooksState.agents = [makeAgent({ agent_id: 5, status: "idling" })];
@@ -292,7 +254,6 @@ describe("Spawn flow", () => {
     fireEvent.click(screen.getByTestId("sidebar-spawn"));
     await waitFor(() => expect(hooksState.focusComposer).toHaveBeenCalled());
   });
-
   it("spawn returns null → focusComposer not called", async () => {
     hooksState.spawn = vi.fn().mockResolvedValue(null);
     wrap(<HomePage />);
@@ -318,7 +279,6 @@ describe("send asks the timeline to stay with the tail", () => {
     await act(() => Promise.resolve());
     expect(hooksState.requestScrollToBottom).toHaveBeenCalledTimes(1);
   });
-
   it("send fails → requestScrollToBottom NOT called", async () => {
     hooksState.activeId = 5;
     hooksState.agents = [makeAgent({ agent_id: 5, status: "idling" })];
@@ -336,7 +296,6 @@ describe("UploadButton receives activeId", () => {
     wrap(<HomePage />);
     expect(screen.getByTestId("upload-button").getAttribute("data-agent-id")).toBe("null");
   });
-
   it("activeId=7 → upload-button data-agent-id '7'", () => {
     hooksState.activeId = 7;
     wrap(<HomePage />);
@@ -356,7 +315,6 @@ describe("pasted image routing", () => {
       },
     ],
   };
-
   it("explains unknown model capabilities while text and stop remain available", async () => {
     hooksState.activeId = 5;
     hooksState.agents = [makeAgent({ agent_id: 5, supports_vision: null, status: "running" })];
@@ -375,17 +333,14 @@ describe("pasted image routing", () => {
     await waitFor(() => expect(api.submitUploadedFiles).toHaveBeenCalledTimes(1));
     expect(api.uploadFiles).not.toHaveBeenCalled();
   });
-
   it("uses file delivery without a native thumbnail for a text-only agent", async () => {
     hooksState.activeId = 5;
     hooksState.agents = [makeAgent({ agent_id: 5, supports_vision: false })];
     const image = new File(["png"], "paste.png", { type: "image/png" });
-
     wrap(<HomePage />);
     fireEvent.paste(screen.getByTestId("composer-paste-target"), {
       clipboardData: { files: [image], types: ["Files"] },
     });
-
     await waitFor(() => expect(vi.mocked(api.submitUploadedFiles)).toHaveBeenCalledTimes(1));
     expect(vi.mocked(api.submitUploadedFiles)).toHaveBeenCalledWith(
       5,
@@ -396,7 +351,6 @@ describe("pasted image routing", () => {
     expect(vi.mocked(api.uploadFiles)).not.toHaveBeenCalled();
     expect(screen.queryByTestId("composer-image-thumbnail")).toBeNull();
   });
-
   it.each(["claude_code", "codex"] as const)("routes images as files and hides native context for %s", async (harness) => {
     hooksState.activeId = 5;
     hooksState.agents = [makeAgent({ agent_id: 5, harness, supports_vision: true })];
@@ -411,26 +365,22 @@ describe("pasted image routing", () => {
     expect(api.uploadFiles).not.toHaveBeenCalled();
     expect(screen.queryByTestId("composer-image-thumbnail")).toBeNull();
   });
-
   it("keeps the native image attachment path for a vision-capable agent", async () => {
     hooksState.activeId = 5;
     hooksState.agents = [makeAgent({ agent_id: 5, supports_vision: true })];
     hooksState.settings["display.composer_context_meter"] = true;
     vi.mocked(api.uploadFiles).mockResolvedValueOnce(uploadResult);
     const image = new File(["png"], "paste.png", { type: "image/png" });
-
     wrap(<HomePage />);
     fireEvent.paste(screen.getByTestId("composer-paste-target"), {
       clipboardData: { files: [image], types: ["Files"] },
     });
-
     await waitFor(() =>
       expect(vi.mocked(api.uploadFiles)).toHaveBeenCalledWith(5, [image]),
     );
     expect(await screen.findByTestId("composer-image-thumbnail")).toBeTruthy();
     expect(screen.getByTestId("composer").getAttribute("data-context-meter")).toBe("true");
   });
-
   it("submits on private HTTP when randomUUID is unavailable", async () => {
     const browserCrypto = globalThis.crypto;
     vi.stubGlobal("crypto", { getRandomValues: browserCrypto.getRandomValues.bind(browserCrypto) });
@@ -453,7 +403,6 @@ describe("pasted image routing", () => {
   });
 });
 
-
 describe("multi-command dispatch", () => {
   it("sends one message for two space-separated commands", async () => {
     hooksState.activeId = 5;
@@ -469,7 +418,6 @@ describe("multi-command dispatch", () => {
     await act(() => Promise.resolve());
     expect(hooksState.requestScrollToBottom).toHaveBeenCalledTimes(1);
   });
-
   it("sends command arguments verbatim in that one message", async () => {
     hooksState.activeId = 5;
     hooksState.agents = [makeAgent({ agent_id: 5, status: "idling" })];
@@ -482,7 +430,6 @@ describe("multi-command dispatch", () => {
       expect.any(String),
     );
   });
-
   it("sends a single message for plain text (no slash prefix)", async () => {
     hooksState.activeId = 5;
     hooksState.agents = [makeAgent({ agent_id: 5, status: "idling" })];
@@ -495,7 +442,6 @@ describe("multi-command dispatch", () => {
       expect.any(String),
     );
   });
-
   it("attaches images to the one command message", async () => {
     hooksState.activeId = 5;
     hooksState.agents = [makeAgent({ agent_id: 5, status: "idling" })];
@@ -511,7 +457,6 @@ describe("multi-command dispatch", () => {
       expect.any(String),
     );
   });
-
   it("does not ask for the tail when the send fails", async () => {
     hooksState.activeId = 5;
     hooksState.agents = [makeAgent({ agent_id: 5, status: "idling" })];

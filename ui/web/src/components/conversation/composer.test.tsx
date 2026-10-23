@@ -1,12 +1,9 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render as rtlRender, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-
 import { api } from "@/lib/transport/api";
 import { clearMessageSent, markMessageSent } from "@/lib/format/interaction-timing";
-
 import { Composer } from "./composer";
-
 let commandList: { name: string; description: string; instruction_hint: string }[] = [];
 vi.mock("@/lib/transport/api", () => ({
   MessageDeliveryUnknownError: class MessageDeliveryUnknownError extends Error {
@@ -29,14 +26,11 @@ vi.mock("@/lib/transport/api", () => ({
       }),
   },
 }));
-
 vi.mock("@/lib/format/interaction-timing", () => ({
   clearMessageSent: vi.fn(),
   markMessageSent: vi.fn(),
 }));
-
 const getCommandsMock = vi.mocked(api.getCommands);
-
 beforeEach(() => {
   vi.mocked(clearMessageSent).mockClear();
   vi.mocked(markMessageSent).mockClear();
@@ -44,7 +38,6 @@ beforeEach(() => {
     Promise.resolve(commandList),
   );
 });
-
 afterEach(() => {
   cleanup();
   commandList = [];
@@ -52,13 +45,11 @@ afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
-
 const baseProps = {
   contextTokens: 0,
   onSend: vi.fn(() => Promise.resolve(true)),
   onStop: vi.fn(),
 };
-
 
 function render(ui: React.ReactElement) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -66,14 +57,12 @@ function render(ui: React.ReactElement) {
     <QueryClientProvider client={qc}>{children}</QueryClientProvider> });
 }
 
-
 describe("Composer placeholder", () => {
   it("explains that messaging a terminated agent resurrects it", () => {
     const { rerender } = render(<Composer {...baseProps} mode="idle" />);
     expect(screen.getByTestId("composer-input").getAttribute("placeholder")).toBe(
       "Send a message",
     );
-
     rerender(<Composer {...baseProps} mode="idle" agentTerminated />);
     expect(screen.getByTestId("composer-input").getAttribute("placeholder")).toBe(
       "Send a message to resurrect this agent",
@@ -87,11 +76,9 @@ describe("Composer reply suggestion", () => {
   function input(): HTMLTextAreaElement {
     return screen.getByTestId<HTMLTextAreaElement>("composer-input");
   }
-
   it("browses numbered candidates in the placeholder and sends only the accepted text", async () => {
     const onSend = vi.fn(() => Promise.resolve(true));
     render(<Composer {...baseProps} mode="idle" onSend={onSend} suggestions={["Use A.", "Use B.", "Use C.", "Use D."]} />);
-
     expect(input().placeholder).toBe("[1/4] Use A.");
     fireEvent.keyDown(input(), { key: "Enter" });
     expect(onSend).not.toHaveBeenCalled();
@@ -108,29 +95,24 @@ describe("Composer reply suggestion", () => {
     fireEvent.keyDown(input(), { key: "ArrowDown" });
     expect(input().placeholder).toBe("[4/4] Use D.");
     expect(input().value).toBe("");
-
     fireEvent.keyDown(input(), { key: "ArrowRight" });
     await waitFor(() => expect(input().value).toBe("Use D."));
     expect(input().selectionStart).toBe("Use D.".length);
     expect(input().selectionEnd).toBe("Use D.".length);
     fireEvent.keyDown(input(), { key: "Enter" });
-
     await waitFor(() => expect(onSend).toHaveBeenCalledWith("Use D.", [], expect.any(String)));
     await waitFor(() => expect(input().value).toBe(""));
     expect(input().placeholder).toBe("Send a message");
     expect(fireEvent.keyDown(input(), { key: "ArrowRight" })).toBe(true);
     expect(input().value).toBe("");
   });
-
   it("stops at the first and last candidate instead of wrapping around", () => {
     render(<Composer {...baseProps} mode="idle" suggestions={["Use A.", "Use B.", "Use C."]} />);
-
     expect(input().placeholder).toBe("[1/3] Use A.");
     fireEvent.keyDown(input(), { key: "ArrowUp" });
     expect(input().placeholder).toBe("[1/3] Use A.");
     fireEvent.keyDown(input(), { key: "ArrowUp" });
     expect(input().placeholder).toBe("[1/3] Use A.");
-
     fireEvent.keyDown(input(), { key: "ArrowDown" });
     expect(input().placeholder).toBe("[2/3] Use B.");
     fireEvent.keyDown(input(), { key: "ArrowDown" });
@@ -139,7 +121,6 @@ describe("Composer reply suggestion", () => {
     expect(input().placeholder).toBe("[3/3] Use C.");
     fireEvent.keyDown(input(), { key: "ArrowDown" });
     expect(input().placeholder).toBe("[3/3] Use C.");
-
     fireEvent.keyDown(input(), { key: "ArrowUp" });
     expect(input().placeholder).toBe("[2/3] Use B.");
     fireEvent.keyDown(input(), { key: "ArrowUp" });
@@ -147,21 +128,17 @@ describe("Composer reply suggestion", () => {
     fireEvent.keyDown(input(), { key: "ArrowUp" });
     expect(input().placeholder).toBe("[1/3] Use A.");
   });
-
   it("restores the selected candidate when an accepted or edited draft is cleared", async () => {
     render(<Composer {...baseProps} mode="idle" suggestions={["Use A.", "Use B.", "Use C."]} />);
     fireEvent.keyDown(input(), { key: "ArrowDown" });
     fireEvent.keyDown(input(), { key: "ArrowRight" });
     await waitFor(() => expect(input().value).toBe("Use B."));
-
     fireEvent.change(input(), { target: { value: "Use B, with changes." } });
     fireEvent.change(input(), { target: { value: "" } });
-
     expect(input().placeholder).toBe("[2/3] Use B.");
     fireEvent.keyDown(input(), { key: "ArrowUp" });
     expect(input().placeholder).toBe("[1/3] Use A.");
   });
-
   it("keeps the selected candidate after a failed send and shows new candidates after success", async () => {
     const onSend = vi.fn().mockResolvedValueOnce(false).mockResolvedValueOnce(true);
     const options = ["Use A.", "Use B."];
@@ -174,36 +151,30 @@ describe("Composer reply suggestion", () => {
     expect(input().value).toBe("Use B.");
     fireEvent.change(input(), { target: { value: "" } });
     expect(input().placeholder).toBe("[2/2] Use B.");
-
     fireEvent.keyDown(input(), { key: "ArrowRight" });
     fireEvent.keyDown(input(), { key: "Enter" });
     await waitFor(() => expect(input().value).toBe(""));
     expect(input().placeholder).toBe("Send a message");
-
     rerender(<Composer {...baseProps} mode="idle" onSend={onSend} suggestions={["Continue.", "Stop here."]} />);
     expect(input().placeholder).toBe("[1/2] Continue.");
   });
-
   it("resets to the first candidate for a new response or another agent", () => {
     const options = ["Use A.", "Use B."];
     const { rerender } = render(<Composer {...baseProps} mode="idle" agentId={7} suggestions={options} />);
     fireEvent.keyDown(input(), { key: "ArrowDown" });
     expect(input().placeholder).toBe("[2/2] Use B.");
-
     rerender(<Composer {...baseProps} mode="idle" agentId={8} suggestions={options} />);
     expect(input().placeholder).toBe("[1/2] Use A.");
     fireEvent.keyDown(input(), { key: "ArrowDown" });
     rerender(<Composer {...baseProps} mode="idle" agentId={8} suggestions={["Explain X.", "Explain Y."]} />);
     expect(input().placeholder).toBe("[1/2] Explain X.");
   });
-
   it.each(["ArrowUp", "ArrowDown", "ArrowRight"])("leaves %s to the input method during composition", (key) => {
     render(<Composer {...baseProps} mode="idle" suggestions={["Use A.", "Use B."]} />);
     expect(fireEvent.keyDown(input(), { key, isComposing: true })).toBe(true);
     expect(input().placeholder).toBe("[1/2] Use A.");
     expect(input().value).toBe("");
   });
-
   it.each(["ArrowUp", "ArrowDown"])("leaves modified %s and nonempty drafts alone", (key) => {
     render(<Composer {...baseProps} mode="idle" suggestions={["Use A.", "Use B."]} />);
     for (const modifier of [{ shiftKey: true }, { ctrlKey: true }, { altKey: true }, { metaKey: true }]) {
@@ -215,19 +186,14 @@ describe("Composer reply suggestion", () => {
     expect(input().value).toBe("My reply");
     expect(input().placeholder).toBe("Send a message");
   });
-
   it("shows the suggestion as the placeholder of the empty input", () => {
     render(<Composer {...baseProps} mode="idle" suggestions={[SUGGESTION]} />);
-
     expect(input().getAttribute("placeholder")).toBe(SUGGESTION);
     expect(input().value).toBe("");
   });
-
   it("ArrowRight accepts it: the input holds the text and the caret is at the end", async () => {
     render(<Composer {...baseProps} mode="idle" suggestions={[SUGGESTION]} />);
-
     const notPrevented = fireEvent.keyDown(input(), { key: "ArrowRight" });
-
     expect(notPrevented).toBe(false);
     await waitFor(() => {
       expect(input().value).toBe(SUGGESTION);
@@ -237,42 +203,32 @@ describe("Composer reply suggestion", () => {
     });
     expect(input().selectionEnd).toBe(SUGGESTION.length);
   });
-
   it("an accepted suggestion is an ordinary draft: Enter sends it", async () => {
     const onSend = vi.fn(() => Promise.resolve(true));
     render(<Composer {...baseProps} mode="idle" onSend={onSend} suggestions={[SUGGESTION]} />);
-
     fireEvent.keyDown(input(), { key: "ArrowRight" });
     await waitFor(() => {
       expect(input().value).toBe(SUGGESTION);
     });
     fireEvent.keyDown(input(), { key: "Enter" });
-
     await waitFor(() => {
       expect(onSend).toHaveBeenCalledWith(SUGGESTION, [], expect.any(String));
     });
   });
-
   it("typing hides it, and emptying the input brings it back", () => {
     render(<Composer {...baseProps} mode="idle" suggestions={[SUGGESTION]} />);
-
     fireEvent.change(input(), { target: { value: "n" } });
     expect(input().getAttribute("placeholder")).toBe("Send a message");
-
     fireEvent.change(input(), { target: { value: "" } });
     expect(input().getAttribute("placeholder")).toBe(SUGGESTION);
   });
-
   it("ArrowRight in a non-empty input moves the caret as usual", () => {
     render(<Composer {...baseProps} mode="idle" suggestions={[SUGGESTION]} />);
     fireEvent.change(input(), { target: { value: "draft" } });
-
     const notPrevented = fireEvent.keyDown(input(), { key: "ArrowRight" });
-
     expect(notPrevented).toBe(true);
     expect(input().value).toBe("draft");
   });
-
   it.each([
     ["Shift", { shiftKey: true }],
     ["Ctrl", { ctrlKey: true }],
@@ -280,44 +236,30 @@ describe("Composer reply suggestion", () => {
     ["Meta", { metaKey: true }],
   ])("%s+ArrowRight does not accept it", (_name, modifier) => {
     render(<Composer {...baseProps} mode="idle" suggestions={[SUGGESTION]} />);
-
     const notPrevented = fireEvent.keyDown(input(), { key: "ArrowRight", ...modifier });
-
     expect(notPrevented).toBe(true);
     expect(input().value).toBe("");
   });
-
   it("ArrowRight during IME composition is left to the input method", () => {
     render(<Composer {...baseProps} mode="idle" suggestions={[SUGGESTION]} />);
-
     const notPrevented = fireEvent.keyDown(input(), { key: "ArrowRight", isComposing: true });
-
     expect(notPrevented).toBe(true);
     expect(input().value).toBe("");
   });
-
   it("without a suggestion ArrowRight does nothing special", () => {
     render(<Composer {...baseProps} mode="idle" />);
-
     const notPrevented = fireEvent.keyDown(input(), { key: "ArrowRight" });
-
     expect(notPrevented).toBe(true);
     expect(input().value).toBe("");
   });
-
   it("a suggestion that goes away restores the normal placeholder", () => {
     const { rerender } = render(<Composer {...baseProps} mode="idle" suggestions={[SUGGESTION]} />);
-
     rerender(<Composer {...baseProps} mode="idle" suggestions={null} />);
-
     expect(input().getAttribute("placeholder")).toBe("Send a message");
   });
-
   it("works while the agent is busy: the user may queue a reply", async () => {
     render(<Composer {...baseProps} mode="busy" suggestions={[SUGGESTION]} />);
-
     fireEvent.keyDown(input(), { key: "ArrowRight" });
-
     await waitFor(() => {
       expect(input().value).toBe(SUGGESTION);
     });
@@ -333,22 +275,18 @@ describe("Composer button mode dispatch", () => {
     expect(root.className).not.toContain("max-w-[45rem]");
     expect(root.style.maxWidth).toBe("min(40vw, 1280px)");
   });
-
   it("uses the tighter bottom gap without changing the textarea height", () => {
     render(<Composer {...baseProps} mode="idle" />);
     const root = screen.getByTestId("composer");
-
     expect(root.className).toContain("pb-3");
     expect(root.className).not.toContain("pb-5");
     expect(screen.getByTestId("composer-input").className).toContain("min-h-9");
   });
-
   it("root maxWidth follows the maxWidthCss prop (setting-derived)", () => {
     render(<Composer {...baseProps} mode="idle" maxWidthCss="min(60vw, 1280px)" />);
     const root = screen.getByTestId("composer");
     expect(root.style.maxWidth).toBe("min(60vw, 1280px)");
   });
-
   it("undefined maxWidthCss (mobile) → no inline maxWidth, full-width", () => {
     render(<Composer {...baseProps} mode="idle" maxWidthCss={undefined} />);
     const root = screen.getByTestId("composer");
@@ -356,98 +294,79 @@ describe("Composer button mode dispatch", () => {
     expect(root.className).toContain("w-full");
     expect(root.className).toContain("mx-auto");
   });
-
   it("mode='idle' + non-empty input → click triggers onSend, not onStop", async () => {
     const onSend = vi.fn(() => Promise.resolve(true));
     const onStop = vi.fn();
     render(<Composer {...baseProps} mode="idle" onSend={onSend} onStop={onStop} />);
-
     const ta = screen.getByTestId<HTMLTextAreaElement>("composer-input");
     fireEvent.change(ta, { target: { value: "hello" } });
-
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
     await Promise.resolve();
     await Promise.resolve();
     expect(onSend).toHaveBeenCalledWith("hello", [], expect.any(String));
     expect(onStop).not.toHaveBeenCalled();
   });
-
   it("marks send latency at submit time before message delivery starts", () => {
     const onSend = vi.fn(() => new Promise<boolean>(() => undefined));
     render(<Composer {...baseProps} agentId={42} mode="idle" onSend={onSend} />);
     fireEvent.change(screen.getByTestId("composer-input"), { target: { value: "hello" } });
-
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
-
     expect(markMessageSent).toHaveBeenCalledWith(42);
     expect(vi.mocked(markMessageSent).mock.invocationCallOrder[0]).toBeLessThan(
       onSend.mock.invocationCallOrder[0],
     );
   });
-
   it("mode='busy' + non-empty input → click triggers onSend (goes through inbound queue, doesn't stop turn)", async () => {
     const onSend = vi.fn(() => Promise.resolve(true));
     const onStop = vi.fn();
     render(<Composer {...baseProps} mode="busy" onSend={onSend} onStop={onStop} />);
-
     const ta = screen.getByTestId<HTMLTextAreaElement>("composer-input");
     fireEvent.change(ta, { target: { value: "draft" } });
-
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
     await Promise.resolve();
     await Promise.resolve();
     expect(onSend).toHaveBeenCalledWith("draft", [], expect.any(String));
     expect(onStop).not.toHaveBeenCalled();
   });
-
   it("mode='busy' + empty input → click triggers onStop (cancel path)", () => {
     const onStop = vi.fn();
     render(<Composer {...baseProps} mode="busy" onStop={onStop} />);
     fireEvent.click(screen.getByRole("button", { name: "Stop current turn" }));
     expect(onStop).toHaveBeenCalled();
   });
-
   it("mode='busy' typing a char → aria-label switches from 'Stop current turn' to 'Send message'", () => {
     render(<Composer {...baseProps} mode="busy" />);
     expect(screen.getByRole("button").getAttribute("aria-label")).toBe("Stop current turn");
-
     const ta = screen.getByTestId<HTMLTextAreaElement>("composer-input");
     fireEvent.change(ta, { target: { value: "x" } });
     expect(screen.getByRole("button").getAttribute("aria-label")).toBe("Send message");
-
     fireEvent.change(ta, { target: { value: "" } });
     expect(screen.getByRole("button").getAttribute("aria-label")).toBe("Stop current turn");
   });
-
   it("mode='busy' + whitespace-only → button still stop (empty after trim; guards against .trim() being silently dropped, flipping to send)", () => {
     render(<Composer {...baseProps} mode="busy" />);
     const ta = screen.getByTestId<HTMLTextAreaElement>("composer-input");
     fireEvent.change(ta, { target: { value: "   \n  " } });
     expect(screen.getByRole("button").getAttribute("aria-label")).toBe("Stop current turn");
   });
-
   it("mode='disabled' → button disabled, neither onSend nor onStop fires", () => {
     const onSend = vi.fn(() => Promise.resolve(true));
     const onStop = vi.fn();
     render(<Composer {...baseProps} mode="disabled" onSend={onSend} onStop={onStop} />);
-
     const btn = screen.getByRole<HTMLButtonElement>("button");
     expect(btn.disabled).toBe(true);
     fireEvent.click(btn);
     expect(onSend).not.toHaveBeenCalled();
     expect(onStop).not.toHaveBeenCalled();
   });
-
   it("mode='idle' + empty input → button disabled (empty send is meaningless)", () => {
     render(<Composer {...baseProps} mode="idle" />);
     const btn = screen.getByRole<HTMLButtonElement>("button", { name: "Send message" });
     expect(btn.disabled).toBe(true);
   });
-
   it("aria-label follows mode ('Send message' ↔ 'Stop current turn')", () => {
     const { rerender } = render(<Composer {...baseProps} mode="idle" />);
     expect(screen.getByRole("button").getAttribute("aria-label")).toBe("Send message");
-
     rerender(<Composer {...baseProps} mode="busy" />);
     expect(screen.getByRole("button").getAttribute("aria-label")).toBe("Stop current turn");
   });
@@ -464,7 +383,6 @@ describe("Composer Enter / IME / Shift+Enter", () => {
     await Promise.resolve();
     expect(onSend).toHaveBeenCalledWith("msg", [], expect.any(String));
   });
-
   it("Enter in mode='busy' goes to onSend, not onStop (stop is click-only)", async () => {
     const onSend = vi.fn(() => Promise.resolve(true));
     const onStop = vi.fn();
@@ -477,7 +395,6 @@ describe("Composer Enter / IME / Shift+Enter", () => {
     expect(onSend).toHaveBeenCalledWith("draft", [], expect.any(String));
     expect(onStop).not.toHaveBeenCalled();
   });
-
   it("mode='busy' + empty input → Enter no-op (nothing to send, also not stop)", async () => {
     const onSend = vi.fn(() => Promise.resolve(true));
     const onStop = vi.fn();
@@ -488,7 +405,6 @@ describe("Composer Enter / IME / Shift+Enter", () => {
     expect(onSend).not.toHaveBeenCalled();
     expect(onStop).not.toHaveBeenCalled();
   });
-
   it("IME composing (isComposing=true) → Enter does not trigger (CJK pinyin must be protected)", async () => {
     const onSend = vi.fn(() => Promise.resolve(true));
     render(<Composer {...baseProps} mode="idle" onSend={onSend} />);
@@ -498,7 +414,6 @@ describe("Composer Enter / IME / Shift+Enter", () => {
     await Promise.resolve();
     expect(onSend).not.toHaveBeenCalled();
   });
-
   it("IME Process key fallback → Enter does not trigger (even with isComposing=false)", async () => {
     const onSend = vi.fn(() => Promise.resolve(true));
     render(<Composer {...baseProps} mode="idle" onSend={onSend} />);
@@ -508,7 +423,6 @@ describe("Composer Enter / IME / Shift+Enter", () => {
     await Promise.resolve();
     expect(onSend).not.toHaveBeenCalled();
   });
-
   it("Shift+Enter → does not trigger send (default newline behavior, let textarea handle it)", async () => {
     const onSend = vi.fn(() => Promise.resolve(true));
     render(<Composer {...baseProps} mode="idle" onSend={onSend} />);

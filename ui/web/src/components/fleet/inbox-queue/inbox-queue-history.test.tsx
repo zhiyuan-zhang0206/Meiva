@@ -1,17 +1,13 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { ComponentProps } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { AgentRow, NoticeItem, OpenNotice, PageRow, TaskSummaryRow } from "@/lib/contracts/types";
 import type { NoticesFeed } from "@/lib/notifications/use-notices";
 
-// Echo the timestamp back so a test can tell WHICH timestamp a row rendered
-// (created_at vs resolved_at) rather than only that some time was shown.
 vi.mock("@/lib/agents/sidebar", () => ({ formatRelativeTime: (ts: string) => `rel:${ts}` }));
 
-// api.resolveNotice is the only network call (the shared OpenNoticeDetail makes
-// it). Mocked.
 const resolveNotice = vi.fn<
   (agentId: number, noticeId: number, body: { action: string; reply?: string }) => Promise<{ status: string }>
 >();
@@ -22,19 +18,13 @@ vi.mock("@/lib/transport/api", () => ({
   },
 }));
 
-// The whole queue is injected through the single data contract
-// (open/awaiting + resolved history). Default: empty.
 const inboxFeedMock = vi.fn<() => NoticesFeed>();
-// The instant local drop after a resolve (Task #1814) — mocked so a click
-// under test never needs a real query cache.
 const dropOpenNotices = vi.fn<(queryClient: unknown, noticeIds: number[]) => void>();
 vi.mock("@/lib/notifications/use-notices", () => ({
   useNotices: () => inboxFeedMock(),
   dropOpenNotices: (qc: unknown, ids: number[]) => dropOpenNotices(qc, ids),
 }));
 
-// The queue joins entries to the task registry client-side (grouping); feed it a
-// controlled task list. Default: none — every entry stays a flat row.
 const useTasksMock = vi.fn<(window?: string, fields?: string) => { tasks: TaskSummaryRow[]; loading: boolean; error: boolean }>(
   () => ({ tasks: [], loading: false, error: false }),
 );
@@ -42,12 +32,10 @@ vi.mock("@/lib/notifications/use-tasks", () => ({
   useTasks: (window?: string, fields?: string) => useTasksMock(window, fields),
 }));
 
-// The fleet-wide open-pages feed drives the "agent's live page" affordances.
-// Stub the hook (default: no pages).
 const useAllPagesMock = vi.fn<() => PageRow[]>(() => []);
 vi.mock("@/lib/agents/use-all-pages", () => ({ useAllPages: () => useAllPagesMock() }));
 
-import { InboxQueue } from "./inbox-queue";
+import { InboxQueue } from "../inbox-queue";
 
 const scrollIntoViewMock = vi.fn();
 Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
@@ -80,9 +68,6 @@ function setFeed(over: Partial<NoticesFeed> = {}) {
   inboxFeedMock.mockReturnValue(emptyFeed(over));
 }
 
-// require_response open notice (rides the agent snapshot).
-// A require_response notice — the awaiting half of the feed (NoticeItem
-// shape, as the unified endpoint returns it).
 function n(over: Partial<NoticeItem> & { id: number; title: string }): NoticeItem {
   return {
     id: over.id,
@@ -103,7 +88,6 @@ function n(over: Partial<NoticeItem> & { id: number; title: string }): NoticeIte
   };
 }
 
-// Standalone NoticeItem (FYI feed / resolved history).
 function ni(over: Partial<NoticeItem> & { id: number; title: string }): NoticeItem {
   return {
     id: over.id,
@@ -171,8 +155,6 @@ function renderQueue(
   );
 }
 
-// The title list (master column) — scope queries here so an auto-selected notice's
-// detail heading doesn't double-count its title.
 function listTitles(): string[] {
   const list = screen.getByRole("list", { name: /inbox queue/i });
   return within(list)
@@ -180,216 +162,6 @@ function listTitles(): string[] {
     .map((b) => b.querySelector('[data-testid="notice-title"]')?.textContent ?? "")
     .filter((t) => t !== "");
 }
-
-describe("InboxQueue — open stream", () => {
-  it("formats queue titles without putting active links inside selection buttons", async () => {
-    setFeed({ awaiting: [n({ id: 10, title: "**Decide** [scope](https://example.com/scope)" })] });
-    renderQueue([agent({ agent_id: 7 })]);
-    const row = screen.getByTestId("notice-title");
-    await waitFor(() => expect(row.querySelector("strong")?.textContent).toBe("Decide"));
-    expect(row.querySelector("a, div, p")).toBeNull();
-    expect(screen.getByRole("link", { name: "scope" }).getAttribute("href")).toBe("https://example.com/scope");
-  });
-
-  it("shows an empty state when nothing is open and nothing resolved", () => {
-    setFeed();
-    renderQueue([agent({ agent_id: 1 })]);
-    expect(screen.getByText(/Nothing needs your attention/)).not.toBeNull();
-  });
-
-  it("excludes legacy FYI entries from the response queue", () => {
-    setFeed({
-      open: [ni({ id: 20, title: "fyi-p0", priority: "P0" }), ni({ id: 21, title: "fyi-p3", priority: "P3" })],
-      awaiting: [n({ id: 10, title: "dec-p2", priority: "P2" })],
-    });
-    renderQueue([agent({ agent_id: 1, label: "a" })]);
-    expect(listTitles()).toEqual(["dec-p2"]);
-  });
-
-  it("labels every response-required row", () => {
-    setFeed({
-      open: [ni({ id: 40, title: "just-fyi", priority: "P2" })],
-      awaiting: [
-        n({ id: 41, title: "needs-answer", priority: "P2" }),
-        n({ id: 42, title: "stalled", priority: "P2", blocking: true }),
-      ],
-    });
-    renderQueue([agent({ agent_id: 1, label: "a" })]);
-    const list = screen.getByRole("list", { name: /inbox queue/i });
-    const rungOf = (title: string) =>
-      within(list)
-        .getByText(title)
-        .closest('[data-testid="inbox-row"]')
-        ?.querySelector('[data-testid="notice-kind"]')?.textContent;
-    expect(within(list).queryByText("just-fyi")).toBeNull();
-    expect(rungOf("needs-answer")).toBe("Decision");
-    expect(rungOf("stalled")).toBe("Decision");
-  });
-
-  it("breaks priority ties by blocking, then oldest", () => {
-    setFeed({
-      awaiting: [
-        n({ id: 30, title: "t-newer", priority: "P2", created_at: "2026-06-14T02:00:00Z" }),
-        n({ id: 31, title: "t-older", priority: "P2", created_at: "2026-06-14T01:00:00Z" }),
-        n({ id: 32, title: "t-block", priority: "P2", blocking: true, created_at: "2026-06-14T03:00:00Z" }),
-      ],
-    });
-    renderQueue([agent({ agent_id: 1, label: "a" })]);
-    expect(listTitles()).toEqual(["t-block", "t-older", "t-newer"]);
-  });
-});
-
-describe("InboxQueue — route anchor", () => {
-  it("scrolls to and briefly highlights the matching notice without reordering", async () => {
-    vi.useFakeTimers();
-    const raf = vi
-      .spyOn(window, "requestAnimationFrame")
-      .mockImplementation((callback) => {
-        callback(0);
-        return 1;
-      });
-    try {
-      setFeed({
-        awaiting: [
-          n({ id: 1, agent_id: 1, title: "first", priority: "P0" }),
-          n({ id: 2, agent_id: 405, title: "target", priority: "P3" }),
-        ],
-      });
-      renderQueue(
-        [agent({ agent_id: 1 }), agent({ agent_id: 405 })],
-        { anchorAgentId: 405 },
-      );
-
-      expect(listTitles()).toEqual(["first", "target"]);
-      const target = screen.getByText("target").closest('[data-testid="inbox-row"]');
-      expect(target?.getAttribute("data-anchor-highlighted")).toBe("true");
-      expect(target?.className).toContain("bg-primary/10");
-      expect(scrollIntoViewMock).toHaveBeenCalledWith({ block: "nearest" });
-
-      await act(() => vi.advanceTimersByTime(1_600));
-      expect(target?.getAttribute("data-anchor-highlighted")).toBeNull();
-      expect(listTitles()).toEqual(["first", "target"]);
-    } finally {
-      raf.mockRestore();
-      vi.useRealTimers();
-    }
-  });
-
-  it("keeps the default position when that agent has no notice", () => {
-    setFeed({
-      awaiting: [
-        n({ id: 1, agent_id: 1, title: "first", priority: "P0" }),
-        n({ id: 2, agent_id: 2, title: "second", priority: "P3" }),
-      ],
-    });
-    renderQueue(
-      [agent({ agent_id: 1 }), agent({ agent_id: 2 })],
-      { anchorAgentId: 405 },
-    );
-
-    expect(listTitles()).toEqual(["first", "second"]);
-    expect(screen.getByRole("heading", { name: "first" })).toBeTruthy();
-    expect(document.querySelector('[data-anchor-highlighted="true"]')).toBeNull();
-    expect(scrollIntoViewMock).not.toHaveBeenCalled();
-  });
-});
-
-describe("InboxQueue — decision (require_response) action surface", () => {
-  it("auto-selects the top notice; submits an answer via the Send button", async () => {
-    resolveNotice.mockResolvedValue({ status: "running" });
-    setFeed({ awaiting: [n({ id: 99, title: "Send it?", content: "A) yes\nB) no", priority: "P0" })] });
-    renderQueue([agent({ agent_id: 7, label: "lead" })]);
-    // Top notice auto-selected -> its content shows without a click.
-    expect(screen.getByText(/A\) yes/)).not.toBeNull();
-    fireEvent.change(screen.getByRole("textbox"), { target: { value: "A" } });
-    fireEvent.click(screen.getByLabelText("Send answer"));
-    await waitFor(() => expect(resolveNotice).toHaveBeenCalledWith(7, 99, { action: "answer", reply: "A" }));
-  });
-
-  it("Enter submits; Shift+Enter does not; IME composition does not", async () => {
-    resolveNotice.mockResolvedValue({ status: "running" });
-    setFeed({ awaiting: [n({ id: 99, title: "Q?" })] });
-    renderQueue([agent({ agent_id: 7, label: "lead" })]);
-    const box = screen.getByRole("textbox");
-    fireEvent.change(box, { target: { value: "yes" } });
-
-    fireEvent.keyDown(box, { key: "Enter", shiftKey: true });
-    expect(resolveNotice).not.toHaveBeenCalled();
-    fireEvent.keyDown(box, { key: "Enter", isComposing: true });
-    expect(resolveNotice).not.toHaveBeenCalled();
-
-    fireEvent.keyDown(box, { key: "Enter" });
-    await waitFor(() => expect(resolveNotice).toHaveBeenCalledWith(7, 99, { action: "answer", reply: "yes" }));
-  });
-
-  it("does not submit a blank answer", () => {
-    setFeed({ awaiting: [n({ id: 99, title: "Q?" })] });
-    renderQueue([agent({ agent_id: 7, label: "lead" })]);
-    fireEvent.click(screen.getByLabelText("Send answer"));
-    expect(resolveNotice).not.toHaveBeenCalled();
-  });
-
-  it("dismiss submits action:'dismiss' with no reply", async () => {
-    resolveNotice.mockResolvedValue({ status: "running" });
-    setFeed({ awaiting: [n({ id: 99, title: "Q?" })] });
-    renderQueue([agent({ agent_id: 7, label: "lead" })]);
-    fireEvent.click(screen.getByRole("button", { name: "Close without answering" }));
-    await waitFor(() => expect(resolveNotice).toHaveBeenCalledWith(7, 99, { action: "dismiss" }));
-  });
-
-  it("auto-advances to the next open notice after a send", async () => {
-    resolveNotice.mockResolvedValue({ status: "running" });
-    setFeed({
-      awaiting: [n({ id: 1, title: "first", priority: "P0" }), n({ id: 2, title: "second", priority: "P1" })],
-    });
-    renderQueue([agent({ agent_id: 7, label: "lead" })]);
-    // "first" auto-selected.
-    expect(screen.getByLabelText(/Reply to notice: first/)).not.toBeNull();
-    fireEvent.change(screen.getByRole("textbox"), { target: { value: "a1" } });
-    fireEvent.keyDown(screen.getByRole("textbox"), { key: "Enter" });
-    await waitFor(() => expect(resolveNotice).toHaveBeenCalledWith(7, 1, { action: "answer", reply: "a1" }));
-    // Selection advances -> the next notice's reply box mounts.
-    await waitFor(() => expect(screen.getByLabelText(/Reply to notice: second/)).not.toBeNull());
-  });
-
-  it("empty-box Down/Up arrows cycle the selection", async () => {
-    setFeed({
-      awaiting: [n({ id: 1, title: "first", priority: "P0" }), n({ id: 2, title: "second", priority: "P1" })],
-    });
-    renderQueue([agent({ agent_id: 7, label: "lead" })]);
-    fireEvent.keyDown(screen.getByRole("textbox"), { key: "ArrowDown" });
-    await waitFor(() => expect(screen.getByLabelText(/Reply to notice: second/)).not.toBeNull());
-    fireEvent.keyDown(screen.getByRole("textbox"), { key: "ArrowUp" });
-    await waitFor(() => expect(screen.getByLabelText(/Reply to notice: first/)).not.toBeNull());
-  });
-});
-
-describe("InboxQueue — notice lifecycle", () => {
-  it("hides legacy FYIs and never offers Mark read", () => {
-    setFeed({ open: [ni({ id: 1, title: "migration done" })] });
-    renderQueue([]);
-    expect(screen.queryByText("migration done")).toBeNull();
-    expect(screen.queryByText("Mark read")).toBeNull();
-    expect(screen.getByText(/Nothing needs your attention/)).toBeTruthy();
-  });
-
-  it("surfaces a 409 as already answered", async () => {
-    resolveNotice.mockRejectedValue(new Error("409 conflict"));
-    setFeed({ awaiting: [n({ id: 5, agent_id: 1, title: "stale" })] });
-    renderQueue([]);
-    fireEvent.change(screen.getByRole("textbox"), { target: { value: "yes" } });
-    fireEvent.click(screen.getByLabelText("Send answer"));
-    await waitFor(() => expect(screen.getByText(/already answered/i)).toBeTruthy());
-  });
-
-  it("drops the dismissed notice from the open queue immediately", async () => {
-    resolveNotice.mockResolvedValue({ status: "running" });
-    setFeed({ awaiting: [n({ id: 1, title: "first" }), n({ id: 2, title: "second" })] });
-    renderQueue([]);
-    fireEvent.click(screen.getByRole("button", { name: "Close without answering" }));
-    await waitFor(() => expect(dropOpenNotices).toHaveBeenCalledWith(expect.anything(), [1]));
-  });
-});
 
 describe("InboxQueue — resolved history (collapsed disclosure)", () => {
   it("keeps Markdown formatting in resolved titles and original choices", async () => {
@@ -413,12 +185,10 @@ describe("InboxQueue — resolved history (collapsed disclosure)", () => {
   it("keeps the resolved history behind a collapsed disclosure, off the main stream", () => {
     setFeed({ resolved: [ni({ id: 50, title: "old notice", resolution: "answered", reply: "my recorded answer" })] });
     renderQueue([agent({ agent_id: 1 })]);
-    // Collapsed: the row is not in the stream until the disclosure is opened.
     expect(screen.queryByText("old notice")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: /Resolved/ }));
     fireEvent.click(screen.getByText("old notice"));
     expect(screen.getByText(/my recorded answer/)).not.toBeNull();
-    // The resolved detail has no reply box.
     expect(screen.queryByRole("textbox")).toBeNull();
   });
 
@@ -426,16 +196,10 @@ describe("InboxQueue — resolved history (collapsed disclosure)", () => {
     setFeed({ resolved: [ni({ id: 50, title: "old notice" }), ni({ id: 51, title: "older notice" })] });
     renderQueue([agent({ agent_id: 1 })]);
     const btn = screen.getByRole("button", { name: "Resolved" });
-    // Accessible name is exactly the word — no trailing count (old code:
-    // the button read "Resolved 2").
     expect(btn.getAttribute("aria-label") ?? btn.textContent).toBe("Resolved");
     expect(btn.textContent).not.toMatch(/\d/);
   });
 
-  // A resolved row is stamped like an open one — agent label + the notice's own
-  // creation time. It previously rendered the RESOLUTION time in place of both
-  // (the label included), so the row lost its author and read as newer than the
-  // question actually was.
   it("stamps a resolved row with its agent label and creation time, not its resolution time", () => {
     setFeed({
       resolved: [
@@ -464,8 +228,6 @@ describe("InboxQueue — resolved history (collapsed disclosure)", () => {
     fireEvent.click(screen.getByRole("button", { name: /Resolved/ }));
     fireEvent.click(screen.getByText("old notice"));
 
-    // The reply lives INSIDE the scrolling body that holds the agent's text —
-    // as a bottom-pinned footer it sat outside that scroller entirely.
     const scroller = screen.getByText(/my recorded answer/).closest(".overflow-y-auto");
     expect(scroller).not.toBeNull();
     expect(scroller!.contains(screen.getByText("agent said this"))).toBe(true);
@@ -491,15 +253,12 @@ describe("InboxQueue — resolved history (collapsed disclosure)", () => {
     const fetchNextPage = vi.fn();
     setFeed({ resolved: [ni({ id: 60, title: "r1" })], hasNextPage: true, fetchNextPage });
     renderQueue([]);
-    // Show more is hidden while the disclosure is collapsed.
     expect(screen.queryByRole("button", { name: /Show more/ })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: /Resolved/ }));
     fireEvent.click(screen.getByRole("button", { name: /Show more/ }));
     expect(fetchNextPage).toHaveBeenCalled();
   });
 });
-
-// ── Task-subtree grouping (unchanged join; entries can be either kind) ──
 
 function tk(id: number, over: Partial<TaskSummaryRow> = {}): TaskSummaryRow {
   return {
@@ -518,8 +277,6 @@ function tk(id: number, over: Partial<TaskSummaryRow> = {}): TaskSummaryRow {
 }
 
 describe("InboxQueue — task grouping", () => {
-  // Registry: root #1 → manager #2 → worker #3; agents 30/40 sit in the manager
-  // subtree, agent 999 owns no task.
   function withRegistry() {
     useTasksMock.mockReturnValue({
       tasks: [
@@ -567,8 +324,6 @@ describe("InboxQueue — task grouping", () => {
       agent({ agent_id: 30, label: "mgr" }),
       agent({ agent_id: 40, label: "wrk" }),
     ]);
-    // Sorted flat: q-wrk (P0), q-loose (P1), q-mgr (P2). The subtree group is
-    // anchored where q-wrk sat, so its members render before the loose P1.
     expect(listTitles()).toEqual(["q-wrk", "q-mgr", "q-loose"]);
     expect(screen.getByLabelText("Task #2: ship feature")).not.toBeNull();
   });
@@ -581,9 +336,6 @@ describe("InboxQueue — task grouping", () => {
 });
 
 describe("InboxQueue — error presentation (audit C3)", () => {
-  // Stale-while-error: a failed fetch keeps its last data on screen and the
-  // failure is surfaced, so "queue empty" is never indistinguishable from
-  // "couldn't load" (previously both hooks failed silently to an empty list).
   it("open feed failure with nothing loaded → failure screen, not the empty state", () => {
     setFeed({ error: true });
     renderQueue([agent({ agent_id: 1 })]);
@@ -620,13 +372,9 @@ describe("InboxQueue — error presentation (audit C3)", () => {
 });
 
 describe("InboxQueue — terminated agent", () => {
-  // The inbox carries no resurrect affordance: replying to a terminated agent
-  // resurrects it on its own, and the sidebar row keeps an explicit button for
-  // the deliberate case. A second one here only invited a dead-end click.
   it("offers no resurrect button for a terminated agent's notice", () => {
     setFeed({ awaiting: [n({ id: 99, title: "Q?" })] });
     renderQueue([agent({ agent_id: 7, label: "dead", status: "terminated" })]);
-    // The notice itself is still selectable and answerable.
     expect(screen.getAllByText("Q?").length).toBeGreaterThan(0);
     expect(screen.queryByRole("button", { name: /Resurrect Agent #7/ })).toBeNull();
   });
@@ -655,7 +403,6 @@ describe("InboxQueue — agent live-page entry", () => {
     useAllPagesMock.mockReturnValue([mkPage({ agent_id: 7, name: "dash", url: "http://host/dash" })]);
     setFeed({ awaiting: [n({ id: 99, title: "Q?" })] });
     renderQueue([agent({ agent_id: 7, label: "lead" })]);
-    // Two entries to the same page: the list row + the auto-selected detail header.
     const links = screen.getAllByRole("link", { name: /open live page/i });
     expect(links.length).toBe(2);
     expect(links.every((l) => l.getAttribute("href") === "http://host/dash")).toBe(true);

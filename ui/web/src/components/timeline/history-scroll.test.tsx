@@ -2,13 +2,11 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { StrictMode, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-
 import type { BackendTimelineItem, TimelineResponse } from "@/lib/contracts/types";
 import { readScrollMemory, saveScrollMemory } from "@/lib/layout/scroll-memory";
 import { useTimeline } from "@/lib/timeline/use-timeline";
 import { useTimelineStore } from "@/lib/timeline/timeline-store";
 import { TimelineView } from ".";
-
 vi.mock("@/lib/transport/api", () => ({ api: {
   getTimeline: vi.fn(), getConfig: vi.fn().mockResolvedValue({ fields: [] }),
 } }));
@@ -27,7 +25,6 @@ vi.mock("../ui/scroll-area", () => ({
     <div><div data-testid="history-viewport" data-slot="scroll-area-viewport">{children}</div></div>
   ),
 }));
-
 const items: BackendTimelineItem[] = Array.from({ length: 16 }, (_, index) => ({
   item_id: `${index + 1}.0`, kind: "agent_chat", payload: `Reply ${index + 1}`,
   source: null, created_at: null, inbound_id: null, show_timestamp: false,
@@ -52,7 +49,6 @@ function readingOffset(id: string) {
   return node ? Math.round(node.getBoundingClientRect().top - viewport().getBoundingClientRect().top) : null;
 }
 function resize() { act(() => { resizeCallbacks.forEach((deliver) => deliver()); }); }
-
 beforeEach(() => {
   client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
   client.setQueryData(["timeline", 42], response);
@@ -143,14 +139,11 @@ describe("history entry scroll ownership", () => {
     render(conversation(42, "history-hold-release"));
     resize();
     expect(viewport().scrollTop).toBe(700);
-
     act(() => { viewport().scrollTop = 4400; fireEvent.scroll(viewport()); });
     act(() => { useTimelineStore.getState().requestScrollToBottom(); });
     act(() => { height = 6000; resizeCallbacks.forEach((deliver) => deliver()); });
-
     expect(viewport().scrollTop).toBe(5400);
   });
-
   it("pins a send from a real tail while a settled bookmark still holds the viewport", () => {
     useTimelineStore.getState().switchThread(42, items, false);
     saveScrollMemory("history-tail-send", {
@@ -159,40 +152,32 @@ describe("history entry scroll ownership", () => {
     });
     render(conversation(42, "history-tail-send"));
     expect(viewport().scrollTop).toBe(4400);
-
     act(() => { useTimelineStore.getState().requestScrollToBottom(); });
     act(() => { height = 6000; resizeCallbacks.forEach((deliver) => deliver()); });
-
     expect(viewport().scrollTop).toBe(5400);
   });
-
   it("remembers a restored reader's later position across an agent switch", () => {
     useTimelineStore.getState().switchThread(42, items, false);
     saveScrollMemory("history-hold-save", { contentKey: "42", scrollTop: 700, followBottom: false });
     const { rerender } = render(conversation(42, "history-hold-save"));
     resize();
     expect(viewport().scrollTop).toBe(700);
-
     act(() => { viewport().scrollTop = 1200; fireEvent.scroll(viewport()); });
     rerender(conversation(43, "history-hold-save-other"));
     top = 0; height = 5000;
     rerender(conversation(42, "history-hold-save"));
-
     expect(viewport().scrollTop).toBe(1200);
   });
-
   it("lands on the end when a bookmark sits past a page that stopped growing", () => {
     height = 900;
     saveScrollMemory("history-unreachable", { contentKey: "42", scrollTop: 700, followBottom: false });
     render(conversation(42, "history-unreachable"));
     resize();
     resize();
-
     expect(viewport().scrollTop).toBe(300);
     act(() => { height = 5000; resizeCallbacks.forEach((deliver) => deliver()); });
     expect(viewport().scrollTop).toBe(4400);
   });
-
   it("lets a reader replace an unreachable saved position by scrolling", () => {
     height = 900;
     saveScrollMemory("history-short-reader", { contentKey: "42", scrollTop: 700, followBottom: false });
@@ -279,7 +264,6 @@ describe("history entry scroll ownership", () => {
   });
 });
 
-
 function AgentTabs({ agentId, entry }: { agentId: number; entry: string }) {
   const timeline = useTimeline(agentId, () => undefined);
   return <TimelineView key={agentId} items={timeline.items} threadKey={String(agentId)}
@@ -300,7 +284,6 @@ describe("agent switch reading positions", () => {
     rerender(tabs(43, "agent-tabs"));
     expect(viewport().scrollTop).toBe(1200);
   });
-
   it("saves a reader on the tail as following the bottom", () => {
     render(tabs(42, "agent-tail-save"));
     act(() => { viewport().scrollTop = 4400; fireEvent.scroll(viewport()); });
@@ -308,7 +291,6 @@ describe("agent switch reading positions", () => {
       contentKey: "42", scrollTop: 4400, followBottom: true,
     });
   });
-
   it("returns a bottom follower to the newest message after messages arrived while away", () => {
     const { rerender } = render(tabs(42, "agent-new-tail"));
     act(() => { viewport().scrollTop = 4400; fireEvent.scroll(viewport()); });
@@ -320,7 +302,6 @@ describe("agent switch reading positions", () => {
     expect(viewport().scrollTop).toBe(5400);
     expect(screen.getByTestId("scroll-to-bottom").className).toContain("opacity-0");
   });
-
   it("keeps following a returned bottom follower as the thread grows", () => {
     const { rerender } = render(tabs(42, "agent-new-tail-growth"));
     act(() => { viewport().scrollTop = 4400; fireEvent.scroll(viewport()); });
@@ -331,7 +312,6 @@ describe("agent switch reading positions", () => {
     act(() => { height = 7000; resizeCallbacks.forEach((deliver) => deliver()); });
     expect(viewport().scrollTop).toBe(6400);
   });
-
   it("keeps following when the switch lands between a chunk and its pin", () => {
     const { rerender } = render(tabs(42, "agent-chunk-frame"));
     act(() => { viewport().scrollTop = 4400; fireEvent.scroll(viewport()); });
@@ -344,7 +324,6 @@ describe("agent switch reading positions", () => {
     resize();
     expect(viewport().scrollTop).toBe(5400);
   });
-
   it("reads the wider touch bottom zone as the tail", () => {
     vi.spyOn(window, "matchMedia").mockImplementation((query: string) => ({
       matches: query === "(pointer: coarse)", media: query, onchange: null,
@@ -357,7 +336,6 @@ describe("agent switch reading positions", () => {
       contentKey: "42", scrollTop: 4300, followBottom: true,
     });
   });
-
   it("returns a parked reader to their item after messages arrived while away", () => {
     const { rerender } = render(tabs(42, "agent-new-parked"));
     act(() => { viewport().scrollTop = 4300; fireEvent.scroll(viewport()); });
@@ -372,7 +350,6 @@ describe("agent switch reading positions", () => {
     expect(viewport().scrollTop).toBe(4300);
     expect(readingOffset("15.0")).toBe(-100);
   });
-
   it("retains scroll-loaded history and keeps it after a newer tail snapshot", () => {
     const older: BackendTimelineItem = { ...items[0], item_id: "s1.old.1.0", payload: "Previously loaded history" };
     const { rerender } = render(tabs(42, "agent-old-window"));
@@ -388,7 +365,6 @@ describe("agent switch reading positions", () => {
     expect(screen.getByText("Previously loaded history")).toBeTruthy();
     expect(viewport().scrollTop).toBe(700);
   });
-
   it("one loading ring at a time: an older-history load keeps the bottom button quiet", () => {
     render(<TimelineView items={items} threadKey="one-ring" loadingNew loadingOlder />, {
       wrapper: ({ children }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>,
@@ -403,7 +379,6 @@ describe("agent switch reading positions", () => {
     expect(button.querySelector(".animate-spin")).toBeNull();
     expect(screen.getByTestId("load-older-spinner").dataset.state).toBe("loading");
   });
-
   it("uses the bottom button's existing footprint for a refresh without moving content", () => {
     const { rerender } = render(<TimelineView items={items} threadKey="spinner" loadingNew />, {
       wrapper: ({ children }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>,
@@ -427,7 +402,6 @@ describe("agent switch reading positions", () => {
   });
 });
 
-
 describe("restored position settles", () => {
   it("keeps a restored reading item at its saved offset while the rows above settle", () => {
     const entry = "history-settle";
@@ -441,7 +415,6 @@ describe("restored position settles", () => {
     expect(viewport().scrollTop).toBe(620);
     expect(readingOffset("3.0")).toBe(-100);
   });
-
   it("keeps the saved bookmark while the restored window is still settling", () => {
     const entry = "history-settle-bookmark";
     saveScrollMemory(entry, { contentKey: "42", scrollTop: 700, followBottom: false, anchor: { itemId: "3.0", rank: 0, viewportTop: -100 } });
@@ -453,7 +426,6 @@ describe("restored position settles", () => {
     act(() => { fireEvent.scroll(viewport()); });
     expect(readScrollMemory(entry)).toEqual({ contentKey: "42", scrollTop: 650, followBottom: false, anchor: { itemId: "3.0", rank: 0, viewportTop: -100 } });
   });
-
   it("keeps the bookmark through a switch away inside the settle", () => {
     const entry = "history-settle-switch";
     saveScrollMemory(entry, { contentKey: "42", scrollTop: 700, followBottom: false, anchor: { itemId: "3.0", rank: 0, viewportTop: -100 } });
@@ -466,8 +438,6 @@ describe("restored position settles", () => {
     expect(readingOffset("3.0")).toBe(-100);
   });
 });
-
-
 it("captures the departing reading position before the native pull reserve is removed", () => {
   vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
     const reserve = Number.parseFloat(this.closest('[data-slot="scroll-area-viewport"]')?.querySelector<HTMLElement>('[data-history-pull-space]')?.style.height ?? "0") || 0;
@@ -480,7 +450,6 @@ it("captures the departing reading position before the native pull reserve is re
   rerender(tabs(42, "agent-native-reserve"));
   expect(viewport().scrollTop).toBe(700);
 });
-
 it("rests on the loading ring while new messages arrive and stays clickable", () => {
   render(<QueryClientProvider client={client}><TimelineView items={items} threadKey="ring-click" loadingNew /></QueryClientProvider>);
   act(() => { viewport().scrollTop = 700; fireEvent.scroll(viewport()); });
@@ -490,14 +459,12 @@ it("rests on the loading ring while new messages arrive and stays clickable", ()
   expect(screen.getByTestId("scroll-to-bottom-arrow").className).toContain("hidden");
   expect(scrollTo).toHaveBeenCalledWith({ top: 5000, behavior: "smooth" });
 });
-
   it("keeps the reader on their row when the viewport width changes", () => {
     useTimelineStore.getState().switchThread(42, items, false);
     render(conversation(42, "history-width-change"));
     resize();
     act(() => { viewport().scrollTop = 900; fireEvent.scroll(viewport()); });
     expect(readingOffset("4.0")).toBe(0);
-
     let width = 400;
     vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockImplementation(() => width);
     // meiva:note
@@ -514,7 +481,6 @@ it("rests on the loading ring while new messages arrive and stays clickable", ()
       aboveSettle = 120;
       resizeCallbacks.forEach((deliver) => deliver());
     });
-
     expect(readingOffset("4.0")).toBe(0);
     expect(viewport().scrollTop).toBe(1020);
   });

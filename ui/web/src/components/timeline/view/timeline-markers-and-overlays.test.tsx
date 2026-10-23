@@ -1,8 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-
 import { ChatMarkdownMock, PythonCodeMock, ScrollAreaMock, cleanupTimelineTest, displayLimits, makeItem, mockSettings, resetStore, revealCollapsedCards, toggleState, userSettingsState } from "./timeline-test-harness";
-
 vi.mock("@/lib/format/display-limits", async () => {
   const { useSyncExternalStore } = await import("react");
   return {
@@ -43,83 +41,28 @@ vi.mock("@/lib/state/use-user-settings", () => ({
 }));
 import { TimelineView } from "..";
 import { LoadOlderSpinner } from "../overlays";
-
 afterEach(cleanupTimelineTest);
 describe("ItemView: system_marker → LifecycleChip", () => {
   it("source='lifecycle_terminate' → Terminated chip", () => {
-    render(
-      <TimelineView
-        items={[
-          makeItem({
-            kind: "system_marker",
-            source: "lifecycle_terminate",
-            payload: "[ts] You are terminated by user",
-          }),
-        ]}
-      />,
-    );
+    render(<TimelineView items={[makeItem({ kind: "system_marker", source: "lifecycle_terminate", payload: "[ts] You are terminated by user" })]} />);
     revealCollapsedCards();
     expect(screen.getByText("Terminated")).toBeTruthy();
     expect(screen.getByText(/terminated by user/)).toBeTruthy();
   });
-
   it("source='lifecycle_restart' → Restarted chip", () => {
-    render(
-      <TimelineView
-        items={[
-          makeItem({
-            kind: "system_marker",
-            source: "lifecycle_restart",
-            payload: "[ts] You have been restarted",
-          }),
-        ]}
-      />,
-    );
+    render(<TimelineView items={[makeItem({ kind: "system_marker", source: "lifecycle_restart", payload: "[ts] You have been restarted" })]} />);
     expect(screen.getByText("Restarted")).toBeTruthy();
   });
-
   it("source='lifecycle_resurrect' → Resurrected chip", () => {
-    render(
-      <TimelineView
-        items={[
-          makeItem({
-            kind: "system_marker",
-            source: "lifecycle_resurrect",
-            payload: "[ts] resurrected",
-          }),
-        ]}
-      />,
-    );
+    render(<TimelineView items={[makeItem({ kind: "system_marker", source: "lifecycle_resurrect", payload: "[ts] resurrected" })]} />);
     expect(screen.getByText("Resurrected")).toBeTruthy();
   });
-
   it("source='lifecycle_fork' → Forked chip", () => {
-    render(
-      <TimelineView
-        items={[
-          makeItem({
-            kind: "system_marker",
-            source: "lifecycle_fork",
-            payload: "[ts] forked from agent:7",
-          }),
-        ]}
-      />,
-    );
+    render(<TimelineView items={[makeItem({ kind: "system_marker", source: "lifecycle_fork", payload: "[ts] forked from agent:7" })]} />);
     expect(screen.getByText("Forked")).toBeTruthy();
   });
-
   it("source='lifecycle_unknown' → UnknownMarkerChip red alarm", () => {
-    render(
-      <TimelineView
-        items={[
-          makeItem({
-            kind: "system_marker",
-            source: "lifecycle_future",
-            payload: "x",
-          }),
-        ]}
-      />,
-    );
+    render(<TimelineView items={[makeItem({ kind: "system_marker", source: "lifecycle_future", payload: "x" })]} />);
     expect(screen.getByText(/Unrecognized system_marker/)).toBeTruthy();
   });
 });
@@ -133,7 +76,6 @@ describe("ItemView: system_marker → ephemeral by payload", () => {
     );
     expect(screen.getByText(/Unrecognized system_marker/)).toBeTruthy();
   });
-
   it("payload='compact_done' → no visible marker (internal event)", () => {
     render(
       <TimelineView
@@ -142,7 +84,6 @@ describe("ItemView: system_marker → ephemeral by payload", () => {
     );
     expect(screen.queryByText(/compact complete/)).toBeNull();
   });
-
   it("payload='cancelled' → silent, not rendered (stop button has no UI noise)", () => {
     render(
       <TimelineView
@@ -151,7 +92,6 @@ describe("ItemView: system_marker → ephemeral by payload", () => {
     );
     expect(screen.queryByText(/cancelled/)).toBeNull();
   });
-
   it("payload='compact_request:<content>' → no visible marker (internal event)", () => {
     render(
       <TimelineView
@@ -162,7 +102,6 @@ describe("ItemView: system_marker → ephemeral by payload", () => {
     );
     expect(screen.queryByText(/compact request/)).toBeNull();
   });
-
   it("payload='error:<content>' → '[error] <content>' (text-destructive)", () => {
     render(
       <TimelineView
@@ -173,7 +112,6 @@ describe("ItemView: system_marker → ephemeral by payload", () => {
     );
     expect(screen.getByText(/error.*redis disconnected/)).toBeTruthy();
   });
-
   it("unrecognized payload goes to UnknownMarkerChip red alarm", () => {
     render(
       <TimelineView
@@ -206,7 +144,6 @@ describe("ItemView: system_marker → system_note chip", () => {
     ).toBeTruthy();
     expect(screen.queryByText(/Unrecognized system_marker/)).toBeNull();
   });
-
   it("source='memory' → dedicated Memory chip (distinct from a guidance note)", () => {
     render(
       <TimelineView
@@ -225,7 +162,6 @@ describe("ItemView: system_marker → system_note chip", () => {
     expect(screen.getByText(/your standing memory/)).toBeTruthy();
     expect(screen.queryByText(/Unrecognized system_marker/)).toBeNull();
   });
-
   it("source='compact_reminder' → neutral Note chip", () => {
     render(
       <TimelineView
@@ -241,7 +177,6 @@ describe("ItemView: system_marker → system_note chip", () => {
     expect(screen.getByText("Note")).toBeTruthy();
     expect(screen.queryByText(/Unrecognized system_marker/)).toBeNull();
   });
-
   it("source='security' → neutral Note chip", () => {
     render(
       <TimelineView
@@ -259,7 +194,6 @@ describe("ItemView: system_marker → system_note chip", () => {
     expect(screen.getByText(/sensitive content detected/)).toBeTruthy();
     expect(screen.queryByText(/Unrecognized system_marker/)).toBeNull();
   });
-
   it("source='context' → neutral Note chip", () => {
     render(
       <TimelineView
@@ -277,7 +211,6 @@ describe("ItemView: system_marker → system_note chip", () => {
     expect(screen.getByText(/additional context injected/)).toBeTruthy();
     expect(screen.queryByText(/Unrecognized system_marker/)).toBeNull();
   });
-
   it("source='project_skills' → neutral Note chip", () => {
     render(
       <TimelineView
@@ -295,7 +228,6 @@ describe("ItemView: system_marker → system_note chip", () => {
     expect(screen.getByText(/project skills listed here/)).toBeTruthy();
     expect(screen.queryByText(/Unrecognized system_marker/)).toBeNull();
   });
-
   it("source='new_skills' → neutral Note chip", () => {
     render(
       <TimelineView
@@ -313,7 +245,6 @@ describe("ItemView: system_marker → system_note chip", () => {
     expect(screen.getByText(/Skills installed since your index was built/)).toBeTruthy();
     expect(screen.queryByText(/Unrecognized system_marker/)).toBeNull();
   });
-
   it("source='skill_recall' → neutral Note chip", () => {
     render(
       <TimelineView
@@ -331,7 +262,6 @@ describe("ItemView: system_marker → system_note chip", () => {
     expect(screen.getByText(/look relevant to the current request/)).toBeTruthy();
     expect(screen.queryByText(/Unrecognized system_marker/)).toBeNull();
   });
-
   it("source='preloaded_skills' → neutral Note chip", () => {
     render(
       <TimelineView
@@ -355,7 +285,6 @@ describe("ItemView: inbound_compact_*", () => {
   function expectNoUnrecognizedAlarm() {
     expect(screen.queryByText(/Unrecognized system_marker/)).toBeNull();
   }
-
   it("inbound_compact_summary renders envelope", () => {
     render(
       <TimelineView
@@ -373,7 +302,6 @@ describe("ItemView: inbound_compact_*", () => {
     expect(screen.getByText("body text")).toBeTruthy();
     expectNoUnrecognizedAlarm();
   });
-
   it("inbound_compact_request renders envelope", () => {
     render(
       <TimelineView
@@ -402,7 +330,6 @@ describe("CopyButton", () => {
     );
     expect(screen.queryByLabelText("Copy message")).toBeNull();
   });
-
   it("final agent_chat shows CopyButton (icon-only, aria-label)", () => {
     render(
       <TimelineView
@@ -427,24 +354,20 @@ describe("Scroll-to-bottom button + multi-item render order", () => {
     const markdowns = screen.getAllByTestId("chat-markdown");
     expect(markdowns.map((m) => m.textContent)).toEqual(["first", "second", "third"]);
   });
-
   it("ScrollArea wraps the content", () => {
     render(
       <TimelineView items={[makeItem({ kind: "agent_chat", payload: "x" })]} />,
     );
     expect(screen.getByTestId("scroll-area")).toBeTruthy();
   });
-
   it("timeline viewport disables scroll anchoring (overflow-anchor: none)", () => {
     render(<TimelineView items={[makeItem({ kind: "agent_chat", payload: "x" })]} />);
     expect(screen.getByTestId("scroll-viewport").className).toContain("overflow-anchor");
   });
-
   it("timeline viewport contains overscroll (does not chain to the page)", () => {
     render(<TimelineView items={[makeItem({ kind: "agent_chat", payload: "x" })]} />);
     expect(screen.getByTestId("scroll-viewport").className).toContain("overscroll-y-contain");
   });
-
   it("Scroll-to-bottom arrow button always in DOM (visibility controlled by opacity)", () => {
     render(<TimelineView items={[]} />);
     expect(screen.getByLabelText("Scroll to bottom")).toBeTruthy();
@@ -458,13 +381,11 @@ describe("cold-load spinner", () => {
     expect(spinner.querySelector('[data-testid="cold-load-ring"]')).not.toBeNull();
     expect(screen.getByText(/Loading conversation…/).className).toContain("sr-only");
   });
-
   it("loading + items present → no spinner (keep the content on screen)", () => {
     render(<TimelineView items={[makeItem({ kind: "agent_chat", payload: "hi" })]} loading />);
     expect(screen.queryByTestId("cold-load-spinner")).toBeNull();
     expect(screen.getByTestId("chat-markdown").textContent).toBe("hi");
   });
-
   it("empty + not loading → no spinner (steady-state empty thread)", () => {
     render(<TimelineView items={[]} />);
     expect(screen.queryByTestId("cold-load-spinner")).toBeNull();
@@ -480,7 +401,6 @@ describe("load-older circle (revealed above the messages)", () => {
     expect(overlay?.className).not.toContain("opacity-100");
     expect(overlay?.getAttribute("aria-hidden")).toBe("true");
   });
-
   it("loadingOlder=true → spinner visible (opacity-100), stays mounted at the top, exposed to assistive tech", () => {
     render(
       <TimelineView items={[makeItem({ kind: "agent_chat", payload: "x" })]} loadingOlder />,
@@ -504,14 +424,12 @@ describe("load-older circle (revealed above the messages)", () => {
     expect(ring?.getAttribute("style")).toContain("scale(0.4)");
     expect(screen.getByTestId("load-older-spinner").dataset.state).toBe("pulling");
   });
-
   it("loadingOlder=false → the hidden overlay runs no spin animation", () => {
     render(<TimelineView items={[makeItem({ kind: "agent_chat", payload: "x" })]} />);
     const overlay = screen.getByTestId("load-older-spinner");
     expect(overlay.className).toContain("opacity-0");
     expect(overlay.querySelector(".animate-spin")).toBeNull();
   });
-
   it("pointer-events-none in BOTH states — the overlay never captures the scroll gesture that triggered it", () => {
     const { rerender } = render(
       <TimelineView items={[makeItem({ kind: "agent_chat", payload: "x" })]} />,
@@ -526,7 +444,6 @@ describe("load-older circle (revealed above the messages)", () => {
       screen.getByText(/Loading earlier messages/).closest("div")?.className,
     ).toContain("pointer-events-none");
   });
-
   it("re-render with loadingOlder flipping true→false does not remount the overlay (same node, opacity only)", () => {
     const { rerender } = render(
       <TimelineView items={[makeItem({ kind: "agent_chat", payload: "x" })]} loadingOlder />,
@@ -541,6 +458,5 @@ describe("load-older circle (revealed above the messages)", () => {
     const nodeAfterLoad = screen.getByText(/Loading earlier messages/).closest("div");
     expect(nodeAfterLoad).toBe(nodeWhileLoading);
     expect(nodeAfterLoad?.className).toContain("opacity-0");
-
   });
 });

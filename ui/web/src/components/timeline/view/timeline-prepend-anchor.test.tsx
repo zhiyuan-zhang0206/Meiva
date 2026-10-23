@@ -1,8 +1,6 @@
 import { act, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-
 import { ChatMarkdownMock, PythonCodeMock, ScrollAreaMock, cleanupTimelineTest, displayLimits, historyWheel, makeItem, mockSettings, pullOlderAtTop, resetStore, toggleState, userSettingsState } from "./timeline-test-harness";
-
 vi.mock("@/lib/format/display-limits", async () => {
   const { useSyncExternalStore } = await import("react");
   return {
@@ -42,21 +40,17 @@ vi.mock("@/lib/state/use-user-settings", () => ({
   }),
 }));
 import { TimelineView } from "..";
-
 afterEach(cleanupTimelineTest);
 describe("load-older prepend anchor (#659, #817, #1272; release-to-load)", () => {
   const rect = (top: number): DOMRect =>
     ({ top, bottom: top, left: 0, right: 0, width: 0, height: 0, x: 0, y: 0, toJSON: () => ({}) });
-
   beforeEach(() => {
     vi.useFakeTimers();
   });
-
   afterEach(() => {
     vi.restoreAllMocks();
     vi.useRealTimers();
   });
-
   const triggerAtTop = (viewport: HTMLElement) => {
     Object.defineProperty(viewport, "scrollHeight", { value: 1200, configurable: true });
     Object.defineProperty(viewport, "clientHeight", { value: 600, configurable: true });
@@ -68,7 +62,6 @@ describe("load-older prepend anchor (#659, #817, #1272; release-to-load)", () =>
     });
     pullOlderAtTop(viewport);
   };
-
   it("momentum arrival alone does not load, and a subsequent released pull loads exactly once", () => {
     const loadOlder = vi.fn();
     const items = [
@@ -79,7 +72,6 @@ describe("load-older prepend anchor (#659, #817, #1272; release-to-load)", () =>
     const viewport = screen.getByTestId("scroll-viewport");
     Object.defineProperty(viewport, "scrollHeight", { value: 1200, configurable: true });
     Object.defineProperty(viewport, "clientHeight", { value: 600, configurable: true });
-
     viewport.scrollTop = 50;
     viewport.dispatchEvent(new Event("scroll"));
     expect(loadOlder).not.toHaveBeenCalled();
@@ -93,7 +85,6 @@ describe("load-older prepend anchor (#659, #817, #1272; release-to-load)", () =>
     viewport.dispatchEvent(new Event("scroll"));
     expect(loadOlder).toHaveBeenCalledTimes(1);
   });
-
   it("anchors to the first REAL content node, not the system prompt (0.0) — zero height jitter (#817)", () => {
     const loadOlder = vi.fn();
     const items = [
@@ -114,7 +105,6 @@ describe("load-older prepend anchor (#659, #817, #1272; release-to-load)", () =>
     const viewport = screen.getByTestId("scroll-viewport");
     triggerAtTop(viewport);
     expect(loadOlder).toHaveBeenCalledTimes(1);
-
     rerender(
       <TimelineView
         items={[...items, makeItem({ item_id: "12.0", kind: "agent_chat", payload: "twelve" })]}
@@ -123,7 +113,6 @@ describe("load-older prepend anchor (#659, #817, #1272; release-to-load)", () =>
       />,
     );
     expect(viewport.scrollTop).toBe(0);
-
     moved = true;
     rerender(
       <TimelineView
@@ -140,7 +129,6 @@ describe("load-older prepend anchor (#659, #817, #1272; release-to-load)", () =>
     );
     expect(viewport.scrollTop).toBe(250);
   });
-
   it("skips re-attached standing head notes — anchor and front signal land on the first real item", () => {
     const loadOlder = vi.fn();
     const items = [
@@ -163,7 +151,6 @@ describe("load-older prepend anchor (#659, #817, #1272; release-to-load)", () =>
     const viewport = screen.getByTestId("scroll-viewport");
     triggerAtTop(viewport);
     expect(loadOlder).toHaveBeenCalledTimes(1);
-
     moved = true;
     rerender(
       <TimelineView
@@ -179,7 +166,6 @@ describe("load-older prepend anchor (#659, #817, #1272; release-to-load)", () =>
     );
     expect(viewport.scrollTop).toBe(250);
   });
-
   it("uses four-part historical ids for the prepend landing signal and exact anchor lookup", () => {
     const loadOlder = vi.fn();
     const recentHistoricalId = "s1.newer-boundary.1.0";
@@ -201,7 +187,6 @@ describe("load-older prepend anchor (#659, #817, #1272; release-to-load)", () =>
     const viewport = screen.getByTestId("scroll-viewport");
     triggerAtTop(viewport);
     expect(loadOlder).toHaveBeenCalledTimes(1);
-
     moved = true;
     const olderHistoricalId = "s2.older-boundary.1.0";
     rerender(
@@ -217,7 +202,6 @@ describe("load-older prepend anchor (#659, #817, #1272; release-to-load)", () =>
     );
     expect(viewport.scrollTop).toBe(320);
   });
-
   it("skips pinned compact-summary context when its turn is collapsed", () => {
     const loadOlder = vi.fn();
     const summaryId = "s1.boundary.0.0";
@@ -240,7 +224,6 @@ describe("load-older prepend anchor (#659, #817, #1272; release-to-load)", () =>
     const viewport = screen.getByTestId("scroll-viewport");
     triggerAtTop(viewport);
     expect(loadOlder).toHaveBeenCalledTimes(1);
-
     moved = true;
     rerender(
       <TimelineView
@@ -255,7 +238,6 @@ describe("load-older prepend anchor (#659, #817, #1272; release-to-load)", () =>
     );
     expect(viewport.scrollTop).toBe(200);
   });
-
   it("skips ephemeral _marker rows too — the anchor is the first real message (#817)", () => {
     const loadOlder = vi.fn();
     const items = [
@@ -276,7 +258,6 @@ describe("load-older prepend anchor (#659, #817, #1272; release-to-load)", () =>
     const viewport = screen.getByTestId("scroll-viewport");
     triggerAtTop(viewport);
     expect(loadOlder).toHaveBeenCalledTimes(1);
-
     moved = true;
     rerender(
       <TimelineView
@@ -291,7 +272,6 @@ describe("load-older prepend anchor (#659, #817, #1272; release-to-load)", () =>
     );
     expect(viewport.scrollTop).toBe(250);
   });
-
   it("still compensates when the thread has no system prompt (front item is real)", () => {
     const loadOlder = vi.fn();
     const items = [
@@ -311,7 +291,6 @@ describe("load-older prepend anchor (#659, #817, #1272; release-to-load)", () =>
     const viewport = screen.getByTestId("scroll-viewport");
     triggerAtTop(viewport);
     expect(loadOlder).toHaveBeenCalledTimes(1);
-
     moved = true;
     rerender(
       <TimelineView
@@ -325,7 +304,6 @@ describe("load-older prepend anchor (#659, #817, #1272; release-to-load)", () =>
     );
     expect(viewport.scrollTop).toBe(180);
   });
-
   it("abandons the anchor when the content above did not grow (delta <= 0 — compact/reset, not a landing)", () => {
     const loadOlder = vi.fn();
     const items = [
@@ -345,7 +323,6 @@ describe("load-older prepend anchor (#659, #817, #1272; release-to-load)", () =>
     const viewport = screen.getByTestId("scroll-viewport");
     triggerAtTop(viewport);
     expect(loadOlder).toHaveBeenCalledTimes(1);
-
     top = 80;
     rerender(
       <TimelineView
@@ -360,7 +337,6 @@ describe("load-older prepend anchor (#659, #817, #1272; release-to-load)", () =>
     );
     expect(viewport.scrollTop).toBe(0);
   });
-
   it("anchors to the 0.0 prompt node when no real item is visible — landing does not scroll (#1272)", () => {
     const loadOlder = vi.fn();
     const items = [
@@ -380,7 +356,6 @@ describe("load-older prepend anchor (#659, #817, #1272; release-to-load)", () =>
     const viewport = screen.getByTestId("scroll-viewport");
     triggerAtTop(viewport);
     expect(loadOlder).toHaveBeenCalledTimes(1);
-
     rerender(
       <TimelineView
         items={[
@@ -394,7 +369,6 @@ describe("load-older prepend anchor (#659, #817, #1272; release-to-load)", () =>
     );
     expect(viewport.scrollTop).toBe(0);
   });
-
   it("materializes the full prepend and keeps its real height after compensation", () => {
     const loadOlder = vi.fn();
     const tallRect = (top: number, height: number): DOMRect =>
@@ -439,7 +413,6 @@ describe("load-older prepend anchor (#659, #817, #1272; release-to-load)", () =>
     triggerAtTop(viewport);
     expect(loadOlder).toHaveBeenCalledTimes(1);
     const readingTop = viewport.querySelector<HTMLElement>('[data-item-id="9.0"]')!.getBoundingClientRect().top;
-
     rerender(
       <TimelineView
         items={[
@@ -455,7 +428,6 @@ describe("load-older prepend anchor (#659, #817, #1272; release-to-load)", () =>
     expect(viewport.scrollTop).toBe(900);
     expect(viewport.querySelector<HTMLElement>('[data-item-id="9.0"]')!.getBoundingClientRect().top).toBe(readingTop);
   });
-
   it("preserves the reading position when the user scrolled during the fetch (document-space delta, not the trigger-time viewport top)", () => {
     const loadOlder = vi.fn();
     const items = [
@@ -481,14 +453,11 @@ describe("load-older prepend anchor (#659, #817, #1272; release-to-load)", () =>
     const viewport = screen.getByTestId("scroll-viewport");
     triggerAtTop(viewport);
     expect(loadOlder).toHaveBeenCalledTimes(1);
-
     rerender(
       <TimelineView items={items} hasMoreOlder loadingOlder onLoadOlder={loadOlder} />,
     );
-
     viewport.scrollTop = 0;
     viewport.dispatchEvent(new Event("scroll"));
-
     moved = true;
     rerender(
       <TimelineView

@@ -1,8 +1,6 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-
 import { ChatMarkdownMock, PythonCodeMock, ScrollAreaMock, cleanupTimelineTest, displayLimits, makeItem, mockSettings, resetStore, revealCollapsedCards, setToggleState, toggleState, userSettingsState } from "./timeline-test-harness";
-
 vi.mock("@/lib/format/display-limits", async () => {
   const { useSyncExternalStore } = await import("react");
   return {
@@ -44,11 +42,9 @@ vi.mock("@/lib/state/use-user-settings", () => ({
 import { TimelineView } from "..";
 import { streamingParseIntervalMs } from "../item";
 import { LIFECYCLE_TAGS, MEMORY_SOURCES, NOTE_SOURCES } from "../markers";
-
 afterEach(cleanupTimelineTest);
 describe("detail-block duration display (Last mode)", () => {
   const runToggle = () => screen.getByTestId("turn-toggle");
-
   it("streaming code block inside the active last turn shows a live 'Writing code for'", () => {
     setToggleState({ detailsMode: "last" });
     render(
@@ -69,7 +65,6 @@ describe("detail-block duration display (Last mode)", () => {
     expect(runToggle().getAttribute("aria-expanded")).toBe("true");
     expect(screen.getByText(/Writing code for/)).toBeTruthy();
   });
-
   it("active last turn header shows a live 'Working for'", () => {
     setToggleState({ detailsMode: "last" });
     render(
@@ -82,7 +77,6 @@ describe("detail-block duration display (Last mode)", () => {
     );
     expect(runToggle().textContent).toContain("Working for");
   });
-
   it("live 'Working for' does not wait for a work item — a system-only active turn still ticks", () => {
     setToggleState({ detailsMode: "last" });
     render(
@@ -95,7 +89,6 @@ describe("detail-block duration display (Last mode)", () => {
     );
     expect(runToggle().textContent).toContain("Working for");
   });
-
   it("completed single-code-block turn shows 'Worked for' and the rounds count", () => {
     setToggleState({ detailsMode: "last" });
     render(
@@ -116,7 +109,6 @@ describe("detail-block duration display (Last mode)", () => {
     expect(header.textContent).toContain("Worked for 5s");
     expect(header.textContent).toContain("1 turn");
   });
-
   it("system-note-only turn shows '1 system note', not a blank header and no 'Worked for'", () => {
     setToggleState({ detailsMode: "last" });
     render(
@@ -132,7 +124,6 @@ describe("detail-block duration display (Last mode)", () => {
     expect(header.textContent).toContain("1 system note");
     expect(header.textContent).not.toContain("Worked for");
   });
-
   it("live timer excludes the idle gap the turn spans, so it does not drop at turn end", () => {
     setToggleState({ detailsMode: "last" });
     const now = Date.now();
@@ -156,11 +147,9 @@ describe("detail-block duration display (Last mode)", () => {
     const { rerender } = render(<TimelineView turnActive items={items} />);
     expect(runToggle().textContent).toContain("Working for 17s");
     expect(runToggle().textContent).not.toContain("6m");
-
     rerender(<TimelineView items={items} />);
     expect(runToggle().textContent).toContain("Worked for 17s");
   });
-
   it("live timer adds the streaming block's elapsed to the committed total", () => {
     setToggleState({ detailsMode: "last" });
     const now = Date.now();
@@ -190,7 +179,6 @@ describe("detail-block duration display (Last mode)", () => {
     expect(header).toContain("Working for 13s");
     expect(header).toContain("1 turn");
   });
-
   it("live timer shows on a turn with no stamped member at all", () => {
     setToggleState({ detailsMode: "last" });
     render(
@@ -210,7 +198,6 @@ describe("detail-block duration display (Last mode)", () => {
     );
     expect(runToggle().textContent).toContain("Working for 4s");
   });
-
   it("active last turn stays expanded across streaming commits; collapses when a reply lands below", () => {
     setToggleState({ detailsMode: "last" });
     const base = [
@@ -246,7 +233,6 @@ describe("Marker contract: every dispatch-set source renders without the red ala
     ...Array.from(MEMORY_SOURCES),
     ...Array.from(NOTE_SOURCES),
   ];
-
   it.each(knownSources)("source=%s renders its chip, never the alarm", (source) => {
     render(
       <TimelineView
@@ -261,7 +247,6 @@ describe("Marker contract: every dispatch-set source renders without the red ala
     );
     expect(screen.queryByText(/Unrecognized system_marker/)).toBeNull();
   });
-
   it("positive control: an unknown source still renders the red alarm", () => {
     render(
       <TimelineView
@@ -277,7 +262,6 @@ describe("Marker contract: every dispatch-set source renders without the red ala
     expect(screen.getByText(/Unrecognized system_marker/)).toBeTruthy();
   });
 });
-
 
 describe("streamingParseIntervalMs (adaptive stream-parse window, user report 2026-09-06)", () => {
   it("keeps the base 40ms window for short payloads", () => {
@@ -312,14 +296,12 @@ describe("TimelineView sticky work block (task #2601)", () => {
       toJSON: () => undefined,
     };
   }
-
   it("renders expanded work block with sticky header classes", () => {
     const items = [
       makeItem({ item_id: "1.0", kind: "agent_reasoning", payload: "thinking" }),
       makeItem({ item_id: "1.1", kind: "agent_code", payload: "code" }),
       makeItem({ item_id: "1.2", kind: "code_output", payload: "output" }),
     ];
-
     render(<TimelineView items={items} />);
     const toggle = screen.getByTestId("turn-toggle");
     expect(toggle.getAttribute("data-expanded")).toBe("true");
@@ -327,25 +309,18 @@ describe("TimelineView sticky work block (task #2601)", () => {
     expect(toggle.className).toContain("top-11");
     expect(toggle.className).toContain("z-10");
   });
-
   it("activates stuck state on scroll past top and updates data-stuck", async () => {
     const items = [
       makeItem({ item_id: "1.0", kind: "agent_reasoning", payload: "thinking" }),
       makeItem({ item_id: "1.1", kind: "agent_code", payload: "code" }),
       makeItem({ item_id: "1.2", kind: "code_output", payload: "output" }),
     ];
-
     const { container } = render(<TimelineView items={items} />);
     const viewport = container.querySelector('[data-slot="scroll-area-viewport"]')!;
-
     vi.spyOn(viewport, "getBoundingClientRect").mockReturnValue(makeMockRect(0, 800, 800));
-
     const turnEl = container.querySelector('[data-turn-expanded="true"]')!;
-
     vi.spyOn(turnEl, "getBoundingClientRect").mockReturnValue(makeMockRect(10, 700, 690));
-
     fireEvent.scroll(viewport);
-
     await waitFor(() => {
       const toggle = screen.getByTestId("turn-toggle");
       expect(toggle.getAttribute("data-stuck")).toBe("true");
@@ -357,14 +332,12 @@ describe("TimelineView sticky work block (task #2601)", () => {
       expect(toggle.className).not.toContain("0_2px_0_0_var(--background)");
     });
   });
-
   it("keeps an expanded work block pinned through a rapid scroll burst", async () => {
     const items = [
       makeItem({ item_id: "1.0", kind: "agent_reasoning", payload: "thinking" }),
       makeItem({ item_id: "1.1", kind: "agent_code", payload: "code" }),
       makeItem({ item_id: "1.2", kind: "code_output", payload: "output" }),
     ];
-
     const { container } = render(<TimelineView items={items} />);
     const viewport = container.querySelector('[data-slot="scroll-area-viewport"]')!;
     Object.defineProperty(viewport, "clientHeight", { value: 600, configurable: true });
@@ -372,12 +345,10 @@ describe("TimelineView sticky work block (task #2601)", () => {
     vi.spyOn(viewport, "getBoundingClientRect").mockReturnValue(makeMockRect(0, 800, 800));
     const turnEl = container.querySelector('[data-turn-expanded="true"]')!;
     vi.spyOn(turnEl, "getBoundingClientRect").mockReturnValue(makeMockRect(10, 700, 690));
-
     fireEvent.scroll(viewport);
     await waitFor(() => {
       expect(screen.getByTestId("turn-toggle").getAttribute("data-stuck")).toBe("true");
     });
-
     for (const top of [1200, 2400, 3600, 4800, 6000]) {
       act(() => {
         viewport.scrollTop = top;
@@ -392,7 +363,6 @@ describe("TimelineView sticky work block (task #2601)", () => {
     }
     expect(container.querySelector('[data-fast-scrolling="true"]')).toBeNull();
   });
-
   it("only marks the closest/latest work block as stuck when multiple blocks cross top", async () => {
     const items = [
       makeItem({ item_id: "1.0", kind: "agent_reasoning", payload: "thinking 1" }),
@@ -401,45 +371,32 @@ describe("TimelineView sticky work block (task #2601)", () => {
       makeItem({ item_id: "3.0", kind: "agent_reasoning", payload: "thinking 2" }),
       makeItem({ item_id: "3.1", kind: "agent_code", payload: "code 2" }),
     ];
-
     const { container } = render(<TimelineView items={items} />);
     const viewport = container.querySelector('[data-slot="scroll-area-viewport"]')!;
-
     vi.spyOn(viewport, "getBoundingClientRect").mockReturnValue(makeMockRect(0, 800, 800));
-
     const turnEls = container.querySelectorAll<HTMLElement>('[data-turn-expanded="true"]');
     expect(turnEls.length).toBe(2);
-
     vi.spyOn(turnEls[0], "getBoundingClientRect").mockReturnValue(makeMockRect(-300, 200, 500));
-
     vi.spyOn(turnEls[1], "getBoundingClientRect").mockReturnValue(makeMockRect(20, 750, 730));
-
     fireEvent.scroll(viewport);
-
     await waitFor(() => {
       const toggles = screen.getAllByTestId("turn-toggle");
       expect(toggles[0].getAttribute("data-stuck")).toBe("false");
       expect(toggles[1].getAttribute("data-stuck")).toBe("true");
     });
   });
-
   it("collapsing while stuck collapses in place and preserves viewport scroll position", () => {
     const items = [
       makeItem({ item_id: "1.0", kind: "agent_reasoning", payload: "thinking" }),
       makeItem({ item_id: "1.1", kind: "agent_code", payload: "code" }),
       makeItem({ item_id: "1.2", kind: "code_output", payload: "output" }),
     ];
-
     const { container } = render(<TimelineView items={items} />);
     const viewport = container.querySelector('[data-slot="scroll-area-viewport"]')!;
-
     viewport.scrollTop = 450;
-
     const toggle = screen.getByTestId("turn-toggle");
     expect(toggle.getAttribute("data-expanded")).toBe("true");
-
     fireEvent.click(toggle);
-
     expect(toggle.getAttribute("data-expanded")).toBe("false");
     expect(viewport.scrollTop).toBe(450);
   });
@@ -453,7 +410,6 @@ describe("TimelineView header scrolling scope", () => {
     makeItem({ item_id: "2.2", kind: "code_output", payload: "result" }),
     makeItem({ item_id: "3.0", kind: "agent_chat", payload: "Agent reply" }),
   ];
-
   it.each(["all", "last", "none"] as const)("keeps primary titles in flow and work/detail titles sticky in %s mode", (mode) => {
     setToggleState({ detailsMode: mode });
     const { container } = render(<TimelineView items={items} />);
@@ -486,7 +442,6 @@ describe("TimelineView header scrolling scope", () => {
     for (const title of titles) expect(container.contains(title)).toBe(true);
     expect(container.querySelector('[style*="--turn-header-h"]')).not.toBeNull();
   });
-
   it("collapses an expanded work block at the current reading position", () => {
     render(<TimelineView items={items} />);
     const viewport = screen.getByTestId("scroll-viewport");
