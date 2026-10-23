@@ -6,3 +6,4 @@ exports = ["capabilities.py", "compaction.py", "context_notes.py", "conversation
 
 [purity]
 "__init__.py" = "strict"
+"compaction.py" = "strict"

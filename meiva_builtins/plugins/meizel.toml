@@ -6,7 +6,3 @@ exports = ["meiva_fleet"]
 
 [purity]
 "__init__.py" = "strict"
-
-[debt.private-module]
-"tests/meiva_sdk_reminder_plugin/test_agent_reply_rearms_after_compaction.py -> meiva_sdk_reminder/_state.py" = 1
-"tests/test_meiva_sdk_reminder_plugin.py -> meiva_sdk_reminder/_state.py" = 1

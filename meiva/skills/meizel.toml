@@ -5,6 +5,7 @@ exports = ["skill_index.py", "skill_proxies.py"]
 
 [purity]
 "." = "strict-to-be"
+"skill_index.py" = "strict"
 "skill_proxies.py" = "strict"
 
 [debt.impure-call]

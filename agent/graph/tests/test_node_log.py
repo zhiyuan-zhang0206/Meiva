@@ -236,7 +236,7 @@ async def test_stall_guard_survives_redirected_stderr(monkeypatch: pytest.Monkey
     guard must hand faulthandler a stable real-fd stderr, never that live
     sys.stderr; passing a fileno-less stream raises io.UnsupportedOperation
     and kills the agent the diagnostic exists to observe."""
-    from agent.graph.exec._stream import StreamingTextIO
+    from agent.graph.exec.node import StreamingTextIO
 
     monkeypatch.setattr(settings.agent, "node_stall_dump_seconds", 12.0)
     monkeypatch.setattr(sys, "stderr", StreamingTextIO(max_chars=1_000_000))  # the leaked redirect

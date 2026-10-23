@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import time
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from typing import Any, Literal, NoReturn, cast
 
@@ -40,7 +40,10 @@ from base.log import logger
 
 from ._cancel import race_stream_vs_cancel
 from ._chunk import assemble_final_message
-from ._retry import RETRY_REMAINING_ATTR, Attempt, retry_wait
+from ._chunk import validate_stop_reason as validate_stop_reason
+from ._retry import RETRY_REMAINING_ATTR
+from ._retry import Attempt as Attempt
+from ._retry import retry_wait as retry_wait
 from ._stream import stream_llm
 from .goto import LlmGoto
 
@@ -119,6 +122,7 @@ async def llm_node(
     config: RunnableConfig,
     *,
     ledger: LlmLedger,
+    impl: Callable[..., Awaitable[Command[LlmGoto]]] | None = None,
 ) -> Command[LlmGoto]:
     agent_id = agent_id_from_config(config)
     model = runtime.context.require_agent().brain.llm_model
@@ -126,9 +130,10 @@ async def llm_node(
     failed = 0
     while True:
         try:
-            return await llm_attempt(
-                state, runtime, config, Attempt(failed + 1, first_started_at), ledger
-            )
+            attempt = Attempt(failed + 1, first_started_at)
+            if impl is None:
+                return await llm_attempt(state, runtime, config, attempt, ledger)
+            return await llm_attempt(state, runtime, config, attempt, ledger, impl=impl)
         except GraphBubbleUp:
             raise
         except Exception as exc:
@@ -196,12 +201,15 @@ async def llm_attempt(
     config: RunnableConfig,
     attempt: Attempt,
     ledger: LlmLedger,
+    *,
+    impl: Callable[..., Awaitable[Command[LlmGoto]]] | None = None,
 ) -> Command[LlmGoto]:
     turn_start = time.monotonic()
     agent_id = agent_id_from_config(config)
     event_publisher = runtime.context.event_publisher
     if event_publisher is None:
         raise RuntimeError("llm_node requires ctx.event_publisher")
+    runner = _llm_node_impl if impl is None else impl
     async with node_lifecycle(
         "llm",
         messages=state.messages,
@@ -224,7 +232,7 @@ async def llm_attempt(
                 attempt,
                 read_lm=lambda field: runtime.context.require_agent().read("lm", field),
             )
-            result = await _llm_node_impl(state, runtime, config, ledger)
+            result = await runner(state, runtime, config, ledger)
         except BaseException as exc:
             _note_failed_attempt(exc, attempt, runtime, agent_id)
             logger.opt(exception=True).warning(

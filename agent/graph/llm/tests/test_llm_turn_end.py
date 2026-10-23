@@ -20,7 +20,6 @@ from unittest.mock import MagicMock
 import pytest
 from langchain_core.runnables import RunnableConfig
 
-from agent.graph.llm import node
 from agent.graph.llm._retry import Attempt
 from agent.graph.llm.node import llm_attempt, llm_node
 from agent.graph.llm_errors import LlmLedger
@@ -57,17 +56,14 @@ def _config_with_thread() -> RunnableConfig:
 
 async def test_turn_end_ok_false_record_carries_exception(
     hosted_resources: HostedTurnResources,
-    monkeypatch: pytest.MonkeyPatch,
     loguru_records,
     model_catalog: ModelCatalog,
 ) -> None:
     """`_llm_node_impl` raises → finally uses logger.opt(exception=True) so that
     record["exception"] is not None, allowing downstream _event_sink to inject the traceback."""
 
-    async def _boom(*_a, **_k):
+    async def _boom(*_a: object, **_k: object):
         raise RuntimeError("simulated LLM timeout 39s")
-
-    monkeypatch.setattr(node, "_llm_node_impl", _boom)  # pyright: ignore[reportUnknownArgumentType]
 
     with pytest.raises(RuntimeError, match="simulated LLM timeout"):
         await llm_attempt(
@@ -76,6 +72,7 @@ async def test_turn_end_ok_false_record_carries_exception(
             config=_config_with_thread(),
             attempt=Attempt(1, time.time()),
             ledger=LlmLedger(),
+            impl=_boom,
         )
 
     turn_end_records = [r for r in loguru_records if r["extra"].get("event") == "turn_end"]  # pyright: ignore[reportUnknownMemberType]
@@ -94,7 +91,6 @@ async def test_turn_end_ok_false_record_carries_exception(
 
 async def test_turn_end_ok_true_record_no_exception(
     hosted_resources: HostedTurnResources,
-    monkeypatch: pytest.MonkeyPatch,
     loguru_records,
     model_catalog: ModelCatalog,
 ) -> None:
@@ -102,16 +98,15 @@ async def test_turn_end_ok_true_record_no_exception(
     payload must not bloat with traceback/exception_* fields."""
     sentinel = MagicMock()
 
-    async def _ok(*_a, **_k):
+    async def _ok(*_a: object, **_k: object):
         return sentinel
-
-    monkeypatch.setattr(node, "_llm_node_impl", _ok)  # pyright: ignore[reportUnknownArgumentType]
 
     result = await llm_node(
         state=MagicMock(),
         runtime=_runtime_with_redis(hosted_resources=hosted_resources, catalog=model_catalog),
         config=_config_with_thread(),
         ledger=LlmLedger(),
+        impl=_ok,
     )
     assert result is sentinel
 

@@ -15,7 +15,7 @@ from agent.graph import claim_node
 from agent.graph.claim.tests.claim_support import insert_inbound_kind, make_runtime, thread_config
 from agent.graph.claim.tests.cursor_fixture import fresh_snapshot_cursor as fresh_snapshot_cursor
 from agent.state import AgentState
-from agent.tests.claim.claim_status_support import _set_agent_status, committed_publishes
+from agent.tests.claim.claim_status_support import committed_publishes, set_agent_status
 from agent.tests.claim.claim_status_support import running_agent as running_agent
 from base.agents.inbox.insert import insert_inbound_message
 from base.agents.tests.units import spawn_agent
@@ -85,7 +85,7 @@ async def test_claim_subsequent_entry_does_not_disturb_running(
         database_gate=database_gate,
         machine=machine_identity,
     )
-    _set_agent_status(db_conn, tid, "running")
+    set_agent_status(db_conn, tid, "running")
     insert_inbound_message(db_conn, tid, "hello", source="user", bus=event_bus, database=database)
 
     # Don't raise — status is already 'running' when the next turn enters claim_node, 0-row no-op

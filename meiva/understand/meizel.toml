@@ -7,3 +7,4 @@ exports = ["answer.py", "plans.py", "wiring.py"]
 
 [purity]
 "errors.py" = "strict"
+"plans.py" = "strict"

@@ -8,8 +8,7 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 
 from agent.graph.exec import node
-from agent.graph.exec._result import ExecDone
-from agent.graph.exec.node import _exec_node_impl
+from agent.graph.exec.node import ExecDone, exec_node_impl
 from agent.graph.interrupt import InterruptEvent
 from agent.graph.tool_calls import normalize_tool_calls
 from agent.hooks.tests.fakes import make_fake_ops_pool
@@ -32,7 +31,7 @@ def _graph(state_cls: type[AgentState], **compile_options: Any) -> Any:
     from langgraph.graph import END, START, StateGraph
 
     builder: Any = StateGraph(state_cls, context_schema=MeivaContext)
-    builder.add_node("exec", _exec_node_impl, input_schema=state_cls)
+    builder.add_node("exec", exec_node_impl, input_schema=state_cls)
     builder.add_node("after_exec", lambda _state: {})
     builder.add_edge(START, "exec")
     builder.add_edge("after_exec", END)
@@ -251,7 +250,7 @@ async def test_lifecycle_pairs_skipped_calls_and_timeout_continues(
     monkeypatch: pytest.MonkeyPatch,
     outcome: str,
 ) -> None:
-    from agent.graph.exec._result import ExecCancelled, ExecLifecycle, ExecTimedOut
+    from agent.graph.exec.node import ExecCancelled, ExecLifecycle, ExecTimedOut
     from base.agents.lifecycle import AgentRestart, AgentTermination, SystemHalt
 
     outcomes = {

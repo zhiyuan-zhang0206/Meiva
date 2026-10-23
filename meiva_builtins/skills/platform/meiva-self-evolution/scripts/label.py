@@ -3,7 +3,8 @@
 # meiva:link meiva_builtins/skills/platform/meiva-self-evolution/docs/evidence-block-and-grading.meiva.okf.md
 from __future__ import annotations
 
-from typing import Any
+from collections.abc import Mapping
+from typing import Any, cast
 
 LABELS = ("ok", "fumbled", "failed", "unknown")
 REGRESSION_LABELS = ("failed", "fumbled")
@@ -15,13 +16,14 @@ FUMBLE_MIN_EXEC_FAILURES = 3
 FUMBLE_TURNS_PER_EXEC_FAILURE = 10
 
 
-def label(rec: dict[str, Any]) -> str:
-    grade = rec.get("evidence_grade")
+def label(rec: Mapping[str, object]) -> str:
+    raw = cast(dict[str, Any], rec)
+    grade = raw.get("evidence_grade")
     if grade is None:
-        return _rule_label(rec)
+        return _rule_label(raw)
     if grade != "complete":
         return "unknown"
-    return _rule_label(rec)
+    return _rule_label(raw)
 
 
 def _rule_label(rec: dict[str, Any]) -> str:

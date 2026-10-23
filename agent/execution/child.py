@@ -388,7 +388,7 @@ def _bind_identity(
     )
 
 
-def _run(
+def run_child(
     request_path: str, result_path: str, boot_started_at: float, *, config: Any, context: Any
 ) -> None:
     child = import_runtime(boot_started_at)
@@ -500,7 +500,7 @@ def main() -> None:
         machine = machine_from_boot(config)
         clients = process_clients(config=config, machine=machine)
         context = MeivaContext(clients=clients, machine=machine)
-        _run(request_path, result_path, boot_started_at, config=config, context=context)
+        run_child(request_path, result_path, boot_started_at, config=config, context=context)
     except BaseException as exc:
         write_crashed_result(result_path, exc)
 

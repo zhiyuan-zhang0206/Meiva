@@ -38,7 +38,7 @@ from base.packages.plugin_providers import build_model_catalog
 from meiva.tests.fixtures.pin_agent import exec_context
 
 
-def _notes() -> HandoffNotes:
+def make_notes() -> HandoffNotes:
     return HandoffNotes(Clock.from_settings, lambda: settings.general.message_timestamps)
 
 
@@ -173,7 +173,7 @@ async def test_checkpoint_receipt_prevents_reapplying_non_idempotent_delta(
             42,
             relays,
             incarnation=incarnation,
-            notes=_notes(),
+            notes=make_notes(),
             read_local_machine=machine_identity.name,
         )
     assert (await graph.aget_state(config)).values["counter"] == 3
@@ -185,7 +185,7 @@ async def test_checkpoint_receipt_prevents_reapplying_non_idempotent_delta(
         42,
         relays,
         incarnation=incarnation,
-        notes=_notes(),
+        notes=make_notes(),
         read_local_machine=machine_identity.name,
     )
     assert (await graph.aget_state(config)).values["counter"] == 3
@@ -251,7 +251,7 @@ async def test_settle_checkpoint_rolls_back_when_relay_establishment_fails(
         42,
         relays,
         incarnation=incarnation,
-        notes=_notes(),
+        notes=make_notes(),
         read_local_machine=machine_identity.name,
     )
     activate.assert_not_called()
@@ -282,7 +282,7 @@ async def test_settle_checkpoint_activates_only_after_relay_ready(
         42,
         relays,
         incarnation=incarnation,
-        notes=_notes(),
+        notes=make_notes(),
         read_local_machine=machine_identity.name,
     )
     checkpoint.assert_awaited_once()

@@ -487,5 +487,5 @@ def make_runtime(
     return Runtime(context=ctx)
 
 
-def _config(tid: int) -> RunnableConfig:
+def make_config(tid: int) -> RunnableConfig:
     return {"configurable": {"thread_id": str(tid)}}

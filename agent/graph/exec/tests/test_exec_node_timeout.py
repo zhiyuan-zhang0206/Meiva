@@ -16,7 +16,7 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 
 from agent.graph.exec import node
-from agent.graph.exec.node import _exec_node_impl
+from agent.graph.exec.node import exec_node_impl
 from agent.hooks.tests.fakes import make_fake_ops_pool
 from agent.state import AgentState
 from base import config
@@ -91,7 +91,7 @@ async def test_exec_node_timeout_fires_asyncio_wait_for(
     # → TimeoutError caught → returns _ExecTimedOut via Command
     from langgraph.types import Command
 
-    result = await _exec_node_impl(
+    result = await exec_node_impl(
         state,
         _make_runtime(hosted_resources=hosted_resources, database_gate=database_gate),
         _CONFIG,
@@ -140,7 +140,7 @@ async def test_exec_node_timeout_does_not_fire_when_fast(
 
     from langgraph.types import Command
 
-    result = await _exec_node_impl(
+    result = await exec_node_impl(
         state,
         _make_runtime(hosted_resources=hosted_resources, database_gate=database_gate),
         _CONFIG,

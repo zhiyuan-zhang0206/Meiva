@@ -1,4 +1,4 @@
-from ._registry import Hook, HookName, make_hook_runner
+from ._registry import Hook, HookName, make_hook_runner, merge_result
 
 # meiva:note
 # The plugin system has two layers: SDK wraps modify the behavior of the meiva namespace (declared as SdkWrap, applied through meiva/sdk_surface), and graph-edge hooks intervene in the agent execution pipeline (declared through PluginContributions, run by the hook container nodes).
@@ -22,4 +22,5 @@ __all__ = [
     "Hook",
     "HookName",
     "make_hook_runner",
+    "merge_result",
 ]

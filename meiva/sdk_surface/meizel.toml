@@ -23,6 +23,8 @@ exports = ["agent_identity.py", "attachment_transport.py", "batch.py", "const.py
 "." = "strict-to-be"
 "__init__.py" = "strict"
 "const.py" = "strict"
+"plugins.py" = "strict"
+"skill_sources.py" = "strict"
 "validation.py" = "strict"
 
 [debt.impure-call]

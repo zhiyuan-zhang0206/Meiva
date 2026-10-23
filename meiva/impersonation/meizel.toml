@@ -5,6 +5,7 @@ exports = ["attachment.py"]
 
 [purity]
 "." = "strict-to-be"
+"__init__.py" = "strict"
 
 [debt.impure-call]
 "attachment.py#uuid.uuid4" = 1

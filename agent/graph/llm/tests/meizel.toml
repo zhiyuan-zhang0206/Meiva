@@ -19,4 +19,3 @@ exports = ["cancel_fixture.py"]
 "test_llm_stream_stall.py#monkeypatch.setattr agent.graph.llm._stream.time.monotonic" = 3
 "test_llm_stream_stall.py#monkeypatch.setattr base.config.settings.lm.llm_stream_inter_chunk_timeout_seconds" = 2
 "test_llm_stream_stall.py#monkeypatch.setattr base.config.settings.lm.llm_stream_ttft_timeout_seconds" = 3
-"test_llm_turn_end.py#monkeypatch.setattr agent.graph.llm.node._llm_node_impl" = 2

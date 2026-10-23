@@ -24,7 +24,7 @@ from langgraph.types import Command
 
 from agent.graph import llm_node
 from agent.graph.llm_errors import LlmLedger
-from agent.graph.prompt._base_prompt import capture_meiva_overview, get_meiva_overview
+from agent.graph.prompt.system_prompt import capture_meiva_overview, get_meiva_overview
 from agent.hooks.tests.fakes import make_fake_ops_pool
 from agent.state import AgentState
 from base.agents.context import MeivaContext
@@ -410,7 +410,7 @@ def test_validate_stop_reason_unexpected_carries_stop_reason_and_output_tokens()
     attributes; `test_validate_raises_on_max_tokens` reads attributes but only covers the
     Truncated subclass path — the unexpected parent class path is uncovered.
     """
-    from agent.graph.llm._chunk import validate_stop_reason
+    from agent.graph.llm.node import validate_stop_reason
     from agent.graph.llm_errors import LLMStreamUnexpectedStopReasonError
 
     msg = AIMessage(

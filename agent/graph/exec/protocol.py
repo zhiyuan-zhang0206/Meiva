@@ -45,6 +45,9 @@ from agent.execution.protocol import (
     read_result as read_result,
 )
 from agent.execution.protocol import (
+    write_json as write_json,
+)
+from agent.execution.protocol import (
     write_request as write_request,
 )
 from agent.execution.protocol import (
@@ -66,6 +69,7 @@ __all__ = [
     "make_result_path",
     "read_request",
     "read_result",
+    "write_json",
     "write_request",
     "write_result",
 ]

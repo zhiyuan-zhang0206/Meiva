@@ -78,15 +78,33 @@ from base.log import logger
 
 from ._crop import CropInputs
 from ._result import (
-    ExecCancelled,
-    ExecCrashed,
-    ExecDone,
-    ExecLifecycle,
-    ExecResult,
-    ExecTimedOut,
+    ExecCancelled as ExecCancelled,
 )
-from ._stream import ExecOutputChunkPublisher
-from ._subprocess import run_in_subprocess
+from ._result import (
+    ExecChildError as ExecChildError,
+)
+from ._result import (
+    ExecCrashed as ExecCrashed,
+)
+from ._result import (
+    ExecDone as ExecDone,
+)
+from ._result import (
+    ExecLifecycle as ExecLifecycle,
+)
+from ._result import (
+    ExecResult as ExecResult,
+)
+from ._result import (
+    ExecTimedOut as ExecTimedOut,
+)
+from ._stream import (
+    ExecOutputChunkPublisher as ExecOutputChunkPublisher,
+)
+from ._stream import (
+    StreamingTextIO as StreamingTextIO,
+)
+from ._subprocess import run_in_subprocess as run_in_subprocess
 from .output import ExecEnvelope, crashed_no_output_body, wrap_code_output
 from .protocol import ResultPayload
 
@@ -131,7 +149,7 @@ async def exec_node(
             "display", "timeline_default_limit"
         ),
     ):
-        return await _exec_node_impl(state, runtime, config)
+        return await exec_node_impl(state, runtime, config)
 
 
 # meiva:note
@@ -433,7 +451,7 @@ async def _exec_single_call(
 ) -> tuple[dict[str, Any], bool]:
     """Execute one invocation; return its state delta and whether it compacted."""
     assert ctx.event_publisher is not None, (  # noqa: S101
-        "_exec_node_impl requires ctx.event_publisher"
+        "exec_node_impl requires ctx.event_publisher"
     )
     # Deferring notes/media keeps result positions consecutive. Streaming and
     # checkpoint reconstruction must use those same positions.
@@ -606,15 +624,17 @@ def _skipped_call_results(
     return results
 
 
-async def _exec_node_impl(
+# meiva:note
+# Run one call; LangGraph owns reducer application and the next snapshot. Recovery may already
+# have paired an interrupted remainder when `calls` is empty, and compaction wipes any findings
+# raised by earlier calls of this batch along with the history.
+async def exec_node_impl(
     state: _state.AgentState,
     runtime: Runtime[MeivaContext],
     config: RunnableConfig,
 ) -> Command[ExecGoto]:
-    """Run one call; LangGraph owns reducer application and the next snapshot."""
     replacements, calls = _remaining_exec_calls(state.messages)
     if not calls:
-        # Recovery may already have paired the interrupted remainder.
         return Command[ExecGoto](
             update={"messages": state.pending_exec_notes, "pending_exec_notes": []},
             goto=AFTER_EXEC,
@@ -625,7 +645,6 @@ async def _exec_node_impl(
     )
     if compacted:
         delta["pending_exec_notes"] = []
-        # Findings raised by earlier calls of this batch annotate the history claim wipes.
         delta["security_findings"] = Overwrite([])
         return Command[ExecGoto](update=delta, goto=AFTER_EXEC)
 
@@ -648,3 +667,6 @@ async def _exec_node_impl(
     delta["messages"] = replacements + results + notes
     delta["pending_exec_notes"] = []
     return Command[ExecGoto](update=delta, goto=AFTER_EXEC)
+
+
+_exec_node_impl = exec_node_impl

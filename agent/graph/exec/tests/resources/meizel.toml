@@ -1,6 +1,4 @@
-[debt.stdlib-patch]
-"_envelope_crash_child.py#assignment os.fsync" = 1
-"_envelope_crash_child.py#assignment os.replace" = 1
+exports = ["envelope_crash_child.py"]
 
 [debt.unresolved-patch]
 "test_output_pipe.py#monkeypatch.setattr reader.stream.write" = 1

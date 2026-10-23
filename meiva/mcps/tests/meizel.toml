@@ -8,9 +8,6 @@
 
 [debt.first-party-patch]
 "_mcps_helpers.py#monkeypatch.setattr base.packages.mcp_config.builtin_mcp_paths" = 1
-"test_browser.py#monkeypatch.setattr meiva.mcps._browser._CONNECT_ATTEMPTS" = 1
-"test_browser.py#monkeypatch.setattr meiva.mcps._browser._CONNECT_DELAY_S" = 1
-"test_browser.py#monkeypatch.setattr meiva.mcps._browser.asyncio.open_unix_connection" = 2
 "test_computer.py#monkeypatch.setattr meiva.mcps._computer.asyncio.open_unix_connection" = 2
 "test_daemon.py#monkeypatch.setattr base.packages.mcp_config.builtin_mcp_paths" = 1
 "test_daemon.py#monkeypatch.setattr meiva.mcps._daemon.asyncio.Event" = 1

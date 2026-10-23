@@ -22,7 +22,7 @@ from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
 
-__all__ = ["committed_publishes", "compact_tail", "running_agent"]
+__all__ = ["committed_publishes", "compact_tail", "running_agent", "set_agent_status"]
 
 
 def committed_publishes(pub: MagicMock) -> list[dict[str, Any]]:
@@ -71,17 +71,13 @@ async def await_status(pool: AsyncConnectionPool, agent_id: int, expected: str) 
     )
 
 
-def _set_agent_status(db: psycopg.Connection, agent_id: int, status: str) -> None:
-    """UPDATE agents_meta.status with rowcount assertion.
-
-    Fail-fast on 0 rows — a silent no-op UPDATE (wrong / nonexistent agent_id)
-    would otherwise surface much later as a baffling ``assert <spawn-value> ==
-    <intended>`` status mismatch far from its cause.
-    """
+# meiva:note
+# UPDATE `agents_meta.status` with rowcount assertion so a silent no-op UPDATE fails fast.
+def set_agent_status(db: psycopg.Connection, agent_id: int, status: str) -> None:
     with db.cursor() as cur:
         cur.execute("UPDATE agents_meta SET status = %s WHERE id = %s", (status, agent_id))
         assert cur.rowcount == 1, (
-            f"_set_agent_status: agent {agent_id} not updated (rowcount={cur.rowcount})"
+            f"set_agent_status: agent {agent_id} not updated (rowcount={cur.rowcount})"
         )
     db.commit()
 

@@ -13,4 +13,4 @@ def test_daemon_guard_rejects_a_live_pid_that_is_not_this_daemon(tmp_path: Path)
     pidfile = tmp_path / "task_maintenance.pid"
     pidfile.write_text(f"{os.getpid()}\n", encoding="utf-8")
 
-    assert daemon._is_running(pidfile=pidfile) is False
+    assert daemon.is_running(pidfile=pidfile) is False

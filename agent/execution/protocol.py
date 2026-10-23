@@ -11,6 +11,7 @@ import os
 import tempfile
 import time
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal, cast
@@ -147,7 +148,7 @@ def write_request(
         tag, blob = dumps_typed(state)
         envelope["state_tag"] = tag
         envelope["state_b64"] = base64.b64encode(blob).decode("ascii")
-    _write_json(path, envelope)
+    write_json(path, envelope)
     _log_envelope_transfer("request", "write", path, started_at)
 
 
@@ -209,7 +210,7 @@ def write_result(path: Path, payload: ResultPayload) -> None:
         tag, blob = dumps_typed(payload.state_update)
         envelope["update_tag"] = tag
         envelope["update_b64"] = base64.b64encode(blob).decode("ascii")
-    _write_json(path, envelope)
+    write_json(path, envelope)
     _log_envelope_transfer("result", "write", path, started_at)
 
 
@@ -265,7 +266,13 @@ def _log_envelope_transfer(
     )
 
 
-def _write_json(path: Path, envelope: dict[str, Any]) -> None:
+def write_json(
+    path: Path,
+    envelope: dict[str, Any],
+    *,
+    fsync: Callable[[int], None] = os.fsync,
+    replace: Callable[[str | os.PathLike[str], str | os.PathLike[str]], object] | None = None,
+) -> None:
     data = json.dumps(envelope, ensure_ascii=False).encode("utf-8")
     fd, raw_tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
     tmp = Path(raw_tmp)
@@ -274,8 +281,11 @@ def _write_json(path: Path, envelope: dict[str, Any]) -> None:
         with os.fdopen(fd, "wb") as f:
             f.write(data)
             f.flush()
-            os.fsync(f.fileno())
-        tmp.replace(path)
+            fsync(f.fileno())
+        if replace is None:
+            tmp.replace(path)
+        else:
+            replace(tmp, path)
     except BaseException:
         with contextlib.suppress(OSError):
             tmp.unlink()

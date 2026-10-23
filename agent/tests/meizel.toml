@@ -35,9 +35,6 @@ exports = ["agent_tests.py", "claim"]
 "test_state_slot.py#assignment meiva.state.messages" = 3
 "test_state_slot.py#assignment meiva.state_update" = 5
 
-[debt.private-name]
-"compact/test_compact_reminder_fires_in_band.py -> test_compact.py#_config" = 1
-
 [debt.restricted-python]
 "test_compact.py#string patch target 'agent.graph.hooks.compact.resolve_context_budget'" = 1
 

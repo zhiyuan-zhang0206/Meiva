@@ -19,8 +19,8 @@ from agent.graph.claim.tests.claim_support import (
 from agent.graph.claim.tests.cursor_fixture import fresh_snapshot_cursor as fresh_snapshot_cursor
 from agent.state import AgentState
 from agent.tests.claim.claim_status_support import (
-    _set_agent_status,
     committed_publishes,
+    set_agent_status,
 )
 from agent.tests.claim.claim_status_support import running_agent as running_agent
 from base.agents.inbox.insert import insert_inbound_message
@@ -180,7 +180,7 @@ async def test_claim_restart_while_idle_commits_halted_true(
     """external restart hits idle agent (halted=True) → committed halted=True,
     carrying 'no in-flight work before restart' across the restart boundary for the new process to read."""
     tid = running_agent()
-    _set_agent_status(db_conn, tid, "running")
+    set_agent_status(db_conn, tid, "running")
     insert_inbound_kind(db_conn, tid, "", "restart", source="system:restart")
 
     cmd = await claim_node(
@@ -209,7 +209,7 @@ async def test_claim_restart_self_source_commits_halted_false(
     set halted to True (turn-end semantics), committed halted must be False — agent has in-flight
     intent, must wake after restart to confirm result and continue."""
     tid = running_agent()
-    _set_agent_status(db_conn, tid, "running")
+    set_agent_status(db_conn, tid, "running")
     insert_inbound_kind(db_conn, tid, "", "restart", source=source)
 
     cmd = await claim_node(
@@ -236,7 +236,7 @@ async def test_claim_restart_preserves_chat_for_successor(
 ):
     """Only the accepted lifecycle command dispatches; chat remains durable pending work."""
     tid = running_agent()
-    _set_agent_status(db_conn, tid, "running")
+    set_agent_status(db_conn, tid, "running")
     insert_inbound_message(db_conn, tid, "hello", source="user", bus=event_bus, database=database)
     insert_inbound_kind(db_conn, tid, "", "restart", source="system:restart")
 
@@ -273,7 +273,7 @@ async def test_claim_restart_kind_does_not_publish_committed(
     """restart kind does not publish InboundCommitted (appends no message and no chat
     inbound id enters committed list)."""
     tid = running_agent()
-    _set_agent_status(db_conn, tid, "running")
+    set_agent_status(db_conn, tid, "running")
     insert_inbound_kind(db_conn, tid, "", "restart", source="user")
 
     pub = MagicMock()

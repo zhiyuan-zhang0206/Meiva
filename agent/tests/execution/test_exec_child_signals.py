@@ -131,7 +131,7 @@ def test_child_installs_signal_handlers_before_reading_request(
         clients = process_clients(config=config, machine=machine)
         context = MeivaContext(clients=clients, machine=machine)
         try:
-            exec_child._run("request.json", "result.json", 0.0, config=config, context=context)
+            exec_child.run_child("request.json", "result.json", 0.0, config=config, context=context)
         finally:
             clients.close()
     finally:
