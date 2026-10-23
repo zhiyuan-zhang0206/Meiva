@@ -274,11 +274,38 @@ _HEALTH_NAME_CALLS = ("start_health_server", "init_gateway_process", "install_gr
 _MODULE_CALLS = ("acquire_pidfile", "pidfile_holds_daemon")
 
 
-def _call_name(node: ast.Call) -> str | None:
+def _default_targets(tree: ast.Module) -> dict[str, ast.expr]:
+    targets: dict[str, ast.expr] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            pos = node.args.posonlyargs + node.args.args
+            for arg, default in [
+                *zip(pos[len(pos) - len(node.args.defaults) :], node.args.defaults, strict=False),
+                *zip(node.args.kwonlyargs, node.args.kw_defaults, strict=False),
+            ]:
+                if default is not None:
+                    targets[arg.arg] = default
+        elif isinstance(node, ast.ClassDef):
+            for stmt in node.body:
+                if (
+                    isinstance(stmt, ast.AnnAssign)
+                    and isinstance(stmt.target, ast.Name)
+                    and stmt.value is not None
+                ):
+                    targets[stmt.target.id] = stmt.value
+    return targets
+
+
+def _call_name(node: ast.Call, defaults: dict[str, ast.expr] | None = None) -> str | None:
     func = node.func
-    if isinstance(func, ast.Name):
-        return func.id
-    return func.attr if isinstance(func, ast.Attribute) else None
+    raw = (
+        func.id
+        if isinstance(func, ast.Name)
+        else (func.attr if isinstance(func, ast.Attribute) else None)
+    )
+    if raw is not None and defaults and isinstance(target := defaults.get(raw), ast.Name):
+        return target.id
+    return raw
 
 
 def _module_constants(tree: ast.Module) -> dict[str, str]:
@@ -306,11 +333,12 @@ def _literal(node: ast.expr, constants: dict[str, str]) -> str | None:
 def _daemon_literals(source: str, *, module: str | None = None) -> dict[str, list[str | None]]:
     tree = ast.parse(source)
     constants = _module_constants(tree)
+    defaults = _default_targets(tree)
     found: dict[str, list[str | None]] = {}
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
             continue
-        callee = _call_name(node)
+        callee = _call_name(node, defaults)
         if callee in _HEALTH_NAME_CALLS:
             keyword = {k.arg: k.value for k in node.keywords}
             argument = node.args[0] if node.args else keyword.get("name") or keyword.get("label")
@@ -385,7 +413,12 @@ def _calls_for_import(
 
 
 def _called_imports(tree: ast.Module, module: str) -> list[tuple[str, str]]:
-    calls = [node.func for node in ast.walk(tree) if isinstance(node, ast.Call)]
+    defaults = _default_targets(tree)
+    raw_calls = [node.func for node in ast.walk(tree) if isinstance(node, ast.Call)]
+    calls = [
+        *raw_calls,
+        *(defaults[c.id] for c in raw_calls if isinstance(c, ast.Name) and c.id in defaults),
+    ]
     rebound = _rebound_names(tree)
     imports = Counter(
         alias.asname or (alias.name.split(".")[0] if isinstance(node, ast.Import) else alias.name)

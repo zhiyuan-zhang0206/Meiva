@@ -25,6 +25,7 @@ Runtime notes:
 
 import json
 import time
+from typing import Any, cast
 
 import redis
 
@@ -40,7 +41,7 @@ TARGET_AGENT_ID = 0
 IDLE_STATUS = "idling"
 
 
-def _is_target_idle(event: dict, target_id: int) -> bool:
+def _is_target_idle(event: dict[str, Any], target_id: int) -> bool:
     """A matching lifecycle hint requests a fresh authoritative status read."""
     if event.get("role") != "agent_updated" or event["agent_id"] != target_id:
         return False
@@ -97,17 +98,17 @@ def watch(target_id: int) -> None:
     happens before the subscription is established is missed (the poll fallback
     covers the already-idle case).
     """
-    client = redis.Redis.from_url(
+    client: Any = cast(Any, redis.Redis).from_url(
         settings.data_plane.redis_url,
         decode_responses=True,
         # redis-py 8 defaults to 5s, which kills a quiet pubsub.listen() read.
         # Observed 2026-08-13: the watcher died mid-watch before target idle.
         socket_timeout=None,
     )
-    pubsub = client.pubsub()
+    pubsub: Any = client.pubsub()
     pubsub.subscribe(settings.data_plane.events_channel)
     try:
-        for message in pubsub.listen():
+        for message in cast(list[dict[str, Any]], pubsub.listen()):
             if message["type"] != "message":
                 continue  # skip the subscribe-confirmation control frame
             payload = message["data"]

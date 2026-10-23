@@ -55,7 +55,7 @@ _MAX_REMIND_INTERVAL_SECONDS = _task_priority.MAX_REMIND_INTERVAL_SECONDS
 _resolve_create_args = _task_priority.resolve_create_args
 
 
-def _append_note_to_results(cur, task_id: int, note: str) -> None:  # noqa: ANN001
+def _append_note_to_results(cur: psycopg.Cursor, task_id: int, note: str) -> None:
     """Append a timestamped note line to a task's results within the
     current transaction.  Caller must hold FOR UPDATE on the row."""
     line = task_note_line(note)
@@ -63,7 +63,8 @@ def _append_note_to_results(cur, task_id: int, note: str) -> None:  # noqa: ANN0
         "SELECT results FROM agent_tasks WHERE id = %s FOR UPDATE",
         (task_id,),
     )
-    current = cur.fetchone()[0] or ""
+    row = cur.fetchone()
+    current: str = (row[0] if row is not None else None) or ""
     if current and not current.endswith("\n"):
         current += "\n"
     # The update also bumps updated_at: a note append is real task activity,

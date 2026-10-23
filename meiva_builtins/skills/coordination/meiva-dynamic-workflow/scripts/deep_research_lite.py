@@ -15,6 +15,7 @@ Contrast with deep_research_orchestrator.py (7 waves, ~40 agents).
 import json
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 from uuid import uuid4
 
 import meiva
@@ -43,13 +44,13 @@ def spawn(prompt: str) -> int:
     return meiva.agents.spawn(prompt=prompt, idempotency_key=str(uuid4()))
 
 
-def read_state() -> dict:
+def read_state() -> dict[str, Any]:
     if SF.exists():
         return json.loads(meiva.files.read(str(SF)))
     return {"wave": 1}
 
 
-def write_state(state: dict) -> None:
+def write_state(state: dict[str, Any]) -> None:
     with open(SF, "w") as f:
         json.dump(state, f, ensure_ascii=False, indent=2)
 
@@ -129,7 +130,7 @@ def wave2():
     log("=" * 50)
     log("WAVE 2/5: Verify — 3 agents cross-check")
 
-    W2_FILES = []
+    W2_FILES: list[str] = []
     for i in range(3):
         fname = f"w2_verify_{i + 1}.json"
         W2_FILES.append(fname)
@@ -213,7 +214,7 @@ def wave4():
         draft = json.loads(meiva.files.read(str(draft_path)))
         draft_text = draft.get("report", json.dumps(draft, ensure_ascii=False))
 
-    W4_FILES = []
+    W4_FILES: list[str] = []
     for role in ["fact-checker", "gap-finder"]:
         fname = f"w4_{role}.json"
         W4_FILES.append(fname)

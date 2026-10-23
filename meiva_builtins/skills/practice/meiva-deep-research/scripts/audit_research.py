@@ -31,6 +31,7 @@ import re
 import sys
 from datetime import datetime
 from pathlib import Path
+from typing import Any, cast
 
 CONFIDENCE = {"consensus", "single", "contradicted", "unverified"}
 VERIFICATION = {"formal", "process", "rubric", "self"}
@@ -41,36 +42,36 @@ _CODE_FENCE_RE = re.compile(r"```.*?```", re.S)
 _INLINE_CODE_RE = re.compile(r"`[^`]*`")
 
 
-def _load(path: str) -> dict:
+def _load(path: str) -> dict[str, Any]:
     data = json.loads(Path(path).read_text(encoding="utf-8"))
     if not isinstance(data, dict):
         raise TypeError(f"{path}: top level must be a JSON object")
-    return data
+    return cast(dict[str, Any], data)
 
 
-def _check_question_plan(state: dict, out: list[str]) -> None:
+def _check_question_plan(state: dict[str, Any], out: list[str]) -> None:
     question = state["question"]
-    if not isinstance(question, dict) or not question.get("three_part"):
+    if not isinstance(question, dict) or not cast(dict[str, Any], question).get("three_part"):
         out.append("question.three_part must be a non-empty string")
-    if not isinstance(question.get("so_what"), str) or not question["so_what"]:
+    if not isinstance(cast(Any, question).get("so_what"), str) or not question["so_what"]:
         out.append("question.so_what must be a non-empty string")
 
     plan = state["plan"]
     if not isinstance(plan, list) or not plan:
         out.append("plan must be a non-empty list of sub-questions")
-    for i, sub in enumerate(plan):
-        if not isinstance(sub, dict) or not sub.get("sub_question"):
+    for i, sub in enumerate(cast(list[Any], plan)):
+        if not isinstance(sub, dict) or not cast(dict[str, Any], sub).get("sub_question"):
             out.append(f"plan[{i}]: missing sub_question")
 
 
-def _check_sources(state: dict, out: list[str]) -> dict[int, dict]:
+def _check_sources(state: dict[str, Any], out: list[str]) -> dict[int, dict[str, Any]]:
     sources = state["sources"]
     if not isinstance(sources, list):
         out.append("sources must be a list")
         return {}
-    source_by_id: dict[int, dict] = {}
+    source_by_id: dict[int, dict[str, Any]] = {}
     urls: set[str] = set()
-    for i, s in enumerate(sources):
+    for i, s in enumerate(cast(list[dict[str, Any]], sources)):
         sid = s.get("id")
         if not isinstance(sid, int):
             out.append(f"sources[{i}]: id must be an integer, got {sid!r}")
@@ -99,12 +100,14 @@ def _check_sources(state: dict, out: list[str]) -> dict[int, dict]:
     return source_by_id
 
 
-def _check_learnings(state: dict, source_by_id: dict[int, dict], out: list[str]) -> None:
+def _check_learnings(
+    state: dict[str, Any], source_by_id: dict[int, dict[str, Any]], out: list[str]
+) -> None:
     learnings = state["learnings"]
     if not isinstance(learnings, list):
         out.append("learnings must be a list")
         return
-    for i, learning in enumerate(learnings):
+    for i, learning in enumerate(cast(list[dict[str, Any]], learnings)):
         if not isinstance(learning.get("fact"), str) or not learning["fact"]:
             out.append(f"learnings[{i}]: missing fact")
         conf = learning.get("confidence")
@@ -114,14 +117,15 @@ def _check_learnings(state: dict, source_by_id: dict[int, dict], out: list[str])
         if not isinstance(ids, list) or not ids:
             out.append(f"learnings[{i}]: source_ids must be a non-empty list")
             continue
-        for sid in ids:
+        ids_list = cast(list[Any], ids)
+        for sid in ids_list:
             if not isinstance(sid, int) or sid not in source_by_id:
                 out.append(f"learnings[{i}]: source_id {sid!r} not in sources")
-        if conf == "consensus" and len(set(ids)) < 2:
+        if conf == "consensus" and len(set(ids_list)) < 2:
             out.append(f"learnings[{i}]: consensus requires >= 2 distinct sources")
 
 
-def _check_budget(state: dict, out: list[str]) -> None:
+def _check_budget(state: dict[str, Any], out: list[str]) -> None:
     """Invariant 8: unique sources must not exceed the pre-registered fetch cap.
 
     Sources are URL-deduped (invariant 5) and every source was fetched
@@ -144,14 +148,16 @@ def _check_budget(state: dict, out: list[str]) -> None:
         )
 
 
-def _check_claims(state: dict, source_by_id: dict[int, dict], out: list[str]) -> None:
+def _check_claims(
+    state: dict[str, Any], source_by_id: dict[int, dict[str, Any]], out: list[str]
+) -> None:
     claims = state.get("claims")
     if claims is None:
         return
     if not isinstance(claims, list):
         out.append("claims must be a list")
         return
-    for i, c in enumerate(claims):
+    for i, c in enumerate(cast(list[dict[str, Any]], claims)):
         if not isinstance(c.get("claim"), str) or not c["claim"]:
             out.append(f"claims[{i}]: missing claim")
         ver = c.get("verification")
@@ -162,7 +168,7 @@ def _check_claims(state: dict, source_by_id: dict[int, dict], out: list[str]) ->
                 out.append(f"claims[{i}]: source_id {sid!r} not in sources")
 
 
-def _problems(state: dict) -> list[str]:
+def _problems(state: dict[str, Any]) -> list[str]:
     out: list[str] = []
     for section in REQUIRED_SECTIONS:
         if section not in state:

@@ -1724,6 +1724,46 @@ reportMissingParameterType = "error"
 reportUnknownLambdaType = "error"
 reportMissingTypeArgument = "error"
 
+# A sub-skill's script reaches its parent skill's scripts/ only through the
+# runtime `__file__`-derived sys.path guard (Structure Rule 6) — pyright does
+# not execute that guard, so it needs the same directory named explicitly to
+# resolve the sibling import statically. Each skill's own scripts/ resolves
+# its OWN same-directory siblings without help (a file's containing directory
+# is always on pyright's implicit search path); only the parent-reaching case
+# needs extraPaths. Listed before `root = "meiva_builtins"` because pyright
+# takes the first matching executionEnvironment.
+[[tool.pyright.executionEnvironments]]
+root = "meiva_builtins/skills/integrations/web-ai"
+extraPaths = ["meiva_builtins/skills/integrations/web-ai/scripts"]
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+reportUnknownVariableType = "error"
+reportUnknownParameterType = "error"
+reportMissingParameterType = "error"
+reportUnknownLambdaType = "error"
+reportMissingTypeArgument = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "meiva_builtins/skills/integrations/web-sources"
+extraPaths = ["meiva_builtins/skills/integrations/web-sources/scripts"]
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+reportUnknownVariableType = "error"
+reportUnknownParameterType = "error"
+reportMissingParameterType = "error"
+reportUnknownLambdaType = "error"
+reportMissingTypeArgument = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "meiva_builtins"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+reportUnknownVariableType = "error"
+reportUnknownParameterType = "error"
+reportMissingParameterType = "error"
+reportUnknownLambdaType = "error"
+reportMissingTypeArgument = "error"
+
 # Ladder rung — tests/ call-site rules (audit round-2 tests-ci P1, task
 # #1143). The two call-signature rules gate merge on these test directories:
 # the first ones zeroed by the tests/ annotation sweep (integration 16, e2e
@@ -1794,21 +1834,6 @@ reportUnknownArgumentType = "error"
 root = "tests/path_scoped"
 reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
-
-# A sub-skill's script reaches its parent skill's scripts/ only through the
-# runtime `__file__`-derived sys.path guard (Structure Rule 6) — pyright does
-# not execute that guard, so it needs the same directory named explicitly to
-# resolve the sibling import statically. Each skill's own scripts/ resolves
-# its OWN same-directory siblings without help (a file's containing directory
-# is always on pyright's implicit search path); only the parent-reaching case
-# needs extraPaths.
-[[tool.pyright.executionEnvironments]]
-root = "meiva_builtins/skills/integrations/web-ai"
-extraPaths = ["meiva_builtins/skills/integrations/web-ai/scripts"]
-
-[[tool.pyright.executionEnvironments]]
-root = "meiva_builtins/skills/integrations/web-sources"
-extraPaths = ["meiva_builtins/skills/integrations/web-sources/scripts"]
 
 [tool.mutmut]
 # Mutation testing exploratory config (mutmut).

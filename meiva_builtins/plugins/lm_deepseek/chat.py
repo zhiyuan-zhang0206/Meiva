@@ -7,7 +7,7 @@ Anthropic transport; this selects a wire API for the same model, never a model.
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 from langchain_core.language_models import LanguageModelInput
 from langchain_core.runnables import Runnable
@@ -36,8 +36,11 @@ class DeepSeekChatModel(ThinkingTokensChatAnthropic):
         if method != "json_schema":
             if http_client is not None or http_async_client is not None:
                 raise ValueError("Custom HTTP clients require method='json_schema'")
-            return super().with_structured_output(
-                schema, include_raw=include_raw, method=method, **kwargs
+            return cast(
+                Runnable[LanguageModelInput, dict[str, Any] | BaseModel],
+                cast(Any, super()).with_structured_output(
+                    schema, include_raw=include_raw, method=method, **kwargs
+                ),
             )
 
         from langchain_openai import ChatOpenAI
@@ -59,6 +62,9 @@ class DeepSeekChatModel(ThinkingTokensChatAnthropic):
             http_async_client=http_async_client,
         )
         kwargs.setdefault("strict", True)
-        return model.with_structured_output(
-            schema, method="json_schema", include_raw=include_raw, **kwargs
+        return cast(
+            Runnable[LanguageModelInput, dict[str, Any] | BaseModel],
+            cast(Any, model).with_structured_output(
+                schema, method="json_schema", include_raw=include_raw, **kwargs
+            ),
         )

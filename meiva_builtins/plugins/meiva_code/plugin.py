@@ -248,7 +248,7 @@ def _wrapped_read(
     # 5. Commit state. injected_paths has no reducer, so it follows
     # last-value semantics — the wrap is the sole writer, so just pass the
     # full new set.
-    update_dict: dict = {}
+    update_dict: dict[str, Any] = {}
     if injected != current.injected_paths:
         update_dict["injected_paths"] = injected
     if hashes != current.injected_hashes:
