@@ -52,7 +52,7 @@ import type {
   InventoryWriteResult,
 } from "@/lib/contracts/types";
 
-import { useSectionVisible } from "../_visibility";
+import { useSectionVisible } from "../visibility";
 import { FLEX } from "@/lib/layout/layout";
 import { cn } from "@/lib/format/utils";
 

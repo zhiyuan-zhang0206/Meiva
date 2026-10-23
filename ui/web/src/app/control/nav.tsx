@@ -1,5 +1,6 @@
 "use client";
 
+// meiva:note
 // Left anchor-nav for the two vertical anchor-nav pages (Control and Insights).
 //
 // The sections list, the scroll-container id it spies on, and its aria-label
@@ -10,22 +11,22 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { useBreakpoint } from "@/lib/layout/breakpoint";
 
-import { controlAnchorIds, type ControlSectionDef } from "./_sections";
+import { controlAnchorIds, type ControlSectionDef } from "./sections";
 import { FLEX, FLEX_1, FLEX_COL, MIN_H_0 } from "@/lib/layout/layout";
 import { cn } from "@/lib/format/utils";
 
+// meiva:note
 // The active anchor is the LAST one (document order = vertical order) whose top
 // has scrolled above this line, measured from the scroll container's top edge.
 const SPY_OFFSET_PX = 96;
 
-/**
- * The active anchor for a set of document-ordered ids and a threshold `line`:
- * the last id whose top is at/above the line. Because a wrapping parent
- * section's own top sits above its sub-anchors' tops, this advances from the
- * parent (config) to a sub (config-llm) as each sub's top passes the line —
- * which an intersection-set approach can't, since the parent element keeps
- * intersecting the top band throughout. Exported for testing.
- */
+// meiva:note
+// The active anchor for a set of document-ordered ids and a threshold `line`:
+// the last id whose top is at/above the line. Because a wrapping parent
+// section's own top sits above its sub-anchors' tops, this advances from the
+// parent (config) to a sub (config-llm) as each sub's top passes the line —
+// which an intersection-set approach can't, since the parent element keeps
+// intersecting the top band throughout. Exported for testing.
 export function pickActiveAnchor(
   ids: readonly string[],
   line: number,
@@ -39,14 +40,13 @@ export function pickActiveAnchor(
   return current;
 }
 
-/**
- * Track which anchor the user has most recently scrolled past. Uses each
- * anchor's own top position rather than IntersectionObserver intersection: a
- * section's wrapping element stays intersecting the top band the whole time any
- * of its content is on screen, so an intersection-set approach can never
- * advance from a parent section to its sub-anchors. Reading positions directly
- * lets a sub-anchor (config-llm …) win over its parent (config).
- */
+// meiva:note
+// Track which anchor the user has most recently scrolled past. Uses each
+// anchor's own top position rather than IntersectionObserver intersection: a
+// section's wrapping element stays intersecting the top band the whole time any
+// of its content is on screen, so an intersection-set approach can never
+// advance from a parent section to its sub-anchors. Reading positions directly
+// lets a sub-anchor (config-llm …) win over its parent (config).
 function useScrollSpy(anchorIds: readonly string[], scrollId: string): string {
   const [activeId, setActiveId] = useState<string>(anchorIds[0] ?? "");
 
@@ -78,11 +78,13 @@ function useScrollSpy(anchorIds: readonly string[], scrollId: string): string {
 function scrollToAnchor(id: string) {
   const el = document.getElementById(id);
   if (!el) return;
+  // meiva:note
   // Instant, not smooth: this is in-page anchor navigation (the equivalent of
   // clicking a table of contents), not a scroll gesture the user should watch
   // ride out — an animated scroll here just adds latency before the target is
   // readable.
   el.scrollIntoView({ behavior: "auto", block: "start" });
+  // meiva:note
   // Reflect the target in the URL without a history entry per click.
   history.replaceState(null, "", `#${id}`);
 }
@@ -97,6 +99,7 @@ export function ControlNav({
   ariaLabel: string;
 }) {
   const t = useTranslations("control.sections");
+  // meiva:note
   // R4 layer 4: one responsive mechanism — breakpoint + conditional render
   // (the old always-mounted desktop rail + mobile disclosure pair hid one
   // with CSS media queries). Switch point preserved from the old CSS `md`
@@ -106,6 +109,7 @@ export function ControlNav({
     labelKey ? t(labelKey as Parameters<typeof t>[0]) : label;
   const anchorIds = useMemo(() => controlAnchorIds(sections), [sections]);
   const activeId = useScrollSpy(anchorIds, scrollId);
+  // meiva:note
   // Mobile disclosure open/closed. Desktop ignores this (nav is always shown).
   const [open, setOpen] = useState(false);
 
@@ -114,6 +118,7 @@ export function ControlNav({
     setOpen(false);
   }, []);
 
+  // meiva:note
   // A section is active if it or one of its subs is the current anchor.
   const isSectionActive = (sectionId: string, subIds: string[]) =>
     activeId === sectionId || subIds.includes(activeId);
@@ -163,6 +168,7 @@ export function ControlNav({
     </ul>
   );
 
+  // meiva:note
   // Shown in the mobile disclosure button. The find almost always resolves
   // (activeId seeds to the first anchor); the first section's label is the
   // fallback for the initial frame — both section lists are non-empty.
@@ -180,6 +186,7 @@ export function ControlNav({
       )}
     >
       {!isNarrow ? (
+        // meiva:note
         // Desktop: a full-height rail that scrolls its own (long) list. The nav is
         // a flex sibling of the content scroller, already bounded to the row's
         // height (min-h-0 on <nav> lets it shrink to that instead of growing to
@@ -192,6 +199,7 @@ export function ControlNav({
           {links}
         </div>
       ) : (
+        // meiva:note
         // Mobile: a "Jump to…" disclosure so the nav folds to one row.
         <div className="px-3 py-2">
           <div className={cn("items-center gap-2", FLEX)}>

@@ -74,12 +74,12 @@ function PlainChatMarkdown({ content, inline }: { content: string; inline?: bool
   );
 }
 
-export function __resetMarkdownCacheForTests(): void {
+export function resetMarkdownCacheForTests(): void {
   rendererPromise = null;
   resolvedRenderer = null;
 }
 
-export function __setMarkdownImportForTests(loader: (() => Promise<Renderer>) | null): void {
+export function setMarkdownImportForTests(loader: (() => Promise<Renderer>) | null): void {
   importRenderer =
     loader ?? (() => import("@/components/content/markdown-renderer").then((module) => module.ChatMarkdownRenderer));
 }

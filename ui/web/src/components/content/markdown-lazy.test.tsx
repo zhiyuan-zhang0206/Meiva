@@ -3,8 +3,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import {
   ChatMarkdown,
-  __resetMarkdownCacheForTests,
-  __setMarkdownImportForTests,
+  resetMarkdownCacheForTests,
+  setMarkdownImportForTests,
   preloadChatMarkdown,
 } from "./markdown";
 import { ChatMarkdownRenderer } from "./markdown-renderer";
@@ -12,12 +12,12 @@ import { ChatMarkdownRenderer } from "./markdown-renderer";
 type Renderer = typeof ChatMarkdownRenderer;
 
 beforeEach(() => {
-  __resetMarkdownCacheForTests();
+  resetMarkdownCacheForTests();
 });
 
 afterEach(() => {
   cleanup();
-  __setMarkdownImportForTests(null);
+  setMarkdownImportForTests(null);
 });
 
 describe("ChatMarkdown lazy boundary", () => {
@@ -26,7 +26,7 @@ describe("ChatMarkdown lazy boundary", () => {
     const pending = new Promise<Renderer>((resolve) => {
       resolveImport = resolve;
     });
-    __setMarkdownImportForTests(() => pending);
+    setMarkdownImportForTests(() => pending);
 
     const { container } = render(<ChatMarkdown content="**bold** text" inline={inline} />);
 
@@ -62,7 +62,7 @@ describe("ChatMarkdown lazy boundary", () => {
     process.on("unhandledRejection", onUnhandledRejection);
 
     try {
-      __setMarkdownImportForTests(() => Promise.reject(new Error("chunk load failed")));
+      setMarkdownImportForTests(() => Promise.reject(new Error("chunk load failed")));
 
       const first = render(<ChatMarkdown content="**bold** text" />);
       expect(screen.getByTestId("chat-markdown-plain")).toBeDefined();
@@ -73,7 +73,7 @@ describe("ChatMarkdown lazy boundary", () => {
       expect(screen.getByTestId("chat-markdown-plain")).toBeDefined();
       first.unmount();
 
-      __setMarkdownImportForTests(null);
+      setMarkdownImportForTests(null);
       await preloadChatMarkdown();
 
       const retry = render(<ChatMarkdown content="**bold** text" />);

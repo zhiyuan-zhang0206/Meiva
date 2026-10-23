@@ -15,8 +15,8 @@ import { fireEvent, render } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 import {
-  __resetHighlighterCacheForTests,
-  __setHighlighterImportForTests,
+  resetHighlighterCacheForTests,
+  setHighlighterImportForTests,
 } from "@/components/content/python-code";
 import { CardHeader, MessageCard, messageCardConfig, type CardConfig } from "./card";
 import { resolveTimelineColors } from "@/lib/timeline/timeline-colors";
@@ -24,8 +24,8 @@ import { formatItemTime } from "./timestamp";
 import type { BackendTimelineItem } from "@/lib/contracts/types";
 
 afterEach(() => {
-  __resetHighlighterCacheForTests();
-  __setHighlighterImportForTests(null);
+  resetHighlighterCacheForTests();
+  setHighlighterImportForTests(null);
 });
 
 // ---------------------------------------------------------------------------
@@ -333,8 +333,8 @@ describe("CardHeader", () => {
     // this wiring had no assertion that pointer-enter/focus actually invokes
     // the prefetch, only that a mocked no-op didn't blow up.
     const preloadPythonCodeHighlighter = vi.fn(() => new Promise<never>(() => undefined));
-    __resetHighlighterCacheForTests();
-    __setHighlighterImportForTests(preloadPythonCodeHighlighter);
+    resetHighlighterCacheForTests();
+    setHighlighterImportForTests(preloadPythonCodeHighlighter);
     const cfg = messageCardConfig(baseItem)!;
     const { getByTestId } = renderWithQuery(
       <CardHeader item={baseItem} config={cfg} expanded={false} onToggle={noop} />,
@@ -344,7 +344,7 @@ describe("CardHeader", () => {
     fireEvent.pointerEnter(btn);
     expect(preloadPythonCodeHighlighter).toHaveBeenCalledTimes(1);
 
-    __resetHighlighterCacheForTests();
+    resetHighlighterCacheForTests();
     fireEvent.focus(btn);
     expect(preloadPythonCodeHighlighter).toHaveBeenCalledTimes(2);
   });

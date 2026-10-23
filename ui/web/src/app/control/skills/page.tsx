@@ -32,7 +32,7 @@ import { errMsg } from "@/lib/contracts/errors";
 import { useStore } from "@/lib/state/store";
 import type { SkillLayer, SkillsView } from "@/lib/contracts/types";
 
-import { useSectionVisible } from "../_visibility";
+import { useSectionVisible } from "../visibility";
 import { FLEX } from "@/lib/layout/layout";
 import { cn } from "@/lib/format/utils";
 

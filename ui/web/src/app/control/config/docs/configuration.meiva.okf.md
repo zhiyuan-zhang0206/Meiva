@@ -29,3 +29,19 @@ choices. After saving, both the stored default and shared model query refresh.
 Page tests wait for the per-model request chain as well as the field editor when
 asserting the settled page. Shared labels and badges are scoped to their panel;
 counts taken after only one of the independent requests completes are unstable.
+
+## Display grouping ownership
+
+`app/control/config-group-defs.ts` owns the field-group membership and ordering tables,
+hidden field list, filter choices and special model-panel anchors. The displayed
+group labels come from `app/control/sections.ts`, which also owns the navigation anchors.
+The default-model and per-model panels have their own elements and never become
+ordinary field buckets, so an anchor exists once. Consumers import these tables
+directly from their owner.
+
+`app/control/config-groups.ts` owns field projection: explicit env-var membership wins over
+the backend-domain fallback, and unknown domains remain visible in Other.
+Unmapped fields sort after curated fields. Hidden fields still retain their raw
+overrides in the merge-patch write; hiding a row must not change its value.
+Group-membership and hidden-field tables remain disjoint, as the grouping test
+asserts.

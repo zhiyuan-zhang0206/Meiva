@@ -7,82 +7,83 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // measured container, so these tests pin the home frame contract instead —
 // which frames mount, with which panels and defaults, and what may persist. The real
 // persistence path runs through useDefaultLayout (not mocked) + lib/panel-layout-storage.
-vi.mock("@/components/ui/resizable", () => ({
-  ResizablePanelGroup: ({
-    children,
-    defaultLayout,
-    onLayoutChanged,
-    orientation,
-  }: {
-    children: ReactNode;
-    defaultLayout?: Record<string, number> | undefined;
-    onLayoutChanged?: (
-      layout: Record<string, number>,
-      meta: { isUserInteraction: boolean },
-    ) => void;
-    orientation: string;
-  }) => (
-    <div
-      data-testid="resizable-panel-group"
-      data-slot="resizable-panel-group"
-      data-orientation={orientation}
-      data-default-layout={JSON.stringify(defaultLayout ?? null)}
-    >
-      {/* The library commits a layout on mount / on a shape or container
-          change (programmatic), and a real drag commits with
-          isUserInteraction: true — one button each so tests can drive both. */}
-      <button
-        data-testid="layout-commit-programmatic"
-        onClick={() =>
-          onLayoutChanged?.(
-            { "panel-sidebar": 30, "panel-main": 70 },
-            { isUserInteraction: false },
-          )
-        }
-      />
-      <button
-        data-testid="layout-commit-drag"
-        onClick={() =>
-          onLayoutChanged?.(
-            { "panel-sidebar": 41, "panel-main": 59 },
-            { isUserInteraction: true },
-          )
-        }
-      />
-      {children}
-    </div>
-  ),
-  ResizablePanel: ({
-    children,
-    defaultSize,
-    id,
-    maxSize,
-    minSize,
-  }: {
-    children: ReactNode;
-    defaultSize: string;
-    id: string;
-    maxSize?: string;
-    minSize: string;
-  }) => (
-    <div
-      data-slot="resizable-panel"
-      data-panel-id={id}
-      data-default-size={defaultSize}
-      data-min-size={minSize}
-      data-max-size={maxSize}
-    >
-      {children}
-    </div>
-  ),
-  ResizableHandle: ({
-    className,
-    style,
-  }: {
-    className?: string;
-    style?: CSSProperties;
-  }) => <div data-slot="resizable-handle" className={className} style={style} />,
-}));
+vi.mock("react-resizable-panels", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("react-resizable-panels")>();
+  return {
+    ...actual,
+    Group: ({
+      children,
+      defaultLayout,
+      onLayoutChanged,
+      orientation,
+    }: {
+      children: ReactNode;
+      defaultLayout?: Record<string, number> | undefined;
+      onLayoutChanged?: (
+        layout: Record<string, number>,
+        meta: { isUserInteraction: boolean },
+      ) => void;
+      orientation: string;
+    }) => (
+      <div
+        data-testid="resizable-panel-group"
+        data-slot="resizable-panel-group"
+        data-orientation={orientation}
+        data-default-layout={JSON.stringify(defaultLayout ?? null)}
+      >
+        <button
+          data-testid="layout-commit-programmatic"
+          onClick={() =>
+            onLayoutChanged?.(
+              { "panel-sidebar": 30, "panel-main": 70 },
+              { isUserInteraction: false },
+            )
+          }
+        />
+        <button
+          data-testid="layout-commit-drag"
+          onClick={() =>
+            onLayoutChanged?.(
+              { "panel-sidebar": 41, "panel-main": 59 },
+              { isUserInteraction: true },
+            )
+          }
+        />
+        {children}
+      </div>
+    ),
+    Panel: ({
+      children,
+      defaultSize,
+      id,
+      maxSize,
+      minSize,
+    }: {
+      children: ReactNode;
+      defaultSize: string;
+      id: string;
+      maxSize?: string;
+      minSize: string;
+    }) => (
+      <div
+        data-slot="resizable-panel"
+        data-panel-id={id}
+        data-default-size={defaultSize}
+        data-min-size={minSize}
+        data-max-size={maxSize}
+      >
+        {children}
+      </div>
+    ),
+    Separator: ({
+      className,
+      style,
+    }: {
+      className?: string;
+      style?: CSSProperties;
+    }) => <div data-slot="resizable-handle" className={className} style={style} />,
+  };
+});
 
 import { HomeLayout } from "./home-layout";
 

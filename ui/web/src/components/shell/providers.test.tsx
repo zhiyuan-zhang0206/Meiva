@@ -16,13 +16,6 @@ vi.mock("@/lib/transport/useEventStream", () => ({
   useEventStream: vi.fn(),
 }));
 
-// AlertsProvider opens the /api/alerts SSE stream + initial fetch on mount;
-// the stream machinery has its own tests (use-alerts.test.tsx) — this smoke
-// test mocks the module out like the EventStream one above.
-vi.mock("@/lib/notifications/use-alerts", () => ({
-  AlertsProvider: ({ children }: { children: React.ReactNode }) => children,
-}));
-
 vi.mock("next-themes", () => ({
   ThemeProvider: ({ children, nonce }: { children: ReactNode; nonce?: string }) => (
     <div data-testid="theme-provider" data-nonce={nonce}>{children}</div>

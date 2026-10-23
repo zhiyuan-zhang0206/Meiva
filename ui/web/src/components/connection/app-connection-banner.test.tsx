@@ -4,11 +4,14 @@
 // that stops retrying must show at once, and recovery must cancel a pending banner.
 // meiva:link ui/web/src/docs/frontend-components/frontend-components.meiva.okf.md
 
-import { act, cleanup, render } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { act, cleanup, render as rtlRender } from "@testing-library/react";
+import type { ReactElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ConnectionState } from "@/lib/contracts/types";
 import { useStore } from "@/lib/state/store";
+import { api } from "@/lib/transport/api";
 
 const states: string[] = [];
 let emit: ((ev: { type: string }) => void) | null = null;
@@ -16,10 +19,6 @@ const origSetConnState = useStore.getState().setConnState;
 
 vi.mock("@/lib/auth/auth-context", () => ({
   useAuth: () => ({ status: "authenticated" }),
-}));
-
-vi.mock("@/lib/notifications/use-cluster-health", () => ({
-  useClusterHealth: () => undefined,
 }));
 
 vi.mock("@/lib/transport/useEventStream", () => ({
@@ -31,9 +30,15 @@ vi.mock("@/lib/transport/useEventStream", () => ({
 import { AppConnectionBanner } from "./app-connection-banner";
 import { NOTICE_DELAY_MS } from "@/components/notifications/connection-notice";
 
+function render(ui: ReactElement) {
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return rtlRender(<QueryClientProvider client={qc}>{ui}</QueryClientProvider>);
+}
+
 beforeEach(() => {
   states.length = 0;
   emit = null;
+  vi.spyOn(api, "getClusterStatus").mockImplementation(() => new Promise(() => undefined));
   useStore.setState({
     connState: "open",
     setConnState: (v: ConnectionState) => {
@@ -47,6 +52,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   useStore.setState({ connState: "open", setConnState: origSetConnState });
+  vi.restoreAllMocks();
   vi.useRealTimers();
 });
 

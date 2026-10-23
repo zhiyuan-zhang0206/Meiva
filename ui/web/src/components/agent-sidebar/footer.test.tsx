@@ -18,17 +18,15 @@ vi.mock("next/navigation", () => ({
 
 vi.mock("@/lib/transport/api", () => ({
   api: {
+    getAlerts: () => new Promise(() => undefined),
     getStatsDashboard: () => new Promise(() => undefined),
     getUiContributions: () => Promise.resolve({ themes: [], nav: [], stats: [] }),
   },
 }));
 
-vi.mock("@/lib/notifications/use-alerts", () => ({
-  useAlerts: () => ({ data: { alerts: [], meta: { window: "24h", total: 0, unresolved_count: 3 } } }),
-}));
-
 function render(ui: React.ReactElement) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  qc.setQueryData(["alerts"], { alerts: [], meta: { window: "24h", total: 0, unresolved_count: 3 } });
   return rtlRender(<QueryClientProvider client={qc}>{ui}</QueryClientProvider>);
 }
 

@@ -9,8 +9,8 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
-  __resetHighlighterCacheForTests,
-  __setHighlighterImportForTests,
+  resetHighlighterCacheForTests,
+  setHighlighterImportForTests,
 } from "@/components/content/python-code";
 import { api } from "@/lib/transport/api";
 import { useStore } from "@/lib/state/store";
@@ -38,15 +38,15 @@ vi.mock("next/navigation", () => ({ useRouter: () => ({ push: pushSpy }) }));
 
 afterEach(() => {
   cleanup();
-  __resetHighlighterCacheForTests();
-  __setHighlighterImportForTests(null);
+  resetHighlighterCacheForTests();
+  setHighlighterImportForTests(null);
 });
 beforeEach(() => {
   vi.restoreAllMocks();
   pushSpy.mockReset();
   preloadPythonCodeHighlighter.mockClear();
-  __resetHighlighterCacheForTests();
-  __setHighlighterImportForTests(preloadPythonCodeHighlighter);
+  resetHighlighterCacheForTests();
+  setHighlighterImportForTests(preloadPythonCodeHighlighter);
 });
 
 function makeQc() {
@@ -209,13 +209,13 @@ describe("SchedulesPage", () => {
     await waitFor(() => expect(screen.getByText("memory-arbiter")).toBeTruthy());
 
     preloadPythonCodeHighlighter.mockClear();
-    __resetHighlighterCacheForTests();
+    resetHighlighterCacheForTests();
     const expandButton = screen.getByRole("button", { name: "Expand" });
 
     fireEvent.pointerEnter(expandButton);
     expect(preloadPythonCodeHighlighter).toHaveBeenCalledTimes(1);
 
-    __resetHighlighterCacheForTests();
+    resetHighlighterCacheForTests();
     fireEvent.focus(expandButton);
     expect(preloadPythonCodeHighlighter).toHaveBeenCalledTimes(2);
   });

@@ -244,6 +244,13 @@ function CodeSummary({
   );
 }
 
+export const HEADER_CLS =
+  "w-full flex items-center gap-1.5 px-2 sm:px-3 py-1.5 text-[11px] font-mono text-left " +
+  "text-muted-foreground/80 hover:text-foreground hover:bg-accent/30 " +
+  "transition-colors select-none rounded-tr-sm";
+
+export const STICKY_HEADER_CLS = "sticky top-11 z-10";
+
 export function CallBadge({ call }: { call: SdkCall }) {
   return (
     <span>

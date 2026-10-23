@@ -3,7 +3,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { __resetHighlighterCacheForTests, __setHighlighterImportForTests } from "@/components/content/python-code";
+import { resetHighlighterCacheForTests, setHighlighterImportForTests } from "@/components/content/python-code";
 import { USER_SETTING_DEFAULTS, type BackendTimelineItem } from "@/lib/contracts/types";
 
 import { TimelineView } from ".";
@@ -43,8 +43,8 @@ function mockRect(top: number, bottom: number, height: number): DOMRect {
 }
 
 function setupStuckBlock() {
-  __resetHighlighterCacheForTests();
-  __setHighlighterImportForTests(() => new Promise(() => undefined));
+  resetHighlighterCacheForTests();
+  setHighlighterImportForTests(() => new Promise(() => undefined));
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
   qc.setQueryData(["config", null], { fields: [] });
   qc.setQueryData(["user-settings"], { ...USER_SETTING_DEFAULTS, "display.expand_runs_mode": "all" });
@@ -64,8 +64,8 @@ function setupStuckBlock() {
 
 afterEach(() => {
   cleanup();
-  __resetHighlighterCacheForTests();
-  __setHighlighterImportForTests(null);
+  resetHighlighterCacheForTests();
+  setHighlighterImportForTests(null);
   vi.restoreAllMocks();
 });
 

@@ -1,3 +1,4 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen } from "@testing-library/react";
 import { NextIntlClientProvider } from "next-intl";
 import { describe, expect, it, vi } from "vitest";
@@ -6,22 +7,21 @@ import en from "../../../messages/en";
 import zh from "../../../messages/zh";
 import { ToUserDocumentView } from "./to-user-document";
 
-vi.mock("@/lib/context/use-to-user", () => ({
-  useToUser: () => ({ data: undefined, isFetching: false, isError: false, refetch: vi.fn() }),
-}));
-
 function renderEmpty(messages: typeof en, locale: "en" | "zh") {
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
-    <NextIntlClientProvider locale={locale} messages={{ toUser: messages.toUser }}>
-      <ToUserDocumentView
-        agentId={7}
-        document={{ content: null, version: null, modified_at: null, legacy_html: false, resources: {} }}
-        failed={false}
-        pending={false}
-        refresh={vi.fn()}
-        mobile={false}
-      />
-    </NextIntlClientProvider>,
+    <QueryClientProvider client={qc}>
+      <NextIntlClientProvider locale={locale} messages={{ toUser: messages.toUser }}>
+        <ToUserDocumentView
+          agentId={7}
+          document={{ content: null, version: null, modified_at: null, legacy_html: false, resources: {} }}
+          failed={false}
+          pending={false}
+          refresh={vi.fn()}
+          mobile={false}
+        />
+      </NextIntlClientProvider>
+    </QueryClientProvider>,
   );
 }
 

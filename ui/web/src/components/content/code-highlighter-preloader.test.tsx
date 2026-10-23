@@ -2,8 +2,8 @@ import { render } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
 import {
-  __resetHighlighterCacheForTests,
-  __setHighlighterImportForTests,
+  resetHighlighterCacheForTests,
+  setHighlighterImportForTests,
 } from "@/components/content/python-code";
 import { CodeHighlighterPreloader } from "./code-highlighter-preloader";
 
@@ -11,13 +11,13 @@ const preload = vi.fn(() => new Promise<never>(() => undefined));
 
 beforeEach(() => {
   preload.mockClear();
-  __resetHighlighterCacheForTests();
-  __setHighlighterImportForTests(preload);
+  resetHighlighterCacheForTests();
+  setHighlighterImportForTests(preload);
 });
 
 afterEach(() => {
-  __resetHighlighterCacheForTests();
-  __setHighlighterImportForTests(null);
+  resetHighlighterCacheForTests();
+  setHighlighterImportForTests(null);
   vi.unstubAllGlobals();
   vi.useRealTimers();
 });
