@@ -93,7 +93,8 @@ with no `path=`) to decide what to assert: that verdict flips between a CI
 runner and a developer's macOS, which is a false positive nobody can debug from
 the failing side. `lint-host-platform-marks` reports such a read — `sys.platform`,
 `os.name`, `Host.system()`, `Platform.current()`, the tree's `is_macos()` /
-`is_linux()`, and the ambient half (`shutil.which(...)` without `path=`,
+`is_linux()`, the six host calls of the `platform` module
+(`system`/`platform`/`uname`/`release`/`mac_ver`/`win32_ver`), and the ambient half (`shutil.which(...)` without `path=`,
 `pytest.importorskip(...)`) — and its baseline
 (`scripts/lint/baseline/host_platform_marks.json`) freezes how many of each read
 predate the rule. The count follows the read rather than the file, so moving or

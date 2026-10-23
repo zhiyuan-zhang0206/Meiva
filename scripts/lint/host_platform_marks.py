@@ -35,6 +35,14 @@ _HOST_PREDICATES = frozenset({"is_macos", "is_linux"})
 _OS_NAME = "os.name"
 
 # meiva:note
+# The stdlib `platform` module is bounded: these six calls answer "what host is this".
+# `python_version()` and `python_implementation()` answer "what interpreter", which is not
+# a host fact; `machine()` answers the architecture, and no marker carries that dimension.
+# `getattr(platform, "system")` and `importlib.import_module("platform")` are outside the
+# rule, and the document says so rather than leaving it to be discovered.
+_PLATFORM_CALLS = frozenset({"system", "platform", "uname", "release", "mac_ver", "win32_ver"})
+
+# meiva:note
 # `shutil.which(name)` resolves through `os.environ["PATH"]` only when it is called without
 # `path=`; an explicit path is the caller stating where to look.
 _WHICH = "shutil.which"
@@ -87,6 +95,8 @@ def _platform_read(node: ast.AST) -> str | None:
         predicate = name.rsplit(".", 1)[-1]
         if predicate in _HOST_PREDICATES:
             return f"{predicate}()"
+        if name.startswith("platform.") and predicate in _PLATFORM_CALLS:
+            return f"{name}()"
     return None
 
 
