@@ -1,12 +1,13 @@
 "use client";
 
+// meiva:note
 // The horizontal TabBar is long gone: the whole page is Ctrl-F-searchable and
 // every section is deep-linkable (#config-gateway, #skills, …). Named Control,
 // not Settings — it carries operational actions (schedules, config, inventory),
 // not just preferences.
 //
 // Every section's scaffolding AND its data queries render/fetch from first
-// paint — see _visibility.tsx for how that stays within the connection budget
+// paint — see visibility.tsx for how that stays within the connection budget
 // as the user scrolls. The section bodies below are the existing per-section
 // components, unchanged except for threading `enabled: visible` into their
 // queries.
@@ -16,7 +17,7 @@ import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { useState } from "react";
 
-import { useSettledAnchorScroll } from "./_anchor-scroll";
+import { useSettledAnchorScroll } from "./anchor-scroll";
 
 import ConfigPage from "@/app/control/config/page";
 import DisplaySettingsPage from "@/app/control/display/page";
@@ -31,13 +32,13 @@ import { assetUrl } from "@/lib/transport/api";
 
 import { AppSettingsEntry, useAppBridge } from "@/components/app/app-settings";
 
-import { ControlNav } from "./_nav";
+import { ControlNav } from "./nav";
 import {
   APP_SETTINGS_SECTION,
   CONTROL_SCROLL_ID,
   CONTROL_SECTIONS,
-} from "./_sections";
-import { ControlSection } from "./_section";
+} from "./sections";
+import { ControlSection } from "./section";
 import { FLEX, FLEX_1, FLEX_COL, MIN_H_0, MIN_W_0, OVERFLOW_HIDDEN } from "@/lib/layout/layout";
 import { cn } from "@/lib/format/utils";
 

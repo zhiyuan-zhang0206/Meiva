@@ -22,7 +22,7 @@ vi.mock("@/app/insights/status/page", () => ({
 vi.mock("@/app/insights/ops/page", () => ({ default: () => <div id="ops-metrics">OPS_BODY</div> }));
 vi.mock("@/components/ops/alerts-section", () => ({ default: () => <div id="alerts-section">ALERTS_BODY</div> }));
 
-import { INSIGHTS_SECTIONS } from "@/app/control/_sections";
+import { INSIGHTS_SECTIONS } from "@/app/control/sections";
 
 import InsightsPage from "./page";
 

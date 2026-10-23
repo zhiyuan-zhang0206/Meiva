@@ -34,7 +34,7 @@ import { errMsg } from "@/lib/contracts/errors";
 import { useStore } from "@/lib/state/store";
 import type { ScheduleCreate } from "@/lib/contracts/types";
 
-import { useSectionVisible } from "../_visibility";
+import { useSectionVisible } from "../visibility";
 import { FLEX } from "@/lib/layout/layout";
 import { cn } from "@/lib/format/utils";
 import { ScheduleForm, ScheduleRow } from "./_schedule_components";

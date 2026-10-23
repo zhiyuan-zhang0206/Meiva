@@ -14,7 +14,7 @@ def test_frontend_config_group_keys_match_backend_aliases() -> None:
         / "src"
         / "app"
         / "control"
-        / "_config_groups.ts"
+        / "config-group-defs.ts"
     )
     assert groups_ts.exists(), f"missing frontend map: {groups_ts}"
     src = groups_ts.read_text()

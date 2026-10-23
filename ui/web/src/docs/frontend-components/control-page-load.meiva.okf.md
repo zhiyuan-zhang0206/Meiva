@@ -7,7 +7,7 @@ tags: [frontend, performance, control, insights]
 
 # Control and Insights first paint
 
-Both pages share one section wrapper, `app/control/_section.tsx`. A section
+Both pages share one section wrapper, `app/control/section.tsx`. A section
 renders its heading and anchor immediately and mounts its body after the first
 paint, one slice at a time — see the mount queue below
 (`lib/layout/use-client-ready.ts`).

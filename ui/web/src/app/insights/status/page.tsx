@@ -22,7 +22,7 @@ import { formatRelative } from "@/lib/format/time";
 import type { ClusterPanel, MachineStatus, SystemStatus } from "@/lib/contracts/types";
 import { SYSTEM_STATUS_QUERY_KEY } from "@/lib/notifications/use-cluster-health";
 
-import { useSectionVisible } from "@/app/control/_visibility";
+import { useSectionVisible } from "@/app/control/visibility";
 import { FLEX } from "@/lib/layout/layout";
 import { cn } from "@/lib/format/utils";
 

@@ -57,7 +57,7 @@ ALLOWED: dict[str, tuple[Category, str]] = {
     ),
     "tests/components/base/test_config_contract.py": (
         "contract",
-        "the frontend config-group keys (ui/web/src/app/control/_config_groups.ts) are real backend field aliases",
+        "the frontend config-group keys (ui/web/src/app/control/config-group-defs.ts) are real backend field aliases",
     ),
     "tests/components/base/test_config_lite_table.py": (
         "contract",

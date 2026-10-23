@@ -43,12 +43,14 @@ class ConfigFieldView(BaseModel):
     default_value: object
     description: str
     group: str  # owning-domain label (e.g. "LLM", "Data plane") — the second-level bucket
+    # meiva:note
     # Owning machine capability — conceptual ownership + the remote-view field
     # filter (a pure agent-runner's view shows only agent-runner + common fields).
     # The panel's DISPLAY grouping is NOT derived from this: the frontend regroups
-    # into finer semantic sections via its own static map (_config_groups.ts).
+    # into finer semantic sections via its own static map (config-group-defs.ts).
     # "common" = not owned by a single capability (cluster-wide policy or shared
     # host identity).
+    # meiva:link base/docs/configuration/configuration.meiva.okf.md
     capability: Capability
     # "agent" | "ops" | "gateway" | "all" | "schedule" | "" — which process
     # must restart after a change. "gateway" covers the gateway process plus

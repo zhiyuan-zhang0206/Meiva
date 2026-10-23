@@ -8,8 +8,8 @@ import { api } from "@/lib/transport/api";
 import { groupedModels, providerLabel } from "@/lib/contracts/models";
 import type { ResolvedFieldView } from "@/lib/contracts/types";
 
-import { fieldLabel, formatConfigValue } from "../_config_groups";
-import { useSectionVisible } from "../_visibility";
+import { fieldLabel, formatConfigValue } from "../config-groups";
+import { useSectionVisible } from "../visibility";
 import { FLEX, FLEX_1, MIN_W_0 } from "@/lib/layout/layout";
 import { cn } from "@/lib/format/utils";
 
