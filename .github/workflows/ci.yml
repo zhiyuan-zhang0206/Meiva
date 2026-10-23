@@ -1514,6 +1514,62 @@ jobs:
           # killed mid-run.
           launchctl bootout "gui/$(id -u)/com.meiva.test.two-section-chain-smoke" || true
 
+  # The darwin lane (task #5531). `scripts/structure/platform_lanes.toml` names this job and
+  # `scripts/structure/platform_lane_coverage.py` reads it back from this file, so a rename
+  # here without the registry fails the structure lane rather than silently uncovering the
+  # tests. `-m requires_host` selects the declarations; the rest of the suite stays out
+  # because a hosted macOS runner has no data plane to give it.
+  #
+  # Blocking on purpose: a job with continue-on-error runs these tests and judges none of
+  # them, which the lane gate refuses to count as coverage.
+  host-marks:
+    name: host marks (macOS)
+    runs-on: macos-15
+    timeout-minutes: 25
+    needs: [classify]
+    if: ${{ needs.classify.outputs.backend == 'true' }}
+    env:
+      MEIVA_DB_URL: ""
+      MEIVA_REDIS_URL: ""
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: 0.13.1
+          enable-cache: true
+
+      - name: Install Python deps
+        uses: ./.github/actions/uv-sync
+
+      - name: Create isolated Meiva home
+        run: |
+          mkdir -p "$RUNNER_TEMP/meiva-home"
+          echo "MEIVA_HOME=$RUNNER_TEMP/meiva-home" >> "$GITHUB_ENV"
+
+      - name: Census the selection
+        # Before the run, so an empty selection fails as an empty selection rather than as a
+        # green job: the junit of a lane that collected nothing reads exactly like a lane
+        # that ran everything it was asked to.
+        run: uv run python -m scripts.ci.host_marks_census
+
+      - name: Run the host declarations
+        run: uv run pytest -m requires_host -q --junit-xml=tmp/junit-host-marks.xml
+
+      - name: Upload census and report
+        # Transport is diagnostic, not gating: the census step above already refused an empty
+        # selection, and the tests' own verdict is the run's.
+        if: ${{ always() }}
+        continue-on-error: true
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: host-marks-census
+          if-no-files-found: warn
+          path: |
+            tmp/host-marks-census.json
+            tmp/junit-host-marks.xml
+
   backend:
     # The aggregator carrying the branch-protection check name. Skipped
     # (= satisfied) when the diff has no backend side and structure succeeded;
@@ -1526,7 +1582,7 @@ jobs:
     name: backend (pytest + pyright)
     runs-on: ubuntu-24.04
     timeout-minutes: 10
-    needs: [classify, backend-static, backend-static-tests, backend-structure, backend-shard, backend-selected, backend-serial, backend-pgvector-smoke, helper-signing-smoke]
+    needs: [classify, backend-static, backend-static-tests, backend-structure, backend-shard, backend-selected, backend-serial, backend-pgvector-smoke, helper-signing-smoke, host-marks]
     if: ${{ !cancelled() && (needs.classify.result == 'failure' || (needs.classify.result == 'success' && (needs.classify.outputs.backend == 'true' || needs.backend-structure.result != 'success'))) }}
     env:
       # Every coverage-data file the combine expects: all backend-shard matrix
@@ -1561,6 +1617,7 @@ jobs:
           check backend-serial "${{ needs.backend-serial.result }}"
           check backend-pgvector-smoke "${{ needs.backend-pgvector-smoke.result }}"
           check helper-signing-smoke "${{ needs.helper-signing-smoke.result }}"
+          check host-marks "${{ needs.host-marks.result }}"
           if [ "$TEST_SELECTION_MODE" = "enforce" ] && [ "$DECISION" = "SELECTED" ]; then
             check backend-selected "${{ needs.backend-selected.result }}"
             # Shards should be skipped here; a shard run that failed anyway is
@@ -1572,7 +1629,7 @@ jobs:
             check backend-shard "${{ needs.backend-shard.result }}"
           fi
           if [ "$ok" = "false" ]; then
-            echo "a backend job did not succeed: static=${{ needs.backend-static.result }} static-tests=${{ needs.backend-static-tests.result }} structure=${{ needs.backend-structure.result }} shards=${{ needs.backend-shard.result }} selected=${{ needs.backend-selected.result }} serial=${{ needs.backend-serial.result }} pgvector-smoke=${{ needs.backend-pgvector-smoke.result }} helper-signing-smoke=${{ needs.helper-signing-smoke.result }} mode=$TEST_SELECTION_MODE decision=$DECISION"
+            echo "a backend job did not succeed: static=${{ needs.backend-static.result }} static-tests=${{ needs.backend-static-tests.result }} structure=${{ needs.backend-structure.result }} shards=${{ needs.backend-shard.result }} selected=${{ needs.backend-selected.result }} serial=${{ needs.backend-serial.result }} pgvector-smoke=${{ needs.backend-pgvector-smoke.result }} helper-signing-smoke=${{ needs.helper-signing-smoke.result }} host-marks=${{ needs.host-marks.result }} mode=$TEST_SELECTION_MODE decision=$DECISION"
             exit 1
           fi
           echo "backend jobs verified (mode=$TEST_SELECTION_MODE decision=$DECISION)"

@@ -28,9 +28,21 @@ def _lane(*, host: str = "darwin", job: str = "mac", selects: str = "marked") ->
 
 
 def _jobs(
-    *, runner: str = "macos-15", system: str | None = "darwin", blocking: bool = True
+    *,
+    runner: str = "macos-15",
+    system: str | None = "darwin",
+    blocking: bool = True,
+    selects_marker: bool = True,
 ) -> dict[str, Job]:
-    return {"mac": Job(id="mac", runs_on=runner, system=system, blocking=blocking)}
+    return {
+        "mac": Job(
+            id="mac",
+            runs_on=runner,
+            system=system,
+            blocking=blocking,
+            selects_marker=selects_marker,
+        )
+    }
 
 
 # meiva:note
@@ -71,7 +83,15 @@ def test_a_marked_lane_covers_only_the_marker() -> None:
 def test_a_suite_lane_covers_the_host_it_runs_on() -> None:
     site = _site(system="linux", declared="marker")
     lane = _lane(host="linux", job="shard", selects="suite")
-    jobs = {"shard": Job(id="shard", runs_on="ubuntu-24.04", system="linux", blocking=True)}
+    jobs = {
+        "shard": Job(
+            id="shard",
+            runs_on="ubuntu-24.04",
+            system="linux",
+            blocking=True,
+            selects_marker=False,
+        )
+    }
     assert coverage.judge([site], [lane], jobs, ()) is None
 
 
@@ -102,6 +122,24 @@ def test_a_decorative_job_covers_nothing() -> None:
     assert report is not None
     assert "carries continue-on-error" in report
     assert "+tests/test_x.py::test_x" in report
+
+
+def test_a_marked_lane_whose_job_never_runs_the_marker_is_named() -> None:
+    # meiva:note
+    # The lane says `marked`, the job runs the whole suite: every other check here passes and
+    # the lane still tests a set the registry does not describe. The job's run steps are the
+    # only place that promise is written down.
+    report = coverage.judge([_site()], [_lane()], _jobs(selects_marker=False), ())
+    assert report is not None
+    assert "never runs `-m requires_host`" in report
+
+
+def test_the_marker_selection_is_read_past_quotes_and_only_from_run_steps() -> None:
+    assert coverage.job_runs_marker({"steps": [{"run": 'pytest -m "requires_host" -q'}]})
+    assert coverage.job_runs_marker({"steps": [{"run": "pytest -m 'requires_host'"}]})
+    assert not coverage.job_runs_marker({"steps": [{"run": "pytest -q"}]})
+    assert not coverage.job_runs_marker({"steps": [{"uses": "./.github/actions/x"}]})
+    assert not coverage.job_runs_marker({})
 
 
 def test_an_unrecorded_gap_is_named_with_its_site() -> None:
