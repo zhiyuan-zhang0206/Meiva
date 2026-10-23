@@ -496,25 +496,65 @@ Why:
 - **A parameter follows a refactor.** It moves with the function. A patch target is a
   coordinate, and the next move breaks it.
 
-What tests need sets the scope. Inject a time source, a process runner or a path where
-a test has to control it; production code that no test needs to steer may still
+What tests need sets the scope. Make a time value, a process plan or a path an input
+where a test has to control it; production code that no test needs to steer may still
 `import time`. There is no blanket ban, and no static analysis that sorts a call into
 "decision" or "record".
 
-### The one allowed form per kind of dependency
+### Data in, decisions out: the forms, in order
 
-| The test needs to control | The only form |
+When a test has to control something, take the first form in this list that fits. The
+order is the design rule the lint cannot express: a lower form is a fallback the change
+justifies, never the first reach.
+
+1. **A value.** What the code reads is data: a config field, a path, `now`, a platform
+   fact, an environment variable. The composition root reads it once and passes it down;
+   the test passes the value it wants. Most patches of `settings`, `MEIVA_HOME`,
+   `os.environ`, `datetime.now` and `Path.home` are this form, and no fake exists for
+   them. When one function needs several, bundle them in a frozen dataclass rather than
+   widening its parameter list.
+2. **A pure function that returns the decision.** When an effect sits inside the logic
+   (a sleep inside a retry loop, a subprocess inside a converge step, a database claim
+   inside a schedule tick), lift the decision out: a function over values that returns
+   a plan, such as the next delay or `None`, the due slots, the argv to run, the rows to
+   write. What remains is a shell that executes the plan: a loop, a handler, a command
+   entry. The test calls the pure function with values and asserts the plan. A spy
+   assertion (`assert_called_once_with`, `call_args`) means the decision has not been
+   lifted yet; replace it with an assertion on the returned plan. Each lifted decision
+   is a module that can be `strict`, which is the point.
+3. **A real resource for the shell.** The shell is tested against the real thing at a
+   small scale: a child process running a small script that lives next to the test, a
+   listener on port 0, a unix socket under `tmp_path`, the throwaway Postgres and Redis
+   the test fixtures provision, real files under `tmp_path`. A shell that only executes
+   a plan needs few tests.
+4. **A port, only for an effect the shell cannot lift or a fault the real resource
+   cannot produce.** A long-lived interactive protocol (a PTY relay, a websocket bridge,
+   a streaming graph node) is itself the logic, and a fault such as a half-open connect
+   or a failed `fsync` cannot be made on demand. Then the component takes a required,
+   narrow `Protocol`, the composition root passes the system implementation, and the
+   fake lives in the `tests/` of the layer that defines the port, exported by that
+   directory's `meizel.toml`. Ports are defined in `base/`; a component above `base`
+   does not define one.
+
+Never: a bag of callables (`now_fn=`, `claim_fn=`, `sleep_fn=`), a dependency whose
+default reaches the real implementation, an `Any`-typed collaborator, a mutable holder
+or a shallow freeze that only quiets a rule, or an `env: Mapping | None = None` that
+falls back to `os.environ`.
+
+### Where each kind of dependency lands
+
+| The test needs to control | The form |
 |---|---|
-| Configuration, including a value that comes from an environment variable | The component takes its own frozen `XxxConfig`, with exactly the fields it reads. The composition root builds it from `settings`; the component never reads `settings` or `os.environ`. A test builds the config it wants. |
+| Configuration, including a value that comes from an environment variable | A value (form 1). At a component boundary (a daemon, an app factory, a command group) the component takes its own frozen `XxxConfig` with exactly the fields it reads; inside the component, plain values travel down. The composition root builds the config from `settings`; the component never reads `settings` or `os.environ`. A test builds the config it wants. |
 | A tuning constant (timeout, threshold, interval) | A field of that config whose default is today's constant. A test passes a small value. |
 | A client, a factory | A required parameter with no default. |
-| A path | A parameter. A test hands in `tmp_path`; it does not switch `MEIVA_HOME`. |
+| A path | A value (form 1). A test hands in `tmp_path`; it does not switch `MEIVA_HOME`. |
 | An atomic file write, or a filesystem call whose failure a test must cause (`replace`, `fsync`, `fchmod`) | `base/host/atomic_io.AtomicWriter(Fs(...))`. Commit, cleanup and durability faults are injected only in `atomic_io`'s own tests, through the `Fs` a test builds. A caller whose own policy warns, suppresses or never syncs may take a required `AtomicWriter` to test that policy, as specified by the `atomic_io` owner; it does not retest the writer's mechanisms. Other components call `write_text_atomic` or `write_bytes_atomic` and their tests use real files under `tmp_path`; a fault the disk can produce (a target that is a directory, a read-only directory) is made on disk. A test never patches `os.replace`, `Path.replace`, `os.fsync` or `os.fchmod`. |
-| Time: elapsed time, waiting, the wall clock | A required `Clock` (wall time and timezone; it carries a `Timers` and satisfies it) or, for a component that needs only elapsed time, a required `Timers` (`monotonic`, `sleep`, `asleep`). A root builds `Clock(config, timers=SYSTEM_TIMERS)` or passes `SYSTEM_TIMERS`; a test passes `ManualTimers` from `base/clock/tests` (`Clock(config, timers=manual, now=manual.now)`), which never waits and records each sleep in `sleeps`. A test never patches `time`, `asyncio.sleep` or `datetime`. |
+| Time | Reading the clock is a value: `now` is a parameter of the function that decides on it, and backoff, due-slot and deadline logic are pure functions of `now` and the previous state (form 2). Waiting is an effect that stays in the shell loop. A loop whose behavior is the interleaving itself (liveness, heartbeat rounds, a deadline racing a child) takes a required `Timers` (`monotonic`, `sleep`, `asleep`) or `Clock` from `base/clock` (form 4), built by a root as `Clock(config, timers=SYSTEM_TIMERS)`; a test passes `ManualTimers` from `base/clock/tests` (`Clock(config, timers=manual, now=manual.now)`), which never waits and records each sleep in `sleeps`. A test never patches `time`, `asyncio.sleep` or `datetime`. |
 | A socket or a server | A real local service: a listener on port 0, a unix socket under `tmp_path`. Only fault injection (a refused or half-open connect) goes through a `connect` parameter, and only in the clients of `services/redis_bridge` and `base/host/permissions_helper`. |
-| An HTTP request whose answer a test controls | A required `UrlOpener` (`base/host/net/ports.py`, `urlopen`'s shape). A root passes `SYSTEM_URL_OPENER`; a test passes `FakeUrlOpener` from `base/host/net/tests` (it answers by URL prefix, raises `HTTPError` for a status outside 2xx like `urlopen`, and refuses an unscripted URL), or starts a real listener on port 0 and uses the system opener. A test never patches `urllib.request.urlopen`. |
+| An HTTP request whose answer a test controls | A real listener on port 0 that the test serves, used through the system opener (form 3). The required `UrlOpener` port (`base/host/net/ports.py`, `urlopen`'s shape) with `FakeUrlOpener` from `base/host/net/tests` (it answers by URL prefix, raises `HTTPError` for a status outside 2xx like `urlopen`, and refuses an unscripted URL) is for an answer a listener cannot script (form 4); a root passes `SYSTEM_URL_OPENER`. A test never patches `urllib.request.urlopen`. |
 | A logger, a meter, a tracer | Production may use the global facade, because it is write-only and decides nothing. A test does not patch it; it reads what was recorded through the capture fixture the facade's owner exports from its `tests/`. |
-| Processes, programs, the platform | A required `Host` (`base/host/system/hostport.py`): `run` (`proc.run_bounded`), `which`, `platform` and `uid`, and nothing else. A root builds `Host.system()`; a test builds the `Host` it wants, with `FakeCommands` from `base/host/tests` as `run` (it records argv, answers by prefix and fails on an unscripted command) and plain values for the rest. A test that needs a real process uses `Host.system()`. A test never patches `subprocess`, `shutil.which`, `os.access`, `sys.platform` or `platform.system()`. |
+| Processes, programs, the platform | The platform, the uid and a resolved program path are values a root reads once (form 1). Building argv, env and cwd is a pure function that returns them (form 2); the shell runs them with `proc.run_bounded`, and a shell test runs a real child (form 3). A required `Host` (`base/host/system/hostport.py`: `run`, `which`, `platform`, `uid`, nothing else) with `FakeCommands` from `base/host/tests` as `run` (it records argv, answers by prefix and fails on an unscripted command) is for a fault a real child cannot produce (form 4); a root builds `Host.system()`. A test never patches `subprocess`, `shutil.which`, `os.access`, `sys.platform` or `platform.system()`. |
 | Signalling a process or a group, reading a pid's group or session | A required `ProcessControl` (`base/native_process/process_control.py`: `kill`, `killpg`, `getpgid`, `getsid`). A root passes `SYSTEM_PROCESS_CONTROL`; a test passes `FakeProcessControl` from `base/native_process/tests` (it records each signal in order, sends none, refuses chosen targets and answers group and session reads from a table), or the system one for a real child it started. A test never patches `os.kill`, `os.killpg`, `os.getpgid` or `os.getsid`. |
 
 A fake lives in the `tests/` of the component that defines the port and is exported by
