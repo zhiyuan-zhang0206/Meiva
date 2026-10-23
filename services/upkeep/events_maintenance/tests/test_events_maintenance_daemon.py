@@ -28,6 +28,8 @@ import pytest
 from psycopg_pool import ConnectionPool
 from pydantic import SecretStr
 
+from base.clock import SYSTEM_TIMERS
+from base.clock.tests.manual_timers import ManualTimers
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import ConfigBoot
@@ -75,7 +77,7 @@ class _FakePool:
 
 async def test_wedged_pass_fails_without_beating_in_flight(monkeypatch: pytest.MonkeyPatch) -> None:
     """A worker that exceeds its hard deadline wedges; elapsed time never earns a beat."""
-    progress = LoopProgress("dispatch", timeout_s=0.01)
+    progress = LoopProgress("dispatch", timeout_s=0.01, timers=SYSTEM_TIMERS)
     beats = 0
     original_beat = progress.beat
 
@@ -104,7 +106,7 @@ async def test_completed_pass_beats_once_after_worker_finishes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A bounded worker completion advances progress exactly once, after it returns."""
-    progress = LoopProgress("dispatch", timeout_s=1.0)
+    progress = LoopProgress("dispatch", timeout_s=1.0, timers=SYSTEM_TIMERS)
     finished_at = 0.0
     beat_at: list[float] = []
     original_beat = progress.beat
@@ -149,7 +151,7 @@ async def test_failed_rollup_still_waits_before_retry(
     monkeypatch.setattr(daemon, "run_maintenance", boom)
     monkeypatch.setattr(daemon, "sleep_with_liveness", fake_sleep)
 
-    progress = LoopProgress("dispatch", timeout_s=5.0)
+    progress = LoopProgress("dispatch", timeout_s=5.0, timers=SYSTEM_TIMERS)
     beat_at: list[float] = []
     original_beat = progress.beat
 
@@ -199,7 +201,7 @@ async def test_wedged_dispatch_parks_without_entering_retry_sleep(
     monkeypatch.setattr(daemon.asyncio, "sleep", forbidden_park)
     monkeypatch.setattr(daemon, "sleep_with_liveness", forbidden_retry_sleep)
 
-    progress = LoopProgress("dispatch", timeout_s=1.0)
+    progress = LoopProgress("dispatch", timeout_s=1.0, timers=SYSTEM_TIMERS)
     async with asyncio.TaskGroup() as tasks:
         await daemon.dispatch_loop(
             _FAKE_POOL,
@@ -262,7 +264,7 @@ def test_maintenance_pass_runs_unconditional_slices(
     rollup, the size telemetry sample, and blob vacuum. Checkpoint pruning belongs only
     to the fast loop; the hourly pass must not run a second retention rule."""
     rec = _instrument_maintenance_slices(monkeypatch)
-    progress = LoopProgress("dispatch", timeout_s=60.0)
+    progress = LoopProgress("dispatch", timeout_s=60.0, timers=SYSTEM_TIMERS)
     beats = 0
     original_beat = progress.beat
 
@@ -327,7 +329,7 @@ def test_maintenance_pass_does_not_rebuild_missed_observations(
     for _ in range(2):
         daemon.run_maintenance(
             cast(ConnectionPool, _ConnPool(db_conn)),
-            LoopProgress("dispatch", timeout_s=60.0),
+            LoopProgress("dispatch", timeout_s=60.0, timers=SYSTEM_TIMERS),
             events_maintenance_config(process_config),
             events_maintenance_db(process_config, local_machine=machine_identity),
         )
@@ -335,10 +337,9 @@ def test_maintenance_pass_does_not_rebuild_missed_observations(
     assert db_conn.execute("SELECT count(*) FROM agent_metric_observations").fetchone() == (0,)
 
 
-def test_loop_components_report_fresh_loops_as_ok(monkeypatch: pytest.MonkeyPatch) -> None:
-    now = 100.0
-    monkeypatch.setattr(daemon.time, "monotonic", lambda: now)
-    liveness = LivenessGroup()
+def test_loop_components_report_fresh_loops_as_ok() -> None:
+    timers = ManualTimers(100.0)
+    liveness = LivenessGroup(timers=timers)
     liveness.register("dispatch", timeout_s=15.0)
     liveness.register("resolution", timeout_s=20.0)
 
@@ -348,9 +349,8 @@ def test_loop_components_report_fresh_loops_as_ok(monkeypatch: pytest.MonkeyPatc
     ]
 
 
-def test_loop_components_report_wedged_loop_reason(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(daemon.time, "monotonic", lambda: 100.0)
-    liveness = LivenessGroup()
+def test_loop_components_report_wedged_loop_reason() -> None:
+    liveness = LivenessGroup(timers=ManualTimers(100.0))
     dispatch = liveness.register("dispatch", timeout_s=15.0)
     dispatch.fail("dispatch pass exceeded hard deadline")
 
@@ -365,12 +365,11 @@ def test_loop_components_report_wedged_loop_reason(monkeypatch: pytest.MonkeyPat
     ]
 
 
-def test_loop_components_report_stale_loop(monkeypatch: pytest.MonkeyPatch) -> None:
-    now = 100.0
-    monkeypatch.setattr(daemon.time, "monotonic", lambda: now)
-    liveness = LivenessGroup()
+def test_loop_components_report_stale_loop() -> None:
+    timers = ManualTimers(100.0)
+    liveness = LivenessGroup(timers=timers)
     liveness.register("resolution", timeout_s=5.0)
-    now = 106.0
+    timers.advance(6.0)
 
     assert daemon.loop_components(liveness) == [
         {
@@ -383,8 +382,7 @@ def test_loop_components_report_stale_loop(monkeypatch: pytest.MonkeyPatch) -> N
 
 
 def test_loop_components_convert_success_iso_to_epoch(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(daemon.time, "monotonic", lambda: 100.0)
-    liveness = LivenessGroup()
+    liveness = LivenessGroup(timers=ManualTimers(100.0))
     dispatch = liveness.register("dispatch", timeout_s=15.0)
     dispatch.mark_success()
     stamped = dispatch.snapshot()["last_success_at"]

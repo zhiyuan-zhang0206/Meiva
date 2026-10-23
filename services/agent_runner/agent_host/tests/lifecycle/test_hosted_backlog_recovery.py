@@ -58,7 +58,7 @@ async def test_pending_scan_classifies_lifecycle_work_and_impersonation(
         db=Database.from_settings(gate=database_gate),
         catalog=model_catalog,
         machine=configured_machine(),
-        commands=CommandCatalog(skills=list),
+        commands=CommandCatalog.system(skills=list),
     )
 
     assert await host.pending_inbound_wakes() == [agent]
@@ -128,7 +128,7 @@ async def test_old_pending_scan_never_cancels_a_running_turn(
         db=Database.from_settings(gate=database_gate),
         catalog=model_catalog,
         machine=configured_machine(),
-        commands=CommandCatalog(skills=list),
+        commands=CommandCatalog.system(skills=list),
     )
     host._owner = incarnation.owner
     scheduler = TurnScheduler(host.run_turn)
@@ -187,7 +187,7 @@ async def test_owner_recovery_scan_excludes_unrelated_rows(
         db=Database.from_settings(gate=database_gate),
         catalog=model_catalog,
         machine=configured_machine(),
-        commands=CommandCatalog(skills=list),
+        commands=CommandCatalog.system(skills=list),
     )
     if boundary == "same_owner":
         host._owner = incarnation.owner

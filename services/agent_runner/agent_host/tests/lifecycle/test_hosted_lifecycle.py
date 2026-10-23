@@ -109,7 +109,7 @@ async def test_hosted_applies_only_after_continuation_returns(
             bus=EventBus.from_settings(),
             db=Database.from_settings(gate=database_gate),
             catalog=model_catalog,
-            commands=CommandCatalog(skills=list),
+            commands=CommandCatalog.system(skills=list),
         )
         host._runtimes[agent_id] = Mock(harness_bridge=None)
         assert [
@@ -189,7 +189,7 @@ async def test_hosted_terminate_crash_leaves_no_half_applied_command(
             bus=EventBus.from_settings(),
             db=Database.from_settings(gate=database_gate),
             catalog=model_catalog,
-            commands=CommandCatalog(skills=list),
+            commands=CommandCatalog.system(skills=list),
         )
         host._runtimes[agent_id] = Mock(harness_bridge=None)
         original_execute = psycopg.AsyncConnection.execute
@@ -305,7 +305,7 @@ async def test_pending_wake_scan_finds_a_claimed_command_without_pending_rows(
         bus=EventBus.from_settings(),
         db=Database.from_settings(gate=database_gate),
         catalog=model_catalog,
-        commands=CommandCatalog(skills=list),
+        commands=CommandCatalog.system(skills=list),
     )
     assert agent_id in await host.pending_inbound_wakes()
     assert db_conn.execute(
@@ -371,7 +371,7 @@ async def _run_terminating_turn(
             bus=EventBus.from_settings(),
             db=Database.from_settings(gate=database_gate),
             catalog=model_catalog,
-            commands=CommandCatalog(skills=list),
+            commands=CommandCatalog.system(skills=list),
         )
         host._runtimes[agent_id] = Mock(harness_bridge=None)
         assert await host._invoke_until_done(

@@ -58,7 +58,7 @@ async def test_the_runtime_is_built_with_the_agents_overrides(
         db=Mock(),
         catalog=model_catalog,
         machine=configured_machine(),
-        commands=CommandCatalog(skills=list),
+        commands=CommandCatalog.system(skills=list),
     )
     pins = {"reasoning_effort": "low", "claude_thinking_budget_tokens": 777} if pinned else {}
     slices = AgentSlices.resolve(
@@ -113,7 +113,7 @@ async def test_runtime_build_does_not_repair_a_dangling_history(
         db=Mock(),
         catalog=model_catalog,
         machine=configured_machine(),
-        commands=CommandCatalog(skills=list),
+        commands=CommandCatalog.system(skills=list),
     )
     slices = AgentSlices.resolve({}, default_reader=configured_policy().default_reader)
 

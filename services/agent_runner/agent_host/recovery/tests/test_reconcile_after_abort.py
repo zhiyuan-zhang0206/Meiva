@@ -195,7 +195,7 @@ async def test_cold_build_consumes_claims_without_reading_checkpoint_history(
         db=Database.from_settings(gate=database_gate),
         catalog=model_catalog,
         machine=configured_machine(),
-        commands=CommandCatalog(skills=list),
+        commands=CommandCatalog.system(skills=list),
     )
     slices = AgentSlices.resolve(default_reader=configured_policy().default_reader)
 

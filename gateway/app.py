@@ -155,7 +155,7 @@ class LifespanServices:
 
 
 def _request_operations(app: FastAPI) -> None:
-    app.state.command_catalog_discoverer = CommandCatalog(skills=load_skill_names).discover
+    app.state.command_catalog_discoverer = CommandCatalog.system(skills=load_skill_names).discover
     app.state.command_rpc_dispatcher = cluster_rpc.dispatch_to_machine
     app.state.config_role_lookup = machines.lookup_role
     app.state.config_rpc_dispatcher = cluster_rpc.dispatch_to_machine

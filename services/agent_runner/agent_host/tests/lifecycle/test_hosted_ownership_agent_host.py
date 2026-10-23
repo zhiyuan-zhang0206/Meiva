@@ -81,7 +81,7 @@ async def test_cancel_during_live_announce_settles_the_committed_admission(
         bus=EventBus.from_settings(),
         db=Database.from_settings(gate=database_gate),
         catalog=model_catalog,
-        commands=CommandCatalog(skills=list),
+        commands=CommandCatalog.system(skills=list),
     )
     task = asyncio.create_task(host._run_turn(agent_id, resources=HostedTurnResources()))
     await asyncio.wait_for(announce_entered.wait(), timeout=2.0)
@@ -141,7 +141,7 @@ async def test_host_takes_over_a_row_last_owned_by_another_instance(
         bus=EventBus.from_settings(),
         db=Database.from_settings(gate=database_gate),
         catalog=model_catalog,
-        commands=CommandCatalog(skills=list),
+        commands=CommandCatalog.system(skills=list),
     )
 
     admitted: list[RuntimeIncarnation] = []

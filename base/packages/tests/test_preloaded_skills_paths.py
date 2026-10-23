@@ -2,25 +2,7 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
-import pytest
-
 from base.config import FIELD_INFOS, AgentSettings, per_agent_field_names
-from base.packages.extensions import install_registry
-from base.paths import meiva_home, skills_dir
-
-
-@pytest.fixture(autouse=True)
-def _isolate_load_dir(unit_home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Run in a per-test unit home whose `skills/` does not exist by default so
-    the real ~/.agents/skills/ never leaks into a scan; fake_skills_dir creates it."""
-
-    def _all_enabled() -> set[str]:
-        d = skills_dir(meiva_home())
-        return {p.name for p in d.iterdir() if p.is_dir()} if d.is_dir() else set()
-
-    monkeypatch.setattr(install_registry, "loadable_skill_names", _all_enabled)
 
 
 def test_field_default_is_empty() -> None:

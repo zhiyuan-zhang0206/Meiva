@@ -84,5 +84,7 @@ async def test_failed_checkin_is_retried_after_backoff_across_ticks(
         clock=clock,
     )
     with pytest.raises(asyncio.CancelledError):
-        await heartbeat_daemon.dispatch_loop(dispatch, LoopProgress("dispatch", 60.0), clock=clock)
+        await heartbeat_daemon.dispatch_loop(
+            dispatch, LoopProgress("dispatch", 60.0, timers=clock), clock=clock
+        )
     assert sent_on_ticks == [0, 3]

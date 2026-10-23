@@ -188,7 +188,7 @@ async def prepare_graph(
         original_incarnation=owner,
         catalog=build_model_catalog(),
         clock_factory=Clock.from_settings,
-        commands=CommandCatalog(skills=list),
+        commands=CommandCatalog.system(skills=list),
     )
     config: RunnableConfig = {"configurable": {"thread_id": str(agent_id)}, "recursion_limit": 100}
     reset: dict[str, Any] = {

@@ -257,7 +257,7 @@ def test_the_first_liveness_pass_runs_at_start_not_after_an_interval() -> None:
     with pytest.raises(asyncio.CancelledError):
         asyncio.run(
             heartbeat_loops.liveness_loop(
-                _ObservedRound(events), LoopProgress("liveness", 60.0), clock=clock
+                _ObservedRound(events), LoopProgress("liveness", 60.0, timers=clock), clock=clock
             )
         )
     assert events == ["pass", "sleep"]
@@ -271,7 +271,7 @@ def test_a_failing_pass_waits_out_the_interval_before_retrying() -> None:
         asyncio.run(
             heartbeat_loops.liveness_loop(
                 _ObservedRound(events, RuntimeError("probe fan-out failed")),
-                LoopProgress("liveness", 60.0),
+                LoopProgress("liveness", 60.0, timers=clock),
                 clock=clock,
             )
         )

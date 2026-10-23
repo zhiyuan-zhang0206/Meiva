@@ -45,6 +45,7 @@ __all__ = [
     "aretry",
     "extract_retry_after",
     "http_classifier",
+    "jitter_delay",
     "jittered",
     "retry",
     "retry_asleep",
@@ -119,15 +120,21 @@ def jittered(delay: float, span: float = 1.0, mode: str = "agent") -> float:
     so ``delay < span`` is reachable in production, not just a broken
     Policy).
     """
+    phase = agent_phase(span) if mode not in {"none", "relative", "random"} else 0.0
+    noise = random.uniform(-span, span) if mode not in {"none", "phase"} else 0.0  # noqa: S311
+    return jitter_delay(delay, mode, phase=phase, noise=noise)
+
+
+def jitter_delay(delay: float, mode: str, *, phase: float, noise: float) -> float:
     if mode == "none":
         return delay
     if mode == "phase":
-        return max(0.0, delay + agent_phase(span))
+        return max(0.0, delay + phase)
     if mode == "relative":
-        return max(0.0, delay * (1 + random.uniform(-span, span)))  # noqa: S311
+        return max(0.0, delay * (1 + noise))
     if mode == "random":
-        return max(0.0, delay + random.uniform(-span, span))  # noqa: S311 — spread, not secrecy
-    return max(0.0, delay + agent_phase(span) + random.uniform(-span, span))  # noqa: S311
+        return max(0.0, delay + noise)
+    return max(0.0, delay + phase + noise)
 
 
 def extract_retry_after(exc: Exception) -> float | None:

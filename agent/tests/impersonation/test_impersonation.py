@@ -65,7 +65,7 @@ def gate_ctx(
         agent=AgentSlices.resolve(
             default_reader=lambda domain, field: getattr(getattr(config.view, domain), field)
         ),
-        commands=CommandCatalog(skills=list),
+        commands=CommandCatalog.system(skills=list),
     )
 
 

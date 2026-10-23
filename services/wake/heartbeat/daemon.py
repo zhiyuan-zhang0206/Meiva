@@ -664,7 +664,7 @@ async def run(
     write_pidfile(process_config, runtime=runtime)
     _log.info("[heartbeat] pidfile written: %s", _pidfile(process_config, runtime=runtime))
 
-    liveness = LivenessGroup()
+    liveness = LivenessGroup(timers=clock)
     dispatch_progress = liveness.register("dispatch", _LIVENESS_TIMEOUT_S)
     liveness_progress = liveness.register("liveness", _LIVENESS_TIMEOUT_S)
     digest_progress = liveness.register("completion_digest", _DIGEST_LIVENESS_TIMEOUT_S)

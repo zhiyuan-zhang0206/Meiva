@@ -109,7 +109,7 @@ async def test_host_persists_provider_failure_before_releasing_turn(
                 catalog=model_catalog,
                 bus=EventBus.from_settings(),
                 db=Database.from_settings(gate=database_gate),
-                commands=CommandCatalog(skills=list),
+                commands=CommandCatalog.system(skills=list),
             )
             assert not (
                 await host._invoke_until_done(

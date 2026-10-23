@@ -7,6 +7,8 @@ from typing import cast
 
 import pytest
 
+from base.clock import SYSTEM_TIMERS
+from base.clock.tests.manual_timers import ManualTimers
 from base.config import get_field
 from base.daemon import health
 from base.daemon.health_schema import DEGRADED, OK, component
@@ -45,18 +47,15 @@ async def test_liveness_flips_stale_then_fresh_on_beat() -> None:
     assert lv.is_alive()
 
 
-def test_loop_progress_flips_stale_then_fresh_on_completed_unit(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    now = 100.0
-    monkeypatch.setattr(health.time, "monotonic", lambda: now)
-    progress = health.LoopProgress("dispatch", timeout_s=5.0)
+def test_loop_progress_flips_stale_then_fresh_on_completed_unit() -> None:
+    timers = ManualTimers(100.0)
+    progress = health.LoopProgress("dispatch", timeout_s=5.0, timers=timers)
 
     assert progress.name == "dispatch"
     assert progress.timeout_s == 5.0
     assert progress.is_alive()
 
-    now = 106.0
+    timers.advance(6.0)
     assert not progress.is_alive()
     assert progress.stale_for() == 6.0
 
@@ -66,7 +65,7 @@ def test_loop_progress_flips_stale_then_fresh_on_completed_unit(
 
 
 def test_loop_progress_snapshot_records_success_error_and_permanent_wedge() -> None:
-    progress = health.LoopProgress("resolution", timeout_s=60.0)
+    progress = health.LoopProgress("resolution", timeout_s=60.0, timers=SYSTEM_TIMERS)
     progress.mark_success()
     progress.mark_error("loki unavailable")
 
@@ -87,17 +86,14 @@ def test_loop_progress_snapshot_records_success_error_and_permanent_wedge() -> N
     assert progress.snapshot()["wedged"] is True
 
 
-def test_liveness_group_reports_the_worst_loop(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    now = 10.0
-    monkeypatch.setattr(health.time, "monotonic", lambda: now)
-    group = health.LivenessGroup()
+def test_liveness_group_reports_the_worst_loop() -> None:
+    timers = ManualTimers(10.0)
+    group = health.LivenessGroup(timers=timers)
     dispatch = group.register("dispatch", timeout_s=5.0)
 
-    now = 13.0
+    timers.advance(3.0)
     trim = group.register("trim", timeout_s=20.0)
-    now = 16.0
+    timers.advance(3.0)
     trim.beat()
 
     assert group.stale_for() == 6.0
@@ -117,7 +113,7 @@ def test_liveness_group_reports_the_worst_loop(
 @pytest.mark.asyncio
 async def test_healthz_group_exposes_loops_and_wedged_loop_is_not_masked() -> None:
     port = find_free_port()
-    group = health.LivenessGroup()
+    group = health.LivenessGroup(timers=SYSTEM_TIMERS)
     dispatch = group.register("dispatch", timeout_s=60.0)
     trim = group.register("trim", timeout_s=60.0)
     dispatch.fail("dispatch exceeded hard deadline")

@@ -172,7 +172,7 @@ class Cluster:
             policy=dataclasses.replace(
                 configured_policy(), llm_override=lambda: scripted_model.OVERRIDE
             ),
-            commands=CommandCatalog(skills=list),
+            commands=CommandCatalog.system(skills=list),
             # meiva:note
             # The exec child's request names a gateway; the tests' code never calls it.
             clients=ClientSet(
