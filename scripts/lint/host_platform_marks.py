@@ -9,8 +9,10 @@
 from __future__ import annotations
 
 import ast
+import io
 import json
 import sys
+import tokenize
 from collections import Counter
 from collections.abc import Iterator
 from pathlib import Path
@@ -20,10 +22,24 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(_REPO_ROOT))
 
 from meizel import lint_common  # noqa: E402
+from meizel.roles import packages  # noqa: E402
 
 BASELINE = "scripts/lint/baseline/host_platform_marks.json"
 
+# meiva:note
+# The exemptions are a record of their own: `<path>::<owner>` -> the reason its reader
+# sees. A comment alone was a free pass — nobody reviews a line they do not expect — so an
+# exemption now has to exist here, with a reason that names a path in this repository or a
+# CI job, before the lint will honour it. `allowed` is the frozen count.
+EXEMPTIONS = "scripts/lint/baseline/host_platform_exemptions.json"
+
 EXEMPTION = "# host-ok:"
+
+# meiva:note
+# The top-level directories a grounding path can start with: the packages of this
+# repository, read from the role the manifests own, plus the two trees that are not
+# packages. A reason that points at one of them tells the next reader where to look.
+_REPO_TOPS = frozenset({*packages("application"), *packages("tooling"), "docs", "tests", "future"})
 
 # meiva:note
 # `Host.system()` and `Platform.current()` build the host of this process; `sys.platform`,
@@ -164,12 +180,76 @@ def findings_in_source(src: str) -> list[tuple[int, str, str]]:
     return out
 
 
+# meiva:note
+# Every `# host-ok:` comment in `src` with the function that owns it (`<module>` at module
+# level) and the reason as written. Read through the tokenizer, not the lines: a fixture
+# that writes the marker into a string literal is data, not an exemption. The innermost
+# function wins — an exemption inside a method does not exempt the class.
+def exemptions_in_source(src: str) -> list[tuple[str, str]]:
+    tree = ast.parse(src)
+    owners = [
+        (node.lineno, node.end_lineno or node.lineno, node.name)
+        for node in ast.walk(tree)
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
+    ]
+    out: list[tuple[str, str]] = []
+    for token in tokenize.generate_tokens(io.StringIO(src).readline):
+        if token.type != tokenize.COMMENT or EXEMPTION not in token.string:
+            continue
+        reason = token.string.split(EXEMPTION, 1)[1].strip()
+        inside = [(start, name) for start, end, name in owners if start <= token.start[0] <= end]
+        out.append((max(inside, default=(0, "<module>"))[1], reason))
+    return out
+
+
+# meiva:note
+# A reason earns an exemption by saying where to look: a path in this repository
+# (`base/host/...`, `docs/conventions/...`) or a CI job that runs the test there.
+def reason_is_grounded(reason: str, jobs: frozenset[str]) -> bool:
+    for token in reason.replace("`", " ").replace(",", " ").split():
+        parts = token.strip(".:;()[]").split("/")
+        if len(parts) > 1 and parts[0] in _REPO_TOPS:
+            return True
+    return any(job and job in reason for job in jobs)
+
+
+# meiva:note
+# The CI job ids and names an exemption may cite, read from the workflow that runs them.
+def job_names(root: Path) -> frozenset[str]:
+    path = root / ".github/workflows/ci.yml"
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return frozenset()
+    names = {
+        line.split(":")[0].strip()
+        for line in text.splitlines()
+        if line.startswith("  ") and line.rstrip().endswith(":")
+    }
+    names |= {
+        line.split("name:")[1].strip()
+        for line in text.splitlines()
+        if line.strip().startswith("name:")
+    }
+    return frozenset(name.strip("\"'") for name in names if name.strip())
+
+
 def _scan_file(path: Path) -> list[tuple[int, str, str]]:
     text = lint_common.read_utf8_text(path)
     if text is None:
         return []
     try:
         return findings_in_source(text)
+    except SyntaxError:
+        return []
+
+
+def _exemptions_of(path: Path) -> list[tuple[str, str]]:
+    text = lint_common.read_utf8_text(path)
+    if text is None:
+        return []
+    try:
+        return exemptions_in_source(text)
     except SyntaxError:
         return []
 
@@ -215,8 +295,9 @@ def _write_baseline(root: Path, judged: dict[str, list[tuple[int, str, str]]]) -
 
 def _judge(
     root: Path, targets: list[Path]
-) -> tuple[dict[str, list[tuple[int, str, str]]], set[str]]:
+) -> tuple[dict[str, list[tuple[int, str, str]]], dict[str, list[str]]]:
     judged: dict[str, list[tuple[int, str, str]]] = {}
+    exemptions: dict[str, list[str]] = {}
     scanned: set[str] = set()
     for path in sorted(lint_common.restrict(_test_files(targets), None, root)):
         try:
@@ -229,7 +310,9 @@ def _judge(
         findings = _scan_file(path)
         if findings:
             judged[rel] = findings
-    return judged, scanned
+        for owner, reason in _exemptions_of(path):
+            exemptions.setdefault(f"{rel}::{owner}", []).append(reason)
+    return judged, exemptions
 
 
 # meiva:note
@@ -278,6 +361,89 @@ def _print_sites(
         print(f"  {rel}:{lineno}{mark}", file=sys.stderr)
 
 
+def _read_exemptions(root: Path) -> tuple[int, dict[str, str]]:
+    path = root / EXEMPTIONS
+    if not path.is_file():
+        return 0, {}
+    raw: object = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(raw, dict):
+        raise SystemExit(f"{EXEMPTIONS}: expected {{'allowed': int, 'exemptions': {{...}}}}")
+    payload = cast("dict[str, object]", raw)
+    allowed = payload.get("allowed")
+    entries = payload.get("exemptions")
+    if not isinstance(allowed, int) or not isinstance(entries, dict):
+        raise SystemExit(f"{EXEMPTIONS}: expected {{'allowed': int, 'exemptions': {{...}}}}")
+    return allowed, {
+        str(key): str(value) for key, value in cast("dict[str, object]", entries).items()
+    }
+
+
+def _write_exemptions(root: Path, found: dict[str, list[str]], jobs: frozenset[str]) -> None:
+    path = root / EXEMPTIONS
+    path.parent.mkdir(parents=True, exist_ok=True)
+    entries = {key: reasons[0] for key, reasons in sorted(found.items())}
+    ungrounded = [key for key, reason in entries.items() if not reason_is_grounded(reason, jobs)]
+    if ungrounded:
+        raise SystemExit(f"{EXEMPTIONS}: reason names no path or job for {', '.join(ungrounded)}")
+    payload = {"allowed": len(entries), "exemptions": entries}
+    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    print(f"{EXEMPTIONS}: {len(entries)} exemption(s)")
+
+
+# meiva:note
+# An exemption is a reviewed exception, not a comment: it has to be in the record, its
+# reason has to be the one on disk, and that reason has to say where to look. A record
+# entry whose site is gone is an error too - the count only shrinks when someone spends
+# the line to shrink it.
+def _report_exemptions(
+    found: dict[str, list[str]],
+    *,
+    root: Path,
+    jobs: frozenset[str],
+    scope: frozenset[str] | None,
+) -> bool:
+    if scope is not None:
+        return False
+    allowed, record = _read_exemptions(root)
+    failed = False
+    if len(record) != allowed:
+        failed = True
+        print(
+            f"{EXEMPTIONS}: allowed says {allowed}, the record lists {len(record)}",
+            file=sys.stderr,
+        )
+    for key, reasons in sorted(found.items()):
+        reason = reasons[0]
+        if key not in record:
+            failed = True
+            print(
+                f"{key}: unrecorded exemption {reason!r} - add it to {EXEMPTIONS} with a "
+                "reason that names a path in this repository or a CI job",
+                file=sys.stderr,
+            )
+        elif record[key] != reason:
+            failed = True
+            print(
+                f"{key}: the record's reason differs from the comment - {EXEMPTIONS} says "
+                f"{record[key]!r}, the tree says {reason!r}",
+                file=sys.stderr,
+            )
+        elif not reason_is_grounded(reason, jobs):
+            failed = True
+            print(
+                f"{key}: reason names no path or job: {reason!r} - say where to look "
+                f"(`base/...`, `docs/...`) or which CI job runs it",
+                file=sys.stderr,
+            )
+    for key in sorted(set(record) - set(found)):
+        failed = True
+        print(
+            f"{key}: recorded exemption is no longer in the tree - `--write-baseline` drops it",
+            file=sys.stderr,
+        )
+    return failed
+
+
 def _report_baseline_drift(
     judged: dict[str, list[tuple[int, str, str]]],
     baseline: dict[str, int],
@@ -286,13 +452,18 @@ def _report_baseline_drift(
     if scope is not None:
         return False
     counts = Counter(what for items in judged.values() for _, what, _ in items)
+    drifted = False
     for what, allowed in sorted(baseline.items()):
-        if counts.get(what, 0) < allowed:
+        actual = counts.get(what, 0)
+        if actual < allowed:
             print(
-                f"{what}: note: {counts.get(what, 0)} unmarked read(s), baseline {allowed}; "
-                "--write-baseline lowers it"
+                f"{what}: {actual} unmarked read(s) below the recorded {allowed} - this change "
+                "removed a read the record still counts; lower it with "
+                "`.venv/bin/python scripts/lint/host_platform_marks.py --write-baseline`",
+                file=sys.stderr,
             )
-    return False
+            drifted = True
+    return drifted
 
 
 def _split_args(argv: list[str]) -> tuple[list[str], list[str] | None, bool]:
@@ -317,11 +488,18 @@ def _targets(paths: list[str], root: Path) -> list[Path]:
 
 
 # meiva:note
-# The verdict: growth fails, a shrunken kind only notes. `--only` narrows what is printed,
-# not what is compared — the pre-commit path has to see the whole tree's counts or a new
-# read in the file under review would pass here and fail in CI.
+# The verdict: both directions are judged. Growth fails because the tree now reads the host
+# where it used to inject one; shrinkage fails because the record and the tree are the same
+# fact, and a record that outlives its reads makes the next author's reduction invisible
+# (2026-10-24: two merged PRs each removed a read and left the count, and every later branch
+# carrying this record failed the merge-tree run instead). `--only` narrows what is printed,
+# not what is compared — the pre-commit path has to see the whole tree's counts or a new read
+# in the file under review would pass here and fail in CI.
 def _verdict(
-    root: Path, judged: dict[str, list[tuple[int, str, str]]], only: list[str] | None
+    root: Path,
+    judged: dict[str, list[tuple[int, str, str]]],
+    exemptions: dict[str, list[str]],
+    only: list[str] | None,
 ) -> int:
     scope = lint_common.changed_scope(only, root, inputs=("pyproject.toml",))
     if scope is not None and not scope:
@@ -329,7 +507,8 @@ def _verdict(
     baseline = _read_baseline(root)
     over = _report_over_baseline(judged, baseline, scope=scope)
     drift = _report_baseline_drift(judged, baseline, scope)
-    if not (over or drift):
+    exemptions_bad = _report_exemptions(exemptions, root=root, jobs=job_names(root), scope=scope)
+    if not (over or drift or exemptions_bad):
         return 0
     print(
         "\nHost-platform violations. A test injects the host it wants; only a subject that IS "
@@ -347,11 +526,12 @@ def main(argv: list[str] | None = None, *, repo_root: Path | None = None) -> int
     if problem is not None:
         print(problem, file=sys.stderr)
         return 1
-    judged = _judge(root, _targets(paths, root))[0]
+    judged, exemptions = _judge(root, _targets(paths, root))
     if write_baseline:
         _write_baseline(root, judged)
+        _write_exemptions(root, exemptions, job_names(root))
         return 0
-    return _verdict(root, judged, only)
+    return _verdict(root, judged, exemptions, only)
 
 
 if __name__ == "__main__":

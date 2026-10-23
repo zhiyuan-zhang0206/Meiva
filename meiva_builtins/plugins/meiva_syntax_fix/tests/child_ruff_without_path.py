@@ -8,8 +8,8 @@ from meiva_builtins.plugins.meiva_syntax_fix._ruff_run import system_ruff
 
 def _assert_ruff_unreachable() -> None:
     # meiva:note
-    # host-ok: this child asks its own PATH, which the parent test emptied, whether ruff is
-    # reachable.
+    # host-ok: meiva_builtins/plugins/meiva_syntax_fix/tests/test_syntax_fix.py empties PATH
+    # for this child, which asserts ruff is unreachable there.
     assert shutil.which("ruff") is None, "precondition: PATH cannot find ruff"
 
 

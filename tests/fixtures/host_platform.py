@@ -48,8 +48,7 @@ def _system(system: object, nodeid: str) -> str:
 
 def _current_system() -> str:
     # meiva:note
-    # host-ok: this module IS the translation the marker is checked against, so asking
-    # the host it runs on is its subject.
+    # host-ok: this module IS the translation `tests/ci/test_host_platform_marker.py` checks.
     from base.native_process.os_platform import Platform
 
     return Platform.current().system
