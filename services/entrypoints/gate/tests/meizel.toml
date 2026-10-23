@@ -8,6 +8,5 @@ exports = ["test_gate.py"]
 "test_gate_daemon.py#monkeypatch.setattr base.telemetry.delivery.reporting.report_no_pipeline" = 1
 "test_gate_daemon.py#monkeypatch.setattr base.telemetry.pipeline_build.build_pipeline" = 2
 "test_gate_daemon.py#monkeypatch.setattr base.telemetry.process_logging.init_gateway_process" = 1
-"test_gate_daemon.py#monkeypatch.setattr services.entrypoints.gate.daemon.ConfigBoot" = 1
 "test_gate_daemon.py#monkeypatch.setattr services.entrypoints.gate.daemon.Gate" = 1
 "test_gate_daemon.py#monkeypatch.setattr services.entrypoints.gate.daemon.ThreadingHTTPServer" = 1
