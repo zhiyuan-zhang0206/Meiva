@@ -1,9 +1,11 @@
 """Data-plane startup ordering, authority and prerequisite contracts."""
 
 import dataclasses
+import json
 import subprocess
 from collections.abc import Callable, Generator
 from contextlib import contextmanager
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, NoReturn
 
@@ -33,29 +35,58 @@ class _Ledger:
         self.generation = SimpleNamespace(number=0)
 
 
+# meiva:note
+# Recorded effects of `complete_gateway_data_plane` and the fake start state.
+#
+# The home is a real gateway home whose start intent says how far its birth got: an
+# ordinary start finds it `provisioned`; `birth()` takes it back to `configured`, as
+# `meiva init` leaves it before the first start provisions the data plane.
 class _Plane:
-    """Recorded effects of `complete_gateway_data_plane` and the fake start state."""
-
-    def __init__(self, config: DataPlaneConfig) -> None:
+    def __init__(self, config: DataPlaneConfig, home: Path) -> None:
         self.config = config
+        self.home = home
         self.calls: list[str] = []
-        self.state = {"active": True, "birth": False}
+        self.state = {"active": True, "verify_fails": False}
+
+    def phase(self) -> str:
+        intent = start_identity.read_intent(self.home)
+        assert intent is not None
+        return intent["phase"]
+
+    def birth(self) -> None:
+        path = self.home / start_identity.INTENT_NAME
+        intent = json.loads(path.read_text())
+        intent["phase"] = "configured"
+        path.write_text(json.dumps(intent, sort_keys=True) + "\n")
+        self.state["active"] = False
 
 
 @pytest.fixture
-def plane(monkeypatch: pytest.MonkeyPatch, data_plane_config: DataPlaneConfig) -> _Plane:
+def plane(
+    monkeypatch: pytest.MonkeyPatch, data_plane_config: DataPlaneConfig, unit_home: Path
+) -> _Plane:
     """Every effect of `complete_gateway_data_plane`, recorded in order."""
     from base.cluster import authority
     from base.host.db_authority import delivery, ledger
     from cli.commands.converge import health_preflight
     from cli.commands.data_plane import bringup
 
+    start_identity.prepare_identity(
+        start_identity.IdentityInput(
+            unit_home,
+            unit_home.parent / "checkout",
+            frozenset({"gateway"}),
+            {"MEIVA_MACHINE_NAME": "plane"},
+        )
+    )
+    start_identity.mark_phase(unit_home, "provisioned")
     recorded = _Plane(
         dataclasses.replace(
             data_plane_config,
             db_url="postgresql://meiva@127.0.0.1:6433/meiva",
             redis_url="redis://127.0.0.1:6380/0",
-        )
+        ),
+        unit_home,
     )
     calls, state = recorded.calls, recorded.state
 
@@ -90,7 +121,13 @@ def plane(monkeypatch: pytest.MonkeyPatch, data_plane_config: DataPlaneConfig) -
     monkeypatch.setattr(delivery, "ensure_pooler_admin", record("pooler-admin"))
     monkeypatch.setattr(authority, "mint_generation", record("mint"))
     monkeypatch.setattr(authority, "check_invariant", record("invariant"))
-    monkeypatch.setattr(authority, "verify_generation", record("verify"))
+
+    def verify(*_a: object, **_kw: object) -> None:
+        calls.append("verify")
+        if state["verify_fails"]:
+            raise RuntimeError("generation 0 does not verify")
+
+    monkeypatch.setattr(authority, "verify_generation", verify)
 
     def activate(*_a: object) -> None:
         calls.append("activate")
@@ -98,14 +135,6 @@ def plane(monkeypatch: pytest.MonkeyPatch, data_plane_config: DataPlaneConfig) -
 
     monkeypatch.setattr(ledger, "activate", activate)
     monkeypatch.setattr(health_preflight, "probe_redis", record("redis-probe"))
-    monkeypatch.setattr(start_identity, "mark_phase", record("provisioned"))
-
-    def needs_provision(_home: object) -> bool:
-        if state["birth"]:
-            state["active"] = False
-        return state["birth"]
-
-    monkeypatch.setattr(start_identity, "needs_provision", needs_provision)
     calls.append("start")
     return recorded
 
@@ -132,8 +161,8 @@ def test_ordinary_start_regrants_and_checks_before_the_pooler(
         "prove-logins",
         "adopt",
         "redis-probe",
-        "provisioned",
     ]
+    assert plane.phase() == "provisioned"
 
 
 def test_birth_mints_generation_zero_and_activates_after_the_pooler_proof(
@@ -144,7 +173,8 @@ def test_birth_mints_generation_zero_and_activates_after_the_pooler_proof(
 ) -> None:
     from cli.commands.data_plane.bringup import complete_gateway_data_plane
 
-    plane.state["birth"] = True
+    plane.birth()
+    assert plane.phase() == "configured"
     complete_gateway_data_plane(
         plane.config, database_factory=operator_database, machine=command_machine
     )
@@ -163,8 +193,8 @@ def test_birth_mints_generation_zero_and_activates_after_the_pooler_proof(
         "activate",
         "adopt",
         "redis-probe",
-        "provisioned",
     ]
+    assert plane.phase() == "provisioned", "the birth is journaled once the data plane is up"
 
 
 def test_release_readiness_performs_no_schema_or_grant_writes(
@@ -188,11 +218,10 @@ def test_release_readiness_performs_no_schema_or_grant_writes(
         "prove-logins",
         "adopt",
         "redis-probe",
-        "provisioned",
     ]
 
 
-def test_invariant_violation_never_starts_pooler_or_marks_provisioned(
+def test_invariant_violation_never_starts_the_pooler(
     plane: _Plane,
     monkeypatch: pytest.MonkeyPatch,
     operator_database: OperatorDatabaseFactory,
@@ -212,6 +241,26 @@ def test_invariant_violation_never_starts_pooler_or_marks_provisioned(
             plane.config, database_factory=operator_database, machine=command_machine
         )
     assert plane.calls == ["start", "extension", "memory-vectors", "groups", "monitor"]
+
+
+# meiva:note
+# The birth is journaled only once the data plane is up: a failed check leaves the
+# home `configured`, so the next start births it again.
+def test_a_birth_that_fails_its_generation_check_stays_configured(
+    plane: _Plane,
+    operator_database: OperatorDatabaseFactory,
+    *,
+    command_machine: MachineIdentity,
+) -> None:
+    from cli.commands.data_plane.bringup import complete_gateway_data_plane
+
+    plane.birth()
+    plane.state["verify_fails"] = True
+    with pytest.raises(RuntimeError, match="does not verify"):
+        complete_gateway_data_plane(
+            plane.config, database_factory=operator_database, machine=command_machine
+        )
+    assert plane.phase() == "configured"
 
 
 class _Authority:

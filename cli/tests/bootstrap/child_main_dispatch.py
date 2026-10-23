@@ -9,7 +9,11 @@ is checking.
 import importlib.abc
 import socket
 import sys
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from cli.database import OperatorDatabaseFactory
+    from cli.database.runtime import CommandRuntime
 
 
 def _defer_logging() -> None:
@@ -132,8 +136,10 @@ def _init_and_start_settings_free() -> None:
     guard = _DenySettings()
     sys.meta_path.insert(0, guard)
     _forbid_network()
-    from base import cluster
-    from cli import main, start_intent, startup_support
+    from cli import init_intent, main, start_intent
+    from cli.parsers import build_parser
+    from cli.start_runtime import HomeSite
+    from cli.startup.service_path import CallerHost
 
     scenario = sys.argv[1]
     authority = scenario != "init_and_start_settings_free"
@@ -141,51 +147,55 @@ def _init_and_start_settings_free() -> None:
     checkout = Path(sys.argv[2]) if authority else home.parent / "checkout"
     if not authority:
         checkout.mkdir()
-    start_intent.checkout = lambda: checkout
-    cluster.port_free = lambda _port: True
-    calls: list[str] = []
+    site = HomeSite(home, checkout)
+    caller = CallerHost(
+        service_path=None,
+        path="/usr/bin:/bin",
+        virtual_env=None,
+        prefix_venv=None,
+        occupied_ports=frozenset(),
+    )
 
     def configured() -> None:
         assert (home / "start-intent.json").is_file()
         assert (home / ".env").is_file()
         assert not (home.parent / "clusters.json").exists()
 
-    def log(args: list[str], *, initialize: object) -> None:
-        assert args == ["start"]
-        configured()
-        calls.append("logging")
-
-    startup_support.init_cli_logging = log
-
-    def start(**kwargs: Any) -> int:
-        assert not kwargs["command"].config.prepared
-        configured()
-        calls.append("runtime")
-        if authority:
-            _verify_start_delivery(scenario, home, kwargs, expected)
-        return 0
-
-    start_intent.run_start_command = start
-    start_intent.complete_start = lambda **_kw: calls.append("boot-complete")
-    start_intent.release_serving = lambda: calls.append("clear-serving")
     assert (
         main.main(["start", "--all-services"]) == 1 and not home.exists()
     )  # nothing to start yet, and nothing made
-    assert (
-        main.main(["init", "--serve-gateway", "--serve-agent-runner", "--machine-name", "probe"])
-        == 0
+    init_args = build_parser().parse_args(
+        ["init", "--serve-gateway", "--serve-agent-runner", "--machine-name", "probe"]
     )
+    assert init_intent.run_init(init_args, site, caller) == 0
     configured()
-    assert calls == []  # init started nothing
+    assert not any((home / name).exists() for name in ("pg", "redis", "pgbouncer", "run"))
     assert "base.config" not in sys.modules
     guard.admitted = True
     expected = _prepare_start_delivery(scenario, home) if authority else None
     assert "base.config" not in sys.modules
     if not authority or scenario == "start_delivery_foreign":
         _boot_start_delivery(scenario, home)
-    assert main.main(["start", "--all-services"]) == 0
-    assert calls == ["logging", "runtime", "boot-complete"]
+    command, factory = _operator_handles()
+    with start_intent.admitted_start(site):
+        assert not command.config.prepared
+        configured()
+        if authority:
+            _verify_start_delivery(scenario, home, command, factory, expected)
     assert "base.config" in sys.modules  # admitted root types are allowed; delivery stayed lazy
+
+
+# meiva:note
+# The command runtime and database factory `cli.main` gives a start, before it enters its home.
+def _operator_handles() -> "tuple[CommandRuntime, OperatorDatabaseFactory]":
+    from cli.database import open_operator_database, operator_database_factory
+    from cli.database.runtime import CommandRuntime
+
+    command = CommandRuntime.create()
+    factory = operator_database_factory(
+        local_host=command.machine.host, open_database=open_operator_database
+    )
+    return command, factory
 
 
 def _boot_start_delivery(scenario: str, home: Any) -> None:
@@ -239,16 +249,20 @@ def _inherit_foreign_delivery(home: Any) -> None:
     assert os.environ["MEIVA_DB_URL"] != own
 
 
-def _verify_start_delivery(scenario: str, home: Any, kwargs: Any, expected: Any) -> None:
+def _verify_start_delivery(
+    scenario: str,
+    home: Any,
+    command: "CommandRuntime",
+    factory: "OperatorDatabaseFactory",
+    expected: Any,
+) -> None:
     from urllib.parse import urlsplit
 
     from base.db import NoDatabaseAuthorityError
     from base.host.db_authority.tests.generation import seed_active_generation
     from cli.commands.data_plane.bringup import adopt_gateway_login
-    from cli.database import OperatorDatabaseFactory
 
-    config = kwargs["command"].config
-    factory: OperatorDatabaseFactory = kwargs["database_factory"]
+    config = command.config
     url: str = config.view.data_plane.db_url
     if scenario in {"start_delivery_refused", "start_delivery_launcher"}:
         reason = config.view.env_boot.db_authority_refusal

@@ -1,0 +1,5 @@
+[uses]
+"test_log_sinks.py" = []
+"test_outcome.py" = []
+"test_service_path.py" = []
+"test_settings_failure.py" = []

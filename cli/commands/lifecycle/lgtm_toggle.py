@@ -16,6 +16,7 @@ from base.telemetry.lgtm_local import BACKENDS
 from cli.commands.lifecycle import start
 from cli.database import OperatorDatabaseFactory
 from cli.database.runtime import CommandRuntime
+from cli.start_runtime import StartRuntime
 from services.supervision.healthchecks.lgtm import lgtm_host_marker
 
 
@@ -34,48 +35,22 @@ def selection_problem(
     return None
 
 
-def _reconcile(
-    *,
-    enabled: bool,
-    only_services: tuple[str, ...],
-    disabled_services: tuple[str, ...],
-    all_services: bool,
-    retained_children: list[subprocess.Popen[bytes]] | None = None,
-    database_factory: OperatorDatabaseFactory,
-    producer: Callable[[], EventPipeline],
-    command: CommandRuntime,
-) -> int:
-    # meiva:note
-    # The operator names the start selection on the command line; nothing is derived from an
-    # earlier start. The toggle refuses only a selection that contradicts it (backends disabled
-    # while turning LGTM on, or named while turning it off).
-    if problem := selection_problem(
-        enabled=enabled, only_services=only_services, disabled_services=disabled_services
-    ):
-        raise ValueError(problem)
-    return start.cmd_start(
-        only_services=only_services,
-        disabled_services=disabled_services,
-        all_services=all_services,
-        retained_children=retained_children,
-        database_factory=database_factory,
-        producer=producer,
-        command=command,
-    )
-
-
 def cmd_lgtm_on(
     *,
     only_services: tuple[str, ...],
     disabled_services: tuple[str, ...],
     all_services: bool,
-    retained_children: list[subprocess.Popen[bytes]] | None = None,
+    runtime: StartRuntime,
+    retained_children: list[subprocess.Popen[bytes]] | None,
     database_factory: OperatorDatabaseFactory,
     producer: Callable[[], EventPipeline],
     command: CommandRuntime,
 ) -> int:
     # meiva:note
-    # Declare this home an observability station and start the named selection.
+    # Declare this home an observability station and start the named selection. The operator
+    # names the start selection on the command line; nothing is derived from an earlier start.
+    # The toggle refuses only a selection that contradicts it (backends disabled while turning
+    # LGTM on).
     if retained_children is None:
         raise ValueError("PostgreSQL launch requires its caller-owned child retention")
     if problem := selection_problem(
@@ -85,11 +60,11 @@ def cmd_lgtm_on(
     marker = lgtm_host_marker()
     marker.parent.mkdir(parents=True, exist_ok=True)
     marker.touch(exist_ok=True)
-    return _reconcile(
-        enabled=True,
+    return start.cmd_start(
         only_services=only_services,
         disabled_services=disabled_services,
         all_services=all_services,
+        runtime=runtime,
         retained_children=retained_children,
         database_factory=database_factory,
         producer=producer,
@@ -102,13 +77,15 @@ def cmd_lgtm_off(
     only_services: tuple[str, ...],
     disabled_services: tuple[str, ...],
     all_services: bool,
-    retained_children: list[subprocess.Popen[bytes]] | None = None,
+    runtime: StartRuntime,
+    retained_children: list[subprocess.Popen[bytes]] | None,
     database_factory: OperatorDatabaseFactory,
     producer: Callable[[], EventPipeline],
     command: CommandRuntime,
 ) -> int:
     # meiva:note
     # Retract the station marker and start the named selection, preserving observation data.
+    # The toggle refuses only a selection that names a backend, which would contradict it.
     if retained_children is None:
         raise ValueError("PostgreSQL launch requires its caller-owned child retention")
     if problem := selection_problem(
@@ -116,11 +93,11 @@ def cmd_lgtm_off(
     ):
         raise ValueError(problem)
     lgtm_host_marker().unlink(missing_ok=True)
-    return _reconcile(
-        enabled=False,
+    return start.cmd_start(
         only_services=only_services,
         disabled_services=disabled_services,
         all_services=all_services,
+        runtime=runtime,
         retained_children=retained_children,
         database_factory=database_factory,
         producer=producer,

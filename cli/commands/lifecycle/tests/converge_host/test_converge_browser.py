@@ -1,252 +1,145 @@
-"""Converge browser step: preflight when enabled."""
+# meiva:note
+# Converge browser step: what it does on a capable, an incapable and a switched-off host.
 
-from collections.abc import Callable
+from __future__ import annotations
+
 from dataclasses import replace
-from pathlib import Path
-from typing import Any
 
 import pytest
 
-import cli.commands.lifecycle.converge_host as cv
-from base.clock.tests.manual_timers import ManualTimers
 from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot
 from base.config.tests.configuration import snapshot_process_config
-from base.host.system.hostport import Host
-from base.host.system.tests.fake_commands import fake_host
-from base.sessions.tests.refuse_helper import refuse_helper
-from base.telemetry import EventPipeline
-from cli.database.runtime import CommandRuntime
-from cli.database.tests.cli_tests import operator_database as operator_database
-from cli.database.tests.cli_tests import operator_pipeline as operator_pipeline
-from cli.database.tests.command_inputs import command_runtime as command_runtime
+from cli.commands.converge.plans.browser_plan import (
+    BrowserDisabled,
+    BrowserIncapable,
+    BrowserNotApplicable,
+    OfferProfileSeed,
+    plan_browser,
+)
+from cli.commands.converge.spec import ConvergeCtx
+from cli.commands.lifecycle import converge_host as cv
+from cli.commands.lifecycle.tests.converge_host.context_inputs import capable_mac
+
+_NO_DISPLAY = "no display (headless server)"
+_NO_CHROME = "no Chrome (install it or set MEIVA_CHROME_BINARY)"
+_NO_NPX = "no npx (install Node.js for chrome-devtools-mcp)"
 
 
-def _ctx(
-    home: Path,
-    *,
-    operator_database: Callable[[], Any],
-    producer: Callable[[], EventPipeline],
-    command_runtime: CommandRuntime,
-) -> cv.ConvergeCtx:
-    return cv.ConvergeCtx(
-        repo=Path("/repo"),
-        meiva_home=home,
-        roles=frozenset({"agent-runner"}),
-        config=command_runtime.config,
-        database_factory=operator_database,
-        producer=producer,
-        machine=command_runtime.machine,
-        helper=refuse_helper,
-        host=fake_host(),
-        services=frozenset(),
-        timers=ManualTimers(),
-    )
+# meiva:note
+# --- the decision (pure) ------------------------------------------------------------
 
 
-def test_enabled_runs_preflight(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-    operator_database: Callable[[], Any],
-    operator_pipeline: Callable[[], EventPipeline],
-    *,
-    command_runtime: CommandRuntime,
+def test_a_switched_off_browser_is_not_probed() -> None:
+    assert plan_browser(enabled=False, incapability=None, interactive=True) == BrowserDisabled()
+    assert plan_browser(enabled=False, incapability=_NO_NPX, interactive=True) == BrowserDisabled()
+
+
+# meiva:note
+# Watchdog respawns and rollout-driven starts have no terminal, so they never block.
+@pytest.mark.parametrize("interactive", [True, False])
+def test_a_capable_host_offers_the_profile_seed_to_a_person_at_the_terminal_only(
+    interactive: bool,
 ) -> None:
-    ctx = _ctx(
-        tmp_path,
-        operator_database=operator_database,
-        producer=operator_pipeline,
-        command_runtime=command_runtime,
-    )
-    ctx.config.set_field("browser_enabled", True)
-    import services.desktop.browser.profile as bp
+    plan = plan_browser(enabled=True, incapability=None, interactive=interactive)
 
-    monkeypatch.setattr(cv, "browser_incapability", lambda _chrome, **_kwargs: None)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(bp, "ensure_browser_profile", lambda **_k: None)  # pyright: ignore[reportUnknownArgumentType]
-    cv.ensure_browser(ctx)
+    assert plan == OfferProfileSeed(interactive=interactive)
 
 
-def test_capable_offers_profile_seed_with_tty_flag(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-    operator_database: Callable[[], Any],
-    operator_pipeline: Callable[[], EventPipeline],
-    *,
-    command_runtime: CommandRuntime,
+def test_a_headless_host_gets_an_informational_notice_not_a_warning() -> None:
+    plan = plan_browser(enabled=True, incapability=_NO_DISPLAY, interactive=True)
+
+    assert plan == BrowserNotApplicable(_NO_DISPLAY)
+
+
+@pytest.mark.parametrize("reason", [_NO_CHROME, _NO_NPX])
+def test_a_repairable_gap_is_a_warning_and_never_offers_the_profile_seed(reason: str) -> None:
+    plan = plan_browser(enabled=True, incapability=reason, interactive=True)
+
+    assert plan == BrowserIncapable(reason)
+
+
+# meiva:note
+# --- the step on a host -------------------------------------------------------------
+
+
+# meiva:note
+# An agent-runner mac with the browser on and a configured Chrome, with or without npx.
+def _browser_ctx(ctx: ConvergeCtx, *, npx: bool) -> ConvergeCtx:
+    mac = replace(ctx, host=capable_mac(programs={"npx": "/usr/bin/npx"} if npx else None))
+    mac.config.set_field("browser_enabled", True)
+    mac.config.set_field("chrome_binary", "/Applications/Chrome")
+    return mac
+
+
+def test_a_capable_host_runs_the_preflight_quietly(
+    ctx: ConvergeCtx, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """When the host is browser-capable, the step invokes the profile-seed offer,
-    passing interactive = both stdin AND stdout are TTYs."""
-    ctx = _ctx(
-        tmp_path,
-        operator_database=operator_database,
-        producer=operator_pipeline,
-        command_runtime=command_runtime,
-    )
-    ctx.config.set_field("browser_enabled", True)
-    import services.desktop.browser.profile as bp
+    cv.ensure_browser(_browser_ctx(ctx, npx=True))
 
-    monkeypatch.setattr(cv, "browser_incapability", lambda _chrome, **_kwargs: None)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(cv.sys.stdin, "isatty", lambda: True)
-    monkeypatch.setattr(cv.sys.stdout, "isatty", lambda: False)
-    seen: list[bool] = []
-    monkeypatch.setattr(
-        bp,
-        "ensure_browser_profile",
-        lambda *, interactive, **_kwargs: seen.append(interactive),  # pyright: ignore[reportUnknownArgumentType]
-    )
-    cv.ensure_browser(ctx)
-    assert seen == [False]  # stdout not a tty -> not interactive
+    assert capsys.readouterr().err == ""
 
 
-def test_incapable_host_does_not_offer_profile_seed(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-    operator_database: Callable[[], Any],
-    operator_pipeline: Callable[[], EventPipeline],
-    *,
-    command_runtime: CommandRuntime,
+# meiva:note
+# A repairable dependency gap keeps converge's existing warn-not-raise path.
+def test_enabled_with_missing_npx_prints_the_repair_box_and_does_not_raise(
+    ctx: ConvergeCtx, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """A headless host must return before ever offering the profile-seed choice."""
-    ctx = _ctx(
-        tmp_path,
-        operator_database=operator_database,
-        producer=operator_pipeline,
-        command_runtime=command_runtime,
-    )
-    ctx.config.set_field("browser_enabled", True)
-    import services.desktop.browser.profile as bp
+    cv.ensure_browser(_browser_ctx(ctx, npx=False))
 
-    monkeypatch.setattr(cv, "browser_incapability", lambda _chrome, **_kwargs: "no display")  # pyright: ignore[reportUnknownArgumentType]
-
-    def _must_not_call(**_k: object) -> None:
-        raise AssertionError("profile seed offered on an incapable host")
-
-    monkeypatch.setattr(bp, "ensure_browser_profile", _must_not_call)
-    cv.ensure_browser(ctx)  # warns + returns, no raise
+    err = capsys.readouterr().err
+    assert "Install Node.js" in err
+    assert "meiva-browser will not start on this host" in err
 
 
-def test_enabled_but_incapable_warns_not_raises(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-    capsys: pytest.CaptureFixture[str],
-    operator_database: Callable[[], Any],
-    operator_pipeline: Callable[[], EventPipeline],
-    *,
-    command_runtime: CommandRuntime,
+def test_a_switched_off_browser_prints_nothing(
+    ctx: ConvergeCtx, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """On a headless machine, converge prints an informational skip and returns."""
-    ctx = _ctx(
-        tmp_path,
-        operator_database=operator_database,
-        producer=operator_pipeline,
-        command_runtime=command_runtime,
-    )
-    ctx.config.set_field("browser_enabled", True)
-    monkeypatch.setattr(cv, "browser_incapability", lambda _chrome, **_kwargs: "no display")  # pyright: ignore[reportUnknownArgumentType]
-    cv.ensure_browser(ctx)
-    stderr = capsys.readouterr().err
-    assert "not applicable" in stderr
-    assert "Install Node.js" not in stderr
+    off = replace(ctx, host=capable_mac())
+    off.config.set_field("browser_enabled", False)
 
+    cv.ensure_browser(off)
 
-def test_enabled_with_missing_npx_prints_the_repair_box(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-    capsys: pytest.CaptureFixture[str],
-    operator_database: Callable[[], Any],
-    operator_pipeline: Callable[[], EventPipeline],
-    *,
-    command_runtime: CommandRuntime,
-) -> None:
-    """A repairable dependency gap keeps converge's existing warn-not-raise path."""
-    ctx = _ctx(
-        tmp_path,
-        operator_database=operator_database,
-        producer=operator_pipeline,
-        command_runtime=command_runtime,
-    )
-    ctx.config.set_field("browser_enabled", True)
-    monkeypatch.setattr(
-        cv,
-        "browser_incapability",
-        lambda _chrome, **_kwargs: "no npx (install Node.js for chrome-devtools-mcp)",  # pyright: ignore[reportUnknownArgumentType]
-    )
-    cv.ensure_browser(ctx)
-    assert "Install Node.js" in capsys.readouterr().err
+    assert capsys.readouterr().err == ""
 
 
 def test_steps_read_their_context_owner_and_later_overlay(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-    operator_database: Callable[[], Any],
-    operator_pipeline: Callable[[], EventPipeline],
-    *,
-    command_runtime: CommandRuntime,
+    ctx: ConvergeCtx, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    from services.desktop.browser import profile
-
-    first = _ctx(
-        tmp_path / "first",
-        operator_database=operator_database,
-        producer=operator_pipeline,
-        command_runtime=command_runtime,
-    )
+    first = _browser_ctx(ctx, npx=False)
     second_config = snapshot_process_config()
-    second = replace(
-        first,
-        meiva_home=tmp_path / "second",
-        config=second_config,
-        machine=machine_from_boot(second_config),
-    )
+    second = replace(first, config=second_config, machine=machine_from_boot(second_config))
     first.config.set_field("browser_enabled", False)
     second.config.set_field("browser_enabled", True)
-    probed: list[bool] = []
+    second.config.set_field("chrome_binary", "/Applications/Chrome")
 
-    def capable(_chrome: str | None, *, host: Host) -> None:
-        probed.append(isinstance(host, Host))
-
-    def seed(*, interactive: bool, host: Host) -> None:
-        assert isinstance(interactive, bool)
-
-    monkeypatch.setattr(cv, "browser_incapability", capable)
-    monkeypatch.setattr(profile, "ensure_browser_profile", seed)
     cv.ensure_browser(first)
+    # meiva:note
+    # its own owner says the browser is off
+    assert capsys.readouterr().err == ""
     cv.ensure_browser(second)
-    assert probed == [True]  # called once, and handed the context's host
+    # meiva:note
+    # another owner says it is on
+    assert "Install Node.js" in capsys.readouterr().err
     assert first.config is not second.config
+
+    # meiva:note
+    # a later overlay on the first owner
     first.config.set_field("browser_enabled", True)
     cv.ensure_browser(first)
-    assert probed == [True, True]
+    assert "Install Node.js" in capsys.readouterr().err
 
 
-def test_context_read_failure_keeps_the_original_error(
-    tmp_path: Path,
-    operator_database: Callable[[], Any],
-    operator_pipeline: Callable[[], EventPipeline],
-    *,
-    command_runtime: CommandRuntime,
-) -> None:
+def test_context_read_failure_keeps_the_original_error(ctx: ConvergeCtx) -> None:
     error = RuntimeError("context configuration is unavailable")
 
     class FailedBoot(ConfigBoot):
         def read_process_environment(self) -> None:
             raise error
 
-    ctx = cv.ConvergeCtx(
-        repo=tmp_path,
-        meiva_home=tmp_path,
-        roles=frozenset({"agent-runner"}),
-        config=FailedBoot(),
-        database_factory=operator_database,
-        producer=operator_pipeline,
-        machine=command_runtime.machine,
-        helper=refuse_helper,
-        host=fake_host(),
-        services=frozenset(),
-        timers=ManualTimers(),
-    )
+    failing = replace(ctx, config=FailedBoot())
     with pytest.raises(RuntimeError) as caught:
-        cv.ensure_browser(ctx)
+        cv.ensure_browser(failing)
     assert caught.value is error
 
 

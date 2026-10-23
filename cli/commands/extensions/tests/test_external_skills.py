@@ -14,6 +14,7 @@ from base.host.system.tests.fake_commands import fake_host
 from base.sessions.tests.refuse_helper import refuse_helper
 from base.telemetry import EventPipeline
 from cli.commands.converge import spec as converge_host
+from cli.commands.converge.spec import UserSession
 from cli.commands.extensions import external_skills as external_skills_module
 from cli.commands.extensions.external_skill_host import filesystem as filesystem_module
 from cli.database.tests.cli_tests import operator_database as operator_database
@@ -70,6 +71,7 @@ def _ctx(
         machine=machine,
         helper=refuse_helper,
         host=fake_host(),
+        session=UserSession(user_home=meiva_home, login_shell="/bin/zsh", interactive=False),
         services=frozenset(),
         timers=ManualTimers(),
     )

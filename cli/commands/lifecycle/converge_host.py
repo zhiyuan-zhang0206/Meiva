@@ -17,7 +17,7 @@ from pathlib import Path
 
 from base.agents.context.clients import DatabaseFactory
 from base.cluster.machine import MachineIdentity, MachineRoles
-from base.deploy.schema.migration_layout import MIGRATIONS_DIR
+from base.deploy.schema.migration_layout import untracked_migration_files
 from base.host.converge.accessibility import (
     clear_status as clear_accessibility_status,
 )
@@ -27,8 +27,8 @@ from base.host.converge.accessibility import (
 from base.host.converge.browser_deps import browser_deps_notice, browser_deps_warning
 from base.host.converge.screen_capture import clear_status, write_status
 from base.host.system.hostport import Host
-from base.host.system.probes import browser_incapability
-from base.paths.home import is_default_home, is_prod_install, resolve_meiva_home
+from base.host.system.probes import browser_incapability, permissions_helper_incapability
+from base.paths.home import is_prod_install
 from base.telemetry import EventPipeline
 from base.telemetry.lgtm_local import BACKENDS
 from cli.commands.converge.brew_pin import ensure_brew_pin
@@ -37,6 +37,8 @@ from cli.commands.converge.frontend_env import ensure_no_frontend_env_overrides
 from cli.commands.converge.health_preflight import (
     ensure_health_preflight as _ensure_health_preflight,
 )
+from cli.commands.converge.incomplete import clear_incomplete
+from cli.commands.converge.incomplete import record_incomplete as record_incomplete_marker
 from cli.commands.converge.os_jobs import (
     ensure_cluster_autostart,
     ensure_health_probe_cron,
@@ -48,23 +50,36 @@ from cli.commands.converge.os_jobs import (
 from cli.commands.converge.ownership_preflight import (
     ensure_ownership_preflight as _ensure_ownership_preflight,
 )
+from cli.commands.converge.plans.browser_plan import (
+    BrowserDisabled,
+    BrowserIncapable,
+    BrowserNotApplicable,
+    OfferProfileSeed,
+    plan_browser,
+)
+from cli.commands.converge.plans.checkout_warnings import untracked_migrations_notice
+from cli.commands.converge.plans.helper_plan import (
+    BringUpHelper,
+    NoHelperPlatform,
+    RefuseBringUp,
+    helper_bring_up_plan,
+    helper_present,
+)
+from cli.commands.converge.plans.split_host_checks import (
+    drive_unavailable_warning,
+    github_pr_failure,
+    probes_cross_machine_transfer,
+    requires_github_pr,
+)
+from cli.commands.converge.plans.step_selection import SkipStep, StepScope, plan_steps
 from cli.commands.converge.redis_bridge import retire_launchd_redis_bridge
-from cli.commands.converge.spec import ALL_ROLES, ConvergeCtx, ConvergeStep
-from cli.commands.converge.steps import (
-    PATH_BEGIN as PATH_BEGIN,
-)
-from cli.commands.converge.steps import (
-    PATH_END as PATH_END,
-)
+from cli.commands.converge.spec import ConvergeCtx, ConvergeStep, UserSession
 from cli.commands.converge.steps import (
     ensure_local_bin_on_path,
     ensure_local_git_hooks,
     ensure_meiva_home_dirs,
     ensure_meiva_on_path,
     ensure_pg_binaries_step,
-)
-from cli.commands.converge.steps import (
-    shell_rc_path as shell_rc_path,
 )
 from cli.commands.converge.walg import converge_walg
 from cli.commands.data_plane.pgbouncer import ensure_pgbouncer_step
@@ -74,12 +89,12 @@ from cli.commands.observability.otel_collector import ensure_otel_collector_step
 from cli.database.runtime import CommandRuntime
 
 __all__ = [
-    "ALL_ROLES",
     "CONVERGE_STEPS",
     "ConvergeCtx",
     "ConvergeStep",
     "cmd_converge",
     "converge_host",
+    "run_converge",
 ]
 
 
@@ -118,41 +133,53 @@ def ensure_browser(ctx: ConvergeCtx) -> None:
     on an incapable machine emit a prominent actionable warning instead of
     failing so the rest of converge (and meiva start) proceeds.
     """
-    if not ctx.read_config().view.services.browser_enabled:
-        return
-    reason = browser_incapability(ctx.read_config().view.services.chrome_binary, host=ctx.host)
-    if reason is not None:
-        if reason.startswith("no display"):
-            print(f"  i browser: {browser_deps_notice(reason)}", file=sys.stderr)
+    services = ctx.read_config().view.services
+    enabled = services.browser_enabled
+    incapability = browser_incapability(services.chrome_binary, host=ctx.host) if enabled else None
+    plan = plan_browser(
+        enabled=enabled, incapability=incapability, interactive=ctx.session.interactive
+    )
+    match plan:
+        case BrowserDisabled():
             return
-        print(f"  ! browser: {reason}", file=sys.stderr)
-        print(browser_deps_warning(reason, host=ctx.host), file=sys.stderr)
-        print("    (meiva-browser will not start on this host)", file=sys.stderr)
-        return
-    # Host is browser-capable. Offer, once, to seed the dedicated Chrome profile
-    # from the operator's daily Chrome — a security-gated choice that only fires
-    # when the profile is still absent/empty AND a human is at the TTY. Watchdog
-    # respawns and rollout-driven starts have no TTY, so they take the fresh
-    # default and never block.
-    from services.desktop.browser.profile import ensure_browser_profile
+        case BrowserNotApplicable(reason=reason):
+            print(f"  i browser: {browser_deps_notice(reason)}", file=sys.stderr)
+        case BrowserIncapable(reason=reason):
+            print(f"  ! browser: {reason}", file=sys.stderr)
+            print(browser_deps_warning(reason, host=ctx.host), file=sys.stderr)
+            print("    (meiva-browser will not start on this host)", file=sys.stderr)
+        case OfferProfileSeed(interactive=interactive):
+            from services.desktop.browser.profile import ensure_browser_profile
 
-    ensure_browser_profile(interactive=sys.stdin.isatty() and sys.stdout.isatty(), host=ctx.host)
+            ensure_browser_profile(interactive=interactive, host=ctx.host)
+
+
+def _helper_enabled(ctx: ConvergeCtx) -> bool:
+    return ctx.read_config().view.services.permissions_helper_enabled
+
+
+def _helper_present(ctx: ConvergeCtx) -> bool:
+    return helper_present(
+        enabled=_helper_enabled(ctx), incapability=permissions_helper_incapability(host=ctx.host)
+    )
 
 
 def _ensure_permissions_helper(ctx: ConvergeCtx) -> None:
     """Require the stable signed ancestor before starting a macOS root."""
-    if ctx.host.platform.system != "darwin":
-        return
-    if not ctx.read_config().view.services.permissions_helper_enabled:
-        raise RuntimeError("macOS root supervision requires the permissions helper")
-    from base.host.system.probes import permissions_helper_incapability
+    plan = helper_bring_up_plan(
+        system=ctx.host.platform.system,
+        enabled=_helper_enabled(ctx),
+        incapability=permissions_helper_incapability(host=ctx.host),
+    )
+    match plan:
+        case NoHelperPlatform():
+            return
+        case RefuseBringUp(message=message):
+            raise RuntimeError(message)
+        case BringUpHelper():
+            from services.desktop.permissions_helper import converge
 
-    reason = permissions_helper_incapability(host=ctx.host)
-    if reason is not None:
-        raise RuntimeError(f"macOS root supervision cannot start: {reason}")
-    from services.desktop.permissions_helper import converge
-
-    converge(helper=ctx.require_helper(), timers=ctx.timers)
+            converge(helper=ctx.require_helper(), timers=ctx.timers)
 
 
 def ensure_cross_machine_transfer(ctx: ConvergeCtx) -> None:
@@ -168,26 +195,14 @@ def ensure_cross_machine_transfer(ctx: ConvergeCtx) -> None:
     Only probed on a split deployment: a single box (this unit also carries
     'gateway') has no peer to transfer to, so the step is skipped.
     """
-    if ctx.roles and "gateway" in ctx.roles:
-        return
     backend = ctx.read_config().view.general.cross_machine_transfer_backend
-    if backend == "none":
+    if not probes_cross_machine_transfer(roles=ctx.roles, backend=backend):
         return
     from base.host.converge.google_drive import candidate_drive_dirs, find_writable_google_drive
 
-    candidates = candidate_drive_dirs(home=Path.home(), host=ctx.host)
+    candidates = candidate_drive_dirs(home=ctx.session.user_home, host=ctx.host)
     if find_writable_google_drive(candidates) is None:
-        looked = ", ".join(str(p) for p in candidates) or "(no candidate paths)"
-        print(
-            "  ! cross-machine transfer backend 'drive' is unavailable on this"
-            " agent-runner: no writable Google Drive synced folder, so file transfer"
-            " via the shared Drive folder will not work. Install Google Drive for"
-            " Desktop (macOS), sign in, and make sure the synced 'My Drive' area"
-            " is writable to enable it; set MEIVA_CROSS_MACHINE_TRANSFER_BACKEND=none"
-            " to skip this probe on a runner that moves files its own way."
-            " Looked in: " + looked,
-            file=sys.stderr,
-        )
+        print(drive_unavailable_warning(tuple(str(path) for path in candidates)), file=sys.stderr)
 
 
 def ensure_github_pr(ctx: ConvergeCtx) -> None:
@@ -204,22 +219,16 @@ def ensure_github_pr(ctx: ConvergeCtx) -> None:
     local-only and never pushed off-box). A split agent-runner that does not
     consolidate via PRs can opt out with MEIVA_REQUIRE_GITHUB_PR=false.
     """
-    if ctx.roles and "gateway" in ctx.roles:
-        return
-    if ctx.read_config().view.general.memory_keep_local:
-        return
-    if not ctx.read_config().view.general.require_github_pr:
+    general = ctx.read_config().view.general
+    if not requires_github_pr(
+        roles=ctx.roles, keep_local=general.memory_keep_local, require_pr=general.require_github_pr
+    ):
         return
     from base.deploy.git.github_pr import github_pr_blocker
 
     reason = github_pr_blocker(host=ctx.host)
     if reason is not None:
-        raise RuntimeError(
-            f"this agent-runner cannot open+merge GitHub PRs on the memory repo: {reason}. "
-            "The memory pool is consolidated nightly by agents that push their machine "
-            "branch and open/merge PRs: install the GitHub CLI (`gh`), run `gh auth login`, "
-            "and grant the account write access to the memory repo, then retry."
-        )
+        raise RuntimeError(github_pr_failure(reason))
 
 
 def ensure_screen_capture(ctx: ConvergeCtx) -> None:
@@ -232,12 +241,7 @@ def ensure_screen_capture(ctx: ConvergeCtx) -> None:
     host that cannot run one, that step already said so, and a derived second
     complaint here would be noise rather than news.
     """
-    from base.host.system.probes import permissions_helper_incapability
-
-    if (
-        not ctx.read_config().view.services.permissions_helper_enabled
-        or permissions_helper_incapability(host=ctx.host) is not None
-    ):
+    if not _helper_present(ctx):
         clear_status()
         return
 
@@ -259,12 +263,7 @@ def ensure_accessibility(ctx: ConvergeCtx) -> None:
     helper's answer for the next agent startup to report, after the helper has
     been brought up and only where it can exist.
     """
-    from base.host.system.probes import permissions_helper_incapability
-
-    if (
-        not ctx.read_config().view.services.permissions_helper_enabled
-        or permissions_helper_incapability(host=ctx.host) is not None
-    ):
+    if not _helper_present(ctx):
         clear_accessibility_status()
         return
 
@@ -277,12 +276,7 @@ def ensure_accessibility(ctx: ConvergeCtx) -> None:
 
 
 def ensure_permissions_onboarding(ctx: ConvergeCtx) -> None:
-    from base.host.system.probes import permissions_helper_incapability
-
-    if (
-        not ctx.read_config().view.services.permissions_helper_enabled
-        or permissions_helper_incapability(host=ctx.host) is not None
-    ):
+    if not _helper_present(ctx):
         return
     from base.host.permissions_helper.grants import checklist, gate
     from services.desktop.permissions_helper import onboarding
@@ -305,7 +299,7 @@ def ensure_permissions_onboarding(ctx: ConvergeCtx) -> None:
     )
 
 
-def warn_untracked_migrations(ctx: ConvergeCtx) -> None:  # noqa: ARG001
+def warn_untracked_migrations(ctx: ConvergeCtx) -> None:
     """Operator-visible warning when migrations/ holds files git does not track.
 
     The applier skips untracked migrations with a log warning (Task #998); this
@@ -315,14 +309,10 @@ def warn_untracked_migrations(ctx: ConvergeCtx) -> None:  # noqa: ARG001
     would otherwise read as "my migration ran". Gateway-only: the gateway is the
     single schema writer (e9d51acea).
     """
-    from base.deploy.schema.migrations import untracked_migration_files
-
-    names = untracked_migration_files(migrations_dir=MIGRATIONS_DIR)
-    if names:
-        print(
-            f"⚠ [migration] {len(names)} untracked file(s) in migrations/ are NOT "
-            f"in git and will NOT be applied: {', '.join(names)}"
-        )
+    names = untracked_migration_files(migrations_dir=ctx.repo / "migrations")
+    notice = untracked_migrations_notice(tuple(names))
+    if notice is not None:
+        print(notice)
 
 
 CONVERGE_STEPS: tuple[ConvergeStep, ...] = (
@@ -520,40 +510,30 @@ CONVERGE_STEPS: tuple[ConvergeStep, ...] = (
 
 
 # meiva:note
-# Host-global steps belong to the host's prod install (the default home
-# `~/.meiva`), not to a dev cluster spun up from a worktree — a dev cluster must
-# not repoint `~/.local/bin/meiva`, rewrite the shell rc or own the boot unit.
-# Identity is the home path, so the criterion is direct: this unit's resolved home
-# must BE the default home. A dev worktree resolves its home to `~/.meiva` too
-# whenever MEIVA_HOME is unset, so additionally require a checkout that is not a
-# dev worktree (`.worktrees/...` or `.claude/worktrees/...`).
-def prod_install(ctx: ConvergeCtx) -> bool:
-    return is_prod_install(repo=ctx.repo, home=ctx.meiva_home, is_default=is_default_home)
-
-
+# Run the applicable converge steps in order; idempotent, fail-fast.
+#
+# The composition point of one converge operation: it reads the invoking user's session
+# once, builds the context the steps share from `command` (whose home is the home being
+# converged) and runs `steps` over it with `run_converge`.
+#
+# `roles is None` means the unit is not configured yet (fresh install): steps
+# with requires_unit_config=True are skipped with a printed notice. A
+# configured host runs a step when it carries any capability the step is scoped
+# to (`roles & step.roles`), so a single-box gateway,agent-runner host runs
+# both the gateway and agent-runner steps.
 def converge_host(
     repo: Path,
     roles: MachineRoles | None,
     *,
-    meiva_home: Path | None = None,
-    steps: tuple[ConvergeStep, ...] = CONVERGE_STEPS,
+    steps: tuple[ConvergeStep, ...],
     services: frozenset[str],
     database_factory: DatabaseFactory,
     producer: Callable[[], EventPipeline],
     command: CommandRuntime,
 ) -> None:
-    """Run the applicable converge steps in order; idempotent, fail-fast.
-
-    `roles is None` means the unit is not configured yet (fresh install): steps
-    with requires_unit_config=True are skipped with a printed notice. A
-    configured host runs a step when it carries any capability the step is scoped
-    to (`roles & step.roles`), so a single-box gateway,agent-runner host runs
-    both the gateway and agent-runner steps.
-    """
-    resolved_home = meiva_home if meiva_home is not None else resolve_meiva_home()
     ctx = ConvergeCtx(
         repo=repo,
-        meiva_home=resolved_home,
+        meiva_home=command.home,
         roles=roles,
         config=command.config,
         machine=command.machine,
@@ -563,17 +543,42 @@ def converge_host(
         helper=command.helper,
         timers=command.timers,
         host=command.host,
+        session=UserSession.current(),
     )
+    # meiva:note
+    # Host-global steps belong to the host's prod install (the default home
+    # `~/.meiva`), not to a dev cluster spun up from a worktree — a dev cluster must
+    # not repoint `~/.local/bin/meiva`, rewrite the shell rc or own the boot unit.
+    # Identity is the home path, so the criterion is direct: this unit's resolved home
+    # must BE the default home. A dev worktree resolves its home to `~/.meiva` too
+    # whenever MEIVA_HOME is unset, so additionally require a checkout that is not a
+    # dev worktree (`.worktrees/...` or `.claude/worktrees/...`).
+    run_converge(ctx, steps, prod_install=is_prod_install(repo=repo, home=command.home))
 
-    is_prod_install = prod_install(ctx)
 
+# meiva:note
+# Print and run what `plan_steps` decides for `steps`, stopping at the first failure.
+#
+# A failed step is announced, recorded as the home's incomplete marker (prod install only)
+# and re-raised; a fully successful converge on the prod install clears the marker.
+def run_converge(ctx: ConvergeCtx, steps: tuple[ConvergeStep, ...], *, prod_install: bool) -> None:
+    decisions = plan_steps(
+        tuple(
+            StepScope(
+                step.name, step.roles, step.requires_unit_config, step.host_global, step.services
+            )
+            for step in steps
+        ),
+        roles=ctx.roles,
+        services=ctx.services,
+        prod_install=prod_install,
+    )
     print("\n→ converge host")
     failed_step = ""
     try:
-        for step in steps:
-            reason = _skip_reason(ctx, step, is_prod_install=is_prod_install)
-            if reason is not None:
-                print(f"  · {step.name}: skipped ({reason})")
+        for step, decision in zip(steps, decisions, strict=True):
+            if isinstance(decision, SkipStep):
+                print(f"  · {step.name}: skipped ({decision.reason})")
                 continue
             try:
                 step.apply(ctx)
@@ -588,13 +593,11 @@ def converge_host(
         # converge), so the marker is the only durable trace of an unapplied step.
         # meiva:link cli/commands/converge/docs/converge-incomplete.meiva.okf.md
         record_incomplete(
-            resolved_home, step=failed_step, error=str(exc), prod_install=is_prod_install
+            ctx.meiva_home, step=failed_step, error=str(exc), prod_install=prod_install
         )
         raise
-    if is_prod_install:
-        from cli.commands.converge import incomplete
-
-        incomplete.clear_incomplete(resolved_home)
+    if prod_install:
+        clear_incomplete(ctx.meiva_home)
 
 
 # meiva:note
@@ -604,21 +607,7 @@ def converge_host(
 def record_incomplete(meiva_home: Path, *, step: str, error: str, prod_install: bool) -> None:
     if not prod_install:
         return
-    from cli.commands.converge import incomplete
-
-    incomplete.record_incomplete(meiva_home, step=step, error=error)
-
-
-def _skip_reason(ctx: ConvergeCtx, step: ConvergeStep, *, is_prod_install: bool) -> str | None:
-    if step.services and not step.services.intersection(ctx.services):
-        return "consumer service not selected"
-    if step.host_global and not is_prod_install:
-        return "dev cluster/worktree — host-global wiring is prod-install only"
-    if ctx.roles is not None and not (ctx.roles & step.roles):
-        return f"roles {','.join(sorted(ctx.roles))}"
-    if ctx.roles is None and step.requires_unit_config:
-        return "unit not configured yet; initialize with meiva start"
-    return None
+    record_incomplete_marker(meiva_home, step=step, error=error)
 
 
 def selected_service_names(
@@ -684,6 +673,7 @@ def cmd_converge(
     converge_host(
         repo,
         roles,
+        steps=CONVERGE_STEPS,
         services=services,
         database_factory=database_factory,
         producer=producer,
@@ -692,13 +682,13 @@ def cmd_converge(
     # After the steps, not inside them: standalone converge runs against a
     # cluster that is already up, which is the precondition this needs and which
     # a CONVERGE_STEPS entry would not have on the `meiva start` path.
-    from base.paths import meiva_home, skills_dir
+    from base.paths import skills_dir
     from cli.commands.extensions.materialize import (
         adopt_local_extensions,
         materialize_cluster_extensions,
     )
 
-    skills_root = skills_dir(meiva_home())
+    skills_root = skills_dir(command.home)
     adopt_local_extensions(
         database_factory=database_factory,
         machine_name=command.machine.name,

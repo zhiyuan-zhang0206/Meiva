@@ -1,11 +1,19 @@
+# meiva:note
+# The audit rows of an operator lifecycle command: what it asked the root for, how it ended.
+#
+# Imports that reach the configuration chain stay inside the functions that use them, so
+# `meiva --help` can import this module without loading settings.
+
 from __future__ import annotations
 
 import time
 from collections.abc import Callable, Generator, Mapping, Sequence
 from contextlib import contextmanager
-from typing import Any, Literal
+from typing import Literal
 
+from base.agents.context.clients import DatabaseFactory
 from base.log import logger
+from base.native_process.root_control.ipc import CallerPayload
 
 __all__ = [
     "CommandAudit",
@@ -96,21 +104,35 @@ def record_lifecycle_result(*, outcome: Outcome, seconds: float) -> None:
 # The audit scope of one operator command: its request and its outcome, both written
 # through the command's own database. `enabled=False` is the OS boot job's retried
 # start — nothing asked for it, so there is no operator to attribute and no result
-# worth a row.
+# worth a row. The caller block and the source commit are read once, when the scope
+# opens; a command whose audit cannot be set up still runs, unaudited, because the
+# record must never fail the command that repairs the host.
 # meiva:link base/native_process/root_control/docs/lifecycle-caller.meiva.okf.md
 @contextmanager
 def operator_lifecycle_audit(
     *,
-    database_factory: Callable[[], Any],
+    database_factory: DatabaseFactory,
     enabled: bool = True,
 ) -> Generator[CommandAudit, None, None]:
     if not enabled:
         with lifecycle_audit(None) as command:
             yield command
         return
+    try:
+        caller = _caller_identity()
+        head_sha = _head_sha()
+    except Exception:
+        logger.opt(exception=True).error("lifecycle audit could not identify its caller")
+        with lifecycle_audit(None) as command:
+            yield command
+        return
     with lifecycle_audit(
-        operator_request_recorder(database_factory=database_factory),
-        operator_result_recorder(database_factory=database_factory),
+        operator_request_recorder(
+            database_factory=database_factory, caller=caller, head_sha=head_sha
+        ),
+        operator_result_recorder(
+            database_factory=database_factory, caller=caller, head_sha=head_sha
+        ),
     ) as command:
         yield command
 
@@ -119,7 +141,7 @@ def _agent_id(raw: str | None) -> int | None:
     return int(raw) if raw is not None and raw.isdigit() else None
 
 
-def _caller_identity() -> Mapping[str, Any]:
+def _caller_identity() -> CallerPayload:
     from base.native_process.root_control.client import caller_identity
 
     return caller_identity()
@@ -131,22 +153,23 @@ def _head_sha() -> str | None:
     return prod_source_head_sha()
 
 
-def _record_audit_reported(database: Any, event: Any) -> None:
-    from base.telemetry.audit_events import record_audit_reported
-
-    record_audit_reported(database, event)
-
-
+# meiva:note
+# Record each request of the command that `caller` names, against `head_sha`.
 def operator_request_recorder(
     *,
-    database_factory: Callable[[], Any],
-    caller_identity: Callable[[], Mapping[str, Any]] = _caller_identity,
-    record_audit_reported: Callable[[Any, Any], None] = _record_audit_reported,
-    head_sha: Callable[[], str | None] = _head_sha,
+    database_factory: DatabaseFactory,
+    caller: CallerPayload,
+    head_sha: str | None,
 ) -> RequestRecorder:
     def recorder(verb: str, units: Sequence[str]) -> None:
         try:
-            _record(verb, units, database_factory, caller_identity, record_audit_reported, head_sha)
+            _record(
+                "lifecycle_request",
+                {"verb": verb, "units": list(units), "caller": dict(caller)},
+                database_factory=database_factory,
+                caller=caller,
+                head_sha=head_sha,
+            )
         except Exception:
             logger.opt(exception=True).error(
                 "lifecycle request {verb} could not be recorded", verb=verb
@@ -155,24 +178,27 @@ def operator_request_recorder(
     return recorder
 
 
+# meiva:note
+# Record the outcome of the command that `caller` names, against `head_sha`.
 def operator_result_recorder(
     *,
-    database_factory: Callable[[], Any],
-    caller_identity: Callable[[], Mapping[str, Any]] = _caller_identity,
-    record_audit_reported: Callable[[Any, Any], None] = _record_audit_reported,
-    head_sha: Callable[[], str | None] = _head_sha,
+    database_factory: DatabaseFactory,
+    caller: CallerPayload,
+    head_sha: str | None,
 ) -> ResultRecorder:
     def recorder(verb: str, units: Sequence[str], outcome: Outcome, seconds: float) -> None:
         try:
-            _record_result(
-                verb,
-                units,
-                outcome,
-                seconds,
-                database_factory,
-                caller_identity,
-                record_audit_reported,
-                head_sha,
+            _record(
+                "lifecycle_result",
+                {
+                    "verb": verb,
+                    "units": list(units),
+                    "outcome": outcome,
+                    "seconds": round(seconds, 3),
+                },
+                database_factory=database_factory,
+                caller=caller,
+                head_sha=head_sha,
             )
         except Exception:
             logger.opt(exception=True).error(
@@ -183,57 +209,20 @@ def operator_result_recorder(
 
 
 def _record(
-    verb: str,
-    units: Sequence[str],
-    database_factory: Callable[[], Any],
-    caller_identity: Callable[[], Mapping[str, Any]],
-    record_audit_reported: Callable[[Any, Any], None],
-    head_sha: Callable[[], str | None],
+    event_type: str,
+    fields: Mapping[str, object],
+    *,
+    database_factory: DatabaseFactory,
+    caller: CallerPayload,
+    head_sha: str | None,
 ) -> None:
-    from base.telemetry.audit_events import prepare_event_log
+    from base.telemetry.audit_events import prepare_event_log, record_audit_reported
 
-    caller = caller_identity()
     agent_id = _agent_id(caller["agent_id"])
     event = prepare_event_log(
-        event_type="lifecycle_request",
+        event_type=event_type,
         agent_id=agent_id,
         source=f"agent:{agent_id}" if agent_id is not None else "user",
-        payload={
-            "verb": verb,
-            "units": list(units),
-            "operation_id": caller["operation_id"],
-            "caller": dict(caller),
-            "head_sha": head_sha(),
-        },
-    )
-    record_audit_reported(database_factory(), event)
-
-
-def _record_result(
-    verb: str,
-    units: Sequence[str],
-    outcome: Outcome,
-    seconds: float,
-    database_factory: Callable[[], Any],
-    caller_identity: Callable[[], Mapping[str, Any]],
-    record_audit_reported: Callable[[Any, Any], None],
-    head_sha: Callable[[], str | None],
-) -> None:
-    from base.telemetry.audit_events import prepare_event_log
-
-    caller = caller_identity()
-    agent_id = _agent_id(caller["agent_id"])
-    event = prepare_event_log(
-        event_type="lifecycle_result",
-        agent_id=agent_id,
-        source=f"agent:{agent_id}" if agent_id is not None else "user",
-        payload={
-            "verb": verb,
-            "units": list(units),
-            "outcome": outcome,
-            "seconds": round(seconds, 3),
-            "operation_id": caller["operation_id"],
-            "head_sha": head_sha(),
-        },
+        payload={**fields, "operation_id": caller["operation_id"], "head_sha": head_sha},
     )
     record_audit_reported(database_factory(), event)

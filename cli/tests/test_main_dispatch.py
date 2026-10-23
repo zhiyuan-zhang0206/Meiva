@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import socket
 import subprocess
 import sys
 from collections.abc import Callable
@@ -19,10 +20,10 @@ from typing import cast
 
 import pytest
 
+from base import cluster
 from base.host.env.dotenv_boot import LAUNCHER_PROFILE_ENV_KEY
 from cli import main as _main
 from cli import parsers as _parsers
-from cli import start_identity
 from cli.commands.agents import parsers as _agents
 from cli.commands.extensions.parsers import mcp as _mcp
 from cli.commands.extensions.parsers import plugins as _plugins
@@ -31,6 +32,9 @@ from cli.parsers import cluster as _cluster
 from cli.parsers import host as _host
 from cli.parsers import logs as _logs
 from cli.parsers import pty as _pty
+from cli.start_runtime import HomeSite
+from cli.startup.service_path import CallerHost
+from cli.tests.bootstrap.init_identity import initialized_runner_home
 
 
 def _subparser_children(action: argparse.Action) -> dict[str, argparse.ArgumentParser] | None:
@@ -336,9 +340,14 @@ def test_the_removed_wal_verbs_no_longer_parse(argv: list[str]) -> None:
     assert exited.value.code == 2
 
 
-def test_start_subcommand_forwards_argparse_flags(monkeypatch: pytest.MonkeyPatch) -> None:
-    """`meiva start --only-service gateway ...` reaches _h_start with the parsed
-    argparse Namespace: the service selection is all `start` takes."""
+# meiva:note
+# `meiva start --only-service gateway ...` reaches _h_start with the parsed
+# argparse Namespace: the service selection is all `start` takes. `start` is the one
+# verb with a pre-dispatch side effect (the settings-free installed-home gate); the
+# home here is initialized, so the gate admits it and hands the start its site.
+def test_start_subcommand_forwards_argparse_flags(
+    monkeypatch: pytest.MonkeyPatch, unit_home: Path
+) -> None:
     captured: dict[str, argparse.Namespace] = {}
 
     def _fake(args: argparse.Namespace) -> int:
@@ -346,15 +355,47 @@ def test_start_subcommand_forwards_argparse_flags(monkeypatch: pytest.MonkeyPatc
         return 7
 
     _stub_dispatch(monkeypatch, "start", _fake)
-    monkeypatch.setattr(start_identity, "require_initialized", _ignoring_retention(lambda: None))
-    # `start` is the one verb with a pre-dispatch side effect (the settings-free
-    # installed-home gate), which this test neutralizes — it asserts flag
-    # forwarding, not bring-up behaviour.
+    home = initialized_runner_home(unit_home, unit_home / "checkout")
     rc = _main.main(["start", "--only-service", "gateway", "--only-service", "frontend"])
     assert rc == 7
     ns = captured["args"]
     assert ns.only_service == ["gateway", "frontend"]
     assert ns.disable_service is None and ns.all_services is False
+    assert ns.site.home == home.resolve()
+    assert ns.site.checkout == Path(_main.__file__).resolve().parents[1]
+
+
+# meiva:note
+# `main` is init's composition root: it reads the home, the checkout and the caller's
+# host facts once and hands them over, so `run_init` reads none of them itself.
+def test_init_receives_its_site_and_the_hosts_facts(
+    monkeypatch: pytest.MonkeyPatch, unit_home: Path
+) -> None:
+    captured: dict[str, argparse.Namespace] = {}
+
+    def _fake(args: argparse.Namespace) -> int:
+        captured["args"] = args
+        return 7
+
+    _stub_dispatch(monkeypatch, "init", _fake)
+    assert _main.main(["init", "--machine-name", "probe", "--serve-gateway"]) == 7
+    ns = captured["args"]
+    assert ns.site == HomeSite(unit_home.resolve(), Path(_main.__file__).resolve().parents[1])
+    assert isinstance(ns.caller_host, CallerHost)
+
+
+def test_init_learns_which_fixed_ports_something_already_holds(unit_home: Path) -> None:
+    held = cluster.new_home_ports()["gateway"]
+    args = build_parser().parse_args(["init", "--machine-name", "probe", "--serve-gateway"])
+    with socket.socket() as listener:
+        listener.bind(("127.0.0.1", held))
+        listener.listen()
+        _main.bind_init_inputs(args)
+
+    host = args.caller_host
+    assert host.occupied_ports == frozenset({held})
+    assert host.path == os.environ.get("PATH", "")
+    assert host.service_path == os.environ.get("MEIVA_SERVICE_PATH")
 
 
 def test_init_subcommand_binds_its_handler_and_takes_the_identity_flags() -> None:
@@ -390,14 +431,12 @@ def test_maintenance_verbs_opt_out_of_the_gateway_fetch(
     from base.native_process.root_control import instance_lock
     from base.paths import root_run_dir
 
-    # The no-op parser admits its own home; initialization is exercised by start-gate tests.
-    def admitted(home: Path) -> None:
-        assert home == tmp_path.resolve()
-
-    monkeypatch.setattr(start_identity, "require_initialized", admitted)
+    # meiva:note
+    # The no-op parser dispatches nothing; the home is initialized so the start gate admits it.
+    unit = initialized_runner_home(tmp_path.resolve() / "unit", tmp_path / "checkout")
 
     def dispatch(verb: str) -> dict[str, str]:
-        env = {"PATH": "/usr/bin", "MEIVA_HOME": str(tmp_path)}
+        env = {"PATH": "/usr/bin", "MEIVA_HOME": str(unit)}
         monkeypatch.setattr(_os, "environ", env)
         monkeypatch.setattr(
             _parsers, "build_parser", _ignoring_retention(lambda: _noop_parser(verb))
@@ -410,7 +449,7 @@ def test_maintenance_verbs_opt_out_of_the_gateway_fetch(
 
     # meiva:note
     # Starting and a stop of a running meiva-root both need data-plane configuration.
-    root_lock = instance_lock.acquire_instance_lock(root_run_dir(tmp_path.resolve()))
+    root_lock = instance_lock.acquire_instance_lock(root_run_dir(unit))
     try:
         for verb in ("start", "stop"):
             assert "MEIVA_CONFIG_FETCH" not in dispatch(verb)
@@ -468,6 +507,7 @@ def _owned_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 @pytest.mark.parametrize(
     "argv",
     [
+        ["init", "--machine-name", "probe", "--serve-gateway"],
         ["start", "--all-services"],
         ["stop", "-y"],
         ["restart"],

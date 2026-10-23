@@ -1,0 +1,17 @@
+exports = ["admission.py", "cold_start_plan.py", "gateway_hint.py", "login_link.py", "login_link_plan.py", "migrations.py", "occupied_ports.py", "preflight_findings.py", "readiness_plan.py", "readiness_preflight.py", "stand_down_gate.py", "start_config.py"]
+
+[uses]
+"__init__.py" = ["admission.py", "cold_start_plan.py", "gateway_hint.py", "login_link.py", "migrations.py", "occupied_ports.py", "readiness_plan.py", "stand_down_gate.py", "start_config.py"]
+"login_link.py" = ["login_link_plan.py", "start_config.py"]
+"migrations.py" = ["cold_start_plan.py"]
+"readiness_preflight.py" = ["preflight_findings.py"]
+
+[purity]
+"admission.py" = "strict"
+"cold_start_plan.py" = "strict"
+"gateway_hint.py" = "strict"
+"login_link_plan.py" = "strict"
+"occupied_ports.py" = "strict"
+"preflight_findings.py" = "strict"
+"readiness_plan.py" = "strict"
+"stand_down_gate.py" = "strict"

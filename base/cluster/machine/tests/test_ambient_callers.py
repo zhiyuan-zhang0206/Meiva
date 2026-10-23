@@ -19,8 +19,6 @@ CALLERS: dict[str, tuple[str, int]] = {
     "cli/commands/cluster/control.py": ("C", 5),
     "cli/commands/cluster/health.py": ("C", 1),
     "cli/commands/extensions/memory.py": ("C", 2),
-    "cli/commands/lifecycle/_temporary_stop.py": ("C", 1),
-    "cli/commands/lifecycle/login_link.py": ("C", 1),
     "cli/commands/management/schedules.py": ("C", 2),
     "ops/cluster/rpc.py": ("O", 1),
     "ops/upload_delivery.py": ("O", 1),
