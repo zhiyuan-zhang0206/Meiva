@@ -182,7 +182,7 @@ def test_actor_failure_stays_primary_when_client_cleanup_fails(
 
 
 def test_runpy_script_receives_the_same_entry_builders(
-    db_conn: psycopg.Connection, unit_home: Path, monkeypatch: pytest.MonkeyPatch
+    db_conn: psycopg.Connection, unit_home: Path
 ) -> None:
     sid = _schedule(db_conn)
     marker = unit_home / "borrowed.txt"
@@ -201,11 +201,5 @@ def test_runpy_script_receives_the_same_entry_builders(
     db_conn.execute("UPDATE schedules SET script = %s WHERE id = %s", (script, sid))
     db_conn.commit()
 
-    def plugins(
-        *, config: ConfigBoot, clock_factory: Callable[[], Clock], producer: Callable[[], Any]
-    ) -> None:
-        pass
-
-    monkeypatch.setattr(runner.meiva, "ensure_plugins_loaded", plugins)
     assert runner.run(sid) == 0
     assert marker.read_text() == "borrowed"
