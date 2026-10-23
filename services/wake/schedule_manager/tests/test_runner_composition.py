@@ -1,4 +1,3 @@
-import sys
 import threading
 from collections.abc import Callable
 from pathlib import Path
@@ -80,14 +79,10 @@ def test_plugins_load_under_guard_after_actor_and_history(
     assert db_conn.execute("SELECT ok FROM schedule_runs").fetchall() == [(False,)]
 
 
-def test_main_refuses_on_foreign_checkout(monkeypatch: pytest.MonkeyPatch) -> None:
-    def refuse(_repo: Path) -> str:
-        return "foreign checkout"
-
-    monkeypatch.setattr(sys, "argv", ["schedule_runner", "1"])
-    monkeypatch.setattr(runner, "prod_service_checkout_error", refuse)
+def test_main_refuses_on_foreign_checkout(unit_home: Path) -> None:
+    (unit_home / "source").mkdir()
     with pytest.raises(SystemExit) as caught:
-        runner.main()
+        runner.main(["1"])
     assert caught.value.code == 3
 
 
