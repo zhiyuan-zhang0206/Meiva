@@ -114,6 +114,23 @@ def test_register_macos_writes_plist_but_never_bootstraps(
     assert commands.argvs == []
 
 
+def test_register_macos_prints_the_reload_form_too(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # meiva:note
+    # A loaded job keeps its OLD definition, so `bootstrap` alone is not the remedy.
+    # Measured 2026-10-23: the plist carried nine `--only-service` flags while the loaded
+    # job still ran `meiva start --boot` with none; every attempt exited in argparse and
+    # the machine never published `serving`. The hint must name both forms.
+    host = fake_host(platform=DARWIN_ARM64)
+    autostart.register_macos(services=_SERVICES, host=host)
+    out = capsys.readouterr().out
+    plist = tmp_path / "Library" / "LaunchAgents" / "com.meiva.autostart.plist"
+    assert f"launchctl bootstrap gui/{host.uid} {plist}" in out
+    assert f"launchctl bootout gui/{host.uid}/{plist.stem}" in out
+    assert "OLD definition" in out
+
+
 def test_register_macos_idempotent_no_rewrite(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
