@@ -1,0 +1,9 @@
+[uses]
+"public_gateway.py" = ["child_public_commands.py"]
+"test_agents_cmd.py" = ["public_gateway.py"]
+"test_external_caller_cli.py" = ["public_gateway.py"]
+"test_rpc_result_domains.py" = ["public_gateway.py"]
+"test_schedules_cmd.py" = ["public_gateway.py"]
+
+[debt.first-party-patch]
+"test_schedules_parser.py#monkeypatch.setattr cli.commands.management.schedules.h_schedules_update" = 1

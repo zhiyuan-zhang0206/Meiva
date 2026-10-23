@@ -98,3 +98,9 @@ tags:
 - `meiva trace ship`
 - `meiva lgtm on/off/status`: observability-stack toggle on this host, represented
   by its marker and native lifecycle.
+
+## Public client wire proof
+
+[[cli/docs/operator-surfaces/public-client-wire.meiva.okf.md|Public client wire contracts]]
+own the client test layout, actual gateway profile and HTTP listener, lexical
+resource lifetime, parser/provenance errors and retained native verification.

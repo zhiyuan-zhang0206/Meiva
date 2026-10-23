@@ -45,7 +45,7 @@ and its separate `down`/`up` recovery halves.
 ### Agent & Ops
 
 Agent lifecycle, context reads, local operations, and package-management command
-groups are enumerated in [[cli/docs/operator-surfaces.meiva.okf.md]].
+groups are enumerated in [[cli/docs/operator-surfaces/operator-surfaces.meiva.okf.md]].
 
 Ordinary `meiva start` marks the home serving after readiness. Durable
 agent identity and work survive both stop and restart; live shell sessions survive

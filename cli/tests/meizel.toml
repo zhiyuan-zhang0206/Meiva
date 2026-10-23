@@ -67,7 +67,6 @@ exports = ["bootstrap"]
 "test_plugin_scaffold.py#monkeypatch.setattr base.paths.repo_plugins_dir" = 1
 "test_plugin_scaffold.py#monkeypatch.setattr cli.commands.lifecycle.converge_host.is_default_home" = 1
 "test_pty_commands.py#monkeypatch.setattr base.sessions.pty.allocation_freeze.resume" = 1
-"test_schedules_parser.py#monkeypatch.setattr cli.commands.management.schedules.h_schedules_update" = 1
 "test_start_gate.py#monkeypatch.setattr base.cluster.port_free" = 1
 "test_start_gate.py#monkeypatch.setattr cli.commands.cluster.unit_join.join_gateway" = 1
 "test_start_gate.py#monkeypatch.setattr cli.commands.lifecycle.root_driver.complete_boot_start" = 1
