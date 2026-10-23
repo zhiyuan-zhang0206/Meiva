@@ -30,8 +30,8 @@ filter or `--changed` does not turn that scoped result into a whole-repository j
 | Test resources | Fixture diagnostics recognize configured requests. They do not measure bootstrap cost or authorize a lightweight runner. Explicit [[tests/fixtures/docs/static-environment.meiva.okf.md|static ownership and refusal canaries]] govern that boundary. |
 
 Passing observed values can separate decisions from effects. Injecting a callable makes
-its operation explicit but does not remove its effects. Use the existing `explain` graph
-to trace owners and consumers, then verify observable behavior at the actual boundary.
+its operation explicit but does not remove its effects. Use [[meizel/docs/checker/explain.meiva.okf.md|explain source evidence]] to trace
+owners and bounded observations, then verify behavior at the actual boundary.
 
 ## Three purity modes
 

@@ -5,12 +5,15 @@ from __future__ import annotations
 import ast
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from typing import Literal
 
 from meizel.graph.model import Fact, FactKind
 from meizel.graph.universe import Universe, parent_of
 
 __all__ = [
     "DEFAULT_IMPURE_FIXTURES",
+    "FixtureFunction",
+    "FixtureIndex",
     "FixtureRequest",
     "FixtureState",
     "fixture_facts",
@@ -43,6 +46,17 @@ class FixtureRequest:
     name: str
     line: int
     skip_self: bool = False
+    requester_line: int = 0
+    form: Literal["parameter", "usefixtures", "call", "lookup"] = "parameter"
+
+
+@dataclass(frozen=True, slots=True)
+class FixtureFunction:
+    name: str
+    line: int
+    registered: str | None
+    module_owned: bool
+    parameters_known: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -52,6 +66,7 @@ class FixtureState:
     defs: set[str] = field(default_factory=set[str])
     requests: list[FixtureRequest] = field(default_factory=list[FixtureRequest])
     plugins: list[tuple[str, int]] = field(default_factory=list[tuple[str, int]])
+    functions: list[FixtureFunction] = field(default_factory=list[FixtureFunction])
 
 
 def is_test_file(path: str) -> bool:
@@ -132,6 +147,36 @@ def _requested_names(node: ast.FunctionDef | ast.AsyncFunctionDef, dotted: _Dott
     return [p for p in params[injected:] if p not in excluded]
 
 
+def _literal_registration(node: ast.FunctionDef | ast.AsyncFunctionDef, dotted: _Dotted) -> bool:
+    return all(
+        isinstance(keyword.value, ast.Constant) and isinstance(keyword.value.value, str)
+        for deco in node.decorator_list
+        if isinstance(deco, ast.Call) and dotted(deco.func) in _FIXTURE_DECORATORS
+        for keyword in deco.keywords
+        if keyword.arg == "name"
+    )
+
+
+def _parameters_known(node: ast.FunctionDef | ast.AsyncFunctionDef, dotted: _Dotted) -> bool:
+    for deco in node.decorator_list:
+        if not isinstance(deco, ast.Call) or dotted(deco.func) != _PARAMETRIZE:
+            continue
+        indirect = next((k.value for k in deco.keywords if k.arg == "indirect"), None)
+        if isinstance(indirect, ast.Constant) and indirect.value is True:
+            continue
+        if indirect is not None or not deco.args or not _literal_names(deco.args[0]):
+            return False
+    return True
+
+
+def _literal_names(value: ast.expr) -> bool:
+    if isinstance(value, ast.Constant):
+        return isinstance(value.value, str)
+    return isinstance(value, ast.List | ast.Tuple) and all(
+        isinstance(item, ast.Constant) and isinstance(item.value, str) for item in value.elts
+    )
+
+
 def record_function(
     state: FixtureState,
     node: ast.FunctionDef | ast.AsyncFunctionDef,
@@ -139,6 +184,7 @@ def record_function(
     *,
     test_file: bool,
     top_level: bool,
+    module_owned: bool,
 ) -> None:
     registered = fixture_name(node, dotted)
     if registered is not None:
@@ -146,18 +192,48 @@ def record_function(
     is_test = test_file and top_level and node.name.startswith("test")
     if registered is None and not is_test:
         return
+    state.functions.append(
+        FixtureFunction(
+            node.name,
+            node.lineno,
+            registered,
+            module_owned and _literal_registration(node, dotted),
+            _parameters_known(node, dotted),
+        )
+    )
     for name in _requested_names(node, dotted):
-        state.requests.append(FixtureRequest(name, node.lineno, skip_self=name == registered))
+        state.requests.append(
+            FixtureRequest(
+                name, node.lineno, skip_self=name == registered, requester_line=node.lineno
+            )
+        )
 
 
-def record_call(state: FixtureState, node: ast.Call, callee: str | None) -> None:
+def record_call(
+    state: FixtureState,
+    node: ast.Call,
+    callee: str | None,
+    *,
+    requester: ast.FunctionDef | ast.AsyncFunctionDef | None,
+) -> None:
     """`usefixtures("a")` and `request.getfixturevalue("a")` request by literal name."""
+    owner = requester.lineno if requester is not None else 0
+    marker = requester is not None and any(node is deco for deco in requester.decorator_list)
     if callee == "pytest.mark.usefixtures":
         for name in _string_args(node):
-            state.requests.append(FixtureRequest(name, node.lineno))
+            state.requests.append(
+                FixtureRequest(
+                    name,
+                    node.lineno,
+                    requester_line=owner,
+                    form="usefixtures" if marker else "call",
+                )
+            )
     elif isinstance(node.func, ast.Attribute) and node.func.attr == "getfixturevalue":
         for name in _string_args(node)[:1]:
-            state.requests.append(FixtureRequest(name, node.lineno))
+            state.requests.append(
+                FixtureRequest(name, node.lineno, requester_line=owner, form="lookup")
+            )
 
 
 def plugin_names(value: ast.expr) -> list[str] | None:
@@ -194,6 +270,27 @@ class FixtureIndex:
             found.append(module.file)
             found.extend(self.plugin_files(module.file, seen))
         return found
+
+    def candidates(self, name: str, test_path: str) -> tuple[list[str], frozenset[str]]:
+        visible = [test_path]
+        directory = parent_of(test_path)
+        while True:
+            conftest = f"{directory}/conftest.py" if directory else "conftest.py"
+            if conftest != test_path and conftest in self.defined:
+                visible.append(conftest)
+            if not directory:
+                break
+            directory = parent_of(directory)
+        providers = [path for path in visible if name in self.names(path)]
+        plugins = list(
+            dict.fromkeys(
+                plugin
+                for path in visible
+                for plugin in self.plugin_files(path)
+                if plugin not in visible and name in self.names(plugin)
+            )
+        )
+        return providers + plugins, frozenset(plugins) if len(plugins) > 1 else frozenset()
 
     def definer(self, request: FixtureRequest, src: str) -> str | None:
         """The file pytest takes `request` from; None when local or not first-party."""

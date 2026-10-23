@@ -25,6 +25,7 @@ from meizel.graph.model import (
 from meizel.graph.universe import Universe
 from meizel.language import fixtures, purity, typescript
 from meizel.language.bindings import is_imported_binding, module_bindings, provides
+from meizel.language.input_mutations import InputListAppend, input_list_appends
 from meizel.language.mounts import mount_facts
 from meizel.language.python_commands import PythonCommands
 from meizel.language.restricted import EXTERNAL_FORMS, const_str
@@ -137,6 +138,7 @@ class FileScan:
     imported: set[str] = field(default_factory=set[str])
     purity: list[PurityItem] = field(default_factory=list[PurityItem])
     enum_subsets: list[EnumSubsetUse] = field(default_factory=list[EnumSubsetUse])
+    input_appends: list[InputListAppend] = field(default_factory=list[InputListAppend])
 
 
 class Scanner(PythonCommands):
@@ -146,6 +148,12 @@ class Scanner(PythonCommands):
         self.fixture_state = fixtures.FixtureState()
         self.purity_state = purity.make_state(universe.root)
         self.fn_depth = 0
+        self.fixture_requester: ast.FunctionDef | ast.AsyncFunctionDef | None = None
+        self.input_appends: list[InputListAppend] = []
+        self.star_import = any(
+            isinstance(n, ast.ImportFrom) and any(a.name == "*" for a in n.names)
+            for n in ast.walk(tree)
+        )
         self.patches: list[Patch] = []
         self._handlers: dict[type[ast.AST], Callable[[Any], None]] = {
             ast.Import: self.visit_import,
@@ -180,6 +188,7 @@ class Scanner(PythonCommands):
             imported=self.imported,
             purity=self.purity_state.items,
             enum_subsets=self.purity_state.finalize_subsets(),
+            input_appends=self.input_appends,
         )
 
     def visit_compare(self, node: ast.Compare) -> None:
@@ -238,6 +247,7 @@ class Scanner(PythonCommands):
     # --- scopes --------------------------------------------------------------------
 
     def visit_function(self, node: ast.FunctionDef | ast.AsyncFunctionDef) -> None:
+        previous_requester, self.fixture_requester = self.fixture_requester, node
         args = node.args
         for deco in node.decorator_list:
             self.visit(deco)
@@ -254,6 +264,7 @@ class Scanner(PythonCommands):
             self.dotted,
             test_file=self.test_file,
             top_level=self.fn_depth == 0,
+            module_owned=self.fn_depth == 0 and self.scope.parent is None,
         )
         purity.record_function(
             self.purity_state,
@@ -262,19 +273,35 @@ class Scanner(PythonCommands):
         )
         parent = self.scope.parent if self.scope.is_class else self.scope
         inner = Scope(parent)
-        inner.shadowed.update(parameter_names(args))
         collect_scope(inner, node.body, self.package, walrus=self.walrus)
+        self.observe_input_parameters(node, inner)
+        inner.shadowed.update(parameter_names(args))
         self.fn_depth += 1
         self.enter(inner, node.body)
         self.fn_depth -= 1
+        self.fixture_requester = previous_requester
+
+    def observe_input_parameters(
+        self, node: ast.FunctionDef | ast.AsyncFunctionDef, inner: Scope
+    ) -> None:
+        if self.fn_depth == 0 and self.scope.parent is None:
+            self.input_appends.extend(
+                input_list_appends(
+                    node,
+                    inner,
+                    builtin_list=not self.star_import and self.scope.find("list") == (None, False),
+                )
+            )
 
     def visit_class_def(self, node: ast.ClassDef) -> None:
+        previous_requester, self.fixture_requester = self.fixture_requester, None
         for outer in (*node.decorator_list, *node.bases, *node.keywords):
             self.visit(outer)
         purity.record_class(self.purity_state, node, self.dotted)
         inner = Scope(self.scope, is_class=True)
         collect_scope(inner, node.body, self.package, walrus=self.walrus)
         self.enter(inner, node.body)
+        self.fixture_requester = previous_requester
 
     def enter(self, inner: Scope, body: list[ast.stmt]) -> None:
         outer, self.scope = self.scope, inner
@@ -428,7 +455,7 @@ class Scanner(PythonCommands):
         elif self.is_shell_call(callee):
             self.shell_call(node)
         self.spawn_call(callee, node)
-        fixtures.record_call(self.fixture_state, node, callee)
+        fixtures.record_call(self.fixture_state, node, callee, requester=self.fixture_requester)
         unshadowed_open = (
             isinstance(node.func, ast.Name)
             and node.func.id == "open"

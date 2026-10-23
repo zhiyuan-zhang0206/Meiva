@@ -14,7 +14,7 @@ exports = ["fixtures.py", "no_script_sibling_imports.py", "path_imports.py", "sc
 "path_imports.py" = ["type_checking.py"]
 "purity.py" = ["purity_structure.py"]
 "python_commands.py" = ["restricted.py"]
-"scan.py" = ["bindings.py", "fixtures.py", "mounts.py", "purity.py", "python_commands.py", "restricted.py", "typescript.py"]
+"scan.py" = ["bindings.py", "input_mutations.py", "fixtures.py", "mounts.py", "purity.py", "python_commands.py", "restricted.py", "typescript.py"]
 "tests" = ["no_script_sibling_imports.py", "path_imports.py", "typescript.py"]
 "typescript.py" = ["fixtures.py"]
 
