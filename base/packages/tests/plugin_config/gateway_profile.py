@@ -1,16 +1,17 @@
 # meiva:link base/packages/plugins/docs/plugin-config/plugin-config.meiva.okf.md
 import os
-import subprocess
 import sys
 from pathlib import Path
 from typing import Literal
+
+from base.host.proc import run_bounded
 
 
 # meiva:note
 # The fixed source module boots a real gateway profile in a private home.
 # The only argument selects one of its two validation contracts.
 def run_gateway_profile(*, home: Path, case: Literal["declaring-model", "validators"]) -> None:
-    result = subprocess.run(  # noqa: S603
+    result = run_bounded(
         [
             sys.executable,
             "-I",
@@ -27,6 +28,5 @@ def run_gateway_profile(*, home: Path, case: Literal["declaring-model", "validat
         capture_output=True,
         text=True,
         timeout=30,
-        check=False,
     )
     assert result.returncode == 0, result.stdout + result.stderr
