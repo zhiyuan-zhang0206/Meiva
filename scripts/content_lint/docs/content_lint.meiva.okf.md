@@ -36,6 +36,10 @@ skill-reference boundaries. Its command options come from the loaded CLI unless
 the caller supplies an explicit `commands` map. Each scan reads a fresh node
 universe so another checkout or an updated Git index cannot reuse stale nodes.
 
+Document scans retain the selected checkout's lexical path when making it absolute.
+Resolving symlinks would detach explicit documents from an aliased checkout and
+would erase the `.agents` path that identifies skill reference checks.
+
 ## `lint_skill_md_size.py`
 
 SKILL.md files are loaded into agent context; a file that grows too large spends
