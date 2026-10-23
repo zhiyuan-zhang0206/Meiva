@@ -1,50 +1,19 @@
-"""Cluster RPC — gateway -> agent-runner direct request/response.
-
-The gateway runs a cluster op on a remote agent-runner by POSTing to that
-host's meiva-ops server (`services/agent_runner/agent_ops`). The host's reachable address is
-read from the `machines` table (each host registers its ops URL at `meiva start`).
-One synchronous round-trip with bounded retry; no queue, no SSE — the cluster's
-private network makes every node mutually dialable, so a control op is a single
-HTTP call.
-
-  dispatch_to_machine(target_machine, kind, payload, ...) -> result dict
-      POST {ops_url}/ops {"kind", "payload", "idempotency_key"?} -> {"status", "result"}.
-      Returns result on status=="completed"; raises ClusterOpFailed on
-      status=="failed", ClusterOpUnreachable on connect/timeout/non-200, and
-      its subclass ClusterOpTargetAbsent when the machine row itself is gone
-      (a definitive, non-retryable absence).
-
-  Retry policy: transient infrastructure failures (transport errors, 5xx)
-  retry with bounded exponential backoff + jitter (see `retry_delay_s`).
-  Business failures (status=="failed") and deterministic rejections (4xx,
-  malformed body, unknown machine) never retry. An op whose effect is NOT
-  repeatable — lifecycle terminate/restart (a second
-  run inserts a second inbound) — is safe to retry only because this module
-  attaches an idempotency key to the envelope: the ops server dedupes by key
-  and replays the first run's stored outcome instead of re-executing, so a
-  lost response cannot duplicate the effect (see
-  `services/agent_runner/agent_ops/daemon.py:dispatch_idempotent`). A spawn-launch payload
-  business id gives a target-scoped, canonical-payload key for cross-call
-  dedup; every other automatic key is fresh unless its caller supplies one.
-
-The agent-runner side that serves /ops lives in `services/agent_runner/agent_ops/daemon.py`.
-"""
-
 from __future__ import annotations
 
-import asyncio
 import hashlib
 import json
 import logging
 import random
-import time
 import uuid
-from typing import Any
+from collections.abc import Callable
+from dataclasses import dataclass
+from typing import Any, Protocol, Self
 
 import httpx
 from pydantic import ValidationError
 
-from base.cluster.machine import gateway_auth_headers
+from base.clock import SYSTEM_TIMERS, Timers
+from base.cluster.machine import GatewayAccess, gateway_auth_headers
 from base.cluster.machine.ambient import gateway_access_from_settings
 from base.cluster.machines import (
     MachineGatewayUrlMissing,
@@ -67,68 +36,34 @@ __all__ = [
 
 _log = logging.getLogger(__name__)
 
-# ── Retry policy ─────────────────────────────────────────────────────────────
-# A dispatch is one synchronous round-trip over the cluster's private network.
-# Load-bearing ops retry on transient infrastructure failures with bounded
-# exponential backoff + jitter.
-# Two bounds keep the retry cheap:
-#   * `retries` caps the extra attempts (default MEIVA_CLUSTER_RPC_MAX_RETRIES,
-#     3 -> 4 attempts total; worst-case wall for a blackholed host ~4x
-#     timeout_s, which latency-critical callers already shorten per-op);
-#   * the per-attempt delay is capped (_RETRY_MAX_DELAY_S) and jittered ±50% so
-#     a fan-out whose targets all failed together (a rollout pausing N runners
-#     at once) does not re-dial them in lockstep.
 _RETRY_BASE_DELAY_S = 0.5
 _RETRY_MAX_DELAY_S = 4.0
 
-# Ops that retain transport dedupe. Launch publishes a repeatable wake
-# and replays one recorded outcome within an attempt. Lifecycle ops have non-repeatable effects.
-# These are retried only under an idempotency key generated once per dispatch call unless
-# the caller supplies one; retries replay the first stored outcome.
 NON_IDEMPOTENT_KINDS = frozenset(
     {
         "spawn-launch",
         "lifecycle",
     }
 )
-# A stable cross-dispatch key is only safe for an agent launch: a caller
-# repeating a lifecycle reconciliation needs the runner to
-# execute again rather than replay a stale failed outcome.
 _BUSINESS_ID_KEYS = {"spawn-launch": "agent_id"}
 
-# Module-level alias so tests can pin the retry sleep without patching asyncio.
-rpc_sleep = asyncio.sleep
 
-
-def retry_delay_s(attempt: int) -> float:
-    """Bounded exponential backoff for retry `attempt` (0-based), jittered ±50%.
-
-    base = min(0.5 * 2**attempt, 4.0) seconds — 0.5, 1, 2, then capped at 4.
-    The ±50% jitter de-synchronizes a fan-out whose targets failed together
-    (without it, a rollout pausing N runners would re-dial all N in lockstep
-    and the retries would land as a synchronized burst).
-    """
+def retry_delay_s(attempt: int, *, uniform: Callable[[float, float], float]) -> float:
     base = min(_RETRY_BASE_DELAY_S * (2**attempt), _RETRY_MAX_DELAY_S)
-    # S311: jitter needs spread, not secrecy — stdlib random is right (same
-    # ruling as base/lm/call.py's retry jitter).
-    return base * random.uniform(0.5, 1.5)  # noqa: S311
+    return base * uniform(0.5, 1.5)
 
 
 def worst_case_dispatch_seconds(timeout_s: float | None = None) -> float:
-    """Longest one `dispatch_to_machine` call can take with the default retry
-    budget: every attempt runs to its timeout (`timeout_s`, default the cluster
-    RPC timeout) and every backoff sleeps its jittered maximum. Callers that put
-    an overall deadline around a dispatch size it from this."""
-    retries = max(settings.gateway.cluster_rpc_max_retries, 0)
+    config = rpc_config_from_settings()
+    retries = max(config.max_retries, 0)
     backoff = sum(
         min(_RETRY_BASE_DELAY_S * (2**attempt), _RETRY_MAX_DELAY_S) for attempt in range(retries)
     )
-    attempt_s = settings.gateway.cluster_rpc_timeout_seconds if timeout_s is None else timeout_s
+    attempt_s = config.timeout_seconds if timeout_s is None else timeout_s
     return (retries + 1) * attempt_s + backoff * 1.5
 
 
 def default_idempotency_key(target_machine: str, kind: OpKind, payload: dict[str, Any]) -> str:
-    """Return a target-scoped stable key when the op names its business id."""
     business_id_key = _BUSINESS_ID_KEYS.get(kind)
     business_id = payload.get(business_id_key) if business_id_key is not None else None
     if business_id is None:
@@ -138,148 +73,196 @@ def default_idempotency_key(target_machine: str, kind: OpKind, payload: dict[str
     return f"{kind}:{target_machine}:{business_id}:{fingerprint}"
 
 
-class _RetryableFailure(Exception):  # noqa: N818 — internal retry signal, not a caller-facing error class
-    """One dispatch attempt failed for a transient infrastructure reason
-    (transport error / 5xx) — the bounded backoff loop in `dispatch_to_machine`
-    retries it. Internal to this module; never escapes to callers (the loop
-    converts the last failure into `ClusterOpUnreachable`)."""
-
+# meiva:link ops/docs/ops-module.md
+class _RetryableFailure(Exception):  # noqa: N818
     def __init__(self, cause: Exception, *, url: str) -> None:
         super().__init__(f"{url}: {cause!r}")
         self.cause = cause
         self.url = url
 
 
-class ClusterOpUnreachable(RuntimeError):  # noqa: N818 — state description; same style as TimeoutError
-    """The target agent-runner's ops server could not be reached or did not respond.
-
-    Covers a connect/read timeout, a non-200 status from /ops (after retries,
-    for transient statuses), a malformed response body, and a machines row
-    that advertises no address (``gateway_url`` NULL). A machines row that
-    does not exist at all is the sharper subclass ``ClusterOpTargetAbsent``.
-    Distinct from ClusterOpFailed (a reached host whose op raised a business
-    error).
-    """
+# meiva:link ops/docs/ops-module.md
+class ClusterOpUnreachable(RuntimeError):  # noqa: N818
+    pass
 
 
 class ClusterOpTargetAbsent(ClusterOpUnreachable):
-    """The target machine has no row in the machines registry.
-
-    Either it was never registered under this name, or its row was deleted
-    (decommission / rename cleanup). Agent-facing state can only name a
-    machine that was registered when it was created — spawns validate the
-    target — so an absent row means the machine is gone from this cluster's
-    view, and a machine that re-registers later is a fresh member (nothing
-    bound to the old name survives on it). Absence is therefore a *definitive*
-    verdict, not a transport hiccup: a dial skipped here cannot succeed later
-    under the same name, so a consumer that owns terminal-state cleanup (the
-    TTL reapers) may terminalize the state it was about to dial instead of
-    deferring it forever.
-
-    A ``ClusterOpUnreachable`` subclass on purpose: every existing handler
-    keeps its transport-level behavior unchanged, and only a consumer that
-    branches on this exact type changes what it does.
-    """
+    pass
 
 
-class ClusterOpFailed(RuntimeError):  # noqa: N818 — semantic predicate, not an error class
-    """The target agent-runner reached its op but the op reported failure.
-
-    `result` carries the failure payload ({"error", optionally "detail" +
-    "reason"}); the caller re-emits the original wire exception from it.
-    """
-
+# meiva:link ops/docs/ops-module.md
+class ClusterOpFailed(RuntimeError):  # noqa: N818
     def __init__(self, result: dict[str, Any]) -> None:
         super().__init__(f"cluster op failed: {result}")
         self.result = result
 
 
-async def _dispatch_once(
-    target_machine: str,
-    kind: str,
-    payload: dict[str, Any],
-    *,
-    timeout_s: float,
-    ops_url: str,
-    idempotency_key: str | None,
-) -> dict[str, Any]:
-    """One POST round-trip to `{ops_url}/ops`; returns the op's result dict.
+@dataclass(frozen=True)
+class RpcConfig:
+    timeout_seconds: float
+    max_retries: int
 
-    Raises:
-        ClusterOpUnreachable: terminal conditions — the host has no advertised
-            address (handled by the caller), a non-5xx non-200 status, or a
-            malformed response body (version skew).
-        ClusterOpFailed: the host ran the op but it reported `status=failed`.
-        _RetryableFailure: transient infrastructure failure (transport error /
-            timeout, or a 5xx status) — safe to retry; the caller's loop owns
-            the retry budget.
-    """
-    url = f"{ops_url.rstrip('/')}/ops"
-    started = time.monotonic()
-    access = gateway_access_from_settings()  # ambient: O
-    try:
-        # connect is capped by timeout_s: a blackholed host (powered-off private-
-        # network peer) hangs in connect, so a connect floor above timeout_s would defeat
-        # short probe timeouts like the roster's 3s probe.
-        # Present the gateway's machine API token so the runner's authenticated
-        # /ops accepts the dial (a runner holds only its digest, never the human
-        # secret).
-        headers = gateway_auth_headers(access)
-        # Cluster-internal dials must never honor the host's system/env proxy:
-        # private peers are not proxy-routable. This matches base/host/net/http_dial.py's
-        # PinnedIPv4Transport, which is sync-only; async httpx already handles
-        # IPv4-literal hosts natively.
-        async with httpx.AsyncClient(
-            timeout=httpx.Timeout(timeout_s, connect=min(10.0, timeout_s)),
-            trust_env=False,
-        ) as client:
-            resp = await client.post(
-                url,
-                # exclude_none: an idempotent op's envelope carries no
-                # idempotency_key field at all.
-                json=OpEnvelope(
-                    kind=kind, payload=payload, idempotency_key=idempotency_key
-                ).model_dump(exclude_none=True),
-                headers=headers,
-            )
-    except httpx.HTTPError as exc:
-        raise _RetryableFailure(exc, url=url) from exc
 
-    _log.info(
-        "cluster_rpc %s -> machine=%s responded %d in %.1fs",
-        kind,
-        target_machine,
-        resp.status_code,
-        time.monotonic() - started,
+def rpc_config_from_settings() -> RpcConfig:
+    return RpcConfig(
+        timeout_seconds=settings.gateway.cluster_rpc_timeout_seconds,
+        max_retries=settings.gateway.cluster_rpc_max_retries,
     )
-    if resp.status_code != 200:
-        if 500 <= resp.status_code < 600:
-            # Server-side transient (ops server mid-restart, a proxy hiccup) —
-            # retried by the backoff loop. Every other non-200 (400 malformed
-            # body, 401 auth, 404 wrong path) is deterministic and fails fast.
-            try:
-                resp.raise_for_status()
-            except httpx.HTTPStatusError as exc:
-                raise _RetryableFailure(exc, url=url) from exc
-        raise ClusterOpUnreachable(
-            f"ops server for machine={target_machine!r} returned {resp.status_code} at {url}: "
-            f"{resp.text[:200]}"
+
+
+class AsyncClientFactory(Protocol):
+    def __call__(self, *, timeout: httpx.Timeout, trust_env: bool) -> httpx.AsyncClient: ...
+
+
+class GatewayAccessFactory(Protocol):
+    def __call__(self) -> GatewayAccess: ...
+
+
+@dataclass(frozen=True)
+class RpcClient:
+    config: RpcConfig
+    access: GatewayAccessFactory
+    timers: Timers
+    clients: AsyncClientFactory
+    uniform: Callable[[float, float], float]
+
+    @classmethod
+    def system(cls) -> Self:
+        def access() -> GatewayAccess:
+            return gateway_access_from_settings()  # ambient: O
+
+        return cls(
+            config=rpc_config_from_settings(),
+            access=access,
+            timers=SYSTEM_TIMERS,
+            clients=httpx.AsyncClient,
+            uniform=random.uniform,
         )
 
-    # The wire contract is exactly {status in {completed, failed}, result}; a
-    # malformed body or an unknown status (version skew / wrong server) fails the
-    # OpResponse validation and is surfaced as unreachable rather than returning a
-    # garbage `result` as if the op succeeded.
-    try:
-        envelope = OpResponse.model_validate(resp.json())
-    except ValidationError as exc:
+    async def _dispatch_once(
+        self,
+        target_machine: str,
+        kind: str,
+        payload: dict[str, Any],
+        *,
+        timeout_s: float,
+        ops_url: str,
+        idempotency_key: str | None,
+    ) -> dict[str, Any]:
+        url = f"{ops_url.rstrip('/')}/ops"
+        started = self.timers.monotonic()
+        access = self.access()
+        try:
+            headers = gateway_auth_headers(access)
+            async with self.clients(
+                timeout=httpx.Timeout(timeout_s, connect=min(10.0, timeout_s)),
+                trust_env=False,
+            ) as client:
+                resp = await client.post(
+                    url,
+                    json=OpEnvelope(
+                        kind=kind, payload=payload, idempotency_key=idempotency_key
+                    ).model_dump(exclude_none=True),
+                    headers=headers,
+                )
+        except httpx.HTTPError as exc:
+            raise _RetryableFailure(exc, url=url) from exc
+
+        _log.info(
+            "cluster_rpc %s -> machine=%s responded %d in %.1fs",
+            kind,
+            target_machine,
+            resp.status_code,
+            self.timers.monotonic() - started,
+        )
+        if resp.status_code != 200:
+            if 500 <= resp.status_code < 600:
+                try:
+                    resp.raise_for_status()
+                except httpx.HTTPStatusError as exc:
+                    raise _RetryableFailure(exc, url=url) from exc
+            raise ClusterOpUnreachable(
+                f"ops server for machine={target_machine!r} returned {resp.status_code} at {url}: "
+                f"{resp.text[:200]}"
+            )
+
+        try:
+            envelope = OpResponse.model_validate(resp.json())
+        except ValidationError as exc:
+            raise ClusterOpUnreachable(
+                f"ops server for machine={target_machine!r} returned a malformed response at {url}: "
+                f"{resp.text[:200]}"
+            ) from exc
+        if envelope.status is OpStatus.COMPLETED:
+            return envelope.result
+        raise ClusterOpFailed(envelope.result)
+
+    async def dispatch_to_url(
+        self,
+        target_machine: str,
+        kind: str,
+        payload: dict[str, Any],
+        *,
+        ops_url: str,
+        timeout_s: float | None = None,
+        retries: int | None = None,
+        idempotency_key: str | None = None,
+    ) -> dict[str, Any]:
+        if not is_op_kind(kind):
+            raise ValueError(f"unknown op kind: {kind!r}")
+        if timeout_s is None:
+            timeout_s = self.config.timeout_seconds
+
+        if kind in NON_IDEMPOTENT_KINDS and idempotency_key is None:
+            idempotency_key = default_idempotency_key(target_machine, kind, payload)
+        if retries is None:
+            retries = self.config.max_retries
+        retries = max(retries, 0)
+
+        started = self.timers.monotonic()
+        last: _RetryableFailure | None = None
+        for attempt in range(retries + 1):
+            try:
+                return await self._dispatch_once(
+                    target_machine,
+                    kind,
+                    payload,
+                    timeout_s=timeout_s,
+                    ops_url=ops_url,
+                    idempotency_key=idempotency_key,
+                )
+            except _RetryableFailure as exc:
+                last = exc
+                if attempt < retries:
+                    delay = retry_delay_s(attempt, uniform=self.uniform)
+                    _log.debug(
+                        "cluster_rpc %s -> machine=%s attempt %d/%d failed, retrying in %.1fs: %r",
+                        kind,
+                        target_machine,
+                        attempt + 1,
+                        retries + 1,
+                        delay,
+                        exc.cause,
+                    )
+                    await self.timers.asleep(delay)
+        if last is None:
+            raise RuntimeError(
+                f"cluster_rpc retry loop exhausted without recording a failure "
+                f"(machine={target_machine!r}, kind={kind!r})"
+            )
+        log = _log.debug if kind == "status_probe" else _log.warning
+        log(
+            "cluster_rpc %s -> machine=%s unreachable after %d attempt(s) (%.1fs): %r",
+            kind,
+            target_machine,
+            retries + 1,
+            self.timers.monotonic() - started,
+            last.cause,
+        )
         raise ClusterOpUnreachable(
-            f"ops server for machine={target_machine!r} returned a malformed response at {url}: "
-            f"{resp.text[:200]}"
-        ) from exc
-    if envelope.status is OpStatus.COMPLETED:
-        return envelope.result
-    raise ClusterOpFailed(envelope.result)
+            f"ops server for machine={target_machine!r} unreachable at {last.url} "
+            f"after {retries + 1} attempt(s): {last.cause!r}"
+        ) from last.cause
 
 
 async def dispatch_to_machine(
@@ -292,22 +275,11 @@ async def dispatch_to_machine(
     retries: int | None = None,
     idempotency_key: str | None = None,
 ) -> dict[str, Any]:
-    """Resolve `target_machine`'s ops URL from the `machines` table, then `dispatch_to_url`.
-
-    Raises:
-        ClusterOpTargetAbsent: no machines row exists for the target (a definitive absence --
-            see the exception's docstring). A subclass of `ClusterOpUnreachable`.
-        ClusterOpUnreachable: the host has no advertised address, or see `dispatch_to_url`.
-    """
     if not is_op_kind(kind):
         raise ValueError(f"unknown op kind: {kind!r}")
     try:
         ops_url = lookup_machine_url(db, target_machine)
     except MachineNotRegistered as exc:
-        # No machines row at all — the machine is definitively absent under
-        # this name (deleted in a decommission / rename cleanup). Callers
-        # that own terminal-state cleanup branch on this exact type; the
-        # rest keep their ClusterOpUnreachable behavior (this is one).
         raise ClusterOpTargetAbsent(
             f"machine={target_machine!r} is absent from the machines registry "
             f"(cannot resolve an address): {exc}"
@@ -337,101 +309,14 @@ async def dispatch_to_url(
     retries: int | None = None,
     idempotency_key: str | None = None,
 ) -> dict[str, Any]:
-    """POST one op to `target_machine`'s ops server at `ops_url`, block on the response.
-
-    POSTs `{kind, payload}` to `{ops_url}/ops` and returns the op's result dict,
-    retrying transient infrastructure failures (transport errors / timeouts and
-    5xx statuses) with bounded exponential backoff + jitter (`retry_delay_s`).
-    `retries` caps the extra attempts (default
-    `settings.gateway.cluster_rpc_max_retries` / MEIVA_CLUSTER_RPC_MAX_RETRIES);
-    pass 0 for a fail-fast single attempt (e.g. latency-critical status probes,
-    which carry their own per-machine backoff). Business failures
-    (status=failed), 4xx statuses, malformed responses and an unresolvable
-    machines row never retry.
-
-    Non-idempotent kinds (`spawn`, `lifecycle`) are retried
-    under an idempotency key. A payload business id gets a target-scoped,
-    canonical-payload key, while an op without one gets a fresh UUID unless the
-    caller passes `idempotency_key`. The ops server dedupes by key, so a retry
-    after a lost response replays the first run's stored outcome instead of
-    re-executing and duplicating the effect.
-
-    `timeout_s` defaults to `settings.gateway.cluster_rpc_timeout_seconds`
-    (MEIVA_CLUSTER_RPC_TIMEOUT_SECONDS) when omitted. It bounds each attempt.
-
-    `ops_url` is the host's ops base URL, already resolved. A caller that must dial while
-    Postgres may be down (the compensating `cluster/resume` of a failed fleet update, the
-    roster's per-machine probe) resolves it earlier and calls this directly; otherwise
-    `dispatch_to_machine` resolves it from the `machines` table.
-
-    Raises:
-        ClusterOpUnreachable: the POST hit a connect/read timeout or non-200
-            status (after retries for transient statuses).
-        ClusterOpFailed: the host ran the op but it reported `status=failed`.
-    """
     if not is_op_kind(kind):
         raise ValueError(f"unknown op kind: {kind!r}")
-    if timeout_s is None:
-        timeout_s = settings.gateway.cluster_rpc_timeout_seconds
-
-    # A business id makes the key stable across separate dispatch calls too,
-    # scoped to its target and full effect payload: re-sending a launch for the
-    # same already-created agent must replay, not start a second child.
-    # Operations without one retain a fresh UUID.
-    if kind in NON_IDEMPOTENT_KINDS and idempotency_key is None:
-        idempotency_key = default_idempotency_key(target_machine, kind, payload)
-    if retries is None:
-        retries = settings.gateway.cluster_rpc_max_retries
-    retries = max(retries, 0)  # a negative budget means "no attempts" — never
-
-    started = time.monotonic()
-    last: _RetryableFailure | None = None
-    for attempt in range(retries + 1):
-        try:
-            return await _dispatch_once(
-                target_machine,
-                kind,
-                payload,
-                timeout_s=timeout_s,
-                ops_url=ops_url,
-                idempotency_key=idempotency_key,
-            )
-        except _RetryableFailure as exc:
-            last = exc
-            if attempt < retries:
-                delay = retry_delay_s(attempt)
-                # Intermediate transport retries stay quiet; exhaustion is reported below.
-                _log.debug(
-                    "cluster_rpc %s -> machine=%s attempt %d/%d failed, retrying in %.1fs: %r",
-                    kind,
-                    target_machine,
-                    attempt + 1,
-                    retries + 1,
-                    delay,
-                    exc.cause,
-                )
-                await rpc_sleep(delay)
-    # Retries exhausted — loud failure for a load-bearing op. status_probe
-    # reachability failures stay DEBUG (an offline host at panel cadence is
-    # steady-state; the roster's own per-machine backoff widens the gap), every
-    # other kind is operator-initiated so its exhausted retry stays a WARNING.
-    # `last` is guaranteed set: the loop runs at least once (retries >= 0 is
-    # enforced above) and every attempt either returns or raises.
-    if last is None:  # pragma: no cover — unreachable by the loop invariant
-        raise RuntimeError(
-            f"cluster_rpc retry loop exhausted without recording a failure "
-            f"(machine={target_machine!r}, kind={kind!r})"
-        )
-    log = _log.debug if kind == "status_probe" else _log.warning
-    log(
-        "cluster_rpc %s -> machine=%s unreachable after %d attempt(s) (%.1fs): %r",
-        kind,
+    return await RpcClient.system().dispatch_to_url(
         target_machine,
-        retries + 1,
-        time.monotonic() - started,
-        last.cause,
+        kind,
+        payload,
+        ops_url=ops_url,
+        timeout_s=timeout_s,
+        retries=retries,
+        idempotency_key=idempotency_key,
     )
-    raise ClusterOpUnreachable(
-        f"ops server for machine={target_machine!r} unreachable at {last.url} "
-        f"after {retries + 1} attempt(s): {last.cause!r}"
-    ) from last.cause
