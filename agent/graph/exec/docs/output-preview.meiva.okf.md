@@ -90,6 +90,16 @@ to the envelope, which names only a **surviving output** archive and states the
 dropped middle is unrecoverable. Soft previews are disabled for such results;
 they never call an already incomplete archive the full output.
 
+## Test scenarios
+
+Output tests use the isolated unit home and inspect the real
+`workspaces/<agent_id>/.exec_output` directory. The hard-ring case writes more
+than the production 20-file capacity and checks that exact limit. Crop cases
+construct their own configuration values from the shared fixture; they do not
+replace the formatter's path lookup or mutate a shared scenario setting. Storage
+failure cases retain their explicit failing filesystem operations and assert
+that the original output survives without a false recovery path.
+
 ## Dependencies
 
 - [[agent/graph/exec/docs/exec.meiva.okf.md]] — native exec lifecycle and result dispatch

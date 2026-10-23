@@ -1,3 +1,4 @@
+from dataclasses import replace
 from pathlib import Path
 from typing import IO, Any
 
@@ -10,14 +11,8 @@ from base.clock import Clock
 
 
 @pytest.fixture
-def archive_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    directory = tmp_path / ".exec_output"
-
-    def overflow_dir(_agent_id: int) -> Path:
-        return directory
-
-    monkeypatch.setattr(output, "overflow_dir", overflow_dir)
-    return directory
+def archive_dir(unit_home: Path) -> Path:
+    return unit_home / "workspaces" / "7" / ".exec_output"
 
 
 def _output(count: int = 340, repeats: int = 9) -> str:
@@ -81,12 +76,11 @@ def test_context_reference_survives_legacy_ring_churn(
 
 def test_referenced_archive_is_kept_when_budget_is_full(
     archive_dir: Path,
-    monkeypatch: pytest.MonkeyPatch,
     crop_config: CropConfig,
     output_clock: Clock,
 ):
     body = _output()
-    monkeypatch.setattr(crop_config, "exec_output_crop_archive_max_bytes", len(body.encode()))
+    crop_config = replace(crop_config, exec_output_crop_archive_max_bytes=len(body.encode()))
     first = output.wrap_code_output(
         body,
         agent_id=7,
@@ -115,12 +109,11 @@ def test_referenced_archive_is_kept_when_budget_is_full(
 
 def test_unreferenced_archive_is_evicted_under_byte_budget(
     archive_dir: Path,
-    monkeypatch: pytest.MonkeyPatch,
     crop_config: CropConfig,
     output_clock: Clock,
 ):
     body = _output()
-    monkeypatch.setattr(crop_config, "exec_output_crop_archive_max_bytes", len(body.encode()))
+    crop_config = replace(crop_config, exec_output_crop_archive_max_bytes=len(body.encode()))
     output.wrap_code_output(
         body,
         agent_id=7,
@@ -150,12 +143,11 @@ def test_unreferenced_archive_is_evicted_under_byte_budget(
 
 def test_execute_code_argument_reference_protects_archive(
     archive_dir: Path,
-    monkeypatch: pytest.MonkeyPatch,
     crop_config: CropConfig,
     output_clock: Clock,
 ):
     body = _output()
-    monkeypatch.setattr(crop_config, "exec_output_crop_archive_max_bytes", len(body.encode()))
+    crop_config = replace(crop_config, exec_output_crop_archive_max_bytes=len(body.encode()))
     output.wrap_code_output(
         body,
         agent_id=7,
@@ -193,13 +185,12 @@ def test_execute_code_argument_reference_protects_archive(
 @pytest.mark.parametrize("kind", ["thinking", "reasoning", "provider_reasoning"])
 def test_reasoning_reference_protects_archive(
     archive_dir: Path,
-    monkeypatch: pytest.MonkeyPatch,
     kind: str,
     crop_config: CropConfig,
     output_clock: Clock,
 ):
     body = _output()
-    monkeypatch.setattr(crop_config, "exec_output_crop_archive_max_bytes", len(body.encode()))
+    crop_config = replace(crop_config, exec_output_crop_archive_max_bytes=len(body.encode()))
     output.wrap_code_output(
         body,
         agent_id=7,
@@ -322,11 +313,10 @@ def test_byte_trigger_crops_multibyte_text_below_char_and_line_triggers(
 
 def test_zero_threshold_disables_soft_crop_only(
     archive_dir: Path,
-    monkeypatch: pytest.MonkeyPatch,
     crop_config: CropConfig,
     output_clock: Clock,
 ):
-    monkeypatch.setattr(crop_config, "exec_output_crop_after_lines", 0)
+    crop_config = replace(crop_config, exec_output_crop_after_lines=0)
     assert (
         _output()
         in output.wrap_code_output(
@@ -373,12 +363,11 @@ def test_newline_spelling_and_unterminated_tail_survive(
 
 def test_budget_counts_utf8_bytes(
     archive_dir: Path,
-    monkeypatch: pytest.MonkeyPatch,
     crop_config: CropConfig,
     output_clock: Clock,
 ):
     body = _output().replace("content", "\u6d4b\u8bd5\u8f93\u51fa\u7ed3\u679c")
-    monkeypatch.setattr(crop_config, "exec_output_crop_archive_max_bytes", len(body))
+    crop_config = replace(crop_config, exec_output_crop_archive_max_bytes=len(body))
     assert (
         body
         in output.wrap_code_output(
@@ -426,13 +415,15 @@ def test_archive_write_failure_keeps_body_without_false_recovery_path(
 
 def test_head_tail_counts_are_independent_of_trigger(
     archive_dir: Path,
-    monkeypatch: pytest.MonkeyPatch,
     crop_config: CropConfig,
     output_clock: Clock,
 ):
-    monkeypatch.setattr(crop_config, "exec_output_crop_after_lines", 130)
-    monkeypatch.setattr(crop_config, "exec_output_crop_head_lines", 3)
-    monkeypatch.setattr(crop_config, "exec_output_crop_tail_lines", 2)
+    crop_config = replace(
+        crop_config,
+        exec_output_crop_after_lines=130,
+        exec_output_crop_head_lines=3,
+        exec_output_crop_tail_lines=2,
+    )
     wrapped = output.wrap_code_output(
         _output(),
         agent_id=7,
@@ -453,11 +444,18 @@ def test_failed_archive_cleanup_cannot_drop_original_tool_output(
     crop_config: CropConfig,
     output_clock: Clock,
 ):
+    original_chmod = Path.chmod
+    original_unlink = Path.unlink
+
     def fail_chmod(path: Path, mode: int) -> None:
-        raise OSError("test archive permissions unavailable")
+        if path.parent == archive_dir and path.name.startswith("crop_"):
+            raise OSError("test archive permissions unavailable")
+        original_chmod(path, mode)
 
     def fail_unlink(path: Path, missing_ok: bool = False) -> None:
-        raise OSError("test archive cleanup unavailable")
+        if path.parent == archive_dir and path.name.startswith("crop_"):
+            raise OSError("test archive cleanup unavailable")
+        original_unlink(path, missing_ok=missing_ok)
 
     monkeypatch.setattr(Path, "chmod", fail_chmod)
     monkeypatch.setattr(Path, "unlink", fail_unlink)
