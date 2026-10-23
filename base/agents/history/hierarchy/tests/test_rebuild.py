@@ -38,6 +38,7 @@ from base.agents.history.hierarchy.tests.consumer_helpers import read_inputs
 from base.config import settings
 from base.config.service_read import ConfigAuthority
 from base.lm.catalog import ModelCatalog
+from base.packages.tests.model_catalog import inert_keys
 from base.telemetry.tests.capture.event_capture import EmittedEvents
 
 AGENT = 7
@@ -264,6 +265,7 @@ async def test_the_consumer_runs_a_claimed_rebuild_and_settles_it(
         MagicMock(),
         [],
         catalog=model_catalog,
+        keys=inert_keys(model_catalog),
         llm_override=config_authority.runtime.lm.llm_override,
         inputs=read_inputs(),
     ).run_until_idle()
@@ -291,6 +293,7 @@ async def test_a_failing_rebuild_is_retried_then_failed(
         MagicMock(),
         [],
         catalog=model_catalog,
+        keys=inert_keys(model_catalog),
         llm_override=config_authority.runtime.lm.llm_override,
         inputs=read_inputs(),
     )

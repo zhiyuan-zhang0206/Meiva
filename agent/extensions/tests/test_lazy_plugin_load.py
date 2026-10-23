@@ -24,6 +24,7 @@ from base.agents.sdk import call_policy
 from base.clock import Clock
 from base.config.service_read import ConfigAuthority
 from base.lm.catalog import ModelCatalog
+from base.lm.catalog.provider_keys import ProviderKeys
 from base.log.tests.log_records import loguru_records as loguru_records
 from base.packages.plugin_config_images import DiskPluginConfigImages
 from base.packages.plugins.extensions import (
@@ -60,6 +61,7 @@ def _reset(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
         install.install(
             prior.registry,
             catalog=prior.catalog,
+            provider_keys=prior.provider_keys,
             authority=prior.authority,
             sampling=prior.sampling,
             clock_factory=prior.clock_factory,
@@ -97,6 +99,7 @@ def _spy_loader(monkeypatch: pytest.MonkeyPatch, *, register: str | None) -> lis
     def fake(
         *,
         catalog: ModelCatalog,
+        provider_keys: ProviderKeys,
         authority: ConfigAuthority,
         clock_factory: Callable[[], Clock],
         producer: Callable[[], Any],
@@ -238,6 +241,7 @@ def test_ensure_plugins_loaded_preserves_unknown_failure_without_retry(
     def boom(
         *,
         catalog: ModelCatalog,
+        provider_keys: ProviderKeys,
         authority: ConfigAuthority,
         clock_factory: Callable[[], Clock],
         producer: Callable[[], Any],
@@ -268,6 +272,7 @@ def test_failed_lazy_lookup_repeats_the_original_boot_error(
     def boom(
         *,
         catalog: ModelCatalog,
+        provider_keys: ProviderKeys,
         authority: ConfigAuthority,
         clock_factory: Callable[[], Clock],
         producer: Callable[[], Any],
@@ -323,6 +328,7 @@ def _spy_member_loader(
     def fake(
         *,
         catalog: ModelCatalog,
+        provider_keys: ProviderKeys,
         authority: ConfigAuthority,
         clock_factory: Callable[[], Clock],
         producer: Callable[[], Any],

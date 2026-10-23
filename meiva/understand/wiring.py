@@ -35,6 +35,7 @@ def understand_deps() -> UnderstandDeps:
     authority = config_authority()
     return UnderstandDeps(
         catalog=sdk_settings.model_catalog(),
+        keys=sdk_settings.provider_keys(),
         overrides=sdk_settings.model_overrides(),
         text_model=authority.service_field_value("understand_text_model"),
         media_model=authority.service_field_value("understand_media_model"),

@@ -4,7 +4,7 @@ import pytest
 from langchain_core.messages import HumanMessage
 from langchain_google_genai import ChatGoogleGenerativeAI
 
-from base.lm.provider_api import BuildContext
+from base.lm.provider_api import BuildContext, ProviderKeys
 from meiva_builtins.plugins.lm_google.provider import PROVIDER, chat_model_kwargs
 
 
@@ -18,6 +18,7 @@ def test_request_has_no_sampling_parameters(model: str) -> None:
         disable_streaming=False,
         timeout=None,
         thinking_budget_tokens=0,
+        keys=ProviderKeys({}),
     )
     llm = ChatGoogleGenerativeAI(**chat_model_kwargs(ctx, api_key="test-not-a-real-key"))
 

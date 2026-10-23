@@ -18,6 +18,7 @@ from base.config.tests.configuration import model_overrides
 from base.host.env import dotenv_file
 from base.host.env.tests.env_files import aliases_of
 from base.lm.catalog import ModelCatalog
+from base.lm.catalog.provider_keys import ProviderKeys
 from base.lm.factory import (
     build_chat_model,
 )
@@ -30,12 +31,12 @@ class TestBuildChatModel:
     ) -> None:
         """The 2026-09-06 user order restored 3.8 to the production picker;
         the builder resolves it to itself, not to the 3.7 fallback."""
-        monkeypatch.setenv("GEMINI_API_KEY", "sk-gemini-test")
         from langchain_google_genai import ChatGoogleGenerativeAI
 
         llm = build_chat_model(
             "gemini-3.8-flash",
             catalog=model_catalog,
+            keys=ProviderKeys({"GEMINI_API_KEY": "sk-gemini-test"}),
             llm_override="",
             overrides=model_overrides(),
         )
@@ -46,10 +47,10 @@ class TestBuildChatModel:
     def test_claude_prefix_returns_chat_anthropic(
         self, monkeypatch: pytest.MonkeyPatch, *, model_catalog: ModelCatalog
     ) -> None:
-        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
         llm = build_chat_model(
             "claude-opus-5",
             catalog=model_catalog,
+            keys=ProviderKeys({"ANTHROPIC_API_KEY": "sk-ant-test"}),
             llm_override="",
             overrides=model_overrides(),
         )
@@ -59,10 +60,10 @@ class TestBuildChatModel:
     def test_claude_sonnet(
         self, monkeypatch: pytest.MonkeyPatch, *, model_catalog: ModelCatalog
     ) -> None:
-        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
         llm = build_chat_model(
             "claude-sonnet-5",
             catalog=model_catalog,
+            keys=ProviderKeys({"ANTHROPIC_API_KEY": "sk-ant-test"}),
             llm_override="",
             overrides=model_overrides(),
         )
@@ -73,10 +74,10 @@ class TestBuildChatModel:
     ) -> None:
         """deepseek-* also returns ChatAnthropic, but base_url points to DeepSeek
         anthropic-compatible endpoint, and its plugin reads DEEPSEEK_API_KEY."""
-        monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test-deepseek")
         llm = build_chat_model(
             "deepseek-flash",
             catalog=model_catalog,
+            keys=ProviderKeys({"DEEPSEEK_API_KEY": "sk-test-deepseek"}),
             llm_override="",
             overrides=model_overrides(),
         )
@@ -95,10 +96,10 @@ class TestBuildChatModel:
         Set to DeepSeek Flash documented cap of 384K so the client is no longer the bottleneck;
         setting a high max_tokens has no side effect — max_tokens is the server-side output cap,
         not a budget, and the model only generates the tokens it needs."""
-        monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test-deepseek")
         llm = build_chat_model(
             "deepseek-flash",
             catalog=model_catalog,
+            keys=ProviderKeys({"DEEPSEEK_API_KEY": "sk-test-deepseek"}),
             llm_override="",
             overrides=model_overrides(),
         )
@@ -114,10 +115,10 @@ class TestBuildChatModel:
         langchain-anthropic 1.4.4's profile table didn't include claude-sonnet-5, falling back
         to legacy 4096; thinking tokens count toward max_tokens and guaranteed truncation
         (same failure mode as #169)."""
-        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
         llm = build_chat_model(
             "claude-sonnet-5",
             catalog=model_catalog,
+            keys=ProviderKeys({"ANTHROPIC_API_KEY": "sk-ant-test"}),
             llm_override="",
             overrides=model_overrides(),
         )
@@ -130,10 +131,10 @@ class TestBuildChatModel:
         """haiku-4-5's official output cap is 64K (not 128K) — per-model table, not
         a prefix-shared constant, prevents a small-cap model from borrowing a large cap
         and hitting a server 400."""
-        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
         llm = build_chat_model(
             "claude-haiku-4-5-20251001",
             catalog=model_catalog,
+            keys=ProviderKeys({"ANTHROPIC_API_KEY": "sk-ant-test"}),
             llm_override="",
             overrides=model_overrides(),
         )
@@ -146,11 +147,11 @@ class TestBuildChatModel:
         """claude models not registered in the registry (build_model_catalog().models) with a max_output_tokens
         raise immediately — do not fall back to langchain's stale profile (unknown id gives 4096)
         which would borrow the wrong cap."""
-        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
         with pytest.raises(ValueError, match="Unknown claude model"):
             build_chat_model(
                 "claude-sonnet-3-9",
                 catalog=model_catalog,
+                keys=ProviderKeys({"ANTHROPIC_API_KEY": "sk-ant-test"}),
                 llm_override="",
                 overrides=model_overrides(),
             )
@@ -161,10 +162,10 @@ class TestBuildChatModel:
         """Explicit settings.lm.reasoning_effort="" → does not inject output_config, endpoint
         defaults (medium thinking budget). Empty string is an explicit non-None value that
         overrides the per-model "max" from the registry — opt out to a cheaper tier."""
-        monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test-deepseek")
         llm = build_chat_model(
             "deepseek-flash",
             catalog=model_catalog,
+            keys=ProviderKeys({"DEEPSEEK_API_KEY": "sk-test-deepseek"}),
             llm_override="",
             overrides=model_overrides(reasoning_effort=""),
         )
@@ -191,10 +192,10 @@ class TestBuildChatModel:
     ) -> None:
         """effort='max' → injects output_config.effort=max into extra_body, passed through
         by langchain-anthropic to the Anthropic SDK into the POST body."""
-        monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test-deepseek")
         llm = build_chat_model(
             "deepseek-flash",
             catalog=model_catalog,
+            keys=ProviderKeys({"DEEPSEEK_API_KEY": "sk-test-deepseek"}),
             llm_override="",
             overrides=model_overrides(reasoning_effort="max"),
         )
@@ -206,10 +207,10 @@ class TestBuildChatModel:
     ) -> None:
         """high is also a valid effort value — DeepSeek docs high/max two tiers;
         explicit value overrides the per-model 'max' from the registry."""
-        monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test-deepseek")
         llm = build_chat_model(
             "deepseek-flash",
             catalog=model_catalog,
+            keys=ProviderKeys({"DEEPSEEK_API_KEY": "sk-test-deepseek"}),
             llm_override="",
             overrides=model_overrides(reasoning_effort="high"),
         )
@@ -224,10 +225,10 @@ class TestBuildChatModel:
         expected one of high, low, medium, max, xhigh"), which is what took every
         `meiva.web.fetch` down (MEIVA_WEB_FETCH_REASONING ships as "none"). Off is the
         endpoint's thinking switch, which is also what the setting promises."""
-        monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test-deepseek")
         llm = build_chat_model(
             "deepseek-flash",
             catalog=model_catalog,
+            keys=ProviderKeys({"DEEPSEEK_API_KEY": "sk-test-deepseek"}),
             llm_override="",
             overrides=model_overrides(reasoning_effort="none"),
         )
@@ -241,11 +242,11 @@ class TestBuildChatModel:
         """A caller that passed `thinking` stated its own intent and wins over a
         global effort of 'none' — the effort is dropped rather than overwriting the
         caller's thinking config."""
-        monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test-deepseek")
         llm = build_chat_model(
             "deepseek-flash",
             thinking={"type": "enabled", "budget_tokens": 8000},
             catalog=model_catalog,
+            keys=ProviderKeys({"DEEPSEEK_API_KEY": "sk-test-deepseek"}),
             llm_override="",
             overrides=model_overrides(reasoning_effort="none"),
         )
@@ -256,11 +257,11 @@ class TestBuildChatModel:
     def test_deepseek_rejects_unsupported_effort(
         self, monkeypatch: pytest.MonkeyPatch, *, model_catalog: ModelCatalog
     ) -> None:
-        monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test-deepseek")
         with pytest.raises(ValueError, match="unsupported reasoning effort"):
             build_chat_model(
                 "deepseek-flash",
                 catalog=model_catalog,
+                keys=ProviderKeys({"DEEPSEEK_API_KEY": "sk-test-deepseek"}),
                 llm_override="",
                 overrides=model_overrides(reasoning_effort="low"),
             )
@@ -271,11 +272,11 @@ class TestBuildChatModel:
         """The pair `meiva.web.fetch` ships with (MEIVA_WEB_FETCH_MODEL=deepseek-flash,
         MEIVA_WEB_FETCH_REASONING=none) has to build a request the endpoint accepts —
         that exact pair is what 400'd on every fetch in production."""
-        monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test-deepseek")
         llm = build_chat_model(
             settings.web.web_fetch_model,
             reasoning_effort=settings.web.web_fetch_reasoning,
             catalog=model_catalog,
+            keys=ProviderKeys({"DEEPSEEK_API_KEY": "sk-test-deepseek"}),
             llm_override="",
             overrides=model_overrides(),
         )
@@ -287,11 +288,11 @@ class TestBuildChatModel:
         self, monkeypatch: pytest.MonkeyPatch, *, model_catalog: ModelCatalog
     ) -> None:
         """A typo'd effort fails fast at build time rather than as a provider 400."""
-        monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test-deepseek")
         with pytest.raises(ValueError, match="unknown reasoning effort"):
             build_chat_model(
                 "deepseek-flash",
                 catalog=model_catalog,
+                keys=ProviderKeys({"DEEPSEEK_API_KEY": "sk-test-deepseek"}),
                 llm_override="",
                 overrides=model_overrides(reasoning_effort="nonw"),
             )
@@ -303,11 +304,11 @@ class TestBuildChatModel:
         resolved effort is non-empty — DeepSeek server rejects setting both simultaneously (400
         "thinking options type cannot be disabled when reasoning_effort is set"). The labeler
         short-text path explicitly disables thinking; the global env effort must not sneak back in."""
-        monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test-deepseek")
         llm = build_chat_model(
             "deepseek-flash",
             thinking={"type": "disabled"},
             catalog=model_catalog,
+            keys=ProviderKeys({"DEEPSEEK_API_KEY": "sk-test-deepseek"}),
             llm_override="",
             overrides=model_overrides(reasoning_effort="max"),
         )
@@ -319,11 +320,11 @@ class TestBuildChatModel:
     ) -> None:
         """thinking={'type':'enabled', ...} does not conflict — the server accepts thinking enabled
         together with reasoning_effort. Only thinking=disabled is mutually exclusive with effort."""
-        monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test-deepseek")
         llm = build_chat_model(
             "deepseek-flash",
             thinking={"type": "enabled", "budget_tokens": 8000},
             catalog=model_catalog,
+            keys=ProviderKeys({"DEEPSEEK_API_KEY": "sk-test-deepseek"}),
             llm_override="",
             overrides=model_overrides(reasoning_effort="max"),
         )
@@ -336,11 +337,11 @@ class TestBuildChatModel:
         """Explicit reasoning_effort parameter overrides the resolved effort —
         allowing a caller like syntax repair to lock on max without being dragged down
         by a global config set to a lower effort by some agent."""
-        monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test-deepseek")
         llm = build_chat_model(
             "deepseek-flash",
             reasoning_effort="max",
             catalog=model_catalog,
+            keys=ProviderKeys({"DEEPSEEK_API_KEY": "sk-test-deepseek"}),
             llm_override="",
             overrides=model_overrides(reasoning_effort="high"),
         )
@@ -352,11 +353,11 @@ class TestBuildChatModel:
     ) -> None:
         """When global effort is empty, explicit override still injects — the override is an
         independent source, not dependent on the global being non-empty."""
-        monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test-deepseek")
         llm = build_chat_model(
             "deepseek-flash",
             reasoning_effort="max",
             catalog=model_catalog,
+            keys=ProviderKeys({"DEEPSEEK_API_KEY": "sk-test-deepseek"}),
             llm_override="",
             overrides=model_overrides(reasoning_effort=""),
         )
@@ -373,12 +374,12 @@ class TestBuildChatModel:
         fallback (Task #5079) is stubbed empty — the suite fixture seeds the test
         home's `.env`, so leaving it live would hide the fail-fast contract.
         """
-        monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
         monkeypatch.setattr(dotenv_file, "read_env_aliases", aliases_of({}))
         with pytest.raises(RuntimeError, match="DEEPSEEK_API_KEY"):
             build_chat_model(
                 "deepseek-flash",
                 catalog=model_catalog,
+                keys=ProviderKeys({}),
                 llm_override="",
                 overrides=model_overrides(),
             )
@@ -389,11 +390,11 @@ class TestBuildChatModel:
         """Missing ANTHROPIC_API_KEY raises RuntimeError fail-fast — consistent with all other
         provider branches. Previously claude-* lacked this check; ChatAnthropic with no key
         silently hung, the agent process stuck in the LLM call never returning."""
-        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
         with pytest.raises(RuntimeError, match="ANTHROPIC_API_KEY"):
             build_chat_model(
                 "claude-opus-5",
                 catalog=model_catalog,
+                keys=ProviderKeys({}),
                 llm_override="",
                 overrides=model_overrides(),
             )
@@ -401,10 +402,10 @@ class TestBuildChatModel:
     def test_gemini_branch_builds(
         self, monkeypatch: pytest.MonkeyPatch, *, model_catalog: ModelCatalog
     ) -> None:
-        monkeypatch.setenv("GEMINI_API_KEY", "k")
         m = build_chat_model(
             "gemini-3.1-pro-preview",
             catalog=model_catalog,
+            keys=ProviderKeys({"GEMINI_API_KEY": "k"}),
             llm_override="",
             overrides=model_overrides(),
         )
@@ -415,11 +416,11 @@ class TestBuildChatModel:
     def test_gemini_missing_key_raises(
         self, monkeypatch: pytest.MonkeyPatch, *, model_catalog: ModelCatalog
     ) -> None:
-        monkeypatch.delenv("GEMINI_API_KEY", raising=False)
         with pytest.raises(RuntimeError, match="GEMINI_API_KEY"):
             build_chat_model(
                 "gemini-3.1-pro-preview",
                 catalog=model_catalog,
+                keys=ProviderKeys({}),
                 llm_override="",
                 overrides=model_overrides(),
             )
@@ -431,12 +432,12 @@ class TestBuildChatModel:
         zero thought blocks (live view zero reasoning). When enabled, thoughts are returned as
         `{"type":"thinking","thinking":...}` content blocks, same shape as claude/deepseek,
         reusing the existing streaming/timeline path without a provider branch."""
-        monkeypatch.setenv("GEMINI_API_KEY", "k")
         from langchain_google_genai import ChatGoogleGenerativeAI
 
         m = build_chat_model(
             "gemini-3.5-flash",
             catalog=model_catalog,
+            keys=ProviderKeys({"GEMINI_API_KEY": "k"}),
             llm_override="",
             overrides=model_overrides(),
         )
@@ -449,13 +450,13 @@ class TestBuildChatModel:
         """thinking={'type':'disabled'} (short-text path) → include_thoughts=False,
         no thought blocks returned. Symmetric with deepseek thinking-disabled skipping effort
         injection: the caller explicitly disables reasoning, so thinking should not be emitted."""
-        monkeypatch.setenv("GEMINI_API_KEY", "k")
         from langchain_google_genai import ChatGoogleGenerativeAI
 
         m = build_chat_model(
             "gemini-3.5-flash",
             thinking={"type": "disabled"},
             catalog=model_catalog,
+            keys=ProviderKeys({"GEMINI_API_KEY": "k"}),
             llm_override="",
             overrides=model_overrides(),
         )
@@ -469,7 +470,6 @@ class TestBuildChatModel:
         Google enum, media_thinking_level wins over the resolved effort, and
         base_url overrides the endpoint. include_thoughts stays at the SDK
         default (None) — the media path never surfaced thought blocks."""
-        monkeypatch.setenv("GEMINI_API_KEY", "k")
         from google.genai.types import MediaResolution
         from langchain_google_genai import ChatGoogleGenerativeAI
 
@@ -479,6 +479,7 @@ class TestBuildChatModel:
             media_thinking_level="low",
             base_url="http://localhost:8080/v1beta",
             catalog=model_catalog,
+            keys=ProviderKeys({"GEMINI_API_KEY": "k"}),
             llm_override="",
             overrides=model_overrides(),
         )
@@ -491,7 +492,6 @@ class TestBuildChatModel:
     def test_gemini_media_resolution_maps_each_level(
         self, monkeypatch: pytest.MonkeyPatch, *, model_catalog: ModelCatalog
     ) -> None:
-        monkeypatch.setenv("GEMINI_API_KEY", "k")
         from google.genai.types import MediaResolution
         from langchain_google_genai import ChatGoogleGenerativeAI
 
@@ -504,6 +504,7 @@ class TestBuildChatModel:
                 "gemini-3.5-flash",
                 media_resolution=setting,
                 catalog=model_catalog,
+                keys=ProviderKeys({"GEMINI_API_KEY": "k"}),
                 llm_override="",
                 overrides=model_overrides(),
             )
@@ -513,12 +514,12 @@ class TestBuildChatModel:
     def test_gemini_invalid_media_resolution_raises(
         self, monkeypatch: pytest.MonkeyPatch, *, model_catalog: ModelCatalog
     ) -> None:
-        monkeypatch.setenv("GEMINI_API_KEY", "k")
         with pytest.raises(ValueError, match="media_resolution"):
             build_chat_model(
                 "gemini-3.5-flash",
                 media_resolution="ultra",
                 catalog=model_catalog,
+                keys=ProviderKeys({"GEMINI_API_KEY": "k"}),
                 llm_override="",
                 overrides=model_overrides(),
             )

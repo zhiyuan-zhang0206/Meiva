@@ -25,7 +25,6 @@ exports = ["configuration.py", "router.py"]
 "configuration.py#base/db/__init__.py" = 1
 "configuration.py#base/host/env/agent_slices.py" = 1
 "configuration.py#base/lm/decision/call.py" = 1
-"configuration.py#base/lm/factory.py" = 1
 "configuration.py#gateway/agents/history/timeline.py" = 1
 "configuration.py#ops/agents/__init__.py" = 1
 "router.py#gateway/agents/eval_guard.py" = 1

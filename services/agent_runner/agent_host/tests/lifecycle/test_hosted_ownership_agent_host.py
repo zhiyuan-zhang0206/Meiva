@@ -13,6 +13,7 @@ from base.db import Database, create_agent
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
+from base.lm.catalog.provider_keys import ProviderKeys
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.packages.composer_commands import CommandCatalog
 from services.agent_runner.agent_host import runtime
@@ -63,13 +64,17 @@ async def test_cancel_during_live_announce_settles_the_committed_admission(
     )
 
     def allow_model_config(
-        *, model: str | None = None, catalog: ModelCatalog, llm_override: str | None
+        *,
+        model: str | None = None,
+        catalog: ModelCatalog,
+        keys: ProviderKeys,
+        llm_override: str | None,
     ) -> None:
         assert model is not None
         assert catalog is model_catalog
-        del llm_override
+        del keys, llm_override
 
-    monkeypatch.setattr(runtime, "validate_model_config", allow_model_config)
+    monkeypatch.setattr(runtime, "validate_model_launch", allow_model_config)
 
     host = AgentHost(
         policy=configured_policy(),

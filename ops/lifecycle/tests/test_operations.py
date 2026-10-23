@@ -30,6 +30,7 @@ from base.events.live.bus import EventBus
 from base.host.proc import run_bounded
 from base.lm.catalog import ModelCatalog
 from base.packages.plugin_providers import build_model_catalog
+from base.packages.tests.model_catalog import inert_keys
 from ops import lifecycle
 from ops.lifecycle import launch
 from ops.rpc_schemas import (
@@ -137,6 +138,7 @@ class TestSpawnPrechecksBlocking:
             SpawnAgentRequest(spawner="user", fork_from=lifecycle_agent_id),
             db_pool,
             catalog=model_catalog,
+            keys=inert_keys(model_catalog),
             authority=config_authority,
         )
         assert checkpoint == "ckpt:v1"
@@ -155,6 +157,7 @@ class TestSpawnPrechecksBlocking:
                 SpawnAgentRequest(spawner="user", fork_from=lifecycle_agent_id),
                 db_pool,
                 catalog=model_catalog,
+                keys=inert_keys(model_catalog),
                 authority=config_authority,
             )
 
@@ -168,6 +171,7 @@ class TestSpawnPrechecksBlocking:
             SpawnAgentRequest(spawner="user"),
             db_pool,
             catalog=model_catalog,
+            keys=inert_keys(model_catalog),
             authority=config_authority,
         )
         assert checkpoint is None

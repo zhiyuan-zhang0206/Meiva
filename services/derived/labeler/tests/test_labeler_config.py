@@ -20,6 +20,7 @@ from base.db.code_version_gate import ProcessDbGate
 from base.db.config import DbConfig
 from base.host.env.agent_slices import ModelOverrides
 from base.lm.catalog import ModelCatalog
+from base.lm.catalog.provider_keys import ProviderKeys
 from base.lm.factory import build_chat_model as real_build_chat_model
 from base.native_process import code_version
 from base.native_process.loaded_commit import LoadedCommit
@@ -75,6 +76,7 @@ def _assert_run_lifecycle(
         *,
         build_chat_model: Callable[..., Any],
         catalog: ModelCatalog,
+        keys: ProviderKeys,
         llm_override: str,
         overrides: ModelOverrides,
     ) -> None:

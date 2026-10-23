@@ -12,6 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response
 
 from base.api_contracts.agent_contract import IndexerUnavailable
 from base.db import Database
+from base.lm.factory import process_provider_keys
 from base.packages.docs.notes import parse_note
 from gateway.agents.eval_guard import deny_isolated_result_read
 from gateway.http.disconnect import run_until_disconnect
@@ -186,12 +187,14 @@ async def _search_and_rank(
     limit = _candidate_count(inputs, body)
     exclude = frozenset(body.exclude)
     hits = await _vector_candidates(request, body, provider, inputs, deadline, limit + len(exclude))
+    catalog = require_model_catalog(request)
     return await rerank.rerank(
         body.query,
         hits,
         purpose=body.purpose,
         model=inputs.rerank_model(),
-        catalog=require_model_catalog(request),
+        catalog=catalog,
+        keys=await asyncio.to_thread(process_provider_keys, catalog),
         k=body.k,
         limit=limit,
         exclude=exclude,

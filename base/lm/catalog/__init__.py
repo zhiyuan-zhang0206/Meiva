@@ -100,6 +100,14 @@ class ModelCatalog:
             }
         )
 
+    # meiva:note
+    # The env name of every provider key, chat and decision, each once in install order.
+    @cached_property
+    def key_envs(self) -> tuple[str, ...]:
+        names = [binding.key_env for binding in self.bindings.values()]
+        names.extend(provider.key_env for provider in self.decision_providers.values())
+        return tuple(dict.fromkeys(names))
+
     def provider_key_of(self, model: str) -> str | None:
         """Provider key of a dispatch prefix match: the binding's explicit key or its prefix
         without the trailing dash. None for an unregistered prefix."""

@@ -20,6 +20,7 @@ from typing import Any, cast
 from base.host.env.agent_slices import ModelOverrides
 from base.lm.attach.constants import ATTACH_MEDIA_MIME
 from base.lm.catalog import ModelCatalog
+from base.lm.catalog.provider_keys import ProviderKeys
 from base.lm.effort import ReasoningEffort, validate_effort
 from meiva.sdk_surface.batch import run_batch
 from meiva.understand.errors import UnderstandError
@@ -73,6 +74,7 @@ class UnderstandDeps:
     """The dependencies of `run`, nothing else."""
 
     catalog: ModelCatalog
+    keys: ProviderKeys
     overrides: ModelOverrides
     text_model: str
     media_model: str
@@ -255,6 +257,7 @@ def _call_text(deps: UnderstandDeps, content: list[Any], *, effort: str | Reason
         llm = deps.build_chat_model(
             model,
             catalog=deps.catalog,
+            keys=deps.keys,
             llm_override=deps.llm_override,
             overrides=deps.overrides,
             reasoning_effort=effort,
@@ -337,6 +340,7 @@ def _call_media(
         llm = deps.build_chat_model(
             model,
             catalog=catalog,
+            keys=deps.keys,
             llm_override=deps.llm_override,
             overrides=deps.overrides,
             reasoning_effort=effort,

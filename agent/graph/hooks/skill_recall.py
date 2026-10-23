@@ -96,7 +96,11 @@ class SkillRecallHook(Hook):
         if peer_text is None:
             return []
         passed = await peer_gate_passes(
-            peer_text, agent=agent, catalog=catalog, agent_id=agent_id_from_config(config)
+            peer_text,
+            agent=agent,
+            catalog=catalog,
+            keys=runtime.context.require_provider_keys(),
+            agent_id=agent_id_from_config(config),
         )
         return candidates if passed else []
 
@@ -117,6 +121,7 @@ class SkillRecallHook(Hook):
                     candidates,
                     agent=agent,
                     catalog=catalog,
+                    keys=runtime.context.require_provider_keys(),
                     agent_id=agent_id_from_config(config),
                     peer_turn=not tail_has_skill_recall_inbound(state.messages),
                 ),

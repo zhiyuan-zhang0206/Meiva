@@ -42,7 +42,8 @@ from base.events.live.bus import EventBus
 from base.host.env.agent_slices import ModelOverrides
 from base.host.exit_codes import hard_exit as _hard_exit
 from base.lm.catalog import ModelCatalog
-from base.lm.factory import build_chat_model
+from base.lm.catalog.provider_keys import ProviderKeys
+from base.lm.factory import build_chat_model, process_provider_keys
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
 from base.packages.plugin_providers import build_model_catalog
@@ -181,6 +182,7 @@ async def dispatch_loop(
     *,
     build_chat_model: Callable[..., Any],
     catalog: ModelCatalog,
+    keys: ProviderKeys,
     llm_override: str,
     overrides: ModelOverrides,
 ) -> None:
@@ -216,6 +218,7 @@ async def dispatch_loop(
                 bus,
                 build_chat_model=build_chat_model,
                 catalog=catalog,
+                keys=keys,
                 llm_override=llm_override,
                 overrides=overrides,
             )
@@ -253,6 +256,7 @@ async def run(
 
     db = database()
     pool = db.pool()
+    catalog = build_model_catalog()
     try:
         await dispatch_loop(
             pool,
@@ -261,7 +265,8 @@ async def run(
             liveness,
             labeler_config(),
             build_chat_model=build_chat_model,
-            catalog=build_model_catalog(),
+            catalog=catalog,
+            keys=process_provider_keys(catalog),
             llm_override=settings.lm.llm_override,
             overrides=labeler_model_overrides(profile=settings.profile, lm=settings.lm),
         )

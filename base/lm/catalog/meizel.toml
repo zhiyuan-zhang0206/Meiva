@@ -1,9 +1,13 @@
-purity = "strict-to-be"
-exports = ["decide", "provider_contract.py"]
+exports = ["decide", "provider_contract.py", "provider_keys.py"]
 
 [uses]
 "__init__.py" = ["decide", "provider_contract.py"]
-"provider_contract.py" = ["decide"]
+"decide" = ["provider_keys.py"]
+"provider_contract.py" = ["decide", "provider_keys.py"]
+
+[purity]
+"." = "strict-to-be"
+"provider_keys.py" = "strict"
 
 [debt.impure-edge]
 "__init__.py#base/lm/registry.py" = 1

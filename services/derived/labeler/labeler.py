@@ -16,6 +16,7 @@ from base.db import Database
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import ModelOverrides
 from base.lm.catalog import ModelCatalog
+from base.lm.catalog.provider_keys import ProviderKeys
 from base.lm.content import content_blocks, message_content
 from base.lm.errors import is_retryable_provider_error, normalize_provider_transport_error
 from services.derived.labeler.config import LabelerConfig
@@ -157,6 +158,7 @@ async def generate_label_async(
     *,
     build_chat_model: Callable[..., Any],
     catalog: ModelCatalog,
+    keys: ProviderKeys,
     llm_override: str,
     overrides: ModelOverrides,
 ) -> bool | None:
@@ -186,6 +188,7 @@ async def generate_label_async(
             config.labeler_model,
             thinking={"type": "disabled"},
             catalog=catalog,
+            keys=keys,
             llm_override=llm_override,
             overrides=overrides,
         )

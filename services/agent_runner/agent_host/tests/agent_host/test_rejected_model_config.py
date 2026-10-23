@@ -11,7 +11,8 @@ import pytest
 from base.api_contracts.agent_contract import Harness
 from base.config import settings
 from base.lm.catalog import ModelCatalog
-from base.lm.factory import validate_model_config
+from base.lm.catalog.provider_keys import ProviderKeys
+from base.lm.factory import validate_model_launch
 from base.log.tests.log_records import LogRecords
 from base.log.tests.log_records import loguru_records as loguru_records
 from base.native_process.runtime_incarnation import RuntimeIncarnation
@@ -47,7 +48,7 @@ class TestRejectedModelConfig:
         """The real registry rejects an unknown model without a provider key."""
         import services.agent_runner.agent_host.runtime as runtime_mod
 
-        monkeypatch.setattr(runtime_mod, "validate_model_config", validate_model_config)
+        monkeypatch.setattr(runtime_mod, "validate_model_launch", validate_model_launch)
         boot_calls: list[int] = []
 
         async def _record_boot(
@@ -77,7 +78,9 @@ class TestRejectedModelConfig:
         boot_calls: list[int] = []
         validated_models: list[str] = []
 
-        def _validate_model(*, model: str, catalog: ModelCatalog, llm_override: str) -> None:
+        def _validate_model(
+            *, model: str, catalog: ModelCatalog, keys: ProviderKeys, llm_override: str
+        ) -> None:
             validated_models.append(model)
             if model == "fable":
                 raise ValueError("unknown model 'fable'")
@@ -88,7 +91,7 @@ class TestRejectedModelConfig:
             boot_calls.append(agent_id)
             return Model(llm_model), None
 
-        monkeypatch.setattr(runtime_mod, "validate_model_config", _validate_model)
+        monkeypatch.setattr(runtime_mod, "validate_model_launch", _validate_model)
         monkeypatch.setattr(runtime_mod, "boot_agent_scope", _record_boot)
         rows = {1: Row(overlay={"llm_model": "fable"})}
         host, graph, _ = wired(rows)
@@ -113,10 +116,12 @@ class TestRejectedModelConfig:
         """Repeated pending wakes stay quiet until the stored config changes."""
         import services.agent_runner.agent_host.runtime as runtime_mod
 
-        def _reject_model(*, model: str, catalog: ModelCatalog, llm_override: str) -> None:
+        def _reject_model(
+            *, model: str, catalog: ModelCatalog, keys: ProviderKeys, llm_override: str
+        ) -> None:
             raise ValueError(f"unknown model '{model}'")
 
-        monkeypatch.setattr(runtime_mod, "validate_model_config", _reject_model)
+        monkeypatch.setattr(runtime_mod, "validate_model_launch", _reject_model)
         rows = {1: Row(overlay={"llm_model": "fable"})}
         host, _, _ = wired(rows)
 
@@ -239,7 +244,7 @@ class TestNormalizedModelConfig:
         taking the reject path (the real validator), and no turn starts."""
         import services.agent_runner.agent_host.runtime as runtime_mod
 
-        monkeypatch.setattr(runtime_mod, "validate_model_config", validate_model_config)
+        monkeypatch.setattr(runtime_mod, "validate_model_launch", validate_model_launch)
         host, graph, _ = wired({1: Row(overlay={"llm_model": "no-such-model-xyz"})})
 
         await asyncio.wait_for(host.run_turn(1), 2)

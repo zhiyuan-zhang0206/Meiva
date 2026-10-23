@@ -22,6 +22,7 @@ from base.db.transaction import write_transaction
 from base.events.live.announce import publish_agent_spawned_sync, publish_task_created_sync
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
+from base.lm.factory import process_provider_keys
 from base.log import logger
 from gateway.agents import creation
 from gateway.agents.creation import recover_launch, scoped_creation_key
@@ -183,6 +184,7 @@ async def post_task_assignment(
         )
         try:
             catalog = require_model_catalog(request)
+            keys = await asyncio.to_thread(process_provider_keys, catalog)
             await asyncio.to_thread(
                 creation.spawn_preflight_blocking,
                 db,
@@ -190,6 +192,7 @@ async def post_task_assignment(
                 spawn,
                 pool,
                 catalog=catalog,
+                keys=keys,
                 authority=request.app.state.config_authority,
             )
         except Exception:

@@ -13,7 +13,7 @@ This module is the read side every SDK piece below the installer shares (`wraps`
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, cast
 
@@ -23,6 +23,7 @@ from base.agents.sdk.call_policy import SamplingPolicyOwner
 from base.clock import Clock
 from base.config.service_read import ConfigAuthority
 from base.lm.catalog import ModelCatalog
+from base.lm.catalog.provider_keys import ProviderKeys
 from base.packages.plugin_config_contracts import PluginConfigImages
 from base.packages.plugins.extensions import ExtensionRegistry
 
@@ -70,6 +71,7 @@ class Installation:
     sampling: SamplingPolicyOwner = field(default_factory=SamplingPolicyOwner)
     configs: Mapping[str, BaseModel] = field(default_factory=dict[str, BaseModel])
     catalog: ModelCatalog | None = None
+    provider_keys: ProviderKeys | None = None
     authority: ConfigAuthority | None = None
     clock_factory: Callable[[], Clock] | None = None
     producer: Callable[[], Any] | None = None
@@ -79,6 +81,13 @@ class Installation:
         if self.catalog is None:
             raise RuntimeError("the SDK installation carries no ModelCatalog")
         return self.catalog
+
+    # meiva:note
+    # Return the provider keys this installation's root read or refuse a keyless one.
+    def require_provider_keys(self) -> ProviderKeys:
+        if self.provider_keys is None:
+            raise RuntimeError("the SDK installation carries no ProviderKeys")
+        return self.provider_keys
 
 
 # The installation is recorded on the `meiva` module object itself — the one process-wide thing it
@@ -111,12 +120,11 @@ def installed() -> Installation | None:
     return value if isinstance(value, Installation) else None
 
 
-def record_disabled(disabled: frozenset[str]) -> None:
-    """Record newly applied SDK-disable entries: build a new value, swap the holder."""
-    current = installed()
-    if current is None:
-        raise RuntimeError("no SDK installation to record disable entries on")
-    setattr(meiva_module(), SLOT, replace(current, disabled=disabled))
+def provider_keys() -> ProviderKeys:
+    installation = installed()
+    if installation is None:
+        raise RuntimeError("the SDK installation carries no ProviderKeys")
+    return installation.require_provider_keys()
 
 
 def model_catalog() -> ModelCatalog:

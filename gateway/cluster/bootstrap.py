@@ -31,10 +31,7 @@ def get_bootstrap(
     catalog = require_model_catalog(request)
     try:
         return request.app.state.config_authority.bootstrap_config_values(
-            provider_key_envs=(
-                *(binding.key_env for binding in catalog.bindings.values()),
-                *(provider.key_env for provider in catalog.decision_providers.values()),
-            ),
+            provider_key_envs=catalog.key_envs,
             plugin_cluster_config=plugin_bootstrap_config(),
         )
     except ValueError as exc:

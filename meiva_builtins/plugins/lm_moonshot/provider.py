@@ -25,7 +25,6 @@ from base.lm.provider_api import (
     PriceTier,
     ProviderBinding,
     ProviderContribution,
-    require_key,
 )
 from base.lm.registry import ModelSpec, ModelTuning
 from base.packages.plugins.extensions import PluginContributions
@@ -46,7 +45,7 @@ def build(ctx: BuildContext) -> BaseChatModel:
     # fan-out (`RedisStreamHandler`) and timeline (`base/agents/history/timeline.py`) both
     # read that key so reasoning renders through the same path as every other
     # provider.
-    api_key = require_key("MOONSHOT_API_KEY")
+    api_key = ctx.keys.require("MOONSHOT_API_KEY")
     # K3's thinking is always on and cannot be turned off, and the
     # K2.x-era `thinking` request parameter is not accepted by K3 — warn
     # instead of silently dropping the caller's intent. (Do NOT wire

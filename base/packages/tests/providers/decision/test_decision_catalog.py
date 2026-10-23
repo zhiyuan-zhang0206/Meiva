@@ -16,6 +16,7 @@ from base.lm.provider_api import (
 )
 from base.lm.registry import ModelSpec
 from base.packages.plugin_providers import build_model_catalog
+from base.packages.tests.model_catalog import inert_keys
 
 
 def _chat_contribution(prefix: str, model_id: str) -> ProviderContribution:
@@ -63,13 +64,12 @@ def test_the_chat_path_rejects_a_decision_id() -> None:
     catalog = _catalog()
 
     with pytest.raises(ValueError, match="decision model"):
-        validate_model_config(
-            model=MODEL, catalog=catalog, check_provider_key=False, llm_override=""
-        )
+        validate_model_config(model=MODEL, catalog=catalog)
     with pytest.raises(ValueError, match="decision model"):
         build_chat_model(
             MODEL,
             catalog=catalog,
+            keys=inert_keys(catalog),
             llm_override="",
             overrides=ModelOverrides.from_pins({}),
         )
@@ -84,6 +84,7 @@ async def test_the_decision_path_rejects_a_chat_id() -> None:
             "hello",
             {"q": YesNo("Is it?", "yes", "no")},
             catalog=catalog,
+            keys=inert_keys(catalog),
             usage_kind="test",
         )
 

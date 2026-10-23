@@ -8,6 +8,7 @@ import pytest
 from psycopg_pool import ConnectionPool
 
 from base.cluster.machine import MachineIdentity
+from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
@@ -60,6 +61,7 @@ async def test_launch_agent_op_hosted_validation_failure_preserves_its_row(
     event_bus: EventBus,
     machine_identity: MachineIdentity,
     model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ) -> None:
     before = db_conn.execute(
         "SELECT status, birth_config, termination_source FROM agents_meta WHERE id=%s",
@@ -80,6 +82,7 @@ async def test_launch_agent_op_hosted_validation_failure_preserves_its_row(
             body,
             db_pool,
             catalog=model_catalog,
+            authority=config_authority,
             local_machine=machine_identity.name(),
         )
     assert (

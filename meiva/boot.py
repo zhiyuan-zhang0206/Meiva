@@ -291,6 +291,7 @@ def _load_plugin_stages(
         else:
             from base import paths
             from base.config.service_read import ConfigAuthority
+            from base.lm.factory import process_provider_keys
             from base.packages.plugin_providers import build_model_catalog
 
             if config is None:
@@ -307,9 +308,11 @@ def _load_plugin_stages(
                 build_all_domains=config.complete_read_model,
                 env_path=paths.meiva_home() / ".env",
             )
+            catalog = build_model_catalog()
             load_extensions(
                 surface=surface,
-                catalog=build_model_catalog(),
+                catalog=catalog,
+                provider_keys=process_provider_keys(catalog),
                 authority=authority,
                 producer=producer,
                 clock_factory=clock_factory

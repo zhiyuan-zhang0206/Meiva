@@ -1,10 +1,9 @@
-"""Skill recall at the before_llm edge (`agent/graph/hooks/skill_recall.py`).
-
-The hook runs against the real `decide()` over a catalog whose decision provider keeps its real
-id and price but answers from a scripted binding, so the questions the hook asks, the scores it
-reads back and the failures it survives are all exercised end to end without a network call.
-Skills are real SKILL.md files in a per-test unit home, as in the capability-drift tests.
-"""
+# meiva:note
+# Skill recall at the before_llm edge (`agent/graph/hooks/skill_recall.py`).
+#
+# The hook runs against the real `decide()` over a catalog whose decision provider keeps its real
+# id and price but answers from a scripted binding, so questions, scores and failures are exercised
+# end to end without a network call. Skills are real SKILL.md files in a per-test unit home.
 
 from __future__ import annotations
 
@@ -51,6 +50,7 @@ from base.packages.extensions import install_registry
 from base.packages.extensions.install_registry import InstalledPackage
 from base.packages.plugin_providers import build_model_catalog
 from base.packages.plugins.extensions import EMPTY
+from base.packages.tests.model_catalog import inert_keys
 
 _CONFIG: Any = {"configurable": {"thread_id": "1042"}}
 _MODEL = "jev-1.13.0"
@@ -118,6 +118,7 @@ def _runtime(database: Database, catalog: ModelCatalog, **pins: Any) -> Runtime[
             db=database,
             bus=EventBus.from_settings(),
             catalog=catalog,
+            provider_keys=inert_keys(catalog),
             clock_factory=Clock.from_settings,
         )
     )

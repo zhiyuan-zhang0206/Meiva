@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import math
+import os
 import shutil
 from collections.abc import Callable
 from dataclasses import replace
@@ -20,8 +21,9 @@ from base.lm.compat import stop
 from base.lm.factory import (
     build_chat_model,
     model_supports_vision,
+    process_provider_keys,
     provider_key_of_model,
-    validate_model_config,
+    validate_model_launch,
 )
 from base.lm.provider_api import PriceRates, ProviderBinding, ProviderContribution
 from base.lm.registry import ModelSpec, ModelTuning
@@ -30,7 +32,7 @@ from base.packages.plugins import enable_config
 from base.packages.tests.lm.providers.provider_plugin_support import (
     provider_plugin as provider_plugin,
 )
-from base.packages.tests.model_catalog import AddBindings
+from base.packages.tests.model_catalog import AddBindings, inert_keys
 
 _REPO_PROVIDER_PLUGINS = {
     "lm_alibaba",
@@ -379,11 +381,19 @@ def test_plugin_model_registers_and_builds(provider_plugin: Callable[..., None])
     assert "testp-1" in catalog.prices
 
     llm = build_chat_model(
-        "testp-1", catalog=catalog, llm_override="", overrides=ModelOverrides.from_pins({})
+        "testp-1",
+        catalog=catalog,
+        keys=inert_keys(catalog),
+        llm_override="",
+        overrides=ModelOverrides.from_pins({}),
     )
     assert isinstance(llm, FakeListChatModel)
     llm2 = build_chat_model(
-        "testp-2", catalog=catalog, llm_override="", overrides=ModelOverrides.from_pins({})
+        "testp-2",
+        catalog=catalog,
+        keys=inert_keys(catalog),
+        llm_override="",
+        overrides=ModelOverrides.from_pins({}),
     )
     assert isinstance(llm2, FakeListChatModel)
 
@@ -440,6 +450,7 @@ def test_bound_build_preserves_fallback_identity_and_effort(
         media_thinking_level="low",
         base_url="https://example.com/v1",
         catalog=catalog,
+        keys=inert_keys(catalog),
         llm_override="",
         overrides=ModelOverrides.from_pins({}),
     )
@@ -459,13 +470,21 @@ def test_plugin_model_validation_and_key_check(
 ) -> None:
     provider_plugin()
     catalog = build_model_catalog()
-    assert not provider_api.provider_key_present("TESTP_API_KEY")
+    assert "TESTP_API_KEY" in catalog.key_envs
+    assert "TESTP_API_KEY" not in os.environ
     (unit_home / ".env").write_text("")
     with pytest.raises(ValueError, match="TESTP_API_KEY"):
-        validate_model_config(model="testp-1", catalog=catalog, llm_override="")
+        validate_model_launch(
+            model="testp-1", catalog=catalog, llm_override="", keys=process_provider_keys(catalog)
+        )
 
     (unit_home / ".env").write_text("TESTP_API_KEY=sk-test\n")
-    assert validate_model_config(model="testp-1", catalog=catalog, llm_override="") == "testp-1"
+    assert (
+        validate_model_launch(
+            model="testp-1", catalog=catalog, llm_override="", keys=process_provider_keys(catalog)
+        )
+        == "testp-1"
+    )
 
 
 def test_vision_flag_drives_image_gate(provider_plugin: Callable[..., None]) -> None:

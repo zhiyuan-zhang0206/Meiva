@@ -11,12 +11,13 @@ from base.agents.birth.harness import LAUNCHABLE_HARNESSES
 from base.agents.birth.spawn import latest_checkpoint_id
 from base.agents.impersonation.wake import publish_inbound_wake
 from base.api_contracts.agent_contract import ForkSourceEmpty, Harness
-from base.config import settings
 from base.config.agent_pins import resolve_agent_config_pins
 from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
+from base.lm.catalog.provider_keys import ProviderKeys
+from base.lm.factory import process_provider_keys
 from ops.rpc_schemas import LaunchAgentRequest, SpawnAgentRequest, SpawnedAgent
 
 
@@ -27,6 +28,7 @@ async def launch_agent_op(
     db_pool: ConnectionPool,
     *,
     catalog: ModelCatalog,
+    authority: ConfigAuthority,
     local_machine: str,
 ) -> SpawnedAgent:
     """Validate a gateway-created row and wake its host without changing identity.
@@ -37,13 +39,14 @@ async def launch_agent_op(
     """
     # Lazy import: the package door re-exports this module, so a module-level
     # import of the door would be circular.
-    from base.lm.factory import validate_model_config
+    from base.lm.factory import validate_model_launch
 
-    await asyncio.to_thread(
-        validate_model_config,
+    keys = await asyncio.to_thread(process_provider_keys, catalog)
+    validate_model_launch(
         catalog=catalog,
-        llm_override=settings.lm.llm_override,
-        model=settings.lm.llm_model,
+        keys=keys,
+        llm_override=authority.service_field_value("llm_override"),
+        model=authority.service_field_value("llm_model"),
         config=resolve_agent_config_pins(body.config, body.birth_config),
     )
     await asyncio.to_thread(validate_launch_row, db_pool, body, local_machine=local_machine)
@@ -86,6 +89,7 @@ def spawn_prechecks_blocking(
     db_pool: ConnectionPool,
     *,
     catalog: ModelCatalog,
+    keys: ProviderKeys,
     authority: ConfigAuthority,
 ) -> str | None:
     """Sync spawn pre-checks — via to_thread: model-config validation (may read
@@ -99,8 +103,9 @@ def spawn_prechecks_blocking(
             body.config,
             body.fork_from,
             catalog=catalog,
+            keys=keys,
             authority=authority,
-            llm_override=settings.lm.llm_override,
+            llm_override=authority.service_field_value("llm_override"),
         )
     fork_checkpoint: str | None = None
     if body.fork_from is not None:

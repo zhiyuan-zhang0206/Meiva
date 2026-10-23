@@ -36,6 +36,7 @@ from base.api_contracts.agent_contract import IndexerUnavailable
 from base.api_contracts.memory_search import MemorySearchPurpose
 from base.lm.catalog import ModelCatalog
 from base.lm.catalog.decide.types import TRUE, DecisionError, YesNo
+from base.lm.catalog.provider_keys import ProviderKeys
 from base.lm.decision.call import decide
 from base.packages.docs.notes import parse_note
 from services.derived.memory_indexer.backends.base import ChunkHit
@@ -139,7 +140,13 @@ class Candidate:
 
 
 async def ask_relevance(
-    model: str, state: str, question: YesNo, *, catalog: ModelCatalog, usage_kind: str
+    model: str,
+    state: str,
+    question: YesNo,
+    *,
+    catalog: ModelCatalog,
+    keys: ProviderKeys,
+    usage_kind: str,
 ) -> float:
     """Probability of "yes" to `question` about `state`, from one decision call."""
     try:
@@ -148,6 +155,7 @@ async def ask_relevance(
             state,
             {"relevant": question},
             catalog=catalog,
+            keys=keys,
             usage_kind=usage_kind,
             source="memory_search",
         )
@@ -269,6 +277,7 @@ async def _score_all(
     states: list[str],
     question: YesNo,
     catalog: ModelCatalog,
+    keys: ProviderKeys,
     usage_kind: str,
 ) -> list[float]:
     """One request per state, at most `MAX_CONCURRENT_DECISIONS` at once; the first failure
@@ -278,7 +287,7 @@ async def _score_all(
     async def score(state: str) -> float:
         async with permits:
             return await ask_relevance(
-                model, state, question, catalog=catalog, usage_kind=usage_kind
+                model, state, question, catalog=catalog, keys=keys, usage_kind=usage_kind
             )
 
     try:
@@ -296,6 +305,7 @@ async def rerank(
     purpose: MemorySearchPurpose,
     model: str,
     catalog: ModelCatalog,
+    keys: ProviderKeys,
     k: int,
     limit: int,
     exclude: Collection[str],
@@ -316,7 +326,9 @@ async def rerank(
     if not candidates:
         return []
     states = [pair_state(query, candidate, purpose) for candidate in candidates]
-    scores = await _score_all(model, states, _QUESTIONS[purpose], catalog, USAGE_KINDS[purpose])
+    scores = await _score_all(
+        model, states, _QUESTIONS[purpose], catalog, keys, USAGE_KINDS[purpose]
+    )
     ranked = sorted(range(len(candidates)), key=lambda i: scores[i], reverse=True)[:k]
     return [
         RankedChunk(

@@ -23,9 +23,11 @@ from base.lm.catalog.decide.types import (
     DecisionRequestError,
     YesNo,
 )
+from base.lm.catalog.provider_keys import ProviderKeys
 from base.log.tests.log_records import LogRecords
 from base.log.tests.log_records import loguru_records as loguru_records
 from base.packages.plugin_providers import build_model_catalog
+from base.packages.tests.model_catalog import inert_keys
 from services.derived.memory_indexer import rerank
 from services.derived.memory_indexer.backends.base import KIND_BODY, KIND_DESC, ChunkHit
 from services.derived.memory_indexer.chunking import chunk_text
@@ -74,9 +76,16 @@ class _FakeJudge:
         self.max_in_flight = 0
 
     async def __call__(
-        self, model: str, state: str, question: YesNo, *, catalog: ModelCatalog, usage_kind: str
+        self,
+        model: str,
+        state: str,
+        question: YesNo,
+        *,
+        catalog: ModelCatalog,
+        keys: ProviderKeys,
+        usage_kind: str,
     ) -> float:
-        del catalog
+        del catalog, keys
         self.calls.append((model, state, question))
         self.usage_kinds.append(usage_kind)
         self.in_flight += 1
@@ -110,6 +119,7 @@ async def _rank(
         purpose=purpose,
         model="m",
         catalog=catalog,
+        keys=inert_keys(catalog),
         k=k,
         limit=limit,
         exclude=exclude,
@@ -555,11 +565,15 @@ async def test_ask_relevance_reads_the_true_probability_and_clamps(
     question = YesNo("q?", "yes", "no")
     kind = "memory_write_dedup"
     assert (
-        await rerank.ask_relevance("m", "the state", question, catalog=catalog, usage_kind=kind)
+        await rerank.ask_relevance(
+            "m", "the state", question, catalog=catalog, keys=inert_keys(catalog), usage_kind=kind
+        )
         == 1.0
     )
     assert (
-        await rerank.ask_relevance("m", "the state", question, catalog=catalog, usage_kind=kind)
+        await rerank.ask_relevance(
+            "m", "the state", question, catalog=catalog, keys=inert_keys(catalog), usage_kind=kind
+        )
         == 0.3
     )
     assert seen["model"] == "m"
@@ -575,6 +589,7 @@ async def test_unknown_decision_model_is_a_clear_error(catalog: ModelCatalog) ->
             "state",
             YesNo("q?", "yes", "no"),
             catalog=catalog,
+            keys=inert_keys(catalog),
             usage_kind="memory_rerank",
         )
 

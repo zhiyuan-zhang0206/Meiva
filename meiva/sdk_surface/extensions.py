@@ -17,6 +17,7 @@ from dataclasses import replace
 from base.clock import Clock
 from base.config.service_read import ConfigAuthority
 from base.lm.catalog import ModelCatalog
+from base.lm.catalog.provider_keys import ProviderKeys
 from base.packages.plugins import load_report
 from base.packages.plugins.loading import StateGate
 from base.packages.plugins.loading.faces import LoadedExtensions, import_faces
@@ -24,33 +25,34 @@ from base.packages.plugins.loading.faces import LoadedExtensions, import_faces
 from . import install as sdk_install
 
 
+# meiva:note
+# Read plugins_config.json, import the enabled plugins' faces, install what they declare.
+#
+# Full form (`surface=False`, the default): uninstall the previous round's SDK surface, import every
+# enabled plugin's `plugin.py` followed by its `agent_runtime.py` face, build the gated registry of
+# what the faces declare and install its SDK surface into `meiva` (the one place `meiva` is written:
+# `meiva.sdk_surface.install`). Called at host boot and by the agent-side tooling. The returned registry
+# holds the plugins admitted — one the install refused (a namespace conflict, a bad wrap target, a
+# config that does not bind) is reported and absent.
+#
+# Surface form (`surface=True`): import only the `plugin.py` surfaces and install the surface-only
+# registry — the load an agent-launched child runs. No uninstall: a child loads once per process and
+# never runs the agent runtime, and the graph/LM stacks stay off its boot path.
+#
+# Contained plugin failures go to ``report`` (see `import_faces`). Model and configuration consumers
+# receive their composition root's explicit ``catalog``, ``provider_keys`` and ``authority``.
+# Inventory-only loads supply none of them; accessing those SDK capabilities still requires a bound owner.
 def load_extensions(
     *,
     surface: bool = False,
     report: load_report.Reporter | None = None,
     catalog: ModelCatalog | None = None,
+    provider_keys: ProviderKeys | None = None,
     authority: ConfigAuthority | None = None,
     clock_factory: Callable[[], Clock] | None = None,
     producer: Callable[[], object] | None = None,
     validate_state: StateGate | None = None,
 ) -> LoadedExtensions:
-    """Read plugins_config.json, import the enabled plugins' faces, install what they declare.
-
-    Full form (`surface=False`, the default): uninstall the previous round's SDK surface, import every
-    enabled plugin's `plugin.py` followed by its `agent_runtime.py` face, build the gated registry of
-    what the faces declare and install its SDK surface into `meiva` (the one place `meiva` is written:
-    `meiva.sdk_surface.install`). Called at host boot and by the agent-side tooling. The returned registry
-    holds the plugins admitted — one the install refused (a namespace conflict, a bad wrap target, a
-    config that does not bind) is reported and absent.
-
-    Surface form (`surface=True`): import only the `plugin.py` surfaces and install the surface-only
-    registry — the load an agent-launched child runs. No uninstall: a child loads once per process and
-    never runs the agent runtime, and the graph/LM stacks stay off its boot path.
-
-    Contained plugin failures go to ``report`` (see `import_faces`). Model and configuration consumers
-    receive their composition root's explicit ``catalog`` and ``authority``. Inventory-only loads
-    supply neither; accessing those SDK capabilities still requires a bound owner.
-    """
     previous = sdk_install.uninstall() if not surface else None
     sampling = None
     if previous is not None:
@@ -66,6 +68,7 @@ def load_extensions(
         report,
         config_images=loaded.config_images,
         catalog=catalog,
+        provider_keys=provider_keys,
         authority=authority,
         producer=producer,
         sampling=sampling,

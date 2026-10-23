@@ -42,6 +42,7 @@ from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import ModelOverrides
 from base.lm.catalog import ModelCatalog
+from base.packages.tests.model_catalog import inert_keys
 from services.derived.labeler.labeler import generate_label_async
 from services.derived.labeler.labeler import rejection_reason as _reason_for
 from services.derived.labeler.labeler import system_prompt as _prompt_for
@@ -311,6 +312,7 @@ class TestGenerateLabelRejectsNonLabels:
             event_bus,
             build_chat_model=_fake_builder(raw),
             catalog=model_catalog,
+            keys=inert_keys(model_catalog),
             llm_override=config_authority.runtime.lm.llm_override,
             overrides=ModelOverrides.from_pins({}),
         )
@@ -344,6 +346,7 @@ class TestGenerateLabelRejectsNonLabels:
                 "\u9a8c\u8bc1\u9884\u89c8\u96c6\u7fa4\u65f6\u533a\u7edf\u4e00\u5e76\u6d4b\u8bd5SDK"
             ),
             catalog=model_catalog,
+            keys=inert_keys(model_catalog),
             llm_override=config_authority.runtime.lm.llm_override,
             overrides=ModelOverrides.from_pins({}),
         )
@@ -382,6 +385,7 @@ async def test_generated_label_overwrites_stray_empty_string(
         event_bus,
         build_chat_model=_fake_builder("ui docs fix"),
         catalog=model_catalog,
+        keys=inert_keys(model_catalog),
         llm_override=config_authority.runtime.lm.llm_override,
         overrides=ModelOverrides.from_pins({}),
     )
@@ -417,6 +421,7 @@ async def test_empty_string_label_with_user_sticky_bit_is_never_overwritten(
         event_bus,
         build_chat_model=_fake_builder("ui docs fix"),
         catalog=model_catalog,
+        keys=inert_keys(model_catalog),
         llm_override=config_authority.runtime.lm.llm_override,
         overrides=ModelOverrides.from_pins({}),
     )
@@ -463,6 +468,7 @@ async def test_label_generation_logs_batch_usage_for_the_target_agent(
             event_bus,
             build_chat_model=_build_usage_llm,
             catalog=model_catalog,
+            keys=inert_keys(model_catalog),
             llm_override=config_authority.runtime.lm.llm_override,
             overrides=ModelOverrides.from_pins({}),
         )

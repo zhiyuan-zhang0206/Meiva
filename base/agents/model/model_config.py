@@ -10,18 +10,21 @@ from base.config.agent_pins import resolve_agent_config_pins
 from base.config.service_read import ConfigAuthority
 from base.lm import factory
 from base.lm.catalog import ModelCatalog
+from base.lm.catalog.provider_keys import ProviderKeys
 
 
+# meiva:note
+# Check the model, effort and provider key a plain birth or inherited fork will run.
 def validate_spawn_model_config(
     cur: psycopg.Cursor,
     config: dict[str, object] | None,
     fork_from: int | None = None,
     *,
     catalog: ModelCatalog,
+    keys: ProviderKeys,
     llm_override: str,
     authority: ConfigAuthority,
 ) -> str:
-    """Check the model and effort a plain birth or inherited fork will run."""
     inherited = None
     if fork_from is not None:
         cur.execute("SELECT birth_config FROM agents_meta WHERE id=%s", (fork_from,))
@@ -33,9 +36,10 @@ def validate_spawn_model_config(
         birth = resolve_birth_config(
             cur, config, inherited=inherited, catalog=catalog, authority=authority
         )
-        return factory.validate_model_config(
+        return factory.validate_model_launch(
             config=resolve_agent_config_pins(config, birth),
             catalog=catalog,
+            keys=keys,
             llm_override=llm_override,
         )
     except ValueError as exc:
@@ -48,7 +52,6 @@ def validate_restart_model_config(
     overlay: Mapping[str, object],
     *,
     catalog: ModelCatalog,
-    llm_override: str,
     default_model: str,
 ) -> None:
     """Lock and check overlay > stored overlay > birth before changing either field.
@@ -73,9 +76,7 @@ def validate_restart_model_config(
         factory.validate_model_config(
             model=pins.get("llm_model", default_model),
             config=pins,
-            check_provider_key=False,
             catalog=catalog,
-            llm_override=llm_override,
         )
     except ValueError as exc:
         raise InvalidModelConfig(str(exc)) from exc

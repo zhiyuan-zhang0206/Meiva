@@ -21,6 +21,7 @@ from base.events.live.bus import EventBus
 from base.host.env.agent_slices import ModelOverrides
 from base.lm import usage
 from base.lm.catalog import ModelCatalog
+from base.packages.tests.model_catalog import inert_keys
 from services.derived.labeler import daemon, labeler
 from services.derived.labeler.tests.slices import labeler_config, labeler_db
 
@@ -59,6 +60,7 @@ async def _generate(
         bus,
         build_chat_model=build_chat_model,
         catalog=catalog,
+        keys=inert_keys(catalog),
         llm_override=authority.runtime.lm.llm_override,
         overrides=ModelOverrides.from_pins({}),
     )
@@ -324,6 +326,7 @@ async def test_dispatch_failure_stops_the_batch_without_rewriting_inbounds(
                 labeler_config(),
                 build_chat_model=_install_llm(),
                 catalog=model_catalog,
+                keys=inert_keys(model_catalog),
                 llm_override=config_authority.runtime.lm.llm_override,
                 overrides=ModelOverrides.from_pins({}),
             )
@@ -381,6 +384,7 @@ async def test_poll_failure_reaches_service_owner_without_retry(
                 labeler_config(),
                 build_chat_model=_install_llm(),
                 catalog=model_catalog,
+                keys=inert_keys(model_catalog),
                 llm_override=config_authority.runtime.lm.llm_override,
                 overrides=ModelOverrides.from_pins({}),
             )
@@ -456,6 +460,7 @@ async def test_injected_factory_preserves_the_transport_failure_boundary(
             event_bus,
             build_chat_model=build,
             catalog=model_catalog,
+            keys=inert_keys(model_catalog),
             llm_override=config_authority.runtime.lm.llm_override,
             overrides=overrides,
         )

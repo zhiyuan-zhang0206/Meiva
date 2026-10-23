@@ -246,6 +246,7 @@ class AgentHost:
                 rejected=self._rejected_configs,
                 normalized=self._normalized_configs,
                 catalog=self._catalog,
+                keys=self._policy.provider_keys,
                 llm_override=self._policy.llm_override(),
                 default_model=self._policy.default_model,
             ):
@@ -469,6 +470,7 @@ class AgentHost:
             fingerprint,
             slices,
             catalog=self._catalog,
+            keys=self._policy.provider_keys,
             llm_override=self._policy.llm_override(),
             harness=harness,
             registry=self._harness_registry,
@@ -559,6 +561,7 @@ class AgentHost:
             ops_pool=self._pool,
             llm=runtime.llm,
             catalog=self._catalog,
+            provider_keys=self._policy.provider_keys,
             event_publisher=event_publisher,
             db=self._db,
             clock_factory=self._policy.clock_factory,

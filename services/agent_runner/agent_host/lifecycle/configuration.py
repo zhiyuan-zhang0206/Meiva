@@ -15,6 +15,7 @@ from base.clock.configuration import clock_config_from_boot
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot
+from base.lm.catalog.provider_keys import ProviderKeys
 from base.native_process.loaded_commit import LoadedCommit
 from base.paths.home import resolve_meiva_home
 from base.telemetry.process_logging import init_gateway_process
@@ -39,8 +40,9 @@ def boot_process() -> tuple[ConfigBoot, Path]:
     return config, home
 
 
-def host_policy(config: ConfigBoot) -> HostPolicy:
+def host_policy(config: ConfigBoot, *, keys: ProviderKeys) -> HostPolicy:
     return HostPolicy(
+        provider_keys=keys,
         max_concurrent_turns=config.view.daemon.host_max_concurrent_turns,
         cache=lambda: HostCachePolicy(
             idle_ttl_seconds=config.view.daemon.host_agent_idle_ttl_seconds,
@@ -87,6 +89,7 @@ def load_installation(
 ) -> Installation:
     from base.config import Settings
     from base.config.service_read import ConfigAuthority
+    from base.lm.factory import process_provider_keys
     from base.packages.plugin_providers import build_model_catalog
     from meiva.sdk_surface.installation import installed
 
@@ -97,8 +100,10 @@ def load_installation(
         authority = ConfigAuthority.deferred(
             runtime=config.view, build_all_domains=lambda: Settings(profile=None), env_path=env_path
         )
+    catalog = build_model_catalog()
     load_extensions(
-        catalog=build_model_catalog(),
+        catalog=catalog,
+        provider_keys=process_provider_keys(catalog),
         authority=authority,
         producer=producer,
         clock_factory=lambda: Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS),

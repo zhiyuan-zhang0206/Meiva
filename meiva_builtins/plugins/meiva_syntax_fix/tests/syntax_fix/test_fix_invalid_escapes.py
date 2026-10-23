@@ -6,6 +6,7 @@ from langchain_core.runnables import RunnableConfig
 from agent.state import AgentState
 from base.config.tests.configuration import model_overrides
 from base.lm.catalog import ModelCatalog
+from base.packages.tests.model_catalog import inert_keys
 from meiva_builtins.plugins.meiva_syntax_fix._deterministic_fixes import (
     fix_bracket_matching,
     fix_fstring_expressions,
@@ -362,7 +363,10 @@ class TestLlmRepairSyntax:
     @staticmethod
     def _inputs(model_catalog: ModelCatalog, llm_override: str) -> RepairInputs:
         return RepairInputs(
-            catalog=model_catalog, overrides=model_overrides(), llm_override=llm_override
+            catalog=model_catalog,
+            keys=inert_keys(model_catalog),
+            overrides=model_overrides(),
+            llm_override=llm_override,
         )
 
     async def test_returns_repaired_text(self, model_catalog: ModelCatalog):

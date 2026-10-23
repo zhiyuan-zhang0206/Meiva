@@ -8,13 +8,14 @@ from base.config import ConfigBoot
 from base.db import Database
 from base.host.env.agent_slices import ModelOverrides
 from base.lm.catalog import ModelCatalog
+from base.lm.catalog.provider_keys import ProviderKeys
 from base.lm.decision.call import decide
 from base.lm.effort import ReasoningEffort
-from base.lm.factory import build_chat_model
 from gateway.agents.history.timeline import load_current_timeline_items
 from gateway.agents.reply_suggestion.service import (
     DRAFT_TIMEOUT_S,
     DraftRuntime,
+    ModelReaders,
     ReplySuggestionPolicy,
     ReplySuggestionService,
 )
@@ -40,13 +41,14 @@ def reply_suggestion_service(
     *,
     db: Database,
     catalog_reader: Callable[[], ModelCatalog],
+    keys_reader: Callable[[ModelCatalog], ProviderKeys],
     rendering: TimelineReadInputs,
-    model_builder: Callable[..., object] = build_chat_model,
+    model_builder: Callable[..., object],
 ) -> ReplySuggestionService:
 
     policy = reply_suggestion_policy(config)
 
-    def draft_model(model: str, catalog: ModelCatalog) -> Any:
+    def draft_model(model: str, catalog: ModelCatalog, keys: ProviderKeys) -> Any:
 
         return model_builder(
             model,
@@ -54,13 +56,14 @@ def reply_suggestion_service(
             timeout=DRAFT_TIMEOUT_S,
             meter=False,
             catalog=catalog,
+            keys=keys,
             llm_override=config.view.lm.llm_override,
             overrides=ModelOverrides.from_pins({}),
         )
 
     return ReplySuggestionService(
         policy=policy,
-        catalog_reader=catalog_reader,
+        models=ModelReaders(catalog=catalog_reader, keys=keys_reader),
         load_timeline=lambda agent_id: load_current_timeline_items(db, agent_id, inputs=rendering),
         agent_status=lambda agent_id: get_agent_status(db, agent_id),
         decide=decide,

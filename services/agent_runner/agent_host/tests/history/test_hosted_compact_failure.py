@@ -124,9 +124,6 @@ def _build_host_driving_invoke_until_done(
         commands=CommandCatalog.system(skills=list),
     )
     monkeypatch.setattr(host, "_runtime_for", AsyncMock(return_value=object()))
-    monkeypatch.setattr(
-        "services.agent_runner.agent_host.runtime.validate_model_config", MagicMock()
-    )
 
     async def drive(
         target: int,

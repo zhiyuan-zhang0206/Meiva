@@ -26,6 +26,9 @@ from .installation import (
 from .installation import (
     model_catalog as model_catalog,
 )
+from .installation import (
+    provider_keys as provider_keys,
+)
 
 
 def clock() -> Clock:
