@@ -62,8 +62,6 @@ from meizel.state.ambient_state.module import (
     dotted,
     is_declarative_class,
     is_main_guard,
-    is_value_class,
-    module_statements,
     target_names,
 )
 from meizel.state.ambient_state.task_owner import owned_calls as owned_task_calls
@@ -160,7 +158,7 @@ def _is_exempt_callee(call: ast.Call, module: Module, callee: str) -> bool:
         or callee in allow.SINK_CALLEES
         or callee.endswith(allow.SINK_CALLEE_SUFFIXES)
         or _is_pure_method_chain(call, module)
-        or is_value_class(callee, module)
+        or module.is_value_class(callee)
     )
 
 
@@ -257,7 +255,7 @@ def _assignment_hits(
 
 def _wiring_heads(module: Module) -> set[str]:
     heads: set[str] = set()
-    for st in module_statements(module.tree.body):
+    for st in module.statements():
         if (
             isinstance(st, ast.Assign | ast.AnnAssign)
             and isinstance(st.value, ast.Call)
@@ -291,7 +289,7 @@ def _decorator_hit(st: ast.FunctionDef | ast.AsyncFunctionDef) -> list[Hit]:
 def _module_level_hits(module: Module, mutated: set[str]) -> list[Hit]:
     hits: list[Hit] = []
     heads = _wiring_heads(module)
-    for st in module_statements(module.tree.body):
+    for st in module.statements():
         if isinstance(st, ast.Assign | ast.AnnAssign):
             hits.extend(_assignment_hits(st, module, mutated))
         elif isinstance(st, ast.Expr):

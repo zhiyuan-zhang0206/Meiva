@@ -108,6 +108,23 @@ class Repo:
     modules: dict[str, str]  # dotted name -> its file (a directory for a namespace package)
     by_path: dict[str, str]  # a module file or package directory -> dotted name
 
+    # meiva:note
+    # Package `__init__` files that import the symbol at their top level, followed in turn.
+    def find_doors(self, module: str, name: str) -> list[Door]:
+        inits = {p: m for p, m in self.by_path.items() if p.endswith("/__init__.py")}
+        doors: list[Door] = []
+        seen = {(module, name)}
+        queue = [(module, name)]
+        while queue:
+            origin, bound = queue.pop()
+            for path, package in inits.items():
+                found = _reexport(self.texts[path], package, origin, bound)
+                if found is not None and (package, found[1]) not in seen:
+                    seen.add((package, found[1]))
+                    queue.append((package, found[1]))
+                    doors.append(Door(package, found[1], f"{path}:{found[0]}"))
+        return doors
+
 
 @dataclass(frozen=True)
 class Target:
@@ -328,23 +345,6 @@ def _resolve_from(node: ast.ImportFrom, current: str | None, *, is_pkg: bool) ->
     if node.module:
         parts.append(node.module)
     return ".".join(parts) or None
-
-
-def find_doors(repo: Repo, module: str, name: str) -> list[Door]:
-    """Package `__init__` files that import the symbol at their top level, followed in turn."""
-    inits = {p: m for p, m in repo.by_path.items() if p.endswith("/__init__.py")}
-    doors: list[Door] = []
-    seen = {(module, name)}
-    queue = [(module, name)]
-    while queue:
-        origin, bound = queue.pop()
-        for path, package in inits.items():
-            found = _reexport(repo.texts[path], package, origin, bound)
-            if found is not None and (package, found[1]) not in seen:
-                seen.add((package, found[1]))
-                queue.append((package, found[1]))
-                doors.append(Door(package, found[1], f"{path}:{found[0]}"))
-    return doors
 
 
 def _reexport(text: str, package: str, origin: str, name: str) -> tuple[int, str] | None:

@@ -12,11 +12,17 @@ import json
 from dataclasses import asdict, dataclass
 
 from meizel.contracts.analysis import scan_all
-from meizel.contracts.debt import PATCH_CODES, target_under
+from meizel.contracts.debt import PATCH_CODES
 from meizel.graph.model import Code, MeizelError
 from meizel.graph.universe import Universe
 
-__all__ = ["Site", "format_sites", "sites"]
+__all__ = ["Site", "format_sites", "sites", "target_under"]
+
+
+# meiva:note
+# Whether the dotted `target` is `prefix` or inside it (`lib.mod` holds `lib.mod.f`, not `lib.mod2`).
+def target_under(target: str, prefix: str) -> bool:
+    return target == prefix or target.startswith(f"{prefix}.")
 
 
 @dataclass(frozen=True, slots=True)

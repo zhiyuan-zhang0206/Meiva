@@ -82,16 +82,14 @@ def classify_stop(
     if raw is None:
         if spec.status_key is not None and spec.status_key in metadata:
             status = metadata[spec.status_key]
-            mapped = (
-                spec.status_map.get(status)
-                if spec.status_map is not None and isinstance(status, str)
-                else None
-            )
-            if mapped is not None:
-                return mapped, status
+            if spec.status_map is not None and isinstance(status, str):
+                mapped = spec.status_map.get(status)
+                if mapped is not None:
+                    return mapped, status
         return StopCategory.CORRUPTED, None
-    if raw in spec.normal:
-        return StopCategory.NORMAL, raw
-    if raw in spec.truncated:
-        return StopCategory.TRUNCATED, raw
-    return StopCategory.UNEXPECTED, raw
+    raw_str = raw if isinstance(raw, str) else str(raw)
+    if raw_str in spec.normal:
+        return StopCategory.NORMAL, raw_str
+    if raw_str in spec.truncated:
+        return StopCategory.TRUNCATED, raw_str
+    return StopCategory.UNEXPECTED, raw_str

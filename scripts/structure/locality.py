@@ -38,7 +38,7 @@ def _new_site_message(kind: str, target: str) -> str:
     if kind == path_imports.SECTION:
         return f"imports by file path (`{target}`) — {path_imports.FIX}"
     if kind == ambient_state.SECTION:
-        return ambient_state.site_message(target)
+        return ambient_state.site_message(target) or ""
     return f"bypasses the single owner of `{target}` — {decisions.DECISIONS[target].fix}"
 
 
@@ -109,7 +109,11 @@ def _entry_scope(kind: str, scope: tuple[str, ...]) -> tuple[str, ...]:
 def _valid_target(kind: str, target: str) -> bool:
     if kind == "owner_bypasses":
         return target in decisions.DECISIONS
-    return ambient_state.is_target(target) if kind == ambient_state.SECTION else bool(target)
+    return (
+        ambient_state.site_message(target) is not None
+        if kind == ambient_state.SECTION
+        else bool(target)
+    )
 
 
 def validate_entries(kind: str, entries: object, scope: tuple[str, ...]) -> None:

@@ -11,7 +11,7 @@ from collections import defaultdict
 from collections.abc import Callable, Iterable
 from dataclasses import replace
 
-from meizel.contracts.debt import owner_hint, source_of, total
+from meizel.contracts.debt import source_of, total
 from meizel.contracts.manifest import Manifest
 from meizel.graph.model import Code, Diagnostic
 
@@ -37,7 +37,7 @@ def _excess(
     if recorded:
         notes.append(f"{recorded} recorded, {len(found)} found")
     if manifest is not None and manifest.debt:
-        notes.append(owner_hint(owner, manifest.debt))
+        notes.append(manifest.owner_hint())
     return [replace(d, hints=(*d.hints, *notes)) for d in found]
 
 

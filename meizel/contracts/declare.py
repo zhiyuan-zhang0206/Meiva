@@ -17,7 +17,7 @@ from pathlib import Path
 from meizel.contracts.analysis import Analysis, analyze
 from meizel.contracts.manifest import first, manifest_path, within
 from meizel.contracts.manifest_text import add_exports, add_uses
-from meizel.contracts.rule import Projection, is_private, relative
+from meizel.contracts.rule import Projection, is_private
 from meizel.graph.graphs import reachable
 from meizel.graph.model import Fact, MeizelError
 from meizel.graph.universe import is_private_module
@@ -110,7 +110,7 @@ def _edge_action(pairs: list[tuple[str, str]], proj: Projection) -> tuple[str, s
     added to that source; a fact from any other source is left for a person to judge, so narrowing
     is never widened silently.
     """
-    src, dst = relative(proj)
+    src, dst = proj.relative()
     if any(within(src, s) and within(dst, d) for s, d in pairs):
         return None
     narrowed = [(s, d) for s, d in pairs if (first(s), first(d)) == (proj.cf, proj.ct)]

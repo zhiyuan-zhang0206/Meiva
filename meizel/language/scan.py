@@ -160,7 +160,7 @@ class Scanner(PythonCommands):
 
     def run(self) -> FileScan:
         self.children(self.tree)
-        purity.record_module(self.purity_state, self.tree)
+        self.purity_state.record_module(self.tree)
         return FileScan(
             self.path,
             facts=list(dict.fromkeys(self.facts)),
@@ -170,9 +170,7 @@ class Scanner(PythonCommands):
             fixtures=self.fixture_state,
             imported=self.imported,
             purity=self.purity_state.items,
-            enum_subsets=purity.finalize_subsets(
-                self.purity_state.enum_subsets, self.purity_state.defined_classes
-            ),
+            enum_subsets=self.purity_state.finalize_subsets(),
         )
 
     def visit_compare(self, node: ast.Compare) -> None:
@@ -181,17 +179,17 @@ class Scanner(PythonCommands):
 
     def visit_import(self, node: ast.Import) -> None:
         super().visit_import(node)
-        purity.record_import(self.purity_state, node)
+        self.purity_state.record_import(node)
 
     def visit_import_from(self, node: ast.ImportFrom) -> None:
         super().visit_import_from(node)
-        purity.record_import_from(self.purity_state, node)
+        self.purity_state.record_import_from(node)
 
     def visit_name(self, node: ast.Name) -> None:
         super().visit_name(node)
         if isinstance(node.ctx, ast.Load):
             origin, _ = self.scope.find(node.id)
-            purity.record_env_access(self.purity_state, origin, node.lineno)
+            self.purity_state.record_env_access(origin, node.lineno)
 
     # --- traversal -----------------------------------------------------------------
 
@@ -226,7 +224,7 @@ class Scanner(PythonCommands):
             return
         self.restricted_attribute(origin, attrs, node.lineno)
         self.module_uses(origin, attrs, node.lineno)
-        purity.record_env_access(self.purity_state, ".".join([origin, *attrs]), node.lineno)
+        self.purity_state.record_env_access(".".join([origin, *attrs]), node.lineno)
 
     # --- scopes --------------------------------------------------------------------
 

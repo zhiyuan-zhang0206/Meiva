@@ -73,22 +73,23 @@ def is_main_guard(test: ast.expr) -> bool:
     )
 
 
-def module_statements(body: list[ast.stmt]) -> Iterator[ast.stmt]:
-    """Statements that run when the module imports: `if`/`try`/`with`/loops are
-    entered, an `if __name__ == "__main__":` block is not."""
+# meiva:note
+# Statements that run when the module imports: `if`/`try`/`with`/loops are
+# entered, an `if __name__ == "__main__":` block is not.
+def _module_statements(body: list[ast.stmt]) -> Iterator[ast.stmt]:
     for st in body:
         if isinstance(st, ast.If):
             if not is_main_guard(st.test):
-                yield from module_statements(st.body)
-                yield from module_statements(st.orelse)
+                yield from _module_statements(st.body)
+                yield from _module_statements(st.orelse)
         elif isinstance(st, ast.Try | ast.TryStar):
             for block in (st.body, *(h.body for h in st.handlers), st.orelse, st.finalbody):
-                yield from module_statements(block)
+                yield from _module_statements(block)
         elif isinstance(st, ast.With | ast.AsyncWith):
-            yield from module_statements(st.body)
+            yield from _module_statements(st.body)
         elif isinstance(st, ast.For | ast.AsyncFor | ast.While):
-            yield from module_statements(st.body)
-            yield from module_statements(st.orelse)
+            yield from _module_statements(st.body)
+            yield from _module_statements(st.orelse)
         else:
             yield st
 
@@ -243,7 +244,7 @@ def _is_value_class(cls: ast.ClassDef) -> bool:
 # ── one module ─────────────────────────────────────────────────────────────
 
 
-def module_name(rel: str) -> str:
+def _module_name(rel: str) -> str:
     parts = rel.removesuffix(".py").split("/")
     return ".".join(parts[:-1] if parts[-1] == "__init__" else parts)
 
@@ -268,13 +269,16 @@ class Module:
         self.tree = tree
         self.rel = rel
         self.repo_root = repo_root
-        self.qualifier = module_name(rel)
+        self.qualifier = _module_name(rel)
         self.imports: dict[str, tuple[str, str | None]] = {}
         self.defs: set[str] = set()
         self.string_constants: set[str] = set()
         self._classes: dict[str, ast.ClassDef] | None = None
-        for st in module_statements(tree.body):
+        for st in _module_statements(tree.body):
             self._bind(st)
+
+    def statements(self) -> Iterator[ast.stmt]:
+        return _module_statements(self.tree.body)
 
     def _bind(self, st: ast.stmt) -> None:
         if isinstance(st, ast.Import | ast.ImportFrom):
@@ -335,7 +339,7 @@ class Module:
         if self._classes is None:
             self._classes = {
                 st.name: st
-                for st in module_statements(self.tree.body)
+                for st in _module_statements(self.tree.body)
                 if isinstance(st, ast.ClassDef)
             }
         return self._classes
@@ -350,7 +354,7 @@ class Module:
         owner, _, name = full.rpartition(".")
         if not owner:
             return None
-        module = self if owner == self.qualifier else load(self.repo_root, owner)
+        module = self if owner == self.qualifier else _load(self.repo_root, owner)
         if module is None:
             return None
         found = module.classes().get(name)
@@ -359,9 +363,26 @@ class Module:
             return module.class_definition(".".join(filter(None, [origin, attr])), hops + 1)
         return (module, found) if found is not None else None
 
+    # meiva:note
+    # A repo value constructor, or its body-proven direct classmethod constructor.
+    # Factory proof uses the existing value-class form, not a return annotation or
+    # a method name. It does not prove constructor argument purity or deep immutability.
+    def is_value_class(self, callee: str) -> bool:
+        cls = self.find_class(callee)
+        if cls is not None:
+            return _is_value_class(cls)
+        receiver, _, method_name = callee.rpartition(".")
+        definition = self.class_definition(receiver)
+        if definition is None or not _is_value_class(definition[1]):
+            return False
+        owner, cls = definition
+        method = _direct_classmethod(owner, cls, method_name)
+        return method is not None and _returns_bound_class(method)
 
-def load(repo_root: Path, dotted_name: str) -> Module | None:
-    """The first-party module `dotted_name` names, parsed once per file version."""
+
+# meiva:note
+# The first-party module `dotted_name` names, parsed once per file version.
+def _load(repo_root: Path, dotted_name: str) -> Module | None:
     base = repo_root.joinpath(*dotted_name.split("."))
     for path in (base.with_suffix(".py"), base / "__init__.py"):
         try:
@@ -376,24 +397,6 @@ def load(repo_root: Path, dotted_name: str) -> Module | None:
             _PARSED[stamp] = Module(tree, path.relative_to(repo_root).as_posix(), repo_root)
         return _PARSED[stamp]
     return None
-
-
-def is_value_class(callee: str, module: Module) -> bool:
-    """A repo value constructor, or its body-proven direct classmethod constructor.
-
-    Factory proof uses the existing value-class form, not a return annotation or
-    a method name. It does not prove constructor argument purity or deep immutability.
-    """
-    cls = module.find_class(callee)
-    if cls is not None:
-        return _is_value_class(cls)
-    receiver, _, method_name = callee.rpartition(".")
-    definition = module.class_definition(receiver)
-    if definition is None or not _is_value_class(definition[1]):
-        return False
-    owner, cls = definition
-    method = _direct_classmethod(owner, cls, method_name)
-    return method is not None and _returns_bound_class(method)
 
 
 def _class_binding_names(st: ast.stmt) -> set[str]:
@@ -417,7 +420,7 @@ def _direct_classmethod(
     method = members[0]
     if any(
         _class_binding_names(st) & {method_name, "classmethod"}
-        for st in module_statements(cls.body)
+        for st in _module_statements(cls.body)
         if st is not method
     ):
         return None

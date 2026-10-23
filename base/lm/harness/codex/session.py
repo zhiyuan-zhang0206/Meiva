@@ -12,11 +12,10 @@ from uuid import uuid4
 from base.lm.harness.codex.auth import session_env
 from base.lm.harness.codex.config import CodexConfig
 from base.lm.harness.codex.mapping import (
+    TurnFields,
     approval_denial,
     assistant_text,
-    is_final_answer,
     item_event,
-    parse_turn,
     reasoning_delta,
     text_delta,
     usage_from,
@@ -604,7 +603,7 @@ class CodexSession:
     def _record_text(self, turn_id: str, item: JsonObject, text: str) -> None:
         if (ticket := self._ticket_for(turn_id)) is not None:
             ticket.parts.append(text)
-            if is_final_answer(item):
+            if assistant_text(item, final_only=True) is not None:
                 self._final_parts.setdefault(turn_id, []).append(text)
 
     def _handle_turn_completed(self, params: JsonObject) -> None:
@@ -625,7 +624,7 @@ class CodexSession:
                 )
             )
             return
-        fields = parse_turn(turn)
+        fields = TurnFields.parse(turn)
         usage = self._turn_usage.pop(ticket.turn_id, Usage())
         steps = tuple(self._turn_steps.pop(ticket.turn_id, ()))
         num_turns = max(len(steps), 1)

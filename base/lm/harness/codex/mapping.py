@@ -77,16 +77,13 @@ def _reasoning(item: Mapping[str, object], phase: str, turn_id: str) -> list[Bri
     return []
 
 
-def assistant_text(item: Mapping[str, object]) -> str | None:
+def assistant_text(item: Mapping[str, object], *, final_only: bool = False) -> str | None:
     if as_text(item.get("type")) != "agentMessage":
+        return None
+    if final_only and item.get("phase") not in {None, "final_answer"}:
         return None
     text = as_text(item.get("text"))
     return text or None
-
-
-def is_final_answer(item: Mapping[str, object]) -> bool:
-    phase = item.get("phase")
-    return phase is None or phase == "final_answer"
 
 
 # meiva:note
@@ -113,13 +110,13 @@ class TurnFields:
     error_message: str | None
     duration_ms: int
 
-
-def parse_turn(turn: Mapping[str, object]) -> TurnFields:
-    return TurnFields(
-        status=as_text(turn.get("status")) or "unknown",
-        error_message=as_text(as_object(turn.get("error")).get("message")),
-        duration_ms=as_int(turn.get("durationMs")) or 0,
-    )
+    @classmethod
+    def parse(cls, turn: Mapping[str, object]) -> TurnFields:
+        return cls(
+            status=as_text(turn.get("status")) or "unknown",
+            error_message=as_text(as_object(turn.get("error")).get("message")),
+            duration_ms=as_int(turn.get("durationMs")) or 0,
+        )
 
 
 def approval_denial(method: str, params: Mapping[str, object]) -> str:

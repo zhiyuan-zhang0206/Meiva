@@ -30,17 +30,11 @@ __all__ = [
     "PURITY_CODES",
     "TABLE_KEY",
     "DebtTable",
-    "edge_key",
     "file_key",
-    "listing",
     "local_edge",
-    "owner_hint",
     "parse_debt",
-    "render_debt",
     "set_debt",
     "source_of",
-    "target_of",
-    "target_under",
     "total",
 ]
 
@@ -89,12 +83,6 @@ def _within(owner: str, path: str) -> str:
     return path[len(owner) + 1 :] if owner else path
 
 
-def edge_key(owner: str, src: str, dst: str, name: str | None = None) -> str:
-    """`src -> dst`, or `src -> dst#name` for a private name, relative to the owning directory."""
-    key = f"{_within(owner, src)}{_SEPARATOR}{_within(owner, dst)}"
-    return f"{key}#{name}" if name else key
-
-
 def file_key(owner: str, path: str, what: str) -> str:
     """`file#what`, relative to the owning directory."""
     return f"{_within(owner, path)}#{what}"
@@ -104,16 +92,6 @@ def source_of(owner: str, code: Code, key: str) -> str:
     """The repository path of the file a debt is about."""
     head = key.split(_SEPARATOR, 1)[0] if code in _EDGE_CODES else key.split("#", 1)[0]
     return f"{owner}/{head}" if owner else head
-
-
-def target_of(key: str) -> str:
-    """The target of a patch entry `file#form target`."""
-    return key.partition("#")[2].partition(" ")[2]
-
-
-def target_under(target: str, prefix: str) -> bool:
-    """Whether the dotted `target` is `prefix` or inside it (`lib.mod` holds `lib.mod.f`, not `lib.mod2`)."""
-    return target == prefix or target.startswith(f"{prefix}.")
 
 
 def local_edge(key: str) -> tuple[str, str]:
@@ -176,29 +154,13 @@ def _valid_entries(
     return kept
 
 
-def listing(table: DebtTable) -> list[tuple[Code, str, int]]:
-    """Every `(code, key, count)` in baseline order: by code, then by key."""
-    return [
-        (code, key, n) for code in sorted(table, key=str) for key, n in sorted(table[code].items())
-    ]
-
-
 def total(table: DebtTable) -> int:
     return sum(count for rows in table.values() for count in rows.values())
 
 
-def owner_hint(owner: str, table: DebtTable) -> str:
-    """Why a violation in a directory that carries debt fails: it is strict-to-be."""
-    where = owner or "."
-    return (
-        f"{where} is strict-to-be: it carries {total(table)} recorded locality debts that must only "
-        "shrink. Fix this violation rather than recording it; `python -m meizel debt record` "
-        "exists for deliberate exceptions."
-    )
-
-
-def render_debt(table: DebtTable) -> str:
-    """The `[debt.<code>]` tables for `table`, sorted, one debt per line; empty when none."""
+# meiva:note
+# The `[debt.<code>]` tables for `table`, sorted, one debt per line; empty when none.
+def _render_debt(table: DebtTable) -> str:
     blocks = [
         f"[debt.{code}]\n"
         + "\n".join(
@@ -225,7 +187,7 @@ def set_debt(text: str, table: DebtTable) -> str:
     while kept and not kept[-1].strip():
         kept.pop()
     base = "\n".join(kept)
-    debt = render_debt(table)
+    debt = _render_debt(table)
     if not debt:
         return base + "\n" if base else ""
     return f"{base}\n\n{debt}" if base else debt

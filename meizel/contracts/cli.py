@@ -32,11 +32,12 @@ from meizel.contracts.sync import prune
 from meizel.graph.model import Diagnostic, MeizelError
 from meizel.graph.universe import load_universe, toplevel
 
-__all__ = ["main", "relative_target"]
+__all__ = ["main"]
 
 
-def relative_target(root: Path, base: Path, raw: str) -> str:
-    """A repository-relative POSIX path for a path given relative to `base`."""
+# meiva:note
+# A repository-relative POSIX path for a path given relative to `base`.
+def _relative_target(root: Path, base: Path, raw: str) -> str:
     resolved = (base / raw).resolve()
     try:
         rel = resolved.relative_to(root.resolve())
@@ -49,7 +50,7 @@ def _within(path: str, targets: list[str]) -> bool:
     return any(not t or path == t or path.startswith(f"{t}/") for t in targets)
 
 
-def select(analysis: Analysis, targets: list[str]) -> list[Diagnostic]:
+def _select(analysis: Analysis, targets: list[str]) -> list[Diagnostic]:
     unique = {(d.path, d.line, d.code, d.message): d for d in analysis.verdict}
     chosen = [d for d in unique.values() if not targets or _within(d.path, targets)]
     return sorted(chosen, key=lambda d: (d.path, d.line, d.code, d.message))
@@ -67,7 +68,7 @@ def _print_verdict(diagnostics: list[Diagnostic], limit: int | None) -> None:
     print(f"meizel: {len(diagnostics)} violations{omitted} [{detail}]", file=sys.stderr)
 
 
-def run_check(
+def _run_check(
     root: Path,
     base: Path,
     raw_paths: list[str],
@@ -77,14 +78,14 @@ def run_check(
 ) -> int:
     if changed is not None and raw_paths:
         raise MeizelError("--changed judges the files it names; it cannot be combined with paths")
-    targets = [relative_target(root, base, p) for p in raw_paths]
-    only = None if changed is None else frozenset(relative_target(root, base, p) for p in changed)
+    targets = [_relative_target(root, base, p) for p in raw_paths]
+    only = None if changed is None else frozenset(_relative_target(root, base, p) for p in changed)
     analysis = analyze(root, jobs=jobs, changed=only)
     known = analysis.universe
     for raw, target in zip(raw_paths, targets, strict=True):
         if target and target not in known.files and target not in known.dirs:
             raise MeizelError(f"{raw}: not a tracked file or directory")
-    diagnostics = select(analysis, targets)
+    diagnostics = _select(analysis, targets)
     if diagnostics:
         _print_verdict(diagnostics, limit)
         return 1
@@ -107,7 +108,7 @@ def _ok_line(analysis: Analysis) -> str:
     )
 
 
-def build_parser() -> argparse.ArgumentParser:
+def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="python -m meizel", description=__doc__)
     parser.add_argument(
         "--repo", type=Path, help="repository root (default: the cwd's git toplevel)"
@@ -135,7 +136,7 @@ def build_parser() -> argparse.ArgumentParser:
     sync.add_argument("paths", nargs="*", help="with --declare: only dependencies of these paths")
     seed = commands.add_parser("bootstrap", help="generate manifests from current facts")
     seed.add_argument("--out", type=Path, required=True, help="directory to mirror manifests into")
-    add_debt_parser(commands)
+    _add_debt_parser(commands)
     policy = commands.add_parser("policy", help="the allowance lists in meizel.policy.toml")
     policy_modes = policy.add_subparsers(dest="policy_mode", required=True)
     policy_diff = policy_modes.add_parser("diff", help="list the entries changed against a git ref")
@@ -149,7 +150,7 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def add_debt_parser(commands: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+def _add_debt_parser(commands: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     debt = commands.add_parser(
         "debt",
         help="recorded locality debt (alone: a read-only summary)",
@@ -276,7 +277,7 @@ def _run_record(root: Path, targets: list[str], jobs: int | None) -> int:
     return 0
 
 
-def run_debt(root: Path, base: Path, args: argparse.Namespace, jobs: int | None) -> int:
+def _run_debt(root: Path, base: Path, args: argparse.Namespace, jobs: int | None) -> int:
     mode = args.debt_mode
     if mode is None:
         print(summarize(root, as_json=args.json))
@@ -289,7 +290,7 @@ def run_debt(root: Path, base: Path, args: argparse.Namespace, jobs: int | None)
         return 0
     if mode == "sites":
         universe = load_universe(root)
-        scopes = [relative_target(root, base, p) for p in args.paths]
+        scopes = [_relative_target(root, base, p) for p in args.paths]
         found = sites(universe, args.code, args.target_prefix, scopes, jobs)
         print(format_sites(found, as_json=args.as_json))
         return 0
@@ -304,10 +305,10 @@ def run_debt(root: Path, base: Path, args: argparse.Namespace, jobs: int | None)
                 "meizel: nothing to carry: no renamed file, target or moved symbol has recorded debt"
             )
         return 0
-    return _run_record(root, [relative_target(root, base, p) for p in args.paths], jobs)
+    return _run_record(root, [_relative_target(root, base, p) for p in args.paths], jobs)
 
 
-def run_sync(root: Path, base: Path, args: argparse.Namespace) -> int:
+def _run_sync(root: Path, base: Path, args: argparse.Namespace) -> int:
     if not (args.prune or args.declare):
         raise MeizelError("sync needs --prune or --declare")
     if args.paths and not args.declare:
@@ -318,7 +319,7 @@ def run_sync(root: Path, base: Path, args: argparse.Namespace) -> int:
     if args.declare:
         for line in prune_debt(root, args.jobs):
             print(line)
-        targets = [relative_target(root, base, p) for p in args.paths] if args.paths else None
+        targets = [_relative_target(root, base, p) for p in args.paths] if args.paths else None
         lines, left = declare(root, targets, args.jobs)
         for line in lines:
             print(line)
@@ -333,7 +334,7 @@ def run_sync(root: Path, base: Path, args: argparse.Namespace) -> int:
     return 0
 
 
-def run_roles(root: Path, args: argparse.Namespace) -> int:
+def _run_roles(root: Path, args: argparse.Namespace) -> int:
     if args.mode == "list":
         for name in role_api.packages(*args.role_names, root=root):
             print(name)
@@ -353,14 +354,14 @@ def run_roles(root: Path, args: argparse.Namespace) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
+    args = _build_parser().parse_args(argv)
     try:
         base = args.repo if args.repo is not None else Path.cwd()
         root = args.repo if args.repo is not None else toplevel(base)
         if args.command == "check":
-            return run_check(root, base, args.paths, args.limit, args.jobs, args.changed)
+            return _run_check(root, base, args.paths, args.limit, args.jobs, args.changed)
         if args.command == "debt":
-            return run_debt(root, base, args, args.jobs)
+            return _run_debt(root, base, args, args.jobs)
         if args.command == "policy":
             for line in policy_changes(
                 policy_at(root, args.against), load_policy(load_universe(root))[0]
@@ -368,12 +369,12 @@ def main(argv: list[str] | None = None) -> int:
                 print(line)
             return 0
         if args.command == "explain":
-            print(explain(analyze(root, jobs=args.jobs), relative_target(root, base, args.path)))
+            print(explain(analyze(root, jobs=args.jobs), _relative_target(root, base, args.path)))
             return 0
         if args.command == "roles":
-            return run_roles(root, args)
+            return _run_roles(root, args)
         if args.command == "sync":
-            return run_sync(root, base, args)
+            return _run_sync(root, base, args)
         print(bootstrap(root, args.out, args.jobs))
         return 0
     except MeizelError as error:

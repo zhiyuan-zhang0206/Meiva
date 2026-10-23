@@ -22,10 +22,10 @@ def _legacy_parse_frontmatter(text: str) -> tuple[dict[str, Any], str]:
 
 
 def test_parse_frontmatter_equivalent_to_legacy_on_repo_bundles() -> None:
-    from base.packages.docs.okf_graph import find_files, parse_frontmatter
+    from base.packages.docs.okf_graph import build_graph_data, parse_frontmatter
 
     repo_root = Path(__file__).resolve().parents[3]
-    bundles = find_files(repo_root)
+    bundles = [str(node["id"]) for node in build_graph_data(repo_root)["nodes"]]
     assert bundles, "repo has no .meiva.okf.md bundles — fixture assumption broken"
 
     for rel in bundles:

@@ -2,6 +2,7 @@ exports = ["graphs.py", "imports.py", "model.py", "scopes.py", "universe.py"]
 
 [purity]
 "." = "strict-to-be"
+"graphs.py" = "strict"
 "imports.py" = "strict"
 "model.py" = "strict"
 "scopes.py" = "strict"
@@ -16,6 +17,3 @@ exports = ["graphs.py", "imports.py", "model.py", "scopes.py", "universe.py"]
 
 [debt.wide-exports]
 "meizel.toml#exports" = 1
-
-[debt.wide-public-surface]
-"graphs.py#public-surface" = 1

@@ -30,6 +30,20 @@ class Drift:
     extra_columns: list[tuple[str, str, str]] = field(default_factory=list[tuple[str, str, str]])
     missing_columns: list[tuple[str, str]] = field(default_factory=list[tuple[str, str]])
 
+    def render(self, declared: set[str]) -> str:
+        lines = ["# schema drift", ""]
+        for name in self.extra_tables:
+            lines.append(f"extra table   {name}  [{classify_table(name, declared)}]")
+        for table, column, meta in self.extra_columns:
+            lines.append(f"extra column  {table}.{column}  [{classify_column(meta)}]")
+        for name in self.missing_tables:
+            lines.append(f"missing table {name}")
+        for table, column in self.missing_columns:
+            lines.append(f"missing column {table}.{column}")
+        if len(lines) == 2:
+            lines.append("clean")
+        return "\n".join(lines)
+
 
 def strip_comments(sql: str) -> str:
     out: list[str] = []
@@ -117,7 +131,7 @@ def schema_columns(sql: str) -> dict[str, list[str]]:
     return tables
 
 
-def live_columns(conn: psycopg.Connection) -> dict[str, dict[str, str]]:
+def _live_columns(conn: psycopg.Connection) -> dict[str, dict[str, str]]:
     with conn.cursor() as cur:
         cur.execute(
             "SELECT table_name, column_name, is_nullable, column_default "
@@ -166,21 +180,6 @@ def classify_column(meta: str) -> str:
     if nullable == "NO" and not default:
         return "dangerous"
     return "historical"
-
-
-def render(drift: Drift, declared: set[str]) -> str:
-    lines = ["# schema drift", ""]
-    for name in drift.extra_tables:
-        lines.append(f"extra table   {name}  [{classify_table(name, declared)}]")
-    for table, column, meta in drift.extra_columns:
-        lines.append(f"extra column  {table}.{column}  [{classify_column(meta)}]")
-    for name in drift.missing_tables:
-        lines.append(f"missing table {name}")
-    for table, column in drift.missing_columns:
-        lines.append(f"missing column {table}.{column}")
-    if len(lines) == 2:
-        lines.append("clean")
-    return "\n".join(lines)
 
 
 def _parse_args(argv: list[str] | None) -> argparse.Namespace:
@@ -248,10 +247,10 @@ def main(argv: list[str] | None = None) -> int:
     schema = schema_columns(args.schema.read_text(encoding="utf-8"))
     with psycopg.connect(_dsn(args)) as conn:
         conn.read_only = True
-        live = live_columns(conn)
+        live = _live_columns(conn)
     declared = {name.lower() for name in schema}
     drift = _allowlisted(compare(schema, live), args.allow)
-    print(render(drift, declared))
+    print(drift.render(declared))
     if args.json is not None:
         args.json.write_text(json.dumps(_as_json(drift, declared), indent=2), encoding="utf-8")
     return int(_is_dirty(drift))

@@ -14,8 +14,8 @@ from meizel.contracts.debt import (
     TABLE_KEY,
     DebtTable,
     local_edge,
-    owner_hint,
     parse_debt,
+    total,
 )
 from meizel.graph.graphs import cycle_through, strongly_connected, unneeded_back_edges
 from meizel.graph.model import Code, Diagnostic
@@ -118,6 +118,16 @@ class Manifest:
     def back_edges(self) -> list[tuple[str, str]]:
         """The declared edges whose facts are recorded as closing a cycle."""
         return sorted(self.back)
+
+    # meiva:note
+    # Why a violation in a directory that carries debt fails: it is strict-to-be.
+    def owner_hint(self) -> str:
+        where = self.directory or "."
+        return (
+            f"{where} is strict-to-be: it carries {total(self.debt)} recorded locality debts that "
+            "must only shrink. Fix this violation rather than recording it; `python -m meizel debt "
+            "record` exists for deliberate exceptions."
+        )
 
 
 class _Reader:
@@ -372,7 +382,7 @@ class _Reader:
             src: tuple(t for t in targets if (src, t) not in carried)
             for src, targets in uses.items()
         }
-        hint = (owner_hint(self.directory, self.manifest.debt),) if self.manifest.debt else ()
+        hint = (self.manifest.owner_hint(),) if self.manifest.debt else ()
         for component in strongly_connected(base):
             cycle = cycle_through(base, component)
             line = self.manifest.line_of(cycle[0])

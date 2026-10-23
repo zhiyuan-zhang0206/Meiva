@@ -85,7 +85,6 @@ from scripts.audit.where_used_scan import (  # noqa: E402
     Target,
     build_matcher,
     file_hits,
-    find_doors,
     is_doc_file,
     load_repo,
     resolve,
@@ -189,7 +188,7 @@ def _name_matches(repo: Repo, target: Target, present: set[str]) -> list[Hit]:
 
 def scan(repo: Repo, target: Target) -> Report:
     """Every reference to `target`, grouped."""
-    doors = find_doors(repo, target.module, target.name) if target.name else []
+    doors = repo.find_doors(target.module, target.name) if target.name else []
     matcher = build_matcher(repo, target, doors)
     found: dict[tuple[str, int], Hit] = {}
     for path, text in repo.texts.items():

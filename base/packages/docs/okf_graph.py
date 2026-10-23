@@ -38,20 +38,21 @@ WIKILINK_RE = re.compile(r"\[\[([^\]|]+)(?:\|[^\]]*)?\]\]")
 DATA_PLACEHOLDER = "/*__GRAPH_DATA_JSON__*/"
 
 
-def posix(p: str) -> str:
+def _posix(p: str) -> str:
     return p.replace(os.sep, "/")
 
 
-def find_files(bundle_dir: str | Path) -> list[str]:
+def _find_files(bundle_dir: str | Path) -> list[str]:
     out: list[str] = []
     for root, dirs, files in os.walk(bundle_dir):
+        # meiva:note
         # `.github/` is walked despite being hidden: its overview node lives
         # inside it (`.github/.github.meiva.okf.md`). Every other hidden dir
         # (`.git`, `.venv`, `.claude`, worktrees, ...) stays excluded.
         dirs[:] = [d for d in dirs if (not d.startswith(".") or d == ".github") and d != ".git"]
         for f in files:
             if f.endswith(EXT):
-                rel = posix(os.path.relpath(str(Path(root) / f), bundle_dir))
+                rel = _posix(os.path.relpath(str(Path(root) / f), bundle_dir))
                 out.append(rel)
     return sorted(out)
 
@@ -76,23 +77,21 @@ def parse_frontmatter(text: str) -> tuple[dict[str, object], str]:
     return {}, text
 
 
-def find_root(all_paths: Iterable[str]) -> str | None:
-    """The bundle's single root node — the `index.meiva.okf.md` closest to the top.
-
-    In this repo the apex lives in the index layer (`docs/index.meiva.okf.md`),
-    which holds only cross-domain nodes — the domain overviews live with their
-    code, in the `docs/` layer of the directory they describe
-    (`agent/docs/agent.meiva.okf.md`, logical path `agent/agent.meiva.okf.md`,
-    for `agent/`). The shallowest `*/index.meiva.okf.md`
-    wins; ties break lexically, keeping the choice deterministic.
-
-    `None` when a bundle carries no index at all — every node is then a root of
-    its own subtree, which is the only sane reading of a bundle with no apex.
-    """
+# meiva:note
+# The bundle's single root node — the `index.meiva.okf.md` closest to the top.
+# In this repo the apex lives in the index layer (`docs/index.meiva.okf.md`),
+# which holds only cross-domain nodes — the domain overviews live with their
+# code, in the `docs/` layer of the directory they describe. The shallowest
+# `*/index.meiva.okf.md` wins; ties break lexically, keeping the choice
+# deterministic. `None` when a bundle carries no index at all.
+def _find_root(all_paths: Iterable[str]) -> str | None:
     candidates = [p for p in all_paths if Path(p).name == ROOT_NAME]
     if not candidates:
         return None
     return min(candidates, key=lambda p: (p.count("/"), p))
+
+
+_UNSET_ROOT = "\x00"
 
 
 def logical_path(path: str) -> str:
@@ -116,7 +115,7 @@ def logical_path(path: str) -> str:
     return path
 
 
-def compute_parent(path: str, all_paths: set[str], root: str | None) -> str | None:
+def compute_parent(path: str, all_paths: set[str], root: str | None = _UNSET_ROOT) -> str | None:
     """Hierarchy parent of `path`, resolved against the paths that actually exist.
 
     The rule is purely filesystem-derived, as `index.meiva.okf.md` documents,
@@ -134,7 +133,8 @@ def compute_parent(path: str, all_paths: set[str], root: str | None) -> str | No
     with exactly one root. Two physical paths sharing one logical path are a
     misplaced duplicate node and raise.
     """
-    if root is not None and path == root:
+    resolved_root = _find_root(all_paths) if root == _UNSET_ROOT else root
+    if resolved_root is not None and path == resolved_root:
         return None
 
     physical: dict[str, str] = {}
@@ -149,11 +149,11 @@ def compute_parent(path: str, all_paths: set[str], root: str | None) -> str | No
     logical = logical_path(path)
     directory = Path(logical).parent
     while directory != Path():
-        overview = posix(str(directory / (directory.name + EXT)))
+        overview = _posix(str(directory / (directory.name + EXT)))
         if overview != logical and overview in physical:
             return physical[overview]
         directory = directory.parent
-    return root
+    return resolved_root
 
 
 def resolve_wikilink(current_path: str, target: str, all_paths: set[str]) -> str | None:
@@ -174,8 +174,8 @@ def resolve_wikilink(current_path: str, target: str, all_paths: set[str]) -> str
         candidates.append(target + EXT)
     # Relative from current file's directory
     if cur_dir:
-        candidates.append(posix(os.path.normpath(str(Path(cur_dir) / target))))
-        candidates.append(posix(os.path.normpath(str(Path(cur_dir) / (target + EXT)))))
+        candidates.append(_posix(os.path.normpath(str(Path(cur_dir) / target))))
+        candidates.append(_posix(os.path.normpath(str(Path(cur_dir) / (target + EXT)))))
     # Absolute from bundle root
     candidates.append(target.lstrip("/"))
     candidates.append(target.lstrip("/") + EXT if not target.endswith(EXT) else target.lstrip("/"))
@@ -238,9 +238,9 @@ def build_graph_data(
     raw_links_out: list[tuple[str, str, str | None]] | None = None,
 ) -> OkfGraphData:
     bundle_dir = str(bundle_dir)
-    paths = find_files(bundle_dir)
+    paths = _find_files(bundle_dir)
     path_set = set(paths)
-    root = find_root(path_set)
+    root = _find_root(path_set)
 
     nodes: dict[str, dict[str, Any]] = {}
     raw_links: list[tuple[str, str, str | None]] = []
