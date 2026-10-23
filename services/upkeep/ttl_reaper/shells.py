@@ -40,6 +40,7 @@ import asyncio
 import functools
 import logging
 from collections import defaultdict
+from collections.abc import Callable, Coroutine
 from datetime import datetime
 from typing import Any
 
@@ -201,8 +202,17 @@ class _MachineAbsent:
     """Local registry evidence, never a verdict accepted from a runner payload."""
 
 
+ShellKillDispatcher = Callable[..., Coroutine[Any, Any, dict[str, Any]]]
+
+
 async def dispatch_shell_kill(
-    db: Database, machine: str, agent_id: int, session_id: int
+    db: Database,
+    machine: str,
+    agent_id: int,
+    session_id: int,
+    *,
+    dispatch_fn: ShellKillDispatcher = cluster_rpc.dispatch_to_machine,
+    deadline_s: float | None = None,
 ) -> dict[str, Any] | _MachineAbsent | None:
     """One ``shell_kill`` dispatch; None means "defer to the next round".
 
@@ -214,8 +224,8 @@ async def dispatch_shell_kill(
     outlives its deadline defers: the session may still live.
     """
     try:
-        async with asyncio.timeout(dispatch_deadline_s()):
-            return await cluster_rpc.dispatch_to_machine(
+        async with asyncio.timeout(dispatch_deadline_s() if deadline_s is None else deadline_s):
+            return await dispatch_fn(
                 db,
                 machine,
                 "shell_kill",
@@ -242,7 +252,13 @@ async def dispatch_shell_kill(
 
 
 async def reclaim_row(
-    pool: ConnectionPool, db: Database, bus: EventBus, machine: str, row: dict[str, Any]
+    pool: ConnectionPool,
+    db: Database,
+    bus: EventBus,
+    machine: str,
+    row: dict[str, Any],
+    *,
+    dispatch_fn: ShellKillDispatcher = cluster_rpc.dispatch_to_machine,
 ) -> tuple[int, int] | None:
     """Reclaim one expired shell on `machine`; the (agent, session) when its row
     was settled, None when the row is left for the next round."""
@@ -253,7 +269,7 @@ async def reclaim_row(
         # forward, so the session is no longer reaper business.
         _log.info("[ttl-reaper] shell %s of agent %s was renewed — skipping", session_id, agent_id)
         return None
-    result = await dispatch_shell_kill(db, machine, agent_id, session_id)
+    result = await dispatch_shell_kill(db, machine, agent_id, session_id, dispatch_fn=dispatch_fn)
     if result is None:
         return None
     if isinstance(result, _MachineAbsent):
@@ -303,7 +319,13 @@ async def reclaim_row(
 
 
 async def reap_expired_shells(
-    pool: ConnectionPool, db: Database, bus: EventBus, progress: LoopProgress
+    pool: ConnectionPool,
+    db: Database,
+    bus: EventBus,
+    progress: LoopProgress,
+    *,
+    expired_rows_fn: Callable[[ConnectionPool], list[dict[str, Any]]] = expired_shell_rows_blocking,
+    dispatch_fn: ShellKillDispatcher = cluster_rpc.dispatch_to_machine,
 ) -> list[tuple[int, int]]:
     """Kill every TTL-expired shell session on its home machine; return the
     (agent, session) pairs whose rows were settled.
@@ -312,7 +334,7 @@ async def reap_expired_shells(
     owner has no usable home machine is left for the next round. All DB work
     runs via to_thread: the event loop never blocks on psycopg.
     """
-    rows = await asyncio.to_thread(expired_shell_rows_blocking, pool)
+    rows = await asyncio.to_thread(expired_rows_fn, pool)
     by_machine: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for row in rows:
         machine = row["machine"]
@@ -328,7 +350,7 @@ async def reap_expired_shells(
 
     async def reclaim_machine(machine: str, machine_rows: list[dict[str, Any]]) -> None:
         for row in machine_rows:
-            settled = await reclaim_row(pool, db, bus, machine, row)
+            settled = await reclaim_row(pool, db, bus, machine, row, dispatch_fn=dispatch_fn)
             if settled is not None:
                 reaped.append(settled)
             progress.beat()

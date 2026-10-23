@@ -6,6 +6,7 @@ import asyncio
 import functools
 import logging
 import urllib.request
+from collections.abc import Callable
 from dataclasses import dataclass
 
 from psycopg_pool import ConnectionPool
@@ -76,14 +77,20 @@ def close_dead_show_pages(pool: ConnectionPool, agent_id: int, names: list[str])
 
 
 async def dead_pages_round(
-    pool: ConnectionPool, _db: Database, host: str, progress: LoopProgress, bus: EventBus
+    pool: ConnectionPool,
+    _db: Database,
+    host: str,
+    progress: LoopProgress,
+    bus: EventBus,
+    *,
+    alive_fn: Callable[[str, int], bool] = page_server_alive,
 ) -> None:
     """Probe every open show page of this host and close the dead ones."""
     pages = await asyncio.to_thread(open_show_pages, pool, host)
     dead: dict[int, list[ShowPage]] = {}
 
     async def probe(page: ShowPage) -> None:
-        if not await asyncio.to_thread(page_server_alive, page.host, page.port):
+        if not await asyncio.to_thread(alive_fn, page.host, page.port):
             dead.setdefault(page.agent_id, []).append(page)
 
     await round_loop.fan_out(

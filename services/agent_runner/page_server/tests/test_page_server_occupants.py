@@ -2,14 +2,10 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 
-import pytest
-
 import services.agent_runner.page_server.daemon as psd
 
 
-def test_occupants_skips_a_process_whose_cmdline_read_fails(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_occupants_skips_a_process_whose_cmdline_read_fails() -> None:
 
     class _ReadFails:
         pid = 424242
@@ -43,8 +39,7 @@ def test_occupants_skips_a_process_whose_cmdline_read_fails(
         del args, kwargs
         return iter(procs)
 
-    monkeypatch.setattr(psd.psutil, "process_iter", process_iter)
-    assert psd.page_server_occupants() == {
+    assert psd.page_server_occupants(process_iter_fn=process_iter) == {
         12001: (5001, "/home/a"),
         12002: (5002, "/home/b"),
     }

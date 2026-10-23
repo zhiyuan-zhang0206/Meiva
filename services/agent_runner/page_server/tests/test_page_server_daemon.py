@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import dataclasses
 import os
 import secrets
 import sys
 from collections.abc import Iterator
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import psycopg
 import pytest
@@ -24,6 +26,7 @@ from base.lm.catalog import ModelCatalog
 from services.agent_runner.page_server.tests.page_shell import PageShellBackend
 
 HOST = "127.0.0.1"
+_ACTIVE_BACKEND: list[PageShellBackend] = []
 
 
 @pytest.fixture(autouse=True)
@@ -32,22 +35,23 @@ def page_server_identity(machine_identity: MachineIdentity) -> None:
 
 
 @pytest.fixture
-def backend(monkeypatch: pytest.MonkeyPatch) -> PageShellBackend:
+def backend() -> Iterator[PageShellBackend]:
     fake = PageShellBackend()
-    monkeypatch.setattr(psd, "get_shell_backend", lambda: fake)
-    monkeypatch.setattr(psd, "page_server_occupants", dict)
-    monkeypatch.setattr(
-        psd,
-        "page_session_shell_pids",
-        lambda _wanted, _live=None: {},  # pyright: ignore[reportUnknownArgumentType]
+    _ACTIVE_BACKEND.append(fake)
+    try:
+        yield fake
+    finally:
+        _ACTIVE_BACKEND.pop()
+
+
+def default_reconcile_deps(fake: PageShellBackend | None = None) -> psd.ReconcileDeps:
+    active = fake if fake is not None else _ACTIVE_BACKEND[-1]
+    return psd.ReconcileDeps(
+        backend_factory=lambda: active,
+        occupants_fn=dict,
+        shell_pids_fn=lambda _wanted, _live=None: {},
+        live_sessions_fn=lambda: {name: SimpleNamespace(pid=12345) for name in active.sessions},
     )
-    # The pty record scan mirrors the fake backend's session set.
-    monkeypatch.setattr(
-        psd,
-        "live_session_records",
-        lambda: {name: SimpleNamespace(pid=12345) for name in fake.sessions},  # pyright: ignore[reportUnknownArgumentType]
-    )
-    return fake
 
 
 @pytest.fixture
@@ -92,8 +96,14 @@ def _close_row(conn: psycopg.Connection, agent_id: int, name: str) -> None:
 def reconcile(
     pool: ConnectionPool,
     managed: dict[tuple[int, str], psd.ServerHandle],
+    *,
+    deps: psd.ReconcileDeps | None = None,
+    **overrides: Any,
 ) -> None:
-    psd.reconcile_once(pool, managed, HOST, EventBus.from_settings())
+    base_deps = default_reconcile_deps() if deps is None else deps
+    if overrides:
+        base_deps = dataclasses.replace(base_deps, **overrides)
+    psd.reconcile_once(pool, managed, HOST, EventBus.from_settings(), deps=base_deps)
 
 
 def _token_and_session(conn: psycopg.Connection, agent_id: int, name: str) -> tuple[str, str]:
@@ -152,7 +162,6 @@ def test_new_row_session_created_before_slow_housekeeping(
     sync_pool: ConnectionPool,
     db_conn: psycopg.Connection,
     backend: PageShellBackend,
-    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     *,
     model_catalog: ModelCatalog,
@@ -178,7 +187,6 @@ def test_new_row_session_created_before_slow_housekeeping(
         events.append("occupants")
         return {}
 
-    monkeypatch.setattr(psd, "page_server_occupants", _occupants)
     # The fixture's pty record scan mirrors the fake backend's session set: the
     # session created in the fast path appears in the post-creation re-scan.
     orig_new = backend.new_session
@@ -190,7 +198,7 @@ def test_new_row_session_created_before_slow_housekeeping(
     backend.new_session = _new
     managed: dict[tuple[int, str], psd.ServerHandle] = {}
 
-    reconcile(sync_pool, managed)
+    reconcile(sync_pool, managed, occupants_fn=_occupants)
 
     assert events[0] == "create"
     assert "occupants" in events
@@ -203,7 +211,6 @@ def test_managed_row_liveness_uses_record_scan_not_backend_round_trip(
     sync_pool: ConnectionPool,
     db_conn: psycopg.Connection,
     backend: PageShellBackend,
-    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     *,
     model_catalog: ModelCatalog,
@@ -231,12 +238,6 @@ def test_managed_row_liveness_uses_record_scan_not_backend_round_trip(
         token=secrets.token_hex(16),
         session=page_session,
     )
-    monkeypatch.setattr(
-        psd,
-        "live_session_records",
-        lambda: {page_session: SimpleNamespace(pid=12345)},  # pyright: ignore[reportUnknownArgumentType]
-    )
-    monkeypatch.setattr(psd, "server_is_healthy", lambda *_args: True)  # pyright: ignore[reportUnknownArgumentType]
     calls: list[str] = []
     orig_has = backend.has_session
 
@@ -247,7 +248,12 @@ def test_managed_row_liveness_uses_record_scan_not_backend_round_trip(
     backend.has_session = _has
     managed: dict[tuple[int, str], psd.ServerHandle] = {}
 
-    reconcile(sync_pool, managed)
+    reconcile(
+        sync_pool,
+        managed,
+        live_sessions_fn=lambda: {page_session: SimpleNamespace(pid=12345)},
+        server_healthy_fn=lambda *_args: True,
+    )
 
     assert set(managed) == {key}
     assert backend.new_calls == []
@@ -259,7 +265,6 @@ def test_healthy_page_is_not_resent(
     sync_pool: ConnectionPool,
     db_conn: psycopg.Connection,
     backend: PageShellBackend,
-    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     *,
     model_catalog: ModelCatalog,
@@ -284,10 +289,9 @@ def test_healthy_page_is_not_resent(
         token=secrets.token_hex(16),
         session=page_session,
     )
-    monkeypatch.setattr(psd, "server_is_healthy", lambda *_args: True)  # pyright: ignore[reportUnknownArgumentType]
     managed: dict[tuple[int, str], psd.ServerHandle] = {}
 
-    reconcile(sync_pool, managed)
+    reconcile(sync_pool, managed, server_healthy_fn=lambda *_args: True)
 
     assert set(managed) == {(agent_id, "live")}
     assert backend.new_calls == []
@@ -329,7 +333,6 @@ def test_stale_snapshot_never_creates_session_for_closed_row(
     sync_pool: ConnectionPool,
     db_conn: psycopg.Connection,
     backend: PageShellBackend,
-    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     *,
     model_catalog: ModelCatalog,
@@ -351,10 +354,9 @@ def test_stale_snapshot_never_creates_session_for_closed_row(
     insert_page_row(db_conn, agent_id, key[1], 12020, tmp_path)
     stale = psd.open_rows(sync_pool, HOST)[0]
     _close_row(db_conn, agent_id, key[1])
-    monkeypatch.setattr(psd, "open_rows", lambda _pool, _host: [stale])  # pyright: ignore[reportUnknownArgumentType]
     managed: dict[tuple[int, str], psd.ServerHandle] = {}
 
-    reconcile(sync_pool, managed)
+    reconcile(sync_pool, managed, open_rows_fn=lambda _pool, _host: [stale])
 
     assert backend.new_calls == []
     assert backend.killed == []
@@ -376,7 +378,6 @@ def test_stale_snapshot_skips_row_re_registered_mid_pass(
     sync_pool: ConnectionPool,
     db_conn: psycopg.Connection,
     backend: PageShellBackend,
-    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     *,
     model_catalog: ModelCatalog,
@@ -402,10 +403,9 @@ def test_stale_snapshot_skips_row_re_registered_mid_pass(
             (agent_id, key[1]),
         )
     db_conn.commit()
-    monkeypatch.setattr(psd, "open_rows", lambda _pool, _host: [stale])  # pyright: ignore[reportUnknownArgumentType]
     managed: dict[tuple[int, str], psd.ServerHandle] = {}
 
-    reconcile(sync_pool, managed)
+    reconcile(sync_pool, managed, open_rows_fn=lambda _pool, _host: [stale])
 
     assert backend.new_calls == []
     assert managed == {}
@@ -423,7 +423,6 @@ def test_session_rolled_back_when_row_expires_during_create(
     sync_pool: ConnectionPool,
     db_conn: psycopg.Connection,
     backend: PageShellBackend,
-    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     *,
     model_catalog: ModelCatalog,
@@ -449,12 +448,14 @@ def test_session_rolled_back_when_row_expires_during_create(
             (agent_id, key[1]),
         )
     db_conn.commit()
-    monkeypatch.setattr(psd, "open_rows", lambda _pool, _host: [stale])  # pyright: ignore[reportUnknownArgumentType]
-    # The liveness re-check passed a moment ago; expiry lands after it.
-    monkeypatch.setattr(psd, "row_matches_snapshot", lambda _pool, _row: True)  # pyright: ignore[reportUnknownArgumentType]
     managed: dict[tuple[int, str], psd.ServerHandle] = {}
 
-    reconcile(sync_pool, managed)
+    reconcile(
+        sync_pool,
+        managed,
+        open_rows_fn=lambda _pool, _host: [stale],
+        row_matches_fn=lambda _pool, _row: True,
+    )
 
     assert backend.new_calls == []
     assert backend.killed == []
@@ -466,7 +467,6 @@ def test_session_created_for_row_closed_during_create_is_rolled_back(
     sync_pool: ConnectionPool,
     db_conn: psycopg.Connection,
     backend: PageShellBackend,
-    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     *,
     model_catalog: ModelCatalog,
@@ -488,12 +488,14 @@ def test_session_created_for_row_closed_during_create_is_rolled_back(
     insert_page_row(db_conn, agent_id, key[1], 12023, tmp_path)
     stale = psd.open_rows(sync_pool, HOST)[0]
     _close_row(db_conn, agent_id, key[1])
-    monkeypatch.setattr(psd, "open_rows", lambda _pool, _host: [stale])  # pyright: ignore[reportUnknownArgumentType]
-    # The liveness re-check passed a moment ago; the close lands after it.
-    monkeypatch.setattr(psd, "row_matches_snapshot", lambda _pool, _row: True)  # pyright: ignore[reportUnknownArgumentType]
     managed: dict[tuple[int, str], psd.ServerHandle] = {}
 
-    reconcile(sync_pool, managed)
+    reconcile(
+        sync_pool,
+        managed,
+        open_rows_fn=lambda _pool, _host: [stale],
+        row_matches_fn=lambda _pool, _row: True,
+    )
 
     assert backend.new_calls == []
     assert backend.killed == []

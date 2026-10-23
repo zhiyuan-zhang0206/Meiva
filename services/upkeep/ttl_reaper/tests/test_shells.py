@@ -7,8 +7,9 @@ shell's reaping is silent. A renewal between the select and the dispatch wins.""
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 import psycopg
 import pytest
@@ -32,13 +33,22 @@ def _progress() -> LoopProgress:
 
 
 async def _reap(
-    pool: ConnectionPool, *, database_gate: ProcessDbGate, bus: EventBus | None = None
+    pool: ConnectionPool,
+    *,
+    database_gate: ProcessDbGate,
+    bus: EventBus | None = None,
+    dispatch_fn: shells.ShellKillDispatcher = shells.cluster_rpc.dispatch_to_machine,
+    expired_rows_fn: Callable[
+        [ConnectionPool], list[dict[str, Any]]
+    ] = shells.expired_shell_rows_blocking,
 ) -> list[tuple[int, int]]:
     return await reap_expired_shells(
         pool,
         Database.from_settings(gate=database_gate),
         bus or EventBus.from_settings(),
         _progress(),
+        expired_rows_fn=expired_rows_fn,
+        dispatch_fn=dispatch_fn,
     )
 
 
@@ -93,7 +103,6 @@ async def test_reap_expired_shells_deletes_on_killed(
     db_conn: psycopg.Connection,
     reaper_pool: ConnectionPool,
     event_bus: EventBus,
-    monkeypatch: pytest.MonkeyPatch,
     *,
     database_gate: ProcessDbGate,
 ) -> None:
@@ -117,12 +126,9 @@ async def test_reap_expired_shells_deletes_on_killed(
             mode=ShellKillMode.KILLED, interrupted=True, name="build"
         ).model_dump()
 
-    monkeypatch.setattr(
-        shells.cluster_rpc,
-        "dispatch_to_machine",
-        _dispatch,
+    reaped = await _reap(
+        reaper_pool, database_gate=database_gate, bus=event_bus, dispatch_fn=_dispatch
     )
-    reaped = await _reap(reaper_pool, database_gate=database_gate, bus=event_bus)
 
     assert reaped == [(aid, 3)]
     with db_conn.cursor() as cur:
@@ -139,7 +145,6 @@ async def test_reap_expired_shells_deletes_on_killed(
 async def test_reap_expired_shells_keeps_row_on_unreachable(
     db_conn: psycopg.Connection,
     reaper_pool: ConnectionPool,
-    monkeypatch: pytest.MonkeyPatch,
     *,
     database_gate: ProcessDbGate,
 ) -> None:
@@ -158,12 +163,7 @@ async def test_reap_expired_shells_keeps_row_on_unreachable(
     ) -> dict[str, object]:
         raise shells.cluster_rpc.ClusterOpUnreachable("boom")
 
-    monkeypatch.setattr(
-        shells.cluster_rpc,
-        "dispatch_to_machine",
-        _dispatch,
-    )
-    reaped = await _reap(reaper_pool, database_gate=database_gate)
+    reaped = await _reap(reaper_pool, database_gate=database_gate, dispatch_fn=_dispatch)
 
     assert reaped == []
     with db_conn.cursor() as cur:
@@ -175,7 +175,6 @@ async def test_reap_expired_shells_keeps_row_on_unreachable(
 async def test_reap_expired_shells_absent_machine_terminalizes_row(
     db_conn: psycopg.Connection,
     reaper_pool: ConnectionPool,
-    monkeypatch: pytest.MonkeyPatch,
     emitted_events: EmittedEvents,
     *,
     database_gate: ProcessDbGate,
@@ -200,8 +199,7 @@ async def test_reap_expired_shells_absent_machine_terminalizes_row(
             "machine 'ghost' is absent from the machines registry"
         )
 
-    monkeypatch.setattr(shells.cluster_rpc, "dispatch_to_machine", _dispatch)
-    reaped = await _reap(reaper_pool, database_gate=database_gate)
+    reaped = await _reap(reaper_pool, database_gate=database_gate, dispatch_fn=_dispatch)
 
     assert reaped == [(aid, 8)]
     with db_conn.cursor() as cur:
@@ -243,7 +241,6 @@ async def test_reap_expired_shells_keeps_row_on_unknown_machine(
 async def test_reap_expired_shells_idle_reaping_is_silent(
     db_conn: psycopg.Connection,
     reaper_pool: ConnectionPool,
-    monkeypatch: pytest.MonkeyPatch,
     *,
     database_gate: ProcessDbGate,
 ) -> None:
@@ -265,12 +262,7 @@ async def test_reap_expired_shells_idle_reaping_is_silent(
     ) -> dict[str, object]:
         return ShellKillResult(mode=ShellKillMode.KILLED, interrupted=False).model_dump()
 
-    monkeypatch.setattr(
-        shells.cluster_rpc,
-        "dispatch_to_machine",
-        _dispatch,
-    )
-    reaped = await _reap(reaper_pool, database_gate=database_gate)
+    reaped = await _reap(reaper_pool, database_gate=database_gate, dispatch_fn=_dispatch)
 
     assert reaped == [(aid, 4)]
     with db_conn.cursor() as cur:
@@ -283,7 +275,6 @@ async def test_reap_expired_shells_idle_reaping_is_silent(
 async def test_reap_expired_shells_absent_reaping_is_silent(
     db_conn: psycopg.Connection,
     reaper_pool: ConnectionPool,
-    monkeypatch: pytest.MonkeyPatch,
     *,
     database_gate: ProcessDbGate,
 ) -> None:
@@ -305,12 +296,7 @@ async def test_reap_expired_shells_absent_reaping_is_silent(
     ) -> dict[str, object]:
         return ShellKillResult(mode=ShellKillMode.ABSENT).model_dump()
 
-    monkeypatch.setattr(
-        shells.cluster_rpc,
-        "dispatch_to_machine",
-        _dispatch,
-    )
-    reaped = await _reap(reaper_pool, database_gate=database_gate)
+    reaped = await _reap(reaper_pool, database_gate=database_gate, dispatch_fn=_dispatch)
 
     assert reaped == [(aid, 5)]
     with db_conn.cursor() as cur:
@@ -323,7 +309,6 @@ async def test_reap_expired_shells_absent_reaping_is_silent(
 async def test_reap_expired_shells_result_without_interrupted_is_deferred(
     db_conn: psycopg.Connection,
     reaper_pool: ConnectionPool,
-    monkeypatch: pytest.MonkeyPatch,
     *,
     database_gate: ProcessDbGate,
 ) -> None:
@@ -344,12 +329,7 @@ async def test_reap_expired_shells_result_without_interrupted_is_deferred(
     ) -> dict[str, object]:
         return {"mode": "killed"}
 
-    monkeypatch.setattr(
-        shells.cluster_rpc,
-        "dispatch_to_machine",
-        _dispatch,
-    )
-    reaped = await _reap(reaper_pool, database_gate=database_gate)
+    reaped = await _reap(reaper_pool, database_gate=database_gate, dispatch_fn=_dispatch)
 
     assert reaped == []
     assert _system_inbounds(db_conn, aid) == []
@@ -362,7 +342,6 @@ async def test_reap_expired_shells_result_without_interrupted_is_deferred(
 async def test_reap_expired_shells_notifies_for_a_watcher_shaped_session(
     db_conn: psycopg.Connection,
     reaper_pool: ConnectionPool,
-    monkeypatch: pytest.MonkeyPatch,
     *,
     database_gate: ProcessDbGate,
     event_bus: EventBus,
@@ -393,8 +372,9 @@ async def test_reap_expired_shells_notifies_for_a_watcher_shaped_session(
             mode=ShellKillMode.KILLED, interrupted=True, name="test-watcher"
         ).model_dump()
 
-    monkeypatch.setattr(shells.cluster_rpc, "dispatch_to_machine", _dispatch)
-    reaped = await _reap(reaper_pool, database_gate=database_gate, bus=event_bus)
+    reaped = await _reap(
+        reaper_pool, database_gate=database_gate, bus=event_bus, dispatch_fn=_dispatch
+    )
 
     assert reaped == [(aid, 7)]
     with db_conn.cursor() as cur:
@@ -409,7 +389,6 @@ async def test_reap_expired_shells_notifies_for_a_watcher_shaped_session(
 async def test_reap_expired_shells_skips_row_renewed_after_select(
     db_conn: psycopg.Connection,
     reaper_pool: ConnectionPool,
-    monkeypatch: pytest.MonkeyPatch,
     *,
     database_gate: ProcessDbGate,
 ) -> None:
@@ -428,7 +407,7 @@ async def test_reap_expired_shells_skips_row_renewed_after_select(
         )
     db_conn.commit()
 
-    stale_rows: list[dict[str, object]] = [
+    stale_rows: list[dict[str, Any]] = [
         {
             "agent_id": aid,
             "session_id": 44,
@@ -438,10 +417,9 @@ async def test_reap_expired_shells_skips_row_renewed_after_select(
         }
     ]
 
-    def _stale_select(_pool: ConnectionPool) -> list[dict[str, object]]:
+    def _stale_select(_pool: ConnectionPool) -> list[dict[str, Any]]:
         return stale_rows
 
-    monkeypatch.setattr(shells, "expired_shell_rows_blocking", _stale_select)
     dispatched: list[tuple[str, object]] = []
 
     async def _dispatch(
@@ -450,8 +428,12 @@ async def test_reap_expired_shells_skips_row_renewed_after_select(
         dispatched.append((kind, payload))
         return ShellKillResult(mode=ShellKillMode.KILLED, interrupted=True, name="x").model_dump()
 
-    monkeypatch.setattr(shells.cluster_rpc, "dispatch_to_machine", _dispatch)
-    reaped = await _reap(reaper_pool, database_gate=database_gate)
+    reaped = await _reap(
+        reaper_pool,
+        database_gate=database_gate,
+        expired_rows_fn=_stale_select,
+        dispatch_fn=_dispatch,
+    )
 
     assert reaped == []
     assert dispatched == []
@@ -573,7 +555,6 @@ def test_wall_clock_none_falls_back_to_host_zone(monkeypatch: pytest.MonkeyPatch
 async def test_runner_invalid_mode_preserves_row_without_false_cleanup(
     db_conn: psycopg.Connection,
     reaper_pool: ConnectionPool,
-    monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
     payload: dict[str, object],
     emitted_events: EmittedEvents,
@@ -592,8 +573,7 @@ async def test_runner_invalid_mode_preserves_row_without_false_cleanup(
     ) -> dict[str, object]:
         return payload
 
-    monkeypatch.setattr(shells.cluster_rpc, "dispatch_to_machine", dispatch)
-    assert await _reap(reaper_pool, database_gate=database_gate) == []
+    assert await _reap(reaper_pool, database_gate=database_gate, dispatch_fn=dispatch) == []
     assert db_conn.execute(
         "SELECT session_id FROM agent_shell_ttls WHERE agent_id = %s", (aid,)
     ).fetchall() == [(3,)]

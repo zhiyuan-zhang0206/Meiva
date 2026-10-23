@@ -194,10 +194,8 @@ def test_reap_expired_web_sessions_removes_only_expired_rows(
 def test_reap_expired_web_sessions_is_limited_to_one_pass_batch(
     db_conn: psycopg.Connection,
     reaper_pool: ConnectionPool,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A large expired-session backlog is reclaimed across bounded transactions."""
-    monkeypatch.setattr(sweep, "PASS_BATCH", 1)
     with db_conn.cursor() as cur:
         cur.executemany(
             "INSERT INTO web_sessions (id, expires_at) VALUES (%s, now() + %s::interval)",
@@ -209,7 +207,7 @@ def test_reap_expired_web_sessions_is_limited_to_one_pass_batch(
         )
     db_conn.commit()
 
-    assert reap_expired_web_sessions_blocking(reaper_pool) == 1
+    assert reap_expired_web_sessions_blocking(reaper_pool, batch_size=1) == 1
 
     with db_conn.cursor() as cur:
         cur.execute(
@@ -332,23 +330,21 @@ def test_prune_schedule_fire_log_deletes_every_row_past_the_window(
 def test_prune_schedule_fire_log_is_bounded_per_pass(
     db_conn: psycopg.Connection,
     reaper_pool: ConnectionPool,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """One pass deletes at most FIRE_LOG_PASS_BATCH rows; the backlog drains
     over successive passes."""
-    monkeypatch.setattr(sweep, "FIRE_LOG_PASS_BATCH", 2)
     s1 = _new_schedule(db_conn, "fire-log-bounded")
     _insert_fire_log(db_conn, s1, [50 * 24, 49 * 24, 48 * 24, 47 * 24, 46 * 24])
     db_conn.commit()
 
-    assert sweep.prune_schedule_fire_log_blocking(reaper_pool) == 2
+    assert sweep.prune_schedule_fire_log_blocking(reaper_pool, batch_size=2) == 2
     with db_conn.cursor() as cur:
         cur.execute("SELECT count(*) FROM schedule_fire_log WHERE schedule_id = %s", (s1,))
         remaining = cur.fetchone()
         assert remaining is not None and remaining[0] == 3
 
-    assert sweep.prune_schedule_fire_log_blocking(reaper_pool) == 2
-    assert sweep.prune_schedule_fire_log_blocking(reaper_pool) == 1
+    assert sweep.prune_schedule_fire_log_blocking(reaper_pool, batch_size=2) == 2
+    assert sweep.prune_schedule_fire_log_blocking(reaper_pool, batch_size=2) == 1
     with db_conn.cursor() as cur:
         cur.execute("SELECT count(*) FROM schedule_fire_log WHERE schedule_id = %s", (s1,))
         remaining = cur.fetchone()

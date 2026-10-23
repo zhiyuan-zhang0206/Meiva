@@ -7,7 +7,7 @@ import asyncio
 import socket
 from collections.abc import Callable, Iterator
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 import psycopg
 import pytest
@@ -19,11 +19,10 @@ from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import ConfigBoot
 from base.config.service_read import ConfigAuthority
-from base.daemon.endpoints import ServiceEndpoint
-from base.daemon.loop_health import LivenessGroup, LoopProgress
+from base.daemon.loop_health import LoopProgress
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
-from base.events.live.bus import EventBus
+from base.events.live.bus import EventBus, event_bus_config_from_settings
 from base.lm.catalog import ModelCatalog
 from base.native_process.loaded_commit import LoadedCommit
 from services.agent_runner.page_server import daemon, dead_pages
@@ -41,19 +40,23 @@ def pool(db_url: str, *, database_gate: ProcessDbGate) -> Iterator[ConnectionPoo
         p.close()
 
 
+class _RecordingBus(EventBus):
+    def __init__(self, seen: dict[str, list[Any]]) -> None:
+        super().__init__(event_bus_config_from_settings())
+        self.seen = seen
+
+    async def publish_best_effort(
+        self, payload: str, *, channel: str | None = None, context: str = ""
+    ) -> int | None:
+        del channel, context
+        self.seen["events"].append(payload)
+        return 1
+
+
 @pytest.fixture
-def published(monkeypatch: pytest.MonkeyPatch) -> dict[str, list[Any]]:
+def published() -> dict[str, list[Any]]:
     """Record the PageClosed frames and the wakes the pass publishes."""
-    seen: dict[str, list[Any]] = {"events": [], "wakes": []}
-
-    async def publish(_bus: object, payload: str, *, context: str) -> None:
-        seen["events"].append(payload)
-
-    def wake(_db: object, _bus: object, agent_id: int, inbound_id: str) -> None:
-        seen["wakes"].append((agent_id, inbound_id))
-
-    monkeypatch.setattr(EventBus, "publish_best_effort", publish)
-    return seen
+    return {"events": [], "wakes": []}
 
 
 def _free_port() -> int:
@@ -100,13 +103,20 @@ def _progress() -> LoopProgress:
     return LoopProgress("dead_show_pages", 600.0)
 
 
-async def _round(pool: ConnectionPool, *, database_gate: ProcessDbGate) -> None:
+async def _round(
+    pool: ConnectionPool,
+    *,
+    database_gate: ProcessDbGate,
+    bus: EventBus | None = None,
+    alive_fn: Callable[[str, int], bool] = dead_pages.page_server_alive,
+) -> None:
     await dead_pages.dead_pages_round(
         pool,
         Database.from_settings(gate=database_gate),
         _HOST,
         _progress(),
-        EventBus.from_settings(),
+        EventBus.from_settings() if bus is None else bus,
+        alive_fn=alive_fn,
     )
 
 
@@ -161,7 +171,7 @@ async def test_a_dead_show_page_is_closed_and_its_owner_told_once(
     _page(db_conn, agent, "dead-one", _free_port())
     _page(db_conn, agent, "dead-two", _free_port())
 
-    await _round(pool, database_gate=database_gate)
+    await _round(pool, database_gate=database_gate, bus=_RecordingBus(published))
 
     assert _closed(db_conn, agent, "dead-one") and _closed(db_conn, agent, "dead-two")
     assert _notices(db_conn, agent) == []
@@ -174,7 +184,6 @@ async def test_a_live_show_page_and_a_dead_serve_page_are_left_alone(
     db_conn: psycopg.Connection,
     pool: ConnectionPool,
     published: dict[str, list[Any]],
-    monkeypatch: pytest.MonkeyPatch,
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
@@ -199,9 +208,12 @@ async def test_a_live_show_page_and_a_dead_serve_page_are_left_alone(
         probed.append(port)
         return port == alive_port
 
-    monkeypatch.setattr(dead_pages, "page_server_alive", alive)
-
-    await _round(pool, database_gate=database_gate)
+    await _round(
+        pool,
+        database_gate=database_gate,
+        bus=_RecordingBus(published),
+        alive_fn=alive,
+    )
 
     assert probed == [alive_port]
     assert not _closed(db_conn, agent, "alive") and not _closed(db_conn, agent, "serve-dead")
@@ -209,19 +221,27 @@ async def test_a_live_show_page_and_a_dead_serve_page_are_left_alone(
 
 
 async def test_the_loop_scans_at_once_then_paces(
-    monkeypatch: pytest.MonkeyPatch, database: Database
+    redis_url: str,
+    db_conn: psycopg.Connection,
+    pool: ConnectionPool,
+    database: Database,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
-    rounds: list[object] = []
-
-    async def fake_round(
-        _pool: object, _db: Database, host: str, _progress: object, _bus: object
-    ) -> None:
-        rounds.append(host)
-
-    monkeypatch.setattr(dead_pages, "dead_pages_round", fake_round)
+    agent = spawn_agent(
+        spawner="user",
+        catalog=model_catalog,
+        authority=config_authority,
+        database_gate=database_gate,
+        machine=machine_identity,
+    )
+    _page(db_conn, agent, "dead-at-start", _free_port())
     task = asyncio.create_task(
         dead_pages.dead_pages_loop(
-            cast(ConnectionPool, object()),
+            pool,
             database,
             _HOST,
             _progress(),
@@ -231,72 +251,23 @@ async def test_the_loop_scans_at_once_then_paces(
     )
     try:
         for _ in range(200):
-            if rounds:
+            if _closed(db_conn, agent, "dead-at-start"):
                 break
             await asyncio.sleep(0.01)
+        _page(db_conn, agent, "dead-later", _free_port())
         await asyncio.sleep(0.05)
     finally:
         task.cancel()
         await asyncio.gather(task, return_exceptions=True)
 
-    assert rounds == [_HOST]  # a scan at once; the heartbeat-interval wait never elapses
+    assert _closed(db_conn, agent, "dead-at-start")
+    assert not _closed(db_conn, agent, "dead-later")
 
 
 # --- the service owns both loops ---------------------------------------------
 
 
-def _patch_run(
-    monkeypatch: pytest.MonkeyPatch, loops: dict[str, Callable[..., Any]], events: list[str]
-) -> dict[str, object]:
-    seen: dict[str, object] = {}
-
-    class _Pool:
-        def close(self) -> None:
-            events.append("pool")
-
-    async def fake_start(
-        _name: str, _port: int, *, liveness: LivenessGroup, image: LoadedCommit
-    ) -> object:
-        seen["trackers"] = sorted(liveness.snapshot())
-        seen["image"] = image
-        return object()
-
-    async def fake_stop(_server: object) -> None:
-        events.append("health")
-
-    def is_running_for_entry(config: ConfigBoot, *, runtime: Path) -> bool:
-        return False
-
-    monkeypatch.setattr(daemon.resources, "is_running", is_running_for_entry)
-
-    def endpoint_for_entry(config: ConfigBoot, *, runtime: Path) -> ServiceEndpoint:
-        return ServiceEndpoint("page_server", 1, Path("/nonexistent/ps.pid"))
-
-    monkeypatch.setattr(daemon.resources, "endpoint", endpoint_for_entry)
-
-    def write_pidfile_for_entry(config: ConfigBoot, *, runtime: Path) -> None:
-        pass
-
-    monkeypatch.setattr(daemon.resources, "write_pidfile", write_pidfile_for_entry)
-
-    def remove_pidfile_for_entry(config: ConfigBoot, *, runtime: Path) -> None:
-        return events.append("pidfile")
-
-    monkeypatch.setattr(daemon.resources, "remove_pidfile", remove_pidfile_for_entry)
-    monkeypatch.setattr(daemon, "start_health_server", fake_start)
-    monkeypatch.setattr(daemon, "stop_health_server", fake_stop)
-
-    def fake_pool(_self: object) -> _Pool:
-        return _Pool()
-
-    monkeypatch.setattr(daemon.Database, "pool", fake_pool)
-    monkeypatch.setattr(daemon, "reconcile_loop", loops["reconcile"])
-    monkeypatch.setattr(daemon.dead_pages, "dead_pages_loop", loops["dead"])
-    return seen
-
-
 def test_each_loop_gets_its_own_progress_tracker(
-    monkeypatch: pytest.MonkeyPatch,
     database: Database,
     *,
     machine_identity: MachineIdentity,
@@ -326,8 +297,6 @@ def test_each_loop_gets_its_own_progress_tracker(
     ) -> None:
         received["dead"] = progress
 
-    seen = _patch_run(monkeypatch, {"reconcile": reconcile, "dead": dead}, [])
-
     image = LoadedCommit(Path("/page-server-tests"), None)
     asyncio.run(
         asyncio.wait_for(
@@ -337,19 +306,18 @@ def test_each_loop_gets_its_own_progress_tracker(
                 database=lambda: database,
                 image=image,
                 local_machine=machine_identity,
+                loop_runners=(reconcile, dead),
             ),
             timeout=5.0,
         )
     )
 
-    assert seen["trackers"] == ["dead_show_pages", "reconcile"]
-    assert seen["image"] is image
+    assert sorted(received) == ["dead", "reconcile"]
     assert len({id(p) for p in received.values()}) == 2
 
 
 @pytest.mark.parametrize("crashing", ["reconcile", "dead"])
 def test_a_crashing_loop_cancels_its_sibling_and_ends_the_service(
-    monkeypatch: pytest.MonkeyPatch,
     crashing: str,
     database: Database,
     *,
@@ -358,10 +326,13 @@ def test_a_crashing_loop_cancels_its_sibling_and_ends_the_service(
     tmp_path: Path,
 ) -> None:
     cancelled: list[str] = []
-    events: list[str] = []
+    observed_pools: list[ConnectionPool] = []
+    pidfile = tmp_path / "run" / "page_server.pid"
 
     def loop(name: str) -> Callable[..., Any]:
-        async def run_loop(*_args: object) -> None:
+        async def run_loop(pool: ConnectionPool, *_args: object) -> None:
+            observed_pools.append(pool)
+            assert pidfile.exists()
             if name == crashing:
                 await asyncio.sleep(0.01)
                 raise RuntimeError(f"{name} crashed")
@@ -373,11 +344,10 @@ def test_a_crashing_loop_cancels_its_sibling_and_ends_the_service(
 
         return run_loop
 
-    async def reconcile_loop(*args: object, local_machine: MachineIdentity) -> None:
+    async def reconcile_loop(*args: Any, local_machine: MachineIdentity) -> None:
         assert local_machine is machine_identity
         await loop("reconcile")(*args)
 
-    seen = _patch_run(monkeypatch, {"reconcile": reconcile_loop, "dead": loop("dead")}, events)
     image = LoadedCommit(Path("/page-server-tests"), None)
 
     with pytest.raises(ExceptionGroup) as raised:
@@ -389,6 +359,7 @@ def test_a_crashing_loop_cancels_its_sibling_and_ends_the_service(
                     database=lambda: database,
                     image=image,
                     local_machine=machine_identity,
+                    loop_runners=(reconcile_loop, loop("dead")),
                 ),
                 timeout=5.0,
             )
@@ -396,5 +367,5 @@ def test_a_crashing_loop_cancels_its_sibling_and_ends_the_service(
 
     assert [str(exc) for exc in raised.value.exceptions] == [f"{crashing} crashed"]
     assert cancelled == [({"reconcile", "dead"} - {crashing}).pop()]
-    assert sorted(events) == ["health", "pidfile", "pool"]
-    assert seen["image"] is image
+    assert observed_pools and all(p.closed for p in observed_pools)
+    assert not pidfile.exists()

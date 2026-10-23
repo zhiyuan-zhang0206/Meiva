@@ -40,6 +40,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 
 from psycopg_pool import ConnectionPool
@@ -224,7 +225,9 @@ def reap_expired_pages_blocking(
     return reaped
 
 
-def reap_expired_web_sessions_blocking(pool: ConnectionPool) -> int:
+def reap_expired_web_sessions_blocking(
+    pool: ConnectionPool, *, batch_size: int = PASS_BATCH
+) -> int:
     """Delete browser sessions whose authoritative expiry has elapsed."""
     with write_transaction(pool) as conn, conn.cursor() as cur:
         cur.execute(
@@ -232,12 +235,14 @@ def reap_expired_web_sessions_blocking(pool: ConnectionPool) -> int:
             "SELECT id FROM web_sessions WHERE expires_at < now() "
             "ORDER BY expires_at, id LIMIT %s"
             ") DELETE FROM web_sessions WHERE id IN (SELECT id FROM expired)",
-            (PASS_BATCH,),
+            (batch_size,),
         )
         return cur.rowcount
 
 
-def prune_schedule_fire_log_blocking(pool: ConnectionPool) -> int:
+def prune_schedule_fire_log_blocking(
+    pool: ConnectionPool, *, batch_size: int = FIRE_LOG_PASS_BATCH
+) -> int:
     """Delete ``schedule_fire_log`` claims older than the retention window.
 
     The table is the at-most-once claim ledger of ``fire_slot_once``
@@ -259,27 +264,43 @@ def prune_schedule_fire_log_blocking(pool: ConnectionPool) -> int:
                 LIMIT %s
             )
             """,
-            (cutoff, FIRE_LOG_PASS_BATCH),
+            (cutoff, batch_size),
         )
         return cur.rowcount
 
 
 # meiva:note
 # The cadence-gated phases that came due: the number of pruned fire-log rows.
-async def _slow_phases(pool: ConnectionPool) -> int:
+async def _slow_phases(
+    pool: ConnectionPool,
+    *,
+    cleanup_interval_s: float | None = None,
+    prune_fire_log_fn: Callable[[ConnectionPool], int] = prune_schedule_fire_log_blocking,
+) -> int:
     pruned = 0
+    interval = (
+        settings.daemon.schedule_fire_log_cleanup_interval_seconds
+        if cleanup_interval_s is None
+        else cleanup_interval_s
+    )
     if await asyncio.to_thread(
         cadence.claim_due,
         pool,
         cadence.FIRE_LOG_PRUNE,
-        settings.daemon.schedule_fire_log_cleanup_interval_seconds,
+        interval,
     ):
-        pruned = await asyncio.to_thread(prune_schedule_fire_log_blocking, pool)
+        pruned = await asyncio.to_thread(prune_fire_log_fn, pool)
     return pruned
 
 
 async def sweep_round(
-    pool: ConnectionPool, db: Database, bus: EventBus, progress: LoopProgress
+    pool: ConnectionPool,
+    db: Database,
+    bus: EventBus,
+    progress: LoopProgress,
+    *,
+    cleanup_interval_s: float | None = None,
+    prune_fire_log_fn: Callable[[ConnectionPool], int] = prune_schedule_fire_log_blocking,
 ) -> None:
     """One pass over every database-only phase, beating `progress` between them."""
     reminded = await asyncio.to_thread(remind_expiring_impersonations, pool, db, bus)
@@ -295,7 +316,11 @@ async def sweep_round(
     for agent_id, nid, details in notices:
         await lifecycle.publish_notice_resolved(bus, agent_id, nid, facts=details)
     progress.beat()
-    pruned_fire_log = await _slow_phases(pool)
+    pruned_fire_log = await _slow_phases(
+        pool,
+        cleanup_interval_s=cleanup_interval_s,
+        prune_fire_log_fn=prune_fire_log_fn,
+    )
     if pages or sessions or impersonations or notices or reminded or pruned_fire_log:
         _log.info(
             "[ttl-reaper] reclaimed %d page(s), %d web session(s), %d impersonation(s), "

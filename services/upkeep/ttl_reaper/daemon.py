@@ -26,8 +26,9 @@ import asyncio
 import logging
 import signal
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Coroutine
 from pathlib import Path
+from typing import Any
 
 from psycopg_pool import ConnectionPool
 
@@ -36,7 +37,7 @@ from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot
 from base.daemon.endpoints import ServiceEndpoint, ServiceEndpoints
 from base.daemon.health import start_health_server, stop_health_server
-from base.daemon.loop_health import LivenessGroup
+from base.daemon.loop_health import LivenessGroup, LoopProgress
 from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
@@ -78,15 +79,24 @@ def _is_running(config: ConfigBoot, *, runtime: Path) -> bool:
     )
 
 
+LoopFn = Callable[[ConnectionPool, Database, EventBus, LoopProgress], Coroutine[Any, Any, None]]
+
+
 async def run_loops(
-    pool: ConnectionPool, db: Database, bus: EventBus, liveness: LivenessGroup
+    pool: ConnectionPool,
+    db: Database,
+    bus: EventBus,
+    liveness: LivenessGroup,
+    *,
+    sweep_loop_fn: LoopFn = sweep.sweep_loop,
+    remote_loop_fn: LoopFn = remote.remote_loop,
 ) -> None:
     """Own the two resident loops; one that raises ends the process."""
     sweep_progress = liveness.register("sweep", _SWEEP_LIVENESS_TIMEOUT_S)
     remote_progress = liveness.register("remote", shells.dispatch_deadline_s() + _LIVENESS_SLACK_S)
     async with asyncio.TaskGroup() as loops:
-        loops.create_task(sweep.sweep_loop(pool, db, bus, sweep_progress))
-        loops.create_task(remote.remote_loop(pool, db, bus, remote_progress))
+        loops.create_task(sweep_loop_fn(pool, db, bus, sweep_progress))
+        loops.create_task(remote_loop_fn(pool, db, bus, remote_progress))
 
 
 async def run(
@@ -95,6 +105,9 @@ async def run(
     runtime: Path,
     database: Callable[[], Database],
     image: LoadedCommit,
+    run_loops_fn: Callable[
+        [ConnectionPool, Database, EventBus, LivenessGroup], Coroutine[Any, Any, None]
+    ] = run_loops,
 ) -> None:
     """Start the daemon: pidfile -> healthz server -> connect DB -> loops."""
     if _is_running(process_config, runtime=runtime) or not acquire_pidfile(
@@ -117,7 +130,7 @@ async def run(
     db = database()
     pool = db.pool(max_size=_POOL_MAX_SIZE)
     try:
-        await run_loops(pool, db, EventBus.from_settings(), liveness)
+        await run_loops_fn(pool, db, EventBus.from_settings(), liveness)
     finally:
         pool.close()
         await stop_health_server(health)
