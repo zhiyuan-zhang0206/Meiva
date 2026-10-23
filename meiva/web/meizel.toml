@@ -1,4 +1,4 @@
-exports = ["deps.py", "plans.py", "runner.py", "wiring.py"]
+exports = ["deepseek.py", "deps.py", "plans.py", "runner.py", "wiring.py"]
 
 [uses]
 "__init__.py" = ["errors.py", "plans.py", "runner.py", "wiring.py"]

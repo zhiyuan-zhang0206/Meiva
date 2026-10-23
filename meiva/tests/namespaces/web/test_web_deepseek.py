@@ -14,7 +14,7 @@ from pydantic import SecretStr
 from base.config import settings
 from meiva.tests.namespaces.web._web_helpers import FakeResp, WebHarness
 from meiva.tests.namespaces.web._web_helpers import web_harness as web_harness
-from meiva.web import FetchError, SearchError, wiring
+from meiva.web import FetchError, SearchError, deepseek, wiring
 
 pytestmark = [
     pytest.mark.usefixtures("retry_waits"),
@@ -177,7 +177,75 @@ def test_persistent_429_exhausts_the_retry_budget(web_harness: WebHarness):
     assert calls["n"] == 3
 
 
-def test_batch_request_starts_respect_the_configured_qps(web_harness: WebHarness):
+# meiva:note
+# The pacer promises a schedule, not an observable spacing: `RateLimiter.acquire()` reserves
+# the next slot (`_next_at + interval`) and sleeps until it, and a caller that oversleeps by
+# epsilon starts la-epsilon and is followed by the caller that had already reserved the slot
+# behind it - so the OBSERVED gap shrinks by epsilon while the slot never moves. Overshooting
+# can therefore only make a request later than planned, never earlier, which is the direction
+# that matters for the account-level 5 QPS limit. These two cases assert that on a
+# deterministic clock; the old `min(gaps) >= 0.15` asserted something the code cannot promise
+# and failed 2-3 runs in 5 on a quiet laptop.
+class _PacerClock:
+    def __init__(self, *, overshoot: float = 0.0) -> None:
+        self.now = 1_000.0
+        self.overshoot = overshoot
+        self.waits: list[float] = []
+
+    def monotonic(self) -> float:
+        return self.now
+
+    def sleep(self, seconds: float) -> None:
+        # meiva:note
+        # The overshoot is applied to the first wait only: it models one late wake-up, and
+        # letting every wait overshoot would hide the compression it causes.
+        extra = self.overshoot if not self.waits else 0.0
+        self.waits.append(seconds)
+        self.now += seconds + extra
+
+
+def _paced_starts(clock: _PacerClock, count: int) -> list[float]:
+    pacer = deepseek.RateLimiter(5.0, monotonic=clock.monotonic, sleep=clock.sleep)
+    starts: list[float] = []
+    for _ in range(count):
+        pacer.acquire()
+        starts.append(clock.now)
+    return starts
+
+
+def test_the_pacer_reserves_slots_one_interval_apart() -> None:
+    clock = _PacerClock()
+    starts = _paced_starts(clock, 4)
+    assert clock.waits == pytest.approx([0.2, 0.2, 0.2])
+    assert starts == sorted(starts)
+    assert len(set(starts)) == 4
+    assert [later - earlier for earlier, later in itertools.pairwise(starts)] == pytest.approx(
+        [0.2, 0.2, 0.2]
+    )
+
+
+def test_an_oversleep_compresses_the_gap_without_moving_a_slot() -> None:
+    # meiva:note
+    # 50 ms of overshoot on one wait: the next wait is 0.15 instead of 0.20 (the slot it
+    # reserved was fixed before this caller woke), so the observed gap compresses by exactly
+    # the overshoot while the requested slot sequence stays 0.20 apart, and no start moves
+    # earlier than its own slot.
+    clock = _PacerClock(overshoot=0.05)
+    starts = _paced_starts(clock, 3)
+    assert clock.waits == pytest.approx([0.2, 0.15])
+    assert starts[1] - starts[0] == pytest.approx(0.25)
+    assert starts[2] - starts[1] == pytest.approx(0.15)
+    assert starts == sorted(starts)
+
+
+def test_batch_request_starts_stay_inside_the_configured_rate_window(
+    web_harness: WebHarness,
+):
+    # meiva:note
+    # The end-to-end claim the provider cares about, and the one a real clock can carry: four
+    # requests occupy at least `(n-1)/qps` because every start waits for its own slot, and
+    # sleep overshoot only widens that window. The upper bound is the regression direction the
+    # floor cannot see (a pacer ten times slower still satisfies a floor).
     _use_deepseek_search(web_harness)
     starts: list[float] = []
     lock = threading.Lock()
@@ -190,9 +258,10 @@ def test_batch_request_starts_respect_the_configured_qps(web_harness: WebHarness
     with web_harness.urlopen_returns(side_effect=_capture):
         web_harness.search(["a", "b", "c", "d"], max_concurrent=4)
 
-    gaps = [later - earlier for earlier, later in itertools.pairwise(sorted(starts))]
-    assert len(gaps) == 3
-    assert min(gaps) >= 0.15, f"request starts too close for 5 QPS: {gaps}"
+    assert len(starts) == 4
+    window = max(starts) - min(starts)
+    assert window >= 3 / 5.0, f"four requests inside {window:.3f}s for 5 QPS"
+    assert window <= 1.0, f"four requests spread over {window:.3f}s for 5 QPS"
 
 
 def test_fetch_reads_the_page_from_the_deepseek_endpoint(web_harness: WebHarness):
