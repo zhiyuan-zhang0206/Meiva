@@ -12,8 +12,10 @@ import meiva
 from base.config.tests.configuration import defaults
 from base.host.env.agent_slices import AgentSlices
 from base.lm import factory
+from base.packages.plugin_config_images import DiskPluginConfigImages
 from base.packages.plugin_providers import build_model_catalog
 from base.packages.plugins.extensions import PluginContributions, SdkNamespace, SdkWrap
+from base.paths.home import resolve_meiva_home
 from meiva.sdk_surface import install, process_context
 from meiva_builtins.plugins.meiva_code.tests.surface_support import code_registry
 from meiva_builtins.plugins.meiva_code.tests.test_meiva_code_plugin import (
@@ -115,7 +117,10 @@ def test_duplicate_namespace_refuses_the_second_plugin_whole():
         ),
         sdk_wraps=(SdkWrap("files.read", _other_wrap),),
     )
-    admitted = install.install(code_registry(("other_plugin", other)))
+    admitted = install.install(
+        code_registry(("other_plugin", other)),
+        config_images=DiskPluginConfigImages(resolve_meiva_home()),
+    )
 
     assert [name for name, _ in admitted.plugins] == ["meiva_code"]
     assert not hasattr(meiva, "other_ns")
@@ -142,7 +147,8 @@ def test_second_wrap_stacks_instead_of_asserting():
                 "other_plugin",
                 PluginContributions(sdk_wraps=(SdkWrap("files.read", _external_wrap),)),
             )
-        )
+        ),
+        config_images=DiskPluginConfigImages(resolve_meiva_home()),
     )
 
     after = meiva.extend.stack("files.read")

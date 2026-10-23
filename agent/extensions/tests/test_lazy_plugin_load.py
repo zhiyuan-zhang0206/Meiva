@@ -25,12 +25,14 @@ from base.clock import Clock
 from base.config.service_read import ConfigAuthority
 from base.lm.catalog import ModelCatalog
 from base.log.tests.log_records import loguru_records as loguru_records
+from base.packages.plugin_config_images import DiskPluginConfigImages
 from base.packages.plugins.extensions import (
     ExtensionRegistry,
     PluginContributions,
     SdkMember,
     SdkNamespace,
 )
+from base.paths.home import resolve_meiva_home
 from meiva.sdk_surface import install
 from meiva.sdk_surface.installation import installed
 from meiva.tests.fixtures.pin_agent import pin_agent, pin_no_identity
@@ -62,6 +64,7 @@ def _reset(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
             sampling=prior.sampling,
             clock_factory=prior.clock_factory,
             producer=prior.producer,
+            config_images=prior.config_images,
         )
 
 
@@ -79,6 +82,7 @@ def _installing(
         authority=authority,
         clock_factory=clock_factory,
         producer=producer,
+        config_images=DiskPluginConfigImages(resolve_meiva_home()),
     )
 
 

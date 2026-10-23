@@ -64,6 +64,7 @@ def load_extensions(
     admitted = sdk_install.install(
         loaded.registry,
         report,
+        config_images=loaded.config_images,
         catalog=catalog,
         authority=authority,
         producer=producer,

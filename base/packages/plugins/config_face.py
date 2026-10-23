@@ -105,7 +105,9 @@ def enabled_config_classes(plugin_dirs: dict[str, Path]) -> dict[str, type[BaseM
 
 
 def disk_image_path(plugin: str) -> Path:
-    return resolve_meiva_home().resolve() / "configs" / plugin / "config.json"
+    from base.packages.plugin_config_images import config_image_path
+
+    return config_image_path(plugin, home=resolve_meiva_home())
 
 
 def read_config_image[C: BaseModel](cls: type[C], config_path: Path) -> C:
@@ -118,18 +120,8 @@ def read_config_image[C: BaseModel](cls: type[C], config_path: Path) -> C:
 
 
 def write_default_disk_image(plugin: str, cls: type[BaseModel]) -> Path:
-    instance = cls()
-    config_path = disk_image_path(plugin)
-    config_path.parent.mkdir(parents=True, exist_ok=True)
-    from base.packages.plugin_config_images import (
-        PluginConfigOwner,
-        image_revision,
-        write_config_image,
-    )
+    from base.packages.plugin_config_images import PluginConfigOwner
 
-    write_config_image(
-        PluginConfigOwner(plugin, cls, config_path),
-        instance,
-        expected_digest=image_revision(None),
-    )
+    config_path = disk_image_path(plugin)
+    PluginConfigOwner(plugin, cls, config_path).create_default()
     return config_path

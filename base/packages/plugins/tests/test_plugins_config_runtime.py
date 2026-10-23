@@ -2,27 +2,24 @@ from pathlib import Path
 
 import pytest
 
-from base import paths
-from base.packages.plugins import load_report
 from base.packages.plugins.enable_config import (
     DanglingPlugin,
+    PluginEnableStore,
     load,
     load_for_runtime,
     write_local,
 )
 
+pytestmark = pytest.mark.usefixtures("unit_home")
 
-@pytest.fixture(autouse=True)
-def _isolate(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    user = tmp_path / "plugins"
-    user.mkdir()
-    monkeypatch.setattr(paths, "plugins_dir", lambda: user)
-    monkeypatch.setenv("MEIVA_HOME", str(tmp_path / "meiva"))
-    monkeypatch.setattr(paths, "meiva_home", lambda: tmp_path)
+
+@pytest.fixture
+def store(unit_home: Path) -> PluginEnableStore:
+    return PluginEnableStore(unit_home / "plugins_config.json")
 
 
 def test_load_for_runtime_drops_dangling_and_reports_each_name(
-    monkeypatch: pytest.MonkeyPatch,
+    store: PluginEnableStore,
 ) -> None:
     write_local(
         {
@@ -38,9 +35,7 @@ def test_load_for_runtime_drops_dangling_and_reports_each_name(
     def _capture(name: str, exc: BaseException) -> None:
         reported.append((name, exc))
 
-    monkeypatch.setattr(load_report, "report_plugin_load_failure", _capture)
-
-    config = load_for_runtime({"real"})
+    config = store.load_for_runtime({"real"}, report=_capture)
 
     assert set(config.plugins) == {"real"}
     assert config.plugins["real"].enabled
@@ -49,7 +44,7 @@ def test_load_for_runtime_drops_dangling_and_reports_each_name(
 
 
 def test_load_for_runtime_reports_each_failed_load(
-    monkeypatch: pytest.MonkeyPatch,
+    store: PluginEnableStore,
 ) -> None:
     write_local({"plugins": {"real": {"enabled": True}, "vanished": {"enabled": False}}})
     reported: list[str] = []
@@ -57,10 +52,8 @@ def test_load_for_runtime_reports_each_failed_load(
     def _capture(name: str, exc: BaseException) -> None:
         reported.append(name)
 
-    monkeypatch.setattr(load_report, "report_plugin_load_failure", _capture)
-
-    load_for_runtime({"real"})
-    load_for_runtime({"real"})
+    store.load_for_runtime({"real"}, report=_capture)
+    store.load_for_runtime({"real"}, report=_capture)
 
     assert reported == ["vanished", "vanished"]
 

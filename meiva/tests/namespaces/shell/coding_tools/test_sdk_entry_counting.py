@@ -12,7 +12,9 @@ from base.agents.context.clients import ClientSet
 from base.agents.sdk import call_policy
 from base.agents.sdk.tally import SdkCallTally
 from base.api_contracts.agent_contract import AgentStatus
+from base.packages.plugin_config_images import DiskPluginConfigImages
 from base.packages.plugins.extensions import ExtensionRegistry, PluginContributions, SdkMember
+from base.paths.home import resolve_meiva_home
 from base.telemetry.tests.capture.event_capture import EmittedEvents
 from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
 from meiva.sdk_surface import install, metering, process_context
@@ -45,7 +47,9 @@ def test_real_shell_owner_probe_counts_its_public_fanout(
             ),
         )
     )
-    install.install(registry, sampling=sampling)
+    install.install(
+        registry, sampling=sampling, config_images=DiskPluginConfigImages(resolve_meiva_home())
+    )
     previous = getattr(meiva, "context", None)
     tally = SdkCallTally()
     process_context.bind_context(
