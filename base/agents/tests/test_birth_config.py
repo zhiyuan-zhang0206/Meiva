@@ -43,11 +43,11 @@ class TestClusterDefaultModel:
         config_authority: ConfigAuthority,
         model_catalog: ModelCatalog,
         cur: psycopg.Cursor,
-        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        from base.config import settings
+        from base.config import Settings
 
-        monkeypatch.setattr(settings.lm, "llm_model", "mimo-v2.6-pro")
+        complete = Settings(profile=None, lm={"llm_model": "mimo-v2.6-pro"})
+        config_authority = ConfigAuthority(complete, complete, config_authority.env_path)
         config_authority.env_path.write_text("MEIVA_MODEL=deepseek-flash\n")
         assert resolve_default_model(cur, catalog=model_catalog, authority=config_authority) == (
             "deepseek-flash",

@@ -17,7 +17,6 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime
 from functools import partial
-from pathlib import Path
 from typing import cast
 
 import psycopg
@@ -29,6 +28,7 @@ from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.db import Database
 from base.paths import meiva_home
+from base.paths.tests.homes import unit_home as unit_home
 from base.telemetry.delivery.receipts import DrainStatus
 from base.telemetry.process_logging import add_event_sink, event_sink
 
@@ -61,18 +61,7 @@ def sink_logger(database: Database, machine_identity: MachineIdentity):
         assert pipeline.stop(timeout=2).status is DrainStatus.COMPLETED
 
 
-@pytest.fixture(autouse=True)
-def _isolate_events_mirror(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Each test's event mirror lives in its own tmp dir, never the
-    worker-shared session home (audit M-2): the drain thread appends to
-    `logs_dir()` by day, so a later test in the same worker would otherwise
-    read earlier tests' lines (order-dependent failures or false passes).
-
-    Both the writer and the reader resolve `meiva_home()` at call time, so this
-    path owner redirects the complete operation to the same isolated home."""
-    from base import paths
-
-    monkeypatch.setattr(paths, "meiva_home", lambda: tmp_path / "meiva_home")
+pytestmark = pytest.mark.usefixtures("unit_home")
 
 
 def _last_event() -> tuple[str, int | None, str, dict]:

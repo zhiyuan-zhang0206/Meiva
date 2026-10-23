@@ -1,6 +1,7 @@
 """Versioned immutable batch receiver; never overwrites an existing final."""
 
 import time
+from pathlib import Path
 
 from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
@@ -30,7 +31,7 @@ def receive(pool: ConnectionPool, request: ReceiveRequest, *, local_machine: str
     if request.target != unit:
         raise UploadDeliveryConflictError("copy targets a different native machine/home")
     manifest = request.manifest
-    directory = agent_upload_dir(manifest.agent_id, create=False).resolve()
+    directory = agent_upload_dir(manifest.agent_id, create=False, home=Path.home()).resolve()
     with write_transaction(pool) as conn:
         storage.lock_agent(conn, manifest.agent_id)
         row = conn.execute(

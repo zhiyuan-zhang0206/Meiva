@@ -82,3 +82,14 @@ and run teardown, invalidating the orphan-sweep scenario before owner death.
 The scripted connection in `base/cluster/tests/test_cluster_provision.py` lets
 only its owner thread consume rows; bystander threads receive inert connections.
 The patch is process-wide, so unrelated dials must not advance the test script.
+
+Checkpoint provisioning receives a required `CheckpointSchema` dependency.
+`PostgresCheckpointSchema` owns the upstream migration list and installation
+operation together. Its setup retains the validated `owner_session` connection,
+then invokes the actual PostgresSaver on that same connection. The provisioning
+policy still refuses drift before database mutation, permits setup only for an
+absent or contiguous-prefix schema with explicit birth authority, and drops a
+newly created database after setup failure. Startup roots supply the actual
+schema owner; tests supply a complete schema implementation without replacing
+upstream class attributes or production functions. Merely importing cluster
+primitives does not import the checkpoint or Postgres drivers.

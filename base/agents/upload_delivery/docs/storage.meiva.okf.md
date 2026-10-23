@@ -36,3 +36,13 @@ Accepted outcome is consulted before mutable target facts; HOLD cannot accept a
 late proof. New placement and inbound acceptance share locks and transaction.
 See the [Gateway domain contract](../../../../gateway/upload_delivery/docs/delivered-uploads/delivered-uploads.meiva.okf.md)
 for source rounds, remote Ops proof and authentication.
+
+Upload directory and traversal helpers receive the OS-user home explicitly;
+request roots bind that path before giving a two-argument resolver to a consumer.
+Image fetch receives the existing gateway HTTP client through its narrow
+`UploadClient` contract. The hosted claim root passes the context's lazy client
+factory, so text and invalid image references do not construct a gateway client.
+The fetch resolves that factory only after its canonical image-MIME guard.
+The actual process client retains its bearer and IPv4 transport, and each image
+request retains the fifteen-second timeout and HTTP-error-to-OSError boundary.
+Tests use real httpx request/response handling through MockTransport.

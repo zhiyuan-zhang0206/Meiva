@@ -9,12 +9,11 @@ from __future__ import annotations
 import base64
 from pathlib import Path
 
+import httpx
 import pytest
 
 from base.agents.messages.inbound_images import image_mime_for, parse_upload_url
 from base.agents.upload_delivery import paths
-from base.cluster import machine
-from base.cluster.machine.tests.gateway_stubs import gateway_api_base_stub
 
 
 class TestParseUploadUrl:
@@ -32,34 +31,26 @@ class TestParseUploadUrl:
 
 
 class TestResolveUploadPath:
-    def test_upload_dir_is_owner_only(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
+    def test_upload_dir_is_owner_only(self, tmp_path: Path) -> None:
         """Upload directories repair a lax mode before files are read or written."""
-        monkeypatch.setattr(Path, "home", lambda: tmp_path)
         directory = tmp_path / "Downloads" / "MeivaAgent-7"
         directory.mkdir(parents=True)
         directory.chmod(0o755)
 
-        assert paths.agent_upload_dir(7) == directory
+        assert paths.agent_upload_dir(7, home=tmp_path) == directory
         assert directory.stat().st_mode & 0o777 == 0o700
 
-    def test_resolves_inside_dir(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-        monkeypatch.setattr(Path, "home", lambda: tmp_path)
-        p = paths.resolve_upload_path(7, "foo.png")
+    def test_resolves_inside_dir(self, tmp_path: Path) -> None:
+        p = paths.resolve_upload_path(7, "foo.png", home=tmp_path)
         assert p == (tmp_path / "Downloads" / "MeivaAgent-7" / "foo.png").resolve()
 
-    def test_rejects_parent_traversal(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
-        monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    def test_rejects_parent_traversal(self, tmp_path: Path) -> None:
         with pytest.raises(ValueError, match="escapes"):
-            paths.resolve_upload_path(7, "../../etc/passwd")
+            paths.resolve_upload_path(7, "../../etc/passwd", home=tmp_path)
 
-    def test_rejects_absolute(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-        monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    def test_rejects_absolute(self, tmp_path: Path) -> None:
         with pytest.raises(ValueError, match="escapes"):
-            paths.resolve_upload_path(7, "/etc/passwd")
+            paths.resolve_upload_path(7, "/etc/passwd", home=tmp_path)
 
 
 class TestImageMime:
@@ -74,74 +65,49 @@ class TestImageMime:
         assert image_mime_for("noext") is None
 
 
-class _FakeResp:
-    def __init__(self, content: bytes, status: int = 200) -> None:
-        self.content = content
-        self.status_code = status
-
-    def raise_for_status(self) -> None:
-        if self.status_code >= 400:
-            import httpx
-
-            raise httpx.HTTPStatusError(
-                f"{self.status_code}",
-                request=None,  # type: ignore[arg-type]
-                response=None,  # type: ignore[arg-type]
-            )
-
-
 class TestFetchUploadB64:
-    def test_fetches_and_encodes(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """The image is fetched over HTTP from the gateway (its URL is the
-        address — never the local disk), carrying the bearer header, and
-        returned as base64."""
-        from base.host.net import http_dial
-
+    def test_fetches_and_encodes(self) -> None:
         raw = b"\x89PNG\r\n\x1a\n" + b"pixels"
-        seen: dict[str, object] = {}
+        seen: list[httpx.Request] = []
 
-        def _fake_get(url: str, **kwargs: object) -> _FakeResp:
-            seen["url"] = url
-            seen["headers"] = kwargs.get("headers")
-            return _FakeResp(raw)
+        def answer(request: httpx.Request) -> httpx.Response:
+            seen.append(request)
+            return httpx.Response(200, content=raw)
 
-        monkeypatch.setattr(http_dial, "get", _fake_get)
-        monkeypatch.setattr(
-            machine, "gateway_api_base", gateway_api_base_stub("http://gw.test:8000")
-        )
-        from base.cluster.machine import gateway_auth_headers
-        from base.cluster.machine.ambient import gateway_access_from_settings
-        from base.config import settings
-
-        monkeypatch.setattr(settings.data_plane, "cluster_secret", "test-secret")
-        mime, b64 = paths.fetch_upload_b64(7, "shot.png")
+        with httpx.Client(
+            base_url="http://gw.test:8000",
+            headers={"Authorization": "Bearer test-value"},
+            transport=httpx.MockTransport(answer),
+        ) as client:
+            mime, b64 = paths.fetch_upload_b64(7, "shot.png", client=lambda: client)
         assert mime == "image/png"
         assert base64.standard_b64decode(b64) == raw
-        assert seen["url"] == "http://gw.test:8000/api/agents/7/uploads/shot.png"
-        # meiva:note
-        # The fetch authenticates exactly as this process does, so the expectation is what
-        # this process resolves; which credential wins is base.cluster.machine's contract.
-        # meiva:link base/agents/upload_delivery/docs/storage.meiva.okf.md
-        assert seen["headers"] == gateway_auth_headers(gateway_access_from_settings())
-
-    def test_non_image_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        from base.host.net import http_dial
-
-        monkeypatch.setattr(http_dial, "get", lambda *_a, **_kw: pytest.fail("must not fetch"))  # pyright: ignore[reportUnknownArgumentType]
-        with pytest.raises(ValueError, match="not a recognized image"):
-            paths.fetch_upload_b64(7, "notes.txt")
-
-    def test_missing_upload_raises_oserror(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """A 404 (or any failed fetch) surfaces as OSError — the claim node's
-        degrade-to-text-note path catches exactly that."""
-        from base.host.net import http_dial
-
-        monkeypatch.setattr(http_dial, "get", lambda *_a, **_kw: _FakeResp(b"", status=404))  # pyright: ignore[reportUnknownArgumentType]
-        monkeypatch.setattr(
-            machine, "gateway_api_base", gateway_api_base_stub("http://gw.test:8000")
+        assert str(seen[0].url) == "http://gw.test:8000/api/agents/7/uploads/shot.png"
+        assert seen[0].headers["Authorization"] == "Bearer test-value"
+        assert seen[0].extensions["timeout"] == dict.fromkeys(
+            ("connect", "read", "write", "pool"), 15.0
         )
-        with pytest.raises(OSError, match="404"):
-            paths.fetch_upload_b64(7, "gone.png")
+
+    def test_non_image_raises(self) -> None:
+        def unexpected(request: httpx.Request) -> httpx.Response:
+            raise AssertionError(f"must not fetch {request.url}")
+
+        with (
+            httpx.Client(transport=httpx.MockTransport(unexpected)) as client,
+            pytest.raises(ValueError, match="not a recognized image"),
+        ):
+            paths.fetch_upload_b64(7, "notes.txt", client=lambda: client)
+
+    def test_missing_upload_raises_oserror(self) -> None:
+        with (
+            httpx.Client(
+                base_url="http://gw.test:8000",
+                transport=httpx.MockTransport(lambda _request: httpx.Response(404)),
+            ) as client,
+            pytest.raises(OSError, match="404") as failure,
+        ):
+            paths.fetch_upload_b64(7, "gone.png", client=lambda: client)
+        assert isinstance(failure.value.__cause__, httpx.HTTPStatusError)
 
 
 def test_upload_url_roundtrips() -> None:

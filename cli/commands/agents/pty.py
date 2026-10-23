@@ -5,6 +5,7 @@ from typing import TextIO
 
 from base.host.atomic_io import SYSTEM_FS, AtomicWriter
 from base.native_process.os_platform import LockTimeoutError
+from base.paths import meiva_home
 from base.sessions.pty import allocation_freeze
 
 
@@ -24,31 +25,33 @@ def _print_freeze(
         print(f"created_at={snapshot.created_at.isoformat()}", file=stream)
     if snapshot.error is not None:
         print(f"error={snapshot.error}", file=stream)
-    print(f"marker={allocation_freeze.state_path()}", file=stream)
+    print(f"marker={allocation_freeze.state_path(meiva_home())}", file=stream)
 
 
 def cmd_pty_freeze(*, holder: str, reason: str) -> int:
     try:
         snapshot = allocation_freeze.freeze(
-            holder=holder, reason=reason, writer=AtomicWriter(SYSTEM_FS)
+            holder=holder, reason=reason, writer=AtomicWriter(SYSTEM_FS), home=meiva_home()
         )
     except (OSError, ValueError, RuntimeError) as exc:
         print(f"PTY allocation freeze refused: {exc}", file=sys.stderr)
-        _print_freeze(allocation_freeze.read(), stream=sys.stderr)
+        _print_freeze(allocation_freeze.read(home=meiva_home()), stream=sys.stderr)
         return 1
     _print_freeze(snapshot)
     return 0
 
 
 def cmd_pty_status() -> int:
-    snapshot = allocation_freeze.read()
+    snapshot = allocation_freeze.read(home=meiva_home())
     _print_freeze(snapshot)
     return 1 if snapshot.status == "invalid" else 0
 
 
 def cmd_pty_resume(*, generation: str) -> int:
     try:
-        resumed = allocation_freeze.resume(generation, writer=AtomicWriter(SYSTEM_FS))
+        resumed = allocation_freeze.resume(
+            generation, writer=AtomicWriter(SYSTEM_FS), home=meiva_home()
+        )
     except (
         LockTimeoutError,
         OSError,
@@ -56,14 +59,14 @@ def cmd_pty_resume(*, generation: str) -> int:
         allocation_freeze.InvalidPtyAllocationFreezeError,
     ) as exc:
         print(f"PTY allocation resume refused: {exc}", file=sys.stderr)
-        _print_freeze(allocation_freeze.read(), stream=sys.stderr)
+        _print_freeze(allocation_freeze.read(home=meiva_home()), stream=sys.stderr)
         return 1
     if not resumed:
         print(
             f"PTY allocation resume refused: generation {generation!r} does not own the freeze",
             file=sys.stderr,
         )
-        _print_freeze(allocation_freeze.read(), stream=sys.stderr)
+        _print_freeze(allocation_freeze.read(home=meiva_home()), stream=sys.stderr)
         return 1
-    _print_freeze(allocation_freeze.read())
+    _print_freeze(allocation_freeze.read(home=meiva_home()))
     return 0

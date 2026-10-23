@@ -10,7 +10,6 @@ _AMBIENT = "base/cluster/machine/ambient.py"
 
 CALLERS: dict[str, tuple[str, int]] = {
     "meiva_builtins/skills/platform/meiva-self-evolution/scripts/collect.py": ("O", 1),
-    "base/agents/upload_delivery/paths.py": ("B2", 1),
     "base/deploy/git/memory_repo.py": ("B2", 1),
     "base/telemetry/alerts/native.py": ("B2", 1),
     "cli/commands/_repo.py": ("C", 1),

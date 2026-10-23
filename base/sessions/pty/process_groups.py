@@ -8,9 +8,10 @@ from __future__ import annotations
 
 import os
 import time
-from collections.abc import Callable, Iterable
+from collections.abc import Iterable
 
 from base.native_process.ownership import OwnedProcess
+from base.native_process.process_control import ProcessControl
 
 _REFUSED_SETTLE_S = 0.25
 
@@ -24,7 +25,7 @@ def signal(
     identities: Iterable[OwnedProcess],
     signum: int,
     *,
-    kill_group: Callable[[int, int], None] | None = None,
+    process_control: ProcessControl,
 ) -> None:
     """Signal each known group once, while its recorded member still verifies.
 
@@ -33,20 +34,19 @@ def signal(
     """
     sent: set[int] = set()
     own_group = os.getpgrp()
-    kill = os.killpg if kill_group is None else kill_group
     for identity in identities:
         if not live(identity):
             continue
         if identity.pid == os.getpid():
             raise RuntimeError("PTY cleanup cannot signal its own process")
         try:
-            group = os.getpgid(identity.pid)
+            group = process_control.getpgid(identity.pid)
             if not live(identity):
                 continue
             if group == own_group:
                 identity.send_signal(signum)
             elif group not in sent:
-                kill(group, signum)
+                process_control.killpg(group, signum)
                 sent.add(group)
         except ProcessLookupError:
             continue

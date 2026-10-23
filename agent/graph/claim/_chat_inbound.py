@@ -19,7 +19,7 @@ from base.agents.messages.envelope import EnvelopeReadInputs, inbound_head, inbo
 from base.agents.messages.inbound_images import parse_upload_url
 from base.agents.messages.injection_scan import scan_inbound_content
 from base.agents.messages.security_finding import SecurityFindingEntry
-from base.agents.upload_delivery.paths import fetch_upload_b64
+from base.agents.upload_delivery.paths import UploadClient, fetch_upload_b64
 from base.log import logger
 
 
@@ -29,6 +29,7 @@ def build_chat_inbound(
     read_security_enabled: Callable[[], bool],
     envelope_inputs: EnvelopeReadInputs,
     expand_command: Callable[[str], str],
+    gateway: Callable[[], UploadClient],
 ) -> tuple[HumanMessage, SecurityFindingEntry | None]:
     """Build the HumanMessage for a kind='chat' inbound row, plus its scan finding.
 
@@ -89,7 +90,7 @@ def build_chat_inbound(
             continue
         ref_agent, name = parsed
         try:
-            mime, b64 = fetch_upload_b64(ref_agent, name)
+            mime, b64 = fetch_upload_b64(ref_agent, name, client=gateway)
         except (OSError, ValueError) as e:
             logger.warning(
                 "claim: image upload {!r} unavailable (agent {}): {!r}", name, item.agent_id, e

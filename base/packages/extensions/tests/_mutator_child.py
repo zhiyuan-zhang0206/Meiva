@@ -20,17 +20,6 @@ marker = pathlib.Path(marker_arg)
 sys.path.insert(0, repo_root)
 os.environ["MEIVA_HOME"] = home
 
-if role == "slow":
-    _real_replace = os.replace
-
-    def _slow_replace(src: str, dst: str, **kw: object) -> None:
-        if str(dst).endswith("installed.json"):
-            marker.touch()
-            time.sleep(float(hold_arg))
-        return _real_replace(src, dst, **kw)  # type: ignore[arg-type]
-
-    os.replace = _slow_replace  # type: ignore[assignment]
-
 from base.packages.extensions import install_registry as reg  # noqa: E402
 
 reg.load()  # pay the import + first-read cost before the handshake
@@ -41,4 +30,7 @@ if role == "fast":
             raise SystemExit("the slow writer never reached its window")
         time.sleep(0.01)
 with reg.mutate() as registry:
+    if role == "slow":
+        marker.touch()
+        time.sleep(float(hold_arg))
     registry.packages.append(reg.InstalledPackage(name=name, type="skill", source="https://x"))

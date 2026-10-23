@@ -17,6 +17,7 @@ from __future__ import annotations
 from collections.abc import Generator
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import LiteralString, cast
 
 import psycopg
 import pytest
@@ -30,6 +31,7 @@ from base.cluster import (
     provision_database,
 )
 from base.cluster.authority import ensure_groups
+from base.cluster.checkpoint_schema import PostgresCheckpointSchema
 from base.cluster.dataplane.pg_admin import owner_conninfo
 from base.cluster.dataplane.pg_throwaway_base import ThrowawayConfig, configured_base
 from base.cluster.dataplane.pg_tools import throwaway_postgres
@@ -159,6 +161,7 @@ def test_ensure_checkpoint_schema_creates_tables_owned_by_identity(runner_db: st
             identity,
             base_admin_url=admin,
             database_created=True,
+            schema=PostgresCheckpointSchema(),
         )
         with psycopg.connect(
             url_with_userinfo(
@@ -201,7 +204,7 @@ def test_ensure_checkpoint_schema_creates_tables_owned_by_identity(runner_db: st
 
 
 def test_fresh_install_dependency_drift_precedes_checkpoint_setup(
-    runner_db: str, monkeypatch: pytest.MonkeyPatch
+    runner_db: str,
 ) -> None:
     """A new upstream migration cannot mutate even a fresh cluster by surprise."""
     from base.cluster.provision import CheckpointDependencyDriftError
@@ -218,9 +221,17 @@ def test_fresh_install_dependency_drift_precedes_checkpoint_setup(
         with psycopg.connect(db_url, autocommit=True) as conn:
             conn.execute(_schema_sql())  # type: ignore[arg-type]
 
-        monkeypatch.setattr(PostgresSaver, "MIGRATIONS", [*PostgresSaver.MIGRATIONS, "SELECT 1"])
+        class DriftedSaver(PostgresCheckpointSchema):
+            @property
+            def migrations(self) -> list[str]:
+                return [*PostgresSaver.MIGRATIONS, "SELECT 1"]
+
         with pytest.raises(CheckpointDependencyDriftError, match="Meiva timestamp migration"):
-            ensure_checkpoint_schema(identity, base_admin_url=admin)
+            ensure_checkpoint_schema(
+                identity,
+                base_admin_url=admin,
+                schema=DriftedSaver(),
+            )
 
         with psycopg.connect(db_url, autocommit=True) as conn:
             row = conn.execute("SELECT to_regclass('public.checkpoint_migrations')").fetchone()
@@ -236,7 +247,7 @@ def test_fresh_install_dependency_drift_precedes_checkpoint_setup(
 
 
 def test_default_missing_schema_refuses_setup(
-    runner_db: str, monkeypatch: pytest.MonkeyPatch
+    runner_db: str,
 ) -> None:
     """Operator/default paths cannot turn a missing table into DDL authority."""
     from base.cluster.provision import CheckpointSchemaMismatchError
@@ -244,12 +255,19 @@ def test_default_missing_schema_refuses_setup(
     with psycopg.connect(runner_db, autocommit=True) as conn:
         conn.execute("DROP TABLE checkpoint_migrations")
 
-    def setup_must_not_run(_self: PostgresSaver) -> None:
-        raise AssertionError("missing schema without birth authority must not run setup")
+    class RefusedSetup(PostgresCheckpointSchema):
+        def setup(
+            self, *, base_admin_url: str, identity: str, expected_data_dir: Path | None
+        ) -> None:
+            del base_admin_url, identity, expected_data_dir
+            raise AssertionError("missing schema without birth authority must not run setup")
 
-    monkeypatch.setattr(PostgresSaver, "setup", setup_must_not_run)
     with pytest.raises(CheckpointSchemaMismatchError):
-        ensure_checkpoint_schema(_IDENTITY, base_admin_url=_admin_url(runner_db))
+        ensure_checkpoint_schema(
+            _IDENTITY,
+            base_admin_url=_admin_url(runner_db),
+            schema=RefusedSetup(),
+        )
 
     with psycopg.connect(runner_db, autocommit=True) as conn:
         row = conn.execute("SELECT to_regclass('public.checkpoint_migrations')").fetchone()
@@ -257,41 +275,44 @@ def test_default_missing_schema_refuses_setup(
 
 
 def test_new_database_setup_failure_is_dropped_then_retry_converges(
-    runner_db: str, monkeypatch: pytest.MonkeyPatch
+    runner_db: str,
 ) -> None:
     """Real PG: caught autocommit setup failure leaves no half-born database."""
     admin = _admin_url(runner_db)
     identity = "meiva_runner_ct4"
     # The provisioned owner is NOLOGIN: the administrator acts as it.
     db_url = owner_conninfo(admin, database=identity, owner=identity)
-    original_setup = PostgresSaver.setup
 
     assert provision_database(identity, base_admin_url=admin) is True
 
-    def fail_after_v0(_self: PostgresSaver) -> None:
-        with psycopg.connect(db_url, autocommit=True) as conn:
-            conn.execute(PostgresSaver.MIGRATIONS[0])  # pyright: ignore[reportCallIssue, reportArgumentType]
-            conn.execute("INSERT INTO checkpoint_migrations (v) VALUES (0)")
-        raise RuntimeError("injected setup crash after v0")
+    class FailedSetup(PostgresCheckpointSchema):
+        def setup(
+            self, *, base_admin_url: str, identity: str, expected_data_dir: Path | None
+        ) -> None:
+            del base_admin_url, identity, expected_data_dir
+            with psycopg.connect(db_url, autocommit=True) as conn:
+                conn.execute(cast(LiteralString, PostgresSaver.MIGRATIONS[0]))
+                conn.execute("INSERT INTO checkpoint_migrations (v) VALUES (0)")
+            raise RuntimeError("injected setup crash after v0")
 
-    monkeypatch.setattr(PostgresSaver, "setup", fail_after_v0)
     with pytest.raises(RuntimeError, match="injected setup crash"):
         ensure_checkpoint_schema(
             identity,
             base_admin_url=admin,
             database_created=True,
+            schema=FailedSetup(),
         )
     with psycopg.connect(admin, autocommit=True) as conn:
         row = conn.execute("SELECT 1 FROM pg_database WHERE datname = %s", (identity,)).fetchone()
     assert row is None
 
-    monkeypatch.setattr(PostgresSaver, "setup", original_setup)
     try:
         assert provision_database(identity, base_admin_url=admin) is True
         ensure_checkpoint_schema(
             identity,
             base_admin_url=admin,
             database_created=True,
+            schema=PostgresCheckpointSchema(),
         )
         with psycopg.connect(db_url, autocommit=True) as conn:
             rows = conn.execute("SELECT v FROM checkpoint_migrations").fetchall()
@@ -301,15 +322,22 @@ def test_new_database_setup_failure_is_dropped_then_retry_converges(
 
 
 def test_current_checkpoint_schema_skips_setup(
-    runner_db: str, monkeypatch: pytest.MonkeyPatch
+    runner_db: str,
 ) -> None:
     """Re-running install provisioning on a current schema performs no DDL."""
 
-    def setup_must_not_run(_self: PostgresSaver) -> None:
-        raise AssertionError("current checkpoint schema must bypass setup")
+    class RefusedSetup(PostgresCheckpointSchema):
+        def setup(
+            self, *, base_admin_url: str, identity: str, expected_data_dir: Path | None
+        ) -> None:
+            del base_admin_url, identity, expected_data_dir
+            raise AssertionError("current checkpoint schema must bypass setup")
 
-    monkeypatch.setattr(PostgresSaver, "setup", setup_must_not_run)
-    ensure_checkpoint_schema(_IDENTITY, base_admin_url=_admin_url(runner_db))
+    ensure_checkpoint_schema(
+        _IDENTITY,
+        base_admin_url=_admin_url(runner_db),
+        schema=RefusedSetup(),
+    )
 
 
 @pytest.mark.parametrize(
@@ -348,7 +376,7 @@ def test_runner_accepts_exact_checkpoint_schema_read_only(runner_db: str) -> Non
 
 
 def test_existing_behind_schema_never_falls_back_to_setup(
-    runner_db: str, monkeypatch: pytest.MonkeyPatch
+    runner_db: str,
 ) -> None:
     """Only an absent fresh-install schema may invoke upstream setup."""
     from base.cluster.provision import CheckpointSchemaMismatchError
@@ -356,45 +384,54 @@ def test_existing_behind_schema_never_falls_back_to_setup(
     with psycopg.connect(runner_db, autocommit=True) as conn:
         conn.execute("DELETE FROM checkpoint_migrations WHERE v = 9")
 
-    def setup_must_not_run(_self: PostgresSaver) -> None:
-        raise AssertionError("existing schemas must use Meiva migrations")
+    class RefusedSetup(PostgresCheckpointSchema):
+        def setup(
+            self, *, base_admin_url: str, identity: str, expected_data_dir: Path | None
+        ) -> None:
+            del base_admin_url, identity, expected_data_dir
+            raise AssertionError("existing schemas must use Meiva migrations")
 
-    monkeypatch.setattr(PostgresSaver, "setup", setup_must_not_run)
     with pytest.raises(CheckpointSchemaMismatchError):
-        ensure_checkpoint_schema(_IDENTITY, base_admin_url=_admin_url(runner_db))
+        ensure_checkpoint_schema(
+            _IDENTITY,
+            base_admin_url=_admin_url(runner_db),
+            schema=RefusedSetup(),
+        )
 
 
 def test_birth_retry_resumes_contiguous_prefix_after_setup_crash(
-    runner_db: str, monkeypatch: pytest.MonkeyPatch
+    runner_db: str,
 ) -> None:
     """Real PG: a hard-crash-shaped partial birth converges on install retry."""
     with psycopg.connect(runner_db, autocommit=True) as conn:
         conn.execute("DELETE FROM checkpoint_migrations")
 
-    original_setup = PostgresSaver.setup
+    class FailedSetup(PostgresCheckpointSchema):
+        def setup(
+            self, *, base_admin_url: str, identity: str, expected_data_dir: Path | None
+        ) -> None:
+            del base_admin_url, identity, expected_data_dir
+            with psycopg.connect(runner_db, autocommit=True) as conn:
+                conn.execute("INSERT INTO checkpoint_migrations (v) VALUES (0)")
+            raise RuntimeError("injected setup crash after v0")
 
-    def fail_after_v0(_self: PostgresSaver) -> None:
-        with psycopg.connect(runner_db, autocommit=True) as conn:
-            conn.execute("INSERT INTO checkpoint_migrations (v) VALUES (0)")
-        raise RuntimeError("injected setup crash after v0")
-
-    monkeypatch.setattr(PostgresSaver, "setup", fail_after_v0)
     with pytest.raises(RuntimeError, match="injected setup crash"):
         ensure_checkpoint_schema(
             _IDENTITY,
             base_admin_url=_admin_url(runner_db),
             resume_partial=True,
+            schema=FailedSetup(),
         )
 
     with psycopg.connect(runner_db, autocommit=True) as conn:
         rows = conn.execute("SELECT v FROM checkpoint_migrations").fetchall()
     assert rows == [(0,)]
 
-    monkeypatch.setattr(PostgresSaver, "setup", original_setup)
     ensure_checkpoint_schema(
         _IDENTITY,
         base_admin_url=_admin_url(runner_db),
         resume_partial=True,
+        schema=PostgresCheckpointSchema(),
     )
     with psycopg.connect(runner_db, autocommit=True) as conn:
         rows = conn.execute("SELECT v FROM checkpoint_migrations").fetchall()
@@ -402,7 +439,7 @@ def test_birth_retry_resumes_contiguous_prefix_after_setup_crash(
 
 
 def test_birth_retry_refuses_non_prefix_checkpoint_state(
-    runner_db: str, monkeypatch: pytest.MonkeyPatch
+    runner_db: str,
 ) -> None:
     """Install repair authority never blesses a gap as a resumable prefix."""
     from base.cluster.provision import CheckpointSchemaMismatchError
@@ -410,15 +447,19 @@ def test_birth_retry_refuses_non_prefix_checkpoint_state(
     with psycopg.connect(runner_db, autocommit=True) as conn:
         conn.execute("DELETE FROM checkpoint_migrations WHERE v = 4")
 
-    def setup_must_not_run(_self: PostgresSaver) -> None:
-        raise AssertionError("gapped checkpoint state must not be repaired")
+    class RefusedSetup(PostgresCheckpointSchema):
+        def setup(
+            self, *, base_admin_url: str, identity: str, expected_data_dir: Path | None
+        ) -> None:
+            del base_admin_url, identity, expected_data_dir
+            raise AssertionError("gapped checkpoint state must not be repaired")
 
-    monkeypatch.setattr(PostgresSaver, "setup", setup_must_not_run)
     with pytest.raises(CheckpointSchemaMismatchError):
         ensure_checkpoint_schema(
             _IDENTITY,
             base_admin_url=_admin_url(runner_db),
             resume_partial=True,
+            schema=RefusedSetup(),
         )
 
 

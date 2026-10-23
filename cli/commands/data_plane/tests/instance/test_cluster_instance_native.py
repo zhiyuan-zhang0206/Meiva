@@ -30,6 +30,7 @@ from redis.retry import Retry
 
 from base import cluster
 from base.cluster import provision_database
+from base.cluster.checkpoint_schema import PostgresCheckpointSchema
 from base.cluster.machine import MachineIdentity
 from base.config import settings
 from base.paths.home import resolve_meiva_home
@@ -200,11 +201,13 @@ def test_per_cluster_instance_bringup(
         base_admin_url=ci.pg_admin_url(pg_port),
         expected_data_dir=resolve_meiva_home() / "pg",
     )
+
     cluster.ensure_checkpoint_schema(
         "meiva_tinst",
         base_admin_url=ci.pg_admin_url(pg_port),
         database_created=True,
         expected_data_dir=resolve_meiva_home() / "pg",
+        schema=PostgresCheckpointSchema(),
     )
 
     with _admin(pg_port, "meiva_tinst") as conn:
