@@ -152,7 +152,14 @@ def test_session_for_host_healthy_resolution_returns_none(tracker: Any) -> None:
         del type
         return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("104.18.1.2", 443))]
 
-    assert tracker._session_for_host(host, addrinfo=getaddrinfo) is None
+    assert (
+        tracker._session_for_host(
+            host,
+            addrinfo=getaddrinfo,
+            doh_resolver=lambda _host: pytest.fail("healthy DNS must not use DoH"),
+        )
+        is None
+    )
 
 
 def test_session_for_host_fake_ip_returns_pinned_session(tracker: Any) -> None:
@@ -203,7 +210,13 @@ def test_fetch_json_uses_pinned_session_when_fake_ip(tracker: Any) -> None:
         return session
 
     assert (
-        tracker.fetch_json(url, headers=headers, params=params, session_for_host=session_for_host)
+        tracker.fetch_json(
+            url,
+            headers=headers,
+            params=params,
+            session_for_host=session_for_host,
+            http_get=lambda *_args, **_kwargs: pytest.fail("pinned session must own the request"),
+        )
         == payload
     )
     assert session_calls == [

@@ -3,6 +3,7 @@ from pathlib import Path
 import pytest
 import yaml
 
+from base.host.proc import run_bounded
 from scripts.audit import module_moves
 from scripts.content_lint import (
     check_doc_references,
@@ -32,6 +33,8 @@ def test_relocated_history_is_exempt_but_live_docs_still_fail(tmp_path: Path, ax
     live = tmp_path / "docs" / "conventions" / "guide.md"
     live.parent.mkdir(parents=True)
     live.write_text("See [the implementation](missing.py).\n")
+    run_bounded(["git", "init", "-q", str(tmp_path)], timeout=10).check_returncode()
+    run_bounded(["git", "-C", str(tmp_path), "add", "."], timeout=10).check_returncode()
     assert check_doc_references.main(repo=tmp_path, commands={}, docs=[history]) == 0
     assert check_doc_references.main(repo=tmp_path, commands={}, docs=[live]) == 1
     assert module_moves.is_frozen(history.relative_to(tmp_path).as_posix())
