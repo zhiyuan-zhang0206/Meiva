@@ -10,7 +10,7 @@ import { useTimeFormat } from "@/lib/format/use-time-format";
 import { api } from "@/lib/transport/api";
 
 import { useLinkKindLabels } from "./agent-view/agent-view-link-labels";
-import type { ResolvedLink } from "./model/timeline-links";
+import type { ResolvedLink } from "./model/links/resolve";
 import { PreviewMessage, TimelineMessages } from "./run-timeline-messages";
 
 function LinkText({ link }: { link: ResolvedLink["link"] }) {

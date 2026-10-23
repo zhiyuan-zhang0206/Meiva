@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { RunTimelineResponse } from "@/lib/contracts/types";
 import { ApiError, type api } from "@/lib/transport/api";
 
-import type { Viewport } from "../model/timeline-model";
+import type { Viewport } from "../model/timeline-model-viewport";
 import { useTimelineWindows } from "./use-timeline-windows";
 
 const { getRunTimeline } = vi.hoisted(() => ({ getRunTimeline: vi.fn<typeof api.getRunTimeline>() }));

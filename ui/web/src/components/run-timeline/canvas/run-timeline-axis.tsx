@@ -9,7 +9,9 @@ import { FLEX, MIN_W_0 } from "@/lib/layout/layout";
 import { cn } from "@/lib/format/utils";
 import { useTimeFormat } from "@/lib/format/use-time-format";
 
-import { axisTicks, zoomView, type AxisMap, type Viewport } from "../model/timeline-model";
+import { axisTicks, type Viewport } from "../model/timeline-model-viewport";
+import { zoomView } from "../model/timeline-model";
+import { type AxisMap } from "../model/timeline-model-axis";
 
 const BUTTON_ZOOM = 0.5;
 const AXIS_TICK_TARGET = 6;

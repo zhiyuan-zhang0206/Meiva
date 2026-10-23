@@ -10,7 +10,7 @@ import type {
   RunTimelineUnit,
 } from "@/lib/contracts/types";
 
-import { firstLine, type Hover } from "./timeline-model";
+import { firstLine, type Hover } from "./timeline-model-selection";
 
 const PREVIEW_CHARS = 80;
 

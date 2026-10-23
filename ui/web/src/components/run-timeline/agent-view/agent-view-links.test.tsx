@@ -23,9 +23,10 @@ vi.mock("@/lib/transport/api", async (importOriginal) => ({
 }));
 
 import AgentViewPage from "@/app/insights/run/[agents]/page";
-import { drawnLinks, itemX, mockCanvas, paintFrame } from "../canvas/run-timeline-test-canvas";
-import { curveOf, curvePoint, MAX_ARROWS } from "../model/timeline-links";
-import { viewportOf } from "../model/timeline-model";
+import { drawnLinks, itemX, mockCanvas, paintFrame } from "../canvas/run-timeline-test-canvas-mock";
+import { curveOf, curvePoint } from "../model/links/geometry";
+import { MAX_ARROWS } from "../model/links/cluster";
+import { viewportOf } from "../model/timeline-model-viewport";
 
 const T0 = Date.parse("2026-10-04T12:00:00.000Z");
 const at = (minutes: number) => new Date(T0 + minutes * 60_000).toISOString();

@@ -16,7 +16,7 @@ vi.mock("@/lib/transport/api", () => ({
 import { preloadChatMarkdown } from "@/components/content/markdown";
 import { NodeDetail, UnitDetail } from "./run-timeline-detail";
 import { LinkDetail } from "./run-timeline-link-detail";
-import type { ResolvedLink } from "./model/timeline-links";
+import type { ResolvedLink } from "./model/links/resolve";
 
 afterEach(cleanup);
 

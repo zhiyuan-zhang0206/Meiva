@@ -7,8 +7,12 @@
 
 import { useEffect, useRef, type RefObject } from "react";
 
-import { bucketOf, clusterToMax, curveOf, curvePoint, endTangent, hitLink, LINK_COLORS, type Arrow, type Cluster, type Curve, type ResolvedLink } from "../model/timeline-links";
-import type { AxisMap, Viewport } from "../model/timeline-model";
+import { bucketOf, clusterToMax, type Arrow, type Cluster } from "../model/links/cluster";
+import { curveOf, curvePoint, endTangent, type Curve } from "../model/links/geometry";
+import { hitLink } from "../model/links/selection";
+import { LINK_COLORS, type ResolvedLink } from "../model/links/resolve";
+import type { AxisMap } from "../model/timeline-model-axis";
+import type { Viewport } from "../model/timeline-model-viewport";
 
 const ROW_TESTID = { units: "run-timeline-row-units", user: "run-timeline-row-user", other: "run-timeline-row-other" } as const;
 const HEAD_PX = 5;

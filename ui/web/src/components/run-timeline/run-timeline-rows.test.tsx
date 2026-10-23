@@ -6,10 +6,10 @@ import type { RunTimelineNode, RunTimelineResponse, RunTimelineUnit } from "@/li
 
 import { RunTimelineRows } from "./run-timeline-rows";
 import type { UnitHeights } from "./canvas/run-timeline-paint";
-import { LINK_KINDS } from "./model/timeline-links";
-import { ALL_ROWS } from "./model/timeline-nav";
-import { clickAt, drawn, leave, mockCanvas, paintFrame, pointAt } from "./canvas/run-timeline-test-canvas";
-import type { Selection } from "./model/timeline-model";
+import { LINK_KINDS } from "./model/links/resolve";
+import { ALL_ROWS } from "./model/timeline-nav-rows";
+import { clickAt, drawn, leave, mockCanvas, paintFrame, pointAt } from "./canvas/run-timeline-test-canvas-mock";
+import type { Selection } from "./model/timeline-model-selection";
 
 vi.mock("@/lib/transport/api", () => ({
   api: {

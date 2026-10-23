@@ -2,7 +2,7 @@
 
 import { useTranslations } from "next-intl";
 
-import type { LinkKind } from "../model/timeline-links";
+import type { LinkKind } from "../model/links/resolve";
 
 export function useLinkKindLabels(): Record<LinkKind, string> {
   const t = useTranslations("runTimeline");

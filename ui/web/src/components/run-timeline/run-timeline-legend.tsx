@@ -9,8 +9,9 @@ import { useTranslations } from "next-intl";
 import { FLEX } from "@/lib/layout/layout";
 import { cn } from "@/lib/format/utils";
 
-import { LINK_COLORS, LINK_KINDS, type LinkKind } from "./model/timeline-links";
-import { BLOCK_CLASSES, classColor, type BlockClass, type Highlight } from "./model/timeline-model";
+import { LINK_COLORS, LINK_KINDS, type LinkKind } from "./model/links/resolve";
+import { BLOCK_CLASSES, classColor, type BlockClass } from "./model/timeline-model-classes";
+import { type Highlight } from "./model/timeline-model-tree";
 
 export function RunTimelineLegend({
   highlight,

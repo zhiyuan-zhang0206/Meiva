@@ -15,7 +15,7 @@ import { FLEX } from "@/lib/layout/layout";
 import type { BackendTimelineItem, RunTimelineMessage, RunTimelineMessagePart, RunTimelineUnit } from "@/lib/contracts/types";
 import { cn } from "@/lib/format/utils";
 
-import { partsForUnit } from "./model/timeline-model";
+import { partsForUnit } from "./model/timeline-model-selection";
 
 const PAGE = 50;
 

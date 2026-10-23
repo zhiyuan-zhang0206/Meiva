@@ -2,19 +2,11 @@ import { describe, expect, it } from "vitest";
 
 import type { RunTimelineNode, RunTimelineUnit } from "@/lib/contracts/types";
 
-import {
-  aggregateColumns,
-  barValue,
-  rowLayout,
-  buildHitIndex,
-  frameOf,
-  hitTest,
-  selectionKey,
-  snap,
-  type Place,
-} from "./timeline-canvas-model";
+import { aggregateColumns, buildHitIndex, frameOf, hitTest, snap, type Place } from "./timeline-canvas-hit";
+import { barValue, rowLayout } from "./timeline-canvas-model";
+import { selectionKey } from "./timeline-nav-rows";
 import { timeAxis } from "./timeline-model";
-import { INPUT_ROW, UNITS_ROW } from "./timeline-nav";
+import { INPUT_ROW, UNITS_ROW } from "./timeline-nav-rows";
 
 const place = (key: string, x0: number, x1: number, weight = 0): Place => ({ key, x0, x1, weight });
 

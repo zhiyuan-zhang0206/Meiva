@@ -6,7 +6,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { RunTimelineResponse } from "@/lib/contracts/types";
 import { api, ApiError } from "@/lib/transport/api";
 
-import { viewportOf, type Viewport } from "../model/timeline-model";
+import { viewportOf, type Viewport } from "../model/timeline-model-viewport";
 
 import { identityKey } from "../model/object-identity";
 import { completeRanges, mergeWindows, omittedIn, overlaps, padded, uncovered } from "./timeline-window-cache";

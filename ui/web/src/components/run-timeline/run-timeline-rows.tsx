@@ -6,38 +6,22 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { RunTimelineResponse, RunTimelineUnit } from "@/lib/contracts/types";
 import { externalAgentName, EXTERNAL_AGENT_PREFIX } from "@/lib/format/inbound-source";
 
-import {
-  blockClass,
-  hoverLit,
-  timeAxis,
-  inboundSources,
-  levelsTopFirst,
-  type BlockClass,
-  type Highlight,
-  type Viewport,
-} from "./model/timeline-model";
-import {
-  INPUT_ROW,
-  UNITS_ROW,
-  levelRowId,
-  navRowIds,
-  SELECTION_LINE_BELOW_PX,
-  selectionRoles,
-  type RowOptions,
-} from "./model/timeline-nav";
+import { blockClass, type BlockClass } from "./model/timeline-model-classes";
+import { hoverLit, inboundSources, type Highlight } from "./model/timeline-model-tree";
+import { timeAxis } from "./model/timeline-model";
+import { levelsTopFirst } from "./model/timeline-model-selection";
+import { type Viewport } from "./model/timeline-model-viewport";
+import { INPUT_ROW, UNITS_ROW, levelRowId, navRowIds, type RowOptions } from "./model/timeline-nav-rows";
+import { SELECTION_LINE_BELOW_PX, selectionRoles } from "./model/timeline-nav";
 import { type AgentSelection, type ViewAgent } from "./agent-view/agent-view-nav";
 import { AgentGroupHeader, AgentPending } from "./agent-view/agent-view-group";
 import { useLinkKindLabels } from "./agent-view/agent-view-link-labels";
 import { LinkRowGroup } from "./agent-view/agent-view-link-group";
 import { LinksCanvas, type LinkHit, type LinkHitResult } from "./canvas/run-timeline-links-canvas";
-import {
-  endIn,
-  groupLinks,
-  MAX_ARROWS,
-  type LinkKind,
-  type ResolvedLink,
-} from "./model/timeline-links";
-import { barTop, frameOf, layoutsFor, type RowLayout } from "./model/timeline-canvas-model";
+import { endIn, groupLinks, type LinkKind, type ResolvedLink } from "./model/links/resolve";
+import { MAX_ARROWS } from "./model/links/cluster";
+import { barTop, layoutsFor } from "./model/timeline-canvas-model";
+import { frameOf, type RowLayout } from "./model/timeline-canvas-hit";
 import { RunTimelineAxis } from "./canvas/run-timeline-axis";
 import { TrackCanvas } from "./canvas/run-timeline-canvas";
 import { paintBars, paintNodes, paintUnits, type PaintState, type RowDeco, type UnitHeights } from "./canvas/run-timeline-paint";

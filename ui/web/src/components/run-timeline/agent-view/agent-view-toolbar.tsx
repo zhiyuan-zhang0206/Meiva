@@ -11,7 +11,7 @@ import { FLEX } from "@/lib/layout/layout";
 import { cn } from "@/lib/format/utils";
 
 import type { UnitHeights } from "../canvas/run-timeline-paint";
-import { MAX_ARROWS_CAP, parseArrowLimit } from "../model/timeline-links";
+import { MAX_ARROWS_CAP, parseArrowLimit } from "../model/links/cluster";
 
 const HEIGHT_OPTIONS: readonly UnitHeights[] = ["equal", "tokens"];
 const FIELD = "rounded border border-border bg-background px-2 py-1 font-mono text-xs text-foreground";

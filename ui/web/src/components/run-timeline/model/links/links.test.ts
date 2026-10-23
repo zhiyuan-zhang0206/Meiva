@@ -2,27 +2,10 @@ import { describe, expect, it } from "vitest";
 
 import type { RunTimelineLink, RunTimelineResponse, RunTimelineUnit } from "@/lib/contracts/types";
 
-import {
-  bucketOf,
-  clusterArrows,
-  clusterToMax,
-  MAX_ARROWS,
-  MAX_ARROWS_CAP,
-  parseArrowLimit,
-  curveOf,
-  curvePoint,
-  distanceToCurve,
-  endTangent,
-  endIn,
-  groupLinks,
-  isHumanSource,
-  hitLink,
-  nearestLink,
-  nearestUnit,
-  resolveLinks,
-  stepLink,
-  type Curve,
-} from "./timeline-links";
+import { bucketOf, clusterArrows, clusterToMax, MAX_ARROWS, MAX_ARROWS_CAP, parseArrowLimit } from "./cluster";
+import { curveOf, curvePoint, distanceToCurve, endTangent, nearestLink, stepLink, type Curve } from "./geometry";
+import { endIn, groupLinks, isHumanSource, resolveLinks } from "./resolve";
+import { hitLink, nearestUnit } from "./selection";
 
 const iso = (minute: number) => new Date(Date.UTC(2026, 9, 4, 12, 0, minute * 60)).toISOString();
 
@@ -71,6 +54,7 @@ describe("resolveLinks", () => {
     expect(on.to).toEqual({ row: "units", agent: 2, ms: Date.parse(iso(21)) });
     expect(at.to).toEqual({ row: "units", agent: 2, ms: Date.parse(iso(10)) });
     expect([on.unmatched, at.unmatched]).toEqual([false, true]);
+    // meiva:note
     // An event that was not delivered as an inbound row has no block to be matched to, and says nothing about it.
     expect([spawn.to.row, spawn.unmatched]).toEqual(["units", false]);
   });
@@ -136,11 +120,13 @@ describe("the User group", () => {
       ["send_message", null, 2, "user"],
       ["send_message", null, 2, "ui:page:fleet"],
     ]);
+    // meiva:note
     // Its own kind, so it has its own color and legend entry and is never merged with messages between agents.
     expect(user.map((l) => l.kind)).toEqual(["user_message", "user_message"]);
     expect(user[0].to).toEqual({ row: "units", agent: 2, ms: Date.parse(iso(21)) });
     expect(user[0].from).toEqual({ row: "user", agent: 0, ms: Date.parse(iso(20)) });
     expect([user[0].unmatched, user[0].external]).toEqual([false, null]);
+    // meiva:note
     // A block with no inbound id (an old history) is still exact: it is the block itself.
     expect(user[1].to).toEqual({ row: "units", agent: 2, ms: Date.parse(iso(30.5)) });
   });
@@ -232,6 +218,7 @@ describe("the curve", () => {
     const c = curveOf("k", 0, 0, 40, 400);
     const tan = endTangent(c);
     expect(Math.hypot(tan.x, tan.y)).toBeCloseTo(1, 5);
+    // meiva:note
     // The end control point is level with the end and to its right: the head points left, not down the chord.
     expect(tan.y).toBeCloseTo(0, 5);
     expect(tan.x).toBeLessThan(-0.9);
@@ -340,6 +327,7 @@ describe("merging down to a limit", () => {
       expect(found.clusters.length).toBeLessThanOrEqual(max);
       expect(total(found)).toBe(400);
       expect(found.withinMax).toBe(true);
+      // meiva:note
       // A smaller distance would have left more than the limit.
       expect(clusterArrows(arrows, found.px - 1).length).toBeGreaterThan(max);
     }
@@ -351,6 +339,7 @@ describe("merging down to a limit", () => {
   });
 
   it("falls apart on zooming in: fewer arrows are in view, so the distance shrinks, and with few enough there is none", () => {
+    // meiva:note
     // 400 arrows over the whole window; zoomed in 8x only an eighth of them are on screen, spread 8x wider.
     const whole = Array.from({ length: 400 }, (_, i) => ({ key: `k${i}`, bucket: "a", x0: (i * 2.5) % 1000, x1: (i * 2.5 + 40) % 1000 }));
     const zoomed = whole.filter((a) => a.x0 < 125).map((a) => ({ ...a, x0: a.x0 * 8, x1: a.x1 * 8 }));
@@ -385,7 +374,8 @@ describe("merging down to a limit", () => {
       const arrows = Array.from({ length: n }, (_, i) => ({ key: `k${i}`, bucket: `b${i % 8}`, x0: (i * 37) % 1800, x1: (i * 91) % 1800 }));
       const started = performance.now();
       clusterToMax(arrows, 30, 3600);
-      // Measured in the report; the bound is generous so a slow CI machine does not flake.
+      // meiva:note
+      // The timing ceiling leaves headroom for slower CI hosts.
       expect(performance.now() - started).toBeLessThan(2000);
     }
   });

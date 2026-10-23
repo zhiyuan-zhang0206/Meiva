@@ -1,6 +1,7 @@
 import type { RunTimelineResponse } from "@/lib/contracts/types";
 
-import { unitKey, viewportOf, type Viewport } from "../model/timeline-model";
+import { unitKey } from "../model/timeline-model-selection";
+import { viewportOf, type Viewport } from "../model/timeline-model-viewport";
 
 export function overlaps(a: Viewport, b: Viewport): boolean {
   return a.from <= b.to && b.from <= a.to;
