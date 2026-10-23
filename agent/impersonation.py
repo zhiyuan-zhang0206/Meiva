@@ -10,9 +10,11 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import secrets
+import sys
 import time
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 from langchain_core.runnables import RunnableConfig
@@ -22,20 +24,104 @@ from langgraph.types import Command
 from psycopg_pool import AsyncConnectionPool
 
 from agent import impersonation_handoff as _handoff
-from agent import impersonation_process as _relay_process
 from agent import state as _state
 from agent.nodes import END, NodeName
+from agent.takeover.gate import (
+    GateVerdict,
+    LeasePhase,
+    SettleStep,
+    delta_plan,
+    gate_verdict,
+    handoff_due,
+    settle_step,
+    start_brief,
+)
+from agent.takeover.process import spawn_relay
+from agent.takeover.relay import (
+    CREDENTIAL_RENEWED_REASON,
+    NOT_READY_REASON,
+    SESSION_RELAY_DOWN_REASON,
+    STALE_RELAY_REASON,
+    UNBOUND_REASON,
+    ChildView,
+    LeaseView,
+    Poll,
+    RelayBinding,
+    RelayRoute,
+    RelayWait,
+    Supervision,
+    TakeoverHost,
+    endpoint_unusable_reason,
+    relay_poll,
+    relay_route,
+    startup_failure,
+    supervision_step,
+)
 from base.agents.context import MeivaContext, agent_id_from_config
+from base.agents.impersonation import (
+    OPEN,
+    SESSION_RELAY_PROVIDERS,
+    ImpersonationError,
+    abort_lease,
+    aborted_detail,
+    activate,
+    fail_acceptance,
+    mark_plugin_applied,
+    prepare,
+    provision_relay,
+    relay_get,
+)
+from base.agents.impersonation import native_status as read_status
 from base.agents.impersonation.notes import HandoffNotes
-from base.agents.impersonation.relay import record_relay_failure
-from base.agents.impersonation.relay import stamp_relay_failure as stamp_relay_failure
-from base.agents.impersonation.status import OPEN, ImpersonationStatus
+from base.agents.impersonation.relay import (
+    record_degradation,
+    record_relay_failure,
+    stamp_relay_failure,
+)
+from base.agents.impersonation.status import ImpersonationStatus
 from base.agents.observation.relay_supervision import RelayChild, RelaySupervision, relay_exited
 from base.agents.observation.relay_supervision import heartbeat_fresh as _heartbeat_fresh
 from base.agents.observation.relay_supervision import terminate_relay as terminate_relay
 from base.db import Database
 from base.events.live.bus import EventBus
+from base.log import logger
 from base.native_process.runtime_incarnation import RuntimeIncarnation
+from base.paths import workspaces_root
+
+AgentGraph = CompiledStateGraph[
+    _state.BaseAgentState, MeivaContext, _state.BaseAgentState, _state.BaseAgentState
+]
+RELAY_WAIT = RelayWait()
+
+
+def process_host(local_machine: str) -> TakeoverHost:
+    return TakeoverHost(
+        local_machine=local_machine,
+        workspaces_root=workspaces_root(),
+        relay_program=(str(Path(sys.executable).with_name("meiva")),),
+    )
+
+
+def _held(
+    session: dict[str, Any] | None, incarnation: RuntimeIncarnation | None
+) -> tuple[dict[str, Any], RuntimeIncarnation]:
+    if session is None or incarnation is None:
+        raise RuntimeError("a lease decision needs the admitted native runtime that read it")
+    return session, incarnation
+
+
+def lease_phase(session: dict[str, Any] | None) -> LeasePhase | None:
+    if session is None:
+        return None
+    match session["status"]:
+        case ImpersonationStatus.REQUESTED:
+            return LeasePhase.REQUESTED
+        case ImpersonationStatus.ACCEPTED:
+            return LeasePhase.ACCEPTED
+        case ImpersonationStatus.ACTIVE:
+            return LeasePhase.ACTIVE
+        case _:
+            return LeasePhase.ENDED
 
 
 async def native_status(
@@ -44,8 +130,6 @@ async def native_status(
     """Read authoritative lease state only for an admitted native runtime."""
     if incarnation is None:
         return None
-    from base.agents.impersonation import native_status as read_status
-
     return await asyncio.to_thread(read_status, db, bus, agent_id, incarnation)
 
 
@@ -79,21 +163,13 @@ async def claim_gate(
     incarnation = ctx.original_incarnation
     db, bus = ctx.require_db(), ctx.require_bus()
     session = await native_status(db, bus, agent_id, incarnation=incarnation)
-    await supervise_relay(
-        db,
-        bus,
-        session,
-        agent_id,
-        ctx.relays,
-        incarnation=incarnation,
-    )
-    if session is None:
+    await supervise_relay(db, bus, session, agent_id, ctx.relays, incarnation=incarnation)
+    verdict = gate_verdict(lease_phase(session))
+    if verdict is GateVerdict.PROCEED:
         return None
-    if session["status"] == ImpersonationStatus.REQUESTED:
-        from base.agents.impersonation import prepare
-
-        assert incarnation is not None  # noqa: S101 — native_status requires it
-        brief = session["reason"] or "Continue the agent's work from its saved state."
+    if verdict is GateVerdict.PREPARE:
+        session, incarnation = _held(session, incarnation)
+        brief = start_brief(session["reason"])
         await asyncio.to_thread(
             prepare,
             db,
@@ -104,15 +180,14 @@ async def claim_gate(
             brief,
             local_machine=ctx.require_machine().name(),
         )
+        stamp = _handoff.note_stamp(
+            ctx.require_clock(),
+            timestamps=ctx.require_agent().read("general", "message_timestamps"),
+        )
         return Command(
             update={
                 **_handoff.start_update(
-                    session,
-                    introduced=state.impersonation_introduced,
-                    notes=HandoffNotes(
-                        ctx.require_clock,
-                        lambda: ctx.require_agent().read("general", "message_timestamps"),
-                    ),
+                    session, introduced=state.impersonation_introduced, stamp=stamp
                 ),
                 "turn_active": False,
                 "turn_idle": True,
@@ -139,7 +214,7 @@ def protect_native_hooks(
                 agent_id_from_config(config),
                 incarnation=runtime.context.original_incarnation,
             )
-            if session is not None and session["status"] != ImpersonationStatus.REQUESTED:
+            if gate_verdict(lease_phase(session)) is GateVerdict.PARK:
                 return Command(update={"turn_idle": True}, goto=END)
         return await runner(state, runtime, config)
 
@@ -147,9 +222,7 @@ def protect_native_hooks(
 
 
 async def _activate_accepted(
-    graph: CompiledStateGraph[
-        _state.BaseAgentState, MeivaContext, _state.BaseAgentState, _state.BaseAgentState
-    ],
+    graph: AgentGraph,
     db: Database,
     bus: EventBus,
     session: dict[str, Any],
@@ -157,76 +230,63 @@ async def _activate_accepted(
     relays: RelaySupervision,
     *,
     notes: HandoffNotes,
-    read_local_machine: Callable[[], str],
+    host: TakeoverHost,
 ) -> dict[str, Any] | None:
     """Activate an accepted lease; None when the relay gate failed and native control resumes."""
-    from base.agents.impersonation import activate
-
     await _handoff.ensure_start_marker(graph, session, notes=notes)
     # The bound relay must be live before the takeover stands. On failure
     # the lease is rolled back to 'rejected' with a loud reason and the
     # native agent resumes — no silent half-takeover.
     if not await asyncio.to_thread(
-        establish_relay,
-        db,
-        bus,
-        session,
-        incarnation,
-        relays,
-        read_local_machine=read_local_machine,
+        establish_relay, db, bus, session, incarnation, relays, host=host
     ):
         return None
     return await asyncio.to_thread(activate, db, bus, session["id"], incarnation)
 
 
-async def _apply_plugin_deltas(
-    graph: CompiledStateGraph[
-        _state.BaseAgentState, MeivaContext, _state.BaseAgentState, _state.BaseAgentState
-    ],
+# meiva:note
+# Apply each unapplied plugin delta exactly once, recording its receipt. LangGraph types
+# the compiled graph's checkpointer with unknown generics, so the flush receives it
+# through the structural `object` the flush helper accepts.
+async def apply_plugin_deltas(
+    graph: AgentGraph,
     db: Database,
     session: dict[str, Any],
     agent_id: int,
     incarnation: RuntimeIncarnation,
 ) -> None:
-    """Apply each unapplied plugin delta exactly once, recording its receipt."""
     from base.agents.context.external_attachment.plugin_state_codec import decode_plugin_delta
-    from base.agents.impersonation import mark_plugin_applied
 
     config: RunnableConfig = {"configurable": {"thread_id": str(agent_id)}}
     snapshot = await graph.aget_state(config)
-    receipt = snapshot.values.get("impersonation_applied", {})
-    for version in range(session["applied_version"] + 1, session["delta_version"] + 1):
-        expected = {"lease_id": session["id"], "version": version}
-        recorded_version = (
-            receipt.get("version", 0) if receipt.get("lease_id") == session["id"] else 0
-        )
-        if recorded_version < version:
+    plan = delta_plan(
+        lease_id=session["id"],
+        applied_version=session["applied_version"],
+        delta_version=session["delta_version"],
+        receipt=snapshot.values.get("impersonation_applied", {}),
+    )
+    for step in plan:
+        if step.apply:
             delta = decode_plugin_delta(
-                session["plugin_delta"][version - 1], graph.builder.state_schema
+                session["plugin_delta"][step.version - 1], graph.builder.state_schema
             )
-            await graph.aupdate_state(config, {**delta, "impersonation_applied": expected})
+            receipt = {"lease_id": session["id"], "version": step.version}
+            await graph.aupdate_state(config, {**delta, "impersonation_applied": receipt})
             await _handoff.flush_checkpoint(graph.checkpointer, agent_id)  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
-            receipt = expected
-        await asyncio.to_thread(mark_plugin_applied, db, session["id"], version, incarnation)
+        await asyncio.to_thread(mark_plugin_applied, db, session["id"], step.version, incarnation)
 
 
-# meiva:note
-# Whether a terminal lease still owes the native checkpoint its receipt: the
-# end-of-session note plus `handoff_applied_at`. Until it lands, the agent refuses every
-# new takeover as an unapplied state.
-# meiva:link docs/conventions/agents/agent-impersonation.md
 def handoff_owed(session: dict[str, Any] | None) -> bool:
-    return bool(
+    phase = lease_phase(session)
+    return (
         session is not None
-        and session["status"] not in OPEN
-        and session["handoff_applied_at"] is None
+        and phase is not None
+        and handoff_due(phase, receipt_written=session["handoff_applied_at"] is not None)
     )
 
 
 async def settle_checkpoint(
-    graph: CompiledStateGraph[
-        _state.BaseAgentState, MeivaContext, _state.BaseAgentState, _state.BaseAgentState
-    ],
+    graph: AgentGraph,
     db: Database,
     bus: EventBus,
     agent_id: int,
@@ -235,35 +295,26 @@ async def settle_checkpoint(
     activate_accepted: bool = True,
     incarnation: RuntimeIncarnation | None,
     notes: HandoffNotes,
-    read_local_machine: Callable[[], str],
+    host: TakeoverHost,
 ) -> bool:
     """After invocation+flush, activate; apply terminal deltas exactly once."""
     session = await native_status(db, bus, agent_id, incarnation=incarnation)
-    if session is None or session["status"] == ImpersonationStatus.REQUESTED:
+    step = settle_step(lease_phase(session), activate_accepted=activate_accepted)
+    if step is SettleStep.STOP:
         return False
-    assert incarnation is not None  # noqa: S101 — native_status requires it
-    if session["status"] == ImpersonationStatus.ACCEPTED:
-        if not activate_accepted:
-            return False
+    session, incarnation = _held(session, incarnation)
+    if step is SettleStep.ACTIVATE:
         activated = await _activate_accepted(
-            graph,
-            db,
-            bus,
-            session,
-            incarnation,
-            relays,
-            notes=notes,
-            read_local_machine=read_local_machine,
+            graph, db, bus, session, incarnation, relays, notes=notes, host=host
         )
         if activated is None:
             return False
         session = activated
-    if session["status"] == ImpersonationStatus.ACTIVE:
+        step = settle_step(lease_phase(session), activate_accepted=False)
+    if step is SettleStep.HOLD:
         return True
-    await _apply_plugin_deltas(graph, db, session, agent_id, incarnation)
+    await apply_plugin_deltas(graph, db, session, agent_id, incarnation)
     if handoff_owed(session):
-        from base.agents.impersonation import aborted_detail
-
         # A supervisor-aborted lease (task #3998) carries its death cause as
         # "aborted: <detail>" in rejection_reason; the end note names it.
         await _handoff.deliver_handoff(
@@ -273,6 +324,7 @@ async def settle_checkpoint(
             session,
             incarnation,
             notes=notes,
+            workspace=host.workspace(agent_id),
             reason=aborted_detail(session.get("rejection_reason")),
         )
     return False
@@ -280,8 +332,9 @@ async def settle_checkpoint(
 
 # ── Bound relay process: establishment, supervision, teardown ─────────────────
 
-RELAY_READY_TIMEOUT_S = 30.0
-_RELAY_READY_POLL_S = 1.0
+
+def _fresh(heartbeat: datetime | None) -> bool:
+    return _heartbeat_fresh(heartbeat, now=datetime.now(UTC))
 
 
 def establish_relay(
@@ -291,7 +344,7 @@ def establish_relay(
     incarnation: RuntimeIncarnation,
     relays: RelaySupervision,
     *,
-    read_local_machine: Callable[[], str],
+    host: TakeoverHost,
 ) -> bool:
     """Activation gate: the bound relay must be up before the takeover stands.
 
@@ -302,156 +355,143 @@ def establish_relay(
     control resumes. A lease that is no longer 'accepted' returns False without
     a transition — someone else already ended it.
     """
-    from base.agents.impersonation import SESSION_RELAY_PROVIDERS, fail_acceptance
-
-    provider = session["relay_provider"]
-    if provider in SESSION_RELAY_PROVIDERS:
-        return _await_session_relay(db, bus, session, incarnation)
-    if provider not in ("codex", "antigravity"):
-        # meiva:note
-        # Defensive: prepare() already rejects leases without a relay binding.
-        return _roll_back_relay_failure(
-            db, bus, session, incarnation, fail_acceptance, "request has no relay binding"
-        )
-    return _establish_codex_relay(
-        db, bus, session, incarnation, relays, read_local_machine=read_local_machine
-    )
+    route = relay_route(session["relay_provider"], session_providers=SESSION_RELAY_PROVIDERS)
+    if route is RelayRoute.SESSION:
+        return _await_session_relay(db, bus, session, incarnation, host.wait)
+    if route is RelayRoute.UNBOUND:
+        return _roll_back_relay_failure(db, bus, session, incarnation, UNBOUND_REASON)
+    return _establish_spawned_relay(db, bus, session, incarnation, relays, host)
 
 
 def _await_session_relay(
-    db: Database, bus: EventBus, session: dict[str, Any], incarnation: RuntimeIncarnation
+    db: Database,
+    bus: EventBus,
+    session: dict[str, Any],
+    incarnation: RuntimeIncarnation,
+    wait: RelayWait,
 ) -> bool:
     """claude / dsh: the relay runs in the controller's own session; require a fresh heartbeat."""
-    from base.agents.impersonation import fail_acceptance
-    from base.agents.impersonation import native_status as read_status
-
-    deadline = time.monotonic() + RELAY_READY_TIMEOUT_S
-    while not _heartbeat_fresh(session["relay_heartbeat_at"]) and time.monotonic() < deadline:
-        time.sleep(_RELAY_READY_POLL_S)
-        latest = read_status(db, bus, incarnation.agent_id, incarnation)
-        if (
-            latest is None
-            or latest["id"] != session["id"]
-            or latest["status"] != ImpersonationStatus.ACCEPTED
-        ):
+    started = time.monotonic()
+    phase = lease_phase(session)
+    while True:
+        poll = relay_poll(
+            phase,
+            heartbeat_fresh=_fresh(session["relay_heartbeat_at"]),
+            waited_s=time.monotonic() - started,
+            wait=wait,
+        )
+        if poll is Poll.READY:
+            return True
+        if poll is Poll.ABANDON:
             return False
-        session = latest
-    if _heartbeat_fresh(session["relay_heartbeat_at"]):
-        return True
-    return _roll_back_relay_failure(
-        db,
-        bus,
-        session,
-        incarnation,
-        fail_acceptance,
-        "the controller relay is not running (no fresh heartbeat)",
-    )
+        if poll is Poll.GIVE_UP:
+            return _roll_back_relay_failure(
+                db, bus, session, incarnation, SESSION_RELAY_DOWN_REASON
+            )
+        time.sleep(wait.poll_s)
+        latest = read_status(db, bus, incarnation.agent_id, incarnation)
+        if latest is None or latest["id"] != session["id"]:
+            phase = None
+        else:
+            phase, session = lease_phase(latest), latest
 
 
-def _establish_codex_relay(
+def _establish_spawned_relay(
     db: Database,
     bus: EventBus,
     session: dict[str, Any],
     incarnation: RuntimeIncarnation,
     relays: RelaySupervision,
-    *,
-    read_local_machine: Callable[[], str],
+    host: TakeoverHost,
 ) -> bool:
-    """codex / antigravity: provision the scoped credential, spawn the relay here, wait for its first heartbeat."""
-    from base.agents.impersonation import (
-        ImpersonationError,
-        fail_acceptance,
-        provision_relay,
-        relay_get,
+    from base.agents.impersonation.host_transport import (
+        antigravity_endpoint_path,
+        resolve_antigravity_endpoint,
     )
 
     # meiva:note
-    # Resolve the Antigravity destination here, before a relay exists: a relay that
-    # dies at startup leaves only an exit code in the lease's reason, and the path or
-    # token problem is exactly what the accepting runtime can name while it still has
-    # the record in hand. The cost is one owner-only file read plus at most one probe.
+    # codex / antigravity: provision the scoped credential, spawn the relay here and wait
+    # for its first heartbeat. Resolve the Antigravity destination first, before a relay
+    # exists: a relay that dies at startup leaves only an exit code in the lease's reason,
+    # and the path or token problem is exactly what the accepting runtime can name while
+    # it still has the record in hand. The cost is one owner-only file read plus at most
+    # one probe.
     # meiva:link docs/conventions/agents/agent-impersonation-hosts.md
     antigravity_endpoint_file = None
     if session["relay_provider"] == "antigravity":
-        from base.agents.impersonation.host_transport import (
-            antigravity_endpoint_path,
-            resolve_antigravity_endpoint,
-        )
-
         try:
             resolve_antigravity_endpoint(session["relay_thread_id"])
         except (OSError, RuntimeError, ValueError) as exc:
             return _roll_back_relay_failure(
-                db,
-                bus,
-                session,
-                incarnation,
-                fail_acceptance,
-                f"the Antigravity endpoint is unusable: {exc}",
+                db, bus, session, incarnation, endpoint_unusable_reason(str(exc))
             )
         antigravity_endpoint_file = str(antigravity_endpoint_path(session["relay_thread_id"]))
 
     relay_token = secrets.token_urlsafe(32)
     try:
         minted = provision_relay(db, session["id"], incarnation, relay_token)
-        if minted is None:
-            return False
     except ImpersonationError:
-        return False  # the lease is no longer native-held accepted state
+        return False
+    if minted is None:
+        return False
+    binding = RelayBinding(
+        agent_id=incarnation.agent_id,
+        lease_id=session["id"],
+        provider=session["relay_provider"],
+        thread_id=session["relay_thread_id"],
+        codex_remote=session["relay_codex_remote"],
+        antigravity_endpoint_file=antigravity_endpoint_file,
+        codex_home=session["process_metadata"].get("codex_home"),
+    )
     child = RelayChild(
         session["id"],
-        _relay_process.spawn_codex_relay(
-            incarnation.agent_id,
-            session["id"],
-            relay_token,
-            session["relay_thread_id"],
-            session["relay_codex_remote"],
-            session["process_metadata"].get("codex_home"),
-            provider=session["relay_provider"],
-            antigravity_endpoint_file=antigravity_endpoint_file,
-        ),
+        spawn_relay(host.relay_program, binding, token=relay_token),
         relay_token,
         time.monotonic(),
         minted["relay_generation"],
     )
     relays.children[incarnation.agent_id] = child
-    deadline = time.monotonic() + RELAY_READY_TIMEOUT_S
-    while time.monotonic() < deadline:
-        if child.process.poll() is not None:
+    return _await_spawned_relay(db, bus, session, incarnation, relays, child, host)
+
+
+def _await_spawned_relay(
+    db: Database,
+    bus: EventBus,
+    session: dict[str, Any],
+    incarnation: RuntimeIncarnation,
+    relays: RelaySupervision,
+    child: RelayChild,
+    host: TakeoverHost,
+) -> bool:
+    started = time.monotonic()
+    while True:
+        failure = startup_failure(session["relay_provider"], child.process.poll())
+        if failure is not None:
             relays.children.pop(incarnation.agent_id, None)
-            return _roll_back_relay_failure(
-                db,
-                bus,
-                session,
-                incarnation,
-                fail_acceptance,
-                f"{session['relay_provider']} relay exited during startup"
-                f" (exit code {child.process.returncode}); its transport error is on stderr",
-            )
+            return _roll_back_relay_failure(db, bus, session, incarnation, failure)
         try:
             latest = relay_get(
-                db, bus, session["id"], relay_token, local_machine=read_local_machine()
+                db, bus, session["id"], child.token, local_machine=host.local_machine
             )
         except ImpersonationError:
-            # Token mismatch means a re-provision raced in; treat as ended here.
             return _roll_back_relay_failure(
-                db,
-                bus,
-                session,
-                incarnation,
-                fail_acceptance,
-                "relay credential was re-provisioned",
+                db, bus, session, incarnation, CREDENTIAL_RENEWED_REASON
             )
-        if latest["status"] != ImpersonationStatus.ACCEPTED:
-            return False  # released/expired/rejected while starting; no relay needed
-        if _heartbeat_fresh(latest["relay_heartbeat_at"]):
+        poll = relay_poll(
+            lease_phase(latest),
+            heartbeat_fresh=_fresh(latest["relay_heartbeat_at"]),
+            waited_s=time.monotonic() - started,
+            wait=host.wait,
+        )
+        if poll is Poll.READY:
             return True
-        time.sleep(_RELAY_READY_POLL_S)
-    terminate_relay(child)
-    relays.children.pop(incarnation.agent_id, None)
-    return _roll_back_relay_failure(
-        db, bus, session, incarnation, fail_acceptance, "relay did not become ready in time"
-    )
+        if poll is Poll.ABANDON:
+            return False
+        if poll is Poll.GIVE_UP:
+            terminate_relay(child)
+            relays.children.pop(incarnation.agent_id, None)
+            return _roll_back_relay_failure(db, bus, session, incarnation, NOT_READY_REASON)
+        time.sleep(host.wait.poll_s)
 
 
 def _roll_back_relay_failure(
@@ -459,14 +499,25 @@ def _roll_back_relay_failure(
     bus: EventBus,
     session: dict[str, Any],
     incarnation: RuntimeIncarnation,
-    fail_acceptance: Callable[[Database, EventBus, str, RuntimeIncarnation, str], dict[str, Any]],
     reason: str,
 ) -> bool:
-    from base.agents.impersonation import ImpersonationError
-
     with contextlib.suppress(ImpersonationError):
-        fail_acceptance(db, bus, session["id"], incarnation, reason)  # already ended: no-op
+        fail_acceptance(db, bus, session["id"], incarnation, reason)
     return False
+
+
+def _lease_view(session: dict[str, Any], *, now: datetime) -> LeaseView | None:
+    phase = lease_phase(session)
+    if phase is None:
+        return None
+    minted_at = session.get("relay_minted_at")
+    return LeaseView(
+        lease_id=session["id"],
+        generation=session["relay_generation"],
+        phase=phase,
+        heartbeat_fresh=_heartbeat_fresh(session["relay_heartbeat_at"], now=now),
+        minted_age_s=None if minted_at is None else (now - minted_at).total_seconds(),
+    )
 
 
 # meiva:note
@@ -476,7 +527,7 @@ def _roll_back_relay_failure(
 # until the TTL. A relay that is only stale keeps the lease open until its TTL or
 # explicit release, because another host may still deliver. When the host first sees
 # its relay's lease ended, it submits the ended-lease notice once.
-# meiva:link docs/conventions/agents/agent-impersonation-hosts.md
+# meiva:link agent/docs/impersonation/relay-supervision.meiva.okf.md
 async def supervise_relay(
     db: Database,
     bus: EventBus,
@@ -487,29 +538,35 @@ async def supervise_relay(
     incarnation: RuntimeIncarnation | None,
 ) -> None:
     child = relays.children.get(agent_id)
-    if (
-        child is not None
-        and session is not None
-        and (child.lease_id, child.generation) != (session["id"], session["relay_generation"])
-    ):
-        return  # A delayed predecessor snapshot cannot retire a replacement's sender.
-    if session is None or session["status"] not in OPEN:
+    now, monotonic = datetime.now(UTC), time.monotonic()
+    step = supervision_step(
+        None
+        if child is None
+        else ChildView(
+            lease_id=child.lease_id,
+            generation=child.generation,
+            exited=relay_exited(child),
+            age_s=monotonic - child.spawned_at,
+        ),
+        None if session is None else _lease_view(session, now=now),
+        native_held=incarnation is not None,
+        wait=RELAY_WAIT,
+    )
+    if step is Supervision.IDLE:
+        return
+    if step is Supervision.RETIRE_IF_ENDED:
         if child is not None and _lease_is_terminal(db, child.lease_id):
             await _retire_relay_child(db, agent_id, relays, child)
         return
-    if session["status"] != ImpersonationStatus.ACTIVE:
-        return
-    exited = relay_exited(child)
-    if not exited and _heartbeat_fresh(session["relay_heartbeat_at"]):
-        return
-    if exited and child is not None:
+    session, incarnation = _held(session, incarnation)
+    if step is Supervision.END_DEAD and child is not None:
         ended = await asyncio.to_thread(
             _end_dead_relay_lease, db, bus, session, agent_id, incarnation, child.process.returncode
         )
         if ended:
             await _retire_relay_child(db, agent_id, relays, child)
         return
-    await _record_stale_relay(db, session, agent_id, child, incarnation=incarnation)
+    await _record_stale_relay(db, session, agent_id, incarnation)
 
 
 def _lease_is_terminal(db: Database, lease_id: str) -> bool:
@@ -543,14 +600,9 @@ def _end_dead_relay_lease(
     bus: EventBus,
     session: dict[str, Any],
     agent_id: int,
-    incarnation: RuntimeIncarnation | None,
+    incarnation: RuntimeIncarnation,
     exit_code: int | None,
 ) -> bool:
-    from base.agents.impersonation import ImpersonationError, abort_lease
-    from base.log import logger
-
-    if incarnation is None:
-        return False
     detail = f"the bound relay process exited (exit code {exit_code})"
     try:
         ended = abort_lease(db, bus, session["id"], incarnation, detail)
@@ -569,42 +621,21 @@ def _end_dead_relay_lease(
 
 
 # meiva:note
-# Record a stale relay as degraded; nothing replaces it. Only a missing
-# heartbeat reaches here: an exited child this host spawned ends its lease
-# instead. A relay still inside its startup window is left alone. The lease keeps
-# its original TTL, so messages stay in the inbox and the liveness alert names the
-# gap until the controller re-requests or releases.
+# Record a stale relay as degraded; nothing replaces it. Only a missing heartbeat
+# outside the startup window reaches here: an exited child this host spawned ends its
+# lease instead, and the supervision plan leaves a relay still inside its startup
+# window alone. The lease keeps its original TTL, so messages stay in the inbox and
+# the liveness alert names the gap until the controller re-requests or releases.
 # meiva:link docs/conventions/agents/agent-impersonation-hosts.md
 async def _record_stale_relay(
-    db: Database,
-    session: dict[str, Any],
-    agent_id: int,
-    child: RelayChild | None,
-    *,
-    incarnation: RuntimeIncarnation | None,
+    db: Database, session: dict[str, Any], agent_id: int, incarnation: RuntimeIncarnation
 ) -> None:
-    from base.agents.impersonation.relay import record_degradation
-
-    if incarnation is None:
-        return
-    if (
-        child is not None
-        and child.process.poll() is None
-        and time.monotonic() - child.spawned_at < RELAY_READY_TIMEOUT_S
-    ):
-        return
-    minted_at = session.get("relay_minted_at")
-    if (
-        minted_at is not None
-        and (datetime.now(UTC) - minted_at).total_seconds() < RELAY_READY_TIMEOUT_S
-    ):
-        return
     await asyncio.to_thread(
         record_degradation,
         db,
         session["id"],
         incarnation,
-        "relay unavailable; automatic recovery unsupported",
+        STALE_RELAY_REASON,
     )
     await asyncio.to_thread(
         stamp_relay_failure,

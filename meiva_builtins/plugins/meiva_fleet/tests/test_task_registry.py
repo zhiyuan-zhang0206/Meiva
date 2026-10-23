@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import inspect
 import re
-from unittest.mock import patch
 from uuid import uuid4
 
 import psycopg
@@ -22,6 +21,7 @@ from meiva.tests.fixtures.pin_agent import pin_agent
 from meiva_builtins.plugins.meiva_fleet import task_registry
 from meiva_builtins.plugins.meiva_fleet.tests.task_registry.notes import record_notes
 from meiva_builtins.plugins.meiva_fleet.tests.task_registry.seeds import (
+    inserts_failing,
     persisted_priority,
     seed_agent,
 )
@@ -535,22 +535,18 @@ def test_create_with_owner_notifies_target(
     agent_id = seed_agent(db_conn)
     other_id = seed_agent(db_conn)
     pin_agent(agent_id)
-    with record_notes(db_conn) as mock_send:
+    with record_notes(db_conn) as notes:
         task = task_registry.create(
             "title", "detail", owner=other_id, parent=root_task_id, operation_key=str(uuid4())
         )
-        mock_send.assert_called_once()
-        call_args = mock_send.call_args
-        assert call_args[0][0] == other_id
-        msg = call_args[0][1]
-        assert f"Task #{task.id}" in msg
-        assert "title" in msg
-        assert "detail" in msg
-        assert "assigned to you" in msg
-        # An assignment is a delegator direction: the new owner is
-        # auto-resurrected so the task never strands on a dead agent.
-        assert call_args.kwargs["task_id"] == task.id
-        assert call_args.kwargs["resurrect"] is True
+    [note] = notes.read()
+    assert note.recipient == other_id
+    assert f"Task #{task.id}" in note.content
+    assert "title" in note.content
+    assert "detail" in note.content
+    assert "assigned to you" in note.content
+    assert note.task_id == task.id
+    assert note.resurrect is True
 
 
 def test_create_with_owner_self_no_notification(
@@ -559,11 +555,11 @@ def test_create_with_owner_self_no_notification(
     """When owner == creator, no notification is sent."""
     agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
-    with record_notes(db_conn) as mock_send:
+    with record_notes(db_conn) as notes:
         task_registry.create(
             "title", "detail", owner=agent_id, parent=root_task_id, operation_key=str(uuid4())
         )
-        mock_send.assert_not_called()
+    assert notes.read() == []
 
 
 def test_create_without_owner_no_notification(
@@ -572,9 +568,9 @@ def test_create_without_owner_no_notification(
     """When owner is not passed (default = creator), no notification is sent."""
     agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
-    with record_notes(db_conn) as mock_send:
+    with record_notes(db_conn) as notes:
         task_registry.create("title", "detail", parent=root_task_id, operation_key=str(uuid4()))
-        mock_send.assert_not_called()
+    assert notes.read() == []
 
 
 # ── update() — owner semantics ────────────────────────────────────────────
@@ -589,15 +585,13 @@ def test_update_owner_reassign_notifies(
     other_id = seed_agent(db_conn)
     pin_agent(agent_id)
     task = task_registry.create("title", "detail", parent=root_task_id, operation_key=str(uuid4()))
-    with record_notes(db_conn) as mock_send:
+    with record_notes(db_conn) as notes:
         task_registry.update(task.id, owner=other_id, operation_key=str(uuid4()))
-        # Only new owner notified; old owner == actor is skipped
-        mock_send.assert_called_once()
-        call_args = mock_send.call_args
-        assert call_args[0][0] == other_id
-        assert "now assigned" in call_args[0][1]
-        assert call_args.kwargs["task_id"] == task.id
-        assert call_args.kwargs["resurrect"] is True
+    [note] = notes.read()
+    assert note.recipient == other_id
+    assert "now assigned" in note.content
+    assert note.task_id == task.id
+    assert note.resurrect is True
 
 
 def test_update_owner_none_is_noop(
@@ -634,10 +628,9 @@ def test_update_owner_self_no_notification(
     agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
     task = task_registry.create("title", "detail", parent=root_task_id, operation_key=str(uuid4()))
-    with record_notes(db_conn) as mock_send:
+    with record_notes(db_conn) as notes:
         task_registry.update(task.id, owner=agent_id, operation_key=str(uuid4()))
-        # send_system_note should not be called because old_owner == new_owner
-        mock_send.assert_not_called()
+    assert notes.read() == []
 
 
 def test_update_owner_new_terminated_still_notified(
@@ -650,12 +643,12 @@ def test_update_owner_new_terminated_still_notified(
     dead_id = seed_agent(db_conn, status="terminated")
     pin_agent(agent_id)
     task = task_registry.create("title", "detail", parent=root_task_id, operation_key=str(uuid4()))
-    with record_notes(db_conn) as mock_send:
+    with record_notes(db_conn) as notes:
         task_registry.update(task.id, owner=dead_id, operation_key=str(uuid4()))
-        mock_send.assert_called_once()
-        assert mock_send.call_args[0][0] == dead_id
-        assert "now assigned" in mock_send.call_args[0][1]
-        assert mock_send.call_args.kwargs["resurrect"] is True
+    [note] = notes.read()
+    assert note.recipient == dead_id
+    assert "now assigned" in note.content
+    assert note.resurrect is True
 
 
 def test_update_owner_old_terminated_leg_skipped(
@@ -677,17 +670,15 @@ def test_update_owner_old_terminated_leg_skipped(
         )
         task_id = cur.fetchone()[0]  # type: ignore[index]
     db_conn.commit()
-    with record_notes(db_conn) as mock_send:
+    with record_notes(db_conn) as notes:
         task_registry.update(task_id, owner=new_owner, operation_key=str(uuid4()))  # pyright: ignore[reportUnknownArgumentType]
-        # Only the new owner is told; the terminated old owner is skipped.
-        mock_send.assert_called_once()
-        assert mock_send.call_args[0][0] == new_owner
+    [note] = notes.read()
+    assert note.recipient == new_owner
 
 
-def test_failed_notification_policy_lookup_rolls_back_assignment(
+def test_failed_note_delivery_rolls_back_assignment(
     db_conn: psycopg.Connection,
 ) -> None:
-    """A failed notification policy lookup cannot commit a task without its notes."""
     actor_id = seed_agent(db_conn)
     old_owner = seed_agent(db_conn)
     new_owner = seed_agent(db_conn)
@@ -701,14 +692,12 @@ def test_failed_notification_policy_lookup_rolls_back_assignment(
         task_id = int(fetch_one(cur, "test task")[0])
     db_conn.commit()
     with (
-        record_notes(db_conn) as send_note,
-        # Fleet-plugin tests can replace the sys.modules entry in this xdist
-        # worker. Patch the collection-time module that update() calls.
-        patch.object(task_registry, "is_terminated", side_effect=RuntimeError),
-        pytest.raises(RuntimeError),
+        record_notes(db_conn) as delivered,
+        inserts_failing(db_conn, "inbound_messages"),
+        pytest.raises(psycopg.errors.RaiseException),
     ):
         task_registry.update(task_id, owner=new_owner, operation_key=str(uuid4()))
-    send_note.assert_not_called()
+    assert delivered.read() == []
     with db_conn.cursor() as cur:
         cur.execute("SELECT owner FROM agent_tasks WHERE id=%s", (task_id,))
         assert cur.fetchone() == (old_owner,)

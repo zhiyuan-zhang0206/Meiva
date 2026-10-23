@@ -2,14 +2,12 @@ import json
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
-from unittest.mock import Mock
 from uuid import uuid4
 
 import psycopg
 import pytest
 from psycopg_pool import AsyncConnectionPool
 
-from agent import impersonation, impersonation_handoff
 from agent.impersonation import settle_checkpoint
 from agent.impersonation_handoff import flush_checkpoint
 from agent.ownership.hosted import admit_hosted_runtime
@@ -17,14 +15,16 @@ from agent.tests.impersonation.handoff_inputs import (
     assert_resume_note_delivery_contract,
     assert_successor_handoff_preserves_unacknowledged_input,
     assert_unacknowledged_input_preserved,
+    controller_relay_alive,
     deliver_peers_and_ack_first,
     end_external_session,
     handoff_notes,
+    inbound_wakes,
     prepare_graph,
-    relay_ready,
     resume_native,
     stop_takeover_with_exhausted_ack,
     stop_takeover_with_lost_relay,
+    takeover_host,
 )
 from agent.tests.impersonation.handoff_inputs import handoff_clients as handoff_clients
 from base.agents import impersonation as leases
@@ -44,7 +44,6 @@ async def test_transport_fault_keeps_native_parked_until_actual_lease_end(
     cause: str,
     db_conn: psycopg.Connection[Any],
     aops_pool: AsyncConnectionPool[Any],
-    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     database: Database,
     event_bus: EventBus,
@@ -54,36 +53,22 @@ async def test_transport_fault_keeps_native_parked_until_actual_lease_end(
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
 ) -> None:
-    from base.agents.impersonation import history as history
-
     graph, saver, ctx, config, reset, owner, requested, model_calls = await prepare_graph(
         db_conn,
         aops_pool,
-        monkeypatch,
         config_authority=config_authority,
         clients=handoff_clients,
         database_gate=database_gate,
         machine_identity=machine_identity,
     )
-    monkeypatch.setattr(impersonation, "establish_relay", relay_ready)
-
-    def workspace_for_agent(_agent_id: int) -> Path:
-        return tmp_path
-
-    monkeypatch.setattr(history, "workspace_dir", workspace_for_agent)
-    wakes: list[tuple[int, str]] = []
-
-    def record_wake(_db: object, _bus: object, agent_id: int, payload: str) -> bool:
-        wakes.append((agent_id, payload))
-        return True
-
-    monkeypatch.setattr(impersonation_handoff, "publish_inbound_wake", record_wake)
+    host = takeover_host(tmp_path, machine_identity)
     await graph.ainvoke(
         reset,
         config,
         context=replace(ctx, original_incarnation=owner, hosted_resources=None),
     )
     await flush_checkpoint(saver, owner.agent_id)
+    controller_relay_alive(db_conn, requested["id"])
     assert await settle_checkpoint(
         graph,
         database,
@@ -92,11 +77,11 @@ async def test_transport_fault_keeps_native_parked_until_actual_lease_end(
         ctx.relays,
         incarnation=owner,
         notes=handoff_notes(),
-        read_local_machine=machine_identity.name,
+        host=host,
     )
     assert not model_calls
     if cause == "relay_death":
-        await stop_takeover_with_lost_relay(monkeypatch, database, event_bus, owner, ctx.relays)
+        await stop_takeover_with_lost_relay(database, event_bus, owner, ctx.relays)
     else:
         stop_takeover_with_exhausted_ack(db_conn, requested, owner)
     died = leases.get(
@@ -120,18 +105,18 @@ async def test_transport_fault_keeps_native_parked_until_actual_lease_end(
         "Explicit end after preserved delivery fault",
         local_machine=machine_identity.name(),
     )
-    await resume_native(
-        graph, saver, ctx, config, reset, owner, model_calls, wakes, database, event_bus
-    )
+    with inbound_wakes(event_bus, owner.agent_id) as wakes:
+        await resume_native(
+            graph, saver, ctx, config, reset, owner, model_calls, wakes, database, event_bus, host
+        )
     assert "Explicit end after preserved delivery fault" in model_calls[0].messages[-1].content
     if cause == "ack_exhaustion":
-        assert_unacknowledged_input_preserved(tmp_path)
+        assert_unacknowledged_input_preserved(host.workspace(owner.agent_id))
 
 
 async def test_successor_ends_the_takeover_and_resumes_preserved_pending_input(
     db_conn: psycopg.Connection[Any],
     aops_pool: AsyncConnectionPool[Any],
-    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     database: Database,
     event_bus: EventBus,
@@ -141,31 +126,22 @@ async def test_successor_ends_the_takeover_and_resumes_preserved_pending_input(
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
 ) -> None:
-    from dataclasses import replace
-
-    from base.agents.impersonation import history
-
     graph, saver, ctx, config, reset, owner, requested, model_calls = await prepare_graph(
         db_conn,
         aops_pool,
-        monkeypatch,
         config_authority=config_authority,
         clients=handoff_clients,
         database_gate=database_gate,
         machine_identity=machine_identity,
     )
-    monkeypatch.setattr(impersonation, "establish_relay", relay_ready)
-
-    def workspace_for_agent(_agent_id: int) -> Path:
-        return tmp_path
-
-    monkeypatch.setattr(history, "workspace_dir", workspace_for_agent)
+    host = takeover_host(tmp_path, machine_identity)
     await graph.ainvoke(
         reset,
         config,
         context=replace(ctx, original_incarnation=owner, hosted_resources=None),
     )
     await flush_checkpoint(saver, owner.agent_id)
+    controller_relay_alive(db_conn, requested["id"])
     assert await settle_checkpoint(
         graph,
         database,
@@ -174,7 +150,7 @@ async def test_successor_ends_the_takeover_and_resumes_preserved_pending_input(
         ctx.relays,
         incarnation=owner,
         notes=handoff_notes(),
-        read_local_machine=machine_identity.name,
+        host=host,
     )
     pending = deliver_peers_and_ack_first(
         db_conn, database, event_bus, requested, owner.agent_id, machine_identity=machine_identity
@@ -213,7 +189,7 @@ async def test_successor_ends_the_takeover_and_resumes_preserved_pending_input(
         replacement_ctx.relays,
         incarnation=successor,
         notes=handoff_notes(),
-        read_local_machine=machine_identity.name,
+        host=host,
     )
     resumed = await graph.ainvoke(
         reset,
@@ -222,7 +198,7 @@ async def test_successor_ends_the_takeover_and_resumes_preserved_pending_input(
     )
     await flush_checkpoint(saver, owner.agent_id)
     assert len(model_calls) == 1
-    assert_successor_handoff_preserves_unacknowledged_input(resumed, tmp_path)
+    assert_successor_handoff_preserves_unacknowledged_input(resumed, host.workspace(owner.agent_id))
     assert db_conn.execute(
         "SELECT runtime_generation,runtime_owner FROM agents_meta WHERE id=%s",
         (owner.agent_id,),
@@ -232,7 +208,7 @@ async def test_successor_ends_the_takeover_and_resumes_preserved_pending_input(
 async def test_late_ack_after_delivery_budget_exhaustion_keeps_native_parked(
     db_conn: psycopg.Connection[Any],
     aops_pool: AsyncConnectionPool[Any],
-    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
     database: Database,
     event_bus: EventBus,
     *,
@@ -244,19 +220,19 @@ async def test_late_ack_after_delivery_budget_exhaustion_keeps_native_parked(
     graph, saver, ctx, config, reset, owner, requested, model_calls = await prepare_graph(
         db_conn,
         aops_pool,
-        monkeypatch,
         config_authority=config_authority,
         clients=handoff_clients,
         database_gate=database_gate,
         machine_identity=machine_identity,
     )
-    monkeypatch.setattr(impersonation, "establish_relay", relay_ready)
+    host = takeover_host(tmp_path, machine_identity)
     await graph.ainvoke(
         reset,
         config,
         context=replace(ctx, original_incarnation=owner, hosted_resources=None),
     )
     await flush_checkpoint(saver, owner.agent_id)
+    controller_relay_alive(db_conn, requested["id"])
     assert await settle_checkpoint(
         graph,
         database,
@@ -265,7 +241,7 @@ async def test_late_ack_after_delivery_budget_exhaustion_keeps_native_parked(
         ctx.relays,
         incarnation=owner,
         notes=handoff_notes(),
-        read_local_machine=machine_identity.name,
+        host=host,
     )
     pending = deliver_peers_and_ack_first(
         db_conn, database, event_bus, requested, owner.agent_id, machine_identity=machine_identity
@@ -343,7 +319,6 @@ async def test_late_ack_after_delivery_budget_exhaustion_keeps_native_parked(
 async def test_end_note_resumes_an_empty_queue(
     db_conn: psycopg.Connection[Any],
     aops_pool: AsyncConnectionPool[Any],
-    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     database: Database,
     event_bus: EventBus,
@@ -353,30 +328,15 @@ async def test_end_note_resumes_an_empty_queue(
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
 ) -> None:
-    from base.agents.impersonation import history as history
-
     graph, saver, ctx, config, reset, owner, requested, model_calls = await prepare_graph(
         db_conn,
         aops_pool,
-        monkeypatch,
         config_authority=config_authority,
         clients=handoff_clients,
         database_gate=database_gate,
         machine_identity=machine_identity,
     )
-    monkeypatch.setattr(impersonation, "establish_relay", relay_ready)
-
-    def workspace_for_agent(_agent_id: int) -> Path:
-        return tmp_path
-
-    monkeypatch.setattr(history, "workspace_dir", workspace_for_agent)
-    wakes: list[tuple[int, str]] = []
-
-    def record_wake(_db: object, _bus: object, agent_id: int, payload: str) -> bool:
-        wakes.append((agent_id, payload))
-        return True
-
-    monkeypatch.setattr(impersonation_handoff, "publish_inbound_wake", record_wake)
+    host = takeover_host(tmp_path, machine_identity)
     await graph.ainvoke(
         reset,
         config,
@@ -384,6 +344,7 @@ async def test_end_note_resumes_an_empty_queue(
     )
     assert not model_calls
     await flush_checkpoint(saver, owner.agent_id)
+    controller_relay_alive(db_conn, requested["id"])
     assert await settle_checkpoint(
         graph,
         database,
@@ -392,7 +353,7 @@ async def test_end_note_resumes_an_empty_queue(
         ctx.relays,
         incarnation=owner,
         notes=handoff_notes(),
-        read_local_machine=machine_identity.name,
+        host=host,
     )
     leases.release(
         database,
@@ -401,18 +362,19 @@ async def test_end_note_resumes_an_empty_queue(
         "External work complete",
         local_machine=machine_identity.name(),
     )
-    assert not await settle_checkpoint(
-        graph,
-        database,
-        event_bus,
-        owner.agent_id,
-        ctx.relays,
-        incarnation=owner,
-        notes=handoff_notes(),
-        read_local_machine=machine_identity.name,
-    )
+    with inbound_wakes(event_bus, owner.agent_id) as wakes:
+        assert not await settle_checkpoint(
+            graph,
+            database,
+            event_bus,
+            owner.agent_id,
+            ctx.relays,
+            incarnation=owner,
+            notes=handoff_notes(),
+            host=host,
+        )
+        assert wakes.drain() == ["impersonation"]
     assert not model_calls
-    assert wakes == [(owner.agent_id, "impersonation")]
 
     resumed = await graph.ainvoke(
         reset,
@@ -437,7 +399,6 @@ async def test_end_note_resumes_an_empty_queue(
 async def test_acknowledged_but_unfinished_input_reaches_the_resumed_native(
     db_conn: psycopg.Connection[Any],
     aops_pool: AsyncConnectionPool[Any],
-    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     database: Database,
     event_bus: EventBus,
@@ -447,25 +408,22 @@ async def test_acknowledged_but_unfinished_input_reaches_the_resumed_native(
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
 ) -> None:
-    from base.agents.impersonation import history as history
-
     graph, saver, ctx, config, reset, owner, requested, model_calls = await prepare_graph(
         db_conn,
         aops_pool,
-        monkeypatch,
         config_authority=config_authority,
         clients=handoff_clients,
         database_gate=database_gate,
         machine_identity=machine_identity,
     )
-    monkeypatch.setattr(impersonation, "establish_relay", relay_ready)
-    monkeypatch.setattr(history, "workspace_dir", Mock(return_value=tmp_path))
+    host = takeover_host(tmp_path, machine_identity)
     await graph.ainvoke(
         reset,
         config,
         context=replace(ctx, original_incarnation=owner, hosted_resources=None),
     )
     await flush_checkpoint(saver, owner.agent_id)
+    controller_relay_alive(db_conn, requested["id"])
     assert await settle_checkpoint(
         graph,
         database,
@@ -474,7 +432,7 @@ async def test_acknowledged_but_unfinished_input_reaches_the_resumed_native(
         ctx.relays,
         incarnation=owner,
         notes=handoff_notes(),
-        read_local_machine=machine_identity.name,
+        host=host,
     )
     inbound_id = insert_inbound_message(
         db_conn,
@@ -514,7 +472,7 @@ async def test_acknowledged_but_unfinished_input_reaches_the_resumed_native(
         ctx.relays,
         incarnation=owner,
         notes=handoff_notes(),
-        read_local_machine=machine_identity.name,
+        host=host,
     )
     await graph.ainvoke(
         reset,
@@ -526,6 +484,6 @@ async def test_acknowledged_but_unfinished_input_reaches_the_resumed_native(
     note = model_calls[0].messages[-1]
     assert "Review the summary and incoming requests" in note.content
     assert "Continue any requests whose completion is not established" in note.content
-    document = json.loads((tmp_path / "impersonation" / "0.json").read_text())
+    document = json.loads((host.workspace(owner.agent_id) / "impersonation" / "0.json").read_text())
     message = next(m for m in document["messages"] if m["payload"]["content"].startswith("Rebuild"))
     assert message["acknowledged"] is True

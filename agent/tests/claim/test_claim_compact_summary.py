@@ -1,7 +1,5 @@
 """Compact-summary claims preserve transport, publication and resume contracts."""
 
-from unittest.mock import MagicMock
-
 import psycopg
 from langchain_core.messages import HumanMessage, SystemMessage
 from psycopg_pool import AsyncConnectionPool
@@ -9,6 +7,7 @@ from psycopg_pool import AsyncConnectionPool
 from agent.graph import claim_node
 from agent.graph.claim.tests.claim_support import insert_inbound_kind, make_runtime, thread_config
 from agent.graph.hooks.compact import compose_summary_message
+from agent.graph.node_log.tests.live_events import LiveEvents
 from agent.state import AgentState
 from agent.tests.claim.claim_status_support import committed_publishes, compact_tail
 from base.agents.tests.units import spawn_agent
@@ -23,6 +22,7 @@ async def test_claim_compact_summary_alone_does_not_publish_committed(
     redis_url: str,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
+    live_events: LiveEvents,
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
@@ -39,16 +39,17 @@ async def test_claim_compact_summary_alone_does_not_publish_committed(
     )
     insert_inbound_kind(db_conn, tid, "summary", "compact_summary")
 
-    pub = MagicMock()
     state = AgentState(messages=[SystemMessage(content="sys")])
     await claim_node(
         state,
-        make_runtime(ops_pool=aops_pool, event_publisher=pub, database_gate=database_gate),
+        make_runtime(
+            ops_pool=aops_pool, event_publisher=live_events.publisher, database_gate=database_gate
+        ),
         thread_config(
             tid,
         ),
     )
-    assert committed_publishes(pub) == []
+    assert await committed_publishes(live_events) == []
 
 
 async def test_claim_compact_summary_with_no_existing_system_message(

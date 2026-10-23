@@ -12,69 +12,72 @@ mock `BaseChatModel.astream` returns async chunk iterator + AsyncMock redis, val
 Assert using `EVENT_ADAPTER.validate_json` deserialization——same code path as UI tailer,
 if any side field changes, the other side test will turn red."""
 
-import asyncio
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Mapping
 from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock
 
-import pytest
+import psycopg
 from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 from langgraph.types import Command
+from psycopg_pool import AsyncConnectionPool
 
 from agent.graph import LlmLedger, exec_node, llm_node
+from agent.graph.exec.output import overflow_dir
 from agent.graph.exec.process import SubprocessExecProcess
-from agent.hooks.tests.fakes import make_fake_ops_pool
+from agent.graph.node_log.tests.live_events import LiveEvents
 from agent.state import AgentState
 from base.agents.context import MeivaContext
 from base.agents.context.identity import AgentIdentity
+from base.agents.tests.units import spawn_agent
 from base.clock import Clock
-from base.config import settings
+from base.cluster.machine import MachineIdentity
+from base.config.service_read import ConfigAuthority
+from base.config.tests.configuration import defaults
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
-from base.events.live.projection import EVENT_ADAPTER, ExecOutput, ExecStart
+from base.events.live.projection import ExecOutput, ExecStart
 from base.host.env.agent_slices import AgentSlices
+from base.lm.catalog import ModelCatalog
 from base.native_process.turn_identity import HostedTurnResources
 from base.packages.plugin_providers import build_model_catalog
 from meiva.boot import process_clients
 from meiva.tests.fixtures.pin_agent import hosted_resources as hosted_resources
 
 
+# meiva:note
+# Assembles the Runtime a node runs in. Without an `ops_pool` the turn has no inbound queue (the
+# container/eval shape), so nothing can interrupt it and it touches no database; a test that reads
+# the database passes the throwaway pool and the real agent id. SSE fan-out goes through
+# `ctx.event_publisher.emit`; the default is a sink so the node's `assert ctx.event_publisher`
+# passes, and a test that reads the events passes `live_events.publisher`.
 def _make_runtime(
     hosted_resources: HostedTurnResources,
     *,
     llm=None,
     event_publisher=None,
     database_gate: ProcessDbGate,
+    ops_pool: AsyncConnectionPool | None = None,
+    agent_id: int = 7,
+    config_defaults: Mapping[str, Any] | None = None,
 ) -> Runtime[MeivaContext]:
-    """test helper: assemble MeivaContext into Runtime; ops_pool
-    placeholders for nodes that don't actually borrow conns.
-
-    llm_node now `ctx.llm.bind_tools(...)` then astream——set bind_tools
-    return llm itself, so fake_llm.astream stub still works after chaining.
-
-    SSE fan-out now goes through `ctx.event_publisher.emit` (non-blocking); default inject a MagicMock
-    so node's `assert ctx.event_publisher` passes, tests verifying events pass their own mock in
-    to assert `pub.emit.call_args_list`.
-    """
     if llm is None:
         llm = MagicMock()
     if isinstance(llm, MagicMock):
         llm.bind_tools.return_value = llm
     ctx = MeivaContext(
         hosted_resources=hosted_resources,
-        ops_pool=make_fake_ops_pool(),
+        ops_pool=ops_pool,
         llm=llm,  # pyright: ignore[reportUnknownArgumentType]
         event_publisher=event_publisher if event_publisher is not None else MagicMock(),  # pyright: ignore[reportUnknownArgumentType]
-        agent=AgentSlices.resolve(
-            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
-        ),
+        agent=AgentSlices.resolve(default_reader=defaults(**(config_defaults or {}))),
         db=Database.from_settings(gate=database_gate),
         bus=EventBus.from_settings(),
         clients=process_clients(),
-        identity=AgentIdentity(agent_id=7, owns_loop=True),
+        identity=AgentIdentity(agent_id=agent_id, owns_loop=True),
         catalog=build_model_catalog(),
         clock_factory=Clock.from_settings,
     )
@@ -99,7 +102,6 @@ async def _aiter(chunks: list[AIMessageChunk]) -> AsyncIterator[AIMessageChunk]:
 
 async def test_llm_node_collects_chunks_into_final_message(
     hosted_resources: HostedTurnResources,
-    fake_cancel_event: asyncio.Event,
     database_gate: ProcessDbGate,
 ) -> None:
     """llm_node merges streaming chunks into AIMessage into state.messages.
@@ -137,19 +139,44 @@ async def test_llm_node_collects_chunks_into_final_message(
     assert result.update["messages"][0].content == "hello from agent"  # pyright: ignore[reportUnknownMemberType]
 
 
-def _executed_sql(ops_pool) -> list[str]:
-    """SQL strings the shared fake cursor ran during the turn."""
-    return [c.args[0] for c in ops_pool.fake_cursor.execute.call_args_list if c.args]  # pyright: ignore[reportUnknownMemberType]
+# meiva:note
+# (last_active_at set, last_message_text, corpse marker still set) of the agent's row.
+def _turn_stamps(db: psycopg.Connection, agent_id: int) -> tuple[bool, str | None, bool]:
+    row = db.execute(
+        "SELECT last_active_at IS NOT NULL, last_message_text, last_turn_fatal_at IS NOT NULL "
+        "FROM agents_meta WHERE id = %s",
+        (agent_id,),
+    ).fetchone()
+    assert row is not None
+    return row
+
+
+def _mark_corpse(db: psycopg.Connection, agent_id: int) -> None:
+    db.execute("UPDATE agents_meta SET last_turn_fatal_at = now() WHERE id = %s", (agent_id,))
+    db.commit()
 
 
 async def test_llm_node_stamps_last_active_at_with_text(
+    redis_url: str,
     hosted_resources: HostedTurnResources,
-    fake_cancel_event: asyncio.Event,
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
     database_gate: ProcessDbGate,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
+    machine_identity: MachineIdentity,
 ) -> None:
     """A completed turn that produced text writes both last_active_at (the
     heartbeat idle clock's real-activity anchor) and last_message_text in one
     UPDATE — so a genuine turn resets the agent's idle timer."""
+    agent_id = spawn_agent(
+        catalog=model_catalog,
+        authority=config_authority,
+        database_gate=database_gate,
+        machine=machine_identity,
+    )
+    _mark_corpse(db_conn, agent_id)
     fake_llm = MagicMock()
     fake_llm.bind_tools.return_value = fake_llm
     fake_llm.astream.return_value = _aiter(
@@ -162,41 +189,46 @@ async def test_llm_node_stamps_last_active_at_with_text(
             ),
         ]
     )
-    ops_pool = make_fake_ops_pool()
-    ctx = MeivaContext(
-        hosted_resources=hosted_resources,
-        ops_pool=ops_pool,
+    runtime = _make_runtime(
+        hosted_resources,
         llm=fake_llm,
-        event_publisher=MagicMock(),
-        agent=AgentSlices.resolve(
-            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
-        ),
-        db=Database.from_settings(gate=database_gate),
-        bus=EventBus.from_settings(),
-        identity=AgentIdentity(agent_id=7, owns_loop=True),
-        catalog=build_model_catalog(),
-        clock_factory=Clock.from_settings,
+        database_gate=database_gate,
+        ops_pool=aops_pool,
+        agent_id=agent_id,
     )
     state = AgentState(messages=[HumanMessage(content="hi")], halted=False)
     await llm_node(
-        state, Runtime(context=ctx), {"configurable": {"thread_id": "7"}}, ledger=LlmLedger()
+        state, runtime, {"configurable": {"thread_id": str(agent_id)}}, ledger=LlmLedger()
     )
 
-    stamped = [s for s in _executed_sql(ops_pool) if "last_active_at = now()" in s]
-    assert len(stamped) == 1, "a completed turn must issue exactly one last_active_at UPDATE"
-    assert "last_message_text" in stamped[0], "a turn with text also persists last_message_text"
-    assert "last_turn_fatal_at = NULL" in stamped[0], (
+    active, text, corpse = _turn_stamps(db_conn, agent_id)
+    assert active, "a completed turn stamps last_active_at"
+    assert text == "hello world", "a turn with text also persists last_message_text"
+    assert not corpse, (
         "a completed turn clears the corpse marker (first success closes the breaker)"
     )
 
 
 async def test_llm_node_stamps_last_active_at_on_tool_only_turn(
+    redis_url: str,
     hosted_resources: HostedTurnResources,
-    fake_cancel_event: asyncio.Event,
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
     database_gate: ProcessDbGate,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
+    machine_identity: MachineIdentity,
 ) -> None:
     """A tool-only turn (code, no text) is still real work: it writes
     last_active_at (without last_message_text, since there is no AI text)."""
+    agent_id = spawn_agent(
+        catalog=model_catalog,
+        authority=config_authority,
+        database_gate=database_gate,
+        machine=machine_identity,
+    )
+    _mark_corpse(db_conn, agent_id)
     fake_llm = MagicMock()
     fake_llm.bind_tools.return_value = fake_llm
     fake_llm.astream.return_value = _aiter(
@@ -215,37 +247,27 @@ async def test_llm_node_stamps_last_active_at_on_tool_only_turn(
             ),
         ]
     )
-    ops_pool = make_fake_ops_pool()
-    ctx = MeivaContext(
-        hosted_resources=hosted_resources,
-        ops_pool=ops_pool,
+    runtime = _make_runtime(
+        hosted_resources,
         llm=fake_llm,
-        event_publisher=MagicMock(),
-        agent=AgentSlices.resolve(
-            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
-        ),
-        db=Database.from_settings(gate=database_gate),
-        bus=EventBus.from_settings(),
-        identity=AgentIdentity(agent_id=7, owns_loop=True),
-        catalog=build_model_catalog(),
-        clock_factory=Clock.from_settings,
+        database_gate=database_gate,
+        ops_pool=aops_pool,
+        agent_id=agent_id,
     )
     state = AgentState(messages=[HumanMessage(content="run it")], halted=False)
     await llm_node(
-        state, Runtime(context=ctx), {"configurable": {"thread_id": "7"}}, ledger=LlmLedger()
+        state, runtime, {"configurable": {"thread_id": str(agent_id)}}, ledger=LlmLedger()
     )
 
-    stamped = [s for s in _executed_sql(ops_pool) if "last_active_at = now()" in s]
-    assert len(stamped) == 1, "a tool-only turn must still stamp last_active_at"
-    assert "last_message_text" not in stamped[0], "no AI text → no last_message_text in the UPDATE"
-    assert "last_turn_fatal_at = NULL" in stamped[0], (
-        "a tool-only turn also clears the corpse marker"
-    )
+    active, text, corpse = _turn_stamps(db_conn, agent_id)
+    assert active, "a tool-only turn must still stamp last_active_at"
+    assert text is None, "no AI text → no last_message_text"
+    assert not corpse, "a tool-only turn also clears the corpse marker"
 
 
 async def test_llm_node_dispatches_chunks_to_handler_with_anthropic_shape(
     hosted_resources: HostedTurnResources,
-    fake_cancel_event: asyncio.Event,
+    live_events: LiveEvents,
     database_gate: ProcessDbGate,
 ) -> None:
     """ChatAnthropic + bind_tools real chunk shape (content is list-of-blocks,
@@ -295,7 +317,6 @@ async def test_llm_node_dispatches_chunks_to_handler_with_anthropic_shape(
             ),
         ]
     )
-    pub = MagicMock()
     state = AgentState(messages=[HumanMessage(content="hi")], halted=False)
     config: RunnableConfig = {"configurable": {"thread_id": "7"}}
 
@@ -304,15 +325,14 @@ async def test_llm_node_dispatches_chunks_to_handler_with_anthropic_shape(
         _make_runtime(
             hosted_resources=hosted_resources,
             llm=fake_llm,
-            event_publisher=pub,
+            event_publisher=live_events.publisher,
             database_gate=database_gate,
         ),
         config,
         ledger=LlmLedger(),
     )
 
-    events = [EVENT_ADAPTER.validate_json(c.args[0]) for c in pub.emit.call_args_list]
-    roles = [e.role for e in events]
+    roles = [e.role for e in await live_events.typed()]
     # Three independent streams all trigger *Start, finally LLMDone sent by finish()
     assert "reasoning_start" in roles
     assert "reasoning_delta" in roles
@@ -329,7 +349,7 @@ async def test_llm_node_dispatches_chunks_to_handler_with_anthropic_shape(
 
 async def test_llm_node_publishes_reasoning_tokens(
     hosted_resources: HostedTurnResources,
-    fake_cancel_event: asyncio.Event,
+    live_events: LiveEvents,
     database_gate: ProcessDbGate,
 ) -> None:
     """usage_metadata.output_token_details.reasoning rides through to the
@@ -352,7 +372,6 @@ async def test_llm_node_publishes_reasoning_tokens(
             ),
         ]
     )
-    pub = MagicMock()
     state = AgentState(messages=[HumanMessage(content="hi")], halted=False)
     config: RunnableConfig = {"configurable": {"thread_id": "7"}}
 
@@ -361,15 +380,14 @@ async def test_llm_node_publishes_reasoning_tokens(
         _make_runtime(
             hosted_resources=hosted_resources,
             llm=fake_llm,
-            event_publisher=pub,
+            event_publisher=live_events.publisher,
             database_gate=database_gate,
         ),
         config,
         ledger=LlmLedger(),
     )
 
-    events = [EVENT_ADAPTER.validate_json(c.args[0]) for c in pub.emit.call_args_list]
-    usage = [e for e in events if e.role == "token_usage"]
+    usage = [e for e in await live_events.typed() if e.role == "token_usage"]
     assert len(usage) == 1
     assert usage[0].reasoning_tokens == 180
     assert usage[0].output_tokens == 200
@@ -377,7 +395,6 @@ async def test_llm_node_publishes_reasoning_tokens(
 
 async def test_llm_node_preserves_usage_metadata(
     hosted_resources: HostedTurnResources,
-    fake_cancel_event: asyncio.Event,
     database_gate: ProcessDbGate,
 ) -> None:
     """usage_metadata must be on the final AIMessage——evals / cost tracking all rely on this
@@ -418,14 +435,13 @@ async def test_llm_node_preserves_usage_metadata(
 
 async def test_exec_node_publishes_exec_start_and_output(
     hosted_resources: HostedTurnResources,
-    fake_cancel_event: asyncio.Event,
+    live_events: LiveEvents,
     database_gate: ProcessDbGate,
 ) -> None:
     """exec_node's two events:
     - before executing publish `exec_start` (UI draws [executing] marker)
     - after finishing publish `exec_output` (UI dev mode sees agent-visible stdout)
     """
-    pub = MagicMock()
     state = AgentState(messages=[_ai_with_code('print("ok")')], halted=False)
     config: RunnableConfig = {"configurable": {"thread_id": "7"}}
 
@@ -433,13 +449,15 @@ async def test_exec_node_publishes_exec_start_and_output(
     await exec_node(
         state,
         _make_runtime(
-            hosted_resources=hosted_resources, event_publisher=pub, database_gate=database_gate
+            hosted_resources=hosted_resources,
+            event_publisher=live_events.publisher,
+            database_gate=database_gate,
         ),
         config,
         process=SubprocessExecProcess(),
     )
 
-    events = [EVENT_ADAPTER.validate_json(c.args[0]) for c in pub.emit.call_args_list]
+    events = await live_events.typed()
     exec_starts = [e for e in events if isinstance(e, ExecStart)]
     # item_id = f"{exec_msg_idx}.0" where exec_msg_idx = len(state.messages) = 1
     assert exec_starts == [ExecStart(agent_id=7, item_id="1.0")]
@@ -452,7 +470,6 @@ async def test_exec_node_publishes_exec_start_and_output(
 
 async def test_exec_node_output_uses_wrap_code_output_envelope(
     hosted_resources: HostedTurnResources,
-    fake_cancel_event: asyncio.Event,
     database_gate: ProcessDbGate,
 ) -> None:
     """exec_node after normal completion, appended HumanMessage uses wrap_code_output
@@ -490,51 +507,43 @@ async def test_exec_node_output_uses_wrap_code_output_envelope(
 
 
 async def test_exec_node_protects_archives_referenced_by_its_current_state(
+    unit_home: Path,
     hosted_resources: HostedTurnResources,
-    fake_cancel_event: asyncio.Event,
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
     database_gate: ProcessDbGate,
 ) -> None:
     """A real child exec cannot evict the previous output still in native context."""
-    from agent.graph.exec import output
-    from base.config import settings
-
-    directory = tmp_path / ".exec_output"
-
-    def overflow_dir(_agent_id: int) -> Path:
-        return directory
-
-    monkeypatch.setattr(output, "overflow_dir", overflow_dir)
     # Bodies exceed the 300-line soft-crop trigger; the new body stays under
     # exec_output_max_chars so a reference-protected skip leaves it fully
     # inline (6 x "old payload " = 72 chars + newline -> 340 lines, 24,820 chars).
     old_body = ("old payload " * 6 + "\n") * 340
     new_body = ("new payload " * 6 + "\n") * 340
-    monkeypatch.setattr(settings.sandbox, "exec_output_crop_archive_max_bytes", len(old_body))
-    prior_output = output.wrap_code_output(
-        old_body,
-        agent_id=7,
-        crop_config=settings.sandbox,
-        clock=Clock.from_settings(),
-        timeout_seconds=settings.sandbox.exec_timeout_seconds,
-        max_chars=settings.sandbox.exec_output_max_chars,
-        elapsed_seconds=1.0,
-    ).text
+    runtime = _make_runtime(
+        hosted_resources,
+        database_gate=database_gate,
+        config_defaults={"sandbox__exec_output_crop_archive_max_bytes": len(old_body)},
+    )
+    config: RunnableConfig = {"configurable": {"thread_id": "7"}}
+
+    first = await exec_node(
+        AgentState(
+            messages=[_ai_with_code("print(('old payload ' * 6 + '\\n') * 340, end='')")],
+            halted=False,
+        ),
+        runtime,
+        config,
+        process=SubprocessExecProcess(),
+    )
+    prior_output = first.update["messages"][0]
+    directory = overflow_dir(7)
     archive = next(directory.glob("crop_*.txt"))
     state = AgentState(
         messages=[
-            HumanMessage(content=prior_output),
+            prior_output,
             _ai_with_code("print(('new payload ' * 6 + '\\n') * 340, end='')"),
         ],
         halted=False,
     )
-    result = await exec_node(
-        state,
-        _make_runtime(hosted_resources=hosted_resources, database_gate=database_gate),
-        {"configurable": {"thread_id": "7"}},
-        process=SubprocessExecProcess(),
-    )
+    result = await exec_node(state, runtime, config, process=SubprocessExecProcess())
 
     assert new_body in result.update["messages"][0].content  # pyright: ignore[reportUnknownMemberType]
     assert archive.read_text() == old_body

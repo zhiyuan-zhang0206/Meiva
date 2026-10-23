@@ -17,6 +17,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Literal, Protocol, cast
 
+from agent.execution.delivery_plan import delivers_telemetry, rewrites_result_after_delivery_failure
 from agent.execution.protocol import RequestPayload
 from base.log import logger
 
@@ -31,18 +32,19 @@ _RESULT_KIND: dict[type[BaseException], Literal["cancelled", "timed_out"]] = {
 }
 
 
+# meiva:note
+# The one thing the framework overlay needs from the boot configuration. `ConfigBoot` lives in a
+# heavy import the exec child defers until its boot, so the child names the capability instead.
+class _FieldSetter(Protocol):
+    def set_field(self, name: str, value: object) -> None: ...
+
+
 class _Sdk(Protocol):
     state: Any
     state_update: dict[str, Any]
 
     def ensure_plugins_loaded(
-        self,
-        *,
-        surface: bool = True,
-        config: Any = None,
-        clock_factory: Callable[[], Any] | None = None,
-        producer: Callable[[], Any] | None = None,
-        validate_state: Callable[[Any], object] | None = None,
+        self, *, surface: bool, validate_state: Callable[[Any], object]
     ) -> None: ...
 
 
@@ -113,26 +115,27 @@ def pop_overlay_env() -> tuple[dict[str, object] | None, dict[str, object] | Non
     )
 
 
-def apply_overlay_scope(
-    birth: dict[str, object] | None,
-    overlay: dict[str, object] | None,
-    *,
-    scope: Literal["framework", "plugin"],
-    set_framework_field: Callable[[str, object], None] | None = None,
+def apply_framework_overlay(
+    birth: dict[str, object] | None, overlay: dict[str, object] | None, *, config: _FieldSetter
 ) -> bool:
     applied = False
     for value in (birth, overlay):
         if value:
-            if scope == "framework":
-                from base.packages.plugins.config_registration import apply_config_overlay
+            from base.packages.plugins.config_registration import apply_config_overlay
 
-                apply_config_overlay(value, scope=scope, set_framework_field=set_framework_field)
-            else:
-                from meiva.sdk_surface import install
-
-                install.apply_config_overlay(value)
+            apply_config_overlay(value, scope="framework", set_framework_field=config.set_field)
             applied = True
     return applied
+
+
+def apply_plugin_overlay(
+    birth: dict[str, object] | None, overlay: dict[str, object] | None
+) -> None:
+    for value in (birth, overlay):
+        if value:
+            from meiva.sdk_surface import install
+
+            install.apply_config_overlay(value)
 
 
 def init_logger(
@@ -165,8 +168,8 @@ def init_logger(
     producer().defer_exports()
 
 
-def emit_child_boot_timing(child: ChildContext, *, clients: Any) -> None:
-    duration_ms = (time.perf_counter() - child.boot_started_at) * 1000
+def emit_child_boot_timing(child: ChildContext, *, clients: Any, now: float) -> None:
+    duration_ms = (now - child.boot_started_at) * 1000
     extra: dict[str, object] = {}
     deferred = clients.exports_deferred()
     if deferred is not None:
@@ -245,10 +248,8 @@ OOM_SCORE_ADJ_PATH = Path("/proc/self/oom_score_adj")
 # meiva:note
 # Raise only this process's score: a value the kernel reads before it decides whom to kill.
 # Returns what was written, or None when the preference is off or the file does not exist.
-def apply_oom_preference(
-    env: Mapping[str, str] | None = None, path: Path = OOM_SCORE_ADJ_PATH
-) -> int | None:
-    raw = (env if env is not None else os.environ).get(OOM_SCORE_ADJ_ENV)
+def apply_oom_preference(env: Mapping[str, str], path: Path) -> int | None:
+    raw = env.get(OOM_SCORE_ADJ_ENV)
     try:
         score = DEFAULT_OOM_SCORE_ADJ if raw in (None, "") else int(raw)
     except ValueError:
@@ -354,7 +355,7 @@ def deliver_envelope_telemetry(*, clients: Any = None) -> None:
 
 
 def deliver_run_telemetry(result_path: str, payload: Any) -> None:
-    if payload.kind not in ("done", "lifecycle", "crashed"):
+    if not delivers_telemetry(payload.kind):
         return
     try:
         finalize_telemetry()
@@ -365,7 +366,7 @@ def deliver_run_telemetry(result_path: str, payload: Any) -> None:
             payload.kind,
         )
 
-        if payload.kind in ("done", "lifecycle"):
+        if rewrites_result_after_delivery_failure(payload.kind):
             write_crashed_result(result_path, exc, code_reached=payload.code_reached)
 
 
@@ -389,13 +390,16 @@ def _bind_identity(
 
 
 def run_child(
-    request_path: str, result_path: str, boot_started_at: float, *, config: Any, context: Any
+    request_path: str,
+    result_path: str,
+    boot_started_at: float,
+    *,
+    config: Any,
+    context: Any,
 ) -> None:
     child = import_runtime(boot_started_at)
     from agent.execution.protocol import ResultPayload, read_request, write_result
 
-    line_buffered_output()
-    _install_signal_handlers()
     raw_agent_id = os.environ.get("MEIVA_AGENT_ID")
     init_logger(
         None if raw_agent_id is None else int(raw_agent_id),
@@ -414,9 +418,7 @@ def run_child(
 
     _bind_identity(request, context=context, clock_factory=clock_factory)
 
-    framework_overlay_applied = apply_overlay_scope(
-        birth, overlay, scope="framework", set_framework_field=config.set_field
-    )
+    framework_overlay_applied = apply_framework_overlay(birth, overlay, config=config)
     import meiva
 
     init_logger(
@@ -434,7 +436,7 @@ def run_child(
     )
     from meiva.sdk_surface import settings as sdk_settings
 
-    apply_overlay_scope(birth, overlay, scope="plugin")
+    apply_plugin_overlay(birth, overlay)
 
     def read_agent_default(_domain: str, field: str) -> Any:
         return sdk_settings.config_authority().service_field_value(field)
@@ -453,7 +455,7 @@ def run_child(
         _arm_watchdog(request.timeout_s)
 
     try:
-        emit_child_boot_timing(child, clients=context.clients)
+        emit_child_boot_timing(child, clients=context.clients, now=time.perf_counter())
     except BaseException as exc:
         write_crashed_result(result_path, exc, code_reached=False)
         deliver_envelope_telemetry()
@@ -486,7 +488,7 @@ def main() -> None:
         )
         raise SystemExit(2)
     clients: Any = None
-    apply_oom_preference()
+    apply_oom_preference(os.environ, OOM_SCORE_ADJ_PATH)
     try:
         line_buffered_output()
         _install_signal_handlers()
@@ -548,14 +550,14 @@ def write_crashed_result(
         return
     except BaseException:
         try:
-            _write_crashed_result_stdlib(result_path, envelope)
+            write_stdlib_envelope(result_path, envelope)
         finally:
             logger.opt(exception=True).warning(
                 "exec child: the result envelope writer failed; fell back to the stdlib writer"
             )
 
 
-def _write_crashed_result_stdlib(result_path: str, envelope: dict[str, object]) -> None:
+def write_stdlib_envelope(result_path: str, envelope: dict[str, object]) -> None:
     path = Path(result_path)
     fd: int | None = None
     try:

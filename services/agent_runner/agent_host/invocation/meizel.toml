@@ -23,6 +23,7 @@ exports = ["checkpoints.py", "driver.py"]
 "__init__.py#base/events/live/bus.py" = 1
 "__init__.py#base/log/__init__.py" = 1
 "__init__.py#services/agent_runner/agent_host/db_recovery.py" = 1
+"__init__.py#services/agent_runner/agent_host/lifecycle/shells.py" = 1
 "__init__.py#services/agent_runner/agent_host/runtime.py" = 1
 "checkpoints.py#base/agents/history/delta_read_compat.py" = 1
 "driver.py#base/agents/context/__init__.py" = 1

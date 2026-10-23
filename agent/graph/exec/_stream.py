@@ -16,12 +16,12 @@ from __future__ import annotations
 
 import io
 import threading
-import time
 from collections import deque
-from dataclasses import dataclass
 
 from base.events.live.projection import ExecOutputChunk
 from base.events.live.publisher import AgentEventPublisher
+
+from ._result import StreamCap
 
 # Spliced in where the accumulation budget dropped the middle, so a reader of
 # the retained text sees the gap at the position it happened. It sits between
@@ -42,24 +42,6 @@ _LIVE_CAP_NOTICE = (
     "\n[... output budget reached — the rest is truncated during execution; "
     "the completed result shows the head + tail ...]\n"
 )
-
-# Keep silent execs visibly alive in the frontend at roughly 2Hz.
-KEEPALIVE_INTERVAL_S = 0.5
-
-
-@dataclass(frozen=True)
-class StreamCap:
-    """Record that the accumulation budget dropped the middle of an exec's output.
-
-    Travels with the text through the `_ExecResult` sum type into
-    `output.wrap_code_output`, which needs both numbers to stay honest:
-    `produced_chars` is the TRUE pre-truncation length the instrumentation log
-    line reports, and the overflow archive can no longer claim to hold the full
-    output — the middle is gone before the archive is ever written.
-    """
-
-    produced_chars: int
-    budget_chars: int
 
 
 class StreamingTextIO(io.TextIOBase):
@@ -197,12 +179,8 @@ class ExecOutputChunkPublisher:
         self._publisher = event_publisher
         self._agent_id = agent_id
         self._item_id = item_id
-        self._last_activity = time.monotonic()
 
     def publish(self, text: str) -> None:
-        if not text:
-            return
-        self._last_activity = time.monotonic()
         self._publisher.emit(
             ExecOutputChunk(
                 agent_id=self._agent_id,
@@ -211,11 +189,7 @@ class ExecOutputChunkPublisher:
             ).model_dump_json()
         )
 
-    def maybe_keepalive(self) -> None:
-        now = time.monotonic()
-        if now - self._last_activity < KEEPALIVE_INTERVAL_S:
-            return
-        self._last_activity = now
+    def keepalive(self) -> None:
         self._publisher.emit(
             ExecOutputChunk(
                 agent_id=self._agent_id,

@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import re
 import tokenize
-from collections.abc import Callable, Iterable
 
 from ._punct import line_starts, tokenize_fix_safe
 
@@ -144,14 +143,8 @@ def _collect_escape_edits(
 #
 # Returns the original code unchanged when tokenization fails (broken syntax, or inputs that
 # crash the C tokenizer -- see tokenize_fix_safe) -- that's compile()'s job to surface downstream.
-def fix_invalid_escapes(
-    code: str,
-    *,
-    tokenize_lines: Callable[
-        [Callable[[], str]], Iterable[tokenize.TokenInfo]
-    ] = tokenize.generate_tokens,
-) -> tuple[str, int]:
-    tokens = tokenize_fix_safe(code, tokenize_lines=tokenize_lines)
+def fix_invalid_escapes(code: str) -> tuple[str, int]:
+    tokens = tokenize_fix_safe(code)
     if tokens is None:
         return code, 0
 

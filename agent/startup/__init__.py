@@ -31,6 +31,7 @@ from langgraph.checkpoint.serde.types import _DeltaSnapshot
 from langgraph.constants import PUSH
 from psycopg_pool import AsyncConnectionPool
 
+from agent.startup.permission_notice import permission_notice
 from base.log import logger
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 
@@ -428,25 +429,14 @@ async def notify_desktop_permissions_at_startup() -> None:
     if not claimed:
         return
 
-    if len(claimed) == 1:
-        _, _, status = claimed[0]
-        title = status.headline
-        content = status.diagnostic
-    else:
-        _, _, screen_status = claimed[0]
-        _, _, accessibility_status = claimed[1]
-        title = "Desktop permissions missing"
-        content = (
-            f"{screen_status.headline}: {screen_status.diagnostic}\n\n"
-            f"{accessibility_status.headline}: {accessibility_status.diagnostic}"
-        )
+    notice = permission_notice([(status.headline, status.diagnostic) for _, _, status in claimed])
 
     import meiva
 
     try:
         meiva.ui.notify(  # type: ignore[attr-defined]
-            title=title,
-            content=content,
+            title=notice.title,
+            content=notice.content,
             priority="P1",
             idempotency_key=str(uuid4()),
         )

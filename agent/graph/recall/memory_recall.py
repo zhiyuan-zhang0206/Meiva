@@ -28,30 +28,19 @@ import asyncio
 import time
 from collections.abc import Collection
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import NamedTuple
 
 from langchain_core.messages import AnyMessage, HumanMessage
 
 from agent.graph.recall.conversation_query import build_conversation_query
+from agent.graph.recall.memory_note import qualifying, render_note_text
 from agent.messages import NoteTag, system_note_message
 from base.agents.context import MeivaContext
 from base.agents.context.gateway_client import memory_search as memory_client
 from base.api_contracts.agent_contract import GatewayUnavailable, IndexerUnavailable
 from base.host.env.agent_slices import AgentSlices
 from base.log import logger
-from base.paths import memory_dir
-
-# Which notes are injected is decided by score (`memory_recall_inject_threshold`) and bounded
-# by `memory_recall_inject_max`, because notes crowd the context they are meant to inform.
-
-# Agent-visible framing. Observational, no implementation detail (obeys the SDK
-# docstring discipline since the agent reads this text).
-_FRAMING = (
-    "Memory notes related to the current conversation, retrieved "
-    "automatically, each with the passage that matched and its relevance score. "
-    "These point into your note pool at meiva.memory.PATH -- read a path in full "
-    "when it looks relevant."
-)
 
 
 class PassiveRecall(NamedTuple):
@@ -127,49 +116,12 @@ async def _search_or_none(
         return None
 
 
-def _qualifying(
-    results: list[memory_client.MemorySearchResult],
-    *,
-    threshold: float,
-    limit: int,
-) -> list[memory_client.MemorySearchResult]:
-    """The results to inject: best score first, at or above `threshold`, present on this
-    machine, at most `limit`.
-
-    Search can return a path not yet synced to this machine; it is skipped (it will
-    be recallable once it arrives).
-    """
-    root = memory_dir()
-    picked: list[memory_client.MemorySearchResult] = []
-    for item in sorted(results, key=lambda r: r.score, reverse=True):
-        if item.score < threshold or len(picked) >= limit:
-            break
-        if not (root / item.path).is_file():
-            continue
-        picked.append(item)
-    return picked
-
-
-def _render_entry(item: memory_client.MemorySearchResult) -> str:
-    """One injected note: path, description and score, then the passage that matched.
-
-    The passage is omitted when it is the description itself. Tags are left out: the
-    injected note is a pointer, not a tag list.
-    """
-    header = f"- {item.path} (score {item.score:.2f})"
-    if item.description:
-        header += f": {item.description}"
-    if not item.chunk or item.chunk == item.description:
-        return header
-    passage = "\n".join(f"  > {line}" if line else "  >" for line in item.chunk.splitlines())
-    return f"{header}\n{passage}"
-
-
 async def passive_memory_recall(
     messages: Collection[AnyMessage],
     *,
     agent: AgentSlices,
     context: MeivaContext,
+    memory_root: Path,
     injected_paths: Collection[str] = frozenset(),
 ) -> PassiveRecall | None:
     """Search the memory pool on the recent conversation and render the notes that
@@ -207,10 +159,11 @@ async def passive_memory_recall(
         return None
     search_ms = round((time.monotonic() - search_started) * 1000)
 
-    picked = _qualifying(
+    picked = qualifying(
         results,
         threshold=memory.memory_recall_inject_threshold,
         limit=memory.memory_recall_inject_max,
+        present={item.path for item in results if (memory_root / item.path).is_file()},
     )
     # The search leg is the one a congested gateway stretches (a fleet wake queues
     # searches behind the search endpoint's semaphore) and it now includes the ranking
@@ -227,7 +180,7 @@ async def passive_memory_recall(
         return None
 
     note = system_note_message(
-        content=f"{_FRAMING}\n\n" + "\n".join(_render_entry(item) for item in picked),
+        content=render_note_text(picked),
         tag=NoteTag.MEMORY,
         created_at=datetime.now(UTC),
     )

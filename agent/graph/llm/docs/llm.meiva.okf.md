@@ -18,14 +18,14 @@ Meiva agent's LLM invocation layer — containing tool schema definition (`agent
   - Normal (has tool_call): `Command(goto="before_exec")`
   - After the final message is assembled, `agent/hooks/understanding_chunks.py:due_chunk_update` may enqueue an understanding chunk (provider `input_tokens` past the segment's previous cut by `MEIVA_UNDERSTANDING_CHUNK_TOKENS`) and returns the moved cut as a `compact` update merged into whichever command ends the turn; off unless `MEIVA_UNDERSTANDING_ENABLED` — see [[base/agents/history/hierarchy/docs/chunks.meiva.okf.md]]
   - No tool_call stop-turn / cancel: `Command(update={halted: True}, goto="after_exec")` (returns to claim to wait for next inbound, process does not exit)
-- **Streaming** (`agent/graph/llm/_stream.py:consume_llm`): one `astream` request per try, bounded by TTFT, inter-chunk and total deadlines. A stall ends the turn without a non-streaming fallback or delayed retry.
+- **Streaming** (`agent/graph/llm/_stream.py:consume_llm`): one `astream` request per try, bounded by TTFT, inter-chunk and total deadlines. A stall ends the turn without a non-streaming fallback or delayed retry. The deadlines are a value (`StreamBounds`, built by `stream_bounds(agent, catalog)` from the agent's pins, else its model's tuning); the arithmetic (how long the next chunk may take, whether the total ceiling is spent, the decode window) is `_deadlines.py`, a `strict` module of values, and `_stream.py` is the shell that reads the monotonic clock and awaits the model.
 - **provider exception classification** (`base/lm/errors.py:classify_error`): official LangChain `ModelError.is_retryable` and actual SDK types distinguish trusted `TRANSIENT` failures from deterministic `PERMANENT` rejections. `UNKNOWN` errors propagate once unchanged; unrelated attributes or arbitrary causes cannot grant retry authority. Raw HTTPX transport is normalized only at the model invoke/iterator await, excluding output callbacks and unrelated services. `emit_provider_error` records the shared classification and billing signal; the graph applies its configured fatal-provider policy.
 - **Failures**: permanent, protocol, stall and unknown errors end the current turn with diagnostics. A stall is a `FatalLLMStreamError` like the protocol aborts, so it rides the host's settled turn abort (`halted=True` + the user-visible Error event) instead of the generic crashed-turn path, which only logs and leaves the row idling with nothing visible. Permanent rejections block background wakes; fresh chat or an explicit control can retry after the cause is fixed. Context overflow requires explicit compaction rather than a model-free history wipe.
 - **streaming validation**: `_sanitize_thinking_blocks` repairs the established missing-thinking-field shape in place. Missing terminal fields, abnormal stop reasons and truncation raise once without automatic re-streaming; the failed turn remains visible.
 - **typed content block reading**: `AIMessage(Chunk).content`'s list branch is flattened by langchain into `list[str | dict[str, Any]]`, `base/lm/reasoning.py:content_blocks()` re-tags it as `ContentBlock` (`TypedDict, total=False`), validators like `_validate_thinking_blocks` use it for block-type traversal instead of bare `.get()`; similarly, `additional_kwargs`'s `meiva_*` fields via `base/agents/messages/kwargs.py:read_meiva_kwargs()` obtain typed views (see [[messages.meiva.okf.md]])
 - **silent-idle handling**: when only reasoning is present, no text, no tool_call, reasoning is kept and a continue-loop entered (`halted=False`, delegated to `meiva_silent_idle` plugin injected nudge). Consecutive silent idles consume output-token budget units; a provider-reported zero-output turn still consumes one unit, so the 2,048-token default (`llm_silent_idle_max_output_tokens`) halts before another model call while the event retains its actual estimated output cost.
 - **streaming output**: AIMessage text goes through two paths — real-time (RedisStreamHandler → ChatStart/ChatDelta → UI) and persistence (LangGraph state.messages → timeline endpoint)
-- **cancel-race tests**: each of `llm`, `exec` and the compact hook has its own opt-in `tests/cancel_fixture.py`, and `graph/tests/cancel_fixture.py` combines them, bound beside the real consumers, rather than in the root plugin roster. Tests retain real node logic and restore subscription patches at teardown.
+- **cancel-race tests**: each of `llm`, `exec` and the compact hook has its own opt-in `tests/cancel_fixture.py`, and `graph/tests/cancel_fixture.py` combines them, bound beside the real consumers, rather than in the root plugin roster. Tests retain real node logic and restore subscription patches at teardown. The `llm` package's own tests do not need a cancel event: their context has no ops pool (no inbound queue), where `subscribe_interrupt` yields an event that never fires, and they stream from a scripted chat model (`agent/graph/llm/tests/llm_support.py:ScriptedModel`) through the real path.
 - **interrupt handling**: `agent/graph/llm/_cancel.py:race_stream_vs_cancel` — `subscribe_interrupt` RAII, node entry listens for cancel/terminate inbound, `asyncio.wait` races streaming task; cancel discards partial generation of current turn, not entering history
 
 ## Key dependencies
@@ -45,12 +45,17 @@ Meiva agent's LLM invocation layer — containing tool schema definition (`agent
 
 ## Notes
 
-`tests/test_llm_decode_ms.py` advances its fake monotonic clock inside the stream
-immediately before each yield. A scripted sequence of clock returns would couple
-the assertions to event-loop timeout machinery that also reads that clock.
+The retry loop in `agent/graph/llm/node.py:llm_node` is a thin shell over values. `agent/graph/llm/_retry.py:retry_policy`
+reads the agent's lm config once, with the model's try cap resolved, into a frozen
+`RetryPolicy`; `_backoff.py` (a `strict` module) answers from values only: the next wait
+(`backoff_wait`: policy, tries failed, the budget the failed try recorded, a jitter roll),
+whether the budget is spent (`budget_spent`) and which limit a failed try hit
+(`assess_failure`). The shell reads the wall clock, draws the jitter (`draw_jitter`), sleeps
+and logs. Tests assert the plan with values (`tests/test_backoff.py`, `test_deadlines.py`)
+and run the loop through a scripted chat model with small configured intervals.
 The handler records the first-to-last chunk window as decode time, separately
 from request latency; an empty stream has no decode window. The handler's publisher
-is a mock, so these assertions do not prove event delivery or live provider speed.
+is a sink, so these assertions do not prove event delivery or live provider speed.
 
 - State type hint uses `from __future__ import annotations` + module attribute references to avoid capturing `BaseAgentState` alias and losing plugin dynamic fields
 - The node retries trusted 429/transport/server failures under the per-model attempt cap and total wall-clock budget, with bounded backoff. Provider SDK construction keeps its existing finite retries. `llm_retry` records the final node retry duration. No retry re-enters the graph or repeats code execution.

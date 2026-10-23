@@ -10,6 +10,7 @@ from langgraph.types import Overwrite
 from agent import state as _state
 from agent.graph.hooks.compact import auto_compact_will_fire
 from agent.graph.prompt.capabilities import RecallCandidate, recall_candidates
+from agent.graph.prompt.live import skill_view
 from agent.graph.recall.skill_recall import SkillRecall, peer_gate_passes, recall_skills
 from agent.hooks import Hook
 from agent.messages import last_agent_inbound_text, tail_has_skill_recall_inbound
@@ -73,7 +74,9 @@ class SkillRecallHook(Hook):
         config: RunnableConfig,
         excluded: set[str],
     ) -> list[RecallCandidate]:
-        candidates = [c for c in recall_candidates(agent.prompt) if c.identifier not in excluded]
+        candidates = [
+            c for c in recall_candidates(skill_view(agent.prompt)) if c.identifier not in excluded
+        ]
         if not candidates:
             return []
         catalog = runtime.context.require_catalog()

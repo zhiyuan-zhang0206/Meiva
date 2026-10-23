@@ -49,6 +49,10 @@ _DAEMON_MODULES: dict[str, ModuleType] = {
 }
 
 
+def _task_maintenance_pidfile() -> Path:
+    return task_maintenance.task_maintenance_endpoint().pidfile
+
+
 def _standard_daemons() -> list[ServiceSpec]:
     return [s for s in roster.build_services() if s.health_name is not None]
 
@@ -79,15 +83,18 @@ def test_every_standard_daemon_records_the_pidfile_its_probe_reads(
 ) -> None:
     for spec in _standard_daemons():
         module = _DAEMON_MODULES[spec.cmd.rsplit(" ", 1)[1]]
+        operation: Callable[..., Path]
         if module is page_server:
             operation = page_resources.pidfile
         elif module is agent_ops:
             operation = ops_boot.pidfile
+        elif module is task_maintenance:
+            operation = _task_maintenance_pidfile
         else:
             operation = module._pidfile
         parameters = inspect.signature(operation).parameters
         if not parameters:
-            actual = cast("Callable[[], Path]", operation)()
+            actual = operation()
         else:
             assert set(parameters) == {"config", "runtime"}, spec.session
             assert all(p.default is inspect.Parameter.empty for p in parameters.values()), (

@@ -67,6 +67,7 @@ async def test_the_breaker_open_event_is_recorded_in_audit_events(
             clock_factory=configured_policy().clock_factory,
         ),
         agent_id=agent_id,
+        circuit=None,
     )
 
     rows = db_conn.execute(
@@ -120,6 +121,7 @@ async def test_a_failed_audit_write_is_reported_and_does_not_undo_the_open_break
             clock_factory=configured_policy().clock_factory,
         ),
         agent_id=agent_id,
+        circuit=None,
     )
 
     circuit = update["circuit"]

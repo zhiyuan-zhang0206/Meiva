@@ -7,20 +7,22 @@ tags: []
 
 # Capability index freshness
 
-The drift check is `agent/graph/prompt/capabilities.py:index_drift` plus the
-`before_llm` hook in `agent/graph/hooks/capabilities.py`.
+The drift check is `agent/graph/prompt/skill_selection.py:index_drift` plus the
+`before_llm` hook in `agent/graph/hooks/capabilities.py`, which reads the live catalog
+(`agent/graph/prompt/live.py:skill_view`) and hands the resulting `SkillView` to the diff.
 
 - The rendered index is a **snapshot**, built once per window; `meiva.skills.names()` under it is an **uncached filesystem scan**. Nothing reconciles them by itself, so a skill installed mid-window would be reachable by name and absent from the listing the delegation check orders the agent to match every task against — until a compaction happened to rebuild the prompt
 - `init_context` records the full selected catalog membership (including folded descendants) into `state.capabilities.indexed` (see [[../../../docs/state.meiva.okf.md]]). Snapshot taken **before** the render, so a skill landing between the two is named once too many rather than dropped
 - A framework-owned `before_llm` hook diffs the live membership against that record each turn and names whatever appeared in one `new_skills` system note, in the index's own line shape; the snapshot advances with the note, so one install produces one note no matter who installed it. Drift is the trigger, not a timer
 - `indexed_skills()` is the single definition of membership, so narrowing needs no special case: a configured name that resolved to nothing at build time and resolves now is drift, and a skill outside a narrowed list never becomes drift
-- Unresolved configured names warn on each resolution.
+- Unresolved configured names warn on each read of the view (`skill_view` reports what the pure resolver returns as unresolved).
 - `indexed: None` means no snapshot exists for this window (a checkpoint predating the field). The check then adopts the live catalog silently rather than announcing the whole catalog as new
 
 Container and eval contexts (`ops_pool=None`) do not announce host-side skill
 installs. The hook also defers a drift note when automatic compaction will replace
 the window; the same catalog change remains eligible when no replacement is
-pending. Tests supply each narrowing, disable and compaction scenario through
-its own `AgentSlices` inputs, keeping the original membership and note assertions.
+pending. Tests supply each narrowing and disable scenario as a `SkillView` over a
+catalog built on disk, and each compaction scenario through its own `AgentSlices`
+inputs, keeping the original membership and note assertions.
 
 Parent: [[agent/graph/docs/system-prompt/system-prompt.meiva.okf.md|System Prompt]].

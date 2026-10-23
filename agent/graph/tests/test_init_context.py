@@ -18,8 +18,8 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 from psycopg_pool import AsyncConnectionPool
 
-from agent.graph import _init_context
 from agent.graph._init_context import init_context_node
+from agent.graph.hooks.tests.scripted_model import ScriptedModel
 from agent.graph.llm_errors import LlmLedger
 from agent.messages import NoteTag, system_note_message
 from agent.state import AgentState, CapabilitiesState, ContextReset
@@ -27,7 +27,7 @@ from base.agents.context import MeivaContext
 from base.agents.context.identity import AgentIdentity
 from base.api_contracts.agent_contract import Harness
 from base.clock import Clock
-from base.config import settings
+from base.config.tests.configuration import defaults
 from base.db import Database, create_agent
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
@@ -35,6 +35,7 @@ from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
 from base.native_process.turn_identity import HostedTurnResources
 from base.packages.extensions import install_registry
+from base.packages.extensions.install_registry import InstalledPackage
 from base.packages.plugin_providers import build_model_catalog
 from base.packages.plugins.extensions import (
     EMPTY,
@@ -72,10 +73,7 @@ def _runtime(
             ops_pool=ops_pool,
             llm=llm if llm is not None else AsyncMock(),
             event_publisher=MagicMock(),
-            agent=AgentSlices.resolve(
-                pins,
-                default_reader=lambda domain, field: getattr(getattr(settings, domain), field),
-            ),
+            agent=AgentSlices.resolve(pins, default_reader=defaults()),
             extensions=extensions,
             db=Database.from_settings(gate=database_gate),
             bus=EventBus.from_settings(),
@@ -92,16 +90,33 @@ def _note(tag: str) -> HumanMessage:
     )
 
 
-def _fake_notes(monkeypatch: pytest.MonkeyPatch, *tags: str) -> list[HumanMessage]:
-    """Pin the ordered registry to a known list so ordering assertions do not
-    depend on which layers happen to be enabled in the test environment."""
-    notes = [_note(t) for t in tags]
+def _note_builder(tag: str) -> Callable[[MeivaContext], HumanMessage]:
+    def build(_ctx: MeivaContext) -> HumanMessage:
+        return _note(tag)
 
-    def fake_notes(_extensions: ExtensionRegistry, _ctx: MeivaContext) -> list[HumanMessage]:
-        return list(notes)
+    return build
 
-    monkeypatch.setattr(_init_context, "context_notes", fake_notes)
-    return notes
+
+# meiva:note
+# A registry whose plugin declares exactly these context notes, in this order, so ordering
+# assertions do not depend on which layers happen to be enabled in the test environment. These
+# runtimes carry no agent identity, so the framework's own notes opt out and only these appear.
+def _registry(*tags: str) -> ExtensionRegistry:
+    notes = tuple(ContextNote(_note_builder(tag), rank=rank) for rank, tag in enumerate(tags))
+    return ExtensionRegistry((("demo", PluginContributions(context_notes=notes)),))
+
+
+def _notes(*tags: str) -> list[HumanMessage]:
+    return [_note(t) for t in tags]
+
+
+def _install_skill(name: str, description: str) -> None:
+    root = skills_dir(meiva_home()) / name
+    root.mkdir(parents=True)
+    (root / "SKILL.md").write_text(
+        f"---\nname: {name}\ndescription: {description}\n---\n\nBODY\n", encoding="utf-8"
+    )
+    install_registry.register(InstalledPackage(name=name, type="skill"))
 
 
 def _tags(msgs: list[AnyMessage]) -> list[str | None]:
@@ -118,16 +133,18 @@ def skills_unit(unit_home: Path, set_machine_identity: Callable[..., None]) -> N
 async def test_empty_window_lays_down_system_prompt_then_notes(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
-    monkeypatch: pytest.MonkeyPatch,
     database_gate: ProcessDbGate,
 ) -> None:
     """An empty window is the one condition that triggers establishment: the
     SystemMessage first, then the notes in registry order."""
     tid = create_agent(db_conn)
-    notes = _fake_notes(monkeypatch, "memory_discipline", "memory", "agent_id")
+    tags = ("memory_discipline", "memory", "agent_id")
+    notes = _notes(*tags)
 
     cmd = await init_context_node(
-        AgentState(), _runtime(aops_pool, database_gate=database_gate), _config(tid)
+        AgentState(),
+        _runtime(aops_pool, _registry(*tags), database_gate=database_gate),
+        _config(tid),
     )
 
     msgs = cmd.update["messages"]  # type: ignore[index]
@@ -180,16 +197,14 @@ async def test_a_plugin_declaration_reaches_the_head_through_the_context_registr
 async def test_intact_window_is_a_pass_through(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
-    monkeypatch: pytest.MonkeyPatch,
     database_gate: ProcessDbGate,
 ) -> None:
     """A live conversation is left alone — no head, no re-injection, no update."""
     tid = create_agent(db_conn)
-    _fake_notes(monkeypatch, "memory")
     state = AgentState(messages=[SystemMessage(content="sys"), HumanMessage(content="prev")])
 
     cmd = await init_context_node(
-        state, _runtime(aops_pool, database_gate=database_gate), _config(tid)
+        state, _runtime(aops_pool, _registry("memory"), database_gate=database_gate), _config(tid)
     )
 
     assert cmd.update is None
@@ -199,13 +214,12 @@ async def test_intact_window_is_a_pass_through(
 async def test_parked_tail_lands_behind_the_head(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
-    monkeypatch: pytest.MonkeyPatch,
     database_gate: ProcessDbGate,
 ) -> None:
     """What a compaction parks — the summary, then any chats co-batched with it —
     is laid down after the notes, and the requester's resume is honoured."""
     tid = create_agent(db_conn)
-    notes = _fake_notes(monkeypatch, "memory", "agent_id")
+    notes = _notes("memory", "agent_id")
     summary = HumanMessage(content="THE-SUMMARY")
     chat = HumanMessage(content="a chat that arrived with the compact")
     state = AgentState(
@@ -213,7 +227,9 @@ async def test_parked_tail_lands_behind_the_head(
     )
 
     cmd = await init_context_node(
-        state, _runtime(aops_pool, database_gate=database_gate), _config(tid)
+        state,
+        _runtime(aops_pool, _registry("memory", "agent_id"), database_gate=database_gate),
+        _config(tid),
     )
 
     msgs = cmd.update["messages"]  # type: ignore[index]
@@ -227,19 +243,17 @@ async def test_parked_tail_lands_behind_the_head(
 async def test_consumed_reset_is_cleared(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
-    monkeypatch: pytest.MonkeyPatch,
     database_gate: ProcessDbGate,
 ) -> None:
     """The channel is written back to its default, so a later invocation cannot
     replay the same tail into a second window."""
     tid = create_agent(db_conn)
-    _fake_notes(monkeypatch, "memory")
     state = AgentState(
         context_reset=ContextReset(tail=[HumanMessage(content="s")], resume="llm"),
     )
 
     cmd = await init_context_node(
-        state, _runtime(aops_pool, database_gate=database_gate), _config(tid)
+        state, _runtime(aops_pool, _registry("memory"), database_gate=database_gate), _config(tid)
     )
 
     reset = cmd.update["context_reset"]  # type: ignore[index]
@@ -248,16 +262,18 @@ async def test_consumed_reset_is_cleared(
 
 
 async def test_container_mode_head_is_the_bare_prompt(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch, database_gate: ProcessDbGate
+    db_conn: psycopg.Connection, database_gate: ProcessDbGate
 ) -> None:
     """The eval harness has no ops_pool, no workspace, and nothing the notes
     describe — its head is the system prompt alone, so an eval's context stays
     deterministic."""
     tid = create_agent(db_conn)
-    _fake_notes(monkeypatch, "memory", "agent_id")  # would be injected if consulted
+    # meiva:note
+    # These notes would be injected if the node consulted its registry.
+    registry = _registry("memory", "agent_id")
 
     cmd = await init_context_node(
-        AgentState(), _runtime(None, database_gate=database_gate), _config(tid)
+        AgentState(), _runtime(None, registry, database_gate=database_gate), _config(tid)
     )
 
     msgs = cmd.update["messages"]  # type: ignore[index]
@@ -268,7 +284,6 @@ async def test_container_mode_head_is_the_bare_prompt(
 async def test_head_is_identical_whether_or_not_the_window_had_history(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
-    monkeypatch: pytest.MonkeyPatch,
     database_gate: ProcessDbGate,
 ) -> None:
     """The regression this node exists to prevent.
@@ -289,16 +304,16 @@ async def test_head_is_identical_whether_or_not_the_window_had_history(
         "exec_timeout",
         "preloaded_skills",
     )
-    _fake_notes(monkeypatch, *tags)
+    registry = _registry(*tags)
 
     cold = await init_context_node(
-        AgentState(), _runtime(aops_pool, database_gate=database_gate), _config(tid)
+        AgentState(), _runtime(aops_pool, registry, database_gate=database_gate), _config(tid)
     )
     # A compaction reaches this node the same way: the window is already empty
     # (RemoveMessage(REMOVE_ALL) applied), with the summary parked.
     post_compact = await init_context_node(
         AgentState(context_reset=ContextReset(tail=[HumanMessage(content="sum")], resume="llm")),
-        _runtime(aops_pool, database_gate=database_gate),
+        _runtime(aops_pool, registry, database_gate=database_gate),
         _config(tid),
     )
 
@@ -317,26 +332,20 @@ async def test_head_is_identical_whether_or_not_the_window_had_history(
 async def test_established_head_records_what_the_capability_index_lists(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
-    monkeypatch: pytest.MonkeyPatch,
     database_gate: ProcessDbGate,
 ) -> None:
     """The `# Capabilities` section it renders is a snapshot of a live filesystem
     scan, so the same act has to record what that snapshot covered — otherwise
     nothing downstream can tell that a skill installed later is missing from it.
     """
-    d = skills_dir(meiva_home())
-    (d / "alpha").mkdir(parents=True)
-    (d / "alpha" / "SKILL.md").write_text(
-        "---\nname: alpha\ndescription: Alpha desc\n---\n\nBODY\n", encoding="utf-8"
-    )
-    monkeypatch.setattr(install_registry, "loadable_skill_names", lambda: {"alpha"})
+    _install_skill("alpha", "Alpha desc")
     tid = create_agent(db_conn)
-    _fake_notes(monkeypatch, "memory")
 
     cmd = await init_context_node(
         AgentState(),
         _runtime(
             aops_pool,
+            _registry("memory"),
             database_gate=database_gate,
             pins={"skills_to_inject_into_system_prompt": ["*"]},
         ),
@@ -352,7 +361,6 @@ async def test_established_head_records_what_the_capability_index_lists(
 async def test_a_skill_installed_after_establishment_reaches_the_next_turn(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
-    monkeypatch: pytest.MonkeyPatch,
     database_gate: ProcessDbGate,
 ) -> None:
     """The whole seam, composed: establish a window, install a skill into the
@@ -365,23 +373,14 @@ async def test_a_skill_installed_after_establishment_reaches_the_next_turn(
     """
     from agent.graph.hooks.framework import framework_hooks
 
-    d = skills_dir(meiva_home())
-    (d / "alpha").mkdir(parents=True)
-    (d / "alpha" / "SKILL.md").write_text(
-        "---\nname: alpha\ndescription: Alpha desc\n---\n\nBODY\n", encoding="utf-8"
-    )
-    monkeypatch.setattr(
-        install_registry,
-        "loadable_skill_names",
-        lambda: {p.name for p in d.iterdir() if p.is_dir()},
-    )
+    _install_skill("alpha", "Alpha desc")
     tid = create_agent(db_conn)
-    _fake_notes(monkeypatch, "memory")
 
     established = await init_context_node(
         AgentState(),
         _runtime(
             aops_pool,
+            _registry("memory"),
             database_gate=database_gate,
             pins={"skills_to_inject_into_system_prompt": ["*"]},
         ),
@@ -389,10 +388,7 @@ async def test_a_skill_installed_after_establishment_reaches_the_next_turn(
     )
     head = established.update["messages"]  # type: ignore[index]
 
-    (d / "beta").mkdir(parents=True)
-    (d / "beta" / "SKILL.md").write_text(
-        "---\nname: beta\ndescription: Beta desc\n---\n\nBODY\n", encoding="utf-8"
-    )
+    _install_skill("beta", "Beta desc")
 
     # The rendered prompt is frozen — this is the bug, and it stays true.
     assert "beta" not in str(head[0].content)  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
@@ -403,6 +399,7 @@ async def test_a_skill_installed_after_establishment_reaches_the_next_turn(
         state,
         _runtime(
             aops_pool,
+            _registry("memory"),
             database_gate=database_gate,
             pins={"skills_to_inject_into_system_prompt": ["*"]},
         ),
@@ -420,7 +417,6 @@ async def test_a_compaction_in_the_same_pass_keeps_its_summary_and_its_head(
     hosted_resources: HostedTurnResources,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
-    monkeypatch: pytest.MonkeyPatch,
     database_gate: ProcessDbGate,
 ) -> None:
     """A simultaneous skill install survives the hook-to-LLM compaction path.
@@ -434,18 +430,9 @@ async def test_a_compaction_in_the_same_pass_keeps_its_summary_and_its_head(
     from agent.graph.hooks.framework import framework_hooks
     from agent.hooks import make_hook_runner
 
-    d = skills_dir(meiva_home())
-    (d / "alpha").mkdir(parents=True)
-    (d / "alpha" / "SKILL.md").write_text(
-        "---\nname: alpha\ndescription: Alpha desc\n---\n\nBODY\n", encoding="utf-8"
-    )
-    monkeypatch.setattr(
-        install_registry,
-        "loadable_skill_names",
-        lambda: {p.name for p in d.iterdir() if p.is_dir()},
-    )
+    _install_skill("alpha", "Alpha desc")
     tid = create_agent(db_conn)
-    _fake_notes(monkeypatch, "memory")
+    registry = _registry("memory")
     pins = {
         "skills_to_inject_into_system_prompt": ["*"],
         "auto_compact_fraction": 1e-6,
@@ -454,21 +441,21 @@ async def test_a_compaction_in_the_same_pass_keeps_its_summary_and_its_head(
 
     established = await init_context_node(
         AgentState(),
-        _runtime(aops_pool, resources=hosted_resources, database_gate=database_gate, pins=pins),
+        _runtime(
+            aops_pool,
+            registry,
+            resources=hosted_resources,
+            database_gate=database_gate,
+            pins=pins,
+        ),
         _config(tid),
     )
 
     # A skill lands mid-window, and the window is simultaneously over the
     # force-compact ceiling — one turn, both triggers.
-    (d / "beta").mkdir(parents=True)
-    (d / "beta" / "SKILL.md").write_text(
-        "---\nname: beta\ndescription: Beta desc\n---\n\nBODY\n", encoding="utf-8"
-    )
+    _install_skill("beta", "Beta desc")
     summary_text = "compacted summary " * 100
-    fake_llm = MagicMock()
-    fake_llm.bind_tools.return_value.ainvoke = AsyncMock(
-        return_value=AIMessage(content=summary_text)
-    )
+    fake_llm = ScriptedModel(AIMessage(content=summary_text))
 
     state = AgentState(
         messages=[
@@ -483,6 +470,7 @@ async def test_a_compaction_in_the_same_pass_keeps_its_summary_and_its_head(
         state,
         _runtime(
             aops_pool,
+            registry,
             resources=hosted_resources,
             database_gate=database_gate,
             pins=pins,
@@ -502,6 +490,7 @@ async def test_a_compaction_in_the_same_pass_keeps_its_summary_and_its_head(
         state,
         _runtime(
             aops_pool,
+            registry,
             resources=hosted_resources,
             database_gate=database_gate,
             pins=pins,
@@ -523,7 +512,13 @@ async def test_a_compaction_in_the_same_pass_keeps_its_summary_and_its_head(
 
     reestablished = await init_context_node(
         AgentState(messages=committed, context_reset=cmd.update["context_reset"]),  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
-        _runtime(aops_pool, resources=hosted_resources, database_gate=database_gate, pins=pins),
+        _runtime(
+            aops_pool,
+            registry,
+            resources=hosted_resources,
+            database_gate=database_gate,
+            pins=pins,
+        ),
         _config(tid),
     )
 
@@ -594,11 +589,10 @@ def test_capabilities_snapshot_survives_the_checkpoint_round_trip() -> None:
 
 
 async def test_compacted_takeover_context_restores_explanation_before_summary(
-    monkeypatch: pytest.MonkeyPatch, database_gate: ProcessDbGate
+    database_gate: ProcessDbGate,
 ) -> None:
     from agent.graph.hooks.compact import build_compact_transition
 
-    _fake_notes(monkeypatch, "memory")
     prior = AgentState(
         messages=[SystemMessage(content="sys"), HumanMessage(content="Prior work")],
         impersonation_introduced=True,

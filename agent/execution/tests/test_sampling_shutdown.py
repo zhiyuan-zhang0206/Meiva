@@ -37,9 +37,7 @@ def _assert_outcome(
 
 @pytest.mark.usefixtures("emitted_events")
 @pytest.mark.parametrize("outcome", ["blocked", "body_failure", "refresh_failure"])
-def test_run_code_collects_sampling_at_its_result_boundary(
-    monkeypatch: pytest.MonkeyPatch, outcome: str
-) -> None:
+def test_run_code_collects_sampling_at_its_result_boundary(outcome: str) -> None:
     entered, release = threading.Event(), threading.Event()
     refresh_error, body_error = TypeError("sampling reader bug"), ValueError("agent body failed")
 
@@ -60,8 +58,6 @@ def test_run_code_collects_sampling_at_its_result_boundary(
         if outcome == "body_failure":
             raise body_error
 
-    real_stop = sampling.stop
-    monkeypatch.setattr(sampling, "stop", lambda: real_stop(0.02))
     install.uninstall()
     install.install(
         ExtensionRegistry(

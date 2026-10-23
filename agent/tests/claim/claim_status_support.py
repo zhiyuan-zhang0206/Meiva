@@ -4,7 +4,6 @@ import asyncio
 from collections.abc import Mapping
 from dataclasses import replace
 from typing import Any
-from unittest.mock import MagicMock
 
 import psycopg
 import pytest
@@ -13,6 +12,7 @@ from langgraph.graph.message import REMOVE_ALL_MESSAGES
 from psycopg_pool import AsyncConnectionPool
 
 import meiva
+from agent.graph.node_log.tests.live_events import LiveEvents
 from agent.state import ContextReset
 from base.agents.tests.units import spawn_agent
 from base.cluster.machine import MachineIdentity
@@ -25,19 +25,11 @@ from base.lm.catalog import ModelCatalog
 __all__ = ["committed_publishes", "compact_tail", "running_agent", "set_agent_status"]
 
 
-def committed_publishes(pub: MagicMock) -> list[dict[str, Any]]:
-    """Filter event_publisher.emit call_args to the InboundCommitted payload list.
-
-    node_lifecycle emits a timeline_snapshot on every enter; we only want the
-    "InboundCommitted emit" behavior here, so filter out the noise.
-    """
-    import json
-
-    return [
-        json.loads(c.args[0])
-        for c in pub.emit.call_args_list
-        if json.loads(c.args[0]).get("role") == "inbound_committed"
-    ]
+# meiva:note
+# The InboundCommitted payloads among the published live events. node_lifecycle emits a
+# timeline_snapshot on every enter; only the committed-inbound behavior is wanted here.
+async def committed_publishes(live: LiveEvents) -> list[dict[str, Any]]:
+    return [event for event in await live.events() if event.get("role") == "inbound_committed"]
 
 
 async def await_status(pool: AsyncConnectionPool, agent_id: int, expected: str) -> None:
@@ -132,18 +124,15 @@ def compact_tail(update: Mapping[str, Any] | None) -> list[AnyMessage]:
     return reset.tail
 
 
-def _events_with_role(pub: MagicMock, role: str) -> list[dict[str, Any]]:
-    """Every event_publisher.emit payload for *role*, parsed, in emit order."""
-    import json
-
-    return [
-        json.loads(c.args[0])
-        for c in pub.emit.call_args_list
-        if json.loads(c.args[0]).get("role") == role
-    ]
+# meiva:note
+# Every published event for `role`, in publish order.
+def _events_with_role(events: list[dict[str, Any]], role: str) -> list[dict[str, Any]]:
+    return [event for event in events if event.get("role") == role]
 
 
-def pair_compact_cycles(pub: MagicMock) -> list[tuple[dict[str, Any], dict[str, Any]]]:
+async def pair_compact_cycles(
+    live: LiveEvents,
+) -> list[tuple[dict[str, Any], dict[str, Any]]]:
     """Pair every compact_started with its exactly-one compact_finished.
 
     Task #3323's completeness invariant: a started run reaches exactly one
@@ -151,8 +140,9 @@ def pair_compact_cycles(pub: MagicMock) -> list[tuple[dict[str, Any], dict[str, 
     ticking block would hang forever. Returns (started, finished) pairs in
     start order.
     """
-    started = _events_with_role(pub, "compact_started")
-    finished = _events_with_role(pub, "compact_finished")
+    events = await live.events()
+    started = _events_with_role(events, "compact_started")
+    finished = _events_with_role(events, "compact_finished")
     by_id = {e["compact_id"]: e for e in finished}
     assert len(finished) == len(by_id), f"duplicate terminal for one run: {finished}"
     assert {e["compact_id"] for e in started} == set(by_id), (

@@ -1,21 +1,11 @@
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock, patch
-
-import pytest
 from langchain_core.messages import AIMessage
 from langchain_core.runnables import RunnableConfig
-from langgraph.runtime import Runtime
 
 from agent.state import AgentState
-from base.agents.context import MeivaContext
-from base.config import settings
-from base.db import Database
-from base.db.code_version_gate import ProcessDbGate
-from base.events.live.bus import EventBus
-from base.host.env.agent_slices import AgentSlices
-from base.lm import factory
-from meiva_builtins.plugins.meiva_syntax_fix import agent_runtime
+from base.config.tests.configuration import model_overrides
+from base.lm.catalog import ModelCatalog
 from meiva_builtins.plugins.meiva_syntax_fix._deterministic_fixes import (
     fix_bracket_matching,
     fix_fstring_expressions,
@@ -25,13 +15,27 @@ from meiva_builtins.plugins.meiva_syntax_fix._deterministic_fixes import (
     fix_unicode_punctuation,
     fix_unterminated_to_triple,
 )
-from meiva_builtins.plugins.meiva_syntax_fix.agent_runtime import (
+from meiva_builtins.plugins.meiva_syntax_fix._llm_repair import RepairInputs, llm_repair_syntax
+from meiva_builtins.plugins.meiva_syntax_fix._repair_text import (
     extract_text,
-    fix_invalid_escapes,
-    is_stdlib_module,
     render_syntax_error,
     strip_code_fence,
+)
+from meiva_builtins.plugins.meiva_syntax_fix.agent_runtime import (
+    fix_invalid_escapes,
+    is_stdlib_module,
     syntax_fix_before_exec,
+)
+from meiva_builtins.plugins.meiva_syntax_fix.tests.hook_support import (
+    ANSWERS_BLANK,
+    FAILS_TO_ANSWER,
+    NEVER_REPAIRS,
+    REPAIRED,
+    REPAIRS_AFTER_ONE_RETRY,
+    REPAIRS_IN_A_FENCE,
+    REPAIRS_UNTERMINATED_STRING,
+    UNAVAILABLE,
+    make_runtime,
 )
 from meiva_builtins.plugins.meiva_syntax_fix.tests.test_syntax_fix import is_broken
 
@@ -111,39 +115,22 @@ class TestFixInvalidEscapes:
 
 class TestSyntaxFixBeforeExec:
     @staticmethod
-    def _runtime(database_gate: ProcessDbGate):
-        ctx = MeivaContext(
-            ops_pool=AsyncMock(),
-            llm=MagicMock(),
-            agent=AgentSlices.resolve(
-                default_reader=lambda domain, field: getattr(getattr(settings, domain), field),
-            ),
-            db=Database.from_settings(gate=database_gate),
-            bus=EventBus.from_settings(),
-        )
-        return Runtime(context=ctx)
-
-    @staticmethod
     def _config() -> RunnableConfig:
         return {"configurable": {"thread_id": "7"}}
 
-    async def test_no_ai_message_returns_none(self, database_gate: ProcessDbGate):
+    async def test_no_ai_message_returns_none(self):
         from langchain_core.messages import HumanMessage
 
         state = AgentState(messages=[HumanMessage(content="hello")])
-        result = await syntax_fix_before_exec(
-            state, self._runtime(database_gate=database_gate), self._config()
-        )
+        result = await syntax_fix_before_exec(state, make_runtime(), self._config())
         assert result is None
 
-    async def test_no_tool_calls_returns_none(self, database_gate: ProcessDbGate):
+    async def test_no_tool_calls_returns_none(self):
         state = AgentState(messages=[AIMessage(content="ok")])
-        result = await syntax_fix_before_exec(
-            state, self._runtime(database_gate=database_gate), self._config()
-        )
+        result = await syntax_fix_before_exec(state, make_runtime(), self._config())
         assert result is None
 
-    async def test_empty_code_returns_none(self, database_gate: ProcessDbGate):
+    async def test_empty_code_returns_none(self):
         state = AgentState(
             messages=[
                 AIMessage(
@@ -152,15 +139,10 @@ class TestSyntaxFixBeforeExec:
                 )
             ]
         )
-        result = await syntax_fix_before_exec(
-            state, self._runtime(database_gate=database_gate), self._config()
-        )
+        result = await syntax_fix_before_exec(state, make_runtime(), self._config())
         assert result is None
 
-    async def test_chinese_punctuation_fixed(
-        self, monkeypatch: pytest.MonkeyPatch, database_gate: ProcessDbGate
-    ):
-        monkeypatch.setattr(settings.sandbox, "syntax_fix_ruff_format", True)
+    async def test_chinese_punctuation_fixed(self):
         state = AgentState(
             messages=[
                 AIMessage(
@@ -176,7 +158,7 @@ class TestSyntaxFixBeforeExec:
             ]
         )
         result = await syntax_fix_before_exec(
-            state, self._runtime(database_gate=database_gate), self._config()
+            state, make_runtime(syntax_fix_ruff_format=True), self._config()
         )
         assert result is not None
         assert "messages" in result
@@ -184,10 +166,7 @@ class TestSyntaxFixBeforeExec:
         code = fixed.tool_calls[0]["args"]["code"]
         assert "print(1, 2)" in code
 
-    async def test_ruff_format_applied_when_enabled(
-        self, monkeypatch: pytest.MonkeyPatch, database_gate: ProcessDbGate
-    ):
-        monkeypatch.setattr(settings.sandbox, "syntax_fix_ruff_format", True)
+    async def test_ruff_format_applied_when_enabled(self):
         state = AgentState(
             messages=[
                 AIMessage(
@@ -197,15 +176,12 @@ class TestSyntaxFixBeforeExec:
             ]
         )
         result = await syntax_fix_before_exec(
-            state, self._runtime(database_gate=database_gate), self._config()
+            state, make_runtime(syntax_fix_ruff_format=True), self._config()
         )
         assert result is not None
         assert result["messages"][0].tool_calls[0]["args"]["code"].strip() == "x = 1"
 
-    async def test_ruff_format_skipped_when_disabled(
-        self, monkeypatch: pytest.MonkeyPatch, database_gate: ProcessDbGate
-    ):
-        monkeypatch.setattr(settings.sandbox, "syntax_fix_ruff_format", False)
+    async def test_ruff_format_skipped_when_disabled(self):
         state = AgentState(
             messages=[
                 AIMessage(
@@ -221,14 +197,14 @@ class TestSyntaxFixBeforeExec:
             ]
         )
         result = await syntax_fix_before_exec(
-            state, self._runtime(database_gate=database_gate), self._config()
+            state, make_runtime(syntax_fix_ruff_format=False), self._config()
         )
         assert result is not None
         code = result["messages"][0].tool_calls[0]["args"]["code"]
         assert "x = 1" not in code
         assert "x=1" in code
 
-    async def test_missing_import_added(self, database_gate: ProcessDbGate):
+    async def test_missing_import_added(self):
         state = AgentState(
             messages=[
                 AIMessage(
@@ -243,14 +219,12 @@ class TestSyntaxFixBeforeExec:
                 )
             ]
         )
-        result = await syntax_fix_before_exec(
-            state, self._runtime(database_gate=database_gate), self._config()
-        )
+        result = await syntax_fix_before_exec(state, make_runtime(), self._config())
         assert result is not None
         code = result["messages"][0].tool_calls[0]["args"]["code"]
         assert "import json" in code
 
-    async def test_syntax_error_injects_tool_message(self, database_gate: ProcessDbGate):
+    async def test_syntax_error_injects_tool_message(self):
         state = AgentState(
             messages=[
                 AIMessage(
@@ -265,14 +239,9 @@ class TestSyntaxFixBeforeExec:
                 )
             ]
         )
-        with patch.object(
-            agent_runtime,
-            "llm_repair_syntax",
-            new=AsyncMock(return_value=None),
-        ):
-            result = await syntax_fix_before_exec(
-                state, self._runtime(database_gate=database_gate), self._config()
-            )
+        result = await syntax_fix_before_exec(
+            state, make_runtime(llm_override=UNAVAILABLE), self._config()
+        )
         assert result is not None
         assert result.get("goto") == "after_exec"
         assert "halted" in result
@@ -291,42 +260,29 @@ class TestSyntaxFixBeforeExec:
             ]
         )
 
-    async def test_llm_repair_success_silent_replacement(self, database_gate: ProcessDbGate):
+    async def test_llm_repair_success_silent_replacement(self):
         broken = "x = 'unterminated\nprint(x)"
-        repaired = "x = 'fixed'\nprint(x)"
-        with patch.object(
-            agent_runtime,
-            "llm_repair_syntax",
-            new=AsyncMock(return_value=repaired),
-        ):
-            result = await syntax_fix_before_exec(
-                self._broken_state(broken),
-                self._runtime(database_gate=database_gate),
-                self._config(),
-            )
+        result = await syntax_fix_before_exec(
+            self._broken_state(broken),
+            make_runtime(llm_override=REPAIRS_UNTERMINATED_STRING),
+            self._config(),
+        )
         assert result is not None
         assert "goto" not in result
         assert len(result["messages"]) == 1
-        assert result["messages"][0].tool_calls[0]["args"]["code"] == repaired
+        assert result["messages"][0].tool_calls[0]["args"]["code"] == REPAIRED
 
-    async def test_llm_repair_unavailable_falls_back(self, database_gate: ProcessDbGate):
+    async def test_llm_repair_unavailable_falls_back(self):
         broken = "if True print('x')"
-        with patch.object(
-            agent_runtime,
-            "llm_repair_syntax",
-            new=AsyncMock(return_value=None),
-        ):
-            result = await syntax_fix_before_exec(
-                self._broken_state(broken),
-                self._runtime(database_gate=database_gate),
-                self._config(),
-            )
+        result = await syntax_fix_before_exec(
+            self._broken_state(broken), make_runtime(llm_override=UNAVAILABLE), self._config()
+        )
         assert result is not None
         assert result.get("goto") == "after_exec"
         assert len(result["messages"]) == 2
         assert "SyntaxError" in result["messages"][1].content
 
-    async def test_valid_code_no_change_returns_none(self, database_gate: ProcessDbGate):
+    async def test_valid_code_no_change_returns_none(self):
         state = AgentState(
             messages=[
                 AIMessage(
@@ -341,9 +297,7 @@ class TestSyntaxFixBeforeExec:
                 )
             ]
         )
-        result = await syntax_fix_before_exec(
-            state, self._runtime(database_gate=database_gate), self._config()
-        )
+        result = await syntax_fix_before_exec(state, make_runtime(), self._config())
         if result is not None:
             assert "messages" in result
 
@@ -404,38 +358,49 @@ class TestRenderSyntaxError:
         assert "<agent_code>" in rendered
 
 
-@pytest.mark.usefixtures("sdk_model_owner")
 class TestLlmRepairSyntax:
-    async def test_returns_repaired_text(self):
-        from unittest.mock import patch
+    @staticmethod
+    def _inputs(model_catalog: ModelCatalog, llm_override: str) -> RepairInputs:
+        return RepairInputs(
+            catalog=model_catalog, overrides=model_overrides(), llm_override=llm_override
+        )
 
-        fake = MagicMock()
-        fake.ainvoke = AsyncMock(return_value=MagicMock(content="x = 1"))
-        with patch.object(factory, "build_chat_model", return_value=fake):
-            from meiva_builtins.plugins.meiva_syntax_fix.agent_runtime import llm_repair_syntax
+    async def test_returns_repaired_text(self, model_catalog: ModelCatalog):
+        inputs = self._inputs(model_catalog, REPAIRS_UNTERMINATED_STRING)
 
-            out = await llm_repair_syntax("x = 'broken", "SyntaxError: ...")
-        assert out == "x = 1"
+        assert await llm_repair_syntax("x = 'broken", "SyntaxError: ...", inputs) == REPAIRED
 
-    async def test_model_unavailable_returns_none(self):
-        from unittest.mock import patch
+    async def test_a_fenced_reply_is_unwrapped(self, model_catalog: ModelCatalog):
+        inputs = self._inputs(model_catalog, REPAIRS_IN_A_FENCE)
 
-        with patch.object(factory, "build_chat_model", side_effect=RuntimeError("no key")):
-            from meiva_builtins.plugins.meiva_syntax_fix.agent_runtime import llm_repair_syntax
+        assert await llm_repair_syntax("x = 'broken", "SyntaxError: ...", inputs) == REPAIRED
 
-            out = await llm_repair_syntax("x = 'broken", "SyntaxError: ...")
-        assert out is None
+    async def test_a_reply_that_still_fails_to_compile_is_retried(
+        self, model_catalog: ModelCatalog
+    ):
+        inputs = self._inputs(model_catalog, REPAIRS_AFTER_ONE_RETRY)
 
-    async def test_empty_output_returns_none(self):
-        from unittest.mock import patch
+        assert await llm_repair_syntax("x = 'broken", "SyntaxError: ...", inputs) == REPAIRED
 
-        fake = MagicMock()
-        fake.ainvoke = AsyncMock(return_value=MagicMock(content="   "))
-        with patch.object(factory, "build_chat_model", return_value=fake):
-            from meiva_builtins.plugins.meiva_syntax_fix.agent_runtime import llm_repair_syntax
+    async def test_every_attempt_failing_to_compile_returns_none(self, model_catalog: ModelCatalog):
+        inputs = self._inputs(model_catalog, NEVER_REPAIRS)
 
-            out = await llm_repair_syntax("x = 'broken", "SyntaxError: ...")
-        assert out is None
+        assert await llm_repair_syntax("x = 'broken", "SyntaxError: ...", inputs) is None
+
+    async def test_model_unavailable_returns_none(self, model_catalog: ModelCatalog):
+        inputs = self._inputs(model_catalog, UNAVAILABLE)
+
+        assert await llm_repair_syntax("x = 'broken", "SyntaxError: ...", inputs) is None
+
+    async def test_a_model_that_fails_to_answer_returns_none(self, model_catalog: ModelCatalog):
+        inputs = self._inputs(model_catalog, FAILS_TO_ANSWER)
+
+        assert await llm_repair_syntax("x = 'broken", "SyntaxError: ...", inputs) is None
+
+    async def test_empty_output_returns_none(self, model_catalog: ModelCatalog):
+        inputs = self._inputs(model_catalog, ANSWERS_BLANK)
+
+        assert await llm_repair_syntax("x = 'broken", "SyntaxError: ...", inputs) is None
 
 
 class TestFixUnicodePunctuation:

@@ -16,31 +16,30 @@ import shutil
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
-from unittest.mock import MagicMock
 
 import pytest
 from langchain_core.messages import AnyMessage, HumanMessage, SystemMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
+from psycopg_pool import AsyncConnectionPool
 
 from agent.graph.hooks.capabilities import newly_installed_skills
 from agent.graph.hooks.framework import framework_hooks
-from agent.graph.prompt.capabilities import (
-    NEW_SKILLS_MAX_ENTRIES,
-    index_drift,
-    indexed_skill_identifiers,
-)
+from agent.graph.prompt.capabilities import NEW_SKILLS_MAX_ENTRIES
+from agent.graph.prompt.live import skill_view
+from agent.graph.prompt.skill_selection import index_drift, indexed_skill_identifiers
 from agent.state import AgentState, CapabilitiesState
 from base import paths
 from base.agents.context import MeivaContext
 from base.agents.messages.kwargs import NoteTag
 from base.clock import Clock
-from base.config import settings
+from base.config.tests.configuration import defaults
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.packages.extensions import install_registry
+from base.packages.extensions.install_registry import InstalledPackage
 from base.packages.plugin_providers import build_model_catalog
 
 _CONFIG: RunnableConfig = {"configurable": {"thread_id": "1042"}}
@@ -49,19 +48,20 @@ _CONFIG: RunnableConfig = {"configurable": {"thread_id": "1042"}}
 def _slices(pins: Mapping[str, Any] | None = None) -> AgentSlices:
     return AgentSlices.resolve(
         {"skills_to_inject_into_system_prompt": ["*"], **(pins or {})},
-        default_reader=lambda domain, field: getattr(getattr(settings, domain), field),
+        default_reader=defaults(),
     )
 
 
 # meiva:link agent/graph/docs/system-prompt/capability-index-freshness.meiva.okf.md
 def _runtime(
-    *, container: bool = False, database_gate: ProcessDbGate, pins: Mapping[str, Any] | None = None
+    *,
+    ops_pool: AsyncConnectionPool | None,
+    database_gate: ProcessDbGate,
+    pins: Mapping[str, Any] | None = None,
 ) -> Runtime[MeivaContext]:
     return Runtime(
         context=MeivaContext(
-            ops_pool=None if container else MagicMock(),
-            llm=MagicMock(),
-            event_publisher=MagicMock(),
+            ops_pool=ops_pool,
             agent=_slices(pins),
             db=Database.from_settings(gate=database_gate),
             bus=EventBus.from_settings(),
@@ -72,14 +72,9 @@ def _runtime(
 
 
 @pytest.fixture
-def skills_dir(unit_home: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+def skills_dir(unit_home: Path) -> Path:
     d = paths.skills_dir(paths.meiva_home())
     d.mkdir()
-    monkeypatch.setattr(
-        install_registry,
-        "loadable_skill_names",
-        lambda: {p.name for p in d.iterdir() if p.is_dir()},
-    )
     return d
 
 
@@ -90,6 +85,7 @@ def _install(root: Path, name: str, desc: str) -> None:
     (root / name / "SKILL.md").write_text(
         f"---\nname: {name}\ndescription: {desc}\n---\n\nBODY\n", encoding="utf-8"
     )
+    install_registry.register(InstalledPackage(name=name, type="skill"))
 
 
 def _state(indexed: set[str] | None) -> AgentState:
@@ -97,10 +93,16 @@ def _state(indexed: set[str] | None) -> AgentState:
 
 
 async def _run_hook(
-    indexed: set[str] | None, database_gate: ProcessDbGate, *, pins: Mapping[str, Any] | None = None
+    indexed: set[str] | None,
+    database_gate: ProcessDbGate,
+    ops_pool: AsyncConnectionPool,
+    *,
+    pins: Mapping[str, Any] | None = None,
 ) -> dict | None:
     return await newly_installed_skills(
-        _state(indexed), _runtime(database_gate=database_gate, pins=pins), _CONFIG
+        _state(indexed),
+        _runtime(ops_pool=ops_pool, database_gate=database_gate, pins=pins),
+        _CONFIG,
     )  # type: ignore[arg-type]
 
 
@@ -111,14 +113,14 @@ def test_drift_reports_only_what_appeared_since_the_snapshot(skills_dir: Path) -
     """The whole point: a skill installed after the index was rendered shows up
     as an addition, and one that was already indexed does not show up again."""
     _install(skills_dir, "alpha", "Alpha desc")
-    snapshot = indexed_skill_identifiers(_slices().prompt)
+    snapshot = indexed_skill_identifiers(skill_view(_slices().prompt))
     assert snapshot == {"alpha"}
 
     _install(skills_dir, "beta", "Beta desc")
 
     drift = index_drift(
         snapshot,
-        _slices().prompt,
+        skill_view(_slices().prompt),
     )
     assert [s["name"] for s in drift.added] == ["beta"]
     assert drift.identifiers == {"alpha", "beta"}
@@ -127,8 +129,8 @@ def test_drift_reports_only_what_appeared_since_the_snapshot(skills_dir: Path) -
 def test_drift_is_empty_when_the_catalog_has_not_moved(skills_dir: Path) -> None:
     _install(skills_dir, "alpha", "Alpha desc")
     drift = index_drift(
-        indexed_skill_identifiers(_slices().prompt),
-        _slices().prompt,
+        indexed_skill_identifiers(skill_view(_slices().prompt)),
+        skill_view(_slices().prompt),
     )
     assert drift.added == []
 
@@ -139,12 +141,12 @@ def test_uninstall_leaves_the_snapshot_so_a_reinstall_announces_again(
     """Only additions are reported, but membership is replaced rather than
     unioned — otherwise a skill removed and put back would stay silent."""
     _install(skills_dir, "alpha", "Alpha desc")
-    snapshot = indexed_skill_identifiers(_slices().prompt)
+    snapshot = indexed_skill_identifiers(skill_view(_slices().prompt))
 
     shutil.rmtree(skills_dir / "alpha")
     after_removal = index_drift(
         snapshot,
-        _slices().prompt,
+        skill_view(_slices().prompt),
     )
     assert after_removal.added == []
     assert after_removal.identifiers == set()
@@ -154,7 +156,7 @@ def test_uninstall_leaves_the_snapshot_so_a_reinstall_announces_again(
         s["name"]
         for s in index_drift(
             after_removal.identifiers,
-            _slices().prompt,
+            skill_view(_slices().prompt),
         ).added
     ] == ["alpha"]
 
@@ -163,15 +165,15 @@ def test_uninstall_leaves_the_snapshot_so_a_reinstall_announces_again(
 
 
 async def test_hook_names_the_new_skill_in_the_index_line_shape(
-    skills_dir: Path, database_gate: ProcessDbGate
+    skills_dir: Path, database_gate: ProcessDbGate, aops_pool: AsyncConnectionPool
 ) -> None:
     """The note has to read as more of the `# Capabilities` listing, so it uses
     the same `- \\`meiva.skills.<path>\\` — description` line the index does."""
     _install(skills_dir, "alpha", "Alpha desc")
-    snapshot = indexed_skill_identifiers(_slices().prompt)
+    snapshot = indexed_skill_identifiers(skill_view(_slices().prompt))
     _install(skills_dir, "beta", "Beta desc")
 
-    update = await _run_hook(snapshot, database_gate=database_gate)
+    update = await _run_hook(snapshot, database_gate, aops_pool)
 
     assert update is not None
     (note,) = update["messages"]
@@ -181,35 +183,36 @@ async def test_hook_names_the_new_skill_in_the_index_line_shape(
 
 
 async def test_hook_advances_the_snapshot_so_one_install_is_named_once(
-    skills_dir: Path, database_gate: ProcessDbGate
+    skills_dir: Path, database_gate: ProcessDbGate, aops_pool: AsyncConnectionPool
 ) -> None:
     _install(skills_dir, "alpha", "Alpha desc")
-    snapshot = indexed_skill_identifiers(_slices().prompt)
+    snapshot = indexed_skill_identifiers(skill_view(_slices().prompt))
     _install(skills_dir, "beta", "Beta desc")
 
-    update = await _run_hook(snapshot, database_gate=database_gate)
+    update = await _run_hook(snapshot, database_gate, aops_pool)
     assert update is not None
     advanced = update["capabilities"].indexed  # pyright: ignore[reportUnknownMemberType]
     assert advanced == {"alpha", "beta"}
 
-    assert await _run_hook(advanced, database_gate=database_gate) is None  # pyright: ignore[reportUnknownArgumentType]
+    assert await _run_hook(advanced, database_gate, aops_pool) is None  # pyright: ignore[reportUnknownArgumentType]
 
 
 async def test_hook_is_silent_when_nothing_was_installed(
-    skills_dir: Path, database_gate: ProcessDbGate
+    skills_dir: Path, database_gate: ProcessDbGate, aops_pool: AsyncConnectionPool
 ) -> None:
     _install(skills_dir, "alpha", "Alpha desc")
     assert (
         await _run_hook(
-            indexed_skill_identifiers(_slices().prompt),
-            database_gate=database_gate,
+            indexed_skill_identifiers(skill_view(_slices().prompt)),
+            database_gate,
+            aops_pool,
         )
         is None
     )
 
 
 async def test_no_snapshot_adopts_the_live_catalog_without_announcing_it(
-    skills_dir: Path, database_gate: ProcessDbGate
+    skills_dir: Path, database_gate: ProcessDbGate, aops_pool: AsyncConnectionPool
 ) -> None:
     """A checkpoint written before the snapshot field existed. What that agent's
     standing SystemMessage lists is unknowable here, so the whole catalog must
@@ -217,7 +220,7 @@ async def test_no_snapshot_adopts_the_live_catalog_without_announcing_it(
     _install(skills_dir, "alpha", "Alpha desc")
     _install(skills_dir, "beta", "Beta desc")
 
-    update = await _run_hook(None, database_gate=database_gate)
+    update = await _run_hook(None, database_gate, aops_pool)
 
     assert update is not None
     assert "messages" not in update
@@ -225,7 +228,7 @@ async def test_no_snapshot_adopts_the_live_catalog_without_announcing_it(
 
 
 async def test_a_bulk_install_is_capped_with_a_counted_tail(
-    skills_dir: Path, database_gate: ProcessDbGate
+    skills_dir: Path, database_gate: ProcessDbGate, aops_pool: AsyncConnectionPool
 ) -> None:
     """One drift event can carry dozens — a first converge on a fresh box, a
     plugin sync landing a whole pack. The note must not turn into a second full
@@ -234,7 +237,7 @@ async def test_a_bulk_install_is_capped_with_a_counted_tail(
     for i in range(NEW_SKILLS_MAX_ENTRIES + extra):
         _install(skills_dir, f"skill-{i:02d}", f"Desc {i}")
 
-    update = await _run_hook(set(), database_gate=database_gate)
+    update = await _run_hook(set(), database_gate, aops_pool)
 
     assert update is not None
     (note,) = update["messages"]
@@ -253,7 +256,7 @@ async def test_a_bulk_install_is_capped_with_a_counted_tail(
 
 
 async def test_hook_defers_when_a_compaction_will_replace_the_window(
-    skills_dir: Path, database_gate: ProcessDbGate
+    skills_dir: Path, database_gate: ProcessDbGate, aops_pool: AsyncConnectionPool
 ) -> None:
     """Real drift, but a compaction fires the same before_llm pass — so nothing
     may be written at all.
@@ -265,7 +268,7 @@ async def test_hook_defers_when_a_compaction_will_replace_the_window(
     that composition end to end; this pins the predicate the defer is gated on.
     """
     _install(skills_dir, "alpha", "Alpha desc")
-    snapshot = indexed_skill_identifiers(_slices().prompt)
+    snapshot = indexed_skill_identifiers(skill_view(_slices().prompt))
     _install(skills_dir, "beta", "Beta desc")
     over_the_ceiling: list[AnyMessage] = [
         SystemMessage(content="<sys>"),
@@ -276,7 +279,11 @@ async def test_hook_defers_when_a_compaction_will_replace_the_window(
     assert (
         await newly_installed_skills(
             state,
-            _runtime(database_gate=database_gate, pins={"auto_compact_ceiling_tokens": 1}),
+            _runtime(
+                ops_pool=aops_pool,
+                database_gate=database_gate,
+                pins={"auto_compact_ceiling_tokens": 1},
+            ),
             _CONFIG,
         )
         is None
@@ -284,25 +291,27 @@ async def test_hook_defers_when_a_compaction_will_replace_the_window(
 
     # Deferring is not silencing: the same state with no compaction predicted
     # still names beta, so the guard is the only thing suppressing it.
-    update = await newly_installed_skills(state, _runtime(database_gate=database_gate), _CONFIG)  # type: ignore[arg-type]
+    update = await newly_installed_skills(
+        state, _runtime(ops_pool=aops_pool, database_gate=database_gate), _CONFIG
+    )  # type: ignore[arg-type]
     assert update is not None
     assert "meiva.skills.beta" in update["messages"][0].content  # pyright: ignore[reportUnknownMemberType]
 
 
 async def test_container_mode_writes_nothing(
-    skills_dir: Path, database_gate: ProcessDbGate
+    skills_dir: Path, database_gate: ProcessDbGate, aops_pool: AsyncConnectionPool
 ) -> None:
     """The eval harness has no ops_pool — the same signal `init_context` reduces
     its head by. An eval's context is deterministic by construction, and this
     note's trigger is whatever the host filesystem gained mid-run."""
     _install(skills_dir, "alpha", "Alpha desc")
-    snapshot = indexed_skill_identifiers(_slices().prompt)
+    snapshot = indexed_skill_identifiers(skill_view(_slices().prompt))
     _install(skills_dir, "beta", "Beta desc")
 
     state = _state(snapshot)
     assert (
         await newly_installed_skills(
-            state, _runtime(container=True, database_gate=database_gate), _CONFIG
+            state, _runtime(ops_pool=None, database_gate=database_gate), _CONFIG
         )
         is None
     )  # type: ignore[arg-type]
@@ -312,20 +321,20 @@ async def test_container_mode_writes_nothing(
 
 
 async def test_narrowing_holds_and_a_configured_name_that_arrives_late_drifts_in(
-    skills_dir: Path, database_gate: ProcessDbGate
+    skills_dir: Path, database_gate: ProcessDbGate, aops_pool: AsyncConnectionPool
 ) -> None:
     """An agent narrowed to a specific list gets the same diff with no special
     case: a name that resolved to nothing at build time and resolves now is
     drift, and a skill outside the list never becomes drift."""
     pins = {"skills_to_inject_into_system_prompt": ["beta"]}
     _install(skills_dir, "alpha", "Alpha desc")
-    snapshot = indexed_skill_identifiers(_slices(pins).prompt)
+    snapshot = indexed_skill_identifiers(skill_view(_slices(pins).prompt))
     assert snapshot == set()  # `beta` is configured but not installed yet
 
     _install(skills_dir, "beta", "Beta desc")
     _install(skills_dir, "gamma", "Gamma desc")
 
-    update = await _run_hook(snapshot, database_gate=database_gate, pins=pins)
+    update = await _run_hook(snapshot, database_gate, aops_pool, pins=pins)
 
     assert update is not None
     (note,) = update["messages"]
@@ -335,19 +344,20 @@ async def test_narrowing_holds_and_a_configured_name_that_arrives_late_drifts_in
 
 
 async def test_sdk_disabled_skills_never_drift(
-    skills_dir: Path, database_gate: ProcessDbGate
+    skills_dir: Path, database_gate: ProcessDbGate, aops_pool: AsyncConnectionPool
 ) -> None:
     """`MEIVA_SDK_DISABLE=skills` removed the surface on purpose; an install must
     not put it back through the note."""
     pins = {"sdk_disable": ["skills"]}
     _install(skills_dir, "alpha", "Alpha desc")
-    assert await _run_hook(set(), database_gate=database_gate, pins=pins) is None
+    assert await _run_hook(set(), database_gate, aops_pool, pins=pins) is None
 
 
 async def test_a_stale_config_name_warns_on_each_resolution(
     skills_dir: Path,
     caplog: pytest.LogCaptureFixture,
     database_gate: ProcessDbGate,
+    aops_pool: AsyncConnectionPool,
 ) -> None:
     """Each unresolved resolution remains visible without global suppression."""
     pins = {"skills_to_inject_into_system_prompt": ["does-not-exist"]}
@@ -355,7 +365,7 @@ async def test_a_stale_config_name_warns_on_each_resolution(
 
     with caplog.at_level("WARNING"):
         for _ in range(3):
-            await _run_hook(set(), database_gate=database_gate, pins=pins)
+            await _run_hook(set(), database_gate, aops_pool, pins=pins)
 
     assert caplog.text.count("does-not-exist") == 3
     assert "skills_to_inject_into_system_prompt" in caplog.text

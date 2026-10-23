@@ -1,13 +1,20 @@
 from __future__ import annotations
 
-import asyncio
+import json
 import time
-from collections.abc import AsyncIterator
 
 import pytest
-from langchain_core.messages import AIMessage
+from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage
+from langchain_core.runnables import RunnableConfig
 
+from agent.graph.llm._backoff import Attempt
 from agent.graph.llm._chunk import validate_stop_reason
+from agent.graph.llm.node import llm_attempt
+from agent.graph.llm.tests.llm_support import (
+    ScriptedModel,
+    llm_runtime,
+    published_payloads,
+)
 from agent.graph.llm_errors import (
     LlmLedger,
     LLMStreamCorruptedError,
@@ -15,15 +22,11 @@ from agent.graph.llm_errors import (
     LLMStreamTruncatedError,
     LLMStreamUnexpectedStopReasonError,
 )
-from base.clock import Clock
-from base.config.tests.configuration import defaults
-from base.db import Database
+from agent.state import AgentState
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
-from base.host.env.agent_slices import AgentSlices
-from base.native_process.turn_identity import HostedTurnResources
+from base.lm.catalog import ModelCatalog
 from base.packages.plugin_providers import build_model_catalog
-from meiva.tests.fixtures.pin_agent import hosted_resources as hosted_resources
 
 build_model_catalog()
 
@@ -204,57 +207,33 @@ def test_gemini_safety_unexpected() -> None:
 
 
 async def test_llm_node_validator_wired(
-    hosted_resources: HostedTurnResources,
-    fake_cancel_event: asyncio.Event,
+    event_bus: EventBus,
+    model_catalog: ModelCatalog,
     database_gate: ProcessDbGate,
 ) -> None:
-    from unittest.mock import MagicMock
-
-    from langchain_core.messages import AIMessageChunk, HumanMessage
-    from langchain_core.runnables import RunnableConfig
-    from langgraph.runtime import Runtime
-
-    from agent.graph.llm._retry import Attempt
-    from agent.graph.llm.node import llm_attempt
-    from agent.hooks.tests.fakes import make_fake_ops_pool
-    from agent.state import AgentState
-    from base.agents.context import MeivaContext
-
-    async def _truncated_stream() -> AsyncIterator[AIMessageChunk]:
-        yield AIMessageChunk(
-            content="thinking...",
-            response_metadata={"model_provider": "anthropic", "stop_reason": "max_tokens"},
-            usage_metadata={"input_tokens": 10, "output_tokens": 4096, "total_tokens": 4106},
-        )
-
-    fake_llm = MagicMock()
-    fake_llm.bind_tools.return_value = fake_llm
-    fake_llm.astream.return_value = _truncated_stream()
-    pub = MagicMock()
-    ops_db = make_fake_ops_pool()
-    ctx = MeivaContext(
-        hosted_resources=hosted_resources,
-        ops_pool=ops_db,
-        llm=fake_llm,
-        event_publisher=pub,
-        agent=AgentSlices.resolve(default_reader=defaults()),
-        db=Database.from_settings(gate=database_gate),
-        bus=EventBus.from_settings(),
-        catalog=build_model_catalog(),
-        clock_factory=Clock.from_settings,
+    truncated = AIMessageChunk(
+        content="thinking...",
+        response_metadata={"model_provider": "anthropic", "stop_reason": "max_tokens"},
+        usage_metadata={"input_tokens": 10, "output_tokens": 4096, "total_tokens": 4106},
     )
-    runtime: Runtime[MeivaContext] = Runtime(context=ctx)
     config: RunnableConfig = {"configurable": {"thread_id": "7"}}
     state = AgentState(messages=[HumanMessage(content="hi")], halted=False)
 
-    with pytest.raises(LLMStreamTruncatedError):
-        await llm_attempt(state, runtime, config, Attempt(1, time.time()), ledger=LlmLedger())
+    async with published_payloads(event_bus) as (publisher, payloads):
+        runtime = llm_runtime(
+            ScriptedModel(scripts=[[truncated]]),
+            model_catalog=model_catalog,
+            database_gate=database_gate,
+            event_publisher=publisher,
+        )
+        with pytest.raises(LLMStreamTruncatedError):
+            await llm_attempt(state, runtime, config, Attempt(1, time.time()), ledger=LlmLedger())
 
-    error_emits = [call for call in pub.emit.call_args_list if '"role":"error"' in call.args[0]]
-    assert len(error_emits) == 0, (
-        f"llm_node should NOT emit Error event (would spam during langgraph retries); "
-        f"got {len(error_emits)} emit call(s): {error_emits!r}"
+    roles = [json.loads(payload)["role"] for payload in payloads]
+    assert "error" not in roles, (
+        "llm_node should NOT emit Error event (would spam during langgraph retries)"
     )
+    assert roles, "the node streamed its partial output to the live view before it raised"
 
 
 def test_exception_hierarchy() -> None:

@@ -1,9 +1,11 @@
-exports = ["agent_runtime.py"]
+exports = ["agent_runtime.py", "hint_selection.py"]
 
 [uses]
-"agent_runtime.py" = ["_state.py"]
+"agent_runtime.py" = ["_state.py", "hint_selection.py"]
+"hint_selection.py" = ["_state.py"]
 
 [purity]
 "__init__.py" = "strict"
 "_state.py" = "strict"
+"hint_selection.py" = "strict"
 "plugin.py" = "strict"

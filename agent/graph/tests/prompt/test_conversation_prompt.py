@@ -1,23 +1,22 @@
-from typing import cast
+from typing import Any, cast
 
 import pytest
 
 from agent.graph.prompt.conversation import user_reply_section
 from agent.graph.prompt.system_prompt import build_system_prompt
-from base.config import settings
+from base.config.tests.configuration import defaults
 from base.host.env.agent_slices import AgentSlices
 from base.packages.plugin_providers import build_model_catalog
 from base.packages.plugins.extensions import EMPTY
 
 
+def _slices(**changes: Any) -> AgentSlices:
+    return AgentSlices.resolve(default_reader=defaults(**changes))
+
+
 @pytest.mark.parametrize("style", ["off", "oriented", "concise", "silent"])
-def test_initial_human_response_is_present_without_plugins(
-    monkeypatch: pytest.MonkeyPatch, style: str
-) -> None:
-    monkeypatch.setattr(settings.agent, "agent_communication_style", style)
-    slices = AgentSlices.resolve(
-        default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
-    )
+def test_initial_human_response_is_present_without_plugins(style: str) -> None:
+    slices = _slices(agent__agent_communication_style=style)
 
     prompt = build_system_prompt(EMPTY, slices, agent_id=1, catalog=build_model_catalog())
 
@@ -41,13 +40,8 @@ def test_initial_human_response_is_present_without_plugins(
 
 
 @pytest.mark.parametrize("style", ["off", "oriented", "concise", "silent"])
-def test_reply_routing_and_handoff_policy_survive_every_style(
-    monkeypatch: pytest.MonkeyPatch, style: str
-) -> None:
-    monkeypatch.setattr(settings.agent, "agent_communication_style", style)
-    slices = AgentSlices.resolve(
-        default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
-    )
+def test_reply_routing_and_handoff_policy_survive_every_style(style: str) -> None:
+    slices = _slices(agent__agent_communication_style=style)
     prompt = build_system_prompt(EMPTY, slices, agent_id=1, catalog=build_model_catalog())
 
     assert prompt.count("Reply in ordinary assistant text in this conversation") == 1
@@ -66,14 +60,11 @@ def test_reply_routing_and_handoff_policy_survive_every_style(
         for shape in [False, True]
     ]
 )
-def communication_prompt(
-    request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch
-) -> tuple[str, str]:
+def communication_prompt(request: pytest.FixtureRequest) -> tuple[str, str]:
     style, output_shape = cast(tuple[str, bool], request.param)
-    monkeypatch.setattr(settings.agent, "agent_communication_style", style)
-    monkeypatch.setattr(settings.agent, "prompt_output_conciseness_enabled", output_shape)
-    slices = AgentSlices.resolve(
-        default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
+    slices = _slices(
+        agent__agent_communication_style=style,
+        agent__prompt_output_conciseness_enabled=output_shape,
     )
 
     return style, build_system_prompt(EMPTY, slices, agent_id=1, catalog=build_model_catalog())

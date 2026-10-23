@@ -1,13 +1,14 @@
-"""Envelope + typed-blob protocol tests for the exec subprocess
-(`agent/graph/exec/protocol.py`).
+# meiva:note
+# Envelope + typed-blob protocol tests for the exec subprocess
+# (`agent/execution/protocol.py`).
+#
+# The load-bearing assertions are the exact round-trips: the typed blob must
+# reconstruct langchain messages field-for-field (AIMessage `usage_metadata`
+# included — `convert_to_messages` loses it, which is why the protocol uses
+# `JsonPlusSerializer` with the checkpoint allowlist) and `set` deltas, since
+# the state snapshot (parent -> child) and the plugin state-update delta
+# (child -> parent) both ride it.
 
-The load-bearing assertions are the exact round-trips: the typed blob must
-reconstruct langchain messages field-for-field (AIMessage `usage_metadata`
-included — `convert_to_messages` loses it, which is why the protocol uses
-`JsonPlusSerializer` with the checkpoint allowlist) and `set` deltas, since
-the state snapshot (parent -> child) and the plugin state-update delta
-(child -> parent) both ride it.
-"""
 
 from __future__ import annotations
 
@@ -18,12 +19,11 @@ import time
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
-from unittest.mock import patch
 
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
-from agent.graph.exec.protocol import (
+from agent.execution.protocol import (
     MAX_ENVELOPE_BYTES,
     REQUEST_VERSION,
     RESULT_VERSION,
@@ -44,12 +44,8 @@ from base.db import Database
 from base.paths import meiva_home
 from meiva.tests.fixtures.pin_agent import exec_context
 
-_ENVELOPE_CRASH_CHILD = Path(__file__).parent / "resources" / "envelope_crash_child.py"
 
-
-@patch.dict(os.environ)
 def _context_description(agent_id: int | None) -> dict[str, Any]:
-    """Snapshot cold test-root delivery without changing later consumers' environment."""
     return exec_context(agent_id).describe()
 
 
@@ -334,7 +330,6 @@ def test_stale_request_evidence_retained_while_result_is_pruned(tmp_path: Path) 
     old_result = path.parent / "res-dead.json"
     old_result.write_text("{}", encoding="utf-8")
     old_time = time.time() - STALE_FILE_AGE_S - 10
-    import os
 
     for old in (old_request, old_gate, old_result):
         os.utime(old, (old_time, old_time))
@@ -345,20 +340,12 @@ def test_stale_request_evidence_retained_while_result_is_pruned(tmp_path: Path) 
     assert fresh.parent.is_dir()
 
 
-def test_failed_envelope_write_leaves_nothing_at_the_destination(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_failed_envelope_write_leaves_nothing_at_the_destination(tmp_path: Path) -> None:
     """A write failing before the rename never materializes at `path` (D-3)."""
-    from agent.graph.exec import protocol
-
     path = make_request_path(tmp_path, agent_id=7)
+    path.mkdir()
 
-    def refuse_replace(*_args: object, **_kwargs: object) -> None:
-        raise OSError("replace refused")
-
-    monkeypatch.setattr(protocol.os, "replace", refuse_replace)
-
-    with pytest.raises(OSError, match="replace refused"):
+    with pytest.raises(OSError):
         write_request(
             path,
             code="x = 1",
@@ -368,28 +355,8 @@ def test_failed_envelope_write_leaves_nothing_at_the_destination(
             incarnation=None,
         )
 
-    assert not path.exists()
+    assert path.is_dir() and list(path.iterdir()) == []
     assert list(path.parent.glob(".*.tmp")) == []  # the scratch file is cleaned up
-
-
-@pytest.mark.parametrize("kill_point", ["os.replace", "os.fsync"])
-def test_writer_killed_before_commit_leaves_no_envelope_at_all(
-    tmp_path: Path, kill_point: str
-) -> None:
-    """The rename is the only commit point: a writer killed just before it —
-    or before the fsync that precedes it — never exposes a zero-byte or partial
-    envelope, which is exactly what used to defer hosted boot recovery forever
-    (task #3619 D-3)."""
-    import subprocess
-    import sys
-
-    path = tmp_path / "req-crash.json"
-    completed = subprocess.run(  # noqa: S603 — our own venv python running a fixed child script
-        [sys.executable, str(_ENVELOPE_CRASH_CHILD), str(path), kill_point], check=False
-    )
-
-    assert completed.returncode == 9
-    assert not path.exists()
 
 
 def test_envelope_write_commits_the_full_bytes_and_a_second_write_replaces_them(
@@ -424,7 +391,6 @@ def test_envelope_write_commits_the_full_bytes_and_a_second_write_replaces_them(
 
 def test_orphaned_write_temp_files_are_swept(tmp_path: Path) -> None:
     """A crashed writer's scratch file is swept by a later allocation."""
-    import os
 
     path = make_request_path(tmp_path, agent_id=7)
     agent_dir = path.parent

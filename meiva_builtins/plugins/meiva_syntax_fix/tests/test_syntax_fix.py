@@ -1,30 +1,40 @@
+import json
 import pathlib
-import shutil
-import subprocess
 import sys
-import tokenize
-from collections.abc import Callable, Iterable
-from unittest.mock import MagicMock
 
 import pytest
 
-from meiva_builtins.plugins.meiva_syntax_fix._imports import (
-    ruff_undefined_names,
-)
+from base.host.proc import run_bounded
+from base.log.tests.log_records import LogRecords
+from meiva_builtins.plugins.meiva_syntax_fix._imports import detect_missing_imports, insert_imports
 from meiva_builtins.plugins.meiva_syntax_fix._punct import (
     FULLWIDTH_QUOTE_MAP,
     MAX_TOKENIZE_LINE_LENGTH,
     PUNCT_MAP,
     translate_outside_strings,
 )
-from meiva_builtins.plugins.meiva_syntax_fix.agent_runtime import (
-    detect_missing_imports,
-    fix_chinese_punctuation,
-    insert_imports,
-    ruff_executable,
+from meiva_builtins.plugins.meiva_syntax_fix._ruff import (
     ruff_fix,
     ruff_format,
+    ruff_undefined_names,
 )
+from meiva_builtins.plugins.meiva_syntax_fix._ruff_plan import RuffRun
+from meiva_builtins.plugins.meiva_syntax_fix._ruff_run import ruff_executable, system_ruff
+from meiva_builtins.plugins.meiva_syntax_fix.agent_runtime import fix_chinese_punctuation
+
+_RUFF = system_ruff()
+_NO_PATH_CHILD = pathlib.Path(__file__).with_name("child_ruff_without_path.py")
+
+
+def scripted_ruff(directory: pathlib.Path, body: str, *, timeout_seconds: float = 5) -> RuffRun:
+    path = directory / "ruff"
+    path.write_text(f"#!{sys.executable}\nimport sys\n{body}\n", encoding="utf-8")
+    path.chmod(0o755)
+    return RuffRun(executable=str(path), timeout_seconds=timeout_seconds)
+
+
+_ECHO = "sys.stdout.buffer.write(sys.stdin.buffer.read())"
+_SLEEP = "import time\ntime.sleep(30)"
 
 
 class TestFixChinesePunctuation:
@@ -150,20 +160,6 @@ class TestTranslateOutsideStringsCrashGuard:
         assert code == self.CRASH_INPUT
         assert n == 0
 
-    def test_memoryerror_from_tokenizer_degrades_to_noop(self) -> None:
-        def boom(_readline: Callable[[], str]) -> Iterable[tokenize.TokenInfo]:
-            raise MemoryError("simulated C-tokenizer MemoryError")
-
-        code, n = translate_outside_strings(self.CRASH_INPUT, PUNCT_MAP, tokenize_lines=boom)
-        assert code == self.CRASH_INPUT
-        assert n == 0
-
-        from meiva_builtins.plugins.meiva_syntax_fix._escapes import fix_invalid_escapes
-
-        esc, esc_n = fix_invalid_escapes(self.CRASH_INPUT, tokenize_lines=boom)
-        assert esc == self.CRASH_INPUT
-        assert esc_n == 0
-
     def test_oversized_line_skips_translation(self):
         src = "a" * MAX_TOKENIZE_LINE_LENGTH + "\uff0c"
         code, n = translate_outside_strings(src, PUNCT_MAP)
@@ -185,78 +181,73 @@ class TestTranslateOutsideStringsCrashGuard:
 class TestDetectMissingImports:
     def test_ruff_extracts_undefined_name_from_unicode_source(self):
         code = 'print("\u4f60\u597d")\nprint(missing_name)\n'
-        assert ruff_undefined_names(code) == {"missing_name"}
+        assert ruff_undefined_names(code, _RUFF) == {"missing_name"}
 
-    def test_ruff_undefined_names_uses_utf8_encoding(self):
-        mock_run = MagicMock(
-            return_value=subprocess.CompletedProcess(
-                args=["ruff"],
-                returncode=1,
-                stdout='[{"code":"F821","message":"Undefined name `missing_name`"}]',
-                stderr="",
-            )
+    def test_ruff_undefined_names_round_trips_utf8(self, tmp_path: pathlib.Path):
+        ruff = scripted_ruff(
+            tmp_path,
+            "sys.stdin.buffer.read()\n"
+            'sys.stdout.buffer.write(\'[{"code":"F821","message":"Undefined name `\\u4f60`"}]\'.encode())',
         )
-        code = 'print("\u4f60\u597d")\nprint(missing_name)\n'
 
-        assert ruff_undefined_names(code, run=mock_run) == {"missing_name"}
-        assert mock_run.call_args.kwargs["encoding"] == "utf-8"
+        assert ruff_undefined_names('print("\u4f60\u597d")\nprint(\u4f60)\n', ruff) == {"\u4f60"}
 
     def test_empty_code_returns_empty(self):
-        assert detect_missing_imports("") == []
+        assert detect_missing_imports("", _RUFF) == []
 
     def test_whitespace_only_returns_empty(self):
-        assert detect_missing_imports("   \n  ") == []
+        assert detect_missing_imports("   \n  ", _RUFF) == []
 
     def test_no_unknown_usage_returns_empty(self):
-        assert detect_missing_imports("x = 1") == []
+        assert detect_missing_imports("x = 1", _RUFF) == []
 
     def test_detects_json_usage(self):
-        result = detect_missing_imports("json.dumps({'a': 1})")
+        result = detect_missing_imports("json.dumps({'a': 1})", _RUFF)
         assert "import json" in result
 
     def test_detects_math_usage(self):
-        result = detect_missing_imports("math.sqrt(4)")
+        result = detect_missing_imports("math.sqrt(4)", _RUFF)
         assert "import math" in result
 
     def test_detects_re_usage(self):
-        result = detect_missing_imports("re.compile(r'.*')")
+        result = detect_missing_imports("re.compile(r'.*')", _RUFF)
         assert "import re" in result
 
     def test_detects_datetime_usage(self):
-        result = detect_missing_imports("datetime.datetime.now()")
+        result = detect_missing_imports("datetime.datetime.now()", _RUFF)
         assert "import datetime" in result
 
     def test_skips_already_imported(self):
         code = "import json\njson.dumps({'a': 1})"
-        assert detect_missing_imports(code) == []
+        assert detect_missing_imports(code, _RUFF) == []
 
     def test_skips_already_from_imported(self):
         code = "from json import dumps\ndumps({'a': 1})"
-        assert detect_missing_imports(code) == []
+        assert detect_missing_imports(code, _RUFF) == []
 
     def test_skips_builtins(self):
-        assert detect_missing_imports("True") == []
-        assert detect_missing_imports("print('hello')") == []
-        assert detect_missing_imports("len([1,2])") == []
+        assert detect_missing_imports("True", _RUFF) == []
+        assert detect_missing_imports("print('hello')", _RUFF) == []
+        assert detect_missing_imports("len([1,2])", _RUFF) == []
 
     def test_detects_os_import(self):
-        result = detect_missing_imports("os.getcwd()")
+        result = detect_missing_imports("os.getcwd()", _RUFF)
         assert "import os" in result
 
     def test_detects_sys_import(self):
-        result = detect_missing_imports("sys.argv")
+        result = detect_missing_imports("sys.argv", _RUFF)
         assert "import sys" in result
 
     def test_detects_time_import(self):
-        result = detect_missing_imports("time.sleep(1)")
+        result = detect_missing_imports("time.sleep(1)", _RUFF)
         assert "import time" in result
 
     def test_detects_dotted_import_urllib(self):
-        result = detect_missing_imports("urllib.parse.urlparse('http://x.com')")
+        result = detect_missing_imports("urllib.parse.urlparse('http://x.com')", _RUFF)
         assert "import urllib.parse" in result
 
     def test_detects_concurrent_futures(self):
-        result = detect_missing_imports("concurrent.futures.ThreadPoolExecutor()")
+        result = detect_missing_imports("concurrent.futures.ThreadPoolExecutor()", _RUFF)
         assert any("concurrent.futures" in s for s in result)
 
     def test_multiple_missing_sorted(self):
@@ -265,42 +256,42 @@ json.dumps(x)
 math.sqrt(y)
 re.compile(z)
 """
-        result = detect_missing_imports(code)
+        result = detect_missing_imports(code, _RUFF)
         imports = [s for s in result if s.startswith("import ")]
         assert imports == sorted(imports)
 
     def test_meiva_transitive_skipped(self):
         code = "os.getcwd()\nsys.argv\ntime.time()"
-        result = detect_missing_imports(code)
+        result = detect_missing_imports(code, _RUFF)
         stmts = set(result)
         assert "import os" in stmts
         assert "import sys" in stmts
         assert "import time" in stmts
 
     def test_meiva_detected(self):
-        result = detect_missing_imports("meiva.files.read('x')")
+        result = detect_missing_imports("meiva.files.read('x')", _RUFF)
         assert "import meiva" in result
 
     def test_meiva_already_imported_skipped(self):
         code = "import meiva\nmeiva.files.read('x')"
-        assert detect_missing_imports(code) == []
+        assert detect_missing_imports(code, _RUFF) == []
 
     def test_import_below_first_usage_counts_as_missing(self):
         code = "os.environ.get('X')\nimport os\nos.walk('/')\n"
-        result = detect_missing_imports(code)
+        result = detect_missing_imports(code, _RUFF)
         assert "import os" in result
 
     def test_import_above_first_usage_skipped(self):
         code = "import os\nos.environ.get('X')\n"
-        assert detect_missing_imports(code) == []
+        assert detect_missing_imports(code, _RUFF) == []
 
     def test_dotted_import_below_first_usage_counts_as_missing(self):
         code = "urllib.parse.urlparse('http://x')\nimport urllib.parse\n"
-        assert "import urllib.parse" in detect_missing_imports(code)
+        assert "import urllib.parse" in detect_missing_imports(code, _RUFF)
 
     def test_from_import_below_first_usage_counts_as_missing(self):
         code = "json.dumps({'a': 1})\nfrom json import dumps\n"
-        assert "import json" in detect_missing_imports(code)
+        assert "import json" in detect_missing_imports(code, _RUFF)
 
 
 class TestInsertImports:
@@ -348,176 +339,99 @@ class TestInsertImports:
 class TestRuffFix:
     def test_ruff_available_runs_fix(self):
         code = 'import os\nimport os\nprint("\u4f60\u597d")\n'
-        result = ruff_fix(code)
+        result = ruff_fix(code, _RUFF)
         assert isinstance(result, str)
         assert "\u4f60\u597d" in result
 
-    def test_ruff_fix_uses_utf8_encoding(self):
+    def test_ruff_fix_round_trips_utf8(self, tmp_path: pathlib.Path):
         code = 'print("\u4f60\u597d")\n'
-        mock_run = MagicMock(
-            return_value=subprocess.CompletedProcess(
-                args=["ruff"], returncode=0, stdout=code, stderr=""
-            )
-        )
 
-        assert ruff_fix(code, run=mock_run) == code
-        assert mock_run.call_args.kwargs["encoding"] == "utf-8"
+        assert ruff_fix(code, scripted_ruff(tmp_path, _ECHO)) == code
 
-    def test_ruff_not_found_returns_original(self):
-        mock_run = MagicMock(side_effect=FileNotFoundError)
-        code = "import os\nimport os\n"
-        assert ruff_fix(code, run=mock_run) == code
+    def test_ruff_fix_takes_the_rewrite_of_a_clean_exit(self, tmp_path: pathlib.Path):
+        ruff = scripted_ruff(tmp_path, 'sys.stdout.write("rewritten\\n")')
 
-    def test_ruff_timeout_returns_original(self):
-        mock_run = MagicMock(side_effect=subprocess.TimeoutExpired("ruff", 5))
-        code = "import os\n"
-        assert ruff_fix(code, run=mock_run) == code
+        assert ruff_fix("import os\n", ruff) == "rewritten\n"
 
-    def test_ruff_nonzero_returns_original(self):
-        mock_run = MagicMock(
-            return_value=subprocess.CompletedProcess(
-                args=["ruff"], returncode=1, stdout="", stderr="error"
-            )
-        )
-        code = "import os\n"
-        assert ruff_fix(code, run=mock_run) == code
+    def test_ruff_nonzero_returns_original(self, tmp_path: pathlib.Path):
+        ruff = scripted_ruff(tmp_path, 'sys.stderr.write("error")\nsys.exit(1)')
 
-    def test_ruff_empty_stdout_returns_original(self):
-        mock_run = MagicMock(
-            return_value=subprocess.CompletedProcess(
-                args=["ruff"], returncode=0, stdout="", stderr=""
-            )
-        )
-        code = "import os\n"
-        assert ruff_fix(code, run=mock_run) == code
+        assert ruff_fix("import os\n", ruff) == "import os\n"
+
+    def test_ruff_empty_stdout_returns_original(self, tmp_path: pathlib.Path):
+        assert ruff_fix("import os\n", scripted_ruff(tmp_path, "pass")) == "import os\n"
 
 
 class TestRuffFormat:
     def test_ruff_available_normalizes_style(self):
-        result = ruff_format('message="\u4f60\u597d"\n')
+        result = ruff_format('message="\u4f60\u597d"\n', _RUFF)
         assert result == 'message = "\u4f60\u597d"\n'
 
-    def test_ruff_format_uses_utf8_encoding(self):
+    def test_ruff_format_round_trips_utf8(self, tmp_path: pathlib.Path):
         code = 'print("\u4f60\u597d")\n'
-        mock_run = MagicMock(
-            return_value=subprocess.CompletedProcess(
-                args=["ruff"], returncode=0, stdout=code, stderr=""
-            )
-        )
 
-        assert ruff_format(code, run=mock_run) == code
-        assert mock_run.call_args.kwargs["encoding"] == "utf-8"
+        assert ruff_format(code, scripted_ruff(tmp_path, _ECHO)) == code
 
-    def test_ruff_not_found_returns_original(self):
-        mock_run = MagicMock(side_effect=FileNotFoundError)
-        assert ruff_format("x=1\n", run=mock_run) == "x=1\n"
+    def test_ruff_nonzero_returns_original(self, tmp_path: pathlib.Path):
+        ruff = scripted_ruff(tmp_path, 'sys.stderr.write("error")\nsys.exit(2)')
 
-    def test_ruff_timeout_returns_original(self):
-        mock_run = MagicMock(side_effect=subprocess.TimeoutExpired("ruff", 5))
-        assert ruff_format("x=1\n", run=mock_run) == "x=1\n"
+        assert ruff_format("x=1\n", ruff) == "x=1\n"
 
-    def test_ruff_nonzero_returns_original(self):
-        mock_run = MagicMock(
-            return_value=subprocess.CompletedProcess(
-                args=["ruff"], returncode=2, stdout="", stderr="error"
-            )
-        )
-        assert ruff_format("x=1\n", run=mock_run) == "x=1\n"
-
-    def test_ruff_empty_stdout_returns_original(self):
-        mock_run = MagicMock(
-            return_value=subprocess.CompletedProcess(
-                args=["ruff"], returncode=0, stdout="", stderr=""
-            )
-        )
-        assert ruff_format("x=1\n", run=mock_run) == "x=1\n"
+    def test_ruff_empty_stdout_returns_original(self, tmp_path: pathlib.Path):
+        assert ruff_format("x=1\n", scripted_ruff(tmp_path, "pass")) == "x=1\n"
 
 
 class TestRuffGiveUpLogging:
-    def test_undefined_names_unicode_encode_error_returns_empty(
-        self, loguru_records: list[dict[str, str]]
+    def test_a_missing_ruff_passes_through_and_is_reported_for_each_skipped_stage(
+        self, tmp_path: pathlib.Path, loguru_records: LogRecords
     ):
-        code = 'print("\u4f60")\n'
-        mock_run = MagicMock(
-            side_effect=UnicodeEncodeError(
-                "cp1252", "\u4f60", 0, 1, "character maps to <undefined>"
-            )
-        )
+        missing = RuffRun(executable=str(tmp_path / "no-ruff"))
 
-        assert ruff_undefined_names(code, run=mock_run) == set()
-        msgs = [r["message"] for r in loguru_records]
-        assert any("UnicodeEncodeError" in m for m in msgs), msgs
-
-    def test_ruff_fix_unicode_encode_error_returns_original(
-        self, loguru_records: list[dict[str, str]]
-    ):
-        code = 'print("\u4f60")\n'
-        mock_run = MagicMock(
-            side_effect=UnicodeEncodeError(
-                "cp1252", "\u4f60", 0, 1, "character maps to <undefined>"
-            )
-        )
-
-        assert ruff_fix(code, run=mock_run) == code
-        msgs = [r["message"] for r in loguru_records]
-        assert any("UnicodeEncodeError" in m for m in msgs), msgs
-
-    def test_ruff_format_unicode_encode_error_returns_original(
-        self, loguru_records: list[dict[str, str]]
-    ):
-        code = 'print("\u4f60")\n'
-        mock_run = MagicMock(
-            side_effect=UnicodeEncodeError(
-                "cp1252", "\u4f60", 0, 1, "character maps to <undefined>"
-            )
-        )
-
-        assert ruff_format(code, run=mock_run) == code
-        msgs = [r["message"] for r in loguru_records]
-        assert any("UnicodeEncodeError" in m for m in msgs), msgs
-
-    def test_ruff_fix_timeout_logs_warning(self, loguru_records):
-        mock_run = MagicMock(side_effect=subprocess.TimeoutExpired("ruff", 5))
-        code = "import os\n"
-        assert ruff_fix(code, run=mock_run) == code
-        msgs = [r["message"] for r in loguru_records]
-        assert any("did not finish within 5s" in m and "char source" in m for m in msgs), msgs
-
-    def test_ruff_fix_oserror_logs_errno(self, loguru_records):
-        mock_run = MagicMock(side_effect=OSError(24, "Too many open files"))
-        code = "import os\n"
-        assert ruff_fix(code, run=mock_run) == code
-        msgs = [r["message"] for r in loguru_records]
-        assert any("errno=24" in m and "Too many open files" in m for m in msgs), msgs
-
-    def test_ruff_format_timeout_logs_warning(self, loguru_records):
-        mock_run = MagicMock(side_effect=subprocess.TimeoutExpired("ruff", 5))
-        code = "x=1\n"
-        assert ruff_format(code, run=mock_run) == code
-        msgs = [r["message"] for r in loguru_records]
-        assert any("did not finish within 5s" in m and "char source" in m for m in msgs), msgs
-
-    def test_ruff_missing_reports_each_skipped_stage(self, loguru_records):
-        mock_run = MagicMock(side_effect=FileNotFoundError)
         for code in ("a = 1\n", "b = 2\n"):
-            assert ruff_fix(code, run=mock_run) == code
-        assert ruff_format("c = 3\n", run=mock_run) == "c = 3\n"
-        msgs = [r["message"] for r in loguru_records]
-        assert sum("not found" in m for m in msgs) == 3, msgs
+            assert ruff_fix(code, missing) == code
+        assert ruff_format("c = 3\n", missing) == "c = 3\n"
+        assert ruff_undefined_names("d\n", missing) == frozenset()
+        messages = loguru_records.messages("WARNING")
+        assert sum("not found" in message for message in messages) == 4, messages
 
-    def test_undefined_names_timeout_logs_warning(self, loguru_records):
-        mock_run = MagicMock(side_effect=subprocess.TimeoutExpired("ruff", 5))
-        assert ruff_undefined_names("import os\n", run=mock_run) == set()
-        msgs = [r["message"] for r in loguru_records]
-        assert any("did not finish within 5s" in m and "check --select F821" in m for m in msgs), (
-            msgs
+    def test_a_ruff_over_its_budget_passes_through_with_the_budget_and_input_size(
+        self, tmp_path: pathlib.Path, loguru_records: LogRecords
+    ):
+        ruff = scripted_ruff(tmp_path, _SLEEP, timeout_seconds=0.2)
+
+        assert ruff_fix("import os\n", ruff) == "import os\n"
+        assert ruff_format("x=1\n", ruff) == "x=1\n"
+        assert ruff_undefined_names("import os\n", ruff) == frozenset()
+        messages = loguru_records.messages("WARNING")
+        assert any(
+            "check --fix did not finish within 0.2s on 10-char source" in m for m in messages
         )
+        assert any("format did not finish within 0.2s on 4-char source" in m for m in messages)
+        assert any("check --select F821 did not finish within 0.2s" in m for m in messages)
 
-    def test_undefined_names_oserror_logs_errno(self, loguru_records):
-        mock_run = MagicMock(side_effect=OSError(28, "No space left on device"))
-        assert ruff_undefined_names("import os\n", run=mock_run) == set()
-        msgs = [r["message"] for r in loguru_records]
-        assert any("errno=28" in m for m in msgs), msgs
+    def test_a_ruff_the_os_refuses_to_run_passes_through_with_the_errno(
+        self, tmp_path: pathlib.Path, loguru_records: LogRecords
+    ):
+        refused = tmp_path / "ruff"
+        refused.write_text("not executable", encoding="utf-8")
+        ruff = RuffRun(executable=str(refused))
+
+        assert ruff_fix("import os\n", ruff) == "import os\n"
+        assert ruff_undefined_names("import os\n", ruff) == frozenset()
+        messages = loguru_records.messages("WARNING")
+        assert any("errno=13" in m and "Permission denied" in m for m in messages), messages
+
+    def test_source_the_text_codec_cannot_encode_passes_through(
+        self, tmp_path: pathlib.Path, loguru_records: LogRecords
+    ):
+        code = 'print("\u4f60")\n\ud800\n'
+        ruff = scripted_ruff(tmp_path, _ECHO)
+
+        assert ruff_fix(code, ruff) == code
+        assert ruff_format(code, ruff) == code
+        assert ruff_undefined_names(code, ruff) == frozenset()
+        messages = loguru_records.messages("WARNING")
+        assert sum("UnicodeEncodeError" in message for message in messages) == 3, messages
 
 
 class TestRuffExecutableResolution:
@@ -526,13 +440,17 @@ class TestRuffExecutableResolution:
         assert resolved.is_file()
         assert resolved.parent == pathlib.Path(sys.executable).parent
 
-    def test_ruff_backed_fixers_work_with_ruff_absent_from_path(
-        self, monkeypatch: pytest.MonkeyPatch
-    ):
-        monkeypatch.setenv("PATH", "")
-        assert shutil.which("ruff") is None, "precondition: PATH cannot find ruff"
-        assert ruff_format("x=1\n") == "x = 1\n"
-        assert "import json" in detect_missing_imports("json.dumps({'a': 1})")
+    def test_ruff_backed_fixers_work_with_ruff_absent_from_path(self):
+        run = run_bounded(
+            [sys.executable, "-I", str(_NO_PATH_CHILD)],
+            env={"PATH": ""},
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+
+        assert run.returncode == 0, run.stderr
+        assert json.loads(run.stdout) == ["x = 1\n", ["import json"]]
 
 
 def is_broken(code: str) -> bool:

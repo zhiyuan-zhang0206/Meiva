@@ -11,11 +11,7 @@ from psycopg.types.json import Jsonb
 from psycopg_pool import AsyncConnectionPool
 
 from agent.db import claim_inbound_batch
-from agent.ownership.hosted import (
-    admit_hosted_runtime,
-    apply_hosted_lifecycle,
-    settle_hosted_runtime,
-)
+from agent.ownership.hosted import admit_hosted_runtime, settle_hosted_runtime
 from agent.ownership.tests.ownership_support import admit_owner, agent_row, insert_lifecycle_command
 from base.agents.context import MeivaContext
 from base.config import settings
@@ -28,6 +24,7 @@ from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.packages.composer_commands import CommandCatalog
 from ops import cluster_status
 from services.agent_runner.agent_host.host import AgentHost
+from services.agent_runner.agent_host.lifecycle.shells import apply_lifecycle_command
 from services.agent_runner.agent_host.tests.host_policy import configured_machine, configured_policy
 from services.agent_runner.agent_host.tests.runtime.hosted_resources import hosted_scope
 
@@ -209,7 +206,7 @@ async def test_hosted_terminate_crash_leaves_no_half_applied_command(
         async def fail_after_commit(
             pool: AsyncConnectionPool, token: RuntimeIncarnation, **kwargs: Any
         ) -> str | None:
-            await apply_hosted_lifecycle(pool, token, **kwargs)
+            await apply_lifecycle_command(pool, token, **kwargs)
             raise RuntimeError("injected post-commit crash")
 
         await claim_inbound_batch(aops_pool, agent_id, incarnation=owner)
@@ -220,7 +217,7 @@ async def test_hosted_terminate_crash_leaves_no_half_applied_command(
                 patch.setattr(psycopg.AsyncConnection, "execute", fail_observe)
             else:
                 patch.setattr(
-                    "services.agent_runner.agent_host.invocation.apply_hosted_lifecycle",
+                    "services.agent_runner.agent_host.invocation.apply_lifecycle_command",
                     fail_after_commit,
                 )
             with pytest.raises(RuntimeError, match="injected"):

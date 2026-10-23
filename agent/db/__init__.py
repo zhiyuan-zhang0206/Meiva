@@ -4,6 +4,7 @@ import asyncio
 import json
 from dataclasses import dataclass
 from datetime import datetime
+from time import monotonic
 from typing import Any, NamedTuple, TypeVar, cast
 from weakref import WeakKeyDictionary
 
@@ -14,8 +15,6 @@ from agent.ownership.inbound import lock_inbound_owner
 from base.agents.impersonation.wake import publish_inbound_wake
 from base.agents.messages.inbound import InterruptReason
 from base.api_contracts.agent_contract import AgentStatus
-from base.clock import Timers
-from base.config import settings
 from base.db import Database
 from base.db.transaction import async_write_transaction
 from base.events.live.bus import EventBus
@@ -23,16 +22,13 @@ from base.log import logger
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.native_process.stop_timing import RESTART_INTERRUPT_GRACE_S
 
-# The slow-borrow threshold is settings.agent.db_pool_slow_acquire_warn_seconds: a
-# slow-but-served borrow is visible below the acquire timeout.
-
-
+# meiva:note
 # Claim is a hot scheduling boundary, not a general database query. Bound both
 # waiting for a client-pool slot and waiting on ownership row locks; a timeout
 # unwinds the transaction and lets the host scheduler retry
-# from the durable inbound row on a later round.
-def claim_db_acquire_timeout_s() -> float:
-    return min(5.0, settings.agent.db_pool_acquire_timeout_seconds)
+# from the durable inbound row on a later round. The bound is the pool's own acquire
+# timeout, capped here.
+CLAIM_ACQUIRE_TIMEOUT_CAP_S = 5.0
 
 
 _CT = TypeVar("_CT", bound=psycopg.AsyncConnection[Any])
@@ -57,9 +53,11 @@ class LoggingConnectionPool(AsyncConnectionPool[_CT]):
     identical to the base pool (the exception still propagates).
     """
 
-    def __init__(self, *args: Any, pool_name: str, timers: Timers, **kwargs: Any) -> None:
+    def __init__(
+        self, *args: Any, pool_name: str, slow_acquire_warn_seconds: float, **kwargs: Any
+    ) -> None:
         self._pool_name = pool_name
-        self._timers = timers
+        self._slow_acquire_warn_seconds = slow_acquire_warn_seconds
         # The borrow in flight on each task of THIS pool: `_getconn_unchecked` and
         # `_check_connection` run inside that task and add their share to its span.
         self._borrow_spans: WeakKeyDictionary[asyncio.Task[Any], _BorrowSpan] = WeakKeyDictionary()
@@ -77,28 +75,28 @@ class LoggingConnectionPool(AsyncConnectionPool[_CT]):
 
     async def _getconn_unchecked(self, timeout: float) -> _CT:
         # Includes the pool lock and client-side queue, not server-side PgBouncer wait.
-        started = self._timers.monotonic()
+        started = monotonic()
         try:
             return await super()._getconn_unchecked(timeout)
         finally:
             task = asyncio.current_task()
             span = self._borrow_spans.get(task) if task is not None else None
             if span is not None:
-                span.slot_wait_ms += (self._timers.monotonic() - started) * 1000
+                span.slot_wait_ms += (monotonic() - started) * 1000
 
     async def _check_connection(self, conn: _CT) -> None:
-        started = self._timers.monotonic()
+        started = monotonic()
         try:
             await super()._check_connection(conn)
         finally:
             task = asyncio.current_task()
             span = self._borrow_spans.get(task) if task is not None else None
             if span is not None:
-                span.check_ms += (self._timers.monotonic() - started) * 1000
+                span.check_ms += (monotonic() - started) * 1000
                 span.check_attempts += 1
 
     async def getconn(self, timeout: float | None = None) -> _CT:
-        t0 = self._timers.monotonic()
+        t0 = monotonic()
         span = _BorrowSpan()
         task = asyncio.current_task()
         assert task is not None  # noqa: S101 — async pool borrow runs in a task
@@ -114,7 +112,7 @@ class LoggingConnectionPool(AsyncConnectionPool[_CT]):
                 "— Postgres unreachable or the client pool is saturated",
                 event="db_pool_acquire_timeout",
                 name=self._pool_name,
-                elapsed=self._timers.monotonic() - t0,
+                elapsed=monotonic() - t0,
                 slot_wait_ms=span.slot_wait_ms,
                 check_ms=span.check_ms,
                 check_attempts=span.check_attempts,
@@ -123,8 +121,8 @@ class LoggingConnectionPool(AsyncConnectionPool[_CT]):
             )
             raise
         else:
-            elapsed = self._timers.monotonic() - t0
-            if elapsed >= settings.agent.db_pool_slow_acquire_warn_seconds:
+            elapsed = monotonic() - t0
+            if elapsed >= self._slow_acquire_warn_seconds:
                 stats = self._acquire_stats()
                 logger.warning(
                     "[db pool] {name} acquire took {elapsed:.1f}s "
@@ -298,7 +296,7 @@ async def claim_inbound_batch(
     lifecycle_only: bool = False,
     incarnation: RuntimeIncarnation | None,
 ) -> list[ClaimedInbound]:
-    acquire_timeout_s = claim_db_acquire_timeout_s()
+    acquire_timeout_s = min(CLAIM_ACQUIRE_TIMEOUT_CAP_S, pool.timeout)
     async with (
         async_write_transaction(pool, timeout=acquire_timeout_s) as conn,
         conn.cursor() as cur,

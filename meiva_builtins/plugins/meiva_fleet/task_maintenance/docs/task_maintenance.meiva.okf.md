@@ -12,4 +12,4 @@ A gateway-side daemon registered by the `meiva_fleet` plugin into the ops servic
 
 ## Sub-concepts
 
-- [[task-maintenance.meiva.okf.md|Task Maintenance]]
+- [[task-maintenance/task-maintenance.meiva.okf.md|Task Maintenance]]

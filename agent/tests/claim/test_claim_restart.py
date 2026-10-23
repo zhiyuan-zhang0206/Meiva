@@ -2,7 +2,6 @@
 
 from collections.abc import Callable
 from typing import cast
-from unittest.mock import MagicMock
 
 import psycopg
 import pytest
@@ -17,6 +16,7 @@ from agent.graph.claim.tests.claim_support import (
     thread_config,
 )
 from agent.graph.claim.tests.cursor_fixture import fresh_snapshot_cursor as fresh_snapshot_cursor
+from agent.graph.node_log.tests.live_events import LiveEvents
 from agent.state import AgentState
 from agent.tests.claim.claim_status_support import (
     committed_publishes,
@@ -266,6 +266,7 @@ async def test_claim_restart_kind_does_not_publish_committed(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     monkeypatch: pytest.MonkeyPatch,
+    live_events: LiveEvents,
     *,
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
@@ -276,12 +277,13 @@ async def test_claim_restart_kind_does_not_publish_committed(
     set_agent_status(db_conn, tid, "running")
     insert_inbound_kind(db_conn, tid, "", "restart", source="user")
 
-    pub = MagicMock()
     await claim_node(
         AgentState(messages=[SystemMessage(content="sys")]),
-        make_runtime(ops_pool=aops_pool, event_publisher=pub, database_gate=database_gate),
+        make_runtime(
+            ops_pool=aops_pool, event_publisher=live_events.publisher, database_gate=database_gate
+        ),
         thread_config(
             tid,
         ),
     )
-    assert committed_publishes(pub) == []
+    assert await committed_publishes(live_events) == []

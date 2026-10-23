@@ -1,2 +1,6 @@
 [uses]
-"tests" = ["__init__.py"]
+"__init__.py" = ["permission_notice.py"]
+"tests" = ["__init__.py", "permission_notice.py"]
+
+[purity]
+"permission_notice.py" = "strict"

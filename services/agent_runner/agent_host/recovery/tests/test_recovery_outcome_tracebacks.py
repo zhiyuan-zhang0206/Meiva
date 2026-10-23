@@ -54,6 +54,7 @@ async def _reject(
         _permanent_rejection(),
         _context(pool, database_gate=database_gate),
         agent_id=agent_id,
+        circuit=None,
         occurred_at=datetime(2026, 9, 16, 6, 0, tzinfo=UTC),
     )
 

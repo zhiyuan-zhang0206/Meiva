@@ -10,31 +10,28 @@ Timestamp is supplied by the composition caller; tests pass fixed rendered text.
 
 from __future__ import annotations
 
-from pathlib import Path
+from dataclasses import replace
+from datetime import datetime, timedelta
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import pytest
 
-from agent.graph.exec.output import format_elapsed, wrap_code_output
-from agent.graph.exec.tests.output_inputs import CropConfig
+from agent.graph.exec.node import dispatch_exec_result
+from agent.graph.exec.output import OutputLimits, format_elapsed, wrap_code_output
+from agent.graph.exec.tests.event_capture import idle_publisher
 from base.agents.messages.inbound import InterruptReason
-from base.clock import SYSTEM_TIMERS, Clock
-from base.config import settings
-from meiva.tests.fixtures.pin_agent import pin_agent
 
 _TIMESTAMP = "[2026-05-06 14:32:05]"
 _TS = _TIMESTAMP  # shorthand
 
 
-def test_wrap_code_output_structured(crop_config: CropConfig, output_clock: Clock):
+def test_wrap_code_output_structured(limits: OutputLimits, output_now: datetime):
     """code_output envelope contains output, **does not** contain exit code."""
     out = wrap_code_output(
         "hello\nwarn\n",
-        agent_id=7,
-        crop_config=crop_config,
-        clock=output_clock,
-        timeout_seconds=60,
-        max_chars=30_000,
+        limits=limits,
+        now=output_now,
         timestamp=_TS,
         elapsed_seconds=1.0,
     ).text
@@ -44,16 +41,13 @@ def test_wrap_code_output_structured(crop_config: CropConfig, output_clock: Cloc
     assert "[exit" not in out
 
 
-def test_wrap_code_output_cancelled_marker(crop_config: CropConfig, output_clock: Clock):
+def test_wrap_code_output_cancelled_marker(limits: OutputLimits, output_now: datetime):
     """When cancelled, carries [cancelled by user] marker."""
     out = wrap_code_output(
         "part\n",
-        agent_id=7,
         cancelled=True,
-        crop_config=crop_config,
-        clock=output_clock,
-        timeout_seconds=60,
-        max_chars=30_000,
+        limits=limits,
+        now=output_now,
         timestamp=_TS,
         elapsed_seconds=1.0,
     ).text
@@ -71,17 +65,14 @@ def test_wrap_code_output_cancelled_marker(crop_config: CropConfig, output_clock
     ],
 )
 def test_wrap_code_output_names_what_ended_the_run(
-    crop_config: CropConfig, output_clock: Clock, reason: InterruptReason, marker: str
+    limits: OutputLimits, output_now: datetime, reason: InterruptReason, marker: str
 ):
     out = wrap_code_output(
         "part\n",
-        agent_id=7,
         cancelled=True,
         cancel_reason=reason,
-        crop_config=crop_config,
-        clock=output_clock,
-        timeout_seconds=60,
-        max_chars=30_000,
+        limits=limits,
+        now=output_now,
         timestamp=_TS,
         elapsed_seconds=1.0,
     ).text
@@ -92,16 +83,13 @@ def test_wrap_code_output_names_what_ended_the_run(
 
 
 def test_wrap_code_output_appends_trailing_newline_when_missing(
-    crop_config: CropConfig, output_clock: Clock
+    limits: OutputLimits, output_now: datetime
 ):
     """When output lacks trailing \\n, envelope still normalizes to single line — nothing to join afterwards, mainly for more stable frontend rendering."""
     out = wrap_code_output(
         "partial output",
-        agent_id=7,
-        crop_config=crop_config,
-        clock=output_clock,
-        timeout_seconds=60,
-        max_chars=30_000,
+        limits=limits,
+        now=output_now,
         timestamp=_TS,
         elapsed_seconds=1.0,
     ).text
@@ -109,32 +97,24 @@ def test_wrap_code_output_appends_trailing_newline_when_missing(
     assert _TS in out
 
 
-def test_wrap_code_output_no_stderr_marker_in_envelope(
-    crop_config: CropConfig, output_clock: Clock
-):
+def test_wrap_code_output_no_stderr_marker_in_envelope(limits: OutputLimits, output_now: datetime):
     """stdout/stderr already merged, envelope should not have '--- stderr ---' separator marker — keeping it directly contradicts 'merged stream' design."""
     out = wrap_code_output(
         "hello\nTraceback (most recent call last):\n  ...\n",
-        agent_id=7,
-        crop_config=crop_config,
-        clock=output_clock,
-        timeout_seconds=60,
-        max_chars=30_000,
+        limits=limits,
+        now=output_now,
         timestamp=_TS,
         elapsed_seconds=1.0,
     ).text
     assert "--- stderr ---" not in out
 
 
-def test_wrap_code_output_no_output_marker_when_empty(crop_config: CropConfig, output_clock: Clock):
+def test_wrap_code_output_no_output_marker_when_empty(limits: OutputLimits, output_now: datetime):
     """When output is empty, show '(no output)' — explicitly tell agent code ran but produced no output (avoid empty envelope making LLM mistakenly think exec failed/didn't run)."""
     out = wrap_code_output(
         "",
-        agent_id=7,
-        crop_config=crop_config,
-        clock=output_clock,
-        timeout_seconds=60,
-        max_chars=30_000,
+        limits=limits,
+        now=output_now,
         timestamp=_TS,
         elapsed_seconds=1.0,
     ).text
@@ -144,16 +124,13 @@ def test_wrap_code_output_no_output_marker_when_empty(crop_config: CropConfig, o
 
 
 def test_wrap_code_output_no_output_marker_omitted_when_output_present(
-    crop_config: CropConfig, output_clock: Clock
+    limits: OutputLimits, output_now: datetime
 ):
     """When output present, don't add '(no output)' marker — marker is only fallback for empty envelope."""
     out = wrap_code_output(
         "real output\n",
-        agent_id=7,
-        crop_config=crop_config,
-        clock=output_clock,
-        timeout_seconds=60,
-        max_chars=30_000,
+        limits=limits,
+        now=output_now,
         timestamp=_TS,
         elapsed_seconds=1.0,
     ).text
@@ -161,17 +138,14 @@ def test_wrap_code_output_no_output_marker_omitted_when_output_present(
 
 
 def test_wrap_code_output_no_output_marker_with_cancelled(
-    crop_config: CropConfig, output_clock: Clock
+    limits: OutputLimits, output_now: datetime
 ):
     """Under cancel path, even if output empty, add '(no output)' marker — agent sees [cancelled by user] + (no output) knows it was interrupted and produced nothing."""
     out = wrap_code_output(
         "",
-        agent_id=7,
         cancelled=True,
-        crop_config=crop_config,
-        clock=output_clock,
-        timeout_seconds=60,
-        max_chars=30_000,
+        limits=limits,
+        now=output_now,
         timestamp=_TS,
         elapsed_seconds=1.0,
     ).text
@@ -181,16 +155,13 @@ def test_wrap_code_output_no_output_marker_with_cancelled(
 
 
 def test_wrap_code_output_header_body_double_newline_split(
-    crop_config: CropConfig, output_clock: Clock
+    limits: OutputLimits, output_now: datetime
 ):
     """Between header and body use \\n\\n separator (same contract as wrap_inbound, frontend splitEnvelope splits header/body by this)."""
     out = wrap_code_output(
         "body line\n",
-        agent_id=7,
-        crop_config=crop_config,
-        clock=output_clock,
-        timeout_seconds=60,
-        max_chars=30_000,
+        limits=limits,
+        now=output_now,
         timestamp=_TS,
         elapsed_seconds=1.0,
     ).text
@@ -199,26 +170,19 @@ def test_wrap_code_output_header_body_double_newline_split(
 
 
 def test_wrap_code_output_truncates_keeps_both_ends_and_writes_file(
-    unit_home: Path,
-    crop_config: CropConfig,
-    output_clock: Clock,
+    limits: OutputLimits,
+    output_now: datetime,
 ):
     """Exceeds exec_output_max_chars → keep head + tail, cut middle, full output written to tmp file and path reported.
     Head carries help() overview / overview, tail carries error / result, both ends must survive."""
-    pin_agent(7)
-    overflow = unit_home / "workspaces" / "7" / ".exec_output"
-
     limit = 1000
     head_marker = "HEAD_START"
     tail_marker = "TAIL_END"
     big = head_marker + ("X" * 5000) + ("M" * (limit * 3)) + ("Y" * 5000) + tail_marker
     out = wrap_code_output(
         big,
-        agent_id=7,
-        max_chars=limit,
-        crop_config=crop_config,
-        clock=output_clock,
-        timeout_seconds=60,
+        limits=replace(limits, max_chars=limit),
+        now=output_now,
         timestamp=_TS,
         elapsed_seconds=1.0,
     ).text
@@ -231,48 +195,38 @@ def test_wrap_code_output_truncates_keeps_both_ends_and_writes_file(
     )
 
     # path is reported, and the file holds the complete output
-    files = list(overflow.glob("exec_*.txt"))
+    files = list(limits.archive_dir.glob("exec_*.txt"))
     assert len(files) == 1
     assert str(files[0]) in out, "complete output path must be reported to agent"
     assert files[0].read_text(encoding="utf-8") == big
 
 
 def test_wrap_code_output_overflow_files_pruned_to_keep_limit(
-    unit_home: Path,
-    crop_config: CropConfig,
-    output_clock: Clock,
+    limits: OutputLimits,
+    output_now: datetime,
 ):
     """Same agent repeatedly overflows keeps only recent N, prevents workspace infinite pile-up."""
-    pin_agent(7)
-    overflow = unit_home / "workspaces" / "7" / ".exec_output"
-
-    for _ in range(22):
+    for second in range(22):
         wrap_code_output(
             "Z" * 2000,
-            agent_id=7,
-            max_chars=100,
-            crop_config=crop_config,
-            clock=output_clock,
-            timeout_seconds=60,
+            limits=replace(limits, max_chars=100),
+            now=output_now + timedelta(seconds=second),
             timestamp=_TS,
             elapsed_seconds=1.0,
         )
-    files = list(overflow.glob("exec_*.txt"))
+    files = list(limits.archive_dir.glob("exec_*.txt"))
     assert len(files) == 20, "only keep the most recent 20 overflow archives"
 
 
 def test_wrap_code_output_no_truncation_when_under_limit(
-    crop_config: CropConfig, output_clock: Clock
+    limits: OutputLimits, output_now: datetime
 ):
     """≤ exec_output_max_chars returns directly unchanged, no marker added."""
     just_under = "y" * (30_000 - 100)
     out = wrap_code_output(
         just_under,
-        agent_id=7,
-        crop_config=crop_config,
-        clock=output_clock,
-        timeout_seconds=60,
-        max_chars=30_000,
+        limits=limits,
+        now=output_now,
         timestamp=_TS,
         elapsed_seconds=1.0,
     ).text
@@ -280,16 +234,13 @@ def test_wrap_code_output_no_truncation_when_under_limit(
     assert just_under in out
 
 
-def test_wrap_code_output_timed_out_marker(crop_config: CropConfig, output_clock: Clock):
+def test_wrap_code_output_timed_out_marker(limits: OutputLimits, output_now: datetime):
     """When timed out, carries [timeout after Ns] marker (N from settings.sandbox.exec_timeout_seconds), no cancel marker."""
     out = wrap_code_output(
         "part\n",
-        agent_id=7,
         timed_out=True,
-        timeout_seconds=60,
-        crop_config=crop_config,
-        clock=output_clock,
-        max_chars=30_000,
+        limits=limits,
+        now=output_now,
         timestamp=_TS,
         elapsed_seconds=1.0,
     ).text
@@ -299,17 +250,14 @@ def test_wrap_code_output_timed_out_marker(crop_config: CropConfig, output_clock
 
 
 def test_wrap_code_output_timed_out_carries_strategy_hint(
-    crop_config: CropConfig, output_clock: Clock
+    limits: OutputLimits, output_now: datetime
 ):
     """timeout envelope is agent's only clue to change strategy — hint must name long-task primitive; non-timeout path no hint."""
     out = wrap_code_output(
         "part\n",
-        agent_id=7,
         timed_out=True,
-        timeout_seconds=60,
-        crop_config=crop_config,
-        clock=output_clock,
-        max_chars=30_000,
+        limits=limits,
+        now=output_now,
         timestamp=_TS,
         elapsed_seconds=1.0,
     ).text
@@ -319,11 +267,8 @@ def test_wrap_code_output_timed_out_carries_strategy_hint(
         "run_background"
         not in wrap_code_output(
             "part\n",
-            agent_id=7,
-            crop_config=crop_config,
-            clock=output_clock,
-            timeout_seconds=60,
-            max_chars=30_000,
+            limits=limits,
+            now=output_now,
             timestamp=_TS,
             elapsed_seconds=1.0,
         ).text
@@ -332,28 +277,22 @@ def test_wrap_code_output_timed_out_carries_strategy_hint(
         "run_background"
         not in wrap_code_output(
             "part\n",
-            agent_id=7,
             cancelled=True,
-            crop_config=crop_config,
-            clock=output_clock,
-            timeout_seconds=60,
-            max_chars=30_000,
+            limits=limits,
+            now=output_now,
             timestamp=_TS,
             elapsed_seconds=1.0,
         ).text
     )
 
 
-def test_wrap_code_output_timed_out_empty(crop_config: CropConfig, output_clock: Clock):
+def test_wrap_code_output_timed_out_empty(limits: OutputLimits, output_now: datetime):
     """Under timeout path, even output empty, adds '(no output)' marker, hint still present."""
     out = wrap_code_output(
         "",
-        agent_id=7,
         timed_out=True,
-        timeout_seconds=60,
-        crop_config=crop_config,
-        clock=output_clock,
-        max_chars=30_000,
+        limits=limits,
+        now=output_now,
         timestamp=_TS,
         elapsed_seconds=1.0,
     ).text
@@ -364,19 +303,16 @@ def test_wrap_code_output_timed_out_empty(crop_config: CropConfig, output_clock:
 
 
 def test_wrap_code_output_cancelled_wins_over_timed_out_marker(
-    crop_config: CropConfig, output_clock: Clock
+    limits: OutputLimits, output_now: datetime
 ):
     """When both cancel and timed_out True, cancel marker shows (priority).
     However wrap_code_output only receives one bool — caller (exec_node) guarantees mutual exclusion.
     Here verify when cancelled=True, no timeout marker appears."""
     out = wrap_code_output(
         "data\n",
-        agent_id=7,
         cancelled=True,
-        timeout_seconds=60,
-        crop_config=crop_config,
-        clock=output_clock,
-        max_chars=30_000,
+        limits=limits,
+        now=output_now,
         timestamp=_TS,
         elapsed_seconds=1.0,
     ).text
@@ -384,41 +320,30 @@ def test_wrap_code_output_cancelled_wins_over_timed_out_marker(
     assert "[timeout after 60s]" not in out
 
 
-def test_wrap_code_output_no_timestamp_when_disabled(
-    monkeypatch: pytest.MonkeyPatch, crop_config: CropConfig, output_clock: Clock
-):
+def test_wrap_code_output_no_timestamp_when_disabled(limits: OutputLimits, output_now: datetime):
     """settings.general.message_timestamps=False → header drops the timestamp and the
     space before the colon, keeping any marker intact."""
     assert wrap_code_output(
         "hello\n",
-        agent_id=7,
-        crop_config=crop_config,
-        clock=output_clock,
-        timeout_seconds=60,
-        max_chars=30_000,
+        limits=limits,
+        now=output_now,
         elapsed_seconds=1.0,
     ).text.startswith("Code execution output after running for 1.0s:\n\n")
     assert (
         _TS
         not in wrap_code_output(
             "hello\n",
-            agent_id=7,
-            crop_config=crop_config,
-            clock=output_clock,
-            timeout_seconds=60,
-            max_chars=30_000,
+            limits=limits,
+            now=output_now,
             elapsed_seconds=1.0,
         ).text
     )
     # marker survives, still no timestamp / stray space
     out = wrap_code_output(
         "part\n",
-        agent_id=7,
         cancelled=True,
-        crop_config=crop_config,
-        clock=output_clock,
-        timeout_seconds=60,
-        max_chars=30_000,
+        limits=limits,
+        now=output_now,
         elapsed_seconds=1.0,
     ).text
     assert "Code execution output after running for 1.0s [cancelled by user]:\n\n" in out
@@ -434,29 +359,31 @@ def _boot_crash(exc: Exception, code_reached: bool | None) -> object:
     return ExecCrashed(output="", exc=exc, full_traceback=None, code_reached=code_reached)
 
 
-def _dispatch(result: object, monkeypatch: pytest.MonkeyPatch) -> tuple[bool, str]:
-    from agent.graph.exec.node import dispatch_exec_result
-
-    del monkeypatch
-    halted, envelope, _ = dispatch_exec_result(
+def _dispatch(
+    result: object, limits: OutputLimits, now: datetime, agent_id: int = 7
+) -> tuple[bool, str]:
+    plan, envelope = dispatch_exec_result(
         result,  # type: ignore[arg-type]
-        None,  # type: ignore[arg-type]
-        7,
-        referenced_messages=(),
+        idle_publisher(),
+        agent_id,
         elapsed_seconds=1.0,
-        read_sandbox=lambda field: getattr(settings.sandbox, field),
-        clock=Clock.from_settings(),
+        timestamp=None,
+        referenced_messages=(),
+        limits=limits,
+        now=now,
     )
-    return halted, envelope.text
+    return plan.halted, envelope.text
 
 
-def test_dispatch_boot_crash_reports_not_executed(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_dispatch_boot_crash_reports_not_executed(
+    limits: OutputLimits, output_now: datetime
+) -> None:
     """The outage shape: child crashed on bootstrap fetch, stdout empty. The
     agent must read "code was NOT executed", never "(no output)"."""
     from agent.graph.exec._result import ExecChildError
 
     exc = ExecChildError("BootstrapFetchError", "could not fetch cluster config", "tb")
-    halted, text = _dispatch(_boot_crash(exc, False), monkeypatch)
+    halted, text = _dispatch(_boot_crash(exc, False), limits, output_now)
     assert halted is False
     assert "Code execution output" in text
     assert "the code was NOT executed" in text
@@ -464,34 +391,9 @@ def test_dispatch_boot_crash_reports_not_executed(monkeypatch: pytest.MonkeyPatc
     assert "(no output)" not in text
 
 
-def test_dispatch_crash_with_unknown_code_reached_stays_honest(
-    monkeypatch: pytest.MonkeyPatch,
+def test_dispatch_crash_with_output_keeps_the_output(
+    limits: OutputLimits, output_now: datetime
 ) -> None:
-    """Older child / missing envelope: say execution status is unknown."""
-    from agent.graph.exec._result import ExecChildError
-
-    exc = ExecChildError("exec_subprocess_aborted", "child exited without a result envelope", None)
-    halted, text = _dispatch(_boot_crash(exc, None), monkeypatch)
-    assert halted is False
-    assert "whether the code executed is unknown" in text
-    assert "(no output)" not in text
-
-
-def test_dispatch_crash_after_code_ran_but_printed_nothing(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Code phase reached: missing output does not prove completion or no effects."""
-    from agent.graph.exec._result import ExecChildError
-
-    exc = ExecChildError("OSError", "result envelope write failed", None)
-    halted, text = _dispatch(_boot_crash(exc, True), monkeypatch)
-    assert halted is False
-    assert "your code may have had effects, but no output was recovered" in text
-    assert "inspect state before retrying" in text
-    assert "(no output)" not in text
-
-
-def test_dispatch_crash_with_output_keeps_the_output(monkeypatch: pytest.MonkeyPatch) -> None:
     """A crash WITH stdout keeps the agent-facing traceback — no marker added."""
     from agent.graph.exec._result import ExecChildError, ExecCrashed
 
@@ -500,30 +402,21 @@ def test_dispatch_crash_with_output_keeps_the_output(monkeypatch: pytest.MonkeyP
         exc=ExecChildError("ValueError", "boom", None),
         code_reached=True,
     )
-    halted, text = _dispatch(result, monkeypatch)
+    halted, text = _dispatch(result, limits, output_now)
     assert halted is False
     assert "Traceback (most recent call last)" in text
     assert "(no output)" not in text
 
 
 def test_dispatch_boot_crash_emits_the_boot_failed_event(
-    loguru_records: list[dict[str, Any]],
+    loguru_records: list[dict[str, Any]], limits: OutputLimits, output_now: datetime
 ) -> None:
     """P2 #2102: a boot-phase failure (code_reached=False) emits the WARNING
     exec_child_boot_failed event the alert rule reads; the unknown case does not."""
     from agent.graph.exec._result import ExecChildError
-    from agent.graph.exec.node import dispatch_exec_result
 
     boot_exc = ExecChildError("BootstrapFetchError", "down", None)
-    dispatch_exec_result(
-        _boot_crash(boot_exc, False),  # type: ignore[arg-type]
-        None,  # type: ignore[arg-type]
-        42,
-        referenced_messages=(),
-        elapsed_seconds=1.0,
-        read_sandbox=lambda field: getattr(settings.sandbox, field),
-        clock=Clock.from_settings(),
-    )
+    _dispatch(_boot_crash(boot_exc, False), limits, output_now, agent_id=42)
     boot = [r for r in loguru_records if r["extra"].get("event") == "exec_child_boot_failed"]
     assert len(boot) == 1
     assert boot[0]["level"].name == "WARNING"
@@ -533,80 +426,25 @@ def test_dispatch_boot_crash_emits_the_boot_failed_event(
 
     loguru_records.clear()
     unknown_exc = ExecChildError("exec_subprocess_aborted", "gone", None)
-    dispatch_exec_result(
-        _boot_crash(unknown_exc, None),  # type: ignore[arg-type]
-        None,  # type: ignore[arg-type]
-        42,
-        referenced_messages=(),
-        elapsed_seconds=1.0,
-        read_sandbox=lambda field: getattr(settings.sandbox, field),
-        clock=Clock.from_settings(),
-    )
+    _dispatch(_boot_crash(unknown_exc, None), limits, output_now, agent_id=42)
     assert not [r for r in loguru_records if r["extra"].get("event") == "exec_child_boot_failed"]
 
 
-def test_crashed_no_output_body_forms() -> None:
-    from agent.graph.exec._result import ExecChildError
-    from agent.graph.exec.output import crashed_no_output_body
-
-    body = crashed_no_output_body(ExecChildError("X", "y", None), code_reached=False)
-    assert "NOT executed" in body
-    assert "X: y" in body
-    body2 = crashed_no_output_body(ValueError("plain"), code_reached=None)
-    assert "ValueError: plain" in body2
-
-
-def test_overflow_archive_uses_explicit_host_identity(
-    unit_home: Path, crop_config: CropConfig, output_clock: Clock
+def test_archive_stamp_is_the_callers_instant_in_the_callers_zone(
+    limits: OutputLimits,
 ) -> None:
-    """The native output path belongs to the host argument, not the child SDK slot."""
-    pin_agent(999)
-    body = "archive " * 100
-    wrapped = wrap_code_output(
-        body,
-        max_chars=100,
-        agent_id=11,
-        crop_config=crop_config,
-        clock=output_clock,
-        timeout_seconds=60,
-        timestamp=_TS,
-        elapsed_seconds=1.0,
-    ).text
-    directory = unit_home / "workspaces" / "11" / ".exec_output"
-    files = list(directory.glob("exec_*.txt"))
-    assert len(files) == 1
-    assert files[0].read_text() == body
-    assert str(files[0]) in wrapped
-    assert not (unit_home / "workspaces" / "999").exists()
-
-
-def test_archive_clock_and_rendered_timestamp_are_explicit(
-    unit_home: Path, crop_config: CropConfig
-) -> None:
-    """Archive timezone and envelope text come from caller inputs, not host settings."""
-    from datetime import UTC, datetime
-
-    from base.clock import ClockConfig
-
-    now = datetime(2026, 10, 9, 1, 2, 3, 456789, tzinfo=UTC)
-    clock = Clock(
-        ClockConfig("Asia/Shanghai", "Asia/Shanghai", False), now=lambda: now, timers=SYSTEM_TIMERS
-    )
+    now = datetime(2026, 10, 9, 9, 2, 3, 456789, tzinfo=ZoneInfo("Asia/Shanghai"))
     wrapped = wrap_code_output(
         "x" * 200,
-        agent_id=13,
-        crop_config=crop_config,
-        clock=clock,
-        timeout_seconds=17,
-        max_chars=100,
+        limits=replace(limits, max_chars=100),
+        now=now,
         timestamp="[caller supplied timestamp]",
         elapsed_seconds=1.0,
     ).text
     assert wrapped.startswith(
         "Code execution output after running for 1.0s [caller supplied timestamp]:\n\n"
     )
-    # The runtime owns workspace layout; inspect the path announced in the body.
-    files = list(unit_home.rglob("exec_20261009_090203_456789.txt"))
+    files = list(limits.archive_dir.glob("exec_20261009_090203_456789.txt"))
     assert len(files) == 1
     assert str(files[0]) in wrapped
     assert files[0].read_text() == "x" * 200
@@ -645,16 +483,13 @@ def test_format_elapsed(seconds: float, text: str):
     ],
 )
 def test_header_carries_elapsed_in_every_ending(
-    kwargs: dict[str, object], header: str, crop_config: CropConfig, output_clock: Clock
+    kwargs: dict[str, object], header: str, limits: OutputLimits, output_now: datetime
 ):
     params: dict[str, object] = {"timestamp": "[ts]", **kwargs}
     out = wrap_code_output(
         "x\n",
-        agent_id=7,
-        crop_config=crop_config,
-        clock=output_clock,
-        timeout_seconds=60,
-        max_chars=30_000,
+        limits=limits,
+        now=output_now,
         elapsed_seconds=113.0,
         **params,  # type: ignore[arg-type]
     ).text
@@ -670,15 +505,10 @@ def test_header_carries_elapsed_in_every_ending(
         ("crashed", "failed", False),
     ],
 )
-def test_dispatch_reports_status_and_body_start(kind: str, status: str, halted: bool) -> None:
+def test_dispatch_reports_status_and_body_start(
+    kind: str, status: str, halted: bool, limits: OutputLimits, output_now: datetime
+) -> None:
     from agent.graph.exec._result import ExecCancelled, ExecCrashed, ExecDone, ExecTimedOut
-    from agent.graph.exec.node import dispatch_exec_result
-
-    class _Events:
-        def emit(self, _event: str) -> None: ...
-
-    class _Ctx:
-        event_publisher = _Events()
 
     results: dict[str, object] = {
         "done": ExecDone(output="o\n"),
@@ -686,14 +516,16 @@ def test_dispatch_reports_status_and_body_start(kind: str, status: str, halted: 
         "cancelled": ExecCancelled(output="o\n"),
         "crashed": ExecCrashed(output="o\n", exc=ValueError("x"), full_traceback=None),
     }
-    got_halted, envelope, got_status = dispatch_exec_result(
+    plan, envelope = dispatch_exec_result(
         results[kind],  # type: ignore[arg-type]
-        _Ctx(),  # type: ignore[arg-type]
+        idle_publisher(),
         7,
         elapsed_seconds=113.0,
-        read_sandbox=lambda field: getattr(settings.sandbox, field),
-        clock=Clock.from_settings(),
+        timestamp=None,
+        referenced_messages=(),
+        limits=limits,
+        now=output_now,
     )
-    assert (got_halted, got_status.value) == (halted, status)
+    assert (plan.halted, plan.status.value) == (halted, status)
     assert envelope.text[envelope.body_start :].startswith("o\n")
     assert envelope.text.startswith("Code execution output after running for 1min 53s")

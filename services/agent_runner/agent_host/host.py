@@ -29,16 +29,12 @@ from agent.impersonation import (
     active_lease,
     handoff_owed,
     native_status,
+    process_host,
     settle_checkpoint,
     supervise_relay,
 )
 from agent.impersonation_handoff import flush_checkpoint
-from agent.ownership.corpse_reap import reap_crash_corpses
-from agent.ownership.hosted import (
-    admit_hosted_runtime,
-    apply_hosted_lifecycle,
-    settle_hosted_runtime,
-)
+from agent.ownership.hosted import admit_hosted_runtime, settle_hosted_runtime
 from agent.startup import consume_claimed_inbounds
 from agent.state import BaseAgentState
 from agent.turn.runloop import (
@@ -81,7 +77,10 @@ from services.agent_runner.agent_host.invocation import (
 )
 from services.agent_runner.agent_host.invocation.checkpoints import TurnCheckpoints
 from services.agent_runner.agent_host.invocation.driver import drive_context
-from services.agent_runner.agent_host.lifecycle.shells import kill_terminating_agent_shells
+from services.agent_runner.agent_host.lifecycle.shells import (
+    apply_lifecycle_command,
+    reap_and_announce_corpses,
+)
 from services.agent_runner.agent_host.lifecycle.shutdown import close_host_resources
 from services.agent_runner.agent_host.runtime import (
     AgentRuntime,
@@ -392,7 +391,7 @@ class AgentHost:
                 activate_accepted=False,
                 incarnation=incarnation,
                 notes=self._policy.handoff_notes,
-                read_local_machine=lambda: self._machine,
+                host=process_host(self._machine),
             )
         batch = await claim_inbound_batch(
             self._control_pool,
@@ -405,12 +404,8 @@ class AgentHost:
         # meiva:note
         # No graph ran here, so nothing says whether the agent's last turn was finished;
         # a restart applied under a lease never queues a continuation.
-        kind = await apply_hosted_lifecycle(
-            self._control_pool,
-            incarnation,
-            bus=self._bus,
-            resume_turn=False,
-            kill_shell_sessions=kill_terminating_agent_shells,
+        kind = await apply_lifecycle_command(
+            self._control_pool, incarnation, bus=self._bus, resume_turn=False
         )
         if kind is None:
             await settle_hosted_runtime(
@@ -637,10 +632,13 @@ class AgentHost:
                         PendingWorkResult(prepared),
                         InvocationHooks(
                             HandoffSettlement(
-                                self._db, self._bus, self.relays, self._policy.handoff_notes
+                                self._db,
+                                self._bus,
+                                self.relays,
+                                self._policy.handoff_notes,
+                                self._machine,
                             ),
                             self.drop_agent,
-                            kill_terminating_agent_shells,
                             self._wake_resumed,
                         ),
                     )
@@ -678,7 +676,7 @@ class AgentHost:
             agent_id,
             fresh_input=fresh_input,
             settlement=HandoffSettlement(
-                self._db, self._bus, self.relays, self._policy.handoff_notes
+                self._db, self._bus, self.relays, self._policy.handoff_notes, self._machine
             ),
         )
         return await self._invoke_native_graph(
@@ -716,11 +714,7 @@ class AgentHost:
     # Terminate this machine's crash corpses whose grace window has elapsed.
     async def reap_corpses(self) -> None:
         try:
-            await reap_crash_corpses(
-                self._control_pool,
-                self._machine,
-                bus=self._bus,
-            )
+            await reap_and_announce_corpses(self._control_pool, self._machine, bus=self._bus)
         except (psycopg.OperationalError, PoolTimeout):
             # meiva:note
             # The beat counts a database that stays unreachable and exits the host.

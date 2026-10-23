@@ -1,10 +1,16 @@
+import json
+import os
+import sys
 from collections.abc import Callable
 from pathlib import Path
 from types import ModuleType
 
 import pytest
 
+from base.host.proc import run_bounded
 from meiva_builtins.plugins.meiva_memory.template import validate
+
+_CAP_CHILD = Path(__file__).with_name("child_note_cap.py")
 
 
 def _validator() -> ModuleType:
@@ -349,15 +355,19 @@ def test_validate_note_applies_the_character_cap(tmp_path: Path) -> None:
     assert validator.validate_note(exact) == []
 
 
-def test_validate_note_cap_follows_the_hook_variable(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    validator = _validator()
-    monkeypatch.setenv("MEIVA_MEMORY_NOTE_CAP", "50")
-    assert validator.note_char_cap() == 50
-    assert validator.validate_note(_note(tmp_path, _GOOD)) == [
-        f"Note is {len(_GOOD)} characters, over the 50 cap"
-    ]
+def test_validate_note_cap_follows_the_hook_variable(tmp_path: Path) -> None:
+    note = _note(tmp_path, _GOOD)
+
+    run = run_bounded(
+        [sys.executable, "-I", str(_CAP_CHILD), str(note)],
+        env={"PATH": os.defpath, "MEIVA_MEMORY_NOTE_CAP": "50"},
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+
+    assert run.returncode == 0, run.stderr
+    assert json.loads(run.stdout) == [50, [f"Note is {len(_GOOD)} characters, over the 50 cap"]]
 
 
 def test_validate_note_leaves_reserved_and_unreadable_files_to_validate_file(

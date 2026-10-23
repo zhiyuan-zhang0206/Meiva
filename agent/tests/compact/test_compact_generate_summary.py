@@ -4,7 +4,6 @@ Split from `agent/tests/test_compact.py`, which holds the shared helpers and the
 """
 
 from typing import Any
-from unittest.mock import MagicMock
 
 import pytest
 from langchain_core.messages import (
@@ -14,95 +13,70 @@ from langchain_core.messages import (
     SystemMessage,
     ToolMessage,
 )
+from psycopg_pool import AsyncConnectionPool
 
 from agent.graph.hooks.compact import (
     COMPACTION_INSTRUCTION,
     generate_summary,
 )
 from agent.llm import execute_code
-from agent.tests.test_compact import (
-    compaction_ainvoke,
-    make_fake_llm,
-    pinned_slices,
-    read_agent_field,
-)
-from base.config import settings
-from base.lm import usage as usage_mod
+from agent.tests.test_compact import make_fake_llm, pinned_slices
+from base.agents.history.closing_request import METADATA_KEY as CLOSING_METADATA_KEY
+from base.agents.history.closing_request import ClosingRequest
 from base.lm.catalog import ModelCatalog
 from base.packages.plugin_providers import build_model_catalog
 
 
+async def _checkpoint(pool: AsyncConnectionPool, checkpoint_id: str) -> None:
+    async with pool.connection() as conn:
+        await conn.execute(
+            "INSERT INTO checkpoints (thread_id, checkpoint_ns, checkpoint_id, type, checkpoint,"
+            " metadata) VALUES ('1', '', %s, 'x', '{}'::jsonb, '{}'::jsonb)",
+            (checkpoint_id,),
+        )
+
+
+async def _metadata(pool: AsyncConnectionPool, checkpoint_id: str) -> dict[str, Any]:
+    async with pool.connection() as conn:
+        row = await (
+            await conn.execute(
+                "SELECT metadata FROM checkpoints WHERE thread_id='1' AND checkpoint_id=%s",
+                (checkpoint_id,),
+            )
+        ).fetchone()
+    assert row is not None
+    return row[0]
+
+
 async def test_stamp_compact_boundary_writes_the_closing_request(
-    monkeypatch: pytest.MonkeyPatch,
+    aops_pool: AsyncConnectionPool,
 ) -> None:
     from agent.graph.hooks import compact
-    from base.agents.history.closing_request import ClosingRequest
 
-    seen: list[ClosingRequest | None] = []
-
-    async def fake_mark(_pool: Any, _thread: str, *, closing: ClosingRequest | None = None) -> str:
-        seen.append(closing)
-        return "boundary"
-
-    async def no_wait(*_args: Any, **_kwargs: Any) -> None:
-        return None
-
-    monkeypatch.setattr(compact, "mark_compact_boundary", fake_mark)
-    monkeypatch.setattr(compact, "await_snapshot", no_wait)
     closing = ClosingRequest(100, 5, "m1")
+    await _checkpoint(aops_pool, "cp-1")
     await compact.stamp_compact_boundary(
-        MagicMock(), 1, None, closing=closing, read_agent=read_agent_field
+        aops_pool, 1, None, closing=closing, understanding_enabled=False
     )
-    await compact.stamp_compact_boundary(MagicMock(), 1, read_agent=read_agent_field)
-    assert seen == [closing, None]
+    await _checkpoint(aops_pool, "cp-2")
+    await compact.stamp_compact_boundary(aops_pool, 1, understanding_enabled=False)
+
+    assert await _metadata(aops_pool, "cp-1") == {
+        "compact_boundary": True,
+        CLOSING_METADATA_KEY: closing.to_metadata(),
+    }
+    assert await _metadata(aops_pool, "cp-2") == {"compact_boundary": True}
 
 
-async def test_generate_summary_emits_agent_billing_span(
-    model_catalog: ModelCatalog,
-    monkeypatch: pytest.MonkeyPatch,
-    loguru_records: list[dict[str, Any]],
+# meiva:note
+# A completed compaction call records its provider usage as the agent's own.
+#
+# The regression this catches is removing usage reporting from the compact path, which is the
+# largest individual agent provider call. The billing span that usage feeds is pinned by the
+# provider billing tests in `base/packages/tests/lm/providers`.
+async def test_generate_summary_reports_the_compaction_call_as_agent_usage(
+    model_catalog: ModelCatalog, loguru_records: list[dict[str, Any]]
 ) -> None:
-    """A completed compaction call records its provider usage in the ledger.
-
-    The regression this catches is removing billing emission from the compact
-    path, which is the largest individual agent provider call.
-    """
-    from opentelemetry import trace as otel_trace
-
-    from base.telemetry import tracing as tracing_mod
-
-    class _Span:
-        def __init__(self, name: str) -> None:
-            self.name = name
-            self.attributes: dict[str, Any] = {}
-
-        def set_attribute(self, key: str, value: Any) -> None:
-            self.attributes[key] = value
-
-        def end(self) -> None:
-            pass
-
-    class _Tracer:
-        def __init__(self) -> None:
-            self.spans: list[_Span] = []
-
-        def start_span(self, _name: str, *, start_time: int | None = None) -> _Span:
-            span = _Span(_name)
-            self.spans.append(span)
-            return span
-
-    tracer = _Tracer()
-
-    # The summary's billing behavior requires a known provider; a bare test
-    # process has no installed provider plugins and must declare that input.
-    def vendor_of_model(_model: str, *, catalog: ModelCatalog) -> str:
-        assert catalog is model_catalog
-        return "deepseek"
-
-    monkeypatch.setattr(usage_mod, "vendor_of_model", vendor_of_model)
-    monkeypatch.setattr(settings.observability, "trace_enabled", True)
-    monkeypatch.setattr(tracing_mod, "is_initialized", lambda: True)
-    monkeypatch.setattr(otel_trace, "get_tracer", lambda _name: tracer)  # pyright: ignore[reportUnknownArgumentType]
     response = AIMessage(
         content="a complete summary",
         usage_metadata={
@@ -113,7 +87,6 @@ async def test_generate_summary_emits_agent_billing_span(
         },
     )
     llm = make_fake_llm(response=response)
-    llm.model_name = "deepseek-flash"
     slices = pinned_slices({"llm_model": "deepseek-flash"})
 
     assert (
@@ -123,17 +96,10 @@ async def test_generate_summary_emits_agent_billing_span(
         == "a complete summary"
     )
 
-    assert len(tracer.spans) == 1
-    span = tracer.spans[0]
-    assert span.name == "meiva.billing.call"
-    assert span.attributes["meiva.billing.model"] == "deepseek-flash"
-    assert span.attributes["meiva.billing.vendor"] == "deepseek"
-    assert span.attributes["meiva.billing.usage_kind"] == "agent"
-    assert span.attributes["meiva.billing.tokens_in"] == 1_000
-    assert span.attributes["meiva.billing.tokens_out"] == 100
-    assert span.attributes["meiva.billing.cache_read_tokens"] == 800
     [record] = [record for record in loguru_records if record["extra"].get("event") == "llm_usage"]
-    assert record["extra"]["usage_kind"] == "agent"
+    extra = record["extra"]
+    assert (extra["model"], extra["usage_kind"]) == ("deepseek-flash", "agent")
+    assert (extra["in_total"], extra["out_total"], extra["cache_read"]) == (1_000, 100, 800)
 
 
 async def test_generate_summary_includes_whole_conversation():
@@ -152,11 +118,10 @@ async def test_generate_summary_includes_whole_conversation():
     llm = make_fake_llm()
     await generate_summary(convo, llm, pinned_slices(), catalog=build_model_catalog())
 
-    [call] = compaction_ainvoke(llm).call_args_list
-    [llm_input] = call.args
+    [llm_input] = llm.requests
     assert llm_input[:-1] == convo  # whole conversation, no hold-out
     assert isinstance(llm_input[-1], HumanMessage)
-    assert llm_input[-1].content.startswith(f"<system_note>\n{COMPACTION_INSTRUCTION}")
+    assert llm_input[-1].text.startswith(f"<system_note>\n{COMPACTION_INSTRUCTION}")
 
 
 async def test_generate_summary_reuses_conversation_prefix_for_cache():
@@ -167,12 +132,11 @@ async def test_generate_summary_reuses_conversation_prefix_for_cache():
     llm = make_fake_llm()
     await generate_summary([sys_msg, *content], llm, pinned_slices(), catalog=build_model_catalog())
 
-    llm.bind_tools.assert_called_once_with([execute_code])
-    [call] = compaction_ainvoke(llm).call_args_list
-    [llm_input] = call.args
+    assert llm.bound_tools == [[execute_code]]
+    [llm_input] = llm.requests
     assert llm_input[0] is sys_msg  # original object in-place — same byte-for-byte prefix
     assert llm_input[:-1] == [sys_msg, *content]
-    assert llm_input[-1].content.startswith(f"<system_note>\n{COMPACTION_INSTRUCTION}")
+    assert llm_input[-1].text.startswith(f"<system_note>\n{COMPACTION_INSTRUCTION}")
 
 
 async def test_generate_summary_raises_on_empty_llm_text():

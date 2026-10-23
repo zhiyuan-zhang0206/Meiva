@@ -4,6 +4,7 @@ with per-compaction cadence; agent-reply hints on agent-sourced inbound.
 
 import inspect
 from collections.abc import Iterator
+from dataclasses import replace
 from typing import Any
 
 import pytest
@@ -16,12 +17,15 @@ from langchain_core.messages import (
 from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 
-from agent.graph.hooks import compact
 from agent.messages import inbound_message, tail_has_agent_inbound
 from agent.state import CompactState, build_agent_state
 from base.agents.context import MeivaContext
+from base.clock import Clock
+from base.config.tests.configuration import defaults
 from base.db.code_version_gate import ProcessDbGate
+from base.host.env.agent_slices import AgentSlices
 from base.packages.plugin_config_images import DiskPluginConfigImages
+from base.packages.plugin_providers import build_model_catalog
 from base.packages.plugins.extensions import ExtensionRegistry
 from base.paths.home import resolve_meiva_home
 from meiva.sdk_surface import install
@@ -32,23 +36,18 @@ from meiva_builtins.plugins.meiva_sdk_reminder.agent_runtime import (
     hint_for,
     mentions_watcher,
 )
+from meiva_builtins.plugins.meiva_sdk_reminder.hint_selection import (
+    assumed_persistence_name,
+    rearmed_reminded,
+    select_hints,
+)
 
 
 # meiva:note
-# Pin the auto-compact thresholds regardless of model by replacing `resolve_context_budget` in the
-# compact module; synthetic test messages have no `usage_metadata`, so occupancy uses the chars/4
-# fallback against `hard_tokens`.
-def pin_compact_budget(
-    monkeypatch: pytest.MonkeyPatch, *, hard_tokens: int, soft_tokens: int = 600_000
-) -> None:
-    from base.lm.context_budget import ContextBudget
-
-    budget = ContextBudget(
-        max_context_tokens=1_000_000,
-        soft_compact_tokens=soft_tokens,
-        hard_compact_tokens=hard_tokens,
-    )
-    monkeypatch.setattr(compact, "resolve_context_budget", lambda *_, **_kw: budget)  # pyright: ignore[reportUnknownArgumentType]
+# The agent's pins that force the auto-compact threshold to `hard_tokens` whatever the model;
+# synthetic test messages have no `usage_metadata`, so occupancy uses the chars/4 fallback.
+def compact_budget_pins(hard_tokens: int) -> dict[str, Any]:
+    return {"auto_compact_ceiling_tokens": hard_tokens}
 
 
 @pytest.fixture
@@ -73,20 +72,27 @@ def make_state(messages: list[AnyMessage], **fields: Any):
 
 
 # meiva:note
-# Placeholder runtime for hooks that ignore runtime/config.
-def make_runtime(*, database_gate: ProcessDbGate) -> Runtime[MeivaContext]:
-    from agent.hooks.tests.fakes import placeholder_runtime
-
-    return placeholder_runtime(database_gate=database_gate)
+# The runtime a hook sees: the agent's slices with `pins` over the unit defaults and the model
+# catalog. These hooks read nothing else from the context.
+def make_runtime(**pins: Any) -> Runtime[MeivaContext]:
+    return Runtime(
+        context=MeivaContext(
+            agent=AgentSlices.resolve(pins, default_reader=defaults()),
+            catalog=build_model_catalog(),
+            clock_factory=Clock.from_settings,
+        )
+    )
 
 
 # meiva:note
 # Runtime for tests that drive a real `make_hook_runner`, supplying a DB-shaped fake ops_pool for
-# `node_lifecycle` timeline snapshot publishing.
-def make_runtime_for_runner(*, database_gate: ProcessDbGate) -> Runtime[MeivaContext]:
+# `node_lifecycle` timeline snapshot publishing, with `pins` over the agent's slices.
+def make_runtime_for_runner(*, database_gate: ProcessDbGate, **pins: Any) -> Runtime[MeivaContext]:
     from agent.hooks.tests.fakes import make_fake_ops_pool, placeholder_runtime
 
-    return placeholder_runtime(make_fake_ops_pool(), database_gate=database_gate)
+    runtime = placeholder_runtime(make_fake_ops_pool(), database_gate=database_gate)
+    agent = AgentSlices.resolve(pins, default_reader=defaults())
+    return replace(runtime, context=replace(runtime.context, agent=agent))
 
 
 def make_config() -> RunnableConfig:
@@ -236,15 +242,67 @@ def test_mentions_watcher(code: str, expected: bool):
     assert mentions_watcher(code) is expected
 
 
+def test_select_hints_hints_only_unreminded_categories_once_per_window():
+    code = "subprocess.run(['ls']); time.sleep(1)"
+    selection = select_hints(code, ["shell", "wait"], {"shell"}, None, every_time=False)
+
+    assert selection.hinted == ("wait",)
+    assert selection.newly_seen == {"wait"}
+    assert selection.nameerror_hint is None
+
+
+def test_select_hints_every_time_ignores_the_reminded_set_for_code_categories():
+    selection = select_hints("subprocess.run(['ls'])", ["shell"], {"shell"}, None, every_time=True)
+
+    assert selection.hinted == ("shell",)
+    assert selection.newly_seen == {"shell"}
+
+
+def test_select_hints_marks_a_watcher_wait_seen_without_a_hint():
+    code = "watcher = 1; time.sleep(1)"
+    selection = select_hints(code, ["wait"], set(), None, every_time=False)
+
+    assert selection.hinted == ()
+    assert selection.newly_seen == {"wait"}
+
+
+def test_select_hints_hints_a_nameerror_name_once_even_under_every_time():
+    first = select_hints("print(x)", [], set(), "x", every_time=True)
+    again = select_hints("print(x)", [], {"nameerror:x"}, "x", every_time=True)
+
+    assert first.newly_seen == {"nameerror:x"}
+    assert first.nameerror_hint is not None and "'x'" in first.nameerror_hint
+    assert again.newly_seen == frozenset()
+    assert again.nameerror_hint is None
+
+
+def test_rearmed_reminded_clears_the_set_once_the_compact_version_passes_the_bookmark():
+    assert rearmed_reminded({"shell"}, bookmark=0, compact_version=1) == (frozenset(), 1)
+    assert rearmed_reminded({"shell"}, bookmark=1, compact_version=1) == ({"shell"}, 1)
+    assert rearmed_reminded({"shell"}, bookmark=2, compact_version=1) == ({"shell"}, 2)
+
+
+@pytest.mark.parametrize(
+    ("output", "earlier", "expected"),
+    [
+        (nameerror_output("cache"), ["cache = 1"], "cache"),
+        (nameerror_output("cache"), ["cached = 1"], None),
+        (nameerror_output("len"), ["len = 1"], None),
+        (nameerror_output("for"), ["for = 1"], None),
+        ("all good", ["cache = 1"], None),
+    ],
+)
+def test_assumed_persistence_name(output: str, earlier: list[str], expected: str | None):
+    assert assumed_persistence_name(output, earlier) == expected
+
+
 # ── the after_exec hook (code categories) ──────────────────────────────────
 
 
-async def test_first_hit_injects_note_and_marks(
-    reminder_plugin_loaded: Any, *, database_gate: ProcessDbGate
-):
+async def test_first_hit_injects_note_and_marks(reminder_plugin_loaded: Any):
     hook = reminder_plugin_loaded.contribute().after_exec[0]
     state = make_state(_cell("subprocess.run(['ls'])"))
-    result = await hook(state, make_runtime(database_gate=database_gate), make_config())
+    result = await hook(state, make_runtime(), make_config())
 
     assert result is not None
     # hint injected as its own system-note; the exec-output message is untouched.
@@ -258,37 +316,29 @@ async def test_first_hit_injects_note_and_marks(
     assert result["meiva_sdk_reminder__last_seen_compact"] == 0
 
 
-async def test_second_hit_same_category_no_append(
-    reminder_plugin_loaded: Any, *, database_gate: ProcessDbGate
-):
+async def test_second_hit_same_category_no_append(reminder_plugin_loaded: Any):
     hook = reminder_plugin_loaded.contribute().after_exec[0]
     state = make_state(_cell("subprocess.run(['ls'])"), meiva_sdk_reminder__reminded={"shell"})
-    result = await hook(state, make_runtime(database_gate=database_gate), make_config())
+    result = await hook(state, make_runtime(), make_config())
     assert result is None
 
 
 async def test_code_every_time_cadence_hints_two_consecutive_matching_cells(
-    reminder_plugin_loaded: Any, monkeypatch: pytest.MonkeyPatch, *, database_gate: ProcessDbGate
+    reminder_plugin_loaded: Any,
 ):
     """`every_time` bypasses the reminded gate for code categories, so two
     consecutive shell cells each receive the shell hint."""
-    from base.config import settings
-
-    monkeypatch.setattr(settings.agent, "sdk_code_reminder_cadence", "every_time")
+    runtime = make_runtime(sdk_code_reminder_cadence="every_time")
     hook = reminder_plugin_loaded.contribute().after_exec[0]
 
-    first = await hook(
-        make_state(_cell("subprocess.run(['first'])")),
-        make_runtime(database_gate=database_gate),
-        make_config(),
-    )
+    first = await hook(make_state(_cell("subprocess.run(['first'])")), runtime, make_config())
     assert first is not None
     second_state = make_state(
         _cell("subprocess.run(['second'])"),
         meiva_sdk_reminder__reminded=first["meiva_sdk_reminder__reminded"],
         meiva_sdk_reminder__last_seen_compact=first["meiva_sdk_reminder__last_seen_compact"],
     )
-    second = await hook(second_state, make_runtime(database_gate=database_gate), make_config())
+    second = await hook(second_state, runtime, make_config())
 
     assert second is not None
     for result in (first, second):
@@ -297,20 +347,14 @@ async def test_code_every_time_cadence_hints_two_consecutive_matching_cells(
 
 
 async def test_code_once_cadence_hints_only_first_consecutive_matching_cell(
-    reminder_plugin_loaded: Any, monkeypatch: pytest.MonkeyPatch, *, database_gate: ProcessDbGate
+    reminder_plugin_loaded: Any,
 ):
     """`once_per_compaction` (the default) preserves the existing behavior:
     the first shell cell hints and the next shell cell in the window no-ops."""
-    from base.config import settings
-
-    monkeypatch.setattr(settings.agent, "sdk_code_reminder_cadence", "once_per_compaction")
+    runtime = make_runtime(sdk_code_reminder_cadence="once_per_compaction")
     hook = reminder_plugin_loaded.contribute().after_exec[0]
 
-    first = await hook(
-        make_state(_cell("subprocess.run(['first'])")),
-        make_runtime(database_gate=database_gate),
-        make_config(),
-    )
+    first = await hook(make_state(_cell("subprocess.run(['first'])")), runtime, make_config())
     assert first is not None
     second_state = make_state(
         _cell("subprocess.run(['second'])"),
@@ -318,21 +362,17 @@ async def test_code_once_cadence_hints_only_first_consecutive_matching_cell(
         meiva_sdk_reminder__last_seen_compact=first["meiva_sdk_reminder__last_seen_compact"],
     )
 
-    assert (
-        await hook(second_state, make_runtime(database_gate=database_gate), make_config()) is None
-    )
+    assert await hook(second_state, runtime, make_config()) is None
 
 
-async def test_different_categories_each_fire_once(
-    reminder_plugin_loaded: Any, *, database_gate: ProcessDbGate
-):
+async def test_different_categories_each_fire_once(reminder_plugin_loaded: Any):
     hook = reminder_plugin_loaded.contribute().after_exec[0]
     # shell already reminded; this cell hits shell + wait -> only wait is fresh.
     state = make_state(
         _cell("subprocess.run(['ls'])\ntime.sleep(2)"),
         meiva_sdk_reminder__reminded={"shell"},
     )
-    result = await hook(state, make_runtime(database_gate=database_gate), make_config())
+    result = await hook(state, make_runtime(), make_config())
 
     assert result is not None
     [note] = result["messages"]
@@ -342,15 +382,13 @@ async def test_different_categories_each_fire_once(
     assert result["meiva_sdk_reminder__reminded"] == {"shell", "wait"}
 
 
-async def test_wait_with_watcher_marked_silently_no_hint(
-    reminder_plugin_loaded: Any, *, database_gate: ProcessDbGate
-):
+async def test_wait_with_watcher_marked_silently_no_hint(reminder_plugin_loaded: Any):
     """A cell that sleeps while already naming `watcher` is the agent working
     with the watcher primitive itself — the wait hint is suppressed but the
     category is marked seen (so it fires neither now nor later this window)."""
     hook = reminder_plugin_loaded.contribute().after_exec[0]
     state = make_state(_cell("meiva.watcher.at('5m', name='test')\ntime.sleep(1)"))
-    result = await hook(state, make_runtime(database_gate=database_gate), make_config())
+    result = await hook(state, make_runtime(), make_config())
 
     assert result is not None
     # marked seen, but no hint emitted -> no output-message replacement.
@@ -359,14 +397,12 @@ async def test_wait_with_watcher_marked_silently_no_hint(
     assert result["meiva_sdk_reminder__last_seen_compact"] == 0
 
 
-async def test_wait_with_watcher_suppressed_other_category_still_hints(
-    reminder_plugin_loaded: Any, *, database_gate: ProcessDbGate
-):
+async def test_wait_with_watcher_suppressed_other_category_still_hints(reminder_plugin_loaded: Any):
     """When a watcher-naming sleep cell also trips another category, the wait
     hint is suppressed (but marked) while the other category still hints."""
     hook = reminder_plugin_loaded.contribute().after_exec[0]
     state = make_state(_cell("subprocess.run(['ls'])\nmeiva.watcher\ntime.sleep(1)"))
-    result = await hook(state, make_runtime(database_gate=database_gate), make_config())
+    result = await hook(state, make_runtime(), make_config())
 
     assert result is not None
     [note] = result["messages"]
@@ -375,9 +411,7 @@ async def test_wait_with_watcher_suppressed_other_category_still_hints(
     assert result["meiva_sdk_reminder__reminded"] == {"shell", "wait"}
 
 
-async def test_wait_with_watcher_already_marked_is_noop(
-    reminder_plugin_loaded: Any, *, database_gate: ProcessDbGate
-):
+async def test_wait_with_watcher_already_marked_is_noop(reminder_plugin_loaded: Any):
     """A second watcher-naming sleep cell, wait already marked -> no-op (the
     silent suppression does not re-fire or re-persist)."""
     hook = reminder_plugin_loaded.contribute().after_exec[0]
@@ -385,13 +419,11 @@ async def test_wait_with_watcher_already_marked_is_noop(
         _cell("meiva.watcher.at('5m', name='test')\ntime.sleep(1)"),
         meiva_sdk_reminder__reminded={"wait"},
     )
-    result = await hook(state, make_runtime(database_gate=database_gate), make_config())
+    result = await hook(state, make_runtime(), make_config())
     assert result is None
 
 
-async def test_compaction_rearms_silent_watcher_path(
-    reminder_plugin_loaded: Any, *, database_gate: ProcessDbGate
-):
+async def test_compaction_rearms_silent_watcher_path(reminder_plugin_loaded: Any):
     """The silent-suppress path is the only one that advances the bookmark
     WITHOUT emitting a message — pin that a re-arm still persists the bookmark
     advance and re-marks wait, with no hint message. Guards a refactor that
@@ -403,7 +435,7 @@ async def test_compaction_rearms_silent_watcher_path(
         meiva_sdk_reminder__last_seen_compact=0,
         compact=CompactState(version=1),
     )
-    result = await hook(state, make_runtime(database_gate=database_gate), make_config())
+    result = await hook(state, make_runtime(), make_config())
 
     assert result is not None
     assert "messages" not in result  # silent path emits no hint
@@ -411,9 +443,7 @@ async def test_compaction_rearms_silent_watcher_path(
     assert result["meiva_sdk_reminder__reminded"] == {"wait"}  # re-marked after re-arm
 
 
-async def test_wait_suppressed_with_stale_other_category_marks_only(
-    reminder_plugin_loaded: Any, *, database_gate: ProcessDbGate
-):
+async def test_wait_suppressed_with_stale_other_category_marks_only(reminder_plugin_loaded: Any):
     """A watcher+sleep cell that also trips an already-reminded category: nothing
     hints (the other category is stale) but wait is still newly marked — the
     `silent - reminded` branch where `hinted` is empty yet `newly_seen` is not."""
@@ -422,22 +452,20 @@ async def test_wait_suppressed_with_stale_other_category_marks_only(
         _cell("subprocess.run(['ls'])\nmeiva.watcher\ntime.sleep(1)"),
         meiva_sdk_reminder__reminded={"shell"},
     )
-    result = await hook(state, make_runtime(database_gate=database_gate), make_config())
+    result = await hook(state, make_runtime(), make_config())
 
     assert result is not None
     assert "messages" not in result  # shell stale, wait suppressed -> no hint
     assert result["meiva_sdk_reminder__reminded"] == {"shell", "wait"}
 
 
-async def test_watcher_named_without_sleep_does_not_suppress(
-    reminder_plugin_loaded: Any, *, database_gate: ProcessDbGate
-):
+async def test_watcher_named_without_sleep_does_not_suppress(reminder_plugin_loaded: Any):
     """Naming `watcher` only suppresses when the cell also trips the wait
     trigger. A watcher mention beside a non-wait idiom still hints that idiom
     and does not mark wait (guards the `"wait" in matched` conjunct)."""
     hook = reminder_plugin_loaded.contribute().after_exec[0]
     state = make_state(_cell("meiva.watcher\nsubprocess.run(['ls'])"))
-    result = await hook(state, make_runtime(database_gate=database_gate), make_config())
+    result = await hook(state, make_runtime(), make_config())
 
     assert result is not None
     [note] = result["messages"]
@@ -445,13 +473,11 @@ async def test_watcher_named_without_sleep_does_not_suppress(
     assert result["meiva_sdk_reminder__reminded"] == {"shell"}  # wait NOT marked
 
 
-async def test_multi_category_cell_lists_all_in_order(
-    reminder_plugin_loaded: Any, *, database_gate: ProcessDbGate
-):
+async def test_multi_category_cell_lists_all_in_order(reminder_plugin_loaded: Any):
     hook = reminder_plugin_loaded.contribute().after_exec[0]
     code = "subprocess.run(['ls'])\ntime.sleep(1)\nopen('f')\nrequests.get('u')"
     state = make_state(_cell(code))
-    result = await hook(state, make_runtime(database_gate=database_gate), make_config())
+    result = await hook(state, make_runtime(), make_config())
 
     assert result is not None
     [note] = result["messages"]
@@ -465,9 +491,7 @@ async def test_multi_category_cell_lists_all_in_order(
     assert result["meiva_sdk_reminder__reminded"] == {"shell", "wait", "files", "http"}
 
 
-async def test_compaction_rearms_category(
-    reminder_plugin_loaded: Any, *, database_gate: ProcessDbGate
-):
+async def test_compaction_rearms_category(reminder_plugin_loaded: Any):
     hook = reminder_plugin_loaded.contribute().after_exec[0]
     # shell was reminded last context window (bookmark 0); a compaction advanced
     # the version to 1 -> the set re-arms and shell hints again.
@@ -477,7 +501,7 @@ async def test_compaction_rearms_category(
         meiva_sdk_reminder__last_seen_compact=0,
         compact=CompactState(version=1),
     )
-    result = await hook(state, make_runtime(database_gate=database_gate), make_config())
+    result = await hook(state, make_runtime(), make_config())
 
     assert result is not None
     [note] = result["messages"]
@@ -487,9 +511,7 @@ async def test_compaction_rearms_category(
     assert result["meiva_sdk_reminder__reminded"] == {"shell"}
 
 
-async def test_compaction_not_advanced_keeps_dedup(
-    reminder_plugin_loaded: Any, *, database_gate: ProcessDbGate
-):
+async def test_compaction_not_advanced_keeps_dedup(reminder_plugin_loaded: Any):
     hook = reminder_plugin_loaded.contribute().after_exec[0]
     # version == bookmark -> no re-arm; shell already reminded -> no-op.
     state = make_state(
@@ -498,66 +520,58 @@ async def test_compaction_not_advanced_keeps_dedup(
         meiva_sdk_reminder__last_seen_compact=1,
         compact=CompactState(version=1),
     )
-    result = await hook(state, make_runtime(database_gate=database_gate), make_config())
+    result = await hook(state, make_runtime(), make_config())
     assert result is None
 
 
-async def test_no_tool_calls_is_noop(reminder_plugin_loaded: Any, *, database_gate: ProcessDbGate):
+async def test_no_tool_calls_is_noop(reminder_plugin_loaded: Any):
     hook = reminder_plugin_loaded.contribute().after_exec[0]
     # An assistant message with no tool_calls (the model spoke + paused) +
     # no trailing ToolMessage -> the tail shape does not match -> no-op.
     state = make_state(
         [HumanMessage(content="hi", id="h1"), AIMessage(content="just talking", id="a1")]
     )
-    result = await hook(state, make_runtime(database_gate=database_gate), make_config())
+    result = await hook(state, make_runtime(), make_config())
     assert result is None
 
 
-async def test_assistant_without_toolcall_before_output_is_noop(
-    reminder_plugin_loaded: Any, *, database_gate: ProcessDbGate
-):
+async def test_assistant_without_toolcall_before_output_is_noop(reminder_plugin_loaded: Any):
     """messages[-2] is an AIMessage but it carries no tool_calls (defensive on
     the [-2] shape) -> no-op rather than indexing tool_calls[0]."""
     hook = reminder_plugin_loaded.contribute().after_exec[0]
     ai = AIMessage(content="spoke", id="a1")  # no tool_calls
     out = ToolMessage(content="x", tool_call_id="c1", id="o1")
     state = make_state([ai, out])
-    result = await hook(state, make_runtime(database_gate=database_gate), make_config())
+    result = await hook(state, make_runtime(), make_config())
     assert result is None
 
 
-async def test_code_matches_nothing_is_noop(
-    reminder_plugin_loaded: Any, *, database_gate: ProcessDbGate
-):
+async def test_code_matches_nothing_is_noop(reminder_plugin_loaded: Any):
     hook = reminder_plugin_loaded.contribute().after_exec[0]
     state = make_state(_cell("total = sum(range(10))\nprint(total)"))
-    result = await hook(state, make_runtime(database_gate=database_gate), make_config())
+    result = await hook(state, make_runtime(), make_config())
     assert result is None
 
 
 async def test_files_hint_not_fired_when_listing_via_stdlib_content_via_sdk(
-    reminder_plugin_loaded: Any, *, database_gate: ProcessDbGate
+    reminder_plugin_loaded: Any,
 ):
     """The user-reported false trigger (2026-08-26): a cell lists file names
     with stdlib glob while reading content through meiva.files — the files hint
     must not fire, and nothing is marked."""
     hook = reminder_plugin_loaded.contribute().after_exec[0]
     code = "import glob\nfor p in glob.glob('*.md'):\n    meiva.files.read(p)"
-    result = await hook(
-        make_state(_cell(code)), make_runtime(database_gate=database_gate), make_config()
-    )
+    result = await hook(make_state(_cell(code)), make_runtime(), make_config())
     assert result is None
 
 
-async def test_files_hint_fires_for_direct_open_read(
-    reminder_plugin_loaded: Any, *, database_gate: ProcessDbGate
-):
+async def test_files_hint_fires_for_direct_open_read(reminder_plugin_loaded: Any):
     """A cell that genuinely bypasses meiva.files for content (open()) still
     receives the files hint."""
     hook = reminder_plugin_loaded.contribute().after_exec[0]
     result = await hook(
         make_state(_cell("data = open('f.txt').read()")),
-        make_runtime(database_gate=database_gate),
+        make_runtime(),
         make_config(),
     )
     assert result is not None
@@ -566,39 +580,31 @@ async def test_files_hint_fires_for_direct_open_read(
     assert result["meiva_sdk_reminder__reminded"] == {"files"}
 
 
-async def test_hint_not_fired_for_trigger_words_in_string_literal(
-    reminder_plugin_loaded: Any, *, database_gate: ProcessDbGate
-):
+async def test_hint_not_fired_for_trigger_words_in_string_literal(reminder_plugin_loaded: Any):
     """A cell whose only 'open(' occurrence sits inside a string literal (e.g.
     a grep pattern or printed example) gets no files hint (literal masking)."""
     hook = reminder_plugin_loaded.contribute().after_exec[0]
     code = "for line in meiva.shell.run(\"grep -rn 'open(' .\").splitlines():\n    print(line)"
-    result = await hook(
-        make_state(_cell(code)), make_runtime(database_gate=database_gate), make_config()
-    )
+    result = await hook(make_state(_cell(code)), make_runtime(), make_config())
     assert result is None
 
 
-async def test_short_history_is_noop(reminder_plugin_loaded: Any, *, database_gate: ProcessDbGate):
+async def test_short_history_is_noop(reminder_plugin_loaded: Any):
     hook = reminder_plugin_loaded.contribute().after_exec[0]
     state = make_state([ToolMessage(content="x", tool_call_id="c1", id="o1")])
-    result = await hook(state, make_runtime(database_gate=database_gate), make_config())
+    result = await hook(state, make_runtime(), make_config())
     assert result is None
 
 
 # ── assumed-persistence NameError hint ─────────────────────────────────────
 
 
-async def test_nameerror_for_name_used_in_earlier_cell_hints(
-    reminder_plugin_loaded: Any, *, database_gate: ProcessDbGate
-):
+async def test_nameerror_for_name_used_in_earlier_cell_hints(reminder_plugin_loaded: Any):
     hook = reminder_plugin_loaded.contribute().after_exec[0]
     messages = _cell("cache = {'ready': True}", id_suffix="1") + _cell(
         "print(cache)", nameerror_output("cache"), id_suffix="2"
     )
-    result = await hook(
-        make_state(messages), make_runtime(database_gate=database_gate), make_config()
-    )
+    result = await hook(make_state(messages), make_runtime(), make_config())
 
     assert result is not None
     [note] = result["messages"]
@@ -612,24 +618,17 @@ async def test_nameerror_for_name_used_in_earlier_cell_hints(
     assert result["meiva_sdk_reminder__reminded"] == {"nameerror:cache"}
 
 
-async def test_nameerror_with_python_suggestion_suffix_hints(
-    reminder_plugin_loaded: Any, *, database_gate: ProcessDbGate
-):
+async def test_nameerror_with_python_suggestion_suffix_hints(reminder_plugin_loaded: Any):
     """Python may append a `Did you mean` clause to the NameError line; the
     stable `name 'X' is not defined` prefix still identifies the failure."""
     hook = reminder_plugin_loaded.contribute().after_exec[0]
     output = nameerror_output("listt") + ". Did you mean: 'list'?"
     messages = _cell("listt = [1]", id_suffix="1") + _cell("print(listt)", output, id_suffix="2")
 
-    assert (
-        await hook(make_state(messages), make_runtime(database_gate=database_gate), make_config())
-        is not None
-    )
+    assert await hook(make_state(messages), make_runtime(), make_config()) is not None
 
 
-async def test_nameerror_without_prior_whole_name_is_noop(
-    reminder_plugin_loaded: Any, *, database_gate: ProcessDbGate
-):
+async def test_nameerror_without_prior_whole_name_is_noop(reminder_plugin_loaded: Any):
     """A substring in an earlier cell does not count, and the current cell is
     excluded from the search even though it necessarily contains the name."""
     hook = reminder_plugin_loaded.contribute().after_exec[0]
@@ -637,39 +636,25 @@ async def test_nameerror_without_prior_whole_name_is_noop(
         "print(cache)", nameerror_output("cache"), id_suffix="2"
     )
 
-    assert (
-        await hook(make_state(messages), make_runtime(database_gate=database_gate), make_config())
-        is None
-    )
+    assert await hook(make_state(messages), make_runtime(), make_config()) is None
 
 
-async def test_nameerror_hint_disabled_is_noop(
-    reminder_plugin_loaded: Any, monkeypatch: pytest.MonkeyPatch, *, database_gate: ProcessDbGate
-):
-    from base.config import settings
-
-    monkeypatch.setattr(settings.agent, "sdk_nameerror_hint_enabled", False)
+async def test_nameerror_hint_disabled_is_noop(reminder_plugin_loaded: Any):
+    runtime = make_runtime(sdk_nameerror_hint_enabled=False)
     hook = reminder_plugin_loaded.contribute().after_exec[0]
     messages = _cell("cache = 1", id_suffix="1") + _cell(
         "print(cache)", nameerror_output("cache"), id_suffix="2"
     )
 
-    assert (
-        await hook(make_state(messages), make_runtime(database_gate=database_gate), make_config())
-        is None
-    )
+    assert await hook(make_state(messages), runtime, make_config()) is None
 
 
-async def test_repeated_nameerror_for_same_name_hints_once_per_window(
-    reminder_plugin_loaded: Any, *, database_gate: ProcessDbGate
-):
+async def test_repeated_nameerror_for_same_name_hints_once_per_window(reminder_plugin_loaded: Any):
     hook = reminder_plugin_loaded.contribute().after_exec[0]
     first_messages = _cell("cache = 1", id_suffix="1") + _cell(
         "print(cache)", nameerror_output("cache"), id_suffix="2"
     )
-    first = await hook(
-        make_state(first_messages), make_runtime(database_gate=database_gate), make_config()
-    )
+    first = await hook(make_state(first_messages), make_runtime(), make_config())
     assert first is not None
 
     second_messages = first_messages + _cell(
@@ -681,24 +666,17 @@ async def test_repeated_nameerror_for_same_name_hints_once_per_window(
         meiva_sdk_reminder__last_seen_compact=first["meiva_sdk_reminder__last_seen_compact"],
     )
 
-    assert (
-        await hook(second_state, make_runtime(database_gate=database_gate), make_config()) is None
-    )
+    assert await hook(second_state, make_runtime(), make_config()) is None
 
 
 @pytest.mark.parametrize("name", ["len", "for"])
-async def test_nameerror_hint_skips_builtins_and_keywords(
-    reminder_plugin_loaded: Any, name: str, *, database_gate: ProcessDbGate
-):
+async def test_nameerror_hint_skips_builtins_and_keywords(reminder_plugin_loaded: Any, name: str):
     hook = reminder_plugin_loaded.contribute().after_exec[0]
     messages = _cell(f"{name} = 1", id_suffix="1") + _cell(
         f"print({name})", nameerror_output(name), id_suffix="2"
     )
 
-    assert (
-        await hook(make_state(messages), make_runtime(database_gate=database_gate), make_config())
-        is None
-    )
+    assert await hook(make_state(messages), make_runtime(), make_config()) is None
 
 
 # ── the agent_reply matcher (inbound tail scan) ─────────────────────────────
@@ -739,12 +717,10 @@ def test_tail_has_agent_inbound_ui_source_false():
 # ── the before_llm hook (agent_reply) ───────────────────────────────────────
 
 
-async def test_agent_reply_first_hit_injects_note(
-    reminder_plugin_loaded: Any, *, database_gate: ProcessDbGate
-):
+async def test_agent_reply_first_hit_injects_note(reminder_plugin_loaded: Any):
     hook = reminder_plugin_loaded.sdk_reminder_agent_reply_before_llm
     state = make_state([AIMessage(content="prev", id="a0"), agent_inbound(source="agent:9")])
-    result = await hook(state, make_runtime(database_gate=database_gate), make_config())
+    result = await hook(state, make_runtime(), make_config())
 
     assert result is not None
     [note] = result["messages"]
@@ -755,15 +731,13 @@ async def test_agent_reply_first_hit_injects_note(
     assert result["meiva_sdk_reminder__reminded"] == {AGENT_REPLY_CATEGORY}
 
 
-async def test_agent_reply_second_hit_no_inject(
-    reminder_plugin_loaded: Any, *, database_gate: ProcessDbGate
-):
+async def test_agent_reply_second_hit_no_inject(reminder_plugin_loaded: Any):
     hook = reminder_plugin_loaded.sdk_reminder_agent_reply_before_llm
     state = make_state(
         [AIMessage(content="prev", id="a0"), agent_inbound(source="agent:9")],
         meiva_sdk_reminder__reminded={AGENT_REPLY_CATEGORY},
     )
-    result = await hook(state, make_runtime(database_gate=database_gate), make_config())
+    result = await hook(state, make_runtime(), make_config())
     assert result is None
 
 

@@ -1,40 +1,44 @@
-# pyright: reportUnknownMemberType = warning
-# pyright: reportUnknownArgumentType = warning
-# pyright: reportUnknownLambdaType = warning
-# pyright: reportUnknownVariableType = warning
-"""When the llm node and the compact paths enqueue understanding chunks."""
-
 from __future__ import annotations
 
-from datetime import UTC, datetime
+import asyncio
+import json
 from typing import Any
-from unittest.mock import MagicMock
 
 import pytest
 from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, SystemMessage
+from psycopg_pool import AsyncConnectionPool
 
-from agent.hooks import understanding_chunks as uc
+from agent.hooks.snapshot_wait import SnapshotWait
+from agent.hooks.understanding_chunks import await_snapshot, due_chunk_update, enqueue_closing_chunk
+from agent.state import AgentState
 from agent.state_channels import CompactState
-from base.agents.history.hierarchy.chunks import Chunk
-from base.config import settings
-from base.host.env.agent_slices import ModelOverrides
-from base.packages.plugin_providers import build_model_catalog
+from base.agents.history.hierarchy.chunks import chunk_threshold
+from base.config.tests.configuration import defaults
+from base.host.env.agent_slices import AgentSlices
+from base.lm.catalog import ModelCatalog
 from base.telemetry.tests.capture.event_capture import EmittedEvents
 
+_MODEL = "deepseek-flash"
+# meiva:note
+# A real model, a small ratio: the threshold is about 750 tokens.
+_RATIO = 0.002
+_AGENT = 3
 
-def _read_agent(field: str):
-    return getattr(settings.agent, field)
+
+def _agent(*, enabled: bool = True) -> AgentSlices:
+    return AgentSlices.resolve(
+        {
+            "llm_model": _MODEL,
+            "understanding_enabled": enabled,
+            "understanding_chunk_ratio": _RATIO,
+        },
+        default_reader=defaults(),
+    )
 
 
-class _Queue:
-    """Stands in for `enqueue_chunk`: records calls, optionally refuses."""
-
-    def __init__(self, ok: bool = True) -> None:
-        self.ok, self.calls = ok, []
-
-    async def __call__(self, pool: Any, agent_id: int, **kwargs: Any) -> bool:
-        self.calls.append((agent_id, kwargs))
-        return self.ok
+def _threshold(model_catalog: ModelCatalog) -> int:
+    agent = _agent()
+    return chunk_threshold(_MODEL, agent.overrides, _RATIO, catalog=model_catalog)
 
 
 def _request(n: int) -> list[AnyMessage]:
@@ -59,369 +63,171 @@ def _reply(input_tokens: int) -> AIMessage:
 _BASELINED = CompactState(understanding_cut_index=1, understanding_cut_tokens=500)
 
 
-@pytest.fixture(autouse=True)
-def _enabled(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(settings.agent, "understanding_enabled", True)
-    monkeypatch.setattr(uc, "chunk_threshold", lambda *_a, **_kw: 1000)
+async def _jobs(pool: AsyncConnectionPool) -> list[tuple[Any, ...]]:
+    async with pool.connection() as conn, conn.cursor() as cur:
+        await cur.execute(
+            "SELECT agent_id, compact_version, start_index, end_index, end_msg_id,"
+            " boundary_checkpoint_id, status FROM understanding_chunk_jobs ORDER BY end_index"
+        )
+        return await cur.fetchall()
 
 
-async def test_turn_below_the_threshold_enqueues_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
-    queue = _Queue()
-    monkeypatch.setattr(uc, "enqueue_chunk", queue)
-    update = await uc.due_chunk_update(
-        _BASELINED,
-        _request(10),
-        _reply(1499),
-        pool=MagicMock(),
-        agent_id=3,
-        model="m",
-        overrides=ModelOverrides.from_pins({}),
-        catalog=build_model_catalog(),
-        read_agent=_read_agent,
-    )
-    assert update == {} and queue.calls == []
-
-
-async def test_a_segments_first_turn_only_records_the_baseline_past_the_head(
-    monkeypatch: pytest.MonkeyPatch,
+async def test_a_turn_past_the_threshold_queues_the_chunk_and_moves_the_cut(
+    aops_pool: AsyncConnectionPool, model_catalog: ModelCatalog
 ) -> None:
-    queue = _Queue()
-    monkeypatch.setattr(uc, "enqueue_chunk", queue)
-    fresh = await uc.due_chunk_update(
-        CompactState(),
-        _request(2),
-        _reply(30_000),
-        pool=MagicMock(),
-        agent_id=3,
-        model="m",
-        overrides=ModelOverrides.from_pins({}),
-        catalog=build_model_catalog(),
-        read_agent=_read_agent,
-    )
-    assert queue.calls == []
-    assert (
-        fresh["compact"].understanding_cut_index,
-        fresh["compact"].understanding_cut_tokens,
-    ) == (
-        1,
-        30_000,
-    )
-    compacted: list[AnyMessage] = [
-        SystemMessage(content="head", id="h"),
-        HumanMessage(
-            content="summary", id="s", additional_kwargs={"meiva_msg_type": "compact_summary"}
-        ),
-        HumanMessage(content="next", id="n"),
-    ]
-    after = await uc.due_chunk_update(
-        CompactState(version=2),
-        compacted,
-        _reply(40_000),
-        pool=MagicMock(),
-        agent_id=3,
-        model="m",
-        overrides=ModelOverrides.from_pins({}),
-        catalog=build_model_catalog(),
-        read_agent=_read_agent,
-    )
-    assert after["compact"].understanding_cut_index == 2
-
-
-async def test_turn_past_the_threshold_enqueues_and_moves_the_cut(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    queue = _Queue()
-    monkeypatch.setattr(uc, "enqueue_chunk", queue)
     compact = _BASELINED.model_copy(update={"version": 4})
-    update = await uc.due_chunk_update(
+
+    update = await due_chunk_update(
         compact,
         _request(10),
-        _reply(1500),
-        pool=MagicMock(),
-        agent_id=3,
-        model="m",
-        overrides=ModelOverrides.from_pins({}),
-        catalog=build_model_catalog(),
-        read_agent=_read_agent,
+        _reply(500 + _threshold(model_catalog)),
+        pool=aops_pool,
+        agent_id=_AGENT,
+        agent=_agent(),
+        catalog=model_catalog,
     )
-    assert queue.calls == [
-        (3, {"compact_version": 4, "chunk": Chunk(1, 10), "end_msg_id": "m9"}),
-    ]
+
+    assert await _jobs(aops_pool) == [(_AGENT, 4, 1, 10, "m9", None, "pending")]
     moved = update["compact"]
     assert (moved.understanding_cut_index, moved.understanding_cut_tokens, moved.version) == (
         10,
-        1500,
+        500 + _threshold(model_catalog),
         4,
     )
-    # The next chunk needs another threshold of growth past the new cut.
-    assert (
-        await uc.due_chunk_update(
-            moved,
-            _request(14),
-            _reply(2499),
-            pool=MagicMock(),
-            agent_id=3,
-            model="m",
-            overrides=ModelOverrides.from_pins({}),
-            catalog=build_model_catalog(),
-            read_agent=_read_agent,
-        )
-        == {}
-    )
 
 
-async def test_failed_enqueue_keeps_the_cut_so_the_stretch_is_retried(
-    monkeypatch: pytest.MonkeyPatch,
+async def test_a_turn_below_the_threshold_queues_nothing(
+    aops_pool: AsyncConnectionPool, model_catalog: ModelCatalog
 ) -> None:
-    monkeypatch.setattr(uc, "enqueue_chunk", _Queue(ok=False))
-    assert (
-        await uc.due_chunk_update(
-            _BASELINED,
-            _request(10),
-            _reply(5000),
-            pool=MagicMock(),
-            agent_id=3,
-            model="m",
-            overrides=ModelOverrides.from_pins({}),
-            catalog=build_model_catalog(),
-            read_agent=_read_agent,
-        )
-        == {}
+    update = await due_chunk_update(
+        _BASELINED,
+        _request(10),
+        _reply(500 + _threshold(model_catalog) - 1),
+        pool=aops_pool,
+        agent_id=_AGENT,
+        agent=_agent(),
+        catalog=model_catalog,
     )
 
-
-async def test_disabled_or_poolless_turns_do_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
-    queue = _Queue()
-    monkeypatch.setattr(uc, "enqueue_chunk", queue)
-    assert (
-        await uc.due_chunk_update(
-            CompactState(),
-            _request(10),
-            _reply(5000),
-            pool=None,
-            agent_id=3,
-            model="m",
-            overrides=ModelOverrides.from_pins({}),
-            catalog=build_model_catalog(),
-            read_agent=_read_agent,
-        )
-        == {}
-    )
-    monkeypatch.setattr(settings.agent, "understanding_enabled", False)
-    assert (
-        await uc.due_chunk_update(
-            _BASELINED,
-            _request(10),
-            _reply(5000),
-            pool=MagicMock(),
-            agent_id=3,
-            model="m",
-            overrides=ModelOverrides.from_pins({}),
-            catalog=build_model_catalog(),
-            read_agent=_read_agent,
-        )
-        == {}
-    )
-    assert queue.calls == []
+    assert update == {}
+    assert await _jobs(aops_pool) == []
 
 
-async def test_turn_without_usage_never_triggers(monkeypatch: pytest.MonkeyPatch) -> None:
-    queue = _Queue()
-    monkeypatch.setattr(uc, "enqueue_chunk", queue)
-    assert (
-        await uc.due_chunk_update(
-            CompactState(),
-            _request(10),
-            AIMessage(content="x"),
-            pool=MagicMock(),
-            agent_id=3,
-            model="m",
-            overrides=ModelOverrides.from_pins({}),
-            catalog=build_model_catalog(),
-            read_agent=_read_agent,
-        )
-        == {}
-    )
-
-
-async def test_compaction_enqueues_the_remainder_against_the_boundary(
-    monkeypatch: pytest.MonkeyPatch,
+async def test_a_segments_first_turn_records_the_baseline_without_queueing(
+    aops_pool: AsyncConnectionPool, model_catalog: ModelCatalog
 ) -> None:
-    queue = _Queue()
-    monkeypatch.setattr(uc, "enqueue_chunk", queue)
+    update = await due_chunk_update(
+        CompactState(),
+        _request(2),
+        _reply(30_000),
+        pool=aops_pool,
+        agent_id=_AGENT,
+        agent=_agent(),
+        catalog=model_catalog,
+    )
+
+    baseline = update["compact"]
+    assert (baseline.understanding_cut_index, baseline.understanding_cut_tokens) == (1, 30_000)
+    assert await _jobs(aops_pool) == []
+
+
+# meiva:note
+# A chunk whose last message has no id cannot be located in the checkpoint later, so the queue refuses it.
+async def test_a_failed_enqueue_keeps_the_cut_so_the_stretch_is_retried(
+    aops_pool: AsyncConnectionPool, model_catalog: ModelCatalog
+) -> None:
+    request = [*_request(9), HumanMessage(content="no id")]
+
+    update = await due_chunk_update(
+        _BASELINED,
+        request,
+        _reply(500 + _threshold(model_catalog)),
+        pool=aops_pool,
+        agent_id=_AGENT,
+        agent=_agent(),
+        catalog=model_catalog,
+    )
+
+    assert update == {}
+    assert await _jobs(aops_pool) == []
+
+
+async def test_a_turn_with_understanding_off_or_without_a_pool_does_nothing(
+    aops_pool: AsyncConnectionPool, model_catalog: ModelCatalog
+) -> None:
+    past = _reply(500 + _threshold(model_catalog))
+
+    poolless = await due_chunk_update(
+        _BASELINED,
+        _request(10),
+        past,
+        pool=None,
+        agent_id=_AGENT,
+        agent=_agent(),
+        catalog=model_catalog,
+    )
+    disabled = await due_chunk_update(
+        _BASELINED,
+        _request(10),
+        past,
+        pool=aops_pool,
+        agent_id=_AGENT,
+        agent=_agent(enabled=False),
+        catalog=model_catalog,
+    )
+
+    assert poolless == disabled == {}
+    assert await _jobs(aops_pool) == []
+
+
+async def test_compaction_queues_the_remainder_against_the_boundary(
+    aops_pool: AsyncConnectionPool,
+) -> None:
     compact = CompactState(version=2, understanding_cut_index=6, understanding_cut_tokens=900)
-    await uc.enqueue_closing_chunk(
-        compact, _request(12), pool=MagicMock(), agent_id=3, boundary="cp-9", read_agent=_read_agent
+
+    await enqueue_closing_chunk(
+        compact,
+        _request(12),
+        pool=aops_pool,
+        agent_id=_AGENT,
+        boundary="cp-9",
+        understanding_enabled=True,
     )
-    assert queue.calls == [
-        (
-            3,
-            {
-                "compact_version": 2,
-                "chunk": Chunk(6, 12),
-                "end_msg_id": "m11",
-                "boundary_checkpoint_id": "cp-9",
-            },
-        ),
-    ]
+
+    assert await _jobs(aops_pool) == [(_AGENT, 2, 6, 12, "m11", "cp-9", "pending")]
 
 
-async def test_compaction_without_a_remainder_or_a_boundary_enqueues_nothing(
-    monkeypatch: pytest.MonkeyPatch,
+async def test_compaction_without_a_remainder_a_boundary_or_the_feature_queues_nothing(
+    aops_pool: AsyncConnectionPool,
 ) -> None:
-    queue = _Queue()
-    monkeypatch.setattr(uc, "enqueue_chunk", queue)
     at_end = CompactState(understanding_cut_index=12)
-    await uc.enqueue_closing_chunk(
-        at_end, _request(12), pool=MagicMock(), agent_id=3, boundary="cp-9", read_agent=_read_agent
-    )
-    await uc.enqueue_closing_chunk(
+    for compact, boundary, enabled in (
+        (at_end, "cp-9", True),
+        (CompactState(), None, True),
+        (CompactState(), "cp-9", False),
+    ):
+        await enqueue_closing_chunk(
+            compact,
+            _request(12),
+            pool=aops_pool,
+            agent_id=_AGENT,
+            boundary=boundary,
+            understanding_enabled=enabled,
+        )
+    await enqueue_closing_chunk(
         CompactState(),
         _request(12),
-        pool=MagicMock(),
-        agent_id=3,
-        boundary=None,
-        read_agent=_read_agent,
-    )
-    assert queue.calls == []
-
-
-def test_compaction_resets_the_cut_with_the_version() -> None:
-    nxt = CompactState(
-        version=2, understanding_cut_index=40, understanding_cut_tokens=70_000, reminder_shown=True
-    ).next_segment()
-    assert (nxt.version, nxt.understanding_cut_index, nxt.understanding_cut_tokens) == (3, 0, 0)
-    assert nxt.reminder_shown  # the other bookkeeping rides along untouched
-
-
-async def test_closing_chunk_stops_before_an_unanswered_tool_call(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    queue = _Queue()
-    monkeypatch.setattr(uc, "enqueue_chunk", queue)
-    open_call = AIMessage(
-        content="", id="call", tool_calls=[{"name": "execute_code", "args": {}, "id": "t1"}]
-    )
-    await uc.enqueue_closing_chunk(
-        CompactState(version=2, understanding_cut_index=3, understanding_cut_tokens=900),
-        [*_request(8), open_call],
-        pool=MagicMock(),
-        agent_id=3,
+        pool=None,
+        agent_id=_AGENT,
         boundary="cp-9",
-        read_agent=_read_agent,
-    )
-    assert queue.calls == [
-        (
-            3,
-            {
-                "compact_version": 2,
-                "chunk": Chunk(3, 8),
-                "end_msg_id": "m7",
-                "boundary_checkpoint_id": "cp-9",
-            },
-        )
-    ]
-
-
-def _framework(kind: str, id_: str) -> HumanMessage:
-    return HumanMessage(
-        content=f"<system_note>\n{id_}\n</system_note>",
-        id=id_,
-        additional_kwargs={"meiva_msg_type": kind},
+        understanding_enabled=True,
     )
 
-
-def _new_agent_segment() -> list[AnyMessage]:
-    return [
-        SystemMessage(content="prompt", id="sys"),
-        _framework("system_note", "timeout"),
-        _framework("system_note", "tz"),
-        _framework("system_note", "agent-id"),
-        _framework("system_note", "memory-index"),
-        HumanMessage(
-            content="first task", id="u1", additional_kwargs={"meiva_msg_type": "inbound"}
-        ),
-        AIMessage(content="ok", id="a1"),
-    ]
+    assert await _jobs(aops_pool) == []
 
 
-def _compacted_segment() -> list[AnyMessage]:
-    return [
-        SystemMessage(content="prompt", id="sys"),
-        _framework("system_note", "timeout"),
-        _framework("system_note", "tz"),
-        _framework("system_note", "agent-id"),
-        _framework("system_note", "memory-index"),
-        _framework("compact_summary", "summary"),
-        _framework("system_note", "dump-path"),
-        AIMessage(content="continuing", id="a1"),
-        HumanMessage(content="later", id="u2", additional_kwargs={"meiva_msg_type": "inbound"}),
-    ]
-
-
-def test_head_of_a_new_agent_ends_at_the_first_user_message() -> None:
-    assert uc.segment_head_len(_new_agent_segment()) == 5
-
-
-def test_head_of_a_compacted_segment_includes_summary_and_dump_note() -> None:
-    assert uc.segment_head_len(_compacted_segment()) == 7
-
-
-def test_head_stops_at_the_first_non_framework_message_and_edge_cases() -> None:
-    assert uc.segment_head_len([]) == 0
-    assert uc.segment_head_len(_request(3)) == 1
-    # a framework note later in the segment is material, not head
-    later = [*_new_agent_segment(), _framework("system_note", "later")]
-    assert uc.segment_head_len(later) == 5
-    request = _framework("compact_request", "req")
-    assert uc.segment_head_len([SystemMessage(content="p"), request]) == 2
-
-
-async def test_first_turn_baseline_skips_the_whole_compacted_head() -> None:
-    update = await uc.due_chunk_update(
-        CompactState(version=2),
-        _compacted_segment(),
-        _reply(40_000),
-        pool=MagicMock(),
-        agent_id=3,
-        model="m",
-        overrides=ModelOverrides.from_pins({}),
-        catalog=build_model_catalog(),
-        read_agent=_read_agent,
-    )
-    assert update["compact"].understanding_cut_index == 7
-
-
-async def test_closing_chunk_of_a_compacted_segment_starts_past_the_summary(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    queue = _Queue()
-    monkeypatch.setattr(uc, "enqueue_chunk", queue)
-    await uc.enqueue_closing_chunk(
-        CompactState(version=2),
-        _compacted_segment(),
-        pool=MagicMock(),
-        agent_id=3,
-        boundary="cp-1",
-        read_agent=_read_agent,
-    )
-    assert queue.calls[0][1]["chunk"] == Chunk(7, 9)
-    queue.calls.clear()
-    # a segment that never left its head has nothing to close
-    await uc.enqueue_closing_chunk(
-        CompactState(version=0),
-        _new_agent_segment()[:5],
-        pool=MagicMock(),
-        agent_id=3,
-        boundary="cp-0",
-        read_agent=_read_agent,
-    )
-    assert queue.calls == []
-
-
-class _State:
-    def __init__(self, messages: list[AnyMessage]) -> None:
-        self.messages = messages
+def _state(*messages: AnyMessage) -> AgentState:
+    return AgentState(messages=[*_request(3), *messages], halted=False)
 
 
 def _stamped(seconds: int) -> HumanMessage:
@@ -432,92 +238,114 @@ def _stamped(seconds: int) -> HumanMessage:
     )
 
 
-def _checkpoint_clock(monkeypatch: pytest.MonkeyPatch, seconds: list[int | None]) -> list[int]:
-    """The newest checkpoint's time per poll (seconds past 12:00:00); the polls made."""
-    polls: list[int] = []
+async def _checkpoint(pool: AsyncConnectionPool, checkpoint_id: str, seconds: int) -> None:
+    async with pool.connection() as conn, conn.cursor() as cur:
+        await cur.execute(
+            "INSERT INTO checkpoints (thread_id, checkpoint_ns, checkpoint_id, type, checkpoint,"
+            " metadata) VALUES (%s, '', %s, 'x', %s::jsonb, '{}'::jsonb)",
+            (
+                str(_AGENT),
+                checkpoint_id,
+                json.dumps({"ts": f"2026-10-07T12:00:{seconds:02d}+00:00"}),
+            ),
+        )
 
-    async def newest(_pool: Any, _agent_id: int) -> datetime | None:
-        polls.append(1)
-        sec = seconds.pop(0) if len(seconds) > 1 else seconds[0]
-        return None if sec is None else datetime(2026, 10, 7, 12, 0, sec, tzinfo=UTC)
 
-    monkeypatch.setattr(uc, "newest_checkpoint_ts", newest)
-    monkeypatch.setattr(settings.agent, "understanding_enabled", True)
-    monkeypatch.setattr(uc, "SNAPSHOT_POLL_SECONDS", 0.0)
-    return polls
+_QUICK = SnapshotWait(wait_seconds=0.3, poll_seconds=0.01)
 
 
 async def test_the_boundary_waits_for_a_checkpoint_as_new_as_the_states_last_message(
-    monkeypatch: pytest.MonkeyPatch, emitted_events: EmittedEvents
+    aops_pool: AsyncConnectionPool, emitted_events: EmittedEvents
 ) -> None:
-    """The graph persists a super-step's checkpoint asynchronously, so the newest row can be one
-    step behind the state when a compaction stamps its boundary: the stamp waits for it."""
-    polls = _checkpoint_clock(monkeypatch, [5, 9, 20])  # the last message is from second 10
-    await uc.await_snapshot(
-        MagicMock(), _State([*_request(3), _stamped(10)]), 3, read_agent=_read_agent
+    await _checkpoint(aops_pool, "c1", 5)  # the last message is from second 10
+    waiting = asyncio.create_task(
+        await_snapshot(
+            aops_pool,
+            _state(_stamped(10)),
+            _AGENT,
+            understanding_enabled=True,
+            wait=SnapshotWait(wait_seconds=30.0, poll_seconds=0.01),
+        )
     )
-    assert len(polls) == 3 and emitted_events.names() == []
+    await asyncio.sleep(0.1)
+    assert not waiting.done()
+
+    await _checkpoint(aops_pool, "c2", 20)
+    await asyncio.wait_for(waiting, timeout=10)
+
+    assert emitted_events.names() == []
 
 
 async def test_a_snapshot_that_never_catches_up_is_stamped_anyway_with_an_event(
-    monkeypatch: pytest.MonkeyPatch, emitted_events: EmittedEvents
+    aops_pool: AsyncConnectionPool, emitted_events: EmittedEvents
 ) -> None:
-    _checkpoint_clock(monkeypatch, [5])
-    monkeypatch.setattr(uc, "SNAPSHOT_WAIT_SECONDS", 0.0)
-    await uc.await_snapshot(
-        MagicMock(), _State([*_request(3), _stamped(10)]), 3, read_agent=_read_agent
+    await _checkpoint(aops_pool, "c1", 5)
+
+    await await_snapshot(
+        aops_pool, _state(_stamped(10)), _AGENT, understanding_enabled=True, wait=_QUICK
     )
+
     assert emitted_events.names() == ["understanding_snapshot_lag"]
-    assert emitted_events.attributes("understanding_snapshot_lag")[0]["agent_id"] == 3
+    assert emitted_events.attributes("understanding_snapshot_lag")[0]["agent_id"] == _AGENT
 
 
-def _inbound_picked_up(pickup: str, created: str) -> HumanMessage:
-    return HumanMessage(
+# meiva:note
+# Arrived at second 3, picked up at second 10: a checkpoint at second 5 predates the pickup, so the stamp does not pass (its arrival time alone would let it).
+async def test_an_inbound_last_message_is_compared_by_the_time_the_model_read_it(
+    aops_pool: AsyncConnectionPool, emitted_events: EmittedEvents
+) -> None:
+    await _checkpoint(aops_pool, "c1", 5)
+    inbound = HumanMessage(
         content="in",
         id="in1",
         additional_kwargs={
             "meiva_msg_type": "inbound",
-            "meiva_created_at": created,
-            "meiva_picked_up_at": pickup,
+            "meiva_created_at": "2026-10-07T12:00:03+00:00",
+            "meiva_picked_up_at": "2026-10-07T12:00:10+00:00",
         },
     )
 
+    await await_snapshot(
+        aops_pool, _state(inbound), _AGENT, understanding_enabled=True, wait=_QUICK
+    )
 
-async def test_an_inbound_last_message_is_compared_by_the_time_the_model_read_it(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """An inbound message arrived at second 3 but was picked up at second 10: the checkpoint at
-    second 5 predates its pickup, so the stamp waits (its arrival time alone would let it pass)."""
-    polls = _checkpoint_clock(monkeypatch, [5, 12])
-    inbound = _inbound_picked_up("2026-10-07T12:00:10+00:00", "2026-10-07T12:00:03+00:00")
-    await uc.await_snapshot(MagicMock(), _State([*_request(3), inbound]), 3, read_agent=_read_agent)
-    assert len(polls) == 2
+    assert emitted_events.names() == ["understanding_snapshot_lag"]
 
 
+# meiva:note
+# Old messages have no timezone (or no stamp at all): the check cannot pass, so it is the timeout path at once: no exception, the boundary is stamped, the lag event says so. A checkpoint from far in the future is there to be read, and is not.
 @pytest.mark.parametrize(
     "stamp",
     [None, "2026-10-07T12:00:10", "not a time"],
     ids=["no timestamp", "no timezone", "unparsable"],
 )
 async def test_a_last_message_without_a_usable_time_is_not_waved_through_or_an_error(
-    monkeypatch: pytest.MonkeyPatch, stamp: str | None, emitted_events: EmittedEvents
+    aops_pool: AsyncConnectionPool, stamp: str | None, emitted_events: EmittedEvents
 ) -> None:
-    """Old messages have no timezone (or no stamp at all): the check cannot pass, so it is the
-    timeout path at once: no exception, the boundary is stamped, the lag event says so."""
-    polls = _checkpoint_clock(monkeypatch, [99])
+    await _checkpoint(aops_pool, "c1", 59)
     kwargs = {} if stamp is None else {"meiva_created_at": stamp}
     last = HumanMessage(content="old", id="old", additional_kwargs=kwargs)
-    await uc.await_snapshot(MagicMock(), _State([*_request(3), last]), 3, read_agent=_read_agent)
-    assert emitted_events.names() == ["understanding_snapshot_lag"] and polls == []
+
+    await await_snapshot(
+        aops_pool,
+        _state(last),
+        _AGENT,
+        understanding_enabled=True,
+        wait=SnapshotWait(wait_seconds=30.0, poll_seconds=0.01),
+    )
+
+    assert emitted_events.names() == ["understanding_snapshot_lag"]
 
 
-async def test_nothing_is_read_when_understanding_is_off_or_there_is_nothing_to_compare(
-    monkeypatch: pytest.MonkeyPatch,
+async def test_nothing_is_waited_for_when_understanding_is_off_or_there_is_nothing_to_compare(
+    aops_pool: AsyncConnectionPool, emitted_events: EmittedEvents
 ) -> None:
-    polls = _checkpoint_clock(monkeypatch, [None])
-    monkeypatch.setattr(settings.agent, "understanding_enabled", False)
-    await uc.await_snapshot(MagicMock(), _State([_stamped(10)]), 3, read_agent=_read_agent)
-    monkeypatch.setattr(settings.agent, "understanding_enabled", True)
-    await uc.await_snapshot(MagicMock(), None, 3, read_agent=_read_agent)
-    await uc.await_snapshot(None, _State([_stamped(10)]), 3, read_agent=_read_agent)
-    assert polls == []
+    await await_snapshot(
+        aops_pool, _state(_stamped(10)), _AGENT, understanding_enabled=False, wait=_QUICK
+    )
+    await await_snapshot(aops_pool, None, _AGENT, understanding_enabled=True, wait=_QUICK)
+    await await_snapshot(
+        None, _state(_stamped(10)), _AGENT, understanding_enabled=True, wait=_QUICK
+    )
+
+    assert emitted_events.names() == []

@@ -17,7 +17,6 @@ from langgraph.runtime import Runtime
 from langgraph.types import Command
 
 from agent.hooks import Hook, make_hook_runner
-from agent.hooks.tests.fakes import make_fake_ops_pool
 from agent.state import AgentState
 from base.agents.context import MeivaContext
 from base.clock import Clock
@@ -26,8 +25,9 @@ from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
+from base.log.tests.log_records import LogRecords
 from base.packages.plugin_providers import build_model_catalog
-from base.packages.plugins import activation
+from base.packages.plugins.activation import PLUGIN_ACTIVATION_EVENT
 from base.packages.plugins.extensions import ExtensionRegistry, PluginContributions
 
 
@@ -76,7 +76,7 @@ def _empty_state() -> AgentState:
 def _empty_runtime(database_gate: ProcessDbGate) -> Runtime[MeivaContext]:
     """Test runtime — MeivaContext fields are all mocks, hook doesn't touch them is fine."""
     ctx = MeivaContext(
-        ops_pool=make_fake_ops_pool(),
+        ops_pool=None,
         llm=MagicMock(),
         event_publisher=MagicMock(),
         agent=AgentSlices.resolve(default_reader=defaults()),
@@ -253,27 +253,20 @@ async def test_hook_can_read_agent_id_from_config(database_gate: ProcessDbGate):
 # ── activation telemetry (issue #40) ────────────────────────────────────────
 
 
-@pytest.fixture
-def activations(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, str, str, str]]:
-    """Capture (plugin, surface, identifier, detail) per recorded activation.
-
-    Keeps the real `record`'s attribution gate — an unattributed firing is
-    dropped rather than captured — so these tests read the emitted stream, not
-    the call log."""
-    recorded: list[tuple[str, str, str, str]] = []
-
-    def spy(
-        plugin: str | None, surface: str, identifier: str, *, detail: str = "", model: str = ""
-    ) -> None:
-        if plugin is not None:
-            recorded.append((plugin, surface, identifier, detail))
-
-    monkeypatch.setattr(activation, "record", spy)
-    return recorded
+def _activations(loguru_records: LogRecords) -> list[tuple[str, str, str, str]]:
+    return [
+        (
+            r["extra"]["plugin"],
+            r["extra"]["surface"],
+            r["extra"]["identifier"],
+            r["extra"]["detail"],
+        )
+        for r in loguru_records.events(PLUGIN_ACTIVATION_EVENT)
+    ]
 
 
 async def test_plugin_hook_state_update_records_activation(
-    activations: list[tuple[str, str, str, str]], database_gate: ProcessDbGate
+    loguru_records: LogRecords, database_gate: ProcessDbGate
 ):
     """A plugin hook that returned a state update acted on the turn — the record
     names the keys it wrote, which is also how the `state` surface is covered
@@ -281,11 +274,13 @@ async def test_plugin_hook_state_update_records_activation(
     await _runner(_ReturnHook({"halted": True}), plugin="myplugin")(
         _empty_state(), _empty_runtime(database_gate=database_gate), _empty_config()
     )
-    assert activations == [("myplugin", "hooks", "before_llm", "_ReturnHook wrote halted")]
+    assert _activations(loguru_records) == [
+        ("myplugin", "hooks", "before_llm", "_ReturnHook wrote halted")
+    ]
 
 
 async def test_each_hook_is_attributed_to_the_plugin_it_was_paired_with(
-    activations: list[tuple[str, str, str, str]], database_gate: ProcessDbGate
+    loguru_records: LogRecords, database_gate: ProcessDbGate
 ):
     """The plugin name rides the `(plugin, hook)` pair, so two plugins' hooks at one edge are
     attributed separately, and a framework hook (None) between them records nothing."""
@@ -300,55 +295,49 @@ async def test_each_hook_is_attributed_to_the_plugin_it_was_paired_with(
     )
 
     await runner(_empty_state(), _empty_runtime(database_gate=database_gate), _empty_config())
-    assert [(plugin, detail) for plugin, _, _, detail in activations] == [
+    assert [(plugin, detail) for plugin, _, _, detail in _activations(loguru_records)] == [
         ("alpha", "_ReturnHook wrote goto"),
         ("beta", "_ReturnHook wrote messages"),
     ]
 
 
 async def test_plugin_hook_returning_none_records_nothing(
-    activations: list[tuple[str, str, str, str]], database_gate: ProcessDbGate
+    loguru_records: LogRecords, database_gate: ProcessDbGate
 ):
     """Pure observation stays free — a None return is not an activation."""
     await _runner(_ReturnHook(None), plugin="myplugin")(
         _empty_state(), _empty_runtime(database_gate=database_gate), _empty_config()
     )
-    assert activations == []
+    assert _activations(loguru_records) == []
 
 
 async def test_framework_hook_records_nothing(
-    activations: list[tuple[str, str, str, str]], database_gate: ProcessDbGate
+    loguru_records: LogRecords, database_gate: ProcessDbGate
 ):
     """Framework hooks carry no plugin name, so they are absent from the attribution
     ledger and from activation telemetry alike."""
     await _runner(_ReturnHook({"halted": True}))(
         _empty_state(), _empty_runtime(database_gate=database_gate), _empty_config()
     )
-    assert activations == []
+    assert _activations(loguru_records) == []
 
 
 async def test_activation_key_matches_the_ledger_entry(
-    monkeypatch: pytest.MonkeyPatch, database_gate: ProcessDbGate
+    loguru_records: LogRecords, database_gate: ProcessDbGate
 ):
     """The whole point of reusing `(plugin, surface, identifier)`: an activation
     joins onto the `Contribution` the same declaration yields, with no second
     identifier space to keep in sync."""
-    recorded: list[tuple[str, str, str]] = []
-
-    def spy(
-        plugin: str | None, surface: str, identifier: str, *, detail: str = "", model: str = ""
-    ) -> None:
-        if plugin is not None:
-            recorded.append((plugin, surface, identifier))
-
-    monkeypatch.setattr(activation, "record", spy)
     hook = _ReturnHook({"halted": True})
     registry = ExtensionRegistry((("myplugin", PluginContributions(before_exec=(hook,))),))
     ledger = registry.records("myplugin")
 
     runner = make_hook_runner("before_exec", "exec", list(registry.hooks("before_exec")))
     await runner(_empty_state(), _empty_runtime(database_gate=database_gate), _empty_config())
-    assert [(c.plugin, c.surface, c.identifier) for c in ledger] == recorded
+    assert [(c.plugin, c.surface, c.identifier) for c in ledger] == [
+        (plugin, surface, identifier)
+        for plugin, surface, identifier, _ in _activations(loguru_records)
+    ]
 
 
 async def test_runner_emits_one_hook_timing_event_per_pass(

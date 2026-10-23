@@ -21,7 +21,7 @@ def _langchain_modules() -> list[str]:
 
 
 def graph_light() -> dict[str, Any]:
-    import agent.graph.exec.protocol  # noqa: F401  # pyright: ignore[reportUnusedImport]
+    import agent.execution.protocol  # noqa: F401  # pyright: ignore[reportUnusedImport]
 
     heavy = sorted(
         name
@@ -40,7 +40,7 @@ def graph_light() -> dict[str, Any]:
 def stateless_request() -> dict[str, Any]:
     import tempfile
 
-    from agent.graph.exec.protocol import read_request
+    from agent.execution.protocol import read_request
 
     req = Path(tempfile.mkdtemp(prefix="lazy-child-")) / "req-x.json"
     req.write_text(
@@ -155,7 +155,7 @@ def plugin_surface_upgrade() -> dict[str, Any]:
 
 
 def stateful_request_raw(req: str) -> dict[str, Any]:
-    from agent.graph.exec.protocol import read_request
+    from agent.execution.protocol import read_request
 
     payload = read_request(Path(req))
     return {
@@ -193,7 +193,7 @@ class _ImportingModuleName(str):
 def child_state_lazy(req: str, mutate_module_names: str) -> dict[str, Any]:
     import meiva
     from agent.execution import child as exec_child
-    from agent.graph.exec.protocol import read_request
+    from agent.execution.protocol import read_request
 
     child = exec_child.import_runtime(0.0)  # the child boot's step that binds the SDK
     payload = read_request(Path(req))
@@ -216,7 +216,7 @@ def child_state_lazy(req: str, mutate_module_names: str) -> dict[str, Any]:
 def child_cwd_set_first_touch(req: str, arg: str) -> dict[str, Any]:
     import meiva
     from agent.execution import child as exec_child
-    from agent.graph.exec.protocol import read_request
+    from agent.execution.protocol import read_request
 
     child = exec_child.import_runtime(0.0)  # the child boot's step that binds the SDK
     payload = read_request(Path(req))

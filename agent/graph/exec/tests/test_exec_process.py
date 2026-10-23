@@ -10,7 +10,8 @@ import psutil
 import pytest
 
 from agent.graph.exec import _subprocess
-from agent.graph.exec._result import ExecDone
+from agent.graph.exec._result import ExecCrashed, ExecDone
+from agent.graph.exec.tests.process_inputs import real_parent
 from base.native_process.exec_domain import ExecProcessDomain
 from base.native_process.process_control import SYSTEM_PROCESS_CONTROL
 from base.native_process.tests.fake_process_control import FakeProcessControl
@@ -19,7 +20,7 @@ from meiva.tests.fixtures.pin_agent import exec_context
 
 _AGENT_ID = 424242
 
-_GROUP_CHILD = Path(__file__).with_name("_group_child.py")
+_GROUP_CHILD = Path(__file__).parent / "resources" / "group_child.py"
 
 
 async def _wait_for(path: Path, timeout_s: float = 10.0) -> str:
@@ -91,6 +92,7 @@ async def test_a_run_ends_with_its_group_dead_and_its_files_removed(tmp_path: Pa
         asyncio.Event(),
         30.0,
         exec_dir=tmp_path / "exec",
+        parent=real_parent(),
         accumulation_max_chars=1_000_000,
     )
 
@@ -120,6 +122,7 @@ async def test_a_detached_output_holder_cannot_hold_the_run_past_the_drain_bound
             asyncio.Event(),
             30.0,
             exec_dir=tmp_path / "exec",
+            parent=real_parent(),
             accumulation_max_chars=1_000_000,
         )
 
@@ -129,3 +132,17 @@ async def test_a_detached_output_holder_cannot_hold_the_run_past_the_drain_bound
     finally:
         if pid_file.exists():
             psutil.Process(int(pid_file.read_text())).kill()
+
+
+async def test_real_missing_executable_crashes_the_exec_without_a_child(tmp_path: Path) -> None:
+    outcome, _ = await _subprocess.run_in_subprocess(
+        "raise AssertionError('must never execute')",
+        exec_context(None),
+        asyncio.Event(),
+        2,
+        exec_dir=tmp_path,
+        parent=real_parent(executable=str(tmp_path / "absent")),
+        accumulation_max_chars=1_000_000,
+    )
+    assert isinstance(outcome, ExecCrashed)
+    assert "could not be spawned" in outcome.output

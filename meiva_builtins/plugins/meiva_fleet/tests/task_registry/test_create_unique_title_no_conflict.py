@@ -10,11 +10,9 @@ from uuid import uuid4
 import psycopg
 import pytest
 
-import meiva
 from meiva.tests.fixtures.pin_agent import pin_agent
 from meiva_builtins.plugins.meiva_fleet import task_registry
 from meiva_builtins.plugins.meiva_fleet.tests.task_registry.seeds import (
-    ignore_system_note,
     parent_of,
     persisted_parent,
     seed_agent,
@@ -170,7 +168,6 @@ def test_update_statuses_are_peer_open(
     db_conn: psycopg.Connection,
     root_task_id: int,
     next_status: str,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Any peer may write in_progress/done/cancelled — the 'ongoing' ownership
     gate was removed with the status itself (user ruling 2026-09-15), so no
@@ -182,7 +179,6 @@ def test_update_statuses_are_peer_open(
         "peer-status-change", "detail", parent=root_task_id, owner=owner, operation_key=str(uuid4())
     )
     pin_agent(stranger)
-    monkeypatch.setattr(meiva.agents, "send_system_note", ignore_system_note)
 
     task_registry.update(task.id, status=next_status, operation_key=str(uuid4()))
 

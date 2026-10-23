@@ -93,15 +93,8 @@ async def test_claim_auto_resurrect_chat_batch_wakes_and_keeps_chat(
 
     old = meiva.context.original_incarnation
     assert old is not None
-    assert (
-        await apply_hosted_lifecycle(
-            aops_pool,
-            old,
-            bus=event_bus,
-            resume_turn=False,
-        )
-        == "terminate"
-    )
+    applied = await apply_hosted_lifecycle(aops_pool, old, resume_turn=False)
+    assert applied is not None and applied.kind == "terminate"
     assert db_conn.execute(
         "SELECT status FROM inbound_messages WHERE id=%s", (stop,)
     ).fetchone() == ("done",)

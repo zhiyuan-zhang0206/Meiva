@@ -5,6 +5,7 @@ from contextlib import redirect_stdout
 import pytest
 
 import meiva
+from base.agents.sdk.call_policy import SamplingPolicy, SamplingPolicyOwner
 from base.packages.plugin_config_images import DiskPluginConfigImages
 from base.packages.plugins.extensions import ExtensionRegistry
 from base.paths.home import resolve_meiva_home
@@ -20,22 +21,15 @@ def _render_help(target: object) -> str:
 
 
 @pytest.fixture
-def load_meiva_code_plugin(
-    monkeypatch: pytest.MonkeyPatch, model_installation: Installation
-) -> Iterator[None]:
-    from base.agents.sdk import call_policy
+def load_meiva_code_plugin(model_installation: Installation) -> Iterator[None]:
     from meiva_builtins.plugins.meiva_code import plugin
-
-    def _policy_for_test(_owner: call_policy.SamplingPolicyOwner) -> call_policy.SamplingPolicy:
-        return call_policy.SamplingPolicy()
-
-    monkeypatch.setattr(call_policy, "policy", _policy_for_test)
 
     install.install(
         ExtensionRegistry((("meiva_code", plugin.contribute()),)),
         catalog=model_installation.require_catalog(),
         authority=model_installation.authority,
         config_images=DiskPluginConfigImages(resolve_meiva_home()),
+        sampling=SamplingPolicyOwner(reader=SamplingPolicy),
     )
 
     yield
@@ -44,22 +38,15 @@ def load_meiva_code_plugin(
 
 
 @pytest.fixture
-def _load_meiva_fleet_plugin(
-    monkeypatch: pytest.MonkeyPatch, model_installation: Installation
-) -> Iterator[None]:
-    from base.agents.sdk import call_policy
+def _load_meiva_fleet_plugin(model_installation: Installation) -> Iterator[None]:
     from meiva_builtins.plugins.meiva_fleet import plugin
-
-    def _policy_for_test(_owner: call_policy.SamplingPolicyOwner) -> call_policy.SamplingPolicy:
-        return call_policy.SamplingPolicy()
-
-    monkeypatch.setattr(call_policy, "policy", _policy_for_test)
 
     install.install(
         ExtensionRegistry((("meiva_fleet", plugin.contribute()),)),
         catalog=model_installation.require_catalog(),
         authority=model_installation.authority,
         config_images=DiskPluginConfigImages(resolve_meiva_home()),
+        sampling=SamplingPolicyOwner(reader=SamplingPolicy),
     )
 
     yield

@@ -1,247 +1,139 @@
-"""Tests for `skills_to_expand_at_start` — the preloaded-skills note.
-
-Two surfaces:
-- `resolve_prompt_skills` (agent/graph/prompt/capabilities.py): the resolver shared
-  with the capabilities index — wildcard, identifier-then-name, warn-and-skip.
-- `preloaded_skills_note` (agent/graph/_memory_inject.py): the full-SKILL.md
-  system note injected at cold start + after every compact (same carrier as the
-  memory index).
-
-Skills are faked by running in a per-test unit home (`unit_home`) and treating
-every dir under `<home>/skills` as an enabled overlay entry — same shape as
-meiva/tests/skills/test_skills.py.
-"""
-
+# meiva:note
+# `skills_to_expand_at_start` and the preloaded-skills note. Two surfaces: the resolver shared
+# with the capabilities index (`skill_selection.resolve_prompt_skills`: wildcard,
+# identifier-then-name, unresolved names returned for the reader to report) and the full
+# SKILL.md note injected at cold start and after every compact (`context_notes`). Skills are
+# real folders under `tmp_path`, scanned by the production scanner into the `SkillView` the
+# resolver decides on; only the shell tests at the end read the installed catalog, through a
+# real install registry in a per-test unit home.
 from __future__ import annotations
 
 from pathlib import Path
 
 import pytest
+from langchain_core.messages import BaseMessage
 
-from agent.graph.prompt.capabilities import resolve_prompt_skills
-from agent.graph.prompt.context_notes import preloaded_skills_note
+from agent.graph.prompt.context_notes import (
+    fork_tail_skills_note,
+    preloaded_note,
+    preloaded_skills_note,
+)
+from agent.graph.prompt.skill_selection import resolve_prompt_skills
+from agent.graph.tests.prompt.skill_support import skill_view, write_skill
 from base.agents.context import MeivaContext
 from base.agents.messages.kwargs import NoteTag
-from base.clock import Clock
-from base.config import settings
+from base.api_contracts.agent_contract import Harness
+from base.config.tests.configuration import defaults
 from base.host.env.agent_slices import AgentSlices
 from base.packages.extensions import install_registry
-from base.packages.plugin_providers import build_model_catalog
-from base.packages.skills.tree import identifier
+from base.packages.extensions.install_registry import InstalledPackage
+from base.packages.skills.tree import Skill, identifier
 from base.paths import meiva_home, skills_dir
 
 
-@pytest.fixture(autouse=True)
-def _isolate_load_dir(unit_home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Run in a per-test unit home whose `skills/` does not exist by default so
-    the real ~/.agents/skills/ never leaks into a scan; fake_skills_dir creates it."""
+def test_resolve_by_bare_name(tmp_path: Path) -> None:
+    write_skill(tmp_path, "ultra_speed", "ultra_speed", "go fast")
 
-    def _all_enabled() -> set[str]:
-        d = skills_dir(meiva_home())
-        return {p.name for p in d.iterdir() if p.is_dir()} if d.is_dir() else set()
+    resolved = resolve_prompt_skills(["ultra_speed"], skill_view(tmp_path))
 
-    monkeypatch.setattr(install_registry, "loadable_skill_names", _all_enabled)
+    assert [s["name"] for s in resolved.skills] == ["ultra_speed"]
+    assert resolved.unresolved == ()
 
 
-@pytest.fixture
-def fake_skills_dir(unit_home: Path) -> Path:
-    d = skills_dir(meiva_home())
-    d.mkdir()
-    return d
-
-
-def _write_skill(root: Path, dirname: str, frontmatter: str, body: str = "") -> None:
-    skill_dir = root / dirname
-    skill_dir.mkdir(parents=True)
-    (skill_dir / "SKILL.md").write_text(f"---\n{frontmatter}\n---\n\n{body}", encoding="utf-8")
-
-
-def _expand(monkeypatch: pytest.MonkeyPatch, wanted: list[str]) -> None:
-    monkeypatch.setattr(settings.agent, "skills_to_expand_at_start", wanted)
-
-
-# ─── config field ─────────────────────────────────────────────────────────
-
-
-# ─── resolve_prompt_skills ─────────────────────────────────────────────────
-
-
-def test_resolve_by_bare_name(fake_skills_dir: Path) -> None:
-    _write_skill(fake_skills_dir, "ultra_speed", "name: ultra_speed\ndescription: go fast")
-    resolved = resolve_prompt_skills(
-        ["ultra_speed"],
-        AgentSlices.resolve(
-            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
-        ).prompt.sdk_disable,
-        config_field="skills_to_expand_at_start",
-    )
-    assert [s["name"] for s in resolved] == ["ultra_speed"]
-
-
-def test_resolve_by_dotted_identifier(fake_skills_dir: Path) -> None:
+def test_resolve_by_dotted_identifier(tmp_path: Path) -> None:
     """A namespaced skill resolves by its `.`-identifier, not just bare name."""
-    parent = fake_skills_dir / "meiva-memory"
-    _write_skill(parent, "consolidation", "name: consolidation\ndescription: merge notes")
-    resolved = resolve_prompt_skills(
-        ["meiva-memory.consolidation"],
-        AgentSlices.resolve(
-            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
-        ).prompt.sdk_disable,
-        config_field="skills_to_expand_at_start",
-    )
-    assert [identifier(s) for s in resolved] == ["meiva-memory:consolidation"]
+    write_skill(tmp_path / "meiva-memory", "consolidation", "consolidation", "merge notes")
+
+    resolved = resolve_prompt_skills(["meiva-memory.consolidation"], skill_view(tmp_path))
+
+    assert [identifier(s) for s in resolved.skills] == ["meiva-memory:consolidation"]
 
 
-def test_resolve_accepts_the_python_spelling_of_a_dash_skill(fake_skills_dir: Path) -> None:
+def test_resolve_accepts_the_python_spelling_of_a_dash_skill(tmp_path: Path) -> None:
     """A config value still written in the underscore (Python) form resolves to
     the dash-named skill — the backcompat that keeps a preset row written before
     the rename working."""
-    parent = fake_skills_dir / "meiva-memory"
-    _write_skill(parent, "consolidation", "name: consolidation\ndescription: merge notes")
-    resolved = resolve_prompt_skills(
-        ["meiva_memory.consolidation"],
-        AgentSlices.resolve(
-            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
-        ).prompt.sdk_disable,
-        config_field="skills_to_expand_at_start",
-    )
-    assert [identifier(s) for s in resolved] == ["meiva-memory:consolidation"]
+    write_skill(tmp_path / "meiva-memory", "consolidation", "consolidation", "merge notes")
+
+    resolved = resolve_prompt_skills(["meiva_memory.consolidation"], skill_view(tmp_path))
+
+    assert [identifier(s) for s in resolved.skills] == ["meiva-memory:consolidation"]
 
 
-def test_resolve_accepts_the_plugin_colon_spelling(fake_skills_dir: Path) -> None:
+def test_resolve_accepts_the_plugin_colon_spelling(tmp_path: Path) -> None:
     """An ecosystem-style `plugin:skill` reference folds to the `.` form."""
-    parent = fake_skills_dir / "meiva-memory"
-    _write_skill(parent, "consolidation", "name: consolidation\ndescription: merge notes")
-    resolved = resolve_prompt_skills(
-        ["meiva-memory:consolidation"],
-        AgentSlices.resolve(
-            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
-        ).prompt.sdk_disable,
-        config_field="skills_to_expand_at_start",
-    )
-    assert [identifier(s) for s in resolved] == ["meiva-memory:consolidation"]
+    write_skill(tmp_path / "meiva-memory", "consolidation", "consolidation", "merge notes")
+
+    resolved = resolve_prompt_skills(["meiva-memory:consolidation"], skill_view(tmp_path))
+
+    assert [identifier(s) for s in resolved.skills] == ["meiva-memory:consolidation"]
 
 
-def test_resolve_wildcard_selects_whole_catalog(fake_skills_dir: Path) -> None:
-    _write_skill(fake_skills_dir, "alpha", "name: alpha\ndescription: a")
-    _write_skill(fake_skills_dir, "beta", "name: beta\ndescription: b")
-    resolved = resolve_prompt_skills(
-        ["*"],
-        AgentSlices.resolve(
-            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
-        ).prompt.sdk_disable,
-        config_field="skills_to_expand_at_start",
-    )
-    assert {s["name"] for s in resolved} == {"alpha", "beta"}
+def test_resolve_wildcard_selects_whole_catalog(tmp_path: Path) -> None:
+    write_skill(tmp_path, "alpha", "alpha", "a")
+    write_skill(tmp_path, "beta", "beta", "b")
+
+    resolved = resolve_prompt_skills(["*"], skill_view(tmp_path))
+
+    assert {s["name"] for s in resolved.skills} == {"alpha", "beta"}
 
 
-def test_resolve_unknown_name_warns_and_skips(
-    fake_skills_dir: Path, caplog: pytest.LogCaptureFixture
-) -> None:
-    _write_skill(fake_skills_dir, "real", "name: real\ndescription: r")
-    with caplog.at_level("WARNING"):
-        resolved = resolve_prompt_skills(
-            ["real", "does_not_exist"],
-            AgentSlices.resolve(
-                default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
-            ).prompt.sdk_disable,
-            config_field="skills_to_expand_at_start",
-        )
-    assert [s["name"] for s in resolved] == ["real"]
-    assert "does_not_exist" in caplog.text
-    assert "skills_to_expand_at_start" in caplog.text  # warning names the config field
+def test_resolve_unknown_name_is_returned_not_selected(tmp_path: Path) -> None:
+    write_skill(tmp_path, "real", "real", "r")
+
+    resolved = resolve_prompt_skills(["real", "does_not_exist"], skill_view(tmp_path))
+
+    assert [s["name"] for s in resolved.skills] == ["real"]
+    assert resolved.unresolved == ("does_not_exist",)
 
 
-def test_resolve_empty_list_returns_empty(fake_skills_dir: Path) -> None:
-    _write_skill(fake_skills_dir, "real", "name: real\ndescription: r")
-    assert (
-        resolve_prompt_skills(
-            [],
-            AgentSlices.resolve(
-                default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
-            ).prompt.sdk_disable,
-            config_field="skills_to_expand_at_start",
-        )
-        == []
-    )
+def test_resolve_keeps_the_requested_order(tmp_path: Path) -> None:
+    write_skill(tmp_path, "first", "first", "1")
+    write_skill(tmp_path, "second", "second", "2")
+
+    resolved = resolve_prompt_skills(["second", "first"], skill_view(tmp_path))
+
+    assert [s["name"] for s in resolved.skills] == ["second", "first"]
 
 
-def test_resolve_returns_empty_when_skills_sdk_disabled(
-    fake_skills_dir: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    _write_skill(fake_skills_dir, "real", "name: real\ndescription: r")
-    monkeypatch.setattr(settings.agent, "sdk_disable", ["skills"])
-    assert (
-        resolve_prompt_skills(
-            ["real"],
-            AgentSlices.resolve(
-                default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
-            ).prompt.sdk_disable,
-            config_field="skills_to_expand_at_start",
-        )
-        == []
-    )
+def test_resolve_empty_list_returns_empty(tmp_path: Path) -> None:
+    write_skill(tmp_path, "real", "real", "r")
+
+    resolved = resolve_prompt_skills([], skill_view(tmp_path))
+
+    assert (resolved.skills, resolved.unresolved) == ((), ())
 
 
-# ─── preloaded_skills_note ─────────────────────────────────────────────────
+def test_resolve_returns_empty_when_skills_sdk_disabled(tmp_path: Path) -> None:
+    write_skill(tmp_path, "real", "real", "r")
+
+    resolved = resolve_prompt_skills(["real"], skill_view(tmp_path, disabled=["skills"]))
+
+    assert (resolved.skills, resolved.unresolved) == ((), ())
 
 
-def test_note_none_when_config_empty(
-    fake_skills_dir: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    _write_skill(fake_skills_dir, "real", "name: real\ndescription: r")
-    _expand(monkeypatch, [])
-    assert (
-        preloaded_skills_note(
-            MeivaContext(
-                agent=AgentSlices.resolve(
-                    default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
-                ),
-                catalog=build_model_catalog(),
-                clock_factory=Clock.from_settings,
-            )
-        )
-        is None
-    )
+def _text(note: BaseMessage) -> str:
+    content: object = note.content
+    assert isinstance(content, str)
+    return content
 
 
-def test_note_none_when_nothing_resolves(
-    fake_skills_dir: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    _write_skill(fake_skills_dir, "real", "name: real\ndescription: r")
-    _expand(monkeypatch, ["ghost"])
-    assert (
-        preloaded_skills_note(
-            MeivaContext(
-                agent=AgentSlices.resolve(
-                    default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
-                ),
-                catalog=build_model_catalog(),
-                clock_factory=Clock.from_settings,
-            )
-        )
-        is None
-    )
+def _skills(root: Path, wanted: list[str]) -> tuple[Skill, ...]:
+    return resolve_prompt_skills(wanted, skill_view(root)).skills
 
 
-def test_note_carries_full_body_and_tag(
-    fake_skills_dir: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_note_none_when_nothing_resolves(tmp_path: Path) -> None:
+    write_skill(tmp_path, "real", "real", "r")
+
+    assert preloaded_note(_skills(tmp_path, ["ghost"]), harness=Harness.MEIVA) is None
+
+
+def test_note_carries_full_body_and_tag(tmp_path: Path) -> None:
     body = "# Ultra speed\n\nDo the fast thing. Never dawdle."
-    _write_skill(
-        fake_skills_dir, "ultra_speed", "name: ultra_speed\ndescription: go fast", body=body
-    )
-    _expand(monkeypatch, ["ultra_speed"])
+    write_skill(tmp_path, "ultra_speed", "ultra_speed", "go fast", body=body)
 
-    note = preloaded_skills_note(
-        MeivaContext(
-            agent=AgentSlices.resolve(
-                default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
-            ),
-            catalog=build_model_catalog(),
-            clock_factory=Clock.from_settings,
-        )
-    )
+    note = preloaded_note(_skills(tmp_path, ["ultra_speed"]), harness=Harness.MEIVA)
+
     assert note is not None
     assert isinstance(note.content, str)  # pyright: ignore[reportUnknownMemberType]
     content = note.content
@@ -254,22 +146,12 @@ def test_note_carries_full_body_and_tag(
     assert "description: go fast" in content  # frontmatter is part of the full text
 
 
-def test_note_merges_multiple_skills_in_order(
-    fake_skills_dir: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    _write_skill(fake_skills_dir, "first", "name: first\ndescription: 1", body="AAA body")
-    _write_skill(fake_skills_dir, "second", "name: second\ndescription: 2", body="BBB body")
-    _expand(monkeypatch, ["second", "first"])  # explicit order preserved
+def test_note_merges_multiple_skills_in_order(tmp_path: Path) -> None:
+    write_skill(tmp_path, "first", "first", "1", body="AAA body")
+    write_skill(tmp_path, "second", "second", "2", body="BBB body")
 
-    note = preloaded_skills_note(
-        MeivaContext(
-            agent=AgentSlices.resolve(
-                default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
-            ),
-            catalog=build_model_catalog(),
-            clock_factory=Clock.from_settings,
-        )
-    )
+    note = preloaded_note(_skills(tmp_path, ["second", "first"]), harness=Harness.MEIVA)
+
     assert note is not None
     assert isinstance(note.content, str)  # pyright: ignore[reportUnknownMemberType]
     content = note.content
@@ -280,29 +162,108 @@ def test_note_merges_multiple_skills_in_order(
     assert content.index("## meiva.skills.second") < content.index("## meiva.skills.first")
 
 
-def test_note_heading_uses_dotted_access_path(
-    fake_skills_dir: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_note_heading_uses_dotted_access_path(tmp_path: Path) -> None:
     """A namespaced skill's heading is its meiva.skills access path (attr form)."""
-    parent = fake_skills_dir / "meiva_memory"
-    _write_skill(
-        parent,
+    write_skill(
+        tmp_path / "meiva_memory",
         "consolidation",
-        "name: consolidation\ndescription: merge notes",
+        "consolidation",
+        "merge notes",
         body="consolidation playbook",
     )
-    _expand(monkeypatch, ["meiva_memory.consolidation"])
 
-    note = preloaded_skills_note(
-        MeivaContext(
-            agent=AgentSlices.resolve(
-                default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
-            ),
-            catalog=build_model_catalog(),
-            clock_factory=Clock.from_settings,
-        )
-    )
+    note = preloaded_note(_skills(tmp_path, ["meiva_memory.consolidation"]), harness=Harness.MEIVA)
+
     assert note is not None
     assert isinstance(note.content, str)  # pyright: ignore[reportUnknownMemberType]
     assert "## meiva.skills.meiva_memory.consolidation" in note.content
     assert "consolidation playbook" in note.content
+
+
+def test_note_for_an_external_harness_points_at_its_native_file_tool(tmp_path: Path) -> None:
+    write_skill(tmp_path, "ultra_speed", "ultra_speed", "go fast", body="body")
+
+    note = preloaded_note(_skills(tmp_path, ["ultra_speed"]), harness=Harness.CLAUDE_CODE)
+
+    assert note is not None
+    text = _text(note)
+    assert "your native file-reading tool" in text
+    assert "meiva.files.read" not in text
+
+
+def test_note_skips_a_skill_whose_body_cannot_be_read(tmp_path: Path) -> None:
+    write_skill(tmp_path, "gone", "gone", "g")
+    write_skill(tmp_path, "kept", "kept", "k", body="KEPT body")
+    skills = _skills(tmp_path, ["gone", "kept"])
+    (tmp_path / "gone" / "SKILL.md").unlink()
+
+    note = preloaded_note(skills, harness=Harness.MEIVA)
+
+    assert note is not None
+    text = _text(note)
+    assert "KEPT body" in text
+    assert "meiva.skills.gone" not in text
+
+
+def _install_skill(name: str, description: str, body: str) -> None:
+    root = skills_dir(meiva_home())
+    write_skill(root, name, name, description, body=body)
+    install_registry.register(InstalledPackage(name=name, type="skill"))
+
+
+def _context(**pins: object) -> MeivaContext:
+    return MeivaContext(agent=AgentSlices.resolve(pins, default_reader=defaults()))
+
+
+@pytest.mark.usefixtures("unit_home")
+def test_installed_skills_are_preloaded_by_the_configured_names() -> None:
+    _install_skill("ultra_speed", "go fast", "Do the fast thing.")
+    _install_skill("other", "not asked for", "OTHER body")
+
+    note = preloaded_skills_note(_context(skills_to_expand_at_start=["ultra_speed"]))
+
+    assert note is not None
+    text = _text(note)
+    assert "Do the fast thing." in text
+    assert "OTHER body" not in text
+
+
+@pytest.mark.usefixtures("unit_home")
+def test_a_configured_name_that_matches_nothing_warns_and_yields_no_note(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    _install_skill("real", "r", "REAL body")
+
+    with caplog.at_level("WARNING"):
+        note = preloaded_skills_note(_context(skills_to_expand_at_start=["ghost"]))
+
+    assert note is None
+    assert "ghost" in caplog.text
+    assert "skills_to_expand_at_start" in caplog.text
+
+
+@pytest.mark.usefixtures("unit_home")
+def test_no_note_without_configured_skills() -> None:
+    _install_skill("real", "r", "REAL body")
+
+    assert preloaded_skills_note(_context(skills_to_expand_at_start=[])) is None
+
+
+@pytest.mark.usefixtures("unit_home")
+def test_fork_tail_note_grafts_the_named_installed_skills() -> None:
+    _install_skill("extra", "the extra skill", "EXTRA body")
+
+    note = fork_tail_skills_note(["extra"], [])
+
+    assert note is not None
+    text = _text(note)
+    assert text.startswith("<system_note>\nAdditional skills for you")
+    assert "## meiva.skills.extra" in text
+    assert "EXTRA body" in text
+
+
+@pytest.mark.usefixtures("unit_home")
+def test_fork_tail_note_is_empty_when_the_skills_surface_is_disabled() -> None:
+    _install_skill("extra", "the extra skill", "EXTRA body")
+
+    assert fork_tail_skills_note(["extra"], ["skills"]) is None

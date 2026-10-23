@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-from pathlib import Path
+from collections.abc import Iterator
 
 import pytest
 
 from agent.startup import notify_desktop_permissions_at_startup
-from base.host.converge import accessibility, screen_capture
 from base.host.converge.accessibility import (
     AccessibilityState,
     AccessibilityStatus,
@@ -32,6 +31,9 @@ from base.host.converge.screen_capture import (
 from base.host.converge.screen_capture import (
     write_status as write_screen_capture_status,
 )
+from meiva.sdk_surface import plugins
+
+pytestmark = pytest.mark.usefixtures("unit_home")
 
 _SCREEN_FAULT = ScreenCaptureStatus(
     state=ScreenCaptureState.NO_GRANT,
@@ -54,36 +56,35 @@ class _FakeUI:
         return 1
 
 
+class _FailingUI:
+    def notify(self, **kwargs: object) -> int:
+        raise RuntimeError("gateway unreachable")
+
+
 @pytest.fixture
-def fake_ui(monkeypatch: pytest.MonkeyPatch) -> _FakeUI:
-    import meiva as meiva_module
-
+def fake_ui() -> Iterator[_FakeUI]:
     ui = _FakeUI()
-    monkeypatch.setattr(meiva_module, "ui", ui, raising=False)
-    return ui
+    undo = plugins.install_member("startup-test", "ui", "notify", ui.notify)
+    yield ui
+    undo()
 
 
-def _patch_status_homes(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    monkeypatch.setattr(screen_capture, "meiva_home", lambda: tmp_path)
-    monkeypatch.setattr(accessibility, "meiva_home", lambda: tmp_path)
+@pytest.fixture
+def failing_ui() -> Iterator[None]:
+    undo = plugins.install_member("startup-test", "ui", "notify", _FailingUI().notify)
+    yield
+    undo()
 
 
 class TestNotifyDesktopPermissionsAtStartup:
     @pytest.mark.asyncio
-    async def test_noop_when_no_status_file(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, fake_ui: _FakeUI
-    ):
-        _patch_status_homes(monkeypatch, tmp_path)
-
+    async def test_noop_when_no_status_file(self, fake_ui: _FakeUI):
         await notify_desktop_permissions_at_startup()
 
         assert fake_ui.calls == []
 
     @pytest.mark.asyncio
-    async def test_screen_only_fault_keeps_the_existing_notice_shape(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, fake_ui: _FakeUI
-    ):
-        _patch_status_homes(monkeypatch, tmp_path)
+    async def test_screen_only_fault_keeps_the_existing_notice_shape(self, fake_ui: _FakeUI):
         write_screen_capture_status(_SCREEN_FAULT)
 
         await notify_desktop_permissions_at_startup()
@@ -99,10 +100,7 @@ class TestNotifyDesktopPermissionsAtStartup:
         assert read_accessibility_status() is None
 
     @pytest.mark.asyncio
-    async def test_accessibility_only_fault_notifies_and_clears(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, fake_ui: _FakeUI
-    ):
-        _patch_status_homes(monkeypatch, tmp_path)
+    async def test_accessibility_only_fault_notifies_and_clears(self, fake_ui: _FakeUI):
         write_accessibility_status(_ACCESSIBILITY_FAULT)
 
         await notify_desktop_permissions_at_startup()
@@ -117,10 +115,7 @@ class TestNotifyDesktopPermissionsAtStartup:
         assert read_accessibility_status() is None
 
     @pytest.mark.asyncio
-    async def test_both_faults_post_one_combined_notice(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, fake_ui: _FakeUI
-    ):
-        _patch_status_homes(monkeypatch, tmp_path)
+    async def test_both_faults_post_one_combined_notice(self, fake_ui: _FakeUI):
         write_screen_capture_status(_SCREEN_FAULT)
         write_accessibility_status(_ACCESSIBILITY_FAULT)
 
@@ -140,20 +135,9 @@ class TestNotifyDesktopPermissionsAtStartup:
         assert read_accessibility_status() is None
 
     @pytest.mark.asyncio
-    async def test_notify_failure_restores_both_claims(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ):
-        _patch_status_homes(monkeypatch, tmp_path)
+    async def test_notify_failure_restores_both_claims(self, failing_ui: None):
         write_screen_capture_status(_SCREEN_FAULT)
         write_accessibility_status(_ACCESSIBILITY_FAULT)
-
-        class FailingUI:
-            def notify(self, **kwargs: object) -> int:
-                raise RuntimeError("gateway unreachable")
-
-        import meiva as meiva_module
-
-        monkeypatch.setattr(meiva_module, "ui", FailingUI(), raising=False)
 
         await notify_desktop_permissions_at_startup()
 
@@ -163,10 +147,7 @@ class TestNotifyDesktopPermissionsAtStartup:
         assert not accessibility_status_file_path().with_suffix(".processing").exists()
 
     @pytest.mark.asyncio
-    async def test_concurrent_claim_loser_skips_only_that_status_file(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, fake_ui: _FakeUI
-    ):
-        _patch_status_homes(monkeypatch, tmp_path)
+    async def test_concurrent_claim_loser_skips_only_that_status_file(self, fake_ui: _FakeUI):
         write_screen_capture_status(_SCREEN_FAULT)
         write_accessibility_status(_ACCESSIBILITY_FAULT)
         screen_capture_status_file_path().rename(
@@ -186,10 +167,7 @@ class TestNotifyDesktopPermissionsAtStartup:
         assert read_accessibility_status() is None
 
     @pytest.mark.asyncio
-    async def test_available_statuses_are_cleaned_without_notifying(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, fake_ui: _FakeUI
-    ):
-        _patch_status_homes(monkeypatch, tmp_path)
+    async def test_available_statuses_are_cleaned_without_notifying(self, fake_ui: _FakeUI):
         write_screen_capture_status(ScreenCaptureStatus(state=ScreenCaptureState.AVAILABLE))
         write_accessibility_status(AccessibilityStatus(state=AccessibilityState.GRANTED))
 

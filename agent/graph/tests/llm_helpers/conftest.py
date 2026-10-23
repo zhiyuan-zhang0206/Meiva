@@ -1,4 +1,4 @@
-from agent.graph.tests.cancel_fixture import fake_cancel_event as fake_cancel_event
+from agent.graph.node_log.tests.live_events import live_events as live_events
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.log.tests.log_records import loguru_records as loguru_records
 from base.packages.tests.model_catalog import add_bindings as add_bindings

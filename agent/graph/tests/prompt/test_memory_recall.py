@@ -19,24 +19,21 @@ from langchain_core.messages import AnyMessage
 
 import agent.graph.recall.memory_recall as recall
 from agent.messages import inbound_message
-from base import config
 from base.agents.context import MeivaContext
 from base.agents.context.clients import ClientSet
 from base.agents.context.gateway_client.memory_search import MemorySearchResult
 from base.agents.context.gateway_client.transport import GatewayTransportInputs
 from base.agents.context.identity import AgentIdentity
-from base.clock import Clock
-from base.config import settings
+from base.config import FIELD_INFOS
 from base.config.tests.configuration import defaults
 from base.host.env.agent_slices import AgentSlices
+from base.log.tests.log_records import LogRecords
 from base.packages.plugin_providers import build_model_catalog
 
 
 @pytest.fixture
-def memory_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """Enable the feature and point the on-disk sync check at a temp pool."""
-    monkeypatch.setattr(config.settings.agent, "passive_memory_recall_enabled", True)
-    monkeypatch.setattr(recall, "memory_dir", lambda: tmp_path)
+def memory_root(tmp_path: Path) -> Path:
+    """The temp pool the on-disk sync check looks in."""
     return tmp_path
 
 
@@ -139,7 +136,9 @@ def _conversation() -> list[AnyMessage]:
 
 
 def _agent(**changes: Any) -> AgentSlices:
-    return AgentSlices.resolve(default_reader=defaults(**changes))
+    return AgentSlices.resolve(
+        default_reader=defaults(**{"agent__passive_memory_recall_enabled": True, **changes})
+    )
 
 
 def _context(
@@ -148,7 +147,6 @@ def _context(
     return MeivaContext(
         identity=AgentIdentity(agent_id=agent_id, owns_loop=True) if agent_id is not None else None,
         catalog=build_model_catalog(),
-        clock_factory=Clock.from_settings,
         clients=ClientSet(
             gateway_url="http://gateway.test",
             gateway=gateway,
@@ -164,12 +162,16 @@ def _context(
 
 
 async def _recall(
-    context: MeivaContext, injected: set[str] | None = None
+    context: MeivaContext,
+    root: Path,
+    injected: set[str] | None = None,
+    **changes: Any,
 ) -> recall.PassiveRecall | None:
     return await recall.passive_memory_recall(
         _conversation(),
         context=context,
-        agent=_agent(),
+        agent=_agent(**changes),
+        memory_root=root,
         injected_paths=injected or frozenset(),
     )
 
@@ -201,7 +203,7 @@ async def test_renders_path_score_description_and_matched_passage(
         ],
     )
 
-    result = await _recall(context)
+    result = await _recall(context, memory_root)
 
     assert result is not None
     content = _content(result)
@@ -219,7 +221,7 @@ async def test_tags_are_not_rendered(
         search, [_result("a.md", description="d", chunk="c", tags=("type/user", "tech-ops"))]
     )
 
-    result = await _recall(context)
+    result = await _recall(context, memory_root)
 
     assert result is not None
     assert "type/user" not in _content(result)
@@ -234,7 +236,7 @@ async def test_empty_description_is_not_synthesized(
     _write_note(memory_root, "c.md", "---\ntitle: A Human Title\n---\nfirst body line\n")
     _set_search(search, [_result("c.md", score=0.8, description="", chunk="")])
 
-    result = await _recall(context)
+    result = await _recall(context, memory_root)
 
     assert result is not None
     content = _content(result)
@@ -250,7 +252,7 @@ async def test_passage_equal_to_the_description_is_not_repeated(
     _write_note(memory_root, "a.md", "note a")
     _set_search(search, [_result("a.md", description="one-liner", chunk="one-liner")])
 
-    result = await _recall(context)
+    result = await _recall(context, memory_root)
 
     assert result is not None
     assert _content(result).count("one-liner") == 1
@@ -263,7 +265,7 @@ async def test_description_and_passage_are_not_truncated(
     _write_note(memory_root, "a.md", "note a")
     _set_search(search, [_result("a.md", description=long_desc, chunk=long_chunk)])
 
-    result = await _recall(context)
+    result = await _recall(context, memory_root)
 
     assert result is not None
     assert f"{long_desc}\n  > {long_chunk}" in _content(result)
@@ -273,12 +275,8 @@ async def test_description_and_passage_are_not_truncated(
 
 
 async def test_only_results_reaching_the_threshold_are_injected(
-    memory_root: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    context: MeivaContext,
-    search: _MemoryGateway,
+    memory_root: Path, context: MeivaContext, search: _MemoryGateway
 ) -> None:
-    monkeypatch.setattr(config.settings.agent, "memory_recall_inject_threshold", 0.7)
     for name in ("hi", "edge", "lo"):
         _write_note(memory_root, f"{name}.md", name)
     _set_search(
@@ -286,7 +284,7 @@ async def test_only_results_reaching_the_threshold_are_injected(
         [_result("hi.md", score=0.95), _result("edge.md", score=0.7), _result("lo.md", score=0.69)],
     )
 
-    result = await _recall(context)
+    result = await _recall(context, memory_root, agent__memory_recall_inject_threshold=0.7)
 
     assert result is not None
     assert result.paths == {"hi.md", "edge.md"}
@@ -306,7 +304,7 @@ async def test_the_default_threshold_is_the_one_that_ships(
         [_result("edge.md", score=0.72), _result("lo.md", score=0.71)],
     )
 
-    result = await _recall(context)
+    result = await _recall(context, memory_root)
 
     assert result is not None
     assert result.paths == {"edge.md"}
@@ -320,22 +318,18 @@ async def test_nothing_is_injected_when_no_result_reaches_the_threshold(
     _write_note(memory_root, "a.md", "note a")
     _set_search(search, [_result("a.md", score=0.3)])
 
-    assert await _recall(context) is None
+    assert await _recall(context, memory_root) is None
 
 
 async def test_the_cap_keeps_the_best_scores_whatever_order_search_returned(
-    memory_root: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    context: MeivaContext,
-    search: _MemoryGateway,
+    memory_root: Path, context: MeivaContext, search: _MemoryGateway
 ) -> None:
-    monkeypatch.setattr(config.settings.agent, "memory_recall_inject_max", 2)
     scores = {"a": 0.75, "b": 0.99, "c": 0.8, "d": 0.9}
     for name in scores:
         _write_note(memory_root, f"{name}.md", name)
     _set_search(search, [_result(f"{n}.md", score=s) for n, s in scores.items()])
 
-    result = await _recall(context)
+    result = await _recall(context, memory_root, agent__memory_recall_inject_max=2)
 
     assert result is not None
     assert result.paths == {"b.md", "d.md"}
@@ -344,31 +338,23 @@ async def test_the_cap_keeps_the_best_scores_whatever_order_search_returned(
 
 
 async def test_zero_cap_disables_injection_without_searching(
-    memory_root: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    context: MeivaContext,
-    search: _MemoryGateway,
+    memory_root: Path, context: MeivaContext, search: _MemoryGateway
 ) -> None:
-    monkeypatch.setattr(config.settings.agent, "memory_recall_inject_max", 0)
     asked = _set_search(search, [])
 
-    assert await _recall(context) is None
+    assert await _recall(context, memory_root, agent__memory_recall_inject_max=0) is None
     assert asked == []
 
 
 async def test_skips_path_not_synced_to_this_machine(
-    memory_root: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    context: MeivaContext,
-    search: _MemoryGateway,
+    memory_root: Path, context: MeivaContext, search: _MemoryGateway
 ) -> None:
     """Search can return a path this machine has not synced yet; the missing file is skipped
     rather than crashing on read, and does not use up a slot."""
-    monkeypatch.setattr(config.settings.agent, "memory_recall_inject_max", 1)
     _write_note(memory_root, "here.md", "present")
     _set_search(search, [_result("not-yet.md", score=0.99), _result("here.md", score=0.8)])
 
-    result = await _recall(context)
+    result = await _recall(context, memory_root, agent__memory_recall_inject_max=1)
 
     assert result is not None
     assert result.paths == {"here.md"}
@@ -380,35 +366,26 @@ async def test_skips_path_not_synced_to_this_machine(
 
 @pytest.mark.parametrize("already_count", [0, 3, 40, 500])
 async def test_search_asks_for_the_cap_whatever_the_session_has_injected(
-    memory_root: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    already_count: int,
-    context: MeivaContext,
-    search: _MemoryGateway,
+    memory_root: Path, already_count: int, context: MeivaContext, search: _MemoryGateway
 ) -> None:
     """Notes injected earlier ride along as an exclusion list; the number of results asked for
     stays the cap, so the ranking work of one pass does not grow with the session's age."""
-    monkeypatch.setattr(config.settings.agent, "memory_recall_inject_max", 5)
     injected = {f"n{i}.md" for i in range(already_count)}
     asked = _set_search(search, [])
 
-    await _recall(context, injected=injected)
+    await _recall(context, memory_root, injected=injected, agent__memory_recall_inject_max=5)
 
     assert [(call.k, call.exclude) for call in asked] == [(5, frozenset(injected))]
 
 
 async def test_search_is_bounded_by_the_recall_deadline(
-    memory_root: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    context: MeivaContext,
-    search: _MemoryGateway,
+    memory_root: Path, context: MeivaContext, search: _MemoryGateway
 ) -> None:
     """The search request carries the pass's budget, so the gateway stops ranking when the
     pass has given up."""
-    monkeypatch.setattr(config.settings.agent, "memory_recall_deadline_seconds", 2.5)
     asked = _set_search(search, [])
 
-    await _recall(context)
+    await _recall(context, memory_root, agent__memory_recall_deadline_seconds=2.5)
 
     assert [call.timeout for call in asked] == [2.5]
     assert [call.http_timeout for call in asked] == [5.5]
@@ -418,7 +395,7 @@ async def test_search_is_issued_for_recall_not_as_an_agent_search(
     memory_root: Path, context: MeivaContext, search: _MemoryGateway
 ) -> None:
     """The gateway asks a different relevance question for a conversation than for a query."""
-    await _recall(context)
+    await _recall(context, memory_root)
 
     assert [call.purpose for call in search.asked] == ["recall"]
     assert "how do I deploy the gateway" in search.asked[0].query
@@ -429,8 +406,8 @@ def test_defaults_are_the_calibrated_values() -> None:
     # 0.72 comes from the 2026-10-18 replay of real inbound traffic; both values are calibrated
     # for the default rerank model and prompts.
     # meiva:link docs/decisions/agents/context/2026-10-18-passive-recall-threshold.md
-    assert settings.agent.memory_recall_inject_threshold == 0.72
-    assert settings.agent.memory_recall_inject_max == 3
+    assert FIELD_INFOS["memory_recall_inject_threshold"].default == 0.72
+    assert FIELD_INFOS["memory_recall_inject_max"].default == 3
 
 
 # ── search failure degrades, never propagates ──
@@ -443,7 +420,7 @@ def test_defaults_are_the_calibrated_values() -> None:
 
 async def test_http_error_degrades_to_no_recall_and_logs_error(
     memory_root: Path,
-    loguru_records: list[dict],
+    loguru_records: LogRecords,
     context: MeivaContext,
     search: _MemoryGateway,
 ) -> None:
@@ -453,19 +430,18 @@ async def test_http_error_degrades_to_no_recall_and_logs_error(
     _write_note(memory_root, "a.md", "note a")
     search.response = httpx.Response(500, text="Server error")
 
-    assert await _recall(context) is None
+    assert await _recall(context, memory_root) is None
     assert len(search.asked) == 1
 
-    errors = [r for r in loguru_records if r["level"].name == "ERROR"]  # pyright: ignore[reportUnknownMemberType]
-    assert len(errors) == 1  # pyright: ignore[reportUnknownArgumentType]
-    assert errors[0]["extra"]["event"] == "passive_recall"
-    assert "500" in errors[0]["message"]
-    assert "/api/memory/search" in errors[0]["message"]
+    (error,) = [r for r in loguru_records if r["level"].name == "ERROR"]
+    assert error["extra"]["event"] == "passive_recall"
+    assert "500" in error["message"]
+    assert "/api/memory/search" in error["message"]
 
 
 async def test_modelled_outage_degrades_without_an_error_log(
     memory_root: Path,
-    loguru_records: list[dict],
+    loguru_records: LogRecords,
     context: MeivaContext,
     search: _MemoryGateway,
 ) -> None:
@@ -481,9 +457,9 @@ async def test_modelled_outage_degrades_without_an_error_log(
         },
     )
 
-    assert await _recall(context) is None
+    assert await _recall(context, memory_root) is None
     assert len(search.asked) == 1
-    assert [r for r in loguru_records if r["level"].name == "ERROR"] == []  # pyright: ignore[reportUnknownMemberType]
+    assert loguru_records.messages("ERROR") == []
 
 
 async def test_programming_error_in_search_still_propagates(
@@ -495,7 +471,7 @@ async def test_programming_error_in_search_still_propagates(
     search.response = httpx.Response(200, json={"results": None})
 
     with pytest.raises(TypeError):
-        await _recall(context)
+        await _recall(context, memory_root)
     assert len(search.asked) == 1
 
 
@@ -503,22 +479,19 @@ async def test_programming_error_in_search_still_propagates(
 
 
 async def test_returns_none_when_disabled(
-    monkeypatch: pytest.MonkeyPatch, context: MeivaContext, search: _MemoryGateway
+    memory_root: Path, context: MeivaContext, search: _MemoryGateway
 ) -> None:
-    monkeypatch.setattr(config.settings.agent, "passive_memory_recall_enabled", False)
-
-    assert await _recall(context) is None
+    assert await _recall(context, memory_root, agent__passive_memory_recall_enabled=False) is None
     assert search.asked == []
 
 
 async def test_returns_none_when_eval_isolated(
-    monkeypatch: pytest.MonkeyPatch, context: MeivaContext, search: _MemoryGateway
+    memory_root: Path, context: MeivaContext, search: _MemoryGateway
 ) -> None:
     """Eval isolation must stop the direct index call that passive recall bypasses."""
-    monkeypatch.setattr(config.settings.agent, "eval_isolation", True)
     asked = _set_search(search, [])
 
-    assert await _recall(context) is None
+    assert await _recall(context, memory_root, agent__eval_isolation=True) is None
     assert asked == []
 
 
@@ -528,7 +501,9 @@ async def test_returns_none_when_no_query(
     """An empty conversation yields no query, so recall no-ops before searching."""
     asked = _set_search(search, [])
 
-    result = await recall.passive_memory_recall([], context=context, agent=_agent())
+    result = await recall.passive_memory_recall(
+        [], context=context, agent=_agent(), memory_root=memory_root
+    )
 
     assert result is None
     assert asked == []
@@ -536,7 +511,7 @@ async def test_returns_none_when_no_query(
 
 async def test_recall_logs_search_time_and_injected_count(
     memory_root: Path,
-    loguru_records: list[dict],
+    loguru_records: LogRecords,
     context: MeivaContext,
     search: _MemoryGateway,
 ) -> None:
@@ -544,12 +519,11 @@ async def test_recall_logs_search_time_and_injected_count(
     _write_note(memory_root, "a.md", "note a")
     _set_search(search, [_result("a.md", score=0.9), _result("b.md", score=0.1)])
 
-    await _recall(context)
+    await _recall(context, memory_root)
 
-    events = [r for r in loguru_records if r["extra"].get("event") == "passive_recall"]  # pyright: ignore[reportUnknownMemberType]
-    assert len(events) == 1  # pyright: ignore[reportUnknownArgumentType]
-    assert events[0]["extra"]["injected"] == 1
-    assert isinstance(events[0]["extra"]["search_ms"], int)
+    (event,) = loguru_records.events("passive_recall")
+    assert event["extra"]["injected"] == 1
+    assert isinstance(event["extra"]["search_ms"], int)
 
 
 async def test_gateway_search_receives_each_explicit_host_context(memory_root: Path) -> None:
@@ -578,7 +552,9 @@ async def test_gateway_search_receives_each_explicit_host_context(memory_root: P
     try:
         for ctx in contexts:
             assert (
-                await recall.passive_memory_recall(_conversation(), agent=_agent(), context=ctx)
+                await recall.passive_memory_recall(
+                    _conversation(), agent=_agent(), context=ctx, memory_root=memory_root
+                )
                 is None
             )
         assert seen == [11, 22]

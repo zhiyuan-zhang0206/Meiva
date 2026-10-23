@@ -3,9 +3,9 @@ from typing import cast
 
 import pytest
 
-from base.config import settings
+from base.log.tests.log_records import LogRecords
 from base.packages.plugin_config_admin import update_all_disk_images
-from base.packages.plugins import enable_config, load_report
+from base.packages.plugins import enable_config
 from base.packages.plugins.config_registration import disk_image_path
 from base.packages.plugins.plugin_errors import InvalidConfigData, SchemaDriftError
 from meiva_builtins.plugins.meiva_memory import services
@@ -13,38 +13,28 @@ from meiva_builtins.plugins.meiva_memory.default_config import MemoryConfig
 from services.supervision.meiva_root.inputs import InputChangedError, InputSeal
 from services.supervision.meiva_root_glue.manifests import build_units
 from services.supervision.roster import plugin_services as roster_plugins
+from services.supervision.roster.service_spec import ServiceSpec
 
 
-@pytest.fixture
-def memory_only_discovery(monkeypatch: pytest.MonkeyPatch) -> None:
-    plugin_dir = Path(services.__file__).parent
-    monkeypatch.setattr(
-        enable_config, "installed_plugin_dirs", lambda: {"meiva_memory": plugin_dir}
+def _indexer() -> ServiceSpec:
+    return next(
+        spec for spec in roster_plugins.plugin_services() if spec.session == "memory-indexer"
     )
 
 
-@pytest.mark.parametrize("inject", [True, False])
-def test_missing_image_runs_indexer_without_writing_home(
-    unit_home: Path, monkeypatch: pytest.MonkeyPatch, inject: bool, memory_only_discovery: None
-) -> None:
-    monkeypatch.setattr(settings.agent, "memory_index_inject_enabled", inject)
-    spec = roster_plugins.plugin_services()[0]
-    assert spec.session == "memory-indexer"
+def test_missing_image_runs_indexer_without_writing_home(unit_home: Path) -> None:
+    spec = _indexer()
     assert spec.capabilities == frozenset({"gateway"})
     assert spec.gate is not None and spec.gate() is None
     assert spec.config_inputs == (unit_home / "configs" / "meiva_memory" / "config.json",)
     assert not (unit_home / "configs").exists()
 
 
-@pytest.mark.parametrize("inject", [True, False])
-def test_independent_host_switch_disables_indexer(
-    unit_home: Path, monkeypatch: pytest.MonkeyPatch, inject: bool, memory_only_discovery: None
-) -> None:
-    monkeypatch.setattr(settings.agent, "memory_index_inject_enabled", inject)
+def test_host_switch_disables_indexer(unit_home: Path) -> None:
     image = disk_image_path("meiva_memory")
     image.parent.mkdir(parents=True)
     image.write_text('{"indexer_enabled": false}\n')
-    spec = roster_plugins.plugin_services()[0]
+    spec = _indexer()
     assert spec.gate is not None
     assert spec.gate() == "disabled (meiva_memory.indexer_enabled off)"
 
@@ -59,35 +49,22 @@ def test_independent_host_switch_disables_indexer(
     ],
 )
 def test_invalid_image_fails_composition_before_a_gate_can_fail_open(
-    unit_home: Path,
-    content: str,
-    error: type[Exception],
-    monkeypatch: pytest.MonkeyPatch,
-    memory_only_discovery: None,
+    unit_home: Path, content: str, error: type[Exception], loguru_records: LogRecords
 ) -> None:
     image = disk_image_path("meiva_memory")
     image.parent.mkdir(parents=True)
     image.write_text(content)
     with pytest.raises(error):
         services.services()
-    failures: list[tuple[str, BaseException]] = []
-
-    def record_failure(name: str, exc: BaseException) -> None:
-        failures.append((name, exc))
-
-    monkeypatch.setattr(load_report, "report_plugin_load_failure", record_failure)
     with pytest.raises(error):
         roster_plugins.plugin_services()
-    assert len(failures) == 1
-    assert failures[0][0] == "meiva_memory"
-    assert isinstance(failures[0][1], error)
+    failed = [r for r in loguru_records if "failed to load" in r["message"]]
+    assert [r["message"].split()[2] for r in failed] == ["meiva_memory"]
     assert image.read_text() == content
 
 
-def test_first_converge_materializes_and_seals_the_declared_input(
-    unit_home: Path, memory_only_discovery: None
-) -> None:
-    before = roster_plugins.plugin_services()[0]
+def test_first_converge_materializes_and_seals_the_declared_input(unit_home: Path) -> None:
+    before = _indexer()
     assert before.gate is not None and before.gate() is None
     assert not disk_image_path("meiva_memory").exists()
     update = update_all_disk_images(plugin_dirs=enable_config.discover_plugins(), home=unit_home)
@@ -95,7 +72,7 @@ def test_first_converge_materializes_and_seals_the_declared_input(
     assert memory.status == "updated"
     image = disk_image_path("meiva_memory")
     assert image.read_text() == MemoryConfig().model_dump_json(indent=2) + "\n"
-    spec = roster_plugins.plugin_services()[0]
+    spec = _indexer()
     assert spec.gate is not None and spec.gate() is None
     units = build_units([spec], capabilities={"gateway"}, repo_root=Path(__file__).parents[4])
     inputs = cast("list[object]", units[0]["inputs"])

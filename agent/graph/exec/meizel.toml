@@ -1,15 +1,21 @@
-exports = ["node.py", "output.py", "process.py", "protocol.py", "tests"]
+exports = ["node.py", "output.py", "process.py", "tests"]
 
 [uses]
-"_child_boundary.py" = ["_result.py", "_stream.py", "protocol.py"]
+"_child_boundary.py" = ["_result.py"]
+"_dispatch.py" = ["_result.py"]
+"_guard.py" = ["_result.py"]
 "_output_pipe.py" = ["_stream.py"]
-"_result.py" = ["_stream.py"]
-"_subprocess.py" = ["_child_boundary.py", "_output_pipe.py", "_result.py", "_stream.py", "protocol.py"]
-"node.py" = ["_crop.py", "_notes.py", "_result.py", "_stream.py", "output.py", "process.py", "protocol.py"]
-"output.py" = ["_crop.py", "_stream.py"]
-"process.py" = ["_result.py", "_stream.py", "_subprocess.py", "protocol.py"]
-"tests" = ["_child_boundary.py", "_output_pipe.py", "_result.py", "_stream.py", "_subprocess.py", "node.py", "output.py", "process.py", "protocol.py"]
+"_stream.py" = ["_result.py"]
+"_subprocess.py" = ["_child_boundary.py", "_guard.py", "_output_pipe.py", "_poll.py", "_result.py", "_stream.py"]
+"node.py" = ["_crop.py", "_dispatch.py", "_notes.py", "_result.py", "_stream.py", "output.py", "process.py"]
+"output.py" = ["_crop.py", "_result.py"]
+"process.py" = ["_child_boundary.py", "_result.py", "_stream.py", "_subprocess.py"]
+"tests" = ["_child_boundary.py", "_crop.py", "_dispatch.py", "_guard.py", "_output_pipe.py", "_poll.py", "_result.py", "_stream.py", "_subprocess.py", "node.py", "output.py", "process.py"]
 
 [purity]
 "__init__.py" = "strict"
+"_dispatch.py" = "strict"
+"_guard.py" = "strict"
 "_notes.py" = "strict"
+"_poll.py" = "strict"
+"_result.py" = "strict"

@@ -8,9 +8,6 @@ surface module carries only the description (task #3633).
 
 from __future__ import annotations
 
-import builtins
-import keyword
-import re
 from datetime import UTC, datetime
 from typing import Any
 
@@ -24,7 +21,6 @@ from agent.hooks import Hook
 from agent.messages import NoteTag, system_note_message, tail_has_agent_inbound
 from agent.state import AgentState
 from base.agents.context import MeivaContext
-from base.host.env.agent_slices import Cadence
 from base.lm.content import message_content
 from base.log import logger
 from base.packages.plugins.extensions import PluginContributions
@@ -48,98 +44,30 @@ from ._state import (
 from ._state import (
     mentions_watcher as mentions_watcher,
 )
+from .hint_selection import assumed_persistence_name, rearmed_reminded, select_hints
 
 # Channel keys for this plugin's state fields (prefixed by the framework from the
 # declared state class). A hook node reads/writes these directly on `state`
 # because the in-turn handle (state_handle.read/update) is not wired up here.
 _REMINDED_FIELD = "meiva_sdk_reminder__reminded"
 _BOOKMARK_FIELD = "meiva_sdk_reminder__last_seen_compact"
-_NAMEERROR_CATEGORY_PREFIX = "nameerror:"
-_NAMEERROR_RE = re.compile(r"(?:^|\n)NameError: name '([^'\n]+)' is not defined\b")
 
 
-def _assumed_persistence_name(
-    previous_messages: list[AnyMessage], out_msg: ToolMessage
-) -> str | None:
-    """Return the undefined name only when it appeared in an earlier code cell."""
-    output = message_content(out_msg)
-    if not isinstance(output, str):
-        return None
-    match = _NAMEERROR_RE.search(output)
-    if match is None:
-        return None
-
-    name = match.group(1)
-    if not name.isidentifier() or keyword.iskeyword(name) or name in vars(builtins):
-        return None
-
-    whole_name = re.compile(rf"(?<!\w){re.escape(name)}(?!\w)")
-    for message in reversed(previous_messages):
-        if not isinstance(message, AIMessage) or not message.tool_calls:
-            continue
-        for call in message.tool_calls:
-            if call["name"] == "execute_code" and whole_name.search(first_tool_call_code([call])):
-                return name
-    return None
+def _earlier_codes(previous_messages: list[AnyMessage]) -> list[str]:
+    return [
+        first_tool_call_code([call])
+        for message in previous_messages
+        if isinstance(message, AIMessage)
+        for call in message.tool_calls
+        if call["name"] == "execute_code"
+    ]
 
 
-def _nameerror_persistence_hint(name: str) -> str:
-    return (
-        f"NameError: '{name}' appeared in an earlier execute_code call, "
-        "but each call runs in a fresh interpreter — variables do not persist "
-        "between calls. Re-define it here, or carry state via files or shell sessions."
+def _rearmed(state: AgentState) -> tuple[set[str], int]:
+    reminded, bookmark = rearmed_reminded(
+        getattr(state, _REMINDED_FIELD), getattr(state, _BOOKMARK_FIELD), state.compact.version
     )
-
-
-def _rearmed_reminded(state: AgentState) -> tuple[set[str], int]:
-    """Return (reminded, new_bookmark) with the compaction re-arm already applied.
-
-    compact bumps its version counter by 1 on each successful compaction.
-    When it has advanced past the stored bookmark, the messages that carried
-    earlier hints have been summarized away, so the reminded set is cleared and
-    the bookmark catches up.
-    the field does not exist, so the version stays 0 <= bookmark 0 and the
-    reset never fires.
-
-    The clear-and-advance only happens on a path that records a fresh category
-    (the caller persists the returned bookmark in the same update that adds the
-    category, whether or not that category also emits a hint); a turn that
-    matches nothing returns without touching state, so a bookmark advance never
-    lands without a fresh category beside it.
-    """
-    bookmark: int = getattr(state, _BOOKMARK_FIELD)
-    compact_v: int = state.compact.version
-    if compact_v > bookmark:
-        return set(), compact_v
-    return set(getattr(state, _REMINDED_FIELD)), bookmark
-
-
-def _select_hints(
-    code: str,
-    matched: list[str],
-    reminded: set[str],
-    nameerror_name: str | None,
-    cadence: Cadence,
-) -> tuple[list[str], set[str], str | None]:
-    """Choose unsuppressed categories and a once-per-name persistence hint."""
-    # A cell that sleeps while already naming `watcher` is the agent working
-    # with the watcher primitive itself — the wait hint would be noise. Mark
-    # that category seen without emitting its line, so it fires neither now nor
-    # later this context window.
-    silent: set[str] = {"wait"} if "wait" in matched and mentions_watcher(code) else set()
-
-    if cadence == "every_time":
-        hinted = [cat for cat in matched if cat not in silent]
-    else:
-        hinted = [cat for cat in matched if cat not in reminded and cat not in silent]
-    newly_seen = set(hinted) | (silent - reminded)
-    nameerror_hint = None
-    if nameerror_name is not None:
-        nameerror_category = f"{_NAMEERROR_CATEGORY_PREFIX}{nameerror_name}"
-        if nameerror_category not in reminded:
-            newly_seen.add(nameerror_category)
-            nameerror_hint = _nameerror_persistence_hint(nameerror_name)
-    return hinted, newly_seen, nameerror_hint
+    return set(reminded), bookmark
 
 
 class _SdkReminderAfterExecHook(Hook):
@@ -223,20 +151,25 @@ class _SdkReminderAfterExecHook(Hook):
 
         reminders = runtime.context.require_agent().sdk_reminders
         matched = detect_categories(code)
+        output = message_content(out_msg)
         nameerror_name = (
-            _assumed_persistence_name(state.messages[:-2], out_msg)
-            if reminders.sdk_nameerror_hint_enabled
+            assumed_persistence_name(output, _earlier_codes(state.messages[:-2]))
+            if reminders.sdk_nameerror_hint_enabled and isinstance(output, str)
             else None
         )
         if not matched and nameerror_name is None:
             return None
 
-        reminded, new_bookmark = _rearmed_reminded(state)
+        reminded, new_bookmark = _rearmed(state)
 
-        hinted, newly_seen, nameerror_hint = _select_hints(
-            code, matched, reminded, nameerror_name, reminders.sdk_code_reminder_cadence
+        selection = select_hints(
+            code,
+            matched,
+            reminded,
+            nameerror_name,
+            every_time=reminders.sdk_code_reminder_cadence == "every_time",
         )
-        if not newly_seen:
+        if not selection.newly_seen:
             # Every once-scoped match is already seen this window (or silently
             # suppressed and already marked). The bookmark only advances on a path
             # that records a fresh key, and a re-arm clears `reminded` (making every
@@ -245,13 +178,13 @@ class _SdkReminderAfterExecHook(Hook):
             return None
 
         update: dict[str, Any] = {
-            _REMINDED_FIELD: reminded | newly_seen,
+            _REMINDED_FIELD: reminded | selection.newly_seen,
             _BOOKMARK_FIELD: new_bookmark,
         }
-        if hinted or nameerror_hint is not None:
-            hint_lines = [hint_for(cat) for cat in hinted]
-            if nameerror_hint is not None:
-                hint_lines.append(nameerror_hint)
+        if selection.hinted or selection.nameerror_hint is not None:
+            hint_lines = [hint_for(cat) for cat in selection.hinted]
+            if selection.nameerror_hint is not None:
+                hint_lines.append(selection.nameerror_hint)
             hints = "\n".join(hint_lines)
             # Emit the hint as its own system-styled note appended after the
             # exec-output message (a fresh message with no id, so the reducer adds
@@ -327,7 +260,7 @@ class _SdkReminderAgentReplyHook(Hook):
             case "every_time":
                 return {"messages": [_agent_reply_note()]}
             case "once_per_compaction":
-                reminded, new_bookmark = _rearmed_reminded(state)
+                reminded, new_bookmark = _rearmed(state)
                 if AGENT_REPLY_CATEGORY in reminded:
                     # Already hinted, and the re-arm only clears `reminded` (which would
                     # drop AGENT_REPLY_CATEGORY out of this set), so a bookmark advance

@@ -21,10 +21,3 @@ def install_cancel_event(monkeypatch: pytest.MonkeyPatch, event: InterruptEvent)
         yield event
 
     monkeypatch.setattr(_cancel, "subscribe_interrupt", fake_subscribe)
-
-
-@pytest.fixture
-def fake_cancel_event(monkeypatch: pytest.MonkeyPatch) -> InterruptEvent:
-    event = InterruptEvent()
-    install_cancel_event(monkeypatch, event)
-    return event

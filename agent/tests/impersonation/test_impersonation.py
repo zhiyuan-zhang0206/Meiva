@@ -1,200 +1,146 @@
-from collections.abc import Callable, Iterator
 from dataclasses import replace
-from datetime import UTC, datetime
 from pathlib import Path
-from typing import Annotated, Any
-from unittest.mock import AsyncMock, MagicMock, Mock
+from typing import Any, cast
 from uuid import uuid4
 
+import psycopg
 import pytest
-from langchain_core.runnables import RunnableConfig
-from langgraph.checkpoint.memory import MemorySaver
-from langgraph.graph import END, START, StateGraph
+from langchain_core.messages import HumanMessage
+from langgraph.runtime import Runtime
 from langgraph.types import Command
-from pydantic import BaseModel, Field
+from psycopg_pool import AsyncConnectionPool
 
-import base.agents.impersonation as agents_impersonation
-from agent import impersonation, impersonation_handoff, impersonation_process
-from agent.graph.exec.protocol import read_request, write_request
-from agent.hooks.tests.fakes import placeholder_runtime
+from agent import impersonation
+from agent.execution.protocol import read_request, write_request
+from agent.nodes import END
 from agent.state import BaseAgentState
-from base.agents.context import MeivaContext
-from base.agents.context.external_attachment import plugin_state_codec
-from base.agents.impersonation import relay
-from base.agents.impersonation.notes import HandoffNotes
-from base.agents.observation.relay_supervision import RelayChild, RelaySupervision
-from base.clock import SYSTEM_TIMERS, Clock
-from base.clock.configuration import clock_config_from_boot
+from agent.takeover.gate import LeasePhase
+from agent.takeover.relay import RelayWait
+from agent.tests.impersonation.handoff_inputs import handoff_notes, takeover_host
+from agent.tests.impersonation.lease_support import Cluster, idle_graph, native_context
+from agent.tests.impersonation.lease_support import cluster as cluster
+from base.agents.impersonation.status import ImpersonationStatus
+from base.agents.observation.relay_supervision import RelaySupervision
 from base.cluster.machine import MachineIdentity
-from base.config import settings
-from base.config.tests.configuration import snapshot_process_config
+from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
-from base.host.env.agent_slices import AgentSlices
+from base.lm.catalog import ModelCatalog
 from base.native_process.runtime_incarnation import RuntimeIncarnation
-from base.packages.composer_commands import CommandCatalog
-from base.packages.plugin_providers import build_model_catalog
 from meiva.tests.fixtures.pin_agent import exec_context
 
-
-def make_notes() -> HandoffNotes:
-    return HandoffNotes(Clock.from_settings, lambda: settings.general.message_timestamps)
+HELD_PHASES = ["accepted", "active", "released", "expired"]
 
 
-@pytest.fixture
-def relays() -> RelaySupervision:
-    return RelaySupervision()
-
-
-@pytest.fixture
-def gate_ctx(
-    database: Database,
-    event_bus: EventBus,
-    relays: RelaySupervision,
-    machine_identity: MachineIdentity,
-) -> MeivaContext:
-    config = snapshot_process_config()
-    return MeivaContext(
-        db=database,
-        bus=event_bus,
-        machine=machine_identity,
-        relays=relays,
-        catalog=build_model_catalog(),
-        clock_factory=lambda: Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS),
-        agent=AgentSlices.resolve(
-            default_reader=lambda domain, field: getattr(getattr(config.view, domain), field)
-        ),
-        commands=CommandCatalog.system(skills=list),
-    )
-
-
-@pytest.fixture
-def native_gate_ctx(gate_ctx: MeivaContext, incarnation: RuntimeIncarnation) -> MeivaContext:
-    return replace(gate_ctx, original_incarnation=incarnation)
-
-
-@pytest.fixture
-def incarnation() -> Iterator[RuntimeIncarnation]:
-    token = RuntimeIncarnation(42, uuid4(), uuid4())
-    yield token
-
-
-def _session(status: str = "active", **values: Any) -> dict[str, Any]:
-    return {
-        "id": "lease-1",
-        "handoff_applied_at": "already-applied",
-        "process_metadata": {},
-        "source": "external_agent:codex:task1",
-        "status": status,
-        "reason": "Finish the assigned task",
-        "plugin_delta": [],
-        "delta_version": 0,
-        "applied_version": 0,
-        "relay_provider": "codex",
-        "relay_thread_id": "thread-1",
-        "relay_codex_remote": None,
-        "relay_heartbeat_at": datetime.now(UTC),
-        "relay_last_failure_at": None,
-        "relay_generation": 1,
-        "relay_identity": None,
-        "relay_minted_at": None,
-        **values,
-    }
-
-
-@pytest.mark.parametrize("status", ["accepted", "active", "released", "expired"])
-async def test_hold_ends_before_claim_or_compaction(
-    monkeypatch: pytest.MonkeyPatch,
-    status: str,
-    gate_ctx: MeivaContext,
-    *,
-    database_gate: ProcessDbGate,
+@pytest.mark.parametrize(
+    ("status", "phase"),
+    [
+        (ImpersonationStatus.REQUESTED, LeasePhase.REQUESTED),
+        (ImpersonationStatus.ACCEPTED, LeasePhase.ACCEPTED),
+        (ImpersonationStatus.ACTIVE, LeasePhase.ACTIVE),
+        (ImpersonationStatus.RELEASED, LeasePhase.ENDED),
+        (ImpersonationStatus.REJECTED, LeasePhase.ENDED),
+        (ImpersonationStatus.EXPIRED, LeasePhase.ENDED),
+    ],
+)
+def test_every_persisted_status_reads_as_one_lease_phase(
+    status: ImpersonationStatus, phase: LeasePhase
 ) -> None:
-    monkeypatch.setattr(impersonation, "native_status", AsyncMock(return_value=_session(status)))
-    decision = await impersonation.claim_gate(BaseAgentState(), 42, gate_ctx)
+    assert impersonation.lease_phase({"status": status}) is phase
+    assert impersonation.lease_phase(None) is None
+
+
+def test_only_an_ended_lease_without_its_receipt_is_owed_a_handoff() -> None:
+    assert impersonation.handoff_owed(None) is False
+    ended = {"status": ImpersonationStatus.EXPIRED, "handoff_applied_at": None}
+    assert impersonation.handoff_owed(ended) is True
+    assert impersonation.handoff_owed({**ended, "handoff_applied_at": "applied"}) is False
+    assert impersonation.handoff_owed({**ended, "status": ImpersonationStatus.ACTIVE}) is False
+
+
+@pytest.mark.parametrize("phase", HELD_PHASES)
+async def test_the_claim_gate_parks_the_graph_while_a_lease_holds_the_agent(
+    cluster: Cluster, phase: str
+) -> None:
+    owner = cluster.native_agent()
+    cluster.lease(owner, provider="claude", phase=phase)
+    decision = await impersonation.claim_gate(
+        BaseAgentState(), owner.agent_id, native_context(cluster, owner)
+    )
     assert decision is not None
     assert decision.goto == END
-    hook = AsyncMock(return_value=Command(goto="llm"))
-    guarded = impersonation.protect_native_hooks(hook)
-    result = await guarded(
-        BaseAgentState(),
-        placeholder_runtime(database_gate=database_gate),
-        {"configurable": {"thread_id": "42"}},
-    )
-    assert result.goto == END
-    hook.assert_not_awaited()
+    assert decision.update == {"turn_active": False, "turn_idle": True}
 
 
-# meiva:note
-# After a receipt write fails, retrying settlement does not apply the same non-idempotent delta to the checkpoint twice.
-# meiva:link agent/tests/impersonation/docs/checkpoint-receipt.meiva.okf.md
-async def test_checkpoint_receipt_prevents_reapplying_non_idempotent_delta(
-    monkeypatch: pytest.MonkeyPatch,
-    incarnation: RuntimeIncarnation,
-    database: Database,
-    event_bus: EventBus,
-    relays: RelaySupervision,
-    machine_identity: MachineIdentity,
-) -> None:
-    def add(left: int, right: int) -> int:
-        return left + right
-
-    class State(BaseModel):
-        counter: Annotated[int, add] = 0
-        impersonation_applied: dict[str, object] = Field(default_factory=dict)
-
-    builder = StateGraph(State)
-
-    def idle(_state: State) -> dict[str, Any]:
-        return {}
-
-    builder.add_node("idle", idle)  # pyright: ignore[reportArgumentType, reportUnknownMemberType]
-    builder.add_edge(START, "idle")
-    builder.add_edge("idle", END)
-    graph: Any = builder.compile(checkpointer=MemorySaver())  # pyright: ignore[reportUnknownMemberType]
-    config: RunnableConfig = {"configurable": {"thread_id": "42"}}
-    await graph.ainvoke({"counter": 0}, config)
-    session = _session("released", plugin_delta=[{"counter": 3}], delta_version=1)
-    monkeypatch.setattr(impersonation, "native_status", AsyncMock(return_value=session))
-
-    def decode(delta: dict[str, Any], state_cls: type[Any]) -> dict[str, Any]:
-        assert state_cls is State
-        return delta
-
-    monkeypatch.setattr(plugin_state_codec, "decode_plugin_delta", decode)
-    receipt = Mock(side_effect=RuntimeError("receipt commit lost"))
-    monkeypatch.setattr(agents_impersonation, "mark_plugin_applied", receipt)
-    with pytest.raises(RuntimeError, match="receipt commit lost"):
-        await impersonation.settle_checkpoint(
-            graph,
-            database,
-            event_bus,
-            42,
-            relays,
-            incarnation=incarnation,
-            notes=make_notes(),
-            read_local_machine=machine_identity.name,
+async def test_the_claim_gate_lets_an_agent_without_a_lease_proceed(cluster: Cluster) -> None:
+    owner = cluster.native_agent()
+    assert (
+        await impersonation.claim_gate(
+            BaseAgentState(), owner.agent_id, native_context(cluster, owner)
         )
-    assert (await graph.aget_state(config)).values["counter"] == 3
-    receipt.side_effect = None
-    await impersonation.settle_checkpoint(
-        graph,
-        database,
-        event_bus,
-        42,
-        relays,
-        incarnation=incarnation,
-        notes=make_notes(),
-        read_local_machine=machine_identity.name,
+        is None
     )
-    assert (await graph.aget_state(config)).values["counter"] == 3
-    assert receipt.call_count == 2
 
 
-def test_exec_envelope_carries_parent_incarnation(
-    tmp_path: Path, incarnation: RuntimeIncarnation
+async def test_the_claim_gate_prepares_a_request_without_a_model_decision(
+    cluster: Cluster,
 ) -> None:
+    owner = cluster.native_agent()
+    requested = cluster.lease(owner, provider="claude", phase="requested")
+    decision = await impersonation.claim_gate(
+        BaseAgentState(), owner.agent_id, native_context(cluster, owner)
+    )
+    assert decision is not None
+    assert decision.goto == END
+    update = decision.update
+    assert isinstance(update, dict)
+    assert [message.id for message in cast("list[HumanMessage]", update["messages"])] == [
+        "impersonation-introduction",
+        f"impersonation-start:{owner.agent_id}:0",
+    ]
+    assert update["impersonation_introduced"] is True
+    assert update["turn_idle"] is True
+    assert cluster.get(requested["id"])["status"] == "accepted"
+
+
+async def _hook_result(
+    cluster: Cluster, owner: RuntimeIncarnation, ops_pool: AsyncConnectionPool[Any]
+) -> Command[Any]:
+    async def hook(*_args: object) -> Command[Any]:
+        return Command(goto="llm")
+
+    return await impersonation.protect_native_hooks(hook)(
+        BaseAgentState(),
+        Runtime(context=native_context(cluster, owner, ops_pool=ops_pool)),
+        {"configurable": {"thread_id": str(owner.agent_id)}},
+    )
+
+
+@pytest.mark.parametrize("phase", HELD_PHASES)
+async def test_hooks_do_not_run_while_a_lease_holds_the_agent(
+    cluster: Cluster, aops_pool: AsyncConnectionPool[Any], phase: str
+) -> None:
+    owner = cluster.native_agent()
+    cluster.lease(owner, provider="claude", phase=phase)
+    result = await _hook_result(cluster, owner, aops_pool)
+    assert result.goto == END
+    assert result.update == {"turn_idle": True}
+
+
+@pytest.mark.parametrize("phase", [None, "requested"])
+async def test_hooks_run_with_no_lease_or_only_a_request(
+    cluster: Cluster, aops_pool: AsyncConnectionPool[Any], phase: str | None
+) -> None:
+    owner = cluster.native_agent()
+    if phase is not None:
+        cluster.lease(owner, provider="claude", phase=phase)
+    result = await _hook_result(cluster, owner, aops_pool)
+    assert result.goto == "llm"
+
+
+def test_exec_envelope_carries_parent_incarnation(tmp_path: Path) -> None:
+    incarnation = RuntimeIncarnation(42, uuid4(), uuid4())
     path = tmp_path / "request.json"
     write_request(
         path,
@@ -207,448 +153,162 @@ def test_exec_envelope_carries_parent_incarnation(
     assert read_request(path).incarnation == incarnation
 
 
-def _relay_session(
-    status: str = "accepted", *, provider: str = "codex", **values: Any
-) -> dict[str, Any]:
-    base: dict[str, Any] = {
-        "relay_provider": provider,
-        "relay_thread_id": "thread-1" if provider == "codex" else None,
-        "relay_codex_remote": None,
-        "relay_heartbeat_at": None,
-        "relay_last_failure_at": None,
-        "relay_generation": 1,
-        "relay_identity": None,
-        "relay_minted_at": None,
-    }
-    base.update(values)
-    return _session(status, **base)
-
-
-async def test_settle_checkpoint_rolls_back_when_relay_establishment_fails(
-    monkeypatch: pytest.MonkeyPatch,
-    incarnation: RuntimeIncarnation,
-    database: Database,
-    event_bus: EventBus,
-    relays: RelaySupervision,
-    machine_identity: MachineIdentity,
+async def test_settlement_rolls_the_lease_back_when_the_controller_relay_is_not_running(
+    cluster: Cluster, tmp_path: Path
 ) -> None:
-    monkeypatch.setattr(
-        impersonation, "native_status", AsyncMock(return_value=_relay_session("accepted"))
-    )
-    activate = Mock()
-    monkeypatch.setattr(agents_impersonation, "activate", activate)
-    checkpoint = AsyncMock()
-    monkeypatch.setattr(impersonation_handoff, "ensure_start_marker", checkpoint)
-
-    def refused(*_args: object, read_local_machine: Callable[[], str]) -> bool:
-        return False
-
-    monkeypatch.setattr(impersonation, "establish_relay", refused)
+    owner = cluster.native_agent()
+    accepted = cluster.lease(owner, provider="claude")
+    graph, config = await idle_graph(owner.agent_id)
+    quick = replace(takeover_host(tmp_path, cluster.machine), wait=RelayWait(0.0, 0.01))
     assert not await impersonation.settle_checkpoint(
-        MagicMock(),
-        database,
-        event_bus,
-        42,
-        relays,
-        incarnation=incarnation,
-        notes=make_notes(),
-        read_local_machine=machine_identity.name,
+        graph,
+        cluster.database,
+        cluster.event_bus,
+        owner.agent_id,
+        RelaySupervision(),
+        incarnation=owner,
+        notes=handoff_notes(),
+        host=quick,
     )
-    activate.assert_not_called()
-    checkpoint.assert_awaited_once()
+    ended = cluster.get(accepted["id"])
+    assert ended["status"] == "rejected"
+    assert ended["rejection_reason"] == "the controller relay is not running (no fresh heartbeat)"
+    messages = (await graph.aget_state(config)).values["messages"]
+    assert f"impersonation-start:{owner.agent_id}:0" in [m.id for m in messages]
 
 
-async def test_settle_checkpoint_activates_only_after_relay_ready(
-    monkeypatch: pytest.MonkeyPatch,
-    incarnation: RuntimeIncarnation,
-    database: Database,
-    event_bus: EventBus,
-    relays: RelaySupervision,
-    machine_identity: MachineIdentity,
+async def test_settlement_activates_only_after_the_relay_is_ready(
+    cluster: Cluster, tmp_path: Path
 ) -> None:
-    monkeypatch.setattr(
-        impersonation, "native_status", AsyncMock(return_value=_relay_session("accepted"))
-    )
-    activate = Mock(return_value=_relay_session("active"))
-    monkeypatch.setattr(agents_impersonation, "activate", activate)
-    checkpoint = AsyncMock()
-    monkeypatch.setattr(impersonation_handoff, "ensure_start_marker", checkpoint)
-    establish = Mock(return_value=True)
-    monkeypatch.setattr(impersonation, "establish_relay", establish)
+    owner = cluster.native_agent()
+    accepted = cluster.lease(owner, provider="claude")
+    cluster.heartbeat(accepted["id"], seconds_ago=0.0)
+    graph, config = await idle_graph(owner.agent_id)
     assert await impersonation.settle_checkpoint(
-        MagicMock(),
-        database,
-        event_bus,
-        42,
-        relays,
-        incarnation=incarnation,
-        notes=make_notes(),
-        read_local_machine=machine_identity.name,
+        graph,
+        cluster.database,
+        cluster.event_bus,
+        owner.agent_id,
+        RelaySupervision(),
+        incarnation=owner,
+        notes=handoff_notes(),
+        host=takeover_host(tmp_path, cluster.machine),
     )
-    checkpoint.assert_awaited_once()
-    establish.assert_called_once()
-    activate.assert_called_once()
+    assert cluster.get(accepted["id"])["status"] == "active"
+    messages = (await graph.aget_state(config)).values["messages"]
+    assert [m.id for m in messages[-2:]] == [
+        "impersonation-introduction",
+        f"impersonation-start:{owner.agent_id}:0",
+    ]
 
 
-@pytest.mark.parametrize("provider", ["claude", "dsh"])
-def test_establish_relay_session_relay_accepts_a_fresh_heartbeat(
-    monkeypatch: pytest.MonkeyPatch,
-    incarnation: RuntimeIncarnation,
-    provider: str,
-    database: Database,
-    event_bus: EventBus,
-    relays: RelaySupervision,
-    machine_identity: MachineIdentity,
+async def test_settlement_without_activation_leaves_an_accepted_lease_alone(
+    cluster: Cluster, tmp_path: Path
 ) -> None:
-    from datetime import UTC, datetime
+    owner = cluster.native_agent()
+    accepted = cluster.lease(owner, provider="claude")
+    cluster.heartbeat(accepted["id"], seconds_ago=0.0)
+    graph, config = await idle_graph(owner.agent_id)
+    assert not await impersonation.settle_checkpoint(
+        graph,
+        cluster.database,
+        cluster.event_bus,
+        owner.agent_id,
+        RelaySupervision(),
+        activate_accepted=False,
+        incarnation=owner,
+        notes=handoff_notes(),
+        host=takeover_host(tmp_path, cluster.machine),
+    )
+    assert cluster.get(accepted["id"])["status"] == "accepted"
+    assert [m.id for m in (await graph.aget_state(config)).values["messages"]] == [
+        "initial-request"
+    ]
 
-    fail = Mock()
-    monkeypatch.setattr(agents_impersonation, "fail_acceptance", fail)
-    fresh = _relay_session("accepted", provider=provider, relay_heartbeat_at=datetime.now(UTC))
-    assert (
-        impersonation.establish_relay(
-            database,
-            event_bus,
-            fresh,
-            incarnation,
-            relays,
-            read_local_machine=machine_identity.name,
+
+async def test_settlement_does_nothing_for_an_agent_without_a_lease_or_with_only_a_request(
+    cluster: Cluster, tmp_path: Path
+) -> None:
+    owner = cluster.native_agent()
+    graph, _config = await idle_graph(owner.agent_id)
+
+    async def settle() -> bool:
+        return await impersonation.settle_checkpoint(
+            graph,
+            cluster.database,
+            cluster.event_bus,
+            owner.agent_id,
+            RelaySupervision(),
+            incarnation=owner,
+            notes=handoff_notes(),
+            host=takeover_host(tmp_path, cluster.machine),
         )
-        is True
-    )
-    fail.assert_not_called()
+
+    assert not await settle()
+    requested = cluster.lease(owner, provider="claude", phase="requested")
+    assert not await settle()
+    assert cluster.get(requested["id"])["status"] == "requested"
 
 
-def test_establish_relay_codex_provisions_spawns_and_waits_for_heartbeat(
-    monkeypatch: pytest.MonkeyPatch,
-    incarnation: RuntimeIncarnation,
+async def test_successor_admission_ends_a_stale_accepted_lease(
+    db_conn: psycopg.Connection[Any],
+    aops_pool: AsyncConnectionPool[Any],
     database: Database,
     event_bus: EventBus,
-    relays: RelaySupervision,
-    machine_identity: MachineIdentity,
-) -> None:
-    from datetime import UTC, datetime
-
-    provision = Mock(return_value={"relay_generation": 1})
-    monkeypatch.setattr(agents_impersonation, "provision_relay", provision)
-    spawn = Mock(return_value=MagicMock(poll=Mock(return_value=None)))
-    monkeypatch.setattr(impersonation_process, "spawn_codex_relay", spawn)
-    ready = {"status": "accepted", "relay_heartbeat_at": datetime.now(UTC)}
-    monkeypatch.setattr(agents_impersonation, "relay_get", Mock(return_value=ready))
-    assert (
-        impersonation.establish_relay(
-            database,
-            event_bus,
-            _relay_session(),
-            incarnation,
-            relays,
-            read_local_machine=machine_identity.name,
-        )
-        is True
-    )
-    provision.assert_called_once()
-    provision_token = provision.call_args.args[3]
-    assert spawn.call_count == 1
-    assert spawn.call_args.args == (42, "lease-1", provision_token, "thread-1", None, None)
-    assert spawn.call_args.kwargs == {"provider": "codex", "antigravity_endpoint_file": None}
-    assert relays.children[42].token == provision_token
-
-
-def test_establish_relay_codex_spawn_exit_rolls_back(
-    monkeypatch: pytest.MonkeyPatch,
-    incarnation: RuntimeIncarnation,
-    database: Database,
-    event_bus: EventBus,
-    relays: RelaySupervision,
-    machine_identity: MachineIdentity,
-) -> None:
-    child = MagicMock()
-    child.poll.return_value = 5
-    child.returncode = 5
-    monkeypatch.setattr(
-        agents_impersonation, "provision_relay", Mock(return_value={"relay_generation": 1})
-    )
-    monkeypatch.setattr(impersonation_process, "spawn_codex_relay", Mock(return_value=child))
-    fail = Mock()
-    monkeypatch.setattr(agents_impersonation, "fail_acceptance", fail)
-    assert (
-        impersonation.establish_relay(
-            database,
-            event_bus,
-            _relay_session(),
-            incarnation,
-            relays,
-            read_local_machine=machine_identity.name,
-        )
-        is False
-    )
-    fail.assert_called_once()
-    assert "exited during startup" in fail.call_args.args[4]
-    assert not relays.children
-
-
-def test_establish_relay_codex_readiness_timeout_rolls_back(
-    monkeypatch: pytest.MonkeyPatch,
-    incarnation: RuntimeIncarnation,
-    database: Database,
-    event_bus: EventBus,
-    relays: RelaySupervision,
-    machine_identity: MachineIdentity,
-) -> None:
-    child = MagicMock()
-    child.poll.return_value = None
-    monkeypatch.setattr(
-        agents_impersonation, "provision_relay", Mock(return_value={"relay_generation": 1})
-    )
-    monkeypatch.setattr(impersonation_process, "spawn_codex_relay", Mock(return_value=child))
-    terminate = Mock()
-    monkeypatch.setattr(impersonation, "terminate_relay", terminate)
-    fail = Mock()
-    monkeypatch.setattr(agents_impersonation, "fail_acceptance", fail)
-    monkeypatch.setattr(impersonation, "RELAY_READY_TIMEOUT_S", 0.0)
-    assert (
-        impersonation.establish_relay(
-            database,
-            event_bus,
-            _relay_session(),
-            incarnation,
-            relays,
-            read_local_machine=machine_identity.name,
-        )
-        is False
-    )
-    terminate.assert_called_once()
-    fail.assert_called_once()
-    assert "did not become ready" in fail.call_args.args[4]
-    assert not relays.children
-
-
-async def test_missing_snapshot_cannot_kill_a_replacement_relay(
-    monkeypatch: pytest.MonkeyPatch,
-    gate_ctx: MeivaContext,
-) -> None:
-    monkeypatch.setattr(impersonation, "native_status", AsyncMock(return_value=None))
-    process = MagicMock()
-    gate_ctx.relays.children[42] = RelayChild(
-        "00000000-0000-0000-0000-000000000001", process, "token", 0.0, 1
-    )
-    conn = MagicMock()
-    conn.execute.return_value.fetchone.return_value = ("active",)
-    db = MagicMock()
-    db.connect.return_value.__enter__.return_value = conn
-    terminate = Mock()
-    monkeypatch.setattr(impersonation, "terminate_relay", terminate)
-    await impersonation.supervise_relay(
-        db,
-        MagicMock(),
-        None,
-        42,
-        gate_ctx.relays,
-        incarnation=None,
-    )
-    terminate.assert_not_called()
-    assert gate_ctx.relays.children[42].process is process
-
-
-@pytest.mark.parametrize("same_lease", [False, True])
-async def test_delayed_snapshot_cannot_retire_replacement_sender(
-    monkeypatch: pytest.MonkeyPatch,
-    gate_ctx: MeivaContext,
-    same_lease: bool,
-    machine_identity: MachineIdentity,
-) -> None:
-    session = _relay_session("active", relay_generation=1)
-    process = MagicMock()
-    gate_ctx.relays.children[42] = RelayChild(
-        "lease-1" if same_lease else "lease-2", process, "new-token", 0.0, 2
-    )
-    terminate = Mock()
-    monkeypatch.setattr(impersonation, "terminate_relay", terminate)
-    await impersonation.supervise_relay(
-        MagicMock(),
-        MagicMock(),
-        session,
-        42,
-        gate_ctx.relays,
-        incarnation=None,
-    )
-    terminate.assert_not_called()
-    assert gate_ctx.relays.children[42].process is process
-
-
-@pytest.mark.parametrize("owned,running", [(False, False), (False, True), (True, True)])
-async def test_claim_gate_records_a_stale_relay_as_degraded_and_never_replaces_it(
-    monkeypatch: pytest.MonkeyPatch,
-    incarnation: RuntimeIncarnation,
-    native_gate_ctx: MeivaContext,
-    owned: bool,
-    running: bool,
-) -> None:
-    from datetime import timedelta
-
-    from agent.nodes import END
-
-    session = _relay_session("active", relay_heartbeat_at=datetime.now(UTC) - timedelta(minutes=5))
-    monkeypatch.setattr(impersonation, "native_status", AsyncMock(return_value=session))
-    old = MagicMock()
-    old.poll.return_value = None if running else 1
-    if owned:
-        native_gate_ctx.relays.children[42] = RelayChild("lease-1", old, "token", 0.0, 1)
-    terminated = Mock()
-    monkeypatch.setattr(impersonation, "terminate_relay", terminated)
-    provision = Mock(return_value={"relay_generation": 2})
-    monkeypatch.setattr(agents_impersonation, "provision_relay", provision)
-    spawn = Mock()
-    monkeypatch.setattr(impersonation_process, "spawn_codex_relay", spawn)
-    degradation = Mock()
-    monkeypatch.setattr(relay, "record_degradation", degradation)
-    stamp = Mock()
-    monkeypatch.setattr(impersonation, "stamp_relay_failure", stamp)
-    abort = Mock()
-    monkeypatch.setattr(agents_impersonation, "abort_lease", abort)
-    decision = await impersonation.claim_gate(BaseAgentState(), 42, native_gate_ctx)
-    assert decision is not None and decision.goto == END
-
-    provision.assert_not_called()
-    spawn.assert_not_called()
-    terminated.assert_not_called()
-    abort.assert_not_called()
-    degradation.assert_called_once()
-    stamp.assert_called_once()
-    if owned:
-        assert native_gate_ctx.relays.children[42].process is old
-
-
-async def test_startup_grace_does_not_degrade_a_fresh_child(
-    monkeypatch: pytest.MonkeyPatch,
-    incarnation: RuntimeIncarnation,
-    native_gate_ctx: MeivaContext,
-) -> None:
-    session = _relay_session("active")
-    child = MagicMock()
-    child.poll.return_value = None
-    native_gate_ctx.relays.children[42] = RelayChild(
-        "lease-1", child, "token", impersonation.time.monotonic()
-    )
-    monkeypatch.setattr(impersonation, "native_status", AsyncMock(return_value=session))
-    degradation = Mock()
-    monkeypatch.setattr(relay, "record_degradation", degradation)
-    await impersonation.claim_gate(BaseAgentState(), 42, native_gate_ctx)
-    degradation.assert_not_called()
-    assert native_gate_ctx.relays.children[42].process is child
-
-
-async def test_stale_session_relay_retains_authority_with_visible_unsupported_recovery(
-    monkeypatch: pytest.MonkeyPatch,
-    incarnation: RuntimeIncarnation,
-    native_gate_ctx: MeivaContext,
-) -> None:
-    session = _relay_session("active", provider="claude")
-    monkeypatch.setattr(impersonation, "native_status", AsyncMock(return_value=session))
-    degradation = Mock()
-    monkeypatch.setattr(relay, "record_degradation", degradation)
-    monkeypatch.setattr(impersonation, "stamp_relay_failure", Mock())
-    abort = Mock()
-    monkeypatch.setattr(agents_impersonation, "abort_lease", abort)
-    await impersonation.claim_gate(BaseAgentState(), 42, native_gate_ctx)
-    degradation.assert_called_once()
-    assert "unsupported" in degradation.call_args.args[-1]
-    abort.assert_not_called()
-
-
-@pytest.mark.parametrize("fresh", [False, True])
-async def test_unknown_relay_exit_evidence_degrades_only_when_the_heartbeat_is_stale(
-    monkeypatch: pytest.MonkeyPatch,
-    incarnation: RuntimeIncarnation,
-    native_gate_ctx: MeivaContext,
-    fresh: bool,
-) -> None:
-    from base.native_process.ownership import OwnedProcess
-
-    session = _relay_session(
-        "active",
-        relay_heartbeat_at=datetime.now(UTC) if fresh else None,
-        relay_identity={"pid": 123, "birth": 1.0, "starttime": 1},
-    )
-    before = dict(session)
-    monkeypatch.setattr(impersonation, "native_status", AsyncMock(return_value=session))
-    monkeypatch.setattr(OwnedProcess, "live", Mock(side_effect=RuntimeError("birth unavailable")))
-    degradation = Mock()
-    monkeypatch.setattr(relay, "record_degradation", degradation)
-    monkeypatch.setattr(impersonation, "stamp_relay_failure", Mock())
-    provision = Mock()
-    monkeypatch.setattr(agents_impersonation, "provision_relay", provision)
-    decision = await impersonation.claim_gate(BaseAgentState(), 42, native_gate_ctx)
-    assert decision is not None and decision.goto == END
-    assert degradation.call_count == int(not fresh)
-    provision.assert_not_called()
-    assert session == before
-
-
-def test_an_unreadable_antigravity_record_rolls_back_with_its_path(
-    db_conn: Any,
-    database: Database,
-    event_bus: EventBus,
-    relays: RelaySupervision,
     *,
-    config_authority: Any,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
 ) -> None:
-    # meiva:note
-    # A relay that dies at startup leaves only an exit code in the lease's reason, so
-    # the accepting runtime resolves the destination first and names the record it
-    # could not use. The assertion is the operator-visible rejection reason, not the
-    # internal call: resolving before spawning is what puts the fact there.
-    # meiva:link docs/conventions/agents/agent-impersonation-hosts.md
+    from agent.ownership.hosted import admit_hosted_runtime
     from base.agents import impersonation as leases
-    from base.agents.impersonation.host_transport import antigravity_endpoint_path
     from base.agents.impersonation.tests.impersonation_support import recorded_tree
+    from base.agents.tests.units import spawn_agent
     from base.api_contracts.caller_identity import CallerIdentity
-    from base.db import create_agent
 
-    local_machine = machine_identity.name()
-    agent_id = create_agent(db_conn)
-    owner = RuntimeIncarnation(agent_id, uuid4(), uuid4())
-    db_conn.execute(
-        "INSERT INTO agents_meta(id,status,machine,runtime_generation,runtime_owner) "
-        "VALUES(%s,'idling',%s,%s,%s)",
-        (agent_id, local_machine, owner.generation, owner.owner),
+    agent_id = spawn_agent(
+        catalog=model_catalog,
+        authority=config_authority,
+        database_gate=database_gate,
+        machine=machine_identity,
     )
-    db_conn.commit()
-    thread_id = str(uuid4())
-    session = leases.request(
+    first = await admit_hosted_runtime(
+        aops_pool, agent_id, machine_identity.name(), uuid4(), db=database
+    )
+    assert first is not None
+    lease = leases.request(
         database,
         event_bus,
         agent_id,
-        caller=CallerIdentity(kind="external_agent", subject="antigravity"),
+        caller=CallerIdentity(kind="external_agent", subject="codex", instance="test"),
+        ttl_seconds=3600,
+        reason="Handle the next message",
         process_metadata=recorded_tree(),
-        relay_provider="antigravity",
-        relay_thread_id=thread_id,
+        relay_provider="codex",
+        relay_thread_id=str(uuid4()),
         authority=config_authority,
-        local_machine=local_machine,
+        local_machine=machine_identity.name(),
         name="Test name",
         executor_name="Test executor_name",
     )
     leases.prepare(
         database,
         event_bus,
-        session["id"],
+        lease["id"],
         agent_id,
-        owner,
+        first,
         "Handoff brief",
-        local_machine=local_machine,
+        local_machine=machine_identity.name(),
     )
-    record = antigravity_endpoint_path(thread_id)
-    record.parent.mkdir(parents=True, exist_ok=True)
-    record.write_text("not json", encoding="utf-8")
-    current = leases.get(database, event_bus, session["id"], local_machine=local_machine)
-    assert (
-        impersonation.establish_relay(
-            database, event_bus, current, owner, relays, read_local_machine=machine_identity.name
-        )
-        is False
+    successor = await admit_hosted_runtime(
+        aops_pool, agent_id, machine_identity.name(), uuid4(), db=database
     )
-    ended = leases.get(database, event_bus, session["id"], local_machine=local_machine)
-    assert ended["status"] == "rejected"
-    assert "the Antigravity endpoint is unusable" in ended["rejection_reason"]
-    assert str(record) in ended["rejection_reason"]
+    assert successor is not None
+    assert db_conn.execute(
+        "SELECT status,ended_at IS NOT NULL,rejection_reason FROM agent_impersonations WHERE id=%s",
+        (lease["id"],),
+    ).fetchone() == ("expired", True, "aborted: native runtime restarted")
+    assert db_conn.execute(
+        "SELECT runtime_generation,runtime_owner FROM agents_meta WHERE id=%s", (agent_id,)
+    ).fetchone() == (successor.generation, successor.owner)
