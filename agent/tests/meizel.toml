@@ -27,9 +27,6 @@ exports = ["agent_tests.py", "claim"]
 "test_external.py#monkeypatch.setattr meiva.gateway_client.send_message" = 2
 "test_external.py#monkeypatch.setattr meiva.impersonation.attachment.control.require_active" = 3
 
-[debt.restricted-python]
-"test_compact.py#string patch target 'agent.graph.hooks.compact.resolve_context_budget'" = 1
-
 [debt.stdlib-patch]
 "test_exec_subprocess.py#monkeypatch.setattr time.monotonic" = 1
 

@@ -111,21 +111,7 @@ os.environ["MEIVA_EVENTS_CHANNEL"] = _TEST_EVENTS_CHANNEL
 # re-pin their own env per test.
 os.environ["MEIVA_CONFIG_FETCH"] = "skip"
 
-# ── Pre-compact history dump: pinned OFF for the suite, like a cluster that
-# configures the flag off ──
-#
-# The flag defaults ON (2026-09-11); left on, every compaction path would write
-# a JSONL dump into the test home and inject the dump note after the summary.
-# compact-behavior tests assert exact post-compact tails, and test_config
-# compares fresh Settings instances against the singleton under "the same env"
-# — so every layer must agree on the value: the singleton built below, the D5
-# pre-warmed fallback, fresh instances, and spawned subprocesses. A fixture-time
-# attribute patch reaches only the singleton (the D5 pre-warm snapshots at
-# import) — pin the environment before the first Settings construction instead,
-# and declare the same key in the test home's .env below so the cluster-env
-# authority pass takes its force branch (an undeclared cluster-scope key is
-# DROPPED). Feature tests (agent/tests/history/test_history_dump.py) flip the singleton
-# back on per test.
+# meiva:link tests/docs/test-fixtures/history-dump-isolation.meiva.okf.md
 os.environ["MEIVA_COMPACT_HISTORY_DUMP"] = "false"
 
 # ── Process-profile marker: the suite is profile-less, like CI ──

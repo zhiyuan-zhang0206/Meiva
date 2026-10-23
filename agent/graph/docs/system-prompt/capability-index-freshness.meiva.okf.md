@@ -17,4 +17,10 @@ The drift check is `agent/graph/prompt/capabilities.py:index_drift` plus the
 - Unresolved configured names warn on each resolution.
 - `indexed: None` means no snapshot exists for this window (a checkpoint predating the field). The check then adopts the live catalog silently rather than announcing the whole catalog as new
 
+Container and eval contexts (`ops_pool=None`) do not announce host-side skill
+installs. The hook also defers a drift note when automatic compaction will replace
+the window; the same catalog change remains eligible when no replacement is
+pending. Tests supply each narrowing, disable and compaction scenario through
+its own `AgentSlices` inputs, keeping the original membership and note assertions.
+
 Parent: [[agent/graph/docs/system-prompt/system-prompt.meiva.okf.md|System Prompt]].
