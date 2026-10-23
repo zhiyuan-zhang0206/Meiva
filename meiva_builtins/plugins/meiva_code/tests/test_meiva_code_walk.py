@@ -142,7 +142,7 @@ def test_walk_target_is_directory(tmp_path: Path):
 
 def test_walk_nonexistent_target_returns_empty(tmp_path: Path):
     fake = tmp_path / "does-not-exist" / "foo.py"
-    result = find_context_files_along_path(fake)
+    result = find_context_files_along_path(fake, home=tmp_path)
     assert result == []
 
 
