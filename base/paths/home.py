@@ -41,7 +41,7 @@ def resolve_meiva_home() -> Path:
     return home
 
 
-def home_checkout_error(repo: Path) -> str | None:
+def home_checkout_error(repo: Path, *, home: Path | None = None) -> str | None:
     """Why `repo` may not operate this process's home, or None when it may.
 
     A home that carries its own `<home>/source` checkout (the production home
@@ -55,13 +55,13 @@ def home_checkout_error(repo: Path) -> str | None:
     Both sides are compared resolved, so a symlinked or `..`-spelled path to
     the same directory is the same checkout.
     """
-    home = resolve_meiva_home()
-    source = home / "source"
+    resolved_home = resolve_meiva_home() if home is None else home
+    source = resolved_home / "source"
     if not source.is_dir() or repo.resolve() == source.resolve():
         return None
     return (
         f"this checkout ({repo}) is not the checkout of the home it would act on: "
-        f"{home} carries its own source checkout ({source}), and only that "
+        f"{resolved_home} carries its own source checkout ({source}), and only that "
         f"checkout may operate it. Run {source}/.venv/bin/meiva (the bare `meiva` of a "
         f"production host) instead, or set MEIVA_HOME to a home of your own (a "
         f"temporary directory, for a test or a tool)."

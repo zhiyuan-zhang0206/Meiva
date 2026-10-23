@@ -8,6 +8,8 @@ from ``base.host.system.probes``; it must never import ``base.config`` or a
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 from base.host.system.hostport import Host
 from base.host.system.probes import NPX_INCAPABILITY_REASON
 
@@ -27,12 +29,17 @@ def browser_deps_notice(reason: str) -> str:
     )
 
 
-def browser_deps_warning(reason: str, *, host: Host) -> str:
+def browser_deps_warning(
+    reason: str,
+    *,
+    host: Host,
+    install_cmd: Callable[..., str] = node_install_command,
+) -> str:
     """Return a prominent repair warning for a browser dependency gap."""
     if reason == NPX_INCAPABILITY_REASON:
         repair = (
             "| Install Node.js (npx):                                         |\n"
-            f"|   {node_install_command(host=host)}\n"
+            f"|   {install_cmd(host=host)}\n"
         )
     elif reason.startswith("no Chrome"):
         repair = (

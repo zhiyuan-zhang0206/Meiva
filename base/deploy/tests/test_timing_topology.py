@@ -4,7 +4,6 @@ import pytest
 
 import base.deploy.progress_timeout as deploy
 import base.native_process.stop_timing as stop
-from base import config
 from base.deploy.timing import CLOCKS, CONSTRAINTS, assert_clock_lattice, validate_clock_lattice
 from base.host.db_authority import unit
 
@@ -14,23 +13,22 @@ def test_default_lattice_holds() -> None:
     assert failures == [], "lattice violated:\n  " + "\n  ".join(failures)
 
 
-def test_checker_catches_lt_violation(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(deploy, "GATEWAY_PREFLIGHT_BUDGET_S", deploy.NO_PROGRESS_TIMEOUT_S + 10)
-    failures = validate_clock_lattice()
+def test_checker_catches_lt_violation() -> None:
+    failures = validate_clock_lattice(
+        overrides={"GATEWAY_PREFLIGHT_BUDGET_S": deploy.NO_PROGRESS_TIMEOUT_S + 10}
+    )
     assert any("GATEWAY_PREFLIGHT_BUDGET_S < NO_PROGRESS_TIMEOUT_S" in f for f in failures)
 
 
-def test_checker_catches_derived_violation(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(config.settings.daemon, "wedged_agent_inbound_age_seconds", 500.0)
-    failures = validate_clock_lattice()
+def test_checker_catches_derived_violation() -> None:
+    failures = validate_clock_lattice(overrides={"WEDGED_AGE_SEC": 500.0})
     assert any("WEDGED_AGE_SEC >= EXEC_NODE_TIMEOUT_S" in f for f in failures)
 
 
-def test_a_default_bundle_lifetime_past_the_cap_is_reported(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(deploy, "UNIT_BUNDLE_TTL_S", unit.UNIT_BUNDLE_MAX_TTL_S + 1)
-    failures = validate_clock_lattice()
+def test_a_default_bundle_lifetime_past_the_cap_is_reported() -> None:
+    failures = validate_clock_lattice(
+        overrides={"UNIT_BUNDLE_TTL_S": unit.UNIT_BUNDLE_MAX_TTL_S + 1}
+    )
     assert any("UNIT_BUNDLE_TTL_S <= UNIT_BUNDLE_MAX_TTL_S" in f for f in failures)
 
 
@@ -59,12 +57,13 @@ def test_the_restart_interrupt_clocks_are_the_stop_family_values() -> None:
     }
 
 
-def test_assert_clock_lattice_raises_on_violation(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_assert_clock_lattice_raises_on_violation() -> None:
     from base.deploy.timing import ClockLatticeError
 
-    monkeypatch.setattr(deploy, "GATEWAY_PREFLIGHT_BUDGET_S", deploy.NO_PROGRESS_TIMEOUT_S + 10)
     with pytest.raises(ClockLatticeError):
-        assert_clock_lattice()
+        assert_clock_lattice(
+            overrides={"GATEWAY_PREFLIGHT_BUDGET_S": deploy.NO_PROGRESS_TIMEOUT_S + 10}
+        )
 
 
 def test_every_deploy_family_clock_is_registered() -> None:

@@ -5,7 +5,6 @@ from pathlib import Path
 
 import pytest
 
-from base.host.converge import accessibility
 from base.host.converge.accessibility import (
     AccessibilityState,
     AccessibilityStatus,
@@ -68,16 +67,18 @@ class TestAccessibilityStatus:
 
 
 class TestStatusFile:
-    def test_write_read_clear_cycle(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
-        monkeypatch.setattr(accessibility, "meiva_home", lambda: tmp_path)
-        write_status(AccessibilityStatus(state=AccessibilityState.NOT_GRANTED, diagnostic="test"))
+    def test_write_read_clear_cycle(self, tmp_path: Path):
+        write_status(
+            AccessibilityStatus(state=AccessibilityState.NOT_GRANTED, diagnostic="test"),
+            home=tmp_path,
+        )
 
-        assert status_file_path().exists()
-        status = read_status()
+        assert status_file_path(home=tmp_path).exists()
+        status = read_status(home=tmp_path)
         assert status is not None
         assert status.state is AccessibilityState.NOT_GRANTED
         assert status.diagnostic == "test"
 
-        clear_status()
-        assert not status_file_path().exists()
-        assert read_status() is None
+        clear_status(home=tmp_path)
+        assert not status_file_path(home=tmp_path).exists()
+        assert read_status(home=tmp_path) is None

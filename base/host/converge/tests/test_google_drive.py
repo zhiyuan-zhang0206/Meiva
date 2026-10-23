@@ -1,6 +1,5 @@
 import os
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 
@@ -37,55 +36,37 @@ def test_is_writable_false_for_readonly_dir(tmp_path: Path) -> None:
         d.chmod(0o700)
 
 
-def test_find_returns_first_writable_candidate(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_find_returns_first_writable_candidate(tmp_path: Path) -> None:
     good = tmp_path / "good"
     good.mkdir()
-    monkeypatch.setattr(gd, "candidate_drive_dirs", lambda: [tmp_path / "missing", good])
-    assert gd.find_writable_google_drive() == good
+    assert gd.find_writable_google_drive(candidates=[tmp_path / "missing", good]) == good
 
 
-def test_find_none_when_no_candidate_writable(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    monkeypatch.setattr(gd, "candidate_drive_dirs", lambda: [tmp_path / "missing"])
-    assert gd.find_writable_google_drive() is None
+def test_find_none_when_no_candidate_writable(tmp_path: Path) -> None:
+    assert gd.find_writable_google_drive(candidates=[tmp_path / "missing"]) is None
 
 
-def test_find_none_when_no_candidates(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(gd, "candidate_drive_dirs", list)
-    assert gd.find_writable_google_drive() is None
+def test_find_none_when_no_candidates() -> None:
+    assert gd.find_writable_google_drive(candidates=[]) is None
 
 
-def test_macos_candidates_point_at_my_drive(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_macos_candidates_point_at_my_drive(tmp_path: Path) -> None:
     mount = tmp_path / "Library" / "CloudStorage" / "GoogleDrive-someone@example.com" / "My Drive"
     mount.mkdir(parents=True)
-    monkeypatch.setattr(gd, "is_macos", lambda: True)
-    with patch.dict(os.environ, {"HOME": str(tmp_path)}):
-        assert mount in gd.candidate_drive_dirs()
+    assert mount in gd.candidate_drive_dirs(home=tmp_path, system="darwin")
 
 
-def test_macos_legacy_google_drive_folder(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_macos_legacy_google_drive_folder(tmp_path: Path) -> None:
     (tmp_path / "Google Drive" / "My Drive").mkdir(parents=True)
-    monkeypatch.setattr(gd, "is_macos", lambda: True)
-    with patch.dict(os.environ, {"HOME": str(tmp_path)}):
-        assert (tmp_path / "Google Drive" / "My Drive") in gd.candidate_drive_dirs()
+    assert (tmp_path / "Google Drive" / "My Drive") in gd.candidate_drive_dirs(
+        home=tmp_path, system="darwin"
+    )
 
 
-def test_linux_candidates_include_fixed_paths(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    monkeypatch.setattr(gd, "is_macos", lambda: False)
-    monkeypatch.setattr(gd, "is_linux", lambda: True)
-    with patch.dict(os.environ, {"HOME": str(tmp_path)}):
-        cands = gd.candidate_drive_dirs()
+def test_linux_candidates_include_fixed_paths(tmp_path: Path) -> None:
+    cands = gd.candidate_drive_dirs(home=tmp_path, system="linux")
     assert (tmp_path / "GoogleDrive") in cands
 
 
-def test_unsupported_platform_returns_empty(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(gd, "is_macos", lambda: False)
-    monkeypatch.setattr(gd, "is_linux", lambda: False)
-    assert gd.candidate_drive_dirs() == []
+def test_unsupported_platform_returns_empty(tmp_path: Path) -> None:
+    assert gd.candidate_drive_dirs(home=tmp_path, system="windows") == []

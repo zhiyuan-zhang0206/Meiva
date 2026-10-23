@@ -68,6 +68,7 @@ import re as re
 import subprocess as subprocess
 from collections.abc import Callable, Generator
 from collections.abc import Iterable as Iterable
+from pathlib import Path
 
 import psycopg
 
@@ -156,7 +157,7 @@ def applied_migration_names(conn: psycopg.Connection) -> set[str]:
     return _applied_migration_set(conn)
 
 
-def check_schema_version(conn: psycopg.Connection) -> None:
+def check_schema_version(conn: psycopg.Connection, *, migrations_dir: Path | None = None) -> None:
     """Pre-startup sanity: the DB's applied set **must equal** the code's
     required set (baseline + migration files). Both directions are errors:
 
@@ -180,7 +181,7 @@ def check_schema_version(conn: psycopg.Connection) -> None:
         CodeBehindSchema: DB ahead of code (or divergent).
         MigrationLayoutError: migrations/ layout itself is broken.
     """
-    required = required_migration_set()
+    required = required_migration_set(migrations_dir=migrations_dir)
     applied = _applied_migration_set(conn)
     missing = required - applied  # DB behind code
     extra = applied - required  # DB ahead of code
@@ -279,7 +280,11 @@ def _gateway_units(conn: psycopg.Connection) -> list[tuple[str, str]]:
 
 
 def _assert_migration_authority(
-    conn: psycopg.Connection, *, machine_name: Callable[[], str]
+    conn: psycopg.Connection,
+    *,
+    machine_name: Callable[[], str],
+    migrations_dir: Path | None = None,
+    home: Path | None = None,
 ) -> None:
     """Refuse unless this checkout is the gateway unit of the cluster it is about
     to migrate. Raises MigrationAuthorityMismatch naming both identities.
@@ -294,20 +299,25 @@ def _assert_migration_authority(
     units = _gateway_units(conn)
     if not units:
         return
-    home = resolve_meiva_home()
-    foreign = home_checkout_error(migration_layout.MIGRATIONS_DIR.parent)
+    resolved_home = resolve_meiva_home() if home is None else home
+    target_dir = migration_layout.MIGRATIONS_DIR if migrations_dir is None else migrations_dir
+    foreign = home_checkout_error(target_dir.parent, home=resolved_home)
     try:
         this_machine = machine_name()
     except MachineNameMissing:
         this_machine = "<unset>"
-    if foreign is None and (this_machine, str(home)) in units:
+    if foreign is None and (this_machine, str(resolved_home)) in units:
         return
     owner = ", ".join(f"{name}:{path}" for name, path in units)
-    claim = f"{this_machine}:{home}" if foreign is None else f"{this_machine}:<foreign checkout>"
+    claim = (
+        f"{this_machine}:{resolved_home}"
+        if foreign is None
+        else f"{this_machine}:<foreign checkout>"
+    )
     raise MigrationAuthorityMismatch(
         f"refusing to migrate: this checkout claims {claim}, but the database's "
         f"gateway unit is {owner}. A cluster's schema is owned by its gateway — "
-        f"update the cluster from there. Applying {migration_layout.MIGRATIONS_DIR} would leave the "
+        f"update the cluster from there. Applying {target_dir} would leave the "
         f"gateway's own code behind the schema and wedge every agent boot."
     )
 
@@ -324,7 +334,12 @@ def squash_history(conn: psycopg.Connection, names: set[str]) -> None:
 
 
 def apply_pending_migrations(
-    conn: psycopg.Connection, *, machine_name: Callable[[], str]
+    conn: psycopg.Connection,
+    *,
+    machine_name: Callable[[], str],
+    migrations_dir: Path | None = None,
+    home: Path | None = None,
+    squash_fn: Callable[[psycopg.Connection, set[str]], None] | None = None,
 ) -> list[str]:
     """Apply every git-tracked migration file whose name is not yet in the DB's
     applied set, in name (≈ chronological) order; return the list of names
@@ -354,8 +369,9 @@ def apply_pending_migrations(
         MigrationLayoutError: layout broken.
         MigrationAuthorityMismatch: this checkout does not own the cluster.
     """
+    do_squash = squash_history if squash_fn is None else squash_fn
     with schema_mutation_lock(conn):
-        files = list_migration_files()
+        files = list_migration_files(migrations_dir=migrations_dir)
         applied = _applied_migration_set(conn)
         required = {BASELINE_NAME} | {name for name, _ in files}
 
@@ -372,12 +388,17 @@ def apply_pending_migrations(
         # schema (a squash is a mutation too).
         pending = [(name, path) for name, path in files if name not in applied]
         if pending or squash:
-            _assert_migration_authority(conn, machine_name=machine_name)
+            _assert_migration_authority(
+                conn,
+                machine_name=machine_name,
+                migrations_dir=migrations_dir,
+                home=home,
+            )
 
         resetting = RESET_ANCHOR in required - applied
         if squash and not resetting:
             with conn.transaction():
-                squash_history(conn, squash)
+                do_squash(conn, squash)
 
         applied_now: list[str] = []
         for name, path in pending:
@@ -407,7 +428,7 @@ def apply_pending_migrations(
                         # The anchor and deletion must commit together. A crash
                         # cannot leave baseline-only tracking that the new guard
                         # would correctly refuse as an incomplete old restore.
-                        squash_history(conn, squash)
+                        do_squash(conn, squash)
             except psycopg.Error as exc:
                 raise MigrationFailed(f"apply migration {name} failed: {exc}") from exc
             logger.info("[migration] {name} applied", name=name)

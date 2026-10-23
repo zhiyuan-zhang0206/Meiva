@@ -15,7 +15,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 
 import base.deploy.progress_timeout as deploy
@@ -299,17 +299,18 @@ CONSTRAINTS: list[Constraint] = [
 ]
 
 
-def _resolve(expr: str) -> float:
+def _resolve(expr: str, overrides: Mapping[str, float] | None = None) -> float:
     """Resolve `"NAME"`, `"N * NAME"`, or `"NAME + NAME"` against `CLOCKS`."""
     if " + " in expr:
-        return sum(_resolve(part) for part in expr.split(" + "))
+        return sum(_resolve(part, overrides) for part in expr.split(" + "))
     if " * " in expr:
         n, name = expr.split(" * ", 1)
-        return float(n) * CLOCKS[name].get()
-    return CLOCKS[expr].get()
+        val = overrides[name] if overrides is not None and name in overrides else CLOCKS[name].get()
+        return float(n) * val
+    return overrides[expr] if overrides is not None and expr in overrides else CLOCKS[expr].get()
 
 
-def validate_clock_lattice() -> list[str]:
+def validate_clock_lattice(*, overrides: Mapping[str, float] | None = None) -> list[str]:
     """Check every declared ordering against the LIVE clock values.
 
     Returns a list of human-readable violations (empty when the lattice holds).
@@ -318,7 +319,7 @@ def validate_clock_lattice() -> list[str]:
     """
     failures: list[str] = []
     for c in CONSTRAINTS:
-        left, right = _resolve(c.lhs), _resolve(c.rhs)
+        left, right = _resolve(c.lhs, overrides), _resolve(c.rhs, overrides)
         holds = {
             "<": left < right,
             "<=": left <= right,
@@ -334,10 +335,10 @@ class ClockLatticeError(RuntimeError):
     """Raised when live clock values violate a declared lattice ordering."""
 
 
-def assert_clock_lattice() -> None:
+def assert_clock_lattice(*, overrides: Mapping[str, float] | None = None) -> None:
     """Fail fast on any lattice violation. Called at agent-host startup so an
     operator env override that inverts a load-bearing ordering dies loudly on
     the box that lives by these clocks, never silently mid-incident."""
-    failures = validate_clock_lattice()
+    failures = validate_clock_lattice(overrides=overrides)
     if failures:
         raise ClockLatticeError("clock lattice violated:\n  " + "\n  ".join(failures))

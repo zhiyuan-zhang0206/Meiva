@@ -5,7 +5,6 @@ from pathlib import Path
 
 import pytest
 
-from base.host.converge import screen_capture
 from base.host.converge.screen_capture import (
     ScreenCaptureState,
     ScreenCaptureStatus,
@@ -67,16 +66,18 @@ class TestScreenCaptureStatus:
 
 
 class TestStatusFile:
-    def test_write_read_clear_cycle(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
-        monkeypatch.setattr(screen_capture, "meiva_home", lambda: tmp_path)
-        write_status(ScreenCaptureStatus(state=ScreenCaptureState.NO_GRANT, diagnostic="test"))
+    def test_write_read_clear_cycle(self, tmp_path: Path):
+        write_status(
+            ScreenCaptureStatus(state=ScreenCaptureState.NO_GRANT, diagnostic="test"),
+            home=tmp_path,
+        )
 
-        assert status_file_path().exists()
-        read = read_status()
+        assert status_file_path(home=tmp_path).exists()
+        read = read_status(home=tmp_path)
         assert read is not None
         assert read.state is ScreenCaptureState.NO_GRANT
         assert read.diagnostic == "test"
 
-        clear_status()
-        assert not status_file_path().exists()
-        assert read_status() is None
+        clear_status(home=tmp_path)
+        assert not status_file_path(home=tmp_path).exists()
+        assert read_status(home=tmp_path) is None
