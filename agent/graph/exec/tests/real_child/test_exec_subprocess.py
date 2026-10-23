@@ -15,6 +15,7 @@ import psycopg
 import pytest
 from langchain_core.messages import HumanMessage
 
+from agent.graph.exec._subprocess import run_in_subprocess
 from agent.graph.exec.node import (
     ExecCancelled,
     ExecChildError,
@@ -23,7 +24,6 @@ from agent.graph.exec.node import (
     ExecLifecycle,
     ExecOutputChunkPublisher,
     ExecTimedOut,
-    run_in_subprocess,
 )
 from base.agents.lifecycle import AgentRestart, AgentTermination, SystemHalt
 from base.config import settings
@@ -178,7 +178,7 @@ async def test_subprocess_bootstrap_ignores_agent_package_in_process_cwd(
     )
 
     assert isinstance(result, ExecDone)
-    expected_entry = Path(__file__).resolve().parents[2] / "agent" / "execution" / "child.py"
+    expected_entry = Path(__file__).resolve().parents[4] / "execution" / "child.py"
     assert str(expected_entry) in result.output
     assert Path.cwd() == old_checkout.resolve()
 

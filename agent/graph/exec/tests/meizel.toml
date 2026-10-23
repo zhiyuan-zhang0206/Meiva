@@ -1,4 +1,4 @@
-exports = ["cancel_fixture.py"]
+exports = ["cancel_fixture.py", "real_child"]
 
 [uses]
 "conftest.py" = ["cancel_fixture.py", "output_inputs.py"]

@@ -2,7 +2,6 @@
 # directory itself, otherwise the test files named here (tests/fixtures/path_scopes.py).
 "agent.tests.agent_tests" = [
     "test_compact.py",
-    "test_exec_subprocess.py",
     "test_state_slot.py",
 ]
 "meiva.tests.fixtures.meiva_tests" = [
