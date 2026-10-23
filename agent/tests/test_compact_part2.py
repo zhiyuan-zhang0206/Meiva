@@ -31,7 +31,6 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.graph.message import REMOVE_ALL_MESSAGES
 from langgraph.runtime import Runtime
 
-from agent.graph.hooks import compact
 from agent.graph.hooks.compact import (
     auto_compact_for_llm,
     generate_summary,
@@ -43,9 +42,7 @@ from base.config.tests.configuration import defaults
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
-from base.host.env.agent_slices import AgentSlices, ModelOverrides
-from base.lm.catalog import ModelCatalog
-from base.lm.context_budget import ContextBudget
+from base.host.env.agent_slices import AgentSlices
 from base.packages.plugin_providers import build_model_catalog
 from base.packages.plugins.extensions import EMPTY
 
@@ -66,33 +63,6 @@ def _compact_tail(update: Any) -> list[AnyMessage]:
     assert isinstance(msgs[0], RemoveMessage)
     assert msgs[0].id == REMOVE_ALL_MESSAGES
     return update["context_reset"].tail
-
-
-def _patch_compact_config(
-    monkeypatch: pytest.MonkeyPatch,
-    *,
-    auto_compact_tokens: int = 800_000,
-    compact_reminder_tokens: int = 600_000,
-) -> None:
-    """Pin the compact thresholds regardless of model, by replacing
-    `resolve_context_budget` in the compact module with a fixed budget. These
-    tests use synthetic messages with no usage_metadata, so context occupancy is
-    the chars/4 fallback and the kwargs are the absolute token thresholds the
-    gate compares against — `auto_compact_tokens` = hard (force) ceiling,
-    `compact_reminder_tokens` = soft (reminder) threshold (the kwarg names keep
-    their historical meaning)."""
-    budget = ContextBudget(
-        max_context_tokens=1_000_000,
-        soft_compact_tokens=compact_reminder_tokens,
-        hard_compact_tokens=auto_compact_tokens,
-    )
-
-    def fixed_budget(
-        _model: str, _overrides: ModelOverrides, *, catalog: ModelCatalog
-    ) -> ContextBudget:
-        return budget
-
-    monkeypatch.setattr(compact, "resolve_context_budget", fixed_budget)
 
 
 def _fake_llm(summary_text: str = "fake summary", *, response: AIMessage | None = None) -> Any:
@@ -136,7 +106,10 @@ def _runtime_with_llm(llm: Any, database_gate: ProcessDbGate) -> Runtime[MeivaCo
         ops_pool=None,
         llm=llm,
         event_publisher=MagicMock(),
-        agent=AgentSlices.resolve(default_reader=defaults()),
+        agent=AgentSlices.resolve(
+            {"auto_compact_fraction": 1e-6, "compact_reminder_fraction": 1e-6},
+            default_reader=defaults(),
+        ),
         db=Database.from_settings(gate=database_gate),
         bus=EventBus.from_settings(),
         catalog=build_model_catalog(),
@@ -318,7 +291,6 @@ async def test_auto_compact_summary_message_carries_msg_type(
     the timeline read side classifies the HumanMessage as a catch-all
     system_marker with source=null and the frontend renders the red
     UNRECOGNIZED SYSTEM_MARKER alarm (2026-08-07 user report)."""
-    _patch_compact_config(monkeypatch, auto_compact_tokens=1)
     state = _over_threshold_state()
 
     fake_llm = _fake_llm(_LONG_SUMMARY)

@@ -11,7 +11,6 @@ from __future__ import annotations
 from typing import Any
 from unittest.mock import MagicMock
 
-import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.graph import END, START, StateGraph
 from langgraph.runtime import Runtime
@@ -42,16 +41,12 @@ _FIRST = SecurityFindingEntry(source="web.fetch", triggers=["ignore previous ins
 _SECOND = SecurityFindingEntry(source="context-file:/repo/AGENTS.md", triggers=["<system_note>"])
 
 
-@pytest.fixture(autouse=True)
-def _scan_on(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(settings.agent, "security_scan_enabled", True)
-
-
-async def _run_hook(state: AgentState) -> dict[str, Any] | None:
+async def _run_hook(state: AgentState, *, enabled: bool = True) -> dict[str, Any] | None:
     runtime = Runtime(
         context=MeivaContext(
             agent=AgentSlices.resolve(
-                default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
+                {"security_scan_enabled": enabled},
+                default_reader=lambda domain, field: getattr(getattr(settings, domain), field),
             ),
             clock_factory=Clock.from_settings,
         )
@@ -81,12 +76,8 @@ async def test_each_pending_finding_becomes_one_security_note_and_the_channel_re
     assert update["security_findings"] == Overwrite([])
 
 
-async def test_findings_are_cleared_without_notes_when_scanning_was_switched_off(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(settings.agent, "security_scan_enabled", False)
-
-    update = await _run_hook(AgentState(security_findings=[_FIRST]))
+async def test_findings_are_cleared_without_notes_when_scanning_was_switched_off() -> None:
+    update = await _run_hook(AgentState(security_findings=[_FIRST]), enabled=False)
 
     assert update == {"security_findings": Overwrite([])}
 
@@ -138,7 +129,12 @@ async def test_a_real_childs_finding_reaches_the_model_through_the_hook(
             ops_pool=make_fake_ops_pool(),
             event_publisher=MagicMock(),
             agent=AgentSlices.resolve(
-                default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
+                None,
+                default_reader=lambda domain, field: (
+                    True
+                    if field == "security_scan_enabled"
+                    else getattr(getattr(settings, domain), field)
+                ),
             ),
             db=Database.from_settings(gate=database_gate),
             bus=EventBus.from_settings(),
