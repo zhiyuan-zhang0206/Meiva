@@ -255,3 +255,34 @@ def test_skill_reference_cannot_escape_the_selected_repository(tmp_path: Path) -
     assert check_doc_references.check_skill_backtick_refs(doc, doc.read_text(), repo=repo) == [
         "references/outside.md"
     ]
+
+
+@pytest.mark.parametrize("explicit_docs", [False, True])
+def test_scan_preserves_checkout_and_skill_symlink_paths(
+    tmp_path: Path, explicit_docs: bool, capsys: pytest.CaptureFixture[str]
+) -> None:
+    actual = tmp_path / "actual"
+    source = actual / "meiva_builtins" / "skills" / "sample" / "SKILL.md"
+    source.parent.mkdir(parents=True)
+    source.write_text("See `references/missing.md`.\n")
+    mirror = actual / ".agents" / "skills" / "sample" / "SKILL.md"
+    mirror.parent.mkdir(parents=True)
+    mirror.symlink_to(source)
+    guide = actual / "docs" / "guide.md"
+    guide.parent.mkdir()
+    guide.write_text("See [[node.meiva.okf.md]].\n")
+    (guide.parent / "node.meiva.okf.md").write_text("Local node.\n")
+    run_bounded(["git", "init", "-q", str(actual)], timeout=10).check_returncode()
+    run_bounded(["git", "-C", str(actual), "add", "."], timeout=10).check_returncode()
+    repo = tmp_path / "checkout-alias"
+    repo.symlink_to(actual, target_is_directory=True)
+    selected = [repo / "docs" / "guide.md", repo / mirror.relative_to(actual)]
+    assert (
+        check_doc_references.main(repo=repo, commands={}, docs=selected if explicit_docs else None)
+        == 1
+    )
+    output = capsys.readouterr().out
+    assert output == (
+        ".agents/skills/sample/SKILL.md:1: "
+        "`references/missing.md` — no such file (skill references/)\n"
+    )
