@@ -52,3 +52,12 @@ Gate startup, root IPC ownership, restart, stop, and rejection of a foreign
 listener. It does not prove macOS helper ancestry or a complete cluster rollout.
 
 Optional private HTTPS/HTTP2 entry and browser acceptance are in [Gate entry operations](operations.md).
+
+The Gate receives the existing required `UrlOpener` HTTP port and a frozen
+`GateConfig` containing the probe/proxy timeout. Its default retains the existing
+three-second budget. The serving root supplies the system opener and config;
+loopback tests construct their timeout configuration per scenario
+without replacing the transport or a module constant. The gateway URL builder
+also receives its configured port explicitly, preserving reachable-host and
+IPv6 formatting. Product tests use an actual isolated unit home, including the
+leftover retired update marker; that marker cannot change live Gate decisions.
