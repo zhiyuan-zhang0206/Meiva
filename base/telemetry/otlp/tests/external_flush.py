@@ -29,27 +29,24 @@ def paused_otlp_record(
     exporter = InMemoryLogRecordExporter()
     logger_provider = LoggerProvider()
     logger_provider.add_log_record_processor(SimpleLogRecordProcessor(exporter))
+    paused = Event()
+    release = Event()
+
+    def pause_after_dequeue(_event: TelemetryEvent) -> None:
+        paused.set()
+        assert release.wait(HANDSHAKE_BOUND_S), "close did not release the paused OTLP worker"
+
     backend = telemetry_otlp.OtlpBackend(
         export_allowed=lambda: True,
+        enabled=lambda: True,
+        on_emit_log=pause_after_dequeue,
         providers=(logger_provider, MeterProvider(metric_readers=[InMemoryMetricReader()])),
     )
-    monkeypatch.setattr(backend, "_enabled", lambda: True)
 
     def build_backend(**_inputs: object) -> telemetry_otlp.OtlpBackend:
         return backend
 
     monkeypatch.setattr(telemetry_otlp_exporting, "OtlpBackend", build_backend)
-
-    paused = Event()
-    release = Event()
-    original_emit = backend._emit_log
-
-    def pause_after_dequeue(event: TelemetryEvent) -> None:
-        paused.set()
-        assert release.wait(HANDSHAKE_BOUND_S), "close did not release the paused OTLP worker"
-        original_emit(event)
-
-    monkeypatch.setattr(backend, "_emit_log", pause_after_dequeue)
     backend.export_batch(
         [
             TelemetryEvent(

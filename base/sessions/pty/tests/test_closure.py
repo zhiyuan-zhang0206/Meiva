@@ -75,32 +75,33 @@ def test_stale_birth_is_never_signalled(leaders: list[subprocess.Popen[bytes]]) 
 
 
 def test_known_shell_survivor_is_reported_not_closed(
-    leaders: list[subprocess.Popen[bytes]], monkeypatch: pytest.MonkeyPatch
+    leaders: list[subprocess.Popen[bytes]],
 ) -> None:
     target = _session(leaders)
 
     def no_signal(_identities: Iterable[OwnedProcess], _signum: int) -> None:
         pass
 
-    monkeypatch.setattr(process_groups, "signal", no_signal)
-    outcome = closure.close_sessions([target], grace_s=0, kill_s=0)
+    outcome = closure.close_sessions([target], grace_s=0, kill_s=0, signal_fn=no_signal)
     assert outcome.closed == ()
     assert outcome.survivors == (closure.Survivor(target.name, target.shell, "shell"),)
 
 
 def test_known_job_survivor_is_diagnostic_after_shell_closes(
-    leaders: list[subprocess.Popen[bytes]], monkeypatch: pytest.MonkeyPatch
+    leaders: list[subprocess.Popen[bytes]],
 ) -> None:
     target, job = _session(leaders), _session(leaders)
     real_signal = process_groups.signal
 
-    def signal_shell_only(identities: object, signum: int) -> None:
+    def signal_shell_only(identities: Iterable[OwnedProcess], signum: int) -> None:
         del identities
         real_signal([target.shell], signum)
 
-    monkeypatch.setattr(process_groups, "signal", signal_shell_only)
     outcome = closure.close_sessions(
-        [closure.Target(target.name, target.shell, (job.shell,))], grace_s=0.2, kill_s=0.2
+        [closure.Target(target.name, target.shell, (job.shell,))],
+        grace_s=0.2,
+        kill_s=0.2,
+        signal_fn=signal_shell_only,
     )
     assert outcome.survivors == (closure.Survivor(target.name, job.shell, "job"),)
     assert outcome.closed == (
@@ -109,17 +110,15 @@ def test_known_job_survivor_is_diagnostic_after_shell_closes(
 
 
 def test_signal_permission_error_is_not_silent_success(
-    leaders: list[subprocess.Popen[bytes]], monkeypatch: pytest.MonkeyPatch
+    leaders: list[subprocess.Popen[bytes]],
 ) -> None:
     target = _session(leaders)
 
     def denied(_group: int, _signum: int) -> None:
         raise PermissionError("known group signal denied")
 
-    with monkeypatch.context() as patch:
-        patch.setattr(os, "killpg", denied)
-        with pytest.raises(PermissionError, match="known group signal denied"):
-            closure.close_sessions([target], grace_s=0, kill_s=0)
+    with pytest.raises(PermissionError, match="known group signal denied"):
+        closure.close_sessions([target], grace_s=0, kill_s=0, kill_group=denied)
     assert target.shell.live()
 
 
@@ -134,21 +133,14 @@ def test_wire_outcome_round_trips_known_survivors() -> None:
 
 
 def test_known_group_force_kill_covers_inheriting_child(
-    leaders: list[subprocess.Popen[bytes]], monkeypatch: pytest.MonkeyPatch
+    leaders: list[subprocess.Popen[bytes]],
 ) -> None:
     import select
     import sys
+    from pathlib import Path
 
-    program = (
-        "import os,signal,time; "
-        "signal.signal(signal.SIGHUP,signal.SIG_IGN); "
-        "signal.signal(signal.SIGTERM,signal.SIG_IGN); "
-        "child=os.fork(); "
-        "print(child,flush=True) if child else None; "
-        "time.sleep(300)"
-    )
     process = subprocess.Popen(  # noqa: S603
-        [sys.executable, "-c", program], start_new_session=True, stdout=subprocess.PIPE
+        [sys.executable, str(Path(__file__))], start_new_session=True, stdout=subprocess.PIPE
     )
     leaders.append(process)
     assert process.stdout is not None
@@ -163,10 +155,9 @@ def test_known_group_force_kill_covers_inheriting_child(
         sent.append(signum)
         real_killpg(group, signum)
 
-    monkeypatch.setattr(os, "killpg", send)
     try:
         outcome = closure.close_sessions(
-            [closure.Target("known-group", shell)], grace_s=0.05, kill_s=1
+            [closure.Target("known-group", shell)], grace_s=0.05, kill_s=1, kill_group=send
         )
         assert outcome == closure.Outcome()
         assert signal.SIGKILL in sent
@@ -188,3 +179,16 @@ def test_known_process_in_callers_group_does_not_signal_whole_group() -> None:
         if process.poll() is None:
             process.kill()
         process.wait(timeout=10)
+
+
+if __name__ == "__main__":
+    import sys
+    import time
+
+    signal.signal(signal.SIGHUP, signal.SIG_IGN)
+    signal.signal(signal.SIGTERM, signal.SIG_IGN)
+    child_pid = os.fork()
+    if child_pid:
+        sys.stdout.write(f"{child_pid}\n")
+        sys.stdout.flush()
+    time.sleep(300)

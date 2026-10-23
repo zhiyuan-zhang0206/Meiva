@@ -19,9 +19,10 @@ is on the `import meiva` path, which stays driver-free (task #3816).
 
 from __future__ import annotations
 
-from collections.abc import Collection, Mapping
+from collections.abc import Callable, Collection, Mapping, Sequence
 from pathlib import Path
 from types import MappingProxyType
+from typing import Any
 
 from base.cluster.derive import swap_db
 from base.log import logger
@@ -317,13 +318,16 @@ def _check_checkpoint_manifest_shape() -> list[int]:
     return declared_versions
 
 
-def _expected_checkpoint_schema_versions() -> frozenset[int]:
+def _expected_checkpoint_schema_versions(
+    *, migrations: Sequence[str] | None = None
+) -> frozenset[int]:
     """The upstream versions explicitly approved by Meiva's checkpoint migration manifest."""
     from langgraph.checkpoint.postgres import PostgresSaver
 
     declared_versions = _check_checkpoint_manifest_shape()
     approved_target = CHECKPOINT_SCHEMA_UPSTREAM_BASELINE_VERSION + len(declared_versions)
-    dependency_target = len(PostgresSaver.MIGRATIONS) - 1
+    upstream_migrations = PostgresSaver.MIGRATIONS if migrations is None else migrations
+    dependency_target = len(upstream_migrations) - 1
     if dependency_target != approved_target:
         raise CheckpointDependencyDriftError(
             "LangGraph checkpoint migrations changed without an Meiva migration: "
@@ -396,6 +400,8 @@ def ensure_checkpoint_schema(
     database_created: bool = False,
     resume_partial: bool = False,
     expected_data_dir: Path | None = None,
+    migrations: Sequence[str] | None = None,
+    setup_fn: Callable[[Any], None] | None = None,
 ) -> None:
     """Create the LangGraph checkpoint tables (idempotent) AS the cluster role.
 
@@ -425,7 +431,7 @@ def ensure_checkpoint_schema(
     # Act as the schema owner and retain the validated native connection
     # throughout setup; PostgresSaver must not open an unchecked second dial.
     owner_dsn = owner_conninfo(base_admin_url, database=identity, owner=identity)
-    expected = _expected_checkpoint_schema_versions()
+    expected = _expected_checkpoint_schema_versions(migrations=migrations)
     actual = checkpoint_schema_versions(owner_dsn, expected_data_dir=expected_data_dir)
     if actual == expected:
         return
@@ -446,7 +452,11 @@ def ensure_checkpoint_schema(
             prepare_threshold=0,
             row_factory=dict_row,
         ) as conn:
-            PostgresSaver(conn).setup()
+            saver = PostgresSaver(conn)
+            if setup_fn is None:
+                saver.setup()
+            else:
+                setup_fn(saver)
         assert_checkpoint_schema_current(owner_dsn, expected_data_dir=expected_data_dir)
     except Exception:
         if database_created:

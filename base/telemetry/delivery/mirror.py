@@ -6,6 +6,7 @@ import contextlib
 import json
 from datetime import UTC, datetime, timedelta
 from hashlib import blake2b
+from pathlib import Path
 from typing import Any
 
 from base.telemetry.delivery.receipts import Event
@@ -51,7 +52,7 @@ def prune_jsonl_mirror() -> None:
                 path.unlink()
 
 
-def append_jsonl(events: list[Event]) -> None:
+def append_jsonl(events: list[Event], *, mirror_dir: Path | None = None) -> None:
     """Append the batch to today's mirror file, one JSON line per event.
 
     Each row carries the stable surrogate ``id`` derived from its id-free body
@@ -72,7 +73,8 @@ def append_jsonl(events: list[Event]) -> None:
             json.dumps(event_row(e), default=str, separators=(",", ":"), ensure_ascii=False) + "\n"
             for e in events
         ]
-        path = logs_dir() / f"events-{day}.jsonl"
+        base_dir = logs_dir() if mirror_dir is None else mirror_dir
+        path = base_dir / f"events-{day}.jsonl"
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("a", encoding="utf-8") as f:
             f.write("".join(lines))

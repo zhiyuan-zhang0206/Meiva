@@ -125,7 +125,6 @@ def test_bootstrap_serves_a_duplicate_plugin_key_once(
 def test_bootstrap_keeps_modeled_alias_after_reachable_host_rewrite(
     provider_plugin: Callable[..., None],
     plugin_env: Path,
-    monkeypatch: pytest.MonkeyPatch,
     bootstrap_authority: ConfigAuthority,
 ) -> None:
     """A plugin key matching a Settings alias cannot undo its bootstrap transform."""
@@ -133,17 +132,20 @@ def test_bootstrap_keeps_modeled_alias_after_reachable_host_rewrite(
 
     provider_plugin(key_env="MEIVA_DB_URL")
     _write_bootstrap_env(plugin_env, "MEIVA_DB_URL=postgresql://meiva:pw@127.0.0.1:5433/meiva\n")
-    monkeypatch.setattr(config.settings.general, "machine_host", "10.0.0.3")
-
-    assert (
-        urlsplit(
-            config.bootstrap_config_values(
-                bootstrap_authority,
-                provider_key_envs=(
-                    binding.key_env for binding in build_model_catalog().bindings.values()
-                ),
-                plugin_cluster_config=plugin_bootstrap_config(),
-            )["MEIVA_DB_URL"]
-        ).hostname
-        == "10.0.0.3"
-    )
+    prev_host = config.get_field("machine_host")
+    config.set_field("machine_host", "10.0.0.3")
+    try:
+        assert (
+            urlsplit(
+                config.bootstrap_config_values(
+                    bootstrap_authority,
+                    provider_key_envs=(
+                        binding.key_env for binding in build_model_catalog().bindings.values()
+                    ),
+                    plugin_cluster_config=plugin_bootstrap_config(),
+                )["MEIVA_DB_URL"]
+            ).hostname
+            == "10.0.0.3"
+        )
+    finally:
+        config.set_field("machine_host", prev_host)

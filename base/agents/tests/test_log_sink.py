@@ -28,13 +28,22 @@ from base import telemetry
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.db import Database
-from base.paths import meiva_home
+from base.paths import logs_dir
 from base.telemetry.delivery.receipts import DrainStatus
 from base.telemetry.process_logging import add_event_sink, event_sink
 
 
 @pytest.fixture
-def sink_logger(database: Database, machine_identity: MachineIdentity):
+def isolated_home(tmp_path: Path) -> Path:
+    """Each test's event mirror lives in its own tmp dir, never the
+    worker-shared session home (audit M-2): the drain thread appends to
+    `logs_dir(home)` by day, so a later test in the same worker would otherwise
+    read earlier tests' lines (order-dependent failures or false passes)."""
+    return tmp_path / "meiva_home"
+
+
+@pytest.fixture
+def sink_logger(database: Database, machine_identity: MachineIdentity, isolated_home: Path):
     """Register the loguru -> emitter adapter + bind agent_id, cleanup after yield.
 
     The adapter enqueues (non-blocking); tests flush via `_last_event`. bind
@@ -42,7 +51,10 @@ def sink_logger(database: Database, machine_identity: MachineIdentity):
     process perspective is needed, logger.bind() overrides it.
     """
     pipeline = telemetry.build_pipeline(
-        database=lambda: database, machine=machine_identity, home=meiva_home()
+        database=lambda: database,
+        machine=machine_identity,
+        home=isolated_home,
+        mirror_dir=logs_dir(isolated_home),
     )
 
     def producer() -> telemetry.EventPipeline:
@@ -61,28 +73,12 @@ def sink_logger(database: Database, machine_identity: MachineIdentity):
         assert pipeline.stop(timeout=2).status is DrainStatus.COMPLETED
 
 
-@pytest.fixture(autouse=True)
-def _isolate_events_mirror(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Each test's event mirror lives in its own tmp dir, never the
-    worker-shared session home (audit M-2): the drain thread appends to
-    `logs_dir()` by day, so a later test in the same worker would otherwise
-    read earlier tests' lines (order-dependent failures or false passes).
-
-    Both the writer and the reader resolve `meiva_home()` at call time, so this
-    path owner redirects the complete operation to the same isolated home."""
-    from base import paths
-
-    monkeypatch.setattr(paths, "meiva_home", lambda: tmp_path / "meiva_home")
-
-
-def _last_event() -> tuple[str, int | None, str, dict]:
+def _last_event(home: Path) -> tuple[str, int | None, str, dict]:
     """Flush the emitter, then return the last mirror line (event_name,
     agent_id, level, attributes). Fail loud on an empty mirror."""
-    from base.paths import logs_dir
-
     telemetry.sync()
     day = datetime.now(UTC).strftime("%Y%m%d")
-    path = logs_dir() / f"events-{day}.jsonl"
+    path = logs_dir(home) / f"events-{day}.jsonl"
     if not path.exists():
         raise AssertionError("events mirror is empty — test didn't emit any event")
     lines = [ln for ln in path.read_text(encoding="utf-8").splitlines() if ln.strip()]
@@ -91,26 +87,26 @@ def _last_event() -> tuple[str, int | None, str, dict]:
     return obj["event_name"], obj.get("agent_id"), obj.get("level"), obj.get("attributes", {})
 
 
-def test_sink_event_resolution_explicit_event(sink_logger) -> None:
+def test_sink_event_resolution_explicit_event(sink_logger, isolated_home: Path) -> None:
     """event= names the event; label= is plain payload."""
     sink_logger.info("foo", event="turn_end", label="ignored")  # pyright: ignore[reportUnknownMemberType]
-    event, _agent_id, _level, payload = _last_event()
+    event, _agent_id, _level, payload = _last_event(isolated_home)
     assert event == "turn_end"
     assert payload["label"] == "ignored"  # label still in payload, not lost
 
 
-def test_sink_label_does_not_name_the_event(sink_logger) -> None:
+def test_sink_label_does_not_name_the_event(sink_logger, isolated_home: Path) -> None:
     """label= is never an event name: without event= the record is a bare log."""
     sink_logger.info("[{label}] {body}", label="exec", body="output...")  # pyright: ignore[reportUnknownMemberType]
-    event, _agent_id, _level, payload = _last_event()
+    event, _agent_id, _level, payload = _last_event(isolated_home)
     assert event == "log"
     assert payload["label"] == "exec"
 
 
-def test_sink_event_resolution_log_default(sink_logger) -> None:
+def test_sink_event_resolution_log_default(sink_logger, isolated_home: Path) -> None:
     """Bare logger.info with no event= → defaults to "log"."""
     sink_logger.info("bare message")  # pyright: ignore[reportUnknownMemberType]
-    event, _agent_id, _level, _payload = _last_event()
+    event, _agent_id, _level, _payload = _last_event(isolated_home)
     assert event == "log"
 
 
@@ -122,10 +118,10 @@ def test_sink_empty_event_raises(sink_logger) -> None:
         sink_logger.info("foo", event="")  # pyright: ignore[reportUnknownMemberType]
 
 
-def test_sink_agent_id_dash_sentinel_maps_to_null(sink_logger) -> None:
+def test_sink_agent_id_dash_sentinel_maps_to_null(sink_logger, isolated_home: Path) -> None:
     """agent_id="-" (gateway init default) → DB NULL."""
     sink_logger.info("from gateway", event="sse_drop")  # pyright: ignore[reportUnknownMemberType]
-    _event, agent_id, _level, _payload = _last_event()
+    _event, agent_id, _level, _payload = _last_event(isolated_home)
     assert agent_id is None
 
 
@@ -141,16 +137,17 @@ def _insert_agent(db: psycopg.Connection) -> int:
 def test_sink_agent_id_numeric_string_converts_to_int(
     sink_logger,
     db_conn: psycopg.Connection,
+    isolated_home: Path,
 ) -> None:
     """agent_id="42" (the string `init_subprocess_logger` binds) → the mirror row carries 42."""
     tid = _insert_agent(db_conn)
     db_conn.commit()
     sink_logger.bind(agent_id=str(tid)).info("from agent", event="sse_drop")  # pyright: ignore[reportUnknownMemberType]
-    _event, agent_id, _level, _payload = _last_event()
+    _event, agent_id, _level, _payload = _last_event(isolated_home)
     assert agent_id == tid
 
 
-def test_stdlib_intercept_routes_through_sink(sink_logger) -> None:
+def test_stdlib_intercept_routes_through_sink(sink_logger, isolated_home: Path) -> None:
     """stdlib `logging.getLogger(...).info(...)` goes through StdlibInterceptHandler →
     loguru sink → the unified event stream. Verifies that service modules (e.g.
     `services/agent_runner/agent_ops/daemon.py` that use stdlib logging) have their logs reach
@@ -162,30 +159,33 @@ def test_stdlib_intercept_routes_through_sink(sink_logger) -> None:
     install_stdlib_intercept()
     stdlib_log = logging.getLogger("test.stdlib.intercept")
     stdlib_log.warning("stdlib warn via intercept handler")
-    event, _agent_id, level, payload = _last_event()
+    event, _agent_id, level, payload = _last_event(isolated_home)
     assert level == "warning"
     # event defaults to "log" (no explicit event=), message goes into payload.msg
     assert event == "log"
     assert payload["msg"] == "stdlib warn via intercept handler"
 
 
-def test_sink_agent_id_int_kwarg_overrides_bind(sink_logger, db_conn: psycopg.Connection) -> None:
+def test_sink_agent_id_int_kwarg_overrides_bind(
+    sink_logger, db_conn: psycopg.Connection, isolated_home: Path
+) -> None:
     """log call passing agent_id=N overrides the bind default — used by base/api_contracts/agent_contract.py for cross-process
     lifecycle events (the caller process bind may not be the target)."""
     tid = _insert_agent(db_conn)
     db_conn.commit()
     sink_logger.info("spawned", event="agent_spawned", agent_id=tid)  # pyright: ignore[reportUnknownMemberType]
-    _event, agent_id, _level, _payload = _last_event()
+    _event, agent_id, _level, _payload = _last_event(isolated_home)
     assert agent_id == tid
 
 
 def test_sink_payload_excludes_meta_columns_includes_msg(
     sink_logger,
+    isolated_home: Path,
 ) -> None:
     """payload jsonb does not duplicate agent_id/event (columns already store them); msg goes into payload
     as a debug grep entry point."""
     sink_logger.info("hello {name}", event="sse_drop", name="world", custom_field=1)  # pyright: ignore[reportUnknownMemberType]
-    _event, _agent_id, _level, payload = _last_event()
+    _event, _agent_id, _level, payload = _last_event(isolated_home)
     assert "agent_id" not in payload
     assert "agent_id" not in payload
     assert "event" not in payload
@@ -194,7 +194,7 @@ def test_sink_payload_excludes_meta_columns_includes_msg(
     assert payload["custom_field"] == 1
 
 
-def test_sink_preserves_llm_usage_source_in_payload(sink_logger) -> None:
+def test_sink_preserves_llm_usage_source_in_payload(sink_logger, isolated_home: Path) -> None:
     """A usage-path discriminator must not be consumed as event provenance."""
     sink_logger.info(  # pyright: ignore[reportUnknownMemberType]
         "metered web answer",
@@ -204,19 +204,19 @@ def test_sink_preserves_llm_usage_source_in_payload(sink_logger) -> None:
         calls=1,
     )
 
-    _event, _agent_id, _level, payload = _last_event()
+    _event, _agent_id, _level, payload = _last_event(isolated_home)
     assert payload["source"] == "web.fetch"
     assert "transport_source" not in payload
 
 
-def test_sink_level_is_recorded(sink_logger) -> None:
+def test_sink_level_is_recorded(sink_logger, isolated_home: Path) -> None:
     """WARNING / ERROR level goes into DB level column — used by sidebar warn_24h/err_24h."""
     sink_logger.warning("uh oh", event="sse_drop")  # pyright: ignore[reportUnknownMemberType]
-    _event, _agent_id, level, _payload = _last_event()
+    _event, _agent_id, level, _payload = _last_event(isolated_home)
     assert level == "warning"
 
     sink_logger.error("boom", event="sse_drop")  # pyright: ignore[reportUnknownMemberType]
-    _event, _agent_id, level, _payload = _last_event()
+    _event, _agent_id, level, _payload = _last_event(isolated_home)
     assert level == "error"
 
 
@@ -231,6 +231,7 @@ def test_sink_level_is_recorded(sink_logger) -> None:
 
 def test_sink_exception_includes_traceback_in_payload(
     sink_logger,
+    isolated_home: Path,
 ) -> None:
     """When logger.opt(exception=True), payload should carry traceback / exception_type /
     exception_value fields — for diagnosing exception turns in the event stream (turn_end ok=False scenarios)."""
@@ -239,18 +240,18 @@ def test_sink_exception_includes_traceback_in_payload(
     except RuntimeError:
         sink_logger.opt(exception=True).warning("turn ended", event="turn_end", ok=False)  # pyright: ignore[reportUnknownMemberType]
 
-    _event, _agent_id, _level, payload = _last_event()
+    _event, _agent_id, _level, payload = _last_event(isolated_home)
     assert payload["exception_type"] == "RuntimeError"
     assert payload["exception_value"] == "simulated LLM timeout"
     assert "Traceback" in payload["traceback"]
     assert "RuntimeError: simulated LLM timeout" in payload["traceback"]
 
 
-def test_sink_no_exception_no_extra_fields(sink_logger) -> None:
+def test_sink_no_exception_no_extra_fields(sink_logger, isolated_home: Path) -> None:
     """Normal logger.info should not have traceback / exception_* fields — avoids payload bloat,
     and lets consumers (sidebar / SQL) use `payload ? 'traceback'` to detect exception turns."""
     sink_logger.info("normal turn", event="turn_end", ok=True)  # pyright: ignore[reportUnknownMemberType]
-    _event, _agent_id, _level, payload = _last_event()
+    _event, _agent_id, _level, payload = _last_event(isolated_home)
     assert "traceback" not in payload
     assert "exception_type" not in payload
     assert "exception_value" not in payload
@@ -258,6 +259,7 @@ def test_sink_no_exception_no_extra_fields(sink_logger) -> None:
 
 def test_sink_opt_exception_without_active_exc_skips_garbage_payload(
     sink_logger,
+    isolated_home: Path,
 ) -> None:
     """`logger.opt(exception=True)` when sys.exc_info() == (None,None,None) still
     sets record["exception"] as a namedtuple with all three fields None (not Python None).
@@ -269,7 +271,7 @@ def test_sink_opt_exception_without_active_exc_skips_garbage_payload(
     # outside an except block, opt(exception=True) → no active exception
     sink_logger.opt(exception=True).warning("no active exc", event="sse_drop")  # pyright: ignore[reportUnknownMemberType]
 
-    _event, _agent_id, _level, payload = _last_event()
+    _event, _agent_id, _level, payload = _last_event(isolated_home)
     assert "traceback" not in payload, (
         f"empty exception should not inject traceback; got {payload.get('traceback')!r}"  # pyright: ignore[reportUnknownMemberType]
     )
@@ -286,7 +288,7 @@ def test_sink_opt_exception_without_active_exc_skips_garbage_payload(
 # database.
 
 
-def test_slow_acquire_warning_keeps_its_level(sink_logger) -> None:
+def test_slow_acquire_warning_keeps_its_level(sink_logger, isolated_home: Path) -> None:
     """db_pool_acquire_slow stays WARNING in the events row — nothing rewrites it."""
     sink_logger.warning(  # pyright: ignore[reportUnknownMemberType]
         "[db pool] acquire took 2.0s (slow — Postgres under load)",
@@ -294,25 +296,27 @@ def test_slow_acquire_warning_keeps_its_level(sink_logger) -> None:
         name="ops",
         elapsed=2.0,
     )
-    _event, _agent_id, level, _payload = _last_event()
+    _event, _agent_id, level, _payload = _last_event(isolated_home)
     assert level == "warning"
 
 
-def test_host_stall_companion_demotes_only_its_emitted_event(sink_logger) -> None:
+def test_host_stall_companion_demotes_only_its_emitted_event(
+    sink_logger, isolated_home: Path
+) -> None:
     """psycopg's `query cancellation failed` warning is a host-stall companion
     (triage #13): the emitted event drops to info while the payload keeps the
     library's message verbatim. The next warning is untouched."""
     sink_logger.warning("query cancellation failed: cancellation timeout expired")  # pyright: ignore[reportUnknownMemberType]
-    _event, _agent_id, level, payload = _last_event()
+    _event, _agent_id, level, payload = _last_event(isolated_home)
     assert level == "info"
     assert payload["msg"] == "query cancellation failed: cancellation timeout expired"
 
     sink_logger.warning("some other warning")  # pyright: ignore[reportUnknownMemberType]
-    _event, _agent_id, level, _payload = _last_event()
+    _event, _agent_id, level, _payload = _last_event(isolated_home)
     assert level == "warning"
 
 
-def test_stdlib_intercept_emit_never_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_stdlib_intercept_emit_never_raises() -> None:
     """`StdlibInterceptHandler.emit` must never propagate (audit 2026-08-08 +
     #1862): stdlib `Handler.handle` has no try/except around emit, so a
     formatting TypeError inside a log call (im_bridge's `%d`-with-str-args
@@ -345,7 +349,9 @@ def test_stdlib_intercept_emit_never_raises(monkeypatch: pytest.MonkeyPatch) -> 
 # rules §6.2: label is display-only).
 
 
-def test_sink_delta_read_compat_reconstruction_is_a_registered_event(sink_logger) -> None:
+def test_sink_delta_read_compat_reconstruction_is_a_registered_event(
+    sink_logger, isolated_home: Path
+) -> None:
     """The reconstruction line lands as its registered event, end to end.
 
     Drives the real `log_reconstruction` through the real loguru → emitter
@@ -372,13 +378,13 @@ def test_sink_delta_read_compat_reconstruction_is_a_registered_event(sink_logger
     # own row. (The historical source was the conftest cluster-spawn guard's
     # `meiva.mcps` probe, fixed in task #3950; the find-by-name defense stays for
     # any other ambient emitter.)
-    from base.paths import logs_dir
-
     telemetry.sync()
     day = datetime.now(UTC).strftime("%Y%m%d")
     rows = [
         json.loads(line)
-        for line in (logs_dir() / f"events-{day}.jsonl").read_text(encoding="utf-8").splitlines()
+        for line in (logs_dir(isolated_home) / f"events-{day}.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
         if line.strip()
     ]
     matches = [row for row in rows if row["event_name"] == "delta_read_compat"]

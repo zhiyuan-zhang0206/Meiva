@@ -43,22 +43,27 @@ class TestClusterDefaultModel:
         config_authority: ConfigAuthority,
         model_catalog: ModelCatalog,
         cur: psycopg.Cursor,
-        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        from base.config import settings
+        from base.config import get_field, set_field
 
-        monkeypatch.setattr(settings.lm, "llm_model", "mimo-v2.6-pro")
-        config_authority.env_path.write_text("MEIVA_MODEL=deepseek-flash\n")
-        assert resolve_default_model(cur, catalog=model_catalog, authority=config_authority) == (
-            "deepseek-flash",
-            "config",
-        )
-        assert (
-            resolve_birth_config(cur, catalog=model_catalog, authority=config_authority)[
-                "llm_model"
-            ]
-            == "deepseek-flash"
-        )
+        prev_model = get_field("llm_model")
+        set_field("llm_model", "mimo-v2.6-pro")
+        try:
+            config_authority.env_path.write_text("MEIVA_MODEL=deepseek-flash\n")
+            assert resolve_default_model(
+                cur, catalog=model_catalog, authority=config_authority
+            ) == (
+                "deepseek-flash",
+                "config",
+            )
+            assert (
+                resolve_birth_config(cur, catalog=model_catalog, authority=config_authority)[
+                    "llm_model"
+                ]
+                == "deepseek-flash"
+            )
+        finally:
+            set_field("llm_model", prev_model)
 
     def test_config_and_cluster_resolution_report_the_same_birth_model(
         self, config_authority: ConfigAuthority, model_catalog: ModelCatalog, cur: psycopg.Cursor

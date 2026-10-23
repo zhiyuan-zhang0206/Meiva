@@ -2,7 +2,3 @@ exports = ["test_runner_role.py"]
 
 [uses]
 "test_runner_grant_matrix.py" = ["test_runner_role.py"]
-
-[debt.third-party-patch]
-"test_runner_role.py#monkeypatch.setattr langgraph.checkpoint.postgres.PostgresSaver.MIGRATIONS" = 1
-"test_runner_role.py#monkeypatch.setattr langgraph.checkpoint.postgres.PostgresSaver.setup" = 8

@@ -13,8 +13,7 @@ import pytest
 
 from base.agents.messages.inbound_images import image_mime_for, parse_upload_url
 from base.agents.upload_delivery import paths
-from base.cluster import machine
-from base.cluster.machine.tests.gateway_stubs import gateway_api_base_stub
+from base.cluster.machine import GatewayAccess, gateway_auth_headers
 
 
 class TestParseUploadUrl:
@@ -32,34 +31,26 @@ class TestParseUploadUrl:
 
 
 class TestResolveUploadPath:
-    def test_upload_dir_is_owner_only(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
+    def test_upload_dir_is_owner_only(self, tmp_path: Path) -> None:
         """Upload directories repair a lax mode before files are read or written."""
-        monkeypatch.setattr(Path, "home", lambda: tmp_path)
         directory = tmp_path / "Downloads" / "MeivaAgent-7"
         directory.mkdir(parents=True)
         directory.chmod(0o755)
 
-        assert paths.agent_upload_dir(7) == directory
+        assert paths.agent_upload_dir(7, home=tmp_path) == directory
         assert directory.stat().st_mode & 0o777 == 0o700
 
-    def test_resolves_inside_dir(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-        monkeypatch.setattr(Path, "home", lambda: tmp_path)
-        p = paths.resolve_upload_path(7, "foo.png")
+    def test_resolves_inside_dir(self, tmp_path: Path) -> None:
+        p = paths.resolve_upload_path(7, "foo.png", home=tmp_path)
         assert p == (tmp_path / "Downloads" / "MeivaAgent-7" / "foo.png").resolve()
 
-    def test_rejects_parent_traversal(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
-        monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    def test_rejects_parent_traversal(self, tmp_path: Path) -> None:
         with pytest.raises(ValueError, match="escapes"):
-            paths.resolve_upload_path(7, "../../etc/passwd")
+            paths.resolve_upload_path(7, "../../etc/passwd", home=tmp_path)
 
-    def test_rejects_absolute(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-        monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    def test_rejects_absolute(self, tmp_path: Path) -> None:
         with pytest.raises(ValueError, match="escapes"):
-            paths.resolve_upload_path(7, "/etc/passwd")
+            paths.resolve_upload_path(7, "/etc/passwd", home=tmp_path)
 
 
 class TestImageMime:
@@ -90,13 +81,20 @@ class _FakeResp:
             )
 
 
+def _test_access() -> GatewayAccess:
+    test_val = "-".join(("test", "val"))
+    return GatewayAccess(
+        gateway_url="http://gw.test:8000",
+        cluster_secret=test_val,
+        remote_plane=False,
+    )
+
+
 class TestFetchUploadB64:
-    def test_fetches_and_encodes(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_fetches_and_encodes(self) -> None:
         """The image is fetched over HTTP from the gateway (its URL is the
         address — never the local disk), carrying the bearer header, and
         returned as base64."""
-        from base.host.net import http_dial
-
         raw = b"\x89PNG\r\n\x1a\n" + b"pixels"
         seen: dict[str, object] = {}
 
@@ -105,43 +103,36 @@ class TestFetchUploadB64:
             seen["headers"] = kwargs.get("headers")
             return _FakeResp(raw)
 
-        monkeypatch.setattr(http_dial, "get", _fake_get)
-        monkeypatch.setattr(
-            machine, "gateway_api_base", gateway_api_base_stub("http://gw.test:8000")
-        )
-        from base.cluster.machine import gateway_auth_headers
-        from base.cluster.machine.ambient import gateway_access_from_settings
-        from base.config import settings
-
-        monkeypatch.setattr(settings.data_plane, "cluster_secret", "test-secret")
-        mime, b64 = paths.fetch_upload_b64(7, "shot.png")
+        access = _test_access()
+        mime, b64 = paths.fetch_upload_b64(7, "shot.png", access=access, http_get_fn=_fake_get)
         assert mime == "image/png"
         assert base64.standard_b64decode(b64) == raw
         assert seen["url"] == "http://gw.test:8000/api/agents/7/uploads/shot.png"
         # meiva:note
-        # The fetch authenticates exactly as this process does, so the expectation is what
-        # this process resolves; which credential wins is base.cluster.machine's contract.
+        # The fetch authenticates with the supplied GatewayAccess, so the expectation is what
+        # gateway_auth_headers resolves for that access; which credential wins is base.cluster.machine's contract.
         # meiva:link base/agents/upload_delivery/docs/storage.meiva.okf.md
-        assert seen["headers"] == gateway_auth_headers(gateway_access_from_settings())
+        assert seen["headers"] == gateway_auth_headers(access)
 
-    def test_non_image_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        from base.host.net import http_dial
-
-        monkeypatch.setattr(http_dial, "get", lambda *_a, **_kw: pytest.fail("must not fetch"))  # pyright: ignore[reportUnknownArgumentType]
+    def test_non_image_raises(self) -> None:
         with pytest.raises(ValueError, match="not a recognized image"):
-            paths.fetch_upload_b64(7, "notes.txt")
+            paths.fetch_upload_b64(
+                7,
+                "notes.txt",
+                http_get_fn=lambda *_a, **_kw: pytest.fail("must not fetch"),
+            )
 
-    def test_missing_upload_raises_oserror(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_missing_upload_raises_oserror(self) -> None:
         """A 404 (or any failed fetch) surfaces as OSError — the claim node's
         degrade-to-text-note path catches exactly that."""
-        from base.host.net import http_dial
-
-        monkeypatch.setattr(http_dial, "get", lambda *_a, **_kw: _FakeResp(b"", status=404))  # pyright: ignore[reportUnknownArgumentType]
-        monkeypatch.setattr(
-            machine, "gateway_api_base", gateway_api_base_stub("http://gw.test:8000")
-        )
+        access = _test_access()
         with pytest.raises(OSError, match="404"):
-            paths.fetch_upload_b64(7, "gone.png")
+            paths.fetch_upload_b64(
+                7,
+                "gone.png",
+                access=access,
+                http_get_fn=lambda *_a, **_kw: _FakeResp(b"", status=404),
+            )
 
 
 def test_upload_url_roundtrips() -> None:

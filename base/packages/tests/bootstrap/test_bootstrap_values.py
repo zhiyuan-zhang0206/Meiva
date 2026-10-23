@@ -1,6 +1,7 @@
 """Unit tests for the bootstrap config allowlist (Plan B2)."""
 
-from collections.abc import Callable
+from collections.abc import Callable, Generator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
@@ -10,12 +11,21 @@ import pytest
 from base import config
 from base.config.domains.storage.data_plane import self_machine_host
 from base.config.service_read import ConfigAuthority
-from base.host.env import dotenv_file
 from base.host.env.dotenv_file import upsert_env
 from base.host.net.predicates import is_loopback_host
 from base.host.net.url_secret import url_with_host
 from base.packages.plugin_providers import build_model_catalog
 from base.packages.plugins.config_registration import plugin_bootstrap_config
+
+
+@contextmanager
+def _override_field(name: str, value: Any) -> Generator[None]:
+    prev = config.get_field(name)
+    config.set_field(name, value)
+    try:
+        yield
+    finally:
+        config.set_field(name, prev)
 
 
 @pytest.fixture
@@ -82,7 +92,6 @@ def test_bootstrap_excludes_machine_local_fields(bootstrap_authority: ConfigAuth
 
 
 def test_bootstrap_serves_explicit_set_to_empty(
-    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     serve_generation: Callable[[Path], None],
     bootstrap_authority: ConfigAuthority,
@@ -93,35 +102,34 @@ def test_bootstrap_serves_explicit_set_to_empty(
     silently revert the recipient to the field default — a bench agent then
     got the default skill index back and crashed on the disabled meiva.skills
     (issue #948)."""
-    monkeypatch.setattr(dotenv_file, "unit_home", lambda: tmp_path)  # no .env overrides
     serve_generation(tmp_path)
-    monkeypatch.setattr(config.settings.agent, "skills_to_inject_into_system_prompt", [])
-
-    vals = config.bootstrap_config_values(
-        bootstrap_authority,
-        provider_key_envs=(binding.key_env for binding in build_model_catalog().bindings.values()),
-        plugin_cluster_config=plugin_bootstrap_config(),
-    )
+    with _override_field("skills_to_inject_into_system_prompt", []):
+        vals = config.bootstrap_config_values(
+            bootstrap_authority,
+            provider_key_envs=(
+                binding.key_env for binding in build_model_catalog().bindings.values()
+            ),
+            plugin_cluster_config=plugin_bootstrap_config(),
+        )
     assert vals["MEIVA_SKILLS_TO_INJECT_INTO_SYSTEM_PROMPT"] == ""
 
 
 def test_bootstrap_still_skips_none(
-    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     serve_generation: Callable[[Path], None],
     bootstrap_authority: ConfigAuthority,
 ) -> None:
     """None (no value at all) stays unserved — env text can't express it; the
     recipient falls back to the field default. Distinct from set-to-empty."""
-    monkeypatch.setattr(dotenv_file, "unit_home", lambda: tmp_path)
     serve_generation(tmp_path)
-    monkeypatch.setattr(config.settings.observability, "trace_retention_days", None)
-
-    vals = config.bootstrap_config_values(
-        bootstrap_authority,
-        provider_key_envs=(binding.key_env for binding in build_model_catalog().bindings.values()),
-        plugin_cluster_config=plugin_bootstrap_config(),
-    )
+    with _override_field("trace_retention_days", None):
+        vals = config.bootstrap_config_values(
+            bootstrap_authority,
+            provider_key_envs=(
+                binding.key_env for binding in build_model_catalog().bindings.values()
+            ),
+            plugin_cluster_config=plugin_bootstrap_config(),
+        )
     assert "MEIVA_TRACE_RETENTION_DAYS" not in vals
 
 
@@ -202,7 +210,6 @@ def test_bootstrap_serves_no_daemon_health_port(bootstrap_authority: ConfigAutho
 
 
 def test_bootstrap_serves_reachable_host_for_loopback_urls(
-    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     serve_generation: Callable[[Path], None],
     bootstrap_authority: ConfigAuthority,
@@ -211,17 +218,17 @@ def test_bootstrap_serves_reachable_host_for_loopback_urls(
     address (host swapped, identity/port/db preserved verbatim)."""
     from urllib.parse import urlsplit
 
-    monkeypatch.setattr(dotenv_file, "unit_home", lambda: tmp_path)  # no .env overrides
     serve_generation(tmp_path)
-    monkeypatch.setattr(config.settings.general, "machine_host", "10.0.0.3")
-
-    db = str(config.settings.data_plane.db_url)
-    redis = str(config.settings.data_plane.redis_url)
-    vals = config.bootstrap_config_values(
-        bootstrap_authority,
-        provider_key_envs=(binding.key_env for binding in build_model_catalog().bindings.values()),
-        plugin_cluster_config=plugin_bootstrap_config(),
-    )
+    with _override_field("machine_host", "10.0.0.3"):
+        db = str(config.settings.data_plane.db_url)
+        redis = str(config.settings.data_plane.redis_url)
+        vals = config.bootstrap_config_values(
+            bootstrap_authority,
+            provider_key_envs=(
+                binding.key_env for binding in build_model_catalog().bindings.values()
+            ),
+            plugin_cluster_config=plugin_bootstrap_config(),
+        )
     served_db, served_redis = urlsplit(vals["MEIVA_DB_URL"]), urlsplit(vals["MEIVA_REDIS_URL"])
     # host swapped to the reachable address; port + database kept verbatim
     assert served_db.hostname == "10.0.0.3"
@@ -233,7 +240,6 @@ def test_bootstrap_serves_reachable_host_for_loopback_urls(
 
 
 def test_bootstrap_keeps_loopback_when_gateway_is_single_box(
-    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     serve_generation: Callable[[Path], None],
     bootstrap_authority: ConfigAuthority,
@@ -241,15 +247,15 @@ def test_bootstrap_keeps_loopback_when_gateway_is_single_box(
     """A gateway whose own reachable host is loopback (single box) serves the
     URLs as-is — there is no remote runner to reach it, and swapping to
     `localhost` would be a no-op."""
-    monkeypatch.setattr(dotenv_file, "unit_home", lambda: tmp_path)
     serve_generation(tmp_path)
-    monkeypatch.setattr(config.settings.general, "machine_host", "localhost")
-
-    vals = config.bootstrap_config_values(
-        bootstrap_authority,
-        provider_key_envs=(binding.key_env for binding in build_model_catalog().bindings.values()),
-        plugin_cluster_config=plugin_bootstrap_config(),
-    )
+    with _override_field("machine_host", "localhost"):
+        vals = config.bootstrap_config_values(
+            bootstrap_authority,
+            provider_key_envs=(
+                binding.key_env for binding in build_model_catalog().bindings.values()
+            ),
+            plugin_cluster_config=plugin_bootstrap_config(),
+        )
     served, owner = urlsplit(vals["MEIVA_DB_URL"]), urlsplit(config.settings.data_plane.db_url)
     assert (served.username, served.password) == (owner.username, None)
     assert served.hostname == owner.hostname
@@ -258,27 +264,24 @@ def test_bootstrap_keeps_loopback_when_gateway_is_single_box(
 
 
 def test_bootstrap_keeps_existing_reachable_url_host(
-    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     serve_generation: Callable[[Path], None],
     bootstrap_authority: ConfigAuthority,
 ) -> None:
     """A .env URL that already names the reachable host (prod's historical
     hand-set URLs) passes through verbatim — no rewrite of a non-loopback host."""
-    monkeypatch.setattr(dotenv_file, "unit_home", lambda: tmp_path)
     serve_generation(tmp_path)
-    monkeypatch.setattr(config.settings.general, "machine_host", "10.0.0.3")
-    dp = config.settings.data_plane
     # parts-built, scanner-safe (same convention as cli/commands/converge/tests/test_converge.py)
     host_url = f"postgresql://meiva_main:{'sek'}@10.0.0.2:5433/meiva_main"
-    monkeypatch.setattr(dp, "db_url", host_url)
     upsert_env(tmp_path / ".env", {"MEIVA_DB_URL": host_url})
-
-    vals = config.bootstrap_config_values(
-        bootstrap_authority,
-        provider_key_envs=(binding.key_env for binding in build_model_catalog().bindings.values()),
-        plugin_cluster_config=plugin_bootstrap_config(),
-    )
+    with _override_field("machine_host", "10.0.0.3"), _override_field("db_url", host_url):
+        vals = config.bootstrap_config_values(
+            bootstrap_authority,
+            provider_key_envs=(
+                binding.key_env for binding in build_model_catalog().bindings.values()
+            ),
+            plugin_cluster_config=plugin_bootstrap_config(),
+        )
     served, owner = urlsplit(vals["MEIVA_DB_URL"]), urlsplit(host_url)
     assert (served.username, served.password) == ("meiva_main", None)
     assert served.hostname == owner.hostname

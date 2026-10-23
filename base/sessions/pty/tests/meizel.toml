@@ -8,14 +8,6 @@ exports = ["job_wait.py", "process_groups.py", "pty_jobs.py", "pty_reaper.py", "
 
 [debt.env-patch]
 "secret_argv.py#monkeypatch.setenv os.environ" = 1
-"test_pty_allocation_freeze.py#monkeypatch.setenv os.environ.MEIVA_HOME" = 1
-
-[debt.first-party-patch]
-"test_closure.py#monkeypatch.setattr base.sessions.pty.process_groups.signal" = 2
-
-[debt.restricted-python]
-"test_closure.py#python -c" = 1
 
 [debt.stdlib-patch]
 "secret_argv.py#monkeypatch.setattr os.environ" = 1
-"test_closure.py#monkeypatch.setattr os.killpg" = 1

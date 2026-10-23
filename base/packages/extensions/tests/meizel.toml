@@ -1,5 +1,2 @@
 [uses]
 "test_install_registry.py" = ["_mutator_child.py"]
-
-[debt.stdlib-patch]
-"_mutator_child.py#assignment os.replace" = 1

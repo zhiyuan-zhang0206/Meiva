@@ -312,9 +312,11 @@ class OtlpBackend:
         providers: tuple[Any, Any] | None = None,
         queue_maxsize: int = _QUEUE_MAXSIZE,
         enabled: Callable[[], bool] | None = None,
+        on_emit_log: Callable[[Event], None] | None = None,
     ) -> None:
         self._export_allowed = export_allowed
         self._enabled_flag = enabled
+        self._on_emit_log = on_emit_log
         self._export_decision: bool | None = None
         self._eligibility_lock = threading.Lock()
         self._queue: queue.Queue[Any] = queue.Queue(maxsize=queue_maxsize)
@@ -656,6 +658,8 @@ class OtlpBackend:
         The mapping body lives in `base.telemetry.otlp.telemetry_otlp_logs` (split for the
         800-line ceiling); runs on the worker thread (or flush()).
         """
+        if self._on_emit_log is not None:
+            self._on_emit_log(event)
         emit_log_record(self._logs, event)
 
     def _record_metrics(self, event: Event) -> None:

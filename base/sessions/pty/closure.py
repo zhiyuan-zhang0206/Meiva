@@ -9,8 +9,9 @@
 from __future__ import annotations
 
 import signal
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
+from functools import partial
 from typing import Any
 
 import psutil
@@ -134,22 +135,32 @@ def _named(identities: Iterable[OwnedProcess]) -> tuple[tuple[int, str], ...]:
     return tuple(names)
 
 
-def close_sessions(targets: Iterable[Target], *, grace_s: float, kill_s: float) -> Outcome:
+def close_sessions(
+    targets: Iterable[Target],
+    *,
+    grace_s: float,
+    kill_s: float,
+    signal_fn: Callable[[Iterable[OwnedProcess], int], None] | None = None,
+    kill_group: Callable[[int, int], None] | None = None,
+) -> Outcome:
     """Attempt closure of known groups within shared grace and kill budgets.
 
     A gone/recycled identity is skipped. Concrete signaling/identity errors
     propagate. A known survivor is diagnostic evidence, not a host-wide scan.
     """
     entries = list(targets)
+    send_signal: Callable[[Iterable[OwnedProcess], int], None] = (
+        partial(process_groups.signal, kill_group=kill_group) if signal_fn is None else signal_fn
+    )
     known = tuple(dict.fromkeys(identity for target in entries for identity in _known(target)))
-    process_groups.signal((target.shell for target in entries), signal.SIGHUP)
-    process_groups.signal(
+    send_signal((target.shell for target in entries), signal.SIGHUP)
+    send_signal(
         (member for target in entries for member in target.members if member != target.shell),
         signal.SIGTERM,
     )
     remaining = process_groups.wait(known, grace_s)
     if remaining:
-        process_groups.signal(remaining, signal.SIGKILL)
+        send_signal(remaining, signal.SIGKILL)
         process_groups.wait(remaining, kill_s)
     survivors: list[Survivor] = []
     closed: list[ClosedSession] = []

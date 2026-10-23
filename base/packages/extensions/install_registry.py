@@ -338,7 +338,11 @@ def load() -> Registry:
     return registry
 
 
-def save(registry: Registry) -> None:
+def save(
+    registry: Registry,
+    *,
+    replace_fn: Callable[[Path, Path], None] | None = None,
+) -> None:
     """Full-replace `$MEIVA_HOME/installed.json` with pretty JSON, atomically.
 
     The body is written to a temp sibling and renamed over the real path, so a
@@ -357,7 +361,10 @@ def save(registry: Registry) -> None:
     tmp = path.with_name(f"{path.name}.tmp")
     try:
         tmp.write_text(body, encoding="utf-8")
-        tmp.replace(path)
+        if replace_fn is None:
+            tmp.replace(path)
+        else:
+            replace_fn(tmp, path)
     finally:
         tmp.unlink(missing_ok=True)
 
@@ -397,7 +404,10 @@ def registry_lock() -> Generator[None]:
 
 
 @contextlib.contextmanager
-def mutate() -> Generator[Registry]:
+def mutate(
+    *,
+    replace_fn: Callable[[Path, Path], None] | None = None,
+) -> Generator[Registry]:
     """Load the registry, hand it over to be edited, and save it back — the one
     way to change `installed.json`.
 
@@ -424,7 +434,7 @@ def mutate() -> Generator[Registry]:
     with registry_lock():
         registry = load()
         yield registry
-        save(registry)
+        save(registry, replace_fn=replace_fn)
 
 
 def register(pkg: InstalledPackage) -> None:
