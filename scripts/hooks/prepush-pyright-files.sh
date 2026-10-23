@@ -24,4 +24,4 @@ if [[ ${#files[@]} -eq 0 ]]; then
     exit 0
 fi
 
-exec bash scripts/hooks/prepush-guard.sh pyright -- .venv/bin/pyright "${files[@]}"
+exec bash scripts/hooks/prepush-guard.sh pyright -- .venv/bin/basedpyright "${files[@]}"

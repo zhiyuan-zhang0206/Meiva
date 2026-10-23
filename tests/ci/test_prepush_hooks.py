@@ -38,7 +38,7 @@ def checkout(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setenv("MEIVA_PREPUSH_LOCK_DIR", str(tmp_path / "locks"))
     monkeypatch.setenv("MEIVA_PREPUSH_MAX_LOAD_PER_CORE", "1000000")
     monkeypatch.setenv("MEIVA_PREPUSH_LOCK_WAIT_SECONDS", "2")
-    executable = repo / ".venv/bin/pyright"
+    executable = repo / ".venv/bin/basedpyright"
     executable.parent.mkdir(parents=True)
     executable.symlink_to(sys.executable)
     return repo
@@ -265,7 +265,7 @@ def test_pyright_files_scopes_to_changed_existing_python_files(tmp_path: Path) -
     # RELATIVE path, so the fake repo needs one; symlink the real one in.
     (repo / "scripts/hooks").mkdir(parents=True)
     (repo / "scripts/hooks/prepush-guard.sh").symlink_to(GUARD)
-    pyright_bin = repo / ".venv/bin/pyright"
+    pyright_bin = repo / ".venv/bin/basedpyright"
     pyright_bin.parent.mkdir(parents=True)
     argv_log = repo / "pyright-argv.json"
     pyright_bin.write_text(
@@ -527,10 +527,10 @@ def test_vitest_binary_and_command_status(
 
 
 def test_missing_python_env(checkout: Path) -> None:
-    (checkout / ".venv/bin/pyright").unlink()
+    (checkout / ".venv/bin/basedpyright").unlink()
     result = run_guard(checkout)
     assert result.returncode == 0
-    assert "missing .venv/bin/pyright" in result.stderr
+    assert "missing .venv/bin/basedpyright" in result.stderr
     assert "executed" not in result.stdout
 
 
