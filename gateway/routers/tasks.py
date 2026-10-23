@@ -9,6 +9,7 @@ any child remains in progress.
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal, LiteralString, cast, overload
 
@@ -349,12 +350,19 @@ def patch_task_blocking(
     body: TaskUpdateRequest,
     operation_key: str,
     operation_path: str | None = None,
+    *,
+    enqueue_notifications_fn: Callable[..., list[TaskNoteReceipt]] | None = None,
+    save_receipt_fn: Callable[..., None] | None = None,
 ) -> tuple[TaskRow, list[TaskNoteReceipt]]:
     """Commit the task and its owner-change inbounds in the same transaction.
 
     The route awaits task-note delivery after this function returns, so no
     network or process wake can roll back the owner assignment.
     """
+    enqueue_fn = (
+        enqueue_task_notifications if enqueue_notifications_fn is None else enqueue_notifications_fn
+    )
+    save_fn = save_task_receipt if save_receipt_fn is None else save_receipt_fn
     path = operation_path if operation_path is not None else f"/api/tasks/{task_id}"
     request_body = body.model_dump(mode="json", exclude_unset=True)
     with write_transaction(pool) as conn, conn.cursor() as cur:
@@ -423,7 +431,7 @@ def patch_task_blocking(
         receipts: list[TaskNoteReceipt] = []
         if "owner" in body.model_fields_set and previous_owner != task.owner:
             supersede_task_assignments(cur, task_id)
-            receipts = enqueue_task_notifications(
+            receipts = enqueue_fn(
                 cur,
                 task_id,
                 owner_change_notifications(
@@ -436,7 +444,7 @@ def patch_task_blocking(
                 ),
                 "user",
             )
-        save_task_receipt(cur, path, operation_key, request_body, task)
+        save_fn(cur, path, operation_key, request_body, task)
     emit_task_note_events(receipts)
     return task, receipts
 
@@ -482,17 +490,21 @@ async def patch_task(
         body,
         operation_key,
         request.url.path,
+        enqueue_notifications_fn=getattr(request.app.state, "task_notifications_enqueuer", None),
+        save_receipt_fn=getattr(request.app.state, "task_receipt_saver", None),
     )
+    wake_publisher = getattr(request.app.state, "task_wake_publisher", publish_inbound_wake)
+    resurrect_fn = getattr(request.app.state, "task_resurrector", _ops.resurrect_if_terminated)
     for note in notes:
         await asyncio.to_thread(
-            publish_inbound_wake,
+            wake_publisher,
             request.app.state.db,
             request.app.state.bus,
             note.agent_id,
             str(note.inbound_id),
         )
         if note.resurrect:
-            await _ops.resurrect_if_terminated(
+            await resurrect_fn(
                 request.app.state.db,
                 request.app.state.bus,
                 note.agent_id,
