@@ -18,6 +18,11 @@ Launched by the `schedule-manager` service ([[schedules.meiva.okf.md]]) inside t
 - **Hard-exit cleanup**: capture descendants and verify birth identity + current ancestry. TERM, 3s grace, KILL survivors (recheck identity), reap up to 5s. Runner/shared PTY group excluded; `setsid()` covered. Already-reparented daemons, pre-signal ancestry/identity mismatches and later births are exempt. Then one fixed 10s `faulthandler` deadline is armed (it dumps every thread's stack and exits 1 if a DB write never returns), `last_error` and the run row (`ok=false`, `stalled (<n>s)`) are written, and the process exits 1. The exit is terminal process loss: the manager records an error and does not relaunch, and the `schedule_stalled` alert fires after two sessionless hours.
 - **Exit means terminal**: script exits cleanly with rc=0 → runner writes `status='completed'` before exiting (the resident process finished, manager will not restart); non-zero rc / uncaught exception → traceback written to `schedules.last_error` (latest crash) and, tail-truncated to 3000 chars after a `crashed: <ExceptionName>` first line, to that run's `schedule_runs.note` (one per crash; the session log is gone with the session), reported as terminal process loss; explicit start/restart is required; SIGTERM/SIGHUP active kill → nothing written, not counted as a crash
 
+The module entry passes arguments after the program name explicitly to `main`.
+That entry uses the actual home checkout guard before composing SDK resources;
+a home containing its own `source` directory refuses a foreign checkout. Tests
+create that real directory in their isolated home instead of replacing the guard.
+
 The process entrypoint statically imports the SDK and supplies its database factory,
 actor binding and plugin loading to `services/wake/schedule_manager/engine.py`. It captures the
 SDK's loaded image and gives execution and lazy telemetry handles one code-version

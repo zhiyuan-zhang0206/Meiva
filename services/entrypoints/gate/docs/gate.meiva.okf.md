@@ -16,6 +16,10 @@ gateway capability, needs no database, and runs as an ordinary child of
 stop use the same lifecycle as the other application services. Full planned
 application downtime includes the entry listener.
 
+The module entry passes arguments after the program name explicitly to `main`.
+Argument rejection happens before image capture or resource construction; each
+composition test owns its argument list without changing process-global argv.
+
 After argument parsing, the daemon captures its loaded image once and owns a
 non-exempt `ProcessDbGate` for `gate`. Its lazy database factory retains that
 image's version reader; the process event pipeline and logging producer share

@@ -56,7 +56,7 @@ actual process birth can lose work; this is accepted to prevent duplicate starts
 
 - `services/wake/schedule_manager/daemon.py` — `.venv/bin/python -m services.wake.schedule_manager.daemon`: the service, its two loops and the checkout guard
 - `services/wake/schedule_manager/manager.py:ScheduleManager` — reconcile logic
-- `services/wake/schedule_manager/runner.py:main()` — the process entrypoint; calls `services/wake/schedule_manager/engine.py:run()` with explicit SDK inputs
+- `services/wake/schedule_manager/runner.py:main(argv)` — the process entrypoint; calls `services/wake/schedule_manager/engine.py:run()` with explicit SDK inputs
 
 ## Router contracts
 
