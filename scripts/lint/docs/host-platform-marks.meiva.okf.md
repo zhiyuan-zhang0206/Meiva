@@ -62,14 +62,36 @@ database binary), the test states that with `# host-ok: <lane>`.
 
 ## Exemption
 
-`host-ok: <reason>` on a line inside a function's body, or on a module-level
-line, exempts that function or line from both rules. In a new or rewritten file
-the reason travels inside a `meiva:note` block — the structured-comment rule
+`host-ok: <reason>` on a comment inside a function's body, or at module level,
+exempts that function or module from both rules. In a new or rewritten file the
+reason travels inside a `meiva:note` block — the structured-comment rule
 (`docs/conventions/engineering/structured-code-comments.md`) rejects free prose
-there — so the exemption reads as a note that begins `host-ok:`. The reason is
-for the next reader, and a reviewer decides whether it holds;
-`tests/fixtures/host_platform.py` and the test that locks it use it because
-asking the current host *is* their subject.
+there — so the exemption reads as a note that begins `host-ok:`.
+
+A comment alone is a free pass: nobody reviews a line they do not expect. So the
+exemption is also a record entry,
+`scripts/lint/baseline/host_platform_exemptions.json`:
+
+```json
+{
+  "allowed": 2,
+  "exemptions": {
+    "tests/fixtures/host_platform.py::_current_system": "this module IS the translation …"
+  }
+}
+```
+
+The key is `<path>::<function>` (`<module>` at module level); the value is the
+reason exactly as the comment writes it, so a reviewer reads the justification in
+the diff. Three things are checked, and each failure names the site: an exemption
+that is not in the record, a recorded reason that no longer matches the comment,
+and a reason that names neither a path in this repository nor a CI job (the job
+ids come from `.github/workflows/ci.yml`). A record entry whose site is gone is
+an error too — `allowed` is a frozen count, and it only falls when someone spends
+the line to lower it. `--write-baseline` rewrites both records.
+
+The marker is read through the tokenizer, so a fixture that writes
+`# host-ok:` into a string literal is data, not a claim.
 
 ## Baseline
 

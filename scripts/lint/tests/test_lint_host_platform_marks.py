@@ -246,3 +246,119 @@ def test_an_explicit_path_outside_a_tests_directory_is_not_judged(tmp_path: Path
     offender = root / "base" / "x.py"
     offender.write_text("import sys\nx = sys.platform\n", encoding="utf-8")
     assert _lint.main([str(offender)], repo_root=root) == 0
+
+
+# meiva:note
+# ── the exemption record: a reviewed exception, not a comment ──────────────
+
+_HOST_READ = (
+    "import sys\n\n\n"
+    "def test_x():\n"
+    "    # host-ok: the subject is the launchd lane (`tests/fixtures/host_platform.py`)\n"
+    "    assert sys.platform\n"
+)
+
+
+def _exemptions(root: Path, entries: dict[str, str], allowed: int | None = None) -> None:
+    path = root / _lint.EXEMPTIONS
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {"allowed": len(entries) if allowed is None else allowed, "exemptions": entries}
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+
+def _exempt_repo(tmp_path: Path) -> Path:
+    root = _repo(tmp_path)
+    (root / "tests" / "test_x.py").write_text(_HOST_READ, encoding="utf-8")
+    return root
+
+
+def test_a_recorded_grounded_exemption_is_honoured(tmp_path: Path) -> None:
+    root = _exempt_repo(tmp_path)
+    _exemptions(
+        root,
+        {
+            "tests/test_x.py::test_x": "the subject is the launchd lane (`tests/fixtures/host_platform.py`)"
+        },
+    )
+    assert _lint.main([], repo_root=root) == 0
+
+
+def test_an_unrecorded_exemption_is_an_error(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # meiva:note
+    # The comment alone was a free pass: nobody reviews a line they do not expect.
+    root = _exempt_repo(tmp_path)
+    assert _lint.main([], repo_root=root) == 1
+    assert "unrecorded exemption" in capsys.readouterr().err
+
+
+def test_a_reason_that_names_nothing_is_an_error(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = _repo(tmp_path)
+    (root / "tests" / "test_x.py").write_text(
+        "import sys\n\n\ndef test_x():\n    # host-ok: it is hard to port\n    assert sys.platform\n",
+        encoding="utf-8",
+    )
+    _exemptions(root, {"tests/test_x.py::test_x": "it is hard to port"})
+    assert _lint.main([], repo_root=root) == 1
+    assert "names no path or job" in capsys.readouterr().err
+
+
+def test_a_reason_may_cite_the_ci_job_that_runs_it(tmp_path: Path) -> None:
+    root = _repo(tmp_path)
+    (root / "tests" / "test_x.py").write_text(
+        "import sys\n\n\ndef test_x():\n    # host-ok: helper-signing-smoke runs this\n"
+        "    assert sys.platform\n",
+        encoding="utf-8",
+    )
+    workflow = root / ".github" / "workflows" / "ci.yml"
+    workflow.parent.mkdir(parents=True)
+    workflow.write_text(
+        "jobs:\n  helper-signing-smoke:\n    name: Helper signing\n", encoding="utf-8"
+    )
+    _exemptions(root, {"tests/test_x.py::test_x": "helper-signing-smoke runs this"})
+    assert _lint.main([], repo_root=root) == 0
+
+
+def test_a_record_entry_without_its_site_is_an_error(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = _repo(tmp_path)
+    (root / "tests" / "test_x.py").write_text("x = 1\n", encoding="utf-8")
+    _exemptions(root, {"tests/test_x.py::test_x": "gone (`tests/test_x.py`)"})
+    assert _lint.main([], repo_root=root) == 1
+    assert "no longer in the tree" in capsys.readouterr().err
+
+
+def test_the_record_count_is_frozen(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    root = _exempt_repo(tmp_path)
+    _exemptions(
+        root,
+        {
+            "tests/test_x.py::test_x": "the subject is the launchd lane (`tests/fixtures/host_platform.py`)"
+        },
+        allowed=3,
+    )
+    assert _lint.main([], repo_root=root) == 1
+    assert "allowed says 3" in capsys.readouterr().err
+
+
+def test_write_baseline_records_the_exemption(tmp_path: Path) -> None:
+    root = _exempt_repo(tmp_path)
+    assert _lint.main(["--write-baseline"], repo_root=root) == 0
+    written = json.loads((root / _lint.EXEMPTIONS).read_text(encoding="utf-8"))
+    assert written == {
+        "allowed": 1,
+        "exemptions": {
+            "tests/test_x.py::test_x": "the subject is the launchd lane (`tests/fixtures/host_platform.py`)"
+        },
+    }
+    assert _lint.main([], repo_root=root) == 0
+
+
+def test_the_marker_inside_a_string_is_not_an_exemption() -> None:
+    # meiva:note
+    # A fixture that writes the marker into a string is data; only a comment is a claim.
+    assert _lint.exemptions_in_source('X = "# host-ok: not mine"\n') == []
