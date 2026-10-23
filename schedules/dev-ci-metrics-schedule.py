@@ -1,12 +1,16 @@
 from __future__ import annotations
 
 import json
+import subprocess
 import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from functools import partial
 from collections.abc import Callable, Mapping
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from zoneinfo import ZoneInfo
+
+from base.clock import SYSTEM_TIMERS
 
 import meiva
 import base
@@ -16,6 +20,11 @@ from schedules.catchup import cluster_timezone
 from schedules.daily_host import DailyLoopHooks, report_agent, run_daily_loop
 from base.daemon.schedules.inputs import ScheduleInputs
 from schedules.entry import fresh_schedule_entry, schedule_entry
+
+
+if TYPE_CHECKING:
+    from base.clock import Timers
+    from scripts.ci.pull_requests.export_process import GhProcess
 
 
 CRON = "20 6 * * *"
@@ -92,17 +101,34 @@ def _day_counts(snapshot: dict[str, Any], day: str, repo: str) -> tuple[int, int
     return int(values["runs"]), int(values["failed_runs"])
 
 
-def _run_exporter(exporter: Any, repo: str) -> None:
-    if exporter.main(["--repo", repo], producer=meiva.context.clients.event_pipeline) != 0:
+def _run_exporter(exporter: Any, repo: str, *, run_process: GhProcess, timers: Timers) -> None:
+    if (
+        exporter.main(
+            ["--repo", repo],
+            run_process=run_process,
+            timers=timers,
+            producer=meiva.context.clients.event_pipeline,
+        )
+        != 0
+    ):
         raise RuntimeError("ci-runs-export exited non-zero")
 
 
 def _workflow_runs(
-    exporter: Any, repo: str, workflow: str, limit: int = 10
+    repo: str,
+    workflow: str,
+    limit: int = 10,
+    *,
+    run_process: GhProcess,
+    timers: Timers,
 ) -> list[dict[str, Any]]:
-    payload = exporter._run_gh(
+    from scripts.ci.pull_requests import runs_api
+
+    payload = runs_api.run_gh(
         [f"repos/{repo}/actions/workflows/{workflow}/runs?per_page={limit}"],
-        exporter.FetchStats(),
+        runs_api.FetchStats(),
+        run_process=run_process,
+        timers=timers,
     )
     runs = json.loads(payload).get("workflow_runs")
     if not isinstance(runs, list):
@@ -129,11 +155,15 @@ def _message_p0_lead(message: str) -> None:
 
 
 def _alert_broken_scheduled_workflows(
-    exporter: Any, repo: str, *, notify: Callable[[str], None] = _message_p0_lead
+    repo: str,
+    *,
+    run_process: GhProcess,
+    timers: Timers,
+    notify: Callable[[str], None] = _message_p0_lead,
 ) -> None:
     for workflow, cost in _SCHEDULED_WORKFLOWS.items():
         try:
-            runs = _workflow_runs(exporter, repo, workflow)
+            runs = _workflow_runs(repo, workflow, run_process=run_process, timers=timers)
         except Exception as exc:
             print(f"dev-ci-metrics: {workflow} runs unreadable: {type(exc).__name__}: {exc}")
             continue
@@ -156,6 +186,8 @@ def _fire(
     slot_end: datetime,
     _payload: None,
     *,
+    run_process: GhProcess,
+    timers: Timers,
     cluster_timezone: Callable[[], str] = cluster_timezone,
     exporter_loader: Callable[[], Any] | None = None,
     snapshot_loader: Callable[[Any], dict[str, Any]] | None = None,
@@ -167,12 +199,12 @@ def _fire(
     try:
         exporter = load_exporter()
         repo = exporter.DEFAULT_REPO
-        _run_exporter(exporter, repo)
+        _run_exporter(exporter, repo, run_process=run_process, timers=timers)
         day = (
             slot_end.astimezone(ZoneInfo(cluster_timezone())).date() - timedelta(days=1)
         ).isoformat()
         runs, failed = _day_counts(load_snapshot(exporter), day, repo)
-        _alert_broken_scheduled_workflows(exporter, repo)
+        _alert_broken_scheduled_workflows(repo, run_process=run_process, timers=timers)
         print(
             f"[{datetime.now(UTC).isoformat()}] dev-ci-metrics: {day} — {runs} runs, {failed} failed"
         )
@@ -189,10 +221,11 @@ def _main_loop(
 ) -> None:
     db = inputs.database()
     runner = loop_fn or run_daily_loop
+    fire = partial(_fire, run_process=subprocess.run, timers=SYSTEM_TIMERS)
     if loop_hooks is not None:
-        runner(db, CRON, cluster_timezone(), _fire, hooks=loop_hooks)
+        runner(db, CRON, cluster_timezone(), fire, hooks=loop_hooks)
     else:
-        runner(db, CRON, cluster_timezone(), _fire)
+        runner(db, CRON, cluster_timezone(), fire)
 
 
 if __name__ == "__main__":

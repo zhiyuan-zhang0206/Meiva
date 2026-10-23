@@ -1,12 +1,11 @@
-from collections.abc import Callable
-from datetime import UTC, date, datetime
+import subprocess
+from collections.abc import Callable, Sequence
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
-from unittest.mock import Mock
-from zoneinfo import ZoneInfo
 
 import pytest
 
+from base.clock.tests.manual_timers import ManualTimers
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.machine import MachineIdentity
 from base.config import ConfigBoot
@@ -19,22 +18,35 @@ from base.telemetry import Event, EventPipeline
 from scripts.ci.pull_requests import export_process, runs_export
 
 
-@pytest.mark.parametrize("sha", ["a" * 40, None])
+# meiva:note
+# These test-owned git commands build the temporary history whose captured version is asserted.
+def _git(repo: Path, *args: str) -> str:
+    result = subprocess.run(  # noqa: S603
+        ["git", "-c", "user.name=C2 Test", "-c", "user.email=c2@example.test", *args],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=10,
+    )
+    return result.stdout.strip()
+
+
+@pytest.mark.parametrize("known", [True, False])
 def test_writer_uses_one_captured_gate_and_is_joined(
-    monkeypatch: pytest.MonkeyPatch, sha: str | None, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, known: bool, tmp_path: Path
 ) -> None:
-    image = LoadedCommit(Path("/loaded-exporter"), sha)
+    _git(tmp_path, "init", "--initial-branch=main")
+    _git(tmp_path, "commit", "--allow-empty", "-m", "captured")
+    captured = LoadedCommit.capture(tmp_path)
+    _git(tmp_path, "commit", "--allow-empty", "-m", "later-head")
+    image = captured if known else LoadedCommit(tmp_path, None)
     gates: list[ProcessDbGate] = []
     hosts: list[Callable[[], str]] = []
-    counts: list[tuple[Path, str]] = []
     config = ConfigBoot()
     config.set_field("machine_name", "export-owner")
     monkeypatch.setattr(export_process, "ConfigBoot", lambda: config)
     monkeypatch.setattr(export_process, "meiva_home", lambda: tmp_path)
-
-    def count(repo: Path, rev: str = "HEAD") -> int:
-        counts.append((repo, rev))
-        return 22
 
     def handle(*, gate: ProcessDbGate, direct_url: ClusterDirectUrl) -> Database:
         gates.append(gate)
@@ -54,20 +66,18 @@ def test_writer_uses_one_captured_gate_and_is_joined(
         return EventPipeline(writer=lambda _events: None)
 
     monkeypatch.setattr(Database, "from_settings", handle)
-    monkeypatch.setattr(code_version, "first_parent_count", count)
     monkeypatch.setattr(export_process, "build_pipeline", build)
     with export_process.owned_event_pipeline("exporter", image=image) as pipeline:
         assert not pipeline.stopped
         assert len(gates) == 2 and gates[0] is gates[1]
-        if sha is None:
+        if not known:
             with pytest.raises(code_version.CodeVersionError, match="loaded commit"):
                 gates[0].application_name()
-            assert counts == []
         else:
-            assert (
-                gates[0].application_name() == gates[1].application_name() == "meiva:exporter:v22"
-            )
-            assert counts == [(image.source_root, sha)]
+            assert gates[0].application_name() == "meiva:exporter:v1"
+            (tmp_path / ".git").rename(tmp_path / "captured-history")
+            assert gates[1].application_name() == "meiva:exporter:v1"
+
     assert pipeline.stopped
 
 
@@ -124,27 +134,32 @@ def test_export_entry_captures_before_fetch_or_borrows_the_supplied_writer(
 ) -> None:
     calls: list[str] = []
     image = LoadedCommit(Path("/loaded-exporter"), None)
-    pipeline = EventPipeline(writer=lambda _events: None)
+    emitted: list[Event] = []
+
+    def write(events: list[Event]) -> None:
+        calls.append("emit")
+        emitted.extend(events)
+
+    pipeline = EventPipeline(writer=write)
 
     def capture(source_root: Path) -> LoadedCommit:
         assert not borrowed
         calls.append("capture")
         return image
 
-    def collect(
-        repo: str, days: list[date], now: datetime, tz: ZoneInfo, state_dir: Path
-    ) -> runs_export.RepoCollection:
-        assert calls == ([] if borrowed else ["capture"])
-        calls.append("fetch")
-        return runs_export.RepoCollection(
-            repo=repo,
-            cache={},
-            daily={},
-            workflows={},
-            window_runs=0,
-            window_prs=0,
-            api_requests=1,
-        )
+    commands: list[list[str]] = []
+
+    def run_process(
+        argv: Sequence[str], *, timeout: float, capture_output: bool, text: bool
+    ) -> subprocess.CompletedProcess[str]:
+        assert timeout == 60 and capture_output and text
+        assert list(argv[:4]) == ["gh", "api", "--method", "GET"]
+        if not commands:
+            assert calls == ([] if borrowed else ["capture"])
+            calls.append("fetch")
+        commands.append(list(argv))
+        assert "actions/runs?" in argv[4] or "pulls?" in argv[4]
+        return subprocess.CompletedProcess(argv, 0, "[]", "")
 
     def build(
         *, database: Callable[[], Database], machine: MachineIdentity, home: Path
@@ -153,25 +168,24 @@ def test_export_entry_captures_before_fetch_or_borrows_the_supplied_writer(
         calls.append("build")
         return pipeline
 
-    def emit(snapshot: dict[str, Any], *, pipeline: EventPipeline) -> None:
-        assert "owner/repo" in snapshot["repositories"]
-        calls.append("emit")
-        assert not pipeline.stopped
-
     monkeypatch.setattr(LoadedCommit, "capture", capture)
-    monkeypatch.setattr(runs_export, "collect_repo", collect)
-    monkeypatch.setattr(runs_export, "save_json", Mock())
-    monkeypatch.setattr(runs_export, "emit_snapshot", emit)
     monkeypatch.setattr(export_process, "build_pipeline", build)
     try:
         assert (
             runs_export.main(
                 ["--repo", "owner/repo", "--state-dir", str(tmp_path)],
                 producer=(lambda: pipeline) if borrowed else None,
+                run_process=run_process,
+                timers=ManualTimers(),
             )
             == 0
         )
         assert calls == (["fetch", "emit"] if borrowed else ["capture", "fetch", "build", "emit"])
         assert pipeline.stopped is not borrowed
+        assert len(commands) == 2
+        assert {event.event_name for event in emitted} == {"ci_runs_daily", "ci_runs_run"}
+        assert all(event.process == runs_export.PROCESS_NAME for event in emitted)
+        assert (tmp_path / "owner--repo.json").is_file()
+        assert (tmp_path / "snapshot.json").is_file()
     finally:
         pipeline.stop(timeout=2)

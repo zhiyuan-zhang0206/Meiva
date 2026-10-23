@@ -13,7 +13,6 @@ import json
 import re
 import subprocess
 import sys
-import time
 from collections import defaultdict
 from collections.abc import Callable, Iterable
 from contextlib import nullcontext
@@ -21,12 +20,20 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from datetime import time as day_time
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from zoneinfo import ZoneInfo
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
+
+# meiva:note
+# The script-mode root guard must run before importing the checkout-owned API.
+from scripts.ci.pull_requests import runs_api  # noqa: E402
+
+if TYPE_CHECKING:
+    from base.clock import Timers
+    from scripts.ci.pull_requests.export_process import GhProcess
 
 DEFAULT_REPO = "zhiyuan-zhang0206/Meiva"
 # Thirty days matches PR flow and lets the next sampler republish a day after
@@ -35,8 +42,6 @@ DEFAULT_WINDOW_DAYS = 30
 PROCESS_NAME = "ci-runs-export"
 
 _STATE_DIR_RELATIVE = Path("state") / "ci-runs"
-_GH_TIMEOUT_SECONDS = 60.0
-_PAGE_SIZE = 100  # GitHub's documented list maximum.
 # Ten pages bounds each created-at cursor segment; the next cursor continues
 # older data instead of silently shrinking a busy repository's observation.
 _MAX_RUN_PAGES_PER_CURSOR = 10
@@ -49,7 +54,6 @@ _INCREMENTAL_OVERLAP = timedelta(hours=48)
 # Keep a small pre-window margin because a PR can close shortly after a run
 # created near the window boundary; it also makes repeated daily pruning safe.
 _CACHE_MARGIN = timedelta(days=2)
-_MAX_GH_ATTEMPTS = 4  # transient 429/5xx retries: bounded rate-limit recovery.
 
 _ZOMBIE_SECONDS = 6 * 60 * 60  # GitHub wall time after runner death is an artifact.
 _INSTANT_SKIP_SECONDS = 2  # zero-execution proof/watchdog wrapper signature.
@@ -59,18 +63,6 @@ _FAILED_CONCLUSIONS = frozenset({"failure", "timed_out", "startup_failure"})
 # Rerun-recovery/machinery wrappers: Meiva's CI failed-job rerun and Monsora's
 # Runner shutdown rerun must remain visible as separately filterable noise.
 _WATCHDOG_WORKFLOW_NAMES = frozenset({"CI failed-job rerun", "Runner shutdown rerun"})
-
-
-class CiRunsError(RuntimeError):
-    """An authoritative GitHub response made this sampling pass unusable."""
-
-
-@dataclass
-class FetchStats:
-    """The per-sampler GitHub request accounting carried by the breadcrumb."""
-
-    api_requests: int = 0
-    retries: int = 0
 
 
 @dataclass
@@ -99,21 +91,12 @@ def complete_days(now: datetime, days: int, tz: ZoneInfo) -> list[date]:
     return [last_complete - timedelta(days=index) for index in range(days - 1, -1, -1)]
 
 
-def parse_timestamp(value: object) -> datetime | None:
-    """Parse a GitHub ISO timestamp as UTC; malformed optional values are absent."""
-    if not isinstance(value, str) or not value:
-        return None
-    try:
-        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-    except ValueError:
-        return None
-    return parsed.astimezone(UTC)
-
-
 def wall_seconds(run: dict[str, Any]) -> float | None:
     """Return observed wall time from start (or creation) to latest update."""
-    started = parse_timestamp(run.get("run_started_at")) or parse_timestamp(run.get("created_at"))
-    updated = parse_timestamp(run.get("updated_at"))
+    started = runs_api.parse_timestamp(run.get("run_started_at")) or runs_api.parse_timestamp(
+        run.get("created_at")
+    )
+    updated = runs_api.parse_timestamp(run.get("updated_at"))
     if started is None or updated is None:
         return None
     return max(0.0, (updated - started).total_seconds())
@@ -158,18 +141,18 @@ def superseded_ids(runs: Iterable[dict[str, Any]]) -> set[int]:
     for siblings in grouped.values():
         siblings.sort(
             key=lambda run: (
-                parse_timestamp(run.get("created_at")) or datetime.min.replace(tzinfo=UTC)
+                runs_api.parse_timestamp(run.get("created_at")) or datetime.min.replace(tzinfo=UTC)
             )
         )
         for index, run in enumerate(siblings):
             if run.get("conclusion") != "cancelled":
                 continue
-            cancelled_created = parse_timestamp(run.get("created_at"))
-            updated = parse_timestamp(run.get("updated_at"))
+            cancelled_created = runs_api.parse_timestamp(run.get("created_at"))
+            updated = runs_api.parse_timestamp(run.get("updated_at"))
             if cancelled_created is None or updated is None:
                 continue
             for newer in siblings[index + 1 :]:
-                created = parse_timestamp(newer.get("created_at"))
+                created = runs_api.parse_timestamp(newer.get("created_at"))
                 if created is None or created <= cancelled_created:
                     continue
                 delay = (created - updated).total_seconds()
@@ -185,101 +168,6 @@ def trunk_merge_pr_number(branch: object) -> int | None:
     """Resolve Trunk's synthetic branch to its real PR number."""
     match = _TRUNK_MERGE_BRANCH.match(str(branch or ""))
     return int(match[1]) if match else None
-
-
-def _run_gh(args: list[str], stats: FetchStats) -> str:
-    """Issue one read-only gh command with bounded transient-error retries."""
-    for attempt in range(_MAX_GH_ATTEMPTS):
-        try:
-            result = subprocess.run(  # noqa: S603 - fixed gh argv, no shell
-                ["gh", "api", "--method", "GET", *args],
-                capture_output=True,
-                text=True,
-                check=False,
-                timeout=_GH_TIMEOUT_SECONDS,
-            )
-        except subprocess.TimeoutExpired as exc:
-            detail = str(exc)
-            retryable = True
-        else:
-            stats.api_requests += 1
-            if result.returncode == 0:
-                return result.stdout
-            detail = (result.stderr or result.stdout or "").strip()
-            retryable = any(code in detail for code in ("429", "500", "502", "503", "504"))
-        if not retryable or attempt == _MAX_GH_ATTEMPTS - 1:
-            raise CiRunsError(f"gh api {' '.join(args[:2])} failed: {detail[-500:]}")
-        stats.retries += 1
-        time.sleep(2 * (attempt + 1))
-    raise AssertionError("bounded gh retry loop exhausted without result")
-
-
-def _json_list(output: str, description: str) -> list[dict[str, Any]]:
-    try:
-        parsed = json.loads(output)
-    except json.JSONDecodeError as exc:
-        raise CiRunsError(f"invalid JSON from {description}") from exc
-    if not isinstance(parsed, list) or not all(isinstance(item, dict) for item in parsed):
-        raise CiRunsError(f"unexpected {description} payload")
-    return parsed
-
-
-def fetch_runs(
-    repo: str, since: datetime, until: datetime, stats: FetchStats
-) -> list[dict[str, Any]]:
-    """Walk runs newest-first using created<= cursors and id deduplication."""
-    cursor = until
-    seen: dict[int, dict[str, Any]] = {}
-    jq = (
-        "[.workflow_runs[] | {id, workflow_id, name, event, status, conclusion, run_attempt, "
-        "head_branch, head_sha, created_at, run_started_at, updated_at}] | @json"
-    )
-    while cursor >= since:
-        oldest: datetime | None = None
-        for page in range(1, _MAX_RUN_PAGES_PER_CURSOR + 1):
-            stamp = cursor.strftime("%Y-%m-%dT%H:%M:%SZ")
-            path = (
-                f"repos/{repo}/actions/runs?created=%3C%3D{stamp}&per_page={_PAGE_SIZE}&page={page}"
-            )
-            batch = _json_list(_run_gh([path, "--jq", jq], stats), "workflow runs")
-            if not batch:
-                return list(seen.values())
-            for run in batch:
-                identifier = run.get("id")
-                created = parse_timestamp(run.get("created_at"))
-                if not isinstance(identifier, int) or created is None:
-                    raise CiRunsError("workflow run lacks an integer id or created_at")
-                seen[identifier] = run
-                oldest = created if oldest is None or created < oldest else oldest
-            if len(batch) < _PAGE_SIZE:
-                return list(seen.values())
-        if oldest is None or oldest < since:
-            return list(seen.values())
-        next_cursor = oldest - timedelta(seconds=1)
-        if next_cursor >= cursor:
-            raise CiRunsError("workflow-runs cursor did not move backward")
-        cursor = next_cursor
-    return list(seen.values())
-
-
-def fetch_closed_prs(repo: str, since: datetime, stats: FetchStats) -> list[dict[str, Any]]:
-    """Walk the authoritative closed-PR population newest-updated first."""
-    jq = (
-        "[.[] | {number, head_ref: .head.ref, head_sha: .head.sha, created_at, updated_at, "
-        "merged_at, closed_at}] | @json"
-    )
-    records: list[dict[str, Any]] = []
-    for page in range(1, _MAX_CLOSED_PR_PAGES + 1):
-        path = f"repos/{repo}/pulls?state=closed&sort=updated&direction=desc&per_page={_PAGE_SIZE}&page={page}"
-        batch = _json_list(_run_gh([path, "--jq", jq], stats), "closed pull requests")
-        records.extend(batch)
-        if len(batch) < _PAGE_SIZE:
-            return records
-        stamps = [parse_timestamp(entry.get("updated_at")) for entry in batch]
-        oldest = min((stamp for stamp in stamps if stamp is not None), default=None)
-        if oldest is not None and oldest < since:
-            return records
-    raise CiRunsError(f"closed-PR walk exceeded {_MAX_CLOSED_PR_PAGES} pages")
 
 
 def load_cache(path: Path) -> dict[str, Any]:
@@ -298,7 +186,9 @@ def load_cache(path: Path) -> dict[str, Any]:
 
 
 def _completed_at(pr: dict[str, Any]) -> datetime | None:
-    return parse_timestamp(pr.get("merged_at")) or parse_timestamp(pr.get("closed_at"))
+    return runs_api.parse_timestamp(pr.get("merged_at")) or runs_api.parse_timestamp(
+        pr.get("closed_at")
+    )
 
 
 def merge_cache(
@@ -319,7 +209,7 @@ def merge_cache(
     runs = {
         key: run
         for key, run in runs.items()
-        if (created := parse_timestamp(run.get("created_at"))) is not None
+        if (created := runs_api.parse_timestamp(run.get("created_at"))) is not None
         and created >= cache_start
     }
     prs = {
@@ -357,7 +247,7 @@ def _runs_in_days(
 ) -> list[dict[str, Any]]:
     result: list[dict[str, Any]] = []
     for run in runs:
-        created = parse_timestamp(run.get("created_at"))
+        created = runs_api.parse_timestamp(run.get("created_at"))
         if created is not None and created.astimezone(tz).date() in days:
             result.append(run)
     return result
@@ -382,7 +272,7 @@ def _attributed_pr(candidates: list[dict[str, Any]], created: datetime) -> dict[
     valid = [
         (opened, pr)
         for pr in candidates
-        if (opened := parse_timestamp(pr.get("created_at"))) is not None
+        if (opened := runs_api.parse_timestamp(pr.get("created_at"))) is not None
         and (completed := _completed_at(pr)) is not None
         and opened - timedelta(hours=2) <= created <= completed + timedelta(hours=1)
     ]
@@ -403,7 +293,7 @@ def attribute_runs(runs: Iterable[dict[str, Any]], prs: Iterable[dict[str, Any]]
     attributed: dict[int, int] = {}
     for run in runs:
         identifier = run.get("id")
-        created = parse_timestamp(run.get("created_at"))
+        created = runs_api.parse_timestamp(run.get("created_at"))
         if not isinstance(identifier, int) or created is None:
             continue
         selected = _attributed_pr(_candidate_prs(run, by_number, by_branch), created)
@@ -561,7 +451,7 @@ def daily_aggregates(
     tz: ZoneInfo,
 ) -> dict[str, dict[str, Any]]:
     """Compute day-labelled count, share, and per-completed-PR absolute state."""
-    by_day = _by_day(runs, lambda run: parse_timestamp(run.get("created_at")), days, tz)
+    by_day = _by_day(runs, lambda run: runs_api.parse_timestamp(run.get("created_at")), days, tz)
     prs_by_day = _by_day(prs, _completed_at, days, tz)
     abandoned_shas = _abandoned_shas(prs)
     superseded = superseded_ids(runs)
@@ -640,18 +530,36 @@ def collect_repo(
     now: datetime,
     tz: ZoneInfo,
     state_dir: Path,
+    *,
+    run_process: GhProcess,
+    timers: Timers,
 ) -> RepoCollection:
     """Fetch, merge, and recompute one repo without persisting partial state."""
     window_start = datetime.combine(days[0], day_time.min, tzinfo=tz).astimezone(UTC)
     cache_start = window_start - _CACHE_MARGIN
     cache = load_cache(_cache_path(state_dir, repo))
-    watermark = parse_timestamp(cache.get("last_fetch_end"))
+    watermark = runs_api.parse_timestamp(cache.get("last_fetch_end"))
     fetch_start = (
         cache_start if watermark is None else max(cache_start, watermark - _INCREMENTAL_OVERLAP)
     )
-    stats = FetchStats()
-    fresh_runs = fetch_runs(repo, fetch_start, now, stats)
-    fresh_prs = fetch_closed_prs(repo, fetch_start, stats)
+    stats = runs_api.FetchStats()
+    fresh_runs = runs_api.fetch_runs(
+        repo,
+        fetch_start,
+        now,
+        stats,
+        run_process=run_process,
+        timers=timers,
+        max_pages=_MAX_RUN_PAGES_PER_CURSOR,
+    )
+    fresh_prs = runs_api.fetch_closed_prs(
+        repo,
+        fetch_start,
+        stats,
+        run_process=run_process,
+        timers=timers,
+        max_pages=_MAX_CLOSED_PR_PAGES,
+    )
     merged = merge_cache(
         cache,
         fresh_runs,
@@ -748,7 +656,13 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     return args
 
 
-def main(argv: list[str] | None = None, *, producer: Callable[[], Any] | None = None) -> int:
+def main(
+    argv: list[str] | None = None,
+    *,
+    run_process: GhProcess,
+    timers: Timers,
+    producer: Callable[[], Any] | None = None,
+) -> int:
     """Run the sampler, returning one on authoritative fetch failure."""
     args = _parse_args(argv)
     repos = args.repo or [DEFAULT_REPO]
@@ -767,8 +681,11 @@ def main(argv: list[str] | None = None, *, producer: Callable[[], Any] | None = 
     else:
         state_dir = args.state_dir
     try:
-        collections = [collect_repo(repo, days, now, tz, state_dir) for repo in repos]
-    except CiRunsError as exc:
+        collections = [
+            collect_repo(repo, days, now, tz, state_dir, run_process=run_process, timers=timers)
+            for repo in repos
+        ]
+    except runs_api.CiRunsError as exc:
         print(f"ci-runs-export: {exc}", file=sys.stderr)
         return 1
     snapshot = build_snapshot(collections, days, now, tz)
@@ -796,4 +713,6 @@ def main(argv: list[str] | None = None, *, producer: Callable[[], Any] | None = 
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    from base.clock import SYSTEM_TIMERS
+
+    sys.exit(main(run_process=subprocess.run, timers=SYSTEM_TIMERS))
