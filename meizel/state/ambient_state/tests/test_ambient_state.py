@@ -420,13 +420,12 @@ def test_a_cached_property_is_per_instance_and_not_reported(tmp_path: pathlib.Pa
     assert _sites(tmp_path, source) == {}
 
 
-def test_a_memoized_pure_function_goes_through_the_closed_list(
-    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_a_memoized_pure_function_goes_through_the_closed_list(tmp_path: pathlib.Path) -> None:
     source = "from functools import cache\n\n@cache\ndef table():\n    return {}\n"
     assert _sites(tmp_path, source) == {"hidden-singleton:table": 1}
 
-    monkeypatch.setattr(allow, "ALLOWED", {"base/mod.py::hidden-singleton:table": "a static table"})
+    allow.ALLOWED.clear()
+    allow.ALLOWED["base/mod.py::hidden-singleton:table"] = "a static table"
     assert _sites(tmp_path, source) == {}
 
 

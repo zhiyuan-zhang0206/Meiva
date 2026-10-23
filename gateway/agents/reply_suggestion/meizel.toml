@@ -24,7 +24,6 @@ exports = ["configuration.py", "router.py"]
 "configuration.py#base/config/__init__.py" = 1
 "configuration.py#base/db/__init__.py" = 1
 "configuration.py#base/host/env/agent_slices.py" = 1
-"configuration.py#base/lm/catalog/__init__.py" = 1
 "configuration.py#base/lm/decision/call.py" = 1
 "configuration.py#base/lm/factory.py" = 1
 "configuration.py#gateway/agents/history/timeline.py" = 1
@@ -35,9 +34,7 @@ exports = ["configuration.py", "router.py"]
 "router.py#gateway/http/middleware/error_envelope.py" = 1
 "service.py#base/agents/history/timeline.py" = 1
 "service.py#base/lm/call.py" = 1
-"service.py#base/lm/catalog/__init__.py" = 1
 "service.py#base/lm/errors.py" = 1
-"service.py#base/lm/usage/__init__.py" = 1
 "service.py#base/log/__init__.py" = 1
 
 [debt.wide-params]

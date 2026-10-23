@@ -1,4 +1,4 @@
-exports = ["auth.py", "config.py", "mapping.py", "session.py", "tests", "transport.py"]
+exports = ["auth.py", "tests", "transport.py"]
 
 [uses]
 "__init__.py" = ["config.py", "session.py", "transport.py"]
@@ -7,3 +7,43 @@ exports = ["auth.py", "config.py", "mapping.py", "session.py", "tests", "transpo
 "auth.py" = []
 "session.py" = ["auth.py", "config.py", "mapping.py", "transport.py"]
 "tests" = ["__init__.py", "auth.py", "config.py", "mapping.py", "session.py", "transport.py"]
+
+[purity]
+"." = "strict-to-be"
+"__init__.py" = "strict"
+
+[debt.impure-call]
+"session.py#async def __aenter__" = 1
+"session.py#async def __aexit__" = 1
+"session.py#async def _begin" = 1
+"session.py#async def _cancel_children" = 1
+"session.py#async def _initialize" = 1
+"session.py#async def _on_request" = 1
+"session.py#async def _open_thread" = 1
+"session.py#async def close" = 1
+"session.py#async def events" = 1
+"session.py#async def expire" = 1
+"session.py#async def interrupt" = 1
+"session.py#async def outcome" = 1
+"session.py#async def start" = 1
+"session.py#datetime.now" = 2
+"session.py#time.monotonic" = 2
+"session.py#uuid.uuid4" = 1
+"transport.py#async def _answer" = 1
+"transport.py#async def _cancel_children" = 1
+"transport.py#async def _dispatch" = 1
+"transport.py#async def _read_loop" = 1
+"transport.py#async def _write" = 1
+"transport.py#async def close" = 2
+"transport.py#async def notify" = 2
+"transport.py#async def request" = 2
+"transport.py#async def start" = 2
+
+[debt.impure-edge]
+"auth.py#base/host/env/registry.py" = 1
+"config.py#base/host/env/harness_binaries.py" = 1
+"session.py#base/lm/harness/process.py" = 1
+"session.py#base/lm/harness/registry.py" = 1
+
+[debt.wide-public-surface]
+"mapping.py#public-surface" = 1

@@ -7,7 +7,7 @@ passes a fake handle and an id instead of replacing anything.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Protocol
 
 from redis.exceptions import ResponseError
 
@@ -18,7 +18,15 @@ from base.log import logger
 __all__ = ["publish_inbound_wake"]
 
 
-def publish_inbound_wake(redis: Any, agent_id: int) -> None:
+class _RedisPublisher(Protocol):
+    def publish(self, channel: str, message: str) -> object: ...
+
+
+class _LazyRedis(Protocol):
+    def __getattr__(self, attr: str) -> Any: ...
+
+
+def publish_inbound_wake(redis: _RedisPublisher | _LazyRedis, agent_id: int) -> None:
     """Publish the wake for `agent_id`'s own inbound channel; never raises.
 
     `redis` is the SDK redis handle (anything with `publish(channel, message)`).

@@ -13,6 +13,5 @@ exports = ["constants.py", "packing.py"]
 "packing.py#Path.stat" = 1
 
 [debt.impure-edge]
-"packing.py#base/lm/catalog/__init__.py" = 1
 "packing.py#base/lm/factory.py" = 1
 "packing.py#base/lm/provider_api.py" = 1

@@ -1,4 +1,33 @@
+purity = "strict-to-be"
 exports = ["checkpoints.py", "driver.py"]
 
 [uses]
 "__init__.py" = ["checkpoints.py"]
+
+[debt.impure-call]
+"__init__.py#async def finish_completed_invocation" = 1
+"__init__.py#async def finish_pending_failure" = 1
+"__init__.py#async def settle_handoff_before_invocation" = 1
+"__init__.py#import psycopg_pool" = 1
+"driver.py#async def drive_context" = 1
+
+[debt.impure-edge]
+"__init__.py#agent/impersonation.py" = 1
+"__init__.py#agent/impersonation_handoff.py" = 1
+"__init__.py#agent/state.py" = 1
+"__init__.py#agent/turn/runloop.py" = 1
+"__init__.py#agent/turn/trace_checkpoint.py" = 1
+"__init__.py#base/agents/context/__init__.py" = 1
+"__init__.py#base/agents/observation/relay_supervision.py" = 1
+"__init__.py#base/db/__init__.py" = 1
+"__init__.py#base/events/live/bus.py" = 1
+"__init__.py#base/log/__init__.py" = 1
+"__init__.py#services/agent_runner/agent_host/db_recovery.py" = 1
+"__init__.py#services/agent_runner/agent_host/runtime.py" = 1
+"checkpoints.py#base/agents/history/delta_read_compat.py" = 1
+"driver.py#base/agents/context/__init__.py" = 1
+"driver.py#services/agent_runner/agent_host/runtime.py" = 1
+
+[debt.wide-params]
+"__init__.py#def finish_completed_invocation" = 1
+"__init__.py#def settle_handoff_before_invocation" = 1

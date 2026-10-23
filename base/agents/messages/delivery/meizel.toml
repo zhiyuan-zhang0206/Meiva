@@ -1,1 +1,7 @@
+purity = "strict-to-be"
 exports = ["retry.py"]
+
+[debt.impure-call]
+"retry.py#import httpx" = 1
+"retry.py#import psycopg" = 1
+"retry.py#import psycopg_pool" = 1
