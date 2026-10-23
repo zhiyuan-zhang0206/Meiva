@@ -243,7 +243,7 @@ def guard_service_readiness(
     readiness code.
 
     Opt out with `@pytest.mark.real_service_readiness_gate` when the wait or the exit
-    code it produces is the subject (cli/commands/lifecycle/tests/startup/test_start_readiness_gate.py)."""
+    code it produces is the subject (cli/commands/lifecycle/tests/startup/test_start_live_path.py)."""
     if request.node.get_closest_marker("real_service_readiness_gate"):
         return
     from cli.commands.probe import ReadinessWait

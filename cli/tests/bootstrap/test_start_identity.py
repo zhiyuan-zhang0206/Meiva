@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import socket
 import subprocess
 from collections.abc import Iterator
 from dataclasses import replace
@@ -16,19 +17,22 @@ import pytest
 from dotenv import dotenv_values
 
 from base import cluster
-from base.host.permissions_helper.client import HelperFactory
-from base.host.system.hostport import Host
-from base.host.system.tests.fake_commands import DARWIN_ARM64, fake_host
-from base.native_process.os_platform import file_lock
-from base.paths import meiva_home
+from base.deploy.lifecycle import start_serving
+from base.native_process.os_platform import LockTimeoutError, file_lock
 from cli import init_intent, start_intent
 from cli import start_identity as identity
-from cli.commands.lifecycle import start
-from cli.database import OperatorDatabaseFactory, operator_event_pipeline
+from cli.commands.lifecycle import root_driver
 from cli.database.runtime import CommandRuntime
 from cli.database.tests.cli_tests import operator_database as operator_database
 from cli.database.tests.command_inputs import command_runtime as command_runtime
-from cli.tests.bootstrap.init_identity import prepare_init_identity
+from cli.start_runtime import HomeSite
+from cli.startup.service_path import CallerHost
+from cli.tests.bootstrap.init_identity import (
+    break_env_publication,
+    caller_host,
+    prepare_init_identity,
+    repair_env_publication,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -39,16 +43,26 @@ def _isolate_start_environment() -> Iterator[None]:
 
 
 @pytest.fixture
-def inputs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> identity.IdentityInput:
+def inputs(tmp_path: Path) -> identity.IdentityInput:
     checkout = tmp_path / "checkout"
     checkout.mkdir()
-    monkeypatch.setattr(cluster, "port_free", lambda _port: True)  # pyright: ignore[reportUnknownArgumentType] — test double or third-party stubs
     return identity.IdentityInput(
         tmp_path / "home",
         checkout,
         frozenset({"gateway", "agent-runner"}),
         {"MEIVA_MACHINE_NAME": "preview"},
     )
+
+
+@pytest.fixture
+def site(inputs: identity.IdentityInput) -> HomeSite:
+    return HomeSite(inputs.home, inputs.checkout)
+
+
+@pytest.fixture
+def caller(tmp_path: Path) -> CallerHost:
+    """A caller whose PATH is one tool directory and who declares nothing else."""
+    return caller_host(path=str(tmp_path / "tools"))
 
 
 def test_fresh_identity_committed_before_native_work(inputs: identity.IdentityInput) -> None:
@@ -99,25 +113,20 @@ def test_an_initialized_home_is_refused_again_and_keeps_its_bytes(
 
 
 def test_a_gateway_birth_pins_a_minted_logical_backup_passphrase(
-    inputs: identity.IdentityInput, monkeypatch: pytest.MonkeyPatch
+    inputs: identity.IdentityInput,
 ) -> None:
     """Logical backups are encrypted under a passphrase the birth mints and pins
     (0600), independent of the cluster secret: a random one, never the public
     sha256(""). An interrupted birth keeps it."""
     from services.backup.artifact import passphrase
 
-    upsert = identity.upsert_env
-
-    def crash(*_a: object, **_k: object) -> None:
-        raise OSError("power loss")
-
-    monkeypatch.setattr(identity, "upsert_env", crash)
-    with pytest.raises(OSError, match="power loss"):
+    break_env_publication(inputs.home)
+    with pytest.raises(OSError):
         identity.prepare_identity(inputs)
     minted = passphrase.pinned(inputs.home)
     assert minted is not None and minted != passphrase.derive("")
     assert passphrase.pin_path(inputs.home).stat().st_mode & 0o777 == 0o600
-    monkeypatch.setattr(identity, "upsert_env", upsert)
+    repair_env_publication(inputs.home)
     identity.resume_claim(inputs.home)
     assert dotenv_values(inputs.home / ".env")["MEIVA_CLUSTER_SECRET"]
     assert passphrase.resolve(inputs.home) == minted
@@ -165,20 +174,13 @@ def test_birth_writes_nothing_outside_the_home(inputs: identity.IdentityInput) -
     assert list(inputs.checkout.iterdir()) == []
 
 
-def test_crash_after_intent_before_env_resumes_same_claim(
-    inputs: identity.IdentityInput, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    write = identity.upsert_env
-    monkeypatch.setattr(
-        identity,
-        "upsert_env",
-        lambda *_a, **_k: (_ for _ in ()).throw(OSError("power loss")),  # pyright: ignore[reportUnknownArgumentType] — test double or third-party stubs
-    )
-    with pytest.raises(OSError, match="power loss"):
+def test_crash_after_intent_before_env_resumes_same_claim(inputs: identity.IdentityInput) -> None:
+    break_env_publication(inputs.home)
+    with pytest.raises(OSError):
         identity.prepare_identity(inputs)
     pending = identity.read_intent(inputs.home)
     assert pending is not None and pending["phase"] == "claiming"
-    monkeypatch.setattr(identity, "upsert_env", write)
+    repair_env_publication(inputs.home)
     identity.resume_claim(inputs.home)
     assert cluster.get_record(inputs.home) == cluster.ClusterRecord(**pending["record"])
     assert dict(dotenv_values(inputs.home / ".env")) == pending["env"]
@@ -250,27 +252,20 @@ def _args(*extra: str):
     return build_parser().parse_args(["init", *extra])
 
 
-def _start_args(*extra: str, command_runtime: CommandRuntime):
-    from cli.parsers import build_parser
-
-    args = build_parser().parse_args(["start", *(extra or ("--all-services",))])
-    args.runtime = command_runtime
-    return args
-
-
 def _single_box(*extra: str):
     """An init of a single-box home: gateway and agent-runner, named."""
     return _args("--serve-gateway", "--serve-agent-runner", "--machine-name", "preview", *extra)
 
 
 def test_init_uses_explicit_home_not_ambient_projection(
-    inputs: identity.IdentityInput, monkeypatch: pytest.MonkeyPatch
+    inputs: identity.IdentityInput,
+    site: HomeSite,
+    caller: CallerHost,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(start_intent, "checkout", lambda: inputs.checkout)
-    monkeypatch.setenv("MEIVA_HOME", str(inputs.home))
     monkeypatch.setenv("MEIVA_DB_URL", "postgresql://foreign@foreign.invalid/production")
     monkeypatch.setenv("MEIVA_CLUSTER_SECRET", "foreign-secret")
-    prepare_init_identity(_single_box())
+    prepare_init_identity(_single_box(), site, caller)
     env = dotenv_values(inputs.home / ".env")
     db_url = env["MEIVA_DB_URL"]
     assert db_url is not None and "foreign" not in db_url
@@ -279,56 +274,44 @@ def test_init_uses_explicit_home_not_ambient_projection(
 
 
 def test_interrupted_init_keeps_admitted_tool_path(
-    inputs: identity.IdentityInput, monkeypatch: pytest.MonkeyPatch
+    inputs: identity.IdentityInput, site: HomeSite
 ) -> None:
-    monkeypatch.setattr(start_intent, "checkout", lambda: inputs.checkout)
-    monkeypatch.setenv("MEIVA_HOME", str(inputs.home))
-    monkeypatch.delenv("MEIVA_SERVICE_PATH", raising=False)
     activated = inputs.checkout.parent / "other-venv"
     tools = str(inputs.checkout.parent / "tools")
     bin_name = "bin"
-    monkeypatch.setenv("VIRTUAL_ENV", str(activated))
-    monkeypatch.setenv(
-        "PATH",
-        os.pathsep.join(
+    caller = caller_host(
+        path=os.pathsep.join(
             (str(activated / bin_name), str(inputs.checkout / ".venv" / bin_name), tools)
         ),
+        virtual_env=str(activated),
     )
-    write = identity.upsert_env
-
-    def crash(*_args: object, **_kwargs: object) -> None:
-        raise OSError("power loss")
-
-    monkeypatch.setattr(identity, "upsert_env", crash)
-    with pytest.raises(OSError, match="power loss"):
-        prepare_init_identity(_single_box())
+    break_env_publication(inputs.home)
+    with pytest.raises(OSError):
+        prepare_init_identity(_single_box(), site, caller)
     pending = identity.read_intent(inputs.home)
     assert pending is not None and pending["phase"] == "claiming"
     assert pending["env"]["MEIVA_SERVICE_PATH"] == tools
-    monkeypatch.setattr(identity, "upsert_env", write)
-    monkeypatch.setenv("PATH", str(inputs.checkout.parent / "different-tools"))
-    prepare_init_identity(_args())  # the resume takes no flags
+    repair_env_publication(inputs.home)
+    different = caller_host(path=str(inputs.checkout.parent / "different-tools"))
+    prepare_init_identity(_args(), site, different)  # the resume takes no flags
     assert dotenv_values(inputs.home / ".env")["MEIVA_SERVICE_PATH"] == tools
 
 
 def test_existing_home_cannot_recapture_caller_tool_path(
-    inputs: identity.IdentityInput, monkeypatch: pytest.MonkeyPatch
+    inputs: identity.IdentityInput, site: HomeSite
 ) -> None:
     identity.prepare_identity(inputs)
-    monkeypatch.setenv("MEIVA_SERVICE_PATH", str(inputs.checkout.parent / "unadmitted"))
+    unadmitted = caller_host(service_path=str(inputs.checkout.parent / "unadmitted"))
     with pytest.raises(ValueError, match="explicit MEIVA_SERVICE_PATH"):
-        init_intent.service_path(identity.stored_values(inputs.home), inputs.home)
+        init_intent.service_path(identity.stored_values(inputs.home), site, unadmitted)
 
 
 def test_lossy_tool_path_is_rejected_before_identity_publication(
-    inputs: identity.IdentityInput, monkeypatch: pytest.MonkeyPatch
+    inputs: identity.IdentityInput, site: HomeSite
 ) -> None:
-    monkeypatch.setattr(start_intent, "checkout", lambda: inputs.checkout)
-    monkeypatch.setenv("MEIVA_HOME", str(inputs.home))
-    monkeypatch.delenv("MEIVA_SERVICE_PATH", raising=False)
-    monkeypatch.setenv("PATH", str(inputs.checkout.parent / "tools #1"))
+    lossy = caller_host(path=str(inputs.checkout.parent / "tools #1"))
     with pytest.raises(ValueError, match="round-trip literally"):
-        prepare_init_identity(_single_box())
+        prepare_init_identity(_single_box(), site, lossy)
     assert identity.read_intent(inputs.home) is None
 
 
@@ -349,14 +332,10 @@ _RUNNER_ENDPOINT = "postgresql://meiva@remote.invalid/db"
 _FETCH_BEARERS: list[object] = []
 
 
-def _runner_start(
-    inputs: identity.IdentityInput, monkeypatch: pytest.MonkeyPatch, *extra: str
-) -> Any:
+def _runner_start(monkeypatch: pytest.MonkeyPatch, *extra: str) -> Any:
     """A remote runner's first start against a gateway serving the endpoint only."""
     from base.host.env import bootstrap
 
-    monkeypatch.setattr(start_intent, "checkout", lambda: inputs.checkout)
-    monkeypatch.setenv("MEIVA_HOME", str(inputs.home))
     # A remote unit joins without the human secret: its capability authenticates.
     monkeypatch.delenv("MEIVA_CLUSTER_SECRET", raising=False)
 
@@ -380,6 +359,8 @@ def _runner_start(
 
 def test_runner_without_a_capability_refuses_before_persisting(
     inputs: identity.IdentityInput,
+    site: HomeSite,
+    caller: CallerHost,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     seed_write_generation: Any,
@@ -388,9 +369,9 @@ def test_runner_without_a_capability_refuses_before_persisting(
     capability; without one it refuses before any identity is written."""
     from base.host.db_authority import unit
 
-    args = _runner_start(inputs, monkeypatch)
+    args = _runner_start(monkeypatch)
     with pytest.raises(ValueError, match="holds no database capability"):
-        prepare_init_identity(args)
+        prepare_init_identity(args, site, caller)
     assert not (inputs.home / ".env").exists()
     # An installed capability (a bundle the operator carried earlier) admits it.
     gateway = tmp_path / "gateway"
@@ -412,7 +393,7 @@ def test_runner_without_a_capability_refuses_before_persisting(
         probe=lambda _dsn: None,
     )
     _FETCH_BEARERS.clear()
-    prepare_init_identity(args)
+    prepare_init_identity(args, site, caller)
     env = dotenv_values(inputs.home / ".env")
     assert env["MEIVA_MACHINE_HOST"] == "runner.invalid"
     assert "MEIVA_DB_URL" not in env and "MEIVA_REDIS_URL" not in env
@@ -424,25 +405,29 @@ def test_runner_without_a_capability_refuses_before_persisting(
 
 
 def test_capability_bundle_needs_its_transport_key(
-    inputs: identity.IdentityInput, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    inputs: identity.IdentityInput,
+    site: HomeSite,
+    caller: CallerHost,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     bundle = tmp_path / "unit.bundle"
     bundle.write_text("{}")
     monkeypatch.delenv("MEIVA_DB_CAPABILITY_KEY", raising=False)
-    args = _runner_start(inputs, monkeypatch, "--db-capability", str(bundle))
+    args = _runner_start(monkeypatch, "--db-capability", str(bundle))
     with pytest.raises(ValueError, match="MEIVA_DB_CAPABILITY_KEY"):
-        prepare_init_identity(args)
+        prepare_init_identity(args, site, caller)
     assert bundle.exists()
     assert not (inputs.home / ".env").exists()
 
 
 def test_gateway_init_refuses_a_capability_bundle(
-    inputs: identity.IdentityInput, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    inputs: identity.IdentityInput, site: HomeSite, caller: CallerHost, tmp_path: Path
 ) -> None:
-    monkeypatch.setattr(start_intent, "checkout", lambda: inputs.checkout)
-    monkeypatch.setenv("MEIVA_HOME", str(inputs.home))
     with pytest.raises(ValueError, match="agent-runner units"):
-        prepare_init_identity(_single_box("--db-capability", str(tmp_path / "unit.bundle")))
+        prepare_init_identity(
+            _single_box("--db-capability", str(tmp_path / "unit.bundle")), site, caller
+        )
     assert identity.read_intent(inputs.home) is None
 
 
@@ -469,11 +454,11 @@ def test_birth_records_the_ports_a_new_home_gets(
 
 
 def test_birth_refuses_ports_that_are_already_bound(
-    inputs: identity.IdentityInput, session_ports: dict[str, int], monkeypatch: pytest.MonkeyPatch
+    inputs: identity.IdentityInput, session_ports: dict[str, int]
 ) -> None:
-    monkeypatch.setattr(cluster, "port_free", lambda port: port != session_ports["gateway"])  # pyright: ignore[reportUnknownArgumentType] — test double
+    held = replace(inputs, occupied_ports=frozenset({session_ports["gateway"]}))
     with pytest.raises(RuntimeError, match="already occupied"):
-        identity.prepare_identity(inputs)
+        identity.prepare_identity(held)
     assert not (inputs.home / identity.INTENT_NAME).exists()
 
 
@@ -528,205 +513,137 @@ def test_corrupt_foreign_reservation_never_publishes(inputs: identity.IdentityIn
 
 
 def test_config_file_is_taken_once_and_a_second_init_is_refused(
-    inputs: identity.IdentityInput, monkeypatch: pytest.MonkeyPatch
+    inputs: identity.IdentityInput, site: HomeSite, caller: CallerHost
 ) -> None:
-    monkeypatch.setattr(start_intent, "checkout", lambda: inputs.checkout)
-    monkeypatch.setenv("MEIVA_HOME", str(inputs.home))
     config = inputs.home.parent / "config.env"
     config.write_text("MEIVA_LLM_OVERRIDE=fixture:model\n")
     args = _single_box("--config-file", str(config))
-    prepare_init_identity(args)
+    prepare_init_identity(args, site, caller)
     first = (inputs.home / ".env").read_bytes()
     assert b"MEIVA_LLM_OVERRIDE" in first
     config.write_text("MEIVA_LLM_OVERRIDE=other:model\n")
     with pytest.raises(RuntimeError, match="already initialized"):
-        prepare_init_identity(args)
+        prepare_init_identity(args, site, caller)
     assert (inputs.home / ".env").read_bytes() == first
     # A home that already has an `.env` without an intent takes no config file either.
     with pytest.raises(ValueError, match=r"no `\.env` yet"):
         init_intent.config_values(args, inputs.home)
 
 
+# meiva:note
+# A single box whose data plane is a provider's. Hosts are IP literals, so no lookup is made.
 def _remote_config(
     inputs: identity.IdentityInput,
-    monkeypatch: pytest.MonkeyPatch,
     *,
-    host: str = "db.invalid",
+    host: str = "192.0.2.55",
+    machine_host: str | None = None,
     query: str = "",
-):
-    import socket
-
-    monkeypatch.setattr(start_intent, "checkout", lambda: inputs.checkout)
-    monkeypatch.setattr(
-        init_intent,
-        "local_addresses",
-        lambda _machine: {"this-host", "192.0.2.1"},  # pyright: ignore[reportUnknownArgumentType] — test double or third-party stubs
-    )
-    monkeypatch.setattr(
-        socket,
-        "getaddrinfo",
-        lambda *_a, **_k: [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("192.0.2.55", 0))],  # pyright: ignore[reportUnknownArgumentType] — test double or third-party stubs
-    )
-    monkeypatch.setenv("MEIVA_HOME", str(inputs.home))
+) -> Any:
     config = inputs.home.parent / "remote.env"
     config.write_text(
-        f"MEIVA_DB_URL=postgresql://owner:provider@{host}:6543/app{query}\nMEIVA_REDIS_URL=rediss://acl:provider@redis.invalid:6381/0\nMEIVA_RUNNER_DB_PASSWORD=external-runner\n"
+        f"MEIVA_DB_URL=postgresql://owner:provider@{host}:6543/app{query}\nMEIVA_REDIS_URL=rediss://acl:provider@192.0.2.56:6381/0\nMEIVA_RUNNER_DB_PASSWORD=external-runner\n"
     )
-    return _single_box("--config-file", str(config))
+    own_address = () if machine_host is None else ("--machine-host", machine_host)
+    return _single_box("--config-file", str(config), *own_address)
 
 
 def test_remote_init_preserves_provider_urls_and_runner_credential(
-    inputs: identity.IdentityInput, monkeypatch: pytest.MonkeyPatch
+    inputs: identity.IdentityInput, site: HomeSite, caller: CallerHost
 ) -> None:
-    args = _remote_config(inputs, monkeypatch)
-    prepare_init_identity(args)
+    args = _remote_config(inputs)
+    prepare_init_identity(args, site, caller)
     env = dotenv_values(inputs.home / ".env")
-    assert env["MEIVA_DB_URL"] == "postgresql://owner:provider@db.invalid:6543/app"
-    assert env["MEIVA_REDIS_URL"] == "rediss://acl:provider@redis.invalid:6381/0"
+    assert env["MEIVA_DB_URL"] == "postgresql://owner:provider@192.0.2.55:6543/app"
+    assert env["MEIVA_REDIS_URL"] == "rediss://acl:provider@192.0.2.56:6381/0"
     assert env["MEIVA_RUNNER_DB_PASSWORD"] == "external-runner"  # noqa: S105 — fixture credential
     assert "MEIVA_DB_ADMIN_PASSWORD" not in env
     assert "MEIVA_REDIS_ADMIN_PASSWORD" not in env
     before = (inputs.home / ".env").read_bytes()
     with pytest.raises(RuntimeError, match="already initialized"):
-        prepare_init_identity(args)
+        prepare_init_identity(args, site, caller)
     assert (inputs.home / ".env").read_bytes() == before
 
 
-@pytest.mark.parametrize("host", ["127.0.0.1", "localhost", "this-host", "192.0.2.1"])
+@pytest.mark.parametrize(
+    ("host", "machine_host"),
+    [
+        ("127.0.0.1", None),
+        ("localhost", None),
+        (socket.gethostname(), None),
+        ("192.0.2.1", "192.0.2.1"),
+    ],
+    ids=["loopback", "localhost", "this-hostname", "the-unit's-own-address"],
+)
 def test_remote_input_refuses_local_or_mixed_ownership(
-    inputs: identity.IdentityInput, monkeypatch: pytest.MonkeyPatch, host: str
+    inputs: identity.IdentityInput,
+    site: HomeSite,
+    caller: CallerHost,
+    host: str,
+    machine_host: str | None,
 ) -> None:
-    args = _remote_config(inputs, monkeypatch, host=host)
+    args = _remote_config(inputs, host=host, machine_host=machine_host)
     with pytest.raises(ValueError, match="foreign"):
-        prepare_init_identity(args)
+        prepare_init_identity(args, site, caller)
     assert identity.read_intent(inputs.home) is None
 
 
 @pytest.mark.parametrize("query", ["?hostaddr=127.0.0.1", "?host=", "?port=", "?dbname=other"])
 def test_remote_input_cannot_redirect_libpq_identity(
-    inputs: identity.IdentityInput, monkeypatch: pytest.MonkeyPatch, query: str
+    inputs: identity.IdentityInput, site: HomeSite, caller: CallerHost, query: str
 ) -> None:
-    args = _remote_config(inputs, monkeypatch, query=query)
+    args = _remote_config(inputs, query=query)
     with pytest.raises(ValueError, match="redirect"):
-        prepare_init_identity(args)
+        prepare_init_identity(args, site, caller)
     assert identity.read_intent(inputs.home) is None
 
 
-def test_public_start_holds_home_lock_through_runtime_start(
-    inputs: identity.IdentityInput,
-    monkeypatch: pytest.MonkeyPatch,
-    operator_database: OperatorDatabaseFactory,
-    command_runtime: CommandRuntime,
+# meiva:note
+# Admission holds the lifecycle lock while the lifecycle runs, and discards the
+# inherited identity of another home.
+def test_an_admitted_start_holds_the_home_lock_and_enters_the_home(
+    inputs: identity.IdentityInput, site: HomeSite, caller: CallerHost
 ) -> None:
-    producer = operator_event_pipeline(
-        operator_database, machine=command_runtime.machine, home=meiva_home()
-    )
-    from base.native_process.os_platform import LockTimeoutError
+    prepare_init_identity(_single_box(), site, caller)
+    os.environ["MEIVA_DB_URL"] = "postgresql://foreign@foreign.invalid/production"
 
-    monkeypatch.setattr(start_intent, "checkout", lambda: inputs.checkout)
-    monkeypatch.setenv("MEIVA_HOME", str(inputs.home))
-
-    def runtime(**_kw: object) -> int:
+    with start_intent.admitted_start(site) as runtime:
+        assert runtime.code_root == inputs.checkout
+        assert os.environ["MEIVA_HOME"] == str(inputs.home)
+        assert "MEIVA_DB_URL" not in os.environ, "another home's login is not this home's"
         with (
             pytest.raises(LockTimeoutError),
             file_lock(inputs.home / "start-intent.lock", timeout_s=0.05),
         ):
             pytest.fail("another lifecycle operation entered during start")
-        return 0
 
-    monkeypatch.setattr(start, "cmd_start", runtime)
-    prepare_init_identity(_single_box())
-    # A macOS host has no boot unit to hand the root to, so the boot tail reads nothing from /proc.
-    mac = replace(command_runtime, host=fake_host(platform=DARWIN_ARM64))
-    assert (
-        start_intent.run_start(
-            _start_args(command_runtime=mac),
-            retained_children=[],
-            database_factory=operator_database,
-            producer=producer,
-        )
-        == 0
-    )
-
-
-@pytest.mark.parametrize("result", [0, 1, 75])
-def test_public_start_publishes_boot_pid_only_after_complete_success(
-    inputs: identity.IdentityInput,
-    monkeypatch: pytest.MonkeyPatch,
-    result: int,
-    operator_database: OperatorDatabaseFactory,
-    command_runtime: CommandRuntime,
-) -> None:
-    producer = operator_event_pipeline(
-        operator_database, machine=command_runtime.machine, home=meiva_home()
-    )
-    from cli.commands.lifecycle import root_driver
-
-    calls: list[str] = []
-    monkeypatch.setattr(start_intent, "checkout", lambda: inputs.checkout)
-    monkeypatch.setenv("MEIVA_HOME", str(inputs.home))
-
-    def runtime(**_kw: object) -> int:
-        calls.append("complete wrapped start")
-        return result
-
-    monkeypatch.setattr(start, "cmd_start", runtime)
-
-    def publish_pid(*, helper: HelperFactory, host: Host) -> None:
-        del helper
-        calls.append("publish PID")
-
-    monkeypatch.setattr(root_driver, "complete_boot_start", publish_pid)
-    prepare_init_identity(_single_box())
-    assert (
-        start_intent.run_start(
-            _start_args(command_runtime=command_runtime),
-            retained_children=[],
-            database_factory=operator_database,
-            producer=producer,
-        )
-        == result
-    )
-    assert calls == ["complete wrapped start"] + (["publish PID"] if result == 0 else [])
+    with file_lock(inputs.home / "start-intent.lock", timeout_s=0.05):
+        # meiva:note
+        # released with the start
+        pass
 
 
 def test_failed_boot_publication_clears_serving_and_refuses_success(
     inputs: identity.IdentityInput,
+    site: HomeSite,
+    caller: CallerHost,
     monkeypatch: pytest.MonkeyPatch,
-    operator_database: OperatorDatabaseFactory,
     command_runtime: CommandRuntime,
 ) -> None:
-    producer = operator_event_pipeline(
-        operator_database, machine=command_runtime.machine, home=meiva_home()
-    )
-    from base.deploy.lifecycle import start_serving
-    from cli.commands.lifecycle import root_driver
-
-    monkeypatch.setattr(start_intent, "checkout", lambda: inputs.checkout)
-    monkeypatch.setenv("MEIVA_HOME", str(inputs.home))
-    calls: list[str] = []
-
-    def ready(**_kw: object) -> int:
-        return 0
-
-    monkeypatch.setattr(start, "cmd_start", ready)
-    monkeypatch.setattr(start_serving, "clear_serving", lambda: calls.append("cleared"))
+    prepare_init_identity(_single_box(), site, caller)
 
     def fail(**_kw: object) -> None:
         raise RuntimeError("manager refused native custody")
 
+    # meiva:note
+    # The boot unit's manager is the one fault a real resource cannot produce here: the
+    # hand-off asks the process's own systemd cgroup.
     monkeypatch.setattr(root_driver, "complete_boot_start", fail)
-    prepare_init_identity(_single_box())
-    assert (
-        start_intent.run_start(
-            _start_args(command_runtime=command_runtime),
-            retained_children=[],
-            database_factory=operator_database,
-            producer=producer,
-        )
-        == 1
-    )
-    assert calls == ["cleared"]
+    with start_intent.admitted_start(site):
+        start_serving.begin_start()
+        assert start_serving.state_path().exists()
+        with pytest.raises(RuntimeError, match="refused native custody"):
+            start_intent.finish_start(0, helper=None, host=command_runtime.host, home=inputs.home)
+        assert not start_serving.state_path().exists(), "the start no longer reads as serving"
 
 
 def _initialized_gateway_home(inputs: identity.IdentityInput) -> Path:

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
+import argparse
 from pathlib import Path
-from typing import Any, cast
 
 import pytest
 
@@ -9,16 +9,18 @@ from base.host.system import boot_policy
 from base.telemetry.tests.capture.event_capture import EmittedEvents
 from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
 from cli import start_intent
+from cli.database import OperatorDatabaseFactory, operator_event_pipeline
+from cli.database.runtime import CommandRuntime
+from cli.database.tests.cli_tests import operator_database as operator_database
+from cli.database.tests.command_inputs import command_runtime as command_runtime
 from cli.parsers import build_parser
+from cli.start_runtime import HomeSite
 
 
-@pytest.fixture(autouse=True)
-def _boot_time(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(boot_policy.psutil, "boot_time", lambda: 1_000_000.0)
-
-
+# meiva:note
+# One boot-job attempt whose start exited with `code`.
 def _boot(home: Path, code: int) -> int:
-    return start_intent.run_boot_attempt(home, lambda: code)
+    return start_intent.settle_boot_attempt(home, boot_policy.begin_attempt(home), code)
 
 
 def test_the_parser_marks_a_boot_start_only_when_asked() -> None:
@@ -27,29 +29,23 @@ def test_the_parser_marks_a_boot_start_only_when_asked() -> None:
     assert parser.parse_args(["start", "--all-services", "--boot"]).boot is True
 
 
-@pytest.mark.parametrize("macos", [True, False])
 def test_failed_attempts_before_the_budget_keep_their_exit_code(
-    tmp_path: Path,
-    emitted_events: EmittedEvents,
-    monkeypatch: pytest.MonkeyPatch,
-    macos: bool,
+    tmp_path: Path, emitted_events: EmittedEvents
 ) -> None:
-    monkeypatch.setattr(boot_policy, "is_macos", lambda: macos)
     codes = [_boot(tmp_path, 75) for _ in range(boot_policy.BOOT_MAX_ATTEMPTS - 1)]
     assert codes == [75] * (boot_policy.BOOT_MAX_ATTEMPTS - 1)
     assert len(emitted_events) == 0
 
 
-def test_the_attempt_that_spends_the_budget_alerts_and_stops_launchd(
-    tmp_path: Path,
-    emitted_events: EmittedEvents,
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
+def test_the_attempt_that_spends_the_budget_alerts_and_takes_the_policys_exit_code(
+    tmp_path: Path, emitted_events: EmittedEvents, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    monkeypatch.setattr(boot_policy, "is_macos", lambda: True)
     for _ in range(boot_policy.BOOT_MAX_ATTEMPTS - 1):
         assert _boot(tmp_path, 75) == 75
-    assert _boot(tmp_path, 75) == 0
+    # meiva:note
+    # launchd retries every nonzero exit, so the spending attempt exits 0 there; systemd
+    # keeps the real code. The policy owns which, and tests it.
+    assert _boot(tmp_path, 75) == boot_policy.exit_code_after_budget(75)
     (event,) = emitted_events
     assert (event.category, event.event_name) == ("telemetry", "boot_retries_exhausted")
     assert event.level == "error"
@@ -57,65 +53,74 @@ def test_the_attempt_that_spends_the_budget_alerts_and_stops_launchd(
     assert "not retrying" in capsys.readouterr().err
 
 
-def test_on_linux_the_spending_attempt_still_fails_for_systemd(
-    tmp_path: Path,
-    emitted_events: EmittedEvents,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(boot_policy, "is_macos", lambda: False)
-    codes = [_boot(tmp_path, 75) for _ in range(boot_policy.BOOT_MAX_ATTEMPTS)]
-    assert codes[-1] == 75
-    assert len(emitted_events) == 1
-
-
 def test_a_start_after_the_budget_still_runs_and_success_clears_the_count(
-    tmp_path: Path,
-    emitted_events: EmittedEvents,
-    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path, emitted_events: EmittedEvents
 ) -> None:
-    monkeypatch.setattr(boot_policy, "is_macos", lambda: True)
     for _ in range(boot_policy.BOOT_MAX_ATTEMPTS):
         _boot(tmp_path, 75)
-    ran: list[int] = []
-
-    def recovered() -> int:
-        ran.append(1)
-        return 0
-
-    assert start_intent.run_boot_attempt(tmp_path, recovered) == 0
-    assert ran == [1]
+    # meiva:note
+    # The count never refuses a start: this attempt is attempt number budget + 1, and it succeeds.
+    assert _boot(tmp_path, 0) == 0
     assert boot_policy.begin_attempt(tmp_path) == 1
 
 
-def test_run_start_hands_the_boot_flag_to_the_start_and_wraps_it(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+def _start_args(command_runtime: CommandRuntime, *flags: str) -> argparse.Namespace:
+    args = build_parser().parse_args(["start", "--all-services", *flags])
+    args.runtime = command_runtime
+    return args
+
+
+def _run_start(
+    site: HomeSite,
+    command_runtime: CommandRuntime,
+    operator_database: OperatorDatabaseFactory,
+    *flags: str,
+) -> int:
+    producer = operator_event_pipeline(
+        operator_database, machine=command_runtime.machine, home=site.home
+    )
+    return start_intent.run_start(
+        _start_args(command_runtime, *flags),
+        site,
+        retained_children=[],
+        database_factory=operator_database,
+        producer=producer,
+    )
+
+
+# meiva:note
+# The homes were never initialized, so every start is refused (exit 1): the record
+# of attempts is what tells a boot start from a plain one.
+def test_a_boot_start_counts_its_attempt_and_a_plain_start_does_not(
+    tmp_path: Path,
+    operator_database: OperatorDatabaseFactory,
+    command_runtime: CommandRuntime,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
-    seen: dict[str, Any] = {}
+    plain, boot = tmp_path / "plain", tmp_path / "boot"
+    for home in (plain, boot):
+        home.mkdir(mode=0o700)
 
-    def once(args: Any, runtime: Any, retained: Any, *, boot: bool = False, **_owners: Any) -> int:
-        seen["boot"] = boot
-        return 0
+    assert _run_start(HomeSite(plain, tmp_path), command_runtime, operator_database) == 1
+    assert _run_start(HomeSite(boot, tmp_path), command_runtime, operator_database, "--boot") == 1
 
-    def wrapped(home: Path, start: Any) -> int:
-        seen["home"] = home
-        return start()
+    assert "not initialized" in capsys.readouterr().err
+    assert boot_policy.begin_attempt(plain) == 1, "a plain start recorded no attempt"
+    assert boot_policy.begin_attempt(boot) == 2, "a boot start recorded its attempt"
 
-    monkeypatch.setattr(start_intent, "start_once", once)
-    monkeypatch.setattr(start_intent, "run_boot_attempt", wrapped)
-    monkeypatch.setattr(start_intent, "resolve_home", lambda: tmp_path)
 
-    def run(args: Any) -> int:
-        return start_intent.run_start(
-            args,
-            retained_children=[],
-            database_factory=object,
-            producer=cast(Any, object),
-        )
+def test_a_boot_start_after_the_budget_still_runs(
+    tmp_path: Path,
+    operator_database: OperatorDatabaseFactory,
+    command_runtime: CommandRuntime,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    site = HomeSite(tmp_path / "home", tmp_path)
+    site.home.mkdir(mode=0o700)
+    for _ in range(boot_policy.BOOT_MAX_ATTEMPTS):
+        _run_start(site, command_runtime, operator_database, "--boot")
+    capsys.readouterr()
 
-    args = build_parser().parse_args(["start", "--all-services", "--boot"])
-    assert run(args) == 0
-    assert seen == {"boot": True, "home": tmp_path}
-    args = build_parser().parse_args(["start", "--all-services"])
-    seen.clear()
-    assert run(args) == 0
-    assert seen == {"boot": False}
+    _run_start(site, command_runtime, operator_database, "--boot")
+
+    assert "not initialized" in capsys.readouterr().err, "the start itself ran"
