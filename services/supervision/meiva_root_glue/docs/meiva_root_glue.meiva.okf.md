@@ -15,6 +15,14 @@ probes for the exact units in the loaded manifest. A missing probe refuses
 wiring before any service spawns. Adding a plugin service follows the same
 `ServiceSpec.identity_probe` contract as a core service.
 
+The roster contract test checks the daemon's literal health, logging, shutdown and
+pidfile identities. It follows a callable's default inside the function that owns
+that parameter and fields of an unmodified frozen dependency default. Overrides,
+rebindings and nested parameter scopes do not provide that evidence. The check
+also follows the public pidfile owner; a source mutation of either standard daemon's
+shutdown name must remain visible. This is static identity evidence, not a running
+daemon readiness test.
+
 The manifest generator (`manifests.py`) also derives each unit's stop window: a
 `ServiceSpec` that declares `stop_ceiling_s` (its own SIGTERM cleanup can outlast
 root's default window) gets `stop_timeout_s = ceiling + STOP_MARGIN_S`. The

@@ -303,11 +303,136 @@ def _literal(node: ast.expr, constants: dict[str, str]) -> str | None:
     return None
 
 
+def _scope_nodes(node: ast.AST) -> list[ast.AST]:
+    found: list[ast.AST] = []
+    for child in ast.iter_child_nodes(node):
+        if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)):
+            continue
+        found.append(child)
+        found.extend(_scope_nodes(child))
+    return found
+
+
+def _frozen_dataclass(node: ast.ClassDef) -> bool:
+    return any(
+        isinstance(decorator, ast.Call)
+        and isinstance(decorator.func, ast.Name)
+        and decorator.func.id == "dataclass"
+        and any(
+            k.arg == "frozen" and isinstance(k.value, ast.Constant) and k.value.value is True
+            for k in decorator.keywords
+        )
+        for decorator in node.decorator_list
+    )
+
+
+def _default_instances(tree: ast.Module) -> dict[str, str]:
+    assignments = Counter(
+        node.id
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store)
+    )
+    return {
+        node.targets[0].id: node.value.func.id
+        for node in tree.body
+        if isinstance(node, ast.Assign)
+        and len(node.targets) == 1
+        and isinstance(node.targets[0], ast.Name)
+        and assignments[node.targets[0].id] == 1
+        and isinstance(node.value, ast.Call)
+        and isinstance(node.value.func, ast.Name)
+        and not node.value.args
+        and not node.value.keywords
+    }
+
+
+def _dependency_fields(tree: ast.Module) -> dict[str, dict[str, ast.expr]]:
+    classes: dict[str, dict[str, ast.expr]] = {
+        node.name: {
+            field.target.id: field.value
+            for field in node.body
+            if isinstance(field, ast.AnnAssign)
+            and isinstance(field.target, ast.Name)
+            and isinstance(field.value, (ast.Name, ast.Attribute))
+        }
+        for node in tree.body
+        if isinstance(node, ast.ClassDef) and _frozen_dataclass(node)
+    }
+    return {name: classes[cls] for name, cls in _default_instances(tree).items() if cls in classes}
+
+
+def _argument_defaults(function: ast.FunctionDef | ast.AsyncFunctionDef) -> dict[str, ast.expr]:
+    positional = function.args.posonlyargs + function.args.args
+    return {
+        argument.arg: default
+        for argument, default in [
+            *zip(
+                positional[len(positional) - len(function.args.defaults) :],
+                function.args.defaults,
+                strict=True,
+            ),
+            *zip(function.args.kwonlyargs, function.args.kw_defaults, strict=True),
+        ]
+        if default is not None
+    }
+
+
+def _scope_rebound(nodes: list[ast.AST]) -> set[str]:
+    rebound = {
+        node.id
+        for node in nodes
+        if isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del))
+    }
+    rebound.update(
+        node.value.id
+        for node in nodes
+        if isinstance(node, ast.Attribute)
+        and isinstance(node.ctx, (ast.Store, ast.Del))
+        and isinstance(node.value, ast.Name)
+    )
+    return rebound
+
+
+def _default_target(
+    callee: ast.expr,
+    defaults: dict[str, ast.expr],
+    instances: dict[str, dict[str, ast.expr]],
+) -> ast.expr | None:
+    if isinstance(callee, ast.Name):
+        return defaults.get(callee.id)
+    if isinstance(callee, ast.Attribute) and isinstance(callee.value, ast.Name):
+        default = defaults.get(callee.value.id)
+        if isinstance(default, ast.Name):
+            return instances.get(default.id, {}).get(callee.attr)
+    return None
+
+
+def _injected_calls(tree: ast.Module) -> list[ast.Call]:
+    instances = _dependency_fields(tree)
+    calls: list[ast.Call] = []
+    for function in tree.body:
+        if not isinstance(function, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        nodes = _scope_nodes(function)
+        rebound = _scope_rebound(nodes)
+        defaults = {
+            name: value
+            for name, value in _argument_defaults(function).items()
+            if name not in rebound
+        }
+        for node in nodes:
+            if isinstance(node, ast.Call):
+                target = _default_target(node.func, defaults, instances)
+                if isinstance(target, (ast.Name, ast.Attribute)):
+                    calls.append(ast.Call(func=target, args=node.args, keywords=node.keywords))
+    return calls
+
+
 def _daemon_literals(source: str, *, module: str | None = None) -> dict[str, list[str | None]]:
     tree = ast.parse(source)
     constants = _module_constants(tree)
     found: dict[str, list[str | None]] = {}
-    for node in ast.walk(tree):
+    for node in [*ast.walk(tree), *_injected_calls(tree)]:
         if not isinstance(node, ast.Call):
             continue
         callee = _call_name(node)
@@ -385,7 +510,11 @@ def _calls_for_import(
 
 
 def _called_imports(tree: ast.Module, module: str) -> list[tuple[str, str]]:
-    calls = [node.func for node in ast.walk(tree) if isinstance(node, ast.Call)]
+    calls = [
+        node.func
+        for node in [*ast.walk(tree), *_injected_calls(tree)]
+        if isinstance(node, ast.Call)
+    ]
     rebound = _rebound_names(tree)
     imports = Counter(
         alias.asname or (alias.name.split(".")[0] if isinstance(node, ast.Import) else alias.name)
@@ -452,6 +581,100 @@ def test_the_literal_finder_sees_a_mismatch() -> None:
         "init_gateway_process": ["beat-x"],
         "install_graceful_shutdown": ["b"],
         "acquire_pidfile": ["pkg.daemon"],
+    }
+
+
+def test_the_literal_finder_follows_each_function_default_in_its_own_scope() -> None:
+    source = (
+        "def boot(start=start_health_server):\n"
+        "    start('wrong-health-name')\n"
+        "def unrelated(start=other):\n"
+        "    start('not-a-health-name')\n"
+    )
+    assert _daemon_literals(source) == {"start_health_server": ["wrong-health-name"]}
+
+
+def test_the_literal_finder_follows_the_default_frozen_dependency_instance() -> None:
+    source = (
+        "@dataclass(frozen=True)\n"
+        "class Dependencies:\n"
+        "    log: Callable = init_gateway_process\n"
+        "    stop: Callable = install_graceful_shutdown\n"
+        "DEFAULT = Dependencies()\n"
+        "def boot(deps=DEFAULT):\n"
+        "    deps.log(name='wrong-log-name')\n"
+        "    deps.stop('wrong-stop-name')\n"
+        "def unrelated(deps):\n"
+        "    deps.log(name='not-a-log-name')\n"
+    )
+    assert _daemon_literals(source) == {
+        "init_gateway_process": ["wrong-log-name"],
+        "install_graceful_shutdown": ["wrong-stop-name"],
+    }
+
+
+@pytest.mark.parametrize("change", ["override", "mutable", "rebound", "changed-field"])
+def test_the_literal_finder_refuses_an_unproven_dependency_instance(change: str) -> None:
+    source = (
+        "@dataclass(frozen=True)\n"
+        "class Dependencies:\n"
+        "    log: Callable = init_gateway_process\n"
+        "DEFAULT = Dependencies()\n"
+        "def boot(deps=DEFAULT):\n"
+        "    deps.log(name='unknown')\n"
+    )
+    source = {
+        "override": source.replace("Dependencies()", "Dependencies(log=other)"),
+        "mutable": source.replace("frozen=True", "frozen=False"),
+        "rebound": source.replace("    deps.log(", "    deps = other\n    deps.log("),
+        "changed-field": source.replace("    deps.log(", "    deps.log = other\n    deps.log("),
+    }[change]
+    assert _daemon_literals(source) == {}
+
+
+@pytest.mark.parametrize(
+    ("module", "call", "health_name"),
+    [
+        ("services.agent_runner.agent_ops.daemon", 'install_shutdown("ops")', "ops"),
+        (
+            "services.agent_runner.page_server.daemon",
+            'deps.install_shutdown_fn("page_server")',
+            "page_server",
+        ),
+    ],
+)
+def test_the_literal_finder_exposes_a_real_daemon_shutdown_name_mismatch(
+    module: str,
+    call: str,
+    health_name: str,
+) -> None:
+    source = (_REPO / (module.replace(".", "/") + ".py")).read_text()
+    assert call in source
+    changed = source.replace(call, call.replace(health_name, "wrong-name"))
+    assert _daemon_literals(changed, module=module)["install_graceful_shutdown"] == ["wrong-name"]
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "start = other\n    start('unknown')",
+        "def nested(start):\n        start('unknown')",
+    ],
+)
+def test_the_literal_finder_does_not_follow_a_rebound_or_nested_default(body: str) -> None:
+    assert _daemon_literals(f"def boot(start=start_health_server):\n    {body}\n") == {}
+
+
+def test_the_literal_finder_follows_an_injected_public_pidfile_owner() -> None:
+    source = (
+        "from services.agent_runner.agent_ops import boot\n"
+        "def run(is_running=boot.is_running, write_pidfile=boot.write_pidfile):\n"
+        "    is_running(config, runtime=runtime)\n"
+        "    write_pidfile(config, runtime=runtime)\n"
+    )
+    assert _daemon_literals(source, module="services.agent_runner.agent_ops.daemon") == {
+        "pidfile_holds_daemon": ["services.agent_runner.agent_ops.daemon"],
+        "acquire_pidfile": ["services.agent_runner.agent_ops.daemon"],
     }
 
 
