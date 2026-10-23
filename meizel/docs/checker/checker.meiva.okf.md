@@ -40,8 +40,7 @@ python -m meizel roles list <role>... | check | write
   judges only those files.
 - `debt` manages recorded violations, a per-directory baseline that may only
   shrink: [[meizel/docs/checker/debt.meiva.okf.md|recorded debt]].
-- `explain` prints a node's place in its parent's local graph and the fact
-  edges that cross its boundary.
+- `explain` shows graph edges and bounded [[meizel/docs/checker/explain.meiva.okf.md|Python source evidence]].
 - `sync --prune` drops stale declarations; `sync --declare` writes the legal new
   dependencies of the changed files: [[meizel/docs/checker/sync.meiva.okf.md|keeping manifests current]].
 - `bootstrap --out DIR` writes one `meizel.toml` per directory under `DIR` from
