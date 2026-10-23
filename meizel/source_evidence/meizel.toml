@@ -1,0 +1,8 @@
+exports = []
+purity = "strict"
+
+[uses]
+"__init__.py" = ["loader.py", "model.py", "render.py"]
+"loader.py" = ["decode.py", "model.py"]
+"decode.py" = ["model.py"]
+"render.py" = ["model.py"]

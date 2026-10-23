@@ -1,7 +1,7 @@
 exports = ["synthetic.py"]
 
 [uses]
-"test_explain_evidence.py" = ["synthetic.py"]
+"explain" = ["synthetic.py"]
 "codes" = ["synthetic.py"]
 "conftest.py" = ["synthetic.py"]
 "debt" = ["synthetic.py"]
