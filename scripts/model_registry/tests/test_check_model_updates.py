@@ -4,7 +4,6 @@ import json
 import socket
 from collections.abc import Callable
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -25,22 +24,24 @@ def write_env_file(tracker: Any, path: Path, *, missing: str | None = None) -> N
     )
 
 
-def known_models(tracker: Any, source: Any) -> list[str]:
+def known_models(tracker: Any, source: Any, *, models: dict[str, Any] | None = None) -> list[str]:
+    catalog_models = tracker.build_model_catalog().models if models is None else models
     return [
-        model_id
-        for model_id, spec in tracker.build_model_catalog().models.items()
-        if spec.provider == source.provider
+        model_id for model_id, spec in catalog_models.items() if spec.provider == source.provider
     ][:1]
 
 
 def stub_fetcher(
-    tracker: Any, overrides: dict[str, list[str]] | None = None
+    tracker: Any,
+    overrides: dict[str, list[str]] | None = None,
+    *,
+    models: dict[str, Any] | None = None,
 ) -> Callable[[Any, str], list[str]]:
     def fetch(source: Any, api_key: str) -> list[str]:
         assert api_key == f"test-{source.provider}"
         if overrides is not None and source.provider in overrides:
             return overrides[source.provider]
-        return known_models(tracker, source)
+        return known_models(tracker, source, models=models)
 
     return fetch
 
@@ -74,9 +75,7 @@ def test_fake_ip_range_boundaries(tracker: Any) -> None:
     assert not tracker._is_fake_ip("not-an-ip")
 
 
-def test_doh_real_ip_falls_back_to_second_endpoint(
-    monkeypatch: pytest.MonkeyPatch, tracker: Any
-) -> None:
+def test_doh_real_ip_falls_back_to_second_endpoint(tracker: Any) -> None:
     host = "api.example.com"
     calls: list[str] = []
 
@@ -95,13 +94,11 @@ def test_doh_real_ip_falls_back_to_second_endpoint(
             raise tracker.requests.exceptions.ConnectionError("primary unavailable")
         return _JSONResponse({"Answer": [{"name": host, "type": 1, "data": "104.18.1.2"}]})
 
-    monkeypatch.setattr(tracker.requests, "get", get)
-
-    assert tracker._doh_real_ip(host) == "104.18.1.2"
+    assert tracker._doh_real_ip(host, http_get=get) == "104.18.1.2"
     assert calls == list(tracker._DOH_ENDPOINTS)
 
 
-def test_doh_real_ip_skips_fake_ip_answers(monkeypatch: pytest.MonkeyPatch, tracker: Any) -> None:
+def test_doh_real_ip_skips_fake_ip_answers(tracker: Any) -> None:
     host = "api.example.com"
     calls: list[str] = []
     addresses = iter(["198.18.0.5", "104.18.1.2"])
@@ -117,29 +114,23 @@ def test_doh_real_ip_skips_fake_ip_answers(monkeypatch: pytest.MonkeyPatch, trac
         calls.append(url)
         return _JSONResponse({"Answer": [{"name": host, "type": 1, "data": next(addresses)}]})
 
-    monkeypatch.setattr(tracker.requests, "get", get)
-
-    assert tracker._doh_real_ip(host) == "104.18.1.2"
+    assert tracker._doh_real_ip(host, http_get=get) == "104.18.1.2"
     assert calls == list(tracker._DOH_ENDPOINTS)
 
 
-def test_doh_real_ip_raises_when_all_endpoints_fail(
-    monkeypatch: pytest.MonkeyPatch, tracker: Any
-) -> None:
+def test_doh_real_ip_raises_when_all_endpoints_fail(tracker: Any) -> None:
     calls: list[str] = []
 
     def get(url: str, **_kwargs: object) -> _JSONResponse:
         calls.append(url)
         raise tracker.requests.exceptions.ConnectionError("unavailable")
 
-    monkeypatch.setattr(tracker.requests, "get", get)
-
     with pytest.raises(ConnectionError, match="DoH"):
-        tracker._doh_real_ip("api.example.com")
+        tracker._doh_real_ip("api.example.com", http_get=get)
     assert calls == list(tracker._DOH_ENDPOINTS)
 
 
-def test_doh_real_ip_is_cached(monkeypatch: pytest.MonkeyPatch, tracker: Any) -> None:
+def test_doh_real_ip_is_cached(tracker: Any) -> None:
     host = "api.example.com"
     calls: list[str] = []
 
@@ -147,16 +138,12 @@ def test_doh_real_ip_is_cached(monkeypatch: pytest.MonkeyPatch, tracker: Any) ->
         calls.append(url)
         return _JSONResponse({"Answer": [{"name": host, "type": 1, "data": "104.18.1.2"}]})
 
-    monkeypatch.setattr(tracker.requests, "get", get)
-
-    assert tracker._doh_real_ip(host) == "104.18.1.2"
-    assert tracker._doh_real_ip(host) == "104.18.1.2"
+    assert tracker._doh_real_ip(host, http_get=get) == "104.18.1.2"
+    assert tracker._doh_real_ip(host, http_get=get) == "104.18.1.2"
     assert calls == [tracker._DOH_ENDPOINTS[0]]
 
 
-def test_session_for_host_healthy_resolution_returns_none(
-    monkeypatch: pytest.MonkeyPatch, tracker: Any
-) -> None:
+def test_session_for_host_healthy_resolution_returns_none(tracker: Any) -> None:
     host = "api.example.com"
 
     def getaddrinfo(
@@ -165,18 +152,10 @@ def test_session_for_host_healthy_resolution_returns_none(
         del type
         return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("104.18.1.2", 443))]
 
-    monkeypatch.setattr(
-        tracker.socket,
-        "getaddrinfo",
-        getaddrinfo,
-    )
-
-    assert tracker._session_for_host(host) is None
+    assert tracker._session_for_host(host, addrinfo=getaddrinfo) is None
 
 
-def test_session_for_host_fake_ip_returns_pinned_session(
-    monkeypatch: pytest.MonkeyPatch, tracker: Any
-) -> None:
+def test_session_for_host_fake_ip_returns_pinned_session(tracker: Any) -> None:
     host = "api.example.com"
     pinned_ip = "140.82.113.3"
 
@@ -189,14 +168,7 @@ def test_session_for_host_fake_ip_returns_pinned_session(
     def doh_real_ip(_host: str) -> str:
         return pinned_ip
 
-    monkeypatch.setattr(
-        tracker.socket,
-        "getaddrinfo",
-        getaddrinfo,
-    )
-    monkeypatch.setattr(tracker, "_doh_real_ip", doh_real_ip)
-
-    session = tracker._session_for_host(host)
+    session = tracker._session_for_host(host, addrinfo=getaddrinfo, doh_resolver=doh_real_ip)
 
     assert isinstance(session, tracker.requests.Session)
     adapter = session.get_adapter(f"https://{host}/")
@@ -212,9 +184,7 @@ def test_session_for_host_fake_ip_returns_pinned_session(
         connection.close()
 
 
-def test_fetch_json_uses_pinned_session_when_fake_ip(
-    monkeypatch: pytest.MonkeyPatch, tracker: Any
-) -> None:
+def test_fetch_json_uses_pinned_session_when_fake_ip(tracker: Any) -> None:
     url = "https://api.example.com/models"
     headers = {"Authorization": "Bearer test-key"}
     params = {"limit": 100}
@@ -232,9 +202,10 @@ def test_fetch_json_uses_pinned_session_when_fake_ip(
     def session_for_host(_host: str) -> Session:
         return session
 
-    monkeypatch.setattr(tracker, "_session_for_host", session_for_host)
-
-    assert tracker.fetch_json(url, headers=headers, params=params) == payload
+    assert (
+        tracker.fetch_json(url, headers=headers, params=params, session_for_host=session_for_host)
+        == payload
+    )
     assert session_calls == [
         (
             url,
@@ -253,61 +224,70 @@ def test_fetch_json_uses_pinned_session_when_fake_ip(
     def no_session_for_host(_host: str) -> None:
         return None
 
-    monkeypatch.setattr(tracker, "_session_for_host", no_session_for_host)
-    monkeypatch.setattr(tracker.requests, "get", plain_get)
-
-    assert tracker.fetch_json(url, headers=headers, params=params) == payload
+    assert (
+        tracker.fetch_json(
+            url,
+            headers=headers,
+            params=params,
+            session_for_host=no_session_for_host,
+            http_get=plain_get,
+        )
+        == payload
+    )
     assert plain_calls == session_calls
 
 
 def test_candidate_is_reported_once_then_recorded_in_state(
-    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
     tracker: Any,
 ) -> None:
     env_file = tmp_path / ".env"
     write_env_file(tracker, env_file)
-    monkeypatch.setattr(tracker, "_environment_value", missing_environment_value)
-    monkeypatch.setattr(
-        tracker,
-        "fetch_provider_models",
-        stub_fetcher(tracker, {"glm": ["glm-5.4"]}),
-    )
+    fetcher = stub_fetcher(tracker, {"glm": ["glm-5.4"]}, models={})
 
     args = ["--env-file", str(env_file), "--state-dir", str(tmp_path / "state")]
-    assert tracker.main(args) == 2
+    assert (
+        tracker.main(
+            args,
+            env_lookup=missing_environment_value,
+            model_fetcher=fetcher,
+            models={},
+        )
+        == 2
+    )
     assert "glm-5.4" in capsys.readouterr().out
 
-    assert tracker.main(args) == 0
+    assert (
+        tracker.main(
+            args,
+            env_lookup=missing_environment_value,
+            model_fetcher=fetcher,
+            models={},
+        )
+        == 0
+    )
     assert "glm-5.4" not in capsys.readouterr().out.split("## Actionable candidates", 1)[-1]
     state = json.loads((tmp_path / "state" / "state.json").read_text())
     assert state["providers"]["glm"]["reported"] == ["glm-5.4"]
 
 
-def test_check_sources_compares_against_the_provider_catalog(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, tracker: Any
-) -> None:
+def test_check_sources_compares_against_the_provider_catalog(tmp_path: Path, tracker: Any) -> None:
     registered = type("Spec", (), {"provider": "gemini"})()
-
-    monkeypatch.setattr(
-        tracker,
-        "build_model_catalog",
-        lambda: SimpleNamespace(models={"gemini-3.5-flash-lite": registered}),
-    )
-    monkeypatch.setattr(
-        tracker,
-        "fetch_provider_models",
-        stub_fetcher(tracker, {"gemini": ["gemini-3.5-flash-lite", "gemini-3.6-flash-lite"]}),
-    )
+    models = {"gemini-3.5-flash-lite": registered}
     env_file = tmp_path / ".env"
     write_env_file(tracker, env_file)
-    monkeypatch.setattr(tracker, "_environment_value", missing_environment_value)
 
     reports = tracker.check_sources(
         tracker._read_env_file(env_file),
         {"providers": {}},
-        models=tracker.build_model_catalog().models,
+        models=models,
+        env_lookup=missing_environment_value,
+        model_fetcher=stub_fetcher(
+            tracker,
+            {"gemini": ["gemini-3.5-flash-lite", "gemini-3.6-flash-lite"]},
+            models=models,
+        ),
     )
 
     assert reports["gemini"].candidates == ["gemini-3.6-flash-lite"]
@@ -447,7 +427,7 @@ def test_qwen_date_suffixes_with_unregistered_remainders_fall_through(tracker: A
 
 
 def test_openai_response_shape_drift_raises_instead_of_reading_no_models(
-    monkeypatch: pytest.MonkeyPatch, tracker: Any
+    tracker: Any,
 ) -> None:
 
     def malformed_response(
@@ -456,25 +436,25 @@ def test_openai_response_shape_drift_raises_instead_of_reading_no_models(
         del url, headers, params
         return {"data": "not-a-list"}
 
-    monkeypatch.setattr(
-        tracker,
-        "fetch_json",
-        malformed_response,
-    )
-
     with pytest.raises(TypeError, match="must be a list"):
-        tracker.fetch_provider_models(tracker.SOURCES["gpt"], "test-key")
+        tracker.fetch_provider_models(
+            tracker.SOURCES["gpt"], "test-key", fetcher=malformed_response
+        )
 
 
-def test_missing_key_is_a_provider_error(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, tracker: Any
-) -> None:
+def test_missing_key_is_a_provider_error(tmp_path: Path, tracker: Any) -> None:
     env_file = tmp_path / ".env"
     write_env_file(tracker, env_file, missing="GLM_API_KEY")
-    monkeypatch.setattr(tracker, "_environment_value", missing_environment_value)
-    monkeypatch.setattr(tracker, "fetch_provider_models", stub_fetcher(tracker))
 
-    assert tracker.main(["--env-file", str(env_file), "--state-dir", str(tmp_path / "state")]) == 0
+    assert (
+        tracker.main(
+            ["--env-file", str(env_file), "--state-dir", str(tmp_path / "state")],
+            env_lookup=missing_environment_value,
+            model_fetcher=stub_fetcher(tracker, models={}),
+            models={},
+        )
+        == 0
+    )
     state = json.loads((tmp_path / "state" / "state.json").read_text())
     assert state["providers"]["glm"]["status"].startswith("error:")
     assert state["providers"]["glm"]["pending"]["rounds"] == 1
@@ -482,7 +462,7 @@ def test_missing_key_is_a_provider_error(
 
 @pytest.mark.usefixtures("retry_waits")
 def test_fetch_json_retries_a_transient_connection_error(
-    monkeypatch: pytest.MonkeyPatch, tracker: Any
+    tracker: Any,
 ) -> None:
     url = "https://api.example.com/models"
     payload: dict[str, object] = {"data": []}
@@ -497,16 +477,22 @@ def test_fetch_json_retries_a_transient_connection_error(
     def no_session_for_host(_host: str) -> None:
         return None
 
-    monkeypatch.setattr(tracker, "_session_for_host", no_session_for_host)
-    monkeypatch.setattr(tracker.requests, "get", get)
-
-    assert tracker.fetch_json(url, headers={}, params={}) == payload
+    assert (
+        tracker.fetch_json(
+            url,
+            headers={},
+            params={},
+            session_for_host=no_session_for_host,
+            http_get=get,
+        )
+        == payload
+    )
     assert calls == [url, url]
 
 
 @pytest.mark.usefixtures("retry_waits")
 def test_fetch_json_raises_after_the_retry_budget_is_exhausted(
-    monkeypatch: pytest.MonkeyPatch, tracker: Any
+    tracker: Any,
 ) -> None:
     calls: list[str] = []
 
@@ -517,16 +503,19 @@ def test_fetch_json_raises_after_the_retry_budget_is_exhausted(
     def no_session_for_host(_host: str) -> None:
         return None
 
-    monkeypatch.setattr(tracker, "_session_for_host", no_session_for_host)
-    monkeypatch.setattr(tracker.requests, "get", get)
-
     with pytest.raises(tracker.requests.exceptions.SSLError):
-        tracker.fetch_json("https://api.example.com/models", headers={}, params={})
+        tracker.fetch_json(
+            "https://api.example.com/models",
+            headers={},
+            params={},
+            session_for_host=no_session_for_host,
+            http_get=get,
+        )
     assert len(calls) == 3
 
 
 @pytest.mark.usefixtures("retry_waits")
-def test_permanent_http_error_is_not_retried(monkeypatch: pytest.MonkeyPatch, tracker: Any) -> None:
+def test_permanent_http_error_is_not_retried(tracker: Any) -> None:
     url = "https://api.example.com/models"
     calls: list[str] = []
 
@@ -539,30 +528,23 @@ def test_permanent_http_error_is_not_retried(monkeypatch: pytest.MonkeyPatch, tr
     def no_session_for_host(_host: str) -> None:
         return None
 
-    monkeypatch.setattr(tracker, "_session_for_host", no_session_for_host)
-    monkeypatch.setattr(tracker.requests, "get", get)
-
     with pytest.raises(tracker.requests.exceptions.HTTPError):
-        tracker.fetch_json(url, headers={}, params={})
+        tracker.fetch_json(
+            url,
+            headers={},
+            params={},
+            session_for_host=no_session_for_host,
+            http_get=get,
+        )
     assert calls == [url]
 
 
 @pytest.mark.usefixtures("retry_waits")
 def test_transient_ssl_eof_is_retried_without_marking_the_provider_error(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, tracker: Any
+    tmp_path: Path, tracker: Any
 ) -> None:
     env_file = tmp_path / ".env"
     write_env_file(tracker, env_file)
-    monkeypatch.setattr(tracker, "_environment_value", missing_environment_value)
-    real_fetch = tracker.fetch_provider_models
-
-    def fetch(source: Any, api_key: str) -> list[str]:
-        if source.provider == "gemini":
-            return real_fetch(source, api_key)
-        return known_models(tracker, source)
-
-    monkeypatch.setattr(tracker, "fetch_provider_models", fetch)
-
     gemini_calls: list[str] = []
 
     def get(request_url: str, **kwargs: object) -> _JSONResponse:
@@ -574,11 +556,31 @@ def test_transient_ssl_eof_is_retried_without_marking_the_provider_error(
     def no_session_for_host(_host: str) -> None:
         return None
 
-    monkeypatch.setattr(tracker, "_session_for_host", no_session_for_host)
-    monkeypatch.setattr(tracker.requests, "get", get)
+    def fetch(source: Any, api_key: str) -> list[str]:
+        if source.provider == "gemini":
+            return tracker.fetch_provider_models(
+                source,
+                api_key,
+                fetcher=lambda url, *, headers, params: tracker.fetch_json(
+                    url,
+                    headers=headers,
+                    params=params,
+                    session_for_host=no_session_for_host,
+                    http_get=get,
+                ),
+            )
+        return known_models(tracker, source, models={})
 
     args = ["--env-file", str(env_file), "--state-dir", str(tmp_path / "state")]
-    assert tracker.main(args) == 0
+    assert (
+        tracker.main(
+            args,
+            env_lookup=missing_environment_value,
+            model_fetcher=fetch,
+            models={},
+        )
+        == 0
+    )
     assert len(gemini_calls) == 2
     state = json.loads((tmp_path / "state" / "state.json").read_text())
     assert state["providers"]["gemini"]["status"] == "ok"
@@ -586,20 +588,10 @@ def test_transient_ssl_eof_is_retried_without_marking_the_provider_error(
 
 @pytest.mark.usefixtures("retry_waits")
 def test_repeated_provider_failure_announces_once_and_never_repeats(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, tracker: Any
+    tmp_path: Path, tracker: Any
 ) -> None:
     env_file = tmp_path / ".env"
     write_env_file(tracker, env_file)
-    monkeypatch.setattr(tracker, "_environment_value", missing_environment_value)
-    real_fetch = tracker.fetch_provider_models
-
-    def fetch(source: Any, api_key: str) -> list[str]:
-        if source.provider == "gemini":
-            return real_fetch(source, api_key)
-        return known_models(tracker, source)
-
-    monkeypatch.setattr(tracker, "fetch_provider_models", fetch)
-
     calls: list[str] = []
 
     def ok_get(request_url: str, **kwargs: object) -> _JSONResponse:
@@ -613,24 +605,47 @@ def test_repeated_provider_failure_announces_once_and_never_repeats(
     def no_session_for_host(_host: str) -> None:
         return None
 
-    monkeypatch.setattr(tracker, "_session_for_host", no_session_for_host)
+    current_get: Callable[..., _JSONResponse] = ok_get
+
+    def fetch(source: Any, api_key: str) -> list[str]:
+        if source.provider == "gemini":
+            return tracker.fetch_provider_models(
+                source,
+                api_key,
+                fetcher=lambda url, *, headers, params: tracker.fetch_json(
+                    url,
+                    headers=headers,
+                    params=params,
+                    session_for_host=no_session_for_host,
+                    http_get=current_get,
+                ),
+            )
+        return known_models(tracker, source, models={})
+
     args = ["--env-file", str(env_file), "--state-dir", str(tmp_path / "state")]
 
-    monkeypatch.setattr(tracker.requests, "get", ok_get)
-    assert tracker.main(args) == 0
+    def run_tracker() -> int:
+        return tracker.main(
+            args,
+            env_lookup=missing_environment_value,
+            model_fetcher=fetch,
+            models={},
+        )
+
+    assert run_tracker() == 0
     assert len(calls) == 1
 
-    monkeypatch.setattr(tracker.requests, "get", failing_get)
+    current_get = failing_get
     calls.clear()
-    assert tracker.main(args) == 0
+    assert run_tracker() == 0
     assert len(calls) == 3
 
     calls.clear()
-    assert tracker.main(args) == 2
+    assert run_tracker() == 2
     assert len(calls) == 3
 
     calls.clear()
-    assert tracker.main(args) == 0
+    assert run_tracker() == 0
     assert len(calls) == 3
     state = json.loads((tmp_path / "state" / "state.json").read_text())
     assert state["providers"]["gemini"]["status"].startswith("error:")

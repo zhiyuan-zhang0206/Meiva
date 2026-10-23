@@ -25,21 +25,15 @@ def test_procedural_scan_roots_follow_relocated_conventions() -> None:
 
 
 @pytest.mark.parametrize("axis", ["decisions", "postmortems"])
-def test_relocated_history_is_exempt_but_live_docs_still_fail(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, axis: str
-) -> None:
+def test_relocated_history_is_exempt_but_live_docs_still_fail(tmp_path: Path, axis: str) -> None:
     history = tmp_path / "docs" / axis / "record.md"
     history.parent.mkdir(parents=True)
     history.write_text("See [the old implementation](missing.py).\n")
     live = tmp_path / "docs" / "conventions" / "guide.md"
     live.parent.mkdir(parents=True)
     live.write_text("See [the implementation](missing.py).\n")
-    monkeypatch.setattr(check_doc_references, "REPO", tmp_path)
-    monkeypatch.setattr(check_doc_references, "meiva_flags", dict)
-    monkeypatch.setattr(check_doc_references, "tracked_docs", lambda: [history])
-    assert check_doc_references.main() == 0
-    monkeypatch.setattr(check_doc_references, "tracked_docs", lambda: [live])
-    assert check_doc_references.main() == 1
+    assert check_doc_references.main(repo=tmp_path, commands={}, docs=[history]) == 0
+    assert check_doc_references.main(repo=tmp_path, commands={}, docs=[live]) == 1
     assert module_moves.is_frozen(history.relative_to(tmp_path).as_posix())
     assert not module_moves.is_frozen(live.relative_to(tmp_path).as_posix())
 

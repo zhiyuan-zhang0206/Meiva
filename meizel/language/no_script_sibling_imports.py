@@ -224,7 +224,9 @@ def _iter_py_files(roots: list[Path]) -> list[Path]:
     return files
 
 
-def _files_to_scan(targets: list[Path], scope: frozenset[str] | None) -> list[Path]:
+def _files_to_scan(
+    targets: list[Path], scope: frozenset[str] | None, *, root: Path = _REPO_ROOT
+) -> list[Path]:
     """Every `.py` under the targets, or just the changed files a full walk would reach.
 
     The walk skips vendored/generated directories; the changed-files path applies the same
@@ -232,12 +234,10 @@ def _files_to_scan(targets: list[Path], scope: frozenset[str] | None) -> list[Pa
     """
     if scope is None:
         return _iter_py_files(targets)
-    return [
-        _REPO_ROOT / rel for rel in scope if rel.endswith(".py") and not _excluded(Path(rel).parts)
-    ]
+    return [root / rel for rel in scope if rel.endswith(".py") and not _excluded(Path(rel).parts)]
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: list[str] | None = None, *, repo_root: Path = _REPO_ROOT) -> int:
     argv = argv if argv is not None else sys.argv[1:]
     argv, only = lint_common.split_only(argv)
     if argv:
@@ -245,17 +245,19 @@ def main(argv: list[str] | None = None) -> int:
         if missing:
             print(f"error: target path(s) not found: {', '.join(missing)}", file=sys.stderr)
             return 1
-    targets = [Path(a).resolve() for a in argv] if argv else [_REPO_ROOT]
+    targets = [Path(a).resolve() for a in argv] if argv else [repo_root]
     total = 0
-    for path in sorted(_files_to_scan(targets, lint_common.changed_scope(only, _REPO_ROOT))):
+    for path in sorted(
+        _files_to_scan(targets, lint_common.changed_scope(only, repo_root), root=repo_root)
+    ):
         rel = (
-            path.relative_to(_REPO_ROOT).as_posix()
-            if path.is_relative_to(_REPO_ROOT)
+            path.relative_to(repo_root).as_posix()
+            if path.is_relative_to(repo_root)
             else path.as_posix()
         )
         if any(p.search(rel) for p in _TEST_PATTERNS):
             continue
-        for violation in scan_file(path):
+        for violation in scan_file(path, root=repo_root):
             total += 1
             print(violation)
     if total:

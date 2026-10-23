@@ -8,12 +8,13 @@ from scripts.content_lint import check_doc_references
 from scripts.content_lint.check_doc_references import REPO, check_doc
 
 _NO_COMMANDS: dict[tuple[str, ...], set[str]] = {}
+_TEST_NODES = frozenset({"pkg/docs/real.meiva.okf.md"})
 
 
-def _targets(tmp_path: Path, body: str) -> list[str]:
+def _targets(tmp_path: Path, body: str, *, nodes: frozenset[str] | None = None) -> list[str]:
     doc = tmp_path / "doc.md"
     doc.write_text(body)
-    return [message for _lineno, message in check_doc(doc, _NO_COMMANDS)]
+    return [message for _lineno, message in check_doc(doc, _NO_COMMANDS, nodes=nodes)]
 
 
 def test_prose_link_to_a_missing_file_is_reported(tmp_path: Path) -> None:
@@ -85,14 +86,6 @@ def test_the_planned_marker_must_be_immediately_adjacent(tmp_path: Path) -> None
     assert [m for _lineno, m in problems] == ["`missing-one.md` — no such file"]
 
 
-@pytest.fixture
-def nodes(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(
-        check_doc_references, "okf_nodes", lambda: frozenset({"pkg/docs/real.meiva.okf.md"})
-    )
-
-
-@pytest.mark.usefixtures("nodes")
 @pytest.mark.parametrize(
     "link",
     [
@@ -103,16 +96,16 @@ def nodes(monkeypatch: pytest.MonkeyPatch) -> None:
 )
 def test_a_dangling_wikilink_is_reported_with_or_without_a_label(link: str, tmp_path: Path) -> None:
     target = link[2:-2].split("|", maxsplit=1)[0]
-    assert _targets(tmp_path, f"See {link} for detail.\n") == [f"`[[{target}]]` — no such OKF node"]
+    assert _targets(tmp_path, f"See {link} for detail.\n", nodes=_TEST_NODES) == [
+        f"`[[{target}]]` — no such OKF node"
+    ]
 
 
-@pytest.mark.usefixtures("nodes")
 @pytest.mark.parametrize("link", ["[[real.meiva.okf.md]]", "[[real.meiva.okf.md|the label]]"])
 def test_a_resolving_wikilink_is_clean(link: str, tmp_path: Path) -> None:
-    assert _targets(tmp_path, f"See {link} for detail.\n") == []
+    assert _targets(tmp_path, f"See {link} for detail.\n", nodes=_TEST_NODES) == []
 
 
-@pytest.mark.usefixtures("nodes")
 @pytest.mark.parametrize(
     "body",
     [
@@ -122,14 +115,13 @@ def test_a_resolving_wikilink_is_clean(link: str, tmp_path: Path) -> None:
     ],
 )
 def test_a_wikilink_sample_is_not_a_link(body: str, tmp_path: Path) -> None:
-    assert _targets(tmp_path, body) == []
+    assert _targets(tmp_path, body, nodes=_TEST_NODES) == []
 
 
-@pytest.mark.usefixtures("nodes")
 def test_the_planned_marker_exempts_a_wikilink_in_a_plan(tmp_path: Path) -> None:
     doc = tmp_path / "doc.md"
     doc.write_text("Next: [[later.meiva.okf.md|the node]] (planned), then [[gone.meiva.okf.md]].\n")
-    problems = check_doc(doc, _NO_COMMANDS, skip_flags=True, allow_planned=True)
+    problems = check_doc(doc, _NO_COMMANDS, skip_flags=True, allow_planned=True, nodes=_TEST_NODES)
     assert [m for _lineno, m in problems] == ["`[[gone.meiva.okf.md]]` — no such OKF node"]
 
 

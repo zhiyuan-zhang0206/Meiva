@@ -109,10 +109,9 @@ class Case:
     bad_source: str
     clean_path: str = ""
     extra: dict[str, str] = field(default_factory=dict[str, str])
-    patches: dict[str, object] = field(default_factory=dict[str, object])
-    explicit_root: bool = False
+    needs_git: bool = False
     # How to call `module.main` when the rule takes its application inputs injected.
-    call: Callable[[list[str]], int] | None = None
+    call: Callable[..., int] | None = None
 
     def clean(self) -> str:
         return self.clean_path or str(
@@ -140,7 +139,7 @@ CASES = [
         termination_source,
         "base/x.py",
         "cur.execute(\"UPDATE agents_meta SET status = 'terminated' WHERE id = %s\", (a,))\n",
-        patches={"_termination_source_values": lambda: frozenset({"launch-confirm"})},
+        call=partial(termination_source.main, legal_sources=frozenset({"launch-confirm"})),
     ),
     Case(
         no_os_environ,
@@ -160,13 +159,12 @@ CASES = [
         clock_lattice,
         "ops/x.py",
         "_SOME_REAP_GRACE_S = 100.0\n",
-        patches={"stale_allowlist_entries": list},
+        call=partial(clock_lattice.main, family_modules=(), independent={}),
     ),
     Case(
         no_plugin_wrap,
         "meiva_builtins/plugins/demo/plugin.py",
         "meiva.files.read = my_read\n",
-        explicit_root=True,
     ),
     Case(
         pool_keepalives,
@@ -202,14 +200,13 @@ CASES = [
         time_bomb,
         "tests/test_a.py",
         "def test_x():\n    f(since='2026-09-06')\n",
-        explicit_root=True,
     ),
-    Case(lint_no_cjk, "docs/a.md", f"{_CJK}\n", explicit_root=True),
+    Case(lint_no_cjk, "docs/a.md", f"{_CJK}\n", needs_git=True),
     Case(
         lint_no_tailnet,
         "docs/a.md",
         f"see {_TAILNET_IP}\n",
-        explicit_root=True,
+        needs_git=True,
     ),
 ]
 
@@ -238,43 +235,20 @@ def _write(root: Path, rel: str, text: str) -> None:
     (root / rel).write_text(text, encoding="utf-8")
 
 
-def _bind_legacy_root(lint: ModuleType, root: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    for root_name in ("_REPO_ROOT", "_ROOT"):
-        if hasattr(lint, root_name):
-            monkeypatch.setattr(lint, root_name, root)
-    if hasattr(lint, "_tracked_files"):
-        monkeypatch.setattr(
-            lint,
-            "_tracked_files",
-            lambda: sorted(p.relative_to(root).as_posix() for p in root.rglob("*") if p.is_file()),
-        )
-
-
 @pytest.mark.parametrize("case", CASES, ids=lambda case: case.module.__name__.rsplit(".", 1)[-1])
-def test_only_judges_exactly_the_changed_files(
-    case: Case, fake_repo: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_only_judges_exactly_the_changed_files(case: Case, fake_repo: Path) -> None:
     lint = case.module
-    if case.explicit_root:
+    if case.needs_git:
         subprocess.run(["git", "init", "-q"], cwd=fake_repo, check=True)
-    else:
-        _bind_legacy_root(lint, fake_repo, monkeypatch)
-    for name, value in case.patches.items():
-        if "." in name:  # another module's attribute, which the lint imports at call time
-            monkeypatch.setattr(name, value)
-        else:
-            monkeypatch.setattr(lint, name, value)
     _write(fake_repo, case.bad_path, case.bad_source)
     _write(fake_repo, case.clean(), "x = 1\n")
     for rel, text in case.extra.items():
         _write(fake_repo, rel, text)
     _write(fake_repo, _TOOLING, "")
-    if case.explicit_root:
+    if case.needs_git:
         subprocess.run(["git", "add", "--", "."], cwd=fake_repo, check=True)
 
-    main: Callable[[list[str]], int] = (
-        partial(lint.main, repo_root=fake_repo) if case.explicit_root else case.call or lint.main
-    )
+    main: Callable[[list[str]], int] = partial(case.call or lint.main, repo_root=fake_repo)
     assert main([]) == 1, "the sample must be a violation the full scan reports"
     assert main(["--only", case.bad_path]) == 1, "a changed file gets the full scan's verdict"
     assert main(["--only", case.clean()]) == 0, "a file that did not change is not judged"

@@ -48,7 +48,9 @@ from __future__ import annotations
 import ast
 import re
 import sys
+from collections.abc import Sequence
 from pathlib import Path
+from typing import Any
 
 from base.host.env.dotenv_boot import enter_scratch_home
 
@@ -106,17 +108,22 @@ def parse_roster(text: str) -> set[str]:
     return names
 
 
-def check() -> int:
+def check(
+    *,
+    services: Sequence[Any] | None = None,
+    service_roster: Path = SERVICE_ROSTER,
+) -> int:
     """Compare the parsed roster against build_services(); return 0/1 exit code."""
-    registered = {spec.session for spec in build_services()}
+    svc_list = build_services() if services is None else services
+    registered = {spec.session for spec in svc_list}
 
-    text = SERVICE_ROSTER.read_text(encoding="utf-8")
+    text = service_roster.read_text(encoding="utf-8")
     try:
         parsed = parse_roster(text)
     except RosterSentinelMissingError:
         print(
             f"roster lint failed: sentinel {_SENTINEL!r} not found in "
-            f"{SERVICE_ROSTER.name} — place it on its own line "
+            f"{service_roster.name} — place it on its own line "
             f"immediately above the roster table.",
             file=sys.stderr,
         )
@@ -167,14 +174,14 @@ DIAGNOSTIC_PROBES = (
 )
 
 
-def diagnostic_healthchecks() -> set[str]:
+def diagnostic_healthchecks(*, probes_path: Path = DIAGNOSTIC_PROBES) -> set[str]:
     """Protocol modules imported by the explicit root diagnostic adapters.
 
     Inspect source instead of constructing a host-dependent diagnostic roster;
     checking documentation must not probe a host or load gateway-only clients.
     """
     names: set[str] = set()
-    tree = ast.parse(DIAGNOSTIC_PROBES.read_text(encoding="utf-8"))
+    tree = ast.parse(probes_path.read_text(encoding="utf-8"))
     for node in ast.walk(tree):
         if not isinstance(node, ast.ImportFrom) or node.module is None:
             continue
@@ -191,7 +198,7 @@ def directory_healthchecks() -> set[str]:
     return {p.stem for p in _HEALTHCHECK_DIR.glob("*.py") if p.name != "__init__.py"}
 
 
-def spec_healthchecks() -> set[str]:
+def spec_healthchecks(*, services: Sequence[Any] | None = None) -> set[str]:
     """The healthcheck modules registered on ServiceSpec rows inside this
     directory (`services.supervision.healthchecks.<x>`, last segment).
 
@@ -199,7 +206,7 @@ def spec_healthchecks() -> set[str]:
     probe), and a plugin service that does keeps it in its own namespace; both are
     out of scope for this table — the roster documents this directory only."""
     names: set[str] = set()
-    for spec in build_services():
+    for spec in build_services() if services is None else services:
         hm = spec.healthcheck_module
         if hm and hm.startswith("services.supervision.healthchecks."):
             names.add(hm.rsplit(".", 1)[-1])
@@ -229,31 +236,38 @@ def parse_healthcheck_roster(text: str) -> set[str]:
     return names
 
 
-def check_healthcheck_roster() -> int:
+def check_healthcheck_roster(
+    *,
+    roster_path: Path = HEALTHCHECK_ROSTER,
+    services: Sequence[Any] | None = None,
+    directory: set[str] | None = None,
+    hand_added: set[str] | None = None,
+) -> int:
     """Assert set equality between the roster table, the module directory, and
     the ServiceSpec + diagnostic registrations; return 0/1 exit code."""
     try:
-        text = HEALTHCHECK_ROSTER.read_text(encoding="utf-8")
+        text = roster_path.read_text(encoding="utf-8")
         parsed = parse_healthcheck_roster(text)
     except RosterSentinelMissingError:
         print(
             f"healthcheck roster lint failed: sentinel {_HEALTHCHECK_SENTINEL!r} not found "
-            f"in {HEALTHCHECK_ROSTER.name} — place it on its own line immediately above "
+            f"in {roster_path.name} — place it on its own line immediately above "
             f"the roster table.",
             file=sys.stderr,
         )
         return 1
 
-    directory = directory_healthchecks()
-    registered = spec_healthchecks() | diagnostic_healthchecks()
+    dir_set = directory_healthchecks() if directory is None else directory
+    diag_set = diagnostic_healthchecks() if hand_added is None else hand_added
+    registered = spec_healthchecks(services=services) | diag_set
 
-    if parsed != directory:
+    if parsed != dir_set:
         print(
             "healthcheck roster lint failed: table does not match the module directory.",
             file=sys.stderr,
         )
-        extra = parsed - directory
-        missing = directory - parsed
+        extra = parsed - dir_set
+        missing = dir_set - parsed
         if extra:
             print(
                 f"  roster documents healthcheck modules that do not exist: {sorted(extra)}",
@@ -265,14 +279,14 @@ def check_healthcheck_roster() -> int:
                 file=sys.stderr,
             )
         return 1
-    if registered != directory:
+    if registered != dir_set:
         print(
             "healthcheck roster lint failed: module directory does not match the "
             "ServiceSpec + diagnostic registrations.",
             file=sys.stderr,
         )
-        extra = registered - directory
-        missing = directory - registered
+        extra = registered - dir_set
+        missing = dir_set - registered
         if extra:
             print(
                 f"  ServiceSpec/diagnostic healthchecks with no module file: {sorted(extra)}",

@@ -176,8 +176,17 @@ def layer_error(filepath: Path, repo_root: Path) -> LintError | None:
     )
 
 
-def _placement_errors(filepath: Path, repo_root: Path, all_paths: set[str]) -> list[LintError]:
-    found = (_dual_node_error(filepath, repo_root, all_paths), layer_error(filepath, repo_root))
+def _placement_errors(
+    filepath: Path,
+    repo_root: Path,
+    all_paths: set[str],
+    *,
+    check_layer: bool = True,
+) -> list[LintError]:
+    found = (
+        _dual_node_error(filepath, repo_root, all_paths),
+        layer_error(filepath, repo_root) if check_layer else None,
+    )
     return [error for error in found if error is not None]
 
 
@@ -443,7 +452,13 @@ def _required_field_errors(path_str: str, fm: dict[str, Any]) -> list[LintError]
     return errors
 
 
-def lint_file(filepath: Path, all_paths: set[str], repo_root: Path) -> list[LintError]:
+def lint_file(
+    filepath: Path,
+    all_paths: set[str],
+    repo_root: Path,
+    *,
+    check_layer: bool = True,
+) -> list[LintError]:
     errors = []
     path_str = str(filepath)
 
@@ -451,7 +466,7 @@ def lint_file(filepath: Path, all_paths: set[str], repo_root: Path) -> list[Lint
         errors.append(LintError(path_str, 1, "E001", "File must end with .meiva.okf.md"))
         return errors
 
-    errors.extend(_placement_errors(filepath, repo_root, all_paths))
+    errors.extend(_placement_errors(filepath, repo_root, all_paths, check_layer=check_layer))
 
     try:
         text = filepath.read_text(encoding="utf-8")
@@ -504,7 +519,7 @@ def _report(all_errors: dict[str, list[LintError]], repo_root: Path, n_files: in
     return error_count
 
 
-def main(argv: Sequence[str] | None = None):
+def main(argv: Sequence[str] | None = None, *, check_layer: bool = True):
     parser = argparse.ArgumentParser(description="Lint Meiva OKF document format")
     parser.add_argument(
         "paths", nargs="*", help="Files or directories to lint (default: repo root)"
@@ -530,7 +545,7 @@ def main(argv: Sequence[str] | None = None):
 
     all_errors: dict[str, list[LintError]] = defaultdict(list)
     for f in files:
-        errs = lint_file(f, all_paths, repo_root)
+        errs = lint_file(f, all_paths, repo_root, check_layer=check_layer)
         all_errors[str(f)].extend(errs)
 
     error_count = _report(all_errors, repo_root, len(files))

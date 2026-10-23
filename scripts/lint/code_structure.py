@@ -169,9 +169,20 @@ def _git(repo_root: Path, *args: str) -> subprocess.CompletedProcess[str]:
     )
 
 
-def _baseline_base(repo_root: Path, explicit: str | None) -> str:
+def _baseline_base(
+    repo_root: Path,
+    explicit: str | None,
+    *,
+    env_base: str | None = None,
+    use_env_base: bool = True,
+) -> str:
     """Resolve an explicit snapshot or the actual merge base with origin/main."""
-    ref = explicit if explicit is not None else os.environ.get("LINT_STRUCTURE_BASELINE_BASE")
+    env_ref = (
+        env_base
+        if env_base is not None
+        else (os.environ.get("LINT_STRUCTURE_BASELINE_BASE") if use_env_base else None)
+    )
+    ref = explicit if explicit is not None else env_ref
     if ref is not None:
         result = _git(repo_root, "rev-parse", "--verify", "--end-of-options", f"{ref}^{{commit}}")
         if result.returncode:
@@ -336,6 +347,9 @@ def _check_ast_and_quality(
     repo_root: Path,
     renames: dict[str, str] | None = None,
     parse_ast: Callable[..., ast.Module],
+    measure_quality: Callable[
+        [ast.AST, str], dict[str, dict[str, int]]
+    ] = quality_budget.measure_quality,
 ) -> list[str]:
     files = limits.budget_files(targets, repo_root, _STRUCTURE_DIRS)
     ast_files = _ast_rule_files(argv, repo_root)
@@ -362,7 +376,7 @@ def _check_ast_and_quality(
         if ambient:
             errors.extend(ambient_state.collect(tree, rel, repo_root, sites, scanned))
         if path in files:
-            for kind, values in quality_budget.measure_quality(tree, rel).items():
+            for kind, values in measure_quality(tree, rel).items():
                 measurements[kind].update(values)
     errors.extend(quality_budget.quality_errors(measurements))
     errors.extend(
@@ -402,7 +416,12 @@ def main(
     *,
     repo_root: Path | None = None,
     baseline_base: str | None = None,
+    env_base: str | None = None,
+    use_env_base: bool = True,
     parse_ast: Callable[..., ast.Module],
+    measure_quality: Callable[
+        [ast.AST, str], dict[str, dict[str, int]]
+    ] = quality_budget.measure_quality,
 ) -> int:
     """Run the gate for CLI arguments against an explicit checkout and comparison commit.
 
@@ -426,7 +445,12 @@ def main(
         print(f"{baseline_shards.SHARD_DIR}: invalid baseline: {exc}", file=sys.stderr)
         return 1
     try:
-        base = _baseline_base(repo_root, baseline_base)
+        base = _baseline_base(
+            repo_root,
+            baseline_base,
+            env_base=env_base,
+            use_env_base=use_env_base,
+        )
         renames = _rename_map(repo_root, base)
     except (OSError, subprocess.CalledProcessError, ValueError) as exc:
         print(f"{baseline_shards.SHARD_DIR}: cannot establish baseline comparison: {exc}")
@@ -446,6 +470,7 @@ def main(
             repo_root=repo_root,
             renames=renames,
             parse_ast=parse_ast,
+            measure_quality=measure_quality,
         )
     )
     for error in errors:

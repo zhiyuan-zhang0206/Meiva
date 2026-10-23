@@ -24,44 +24,40 @@ def _roster_table(*services: str) -> str:
     )
 
 
-def _load_lint(monkeypatch, registered, runbook_text, tmp_path):
-    """Load the lint module with build_services() faked to `registered` and the
-    runbook pointed at a temp file containing `runbook_text`."""
+class _FakeSpec:
+    def __init__(self, session: str) -> None:
+        self.session = session
 
-    class _FakeSpec:
-        def __init__(self, session: str) -> None:
-            self.session = session
 
-    monkeypatch.setattr(lint, "build_services", lambda: tuple(_FakeSpec(s) for s in registered))
+def _run_service_check(registered, runbook_text, tmp_path) -> int:
     runbook = tmp_path / "runbook.md"
     runbook.write_text(runbook_text, encoding="utf-8")
-    monkeypatch.setattr(lint, "SERVICE_ROSTER", runbook)
-    return lint
+    return lint.check(
+        services=tuple(_FakeSpec(s) for s in registered),
+        service_roster=runbook,
+    )
 
 
-def test_roster_matches_registered_passes(monkeypatch, tmp_path):
+def test_roster_matches_registered_passes(tmp_path):
     services = ["gateway", "labeler", "otel-collector"]
-    lint = _load_lint(monkeypatch, services, _roster_table(*services), tmp_path)
-    assert lint.check() == 0
+    assert _run_service_check(services, _roster_table(*services), tmp_path) == 0
 
 
-def test_roster_has_extra_service_fails(monkeypatch, tmp_path):
+def test_roster_has_extra_service_fails(tmp_path):
     registered = ["gateway", "labeler"]
     # The roster documents `scheduler` on top of the registered set (the #728 case).
     text = _roster_table("gateway", "labeler", "scheduler")
-    lint = _load_lint(monkeypatch, registered, text, tmp_path)
-    assert lint.check() == 1
+    assert _run_service_check(registered, text, tmp_path) == 1
 
 
-def test_registered_missing_from_roster_fails(monkeypatch, tmp_path):
+def test_registered_missing_from_roster_fails(tmp_path):
     # build_services() registers `browser` but the roster forgot to document it.
     registered = ["gateway", "labeler", "browser"]
     text = _roster_table("gateway", "labeler")
-    lint = _load_lint(monkeypatch, registered, text, tmp_path)
-    assert lint.check() == 1
+    assert _run_service_check(registered, text, tmp_path) == 1
 
 
-def test_missing_sentinel_errors(monkeypatch, tmp_path):
+def test_missing_sentinel_errors(tmp_path):
     registered = ["gateway", "labeler"]
     # A roster table with no sentinel above it.
     text = (
@@ -70,8 +66,7 @@ def test_missing_sentinel_errors(monkeypatch, tmp_path):
         "| `gateway` | runs gateway | healthcheck |\n"
         "| `labeler` | runs labeler | healthcheck |\n"
     )
-    lint = _load_lint(monkeypatch, registered, text, tmp_path)
-    assert lint.check() == 1
+    assert _run_service_check(registered, text, tmp_path) == 1
 
 
 def test_parse_roster_raises_without_sentinel():
@@ -112,94 +107,96 @@ class _FakeSpecWithHealthcheck:
 
 
 def _load_healthcheck_lint(
-    monkeypatch,
     *,
     spec_modules: set[str],
     directory: set[str],
     hand_added: set[str],
     table_text: str,
     tmp_path,
-):
+) -> int:
     """Load the lint with all three healthcheck-roster sources faked and the
     roster doc pointed at a temp file."""
-
-    def fake_services():
-        return tuple(
-            _FakeSpecWithHealthcheck(f"session-{m}", f"services.supervision.healthchecks.{m}")
-            for m in spec_modules
-        )
-
-    monkeypatch.setattr(lint, "build_services", fake_services)
-    monkeypatch.setattr(lint, "directory_healthchecks", lambda: directory)
-    monkeypatch.setattr(lint, "diagnostic_healthchecks", lambda: hand_added)
+    services = tuple(
+        _FakeSpecWithHealthcheck(f"session-{m}", f"services.supervision.healthchecks.{m}")
+        for m in spec_modules
+    )
     roster = tmp_path / "check-roster.meiva.okf.md"
     roster.write_text(table_text, encoding="utf-8")
-    monkeypatch.setattr(lint, "HEALTHCHECK_ROSTER", roster)
-    return lint
-
-
-def test_healthcheck_roster_matches_passes(monkeypatch, tmp_path):
-    lint = _load_healthcheck_lint(
-        monkeypatch,
-        spec_modules={"gateway", "browser"},
-        directory={"gateway", "browser", "lgtm"},
-        hand_added={"lgtm"},
-        table_text=_healthcheck_table("gateway", "browser", "lgtm"),
-        tmp_path=tmp_path,
+    return lint.check_healthcheck_roster(
+        roster_path=roster,
+        services=services,
+        directory=directory,
+        hand_added=hand_added,
     )
-    assert lint.check_healthcheck_roster() == 0
 
 
-def test_healthcheck_roster_phantom_row_fails(monkeypatch, tmp_path):
+def test_healthcheck_roster_matches_passes(tmp_path):
+    assert (
+        _load_healthcheck_lint(
+            spec_modules={"gateway", "browser"},
+            directory={"gateway", "browser", "lgtm"},
+            hand_added={"lgtm"},
+            table_text=_healthcheck_table("gateway", "browser", "lgtm"),
+            tmp_path=tmp_path,
+        )
+        == 0
+    )
+
+
+def test_healthcheck_roster_phantom_row_fails(tmp_path):
     """The audit's drift case: the table documents a module that no longer
     exists in the directory (task_maintenance)."""
-    lint = _load_healthcheck_lint(
-        monkeypatch,
-        spec_modules={"gateway"},
-        directory={"gateway"},
-        hand_added=set(),
-        table_text=_healthcheck_table("gateway", "task_maintenance"),
-        tmp_path=tmp_path,
+    assert (
+        _load_healthcheck_lint(
+            spec_modules={"gateway"},
+            directory={"gateway"},
+            hand_added=set(),
+            table_text=_healthcheck_table("gateway", "task_maintenance"),
+            tmp_path=tmp_path,
+        )
+        == 1
     )
-    assert lint.check_healthcheck_roster() == 1
 
 
-def test_healthcheck_roster_missing_module_fails(monkeypatch, tmp_path):
+def test_healthcheck_roster_missing_module_fails(tmp_path):
     """The audit's other drift case: a real module is absent from the table."""
-    lint = _load_healthcheck_lint(
-        monkeypatch,
-        spec_modules={"gateway", "page_server"},
-        directory={"gateway", "page_server"},
-        hand_added=set(),
-        table_text=_healthcheck_table("gateway"),
-        tmp_path=tmp_path,
+    assert (
+        _load_healthcheck_lint(
+            spec_modules={"gateway", "page_server"},
+            directory={"gateway", "page_server"},
+            hand_added=set(),
+            table_text=_healthcheck_table("gateway"),
+            tmp_path=tmp_path,
+        )
+        == 1
     )
-    assert lint.check_healthcheck_roster() == 1
 
 
-def test_healthcheck_roster_unregistered_module_fails(monkeypatch, tmp_path):
+def test_healthcheck_roster_unregistered_module_fails(tmp_path):
     """A module file with neither a ServiceSpec row nor a hand-added import."""
-    lint = _load_healthcheck_lint(
-        monkeypatch,
-        spec_modules={"gateway"},
-        directory={"gateway", "stray"},
-        hand_added=set(),
-        table_text=_healthcheck_table("gateway", "stray"),
-        tmp_path=tmp_path,
+    assert (
+        _load_healthcheck_lint(
+            spec_modules={"gateway"},
+            directory={"gateway", "stray"},
+            hand_added=set(),
+            table_text=_healthcheck_table("gateway", "stray"),
+            tmp_path=tmp_path,
+        )
+        == 1
     )
-    assert lint.check_healthcheck_roster() == 1
 
 
-def test_healthcheck_roster_sentinel_missing_fails(monkeypatch, tmp_path):
-    lint = _load_healthcheck_lint(
-        monkeypatch,
-        spec_modules={"gateway"},
-        directory={"gateway"},
-        hand_added=set(),
-        table_text="| `gateway.py` | service | probe |\n",
-        tmp_path=tmp_path,
+def test_healthcheck_roster_sentinel_missing_fails(tmp_path):
+    assert (
+        _load_healthcheck_lint(
+            spec_modules={"gateway"},
+            directory={"gateway"},
+            hand_added=set(),
+            table_text="| `gateway.py` | service | probe |\n",
+            tmp_path=tmp_path,
+        )
+        == 1
     )
-    assert lint.check_healthcheck_roster() == 1
 
 
 def test_parse_healthcheck_roster_strips_py_suffix():
@@ -207,15 +204,16 @@ def test_parse_healthcheck_roster_strips_py_suffix():
     assert parsed == {"gateway", "lgtm"}
 
 
-def test_diagnostic_imports_include_nested_and_aliased_modules(monkeypatch, tmp_path):
-    from scripts.content_lint import lint_doc_roster as lint
-
+def test_diagnostic_imports_include_nested_and_aliased_modules(tmp_path):
     source = tmp_path / "probes.py"
     source.write_text(
         "def probe():\n    from services.supervision.healthchecks import redis_acl as check, protocol_probe\n    from services.supervision.healthchecks.permissions_helper import probe\n"
     )
-    monkeypatch.setattr(lint, "DIAGNOSTIC_PROBES", source)
-    assert lint.diagnostic_healthchecks() == {"redis_acl", "protocol_probe", "permissions_helper"}
+    assert lint.diagnostic_healthchecks(probes_path=source) == {
+        "redis_acl",
+        "protocol_probe",
+        "permissions_helper",
+    }
 
 
 def test_real_healthcheck_documentation_matches_current_sources():

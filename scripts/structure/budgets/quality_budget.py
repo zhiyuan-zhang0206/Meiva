@@ -5,6 +5,8 @@ from __future__ import annotations
 import ast
 import sys
 from collections import Counter
+from collections.abc import Callable
+from typing import Any
 
 from radon.complexity import ComplexityVisitor
 from radon.visitors import Class, Function
@@ -56,17 +58,20 @@ def _block_scores(blocks: list[Class | Function]) -> dict[tuple[int, str], int]:
 
 
 def complexity_scores(
-    tree: ast.AST, nodes: dict[str, ast.FunctionDef | ast.AsyncFunctionDef]
+    tree: ast.AST,
+    nodes: dict[str, ast.FunctionDef | ast.AsyncFunctionDef],
+    *,
+    visitor_from_ast: Callable[[ast.AST], Any] = ComplexityVisitor.from_ast,
 ) -> dict[str, int]:
     """Use Radon 6.0.1 on the shared AST, including its local-class collection gap."""
-    scores = _block_scores(ComplexityVisitor.from_ast(tree).blocks)
+    scores = _block_scores(visitor_from_ast(tree).blocks)
     result: dict[str, int] = {}
     for key, node in nodes.items():
         identity = (node.lineno, node.name)
         if identity not in scores:
             # Radon discards classes inside functions (and their methods/closures).
             # Reuse the existing node and the same visitor, never reparse source.
-            scores.update(_block_scores(ComplexityVisitor.from_ast(node).blocks))
+            scores.update(_block_scores(visitor_from_ast(node).blocks))
         result[key] = scores[identity]
     return result
 
@@ -108,10 +113,15 @@ def max_depth(body: list[ast.stmt]) -> int:
     return max((_node_depth(node, 0) for node in body), default=0)
 
 
-def measure_quality(tree: ast.AST, path: str) -> dict[str, dict[str, int]]:
+def measure_quality(
+    tree: ast.AST,
+    path: str,
+    *,
+    visitor_from_ast: Callable[[ast.AST], Any] = ComplexityVisitor.from_ast,
+) -> dict[str, dict[str, int]]:
     nodes = function_nodes(tree, path)
     return {
-        "complexity": complexity_scores(tree, nodes),
+        "complexity": complexity_scores(tree, nodes, visitor_from_ast=visitor_from_ast),
         "nesting": {key: max_depth(node.body) for key, node in nodes.items()},
     }
 

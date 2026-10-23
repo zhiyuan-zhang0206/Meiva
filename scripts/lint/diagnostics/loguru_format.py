@@ -422,27 +422,29 @@ def violations_in_source(src: str, filename: str = "<source>") -> list[tuple[int
     return sorted(out)
 
 
-def _default_files() -> list[str]:
-    roots = lint_common.scan_roots(_REPO_ROOT, SCAN_DIRS)
-    return sorted(p.relative_to(_REPO_ROOT).as_posix() for r in roots for p in r.rglob("*.py"))
+def _default_files(root: Path = _REPO_ROOT) -> list[str]:
+    roots = lint_common.scan_roots(root, SCAN_DIRS)
+    return sorted(p.relative_to(root).as_posix() for r in roots for p in r.rglob("*.py"))
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: list[str] | None = None, *, repo_root: Path | None = None) -> int:
+    root = _REPO_ROOT if repo_root is None else repo_root
     argv = argv if argv is not None else sys.argv[1:]
     argv, only = lint_common.split_only(argv)
     if argv:
-        files, missing = lint_common.resolve_targets(argv, _REPO_ROOT)
+        files, missing = lint_common.resolve_targets(argv, root)
         if missing:
             print(f"error: target path(s) not found: {', '.join(missing)}", file=sys.stderr)
             return 1
     else:
         # The default scope, or only the `--only` changed files (the commit hook) inside it.
-        scope = lint_common.changed_scope(only, _REPO_ROOT)
-        files = _default_files() if scope is None else [f for f in _default_files() if f in scope]
+        scope = lint_common.changed_scope(only, root)
+        default = _default_files(root)
+        files = default if scope is None else [f for f in default if f in scope]
 
     total = 0
     for rel in files:
-        text = lint_common.read_utf8_text(_REPO_ROOT / rel) if rel.endswith(".py") else None
+        text = lint_common.read_utf8_text(root / rel) if rel.endswith(".py") else None
         for lineno, message in violations_in_source(text, rel) if text is not None else ():
             total += 1
             print(f"{rel}:{lineno}: {message}")

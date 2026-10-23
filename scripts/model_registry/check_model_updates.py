@@ -36,10 +36,7 @@ from base.paths import meiva_home
 _USER_AGENT = "Meiva model-update tracker"
 _TIMEOUT_SECONDS, _QWEN_PAGE_SIZE = 30, 100
 _DOH_TIMEOUT_SECONDS = 10
-_DOH_ENDPOINTS = (
-    "https://cloudflare-dns.com/dns-query",
-    "https://dns.google/resolve",
-)
+_DOH_ENDPOINTS = ("https://cloudflare-dns.com/dns-query", "https://dns.google/resolve")
 _FAKE_IP_NETWORK = ipaddress.ip_network("198.18.0.0/15")
 doh_cache: dict[str, str] = {}
 _DATED_SNAPSHOT_SUFFIX = re.compile(r"-\d{4}(?:-\d{2}(?:-\d{2})?)?$|-\d{8}$")
@@ -64,14 +61,11 @@ class SourceDescriptor:
 # fmt: off
 SOURCES: dict[str, SourceDescriptor] = {
     # Official docs: DeepSeek Models API.
-    "deepseek": SourceDescriptor("deepseek", "https://api.deepseek.com", "/models", "Authorization", "DEEPSEEK_API_KEY", "openai", re.compile(r"^deepseek-v\d+-(flash|pro)$"),
-                                 re.compile(r"^deepseek-v\d+-(?P<series>flash|pro)$"), re.compile(r"^deepseek-v(?P<version>\d+)-(flash|pro)$")),
+    "deepseek": SourceDescriptor("deepseek", "https://api.deepseek.com", "/models", "Authorization", "DEEPSEEK_API_KEY", "openai", re.compile(r"^deepseek-v\d+-(flash|pro)$"), re.compile(r"^deepseek-v\d+-(?P<series>flash|pro)$"), re.compile(r"^deepseek-v(?P<version>\d+)-(flash|pro)$")),
     # Official docs: OpenAI Models API.
-    "gpt": SourceDescriptor("gpt", "https://api.openai.com", "/v1/models", "Authorization", "OPENAI_API_KEY", "openai", re.compile(r"^gpt-(?:5\.\d+|6(?:\.\d+)?)(?:-(?:sol|terra|luna|astra))?$"),
-                            re.compile(r"^gpt-(?:5\.\d+|6(?:\.\d+)?)(?:-(?P<series>sol|terra|luna|astra))?$"), re.compile(r"^gpt-(?P<version>5\.\d+|6(?:\.\d+)?)(?:-(?:sol|terra|luna|astra))?$")),
+    "gpt": SourceDescriptor("gpt", "https://api.openai.com", "/v1/models", "Authorization", "OPENAI_API_KEY", "openai", re.compile(r"^gpt-(?:5\.\d+|6(?:\.\d+)?)(?:-(?:sol|terra|luna|astra))?$"), re.compile(r"^gpt-(?:5\.\d+|6(?:\.\d+)?)(?:-(?P<series>sol|terra|luna|astra))?$"), re.compile(r"^gpt-(?P<version>5\.\d+|6(?:\.\d+)?)(?:-(?:sol|terra|luna|astra))?$")),
     # Official docs: Anthropic Models API.
-    "claude": SourceDescriptor("claude", "https://api.anthropic.com", "/v1/models", "x-api-key", "ANTHROPIC_API_KEY", "anthropic", re.compile(r"^claude-(opus|sonnet|haiku|fable)-\d"),
-                               re.compile(r"^claude-(?P<series>opus|sonnet|haiku|fable)-\d"), re.compile(r"^claude-(opus|sonnet|haiku|fable)-(?P<version>\d+(?:-\d+)?)"), (("anthropic-version", "2023-06-01"),)),
+    "claude": SourceDescriptor("claude", "https://api.anthropic.com", "/v1/models", "x-api-key", "ANTHROPIC_API_KEY", "anthropic", re.compile(r"^claude-(opus|sonnet|haiku|fable)-\d"), re.compile(r"^claude-(?P<series>opus|sonnet|haiku|fable)-\d"), re.compile(r"^claude-(opus|sonnet|haiku|fable)-(?P<version>\d+(?:-\d+)?)"), (("anthropic-version", "2023-06-01"),)),
     # Official docs: Gemini Models API. `flash(-lite)?` keeps the numbered Flash-Lite
     # line in the family: upstream publishes `gemini-<version>-flash-lite` ids beside
     # the pro/flash ones, and without `-lite` they fell through to other_ids and never
@@ -84,23 +78,17 @@ SOURCES: dict[str, SourceDescriptor] = {
     # detect when upstream re-resolves it (it tracked 3.5 at registration, checked
     # 2026-09-10); a newly numbered flash-lite id surfacing as a candidate is the cue
     # to re-verify the alias facts by hand.
-    "gemini": SourceDescriptor("gemini", "https://generativelanguage.googleapis.com", "/v1beta/models", None, "GEMINI_API_KEY", "gemini", re.compile(r"^gemini-\d+(\.\d+)?-(pro|flash(-lite)?|argon)(-preview)?$"),
-                               re.compile(r"^gemini-\d+(?:\.\d+)?-(?P<series>pro|flash(-lite)?|argon)(?P<preview>-preview)?$"), re.compile(r"^gemini-(?P<version>\d+(?:\.\d+)?)-(pro|flash(-lite)?|argon)(-preview)?$")),
+    "gemini": SourceDescriptor("gemini", "https://generativelanguage.googleapis.com", "/v1beta/models", None, "GEMINI_API_KEY", "gemini", re.compile(r"^gemini-\d+(\.\d+)?-(pro|flash(-lite)?|argon)(-preview)?$"), re.compile(r"^gemini-\d+(?:\.\d+)?-(?P<series>pro|flash(-lite)?|argon)(?P<preview>-preview)?$"), re.compile(r"^gemini-(?P<version>\d+(?:\.\d+)?)-(pro|flash(-lite)?|argon)(-preview)?$")),
     # Official docs: xAI Models API.
-    "grok": SourceDescriptor("grok", "https://api.x.ai", "/v1/models", "Authorization", "XAI_API_KEY", "openai", re.compile(r"^grok-\d+\.\d+$"),
-                             re.compile(r"^(?P<series>grok)-\d+\.\d+$"), re.compile(r"^grok-(?P<version>\d+\.\d+)$")),
+    "grok": SourceDescriptor("grok", "https://api.x.ai", "/v1/models", "Authorization", "XAI_API_KEY", "openai", re.compile(r"^grok-\d+\.\d+$"), re.compile(r"^(?P<series>grok)-\d+\.\d+$"), re.compile(r"^grok-(?P<version>\d+\.\d+)$")),
     # Official docs: Moonshot Models API.
-    "kimi": SourceDescriptor("kimi", "https://api.moonshot.ai", "/v1/models", "Authorization", "MOONSHOT_API_KEY", "openai", re.compile(r"^kimi-k\d"),
-                             re.compile(r"^(?P<series>kimi)-k\d"), re.compile(r"^kimi-k(?P<version>\d+(?:\.\d+)?)")),
+    "kimi": SourceDescriptor("kimi", "https://api.moonshot.ai", "/v1/models", "Authorization", "MOONSHOT_API_KEY", "openai", re.compile(r"^kimi-k\d"), re.compile(r"^(?P<series>kimi)-k\d"), re.compile(r"^kimi-k(?P<version>\d+(?:\.\d+)?)")),
     # Official docs: Zhipu AI Models API.
-    "glm": SourceDescriptor("glm", "https://open.bigmodel.cn", "/api/paas/v4/models", "Authorization", "GLM_API_KEY", "openai", re.compile(r"^glm-\d+(\.\d+)?(-\w+)?$"),
-                            re.compile(r"^(?P<series>glm)-\d+(?:\.\d+)?(?:-\w+)?$"), re.compile(r"^glm-(?P<version>\d+(?:\.\d+)?)(?:-\w+)?$")),
+    "glm": SourceDescriptor("glm", "https://open.bigmodel.cn", "/api/paas/v4/models", "Authorization", "GLM_API_KEY", "openai", re.compile(r"^glm-\d+(\.\d+)?(-\w+)?$"), re.compile(r"^(?P<series>glm)-\d+(?:\.\d+)?(?:-\w+)?$"), re.compile(r"^glm-(?P<version>\d+(?:\.\d+)?)(?:-\w+)?$")),
     # Official docs: Xiaomi MiMo Models API.
-    "mimo": SourceDescriptor("mimo", "https://api.xiaomimimo.com", "/v1/models", "Authorization", "MIMO_API_KEY", "openai", re.compile(r"^mimo-v\d+\.\d+(-pro(-ultraspeed)?)?$"),
-                             re.compile(r"^(?P<series>mimo)-v\d+\.\d+(?:-pro(?:-ultraspeed)?)?$"), re.compile(r"^mimo-v(?P<version>\d+\.\d+)(?:-pro(?:-ultraspeed)?)?$")),
+    "mimo": SourceDescriptor("mimo", "https://api.xiaomimimo.com", "/v1/models", "Authorization", "MIMO_API_KEY", "openai", re.compile(r"^mimo-v\d+\.\d+(-pro(-ultraspeed)?)?$"), re.compile(r"^(?P<series>mimo)-v\d+\.\d+(?:-pro(?:-ultraspeed)?)?$"), re.compile(r"^mimo-v(?P<version>\d+\.\d+)(?:-pro(?:-ultraspeed)?)?$")),
     # Official docs: DashScope Model List API.
-    "qwen": SourceDescriptor("qwen", "https://dashscope.aliyuncs.com", "/api/v1/models", "Authorization", "DASHSCOPE_API_KEY", "dashscope", re.compile(r"^qwen3"),
-                             re.compile(r"^(?P<series>qwen)\d"), re.compile(r"^qwen(?P<version>\d+(?:\.\d+)?)")),
+    "qwen": SourceDescriptor("qwen", "https://dashscope.aliyuncs.com", "/api/v1/models", "Authorization", "DASHSCOPE_API_KEY", "dashscope", re.compile(r"^qwen3"), re.compile(r"^(?P<series>qwen)\d"), re.compile(r"^qwen(?P<version>\d+(?:\.\d+)?)")),
 }
 # fmt: on
 
@@ -211,13 +199,13 @@ def _first_real_doh_address(value: object, endpoint: str, host: str) -> str:
     raise ValueError(f"{endpoint} returned no usable A answer for {host}")
 
 
-def _doh_real_ip(host: str) -> str:
+def _doh_real_ip(host: str, *, http_get: Callable[..., Any] = requests.get) -> str:
     if host in doh_cache:
         return doh_cache[host]
     last_error: Exception | None = None
     for endpoint in _DOH_ENDPOINTS:
         try:
-            response = requests.get(
+            response = http_get(
                 endpoint,
                 headers={"accept": "application/dns-json"},
                 params={"name": host, "type": "A"},
@@ -232,9 +220,14 @@ def _doh_real_ip(host: str) -> str:
     raise ConnectionError(f"DoH resolution failed for {host}") from last_error
 
 
-def _session_for_host(host: str) -> requests.Session | None:
+def _session_for_host(
+    host: str,
+    *,
+    addrinfo: Callable[..., Any] = socket.getaddrinfo,
+    doh_resolver: Callable[[str], str] = _doh_real_ip,
+) -> requests.Session | None:
     try:
-        address_rows = socket.getaddrinfo(host, 443, type=socket.SOCK_STREAM)
+        address_rows = addrinfo(host, 443, type=socket.SOCK_STREAM)
     except socket.gaierror:
         return None
     ipv4_addresses = [
@@ -245,7 +238,7 @@ def _session_for_host(host: str) -> requests.Session | None:
     if not any(_is_fake_ip(address) for address in ipv4_addresses):
         return None
     # A detected fake IP must not fall back to the hijacked resolver if DoH fails.
-    pinned_ip = _doh_real_ip(host)
+    pinned_ip = doh_resolver(host)
     session = requests.Session()
     session.mount(f"https://{host}/", PinnedIPHTTPSAdapter(pinned_ip))
     return session
@@ -306,12 +299,17 @@ _FETCH_POLICY = Policy(
 
 
 def fetch_json(
-    url: str, *, headers: dict[str, str], params: dict[str, str | int]
+    url: str,
+    *,
+    headers: dict[str, str],
+    params: dict[str, str | int],
+    session_for_host: Callable[[str], Any] = _session_for_host,
+    http_get: Callable[..., Any] = requests.get,
 ) -> dict[str, Any]:
     def _attempt() -> dict[str, Any]:
         host = urlparse(url).hostname or ""
-        session = _session_for_host(host)
-        requester = session.get if session is not None else requests.get
+        session = session_for_host(host)
+        requester = session.get if session is not None else http_get
         response = requester(
             url,
             headers={"User-Agent": _USER_AGENT, **headers},
@@ -334,8 +332,10 @@ def _headers(source: SourceDescriptor, api_key: str) -> dict[str, str]:
     return headers
 
 
-def _openai_models(source: SourceDescriptor, api_key: str) -> list[str]:
-    payload = fetch_json(
+def _openai_models(
+    source: SourceDescriptor, api_key: str, *, fetcher: Callable[..., dict[str, Any]] = fetch_json
+) -> list[str]:
+    payload = fetcher(
         source.base_url + source.models_path, headers=_headers(source, api_key), params={}
     )
     if "data" not in payload:
@@ -343,12 +343,14 @@ def _openai_models(source: SourceDescriptor, api_key: str) -> list[str]:
     return _id_rows(payload["data"], "id", source.provider)
 
 
-def _anthropic_models(source: SourceDescriptor, api_key: str) -> list[str]:
+def _anthropic_models(
+    source: SourceDescriptor, api_key: str, *, fetcher: Callable[..., dict[str, Any]] = fetch_json
+) -> list[str]:
     ids: list[str] = []
     after_id: str | None = None
     while True:
         params: dict[str, str | int] = {"after_id": after_id} if after_id is not None else {}
-        payload = fetch_json(
+        payload = fetcher(
             source.base_url + source.models_path, headers=_headers(source, api_key), params=params
         )
         if "data" not in payload or "has_more" not in payload:
@@ -367,11 +369,13 @@ def _anthropic_models(source: SourceDescriptor, api_key: str) -> list[str]:
     return ids
 
 
-def _gemini_models(source: SourceDescriptor, api_key: str) -> list[str]:
+def _gemini_models(
+    source: SourceDescriptor, api_key: str, *, fetcher: Callable[..., dict[str, Any]] = fetch_json
+) -> list[str]:
     ids: list[str] = []
     params: dict[str, str | int] = {"key": api_key}
     while True:
-        payload = fetch_json(
+        payload = fetcher(
             source.base_url + source.models_path, headers=_headers(source, api_key), params=params
         )
         if "models" not in payload:
@@ -393,16 +397,13 @@ def _gemini_models(source: SourceDescriptor, api_key: str) -> list[str]:
 
 
 def _dashscope_models(
-    source: SourceDescriptor,
-    api_key: str,
-    *,
-    fetcher: Callable[..., dict[str, Any]] | None = None,
+    source: SourceDescriptor, api_key: str, *, fetcher: Callable[..., dict[str, Any]] = fetch_json
 ) -> list[str]:
     ids: list[str] = []
     total: int | None = None
     page_no = 1
     while True:
-        payload = (fetch_json if fetcher is None else fetcher)(
+        payload = fetcher(
             source.base_url + source.models_path,
             headers=_headers(source, api_key),
             params={"page_no": page_no, "page_size": _QWEN_PAGE_SIZE},
@@ -437,14 +438,15 @@ def fetch_provider_models(
     *,
     fetcher: Callable[..., dict[str, Any]] | None = None,
 ) -> list[str]:
+    fn = fetch_json if fetcher is None else fetcher
     if source.response_kind == "openai":
-        return _openai_models(source, api_key)
+        return _openai_models(source, api_key, fetcher=fn)
     if source.response_kind == "anthropic":
-        return _anthropic_models(source, api_key)
+        return _anthropic_models(source, api_key, fetcher=fn)
     if source.response_kind == "gemini":
-        return _gemini_models(source, api_key)
+        return _gemini_models(source, api_key, fetcher=fn)
     if source.response_kind == "dashscope":
-        return _dashscope_models(source, api_key, fetcher=fetcher)
+        return _dashscope_models(source, api_key, fetcher=fn)
     raise RuntimeError(f"unknown response kind {source.response_kind!r}")
 
 
@@ -469,13 +471,9 @@ def compare_models(
     upstream_ids: list[str],
     registry: Mapping[str, Any],
 ) -> Comparison:
-    registry_ids = [
-        model_id for model_id, spec in registry.items() if spec.provider == source.provider
-    ]
     registry_series: dict[str, list[tuple[str, tuple[int, ...]]]] = {}
-    for model_id in registry_ids:
-        identity = _identity(source, model_id)
-        if identity is not None:
+    for model_id, spec in registry.items():
+        if spec.provider == source.provider and (identity := _identity(source, model_id)):
             registry_series.setdefault(identity[0], []).append((model_id, identity[1]))
     candidates: list[str] = []
     suppressed: list[str] = []
@@ -657,7 +655,6 @@ def check_sources(
     # skipped, a same-series older id is suppressed against registered versions — so it
     # compares against the catalog the enabled provider plugins build. Comparing against
     # nothing would re-report every registered id as new (deduped only by its own state file).
-    registry = models
     fetcher = fetch_provider_models if model_fetcher is None else model_fetcher
     reports: dict[str, ProviderReport] = {}
     providers = state["providers"]
@@ -671,7 +668,7 @@ def check_sources(
             )
             continue
         try:
-            comparison = compare_models(source, fetcher(source, api_key), registry)
+            comparison = compare_models(source, fetcher(source, api_key), models)
         except Exception as exc:
             status = f"error: {str(exc) or type(exc).__name__}"
             reports[provider] = ProviderReport(
@@ -756,6 +753,7 @@ def main(
     *,
     env_lookup: Callable[[str], str | None] | None = None,
     model_fetcher: Callable[[SourceDescriptor, str], list[str]] | None = None,
+    models: Mapping[str, Any] | None = None,
 ) -> int:
     parser = argparse.ArgumentParser(
         description="Check official provider model lists for Meiva updates."
@@ -773,7 +771,7 @@ def main(
         reports = check_sources(
             _read_env_file(args.env_file),
             state,
-            models=build_model_catalog().models,
+            models=build_model_catalog().models if models is None else models,
             env_lookup=env_lookup,
             model_fetcher=model_fetcher,
         )
