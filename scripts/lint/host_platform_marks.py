@@ -452,13 +452,18 @@ def _report_baseline_drift(
     if scope is not None:
         return False
     counts = Counter(what for items in judged.values() for _, what, _ in items)
+    drifted = False
     for what, allowed in sorted(baseline.items()):
-        if counts.get(what, 0) < allowed:
+        actual = counts.get(what, 0)
+        if actual < allowed:
             print(
-                f"{what}: note: {counts.get(what, 0)} unmarked read(s), baseline {allowed}; "
-                "--write-baseline lowers it"
+                f"{what}: {actual} unmarked read(s) below the recorded {allowed} - this change "
+                "removed a read the record still counts; lower it with "
+                "`.venv/bin/python scripts/lint/host_platform_marks.py --write-baseline`",
+                file=sys.stderr,
             )
-    return False
+            drifted = True
+    return drifted
 
 
 def _split_args(argv: list[str]) -> tuple[list[str], list[str] | None, bool]:
@@ -483,9 +488,13 @@ def _targets(paths: list[str], root: Path) -> list[Path]:
 
 
 # meiva:note
-# The verdict: growth fails, a shrunken kind only notes. `--only` narrows what is printed,
-# not what is compared — the pre-commit path has to see the whole tree's counts or a new
-# read in the file under review would pass here and fail in CI.
+# The verdict: both directions are judged. Growth fails because the tree now reads the host
+# where it used to inject one; shrinkage fails because the record and the tree are the same
+# fact, and a record that outlives its reads makes the next author's reduction invisible
+# (2026-10-24: two merged PRs each removed a read and left the count, and every later branch
+# carrying this record failed the merge-tree run instead). `--only` narrows what is printed,
+# not what is compared — the pre-commit path has to see the whole tree's counts or a new read
+# in the file under review would pass here and fail in CI.
 def _verdict(
     root: Path,
     judged: dict[str, list[tuple[int, str, str]]],
