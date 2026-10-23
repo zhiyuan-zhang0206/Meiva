@@ -5,7 +5,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { pickActiveAnchor } from "./_nav";
+import { pickActiveAnchor } from "./nav";
 
 const IDS = ["status", "config", "config-gateway", "config-agent-runner", "config-common", "schedules"];
 

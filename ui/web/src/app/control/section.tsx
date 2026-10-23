@@ -19,7 +19,7 @@ import { type ReactNode } from "react";
 
 import { useDeferredMount } from "@/lib/layout/use-client-ready";
 
-import { SectionVisibilityProvider, useInView } from "./_visibility";
+import { SectionVisibilityProvider, useInView } from "./visibility";
 
 export function ControlSection({
   id,

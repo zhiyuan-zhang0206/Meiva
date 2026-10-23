@@ -5,8 +5,8 @@ const copy = vi.fn().mockResolvedValue(undefined);
 
 import {
   PythonCode,
-  __resetHighlighterCacheForTests,
-  __setHighlighterImportForTests,
+  resetHighlighterCacheForTests,
+  setHighlighterImportForTests,
   preloadPythonCodeHighlighter,
 } from "./python-code";
 
@@ -28,7 +28,7 @@ beforeEach(() => {
     writable: true,
     configurable: true,
   });
-  __resetHighlighterCacheForTests();
+  resetHighlighterCacheForTests();
 });
 
 // meiva:note
@@ -37,7 +37,7 @@ beforeEach(() => {
 // (or stale-resolving) dynamic import.
 // meiva:link ui/web/src/docs/frontend-components/frontend-components.meiva.okf.md
 afterEach(() => {
-  __setHighlighterImportForTests(null);
+  setHighlighterImportForTests(null);
 });
 
 it("highlights immediately when the chunk was already prefetched", async () => {
@@ -111,7 +111,7 @@ it("a rejected import falls back to plain text without an unhandled rejection", 
   const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
 
   try {
-    __setHighlighterImportForTests(() => Promise.reject(new Error("chunk load failed")));
+    setHighlighterImportForTests(() => Promise.reject(new Error("chunk load failed")));
 
     const code = 'print("<pending>")';
     const { container } = render(<PythonCode code={code} streaming />);
@@ -151,7 +151,7 @@ it("warns only once per failed import attempt even with several concurrent prelo
   const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
 
   try {
-    __setHighlighterImportForTests(() => Promise.reject(new Error("chunk load failed")));
+    setHighlighterImportForTests(() => Promise.reject(new Error("chunk load failed")));
 
     await Promise.all([
       preloadPythonCodeHighlighter(),
@@ -166,7 +166,7 @@ it("warns only once per failed import attempt even with several concurrent prelo
 });
 
 it("retries and highlights on the next call after a prior rejection", async () => {
-  __setHighlighterImportForTests(() => Promise.reject(new Error("chunk load failed")));
+  setHighlighterImportForTests(() => Promise.reject(new Error("chunk load failed")));
 
   const code = 'print("<pending>")';
   const first = render(<PythonCode code={code} streaming />);
@@ -179,7 +179,7 @@ it("retries and highlights on the next call after a prior rejection", async () =
   // The failure above must have cleared the module-level cache (not just
   // left `highlightPromise` pointing at a dead, permanently-rejected
   // promise) — restoring the real import and retrying now succeeds.
-  __setHighlighterImportForTests(null);
+  setHighlighterImportForTests(null);
   await preloadPythonCodeHighlighter();
 
   const retry = render(<PythonCode code={code} streaming />);

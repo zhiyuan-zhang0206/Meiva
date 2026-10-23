@@ -1,14 +1,18 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { cleanup, fireEvent, render as rtlRender, screen } from "@testing-library/react";
+import type { ReactElement } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { harnessRows, type HarnessAvailability } from "@/lib/harness/harness";
+import { HarnessPicker } from "./harness-picker";
 
 let rows: HarnessAvailability[] = [];
-vi.mock("@/lib/harness/use-harness-availability", () => ({
-  useHarnessAvailability: () => ({ data: rows }),
-}));
 
-import { HarnessPicker } from "./harness-picker";
+function render(ui: ReactElement) {
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  qc.setQueryData(["harness-availability", "local"], rows);
+  return rtlRender(<QueryClientProvider client={qc}>{ui}</QueryClientProvider>);
+}
 
 afterEach(cleanup);
 

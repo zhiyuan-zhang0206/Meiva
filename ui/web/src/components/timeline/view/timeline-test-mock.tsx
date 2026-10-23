@@ -4,8 +4,8 @@ import type { ReactElement, ReactNode } from "react";
 import { vi } from "vitest";
 
 import {
-  __resetHighlighterCacheForTests,
-  __setHighlighterImportForTests,
+  resetHighlighterCacheForTests,
+  setHighlighterImportForTests,
 } from "@/components/content/python-code";
 import { USER_SETTING_DEFAULTS, type BackendTimelineItem } from "@/lib/contracts/types";
 import { useContentToggleReset } from "@/lib/layout/content-toggle-store";
@@ -15,8 +15,8 @@ import { api } from "@/lib/transport/api";
 notifyManager.setScheduler((cb) => {
   cb();
 });
-__resetHighlighterCacheForTests();
-__setHighlighterImportForTests(() => new Promise(() => undefined));
+resetHighlighterCacheForTests();
+setHighlighterImportForTests(() => new Promise(() => undefined));
 
 export const timelineQueryClient = new QueryClient({
   defaultOptions: {
@@ -178,8 +178,8 @@ export function cleanupTimelineTest() {
   displayLimits.clear();
   syncSettingsCache();
   syncDisplayLimitsCache();
-  __resetHighlighterCacheForTests();
-  __setHighlighterImportForTests(() => new Promise(() => undefined));
+  resetHighlighterCacheForTests();
+  setHighlighterImportForTests(() => new Promise(() => undefined));
   vi.unstubAllGlobals();
 }
 

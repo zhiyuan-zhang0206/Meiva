@@ -1,17 +1,15 @@
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
-vi.mock("./python-code", () => ({
-  PythonCode: ({ code }: { code: string }) => (
-    <pre data-testid="python-code">{code}</pre>
-  ),
-}));
-
-import { __resetMarkdownMathForTests, __setMarkdownMathImportForTests, type MarkdownMath } from "@/lib/markdown/math";
+import * as markdownMath from "@/lib/markdown/math";
+import type { MarkdownMath } from "@/lib/markdown/math";
 import reportedMessage from "./fixtures/reported-message-20261019.json";
 import { ChatMarkdown, preloadChatMarkdown } from "./markdown";
+import { resetHighlighterCacheForTests, setHighlighterImportForTests } from "./python-code";
 
 beforeAll(async () => {
+  resetHighlighterCacheForTests();
+  setHighlighterImportForTests(() => new Promise(() => undefined));
   await preloadChatMarkdown();
 });
 
@@ -350,13 +348,13 @@ line<br>break <mark>m</mark> <kbd>K</kbd>
 
 describe("math through the lazy KaTeX surface", () => {
   afterEach(() => {
-    __resetMarkdownMathForTests();
-    __setMarkdownMathImportForTests(null);
+    markdownMath.__resetMarkdownMathForTests();
+    markdownMath.__setMarkdownMathImportForTests(null);
   });
 
   it("never loads the math chunk for content without $", () => {
     const load = vi.fn((): Promise<MarkdownMath> => Promise.resolve({ remark: [], rehype: [] }));
-    __setMarkdownMathImportForTests(load);
+    markdownMath.__setMarkdownMathImportForTests(load);
     render(<ChatMarkdown content="no formulas here" />);
     expect(load).not.toHaveBeenCalled();
   });

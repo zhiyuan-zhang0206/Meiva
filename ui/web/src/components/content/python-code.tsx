@@ -38,7 +38,7 @@ let resolvedHighlight: typeof HighlightComponentType | null = null;
 
 // Indirection so tests can substitute a rejecting/resolving stub without
 // depending on how a bundler's dynamic-import chunk cache behaves on
-// failure (see __setHighlighterImportForTests below).
+// failure (see setHighlighterImportForTests below).
 let importHighlighterModule: () => Promise<typeof PrismReactRenderer> = () =>
   import("prism-react-renderer");
 
@@ -104,7 +104,7 @@ export function preloadPythonCodeHighlighter(): Promise<void> {
  * itself (an ESM dependency Vite doesn't externalize) as a second, partially
  * initialized copy and crashes.
  */
-export function __resetHighlighterCacheForTests(): void {
+export function resetHighlighterCacheForTests(): void {
   highlightPromise = null;
   resolvedHighlight = null;
 }
@@ -117,7 +117,7 @@ export function __resetHighlighterCacheForTests(): void {
  * can be relied on to reproduce for a *subsequent* call within one test —
  * this seam sidesteps that entirely. Pass `null` to restore the real import.
  */
-export function __setHighlighterImportForTests(
+export function setHighlighterImportForTests(
   fn: (() => Promise<typeof PrismReactRenderer>) | null,
 ): void {
   importHighlighterModule = fn ?? (() => import("prism-react-renderer"));

@@ -20,7 +20,7 @@ import {
   fieldLabel,
   formatConfigValue,
   isPerAgent,
-} from "../_config_groups";
+} from "../config-groups";
 
 export type MachineSelection = string | null;
 

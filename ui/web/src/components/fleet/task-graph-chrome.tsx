@@ -7,36 +7,16 @@ import type { ReactNode } from "react";
 
 import { WindowSelect, type WindowOption } from "@/components/agents/window-select";
 import { ChatMarkdown } from "@/components/content/markdown";
-import type { TaskStatus, TaskSummaryRow } from "@/lib/contracts/types";
+import type { TaskSummaryRow } from "@/lib/contracts/types";
 import { formatRelative, formatUptime } from "@/lib/format/time";
 import { cn } from "@/lib/format/utils";
 import { FLEX, FLEX_1, MIN_W_0, OVERFLOW_HIDDEN } from "@/lib/layout/layout";
 import { PRIORITY_BG } from "@/lib/notifications/notices";
 import type { TaskWindow } from "@/lib/notifications/use-tasks";
 import { api } from "@/lib/transport/api";
+import { taskFill } from "./task-graph-palette";
 
-export const STATUS_FILL: Record<TaskStatus, string> = {
-  in_progress: "text-slate-400",
-  done: "text-emerald-500",
-  cancelled: "text-destructive",
-};
-
-export const ROOT_NODE_STATUS = "root";
-export const ROOT_FILL = "text-violet-500";
-
-export const NODE_FILL: Record<string, string> = {
-  ...STATUS_FILL,
-  [ROOT_NODE_STATUS]: ROOT_FILL,
-};
-
-export function taskFill(task: TaskSummaryRow): string {
-  return task.parent_id == null ? ROOT_FILL : STATUS_FILL[task.status];
-}
-
-export const TASK_LEGEND_ENTRIES = [
-  { key: "in_progress", fill: STATUS_FILL.in_progress, labelKey: "status.inProgress" },
-  { key: ROOT_NODE_STATUS, fill: ROOT_FILL, labelKey: "root" },
-] as const;
+export { NODE_FILL, ROOT_FILL, ROOT_NODE_STATUS, STATUS_FILL, TASK_LEGEND_ENTRIES, taskFill } from "./task-graph-palette";
 
 function MetaRow({ label, children }: { label: string; children: ReactNode }) {
   return (

@@ -64,8 +64,8 @@ import {
   DEFAULT_MODEL_GROUP_ID,
   PER_MODEL_GROUP_ID,
   displayGroupId,
-} from "../_config_groups";
-import { useSectionVisible } from "../_visibility";
+} from "../config-groups";
+import { useSectionVisible } from "../visibility";
 import {
   ConfigFilterBar,
   ConfigRow,

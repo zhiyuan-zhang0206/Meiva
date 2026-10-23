@@ -11,7 +11,7 @@ import { describe, expect, it } from "vitest";
 
 import type { ConfigFieldView } from "@/lib/contracts/types";
 
-import { GROUP_ENV_VARS, HIDDEN_ENV_VARS, displayGroupId } from "./_config_groups";
+import { GROUP_ENV_VARS, HIDDEN_ENV_VARS, displayGroupId } from "./config-groups";
 
 describe("config display grouping tables", () => {
   it("keeps hidden env vars out of every display group", () => {

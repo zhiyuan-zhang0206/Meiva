@@ -9,7 +9,7 @@
 import { cleanup, render } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { useSettledAnchorScroll } from "./_anchor-scroll";
+import { useSettledAnchorScroll } from "./anchor-scroll";
 
 class FakeResizeObserver {
   static instances: FakeResizeObserver[] = [];

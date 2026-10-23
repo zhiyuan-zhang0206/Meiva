@@ -9,7 +9,7 @@
 import { renderHook } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
-import { useInView } from "./_visibility";
+import { useInView } from "./visibility";
 
 describe("useInView", () => {
   it("starts visible before any node is attached (no scroll-gated first fetch)", () => {

@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type * as SidebarModule from "@/lib/agents/sidebar";
 import type { PluginStat, StatsDashboard } from "@/lib/contracts/types";
 import type * as PluginStatsModule from "@/lib/plugins/plugin-stats";
-import { bpMock, handlers, makeAgent, pushSpy, resetSidebarTestState, sortStore, state, StubAgentRow, StubButton, StubScrollArea, StubSpawnForm, wrap } from "./sidebar-test-harness";
+import { bpMock, handlers, makeAgent, pushSpy, resetSidebarTestState, sortStore, state, StubAgentRow, StubButton, StubScrollArea, StubSpawnForm, wrap } from "./sidebar-test-mock";
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: pushSpy }),
 }));

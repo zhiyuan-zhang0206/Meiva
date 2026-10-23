@@ -16,7 +16,7 @@ import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { useState } from "react";
 
-import { useSettledAnchorScroll } from "./_anchor-scroll";
+import { useSettledAnchorScroll } from "./anchor-scroll";
 
 import ConfigPage from "@/app/control/config/page";
 import DisplaySettingsPage from "@/app/control/display/page";
@@ -31,13 +31,13 @@ import { assetUrl } from "@/lib/transport/api";
 
 import { AppSettingsEntry, useAppBridge } from "@/components/app/app-settings";
 
-import { ControlNav } from "./_nav";
+import { ControlNav } from "./nav";
 import {
   APP_SETTINGS_SECTION,
   CONTROL_SCROLL_ID,
   CONTROL_SECTIONS,
-} from "./_sections";
-import { ControlSection } from "./_section";
+} from "./sections";
+import { ControlSection } from "./section";
 import { FLEX, FLEX_1, FLEX_COL, MIN_H_0, MIN_W_0, OVERFLOW_HIDDEN } from "@/lib/layout/layout";
 import { cn } from "@/lib/format/utils";
 
