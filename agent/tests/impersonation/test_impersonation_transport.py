@@ -1,10 +1,9 @@
 from __future__ import annotations
 
 import subprocess
-import sys
 from pathlib import Path
 from typing import Any
-from unittest.mock import MagicMock, Mock
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -12,38 +11,27 @@ from agent import impersonation, impersonation_process
 from agent.tests.impersonation.test_impersonation import gate_ctx as gate_ctx
 from agent.tests.impersonation.test_impersonation import relays as relays
 from base.agents.context import MeivaContext
-from base.agents.impersonation import terminal_notices
 from base.agents.observation.relay_supervision import RelayChild
 from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
 
 
-def test_spawn_sends_the_private_token_over_the_pipe_only(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_spawn_sends_the_private_token_over_the_pipe_only(tmp_path: Path) -> None:
     marker = tmp_path / "received"
-    real_popen = subprocess.Popen
     argvs: list[list[str]] = []
 
     def spawn(argv: list[str], **kwargs: Any) -> subprocess.Popen[bytes]:
         argvs.append(argv)
-        return real_popen(
-            [
-                sys.executable,
-                "-c",
-                "import sys; from pathlib import Path; token=sys.stdin.buffer.readline(); "
-                "Path(sys.argv[1]).write_bytes(token) if token else None",
-                str(marker),
-            ],
+        return subprocess.Popen(
+            ["tee", str(marker)],
             stdin=subprocess.PIPE,
             stdout=subprocess.DEVNULL,
             start_new_session=True,
             env=kwargs["env"],
         )
 
-    monkeypatch.setattr(impersonation_process.subprocess, "Popen", spawn)
     child = impersonation_process.spawn_codex_relay(
-        1, "lease", "private-test-token", "thread", None
+        1, "lease", "private-test-token", "thread", None, popen_fn=spawn
     )
     child.wait(timeout=5)
     assert marker.read_bytes() == b"private-test-token\n"
@@ -55,7 +43,6 @@ def active_codex_lease(
     db_conn: Any,
     database: Any,
     event_bus: Any,
-    monkeypatch: pytest.MonkeyPatch,
     *,
     config_authority: ConfigAuthority,
     machine_identity: MachineIdentity,
@@ -70,7 +57,6 @@ def active_codex_lease(
     from base.db import create_agent
     from base.db.test_db_guard import assert_test_db_url
     from base.native_process.runtime_incarnation import RuntimeIncarnation
-    from base.sessions import env_forwarding
 
     url = config_authority.runtime.data_plane.db_url
     assert_test_db_url(url, context="real impersonation relay fixture")
@@ -81,12 +67,6 @@ def active_codex_lease(
         encoding="utf-8",
     )
 
-    forwarded = env_forwarding.forward_env_dict()
-    monkeypatch.setattr(
-        env_forwarding,
-        "forward_env_dict",
-        Mock(return_value=forwarded | {"MEIVA_CONFIG_FETCH": "skip"}),
-    )
     aid = create_agent(db_conn)
     owner = RuntimeIncarnation(aid, uuid4(), uuid4())
     db_conn.execute(
@@ -135,7 +115,6 @@ async def test_dead_relay_child_ends_the_lease(
     db_conn: Any,
     database: Any,
     event_bus: Any,
-    monkeypatch: pytest.MonkeyPatch,
     active_codex_lease: Any,
     *,
     machine_identity: MachineIdentity,
@@ -145,7 +124,7 @@ async def test_dead_relay_child_ends_the_lease(
 
     session, owner = active_codex_lease
     assert leases.provision_relay(database, session["id"], owner, "old-private") is not None
-    dead = subprocess.Popen([sys.executable, "-c", "pass"])
+    dead = subprocess.Popen(["true"])
     dead.wait(timeout=5)
     db_conn.execute(
         "UPDATE agent_impersonations SET relay_heartbeat_at=clock_timestamp() WHERE id=%s",
@@ -154,8 +133,6 @@ async def test_dead_relay_child_ends_the_lease(
     db_conn.commit()
     current = leases.native_status(database, event_bus, owner.agent_id, owner)
     assert current is not None
-    spawn = Mock()
-    monkeypatch.setattr(impersonation_process, "spawn_codex_relay", spawn)
     relays = RelaySupervision()
     relays.children[owner.agent_id] = RelayChild(
         session["id"], dead, "old-private", 0.0, current["relay_generation"]
@@ -163,7 +140,7 @@ async def test_dead_relay_child_ends_the_lease(
     await impersonation.supervise_relay(
         database, event_bus, current, owner.agent_id, relays, incarnation=owner
     )
-    spawn.assert_not_called()
+    assert owner.agent_id not in relays.children
     after = leases.get(
         database,
         event_bus,
@@ -212,27 +189,36 @@ async def test_stale_relay_heartbeat_alone_keeps_the_lease(
     assert after["expires_at"] == current["expires_at"]
 
 
-@pytest.mark.parametrize("error", [None, "TimeoutError: ambiguous acceptance"])
+@pytest.mark.parametrize("error", [None, "the recorded Codex destination is not deliverable"])
 async def test_ended_lease_notice_is_submitted_once_and_a_failure_is_reported_not_retried(
-    monkeypatch: pytest.MonkeyPatch,
     gate_ctx: MeivaContext,
     loguru_records: list[dict[str, Any]],
     error: str | None,
 ) -> None:
     lease_id = "00000000-0000-0000-0000-000000000001"
     gate_ctx.relays.children[42] = RelayChild(lease_id, MagicMock(), "token", 0.0, 1)
+    snapshot = None if error is None else {"provider": "codex", "endpoint": "", "thread_id": ""}
+    queries: list[str] = []
+
+    def execute(sql: str, *_args: object) -> MagicMock:
+        queries.append(sql)
+        cur = MagicMock()
+        cur.fetchone.return_value = (
+            (snapshot,) if "terminal_notice_snapshot" in sql else ("expired",)
+        )
+        return cur
+
     conn = MagicMock()
-    conn.execute.return_value.fetchone.return_value = ("expired",)
+    conn.execute.side_effect = execute
     db = MagicMock()
     db.connect.return_value.__enter__.return_value = conn
-    monkeypatch.setattr(impersonation, "terminate_relay", Mock())
-    send = Mock(return_value=error)
-    monkeypatch.setattr(terminal_notices, "send_ended_notice", send)
     for _ in range(3):
         await impersonation.supervise_relay(
             db, MagicMock(), None, 42, gate_ctx.relays, incarnation=None
         )
-    send.assert_called_once_with(db, lease_id)
+    assert [q for q in queries if "terminal_notice_snapshot" in q] == [
+        "SELECT terminal_notice_snapshot FROM agent_impersonations WHERE id=%s"
+    ]
     failures = [
         record["extra"]
         for record in loguru_records

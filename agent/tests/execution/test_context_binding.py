@@ -5,7 +5,6 @@ import os
 import subprocess
 import sys
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 
@@ -24,7 +23,6 @@ from base.packages.plugin_providers import build_model_catalog
 from meiva.boot import process_clients
 
 
-@patch.dict(os.environ)
 def _start(tmp_path: Path, agent_id: int, code: str) -> tuple[subprocess.Popen[str], Path]:
     context = MeivaContext(
         identity=AgentIdentity(agent_id, True),
@@ -138,7 +136,6 @@ def test_failure_preserves_legal_delta_and_original_traceback(tmp_path: Path, fa
         assert f"raise {failure}" in (payload.full_traceback or "")
 
 
-@patch.dict(os.environ)
 def test_execution_tally_stays_with_its_context_and_out_of_description() -> None:
     tally = SdkCallTally()
     context = MeivaContext(
@@ -151,7 +148,6 @@ def test_execution_tally_stays_with_its_context_and_out_of_description() -> None
     assert tally.snapshot() == {"files.read": 1}
 
 
-@patch.dict(os.environ)
 def test_child_sdk_tally_includes_plain_thread_calls(tmp_path: Path) -> None:
     sample = tmp_path / "thread-sample.txt"
     sample.write_text("hello", encoding="utf-8")

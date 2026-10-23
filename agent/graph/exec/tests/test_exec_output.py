@@ -199,21 +199,14 @@ def test_wrap_code_output_header_body_double_newline_split(
 
 
 def test_wrap_code_output_truncates_keeps_both_ends_and_writes_file(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
+    unit_home: Path,
     crop_config: CropConfig,
     output_clock: Clock,
 ):
     """Exceeds exec_output_max_chars → keep head + tail, cut middle, full output written to tmp file and path reported.
     Head carries help() overview / overview, tail carries error / result, both ends must survive."""
-    from agent.graph.exec import output
-
     pin_agent(7)
-
-    def overflow_dir(_agent_id: int) -> Path:
-        return tmp_path / "overflow"
-
-    monkeypatch.setattr(output, "overflow_dir", overflow_dir)
+    overflow = unit_home / "workspaces" / "7" / ".exec_output"
 
     limit = 1000
     head_marker = "HEAD_START"
@@ -238,15 +231,14 @@ def test_wrap_code_output_truncates_keeps_both_ends_and_writes_file(
     )
 
     # path is reported, and the file holds the complete output
-    files = list((tmp_path / "overflow").glob("exec_*.txt"))
+    files = list(overflow.glob("exec_*.txt"))
     assert len(files) == 1
     assert str(files[0]) in out, "complete output path must be reported to agent"
     assert files[0].read_text(encoding="utf-8") == big
 
 
 def test_wrap_code_output_overflow_files_pruned_to_keep_limit(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
+    unit_home: Path,
     crop_config: CropConfig,
     output_clock: Clock,
 ):
@@ -254,14 +246,9 @@ def test_wrap_code_output_overflow_files_pruned_to_keep_limit(
     from agent.graph.exec import output
 
     pin_agent(7)
+    overflow = unit_home / "workspaces" / "7" / ".exec_output"
 
-    def overflow_dir(_agent_id: int) -> Path:
-        return tmp_path / "overflow"
-
-    monkeypatch.setattr(output, "overflow_dir", overflow_dir)
-    monkeypatch.setattr(output, "OVERFLOW_KEEP", 3)
-
-    for _ in range(5):
+    for _ in range(output.OVERFLOW_KEEP + 2):
         wrap_code_output(
             "Z" * 2000,
             agent_id=7,
@@ -272,8 +259,8 @@ def test_wrap_code_output_overflow_files_pruned_to_keep_limit(
             timestamp=_TS,
             elapsed_seconds=1.0,
         )
-    files = list((tmp_path / "overflow").glob("exec_*.txt"))
-    assert len(files) == 3, "only keep recent 3"
+    files = list(overflow.glob("exec_*.txt"))
+    assert len(files) == output.OVERFLOW_KEEP, "only keep recent OVERFLOW_KEEP"
 
 
 def test_wrap_code_output_no_truncation_when_under_limit(

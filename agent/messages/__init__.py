@@ -29,7 +29,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
-from typing import Any, cast
+from typing import Any, TypedDict, Unpack, cast
 
 from langchain_core.messages import (
     HumanMessage,
@@ -91,17 +91,26 @@ def _stamp_created_at(kwargs: dict[str, object], created_at: datetime | None) ->
     return kwargs
 
 
+class _InboundOptions(TypedDict, total=False):
+    created_at: datetime | None
+    image_urls: list[str] | None
+    message_id: str | None
+
+
 def inbound_message(
     *,
     content: str | Sequence[Mapping[str, object]],
     source: str,
     inbound_id: int | None,
     body_start: int,
-    created_at: datetime | None = None,
-    image_urls: list[str] | None = None,
-    message_id: str | None = None,
+    **options: Unpack[_InboundOptions],
 ) -> HumanMessage:
     # meiva:link agent/messages/docs/message-format.meiva.okf.md
+    if unknown := set(options) - {"created_at", "image_urls", "message_id"}:
+        raise TypeError(f"inbound_message() got unexpected keyword arguments: {sorted(unknown)}")
+    created_at = options.get("created_at")
+    image_urls = options.get("image_urls")
+    message_id = options.get("message_id")
     kwargs: dict[str, object] = {
         "meiva_msg_type": MeivaMsgType.INBOUND.value,
         "meiva_source": source,
@@ -196,6 +205,12 @@ def attach_message(
     )
 
 
+class _ExecOutputOptions(TypedDict, total=False):
+    exec_ms: int | None
+    started_at: datetime | None
+    sdk_calls: Sequence[Mapping[str, object]] | None
+
+
 def exec_output_message(
     *,
     content: str,
@@ -203,9 +218,7 @@ def exec_output_message(
     status: ExecStatus,
     body_start: int,
     created_at: datetime,
-    exec_ms: int | None = None,
-    started_at: datetime | None = None,
-    sdk_calls: Sequence[Mapping[str, object]] | None = None,
+    **options: Unpack[_ExecOutputOptions],
 ) -> ToolMessage:
     """Envelope-wrapped stdout/stderr block after subprocess exec completes
     (product of `agent/graph/exec/node.py:wrap_code_output`).
@@ -235,6 +248,11 @@ def exec_output_message(
             not supplied. Produced inside the context, so this is also its read
             time (no `meiva_picked_up_at`).
     """
+    if unknown := set(options) - {"exec_ms", "started_at", "sdk_calls"}:
+        raise TypeError(f"exec_output_message() got unexpected keyword arguments: {sorted(unknown)}")
+    exec_ms = options.get("exec_ms")
+    started_at = options.get("started_at")
+    sdk_calls = options.get("sdk_calls")
     kwargs: dict[str, object] = {
         "meiva_msg_type": MeivaMsgType.EXEC_OUTPUT.value,
         "meiva_exec_ms": exec_ms,

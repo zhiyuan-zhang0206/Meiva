@@ -5,9 +5,7 @@ from typing import Any
 
 import meiva
 from agent.state import build_agent_state, plugin_state_schema
-from base.agents.context.external_attachment import plugin_state_codec
 from base.packages.plugins.loading.registry import build_registry
-from meiva import impersonation
 from meiva.impersonation import attachment as attachment_module
 
 SAMPLE = sys.argv[1]
@@ -35,9 +33,9 @@ def load_snapshot(_agent_id: Any, **_kwargs: Any) -> tuple[Any, dict[str, Any], 
     return state, {}, None
 
 
-attachment_module.control.require_active = require_active
 os.environ["MEIVA_MACHINE_NAME"] = "external-cli-probe"
-plugin_state_codec.load_snapshot = load_snapshot
 
-with impersonation.attach("lease"):
+with attachment_module.Attachment(
+    "lease", lease_reader=require_active, snapshot_loader=load_snapshot
+):
     assert meiva.files.read(SAMPLE) == "tail event"

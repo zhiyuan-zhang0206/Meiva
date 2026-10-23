@@ -150,14 +150,20 @@ def test_regenerate_indexes_writes_every_directory_index(
     assert (pool / "index.md").is_file()
 
 
-def _run_validator(pool: Path) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(  # noqa: S603 — sys.executable + the validator copy seeded in the pool
-        [sys.executable, str(pool / "validate.py")],
-        capture_output=True,
-        text=True,
-        timeout=120,
-        check=False,
-    )
+def _validate_pool(pool: Path) -> list[str]:
+    from meiva_builtins.plugins.meiva_memory.template import validate
+
+    errors = [
+        *validate.validate_structure(pool),
+        *validate.validate_project_home(pool),
+        *validate.validate_type_tag(pool),
+        *validate.validate_indexes(pool),
+        *validate.validate_factchecks(pool),
+        *validate.validate_pointers(pool),
+    ]
+    for fp in sorted(pool.rglob("*.md")):
+        errors.extend(f"{fp.name}: {e}" for e in validate.validate_file(fp))
+    return errors
 
 
 def test_a_new_root_note_passes_the_pool_validator_after_the_steward(tmp_path: Path) -> None:
@@ -180,7 +186,7 @@ def test_a_new_root_note_passes_the_pool_validator_after_the_steward(tmp_path: P
     (pool / "rule.md").write_text(_NOTE)
     (pool / "topics").mkdir()
     (pool / "topics" / "retry.md").write_text(_NOTE.replace("Retry rule", "Topic rule"))
-    assert _run_validator(pool).returncode != 0  # the new notes are orphans until indexed
+    assert _validate_pool(pool) != []
 
     remote = tmp_path / "remote.git"
     subprocess.run(  # noqa: S603 — fixed argv, test-local fixture repo
@@ -200,6 +206,5 @@ def test_a_new_root_note_passes_the_pool_validator_after_the_steward(tmp_path: P
     assert "## Setup (keep current, do not drop)" in memory_index
     assert "- [Retry rule](rule.md) — Retries above three hurt" in memory_index
     assert "- [topics/](topics/index.md) — 1 notes" in memory_index
-    validated = _run_validator(pool)
-    assert validated.returncode == 0, validated.stderr
+    assert _validate_pool(pool) == []
     assert _git(pool, "status", "--porcelain").strip() == ""

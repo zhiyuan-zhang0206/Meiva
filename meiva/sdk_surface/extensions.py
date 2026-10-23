@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import replace
+from typing import TypedDict, Unpack
 
 from base.clock import Clock
 from base.config.service_read import ConfigAuthority
@@ -24,15 +25,19 @@ from base.packages.plugins.loading.faces import LoadedExtensions, import_faces
 from . import install as sdk_install
 
 
+class _LoadOptions(TypedDict, total=False):
+    clock_factory: Callable[[], Clock] | None
+    producer: Callable[[], object] | None
+    validate_state: StateGate | None
+
+
 def load_extensions(
     *,
     surface: bool = False,
     report: load_report.Reporter | None = None,
     catalog: ModelCatalog | None = None,
     authority: ConfigAuthority | None = None,
-    clock_factory: Callable[[], Clock] | None = None,
-    producer: Callable[[], object] | None = None,
-    validate_state: StateGate | None = None,
+    **options: Unpack[_LoadOptions],
 ) -> LoadedExtensions:
     """Read plugins_config.json, import the enabled plugins' faces, install what they declare.
 
@@ -51,6 +56,11 @@ def load_extensions(
     receive their composition root's explicit ``catalog`` and ``authority``. Inventory-only loads
     supply neither; accessing those SDK capabilities still requires a bound owner.
     """
+    if unknown := set(options) - {"clock_factory", "producer", "validate_state"}:
+        raise TypeError(f"load_extensions() got unexpected keyword arguments: {sorted(unknown)}")
+    clock_factory = options.get("clock_factory")
+    producer = options.get("producer")
+    validate_state = options.get("validate_state")
     previous = sdk_install.uninstall() if not surface else None
     sampling = None
     if previous is not None:

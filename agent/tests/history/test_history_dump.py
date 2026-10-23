@@ -18,6 +18,7 @@ Covers the four contracts of the feature:
 
 import json
 import re
+from collections.abc import Iterator
 from datetime import UTC, datetime, tzinfo
 from pathlib import Path
 from typing import Any
@@ -41,7 +42,6 @@ from langgraph.runtime import Runtime
 from psycopg_pool import AsyncConnectionPool
 
 from agent.graph import claim_node
-from agent.graph.hooks import compact
 from agent.graph.hooks.compact import auto_compact_for_llm, compose_summary_message
 from agent.hooks import history_dump
 from agent.messages import NoteTag, system_note_message
@@ -57,12 +57,22 @@ from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
-from base.host.env.agent_slices import AgentSlices, ModelOverrides
+from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
-from base.lm.context_budget import ContextBudget
 from base.packages.plugin_providers import build_model_catalog
 
 # ── helpers ──
+
+_DUMP_PINS: dict[str, Any] = {}
+
+
+@pytest.fixture(autouse=True)
+def _reset_dump_pins() -> Iterator[None]:
+    _DUMP_PINS.clear()
+    try:
+        yield
+    finally:
+        _DUMP_PINS.clear()
 
 
 def _patch_dump_enabled(
@@ -74,8 +84,8 @@ def _patch_dump_enabled(
 ) -> Any:
     """Enable the dump and redirect the workspace to a tmp dir, so tests never
     write into the real per-agent workspace. Returns the fake workspace root."""
-    monkeypatch.setattr(settings.agent, "history_dump_enabled", enabled)
-    monkeypatch.setattr(settings.agent, "history_dump_keep", keep)
+    _DUMP_PINS["history_dump_enabled"] = enabled
+    _DUMP_PINS["history_dump_keep"] = keep
     ws = tmp_path / "workspace"
 
     def _fake_workspace_dir(_aid: int) -> Any:
@@ -91,7 +101,8 @@ def _dump(messages: list[AnyMessage]) -> Any:
         messages,
         1,
         AgentSlices.resolve(
-            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
+            _DUMP_PINS,
+            default_reader=lambda domain, field: getattr(getattr(settings, domain), field),
         ).history_dump,
     )
 
@@ -167,22 +178,6 @@ def _compact_tail(update: Any) -> list[AnyMessage]:
     return update["context_reset"].tail
 
 
-def _patch_compact_config(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Pin compact thresholds so any message exceeds the force ceiling."""
-    budget = ContextBudget(
-        max_context_tokens=1_000_000,
-        soft_compact_tokens=1,
-        hard_compact_tokens=1,
-    )
-
-    def fixed_budget(
-        _model: str, _overrides: ModelOverrides, *, catalog: ModelCatalog
-    ) -> ContextBudget:
-        return budget
-
-    monkeypatch.setattr(compact, "resolve_context_budget", fixed_budget)
-
-
 def _fake_llm(summary_text: str) -> Any:
     llm = MagicMock()
     llm.bind_tools.return_value.ainvoke = AsyncMock(return_value=AIMessage(content=summary_text))
@@ -199,7 +194,8 @@ def _runtime_with_llm(llm: Any, database_gate: ProcessDbGate) -> Runtime[MeivaCo
             llm=llm,
             event_publisher=MagicMock(),
             agent=AgentSlices.resolve(
-                default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
+                {**_DUMP_PINS, "auto_compact_fraction": 1e-6, "compact_reminder_fraction": 1e-6},
+                default_reader=lambda domain, field: getattr(getattr(settings, domain), field),
             ),
             db=Database.from_settings(gate=database_gate),
             bus=EventBus.from_settings(),
@@ -234,7 +230,8 @@ def _make_runtime(
         llm=llm if llm is not None else _fake_llm("synthetic summary"),
         event_publisher=MagicMock(),
         agent=AgentSlices.resolve(
-            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
+            _DUMP_PINS,
+            default_reader=lambda domain, field: getattr(getattr(settings, domain), field),
         ),
         db=Database.from_settings(gate=database_gate),
         bus=EventBus.from_settings(),
@@ -414,7 +411,6 @@ async def test_auto_compact_injects_dump_note_after_summary(
     update carries only the REMOVE_ALL sentinel — the note is never in the
     pre-compact channel and never between an AIMessage and its ToolMessage."""
     ws = _patch_dump_enabled(monkeypatch, tmp_path)
-    _patch_compact_config(monkeypatch)
     state = _over_threshold_state()
 
     result = await auto_compact_for_llm(
@@ -443,7 +439,6 @@ async def test_auto_compact_no_note_when_disabled(
     """Config off → the auto-compact transition is exactly the old shape:
     tail = the summary alone, no note (and no dump file)."""
     _patch_dump_enabled(monkeypatch, tmp_path, enabled=False)
-    _patch_compact_config(monkeypatch)
     state = _over_threshold_state()
 
     result = await auto_compact_for_llm(
@@ -462,7 +457,6 @@ async def test_auto_compact_proceeds_when_dump_fails(
     """A dump failure degrades to today's behavior: compaction still applies,
     no note is injected."""
     _patch_dump_enabled(monkeypatch, tmp_path)
-    _patch_compact_config(monkeypatch)
 
     def _boom(aid: int) -> Any:
         raise OSError("disk full")

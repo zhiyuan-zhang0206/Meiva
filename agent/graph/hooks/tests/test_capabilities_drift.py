@@ -13,6 +13,7 @@ agent/graph/tests/prompt/test_capabilities_index.py.
 from __future__ import annotations
 
 import shutil
+from collections.abc import Iterator
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -21,7 +22,6 @@ from langchain_core.messages import AnyMessage, HumanMessage, SystemMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 
-from agent.graph.hooks import compact
 from agent.graph.hooks.capabilities import newly_installed_skills
 from agent.graph.hooks.framework import framework_hooks
 from agent.graph.prompt.capabilities import (
@@ -38,12 +38,28 @@ from base.config import settings
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
-from base.host.env.agent_slices import AgentSlices, ModelOverrides
-from base.lm.catalog import ModelCatalog
+from base.host.env.agent_slices import AgentSlices
 from base.packages.extensions import install_registry
 from base.packages.plugin_providers import build_model_catalog
 
 _CONFIG: RunnableConfig = {"configurable": {"thread_id": "1042"}}
+_DRIFT_PINS: dict[str, object] = {}
+
+
+@pytest.fixture(autouse=True)
+def _reset_drift_pins() -> Iterator[None]:
+    _DRIFT_PINS.clear()
+    try:
+        yield
+    finally:
+        _DRIFT_PINS.clear()
+
+
+def _slices() -> AgentSlices:
+    return AgentSlices.resolve(
+        {"skills_to_inject_into_system_prompt": ["*"], **_DRIFT_PINS},
+        default_reader=lambda domain, field: getattr(getattr(settings, domain), field),
+    )
 
 
 def _runtime(*, container: bool = False, database_gate: ProcessDbGate) -> Runtime[MeivaContext]:
@@ -54,9 +70,7 @@ def _runtime(*, container: bool = False, database_gate: ProcessDbGate) -> Runtim
             ops_pool=None if container else MagicMock(),
             llm=MagicMock(),
             event_publisher=MagicMock(),
-            agent=AgentSlices.resolve(
-                default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
-            ),
+            agent=_slices(),
             db=Database.from_settings(gate=database_gate),
             bus=EventBus.from_settings(),
             catalog=build_model_catalog(),
@@ -74,7 +88,6 @@ def skills_dir(unit_home: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
         "loadable_skill_names",
         lambda: {p.name for p in d.iterdir() if p.is_dir()},
     )
-    monkeypatch.setattr(settings.agent, "skills_to_inject_into_system_prompt", ["*"])
     return d
 
 
@@ -105,9 +118,7 @@ def test_drift_reports_only_what_appeared_since_the_snapshot(skills_dir: Path) -
     as an addition, and one that was already indexed does not show up again."""
     _install(skills_dir, "alpha", "Alpha desc")
     snapshot = indexed_skill_identifiers(
-        AgentSlices.resolve(
-            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
-        ).prompt
+        _slices().prompt
     )
     assert snapshot == {"alpha"}
 
@@ -115,9 +126,7 @@ def test_drift_reports_only_what_appeared_since_the_snapshot(skills_dir: Path) -
 
     drift = index_drift(
         snapshot,
-        AgentSlices.resolve(
-            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
-        ).prompt,
+        _slices().prompt,
     )
     assert [s["name"] for s in drift.added] == ["beta"]
     assert drift.identifiers == {"alpha", "beta"}
@@ -127,13 +136,9 @@ def test_drift_is_empty_when_the_catalog_has_not_moved(skills_dir: Path) -> None
     _install(skills_dir, "alpha", "Alpha desc")
     drift = index_drift(
         indexed_skill_identifiers(
-            AgentSlices.resolve(
-                default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
-            ).prompt
+            _slices().prompt
         ),
-        AgentSlices.resolve(
-            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
-        ).prompt,
+        _slices().prompt,
     )
     assert drift.added == []
 
@@ -145,17 +150,13 @@ def test_uninstall_leaves_the_snapshot_so_a_reinstall_announces_again(
     unioned — otherwise a skill removed and put back would stay silent."""
     _install(skills_dir, "alpha", "Alpha desc")
     snapshot = indexed_skill_identifiers(
-        AgentSlices.resolve(
-            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
-        ).prompt
+        _slices().prompt
     )
 
     shutil.rmtree(skills_dir / "alpha")
     after_removal = index_drift(
         snapshot,
-        AgentSlices.resolve(
-            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
-        ).prompt,
+        _slices().prompt,
     )
     assert after_removal.added == []
     assert after_removal.identifiers == set()
@@ -165,9 +166,7 @@ def test_uninstall_leaves_the_snapshot_so_a_reinstall_announces_again(
         s["name"]
         for s in index_drift(
             after_removal.identifiers,
-            AgentSlices.resolve(
-                default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
-            ).prompt,
+            _slices().prompt,
         ).added
     ] == ["alpha"]
 
@@ -182,9 +181,7 @@ async def test_hook_names_the_new_skill_in_the_index_line_shape(
     the same `- \\`meiva.skills.<path>\\` — description` line the index does."""
     _install(skills_dir, "alpha", "Alpha desc")
     snapshot = indexed_skill_identifiers(
-        AgentSlices.resolve(
-            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
-        ).prompt
+        _slices().prompt
     )
     _install(skills_dir, "beta", "Beta desc")
 
@@ -202,9 +199,7 @@ async def test_hook_advances_the_snapshot_so_one_install_is_named_once(
 ) -> None:
     _install(skills_dir, "alpha", "Alpha desc")
     snapshot = indexed_skill_identifiers(
-        AgentSlices.resolve(
-            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
-        ).prompt
+        _slices().prompt
     )
     _install(skills_dir, "beta", "Beta desc")
 
@@ -223,9 +218,7 @@ async def test_hook_is_silent_when_nothing_was_installed(
     assert (
         await _run_hook(
             indexed_skill_identifiers(
-                AgentSlices.resolve(
-                    default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
-                ).prompt
+                _slices().prompt
             ),
             database_gate=database_gate,
         )
@@ -277,20 +270,13 @@ async def test_a_bulk_install_is_capped_with_a_counted_tail(
 # ── the two turns that write nothing ──
 
 
-def _pin_compact_ceiling(monkeypatch: pytest.MonkeyPatch, *, hard_tokens: int) -> None:
+def _pin_compact_ceiling(_monkeypatch: pytest.MonkeyPatch, *, hard_tokens: int) -> None:
     """Pin the force-compact ceiling regardless of model. These messages carry no
     usage_metadata, so occupancy is the chars/4 fallback and `hard_tokens` is the
     absolute threshold `auto_compact_will_fire` compares against."""
-    from base.lm.context_budget import ContextBudget
-
-    def budget(_model: str, _overrides: ModelOverrides, *, catalog: ModelCatalog) -> ContextBudget:
-        return ContextBudget(
-            max_context_tokens=1_000_000,
-            soft_compact_tokens=hard_tokens,
-            hard_compact_tokens=hard_tokens,
-        )
-
-    monkeypatch.setattr(compact, "resolve_context_budget", budget)
+    _DRIFT_PINS["auto_compact_fraction"] = hard_tokens / 1_000_000
+    _DRIFT_PINS["compact_reminder_fraction"] = hard_tokens / 1_000_000
+    _DRIFT_PINS["auto_compact_ceiling_tokens"] = 0
 
 
 async def test_hook_defers_when_a_compaction_will_replace_the_window(
@@ -307,9 +293,7 @@ async def test_hook_defers_when_a_compaction_will_replace_the_window(
     """
     _install(skills_dir, "alpha", "Alpha desc")
     snapshot = indexed_skill_identifiers(
-        AgentSlices.resolve(
-            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
-        ).prompt
+        _slices().prompt
     )
     _install(skills_dir, "beta", "Beta desc")
     over_the_ceiling: list[AnyMessage] = [
@@ -339,9 +323,7 @@ async def test_container_mode_writes_nothing(
     note's trigger is whatever the host filesystem gained mid-run."""
     _install(skills_dir, "alpha", "Alpha desc")
     snapshot = indexed_skill_identifiers(
-        AgentSlices.resolve(
-            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
-        ).prompt
+        _slices().prompt
     )
     _install(skills_dir, "beta", "Beta desc")
 
@@ -358,18 +340,14 @@ async def test_container_mode_writes_nothing(
 
 
 async def test_narrowing_holds_and_a_configured_name_that_arrives_late_drifts_in(
-    skills_dir: Path, monkeypatch: pytest.MonkeyPatch, database_gate: ProcessDbGate
+    skills_dir: Path, database_gate: ProcessDbGate
 ) -> None:
     """An agent narrowed to a specific list gets the same diff with no special
     case: a name that resolved to nothing at build time and resolves now is
     drift, and a skill outside the list never becomes drift."""
-    monkeypatch.setattr(settings.agent, "skills_to_inject_into_system_prompt", ["beta"])
+    _DRIFT_PINS["skills_to_inject_into_system_prompt"] = ["beta"]
     _install(skills_dir, "alpha", "Alpha desc")
-    snapshot = indexed_skill_identifiers(
-        AgentSlices.resolve(
-            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
-        ).prompt
-    )
+    snapshot = indexed_skill_identifiers(_slices().prompt)
     assert snapshot == set()  # `beta` is configured but not installed yet
 
     _install(skills_dir, "beta", "Beta desc")
@@ -385,23 +363,22 @@ async def test_narrowing_holds_and_a_configured_name_that_arrives_late_drifts_in
 
 
 async def test_sdk_disabled_skills_never_drift(
-    skills_dir: Path, monkeypatch: pytest.MonkeyPatch, database_gate: ProcessDbGate
+    skills_dir: Path, database_gate: ProcessDbGate
 ) -> None:
     """`MEIVA_SDK_DISABLE=skills` removed the surface on purpose; an install must
     not put it back through the note."""
-    monkeypatch.setattr(settings.agent, "sdk_disable", ["skills"])
+    _DRIFT_PINS["sdk_disable"] = ["skills"]
     _install(skills_dir, "alpha", "Alpha desc")
     assert await _run_hook(set(), database_gate=database_gate) is None
 
 
 async def test_a_stale_config_name_warns_on_each_resolution(
     skills_dir: Path,
-    monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
     database_gate: ProcessDbGate,
 ) -> None:
     """Each unresolved resolution remains visible without global suppression."""
-    monkeypatch.setattr(settings.agent, "skills_to_inject_into_system_prompt", ["does-not-exist"])
+    _DRIFT_PINS["skills_to_inject_into_system_prompt"] = ["does-not-exist"]
     _install(skills_dir, "alpha", "Alpha desc")
 
     with caplog.at_level("WARNING"):

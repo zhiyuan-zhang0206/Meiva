@@ -7,13 +7,11 @@ import subprocess
 import sys
 from pathlib import Path
 from typing import Any, cast
-from unittest.mock import patch
 
 import pytest
 from langchain_core.messages import HumanMessage
 
 import meiva
-from agent import process_boot
 from agent.graph.exec.protocol import (
     make_request_path,
     make_result_path,
@@ -21,7 +19,6 @@ from agent.graph.exec.protocol import (
     write_request,
 )
 from base.native_process.tests.host_pipe import live_host_control
-from meiva import boot
 from meiva.sdk_surface.installation import Installation
 from meiva.tests.fixtures.pin_agent import exec_context
 
@@ -36,8 +33,11 @@ def child_env(
     config_overlay: dict[str, object] | None = None,
     birth_config: dict[str, object] | None = None,
     launcher_env: dict[str, str] | None = None,
+    unset_env: tuple[str, ...] = (),
 ) -> dict[str, str]:
     env = os.environ.copy()
+    for key in unset_env:
+        env.pop(key, None)
     env.update(launcher_env or {})
     env.update(
         {
@@ -66,6 +66,7 @@ def spawn_real_child(
     birth_config: dict[str, object] | None = None,
     write_request_file: bool = True,
     launcher_env: dict[str, str] | None = None,
+    unset_env: tuple[str, ...] = (),
     context: dict[str, Any] | None = None,
 ) -> tuple[subprocess.CompletedProcess[str], Path, Path]:
     exec_dir = tmp_path / "exec"
@@ -94,6 +95,7 @@ def spawn_real_child(
                 config_overlay=config_overlay,
                 birth_config=birth_config,
                 launcher_env=launcher_env,
+                unset_env=unset_env,
             ),
             timeout=120,
             check=False,
@@ -163,11 +165,7 @@ raise ValueError('boom')
     assert payload.sdk_calls == [{"method": "files.read", "count": 1}]
 
 
-def test_boot_config_failure_writes_crashed_envelope(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.delenv("MEIVA_CONFIG_FETCH", raising=False)
-    monkeypatch.setenv("MEIVA_CONFIG_BOOT", "eager")
+def test_boot_config_failure_writes_crashed_envelope(tmp_path: Path) -> None:
     home = tmp_path / "home"
     home.mkdir()
     (home / ".env").write_text(
@@ -182,7 +180,11 @@ def test_boot_config_failure_writes_crashed_envelope(
         tmp_path,
         "pass",
         write_request_file=False,
-        launcher_env={"MEIVA_DB_URL": "postgresql://meiva_runner@127.0.0.1:1/x"},
+        launcher_env={
+            "MEIVA_CONFIG_BOOT": "eager",
+            "MEIVA_DB_URL": "postgresql://meiva_runner@127.0.0.1:1/x",
+        },
+        unset_env=("MEIVA_CONFIG_FETCH",),
     )
 
     assert proc.returncode == 0, proc.stderr
@@ -195,11 +197,7 @@ def test_boot_config_failure_writes_crashed_envelope(
     assert payload.code_reached is False
 
 
-def test_lite_boot_config_failure_writes_crashed_envelope(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.delenv("MEIVA_CONFIG_BOOT", raising=False)
-    monkeypatch.delenv("MEIVA_CONFIG_FETCH", raising=False)
+def test_lite_boot_config_failure_writes_crashed_envelope(tmp_path: Path) -> None:
     home = tmp_path / "home"
     home.mkdir()
     (home / ".env").write_text(
@@ -209,7 +207,12 @@ def test_lite_boot_config_failure_writes_crashed_envelope(
         encoding="utf-8",
     )
 
-    proc, _request, result = spawn_real_child(tmp_path, "pass", write_request_file=False)
+    proc, _request, result = spawn_real_child(
+        tmp_path,
+        "pass",
+        write_request_file=False,
+        unset_env=("MEIVA_CONFIG_BOOT", "MEIVA_CONFIG_FETCH"),
+    )
 
     assert proc.returncode == 0, proc.stderr
     payload = read_result(result)
@@ -230,19 +233,17 @@ def test_missing_request_writes_crashed_envelope_after_healthy_boot(tmp_path: Pa
     assert payload.code_reached is False
 
 
-def test_crash_envelope_uses_stdlib_fallback_when_protocol_writer_fails(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_crash_envelope_uses_stdlib_fallback_when_protocol_writer_fails(tmp_path: Path) -> None:
     from agent.execution import child as exec_child
-    from agent.execution import protocol
 
     result = tmp_path / "result.json"
 
     def fail_write_result(_path: Path, _payload: object) -> None:
         raise OSError("synthetic protocol write failure")
 
-    monkeypatch.setattr(protocol, "write_result", fail_write_result)
-    exec_child.write_crashed_result(str(result), ValueError("fallback boom"))
+    exec_child.write_crashed_result(
+        str(result), ValueError("fallback boom"), writer=fail_write_result
+    )
 
     payload = read_result(result)
     assert payload.kind == "crashed"
@@ -445,15 +446,14 @@ def test_child_lifecycle_envelope(tmp_path: Path) -> None:
 
 
 def test_child_boot_timing_emits_ready_duration(
-    monkeypatch: pytest.MonkeyPatch, loguru_records: list[dict[str, Any]]
+    loguru_records: list[dict[str, Any]],
 ) -> None:
     from agent.execution import child as exec_child
-
-    monkeypatch.setattr(exec_child.time, "perf_counter", lambda: 100.25)
-
     from base.agents.context.clients import ClientSet
 
-    exec_child.emit_child_boot_timing(exec_child.import_runtime(100.0), clients=ClientSet())
+    exec_child.emit_child_boot_timing(
+        exec_child.import_runtime(100.0), clients=ClientSet(), now=100.25
+    )
 
     [record] = [
         record for record in loguru_records if record["extra"].get("event") == "exec_child_boot"
@@ -494,11 +494,11 @@ def test_child_applies_overlay_framework_and_pops_env(tmp_path: Path) -> None:
 
 
 def test_child_overlay_phases_framework_then_plugin(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, sdk_model_owner: Installation
+    tmp_path: Path, sdk_model_owner: Installation
 ) -> None:
     from agent.execution import child as exec_child
-    from agent.execution import protocol
     from agent.execution.protocol import RequestPayload, ResultPayload
+    from meiva.boot import ensure_plugins_loaded
 
     events: list[str] = []
     results: list[ResultPayload] = []
@@ -550,14 +550,22 @@ def test_child_overlay_phases_framework_then_plugin(
         )
         events.append("plugins")
 
-    monkeypatch.setattr(protocol, "read_request", fake_read_request)
-    monkeypatch.setattr(exec_child, "init_logger", fake_init_logger)
-    monkeypatch.setattr(process_boot, "apply_per_agent_sdk_disable", fake_sdk_disable)
-    monkeypatch.setattr(process_boot, "apply_per_agent_eval_isolation", fake_eval_isolation)
-    monkeypatch.setattr(exec_child, "build_state_slot", fake_build_state_slot)
-    monkeypatch.setattr(exec_child, "run_code", fake_run_code)
-    monkeypatch.setattr(protocol, "write_result", fake_write_result)
-    monkeypatch.setattr(boot, "ensure_plugins_loaded", fake_plugins_loaded)
+    def fake_initialize_context(
+        context: Any,
+        *,
+        config: Any,
+        clock_factory: Any,
+        producer: Any,
+        surface: bool = True,
+    ) -> None:
+        fake_plugins_loaded(
+            surface=surface,
+            config=config,
+            clock_factory=clock_factory or context.clock_factory,
+            producer=producer,
+            context=context,
+            machine=context.machine,
+        )
 
     def fake_apply_scope(
         birth: dict[str, object] | None,
@@ -569,19 +577,29 @@ def test_child_overlay_phases_framework_then_plugin(
         events.append(f"apply:{scope}")
         return bool(birth or overlay)
 
-    monkeypatch.setattr(exec_child, "apply_overlay_scope", fake_apply_scope)
-    monkeypatch.setenv("MEIVA_AGENT_CONFIG_OVERLAY", json.dumps({"llm_model": "x"}))
-    monkeypatch.setenv(
-        "MEIVA_AGENT_BIRTH_CONFIG", json.dumps({"llm_stream_ttft_timeout_seconds": 1.0})
+    env = {
+        "MEIVA_AGENT_CONFIG_OVERLAY": json.dumps({"llm_model": "x"}),
+        "MEIVA_AGENT_BIRTH_CONFIG": json.dumps({"llm_stream_ttft_timeout_seconds": 1.0}),
+        "MEIVA_EXEC_REQUEST_FILE": str(tmp_path / "req.json"),
+        "MEIVA_EXEC_RESULT_FILE": str(tmp_path / "res.json"),
+    }
+    deps = exec_child.ChildRunDeps(
+        init_logger=fake_init_logger,
+        read_request=fake_read_request,
+        pop_overlay_env=lambda: exec_child.pop_overlay_env(env),
+        apply_overlay_scope=fake_apply_scope,
+        initialize_context=fake_initialize_context,
+        apply_sdk_disable=fake_sdk_disable,
+        apply_eval_isolation=fake_eval_isolation,
+        build_state_slot=fake_build_state_slot,
+        run_code=fake_run_code,
+        write_result=fake_write_result,
     )
-    monkeypatch.setenv("MEIVA_EXEC_REQUEST_FILE", str(tmp_path / "req.json"))
-    monkeypatch.setenv("MEIVA_EXEC_RESULT_FILE", str(tmp_path / "res.json"))
 
     old_sigint = signal.getsignal(signal.SIGINT)
     old_sigterm = signal.getsignal(signal.SIGTERM)
     try:
-        with patch.dict(os.environ):
-            exec_child.main()
+        exec_child.main(env=env, deps=deps)
     finally:
         signal.signal(signal.SIGINT, old_sigint)
         signal.signal(signal.SIGTERM, old_sigterm)

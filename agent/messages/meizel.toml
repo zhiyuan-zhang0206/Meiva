@@ -13,7 +13,3 @@ exports = ["guard.py"]
 
 [debt.impure-edge]
 "guard.py#base/agents/messages/guard.py" = 1
-
-[debt.wide-params]
-"__init__.py#def exec_output_message" = 1
-"__init__.py#def inbound_message" = 1

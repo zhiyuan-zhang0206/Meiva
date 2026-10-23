@@ -43,6 +43,7 @@ import atexit
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from types import MappingProxyType
+from typing import TypedDict, Unpack
 
 from pydantic import BaseModel
 
@@ -217,15 +218,19 @@ def _run(undo: list[Callable[[], None]], primary: BaseException | None = None) -
         raise failure
 
 
+class _InstallOptions(TypedDict, total=False):
+    sampling: SamplingPolicyOwner | None
+    clock_factory: Callable[[], Clock] | None
+    producer: Callable[[], object] | None
+
+
 def install(
     registry: ExtensionRegistry,
     report: load_report.Reporter | None = None,
     *,
     catalog: ModelCatalog | None = None,
     authority: ConfigAuthority | None = None,
-    sampling: SamplingPolicyOwner | None = None,
-    clock_factory: Callable[[], Clock] | None = None,
-    producer: Callable[[], object] | None = None,
+    **options: Unpack[_InstallOptions],
 ) -> ExtensionRegistry:
     """Install `registry`'s SDK surface into `meiva`; return the registry of the plugins admitted.
 
@@ -234,6 +239,11 @@ def install(
         BaseException: an unexpected application or cleanup failure; already-applied
             pieces are undone before the original error propagates.
     """
+    if unknown := set(options) - {"sampling", "clock_factory", "producer"}:
+        raise TypeError(f"install() got unexpected keyword arguments: {sorted(unknown)}")
+    sampling = options.get("sampling")
+    clock_factory = options.get("clock_factory")
+    producer = options.get("producer")
     if installed() is not None:
         raise RuntimeError(
             "the SDK surface is already installed; uninstall() it before installing another registry"

@@ -533,9 +533,44 @@ def test_spawn_line_tees_and_notifies(_agent_row: int, launch_watcher: Callable[
     assert cmd.endswith("; exit $_ec")
 
 
+@dataclasses.dataclass(frozen=True)
+class _FakeBackground:
+    cli: pathlib.Path
+    log_dir: pathlib.Path | None = None
+
+    def validate_notify(self, notify: str | None) -> str | None:
+        return background.validate_notify(notify)
+
+    def allocate_output_path(self, session_id: int, name: str) -> pathlib.Path:
+        return background.allocate_output_path(session_id, name, log_dir=self.log_dir)
+
+    def notified_line(
+        self,
+        cmd: str,
+        *,
+        agent_id: int,
+        label: str,
+        source: str,
+        output_path: pathlib.Path,
+        notify: str | None,
+    ) -> str:
+        return background.notified_line(
+            cmd,
+            agent_id=agent_id,
+            label=label,
+            source=source,
+            output_path=output_path,
+            notify=notify,
+            cli=self.cli,
+        )
+
+    def write_launch_file(self, line: str, path: pathlib.Path) -> str:
+        return background.write_launch_file(line, path)
+
+
 @pytest.mark.flaky  # real pty watcher session + time.sleep polling (15s deadline)
 def test_watcher_completion_notice_e2e(
-    _agent_row: int, monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path
+    _agent_row: int, tmp_path: pathlib.Path
 ) -> None:
     """End-to-end through a real pty session: when the watcher child exits, the
     completion notice fires (CLI invoked with the watcher source) and the
@@ -545,11 +580,13 @@ def test_watcher_completion_notice_e2e(
     fake_cli = tmp_path / "fake-meiva"
     fake_cli.write_text(f"#!/bin/sh\nprintf '%s\\n' \"$@\" > {argv_file}\n")
     fake_cli.chmod(0o755)
-    monkeypatch.setattr(background, "cli_path", lambda: fake_cli)
 
     # `exit 7` exits the shell subshell wrapping the python command — use a
     # python-level SystemExit instead so the exit code flows through the child.
-    wid = _launch("raise SystemExit(7)\n", timeout="1h", name="test-e2e")
+    wid = spawn.run(
+        plans.plan_launch("raise SystemExit(7)\n", "1h", "test-e2e", None),
+        dataclasses.replace(wiring.spawn_deps(), background=_FakeBackground(cli=fake_cli)),
+    ).session_id
 
     deadline = time.time() + 15
     while time.time() < deadline and not argv_file.exists():
@@ -573,7 +610,6 @@ def test_watcher_completion_notice_e2e(
 
 def test_watcher_launch_during_shell_startup_with_long_paths(
     _agent_row: int,
-    monkeypatch: pytest.MonkeyPatch,
     tmp_path: pathlib.Path,
     unit_home: pathlib.Path,
 ) -> None:
@@ -591,11 +627,13 @@ def test_watcher_launch_during_shell_startup_with_long_paths(
     fake_cli = long_dir / "fake-meiva"
     fake_cli.write_text(f"#!/bin/sh\nprintf '%s\\n' \"$@\" > '{argv_file}'\n")
     fake_cli.chmod(0o755)
-    monkeypatch.setattr(background, "cli_path", lambda: fake_cli)
-    monkeypatch.setattr(background, "output_dir", lambda: long_dir)
     wid = spawn.run(
         plans.plan_launch("raise SystemExit(7)\n", "1h", "test-long-path", None),
-        dataclasses.replace(wiring.spawn_deps(), watchers_dir=carrier_dir),
+        dataclasses.replace(
+            wiring.spawn_deps(),
+            watchers_dir=carrier_dir,
+            background=_FakeBackground(cli=fake_cli, log_dir=long_dir),
+        ),
     ).session_id
     assert wait_for(argv_file.exists, timeout=15), meiva.shell.sessions.capture(wid, lines=30)
     argv = argv_file.read_text().splitlines()
@@ -635,7 +673,7 @@ def test_boot_inlines_agent_identity(tmp_path: pathlib.Path) -> None:
 
 @pytest.mark.flaky  # real pty watcher session + file-polling (15s deadline)
 def test_watcher_child_sees_agent_identity(
-    _agent_row: int, monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path
+    _agent_row: int, tmp_path: pathlib.Path
 ) -> None:
     """End-to-end regression (Task #964): a real watcher child must see its
     agent id via meiva.self.AGENT_ID — the wake-up send_message depends on it.
@@ -653,9 +691,11 @@ def test_watcher_child_sees_agent_identity(
     fake_cli = tmp_path / "fake-meiva"
     fake_cli.write_text("#!/bin/sh\nexit 0\n")
     fake_cli.chmod(0o755)
-    monkeypatch.setattr(background, "cli_path", lambda: fake_cli)
 
-    wid = _launch(code, timeout="1h", name="test-identity")
+    wid = spawn.run(
+        plans.plan_launch(code, "1h", "test-identity", None),
+        dataclasses.replace(wiring.spawn_deps(), background=_FakeBackground(cli=fake_cli)),
+    ).session_id
 
     deadline = time.time() + 15
     while time.time() < deadline and not out.exists():
@@ -709,7 +749,7 @@ def test_boot_overrides_stale_env_identity(tmp_path: pathlib.Path) -> None:
 
 
 def test_watcher_child_overrides_stale_session_identity(
-    _agent_row: int, monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path
+    _agent_row: int, tmp_path: pathlib.Path
 ) -> None:
     """A stale MEIVA_AGENT_ID in the session env must NOT win: the bootstrap
     inlines the spawning agent's id BEFORE `import meiva`. Regression for
@@ -729,21 +769,17 @@ def test_watcher_child_overrides_stale_session_identity(
     fake_cli = tmp_path / "fake-meiva"
     fake_cli.write_text("#!/bin/sh\nexit 0\n")
     fake_cli.chmod(0o755)
-    monkeypatch.setattr(background, "cli_path", lambda: fake_cli)
 
     stale = _agent_row + 1  # a WRONG identity, as if frozen into the session env
-
-    def forward_env(*, activate_venv: bool = True) -> dict[str, str]:
-        del activate_venv
-        return {"MEIVA_AGENT_ID": str(stale)}
-
-    monkeypatch.setattr(
-        _sessions,
-        "forward_env_dict",
-        forward_env,
-    )
-
-    wid = _launch(code, timeout="1h", name="test-stale-id")
+    base_deps = wiring.spawn_deps()
+    wid = spawn.run(
+        plans.plan_launch(code, "1h", "test-stale-id", None),
+        dataclasses.replace(
+            base_deps,
+            background=_FakeBackground(cli=fake_cli),
+            runner_env={**base_deps.runner_env, "MEIVA_AGENT_ID": str(stale)},
+        ),
+    ).session_id
 
     deadline = time.time() + 15
     while time.time() < deadline and not out.exists():

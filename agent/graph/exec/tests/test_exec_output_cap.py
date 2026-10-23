@@ -138,17 +138,10 @@ def test_live_stream_is_bounded_and_says_so_exactly_once() -> None:
 
 
 @pytest.fixture
-def _overflow(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """Redirect the workspace overflow ring into tmp_path."""
-    from agent.graph.exec import output
-
+def _overflow(unit_home: Path) -> Path:
+    """Redirect the workspace overflow ring into unit_home."""
     pin_agent(7)
-
-    def overflow_dir(_agent_id: int) -> Path:
-        return tmp_path / "overflow"
-
-    monkeypatch.setattr(output, "overflow_dir", overflow_dir)
-    return tmp_path / "overflow"
+    return unit_home / "workspaces" / "7" / ".exec_output"
 
 
 def test_envelope_still_has_both_ends_after_the_accumulation_cap(

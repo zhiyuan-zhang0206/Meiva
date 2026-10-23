@@ -128,6 +128,10 @@ async def exec_node(
     state: _state.AgentState,
     runtime: Runtime[MeivaContext],
     config: RunnableConfig,
+    *,
+    code_runner: Callable[..., Awaitable[Any]] | None = None,
+    subprocess_runner: Callable[..., Awaitable[tuple[ExecResult, ResultPayload | None]]] = run_in_subprocess,
+    attach_builder: Callable[..., Any] = build_attach_message,
 ) -> Command[ExecGoto]:
     """Run agent-written code in one disposable child process. See module docstring."""
     event_publisher = runtime.context.event_publisher
@@ -149,7 +153,14 @@ async def exec_node(
             "display", "timeline_default_limit"
         ),
     ):
-        return await exec_node_impl(state, runtime, config)
+        return await exec_node_impl(
+            state,
+            runtime,
+            config,
+            code_runner=code_runner,
+            subprocess_runner=subprocess_runner,
+            attach_builder=attach_builder,
+        )
 
 
 # meiva:note
@@ -197,6 +208,8 @@ async def run_agent_code(
     agent_id: int,
     code: str,
     chunk_publisher: ExecOutputChunkPublisher,
+    *,
+    subprocess_runner: Callable[..., Awaitable[tuple[ExecResult, ResultPayload | None]]] = run_in_subprocess,
 ) -> tuple[
     ExecResult,
     dict[str, Any],
@@ -221,7 +234,7 @@ async def run_agent_code(
         resources=ctx.hosted_resources,
     ) as cancel_event:
         outcome = await _exec_with_node_shield(
-            run_in_subprocess(
+            subprocess_runner(
                 code,
                 ctx,
                 cancel_event,
@@ -448,6 +461,10 @@ async def _exec_single_call(
     agent_id: int,
     call: ToolCall,
     exec_msg_idx: int,
+    *,
+    code_runner: Callable[..., Awaitable[Any]] | None = None,
+    subprocess_runner: Callable[..., Awaitable[tuple[ExecResult, ResultPayload | None]]] = run_in_subprocess,
+    attach_builder: Callable[..., Any] = build_attach_message,
 ) -> tuple[dict[str, Any], bool]:
     """Execute one invocation; return its state delta and whether it compacted."""
     assert ctx.event_publisher is not None, (  # noqa: S101
@@ -486,18 +503,24 @@ async def _exec_single_call(
     )
 
     started_at = datetime.now(UTC)
+    code_str = code_from_args(call["args"], source=f"tool_call {call['id']!r}")
     (
         result,
         plugin_state_update,
         exec_ms,
         envelope_attachments,
         envelope_sdk_calls,
-    ) = await run_agent_code(
-        state,
-        ctx,
-        agent_id,
-        code_from_args(call["args"], source=f"tool_call {call['id']!r}"),
-        chunk_publisher,
+    ) = await (
+        code_runner(state, ctx, agent_id, code_str, chunk_publisher)
+        if code_runner is not None
+        else run_agent_code(
+            state,
+            ctx,
+            agent_id,
+            code_str,
+            chunk_publisher,
+            subprocess_runner=subprocess_runner,
+        )
     )
     clock = ctx.require_clock()
     timestamp = (
@@ -570,7 +593,7 @@ async def _exec_single_call(
         # as the fallback for edge paths that skip this update (compact halt).
         merged_attach = merge_attachments(state.attach, envelope_attachments)
         update["attach"] = merged_attach
-        attach_msg = build_attach_message(
+        attach_msg = attach_builder(
             merged_attach, _attach_model(ctx), catalog=ctx.require_catalog()
         )
         if attach_msg is not None:
@@ -632,6 +655,10 @@ async def exec_node_impl(
     state: _state.AgentState,
     runtime: Runtime[MeivaContext],
     config: RunnableConfig,
+    *,
+    code_runner: Callable[..., Awaitable[Any]] | None = None,
+    subprocess_runner: Callable[..., Awaitable[tuple[ExecResult, ResultPayload | None]]] = run_in_subprocess,
+    attach_builder: Callable[..., Any] = build_attach_message,
 ) -> Command[ExecGoto]:
     replacements, calls = _remaining_exec_calls(state.messages)
     if not calls:
@@ -641,7 +668,14 @@ async def exec_node_impl(
         )
     agent_id = agent_id_from_config(config)
     delta, compacted = await _exec_single_call(
-        state, runtime.context, agent_id, calls[0], len(state.messages)
+        state,
+        runtime.context,
+        agent_id,
+        calls[0],
+        len(state.messages),
+        code_runner=code_runner,
+        subprocess_runner=subprocess_runner,
+        attach_builder=attach_builder,
     )
     if compacted:
         delta["pending_exec_notes"] = []

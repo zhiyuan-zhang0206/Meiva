@@ -46,20 +46,15 @@ _FORBIDDEN_PREFIXES = (
     "opentelemetry",
 )
 
-# Literal source with data in argv, so test selection can read the probe's imports.
-_PROBE = """
-import json
-import sys
+def _probe() -> None:
+    root, prefixes = sys.argv[1], tuple(json.loads(sys.argv[2]))
+    sys.path.insert(0, root)
+    import meiva_builtins.plugins.meiva_fleet._task_update as _task_update  # noqa: F401
+    import meiva_builtins.plugins.meiva_fleet.plugin as _plugin  # noqa: F401
+    import meiva_builtins.plugins.meiva_fleet.task_registry as _task_registry  # noqa: F401
 
-root, prefixes = sys.argv[1], tuple(json.loads(sys.argv[2]))
-sys.path.insert(0, root)
-import meiva_builtins.plugins.meiva_fleet._task_update  # the imports under test
-import meiva_builtins.plugins.meiva_fleet.plugin
-import meiva_builtins.plugins.meiva_fleet.task_registry
-
-bad = sorted(name for name in sys.modules if name.startswith(prefixes))
-print(json.dumps(bad))
-"""
+    bad = sorted(name for name in sys.modules if name.startswith(prefixes))
+    print(json.dumps(bad))
 
 
 def test_fleet_plugin_autoload_does_not_load_redis_psycopg_or_otel() -> None:
@@ -71,8 +66,7 @@ def test_fleet_plugin_autoload_does_not_load_redis_psycopg_or_otel() -> None:
             "-B",
             "-X",
             "utf8",
-            "-c",
-            _PROBE,
+            str(Path(__file__)),
             str(_REPO_ROOT),
             json.dumps(_FORBIDDEN_PREFIXES),
         ],
@@ -88,3 +82,7 @@ def test_fleet_plugin_autoload_does_not_load_redis_psycopg_or_otel() -> None:
     assert loaded == [], (
         f"fleet-plugin autoload must not load the redis/psycopg/otel stacks, found: {loaded}"
     )
+
+
+if __name__ == "__main__":
+    _probe()

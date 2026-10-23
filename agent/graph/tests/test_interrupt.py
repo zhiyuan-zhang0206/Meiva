@@ -19,7 +19,6 @@ from psycopg_pool import AsyncConnectionPool
 
 from agent.db import has_pending_interrupt, pending_interrupt_reason
 from agent.graph import _init_context, interrupt
-from agent.graph.hooks import compact
 from agent.graph.interrupt import (
     subscribe_interrupt,
 )
@@ -37,7 +36,7 @@ from base.config.tests.configuration import defaults
 from base.db import Database, create_agent
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
-from base.host.env.agent_slices import AgentSlices, ModelOverrides
+from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
 from base.native_process.stop_timing import RESTART_INTERRUPT_GRACE_S
 from base.native_process.turn_identity import HostedTurnResources
@@ -488,29 +487,12 @@ async def test_auto_compaction_cancels_at_llm_node_without_replacing_context(
     from agent.graph.llm.node import llm_node
     from agent.state import AgentState, CompactState
     from base.agents.context import MeivaContext
-    from base.lm.context_budget import ContextBudget
 
     tid = create_agent(db_conn)
     monkeypatch.setattr(interrupt, "INTERRUPT_POLL_S", 0.01)
-
-    def small_budget(
-        _model: str, _overrides: ModelOverrides, *, catalog: ModelCatalog
-    ) -> ContextBudget:
-        return ContextBudget(
-            max_context_tokens=10_000, soft_compact_tokens=1, hard_compact_tokens=1
-        )
-
-    monkeypatch.setattr(compact, "resolve_context_budget", small_budget)
     started, settled = asyncio.Event(), asyncio.Event()
 
-    async def summarizing(
-        _messages: object,
-        _llm: object,
-        _slices: AgentSlices,
-        *,
-        catalog: ModelCatalog,
-        binding: object = None,
-    ) -> str:
+    async def summarizing(*_args: object, **_kwargs: object) -> object:
         started.set()
         try:
             await asyncio.Future()
@@ -518,20 +500,23 @@ async def test_auto_compaction_cancels_at_llm_node_without_replacing_context(
             settled.set()
         raise AssertionError("unreachable")
 
-    monkeypatch.setattr(compact, "generate_summary", summarizing)
     state = AgentState(
         messages=[HumanMessage(content="uncompacted original work " * 30)],
         compact=CompactState(version=4),
         halted=False,
     )
     publisher, model = MagicMock(), MagicMock()
+    model.bind_tools.return_value.ainvoke = summarizing
     runtime = Runtime(
         context=MeivaContext(
             hosted_resources=hosted_resources,
             ops_pool=aops_pool,
             llm=model,
             event_publisher=publisher,
-            agent=AgentSlices.resolve(default_reader=defaults()),
+            agent=AgentSlices.resolve(
+                {"auto_compact_fraction": 1e-6, "compact_reminder_fraction": 1e-6},
+                default_reader=defaults(),
+            ),
             db=Database.from_settings(gate=database_gate),
             bus=EventBus.from_settings(),
             catalog=build_model_catalog(),
@@ -600,7 +585,7 @@ async def test_compaction_returns_through_claim_then_generates_before_compacting
     from typing import Any, cast
     from unittest.mock import AsyncMock, MagicMock
 
-    from langchain_core.messages import AIMessageChunk, HumanMessage
+    from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage
     from langchain_core.runnables import RunnableConfig
     from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
     from langgraph.graph.message import add_messages
@@ -614,12 +599,6 @@ async def test_compaction_returns_through_claim_then_generates_before_compacting
     from agent.state import AgentState, checkpoint_msgpack_allowlist
     from base.agents.context import MeivaContext
     from base.agents.tests.units import spawn_agent
-    from base.lm.context_budget import ContextBudget
-
-    def small_budget(
-        _model: str, _overrides: ModelOverrides, *, catalog: ModelCatalog
-    ) -> ContextBudget:
-        return ContextBudget(10_000, 1, 1)
 
     def apply(state: AgentState, command: Command[Any]) -> AgentState:
         assert isinstance(command.update, dict)
@@ -627,8 +606,6 @@ async def test_compaction_returns_through_claim_then_generates_before_compacting
         if "messages" in update:
             update["messages"] = add_messages(list(state.messages), update["messages"])
         return state.model_copy(update=update)
-
-    monkeypatch.setattr(compact, "resolve_context_budget", small_budget)
 
     def standing_head(
         _extensions: ExtensionRegistry,
@@ -646,8 +623,9 @@ async def test_compaction_returns_through_claim_then_generates_before_compacting
 
     monkeypatch.setattr(_init_context, "build_system_prompt", standing_head)
     monkeypatch.setattr(_init_context, "context_notes", no_notes)
-    summary = AsyncMock(return_value="the retained summary is still above the ceiling " * 30)
-    monkeypatch.setattr(compact, "generate_summary", summary)
+    summary = AsyncMock(
+        return_value=AIMessage(content="the retained summary is still above the ceiling " * 30)
+    )
 
     async def ordinary_generation():
         yield AIMessageChunk(
@@ -658,6 +636,7 @@ async def test_compaction_returns_through_claim_then_generates_before_compacting
 
     model, publisher = MagicMock(), MagicMock()
     model.bind_tools.return_value = model
+    model.ainvoke = summary
     model.astream.return_value = ordinary_generation()
     tid = spawn_agent(
         catalog=model_catalog,
@@ -672,7 +651,10 @@ async def test_compaction_returns_through_claim_then_generates_before_compacting
             ops_pool=aops_pool,
             llm=model,
             event_publisher=publisher,
-            agent=AgentSlices.resolve(default_reader=defaults()),
+            agent=AgentSlices.resolve(
+                {"auto_compact_fraction": 1e-6, "compact_reminder_fraction": 1e-6},
+                default_reader=defaults(),
+            ),
             db=Database.from_settings(gate=database_gate),
             bus=EventBus.from_settings(),
             catalog=build_model_catalog(),

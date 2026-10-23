@@ -47,7 +47,7 @@ def output_dir() -> Path:
     return workspace_dir(meiva.sdk_surface.agent_identity.require_agent_id()) / _OUTPUT_DIRNAME
 
 
-def allocate_output_path(session_id: int, name: str) -> Path:
+def allocate_output_path(session_id: int, name: str, *, log_dir: Path | None = None) -> Path:
     """Create (touch) and return the log file for one background run, pruning
     the workspace's oldest logs beyond the ring size. Touching the file up
     front makes the path immediately readable (progress can be tailed
@@ -63,7 +63,7 @@ def allocate_output_path(session_id: int, name: str) -> Path:
     """
     from meiva.shell import sessions as _sessions
 
-    d = output_dir()
+    d = log_dir if log_dir is not None else output_dir()
     d.mkdir(parents=True, exist_ok=True)
     path = d / f"{session_id}_{name}.log"
     path.touch()
@@ -112,7 +112,7 @@ def notified_line(
     label: str,
     source: str,
     output_path: Path,
-    keep: bool,
+    keep: bool = False,
     notify: str | None = None,
     cli: Path | None = None,
 ) -> str:

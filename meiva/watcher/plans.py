@@ -9,6 +9,7 @@ on the request without starting a session.
 from __future__ import annotations
 
 import datetime
+from typing import TypedDict, Unpack
 
 from base.daemon.schedules.watcher import (
     DEFAULT_STANDING_CRON_MAX_SECONDS,
@@ -49,16 +50,20 @@ def plan_launch(
     )
 
 
+class _CronOptions(TypedDict, total=False):
+    timezone: str | None
+    end_time: datetime.datetime | datetime.timedelta | str | None
+    notify: str | None
+
+
 def plan_cron(
     expr: str,
     message: str,
     *,
-    timezone: str | None,
-    end_time: datetime.datetime | datetime.timedelta | str | None,
     name: str,
-    notify: str | None,
     now: datetime.datetime,
     default_timezone: str,
+    **options: Unpack[_CronOptions],
 ) -> SpawnRequest:
     """A cron wake-up that runs until `end_time` (default: seven days from the current minute).
 
@@ -68,6 +73,11 @@ def plan_cron(
     Raises:
         ValueError: the message is empty, or `end_time` is in the past.
     """
+    if unknown := set(options) - {"timezone", "end_time", "notify"}:
+        raise TypeError(f"plan_cron() got unexpected keyword arguments: {sorted(unknown)}")
+    timezone = options.get("timezone")
+    end_time = options.get("end_time")
+    notify = options.get("notify")
     expr = coerce_str(expr, "expr")
     message = coerce_str(message, "message")
     timezone = coerce_str(timezone, "timezone", allow_none=True)

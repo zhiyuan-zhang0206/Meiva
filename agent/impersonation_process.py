@@ -5,6 +5,7 @@ from __future__ import annotations
 import contextlib
 import subprocess
 import sys
+from collections.abc import Callable
 from pathlib import Path
 
 __all__ = ["relay_argv", "spawn_codex_relay"]
@@ -54,6 +55,7 @@ def spawn_codex_relay(
     *,
     provider: str = "codex",
     antigravity_endpoint_file: str | None = None,
+    popen_fn: Callable[..., subprocess.Popen[bytes]] = subprocess.Popen,
 ) -> subprocess.Popen[bytes]:
     """Spawn the bound relay; the scoped credential travels over a private pipe.
 
@@ -80,7 +82,7 @@ def spawn_codex_relay(
         provider=provider,
         antigravity_endpoint_file=antigravity_endpoint_file,
     )
-    process = subprocess.Popen(  # noqa: S603 — fixed argv built from constants and lease-row fields
+    process = popen_fn(
         argv,
         stdin=subprocess.PIPE,
         stdout=subprocess.DEVNULL,

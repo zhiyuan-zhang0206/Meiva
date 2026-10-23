@@ -1,5 +1,5 @@
 import json
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
@@ -33,11 +33,21 @@ from base.config.tests.configuration import defaults
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
-from base.host.env.agent_slices import AgentSlices, ModelOverrides
-from base.lm.catalog import ModelCatalog
-from base.lm.context_budget import ContextBudget
+from base.host.env.agent_slices import AgentSlices
 from base.packages.plugin_providers import build_model_catalog
 from base.packages.plugins.extensions import EMPTY
+
+
+_COMPACT_PINS: dict[str, Any] = {}
+
+
+@pytest.fixture(autouse=True)
+def reset_compact_pins() -> Iterator[None]:
+    _COMPACT_PINS.clear()
+    try:
+        yield
+    finally:
+        _COMPACT_PINS.clear()
 
 
 def read_agent_field(field: str):
@@ -45,7 +55,7 @@ def read_agent_field(field: str):
 
 
 def pinned_slices(pins: Mapping[str, Any] | None = None) -> AgentSlices:
-    return AgentSlices.resolve(pins, default_reader=defaults())
+    return AgentSlices.resolve({**_COMPACT_PINS, **(pins or {})}, default_reader=defaults())
 
 
 def compact_tail(update: Any) -> list[AnyMessage]:
@@ -57,23 +67,14 @@ def compact_tail(update: Any) -> list[AnyMessage]:
 
 
 def patch_compact_config(
-    monkeypatch: pytest.MonkeyPatch,
+    _monkeypatch: pytest.MonkeyPatch,
     *,
     auto_compact_tokens: int = 800_000,
     compact_reminder_tokens: int = 600_000,
 ) -> None:
-    budget = ContextBudget(
-        max_context_tokens=1_000_000,
-        soft_compact_tokens=compact_reminder_tokens,
-        hard_compact_tokens=auto_compact_tokens,
-    )
-
-    def fixed_budget(
-        _model: str, _overrides: ModelOverrides, *, catalog: ModelCatalog
-    ) -> ContextBudget:
-        return budget
-
-    monkeypatch.setattr("agent.graph.hooks.compact.resolve_context_budget", fixed_budget)
+    _COMPACT_PINS["auto_compact_fraction"] = auto_compact_tokens / 1_000_000
+    _COMPACT_PINS["compact_reminder_fraction"] = compact_reminder_tokens / 1_000_000
+    _COMPACT_PINS["auto_compact_ceiling_tokens"] = 0
 
 
 def make_fake_llm(summary_text: str = "fake summary", *, response: AIMessage | None = None) -> Any:

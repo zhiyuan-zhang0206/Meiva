@@ -29,7 +29,3 @@ exports = ["files.py", "plans.py", "spawn.py", "wiring.py"]
 "wiring.py#base/paths/__init__.py" = 1
 "wiring.py#meiva/shell/background.py" = 1
 "wiring.py#meiva/shell/sessions.py" = 2
-
-[debt.wide-params]
-"plans.py#def plan_cron" = 1
-"spawn.py#def notified_line" = 1

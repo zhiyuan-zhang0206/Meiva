@@ -39,7 +39,6 @@
 "test_memory_write_wraps.py#monkeypatch.setattr base.agents.sdk.call_policy.policy" = 1
 
 [debt.restricted-python]
-"test_meiva_memory_steward_guard.py#python subprocess that runs something other than a literal repository file" = 1
 "test_memory_write_wraps.py#python -c" = 1
 
 [debt.unresolved-patch]

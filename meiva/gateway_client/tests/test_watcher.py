@@ -296,7 +296,6 @@ class _FakeDT:
 def _exec_watcher(
     script: str,
     wall: _FakeWall,
-    monkeypatch: pytest.MonkeyPatch,
     *,
     send: Callable[..., None] | None = None,
 ) -> list[tuple[object, object]]:
@@ -308,13 +307,16 @@ def _exec_watcher(
     with fakes before exec — the template itself stays untouched. `_wake`'s delivery
     is stubbed through meiva.gateway_client; pass `send` to script a failing stub
     (the wake-retry tests, task #3525)."""
-    from meiva import gateway_client
-    from meiva.sdk_surface import agent_identity
-
-    script = script.replace("import datetime as _dt\n", "_dt = _FakeDT\n").replace(
-        "import time as _time\n", "_time = _fake_time\n"
+    script = (
+        script.replace("import datetime as _dt\n", "_dt = _FakeDT\n")
+        .replace("import time as _time\n", "_time = _fake_time\n")
+        .replace("import os as _os\n", "_os = _fake_os\n")
+        .replace("from meiva.sdk_surface import agent_identity\n", "agent_identity = _fake_id\n")
+        .replace("from meiva import gateway_client\n", "gateway_client = _fake_gw\n")
     )
     fake_time = type("_FakeTime", (), {"sleep": staticmethod(wall.sleep)})()
+    fake_os = type("_FakeOS", (), {"environ": {"MEIVA_WATCHER_SESSION_ID": "77"}})()
+    fake_id = type("_FakeID", (), {"agent_id": staticmethod(lambda: 3115)})()
     _FakeDateTime._wall = wall
 
     sent: list[tuple[object, object]] = []
@@ -322,16 +324,24 @@ def _exec_watcher(
     def _record(*a: object, **k: object) -> None:
         sent.append((a, k))
 
-    monkeypatch.setattr(agent_identity, "agent_id", lambda: 3115)
-    monkeypatch.setattr(gateway_client, "send_message", send if send is not None else _record)
-    monkeypatch.setenv("MEIVA_WATCHER_SESSION_ID", "77")
-    exec(script, {"__name__": "__watcher__", "_FakeDT": _FakeDT, "_fake_time": fake_time})
+    fake_gw = type(
+        "_FakeGW", (), {"send_message": staticmethod(send if send is not None else _record)}
+    )()
+    exec(
+        script,
+        {
+            "__name__": "__watcher__",
+            "_FakeDT": _FakeDT,
+            "_fake_time": fake_time,
+            "_fake_os": fake_os,
+            "_fake_id": fake_id,
+            "_fake_gw": fake_gw,
+        },
+    )
     return sent
 
 
-def test_cron_clock_step_backwards_never_fires_a_boundary_twice(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_cron_clock_step_backwards_never_fires_a_boundary_twice() -> None:
     """The issue #182 scenario: every sleep lands the wall clock BACK before the
     boundary (accumulated ~1.5-3s corrections), and after a fire the clock steps
     back across the fired boundary. The watcher must fire each boundary exactly
@@ -347,7 +357,7 @@ def test_cron_clock_step_backwards_never_fires_a_boundary_twice(
         timezone="UTC",
         end_time_iso="2026-08-20T16:02:00-08:00",  # 00:02:00 UTC
     )
-    sent = _exec_watcher(script, wall, monkeypatch)
+    sent = _exec_watcher(script, wall)
 
     assert len(sent) == 3, f"expected exactly 3 boundary fires, got {len(sent)}"
     # Fires happened at the boundary instants — never before them.
@@ -360,9 +370,7 @@ def test_cron_clock_step_backwards_never_fires_a_boundary_twice(
         assert wall.t >= boundary, f"fired before the boundary ({wall.t} < {boundary})"
 
 
-def test_at_clock_step_backwards_does_not_fire_early(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_at_clock_step_backwards_does_not_fire_early() -> None:
     """An `at` watcher whose sleep lands the clock back before `when` (the 2.9s-early
     fire from the issue) must keep waiting and fire at/after `when`, exactly once."""
     when = dt.datetime(2026, 8, 20, 16, 0, 12, 330000, tzinfo=dt.UTC)
@@ -371,15 +379,13 @@ def test_at_clock_step_backwards_does_not_fire_early(
         corrections=[-4.0],
     )
     script = build_at_script(when_iso=when.isoformat(), message="wake", timezone="UTC")
-    sent = _exec_watcher(script, wall, monkeypatch)
+    sent = _exec_watcher(script, wall)
 
     assert len(sent) == 1
     assert wall.t >= when, f"fired before `when` ({wall.t} < {when})"
 
 
-def test_cron_clock_step_forward_still_fires_each_boundary_once(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_cron_clock_step_forward_still_fires_each_boundary_once() -> None:
     """Clock stepping FORWARD (waking past the boundary) must not add or drop
     fires: each boundary fires once, late by the step but never twice."""
     wall = _FakeWall(
@@ -392,7 +398,7 @@ def test_cron_clock_step_forward_still_fires_each_boundary_once(
         timezone="UTC",
         end_time_iso="2026-08-20T16:02:00-08:00",  # 00:02:00 UTC
     )
-    sent = _exec_watcher(script, wall, monkeypatch)
+    sent = _exec_watcher(script, wall)
 
     assert len(sent) == 3, f"expected exactly 3 boundary fires, got {len(sent)}"
 
@@ -401,7 +407,7 @@ def test_cron_clock_step_forward_still_fires_each_boundary_once(
 
 
 def test_cron_script_announces_schedule_state(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     """A running cron watcher must say on stdout what it is doing: its next
     fire at startup and, after each fire, the fired instant plus the next fire.
@@ -419,7 +425,7 @@ def test_cron_script_announces_schedule_state(
         timezone="UTC",
         end_time_iso="2026-08-20T16:02:00-08:00",  # 00:02:00 UTC
     )
-    sent = _exec_watcher(script, wall, monkeypatch)
+    sent = _exec_watcher(script, wall)
     out = capsys.readouterr().out
 
     assert len(sent) == 3  # fire semantics unchanged by the prints
@@ -436,14 +442,14 @@ def test_cron_script_announces_schedule_state(
 
 
 def test_at_script_announces_when(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     """A one-shot watcher announces its target time at startup, so a session
     capture shows at a glance when it will fire."""
     when = dt.datetime(2026, 8, 20, 16, 0, 0, tzinfo=dt.UTC)
     wall = _FakeWall(dt.datetime(2026, 8, 20, 15, 59, 30, tzinfo=dt.UTC), corrections=[])
     script = build_at_script(when_iso=when.isoformat(), message="wake", timezone="UTC")
-    sent = _exec_watcher(script, wall, monkeypatch)
+    sent = _exec_watcher(script, wall)
     out = capsys.readouterr().out
 
     assert len(sent) == 1  # fire semantics unchanged
@@ -472,9 +478,7 @@ def test_build_scripts_carry_wake_retry() -> None:
         ast.parse(script, filename="<script>")
 
 
-def test_wake_retries_transient_failure_then_delivers(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_wake_retries_transient_failure_then_delivers() -> None:
     """Two failing attempts must not lose the wake — the third delivers."""
     when = dt.datetime(2026, 8, 20, 16, 0, 0, tzinfo=dt.UTC)
     wall = _FakeWall(dt.datetime(2026, 8, 20, 15, 59, 30, tzinfo=dt.UTC), corrections=[])
@@ -486,13 +490,13 @@ def test_wake_retries_transient_failure_then_delivers(
         if len(attempts) < 3:
             raise ConnectionError("gateway restarting")
 
-    _exec_watcher(script, wall, monkeypatch, send=flaky)
+    _exec_watcher(script, wall, send=flaky)
     assert len(attempts) == 3  # two failures, then delivery
     assert 10.0 in wall.sleeps and 40.0 in wall.sleeps  # bounded backoff between attempts
 
 
 def test_wake_final_failure_is_logged_not_raised(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     """A sustained outage must not crash the watcher: three failed attempts,
     the failure lands on stderr, and the script exits without raising."""
@@ -503,13 +507,13 @@ def test_wake_final_failure_is_logged_not_raised(
     def boom(*_args: object, **_kwargs: object) -> None:
         raise ConnectionError("connection refused")
 
-    _exec_watcher(script, wall, monkeypatch, send=boom)  # must not raise
+    _exec_watcher(script, wall, send=boom)  # must not raise
     err = capsys.readouterr().err
     assert "wake delivery failed after 3 attempts" in err
 
 
 def test_cron_wake_failure_keeps_the_schedule(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     """When one fire's wake cannot be delivered, the cron loop survives and
     the next fire's wake is delivered (2026-09-15: the bare call killed it)."""
@@ -527,6 +531,6 @@ def test_cron_wake_failure_keeps_the_schedule(
         if len(attempts) <= 3:  # fire 1: all three attempts fail
             raise ConnectionError("gateway down")
 
-    _exec_watcher(script, wall, monkeypatch, send=first_fire_down)
+    _exec_watcher(script, wall, send=first_fire_down)
     assert len(attempts) == 4  # fire 2 delivered on its first attempt
     assert "wake delivery failed after 3 attempts" in capsys.readouterr().err

@@ -34,6 +34,7 @@ from agent.tests.test_compact import (
     runtime_with_llm,
 )
 from agent.tests.test_compact import meiva_compact_loaded as meiva_compact_loaded
+from agent.tests.test_compact import reset_compact_pins as reset_compact_pins
 from base.agents.context import MeivaContext
 from base.agents.tests.units import spawn_agent
 from base.clock import Clock

@@ -92,14 +92,17 @@ def _arm_watchdog(timeout_s: float) -> None:
     timer.start()
 
 
-def pop_overlay_env() -> tuple[dict[str, object] | None, dict[str, object] | None]:
+def pop_overlay_env(
+    env: dict[str, str] | None = None,
+) -> tuple[dict[str, object] | None, dict[str, object] | None]:
     import json as _json
 
     from base.host.env.registry import AGENT_BIRTH_CONFIG_ENV, AGENT_CONFIG_OVERLAY_ENV
 
+    target_env = os.environ if env is None else env
     maps: dict[str, dict[str, object] | None] = {}
     for env_name in (AGENT_BIRTH_CONFIG_ENV, AGENT_CONFIG_OVERLAY_ENV):
-        raw = os.environ.pop(env_name, "")
+        raw = target_env.pop(env_name, "")
         if not raw:
             maps[env_name] = None
             continue
@@ -165,8 +168,10 @@ def init_logger(
     producer().defer_exports()
 
 
-def emit_child_boot_timing(child: ChildContext, *, clients: Any) -> None:
-    duration_ms = (time.perf_counter() - child.boot_started_at) * 1000
+def emit_child_boot_timing(
+    child: ChildContext, *, clients: Any, now: float | None = None
+) -> None:
+    duration_ms = ((now if now is not None else time.perf_counter()) - child.boot_started_at) * 1000
     extra: dict[str, object] = {}
     deferred = clients.exports_deferred()
     if deferred is not None:
@@ -388,24 +393,47 @@ def _bind_identity(
     )
 
 
+@dataclass(frozen=True)
+class ChildRunDeps:
+    line_buffered_output: Callable[[], None] = line_buffered_output
+    init_logger: Callable[..., None] = init_logger
+    read_request: Callable[[Path], RequestPayload] | None = None
+    pop_overlay_env: Callable[
+        [], tuple[dict[str, object] | None, dict[str, object] | None]
+    ] = pop_overlay_env
+    apply_overlay_scope: Callable[..., bool] = apply_overlay_scope
+    initialize_context: Callable[..., None] | None = None
+    apply_sdk_disable: Callable[..., None] | None = None
+    apply_eval_isolation: Callable[..., None] | None = None
+    build_state_slot: Callable[[ChildContext, RequestPayload], None] = build_state_slot
+    run_code: Callable[[str, Any], None] = run_code
+    write_result: Callable[[Path, Any], None] | None = None
+
+
 def run_child(
-    request_path: str, result_path: str, boot_started_at: float, *, config: Any, context: Any
+    request_path: str,
+    result_path: str,
+    boot_started_at: float,
+    *,
+    config: Any,
+    context: Any,
+    deps: ChildRunDeps = ChildRunDeps(),
 ) -> None:
     child = import_runtime(boot_started_at)
     from agent.execution.protocol import ResultPayload, read_request, write_result
 
-    line_buffered_output()
+    deps.line_buffered_output()
     _install_signal_handlers()
     raw_agent_id = os.environ.get("MEIVA_AGENT_ID")
-    init_logger(
+    deps.init_logger(
         None if raw_agent_id is None else int(raw_agent_id),
         producer=context.clients.event_pipeline,
         machine_reader=context.require_machine().name,
     )
-    request = read_request(Path(request_path))
+    request = (deps.read_request or read_request)(Path(request_path))
     payload = ResultPayload(kind="done")
 
-    birth, overlay = pop_overlay_env()
+    birth, overlay = deps.pop_overlay_env()
     from base.clock import SYSTEM_TIMERS, Clock
     from base.clock.configuration import clock_config_from_boot
 
@@ -414,19 +442,19 @@ def run_child(
 
     _bind_identity(request, context=context, clock_factory=clock_factory)
 
-    framework_overlay_applied = apply_overlay_scope(
+    framework_overlay_applied = deps.apply_overlay_scope(
         birth, overlay, scope="framework", set_framework_field=config.set_field
     )
     import meiva
 
-    init_logger(
+    deps.init_logger(
         request.agent_id,
         producer=meiva.context.clients.event_pipeline,
         machine_reader=context.require_machine().name,
     )
     from meiva.boot import initialize_context
 
-    initialize_context(
+    (deps.initialize_context or initialize_context)(
         meiva.context,
         config=config,
         clock_factory=clock_factory,
@@ -434,7 +462,7 @@ def run_child(
     )
     from meiva.sdk_surface import settings as sdk_settings
 
-    apply_overlay_scope(birth, overlay, scope="plugin")
+    deps.apply_overlay_scope(birth, overlay, scope="plugin")
 
     def read_agent_default(_domain: str, field: str) -> Any:
         return sdk_settings.config_authority().service_field_value(field)
@@ -442,12 +470,14 @@ def run_child(
     if framework_overlay_applied:
         from agent.process_boot import apply_per_agent_sdk_disable
 
-        apply_per_agent_sdk_disable(default_reader=read_agent_default)
+        (deps.apply_sdk_disable or apply_per_agent_sdk_disable)(default_reader=read_agent_default)
 
     from agent.process_boot import apply_per_agent_eval_isolation
 
-    apply_per_agent_eval_isolation(default_reader=read_agent_default)
-    build_state_slot(child, request)
+    (deps.apply_eval_isolation or apply_per_agent_eval_isolation)(
+        default_reader=read_agent_default
+    )
+    deps.build_state_slot(child, request)
 
     if request.timeout_s > 0:
         _arm_watchdog(request.timeout_s)
@@ -459,7 +489,7 @@ def run_child(
         deliver_envelope_telemetry()
         return
     try:
-        run_code(request.code, payload)
+        deps.run_code(request.code, payload)
     except BaseException as exc:
         write_crashed_result(result_path, exc, code_reached=payload.code_reached)
         deliver_envelope_telemetry()
@@ -468,17 +498,20 @@ def run_child(
         _take_result_state_update(child, payload, state_injected=request.state_raw is not None)
 
     try:
-        write_result(Path(result_path), payload)
+        (deps.write_result or write_result)(Path(result_path), payload)
     except BaseException as write_exc:
         write_crashed_result(result_path, write_exc, code_reached=payload.code_reached)
 
     deliver_run_telemetry(result_path, payload)
 
 
-def main() -> None:
+def main(
+    *, env: Mapping[str, str] | None = None, deps: ChildRunDeps = ChildRunDeps()
+) -> None:
     boot_started_at = time.perf_counter()
-    request_path = os.environ.get("MEIVA_EXEC_REQUEST_FILE")
-    result_path = os.environ.get("MEIVA_EXEC_RESULT_FILE")
+    env_source = os.environ if env is None else env
+    request_path = env_source.get("MEIVA_EXEC_REQUEST_FILE")
+    result_path = env_source.get("MEIVA_EXEC_RESULT_FILE")
     if not request_path or not result_path:
         sys.stderr.write(
             "agent.execution.child needs MEIVA_EXEC_REQUEST_FILE and MEIVA_EXEC_RESULT_FILE "
@@ -488,7 +521,7 @@ def main() -> None:
     clients: Any = None
     apply_oom_preference()
     try:
-        line_buffered_output()
+        deps.line_buffered_output()
         _install_signal_handlers()
         from base.agents.context import MeivaContext
         from base.cluster.machine.boot import machine_from_boot
@@ -500,7 +533,9 @@ def main() -> None:
         machine = machine_from_boot(config)
         clients = process_clients(config=config, machine=machine)
         context = MeivaContext(clients=clients, machine=machine)
-        run_child(request_path, result_path, boot_started_at, config=config, context=context)
+        run_child(
+            request_path, result_path, boot_started_at, config=config, context=context, deps=deps
+        )
     except BaseException as exc:
         write_crashed_result(result_path, exc)
 
@@ -515,7 +550,11 @@ def main() -> None:
 
 
 def write_crashed_result(
-    result_path: str, exc: BaseException, *, code_reached: bool | None = False
+    result_path: str,
+    exc: BaseException,
+    *,
+    code_reached: bool | None = False,
+    writer: Callable[[Path, Any], None] | None = None,
 ) -> None:
     exc_type = type(exc).__name__
     exc_msg = str(exc)[:2000]
@@ -535,7 +574,7 @@ def write_crashed_result(
         from agent.execution.protocol import ResultPayload as RuntimeResultPayload
         from agent.execution.protocol import write_result as runtime_write_result
 
-        runtime_write_result(
+        (writer or runtime_write_result)(
             Path(result_path),
             RuntimeResultPayload(
                 kind="crashed",

@@ -60,11 +60,9 @@ def test_child_sigterm_writes_timed_out_envelope(tmp_path: Path) -> None:
 
 
 def test_child_installs_signal_handlers_before_reading_request(
-    monkeypatch: pytest.MonkeyPatch,
     sdk_model_owner: Installation,
 ) -> None:
     from agent.execution import child as exec_child
-    from agent.execution import protocol
     from agent.execution.protocol import RequestPayload, ResultPayload
 
     old_sigint = signal.getsignal(signal.SIGINT)
@@ -95,29 +93,29 @@ def test_child_installs_signal_handlers_before_reading_request(
     def fake_write_result(_path: Path, _payload: ResultPayload) -> None:
         return None
 
-    def fake_ensure_plugins_loaded(
-        *,
-        surface: bool = True,
+    def fake_initialize_context(
         context: object,
+        *,
         config: object,
         clock_factory: object,
         producer: Callable[[], object],
-        machine: object,
+        surface: bool = True,
     ) -> None:
         assert surface is True
         assert context is meiva.context
         assert callable(producer)
         assert meiva.context.clock_factory is clock_factory
-        assert meiva.context.machine is machine
 
-    monkeypatch.setattr(exec_child, "line_buffered_output", lambda: None)
-    monkeypatch.setattr(protocol, "read_request", fake_read_request)
-    monkeypatch.setattr(exec_child, "pop_overlay_env", lambda: (None, None))
-    monkeypatch.setattr(exec_child, "apply_overlay_scope", fake_apply_scope)
-    monkeypatch.setattr(exec_child, "build_state_slot", fake_build_state_slot)
-    monkeypatch.setattr(exec_child, "run_code", fake_run_code)
-    monkeypatch.setattr(protocol, "write_result", fake_write_result)
-    monkeypatch.setattr(meiva, "ensure_plugins_loaded", fake_ensure_plugins_loaded)
+    deps = exec_child.ChildRunDeps(
+        line_buffered_output=lambda: None,
+        read_request=fake_read_request,
+        pop_overlay_env=lambda: (None, None),
+        apply_overlay_scope=fake_apply_scope,
+        initialize_context=fake_initialize_context,
+        build_state_slot=fake_build_state_slot,
+        run_code=fake_run_code,
+        write_result=fake_write_result,
+    )
 
     try:
         from base.agents.context import MeivaContext
@@ -130,7 +128,9 @@ def test_child_installs_signal_handlers_before_reading_request(
         clients = process_clients(config=config, machine=machine)
         context = MeivaContext(clients=clients, machine=machine)
         try:
-            exec_child.run_child("request.json", "result.json", 0.0, config=config, context=context)
+            exec_child.run_child(
+                "request.json", "result.json", 0.0, config=config, context=context, deps=deps
+            )
         finally:
             clients.close()
     finally:

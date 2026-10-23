@@ -78,7 +78,6 @@ class BackgroundPort(Protocol):
         label: str,
         source: str,
         output_path: Path,
-        keep: bool,
         notify: str | None,
     ) -> str: ...
 
@@ -332,7 +331,6 @@ def run(request: SpawnRequest, deps: SpawnDeps) -> SessionHandle:
         label=f"Watcher '{name}'",
         source=f"watcher:{session_id}",
         output_path=output_path,
-        keep=False,
         notify=notify,
     )
     # A fresh PTY may still be in canonical mode while the login shell reads

@@ -13,7 +13,6 @@ from langchain_core.messages import AIMessageChunk, HumanMessage
 from langgraph.types import Command
 
 from agent.graph import llm_node
-from agent.graph.hooks import compact
 from agent.graph.llm.node import Attempt, llm_attempt, retry_wait
 from agent.graph.llm_errors import LlmLedger
 from agent.graph.tests.test_llm_helpers import (
@@ -32,8 +31,7 @@ from agent.state import AgentState
 from base.config import settings
 from base.config.tests.configuration import defaults
 from base.db.code_version_gate import ProcessDbGate
-from base.host.env.agent_slices import AgentSlices, ModelOverrides
-from base.lm.catalog import ModelCatalog
+from base.host.env.agent_slices import AgentSlices
 from base.native_process.turn_identity import HostedTurnResources
 from base.packages.plugin_providers import build_model_catalog
 from meiva.tests.fixtures.pin_agent import hosted_resources as hosted_resources
@@ -42,43 +40,30 @@ from meiva.tests.fixtures.pin_agent import hosted_resources as hosted_resources
 async def test_llm_node_billing_error_logs_billing_vendor_and_model(
     hosted_resources: HostedTurnResources,
     loguru_records,
-    monkeypatch: pytest.MonkeyPatch,
     ledger: LlmLedger,
     *,
     database_gate: ProcessDbGate,
 ) -> None:
     """Provider 402 logs the billing flag, vendor, and model for alert routing."""
     from agent.graph.llm_errors import FatalProviderError
-    from base.config import settings
-    from base.lm.context_budget import ContextBudget
 
-    def fixture_budget(
-        _model: str, _overrides: ModelOverrides, *, catalog: ModelCatalog
-    ) -> ContextBudget:
-        return ContextBudget(10_000, 3_000, 4_000)
-
-    monkeypatch.setattr(compact, "resolve_context_budget", fixture_budget)
     fake_llm = MagicMock()
     fake_llm.astream.return_value = astream_raising(FakeProviderStatusError(402))
     state = AgentState(messages=[HumanMessage(content="hi")], halted=False)
 
-    original = settings.lm.llm_model
-    try:
-        settings.lm.llm_model = "deepseek-v4-flash"
-        with pytest.raises(FatalProviderError) as exc_info:
-            await llm_node(
-                state,
-                make_runtime(
-                    resources=hosted_resources,
-                    llm=fake_llm,
-                    event_publisher=MagicMock(),
-                    database_gate=database_gate,
-                ),
-                CONFIG,
-                ledger=ledger,
-            )
-    finally:
-        settings.lm.llm_model = original
+    with pytest.raises(FatalProviderError) as exc_info:
+        await llm_node(
+            state,
+            make_runtime(
+                resources=hosted_resources,
+                llm=fake_llm,
+                event_publisher=MagicMock(),
+                database_gate=database_gate,
+                pins={"llm_model": "deepseek-flash"},
+            ),
+            CONFIG,
+            ledger=ledger,
+        )
 
     assert "out of credit or quota" in str(exc_info.value)
     assert "vendor=deepseek" in str(exc_info.value)
@@ -88,7 +73,7 @@ async def test_llm_node_billing_error_logs_billing_vendor_and_model(
     assert extra["billing"] is True
     assert extra["status"] == 402
     assert extra["vendor"] == "deepseek"
-    assert extra["model"] == "deepseek-v4-flash"
+    assert extra["model"] == "deepseek-flash"
 
 
 async def test_llm_node_transient_provider_error_propagates_for_retry(
@@ -138,36 +123,32 @@ async def test_llm_node_configured_fatal_error_type_fails_fast(
     from agent.graph.llm_errors import FatalProviderError
     from base.config import settings
 
-    original = settings.lm.llm_fatal_provider_error_types
-    try:
-        settings.lm.llm_fatal_provider_error_types = "engine_overloaded_error"
-        exc = FakeProviderStatusError(
-            429, {"error": {"type": "engine_overloaded_error", "message": "overloaded"}}
-        )
-        fake_llm = MagicMock()
-        fake_llm.astream.return_value = astream_raising(exc)
-        # A configured-fatal error type triggers _consume_llm's one non-streaming
-        # fallback; make ainvoke fail the same way so the error survives to the
-        # classify block instead of the fallback masking it.
-        fake_llm.ainvoke = AsyncMock(side_effect=exc)
-        state = AgentState(messages=[HumanMessage(content="hi")], halted=False)
+    exc = FakeProviderStatusError(
+        429, {"error": {"type": "engine_overloaded_error", "message": "overloaded"}}
+    )
+    fake_llm = MagicMock()
+    fake_llm.astream.return_value = astream_raising(exc)
+    # A configured-fatal error type triggers _consume_llm's one non-streaming
+    # fallback; make ainvoke fail the same way so the error survives to the
+    # classify block instead of the fallback masking it.
+    fake_llm.ainvoke = AsyncMock(side_effect=exc)
+    state = AgentState(messages=[HumanMessage(content="hi")], halted=False)
 
-        with pytest.raises(FatalProviderError) as exc_info:
-            await llm_node(
-                state,
-                make_runtime(
-                    resources=hosted_resources,
-                    llm=fake_llm,
-                    event_publisher=MagicMock(),
-                    database_gate=database_gate,
-                ),
-                CONFIG,
-                ledger=ledger,
-            )
-        assert exc_info.value.error_class == "transient"
-        assert exc_info.value.status == 429
-    finally:
-        settings.lm.llm_fatal_provider_error_types = original
+    with pytest.raises(FatalProviderError) as exc_info:
+        await llm_node(
+            state,
+            make_runtime(
+                resources=hosted_resources,
+                llm=fake_llm,
+                event_publisher=MagicMock(),
+                database_gate=database_gate,
+                pins={"llm_fatal_provider_error_types": "engine_overloaded_error"},
+            ),
+            CONFIG,
+            ledger=ledger,
+        )
+    assert exc_info.value.error_class == "transient"
+    assert exc_info.value.status == 429
 
 
 async def test_silent_idle_guard_halts_at_cumulative_output_token_cap(

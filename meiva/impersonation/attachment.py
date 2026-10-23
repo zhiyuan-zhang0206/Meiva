@@ -9,7 +9,7 @@
 from __future__ import annotations
 
 import dataclasses
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from typing import Any, Self, cast
 
 from base.agents import impersonation as control
@@ -78,7 +78,8 @@ class _Codec:
         self._attachment = attachment
 
     def load_snapshot(self, agent_id: int) -> Any:
-        return _agent_codec().load_snapshot(agent_id, database=self._attachment._database())
+        loader = self._attachment._snapshot_loader or _agent_codec().load_snapshot
+        return loader(agent_id, database=self._attachment._database())
 
     def plugin_state_schema(self, state: Any) -> Any:
         del state
@@ -130,7 +131,13 @@ class _LeaseIdentity:
 
 class Attachment(ExternalAttachment):
     def __init__(
-        self, lease_id: str, *, agent_id: int | None = None, session_id: int | None = None
+        self,
+        lease_id: str,
+        *,
+        agent_id: int | None = None,
+        session_id: int | None = None,
+        lease_reader: Callable[..., dict[str, Any]] | None = None,
+        snapshot_loader: Callable[..., Any] | None = None,
     ) -> None:
         if session_id is not None and agent_id is None:
             raise ValueError("an integer session requires an agent_id")
@@ -138,6 +145,8 @@ class Attachment(ExternalAttachment):
         self.lease_id = lease_id
         self._lease_agent_id = agent_id
         self._lease_session_id = session_id
+        self._lease_reader = lease_reader
+        self._snapshot_loader = snapshot_loader
         self.config: tuple[Mapping[str, Any], PluginConfigView] | None = None
         self._machine: MachineIdentity
         self._database: DatabaseFactory
@@ -261,7 +270,8 @@ class Attachment(ExternalAttachment):
         return capture_local_event(event, gate=self._event_gate)
 
     def _lease(self) -> dict[str, Any]:
-        lease = control.require_active(
+        reader = self._lease_reader or control.require_active
+        lease = reader(
             self._database(), self.lease_id, local_machine=self._machine.name()
         )
         if lease["machine"] != self._machine.name():
