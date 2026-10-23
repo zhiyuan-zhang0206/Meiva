@@ -1,16 +1,10 @@
-"""`meiva config get/set/unset` — the thin client over GET/PUT /api/config.
-
-The gateway calls (`get_config` / `put_config`) are monkeypatched, so these
-tests exercise the client-side logic: key resolution (env-var or field name),
-value coercion by field type, the merge-patch delta (only changed keys; an unset
-is an explicit null), the read-only / unknown-key guards, and the restart hint.
-"""
-
+# meiva:link cli/docs/config.meiva.okf.md
 from __future__ import annotations
 
 import os
 import subprocess
 import sys
+from collections.abc import Generator
 from pathlib import Path
 from typing import Any
 
@@ -25,9 +19,10 @@ from base.api_contracts.config import (
 )
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
-from base.config import runtime_config
 from base.host.env import dotenv_file
+from base.paths.tests.homes import unit_home as unit_home
 from cli.commands.management import config as cfg
+from cli.commands.management.tests.config_gateway import ConfigGateway, run_config
 
 _CHILD = Path(__file__).with_name("child_config_cmd.py")
 
@@ -42,9 +37,6 @@ def _field(
     restart_required: str,
     remote_writable: bool | None = None,
 ) -> ConfigFieldView:
-    """A ConfigFieldView with the CLI-relevant fields set + inert defaults for the
-    rest — built from the real schema (not a partial dict) so the test fails loudly
-    if the wire model drops/renames a field the client reads."""
     return ConfigFieldView(
         name=name,
         field_type=field_type,
@@ -64,7 +56,6 @@ def _field(
 
 
 def _view(raw_overrides: dict[str, Any] | None = None) -> ConfigView:
-    """A canned ConfigView with a cluster field, a host int field, and a read-only field."""
     return ConfigView(
         fields=[
             _field("llm_model", "MEIVA_MODEL", "string", "old", True, "cluster-default", "agent"),
@@ -79,48 +70,33 @@ def _view(raw_overrides: dict[str, Any] | None = None) -> ConfigView:
 
 
 @pytest.fixture
-def captured_put(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
-    """Capture the PUT body + return an applied result; seed GET with a view."""
-    state: dict[str, Any] = {"body": None, "machine": None, "view": _view()}
-
-    monkeypatch.setattr(cfg, "get_config", lambda _machine: state["view"])  # pyright: ignore[reportUnknownArgumentType]
-
-    def _fake_put(body: dict[str, Any], machine: str | None) -> ConfigWriteResult:
-        state["body"] = body
-        state["machine"] = machine
-        return ConfigWriteResult(applied=True, results={}, restart_required=["agent"])
-
-    monkeypatch.setattr(cfg, "put_config", _fake_put)
-    return state
+def captured_put(unit_home: Path) -> Generator[ConfigGateway, None, None]:
+    with ConfigGateway(unit_home, _view()) as gateway:
+        yield gateway
 
 
-def test_set_by_env_var_name(captured_put: dict[str, Any]) -> None:
-    rc = cfg.cmd_config_set(["MEIVA_MODEL=new"], machine=None)
-    assert rc == 0
-    assert captured_put["body"] == {"llm_model": "new"}
+def test_set_by_env_var_name(captured_put: ConfigGateway) -> None:
+    result = captured_put.run("set", "MEIVA_MODEL=new")
+    assert result.returncode == 0, result.stderr
+    assert captured_put.body == {"llm_model": "new"}
 
 
-def test_set_by_field_name(captured_put: dict[str, Any]) -> None:
-    rc = cfg.cmd_config_set(["llm_model=new"], machine=None)
-    assert rc == 0
-    assert captured_put["body"] == {"llm_model": "new"}
+def test_set_by_field_name(captured_put: ConfigGateway) -> None:
+    result = captured_put.run("set", "llm_model=new")
+    assert result.returncode == 0, result.stderr
+    assert captured_put.body == {"llm_model": "new"}
 
 
-def test_set_coerces_int(captured_put: dict[str, Any]) -> None:
-    rc = cfg.cmd_config_set(["MEIVA_OPS_CONCURRENCY=4"], machine=None)
-    assert rc == 0
-    assert captured_put["body"] == {"ops_concurrency": 4}  # int, not "4"
+def test_set_coerces_int(captured_put: ConfigGateway) -> None:
+    result = captured_put.run("set", "MEIVA_OPS_CONCURRENCY=4")
+    assert result.returncode == 0, result.stderr
+    assert captured_put.body == {"ops_concurrency": 4}
 
 
-def test_set_list_field_writes_bare_env_and_round_trips(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    """A list-backed CLI value lands as a bare comma list that the consuming
-    Settings model parses back into the declared list type."""
+def test_set_list_field_writes_bare_env_and_round_trips(captured_put: ConfigGateway) -> None:
     from base.config.domains.services.settings import ServiceSettings
 
-    view = _view()
-    view.fields.append(
+    captured_put.view.fields.append(
         _field(
             "im_disabled_adapters",
             "MEIVA_IM_DISABLED_ADAPTERS",
@@ -131,94 +107,64 @@ def test_set_list_field_writes_bare_env_and_round_trips(
             "agent",
         )
     )
-    monkeypatch.setattr(cfg, "get_config", lambda _machine: view)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(dotenv_file, "unit_home", lambda: tmp_path)
+    captured_put.persist = True
+    result = captured_put.run("set", "MEIVA_IM_DISABLED_ADAPTERS=weixin,feishu")
 
-    def _persist(body: dict[str, Any], _machine: str | None) -> ConfigWriteResult:
-        runtime_config.write_fields(body, set())
-        return ConfigWriteResult(applied=True, results={}, restart_required=["agent"])
-
-    monkeypatch.setattr(cfg, "put_config", _persist)
-
-    rc = cfg.cmd_config_set(["MEIVA_IM_DISABLED_ADAPTERS=weixin,feishu"], machine=None)
-
-    assert rc == 0
-    assert (tmp_path / ".env").read_text() == "MEIVA_IM_DISABLED_ADAPTERS=weixin,feishu\n"
+    assert result.returncode == 0, result.stderr
+    assert (captured_put.home / ".env").read_text() == (
+        f"MEIVA_GATEWAY_URL={captured_put.url}\nMEIVA_IM_DISABLED_ADAPTERS=weixin,feishu\n"
+    )
     written = dotenv_file.read_env_aliases()["MEIVA_IM_DISABLED_ADAPTERS"]
     parsed = ServiceSettings.model_validate({"MEIVA_IM_DISABLED_ADAPTERS": written})
     assert parsed.im_disabled_adapters == ["weixin", "feishu"]
 
 
-def test_set_sends_only_the_delta(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A set sends ONLY the changed key — not the whole override set. Absent keys
-    are left untouched server-side (merge semantics), so an existing override
-    (llm_model here) need not be echoed back and can't be clobbered by a stale GET."""
-    state: dict[str, Any] = {"body": None}
-    monkeypatch.setattr(cfg, "get_config", lambda _machine: _view({"llm_model": "keep"}))  # pyright: ignore[reportUnknownArgumentType]
-
-    def _fake_put(body: dict[str, Any], _machine: str | None) -> ConfigWriteResult:
-        state["body"] = body
-        return ConfigWriteResult(applied=True, results={}, restart_required=[])
-
-    monkeypatch.setattr(cfg, "put_config", _fake_put)
-    rc = cfg.cmd_config_set(["MEIVA_OPS_CONCURRENCY=4"], machine=None)
-    assert rc == 0
-    assert state["body"] == {"ops_concurrency": 4}  # only the delta; llm_model not echoed
+def test_set_sends_only_the_delta(captured_put: ConfigGateway) -> None:
+    captured_put.view = _view({"llm_model": "keep"})
+    result = captured_put.run("set", "MEIVA_OPS_CONCURRENCY=4")
+    assert result.returncode == 0, result.stderr
+    assert captured_put.body == {"ops_concurrency": 4}
 
 
-def test_set_read_only_field_rejected(captured_put: dict[str, Any]) -> None:
-    rc = cfg.cmd_config_set(["MEIVA_DB_URL=postgresql://y"], machine=None)
-    assert rc == 1
-    assert captured_put["body"] is None  # no PUT issued
+def test_set_read_only_field_rejected(captured_put: ConfigGateway) -> None:
+    result = captured_put.run("set", "MEIVA_DB_URL=postgresql://y")
+    assert result.returncode == 1, result.stderr
+    assert captured_put.body is None
 
 
-def test_set_unknown_key_rejected(captured_put: dict[str, Any]) -> None:
-    rc = cfg.cmd_config_set(["NOT_A_KEY=x"], machine=None)
-    assert rc == 1
-    assert captured_put["body"] is None
+def test_set_unknown_key_rejected(captured_put: ConfigGateway) -> None:
+    result = captured_put.run("set", "NOT_A_KEY=x")
+    assert result.returncode == 1, result.stderr
+    assert captured_put.body is None
 
 
-def test_set_missing_equals_rejected(captured_put: dict[str, Any]) -> None:
-    rc = cfg.cmd_config_set(["MEIVA_MODEL"], machine=None)
-    assert rc == 1
-    assert captured_put["body"] is None
+def test_set_missing_equals_rejected(captured_put: ConfigGateway) -> None:
+    result = captured_put.run("set", "MEIVA_MODEL")
+    assert result.returncode == 1, result.stderr
+    assert captured_put.body is None
 
 
-def test_set_bad_int_clean_error(captured_put: dict[str, Any]) -> None:
-    """A non-numeric value for an int field gives a clean error (rc 1), not an
-    uncaught ValueError, and issues no PUT."""
-    rc = cfg.cmd_config_set(["MEIVA_OPS_CONCURRENCY=not-a-number"], machine=None)
-    assert rc == 1
-    assert captured_put["body"] is None
+def test_set_bad_int_clean_error(captured_put: ConfigGateway) -> None:
+    result = captured_put.run("set", "MEIVA_OPS_CONCURRENCY=not-a-number")
+    assert result.returncode == 1, result.stderr
+    assert captured_put.body is None
 
 
-def test_unset_sends_explicit_null(monkeypatch: pytest.MonkeyPatch) -> None:
-    """An unset sends {field: None} — deletion is explicit, never an omission, so
-    only the named key is dropped and nothing else is disturbed."""
-    state: dict[str, Any] = {"body": None}
-    monkeypatch.setattr(
-        cfg,
-        "get_config",
-        lambda _machine: _view({"llm_model": "x", "ops_concurrency": 4}),  # pyright: ignore[reportUnknownArgumentType]
-    )
-
-    def _fake_put(body: dict[str, Any], _machine: str | None) -> ConfigWriteResult:
-        state["body"] = body
-        return ConfigWriteResult(applied=True, results={}, restart_required=[])
-
-    monkeypatch.setattr(cfg, "put_config", _fake_put)
-    rc = cfg.cmd_config_unset(["MEIVA_MODEL"], machine=None)
-    assert rc == 0
-    assert state["body"] == {"llm_model": None}  # explicit null, not omission
+def test_unset_sends_explicit_null(captured_put: ConfigGateway) -> None:
+    captured_put.view = _view({"llm_model": "x", "ops_concurrency": 4})
+    result = captured_put.run("unset", "MEIVA_MODEL")
+    assert result.returncode == 0, result.stderr
+    assert captured_put.body == {"llm_model": None}
 
 
-def test_set_machine_is_forwarded(captured_put: dict[str, Any]) -> None:
-    cfg.cmd_config_set(["MEIVA_OPS_CONCURRENCY=4"], machine="runner-2")
-    assert captured_put["machine"] == "runner-2"
+def test_set_machine_is_forwarded(captured_put: ConfigGateway) -> None:
+    result = captured_put.run("set", "MEIVA_OPS_CONCURRENCY=4", machine="runner-2")
+    assert result.returncode == 0, result.stderr
+    assert captured_put.machine == "runner-2"
 
 
-def test_set_machine_host_field_uses_remote_writable(captured_put: dict[str, Any]) -> None:
-    captured_put["view"].fields.append(
+def test_set_machine_host_field_uses_remote_writable(captured_put: ConfigGateway) -> None:
+    captured_put.view.fields.append(
         _field(
             "permissions_helper_enabled",
             "MEIVA_PERMISSIONS_HELPER_ENABLED",
@@ -231,17 +177,17 @@ def test_set_machine_host_field_uses_remote_writable(captured_put: dict[str, Any
         )
     )
 
-    rc = cfg.cmd_config_set(["MEIVA_PERMISSIONS_HELPER_ENABLED=true"], machine="company-mini")
+    result = captured_put.run(
+        "set", "MEIVA_PERMISSIONS_HELPER_ENABLED=true", machine="company-mini"
+    )
 
-    assert rc == 0
-    assert captured_put["body"] == {"permissions_helper_enabled": True}
-    assert captured_put["machine"] == "company-mini"
+    assert result.returncode == 0, result.stderr
+    assert captured_put.body == {"permissions_helper_enabled": True}
+    assert captured_put.machine == "company-mini"
 
 
-def test_set_machine_host_field_rejects_remote_read_only(
-    captured_put: dict[str, Any], capsys: pytest.CaptureFixture[str]
-) -> None:
-    captured_put["view"].fields.append(
+def test_set_machine_host_field_rejects_remote_read_only(captured_put: ConfigGateway) -> None:
+    captured_put.view.fields.append(
         _field(
             "agent_host_health_port",
             "MEIVA_AGENT_HOST_HEALTH_PORT",
@@ -254,17 +200,15 @@ def test_set_machine_host_field_rejects_remote_read_only(
         )
     )
 
-    rc = cfg.cmd_config_set(["MEIVA_AGENT_HOST_HEALTH_PORT=18133"], machine="runner-2")
+    result = captured_put.run("set", "MEIVA_AGENT_HOST_HEALTH_PORT=18133", machine="runner-2")
 
-    assert rc == 1
-    assert "MEIVA_AGENT_HOST_HEALTH_PORT is read-only" in capsys.readouterr().err
-    assert captured_put["body"] is None
+    assert result.returncode == 1, result.stderr
+    assert "MEIVA_AGENT_HOST_HEALTH_PORT is read-only" in result.stderr
+    assert captured_put.body is None
 
 
-def test_set_machine_non_host_field_still_uses_writable(
-    captured_put: dict[str, Any], capsys: pytest.CaptureFixture[str]
-) -> None:
-    captured_put["view"].fields.append(
+def test_set_machine_non_host_field_still_uses_writable(captured_put: ConfigGateway) -> None:
+    captured_put.view.fields.append(
         _field(
             "read_only_cluster_field",
             "MEIVA_READ_ONLY_CLUSTER_FIELD",
@@ -277,17 +221,15 @@ def test_set_machine_non_host_field_still_uses_writable(
         )
     )
 
-    rc = cfg.cmd_config_set(["MEIVA_READ_ONLY_CLUSTER_FIELD=new"], machine="runner-2")
+    result = captured_put.run("set", "MEIVA_READ_ONLY_CLUSTER_FIELD=new", machine="runner-2")
 
-    assert rc == 1
-    assert "MEIVA_READ_ONLY_CLUSTER_FIELD is read-only" in capsys.readouterr().err
-    assert captured_put["body"] is None
+    assert result.returncode == 1, result.stderr
+    assert "MEIVA_READ_ONLY_CLUSTER_FIELD is read-only" in result.stderr
+    assert captured_put.body is None
 
 
-def test_unset_machine_host_field_rejects_remote_read_only(
-    captured_put: dict[str, Any], capsys: pytest.CaptureFixture[str]
-) -> None:
-    captured_put["view"].fields.append(
+def test_unset_machine_host_field_rejects_remote_read_only(captured_put: ConfigGateway) -> None:
+    captured_put.view.fields.append(
         _field(
             "agent_host_health_port",
             "MEIVA_AGENT_HOST_HEALTH_PORT",
@@ -300,11 +242,11 @@ def test_unset_machine_host_field_rejects_remote_read_only(
         )
     )
 
-    rc = cfg.cmd_config_unset(["MEIVA_AGENT_HOST_HEALTH_PORT"], machine="runner-2")
+    result = captured_put.run("unset", "MEIVA_AGENT_HOST_HEALTH_PORT", machine="runner-2")
 
-    assert rc == 1
-    assert "MEIVA_AGENT_HOST_HEALTH_PORT is read-only" in capsys.readouterr().err
-    assert captured_put["body"] is None
+    assert result.returncode == 1, result.stderr
+    assert "MEIVA_AGENT_HOST_HEALTH_PORT is read-only" in result.stderr
+    assert captured_put.body is None
 
 
 @pytest.mark.parametrize("scope", ["host", "cluster-pinned", "cluster-default", "agent"])
@@ -314,9 +256,6 @@ def test_unset_machine_host_field_rejects_remote_read_only(
 def test_cli_field_editable_mirrors_shared_definition(
     scope: str, writable: bool, remote_writable: bool, remote: bool
 ) -> None:
-    """The CLI's wire-view gate and base.config.admin.editing.field_editable are two
-    definitions of one policy; this table pins their agreement so a future
-    special case in the shared definition turns this test red (task #2552)."""
     from base.config import ConfigFieldMeta
     from base.config.admin.editing import field_editable
 
@@ -349,8 +288,8 @@ def test_cli_field_editable_mirrors_shared_definition(
     assert cfg.field_editable(view_field, remote=remote) == field_editable(meta, local=not remote)
 
 
-def test_unset_machine_host_field_uses_remote_writable(captured_put: dict[str, Any]) -> None:
-    captured_put["view"].fields.append(
+def test_unset_machine_host_field_uses_remote_writable(captured_put: ConfigGateway) -> None:
+    captured_put.view.fields.append(
         _field(
             "permissions_helper_enabled",
             "MEIVA_PERMISSIONS_HELPER_ENABLED",
@@ -363,15 +302,14 @@ def test_unset_machine_host_field_uses_remote_writable(captured_put: dict[str, A
         )
     )
 
-    rc = cfg.cmd_config_unset(["MEIVA_PERMISSIONS_HELPER_ENABLED"], machine="company-mini")
+    result = captured_put.run("unset", "MEIVA_PERMISSIONS_HELPER_ENABLED", machine="company-mini")
 
-    assert rc == 0
-    assert captured_put["body"] == {"permissions_helper_enabled": None}
-    assert captured_put["machine"] == "company-mini"
+    assert result.returncode == 0, result.stderr
+    assert captured_put.body == {"permissions_helper_enabled": None}
+    assert captured_put.machine == "company-mini"
 
 
 def _write_incident_env(home: Path) -> None:
-    """Create the shape that prevents ``Settings()`` from booting: inverted sandbox timeouts."""
     (home / ".env").write_text(
         "\n".join(
             (
@@ -388,7 +326,6 @@ def _write_incident_env(home: Path) -> None:
 
 
 def _write_valid_sandbox_env(home: Path) -> None:
-    """A gateway `.env` whose sandbox timeout pair is valid."""
     (home / ".env").write_text(
         "\n".join(
             (
@@ -402,7 +339,6 @@ def _write_valid_sandbox_env(home: Path) -> None:
 
 
 def test_cli_module_imports_without_settings(tmp_path: Path) -> None:
-    """The local read path remains usable when the current `.env` cannot boot Settings."""
     _write_incident_env(tmp_path)
     repo_root = Path(__file__).parents[4]
     result = subprocess.run(
@@ -423,68 +359,50 @@ def test_cli_module_imports_without_settings(tmp_path: Path) -> None:
 
 
 @pytest.fixture
-def local_env_home(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
-    monkeypatch.setenv("MEIVA_HOME", str(tmp_path))
-    return tmp_path
+def local_env_home(unit_home: Path) -> Path:
+    return unit_home
 
 
-def test_gateway_base_reads_local_env_without_settings(
-    local_env_home: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    # delitem/setitem, not delenv/setenv: the lint bans env mutation on
-    # Settings aliases (the singleton never re-reads env), but `gateway_base`
-    # is the settings-free repair path — it reads the RAW env/.env by design.
-    monkeypatch.delitem(os.environ, "MEIVA_GATEWAY_URL", raising=False)
+def test_gateway_base_reads_local_env_without_settings(local_env_home: Path) -> None:
     (local_env_home / ".env").write_text("MEIVA_GATEWAY_URL=http://gateway.test:8000\n")
+    result = run_config(local_env_home, "gateway-base")
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "http://gateway.test:8000"
 
-    assert cfg.gateway_base() == "http://gateway.test:8000"
 
-
-def test_gateway_base_reads_the_homes_env_not_a_gateway_url_file(
-    local_env_home: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """The home's gateway identity is its `.env` (`MEIVA_GATEWAY_URL`, recorded by
-    `meiva init`); a `gateway_url` file older homes kept is not read."""
-    monkeypatch.delitem(os.environ, "MEIVA_GATEWAY_URL", raising=False)
+def test_gateway_base_reads_the_homes_env_not_a_gateway_url_file(local_env_home: Path) -> None:
     (local_env_home / "gateway_url").write_text("http://legacy-file.test:8000\n")
     (local_env_home / ".env").write_text("MEIVA_GATEWAY_URL=http://own-cluster.test:8000\n")
+    result = run_config(local_env_home, "gateway-base")
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "http://own-cluster.test:8000"
 
-    assert cfg.gateway_base() == "http://own-cluster.test:8000"
 
-
-def test_gateway_base_refuses_a_home_with_no_gateway_identity(
-    local_env_home: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """A home that carries no gateway identity yet (before `meiva init`) gets a
-    refusal with guidance, not a guessed gateway."""
-    monkeypatch.delitem(os.environ, "MEIVA_GATEWAY_URL", raising=False)
+def test_gateway_base_refuses_a_home_with_no_gateway_identity(local_env_home: Path) -> None:
     (local_env_home / ".env").write_text("OTHER=kept\n")
-
-    with pytest.raises(cfg.ConfigError, match="no gateway identity"):
-        cfg.gateway_base()
+    result = run_config(local_env_home, "gateway-base")
+    assert result.returncode == 1
+    assert "no gateway identity" in result.stderr
 
 
 def test_put_config_refuses_a_home_with_no_identity_even_with_env_override(
-    local_env_home: Path, monkeypatch: pytest.MonkeyPatch
+    captured_put: ConfigGateway,
 ) -> None:
-    """A home with no gateway identity may read through an explicit env
-    override but never write gateway config — no HTTP call happens."""
-    monkeypatch.setitem(os.environ, "MEIVA_GATEWAY_URL", "http://elsewhere.test:8000")
-
-    with pytest.raises(cfg.ConfigError, match="refusing to write gateway config"):
-        cfg.put_config({"x": "y"}, machine=None)
+    (captured_put.home / ".env").unlink()
+    result = run_config(captured_put.home, "put", env={"MEIVA_GATEWAY_URL": captured_put.url})
+    assert result.returncode == 1
+    assert "refusing to write gateway config" in result.stderr
+    assert captured_put.requests == []
 
 
 def test_put_config_refuses_env_override_mismatching_home_identity(
-    local_env_home: Path, monkeypatch: pytest.MonkeyPatch
+    captured_put: ConfigGateway,
 ) -> None:
-    """An explicit MEIVA_GATEWAY_URL that contradicts this home's own gateway
-    identity must not write foreign config."""
-    (local_env_home / ".env").write_text("MEIVA_GATEWAY_URL=http://own-cluster.test:8000\n")
-    monkeypatch.setitem(os.environ, "MEIVA_GATEWAY_URL", "http://other-cluster.test:9000")
-
-    with pytest.raises(cfg.ConfigError, match="does not match this home's gateway"):
-        cfg.put_config({"x": "y"}, machine=None)
+    (captured_put.home / ".env").write_text("MEIVA_GATEWAY_URL=http://own-cluster.test:8000\n")
+    result = run_config(captured_put.home, "put", env={"MEIVA_GATEWAY_URL": captured_put.url})
+    assert result.returncode == 1
+    assert "does not match this home's gateway" in result.stderr
+    assert captured_put.requests == []
 
 
 def test_local_get_masks_sensitive(
@@ -504,28 +422,12 @@ def test_local_get_masks_sensitive(
     assert credential_path not in out
 
 
-def test_local_set_validates_candidate_and_rejects_incident_shape(
-    local_env_home: Path,
-    capsys: pytest.CaptureFixture[str],
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    # The candidate validation builds the sandbox model FRESH from os.environ
-    # (base/config/admin/candidate.py `source_model()`), so the env itself is the seam,
-    # not the Settings singleton (which is why setenv/delenv would be a no-op
-    # elsewhere, and why the wholesale environ swap is the honest patch here):
-    # an inherited exec timeout would otherwise decide the verdict.
-    import os
-
-    keys = ("MEIVA_EXEC_TIMEOUT_SECONDS", "MEIVA_EXEC_NODE_TIMEOUT_SECONDS")
-    clean_env = {k: v for k, v in os.environ.items() if k not in keys}
-    monkeypatch.setattr(os, "environ", clean_env)
+def test_local_set_validates_candidate_and_rejects_incident_shape(local_env_home: Path) -> None:
     _write_valid_sandbox_env(local_env_home)
     before = (local_env_home / ".env").read_bytes()
-
-    rc = cfg.cmd_config_set(["MEIVA_EXEC_NODE_TIMEOUT_SECONDS=200"], machine=None, local=True)
-
-    assert rc == 1
-    assert "exec_node_timeout_seconds" in capsys.readouterr().err
+    result = run_config(local_env_home, "set", "MEIVA_EXEC_NODE_TIMEOUT_SECONDS=200")
+    assert result.returncode == 1
+    assert "exec_node_timeout_seconds" in result.stderr
     assert (local_env_home / ".env").read_bytes() == before
 
 
@@ -542,9 +444,6 @@ def test_local_set_applies_valid_patch(
 
 
 def test_the_offsite_keys_are_official_local_config(local_env_home: Path) -> None:
-    """The daily dump's off-site destination is configured, and removed, through
-    `meiva config`: an operator never hand-edits the `.env` for it. The gateway unit
-    owns the cluster-pinned endpoint and bucket, so its own `.env` is the target."""
     (local_env_home / ".env").write_text("MEIVA_MACHINE_SERVE_GATEWAY=true\nOTHER=kept\n")
     credentials = local_env_home / "oss-credentials.json"
     keys = {
@@ -565,8 +464,6 @@ def test_the_offsite_keys_are_official_local_config(local_env_home: Path) -> Non
 
 
 def test_the_walg_key_is_official_local_config(local_env_home: Path) -> None:
-    """WAL archiving is switched on, and off again, through `meiva config`: the one
-    key is writable, so an operator never hand-edits the `.env` to remove it."""
     (local_env_home / ".env").write_text("MEIVA_MACHINE_SERVE_GATEWAY=true\nOTHER=kept\n")
     config_file = local_env_home / "walg.json"
 
@@ -582,11 +479,6 @@ def test_the_walg_key_is_official_local_config(local_env_home: Path) -> None:
 def test_local_set_can_pin_the_hosted_runner_health_port(
     local_env_home: Path,
 ) -> None:
-    """2026-09-02 (two units fell back to the shared 8114): the
-    agent-host health port was read-only with no official repair surface, so the
-    emergency fix was a direct `.env` hand-edit. The field is now host-writable:
-    `config set` IS the repair surface. remote_writable stays False, so a remote
-    `--machine` set is still refused gateway-side."""
     (local_env_home / ".env").write_text("OTHER=kept\n")
 
     rc = cfg.cmd_config_set(["MEIVA_AGENT_HOST_HEALTH_PORT=18133"], machine=None, local=True)
@@ -594,7 +486,7 @@ def test_local_set_can_pin_the_hosted_runner_health_port(
     assert rc == 0
     aliases = dotenv_file.read_env_aliases()
     assert aliases["MEIVA_AGENT_HOST_HEALTH_PORT"] == "18133"
-    assert "OTHER" in aliases  # unrelated lines survive the patch
+    assert "OTHER" in aliases
 
 
 def test_local_unset_removes_key(local_env_home: Path) -> None:
@@ -607,15 +499,6 @@ def test_local_unset_removes_key(local_env_home: Path) -> None:
 
 
 def test_local_set_repairs_incident_env(local_env_home: Path) -> None:
-    """`set --local` lands a valid patch on the broken `.env` it exists to repair.
-
-    Regression: the backup snapshot forced Settings construction (cluster_tz()
-    through the lazy proxy), so any write to an incident-shaped env crashed
-    with ValidationError before landing — the headline repair verb was dead.
-    Runs in a subprocess because a broken env can only coexist with the lazy
-    settings proxy (MEIVA_CONFIG_FETCH=skip); an in-process import would eagerly
-    build Settings from the test process's own env.
-    """
     _write_incident_env(local_env_home)
     before = (local_env_home / ".env").read_bytes()
     repo_root = Path(__file__).parents[4]
@@ -633,52 +516,37 @@ def test_local_set_repairs_incident_env(local_env_home: Path) -> None:
     )
 
     assert result.returncode == 0, result.stderr
-    # The patch lands (values are stored quoted; compare through the alias
-    # view like the sibling valid-env test).
+
     assert dotenv_file.read_env_aliases()["MEIVA_EXEC_NODE_TIMEOUT_SECONDS"] == "2000.0"
-    # Unrelated incident lines survive the repair write.
+
     assert dotenv_file.read_env_aliases()["MEIVA_OPS_CONCURRENCY"] == "7"
     assert (local_env_home / ".env").read_bytes() != before
 
 
-def test_set_rejected_result_returns_1(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A host-validated rejection (applied False) surfaces per-field reasons + rc=1."""
-    monkeypatch.setattr(cfg, "get_config", lambda _machine: _view())  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(
-        cfg,
-        "put_config",
-        lambda _body, _machine: ConfigWriteResult(  # pyright: ignore[reportUnknownArgumentType]
-            applied=False,
-            results={"ops_concurrency": ConfigFieldWriteResult(ok=False, reason="out of range")},
-            restart_required=[],
-        ),
+def test_set_rejected_result_returns_1(captured_put: ConfigGateway) -> None:
+    captured_put.result = ConfigWriteResult(
+        applied=False,
+        results={"ops_concurrency": ConfigFieldWriteResult(ok=False, reason="out of range")},
+        restart_required=[],
     )
-    rc = cfg.cmd_config_set(["MEIVA_OPS_CONCURRENCY=4"], machine=None)
-    assert rc == 1
+    result = captured_put.run("set", "MEIVA_OPS_CONCURRENCY=4")
+    assert result.returncode == 1
+    assert "out of range" in result.stderr
 
 
-def test_get_single_key(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    monkeypatch.setattr(cfg, "get_config", lambda _machine: _view())  # pyright: ignore[reportUnknownArgumentType]
-    rc = cfg.cmd_config_get("MEIVA_MODEL", machine=None)
-    assert rc == 0
-    out = capsys.readouterr().out
-    assert "MEIVA_MODEL" in out
-    assert "old" in out
+def test_get_single_key(captured_put: ConfigGateway) -> None:
+    result = captured_put.run("get", "MEIVA_MODEL")
+    assert result.returncode == 0, result.stderr
+    assert "MEIVA_MODEL" in result.stdout
+    assert "old" in result.stdout
 
 
 def test_config_audit_local_reads_newest_first_and_filters(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-    machine_identity: MachineIdentity,
+    local_env_home: Path, capsys: pytest.CaptureFixture[str], machine_identity: MachineIdentity
 ) -> None:
-    """No --machine: reads this unit's own JSONL; --key keeps one alias's records."""
     from ops.env_audit import record_env_write
 
-    monkeypatch.setattr(dotenv_file, "unit_home", lambda: tmp_path)
-    env_path = tmp_path / ".env"
+    env_path = local_env_home / ".env"
     env_path.write_text("MEIVA_MODEL=m\n")
     record_env_write(
         env_path,
@@ -693,7 +561,7 @@ def test_config_audit_local_reads_newest_first_and_filters(
     assert cfg.cmd_config_audit(last=10, key=None, machine=None, identity=machine_identity) == 0
     out = capsys.readouterr().out
     assert "site=first" in out and "site=second" in out
-    assert out.index("site=second") < out.index("site=first")  # newest first
+    assert out.index("site=second") < out.index("site=first")
     assert "MEIVA_MODEL: a -> b" in out
 
     assert (
@@ -707,13 +575,8 @@ def test_config_audit_local_reads_newest_first_and_filters(
     assert "site=first" not in out
 
 
-def test_config_audit_machine_fetches_via_gateway(
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-    machine_identity: MachineIdentity,
-) -> None:
-    """--machine fetches through the gateway and shows withheld sensitive diffs."""
-    view = ConfigAuditView(
+def test_config_audit_machine_fetches_via_gateway(captured_put: ConfigGateway) -> None:
+    captured_put.audit = ConfigAuditView(
         records=[
             {
                 "ts": "2026-09-16T00:00:00+00:00",
@@ -742,13 +605,10 @@ def test_config_audit_machine_fetches_via_gateway(
         ]
     )
 
-    def _fetch(_machine: str | None, _last: int) -> ConfigAuditView:
-        return view
-
-    monkeypatch.setattr(cfg, "get_config_audit", _fetch)
-
-    assert cfg.cmd_config_audit(last=5, key=None, machine="m1", identity=machine_identity) == 0
-    out = capsys.readouterr().out
+    result = captured_put.run("audit", "5", machine="m1")
+    assert result.returncode == 0, result.stderr
+    assert captured_put.requests == [("GET", "/api/config/audit?last=5&machine=m1")]
+    out = result.stdout
     assert "[m1]" in out and "remote-site" in out
     assert "actor=user_session:administrator" in out
     assert "MEIVA_MODEL: a -> b" in out
@@ -758,7 +618,6 @@ def test_config_audit_machine_fetches_via_gateway(
 def test_config_audit_rejects_out_of_range_last(
     capsys: pytest.CaptureFixture[str], machine_identity: MachineIdentity
 ) -> None:
-    """--last outside 1..200 is a clean CLI error on both paths, never a traceback."""
     assert cfg.cmd_config_audit(last=0, key=None, machine=None, identity=machine_identity) == 1
     assert "--last must be between 1 and 200" in capsys.readouterr().err
 
