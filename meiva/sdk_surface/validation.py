@@ -21,6 +21,35 @@ from __future__ import annotations
 
 from typing import Literal, cast, overload
 
+from . import STATE_KEY, UPDATE_KEY, ContextOutsideProcessError, meiva_module
+
+
+def set_state(value: object) -> None:
+    if value is None:
+        raise TypeError(
+            "meiva.state cannot be None; end a turn with process_context.unbind_exec_turn()"
+        )
+    meiva_module().__dict__[STATE_KEY] = value
+
+
+def set_state_update(value: object) -> None:
+    meiva_module().__dict__[UPDATE_KEY] = value
+
+
+def unbind_exec_turn() -> None:
+    slots = meiva_module().__dict__
+    slots.pop(STATE_KEY, None)
+    slots.pop(UPDATE_KEY, None)
+
+
+def is_launched_child() -> bool:
+    try:
+        context = meiva_module().context
+    except ContextOutsideProcessError:
+        return False
+    identity = context.identity
+    return bool(identity is not None and identity.agent_id is not None and not identity.owns_loop)
+
 
 def _type_names(expected: type | tuple[type, ...]) -> str:
     """Render a type union as an error-message phrase ("int", "int or None",

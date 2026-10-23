@@ -32,18 +32,45 @@ from datetime import UTC, datetime
 from typing import Any, cast
 
 from langchain_core.messages import (
-    AIMessage,
-    AnyMessage,
     HumanMessage,
-    SystemMessage,
     ToolMessage,
 )
 
+from agent.messages.tail import (
+    has_conversation,
+    last_agent_inbound_text,
+    tail_has_agent_inbound,
+    tail_has_recallable_inbound,
+    tail_has_skill_recall_inbound,
+)
 from base.agents.messages.kwargs import (
     COMPACT_SUMMARY_HEADER as COMPACT_SUMMARY_HEADER,  # public: the header's owner is the base leaf
 )
-from base.agents.messages.kwargs import ExecStatus, MeivaMsgType, NoteTag, read_meiva_kwargs
+from base.agents.messages.kwargs import (
+    ExecStatus,
+    MeivaMsgType,
+    NoteTag,
+    read_meiva_kwargs,
+)
 from base.lm.system_note import wrap_system_note
+
+__all__ = [
+    "COMPACT_SUMMARY_HEADER",
+    "ExecStatus",
+    "MeivaMsgType",
+    "NoteTag",
+    "attach_message",
+    "exec_output_message",
+    "has_conversation",
+    "inbound_message",
+    "last_agent_inbound_text",
+    "read_meiva_kwargs",
+    "security_note_message",
+    "system_note_message",
+    "tail_has_agent_inbound",
+    "tail_has_recallable_inbound",
+    "tail_has_skill_recall_inbound",
+]
 
 
 def _stamp_picked_up(kwargs: dict[str, object]) -> dict[str, object]:
@@ -221,119 +248,4 @@ def exec_output_message(
         content=content,
         tool_call_id=tool_call_id,
         additional_kwargs=_stamp_created_at(kwargs, created_at),
-    )
-
-
-def _tail_inbound_sources(messages: list[AnyMessage]) -> list[str]:
-    """The `meiva_source` of every inbound added since the last assistant turn.
-
-    Scans backward from the end, stopping at the most recent AIMessage (the
-    boundary of the current incoming batch), and collects the source of each
-    `meiva_msg_type="inbound"` HumanMessage. `inbound_message()` always sets
-    meiva_source (contract field), so it is indexed rather than `.get()`-ed — a
-    missing source on an "inbound"-typed message surfaces as a KeyError instead
-    of being silently dropped.
-    """
-    sources: list[str] = []
-    for msg in reversed(messages):
-        if isinstance(msg, AIMessage):
-            break
-        if not isinstance(msg, HumanMessage):
-            continue
-        if read_meiva_kwargs(msg).get("meiva_msg_type") != MeivaMsgType.INBOUND:
-            continue
-        # meiva_source is indexed (not `.get`) off the raw bag so a missing source
-        # on an "inbound"-typed message surfaces as a KeyError rather than being
-        # silently dropped — see the docstring.
-        source = msg.additional_kwargs["meiva_source"]  # pyright: ignore[reportUnknownMemberType]
-        if isinstance(source, str):
-            sources.append(source)
-    return sources
-
-
-def tail_has_agent_inbound(messages: list[AnyMessage]) -> bool:
-    """Whether the messages added since the last assistant turn include an
-    inbound from another agent (`meiva_source` starts with "agent:").
-
-    The read-side counterpart to `inbound_message`, so it lives here rather than
-    in any one plugin. Used by before_llm hooks that must coordinate the single
-    `messages` write a pass allows (the hook runner is fail-loud on co-writes):
-    a turn woken by an agent inbound is claimed by the agent-reply reminder, so
-    other note-injecting hooks defer on it.
-    """
-    return any(s.startswith("agent:") for s in _tail_inbound_sources(messages))
-
-
-# meiva:note
-# The newest `agent:`-sourced inbound after the last assistant turn: the one message a peer
-# gate reads, never the conversation. Reads `meiva_source` by index, not `.get`, because every
-# inbound-typed message carries the contract field and a missing source must surface as a
-# KeyError instead of being silently skipped.
-# meiva:link agent/messages/docs/message-format.meiva.okf.md
-def last_agent_inbound_text(messages: list[AnyMessage]) -> str | None:
-    for msg in reversed(messages):
-        if isinstance(msg, AIMessage):
-            return None
-        if not isinstance(msg, HumanMessage):
-            continue
-        if read_meiva_kwargs(msg).get("meiva_msg_type") != MeivaMsgType.INBOUND:
-            continue
-        source = msg.additional_kwargs["meiva_source"]  # pyright: ignore[reportUnknownMemberType]
-        if not (isinstance(source, str) and source.startswith("agent:")):
-            continue
-        content = msg.content
-        return content if isinstance(content, str) else None
-    return None
-
-
-def has_conversation(messages: list[AnyMessage]) -> bool:
-    """Whether anything has been *said* in this context window yet.
-
-    A window is never truly empty past `init_context`: that node lays down the
-    standing head — the SystemMessage plus the context notes behind it — before
-    claim ever runs. So "nothing has happened yet" is not `not messages`; it is
-    the absence of anything that is not part of that head.
-
-    Claim uses this to tell a fresh window from a multi-step loop in progress.
-    Getting it wrong in the permissive direction costs a wasted LLM turn on an
-    empty conversation.
-    """
-    return any(
-        not isinstance(m, SystemMessage)
-        and read_meiva_kwargs(m).get("meiva_msg_type") != MeivaMsgType.SYSTEM_NOTE
-        for m in messages
-    )
-
-
-def tail_has_recallable_inbound(messages: list[AnyMessage]) -> bool:
-    """Whether the messages added since the last assistant turn include an
-    inbound passive memory recall should fire on: any source except a
-    background wake-up (`watcher:` / `shell:` prefixes).
-
-    The mirror of `tail_has_agent_inbound`. Used by the memory-recall hook as
-    its positive gate: recall serves turns that carry real content — user chat,
-    a peer agent's message (`agent:`), a scheduled turn (`schedule:`), or a
-    system notice — while watcher and shell completions are machine-originated
-    wake-ups whose payload is the notice itself, not conversation to recall
-    over. This same tail shape (an inbound sits after the last AIMessage) makes
-    it mutually exclusive with hooks that fire on a bare AIMessage tail (e.g.
-    silent-idle).
-    """
-    return any(not s.startswith(("watcher:", "shell:")) for s in _tail_inbound_sources(messages))
-
-
-def tail_has_skill_recall_inbound(messages: list[AnyMessage]) -> bool:
-    """Whether the messages added since the last assistant turn include an
-    inbound that skill recall should fire on: a human message (`user`,
-    `ui:page:<name>`) or a schedule trigger (`schedule:<id>`).
-
-    Narrower than `tail_has_recallable_inbound`, which only excludes background
-    wake-ups: a peer agent's message, a system notice and a watcher or shell
-    completion are not a request the agent has to pick a playbook for, so they
-    never trigger skill recall. Takes its own source list rather than widening
-    that gate, whose memory-recall consumer keeps its semantics.
-    """
-    return any(
-        s == "user" or s.startswith(("ui:page:", "schedule:"))
-        for s in _tail_inbound_sources(messages)
     )

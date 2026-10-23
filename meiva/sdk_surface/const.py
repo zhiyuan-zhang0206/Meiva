@@ -6,6 +6,8 @@ const assignments (e.g. `meiva.self.AGENT_ID = meiva.const(...)`) keep working
 during submodule load.
 """
 
+import inspect
+from types import SimpleNamespace
 from typing import Any, cast
 
 _DOCUMENTED_MARKER = "__meiva_documented_const__"
@@ -15,6 +17,27 @@ _DOCUMENTED_MARKER = "__meiva_documented_const__"
 def is_documented_const(obj: object) -> bool:
     """True if `obj`'s type is one minted by `const()`."""
     return vars(type(obj)).get(_DOCUMENTED_MARKER) is True
+
+
+def is_container(obj: object) -> bool:
+    return inspect.ismodule(obj) or inspect.isclass(obj) or isinstance(obj, SimpleNamespace)
+
+
+def is_skill_object(obj: object) -> bool:
+    return hasattr(obj, "_meiva_skill_kind")
+
+
+def is_namespace(obj: object) -> bool:
+    return obj is not None and (inspect.ismodule(obj) or isinstance(obj, SimpleNamespace))
+
+
+def format_docstring(doc: str, *, indent: str) -> str:
+    triple = '"""' if '"""' not in doc else "'''"
+    lines = doc.split("\n")
+    if len(lines) == 1:
+        return f"{indent}{triple}{lines[0]}{triple}"
+    indented_body = "\n".join(f"{indent}{line}" if line else "" for line in lines[1:])
+    return f"{indent}{triple}{lines[0]}\n{indented_body}\n{indent}{triple}"
 
 
 def const[T](value: T, doc: str) -> T:

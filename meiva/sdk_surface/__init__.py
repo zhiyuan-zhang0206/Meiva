@@ -50,10 +50,66 @@ framework module such as this package.
 """
 
 import sys as _sys
+from enum import StrEnum
 from types import ModuleType
+from typing import Any
 
 
 def meiva_module() -> ModuleType:
     """The `meiva` package module itself — reached through `sys.modules` so
     these private modules never create an import cycle during `import meiva`."""
     return _sys.modules["meiva"]
+
+
+class SdkProcessPurpose(StrEnum):
+    SHARED_HOST = "shared_host"
+
+
+class ContextOutsideProcessError(AttributeError):
+    pass
+
+
+class PluginStateOutsideTurnError(AttributeError):
+    pass
+
+
+CONTEXT_KEY = "_exec_context"
+STATE_KEY = "_exec_state"
+UPDATE_KEY = "_exec_state_update"
+IMAGE_KEY = "_LOADED_IMAGE"
+
+
+def _slots() -> dict[str, Any]:
+    return meiva_module().__dict__
+
+
+def outside_exec_turn(name: str) -> PluginStateOutsideTurnError:
+    return PluginStateOutsideTurnError(
+        f"meiva.{name} exists only inside execute_code (an exec turn); this process has no bound "
+        "turn state. Host code reads the graph state its hook was handed instead."
+    )
+
+
+def outside_process(name: str) -> ContextOutsideProcessError:
+    return ContextOutsideProcessError(
+        f"meiva.{name} requires an execution child, launched script or external attachment; "
+        "host code uses the context its caller supplied"
+    )
+
+
+def get_state() -> object:
+    value = _slots().get(STATE_KEY)
+    if value is None:
+        raise outside_exec_turn("state")
+    return value
+
+
+def get_state_update() -> object:
+    slots = _slots()
+    if slots.get(STATE_KEY) is None:
+        raise outside_exec_turn("state_update")
+    return slots.get(UPDATE_KEY)
+
+
+def in_exec_turn() -> bool:
+    return _slots().get(STATE_KEY) is not None

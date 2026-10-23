@@ -1,12 +1,14 @@
 exports = ["ambient.py", "boot.py", "tests"]
 
 [uses]
+"__init__.py" = ["identity.py"]
 "ambient.py" = ["__init__.py"]
 "boot.py" = ["__init__.py"]
 "tests" = ["__init__.py", "boot.py"]
 
 [purity]
 "." = "strict-to-be"
+"identity.py" = "strict"
 
 [debt.impure-edge]
 "__init__.py#base/host/db_authority/api.py" = 1
@@ -17,6 +19,3 @@ exports = ["ambient.py", "boot.py", "tests"]
 "__init__.py#base/paths/__init__.py" = 1
 "ambient.py#base/config/__init__.py" = 1
 "boot.py#base/config/__init__.py" = 1
-
-[debt.wide-public-surface]
-"__init__.py#public-surface" = 1

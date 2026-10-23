@@ -18,7 +18,11 @@ import types as _types
 from typing import Any
 
 from . import meiva_module
-from .installation import installed, record_disabled
+from .installation import SLOT, Loading, installed, record_disabled
+
+
+def mark_load_failed(exc: BaseException) -> None:
+    setattr(meiva_module(), SLOT, Loading(installed(), exc))
 
 
 # MEIVA_SDK_DISABLE removes pieces of the agent-facing SDK after the regular

@@ -8,6 +8,8 @@ registering turn (user ruling 2026-08-26). The SDK keeps no buffer of its own.
 
 from __future__ import annotations
 
+import inspect
+import re as _re
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any, cast
@@ -23,6 +25,16 @@ from meiva.sdk_surface.validation import coerce_str
 
 # The graph-state channel a registration is appended to (`BaseAgentState.attach`).
 _ATTACH_CHANNEL = "attach"
+
+
+def format_signature(target: object) -> str:
+    try:
+        sig = str(inspect.signature(cast(Callable[..., Any], target)))
+    except (ValueError, TypeError):
+        return "(...)"
+    sig = _re.sub(r"(: |-> )'([^']*)'(?=[,)= ]|$)", r"\1\2", sig)
+    sig = _re.sub(r"<(\w+(?:\.\w+)+): [^<>]*>", r"\1", sig)
+    return sig.replace("typing.", "")
 
 
 def media_gated_members(model: str, *, catalog: ModelCatalog) -> frozenset[str]:

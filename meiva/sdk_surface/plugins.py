@@ -13,8 +13,29 @@ from collections.abc import Callable, Mapping
 from types import ModuleType, SimpleNamespace
 from typing import Any
 
-from . import meiva_module
+from . import CONTEXT_KEY, SdkProcessPurpose, meiva_module
 from .sdk_disable import DisabledSDKModule
+
+
+def is_host_process() -> bool:
+    return meiva_module().__dict__.get(CONTEXT_KEY) is SdkProcessPurpose.SHARED_HOST
+
+
+def bind_host_process() -> None:
+    slots = meiva_module().__dict__
+    bound = slots.get(CONTEXT_KEY)
+    if bound is not None and bound is not SdkProcessPurpose.SHARED_HOST:
+        raise RuntimeError("cannot boot a shared host with an established SDK process context")
+    slots[CONTEXT_KEY] = SdkProcessPurpose.SHARED_HOST
+
+
+def bind_context(context: object) -> None:
+    if is_host_process():
+        raise RuntimeError("the shared agent host cannot bind an SDK process context")
+    if not any(cls.__name__ == "MeivaContext" for cls in type(context).__mro__):
+        raise TypeError("meiva.context must be an MeivaContext")
+    meiva_module().__dict__[CONTEXT_KEY] = context
+
 
 # ── Exception hierarchy (AGENTS.md SDK docstring rule: parent + subclass) ─
 # Plugin authors use RegisterNamespaceError for coarse catch, specific
