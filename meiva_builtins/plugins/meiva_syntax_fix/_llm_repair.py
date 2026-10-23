@@ -1,96 +1,45 @@
-"""
-Step 8 of the syntax-fix pipeline: LLM repair.
-
-A fast reasoning model rewrites source that still fails compile()
-after all deterministic steps. Split out of plugin.py
-(2026-08-07, Task #1011).
-"""
-
+# meiva:note
+# Step 8 of the syntax-fix pipeline: a fast reasoning model rewrites source that still fails
+# compile() after every deterministic step. Each attempt is compiled and, if still broken, its new
+# error is fed back for another round. The model is built from the values the hook hands in.
 from __future__ import annotations
 
 import asyncio
-import re
 import time
-from typing import Any, cast
+from dataclasses import dataclass
+from typing import Any
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from loguru import logger
 
+from base.host.env.agent_slices import ModelOverrides
 from base.lm.catalog import ModelCatalog
 
-# ---------------------------------------------------------------------------
-# 5. LLM repair (only on the rare path where deterministic fixes left it broken)
-# ---------------------------------------------------------------------------
-
-_REPAIR_MODEL = "deepseek-flash"
-_REPAIR_TIMEOUT = 60.0  # per-attempt; flash model responds much faster
-_REPAIR_MAX_ATTEMPTS = 3  # single-shot is probabilistic; feed the error back and retry
-_REPAIR_SYSTEM = (
-    "You are a Python syntax repair tool. The user message contains Python "
-    "source that failed to compile, followed by its SyntaxError. Return the "
-    "corrected source code and nothing else -- no markdown fences, no prose, no "
-    "commentary. Make the smallest change that resolves the error while "
-    "preserving the code's intent and structure; do not add or remove unrelated "
-    "lines. Frequent causes: a multi-line value written with single/double "
-    "quotes that should be a triple-quoted string; a triple-quoted string whose "
-    "body contains an unescaped triple-quote or ends with a quote adjacent to "
-    "the closing delimiter; an f-string with an empty or malformed `{}` field."
+from ._repair_text import (
+    REPAIR_MAX_ATTEMPTS,
+    REPAIR_SYSTEM,
+    extract_text,
+    render_syntax_error,
+    repair_request,
+    retry_request,
+    strip_code_fence,
 )
 
-_FENCE_RE = re.compile(r"^\s*```[^\n]*\n(.*?)\n```\s*$", re.DOTALL)
+_REPAIR_MODEL = "deepseek-flash"
+_REPAIR_TIMEOUT = 60.0
 
 
-def render_syntax_error(e: SyntaxError, source: str) -> str:
-    """Render a SyntaxError as Python's native traceback would -- a
-    `File ... line N` header, the offending source line, a caret, and the
-    `SyntaxError: msg` line. Reused for both the LLM repair prompt and the
-    fallback message the agent receives.
-    """
-    lines: list[str] = []
-    if e.lineno:
-        lines.append(f'  File "<agent_code>", line {e.lineno}')
-        # compile() does not set .text when the source is a string, so fall
-        # back to slicing the offending line out of the source ourselves.
-        source_line = e.text.rstrip() if e.text else ""
-        if not source_line:
-            code_lines = source.split("\n")
-            if e.lineno <= len(code_lines):
-                source_line = code_lines[e.lineno - 1]
-        if source_line:
-            lines.append(f"    {source_line}")
-        if e.offset:
-            lines.append(f"    {' ' * max(0, e.offset - 1)}^")
-    lines.append(f"SyntaxError: {e.msg}")
-    return "\n".join(lines)
+@dataclass(frozen=True)
+class RepairInputs:
+    catalog: ModelCatalog
+    overrides: ModelOverrides
+    llm_override: str
 
 
-def extract_text(content: Any) -> str:
-    """Flatten an LLM response content into plain text. A thinking model returns
-    a list of blocks (thinking + text); keep only the text blocks."""
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        parts: list[str] = []
-        for b in cast(list[object], content):
-            if isinstance(b, dict):
-                bd = cast(dict[str, Any], b)
-                if bd.get("type") == "text" and isinstance(bd.get("text"), str):
-                    parts.append(bd["text"])
-        return "".join(parts)
-    return ""
-
-
-def strip_code_fence(text: str) -> str:
-    """Strip one surrounding markdown code fence if the model wrapped its output
-    despite instructions not to."""
-    m = _FENCE_RE.match(text)
-    return m.group(1) if m else text.strip()
-
-
+# meiva:note
+# One LLM repair attempt: invoke with a timeout, then flatten and strip the reply. The candidate
+# source, or None when the model is unavailable (missing key, timeout, empty output).
 async def repair_once(llm: Any, messages: list[Any], *, catalog: ModelCatalog) -> str | None:
-    """One LLM repair attempt: invoke with timeout, then flatten + strip the
-    response. Returns the candidate source, or None when the model is
-    unavailable (missing key, timeout, empty output)."""
     started = time.monotonic()
     try:
         resp = await asyncio.wait_for(llm.ainvoke(messages), timeout=_REPAIR_TIMEOUT)
@@ -117,33 +66,23 @@ async def repair_once(llm: Any, messages: list[Any], *, catalog: ModelCatalog) -
     return strip_code_fence(extract_text(resp.content)).strip() or None
 
 
-async def llm_repair_syntax(code: str, rendered_error: str) -> str | None:
-    """Fast-model repair for a syntax error the deterministic pipeline could
-    not fix, running deepseek-flash (delimiter repair
-    needs to infer the author's intent). Single-shot output is probabilistic, so
-    each attempt's result is compiled and, if still broken, the new error is fed
-    back for up to _REPAIR_MAX_ATTEMPTS rounds.
-
-    Returns source that compiles, or None when every attempt fails or the model
-    is unavailable (missing key, timeout, empty output) -- the caller then
-    degrades to surfacing the error to the agent. A non-None return is
-    guaranteed to compile.
-    """
+# meiva:note
+# Fast-model repair for a syntax error the deterministic pipeline could not fix. Single-shot output
+# is probabilistic, so each attempt's result is compiled and, if still broken, the new error is fed
+# back for up to REPAIR_MAX_ATTEMPTS rounds. Returns source that compiles, or None when every
+# attempt fails or the model is unavailable (missing key, timeout, empty output); the caller then
+# surfaces the error to the agent.
+async def llm_repair_syntax(code: str, rendered_error: str, repair: RepairInputs) -> str | None:
     from base.lm.factory import build_chat_model
-    from meiva.sdk_surface import settings as sdk_settings
-
-    catalog = sdk_settings.model_catalog()
 
     try:
         llm = build_chat_model(
             _REPAIR_MODEL,
-            catalog=catalog,
-            llm_override=sdk_settings.settings.lm.llm_override,
-            overrides=sdk_settings.model_overrides(),
+            catalog=repair.catalog,
+            llm_override=repair.llm_override,
+            overrides=repair.overrides,
         )
-    except (
-        Exception
-    ) as exc:  # best-effort: any failure degrades to surfacing the error to the agent
+    except Exception as exc:
         logger.warning(
             "[syntax_fix] llm_repair unavailable: {err}",
             event="syntax_fix",
@@ -152,34 +91,27 @@ async def llm_repair_syntax(code: str, rendered_error: str) -> str | None:
         return None
 
     messages: list[Any] = [
-        SystemMessage(content=_REPAIR_SYSTEM),
-        HumanMessage(content=f"{code}\n\n# --- compile error ---\n{rendered_error}"),
+        SystemMessage(content=REPAIR_SYSTEM),
+        HumanMessage(content=repair_request(code, rendered_error)),
     ]
-    for attempt in range(1, _REPAIR_MAX_ATTEMPTS + 1):
+    for attempt in range(1, REPAIR_MAX_ATTEMPTS + 1):
         logger.debug(
             "[syntax_fix] llm_repair attempt {attempt}/{max_attempts}: model={model} code_lines={lines}",
             event="syntax_fix",
             attempt=attempt,
-            max_attempts=_REPAIR_MAX_ATTEMPTS,
+            max_attempts=REPAIR_MAX_ATTEMPTS,
             model=_REPAIR_MODEL,
             lines=len(code.splitlines()),
         )
-        candidate = await repair_once(llm, messages, catalog=catalog)
+        candidate = await repair_once(llm, messages, catalog=repair.catalog)
         if candidate is None:
             return None
         try:
             compile(candidate, "<agent_code>", "exec")
         except SyntaxError as retry_err:
-            # Feed the still-broken attempt + its error back for another round.
             messages.append(AIMessage(content=candidate))
             messages.append(
-                HumanMessage(
-                    content=(
-                        "That still fails to compile:\n"
-                        f"{render_syntax_error(retry_err, candidate)}\n"
-                        "Return the full corrected source again, code only."
-                    )
-                )
+                HumanMessage(content=retry_request(render_syntax_error(retry_err, candidate)))
             )
             continue
         return candidate

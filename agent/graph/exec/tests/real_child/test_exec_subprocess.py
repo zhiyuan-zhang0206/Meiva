@@ -2,19 +2,20 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import json
 import os
+import sys
 import threading
 import time
 from pathlib import Path
 from typing import Any
-from unittest.mock import MagicMock
 
 import psutil
 import psycopg
 import pytest
 from langchain_core.messages import HumanMessage
 
+from agent.graph.exec._child_boundary import ParentFacts
+from agent.graph.exec._result import LifecycleKind
 from agent.graph.exec._subprocess import run_in_subprocess
 from agent.graph.exec.node import (
     ExecCancelled,
@@ -25,14 +26,18 @@ from agent.graph.exec.node import (
     ExecOutputChunkPublisher,
     ExecTimedOut,
 )
-from base.agents.lifecycle import AgentRestart, AgentTermination, SystemHalt
+from agent.graph.exec.tests.event_capture import EventCapture
+from agent.graph.exec.tests.process_inputs import real_parent
 from base.config import settings
 from base.host.env.dotenv_file import upsert_env
 from base.host.proc import kill_process_tree
+from base.native_process.exec_domain import ExecProcessDomain
+from base.native_process.process_control import SYSTEM_PROCESS_CONTROL
 from base.paths import logs_dir
 from meiva.tests.fixtures.pin_agent import exec_context
 
 _AGENT_ID = 424242
+_SLEEP_CHILD = Path(__file__).with_name("sleep_child.py")
 
 
 def _seed_agent_for_self_lifecycle() -> None:
@@ -59,6 +64,7 @@ async def _run(
     cancel_after: float | None = None,
     state: dict[str, Any] | None = None,
     chunk_publisher: ExecOutputChunkPublisher | None = None,
+    parent: ParentFacts | None = None,
 ):
     cancel_event = asyncio.Event()
     cancel_task: asyncio.Task[None] | None = None
@@ -78,6 +84,7 @@ async def _run(
             chunk_publisher,
             state=state,
             exec_dir=tmp_path / "exec",
+            parent=parent or real_parent(),
             accumulation_max_chars=1_000_000,
         )
         return result
@@ -105,25 +112,25 @@ async def test_assert_tree_gone_accepts_missing_pid_immediately() -> None:
     await asyncio.wait_for(_assert_tree_gone([999_999_999]), timeout=0.5)
 
 
-async def test_assert_tree_gone_waits_for_live_pid_to_become_zombie(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    process = MagicMock()
-    process.status.side_effect = [psutil.STATUS_SLEEPING, psutil.STATUS_ZOMBIE]
-    monkeypatch.setattr(psutil, "Process", MagicMock(return_value=process))
+async def test_assert_tree_gone_waits_for_live_pid_to_become_zombie() -> None:
+    sleeper, domain = ExecProcessDomain.launch_posix(
+        [sys.executable, str(_SLEEP_CHILD), "0.3"], process_control=SYSTEM_PROCESS_CONTROL
+    )
+    try:
+        await _assert_tree_gone([sleeper.pid], timeout_s=10.0)
+    finally:
+        domain.kill_and_reap()
 
-    await _assert_tree_gone([12345], timeout_s=0.3)
 
-
-async def test_assert_tree_gone_rejects_pid_still_running_after_deadline(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    process = MagicMock()
-    process.status.return_value = psutil.STATUS_RUNNING
-    monkeypatch.setattr(psutil, "Process", MagicMock(return_value=process))
-
-    with pytest.raises(AssertionError, match="still alive after exec teardown"):
-        await _assert_tree_gone([12345], timeout_s=0.3)
+async def test_assert_tree_gone_rejects_pid_still_running_after_deadline() -> None:
+    sleeper, domain = ExecProcessDomain.launch_posix(
+        [sys.executable, str(_SLEEP_CHILD), "60"], process_control=SYSTEM_PROCESS_CONTROL
+    )
+    try:
+        with pytest.raises(AssertionError, match="still alive after exec teardown"):
+            await _assert_tree_gone([sleeper.pid], timeout_s=0.3)
+    finally:
+        domain.kill_and_reap()
 
 
 async def test_subprocess_done(tmp_path: Path) -> None:
@@ -163,32 +170,25 @@ async def test_exec_child_disables_otlp_after_cluster_env_authority(tmp_path: Pa
     assert b"OTLP backend init failed" not in child_log
 
 
-async def test_subprocess_bootstrap_ignores_agent_package_in_process_cwd(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+async def test_subprocess_bootstrap_ignores_agent_package_in_process_cwd(tmp_path: Path) -> None:
     old_checkout = tmp_path / "old-checkout"
     (old_checkout / "agent").mkdir(parents=True)
     (old_checkout / "agent" / "__init__.py").write_text("# old checkout\n")
-    monkeypatch.chdir(old_checkout)
-    monkeypatch.setenv("PYTHONPATH", str(old_checkout))
 
     result = await _run(
         tmp_path,
         ("import agent.execution.child as entry\nprint('exec-child', entry.__file__)\n"),
+        parent=real_parent(
+            cwd=old_checkout.resolve(), environ={**os.environ, "PYTHONPATH": str(old_checkout)}
+        ),
     )
 
     assert isinstance(result, ExecDone)
     expected_entry = Path(__file__).resolve().parents[4] / "execution" / "child.py"
     assert str(expected_entry) in result.output
-    assert Path.cwd() == old_checkout.resolve()
 
 
-async def test_subprocess_bootstrap_forces_utf8_when_python_env_is_ignored(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setenv("PYTHONUTF8", "0")
-    monkeypatch.setenv("PYTHONIOENCODING", "cp1252")
-
+async def test_subprocess_bootstrap_forces_utf8_when_python_env_is_ignored(tmp_path: Path) -> None:
     result = await _run(
         tmp_path,
         (
@@ -197,6 +197,7 @@ async def test_subprocess_bootstrap_forces_utf8_when_python_env_is_ignored(
             "print('stdout-encoding', sys.stdout.encoding)\n"
             "print('cjk', '\u5b50\u8fdb\u7a0b')\n"
         ),
+        parent=real_parent(environ={**os.environ, "PYTHONUTF8": "0", "PYTHONIOENCODING": "cp1252"}),
     )
 
     assert isinstance(result, ExecDone)
@@ -369,6 +370,7 @@ async def test_outer_task_cancel_reaps_child_and_descendant(tmp_path: Path) -> N
             asyncio.Event(),
             60.0,
             exec_dir=tmp_path / "exec",
+            parent=real_parent(),
             accumulation_max_chars=1_000_000,
         )
     )
@@ -401,9 +403,10 @@ async def test_outer_task_cancel_reaps_child_and_descendant(tmp_path: Path) -> N
                 os.waitpid(pids[0], 0)
 
 
-async def test_subprocess_streaming_chunks_published_incrementally(tmp_path: Path) -> None:
-    emitter = MagicMock()
-    publisher = ExecOutputChunkPublisher(emitter, agent_id=_AGENT_ID, item_id="7.0")
+async def test_subprocess_streaming_chunks_published_incrementally(
+    tmp_path: Path, event_capture: EventCapture
+) -> None:
+    publisher = ExecOutputChunkPublisher(event_capture.publisher, agent_id=_AGENT_ID, item_id="7.0")
     result = await _run(
         tmp_path,
         "import time\nfor i in range(5):\n    print(f'line {i}')\n    time.sleep(0.15)",
@@ -411,12 +414,16 @@ async def test_subprocess_streaming_chunks_published_incrementally(tmp_path: Pat
         chunk_publisher=publisher,
     )
     assert isinstance(result, ExecDone)
-    assert emitter.emit.call_count >= 2
+    chunks = [event for event in await event_capture.events() if not event["keepalive"]]
+    assert len(chunks) >= 2
+    assert "".join(event["content"] for event in chunks) == result.output
+    assert all(event["item_id"] == "7.0" for event in chunks)
 
 
-async def test_subprocess_silent_child_publishes_keepalive(tmp_path: Path) -> None:
-    emitter = MagicMock()
-    publisher = ExecOutputChunkPublisher(emitter, agent_id=_AGENT_ID, item_id="7.0")
+async def test_subprocess_silent_child_publishes_keepalive(
+    tmp_path: Path, event_capture: EventCapture
+) -> None:
+    publisher = ExecOutputChunkPublisher(event_capture.publisher, agent_id=_AGENT_ID, item_id="7.0")
 
     result = await _run(
         tmp_path,
@@ -427,36 +434,10 @@ async def test_subprocess_silent_child_publishes_keepalive(tmp_path: Path) -> No
 
     assert isinstance(result, ExecDone)
     assert result.output == ""
-    events = [json.loads(call.args[0]) for call in emitter.emit.call_args_list]
+    events = await event_capture.events()
     keepalives = [event for event in events if event["keepalive"] is True]
     assert keepalives
     assert all(event["content"] == "" for event in keepalives)
-
-
-def test_chunk_publisher_real_output_resets_keepalive_deadline(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    now = 0.0
-    monkeypatch.setattr(time, "monotonic", lambda: now)
-    emitter = MagicMock()
-    publisher = ExecOutputChunkPublisher(emitter, agent_id=_AGENT_ID, item_id="7.0")
-
-    now = 0.5
-    publisher.maybe_keepalive()
-    now = 0.75
-    publisher.publish("output")
-    now = 1.24
-    publisher.maybe_keepalive()
-    assert emitter.emit.call_count == 2
-
-    now = 1.25
-    publisher.maybe_keepalive()
-    events = [json.loads(call.args[0]) for call in emitter.emit.call_args_list]
-    assert [(event["content"], event["keepalive"]) for event in events] == [
-        ("", True),
-        ("output", False),
-        ("", True),
-    ]
 
 
 async def test_subprocess_state_snapshot_reaches_child(tmp_path: Path) -> None:
@@ -481,43 +462,55 @@ def _self_lifecycle_code(action: str) -> str:
     )
 
 
-@pytest.mark.usefixtures("runner_exec_env")
-async def test_subprocess_self_terminate_lifecycle_and_inbound(tmp_path: Path) -> None:
+async def test_subprocess_self_terminate_lifecycle_and_inbound(
+    tmp_path: Path, runner_db_url: str
+) -> None:
     _seed_agent_for_self_lifecycle()
 
-    result = await _run(tmp_path, _self_lifecycle_code("meiva.self.terminate()"))
+    result = await _run(
+        tmp_path,
+        _self_lifecycle_code("meiva.self.terminate()"),
+        parent=real_parent(environ={**os.environ, "MEIVA_DB_URL": runner_db_url}),
+    )
 
     assert isinstance(result, ExecLifecycle)
-    assert isinstance(result.exc, AgentTermination)
+    assert result.kind is LifecycleKind.TERMINATION
     _content, kind, source = _self_inbound_row()
     assert kind == "terminate"
     assert source == "self"
 
 
-@pytest.mark.usefixtures("runner_exec_env")
-async def test_subprocess_self_restart_lifecycle_and_inbound(tmp_path: Path) -> None:
+async def test_subprocess_self_restart_lifecycle_and_inbound(
+    tmp_path: Path, runner_db_url: str
+) -> None:
     _seed_agent_for_self_lifecycle()
 
-    result = await _run(tmp_path, _self_lifecycle_code("meiva.self.restart()"))
+    result = await _run(
+        tmp_path,
+        _self_lifecycle_code("meiva.self.restart()"),
+        parent=real_parent(environ={**os.environ, "MEIVA_DB_URL": runner_db_url}),
+    )
 
     assert isinstance(result, ExecLifecycle)
-    assert isinstance(result.exc, AgentRestart)
+    assert result.kind is LifecycleKind.RESTART
     _content, kind, source = _self_inbound_row()
     assert kind == "restart"
     assert source == "self"
 
 
-@pytest.mark.usefixtures("runner_exec_env")
-async def test_subprocess_self_compact_lifecycle_and_inbound(tmp_path: Path) -> None:
+async def test_subprocess_self_compact_lifecycle_and_inbound(
+    tmp_path: Path, runner_db_url: str
+) -> None:
     _seed_agent_for_self_lifecycle()
 
     result = await _run(
         tmp_path,
         _self_lifecycle_code("meiva.self.compact('audit e2e summary')"),
+        parent=real_parent(environ={**os.environ, "MEIVA_DB_URL": runner_db_url}),
     )
 
     assert isinstance(result, ExecLifecycle)
-    assert isinstance(result.exc, SystemHalt)
+    assert result.kind is LifecycleKind.SYSTEM_HALT
     content, kind, _source = _self_inbound_row()
     assert kind == "compact_summary"
     assert content == "audit e2e summary"

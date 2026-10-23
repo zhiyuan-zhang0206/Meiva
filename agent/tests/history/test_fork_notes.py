@@ -19,6 +19,7 @@ from base.config.service_read import ConfigAuthority
 from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
 from base.packages.extensions import install_registry
+from base.packages.extensions.install_registry import InstalledPackage
 from base.paths import meiva_home, skills_dir
 
 
@@ -34,7 +35,6 @@ async def test_fork_tail_grafts_delta_skills_from_inbound_payload(
     redis_url: str,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
-    monkeypatch: pytest.MonkeyPatch,
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
@@ -53,10 +53,7 @@ async def test_fork_tail_grafts_delta_skills_from_inbound_payload(
         encoding="utf-8",
     )
 
-    def _all_enabled() -> set[str]:
-        return {p.name for p in load_dir.iterdir() if p.is_dir()}
-
-    monkeypatch.setattr(install_registry, "loadable_skill_names", _all_enabled)
+    install_registry.register(InstalledPackage(name="extra", type="skill"))
 
     tid = spawn_agent(
         catalog=model_catalog,

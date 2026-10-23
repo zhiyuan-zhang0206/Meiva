@@ -9,6 +9,7 @@ surface module carries only the description (task #3633).
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
@@ -35,18 +36,12 @@ from ._imports import detect_missing_imports, insert_imports
 from ._imports import (
     is_stdlib_module as is_stdlib_module,  # re-exported for tests
 )
-from ._imports import (
-    ruff_executable as ruff_executable,
-)
-from ._llm_repair import (
-    extract_text as extract_text,  # re-exported for tests
-)
-from ._llm_repair import llm_repair_syntax, render_syntax_error
-from ._llm_repair import (
-    strip_code_fence as strip_code_fence,
-)
+from ._llm_repair import RepairInputs, llm_repair_syntax
 from ._punct import fix_chinese_punctuation
+from ._repair_text import render_syntax_error
 from ._ruff import ruff_fix, ruff_format
+from ._ruff_plan import RuffRun
+from ._ruff_run import system_ruff
 
 # ---------------------------------------------------------------------------
 # Main hook
@@ -96,7 +91,7 @@ def emit_syntax_fix_event(
     )
 
 
-def apply_fix_pipeline(code: str, *, ruff_format: bool) -> tuple[str, list[str]]:
+def apply_fix_pipeline(code: str, *, ruff_format: bool, ruff: RuffRun) -> tuple[str, list[str]]:
     """Run the deterministic fix pipeline (steps 1-6): Chinese punctuation,
     missing imports, invalid escapes, ruff --fix, ruff format (gated), and the
     11 compile-guarded deterministic patterns. Returns (fixed_code,
@@ -111,7 +106,7 @@ def apply_fix_pipeline(code: str, *, ruff_format: bool) -> tuple[str, list[str]]
         fixes_applied.append(f"chinese_punct({n})")
 
     # Step 2: Missing imports
-    missing = detect_missing_imports(fixed_code)
+    missing = detect_missing_imports(fixed_code, ruff)
     if missing:
         fixed_code = insert_imports(fixed_code, missing)
         fixes_applied.append(f"missing_imports({len(missing)})")
@@ -123,14 +118,14 @@ def apply_fix_pipeline(code: str, *, ruff_format: bool) -> tuple[str, list[str]]
 
     # Step 4: ruff --fix (unused imports, formatting)
     ruff_before = fixed_code
-    fixed_code = ruff_fix(fixed_code)
+    fixed_code = ruff_fix(fixed_code, ruff)
     if fixed_code != ruff_before:
         fixes_applied.append("ruff")
 
     # Step 5: ruff format (style normalization) — pulls in-context code toward
     # canonical formatting. Off the deterministic-correctness path: it never
     # fixes an error, only restyles, so it is gated and trivially skippable.
-    fixed_code, fmt_applied = _maybe_ruff_format(fixed_code, enabled=ruff_format)
+    fixed_code, fmt_applied = _maybe_ruff_format(fixed_code, ruff, enabled=ruff_format)
     if fmt_applied:
         fixes_applied.append("ruff_format")
 
@@ -153,12 +148,12 @@ def apply_fix_pipeline(code: str, *, ruff_format: bool) -> tuple[str, list[str]]
     return fixed_code, fixes_applied
 
 
-def _maybe_ruff_format(code: str, *, enabled: bool) -> tuple[str, bool]:
+def _maybe_ruff_format(code: str, ruff: RuffRun, *, enabled: bool) -> tuple[str, bool]:
     """Step 5 of the pipeline: run `ruff format` (style-only normalization)
     when gated on; returns (code, applied)."""
     if not enabled:
         return code, False
-    formatted = ruff_format(code)
+    formatted = ruff_format(code, ruff)
     return formatted, formatted != code
 
 
@@ -199,6 +194,7 @@ async def _handle_compile_failure(
     last_msg: AIMessage,
     fixed_msg: AIMessage,
     tool_call_id: str,
+    repair: RepairInputs,
 ) -> dict[str, object]:
     """Last-resort handling for source that still does not compile: hand it to
     the LLM repair model, or surface the error to the agent (skipping the
@@ -210,7 +206,7 @@ async def _handle_compile_failure(
     # reasoning model. Covers open-ended string-delimiter mistakes the
     # deterministic steps can't (multi-line value in single quotes, embedded
     # triple-quote, trailing quote against the closing delimiter).
-    repaired = await llm_repair_syntax(fixed_code, rendered_error)
+    repaired = await llm_repair_syntax(fixed_code, rendered_error, repair)
     if repaired is not None and repaired != fixed_code:
         # llm_repair_syntax only returns source that compiles.
         logger.info(
@@ -262,8 +258,15 @@ async def _handle_compile_failure(
     }
 
 
+@dataclass(frozen=True)
+class FixInputs:
+    ruff_format: bool
+    ruff: RuffRun
+    repair: RepairInputs
+
+
 async def _fix_call(
-    last_msg: AIMessage, call: ToolCall, *, ruff_format: bool
+    last_msg: AIMessage, call: ToolCall, inputs: FixInputs
 ) -> dict[str, Any] | None:
     """Repair one invocation without inspecting or rewriting sibling code."""
     if call["name"] != "execute_code":
@@ -271,13 +274,15 @@ async def _fix_call(
     code = first_tool_call_code([call])
     if not code:
         return None
-    fixed_code, fixes_applied = apply_fix_pipeline(code, ruff_format=ruff_format)
+    fixed_code, fixes_applied = apply_fix_pipeline(
+        code, ruff_format=inputs.ruff_format, ruff=inputs.ruff
+    )
     fixed_msg = replace_execute_code(last_msg, call["id"], fixed_code)
     try:
         compile(fixed_code, "<agent_code>", "exec")
     except SyntaxError as e:
         return await _handle_compile_failure(
-            e, fixed_code, fixes_applied, last_msg, fixed_msg, call["id"] or ""
+            e, fixed_code, fixes_applied, last_msg, fixed_msg, call["id"] or "", inputs.repair
         )
     return _finalize_success(fixed_msg, fixes_applied, before_code=code)
 
@@ -301,9 +306,18 @@ class _SyntaxFixHook(Hook):
             return None
         last_msg = normalize_tool_calls(original) or original
         changed = last_msg is not original
-        ruff_format = runtime.context.require_agent().sandbox.syntax_fix_ruff_format
+        slices = runtime.context.require_agent()
+        inputs = FixInputs(
+            ruff_format=slices.sandbox.syntax_fix_ruff_format,
+            ruff=system_ruff(),
+            repair=RepairInputs(
+                catalog=runtime.context.require_catalog(),
+                overrides=slices.overrides,
+                llm_override=slices.read("lm", "llm_override"),
+            ),
+        )
         for call in last_msg.tool_calls:
-            result = await _fix_call(last_msg, call, ruff_format=ruff_format)
+            result = await _fix_call(last_msg, call, inputs)
             if result is None:
                 continue
             if "goto" in result:

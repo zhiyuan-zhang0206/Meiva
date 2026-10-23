@@ -28,4 +28,4 @@ Within the same overdue window, at most one reminder per backoff period (Fleet `
 - If the parent has an owner → notify the parent owner.
 - If the parent has no owner (a top-level task under the unowned system root) → insert a `require_response` notice into the human queue.
 
-Details in [[meiva_builtins/plugins/meiva_fleet/task_maintenance/docs/task-maintenance.meiva.okf.md|Task-Maintenance]].
+Details in [[meiva_builtins/plugins/meiva_fleet/task_maintenance/docs/task-maintenance/task-maintenance.meiva.okf.md|Task-Maintenance]].

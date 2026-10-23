@@ -1,16 +1,15 @@
 exports = ["corpse_reap.py", "hosted.py", "inbound.py", "tests"]
 
 [uses]
-"corpse_reap.py" = ["hosted_cleanup.py"]
-"hosted.py" = ["hosted_cleanup.py"]
-"tests" = ["corpse_reap.py", "hosted.py", "hosted_cleanup.py"]
+"hosted.py" = ["lifecycle_plan.py"]
+"tests" = ["corpse_reap.py", "hosted.py", "lifecycle_plan.py"]
 
 [purity]
 "." = "strict-to-be"
 "__init__.py" = "strict"
+"lifecycle_plan.py" = "strict"
 
 [debt.impure-call]
-"corpse_reap.py#async def _publish_reaped_corpses" = 1
 "corpse_reap.py#async def reap_crash_corpses" = 1
 "corpse_reap.py#import psycopg_pool" = 1
 "hosted.py#async def admit_hosted_runtime" = 1
@@ -21,14 +20,11 @@ exports = ["corpse_reap.py", "hosted.py", "inbound.py", "tests"]
 "hosted.py#async def stamp_turn_fatal" = 1
 "hosted.py#import psycopg" = 1
 "hosted.py#import psycopg_pool" = 1
-"hosted_cleanup.py#async def finish_termination" = 1
 "inbound.py#async def lock_inbound_owner" = 1
 "inbound.py#import psycopg" = 1
 
 [debt.impure-edge]
 "corpse_reap.py#base/db/transaction.py" = 1
-"corpse_reap.py#base/events/live/announce.py" = 1
-"corpse_reap.py#base/events/live/bus.py" = 1
 "corpse_reap.py#base/log/__init__.py" = 1
 "corpse_reap.py#base/telemetry/__init__.py" = 3
 "corpse_reap.py#base/telemetry/audit_events.py" = 1
@@ -42,7 +38,3 @@ exports = ["corpse_reap.py", "hosted.py", "inbound.py", "tests"]
 "hosted.py#base/log/__init__.py" = 1
 "hosted.py#base/telemetry/__init__.py" = 4
 "hosted.py#base/telemetry/audit_events.py" = 1
-"hosted_cleanup.py#base/agents/lifecycle.py" = 1
-"hosted_cleanup.py#base/events/live/announce.py" = 1
-"hosted_cleanup.py#base/events/live/bus.py" = 1
-"hosted_cleanup.py#base/log/__init__.py" = 1

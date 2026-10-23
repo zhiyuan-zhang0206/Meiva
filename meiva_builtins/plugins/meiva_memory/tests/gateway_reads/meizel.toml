@@ -1,0 +1,4 @@
+[uses]
+"conftest.py" = ["gateway_stub.py"]
+"test_meiva_memory_inherit.py" = ["gateway_stub.py"]
+"test_meiva_memory_recall_hook.py" = ["gateway_stub.py"]

@@ -61,7 +61,7 @@ async def test_fatal_provider_error_opens_circuit_breaker(
         context_overflow=True,
     )
     update = await _handle_fatal_llm_error(
-        exc, breaker_ctx(database_gate=database_gate), agent_id=42
+        exc, breaker_ctx(database_gate=database_gate), agent_id=42, circuit=None
     )
 
     assert update["halted"] is True
@@ -85,7 +85,7 @@ async def test_fatal_provider_error_billing_reason(*, database_gate: ProcessDbGa
         status=402,
     )
     update = await _handle_fatal_llm_error(
-        exc, breaker_ctx(database_gate=database_gate), agent_id=42
+        exc, breaker_ctx(database_gate=database_gate), agent_id=42, circuit=None
     )
 
     circuit = update["circuit"]
@@ -121,7 +121,7 @@ async def test_fatal_provider_error_emits_blocked_recovery_details(
         status=400,
     )
 
-    await _handle_fatal_llm_error(exc, ctx, agent_id=42)
+    await _handle_fatal_llm_error(exc, ctx, agent_id=42, circuit=None)
 
     emitted = json.loads(publisher.payloads[-1])
     assert emitted["role"] == "error"
@@ -213,6 +213,7 @@ async def test_permanent_provider_error_reports_metadata_to_nearest_alive_ancest
             commands=CommandCatalog.system(skills=list),
         ),
         agent_id=child_id,
+        circuit=None,
         occurred_at=occurred_at,
     )
 
@@ -291,6 +292,7 @@ async def test_context_overflow_halts_background_wakes_and_reports_to_an_ancesto
             commands=CommandCatalog.system(skills=list),
         ),
         agent_id=child_id,
+        circuit=None,
     )
 
     with db_conn.cursor() as cur:
@@ -305,7 +307,7 @@ async def test_fatal_llm_stream_error_does_not_open_breaker(
     it only halts the turn; the breaker stays untouched."""
     exc = FatalLLMStreamError("retry cap exhausted")
     update = await _handle_fatal_llm_error(
-        exc, breaker_ctx(database_gate=database_gate), agent_id=42
+        exc, breaker_ctx(database_gate=database_gate), agent_id=42, circuit=None
     )
 
     assert update == {"halted": True}
@@ -325,11 +327,11 @@ async def test_fatal_provider_error_does_not_reopen_already_open_breaker(
     )
     opened_at = "2026-08-29T00:00:00+00:00"
 
-    async def _reader() -> CircuitState | None:
-        return CircuitState(open=True, reason="billing", opened_at=opened_at)
-
     update = await _handle_fatal_llm_error(
-        exc, breaker_ctx(database_gate=database_gate), agent_id=42, circuit_reader=_reader
+        exc,
+        breaker_ctx(database_gate=database_gate),
+        agent_id=42,
+        circuit=CircuitState(open=True, reason="billing", opened_at=opened_at),
     )
 
     assert update == {"halted": True}, (

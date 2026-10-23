@@ -9,10 +9,10 @@ from agent.graph.exec._output_pipe import ExecOutputPipe
 from agent.graph.exec._stream import StreamingTextIO
 
 
-def pipe() -> tuple[ExecOutputPipe, int]:
+def pipe(stream: StreamingTextIO | None = None) -> tuple[ExecOutputPipe, int]:
     source, destination = os.pipe()
     process: Any = SimpleNamespace(stdout=os.fdopen(source, "rb"))
-    return ExecOutputPipe(process, StreamingTextIO(max_chars=64)), destination
+    return ExecOutputPipe(process, stream or StreamingTextIO(max_chars=64)), destination
 
 
 async def test_partial_output_streams_before_writer_eof() -> None:
@@ -50,16 +50,14 @@ async def test_readiness_drains_output_between_invocation_poll_beats() -> None:
         reader.close()
 
 
-async def test_readiness_error_is_returned_to_the_actual_tail_owner(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    reader, destination = pipe()
+async def test_readiness_error_is_returned_to_the_actual_tail_owner() -> None:
     original = RuntimeError("stream failed")
 
-    def failed(_text: str) -> int:
-        raise original
+    class FailingStream(StreamingTextIO):
+        def write(self, s: str) -> int:
+            raise original
 
-    monkeypatch.setattr(reader.stream, "write", failed)
+    reader, destination = pipe(FailingStream(max_chars=64))
     reader.watch()
     try:
         os.write(destination, b"error")

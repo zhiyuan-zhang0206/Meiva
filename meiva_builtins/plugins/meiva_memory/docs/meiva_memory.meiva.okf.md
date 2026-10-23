@@ -12,7 +12,7 @@ tags:
 
 ## What it is
 
-`meiva_memory` provides shared memory pool capability: passive memory recall (`MEIVA_PASSIVE_MEMORY_RECALL`), the `meiva.memory.*` SDK surface, the write check, and the standing memory context notes — the shared pool index, the per-agent index, and the chain-inherited `inheritable` blocks (`inherit.py`). Whether recall runs, and the knobs that shape it, are [[meiva_builtins/plugins/meiva_memory/docs/memory-recall.meiva.okf.md]]'s to state.
+`meiva_memory` provides shared memory pool capability: passive memory recall (`MEIVA_PASSIVE_MEMORY_RECALL`), the `meiva.memory.*` SDK surface, the write check, and the standing memory context notes — the shared pool index, the per-agent index, and the chain-inherited `inheritable` blocks (`inherit.py`, whose decisions are the pure `inherited_blocks.py`). Whether recall runs, and the knobs that shape it, are [[meiva_builtins/plugins/meiva_memory/docs/memory-recall.meiva.okf.md]]'s to state.
 
 ## Registered hooks
 
@@ -32,23 +32,14 @@ passive_memory_recall_before_llm = _PassiveMemoryRecallHook()
 # declared in contribute(): before_llm=(passive_memory_recall_before_llm,)
 ```
 
-**Trigger conditions**:
-- **Feature gate**: `settings.passive_memory_recall_enabled` (env `MEIVA_PASSIVE_MEMORY_RECALL`) — the entire hook is a no-op when it is off; its default and the cluster opt-out are in [[meiva_builtins/plugins/meiva_memory/docs/memory-recall.meiva.okf.md]]
-- Positive gate `tail_has_user_inbound` (`agent/messages/__init__.py:223-232`): **since last AIMessage** any inbound whose source **does not start with `agent:`** triggers — user / system / schedule / watcher / shell sources **all pass**, **only peer agent (`agent:` prefix) is excluded**; no non-empty text check, not "most recent one", but scans tail inbound
-- If auto-compact hook would also trigger in the same turn, **defers** (returns None) — `messages` have add_messages reducer that merges, without failing loud, but auto-compact's REMOVE_ALL full replacement is order-sensitive and would swallow the same-turn appended note
-
-**Behavior**:
-- Performs semantic search against recent conversation, injects matched note references as system messages (`system_note`), seen by agent in next turn. Each injected note presents path, score, frontmatter description and the passage that matched — `meiva.memory.search`'s fields minus tags (the injected note is a pointer, not a tag list). Description is empty when absent, never synthesized from title/body
-- The built-in `memory` sub-state's `injected_paths` (reducer `memory_state_merge`) holds this window's notes; the hook resets it when `compact.version` passes `window`
+**Trigger and behavior**: the hook is a no-op when `settings.passive_memory_recall_enabled` is off, triggers when any inbound since the last AIMessage is not from a peer agent, defers (returns None) when auto-compact would also fire in the same turn, and injects the matched note references as `system_note` messages the agent sees on its next turn; the built-in `memory` sub-state's `injected_paths` holds this window's notes. The gate, the deferral reason and the injected shape: [[meiva_builtins/plugins/meiva_memory/docs/memory-recall-hook.meiva.okf.md|Passive Recall Hook]].
 
 The recall engine (search + rendering beyond gating) is in the core `agent/graph/recall/memory_recall.py:passive_memory_recall`;
 this plugin only provides the before_llm wiring + trigger gate. It also bundles memory skills: `meiva.skills.meiva_memory`
 (Memory Steward maintenance manual — daily merge, health check, note consolidation, query service) +
 `meiva.skills.meiva_memory.consolidation` sub-skill (`meiva memory` CLI daily merge — commit / push / rebuild index).
 
-**Host-side scaffolding** (`meiva_builtins/plugins/meiva_memory/setup.py:scaffold(*, machine)`, run by explicit `meiva memory init` for every enabled plugin): brings up this cluster's memory pool checkouts and lays the plugin's `template/` down inside the authoring one — `MEMORY.md` (the index every agent reads) and `.githooks/pre-commit` (the character-cap guard), then arms `core.hooksPath`. Idempotent and non-destructive; never overwrites existing pool files. Kept out of `plugin.py`, which imports the agent runtime absent from the `meiva` CLI process. Converge and service startup never touch the memory repository.
-
-**`python3 validate.py`** (in the pool checkout, run by the pre-commit hook): the pool's rules in one place — frontmatter, exactly one `type/<x>` tag, a non-empty `description`, the index's pointer format (`- [Title](path.md) — description`) and targets, orphaned notes, the character caps, and the directory-structure limits. Exits non-zero on any finding and runs on every commit via `.githooks/pre-commit`.
+**Host-side scaffolding and validator**: explicit `meiva memory init` brings up this cluster's memory pool checkouts and lays the plugin's `template/` down inside the authoring one (the `MEMORY.md` index and the pre-commit character-cap guard); the pool's own `validate.py` runs on every commit. Idempotent, non-destructive, and converge and service startup never touch the memory repository: [[meiva_builtins/plugins/meiva_memory/docs/memory-pool-scaffold.meiva.okf.md|Memory Pool Scaffold and Validator]].
 Skill nodes see [[meiva_builtins/plugins/meiva_memory/skills/docs/skills.meiva.okf.md|Meiva Memory Skills]].
 
 ## Provided SDK surface

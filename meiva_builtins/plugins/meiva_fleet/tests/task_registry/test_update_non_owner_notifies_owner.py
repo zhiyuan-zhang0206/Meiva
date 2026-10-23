@@ -3,18 +3,20 @@
 from __future__ import annotations
 
 import inspect
-from unittest.mock import patch
 from uuid import uuid4
 
 import psycopg
 import pytest
 
-from base.events.live import announce
+from base.events.live.bus import EventBus
 from meiva.tests.fixtures.pin_agent import pin_agent
 from meiva_builtins.plugins.meiva_fleet import task_registry
+from meiva_builtins.plugins.meiva_fleet.tests.task_registry.concurrent_claim import (
+    run_against_concurrent_claim,
+)
+from meiva_builtins.plugins.meiva_fleet.tests.task_registry.live_events import recorded_events
 from meiva_builtins.plugins.meiva_fleet.tests.task_registry.notes import record_notes
 from meiva_builtins.plugins.meiva_fleet.tests.task_registry.seeds import (
-    fake_no_duplicate_precheck,
     persisted_parent,
     persisted_priority,
     seed_agent,
@@ -36,18 +38,15 @@ def test_update_non_owner_notifies_owner(
         task = task_registry.create(
             "title", "detail", owner=owner_id, parent=root_task_id, operation_key=str(uuid4())
         )
-    with record_notes(db_conn) as mock_send:
+    with record_notes(db_conn) as notes:
         task_registry.update(task.id, status="cancelled", operation_key=str(uuid4()))
-        mock_send.assert_called_once()
-        recipient, msg = mock_send.call_args[0]
-        assert recipient == owner_id
-        assert f"Task #{task.id}" in msg
-        assert '"title"' in msg
-        assert "status → cancelled" in msg
-        assert f"agent #{actor_id}" in msg
-        # A plain update notice is a notification, not a delegator
-        # direction: it must never resurrect a terminated owner.
-        assert mock_send.call_args.kwargs["resurrect"] is False
+    [note] = notes.read()
+    assert note.recipient == owner_id
+    assert f"Task #{task.id}" in note.content
+    assert '"title"' in note.content
+    assert "status → cancelled" in note.content
+    assert f"agent #{actor_id}" in note.content
+    assert note.resurrect is False
 
 
 def test_update_by_owner_no_notification(
@@ -57,9 +56,9 @@ def test_update_by_owner_no_notification(
     agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
     task = task_registry.create("title", "detail", parent=root_task_id, operation_key=str(uuid4()))
-    with record_notes(db_conn) as mock_send:
+    with record_notes(db_conn) as notes:
         task_registry.update(task.id, status="done", results="shipped", operation_key=str(uuid4()))
-        mock_send.assert_not_called()
+    assert notes.read() == []
 
 
 def test_update_non_owner_skips_terminated_owner(
@@ -75,9 +74,9 @@ def test_update_non_owner_skips_terminated_owner(
         task = task_registry.create(
             "title", "detail", owner=dead_owner, parent=root_task_id, operation_key=str(uuid4())
         )
-    with record_notes(db_conn) as mock_send:
+    with record_notes(db_conn) as notes:
         task_registry.update(task.id, status="done", operation_key=str(uuid4()))
-        mock_send.assert_not_called()
+    assert notes.read() == []
 
 
 def test_update_parent_only_by_non_owner_no_notification(
@@ -96,9 +95,9 @@ def test_update_parent_only_by_non_owner_no_notification(
         task = task_registry.create(
             "notify-child", "d", owner=owner_id, parent=root_task_id, operation_key=str(uuid4())
         )
-    with record_notes(db_conn) as mock_send:
+    with record_notes(db_conn) as notes:
         task_registry.update(task.id, parent_id=parent.id, operation_key=str(uuid4()))
-        mock_send.assert_not_called()
+    assert notes.read() == []
     assert persisted_parent(db_conn, task.id) == parent.id
 
 
@@ -118,9 +117,9 @@ def test_update_parent_only_terminated_owner_not_resurrected(
         task = task_registry.create(
             "storm-child", "d", owner=dead_owner, parent=root_task_id, operation_key=str(uuid4())
         )
-    with record_notes(db_conn) as mock_send:
+    with record_notes(db_conn) as notes:
         task_registry.update(task.id, parent_id=parent.id, operation_key=str(uuid4()))
-        mock_send.assert_not_called()
+    assert notes.read() == []
     assert persisted_parent(db_conn, task.id) == parent.id
 
 
@@ -139,15 +138,14 @@ def test_update_parent_plus_business_field_still_notifies(
         task = task_registry.create(
             "mixed-child", "d", owner=owner_id, parent=root_task_id, operation_key=str(uuid4())
         )
-    with record_notes(db_conn) as mock_send:
+    with record_notes(db_conn) as notes:
         task_registry.update(
             task.id, parent_id=parent.id, status="cancelled", operation_key=str(uuid4())
         )
-        mock_send.assert_called_once()
-        recipient, msg = mock_send.call_args[0]
-        assert recipient == owner_id
-        assert "parent →" in msg
-        assert "status → cancelled" in msg
+    [note] = notes.read()
+    assert note.recipient == owner_id
+    assert "parent →" in note.content
+    assert "status → cancelled" in note.content
 
 
 def test_update_owner_change_appends_changes_to_new_owner(
@@ -164,18 +162,18 @@ def test_update_owner_change_appends_changes_to_new_owner(
         task = task_registry.create(
             "title", "detail", owner=old_owner, parent=root_task_id, operation_key=str(uuid4())
         )
-    with record_notes(db_conn) as mock_send:
+    with record_notes(db_conn) as notes:
         task_registry.update(
             task.id, status="cancelled", owner=new_owner, operation_key=str(uuid4())
         )
-        assert mock_send.call_count == 2
-        msgs = {call.args[0]: call.args[1] for call in mock_send.call_args_list}
-        flags = {call.args[0]: call.kwargs["resurrect"] for call in mock_send.call_args_list}
-        assert "now assigned" in msgs[new_owner]
-        assert "status → cancelled" in msgs[new_owner]
-        assert "no longer assigned" in msgs[old_owner]
-        # New owner (assignment): resurrect; old owner (released): never.
-        assert flags == {new_owner: True, old_owner: False}
+    delivered = notes.read()
+    assert len(delivered) == 2
+    msgs = {note.recipient: note.content for note in delivered}
+    flags = {note.recipient: note.resurrect for note in delivered}
+    assert "now assigned" in msgs[new_owner]
+    assert "status → cancelled" in msgs[new_owner]
+    assert "no longer assigned" in msgs[old_owner]
+    assert flags == {new_owner: True, old_owner: False}
 
 
 def test_log_by_non_owner_notifies_owner(
@@ -189,11 +187,11 @@ def test_log_by_non_owner_notifies_owner(
         task = task_registry.create(
             "title", "detail", owner=owner_id, parent=root_task_id, operation_key=str(uuid4())
         )
-    with record_notes(db_conn) as mock_send:
+    with record_notes(db_conn) as notes:
         task_registry.log(task.id, "progress update", operation_key=str(uuid4()))
-        mock_send.assert_called_once()
-        assert mock_send.call_args[0][0] == owner_id
-        assert "note appended" in mock_send.call_args[0][1]
+    [note] = notes.read()
+    assert note.recipient == owner_id
+    assert "note appended" in note.content
 
 
 def test_create_defaults_priority_p2(
@@ -261,26 +259,28 @@ def test_update_rejects_bad_priority(
 
 
 def test_create_publishes_task_created(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch, root_task_id: int
+    db_conn: psycopg.Connection, event_bus: EventBus, root_task_id: int
 ) -> None:
     agent_id = seed_agent(db_conn)
-    calls: list[tuple] = []
-    monkeypatch.setattr(announce, "publish_task_created_sync", lambda *a: calls.append(a))  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
     pin_agent(agent_id)
-    task = task_registry.create("title", "detail", parent=root_task_id, operation_key=str(uuid4()))
-    assert [call[1:] for call in calls] == [(agent_id, task.id)]
+    with recorded_events(event_bus) as events:
+        task = task_registry.create(
+            "title", "detail", parent=root_task_id, operation_key=str(uuid4())
+        )
+    created = [event for event in events if event["role"] == "task_created"]
+    assert [(event["agent_id"], event["task_id"]) for event in created] == [(agent_id, task.id)]
 
 
 def test_update_publishes_task_updated(
-    redis_url: str, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch, root_task_id: int
+    db_conn: psycopg.Connection, event_bus: EventBus, root_task_id: int
 ) -> None:
     agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
     task = task_registry.create("title", "detail", parent=root_task_id, operation_key=str(uuid4()))
-    calls: list[tuple] = []
-    monkeypatch.setattr(announce, "publish_task_updated_sync", lambda *a: calls.append(a))  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
-    task_registry.update(task.id, status="in_progress", operation_key=str(uuid4()))
-    assert [call[1:] for call in calls] == [(agent_id, task.id)]
+    with recorded_events(event_bus) as events:
+        task_registry.update(task.id, status="in_progress", operation_key=str(uuid4()))
+    updated = [event for event in events if event["role"] == "task_updated"]
+    assert [(event["agent_id"], event["task_id"]) for event in updated] == [(agent_id, task.id)]
 
 
 def test_create_and_assign_signature() -> None:
@@ -386,37 +386,38 @@ def test_schema_unique_in_progress_title_backstop(db_conn):
 
 
 def test_create_unique_violation_race_becomes_value_error(
-    redis_url: str, db_conn, root_task_id: int
+    redis_url: str, db_url: str, db_conn: psycopg.Connection, root_task_id: int
 ):
     """When two creates race past the app-level pre-check, the partial unique
     index rejects the second INSERT with UniqueViolation; create() translates
     that into the same ValueError agents see on the normal path."""
     agent_id = seed_agent(db_conn)  # pyright: ignore[reportUnknownArgumentType]
     pin_agent(agent_id)
-    task_registry.create("raced-title", "d", parent=root_task_id, operation_key=str(uuid4()))
-    real_execute = psycopg.Cursor.execute
-    with (
-        patch.object(psycopg.Cursor, "execute", fake_no_duplicate_precheck(real_execute)),  # pyright: ignore[reportUnknownArgumentType]
-        pytest.raises(ValueError, match="already exists"),
-    ):
-        task_registry.create("raced-title", "d", parent=root_task_id, operation_key=str(uuid4()))
+
+    def create() -> object:
+        return task_registry.create(
+            "raced-title", "d", parent=root_task_id, operation_key=str(uuid4())
+        )
+
+    with pytest.raises(ValueError, match="already exists"):
+        run_against_concurrent_claim(db_url, "raced-title", create)
 
 
-def test_update_rename_race_becomes_value_error(redis_url: str, db_conn, root_task_id: int):
+def test_update_rename_race_becomes_value_error(
+    redis_url: str, db_url: str, db_conn: psycopg.Connection, root_task_id: int
+):
     """Same backstop on the rename path: a concurrent rename that lands
     between update()'s pre-check and its UPDATE surfaces as ValueError, not a
     raw psycopg error."""
     agent_id = seed_agent(db_conn)  # pyright: ignore[reportUnknownArgumentType]
     pin_agent(agent_id)
-    task_registry.create("taken-title", "d", parent=root_task_id, operation_key=str(uuid4()))
     task = task_registry.create("free-title", "d", parent=root_task_id, operation_key=str(uuid4()))
-    real_execute = psycopg.Cursor.execute
-    with (
-        patch.object(psycopg.Cursor, "execute", fake_no_duplicate_precheck(real_execute)),  # pyright: ignore[reportUnknownArgumentType]
-        pytest.raises(ValueError, match="already exists"),
-    ):
-        task_registry.update(task.id, title="taken-title", operation_key=str(uuid4()))
-    # The failed update left the row untouched.
+
+    def rename() -> object:
+        return task_registry.update(task.id, title="taken-title", operation_key=str(uuid4()))
+
+    with pytest.raises(ValueError, match="already exists"):
+        run_against_concurrent_claim(db_url, "taken-title", rename)
     assert task_registry.get(task.id).title == "free-title"
 
 
@@ -454,9 +455,9 @@ def test_update_title_reassign_notifies_with_new_title(
     task = task_registry.create(
         "old title", "detail", parent=root_task_id, operation_key=str(uuid4())
     )
-    with record_notes(db_conn) as mock_send:
+    with record_notes(db_conn) as notes:
         task_registry.update(task.id, title="new title", owner=other_id, operation_key=str(uuid4()))
-    assert any("new title" in call.args[1] for call in mock_send.call_args_list)
+    assert any("new title" in note.content for note in notes.read())
 
 
 def test_create_same_title_cancelled_allowed(redis_url: str, db_conn, root_task_id: int):

@@ -1,8 +1,8 @@
 exports = ["agent_traceback.py", "child.py", "protocol.py"]
 
 [uses]
-"child.py" = ["agent_traceback.py", "protocol.py"]
-"tests" = ["child.py", "protocol.py"]
+"child.py" = ["agent_traceback.py", "delivery_plan.py", "protocol.py"]
+"tests" = ["child.py", "delivery_plan.py", "protocol.py"]
 
 [external]
 "child.py" = "executes the agent-authored code of one execute_code call"
@@ -10,3 +10,4 @@ exports = ["agent_traceback.py", "child.py", "protocol.py"]
 [purity]
 "__init__.py" = "strict"
 "agent_traceback.py" = "strict"
+"delivery_plan.py" = "strict"

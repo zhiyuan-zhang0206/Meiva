@@ -1,12 +1,8 @@
 # meiva:note
 # Plugin expansions lead the deduplicated configured expansion list. Wildcards recursively discover public namespaces while excluding disabled entries and capability surfaces; explicitly naming a capability member is refused to avoid injecting whole skill bodies or tool schemas and falsely attributing them as loaded. Media filtering is per rendering call, and installed extensions are visible before rendering captures the SDK overview. The system prompt can be rebuilt when an empty context window is initialized. Delegation checks give the exact `meiva.help(meiva.skills.meiva_workflow)` invocation syntax for non-trivial work.
-import contextlib
 import hashlib
-import inspect
-import io
 import logging
 from collections.abc import Callable, Sequence
-from types import ModuleType, SimpleNamespace
 from typing import Any
 
 from agent.hooks.history_dump import workspace_section_hint
@@ -24,18 +20,19 @@ from ._base_prompt import (
     get_meiva_overview as get_meiva_overview,
 )
 from ._codeact import codeact_section as codeact_section
-from .capabilities import (
-    CAPABILITY_SURFACES,
-    capabilities_section,
-    capability_index_is_empty,
-    disabled_by_sdk_config,
-    is_capability_surface_member,
-)
+from .capabilities import capabilities_section, capability_index_is_empty
 from .conversation import (
     COMMUNICATION_STYLE_SECTIONS,
     harness_user_reply_section,
     user_reply_section,
 )
+from .live import (
+    LiveSdk,
+    discover_all_namespaces,
+    read_live_sdk,
+    render_expanded_reference,
+)
+from .sdk_scope import expand_plan
 
 
 def _resolved(setting: str, slices: AgentSlices, catalog: ModelCatalog) -> Any:
@@ -50,114 +47,43 @@ def _resolved(setting: str, slices: AgentSlices, catalog: ModelCatalog) -> Any:
     )
 
 
-def discover_all_namespaces(sdk_disable: Sequence[str]) -> list[str]:
-
-    import meiva
-
-    discovered: list[str] = []
-
-    def _collect(parent: ModuleType, prefix: str) -> None:
-
-        for name in meiva.agent_visible_names(parent):
-            full = f"{prefix}.{name}" if prefix else name
-            if full in CAPABILITY_SURFACES or disabled_by_sdk_config(full, sdk_disable):
-                continue
-            attr = getattr(parent, name, None)
-            if inspect.ismodule(attr) or isinstance(attr, SimpleNamespace):
-                discovered.append(full)
-
-                if inspect.ismodule(attr) and hasattr(attr, "__all_for_meiva__"):
-                    _collect(attr, full)
-
-    _collect(meiva, "")
-    return sorted(discovered)
-
-
 def effective_sdk_expand(
-    sdk_disable: Sequence[str], *, configured_expansions: Sequence[str]
+    configured: Sequence[str], *, disabled: Sequence[str], plugin_expansions: Sequence[str]
 ) -> list[str]:
 
-    from meiva.sdk_surface import install
-
-    configured: list[str] = []
-    for entry in configured_expansions:
-        if entry == "*":
-            configured.extend(discover_all_namespaces(sdk_disable))
-        else:
-            configured.append(entry)
-
-    merged = [*install.expansions(), *configured]
-    seen: set[str] = set()
-    resolved: list[str] = []
-    for path in merged:
-        if path in seen:
-            continue
-        seen.add(path)
-        if is_capability_surface_member(path):
-            logging.getLogger(__name__).warning(
-                "sdk_expand_in_system_prompt: refusing %r — expanding one member of a "
-                "capability surface would render that skill's whole body (or that "
-                "server's tool schemas) into every prompt and record a bogus 'loaded' "
-                "attribution. Preload a skill with skills_to_expand_at_start; leave a "
-                "server's tools to meiva.help(meiva.mcps.<server>)",
-                path,
-            )
-            continue
-        resolved.append(path)
-    return resolved
+    plan = expand_plan(
+        configured,
+        plugin_expansions=plugin_expansions,
+        discovered=discover_all_namespaces(disabled) if "*" in configured else (),
+    )
+    for path in plan.refused:
+        logging.getLogger(__name__).warning(
+            "sdk_expand_in_system_prompt: refusing %r — expanding one member of a "
+            "capability surface would render that skill's whole body (or that "
+            "server's tool schemas) into every prompt and record a bogus 'loaded' "
+            "attribution. Preload a skill with skills_to_expand_at_start; leave a "
+            "server's tools to meiva.help(meiva.mcps.<server>)",
+            path,
+        )
+    return list(plan.paths)
 
 
-def sdk_expand_section(slices: AgentSlices, *, catalog: ModelCatalog) -> str:
+def sdk_expand_section(slices: AgentSlices, *, catalog: ModelCatalog, live: LiveSdk) -> str:
 
     wanted = effective_sdk_expand(
-        slices.prompt.sdk_disable,
-        configured_expansions=slices.read("agent", "sdk_expand_in_system_prompt"),
+        slices.read("agent", "sdk_expand_in_system_prompt"),
+        disabled=live.view.disabled,
+        plugin_expansions=live.plugin_expansions,
     )
     if not wanted:
         return ""
-    import meiva
-    from meiva.sdk_surface.help import ModelHelpProfile
-    from meiva.sdk_surface.help import render as render_help
-
-    pieces: list[str] = []
-    seen_targets: set[int] = set()
-
-    profile = ModelHelpProfile.for_model(slices.brain.llm_model, catalog=catalog)
-    for path in wanted:
-        if disabled_by_sdk_config(path, slices.prompt.sdk_disable):
-            continue
-        target: object = meiva
-        try:
-            for segment in path.split("."):
-                target = getattr(target, segment)
-        except AttributeError:
-            logging.getLogger(__name__).warning(
-                "sdk_expand_in_system_prompt: meiva.%s does not resolve and is not covered "
-                "by MEIVA_SDK_DISABLE (typo, or a plugin namespace whose plugin is not "
-                "loaded?), skipping",
-                path,
-            )
-            continue
-        if id(target) in seen_targets:
-            logging.getLogger(__name__).warning(
-                "sdk_expand_in_system_prompt: %r resolves to an already-expanded "
-                "namespace; rendering once. The expand list should be deduped, so a "
-                "duplicate points at a polluted list (a stray plugin sdk expansion or "
-                "cross-test global-state leak). effective list was %r",
-                path,
-                wanted,
-            )
-            continue
-        seen_targets.add(id(target))
-        buf = io.StringIO()
-        with contextlib.redirect_stdout(buf):
-            render_help(target, compact_classes=True, profile=profile)
-        pieces.append(buf.getvalue().rstrip())
-
-    if not pieces:
-        return ""
-    body = "\n\n".join(pieces)
-    return f"# Expanded SDK reference\n\nFull contracts for your most-used namespaces.\n\n{body}"
+    return render_expanded_reference(
+        wanted,
+        disabled=live.view.disabled,
+        model=slices.brain.llm_model,
+        catalog=catalog,
+        report=True,
+    )
 
 
 def _prefer_sdk_section(slices: AgentSlices, *, catalog: ModelCatalog) -> str:
@@ -322,12 +248,12 @@ _STEP_PARALLEL = (
 )
 
 
-def delegation_check_section(slices: AgentSlices, *, catalog: ModelCatalog) -> str:
+def delegation_check_section(slices: AgentSlices, *, catalog: ModelCatalog, live: LiveSdk) -> str:
 
     if not _resolved("prompt_delegation_check_enabled", slices, catalog):
         return ""
     steps: list[str] = []
-    if not capability_index_is_empty(slices.prompt):
+    if not capability_index_is_empty(live.view, live.mcp_servers):
         steps.append(_STEP_SKILL_INDEX)
     steps.append(_STEP_NEIGHBORS)
     steps.append(_STEP_TOOLS)
@@ -432,8 +358,6 @@ def agent_workspace_pointer(slices: AgentSlices, *, agent_id: int | None) -> str
 
     if agent_id is None or not slices.read("agent", "workspace_in_system_prompt"):
         return ""
-
-    workspace_dir(agent_id)
     return (
         "# Workspace\n\n"
         "Your workspace is your per-agent folder — it is named with your agent "
@@ -522,6 +446,76 @@ FRAMEWORK_SECTIONS: tuple[Callable[..., str], ...] = (
 )
 
 
+_CATALOG_SECTIONS = (
+    _prefer_sdk_section,
+    keep_it_simple_section,
+    communication_style_section,
+    user_tone_section,
+    _output_conciseness_section,
+    ui_delivery_section,
+    _outcome_reporting_section,
+    _action_caution_section,
+    align_before_action_section,
+    cross_machine_delegation_section,
+    _file_driven_work_section,
+    temporal_awareness_section,
+    invest_in_the_future_section,
+)
+
+
+def _render_section(
+    section_fn: Callable[..., str], slices: AgentSlices, catalog: ModelCatalog, live: LiveSdk
+) -> str:
+    if section_fn in _LIVE_SECTIONS:
+        return section_fn(slices, catalog=catalog, live=live)
+    if section_fn in _CATALOG_SECTIONS:
+        return section_fn(slices, catalog=catalog)
+    return section_fn(slices)
+
+
+def _framework_parts(
+    sections: tuple[Callable[..., str], ...],
+    slices: AgentSlices,
+    *,
+    agent_id: int | None,
+    catalog: ModelCatalog,
+    live: LiveSdk,
+) -> list[str]:
+    if agent_id is not None and slices.read("agent", "workspace_in_system_prompt"):
+        workspace_dir(agent_id)
+    rendered = [_render_section(fn, slices, catalog, live) for fn in sections]
+    rendered.append(agent_workspace_pointer(slices, agent_id=agent_id))
+    rendered.append(capabilities_section(live.view, live.mcp_servers))
+    return [part for part in rendered if part]
+
+
+def _plugin_parts(
+    extensions: ExtensionRegistry,
+    slices: AgentSlices,
+    catalog: ModelCatalog,
+    *,
+    excluded: frozenset[str],
+) -> list[str]:
+    parts: list[str] = []
+    for plugin, section_fn in extensions.system_prompt_sections():
+        if section_fn.__name__ in excluded:
+            continue
+        contribution = section_fn(slices, catalog=catalog)
+        if contribution:
+            parts.append(contribution)
+            activation.record(
+                plugin,
+                "systemPromptSections",
+                section_fn.__name__,
+                model=slices.brain.llm_model,
+                detail=(
+                    f"chars={len(contribution)} "
+                    f"sha={hashlib.sha256(contribution.encode()).hexdigest()[:12]}"
+                ),
+            )
+    return parts
+
+
 def build_system_prompt(
     extensions: ExtensionRegistry,
     slices: AgentSlices,
@@ -549,56 +543,16 @@ def build_system_prompt(
     else:
         parts = [CODE_ACTION_PREAMBLE.format(_SEQUENTIAL_TOOL_CALLS=sequential)]
 
-    def workspace_section(agent: AgentSlices) -> str:
-        return agent_workspace_pointer(agent, agent_id=agent_id)
-
-    framework_sections: tuple[Callable[..., str], ...] = (
-        *FRAMEWORK_SECTIONS,
-        workspace_section,
-        capabilities_section,
-    )
-    catalog_sections = (
-        sdk_expand_section,
-        _prefer_sdk_section,
-        keep_it_simple_section,
-        communication_style_section,
-        user_tone_section,
-        _output_conciseness_section,
-        ui_delivery_section,
-        _outcome_reporting_section,
-        _action_caution_section,
-        align_before_action_section,
-        delegation_check_section,
-        cross_machine_delegation_section,
-        _file_driven_work_section,
-        temporal_awareness_section,
-        invest_in_the_future_section,
-    )
-    for section_fn in framework_sections:
-        from functools import partial
-
-        bound_section: Callable[[AgentSlices], str] = (
-            partial(section_fn, catalog=catalog)
-            if section_fn in catalog_sections
-            else partial(section_fn)
+    parts.extend(
+        _framework_parts(
+            FRAMEWORK_SECTIONS,
+            slices,
+            agent_id=agent_id,
+            catalog=catalog,
+            live=read_live_sdk(slices.prompt),
         )
-        contribution = bound_section(slices)
-        if contribution:
-            parts.append(contribution)
-    for plugin, section_fn in extensions.system_prompt_sections():
-        contribution = section_fn(slices, catalog=catalog)
-        if contribution:
-            parts.append(contribution)
-            activation.record(
-                plugin,
-                "systemPromptSections",
-                section_fn.__name__,
-                model=slices.brain.llm_model,
-                detail=(
-                    f"chars={len(contribution)} "
-                    f"sha={hashlib.sha256(contribution.encode()).hexdigest()[:12]}"
-                ),
-            )
+    )
+    parts.extend(_plugin_parts(extensions, slices, catalog, excluded=frozenset()))
 
     identity = catalog.identities.get(slices.brain.llm_model)
     if identity:
@@ -619,49 +573,28 @@ HARNESS_DEFAULT_SDK_EXPANSIONS: tuple[str, ...] = ("self",)
 HARNESS_EXCLUDED_PLUGIN_SECTIONS: frozenset[str] = frozenset({"coding_tools_section"})
 
 
-def harness_sdk_expand_section(slices: AgentSlices, *, catalog: ModelCatalog) -> str:
-    configured = (
-        *HARNESS_DEFAULT_SDK_EXPANSIONS,
-        *slices.read("agent", "sdk_expand_in_system_prompt"),
-    )
+def harness_sdk_expand_section(slices: AgentSlices, *, catalog: ModelCatalog, live: LiveSdk) -> str:
     wanted = [
         path
         for path in effective_sdk_expand(
-            slices.prompt.sdk_disable,
-            configured_expansions=configured,
+            (*HARNESS_DEFAULT_SDK_EXPANSIONS, *slices.read("agent", "sdk_expand_in_system_prompt")),
+            disabled=live.view.disabled,
+            plugin_expansions=live.plugin_expansions,
         )
         if path.split(".", 1)[0] not in HARNESS_NATIVE_OVERLAP_NAMESPACES
     ]
     if not wanted:
         return ""
-    import meiva
-    from meiva.sdk_surface.help import ModelHelpProfile
-    from meiva.sdk_surface.help import render as render_help
+    return render_expanded_reference(
+        wanted,
+        disabled=live.view.disabled,
+        model=slices.brain.llm_model,
+        catalog=catalog,
+        report=False,
+    )
 
-    pieces: list[str] = []
-    seen_targets: set[int] = set()
-    profile = ModelHelpProfile.for_model(slices.brain.llm_model, catalog=catalog)
-    for path in wanted:
-        if disabled_by_sdk_config(path, slices.prompt.sdk_disable):
-            continue
-        target: object = meiva
-        try:
-            for segment in path.split("."):
-                target = getattr(target, segment)
-        except AttributeError:
-            continue
-        if id(target) in seen_targets:
-            continue
-        seen_targets.add(id(target))
-        buf = io.StringIO()
-        with contextlib.redirect_stdout(buf):
-            render_help(target, compact_classes=True, profile=profile)
-        pieces.append(buf.getvalue().rstrip())
-    if not pieces:
-        return ""
-    body = "\n\n".join(pieces)
-    return f"# Expanded SDK reference\n\nFull contracts for your most-used namespaces.\n\n{body}"
 
+_LIVE_SECTIONS = (sdk_expand_section, harness_sdk_expand_section, delegation_check_section)
 
 HARNESS_FRAMEWORK_SECTIONS: tuple[Callable[..., str], ...] = (
     harness_sdk_expand_section,
@@ -690,60 +623,16 @@ def build_harness_system_prompt(
     agent_id: int | None,
     catalog: ModelCatalog,
 ) -> str:
-    from functools import partial
-
-    parts: list[str] = []
-
-    def workspace_section(agent: AgentSlices) -> str:
-        return agent_workspace_pointer(agent, agent_id=agent_id)
-
-    framework_sections: tuple[Callable[..., str], ...] = (
-        *HARNESS_FRAMEWORK_SECTIONS,
-        workspace_section,
-        capabilities_section,
+    parts = _framework_parts(
+        HARNESS_FRAMEWORK_SECTIONS,
+        slices,
+        agent_id=agent_id,
+        catalog=catalog,
+        live=read_live_sdk(slices.prompt),
     )
-    catalog_sections = (
-        harness_sdk_expand_section,
-        keep_it_simple_section,
-        communication_style_section,
-        user_tone_section,
-        _output_conciseness_section,
-        ui_delivery_section,
-        _outcome_reporting_section,
-        _action_caution_section,
-        align_before_action_section,
-        delegation_check_section,
-        cross_machine_delegation_section,
-        _file_driven_work_section,
-        temporal_awareness_section,
-        invest_in_the_future_section,
+    parts.extend(
+        _plugin_parts(extensions, slices, catalog, excluded=HARNESS_EXCLUDED_PLUGIN_SECTIONS)
     )
-    for section_fn in framework_sections:
-        bound_section: Callable[[AgentSlices], str] = (
-            partial(section_fn, catalog=catalog)
-            if section_fn in catalog_sections
-            else partial(section_fn)
-        )
-        contribution = bound_section(slices)
-        if contribution:
-            parts.append(contribution)
-
-    for plugin, section_fn in extensions.system_prompt_sections():
-        if section_fn.__name__ in HARNESS_EXCLUDED_PLUGIN_SECTIONS:
-            continue
-        contribution = section_fn(slices, catalog=catalog)
-        if contribution:
-            parts.append(contribution)
-            activation.record(
-                plugin,
-                "systemPromptSections",
-                section_fn.__name__,
-                model=slices.brain.llm_model,
-                detail=(
-                    f"chars={len(contribution)} "
-                    f"sha={hashlib.sha256(contribution.encode()).hexdigest()[:12]}"
-                ),
-            )
 
     if slices.read("agent", "prompt_knowledge_cutoff_enabled"):
         cutoff = catalog.knowledge_cutoffs.get(slices.brain.llm_model)

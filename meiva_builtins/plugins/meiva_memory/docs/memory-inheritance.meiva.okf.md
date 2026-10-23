@@ -61,6 +61,17 @@ index and armed when flagged.
 
 The note renders one section per ancestor entry — nearest ancestor first, file names sorted, the fences of one file joined into one section — behind the framing; the content carries no timestamps, so unchanged state renders byte-identical; it is None when the layer is off, no agent id is established, the chain read failed, or nothing was declared.
 
+## Where the decisions live
+
+`inherited_blocks.py` is the strict pure half: which birth-chain rows this host can read
+(`split_ancestors`), the fenced blocks of one entry (`parse_inheritable_blocks`) and the note
+text with both size caps applied (`render_inherited`). It takes plain values and returns
+values, warnings included, so it logs nothing and reads nothing. `inherit.py` is the thin
+shell: it reads the agent's slices, makes the one gateway call, reads the entry files of the
+local ancestors, logs the returned warnings, scans the text and wraps it into the note. The
+tests run the pure half on literal values and the shell against a gateway on a port-0
+listener and entry files under a unit home.
+
 ## Key Dependencies
 
 - [[meiva_builtins/plugins/meiva_memory/docs/meiva_memory.meiva.okf.md]] — the owning plugin

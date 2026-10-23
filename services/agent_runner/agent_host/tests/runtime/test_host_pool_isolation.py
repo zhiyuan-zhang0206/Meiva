@@ -33,14 +33,13 @@ class TestPoolIsolation:
     def test_pool_capacity_is_independent_of_agent_admission(
         self, monkeypatch: pytest.MonkeyPatch, turn_limit: int, database: Database
     ) -> None:
-        from base.clock import SYSTEM_TIMERS
         from services.agent_runner.agent_host.pools import build_control_pool, build_shared_pool
 
         monkeypatch.setattr(settings.daemon, "host_max_concurrent_turns", turn_limit)
         monkeypatch.setattr(settings.daemon, "host_db_pool_max_size", 12)
         monkeypatch.setattr(settings.daemon, "host_control_pool_max_size", 3)
-        workload_pool = build_shared_pool(database, timers=SYSTEM_TIMERS)
-        control_pool = build_control_pool(database, timers=SYSTEM_TIMERS)
+        workload_pool = build_shared_pool(database)
+        control_pool = build_control_pool(database)
 
         assert workload_pool is not control_pool
         assert workload_pool.max_size == 12

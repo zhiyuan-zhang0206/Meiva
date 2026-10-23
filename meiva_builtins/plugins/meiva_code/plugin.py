@@ -107,7 +107,7 @@ def _process_context_file(
     # Agent-runtime half only: reachable when a live state slot exists
     # (a stateful child / the agent process), so these imports stay off the
     # surface boot (task #3633).
-    from agent.graph.exec.output import truncate_both_ends
+    from agent.graph.exec.output import overflow_dir, truncate_both_ends
     from agent.messages import NoteTag, system_note_message
     from meiva.security import scan_content
 
@@ -159,11 +159,12 @@ def _process_context_file(
     # content); the archive path rides in the injected note.
     note_body = content
     if len(note_body) > settings.sandbox.exec_output_max_chars:
+        clock = Clock.from_settings()
         note_body = truncate_both_ends(
             note_body,
             settings.sandbox.exec_output_max_chars,
-            agent_id=require_agent_id(),
-            clock=Clock.from_settings(),
+            archive_dir=overflow_dir(require_agent_id()),
+            now=clock.now().astimezone(clock.explicit_zone()),
         )
     update_state(
         {

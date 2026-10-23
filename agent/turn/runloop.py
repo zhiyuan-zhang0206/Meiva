@@ -1,6 +1,5 @@
 """Shared graph invocation configuration and recoverable turn-error reporting."""
 
-from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
@@ -11,16 +10,12 @@ from agent.graph.hooks.compact import CompactionFailedError
 from agent.graph.llm_errors import FatalLLMStreamError, FatalProviderError
 from agent.startup import CHECKPOINT_INTERVAL_KEY
 from agent.state import BaseAgentState
-from agent.state_channels import (
-    CIRCUIT_REASON_AUTH,
-    CIRCUIT_REASON_BAD_REQUEST,
-    CIRCUIT_REASON_BILLING,
-    CIRCUIT_REASON_CONTEXT_OVERFLOW,
-    CIRCUIT_REASON_FORBIDDEN,
-    CIRCUIT_REASON_MODEL_NOT_FOUND,
-    CIRCUIT_REASON_PERMANENT,
-    CIRCUIT_REASON_SCHEMA,
-    CircuitState,
+from agent.state_channels import CircuitState
+from agent.turn.failure_decision import (
+    abort_message,
+    breaker_already_open,
+    circuit_reason,
+    provider_recovery,
 )
 from base.agents.context import MeivaContext
 from base.events.live.bus import EventBus
@@ -80,40 +75,6 @@ def emit_error_event(
             "emitting the turn Error event for agent {} failed; the frontend does not see it",
             agent_id,
         )
-
-
-def _circuit_reason(exc: FatalProviderError) -> str:
-    """Map a permanent provider rejection to its circuit-breaker reason.
-
-    Reasons classify the required user action; every permanent rejection
-    suppresses background wakes until corrected.
-    """
-    if exc.context_overflow:
-        return CIRCUIT_REASON_CONTEXT_OVERFLOW
-    status = exc.status
-    if status is None:
-        return CIRCUIT_REASON_PERMANENT
-    return {
-        401: CIRCUIT_REASON_AUTH,
-        402: CIRCUIT_REASON_BILLING,
-        403: CIRCUIT_REASON_FORBIDDEN,
-        404: CIRCUIT_REASON_MODEL_NOT_FOUND,
-        422: CIRCUIT_REASON_SCHEMA,
-        400: CIRCUIT_REASON_BAD_REQUEST,
-    }.get(status, CIRCUIT_REASON_PERMANENT)
-
-
-def _provider_recovery(reason: str) -> str:
-    """Return the user action for a blocked permanent provider rejection."""
-    if reason == CIRCUIT_REASON_CONTEXT_OVERFLOW:
-        return "Compact the conversation, then send a new message."
-    if reason in (CIRCUIT_REASON_AUTH, CIRCUIT_REASON_BILLING, CIRCUIT_REASON_FORBIDDEN):
-        return "Resolve the provider credentials or billing issue, then send a new message."
-    if reason == CIRCUIT_REASON_MODEL_NOT_FOUND:
-        return "Choose a different model overlay, then send a new message."
-    if reason == CIRCUIT_REASON_SCHEMA:
-        return "Correct the request or model configuration, then send a new message."
-    return "Choose a different model overlay or resolve the provider policy rejection, then send a new message."
 
 
 def _model_vendor(ctx: MeivaContext) -> str | None:
@@ -238,34 +199,6 @@ async def _record_permanent_reject_outcome(
     )
 
 
-def _abort_message(exc: FatalLLMStreamError | FatalProviderError, *, blocked: bool) -> str:
-    if blocked:
-        return (
-            f"{type(exc).__name__}: {exc} The agent is blocked; heartbeat check-ins "
-            "will not re-run this request. Resolve the cause, then send a new message."
-        )
-    return (
-        f"{type(exc).__name__}: {exc} The turn was aborted; the agent "
-        "is still alive and idling. It retries on the next message or "
-        "wake-up once the underlying cause is resolved."
-    )
-
-
-async def _breaker_already_open(
-    circuit_reader: Callable[[], Awaitable[CircuitState | None]] | None, reason: str
-) -> bool:
-    if circuit_reader is None:
-        return False
-    try:
-        current = await circuit_reader()
-    except Exception:
-        logger.opt(exception=True).warning(
-            "reading the circuit breaker state failed; treating the breaker as not open"
-        )
-        current = None
-    return current is not None and current.open and current.reason == reason
-
-
 async def _open_breaker(
     ctx: MeivaContext,
     agent_id: int,
@@ -314,7 +247,7 @@ async def _apply_provider_failure(
     agent_id: int,
     exc: FatalProviderError,
     reason: str,
-    circuit_reader: Callable[[], Awaitable[CircuitState | None]] | None,
+    circuit: CircuitState | None,
     *,
     occurred_at: datetime | None,
     emit_reports: bool,
@@ -324,7 +257,7 @@ async def _apply_provider_failure(
     if emit_reports and ctx.ops_pool is not None and exc.error_class == "permanent":
         # Persist the halt even when the checkpoint circuit was already open.
         await _record_permanent_reject_outcome(ctx, agent_id, exc, reason, occurred_at, deferred)
-    if await _breaker_already_open(circuit_reader, reason):
+    if breaker_already_open(circuit, reason):
         # The breaker is still open for the same reason from an earlier
         # failed turn — re-opening is idempotent and re-emitting the open
         # event per failed wake is noise (QA #903 nit). Skip both; the
@@ -346,8 +279,8 @@ async def _handle_fatal_llm_error(
     exc: FatalLLMStreamError | FatalProviderError,
     ctx: MeivaContext,
     agent_id: int,
-    circuit_reader: Callable[[], Awaitable[CircuitState | None]] | None = None,
     *,
+    circuit: CircuitState | None,
     occurred_at: datetime | None = None,
     emit_reports: bool = True,
     deferred: list[Error] | None = None,
@@ -371,11 +304,15 @@ async def _handle_fatal_llm_error(
         status=getattr(exc, "status", None),
         context_overflow=getattr(exc, "context_overflow", None),
     )
-    reason = _circuit_reason(exc) if isinstance(exc, FatalProviderError) else None
+    reason = (
+        circuit_reason(status=exc.status, context_overflow=exc.context_overflow)
+        if isinstance(exc, FatalProviderError)
+        else None
+    )
     is_blocked_provider_failure = (
         isinstance(exc, FatalProviderError) and exc.error_class == "permanent"
     )
-    content = _abort_message(exc, blocked=is_blocked_provider_failure)
+    content = abort_message(f"{type(exc).__name__}: {exc}", blocked=is_blocked_provider_failure)
     if emit_reports:
         emit_error_event(
             ctx,
@@ -386,7 +323,7 @@ async def _handle_fatal_llm_error(
             status=getattr(exc, "status", None),
             reason=reason,
             blocked=is_blocked_provider_failure,
-            recovery=_provider_recovery(reason) if reason is not None else None,
+            recovery=provider_recovery(reason) if reason is not None else None,
             deferred=deferred,
         )
     # halted=True so the claim node actually waits for the next inbound
@@ -402,7 +339,7 @@ async def _handle_fatal_llm_error(
             agent_id,
             exc,
             reason,
-            circuit_reader,
+            circuit,
             occurred_at=occurred_at,
             emit_reports=emit_reports,
             deferred=deferred,
@@ -434,6 +371,24 @@ class PendingTurnFailure:
     errors: list[Error] = field(default_factory=list[Error])
 
 
+# meiva:note
+# The breaker state in the checkpoint. A failed read is reported and treated as no state: the
+# breaker is then opened again, which is idempotent.
+async def _read_circuit(
+    graph: CompiledStateGraph[BaseAgentState, MeivaContext, BaseAgentState, BaseAgentState],
+    config: RunnableConfig,
+) -> CircuitState | None:
+    try:
+        snapshot = await graph.aget_state(config)
+        value = snapshot.values.get("circuit")
+        return CircuitState.model_validate(value) if value is not None else None
+    except Exception:
+        logger.opt(exception=True).warning(
+            "reading the circuit breaker state failed; treating the breaker as not open"
+        )
+        return None
+
+
 async def settle_turn_failure(
     graph: CompiledStateGraph[BaseAgentState, MeivaContext, BaseAgentState, BaseAgentState],
     checkpointer: object,
@@ -444,17 +399,18 @@ async def settle_turn_failure(
 ) -> None:
     """Prepare the abort once; its host publishes errors after durable turn settlement."""
 
-    async def read_circuit() -> CircuitState | None:
-        snapshot = await graph.aget_state(config)
-        value = snapshot.values.get("circuit")
-        return CircuitState.model_validate(value) if value is not None else None
-
     if pending.prepared_update is None:
+        exc = pending.error
+        # meiva:note
+        # Read before the reports start: a database-phase timeout that interrupts this read
+        # has reported nothing yet, so its retry still reports.
+        circuit = (
+            await _read_circuit(graph, config) if isinstance(exc, FatalProviderError) else None
+        )
         # A database-phase timeout can interrupt preparation after a report
         # committed. Retrying the state calculation must not repeat that wake.
         emit_reports = not pending.reports_started
         pending.reports_started = True
-        exc = pending.error
         if isinstance(exc, CompactionFailedError):
             logger.warning(
                 "compaction failed — aborting turn, preserving history for the next inbound",
@@ -475,7 +431,7 @@ async def settle_turn_failure(
                 exc,
                 ctx,
                 agent_id,
-                circuit_reader=read_circuit,
+                circuit=circuit,
                 emit_reports=emit_reports,
                 deferred=pending.errors,
             )

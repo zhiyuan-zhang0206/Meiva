@@ -26,7 +26,7 @@ _CHILD = Path(__file__).with_name("child_pool_ops.py")
 
 
 def _run(
-    fn: str, env_overrides: dict[str, str], home: Path | None = None
+    fn: str, env_overrides: dict[str, str], home: Path | None = None, *args: str
 ) -> subprocess.CompletedProcess[str]:
     # Start from a clean slate: no inherited MEIVA_* leaks from this test's own
     # process, so each case's environment is exactly what it declares.
@@ -35,13 +35,25 @@ def _run(
         env["HOME"] = str(home)
     env |= env_overrides
     return subprocess.run(  # noqa: S603 — fixed argv, repository-owned driver script
-        [sys.executable, str(_CHILD), fn],
+        [sys.executable, str(_CHILD), fn, *args],
         capture_output=True,
         text=True,
         env=env,
         timeout=30,
         check=False,
     )
+
+
+def test_the_pool_follows_the_home_variable_after_import(tmp_path: Path) -> None:
+    first, second = tmp_path / "first", tmp_path / "second"
+
+    res = _run("follows_variable", {}, None, str(first), str(second))
+
+    assert res.returncode == 0, res.stderr
+    assert res.stdout.splitlines() == [
+        f"{first / 'memory'} {first / 'memory'}",
+        f"{second / 'memory'} {second / 'memory'}",
+    ]
 
 
 def test_pool_dir_is_under_the_default_home_when_meiva_home_is_unset(tmp_path: Path) -> None:

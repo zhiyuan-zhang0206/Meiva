@@ -5,24 +5,25 @@
 ]
 "base.paths.tests.homes" = ["."]
 "base.cluster.machine.tests.identity" = ["."]
-"agent.graph.tests.cancel_fixture" = [
+"agent.graph.node_log.tests.live_events" = [
+    "test_callbacks.py",
+    "test_compact_interrupt.py",
     "test_graph_stream.py",
     "test_llm_helpers.py",
-    "test_llm_understanding_wiring.py",
 ]
 "base.packages.tests.model_catalog" = [
-    "test_build_with_extensions.py",
-    "test_interrupt.py",
+    "test_claim_attach_drain.py",
+    "test_compact_interrupt.py",
+    "test_graph_stream.py",
 ]
 "base.config.tests.config_authority" = [
-    "test_interrupt.py",
+    "test_claim_attach_drain.py",
+    "test_compact_interrupt.py",
+    "test_graph_stream.py",
 ]
 "base.log.tests.log_records" = [
     "test_build_with_extensions.py",
-    "test_interrupt.py",
     "test_llm_helpers.py",
-    "test_model_interrupt_owner.py",
-    "test_node_log.py",
 ]
 "meiva.tests.fixtures.sdk" = [
     "."

@@ -29,7 +29,7 @@ def core_metrics() -> list[MetricSpec]:
                 "Exec envelope transfer size — serialized request/result envelope "
                 "bytes moved between the agent and its exec child, unwrapped from "
                 "the exec_envelope event's size_bytes attribute "
-                "(agent/graph/exec/protocol.py::_log_envelope_transfer). p50/p95 "
+                "(agent/execution/protocol.py::_log_envelope_transfer). p50/p95 "
                 "percentiles plus max, grouped by envelope/op; a rising request "
                 "band is state/payload inflation. The event is excluded from the "
                 "Exec outcomes other bucket (PM ruling 2026-08-31) and displays "

@@ -75,7 +75,7 @@ async def test_a_leased_agents_wake_returns_before_runtime_or_slot(
     monkeypatch.setattr(agent_host_host, "native_status", AsyncMock(return_value=None))
     monkeypatch.setattr(agent_host_host, "supervise_relay", AsyncMock())
     monkeypatch.setattr(db, "claim_inbound_batch", AsyncMock(return_value=[]))
-    monkeypatch.setattr(agent_host_host, "apply_hosted_lifecycle", AsyncMock(return_value=None))
+    monkeypatch.setattr(agent_host_host, "apply_lifecycle_command", AsyncMock(return_value=None))
     admission = AsyncMock(return_value=RuntimeIncarnation(42, uuid4(), host._owner))
     settlement = AsyncMock(return_value=True)
     monkeypatch.setattr(agent_host_host, "admit_hosted_runtime", admission)
@@ -113,7 +113,7 @@ async def test_a_lease_refuses_an_unaccepted_control_batch(
         AsyncMock(return_value=[SimpleNamespace(durable_lifecycle=False)]),
     )
     apply = AsyncMock(return_value=None)
-    monkeypatch.setattr(agent_host_host, "apply_hosted_lifecycle", apply)
+    monkeypatch.setattr(agent_host_host, "apply_lifecycle_command", apply)
     monkeypatch.setattr(agent_host_host, "settle_hosted_runtime", AsyncMock())
     with pytest.raises(RuntimeError, match="lease control claim returned an unaccepted command"):
         await host._run_lease_controls(42)
@@ -144,7 +144,7 @@ async def test_lease_controls_supervise_the_active_lease_relay(
     supervise = AsyncMock()
     monkeypatch.setattr(agent_host_host, "supervise_relay", supervise)
     monkeypatch.setattr(db, "claim_inbound_batch", AsyncMock(return_value=[]))
-    monkeypatch.setattr(agent_host_host, "apply_hosted_lifecycle", AsyncMock(return_value=None))
+    monkeypatch.setattr(agent_host_host, "apply_lifecycle_command", AsyncMock(return_value=None))
     monkeypatch.setattr(agent_host_host, "settle_hosted_runtime", AsyncMock())
     await host._run_lease_controls(42)
     supervise.assert_awaited_once_with(

@@ -9,16 +9,11 @@ of plugin.py (2026-08-07, Task #1011).
 from __future__ import annotations
 
 import importlib.util
-import json
-import pathlib
 import re
-import shutil
-import subprocess
 import sys
-from collections.abc import Callable
-from typing import Any
 
-from loguru import logger
+from ._ruff import ruff_undefined_names
+from ._ruff_plan import RuffRun
 
 # ---------------------------------------------------------------------------
 # 2. Missing import detection (ruff F821 + curated name -> import mapping)
@@ -174,142 +169,6 @@ _DATETIME_CLASS_ATTRS = frozenset(
     }
 )
 
-_F821_MSG_RE = re.compile(r"Undefined name `([^`]+)`")
-
-
-# Every ruff `subprocess.run` in this module carries a `noqa: S603` marker: the argv is
-# a fixed list built in-process (this resolved path + literal flags), and the
-# only thing that varies is the agent's source, which is piped to stdin and
-# never interpolated into the command. S603 fires solely because the executable
-# is a resolved path rather than a string literal.
-def ruff_executable() -> str:
-    """Absolute path to the ``ruff`` that ships in this interpreter's env.
-
-    The three ruff-backed fixers below each swallow ``FileNotFoundError`` and
-    return their input unchanged, so an unresolvable binary degrades them to a
-    silent no-op instead of failing loudly. A bare ``"ruff"`` makes that hinge
-    on ambient ``PATH``: agent processes only work because their launcher
-    prepends the venv's ``bin``, an implicit contract
-    owned by a different module, and any caller that skips it (a direct
-    ``.venv/bin/python`` run, an eval harness) silently loses the whole stage.
-    Anchoring on ``sys.executable`` binds ruff to the environment of the running
-    interpreter, which is where the dependency is installed. Falls back to a
-    ``PATH`` lookup so an interpreter outside a ruff-carrying env still finds a
-    system-wide install.
-    """
-    return shutil.which("ruff", path=str(pathlib.Path(sys.executable).parent)) or "ruff"
-
-
-# Wall-clock timeout for every ruff subprocess pass in this package. A timeout
-# used to collapse into silent pass-through (issue #159): the repair stage
-# reported success-by-omission, indistinguishable from "ruff ran and found
-# nothing to fix". Every give-up below now logs — never silent.
-RUFF_TIMEOUT_SECONDS = 5
-
-
-def _warn_ruff_missing() -> None:
-    """Log a missing ruff executable for each skipped stage.
-
-    ruff is an optional stage — a host without it skips the fix — but the skip
-    must be visible. Each skipped stage remains observable (issue #159).
-    """
-    logger.warning(
-        f"ruff executable {ruff_executable()!r} not found — syntax-fix "
-        "ruff stage skipped (source passed through unchanged)"
-    )
-
-
-def log_ruff_give_up(step: str, code: str, exc: BaseException) -> None:
-    """Log why a ruff subprocess pass gave up, then let the caller pass through.
-
-    FileNotFoundError = the optional stage is skipped on a host without ruff —
-    a warning for each skipped stage via _warn_ruff_missing. TimeoutExpired and
-    OSError and UnicodeError are silent-failure smells (issue #159): the first
-    logs the elapsed budget and the input size (a timeout correlated with large
-    inputs points at the budget, not the host), the second logs the errno
-    (usually a symptom of something larger on the host), and the third logs the
-    text codec failure.
-    """
-    if isinstance(exc, subprocess.TimeoutExpired):
-        logger.warning(
-            f"ruff {step} did not finish within {exc.timeout}s on "
-            f"{len(code)}-char source — passing through unchanged"
-        )
-        return
-    if isinstance(exc, FileNotFoundError):  # OSError subclass — check first
-        _warn_ruff_missing()
-        return
-    if isinstance(exc, UnicodeError):
-        logger.warning(
-            f"ruff {step} failed with {type(exc).__name__} ({exc}) — passing through unchanged"
-        )
-        return
-    if isinstance(exc, OSError):
-        logger.warning(
-            f"ruff {step} failed with OSError errno={exc.errno} "
-            f"({exc.strerror}) — passing through unchanged"
-        )
-        return
-
-
-def _f821_names(diagnostics: list[dict[str, Any]]) -> set[str]:
-    """Extract the undefined names from a ruff F821 diagnostic list."""
-    names: set[str] = set()
-    for diag in diagnostics:
-        # Non-F821 entries (syntax errors carry code=None) are not name hits.
-        if diag["code"] != "F821":
-            continue
-        m = _F821_MSG_RE.search(diag["message"])
-        if m:
-            names.add(m.group(1))
-    return names
-
-
-# meiva:note
-# Run `ruff check --select F821` via stdin; return the undefined names.
-#
-# Returns an empty set when ruff is unavailable, crashes, or the source does not parse
-# (syntax errors surface downstream via compile()).
-# Same contract as _ruff_fix / _ruff_format (issue #159): a missing ruff is logged per
-# skipped stage, a timeout / OS error at warning — a detection stage that silently returns
-# "no undefined names" would leave missing imports un-repaired with zero signal.
-# ruff exits 1 when diagnostics were found; >1 means it crashed.
-def ruff_undefined_names(
-    code: str,
-    *,
-    run: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
-) -> set[str]:
-    try:
-        proc = run(
-            [
-                ruff_executable(),
-                "check",
-                "--select",
-                "F821",
-                "--output-format",
-                "json",
-                "--stdin-filename",
-                "script.py",
-                "-",
-            ],
-            input=code,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            timeout=RUFF_TIMEOUT_SECONDS,
-            check=False,
-        )
-    except (FileNotFoundError, subprocess.TimeoutExpired, OSError, UnicodeError) as exc:
-        log_ruff_give_up("check --select F821", code, exc)
-        return set()
-    if proc.returncode > 1 or not proc.stdout.strip():
-        return set()
-    try:
-        diagnostics = json.loads(proc.stdout)
-    except json.JSONDecodeError:
-        return set()
-    return _f821_names(diagnostics)
-
 
 def _module_attrs(code: str, name: str) -> set[str]:
     """Attributes accessed as ``name.attr`` anywhere in the source. String
@@ -368,7 +227,7 @@ def _imports_for_name(name: str, code: str) -> list[str]:
     return []
 
 
-def detect_missing_imports(code: str) -> list[str]:
+def detect_missing_imports(code: str, ruff: RuffRun) -> list[str]:
     """Find names used but never bound; return import statements to prepend.
 
     ruff F821 supplies the undefined names -- scope-aware, so existing imports,
@@ -380,7 +239,7 @@ def detect_missing_imports(code: str) -> list[str]:
     if not code.strip():
         return []
     stmts: set[str] = set()
-    for name in ruff_undefined_names(code):
+    for name in ruff_undefined_names(code, ruff):
         stmts.update(_imports_for_name(name, code))
     return sorted(stmts)
 

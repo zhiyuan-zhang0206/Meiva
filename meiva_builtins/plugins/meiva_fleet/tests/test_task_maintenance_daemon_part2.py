@@ -1,23 +1,16 @@
-"""`plugins.meiva_fleet.task_maintenance.daemon` — task reminders + escalation.
-
-Two cluster-wide passes, gateway-owned:
-
-- `run_reminders` finds in-progress tasks past their remind_interval_seconds and delivers one
-  chat digest per owner through a direct inbound insert. Terminated owners keep
-  their inbox row without being revived. Each overdue window gets at most one
-  reminder per backoff period; the counters advance only after delivery succeeds.
-- `run_escalate` notifies the parent task's owner when reminder_count reaches the
-  escalation threshold.
-
-Delivery is normally exercised against a stubbed `deliver_message`; the
-terminated-owner test keeps the direct write real. These tests assert digest
-recipients, message contents, counters, telemetry, and no-resurrect delivery. No
-stale sweep, no automatic cancellation. History is preserved: rows are UPDATEd,
-never DELETEd.
-"""
+# meiva:note
+# `plugins.meiva_fleet.task_maintenance.daemon` — task reminders and escalation, cluster-wide and
+# gateway-owned. `run_reminders` finds in-progress tasks past their remind_interval_seconds and
+# commits one digest per owner as a direct inbound insert together with the counters; terminated
+# owners keep their inbox row without being revived, and each overdue window gets at most one
+# reminder per backoff period. `run_escalate` notifies the parent task's owner when reminder_count
+# reaches the escalation threshold. The tests run both against the throwaway Postgres and Redis and
+# read the delivered digests back from the inbound rows. No stale sweep, no automatic cancellation:
+# rows are UPDATEd, never DELETEd.
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from itertools import count
 from typing import Any
 
@@ -32,6 +25,7 @@ from base.telemetry.tests.capture.event_capture import EmittedEvents
 from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
 from meiva_builtins.plugins.meiva_fleet.task_maintenance import daemon
 from meiva_builtins.plugins.meiva_fleet.task_maintenance.daemon import run_escalate
+from meiva_builtins.plugins.meiva_fleet.tests.task_registry.notes import TaskNotes, record_notes
 
 _DAY_S = 86400.0
 
@@ -46,18 +40,9 @@ def pool(db_url: str):
 
 
 @pytest.fixture
-def deliver(monkeypatch: pytest.MonkeyPatch) -> list[tuple[int, str]]:
-    """Stub `deliver_message`, recording (agent_id, message) per call.
-
-    The real one writes an inbound row; here we only assert the daemon's own
-    responsibility — digest recipients, content, and counter updates."""
-    calls: list[tuple[int, str]] = []
-
-    def _accepted(_db: object, _bus: object, owner: int, _inbound_id: int, content: str) -> None:
-        calls.append((owner, content))
-
-    monkeypatch.setattr(daemon, "announce_reminder", _accepted)
-    return calls
+def deliver(db_conn: psycopg.Connection) -> Iterator[TaskNotes]:
+    with record_notes(db_conn) as notes:
+        yield notes
 
 
 def _maintenance_events(
@@ -174,7 +159,7 @@ class TestEscalate:
         self,
         pool: ConnectionPool,
         db_conn: psycopg.Connection,
-        deliver: list[tuple[int, str]],
+        deliver: TaskNotes,
         emitted_events: EmittedEvents,
         database: Database,
         event_bus: EventBus,
@@ -197,8 +182,8 @@ class TestEscalate:
         ]
 
         assert run_escalate(pool, database, event_bus, 3) == 1
-        assert len(deliver) == 1
-        delivered_owner, message = deliver[0]
+        assert len(deliver.deliveries()) == 1
+        delivered_owner, message = deliver.deliveries()[0]
         assert delivered_owner == delegator
         assert "Stalled subtasks — owner(s) unresponsive after repeated reminders:" in message
         assert all(f"#{task_id}" in message for task_id in task_ids)
@@ -226,7 +211,7 @@ class TestEscalate:
         self,
         pool: ConnectionPool,
         db_conn: psycopg.Connection,
-        deliver: list[tuple[int, str]],
+        deliver: TaskNotes,
         database: Database,
         event_bus: EventBus,
     ) -> None:
@@ -242,8 +227,8 @@ class TestEscalate:
             reminder_count=3,
         )
         assert run_escalate(pool, database, event_bus, 3) == 1
-        assert len(deliver) == 1
-        delivered_owner, message = deliver[0]
+        assert len(deliver.deliveries()) == 1
+        delivered_owner, message = deliver.deliveries()[0]
         assert delivered_owner == parent_owner
         assert "3 reminders" in message
 
@@ -255,7 +240,7 @@ class TestEscalate:
         self,
         pool: ConnectionPool,
         db_conn: psycopg.Connection,
-        deliver: list[tuple[int, str]],
+        deliver: TaskNotes,
         database: Database,
         event_bus: EventBus,
     ) -> None:
@@ -273,20 +258,20 @@ class TestEscalate:
         _make_task(db_conn, owner=stalled, parent_id=container, updated_s_ago=0)
 
         assert run_escalate(pool, database, event_bus, 3) == 1
-        assert len(deliver) == 1
-        delivered_owner, message = deliver[0]
+        assert len(deliver.deliveries()) == 1
+        delivered_owner, message = deliver.deliveries()[0]
         assert delivered_owner == delegator
         assert f"#{container}" in message
 
-        deliver.clear()
+        deliver.restart()
         assert daemon.run_reminders(pool, database, event_bus, 3600.0) == 0
-        assert deliver == []
+        assert deliver.deliveries() == []
 
     def test_below_threshold_is_skipped(
         self,
         pool: ConnectionPool,
         db_conn: psycopg.Connection,
-        deliver: list[tuple[int, str]],
+        deliver: TaskNotes,
         database: Database,
         event_bus: EventBus,
     ) -> None:
@@ -302,13 +287,13 @@ class TestEscalate:
             reminder_count=2,
         )
         assert run_escalate(pool, database, event_bus, 3) == 0
-        assert deliver == []
+        assert deliver.deliveries() == []
 
     def test_above_threshold_escalates_once_per_window(
         self,
         pool: ConnectionPool,
         db_conn: psycopg.Connection,
-        deliver: list[tuple[int, str]],
+        deliver: TaskNotes,
         database: Database,
         event_bus: EventBus,
     ) -> None:
@@ -326,13 +311,13 @@ class TestEscalate:
             reminder_count=5,
         )
         assert run_escalate(pool, database, event_bus, 3) == 1
-        assert len(deliver) == 1
+        assert len(deliver.deliveries()) == 1
 
     def test_no_parent_no_escalation(
         self,
         pool: ConnectionPool,
         db_conn: psycopg.Connection,
-        deliver: list[tuple[int, str]],
+        deliver: TaskNotes,
         database: Database,
         event_bus: EventBus,
     ) -> None:
@@ -345,13 +330,13 @@ class TestEscalate:
             reminder_count=3,
         )
         assert run_escalate(pool, database, event_bus, 3) == 0
-        assert deliver == []
+        assert deliver.deliveries() == []
 
     def test_user_task_escalates_to_human_queue(
         self,
         pool: ConnectionPool,
         db_conn: psycopg.Connection,
-        deliver: list[tuple[int, str]],
+        deliver: TaskNotes,
         emitted_events: EmittedEvents,
         database: Database,
         event_bus: EventBus,
@@ -373,7 +358,7 @@ class TestEscalate:
             priority="P1",
         )
         assert run_escalate(pool, database, event_bus, 3) == 1
-        assert deliver == []  # a notice, not a reminder message
+        assert deliver.deliveries() == []
         notices = _open_notices(db_conn, owner)
         assert len(notices) == 1
         title, priority, require_response, task_id = notices[0]
@@ -396,7 +381,7 @@ class TestEscalate:
         self,
         pool: ConnectionPool,
         db_conn: psycopg.Connection,
-        deliver: list[tuple[int, str]],
+        deliver: TaskNotes,
         database: Database,
         event_bus: EventBus,
     ) -> None:
@@ -424,7 +409,7 @@ class TestEscalate:
         self,
         pool: ConnectionPool,
         db_conn: psycopg.Connection,
-        deliver: list[tuple[int, str]],
+        deliver: TaskNotes,
         database: Database,
         event_bus: EventBus,
     ) -> None:
@@ -444,7 +429,7 @@ class TestEscalate:
             priority="P1",
         )
         assert run_escalate(pool, database, event_bus, 3) == 1
-        assert deliver == []
+        assert deliver.deliveries() == []
         notices = _open_notices(db_conn, owner)
         assert len(notices) == 1
         assert notices[0][3] == child  # task_id on the escalation notice
@@ -453,7 +438,7 @@ class TestEscalate:
         self,
         pool: ConnectionPool,
         db_conn: psycopg.Connection,
-        deliver: list[tuple[int, str]],
+        deliver: TaskNotes,
         database: Database,
         event_bus: EventBus,
     ) -> None:

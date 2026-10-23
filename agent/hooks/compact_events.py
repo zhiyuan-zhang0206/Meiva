@@ -21,6 +21,31 @@ from base.events.live.projection import (
 from base.events.live.publisher import AgentEventPublisher
 
 
+# meiva:note
+# The wire payload of a run's start, from values: the run id and the start time come from the caller.
+def compact_started_event(
+    agent_id: int, *, compact_id: str, started_at: datetime, mode: CompactionMode
+) -> str:
+    return CompactStarted(
+        agent_id=agent_id, compact_id=compact_id, started_at=started_at.isoformat(), mode=mode
+    ).model_dump_json()
+
+
+# meiva:note
+# The wire payload of a run's end, None when the start emitted no run id (nothing to close).
+def compact_finished_event(
+    agent_id: int, compact_id: str | None, *, finished_at: datetime, status: CompactionStatus
+) -> str | None:
+    if compact_id is None:
+        return None
+    return CompactFinished(
+        agent_id=agent_id,
+        compact_id=compact_id,
+        status=status,
+        finished_at=finished_at.isoformat(),
+    ).model_dump_json()
+
+
 def emit_compact_started(
     publisher: AgentEventPublisher | None,
     agent_id: int,
@@ -38,12 +63,9 @@ def emit_compact_started(
         return None
     compact_id = uuid4().hex
     publisher.emit(
-        CompactStarted(
-            agent_id=agent_id,
-            compact_id=compact_id,
-            started_at=datetime.now(UTC).isoformat(),
-            mode=mode,
-        ).model_dump_json()
+        compact_started_event(
+            agent_id, compact_id=compact_id, started_at=datetime.now(UTC), mode=mode
+        )
     )
     return compact_id
 
@@ -64,13 +86,10 @@ def emit_compact_finished(
     same batch, or dropped by a co-batched cancel). No publisher / no run id
     is a no-op (see `emit_compact_started`).
     """
-    if publisher is None or compact_id is None:
+    if publisher is None:
         return
-    publisher.emit(
-        CompactFinished(
-            agent_id=agent_id,
-            compact_id=compact_id,
-            status=status,
-            finished_at=datetime.now(UTC).isoformat(),
-        ).model_dump_json()
+    event = compact_finished_event(
+        agent_id, compact_id, finished_at=datetime.now(UTC), status=status
     )
+    if event is not None:
+        publisher.emit(event)

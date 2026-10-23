@@ -2,15 +2,12 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
-from collections.abc import Callable
 from pathlib import Path
 
-import pytest
-
-from agent.graph.exec import _child_boundary
-from agent.graph.exec._result import ExecChildError, ExecCrashed, ExecDone
+from agent.graph.exec._guard import inspection_refusal, violation_refusal
+from agent.graph.exec._result import ExecChildError, ExecDone
 from agent.graph.exec._subprocess import run_in_subprocess
+from agent.graph.exec.tests.process_inputs import real_parent
 from base.db.code_version_gate import ProcessDbGate
 from base.deploy.release import editable_install
 from meiva.tests.fixtures.pin_agent import exec_context
@@ -18,119 +15,53 @@ from meiva.tests.fixtures.pin_agent import exec_context
 _AGENT_ID = 424242
 
 
-async def _run(
-    tmp_path: Path,
-    *,
-    editable_guard: Callable[[], tuple[str, ...]] | None,
-    database_gate: ProcessDbGate,
-) -> object:
+def test_a_poisoned_install_names_its_records_and_forbids_a_retry(tmp_path: Path) -> None:
+    poisoned_pth = tmp_path / "prod" / ".venv" / "_editable_impl_meiva.pth"
+    violation = f"{poisoned_pth} names {str(tmp_path / 'deleted-worktree')!r}"
+
+    refusal = violation_refusal((violation,))
+
+    assert refusal is not None
+    assert isinstance(refusal.exc, ExecChildError)
+    assert refusal.exc.exc_type == "exec_editable_install_poisoned"
+    assert violation in refusal.output
+    assert "no child was started" in refusal.output
+    assert "do not retry" in refusal.output.lower()
+
+
+def test_a_healthy_install_is_not_refused() -> None:
+    assert violation_refusal(()) is None
+
+
+def test_an_inspection_failure_tells_the_agent_not_to_retry() -> None:
+    failure = PermissionError("site-packages is read-only")
+
+    refusal = inspection_refusal(failure)
+
+    assert refusal.exc is failure
+    assert "site-packages is read-only" in refusal.output
+    assert "do not retry" in refusal.output.lower()
+
+
+async def test_a_system_interpreter_has_no_checkout_to_guard(
+    tmp_path: Path, database_gate: ProcessDbGate
+) -> None:
     result, _payload = await run_in_subprocess(
         "print('healthy child')",
         exec_context(_AGENT_ID),
         asyncio.Event(),
         30.0,
         exec_dir=tmp_path / "exec",
-        editable_guard=editable_guard,
+        parent=real_parent(),
         accumulation_max_chars=1_000_000,
     )
-    return result
-
-
-async def test_poisoned_editable_install_refuses_without_request_file(
-    tmp_path: Path, database_gate: ProcessDbGate
-) -> None:
-    poisoned_pth = (
-        tmp_path
-        / "prod"
-        / ".venv"
-        / "lib"
-        / "python3.12"
-        / "site-packages"
-        / "_editable_impl_meiva.pth"
-    )
-    deleted_worktree = tmp_path / "deleted-worktree"
-    violation = f"{poisoned_pth} names {str(deleted_worktree)!r}"
-
-    result = await _run(tmp_path, editable_guard=lambda: (violation,), database_gate=database_gate)
-
-    assert isinstance(result, ExecCrashed)
-    assert isinstance(result.exc, ExecChildError)
-    assert result.exc.exc_type == "exec_editable_install_poisoned"
-    assert violation in result.output
-    assert "no child was started" in result.output
-    assert "do not retry" in result.output.lower()
-    assert not list((tmp_path / "exec").rglob("*.json"))
-
-
-async def test_editable_guard_inspection_failure_tells_agent_not_to_retry(
-    tmp_path: Path, database_gate: ProcessDbGate
-) -> None:
-    failure = PermissionError("site-packages is read-only")
-
-    def raise_failure() -> tuple[str, ...]:
-        raise failure
-
-    result = await _run(tmp_path, editable_guard=raise_failure, database_gate=database_gate)
-
-    assert isinstance(result, ExecCrashed)
-    assert result.exc is failure
-    assert "site-packages is read-only" in result.output
-    assert "do not retry" in result.output.lower()
-    assert not list((tmp_path / "exec").rglob("*.json"))
-
-
-async def test_healthy_editable_guard_preserves_real_child_behavior(
-    tmp_path: Path, database_gate: ProcessDbGate
-) -> None:
-    result = await _run(tmp_path, editable_guard=lambda: (), database_gate=database_gate)
 
     assert isinstance(result, ExecDone)
     assert result.output == "healthy child\n"
 
 
-def test_child_env_drops_foreign_virtual_env_but_preserves_its_own(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    source_root = tmp_path / "source"
-    inside = source_root / "agent"
-    sibling_worktree = source_root / ".worktrees" / "feature"
-    claude_sibling_worktree = source_root / ".claude" / "worktrees" / "feature"
-    outside = tmp_path / "worktree"
-    inside.mkdir(parents=True)
-    sibling_worktree.mkdir(parents=True)
-    claude_sibling_worktree.mkdir(parents=True)
-    outside.mkdir()
-    monkeypatch.setattr(os, "environ", {"VIRTUAL_ENV": "/source/.venv"})
-    monkeypatch.setattr(editable_install, "current_interpreter_source_root", lambda: source_root)
-
-    monkeypatch.chdir(outside)
-    foreign_env = _child_boundary.build_child_env(None, tmp_path / "request", tmp_path / "result")
-
-    monkeypatch.chdir(inside)
-    own_env = _child_boundary.build_child_env(None, tmp_path / "request", tmp_path / "result")
-
-    monkeypatch.chdir(sibling_worktree)
-    sibling_env = _child_boundary.build_child_env(None, tmp_path / "request", tmp_path / "result")
-
-    monkeypatch.chdir(claude_sibling_worktree)
-    claude_sibling_env = _child_boundary.build_child_env(
-        None,
-        tmp_path / "request",
-        tmp_path / "result",
-    )
-
-    monkeypatch.setattr(editable_install, "current_interpreter_source_root", lambda: None)
-    no_root_env = _child_boundary.build_child_env(None, tmp_path / "request", tmp_path / "result")
-
-    assert "VIRTUAL_ENV" not in foreign_env
-    assert own_env["VIRTUAL_ENV"] == "/source/.venv"
-    assert "VIRTUAL_ENV" not in sibling_env
-    assert "VIRTUAL_ENV" not in claude_sibling_env
-    assert no_root_env["VIRTUAL_ENV"] == "/source/.venv"
-
-
-async def test_default_guard_refuses_real_poison_without_repairing_files(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, database_gate: ProcessDbGate
+async def test_a_real_poisoned_checkout_refuses_the_run_without_repairing_files(
+    tmp_path: Path, database_gate: ProcessDbGate
 ) -> None:
     source = tmp_path / "source"
     packages = source / ".venv" / "lib" / "python3.12" / "site-packages"
@@ -145,11 +76,18 @@ async def test_default_guard_refuses_real_poison_without_repairing_files(
         )
     )
     before = {path: path.read_bytes() for path in (pointer, metadata)}
-    monkeypatch.setattr(editable_install, "current_interpreter_source_root", lambda: source)
 
-    result = await _run(tmp_path, editable_guard=None, database_gate=database_gate)
+    result, payload = await run_in_subprocess(
+        "print('must never run')",
+        exec_context(_AGENT_ID),
+        asyncio.Event(),
+        30.0,
+        exec_dir=tmp_path / "exec",
+        parent=real_parent(source_root=source, editable_roots=()),
+        accumulation_max_chars=1_000_000,
+    )
 
-    assert isinstance(result, ExecCrashed)
+    assert payload is None
     assert "no child was started" in result.output
     assert {path: path.read_bytes() for path in before} == before
     assert not list((tmp_path / "exec").rglob("*.json"))

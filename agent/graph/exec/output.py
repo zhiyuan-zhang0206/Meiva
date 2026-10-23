@@ -23,18 +23,19 @@ the accumulator's kept head and its tail out of the kept tail.
 from __future__ import annotations
 
 from collections.abc import Sequence
+from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import NamedTuple
 
 from langchain_core.messages import BaseMessage
 
 from base.agents.messages.inbound import InterruptReason
-from base.clock import Clock
 from base.log import logger
-from base.paths import workspace_dir
+from base.paths import workspace_dir_readonly
 
-from ._crop import CropConfig, crop_output
-from ._stream import StreamCap
+from ._crop import CropLimits, crop_output
+from ._result import StreamCap
 
 # The default marker is the user Stop action. Maintenance and other external
 # system interruptions retain their observed attribution in the same envelope.
@@ -52,7 +53,18 @@ OVERFLOW_KEEP = 20
 
 
 def overflow_dir(agent_id: int) -> Path:
-    return workspace_dir(agent_id) / _OVERFLOW_DIRNAME
+    return workspace_dir_readonly(agent_id) / _OVERFLOW_DIRNAME
+
+
+# meiva:note
+# Everything the envelope reads from configuration and the workspace, as values: where the
+# archives live, the soft-crop view, the timeout the marker names and the inline cap.
+@dataclass(frozen=True)
+class OutputLimits:
+    archive_dir: Path
+    crop: CropLimits
+    timeout_seconds: float
+    max_chars: int
 
 
 class ExecEnvelope(NamedTuple):
@@ -100,10 +112,8 @@ def _fit_body(
     output: str,
     stream_cap: StreamCap | None,
     referenced_messages: Sequence[BaseMessage],
-    max_chars: int,
-    agent_id: int,
-    crop_config: CropConfig,
-    clock: Clock,
+    limits: OutputLimits,
+    now: datetime,
 ) -> str:
     """The envelope body for non-empty output: logged, soft-cropped or truncated to fit."""
     # Log the true (pre-truncation) length on every exec — instrumentation
@@ -114,38 +124,71 @@ def _fit_body(
     produced = stream_cap.produced_chars if stream_cap is not None else len(output)
     logger.info("[exec output chars] {n}", n=produced)
     preview = None
-    crop_after = crop_config.exec_output_crop_after_lines
-    if stream_cap is None and crop_after:
+    crop = limits.crop
+    if stream_cap is None and crop.exec_output_crop_after_lines:
         over = (
-            len(output.splitlines()) > crop_after
-            or len(output) > crop_config.exec_output_crop_after_chars
-            or len(output.encode("utf-8")) > crop_config.exec_output_crop_after_bytes
+            len(output.splitlines()) > crop.exec_output_crop_after_lines
+            or len(output) > crop.exec_output_crop_after_chars
+            or len(output.encode("utf-8")) > crop.exec_output_crop_after_bytes
         )
         if over:
             preview = crop_output(
                 output,
-                overflow_dir(agent_id),
-                crop_config,
+                limits.archive_dir,
+                crop,
                 referenced_messages=referenced_messages,
-                max_chars=max_chars,
+                max_chars=limits.max_chars,
             )
     if preview is not None:
         output = preview
-    elif len(output) > max_chars:
+    elif len(output) > limits.max_chars:
         output = truncate_both_ends(
-            output, max_chars, agent_id=agent_id, clock=clock, stream_cap=stream_cap
+            output,
+            limits.max_chars,
+            archive_dir=limits.archive_dir,
+            now=now,
+            stream_cap=stream_cap,
         )
     return output if output.endswith("\n") else output + "\n"
 
 
+# meiva:note
+# Generate the code execution output envelope fed to the LLM.
+#
+# `output` is the exec's stdout + stderr merged stream (both redirected to the same
+# `StreamingTextIO`) — preserves the real chronological order of print / traceback / log
+# output, same as running Python in a terminal.
+#
+# When cancelled=True, names the observed user/system reason. Partial output is retained;
+# cancellation does not imply that external effects were undone.
+#
+# The caller supplies `limits` (the cluster sandbox limits, the crop view and the archive
+# directory), `now` (the instant the overflow archive is stamped with, in the configured
+# timezone) and the optional rendered timestamp. This layer never discovers configuration.
+#
+# `elapsed_seconds` is the run's wall-clock time (also for cancelled and timed-out runs: the
+# time before the stop); the header always carries it, with or without a timestamp.
+#
+# `stream_cap` is set when the accumulation cap already dropped the middle of `output`
+# mid-run: it carries the true produced length for the instrumentation log line, and tells
+# the overflow archive to stop claiming it holds the full text.
+#
+# `referenced_messages` is the native node's current context, passed explicitly because the
+# parent does not install that state into the child SDK's slot. Soft-crop archives mentioned
+# there cannot be evicted to make space.
+#
+# Format (double \n after header, same contract as wrap_inbound; the frontend splitEnvelope
+# uses this to split header / body):
+#
+#     Code execution output after running for 1min 53s [timestamp]:
+#
+#     <output>
+#     (no output)          # only when output is empty — explicitly tells the agent code ran but produced no output
 def wrap_code_output(
     output: str,
     *,
-    agent_id: int,
-    crop_config: CropConfig,
-    clock: Clock,
-    timeout_seconds: float,
-    max_chars: int,
+    limits: OutputLimits,
+    now: datetime,
     elapsed_seconds: float,
     timestamp: str | None = None,
     cancelled: bool = False,
@@ -154,45 +197,11 @@ def wrap_code_output(
     stream_cap: StreamCap | None = None,
     referenced_messages: Sequence[BaseMessage] = (),
 ) -> ExecEnvelope:
-    """Generate the code execution output envelope fed to the LLM.
-
-    `output` is the exec's stdout + stderr merged stream (both
-    redirected to the same `StreamingTextIO`) — preserves the real
-    chronological order of print / traceback / log output, same as
-    running Python in a terminal.
-
-    When cancelled=True, names the observed user/system reason. Partial output
-    is retained; cancellation does not imply that external effects were undone.
-
-    The caller supplies the cluster sandbox limits, crop view, archive clock and
-    optional rendered timestamp. This layer never discovers configuration.
-
-    `elapsed_seconds` is the run's wall-clock time (also for cancelled and timed-out
-    runs: the time before the stop); the header always carries it, with or without
-    a timestamp.
-
-    `stream_cap` is set when the accumulation cap already dropped the middle of
-    `output` mid-run: it carries the true produced length for the
-    instrumentation log line, and tells the overflow archive to stop claiming
-    it holds the full text.
-
-    `referenced_messages` is the native node's current context, passed explicitly
-    because the parent does not install that state into the child SDK's slot.
-    Soft-crop archives mentioned there cannot be evicted to make space.
-
-    Format (double \n after header, same contract as wrap_inbound; the
-    frontend splitEnvelope uses this to split header / body):
-
-        Code execution output after running for 1min 53s [timestamp]:
-
-        <output>
-        (no output)          # only when output is empty — explicitly tells the agent code ran but produced no output
-    """
     marker = _marker(
         cancelled=cancelled,
         cancel_reason=cancel_reason,
         timed_out=timed_out,
-        timeout_seconds=timeout_seconds,
+        timeout_seconds=limits.timeout_seconds,
     )
     ts = f" {timestamp}" if timestamp is not None else ""
     header = (
@@ -201,9 +210,7 @@ def wrap_code_output(
     if not output:
         body = "(no output)"
     else:
-        body = _fit_body(
-            output, stream_cap, referenced_messages, max_chars, agent_id, crop_config, clock
-        )
+        body = _fit_body(output, stream_cap, referenced_messages, limits, now)
     if timed_out:
         # The envelope is the agent's only cue to change strategy — the better
         # primitives must be named here, where the timeout is actually seen.
@@ -217,33 +224,13 @@ def wrap_code_output(
     return ExecEnvelope(head + body, len(head))
 
 
-def crashed_no_output_body(exc: BaseException, *, code_reached: bool | None) -> str:
-    """Agent-facing body for a crash whose stdout is empty — the honest
-    replacement for the "(no output)" fallback when the crash may have
-    happened BEFORE the agent's code ran (P0 #2100: a boot-crash must never
-    read as "ran, produced no output").
-
-    `code_reached` is the child's own flag: False = boot-phase crash (the code
-    was NOT executed), True = the user-code phase was entered (completion is not implied), None = unknown (older child / parent-side construction failure).
-    The type and message name the failure so the agent can stop retrying
-    something a retry cannot fix (e.g. a bootstrap fetch failure).
-    """
-    exc_type = getattr(exc, "exc_type", None) or type(exc).__name__
-    exc_msg = getattr(exc, "exc_msg", None) or str(exc)
-    if code_reached is False:
-        verdict = "execution failed before running your code — the code was NOT executed"
-    elif code_reached is True:
-        verdict = "your code may have had effects, but no output was recovered; inspect state before retrying"
-    else:
-        verdict = (
-            "no output was recovered — whether the code executed is unknown; "
-            "inspect the current state before retrying"
-        )
-    return f"[exec crashed: {verdict}]\n{exc_type}: {exc_msg}".rstrip() + "\n"
-
-
 def truncate_both_ends(
-    output: str, max_chars: int, *, agent_id: int, clock: Clock, stream_cap: StreamCap | None = None
+    output: str,
+    max_chars: int,
+    *,
+    archive_dir: Path,
+    now: datetime,
+    stream_cap: StreamCap | None = None,
 ) -> str:
     """Keep the first + last `max_chars // 2` chars (head carries an overview /
     a help() listing, tail carries the result / traceback), drop the middle,
@@ -260,7 +247,7 @@ def truncate_both_ends(
     half = max_chars // 2
     head, tail = output[:half], output[-half:]
     omitted = len(output) - 2 * half
-    path = _write_overflow_file(output, agent_id=agent_id, clock=clock, stream_cap=stream_cap)
+    path = _write_overflow_file(output, archive_dir=archive_dir, now=now, stream_cap=stream_cap)
     if stream_cap is None:
         total = f"{len(output):,} chars total"
         source = f"full output at {path}"
@@ -280,7 +267,7 @@ def truncate_both_ends(
 
 
 def _write_overflow_file(
-    output: str, *, agent_id: int, clock: Clock, stream_cap: StreamCap | None = None
+    output: str, *, archive_dir: Path, now: datetime, stream_cap: StreamCap | None = None
 ) -> Path:
     """Write `output` to a timestamped file under the workspace overflow dir,
     prune old ones, and return its path.
@@ -293,12 +280,8 @@ def _write_overflow_file(
     microsecond timestamp makes names sortable by exec time and unique within
     an agent (execs are serial, and two in the same microsecond cannot happen).
     """
-    d = overflow_dir(agent_id)
-    d.mkdir(parents=True, exist_ok=True)
-    # Stamped in the configured timezone so filenames sort together with the
-    # envelope timestamps the agent sees.
-    now = clock.now().astimezone(clock.explicit_zone())
-    path = d / f"exec_{now.strftime('%Y%m%d_%H%M%S_%f')}.txt"
+    archive_dir.mkdir(parents=True, exist_ok=True)
+    path = archive_dir / f"exec_{now.strftime('%Y%m%d_%H%M%S_%f')}.txt"
     if stream_cap is not None:
         output = (
             f"[archive note: {stream_cap.produced_chars:,} chars were produced; the "
@@ -307,7 +290,7 @@ def _write_overflow_file(
             f"full output]\n\n"
         ) + output
     path.write_text(output, encoding="utf-8")
-    existing = sorted(d.glob("exec_*.txt"), key=lambda p: p.stat().st_mtime)
+    existing = sorted(archive_dir.glob("exec_*.txt"), key=lambda p: p.stat().st_mtime)
     for old in existing[:-OVERFLOW_KEEP]:
         old.unlink(missing_ok=True)
     return path

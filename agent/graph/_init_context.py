@@ -11,12 +11,11 @@ from langgraph.runtime import Runtime
 from langgraph.types import Command
 
 from agent import state as _state
-from agent.impersonation_handoff import introduction_note
+from agent.impersonation_handoff import introduction_note, note_stamp
 from agent.nodes import INIT_CONTEXT, NodeName
 from agent.state import CapabilitiesState, ContextReset
 from base.agents.context import MeivaContext, agent_id_from_config
 from base.agents.history.timeline_inputs import TimelineReadInputs
-from base.agents.impersonation.notes import HandoffNotes
 from base.api_contracts.agent_contract import Harness
 from base.lm.harness.handoff import ClusterFact, Handoff
 from base.lm.harness.wiring import HANDOFF_INSTRUCTION, handoff_for
@@ -24,13 +23,15 @@ from base.log import logger
 from base.paths import workspace_dir
 
 from .claim import route_target
-from .node_log import node_lifecycle
-from .prompt.capabilities import disabled_by_sdk_config, indexed_skill_identifiers
+from .node_log import StallConfig, node_lifecycle
 from .prompt.context_notes import (
     context_notes,
     machine_clause,
     own_label,
 )
+from .prompt.live import effective_sdk_disable, skill_view
+from .prompt.sdk_scope import disabled_by_sdk_config
+from .prompt.skill_selection import indexed_skill_identifiers
 from .prompt.system_prompt import build_harness_system_prompt, build_system_prompt
 
 
@@ -87,14 +88,12 @@ def _build_grounded_handoff(ctx: MeivaContext, *, agent_id: int) -> Handoff:
         cluster=cluster,
         contributions=tuple(hc for _, hc in extensions.harness_contributions(ctx.harness)),
     )
+    disabled = effective_sdk_disable(slices.prompt.sdk_disable)
     filtered_entries = tuple(
         entry
         for entry in handoff.entries
         if entry.name == "meiva"
-        or not disabled_by_sdk_config(
-            entry.name.removeprefix("meiva."),
-            slices.prompt.sdk_disable,
-        )
+        or not disabled_by_sdk_config(entry.name.removeprefix("meiva."), disabled)
     )
     return Handoff(
         agent_id=handoff.agent_id,
@@ -123,16 +122,12 @@ async def init_context_node(
         event_publisher=event_publisher,
         agent_id=agent_id_from_config(config),
         turn_progress=runtime.context.turn_progress,
-        read_stall_seconds=lambda: runtime.context.require_agent().read(
-            "agent", "node_stall_dump_seconds"
-        ),
+        stall=StallConfig(runtime.context.require_agent().read("agent", "node_stall_dump_seconds")),
         timeline_inputs=TimelineReadInputs(
             runtime.context.require_clock,
             lambda: runtime.context.require_agent().read("general", "message_timestamps"),
         ),
-        limit_reader=lambda: runtime.context.require_agent().read(
-            "display", "timeline_default_limit"
-        ),
+        timeline_limit=runtime.context.require_agent().read("display", "timeline_default_limit"),
     ):
         reset = state.context_reset
         if state.messages:
@@ -165,9 +160,9 @@ async def init_context_node(
         if state.impersonation_introduced:
             notes.append(
                 introduction_note(
-                    notes=HandoffNotes(
-                        runtime.context.require_clock,
-                        lambda: runtime.context.require_agent().read(
+                    note_stamp(
+                        runtime.context.require_clock(),
+                        timestamps=runtime.context.require_agent().read(
                             "general", "message_timestamps"
                         ),
                     )
@@ -187,7 +182,7 @@ async def init_context_node(
         # recorded, so the drift check names it one extra time, where the reverse
         # order would mark it known and drop it silently until the next
         # compaction.
-        indexed = indexed_skill_identifiers(runtime.context.require_agent().prompt)
+        indexed = indexed_skill_identifiers(skill_view(runtime.context.require_agent().prompt))
 
         # meiva:link agent/graph/docs/harness-turn.meiva.okf.md
         if runtime.context.harness is not Harness.MEIVA:

@@ -1,41 +1,42 @@
-"""Child start path stays off the agent-side heavy chains — PR-2 of the
-startup-path laziness work (task #3585).
+# meiva:note
+# Child start path stays off the agent-side heavy chains — PR-2 of the
+# startup-path laziness work (task #3585).
+#
+# The exec child imports `agent.execution.protocol` (request envelope),
+# `agent.process_boot` (SDK helpers), and the media-gate resolution on
+# `base.lm.registry` before any user code runs. Each probe runs in a clean
+# subprocess (isolated interpreter, agent-launch env vars stripped, repo root
+# prepended to `sys.path`) and reports the heavy modules the touch left in
+# `sys.modules`:
+#
+# - the `agent.graph` package init is lazy (PEP 562): importing a light
+#   submodule must not pull the node set (`_build`/`claim.node`/`llm.node`/`exec.node`) or
+#   any langchain/langgraph module;
+# - `read_request` on a state-less envelope must not pull the langgraph serde
+#   or `agent.state` (they load only when a state snapshot exists);
+# - importing `agent.process_boot` must stay off the LM stack;
+# - importing `base.lm.registry` (the media-capability data leaf) must not
+#   pull `base.lm.factory` / `base.lm.provider_api`;
+# - the provider-registration surface (`base.lm.provider_api` plus the `lm_*`
+#   provider plugins loaded by `model_catalog`) must stay off
+#   the LM chat-model stack (task #3633);
+# - the child's plugin autoload surface form (`meiva.ensure_plugins_loaded(surface=True)`)
+#   must load the plugin surfaces only — no agent-runtime faces, no `agent.state`
+#   / `agent.hooks` / `agent.graph.*`, no graph/LM stack — and a later full call
+#   must upgrade by loading faces only, never re-executing a surface (task #3633,
+#   leg-1 B6);
+# - a stateful request reads raw and its child boot arms a lazy state slot —
+#   `read_request` + the surface load stay off the serde / `agent.state` / the
+#   faces; the first state use (materialize) resolves them (task #3633, leg-2 B3).
+# - the first state use goes through the plugin surface's own call sites too:
+#   `meiva.cwd.set` as the child's very first state touch (absolute and relative)
+#   lands both of its updates, and a stand-in handle held across materialization
+#   forwards to the rebound real handle (task #3665 — the update-first
+#   regression).
+#
+# The lazy re-export stays a working API: `from agent.graph import build_graph`
+# and friends resolve through `__getattr__` (the functional probe).
 
-The exec child imports `agent.graph.exec.protocol` (request envelope),
-`agent.process_boot` (SDK helpers), and the media-gate resolution on
-`base.lm.registry` before any user code runs. Each probe runs in a clean
-subprocess (isolated interpreter, agent-launch env vars stripped, repo root
-prepended to `sys.path`) and reports the heavy modules the touch left in
-`sys.modules`:
-
-- the `agent.graph` package init is lazy (PEP 562): importing a light
-  submodule must not pull the node set (`_build`/`claim.node`/`llm.node`/`exec.node`) or
-  any langchain/langgraph module;
-- `read_request` on a state-less envelope must not pull the langgraph serde
-  or `agent.state` (they load only when a state snapshot exists);
-- importing `agent.process_boot` must stay off the LM stack;
-- importing `base.lm.registry` (the media-capability data leaf) must not
-  pull `base.lm.factory` / `base.lm.provider_api`;
-- the provider-registration surface (`base.lm.provider_api` plus the `lm_*`
-  provider plugins loaded by `model_catalog`) must stay off
-  the LM chat-model stack (task #3633);
-- the child's plugin autoload surface form (`meiva.ensure_plugins_loaded(surface=True)`)
-  must load the plugin surfaces only — no agent-runtime faces, no `agent.state`
-  / `agent.hooks` / `agent.graph.*`, no graph/LM stack — and a later full call
-  must upgrade by loading faces only, never re-executing a surface (task #3633,
-  leg-1 B6);
-- a stateful request reads raw and its child boot arms a lazy state slot —
-  `read_request` + the surface load stay off the serde / `agent.state` / the
-  faces; the first state use (materialize) resolves them (task #3633, leg-2 B3).
-- the first state use goes through the plugin surface's own call sites too:
-  `meiva.cwd.set` as the child's very first state touch (absolute and relative)
-  lands both of its updates, and a stand-in handle held across materialization
-  forwards to the rebound real handle (task #3665 — the update-first
-  regression).
-
-The lazy re-export stays a working API: `from agent.graph import build_graph`
-and friends resolve through `__getattr__` (the functional probe).
-"""
 
 from __future__ import annotations
 
@@ -175,7 +176,7 @@ def _craft_stateful_envelope(tmp_path: Path) -> Path:
     """A v1 request envelope carrying a typed state snapshot."""
     import base64
 
-    from agent.graph.exec.protocol import dumps_typed
+    from agent.execution.protocol import dumps_typed
 
     tag, blob = dumps_typed({"meiva_code__cwd": str(tmp_path)})
     req = tmp_path / "req-state.json"

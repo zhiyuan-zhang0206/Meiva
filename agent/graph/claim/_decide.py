@@ -24,6 +24,7 @@ from agent.nodes import BEFORE_LLM, CLAIM, END, INIT_CONTEXT
 from base.agents.context import MeivaContext
 from base.agents.messages.kwargs import MeivaMsgType, NoteTag, read_meiva_kwargs
 from base.events.live.projection import CompactDone, CompactionStatus
+from base.paths import workspace_dir
 
 
 @dataclass(frozen=True)
@@ -93,7 +94,7 @@ async def _compact_outcome(
         agent_id,
         state,
         closing=closing_of(summary_text),
-        read_agent=lambda field: ctx.require_agent().read("agent", field),
+        understanding_enabled=ctx.require_agent().read("agent", "understanding_enabled"),
     )
     if st.committed_chat_ids:
         await defer_chats_to_pending(
@@ -103,9 +104,14 @@ async def _compact_outcome(
         st.committed_chat_ids = []
     await finalize_claimed_inbounds(ctx.ops_pool, agent_id, incarnation=ctx.original_incarnation)
     halted = st.restart_preserves_idle and not st.committed_chat_ids
-    dump_path = dump_history(state.messages, agent_id, ctx.require_agent().history_dump)
+    dump_path = dump_history(
+        state.messages,
+        workspace_dir(agent_id),
+        ctx.require_agent().history_dump,
+        now=datetime.now(UTC),
+    )
     if dump_path is not None:
-        st.new_msgs.append(history_dump_note(dump_path))
+        st.new_msgs.append(history_dump_note(dump_path, created_at=datetime.now(UTC)))
     extra_msgs = [cast(AnyMessage, m) for m in st.new_msgs if not isinstance(m, RemoveMessage)]
     summary_kwargs: dict[str, str] = {
         "meiva_msg_type": compact_kind,

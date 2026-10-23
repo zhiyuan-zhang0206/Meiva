@@ -35,55 +35,24 @@ anthropic-compatible endpoint rejects that shape with a 400 — see
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime
+from datetime import datetime
 from pathlib import Path
 
 from langchain_core.messages import AnyMessage, HumanMessage
 
 from agent.messages import NoteTag, system_note_message
-from base.agents.messages.kwargs import message_read_time
 from base.host.env.agent_slices import HistoryDump
 from base.log import logger
-from base.paths import workspace_dir
+
+from .dump_name import dump_filename
 
 # Subdirectory of the agent workspace holding the dumps.
 _DUMP_DIRNAME = "message-history"
 
 
-def history_dump_dir(agent_id: int) -> Path:
-    """The per-agent dump directory (``<workspace>/message-history``), created on
-    first use. Exported for tests; callers go through ``dump_history``."""
-    d = workspace_dir(agent_id) / _DUMP_DIRNAME
-    d.mkdir(parents=True, exist_ok=True)
-    return d
-
-
-def _earliest_message_ts(messages: list[AnyMessage]) -> datetime | None:
-    """The earliest read time (``message_read_time``) across the dumped messages, or None.
-
-    Every message shape but the SystemMessage carries the stamp (the
-    ``agent/messages/__init__.py`` builders and the AIMessage stamp in
-    ``agent/graph/llm/node.py``), so this is the moment the round's context began.
-    An unparseable value is skipped rather than sinking the whole dump; a
-    stamp-less history falls back to the compaction moment at the caller.
-    """
-    earliest: datetime | None = None
-    for msg in messages:
-        raw = message_read_time(msg)
-        if raw is None:
-            continue
-        try:
-            ts = datetime.fromisoformat(raw)
-        except ValueError:
-            continue
-        if ts.tzinfo is None:
-            ts = ts.replace(tzinfo=UTC)
-        if earliest is None or ts < earliest:
-            earliest = ts
-    return earliest
-
-
-def dump_history(messages: list[AnyMessage], agent_id: int, config: HistoryDump) -> Path | None:
+def dump_history(
+    messages: list[AnyMessage], workspace: Path, config: HistoryDump, *, now: datetime
+) -> Path | None:
     """Write the full pre-compact conversation to a JSONL file; return its path.
 
     Returns ``None`` when the dump is disabled (``history_dump_enabled`` off —
@@ -105,10 +74,9 @@ def dump_history(messages: list[AnyMessage], agent_id: int, config: HistoryDump)
     if not config.history_dump_enabled:
         return None
     try:
-        d = history_dump_dir(agent_id)
-        end = datetime.now(UTC)
-        start = _earliest_message_ts(messages) or end
-        path = d / f"{start:%Y%m%dT%H%M%SZ}__{end:%Y%m%dT%H%M%S.%fZ}.jsonl"
+        d = workspace / _DUMP_DIRNAME
+        d.mkdir(parents=True, exist_ok=True)
+        path = d / dump_filename(messages, now)
         with path.open("w", encoding="utf-8") as f:
             for msg in messages:
                 f.write(json.dumps(msg.model_dump(mode="json")) + "\n")
@@ -125,7 +93,7 @@ def dump_history(messages: list[AnyMessage], agent_id: int, config: HistoryDump)
             "[{label}] {body}",
             label="history-dump",
             event="history_dump",
-            body=f"dump failed for agent {agent_id}: {exc!r}",
+            body=f"dump failed under {workspace}: {exc!r}",
         )
         return None
 
@@ -150,7 +118,7 @@ def _rotate(d: Path, keep: int) -> None:
         )
 
 
-def history_dump_note(path: Path) -> HumanMessage:
+def history_dump_note(path: Path, *, created_at: datetime) -> HumanMessage:
     """The system note telling the fresh post-compact context where the dump is.
 
     Only ever injected when the dump actually succeeded, and only into the new
@@ -164,7 +132,7 @@ def history_dump_note(path: Path) -> HumanMessage:
             f"summary dropped; recent dumps are kept in the same folder."
         ),
         tag=NoteTag.HISTORY_DUMP,
-        created_at=datetime.now(UTC),
+        created_at=created_at,
     )
 
 

@@ -1,4 +1,9 @@
 exports = ["runloop.py", "trace_checkpoint.py"]
 
+[uses]
+"runloop.py" = ["failure_decision.py"]
+"tests" = ["failure_decision.py"]
+
 [purity]
 "__init__.py" = "strict"
+"failure_decision.py" = "strict"

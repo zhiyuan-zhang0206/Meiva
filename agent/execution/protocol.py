@@ -7,15 +7,13 @@ from __future__ import annotations
 import base64
 import contextlib
 import json
-import os
-import tempfile
 import time
 import uuid
-from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal, cast
 
+from base.host.atomic_io import write_bytes_atomic
 from base.log import logger
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 
@@ -148,7 +146,7 @@ def write_request(
         tag, blob = dumps_typed(state)
         envelope["state_tag"] = tag
         envelope["state_b64"] = base64.b64encode(blob).decode("ascii")
-    write_json(path, envelope)
+    _write_json(path, envelope)
     _log_envelope_transfer("request", "write", path, started_at)
 
 
@@ -210,7 +208,7 @@ def write_result(path: Path, payload: ResultPayload) -> None:
         tag, blob = dumps_typed(payload.state_update)
         envelope["update_tag"] = tag
         envelope["update_b64"] = base64.b64encode(blob).decode("ascii")
-    write_json(path, envelope)
+    _write_json(path, envelope)
     _log_envelope_transfer("result", "write", path, started_at)
 
 
@@ -266,30 +264,9 @@ def _log_envelope_transfer(
     )
 
 
-def write_json(
-    path: Path,
-    envelope: dict[str, Any],
-    *,
-    fsync: Callable[[int], None] = os.fsync,
-    replace: Callable[[str | os.PathLike[str], str | os.PathLike[str]], object] | None = None,
-) -> None:
+def _write_json(path: Path, envelope: dict[str, Any]) -> None:
     data = json.dumps(envelope, ensure_ascii=False).encode("utf-8")
-    fd, raw_tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
-    tmp = Path(raw_tmp)
-    try:
-        os.fchmod(fd, 0o600)
-        with os.fdopen(fd, "wb") as f:
-            f.write(data)
-            f.flush()
-            fsync(f.fileno())
-        if replace is None:
-            tmp.replace(path)
-        else:
-            replace(tmp, path)
-    except BaseException:
-        with contextlib.suppress(OSError):
-            tmp.unlink()
-        raise
+    write_bytes_atomic(path, data, mode=0o600, suppress_cleanup_error=True)
 
 
 def _read_json(path: Path) -> dict[str, Any]:

@@ -1,19 +1,21 @@
 """Hosted incarnation admission and settlement, replacing status-only writes."""
 
 import asyncio
-from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Literal
 from uuid import UUID
 
 from psycopg.types.json import Jsonb
 from psycopg_pool import AsyncConnectionPool
 
-from agent.ownership.hosted_cleanup import finish_termination
+from agent.ownership.lifecycle_plan import (
+    LifecycleKind,
+    lifecycle_kind,
+    resume_note,
+    shell_cutoff,
+    turn_close,
+)
 from base import telemetry
 from base.agents.impersonation.replacement import end_for_replacement
-from base.agents.messages.kwargs import NoteTag
-from base.agents.messages.lifecycle_text import restart_resume_note
 from base.db import Database
 from base.db.transaction import async_write_transaction
 from base.events.live.announce import publish_agent_updated
@@ -21,6 +23,17 @@ from base.events.live.bus import EventBus
 from base.log import logger
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.telemetry.audit_events import prepare_event_log, record_audit_async
+
+
+# meiva:note
+# What a committed lifecycle command leaves to do after the commit. `shell_cutoff` is the
+# exclusive shell-ID bound of the terminate's requested shell cleanup, or None when no
+# closed terminate asked for it.
+@dataclass(frozen=True)
+class AppliedLifecycle:
+    kind: LifecycleKind
+    agent_id: int
+    shell_cutoff: int | None
 
 
 # meiva:note
@@ -32,30 +45,30 @@ from base.telemetry.audit_events import prepare_event_log, record_audit_async
 #     transaction, so no state exists in which it is half applied. Restart
 #     releases ownership, so the next admission creates a new incarnation.
 #     Terminate keeps the runtime identity and closes every open terminate of the
-#     agent, since one death serves them all. Returns the executed kind, or None
+#     agent, since one death serves them all. Returns what was applied, or None
 #     when the incarnation no longer owns the row or no command was claimed.
 #
 #     `resume_turn` says the restart ended a turn that was not finished (the claim
 #     that took it did not find the agent idle). The same transaction then queues
-#     the one pending note that continues that turn (`restart_resume_note`, source
+#     the one pending note that continues that turn (`resume_note`, source
 #     the restart's own), so the restart is never done without the note that wakes
 #     the agent: the pending scan finds it on this host or the next. An idle agent
 #     gets no note, and neither does a terminate.
 #
 #     When a terminate asked to take the agent's shell sessions with it, the
-#     row lock captures the next shell ID. After committing the termination,
-#     `kill_shell_sessions(agent_id, cutoff)` attempts only older sessions. The
-#     host reports cleanup failures; they cannot roll back the durable death.
-#     A crash or a session created after this cutoff can leave live sessions for operators.
+#     row lock captures the next shell ID as `shell_cutoff`. Nothing runs after the
+#     commit here: the caller executes the post-commit cleanup (the change hint, the
+#     browser pages and the shell sessions older than the cutoff), so the lifecycle
+#     lock is never held across it and the host reports cleanup failures without
+#     rolling back the durable death. A crash or a session created after this cutoff
+#     can leave live sessions for operators.
 async def apply_hosted_lifecycle(
     pool: AsyncConnectionPool,
     incarnation: RuntimeIncarnation,
     *,
-    bus: EventBus,
     resume_turn: bool,
-    kill_shell_sessions: Callable[[int, int], None] | None = None,
-) -> Literal["restart", "terminate"] | None:
-    shell_cutoff: int | None = None
+) -> AppliedLifecycle | None:
+    cutoff: int | None = None
     async with async_write_transaction(pool) as conn:
         cursor = await conn.execute(
             "SELECT session_index FROM agents_meta WHERE id=%s "
@@ -75,8 +88,9 @@ async def apply_hosted_lifecycle(
         command = await cursor.fetchone()
         if command is None:
             return None
-        command_id, lifecycle_kind, command_source = command
-        if lifecycle_kind == "restart":
+        command_id, command_kind, command_source = command
+        kind = lifecycle_kind(command_kind)
+        if kind == "restart":
             await conn.execute(
                 "UPDATE agents_meta SET status='idling',runtime_generation=NULL,"
                 "runtime_owner=NULL WHERE id=%s",
@@ -91,37 +105,31 @@ async def apply_hosted_lifecycle(
                 "WHERE id=%s",
                 (command_id,),
             )
-            if resume_turn:
+            note = resume_note(command_source, resume_turn=resume_turn)
+            if note is not None:
                 await conn.execute(
                     "INSERT INTO inbound_messages(agent_id,content,kind,source,payload) "
                     "VALUES(%s,%s,'system_note',%s,%s)",
                     (
                         incarnation.agent_id,
-                        restart_resume_note(command_source),
-                        command_source,
-                        Jsonb({"note_tag": NoteTag.LIFECYCLE_RESTART.value}),
+                        note.content,
+                        note.source,
+                        Jsonb({"note_tag": note.note_tag}),
                     ),
                 )
-        elif lifecycle_kind == "terminate":
+        else:
             closed = await conn.execute(
                 "UPDATE inbound_messages SET status='done' WHERE agent_id=%s AND kind='terminate' "
                 "AND status IN ('pending','claimed') RETURNING "
                 "COALESCE((payload -> 'kill_all_shell_sessions') = 'true'::jsonb, false)",
                 (incarnation.agent_id,),
             )
-            if any(kill for (kill,) in await closed.fetchall()):
-                if kill_shell_sessions is None:
-                    raise RuntimeError("shell-session kill requested but no killer is bound")
-                shell_cutoff = row[0]
+            cutoff = shell_cutoff([kill for (kill,) in await closed.fetchall()], row[0])
             await conn.execute(
                 "UPDATE agents_meta SET status='terminated',termination_source='user' WHERE id=%s",
                 (incarnation.agent_id,),
             )
-        else:
-            raise ValueError(f"not an executable lifecycle command: {lifecycle_kind}")
-    if lifecycle_kind == "terminate":
-        await finish_termination(bus, incarnation.agent_id, shell_cutoff, kill_shell_sessions)
-    return lifecycle_kind
+    return AppliedLifecycle(kind=kind, agent_id=incarnation.agent_id, shell_cutoff=cutoff)
 
 
 # meiva:note
@@ -311,8 +319,9 @@ async def settle_and_stamp_turn(
     Returns both halves to the settlement boundary: the crash stamp and
     whether the settle reached idling.
     """
+    close = turn_close(exited=exited, crashed=crashed)
     stamp: TurnFatalStamp | None = None
-    if crashed:
+    if close.stamp_fatal:
         try:
             stamp = await stamp_turn_fatal(pool, incarnation)
         except Exception:
@@ -323,7 +332,7 @@ async def settle_and_stamp_turn(
                 agent_id=incarnation.agent_id,
             )
     settled = False
-    if not exited:
+    if close.settle:
         settled = await settle_hosted_runtime(
             pool,
             incarnation,

@@ -13,8 +13,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-import pytest
-
 _REPO_ROOT = Path(__file__).resolve().parents[4]
 _STEWARD = (
     _REPO_ROOT / "meiva_builtins" / "plugins" / "meiva_memory" / "skills" / "scripts" / "steward.py"
@@ -133,15 +131,12 @@ def test_directory_indexes_are_rebuilt_before_the_commit(tmp_path: Path) -> None
     assert _git(pool, "status", "--porcelain").strip() == ""
 
 
-def test_regenerate_indexes_writes_every_directory_index(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_regenerate_indexes_writes_every_directory_index(unit_home: Path) -> None:
     from meiva_builtins.plugins.meiva_memory import pool_ops
 
-    pool = tmp_path / "memory"
+    pool = unit_home / "memory"
     (pool / "a" / "b").mkdir(parents=True)
     (pool / "a" / "b" / "deep.md").write_text(_NOTE)
-    monkeypatch.setenv("MEIVA_HOME", str(tmp_path))
 
     pool_ops.regenerate_indexes()
 

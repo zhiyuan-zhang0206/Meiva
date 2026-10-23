@@ -1,9 +1,10 @@
 import json
-from collections.abc import Callable, Iterator
+from collections.abc import Generator, Iterator
+from contextlib import contextmanager
 from dataclasses import replace
 from functools import partial
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Any, cast
 from unittest.mock import MagicMock
 from uuid import uuid4
 
@@ -14,16 +15,19 @@ from langgraph.graph import START, StateGraph
 from langgraph.types import Command
 from psycopg_pool import AsyncConnectionPool
 from pydantic import BaseModel
+from redis.client import PubSub
 
 from agent import impersonation
 from agent import state as states
 from agent.graph.claim.node import claim_node
 from agent.graph.exec.node import exec_node
-from agent.graph.exec.process import SubprocessExecProcess
+from agent.graph.exec.process import ParentFacts, SubprocessExecProcess
 from agent.impersonation import protect_native_hooks, settle_checkpoint
 from agent.impersonation_handoff import flush_checkpoint
 from agent.ownership.hosted import admit_hosted_runtime
 from agent.startup import wrap_saver_writes_with_nstep_interval
+from agent.takeover.relay import RelayWait, TakeoverHost
+from agent.tests.impersonation.lease_support import relay_program
 from base.agents import impersonation as leases
 from base.agents.context import MeivaContext
 from base.agents.context.clients import ClientSet
@@ -37,9 +41,9 @@ from base.agents.impersonation.tests.impersonation_support import recorded_tree
 from base.agents.inbox.insert import insert_inbound_message
 from base.agents.observation.relay_supervision import RelaySupervision
 from base.api_contracts.caller_identity import CallerIdentity
-from base.clock import Clock
+from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
+from base.cluster import inbound_channel
 from base.cluster.machine import MachineIdentity
-from base.config import settings
 from base.config.service_read import ConfigAuthority
 from base.config.tests.configuration import defaults, snapshot_process_config
 from base.db import Database, create_agent
@@ -55,6 +59,8 @@ from meiva.tests.fixtures.pin_agent import hosted_resources as hosted_resources
 
 __all__ = [
     "HandoffState",
+    "RunnerExecProcess",
+    "WakeLog",
     "assert_death_cause_note",
     "assert_end_note_and_handoff_document",
     "assert_handoff_precedes_queued_input",
@@ -62,16 +68,19 @@ __all__ = [
     "assert_resumed_transcript",
     "assert_successor_handoff_preserves_unacknowledged_input",
     "assert_unacknowledged_input_preserved",
+    "controller_relay_alive",
     "deliver_peers_and_ack_first",
     "end_external_session",
     "executor_acks_says_and_releases",
+    "failing_flush",
     "handoff_clients",
     "handoff_notes",
+    "inbound_wakes",
     "prepare_graph",
-    "relay_ready",
     "resume_native",
     "stop_takeover_with_exhausted_ack",
     "stop_takeover_with_lost_relay",
+    "takeover_host",
 ]
 
 
@@ -85,13 +94,64 @@ def handoff_clients(machine_identity: MachineIdentity) -> Iterator[ClientSet]:
 
 
 def handoff_notes() -> HandoffNotes:
-    return HandoffNotes(Clock.from_settings, lambda: settings.general.message_timestamps)
+    clock = Clock(ClockConfig("UTC", "UTC", False), timers=SYSTEM_TIMERS)
+    return HandoffNotes(lambda: clock, lambda: False)
 
 
-def relay_ready(
-    _db: object, _bus: object, *_args: object, read_local_machine: Callable[[], str]
-) -> bool:
-    return True
+def takeover_host(tmp_path: Path, machine: MachineIdentity) -> TakeoverHost:
+    return TakeoverHost(
+        local_machine=machine.name(),
+        workspaces_root=tmp_path / "workspaces",
+        relay_program=relay_program(tmp_path / "relay", "exit:9"),
+        wait=RelayWait(timeout_s=5.0, poll_s=0.05),
+    )
+
+
+def controller_relay_alive(db_conn: psycopg.Connection[Any], lease_id: str) -> None:
+    db_conn.execute(
+        "UPDATE agent_impersonations SET relay_heartbeat_at=clock_timestamp() WHERE id=%s",
+        (lease_id,),
+    )
+    db_conn.commit()
+
+
+class WakeLog:
+    def __init__(self, pubsub: PubSub) -> None:
+        self._pubsub = pubsub
+
+    def drain(self) -> list[str]:
+        received: list[str] = []
+        while message := cast("dict[str, Any] | None", self._pubsub.get_message(timeout=0.2)):
+            if message["type"] == "message":
+                received.append(str(message["data"]))
+        return received
+
+
+@contextmanager
+def failing_flush(saver: object, error: OSError) -> Generator[None]:
+    attributes = vars(saver)
+    real = attributes["_meiva_nstep_flush"]
+
+    async def fail(_thread_id: str) -> None:
+        raise error
+
+    attributes["_meiva_nstep_flush"] = fail
+    try:
+        yield
+    finally:
+        attributes["_meiva_nstep_flush"] = real
+
+
+@contextmanager
+def inbound_wakes(event_bus: EventBus, agent_id: int) -> Generator[WakeLog]:
+    with (
+        event_bus.sync_redis(decode_responses=True) as redis,
+        PubSub(redis.connection_pool) as pubsub,
+    ):
+        pubsub.subscribe(inbound_channel(agent_id, event_bus.channel))
+        subscribed = cast("dict[str, Any] | None", pubsub.get_message(timeout=2))
+        assert subscribed is not None and subscribed["type"] == "subscribe"
+        yield WakeLog(pubsub)
 
 
 def _add(left: int, right: int) -> int:
@@ -102,11 +162,23 @@ class HandoffState(BaseModel):
     total: Annotated[int, _add] = 0
 
 
+# meiva:note
+# An exec process whose children connect to the database as the runner login: the child
+# environment is the parent's facts with the runner URL, so no process environment changes.
+class RunnerExecProcess(SubprocessExecProcess):
+    def __init__(self, runner_db_url: str) -> None:
+        self._runner_db_url = runner_db_url
+
+    def parent_facts(self) -> ParentFacts:
+        facts = super().parent_facts()
+        return replace(facts, environ={**facts.environ, "MEIVA_DB_URL": self._runner_db_url})
+
+
 async def prepare_graph(
     db_conn: psycopg.Connection[Any],
     aops_pool: AsyncConnectionPool[Any],
-    monkeypatch: pytest.MonkeyPatch,
     *,
+    exec_process: SubprocessExecProcess | None = None,
     config_authority: ConfigAuthority,
     clients: ClientSet,
     database_gate: ProcessDbGate,
@@ -146,8 +218,7 @@ async def prepare_graph(
         reason="Do the task",
         name="Integration test",
         executor_name="Codex: integration",
-        relay_provider="codex",
-        relay_thread_id=str(uuid4()),
+        relay_provider="claude",
         authority=config_authority,
         local_machine=machine_identity.name(),
     )
@@ -171,7 +242,9 @@ async def prepare_graph(
     )
     builder.add_node("llm", model, destinations=("exec", "claim"))
     builder.add_node(
-        "exec", partial(exec_node, process=SubprocessExecProcess()), destinations=("after_exec",)
+        "exec",
+        partial(exec_node, process=exec_process or SubprocessExecProcess()),
+        destinations=("after_exec",),
     )
 
     def after_exec(_state: Any) -> Command[str]:
@@ -354,7 +427,6 @@ def assert_resume_note_delivery_contract(content: str) -> None:
 
 
 async def stop_takeover_with_lost_relay(
-    monkeypatch: pytest.MonkeyPatch,
     database: Database,
     event_bus: EventBus,
     owner: RuntimeIncarnation,
@@ -430,11 +502,13 @@ async def resume_native(
     reset: Any,
     owner: RuntimeIncarnation,
     model_calls: Any,
-    wakes: list[tuple[int, str]],
+    wakes: WakeLog,
     database: Database,
     event_bus: EventBus,
+    host: TakeoverHost,
 ) -> None:
     ctx = replace(ctx, original_incarnation=owner)
+    wakes.drain()
     await graph.ainvoke(reset, config, context=ctx)
     assert not model_calls
     await flush_checkpoint(saver, owner.agent_id)
@@ -446,9 +520,9 @@ async def resume_native(
         ctx.relays,
         incarnation=owner,
         notes=handoff_notes(),
-        read_local_machine=lambda: ctx.require_machine().name(),
+        host=host,
     )
-    assert wakes == [(owner.agent_id, "impersonation")]
+    assert wakes.drain() == ["impersonation"]
     resumed = await graph.ainvoke(reset, config, context=ctx)
     await flush_checkpoint(saver, owner.agent_id)
     assert len(model_calls) == 1

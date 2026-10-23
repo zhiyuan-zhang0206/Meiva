@@ -128,22 +128,20 @@ class TestTerminate:
         assert _inbound_rows(db_conn, meiva.self.AGENT_ID) == [("", "terminate", "self")]
 
 
+@pytest.mark.usefixtures("sdk_model_owner")
 class TestRestart:
     def test_restart_inserts_restart_inbound_to_self(
         self,
         redis_url: str,
         db_conn: psycopg.Connection,
-        monkeypatch: pytest.MonkeyPatch,
         *,
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
-        model_installation: Installation,
         database_gate: ProcessDbGate,
         machine_identity: MachineIdentity,
     ) -> None:
         """restart self-inserts a kind='restart' source='self' into its own agent.
         The restarter daemon will handle the respawn (this test only verifies the SDK-side write is correct)."""
-        monkeypatch.setattr(meiva, "__plugin_installation__", model_installation, raising=False)
         pin_agent(
             spawn_agent(
                 catalog=model_catalog,
@@ -160,11 +158,9 @@ class TestRestart:
         self,
         redis_url: str,
         db_conn: psycopg.Connection,
-        monkeypatch: pytest.MonkeyPatch,
         *,
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
-        model_installation: Installation,
         database_gate: ProcessDbGate,
         machine_identity: MachineIdentity,
     ) -> None:
@@ -173,7 +169,6 @@ class TestRestart:
         Validation + INSERT path exercised, validate_config_overlay passes then payload serialized
         into inbound_messages.payload.
         """
-        monkeypatch.setattr(meiva, "__plugin_installation__", model_installation, raising=False)
         pin_agent(
             spawn_agent(
                 catalog=model_catalog,
@@ -205,15 +200,12 @@ class TestRestart:
         self,
         redis_url: str,
         db_conn: psycopg.Connection,
-        monkeypatch: pytest.MonkeyPatch,
         *,
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
-        model_installation: Installation,
         database_gate: ProcessDbGate,
         machine_identity: MachineIdentity,
     ) -> None:
-        monkeypatch.setattr(meiva, "__plugin_installation__", model_installation, raising=False)
         pin_agent(
             spawn_agent(
                 catalog=model_catalog,
@@ -258,16 +250,13 @@ class TestRestart:
         self,
         redis_url: str,
         db_conn: psycopg.Connection,
-        monkeypatch: pytest.MonkeyPatch,
         *,
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
-        model_installation: Installation,
         database_gate: ProcessDbGate,
         machine_identity: MachineIdentity,
     ) -> None:
         """Non-per_agent field → InvalidConfigOverlay; does **not** deliver inbound, process does not exit."""
-        monkeypatch.setattr(meiva, "__plugin_installation__", model_installation, raising=False)
         pin_agent(
             spawn_agent(
                 catalog=model_catalog,
@@ -292,16 +281,13 @@ class TestRestart:
         self,
         redis_url: str,
         db_conn: psycopg.Connection,
-        monkeypatch: pytest.MonkeyPatch,
         *,
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
-        model_installation: Installation,
         database_gate: ProcessDbGate,
         machine_identity: MachineIdentity,
     ) -> None:
         """A model typo is rejected before either persistent restart side effect."""
-        monkeypatch.setattr(meiva, "__plugin_installation__", model_installation, raising=False)
         pin_agent(
             spawn_agent(
                 catalog=model_catalog,
@@ -354,7 +340,6 @@ class TestRestart:
         """A registered-but-withdrawn model passes the membership check but is
         settled to its registered fallback before persistence (task #4306): the
         overlay column and the restart payload both carry the fallback."""
-        from dataclasses import replace
 
         model = "deepseek-retired-fixture"
         model_catalog = add_models(
@@ -398,22 +383,8 @@ class TestRestart:
         assert inbound_row[0] == {"config_overlay": {"llm_model": "deepseek-flash"}}
 
 
+@pytest.mark.usefixtures("sdk_model_owner")
 class TestPauseHeartbeat:
-    @pytest.fixture(autouse=True)
-    def policy_installation(
-        self,
-        monkeypatch: pytest.MonkeyPatch,
-        model_installation: Installation,
-        config_authority: ConfigAuthority,
-    ) -> None:
-        """The actual SDK caller uses this test root's supplied live configuration."""
-        monkeypatch.setattr(
-            meiva,
-            "__plugin_installation__",
-            replace(model_installation, authority=config_authority),
-            raising=False,
-        )
-
     @pytest.mark.usefixtures("event_pipeline")
     def test_pause_heartbeat_sets_window_records_trail_and_emits_event(
         self,

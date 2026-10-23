@@ -1,4 +1,4 @@
-exports = ["db", "execution", "extensions", "graph", "hooks", "impersonation.py", "impersonation_handoff.py", "impersonation_process.py", "llm", "messages", "nodes.py", "ownership", "process_boot.py", "startup", "state.py", "state_channels.py", "tests", "turn"]
+exports = ["db", "execution", "extensions", "graph", "hooks", "impersonation.py", "impersonation_handoff.py", "llm", "messages", "nodes.py", "ownership", "process_boot.py", "startup", "state.py", "state_channels.py", "tests", "turn"]
 
 [uses]
 "db" = ["ownership"]
@@ -6,12 +6,12 @@ exports = ["db", "execution", "extensions", "graph", "hooks", "impersonation.py"
 "extensions" = ["state.py"]
 "graph" = ["db", "execution", "hooks", "impersonation.py", "impersonation_handoff.py", "llm", "messages", "nodes.py", "ownership", "state.py", "state_channels.py"]
 "hooks" = ["messages", "nodes.py", "state.py", "state_channels.py"]
-"impersonation.py" = ["impersonation_handoff.py", "impersonation_process.py", "nodes.py", "state.py"]
-"impersonation_handoff.py" = ["messages"]
+"impersonation.py" = ["impersonation_handoff.py", "nodes.py", "state.py", "takeover"]
+"impersonation_handoff.py" = ["messages", "takeover"]
 "process_boot.py" = ["startup"]
 "startup" = ["db"]
 "state.py" = ["state_channels.py"]
-"tests" = ["db", "execution", "extensions", "graph", "hooks", "impersonation.py", "impersonation_handoff.py", "impersonation_process.py", "llm", "messages", "nodes.py", "ownership", "process_boot.py", "startup", "state.py"]
+"tests" = ["db", "execution", "extensions", "graph", "hooks", "impersonation.py", "impersonation_handoff.py", "llm", "messages", "nodes.py", "ownership", "process_boot.py", "startup", "state.py", "takeover"]
 "turn" = ["db", "graph", "impersonation_handoff.py", "startup", "state.py", "state_channels.py"]
 
 [purity]

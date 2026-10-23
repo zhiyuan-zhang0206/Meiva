@@ -1,7 +1,6 @@
 """The claim node's chat dispatch, short path, inbound-committed publishes and container mode."""
 
 from collections.abc import Callable
-from unittest.mock import MagicMock
 
 import psycopg
 import pytest
@@ -14,6 +13,7 @@ import meiva
 from agent.graph import claim_node
 from agent.graph.claim.tests.claim_support import insert_inbound_kind, make_runtime, thread_config
 from agent.graph.claim.tests.cursor_fixture import fresh_snapshot_cursor as fresh_snapshot_cursor
+from agent.graph.node_log.tests.live_events import LiveEvents
 from agent.state import AgentState
 from agent.tests.claim.claim_status_support import committed_publishes, set_agent_status
 from agent.tests.claim.claim_status_support import running_agent as running_agent
@@ -363,6 +363,7 @@ async def test_claim_chat_publishes_inbound_committed_per_id(
     aops_pool: AsyncConnectionPool,
     database: Database,
     event_bus: EventBus,
+    live_events: LiveEvents,
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
@@ -375,8 +376,6 @@ async def test_claim_chat_publishes_inbound_committed_per_id(
     Anchor the protocol layer ACK contract: changing publish order / missing a publish /
     wrong inbound_id any of these → test fails.
     """
-    import json
-
     tid = spawn_agent(
         catalog=model_catalog,
         authority=config_authority,
@@ -390,10 +389,11 @@ async def test_claim_chat_publishes_inbound_committed_per_id(
         db_conn, tid, "second", source="user", bus=event_bus, database=database
     )
 
-    pub = MagicMock()
     await claim_node(
         AgentState(),
-        make_runtime(ops_pool=aops_pool, event_publisher=pub, database_gate=database_gate),
+        make_runtime(
+            ops_pool=aops_pool, event_publisher=live_events.publisher, database_gate=database_gate
+        ),
         thread_config(
             tid,
         ),
@@ -402,8 +402,7 @@ async def test_claim_chat_publishes_inbound_committed_per_id(
     # two chats → two InboundCommitted emits, order by id ascending (claim node internal
     # created_at FIFO). node_lifecycle also emits timeline_snapshot; filter out and only look at
     # inbound_committed payloads.
-    payloads = [json.loads(c.args[0]) for c in pub.emit.call_args_list]
-    committed = [p for p in payloads if p["role"] == "inbound_committed"]
+    committed = await committed_publishes(live_events)
     assert len(committed) == 2
     assert all(p["agent_id"] == tid for p in committed)
     assert {p["inbound_id"] for p in committed} == {id1, id2}
@@ -421,6 +420,7 @@ async def test_claim_lifecycle_kind_does_not_publish_committed(
     kind: str,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
+    live_events: LiveEvents,
     *,
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
@@ -428,15 +428,16 @@ async def test_claim_lifecycle_kind_does_not_publish_committed(
     tid = running_agent()
     insert_inbound_kind(db_conn, tid, "", kind, source="user")
 
-    pub = MagicMock()
     await claim_node(
         AgentState(messages=[SystemMessage(content="sys")]),
-        make_runtime(ops_pool=aops_pool, event_publisher=pub, database_gate=database_gate),
+        make_runtime(
+            ops_pool=aops_pool, event_publisher=live_events.publisher, database_gate=database_gate
+        ),
         thread_config(
             tid,
         ),
     )
-    assert committed_publishes(pub) == []
+    assert await committed_publishes(live_events) == []
 
 
 async def test_claim_mixed_batch_publishes_only_chat_ids(
@@ -444,6 +445,7 @@ async def test_claim_mixed_batch_publishes_only_chat_ids(
     aops_pool: AsyncConnectionPool,
     database: Database,
     event_bus: EventBus,
+    live_events: LiveEvents,
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
@@ -463,17 +465,18 @@ async def test_claim_mixed_batch_publishes_only_chat_ids(
     )
     insert_inbound_kind(db_conn, tid, "summary", "compact_summary")
 
-    pub = MagicMock()
     state = AgentState(messages=[SystemMessage(content="sys")])
     await claim_node(
         state,
-        make_runtime(ops_pool=aops_pool, event_publisher=pub, database_gate=database_gate),
+        make_runtime(
+            ops_pool=aops_pool, event_publisher=live_events.publisher, database_gate=database_gate
+        ),
         thread_config(
             tid,
         ),
     )
 
-    committed = committed_publishes(pub)
+    committed = await committed_publishes(live_events)
     assert len(committed) == 1  # pyright: ignore[reportUnknownArgumentType]
     assert committed[0]["inbound_id"] == chat_id
 
@@ -561,6 +564,7 @@ async def test_claim_chat_only_publishes_chat_id_not_lifecycle_in_mixed_batch(
     aops_pool: AsyncConnectionPool,
     database: Database,
     event_bus: EventBus,
+    live_events: LiveEvents,
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
@@ -584,17 +588,18 @@ async def test_claim_chat_only_publishes_chat_id_not_lifecycle_in_mixed_batch(
     )
     insert_inbound_kind(db_conn, tid, "", "resurrect", source="user")
 
-    pub = MagicMock()
     state = AgentState(messages=[SystemMessage(content="sys")])
     await claim_node(
         state,
-        make_runtime(ops_pool=aops_pool, event_publisher=pub, database_gate=database_gate),
+        make_runtime(
+            ops_pool=aops_pool, event_publisher=live_events.publisher, database_gate=database_gate
+        ),
         thread_config(
             tid,
         ),
     )
 
-    committed = committed_publishes(pub)
+    committed = await committed_publishes(live_events)
     assert len(committed) == 1, f"should emit only 1 InboundCommitted (chat), got {len(committed)}"  # pyright: ignore[reportUnknownArgumentType]
     assert committed[0]["inbound_id"] == chat_id
 

@@ -12,27 +12,23 @@ that the rendered section reflects the wildcard, and that the field default is
 the stable production P95 module set.
 """
 
-from collections.abc import Iterator
-from typing import Any
+from collections.abc import Callable
+from typing import Any, cast
 
 import pytest
 
-from agent.graph.prompt.system_prompt import (
-    CAPABILITY_SURFACES,
-    discover_all_namespaces,
-    effective_sdk_expand,
-    sdk_expand_section,
-)
-from base.config import FIELD_INFOS, AgentSettings, settings
-from base.config.service_read import ConfigAuthority
+from agent.graph.prompt.live import LiveSdk, discover_all_namespaces
+from agent.graph.prompt.sdk_scope import CAPABILITY_SURFACES
+from agent.graph.prompt.skill_selection import SkillView
+from agent.graph.prompt.system_prompt import effective_sdk_expand, sdk_expand_section
+from agent.graph.tests.prompt.skill_support import write_skill
+from base.config import FIELD_INFOS, AgentSettings
+from base.config.tests.configuration import defaults
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
-from base.packages.plugin_config_images import DiskPluginConfigImages
-from base.packages.plugins.extensions import ExtensionRegistry, PluginContributions
-from base.paths.home import resolve_meiva_home
-from base.telemetry import audit_events
-from meiva.sdk_surface import install, sdk_disable
-from meiva.sdk_surface.installation import installed
+from base.packages.extensions import install_registry
+from base.packages.extensions.install_registry import InstalledPackage
+from base.paths import meiva_home, skills_dir
 
 # The framework-owned top-level namespaces the wildcard must always surface.
 # Asserted as a subset (not equality) so a plugin namespace installed into
@@ -50,132 +46,77 @@ FRAMEWORK_NAMESPACES = {
 }
 
 
-@pytest.fixture(autouse=True)
-def _no_plugin_expansions() -> Iterator[None]:
-    # Every case here reasons about the framework expand list alone; take any installed
-    # plugin surface out so a leak from another test cannot prepend stray paths, and put it
-    # back after. A test that needs a promotion installs its own.
-    prior = installed()
-    install.uninstall()
-    yield
-    install.uninstall()
-    if prior is not None:
-        install.install(
-            prior.registry,
-            catalog=prior.catalog,
-            authority=prior.authority,
-            config_images=prior.config_images,
-        )
+def _live(disabled: tuple[str, ...] = ()) -> LiveSdk:
+    return LiveSdk(SkillView(("*",), (), disabled, ()), (), ())
 
 
-@pytest.fixture
-def skill_writes(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
-    """Every event handed to the audit-event writer — the ONE path a skill
-    attribution row takes — for the "records nothing" assertions."""
-    writes: list[dict[str, Any]] = []
-
-    def _record(_db: object, event: Any) -> None:
-        writes.append({"event": event})
-
-    monkeypatch.setattr(audit_events, "record_audit_reported", _record)
-    return writes
+def _slices(expand: list[str], **changes: Any) -> AgentSlices:
+    return AgentSlices.resolve(
+        default_reader=defaults(agent__sdk_expand_in_system_prompt=expand, **changes)
+    )
 
 
-def test_wildcard_expands_all_public_namespaces(monkeypatch: pytest.MonkeyPatch) -> None:
+def _expand(configured: list[str], *, disabled: tuple[str, ...] = ()) -> list[str]:
+    return effective_sdk_expand(configured, disabled=disabled, plugin_expansions=())
+
+
+def test_wildcard_expands_all_public_namespaces() -> None:
     """`["*"]` resolves to exactly the discovered namespaces — every
     framework namespace, in deterministic sorted order, and nothing the
     discovery would not surface."""
-    monkeypatch.setattr(settings.agent, "sdk_expand_in_system_prompt", ["*"])
-    result = effective_sdk_expand(
-        AgentSlices.resolve(
-            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
-        ).prompt.sdk_disable,
-        configured_expansions=settings.agent.sdk_expand_in_system_prompt,
-    )
+    result = _expand(["*"])
+
     assert set(result) >= FRAMEWORK_NAMESPACES
     assert "shell.sessions" in result  # nested namespace discovered recursively
-    assert result == discover_all_namespaces(
-        AgentSlices.resolve(
-            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
-        ).prompt.sdk_disable
-    )
+    assert result == discover_all_namespaces(())
     assert result == sorted(result)  # deterministic order
 
 
-def test_wildcard_excludes_functions_and_private_names(
-    monkeypatch: pytest.MonkeyPatch, model_catalog: ModelCatalog
-) -> None:
+def test_wildcard_excludes_functions_and_private_names(model_catalog: ModelCatalog) -> None:
     """Top-level functions (`help`, `understand`) and private names are not
     namespaces — the SDK overview already prints functions in full, so the
     wildcard skips them rather than duplicating their contract."""
-    monkeypatch.setattr(settings.agent, "sdk_expand_in_system_prompt", ["*"])
-    result = effective_sdk_expand(
-        AgentSlices.resolve(
-            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
-        ).prompt.sdk_disable,
-        configured_expansions=settings.agent.sdk_expand_in_system_prompt,
-    )
+    result = _expand(["*"])
+
     assert "help" not in result
     assert "understand" not in result
     assert "impersonation" not in result
     assert "## meiva.impersonation" not in sdk_expand_section(
-        AgentSlices.resolve(
-            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
-        ),
-        catalog=model_catalog,
+        _slices(["*"]), catalog=model_catalog, live=_live()
     )
     assert not any(name.startswith("_") for name in result)
 
 
-def test_wildcard_skips_capability_surfaces(
-    monkeypatch: pytest.MonkeyPatch, model_catalog: ModelCatalog
-) -> None:
+def test_wildcard_skips_capability_surfaces(model_catalog: ModelCatalog) -> None:
     """`skills` and `mcps` are capability surfaces, not SDK API: expanding them
     renders a full listing of every installed skill / configured server, which
     is exactly what `# Capabilities` already indexes. `"*"` skips both so the
     prompt carries one index, not two."""
-    monkeypatch.setattr(settings.agent, "sdk_expand_in_system_prompt", ["*"])
-    result = effective_sdk_expand(
-        AgentSlices.resolve(
-            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
-        ).prompt.sdk_disable,
-        configured_expansions=settings.agent.sdk_expand_in_system_prompt,
-    )
-    assert {"skills", "mcps"} == CAPABILITY_SURFACES
-    assert not (CAPABILITY_SURFACES & set(result))
-    text = sdk_expand_section(
-        AgentSlices.resolve(
-            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
-        ),
-        catalog=model_catalog,
-    )
+    result = _expand(["*"])
+
+    assert {"skills", "mcps"} == set(CAPABILITY_SURFACES)
+    assert not (set(CAPABILITY_SURFACES) & set(result))
+    text = sdk_expand_section(_slices(["*"]), catalog=model_catalog, live=_live())
     assert "## meiva.skills" not in text
     assert "## meiva.mcps" not in text
 
 
-def test_capability_surface_expands_when_named_explicitly(
-    monkeypatch: pytest.MonkeyPatch, skill_writes: list[dict[str, Any]], model_catalog: ModelCatalog
-) -> None:
+@pytest.mark.usefixtures("unit_home")
+def test_capability_surface_expands_when_named_explicitly(model_catalog: ModelCatalog) -> None:
     """The skip is a wildcard default, not a ban — an operator who names a
     capability SURFACE explicitly still gets it expanded. Expanding the surface
     is index-style, so it costs a duplicate index and nothing worse: no SKILL.md
     body reaches the prompt and no attribution is recorded."""
-    monkeypatch.setattr(settings.agent, "sdk_expand_in_system_prompt", ["*", "skills"])
+    write_skill(
+        skills_dir(meiva_home()), "alpha", "alpha", "Alpha desc", body="# Body\n\nSECRET_MARKER\n"
+    )
+    install_registry.register(InstalledPackage(name="alpha", type="skill"))
+    assert "skills" in _expand(["*", "skills"])
 
-    assert "skills" in effective_sdk_expand(
-        AgentSlices.resolve(
-            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
-        ).prompt.sdk_disable,
-        configured_expansions=settings.agent.sdk_expand_in_system_prompt,
-    )
-    text = sdk_expand_section(
-        AgentSlices.resolve(
-            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
-        ),
-        catalog=model_catalog,
-    )
+    text = sdk_expand_section(_slices(["*", "skills"]), catalog=model_catalog, live=_live())
+
     assert "## meiva.skills" in text
-    assert skill_writes == []
+    assert "SECRET_MARKER" not in text
     # An index render carries descriptions, never bodies. Every SKILL.md in this
     # repo opens with a markdown heading; none may appear under the skills block.
     skills_block = text[text.index("## meiva.skills") :]
@@ -184,7 +125,7 @@ def test_capability_surface_expands_when_named_explicitly(
 
 
 def test_member_of_a_capability_surface_is_refused(
-    monkeypatch: pytest.MonkeyPatch, skill_writes: list[dict[str, Any]], model_catalog: ModelCatalog
+    model_catalog: ModelCatalog, caplog: pytest.LogCaptureFixture
 ) -> None:
     """`skills.<name>` / `mcps.<server>` are refused even when named explicitly.
 
@@ -197,169 +138,102 @@ def test_member_of_a_capability_surface_is_refused(
     The refusal lives in `effective_sdk_expand`, so it holds for every consumer
     of that view (the meiva_code section reads it too), not only for the section
     that renders it."""
-    monkeypatch.setattr(
-        settings.agent, "sdk_expand_in_system_prompt", ["*", "skills.gmail", "mcps.chrome"]
-    )
+    configured = ["*", "skills.gmail", "mcps.chrome"]
 
-    assert "skills.gmail" not in effective_sdk_expand(
-        AgentSlices.resolve(
-            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
-        ).prompt.sdk_disable,
-        configured_expansions=settings.agent.sdk_expand_in_system_prompt,
-    )
-    assert "mcps.chrome" not in effective_sdk_expand(
-        AgentSlices.resolve(
-            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
-        ).prompt.sdk_disable,
-        configured_expansions=settings.agent.sdk_expand_in_system_prompt,
-    )
-    text = sdk_expand_section(
-        AgentSlices.resolve(
-            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
-        ),
-        catalog=model_catalog,
-    )
+    with caplog.at_level("WARNING", logger="agent.graph.prompt.system_prompt"):
+        result = _expand(configured)
+
+    assert "skills.gmail" not in result
+    assert "mcps.chrome" not in result
+    assert "refusing 'skills.gmail'" in caplog.text
+    assert "refusing 'mcps.chrome'" in caplog.text
+    text = sdk_expand_section(_slices(configured), catalog=model_catalog, live=_live())
     assert "## meiva.skills.gmail" not in text
     assert "## meiva.mcps.chrome" not in text
-    assert skill_writes == []
 
 
-def test_wildcard_respects_sdk_disable(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_wildcard_respects_sdk_disable() -> None:
     """A namespace listed in MEIVA_SDK_DISABLE is dropped from the wildcard set —
     a disabled namespace must never be expanded back into the prompt."""
-    monkeypatch.setattr(settings.agent, "sdk_expand_in_system_prompt", ["*"])
-    monkeypatch.setattr(settings.agent, "sdk_disable", ["watcher"])
-    result = effective_sdk_expand(
-        AgentSlices.resolve(
-            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
-        ).prompt.sdk_disable,
-        configured_expansions=settings.agent.sdk_expand_in_system_prompt,
-    )
+    result = _expand(["*"], disabled=("watcher",))
+
     assert "watcher" not in result
     assert "files" in result and "self" in result
 
 
-def test_wildcard_disable_of_member_keeps_namespace(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_wildcard_disable_of_member_keeps_namespace() -> None:
     """Disabling a member (`self.terminate`) removes only that attribute; the
     parent namespace still expands under the wildcard."""
-    monkeypatch.setattr(settings.agent, "sdk_expand_in_system_prompt", ["*"])
-    monkeypatch.setattr(settings.agent, "sdk_disable", ["self.terminate"])
-    assert "self" in effective_sdk_expand(
-        AgentSlices.resolve(
-            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
-        ).prompt.sdk_disable,
-        configured_expansions=settings.agent.sdk_expand_in_system_prompt,
-    )
+    assert "self" in _expand(["*"], disabled=("self.terminate",))
 
 
-def test_wildcard_merges_with_explicit_nested_path(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_wildcard_merges_with_explicit_nested_path() -> None:
     """`["*", "shell.sessions"]` is a union: the wildcard expands every
     top-level and nested namespace; the explicit `shell.sessions` is deduped
     (keep-first from the wildcard block), so `shell` sorts before `shell.sessions`."""
-    monkeypatch.setattr(settings.agent, "sdk_expand_in_system_prompt", ["*", "shell.sessions"])
-    result = effective_sdk_expand(
-        AgentSlices.resolve(
-            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
-        ).prompt.sdk_disable,
-        configured_expansions=settings.agent.sdk_expand_in_system_prompt,
-    )
+    result = _expand(["*", "shell.sessions"])
+
     assert "shell.sessions" in result
     assert set(result) >= FRAMEWORK_NAMESPACES
     assert result.index("shell") < result.index("shell.sessions")
 
 
-def test_wildcard_dedups_overlapping_explicit_entry(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_wildcard_dedups_overlapping_explicit_entry() -> None:
     """A namespace named explicitly AND discovered by `*` appears once, keeping
     its first (explicit) position."""
-    monkeypatch.setattr(settings.agent, "sdk_expand_in_system_prompt", ["files", "*"])
-    result = effective_sdk_expand(
-        AgentSlices.resolve(
-            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
-        ).prompt.sdk_disable,
-        configured_expansions=settings.agent.sdk_expand_in_system_prompt,
-    )
+    result = _expand(["files", "*"])
+
     assert result.count("files") == 1
     assert result[0] == "files"
 
 
-def test_legacy_explicit_list_is_unchanged(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_legacy_explicit_list_is_unchanged() -> None:
     """A list with no `"*"` is the old behavior: returned verbatim, deduped
     keep-first, no discovery."""
-    monkeypatch.setattr(settings.agent, "sdk_expand_in_system_prompt", ["files", "shell", "self"])
-    assert effective_sdk_expand(
-        AgentSlices.resolve(
-            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
-        ).prompt.sdk_disable,
-        configured_expansions=settings.agent.sdk_expand_in_system_prompt,
-    ) == [
-        "files",
-        "shell",
-        "self",
-    ]
+    assert _expand(["files", "shell", "self"]) == ["files", "shell", "self"]
 
 
 def test_missing_unregistered_expand_path_warns(
-    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture, model_catalog: ModelCatalog
+    caplog: pytest.LogCaptureFixture, model_catalog: ModelCatalog
 ) -> None:
     """An unregistered missing path reaches the existing resolution warning."""
-    monkeypatch.setattr(settings.agent, "sdk_expand_in_system_prompt", ["missing_sdk_namespace"])
-    monkeypatch.setattr(settings.agent, "sdk_disable", [])
-    monkeypatch.setattr(sdk_disable, "applied_entries", frozenset)
-
-    with caplog.at_level("WARNING", logger="agent.graph.prompt.system_prompt"):
+    with caplog.at_level("WARNING", logger="agent.graph.prompt.live"):
         text = sdk_expand_section(
-            AgentSlices.resolve(
-                default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
-            ),
-            catalog=model_catalog,
+            _slices(["missing_sdk_namespace"]), catalog=model_catalog, live=_live()
         )
 
     assert text == ""
     assert "meiva.missing_sdk_namespace does not resolve" in caplog.text
 
 
-def test_plugin_expansions_lead_the_wildcard(
-    monkeypatch: pytest.MonkeyPatch,
-    model_catalog: ModelCatalog,
-    config_authority: ConfigAuthority,
+def test_disabled_expand_path_is_skipped_without_a_warning(
+    caplog: pytest.LogCaptureFixture, model_catalog: ModelCatalog
 ) -> None:
+    with caplog.at_level("WARNING", logger="agent.graph.prompt.live"):
+        text = sdk_expand_section(
+            _slices(["missing_sdk_namespace"]),
+            catalog=model_catalog,
+            live=_live(("missing_sdk_namespace",)),
+        )
+
+    assert text == ""
+    assert caplog.text == ""
+
+
+def test_plugin_expansions_lead_the_wildcard() -> None:
     """Plugin-promoted paths keep their lead position ahead of the discovered
     set even when the configured list is just `["*"]`."""
-    install.install(
-        ExtensionRegistry((("p", PluginContributions(sdk_expansions=("cwd",))),)),
-        catalog=model_catalog,
-        authority=config_authority,
-        config_images=DiskPluginConfigImages(resolve_meiva_home()),
-    )
-    monkeypatch.setattr(settings.agent, "sdk_expand_in_system_prompt", ["*"])
-    result = effective_sdk_expand(
-        AgentSlices.resolve(
-            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
-        ).prompt.sdk_disable,
-        configured_expansions=settings.agent.sdk_expand_in_system_prompt,
-    )
+    result = effective_sdk_expand(["*"], disabled=(), plugin_expansions=("cwd",))
+
     assert result[0] == "cwd"
     assert set(result) >= FRAMEWORK_NAMESPACES
 
 
-def test_section_renders_all_wildcard_namespaces(
-    monkeypatch: pytest.MonkeyPatch, model_catalog: ModelCatalog
-) -> None:
+def test_section_renders_all_wildcard_namespaces(model_catalog: ModelCatalog) -> None:
     """The rendered section carries one `## meiva.<name>` contract per discovered
     namespace and no heading for the skipped top-level functions."""
-    monkeypatch.setattr(settings.agent, "sdk_expand_in_system_prompt", ["*"])
-    text = sdk_expand_section(
-        AgentSlices.resolve(
-            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
-        ),
-        catalog=model_catalog,
-    )
+    text = sdk_expand_section(_slices(["*"]), catalog=model_catalog, live=_live())
+
     assert text.startswith("# Expanded SDK reference")
     for ns in FRAMEWORK_NAMESPACES:
         assert f"## meiva.{ns}" in text
@@ -375,33 +249,16 @@ def test_field_default_is_production_p95() -> None:
     assert factory() == ["shell", "files", "agents", "tasks"]  # type: ignore[call-arg]
 
 
-def test_plugin_expansions_merge_with_p95_without_duplicates(
-    monkeypatch: pytest.MonkeyPatch,
-    model_catalog: ModelCatalog,
-    config_authority: ConfigAuthority,
-) -> None:
+def test_plugin_expansions_merge_with_p95_without_duplicates() -> None:
     factory = FIELD_INFOS["sdk_expand_in_system_prompt"].default_factory
     assert factory is not None
-    monkeypatch.setattr(settings.agent, "sdk_expand_in_system_prompt", factory())
-    install.install(
-        ExtensionRegistry((("p", PluginContributions(sdk_expansions=("cwd", "tasks"))),)),
-        catalog=model_catalog,
-        authority=config_authority,
-        config_images=DiskPluginConfigImages(resolve_meiva_home()),
-    )
 
+    defaults_list = cast("Callable[[], list[str]]", factory)()
     assert effective_sdk_expand(
-        AgentSlices.resolve(
-            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
-        ).prompt.sdk_disable,
-        configured_expansions=settings.agent.sdk_expand_in_system_prompt,
-    ) == [
-        "cwd",
-        "tasks",
-        "shell",
-        "files",
-        "agents",
-    ]
+        defaults_list,
+        disabled=(),
+        plugin_expansions=("cwd", "tasks"),
+    ) == ["cwd", "tasks", "shell", "files", "agents"]
 
 
 def test_env_comma_string_with_wildcard_parses() -> None:
@@ -411,35 +268,23 @@ def test_env_comma_string_with_wildcard_parses() -> None:
     assert s.sdk_expand_in_system_prompt == ["*", "shell.sessions"]
 
 
-def test_section_hides_attach_for_text_only_model(
-    monkeypatch: pytest.MonkeyPatch, model_catalog: ModelCatalog
-) -> None:
+def test_section_hides_attach_for_text_only_model(model_catalog: ModelCatalog) -> None:
     """A text-only model's expanded SDK reference carries no attach contract —
     the member is unavailable to it (user ruling 2026-08-28)."""
-    monkeypatch.setattr(settings.agent, "sdk_expand_in_system_prompt", ["*"])
-    monkeypatch.setattr(settings.lm, "llm_model", "deepseek-v4-pro")
     text = sdk_expand_section(
-        AgentSlices.resolve(
-            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
-        ),
-        catalog=model_catalog,
+        _slices(["*"], lm__llm_model="deepseek-v4-pro"), catalog=model_catalog, live=_live()
     )
+
     assert "## meiva.self" in text
     assert "def attach(" not in text
 
 
-def test_section_keeps_attach_for_media_capable_model(
-    monkeypatch: pytest.MonkeyPatch, model_catalog: ModelCatalog
-) -> None:
+def test_section_keeps_attach_for_media_capable_model(model_catalog: ModelCatalog) -> None:
     """A media-capable model's expanded SDK reference keeps the attach
     contract unchanged (user ruling 2026-08-28)."""
-    monkeypatch.setattr(settings.agent, "sdk_expand_in_system_prompt", ["*"])
-    monkeypatch.setattr(settings.lm, "llm_model", "claude-sonnet-5")
     text = sdk_expand_section(
-        AgentSlices.resolve(
-            default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
-        ),
-        catalog=model_catalog,
+        _slices(["*"], lm__llm_model="claude-sonnet-5"), catalog=model_catalog, live=_live()
     )
+
     assert "## meiva.self" in text
     assert "def attach(" in text

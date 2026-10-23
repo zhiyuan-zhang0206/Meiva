@@ -1,3 +1,4 @@
+from agent.ownership.tests.ownership_support import bus_tap as bus_tap
 from base.config.tests.config_authority import config_authority as config_authority
 from base.log.tests.log_records import loguru_records as loguru_records
 from base.packages.tests.model_catalog import add_bindings as add_bindings

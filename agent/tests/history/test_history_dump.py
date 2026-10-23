@@ -18,7 +18,8 @@ Covers the four contracts of the feature:
 
 import json
 import re
-from datetime import UTC, datetime, tzinfo
+import shutil
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
@@ -59,42 +60,45 @@ from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices, HistoryDump
 from base.lm.catalog import ModelCatalog
 from base.packages.plugin_providers import build_model_catalog
+from base.paths import workspace_dir
 
 # ── helpers ──
 
 
-def _patch_workspace(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
-    ws = tmp_path / "workspace"
-
-    def _fake_workspace_dir(_aid: int) -> Path:
-        return ws
-
-    monkeypatch.setattr(history_dump, "workspace_dir", _fake_workspace_dir)
-    return ws
+def _instant(tick: int = 1) -> datetime:
+    return datetime(2026, 8, 13, 12, 0, 0, tick, tzinfo=UTC)
 
 
-def _dump(messages: list[AnyMessage], *, enabled: bool = True, keep: int = 5) -> Any:
+def _dump(
+    messages: list[AnyMessage],
+    workspace: Path,
+    *,
+    enabled: bool = True,
+    keep: int = 5,
+    tick: int = 1,
+) -> Any:
     return history_dump.dump_history(
-        messages, 1, HistoryDump(history_dump_enabled=enabled, history_dump_keep=keep)
+        messages,
+        workspace,
+        HistoryDump(history_dump_enabled=enabled, history_dump_keep=keep),
+        now=_instant(tick),
     )
 
 
-class _FakeClock(datetime):
-    """Controllable `datetime` subclass for `agent.hooks.history_dump` — lets a test
-    write several dumps with distinct, ordered timestamps without sleeping.
-    Subclassing (not a bare stub) keeps the whole datetime API, so the module's
-    parse path (`datetime.fromisoformat`) keeps working under the patch."""
-
-    _counter = 0
-
-    @classmethod
-    def now(cls, tz: tzinfo | None = None) -> "_FakeClock":  # noqa: ARG003 — the fake pins its own instant
-        cls._counter += 1
-        return cls(2026, 8, 13, 12, 0, 0, cls._counter, tzinfo=UTC)
+def _clear(path: Path) -> None:
+    if path.is_dir():
+        shutil.rmtree(path)
+    else:
+        path.unlink(missing_ok=True)
 
 
-def _patch_clock(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(history_dump, "datetime", _FakeClock)
+# meiva:note
+# The workspace of agent 1 under the test home, with no dumps in it: the auto-compact tests run as agent 1 and write where the production code writes.
+@pytest.fixture
+def agent_workspace() -> Path:
+    workspace = workspace_dir(1)
+    _clear(workspace / "message-history")
+    return workspace
 
 
 # `<start>__<end>.jsonl`, both UTC: start with second precision, end with
@@ -249,18 +253,18 @@ def test_dump_enabled_by_default() -> None:
     assert AgentCompactionSettings.model_fields["history_dump_enabled"].default is True
 
 
-def test_dump_disabled_returns_none(monkeypatch: pytest.MonkeyPatch, tmp_path: Any):
+def test_dump_disabled_returns_none(tmp_path: Path):
     """Config off → dump_history returns None and creates nothing."""
-    ws = _patch_workspace(monkeypatch, tmp_path)
-    assert _dump(_sample_messages(), enabled=False) is None
+    ws = tmp_path / "workspace"
+    assert _dump(_sample_messages(), ws, enabled=False) is None
     assert not (ws / "message-history").exists()
 
 
-def test_dump_enabled_writes_file(monkeypatch: pytest.MonkeyPatch, tmp_path: Any):
+def test_dump_enabled_writes_file(tmp_path: Path):
     """Config on → the dump is written under <workspace>/message-history/ and
     the path is returned."""
-    ws = _patch_workspace(monkeypatch, tmp_path)
-    path = _dump(_sample_messages())
+    ws = tmp_path / "workspace"
+    path = _dump(_sample_messages(), ws)
     assert path is not None
     assert path.parent == ws / "message-history"
     assert path.name.endswith(".jsonl")
@@ -270,12 +274,9 @@ def test_dump_enabled_writes_file(monkeypatch: pytest.MonkeyPatch, tmp_path: Any
 # ── dump_history: filename = round start + compaction moment ──
 
 
-def test_dump_filename_is_start_and_end(monkeypatch: pytest.MonkeyPatch, tmp_path: Any):
-    """The name stamps the round: start = the earliest message `meiva_created_at`,
-    end = the write moment (here the fake clock's first tick)."""
-    _FakeClock._counter = 0
-    _patch_clock(monkeypatch)
-    _patch_workspace(monkeypatch, tmp_path)
+# meiva:note
+# The name stamps the round: start = the earliest message `meiva_created_at`, end = the write moment the caller passes.
+def test_dump_filename_is_start_and_end(tmp_path: Path):
     messages: list[AnyMessage] = [
         SystemMessage(content="<sys>"),
         HumanMessage(
@@ -287,24 +288,21 @@ def test_dump_filename_is_start_and_end(monkeypatch: pytest.MonkeyPatch, tmp_pat
             additional_kwargs={"meiva_created_at": "2026-08-13T08:15:00+00:00"},
         ),
     ]
-    path = _dump(messages)
+    path = _dump(messages, tmp_path / "workspace")
     assert path is not None
     start, end = _parse_dump_name(path)
     assert start == datetime(2026, 8, 13, 8, 15, tzinfo=UTC)
-    assert end == datetime(2026, 8, 13, 12, 0, 0, 1, tzinfo=UTC)
+    assert end == _instant(1)
 
 
-def test_dump_filename_falls_back_to_write_moment(monkeypatch: pytest.MonkeyPatch, tmp_path: Any):
+def test_dump_filename_falls_back_to_write_moment(tmp_path: Path):
     """A stamp-less (or unparseable) history degrades to start == end — the name
     stays well-formed and every dump remains parseable/sortable."""
-    _FakeClock._counter = 0
-    _patch_clock(monkeypatch)
-    _patch_workspace(monkeypatch, tmp_path)
     messages: list[AnyMessage] = [
         HumanMessage(content="no stamp", additional_kwargs={"meiva_created_at": "not-a-date"}),
         SystemMessage(content="<sys>"),
     ]
-    path = _dump(messages)
+    path = _dump(messages, tmp_path / "workspace")
     assert path is not None
     start, end = _parse_dump_name(path)
     assert start == end.replace(microsecond=0)
@@ -313,13 +311,12 @@ def test_dump_filename_falls_back_to_write_moment(monkeypatch: pytest.MonkeyPatc
 # ── dump_history: content completeness + replayability ──
 
 
-def test_dump_is_replayable_jsonl(monkeypatch: pytest.MonkeyPatch, tmp_path: Any):
+def test_dump_is_replayable_jsonl(tmp_path: Path):
     """One JSON line per message, each line a raw BaseMessage model_dump that
     round-trips through langchain load — type, content, and meiva_* kwargs all
     survive, SystemMessage and ToolMessages included (full-history snapshot)."""
-    _patch_workspace(monkeypatch, tmp_path)
     messages = _sample_messages()
-    path = _dump(messages)
+    path = _dump(messages, tmp_path / "workspace")
     assert path is not None
 
     lines = path.read_text(encoding="utf-8").splitlines()
@@ -352,15 +349,12 @@ def test_dump_is_replayable_jsonl(monkeypatch: pytest.MonkeyPatch, tmp_path: Any
     assert tool_msg.tool_call_id == "c1"
 
 
-def test_dump_rotates_to_newest_keep(monkeypatch: pytest.MonkeyPatch, tmp_path: Any):
-    """After each write only the newest `history_dump_keep` dumps remain — disk
-    growth is bounded (each dump is a full conversation snapshot)."""
-    _FakeClock._counter = 0
-    _patch_clock(monkeypatch)
-    _patch_workspace(monkeypatch, tmp_path)
-    messages: list[AnyMessage] = [HumanMessage(content="old")]  # no stamps → start == end tick
-    for _ in range(4):
-        _dump(messages, keep=2)
+# meiva:note
+# After each write only the newest `history_dump_keep` dumps remain — disk growth is bounded (each dump is a full conversation snapshot). The messages carry no stamps, so each dump's start is its own write moment.
+def test_dump_rotates_to_newest_keep(tmp_path: Path):
+    messages: list[AnyMessage] = [HumanMessage(content="old")]
+    for tick in range(1, 5):
+        _dump(messages, tmp_path / "workspace", keep=2, tick=tick)
     dump_dir = tmp_path / "workspace" / "message-history"
     dumps = sorted(p.name for p in dump_dir.glob("*.jsonl"))
     assert len(dumps) == 2
@@ -368,29 +362,26 @@ def test_dump_rotates_to_newest_keep(monkeypatch: pytest.MonkeyPatch, tmp_path: 
     assert dumps[-1].endswith("20260813T120000.000004Z.jsonl")  # the newest write
 
 
-def test_dump_failure_is_best_effort(monkeypatch: pytest.MonkeyPatch, tmp_path: Any):
-    """A write failure must never raise — the dump is forensics, the compaction
-    is the critical path. Returns None and the caller injects no note."""
-    _patch_workspace(monkeypatch, tmp_path)
-
-    def _boom(aid: int) -> Any:
-        raise OSError("disk full")
-
-    monkeypatch.setattr(history_dump, "workspace_dir", _boom)
-    assert _dump(_sample_messages()) is None
+# meiva:note
+# A write failure must never raise — the dump is forensics, the compaction is the critical path. Returns None and the caller injects no note. The fault is real: the dump directory's place is taken by a file.
+def test_dump_failure_is_best_effort(tmp_path: Path):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "message-history").write_text("a file, not a directory")
+    assert _dump(_sample_messages(), workspace) is None
 
 
 # ── auto-compact path: note injection position ──
 
 
 async def test_auto_compact_injects_dump_note_after_summary(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Any, database_gate: ProcessDbGate
+    agent_workspace: Path, database_gate: ProcessDbGate
 ):
     """Enabled → the auto-compact hook dumps the pre-compact history and parks
     the note in the fresh-context tail AFTER the summary. The live `messages`
     update carries only the REMOVE_ALL sentinel — the note is never in the
     pre-compact channel and never between an AIMessage and its ToolMessage."""
-    ws = _patch_workspace(monkeypatch, tmp_path)
+    ws = agent_workspace
     state = _over_threshold_state()
 
     result = await auto_compact_for_llm(
@@ -414,11 +405,10 @@ async def test_auto_compact_injects_dump_note_after_summary(
 
 
 async def test_auto_compact_no_note_when_disabled(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Any, database_gate: ProcessDbGate
+    agent_workspace: Path, database_gate: ProcessDbGate
 ):
     """Config off → the auto-compact transition is exactly the old shape:
     tail = the summary alone, no note (and no dump file)."""
-    _patch_workspace(monkeypatch, tmp_path)
     state = _over_threshold_state()
 
     result = await auto_compact_for_llm(
@@ -429,19 +419,16 @@ async def test_auto_compact_no_note_when_disabled(
     assert result is not None
     tail = _compact_tail(result)
     assert [m.content for m in tail] == [compose_summary_message(_LONG_SUMMARY)]  # pyright: ignore[reportUnknownMemberType]
+    assert not (agent_workspace / "message-history").exists()
 
 
+# meiva:note
+# A dump failure degrades to today's behavior: compaction still applies, no note is injected. The fault is real: the dump directory's place is taken by a file.
 async def test_auto_compact_proceeds_when_dump_fails(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Any, database_gate: ProcessDbGate
+    agent_workspace: Path, database_gate: ProcessDbGate
 ):
-    """A dump failure degrades to today's behavior: compaction still applies,
-    no note is injected."""
-    _patch_workspace(monkeypatch, tmp_path)
-
-    def _boom(aid: int) -> Any:
-        raise OSError("disk full")
-
-    monkeypatch.setattr(history_dump, "workspace_dir", _boom)
+    agent_workspace.mkdir(parents=True, exist_ok=True)
+    (agent_workspace / "message-history").write_text("a file, not a directory")
     state = _over_threshold_state()
 
     result = await auto_compact_for_llm(
@@ -461,8 +448,6 @@ async def test_claim_compact_summary_parks_dump_note_after_summary(
     redis_url: str,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Any,
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
@@ -474,7 +459,6 @@ async def test_claim_compact_summary_parks_dump_note_after_summary(
     fresh-context tail. The messages update is the REMOVE_ALL sentinel alone:
     no note, no AIMessage — nothing that could sit between a tool_use and its
     tool_result on the wire."""
-    _patch_workspace(monkeypatch, tmp_path)
     tid = spawn_agent(
         catalog=model_catalog,
         authority=config_authority,
@@ -517,8 +501,6 @@ async def test_claim_compact_summary_no_note_when_disabled(
     redis_url: str,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Any,
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
@@ -526,7 +508,6 @@ async def test_claim_compact_summary_no_note_when_disabled(
     machine_identity: MachineIdentity,
 ):
     """Config off → claim-path compact tail is exactly today's (summary only)."""
-    _patch_workspace(monkeypatch, tmp_path)
     tid = spawn_agent(
         catalog=model_catalog,
         authority=config_authority,

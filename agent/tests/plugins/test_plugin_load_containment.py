@@ -35,15 +35,10 @@ _PLUGIN_MODULE_PREFIXES = ("meiva_builtins.plugins.", "plugins.")
 
 
 @pytest.fixture(autouse=True)
-def _isolate_paths(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+def _isolate_paths(unit_home: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     repo = tmp_path / "repo_plugins"
-    user = tmp_path / "user_plugins"
     repo.mkdir()
-    user.mkdir()
     monkeypatch.setattr(paths, "repo_plugins_dir", lambda: repo)
-    monkeypatch.setattr(paths, "plugins_dir", lambda: user)
-    monkeypatch.setenv("MEIVA_HOME", str(tmp_path / "meiva"))
-    monkeypatch.setattr(paths, "meiva_home", lambda: tmp_path)
 
 
 @pytest.fixture(autouse=True)

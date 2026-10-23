@@ -9,16 +9,13 @@ Confirms:
 
 import json
 import sys
-from collections.abc import Callable, Iterator
+from collections.abc import Iterator
 from pathlib import Path
-from types import ModuleType
 from uuid import uuid4
 
 import pytest
 
 from base import paths
-from base.lm.catalog import ModelCatalog
-from base.packages import plugin_providers
 from base.packages.plugins.enable_config import write_local
 from base.telemetry.tests.capture.event_capture import EmittedEvents
 from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
@@ -27,19 +24,20 @@ from base.telemetry.tests.capture.event_capture import emitted_events as emitted
 _PLUGIN_MODULE_PREFIXES = ("meiva_builtins.plugins.", "plugins.")
 
 
+# meiva:note
+# The user's plugin directory is the test home's own (`unit_home`). The built-in directory is
+# derived from the checkout's location, so the synthetic built-ins these tests declare cannot
+# sit beside the real ones without a redirect of `repo_plugins_dir`.
 @pytest.fixture(autouse=True)
-def _isolate_paths(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, model_catalog: ModelCatalog):
-    monkeypatch.setattr(plugin_providers, "build_model_catalog", lambda: model_catalog)
+def _isolate_paths(tmp_path: Path, unit_home: Path, monkeypatch: pytest.MonkeyPatch):
     repo = tmp_path / "repo_plugins"
-    user = tmp_path / "user_plugins"
     repo.mkdir()
-    user.mkdir()
     monkeypatch.setattr(paths, "repo_plugins_dir", lambda: repo)
-    monkeypatch.setattr(paths, "plugins_dir", lambda: user)
-    monkeypatch.setenv("MEIVA_HOME", str(tmp_path / "meiva"))
-    monkeypatch.setattr(paths, "meiva_home", lambda: tmp_path)
 
 
+# meiva:note
+# Every plugin module a test sees was loaded by that test: the namespace is emptied first and put
+# back afterwards, so a module another test left in this worker cannot stand in for a load.
 @pytest.fixture(autouse=True)
 def _restore_plugin_modules() -> Iterator[None]:
     """The synthetic plugins here live in a per-test tmp dir but claim a
@@ -49,10 +47,10 @@ def _restore_plugin_modules() -> Iterator[None]:
     the migration-authority fix in c86c63dce.
     """
     before = {k: v for k, v in sys.modules.items() if k.startswith(_PLUGIN_MODULE_PREFIXES)}
+    for key in before:
+        del sys.modules[key]
     yield
-    for key in [
-        k for k in sys.modules if k.startswith(_PLUGIN_MODULE_PREFIXES) and k not in before
-    ]:
+    for key in [k for k in sys.modules if k.startswith(_PLUGIN_MODULE_PREFIXES)]:
         del sys.modules[key]
     sys.modules.update(before)
 
@@ -89,7 +87,11 @@ def _make_external_plugin(name: str) -> None:
     _write_manifest(plugin_dir)
 
 
-def test_only_enabled_plugins_are_imported(monkeypatch: pytest.MonkeyPatch):
+def _imported_plugins() -> set[str]:
+    return {key for key in sys.modules if key.startswith(_PLUGIN_MODULE_PREFIXES)}
+
+
+def test_only_enabled_plugins_are_imported():
     """enabled=true plugins are imported; enabled=false are not."""
     _make_plugin("compact")
     _make_plugin("syntax_fix")
@@ -105,26 +107,17 @@ def test_only_enabled_plugins_are_imported(monkeypatch: pytest.MonkeyPatch):
         }
     )
 
-    from base.packages.plugins.loading import plugin_loader
     from meiva.sdk_surface import extensions as _loader
-
-    loaded: list[str] = []
-    real = plugin_loader.load_plugin_module
-
-    def spy(plugin_py: Path, *, name: str, pkg: str, module: str = "plugin") -> ModuleType:
-        loaded.append(name)
-        return real(plugin_py, name=name, pkg=pkg, module=module)
-
-    monkeypatch.setattr(plugin_loader, "load_plugin_module", spy)
 
     _loader.load_extensions()
 
-    assert any("compact" in n for n in loaded)
-    assert any("syntax_fix" in n for n in loaded)
-    assert not any("demo" in n for n in loaded)
+    imported = _imported_plugins()
+    assert "meiva_builtins.plugins.compact.plugin" in imported
+    assert "meiva_builtins.plugins.syntax_fix.plugin" in imported
+    assert not any("demo" in name for name in imported)
 
 
-def test_external_plugin_also_loaded(monkeypatch: pytest.MonkeyPatch):
+def test_external_plugin_also_loaded():
     """External plugins (~/.meiva/plugins/) are also loaded."""
     _make_plugin("compact")
     _make_external_plugin("audit")
@@ -138,52 +131,33 @@ def test_external_plugin_also_loaded(monkeypatch: pytest.MonkeyPatch):
         }
     )
 
-    from base.packages.plugins.loading import plugin_loader
     from meiva.sdk_surface import extensions as _loader
-
-    loaded: list[str] = []
-    real = plugin_loader.load_plugin_module
-
-    def spy(plugin_py: Path, *, name: str, pkg: str, module: str = "plugin") -> ModuleType:
-        loaded.append(name)
-        return real(plugin_py, name=name, pkg=pkg, module=module)
-
-    monkeypatch.setattr(plugin_loader, "load_plugin_module", spy)
 
     _loader.load_extensions()
 
-    assert any("audit" in n for n in loaded)
-    assert not any("compact" in n for n in loaded)
+    imported = _imported_plugins()
+    assert "plugins.audit.plugin" in imported
+    assert not any("compact" in name for name in imported)
 
 
-def test_load_extensions_installs_metering(monkeypatch: pytest.MonkeyPatch):
+def test_load_extensions_installs_metering():
     """load_extensions must install the SDK-usage recorder over the final meiva.*
     surface (after plugins load), so every agent's SDK calls get metered."""
     from meiva.sdk_surface import extensions as _loader
-    from meiva.sdk_surface import metering
-
-    installed: list[bool] = []
+    from meiva.sdk_surface.installation import installed
 
     def expected_producer() -> object:
         return object()
 
-    def install_metering(
-        _sampling: object, *, producer: Callable[[], object] | None
-    ) -> tuple[tuple[object, str], ...]:
-        assert producer is expected_producer
-        installed.append(True)
-        return ()
-
-    monkeypatch.setattr(metering, "install", install_metering)
-
     _loader.load_extensions(producer=expected_producer)
 
-    assert installed == [True]
+    installation = installed()
+    assert installation is not None
+    assert installation.producer is expected_producer
+    assert installation.metered, "the recorder was installed over the surface"
 
 
-def test_a_repeat_load_reuses_the_module_object_so_a_patch_still_lands(
-    monkeypatch: pytest.MonkeyPatch,
-):
+def test_a_repeat_load_reuses_the_module_object_so_a_patch_still_lands():
     """Issue #147: a second `load_extensions()` re-executes the plugin module
     already registered in `sys.modules` — it must not bind a new one.
 
@@ -221,8 +195,7 @@ def test_a_repeat_load_reuses_the_module_object_so_a_patch_still_lands(
     # The consequence that actually bites: a callable captured before the reload
     # resolves its globals out of the one module `__dict__`, so a patch applied
     # through `sys.modules` reaches it. Two module objects, and it would not.
-    monkeypatch.setattr(sys.modules[dotted], "MARK", "patched")
-    assert stale_probe() == "patched"
+    assert stale_probe.__globals__ is sys.modules[dotted].__dict__
 
 
 def test_a_different_file_under_the_same_name_gets_a_fresh_module(

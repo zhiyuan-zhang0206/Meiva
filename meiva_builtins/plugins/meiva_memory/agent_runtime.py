@@ -262,6 +262,7 @@ class _PassiveMemoryRecallHook(Hook):
                     injected_paths=injected,
                     agent=agent,
                     context=runtime.context,
+                    memory_root=memory_dir(),
                 ),
                 timeout=deadline,
             )

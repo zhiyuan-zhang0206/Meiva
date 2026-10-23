@@ -46,10 +46,9 @@ from __future__ import annotations
 
 import asyncio
 import time
-from collections.abc import Awaitable, Callable, Sequence
-from dataclasses import replace
+from collections.abc import Awaitable, Sequence
+from dataclasses import fields, replace
 from datetime import UTC, datetime
-from functools import partial
 from typing import Any, Literal
 
 from langchain_core.messages import AIMessage, AnyMessage, ToolCall, ToolMessage
@@ -58,25 +57,27 @@ from langgraph.runtime import Runtime
 from langgraph.types import Command, Overwrite
 
 from agent import state as _state
+from agent.execution.protocol import ResultPayload
 from agent.graph._attach_drain import build_attach_message
 from agent.graph._attach_merge import merge_attachments
 from agent.graph.agent_traceback import format_full_traceback
 from agent.graph.exec._notes import merge_exec_notes
 from agent.graph.interrupt import interrupt_halt, subscribe_interrupt
-from agent.graph.node_log import node_lifecycle
+from agent.graph.node_log import StallConfig, node_lifecycle
 from agent.graph.tool_calls import code_from_args, normalize_tool_calls
 from agent.messages import exec_output_message
 from agent.nodes import AFTER_EXEC, EXEC
 from agent.state import AttachState, validate_plugin_state_keys
 from base.agents.context import MeivaContext, agent_id_from_config
 from base.agents.history.timeline_inputs import TimelineReadInputs
-from base.agents.lifecycle import AgentRestart, AgentTermination, SystemHalt
 from base.agents.messages.kwargs import ExecStatus
-from base.clock import Clock
 from base.events.live.projection import Cancelled, ExecOutput, ExecStart
+from base.events.live.publisher import AgentEventPublisher
+from base.host.env.agent_slices import AgentSlices
 from base.log import logger
 
-from ._crop import CropInputs
+from ._crop import CropLimits
+from ._dispatch import CrashFacts, DispatchKind, DispatchPlan, plan_dispatch
 from ._result import (
     ExecCancelled as ExecCancelled,
 )
@@ -104,9 +105,8 @@ from ._stream import (
 from ._stream import (
     StreamingTextIO as StreamingTextIO,
 )
-from .output import ExecEnvelope, crashed_no_output_body, wrap_code_output
+from .output import ExecEnvelope, OutputLimits, overflow_dir, wrap_code_output
 from .process import ExecProcess
-from .protocol import ResultPayload
 
 # Each exec step commits one call; remaining calls return to EXEC before AFTER_EXEC.
 ExecGoto = Literal["exec", "after_exec"]
@@ -140,16 +140,12 @@ async def exec_node(
         event_publisher=event_publisher,
         agent_id=agent_id_from_config(config),
         turn_progress=runtime.context.turn_progress,
-        read_stall_seconds=lambda: runtime.context.require_agent().read(
-            "agent", "node_stall_dump_seconds"
-        ),
+        stall=StallConfig(runtime.context.require_agent().read("agent", "node_stall_dump_seconds")),
         timeline_inputs=TimelineReadInputs(
             runtime.context.require_clock,
             lambda: runtime.context.require_agent().read("general", "message_timestamps"),
         ),
-        limit_reader=lambda: runtime.context.require_agent().read(
-            "display", "timeline_default_limit"
-        ),
+        timeline_limit=runtime.context.require_agent().read("display", "timeline_default_limit"),
     ):
         return await exec_node_impl(state, runtime, config, process=process)
 
@@ -166,23 +162,23 @@ async def _exec_with_node_shield(
     coro: Awaitable[tuple[ExecResult, ResultPayload | None]],
     agent_id: int,
     *,
-    read_timeout: Callable[[], float],
+    timeout_seconds: float,
 ) -> tuple[ExecResult, ResultPayload | None]:
     try:
-        return await asyncio.wait_for(coro, timeout=read_timeout())
+        return await asyncio.wait_for(coro, timeout=timeout_seconds)
     except TimeoutError:
         logger.error(
             "[exec(node-timeout)] exec_node timed out after {timeout}s — "
             "inner code-exec timeout did not trigger; possible framework hang. "
             "Returning timeout ToolMessage so the LLM can react.",
             event="exec_node_timeout",
-            timeout=read_timeout(),
+            timeout=timeout_seconds,
             agent_id=agent_id,
         )
         return (
             ExecTimedOut(
                 output=(
-                    f"[exec node timeout after {read_timeout():.0f}s] "
+                    f"[exec node timeout after {timeout_seconds:.0f}s] "
                     "Execution was stopped by an internal safeguard and did not "
                     "complete. This does not necessarily mean your code was slow; "
                     "consider re-running it, or moving long-running work to a "
@@ -234,7 +230,7 @@ async def run_agent_code(
                 config_overlay=config_overlay,
             ),
             agent_id,
-            read_timeout=lambda: ctx.require_agent().read("sandbox", "exec_node_timeout_seconds"),
+            timeout_seconds=ctx.require_agent().read("sandbox", "exec_node_timeout_seconds"),
         )
     # Wall-clock surfaced on the code_output item ("ran in 1.3s"); cancel /
     # timeout still report the honest time-before-stop.
@@ -253,103 +249,45 @@ async def run_agent_code(
     return result, plugin_state_update, exec_ms, attachments, sdk_calls
 
 
-def _emit_exec_boot_failed(agent_id: int, exc: BaseException) -> None:
+def _emit_exec_boot_failed(agent_id: int, crash: CrashFacts) -> None:
     """The `exec_child_boot_failed` signal: the child died before the agent's code ran."""
     logger.warning(
         "[exec-boot-failed] exec child crashed before running code: {exc_type}: {exc_msg}",
         event="exec_child_boot_failed",
         agent_id=agent_id,
-        exc_type=getattr(exc, "exc_type", None) or type(exc).__name__,
-        exc_msg=(getattr(exc, "exc_msg", None) or str(exc))[:200],
+        exc_type=crash.exc_type,
+        exc_msg=crash.exc_msg[:200],
     )
 
 
-def dispatch_exec_result(
-    result: ExecResult,
-    ctx: MeivaContext,
-    agent_id: int,
-    *,
-    elapsed_seconds: float,
-    timestamp: str | None = None,
-    referenced_messages: Sequence[AnyMessage] = (),
-    read_sandbox: Callable[[str], Any],
-    clock: Clock,
-) -> tuple[bool, ExecEnvelope, ExecStatus]:
-    """Map the `ExecResult` sum type to (halted, envelope, status).
-
-    Lifecycle priority (lifecycle always wins the cancel/timeout race) is
-    implemented at the construction site in `_construct_exec_result` (`_result.py`); the match directly
-    consumes the sum type. Exhaustiveness: pyright strict + match narrowing make
-    a forgotten variant a static error (replaces the hand-written fallthrough).
-    """
-    # Present on every variant (see the sum-type definitions): when the
-    # accumulation budget dropped the middle mid-run, the envelope needs it to
-    # report the true produced length and to stop calling the archive complete.
-    crop_inputs = CropInputs(read_sandbox)
-    wrap = partial(
-        wrap_code_output,
-        crop_config=crop_inputs,
-        clock=clock,
-        timestamp=timestamp,
-        elapsed_seconds=elapsed_seconds,
-        timeout_seconds=read_sandbox("exec_timeout_seconds"),
-        max_chars=read_sandbox("exec_output_max_chars"),
+def _log_crash(
+    plan: DispatchPlan, crash: CrashFacts, envelope: ExecEnvelope, agent_id: int
+) -> None:
+    logger.info(
+        "[{label}] {body}\n[full traceback]\n{full_traceback}",
+        label="exec-failed",
+        body=envelope.text,
+        full_traceback=crash.child_traceback or format_full_traceback(crash.exc),
+        event="exec_failed",
+        exc_type=type(crash.exc).__name__,
+        agent_id=agent_id,
     )
-    stream_cap = result.stream_cap
-    match result:
-        case ExecLifecycle(output=output, exc=SystemHalt()):
-            # meiva.self.compact already INSERTed compact_summary inbound; append
-            # "[system halt]" at the end (agent's real output comes first).
-            halted, status = True, ExecStatus.HALTED
-            extra = "[system halt] You just called meiva.self.compact; your context has been compacted and you will continue as the same agent\n"
-            output = (output if not output or output.endswith("\n") else output + "\n") + extra
-            envelope = wrap(
-                output,
-                agent_id=agent_id,
-                stream_cap=stream_cap,
-                referenced_messages=referenced_messages,
-            )
-            logger.info("[exec] {body}", event="exec", body=envelope.text, agent_id=agent_id)
-            logger.info(
-                "[halt] {body}", event="halt", body="system_halt (compact)", agent_id=agent_id
-            )
-        case ExecLifecycle(output=output, exc=AgentTermination() | AgentRestart() as exc):
-            # meiva:note
-            # Restart/terminate enqueue lifecycle inbounds. Their drivers resume after exec
-            # cleanup, without adding a duplicate "[halt]" annotation here.
-            halted, status = True, ExecStatus.HALTED
-            envelope = wrap(
-                output,
-                agent_id=agent_id,
-                stream_cap=stream_cap,
-                referenced_messages=referenced_messages,
-            )
-            logger.info("[exec] {body}", event="exec", body=envelope.text, agent_id=agent_id)
-            logger.info(
-                "[halt] {body}",
-                event="halt",
-                body=f"lifecycle {type(exc).__name__}",
-                agent_id=agent_id,
-            )
-        case ExecLifecycle(exc=other_exc):
-            # Exhaustive fallthrough: future LifecycleExit subclass not handled
-            # in the two cases above falls here and raises — safer than silently
-            # taking the "ordinary exception" halted=False path. Implements
-            # AGENTS.md "enum dispatch must be exhaustive".
-            raise TypeError(
-                f"Unrecognized LifecycleExit subclass: {type(other_exc).__name__!r} — "
-                f"dispatch ladder missed update"
-            )
-        case ExecCancelled(output=output, reason=reason):
-            halted, status = True, ExecStatus.CANCELLED
-            envelope = wrap(
-                output,
-                agent_id=agent_id,
-                cancelled=True,
-                cancel_reason=reason,
-                stream_cap=stream_cap,
-                referenced_messages=referenced_messages,
-            )
+    if plan.boot_failed:
+        _emit_exec_boot_failed(agent_id, crash)
+
+
+# meiva:note
+# Word what the plan decided. A failed execute_code logs at INFO with event=exec_failed:
+# trial-and-error is the normal dev loop, not an operator alert (metrics still aggregate by
+# event name). The log gets the full unfiltered chain, so framework or SDK bugs invisible in
+# the agent view stay diagnosable: the child's formatted traceback, or one formatted here for
+# a parent-side failure.
+def _log_dispatch(plan: DispatchPlan, envelope: ExecEnvelope, agent_id: int) -> None:
+    if plan.crash is not None:
+        _log_crash(plan, plan.crash, envelope, agent_id)
+        return
+    match plan.kind:
+        case DispatchKind.CANCELLED:
             logger.info(
                 "[{label}] {body}",
                 label="exec-cancelled",
@@ -357,21 +295,7 @@ def dispatch_exec_result(
                 event="exec_cancelled",
                 agent_id=agent_id,
             )
-            # Notify frontend of abort (symmetric with llm_node cancel path;
-            # the timeout path does not send Cancelled — not a user cancel).
-            assert ctx.event_publisher is not None  # noqa: S101 — asserted by caller; narrowed for the emit
-            ctx.event_publisher.emit(Cancelled(agent_id=agent_id).model_dump_json())
-        case ExecTimedOut(output=output):
-            # Timeout is ordinary feedback, not a stop-turn signal: the envelope
-            # hints at long-running primitives; the next LLM round adapts.
-            halted, status = False, ExecStatus.TIMED_OUT
-            envelope = wrap(
-                output,
-                agent_id=agent_id,
-                timed_out=True,
-                stream_cap=stream_cap,
-                referenced_messages=referenced_messages,
-            )
+        case DispatchKind.TIMED_OUT:
             logger.info(
                 "[{label}] {body}",
                 label="exec-timeout",
@@ -379,57 +303,57 @@ def dispatch_exec_result(
                 event="exec_timeout",
                 agent_id=agent_id,
             )
-        case ExecCrashed(
-            output=output, exc=exc, full_traceback=child_traceback, code_reached=code_reached
+        case (
+            DispatchKind.DONE | DispatchKind.COMPACT | DispatchKind.LIFECYCLE | DispatchKind.CRASHED
         ):
-            # Ordinary exception: `output` carries the agent-facing (filtered)
-            # traceback; the log gets the full unfiltered chain (framework/SDK
-            # bugs invisible in the agent view stay diagnosable). INFO +
-            # event=exec_failed — trial-and-error is the normal dev loop, not
-            # an operator alert (metrics still aggregate by event name).
-            # The child ships its formatted traceback in the envelope
-            # (`child_traceback`); parent-side construction failures (spawn
-            # error, unserializable state) format from `exc`.
-            #
-            # P0 #2100: an EMPTY output on a crash means nothing reached the
-            # agent's stdout — never wrap it as "(no output)", which asserts
-            # the code ran. Say what happened instead: with the child's
-            # code_reached flag, "the code was NOT executed" (boot crash),
-            # "ran, printed nothing" or "unknown".
-            halted, status = False, ExecStatus.FAILED
-            if not output:
-                output = crashed_no_output_body(exc, code_reached=code_reached)
-            envelope = wrap(
-                output,
-                agent_id=agent_id,
-                stream_cap=stream_cap,
-                referenced_messages=referenced_messages,
-            )
-            logger.info(
-                "[{label}] {body}\n[full traceback]\n{full_traceback}",
-                label="exec-failed",
-                body=envelope.text,
-                full_traceback=child_traceback or format_full_traceback(exc),
-                event="exec_failed",
-                exc_type=type(exc).__name__,
-                agent_id=agent_id,
-            )
-            if code_reached is False:
-                # Bootstrap-class failure: the child died before the agent's
-                # code ever ran — the class that used to vanish as "(no
-                # output)". A distinct WARNING event is the operator signal
-                # (P2 #2102); the alert rule reads it from the event stream.
-                _emit_exec_boot_failed(agent_id, exc)
-        case ExecDone(output=output):
-            halted, status = False, ExecStatus.COMPLETED
-            envelope = wrap(
-                output,
-                agent_id=agent_id,
-                stream_cap=stream_cap,
-                referenced_messages=referenced_messages,
-            )
             logger.info("[exec] {body}", event="exec", body=envelope.text, agent_id=agent_id)
-    return halted, envelope, status
+    if plan.halt_log is not None:
+        logger.info("[halt] {body}", event="halt", body=plan.halt_log, agent_id=agent_id)
+
+
+# meiva:note
+# Execute the dispatch plan `plan_dispatch` makes for one `ExecResult`: wrap the envelope the
+# plan's markers describe, log the outcome, and tell the frontend about a cancel (symmetric
+# with the llm_node cancel path; a timeout is not a user cancel and sends nothing).
+def dispatch_exec_result(
+    result: ExecResult,
+    event_publisher: AgentEventPublisher,
+    agent_id: int,
+    *,
+    elapsed_seconds: float,
+    timestamp: str | None,
+    referenced_messages: Sequence[AnyMessage],
+    limits: OutputLimits,
+    now: datetime,
+) -> tuple[DispatchPlan, ExecEnvelope]:
+    plan = plan_dispatch(result)
+    envelope = wrap_code_output(
+        plan.body,
+        limits=limits,
+        now=now,
+        elapsed_seconds=elapsed_seconds,
+        timestamp=timestamp,
+        cancelled=plan.cancelled,
+        cancel_reason=plan.cancel_reason,
+        timed_out=plan.timed_out,
+        stream_cap=result.stream_cap,
+        referenced_messages=referenced_messages,
+    )
+    _log_dispatch(plan, envelope, agent_id)
+    if plan.kind is DispatchKind.CANCELLED:
+        event_publisher.emit(Cancelled(agent_id=agent_id).model_dump_json())
+    return plan, envelope
+
+
+def _output_limits(agent: AgentSlices, agent_id: int) -> OutputLimits:
+    return OutputLimits(
+        archive_dir=overflow_dir(agent_id),
+        crop=CropLimits(
+            **{field.name: agent.read("sandbox", field.name) for field in fields(CropLimits)}
+        ),
+        timeout_seconds=agent.read("sandbox", "exec_timeout_seconds"),
+        max_chars=agent.read("sandbox", "exec_output_max_chars"),
+    )
 
 
 def _attach_model(ctx: MeivaContext) -> str:
@@ -503,19 +427,18 @@ async def _exec_single_call(
         process=process,
     )
     clock = ctx.require_clock()
-    timestamp = (
-        clock.now_timestamp() if ctx.require_agent().read("general", "message_timestamps") else None
-    )
-    halted, envelope, status = dispatch_exec_result(
+    agent = ctx.require_agent()
+    plan, envelope = dispatch_exec_result(
         result,
-        ctx,
+        ctx.event_publisher,
         agent_id,
         elapsed_seconds=exec_ms / 1000,
-        timestamp=timestamp,
+        timestamp=clock.now_timestamp() if agent.read("general", "message_timestamps") else None,
         referenced_messages=state.messages,
-        read_sandbox=lambda field: ctx.require_agent().read("sandbox", field),
-        clock=ctx.require_clock(),
+        limits=_output_limits(agent, agent_id),
+        now=clock.now().astimezone(clock.explicit_zone()),
     )
+    halted, status = plan.halted, plan.status
 
     # Pop the plugin's messages delta out of the state update — merged below
     # after the ToolMessage instead of riding the dict **spread (which would
@@ -525,7 +448,7 @@ async def _exec_single_call(
 
     # Compact path (SystemHalt): write nothing back — claim REMOVE_ALLs the
     # whole history this turn, so ToolMessage/notes would be wiped anyway.
-    compact_halt = isinstance(result, ExecLifecycle) and isinstance(result.exc, SystemHalt)
+    compact_halt = not plan.writes_back
     if compact_halt:
         # Findings annotate the history claim is about to wipe; the rest of the delta (plugin
         # fields) is written back as before, and the findings otherwise ride the spread below
@@ -563,8 +486,8 @@ async def _exec_single_call(
         "halted": halted,
         **plugin_state_update,
     }
-    if isinstance(result, ExecCancelled):
-        update.update(interrupt_halt(result.reason))
+    if plan.cancelled:
+        update.update(interrupt_halt(plan.cancel_reason))
     if not compact_halt:
         # Attachments registered during this execute_code call are packed into
         # a media HumanMessage appended right after the exec output — the model

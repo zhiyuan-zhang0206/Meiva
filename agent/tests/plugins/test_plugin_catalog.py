@@ -6,9 +6,6 @@ import pytest
 from agent.extensions import catalog as catalog_mod
 from agent.state import plugin_state_schema
 from base import paths
-from base.lm.catalog import ModelCatalog
-from base.packages import plugin_providers
-from base.packages.plugins import load_report
 from base.packages.plugins.enable_config import write_local
 from base.packages.plugins.gate import ContributionMismatch
 from base.packages.plugins.loading.registry import declarations
@@ -17,16 +14,10 @@ from meiva.sdk_surface.extensions import load_extensions
 
 
 @pytest.fixture(autouse=True)
-def _isolate_paths(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, model_catalog: ModelCatalog):
-    monkeypatch.setattr(plugin_providers, "build_model_catalog", lambda: model_catalog)
+def _isolate_paths(unit_home: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     repo = tmp_path / "repo_plugins"
-    user = tmp_path / "user_plugins"
     repo.mkdir()
-    user.mkdir()
     monkeypatch.setattr(paths, "repo_plugins_dir", lambda: repo)
-    monkeypatch.setattr(paths, "plugins_dir", lambda: user)
-    monkeypatch.setenv("MEIVA_HOME", str(tmp_path / "meiva"))
-    monkeypatch.setattr(paths, "meiva_home", lambda: tmp_path)
 
 
 _DEMO_PLUGIN = '''
@@ -325,19 +316,20 @@ def _gate_manifest(
 _GATE_PLUGIN = '__description__ = "a plugin under the load gate"\n'
 
 
+# meiva:note
+# The load's own reporter, as values: the plugins a load contained, with their errors.
+class LoadFailures(list[tuple[str, BaseException]]):
+    def __call__(self, name: str, exc: BaseException) -> None:
+        self.append((name, exc))
+
+
 @pytest.fixture
-def load_failures(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, BaseException]]:
-    failures: list[tuple[str, BaseException]] = []
-
-    def spy(name: str, exc: BaseException) -> None:
-        failures.append((name, exc))
-
-    monkeypatch.setattr(load_report, "report_plugin_load_failure", spy)
-    return failures
+def load_failures() -> LoadFailures:
+    return LoadFailures()
 
 
-def _registered() -> dict[str, tuple[str, ...]]:
-    registry = load_extensions(validate_state=plugin_state_schema).registry
+def _registered(load_failures: LoadFailures) -> dict[str, tuple[str, ...]]:
+    registry = load_extensions(validate_state=plugin_state_schema, report=load_failures).registry
     return {
         name: tuple(point for point in _HOOK_POINTS if contributions.hooks(point))
         for name, contributions in registry.plugins
@@ -345,7 +337,7 @@ def _registered() -> dict[str, tuple[str, ...]]:
 
 
 def test_a_plugin_whose_manifest_and_contribute_agree_is_admitted(
-    load_failures: list[tuple[str, BaseException]],
+    load_failures: LoadFailures,
 ):
     _write_plugin(
         "gate_ok",
@@ -355,7 +347,7 @@ def test_a_plugin_whose_manifest_and_contribute_agree_is_admitted(
     )
     _enable(gate_ok=True)
 
-    assert _registered() == {"gate_ok": ("before_llm",)}
+    assert _registered(load_failures) == {"gate_ok": ("before_llm",)}
     assert load_failures == []
 
 
@@ -377,7 +369,7 @@ def test_a_plugin_whose_manifest_and_contribute_agree_is_admitted(
     ],
 )
 def test_a_plugin_whose_manifest_and_contribute_disagree_on_hooks_is_excluded(
-    load_failures: list[tuple[str, BaseException]],
+    load_failures: LoadFailures,
     manifest_hooks: tuple[str, ...],
     provided_hooks: tuple[str, ...],
     problem: str,
@@ -396,7 +388,7 @@ def test_a_plugin_whose_manifest_and_contribute_disagree_on_hooks_is_excluded(
     )
     _enable(gate_bad=True, gate_ok=True)
 
-    assert _registered() == {"gate_ok": ("before_llm",)}
+    assert _registered(load_failures) == {"gate_ok": ("before_llm",)}
     [(name, exc)] = load_failures
     assert name == "gate_bad"
     assert isinstance(exc, ContributionMismatch)
@@ -422,7 +414,7 @@ def test_a_plugin_whose_manifest_and_contribute_disagree_on_hooks_is_excluded(
     ],
 )
 def test_a_plugin_whose_manifest_and_contribute_disagree_on_sections_is_excluded(
-    load_failures: list[tuple[str, BaseException]],
+    load_failures: LoadFailures,
     manifest_sections: tuple[str, ...],
     provides_section: bool,
     problem: str,
@@ -435,14 +427,14 @@ def test_a_plugin_whose_manifest_and_contribute_disagree_on_sections_is_excluded
     )
     _enable(gate_bad=True)
 
-    assert _registered() == {}
+    assert _registered(load_failures) == {}
     [(name, exc)] = load_failures
     assert name == "gate_bad"
     assert isinstance(exc, ContributionMismatch)
     assert problem in str(exc)
 
 
-def test_a_plugin_without_a_manifest_is_excluded(load_failures: list[tuple[str, BaseException]]):
+def test_a_plugin_without_a_manifest_is_excluded(load_failures: LoadFailures):
     bare = _write_plugin(
         "gate_bare", _GATE_PLUGIN, runtime=_gate_runtime(("before_llm", "after_exec"))
     )
@@ -455,7 +447,7 @@ def test_a_plugin_without_a_manifest_is_excluded(load_failures: list[tuple[str, 
     )
     _enable(gate_bare=True, gate_ok=True)
 
-    assert _registered() == {"gate_ok": ("before_llm",)}
+    assert _registered(load_failures) == {"gate_ok": ("before_llm",)}
     [(name, exc)] = load_failures
     assert name == "gate_bare"
     assert isinstance(exc, ManifestError)
@@ -463,7 +455,7 @@ def test_a_plugin_without_a_manifest_is_excluded(load_failures: list[tuple[str, 
 
 
 def test_an_invalid_state_declaration_excludes_the_plugin(
-    load_failures: list[tuple[str, BaseException]],
+    load_failures: LoadFailures,
 ):
     core_state = "class GateState(BaseModel):\n    halted: bool = False\n"
     ok_manifest = _gate_manifest("gate_ok", hooks=("before_llm",), sections=("gate_section",))
@@ -478,14 +470,14 @@ def test_an_invalid_state_declaration_excludes_the_plugin(
     )
     _enable(gate_state=True, gate_ok=True)
 
-    assert _registered() == {"gate_ok": ("before_llm",)}
+    assert _registered(load_failures) == {"gate_ok": ("before_llm",)}
     [(name, exc)] = load_failures
     assert name == "gate_state"
     assert isinstance(exc, ValueError)
     assert "halted" in str(exc)
 
 
-def test_a_valid_state_declaration_is_admitted(load_failures: list[tuple[str, BaseException]]):
+def test_a_valid_state_declaration_is_admitted(load_failures: LoadFailures):
     state = "class GateState(BaseModel):\n    counter: int = 0\n"
     _write_plugin(
         "gate_state",
@@ -495,7 +487,7 @@ def test_a_valid_state_declaration_is_admitted(load_failures: list[tuple[str, Ba
     )
     _enable(gate_state=True)
 
-    registry = load_extensions(validate_state=plugin_state_schema).registry
+    registry = load_extensions(validate_state=plugin_state_schema, report=load_failures).registry
 
     assert [(plugin, cls.__name__) for plugin, cls in registry.state_classes()] == [
         ("gate_state", "GateState")

@@ -10,36 +10,41 @@ fourth member, 'off', which is a gate like any other and renders nothing.
 """
 
 import re
-from pathlib import Path
+from typing import Any
 
 import pytest
 
 from agent.graph.prompt.system_prompt import (
     INVEST_IN_THE_FUTURE_SECTION,
+    agent_workspace_pointer,
     align_before_action_section,
     build_system_prompt,
+    codeact_section,
     communication_style_section,
+    cross_machine_delegation_section,
     invest_in_the_future_section,
+    keep_it_simple_section,
+    temporal_awareness_section,
+    ui_delivery_section,
+    user_tone_section,
 )
-from base.config import settings
+from base.config.tests.configuration import defaults
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
+from base.log.tests.log_records import LogRecords
 from base.packages.plugin_providers import build_model_catalog
 from base.packages.plugins.extensions import EMPTY, ExtensionRegistry, PluginContributions
 
 
-def _slices() -> AgentSlices:
-    return AgentSlices.resolve(
-        default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
+def _slices(**changes: Any) -> AgentSlices:
+    return AgentSlices.resolve(default_reader=defaults(**changes))
+
+
+def test_alignment_preserves_authorized_work_and_optional_methods() -> None:
+
+    rendered = align_before_action_section(
+        _slices(agent__prompt_align_before_action_enabled=True), catalog=build_model_catalog()
     )
-
-
-def test_alignment_preserves_authorized_work_and_optional_methods(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(settings.agent, "prompt_align_before_action_enabled", True)
-
-    rendered = align_before_action_section(_slices(), catalog=build_model_catalog())
 
     assert "outcome, cost, autonomy, or authority" in rendered
     assert "choose routine methods within the authorized scope yourself" in rendered
@@ -54,12 +59,11 @@ def test_alignment_preserves_authorized_work_and_optional_methods(
         (False, False),
     ],
 )
-def test_invest_in_the_future_section_gating(
-    monkeypatch: pytest.MonkeyPatch, enabled, expect_section
-):
-    monkeypatch.setattr(settings.agent, "prompt_invest_future_enabled", enabled)  # pyright: ignore[reportUnknownArgumentType]
+def test_invest_in_the_future_section_gating(enabled: bool, expect_section: bool):
 
-    rendered = invest_in_the_future_section(_slices(), catalog=build_model_catalog())
+    rendered = invest_in_the_future_section(
+        _slices(agent__prompt_invest_future_enabled=enabled), catalog=build_model_catalog()
+    )
 
     if expect_section:
         assert "# Invest in the future" in rendered
@@ -67,29 +71,30 @@ def test_invest_in_the_future_section_gating(
         assert rendered == ""
 
 
-def test_invest_in_the_future_section_is_verbatim(monkeypatch: pytest.MonkeyPatch):
+def test_invest_in_the_future_section_is_verbatim():
     """The user-approved future-signal guidance is intentionally byte-exact."""
-    monkeypatch.setattr(settings.agent, "prompt_invest_future_enabled", True)
 
-    rendered = invest_in_the_future_section(_slices(), catalog=build_model_catalog())
-
-    assert rendered == INVEST_IN_THE_FUTURE_SECTION
-
-
-def test_invest_in_the_future_section_defaults_to_on(monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setattr(settings.agent, "prompt_invest_future_enabled", None)
-
-    rendered = invest_in_the_future_section(_slices(), catalog=build_model_catalog())
+    rendered = invest_in_the_future_section(
+        _slices(agent__prompt_invest_future_enabled=True), catalog=build_model_catalog()
+    )
 
     assert rendered == INVEST_IN_THE_FUTURE_SECTION
 
 
-def test_invest_in_the_future_section_has_no_platform_words_or_numeric_thresholds(
-    monkeypatch: pytest.MonkeyPatch,
-):
-    monkeypatch.setattr(settings.agent, "prompt_invest_future_enabled", True)
+def test_invest_in_the_future_section_defaults_to_on():
 
-    rendered = invest_in_the_future_section(_slices(), catalog=build_model_catalog())
+    rendered = invest_in_the_future_section(
+        _slices(agent__prompt_invest_future_enabled=None), catalog=build_model_catalog()
+    )
+
+    assert rendered == INVEST_IN_THE_FUTURE_SECTION
+
+
+def test_invest_in_the_future_section_has_no_platform_words_or_numeric_thresholds():
+
+    rendered = invest_in_the_future_section(
+        _slices(agent__prompt_invest_future_enabled=True), catalog=build_model_catalog()
+    )
 
     assert re.search(r"\d", rendered) is None
     assert all(
@@ -98,12 +103,11 @@ def test_invest_in_the_future_section_has_no_platform_words_or_numeric_threshold
     assert "Beyond the task at hand" not in rendered
 
 
-def test_invest_in_the_future_section_never_filters_out_a_signal(
-    monkeypatch: pytest.MonkeyPatch,
-):
-    monkeypatch.setattr(settings.agent, "prompt_invest_future_enabled", True)
+def test_invest_in_the_future_section_never_filters_out_a_signal():
 
-    rendered = invest_in_the_future_section(_slices(), catalog=build_model_catalog())
+    rendered = invest_in_the_future_section(
+        _slices(agent__prompt_invest_future_enabled=True), catalog=build_model_catalog()
+    )
 
     assert all(
         sentence not in rendered
@@ -115,24 +119,28 @@ def test_invest_in_the_future_section_never_filters_out_a_signal(
     )
 
 
-def test_invest_in_the_future_section_in_full_prompt_when_on(
-    monkeypatch: pytest.MonkeyPatch,
-):
-    monkeypatch.setattr(settings.agent, "prompt_invest_future_enabled", True)
+def test_invest_in_the_future_section_in_full_prompt_when_on():
 
-    prompt = build_system_prompt(EMPTY, _slices(), agent_id=1, catalog=build_model_catalog())
+    prompt = build_system_prompt(
+        EMPTY,
+        _slices(agent__prompt_invest_future_enabled=True),
+        agent_id=1,
+        catalog=build_model_catalog(),
+    )
 
     assert "# Invest in the future" in prompt
     assert "Beyond the task at hand" not in prompt
     assert prompt.count("Choose the smallest action that closes the signal") == 1
 
 
-def test_invest_in_the_future_section_absent_from_full_prompt_when_off(
-    monkeypatch: pytest.MonkeyPatch,
-):
-    monkeypatch.setattr(settings.agent, "prompt_invest_future_enabled", False)
+def test_invest_in_the_future_section_absent_from_full_prompt_when_off():
 
-    prompt = build_system_prompt(EMPTY, _slices(), agent_id=1, catalog=build_model_catalog())
+    prompt = build_system_prompt(
+        EMPTY,
+        _slices(agent__prompt_invest_future_enabled=False),
+        agent_id=1,
+        catalog=build_model_catalog(),
+    )
 
     assert "# Invest in the future" not in prompt
     assert "Beyond the task at hand" not in prompt
@@ -145,14 +153,11 @@ def test_invest_in_the_future_section_absent_from_full_prompt_when_off(
         (False, False),
     ],
 )
-def test_temporal_awareness_section_gating(
-    monkeypatch: pytest.MonkeyPatch, enabled, expect_section
-):
-    monkeypatch.setattr(settings.agent, "prompt_temporal_awareness_enabled", enabled)  # pyright: ignore[reportUnknownArgumentType]
+def test_temporal_awareness_section_gating(enabled: bool, expect_section: bool):
 
-    from agent.graph.prompt.system_prompt import temporal_awareness_section
-
-    rendered = temporal_awareness_section(_slices(), catalog=build_model_catalog())
+    rendered = temporal_awareness_section(
+        _slices(agent__prompt_temporal_awareness_enabled=enabled), catalog=build_model_catalog()
+    )
 
     if expect_section:
         assert "Temporal awareness" in rendered
@@ -167,12 +172,11 @@ def test_temporal_awareness_section_gating(
         (False, False),
     ],
 )
-def test_keep_it_simple_section_gating(monkeypatch: pytest.MonkeyPatch, enabled, expect_section):
-    monkeypatch.setattr(settings.agent, "prompt_keep_it_simple_enabled", enabled)  # pyright: ignore[reportUnknownArgumentType]
+def test_keep_it_simple_section_gating(enabled: bool, expect_section: bool):
 
-    from agent.graph.prompt.system_prompt import keep_it_simple_section
-
-    rendered = keep_it_simple_section(_slices(), catalog=build_model_catalog())
+    rendered = keep_it_simple_section(
+        _slices(agent__prompt_keep_it_simple_enabled=enabled), catalog=build_model_catalog()
+    )
 
     if expect_section:
         assert "Keep It Simple" in rendered
@@ -180,12 +184,11 @@ def test_keep_it_simple_section_gating(monkeypatch: pytest.MonkeyPatch, enabled,
         assert rendered == ""
 
 
-def test_keep_it_simple_section_carries_meta_principle(monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setattr(settings.agent, "prompt_keep_it_simple_enabled", True)
+def test_keep_it_simple_section_carries_meta_principle():
 
-    from agent.graph.prompt.system_prompt import keep_it_simple_section
-
-    rendered = keep_it_simple_section(_slices(), catalog=build_model_catalog())
+    rendered = keep_it_simple_section(
+        _slices(agent__prompt_keep_it_simple_enabled=True), catalog=build_model_catalog()
+    )
 
     assert "Keep It Simple" in rendered
     assert "looks cheaper" in rendered and "conceptually simpler" in rendered
@@ -198,7 +201,7 @@ def test_keep_it_simple_section_carries_meta_principle(monkeypatch: pytest.Monke
 
 def test_codeact_section_defaults_to_on():
     """Unconfigured clusters receive batching guidance in the assembled prompt."""
-    assert settings.agent.prompt_codeact_enabled is True
+    assert _slices().prompt.prompt_codeact_enabled is True
     assert "# CodeAct" in build_system_prompt(
         EMPTY, _slices(), agent_id=1, catalog=build_model_catalog()
     )
@@ -211,12 +214,9 @@ def test_codeact_section_defaults_to_on():
         (False, False),
     ],
 )
-def test_codeact_section_gating(monkeypatch: pytest.MonkeyPatch, enabled, expect_section):
-    monkeypatch.setattr(settings.agent, "prompt_codeact_enabled", enabled)  # pyright: ignore[reportUnknownArgumentType]
+def test_codeact_section_gating(enabled: bool, expect_section: bool):
 
-    from agent.graph.prompt.system_prompt import codeact_section
-
-    rendered = codeact_section(_slices())
+    rendered = codeact_section(_slices(agent__prompt_codeact_enabled=enabled))
 
     if expect_section:
         assert "CodeAct" in rendered
@@ -224,15 +224,12 @@ def test_codeact_section_gating(monkeypatch: pytest.MonkeyPatch, enabled, expect
         assert rendered == ""
 
 
-def test_codeact_section_urges_batching(monkeypatch: pytest.MonkeyPatch):
+def test_codeact_section_urges_batching():
     """When it renders, the section pushes the batching behavior by name:
     known operations together, branches folded into one script, and the
     absence of an intermediate result to inspect as the condition for batching."""
-    monkeypatch.setattr(settings.agent, "prompt_codeact_enabled", True)
 
-    from agent.graph.prompt.system_prompt import codeact_section
-
-    rendered = codeact_section(_slices())
+    rendered = codeact_section(_slices(agent__prompt_codeact_enabled=True))
 
     assert "execute_code" in rendered
     assert "Read independent files together" in rendered
@@ -241,38 +238,39 @@ def test_codeact_section_urges_batching(monkeypatch: pytest.MonkeyPatch):
     assert "Split calls" not in rendered
 
 
-def test_codeact_section_in_full_prompt_when_on(monkeypatch: pytest.MonkeyPatch):
+def test_codeact_section_in_full_prompt_when_on():
     """End-to-end: with the toggle on, the section is part of the assembled
     system prompt."""
-    monkeypatch.setattr(settings.agent, "prompt_codeact_enabled", True)
 
-    from agent.graph.prompt.system_prompt import build_system_prompt
-
-    prompt = build_system_prompt(EMPTY, _slices(), agent_id=1, catalog=build_model_catalog())
+    prompt = build_system_prompt(
+        EMPTY,
+        _slices(agent__prompt_codeact_enabled=True),
+        agent_id=1,
+        catalog=build_model_catalog(),
+    )
 
     assert "CodeAct" in prompt
 
 
-def test_codeact_section_absent_from_full_prompt_when_off(monkeypatch: pytest.MonkeyPatch):
+def test_codeact_section_absent_from_full_prompt_when_off():
     """End-to-end: with an explicit off override, the section is gone from
     the assembled prompt entirely."""
-    monkeypatch.setattr(settings.agent, "prompt_codeact_enabled", False)
 
-    from agent.graph.prompt.system_prompt import build_system_prompt
-
-    prompt = build_system_prompt(EMPTY, _slices(), agent_id=1, catalog=build_model_catalog())
+    prompt = build_system_prompt(
+        EMPTY,
+        _slices(agent__prompt_codeact_enabled=False),
+        agent_id=1,
+        catalog=build_model_catalog(),
+    )
 
     assert "CodeAct" not in prompt
 
 
-def test_temporal_awareness_invokes_ai_capability_timescale(
-    monkeypatch: pytest.MonkeyPatch,
-):
-    monkeypatch.setattr(settings.agent, "prompt_temporal_awareness_enabled", True)
+def test_temporal_awareness_invokes_ai_capability_timescale():
 
-    from agent.graph.prompt.system_prompt import temporal_awareness_section
-
-    rendered = temporal_awareness_section(_slices(), catalog=build_model_catalog())
+    rendered = temporal_awareness_section(
+        _slices(agent__prompt_temporal_awareness_enabled=True), catalog=build_model_catalog()
+    )
 
     assert "meiva.skills.meiva_workflow.capability_timescale" in rendered
     assert "scheduling, estimating, or judging the feasibility" in rendered
@@ -285,12 +283,11 @@ def test_temporal_awareness_invokes_ai_capability_timescale(
         (False, False),
     ],
 )
-def test_ui_delivery_section_gating(monkeypatch: pytest.MonkeyPatch, enabled, expect_section):
-    monkeypatch.setattr(settings.agent, "prompt_ui_delivery_enabled", enabled)  # pyright: ignore[reportUnknownArgumentType]
+def test_ui_delivery_section_gating(enabled: bool, expect_section: bool):
 
-    from agent.graph.prompt.system_prompt import ui_delivery_section
-
-    rendered = ui_delivery_section(_slices(), catalog=build_model_catalog())
+    rendered = ui_delivery_section(
+        _slices(agent__prompt_ui_delivery_enabled=enabled), catalog=build_model_catalog()
+    )
 
     if expect_section:
         assert "Deliver through the UI" in rendered
@@ -298,17 +295,16 @@ def test_ui_delivery_section_gating(monkeypatch: pytest.MonkeyPatch, enabled, ex
         assert rendered == ""
 
 
-def test_ui_delivery_section_prefers_ui_over_file_paths(monkeypatch: pytest.MonkeyPatch):
+def test_ui_delivery_section_prefers_ui_over_file_paths():
     """The section states the semantic rule — present content through the UI,
     call out the anti-pattern by name (a Markdown file plus its path as the
     presentation channel) — and keeps files their role as persistence and
     handoff. It names NO concrete SDK entry points: the rule is the stable
     part, function signatures are not, so the section must stay example-free."""
-    monkeypatch.setattr(settings.agent, "prompt_ui_delivery_enabled", True)
 
-    from agent.graph.prompt.system_prompt import ui_delivery_section
-
-    rendered = ui_delivery_section(_slices(), catalog=build_model_catalog())
+    rendered = ui_delivery_section(
+        _slices(agent__prompt_ui_delivery_enabled=True), catalog=build_model_catalog()
+    )
 
     assert "through the UI" in rendered
     assert "telling the user its path" in rendered
@@ -320,24 +316,24 @@ def test_ui_delivery_section_prefers_ui_over_file_paths(monkeypatch: pytest.Monk
 
 
 @pytest.mark.parametrize("style", ["oriented", "concise", "silent"])
-def test_communication_style_only_renders_optional_narration(
-    monkeypatch: pytest.MonkeyPatch, style
-) -> None:
+def test_communication_style_only_renders_optional_narration(style: str) -> None:
     """Reply routing has one unconditional owner, independent from narration."""
-    monkeypatch.setattr(settings.agent, "agent_communication_style", style)  # pyright: ignore[reportUnknownArgumentType]
 
-    rendered = communication_style_section(_slices(), catalog=build_model_catalog())
+    rendered = communication_style_section(
+        _slices(agent__agent_communication_style=style), catalog=build_model_catalog()
+    )
 
     assert rendered.startswith("# ")
     assert "`meiva.ui.notify`" in rendered
     assert "Reply in ordinary assistant text" not in rendered
 
 
-def test_oriented_style_keeps_the_user_oriented(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_oriented_style_keeps_the_user_oriented() -> None:
     """Explicit live pairing allows substantive checkpoints, not a tool log."""
-    monkeypatch.setattr(settings.agent, "agent_communication_style", "oriented")
 
-    rendered = communication_style_section(_slices(), catalog=build_model_catalog())
+    rendered = communication_style_section(
+        _slices(agent__agent_communication_style="oriented"), catalog=build_model_catalog()
+    )
 
     assert rendered.startswith("# Keeping the user oriented")
     assert "This agent is configured for live pairing" in rendered
@@ -347,14 +343,13 @@ def test_oriented_style_keeps_the_user_oriented(monkeypatch: pytest.MonkeyPatch)
     assert "alongside each action" not in rendered
 
 
-def test_silent_style_asks_for_no_narration_and_a_closing_report(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_silent_style_asks_for_no_narration_and_a_closing_report() -> None:
     """Silent means quiet *while working* plus one standalone report at the end —
     not silence about the outcome. Blockers still interrupt immediately."""
-    monkeypatch.setattr(settings.agent, "agent_communication_style", "silent")
 
-    rendered = communication_style_section(_slices(), catalog=build_model_catalog())
+    rendered = communication_style_section(
+        _slices(agent__agent_communication_style="silent"), catalog=build_model_catalog()
+    )
 
     assert "Work without narrating" in rendered
     assert "one complete report" in rendered
@@ -364,12 +359,13 @@ def test_silent_style_asks_for_no_narration_and_a_closing_report(
     assert "don't work in long silences" not in rendered
 
 
-def test_concise_style_speaks_only_at_milestones(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_concise_style_speaks_only_at_milestones() -> None:
     """Between milestones the agent works without commenting — and neither of
     the other two styles' guidance leaks in."""
-    monkeypatch.setattr(settings.agent, "agent_communication_style", "concise")
 
-    rendered = communication_style_section(_slices(), catalog=build_model_catalog())
+    rendered = communication_style_section(
+        _slices(agent__agent_communication_style="concise"), catalog=build_model_catalog()
+    )
 
     assert "Speak at milestones" in rendered
     assert "Keeping the user oriented" not in rendered
@@ -394,22 +390,25 @@ def test_every_narrating_style_renders_a_distinct_section() -> None:
     assert len(set(COMMUNICATION_STYLE_SECTIONS.values())) == len(COMMUNICATION_STYLE_SECTIONS)
 
 
-def test_off_style_omits_the_section_entirely(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_off_style_omits_the_section_entirely() -> None:
     """Off omits optional narration while the core reply policy stays active."""
-    monkeypatch.setattr(settings.agent, "agent_communication_style", "off")
 
-    rendered = communication_style_section(_slices(), catalog=build_model_catalog())
+    rendered = communication_style_section(
+        _slices(agent__agent_communication_style="off"), catalog=build_model_catalog()
+    )
 
     assert rendered == ""
 
 
-def test_off_style_is_absent_from_the_full_system_prompt(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_off_style_is_absent_from_the_full_system_prompt() -> None:
     """End-to-end: build_system_prompt() carries no trace of the communication
     style section when the style is 'off' — not just the leaf function."""
-    monkeypatch.setattr(settings.agent, "agent_communication_style", "off")
-    from agent.graph.prompt.system_prompt import build_system_prompt
-
-    prompt = build_system_prompt(EMPTY, _slices(), agent_id=1, catalog=build_model_catalog())
+    prompt = build_system_prompt(
+        EMPTY,
+        _slices(agent__agent_communication_style="off"),
+        agent_id=1,
+        catalog=build_model_catalog(),
+    )
 
     assert "# Keeping the user oriented" not in prompt
     assert "# Talking to the user" not in prompt
@@ -425,15 +424,12 @@ def test_off_style_is_absent_from_the_full_system_prompt(monkeypatch: pytest.Mon
         (False, False),
     ],
 )
-def test_user_tone_section_gating(
-    monkeypatch: pytest.MonkeyPatch, enabled: bool, expect_section: bool
-) -> None:
-    monkeypatch.setattr(settings.agent, "prompt_user_tone_enabled", enabled)
-    monkeypatch.setattr(settings.lm, "llm_model", "deepseek-v4-pro")
+def test_user_tone_section_gating(enabled: bool, expect_section: bool) -> None:
 
-    from agent.graph.prompt.system_prompt import user_tone_section
-
-    rendered = user_tone_section(_slices(), catalog=build_model_catalog())
+    rendered = user_tone_section(
+        _slices(agent__prompt_user_tone_enabled=enabled, lm__llm_model="deepseek-v4-pro"),
+        catalog=build_model_catalog(),
+    )
 
     if expect_section:
         assert rendered.startswith("# Communicating with the user\n\n")
@@ -441,18 +437,15 @@ def test_user_tone_section_gating(
         assert rendered == ""
 
 
-def test_user_tone_defaults_on_for_non_claude(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(settings.agent, "prompt_user_tone_enabled", None)
-    monkeypatch.setattr(settings.lm, "llm_model", "deepseek-v4-pro")
+def test_user_tone_defaults_on_for_non_claude() -> None:
 
-    from agent.graph.prompt.system_prompt import user_tone_section
-
-    assert user_tone_section(_slices(), catalog=build_model_catalog()).startswith(
-        "# Communicating with the user\n\n"
-    )
+    assert user_tone_section(
+        _slices(agent__prompt_user_tone_enabled=None, lm__llm_model="deepseek-v4-pro"),
+        catalog=build_model_catalog(),
+    ).startswith("# Communicating with the user\n\n")
 
 
-def test_user_tone_uses_strong_gemini_variant(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_user_tone_uses_strong_gemini_variant() -> None:
     """A registered gemini model gets the strong variant. The id is picked from
     the registry rather than hardcoded: a model swap (gemini-3.7-flash ->
     gemini-3.8-flash, #1535) must not break this contract test by drifting the
@@ -464,62 +457,54 @@ def test_user_tone_uses_strong_gemini_variant(monkeypatch: pytest.MonkeyPatch) -
         for model, spec in build_model_catalog().models.items()
         if spec.provider == "gemini" and spec.spawnable
     )
-    monkeypatch.setattr(settings.agent, "prompt_user_tone_enabled", None)
-    monkeypatch.setattr(settings.lm, "llm_model", gemini_id)
 
-    from agent.graph.prompt.system_prompt import user_tone_section
-
-    rendered = user_tone_section(_slices(), catalog=build_model_catalog())
+    rendered = user_tone_section(
+        _slices(agent__prompt_user_tone_enabled=None, lm__llm_model=gemini_id),
+        catalog=build_model_catalog(),
+    )
 
     assert rendered.startswith("# Communicating with the user\n\n")
     assert "trusted peer" in rendered
     assert "not a cheerleader" in rendered
 
 
-def test_user_tone_defaults_off_for_claude(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(settings.agent, "prompt_user_tone_enabled", None)
-    monkeypatch.setattr(settings.lm, "llm_model", "claude-sonnet-5")
+def test_user_tone_defaults_off_for_claude() -> None:
 
-    from agent.graph.prompt.system_prompt import user_tone_section
+    assert (
+        user_tone_section(
+            _slices(agent__prompt_user_tone_enabled=None, lm__llm_model="claude-sonnet-5"),
+            catalog=build_model_catalog(),
+        )
+        == ""
+    )
 
-    assert user_tone_section(_slices(), catalog=build_model_catalog()) == ""
 
+def test_user_tone_claude_variant_requires_explicit_enablement() -> None:
 
-def test_user_tone_claude_variant_requires_explicit_enablement(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(settings.agent, "prompt_user_tone_enabled", True)
-    monkeypatch.setattr(settings.lm, "llm_model", "claude-sonnet-5")
-
-    from agent.graph.prompt.system_prompt import user_tone_section
-
-    rendered = user_tone_section(_slices(), catalog=build_model_catalog())
+    rendered = user_tone_section(
+        _slices(agent__prompt_user_tone_enabled=True, lm__llm_model="claude-sonnet-5"),
+        catalog=build_model_catalog(),
+    )
 
     assert "lecturing" in rendered
     assert "trusted peer" not in rendered
     assert "not a cheerleader" not in rendered
 
 
-def test_user_tone_unknown_model_uses_light_variant(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(settings.agent, "prompt_user_tone_enabled", True)
-    monkeypatch.setattr(settings.lm, "llm_model", "unknown-model-v1")
-
-    from agent.graph.prompt.system_prompt import user_tone_section
+def test_user_tone_unknown_model_uses_light_variant() -> None:
 
     assert "State conclusions and judgments directly" in user_tone_section(
-        _slices(), catalog=build_model_catalog()
+        _slices(agent__prompt_user_tone_enabled=True, lm__llm_model="unknown-model-v1"),
+        catalog=build_model_catalog(),
     )
 
 
-def test_user_tone_section_stays_semantic_not_api_specific(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(settings.agent, "prompt_user_tone_enabled", True)
-    monkeypatch.setattr(settings.lm, "llm_model", "deepseek-v4-pro")
+def test_user_tone_section_stays_semantic_not_api_specific() -> None:
 
-    from agent.graph.prompt.system_prompt import user_tone_section
-
-    rendered = user_tone_section(_slices(), catalog=build_model_catalog())
+    rendered = user_tone_section(
+        _slices(agent__prompt_user_tone_enabled=True, lm__llm_model="deepseek-v4-pro"),
+        catalog=build_model_catalog(),
+    )
 
     assert "meiva.ui." not in rendered
     assert "spawn(" not in rendered
@@ -533,12 +518,15 @@ def test_user_tone_section_stays_semantic_not_api_specific(
     ],
 )
 def test_user_tone_section_is_present_in_the_full_prompt_when_enabled(
-    monkeypatch: pytest.MonkeyPatch, enabled: bool, expect_section: bool
+    enabled: bool, expect_section: bool
 ) -> None:
-    monkeypatch.setattr(settings.agent, "prompt_user_tone_enabled", enabled)
-    monkeypatch.setattr(settings.lm, "llm_model", "deepseek-v4-pro")
 
-    prompt = build_system_prompt(EMPTY, _slices(), agent_id=1, catalog=build_model_catalog())
+    prompt = build_system_prompt(
+        EMPTY,
+        _slices(agent__prompt_user_tone_enabled=enabled, lm__llm_model="deepseek-v4-pro"),
+        agent_id=1,
+        catalog=build_model_catalog(),
+    )
 
     assert ("# Communicating with the user" in prompt) is expect_section
 
@@ -546,23 +534,21 @@ def test_user_tone_section_is_present_in_the_full_prompt_when_enabled(
 # --- Knowledge cutoff ---
 
 
-def test_knowledge_cutoff_appears_for_known_model(monkeypatch: pytest.MonkeyPatch):
+def test_knowledge_cutoff_appears_for_known_model():
     """When the current model has a knowledge cutoff,
     build_system_prompt() appends a 'Knowledge cutoff: YYYY-MM' line."""
-    monkeypatch.setattr(settings.lm, "llm_model", "claude-sonnet-5")
-    from agent.graph.prompt.system_prompt import build_system_prompt
-
-    prompt = build_system_prompt(EMPTY, _slices(), agent_id=1, catalog=build_model_catalog())
+    prompt = build_system_prompt(
+        EMPTY, _slices(lm__llm_model="claude-sonnet-5"), agent_id=1, catalog=build_model_catalog()
+    )
     assert "Knowledge cutoff: 2026-01" in prompt
 
 
-def test_knowledge_cutoff_absent_for_unknown_model(monkeypatch: pytest.MonkeyPatch):
+def test_knowledge_cutoff_absent_for_unknown_model():
     """When the model has no knowledge cutoff, no cutoff line is
     appended — the prompt just omits it rather than crashing."""
-    monkeypatch.setattr(settings.lm, "llm_model", "unknown-model-v1")
-    from agent.graph.prompt.system_prompt import build_system_prompt
-
-    prompt = build_system_prompt(EMPTY, _slices(), agent_id=1, catalog=build_model_catalog())
+    prompt = build_system_prompt(
+        EMPTY, _slices(lm__llm_model="unknown-model-v1"), agent_id=1, catalog=build_model_catalog()
+    )
     assert "Knowledge cutoff:" not in prompt
 
 
@@ -578,7 +564,7 @@ def test_model_knowledge_cutoff_all_entries_valid():
         assert re.match(r"^\d{4}-\d{2}$", cutoff), f"Bad format for {model}: {cutoff!r}"
 
 
-def test_supported_models_all_have_cutoff(monkeypatch: pytest.MonkeyPatch):
+def test_supported_models_all_have_cutoff():
     """Every spawnable model in the catalog has a knowledge cutoff."""
     from base.packages.plugin_providers import build_model_catalog
 
@@ -607,14 +593,12 @@ _CROSS_MACHINE_DELEGATION_SENTENCE = (
         (False, False),
     ],
 )
-def test_cross_machine_delegation_section_gating(
-    monkeypatch: pytest.MonkeyPatch, enabled, expect_section
-):
-    monkeypatch.setattr(settings.agent, "prompt_cross_machine_delegation_enabled", enabled)  # pyright: ignore[reportUnknownArgumentType]
+def test_cross_machine_delegation_section_gating(enabled: bool, expect_section: bool):
 
-    from agent.graph.prompt.system_prompt import cross_machine_delegation_section
-
-    rendered = cross_machine_delegation_section(_slices(), catalog=build_model_catalog())
+    rendered = cross_machine_delegation_section(
+        _slices(agent__prompt_cross_machine_delegation_enabled=enabled),
+        catalog=build_model_catalog(),
+    )
 
     if expect_section:
         assert rendered == _CROSS_MACHINE_DELEGATION_SENTENCE
@@ -622,57 +606,57 @@ def test_cross_machine_delegation_section_gating(
         assert rendered == ""
 
 
-def test_cross_machine_delegation_section_is_verbatim(monkeypatch: pytest.MonkeyPatch):
+def test_cross_machine_delegation_section_is_verbatim():
     """The section renders the user-finalized sentence exactly — a wording
     change anywhere in the sentence fails this test on purpose."""
-    monkeypatch.setattr(settings.agent, "prompt_cross_machine_delegation_enabled", True)
 
-    from agent.graph.prompt.system_prompt import cross_machine_delegation_section
-
-    rendered = cross_machine_delegation_section(_slices(), catalog=build_model_catalog())
+    rendered = cross_machine_delegation_section(
+        _slices(agent__prompt_cross_machine_delegation_enabled=True), catalog=build_model_catalog()
+    )
 
     assert rendered == _CROSS_MACHINE_DELEGATION_SENTENCE
     assert rendered.count("machine") == 3
 
 
-def test_cross_machine_delegation_section_names_no_api_detail(monkeypatch: pytest.MonkeyPatch):
+def test_cross_machine_delegation_section_names_no_api_detail():
     """Semantic steer only: no SDK function signatures (no `spawn(...)`),
     no concrete mechanism (no SSH) — the stable part is the rule, not the
     API, so the section must stay mechanism-free (user preference: system
     prompt sections describe semantics, not call syntax)."""
-    monkeypatch.setattr(settings.agent, "prompt_cross_machine_delegation_enabled", True)
 
-    from agent.graph.prompt.system_prompt import cross_machine_delegation_section
-
-    rendered = cross_machine_delegation_section(_slices(), catalog=build_model_catalog())
+    rendered = cross_machine_delegation_section(
+        _slices(agent__prompt_cross_machine_delegation_enabled=True), catalog=build_model_catalog()
+    )
 
     assert "spawn(" not in rendered
     assert "ssh" not in rendered.lower()
 
 
-def test_cross_machine_delegation_hint_in_full_prompt_when_on(monkeypatch: pytest.MonkeyPatch):
+def test_cross_machine_delegation_hint_in_full_prompt_when_on():
     """End-to-end: with the toggle on (the default), the sentence is part of
     the assembled system prompt, rendered after the delegation check."""
-    monkeypatch.setattr(settings.agent, "prompt_cross_machine_delegation_enabled", True)
 
-    from agent.graph.prompt.system_prompt import build_system_prompt
-
-    prompt = build_system_prompt(EMPTY, _slices(), agent_id=1, catalog=build_model_catalog())
+    prompt = build_system_prompt(
+        EMPTY,
+        _slices(agent__prompt_cross_machine_delegation_enabled=True),
+        agent_id=1,
+        catalog=build_model_catalog(),
+    )
 
     assert _CROSS_MACHINE_DELEGATION_SENTENCE in prompt
     assert prompt.index(_CROSS_MACHINE_DELEGATION_SENTENCE) > prompt.index("# Before you act")
 
 
-def test_cross_machine_delegation_hint_absent_from_full_prompt_when_off(
-    monkeypatch: pytest.MonkeyPatch,
-):
+def test_cross_machine_delegation_hint_absent_from_full_prompt_when_off():
     """End-to-end: with the toggle off, the sentence is gone from the
     assembled prompt entirely."""
-    monkeypatch.setattr(settings.agent, "prompt_cross_machine_delegation_enabled", False)
 
-    from agent.graph.prompt.system_prompt import build_system_prompt
-
-    prompt = build_system_prompt(EMPTY, _slices(), agent_id=1, catalog=build_model_catalog())
+    prompt = build_system_prompt(
+        EMPTY,
+        _slices(agent__prompt_cross_machine_delegation_enabled=False),
+        agent_id=1,
+        catalog=build_model_catalog(),
+    )
 
     assert _CROSS_MACHINE_DELEGATION_SENTENCE not in prompt
 
@@ -680,76 +664,72 @@ def test_cross_machine_delegation_hint_absent_from_full_prompt_when_off(
 # ── workspace section: pre-compact history dump pointer ─────────────────────
 
 
-def test_workspace_section_names_the_history_dump(
-    workspace: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """With the dump on (default), the workspace section names the
-    `message-history/` folder and shows the grep recipe — the standing pointer
-    behind "the summary dropped a detail I need". With it off, the sentence is
-    absent so the prompt never points at a folder that stays empty. (The
-    `workspace` fixture pins the agent id the section needs.)"""
-    monkeypatch.setattr(settings.agent, "workspace_in_system_prompt", True)
-    monkeypatch.setattr(settings.agent, "history_dump_enabled", True)
+# meiva:note
+# With the dump on (default), the workspace section names the `message-history/` folder and
+# shows the grep recipe, the standing pointer behind "the summary dropped a detail I need".
+# With it off the sentence is absent, so the prompt never points at a folder that stays empty.
+def test_workspace_section_names_the_history_dump() -> None:
+    on = _slices(agent__workspace_in_system_prompt=True, agent__history_dump_enabled=True)
+    off = _slices(agent__workspace_in_system_prompt=True, agent__history_dump_enabled=False)
 
-    from agent.graph.prompt.system_prompt import agent_workspace_pointer
-
-    rendered = agent_workspace_pointer(_slices(), agent_id=1)
+    rendered = agent_workspace_pointer(on, agent_id=1)
     assert "message-history/" in rendered
     assert "grep -rn 'keyword' message-history/" in rendered
+    assert "message-history" not in agent_workspace_pointer(off, agent_id=1)
 
-    monkeypatch.setattr(settings.agent, "history_dump_enabled", False)
-    assert "message-history" not in agent_workspace_pointer(_slices(), agent_id=1)
+
+def test_workspace_section_needs_an_agent_and_the_gate() -> None:
+    gated_off = _slices(agent__workspace_in_system_prompt=False)
+    gated_on = _slices(agent__workspace_in_system_prompt=True)
+
+    assert agent_workspace_pointer(gated_off, agent_id=1) == ""
+    assert agent_workspace_pointer(gated_on, agent_id=None) == ""
+    assert agent_workspace_pointer(gated_on, agent_id=1).startswith("# Workspace")
 
 
 # ── activation telemetry (issue #40) ────────────────────────────────────────
 
 
-def test_plugin_prompt_section_records_an_activation(monkeypatch: pytest.MonkeyPatch):
+def test_plugin_prompt_section_records_an_activation(loguru_records: LogRecords) -> None:
     """A plugin section that rendered text is prompt real estate the plugin is
     spending — recorded with its length + digest, so which variant landed is
     identifiable without storing the text. A section returning "" contributed
     nothing and records nothing."""
-    from agent.graph.prompt import system_prompt
-    from base.packages.plugins import activation
-
-    recorded: list[tuple[str, str, str, str]] = []
-
-    def spy(
-        plugin: str | None, surface: str, identifier: str, *, detail: str = "", model: str = ""
-    ) -> None:
-        if plugin is not None:
-            recorded.append((plugin, surface, identifier, detail))
-
-    monkeypatch.setattr(activation, "record", spy)
-
-    supplied: list[ModelCatalog] = []
     catalog = build_model_catalog()
+    first_model = sorted(catalog.models)[0]
 
     def loud_section(_slices: object, *, catalog: ModelCatalog) -> str:
-        supplied.append(catalog)
-        return "## Loud\n\nsomething."
+        return f"## Loud\n\nsomething for {sorted(catalog.models)[0]}."
 
     def silent_section(_slices: object, *, catalog: ModelCatalog) -> str:
-        supplied.append(catalog)
         return ""
 
     registry = ExtensionRegistry(
         (("myplugin", PluginContributions(system_prompt_sections=(loud_section, silent_section))),)
     )
-    system_prompt.build_system_prompt(registry, _slices(), agent_id=1, catalog=catalog)
+    slices = _slices()
+    prompt = build_system_prompt(registry, slices, agent_id=1, catalog=catalog)
 
-    assert supplied == [catalog, catalog]
-    assert all(value is catalog for value in supplied)
-    assert [(p, s, i) for p, s, i, _d in recorded] == [
-        ("myplugin", "systemPromptSections", "loud_section")
-    ]
-    assert recorded[0][3].startswith(f"chars={len('## Loud\n\nsomething.')} sha=")
+    contribution = f"## Loud\n\nsomething for {first_model}."
+    assert contribution in prompt
+    (event,) = (r["extra"] for r in loguru_records.events("plugin_activation"))
+    assert (event["plugin"], event["surface"], event["identifier"]) == (
+        "myplugin",
+        "systemPromptSections",
+        "loud_section",
+    )
+    assert event["model"] == slices.brain.llm_model
+    assert event["detail"].startswith(f"chars={len(contribution)} sha=")
 
 
-def test_long_running_operation_without_fleet(monkeypatch: pytest.MonkeyPatch):
+def test_long_running_operation_without_fleet():
     """An isolated agent gets cost/lifecycle guidance without loading a skill or fleet."""
-    monkeypatch.setattr(settings.agent, "skills_to_inject_into_system_prompt", [])
-    prompt = build_system_prompt(EMPTY, _slices(), agent_id=1, catalog=build_model_catalog())
+    prompt = build_system_prompt(
+        EMPTY,
+        _slices(agent__skills_to_inject_into_system_prompt=[]),
+        agent_id=1,
+        catalog=build_model_catalog(),
+    )
     assert prompt.count("# Efficient long-running operation") == 1
     assert "## Agent-to-agent communication" not in prompt
     assert "end the turn idle" in prompt

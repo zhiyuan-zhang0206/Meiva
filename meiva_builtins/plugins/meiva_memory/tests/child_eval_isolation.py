@@ -11,34 +11,41 @@ import meiva
 from agent.process_boot import apply_per_agent_eval_isolation
 from base.agents.context import MeivaContext
 from base.agents.context.identity import AgentIdentity
-from base.config import settings
+from base.config.tests.configuration import defaults
 from base.packages.plugin_config_images import DiskPluginConfigImages
-from base.packages.plugins.extensions import ExtensionRegistry
+from base.packages.plugins.extensions import ExtensionRegistry, PluginContributions, SdkNamespace
 from base.paths.home import resolve_meiva_home
 from meiva.sdk_surface import install, process_context
 from meiva_builtins.plugins.meiva_memory import plugin
 
 
-def _apply() -> None:
-    apply_per_agent_eval_isolation(
-        default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
+def _install() -> None:
+    install.install(
+        ExtensionRegistry(
+            (
+                (
+                    "tasks_namespace",
+                    PluginContributions(
+                        sdk_namespaces=(SdkNamespace("tasks", SimpleNamespace(list=list)),)
+                    ),
+                ),
+                ("meiva_memory", plugin.contribute()),
+            )
+        ),
+        config_images=DiskPluginConfigImages(resolve_meiva_home()),
     )
 
 
 def isolated() -> None:
-    install.install(
-        ExtensionRegistry((("meiva_memory", plugin.contribute()),)),
-        config_images=DiskPluginConfigImages(resolve_meiva_home()),
-    )
-    meiva.tasks = SimpleNamespace(list=list)  # pyright: ignore[reportAttributeAccessIssue]
-    meiva.__all_for_meiva__.append("tasks")
+    _install()
+    assert hasattr(meiva, "tasks")
 
     original_path_doc = meiva.memory.PATH.__doc__
     os.environ["MEIVA_AGENT_ID"] = "417"
     process_context.bind_context(MeivaContext(identity=AgentIdentity(417, True)))
-    settings.agent.eval_isolation = True
-    settings.agent.eval_network_allowlist = []
-    _apply()
+    apply_per_agent_eval_isolation(
+        default_reader=defaults(agent__eval_isolation=True, agent__eval_network_allowlist=[])
+    )
 
     assert not hasattr(meiva, "web")
     assert not hasattr(meiva, "understand")
@@ -56,15 +63,12 @@ def isolated() -> None:
 
 
 def network_allowlist() -> None:
-    install.install(
-        ExtensionRegistry((("meiva_memory", plugin.contribute()),)),
-        config_images=DiskPluginConfigImages(resolve_meiva_home()),
-    )
+    _install()
     os.environ["MEIVA_AGENT_ID"] = "418"
     process_context.bind_context(MeivaContext(identity=AgentIdentity(418, True)))
-    settings.agent.eval_isolation = True
-    settings.agent.eval_network_allowlist = ["web"]
-    _apply()
+    apply_per_agent_eval_isolation(
+        default_reader=defaults(agent__eval_isolation=True, agent__eval_network_allowlist=["web"])
+    )
 
     assert hasattr(meiva, "web")
     assert not hasattr(meiva, "understand")
@@ -72,13 +76,9 @@ def network_allowlist() -> None:
 
 
 def off() -> None:
-    install.install(
-        ExtensionRegistry((("meiva_memory", plugin.contribute()),)),
-        config_images=DiskPluginConfigImages(resolve_meiva_home()),
-    )
+    _install()
     original_path = meiva.memory.PATH
-    settings.agent.eval_isolation = False
-    _apply()
+    apply_per_agent_eval_isolation(default_reader=defaults(agent__eval_isolation=False))
 
     assert hasattr(meiva, "web")
     assert hasattr(meiva, "understand")

@@ -17,8 +17,9 @@ change tool execution, automatically rerun code, or call a model.
 
 ## Configuration
 
-The node supplies explicit accumulation and inline budgets, timeout, structural
-`_CropConfig`, archive `Clock`, and optional rendered timestamp. Formatter and
+The node supplies explicit accumulation and inline budgets, timeout, `CropLimits`,
+the archive directory (together an `OutputLimits` value), the archive instant
+`now` (already in the configured timezone) and an optional rendered timestamp. Formatter and
 stream components never read global settings. Both subprocess ownership paths
 receive the same accumulation budget. `SandboxSettings` owns defaults and
 validation; the structural view also accepts boot-lite configuration. Resolution
@@ -54,8 +55,9 @@ of future traffic.
 
 ## Recoverability and space
 
-Full soft-cropped output is written before returning the preview, using an
-exclusive UUID filename under the agent workspace: `.exec_output/crop_<uuid>.txt`.
+Full soft-cropped output is written before returning the preview, atomically
+(a complete owner-only file or none, through `base/host/atomic_io`), using a
+UUID filename under the agent workspace: `.exec_output/crop_<uuid>.txt`.
 The agent can read or grep that exact path. These files are independent of the
 legacy `exec_*.txt` ring, so repeated hard overflows cannot remove a soft archive.
 
@@ -92,13 +94,12 @@ they never call an already incomplete archive the full output.
 
 ## Test scenarios
 
-Output tests use the isolated unit home and inspect the real
-`workspaces/<agent_id>/.exec_output` directory. The hard-ring case writes more
-than the production 20-file capacity and checks that exact limit. Crop cases
-construct their own configuration values from the shared fixture; they do not
-replace the formatter's path lookup or mutate a shared scenario setting. Storage
-failure cases retain their explicit failing filesystem operations and assert
-that the original output survives without a false recovery path.
+Output tests build their `OutputLimits` value over a `tmp_path` archive directory
+and pass a fixed `now`, so archive names are deterministic; they patch nothing. The
+hard-ring case writes more than the production 20-file capacity and checks that
+exact limit. Crop cases `replace` the fixture's limits. The storage-failure case
+puts a regular file where the archive directory belongs, a fault the disk produces,
+and asserts that the original output survives without a false recovery path.
 
 ## Dependencies
 

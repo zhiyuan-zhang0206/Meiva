@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 import meiva
-from agent.graph.exec.protocol import (
+from agent.execution.protocol import (
     ResultPayload,
     make_request_path,
     make_result_path,

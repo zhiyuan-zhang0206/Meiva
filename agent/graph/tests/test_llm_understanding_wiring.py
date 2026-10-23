@@ -4,31 +4,31 @@
 # pyright: reportUnknownVariableType = warning
 """The llm node carries the understanding cut on whichever command ends the turn."""
 
-import asyncio
 from collections.abc import AsyncIterator
 from unittest.mock import MagicMock
 
+import psycopg
 import pytest
 from langchain_core.messages import AIMessageChunk, AnyMessage, HumanMessage, SystemMessage
 from langchain_core.messages.ai import UsageMetadata
 from langgraph.runtime import Runtime
 from langgraph.types import Command
+from psycopg_pool import AsyncConnectionPool
 
 from agent.graph import LlmLedger, llm_node
-from agent.hooks import understanding_chunks as uc
-from agent.hooks.tests.fakes import make_fake_ops_pool
 from agent.state import AgentState
 from agent.state_channels import CompactState
 from base.agents.context import MeivaContext
 from base.agents.context.identity import AgentIdentity
 from base.clock import Clock
-from base.config import settings
-from base.db import Database
+from base.config.tests.configuration import defaults
+from base.db import Database, create_agent
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
-from base.host.env.agent_slices import AgentSlices, ModelOverrides
-from base.lm.catalog import ModelCatalog
+from base.host.env.agent_slices import AgentSlices
+from base.native_process.turn_identity import HostedTurnResources
 from base.packages.plugin_providers import build_model_catalog
+from meiva.tests.fixtures.pin_agent import hosted_resources as hosted_resources
 
 
 async def _aiter(chunks: list[AIMessageChunk]) -> AsyncIterator[AIMessageChunk]:
@@ -36,25 +36,44 @@ async def _aiter(chunks: list[AIMessageChunk]) -> AsyncIterator[AIMessageChunk]:
         yield c
 
 
-def _runtime(chunks: list[AIMessageChunk], database_gate: ProcessDbGate) -> Runtime[MeivaContext]:
+def _runtime(
+    chunks: list[AIMessageChunk],
+    database_gate: ProcessDbGate,
+    ops_pool: AsyncConnectionPool,
+    agent_id: int,
+    hosted_resources: HostedTurnResources,
+) -> Runtime[MeivaContext]:
     llm = MagicMock()
     llm.bind_tools.return_value = llm
     llm.astream.return_value = _aiter(chunks)
     return Runtime(
         context=MeivaContext(
-            ops_pool=make_fake_ops_pool(),
+            hosted_resources=hosted_resources,
+            ops_pool=ops_pool,
             llm=llm,
             event_publisher=MagicMock(),
             agent=AgentSlices.resolve(
-                default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
+                {
+                    "llm_model": _MODEL,
+                    "understanding_enabled": True,
+                    "understanding_chunk_ratio": _RATIO,
+                },
+                default_reader=defaults(),
             ),
             db=Database.from_settings(gate=database_gate),
             bus=EventBus.from_settings(),
-            identity=AgentIdentity(agent_id=7, owns_loop=True),
+            identity=AgentIdentity(agent_id=agent_id, owns_loop=True),
             catalog=build_model_catalog(),
             clock_factory=Clock.from_settings,
         )
     )
+
+
+_MODEL = "deepseek-flash"
+# meiva:note
+# A real model and a small ratio: the chunk size is about 750 tokens, between the 2000 tokens the
+# first turn grows by and the shrinkage of the second.
+_RATIO = 0.002
 
 
 def _state() -> AgentState:
@@ -89,56 +108,53 @@ def _turn(input_tokens: int, *, tool: bool) -> list[AIMessageChunk]:
     ]
 
 
-@pytest.fixture
-def enqueued(monkeypatch: pytest.MonkeyPatch) -> list[dict]:
-    monkeypatch.setattr(settings.agent, "understanding_enabled", True)
-
-    def threshold(
-        _model: str, _overrides: ModelOverrides, _ratio: float, *, catalog: ModelCatalog
-    ) -> int:
-        return 1000
-
-    monkeypatch.setattr(uc, "chunk_threshold", threshold)
-    calls: list[dict] = []
-
-    async def fake(pool: object, agent_id: int, **kwargs: object) -> bool:
-        calls.append({"agent_id": agent_id, **kwargs})
-        return True
-
-    monkeypatch.setattr(uc, "enqueue_chunk", fake)
-    return calls
+async def _jobs(pool: AsyncConnectionPool) -> list[tuple[int, int, int, int, str]]:
+    async with pool.connection() as conn, conn.cursor() as cur:
+        await cur.execute(
+            "SELECT agent_id, compact_version, start_index, end_index, end_msg_id"
+            " FROM understanding_chunk_jobs ORDER BY id"
+        )
+        return await cur.fetchall()
 
 
 @pytest.mark.parametrize("tool", [True, False])
 async def test_cut_rides_the_tool_and_the_idle_command(
-    fake_cancel_event: asyncio.Event,
-    enqueued: list[dict],
+    redis_url: str,
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    hosted_resources: HostedTurnResources,
     tool: bool,
     database_gate: ProcessDbGate,
 ) -> None:
+    agent_id = create_agent(db_conn)
     result = await llm_node(
         _state(),
-        _runtime(_turn(2500, tool=tool), database_gate=database_gate),
-        {"configurable": {"thread_id": "7"}},
+        _runtime(_turn(2500, tool=tool), database_gate, aops_pool, agent_id, hosted_resources),
+        {"configurable": {"thread_id": str(agent_id)}},
         ledger=LlmLedger(),
     )
     assert isinstance(result, Command)
     assert result.update["compact"].understanding_cut_index == 2  # type: ignore[index]
     assert result.update["compact"].understanding_cut_tokens == 2500  # type: ignore[index]
     assert result.update["compact"].version == 3  # type: ignore[index]
-    assert len(enqueued) == 1
-    assert enqueued[0]["agent_id"] == 7 and enqueued[0]["compact_version"] == 3
-    assert enqueued[0]["end_msg_id"] == "m1"  # the request's last message, not the reply
+    # meiva:note
+    # The request's last message, not the reply, ends the stretch.
+    assert await _jobs(aops_pool) == [(agent_id, 3, 1, 2, "m1")]
 
 
 async def test_turn_under_the_threshold_leaves_the_state_alone(
-    fake_cancel_event: asyncio.Event, enqueued: list[dict], database_gate: ProcessDbGate
+    redis_url: str,
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    hosted_resources: HostedTurnResources,
+    database_gate: ProcessDbGate,
 ) -> None:
+    agent_id = create_agent(db_conn)
     result = await llm_node(
         _state(),
-        _runtime(_turn(10, tool=True), database_gate=database_gate),
-        {"configurable": {"thread_id": "7"}},
+        _runtime(_turn(10, tool=True), database_gate, aops_pool, agent_id, hosted_resources),
+        {"configurable": {"thread_id": str(agent_id)}},
         ledger=LlmLedger(),
     )
     assert "compact" not in result.update  # type: ignore[operator]
-    assert enqueued == []
+    assert await _jobs(aops_pool) == []

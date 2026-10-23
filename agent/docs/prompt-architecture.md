@@ -70,14 +70,16 @@ Capabilities rather than standing as its own section.
   histories from 2026-09-28 to 2026-10-10 showed no cross-call dependency failures
   for `deepseek-flash`, and other models are enabled per agent while they are evaluated.
 - **Core expanded SDK reference** — `agent/graph/prompt/system_prompt.py:sdk_expand_section`,
-  rendering `effective_sdk_expand()`: plugin registrations
+  rendering `effective_sdk_expand()` (the plan itself is `sdk_scope.py:expand_plan`, a function of
+  the configured list, the plugin expansions and the discovered namespaces, all read once by
+  `live.py`): plugin registrations
   (a plugin's declared `sdk_namespaces(expand=True)` / `sdk_expansions`, e.g. meiva_code's `cwd`) first, then
   `settings.sdk_expand_in_system_prompt` (env `MEIVA_SDK_EXPAND`, default `shell,files,agents,tasks`),
   deduped keep-first — full `meiva.help(meiva.<path>)` stubs right after the
   overview. `*` recursively expands public namespaces (discovered from
   `__all_for_meiva__`, sorted; top-level functions like `help`/`understand` are skipped
   — the overview already prints them in full; `skills` / `mcps` are skipped as
-  capability surfaces, `_CAPABILITY_SURFACES`; naming a surface explicitly
+  capability surfaces, `CAPABILITY_SURFACES`; naming a surface explicitly
   overrides, but a path INSIDE one — `skills.gmail`, `mcps.chrome` — is refused
   with a warning even then, because resolving it inlines that skill's whole
   SKILL.md body / that server's tool schemas into every prompt and records a
@@ -101,7 +103,8 @@ Capabilities rather than standing as its own section.
   call when no intermediate review is needed. The prompt states no separate
   split rule; that condition already implies it. The user ruling on 2026-10-07 changed the
   repository default to on; cluster settings and per-agent overlays can disable it.
-- **Core capabilities index** — `agent/graph/prompt/capabilities.py:capabilities_section`:
+- **Core capabilities index** — `agent/graph/prompt/capabilities.py:capabilities_section(view, servers)`,
+  a function of the `SkillView` and the configured servers that `live.py` read once:
   always-on name + one-line description of the capabilities the agent already
   has, under one `# Capabilities` heading — the prompt's ONE skill index.
   Two halves: injected skills (`_skill_index_lines`, keyed by

@@ -11,6 +11,18 @@ tags: [agent-lifecycle, concurrency]
 `base/agents/impersonation/` to the native graph. The native runtime remains the
 only checkpoint writer; an external process executes the SDK directly.
 
+The decisions are values in, plan out, in the `strict` modules of `agent/takeover/`:
+`gate.py` (what the claim gate and the hook guards do with a lease phase, the next
+settlement step, which plugin deltas still change the checkpoint, whether a handoff
+is owed), `relay.py` (who brings the relay up, each poll of the activation wait,
+what a supervision pass does, the relay command line) and `notes.py` (the notes a
+takeover writes and their text). `agent/impersonation.py` and
+`agent/impersonation_handoff.py` read the lease, the clocks and the checkpoint,
+call the plan and execute it. A host hands the shells one `TakeoverHost`
+(`agent.impersonation.process_host(machine_name)`): its machine name, the root of the
+per-agent workspaces, the command that starts a relay and the readiness wait. The
+shells read neither `MEIVA_HOME` nor `sys.executable` themselves.
+
 The first takeover in a native conversation appends an explanation of borrowed
 identity, exclusive execution, message/SDK routing and the return handoff before
 the session's start marker. `impersonation_introduced` is committed with those
@@ -73,17 +85,23 @@ marks the log version applied. Recovery skips checkpoint-receipted versions,
 so a crash between checkpoint and acknowledgement cannot apply an additive
 reducer twice. Core lifecycle fields cannot be changed by plugin deltas.
 
-Tests: `agent/tests/impersonation/test_impersonation.py` covers gates, receipt recovery,
-and fenced delivery recovery;
-`agent/tests/impersonation/test_impersonation_integration.py` exercises PostgreSQL, buffered
-checkpoints, the compiled graph, model-free preparation, peer inbox acknowledgement,
-release summary, and native resumption with plugin state.
+Tests: the decisions are asserted on their returned plans in `agent/takeover/tests/`.
+`agent/tests/impersonation/test_impersonation.py` drives the gates and the settlement
+shell against real lease rows in every phase. `test_relay_establishment.py` starts a
+small script (`relay_stub.py`) as the relay child, so spawn, readiness, exit,
+timeout and credential-replacement outcomes are real processes and real lease
+rollbacks; `test_relay_supervision.py` supervises real children and records the
+degradation, expiry and ended-lease notice in the database.
+`agent/tests/impersonation/test_impersonation_integration.py` exercises PostgreSQL,
+buffered checkpoints, the compiled graph, model-free preparation, peer inbox
+acknowledgement, release summary, a lost plugin receipt, and native resumption with
+plugin state.
 `agent/tests/impersonation/test_impersonation_transport_integration.py` combines real
-PostgreSQL and a compiled graph with stubbed relay establishment. Delivery
-reservations exhaust the push budget without preventing a valid late ACK.
+PostgreSQL and a compiled graph with a session relay whose heartbeat the test writes.
+Delivery reservations exhaust the push budget without preventing a valid late ACK.
 Successor admission fences the previous runtime, aligns the active lease's
 native binding, and preserves unacknowledged input in the handoff record before
-native resumption. These tests do not start or restart a real agent host or
-Codex relay process.
+native resumption. The end-note wake is observed on the agent's real Redis inbound
+channel. These tests do not start or restart a real agent host or Codex relay process.
 
 Checkpoint return notes and event-coverage semantics are in [[impersonation-handoff.meiva.okf.md]].

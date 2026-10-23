@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 
 import psycopg
 import pytest
@@ -16,6 +16,7 @@ from agent.graph.hooks.compact import (
     compose_summary_message,
     generate_summary,
 )
+from agent.graph.node_log.tests.live_events import LiveEvents
 from agent.hooks import Hook
 from agent.messages import inbound_message
 from agent.state import AgentState, CompactState, ContextReset
@@ -24,7 +25,6 @@ from agent.tests.test_compact import (
     LONG_SUMMARY,
     compact_slices,
     compact_tail,
-    compaction_ainvoke,
     fake_config,
     insert_compact_summary,
     make_config,
@@ -210,17 +210,14 @@ async def test_compact_contract_reaches_request_without_resident_self(meiva_comp
         ),
         catalog=build_model_catalog(),
     )
-    [call] = compaction_ainvoke(llm).call_args_list
-    [request] = call.args
+    [request] = llm.requests
     assert request[0] is head
     from inspect import cleandoc
 
-    assert request[-1].content.startswith(f"<system_note>\n{COMPACTION_INSTRUCTION}")
-    assert cleandoc(contract) in request[-1].content
+    assert request[-1].text.startswith(f"<system_note>\n{COMPACTION_INSTRUCTION}")
+    assert cleandoc(contract) in request[-1].text
     for section in COMPACT_SECTIONS:
-        assert section in request[-1].content, (
-            f"section {section!r} missing from compaction request"
-        )
+        assert section in request[-1].text, f"section {section!r} missing from compaction request"
 
 
 async def test_compact_summary_preserves_agent_continuity(
@@ -301,6 +298,7 @@ async def test_compact_summary_emits_compact_done(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     loguru_records: list[dict[str, Any]],
+    live_events: LiveEvents,
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
@@ -321,11 +319,10 @@ async def test_compact_summary_emits_compact_done(
         ],
         compact=CompactState(reminder_shown=reminded),
     )
-    publisher = MagicMock()
     ctx = MeivaContext(
         ops_pool=aops_pool,
         llm=AsyncMock(),
-        event_publisher=publisher,
+        event_publisher=live_events.publisher,
         agent=AgentSlices.resolve(default_reader=defaults()),
         db=Database.from_settings(gate=database_gate),
         bus=EventBus.from_settings(),
@@ -336,7 +333,7 @@ async def test_compact_summary_emits_compact_done(
 
     await claim_node(state, runtime, make_config(tid))
 
-    emitted = [call.args[0] for call in publisher.emit.call_args_list]
+    emitted = await live_events.payloads()
     assert any('"compact_done"' in e for e in emitted), f"no CompactDone emitted; saw {emitted}"
     [monitoring] = [
         record
@@ -470,7 +467,6 @@ async def test_compact_with_super_long_summary_in_claim(
 async def test_terminate_preserves_pending_summary_without_wiping_history(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
-    event_bus: EventBus,
     database_gate: ProcessDbGate,
 ):
     from agent.ownership.hosted import apply_hosted_lifecycle
@@ -504,12 +500,7 @@ async def test_terminate_preserves_pending_summary_without_wiping_history(
         ),
         make_config(tid),
     )
-    await apply_hosted_lifecycle(
-        aops_pool,
-        old,
-        bus=event_bus,
-        resume_turn=False,
-    )
+    await apply_hosted_lifecycle(aops_pool, old, resume_turn=False)
 
     assert cmd.goto == END
     assert cmd.update is not None
@@ -524,7 +515,6 @@ async def test_terminate_preserves_pending_summary_without_wiping_history(
 async def test_compact_in_same_batch_as_restart(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
-    event_bus: EventBus,
     database_gate: ProcessDbGate,
 ):
     from agent.ownership.hosted import apply_hosted_lifecycle
@@ -559,12 +549,7 @@ async def test_compact_in_same_batch_as_restart(
         ),
         make_config(tid),
     )
-    await apply_hosted_lifecycle(
-        aops_pool,
-        old,
-        bus=event_bus,
-        resume_turn=False,
-    )
+    await apply_hosted_lifecycle(aops_pool, old, resume_turn=False)
 
     assert cmd.goto == END
     assert cmd.update is not None

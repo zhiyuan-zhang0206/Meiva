@@ -19,6 +19,7 @@ import pytest
 
 import meiva
 from agent.state import build_agent_state
+from base.agents.sdk.call_policy import SamplingPolicy, SamplingPolicyOwner
 from base.log.tests.log_records import LogRecords
 from base.packages.plugin_config_images import DiskPluginConfigImages
 from base.packages.plugins.extensions import ExtensionRegistry
@@ -48,15 +49,8 @@ def _registry() -> ExtensionRegistry:
 
 
 @pytest.fixture
-def exec_turn(unit_home: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
+def exec_turn(unit_home: Path) -> Iterator[Path]:
     """The wraps installed over a bound exec turn of agent 17; yields the home."""
-    from base.agents.sdk import call_policy
-
-    def _policy_for_test(_owner: call_policy.SamplingPolicyOwner) -> call_policy.SamplingPolicy:
-        return call_policy.SamplingPolicy()
-
-    monkeypatch.setattr(call_policy, "policy", _policy_for_test)
-
     requests: list[httpx.Request] = []
 
     def no_request(request: httpx.Request) -> httpx.Response:
@@ -67,7 +61,11 @@ def exec_turn(unit_home: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path
 
     pin_agent(17)
     registry = _registry()
-    install.install(registry, config_images=DiskPluginConfigImages(resolve_meiva_home()))
+    install.install(
+        registry,
+        config_images=DiskPluginConfigImages(resolve_meiva_home()),
+        sampling=SamplingPolicyOwner(reader=SamplingPolicy),
+    )
     process_context.set_state(build_agent_state(registry)(messages=[], halted=False))
     process_context.set_state_update({})
     with (
