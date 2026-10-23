@@ -4,12 +4,16 @@
 // that stops retrying must show at once, and recovery must cancel a pending banner.
 // meiva:link ui/web/src/docs/frontend-components/frontend-components.meiva.okf.md
 
-import { act, cleanup, render } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { act, cleanup, render as rtlRender } from "@testing-library/react";
+import { useEffect, type ReactElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ConnectionState } from "@/lib/contracts/types";
 import { useStore } from "@/lib/state/store";
+import { api } from "@/lib/transport/api";
 
+const clients = new Set<QueryClient>();
 const states: string[] = [];
 let emit: ((ev: { type: string }) => void) | null = null;
 const origSetConnState = useStore.getState().setConnState;
@@ -18,22 +22,28 @@ vi.mock("@/lib/auth/auth-context", () => ({
   useAuth: () => ({ status: "authenticated" }),
 }));
 
-vi.mock("@/lib/notifications/use-cluster-health", () => ({
-  useClusterHealth: () => undefined,
-}));
-
 vi.mock("@/lib/transport/useEventStream", () => ({
   useEventStream: (_onEvent: unknown, onConnection: (ev: { type: string }) => void) => {
-    emit = onConnection;
+    useEffect(() => {
+      emit = onConnection;
+      return () => { emit = null; };
+    }, [onConnection]);
   },
 }));
 
 import { AppConnectionBanner } from "./app-connection-banner";
 import { NOTICE_DELAY_MS } from "@/components/notifications/connection-notice";
 
+function render(ui: ReactElement) {
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  clients.add(qc);
+  return rtlRender(<QueryClientProvider client={qc}>{ui}</QueryClientProvider>);
+}
+
 beforeEach(() => {
   states.length = 0;
   emit = null;
+  vi.spyOn(api, "getClusterStatus").mockImplementation(() => new Promise(() => undefined));
   useStore.setState({
     connState: "open",
     setConnState: (v: ConnectionState) => {
@@ -46,13 +56,16 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  for (const client of clients) client.clear();
+  clients.clear();
   useStore.setState({ connState: "open", setConnState: origSetConnState });
+  vi.restoreAllMocks();
   vi.useRealTimers();
 });
 
 describe("AppConnectionBanner connection state", () => {
   it("does not announce a reconnect that finishes inside the delay", () => {
-    render(<AppConnectionBanner />);
+    const view = render(<AppConnectionBanner />);
     act(() => emit?.({ type: "reconnecting" }));
     act(() => {
       vi.advanceTimersByTime(NOTICE_DELAY_MS - 50);
@@ -61,6 +74,15 @@ describe("AppConnectionBanner connection state", () => {
     act(() => {
       vi.advanceTimersByTime(NOTICE_DELAY_MS * 2);
     });
+    expect(states).toEqual(["open"]);
+    expect(api.getClusterStatus).toHaveBeenCalledTimes(1);
+    act(() => emit?.({ type: "reconnecting" }));
+    view.unmount();
+    expect(emit).toBeNull();
+    for (const client of clients) {
+      expect(client.getQueryCache().getAll().every((query) => query.getObserversCount() === 0)).toBe(true);
+    }
+    act(() => { vi.advanceTimersByTime(NOTICE_DELAY_MS * 2); });
     expect(states).toEqual(["open"]);
   });
 

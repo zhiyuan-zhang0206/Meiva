@@ -80,3 +80,8 @@ The composer carries no Details affordance: the read-only summary chip was
 removed on 2026-10-18, so nothing on the home screen renders the mode or writes
 it. The chip's absence is deliberate — a control that cannot change the value is
 not worth a row in the composer.
+
+The home frame tests run the local resizable wrappers and real `useDefaultLayout`
+storage path. Only the third-party measured layout primitives are substituted;
+scripted commit events preserve `isUserInteraction` and the independent layout
+IDs. They prove forwarding and persistence, not browser drag geometry.

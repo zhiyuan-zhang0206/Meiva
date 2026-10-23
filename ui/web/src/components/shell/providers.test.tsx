@@ -1,9 +1,9 @@
 // Providers: QueryClient defaults + root provider composition.
 
-import { QueryClientProvider, useQuery } from "@tanstack/react-query";
+import { QueryClientProvider, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
-import type { ReactNode } from "react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { useEffect, type ReactNode } from "react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type * as ApiModule from "@/lib/transport/api";
 
@@ -16,13 +16,6 @@ vi.mock("@/lib/transport/useEventStream", () => ({
   useEventStream: vi.fn(),
 }));
 
-// AlertsProvider opens the /api/alerts SSE stream + initial fetch on mount;
-// the stream machinery has its own tests (use-alerts.test.tsx) — this smoke
-// test mocks the module out like the EventStream one above.
-vi.mock("@/lib/notifications/use-alerts", () => ({
-  AlertsProvider: ({ children }: { children: React.ReactNode }) => children,
-}));
-
 vi.mock("next-themes", () => ({
   ThemeProvider: ({ children, nonce }: { children: ReactNode; nonce?: string }) => (
     <div data-testid="theme-provider" data-nonce={nonce}>{children}</div>
@@ -30,14 +23,10 @@ vi.mock("next-themes", () => ({
   useTheme: () => ({ resolvedTheme: "light" }),
 }));
 
-// Two of Providers' children fire real api calls on mount if left unmocked —
-// unmocked, these are live fetches that silently "succeed" against a local
-// dev gateway but ECONNREFUSED with no gateway around (CI), the source of a
-// flaky "Unhandled Errors" vitest exit surfacing in an unrelated test file:
-//   - AppConnectionBanner's useClusterHealth() → api.getClusterStatus()
-//   - AuthProvider's mount-time session check → api.checkAuth()
-// Stub both to never-resolving promises: this smoke test only checks the
-// initial render, not status- or auth-driven content.
+// meiva:note
+// Authentication stays pending while real root readers own their explicit wire
+// boundaries. Alert I/O is asserted blocked; settings and themes still read.
+// meiva:link ui/web/src/docs/frontend.meiva.okf.md
 vi.mock("@/lib/transport/api", async (importOriginal) => {
   const actual = await importOriginal<typeof ApiModule>();
   return {
@@ -45,21 +34,47 @@ vi.mock("@/lib/transport/api", async (importOriginal) => {
     api: {
       getClusterStatus: vi.fn(() => new Promise(() => undefined)),
       checkAuth: vi.fn(() => new Promise(() => undefined)),
+      getSettings: vi.fn<typeof actual.api.getSettings>(() => new Promise(() => undefined)),
+      getUiContributions: vi.fn<typeof actual.api.getUiContributions>(() => new Promise(() => undefined)),
+      getAlerts: vi.fn<typeof actual.api.getAlerts>(() => new Promise(() => undefined)),
     },
   };
 });
 
-import { ApiError } from "@/lib/transport/api";
-import { setSessionInvalidHandler } from "@/lib/auth/auth-context";
+import { ApiError, api } from "@/lib/transport/api";
+import { ProfileSseTransport } from "@/lib/transport/sse-share";
+import { setSessionInvalidHandler, useAuth } from "@/lib/auth/auth-context";
 import { useNonce } from "@/lib/auth/nonce-context";
 
 import { createQueryClient, Providers } from "./providers";
 
+const clients = new Set<QueryClient>();
+const originalLang = document.documentElement.lang;
+
+beforeEach(() => { vi.clearAllMocks(); });
+
 afterEach(() => {
   cleanup();
+  for (const client of clients) client.clear();
+  clients.clear();
+  document.documentElement.lang = originalLang;
+  vi.restoreAllMocks();
   setSessionInvalidHandler(null);
   vi.useRealTimers();
 });
+
+function testQueryClient() {
+  const client = createQueryClient();
+  clients.add(client);
+  return client;
+}
+
+function RootProbe() {
+  const client = useQueryClient();
+  const { status } = useAuth();
+  useEffect(() => { clients.add(client); }, [client]);
+  return <span data-testid="auth-status">{status}</span>;
+}
 
 function QueryProbe({ queryFn }: { queryFn: () => Promise<unknown> }) {
   useQuery({ queryKey: ["query-client-probe"], queryFn });
@@ -75,7 +90,7 @@ describe("QueryClient defaults", () => {
     setSessionInvalidHandler(sessionInvalidHandler);
 
     render(
-      <QueryClientProvider client={createQueryClient()}>
+      <QueryClientProvider client={testQueryClient()}>
         <QueryProbe queryFn={queryFn} />
       </QueryClientProvider>,
     );
@@ -89,7 +104,7 @@ describe("QueryClient defaults", () => {
     const queryFn = vi.fn().mockRejectedValue(new TypeError("Failed to fetch"));
 
     render(
-      <QueryClientProvider client={createQueryClient()}>
+      <QueryClientProvider client={testQueryClient()}>
         <QueryProbe queryFn={queryFn} />
       </QueryClientProvider>,
     );
@@ -101,7 +116,7 @@ describe("QueryClient defaults", () => {
   });
 
   it("retries only transient statuses and caps the retry delay (task #3895)", () => {
-    const client = createQueryClient();
+    const client = testQueryClient();
     const retry = client.getDefaultOptions().queries?.retry as (
       failureCount: number,
       error: unknown,
@@ -122,18 +137,34 @@ describe("QueryClient defaults", () => {
 });
 
 describe("Providers", () => {
-  it("passes children through", () => {
-    render(
+  it("passes children through", async () => {
+    const sources = vi.spyOn(globalThis, "EventSource");
+    const subscriptions = vi.spyOn(ProfileSseTransport.prototype, "subscribe");
+    const view = render(
       <Providers>
+        <RootProbe />
         <span data-testid="child">child</span>
       </Providers>,
     );
     expect(screen.getByTestId("child")).toBeTruthy();
+    await waitFor(() => expect(api.checkAuth).toHaveBeenCalledTimes(1));
+    expect(screen.getByTestId("auth-status").textContent).toBe("loading");
+    expect(api.getSettings).toHaveBeenCalledTimes(1);
+    expect(api.getUiContributions).toHaveBeenCalledTimes(1);
+    expect(api.getAlerts).not.toHaveBeenCalled();
+    expect(api.getClusterStatus).not.toHaveBeenCalled();
+    expect(sources).not.toHaveBeenCalled();
+    expect(subscriptions).not.toHaveBeenCalled();
+    view.unmount();
+    for (const client of clients) {
+      expect(client.getQueryCache().getAll().every((query) => query.getObserversCount() === 0)).toBe(true);
+    }
   });
 
   it("passes the request nonce to the theme bootstrap script", () => {
     render(
       <Providers nonce="request-nonce">
+        <RootProbe />
         <span>child</span>
       </Providers>,
     );
@@ -148,6 +179,7 @@ describe("Providers", () => {
 
     render(
       <Providers nonce="request-nonce">
+        <RootProbe />
         <NonceProbe />
       </Providers>,
     );

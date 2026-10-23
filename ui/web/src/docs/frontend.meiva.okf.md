@@ -47,7 +47,7 @@ Meiva's web user interface — Next.js 16 (App Router) + React 19 + Tailwind CSS
 
 ## Provider composition (`app/layout.tsx` → `components/providers.tsx`)
 
-`<html lang="zh-CN">` → `Providers` (QueryClientProvider → AuthProvider → EventStreamProvider → [fold owner] → ThemeProvider → `AppConnectionBanner` + `ToastHost` + `OpenTasksNoticeHost`) → `AuthGuard` → page.
+`<html lang="zh-CN">` → `Providers` (QueryClientProvider → AuthProvider → EventStreamProvider → [fold owner] → AlertsProvider → ThemeProvider → `AppConnectionBanner` + `ToastHost` + `OpenTasksNoticeHost`) → `AuthGuard` → page.
 
 - **QueryClient**: `staleTime` default 5min, `gcTime` 30min, `refetchOnWindowFocus` off (SSE-driven queries set `staleTime: Infinity`; bounded snapshots opt into polling explicitly). Sidebar stats consumers share one QueryClient-level 30s poll coordinator, so responsive/header/footer observers cannot mint independent intervals. A 401 is never retried and globally invalidates the session so `AuthGuard` redirects to `/login` and unmounts polling observers (Task #1326).
 - **EventStreamProvider** sits above the route tree: global `/api/system` broadcast persists across page navigation (one EventSource shared across routes; closed while the tab is hidden, reopened on return).
@@ -77,3 +77,9 @@ Meiva's web user interface — Next.js 16 (App Router) + React 19 + Tailwind CSS
 - `ui/web/src/lib/state/store.ts` — Zustand store (pure UI + cluster coordination, not persisted)
 - `ui/web/src/lib/timeline/timeline-store.ts` — Zustand store (SSE-driven timeline state, independent from `store.ts`)
 - `ui/web/src/lib/transport/useEventStream.tsx` — SSE Provider
+
+Root composition tests keep authentication pending and assert that alert reads,
+SSE subscriptions and cluster polling stay blocked. Settings and theme readers
+still run against explicit pending API boundaries. They mount the real alert
+provider, observe the root query client and unmount before clearing its cache;
+this is initial composition evidence, not live stream acceptance.
