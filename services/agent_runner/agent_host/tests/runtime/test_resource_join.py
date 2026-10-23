@@ -86,7 +86,7 @@ async def test_original_error_joins_before_clients_and_pools_close(
         catalog=model_catalog,
         bus=EventBus.from_settings(),
         db=Database.from_settings(gate=database_gate),
-        commands=CommandCatalog(skills=list),
+        commands=CommandCatalog.system(skills=list),
     )
     scope = await host._resource_service.turn()
     failure = ValueError("original late resource error")
@@ -138,7 +138,7 @@ def exercise_unfinished_main() -> None:
             bus=EventBus.from_settings(),
             db=database(),
             clients=clients,
-            commands=CommandCatalog(skills=list),
+            commands=CommandCatalog.system(skills=list),
         )
         marker = Path(os.environ["RESOURCE_JOIN_MARKER"])
         patch = pytest.MonkeyPatch()

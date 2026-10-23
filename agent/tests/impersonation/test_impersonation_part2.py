@@ -36,7 +36,7 @@ def gate_ctx(database: Database, event_bus: EventBus) -> MeivaContext:
         bus=event_bus,
         catalog=build_model_catalog(),
         clock_factory=Clock.from_settings,
-        commands=CommandCatalog(skills=list),
+        commands=CommandCatalog.system(skills=list),
     )
 
 

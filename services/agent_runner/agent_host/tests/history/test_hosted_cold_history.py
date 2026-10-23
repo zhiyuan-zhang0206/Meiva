@@ -111,7 +111,7 @@ async def test_cold_admission_reads_the_history_once_and_never_repairs_it(
         db=Database.from_settings(gate=database_gate),
         catalog=model_catalog,
         machine=configured_machine(),
-        commands=CommandCatalog(skills=list),
+        commands=CommandCatalog.system(skills=list),
     )
 
     async def drive(

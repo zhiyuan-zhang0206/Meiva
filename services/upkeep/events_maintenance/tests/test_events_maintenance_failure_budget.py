@@ -7,6 +7,7 @@ from typing import Any
 import psycopg
 import pytest
 
+from base.clock import SYSTEM_TIMERS
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import ConfigBoot
@@ -27,7 +28,7 @@ def _drive(
     process_config: ConfigBoot,
     machine_identity: MachineIdentity,
 ) -> Awaitable[None]:
-    progress = LoopProgress(loop, timeout_s=5.0)
+    progress = LoopProgress(loop, timeout_s=5.0, timers=SYSTEM_TIMERS)
     config = events_maintenance_config(process_config)
     if loop == "dispatch":
         return daemon.dispatch_loop(

@@ -7,7 +7,7 @@ from typing import Any, cast
 
 import pytest
 
-from base.clock import Clock
+from base.clock import SYSTEM_TIMERS, Clock
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import ConfigBoot
@@ -175,7 +175,9 @@ async def test_the_digest_loop_flushes_at_once_then_paces() -> None:
             flushed.set()
 
     task = asyncio.create_task(
-        completion_digest.completion_digest_loop(Flush(), LoopProgress("digest", 300.0))
+        completion_digest.completion_digest_loop(
+            Flush(), LoopProgress("digest", 300.0, timers=SYSTEM_TIMERS)
+        )
     )
     try:
         await asyncio.wait_for(flushed.wait(), timeout=5)
@@ -195,4 +197,6 @@ async def test_a_failing_flush_ends_the_digest_loop() -> None:
             raise RuntimeError("digest table unreadable")
 
     with pytest.raises(RuntimeError, match="digest table unreadable"):
-        await completion_digest.completion_digest_loop(Flush(), LoopProgress("digest", 300.0))
+        await completion_digest.completion_digest_loop(
+            Flush(), LoopProgress("digest", 300.0, timers=SYSTEM_TIMERS)
+        )

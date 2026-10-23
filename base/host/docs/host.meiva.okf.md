@@ -72,3 +72,14 @@ Drive convergence receives the existing `Host` and an explicit user home when
 enumerating candidate folders. The lifecycle CLI captures those candidates once,
 passes them to the real write/read/delete probe, and reuses the same paths in its
 warning. A Drive mount is never accepted from directory existence alone.
+
+`jittered` samples the process phase and random noise; `jitter_delay` owns the
+mode arithmetic and nonnegative clamp from explicit numeric values. The existing
+unknown-mode agent fallback and none-mode behavior remain unchanged. Deterministic
+integration tests seed only a fresh child process and compare its actual retry
+wait with an independently computed random sample. Existing hook late binding is
+verified with retry closures constructed before the shared wait fixture replaces
+the hooks. A separate child runs the actual async retry through a standard event
+loop that records `call_later` delays; those observations prove scheduling values
+and attempt counts, not that one or two real seconds elapsed. Other retry
+consumers and their existing wait contracts retain their interfaces.

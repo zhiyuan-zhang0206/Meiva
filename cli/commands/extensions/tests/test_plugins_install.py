@@ -513,7 +513,7 @@ def test_install_claude_code_plugin_commands_surface(
     # commands/ copied verbatim into the overlay
     assert (unit_home / "plugins" / "pr-toolkit" / "commands" / "deploy.md").is_file()
     # surfaced namespaced under the plugin in the `:`-joined form skill identifiers use
-    cmds = {c["name"]: c for c in CommandCatalog(skills=skills.names).discover()}
+    cmds = {c["name"]: c for c in CommandCatalog.system(skills=skills.names).discover()}
     assert "pr-toolkit:deploy" in cmds
     assert cmds["pr-toolkit:deploy"]["description"] == "Deploy the thing"
     assert cmds["pr-toolkit:deploy"]["instruction_hint"] == "env"

@@ -68,7 +68,7 @@ async def test_host_release_runs_and_first_original_failure_remains_primary(
         clients=clients,
         bus=EventBus.from_settings(),
         db=Database.from_settings(gate=database_gate),
-        commands=CommandCatalog(skills=list),
+        commands=CommandCatalog.system(skills=list),
     )
     try:
         clients.event_pipeline().enqueue(event())

@@ -4,7 +4,7 @@ import re
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import NamedTuple, TypedDict
+from typing import NamedTuple, Protocol, Self, TypedDict
 
 from base.config import settings
 from base.host.runtime_interpreter import external_plugin_read_root
@@ -44,13 +44,46 @@ class Command(TypedDict):
     skill_target: str | None
 
 
+@dataclass(frozen=True)
+class CommandSources:
+    builtin_commands: Path
+    user_commands: Path
+    builtin_plugins: Path
+    external_plugins: Path
+
+    @classmethod
+    def system(cls) -> Self:
+        return cls(
+            builtin_commands=repo_root() / "meiva_builtins" / "commands",
+            user_commands=meiva_home() / "commands",
+            builtin_plugins=repo_plugins_dir(),
+            external_plugins=external_plugin_read_root(),
+        )
+
+
+class CommandEnvironment(Protocol):
+    def enabled(self) -> bool: ...
+
+    def sources(self) -> CommandSources: ...
+
+
+class _SystemCommandEnvironment:
+    def enabled(self) -> bool:
+        return _commands_enabled()
+
+    def sources(self) -> CommandSources:
+        return CommandSources.system()
+
+
 # meiva:link base/packages/docs/composer-commands.meiva.okf.md
-def command_dirs(skills: Sequence[Skill]) -> list[tuple[Path, tuple[str, ...]]]:
+def command_dirs(
+    skills: Sequence[Skill], *, sources: CommandSources
+) -> list[tuple[Path, tuple[str, ...]]]:
     dirs: list[tuple[Path, tuple[str, ...]]] = [
-        (repo_root() / "meiva_builtins" / "commands", ()),
-        (meiva_home() / "commands", ()),
+        (sources.builtin_commands, ()),
+        (sources.user_commands, ()),
     ]
-    for base in (repo_plugins_dir(), external_plugin_read_root()):
+    for base in (sources.builtin_plugins, sources.external_plugins):
         if base.is_dir():
             dirs.extend(
                 (p / "commands", (p.name,))
@@ -105,11 +138,11 @@ def skill_commands(skills: Sequence[Skill]) -> dict[str, Command]:
 
 
 # meiva:link base/packages/docs/composer-commands.meiva.okf.md
-def discover_commands(skills: Sequence[Skill]) -> list[Command]:
-    if not _commands_enabled():
+def discover_commands(skills: Sequence[Skill], *, environment: CommandEnvironment) -> list[Command]:
+    if not environment.enabled():
         return []
     out: dict[str, Command] = skill_commands(skills)
-    for d, base_ns in command_dirs(skills):
+    for d, base_ns in command_dirs(skills, sources=environment.sources()):
         out.update(scan_dir(d, base_ns))
     return [out[name] for name in sorted(out)]
 
@@ -170,11 +203,16 @@ def expand_command(content: str, commands: Sequence[Command]) -> str:
 @dataclass(frozen=True)
 class CommandCatalog:
     skills: Callable[[], Sequence[Skill]]
+    environment: CommandEnvironment
+
+    @classmethod
+    def system(cls, *, skills: Callable[[], Sequence[Skill]]) -> Self:
+        return cls(skills=skills, environment=_SystemCommandEnvironment())
 
     def discover(self) -> list[Command]:
-        if not _commands_enabled():
+        if not self.environment.enabled():
             return []
-        return discover_commands(self.skills())
+        return discover_commands(self.skills(), environment=self.environment)
 
     def expand(self, content: str) -> str:
         if not content.startswith("/"):
