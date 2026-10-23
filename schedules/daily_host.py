@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import os
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 import meiva
 from meiva.agents import AgentStatus as S
@@ -12,8 +13,16 @@ from base.daemon.schedules.watcher import next_fire
 from base.db import Database
 
 
-def report_agent(env_name: str, label: str) -> int:
-    configured = os.environ.get(env_name)
+def report_agent(
+    env_name: str,
+    label: str,
+    *,
+    env: Mapping[str, str] | None = None,
+    list_agents_fn: Callable[..., Any] | None = None,
+) -> int:
+    source_env = os.environ if env is None else env
+    list_agents = list_agents_fn or meiva.agents.list_agents
+    configured = source_env.get(env_name)
     if configured is not None and configured.strip():
         try:
             agent_id = int(configured)
@@ -25,7 +34,7 @@ def report_agent(env_name: str, label: str) -> int:
 
     before_id = None
     while True:
-        page = meiva.agents.list_agents(scope="all", query=label, before_id=before_id)
+        page = list_agents(scope="all", query=label, before_id=before_id)
         for agent in page.agents:
             if agent.label == label and agent.status in (S.RUNNING, S.IDLING, S.TERMINATED):
                 return agent.agent_id

@@ -14,14 +14,13 @@ import psycopg
 import pytest
 
 from base.cluster.machine import MachineIdentity
-from base.config import settings
 from base.db import Database
 from base.host.system.hostport import Host
 from base.host.system.tests.fake_commands import fake_host
 from base.native_process.loaded_commit import LoadedCommit
-from schedules.catchup import fire_slot_once
 from base.telemetry.tests.capture.event_capture import EmittedEvents
 from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
+from schedules.catchup import fire_slot_once
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCHEDULE_PATH = REPO_ROOT / "schedules" / "c9-daily-report-schedule.py"
@@ -63,9 +62,10 @@ def _entry(agent_id: int | None, *, linux: int, macos: int) -> dict[str, int | N
 
 
 class _FakeAccounting(SimpleNamespace):
-    def __init__(self, module: ModuleType) -> None:
+    def __init__(self, module: ModuleType, *, error: Exception | None = None) -> None:
         super().__init__()
         self.module = module
+        self.error = error
         self.windows: list[tuple[str, str]] = []
         self.hosts: list[Host] = []
         self.DEFAULT_REPO = "zhiyuan-zhang0206/Meiva"
@@ -76,6 +76,8 @@ class _FakeAccounting(SimpleNamespace):
         self, repo: str, since: str, until: str, *, host: Host
     ) -> list[dict[str, int | None]]:
         del repo
+        if self.error is not None:
+            raise self.error
         self.hosts.append(host)
         self.windows.append((since, until))
         return self.entries
@@ -126,18 +128,15 @@ def test_manifest_declares_c9_daily_report_schedule() -> None:
     assert "05:00 cluster time" in entry["description"]
 
 
-def test_window_bounds_covers_the_slot_day_in_cluster_timezone(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_window_bounds_covers_the_slot_day_in_cluster_timezone() -> None:
     module = _load_schedule_module()
     # meiva:note
     # The day label must follow the cluster wall clock, not the test environment's zone (CI
     # runs UTC): 05:00 Asia/Shanghai on 2026-09-07 is 21:00 UTC on 2026-09-06, so the UTC
     # date and the cluster day differ.
-    monkeypatch.setattr(settings.general, "timezone", "Asia/Shanghai")
     slot_end = datetime(2026, 9, 6, 21, 0, tzinfo=UTC)
 
-    since, until, day = module.window_bounds(slot_end)
+    since, until, day = module.window_bounds(slot_end, cluster_timezone=lambda: "Asia/Shanghai")
 
     assert since == "2026-09-05T21:00:00Z"
     assert until == "2026-09-06T21:00:00Z"
@@ -178,7 +177,6 @@ def test_summarize_splits_attribution_and_meters_minutes() -> None:
 
 def test_fire_reconciles_the_claimed_slot_window_and_emits(
     db_conn: psycopg.Connection,
-    monkeypatch: pytest.MonkeyPatch,
     database: Database,
     machine_identity: MachineIdentity,
     emitted_events: EmittedEvents,
@@ -195,25 +193,27 @@ def test_fire_reconciles_the_claimed_slot_window_and_emits(
         assert callable(producer) and callable(machine_reader)
         assert image.sha is None
 
-    monkeypatch.setattr(module, "init_gateway_process", fake_init_gateway)
-    monkeypatch.setattr(settings.general, "timezone", "Asia/Shanghai")
     command_host = fake_host()
     accounting = _FakeAccounting(module)
-    monkeypatch.setattr(accounting.module, "_load_accounting", lambda: accounting)
     slot = datetime(2026, 9, 6, 21, 0, tzinfo=UTC)
     schedule_id = _insert_schedule(db_conn, created_at=datetime(2026, 9, 6, 20, 0, tzinfo=UTC))
-    monkeypatch.setenv("MEIVA_SCHEDULE_ID", str(schedule_id))
 
     assert fire_slot_once(
         database,
         slot,
         None,
+        schedule_id=schedule_id,
         fire=partial(
             module._fire,
             producer=lambda: None,
             image=LoadedCommit(REPO_ROOT, None),
             machine_reader=machine_identity.name,
             host=command_host,
+            hooks=module.C9FireHooks(
+                tz_fn=lambda: "Asia/Shanghai",
+                accounting_loader=lambda: accounting,
+                gateway_init=fake_init_gateway,
+            ),
         ),
     )
 
@@ -230,37 +230,30 @@ def test_fire_reconciles_the_claimed_slot_window_and_emits(
 
 def test_fire_reports_failure_without_raising(
     db_conn: psycopg.Connection,
-    monkeypatch: pytest.MonkeyPatch,
     database: Database,
     machine_identity: MachineIdentity,
 ) -> None:
     module = _load_schedule_module()
-    accounting = _FakeAccounting(module)
-
-    def broken_collect(
-        repo: str, since: str, until: str, *, host: Host
-    ) -> list[dict[str, int | None]]:
-        del repo, since, until, host
-        raise RuntimeError("gh api down")
-
-    monkeypatch.setattr(accounting, "collect", broken_collect)
-    monkeypatch.setattr(module, "_load_accounting", lambda: accounting)
+    accounting = _FakeAccounting(module, error=RuntimeError("gh api down"))
     failures: list[str] = []
-    monkeypatch.setattr(module, "_report_failure", failures.append)
     slot = datetime(2026, 9, 6, 21, 0, tzinfo=UTC)
     schedule_id = _insert_schedule(db_conn, created_at=datetime(2026, 9, 6, 20, 0, tzinfo=UTC))
-    monkeypatch.setenv("MEIVA_SCHEDULE_ID", str(schedule_id))
 
     assert fire_slot_once(
         database,
         slot,
         None,
+        schedule_id=schedule_id,
         fire=partial(
             module._fire,
             producer=lambda: None,
             image=LoadedCommit(REPO_ROOT, None),
             machine_reader=machine_identity.name,
             host=fake_host(),
+            hooks=module.C9FireHooks(
+                accounting_loader=lambda: accounting,
+                failure_reporter=failures.append,
+            ),
         ),
     )
 
@@ -268,7 +261,11 @@ def test_fire_reports_failure_without_raising(
     assert "RuntimeError" in failures[0]
     assert "gh api down" in failures[0]
     assert not fire_slot_once(
-        database, slot, None, fire=lambda _slot, _payload: pytest.fail("unexpected retry")
+        database,
+        slot,
+        None,
+        schedule_id=schedule_id,
+        fire=lambda _slot, _payload: pytest.fail("unexpected retry"),
     )
     assert len(failures) == 1
 
@@ -279,23 +276,17 @@ def test_fire_requires_an_explicit_slot() -> None:
         module._fire(_payload=None)
 
 
-def test_report_agent_override_rejects_nonnumeric_value(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_report_agent_override_rejects_nonnumeric_value() -> None:
     module = _load_schedule_module()
-    monkeypatch.setenv(module._REPORT_AGENT_ENV, "not-an-id")
 
     with pytest.raises(
         RuntimeError, match="MEIVA_CI_USAGE_REPORT_AGENT must be a numeric agent id"
     ):
-        module._report_agent()
+        module._report_agent(env={module._REPORT_AGENT_ENV: "not-an-id"})
 
 
-def test_report_failure_uses_exact_label_and_existing_message(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_report_failure_uses_exact_label_and_existing_message() -> None:
     module = _load_schedule_module()
-    monkeypatch.delenv(module._REPORT_AGENT_ENV, raising=False)
     unrelated = SimpleNamespace(agent_id=31, label="another", status=module.S.RUNNING)
     target = SimpleNamespace(agent_id=17, label=module._REPORT_LABEL, status=module.S.TERMINATED)
     find = Mock(
@@ -305,10 +296,13 @@ def test_report_failure_uses_exact_label_and_existing_message(
         ]
     )
     send = Mock()
-    monkeypatch.setattr(module.meiva.agents, "list_agents", find)
-    monkeypatch.setattr(module.meiva.agents, "send_message", send)
 
-    module._report_failure("collector failed")
+    module._report_failure(
+        "collector failed",
+        env={},
+        list_agents_fn=find,
+        send_message_fn=send,
+    )
 
     assert [call.kwargs for call in find.call_args_list] == [
         {"scope": "all", "query": module._REPORT_LABEL, "before_id": None},

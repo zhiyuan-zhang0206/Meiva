@@ -8,8 +8,8 @@ from types import ModuleType, SimpleNamespace
 from typing import Any, cast
 from unittest.mock import Mock
 
-import pytest
 import httpx
+import pytest
 
 from schedules.adversarial_eval_cases import AuditResult, audit_case, select_case_ids
 
@@ -233,7 +233,7 @@ def test_schedule_modules_import_without_starting_work() -> None:
 
 
 def test_stale_batch_marker_is_indexed_alerted_and_its_workers_terminated(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
 ) -> None:
     module = _load_schedule_module()
     schedule = cast(Any, module)
@@ -266,11 +266,15 @@ def test_stale_batch_marker_is_indexed_alerted_and_its_workers_terminated(
         return 999
 
     statuses = {agent.agent_id: agent.status for agent in agents}
-    monkeypatch.setattr(schedule.meiva.agents, "get_status", statuses.__getitem__)
-    monkeypatch.setattr(schedule.meiva.agents, "terminate", terminate)
-    monkeypatch.setattr(schedule, "ensure_agent", alert_owner)
 
-    schedule._recover_stale_batch(marker, tmp_path, fallback_week="2026-35")
+    schedule._recover_stale_batch(
+        marker,
+        tmp_path,
+        fallback_week="2026-35",
+        get_status_fn=statuses.__getitem__,
+        terminate_fn=terminate,
+        ensure_agent_fn=alert_owner,
+    )
 
     event = json.loads((tmp_path / "results" / "index.jsonl").read_text())
     assert event["week"] == "2026-34"
@@ -282,9 +286,7 @@ def test_stale_batch_marker_is_indexed_alerted_and_its_workers_terminated(
     assert not marker.exists()
 
 
-def test_worker_sweep_terminates_only_workers_outside_the_current_batch(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_worker_sweep_terminates_only_workers_outside_the_current_batch() -> None:
     schedule = cast(Any, _load_schedule_module())
     agents = [
         SimpleNamespace(agent_id=101, label="doc-worker", status=schedule.S.RUNNING),
@@ -306,17 +308,18 @@ def test_worker_sweep_terminates_only_workers_outside_the_current_batch(
             next_cursor=None,
         )
 
-    monkeypatch.setattr(schedule.meiva.agents, "list_agents", list_agents)
-    monkeypatch.setattr(schedule.meiva.agents, "terminate", terminate)
-
-    schedule._sweep_leftover_workers({102})
+    schedule._sweep_leftover_workers(
+        {102},
+        list_agents_fn=list_agents,
+        terminate_fn=terminate,
+    )
 
     assert terminated == [101]
 
 
 @pytest.mark.parametrize("failure", [None, RuntimeError("batch failed")])
 def test_batch_owns_scenario_http_server_until_exit(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: RuntimeError | None
+    tmp_path: Path, failure: RuntimeError | None
 ) -> None:
     schedule = cast(Any, _load_schedule_module())
     servers: list[Any] = []
@@ -351,22 +354,18 @@ def test_batch_owns_scenario_http_server_until_exit(
             "probe_id": 101,
         }
 
-    monkeypatch.setattr(schedule, "data_root", lambda: tmp_path)
-    monkeypatch.setattr(schedule, "select_case_ids", Mock(return_value=["c003"]))
-    monkeypatch.setattr(schedule, "_prepare_case", prepare_case)
-    monkeypatch.setattr(schedule, "audit_case", Mock(return_value=AuditResult(1.0, "ok")))
-    monkeypatch.setattr(
-        schedule.meiva.agents,
-        "list_agents",
-        Mock(return_value=SimpleNamespace(agents=[], next_cursor=None)),
+    hooks = schedule.BatchHooks(
+        data_root_fn=lambda: tmp_path,
+        select_cases_fn=Mock(return_value=["c003"]),
+        prepare_case_fn=prepare_case,
+        audit_case_fn=Mock(return_value=AuditResult(1.0, "ok")),
+        list_agents_fn=Mock(return_value=SimpleNamespace(agents=[], next_cursor=None)),
+        get_status_fn=Mock(return_value=schedule.S.TERMINATED),
+        get_last_message_fn=Mock(return_value="done"),
     )
-    monkeypatch.setattr(
-        schedule.meiva.agents, "get_status", Mock(return_value=schedule.S.TERMINATED)
-    )
-    monkeypatch.setattr(schedule.meiva.agents, "get_last_message", Mock(return_value="done"))
 
     if failure is None:
-        scoreboard_path = schedule.run_weekly_batch()
+        scoreboard_path = schedule.run_weekly_batch(hooks=hooks)
         scoreboard = json.loads(scoreboard_path.read_text())
         assert scoreboard["request_counts"] == {"/partner-doc": 2, "/flaky-service": 1}
         assert scoreboard["per_case_scores"] == {"c003": 1.0}
@@ -374,7 +373,7 @@ def test_batch_owns_scenario_http_server_until_exit(
         assert not (tmp_path / "cases" / ".batch.json").exists()
     else:
         with pytest.raises(RuntimeError, match="batch failed"):
-            schedule.run_weekly_batch()
+            schedule.run_weekly_batch(hooks=hooks)
         assert (tmp_path / "cases" / ".batch.json").exists()
 
     assert len(servers) == len(workers) == 1
@@ -383,7 +382,7 @@ def test_batch_owns_scenario_http_server_until_exit(
     assert not workers[0].is_alive()
 
 
-def test_scenario_server_failure_propagates_after_join(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_scenario_server_failure_propagates_after_join() -> None:
     schedule = cast(Any, _load_schedule_module())
     failed = threading.Event()
     workers: list[threading.Thread] = []
@@ -393,10 +392,9 @@ def test_scenario_server_failure_propagates_after_join(monkeypatch: pytest.Monke
             failed.set()
             raise RuntimeError("server failed")
 
-    monkeypatch.setattr(schedule, "HTTPServer", BrokenServer)
     with (
         pytest.raises(RuntimeError, match="server failed"),
-        schedule.start_scenario_server() as server,
+        schedule.start_scenario_server(server_cls=BrokenServer) as server,
     ):
         workers.extend(
             thread

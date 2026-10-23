@@ -1,5 +1,8 @@
 # meiva:link schedules/docs/self-evolution.meiva.okf.md
 
+from collections.abc import Callable
+from dataclasses import dataclass, field
+from typing import Any
 from uuid import uuid4
 
 import time
@@ -75,22 +78,32 @@ def count_events(since: datetime) -> int:
     return int(total)
 
 
-def ensure_agent(label: str, prompt: str) -> int:
+@dataclass(frozen=True)
+class EnsureAgentHooks:
+    list_agents_fn: Callable[..., Any] = field(default_factory=lambda: meiva.agents.list_agents)
+    resurrect_fn: Callable[..., Any] = field(default_factory=lambda: meiva.agents.resurrect)
+    send_message_fn: Callable[..., Any] = field(default_factory=lambda: meiva.agents.send_message)
+    spawn_fn: Callable[..., int] = field(default_factory=lambda: meiva.agents.spawn)
+    uuid_fn: Callable[[], Any] = field(default_factory=lambda: uuid4)
+
+
+def ensure_agent(label: str, prompt: str, *, hooks: EnsureAgentHooks | None = None) -> int:
+    active = hooks or EnsureAgentHooks()
     before_id = None
     while True:
-        page = meiva.agents.list_agents(scope="all", query=label, before_id=before_id)
+        page = active.list_agents_fn(scope="all", query=label, before_id=before_id)
         for agent in page.agents:
             if agent.label != label:
                 continue
             if agent.status == S.TERMINATED:
-                meiva.agents.resurrect(agent.agent_id, prompt)
+                active.resurrect_fn(agent.agent_id, prompt)
             else:
-                meiva.agents.send_message(agent.agent_id, prompt)
+                active.send_message_fn(agent.agent_id, prompt)
             return agent.agent_id
         if page.next_cursor is None:
             break
         before_id = page.next_cursor
-    return meiva.agents.spawn(prompt=prompt, label=label, idempotency_key=str(uuid4()))
+    return active.spawn_fn(prompt=prompt, label=label, idempotency_key=str(active.uuid_fn()))
 
 
 def fire(prompt: str) -> None:
