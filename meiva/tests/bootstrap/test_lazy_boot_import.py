@@ -60,18 +60,16 @@ _CONNECTION_STACK = (
     "anyio",
 )
 
-# Literal source with data in argv, so test selection can read the probe's imports.
-_PROBE = """
-import json
-import sys
 
-root, prefixes = sys.argv[1], tuple(json.loads(sys.argv[2]))
-sys.path.insert(0, root)
-import meiva  # the import under test
+def _probe() -> None:
+    root, prefixes = sys.argv[1], tuple(json.loads(sys.argv[2]))
+    sys.path.insert(0, root)
+    import meiva
 
-bad = sorted(name for name in sys.modules if name.startswith(prefixes))
-print(json.dumps(bad))
-"""
+    assert sys.modules["meiva"] is meiva
+
+    bad = sorted(name for name in sys.modules if name.startswith(prefixes))
+    print(json.dumps(bad))
 
 
 def _loaded_after_import_meiva(prefixes: tuple[str, ...]) -> list[str]:
@@ -83,8 +81,7 @@ def _loaded_after_import_meiva(prefixes: tuple[str, ...]) -> list[str]:
             "-B",
             "-X",
             "utf8",
-            "-c",
-            _PROBE,
+            str(Path(__file__)),
             str(_REPO_ROOT),
             json.dumps(prefixes),
         ],
@@ -109,3 +106,7 @@ def test_import_meiva_clean_does_not_load_redis_psycopg_or_otel() -> None:
 def test_import_meiva_clean_does_not_load_the_connection_stack() -> None:
     loaded = _loaded_after_import_meiva(_CONNECTION_STACK)
     assert loaded == [], f"`import meiva` must not load a connection stack, found: {loaded}"
+
+
+if __name__ == "__main__":
+    _probe()

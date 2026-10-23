@@ -40,10 +40,6 @@ exports = ["child_sdk_probes.py"]
 "test_session_venv_projection.py#monkeypatch.setattr meiva.shell.sessions.shell_sessions" = 1
 "test_session_venv_projection.py#monkeypatch.setattr meiva.shell.sessions.workspace_dir" = 1
 
-[debt.restricted-python]
-"test_lazy_boot_import.py#python -c" = 1
-"test_lazy_lm_import.py#python -c" = 1
-
 [debt.third-party-patch]
 "test_connect_fail_fast.py#monkeypatch.setattr psycopg.connect" = 1
 "test_sdk_redis_resilience.py#monkeypatch.setattr redis.Redis.from_url" = 1

@@ -45,6 +45,8 @@ tags:
 
 ## Dependencies
 
+Cold imports: [[meiva/docs/boot-contracts.meiva.okf.md]].
+
 - All sub-concepts share the same DB (`agent_notices`, `agent_tasks` tables, etc.)
 - Notify depends on Self's `agent_id` as the notice owner
 - Tasks notifies relevant agents on owner change with a system note (`send_system_note`, NoteTag `task`)
