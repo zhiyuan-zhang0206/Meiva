@@ -18,7 +18,7 @@ import {
   StubScrollArea,
   StubSpawnForm,
   wrap,
-} from "./sidebar-test-harness";
+} from "./sidebar-test-mock";
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: pushSpy }),
