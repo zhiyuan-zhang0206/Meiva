@@ -18,6 +18,7 @@
 "test_external_integration_memory.py#monkeypatch.setattr base.config.settings.agent.memory_per_agent_inject_enabled" = 1
 "test_external_integration_memory.py#monkeypatch.setattr base.packages.plugins.loading.registry.build_registry" = 1
 "test_external_integration_memory.py#monkeypatch.setattr base.paths.workspace_dir" = 2
+"test_external_integration_memory.py#monkeypatch.setattr meiva.__plugin_installation__" = 1
 "test_external_integration_memory.py#monkeypatch.setattr meiva.ensure_plugins_loaded" = 1
 "test_external_integration_memory.py#monkeypatch.setattr meiva_builtins.plugins.meiva_memory.notes.workspace_dir" = 1
 "test_indexer_service_config.py#monkeypatch.setattr base.config.settings.agent.memory_index_inject_enabled" = 2

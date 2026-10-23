@@ -24,7 +24,6 @@ from meiva import impersonation
 from meiva.impersonation import attachment as attachment_module
 from meiva.sdk_surface import process_context
 from meiva.sdk_surface.installation import Installation
-from meiva.tests.fixtures.model_owner import bind_installation
 from meiva.tests.fixtures.pin_agent import pin_agent
 
 
@@ -98,8 +97,7 @@ def attached_runtime(
         catalog=model_catalog,
         authority=config_authority,
     )
-    prior_slot = bind_installation(installation)
-    request.addfinalizer(lambda: bind_installation(prior_slot))
+    monkeypatch.setattr(meiva, "__plugin_installation__", installation, raising=False)
 
     def loader_stub(**_kwargs: object) -> None:
         """Accept the `surface` kwarg attach passes (ignored)."""

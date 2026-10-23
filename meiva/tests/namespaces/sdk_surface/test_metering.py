@@ -123,11 +123,13 @@ def _installed(sampling_owner: call_policy.SamplingPolicyOwner) -> Iterator[None
 
 
 def test_help_is_byte_identical_across_install(
-    sdk_model_owner: Installation,
+    monkeypatch: pytest.MonkeyPatch,
+    model_installation: Installation,
     sampling_owner: call_policy.SamplingPolicyOwner,
 ) -> None:
     """Acceptance for the transparency contract: metering must not change a single
     byte of what the agent sees via `meiva.help`."""
+    monkeypatch.setattr(meiva, "__plugin_installation__", model_installation, raising=False)
     before_root = _help(meiva)
     before_ns = _help(meiva.files)
     before_fn = _help(meiva.files.read)
