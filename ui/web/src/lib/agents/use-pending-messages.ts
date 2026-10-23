@@ -41,11 +41,11 @@ import { useAgentEventStream } from "../transport/useEventStream";
 //  - the *_start roles fire repeatedly across a multi-step turn, yet the batch
 //    is claimed exactly once (at the first start). Refetching per start was the
 //    R11 storm; collapse the burst into a coalesced read with a fixed deadline instead.
-const IMMEDIATE_REFETCH_ROLES: ReadonlySet<SystemEvent["role"]> = new Set([
+const IMMEDIATE_REFETCH_ROLES: readonly SystemEvent["role"][] = Object.freeze([
   "inbound_arrived",
   "inbound_committed",
 ]);
-const TURN_START_ROLES: ReadonlySet<SystemEvent["role"]> = new Set([
+const TURN_START_ROLES: readonly SystemEvent["role"][] = Object.freeze([
   "chat_start",
   "code_start",
   "reasoning_start",
@@ -101,13 +101,13 @@ export function usePendingMessages(
       if (agentId == null || !isEventForThread(ev, agentId)) return;
       // A fresh inbound / a commit changes the set once and is low-frequency —
       // refetch now so the strip reflects it without lag.
-      if (IMMEDIATE_REFETCH_ROLES.has(ev.role)) {
+      if (IMMEDIATE_REFETCH_ROLES.includes(ev.role)) {
         requestRepair();
         return;
       }
       // Repeated turn starts share a fixed repair deadline. A start during
       // the read leaves one trailing repair instead of starving the strip.
-      if (TURN_START_ROLES.has(ev.role)) requestRepair(false);
+      if (TURN_START_ROLES.includes(ev.role)) requestRepair(false);
     },
     [agentId, requestRepair],
   );

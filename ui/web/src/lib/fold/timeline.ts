@@ -468,7 +468,7 @@ export function mergeSnapshotWithStreaming(
   prev: BackendTimelineItem[],
   snapshot: BackendTimelineItem[],
   msg_count: number,
-  streamingIds: ReadonlySet<string> = EMPTY_STREAMING_IDS,
+  streamingIds: ReadonlySet<string> = new Set(),
 ): BackendTimelineItem[] {
   const snapshotIds = new Set(snapshot.map((it) => it.item_id));
   const clientExtras = prev.filter((it) => {
@@ -503,10 +503,6 @@ export function mergeSnapshotWithStreaming(
   }
   return merged;
 }
-
-// Default for the streamingIds parameter — a caller that has no tracking
-// (pure reducer tests) simply never keeps stale partials by that path.
-const EMPTY_STREAMING_IDS: ReadonlySet<string> = new Set();
 
 // =============================================================
 // One thread's fold state + per-thread reducer (from timeline-store)
