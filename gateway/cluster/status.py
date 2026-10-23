@@ -34,6 +34,7 @@ from base.cluster.machine import (
 from base.daemon.endpoints import ServiceEndpoints
 from base.db import Database
 from base.deploy.git.cluster_drift import checkout_head_sha
+from base.host.env.registry import process_environment
 from base.host.resource_sample import ResourceSample
 from base.native_process.loaded_commit import LoadedCommit
 from base.packages.plugins.surface import stats
@@ -335,7 +336,7 @@ def _local_resource_sample() -> ResourceSample | None:
 def read_local_facts(env: RosterEnv, *, with_resource: bool) -> LocalFacts:
     return LocalFacts(
         paused_reason=serving_gate_reason(),
-        head_sha=checkout_head_sha(env.home / "source"),
+        head_sha=checkout_head_sha(env.home / "source", environ=process_environment()),
         # meiva:note
         # This gateway process's own frozen commit — not a disk bookmark, so a
         # gateway that outlived a checkout advance reports the old commit and the
