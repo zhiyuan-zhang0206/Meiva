@@ -296,7 +296,6 @@ def test_code_structure_turns_changed_files_into_explicit_targets(
     assert main(["--only", "base/a.py"]) == 0
     assert main(["--only", "base/a.py", "scripts/structure/baseline/README.md"]) == 1
     assert main(["--only"]) == 0
-    assert main(["--complexity-warnings-full"]) == 1
 
 
 def test_zombie_ignores_checks_only_the_changed_python_files(tmp_path: Path) -> None:

@@ -17,8 +17,14 @@ Genuine exceptions (circular imports, `import torch`-class heavy deps) go in
 
 ## Per-file line budget: 800 lines
 
-A `.py` file may contain at most 800 lines (`len(text.splitlines())`). Split
-larger files into focused modules. The budget covers the eight governed
+A `.py` file may contain at most 800 lines (`len(text.splitlines())`). The budget
+leaves room for substantial cohesive implementation behind a small interface.
+When a file exceeds it, review the package's responsibilities: separate pure
+decisions from I/O orchestration, or move related implementation into a cohesive
+subpackage with a narrow `meizel.toml` exports door. Mechanical `_part2` or
+`_helpers` splits change file size without improving the boundary.
+
+The budget covers the eight governed
 packages (`agent`, `meiva`, `meiva_builtins`, `gateway`, `base`, `services`, `ops`,
 `cli`) plus `tests/` and `scripts/`. The TYPE_CHECKING ban and retired ambient machine_role()
 call rejection apply only to the eight packages.
@@ -40,8 +46,11 @@ Git-tracked entries. All files count regardless of suffix or language: Python,
 TypeScript, Markdown, SQL, binary assets and other tracked files use one slot.
 Hidden entries, `docs/`, `tests/`, migrations, symlinks and gitlinks also count.
 A subdirectory takes one slot in its parent and has its own independent limit;
-nesting depth is unrestricted. Symlink targets, gitlink contents and untracked
-local artifacts are not traversed or counted.
+nesting depth is unrestricted. The cap bounds the concepts visible at one node,
+not total project size. Group related behavior into cohesive subpackages with
+narrow `meizel.toml` exports doors. Directory depth alone does not make a module
+deep: its interface must hide the related implementation. Symlink targets,
+gitlink contents and untracked local artifacts are not traversed or counted.
 
 Directory-budget baselines and per-directory exemptions are not allowed. A full
 gate run checks the entire tracked tree. An explicit directory target checks
@@ -219,8 +228,7 @@ insufficient. See the [accepted ownership and shutdown choices](../decisions/eng
 Every function and method in the same recursive `.py` scope has two budgets:
 
 - **McCabe cyclomatic complexity (CC)** uses pinned `radon==6.0.1`.
-  CC ≥15 is a hard violation; CC 10–14 is a non-blocking warning; CC ≤9
-  is silent. Each file is parsed once. Methods in function-local classes
+  CC ≥15 is a hard violation; lower scores are silent. Each file is parsed once. Methods in function-local classes
   omitted by Radon's whole-file collection are scored from their existing
   AST nodes with the same Radon calculation, so all functions remain covered.
 - **Control-flow nesting** may be at most 5; depth >5 is a hard violation.
@@ -265,12 +273,10 @@ and explicit-target scans alike, while quality checks only inspect the
 selected scope.
 
 Run `.venv/bin/python scripts/lint/code_structure.py` for the full gate.
-Complexity warnings go to stderr as a total function/file count and up to
-30 per-file counts, sorted by count descending then path ascending; remaining
-files and functions are summarized in a `rest:` line. Add
-`--complexity-warnings-full` anywhere in the arguments to print every file
-count. Explicit targets restrict warnings too; no warned functions means
-no warning output. Warnings alone never fail the gate.
+Only hard violations are reported. Their diagnostics suggest separating pure
+decisions from I/O, replacing flag or mode cascades with explicit data or domain
+helpers, and flattening nested control flow with guard clauses. These are
+refactoring options; the measured thresholds and scan scope remain the rules.
 
 ## No `print()` in framework code
 
