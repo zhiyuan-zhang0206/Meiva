@@ -34,6 +34,7 @@ def _no_plugin_expansions() -> Iterator[None]:
         install.install(
             prior.registry,
             catalog=prior.catalog,
+            provider_keys=prior.provider_keys,
             authority=prior.authority,
             config_images=prior.config_images,
         )

@@ -61,6 +61,7 @@ def _reset(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
         install.install(
             prior.registry,
             catalog=prior.catalog,
+            provider_keys=prior.provider_keys,
             authority=prior.authority,
             sampling=prior.sampling,
             clock_factory=prior.clock_factory,
