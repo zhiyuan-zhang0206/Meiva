@@ -31,7 +31,7 @@ OKF viewer. Fleet graph keeps its route-local query.
 - **events** (`/api/events`) — unified event stream query (Wave 2): every category (audit / telemetry / log) through one surface: audit rows from Postgres `audit_events`, telemetry/log from Postgres `telemetry_events`, merged newest-first; filters category/event_name/agent_id/trace_id/machine/level + time window (`from`/`to` or `hours`) + offset paging, `meta` (total/window/has_more) envelope
 - **run_timeline** (`/api/agents/{id}/run-timeline`) — see [[run_timeline.meiva.okf.md|the understanding tree and message units over a window]] (its `/messages` range read included).
 - **inspect** (`/api/agents/{id}/inspect/*` + `/neighbors`) — per-agent LLM cost/token/TPS + neighbor graph; plugin metric and inspector-widget surfaces — [[gateway/inspect/docs/inspect.meiva.okf.md]]
-- **system** (`/api/system`, `/api/agents/{id}/system`, `/api/system/all`) — SSE broadcasting (see [[gateway/events/docs/sse.meiva.okf.md]])
+- **system** (`/api/system`, `/api/agents/{id}/system`, `/api/system/all`) — SSE broadcasting (see [[gateway/events/docs/sse/sse.meiva.okf.md]])
 - **delivery** — chat inbound delivery helper (not a router); gateway callers attach server-owned credential, transport, content-hash, and source-assertion facts at the durable insert
 - **ops_monitor** (`/api/ops/monitor`) — time-bucketed ops panel series (SSE backlog / LLM latency+TPS / restart counts), see [[gateway/cluster/docs/ops-monitor.meiva.okf.md]]
 - **alerts** (`/api/alerts` + `/stream` + `/read`) — the system→human alert store (Alertmanager shape, `alerts` table), unresolved-first list + counts, SSE tail, mark-as-read, IM fan-out via im_bridge [[gateway/alerts/docs/alerts.meiva.okf.md]]

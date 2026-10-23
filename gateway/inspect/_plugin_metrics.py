@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import importlib
 import re
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Collection, Sequence
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, LiteralString, cast
@@ -36,7 +36,7 @@ from fastapi import HTTPException
 from psycopg import Connection, Cursor
 from psycopg_pool import ConnectionPool
 
-from base.packages.plugins import data_registry, enable_config
+from base.packages.plugins import data_registry
 from base.telemetry.metrics.core import catalog
 from base.telemetry.metrics.logql import validate_logql
 from base.telemetry.metrics.plugin_metrics import (
@@ -49,10 +49,6 @@ from base.telemetry.metrics.plugin_metrics import (
 from gateway.inspect import _event_metrics
 from gateway.inspect._plugin_faces import enabled_face_files
 from gateway.inspect.schemas import MetricPoint, PluginMetricResult
-
-# The shipped-plugin metrics directory — every ENABLED plugin dir with a metrics.py is part of the
-# in-process registry (the generator's import set, task #180 PR D).
-PLUGINS_DIR = Path(__file__).resolve().parents[2] / "meiva_builtins" / "plugins"
 
 # The inspector's fixed recent window: the templates' `$__timeFilter(ts)` /
 # `$__timeGroup(ts, $__interval)` render to this window (24h in 1h buckets =
@@ -89,29 +85,13 @@ _MACRO_INTERVAL_LOKI = "1h"
 _MACRO_RANGE_LOKI = f"{_INSPECTOR_WINDOW_HOURS}h"
 
 
-def plugin_metric_modules(
-    plugins_dir: Path | None = None,
-    *,
-    installed_dirs: Callable[[], Mapping[str, Path]] | None = None,
-    runtime_loader: Callable[[set[str]], enable_config.PluginsConfig] | None = None,
-) -> list[Path]:
+def plugin_metric_modules(plugins_dir: Path, enabled: Collection[str]) -> list[Path]:
     """``metrics.py`` of every ENABLED shipped plugin, sorted — the import set of one registry
     build (the same enable rule the widget loader applies)."""
-    return enabled_face_files(
-        PLUGINS_DIR if plugins_dir is None else plugins_dir,
-        "metrics.py",
-        installed_dirs=installed_dirs,
-        runtime_loader=runtime_loader,
-    )
+    return enabled_face_files(plugins_dir, "metrics.py", enabled)
 
 
-def load_plugin_metrics(
-    modules: Sequence[Path] | None = None,
-    *,
-    plugins_dir: Path | None = None,
-    installed_dirs: Callable[[], Mapping[str, Path]] | None = None,
-    runtime_loader: Callable[[set[str]], enable_config.PluginsConfig] | None = None,
-) -> list[MetricSpec]:
+def load_plugin_metrics(plugins_dir: Path, enabled: Collection[str]) -> list[MetricSpec]:
     """The in-process metric registry: every ENABLED shipped plugin's ``metrics.py``
     declaration (``contribute()``) admitted into a data registry, plus the core
     definition modules — plugin metrics first, then core, the order the old
@@ -128,13 +108,7 @@ def load_plugin_metrics(
     core metrics still serve — never a 500 for the whole endpoint, never a stale
     snapshot. A declaration is admitted whole or not at all, so there is no partial
     registration to clean up and a fixed file is picked up on the next call."""
-    target_modules = (
-        plugin_metric_modules(
-            plugins_dir, installed_dirs=installed_dirs, runtime_loader=runtime_loader
-        )
-        if modules is None
-        else modules
-    )
+    target_modules = plugin_metric_modules(plugins_dir, enabled)
     declared = [
         data_registry.load_declaration(
             path.parent.name,
@@ -309,7 +283,7 @@ def metrics_for_agent(
     pool: ConnectionPool[Any],
     agent_id: int,
     *,
-    loader: Callable[[], list[MetricSpec]] | None = None,
+    registry: Sequence[MetricSpec],
 ) -> list[PluginMetricResult]:
     """Sync twin of the metrics endpoint — runs via asyncio.to_thread.
 
@@ -321,8 +295,7 @@ def metrics_for_agent(
     on the pooled connection object after return, so a later borrower could
     inherit a read-only session and its writes would fail. The SET TRANSACTION
     form leaves nothing behind when the transaction rolls back."""
-    loader_fn = load_plugin_metrics if loader is None else loader
-    specs = [s for s in loader_fn() if "inspector" in s.output]
+    specs = [s for s in registry if "inspector" in s.output]
     results: list[PluginMetricResult] = []
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute("SET TRANSACTION READ ONLY")

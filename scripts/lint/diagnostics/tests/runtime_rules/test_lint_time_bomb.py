@@ -227,7 +227,7 @@ def test_pinned_clock_exact_equality_is_allowed(scratch: _Scratch) -> None:
     _write(root, "base/telemetry/loki_index_labels.py", FIXED_FAMILY)
     _write(
         root,
-        "gateway/routers/fleet_graph.py",
+        "gateway/routers/fleet/fleet_graph.py",
         """
         from base.telemetry.loki_index_labels import INDEX_LABEL_CUTOVER_AT
 
@@ -242,7 +242,7 @@ def test_pinned_clock_exact_equality_is_allowed(scratch: _Scratch) -> None:
         """
         from datetime import timedelta
 
-        from gateway.routers.fleet_graph import fetch_edges
+        from gateway.routers.fleet.fleet_graph import fetch_edges
         from base.telemetry.loki_index_labels import INDEX_LABEL_CUTOVER_AT
 
 

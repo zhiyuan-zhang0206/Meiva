@@ -83,9 +83,10 @@ def _parameter_lists() -> dict[str, set[str]]:
 
 def _inspector_names() -> set[str]:
     from gateway.inspect import _plugin_metrics
+    from gateway.inspect._plugin_faces import SHIPPED_PLUGINS_DIR, enabled_plugin_names
 
     names: set[str] = set()
-    for spec in _plugin_metrics.load_plugin_metrics():
+    for spec in _plugin_metrics.load_plugin_metrics(SHIPPED_PLUGINS_DIR, enabled_plugin_names()):
         if "inspector" not in spec.output:
             continue
         names.add(spec.event_name)

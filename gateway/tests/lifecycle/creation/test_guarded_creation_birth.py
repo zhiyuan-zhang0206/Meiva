@@ -1,6 +1,5 @@
 from concurrent.futures import ThreadPoolExecutor
-from threading import Barrier
-from typing import Any, LiteralString
+from typing import LiteralString
 from uuid import UUID
 
 import psycopg
@@ -9,17 +8,23 @@ from psycopg import sql
 from psycopg.types.json import Jsonb
 
 from base.agents.birth.creation_identity import creation_request_hash, find_creation
-from base.cluster import machines
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
-from gateway.agents import creation as agent_creation
 from gateway.http.auth.request_principal import AuthPrincipal, principal_key
 from gateway.tests.auth.gateway_config import GatewayTestClient
-from gateway.tests.auth.gateway_tests import local_spawn_in_process as local_spawn_in_process
 from gateway.tests.lifecycle.creation.test_guarded_creation import HEADERS, PATH
 from gateway.tests.lifecycle.creation.test_guarded_creation import client as client
-from ops.cluster import rpc
-from ops.rpc_schemas import LaunchAgentRequest, SpawnAgentRequest, SpawnedAgent
+from gateway.tests.lifecycle.creation.test_guarded_creation import runner as runner
+from gateway.tests.support.db_faults.held_lock import held_creation_lock
+from gateway.tests.support.db_faults.insert_fault import failing_insert
+from gateway.tests.support.runner_ops.ops_stub import (
+    OpsCall,
+    OpsReply,
+    RunnerOps,
+    launched,
+    runner_ops,
+)
+from ops.rpc_schemas import LaunchAgentRequest, SpawnAgentRequest
 
 BODY = {"machine": "local-test", "prompt": "one goal", "prompt_source": "user"}
 
@@ -32,15 +37,18 @@ def _snapshot(conn: psycopg.Connection) -> tuple[str, str, UUID]:
     return row
 
 
-def _no_revalidation(*args: object, **kwargs: object) -> None:
-    raise AssertionError("retained birth cannot repeat mutable preflight")
+# meiva:note
+# The target is no longer a runner: a fresh spawn would be refused at preflight.
+def _registry_refuses_new_spawns(conn: psycopg.Connection) -> None:
+    conn.execute("UPDATE machines SET role=ARRAY['gateway'] WHERE name='local-test'")
+    conn.commit()
 
 
 @pytest.mark.parametrize("mutation", ["admitted", "terminated", "deleted", "placed"])
 def test_historical_birth_never_wakes_later_work(
     client: GatewayTestClient,
+    runner: RunnerOps,
     db_conn: psycopg.Connection,
-    monkeypatch: pytest.MonkeyPatch,
     mutation: str,
 ) -> None:
     first = client.post(PATH, json=BODY, headers=HEADERS)
@@ -54,25 +62,20 @@ def test_historical_birth_never_wakes_later_work(
     }
     db_conn.execute(sql.SQL(statements[mutation]), (agent_id,))
     db_conn.commit()
-    monkeypatch.setattr(machines, "lookup_role", _no_revalidation)
-
-    async def unexpected(_db: object, _target: str, _body: LaunchAgentRequest) -> SpawnedAgent:
-        raise AssertionError("historical creation cannot wake later work")
-
-    monkeypatch.setattr(agent_creation, "forward_spawn_to_remote", unexpected)
+    _registry_refuses_new_spawns(db_conn)
+    launches_before = len(runner.calls_of("spawn-launch"))
     replay = client.post(PATH, json=BODY, headers=HEADERS)
     assert replay.status_code == 201, replay.text
     assert replay.json()["id"] == agent_id
     assert replay.json()["accepted"] is True
     assert replay.json()["execution_observed"] is False
+    assert len(runner.calls_of("spawn-launch")) == launches_before
     assert db_conn.execute("SELECT count(*) FROM agent_creation_snapshots").fetchone() == (1,)
     assert db_conn.execute("SELECT count(*) FROM inbound_messages").fetchone() == (1,)
 
 
 def test_original_manifest_precedes_mutable_config_and_defaults(
-    client: GatewayTestClient,
-    db_conn: psycopg.Connection,
-    monkeypatch: pytest.MonkeyPatch,
+    client: GatewayTestClient, runner: RunnerOps, db_conn: psycopg.Connection
 ) -> None:
     body = {"prompt": "one goal", "prompt_source": "user"}
     first = client.post(PATH, json=body, headers=HEADERS)
@@ -89,19 +92,19 @@ def test_original_manifest_precedes_mutable_config_and_defaults(
     )
     db_conn.commit()
     client.app.state.machine.set(name="new-default")
-    monkeypatch.setattr(machines, "lookup_role", _no_revalidation)
-    calls: list[tuple[str, LaunchAgentRequest]] = []
-
-    async def accept(_db: object, target: str, launch: LaunchAgentRequest) -> SpawnedAgent:
-        calls.append((target, launch))
-        return SpawnedAgent(id=launch.agent_id)
-
-    monkeypatch.setattr(agent_creation, "forward_spawn_to_remote", accept)
+    _registry_refuses_new_spawns(db_conn)
+    first_launches = len(runner.calls_of("spawn-launch"))
     replay = client.post(PATH, json=body, headers=HEADERS)
     assert replay.status_code == 201, replay.text
-    assert len(calls) == 1
-    target, launch = calls[0]
-    assert (target, launch.config, launch.birth_config, launch.launch_attempt_id) == stored
+    launches = runner.payloads("spawn-launch")
+    assert len(launches) == first_launches + 1
+    launch = launches[-1]
+    assert (
+        runner.name,
+        launch.get("config"),
+        launch["birth_config"],
+        UUID(launch["launch_attempt_id"]),
+    ) == stored
     assert db_conn.execute(
         "SELECT config_overlay FROM agents_meta WHERE id=%s", (agent_id,)
     ).fetchone() == (changed,)
@@ -113,8 +116,8 @@ def test_original_manifest_precedes_mutable_config_and_defaults(
 
 def test_original_key_cannot_dispatch_deliberate_replacement_attempt(
     client: GatewayTestClient,
+    runner: RunnerOps,
     db_conn: psycopg.Connection,
-    monkeypatch: pytest.MonkeyPatch,
     *,
     machine_identity: MachineIdentity,
 ) -> None:
@@ -125,16 +128,13 @@ def test_original_key_cannot_dispatch_deliberate_replacement_attempt(
     agent_id = first.json()["id"]
     key, digest, original = _snapshot(db_conn)
 
-    async def reconcile(*args: object, **kwargs: object) -> dict[str, object]:
-        return {}
-
-    monkeypatch.setattr(rpc, "dispatch_to_machine", reconcile)
     retry = client.post(
         f"/api/keyed/v1/agents/{agent_id}/retry-launch",
         json={"expected_prior_attempt_id": str(original)},
         headers={**HEADERS, "Idempotency-Key": "deliberate-retry"},
     )
     assert retry.status_code == 200, retry.text
+    assert len(runner.calls_of("launch-reconcile")) == 1
     replacement = UUID(retry.json()["launch_attempt_id"])
     assert replacement != original
     validate_launch_row(
@@ -153,12 +153,12 @@ def test_original_key_cannot_dispatch_deliberate_replacement_attempt(
         receipt is not None and receipt.launch_attempt_id == original and not receipt.launch_pending
     )
 
-    async def unexpected(_db: object, _target: str, _body: LaunchAgentRequest) -> SpawnedAgent:
-        raise AssertionError("old creation cannot dispatch a later retry attempt")
-
-    monkeypatch.setattr(agent_creation, "forward_spawn_to_remote", unexpected)
+    launches_before = len(runner.calls_of("spawn-launch"))
     replay = client.post(PATH, json=BODY, headers=HEADERS)
     assert replay.status_code == 201 and replay.json()["id"] == agent_id
+    # meiva:note
+    # The old creation cannot dispatch a later retry attempt.
+    assert len(runner.calls_of("spawn-launch")) == launches_before
     assert db_conn.execute("SELECT last_launch_attempt_id FROM agents_meta").fetchone() == (
         replacement,
     )
@@ -166,19 +166,12 @@ def test_original_key_cannot_dispatch_deliberate_replacement_attempt(
 
 
 def test_snapshot_fault_rolls_back_then_same_key_accepts_fresh_birth(
-    client: GatewayTestClient,
-    db_conn: psycopg.Connection,
-    monkeypatch: pytest.MonkeyPatch,
+    client: GatewayTestClient, db_conn: psycopg.Connection
 ) -> None:
-    from base.agents.birth import transaction
-
-    original = transaction.record_creation_snapshot
-
-    def fail(*args: object, **kwargs: object) -> None:
-        raise RuntimeError("injected snapshot failure")
-
-    monkeypatch.setattr(transaction, "record_creation_snapshot", fail)
-    with pytest.raises(RuntimeError, match="injected snapshot"):
+    with (
+        failing_insert(db_conn, "agent_creation_snapshots", message="injected snapshot failure"),
+        pytest.raises(psycopg.errors.RaiseException, match="injected snapshot"),
+    ):
         client.post(PATH, json=BODY, headers=HEADERS)
     for statement in (
         "SELECT count(*) FROM agents",
@@ -187,7 +180,6 @@ def test_snapshot_fault_rolls_back_then_same_key_accepts_fresh_birth(
         "SELECT count(*) FROM agent_creation_snapshots",
     ):
         assert db_conn.execute(statement).fetchone() == (0,)
-    monkeypatch.setattr(transaction, "record_creation_snapshot", original)
     accepted = client.post(PATH, json=BODY, headers=HEADERS)
     assert accepted.status_code == 201, accepted.text
     assert db_conn.execute("SELECT count(*) FROM agent_creation_snapshots").fetchone() == (1,)
@@ -195,24 +187,19 @@ def test_snapshot_fault_rolls_back_then_same_key_accepts_fresh_birth(
 
 @pytest.mark.parametrize("different", [False, True])
 def test_same_key_birth_transaction_freezes_concurrent_winner(
-    client: GatewayTestClient,
-    db_conn: psycopg.Connection,
-    monkeypatch: pytest.MonkeyPatch,
-    different: bool,
+    client: GatewayTestClient, db_conn: psycopg.Connection, db_url: str, different: bool
 ) -> None:
-    original = agent_creation.create_agent_row
-    gate = Barrier(2)
-
-    def race(*args: Any, **kwargs: Any) -> Any:
-        gate.wait(timeout=10)
-        return original(*args, **kwargs)
-
-    monkeypatch.setattr(agent_creation, "create_agent_row", race)
+    key = principal_key(AuthPrincipal("cluster", "administrator"), "POST", PATH, "intent")
     bodies = [BODY, {**BODY, "prompt": "another goal"} if different else BODY]
+    # meiva:note
+    # Both requests pass the receipt lookup, then queue on the key's birth lock; released
+    # together, the database decides which birth is the winner.
     with ThreadPoolExecutor(max_workers=2) as executor:
-        futures = [
-            executor.submit(client.post, PATH, json=body, headers=HEADERS) for body in bodies
-        ]
+        with held_creation_lock(db_url, key) as held:
+            futures = [
+                executor.submit(client.post, PATH, json=body, headers=HEADERS) for body in bodies
+            ]
+            held.wait_for_waiters(2)
         responses = [future.result() for future in futures]
     assert sorted(response.status_code for response in responses) == (
         [201, 409] if different else [201, 201]
@@ -235,31 +222,24 @@ def test_same_key_birth_transaction_freezes_concurrent_winner(
 
 
 def test_native_launch_ack_loss_recovers_same_attempt(
-    client: GatewayTestClient,
-    db_conn: psycopg.Connection,
-    monkeypatch: pytest.MonkeyPatch,
-    *,
-    machine_identity: MachineIdentity,
+    client: GatewayTestClient, db_conn: psycopg.Connection
 ) -> None:
-    from ops.lifecycle.launch import validate_launch_row
+    attempts: list[OpsCall] = []
 
-    calls: list[LaunchAgentRequest] = []
+    def lose_the_first_acknowledgement(call: OpsCall) -> OpsReply:
+        # meiva:note
+        # The runner acted on the launch; only its acknowledgement never arrives whole.
+        attempts.append(call)
+        return OpsReply(200, "{") if len(attempts) == 1 else launched(call)
 
-    async def lost_once(_db: object, _target: str, body: LaunchAgentRequest) -> SpawnedAgent:
-        validate_launch_row(client.app.state.db_pool, body, local_machine=machine_identity.name())
-        calls.append(body)
-        if len(calls) == 1:
-            raise TimeoutError("native launch acknowledgement lost")
-        return SpawnedAgent(id=body.agent_id)
-
-    monkeypatch.setattr(agent_creation, "forward_spawn_to_remote", lost_once)
-    first = client.post(PATH, json=BODY, headers=HEADERS)
-    assert first.status_code == 502, first.text
-    snapshot = _snapshot(db_conn)
-    retry = client.post(PATH, json=BODY, headers=HEADERS)
+    with runner_ops(db_conn, "local-test", {"spawn-launch": lose_the_first_acknowledgement}):
+        first = client.post(PATH, json=BODY, headers=HEADERS)
+        assert first.status_code == 502, first.text
+        snapshot = _snapshot(db_conn)
+        retry = client.post(PATH, json=BODY, headers=HEADERS)
     assert retry.status_code == 201, retry.text
-    assert len(calls) == 2
-    assert all(call.launch_attempt_id == snapshot[2] for call in calls)
-    assert all(call.agent_id == retry.json()["id"] for call in calls)
+    assert len(attempts) == 2
+    assert all(UUID(call.payload["launch_attempt_id"]) == snapshot[2] for call in attempts)
+    assert all(call.payload["agent_id"] == retry.json()["id"] for call in attempts)
     assert db_conn.execute("SELECT count(*) FROM inbound_messages").fetchone() == (1,)
     assert _snapshot(db_conn) == snapshot

@@ -1,11 +1,8 @@
 # meiva:link gateway/docs/error-responses-and-middleware-order.meiva.okf.md
-import os
-from collections.abc import Iterator
+from collections.abc import Generator
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from typing import Any
-from unittest.mock import patch
-from uuid import UUID
 
 import psycopg
 import pytest
@@ -13,12 +10,11 @@ from fastapi.testclient import TestClient
 
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
-from base.config import settings
-from gateway.agents import creation as agent_creation
-from gateway.agents.task_assignment import router as task_assignments
 from gateway.http.model_catalog import CatalogLoadFailure
 from gateway.tests.auth.gateway_config import GatewayTestClient, gateway_test_client
-from ops.rpc_schemas import LaunchAgentRequest, SpawnedAgent
+from gateway.tests.support.db_faults.insert_fault import failing_insert
+from gateway.tests.support.db_faults.missing_table import missing_table
+from gateway.tests.support.runner_ops.ops_stub import RunnerOps, launched, refused, runner_ops
 
 PATH = "/api/keyed/v1/task-assignments"
 HEADERS = {"Idempotency-Key": "compound", "Idempotency-Scope": "principal-v1"}
@@ -26,29 +22,27 @@ SECRET = "compound-test-secret"  # noqa: S105
 
 
 @pytest.fixture
-def client(
-    gateway_data_plane: None,
-    monkeypatch: pytest.MonkeyPatch,
-    set_machine_identity: Any,
-    *,
-    machine_identity: MachineIdentity,
-) -> Iterator[GatewayTestClient]:
+def runner(
+    gateway_data_plane: None, db_conn: psycopg.Connection, set_machine_identity: Any
+) -> Generator[RunnerOps]:
+    """The runner `local-test`, which accepts every launch it is asked for."""
     set_machine_identity(role="agent-runner", name="local-test")
-    monkeypatch.setattr(settings.data_plane, "cluster_secret", SECRET)
+    with runner_ops(db_conn, "local-test", {"spawn-launch": launched}) as value:
+        yield value
 
-    async def accept(db: object, target: str, body: LaunchAgentRequest) -> SpawnedAgent:
-        return SpawnedAgent(id=body.agent_id)
 
-    monkeypatch.setattr(agent_creation, "forward_spawn_to_remote", accept)
+@pytest.fixture
+def client(runner: RunnerOps, *, machine_identity: MachineIdentity) -> Generator[GatewayTestClient]:
     with gateway_test_client(
-        headers={"Authorization": f"Bearer {SECRET}"}, machine=machine_identity
+        cluster_secret=SECRET,
+        headers={"Authorization": f"Bearer {SECRET}"},
+        machine=machine_identity,
     ) as value:
         yield value
 
 
 @pytest.fixture
-def body(db_conn: psycopg.Connection) -> dict[str, Any]:
-    db_conn.execute("INSERT INTO machines(name,role) VALUES ('local-test',ARRAY['agent-runner'])")
+def body(runner: RunnerOps, db_conn: psycopg.Connection) -> dict[str, Any]:
     actor = db_conn.execute("INSERT INTO agents DEFAULT VALUES RETURNING id").fetchone()
     assert actor is not None
     db_conn.execute(
@@ -116,18 +110,17 @@ def test_model_failure_preserves_accepted_pair_and_blocks_new_assignment(
 
 
 def test_producer_failure_rolls_back_entire_pair(
-    client: TestClient,
-    db_conn: psycopg.Connection,
-    body: dict[str, Any],
-    monkeypatch: pytest.MonkeyPatch,
+    client: TestClient, db_conn: psycopg.Connection, body: dict[str, Any]
 ) -> None:
     before = _counts(db_conn)
-
-    def refuse(*args: Any) -> None:
-        raise RuntimeError("receipt failure after birth/task/audit/inbound")
-
-    monkeypatch.setattr(task_assignments, "save_assignment", refuse)
-    with pytest.raises(RuntimeError, match="receipt failure"):
+    # meiva:note
+    # The receipt is the last write, after birth, task, audit and inbound have been written.
+    with (
+        failing_insert(
+            db_conn, "task_assignment_receipts", message="receipt failure after birth/task"
+        ),
+        pytest.raises(psycopg.errors.RaiseException, match="receipt failure"),
+    ):
         client.post(PATH, json=body, headers=HEADERS)
     assert _counts(db_conn) == before
 
@@ -172,14 +165,9 @@ def test_snapshot_replays_after_task_and_birth_metadata_deleted(
     assert replay.json()["launch"]["execution_observed"] is False
 
 
-def test_replay_skips_changed_default_policy(
-    client: TestClient,
-    db_conn: psycopg.Connection,
-    body: dict[str, Any],
-    monkeypatch: pytest.MonkeyPatch,
+def test_replay_skips_changed_task_state_and_defaults(
+    client: TestClient, db_conn: psycopg.Connection, body: dict[str, Any]
 ) -> None:
-    from base.agents.tasks.priority import DEFAULT_REMIND_INTERVAL_SECONDS, Priority
-
     body["agent"]["config"] = {"reasoning_effort": "high"}
     first = client.post(PATH, json=body, headers=HEADERS)
     assert first.status_code == 201, first.text
@@ -189,7 +177,6 @@ def test_replay_skips_changed_default_policy(
         (original["task"]["id"],),
     )
     db_conn.commit()
-    monkeypatch.setitem(DEFAULT_REMIND_INTERVAL_SECONDS, Priority.P2, 123)
     replay = client.post(PATH, json=body, headers=HEADERS)
     assert replay.status_code == 201, replay.text
     assert replay.json()["task"] == original["task"]
@@ -204,37 +191,28 @@ def test_replay_skips_changed_default_policy(
 
 
 def test_launch_failure_retains_accepted_pair_and_original_attempt(
-    client: TestClient,
-    db_conn: psycopg.Connection,
-    body: dict[str, Any],
-    monkeypatch: pytest.MonkeyPatch,
+    client: TestClient, db_conn: psycopg.Connection, body: dict[str, Any]
 ) -> None:
-    attempts: list[UUID | None] = []
-
-    async def unavailable(db: object, target: str, launch: LaunchAgentRequest) -> SpawnedAgent:
-        attempts.append(launch.launch_attempt_id)
-        raise RuntimeError("runner unavailable")
-
-    monkeypatch.setattr(agent_creation, "forward_spawn_to_remote", unavailable)
-    first = client.post(PATH, json=body, headers=HEADERS)
-    assert first.status_code == 201, first.text
-    original = first.json()
-    assert original["launch"] is None and original["launch_failure"]
-    assert original["retry_launch_path"].endswith("/retry-launch")
-    before = _counts(db_conn)
-    again = client.post(PATH, json=body, headers=HEADERS)
+    with runner_ops(
+        db_conn, "local-test", {"spawn-launch": refused(404, "runner unavailable")}
+    ) as unavailable:
+        first = client.post(PATH, json=body, headers=HEADERS)
+        assert first.status_code == 201, first.text
+        original = first.json()
+        assert original["launch"] is None and original["launch_failure"]
+        assert original["retry_launch_path"].endswith("/retry-launch")
+        before = _counts(db_conn)
+        again = client.post(PATH, json=body, headers=HEADERS)
     assert again.status_code == 201
     assert again.json()["task"] == original["task"]
     assert again.json()["launch_attempt_id"] == original["launch_attempt_id"]
-    assert len(attempts) == 2 and attempts[0] == attempts[1]
+    attempts = [payload["launch_attempt_id"] for payload in unavailable.payloads("spawn-launch")]
+    assert len(attempts) == 2 and attempts[0] == attempts[1] == original["launch_attempt_id"]
     assert _counts(db_conn) == before
 
 
 def test_changed_placement_returns_historical_acceptance_without_launch(
-    client: TestClient,
-    db_conn: psycopg.Connection,
-    body: dict[str, Any],
-    monkeypatch: pytest.MonkeyPatch,
+    client: TestClient, runner: RunnerOps, db_conn: psycopg.Connection, body: dict[str, Any]
 ) -> None:
     first = client.post(PATH, json=body, headers=HEADERS)
     assert first.status_code == 201, first.text
@@ -247,16 +225,10 @@ def test_changed_placement_returns_historical_acceptance_without_launch(
         (original["agent_id"],),
     )
     db_conn.commit()
-    seen: list[str] = []
-
-    async def unexpected(db: object, target: str, launch: LaunchAgentRequest) -> SpawnedAgent:
-        seen.append(target)
-        return SpawnedAgent(id=launch.agent_id)
-
-    monkeypatch.setattr(agent_creation, "forward_spawn_to_remote", unexpected)
+    launches_before = len(runner.calls_of("spawn-launch"))
     replay = client.post(PATH, json=body, headers=HEADERS)
     assert replay.status_code == 201
-    assert seen == []
+    assert len(runner.calls_of("spawn-launch")) == launches_before
     assert replay.json()["launch_attempt_id"] == original["launch_attempt_id"]
     assert replay.json()["launch"]["accepted"] is True
     assert (
@@ -313,16 +285,18 @@ def test_cookie_and_bearer_share_verified_subject(client: TestClient, body: dict
 
 
 def test_postcommit_launch_observation_failure_preserves_pair(
-    client: TestClient, body: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+    client: TestClient, body: dict[str, Any], db_conn: psycopg.Connection
 ) -> None:
-    def unavailable(*args: Any):
-        raise psycopg.OperationalError("current-state read unavailable")
-
-    monkeypatch.setattr(task_assignments, "find_creation", unavailable)
     first = client.post(PATH, json=body, headers=HEADERS)
     assert first.status_code == 201, first.text
-    assert first.json()["launch"] is None
-    assert "OperationalError" in first.json()["launch_failure"]
+    # meiva:note
+    # The accepted pair is durable; reading the creation snapshot of its launch now fails.
+    with missing_table(db_conn, "agent_creation_snapshots"):
+        unobserved = client.post(PATH, json=body, headers=HEADERS)
+    assert unobserved.status_code == 201, unobserved.text
+    assert unobserved.json()["launch"] is None
+    assert "UndefinedTable" in unobserved.json()["launch_failure"]
+    assert unobserved.json()["task"] == first.json()["task"]
     replay = client.post(PATH, json=body, headers=HEADERS)
     assert replay.status_code == 201
     assert replay.json()["task"] == first.json()["task"]
@@ -341,10 +315,3 @@ def test_corrupt_snapshot_fails_without_recreating_mutable_state(
     with pytest.raises(ValueError, match="missing or unknown"):
         client.post(PATH, json=body, headers=HEADERS)
     assert _counts(db_conn) == before
-
-
-@pytest.fixture(autouse=True)
-def _restore_cold_gateway_delivery() -> Iterator[None]:
-    """This module owns every environment mutation made by its real gateway lifespan."""
-    with patch.dict(os.environ):
-        yield

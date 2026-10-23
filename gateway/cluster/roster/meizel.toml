@@ -1,0 +1,10 @@
+exports = ["liveness_snapshot.py", "roster_plan.py", "roster_probe.py", "roster_rows.py", "snapshots.py"]
+
+[uses]
+"roster_plan.py" = ["liveness_snapshot.py", "roster_rows.py"]
+"snapshots.py" = ["liveness_snapshot.py", "roster_rows.py"]
+
+[purity]
+"liveness_snapshot.py" = "strict"
+"roster_plan.py" = "strict"
+"roster_rows.py" = "strict"

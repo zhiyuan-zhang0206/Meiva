@@ -30,7 +30,8 @@ class ValidatedFleetConfig(FleetConfig):
 
 @pytest.fixture
 def owned_image(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    image = tmp_path / "config.json"
+    image = tmp_path / "images" / "config.json"
+    image.parent.mkdir()
     image.write_text(ValidatedFleetConfig().model_dump_json())
     owner = PluginConfigOwner("meiva_fleet", ValidatedFleetConfig, image)
     monkeypatch.setattr(plugin_config, "config_owners", lambda: {owner.name: owner})
@@ -118,28 +119,24 @@ def test_concurrent_image_change_is_rejected_without_overwriting(
 
 
 @pytest.mark.parametrize("consumer", ["gateway", "host"])
-@pytest.mark.parametrize("error_type", [ValueError, RuntimeError])
 def test_unexpected_persistence_failure_keeps_original_exception_and_bytes(
     owned_image: Path,
-    monkeypatch: pytest.MonkeyPatch,
     consumer: Literal["gateway", "host"],
-    error_type: type[Exception],
     *,
     config_authority: ConfigAuthority,
     machine_identity: MachineIdentity,
 ) -> None:
     saved = owned_image.read_bytes()
-    failure = error_type("unexpected persistence failure")
-
-    def fail_write(_path: Path, _data: bytes, *, mode: int | None = None) -> None:
-        raise failure
-
-    monkeypatch.setattr(plugin_config_images, "write_bytes_atomic", fail_write)
-    with pytest.raises(error_type) as captured:
-        write_request(
-            consumer, config_authority=config_authority, local_machine=machine_identity.name()
-        )
-    assert captured.value is failure
+    # meiva:note
+    # The image's directory cannot take the temporary file the atomic write starts with.
+    owned_image.parent.chmod(0o500)
+    try:
+        with pytest.raises(PermissionError):
+            write_request(
+                consumer, config_authority=config_authority, local_machine=machine_identity.name()
+            )
+    finally:
+        owned_image.parent.chmod(0o700)
     assert owned_image.read_bytes() == saved
 
 

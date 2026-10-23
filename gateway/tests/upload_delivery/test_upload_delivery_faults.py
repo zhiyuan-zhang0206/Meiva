@@ -1,6 +1,5 @@
 """Remote copy and transactional inbound response-loss fault boundaries."""
 
-import asyncio
 from contextlib import contextmanager
 from dataclasses import replace
 from pathlib import Path
@@ -19,104 +18,97 @@ from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import settings
 from base.config.service_read import ConfigAuthority
-from base.db import Database
 from base.host.db_authority.unit import UnitIdentity
 from base.host.system.tests.fake_commands import fake_host
-from base.lm.catalog import ModelCatalog
 from gateway.tests.auth.gateway_config import GatewayTestClient, gateway_test_client
+from gateway.tests.support.db_faults.insert_fault import failing_insert
+from gateway.tests.support.db_faults.update_fault import failing_update
+from gateway.tests.support.runner_ops.ops_stub import (
+    OpsCall,
+    OpsReply,
+    completed,
+    failed,
+    refused,
+    runner_ops,
+)
 from gateway.tests.upload_delivery.test_upload_delivery_recovery import (
     SECRET,
     post,
     proof_for,
+    recovery_for,
+    register_second_home,
     request_for,
 )
 from gateway.tests.upload_delivery.test_upload_delivery_recovery import (
     uploaded_agent as uploaded_agent,
 )
-from gateway.upload_delivery import worker
 from ops import upload_delivery as receiver
-from ops.cluster.rpc import ClusterOpFailed, ClusterOpUnreachable
 from ops.rpc_schemas import OpStatus
 from services.agent_runner.agent_ops.dispatch_sync import dispatch_sync
 
-# meiva:note
-# The recovery worker's claim lease for a constructed worker: these tests drive one
-# batch at a time, so any positive lease behaves the same here.
-_CLAIM_SECONDS = 300.0
 
-
-@pytest.mark.parametrize("stage", ["before", "after"])
-def test_source_ready_commit_failure_or_lost_receipt_recovers(
-    uploaded_agent: tuple[GatewayTestClient, int],
-    db_conn: psycopg.Connection[Any],
-    monkeypatch: pytest.MonkeyPatch,
-    stage: str,
+def _recovered_source_ready(
+    client: GatewayTestClient, db_conn: psycopg.Connection[Any], agent: int
 ):
-    client, agent = uploaded_agent
-    original = source.write_transaction
-    count = 0
-
-    @contextmanager
-    def faulty(pool: ConnectionPool):
-        nonlocal count
-        count += 1
-        this = count
-        with original(pool) as conn:
-            yield conn
-            if this == 2 and stage == "before":
-                raise psycopg.OperationalError("source ready commit failure")
-        if this == 2 and stage == "after":
-            raise psycopg.OperationalError("source ready response lost")
-
-    monkeypatch.setattr(source, "write_transaction", faulty)
-    assert post(client, agent).status_code == 500
-    assert db_conn.execute("SELECT state FROM upload_delivery_batches").fetchone() == (
-        "receiving" if stage == "before" else "pending",
-    )
-    monkeypatch.setattr(source, "write_transaction", original)
     recovered = post(client, agent)
     assert recovered.status_code == 202
     assert db_conn.execute("SELECT count(*) FROM upload_delivery_batches").fetchone() == (1,)
     assert client.get(recovered.json()["status_url"] + "/objects/0").content == b"bytes"
 
 
-@pytest.mark.parametrize("stage", ["before", "after"])
-def test_inbound_transaction_rollback_and_commit_ack_loss(
+def test_source_ready_commit_failure_recovers(
+    uploaded_agent: tuple[GatewayTestClient, int], db_conn: psycopg.Connection[Any]
+):
+    client, agent = uploaded_agent
+    with failing_update(db_conn, "upload_delivery_batches", message="source ready commit failure"):
+        assert post(client, agent).status_code == 500
+        assert db_conn.execute("SELECT state FROM upload_delivery_batches").fetchone() == (
+            "receiving",
+        )
+    _recovered_source_ready(client, db_conn, agent)
+
+
+# meiva:note
+# The ready write commits, then the caller sees a failure: Postgres cannot lose an ack on
+# demand, so the transaction wrapper raises once after its commit (needs base: a transaction
+# port). Every other transaction runs through untouched.
+def test_source_ready_lost_commit_ack_recovers(
     uploaded_agent: tuple[GatewayTestClient, int],
     db_conn: psycopg.Connection[Any],
     monkeypatch: pytest.MonkeyPatch,
-    stage: str,
-    *,
-    machine_identity: MachineIdentity,
 ):
     client, agent = uploaded_agent
+    original = source.write_transaction
+    count = 0
+
+    @contextmanager
+    def ack_lost_once(pool: ConnectionPool):
+        nonlocal count
+        count += 1
+        this = count
+        with original(pool) as conn:
+            yield conn
+        if this == 2:
+            raise psycopg.OperationalError("source ready response lost")
+
+    monkeypatch.setattr(source, "write_transaction", ack_lost_once)
+    assert post(client, agent).status_code == 500
+    assert db_conn.execute("SELECT state FROM upload_delivery_batches").fetchone() == ("pending",)
+    _recovered_source_ready(client, db_conn, agent)
+
+
+def _request_and_proof(
+    client: GatewayTestClient, agent: int, machine_identity: MachineIdentity
+) -> tuple[ReceiveRequest, CopyProof]:
     request = request_for(
         client.app.state.db_pool,
         post(client, agent).json()["batch_id"],
         local_machine=machine_identity.name(),
     )
-    proof = proof_for(request)
-    original = source.write_transaction
+    return request, proof_for(request)
 
-    @contextmanager
-    def faulty(pool: ConnectionPool):
-        with original(pool) as conn:
-            yield conn
-            if stage == "before":
-                raise psycopg.OperationalError("inbound commit failure")
-        if stage == "after":
-            raise psycopg.OperationalError("inbound commit ack lost")
 
-    monkeypatch.setattr(source, "write_transaction", faulty)
-    with pytest.raises(psycopg.OperationalError):
-        source.complete(client.app.state.db_pool, request, proof)
-    expected = 0 if stage == "before" else 1
-    assert db_conn.execute(
-        "SELECT count(*) FROM inbound_messages WHERE agent_id=%s", (agent,)
-    ).fetchone() == (expected,)
-    monkeypatch.setattr(source, "write_transaction", original)
-    iid = source.complete(client.app.state.db_pool, request, proof)
-    assert source.complete(client.app.state.db_pool, request, proof) == iid
+def _assert_one_system_notice(db_conn: psycopg.Connection[Any], agent: int, iid: int) -> None:
     assert db_conn.execute(
         "SELECT count(*) FROM inbound_messages WHERE agent_id=%s", (agent,)
     ).fetchone() == (1,)
@@ -130,10 +122,62 @@ def test_inbound_transaction_rollback_and_commit_ack_loss(
     ).fetchone() == ("system:upload", "cluster_bearer", "http")
 
 
+def test_inbound_transaction_rollback_recovers(
+    uploaded_agent: tuple[GatewayTestClient, int],
+    db_conn: psycopg.Connection[Any],
+    *,
+    machine_identity: MachineIdentity,
+):
+    client, agent = uploaded_agent
+    request, proof = _request_and_proof(client, agent, machine_identity)
+    with failing_insert(db_conn, "inbound_messages", message="inbound commit failure"):
+        with pytest.raises(psycopg.errors.RaiseException):
+            source.complete(client.app.state.db_pool, request, proof)
+        assert db_conn.execute(
+            "SELECT count(*) FROM inbound_messages WHERE agent_id=%s", (agent,)
+        ).fetchone() == (0,)
+    iid = source.complete(client.app.state.db_pool, request, proof)
+    assert source.complete(client.app.state.db_pool, request, proof) == iid
+    _assert_one_system_notice(db_conn, agent, iid)
+
+
+# meiva:note
+# The inbound commits, then the caller sees a failure once (needs base: a transaction port).
+def test_inbound_lost_commit_ack_recovers(
+    uploaded_agent: tuple[GatewayTestClient, int],
+    db_conn: psycopg.Connection[Any],
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    machine_identity: MachineIdentity,
+):
+    client, agent = uploaded_agent
+    request, proof = _request_and_proof(client, agent, machine_identity)
+    original = source.write_transaction
+    lost = False
+
+    @contextmanager
+    def ack_lost_once(pool: ConnectionPool):
+        nonlocal lost
+        with original(pool) as conn:
+            yield conn
+        if not lost:
+            lost = True
+            raise psycopg.OperationalError("inbound commit ack lost")
+
+    monkeypatch.setattr(source, "write_transaction", ack_lost_once)
+    with pytest.raises(psycopg.OperationalError):
+        source.complete(client.app.state.db_pool, request, proof)
+    assert db_conn.execute(
+        "SELECT count(*) FROM inbound_messages WHERE agent_id=%s", (agent,)
+    ).fetchone() == (1,)
+    iid = source.complete(client.app.state.db_pool, request, proof)
+    assert source.complete(client.app.state.db_pool, request, proof) == iid
+    _assert_one_system_notice(db_conn, agent, iid)
+
+
 @pytest.mark.parametrize("version", [None, True, 1.0, 2, "1"])
 def test_explicit_native_request_and_proof_versions_fail_fast(
     uploaded_agent: tuple[GatewayTestClient, int],
-    monkeypatch: pytest.MonkeyPatch,
     version: object,
     *,
     config_authority: ConfigAuthority,
@@ -173,6 +217,42 @@ def test_explicit_native_request_and_proof_versions_fail_fast(
         )
 
 
+# meiva:note
+# The receiver runner's `upload-receive-v1` op: the real receive code, in this process.
+#
+# With `lose_first_response` the first call completes its work (the bytes are published and
+# the ready marker committed) and the caller then sees the connection answer 404.
+def _receiver_op(
+    client: GatewayTestClient,
+    authority: ConfigAuthority,
+    machine: MachineIdentity,
+    *,
+    lose_first_response: bool = False,
+):
+    calls = 0
+
+    def receive(call: OpsCall) -> OpsReply:
+        nonlocal calls
+        calls += 1
+        assert call.idempotency_key is None
+        status, proof = dispatch_sync(
+            call.kind,
+            call.payload,
+            image=client.app.state.process_image,
+            pool=client.app.state.db_pool,
+            db=client.app.state.db,
+            authority=authority,
+            local_machine=machine,
+            host=fake_host(),
+        )
+        assert status == OpStatus.COMPLETED
+        if lose_first_response and calls == 1:
+            return refused(404, "remote fsync/ready succeeded but response lost")
+        return completed(proof)
+
+    return receive
+
+
 @pytest.mark.asyncio
 async def test_real_remote_receiver_after_fsync_response_loss_one_inbound(
     uploaded_agent: tuple[GatewayTestClient, int],
@@ -186,31 +266,14 @@ async def test_real_remote_receiver_after_fsync_response_loss_one_inbound(
     client, agent = uploaded_agent
     source_unit = receiver.current_unit(local_machine=machine_identity.name())
     target = source_unit.model_copy(update={"machine": "remote", "home": "/remote/unit"})
-    db_conn.execute("INSERT INTO machines(name,gateway_url) VALUES ('remote','http://remote:7001')")
-    db_conn.execute(
-        "INSERT INTO machine_units(machine_name,home,serve_agent_runner,url) "
-        "VALUES ('remote','/remote/unit',true,'http://remote:7001')"
-    )
-    db_conn.execute("UPDATE agents_meta SET machine='remote' WHERE id=%s", (agent,))
-    db_conn.commit()
-    first = post(client, agent).json()
-    request = request_for(
-        client.app.state.db_pool,
-        first["batch_id"],
-        local_machine=machine_identity.name(),
-    )
     remote_dir = tmp_path / "remote-disk" / f"MeivaAgent-{agent}"
 
     def current_target(*, local_machine: str) -> UnitIdentity:
         assert local_machine == machine_identity.name()
         return target
 
-    monkeypatch.setattr(receiver, "current_unit", current_target)
-
     def directory(_id: int, **_kwargs: Any) -> Path:
         return remote_dir
-
-    monkeypatch.setattr(receiver, "agent_upload_dir", directory)
 
     def get(url: str, **_kwargs: Any):
         # A receiver file/network phase has released its own DB connection.
@@ -223,127 +286,114 @@ async def test_real_remote_receiver_after_fsync_response_loss_one_inbound(
             result.status_code, content=result.content, request=httpx.Request("GET", url)
         )
 
+    # meiva:note
+    # needs ops: `receive` reads its unit, its upload directory and the gateway fetch ambiently,
+    # so the in-process receiver is made to be another machine with these three patches.
+    monkeypatch.setattr(receiver, "current_unit", current_target)
+    monkeypatch.setattr(receiver, "agent_upload_dir", directory)
     monkeypatch.setattr(receiver, "http_get", get)
-    calls = 0
-
-    async def dispatch(
-        _db: Database, machine: str, kind: str, payload: dict[str, Any], **kwargs: Any
-    ):
-        nonlocal calls
-        assert machine == "remote" and kind == "upload-receive-v1"
-        assert kwargs.get("idempotency_key") is None
-        calls += 1
-        status, proof = await asyncio.to_thread(
-            dispatch_sync,
-            kind,
-            payload,
-            image=client.app.state.process_image,
-            pool=client.app.state.db_pool,
-            db=client.app.state.db,
-            authority=config_authority,
-            local_machine=machine_identity,
-            host=fake_host(),
+    receive = _receiver_op(client, config_authority, machine_identity, lose_first_response=True)
+    with runner_ops(db_conn, "remote", {"upload-receive-v1": receive}) as runner:
+        db_conn.execute(
+            "INSERT INTO machine_units(machine_name,home,serve_agent_runner,url) "
+            "VALUES ('remote','/remote/unit',true,%s)",
+            (runner.url,),
         )
-        assert status == OpStatus.COMPLETED
-        if calls == 1:
-            raise ClusterOpUnreachable("remote fsync/ready succeeded but response lost")
-        return proof
-
-    monkeypatch.setattr(worker, "dispatch_to_machine", dispatch)
-    recovery = worker.UploadRecovery(
-        client.app.state.db_pool,
-        client.app.state.db,
-        client.app.state.bus,
-        machine=machine_identity,
-        claim_seconds=_CLAIM_SECONDS,
-    )
-    await recovery.copy(request)
-    assert source.status(client.app.state.db_pool, agent, first["batch_id"]).state == "pending"
-    assert db_conn.execute(
-        "SELECT count(*) FROM upload_delivery_copies WHERE ready_at IS NOT NULL"
-    ).fetchone() == (1,)
-    await recovery.copy(request)
-    assert source.status(client.app.state.db_pool, agent, first["batch_id"]).state == "accepted"
+        db_conn.execute("UPDATE agents_meta SET machine='remote' WHERE id=%s", (agent,))
+        db_conn.commit()
+        first = post(client, agent).json()
+        request = request_for(
+            client.app.state.db_pool,
+            first["batch_id"],
+            local_machine=machine_identity.name(),
+        )
+        recovery = recovery_for(client, machine_identity)
+        await recovery.copy(request)
+        assert source.status(client.app.state.db_pool, agent, first["batch_id"]).state == "pending"
+        assert db_conn.execute(
+            "SELECT count(*) FROM upload_delivery_copies WHERE ready_at IS NOT NULL"
+        ).fetchone() == (1,)
+        await recovery.copy(request)
+        assert source.status(client.app.state.db_pool, agent, first["batch_id"]).state == "accepted"
+        await recovery.close()
+    assert len(runner.calls_of("upload-receive-v1")) == 2
     assert db_conn.execute(
         "SELECT count(*) FROM inbound_messages WHERE agent_id=%s", (agent,)
     ).fetchone() == (1,)
     assert (
         remote_dir / ".delivered-v1" / request.manifest.batch_id / request.manifest.objects[0].name
     ).read_bytes() == b"bytes"
-    await recovery.close()
 
 
 @pytest.mark.asyncio
 async def test_unknown_remote_kind_holds(
     uploaded_agent: tuple[GatewayTestClient, int],
-    monkeypatch: pytest.MonkeyPatch,
+    db_conn: psycopg.Connection[Any],
     *,
-    config_authority: ConfigAuthority,
-    model_catalog: ModelCatalog,
     machine_identity: MachineIdentity,
 ):
-    from services.agent_runner.agent_ops import boot, daemon
+    client, agent = uploaded_agent
+    unit = receiver.current_unit(local_machine=machine_identity.name())
+    # meiva:note
+    # A runner of the previous version answers the way its dispatcher does for a kind it lacks.
+    old_runner = failed({"error": "unknown kind: 'upload-receive-v1'"})
+    with runner_ops(db_conn, unit.machine, {"upload-receive-v1": old_runner}) as runner:
+        register_second_home(db_conn, unit, url=runner.url)
+        request = request_for(
+            client.app.state.db_pool,
+            post(client, agent).json()["batch_id"],
+            local_machine=machine_identity.name(),
+        )
+        # Source does not reinterpret an unsupported version as another op kind.
+        recovery = recovery_for(client, machine_identity)
+        await recovery.copy(request)
+        await recovery.close()
+    assert len(runner.calls_of("upload-receive-v1")) == 1
+    assert source.status(client.app.state.db_pool, agent, request.manifest.batch_id).state == "hold"
 
+
+def _receive_twice_after_failure(
+    client: GatewayTestClient,
+    db_conn: psycopg.Connection[Any],
+    request: ReceiveRequest,
+    machine: MachineIdentity,
+) -> None:
+    proof = receiver.receive(client.app.state.db_pool, request, local_machine=machine.name())
+    assert proof == receiver.receive(
+        client.app.state.db_pool, request, local_machine=machine.name()
+    )
+    assert db_conn.execute(
+        "SELECT count(*) FROM upload_delivery_copies WHERE ready_at IS NOT NULL"
+    ).fetchone() == (1,)
+
+
+def test_receiver_ready_commit_failure_recovers_without_second_copy(
+    uploaded_agent: tuple[GatewayTestClient, int],
+    db_conn: psycopg.Connection[Any],
+    *,
+    machine_identity: MachineIdentity,
+):
     client, agent = uploaded_agent
     request = request_for(
         client.app.state.db_pool,
         post(client, agent).json()["batch_id"],
         local_machine=machine_identity.name(),
     )
-    request = request.model_copy(
-        update={"target": request.target.model_copy(update={"home": "/old"})}
-    )
-    original = daemon.is_op_kind
-
-    def old_kind(value: str) -> bool:
-        return value != "upload-receive-v1" and original(value)
-
-    monkeypatch.setattr(daemon, "is_op_kind", old_kind)
-    with boot.op_thread_pool(authority=config_authority) as executor:
-        status, result = await daemon._dispatch(
-            "upload-receive-v1",
-            request.model_dump(),
-            active_ops={},
-            workers=set(),
-            pool=client.app.state.db_pool,
-            executor=executor,
-            authority=config_authority,
-            catalog=model_catalog,
-            database=lambda: client.app.state.db,
-            image=client.app.state.process_image,
-            local_machine=machine_identity,
-            host=fake_host(),
-        )
-    assert status == OpStatus.FAILED and "unknown kind" in str(result["error"])
-    # Source does not reinterpret an unsupported version as another op kind.
-    recovery = worker.UploadRecovery(
-        client.app.state.db_pool,
-        client.app.state.db,
-        client.app.state.bus,
-        machine=machine_identity,
-        claim_seconds=_CLAIM_SECONDS,
-    )
-
-    async def dispatch(*_args: Any, **_kwargs: Any):
-        raise ClusterOpFailed(result)
-
-    monkeypatch.setattr(worker, "dispatch_to_machine", dispatch)
-
-    def eligible(*_args: Any) -> bool:
-        return True
-
-    monkeypatch.setattr(source, "validate_pending", eligible)
-    await recovery.copy(request)
-    assert source.status(client.app.state.db_pool, agent, request.manifest.batch_id).state == "hold"
-    await recovery.close()
+    with (
+        failing_update(db_conn, "upload_delivery_copies", message="receiver ready rollback"),
+        pytest.raises(psycopg.errors.RaiseException),
+    ):
+        receiver.receive(client.app.state.db_pool, request, local_machine=machine_identity.name())
+    _receive_twice_after_failure(client, db_conn, request, machine_identity)
 
 
-@pytest.mark.parametrize("stage", ["before", "after"])
-def test_receiver_ready_commit_boundary_recovers_without_second_copy(
+# meiva:note
+# The ready marker commits, then the receiver sees a failure once (needs ops: a transaction
+# port).
+def test_receiver_ready_lost_commit_ack_recovers_without_second_copy(
     uploaded_agent: tuple[GatewayTestClient, int],
     db_conn: psycopg.Connection[Any],
     monkeypatch: pytest.MonkeyPatch,
-    stage: str,
     *,
     machine_identity: MachineIdentity,
 ):
@@ -357,34 +407,19 @@ def test_receiver_ready_commit_boundary_recovers_without_second_copy(
     count = 0
 
     @contextmanager
-    def faulty(pool: ConnectionPool):
+    def ack_lost_once(pool: ConnectionPool):
         nonlocal count
         count += 1
         current = count
         with original(pool) as conn:
             yield conn
-            if current == 2 and stage == "before":
-                raise psycopg.OperationalError("receiver ready rollback")
-        if current == 2 and stage == "after":
+        if current == 2:
             raise psycopg.OperationalError("receiver ready ack lost")
 
-    monkeypatch.setattr(receiver, "write_transaction", faulty)
+    monkeypatch.setattr(receiver, "write_transaction", ack_lost_once)
     with pytest.raises(psycopg.OperationalError):
         receiver.receive(client.app.state.db_pool, request, local_machine=machine_identity.name())
-    monkeypatch.setattr(receiver, "write_transaction", original)
-    proof = receiver.receive(
-        client.app.state.db_pool,
-        request,
-        local_machine=machine_identity.name(),
-    )
-    assert proof == receiver.receive(
-        client.app.state.db_pool,
-        request,
-        local_machine=machine_identity.name(),
-    )
-    assert db_conn.execute(
-        "SELECT count(*) FROM upload_delivery_copies WHERE ready_at IS NOT NULL"
-    ).fetchone() == (1,)
+    _receive_twice_after_failure(client, db_conn, request, machine_identity)
 
 
 def test_concurrent_receivers_and_inbound_acceptance_one_identity(
@@ -529,17 +564,12 @@ def test_single_connection_receiver_releases_pool_across_http(
 
 
 def test_auth_revocation_and_missing_target_never_recover_by_bypassing_admission(
-    uploaded_agent: tuple[GatewayTestClient, int],
-    db_conn: psycopg.Connection[Any],
-    monkeypatch: pytest.MonkeyPatch,
+    uploaded_agent: tuple[GatewayTestClient, int], db_conn: psycopg.Connection[Any]
 ):
-    from base.config import settings
-
     client, agent = uploaded_agent
     response = post(client, agent)
     assert response.status_code == 202
     assert post(client, agent + 999).status_code == 404
-    monkeypatch.setattr(settings.data_plane, "cluster_secret", "new-test-secret")
     with gateway_test_client(
         process=client.app.state.gateway_process,
         config=replace(
@@ -566,60 +596,31 @@ async def test_same_machine_other_home_requires_native_rpc_not_local_shortcut(
     client, agent = uploaded_agent
     unit = receiver.current_unit(local_machine=machine_identity.name())
     target = unit.model_copy(update={"home": unit.home + "-second"})
-    db_conn.execute("UPDATE machine_units SET url=NULL WHERE machine_name=%s", (unit.machine,))
-    db_conn.execute(
-        "INSERT INTO machine_units(machine_name,home,serve_agent_runner,url) "
-        "VALUES (%s,%s,true,'http://runner:7001')",
-        (unit.machine, target.home),
-    )
-    db_conn.commit()
-    response = post(client, agent)
-    assert response.status_code == 202
-    request = request_for(
-        client.app.state.db_pool,
-        response.json()["batch_id"],
-        local_machine=machine_identity.name(),
-    )
-    assert request.source != request.target and request.target == target
 
     def current_target(*, local_machine: str) -> UnitIdentity:
         assert local_machine == machine_identity.name()
         return target
 
+    # meiva:note
+    # needs ops: the receiver's unit and its quota constant are read ambiently.
     monkeypatch.setattr(receiver, "current_unit", current_target)
     monkeypatch.setattr(receiver, "MAX_AGENT_UPLOAD_BYTES", 5)
-    calls: list[tuple[str, str, dict[str, Any]]] = []
-
-    async def dispatch(
-        _db: Database, machine: str, kind: str, payload: dict[str, Any], **kwargs: Any
-    ):
-        calls.append((machine, kind, kwargs))
-        status, result = await asyncio.to_thread(
-            dispatch_sync,
-            kind,
-            payload,
-            image=client.app.state.process_image,
-            pool=client.app.state.db_pool,
-            db=client.app.state.db,
-            authority=config_authority,
-            local_machine=machine_identity,
-            host=fake_host(),
+    receive = _receiver_op(client, config_authority, machine_identity)
+    with runner_ops(db_conn, unit.machine, {"upload-receive-v1": receive}) as runner:
+        assert register_second_home(db_conn, unit, url=runner.url) == target
+        response = post(client, agent)
+        assert response.status_code == 202
+        request = request_for(
+            client.app.state.db_pool,
+            response.json()["batch_id"],
+            local_machine=machine_identity.name(),
         )
-        assert status == OpStatus.COMPLETED
-        return result
-
-    monkeypatch.setattr(worker, "dispatch_to_machine", dispatch)
-    recovery = worker.UploadRecovery(
-        client.app.state.db_pool,
-        client.app.state.db,
-        client.app.state.bus,
-        machine=machine_identity,
-        claim_seconds=_CLAIM_SECONDS,
-    )
-    await recovery.copy(request)
-    assert len(calls) == 1 and calls[0][0] == unit.machine
+        assert request.source != request.target and request.target == target
+        recovery = recovery_for(client, machine_identity)
+        await recovery.copy(request)
+        await recovery.close()
+    assert len(runner.calls_of("upload-receive-v1")) == 1
     assert (
         source.status(client.app.state.db_pool, agent, request.manifest.batch_id).state
         == "accepted"
     )
-    await recovery.close()

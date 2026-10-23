@@ -7,9 +7,15 @@ import psycopg
 import pytest
 
 from base.config import settings
-from gateway.inspect import router as inspect_router
+from base.telemetry.metrics.core.catalog import collect_core_metrics
 from gateway.tests.auth.gateway_config import gateway_test_client
-from ops.cluster import rpc as cluster_rpc
+from gateway.tests.support.runner_ops.ops_stub import (
+    OpsReply,
+    completed,
+    failed,
+    refused,
+    runner_ops,
+)
 from services.wake.heartbeat import JITTER_SPAN_S, STALE_PENDING_S
 
 
@@ -86,7 +92,6 @@ def test_inspect_unknown_agent_404(db_conn: psycopg.Connection) -> None:
 
 def test_inspect_live_returns_only_window_independent_fields(
     db_conn: psycopg.Connection,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     aid = _insert_agent(
         db_conn,
@@ -98,22 +103,18 @@ def test_inspect_live_returns_only_window_independent_fields(
     _pause_row(db_conn, agent_id=aid, duration_s=1800, hours_ago=1)
     db_conn.commit()
 
-    async def dispatch(
-        _db: object, target_machine: str, kind: str, payload: dict[str, object], **kwargs: object
-    ) -> dict[str, object]:
-        assert (target_machine, kind, payload) == (
-            "runner-a",
-            "shell_probe",
-            {"agent_id": aid},
-        )
-        return {
-            "shells": [{"id": 5, "name": "live-shell", "created_at": None, "uptime_seconds": 42}]
-        }
-
-    monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", dispatch)
-    with gateway_test_client() as client:
+    probe = completed(
+        {"shells": [{"id": 5, "name": "live-shell", "created_at": None, "uptime_seconds": 42}]}
+    )
+    with (
+        runner_ops(db_conn, "runner-a", {"shell_probe": probe}) as runner,
+        gateway_test_client() as client,
+    ):
         response = client.get(f"/api/agents/{aid}/inspect/live")
 
+    assert [(call.kind, call.payload) for call in runner.calls] == [
+        ("shell_probe", {"agent_id": aid})
+    ]
     assert response.status_code == 200
     body = response.json()
     assert set(body) == {
@@ -158,15 +159,12 @@ def test_inspect_live_unknown_agent_404(db_conn: psycopg.Connection) -> None:
 
 def test_inspect_live_probe_failure_is_unavailable_not_empty_success(
     db_conn: psycopg.Connection,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     aid = _insert_agent(db_conn)
     db_conn.commit()
 
-    async def unreachable(*args: object, **kwargs: object) -> dict[str, object]:
-        raise inspect_router.cluster_rpc.ClusterOpUnreachable("connect failed")
-
-    monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", unreachable)
+    # meiva:note
+    # the agent's machine is not registered anywhere
     with gateway_test_client() as client:
         response = client.get(f"/api/agents/{aid}/inspect/live")
     assert response.status_code == 200
@@ -176,16 +174,18 @@ def test_inspect_live_probe_failure_is_unavailable_not_empty_success(
 
 @pytest.mark.parametrize("malformed", [False, True])
 def test_inspect_live_distinguishes_valid_empty_from_missing_shell_data(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch, malformed: bool
+    db_conn: psycopg.Connection, malformed: bool
 ) -> None:
     aid = _insert_agent(db_conn)
+    with db_conn.cursor() as cur:
+        cur.execute("UPDATE agents_meta SET machine = 'runner-a' WHERE id = %s", (aid,))
     db_conn.commit()
 
-    async def probe(*args: object, **kwargs: object) -> dict[str, object]:
-        return {} if malformed else {"shells": []}
-
-    monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", probe)
-    with gateway_test_client() as client:
+    probe = completed({} if malformed else {"shells": []})
+    with (
+        runner_ops(db_conn, "runner-a", {"shell_probe": probe}),
+        gateway_test_client() as client,
+    ):
         if malformed:
             with pytest.raises(KeyError, match="shells"):
                 client.get(f"/api/agents/{aid}/inspect/live")
@@ -220,37 +220,23 @@ def test_inspect_null_config_overlay_is_empty_dict(db_conn: psycopg.Connection) 
     assert body["config_overlay"] == {}
 
 
-def test_inspect_shells_probed_on_agents_machine(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_inspect_shells_probed_on_agents_machine(db_conn: psycopg.Connection) -> None:
     aid = _insert_agent(db_conn)
     with db_conn.cursor() as cur:
         cur.execute("UPDATE agents_meta SET machine = 'runner-a' WHERE id = %s", (aid,))
     db_conn.commit()
 
-    seen: dict[str, object] = {}
-
-    async def _fake_dispatch(
-        _db: object, target_machine: str, kind: str, payload: dict[str, object], **kwargs: object
-    ) -> dict[str, object]:
-        seen["machine"] = target_machine
-        seen["kind"] = kind
-        seen["payload"] = payload
-        return {
-            "shells": [
-                {"id": 5, "name": "desktop-remove", "created_at": None, "uptime_seconds": 42},
-            ]
-        }
-
-    monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", _fake_dispatch)
-
-    with gateway_test_client() as client:
+    probe = completed(
+        {"shells": [{"id": 5, "name": "desktop-remove", "created_at": None, "uptime_seconds": 42}]}
+    )
+    with (
+        runner_ops(db_conn, "runner-a", {"shell_probe": probe}) as runner,
+        gateway_test_client() as client,
+    ):
         body = client.get(f"/api/agents/{aid}/inspect/live").json()
-    assert seen == {
-        "machine": "runner-a",
-        "kind": "shell_probe",
-        "payload": {"agent_id": aid},
-    }
+    assert [(call.kind, call.payload) for call in runner.calls] == [
+        ("shell_probe", {"agent_id": aid})
+    ]
     assert body["shells"] == [
         {
             "id": 5,
@@ -264,7 +250,7 @@ def test_inspect_shells_probed_on_agents_machine(
 
 @pytest.mark.parametrize("name", ["page-preview", "schedule-check"])
 def test_inspect_shells_carry_ttl_deadline_from_gateway_db(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch, name: str
+    db_conn: psycopg.Connection, name: str
 ) -> None:
     launched = datetime.now(UTC) - timedelta(minutes=30)
     deadline = datetime.now(UTC) + timedelta(hours=2)
@@ -278,65 +264,45 @@ def test_inspect_shells_carry_ttl_deadline_from_gateway_db(
         )
     db_conn.commit()
 
-    async def _fake_dispatch(
-        _db: object, target_machine: str, kind: str, payload: dict[str, object], **kwargs: object
-    ) -> dict[str, object]:
-        return {
+    probe = completed(
+        {
             "shells": [
                 {"id": 5, "name": "dev-server", "created_at": None, "uptime_seconds": 42},
                 {"id": 6, "name": name, "created_at": launched.isoformat(), "uptime_seconds": 1800},
             ]
         }
-
-    monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", _fake_dispatch)
-
-    with gateway_test_client() as client:
+    )
+    with (
+        runner_ops(db_conn, "runner-a", {"shell_probe": probe}),
+        gateway_test_client() as client,
+    ):
         body = client.get(f"/api/agents/{aid}/inspect/live").json()
     by_id = {s["id"]: s for s in body["shells"]}
     assert datetime.fromisoformat(by_id[5]["expires_at"]) == deadline
     assert by_id[6]["expires_at"] is None
 
 
-def test_inspect_shells_degrade_to_empty_on_unreachable(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize(
+    "reply",
+    [refused(404, "no ops here"), failed({"error": "unknown kind: shell_probe"})],
+    ids=["unreachable", "failed-op"],
+)
+def test_inspect_shells_degrade_to_empty_when_the_runner_cannot_answer(
+    db_conn: psycopg.Connection, reply: OpsReply
 ) -> None:
     aid = _insert_agent(db_conn)
     with db_conn.cursor() as cur:
         cur.execute("UPDATE agents_meta SET machine = 'runner-a' WHERE id = %s", (aid,))
     db_conn.commit()
 
-    async def _unreachable_dispatch(
-        _db: object, target_machine: str, kind: str, payload: dict[str, object], **kwargs: object
-    ) -> dict[str, object]:
-        raise cluster_rpc.ClusterOpUnreachable("connect failed")
-
-    monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", _unreachable_dispatch)
-
-    with gateway_test_client() as client:
+    with (
+        runner_ops(db_conn, "runner-a", {"shell_probe": reply}),
+        gateway_test_client() as client,
+    ):
         resp = client.get(f"/api/agents/{aid}/inspect/live")
     assert resp.status_code == 200
     assert resp.json()["shells"] == []
-
-
-def test_inspect_shells_degrade_to_empty_on_failed_op(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    aid = _insert_agent(db_conn)
-    with db_conn.cursor() as cur:
-        cur.execute("UPDATE agents_meta SET machine = 'runner-a' WHERE id = %s", (aid,))
-    db_conn.commit()
-
-    async def _failed_dispatch(
-        _db: object, target_machine: str, kind: str, payload: dict[str, object], **kwargs: object
-    ) -> dict[str, object]:
-        raise cluster_rpc.ClusterOpFailed({"error": "unknown kind: shell_probe"})
-
-    monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", _failed_dispatch)
-
-    with gateway_test_client() as client:
-        resp = client.get(f"/api/agents/{aid}/inspect/live")
-    assert resp.status_code == 200
-    assert resp.json()["shells"] == []
+    assert resp.json()["shells_available"] is False
 
 
 @pytest.mark.parametrize("bad", ["5", "-1", "169", "abc", "24.5"])
@@ -645,3 +611,49 @@ def test_inspect_last_pause_same_timestamp_uses_newest_id(db_conn: psycopg.Conne
     with gateway_test_client() as client:
         response = client.get(f"/api/agents/{aid}/inspect/live")
     assert response.json()["heartbeat"]["last_pause"]["duration_s"] == 600
+
+
+# meiva:note
+# ── the plugin surfaces (metrics, widgets) on the real gateway app ────────────
+
+
+def test_inspect_metrics_route_serves_the_enabled_registry(db_conn: psycopg.Connection) -> None:
+    aid = _insert_agent(db_conn)
+    db_conn.commit()
+    with gateway_test_client() as client:
+        response = client.get(f"/api/agents/{aid}/inspect/metrics")
+    assert response.status_code == 200, response.text
+    served = {metric["name"] for metric in response.json()}
+    core = {spec.name for spec in collect_core_metrics() if "inspector" in spec.output}
+    assert core
+    assert core <= served
+
+
+def test_inspect_widgets_route_serves_the_widgets_of_the_enabled_plugins(
+    db_conn: psycopg.Connection,
+) -> None:
+    aid = _insert_agent(db_conn)
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO agent_tasks (title, description, status, owner, created_by) "
+            "VALUES ('work', 'd', 'in_progress', %s, 'user') RETURNING id",
+            (aid,),
+        )
+        row = cur.fetchone()
+    assert row is not None
+    db_conn.commit()
+    with gateway_test_client() as client:
+        response = client.get(f"/api/agents/{aid}/inspect/widgets")
+    assert response.status_code == 200, response.text
+    widgets = response.json()
+    assert [(w["plugin"], w["id"]) for w in widgets] == [("meiva_fleet", "today-tasks")]
+    assert [t["id"] for t in widgets[0]["tasks"]] == [row[0]]
+
+
+@pytest.mark.parametrize("surface", ["metrics", "widgets"])
+def test_inspect_plugin_surfaces_answer_404_for_an_unknown_agent(
+    db_conn: psycopg.Connection, surface: str
+) -> None:
+    db_conn.commit()
+    with gateway_test_client() as client:
+        assert client.get(f"/api/agents/999999/inspect/{surface}").status_code == 404

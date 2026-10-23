@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
-from collections.abc import Callable
-from types import SimpleNamespace
-from typing import cast
+import subprocess
 
 import psutil
 import pytest
@@ -13,117 +12,64 @@ import pytest
 from base.telemetry.tests.capture.event_capture import EmittedEvents
 from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
 from gateway.http.middleware import runtime_metrics
+from gateway.http.middleware.loop_lag import LagPolicy
+
+_POLICY = LagPolicy(tick_interval_s=0.01, emit_interval_s=0.03, slow_tick_threshold_ms=10_000.0)
 
 
-class _TimerHandle:
-    def __init__(self) -> None:
-        self.cancelled = False
-
-    def cancel(self) -> None:
-        self.cancelled = True
-
-
-class _Loop:
-    def __init__(self) -> None:
-        self.now = 0.0
-        self.scheduled: list[
-            tuple[float, Callable[..., None], tuple[object, ...], _TimerHandle]
-        ] = []
-
-    def time(self) -> float:
-        return self.now
-
-    def call_at(
-        self,
-        when: float,
-        callback: Callable[..., None],
-        *args: object,
-    ) -> _TimerHandle:
-        handle = _TimerHandle()
-        self.scheduled.append((when, callback, args, handle))
-        return handle
+async def _run_monitor_for(process: psutil.Process, seconds: float) -> None:
+    monitor = runtime_metrics.GatewayRuntimeMonitor(
+        loop=asyncio.get_running_loop(), process=process, policy=_POLICY
+    )
+    monitor.start()
+    try:
+        await asyncio.sleep(seconds)
+    finally:
+        monitor.stop()
 
 
-class _Process:
-    def __init__(self, *, fail_memory: bool = False) -> None:
-        self.cpu_calls = 0
-        self.fail_memory = fail_memory
-
-    def cpu_percent(self, interval: float | None = None) -> float:
-        assert interval is None
-        self.cpu_calls += 1
-        return 0.0 if self.cpu_calls == 1 else 37.5
-
-    def memory_info(self) -> SimpleNamespace:
-        if self.fail_memory:
-            raise OSError("gone")
-        return SimpleNamespace(rss=268_435_456)
-
-    def num_fds(self) -> int:
-        return 23
-
-
-def test_runtime_monitor_callback_emits_process_and_loop_metrics(
+async def test_runtime_monitor_emits_process_and_loop_metrics_from_a_real_loop(
     emitted_events: EmittedEvents,
 ) -> None:
-    loop = _Loop()
-    process = _Process()
-    monitor = runtime_metrics.GatewayRuntimeMonitor(
-        loop=loop,  # type: ignore[arg-type]
-        process=cast(psutil.Process, process),
-        tick_interval_s=1.0,
-        emit_interval_s=1.0,
-        slow_tick_threshold_ms=100.0,
-    )
+    await _run_monitor_for(psutil.Process(), 0.3)
 
-    monitor.start()
-    scheduled_at, callback, args, first_handle = loop.scheduled.pop()
-    assert scheduled_at == 1.0
-    loop.now = 1.25
-    callback(*args)
-
-    assert [(event.event_name, event.attributes) for event in emitted_events] == [
-        (
-            "gateway_event_loop",
-            {
-                "lag_ms": 250.0,
-                "slow_ticks": 1,
-            },
-        ),
-        (
-            "gateway_process",
-            {"cpu_percent": 37.5, "rss_bytes": 268_435_456, "fd_count": 23},
-        ),
-    ]
-    assert process.cpu_calls == 2
-    assert loop.scheduled[-1][0] == 2.25
-
-    monitor.stop()
-    assert loop.scheduled[-1][3].cancelled
-    assert not first_handle.cancelled
+    names = [event.event_name for event in emitted_events]
+    assert names.count("gateway_event_loop") == names.count("gateway_process") >= 1
+    loop_event = next(e for e in emitted_events if e.event_name == "gateway_event_loop")
+    process_event = next(e for e in emitted_events if e.event_name == "gateway_process")
+    assert loop_event.attributes["slow_ticks"] == 0
+    assert 0.0 <= loop_event.attributes["lag_ms"] < 5_000.0
+    assert process_event.attributes["rss_bytes"] > 0
+    assert process_event.attributes["fd_count"] > 0
+    assert process_event.attributes["cpu_percent"] >= 0.0
 
 
-def test_runtime_monitor_reschedules_after_sampling_failure(
-    caplog: pytest.LogCaptureFixture,
+async def test_runtime_monitor_stops_sampling_once_stopped(
+    emitted_events: EmittedEvents,
 ) -> None:
-    loop = _Loop()
-    process = _Process(fail_memory=True)
-    monitor = runtime_metrics.GatewayRuntimeMonitor(
-        loop=loop,  # type: ignore[arg-type]
-        process=cast(psutil.Process, process),
-        tick_interval_s=1.0,
-        emit_interval_s=1.0,
-        slow_tick_threshold_ms=100.0,
-    )
+    await _run_monitor_for(psutil.Process(), 0.2)
+    emitted_events.clear()
+    await asyncio.sleep(0.15)
+    assert list(emitted_events) == []
 
-    monitor.start()
-    _scheduled_at, callback, args, _handle = loop.scheduled.pop()
-    loop.now = 1.0
+
+# meiva:note
+# A process that is gone cannot be sampled; the monitor still reports the loop each window.
+async def test_runtime_monitor_keeps_ticking_after_a_sampling_failure(
+    emitted_events: EmittedEvents, caplog: pytest.LogCaptureFixture
+) -> None:
+    child = subprocess.Popen(["sleep", "60"])
+    gone = psutil.Process(child.pid)
+    child.kill()
+    child.wait(timeout=10)
+
     with caplog.at_level(logging.WARNING):
-        callback(*args)
+        await _run_monitor_for(gone, 0.3)
 
     assert "gateway runtime metric sample failed" in caplog.text
-    assert loop.scheduled[-1][0] == 2.0
+    names = [event.event_name for event in emitted_events]
+    assert names.count("gateway_event_loop") >= 2
+    assert "gateway_process" not in names
 
 
 def test_sse_metrics_initialize_idle_modes_at_zero(

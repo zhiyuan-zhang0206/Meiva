@@ -8,10 +8,11 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+import psycopg
 import pytest
 
 from base import paths
-from base.cluster.dataplane.direct_url import ClusterDirectUrl
+from base.agents.context.clients import ClientSet
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.boot import machine_from_boot
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
@@ -19,19 +20,21 @@ from base.config import ConfigBoot
 from base.config.service_read import ConfigAuthority
 from base.config.tests.configuration import snapshot_process_config
 from base.db import Database
-from base.db.code_version_gate import ProcessDbGate
-from base.db.config import DbConfig
 from base.host import proc
 from base.host.net.auth import bearer_header, cookie_name
 from base.host.system.tests.fake_commands import fake_host
 from base.native_process.loaded_commit import LoadedCommit
+from base.packages.plugin_providers import build_model_catalog
 from base.paths import meiva_home
 from base.telemetry import DrainStatus
 from gateway import app as gateway_app
 from gateway.cluster import server
 from gateway.cluster.process_boot import LOADED_IMAGE, GatewayProcess
 from gateway.http.config import gateway_config_from_boot
+from gateway.http.model_catalog import load_model_catalog
 from gateway.tests.auth.gateway_config import gateway_test_app, gateway_test_client
+
+_CHILD = Path(__file__).with_name("child_gateway_scenarios.py")
 
 
 def test_both_gateway_entries_use_the_same_first_load_fact() -> None:
@@ -39,21 +42,19 @@ def test_both_gateway_entries_use_the_same_first_load_fact() -> None:
     assert gateway_app.LOADED_IMAGE is LOADED_IMAGE
 
 
-def _forbid_config_reads(monkeypatch: pytest.MonkeyPatch) -> None:
-    def forbidden(_boot: ConfigBoot, _name: str) -> object:
-        raise AssertionError("entry owner read configuration during cold construction")
+# meiva:note
+# A configuration owner that refuses every field read.
+class _UnreadConfig(ConfigBoot):
+    def get_field(self, name: str) -> object:
+        raise AssertionError(
+            f"entry owner read configuration field {name!r} during cold construction"
+        )
 
-    monkeypatch.setattr(ConfigBoot, "get_field", forbidden)
 
-
-def test_gateway_owner_construction_is_cold(
-    monkeypatch: pytest.MonkeyPatch, *, machine_identity: MachineIdentity
-) -> None:
-    config = ConfigBoot()
-    _forbid_config_reads(monkeypatch)
+def test_gateway_owner_construction_is_cold(*, machine_identity: MachineIdentity) -> None:
     process = GatewayProcess(
         home=meiva_home(),
-        config=config,
+        config=_UnreadConfig(),
         image=LoadedCommit(Path("unknown-source"), None),
         machine=machine_identity,
         host=fake_host(),
@@ -63,18 +64,11 @@ def test_gateway_owner_construction_is_cold(
         assert process.clients.sync_events().status is DrainStatus.COMPLETED
 
 
+# meiva:note
+# Every handle the process builds names the connections it opens after the entry's image.
 def test_gateway_handles_retain_the_same_entry_gate(
-    monkeypatch: pytest.MonkeyPatch, *, machine_identity: MachineIdentity
+    db_conn: psycopg.Connection, *, machine_identity: MachineIdentity
 ) -> None:
-    gates: list[ProcessDbGate] = []
-    original = Database.__init__
-
-    def build(
-        handle: Database, config: DbConfig, *, gate: ProcessDbGate, direct_url: ClusterDirectUrl
-    ) -> None:
-        gates.append(gate)
-        original(handle, config, gate=gate, direct_url=direct_url)
-
     process = GatewayProcess(
         home=meiva_home(),
         config=snapshot_process_config(),
@@ -82,25 +76,29 @@ def test_gateway_handles_retain_the_same_entry_gate(
         machine=machine_identity,
         host=fake_host(),
     )
-    monkeypatch.setattr(Database, "__init__", build)
+    db_conn.commit()
     with process.lifetime():
         first = process.database()
         second = process.database()
         assert first is not second
-    assert gates == [process.gate, process.gate]
+        names: list[str] = []
+        for handle in (first, second):
+            with handle.connect() as conn:
+                row = conn.execute("SHOW application_name").fetchone()
+                assert row is not None
+                names.append(row[0])
+    assert names == [f"meiva:gateway:v{process.version.get()}"] * 2
 
 
-def test_gateway_cleanup_preserves_a_startup_primary(
-    monkeypatch: pytest.MonkeyPatch, *, machine_identity: MachineIdentity
-) -> None:
-    from base.agents.context.clients import ClientSet
+# meiva:note
+# An event writer whose stop fails, as one that cannot flush its last batch would.
+class _FailsToStop:
+    def stop(self, timeout: float) -> object:
+        raise RuntimeError("writer close failed")
 
+
+def test_gateway_cleanup_preserves_a_startup_primary(*, machine_identity: MachineIdentity) -> None:
     primary = ValueError("startup failed")
-    cleanup = RuntimeError("writer close failed")
-
-    def fail(_clients: ClientSet) -> None:
-        raise cleanup
-
     process = GatewayProcess(
         home=meiva_home(),
         config=ConfigBoot(),
@@ -108,7 +106,8 @@ def test_gateway_cleanup_preserves_a_startup_primary(
         machine=machine_identity,
         host=fake_host(),
     )
-    monkeypatch.setattr(ClientSet, "close", fail)
+    process.clients = ClientSet(pipeline_factory=_FailsToStop)
+    process.clients.event_pipeline()
     with pytest.raises(ValueError) as caught, process.lifetime():
         raise primary
     assert caught.value is primary
@@ -164,19 +163,37 @@ def test_gateway_first_load_image_does_not_follow_a_checkout_move(tmp_path: Path
     assert fact["version"] == 1
 
 
-@pytest.mark.parametrize("sha", [None, "entry-image-sha"])
+# meiva:note
+# The health route reports the commit the entry captured, not the checkout's HEAD.
 def test_asgi_health_keeps_its_explicit_entry_image(
-    monkeypatch: pytest.MonkeyPatch,
-    sha: str | None,
-    database: Database,
-    *,
-    machine_identity: MachineIdentity,
+    tmp_path: Path, database: Database, *, machine_identity: MachineIdentity
 ) -> None:
-    def test_database(_process: GatewayProcess) -> Database:
-        return database
-
-    monkeypatch.setattr(GatewayProcess, "database", test_database)
-    image = LoadedCommit(Path("entry-source"), sha)
+    # meiva:note
+    # the throwaway data plane the process dials
+    _ = database
+    source = tmp_path / "entry-source"
+    source.mkdir()
+    for args in (
+        ["init", "-q"],
+        ["add", "."],
+        [
+            "-c",
+            "user.name=entry-proof",
+            "-c",
+            "user.email=proof@example.invalid",
+            "commit",
+            "-qm",
+            "entry",
+            "--allow-empty",
+        ],
+    ):
+        result = proc.run_bounded(
+            ["git", "-C", str(source), *args], timeout=10, capture_output=True
+        )
+        assert result.returncode == 0, result.stderr
+    image = LoadedCommit.capture(source)
+    assert image.sha is not None
+    assert image.sha != LOADED_IMAGE.sha
     process = GatewayProcess(
         home=meiva_home(),
         config=snapshot_process_config(),
@@ -192,18 +209,20 @@ def test_asgi_health_keeps_its_explicit_entry_image(
         first = client.get("/api/health")
         second = client.get("/api/health")
         assert first.status_code == second.status_code == 200
-        assert first.json()["sha"] == second.json()["sha"] == sha
+        assert first.json()["sha"] == second.json()["sha"] == image.sha
         assert app.state.gateway_process is process
         assert app.state.process_image is image
 
 
-def test_openapi_schema_is_cold(monkeypatch: pytest.MonkeyPatch) -> None:
-    _forbid_config_reads(monkeypatch)
-    schema = gateway_app.openapi_schema()
+def test_openapi_schema_is_cold() -> None:
+    schema = gateway_app.openapi_schema_of(_UnreadConfig(), home=meiva_home())
     assert isinstance(schema, dict)
     assert "/api/health" in schema["paths"]
 
 
+# meiva:note
+# A reload worker builds its app from its own environment: booting loads the unit's
+# `.env` into the process, so the check runs in a process of its own.
 def test_create_app_from_environment_assembles_gateway_config(
     config_authority: ConfigAuthority,
 ) -> None:
@@ -213,18 +232,20 @@ def test_create_app_from_environment_assembles_gateway_config(
         f"MEIVA_REDIS_URL={config_authority.service_field_value('redis_url')}\n",
         encoding="utf-8",
     )
-    saved_env = dict(os.environ)
-    try:
-        first = gateway_app.create_app_from_environment()
-        second = gateway_app.create_app_from_environment()
-        expected = gateway_app.gateway_config_from_boot(ConfigBoot())
-    finally:
-        os.environ.clear()
-        os.environ.update(saved_env)
-    assert first is not second
-    assert first.state.gateway_config == expected
-    assert first.state.machine_token_acceptance == {}
-    assert first.state.machine_token_acceptance is not second.state.machine_token_acceptance
+    result = proc.run_bounded(
+        [sys.executable, str(_CHILD), "app_from_environment"],
+        env={**os.environ, "MEIVA_HOME": str(config_authority.env_path.parent)},
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout) == {
+        "distinct_apps": True,
+        "config_matches_boot": True,
+        "acceptance_empty": True,
+        "acceptance_independent": True,
+    }
 
 
 _ROOT_READS = frozenset({"meiva_home", "resolve_meiva_home"})
@@ -240,7 +261,10 @@ def _rooted_app(home: Path) -> Any:
         host=fake_host(),
     )
     return gateway_app.create_app(
-        gateway_config_from_boot(process.config), process=process, process_ownership="owned"
+        gateway_config_from_boot(process.config),
+        process=process,
+        process_ownership="owned",
+        catalog=load_model_catalog(build_model_catalog),
     )
 
 

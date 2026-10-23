@@ -126,7 +126,7 @@ any server data (TanStack Query). No per-plugin frontend code, no build step.
 ### Plugin-served pages — the universal escape hatch
 
 Custom visuals come from a page the plugin serves itself, reached through the
-gateway exactly like `meiva.ui` pages are today (`gateway/routers/pages.py`
+gateway exactly like `meiva.ui` pages are today (`gateway/routers/page_serving/pages.py`
 reverse-proxies `/pages/<agent_id>-<name>/…` to a supervised local page
 server, behind the gateway's normal auth). Plugin pages get the sibling mount:
 

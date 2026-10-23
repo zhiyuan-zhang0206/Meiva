@@ -11,20 +11,19 @@ from fastapi.responses import JSONResponse
 
 from base import telemetry
 from base.api_contracts.agent_contract import ErrorReason
+from gateway.http.middleware.correlation import correlation
 from gateway.schemas import ErrorEnvelope
 
 
 def _trace_id(request: Request) -> str:
     """Return the active OTel trace id or this request's generated correlation id."""
-    trace_id, _span_id = telemetry.capture_trace_ids()
-    if trace_id is not None:
-        return trace_id
-    trace_id = getattr(request.state, "trace_id", None)
-    if isinstance(trace_id, str):
-        return trace_id
-    trace_id = uuid4().hex
-    request.state.trace_id = trace_id
-    return trace_id
+    active, _span_id = telemetry.capture_trace_ids()
+    chosen = correlation(
+        active=active, assigned=getattr(request.state, "trace_id", None), fresh=uuid4().hex
+    )
+    if chosen.assign:
+        request.state.trace_id = chosen.trace_id
+    return chosen.trace_id
 
 
 async def request_trace_middleware(

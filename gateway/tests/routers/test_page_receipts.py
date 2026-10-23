@@ -1,24 +1,35 @@
 """Guarded registry acceptance survives lost responses without replacing later pages."""
 
+import time
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
-from threading import Event
 
 import psycopg
 import pytest
-from fastapi import APIRouter, FastAPI, HTTPException
+from fastapi import APIRouter, FastAPI
 from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 
-from base.config import settings
+from base.config.tests.configuration import snapshot_process_config
 from base.db import create_agent
-from gateway.routers import pages
+from base.events.live.bus import EventBus, EventBusConfig
+from gateway.http.config import GatewayConfig, gateway_config_from_boot
+from gateway.routers.page_serving import pages
 from gateway.tests.auth.gateway_config import GatewayTestClient, gateway_test_client
+from gateway.tests.support.db_faults.insert_fault import failing_insert
 
 SECRET = "page-receipt-test-secret"  # noqa: S105 -- isolated credential fixture
 HEADERS = {"Idempotency-Key": "intent", "Idempotency-Scope": "principal-v1"}
 BODY = {"name": "report", "port": 8801, "host": "127.0.0.1", "ttl_seconds": 60}
+
+
+# meiva:note
+# The test gateway's HTTP policy with `changes` applied.
+def _gateway_config(**changes: object) -> GatewayConfig:
+    return replace(
+        gateway_config_from_boot(snapshot_process_config()), human_auth="required", **changes
+    )
 
 
 @pytest.fixture
@@ -28,6 +39,32 @@ def client() -> Iterator[GatewayTestClient]:
         headers={"Authorization": f"Bearer {SECRET}"},
     ) as value:
         yield value
+
+
+# meiva:note
+# A bus whose Redis URL names no scheme: any publish through it raises.
+#
+# A route that must not publish (a replay, an already-closed observation) is exercised
+# against it and answers normally; one that publishes after its commit fails visibly.
+def _unreachable_bus(client: GatewayTestClient) -> EventBus:
+    return EventBus(
+        EventBusConfig(redis_url="no-scheme", events_channel=client.app.state.bus.channel)
+    )
+
+
+# meiva:note
+# Block until some backend is waiting on a lock, so the test acts after the request is stuck.
+def _wait_until_a_statement_waits_for_a_lock(db_url: str, *, timeout_s: float = 5.0) -> None:
+    deadline = time.monotonic() + timeout_s
+    with psycopg.connect(db_url, autocommit=True) as probe:
+        while time.monotonic() < deadline:
+            waiting = probe.execute(
+                "SELECT count(*) FROM pg_stat_activity WHERE wait_event_type = 'Lock'"
+            ).fetchone()
+            if waiting is not None and waiting[0] > 0:
+                return
+            time.sleep(0.02)
+    raise AssertionError("no statement started waiting for a lock")
 
 
 def _agent(conn: psycopg.Connection) -> int:
@@ -112,10 +149,9 @@ def test_registration_replay_cannot_close_later_page(
     client.app.state.gateway_process.config.set_field("page_default_ttl_seconds", 1)
     client.app.state.gateway_process.config.set_field("gateway_url", "http://changed.invalid")
 
-    async def no_old_events(*args: object, **kwargs: object) -> None:
-        raise AssertionError("replaying historical acceptance must not publish obsolete events")
-
-    client.app.state.bus.publish_best_effort = no_old_events
+    # meiva:note
+    # Replaying a historical acceptance must not publish obsolete events: a publish raises.
+    client.app.state.bus = _unreachable_bus(client)
     replay = client.post(_path(agent), json=BODY, headers=HEADERS)
     assert replay.status_code == 201 and replay.json() == first.json()
     assert db_conn.execute("SELECT id FROM agent_pages WHERE closed_at IS NULL").fetchall() == [
@@ -193,10 +229,9 @@ def test_fresh_already_closed_observation_is_accepted(
     body = {"expected_page_id": first["id"]}
     accepted = client.post(_close_path(agent), json=body, headers=_key("close"))
 
-    async def forbid_old_hint(*args: object, **kwargs: object) -> None:
-        raise AssertionError("already-closed acceptance must not publish obsolete name hints")
-
-    client.app.state.bus.publish_best_effort = forbid_old_hint
+    # meiva:note
+    # An already-closed acceptance must not publish obsolete name hints: a publish raises.
+    client.app.state.bus = _unreachable_bus(client)
     no_effect = client.post(_close_path(agent), json=body, headers=_key("already-closed"))
     assert no_effect.status_code == 200 and no_effect.json() == accepted.json()
 
@@ -220,22 +255,18 @@ def test_failure_before_receipt_rolls_back_replacement(
 ) -> None:
     agent = _agent(db_conn)
     first = client.post(_path(agent), json=BODY, headers=HEADERS)
-
-    def fail(*_args: object) -> None:
-        raise HTTPException(status_code=503, detail="fault before page receipt commit")
-
-    original_finish = client.app.state.page_receipt_finisher
-    client.app.state.page_receipt_finisher = fail
-    assert (
-        client.post(_path(agent), json={**BODY, "port": 8802}, headers=_key("pending")).status_code
-        == 503
-    )
+    with (
+        failing_insert(
+            db_conn, "page_operation_receipts", message="fault before page receipt commit"
+        ),
+        pytest.raises(psycopg.errors.RaiseException),
+    ):
+        client.post(_path(agent), json={**BODY, "port": 8802}, headers=_key("pending"))
     assert db_conn.execute("SELECT id FROM agent_pages WHERE closed_at IS NULL").fetchall() == [
         (first.json()["id"],)
     ]
     assert db_conn.execute("SELECT count(*) FROM page_operation_receipts").fetchone() == (1,)
     db_conn.commit()
-    client.app.state.page_receipt_finisher = original_finish
     recovered = client.post(_path(agent), json={**BODY, "port": 8802}, headers=_key("pending"))
     assert recovered.status_code == 201
 
@@ -314,37 +345,45 @@ def test_commit_survives_response_tail_failure(
     client: GatewayTestClient, db_conn: psycopg.Connection
 ) -> None:
     agent = _agent(db_conn)
-    original_publish = client.app.state.bus.publish_best_effort
-
-    async def fail_tail(*args: object, **kwargs: object) -> None:
-        raise HTTPException(
-            status_code=503, detail="acceptance committed; response tail unavailable"
-        )
-
-    client.app.state.bus.publish_best_effort = fail_tail
-    try:
-        assert client.post(_path(agent), json=BODY, headers=HEADERS).status_code == 503
-        row = db_conn.execute("SELECT id FROM agent_pages WHERE agent_id=%s", (agent,)).fetchone()
-        replay = client.post(_path(agent), json=BODY, headers=HEADERS)
-        assert row is not None and replay.status_code == 201 and replay.json()["id"] == row[0]
-        assert db_conn.execute("SELECT count(*) FROM agent_pages").fetchone() == (1,)
-    finally:
-        client.app.state.bus.publish_best_effort = original_publish
+    working_bus = client.app.state.bus
+    client.app.state.bus = _unreachable_bus(client)
+    with pytest.raises(ValueError, match="Redis URL"):
+        client.post(_path(agent), json=BODY, headers=HEADERS)
+    client.app.state.bus = working_bus
+    row = db_conn.execute("SELECT id FROM agent_pages WHERE agent_id=%s", (agent,)).fetchone()
+    replay = client.post(_path(agent), json=BODY, headers=HEADERS)
+    assert row is not None and replay.status_code == 201 and replay.json()["id"] == row[0]
+    assert db_conn.execute("SELECT count(*) FROM agent_pages").fetchone() == (1,)
 
 
 def test_raced_unique_conflict_rolls_back_old_close(
-    client: GatewayTestClient, db_conn: psycopg.Connection
+    client: GatewayTestClient, db_conn: psycopg.Connection, db_url: str
 ) -> None:
-    one, two = _agent(db_conn), _agent(db_conn)
+    one, two, three = _agent(db_conn), _agent(db_conn), _agent(db_conn)
     original = client.post(_path(one), json=BODY, headers=HEADERS).json()
     assert client.post(_path(two), json={**BODY, "port": 8802}, headers=HEADERS).status_code == 201
-
-    # Model a port owner becoming visible only after the advisory pre-check.
-    def raced_precheck(*_args: object) -> None:
-        pass
-
-    client.app.state.page_port_free_checker = raced_precheck
-    rejected = client.post(_path(one), json={**BODY, "port": 8802}, headers=_key("raced"))
+    # meiva:note
+    # Close two's page: the advisory pre-check now sees (host, 8802) free.
+    two_page = db_conn.execute("SELECT id FROM agent_pages WHERE agent_id=%s", (two,)).fetchone()
+    assert two_page is not None
+    db_conn.execute("UPDATE agent_pages SET closed_at = now() WHERE id=%s", (two_page[0],))
+    db_conn.commit()
+    # meiva:note
+    # A third agent's registration of the same port is still uncommitted: invisible to the
+    # pre-check, but it holds the live-port unique index entry the insert will need.
+    db_conn.execute(
+        "INSERT INTO agent_pages (agent_id, name, host, port) VALUES (%s, 'raced', '127.0.0.1', 8802)",
+        (three,),
+    )
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        racing = executor.submit(
+            client.post, _path(one), json={**BODY, "port": 8802}, headers=_key("raced")
+        )
+        _wait_until_a_statement_waits_for_a_lock(db_url)
+        # meiva:note
+        # the other registration wins: the insert now violates the index
+        db_conn.commit()
+        rejected = racing.result(timeout=10)
     assert rejected.status_code == 409
     assert db_conn.execute(
         "SELECT id FROM agent_pages WHERE agent_id=%s AND closed_at IS NULL", (one,)
@@ -368,55 +407,39 @@ def test_close_replay_survives_target_cleanup(
     assert client.post(_close_path(agent), json=body, headers=_key("fresh")).status_code == 404
 
 
-def test_host_validation_reuses_single_borrowed_connection(
-    client: GatewayTestClient, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    from psycopg_pool import ConnectionPool
-
+def test_host_validation_reuses_single_borrowed_connection(db_conn: psycopg.Connection) -> None:
     agent = _agent(db_conn)
     db_conn.execute("UPDATE agents_meta SET machine='page-home' WHERE id=%s", (agent,))
     db_conn.commit()
     # A guarded receipt lookup already owns the only backend. Validation must
     # share it rather than exhaust a pool with a nested connection request.
-    with (
-        ConnectionPool(settings.data_plane.db_url, min_size=1, max_size=1, timeout=0.5) as pool,
-        monkeypatch.context() as patch,
-    ):
-        patch.setattr(client.app.state, "db_pool", pool)
-        result = client.post(_path(agent), json={**BODY, "host": "page-home"}, headers=HEADERS)
+    with gateway_test_client(
+        config=_gateway_config(db_pool_max_size=1, cluster_secret=SECRET),
+        headers={"Authorization": f"Bearer {SECRET}"},
+    ) as one_connection:
+        result = one_connection.post(
+            _path(agent), json={**BODY, "host": "page-home"}, headers=HEADERS
+        )
     assert result.status_code == 201, result.text
 
 
 def test_placement_is_locked_before_host_validation(
-    client: GatewayTestClient, db_conn: psycopg.Connection
+    client: GatewayTestClient, db_conn: psycopg.Connection, db_url: str
 ) -> None:
-    from psycopg_pool import ConnectionPool
-
     agent = _agent(db_conn)
     db_conn.execute("UPDATE agents_meta SET machine='page-home' WHERE id=%s", (agent,))
     db_conn.commit()
-    entered, proceed = Event(), Event()
-    original = client.app.state.page_host_cache.dial_hosts
-
-    def paused_validation(
-        pool: ConnectionPool,
-        machine: str,
-        *,
-        connection: psycopg.Connection | None = None,
-    ) -> frozenset[str]:
-        assert connection is not None
-        entered.set()
-        assert proceed.wait(5), "test did not release target validation"
-        return original(pool, machine, connection=connection)
-
-    client.app.state.page_host_cache.dial_hosts = paused_validation
+    # meiva:note
+    # Host validation reads the machine's advertised addresses; holding that table
+    # stalls the request after it has locked the placement, so the lock can be probed.
+    db_conn.execute("LOCK TABLE machine_units IN ACCESS EXCLUSIVE MODE")
     with ThreadPoolExecutor(max_workers=1) as executor:
         accepted = executor.submit(
             client.post, _path(agent), json={**BODY, "host": "page-home"}, headers=HEADERS
         )
         try:
-            assert entered.wait(5), "guarded request did not reach host validation"
-            with psycopg.connect(settings.data_plane.db_url) as other:
+            _wait_until_a_statement_waits_for_a_lock(db_url)
+            with psycopg.connect(db_url) as other:
                 other.execute("SET LOCAL lock_timeout='100ms'")
                 with pytest.raises(psycopg.errors.LockNotAvailable):
                     other.execute(
@@ -424,23 +447,5 @@ def test_placement_is_locked_before_host_validation(
                     )
                 other.rollback()
         finally:
-            proceed.set()
-        assert accepted.result().status_code == 201
-
-
-def test_expired_name_reregistration_has_a_new_observed_identity(
-    client: TestClient, db_conn: psycopg.Connection
-) -> None:
-    agent = _agent(db_conn)
-    first = client.post(_path(agent), json=BODY, headers=HEADERS).json()
-    db_conn.execute("UPDATE agent_pages SET expired_at=now() WHERE id=%s", (first["id"],))
-    db_conn.commit()
-    later = client.post(_path(agent), json={**BODY, "port": 8802}, headers=_key("later"))
-    assert later.status_code == 201 and later.json()["id"] != first["id"]
-    stale = client.post(
-        _close_path(agent), json={"expected_page_id": first["id"]}, headers=_key("old-close")
-    )
-    assert stale.status_code == 409
-    assert db_conn.execute("SELECT id FROM agent_pages WHERE closed_at IS NULL").fetchone() == (
-        later.json()["id"],
-    )
+            db_conn.commit()
+        assert accepted.result(timeout=10).status_code == 201

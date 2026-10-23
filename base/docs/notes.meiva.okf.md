@@ -14,7 +14,7 @@ tags:
 
 `base/packages/docs/notes.py` is the single place that turns a `---`-frontmatter markdown
 file into a typed `Note` — the model behind the memory pool concept graph
-(`gateway/routers/memory.py`) and the OKF bundle graph
+(`gateway/routers/memory_api/memory.py`) and the OKF bundle graph
 (`base/packages/docs/okf_graph.py`). Before it existed, frontmatter parsing was inlined
 three times (memory graph, memory search metadata, okf bundle) with two
 different tags-normalization rules; now the delimiter scan lives once in

@@ -1,0 +1,4 @@
+exports = ["local_runner.py", "ops_stub.py"]
+
+[uses]
+"local_runner.py" = ["ops_stub.py"]

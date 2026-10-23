@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Sequence
-from dataclasses import dataclass
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from langchain_core.messages import BaseMessage
@@ -28,68 +27,30 @@ from base.agents.history.checkpoint import (
     load_checkpoint_messages,
     load_checkpoint_messages_segment,
 )
-from base.agents.history.timeline import (
-    TimelineItem,
-    build_timeline_items,
-    tail_window,
-    timeline_default_limit,
-)
+from base.agents.history.timeline import TimelineItem, build_timeline_items, tail_window
 from base.agents.history.timeline_inputs import TimelineReadInputs
 from base.agents.history.timeline_item import hydrate
 from base.db import Database, agent_exists
 from gateway.agents.eval_guard import deny_isolated_result_read
-from gateway.agents.history.read_inputs import TimelineReadPolicy
+from gateway.agents.history.configuration import request_timeline_read
+from gateway.agents.history.cursor import (
+    MAX_CURSOR_LENGTH,
+    TimelineCursor,
+    item_sort_key,
+    parse_cursor,
+)
+from gateway.agents.history.paging import (
+    boundary_read_limit,
+    depth_allows,
+    initial_window,
+    older_segment_available,
+    window_before,
+    window_or_cross,
+)
+from gateway.agents.history.read_inputs import TimelineRead
 
 router = APIRouter()
 _log = logging.getLogger(__name__)
-_REATTACHED_KINDS = frozenset({"system_prompt", "inbound_compact_summary"})
-
-
-def _standing_head_note_ids(items: list[TimelineItem]) -> set[str]:
-    """Item ids of the standing head notes: the contiguous ``system_marker``
-    run immediately after the system prompt.
-
-    These are the notes ``agent/graph/prompt/context_notes.py`` lays down at window
-    establishment (exec timeout / timezone / cluster memory / agent id / agent
-    memory / preloaded skills), rendered as ``system_marker`` items right
-    behind the prompt. They are standing context of the same class as the
-    prompt itself: ``_initial_window`` re-attaches them at the window head,
-    and the paging paths treat them as re-attached context (a cursor that
-    would select one must cross to the next older segment instead of looping
-    on the re-attached head).
-
-    The run requires ``source is not None`` (a real NoteTag): the catch-all
-    fallback renders untagged HumanMessages — pre-tag checkpoint rows and
-    retired markers that old data may still carry right after the prompt —
-    as ``system_marker`` with ``source=None``, and treating those as head
-    notes would re-attach stale rows to every window and skip them in paging.
-    """
-    head: set[str] = set()
-    idx = 0
-    # The current segment's prompt is always the plain "0.0" item (historical
-    # segments carry segment-prefixed ids), and the standing notes directly
-    # follow it. Historical segments have their SystemMessage stripped by
-    # ``load_checkpoint_messages_segment``, so their standing notes sit at
-    # items[0] — the run starts there when no prompt is present.
-    while idx < len(items) and items[idx].kind != "system_prompt":
-        idx += 1
-    if idx < len(items):
-        idx += 1  # past the prompt itself
-    else:
-        idx = 0  # no prompt (historical segment): its notes start at the front
-    while (
-        idx < len(items)
-        and items[idx].kind == "system_marker"
-        and items[idx].source is not None
-        and items[idx].impersonation is None
-    ):
-        head.add(items[idx].item_id)
-        idx += 1
-    return head
-
-
-_MAX_CURSOR_LENGTH = 512
-_MAX_CURSOR_INDEX_DIGITS = 20
 
 
 class TimelineResponse(BaseModel):
@@ -136,127 +97,6 @@ def _read_unavailable(agent_id: int, exc: CheckpointReadError) -> HTTPException:
     )
 
 
-@dataclass(frozen=True)
-class _TimelineCursor:
-    checkpoint_id: str | None
-    msg_idx: int
-    block_idx: int
-
-    def item_id(self, segment_prefix: str = "") -> str:
-        local_id = f"{self.msg_idx}.{self.block_idx}"
-        return f"{segment_prefix}.{local_id}" if segment_prefix else local_id
-
-
-def _parse_cursor(before: str) -> _TimelineCursor | None:
-    """Parse current (`m.b`) or historical (`sK.cpid.m.b`) item ids.
-
-    Historical ranks are syntax only. The checkpoint id is resolved against
-    the current boundary index and determines the canonical rank used in the
-    response, so a compact that shifts ranks cannot redirect a stale cursor.
-    """
-    if len(before) > _MAX_CURSOR_LENGTH:
-        return None
-    parts = before.split(".")
-    if len(parts) == 2:
-        msg, block = parts
-        msg_idx = _parse_cursor_index(msg)
-        block_idx = _parse_cursor_index(block)
-        if msg_idx is None or block_idx is None:
-            return None
-        return _TimelineCursor(checkpoint_id=None, msg_idx=msg_idx, block_idx=block_idx)
-    if len(parts) != 4:
-        return None
-    rank, checkpoint_id, msg, block = parts
-    rank_value = rank[1:] if rank.startswith("s") else ""
-    rank_idx = _parse_cursor_index(rank_value)
-    msg_idx = _parse_cursor_index(msg)
-    block_idx = _parse_cursor_index(block)
-    if rank_idx is None or rank_idx == 0 or rank_value.startswith("0") or not checkpoint_id:
-        return None
-    if msg_idx is None or block_idx is None:
-        return None
-    return _TimelineCursor(
-        checkpoint_id=checkpoint_id,
-        msg_idx=msg_idx,
-        block_idx=block_idx,
-    )
-
-
-def _parse_cursor_index(value: str) -> int | None:
-    """Parse one bounded ASCII item-id integer without integer-limit errors."""
-    if (
-        not value
-        or len(value) > _MAX_CURSOR_INDEX_DIGITS
-        or not value.isascii()
-        or not value.isdigit()
-    ):
-        return None
-    try:
-        return int(value)
-    except ValueError:
-        return None
-
-
-def window_before(
-    items: list[TimelineItem], before: str, limit: int
-) -> tuple[list[TimelineItem], bool]:
-    """Return up to `limit` items immediately older than the `before` item_id.
-
-    `before` is the oldest item_id the frontend currently holds. If it is
-    not found (rolled off / never existed), return an empty window with no
-    more — the frontend stops asking rather than looping.
-    """
-    idx = next((i for i, it in enumerate(items) if it.item_id == before), None)
-    if idx is None:
-        return [], False
-    start = max(0, idx - limit) if limit > 0 else 0
-    return items[start:idx], start > 0
-
-
-def _window_or_cross(
-    items: list[TimelineItem],
-    before: str,
-    limit: int,
-    *,
-    older_segment_available: bool,
-) -> tuple[list[TimelineItem], bool, bool]:
-    """Return a segment-local page or signal that the cursor is at its head.
-
-    The frontend never uses re-attached context as a cursor. When every item
-    before its oldest real item is re-attached context (the prompt, the
-    standing head notes, compact summaries), return that small head once more
-    while signaling the caller to append the next older segment.
-    Frontend de-duplication converges repeated standing context, and returning
-    it here guarantees a compact summary cannot fall between page boundaries.
-    """
-    idx = next((i for i, item in enumerate(items) if item.item_id == before), None)
-    if idx is None:
-        return [], False, False
-    head_note_ids = _standing_head_note_ids(items)
-    if all(item.kind in _REATTACHED_KINDS or item.item_id in head_note_ids for item in items[:idx]):
-        return items[:idx], older_segment_available, True
-    start = max(0, idx - limit) if limit > 0 else 0
-    return items[start:idx], start > 0 or older_segment_available, False
-
-
-def _depth_allows(rank: int, depth: int) -> bool:
-    return depth == -1 or 0 < rank <= depth
-
-
-def _older_segment_available(rank: int, boundary_count: int, depth: int) -> bool:
-    older_rank = rank + 1
-    return older_rank <= boundary_count and _depth_allows(older_rank, depth)
-
-
-def item_sort_key(item_id: str) -> tuple[int, int]:
-    """Order items by their logical append position (msg_idx, block_idx) parsed
-    from item_id — numeric, so "10.0" follows "2.0". This is the order
-    build_timeline_items already emits in; sorting by created_at would reorder
-    on a clock skew now that items carry real wall-clock timestamps."""
-    *_, msg_idx, block_idx = item_id.split(".")
-    return (int(msg_idx), int(block_idx))
-
-
 def _load_history_tail(
     db: Database,
     agent_id: int,
@@ -265,18 +105,18 @@ def _load_history_tail(
     limit: int,
     depth: int,
     *,
-    policy: TimelineReadPolicy,
+    read: TimelineRead,
 ) -> tuple[list[TimelineItem], bool]:
     """Load and window one exact older segment."""
-    if rank > len(boundary_ids) or not _depth_allows(rank, depth):
+    if rank > len(boundary_ids) or not depth_allows(rank, depth):
         return [], False
     items = _load_history_segment(
-        db, agent_id, boundary_ids[rank - 1], rank, policy=policy, limit=limit
+        db, agent_id, boundary_ids[rank - 1], rank, read=read, limit=limit
     )
     if not items:
         return [], False
     window, segment_has_more = tail_window(items, limit)
-    return window, segment_has_more or _older_segment_available(rank, len(boundary_ids), depth)
+    return window, segment_has_more or older_segment_available(rank, len(boundary_ids), depth)
 
 
 def _load_history_segment(
@@ -285,63 +125,36 @@ def _load_history_segment(
     checkpoint_id: str,
     rank: int,
     *,
-    policy: TimelineReadPolicy,
+    read: TimelineRead,
     limit: int | None = None,
     before: str | None = None,
 ) -> list[TimelineItem] | None:
     """Load and render one persisted segment; read/render failures stay visible."""
     if limit is None:
-        limit = timeline_default_limit(limit_reader=policy.default_limit)
-    read_segment = policy.load_segment or load_checkpoint_messages_segment
-    render = policy.render_items or build_timeline_items
+        limit = read.default_limit
     try:
-        messages = read_segment(db, agent_id, checkpoint_id)
+        messages = load_checkpoint_messages_segment(db, agent_id, checkpoint_id)
     except CheckpointReadError as exc:
         raise _read_unavailable(agent_id, exc) from exc
     if not messages:
         return None
     prefix = f"s{rank}.{checkpoint_id}"
-    items, _ = render(messages, inputs=policy.rendering, segment_prefix=prefix)
+    items, _ = build_timeline_items(messages, inputs=read.rendering, segment_prefix=prefix)
     return hydrate(db, items, agent_id, limit=limit, before=before)
 
 
-def _load_boundary_ids(
-    db: Database,
-    agent_id: int,
-    depth: int,
-    *,
-    policy: TimelineReadPolicy | None = None,
-) -> list[str]:
+def _load_boundary_ids(db: Database, agent_id: int, depth: int) -> list[str]:
     if depth == 0:
         return []
-    read_boundaries = (
-        policy.list_boundary_ids
-        if policy is not None and policy.list_boundary_ids is not None
-        else list_compact_boundary_checkpoint_ids
-    )
     try:
-        return read_boundaries(
-            db,
-            agent_id,
-            limit=depth + 1 if depth > 0 else None,
-        )
+        return list_compact_boundary_checkpoint_ids(db, agent_id, limit=boundary_read_limit(depth))
     except CheckpointReadError as exc:
         raise _read_unavailable(agent_id, exc) from exc
 
 
-def _load_current_message_count(
-    db: Database,
-    agent_id: int,
-    *,
-    policy: TimelineReadPolicy | None = None,
-) -> int:
-    read_count = (
-        policy.load_message_count
-        if policy is not None and policy.load_message_count is not None
-        else load_checkpoint_message_count
-    )
+def _load_current_message_count(db: Database, agent_id: int) -> int:
     try:
-        return read_count(db, agent_id)
+        return load_checkpoint_message_count(db, agent_id)
     except CheckpointReadError as exc:
         raise _read_unavailable(agent_id, exc) from exc
 
@@ -349,12 +162,12 @@ def _load_current_message_count(
 def _historical_window(
     db: Database,
     agent_id: int,
-    cursor: _TimelineCursor,
+    cursor: TimelineCursor,
     limit: int,
     boundary_ids: list[str],
     depth: int,
     *,
-    policy: TimelineReadPolicy,
+    read: TimelineRead,
 ) -> tuple[list[TimelineItem], bool]:
     """Page one exact boundary; a stale display rank never selects content."""
     checkpoint_id = cursor.checkpoint_id
@@ -364,119 +177,44 @@ def _historical_window(
         rank = boundary_ids.index(checkpoint_id) + 1
     except ValueError:
         return [], False
-    if not _depth_allows(rank, depth):
+    if not depth_allows(rank, depth):
         return [], False
     segment_items = _load_history_segment(
-        db, agent_id, checkpoint_id, rank, policy=policy, limit=limit, before=cursor.item_id()
+        db, agent_id, checkpoint_id, rank, read=read, limit=limit, before=cursor.item_id()
     )
     if not segment_items:
         return [], False
     segment_prefix = f"s{rank}.{checkpoint_id}"
-    older_available = _older_segment_available(rank, len(boundary_ids), depth)
-    window, has_more, cross = _window_or_cross(
+    older_available = older_segment_available(rank, len(boundary_ids), depth)
+    page = window_or_cross(
         segment_items,
         cursor.item_id(segment_prefix),
         limit,
-        older_segment_available=older_available,
+        older_available=older_available,
     )
-    if not cross:
-        return window, has_more
-    head = window
+    if not page.crossed:
+        return page.items, page.has_more
+    head = page.items
     if not older_available:
         return head, False
 
     # Release the requested segment before materializing the cross-segment
     # target. At most one checkpoint segment is resident during a request.
     del segment_items
-    older_rank = rank + 1
     older_window, older_has_more = _load_history_tail(
-        db,
-        agent_id,
-        boundary_ids,
-        older_rank,
-        limit,
-        depth,
-        policy=policy,
+        db, agent_id, boundary_ids, rank + 1, limit, depth, read=read
     )
     return [*head, *older_window], older_has_more
 
 
-def _missing_standing_context(
-    items: list[TimelineItem], window: list[TimelineItem]
-) -> tuple[list[TimelineItem], list[TimelineItem]]:
-    """The standing head notes and compact summaries that fell off the tail `window`."""
-    in_window = {window_item.item_id for window_item in window}
-    # The standing head notes — the contiguous system_marker run right after
-    # the prompt (exec timeout / timezone / cluster memory / agent id / agent
-    # memory / preloaded skills, agent/graph/prompt/context_notes.py) — are the same
-    # class of standing context as the prompt: laid down at window
-    # establishment, they fall off the tail window for any conversation past
-    # `limit` rendered items. Re-attach the missing ones right after the
-    # prompt so a long conversation's head reads like a fresh window (user
-    # report 2026-08-27: agent 2992's head showed only "system prompt ·
-    # compact summary" while a fresh agent shows "system prompt · 2 memories ·
-    # 3 system notes"). Deduped by item_id; not counted against `limit`.
-    head_note_ids = _standing_head_note_ids(items)
-    notes_missing = [
-        item for item in items if item.item_id in head_note_ids and item.item_id not in in_window
-    ]
-    # Compact summaries are standing context too. Once the prompt is
-    # re-attached, a cursor can never page to summaries older than it, so keep
-    # every missing summary immediately after the head notes.
-    compact_missing = [
-        item
-        for item in items
-        if item.kind == "inbound_compact_summary" and item.item_id not in in_window
-    ]
-    return notes_missing, compact_missing
-
-
-def _initial_window(
-    items: list[TimelineItem], limit: int, *, historical_segments_available: bool
-) -> tuple[list[TimelineItem], bool]:
-    """Window the current segment while preserving its standing context."""
-    window, has_more = tail_window(items, limit)
-    # The system-prompt item (0.0) is the OLDEST item and falls off the tail
-    # window for a long conversation. Re-attach it without counting it
-    # against the page limit or creating a phantom older-page affordance.
-    prompt = None
-    if not any(item.item_id == "0.0" for item in window):
-        prompt = next((item for item in items if item.kind == "system_prompt"), None)
-
-    notes_missing, compact_missing = _missing_standing_context(items, window)
-
-    reattached = (0 if prompt is None else 1) + len(notes_missing) + len(compact_missing)
-    if reattached:
-        # Standing context heads the window in reading order: prompt, head
-        # notes, compact summaries, then the raw tail window.
-        window = [
-            *([prompt] if prompt is not None else []),
-            *notes_missing,
-            *compact_missing,
-            *window,
-        ]
-        has_more = has_more and len(items) - reattached > limit
-    return window, has_more or historical_segments_available
-
-
-def load_current_messages(
-    db: Database,
-    agent_id: int,
-    *,
-    policy: TimelineReadPolicy | None = None,
-) -> list[BaseMessage]:
+def load_current_messages(db: Database, agent_id: int) -> list[BaseMessage]:
     """Load live messages once for timeline and composed snapshot reads.
 
     Failed storage or reconstruction reads remain unavailable rather than
     masquerading as a successfully empty conversation.
     """
-    read_messages = (
-        policy.load_messages
-        if policy is not None and policy.load_messages is not None
-        else load_checkpoint_messages
-    )
     try:
-        return read_messages(db, agent_id)
+        return load_checkpoint_messages(db, agent_id)
     except CheckpointReadError as exc:
         raise _read_unavailable(agent_id, exc) from exc
 
@@ -502,12 +240,12 @@ def _current_items(
     messages: Sequence[BaseMessage],
     limit: int,
     before: str | None,
+    *,
+    read: TimelineRead,
 ) -> tuple[list[TimelineItem], int]:
     """The current segment's rendered, hydrated items in item-id order + msg_count."""
     db: Database = request.app.state.db
-    policy: TimelineReadPolicy = request.app.state.timeline_policy
-    render = policy.render_items or build_timeline_items
-    items, msg_count = render(messages, inputs=policy.rendering)
+    items, msg_count = build_timeline_items(messages, inputs=read.rendering)
     items = hydrate(db, items, agent_id, limit=limit, before=before)
     items.sort(key=lambda it: item_sort_key(it.item_id))
     return items, msg_count
@@ -519,11 +257,14 @@ def _head_response(
     messages: Sequence[BaseMessage],
     limit: int,
     boundary_ids: list[str],
+    *,
+    read: TimelineRead,
 ) -> TimelineResponse:
     """The head window (no cursor) of the current segment."""
-    items, msg_count = _current_items(request, agent_id, messages, limit, None)
-    window, has_more = _initial_window(
+    items, msg_count = _current_items(request, agent_id, messages, limit, None, read=read)
+    window, has_more = initial_window(
         items,
+        tail_window(items, limit),
         limit,
         historical_segments_available=bool(boundary_ids),
     )
@@ -539,21 +280,14 @@ def head_timeline(
     (``load_current_messages``) so it deserializes the checkpoint once.
     """
     _require_agent(request, agent_id)
-    policy: TimelineReadPolicy = request.app.state.timeline_policy
-    depth = policy.compact_history()
-    boundary_ids = _load_boundary_ids(request.app.state.db, agent_id, depth, policy=policy)
-    return _head_response(
-        request,
-        agent_id,
-        messages,
-        timeline_default_limit(limit_reader=policy.default_limit),
-        boundary_ids,
-    )
+    read = request_timeline_read(request)
+    boundary_ids = _load_boundary_ids(request.app.state.db, agent_id, read.compact_history)
+    return _head_response(request, agent_id, messages, read.default_limit, boundary_ids, read=read)
 
 
 def _current_page_before(
     items: list[TimelineItem],
-    cursor: _TimelineCursor | None,
+    cursor: TimelineCursor | None,
     limit: int,
     depth: int,
     boundary_ids: list[str],
@@ -569,48 +303,38 @@ def _current_page_before(
     if depth == 0:
         window, has_more = window_before(items, cursor.item_id(), limit)
         return TimelineResponse(items=window, msg_count=msg_count, has_more=has_more)
-    older_available = bool(boundary_ids) and _depth_allows(1, depth)
-    window, has_more, cross = _window_or_cross(
-        items,
-        cursor.item_id(),
-        limit,
-        older_segment_available=older_available,
-    )
-    if not cross:
-        return TimelineResponse(items=window, msg_count=msg_count, has_more=has_more)
+    older_available = bool(boundary_ids) and depth_allows(1, depth)
+    page = window_or_cross(items, cursor.item_id(), limit, older_available=older_available)
+    if not page.crossed:
+        return TimelineResponse(items=page.items, msg_count=msg_count, has_more=page.has_more)
     if not older_available:
-        return TimelineResponse(items=window, msg_count=msg_count, has_more=False)
-    return window
+        return TimelineResponse(items=page.items, msg_count=msg_count, has_more=False)
+    return page.items
 
 
 def _historical_response(
     db: Database,
     agent_id: int,
     before: str | None,
-    cursor: _TimelineCursor | None,
+    cursor: TimelineCursor | None,
     limit: int,
     boundary_ids: list[str],
-    depth: int,
     *,
-    policy: TimelineReadPolicy,
+    read: TimelineRead,
 ) -> TimelineResponse | None:
     """The page of a historical or malformed `before=` request; None for a live-checkpoint read."""
     # Historical pages do not deserialize the live checkpoint. Its exact
     # message count comes from the five-byte channel header instead.
     if before is not None and cursor is None:
         return TimelineResponse(
-            items=[],
-            msg_count=_load_current_message_count(db, agent_id, policy=policy),
-            has_more=False,
+            items=[], msg_count=_load_current_message_count(db, agent_id), has_more=False
         )
     if cursor is not None and cursor.checkpoint_id is not None:
         window, has_more = _historical_window(
-            db, agent_id, cursor, limit, boundary_ids, depth, policy=policy
+            db, agent_id, cursor, limit, boundary_ids, read.compact_history, read=read
         )
         return TimelineResponse(
-            items=window,
-            msg_count=_load_current_message_count(db, agent_id, policy=policy),
-            has_more=has_more,
+            items=window, msg_count=_load_current_message_count(db, agent_id), has_more=has_more
         )
     return None
 
@@ -638,39 +362,37 @@ def get_timeline(
     the frontend render. A checkpoint read failure returns 503. Retained
     compact boundaries remain independently readable via /timeline/retained.
     """
-    policy: TimelineReadPolicy = request.app.state.timeline_policy
+    read = request_timeline_read(request)
     if limit is None:
-        limit = timeline_default_limit(limit_reader=policy.default_limit)
-    cursor = _parse_cursor(before) if before is not None else None
+        limit = read.default_limit
+    cursor = parse_cursor(before) if before is not None else None
     _require_agent(request, agent_id)
-    depth = policy.compact_history()
+    depth = read.compact_history
     db: Database = request.app.state.db
-    boundary_ids = _load_boundary_ids(db, agent_id, depth, policy=policy)
+    boundary_ids = _load_boundary_ids(db, agent_id, depth)
 
-    early = _historical_response(
-        db, agent_id, before, cursor, limit, boundary_ids, depth, policy=policy
-    )
+    early = _historical_response(db, agent_id, before, cursor, limit, boundary_ids, read=read)
     if early is not None:
         return early
 
-    messages = load_current_messages(db, agent_id, policy=policy)
+    messages = load_current_messages(db, agent_id)
     if before is None:
-        return _head_response(request, agent_id, messages, limit, boundary_ids)
-    items, msg_count = _current_items(request, agent_id, messages, limit, before)
+        return _head_response(request, agent_id, messages, limit, boundary_ids, read=read)
+    items, msg_count = _current_items(request, agent_id, messages, limit, before, read=read)
     paged = _current_page_before(items, cursor, limit, depth, boundary_ids, msg_count)
     if isinstance(paged, TimelineResponse):
         return paged
     del messages, items
     older_window, has_more = _load_history_tail(
-        db, agent_id, boundary_ids, 1, limit, depth, policy=policy
+        db, agent_id, boundary_ids, 1, limit, depth, read=read
     )
     return TimelineResponse(items=[*paged, *older_window], msg_count=msg_count, has_more=has_more)
 
 
-def _retained_cursor(before: str | None, checkpoint_id: str | None) -> _TimelineCursor | None:
+def _retained_cursor(before: str | None, checkpoint_id: str | None) -> TimelineCursor | None:
     if before is None:
         return None
-    cursor = _parse_cursor(before)
+    cursor = parse_cursor(before)
     if cursor is None or cursor.checkpoint_id is None:
         raise HTTPException(status_code=400, detail="Retained history requires a historical cursor")
     if checkpoint_id is not None and cursor.checkpoint_id != checkpoint_id:
@@ -685,8 +407,8 @@ def get_retained_timeline(
     agent_id: int,
     request: Request,
     limit: int | None = Query(default=None, ge=1, le=1000),
-    checkpoint_id: str | None = Query(default=None, max_length=_MAX_CURSOR_LENGTH),
-    before: str | None = Query(default=None, max_length=_MAX_CURSOR_LENGTH),
+    checkpoint_id: str | None = Query(default=None, max_length=MAX_CURSOR_LENGTH),
+    before: str | None = Query(default=None, max_length=MAX_CURSOR_LENGTH),
 ) -> RetainedTimelineResponse:
     """Read retained compact history explicitly, without reading the live head.
 
@@ -698,9 +420,9 @@ def get_retained_timeline(
         if not agent_exists(conn, agent_id):
             raise HTTPException(status_code=404, detail=f"agent {agent_id} not found")
     db: Database = request.app.state.db
-    policy: TimelineReadPolicy = request.app.state.timeline_policy
-    depth = policy.compact_history()
-    boundary_ids = _load_boundary_ids(db, agent_id, depth, policy=policy)
+    read = request_timeline_read(request)
+    depth = read.compact_history
+    boundary_ids = _load_boundary_ids(db, agent_id, depth)
     cursor = _retained_cursor(before, checkpoint_id)
     selected = cursor.checkpoint_id if cursor is not None else checkpoint_id
     if selected is None and not boundary_ids:
@@ -709,14 +431,14 @@ def get_retained_timeline(
     if selected not in boundary_ids:
         raise HTTPException(status_code=404, detail="Retained compact boundary not found")
     if limit is None:
-        limit = timeline_default_limit(limit_reader=policy.default_limit)
+        limit = read.default_limit
     if cursor is not None:
         items, has_more = _historical_window(
-            db, agent_id, cursor, limit, boundary_ids, depth, policy=policy
+            db, agent_id, cursor, limit, boundary_ids, depth, read=read
         )
     else:
         rank = boundary_ids.index(selected) + 1
         items, has_more = _load_history_tail(
-            db, agent_id, boundary_ids, rank, limit, depth, policy=policy
+            db, agent_id, boundary_ids, rank, limit, depth, read=read
         )
     return RetainedTimelineResponse(boundary_checkpoint_id=selected, items=items, has_more=has_more)

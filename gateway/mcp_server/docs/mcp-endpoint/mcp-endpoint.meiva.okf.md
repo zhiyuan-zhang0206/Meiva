@@ -37,8 +37,10 @@ sent, so the route owns every default.
 
 ## Mechanics
 
-- **Flag-gated, additive**: `settings.gateway.mcp_endpoint_enabled`
-  (MEIVA_MCP_ENDPOINT_ENABLED), default off. Off, `/mcp` answers 404 via the
+- **Flag-gated, additive**: `GatewayConfig.mcp_endpoint_enabled`, snapshotted at app
+  construction from `settings.gateway.mcp_endpoint_enabled` (MEIVA_MCP_ENDPOINT_ENABLED),
+  default off. A test builds the app with the value it wants (`mcp_client(enabled=...)` in
+  `gateway/tests/mcp_calls.py`). Off, `/mcp` answers 404 via the
   `mcp_gateway` ASGI wrapper; the existing mcp-daemon path is untouched either way.
 - **Mount**: `app.mount("/mcp", mcp_gateway(app))` — the wrapper reads
   `app.state.mcp_manager`, set by the gateway lifespan, which builds a fresh

@@ -10,6 +10,7 @@ from base.packages.extensions import registry
 from base.packages.extensions.install_registry import tree_hash
 from gateway.extensions.registry import MAX_ARCHIVE_B64_CHARS
 from gateway.tests.lifecycle.creation.test_guarded_creation import client as client
+from gateway.tests.lifecycle.creation.test_guarded_creation import runner as runner
 
 
 def _tree(root: Path, body: str = "# demo\n") -> Path:

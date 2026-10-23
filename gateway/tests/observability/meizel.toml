@@ -1,2 +1,4 @@
 [uses]
+"test_token_usage.py" = ["checkpoint_faults.py"]
+"test_trace_checkpoint_messages.py" = ["checkpoint_faults.py"]
 "test_gateway_entry_imports_httpx.py" = ["child_gateway_httpx_probe.py"]

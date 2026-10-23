@@ -1,5 +1,6 @@
 """Real notice selector receipts preserve identity across retries and replacements."""
 
+import time
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from uuid import uuid4
@@ -9,10 +10,12 @@ import pytest
 from fastapi.testclient import TestClient
 
 from base.api_contracts.idempotency import keyed_headers
-from gateway.agents.notice_operations import current as current_notice_receipts
-from gateway.agents.notice_operations import router as guarded_notices
+from base.events.live.bus import EventBus
 from gateway.tests.auth.gateway_config import GatewayTestClient, gateway_test_client
 from gateway.tests.events.test_notices_endpoint import insert_notice, seed_agent
+from gateway.tests.support.db_faults.refusing import refusing_inserts
+from gateway.tests.support.live_events.faults import unpublishable_bus
+from gateway.tests.support.live_events.recorder import recording_live_events
 
 SECRET = "guarded-notice-test-secret"  # noqa: S105 -- isolated credential
 HEADERS = {"Idempotency-Key": "intent", "Idempotency-Scope": "principal-v1"}
@@ -118,44 +121,35 @@ def test_concurrent_duplicate_has_one_acceptance(
 
 @pytest.mark.parametrize("dismiss", [False, True])
 def test_receipt_failure_rolls_back_mutation(
-    client: GatewayTestClient, db_conn: psycopg.Connection, dismiss: bool
+    client: GatewayTestClient, db_conn: psycopg.Connection, db_url: str, dismiss: bool
 ) -> None:
     agent = seed_agent(db_conn)
     notice = insert_notice(db_conn, agent, "A")
-    original = current_notice_receipts.save_receipt
 
-    def fail(*args: object) -> None:
-        raise RuntimeError("before receipt commit")
-
-    client.app.state.notice_receipt_writer = fail
-    assert _send(client, agent, notice, dismiss).status_code == 500
+    with refusing_inserts(db_url, "notice_operation_receipts"):
+        assert _send(client, agent, notice, dismiss).status_code == 500
     assert db_conn.execute(
         "SELECT title,resolved_at FROM agent_notices WHERE id=%s", (notice,)
     ).fetchone() == ("A", None)
     assert db_conn.execute("SELECT count(*) FROM notice_operation_receipts").fetchone() == (0,)
-    client.app.state.notice_receipt_writer = original
     assert _send(client, agent, notice, dismiss).status_code == 200
 
 
 @pytest.mark.parametrize("dismiss", [False, True])
 def test_lost_post_commit_response_replays_without_old_hint(
-    client: GatewayTestClient, db_conn: psycopg.Connection, dismiss: bool
+    client: GatewayTestClient, db_conn: psycopg.Connection, event_bus: EventBus, dismiss: bool
 ) -> None:
     agent = seed_agent(db_conn)
     notice = insert_notice(db_conn, agent, "A")
-    calls: list[tuple[object, ...]] = []
 
-    async def fail(*args: object, **kwargs: object) -> None:
-        calls.append(args)
-        raise RuntimeError("response lost after durable commit")
-
-    attr = "notice_publish_resolved" if dismiss else "notice_publish_posted"
-    setattr(client.app.state, attr, fail)
+    client.app.state.bus = unpublishable_bus()
     assert _send(client, agent, notice, dismiss).status_code == 500
-    replay = _send(client, agent, notice, dismiss)
-    assert replay.status_code == 200
-    assert len(calls) == 1
-    _ = guarded_notices
+    client.app.state.bus = event_bus
+    with recording_live_events(event_bus) as live:
+        replay = _send(client, agent, notice, dismiss)
+        live.quiet()
+        assert replay.status_code == 200
+        assert live.events("notice_posted") == [] and live.events("notice_resolved") == []
 
 
 @pytest.mark.parametrize(
@@ -258,33 +252,18 @@ def test_reply_concurrent_with_guarded_edit_has_no_lock_cycle(
 
 
 def test_creation_waits_for_guarded_owner_lock(
-    client: GatewayTestClient, db_conn: psycopg.Connection
+    client: GatewayTestClient, db_conn: psycopg.Connection, db_url: str
 ) -> None:
-    from threading import Event
-
     agent = seed_agent(db_conn)
     notice = insert_notice(db_conn, agent, "A", require_response=True)
-    locked = Event()
-    release = Event()
-    original = current_notice_receipts.save_receipt
 
-    def held(
-        conn: psycopg.Connection,
-        path: str,
-        key: str,
-        body: dict[str, object],
-        receipt: dict[str, object],
-    ) -> None:
-        original(conn, path, key, body, receipt)
-        locked.set()
-        assert release.wait(5)
-
-    client.app.state.notice_receipt_writer = held
-    with ThreadPoolExecutor(max_workers=2) as executor:
+    # meiva:note
+    # While another session holds the receipts table against inserts, the edit takes its owner
+    # and notice locks and then waits at the receipt write with its transaction open.
+    with psycopg.connect(db_url) as holder, ThreadPoolExecutor(max_workers=2) as executor:
+        holder.execute("LOCK TABLE notice_operation_receipts IN SHARE MODE")
         edit = executor.submit(_send, client, agent, notice, False)
-        assert locked.wait(5)
-        with pytest.raises(psycopg.errors.LockNotAvailable), db_conn.transaction():
-            db_conn.execute("SELECT id FROM agents WHERE id=%s FOR UPDATE NOWAIT", (agent,))
+        _wait_until_owner_is_locked(db_conn, agent)
         later = executor.submit(
             client.post,
             f"/api/agents/{agent}/notices",
@@ -294,7 +273,7 @@ def test_creation_waits_for_guarded_owner_lock(
         try:
             assert not later.done()
         finally:
-            release.set()
+            holder.rollback()
         assert edit.result(timeout=10).status_code == 200
         # meiva:note
         # The creation still waits for the edit's transaction, then finds the row
@@ -304,6 +283,18 @@ def test_creation_waits_for_guarded_owner_lock(
     assert db_conn.execute(
         "SELECT title FROM agent_notices WHERE agent_id=%s AND resolved_at IS NULL", (agent,)
     ).fetchone() == ("edited",)
+
+
+def _wait_until_owner_is_locked(db_conn: psycopg.Connection, agent: int) -> None:
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        try:
+            with db_conn.transaction():
+                db_conn.execute("SELECT id FROM agents WHERE id=%s FOR UPDATE NOWAIT", (agent,))
+        except psycopg.errors.LockNotAvailable:
+            return
+        time.sleep(0.02)
+    raise AssertionError("the edit never took the owner lock")
 
 
 def test_receipt_survives_expiration_and_changed_body_conflicts(

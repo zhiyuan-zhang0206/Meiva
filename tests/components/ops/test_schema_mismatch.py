@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 from datetime import UTC, datetime
 from functools import partial
 from pathlib import Path
@@ -172,11 +171,8 @@ def test_unexpected_programming_failure_is_not_silently_graded(
 
 
 @pytest.mark.parametrize("kind", ["invalid-migration-layout", "unavailable"])
-def test_gateway_probe_preserves_degraded_schema_status(
-    monkeypatch: pytest.MonkeyPatch, kind: SchemaMismatchKind
-) -> None:
-    from gateway.cluster import roster_probe
-    from gateway.cluster import status as status_route
+def test_gateway_roster_row_preserves_degraded_schema_status(kind: SchemaMismatchKind) -> None:
+    from gateway.cluster.roster.roster_rows import RosterRowSpec, reported_status
 
     diagnosis = SchemaMismatchStatus(kind=kind, machine="gateway", detail="schema evidence failed")
     response = ClusterStatus(
@@ -187,20 +183,17 @@ def test_gateway_probe_preserves_degraded_schema_status(
         schema_mismatch=diagnosis,
     )
 
-    async def probe(_name: str, _url: str) -> dict[str, object]:
-        return response.model_dump(mode="json")
-
-    monkeypatch.setattr(roster_probe, "dispatch_status_probe", probe)
-    row = asyncio.run(
-        status_route.probe_agent_runner(
-            roster_probe.IdentityMismatchLog(),
-            "gateway",
-            ["gateway"],
-            "http://inert.invalid",
-            datetime.now(UTC),
-            None,
-            None,
-        )
+    row = reported_status(
+        RosterRowSpec(
+            name="gateway",
+            gateway_url="http://inert.invalid",
+            role=["gateway"],
+            up_since_at=datetime.now(UTC),
+            description=None,
+            stopped_at=None,
+        ),
+        response,
+        observed_at=None,
     )
     assert row.online is True
     assert row.schema_mismatch is not None

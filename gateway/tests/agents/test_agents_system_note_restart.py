@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import threading
-from typing import Any
+import time
 from uuid import uuid4
 
 import psycopg
@@ -17,6 +17,20 @@ from base.lm.catalog import ModelCatalog
 from gateway.tests.auth.gateway_config import gateway_test_client, spawn_via_http
 from gateway.tests.test_agents_endpoints import inbound_rows, returned_id, terminate_hosted
 from gateway.tests.test_agents_endpoints import withdrawn_model as withdrawn_model
+
+
+def _wait_until_task_is_locked(db_conn: psycopg.Connection, task_id: int) -> None:
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        try:
+            with db_conn.transaction():
+                db_conn.execute(
+                    "SELECT id FROM agent_tasks WHERE id = %s FOR UPDATE NOWAIT", (task_id,)
+                )
+        except psycopg.errors.LockNotAvailable:
+            return
+        time.sleep(0.02)
+    raise AssertionError("the note never locked the task")
 
 
 class TestSystemNote:
@@ -138,7 +152,7 @@ class TestSystemNote:
     def test_system_note_task_ownership_stays_locked_through_enqueue(
         self,
         db_conn: psycopg.Connection,
-        monkeypatch: pytest.MonkeyPatch,
+        db_url: str,
         database: Database,
         event_bus: EventBus,
         *,
@@ -147,20 +161,8 @@ class TestSystemNote:
         from base.db import connect, pool
         from gateway.agents import system_note
 
-        enqueue_entered, release_enqueue, reassign_started, reassign_finished = (
-            threading.Event(),
-            threading.Event(),
-            threading.Event(),
-            threading.Event(),
-        )
+        reassign_started, reassign_finished = threading.Event(), threading.Event()
         errors: list[Exception] = []
-
-        writer = system_note.insert_inbound_message_in_transaction
-
-        def pause_enqueue(*args: Any, **kwargs: Any):
-            enqueue_entered.set()
-            assert release_enqueue.wait(timeout=2)
-            return writer(*args, **kwargs)
 
         with db_conn.cursor() as cur:
             cur.execute("INSERT INTO agents DEFAULT VALUES RETURNING id")
@@ -174,7 +176,6 @@ class TestSystemNote:
             )
             task_id = returned_id(cur)
         db_conn.commit()
-        monkeypatch.setattr(system_note, "insert_inbound_message_in_transaction", pause_enqueue)
 
         def enqueue(note_pool: ConnectionPool) -> None:
             try:
@@ -205,24 +206,31 @@ class TestSystemNote:
             finally:
                 reassign_finished.set()
 
-        with pool(max_size=1, gate=database_gate) as note_pool:
+        # meiva:note
+        # A session holding the inbox table against inserts parks the note at its insert, after
+        # it has locked the task row; the reassignment must wait for the note's transaction.
+        with (
+            psycopg.connect(db_url) as holder,
+            pool(max_size=1, gate=database_gate) as note_pool,
+        ):
+            holder.execute("LOCK TABLE inbound_messages IN SHARE MODE")
             enqueue_thread, reassign_thread = (
                 threading.Thread(target=enqueue, args=(note_pool,), daemon=True),
                 threading.Thread(target=reassign, daemon=True),
             )
             enqueue_thread.start()
             try:
-                assert enqueue_entered.wait(timeout=2), errors
+                _wait_until_task_is_locked(db_conn, task_id)
                 reassign_thread.start()
                 assert reassign_started.wait(timeout=2)
                 assert not reassign_finished.wait(timeout=0.2), (
                     "task reassignment committed while the task note was being enqueued"
                 )
             finally:
-                release_enqueue.set()
-                enqueue_thread.join(timeout=2)
+                holder.rollback()
+                enqueue_thread.join(timeout=5)
                 if reassign_thread.ident is not None:
-                    reassign_thread.join(timeout=2)
+                    reassign_thread.join(timeout=5)
 
         assert not enqueue_thread.is_alive()
         assert not reassign_thread.is_alive()
@@ -313,13 +321,9 @@ class TestRestart:
         self,
         db_conn: psycopg.Connection,
         withdrawn_model: tuple[str, ModelCatalog],
-        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        import gateway.app as gateway_app
-
         model, catalog = withdrawn_model
-        monkeypatch.setattr(gateway_app, "build_model_catalog", lambda: catalog)
-        with gateway_test_client() as client:
+        with gateway_test_client(catalog=catalog) as client:
             agent_id = spawn_via_http(client, {}).json()["id"]
             resp = client.post(
                 f"/api/agents/{agent_id}/restart",

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC
+from typing import Any
 from uuid import uuid4
 
 import psycopg
@@ -11,6 +12,7 @@ import pytest
 import meiva
 from base.agents.observation.snapshot import select_one
 from base.config import settings
+from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 from gateway.tests.extensions.fleet.test_fleet_notices_via_gateway import (
     load_activity_plugin as load_activity_plugin,
@@ -19,85 +21,59 @@ from gateway.tests.extensions.fleet.test_fleet_notices_via_gateway import (
     sdk_via_inprocess_gateway as sdk_via_inprocess_gateway,
 )
 from gateway.tests.extensions.fleet.test_fleet_notices_via_gateway import seed_agent
+from gateway.tests.support.live_events.recorder import recording_live_events
 from meiva.tests.fixtures.pin_agent import pin_agent
-from ops import lifecycle
+
+
+# meiva:note
+# What the inspector reads when an AgentUpdated hint arrives: the notices awaiting a reply.
+def _awaiting_titles(db_url: str, model_catalog: ModelCatalog):
+
+    def read(event: dict[str, Any]) -> list[str]:
+        with psycopg.connect(db_url) as conn:
+            snapshot = select_one(
+                conn,
+                event["agent_id"],
+                catalog=model_catalog,
+                default_model_reader=lambda: settings.lm.llm_model,
+            )
+        assert snapshot is not None
+        return [notice.title for notice in snapshot.notices_awaiting_response]
+
+    return read
 
 
 def test_dismissing_response_notice_refreshes_inspector_snapshot(
     sdk_via_inprocess_gateway: None,
     load_activity_plugin: None,
     db_conn: psycopg.Connection,
-    monkeypatch: pytest.MonkeyPatch,
+    db_url: str,
+    event_bus: EventBus,
     model_catalog: ModelCatalog,
 ):
     """Removing the dismiss snapshot refresh leaves the inspector stale."""
-    from gateway.agents import notices as notices_router
-
-    published_awaiting: list[list[str]] = []
-
-    def _capture_snapshot(_bus: object, published_agent_id: int) -> None:
-        snapshot = select_one(
-            db_conn,
-            published_agent_id,
-            catalog=model_catalog,
-            default_model_reader=lambda: settings.lm.llm_model,
-        )
-        assert snapshot is not None
-        published_awaiting.append([notice.title for notice in snapshot.notices_awaiting_response])
-
-    monkeypatch.setattr(
-        notices_router, "publish_agent_updated_sync", _capture_snapshot, raising=False
-    )
-
     agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
-    meiva.ui.notify("decision needed", require_response=True, idempotency_key=str(uuid4()))  # type: ignore[attr-defined]
-    meiva.ui.dismiss_notice()  # type: ignore[attr-defined]
+    with recording_live_events(event_bus, react=_awaiting_titles(db_url, model_catalog)) as live:
+        meiva.ui.notify("decision needed", require_response=True, idempotency_key=str(uuid4()))  # type: ignore[attr-defined]
+        meiva.ui.dismiss_notice()  # type: ignore[attr-defined]
+        updates = live.settle("agent_updated", 2)
 
     # The first snapshot announces the newly posted question. Dismissal
     # must publish a second, now-empty snapshot for the inspector.
-    assert published_awaiting == [["decision needed"], []]
+    assert [event.reaction for event in updates] == [["decision needed"], []]
 
 
 def test_a_legacy_fyi_row_does_not_block_and_a_second_notice_is_refused(
     sdk_via_inprocess_gateway: None,
     load_activity_plugin: None,
     db_conn: psycopg.Connection,
-    monkeypatch: pytest.MonkeyPatch,
+    db_url: str,
+    event_bus: EventBus,
     model_catalog: ModelCatalog,
 ):
     # meiva:link gateway/agents/docs/notice-receipts.meiva.okf.md
     # meiva:link meiva/docs/ui.meiva.okf.md
-    from gateway.agents import notices as notices_router
-
-    published_awaiting: list[list[str]] = []
-    posted: list[int] = []
-    resolved: list[int] = []
-
-    def _capture_snapshot(_bus: object, published_agent_id: int) -> None:
-        snapshot = select_one(
-            db_conn,
-            published_agent_id,
-            catalog=model_catalog,
-            default_model_reader=lambda: settings.lm.llm_model,
-        )
-        assert snapshot is not None
-        published_awaiting.append([notice.title for notice in snapshot.notices_awaiting_response])
-
-    async def _capture_posted(
-        _bus: object, _agent_id: int, notice_id: int, *_args: object, **_kwargs: object
-    ) -> None:
-        posted.append(notice_id)
-
-    async def _capture_resolved(_bus: object, _agent_id: int, notice_id: int, **_: object) -> None:
-        resolved.append(notice_id)
-
-    monkeypatch.setattr(
-        notices_router, "publish_agent_updated_sync", _capture_snapshot, raising=False
-    )
-    monkeypatch.setattr(lifecycle, "publish_notice_posted", _capture_posted)
-    monkeypatch.setattr(lifecycle, "publish_notice_resolved", _capture_resolved)
-
     agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
     with db_conn.cursor() as cur:
@@ -108,11 +84,16 @@ def test_a_legacy_fyi_row_does_not_block_and_a_second_notice_is_refused(
             (agent_id,),
         )
     db_conn.commit()
-    meiva.ui.notify("question", require_response=True, idempotency_key=str(uuid4()))  # pyright: ignore[reportCallIssue]
-    with pytest.raises(ValueError, match="already holds an open notice"):
+    with recording_live_events(event_bus, react=_awaiting_titles(db_url, model_catalog)) as live:
+        meiva.ui.notify("question", require_response=True, idempotency_key=str(uuid4()))  # pyright: ignore[reportCallIssue]
+        with pytest.raises(ValueError, match="already holds an open notice"):
+            meiva.ui.notify("next question", idempotency_key=str(uuid4()))  # pyright: ignore[reportCallIssue]
+        meiva.ui.dismiss_notice()  # pyright: ignore[reportCallIssue]
         meiva.ui.notify("next question", idempotency_key=str(uuid4()))  # pyright: ignore[reportCallIssue]
-    meiva.ui.dismiss_notice()  # pyright: ignore[reportCallIssue]
-    meiva.ui.notify("next question", idempotency_key=str(uuid4()))  # pyright: ignore[reportCallIssue]
+        posted = live.settle("notice_posted", 2)
+        resolved = live.settle("notice_resolved", 1)
+        updates = live.settle("agent_updated", 3)
+        live.quiet()
 
     db_conn.rollback()
     with db_conn.cursor() as cur:
@@ -125,10 +106,13 @@ def test_a_legacy_fyi_row_does_not_block_and_a_second_notice_is_refused(
 
     assert by_title["Legacy FYI"][1] is None, "posting must not resolve a legacy FYI row"
     assert by_title["question"][1] == "withdrawn"
-    assert resolved == [by_title["question"][0]]
-    assert posted == [by_title["question"][0], by_title["next question"][0]]
-    assert published_awaiting[0] == ["question"]
-    assert published_awaiting[-1] == ["next question"]
+    assert [event.payload["notice_id"] for event in resolved] == [by_title["question"][0]]
+    assert [event.payload["notice_id"] for event in posted] == [
+        by_title["question"][0],
+        by_title["next question"][0],
+    ]
+    assert updates[0].reaction == ["question"]
+    assert updates[-1].reaction == ["next question"]
 
 
 def test_notice_return_int_and_edit_dismiss_take_no_id(

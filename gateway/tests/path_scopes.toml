@@ -13,8 +13,8 @@
     "test_agents_endpoints.py",
     "test_error_envelope.py",
     "test_idempotency.py",
-    "test_status_cluster.py",
-    "test_understanding_build_endpoints.py",
+    "routers/cluster_endpoints/test_status_cluster.py",
+    "history/test_understanding_build_endpoints.py",
 ]
 "meiva.tests.fixtures.sdk" = [
     ".",

@@ -17,13 +17,13 @@ from typing import Annotated
 import psycopg
 from fastapi import APIRouter, HTTPException, Query, Request
 
-from base.config import settings
 from base.telemetry.metrics.aggregate import (
     build_report_from_aggregate,
     fetch_agent_rollups,
     fetch_aggregate,
 )
 from gateway.events.schemas import AgentMetricsItem, AgentMetricsReport, MetricsMeta, MetricsReport
+from gateway.http.config import runtime_view
 
 router = APIRouter()
 
@@ -51,18 +51,11 @@ def get_metrics(
     widened by the W9 events-table switch (it was agent-kernel lines only
     before); audit events are excluded."""
     if days is None:
-        days = int(
-            getattr(
-                request.app.state,
-                "metrics_default_window_days",
-                settings.display.metrics_default_window_days,
-            )
-        )
-    now = getattr(request.app.state, "metrics_now", None)
+        days = int(runtime_view(request).display.metrics_default_window_days)
     try:
         with request.app.state.db_pool.connection() as conn:
             conn.execute(_READ_TIMEOUT)
-            agg = fetch_aggregate(conn, days, agent, since_compact=since_compact, now=now)
+            agg = fetch_aggregate(conn, days, agent, since_compact=since_compact)
     except psycopg.errors.QueryCanceled as exc:
         raise HTTPException(status_code=503, detail="metrics read timed out; retry") from exc
     _, data = build_report_from_aggregate(agg, days, agent, since_compact=since_compact)
@@ -86,20 +79,11 @@ def get_metrics_agents(
     and the count covers every telemetry/log event in the window (all
     processes), the W9-widened scope documented on `get_metrics`."""
     if days is None:
-        days = int(
-            getattr(
-                request.app.state,
-                "metrics_default_window_days",
-                settings.display.metrics_default_window_days,
-            )
-        )
-    now = getattr(request.app.state, "metrics_now", None)
+        days = int(runtime_view(request).display.metrics_default_window_days)
     try:
         with request.app.state.db_pool.connection() as conn:
             conn.execute(_READ_TIMEOUT)
-            total_events, rollups = fetch_agent_rollups(
-                conn, days, since_compact=since_compact, now=now
-            )
+            total_events, rollups = fetch_agent_rollups(conn, days, since_compact=since_compact)
             labels: dict[int, str | None] = {}
             if rollups:
                 rows = conn.execute(

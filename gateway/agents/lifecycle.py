@@ -2,8 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Callable
-from typing import Any, Literal
+from typing import Literal
 
 import psycopg
 from fastapi import APIRouter, Body, HTTPException, Request
@@ -17,7 +16,8 @@ from base.api_contracts.agent_contract import AgentNotFound, AgentStatus
 from base.db import Database
 from base.db.transaction import write_transaction
 from base.events.live.bus import EventBus
-from gateway.agents.forward import forward_to_home_machine
+from gateway.agents.launch.forward import forward_to_home_machine
+from gateway.http.config import GatewayConfig
 from gateway.http.model_catalog import require_model_catalog
 from ops.rpc_schemas import (
     CancelAgentResponse,
@@ -89,7 +89,11 @@ async def post_agent_terminate(
 ) -> TerminateAgentResponse:
 
     return await terminate_agent_with_open_tasks(
-        agent_id, body, request.app.state.db_pool, db=request.app.state.db
+        agent_id,
+        body,
+        request.app.state.db_pool,
+        db=request.app.state.db,
+        config=request.app.state.gateway_config,
     )
 
 
@@ -99,20 +103,22 @@ async def terminate_agent_with_open_tasks(
     pool: ConnectionPool,
     *,
     db: Database,
-    forward_op: Callable[..., Any] | None = None,
-    read_open_tasks: Callable[[ConnectionPool, int], OpenTasksHint | None] | None = None,
+    config: GatewayConfig,
 ) -> TerminateAgentResponse:
 
-    forwarder = forward_to_home_machine if forward_op is None else forward_op
-    forwarded = await forwarder(
-        agent_id, f"/api/agents/{agent_id}/terminate", body.model_dump(), db=db, pool=pool
+    forwarded = await forward_to_home_machine(
+        agent_id,
+        f"/api/agents/{agent_id}/terminate",
+        body.model_dump(),
+        db=db,
+        pool=pool,
+        config=config,
     )
     response = TerminateAgentResponse.model_validate(forwarded)
     if response.shell_sessions is not None and response.shell_sessions.killed:
         await _drop_killed_shell_ttls(pool, agent_id, response.shell_sessions.killed)
-    tasks_reader = _open_tasks_hint_blocking if read_open_tasks is None else read_open_tasks
     try:
-        hint = await asyncio.to_thread(tasks_reader, pool, agent_id)
+        hint = await asyncio.to_thread(_open_tasks_hint_blocking, pool, agent_id)
     except (psycopg.Error, PoolTimeout) as exc:
         _log.error(
             "[lifecycle] open-tasks hint for terminate of agent %s failed: %r",
@@ -182,6 +188,7 @@ async def post_agent_resurrect(
         body.model_dump(),
         db=request.app.state.db,
         pool=request.app.state.db_pool,
+        config=request.app.state.gateway_config,
     )
     return ResurrectAgentResponse.model_validate(forwarded)
 
@@ -201,23 +208,21 @@ async def post_agent_restart(
         from base.packages.plugins.plugin_errors import InvalidConfigOverlay
 
         catalog = require_model_catalog(request)
-        overlay_configs = getattr(request.app.state, "overlay_configs", None)
         try:
             validate_config_overlay(
                 body.config_overlay,
-                configs=overlay_configs,
                 models=catalog.models,
                 decision_models=catalog.decision_models,
             )
         except InvalidConfigOverlay as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
-    forward_op = getattr(request.app.state, "lifecycle_forward_op", forward_to_home_machine)
-    forwarded = await forward_op(
+    forwarded = await forward_to_home_machine(
         agent_id,
         f"/api/agents/{agent_id}/restart",
         body.model_dump(),
         db=request.app.state.db,
         pool=request.app.state.db_pool,
+        config=request.app.state.gateway_config,
     )
     return RestartAgentResponse.model_validate(forwarded)
 
@@ -234,6 +239,7 @@ async def post_agent_cancel(agent_id: int, request: Request) -> CancelAgentRespo
         {},
         db=request.app.state.db,
         pool=request.app.state.db_pool,
+        config=request.app.state.gateway_config,
     )
     return CancelAgentResponse.model_validate(forwarded)
 

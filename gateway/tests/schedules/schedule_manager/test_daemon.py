@@ -1,10 +1,19 @@
+# meiva:note
+# The schedule-manager daemon: its two resident loops and the order it takes resources up and gives them back.
+#
+# The loops run over the real manager, the home's real pty-sessions service and the test's
+# Postgres. A loop's crash is a real database error: a trigger makes the delete that consumes a
+# request fail, which is the one write the request loop cannot survive.
+
 from __future__ import annotations
 
 import asyncio
 import importlib.util
-from collections.abc import Iterator
+import socket
+from collections.abc import Callable, Generator
 from pathlib import Path
 
+import psycopg
 import pytest
 from psycopg_pool import ConnectionPool
 
@@ -12,20 +21,45 @@ import base.db
 import gateway.app
 from base.clock import SYSTEM_TIMERS
 from base.config import ConfigBoot
+from base.daemon.endpoints import ServiceEndpoints
 from base.daemon.loop_health import LivenessGroup
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.native_process.loaded_commit import LoadedCommit
+from base.sessions.backend import get_shell_backend
+from base.sessions.env_forwarding import forward_env_dict
+from base.sessions.pty.tests.pty_service import PtyServiceProcess
+from base.sessions.pty.tests.pty_service import pty_service as pty_service
+from gateway.schedules.tests.db_faults import failing_write
 from services.wake.schedule_manager import daemon
+from services.wake.schedule_manager.tests.manager_support import schedule_manager
 
 
 @pytest.fixture
-def pool(db_url: str, *, database_gate: ProcessDbGate) -> Iterator[ConnectionPool]:
-    p = base.db.pool(max_size=2, gate=database_gate)
+def pool(db_url: str, *, database_gate: ProcessDbGate) -> Generator[ConnectionPool]:
+    p = base.db.pool(max_size=4, gate=database_gate)
     try:
         yield p
     finally:
         p.close()
+
+
+def _queue(conn: psycopg.Connection, schedule_id: int) -> None:
+    conn.execute("INSERT INTO schedule_sync_requests (schedule_id) VALUES (%s)", (schedule_id,))
+    conn.commit()
+
+
+def _queued(conn: psycopg.Connection) -> list[int]:
+    conn.rollback()
+    return [r[0] for r in conn.execute("SELECT schedule_id FROM schedule_sync_requests")]
+
+
+async def _until(condition: Callable[[], bool], what: str) -> None:
+    for _ in range(600):
+        if condition():
+            return
+        await asyncio.sleep(0.025)
+    raise AssertionError(f"never happened: {what}")
 
 
 def test_the_gateway_owns_no_schedule_manager() -> None:
@@ -34,135 +68,92 @@ def test_the_gateway_owns_no_schedule_manager() -> None:
 
 
 async def test_both_loops_run_their_rounds(
-    pool: ConnectionPool, monkeypatch: pytest.MonkeyPatch
+    db_conn: psycopg.Connection, pool: ConnectionPool, pty_service: PtyServiceProcess
 ) -> None:
-    reconciled = asyncio.Event()
-    consumed = asyncio.Event()
-
-    def reconcile(_self: object) -> None:
-        reconciled.set()
-
-    def consume(_pool: object, _manager: object) -> int:
-        consumed.set()
-        return 0
-
-    monkeypatch.setattr(daemon.ScheduleManager, "reconcile", reconcile)
-    monkeypatch.setattr(daemon.requests, "consume_requests", consume)
+    # meiva:note
+    # a deleted schedule: the request loop reaps its (absent) session
+    _queue(db_conn, 4242)
     liveness = LivenessGroup(timers=SYSTEM_TIMERS)
+    manager = schedule_manager(pool, get_shell_backend(), launch_env=forward_env_dict())
 
-    task = asyncio.create_task(daemon.run_loops(pool, liveness))
+    task = asyncio.create_task(daemon.run_loops(pool, manager, liveness))
     try:
-        await asyncio.wait_for(asyncio.gather(reconciled.wait(), consumed.wait()), timeout=10)
+        await _until(lambda: _queued(db_conn) == [], "the request loop consumed the request")
+        await _until(
+            lambda: liveness.snapshot()["reconcile"]["last_success_at"] is not None,
+            "the reconcile loop finished a round",
+        )
         assert set(liveness.snapshot()) == {"reconcile", "requests"}
     finally:
         task.cancel()
         await asyncio.gather(task, return_exceptions=True)
 
 
-@pytest.mark.parametrize("crashing", ["reconcile", "requests"])
 async def test_a_crashing_loop_cancels_its_sibling_and_ends_the_service(
-    pool: ConnectionPool, monkeypatch: pytest.MonkeyPatch, crashing: str
+    db_conn: psycopg.Connection, pool: ConnectionPool, pty_service: PtyServiceProcess
 ) -> None:
-    cancelled: list[str] = []
+    _queue(db_conn, 4242)
+    manager = schedule_manager(pool, get_shell_backend(), launch_env=forward_env_dict())
 
-    def stand_in(name: str):
-        async def loop(*_args: object) -> None:
-            if name == crashing:
-                await asyncio.sleep(0.01)
-                raise RuntimeError(f"{name} loop crashed")
-            try:
-                await asyncio.Event().wait()
-            except asyncio.CancelledError:
-                cancelled.append(name)
-                raise
+    with (
+        failing_write(db_conn, table="schedule_sync_requests", events="DELETE"),
+        pytest.raises(ExceptionGroup) as raised,
+    ):
+        await asyncio.wait_for(
+            daemon.run_loops(pool, manager, LivenessGroup(timers=SYSTEM_TIMERS)), timeout=30
+        )
 
-        return loop
+    assert [type(exc) for exc in raised.value.exceptions] == [psycopg.errors.RaiseException]
+    assert _queued(db_conn) == [4242]
 
-    async def run_rounds(name: str, *_args: object) -> None:
-        await stand_in(name)()
 
-    monkeypatch.setattr(daemon.round_loop, "run_rounds", run_rounds)
-
-    with pytest.raises(ExceptionGroup) as raised:
-        await daemon.run_loops(pool, LivenessGroup(timers=SYSTEM_TIMERS))
-
-    assert [str(exc) for exc in raised.value.exceptions] == [f"{crashing} loop crashed"]
-    assert cancelled == [({"reconcile", "requests"} - {crashing}).pop()]
+def _no_builtins(config: ConfigBoot) -> ConfigBoot:
+    config.set_field("provision_builtin_schedules", False)
+    return config
 
 
 async def test_a_crash_leaves_run_after_releasing_its_resources(
-    monkeypatch: pytest.MonkeyPatch,
+    db_conn: psycopg.Connection,
+    pty_service: PtyServiceProcess,
     database: Database,
+    unit_home: Path,
     *,
     process_config: ConfigBoot,
-    tmp_path: Path,
 ) -> None:
-    released: list[str] = []
+    config = _no_builtins(process_config)
+    endpoint = ServiceEndpoints.from_boot(config, runtime=unit_home / "run").of("schedule_manager")
+    _queue(db_conn, 4242)
 
-    class _Pool:
-        def close(self) -> None:
-            released.append("pool")
-
-    async def start_health(_name: str, _port: int, **_kw: object) -> str:
-        return "health"
-
-    async def stop_health(_server: object) -> None:
-        released.append("health")
-
-    async def crashing_loops(_pool: object, _liveness: object) -> None:
-        raise ExceptionGroup("loops", [RuntimeError("reconcile loop crashed")])
-
-    async def no_provision(_pool: object) -> None:
-        return None
-
-    def acquire(_path: object, _module: str) -> bool:
-        return True
-
-    def remove(_path: object) -> None:
-        released.append("pidfile")
-
-    def make_pool(_self: object, **_kw: object) -> _Pool:
-        return _Pool()
-
-    def own_checkout(_repo: object) -> None:
-        return None
-
-    monkeypatch.setattr(daemon, "prod_service_checkout_error", own_checkout)
-    monkeypatch.setattr(daemon, "acquire_pidfile", acquire)
-    monkeypatch.setattr(daemon, "remove_pidfile", remove)
-    monkeypatch.setattr(daemon, "start_health_server", start_health)
-    monkeypatch.setattr(daemon, "stop_health_server", stop_health)
-    monkeypatch.setattr(daemon.Database, "pool", make_pool)
-    monkeypatch.setattr(daemon, "provision_builtins", no_provision)
-    monkeypatch.setattr(daemon, "run_loops", crashing_loops)
-
-    with pytest.raises(ExceptionGroup):
-        await daemon.run(
-            process_config=process_config,
-            runtime=tmp_path / "run",
-            database=lambda: database,
-            image=LoadedCommit(Path(), None),
+    with (
+        failing_write(db_conn, table="schedule_sync_requests", events="DELETE"),
+        pytest.raises(ExceptionGroup),
+    ):
+        await asyncio.wait_for(
+            daemon.run(
+                process_config=config,
+                runtime=unit_home / "run",
+                database=lambda: database,
+                image=LoadedCommit(Path(), None),
+            ),
+            timeout=30,
         )
 
-    assert sorted(released) == ["health", "pidfile", "pool"]
+    assert not endpoint.pidfile.exists()
+    with socket.socket() as probe:
+        assert probe.connect_ex(("127.0.0.1", endpoint.health_port)) != 0, "healthz still listening"
 
 
 async def test_a_foreign_checkout_refuses_to_supervise_schedules(
-    monkeypatch: pytest.MonkeyPatch,
-    database: Database,
-    *,
-    process_config: ConfigBoot,
-    tmp_path: Path,
+    database: Database, unit_home: Path, *, process_config: ConfigBoot
 ) -> None:
-    def foreign(_repo: object) -> str:
-        return "prod home but foreign checkout"
+    # meiva:note
+    # a prod home whose checkout is not this one
+    (unit_home / "source").mkdir()
 
-    monkeypatch.setattr(daemon, "prod_service_checkout_error", foreign)
-
-    with pytest.raises(RuntimeError, match="foreign checkout"):
+    with pytest.raises(RuntimeError, match="schedule supervision refused"):
         await daemon.run(
             process_config=process_config,
-            runtime=tmp_path / "run",
+            runtime=unit_home / "run",
             database=lambda: database,
             image=LoadedCommit(Path(), None),
         )

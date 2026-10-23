@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import uuid
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import AbstractContextManager
 from pathlib import Path
 
 import httpx2 as httpx
@@ -10,7 +11,12 @@ import pytest
 from fastapi.testclient import TestClient
 
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
-from gateway.tests.auth.gateway_config import gateway_test_client, spawn_via_http
+from gateway.tests.auth.gateway_config import (
+    GatewayTestClient,
+    gateway_test_client,
+    gateway_test_config,
+    spawn_via_http,
+)
 
 
 def _upload(
@@ -45,6 +51,12 @@ def _spawn_agent() -> int:
         return resp.json()["id"]
 
 
+# meiva:note
+# A gateway whose uploads live under `home` and whose upload limits are `limits`.
+def _upload_client(home: Path, **limits: int) -> AbstractContextManager[GatewayTestClient]:
+    return gateway_test_client(config=gateway_test_config(upload_home=home, **limits))
+
+
 def _agent_dir(home: Path, agent_id: int) -> Path:
     return home / "Downloads" / f"MeivaAgent-{agent_id}"
 
@@ -55,12 +67,11 @@ def _stored_files(directory: Path) -> list[Path]:
 
 class TestUploadFile:
     def test_upload_single_file_saves_privately_and_queues_no_inbound(
-        self, db_conn: psycopg.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+        self, db_conn: psycopg.Connection, tmp_path: Path
     ) -> None:
         agent_id = _spawn_agent()
-        monkeypatch.setattr(Path, "home", lambda: tmp_path)
 
-        with gateway_test_client() as client:
+        with _upload_client(tmp_path) as client:
             resp = _upload(
                 client,
                 agent_id,
@@ -81,12 +92,11 @@ class TestUploadFile:
         assert _inbound_count(db_conn, agent_id) == 0
 
     def test_upload_multiple_files_one_batch(
-        self, db_conn: psycopg.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+        self, db_conn: psycopg.Connection, tmp_path: Path
     ) -> None:
         agent_id = _spawn_agent()
-        monkeypatch.setattr(Path, "home", lambda: tmp_path)
 
-        with gateway_test_client() as client:
+        with _upload_client(tmp_path) as client:
             resp = _upload(
                 client,
                 agent_id,
@@ -104,12 +114,11 @@ class TestUploadFile:
         assert [Path(f["path"]).read_bytes() for f in files] == [b"aaa", b"bb", b"c"]
 
     def test_slashes_in_a_display_name_never_reach_the_stored_path(
-        self, db_conn: psycopg.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+        self, db_conn: psycopg.Connection, tmp_path: Path
     ) -> None:
         agent_id = _spawn_agent()
-        monkeypatch.setattr(Path, "home", lambda: tmp_path)
 
-        with gateway_test_client() as client:
+        with _upload_client(tmp_path) as client:
             resp = _upload(client, agent_id, [("files", ("etc/passwd.txt", b"data", "text/plain"))])
 
         assert resp.status_code == 200, resp.text
@@ -118,18 +127,15 @@ class TestUploadFile:
         assert Path(file["path"]).parent == _agent_dir(tmp_path, agent_id)
         assert Path(file["path"]).suffix == ".txt"
 
-    def test_upload_agent_not_found_returns_404(self) -> None:
-        with gateway_test_client() as client:
+    def test_upload_agent_not_found_returns_404(self, tmp_path: Path) -> None:
+        with _upload_client(tmp_path) as client:
             resp = _upload(client, 99999, [("files", ("x.txt", b"x", "text/plain"))])
         assert resp.status_code == 404
 
-    def test_upload_empty_file(
-        self, db_conn: psycopg.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_upload_empty_file(self, db_conn: psycopg.Connection, tmp_path: Path) -> None:
         agent_id = _spawn_agent()
-        monkeypatch.setattr(Path, "home", lambda: tmp_path)
 
-        with gateway_test_client() as client:
+        with _upload_client(tmp_path) as client:
             resp = _upload(client, agent_id, [("files", ("empty.txt", b"", "text/plain"))])
 
         assert resp.status_code == 200, resp.text
@@ -150,13 +156,11 @@ class TestUploadContract:
         self,
         db_conn: psycopg.Connection,
         tmp_path: Path,
-        monkeypatch: pytest.MonkeyPatch,
         headers: dict[str, str],
     ) -> None:
         agent_id = _spawn_agent()
-        monkeypatch.setattr(Path, "home", lambda: tmp_path)
 
-        with gateway_test_client() as client:
+        with _upload_client(tmp_path) as client:
             resp = _upload(
                 client,
                 agent_id,
@@ -170,12 +174,11 @@ class TestUploadContract:
         assert row is not None and row[0] == 0
 
     def test_deliver_true_is_refused_and_saves_nothing(
-        self, db_conn: psycopg.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+        self, db_conn: psycopg.Connection, tmp_path: Path
     ) -> None:
         agent_id = _spawn_agent()
-        monkeypatch.setattr(Path, "home", lambda: tmp_path)
 
-        with gateway_test_client() as client:
+        with _upload_client(tmp_path) as client:
             resp = _upload(
                 client,
                 agent_id,
@@ -189,12 +192,11 @@ class TestUploadContract:
         assert _inbound_count(db_conn, agent_id) == 0
 
     def test_response_url_serves_the_saved_object(
-        self, db_conn: psycopg.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+        self, db_conn: psycopg.Connection, tmp_path: Path
     ) -> None:
         agent_id = _spawn_agent()
-        monkeypatch.setattr(Path, "home", lambda: tmp_path)
 
-        with gateway_test_client() as client:
+        with _upload_client(tmp_path) as client:
             resp = _upload(client, agent_id, [("files", ("shot.png", b"\x89PNG", "image/png"))])
             url = resp.json()["files"][0]["url"]
             served = client.get(url)
@@ -206,15 +208,9 @@ class TestUploadContract:
 
 
 class TestUploadLimits:
-    def test_per_file_limit_rejected_413(
-        self, db_conn: psycopg.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_per_file_limit_rejected_413(self, db_conn: psycopg.Connection, tmp_path: Path) -> None:
         agent_id = _spawn_agent()
-        monkeypatch.setattr(Path, "home", lambda: tmp_path)
-        import gateway.routers.upload.router as uploads_router
-
-        monkeypatch.setattr(uploads_router, "MAX_UPLOAD_BYTES", 10)
-        with gateway_test_client() as client:
+        with _upload_client(tmp_path, max_upload_bytes=10) as client:
             resp = _upload(
                 client,
                 agent_id,
@@ -223,15 +219,9 @@ class TestUploadLimits:
         assert resp.status_code == 413
         assert not _agent_dir(tmp_path, agent_id).exists()
 
-    def test_agent_quota_rejected_413(
-        self, db_conn: psycopg.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_agent_quota_rejected_413(self, db_conn: psycopg.Connection, tmp_path: Path) -> None:
         agent_id = _spawn_agent()
-        monkeypatch.setattr(Path, "home", lambda: tmp_path)
-        import gateway.routers.upload.router as uploads_router
-
-        monkeypatch.setattr(uploads_router, "MAX_AGENT_UPLOAD_BYTES", 30)
-        with gateway_test_client() as client:
+        with _upload_client(tmp_path, max_agent_upload_bytes=30) as client:
             ok = _upload(client, agent_id, [("files", ("a.txt", b"a" * 20, "text/plain"))])
             over = _upload(client, agent_id, [("files", ("b.txt", b"b" * 20, "text/plain"))])
         assert ok.status_code == 200
@@ -239,14 +229,10 @@ class TestUploadLimits:
         assert len(_stored_files(_agent_dir(tmp_path, agent_id))) == 1
 
     def test_agent_quota_rejects_entire_oversized_batch(
-        self, db_conn: psycopg.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+        self, db_conn: psycopg.Connection, tmp_path: Path
     ) -> None:
         agent_id = _spawn_agent()
-        monkeypatch.setattr(Path, "home", lambda: tmp_path)
-        import gateway.routers.upload.router as uploads_router
-
-        monkeypatch.setattr(uploads_router, "MAX_AGENT_UPLOAD_BYTES", 5)
-        with gateway_test_client() as client:
+        with _upload_client(tmp_path, max_agent_upload_bytes=5) as client:
             resp = _upload(
                 client,
                 agent_id,
@@ -260,29 +246,19 @@ class TestUploadLimits:
         directory = _agent_dir(tmp_path, agent_id)
         assert not directory.exists() or _stored_files(directory) == []
 
-    def test_file_count_cap_rejected_413(
-        self, db_conn: psycopg.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_file_count_cap_rejected_413(self, db_conn: psycopg.Connection, tmp_path: Path) -> None:
         agent_id = _spawn_agent()
-        monkeypatch.setattr(Path, "home", lambda: tmp_path)
-        import gateway.routers.upload.router as uploads_router
-
-        monkeypatch.setattr(uploads_router, "MAX_AGENT_UPLOAD_FILES", 1)
-        with gateway_test_client() as client:
+        with _upload_client(tmp_path, max_agent_upload_files=1) as client:
             ok = _upload(client, agent_id, [("files", ("a.txt", b"a", "text/plain"))])
             over = _upload(client, agent_id, [("files", ("b.txt", b"b", "text/plain"))])
         assert ok.status_code == 200
         assert over.status_code == 413
 
     def test_file_count_cap_rejects_entire_batch(
-        self, db_conn: psycopg.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+        self, db_conn: psycopg.Connection, tmp_path: Path
     ) -> None:
         agent_id = _spawn_agent()
-        monkeypatch.setattr(Path, "home", lambda: tmp_path)
-        import gateway.routers.upload.router as uploads_router
-
-        monkeypatch.setattr(uploads_router, "MAX_AGENT_UPLOAD_FILES", 1)
-        with gateway_test_client() as client:
+        with _upload_client(tmp_path, max_agent_upload_files=1) as client:
             resp = _upload(
                 client,
                 agent_id,
@@ -297,14 +273,13 @@ class TestUploadLimits:
         assert not directory.exists() or _stored_files(directory) == []
 
     def test_concurrent_batches_share_agent_quota(
-        self, db_conn: psycopg.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+        self, db_conn: psycopg.Connection, tmp_path: Path
     ) -> None:
         agent_id = _spawn_agent()
-        monkeypatch.setattr(Path, "home", lambda: tmp_path)
-        import gateway.routers.upload.router as uploads_router
-
-        monkeypatch.setattr(uploads_router, "MAX_AGENT_UPLOAD_BYTES", 10)
-        with gateway_test_client() as client, ThreadPoolExecutor(max_workers=2) as executor:
+        with (
+            _upload_client(tmp_path, max_agent_upload_bytes=10) as client,
+            ThreadPoolExecutor(max_workers=2) as executor,
+        ):
             responses = [
                 executor.submit(
                     _upload, client, agent_id, [("files", (name, b"x" * 6, "text/plain"))]
@@ -320,24 +295,20 @@ class TestUploadLimits:
 
 
 class TestServeUpload:
-    def test_serves_saved_file(
-        self, db_conn: psycopg.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_serves_saved_file(self, db_conn: psycopg.Connection, tmp_path: Path) -> None:
         agent_id = _spawn_agent()
-        monkeypatch.setattr(Path, "home", lambda: tmp_path)
         raw = b"\x89PNG\r\n\x1a\npixels"
-        with gateway_test_client() as client:
+        with _upload_client(tmp_path) as client:
             saved = _upload(client, agent_id, [("files", ("shot.png", raw, "image/png"))])
             resp = client.get(saved.json()["files"][0]["url"])
         assert resp.status_code == 200
         assert resp.content == raw
 
     def test_renderable_upload_served_as_attachment(
-        self, db_conn: psycopg.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+        self, db_conn: psycopg.Connection, tmp_path: Path
     ) -> None:
         agent_id = _spawn_agent()
-        monkeypatch.setattr(Path, "home", lambda: tmp_path)
-        with gateway_test_client() as client:
+        with _upload_client(tmp_path) as client:
             saved = _upload(
                 client,
                 agent_id,
@@ -349,36 +320,29 @@ class TestServeUpload:
         assert resp.headers["content-disposition"].startswith("attachment")
 
     def test_plain_upload_served_with_nosniff_only(
-        self, db_conn: psycopg.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+        self, db_conn: psycopg.Connection, tmp_path: Path
     ) -> None:
         agent_id = _spawn_agent()
-        monkeypatch.setattr(Path, "home", lambda: tmp_path)
-        with gateway_test_client() as client:
+        with _upload_client(tmp_path) as client:
             saved = _upload(client, agent_id, [("files", ("shot.png", b"\x89PNG", "image/png"))])
             resp = client.get(saved.json()["files"][0]["url"])
         assert resp.status_code == 200
         assert resp.headers["x-content-type-options"] == "nosniff"
         assert "content-disposition" not in resp.headers
 
-    def test_missing_file_404(
-        self, db_conn: psycopg.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_missing_file_404(self, db_conn: psycopg.Connection, tmp_path: Path) -> None:
         agent_id = _spawn_agent()
-        monkeypatch.setattr(Path, "home", lambda: tmp_path)
-        with gateway_test_client() as client:
+        with _upload_client(tmp_path) as client:
             resp = client.get(f"/api/agents/{agent_id}/uploads/nope.png")
         assert resp.status_code == 404
 
-    def test_traversal_rejected(
-        self, db_conn: psycopg.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_traversal_rejected(self, db_conn: psycopg.Connection, tmp_path: Path) -> None:
         agent_id = _spawn_agent()
-        monkeypatch.setattr(Path, "home", lambda: tmp_path)
-        with gateway_test_client() as client:
+        with _upload_client(tmp_path) as client:
             resp = client.get(f"/api/agents/{agent_id}/uploads/..%2f..%2fsecret")
         assert resp.status_code in (400, 404)
 
-    def test_serve_unknown_agent_404(self) -> None:
-        with gateway_test_client() as client:
+    def test_serve_unknown_agent_404(self, tmp_path: Path) -> None:
+        with _upload_client(tmp_path) as client:
             resp = client.get("/api/agents/99999/uploads/x.png")
         assert resp.status_code == 404

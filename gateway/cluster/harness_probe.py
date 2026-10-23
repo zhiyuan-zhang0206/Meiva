@@ -3,22 +3,17 @@ from __future__ import annotations
 import asyncio
 import threading
 import time
-from collections.abc import Awaitable, Callable
-from typing import Any
 
 from fastapi import HTTPException
 
-from base.agents.birth.harness import LAUNCHABLE_HARNESSES
-from base.api_contracts.agent_contract import HARNESS_BILLING, Harness
 from base.cluster import machines
 from base.cluster.machine import MachineIdentity
 from base.db import Database
+from gateway.cluster.ops_dispatch import dispatch_op
 from gateway.cluster.schemas import HarnessAvailability
-from ops.rpc_schemas import HarnessProbeResult, HarnessProbeRow, OpKind
+from ops.rpc_schemas import HarnessProbeResult
 
 _HARNESS_CACHE_TTL_S = 30.0
-
-DispatchOp = Callable[[Database, str, OpKind, dict[str, Any]], Awaitable[dict[str, Any]]]
 
 
 # meiva:note
@@ -28,14 +23,8 @@ DispatchOp = Callable[[Database, str, OpKind, dict[str, Any]], Awaitable[dict[st
 # form can be opened, closed and reopened many times in that window.
 # meiva:link base/agents/docs/harness/harness.meiva.okf.md
 class HarnessProbeCache:
-    def __init__(
-        self,
-        *,
-        ttl_s: float = _HARNESS_CACHE_TTL_S,
-        monotonic: Callable[[], float] = time.monotonic,
-    ) -> None:
+    def __init__(self, *, ttl_s: float = _HARNESS_CACHE_TTL_S) -> None:
         self._ttl_s = ttl_s
-        self._monotonic = monotonic
         self._rows: dict[str, tuple[float, list[HarnessAvailability]]] = {}
         self._lock = threading.Lock()
 
@@ -45,39 +34,13 @@ class HarnessProbeCache:
     def get(self, machine: str) -> list[HarnessAvailability] | None:
         with self._lock:
             cached = self._rows.get(machine)
-            if cached is None or self._monotonic() - cached[0] >= self._ttl_s:
+            if cached is None or time.monotonic() - cached[0] >= self._ttl_s:
                 return None
             return cached[1]
 
     def store(self, machine: str, rows: list[HarnessAvailability]) -> None:
         with self._lock:
-            self._rows[machine] = (self._monotonic(), rows)
-
-
-# meiva:note
-# `launchable` joins two separate facts and must not report either alone: a launcher
-# for the harness exists in this build (LAUNCHABLE_HARNESSES, imported so the set has
-# one owner) AND the machine can actually run it — installed and signed in, or the
-# built-in runtime, which needs neither. Testing only the set would offer a choice
-# the spawn then refuses.
-# meiva:link base/agents/docs/harness/harness.meiva.okf.md
-def launchable(row: HarnessProbeRow) -> bool:
-    if row.harness not in LAUNCHABLE_HARNESSES:
-        return False
-    return row.harness is Harness.MEIVA or row.status == "available"
-
-
-def availability_rows(probed: HarnessProbeResult) -> list[HarnessAvailability]:
-    return [
-        HarnessAvailability(
-            harness=row.harness,
-            status=row.status,
-            reason=row.reason,
-            launchable=launchable(row),
-            billing=HARNESS_BILLING[row.harness],
-        )
-        for row in probed.harnesses
-    ]
+            self._rows[machine] = (time.monotonic(), rows)
 
 
 # meiva:note
@@ -87,7 +50,7 @@ def availability_rows(probed: HarnessProbeResult) -> list[HarnessAvailability]:
 # `unknown` rather than a `launchable` option that leads nowhere.
 # meiva:link base/agents/docs/harness/harness.meiva.okf.md
 async def probe_harnesses(
-    target: str, *, db: Database, local_machine: MachineIdentity, dispatch: DispatchOp
+    target: str, *, db: Database, local_machine: MachineIdentity
 ) -> HarnessProbeResult:
     if target == local_machine.name():
         role = local_machine.role()
@@ -104,4 +67,4 @@ async def probe_harnesses(
                 "it cannot run an agent, so it cannot report which harnesses it can run"
             ),
         )
-    return HarnessProbeResult.model_validate(await dispatch(db, target, "harness_probe", {}))
+    return HarnessProbeResult.model_validate(await dispatch_op(db, target, "harness_probe", {}))

@@ -1,28 +1,5 @@
 [uses]
 "test_auth_enforcement.py" = ["test_auth.py"]
 "test_process_boot.py" = ["child_gateway_scenarios.py"]
+"test_server.py" = ["child_gateway_scenarios.py"]
 "test_server_shutdown.py" = ["child_gateway_scenarios.py"]
-
-[debt.env-patch]
-"test_bootstrap_fetch_gateway.py#monkeypatch.delitem os.environ.MEIVA_CLUSTER_SECRET" = 1
-
-[debt.first-party-patch]
-"test_bootstrap_fetch_gateway.py#monkeypatch.setattr base.config.settings.data_plane.cluster_secret" = 1
-"test_process_boot.py#monkeypatch.setattr base.agents.context.clients.ClientSet.close" = 1
-"test_process_boot.py#monkeypatch.setattr base.config.ConfigBoot.get_field" = 1
-"test_process_boot.py#monkeypatch.setattr base.db.Database.__init__" = 1
-"test_process_boot.py#monkeypatch.setattr gateway.cluster.process_boot.GatewayProcess.database" = 1
-"test_server.py#monkeypatch.setattr base.config.settings.data_plane.cluster_secret" = 2
-"test_server.py#monkeypatch.setattr base.config.settings.gateway.gateway_graceful_shutdown_timeout_seconds" = 1
-"test_server.py#monkeypatch.setattr base.config.settings.general.machine_host" = 1
-"test_server.py#monkeypatch.setattr base.config.settings.general.machine_serve_gateway" = 3
-"test_server.py#monkeypatch.setattr base.config.settings.services.gateway_pidfile" = 3
-"test_server.py#monkeypatch.setattr base.db.code_version_gate.ProcessDbGate.raise_min_code_version" = 2
-"test_server.py#monkeypatch.setattr gateway.cluster.server.ConfigBoot" = 3
-"test_server.py#monkeypatch.setattr gateway.cluster.server.assert_schema_current" = 3
-"test_server.py#monkeypatch.setattr gateway.cluster.server.faulthandler.register" = 3
-"test_server.py#monkeypatch.setattr gateway.cluster.server.init_gateway_process" = 3
-"test_server.py#monkeypatch.setattr gateway.cluster.server.raise_fd_limit" = 3
-"test_server.py#monkeypatch.setattr gateway.cluster.server.serve" = 3
-"test_server_shutdown.py#monkeypatch.setattr gateway.events.sse.retry_auth_failures_async" = 1
-"test_server_shutdown.py#monkeypatch.setattr gateway.http.middleware.stopping.is_stopping" = 1

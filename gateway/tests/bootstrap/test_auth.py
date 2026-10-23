@@ -48,6 +48,7 @@ def request_with_origin(
         session_cookie_secure=False,
         human_auth="required",
         memory_root=Path("/nonexistent/memory"),
+        upload_home=Path("/nonexistent/home"),
     )
     return Request(
         {

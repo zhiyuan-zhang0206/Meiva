@@ -9,6 +9,7 @@ import psycopg
 import pytest
 
 from gateway.inspect import _event_metrics, _plugin_metrics
+from gateway.inspect._plugin_faces import SHIPPED_PLUGINS_DIR, enabled_plugin_names
 
 _STOP = datetime(2026, 10, 2, 12, 0, tzinfo=UTC)
 _START = _STOP - timedelta(hours=2)
@@ -162,7 +163,11 @@ def test_anything_outside_the_vocabulary_is_refused(
 
 
 def test_every_shipped_inspector_metric_is_evaluable(db_conn: psycopg.Connection) -> None:
-    specs = [s for s in _plugin_metrics.load_plugin_metrics() if "inspector" in s.output]
+    specs = [
+        s
+        for s in _plugin_metrics.load_plugin_metrics(SHIPPED_PLUGINS_DIR, enabled_plugin_names())
+        if "inspector" in s.output
+    ]
     assert specs
     for spec in specs:
         query = _plugin_metrics.translate_macros(

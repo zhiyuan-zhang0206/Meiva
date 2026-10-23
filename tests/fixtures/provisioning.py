@@ -372,11 +372,7 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
 
 
 @pytest.fixture
-def gateway_data_plane(
-    db_url: str,
-    redis_url: str,
-    guard_schedule_session_control: None,
-) -> None:
+def gateway_data_plane(db_url: str, redis_url: str) -> None:
     pass
 
 

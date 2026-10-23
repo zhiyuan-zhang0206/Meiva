@@ -7,7 +7,6 @@ from pathlib import Path
 import pytest
 
 from base.config import runtime_config
-from base.config.admin.candidate import EnvPatchValidation, validate_env_patch_for_write
 from base.host.env.tests.env_files import unit_env_aliases
 from gateway.tests.auth.gateway_config import gateway_test_client
 
@@ -83,44 +82,14 @@ def test_put_unsets_the_offsite_backup_destination(configured_home: Path) -> Non
     assert "MEIVA_BACKUP_OFFSITE_ENDPOINT" not in unit_env_aliases()
 
 
+# meiva:note
+# A host-only edit lands without a cluster candidate (see `test_write_plan`).
 def test_host_only_put_skips_cluster_candidate_validation(
     configured_home: Path,
 ) -> None:
-    """A host-only edit cannot fail because an empty cluster patch went stale."""
-
-    def unexpected_cluster_validation(*_args: object, **_kwargs: object) -> None:
-        raise AssertionError("host-only PUT must not validate a cluster candidate")
-
     with gateway_test_client() as client:
-        client.app.state.config_candidate_validator = unexpected_cluster_validation
         response = client.put("/api/config", json={"ops_concurrency": 4})
 
     assert response.status_code == 200, response.text
     assert response.json()["applied"] is True
     assert unit_env_aliases()["MEIVA_OPS_CONCURRENCY"] == "4"
-
-
-def test_put_returns_conflict_when_cluster_candidate_goes_stale(
-    configured_home: Path,
-) -> None:
-    """A write between validation and persistence is reported as a retryable 409."""
-    original_validate = validate_env_patch_for_write
-    validation_calls = 0
-
-    def validate_then_change_file(
-        updates: dict[str, object], removals: set[str]
-    ) -> EnvPatchValidation:
-        nonlocal validation_calls
-        candidate = original_validate(updates, removals)
-        validation_calls += 1
-        if validation_calls == 2:
-            runtime_config.write_fields({"llm_model": "concurrent-update"}, set())
-        return candidate
-
-    with gateway_test_client() as client:
-        client.app.state.config_candidate_validator = validate_then_change_file
-        response = client.put("/api/config", json={"llm_model": "requested-update"})
-
-    assert validation_calls == 2
-    assert response.status_code == 409, response.text
-    assert response.json()["detail"] == "config changed concurrently; retry the request"

@@ -1,25 +1,15 @@
 """Durable desired revisions and live PTY command provenance for convergence."""
 
-import re
 from collections.abc import Generator
 from contextlib import contextmanager
-from typing import Any, NamedTuple
+from typing import Any
 
 from psycopg_pool import ConnectionPool
 
 from base.cluster import session_name
 from base.db.transaction import write_transaction
 from base.sessions.pty import client
-
-_REVISION = re.compile(r"-m services\.wake\.schedule_manager\.runner \d+ (\d+);")
-
-
-class Desired(NamedTuple):
-    enabled: bool
-    status: str
-    revision: int
-    applied: int
-    launch_generation: str | None
+from services.wake.schedule_manager.convergence import Desired, revision_in
 
 
 @contextmanager
@@ -58,10 +48,7 @@ def launched_revision(schedule_id: int) -> int | None:
     name = session_name(f"schedule-{schedule_id}")
     infos = client.list_sessions(name, include_initial_command=True)
     info = next((item for item in infos if item.name == name), None)
-    if info is None or info.initial_command is None:
-        return None
-    match = _REVISION.search(info.initial_command)
-    return 0 if match is None else int(match.group(1))
+    return None if info is None else revision_in(info.initial_command)
 
 
 def mark_applied(pool: ConnectionPool[Any], schedule_id: int, revision: int) -> None:

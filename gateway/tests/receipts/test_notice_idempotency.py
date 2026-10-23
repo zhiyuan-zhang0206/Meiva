@@ -1,13 +1,13 @@
 from concurrent.futures import ThreadPoolExecutor
-from datetime import UTC, datetime, timedelta
 
 import psycopg
 import pytest
 
-import gateway.agents.notices as agents_notices
 from base.api_contracts.idempotency import keyed_headers
+from base.events.live.bus import EventBus
 from gateway.tests.auth.gateway_config import gateway_test_client
 from gateway.tests.events.test_notices_endpoint import insert_notice, seed_agent
+from gateway.tests.support.live_events.faults import unpublishable_bus
 
 
 def test_concurrent_resolution_replays_one_reply(db_conn: psycopg.Connection) -> None:
@@ -120,27 +120,21 @@ def test_creation_key_requires_the_principal_scope(db_conn: psycopg.Connection) 
 
 
 def test_resolution_recovers_after_committed_wake_failure(
-    db_conn: psycopg.Connection,
+    db_conn: psycopg.Connection, event_bus: EventBus
 ) -> None:
-    from gateway.agents import notices
-
     agent = seed_agent(db_conn)
     notice = insert_notice(db_conn, agent, "question", require_response=True)
     path = f"/api/keyed/v1/agents/{agent}/notices/{notice}/resolve"
-    original = notices.publish_inbound_wake
-
-    def unavailable(*args: object) -> bool:
-        raise RuntimeError("process lost after commit")
 
     with gateway_test_client(raise_server_exceptions=False) as client:
-        client.app.state.notice_wake_publisher = unavailable
+        client.app.state.bus = unpublishable_bus()
         first = client.post(
             path,
             json={"action": "answer", "reply": "yes"},
             headers={"Idempotency-Key": "lost-tail", "Idempotency-Scope": "principal-v1"},
         )
         assert first.status_code == 500
-        client.app.state.notice_wake_publisher = original
+        client.app.state.bus = event_bus
         second = client.post(
             path,
             json={"action": "answer", "reply": "yes"},
@@ -155,21 +149,29 @@ def test_resolution_recovers_after_committed_wake_failure(
 def test_create_receipt_survives_expiration(
     db_conn: psycopg.Connection,
 ) -> None:
+    # meiva:note
+    # A replay answers from the receipt before any mutable precondition is checked: the task
+    # the first request named is gone when it is retried, and a fresh request naming it
+    # would be refused.
     agent = seed_agent(db_conn)
     path = f"/api/agents/{agent}/notices"
-    deadline = datetime.now(UTC) + timedelta(hours=1)
+    task = db_conn.execute(
+        "INSERT INTO agent_tasks (title, description, status, created_by) "
+        "VALUES ('t', '', 'in_progress', 'user') RETURNING id"
+    ).fetchone()
+    assert task is not None
+    db_conn.commit()
     with gateway_test_client() as client:
-        body = {"title": "expiring", "expire_at": deadline.isoformat()}
+        body = {"title": "expiring", "task_id": task[0]}
         first = client.post(path, json=body, headers=keyed_headers("expires"))
-
-        def reject_fresh(*args: object) -> None:
-            raise RuntimeError("fresh operation validation should not run")
-
-        client.app.state.notice_creation_state_validator = reject_fresh
+        db_conn.execute("UPDATE agent_notices SET task_id = NULL WHERE agent_id = %s", (agent,))
+        db_conn.execute("DELETE FROM agent_tasks WHERE id = %s", (task[0],))
+        db_conn.commit()
+        fresh = client.post(path, json=body, headers=keyed_headers("fresh"))
         replay = client.post(path, json=body, headers=keyed_headers("expires"))
     assert first.status_code == replay.status_code == 201
+    assert fresh.status_code == 422
     assert first.json() == replay.json()
-    _ = agents_notices
 
 
 @pytest.mark.parametrize("resolve", [False, True])

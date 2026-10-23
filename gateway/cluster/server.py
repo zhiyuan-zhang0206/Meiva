@@ -28,6 +28,7 @@ from base.native_process.os_platform import raise_fd_limit
 from base.paths import meiva_home
 from base.telemetry.process_logging import init_gateway_process
 from gateway.cluster.process_boot import LOADED_IMAGE, GatewayProcess
+from gateway.cluster.serve_plan import ServePlan, serve_plan
 from gateway.http.middleware import stopping
 
 _log = logging.getLogger(__name__)
@@ -69,19 +70,22 @@ def serve(kwargs: dict[str, Any]) -> None:
         sys.exit(STARTUP_FAILURE)
 
 
-def main(*, build_app: Callable[[GatewayProcess], FastAPI]) -> None:
-    """Prepare the gateway process and start its ASGI server.
-
-    The builder borrows this entry's process. Development reload creates its
-    owned app in the new worker through the environment factory.
-    """
+# meiva:note
+# Prepare the gateway process and start its ASGI server.
+#
+# The builder borrows this entry's process. Development reload creates its
+# owned app in the new worker through the environment factory. The caller
+# boots `config`; the decisions that follow are `serve_plan`'s.
+def main(*, config: ConfigBoot, build_app: Callable[[GatewayProcess], FastAPI]) -> None:
+    machine = machine_from_boot(config)
+    plan = serve_plan(
+        serves_gateway="gateway" in machine.role(),
+        off_box=serves_off_box(machine=machine),
+        reload=config.view.gateway.gateway_reload,
+    )
     # The API always authenticates: a gateway without a human secret refuses to
     # serve, before it touches the database or binds a port.
-    config = ConfigBoot()
-    config.boot()
-    config.ensure_eager()
-    machine = machine_from_boot(config)
-    if "gateway" in machine.role():
+    if plan.require_cluster_secret:
         require_cluster_secret(config.view.data_plane.cluster_secret, where="this gateway")
     assert_schema_current(config.view.data_plane.db_url)
 
@@ -109,10 +113,12 @@ def main(*, build_app: Callable[[GatewayProcess], FastAPI]) -> None:
         home=meiva_home(), config=config, image=LOADED_IMAGE, machine=machine, host=Host.system()
     )
     with process.lifetime():
-        _serve_process(process, build_app)
+        _serve_process(process, plan, build_app)
 
 
-def _serve_process(process: GatewayProcess, build_app: Callable[[GatewayProcess], FastAPI]) -> None:
+def _serve_process(
+    process: GatewayProcess, plan: ServePlan, build_app: Callable[[GatewayProcess], FastAPI]
+) -> None:
     """Serve one owned entry; the ASGI lifespan borrows its existing root."""
     init_gateway_process(
         producer=process.event_pipeline,
@@ -123,8 +129,9 @@ def _serve_process(process: GatewayProcess, build_app: Callable[[GatewayProcess]
     # Raise the cluster's minimum code version to this gateway's own: a process
     # left running older code (a runner offline during the update) then refuses
     # to write. After the schema assertion and the logger init, so a refusal or
-    # a failure is logged; a runner's local gateway holds no write on the row.
-    if "gateway" in process.machine.role():
+    # meiva:note
+    # a failure is logged.
+    if plan.raise_min_code_version:
         process.gate.raise_min_code_version(process.database())
 
     # Thread dump on SIGUSR1: the watchdog's gateway healthcheck sends this
@@ -134,25 +141,6 @@ def _serve_process(process: GatewayProcess, build_app: Callable[[GatewayProcess]
     # does not touch SIGUSR1, so the registration survives into the loop.
     faulthandler.register(signal.SIGUSR1)
 
-    # Bind address depends on role.
-    #
-    # - **gateway**: "" = all interfaces, BOTH address families (asyncio binds
-    #   a wildcard socket per family for an empty host). Dual-stack matters
-    #   because browsers resolving the host's DNS name try the AAAA first — a
-    #   v4-only bind refuses that first dial on every request. NOT "::": asyncio
-    #   sets IPV6_V6ONLY on an explicit "::" bind, which refuses plain-IPv4
-    #   clients (healthchecks, SDK) outright — verified on macOS.
-    #   A gateway whose reachable address is a loopback alias (the single-box
-    #   default, `MEIVA_MACHINE_HOST` unset) binds 127.0.0.1 instead, like its data
-    #   plane (`port_preflight.bind_addrs`): the API is authenticated either way, but
-    #   a box that declares no private-network address serves no other machine.
-    # - **agent-runner**: 127.0.0.1. The gateway does not reach an
-    #   agent-runner's gateway directly — gateway→agent-runner RPC goes
-    #   to the separate meiva-ops server (services/agent_runner/agent_ops), which dispatches
-    #   each op in-process via gateway.ops_*. The only callers of an
-    #   agent-runner's gateway :8000 are local SDK + local agent processes,
-    #   so bind 127.0.0.1.
-    #
     # reload defaults to False — prod-safe. reload=True forks workers via
     # multiprocessing.spawn, and the worker's `PPID=1` is fully detached
     # from the session: when the session closes the worker does
@@ -163,31 +151,27 @@ def _serve_process(process: GatewayProcess, build_app: Callable[[GatewayProcess]
     # mode binds through uvicorn's own bind_socket, which maps "" to a
     # v4-only wildcard — dev-only, and browsers fall back from the refused
     # IPv6 dial instantly.
-    serves_off_box_gateway = "gateway" in process.machine.role() and serves_off_box(
-        machine=process.machine
-    )
-    host = "" if serves_off_box_gateway else "127.0.0.1"
-    if host != "127.0.0.1":
+    if plan.transport_declaration_required:
         verify_transport_encryption_declaration(
-            host, process.config.view.data_plane.transport_encryption, authenticated=True
-        )
-    if _GATEWAY_UVICORN_WORKERS != 1:
-        raise RuntimeError(
-            "gateway must run one uvicorn worker because rate limiters are process-local"
+            plan.bind_host, process.config.view.data_plane.transport_encryption, authenticated=True
         )
     _log.warning("gateway starts with one uvicorn worker because rate limiters are process-local")
-    if process.config.view.gateway.gateway_reload:
+    if plan.app_factory_path is not None:
         # The parent never constructs the ASGI app a reload worker will serve.
         serve(
             serve_kwargs(
-                host=host,
-                app="gateway.app:create_app_from_environment",
+                host=plan.bind_host,
+                app=plan.app_factory_path,
                 factory=True,
                 config=process.config,
             )
         )
     else:
-        serve(serve_kwargs(host=host, app=build_app(process), factory=False, config=process.config))
+        serve(
+            serve_kwargs(
+                host=plan.bind_host, app=build_app(process), factory=False, config=process.config
+            )
+        )
 
 
 def serve_kwargs(*, host: str, app: Any, factory: bool, config: ConfigBoot) -> dict[str, Any]:

@@ -1,7 +1,6 @@
 """Fleet graph PG failures through a router with explicit app-owned resources."""
 
 from collections.abc import Iterator
-from datetime import datetime
 from unittest.mock import MagicMock
 
 import pytest
@@ -14,12 +13,8 @@ from base.events.live.bus import EventBus
 from base.events.live.tests.fakes import patch_sync_redis
 from gateway.http.middleware.error_handlers import unhandled_exception_handler
 from gateway.lgtm.telemetry_staleness import TelemetryStaleness
-from gateway.routers import fleet_graph as fg
-
-
-def _fresh_heartbeat_age(pool: object, *, now: datetime) -> float:
-    del pool, now
-    return 30.0
+from gateway.routers.fleet import fleet_graph as fg
+from gateway.tests.routers.fleet_graph.staleness_support import write_fresh_heartbeat
 
 
 @pytest.fixture
@@ -41,10 +36,9 @@ def app(
     app.include_router(fg.router)
     app.add_exception_handler(Exception, unhandled_exception_handler)
     app.state.bus = event_bus
-    app.state.telemetry_staleness = TelemetryStaleness(
-        check_interval_s=0, read_heartbeat_age=_fresh_heartbeat_age
-    )
+    app.state.telemetry_staleness = TelemetryStaleness(check_interval_s=0)
     with database.pool(max_size=2) as pool:
+        write_fresh_heartbeat(pool)
         app.state.db_pool = pool
         yield app
 

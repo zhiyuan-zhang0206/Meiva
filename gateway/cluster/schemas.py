@@ -1,20 +1,20 @@
-"""Wire models of the cluster surface: system + cluster status and the
-machine pause/resume/delete admin responses, the stats-dashboard aggregate, and
-the `GET /api/ops/monitor` series (the Insights Ops panel).
-
-`MachineStatus` (the roster row the CLI also decodes) lives in
-`base.api_contracts.status` so `cli` can decode the roster without importing
-up into `gateway`; the models below are the gateway-only status surface.
-
-The ops-monitor shapes mirror `gateway.cluster.ops_series.fetch_ops_series`
-output one-for-one (the router builds the report dict there, then validates it
-here). Every series array is positionally aligned with `meta.bucket_starts` via
-its `bucket` index; missing buckets are zero-filled by the query core, so a
-panel can render the arrays directly.
-
-FastAPI registers these unchanged, so the OpenAPI codegen is byte-identical to
-the wire before.
-"""
+# meiva:note
+# Wire models of the cluster surface: system + cluster status and the
+# machine pause/resume/delete admin responses, the stats-dashboard aggregate, and
+# the `GET /api/ops/monitor` series (the Insights Ops panel).
+#
+# `MachineStatus` (the roster row the CLI also decodes) lives in
+# `base.api_contracts.status` so `cli` can decode the roster without importing
+# up into `gateway`; the models below are the gateway-only status surface.
+#
+# The ops-monitor shapes mirror `gateway.cluster.monitor.ops_series.fetch_ops_series`
+# output one-for-one (the router builds the report dict there, then validates it
+# here). Every series array is positionally aligned with `meta.bucket_starts` via
+# its `bucket` index; missing buckets are zero-filled by the query core, so a
+# panel can render the arrays directly.
+#
+# FastAPI registers these unchanged, so the OpenAPI codegen is byte-identical to
+# the wire before.
 
 from __future__ import annotations
 

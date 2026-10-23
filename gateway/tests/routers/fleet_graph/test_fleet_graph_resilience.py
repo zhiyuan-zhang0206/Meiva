@@ -1,7 +1,5 @@
 """Regression tests for fleet-graph read failures and the Redis poll cache."""
 
-from datetime import datetime
-
 import psycopg
 import pytest
 from psycopg import errors as pg_errors
@@ -65,7 +63,7 @@ def test_success_writes_only_the_short_poll_cache(
     _seed_agent(db_conn)
     redis = _FakeRedis()
 
-    import gateway.routers.fleet_graph as fg
+    import gateway.routers.fleet.fleet_graph as fg
 
     patch_sync_redis(monkeypatch, _RedisFactory(redis))
     with fleet_graph_client() as client:
@@ -83,16 +81,13 @@ def test_stale_heartbeat_marks_telemetry_and_keeps_fresh_graph_cached(
     _seed_agent(db_conn)
     redis = _FakeRedis()
 
-    import gateway.routers.fleet_graph as fg
+    import gateway.routers.fleet.fleet_graph as fg
 
     patch_sync_redis(monkeypatch, _RedisFactory(redis))
 
-    def missing_heartbeat(pool: object, *, now: datetime) -> None:
-        del pool, now
-
     # The capture is bound inside the app's lifespan: the gateway binds its own pipeline on start.
     with (
-        fleet_graph_client(read_heartbeat_age=missing_heartbeat) as client,
+        fleet_graph_client(heartbeat=False) as client,
         capturing_events() as emitted_events,
     ):
         resp = client.get("/api/fleet/graph")
@@ -129,7 +124,7 @@ def test_pg_cancellation_is_a_500_and_ignores_leftover_last_good_entries(
         edges=[],
     )
 
-    import gateway.routers.fleet_graph as fg
+    import gateway.routers.fleet.fleet_graph as fg
 
     key = fg.cache_key(include_terminated=False, hours=None, decay_lambda=0.5)
     redis.values[f"fleet_graph:last_good:{key}"] = leftover.model_dump_json()

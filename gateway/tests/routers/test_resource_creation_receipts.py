@@ -9,6 +9,7 @@ from base.api_contracts.idempotency import keyed_headers
 from base.db.code_version_gate import ProcessDbGate
 from gateway.routers.receipts import creation as creation_receipts
 from gateway.schedules import router as schedules
+from gateway.schedules.tests.db_faults import failing_write
 from gateway.tests.auth.gateway_config import gateway_test_client
 
 _SCHEDULE_BODY = {"name": "receipt", "script": "pass"}
@@ -72,7 +73,6 @@ def test_concurrent_creation_commits_one_resource_and_receipt(
                 pool,
                 schedules.ScheduleCreate(name="concurrent", script="pass"),
                 "create",
-                finish_receipt=creation_receipts.finish,
             )
 
         results = list(workers.map(create, range(4)))
@@ -102,18 +102,13 @@ def test_receipt_contains_no_raw_script_request(db_conn: psycopg.Connection) -> 
 def test_receipt_failure_rolls_back_created_resource_and_version(
     db_conn: psycopg.Connection, *, database_gate: ProcessDbGate
 ) -> None:
-    def fail(*_args: object) -> None:
-        raise RuntimeError("receipt failed")
-
     with (
+        failing_write(db_conn, table="resource_creation_receipts", events="UPDATE"),
         base.db.pool(gate=database_gate) as pool,
-        pytest.raises(RuntimeError, match="receipt failed"),
+        pytest.raises(psycopg.errors.RaiseException, match="injected fault"),
     ):
         schedules.create_blocking(
-            pool,
-            schedules.ScheduleCreate(name="rollback", script="pass"),
-            "rollback",
-            finish_receipt=fail,
+            pool, schedules.ScheduleCreate(name="rollback", script="pass"), "rollback"
         )
     assert db_conn.execute("SELECT count(*) FROM schedules").fetchone() == (0,)
     assert db_conn.execute("SELECT count(*) FROM schedule_versions").fetchone() == (0,)
@@ -144,13 +139,11 @@ def test_creation_identity_is_bound_to_verified_principal(
             pool,
             schedules.ScheduleCreate(name="one", script="pass"),
             scoped_key("one"),
-            finish_receipt=creation_receipts.finish,
         )
         second = schedules.create_blocking(
             pool,
             schedules.ScheduleCreate(name="two", script="pass"),
             scoped_key("two"),
-            finish_receipt=creation_receipts.finish,
         )
     assert first[0] != second[0]
     assert db_conn.execute("SELECT count(*) FROM resource_creation_receipts").fetchone() == (2,)

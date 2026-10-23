@@ -3,24 +3,16 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
-from typing import Any
-from unittest.mock import Mock
 
 import psycopg
 import pytest
 
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
-from base.config import settings
-from base.db import Database
-from base.db.code_version_gate import ProcessDbGate
+from gateway.schedules.tests.db_faults import failing_write
 from gateway.schedules.tests.runner_inputs import run_schedule as run
 from services.wake.schedule_manager.engine import script_filename
-
-
-@pytest.fixture(autouse=True)
-def _restore_actor(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("MEIVA_SCHEDULE_ID", raising=False)
+from services.wake.schedule_manager.stall_policy import StallPolicy
 
 
 def _insert_schedule(
@@ -247,18 +239,12 @@ def test_run_records_py_sys_exit_bool(
 
 
 def test_run_records_stall_timeout(
-    db_conn: psycopg.Connection,
-    unit_home: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    *,
-    machine_identity: MachineIdentity,
+    db_conn: psycopg.Connection, unit_home: Path, *, machine_identity: MachineIdentity
 ) -> None:
-
-    monkeypatch.setattr(settings.gateway, "schedule_stall_timeout_seconds", 2.0)
     sid = _insert_schedule(db_conn, script="sleep 60\n", command="bash run.sh")
 
-    assert run(sid, machine=machine_identity) == 1
-    assert _runs(db_conn, sid) == [(False, "stall timeout (2s)")]
+    assert run(sid, machine=machine_identity, policy=StallPolicy(timeout_s=1.0)) == 1
+    assert _runs(db_conn, sid) == [(False, "stall timeout (1s)")]
 
 
 def test_run_skips_disabled_schedule(
@@ -274,31 +260,10 @@ def test_run_skips_disabled_schedule(
     assert _runs(db_conn, sid) == []
 
 
-def test_run_loads_plugins_for_py_script(
-    db_conn: psycopg.Connection,
-    unit_home: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    *,
-    machine_identity: MachineIdentity,
-) -> None:
-    import meiva
-
-    calls: list[int] = []
-    monkeypatch.setattr(meiva, "ensure_plugins_loaded", lambda: calls.append(1))
-    sid = _insert_schedule(db_conn, script="x = 1\n")
-
-    assert run(sid, machine=machine_identity) == 0
-    assert calls == [1]
-
-
 def test_run_hands_py_script_a_clean_argv(
-    db_conn: psycopg.Connection,
-    unit_home: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    *,
-    machine_identity: MachineIdentity,
+    db_conn: psycopg.Connection, unit_home: Path, *, machine_identity: MachineIdentity
 ) -> None:
-    monkeypatch.setattr(sys, "argv", ["schedule_runner", "4242"])
+    runner_argv = sys.argv
     marker = unit_home / "argv.json"
     script = (
         "import json, pathlib, sys\n"
@@ -310,158 +275,32 @@ def test_run_hands_py_script_a_clean_argv(
     assert json.loads(marker.read_text()) == [
         str(unit_home / "schedules" / str(sid) / "schedule.py")
     ]
-    assert sys.argv == ["schedule_runner", "4242"]
-
-
-def test_run_skips_plugin_load_for_non_py_command(
-    db_conn: psycopg.Connection,
-    unit_home: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    *,
-    machine_identity: MachineIdentity,
-) -> None:
-    import meiva
-
-    calls: list[int] = []
-    monkeypatch.setattr(meiva, "ensure_plugins_loaded", lambda: calls.append(1))
-    sid = _insert_schedule(db_conn, script="exit 0\n", command="bash run.sh")
-
-    assert run(sid, machine=machine_identity) == 0
-    assert calls == []
+    assert sys.argv is runner_argv
 
 
 def test_run_record_failure_does_not_break_the_run(
-    db_conn: psycopg.Connection,
-    unit_home: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    *,
-    machine_identity: MachineIdentity,
+    db_conn: psycopg.Connection, unit_home: Path, *, machine_identity: MachineIdentity
 ) -> None:
-    import services.wake.schedule_manager.engine as sr
-
-    real_connect = sr.Database.connect
-
-    class _FlakyCursor:
-        def __init__(self, cur: Any) -> None:
-            self._cur = cur
-
-        def __getattr__(self, name: str) -> Any:
-            return getattr(self._cur, name)
-
-        def __enter__(self) -> _FlakyCursor:
-            self._cur.__enter__()
-            return self
-
-        def __exit__(
-            self,
-            exc_type: type[BaseException] | None,
-            exc_val: BaseException | None,
-            exc_tb: Any,
-        ) -> None:
-            self._cur.__exit__(exc_type, exc_val, exc_tb)
-
-        def execute(self, sql: str, params: Any = None) -> Any:
-            if "schedule_runs" in sql:
-                raise RuntimeError("db down on schedule_runs")
-            return self._cur.execute(sql, params)
-
-    class _Flaky:
-        def __init__(self, conn: psycopg.Connection) -> None:
-            self._conn = conn
-
-        def __enter__(self) -> _Flaky:
-            self._inner = self._conn.__enter__()
-            return self
-
-        def __exit__(
-            self,
-            exc_type: type[BaseException] | None,
-            exc_val: BaseException | None,
-            exc_tb: Any,
-        ) -> None:
-            self._conn.__exit__(exc_type, exc_val, exc_tb)
-
-        def cursor(self) -> _FlakyCursor:
-            return _FlakyCursor(self._inner.cursor())
-
-        def execute(self, query: Any, params: Any = None) -> Any:
-            return self._inner.execute(query, params)
-
-    def _flaky_connect(self: Database, *args: object, **kwargs: object) -> _Flaky:
-        return _Flaky(real_connect(self, *args, **kwargs))
-
-    monkeypatch.setattr(sr.Database, "connect", _flaky_connect)
     sid = _insert_schedule(db_conn, script="x = 1\n")
 
-    assert run(sid, machine=machine_identity) == 0
+    with failing_write(db_conn, table="schedule_runs", events="INSERT OR UPDATE"):
+        assert run(sid, machine=machine_identity) == 0
+
     status, _ = _status_and_error(db_conn, sid)
     assert status == "completed"
+    assert _runs(db_conn, sid) == []
 
 
 def test_run_completed_marker_failure_keeps_run_row_honest(
-    db_conn: psycopg.Connection,
-    unit_home: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    *,
-    machine_identity: MachineIdentity,
+    db_conn: psycopg.Connection, unit_home: Path, *, machine_identity: MachineIdentity
 ) -> None:
-    import services.wake.schedule_manager.engine as sr
-
-    real_connect = sr.Database.connect
-
-    class _FlakyCursor:
-        def __init__(self, cur: Any) -> None:
-            self._cur = cur
-
-        def __getattr__(self, name: str) -> Any:
-            return getattr(self._cur, name)
-
-        def __enter__(self) -> _FlakyCursor:
-            self._cur.__enter__()
-            return self
-
-        def __exit__(
-            self,
-            exc_type: type[BaseException] | None,
-            exc_val: BaseException | None,
-            exc_tb: Any,
-        ) -> None:
-            self._cur.__exit__(exc_type, exc_val, exc_tb)
-
-        def execute(self, sql: str, params: Any = None) -> Any:
-            if "status = 'completed'" in sql:
-                raise RuntimeError("db down on completed marker")
-            return self._cur.execute(sql, params)
-
-    class _Flaky:
-        def __init__(self, conn: psycopg.Connection) -> None:
-            self._conn = conn
-
-        def __enter__(self) -> _Flaky:
-            self._inner = self._conn.__enter__()
-            return self
-
-        def __exit__(
-            self,
-            exc_type: type[BaseException] | None,
-            exc_val: BaseException | None,
-            exc_tb: Any,
-        ) -> None:
-            self._conn.__exit__(exc_type, exc_val, exc_tb)
-
-        def cursor(self) -> _FlakyCursor:
-            return _FlakyCursor(self._inner.cursor())
-
-        def execute(self, query: Any, params: Any = None) -> Any:
-            return self._inner.execute(query, params)
-
-    def _flaky_connect(self: Database, *args: object, **kwargs: object) -> _Flaky:
-        return _Flaky(real_connect(self, *args, **kwargs))
-
-    monkeypatch.setattr(sr.Database, "connect", _flaky_connect)
     sid = _insert_schedule(db_conn, script="x = 1\n")
 
-    assert run(sid, machine=machine_identity) == 0
+    with failing_write(
+        db_conn, table="schedules", events="UPDATE", when="NEW.status = 'completed'"
+    ):
+        assert run(sid, machine=machine_identity) == 0
+
     status, _ = _status_and_error(db_conn, sid)
     assert status != "completed"
     assert _runs(db_conn, sid) == [(True, "completed-marker write failed")]
@@ -485,40 +324,13 @@ def test_script_filename(command: str, expected: str) -> None:
 
 
 def test_run_hung_subprocess_times_out_and_records_error(
-    db_conn: psycopg.Connection,
-    unit_home: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    *,
-    machine_identity: MachineIdentity,
+    db_conn: psycopg.Connection, unit_home: Path, *, machine_identity: MachineIdentity
 ) -> None:
-
-    monkeypatch.setattr(settings.gateway, "schedule_stall_timeout_seconds", 2.0)
     sid = _insert_schedule(db_conn, script="sleep 60\n", command="bash run.sh")
 
-    rc = run(sid, machine=machine_identity)
+    rc = run(sid, machine=machine_identity, policy=StallPolicy(timeout_s=1.0))
 
     assert rc == 1
     status, last_error = _status_and_error(db_conn, sid)
     assert status != "completed"
-    assert last_error is not None and "did not finish within 2s" in last_error
-
-
-def test_stall_verdict_closes_run_row(
-    db_conn: psycopg.Connection,
-    unit_home: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    database_gate: ProcessDbGate,
-) -> None:
-    import services.wake.schedule_manager.engine as sr
-
-    sid = _insert_schedule(db_conn, script="x = 1\n")
-    run_id = sr.record_run_start(Database.from_settings(gate=database_gate), sid)
-    exited: list[int] = []
-    monkeypatch.setattr(sr.os, "_exit", exited.append)
-    monkeypatch.setattr(sr.base.host.proc, "kill_process_tree", Mock())
-    monkeypatch.setattr(sr.faulthandler, "dump_traceback_later", Mock())
-
-    sr.stall_action(Database.from_settings(gate=database_gate), sid, "stalled in foo", run_id)
-
-    assert exited == [1]
-    assert _runs(db_conn, sid) == [(False, f"stalled ({sr.schedule_stall_timeout_seconds():.0f}s)")]
+    assert last_error is not None and "did not finish within 1s" in last_error

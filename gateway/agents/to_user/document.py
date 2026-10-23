@@ -12,8 +12,8 @@ from base.agents.to_user import ToUserDocument, ToUserReadRequest
 from base.cluster.machine import gateway_auth_headers
 from base.cluster.machine.boot import gateway_access_from_boot
 from base.cluster.machines import MachineGatewayUrlMissing, MachineNotRegistered, lookup
-from base.config import settings
 from gateway.agents.eval_guard import deny_isolated_result_read
+from gateway.http.config import runtime_view
 from ops.cluster.rpc import ClusterOpFailed, ClusterOpUnreachable, dispatch_to_machine
 
 router = APIRouter()
@@ -29,8 +29,7 @@ def home_machine(request: Request, agent_id: int) -> str:
     return row[0]
 
 
-def resource_request(agent_id: int, references: list[str]) -> ToUserReadRequest:
-    max_depth = settings.to_user.max_chain_depth
+def resource_request(agent_id: int, references: list[str], *, max_depth: int) -> ToUserReadRequest:
     if len(references) > max_depth:
         raise HTTPException(422, f"A resource chain may carry at most {max_depth} reference IDs")
     try:
@@ -63,7 +62,9 @@ async def get_to_user(
     reference: Annotated[list[str] | None, Query()] = None,
 ) -> ToUserDocument:
     machine = await asyncio.to_thread(home_machine, request, agent_id)
-    return await read_snapshot(request, resource_request(agent_id, reference or []), machine)
+    max_depth = runtime_view(request).to_user.max_chain_depth
+    query = resource_request(agent_id, reference or [], max_depth=max_depth)
+    return await read_snapshot(request, query, machine)
 
 
 _PASSIVE_PREFIXES = ("image/", "audio/", "video/")
@@ -117,14 +118,18 @@ def resource_response(content: bytes, name: str) -> Response:
 
 
 async def fetch_resource(
-    client: httpx.AsyncClient, url: str, query: ToUserReadRequest, headers: dict[str, str]
+    client: httpx.AsyncClient,
+    url: str,
+    query: ToUserReadRequest,
+    headers: dict[str, str],
+    *,
+    limit: int,
 ) -> bytes:
 
     async with client.stream("POST", url, json=query.model_dump(), headers=headers) as response:
         if response.status_code != 200:
             status = response.status_code if response.status_code in (404, 422, 503) else 502
             raise HTTPException(status, "Referenced file could not be read")
-        limit = settings.to_user.max_resource_bytes
         content = bytearray()
         async for chunk in response.aiter_bytes():
             content.extend(chunk)
@@ -140,8 +145,9 @@ async def get_resource(
     reference: Annotated[list[str], Query(min_length=1)],
 ) -> Response:
     machine = await asyncio.to_thread(home_machine, request, agent_id)
-    query = resource_request(agent_id, reference)
-    parent = resource_request(agent_id, query.references[:-1])
+    to_user = runtime_view(request).to_user
+    query = resource_request(agent_id, reference, max_depth=to_user.max_chain_depth)
+    parent = resource_request(agent_id, query.references[:-1], max_depth=to_user.max_chain_depth)
     document = await read_snapshot(request, parent, machine)
     resource = next(
         (value for value in document.resources.values() if value.id == reference[-1]), None
@@ -159,6 +165,7 @@ async def get_resource(
                 f"{ops_url.rstrip('/')}/to-user/resource",
                 query,
                 gateway_auth_headers(access),
+                limit=to_user.max_resource_bytes,
             )
     except (httpx.HTTPError, MachineGatewayUrlMissing, MachineNotRegistered) as exc:
         raise HTTPException(503, "The agent's machine is unavailable") from exc

@@ -1,5 +1,3 @@
-from typing import Any
-from unittest.mock import MagicMock
 from uuid import UUID
 
 import httpx
@@ -9,72 +7,47 @@ import pytest
 from base.api_contracts.agent_contract import GatewayUnavailable
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
-from base.config import settings
 from base.host.net.tests.retry_waits import retry_waits as retry_waits
-from gateway.agents import creation as agent_creation
-from gateway.tests.auth.gateway_config import GatewayTestClient, gateway_test_client
-from gateway.tests.auth.gateway_tests import local_spawn_in_process as local_spawn_in_process
+from gateway.tests.auth.gateway_config import gateway_test_client
+from gateway.tests.auth.sdk_transport import AppTransport
 from gateway.tests.lifecycle.creation.test_guarded_creation import HEADERS, SECRET
-from gateway.tests.lifecycle.creation.test_sdk_strong_creation import httpx_response_of, sdk
+from gateway.tests.lifecycle.creation.test_guarded_creation import runner as runner
+from gateway.tests.lifecycle.creation.test_sdk_strong_creation import sdk
+from gateway.tests.support.runner_ops.ops_stub import RunnerOps
 from meiva.gateway_client import use_client
-from ops.cluster import rpc
-from ops.lifecycle.launch import validate_launch_row
-from ops.rpc_schemas import LaunchAgentRequest, SpawnedAgent
 
 
 @pytest.mark.usefixtures("retry_waits")
 @pytest.mark.parametrize("rotate", [False, True])
 def test_same_sdk_intent_after_lost_response_and_gateway_restart(
-    gateway_data_plane: None,
+    runner: RunnerOps,
     db_conn: psycopg.Connection,
-    monkeypatch: pytest.MonkeyPatch,
-    set_machine_identity: Any,
     rotate: bool,
     *,
     machine_identity: MachineIdentity,
 ) -> None:
-    set_machine_identity(role="agent-runner", name="local-test")
-    monkeypatch.setattr(settings.data_plane, "cluster_secret", SECRET)
-    launches: list[LaunchAgentRequest] = []
-    target: GatewayTestClient
-
-    async def accept(_db: object, _target: str, body: LaunchAgentRequest) -> SpawnedAgent:
-        validate_launch_row(target.app.state.db_pool, body, local_machine=machine_identity.name())
-        launches.append(body)
-        return SpawnedAgent(id=body.agent_id)
-
-    async def reconcile(*args: object, **kwargs: object) -> dict[str, object]:
-        return {}
-
-    monkeypatch.setattr(agent_creation, "forward_spawn_to_remote", accept)
-    monkeypatch.setattr(rpc, "dispatch_to_machine", reconcile)
-    http = MagicMock()
-    lose = True
-
-    def submit(path: str, **kwargs: Any) -> httpx.Response:
-        nonlocal lose
-        response = target.post(path, **kwargs)
-        if lose:
-            assert response.status_code == 201, response.text
-            raise httpx.ReadTimeout("committed birth response lost")
-        return httpx_response_of(response)
-
-    http.post.side_effect = submit
-    with use_client(http):
-        with gateway_test_client(
-            headers={"Authorization": f"Bearer {SECRET}"}, machine=machine_identity
-        ) as target:
+    with gateway_test_client(
+        cluster_secret=SECRET,
+        headers={"Authorization": f"Bearer {SECRET}"},
+        machine=machine_identity,
+    ) as target:
+        wire = AppTransport(target)
+        sdk_client = httpx.Client(
+            transport=wire, base_url="http://testserver", timeout=httpx.Timeout(10.0)
+        )
+        with use_client(sdk_client):
+            wire.losing_responses = True
             with pytest.raises(GatewayUnavailable):
                 sdk()
-            lost_attempts = http.post.call_count
+            lost_attempts = len(wire.requests)
             assert lost_attempts > 1
-            lose = False
+            wire.losing_responses = False
             row = db_conn.execute(
                 "SELECT agent_id, launch_attempt_id FROM agent_creation_snapshots"
             ).fetchone()
             assert row is not None
             agent_id, original = row
-            assert launches[0].launch_attempt_id == original
+            assert runner.payloads("spawn-launch")[0]["launch_attempt_id"] == str(original)
             if rotate:
                 retry = target.post(
                     f"/api/keyed/v1/agents/{agent_id}/retry-launch",
@@ -83,14 +56,22 @@ def test_same_sdk_intent_after_lost_response_and_gateway_restart(
                 )
                 assert retry.status_code == 200, retry.text
                 assert retry.json()["launch_attempt_id"] != str(original)
-        with gateway_test_client(
-            headers={"Authorization": f"Bearer {SECRET}"}, machine=machine_identity
-        ) as target:
-            assert sdk() == agent_id
-    assert http.post.call_count == lost_attempts + 1
-    assert all(call == http.post.call_args_list[0] for call in http.post.call_args_list)
+    with (
+        gateway_test_client(
+            cluster_secret=SECRET,
+            headers={"Authorization": f"Bearer {SECRET}"},
+            machine=machine_identity,
+        ) as restarted,
+        use_client(sdk_client),
+    ):
+        wire.target = restarted
+        assert sdk() == agent_id
+    sdk_client.close()
+    assert len(wire.requests) == lost_attempts + 1
+    assert len(wire.distinct()) == 1
+    launches = runner.payloads("spawn-launch")
     assert len(launches) == (lost_attempts if rotate else lost_attempts + 1)
-    assert all(launch.launch_attempt_id == original for launch in launches)
+    assert {launch["launch_attempt_id"] for launch in launches} == {str(original)}
     _assert_one_birth(db_conn, original)
 
 

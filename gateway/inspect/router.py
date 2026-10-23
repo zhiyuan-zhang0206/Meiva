@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import time as time_mod
-from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any
 
@@ -16,11 +15,13 @@ from psycopg.errors import QueryCanceled
 from psycopg_pool import ConnectionPool, PoolTimeout
 
 from base.api_contracts.agent_contract import AgentNotFound
-from base.config import settings
 from base.db import Database
+from gateway.http.config import runtime_view
 from gateway.inspect import _metrics, _plugin_metrics, _plugin_widgets, neighbors
 from gateway.inspect._cache import InspectCacheFullError, InspectQueryCache
+from gateway.inspect._heartbeat import HeartbeatCadence, HeartbeatState
 from gateway.inspect._live import db_rows_blocking, notice_blocking, project_heartbeat
+from gateway.inspect._plugin_faces import SHIPPED_PLUGINS_DIR, enabled_plugin_names
 from gateway.inspect.schemas import (
     AgentInspectLive,
     AgentInspectStatistics,
@@ -33,6 +34,7 @@ from gateway.inspect.schemas import (
 from gateway.schemas.stats import StatsWindowHours
 from ops.cluster import rpc as cluster_rpc
 from ops.rpc_schemas import ShellInfo
+from services.wake.heartbeat import JITTER_SPAN_S
 
 router = APIRouter()
 _log = logging.getLogger(__name__)
@@ -146,7 +148,6 @@ async def _inspect_rows_cached_async(
     hours: StatsWindowHours | None,
     *,
     spawned_at: datetime,
-    note_coverage: Callable[..., None] | None = None,
 ) -> _metrics.MetricsSnapshot:
     key = (agent_id, None if hours is None else int(hours))
     try:
@@ -157,10 +158,9 @@ async def _inspect_rows_cached_async(
                 agent_id,
                 hours,
                 spawned_at=spawned_at,
-                note_coverage=note_coverage,
             ),
             ttl_s=0,
-            now=time_mod.monotonic,
+            now=time_mod.monotonic(),
         )
     except InspectCacheFullError as exc:
         raise HTTPException(status_code=503, detail="inspect query queue is full") from exc
@@ -176,8 +176,8 @@ async def get_agent_inspect_live(agent_id: int, request: Request) -> AgentInspec
     shells_available=False. No part of this response is cached.
     """
     pool = request.app.state.db_pool
-    rows_reader = getattr(request.app.state, "inspect_db_rows", db_rows_blocking)
-    db = await asyncio.to_thread(rows_reader, pool, agent_id)
+    daemon = runtime_view(request).daemon
+    db = await asyncio.to_thread(db_rows_blocking, pool, agent_id)
     notice, shells, last_pause = await asyncio.gather(
         asyncio.to_thread(notice_blocking, pool, agent_id),
         _probe_agent_shells(request.app.state.db, agent_id, db.machine, pool),
@@ -196,13 +196,20 @@ async def get_agent_inspect_live(agent_id: int, request: Request) -> AgentInspec
         config_overlay=db.config_overlay,
         notice=notice,
         heartbeat=project_heartbeat(
-            status=db.status,
-            last_active_at=db.last_active_at,
-            last_heartbeat_at=db.last_heartbeat_at,
-            paused_until=db.paused_until,
-            agent_id=agent_id,
-            pending_inbound=db.pending_inbound,
-            last_pause=last_pause,
+            HeartbeatState(
+                agent_id=agent_id,
+                status=db.status,
+                last_active_at=db.last_active_at,
+                last_heartbeat_at=db.last_heartbeat_at,
+                paused_until=db.paused_until,
+                pending_inbound=db.pending_inbound,
+            ),
+            HeartbeatCadence(
+                idle_threshold_s=int(daemon.heartbeat_idle_threshold_seconds),
+                interval_s=int(daemon.heartbeat_interval_seconds),
+                jitter_span_s=JITTER_SPAN_S,
+            ),
+            last_pause,
         ),
     )
 
@@ -222,9 +229,6 @@ async def get_agent_inspect_statistics(
     """
     pool = request.app.state.db_pool
     applied_window_hours = None if hours is None else int(hours)
-    note_coverage = getattr(
-        request.app.state, "inspect_note_coverage", _metrics.note_inspect_metrics_coverage
-    )
     try:
         spawned_at = await asyncio.to_thread(_statistics_spawned_at, pool, agent_id)
         aggregates = await asyncio.wait_for(
@@ -234,7 +238,6 @@ async def get_agent_inspect_statistics(
                 agent_id,
                 hours,
                 spawned_at=spawned_at,
-                note_coverage=note_coverage,
             ),
             timeout=_INSPECT_RESPONSE_TIMEOUT_S,
         )
@@ -305,10 +308,11 @@ def get_agent_neighbors(
         cur.execute("SELECT 1 FROM agents_meta WHERE id = %s", (agent_id,))
         if cur.fetchone() is None:
             raise AgentNotFound(f"agent {agent_id} does not exist")
+    display = runtime_view(request).display
     if depth is None:
-        depth = settings.display.neighbors_default_depth
+        depth = display.neighbors_default_depth
     if limit is None:
-        limit = settings.display.neighbors_default_limit
+        limit = display.neighbors_default_limit
     try:
         ranked, ancestors_ranked = neighbors.compute(
             root=agent_id,
@@ -379,11 +383,11 @@ async def get_agent_plugin_metrics(agent_id: int, request: Request) -> list[Plug
     every 5s like the parent /inspect. Implementation in
     ``gateway/inspect/_plugin_metrics.py``.
     """
-    loader = getattr(
-        request.app.state, "inspect_metric_loader", _plugin_metrics.load_plugin_metrics
+    registry = await asyncio.to_thread(
+        _plugin_metrics.load_plugin_metrics, SHIPPED_PLUGINS_DIR, enabled_plugin_names()
     )
     return await asyncio.to_thread(
-        _plugin_metrics.metrics_for_agent, request.app.state.db_pool, agent_id, loader=loader
+        _plugin_metrics.metrics_for_agent, request.app.state.db_pool, agent_id, registry=registry
     )
 
 
@@ -402,9 +406,9 @@ async def get_agent_inspect_widgets(agent_id: int, request: Request) -> list[Ins
     rest of the /inspect family. Implementation in
     ``gateway/inspect/_plugin_widgets.py``.
     """
-    loader = getattr(
-        request.app.state, "inspect_widget_loader", _plugin_widgets.load_inspect_widgets
+    specs = await asyncio.to_thread(
+        _plugin_widgets.load_inspect_widgets, SHIPPED_PLUGINS_DIR, enabled_plugin_names()
     )
     return await asyncio.to_thread(
-        _plugin_widgets.widgets_for_agent, request.app.state.db_pool, agent_id, loader=loader
+        _plugin_widgets.widgets_for_agent, request.app.state.db_pool, agent_id, specs=specs
     )

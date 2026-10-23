@@ -1,0 +1,9 @@
+exports = ["page_acceptance.py", "page_target.py", "page_target_policy.py", "pages.py"]
+
+[uses]
+"page_acceptance.py" = ["page_target.py"]
+"page_target.py" = ["page_target_policy.py"]
+"pages.py" = ["page_acceptance.py", "page_target.py", "page_target_policy.py"]
+
+[purity]
+"page_target_policy.py" = "strict"

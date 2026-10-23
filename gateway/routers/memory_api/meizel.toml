@@ -1,0 +1,7 @@
+exports = ["memory.py", "memory_plan.py"]
+
+[uses]
+"memory.py" = ["memory_plan.py"]
+
+[purity]
+"memory_plan.py" = "strict"

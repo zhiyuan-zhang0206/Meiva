@@ -19,17 +19,15 @@ def _inbound_rows(conn: psycopg.Connection, agent_id: int) -> list[tuple[str, st
         return [(r[0], r[1], r[2]) for r in cur.fetchall()]
 
 
-def _spawn_self(monkeypatch: pytest.MonkeyPatch) -> int:
+def _spawn_self() -> int:
     aid = meiva.agents.spawn(idempotency_key=str(uuid4()))
     pin_agent(aid)
     return aid
 
 
 class TestSelfTerminate:
-    def test_terminate_inserts_inbound(
-        self, db_conn: psycopg.Connection, gateway_client, monkeypatch: pytest.MonkeyPatch
-    ):
-        aid = _spawn_self(monkeypatch)
+    def test_terminate_inserts_inbound(self, db_conn: psycopg.Connection, gateway_client):
+        aid = _spawn_self()
         with pytest.raises(meiva.self.AgentTermination):
             meiva.self.terminate()
         rows = _inbound_rows(db_conn, aid)
@@ -67,10 +65,8 @@ class TestSelfRestart:
         ).fetchone() == (overlay,)
         assert _inbound_rows(db_conn, aid) == [("", "restart", "self")]
 
-    def test_restart_inserts_inbound(
-        self, db_conn: psycopg.Connection, gateway_client, monkeypatch: pytest.MonkeyPatch
-    ):
-        aid = _spawn_self(monkeypatch)
+    def test_restart_inserts_inbound(self, db_conn: psycopg.Connection, gateway_client):
+        aid = _spawn_self()
         with pytest.raises(meiva.self.AgentRestart):
             meiva.self.restart()
         rows = _inbound_rows(db_conn, aid)

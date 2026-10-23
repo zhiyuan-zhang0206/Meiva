@@ -1,7 +1,10 @@
-exports = ["current.py", "router.py"]
+exports = ["current.py", "notice_answers.py", "notice_plan.py", "notices.py", "router.py"]
 
 [uses]
-"router.py" = ["current.py"]
+"current.py" = ["notices.py"]
+"notices.py" = ["notice_answers.py", "notice_plan.py"]
+"router.py" = ["current.py", "notices.py"]
 
 [purity]
 "__init__.py" = "strict"
+"notice_plan.py" = "strict"

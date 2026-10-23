@@ -25,19 +25,19 @@ from typing import Any
 
 import psycopg
 import pytest
-from fastapi import FastAPI, HTTPException
-from fastapi.testclient import TestClient
+from fastapi import HTTPException
+from psycopg_pool import ConnectionPool
 
 import meiva_builtins.plugins as shipped_plugins
 from base.db import Database
-from base.packages.plugins import enable_config
 from base.telemetry.metrics.plugin_metrics import MetricSpec
 from gateway.inspect import _plugin_metrics
+from gateway.inspect._plugin_faces import SHIPPED_PLUGINS_DIR, enabled_plugin_names
 from gateway.inspect._plugin_metrics import (
+    metrics_for_agent,
     render_metric_query,
     translate_macros,
 )
-from gateway.inspect.router import router
 
 # A valid inspector query — the static-SQL shape (task #180 PR C): the
 # template era (macros + {event_name}/{category}/{{agent_id}} placeholders)
@@ -58,13 +58,10 @@ _STAT_QUERY = "SELECT count(*) AS live FROM agents_meta WHERE status IN ('runnin
 
 
 @pytest.fixture
-def app(database: Database) -> Iterator[FastAPI]:
-    """Exercise this package's HTTP router with a real isolated database."""
-    application = FastAPI()
-    application.include_router(router)
-    with database.pool(max_size=2) as pool:
-        application.state.db_pool = pool
-        yield application
+def pool(database: Database) -> Iterator[ConnectionPool]:
+    """A real isolated database, borrowed the way the route borrows it."""
+    with database.pool(max_size=2) as opened:
+        yield opened
 
 
 def _metric(
@@ -92,12 +89,12 @@ def _metric(
     }
 
 
-def _patch_loader(app: FastAPI, *metrics: dict[str, Any]) -> None:
-    """Seed the in-process loader with the given registry rows — the
-    task #180 PR D equivalent of the old snapshot file (the loader itself is
-    covered separately by `test_in_process_loader_imports_shipped_metrics`)."""
-    specs = [MetricSpec.model_validate(m) for m in metrics]
-    app.state.inspect_metric_loader = lambda: specs
+# meiva:note
+# The inspector results of `agent_id` for these registry rows, as the route serializes them.
+def _run(pool: ConnectionPool, agent_id: int, *metrics: dict[str, Any]) -> list[dict[str, Any]]:
+    registry = [MetricSpec.model_validate(m) for m in metrics]
+    results = metrics_for_agent(pool, agent_id, registry=registry)
+    return [result.model_dump(mode="json") for result in results]
 
 
 def _insert_agent(db: psycopg.Connection, label: str = "t") -> int:
@@ -119,35 +116,37 @@ def _insert_agent(db: psycopg.Connection, label: str = "t") -> int:
 # ── file absent / agent unknown ───────────────────────────────────────────────
 
 
-def test_metrics_empty_registry_returns_empty(app: FastAPI, db_conn: psycopg.Connection) -> None:
-    """No registered metrics -> 200 []."""
-    _patch_loader(app)
+# meiva:note
+# No registered metrics -> [].
+def test_metrics_empty_registry_returns_empty(
+    pool: ConnectionPool, db_conn: psycopg.Connection
+) -> None:
     aid = _insert_agent(db_conn)
     db_conn.commit()
-    with TestClient(app) as client:
-        resp = client.get(f"/api/agents/{aid}/inspect/metrics")
-    assert resp.status_code == 200
-    assert resp.json() == []
+    assert _run(pool, aid) == []
 
 
-def test_metrics_unknown_agent_404(app: FastAPI, db_conn: psycopg.Connection) -> None:
+def test_metrics_unknown_agent_404(pool: ConnectionPool, db_conn: psycopg.Connection) -> None:
     """No agents_meta row -> 404 (same contract as /inspect)."""
-    _patch_loader(app, _metric())
     db_conn.commit()
-    with TestClient(app) as client:
-        resp = client.get("/api/agents/999999/inspect/metrics")
-    assert resp.status_code == 404
+    with pytest.raises(HTTPException) as caught:
+        _run(pool, 999999, _metric())
+    assert caught.value.status_code == 404
 
 
 # ── filtering + rendering + execution ─────────────────────────────────────────
 
 
-def test_metrics_filters_inspector_output(app: FastAPI, db_conn: psycopg.Connection) -> None:
+def test_metrics_filters_inspector_output(
+    pool: ConnectionPool, db_conn: psycopg.Connection
+) -> None:
     """Only metrics whose output includes 'inspector' are returned; a
     grafana-only metric (even one sharing the same table shape) is skipped."""
     aid = _insert_agent(db_conn)
-    _patch_loader(
-        app,
+    db_conn.commit()
+    body = _run(
+        pool,
+        aid,
         _metric(name="insp_metric"),
         _metric(
             name="grafana_only",
@@ -155,26 +154,17 @@ def test_metrics_filters_inspector_output(app: FastAPI, db_conn: psycopg.Connect
             output=["grafana"],
         ),
     )
-    db_conn.commit()
-    with TestClient(app) as client:
-        resp = client.get(f"/api/agents/{aid}/inspect/metrics")
-    assert resp.status_code == 200
-    body = resp.json()
     assert [m["name"] for m in body] == ["insp_metric"]
 
 
-def test_metrics_stat_scalar(app: FastAPI, db_conn: psycopg.Connection) -> None:
+def test_metrics_stat_scalar(pool: ConnectionPool, db_conn: psycopg.Connection) -> None:
     """A stat metric returns the single aggregate as `value`. The SQL
     inspector surface is static now (task #180 PR C — no macro windows), so
     the query counts exactly what its own predicates select."""
     aid = _insert_agent(db_conn)
     _insert_agent(db_conn)
-    _patch_loader(app, _metric(name="stat_count", panel="stat", query=_STAT_QUERY))
     db_conn.commit()
-    with TestClient(app) as client:
-        resp = client.get(f"/api/agents/{aid}/inspect/metrics")
-    assert resp.status_code == 200
-    body = resp.json()
+    body = _run(pool, aid, _metric(name="stat_count", panel="stat", query=_STAT_QUERY))
     assert len(body) == 1
     assert body[0]["name"] == "stat_count"
     assert body[0]["panel"] == "stat"
@@ -222,21 +212,16 @@ def test_metrics_macro_translation_unit() -> None:
     ],
 )
 def test_metrics_tampered_query_500(
-    app: FastAPI, db_conn: psycopg.Connection, tampered: str
+    pool: ConnectionPool, db_conn: psycopg.Connection, tampered: str
 ) -> None:
     """A registry file edited after generation fails the second validation ->
     500 with the reason (never executed)."""
     aid = _insert_agent(db_conn)
-    _patch_loader(
-        app,
-        _metric(name="tampered", query=tampered),
-        _metric(name="still_fine"),
-    )
     db_conn.commit()
-    with TestClient(app) as client:
-        resp = client.get(f"/api/agents/{aid}/inspect/metrics")
-    assert resp.status_code == 500
-    assert "re-validation" in resp.json()["detail"]
+    with pytest.raises(HTTPException) as caught:
+        _run(pool, aid, _metric(name="tampered", query=tampered), _metric(name="still_fine"))
+    assert caught.value.status_code == 500
+    assert "re-validation" in caught.value.detail
 
 
 def test_metrics_render_requires_agent_id_400() -> None:
@@ -262,50 +247,50 @@ def test_metrics_render_static_sql_passes_through() -> None:
 # ── execution-time failure is per-metric, not fatal ───────────────────────────
 
 
-def test_metrics_runtime_query_error_per_metric(app: FastAPI, db_conn: psycopg.Connection) -> None:
-    """A query that passes the whitelist but fails at runtime (a bad cast on
-    the row values) lands in that metric's `error`; the sibling metric still
-    renders and the request stays 200."""
+# meiva:note
+# A query that passes the whitelist but fails at runtime (a bad cast on
+# the row values) lands in that metric's `error`; the sibling metric still
+# renders.
+def test_metrics_runtime_query_error_per_metric(
+    pool: ConnectionPool, db_conn: psycopg.Connection
+) -> None:
     aid = _insert_agent(db_conn)
-    _patch_loader(
-        app,
+    db_conn.commit()
+    body = _run(
+        pool,
+        aid,
         _metric(
             name="broken",
             query=("SELECT status::bigint AS n FROM agents_meta WHERE id = %(agent_id)s"),
         ),
         _metric(name="healthy", panel="stat", query=_STAT_QUERY),
     )
-    db_conn.commit()
-    with TestClient(app) as client:
-        resp = client.get(f"/api/agents/{aid}/inspect/metrics")
-    assert resp.status_code == 200
-    by_name = {m["name"]: m for m in resp.json()}
+    by_name = {m["name"]: m for m in body}
     assert "bigint" in by_name["broken"]["error"].lower()
     assert by_name["healthy"]["error"] is None
     assert by_name["healthy"]["value"] == 1.0  # the seeded agents_meta row
 
 
-def test_metrics_read_only_is_transaction_scoped(app: FastAPI, db_conn: psycopg.Connection) -> None:
-    """The read-only enforcement must NOT leak onto pooled connections.
-
-    The endpoint opens its transaction with `SET TRANSACTION READ ONLY`
-    (server-enforced, transaction-scoped) instead of `Connection.read_only` —
-    that attribute is client-side state that persists on the pooled
-    connection object after return, so a later borrower could inherit a
-    read-only session and its writes would fail. After a metrics request,
-    the gateway's own pool must still accept writes."""
+# meiva:note
+# The read-only enforcement must NOT leak onto pooled connections.
+#
+# The read opens its transaction with `SET TRANSACTION READ ONLY`
+# (server-enforced, transaction-scoped) instead of `Connection.read_only` —
+# that attribute is client-side state that persists on the pooled
+# connection object after return, so a later borrower could inherit a
+# read-only session and its writes would fail. After a metrics read,
+# the same pool must still accept writes.
+def test_metrics_read_only_is_transaction_scoped(
+    pool: ConnectionPool, db_conn: psycopg.Connection
+) -> None:
     aid = _insert_agent(db_conn)
-    _patch_loader(app, _metric(name="stat_count", panel="stat", query=_STAT_QUERY))
     db_conn.commit()
-    with TestClient(app) as client:
-        resp = client.get(f"/api/agents/{aid}/inspect/metrics")
-        assert resp.status_code == 200
-        assert resp.json()[0]["value"] == 1
-        # Same pool the endpoint used — a write must succeed on a fresh borrow.
-        with app.state.db_pool.connection() as conn, conn.cursor() as cur:
-            cur.execute(
-                "INSERT INTO agents (label) VALUES ('post-metrics-write')",
-            )
+    body = _run(pool, aid, _metric(name="stat_count", panel="stat", query=_STAT_QUERY))
+    assert body[0]["value"] == 1
+    # meiva:note
+    # Same pool the read used — a write must succeed on a fresh borrow.
+    with pool.connection() as conn, conn.cursor() as cur:
+        cur.execute("INSERT INTO agents (label) VALUES ('post-metrics-write')")
 
 
 # ── LogQL inspector metrics (task #1280) ──────────────────────────────────────
@@ -350,22 +335,18 @@ def _usage(db: psycopg.Connection, agent_id: int, cost: float, *, minutes_ago: f
 
 
 def test_metrics_logql_timeseries_is_answered_from_telemetry_events(
-    app: FastAPI, db_conn: psycopg.Connection
+    pool: ConnectionPool, db_conn: psycopg.Connection
 ) -> None:
     """A logql inspector metric is evaluated on Postgres over the fixed 24h window in 1h
     steps (the range-vector window ends at each step), and folds into the same
     PluginMetricResult shape. Another agent's rows stay out."""
     aid = _insert_agent(db_conn)
     other = _insert_agent(db_conn, "other")
-    _patch_loader(app, _logql_metric())
     _usage(db_conn, aid, 0.25, minutes_ago=30)
     _usage(db_conn, aid, 0.5, minutes_ago=90)
     _usage(db_conn, other, 9.0, minutes_ago=30)
     db_conn.commit()
-    with TestClient(app) as client:
-        resp = client.get(f"/api/agents/{aid}/inspect/metrics")
-    assert resp.status_code == 200
-    [m] = resp.json()
+    [m] = _run(pool, aid, _logql_metric())
     assert m["error"] is None and m["value"] is None
     values = [point["value"] for point in m["series"]]
     assert len(values) == 25  # 24 hours of hourly steps, both ends
@@ -374,12 +355,17 @@ def test_metrics_logql_timeseries_is_answered_from_telemetry_events(
 
 
 def test_metrics_logql_stat_is_the_last_step_over_the_whole_range(
-    app: FastAPI, db_conn: psycopg.Connection
+    pool: ConnectionPool, db_conn: psycopg.Connection
 ) -> None:
     """A stat-shaped logql metric returns the last step as `value`; `$__range` is 24h."""
     aid = _insert_agent(db_conn)
-    _patch_loader(
-        app,
+    _usage(db_conn, aid, 0.25, minutes_ago=30)
+    _usage(db_conn, aid, 0.5, minutes_ago=600)
+    _usage(db_conn, aid, 4.0, minutes_ago=60 * 30)  # outside the 24h range
+    db_conn.commit()
+    m = _run(
+        pool,
+        aid,
         _logql_metric(
             name="stat_cost",
             panel="stat",
@@ -389,62 +375,56 @@ def test_metrics_logql_stat_is_the_last_step_over_the_whole_range(
                 "unwrap attributes_cost_usd [$__range]))"
             ),
         ),
-    )
-    _usage(db_conn, aid, 0.25, minutes_ago=30)
-    _usage(db_conn, aid, 0.5, minutes_ago=600)
-    _usage(db_conn, aid, 4.0, minutes_ago=60 * 30)  # outside the 24h range
-    db_conn.commit()
-    with TestClient(app) as client:
-        resp = client.get(f"/api/agents/{aid}/inspect/metrics")
-    assert resp.status_code == 200
-    m = resp.json()[0]
+    )[0]
     assert m["panel"] == "stat"
     assert m["value"] == pytest.approx(0.75)
     assert m["series"] == []
 
 
 def test_metrics_logql_outside_the_evaluator_vocabulary_is_per_metric(
-    app: FastAPI, db_conn: psycopg.Connection
+    pool: ConnectionPool, db_conn: psycopg.Connection
 ) -> None:
     """A template the evaluator does not understand lands in the metric's `error` field;
     sibling metrics still render."""
     aid = _insert_agent(db_conn)
-    _patch_loader(
-        app,
-        _logql_metric(
-            name="rate_query",
-            query=(
-                'rate({service_name="unknown_service", event_name={event_name}} | json | '
-                "category={category} [1h])"
-            ),
-        ),
-        _metric(name="still_fine"),
-    )
     db_conn.commit()
-    with TestClient(app) as client:
-        resp = client.get(f"/api/agents/{aid}/inspect/metrics")
-    assert resp.status_code == 200
-    body = {m["name"]: m for m in resp.json()}
+    body = {
+        m["name"]: m
+        for m in _run(
+            pool,
+            aid,
+            _logql_metric(
+                name="rate_query",
+                query=(
+                    'rate({service_name="unknown_service", event_name={event_name}} | json | '
+                    "category={category} [1h])"
+                ),
+            ),
+            _metric(name="still_fine"),
+        )
+    }
     assert "query failed" in body["rate_query"]["error"]
     assert body["still_fine"]["error"] is None
 
 
-def test_metrics_logql_tampered_query_500(app: FastAPI, db_conn: psycopg.Connection) -> None:
+def test_metrics_logql_tampered_query_500(
+    pool: ConnectionPool, db_conn: psycopg.Connection
+) -> None:
     """A tampered logql registry row (lost selector / json pipeline) fails
     the rendered-form re-validation -> 500, never executed."""
     aid = _insert_agent(db_conn)
-    _patch_loader(
-        app,
-        _logql_metric(
-            name="tampered_logql",
-            query='sum(count_over_time({other="x"} | json | event_name={event_name} [1h]))',
-        ),
-    )
     db_conn.commit()
-    with TestClient(app) as client:
-        resp = client.get(f"/api/agents/{aid}/inspect/metrics")
-    assert resp.status_code == 500
-    assert "re-validation" in resp.json()["detail"]
+    with pytest.raises(HTTPException) as caught:
+        _run(
+            pool,
+            aid,
+            _logql_metric(
+                name="tampered_logql",
+                query='sum(count_over_time({other="x"} | json | event_name={event_name} [1h]))',
+            ),
+        )
+    assert caught.value.status_code == 500
+    assert "re-validation" in caught.value.detail
 
 
 def test_metrics_logql_macro_translation_unit() -> None:
@@ -469,7 +449,7 @@ def test_in_process_loader_imports_shipped_metrics() -> None:
     `contribute()` declaration into a data registry plus the core definition
     modules — plugin metrics first, then core, the old snapshot's two-section
     order. No file involved."""
-    specs = _plugin_metrics.load_plugin_metrics()
+    specs = _plugin_metrics.load_plugin_metrics(SHIPPED_PLUGINS_DIR, enabled_plugin_names())
 
     plugin_specs = [s for s in specs if s.plugin != "core"]
     core_specs = [s for s in specs if s.plugin == "core"]
@@ -480,24 +460,26 @@ def test_in_process_loader_imports_shipped_metrics() -> None:
     assert [s.plugin for s in specs].index("core") == len(plugin_specs)
     assert len(core_specs) >= 16
     # a second call rebuilds the same registry (no process-global state to double up)
-    assert _plugin_metrics.load_plugin_metrics() == specs
+    assert _plugin_metrics.load_plugin_metrics(SHIPPED_PLUGINS_DIR, enabled_plugin_names()) == specs
 
 
-def test_a_disabled_plugins_metrics_are_not_loaded() -> None:
-    """Metrics follow the enable rule the widgets already follow: a disabled shipped plugin
-    contributes none (the per-agent inspector panel), read per request."""
-    shipped = _plugin_metrics.PLUGINS_DIR / "meiva_fleet" / "metrics.py"
-    assert shipped in _plugin_metrics.plugin_metric_modules()
-    real_load = enable_config.load_for_runtime
-
-    def _fleet_disabled(known: set[str]) -> enable_config.PluginsConfig:
-        config = real_load(known)
-        entries = {**config.plugins, "meiva_fleet": enable_config.PluginEntry(enabled=False)}
-        return enable_config.PluginsConfig(plugins=entries)
-
-    assert shipped not in _plugin_metrics.plugin_metric_modules(runtime_loader=_fleet_disabled)
+# meiva:note
+# Metrics follow the enable rule the widgets already follow: a disabled shipped plugin
+# contributes none (the per-agent inspector panel), read per request from the machine's
+# plugin config.
+def test_a_disabled_plugins_metrics_are_not_loaded(unit_home: Path) -> None:
+    shipped = SHIPPED_PLUGINS_DIR / "meiva_fleet" / "metrics.py"
+    assert shipped in _plugin_metrics.plugin_metric_modules(
+        SHIPPED_PLUGINS_DIR, enabled_plugin_names()
+    )
+    (unit_home / "plugins_config.json").write_text(
+        json.dumps({"plugins": {"meiva_fleet": {"enabled": False}}}), encoding="utf-8"
+    )
+    enabled = enabled_plugin_names()
+    assert "meiva_fleet" not in enabled
+    assert shipped not in _plugin_metrics.plugin_metric_modules(SHIPPED_PLUGINS_DIR, enabled)
     assert "meiva_fleet" not in {
-        s.plugin for s in _plugin_metrics.load_plugin_metrics(runtime_loader=_fleet_disabled)
+        s.plugin for s in _plugin_metrics.load_plugin_metrics(SHIPPED_PLUGINS_DIR, enabled)
     }
 
 
@@ -541,16 +523,8 @@ def _fixture_metrics_source(metric: str, query: str, *, raises: bool = False) ->
 
 
 def _load_fixture_metrics(plugins_dir: Path) -> list[MetricSpec]:
-    real_load = enable_config.load_for_runtime
-
-    def _with_fixture_plugins(known: set[str]) -> enable_config.PluginsConfig:
-        config = real_load(known)
-        fixtures = {p.name: enable_config.PluginEntry(enabled=True) for p in plugins_dir.iterdir()}
-        return enable_config.PluginsConfig(plugins={**config.plugins, **fixtures})
-
-    return _plugin_metrics.load_plugin_metrics(
-        plugins_dir=plugins_dir, runtime_loader=_with_fixture_plugins
-    )
+    enabled = {p.name for p in plugins_dir.iterdir()}
+    return _plugin_metrics.load_plugin_metrics(plugins_dir, enabled)
 
 
 @pytest.fixture

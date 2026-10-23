@@ -1,28 +1,10 @@
 import json
-from pathlib import Path
 
-import pytest
 from fastapi.testclient import TestClient
 
-import gateway.app as gateway_app
 from base import paths
-from base.lm.catalog import ModelCatalog
 from base.packages.plugins.enable_config import write_local
 from gateway.tests.auth.gateway_config import gateway_test_client
-
-
-@pytest.fixture(autouse=True)
-def _isolate_plugin_paths(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, model_catalog: ModelCatalog
-) -> None:
-    monkeypatch.setattr(gateway_app, "build_model_catalog", lambda: model_catalog)
-    repo = tmp_path / "repo_plugins"
-    user = tmp_path / "user_plugins"
-    repo.mkdir()
-    user.mkdir()
-    monkeypatch.setattr(paths, "repo_plugins_dir", lambda: repo)
-    monkeypatch.setattr(paths, "plugins_dir", lambda: user)
-    monkeypatch.setenv("MEIVA_HOME", str(tmp_path / "meiva"))
 
 
 def _write_plugin(
@@ -32,8 +14,8 @@ def _write_plugin(
     raw: str | None = None,
     manifest: bool = True,
 ) -> None:
-    directory = paths.repo_plugins_dir() / name
-    directory.mkdir()
+    directory = paths.plugins_dir() / name
+    directory.mkdir(parents=True)
     (directory / "plugin.py").write_text('"""A test plugin."""\n', encoding="utf-8")
     if raw is not None:
         (directory / "meiva-plugin.json").write_text(raw, encoding="utf-8")

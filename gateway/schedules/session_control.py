@@ -22,14 +22,9 @@ from psycopg_pool import ConnectionPool
 
 from base.cluster import session_name
 from base.db.transaction import write_transaction
-from base.sessions.backend import get_shell_backend
+from base.sessions.protocol import SessionBackend
 
 _log = logging.getLogger(__name__)
-
-# How long a request waits to be consumed: the service's one-second poll plus
-# the kill and relaunch it runs.
-CONSUME_WAIT_S = 8.0
-CONSUME_POLL_S = 0.2
 
 
 def enqueue_blocking(pool: ConnectionPool[Any], schedule_id: int) -> None:
@@ -59,36 +54,42 @@ def _is_queued_blocking(pool: ConnectionPool[Any], schedule_id: int) -> bool:
         return cur.fetchone() is not None
 
 
-async def wait_consumed(pool: ConnectionPool[Any], schedule_id: int) -> None:
-    deadline = time.monotonic() + CONSUME_WAIT_S
+# meiva:note
+# Wait up to `wait_s` (the service's one-second poll plus the kill and relaunch it runs)
+# for the request to be consumed, looking every `poll_s`.
+async def wait_consumed(
+    pool: ConnectionPool[Any], schedule_id: int, *, wait_s: float, poll_s: float
+) -> None:
+    deadline = time.monotonic() + wait_s
     while time.monotonic() < deadline:
         if not await asyncio.to_thread(_is_queued_blocking, pool, schedule_id):
             return
-        await asyncio.sleep(CONSUME_POLL_S)
+        await asyncio.sleep(poll_s)
     _log.warning(
         "schedule %s: sync request not consumed within %.0fs — the schedule-manager "
         "service will converge it when it is next up",
         schedule_id,
-        CONSUME_WAIT_S,
+        wait_s,
     )
 
 
-async def request_sync(pool: ConnectionPool[Any], schedule_id: int) -> None:
+async def request_sync(
+    pool: ConnectionPool[Any], schedule_id: int, *, wait_s: float, poll_s: float
+) -> None:
     """Ask the schedule-manager service to converge one schedule's session to its
     latest desired revision now (adopt an applied revision, or replace
     its predecessor), and wait a bounded time for it to do so."""
     await asyncio.to_thread(enqueue_blocking, pool, schedule_id)
-    await wait_consumed(pool, schedule_id)
+    await wait_consumed(pool, schedule_id, wait_s=wait_s, poll_s=poll_s)
 
 
-async def capture(schedule_id: int, lines: int) -> str | None:
+async def capture(backend: SessionBackend, schedule_id: int, lines: int) -> str | None:
     """The schedule session's recent output, or None when no session is live."""
-    return await asyncio.to_thread(capture_blocking, schedule_id, lines)
+    return await asyncio.to_thread(capture_blocking, backend, schedule_id, lines)
 
 
-def capture_blocking(schedule_id: int, lines: int) -> str | None:
+def capture_blocking(backend: SessionBackend, schedule_id: int, lines: int) -> str | None:
     name = session_name(f"schedule-{schedule_id}")
-    backend = get_shell_backend()
     if not backend.has_session(name):
         return None
     return backend.capture_pane(name, lines)

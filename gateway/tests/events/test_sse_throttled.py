@@ -3,7 +3,6 @@
 import asyncio
 import contextlib
 import json
-from collections.abc import AsyncIterator
 
 import psycopg
 import pytest
@@ -13,14 +12,10 @@ from base.config import settings
 from base.db import create_agent
 from base.events.live.bus import EventBus
 from base.events.live.projection import ChatDelta, CodeDelta, LabelUpdated
-from gateway.events.sse import (
-    decode_frames_for_test,
-    sse_batch_frame,
-    sse_frame,
-    throttled_event_stream,
-)
+from gateway.events.sse import throttled_event_stream
+from gateway.events.sse_frames import SseCadence, parse_agent_ids, sse_batch_frame, sse_frame
 from gateway.tests.auth.gateway_config import gateway_test_client
-from gateway.tests.events.test_sse import FakeRequest
+from gateway.tests.events.sse_support import FakeRequest, decode_frames_for_test
 from gateway.tests.events.test_sse import redis_client as redis_client
 
 
@@ -49,6 +44,7 @@ async def _collect_throttled_frames(
         req,  # type: ignore[arg-type]
         channel=channel,
         throttle_rate=throttle_rate,
+        cadence=SseCadence(),
         agent_filter=agent_filter,
     )
 
@@ -267,25 +263,15 @@ def test_throttled_wire_format_is_json_array(
     pytest.fail("No data frame found")
 
 
-def test_throttled_agent_filter_endpoint_query(
-    db_conn: psycopg.Connection,
-) -> None:
-    """The query is parsed once and forwarded; malformed ids fail with 422."""
-    tid = create_agent(db_conn)
-    captured_kwargs: dict[str, object] = {}
-
-    async def fake_stream(*_args: object, **kwargs: object) -> AsyncIterator[bytes]:
-        captured_kwargs.update(kwargs)
-        yield b": stream open\n\n"
-
+# meiva:note
+# `agents` is a comma-separated id list; absent means no filter, and a bad token is a 422.
+def test_the_agents_query_is_parsed_once_and_malformed_ids_fail_with_422() -> None:
+    assert parse_agent_ids(None) is None
+    assert parse_agent_ids("3,7,3") == {3, 7}
+    with pytest.raises(ValueError, match="invalid literal"):
+        parse_agent_ids("3,abc")
     with gateway_test_client() as client:
-        client.app.state.throttled_system_event_stream = fake_stream
-        with client.stream("GET", f"/api/system/all?agents={tid}") as resp:
-            assert resp.status_code == 200
-        assert captured_kwargs["agent_filter"] == {tid}
-
-        invalid = client.get("/api/system/all?agents=abc")
-        assert invalid.status_code == 422
+        assert client.get("/api/system/all?agents=abc").status_code == 422
 
 
 def test_throttled_drops_invalid_payload(

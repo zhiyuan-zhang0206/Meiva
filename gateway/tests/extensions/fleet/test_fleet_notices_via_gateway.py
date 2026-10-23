@@ -13,7 +13,9 @@ import meiva
 from base.agents.observation.snapshot import select_one
 from base.cluster.machine import MachineIdentity
 from base.config import settings
+from base.events.live.bus import EventBus
 from base.packages.plugin_providers import build_model_catalog
+from gateway.tests.support.live_events.recorder import recording_live_events
 from meiva.tests.fixtures.pin_agent import pin_agent
 from meiva_builtins.plugins.meiva_fleet.tests.registry_support import (
     installed_fleet_surface,
@@ -58,7 +60,12 @@ def sdk_via_inprocess_gateway(
 
 @pytest.fixture
 def load_activity_plugin(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
-    """Install Fleet with a valid local sampling policy; uninstall after the test."""
+    """Install Fleet with a valid local sampling policy; uninstall after the test.
+
+    Retained patch: the SDK installation's sampling owner refreshes from the gateway's
+    bootstrap fetch, and `installed_fleet_surface` (meiva_builtins) does not take a
+    `sampling=` owner to install instead.
+    """
     from base.agents.sdk import call_policy
 
     def _policy_for_test(_owner: call_policy.SamplingPolicyOwner) -> call_policy.SamplingPolicy:
@@ -309,40 +316,34 @@ def test_response_notice_content_edits_publish_refreshed_snapshot(
     sdk_via_inprocess_gateway: None,
     load_activity_plugin: None,
     db_conn: psycopg.Connection,
-    monkeypatch: pytest.MonkeyPatch,
+    event_bus: EventBus,
 ):
     """Content-only edits invalidate the selected agent's authoritative read.
 
     NoticePosted refreshes the Inbox queue; AgentUpdated requests current
     detail so the inspector can read the edited response-required notice.
     """
-    from gateway.agents import notices as notices_router
-
-    published_agent_ids: list[int] = []
-
-    def _capture_snapshot(_bus: object, published_agent_id: int) -> None:
-        published_agent_ids.append(published_agent_id)
-
-    # The route must publish this after every durable create/edit. It is absent
-    # before the regression fix, so the assertion below proves the missing
-    # inspector projection rather than merely the row's database state.
-    monkeypatch.setattr(
-        notices_router, "publish_agent_updated_sync", _capture_snapshot, raising=False
-    )
-
     agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
-    meiva.ui.notify(  # type: ignore[attr-defined]
-        "decision needed",
-        content="revision 0",
-        priority="P1",
-        require_response=True,
-        blocking=True,
-        idempotency_key=str(uuid4()),
-    )
-    for revision in range(1, 11):
-        content = f"revision {revision}"
-        meiva.ui.edit_notice(content=content)  # type: ignore[attr-defined]
+    # meiva:note
+    # The route must announce AgentUpdated after every durable create/edit; the recorder reads
+    # the hints back from the channel, so the assertion proves the inspector projection rather
+    # than merely the row's database state.
+    with recording_live_events(event_bus) as live:
+        meiva.ui.notify(  # type: ignore[attr-defined]
+            "decision needed",
+            content="revision 0",
+            priority="P1",
+            require_response=True,
+            blocking=True,
+            idempotency_key=str(uuid4()),
+        )
+        for revision in range(1, 11):
+            content = f"revision {revision}"
+            meiva.ui.edit_notice(content=content)  # type: ignore[attr-defined]
+        live.settle("agent_updated", 11)
+        live.quiet()
+        published_agent_ids = [event.payload["agent_id"] for event in live.events("agent_updated")]
 
     # One AgentUpdated for creation plus one per content-only edit keeps the
     # inspector's cached snapshot authoritative through the whole chain.
@@ -423,7 +424,7 @@ def test_each_agent_side_resolution_publishes_notice_resolved(
     sdk_via_inprocess_gateway: None,
     load_activity_plugin: None,
     db_conn: psycopg.Connection,
-    monkeypatch: pytest.MonkeyPatch,
+    event_bus: EventBus,
 ):
     # meiva:note
     # Every agent-side resolution — a dismissal through dismiss_notice — publishes
@@ -431,23 +432,17 @@ def test_each_agent_side_resolution_publishes_notice_resolved(
     # resolved history off this event alone, so a notice resolved without one would
     # leave the open list yet never surface in the resolved history. Posting resolves
     # nothing. Events publish from the gateway (R3 door ④ unified write API), not the
-    # SDK, so the gateway-side publisher is patched.
+    # SDK, so the recorder subscribes to the gateway's channel.
     # meiva:link gateway/agents/docs/notice-receipts.meiva.okf.md
-    import ops.lifecycle as ops_mod
-
-    resolved: list[int] = []
-
-    async def _fake_publish(_bus: object, _aid: int, global_id: int, **_: object) -> None:
-        resolved.append(global_id)
-
-    monkeypatch.setattr(ops_mod, "publish_notice_resolved", _fake_publish)
-
     agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
-    meiva.ui.notify("Q1?", require_response=True, idempotency_key=str(uuid4()))  # pyright: ignore[reportCallIssue]
-    assert resolved == []
-    meiva.ui.dismiss_notice()  # pyright: ignore[reportCallIssue]
-    assert len(resolved) == 1
-    meiva.ui.notify("Q2?", require_response=True, idempotency_key=str(uuid4()))  # pyright: ignore[reportCallIssue]
-    meiva.ui.dismiss_notice()  # pyright: ignore[reportCallIssue]
-    assert len(resolved) == 2
+    with recording_live_events(event_bus) as live:
+        meiva.ui.notify("Q1?", require_response=True, idempotency_key=str(uuid4()))  # pyright: ignore[reportCallIssue]
+        live.settle("notice_posted", 1)
+        live.quiet()
+        assert live.events("notice_resolved") == []
+        meiva.ui.dismiss_notice()  # pyright: ignore[reportCallIssue]
+        live.settle("notice_resolved", 1)
+        meiva.ui.notify("Q2?", require_response=True, idempotency_key=str(uuid4()))  # pyright: ignore[reportCallIssue]
+        meiva.ui.dismiss_notice()  # pyright: ignore[reportCallIssue]
+        assert len(live.settle("notice_resolved", 2)) == 2

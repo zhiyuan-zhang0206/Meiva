@@ -5,8 +5,8 @@ from pathlib import Path
 import psycopg
 from psycopg_pool import ConnectionPool
 
-from base.clock import SYSTEM_TIMERS
 from base.sessions.backend import get_shell_backend
+from base.sessions.env_forwarding import forward_env_dict
 from base.sessions.pty.tests.pty_service import PtyServiceProcess
 from base.sessions.pty.tests.pty_service import pty_service as pty_service
 from base.sessions.pty.tests.pty_shells import wait_for
@@ -18,6 +18,7 @@ from base.sessions.pty.tests.secret_argv import (
 from base.sessions.pty.tests.secret_argv import (
     secrets_in_creator_env as secrets_in_creator_env,
 )
+from services.wake.schedule_manager.tests.manager_support import NOW, schedule_manager
 
 
 def test_schedule_launch(
@@ -26,8 +27,6 @@ def test_schedule_launch(
     db_conn: psycopg.Connection,
     unit_home: Path,
 ) -> None:
-    from services.wake.schedule_manager.manager import ScheduleManager
-
     stub = unit_home / ".venv" / "bin" / "python"
     stub.parent.mkdir(parents=True)
     dump = unit_home / "runner-env.txt"
@@ -45,9 +44,9 @@ def test_schedule_launch(
         db_conn.info.dsn, min_size=1, max_size=2, open=True
     )
     try:
-        ScheduleManager(
-            pool, backend=get_shell_backend(), timers=SYSTEM_TIMERS, repo_root=unit_home
-        )._launch(schedule_id)
+        schedule_manager(
+            pool, get_shell_backend(), repo_root=unit_home, launch_env=forward_env_dict()
+        )._launch(schedule_id, NOW)
     finally:
         pool.close()
 

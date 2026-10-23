@@ -40,7 +40,6 @@ from fastapi.responses import StreamingResponse
 from psycopg.rows import dict_row
 from pydantic import TypeAdapter
 
-from base.config import settings
 from base.db.transaction import write_transaction
 from base.telemetry.alerts import (
     display_language,
@@ -55,7 +54,9 @@ from gateway.alerts.schemas import (
     AlertWebhookPayload,
 )
 from gateway.events.sse import event_stream
+from gateway.events.sse_frames import SseCadence
 from gateway.http.auth.webhook import authenticate_webhook
+from gateway.http.config import runtime_view
 from ops.alerts import ALERTS_CHANNEL, AlertRow, AlertSeverity, AlertStatus, publish_alert_rows
 
 router = APIRouter()
@@ -112,7 +113,9 @@ def ingest_alerts(body: AlertWebhookPayload, request: Request) -> AlertIngestRes
     with write_transaction(request.app.state.db_pool) as conn:
         lang = display_language(conn)
         alerts = body.flattened()
-        shadow = AlertShadowBatch(conn, alerts, lang, native=settings.alerts.im_notify_enabled)
+        shadow = AlertShadowBatch(
+            conn, alerts, lang, native=runtime_view(request).alerts.im_notify_enabled
+        )
         for alert in shadow.items:
             instance_key, previous = shadow.observe(alert)
             if instance_key is None:
@@ -133,9 +136,8 @@ def ingest_alerts(body: AlertWebhookPayload, request: Request) -> AlertIngestRes
 
     publish_alert_rows(request.app.state.bus, rows)
 
-    notifier = getattr(request.app.state, "alert_group_notifier", None) or notify_alert_group
     for group_id in sorted(shadow.native_ids):
-        notifier(group_id)
+        notify_alert_group(group_id)
     with request.app.state.db_pool.connection() as conn:
         notified = native_sent_count(conn, shadow.native_ids)
 
@@ -158,15 +160,16 @@ async def get_alerts_stream(request: Request) -> StreamingResponse:
     ingested before the subscription opened.
     """
 
-    stream_fn = getattr(request.app.state, "alerts_event_stream", event_stream)
     return StreamingResponse(
-        stream_fn(
+        event_stream(
             request.app.state.bus,
             0,
             request,
             channel=ALERTS_CHANNEL,
             broadcast=True,
             validator=_alert_frame_validator,
+            poll_s=runtime_view(request).gateway.sse_disconnect_poll_seconds,
+            cadence=SseCadence(),
         ),
         media_type="text/event-stream",
         headers={
@@ -200,10 +203,9 @@ def list_alerts(
     the full match count.
     """
 
-    default_limit = getattr(
-        request.app.state, "alerts_default_limit", settings.display.alerts_default_limit
+    effective_limit = (
+        limit if limit is not None else runtime_view(request).display.alerts_default_limit
     )
-    effective_limit = limit if limit is not None else default_limit
     since = datetime.now(UTC) - _WINDOWS[window]
     params: list[Any] = [since]
     # Live problems never age out. The window limits recovery history, including

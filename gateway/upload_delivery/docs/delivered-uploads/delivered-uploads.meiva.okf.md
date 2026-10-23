@@ -44,12 +44,19 @@ TaskGroup; due selection and final acceptance borrow short transactions, with no
 DB connection held across RPC/HTTP. A batch gets `source.MAX_COPY_ATTEMPTS` (3) copy
 attempts spaced by a short linear backoff. `source.due()` claims what it returns: the
 same statement pushes `next_attempt_at` a claim window ahead
-(`settings.gateway.upload_recovery_claim_seconds`, 300 s by default) under
+(`upload_recovery_claim_seconds` from the gateway's own config owner, 300 s by default) under
 `FOR UPDATE SKIP LOCKED`, so two Gateway processes sharing a database never copy one
 batch twice. The claim is scheduling, not proof another writer died: a failed copy
 replaces it with its own backoff, and a worker that dies mid-copy delays only that batch
 by one window.
 Source placement is checked before copy and again under locks before inbound.
+
+The worker takes its two environment facts as values from the lifespan: the claim window
+and the account `home` under which the same-unit shortcut verifies the source objects
+(`GatewayConfig.upload_home`, read once by the root). What a failed copy means (held for
+good, or retried under backoff) is the pure verdict of `failure_plan.py`; the worker only
+records it. `GatewayConfig.upload_recovery_enabled` turns the background loop off for a test
+that drives the rounds itself.
 
 The independently known Ops kind `upload-receive-v1` requires explicit integer
 protocol 1 (missing/bool/float/unknown refused), exact target unit and strict

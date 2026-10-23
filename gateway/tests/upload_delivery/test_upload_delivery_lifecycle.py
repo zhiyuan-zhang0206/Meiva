@@ -5,6 +5,8 @@ import os
 import subprocess
 import sys
 import threading
+from collections.abc import Callable, Generator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -13,40 +15,49 @@ import pytest
 
 from base.agents.upload_delivery import source, storage
 from base.agents.upload_delivery.models import UploadDeliveryConflictError
+from base.cluster import inbound_channel
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
-from base.db import Database
 from base.events.live.bus import EventBus
 from base.telemetry.tests.capture.event_capture import capturing_events
-from gateway.tests.auth.gateway_config import GatewayTestClient, gateway_test_client
-from gateway.tests.upload_delivery.test_upload_delivery_recovery import post, proof_for, request_for
+from gateway.tests.auth.gateway_config import (
+    GatewayTestClient,
+    gateway_test_client,
+    gateway_test_config,
+)
+from gateway.tests.support.live_events.faults import unpublishable_bus
+from gateway.tests.support.runner_ops.ops_stub import refused, runner_ops
+from gateway.tests.upload_delivery.test_upload_delivery_recovery import (
+    CLAIM_SECONDS,
+    post,
+    proof_for,
+    recovery_for,
+    register_second_home,
+    request_for,
+)
 from gateway.tests.upload_delivery.test_upload_delivery_recovery import (
     uploaded_agent as uploaded_agent,
 )
-from gateway.upload_delivery import worker
-
-# meiva:note
-# The recovery worker's claim lease for a constructed worker: these tests drive one
-# batch at a time, so any positive lease behaves the same here.
-_CLAIM_SECONDS = 300.0
+from gateway.upload_delivery.worker import UploadRecovery
 
 
 @pytest.mark.parametrize("stage", ["before-link", "after-link"])
 def test_hard_death_native_temp_not_double_charged_or_cleaned(
     uploaded_agent: tuple[GatewayTestClient, int],
     db_conn: psycopg.Connection[Any],
-    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
     stage: str,
     machine_identity: MachineIdentity,
 ):
     client, agent = uploaded_agent
-    original = storage.publish
-
-    def refuse(*_args: Any):
-        raise OSError("source publication not started")
-
-    monkeypatch.setattr(storage, "publish", refuse)
+    # meiva:note
+    # Publication cannot start: the downloads root is a file, so it cannot hold the agent's
+    # directory (a fault that binds root as well, unlike a permission bit).
+    downloads = tmp_path / "Downloads"
+    downloads.write_text("not a directory")
     assert post(client, agent).status_code == 500
+    downloads.unlink()
+    downloads.mkdir(mode=0o700)
     row = db_conn.execute("SELECT manifest FROM upload_delivery_batches").fetchone()
     assert row is not None
     manifest = source.Manifest.model_validate(row[0])
@@ -76,7 +87,6 @@ def test_hard_death_native_temp_not_double_charged_or_cleaned(
             5,
             1,
         )
-    monkeypatch.setattr(storage, "publish", original)
     assert post(client, agent).status_code == 202
     assert final.read_bytes() == b"bytes"
     assert temps[0].exists()  # No orphan cleanup or inferred writer-dead takeover.
@@ -140,13 +150,7 @@ async def test_shutdown_drains_native_future_after_cancelled_http_wait(
     uploaded_agent: tuple[GatewayTestClient, int], *, machine_identity: MachineIdentity
 ):
     client, _agent = uploaded_agent
-    recovery = worker.UploadRecovery(
-        client.app.state.db_pool,
-        client.app.state.db,
-        client.app.state.bus,
-        machine=machine_identity,
-        claim_seconds=_CLAIM_SECONDS,
-    )
+    recovery = recovery_for(client, machine_identity)
     entered, finish = threading.Event(), threading.Event()
 
     def native_writer():
@@ -172,36 +176,45 @@ async def test_shutdown_drains_native_future_after_cancelled_http_wait(
     assert not recovery.calls
 
 
+# meiva:note
+# Subscribe to the agent's inbound wake channel; the callable drains what arrived.
+@contextmanager
+def _inbound_wakes(bus: EventBus, agent: int) -> Generator[Callable[[], list[str]]]:
+    redis = bus.sync_redis(decode_responses=True)
+    pubsub = redis.pubsub()  # pyright: ignore[reportUnknownMemberType]
+    pubsub.subscribe(inbound_channel(agent, bus.channel))
+    assert pubsub.get_message(timeout=5)["type"] == "subscribe"  # pyright: ignore[reportUnknownMemberType, reportOptionalSubscript]
+
+    def received() -> list[str]:
+        payloads: list[str] = []
+        while True:
+            # meiva:note
+            # The redis-py client and its pubsub are untyped. The annotated shape is the one the untyped call returns.
+            message: dict[str, Any] | None = pubsub.get_message(timeout=0.3)  # pyright: ignore[reportUnknownMemberType, reportAssignmentType]
+            if message is None:
+                return payloads
+            if message["type"] == "message":
+                payloads.append(str(message["data"]))
+
+    try:
+        yield received
+    finally:
+        pubsub.close()  # pyright: ignore[reportUnknownMemberType]
+        redis.close()
+
+
 @pytest.mark.asyncio
-async def test_accepted_upload_wakes_once_and_a_lost_wake_is_not_repeated(
-    uploaded_agent: tuple[GatewayTestClient, int],
-    monkeypatch: pytest.MonkeyPatch,
-    *,
-    machine_identity: MachineIdentity,
+async def test_accepted_upload_wakes_once(
+    uploaded_agent: tuple[GatewayTestClient, int], *, machine_identity: MachineIdentity
 ):
     client, agent = uploaded_agent
     batch_id = post(client, agent).json()["batch_id"]
-    woken: list[int] = []
-
-    def lost_wake(_db: Database, _bus: EventBus, _agent: int, iid: str):
-        woken.append(int(iid))
-        raise RuntimeError("redis unavailable")
-
-    async def copied(_self: worker.UploadRecovery, request: Any):
-        return proof_for(request)
-
-    monkeypatch.setattr(worker, "publish_inbound_wake", lost_wake)
-    monkeypatch.setattr(worker.UploadRecovery, "copy_proof", copied)
-    recovery = worker.UploadRecovery(
-        client.app.state.db_pool,
-        client.app.state.db,
-        client.app.state.bus,
-        machine=machine_identity,
-        claim_seconds=_CLAIM_SECONDS,
-    )
-    await recovery.round()
-    await recovery.round()
-    await recovery.round()
+    recovery = recovery_for(client, machine_identity)
+    with _inbound_wakes(client.app.state.bus, agent) as received:
+        await recovery.round()
+        await recovery.round()
+        await recovery.round()
+        woken = received()
     status = source.status(client.app.state.db_pool, agent, batch_id)
     assert status.state == "accepted" and status.inbound_id is not None
     # meiva:note
@@ -213,61 +226,87 @@ async def test_accepted_upload_wakes_once_and_a_lost_wake_is_not_repeated(
         assert conn.execute(
             "SELECT source FROM inbound_messages WHERE id=%s", (status.inbound_id,)
         ).fetchone() == ("system:upload",)
+    # meiva:note
     # One wake at acceptance; the still-pending chat is never re-announced by a scan.
-    assert woken == [status.inbound_id]
+    assert woken == [str(status.inbound_id)]
     await recovery.close()
+
+
+@pytest.mark.asyncio
+async def test_a_lost_wake_is_not_repeated(
+    uploaded_agent: tuple[GatewayTestClient, int], *, machine_identity: MachineIdentity
+):
+    client, agent = uploaded_agent
+    batch_id = post(client, agent).json()["batch_id"]
+    lossy = UploadRecovery(
+        client.app.state.db_pool,
+        client.app.state.db,
+        unpublishable_bus(),
+        machine=machine_identity,
+        home=client.app.state.gateway_config.upload_home,
+        claim_seconds=CLAIM_SECONDS,
+    )
+    healthy = recovery_for(client, machine_identity)
+    with _inbound_wakes(client.app.state.bus, agent) as received:
+        await lossy.round()
+        # meiva:note
+        # Accepted although the wake never left; no later round, on any worker, announces it.
+        await healthy.round()
+        await healthy.round()
+        woken = received()
+    status = source.status(client.app.state.db_pool, agent, batch_id)
+    assert status.state == "accepted" and status.inbound_id is not None
+    assert woken == []
+    await lossy.close()
+    await healthy.close()
 
 
 @pytest.mark.asyncio
 async def test_failed_copies_hold_after_the_attempt_budget_and_alert_once(
     uploaded_agent: tuple[GatewayTestClient, int],
-    monkeypatch: pytest.MonkeyPatch,
+    db_conn: psycopg.Connection[Any],
     *,
     machine_identity: MachineIdentity,
 ):
     client, agent = uploaded_agent
-    batch_id = post(client, agent).json()["batch_id"]
-    calls: list[int] = []
-
-    async def unreachable(_self: worker.UploadRecovery, _request: Any):
-        calls.append(1)
-        raise OSError("receiver unreachable")
-
-    monkeypatch.setattr(worker.UploadRecovery, "copy_proof", unreachable)
-    recovery = worker.UploadRecovery(
-        client.app.state.db_pool,
-        client.app.state.db,
-        client.app.state.bus,
-        machine=machine_identity,
-        claim_seconds=_CLAIM_SECONDS,
-    )
-    # Bound here, not as a fixture: the gateway of `uploaded_agent` binds its own pipeline first.
-    with capturing_events() as emitted_events:
-        for attempt in range(1, source.MAX_COPY_ATTEMPTS + 1):
-            with client.app.state.db_pool.connection() as conn:
-                conn.execute("UPDATE upload_delivery_batches SET next_attempt_at=now()")
-            await recovery.round()
-            status = source.status(client.app.state.db_pool, agent, batch_id)
-            assert status.attempts == attempt
-            assert status.state == ("hold" if attempt == source.MAX_COPY_ATTEMPTS else "pending")
-        assert [(event.event_name, event.attributes) for event in emitted_events] == [
-            (
-                "upload_delivery_held",
-                {"agent_id": agent, "batch_id": batch_id, "reason": "OSError"},
-            )
-        ]
-    # Held means held: no later round copies it again.
-    with client.app.state.db_pool.connection() as conn:
-        conn.execute("UPDATE upload_delivery_batches SET next_attempt_at=now()")
-    await recovery.round()
-    assert len(calls) == source.MAX_COPY_ATTEMPTS
-    await recovery.close()
+    unit = source.current_unit(local_machine=machine_identity.name())
+    # meiva:note
+    # The receiving runner never answers the receive op.
+    with runner_ops(
+        db_conn, unit.machine, {"upload-receive-v1": refused(404, "receiver unreachable")}
+    ) as runner:
+        register_second_home(db_conn, unit, url=runner.url)
+        batch_id = post(client, agent).json()["batch_id"]
+        recovery = recovery_for(client, machine_identity)
+        # Bound here, not as a fixture: the gateway of `uploaded_agent` binds its own pipeline first.
+        with capturing_events() as emitted_events:
+            for attempt in range(1, source.MAX_COPY_ATTEMPTS + 1):
+                with client.app.state.db_pool.connection() as conn:
+                    conn.execute("UPDATE upload_delivery_batches SET next_attempt_at=now()")
+                await recovery.round()
+                status = source.status(client.app.state.db_pool, agent, batch_id)
+                assert status.attempts == attempt
+                assert status.state == (
+                    "hold" if attempt == source.MAX_COPY_ATTEMPTS else "pending"
+                )
+            assert [(event.event_name, event.attributes) for event in emitted_events] == [
+                (
+                    "upload_delivery_held",
+                    {"agent_id": agent, "batch_id": batch_id, "reason": "ClusterOpUnreachable"},
+                )
+            ]
+        # Held means held: no later round copies it again.
+        with client.app.state.db_pool.connection() as conn:
+            conn.execute("UPDATE upload_delivery_batches SET next_attempt_at=now()")
+        await recovery.round()
+        await recovery.close()
+    assert len(runner.calls_of("upload-receive-v1")) == source.MAX_COPY_ATTEMPTS
 
 
 @pytest.mark.asyncio
 async def test_a_stopped_recovery_skips_new_copy_and_db_round(
     uploaded_agent: tuple[GatewayTestClient, int],
-    monkeypatch: pytest.MonkeyPatch,
+    db_conn: psycopg.Connection[Any],
     *,
     machine_identity: MachineIdentity,
 ):
@@ -277,23 +316,17 @@ async def test_a_stopped_recovery_skips_new_copy_and_db_round(
         post(client, agent).json()["batch_id"],
         local_machine=machine_identity.name(),
     )
-
-    def forbidden(*_args: Any):
-        raise AssertionError("a stopped recovery must not inspect/accept pending work")
-
-    monkeypatch.setattr(source, "validate_pending", forbidden)
-    recovery = worker.UploadRecovery(
-        client.app.state.db_pool,
-        client.app.state.db,
-        client.app.state.bus,
-        machine=machine_identity,
-        claim_seconds=_CLAIM_SECONDS,
-    )
+    recovery = recovery_for(client, machine_identity)
     recovery.stopped.set()
     await recovery.copy(request)
+    # meiva:note
+    # A running worker would copy and accept this batch; a stopped one leaves it pending.
     assert (
         source.status(client.app.state.db_pool, agent, request.manifest.batch_id).state == "pending"
     )
+    assert db_conn.execute(
+        "SELECT count(*) FROM inbound_messages WHERE agent_id=%s", (agent,)
+    ).fetchone() == (0,)
     await recovery.close()
 
 
@@ -302,13 +335,7 @@ async def test_cancelled_shutdown_wait_still_drains_actual_native_writer(
     uploaded_agent: tuple[GatewayTestClient, int], *, machine_identity: MachineIdentity
 ):
     client, _agent = uploaded_agent
-    recovery = worker.UploadRecovery(
-        client.app.state.db_pool,
-        client.app.state.db,
-        client.app.state.bus,
-        machine=machine_identity,
-        claim_seconds=_CLAIM_SECONDS,
-    )
+    recovery = recovery_for(client, machine_identity)
     entered, finish = threading.Event(), threading.Event()
 
     def native_writer():
@@ -343,12 +370,12 @@ def test_actual_gateway_lifespan_recovers_one_chat_without_ops_process(
 ):
     import time
 
-    from base.config import settings
     from gateway.tests.events.test_notices_endpoint import seed_agent
     from gateway.tests.upload_delivery.test_upload_delivery_recovery import SECRET
 
+    # meiva:note
+    # needs base/ops: the native upload code reads `Path.home()` itself.
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
-    monkeypatch.setattr(settings.data_plane, "cluster_secret", SECRET)
     unit = source.current_unit(local_machine=machine_identity.name())
     agent = seed_agent(db_conn)
     db_conn.execute(
@@ -363,9 +390,8 @@ def test_actual_gateway_lifespan_recovers_one_chat_without_ops_process(
     )
     db_conn.execute("UPDATE agents_meta SET machine=%s WHERE id=%s", (unit.machine, agent))
     db_conn.commit()
-    with gateway_test_client(
-        headers={"Authorization": f"Bearer {SECRET}"}, machine=machine_identity
-    ) as client:
+    config = gateway_test_config(upload_home=tmp_path, cluster_secret=SECRET)
+    with gateway_test_client(machine=machine_identity, config=config) as client:
         response = post(client, agent)
         assert response.status_code == 202
         deadline = time.monotonic() + 10
