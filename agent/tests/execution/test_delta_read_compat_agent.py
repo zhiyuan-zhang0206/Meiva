@@ -1,10 +1,9 @@
 """Delta-written threads read back through the agent's message reducer: reconstruction, resume, self-heal, snapshot tips, rebuilds, forks and startup reconcile."""
 
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from typing import Annotated, Any, TypedDict, cast
 
 import psycopg
-import pytest
 from langchain_core.messages import (
     AIMessage,
     AnyMessage,
@@ -14,6 +13,7 @@ from langchain_core.messages import (
 )
 from langchain_core.runnables import RunnableConfig
 from langgraph.channels.delta import DeltaChannel
+from langgraph.checkpoint.base import DeltaChannelHistory
 from langgraph.checkpoint.serde.types import _DeltaSnapshot
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import REMOVE_ALL_MESSAGES, add_messages
@@ -186,37 +186,41 @@ async def test_delta_read_span_has_phase_fields(
     assert "decode_ms" not in span and "reset_decode_ms" not in span
 
 
+class _CountingSaver(AsyncPostgresSaver):
+    def __init__(self, pool: AsyncConnectionPool) -> None:
+        super().__init__(conn=cast(AsyncConnectionPool[psycopg.AsyncConnection[DictRow]], pool))
+        self.walks = 0
+
+    async def aget_delta_channel_history(
+        self, *, config: RunnableConfig, channels: Sequence[str]
+    ) -> Mapping[str, DeltaChannelHistory]:
+        self.walks += 1
+        return await super().aget_delta_channel_history(config=config, channels=channels)
+
+
 async def test_recovery_cache_invalidates_on_graph_state_update(
-    aops_pool: AsyncConnectionPool, monkeypatch: pytest.MonkeyPatch
+    aops_pool: AsyncConnectionPool,
 ) -> None:
-    saver = _saver(aops_pool)
+    saver = _CountingSaver(aops_pool)
     graph = _delta_app(saver)
     config = _config("drc-state-write")
     await graph.ainvoke({"messages": [], "n": 0, "target": 2}, config)  # pyright: ignore[reportUnknownMemberType]
     previous = await AsyncPostgresSaver.aget_tuple(saver, config)
     assert previous is not None
     wrap_saver_reads_with_delta_reconstruction(saver)
-    history = saver.aget_delta_channel_history
-    walks = 0
-
-    async def counted(*, config: RunnableConfig, channels: Sequence[str]) -> Any:
-        nonlocal walks
-        walks += 1
-        return await history(config=config, channels=channels)
-
-    monkeypatch.setattr(saver, "aget_delta_channel_history", counted)
+    saver.walks = 0
     with recovery_reconstruction_scope(saver, "drc-state-write") as scope:
         assert scope is not None
         reader = scope.reader()
         await reader.aget_tuple(previous.config)
         await reader.aget_tuple(previous.config)
-        assert walks == 1
+        assert saver.walks == 1
         scoped_graph = graph.copy({"checkpointer": reader})
         await scoped_graph.aupdate_state(
             config, {"messages": [HumanMessage(id="new", content="new")]}
         )  # pyright: ignore[reportUnknownMemberType]
         await reader.aget_tuple(previous.config)
-        assert walks == 2
+        assert saver.walks == 2
 
 
 async def test_snapshot_tip_unwraps_and_mid_chain_walks(
