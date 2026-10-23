@@ -55,7 +55,7 @@ from base.clock import Clock
 from base.config import settings
 from base.log import logger
 from base.packages.plugins.extensions import PluginContributions, SdkNamespace, SdkWrap
-from base.packages.skills.project_roots import project_skill_roots
+from base.packages.skills import project_skill_roots
 from meiva.sdk_surface import process_context
 from meiva.sdk_surface.agent_identity import require_agent_id
 from meiva.sdk_surface.validation import coerce_str

@@ -6,11 +6,13 @@ import re
 from pathlib import Path
 
 from meizel.contracts.analysis import Analysis, analyze
+from meizel.contracts.debt_edit import prune as prune_debt
+from meizel.contracts.declare import declare
 from meizel.contracts.manifest import manifest_path
 from meizel.contracts.manifest_text import ENTRY, HEADER, entry_end, items, unquote
 from meizel.graph.model import MeizelError
 
-__all__ = ["prune", "remove_entries"]
+__all__ = ["prune", "remove_entries", "sync_manifests"]
 
 
 def _rewrite_entry(lines: list[str], start: int, end: int, drop: set[str]) -> list[str]:
@@ -128,3 +130,15 @@ def prune(root: Path, jobs: int | None = None) -> list[str]:
             return changes
         changes.extend(found)
         _apply(root, removals)
+
+
+def sync_manifests(
+    root: Path, targets: list[str] | None, jobs: int | None, *, do_declare: bool
+) -> tuple[list[str], list[str]]:
+    lines = list(prune(root, jobs))
+    if not do_declare:
+        return lines, []
+    lines.extend(prune_debt(root, jobs))
+    declared, left = declare(root, targets, jobs)
+    lines.extend(declared)
+    return lines, left

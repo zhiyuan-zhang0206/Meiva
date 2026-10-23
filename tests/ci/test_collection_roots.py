@@ -29,7 +29,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from meizel.lint_common import pytest_test_hosts
+from meizel.roles import pytest_test_hosts
 from scripts.ci import test_selector
 from scripts.codegen import gen_pyright_test_environments as gen
 

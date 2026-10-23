@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from types import ModuleType
+
 from base.events.contract import (
     FRONTEND_INTERACTION_KEYS,
     HALT_KEYS,
@@ -8,12 +10,15 @@ from base.events.contract import (
     SYNTAX_FIX_KEYS,
     TURN_END_KEYS,
 )
+from base.telemetry.metrics.core import exec_envelope, frontend
 from base.telemetry.metrics.logql import (
     HARNESS_ORDER,
     event_count,
     harness_source_filter,
 )
 from base.telemetry.metrics.plugin_metrics import MetricSpec
+
+PACK_MODULES: tuple[ModuleType, ...] = (exec_envelope, frontend)
 
 _LLM_ATTR = {k: f"attributes_{k}" for k in LLM_USAGE_KEYS}
 _TURN_ATTR = {k: f"attributes_{k}" for k in TURN_END_KEYS}

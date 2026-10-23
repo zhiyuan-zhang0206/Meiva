@@ -9,10 +9,10 @@ from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from meizel.contracts.debt import file_key
-from meizel.contracts.ledger import reconcile
+from meizel.contracts.debt import file_key, set_debt
+from meizel.contracts.ledger import debts_in, reconcile
 from meizel.contracts.manifest import Manifest, load_manifests, manifest_path
-from meizel.contracts.policy import Policy, load_policy
+from meizel.contracts.policy import POLICY, Policy, load_policy, render_policy
 from meizel.contracts.policy import check as check_policy
 from meizel.contracts.rule import (
     Projection,
@@ -25,10 +25,9 @@ from meizel.contracts.rule import (
 from meizel.graph.model import Code, DebtKey, Diagnostic, Fact, FactKind
 from meizel.graph.universe import Universe, load_universe
 from meizel.language.fixtures import FixtureIndex, fixture_facts
-from meizel.language.mounts import mount_facts
-from meizel.language.scan import EXTERNAL_FORMS, FileScan, scan_file
+from meizel.language.scan import EXTERNAL_FORMS, FileScan, mount_facts, scan_file
 
-__all__ = ["Analysis", "analyze", "diagnose", "scan_all"]
+__all__ = ["POLICY", "Analysis", "analyze", "diagnose", "render_policy", "scan_all", "set_debt"]
 
 _PARALLEL_FROM = 200
 _WORKER: dict[str, Universe] = {}
@@ -58,6 +57,20 @@ class Analysis:
     stale_loads: list[tuple[str, str]] = field(default_factory=list[tuple[str, str]])
     stale_externals: list[tuple[str, str]] = field(default_factory=list[tuple[str, str]])
     stale_exports: list[tuple[str, str]] = field(default_factory=list[tuple[str, str]])
+
+    def ok_line(self) -> str:
+        debts = debts_in(self.manifests)
+        scope = "" if self.changed is None else f"{len(self.changed)} changed paths, "
+        carried = (
+            ""
+            if not debts
+            else f"; {debts} recorded debts remain in "
+            f"{sum(1 for m in self.manifests.values() if m.debt)} strict-to-be directories"
+        )
+        return (
+            f"meizel: ok ({scope}{len(self.facts)} fact edges, "
+            f"{len(self.manifests)} manifests{carried})"
+        )
 
 
 def _init_worker(universe: Universe) -> None:

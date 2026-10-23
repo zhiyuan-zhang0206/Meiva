@@ -112,7 +112,7 @@ def main(argv: list[str] | None = None, *, repo_root: Path = _REPO_ROOT) -> int:
             continue
         for lineno, literal, content in _scan_file(rel, repo_root):
             total += 1
-            print(lint_common.format_violation(rel, lineno, literal, content))
+            print(f"{rel}:{lineno}: {literal} | {content}")
 
     if total:
         print(

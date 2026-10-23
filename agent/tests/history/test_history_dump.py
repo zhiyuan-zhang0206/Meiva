@@ -52,7 +52,7 @@ from base.clock import Clock
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import settings
-from base.config.domains.agent.compaction import AgentCompactionSettings
+from base.config.domains.agent.settings import AgentCompactionSettings
 from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate

@@ -9,7 +9,28 @@ from dataclasses import dataclass, field
 from meizel.graph.model import Fact, FactKind
 from meizel.graph.universe import Universe, parent_of
 
-__all__ = ["FixtureRequest", "FixtureState", "fixture_facts", "is_test_file", "record_function"]
+__all__ = [
+    "DEFAULT_IMPURE_FIXTURES",
+    "FixtureRequest",
+    "FixtureState",
+    "fixture_facts",
+    "is_test_file",
+    "record_function",
+]
+
+DEFAULT_IMPURE_FIXTURES = frozenset(
+    {
+        "db_conn",
+        "database_gate",
+        "database",
+        "operator_database",
+        "aops_pool",
+        "pool",
+        "event_bus",
+        "redis_url",
+        "monkeypatch",
+    }
+)
 
 _FIXTURE_DECORATORS = frozenset({"pytest.fixture", "pytest_asyncio.fixture"})
 _PARAMETRIZE = "pytest.mark.parametrize"

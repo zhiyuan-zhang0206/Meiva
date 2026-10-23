@@ -18,7 +18,14 @@ from typing import cast
 from meizel.graph.model import MeizelError
 from meizel.graph.universe import MANIFEST
 
-__all__ = ["ROLE_NAMES", "all_packages", "check_table", "packages", "roles"]
+__all__ = [
+    "ROLE_NAMES",
+    "all_packages",
+    "check_table",
+    "packages",
+    "pytest_test_hosts",
+    "roles",
+]
 
 # The closed set of roles; an unknown role is an error, never a new category.
 ROLE_NAMES = ("application", "templates", "examples", "tooling", "tests", "frontend")
@@ -81,3 +88,43 @@ def packages(*role_names: str, root: Path | None = None) -> tuple[str, ...]:
 def all_packages(root: Path | None = None) -> tuple[str, ...]:
     """Every declared top-level directory, by role order."""
     return packages(*ROLE_NAMES, root=root)
+
+
+# meiva:note
+# Test hosts owned by pytest's required `testpaths`, without a second registry.
+# Supported roots are `tests` and `<host>/**/tests`; reject other patterns instead
+# of silently giving pytest, the CI selector, and generated type checking different scopes.
+def pytest_test_hosts(pyproject_text: str) -> tuple[str, ...]:
+    try:
+        paths = cast(
+            object, tomllib.loads(pyproject_text)["tool"]["pytest"]["ini_options"]["testpaths"]
+        )
+    except KeyError as error:
+        raise ValueError(
+            "pyproject.toml must configure tool.pytest.ini_options.testpaths"
+        ) from error
+    if not isinstance(paths, list) or not paths:
+        raise ValueError("pytest testpaths must be a nonempty list of directory patterns")
+    hosts: list[str] = []
+    for pattern in cast(list[object], paths):
+        host = _pytest_test_host(pattern)
+        if host in hosts:
+            raise ValueError(f"duplicate pytest test host: {host!r}")
+        hosts.append(host)
+    return tuple(hosts)
+
+
+def _pytest_test_host(pattern: object) -> str:
+    if not isinstance(pattern, str):
+        raise TypeError("pytest testpaths entries must be strings")
+    if pattern == "tests":
+        return pattern
+    host, separator, tail = pattern.partition("/")
+    if (
+        not separator
+        or tail != "**/tests"
+        or host in ("", ".", "..", "tests")
+        or any(char in host for char in "*?[]\\")
+    ):
+        raise ValueError(f"unsupported pytest testpaths pattern: {pattern!r}")
+    return host

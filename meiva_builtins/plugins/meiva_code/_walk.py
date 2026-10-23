@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from base.packages.skills.project_roots import git_root
+from base.packages.skills import git_root
 
 # Context files surfaced to the agent, in per-directory scan order. AGENTS.md
 # (Meiva's / the cross-tool standard) before CLAUDE.md (Claude Code's native).

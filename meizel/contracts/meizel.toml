@@ -1,8 +1,9 @@
-exports = ["analysis.py", "cli.py", "debt.py", "enumerations.py", "generated.py", "policy.py", "sync.py"]
+exports = ["analysis.py", "cli.py", "enumerations.py", "sync.py"]
 
 [purity]
 "." = "strict-to-be"
 "analysis.py" = "strict"
+"cli.py" = "strict"
 "debt.py" = "strict"
 "debt_sites.py" = "strict"
 "debt_symbol.py" = "strict"
@@ -14,8 +15,8 @@ exports = ["analysis.py", "cli.py", "debt.py", "enumerations.py", "generated.py"
 [uses]
 "analysis.py" = ["debt.py", "ledger.py", "manifest.py", "policy.py", "rule.py"]
 "bootstrap.py" = ["analysis.py", "debt.py", "manifest.py", "rule.py"]
-"cli.py" = ["analysis.py", "bootstrap.py", "debt_carry.py", "debt_edit.py", "debt_report.py", "debt_rules.py", "debt_sites.py", "declare.py", "enumerations.py", "explain.py", "generated.py", "ledger.py", "policy.py", "sync.py"]
-"debt_carry.py" = ["debt.py", "debt_edit.py", "debt_report.py", "debt_symbol.py", "manifest.py", "rule.py"]
+"cli.py" = ["analysis.py", "bootstrap.py", "debt_carry.py", "enumerations.py", "explain.py", "policy.py", "sync.py"]
+"debt_carry.py" = ["debt.py", "debt_edit.py", "debt_report.py", "debt_rules.py", "debt_sites.py", "debt_symbol.py", "manifest.py", "rule.py"]
 "debt_rules.py" = ["analysis.py", "debt.py", "debt_edit.py", "debt_report.py", "declare.py", "manifest.py", "manifest_text.py", "sync.py"]
 "debt_symbol.py" = ["analysis.py", "manifest.py"]
 "debt_edit.py" = ["analysis.py", "debt.py", "ledger.py", "manifest.py"]
@@ -28,7 +29,7 @@ exports = ["analysis.py", "cli.py", "debt.py", "enumerations.py", "generated.py"
 "manifest.py" = ["debt.py"]
 "policy.py" = ["manifest.py"]
 "rule.py" = ["debt.py", "manifest.py", "policy.py"]
-"sync.py" = ["analysis.py", "manifest.py", "manifest_text.py"]
+"sync.py" = ["analysis.py", "debt_edit.py", "declare.py", "manifest.py", "manifest_text.py"]
 
 [debt.impure-call]
 "bootstrap.py#Path.mkdir" = 2
@@ -67,9 +68,3 @@ exports = ["analysis.py", "cli.py", "debt.py", "enumerations.py", "generated.py"
 "sync.py#Path.read_text" = 1
 "sync.py#Path.unlink" = 1
 "sync.py#Path.write_text" = 1
-
-[debt.wide-exports]
-"meizel.toml#exports" = 1
-
-[debt.wide-fanout]
-"cli.py#uses" = 1

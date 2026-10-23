@@ -4,7 +4,8 @@ from pathlib import Path
 
 import pytest
 
-from meizel.contracts import enumerations, generated
+from meizel.contracts import enumerations
+from meizel.contracts import enumerations as generated
 from meizel.contracts.cli import main
 from meizel.graph.model import MeizelError
 from meizel.tests.synthetic import RepoFactory

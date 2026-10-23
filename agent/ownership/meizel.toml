@@ -1,4 +1,4 @@
-exports = ["corpse_reap.py", "hosted.py", "hosted_cleanup.py", "inbound.py", "tests"]
+exports = ["corpse_reap.py", "hosted.py", "inbound.py", "tests"]
 
 [uses]
 "corpse_reap.py" = ["hosted_cleanup.py"]
@@ -46,6 +46,3 @@ exports = ["corpse_reap.py", "hosted.py", "hosted_cleanup.py", "inbound.py", "te
 "hosted_cleanup.py#base/events/live/announce.py" = 1
 "hosted_cleanup.py#base/events/live/bus.py" = 1
 "hosted_cleanup.py#base/log/__init__.py" = 1
-
-[debt.wide-exports]
-"meizel.toml#exports" = 1

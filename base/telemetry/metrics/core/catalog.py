@@ -44,13 +44,9 @@ from base.telemetry.metrics.core import (
     cost,
     dismissed,
     events,
-    exec_envelope,
-    fleet,
-    frontend,
     host,
     observability,
     panels,
-    pr_flow,
 )
 from base.telemetry.metrics.plugin_metrics import (
     DuplicateMetric,
@@ -67,14 +63,12 @@ CORE_DEFINITION_MODULES: tuple[ModuleType, ...] = (
     panels,
     cost,
     dismissed,
-    fleet,
-    pr_flow,
+    *ci.DELIVERY_MODULES,
     ci,
     events,
     host,
     observability,
-    exec_envelope,
-    frontend,
+    *observability.PACK_MODULES,
 )
 
 

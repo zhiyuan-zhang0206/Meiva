@@ -4,6 +4,9 @@ import ast
 from pathlib import Path
 
 from meizel import allowances, lint_common
+from meizel.language.type_checking import violations as type_checking_violations
+
+__all__ = ["FIX", "SECTION", "Sites", "measure", "type_checking_violations"]
 
 _POLICY = allowances.load(Path(__file__).resolve().parents[2])
 SECTION = "path_imports"

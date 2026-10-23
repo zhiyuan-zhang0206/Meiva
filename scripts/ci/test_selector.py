@@ -20,8 +20,7 @@ if str(_SCRIPT_REPOSITORY_ROOT) not in sys.path:
 from base.deploy.git.repo_change import (  # noqa: E402 - direct script entry needs repo root first
     is_doc_path,
 )
-from meizel.lint_common import pytest_test_hosts  # noqa: E402 - standalone script
-from meizel.roles import all_packages  # noqa: E402 - standalone script
+from meizel.roles import all_packages, pytest_test_hosts  # noqa: E402 - standalone script
 from scripts.ci.test_impact import (  # noqa: E402 - standalone script
     Impact,
     base_checkout,

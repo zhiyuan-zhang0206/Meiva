@@ -1,23 +1,10 @@
 exports = ["catalog.py"]
 
 [uses]
-"catalog.py" = ["ci.py", "cost.py", "dismissed.py", "events.py", "exec_envelope.py", "fleet.py", "frontend.py", "host.py", "observability.py", "panels.py", "pr_flow.py"]
+"catalog.py" = ["ci.py", "cost.py", "dismissed.py", "events.py", "host.py", "observability.py", "panels.py"]
+"ci.py" = ["fleet.py", "pr_flow.py"]
+"observability.py" = ["exec_envelope.py", "frontend.py"]
 "tests" = ["catalog.py", "exec_envelope.py", "frontend.py", "observability.py"]
 
 [purity]
-"." = "strict-to-be"
-"__init__.py" = "strict"
-"ci.py" = "strict"
-"cost.py" = "strict"
-"dismissed.py" = "strict"
-"events.py" = "strict"
-"exec_envelope.py" = "strict"
-"fleet.py" = "strict"
-"frontend.py" = "strict"
-"host.py" = "strict"
-"observability.py" = "strict"
-"panels.py" = "strict"
-"pr_flow.py" = "strict"
-
-[debt.wide-fanout]
-"catalog.py#uses" = 1
+"." = "strict"

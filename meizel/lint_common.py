@@ -3,22 +3,16 @@
 from __future__ import annotations
 
 import os
-import re
 import subprocess
-import tomllib
 from collections.abc import Iterable
 from pathlib import Path
-from typing import cast
 
-from meizel.roles import packages
+from meizel import is_repo_test_file, is_test_path, split_only
+from meizel.roles import packages, pytest_test_hosts
 
 __all__ = [
     "FRAMEWORK_DIRS",
-    "LINT_TOOLING",
-    "ONLY_FLAG",
-    "TEST_DIR",
     "changed_scope",
-    "format_violation",
     "is_repo_test_file",
     "is_test_path",
     "pytest_test_hosts",
@@ -36,66 +30,6 @@ __all__ = [
 FRAMEWORK_DIRS = packages("application")
 
 
-# A test lives in a `tests/` directory: the top-level `tests/` (e2e, contract
-# and shared-support tests) or a package's own `<pkg>/**/tests/`. Every lint that
-# exempts tests, or scans them on purpose, decides it with this one pattern.
-TEST_DIR = re.compile(r"(^|/)tests?/")
-
-
-def pytest_test_hosts(pyproject_text: str) -> tuple[str, ...]:
-    """Test hosts owned by pytest's required `testpaths`, without a second registry.
-
-    Supported roots are `tests` and `<host>/**/tests`. Reject other patterns instead
-    of silently giving pytest, the CI selector and generated type checking different scopes.
-    """
-    try:
-        paths = cast(
-            object, tomllib.loads(pyproject_text)["tool"]["pytest"]["ini_options"]["testpaths"]
-        )
-    except KeyError as error:
-        raise ValueError(
-            "pyproject.toml must configure tool.pytest.ini_options.testpaths"
-        ) from error
-    if not isinstance(paths, list) or not paths:
-        raise ValueError("pytest testpaths must be a nonempty list of directory patterns")
-    hosts: list[str] = []
-    for pattern in cast(list[object], paths):
-        host = _pytest_test_host(pattern)
-        if host in hosts:
-            raise ValueError(f"duplicate pytest test host: {host!r}")
-        hosts.append(host)
-    return tuple(hosts)
-
-
-def _pytest_test_host(pattern: object) -> str:
-    if not isinstance(pattern, str):
-        raise TypeError("pytest testpaths entries must be strings")
-    if pattern == "tests":
-        return pattern
-    host, separator, tail = pattern.partition("/")
-    if (
-        not separator
-        or tail != "**/tests"
-        or host in ("", ".", "..", "tests")
-        or any(char in host for char in "*?[]\\")
-    ):
-        raise ValueError(f"unsupported pytest testpaths pattern: {pattern!r}")
-    return host
-
-
-def is_test_path(rel_path: str) -> bool:
-    """Whether a repo-relative posix path sits inside any `tests/` directory."""
-    return TEST_DIR.search(rel_path) is not None
-
-
-def is_repo_test_file(path: Path, repo_root: Path) -> bool:
-    """`is_test_path` for an absolute path; a path outside the repo is never a test."""
-    try:
-        return is_test_path(path.relative_to(repo_root).as_posix())
-    except ValueError:
-        return False
-
-
 def scan_roots(repo_root: Path, dirs: Iterable[str]) -> list[Path]:
     """Resolve a lint's configured scan dirs; a missing one is a configuration error.
 
@@ -111,18 +45,7 @@ def scan_roots(repo_root: Path, dirs: Iterable[str]) -> list[Path]:
     return roots
 
 
-# ── Changed-files mode ───────────────────────────────────────────────────────
-# A commit hook hands a lint the files that changed. `--only FILE...` judges
-# those files under the lint's own default scope and exemptions, so a changed
-# file gets exactly the verdict a full scan would give it, at a cost that grows
-# with the change instead of with the repository. Whatever can move the verdict
-# of a file that did NOT change widens the run to the full scan: the lint
-# tooling itself (code, shared helpers, frozen baselines) and the lint's own
-# `inputs` (a registry or enum its rule reads). CI's `--all-files` run is the
-# full scan of every lint.
-ONLY_FLAG = "--only"
-
-LINT_TOOLING = (
+_LINT_TOOLING = (
     "meizel/",
     "meizel.policy.toml",
     "scripts/lint/",
@@ -130,18 +53,6 @@ LINT_TOOLING = (
     "scripts/content_lint/",
     "scripts/lint/pool_keepalives.py",
 )
-
-
-def split_only(argv: list[str]) -> tuple[list[str], list[str] | None]:
-    """Split `--only FILE...` (it consumes the rest of argv) off a lint's arguments.
-
-    Returns the arguments before the flag and the changed files, or None when the
-    flag is absent. An empty list is a real answer: nothing changed, nothing to judge.
-    """
-    if ONLY_FLAG not in argv:
-        return argv, None
-    at = argv.index(ONLY_FLAG)
-    return argv[:at], argv[at + 1 :]
 
 
 def changed_scope(
@@ -159,8 +70,8 @@ def changed_scope(
     missing = [a for a in only if not os.path.lexists(repo_root / a)]
     if missing:
         raise SystemExit(f"error: target path(s) not found: {', '.join(missing)}")
-    changed = frozenset(rel_or_abs((repo_root / a).absolute(), repo_root) for a in only)
-    widening = (*LINT_TOOLING, *inputs)
+    changed = frozenset(_rel_or_abs((repo_root / a).absolute(), repo_root) for a in only)
+    widening = (*_LINT_TOOLING, *inputs)
     if any(path.startswith(widening) and not is_test_path(path) for path in changed):
         return None  # a lint's own tests are not its tooling
     return changed
@@ -170,7 +81,7 @@ def restrict(paths: Iterable[Path], scope: frozenset[str] | None, repo_root: Pat
     """The enumerated files `scope` judges: all of them, or only the changed ones."""
     if scope is None:
         return list(paths)
-    return [path for path in paths if rel_or_abs(path, repo_root) in scope]
+    return [path for path in paths if _rel_or_abs(path, repo_root) in scope]
 
 
 def tracked_files(repo_root: Path) -> list[str]:
@@ -186,8 +97,7 @@ def tracked_files(repo_root: Path) -> list[str]:
     return [path for path in out.stdout.splitlines() if path]
 
 
-def rel_or_abs(path: Path, repo_root: Path) -> str:
-    """Use a repo-relative path, or an absolute path outside the repo."""
+def _rel_or_abs(path: Path, repo_root: Path) -> str:
     try:
         return path.relative_to(repo_root).as_posix()
     except ValueError:
@@ -205,9 +115,9 @@ def _resolved_target(argument: str, repo_root: Path) -> Path:
 
 def _files_in_target(target: Path, repo_root: Path) -> list[str]:
     if target.is_file():
-        return [rel_or_abs(target, repo_root)]
+        return [_rel_or_abs(target, repo_root)]
     if target.is_dir():
-        return [rel_or_abs(path, repo_root) for path in target.rglob("*") if path.is_file()]
+        return [_rel_or_abs(path, repo_root) for path in target.rglob("*") if path.is_file()]
     return []
 
 
@@ -234,8 +144,3 @@ def read_utf8_text(path: Path) -> str | None:
         return data.decode("utf-8")
     except UnicodeDecodeError:
         return None
-
-
-def format_violation(rel_path: str, lineno: int, detail: str, content: str) -> str:
-    """Format one stable file:line result; each lint supplies its own detail."""
-    return f"{rel_path}:{lineno}: {detail} | {content}"

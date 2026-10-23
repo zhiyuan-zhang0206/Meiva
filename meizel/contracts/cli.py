@@ -7,28 +7,14 @@ import sys
 from collections import Counter
 from pathlib import Path
 
-from meizel import roles as role_api
-from meizel.contracts import enumerations, generated
+from meizel.contracts import enumerations
 from meizel.contracts.analysis import Analysis, analyze
 from meizel.contracts.bootstrap import bootstrap
-from meizel.contracts.debt_carry import carry as carry_debt
-from meizel.contracts.debt_edit import prune as prune_debt
-from meizel.contracts.debt_edit import record
-from meizel.contracts.debt_report import (
-    by_target,
-    changed_under,
-    diff,
-    summarize,
-    totals_at,
-)
-from meizel.contracts.debt_rules import purity_changed, rule_diff
-from meizel.contracts.debt_sites import format_sites, sites
-from meizel.contracts.declare import declare
+from meizel.contracts.debt_carry import run_debt
 from meizel.contracts.explain import explain
-from meizel.contracts.ledger import debts_in
 from meizel.contracts.policy import changes as policy_changes
 from meizel.contracts.policy import load_policy, policy_at
-from meizel.contracts.sync import prune
+from meizel.contracts.sync import sync_manifests
 from meizel.graph.model import Diagnostic, MeizelError
 from meizel.graph.universe import load_universe, toplevel
 
@@ -89,23 +75,8 @@ def _run_check(
     if diagnostics:
         _print_verdict(diagnostics, limit)
         return 1
-    print(_ok_line(analysis))
+    print(analysis.ok_line())
     return 0
-
-
-def _ok_line(analysis: Analysis) -> str:
-    debts = debts_in(analysis.manifests)
-    scope = "" if analysis.changed is None else f"{len(analysis.changed)} changed paths, "
-    carried = (
-        ""
-        if not debts
-        else f"; {debts} recorded debts remain in "
-        f"{sum(1 for m in analysis.manifests.values() if m.debt)} strict-to-be directories"
-    )
-    return (
-        f"meizel: ok ({scope}{len(analysis.facts)} fact edges, "
-        f"{len(analysis.manifests)} manifests{carried})"
-    )
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -232,124 +203,23 @@ def _add_debt_parser(commands: argparse._SubParsersAction[argparse.ArgumentParse
     )
 
 
-def _run_diff(root: Path, ref: str, on_growth: str, args: argparse.Namespace) -> int:
-    rules_changed = (
-        bool(args.waive_if_changed) and bool(changed_under(root, ref, args.waive_if_changed))
-    ) or purity_changed(root, ref)
-    if rules_changed:
-        result = rule_diff(root, ref, totals_at(root, ref), args.jobs)
-        print("\n".join(result.lines()))
-        print("\n".join(result.explanation()))
-        grew = result.content_grew
-    else:
-        lines, grew = diff(root, ref)
-        print("\n".join(lines))
-    if args.by_target:
-        print()
-        print("\n".join(by_target(root, ref, args.target_prefix, args.depth)))
-        print()
-    if not grew:
-        if not rules_changed:
-            print(f"meizel: no growth against {ref}")
-        return 0
-    warning = "" if on_growth == "fail" else " warning:"
-    print(f"meizel:{warning} recorded debt grew against {ref}", file=sys.stderr)
-    return 1 if on_growth == "fail" else 0
-
-
-def _run_record(root: Path, targets: list[str], jobs: int | None) -> int:
-    written, created, unrecordable = record(root, targets, jobs)
-    for path in written:
-        print(f"meizel: wrote {path}")
-    if created:
-        print(
-            f"meizel: {len(created)} manifests created; stage them with git add, "
-            "because check reads tracked files only"
-        )
-    for diagnostic in unrecordable:
-        print(diagnostic.render())
-    if unrecordable:
-        codes = ", ".join(sorted({d.code.value for d in unrecordable}))
-        print(
-            f"meizel: {len(unrecordable)} violations cannot be recorded [{codes}]", file=sys.stderr
-        )
-        return 1
-    return 0
-
-
-def _run_debt(root: Path, base: Path, args: argparse.Namespace, jobs: int | None) -> int:
-    mode = args.debt_mode
-    if mode is None:
-        print(summarize(root, as_json=args.json))
-        return 0
-    if args.json:
-        raise MeizelError("--json belongs to the summary: `meizel debt --json`")
-    if mode == "prune":
-        for line in prune_debt(root, jobs):
-            print(line)
-        return 0
-    if mode == "sites":
-        universe = load_universe(root)
-        scopes = [_relative_target(root, base, p) for p in args.paths]
-        found = sites(universe, args.code, args.target_prefix, scopes, jobs)
-        print(format_sites(found, as_json=args.as_json))
-        return 0
-    if mode == "diff":
-        return _run_diff(root, args.against, args.on_growth, args)
-    if mode == "carry":
-        lines = carry_debt(root, args.base, args.rename_target, args.move_symbol)
-        for line in lines:
-            print(f"meizel: carried {line}")
-        if not lines:
-            print(
-                "meizel: nothing to carry: no renamed file, target or moved symbol has recorded debt"
-            )
-        return 0
-    return _run_record(root, [_relative_target(root, base, p) for p in args.paths], jobs)
-
-
 def _run_sync(root: Path, base: Path, args: argparse.Namespace) -> int:
     if not (args.prune or args.declare):
         raise MeizelError("sync needs --prune or --declare")
     if args.paths and not args.declare:
         raise MeizelError("paths narrow --declare only")
-    for line in prune(root, args.jobs):
+    targets = [_relative_target(root, base, p) for p in args.paths] if args.paths else None
+    lines, left = sync_manifests(root, targets, args.jobs, do_declare=bool(args.declare))
+    for line in lines:
         print(line)
-    left: list[str] = []
-    if args.declare:
-        for line in prune_debt(root, args.jobs):
-            print(line)
-        targets = [_relative_target(root, base, p) for p in args.paths] if args.paths else None
-        lines, left = declare(root, targets, args.jobs)
-        for line in lines:
-            print(line)
-        for line in left:
-            print(line)
+    for line in left:
+        print(line)
     if left:
         print(
             f"meizel: {len(left)} dependencies need a code change, not a declaration",
             file=sys.stderr,
         )
         return 1
-    return 0
-
-
-def _run_roles(root: Path, args: argparse.Namespace) -> int:
-    if args.mode == "list":
-        for name in role_api.packages(*args.role_names, root=root):
-            print(name)
-        return 0
-    if args.mode == "write":
-        for path in generated.write(root):
-            print(f"meizel: regenerated {path}")
-        return 0
-    problems = [*generated.stale(root), *enumerations.violations(root)]
-    for problem in problems:
-        print(problem)
-    if problems:
-        print(f"meizel: {len(problems)} role problems", file=sys.stderr)
-        return 1
-    print("meizel: roles ok")
     return 0
 
 
@@ -361,7 +231,8 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "check":
             return _run_check(root, base, args.paths, args.limit, args.jobs, args.changed)
         if args.command == "debt":
-            return _run_debt(root, base, args, args.jobs)
+            targets = [_relative_target(root, base, p) for p in getattr(args, "paths", ())]
+            return run_debt(root, targets, args, args.jobs)
         if args.command == "policy":
             for line in policy_changes(
                 policy_at(root, args.against), load_policy(load_universe(root))[0]
@@ -372,7 +243,7 @@ def main(argv: list[str] | None = None) -> int:
             print(explain(analyze(root, jobs=args.jobs), _relative_target(root, base, args.path)))
             return 0
         if args.command == "roles":
-            return _run_roles(root, args)
+            return enumerations.run_roles(root, args.mode, tuple(getattr(args, "role_names", ())))
         if args.command == "sync":
             return _run_sync(root, base, args)
         print(bootstrap(root, args.out, args.jobs))

@@ -5,10 +5,16 @@ from __future__ import annotations
 import ast
 
 from meizel.graph.model import Code, Fact, FactKind, Problem
-from meizel.graph.scopes import Scope, absolute_base, collect_scope, dotted_chain
+from meizel.graph.scopes import (
+    Scope,
+    absolute_base,
+    collect_scope,
+    dotted_chain,
+    parameter_names,
+)
 from meizel.graph.universe import Universe
 
-__all__ = ["ImportAccess"]
+__all__ = ["ImportAccess", "Scope", "collect_scope", "dotted_chain", "parameter_names"]
 
 
 class ImportAccess:

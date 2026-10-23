@@ -31,7 +31,7 @@ from typing import Any
 
 import pytest
 
-from meizel.lint_common import pytest_test_hosts
+from meizel.roles import pytest_test_hosts
 from scripts.codegen import gen_pyright_test_environments as gen
 from scripts.codegen.gen_pyright_test_environments import (
     CALL_SIGNATURE_RULES,

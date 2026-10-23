@@ -19,7 +19,6 @@ from meizel.language.purity_structure import (
 
 __all__ = [
     "DEFAULT_IMPURE_CALLS",
-    "DEFAULT_IMPURE_FIXTURES",
     "DEFAULT_IMPURE_IMPORTS",
     "PurityState",
     "make_state",
@@ -83,20 +82,6 @@ DEFAULT_IMPURE_CALLS = frozenset(
         "io.open",
         "uuid.uuid4",
         "uuid.uuid1",
-    }
-)
-
-DEFAULT_IMPURE_FIXTURES = frozenset(
-    {
-        "db_conn",
-        "database_gate",
-        "database",
-        "operator_database",
-        "aops_pool",
-        "pool",
-        "event_bus",
-        "redis_url",
-        "monkeypatch",
     }
 )
 

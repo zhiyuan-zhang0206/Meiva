@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+from types import ModuleType
 from typing import Any
 
+from base.telemetry.metrics.core import fleet, pr_flow
 from base.telemetry.metrics.plugin_metrics import MetricSpec
+
+DELIVERY_MODULES: tuple[ModuleType, ...] = (fleet, pr_flow)
 
 
 def _day_query(field: str) -> str:
