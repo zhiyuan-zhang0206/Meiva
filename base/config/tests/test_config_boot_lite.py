@@ -109,7 +109,9 @@ def test_exec_child_closure_stays_lite_with_real_pin_map(
         updated = _spawn(
             "-c",
             "from base.packages.plugin_config_admin import update_all_disk_images as update\n"
-            "result = update()\n"
+            "from base.packages.plugins.enable_config import discover_plugins\n"
+            "from base.paths.home import resolve_meiva_home\n"
+            "result = update(plugin_dirs=discover_plugins(), home=resolve_meiva_home())\n"
             "assert not any(entry.status == 'error' for entry in result.entries), result\n",
         )
         assert updated.returncode == 0, updated.stderr

@@ -97,3 +97,11 @@ processes, where the agent domain is absent. Framework-scope overlay tests
 attach independent configuration read owners to the delivered environment;
 only the explicitly supplied setter changes, and plugin configuration remains
 unchanged. These attachments do not rerun process environment delivery.
+
+The batch image updater receives a required discovered plugin-directory map and
+selected home. CLI roots supply actual discovery and their unit home; it does
+not discover a second set of plugins or infer a storage home during iteration.
+Each entry constructs the shared schema-owned image and calls the same required
+merge operation. Tests supply actual temporary directories and images, retaining
+schema shrink, exact values and per-plugin error isolation without changing
+process-wide paths.
