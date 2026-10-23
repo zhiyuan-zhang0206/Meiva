@@ -173,7 +173,7 @@ def iter_doc_files(root: Path) -> list[Path]:
 _OKF_SKIP_DIRS = {".venv", "node_modules", "__pycache__", ".cache"}
 
 
-def iter_okf_docs() -> list[Path]:
+def iter_okf_docs(*, repo_root: Path | None = None) -> list[Path]:
     """Every `*.meiva.okf.md` under the repo root.
 
     Hidden directories are not descended, with the one exception the OKF graph
@@ -181,9 +181,10 @@ def iter_okf_docs() -> list[Path]:
     / cache trees are pruned by name — they are not hidden, and a vendor walk
     would drown the scan in files that are not documentation.
     """
+    root = _REPO_ROOT if repo_root is None else repo_root
     files: list[Path] = []
-    for dirpath, dirnames, filenames in os.walk(_REPO_ROOT):
-        rel_root = Path(dirpath).relative_to(_REPO_ROOT)
+    for dirpath, dirnames, filenames in os.walk(root):
+        rel_root = Path(dirpath).relative_to(root)
         keep: list[str] = []
         for name in dirnames:
             rel = rel_root / name
@@ -198,26 +199,37 @@ def iter_okf_docs() -> list[Path]:
     return sorted(files)
 
 
-def _scanned_docs() -> list[tuple[Path, Path]]:
+def _scanned_docs(*, repo_root: Path | None = None) -> list[tuple[Path, Path]]:
     """`(doc, the root its display path is relative to)` for every doc in scope.
 
     A doc can be in scope twice — an OKF file under a procedural root (the built-in skills) —
     the caller dedupes by resolved path so each doc is scanned once.
     """
+    base = _REPO_ROOT if repo_root is None else repo_root
+    roots = (
+        (DOCS_CONVENTIONS, DEV_SKILLS, BUILTIN_SKILLS)
+        if repo_root is None
+        else (
+            base / "docs" / "conventions",
+            base / ".agents" / "skills",
+            base / "meiva_builtins" / "skills",
+        )
+    )
     targets: list[tuple[Path, Path]] = []
-    for root in (DOCS_CONVENTIONS, DEV_SKILLS, BUILTIN_SKILLS):
+    for root in roots:
         if not root.is_dir():
             continue
         # Display paths relative to the repo root on the real run; fall back to
         # the root's parent when a test monkeypatches it to a tmp tree.
-        display_root = _REPO_ROOT if root.is_relative_to(_REPO_ROOT) else root.parent
+        display_root = base if root.is_relative_to(base) else root.parent
         targets.extend((doc, display_root) for doc in iter_doc_files(root))
-    targets.extend((doc, _REPO_ROOT) for doc in iter_okf_docs())
+    targets.extend((doc, base) for doc in iter_okf_docs(repo_root=base))
     return targets
 
 
-def check() -> int:
+def check(*, repo_root: Path | None = None) -> int:
     """Validate every procedural-doc anchor; return 0 (clean) or 1 (violations)."""
+    root = _REPO_ROOT if repo_root is None else repo_root
     violations: list[str] = []
     checked = 0
     docs = 0
@@ -227,7 +239,7 @@ def check() -> int:
     cache: dict[Path, set[str] | str] = {}
 
     seen_docs: set[Path] = set()
-    for doc, display_root in _scanned_docs():
+    for doc, display_root in _scanned_docs(repo_root=repo_root):
         resolved = doc.resolve()
         if resolved in seen_docs:
             continue
@@ -240,7 +252,7 @@ def check() -> int:
         rel_doc = doc.relative_to(display_root)
         for lineno, path, symbol in found:
             checked += 1
-            target = _REPO_ROOT / path
+            target = root / path
             if target not in cache:
                 cache[target] = _names_or_reason(target)
             names = cache[target]

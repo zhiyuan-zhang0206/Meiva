@@ -7,7 +7,6 @@ gate wiring)."""
 from __future__ import annotations
 
 import json
-import os
 import pathlib
 import shutil
 import subprocess
@@ -298,9 +297,7 @@ def history_repo(tmp_path: pathlib.Path) -> pathlib.Path:
     return tmp_path
 
 
-def _fault_git(
-    root: pathlib.Path, monkeypatch: pytest.MonkeyPatch, command: str, fault: str
-) -> None:
+def _fault_git(root: pathlib.Path, command: str, fault: str) -> str:
     real_git = shutil.which("git")
     assert real_git is not None
     binary = root / "bin/git"
@@ -313,7 +310,7 @@ def _fault_git(
         encoding="utf-8",
     )
     binary.chmod(0o755)
-    monkeypatch.setenv("PATH", f"{binary.parent}{os.pathsep}{os.environ['PATH']}")
+    return str(binary)
 
 
 @pytest.mark.parametrize("reader", [baseline_shards.read_at, baseline_shards.read_rules_at])
@@ -343,18 +340,16 @@ def test_non_repository_is_not_historical_absence(
 )
 def test_git_read_failure_propagates(
     history_repo: pathlib.Path,
-    monkeypatch: pytest.MonkeyPatch,
-    reader: Callable[[pathlib.Path, str], object],
+    reader: Callable[..., object],
     command: str,
 ) -> None:
-    _fault_git(
+    git_bin = _fault_git(
         history_repo,
-        monkeypatch,
         command,
         "sys.stderr.write('injected Git read failure')\nsys.exit(71)",
     )
     with pytest.raises(subprocess.CalledProcessError) as error:
-        reader(history_repo, "HEAD")
+        reader(history_repo, "HEAD", git_executable=git_bin)
     assert error.value.returncode == 71
 
 
@@ -373,13 +368,13 @@ def test_git_read_failure_propagates(
     ],
 )
 def test_invalid_batch_never_becomes_a_partial_baseline(
-    history_repo: pathlib.Path, monkeypatch: pytest.MonkeyPatch, output: bytes
+    history_repo: pathlib.Path, output: bytes
 ) -> None:
-    _fault_git(
-        history_repo, monkeypatch, "cat-file", f"sys.stdout.buffer.write({output!r})\nsys.exit(0)"
+    git_bin = _fault_git(
+        history_repo, "cat-file", f"sys.stdout.buffer.write({output!r})\nsys.exit(0)"
     )
     with pytest.raises(ValueError):
-        baseline_shards.read_at(history_repo, "HEAD")
+        baseline_shards.read_at(history_repo, "HEAD", git_executable=git_bin)
 
 
 def test_valid_revision_without_rules_keeps_version_one(history_repo: pathlib.Path) -> None:

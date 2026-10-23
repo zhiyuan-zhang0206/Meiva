@@ -49,7 +49,9 @@ _CORE_ROOT = "meiva_builtins"
 _PLUGINS_ROOT = "meiva_builtins/plugins"
 
 
-def _tracked(pattern: str, rel_dir: str | None = None) -> list[Path]:
+def _tracked(
+    pattern: str, rel_dir: str | None = None, *, repo_root: Path = _REPO_ROOT
+) -> list[Path]:
     """Tracked files matching the `git ls-files` `pattern` (optionally under `rel_dir`).
 
     Tracked-only via `git ls-files`: an untracked scratch manifest must not
@@ -57,7 +59,7 @@ def _tracked(pattern: str, rel_dir: str | None = None) -> list[Path]:
     """
     try:
         result = run_bounded(  # git + fixed args, no user input
-            ["git", "-C", str(_REPO_ROOT), "ls-files", "-z", pattern],
+            ["git", "-C", str(repo_root), "ls-files", "-z", pattern],
             capture_output=True,
             text=True,
             timeout=60,
@@ -72,13 +74,13 @@ def _tracked(pattern: str, rel_dir: str | None = None) -> list[Path]:
             continue
         if rel_dir is not None and not rel.startswith(rel_dir + "/"):
             continue
-        out.append(_REPO_ROOT / rel)
+        out.append(repo_root / rel)
     return out
 
 
-def _tracked_manifests(rel_dir: str | None = None) -> list[Path]:
+def _tracked_manifests(rel_dir: str | None = None, *, repo_root: Path = _REPO_ROOT) -> list[Path]:
     """Tracked `meiva-plugin.json` files (optionally under `rel_dir`)."""
-    return _tracked("*meiva-plugin.json", rel_dir)
+    return _tracked("*meiva-plugin.json", rel_dir, repo_root=repo_root)
 
 
 def _ranges_verdict(manifest: pm.PluginManifest, host: str) -> str:
@@ -89,9 +91,9 @@ def _ranges_verdict(manifest: pm.PluginManifest, host: str) -> str:
     return "PASS"
 
 
-def _audit_one(path: Path, derived: str) -> None:
+def _audit_one(path: Path, derived: str, *, repo_root: Path = _REPO_ROOT) -> None:
     try:
-        rel = path.relative_to(_REPO_ROOT)
+        rel = path.relative_to(repo_root)
     except ValueError:  # --audit-dir: a machine-local path outside the repo
         rel = path
     try:
@@ -126,28 +128,26 @@ def _parse_audit_dirs(argv: list[str]) -> tuple[list[Path], int | None]:
     return audit_dirs, None
 
 
-def _missing_plugin_manifests() -> int:
+def _missing_plugin_manifests(*, repo_root: Path = _REPO_ROOT) -> int:
     """Report each tracked builtin plugin without a tracked manifest; the count."""
-    root = _REPO_ROOT / _PLUGINS_ROOT
-    manifests = {p.parent for p in _tracked_manifests(_PLUGINS_ROOT)}
+    root = repo_root / _PLUGINS_ROOT
+    manifests = {p.parent for p in _tracked_manifests(_PLUGINS_ROOT, repo_root=repo_root)}
     missing = 0
-    for plugin_py in _tracked("*plugin.py", _PLUGINS_ROOT):
+    for plugin_py in _tracked("*plugin.py", _PLUGINS_ROOT, repo_root=repo_root):
         plugin_dir = plugin_py.parent
         if plugin_py.name != "plugin.py" or plugin_dir.parent != root:
             continue
         if plugin_dir not in manifests:
-            print(
-                f"{plugin_dir.relative_to(_REPO_ROOT)}: builtin plugin ships no meiva-plugin.json"
-            )
+            print(f"{plugin_dir.relative_to(repo_root)}: builtin plugin ships no meiva-plugin.json")
             missing += 1
     return missing
 
 
-def _core_errors(derived: str) -> int:
+def _core_errors(derived: str, *, repo_root: Path = _REPO_ROOT) -> int:
     """Check every tracked core manifest against the derived host version; the error count."""
-    errors = _missing_plugin_manifests()
-    for path in _tracked_manifests(_CORE_ROOT):
-        rel = path.relative_to(_REPO_ROOT)
+    errors = _missing_plugin_manifests(repo_root=repo_root)
+    for path in _tracked_manifests(_CORE_ROOT, repo_root=repo_root):
+        rel = path.relative_to(repo_root)
         try:
             manifest = pm.load_manifest(path.parent)
         except pm.ManifestError as e:
@@ -157,34 +157,37 @@ def _core_errors(derived: str) -> int:
         for problem in pm.check_host_engine(manifest, derived):
             print(f"{rel}: {problem} (host version is the derived {derived})")
             errors += 1
-        for problem in pm.check_host_commit(manifest, _REPO_ROOT):
+        for problem in pm.check_host_commit(manifest, repo_root):
             print(f"{rel}: {problem}")
             errors += 1
     return errors
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: list[str] | None = None, *, repo_root: Path | None = None) -> int:
+    root = _REPO_ROOT if repo_root is None else repo_root
     argv = list(sys.argv[1:] if argv is None else argv)
     audit_dirs, failure = _parse_audit_dirs(argv)
     if failure is not None:
         return failure
 
     try:
-        derived = host_version.host_version(_REPO_ROOT)
+        derived = host_version.host_version(root)
     except host_version.HostVersionError as e:
         print(f"cannot determine the repo's derived host version: {e}", file=sys.stderr)
         return 1
 
-    errors = _core_errors(derived)
+    errors = _core_errors(derived, repo_root=root)
 
-    audit = [p for p in _tracked_manifests() if not p.is_relative_to(_REPO_ROOT / _CORE_ROOT)]
+    audit = [
+        p for p in _tracked_manifests(repo_root=root) if not p.is_relative_to(root / _CORE_ROOT)
+    ]
     for d in audit_dirs:
         if d.is_dir():
             audit.extend(sorted(d.rglob("meiva-plugin.json")))
     if audit:
         print(f"audit: {len(audit)} non-core manifest(s) against derived {derived}:")
         for path in audit:
-            _audit_one(path, derived)
+            _audit_one(path, derived, repo_root=root)
 
     if errors:
         print(f"\n{errors} core-content manifest error(s).", file=sys.stderr)

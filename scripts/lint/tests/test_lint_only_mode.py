@@ -196,7 +196,7 @@ CASES = [
         async_no_sync_blocking,
         "gateway/x.py",
         "import time\n\n\nasync def f():\n    time.sleep(1)\n",
-        patches={"stale_repo_helpers": list},
+        call=partial(async_no_sync_blocking.main, repo_blocking_helpers=frozenset()),
     ),
     Case(
         time_bomb,
@@ -330,15 +330,10 @@ def test_zombie_ignores_checks_only_the_changed_python_files(tmp_path: Path) -> 
 
     for rel in ("a.py", "notes.md", "pyproject.toml"):
         (tmp_path / rel).write_text("x\n")
-    original = zombie._REPO_ROOT
-    try:
-        zombie._REPO_ROOT = tmp_path
-        assert zombie.changed_python(None) is None
-        assert zombie.changed_python(["a.py", "notes.md"]) == ["a.py"]
-        # The tier configuration the ignores are judged against is an input.
-        assert zombie.changed_python(["a.py", "pyproject.toml"]) is None
-    finally:
-        zombie._REPO_ROOT = original
+    assert zombie.changed_python(None, repo_root=tmp_path) is None
+    assert zombie.changed_python(["a.py", "notes.md"], repo_root=tmp_path) == ["a.py"]
+    # The tier configuration the ignores are judged against is an input.
+    assert zombie.changed_python(["a.py", "pyproject.toml"], repo_root=tmp_path) is None
 
 
 def test_a_module_is_built_when_first_reached_and_only_once() -> None:

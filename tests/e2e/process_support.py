@@ -24,8 +24,12 @@ from base.deploy.lifecycle.tests.serving_entrypoint import inject_fixture_gate
 from base.sessions.pty import client as pty_client
 from base.sessions.pty.tests.process_groups import kill_group_or_prove_already_gone
 from tests.e2e._credentials import current_credentials
+from tests.e2e._ports import GATEWAY_PORT, GATEWAY_SOCKET
+from tests.e2e._truncate import truncate_with_deadlock_retry
 
 __all__ = [
+    "GATEWAY_PORT",
+    "GATEWAY_SOCKET",
     "E2EProcess",
     "ManagedServer",
     "ProcessInspection",
@@ -42,6 +46,7 @@ __all__ = [
     "require_native_listener",
     "scan_e2e_processes",
     "sweep_stale_e2e_processes",
+    "truncate_with_deadlock_retry",
     "wait_for_port",
 ]
 

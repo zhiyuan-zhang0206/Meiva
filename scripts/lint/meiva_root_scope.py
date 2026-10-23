@@ -237,22 +237,23 @@ def _docstring_lines(text: str) -> set[int]:
     return lines
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: list[str] | None = None, *, repo_root: Path | None = None) -> int:
+    root = _REPO_ROOT if repo_root is None else repo_root
     argv = argv if argv is not None else sys.argv[1:]
     if argv:
         missing = [arg for arg in argv if not Path(arg).exists()]
         if missing:
             print(f"error: target path(s) not found: {', '.join(missing)}", file=sys.stderr)
             return 1
-    targets = [Path(arg).resolve() for arg in argv] if argv else [_REPO_ROOT / _DEFAULT_TARGET]
+    targets = [Path(arg).resolve() for arg in argv] if argv else [root / _DEFAULT_TARGET]
     total = 0
     for path in iter_files(targets):
-        if lint_common.is_repo_test_file(path, _REPO_ROOT):
+        if lint_common.is_repo_test_file(path, root):
             continue
         for lineno, symbol, content in scan_file(path):
             total += 1
             try:
-                shown = path.relative_to(_REPO_ROOT).as_posix()
+                shown = path.relative_to(root).as_posix()
             except ValueError:
                 shown = path.as_posix()
             print(f"{shown}:{lineno}: {symbol} | {content}")

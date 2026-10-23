@@ -14,7 +14,7 @@ import json
 import os
 import re
 import socket
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Literal, cast, override
@@ -186,15 +186,10 @@ class PinnedIPHTTPSAdapter(HTTPAdapter):
         **pool_kwargs: Any,
     ) -> None:
         self.poolmanager = PoolManager(
-            num_pools=connections,
-            maxsize=maxsize,
-            block=block,
-            **pool_kwargs,
+            num_pools=connections, maxsize=maxsize, block=block, **pool_kwargs
         )
         pinned_pool = type(
-            "_PinnedIPConnectionPool",
-            (_PinnedIPConnectionPool,),
-            {"pinned_ip": self._pinned_ip},
+            "_PinnedIPConnectionPool", (_PinnedIPConnectionPool,), {"pinned_ip": self._pinned_ip}
         )
         self.poolmanager.pool_classes_by_scheme = {
             "http": HTTPConnectionPool,
@@ -242,11 +237,11 @@ def _session_for_host(host: str) -> requests.Session | None:
         address_rows = socket.getaddrinfo(host, 443, type=socket.SOCK_STREAM)
     except socket.gaierror:
         return None
-    ipv4_addresses: list[str] = []
-    for family, _socket_type, _protocol, _canonical_name, socket_address in address_rows:
-        address = socket_address[0]
-        if family == socket.AF_INET and isinstance(address, str):
-            ipv4_addresses.append(address)
+    ipv4_addresses = [
+        socket_address[0]
+        for family, _st, _proto, _canon, socket_address in address_rows
+        if family == socket.AF_INET and isinstance(socket_address[0], str)
+    ]
     if not any(_is_fake_ip(address) for address in ipv4_addresses):
         return None
     # A detected fake IP must not fall back to the hijacked resolver if DoH fails.
@@ -341,9 +336,7 @@ def _headers(source: SourceDescriptor, api_key: str) -> dict[str, str]:
 
 def _openai_models(source: SourceDescriptor, api_key: str) -> list[str]:
     payload = fetch_json(
-        source.base_url + source.models_path,
-        headers=_headers(source, api_key),
-        params={},
+        source.base_url + source.models_path, headers=_headers(source, api_key), params={}
     )
     if "data" not in payload:
         raise ValueError(f"{source.provider} response is missing data")
@@ -354,13 +347,9 @@ def _anthropic_models(source: SourceDescriptor, api_key: str) -> list[str]:
     ids: list[str] = []
     after_id: str | None = None
     while True:
-        params: dict[str, str | int] = {}
-        if after_id is not None:
-            params["after_id"] = after_id
+        params: dict[str, str | int] = {"after_id": after_id} if after_id is not None else {}
         payload = fetch_json(
-            source.base_url + source.models_path,
-            headers=_headers(source, api_key),
-            params=params,
+            source.base_url + source.models_path, headers=_headers(source, api_key), params=params
         )
         if "data" not in payload or "has_more" not in payload:
             raise ValueError("claude response is missing data or has_more")
@@ -383,9 +372,7 @@ def _gemini_models(source: SourceDescriptor, api_key: str) -> list[str]:
     params: dict[str, str | int] = {"key": api_key}
     while True:
         payload = fetch_json(
-            source.base_url + source.models_path,
-            headers=_headers(source, api_key),
-            params=params,
+            source.base_url + source.models_path, headers=_headers(source, api_key), params=params
         )
         if "models" not in payload:
             raise ValueError("gemini response is missing models")
@@ -405,12 +392,17 @@ def _gemini_models(source: SourceDescriptor, api_key: str) -> list[str]:
     return ids
 
 
-def _dashscope_models(source: SourceDescriptor, api_key: str) -> list[str]:
+def _dashscope_models(
+    source: SourceDescriptor,
+    api_key: str,
+    *,
+    fetcher: Callable[..., dict[str, Any]] | None = None,
+) -> list[str]:
     ids: list[str] = []
     total: int | None = None
     page_no = 1
     while True:
-        payload = fetch_json(
+        payload = (fetch_json if fetcher is None else fetcher)(
             source.base_url + source.models_path,
             headers=_headers(source, api_key),
             params={"page_no": page_no, "page_size": _QWEN_PAGE_SIZE},
@@ -439,7 +431,12 @@ def _dashscope_models(source: SourceDescriptor, api_key: str) -> list[str]:
     return ids
 
 
-def fetch_provider_models(source: SourceDescriptor, api_key: str) -> list[str]:
+def fetch_provider_models(
+    source: SourceDescriptor,
+    api_key: str,
+    *,
+    fetcher: Callable[..., dict[str, Any]] | None = None,
+) -> list[str]:
     if source.response_kind == "openai":
         return _openai_models(source, api_key)
     if source.response_kind == "anthropic":
@@ -447,7 +444,7 @@ def fetch_provider_models(source: SourceDescriptor, api_key: str) -> list[str]:
     if source.response_kind == "gemini":
         return _gemini_models(source, api_key)
     if source.response_kind == "dashscope":
-        return _dashscope_models(source, api_key)
+        return _dashscope_models(source, api_key, fetcher=fetcher)
     raise RuntimeError(f"unknown response kind {source.response_kind!r}")
 
 
@@ -515,13 +512,17 @@ def _read_env_file(path: Path | None) -> dict[str, str]:
     return {key: value for key, value in dotenv_values(path).items() if value is not None}
 
 
-def _api_key(source: SourceDescriptor, file_aliases: Mapping[str, str]) -> str | None:
-    value = _environment_value(source.key_alias)
+def _api_key(
+    source: SourceDescriptor,
+    file_aliases: Mapping[str, str],
+    *,
+    env_lookup: Callable[[str], str | None] | None = None,
+) -> str | None:
+    value = (_environment_value if env_lookup is None else env_lookup)(source.key_alias)
     if value is not None and value.strip():
         return value
-    if source.key_alias in file_aliases and file_aliases[source.key_alias].strip():
-        return file_aliases[source.key_alias]
-    return None
+    file_val = file_aliases.get(source.key_alias, "")
+    return file_val if file_val.strip() else None
 
 
 def _state_path(state_dir: Path | None) -> Path:
@@ -649,20 +650,20 @@ def check_sources(
     state: dict[str, dict[str, dict[str, object]]],
     *,
     models: Mapping[str, ModelSpec],
+    env_lookup: Callable[[str], str | None] | None = None,
+    model_fetcher: Callable[[SourceDescriptor, str], list[str]] | None = None,
 ) -> dict[str, ProviderReport]:
     # The comparison consults the registered models twice over — a registered id is
     # skipped, a same-series older id is suppressed against registered versions — so it
     # compares against the catalog the enabled provider plugins build. Comparing against
     # nothing would re-report every registered id as new (deduped only by its own state file).
     registry = models
+    fetcher = fetch_provider_models if model_fetcher is None else model_fetcher
     reports: dict[str, ProviderReport] = {}
     providers = state["providers"]
     for provider, source in SOURCES.items():
-        entry: dict[str, object] | None = providers.get(provider)
-        if entry is None:
-            entry = {"reported": []}
-            providers[provider] = entry
-        api_key = _api_key(source, file_aliases)
+        entry = providers.setdefault(provider, {"reported": []})
+        api_key = _api_key(source, file_aliases, env_lookup=env_lookup)
         if api_key is None:
             status = f"error: missing {source.key_alias}"
             reports[provider] = ProviderReport(
@@ -670,7 +671,7 @@ def check_sources(
             )
             continue
         try:
-            comparison = compare_models(source, fetch_provider_models(source, api_key), registry)
+            comparison = compare_models(source, fetcher(source, api_key), registry)
         except Exception as exc:
             status = f"error: {str(exc) or type(exc).__name__}"
             reports[provider] = ProviderReport(
@@ -750,7 +751,12 @@ def _write_report(directory: Path, markdown: str, payload: dict[str, object]) ->
     )
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(
+    argv: list[str] | None = None,
+    *,
+    env_lookup: Callable[[str], str | None] | None = None,
+    model_fetcher: Callable[[SourceDescriptor, str], list[str]] | None = None,
+) -> int:
     parser = argparse.ArgumentParser(
         description="Check official provider model lists for Meiva updates."
     )
@@ -765,7 +771,11 @@ def main(argv: list[str] | None = None) -> int:
     try:
         state = _load_state(state_path)
         reports = check_sources(
-            _read_env_file(args.env_file), state, models=build_model_catalog().models
+            _read_env_file(args.env_file),
+            state,
+            models=build_model_catalog().models,
+            env_lookup=env_lookup,
+            model_fetcher=model_fetcher,
         )
         _save_state(state_path, state)
     except Exception as exc:
@@ -776,13 +786,11 @@ def main(argv: list[str] | None = None) -> int:
     print(markdown, end="")
     if args.write_report is not None:
         _write_report(args.write_report, markdown, payload)
-    has_actionable = any(report.actionable_candidates for report in reports.values())
-    has_status_change = any(report.status_changed for report in reports.values())
     # Provider errors reach the P0 lead only through the confirmed status
     # change above: a first-round error reports clean here on purpose, and a
     # continuing one has already been announced. Exit 1 stays reserved for
     # the tracker failing to report at all (the handler above this block).
-    if has_actionable or has_status_change:
+    if any(report.actionable_candidates or report.status_changed for report in reports.values()):
         return 2
     return 0
 
