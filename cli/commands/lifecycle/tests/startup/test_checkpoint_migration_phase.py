@@ -10,7 +10,8 @@ import psycopg
 import pytest
 
 from base.db.tests.fakes import patch_database
-from base.deploy.schema import migration_layout
+from base.deploy.schema.migration_layout import MIGRATIONS_DIR
+from base.paths.home import resolve_meiva_home
 from cli.database import OperatorDatabaseFactory
 from cli.database.runtime import CommandRuntime
 from cli.database.tests.cli_tests import operator_database as operator_database
@@ -94,8 +95,12 @@ def migration_phase(monkeypatch: pytest.MonkeyPatch) -> list[str]:
         assert isinstance(tracked_migrations, set)
         calls.append("dependency")
 
-    def fake_meiva_migrations(got: object, *, machine_name: Callable[[], str]) -> list[str]:
+    def fake_meiva_migrations(
+        got: object, *, machine_name: Callable[[], str], migrations_dir: Path, home: Path
+    ) -> list[str]:
         assert callable(machine_name)
+        assert migrations_dir == MIGRATIONS_DIR
+        assert home == resolve_meiva_home()
         assert got in (conn, admin_conn)
         calls.append("meiva")
         return ["20260823T000000_example"]
@@ -274,7 +279,7 @@ def test_real_start_phase_converges_meiva_then_is_idempotent(
     )
 
     meiva_rows = db_conn.execute("SELECT name FROM schema_migrations").fetchall()
-    assert {row[0] for row in meiva_rows} == required_migration_set()
+    assert {row[0] for row in meiva_rows} == required_migration_set(migrations_dir=MIGRATIONS_DIR)
     checkpoint_rows = db_conn.execute("SELECT v FROM checkpoint_migrations").fetchall()
     assert {row[0] for row in checkpoint_rows} == set(range(10))
     assert (
@@ -377,14 +382,15 @@ def test_checkpoint_migration_manifest_requires_a_tracked_migration(
     if write_up:
         (tmp_path / f"{name}.sql").write_text("SELECT 1;\n")
     monkeypatch.setattr(provision, "CHECKPOINT_SCHEMA_MEIVA_MIGRATIONS", {10: name})
-    monkeypatch.setattr(migration_layout, "MIGRATIONS_DIR", tmp_path)
     if tracked:
         git(tmp_path, "add", "-A")
 
     with pytest.raises(
         provision.CheckpointDependencyDriftError, match="git-tracked Meiva migration"
     ):
-        provision.assert_checkpoint_dependency_pinned(required_migration_set())
+        provision.assert_checkpoint_dependency_pinned(
+            required_migration_set(migrations_dir=tmp_path)
+        )
 
 
 def test_checkpoint_migration_manifest_accepts_nested_tracked_sql(
@@ -402,7 +408,6 @@ def test_checkpoint_migration_manifest_accepts_nested_tracked_sql(
     (hour / f"{name}.sql").write_text("SELECT 1;\n")
     init_repo(tmp_path)
     monkeypatch.setattr(provision, "CHECKPOINT_SCHEMA_MEIVA_MIGRATIONS", {10: name})
-    monkeypatch.setattr(migration_layout, "MIGRATIONS_DIR", tmp_path)
     monkeypatch.setattr(PostgresSaver, "MIGRATIONS", [*PostgresSaver.MIGRATIONS, "SELECT 1;"])
 
-    provision.assert_checkpoint_dependency_pinned(required_migration_set())
+    provision.assert_checkpoint_dependency_pinned(required_migration_set(migrations_dir=tmp_path))

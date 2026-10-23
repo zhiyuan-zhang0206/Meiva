@@ -12,6 +12,7 @@ from psycopg import sql
 
 from base.cluster.machine import MachineIdentity
 from base.config import settings
+from base.deploy.schema.migration_layout import MIGRATIONS_DIR
 from base.deploy.schema.migrations import (
     apply_pending_migrations,
     required_migration_set,
@@ -24,6 +25,7 @@ from base.deploy.schema.tests.migration_support import (
 from base.deploy.schema.tests.migration_support import (
     reset_schema_migrations_state as reset_schema_migrations_state,
 )
+from base.paths.home import resolve_meiva_home
 
 _MIGRATIONS = SCHEMA_SQL.parents[1] / "migrations"
 
@@ -56,10 +58,25 @@ def test_fresh_schema_sql_bootstrap_is_baselined(machine_identity: MachineIdenti
         # post-baseline migrations replay cleanly, then a second apply is a no-op.
         with psycopg.connect(url) as conn:
             assert set(
-                apply_pending_migrations(conn, machine_name=machine_identity.name)
-            ) == required_migration_set() - set(schema_sql_stamped_migration_names())
+                apply_pending_migrations(
+                    conn,
+                    machine_name=machine_identity.name,
+                    migrations_dir=MIGRATIONS_DIR,
+                    home=resolve_meiva_home(),
+                )
+            ) == required_migration_set(migrations_dir=MIGRATIONS_DIR) - set(
+                schema_sql_stamped_migration_names()
+            )
         with psycopg.connect(url) as conn:
-            assert apply_pending_migrations(conn, machine_name=machine_identity.name) == []
+            assert (
+                apply_pending_migrations(
+                    conn,
+                    machine_name=machine_identity.name,
+                    migrations_dir=MIGRATIONS_DIR,
+                    home=resolve_meiva_home(),
+                )
+                == []
+            )
             settled = conn.execute("SELECT llm_model FROM cluster_defaults WHERE id = 1").fetchone()
             assert settled == ("deepseek-flash",)
     finally:
@@ -100,7 +117,12 @@ def test_the_version_gate_and_the_agent_status_check_survive_the_contraction(
     with throwaway_database("retire_paths") as url, psycopg.connect(url) as conn:
         conn.execute(cast(LiteralString, SCHEMA_SQL.read_text()))
         conn.commit()
-        apply_pending_migrations(conn, machine_name=machine_identity.name)
+        apply_pending_migrations(
+            conn,
+            machine_name=machine_identity.name,
+            migrations_dir=MIGRATIONS_DIR,
+            home=resolve_meiva_home(),
+        )
         conn.execute(
             "UPDATE deployment_state SET min_code_version = GREATEST(min_code_version, %s) "
             "WHERE id = 1",
@@ -137,13 +159,26 @@ def test_the_migration_drops_the_posture_table_of_an_upgraded_cluster(
             conn.execute("INSERT INTO host_deploy_state (machine) VALUES ('m1')")
 
         with psycopg.connect(url) as conn:
-            applied = apply_pending_migrations(conn, machine_name=machine_identity.name)
+            applied = apply_pending_migrations(
+                conn,
+                machine_name=machine_identity.name,
+                migrations_dir=MIGRATIONS_DIR,
+                home=resolve_meiva_home(),
+            )
             assert _POSTURE_STATE in applied
             row = conn.execute("SELECT to_regclass('public.host_deploy_state')").fetchone()
             assert row == (None,)
 
         with psycopg.connect(url) as conn:
-            assert apply_pending_migrations(conn, machine_name=machine_identity.name) == []
+            assert (
+                apply_pending_migrations(
+                    conn,
+                    machine_name=machine_identity.name,
+                    migrations_dir=MIGRATIONS_DIR,
+                    home=resolve_meiva_home(),
+                )
+                == []
+            )
 
 
 # ── Contraction of the delivery watchdog's durable retry state ──
@@ -184,7 +219,12 @@ def test_a_fresh_database_has_none_of_the_dead_watchdog_state(
         conn.execute(cast(LiteralString, SCHEMA_SQL.read_text()))
         conn.commit()
         assert _watchdog_state_present(conn) == ([], [])
-        apply_pending_migrations(conn, machine_name=machine_identity.name)
+        apply_pending_migrations(
+            conn,
+            machine_name=machine_identity.name,
+            migrations_dir=MIGRATIONS_DIR,
+            home=resolve_meiva_home(),
+        )
         assert _watchdog_state_present(conn) == ([], [])
 
 
@@ -231,14 +271,27 @@ def test_the_contraction_drops_the_state_of_an_upgraded_cluster_and_keeps_its_ro
             conn.execute("DELETE FROM schema_migrations WHERE name = %s", (_WATCHDOG_STATE,))
 
         with psycopg.connect(url) as conn:
-            applied = apply_pending_migrations(conn, machine_name=machine_identity.name)
+            applied = apply_pending_migrations(
+                conn,
+                machine_name=machine_identity.name,
+                migrations_dir=MIGRATIONS_DIR,
+                home=resolve_meiva_home(),
+            )
             assert _WATCHDOG_STATE in applied
             assert _watchdog_state_present(conn) == ([], [])
             kept = conn.execute("SELECT content, status FROM inbound_messages WHERE id = 10")
             assert kept.fetchone() == ("hello", "pending")
 
         with psycopg.connect(url) as conn:
-            assert apply_pending_migrations(conn, machine_name=machine_identity.name) == []
+            assert (
+                apply_pending_migrations(
+                    conn,
+                    machine_name=machine_identity.name,
+                    migrations_dir=MIGRATIONS_DIR,
+                    home=resolve_meiva_home(),
+                )
+                == []
+            )
             migration = next(
                 path for path in _MIGRATIONS.rglob(f"{_WATCHDOG_STATE}.sql")
             ).read_text()
@@ -336,7 +389,12 @@ def test_the_fencing_retirement_drops_an_upgraded_clusters_storage_and_keeps_its
             conn.execute("DELETE FROM schema_migrations WHERE name = %s", (_FENCING,))
 
         with psycopg.connect(url) as conn:
-            applied = apply_pending_migrations(conn, machine_name=machine_identity.name)
+            applied = apply_pending_migrations(
+                conn,
+                machine_name=machine_identity.name,
+                migrations_dir=MIGRATIONS_DIR,
+                home=resolve_meiva_home(),
+            )
             assert _FENCING in applied
             assert _fencing_state_present(conn) == ([], [], [])
             assert conn.execute(
@@ -351,7 +409,15 @@ def test_the_fencing_retirement_drops_an_upgraded_clusters_storage_and_keeps_its
             ).fetchone() == ("hello",)
 
         with psycopg.connect(url) as conn:
-            assert apply_pending_migrations(conn, machine_name=machine_identity.name) == []
+            assert (
+                apply_pending_migrations(
+                    conn,
+                    machine_name=machine_identity.name,
+                    migrations_dir=MIGRATIONS_DIR,
+                    home=resolve_meiva_home(),
+                )
+                == []
+            )
             migration = next(path for path in _MIGRATIONS.rglob(f"{_FENCING}.sql")).read_text()
             conn.execute(cast(LiteralString, migration))
             assert _fencing_state_present(conn) == ([], [], [])

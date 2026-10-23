@@ -7,7 +7,7 @@ import psycopg
 import pytest
 
 from base.cluster.machine import MachineIdentity
-from base.deploy.schema import migration_layout
+from base.deploy.schema.migration_layout import MIGRATIONS_DIR
 from base.deploy.schema.migrations import (
     BASELINE_NAME,
     apply_pending_migrations,
@@ -21,23 +21,30 @@ from base.deploy.schema.tests.migration_support import (
 from base.deploy.schema.tests.migration_support import (
     reset_schema_migrations_state as reset_schema_migrations_state,
 )
+from base.paths.home import resolve_meiva_home
 
 
 def test_apply_pending_squashes_orphaned_applied_names(
     db_conn: psycopg.Connection,
-    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     machine_identity: MachineIdentity,
 ) -> None:
     _ = db_conn
     orphan = "20260815T000001_synthetic-orphan"
     init_repo(tmp_path)
-    monkeypatch.setattr(migration_layout, "MIGRATIONS_DIR", tmp_path)
     with psycopg.connect(db_url(), autocommit=True) as c:
         c.execute("INSERT INTO schema_migrations (name) VALUES (%s)", (orphan,))
     try:
         with psycopg.connect(db_url()) as fresh:
-            assert apply_pending_migrations(fresh, machine_name=machine_identity.name) == []
+            assert (
+                apply_pending_migrations(
+                    fresh,
+                    machine_name=machine_identity.name,
+                    migrations_dir=tmp_path,
+                    home=resolve_meiva_home(),
+                )
+                == []
+            )
         with psycopg.connect(db_url(), autocommit=True) as v, v.cursor() as cur:
             cur.execute("SELECT name FROM schema_migrations ORDER BY name")
             assert cur.fetchall() == [(BASELINE_NAME,)]
@@ -48,7 +55,6 @@ def test_apply_pending_squashes_orphaned_applied_names(
 
 def test_apply_pending_squash_then_apply_pending(
     db_conn: psycopg.Connection,
-    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     machine_identity: MachineIdentity,
 ) -> None:
@@ -56,12 +62,16 @@ def test_apply_pending_squash_then_apply_pending(
     orphan = "20260815T000001_synthetic-orphan"
     (tmp_path / f"{SYN}.sql").write_text("CREATE TABLE syn_squash_t (id int);")
     init_repo(tmp_path)
-    monkeypatch.setattr(migration_layout, "MIGRATIONS_DIR", tmp_path)
     with psycopg.connect(db_url(), autocommit=True) as c:
         c.execute("INSERT INTO schema_migrations (name) VALUES (%s)", (orphan,))
     try:
         with psycopg.connect(db_url()) as fresh:
-            assert apply_pending_migrations(fresh, machine_name=machine_identity.name) == [SYN]
+            assert apply_pending_migrations(
+                fresh,
+                machine_name=machine_identity.name,
+                migrations_dir=tmp_path,
+                home=resolve_meiva_home(),
+            ) == [SYN]
         with psycopg.connect(db_url(), autocommit=True) as v, v.cursor() as cur:
             cur.execute("SELECT name FROM schema_migrations ORDER BY name")
             assert cur.fetchall() == [(BASELINE_NAME,), (SYN,)]
@@ -76,19 +86,25 @@ def test_apply_pending_squash_then_apply_pending(
 
 def test_squash_does_not_touch_baseline_or_pending(
     db_conn: psycopg.Connection,
-    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     machine_identity: MachineIdentity,
 ) -> None:
     _ = db_conn
     (tmp_path / f"{SYN}.sql").write_text("CREATE TABLE syn_keep_t (id int);")
     init_repo(tmp_path)
-    monkeypatch.setattr(migration_layout, "MIGRATIONS_DIR", tmp_path)
     with psycopg.connect(db_url(), autocommit=True) as c:
         c.execute("INSERT INTO schema_migrations (name) VALUES (%s)", (SYN,))
     try:
         with psycopg.connect(db_url()) as fresh:
-            assert apply_pending_migrations(fresh, machine_name=machine_identity.name) == []
+            assert (
+                apply_pending_migrations(
+                    fresh,
+                    machine_name=machine_identity.name,
+                    migrations_dir=tmp_path,
+                    home=resolve_meiva_home(),
+                )
+                == []
+            )
         with psycopg.connect(db_url(), autocommit=True) as v, v.cursor() as cur:
             cur.execute("SELECT name FROM schema_migrations ORDER BY name")
             assert cur.fetchall() == [(BASELINE_NAME,), (SYN,)]
@@ -100,14 +116,12 @@ def test_squash_does_not_touch_baseline_or_pending(
 
 def test_squash_authority_checked_even_without_pending(
     db_conn: psycopg.Connection,
-    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     machine_identity: MachineIdentity,
 ) -> None:
     _ = db_conn
     orphan = "20260815T000001_synthetic-orphan"
     init_repo(tmp_path)
-    monkeypatch.setattr(migration_layout, "MIGRATIONS_DIR", tmp_path)
     with psycopg.connect(db_url(), autocommit=True) as c:
         c.execute("INSERT INTO schema_migrations (name) VALUES (%s)", (orphan,))
         c.execute(
@@ -115,12 +129,16 @@ def test_squash_authority_checked_even_without_pending(
             "VALUES ('real-gateway', '/real/home', true)"
         )
     try:
-        monkeypatch.setenv("MEIVA_HOME", str(tmp_path / "not-the-gateways-home"))
         from base.deploy.schema.migrations import MigrationAuthorityMismatch
 
         with psycopg.connect(db_url()) as fresh:
             try:
-                apply_pending_migrations(fresh, machine_name=machine_identity.name)
+                apply_pending_migrations(
+                    fresh,
+                    machine_name=machine_identity.name,
+                    migrations_dir=tmp_path,
+                    home=tmp_path / "not-the-gateways-home",
+                )
             except MigrationAuthorityMismatch:
                 pass
             else:
@@ -133,7 +151,6 @@ def test_squash_authority_checked_even_without_pending(
 
 def test_squash_logs_the_converged_names(
     db_conn: psycopg.Connection,
-    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     loguru_records: list[dict[str, Any]],
     machine_identity: MachineIdentity,
@@ -141,12 +158,16 @@ def test_squash_logs_the_converged_names(
     _ = db_conn
     orphan = "20260815T000001_synthetic-orphan"
     init_repo(tmp_path)
-    monkeypatch.setattr(migration_layout, "MIGRATIONS_DIR", tmp_path)
     with psycopg.connect(db_url(), autocommit=True) as c:
         c.execute("INSERT INTO schema_migrations (name) VALUES (%s)", (orphan,))
     try:
         with psycopg.connect(db_url()) as fresh:
-            apply_pending_migrations(fresh, machine_name=machine_identity.name)
+            apply_pending_migrations(
+                fresh,
+                machine_name=machine_identity.name,
+                migrations_dir=tmp_path,
+                home=resolve_meiva_home(),
+            )
         assert any("squash" in r["message"] and orphan in r["message"] for r in loguru_records), (
             "the squash must be loud"
         )
@@ -157,7 +178,6 @@ def test_squash_logs_the_converged_names(
 
 def test_squash_refuses_partial_pre_reset_history(
     db_conn: psycopg.Connection,
-    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     machine_identity: MachineIdentity,
 ) -> None:
@@ -166,7 +186,6 @@ def test_squash_refuses_partial_pre_reset_history(
     assert len(V010_PRE_RESET_SET) == 59, "frozen set drifted"
     partial = sorted(V010_PRE_RESET_SET)[:24]
     init_repo(tmp_path)
-    monkeypatch.setattr(migration_layout, "MIGRATIONS_DIR", tmp_path)
     with psycopg.connect(db_url(), autocommit=True) as c:
         for name in partial:
             c.execute("INSERT INTO schema_migrations (name) VALUES (%s)", (name,))
@@ -175,7 +194,12 @@ def test_squash_refuses_partial_pre_reset_history(
             psycopg.connect(db_url()) as fresh,
             pytest.raises(MigrationHistoryGap),
         ):
-            apply_pending_migrations(fresh, machine_name=machine_identity.name)
+            apply_pending_migrations(
+                fresh,
+                machine_name=machine_identity.name,
+                migrations_dir=tmp_path,
+                home=resolve_meiva_home(),
+            )
         with psycopg.connect(db_url(), autocommit=True) as v, v.cursor() as cur:
             cur.execute("SELECT COUNT(*) FROM schema_migrations")
             surviving = cur.fetchone()
@@ -188,7 +212,6 @@ def test_squash_refuses_partial_pre_reset_history(
 
 def test_squash_converges_full_pre_reset_history(
     db_conn: psycopg.Connection,
-    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     machine_identity: MachineIdentity,
 ) -> None:
@@ -196,13 +219,20 @@ def test_squash_converges_full_pre_reset_history(
 
     all_names = sorted(V010_PRE_RESET_SET)
     init_repo(tmp_path)
-    monkeypatch.setattr(migration_layout, "MIGRATIONS_DIR", tmp_path)
     with psycopg.connect(db_url(), autocommit=True) as c:
         for name in all_names:
             c.execute("INSERT INTO schema_migrations (name) VALUES (%s)", (name,))
     try:
         with psycopg.connect(db_url()) as fresh:
-            assert apply_pending_migrations(fresh, machine_name=machine_identity.name) == []
+            assert (
+                apply_pending_migrations(
+                    fresh,
+                    machine_name=machine_identity.name,
+                    migrations_dir=tmp_path,
+                    home=resolve_meiva_home(),
+                )
+                == []
+            )
         with psycopg.connect(db_url(), autocommit=True) as v, v.cursor() as cur:
             cur.execute("SELECT name FROM schema_migrations ORDER BY name")
             assert cur.fetchall() == [(BASELINE_NAME,)]
@@ -214,18 +244,24 @@ def test_squash_converges_full_pre_reset_history(
 
 def test_squash_ignores_pre_reset_names_outside_the_frozen_set(
     db_conn: psycopg.Connection,
-    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     machine_identity: MachineIdentity,
 ) -> None:
     _ = db_conn
     init_repo(tmp_path)
-    monkeypatch.setattr(migration_layout, "MIGRATIONS_DIR", tmp_path)
     with psycopg.connect(db_url(), autocommit=True) as c:
         c.execute("INSERT INTO schema_migrations (name) VALUES (%s)", (SYN_ORPHAN,))
     try:
         with psycopg.connect(db_url()) as fresh:
-            assert apply_pending_migrations(fresh, machine_name=machine_identity.name) == []
+            assert (
+                apply_pending_migrations(
+                    fresh,
+                    machine_name=machine_identity.name,
+                    migrations_dir=tmp_path,
+                    home=resolve_meiva_home(),
+                )
+                == []
+            )
         with psycopg.connect(db_url(), autocommit=True) as v, v.cursor() as cur:
             cur.execute("SELECT name FROM schema_migrations ORDER BY name")
             assert cur.fetchall() == [(BASELINE_NAME,)]
@@ -249,7 +285,12 @@ def test_current_reset_refuses_missing_history_without_mutation(
     set_table_to(db_conn, "set", before)
     with psycopg.connect(db_url()) as conn:
         with pytest.raises(MigrationHistoryGap, match="2026-09-23"):
-            apply_pending_migrations(conn, machine_name=machine_identity.name)
+            apply_pending_migrations(
+                conn,
+                machine_name=machine_identity.name,
+                migrations_dir=MIGRATIONS_DIR,
+                home=resolve_meiva_home(),
+            )
         assert applied_migration_names(conn) == before
 
 
@@ -271,12 +312,25 @@ def test_current_reset_converges_complete_history(
     predecessor = set(PRE_RESET_SET) | (set(schema_sql_stamped_migration_names()) - {RESET_ANCHOR})
     set_table_to(db_conn, "set", predecessor)
     with psycopg.connect(db_url()) as conn:
-        applied = apply_pending_migrations(conn, machine_name=machine_identity.name)
+        applied = apply_pending_migrations(
+            conn,
+            machine_name=machine_identity.name,
+            migrations_dir=MIGRATIONS_DIR,
+            home=resolve_meiva_home(),
+        )
         assert RESET_ANCHOR in applied
-        check_schema_version(conn)
-        expected = required_migration_set()
+        check_schema_version(conn, migrations_dir=MIGRATIONS_DIR)
+        expected = required_migration_set(migrations_dir=MIGRATIONS_DIR)
         assert applied_migration_names(conn) == expected
-        assert apply_pending_migrations(conn, machine_name=machine_identity.name) == []
+        assert (
+            apply_pending_migrations(
+                conn,
+                machine_name=machine_identity.name,
+                migrations_dir=MIGRATIONS_DIR,
+                home=resolve_meiva_home(),
+            )
+            == []
+        )
 
 
 @pytest.mark.parametrize("apply", [False, True])
@@ -292,8 +346,11 @@ def test_integer_history_is_refused_without_conversion(
     with psycopg.connect(db_url()) as conn:
         with pytest.raises(MigrationLayoutError, match="matching release"):
             apply_pending_migrations(
-                conn, machine_name=machine_identity.name
-            ) if apply else check_schema_version(conn)
+                conn,
+                machine_name=machine_identity.name,
+                migrations_dir=MIGRATIONS_DIR,
+                home=resolve_meiva_home(),
+            ) if apply else check_schema_version(conn, migrations_dir=MIGRATIONS_DIR)
         assert conn.execute(
             "SELECT version FROM schema_migrations ORDER BY version"
         ).fetchall() == [(version,) for version in range(1, 82)]
@@ -301,7 +358,6 @@ def test_integer_history_is_refused_without_conversion(
 
 def test_reset_anchor_and_history_deletion_roll_back_together(
     db_conn: psycopg.Connection,
-    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     machine_identity: MachineIdentity,
 ) -> None:
@@ -311,30 +367,41 @@ def test_reset_anchor_and_history_deletion_roll_back_together(
 
     (tmp_path / f"{RESET_ANCHOR}.sql").write_text("SELECT 1;")
     init_repo(tmp_path)
-    monkeypatch.setattr(migration_layout, "MIGRATIONS_DIR", tmp_path)
     predecessor = {BASELINE_NAME, *PRE_RESET_SET}
     set_table_to(db_conn, "set", predecessor)
-    original = migrations.squash_history
-
-    def interrupted(conn: psycopg.Connection, names: set[str]) -> None:
-        original(conn, names)
-        raise RuntimeError("interrupted after history deletion")
-
-    monkeypatch.setattr(migrations, "squash_history", interrupted)
     with psycopg.connect(db_url(), autocommit=True) as conn:
-        with pytest.raises(RuntimeError, match="interrupted"):
-            migrations.apply_pending_migrations(conn, machine_name=machine_identity.name)
-        assert migrations.applied_migration_names(conn) == predecessor
-        monkeypatch.setattr(migrations, "squash_history", original)
-        assert migrations.apply_pending_migrations(conn, machine_name=machine_identity.name) == [
-            RESET_ANCHOR
-        ]
-        migrations.check_schema_version(conn)
+        conn.execute(
+            "CREATE FUNCTION syn_reject_history_delete() RETURNS trigger LANGUAGE plpgsql AS $$ "
+            "BEGIN RAISE EXCEPTION 'interrupted after history deletion'; END $$"
+        )
+        try:
+            conn.execute(
+                "CREATE TRIGGER syn_reject_history_delete AFTER DELETE ON schema_migrations "
+                "FOR EACH STATEMENT EXECUTE FUNCTION syn_reject_history_delete()"
+            )
+            with pytest.raises(migrations.MigrationFailed, match="interrupted") as exc:
+                migrations.apply_pending_migrations(
+                    conn,
+                    machine_name=machine_identity.name,
+                    migrations_dir=tmp_path,
+                    home=resolve_meiva_home(),
+                )
+            assert isinstance(exc.value.__cause__, psycopg.errors.RaiseException)
+            assert migrations.applied_migration_names(conn) == predecessor
+        finally:
+            conn.execute("DROP TRIGGER IF EXISTS syn_reject_history_delete ON schema_migrations")
+            conn.execute("DROP FUNCTION syn_reject_history_delete()")
+        assert migrations.apply_pending_migrations(
+            conn,
+            machine_name=machine_identity.name,
+            migrations_dir=tmp_path,
+            home=resolve_meiva_home(),
+        ) == [RESET_ANCHOR]
+        migrations.check_schema_version(conn, migrations_dir=tmp_path)
 
 
 def test_failed_reset_anchor_preserves_history_for_retry(
     db_conn: psycopg.Connection,
-    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     machine_identity: MachineIdentity,
 ) -> None:
@@ -345,15 +412,22 @@ def test_failed_reset_anchor_preserves_history_for_retry(
     anchor = tmp_path / f"{RESET_ANCHOR}.sql"
     anchor.write_text("SELECT 1 / 0;")
     init_repo(tmp_path)
-    monkeypatch.setattr(migration_layout, "MIGRATIONS_DIR", tmp_path)
     predecessor = {BASELINE_NAME, *PRE_RESET_SET}
     set_table_to(db_conn, "set", predecessor)
     with psycopg.connect(db_url(), autocommit=True) as conn:
         with pytest.raises(migrations.MigrationFailed, match="division by zero"):
-            migrations.apply_pending_migrations(conn, machine_name=machine_identity.name)
+            migrations.apply_pending_migrations(
+                conn,
+                machine_name=machine_identity.name,
+                migrations_dir=tmp_path,
+                home=resolve_meiva_home(),
+            )
         assert migrations.applied_migration_names(conn) == predecessor
         anchor.write_text("SELECT 1;")
-        assert migrations.apply_pending_migrations(conn, machine_name=machine_identity.name) == [
-            RESET_ANCHOR
-        ]
-        migrations.check_schema_version(conn)
+        assert migrations.apply_pending_migrations(
+            conn,
+            machine_name=machine_identity.name,
+            migrations_dir=tmp_path,
+            home=resolve_meiva_home(),
+        ) == [RESET_ANCHOR]
+        migrations.check_schema_version(conn, migrations_dir=tmp_path)

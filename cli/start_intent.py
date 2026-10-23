@@ -37,7 +37,7 @@ def resolve_home() -> Path:
     #
     # A home that carries its own `<home>/source` checkout starts only from that
     # checkout (`base.paths.home.home_checkout_error`).
-    error = home_checkout_error(checkout())
+    error = home_checkout_error(checkout(), home=resolve_meiva_home())
     if error is not None:
         raise ValueError(error)
     return resolve_meiva_home().resolve()

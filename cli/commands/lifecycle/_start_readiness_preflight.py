@@ -40,6 +40,7 @@ import sys
 from pathlib import Path
 
 from base.cluster.machine import MachineIdentity, MachineRoles
+from base.deploy.schema.migration_layout import MIGRATIONS_DIR
 from base.host.private_storage import (
     private_file_problem,
     private_tree_root_problem,
@@ -251,7 +252,7 @@ def _migration_findings() -> list[str]:
     from base.deploy.schema.migrations import MigrationLayoutError, unreadable_migration_files
 
     try:
-        problems = unreadable_migration_files()
+        problems = unreadable_migration_files(migrations_dir=MIGRATIONS_DIR)
     except MigrationLayoutError as exc:
         return [f"migrations/ cannot be enumerated: {exc}"]
     return [

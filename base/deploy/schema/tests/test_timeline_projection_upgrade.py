@@ -6,8 +6,10 @@ import psycopg
 from psycopg import sql
 
 from base.cluster.machine import MachineIdentity
+from base.deploy.schema.migration_layout import MIGRATIONS_DIR
 from base.deploy.schema.migrations import apply_pending_migrations
 from base.deploy.schema.tests.migration_support import SCHEMA_SQL, throwaway_database
+from base.paths.home import resolve_meiva_home
 
 _TIMELINE_PROJECTION = "20261016T153550_run-timeline-range-projection"
 _TIMELINE_TABLES = (
@@ -34,7 +36,12 @@ def test_timeline_projection_upgrade_is_discovered_and_preserves_history(
                 "VALUES (1, 1, 'chat', 'retained history')"
             )
         with psycopg.connect(url) as conn:
-            applied = apply_pending_migrations(conn, machine_name=machine_identity.name)
+            applied = apply_pending_migrations(
+                conn,
+                machine_name=machine_identity.name,
+                migrations_dir=MIGRATIONS_DIR,
+                home=resolve_meiva_home(),
+            )
             assert _TIMELINE_PROJECTION in applied
             for table in _TIMELINE_TABLES:
                 assert conn.execute("SELECT to_regclass(%s)", (table,)).fetchone() == (table,)
@@ -51,4 +58,12 @@ def test_timeline_projection_upgrade_is_discovered_and_preserves_history(
                 "SELECT content, status FROM inbound_messages WHERE id = 1"
             ).fetchone() == ("retained history", "pending")
         with psycopg.connect(url) as conn:
-            assert apply_pending_migrations(conn, machine_name=machine_identity.name) == []
+            assert (
+                apply_pending_migrations(
+                    conn,
+                    machine_name=machine_identity.name,
+                    migrations_dir=MIGRATIONS_DIR,
+                    home=resolve_meiva_home(),
+                )
+                == []
+            )

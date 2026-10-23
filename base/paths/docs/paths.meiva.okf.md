@@ -81,7 +81,7 @@ only itself.
   (`base/host/env/dotenv_boot.py:resolve_meiva_home`), never from cwd and never from a
   flag: no pointer file, no checkout claim, no in-process override. A home that
   carries its own `<home>/source` checkout is operated only by that checkout's code
-  (`base.paths.home.home_checkout_error`; `prod_service_checkout_error` applies it to
+  (`base.paths.home.home_checkout_error(repo, home=home)`; `prod_service_checkout_error` applies it to
   service launches). Cluster identity **is** this path — there is no cluster name;
   see [[base.meiva.okf.md|the base overview]].
 - `run/` exists so ephemeral runtime artifacts (pidfiles, sockets, session

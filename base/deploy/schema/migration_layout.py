@@ -15,8 +15,9 @@ from base.log import logger
 # all-zeros timestamp sorts before every real migration.
 BASELINE_NAME = "00000000T000000_baseline"
 
+# meiva:note
 # Repo root = base/deploy/schema/../../.. = `<root>/`; migrations dir is under repo root.
-# Tests re-point this module attribute, and every reader below reads it at call time.
+# Composition roots pass this checkout path to the migration readers.
 MIGRATIONS_DIR: Path = Path(__file__).resolve().parents[3] / "migrations"
 
 # Filename schema: `YYYYMMDDTHHMMSS_<kebab-name>.sql`. Timestamp = 8-digit date +
@@ -59,7 +60,7 @@ def assert_unique(names: Iterable[str]) -> None:
         seen.add(name)
 
 
-def tracked_migration_paths() -> set[Path] | None:
+def tracked_migration_paths(*, migrations_dir: Path) -> set[Path] | None:
     """The absolute paths under migrations/ that git tracks in this checkout.
 
     `None` when migrations/ is not inside a git worktree (either `git
@@ -75,13 +76,13 @@ def tracked_migration_paths() -> set[Path] | None:
     entries.
     """
 
-    migrations_dir = MIGRATIONS_DIR
-    root_result = git_probe(["-C", str(migrations_dir), "rev-parse", "--show-toplevel"])
+    target_dir = migrations_dir.resolve()
+    root_result = git_probe(["-C", str(target_dir), "rev-parse", "--show-toplevel"])
     if root_result.returncode != 0:
         return None
     root = Path(root_result.stdout.strip())
     try:
-        rel = migrations_dir.resolve().relative_to(root)
+        rel = target_dir.resolve().relative_to(root)
     except ValueError:
         return None  # migrations dir outside the worktree — cannot verify
     listing = git_probe(["-C", str(root), "ls-files", "-z", "--", str(rel)])
@@ -90,7 +91,7 @@ def tracked_migration_paths() -> set[Path] | None:
     return {root / entry for entry in listing.stdout.split("\0") if entry}
 
 
-def list_migration_files() -> list[tuple[str, Path]]:
+def list_migration_files(*, migrations_dir: Path) -> list[tuple[str, Path]]:
     """Enumerate the migrations dir, validate layout, return (name, path) sorted
     ascending by name (≈ chronological). An empty dir is valid — a release may
     carry no delta over the baseline.
@@ -108,21 +109,21 @@ def list_migration_files() -> list[tuple[str, Path]]:
     tracked filename not matching `YYYYMMDDTHHMMSS_<kebab-name>.sql` / a
     duplicate name.
     """
-    migrations_dir = MIGRATIONS_DIR
-    if not migrations_dir.is_dir():
-        raise MigrationLayoutError(f"migrations dir does not exist: {migrations_dir}")
+    target_dir = migrations_dir.resolve()
+    if not target_dir.is_dir():
+        raise MigrationLayoutError(f"migrations dir does not exist: {target_dir}")
 
-    tracked = tracked_migration_paths()
+    tracked = tracked_migration_paths(migrations_dir=target_dir)
     if tracked is None:
         raise MigrationLayoutError(
-            f"{migrations_dir} is not inside a git worktree — cannot verify which "
+            f"{target_dir} is not inside a git worktree — cannot verify which "
             "migration files are git-tracked; refusing to enumerate. Apply path "
             "must only ever apply files git tracks."
         )
 
     files: list[tuple[str, Path]] = []
     skipped: list[Path] = []
-    for path in sorted(migrations_dir.rglob("*.sql")):
+    for path in sorted(target_dir.rglob("*.sql")):
         if path.name.startswith(".") or not path.is_file():
             continue
         if not path.name.endswith(".sql"):
@@ -149,7 +150,7 @@ def list_migration_files() -> list[tuple[str, Path]]:
     return files
 
 
-def untracked_migration_files() -> list[str]:
+def untracked_migration_files(*, migrations_dir: Path) -> list[str]:
     """Names of the `.sql` up-files in migrations/ that git does not track.
 
     The applier (Task #998) only ever applies git-tracked migrations and logs a
@@ -161,13 +162,13 @@ def untracked_migration_files() -> list[str]:
     not inside a git worktree — the loader fails closed there and a warning
     would add nothing.
     """
-    migrations_dir = MIGRATIONS_DIR
-    tracked = tracked_migration_paths()
+    target_dir = migrations_dir.resolve()
+    tracked = tracked_migration_paths(migrations_dir=target_dir)
     if tracked is None:
         return []
     return sorted(
         path.name
-        for path in migrations_dir.rglob("*.sql")
+        for path in target_dir.rglob("*.sql")
         if path.is_file()
         and not path.name.startswith(".")
         and path.name.endswith(".sql")
@@ -175,7 +176,7 @@ def untracked_migration_files() -> list[str]:
     )
 
 
-def unreadable_migration_files() -> list[tuple[str, str]]:
+def unreadable_migration_files(*, migrations_dir: Path) -> list[tuple[str, str]]:
     """Tracked up-migrations in this checkout whose files cannot be read.
 
     The apply-side half of validate-before-kill: `validate_migrations_at_ref`
@@ -198,7 +199,7 @@ def unreadable_migration_files() -> list[tuple[str, str]]:
     read-only filesystem check.
     """
     problems: list[tuple[str, str]] = []
-    for name, path in list_migration_files():
+    for name, path in list_migration_files(migrations_dir=migrations_dir):
         try:
             path.read_bytes()
         except OSError as exc:
@@ -257,8 +258,10 @@ def validate_migrations_at_ref(ref: str, *, repo_root: Path | None = None) -> No
     validate_migration_layout(names)
 
 
-def required_migration_set() -> set[str]:
+def required_migration_set(*, migrations_dir: Path) -> set[str]:
     """The set of migration names the code in this checkout expects the DB to
     have applied: the baseline sentinel plus every migration file in migrations/.
     The DB's applied set must equal this (both directions checked)."""
-    return {BASELINE_NAME} | {name for name, _ in list_migration_files()}
+    return {BASELINE_NAME} | {
+        name for name, _ in list_migration_files(migrations_dir=migrations_dir)
+    }

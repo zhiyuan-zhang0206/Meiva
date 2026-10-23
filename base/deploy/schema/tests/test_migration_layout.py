@@ -4,7 +4,6 @@ from pathlib import Path
 
 import pytest
 
-from base.deploy.schema import migration_layout
 from base.deploy.schema.migration_layout import MIGRATIONS_DIR
 from base.deploy.schema.migrations import (
     MigrationLayoutError,
@@ -30,28 +29,23 @@ def test_migrations_dir_resolves_beside_the_checkout_root() -> None:
 
 
 class TestLayoutValidation:
-    def test_dir_missing_raises(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(migration_layout, "MIGRATIONS_DIR", tmp_path / "nope")
+    def test_dir_missing_raises(self, tmp_path: Path) -> None:
         with pytest.raises(MigrationLayoutError, match="does not exist"):
-            list_migration_files()
+            list_migration_files(migrations_dir=tmp_path / "nope")
 
-    def test_bad_filename_raises(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_bad_filename_raises(self, tmp_path: Path) -> None:
         (tmp_path / f"{SYN}.sql").write_text("-- noop")
         (tmp_path / "0001_legacy.sql").write_text("-- noop")
         init_repo(tmp_path)
-        monkeypatch.setattr(migration_layout, "MIGRATIONS_DIR", tmp_path)
         with pytest.raises(MigrationLayoutError, match="does not match"):
-            list_migration_files()
+            list_migration_files(migrations_dir=tmp_path)
 
-    def test_readme_and_dotfiles_skipped(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_readme_and_dotfiles_skipped(self, tmp_path: Path) -> None:
         (tmp_path / f"{SYN}.sql").write_text("-- noop")
         (tmp_path / "README.md").write_text("docs")
         (tmp_path / ".DS_Store").write_text("junk")
         init_repo(tmp_path)
-        monkeypatch.setattr(migration_layout, "MIGRATIONS_DIR", tmp_path)
-        assert [n for n, _ in list_migration_files()] == [SYN]
+        assert [n for n, _ in list_migration_files(migrations_dir=tmp_path)] == [SYN]
 
 
 class TestValidateMigrationLayout:
@@ -100,9 +94,7 @@ class TestValidateMigrationsAtRef:
             validate_migrations_at_ref("no-such-ref", repo_root=tmp_path)
 
 
-def test_nested_migrations_are_sorted_by_name_not_directory(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_nested_migrations_are_sorted_by_name_not_directory(tmp_path: Path) -> None:
     paths: list[Path] = []
     for directory, name in (("z/early", SYN), ("a/later", SYN2)):
         path = tmp_path / directory / f"{name}.sql"
@@ -110,18 +102,16 @@ def test_nested_migrations_are_sorted_by_name_not_directory(
         path.write_text("SELECT 1;")
         paths.append(path)
     init_repo(tmp_path)
-    monkeypatch.setattr(migration_layout, "MIGRATIONS_DIR", tmp_path)
-    assert list_migration_files() == list(zip((SYN, SYN2), paths, strict=True))
+    assert list_migration_files(migrations_dir=tmp_path) == list(
+        zip((SYN, SYN2), paths, strict=True)
+    )
 
 
-def test_duplicate_migration_name_in_separate_groups_fails(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_duplicate_migration_name_in_separate_groups_fails(tmp_path: Path) -> None:
     for directory in ("one", "two"):
         path = tmp_path / directory / f"{SYN}.sql"
         path.parent.mkdir()
         path.write_text("SELECT 1;")
     init_repo(tmp_path)
-    monkeypatch.setattr(migration_layout, "MIGRATIONS_DIR", tmp_path)
     with pytest.raises(MigrationLayoutError, match="duplicate migration name"):
-        list_migration_files()
+        list_migration_files(migrations_dir=tmp_path)

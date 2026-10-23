@@ -13,6 +13,7 @@ import pytest
 from psycopg import sql
 
 from base.config import settings
+from base.deploy.schema.migration_layout import MIGRATIONS_DIR
 from base.deploy.schema.migrations import (
     BASELINE_NAME,
     MIGRATION_LOCK_KEY,
@@ -106,10 +107,7 @@ def reset_schema_migrations_state(db_url: str) -> Iterator[None]:
         with psycopg.connect(settings.data_plane.db_url, autocommit=True) as conn:
             set_table_to(conn, "set", names)
 
-    # Captured at setup, not at teardown: a test's monkeypatch of MIGRATIONS_DIR
-    # is still active when this autouse fixture tears down, and the after-state
-    # must be the real checkout's canonical applied set.
-    _canonical_applied = sorted(required_migration_set())
+    _canonical_applied = sorted(required_migration_set(migrations_dir=MIGRATIONS_DIR))
     _reseed([BASELINE_NAME])
     yield
     # Restore the canonical fully-applied state (baseline + every migration file),
@@ -126,12 +124,13 @@ def git(repo: Path, *args: str) -> None:
     subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True)  # noqa: S603 — test git fixture, fixed argv
 
 
+# meiva:note
+# Make `repo` a git worktree with an initial commit. The loader's
+# git-tracking gate (#998) applies only what git tracks, so any test that
+# supplies a migrations directory must model a real checkout. Call AFTER writing
+# the files that should be tracked (they land in the initial commit); files
+# written afterwards are untracked by construction.
 def init_repo(repo: Path) -> None:
-    """Make `repo` a git worktree with an initial commit. The loader's
-    git-tracking gate (#998) applies only what git tracks, so any test that
-    monkeypatches MIGRATIONS_DIR must model a real checkout. Call AFTER writing
-    the files that should be tracked (they land in the initial commit); files
-    written afterwards are untracked by construction."""
     git(repo, "init", "-q")
     git(repo, "config", "user.email", "t@t")
     git(repo, "config", "user.name", "t")

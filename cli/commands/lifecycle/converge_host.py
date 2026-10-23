@@ -17,6 +17,7 @@ from pathlib import Path
 
 from base.agents.context.clients import DatabaseFactory
 from base.cluster.machine import MachineIdentity, MachineRoles
+from base.deploy.schema.migration_layout import MIGRATIONS_DIR
 from base.host.converge.accessibility import (
     clear_status as clear_accessibility_status,
 )
@@ -314,7 +315,7 @@ def warn_untracked_migrations(ctx: ConvergeCtx) -> None:  # noqa: ARG001
     """
     from base.deploy.schema.migrations import untracked_migration_files
 
-    names = untracked_migration_files()
+    names = untracked_migration_files(migrations_dir=MIGRATIONS_DIR)
     if names:
         print(
             f"⚠ [migration] {len(names)} untracked file(s) in migrations/ are NOT "

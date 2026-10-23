@@ -68,12 +68,12 @@ import re as re
 import subprocess as subprocess
 from collections.abc import Callable, Generator
 from collections.abc import Iterable as Iterable
+from pathlib import Path
 
 import psycopg
 
 from base.cluster.machine import MachineNameMissing
 from base.db import connect_url
-from base.deploy.schema import migration_layout
 from base.deploy.schema.migration_errors import CodeBehindSchema as CodeBehindSchema
 from base.deploy.schema.migration_errors import (
     MigrationAuthorityMismatch as MigrationAuthorityMismatch,
@@ -87,6 +87,7 @@ from base.deploy.schema.migration_history import RESET_ANCHOR, assert_reset_hist
 from base.deploy.schema.migration_history import V010_PRE_RESET_SET as V010_PRE_RESET_SET
 from base.deploy.schema.migration_layout import BASELINE_NAME as BASELINE_NAME
 from base.deploy.schema.migration_layout import FILENAME_RE as FILENAME_RE
+from base.deploy.schema.migration_layout import MIGRATIONS_DIR
 from base.deploy.schema.migration_layout import STEM_RE as STEM_RE
 from base.deploy.schema.migration_layout import assert_unique as assert_unique
 from base.deploy.schema.migration_layout import git_probe as git_probe
@@ -109,7 +110,7 @@ from base.deploy.schema.migration_layout import (
     validate_migrations_at_ref as validate_migrations_at_ref,
 )
 from base.log import logger
-from base.paths.home import home_checkout_error, resolve_meiva_home
+from base.paths.home import home_checkout_error
 
 # Fixed key for the Postgres advisory lock that serializes the whole apply loop
 # (see `schema_mutation_lock`). Arbitrary but stable cluster-wide; ASCII "AVMI".
@@ -156,7 +157,7 @@ def applied_migration_names(conn: psycopg.Connection) -> set[str]:
     return _applied_migration_set(conn)
 
 
-def check_schema_version(conn: psycopg.Connection) -> None:
+def check_schema_version(conn: psycopg.Connection, *, migrations_dir: Path) -> None:
     """Pre-startup sanity: the DB's applied set **must equal** the code's
     required set (baseline + migration files). Both directions are errors:
 
@@ -180,7 +181,7 @@ def check_schema_version(conn: psycopg.Connection) -> None:
         CodeBehindSchema: DB ahead of code (or divergent).
         MigrationLayoutError: migrations/ layout itself is broken.
     """
-    required = required_migration_set()
+    required = required_migration_set(migrations_dir=migrations_dir)
     applied = _applied_migration_set(conn)
     missing = required - applied  # DB behind code
     extra = applied - required  # DB ahead of code
@@ -227,7 +228,7 @@ def assert_schema_current(db_url: str) -> None:
     identically. Bounded at 5s, boot raises the socket error instead.
     """
     with connect_url(db_url, autocommit=True) as conn:
-        check_schema_version(conn)
+        check_schema_version(conn, migrations_dir=MIGRATIONS_DIR)
 
 
 @contextlib.contextmanager
@@ -279,7 +280,11 @@ def _gateway_units(conn: psycopg.Connection) -> list[tuple[str, str]]:
 
 
 def _assert_migration_authority(
-    conn: psycopg.Connection, *, machine_name: Callable[[], str]
+    conn: psycopg.Connection,
+    *,
+    machine_name: Callable[[], str],
+    migrations_dir: Path,
+    home: Path,
 ) -> None:
     """Refuse unless this checkout is the gateway unit of the cluster it is about
     to migrate. Raises MigrationAuthorityMismatch naming both identities.
@@ -294,8 +299,7 @@ def _assert_migration_authority(
     units = _gateway_units(conn)
     if not units:
         return
-    home = resolve_meiva_home()
-    foreign = home_checkout_error(migration_layout.MIGRATIONS_DIR.parent)
+    foreign = home_checkout_error(migrations_dir.parent, home=home)
     try:
         this_machine = machine_name()
     except MachineNameMissing:
@@ -307,7 +311,7 @@ def _assert_migration_authority(
     raise MigrationAuthorityMismatch(
         f"refusing to migrate: this checkout claims {claim}, but the database's "
         f"gateway unit is {owner}. A cluster's schema is owned by its gateway — "
-        f"update the cluster from there. Applying {migration_layout.MIGRATIONS_DIR} would leave the "
+        f"update the cluster from there. Applying {migrations_dir} would leave the "
         f"gateway's own code behind the schema and wedge every agent boot."
     )
 
@@ -324,7 +328,11 @@ def squash_history(conn: psycopg.Connection, names: set[str]) -> None:
 
 
 def apply_pending_migrations(
-    conn: psycopg.Connection, *, machine_name: Callable[[], str]
+    conn: psycopg.Connection,
+    *,
+    machine_name: Callable[[], str],
+    migrations_dir: Path,
+    home: Path,
 ) -> list[str]:
     """Apply every git-tracked migration file whose name is not yet in the DB's
     applied set, in name (≈ chronological) order; return the list of names
@@ -355,7 +363,7 @@ def apply_pending_migrations(
         MigrationAuthorityMismatch: this checkout does not own the cluster.
     """
     with schema_mutation_lock(conn):
-        files = list_migration_files()
+        files = list_migration_files(migrations_dir=migrations_dir)
         applied = _applied_migration_set(conn)
         required = {BASELINE_NAME} | {name for name, _ in files}
 
@@ -372,7 +380,12 @@ def apply_pending_migrations(
         # schema (a squash is a mutation too).
         pending = [(name, path) for name, path in files if name not in applied]
         if pending or squash:
-            _assert_migration_authority(conn, machine_name=machine_name)
+            _assert_migration_authority(
+                conn,
+                machine_name=machine_name,
+                migrations_dir=migrations_dir,
+                home=home,
+            )
 
         resetting = RESET_ANCHOR in required - applied
         if squash and not resetting:

@@ -25,11 +25,11 @@ def require_own_checkout(args_in: list[str], repo: Path) -> int | None:
     anything loads the home's configuration. The refusal does not echo the argv: it
     can carry a secret (`meiva config set KEY=...`).
     """
-    from base.paths.home import home_checkout_error
+    from base.paths.home import home_checkout_error, resolve_meiva_home
 
     if args_in in ([], ["-h"], ["--help"]):
         return None
-    error = home_checkout_error(repo)
+    error = home_checkout_error(repo, home=resolve_meiva_home())
     if error is None:
         return None
     print(f"✗ meiva: {error}", file=sys.stderr)

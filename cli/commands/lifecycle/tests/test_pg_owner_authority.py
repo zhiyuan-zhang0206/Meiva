@@ -41,6 +41,7 @@ from base.cluster.dataplane import pg_admin
 from base.cluster.dataplane.pg_admin import OwnerAuthority, local_owner_authority, owner_conninfo
 from base.cluster.dataplane.pg_tools import pg_tool
 from base.config import settings
+from base.deploy.schema.migration_layout import MIGRATIONS_DIR
 from base.deploy.schema.migrations import apply_pending_migrations, required_migration_set
 from base.host.db_authority.model import GATEWAY_GROUP, RUNNER_GROUP, Groups
 from base.paths.home import resolve_meiva_home
@@ -265,7 +266,12 @@ def _provision_by_owner_login(pg_port: int, identity: str, dim: int) -> None:
     with PostgresSaver.from_conn_string(login) as saver:
         saver.setup()
     with psycopg.connect(login) as conn:
-        apply_pending_migrations(conn, machine_name=lambda: "owner-procedure-test")
+        apply_pending_migrations(
+            conn,
+            machine_name=lambda: "owner-procedure-test",
+            migrations_dir=MIGRATIONS_DIR,
+            home=resolve_meiva_home(),
+        )
     _grant_groups(pg_port, identity)
     with psycopg.connect(login) as conn:
         prepare_table(conn, dim)
@@ -360,7 +366,7 @@ def test_authority_matches_owner_login_privileges_and_is_idempotent(
     assert after_birth == _snapshot(_admin_on(owned_pg, legacy), legacy)
     assert _foreign_owned(_admin_on(owned_pg, current), current) == []
     assert _prepared_state(_admin_on(owned_pg, current)) == (
-        required_migration_set(),
+        required_migration_set(migrations_dir=MIGRATIONS_DIR),
         _vector_available(owned_pg),
     )
 
