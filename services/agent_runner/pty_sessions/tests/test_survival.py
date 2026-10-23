@@ -29,7 +29,7 @@ from base.sessions.pty.client import PtyClientConfig
 from base.sessions.pty.paths import ledger_path
 from base.sessions.pty.tests import pty_jobs as jobs
 from base.sessions.pty.tests import pty_shells as support
-from base.sessions.pty.tests.pty_service import REPO, PtyServiceProcess
+from base.sessions.pty.tests.pty_service import REPO, PtyServiceProcess, service_run, service_socket
 from base.sessions.pty.tests.pty_service import pty_service as pty_service
 from base.sessions.pty.tests.pty_shells import new, output_until, type_line, wait_for
 from services.agent_runner.pty_sessions import ledger
@@ -79,12 +79,14 @@ def test_a_session_outlives_the_process_that_created_it(unit_home: Path) -> None
     host.send_signal(signal.SIGKILL)
     host.wait(timeout=10)
 
-    assert client.has_session(name), "the session died with its creator"
+    assert client.has_session(name, socket_path=service_socket()), (
+        "the session died with its creator"
+    )
     assert wait_for(lambda: int(counter.read_text()) > before + 3), "its job stopped running"
     type_line(name, "echo reached-by-the-next-client")
     output_until(name, "reached-by-the-next-client")
     assert wait_for(lambda: support.screen(name).rstrip().endswith(("$", "#")))
-    assert client.kill(name, graceful=False).interrupted is False
+    assert client.kill(name, graceful=False, socket_path=service_socket()).interrupted is False
 
 
 @pytest.mark.usefixtures("pty_service")
@@ -102,17 +104,19 @@ def test_a_backend_session_outlives_the_process_that_created_it(unit_home: Path)
         text=True,
     )
     assert host.stdout is not None and host.stdout.readline().strip() == "created"
-    (before,) = client.list_sessions()
+    (before,) = client.list_sessions(socket_path=service_socket())
 
     host.send_signal(signal.SIGKILL)
     host.wait(timeout=10)
 
-    backend = PtySessionBackend(config=PtyClientConfig())
+    backend = PtySessionBackend(config=PtyClientConfig(socket_path=service_socket()))
     assert backend.has_session(name)
     backend.send(name, "echo reached-through-the-backend")
     backend.send_keys(name, "Enter")
     output_until(name, "reached-through-the-backend")
-    assert [s.pid for s in client.list_sessions()] == [before.pid], "the same shell answered"
+    assert [s.pid for s in client.list_sessions(socket_path=service_socket())] == [before.pid], (
+        "the same shell answered"
+    )
     assert backend.kill_session(name) == (True, "forced")
 
 
@@ -120,7 +124,7 @@ def test_a_backend_session_outlives_the_process_that_created_it(unit_home: Path)
 def test_a_session_outlives_every_client_restarting_in_turn(unit_home: Path) -> None:
     name = "meiva-agent-987-shell-1-reconnect"
     new(name, unit_home)
-    (first,) = client.list_sessions()
+    (first,) = client.list_sessions(socket_path=service_socket())
     for generation in range(3):
         result = subprocess.run(  # noqa: S603 — repo-internal interpreter + inline program
             [
@@ -138,7 +142,7 @@ def test_a_session_outlives_every_client_restarting_in_turn(unit_home: Path) -> 
         )
         assert result.returncode == 0, result.stderr
         output_until(name, f"generation-{generation}")
-    assert [s.pid for s in client.list_sessions()] == [first.pid]
+    assert [s.pid for s in client.list_sessions(socket_path=service_socket())] == [first.pid]
 
 
 def test_stopping_the_service_closes_its_sessions_and_removes_the_socket(
@@ -155,10 +159,9 @@ def test_stopping_the_service_closes_its_sessions_and_removes_the_socket(
     assert pty_service.wait() == 0
     assert jobs.wait_exit(job.pid), "the service left a job running behind its stop"
     assert jobs.wait_exit(shell.pid)
-    from base.sessions.pty.paths import service_socket_path
 
-    assert not service_socket_path().exists()
-    assert client.list_sessions() == []
+    assert not service_socket().exists()
+    assert client.list_sessions(socket_path=service_socket()) == []
 
 
 def test_a_crashed_service_sweeps_known_shells_without_discovering_jobs(
@@ -169,7 +172,7 @@ def test_a_crashed_service_sweeps_known_shells_without_discovering_jobs(
     shell = jobs.start(name, unit_home, jobs.STUBBORN)
     output_until(name, "stubborn-ready")
     (job,) = jobs.live_children(shell)
-    recorded = json.loads(ledger_path().read_text())["sessions"]
+    recorded = json.loads(ledger_path(service_run()).read_text())["sessions"]
     assert recorded[name]["members"] == [], "ordinary persistence does not scan membership"
     try:
         pty_service.signal(signal.SIGKILL)
@@ -177,9 +180,9 @@ def test_a_crashed_service_sweeps_known_shells_without_discovering_jobs(
         assert jobs.wait_exit(shell.pid, timeout=10), "the master hangup ends the shell"
         assert psutil.pid_exists(job.pid), "the job ignores hangup"
         pty_service.start()
-        assert client.list_sessions() == []
+        assert client.list_sessions(socket_path=service_socket()) == []
         assert psutil.pid_exists(job.pid), "the sweep must not discover unrecorded jobs"
-        assert json.loads(ledger_path().read_text())["sessions"] == {}
+        assert json.loads(ledger_path(service_run()).read_text())["sessions"] == {}
     finally:
         jobs.kill_quietly(job.pid)
 
@@ -194,8 +197,8 @@ def test_a_crashed_services_stale_socket_is_replaced_by_the_next_start(
 
     pty_service.start()
 
-    assert client.request("ping")["pid"] == pty_service.pid
-    assert not client.has_session("meiva-agent-987-shell-6-stale")
+    assert client.request("ping", socket_path=service_socket())["pid"] == pty_service.pid
+    assert not client.has_session("meiva-agent-987-shell-6-stale", socket_path=service_socket())
 
 
 def test_the_sweep_closes_the_members_a_dead_shell_left_and_reports_the_busy_session(
@@ -394,7 +397,7 @@ def test_a_crashed_service_keeps_local_evidence_without_notifying_or_replaying(
     (job,) = jobs.live_children(shell)
     # Explicit known-target fixture, also readable from the legacy ledger shape.
     ledger.write(
-        ledger_path(),
+        ledger_path(service_run()),
         [closure.Target(name, OwnedProcess.capture(shell), (OwnedProcess.capture(job),))],
     )
     pty_service.signal(signal.SIGKILL)
@@ -406,9 +409,9 @@ def test_a_crashed_service_keeps_local_evidence_without_notifying_or_replaying(
     old_journal.write_text(old_content)
 
     pty_service.start()
-    assert client.request("ping")["pid"] == pty_service.pid
+    assert client.request("ping", socket_path=service_socket())["pid"] == pty_service.pid
     assert old_journal.read_text() == old_content
-    assert ledger.read(ledger_path()) == []
+    assert ledger.read(ledger_path(service_run())) == []
 
     def inbounds() -> list[tuple[str, str]]:
         with db_conn.cursor() as cur:
@@ -436,7 +439,7 @@ def test_a_crash_sweep_with_an_unreachable_database_still_serves_new_sessions(
     shell = support.shell_process(name)
     (job,) = jobs.live_children(shell)
     ledger.write(
-        ledger_path(),
+        ledger_path(service_run()),
         [closure.Target(name, OwnedProcess.capture(shell), (OwnedProcess.capture(job),))],
     )
     pty_service.signal(signal.SIGKILL)
@@ -444,7 +447,7 @@ def test_a_crash_sweep_with_an_unreachable_database_still_serves_new_sessions(
 
     pty_service.start()
 
-    assert client.request("ping")["pid"] == pty_service.pid
+    assert client.request("ping", socket_path=service_socket())["pid"] == pty_service.pid
     assert not (unit_home / "run" / "pty-close-notices.json").exists()
     new("meiva-agent-987-shell-9-after", unit_home)
-    assert client.has_session("meiva-agent-987-shell-9-after")
+    assert client.has_session("meiva-agent-987-shell-9-after", socket_path=service_socket())

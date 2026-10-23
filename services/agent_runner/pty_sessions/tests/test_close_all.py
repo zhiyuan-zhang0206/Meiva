@@ -12,6 +12,7 @@ from base.sessions.pty.tests import pty_jobs as jobs
 from base.sessions.pty.tests import pty_shells as support
 from base.sessions.pty.tests.job_wait import wait_for_foreground, wait_for_job
 from base.sessions.pty.tests.pty_service import pty_service as pty_service
+from base.sessions.pty.tests.pty_service import service_socket
 from base.sessions.pty.tests.pty_shells import new, output_until, type_line, wait_for
 
 pytestmark = [
@@ -29,10 +30,10 @@ def test_a_regular_job_and_its_shell_close_within_the_grace(unit_home: Path) -> 
     output_until(name, "job-ready")
     (job,) = jobs.live_children(shell)
     wait_for_foreground(job)
-    (info,) = client.list_sessions()
+    (info,) = client.list_sessions(socket_path=service_socket())
 
     started = time.monotonic()
-    outcome = client.close_all(grace_s=10.0, kill_s=3.0)
+    outcome = client.close_all(grace_s=10.0, kill_s=3.0, socket_path=service_socket())
 
     assert time.monotonic() - started < 8, "a job that handles TERM must not cost the whole grace"
     assert _names(outcome) == [name]
@@ -40,7 +41,7 @@ def test_a_regular_job_and_its_shell_close_within_the_grace(unit_home: Path) -> 
     assert outcome.closed[0].left == ()
     assert outcome.survivors == ()
     assert jobs.wait_exit(job.pid), "the job must be closed"
-    assert client.list_sessions() == []
+    assert client.list_sessions(socket_path=service_socket()) == []
 
 
 def test_an_idle_session_closes_silently(unit_home: Path) -> None:
@@ -50,11 +51,11 @@ def test_an_idle_session_closes_silently(unit_home: Path) -> None:
     assert wait_for(lambda: support.screen(name).rstrip().endswith("meiva-idle-shell>"))
     shell = support.shell_process(name)
 
-    outcome = client.close_all(grace_s=5.0, kill_s=3.0)
+    outcome = client.close_all(grace_s=5.0, kill_s=3.0, socket_path=service_socket())
 
     assert outcome.closed == ()
     assert jobs.wait_exit(shell.pid)
-    assert client.list_sessions() == []
+    assert client.list_sessions(socket_path=service_socket()) == []
 
 
 def test_a_restart_loop_shell_cannot_outlive_the_closure(unit_home: Path) -> None:
@@ -63,7 +64,7 @@ def test_a_restart_loop_shell_cannot_outlive_the_closure(unit_home: Path) -> Non
     shell = support.shell_process(name)
     wait_for_foreground(wait_for_job(shell, ["bash", "-c", "while true; do sleep 1; done"]))
 
-    outcome = client.close_all(grace_s=10.0, kill_s=3.0)
+    outcome = client.close_all(grace_s=10.0, kill_s=3.0, socket_path=service_socket())
 
     assert _names(outcome) == [name]
     assert jobs.wait_exit(shell.pid), "the restart loop shell must exit"
@@ -77,7 +78,7 @@ def test_a_job_that_ignores_termination_is_killed_after_its_grace(unit_home: Pat
     wait_for_foreground(job)
 
     started = time.monotonic()
-    outcome = client.close_all(grace_s=1.0, kill_s=3.0)
+    outcome = client.close_all(grace_s=1.0, kill_s=3.0, socket_path=service_socket())
 
     assert time.monotonic() - started < 8, "the grace bounds the wait"
     assert jobs.wait_exit(job.pid, timeout=5), "the job outlived the closure"
@@ -101,9 +102,11 @@ def test_an_untracked_nohup_job_does_not_block_shell_session_closure(
         if background_exited:
             jobs.kill_quietly(member)
             assert wait_for(lambda: not psutil.pid_exists(member)), "the test job must exit"
-        outcome = client.close_all(grace_s=1.0, kill_s=3.0)
+        outcome = client.close_all(grace_s=1.0, kill_s=3.0, socket_path=service_socket())
         assert jobs.wait_exit(shell.pid), "the known shell must close"
-        assert client.list_sessions() == [], "the master must close despite a leftover job"
+        assert client.list_sessions(socket_path=service_socket()) == [], (
+            "the master must close despite a leftover job"
+        )
         assert outcome.survivors == (), "untracked jobs are not certified or reported"
     finally:
         jobs.kill_quietly(member)
@@ -117,9 +120,11 @@ def test_an_escaped_child_holding_the_slave_does_not_block_master_teardown(unit_
     assert wait_for(lambda: psutil.Process(child).ppid() != shell.pid)
     assert wait_for(lambda: support.screen(name).rstrip().endswith(("$", "#")))
     try:
-        outcome = client.close_all(grace_s=0.5, kill_s=3.0)
+        outcome = client.close_all(grace_s=0.5, kill_s=3.0, socket_path=service_socket())
         assert jobs.wait_exit(shell.pid)
-        assert client.list_sessions() == [], "master teardown must not wait for slave EOF"
+        assert client.list_sessions(socket_path=service_socket()) == [], (
+            "master teardown must not wait for slave EOF"
+        )
         assert psutil.pid_exists(child), "the escaped worker is not a known target"
         assert outcome.survivors == ()
     finally:
@@ -136,21 +141,26 @@ def test_the_closure_covers_every_session_at_once(unit_home: Path) -> None:
     idle = "meiva-agent-987-shell-99-quiet"
     new(idle, unit_home)
 
-    outcome = client.close_all(grace_s=1.0, kill_s=3.0)
+    outcome = client.close_all(grace_s=1.0, kill_s=3.0, socket_path=service_socket())
 
     assert sorted(_names(outcome)) == sorted(busy)
     assert all(jobs.wait_exit(shell.pid) for shell in shells)
-    assert client.list_sessions() == []
+    assert client.list_sessions(socket_path=service_socket()) == []
 
 
 def test_a_closure_over_no_sessions_is_empty() -> None:
-    assert client.close_all(grace_s=1.0, kill_s=1.0) == closure.Outcome()
+    assert (
+        client.close_all(grace_s=1.0, kill_s=1.0, socket_path=service_socket()) == closure.Outcome()
+    )
 
 
 def test_no_session_is_born_while_the_closure_runs(unit_home: Path) -> None:
     jobs.start("meiva-agent-987-shell-2060-slow", unit_home, jobs.STUBBORN)
     output_until("meiva-agent-987-shell-2060-slow", "stubborn-ready")
-    closing = threading.Thread(target=client.close_all, kwargs={"grace_s": 3.0, "kill_s": 3.0})
+    closing = threading.Thread(
+        target=client.close_all,
+        kwargs={"grace_s": 3.0, "kill_s": 3.0, "socket_path": service_socket()},
+    )
     closing.start()
     try:
         refusal: list[client.ServiceError] = []
@@ -161,7 +171,9 @@ def test_no_session_is_born_while_the_closure_runs(unit_home: Path) -> None:
             except client.ServiceError as exc:
                 refusal.append(exc)
                 return True
-            client.kill("meiva-agent-987-shell-2061-late", graceful=False)
+            client.kill(
+                "meiva-agent-987-shell-2061-late", graceful=False, socket_path=service_socket()
+            )
             return False
 
         assert wait_for(refused, timeout=5, interval=0.05)
@@ -175,9 +187,9 @@ def test_the_closure_outcome_survives_the_wire(unit_home: Path) -> None:
     name = "meiva-agent-987-shell-2070-wire"
     jobs.start(name, unit_home, jobs.STUBBORN)
     output_until(name, "stubborn-ready")
-    (info,) = client.list_sessions()
+    (info,) = client.list_sessions(socket_path=service_socket())
 
-    outcome = client.close_all(grace_s=0.5, kill_s=3.0)
+    outcome = client.close_all(grace_s=0.5, kill_s=3.0, socket_path=service_socket())
 
     (closed,) = outcome.closed
     assert (closed.shell.pid, closed.shell.birth) == (info.pid, info.create_time)

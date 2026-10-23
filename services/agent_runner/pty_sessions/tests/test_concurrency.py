@@ -22,6 +22,7 @@ import pytest
 from base.sessions.pty import client
 from base.sessions.pty.tests import pty_shells as support
 from base.sessions.pty.tests.pty_service import pty_service as pty_service
+from base.sessions.pty.tests.pty_service import service_socket
 from base.sessions.pty.tests.pty_shells import new, type_line, wait_for
 
 pytestmark = [
@@ -45,7 +46,7 @@ def _start_streaming(home: Path) -> list[str]:
         # Builds the live pyte model while the shell is quiet: every byte printed from now on
         # feeds it. Built after the flood starts, the first capture would replay a full 2 MiB
         # ring through pure-Python pyte (seconds of CPU) against twenty spinning `yes` processes.
-        client.capture(name, 20, scrollback=True)
+        client.capture(name, 20, scrollback=True, socket_path=service_socket())
     for name in streaming:
         type_line(name, "yes streaming-output")
     return streaming
@@ -62,7 +63,7 @@ class _Pinger:
     def _loop(self) -> None:
         while not self._stop.is_set():
             started = time.monotonic()
-            client.request("ping")
+            client.request("ping", socket_path=service_socket())
             self.latencies.append(time.monotonic() - started)
             time.sleep(0.02)
 
@@ -124,8 +125,15 @@ def test_new_sessions_fork_cleanly_while_other_sessions_stream_output(unit_home:
         # Consume every result: a failed shell check must fail the test in the caller.
         list(checks.map(_assert_shell_responds, created))
     # The streaming sessions kept streaming through all of it.
-    assert wait_for(lambda: "streaming-output" in client.capture(streaming[0], 5, scrollback=False))
-    assert {s.name for s in client.list_sessions()} == set(streaming) | set(created)
+    assert wait_for(
+        lambda: (
+            "streaming-output"
+            in client.capture(streaming[0], 5, scrollback=False, socket_path=service_socket())
+        )
+    )
+    assert {s.name for s in client.list_sessions(socket_path=service_socket())} == set(
+        streaming
+    ) | set(created)
     print(  # noqa: T201 — the measured shape of the load, shown with -s
         f"{len(created)} forks in {elapsed:.1f}s with {_STREAMING} streaming sessions; "
         f"ping max {worst * 1000:.0f} ms over {len(pinger.latencies)} pings"

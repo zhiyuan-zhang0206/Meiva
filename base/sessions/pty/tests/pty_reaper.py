@@ -17,6 +17,7 @@ import pytest
 
 from base.native_process.ownership import OwnedProcess
 from base.sessions.pty import client
+from base.sessions.pty.tests.pty_service import service_socket
 
 
 def _running(process: psutil.Process) -> bool:
@@ -67,7 +68,7 @@ class PtyReaper:
 
     def track_session(self, name: str) -> OwnedProcess:
         """Pin a just-created session's shell; return its identity."""
-        (info,) = [s for s in client.list_sessions() if s.name == name]
+        (info,) = [s for s in client.list_sessions(socket_path=service_socket()) if s.name == name]
         shell = OwnedProcess(info.pid, info.create_time, info.starttime)
         self._names.append(name)
         # Construct first, then verify: a pid recycled in between fails the check.
@@ -110,10 +111,12 @@ class PtyReaper:
         # drops a session once it sees its shell's end.
         names = set(self._names)
         listing_deadline = time.monotonic() + 5
-        listed = {info.name for info in client.list_sessions()} & names
+        listed = {info.name for info in client.list_sessions(socket_path=service_socket())} & names
         while listed and time.monotonic() < listing_deadline:
             time.sleep(0.05)
-            listed = {info.name for info in client.list_sessions()} & names
+            listed = {
+                info.name for info in client.list_sessions(socket_path=service_socket())
+            } & names
         survivors = {process.pid for process in frozen if _running(process)}
         survivors |= {process.pid for process in self._strays()}
         if survivors or listed:

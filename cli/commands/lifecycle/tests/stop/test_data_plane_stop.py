@@ -25,6 +25,7 @@ from base.cluster.dataplane import pooler as base_pooler
 from base.native_process.ownership import OwnedProcess
 from base.sessions.pty import client, closure
 from base.sessions.pty.paths import ledger_path
+from base.sessions.pty.tests.pty_service import service_run, service_socket
 from base.sessions.pty.tests.pty_shells import new as new_session
 from base.telemetry import EventPipeline
 from cli.commands.data_plane import maintenance_stop as plane
@@ -289,10 +290,11 @@ def test_a_dead_service_with_only_a_known_job_does_not_block_shell_session_closu
     job = launch("surviving-job", term="ignore")
     member = OwnedProcess.capture(psutil.Process(job.pid))
     ledger.write(
-        ledger_path(), [closure.Target("meiva-agent-123-shell-1", _dead_shell(launch), (member,))]
+        ledger_path(service_run()),
+        [closure.Target("meiva-agent-123-shell-1", _dead_shell(launch), (member,))],
     )
     with pytest.raises(client.ServiceDownError):
-        client.request("list")
+        client.request("list", socket_path=service_socket())
     stop.require_no_shell_sessions()
     stop.await_no_shell_sessions(time.monotonic(), "shell-sessions")
     assert job.poll() is None, "fixture teardown, not shell-session-presence probing, owns this job"
@@ -303,7 +305,9 @@ def test_a_dead_service_whose_ledger_names_only_dead_processes_does_not_refuse(
     home: Path, launch: Launcher
 ) -> None:
     del home
-    ledger.write(ledger_path(), [closure.Target("meiva-agent-123-shell-1", _dead_shell(launch))])
+    ledger.write(
+        ledger_path(service_run()), [closure.Target("meiva-agent-123-shell-1", _dead_shell(launch))]
+    )
     stop.require_no_shell_sessions()
 
 

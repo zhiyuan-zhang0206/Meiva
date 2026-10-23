@@ -9,12 +9,14 @@ pty-sessions client it reads; `base.host.proc` keeps the process primitives.
 from __future__ import annotations
 
 import contextlib
+from pathlib import Path
 
 import psutil
 
 from base.native_process.ownership import OwnedProcess, stable_create_time
-from base.paths import meiva_home, run_dir
+from base.paths import run_dir
 from base.sessions.pty import client
+from base.sessions.pty.paths import service_socket_path
 from base.sessions.record import SessionRecord
 
 __all__ = ["hosting_supervised_session"]
@@ -42,13 +44,13 @@ _SESSION_CREATE_TIME_TOLERANCE_S = 2.0
 # A record whose process is gone, or whose pid the OS recycled onto a
 # different process (start-time mismatch), does not count. Neither does a
 # pty-sessions service that does not answer: there is then no evidence either way.
-def hosting_supervised_session() -> str | None:
+def hosting_supervised_session(home: Path) -> str | None:
     try:
         me = psutil.Process()
         lineage = {me.pid} | {p.pid for p in me.parents()}
     except psutil.Error:  # racing our own ancestry going away — no lineage evidence
         return None
-    for record_path in (run_dir(meiva_home()) / "sessions").glob("*.json"):
+    for record_path in (run_dir(home) / "sessions").glob("*.json"):
         name = record_path.stem
         record = SessionRecord.read(record_path)
         if record is None or record.pid not in lineage:
@@ -66,7 +68,7 @@ def hosting_supervised_session() -> str | None:
                 return name
         except psutil.Error:
             continue
-    return _hosting_pty_session(lineage)
+    return _hosting_pty_session(lineage, service_socket_path(run_dir(home)))
 
 
 # meiva:note
@@ -74,9 +76,9 @@ def hosting_supervised_session() -> str | None:
 #
 # A stop closes every persistent shell session, so one run from a shell the
 # pty-sessions service holds would end itself mid-stop.
-def _hosting_pty_session(lineage: set[int]) -> str | None:
+def _hosting_pty_session(lineage: set[int], socket_path: Path) -> str | None:
     try:
-        sessions = client.list_sessions()
+        sessions = client.list_sessions(socket_path=socket_path)
     except OSError:
         return None
     for info in sessions:

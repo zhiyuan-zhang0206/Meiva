@@ -2,13 +2,16 @@
 
 from collections.abc import Generator
 from contextlib import contextmanager
+from pathlib import Path
 from typing import Any
 
 from psycopg_pool import ConnectionPool
 
 from base.cluster import session_name
 from base.db.transaction import write_transaction
+from base.paths import run_dir
 from base.sessions.pty import client
+from base.sessions.pty.paths import service_socket_path
 from services.wake.schedule_manager.convergence import Desired, revision_in
 
 
@@ -39,14 +42,15 @@ def desired(pool: ConnectionPool[Any], schedule_id: int) -> Desired | None:
     return None if row is None else Desired(*row)
 
 
-def launched_revision(schedule_id: int) -> int | None:
+def launched_revision(home: Path, schedule_id: int) -> int | None:
     """Read provenance from the PTY owner; missing evidence never permits replacement.
 
     A legacy command belongs to revision zero. The allocation generation is a
     separate release identity, still checked by the manager's exact PTY cleanup.
     """
     name = session_name(f"schedule-{schedule_id}")
-    infos = client.list_sessions(name, include_initial_command=True)
+    socket_path = service_socket_path(run_dir(home))
+    infos = client.list_sessions(name, socket_path=socket_path, include_initial_command=True)
     info = next((item for item in infos if item.name == name), None)
     return None if info is None else revision_in(info.initial_command)
 
