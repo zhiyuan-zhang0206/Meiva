@@ -22,7 +22,7 @@ __all__ = ["Site", "format_sites", "sites", "target_under"]
 # meiva:note
 # Whether the dotted `target` is `prefix` or inside it (`lib.mod` holds `lib.mod.f`, not `lib.mod2`).
 def target_under(target: str, prefix: str) -> bool:
-    return target == prefix or target.startswith(f"{prefix}.")
+    return target == prefix or target.startswith((f"{prefix}.", f"{prefix}/"))
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,7 +59,7 @@ def sites(
     """
     wanted = _code(code)
     scopes = [p.rstrip("/") for p in paths]
-    files = [p for p in universe.python_files if _within(p, scopes)]
+    files = [p for p in (*universe.python_files, *universe.typescript_files) if _within(p, scopes)]
     found: list[Site] = []
     for path, scan in sorted(scan_all(universe, jobs, files).items()):
         found.extend(

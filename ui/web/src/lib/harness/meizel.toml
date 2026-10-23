@@ -1,0 +1,12 @@
+exports = ["harness.ts", "use-harness-availability.ts"]
+
+[uses]
+"use-harness-availability.ts" = ["harness.ts"]
+
+[purity]
+"." = "strict-to-be"
+"harness.ts" = "strict"
+
+[debt.impure-call]
+"use-harness-availability.ts#useHarnessAvailability#useQuery" = 1
+"use-harness-availability.ts#useWarmHarnessAvailability#useQuery" = 1

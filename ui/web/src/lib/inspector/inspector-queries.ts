@@ -1,7 +1,6 @@
 import { api } from "../transport/api";
 
-export const inspectLiveQueryKey = (agentId: number) =>
-  ["agent-inspect-live", agentId] as const;
+export { inspectLiveQueryKey } from "../contracts/types";
 
 export const inspectWindowedQueryKey = (agentId: number, hours: number | null) =>
   ["agent-inspect", agentId, hours] as const;

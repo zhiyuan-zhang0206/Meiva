@@ -1,0 +1,21 @@
+exports = ["constants-generated.ts", "errors.ts", "models.ts", "types.ts"]
+
+[uses]
+"errors.test.ts" = ["errors.ts"]
+"event-fixtures.test.ts" = ["types.ts"]
+"models.test.ts" = ["models.ts", "types.ts"]
+"models.ts" = ["types-generated.ts", "types.ts"]
+"types-events.ts" = ["types-generated.ts"]
+"types-settings.ts" = ["types-generated.ts"]
+"types.test.ts" = ["types.ts"]
+"types.ts" = ["types-events.ts", "types-generated.ts", "types-settings.ts"]
+
+[purity]
+"." = "strict"
+"constants-generated.ts" = "strict"
+"errors.ts" = "strict"
+"models.ts" = "strict"
+"types-events.ts" = "strict"
+"types-generated.ts" = "strict"
+"types-settings.ts" = "strict"
+"types.ts" = "strict"

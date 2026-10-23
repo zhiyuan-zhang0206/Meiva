@@ -83,7 +83,7 @@ interface UISlice {
 // watchdog also repairs a half-dead socket, directly through the shared
 // transport or through bumpReconnect() on the legacy path.
 
-import type { ConnectionState } from "@/lib/timeline/use-timeline";
+import type { ConnectionState } from "@/lib/contracts/types";
 
 interface ClusterSlice {
   /** Monotonic token requesting fresh system EventSources after a gateway bounce. */

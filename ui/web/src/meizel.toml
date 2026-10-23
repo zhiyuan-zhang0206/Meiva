@@ -1,0 +1,6 @@
+[uses]
+"app" = ["lib", "test-support"]
+"components" = ["i18n", "lib", "test-support"]
+"i18n" = ["lib", "test-support"]
+"proxy.ts" = ["lib"]
+"test-support" = ["lib"]

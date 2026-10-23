@@ -20,6 +20,7 @@ from __future__ import annotations
 import shutil
 import subprocess
 import tempfile
+import tomllib
 from collections import Counter
 from collections.abc import Generator
 from contextlib import contextmanager
@@ -180,15 +181,46 @@ def regenerated(base_root: Path, ref: str, jobs: int | None) -> Baselines:
     return read_baselines(load_universe(base_root))
 
 
+def _strict_to_be_targets(text: str) -> set[str]:
+    try:
+        doc = tomllib.loads(text)
+    except tomllib.TOMLDecodeError:
+        return set()
+    purity = doc.get("purity")
+    if purity == "strict-to-be":
+        return {"."}
+    if isinstance(purity, dict):
+        return {k for k, v in purity.items() if v == "strict-to-be"}
+    return set()
+
+
+# meiva:note
+# Reads a tracked manifest blob from a git ref using a fixed git show argv without invoking a shell.
+def _base_text(root: Path, ref: str, path: str) -> str:
+    result = subprocess.run(  # noqa: S603
+        ["git", "-C", str(root), "show", f"{ref}:{path}"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    return result.stdout if result.returncode == 0 else ""
+
+
 def purity_changed(root: Path, ref: str) -> bool:
     changed = set(changed_under(root, ref, [":(glob)**/meizel.toml", "meizel.toml"]))
     if not changed:
         return False
     manifests, _ = load_manifests(load_universe(root))
-    return any(
-        (m.purity_default is not None or bool(m.purity)) and manifest_path(d) in changed
-        for d, m in manifests.items()
-    )
+    for d, m in manifests.items():
+        rel = manifest_path(d)
+        if rel not in changed:
+            continue
+        now = {k for k, v in m.purity.items() if v == "strict-to-be"}
+        if m.purity_default == "strict-to-be":
+            now.add(".")
+        if now - _strict_to_be_targets(_base_text(root, ref, rel)):
+            return True
+    return False
 
 
 def _sync_purity_scope(root: Path, ref: str, base_root: Path) -> None:

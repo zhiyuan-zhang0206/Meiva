@@ -1,0 +1,112 @@
+exports = ["api-base.ts", "api.ts", "gateway-origin.ts", "operation-key.ts", "sse-lifecycle.ts", "sse-share.ts", "useEventStream.tsx"]
+
+[uses]
+"api-base.ts" = ["gateway-origin.ts"]
+"api-drafts.test.ts" = ["api.ts"]
+"api-guarded-lifecycle.test.ts" = ["api.ts"]
+"api.test.ts" = ["api.ts", "operation-key.ts"]
+"api.ts" = ["api-base.ts", "operation-key.ts", "upload-delivery.ts"]
+"gateway-origin.test.ts" = ["gateway-origin.ts"]
+"notice-resolution.test.ts" = ["api.ts"]
+"sse-share.test.ts" = ["sse-share.ts"]
+"sse-share.ts" = ["api.ts"]
+"upload-delivery.test.ts" = ["upload-delivery.ts"]
+"upload-delivery.ts" = ["api-base.ts", "operation-key.ts"]
+"use-detail-reconnect.test.ts" = ["api.ts", "useEventStream.tsx"]
+"useEventStream.test.ts" = ["api.ts", "useEventStream.tsx"]
+"useEventStream.tsx" = ["api.ts", "sse-lifecycle.ts", "sse-share.ts"]
+
+[purity]
+"." = "strict-to-be"
+"gateway-origin.ts" = "strict"
+
+[debt.first-party-patch]
+"api-drafts.test.ts#vi.mock ui/web/src/lib/telemetry/telemetry.ts" = 1
+"api.test.ts#vi.mock ui/web/src/lib/telemetry/telemetry.ts" = 1
+"notice-resolution.test.ts#vi.mock ui/web/src/lib/telemetry/telemetry.ts" = 1
+"sse-share.test.ts#vi.mock ui/web/src/lib/telemetry/telemetry.ts" = 1
+"use-detail-reconnect.test.ts#vi.mock ui/web/src/lib/transport/api.ts" = 1
+"use-detail-reconnect.test.ts#vi.mock ui/web/src/lib/transport/useEventStream.tsx" = 1
+"useEventStream.test.ts#vi.mock ui/web/src/lib/telemetry/telemetry.ts" = 1
+"useEventStream.test.ts#vi.mock ui/web/src/lib/transport/api.ts" = 1
+
+[debt.impure-call]
+"api-base.ts#<module>#process.env" = 1
+"api-base.ts#<module>#window" = 1
+"api.ts#<module>#XMLHttpRequest" = 1
+"api.ts#<module>#new XMLHttpRequest" = 1
+"api.ts#<module>#window" = 1
+"api.ts#f#fetch" = 1
+"api.ts#f#performance.now" = 1
+"api.ts#jsonWithTimeout#clearTimeout" = 1
+"api.ts#jsonWithTimeout#setTimeout" = 1
+"operation-key.ts#newOperationKey#crypto.getRandomValues" = 1
+"operation-key.ts#newOperationKey#crypto.randomUUID" = 1
+"sse-lifecycle.ts#createSseLifecycle#EventSource" = 1
+"sse-lifecycle.ts#createSseLifecycle#clearTimeout" = 1
+"sse-lifecycle.ts#createSseLifecycle#setTimeout" = 1
+"sse-share.ts#<module>#EventSource" = 1
+"sse-share.ts#<module>#clearInterval" = 1
+"sse-share.ts#<module>#clearTimeout" = 1
+"sse-share.ts#<module>#console.error" = 1
+"sse-share.ts#<module>#console.warn" = 1
+"sse-share.ts#<module>#document" = 1
+"sse-share.ts#<module>#queueMicrotask" = 1
+"sse-share.ts#<module>#setInterval" = 1
+"sse-share.ts#<module>#setTimeout" = 1
+"sse-share.ts#sharedSseTransport#BroadcastChannel" = 1
+"sse-share.ts#sharedSseTransport#Date.now" = 1
+"sse-share.ts#sharedSseTransport#EventSource" = 1
+"sse-share.ts#sharedSseTransport#navigator" = 1
+"sse-share.ts#sharedSseTransport#new BroadcastChannel" = 1
+"sse-share.ts#sharedSseTransport#new EventSource" = 1
+"sse-share.ts#sseTransport#BroadcastChannel" = 1
+"sse-share.ts#sseTransport#Date.now" = 1
+"sse-share.ts#sseTransport#EventSource" = 1
+"sse-share.ts#sseTransport#navigator" = 1
+"sse-share.ts#sseTransport#new BroadcastChannel" = 1
+"sse-share.ts#sseTransport#new EventSource" = 1
+"upload-delivery.ts#submitUploadedFiles#XMLHttpRequest" = 1
+"upload-delivery.ts#submitUploadedFiles#new XMLHttpRequest" = 1
+"useEventStream.tsx#<module>#createContext" = 1
+"useEventStream.tsx#AgentEventStreamProvider#useRef" = 1
+"useEventStream.tsx#EventStreamProvider#useEffect" = 1
+"useEventStream.tsx#EventStreamProvider#useRef" = 1
+"useEventStream.tsx#EventStreamProvider#useState" = 1
+"useEventStream.tsx#useAgentEventStream#useContext" = 1
+"useEventStream.tsx#useEventStream#useContext" = 1
+"useEventStream.tsx#useSseConnection#EventSource" = 1
+"useEventStream.tsx#useSseConnection#console.error" = 1
+"useEventStream.tsx#useSseConnection#new EventSource" = 1
+"useEventStream.tsx#useSseConnection#useEffect" = 1
+"useEventStream.tsx#useSseConnection#useRef" = 1
+"useEventStream.tsx#useSseConnection#useState" = 1
+"useEventStream.tsx#useSubscribeEffect#useEffect" = 1
+
+[debt.stdlib-patch]
+"api-drafts.test.ts#vi.stubGlobal fetch" = 1
+"api-guarded-lifecycle.test.ts#vi.stubGlobal fetch" = 2
+"api.test.ts#vi.spyOn performance.now" = 5
+"api.test.ts#vi.stubGlobal XMLHttpRequest" = 1
+"api.test.ts#vi.stubGlobal crypto" = 1
+"api.test.ts#vi.stubGlobal fetch" = 20
+"notice-resolution.test.ts#vi.stubGlobal fetch" = 4
+"sse-share.test.ts#vi.spyOn console.error" = 2
+"sse-share.test.ts#vi.spyOn console.warn" = 1
+"sse-share.test.ts#vi.stubGlobal BroadcastChannel" = 2
+"sse-share.test.ts#vi.stubGlobal EventSource" = 1
+"upload-delivery.test.ts#vi.stubGlobal XMLHttpRequest" = 1
+"use-detail-reconnect.test.ts#vi.spyOn document.visibilityState" = 2
+"useEventStream.test.ts#vi.spyOn console.error" = 3
+"useEventStream.test.ts#vi.spyOn qc.invalidateQueries" = 1
+"useEventStream.test.ts#vi.stubGlobal BroadcastChannel" = 2
+"useEventStream.test.ts#vi.stubGlobal EventSource" = 1
+"useEventStream.test.ts#vi.stubGlobal navigator" = 1
+
+[debt.unfrozen-value]
+"sse-share.ts#mergedTransports" = 1
+"sse-share.ts#modeReported" = 1
+"sse-share.ts#shared" = 1
+
+[debt.wide-exports]
+"meizel.toml#exports" = 1

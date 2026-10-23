@@ -22,8 +22,7 @@ import {
   type FoldContext,
 } from "./index";
 import { createQueryRepairScheduler } from "./repair";
-import type { SystemEvent } from "../contracts/types";
-import type { ConnectionEvent } from "../transport/useEventStream";
+import type { ConnectionEvent, SystemEvent } from "../contracts/types";
 
 export interface FoldOwner {
   onSystemEvent: (ev: SystemEvent) => void;

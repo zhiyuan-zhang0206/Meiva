@@ -48,6 +48,7 @@ table or section name is `policy-syntax`, not an exemption that silently allows 
 | `python-commands` | bare Python subprocess invocations | `argv-wrappers` (list) |
 | `purity` | mechanical purity rules (`strict` / `strict-to-be`) | `impure-imports`, `impure-calls`, `impure-fixtures`, `max-uses`, `max-exports`, `max-public-symbols`, `max-params`, `max-attr-hops` (lists) |
 | `type-checking` | `if TYPE_CHECKING:` | `files` |
+| `typescript` | TypeScript/TSX scanning (`meizel/language/typescript.py`) | `scopes`, `import-sources`, `aliases`, `extensions`, `impure-calls`, `impure-hooks` (lists) |
 
 An entry that names a file or a site still goes stale when the file is gone or the site is no
 longer reported; the lint fails and says which table to remove it from. A lint reads the file

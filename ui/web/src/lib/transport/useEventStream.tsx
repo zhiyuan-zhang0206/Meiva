@@ -16,7 +16,9 @@ import { createSseLifecycle } from "@/lib/transport/sse-lifecycle";
 import { reportSseTransportMode, sseTransport, type SseChannel } from "./sse-share";
 import { useMergedSseChannels } from "../state/sse-merge";
 import { useStore } from "../state/store";
-import type { SystemEvent } from "../contracts/types";
+import type { ConnectionEvent, SystemEvent } from "../contracts/types";
+
+export type { ConnectionEvent } from "../contracts/types";
 
 // Half-dead-connection watchdog window. The server emits a heartbeat data
 // frame after ~15s of silence (so `onmessage` sees liveness even when no
@@ -37,15 +39,6 @@ const WATCHDOG_MS = 45_000;
 // backoff on a successful open.
 const RECONNECT_BASE_MS = 1_000;
 const RECONNECT_MAX_MS = 30_000;
-
-/** Connection / parsing-side events (distinct from SystemEvent
- *  business events). Subscribers use these to decide whether to show a
- *  reconnect banner / report schema drift / show a refresh hint, etc. */
-export type ConnectionEvent =
-  | { type: "open" }
-  | { type: "reconnecting" } // readyState=CONNECTING — UA reconnecting per spec
-  | { type: "closed" } // server closed (404/500 etc), EventSource no longer retries
-  | { type: "parse-failed"; raw: string; error: unknown };
 
 interface Subscriber {
   system: (ev: SystemEvent) => void;

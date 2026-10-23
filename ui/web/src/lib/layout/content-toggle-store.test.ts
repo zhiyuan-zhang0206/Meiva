@@ -6,9 +6,9 @@
 import { act, cleanup, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("@/lib/state/use-user-settings", () => import("@/test-support/user-settings-mock"));
+vi.mock("@/lib/state/use-user-settings", () => import("@/lib/state/user-settings-mock"));
 
-import { mockSetSettingCalls, resetMockSettings, setMockSetting } from "@/test-support/user-settings-mock";
+import { mockSetSettingCalls, resetMockSettings, setMockSetting } from "@/lib/state/user-settings-mock";
 
 import { useContentToggle, useContentToggleReset } from "./content-toggle-store";
 

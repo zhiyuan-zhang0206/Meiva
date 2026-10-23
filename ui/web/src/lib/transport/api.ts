@@ -1,7 +1,7 @@
 // meiva:note
 // The timeout and caller cancellation remain connected through both response headers and response-body consumption. The Inspector client budget leaves serialization and network headroom above the backend work budget. HTTP rejection retains its status separately from network failure. Cross-origin gateway requests include session cookies. Slow-request telemetry removes query strings and normalizes numeric IDs, and telemetry requests do not report themselves.
 // meiva:link ui/web/src/docs/frontend-state/api-requests.meiva.okf.md
-import type { HarnessAvailability } from "@/lib/harness/harness";
+import type { HarnessAvailability } from "../contracts/models";
 
 import { API_BASE } from "./api-base";
 import { track } from "../telemetry/telemetry";

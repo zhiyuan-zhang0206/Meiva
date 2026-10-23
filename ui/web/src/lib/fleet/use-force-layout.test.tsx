@@ -6,9 +6,7 @@ import { act, render } from "@testing-library/react";
 import { useEffect, useRef } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { ForceParams } from "@/components/fleet/force-controls";
-
-import { useForceLayout, type SimLink, type SimNode } from "./use-force-layout";
+import { useForceLayout, type ForceParams, type SimLink, type SimNode } from "./use-force-layout";
 
 const PARAMS: ForceParams = {
   nodeSizeMin: 4,

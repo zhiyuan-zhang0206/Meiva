@@ -1,0 +1,38 @@
+exports = ["sse-merge.ts", "store.ts", "use-user-settings.ts", "user-settings-mock.ts"]
+
+[uses]
+"sse-merge.test.ts" = ["sse-merge.ts", "use-user-settings.ts", "user-settings-mock.ts"]
+"sse-merge.ts" = ["use-user-settings.ts"]
+"store.test.ts" = ["store.ts"]
+"use-user-settings.test.tsx" = ["use-user-settings.ts"]
+"use-user-settings.ts" = ["store.ts"]
+
+[purity]
+"." = "strict-to-be"
+"sse-merge.ts" = "strict-to-be"
+"store.ts" = "strict-to-be"
+"use-user-settings.ts" = "strict-to-be"
+
+[debt.first-party-patch]
+"sse-merge.test.ts#vi.mock ui/web/src/lib/state/use-user-settings.ts" = 1
+"use-user-settings.test.tsx#vi.mock ui/web/src/lib/transport/api.ts" = 1
+"use-user-settings.test.tsx#vi.spyOn ui/web/src/lib/transport/api.ts.getSettings" = 7
+"use-user-settings.test.tsx#vi.spyOn ui/web/src/lib/transport/api.ts.putSetting" = 4
+
+[debt.impure-call]
+"sse-merge.ts#useMergedSseChannels#console.warn" = 1
+"sse-merge.ts#useMergedSseChannels#useEffect" = 1
+"store.ts#<module>#clearTimeout" = 1
+"store.ts#<module>#setTimeout" = 1
+"use-user-settings.ts#<module>#useMutation" = 1
+"use-user-settings.ts#<module>#useQuery" = 1
+"use-user-settings.ts#<module>#useQueryClient" = 1
+"use-user-settings.ts#useDebouncedSetting#clearTimeout" = 1
+"use-user-settings.ts#useDebouncedSetting#setTimeout" = 1
+"use-user-settings.ts#useDebouncedSetting#useEffect" = 1
+"use-user-settings.ts#useDebouncedSetting#useRef" = 1
+"use-user-settings.ts#useDebouncedSetting#useState" = 1
+
+[debt.unfrozen-value]
+"sse-merge.ts#warnedEmptySelection" = 1
+"store.ts#toastTimer" = 1

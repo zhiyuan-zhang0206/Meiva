@@ -13,14 +13,24 @@ import { api } from "../transport/api";
 import { useAgentReconcile } from "../agents/agent-reconcile";
 import { useDisplayLimit } from "../format/display-limits";
 import { useAgentReadRepair } from "../agents/use-agent-read-repair";
-import { inspectLiveQueryKey } from "../inspector/inspector-queries";
 import { errMsg } from "../contracts/errors";
+import {
+  inspectLiveQueryKey,
+  type BackendTimelineItem,
+  type ConnectionEvent,
+  type ConnectionState,
+  type SystemEvent,
+  type TimelineResponse,
+} from "../contracts/types";
+import { isReattachedTimelineContext, parseItemIdParts, standingHeadNoteIds } from "../fold";
 import { noteTurnStart } from "../format/interaction-timing";
-import { useTimelineStore } from "./timeline-store";
 import type { CompactTransitionBuffer } from "../layout/compact-transition";
 import { CONVERSATION_RETENTION_MS } from "../layout/switch-budget";
-import { isReattachedTimelineContext, parseItemIdParts, standingHeadNoteIds } from "./timeline";
+import { useAgentEventStream } from "../transport/useEventStream";
+import { useTimelineStore } from "./timeline-store";
 import { useCompactHistoryRetention, type OlderSegmentLoadResult } from "./use-compact-history-retention";
+
+export type { ConnectionState } from "../contracts/types";
 
 /** Baked fallback for the base number of items fetched per scroll-up — the
  * live value is display.timeline_history_page_base, read at runtime from
@@ -30,9 +40,6 @@ import { useCompactHistoryRetention, type OlderSegmentLoadResult } from "./use-c
 const OLDER_BASE_LIMIT = 50;
 const RETAINED_ITEMS_FALLBACK = 250;
 const EMPTY_ITEMS: BackendTimelineItem[] = [];
-import type { BackendTimelineItem, SystemEvent, TimelineResponse } from "../contracts/types";
-import type { ConnectionEvent } from "../transport/useEventStream";
-import { useAgentEventStream } from "../transport/useEventStream";
 
 function startsTurn(event: SystemEvent): boolean {
   return (
@@ -56,11 +63,6 @@ function hasUnsettledClock(items: readonly BackendTimelineItem[]): boolean {
   }
   return false;
 }
-
-/** SSE connection state — UI uses it to show banners ("disconnected /
- *  reconnecting"). Parse failures are signals,
- *  not health-state changes. */
-export type ConnectionState = Exclude<ConnectionEvent["type"], "parse-failed">;
 
 export interface UseTimelineResult {
   items: BackendTimelineItem[];

@@ -1,9 +1,9 @@
 import { renderHook } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { resetMockSettings } from "@/test-support/user-settings-mock";
+import { resetMockSettings } from "./user-settings-mock";
 
-vi.mock("@/lib/state/use-user-settings", () => import("@/test-support/user-settings-mock"));
+vi.mock("@/lib/state/use-user-settings", () => import("./user-settings-mock"));
 
 import {
   MERGED_SSE_CHANNELS,

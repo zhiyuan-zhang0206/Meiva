@@ -1,0 +1,22 @@
+exports = ["math.ts", "remark-autolink-delimiter.ts", "remark-cjk-link-boundary.ts"]
+
+[uses]
+"math.ts" = ["remark-display-math-recovery.ts", "remark-math-prose-guard.ts"]
+"remark-autolink-delimiter.test.ts" = ["remark-autolink-delimiter.ts", "remark-cjk-link-boundary.ts"]
+"remark-autolink-delimiter.ts" = ["remark-shared.ts"]
+"remark-cjk-link-boundary.test.ts" = ["remark-cjk-link-boundary.ts"]
+"remark-cjk-link-boundary.ts" = ["remark-shared.ts"]
+"remark-display-math-recovery.ts" = ["remark-shared.ts"]
+"remark-math-prose-guard.ts" = ["remark-shared.ts"]
+
+[purity]
+"." = "strict-to-be"
+"remark-autolink-delimiter.ts" = "strict"
+"remark-cjk-link-boundary.ts" = "strict"
+"remark-display-math-recovery.ts" = "strict"
+"remark-math-prose-guard.ts" = "strict"
+"remark-shared.ts" = "strict"
+
+[debt.unfrozen-value]
+"math.ts#importMath" = 1
+"math.ts#mathPromise" = 1

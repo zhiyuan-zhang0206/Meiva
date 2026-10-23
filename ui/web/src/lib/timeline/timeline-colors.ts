@@ -14,45 +14,25 @@
 // which collided with thinking); the user message stays gray; everything else
 // is unchanged from the previous palette.
 
-export const COLOR_FAMILIES = [
-  "emerald",
-  "teal",
-  "cyan",
-  "sky",
-  "blue",
-  "indigo",
-  "violet",
-  "fuchsia",
-  "pink",
-  "rose",
-  "red",
-  "orange",
-  "amber",
-  "gray",
-] as const;
+import {
+  COLOR_FAMILIES,
+  COLOR_SLOT_IDS,
+  TIMELINE_COLOR_ITEMS,
+  type ColorFamily,
+  type ColorSlotId,
+  type FamilyClasses,
+} from "../contracts/types";
 
-export type ColorFamily = (typeof COLOR_FAMILIES)[number];
-
-/** Class shapes used across the timeline visuals. Every string in CLASSES is
- *  a full literal (no runtime interpolation) so every renderable class is
- *  scannable at build time. */
-export interface FamilyClasses {
-  readonly border500_50: string;
-  readonly border500_70: string;
-  readonly border500_40: string;
-  readonly border400_40: string;
-  readonly border400_50: string;
-  readonly border400_60: string;
-  readonly bg50_40_950_15: string;
-  readonly bg50_60_900_20: string;
-  readonly bg50_40_950_10: string;
-  readonly bg50_950_20: string;
-  readonly bg50_900_30: string;
-  readonly bg50_950_30: string;
-  readonly text700_300: string;
-}
-
-export type ColorShape = keyof FamilyClasses;
+export {
+  COLOR_FAMILIES,
+  COLOR_SLOT_IDS,
+  TIMELINE_COLOR_ITEMS,
+  type ColorFamily,
+  type ColorItemSpec,
+  type ColorShape,
+  type ColorSlotId,
+  type FamilyClasses,
+} from "../contracts/types";
 
 const CLASSES: Record<ColorFamily, FamilyClasses> = {
   emerald: {
@@ -288,57 +268,6 @@ export const FAMILY_SWATCH: Record<ColorFamily, string> = {
   orange: "bg-orange-500",
   amber: "bg-amber-500",
   gray: "bg-gray-500",
-};
-
-export const COLOR_SLOT_IDS = [
-  "agent_chat",
-  "agent_code",
-  "code_output",
-  "reasoning",
-  "inbound_human",
-  "inbound_agent",
-  "inbound_system",
-  "system_prompt",
-  "attach",
-  "note",
-  "memory",
-  "lifecycle_terminate",
-  "lifecycle_restart",
-  "lifecycle_resurrect",
-  "lifecycle_fork",
-] as const;
-
-export type ColorSlotId = (typeof COLOR_SLOT_IDS)[number];
-
-export interface ColorItemSpec {
-  /** The user-settings key holding this slot's family override. */
-  readonly key: string;
-  readonly default: ColorFamily;
-  readonly border: ColorShape;
-  readonly bg: ColorShape | null;
-  readonly text: ColorShape | null;
-}
-
-/** One configurable item per distinct timeline visual. The slot set mirrors
- *  the user-approved inventory (2026-09-14): every card kind with a colored
- *  border, the note / memory / lifecycle markers, in the order the settings
- *  panel lists them. */
-export const TIMELINE_COLOR_ITEMS: Record<ColorSlotId, ColorItemSpec> = {
-  agent_chat: { key: "display.color.agent_chat", default: "emerald", border: "border500_50", bg: null, text: null },
-  agent_code: { key: "display.color.agent_code", default: "cyan", border: "border500_70", bg: null, text: null },
-  code_output: { key: "display.color.code_output", default: "amber", border: "border500_50", bg: "bg50_40_950_10", text: null },
-  reasoning: { key: "display.color.reasoning", default: "blue", border: "border400_40", bg: "bg50_60_900_20", text: null },
-  inbound_human: { key: "display.color.inbound_human", default: "gray", border: "border400_60", bg: "bg50_900_30", text: null },
-  inbound_agent: { key: "display.color.inbound_agent", default: "violet", border: "border400_60", bg: "bg50_950_20", text: null },
-  inbound_system: { key: "display.color.inbound_system", default: "sky", border: "border400_60", bg: "bg50_950_20", text: null },
-  system_prompt: { key: "display.color.system_prompt", default: "indigo", border: "border400_40", bg: "bg50_40_950_15", text: null },
-  attach: { key: "display.color.attach", default: "sky", border: "border400_50", bg: "bg50_40_950_10", text: null },
-  note: { key: "display.color.note", default: "teal", border: "border500_40", bg: "bg50_40_950_15", text: "text700_300" },
-  memory: { key: "display.color.memory", default: "violet", border: "border400_60", bg: "bg50_950_30", text: "text700_300" },
-  lifecycle_terminate: { key: "display.color.lifecycle_terminate", default: "rose", border: "border400_60", bg: "bg50_950_30", text: "text700_300" },
-  lifecycle_restart: { key: "display.color.lifecycle_restart", default: "amber", border: "border400_60", bg: "bg50_950_30", text: "text700_300" },
-  lifecycle_resurrect: { key: "display.color.lifecycle_resurrect", default: "emerald", border: "border400_60", bg: "bg50_950_30", text: "text700_300" },
-  lifecycle_fork: { key: "display.color.lifecycle_fork", default: "sky", border: "border400_60", bg: "bg50_950_30", text: "text700_300" },
 };
 
 /** Display names for the Timeline-colors settings rows. Hardcoded English,

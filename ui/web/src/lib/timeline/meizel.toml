@@ -1,0 +1,59 @@
+exports = ["timeline-colors.ts", "timeline-store.ts", "timeline-width.ts", "timeline.ts", "use-throttled-streaming.ts", "use-timeline-colors.ts", "use-timeline.ts"]
+
+[uses]
+"timeline-colors.test.ts" = ["timeline-colors.ts"]
+"timeline-scenarios.test.ts" = ["timeline.ts"]
+"timeline-store.test.ts" = ["timeline-store.ts"]
+"timeline-store.ts" = ["timeline-store-events.ts"]
+"timeline-width.test.ts" = ["timeline-width.ts"]
+"timeline.test.ts" = ["timeline.ts"]
+"use-compact-history-retention.ts" = ["timeline-store.ts"]
+"use-throttled-streaming.test.ts" = ["use-throttled-streaming.ts"]
+"use-timeline-colors.ts" = ["timeline-colors.ts"]
+"use-timeline.test.ts" = ["timeline-store.ts", "timeline.ts", "use-timeline.ts"]
+"use-timeline.ts" = ["timeline-store.ts", "use-compact-history-retention.ts"]
+
+[purity]
+"." = "strict-to-be"
+"timeline-store-events.ts" = "strict"
+"timeline-store.ts" = "strict"
+"timeline.ts" = "strict"
+"use-timeline-colors.ts" = "strict"
+
+[debt.first-party-patch]
+"use-timeline.test.ts#vi.mock ui/web/src/lib/format/interaction-timing.ts" = 1
+"use-timeline.test.ts#vi.mock ui/web/src/lib/transport/api.ts" = 1
+"use-timeline.test.ts#vi.mock ui/web/src/lib/transport/useEventStream.tsx" = 1
+
+[debt.impure-call]
+"use-compact-history-retention.ts#useCompactHistoryRetention#setTimeout" = 1
+"use-compact-history-retention.ts#useCompactHistoryRetention#useEffect" = 1
+"use-compact-history-retention.ts#useCompactHistoryRetention#useLayoutEffect" = 1
+"use-compact-history-retention.ts#useCompactHistoryRetention#useRef" = 1
+"use-throttled-streaming.ts#useThrottledStreaming#Date.now" = 1
+"use-throttled-streaming.ts#useThrottledStreaming#clearTimeout" = 1
+"use-throttled-streaming.ts#useThrottledStreaming#setTimeout" = 1
+"use-throttled-streaming.ts#useThrottledStreaming#useEffect" = 1
+"use-throttled-streaming.ts#useThrottledStreaming#useRef" = 1
+"use-throttled-streaming.ts#useThrottledStreaming#useState" = 1
+"use-timeline.ts#useTimeline#useEffect" = 1
+"use-timeline.ts#useTimeline#useLayoutEffect" = 1
+"use-timeline.ts#useTimeline#useQuery" = 1
+"use-timeline.ts#useTimeline#useQueryClient" = 1
+"use-timeline.ts#useTimeline#useRef" = 1
+
+[debt.stdlib-patch]
+"use-timeline.test.ts#vi.spyOn document.visibilityState" = 2
+"use-timeline.test.ts#vi.spyOn queryClient.invalidateQueries" = 1
+
+[debt.third-party-patch]
+"use-timeline.test.ts#vi.mock react" = 1
+
+[debt.unfrozen-value]
+"timeline-colors.ts#lastResolved" = 1
+
+[debt.wide-exports]
+"meizel.toml#exports" = 1
+
+[debt.wide-public-surface]
+"timeline-width.ts#__all__" = 1

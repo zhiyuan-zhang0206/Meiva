@@ -76,7 +76,7 @@ def _by_code(baselines: Baselines) -> Counter[Code]:
 def _judged_directories(universe: Universe) -> set[str]:
     """Directories with Python anywhere below them: the ones whose rules can be violated."""
     judged: set[str] = set()
-    for path in universe.python_files:
+    for path in (*universe.python_files, *universe.typescript_files):
         directory = parent_of(path)
         while True:
             judged.add(directory)

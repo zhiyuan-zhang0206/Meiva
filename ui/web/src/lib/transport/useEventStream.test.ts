@@ -22,9 +22,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useStore } from "../state/store";
 import { AuthProvider, useAuth } from "../auth/auth-context";
-import { RECONNECT_QUERY_KEYS } from "../fold";
+import { AGENTS_QUERY_KEY, RECONNECT_QUERY_KEYS } from "../fold";
 import { useFoldOwner } from "../fold/owner";
-import { AGENTS_QUERY_KEY } from "../fold/agents";
 import type { SystemEvent } from "../contracts/types";
 import type { ConnectionEvent } from "./useEventStream";
 import {

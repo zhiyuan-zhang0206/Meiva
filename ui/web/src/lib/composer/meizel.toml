@@ -1,0 +1,22 @@
+exports = ["use-reply-suggestion.ts"]
+
+[uses]
+"use-reply-suggestion.test.ts" = ["use-reply-suggestion.ts"]
+
+[purity]
+"." = "strict-to-be"
+"use-reply-suggestion.ts" = "strict-to-be"
+
+[debt.first-party-patch]
+"use-reply-suggestion.test.ts#vi.spyOn ui/web/src/lib/transport/api.ts.getReplySuggestion" = 1
+
+[debt.impure-call]
+"use-reply-suggestion.ts#useReplySuggestion#clearTimeout" = 1
+"use-reply-suggestion.ts#useReplySuggestion#console.warn" = 1
+"use-reply-suggestion.ts#useReplySuggestion#setTimeout" = 1
+"use-reply-suggestion.ts#useReplySuggestion#useEffect" = 1
+"use-reply-suggestion.ts#useReplySuggestion#useRef" = 1
+"use-reply-suggestion.ts#useReplySuggestion#useState" = 1
+
+[debt.stdlib-patch]
+"use-reply-suggestion.test.ts#vi.spyOn console.warn" = 1

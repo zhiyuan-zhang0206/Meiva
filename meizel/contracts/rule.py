@@ -11,7 +11,7 @@ from meizel.contracts.manifest import Manifest, effective_purity, manifest_path,
 from meizel.contracts.policy import Policy
 from meizel.graph.graphs import reachable
 from meizel.graph.model import Code, DebtKey, Diagnostic, Fact, FactKind
-from meizel.graph.universe import is_private_module
+from meizel.graph.universe import Universe, is_private_module
 from meizel.language.fixtures import DEFAULT_IMPURE_FIXTURES, is_test_file
 from meizel.language.scan import FileScan
 
@@ -147,7 +147,7 @@ def _blocked(proj: Projection, manifests: dict[str, Manifest]) -> Diagnostic | N
     fact = proj.fact
     last = len(proj.steps) - 1
     for position, (directory, child) in enumerate(proj.steps):
-        if child == "__init__.py" and position == last:
+        if child in Universe.DOOR_FILES and position == last:
             continue
         if is_private_module(child):
             hint = f"{child!r} is private to {_where(directory)} and cannot be exported; import its door `{_where(directory)}/__init__.py` or a sibling that is exported"
@@ -217,7 +217,7 @@ def _module_purity_diagnostics(
         if fact.kind not in {FactKind.IMPORT, FactKind.ATTRIBUTE} or fact.dst == scan.path:
             continue
         if (
-            effective_purity(fact.dst, manifests) == "none"
+            effective_purity(fact.dst, manifests, include_tests=is_test_file(scan.path)) == "none"
             and (fact.line, fact.dst) not in seen_edges
         ):
             seen_edges.add((fact.line, fact.dst))
@@ -430,7 +430,7 @@ def stale_exports(
         if "/" not in directory:
             continue
         for child in manifest.exports:
-            if child == "__init__.py" or (directory, child) in traversed:
+            if child in Universe.DOOR_FILES or (directory, child) in traversed:
                 continue
             child_path = f"{directory}/{child}"
             mode = effective_purity(child_path, manifests)

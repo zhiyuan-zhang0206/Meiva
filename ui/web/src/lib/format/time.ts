@@ -6,12 +6,17 @@
 // Clock times are written in one of two formats, chosen by the viewer's `display.clock_format` setting and 24-hour by default: `15:45` or `3:45 PM`. `formatClockText` is the single owner of that choice for the viewer's local zone; every formatter here takes `clockFormat` so no call site can hard-code a 12-hour clock. `formatAbsolute` appends the zone name only when `showTimeZone` is on (setting `display.show_timezone`, default off): the viewer's own zone is implied context, and a bare offset is noise.
 // meiva:link ui/web/src/lib/format/docs/time.meiva.okf.md
 
-export type ClockFormat = "24h" | "12h";
+import {
+  DEFAULT_CLOCK_FORMAT,
+  normalizeDayPeriodSpace,
+  type ClockFormat,
+} from "./utils";
 
-// meiva:note
-// DEFAULT_CLOCK_FORMAT is 24-hour: the AM/PM suffix is noise beside 24-hour logs, so 12-hour is opt-in (user ruling 2026-10-19).
-// meiva:link ui/web/src/lib/format/docs/time.meiva.okf.md
-export const DEFAULT_CLOCK_FORMAT: ClockFormat = "24h";
+export {
+  DEFAULT_CLOCK_FORMAT,
+  normalizeDayPeriodSpace,
+  type ClockFormat,
+} from "./utils";
 
 function pad2(value: number): string {
   return String(value).padStart(2, "0");
@@ -204,10 +209,6 @@ function localDateFields(d: Date, timeZone?: string): LocalDateFields {
 
 function dayOrdinal({ year, month, day }: LocalDateFields): number {
   return Math.round(Date.UTC(year, month - 1, day) / MS_PER_DAY);
-}
-
-export function normalizeDayPeriodSpace(value: string): string {
-  return value.replace(/[\u202f\u00a0]/g, " ");
 }
 
 function clockLabel(d: Date, timeZone: string | undefined, clockFormat: ClockFormat): string {
