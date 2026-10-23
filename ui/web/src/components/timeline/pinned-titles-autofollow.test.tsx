@@ -1,32 +1,15 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { BackendTimelineItem } from "@/lib/contracts/types";
+import { __resetHighlighterCacheForTests, __setHighlighterImportForTests } from "@/components/content/python-code";
+import { USER_SETTING_DEFAULTS, type BackendTimelineItem } from "@/lib/contracts/types";
 
 import { TimelineView } from ".";
 
-vi.mock("@/lib/format/display-limits", () => ({
-  useDisplayLimit: (_envVar: string, fallback: number) => fallback,
-}));
-
-vi.mock("@/lib/state/use-user-settings", () => ({
-  useUserSettings: () => ({ settings: {}, setSetting: vi.fn(), isLoading: false }),
-}));
-
-vi.mock("@/lib/layout/content-toggle-store", () => ({
-  useContentToggle: () => ({ detailsMode: "all", isLoading: false }),
-  useContentToggleReset: (selector: (state: { resetPending: boolean; consumeReset: () => void }) => unknown) =>
-    selector({ resetPending: false, consumeReset: vi.fn() }),
-}));
-
 vi.mock("../content/markdown", () => ({
   ChatMarkdown: ({ content }: { content: string }) => <div>{content}</div>,
-}));
-
-vi.mock("../content/python-code", () => ({
-  PythonCode: ({ code }: { code: string }) => <pre>{code}</pre>,
-  preloadPythonCodeHighlighter: () => Promise.resolve(),
 }));
 
 vi.mock("../ui/scroll-area", () => ({
@@ -60,7 +43,16 @@ function mockRect(top: number, bottom: number, height: number): DOMRect {
 }
 
 function setupStuckBlock() {
-  const { container } = render(<TimelineView items={makeItems()} />);
+  __resetHighlighterCacheForTests();
+  __setHighlighterImportForTests(() => new Promise(() => undefined));
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
+  qc.setQueryData(["config", null], { fields: [] });
+  qc.setQueryData(["user-settings"], { ...USER_SETTING_DEFAULTS, "display.expand_runs_mode": "all" });
+  const { container } = render(
+    <QueryClientProvider client={qc}>
+      <TimelineView items={makeItems()} />
+    </QueryClientProvider>,
+  );
   const viewport = container.querySelector<HTMLElement>('[data-slot="scroll-area-viewport"]')!;
   Object.defineProperty(viewport, "scrollHeight", { value: 2000, configurable: true });
   Object.defineProperty(viewport, "clientHeight", { value: 600, configurable: true });
@@ -72,6 +64,8 @@ function setupStuckBlock() {
 
 afterEach(() => {
   cleanup();
+  __resetHighlighterCacheForTests();
+  __setHighlighterImportForTests(null);
   vi.restoreAllMocks();
 });
 

@@ -1,4 +1,4 @@
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClientProvider } from "@tanstack/react-query";
 import {
   act,
   fireEvent,
@@ -11,7 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useTimelineStore } from "@/lib/timeline/timeline-store";
 import { BAR_DIVIDER_CLASS, BAR_HEIGHT_CLASS } from "@/lib/layout/layout";
-import type * as TimeFormat from "@/lib/format/time";
+import { useStore } from "@/lib/state/store";
 import type {
   AgentInspectLive,
   AgentInspectStatistics,
@@ -19,23 +19,24 @@ import type {
 } from "@/lib/contracts/types";
 import {
   cleanupInspectorTest,
+  createInspectorQueryClient,
   fixture,
   getAgent,
   getAgentInspectLive,
   getAgentInspectStatistics,
   getAgentInspectWidgets,
   getAgentRoster,
-  isLargeMock,
+  getSettings,
   listPages,
   liveFixture,
   panelState,
+  putSetting,
   render,
   resolveNotice,
   rosterFixture,
-  setInspectorHours,
+  setInspectorOpen,
   setupInspectorTest,
   streamHandlers,
-  toggle,
 } from "./inspector-test-harness";
 
 vi.mock("@/lib/transport/api", () => ({
@@ -47,14 +48,10 @@ vi.mock("@/lib/transport/api", () => ({
     getAgent,
     listPages,
     resolveNotice,
-    getSettings: vi.fn(() => Promise.resolve({ settings: [] })),
+    putSetting,
+    getSettings,
   },
 }));
-
-vi.mock("@/lib/format/time", async (importOriginal) => {
-  const actual = await importOriginal<typeof TimeFormat>();
-  return { ...actual, formatUpcoming: vi.fn(actual.formatUpcoming) };
-});
 
 vi.mock("@/lib/transport/useEventStream", () => ({
   EventStreamProvider: ({ children }: { children: React.ReactNode }) => children,
@@ -67,31 +64,6 @@ vi.mock("@/lib/transport/useEventStream", () => ({
   },
 }));
 
-vi.mock("@/lib/inspector/inspector-panel-store", async () => {
-  const React = await import("react");
-  return {
-    useInspectorOpen: () => ({ open: panelState.open, toggle }),
-    useInspectorHours: () => {
-      const [hours, setHours] = React.useState(panelState.hours);
-      return {
-        inspectorHours: hours,
-        setInspectorHours: (next: number | null) => {
-          setInspectorHours(next);
-          setHours(next);
-        },
-      };
-    },
-  };
-});
-
-vi.mock("@/lib/layout/breakpoint", () => ({
-  useBreakpoint: () => ({
-    tier: isLargeMock() ? "xl" : "xs",
-    isNarrow: !isLargeMock(),
-    isLarge: isLargeMock(),
-  }),
-}));
-
 import { InspectorPanel } from "./inspector-panel";
 
 beforeEach(setupInspectorTest);
@@ -99,11 +71,11 @@ afterEach(cleanupInspectorTest);
 
 describe("InspectorPanel desktop", () => {
   beforeEach(() => {
-    isLargeMock.mockReturnValue(true);
+    window.innerWidth = 1024;
   });
 
   it("uses the shared scroll surface and resets its viewport on agent switch", () => {
-    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const qc = createInspectorQueryClient();
     const { container, rerender } = rtlRender(
       <QueryClientProvider client={qc}><InspectorPanel agentId={1} /></QueryClientProvider>,
     );
@@ -159,7 +131,7 @@ describe("InspectorPanel desktop", () => {
 
     await waitFor(() => expect(screen.getByText("Persistent shells")).toBeTruthy());
     fireEvent.keyDown(window, { key: "Escape" });
-    expect(toggle).not.toHaveBeenCalled();
+    expect(putSetting).not.toHaveBeenCalled();
   });
 
   it("does not close when clicking outside the desktop side panel", async () => {
@@ -168,7 +140,7 @@ describe("InspectorPanel desktop", () => {
 
     await waitFor(() => expect(screen.getByText("Persistent shells")).toBeTruthy());
     fireEvent.mouseDown(document.body);
-    expect(toggle).not.toHaveBeenCalled();
+    expect(putSetting).not.toHaveBeenCalled();
   });
 
   it("renders nothing while closed", () => {
@@ -182,7 +154,7 @@ describe("InspectorPanel desktop", () => {
 
 describe("InspectorPanel mobile", () => {
   beforeEach(() => {
-    isLargeMock.mockReturnValue(false);
+    window.innerWidth = 375;
   });
 
   it("renders as a full-screen overlay on mobile", async () => {
@@ -206,7 +178,7 @@ describe("InspectorPanel mobile", () => {
     const backdrop = document.querySelector('[aria-hidden="true"]');
     expect(backdrop).toBeTruthy();
     fireEvent.click(backdrop!);
-    expect(toggle).toHaveBeenCalled();
+    expect(useStore.getState().mobileInspectorOpen).toBe(false);
   });
 
   it("closes when clicking the X button (task #793 — the mobile overlay must be closable)", async () => {
@@ -216,7 +188,7 @@ describe("InspectorPanel mobile", () => {
     await waitFor(() => expect(screen.getByText("Persistent shells")).toBeTruthy());
     const btn = screen.getByRole("button", { name: "Close inspector" });
     fireEvent.click(btn);
-    expect(toggle).toHaveBeenCalled();
+    expect(useStore.getState().mobileInspectorOpen).toBe(false);
   });
 
   it("header shows no agent id — the timeline header already shows it (task #709)", async () => {
@@ -273,7 +245,7 @@ describe("InspectorPanel mobile", () => {
       liveSignal = signal;
       return new Promise<AgentInspectLive>(() => undefined);
     });
-    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const qc = createInspectorQueryClient();
     const view = rtlRender(
       <QueryClientProvider client={qc}>
         <InspectorPanel agentId={1} />
@@ -282,7 +254,9 @@ describe("InspectorPanel mobile", () => {
     await waitFor(() => expect(windowedSignal).toBeDefined());
     expect(liveSignal).toBeDefined();
 
-    panelState.open = false;
+    act(() => {
+      setInspectorOpen(false, qc);
+    });
     view.rerender(
       <QueryClientProvider client={qc}>
         <InspectorPanel agentId={1} />
@@ -298,7 +272,7 @@ describe("InspectorPanel mobile", () => {
       signals.set(agentId, signal);
       return new Promise<AgentInspectStatistics>(() => undefined);
     });
-    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const qc = createInspectorQueryClient();
     const view = rtlRender(
       <QueryClientProvider client={qc}>
         <InspectorPanel agentId={1} />
@@ -404,8 +378,8 @@ describe("InspectorPanel agent switch (task #1939)", () => {
   it("refetches inspect data on hot switch-back while open", async () => {
     getAgentInspectLive.mockImplementation((id) => Promise.resolve(liveFixture({ agent_id: id })));
     getAgentInspectStatistics.mockImplementation((id) => Promise.resolve(fixture({ agent_id: id })));
-    const qc = new QueryClient({
-      defaultOptions: { queries: { retry: false, staleTime: 5 * 60_000 } },
+    const qc = createInspectorQueryClient({
+      queries: { retry: false, staleTime: 5 * 60_000 },
     });
     const { rerender } = rtlRender(
       <QueryClientProvider client={qc}>

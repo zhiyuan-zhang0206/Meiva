@@ -9,6 +9,8 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { USER_SETTING_DEFAULTS } from "@/lib/contracts/types";
+import { SETTINGS_QUERY_KEY } from "@/lib/state/use-user-settings";
 import { api } from "@/lib/transport/api";
 
 import { ContextButton, type ContextButtonProps } from "./context-breakdown";
@@ -16,7 +18,11 @@ import { ContextBreakdownCard } from "./context-breakdown-body";
 import { ContextMeter, ContextMeterGhost, resolveContextMeterWidth } from "./context-meter";
 
 vi.mock("@/lib/transport/api", () => ({
-  api: { getContextBreakdown: vi.fn(), getRunTimelineContext: vi.fn(), getSettings: vi.fn() },
+  api: {
+    getContextBreakdown: vi.fn(),
+    getRunTimelineContext: vi.fn(),
+    getSettings: vi.fn(() => Promise.resolve({ settings: [] })),
+  },
 }));
 
 function apiError(status: number, message: string): Error {
@@ -25,15 +31,6 @@ function apiError(status: number, message: string): Error {
 
 const getContextBreakdown = vi.mocked(api.getContextBreakdown);
 const getRunTimelineContext = vi.mocked(api.getRunTimelineContext);
-
-// meiva:note
-// The ghost reads the gauge-width display setting; stub the settings hook so
-// the tests need no QueryClient and can drive the value per case.
-// meiva:link ui/web/src/docs/frontend-components/frontend-components.meiva.okf.md
-const settingsRef = vi.hoisted((): { value: Record<string, unknown> } => ({ value: {} }));
-vi.mock("@/lib/state/use-user-settings", () => ({
-  useUserSettings: () => ({ settings: settingsRef.value, setSetting: vi.fn(), isLoading: false }),
-}));
 
 afterEach(() => {
   cleanup();
@@ -142,8 +139,7 @@ describe("resolveContextMeterWidth", () => {
 
 describe("ContextMeterGhost", () => {
   it("renders a decorative pulsing track in the meter's geometry", () => {
-    settingsRef.value = {};
-    render(<ContextMeterGhost />);
+    wrap(<ContextMeterGhost />);
     const ghost = screen.getByTestId("context-meter-ghost");
     expect(ghost.getAttribute("aria-hidden")).toBe("true");
     const track = ghost.querySelector("span");
@@ -154,8 +150,7 @@ describe("ContextMeterGhost", () => {
   });
 
   it("follows the display.context_meter_width setting", () => {
-    settingsRef.value = { "display.context_meter_width": "wide" };
-    render(<ContextMeterGhost />);
+    wrap(<ContextMeterGhost />, { "display.context_meter_width": "wide" });
     const track = screen.getByTestId("context-meter-ghost").querySelector("span");
     expect(track?.className).toContain("w-48");
   });
@@ -204,8 +199,9 @@ function Harness(props: Omit<ContextButtonProps, "open" | "onOpenChange">) {
   return <ContextButton {...props} open={open} onOpenChange={setOpen} />;
 }
 
-function wrap(ui: React.ReactElement) {
+function wrap(ui: React.ReactElement, settings: Record<string, unknown> = {}) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  qc.setQueryData(SETTINGS_QUERY_KEY, { ...USER_SETTING_DEFAULTS, ...settings });
   return render(<QueryClientProvider client={qc}>{ui}</QueryClientProvider>);
 }
 

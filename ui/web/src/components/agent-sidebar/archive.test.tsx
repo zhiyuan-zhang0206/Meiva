@@ -7,9 +7,40 @@ import type { AgentRow } from "@/lib/contracts/types";
 import { api } from "@/lib/transport/api";
 vi.mock("@/lib/transport/api", () => ({ api: { listAgents: vi.fn() } }));
 vi.mock("next-intl", () => ({ useTranslations: () => (key: string) => key }));
-vi.mock("@/components/agents/agent-row", () => ({ AgentRow: ({ agent, onSelect }: { agent: AgentRow; onSelect: () => void }) => <li><button onClick={onSelect}>#{agent.agent_id}</button></li> }));
-const props = { onSelect: vi.fn(), pendingActions: {}, wide: true } as unknown as InnerProps & { wide: boolean };
-const row = (id: number) => ({ agent_id: id, harness: "meiva" }) as AgentRow;
+const props = {
+  activeId: null,
+  onSelect: vi.fn(),
+  onTerminate: vi.fn(),
+  onRestart: vi.fn(),
+  onForceKill: vi.fn(),
+  onFork: vi.fn(),
+  onRename: vi.fn(),
+  pendingActions: {},
+  showStatusDot: false,
+  showActivity: false,
+  confirmTerminate: false,
+  confirmRestart: false,
+  confirmForceKill: false,
+  wide: true,
+} as unknown as InnerProps & { wide: boolean };
+const row = (id: number): AgentRow => ({
+  agent_id: id,
+  spawner: "user",
+  harness: "meiva",
+  fork_source_agent_id: null,
+  status: "terminated",
+  spawned_at: "2026-06-06T00:00:00Z",
+  last_active_at: "2026-06-06T00:00:00Z",
+  last_inbound_at: "2026-06-06T00:00:00Z",
+  label: null,
+  machine: "test",
+  supports_vision: true,
+  awaiting_response_count: 0,
+  highest_notice_priority: null,
+  unread_notice_count: 0,
+  heartbeat_paused_until: null,
+  liveness_state: "offline",
+});
 let client: QueryClient;
 beforeEach(() => { vi.resetAllMocks(); client = new QueryClient({ defaultOptions: { queries: { retry: false } } }); });
 afterEach(() => { cleanup(); client.clear(); });

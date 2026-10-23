@@ -3,7 +3,6 @@ import { cleanup, fireEvent, render as rtlRender, screen, waitFor } from "@testi
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { api } from "@/lib/transport/api";
-import { clearMessageSent, markMessageSent } from "@/lib/format/interaction-timing";
 
 import { Composer } from "./composer";
 
@@ -30,16 +29,9 @@ vi.mock("@/lib/transport/api", () => ({
   },
 }));
 
-vi.mock("@/lib/format/interaction-timing", () => ({
-  clearMessageSent: vi.fn(),
-  markMessageSent: vi.fn(),
-}));
-
 const getCommandsMock = vi.mocked(api.getCommands);
 
 beforeEach(() => {
-  vi.mocked(clearMessageSent).mockClear();
-  vi.mocked(markMessageSent).mockClear();
   getCommandsMock.mockImplementation((_agentId?: number | null) =>
     Promise.resolve(commandList),
   );

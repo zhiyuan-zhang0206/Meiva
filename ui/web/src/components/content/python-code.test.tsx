@@ -1,8 +1,7 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
-const copy = vi.hoisted(() => vi.fn().mockResolvedValue(true));
-vi.mock("@/lib/format/clipboard", () => ({ copyToClipboard: copy }));
+const copy = vi.fn().mockResolvedValue(undefined);
 
 import {
   PythonCode,
@@ -11,6 +10,7 @@ import {
   preloadPythonCodeHighlighter,
 } from "./python-code";
 
+// meiva:note
 // python-code.tsx caches the highlighter chunk in module-level state
 // (resolvedHighlight / highlightPromise) so a real prefetch survives
 // re-renders without re-fetching — that's the whole point of prefetching.
@@ -20,13 +20,22 @@ import {
 // would also isolate this module's own state, but it reinstantiates
 // prism-react-renderer itself — an ESM dependency Vite doesn't externalize —
 // as a second, partially initialized copy that crashes when rendered.)
+// meiva:link ui/web/src/docs/frontend-components/frontend-components.meiva.okf.md
 beforeEach(() => {
+  copy.mockReset().mockResolvedValue(undefined);
+  Object.defineProperty(navigator, "clipboard", {
+    value: { writeText: copy },
+    writable: true,
+    configurable: true,
+  });
   __resetHighlighterCacheForTests();
 });
 
+// meiva:note
 // Every test that installs a stub import must restore the real one — a leak
 // would poison every later test in this file with a permanently-rejecting
 // (or stale-resolving) dynamic import.
+// meiva:link ui/web/src/docs/frontend-components/frontend-components.meiva.okf.md
 afterEach(() => {
   __setHighlighterImportForTests(null);
 });

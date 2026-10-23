@@ -2,21 +2,28 @@
 // (and, after the queue-merge cut, the fleet queue). Verifies the resolve calls
 // per notice kind, the empty-reply guard, the 409 message, and onResolved.
 
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { cleanup, fireEvent, render as rtlRender, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { OpenNoticeDetail } from "./open-notice-detail";
 import { formatAbsolute, formatRelative } from "@/lib/format/time";
-import type { OpenNotice } from "@/lib/contracts/types";
+import { USER_SETTING_DEFAULTS, type OpenNotice } from "@/lib/contracts/types";
+import { SETTINGS_QUERY_KEY } from "@/lib/state/use-user-settings";
 
 const { resolveNotice } = vi.hoisted(() => ({
   resolveNotice:
     vi.fn<(agentId: number, noticeId: number, body: unknown, key?: string) => Promise<{ status: string }>>(),
 }));
 vi.mock("@/lib/transport/api", () => ({
-  api: { resolveNotice },
+  api: { resolveNotice, getSettings: () => Promise.resolve({ settings: [] }) },
 }));
-vi.mock("@/lib/state/use-user-settings", () => import("@/test-support/user-settings-mock"));
+
+function render(ui: React.ReactElement) {
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  qc.setQueryData(SETTINGS_QUERY_KEY, { ...USER_SETTING_DEFAULTS });
+  return rtlRender(<QueryClientProvider client={qc}>{ui}</QueryClientProvider>);
+}
 
 function ntc(overrides: Partial<OpenNotice> = {}): OpenNotice {
   return {

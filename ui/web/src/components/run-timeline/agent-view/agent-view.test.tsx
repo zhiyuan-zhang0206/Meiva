@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { RunTimelineNode, RunTimelineResponse, RunTimelineUnit } from "@/lib/contracts/types";
 
-const { getRunTimeline, getRunTimelineLinks, getRunTimelineLinkContent, getAgentRoster, getContextBreakdown, getRunTimelineContext, getRunTimelineMessages, getSettings, useMediaQuery } =
+const { getRunTimeline, getRunTimelineLinks, getRunTimelineLinkContent, getAgentRoster, getContextBreakdown, getRunTimelineContext, getRunTimelineMessages, getSettings } =
   vi.hoisted(() => ({
     getRunTimeline: vi.fn<(agentId: number, options?: object) => Promise<RunTimelineResponse>>(),
     getRunTimelineLinks: vi.fn(),
@@ -15,10 +15,8 @@ const { getRunTimeline, getRunTimelineLinks, getRunTimelineLinkContent, getAgent
     getRunTimelineContext: vi.fn(),
     getRunTimelineMessages: vi.fn(),
     getSettings: vi.fn(),
-    useMediaQuery: vi.fn(() => false),
   }));
 
-vi.mock("@/lib/layout/use-media-query", () => ({ useMediaQuery }));
 vi.mock("@/lib/transport/api", async (importOriginal) => ({
   ...(await importOriginal<typeof ApiModule>()),
   api: { getRunTimeline, getRunTimelineLinks, getRunTimelineLinkContent, getAgentRoster, getContextBreakdown, getRunTimelineContext, getRunTimelineMessages, getSettings },
@@ -96,7 +94,6 @@ function render(agents = "7", { contextSize = true }: { contextSize?: boolean } 
 
 beforeEach(() => {
   mockCanvas();
-  useMediaQuery.mockReturnValue(false);
   getRunTimeline.mockReset();
   getRunTimelineLinks.mockReset();
   getRunTimelineLinks.mockResolvedValue({ links: [] });

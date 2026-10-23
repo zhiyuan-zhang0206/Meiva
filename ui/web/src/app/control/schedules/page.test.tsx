@@ -8,25 +8,17 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import {
+  __resetHighlighterCacheForTests,
+  __setHighlighterImportForTests,
+} from "@/components/content/python-code";
 import { api } from "@/lib/transport/api";
 import { useStore } from "@/lib/state/store";
 import type { ScheduleSummary, ScheduleView } from "@/lib/contracts/types";
 
-// Mock PythonCode — avoid running Prism syntax highlighting in tests
-//
-// The row's expand button calls preloadPythonCodeHighlighter on
-// pointer-enter/focus to warm the highlighter chunk ahead of expand (see
-// python-code.tsx) — a vi.fn() here (not a plain no-op) so the "intent
-// prefetch wiring" test below can assert it's actually invoked.
-const preloadPythonCodeHighlighter = vi.hoisted(() => vi.fn(() => Promise.resolve()));
-vi.mock("@/components/content/python-code", () => ({
-  PythonCode: ({ code }: { code: string }) => (
-    <pre data-testid="python-code">{code}</pre>
-  ),
-  preloadPythonCodeHighlighter,
-}));
-
 import SchedulesPage from "./page";
+
+const preloadPythonCodeHighlighter = vi.fn(() => new Promise<never>(() => undefined));
 
 const FULL: ScheduleView = {
   id: 1,
@@ -44,10 +36,17 @@ const FULL: ScheduleView = {
 const pushSpy = vi.fn();
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push: pushSpy }) }));
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  __resetHighlighterCacheForTests();
+  __setHighlighterImportForTests(null);
+});
 beforeEach(() => {
   vi.restoreAllMocks();
   pushSpy.mockReset();
+  preloadPythonCodeHighlighter.mockClear();
+  __resetHighlighterCacheForTests();
+  __setHighlighterImportForTests(preloadPythonCodeHighlighter);
 });
 
 function makeQc() {
@@ -210,11 +209,13 @@ describe("SchedulesPage", () => {
     await waitFor(() => expect(screen.getByText("memory-arbiter")).toBeTruthy());
 
     preloadPythonCodeHighlighter.mockClear();
+    __resetHighlighterCacheForTests();
     const expandButton = screen.getByRole("button", { name: "Expand" });
 
     fireEvent.pointerEnter(expandButton);
     expect(preloadPythonCodeHighlighter).toHaveBeenCalledTimes(1);
 
+    __resetHighlighterCacheForTests();
     fireEvent.focus(expandButton);
     expect(preloadPythonCodeHighlighter).toHaveBeenCalledTimes(2);
   });

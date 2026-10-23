@@ -19,10 +19,6 @@ vi.mock("@/lib/auth/auth-context", () => ({
   useAuth: vi.fn(),
 }));
 
-vi.mock("@/components/auth/login-form", () => ({
-  LoginForm: () => <div data-testid="login-form" />,
-}));
-
 import LoginPage from "./page";
 
 const mockAuth = vi.mocked(useAuth);
@@ -42,13 +38,13 @@ describe("LoginPage", () => {
     setStatus("loading");
     render(<LoginPage />);
     expect(screen.getByText(/Checking session/)).toBeTruthy();
-    expect(screen.queryByTestId("login-form")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Sign in" })).toBeNull();
   });
 
   it("renders the login form when unauthenticated", () => {
     setStatus("unauthenticated");
     render(<LoginPage />);
-    expect(screen.getByTestId("login-form")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Sign in" })).toBeTruthy();
     expect(replaceSpy).not.toHaveBeenCalled();
   });
 

@@ -6,8 +6,6 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AgentRow, NoticeItem, OpenNotice, PageRow, TaskSummaryRow } from "@/lib/contracts/types";
 import type { NoticesFeed } from "@/lib/notifications/use-notices";
 
-vi.mock("@/lib/agents/sidebar", () => ({ formatRelativeTime: (ts: string) => `rel:${ts}` }));
-
 const resolveNotice = vi.fn<
   (agentId: number, noticeId: number, body: { action: string; reply?: string }) => Promise<{ status: string }>
 >();
@@ -213,13 +211,16 @@ describe("InboxQueue — resolved history (collapsed disclosure)", () => {
         }),
       ],
     });
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-06-18T10:00:00Z"));
     renderQueue([agent({ agent_id: 1 })]);
     fireEvent.click(screen.getByRole("button", { name: /Resolved/ }));
     const list = screen.getByRole("list", { name: /inbox queue/i });
     const row = within(list).getByText("old notice").closest("button");
     expect(row?.textContent).toContain("worker");
-    expect(row?.textContent).toContain("rel:2026-06-17T00:00:00Z");
-    expect(row?.textContent).not.toContain("rel:2026-06-18T09:30:00Z");
+    expect(row?.textContent).toContain("1d ago");
+    expect(row?.textContent).not.toContain("30m ago");
+    vi.useRealTimers();
   });
 
   it("keeps the resolution inline with the agent's text, not pinned to the panel bottom", () => {

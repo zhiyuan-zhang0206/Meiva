@@ -3,18 +3,16 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, render as rtlRender, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ContextBreakdownResponse, RunTimelineContext, RunTimelineLinks, RunTimelineMessages, RunTimelineResponse, UserSettingListResponse } from "@/lib/contracts/types";
-const { getRunTimeline, getRunTimelineMessages, getRunTimelineContext, getRunTimelineLinks, getAgentRoster, getSettings, getContextBreakdown, useMediaQuery } =
+const { getRunTimeline, getRunTimelineMessages, getRunTimelineContext, getRunTimelineLinks, getAgentRoster, getSettings, getContextBreakdown } =
   vi.hoisted(() => ({
     getRunTimeline: vi.fn<(agentId: number, options?: { from?: string; to?: string; signal?: AbortSignal }) => Promise<RunTimelineResponse>>(),
     getRunTimelineMessages: vi.fn<(agentId: number, range: { start: number; end: number; limit?: number; full?: boolean }) => Promise<RunTimelineMessages>>(),
-    useMediaQuery: vi.fn(() => false),
     getSettings: vi.fn<() => Promise<UserSettingListResponse>>(),
     getContextBreakdown: vi.fn<(agentId: number) => Promise<ContextBreakdownResponse>>(),
     getRunTimelineContext: vi.fn<(agentId: number, at: number) => Promise<RunTimelineContext>>(),
     getRunTimelineLinks: vi.fn<(agents: readonly number[], window: { from: string; to: string }) => Promise<RunTimelineLinks>>(),
     getAgentRoster: vi.fn(),
   }));
-vi.mock("@/lib/layout/use-media-query", () => ({ useMediaQuery }));
 vi.mock("@/lib/transport/api", async (importOriginal) => ({
   ...(await importOriginal<typeof ApiModule>()),
   api: { getRunTimeline, getRunTimelineMessages, getRunTimelineContext, getRunTimelineLinks, getAgentRoster, getSettings, getContextBreakdown },
@@ -61,7 +59,6 @@ const faded = async (item: Item) => (await lookOf(item)).faded;
 const ringOf = async (item: Item) => (await lookOf(item)).ring;
 beforeEach(() => {
   mockCanvas();
-  useMediaQuery.mockReturnValue(false);
   getRunTimeline.mockReset();
   getRunTimelineLinks.mockReset();
   getRunTimelineLinks.mockResolvedValue({ links: [] });

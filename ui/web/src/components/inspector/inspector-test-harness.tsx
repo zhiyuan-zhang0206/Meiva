@@ -1,9 +1,8 @@
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { notifyManager, QueryClient, QueryClientProvider, type DefaultOptions } from "@tanstack/react-query";
 import { cleanup, render as rtlRender } from "@testing-library/react";
 import { vi } from "vitest";
 
-import { formatUpcoming } from "@/lib/format/time";
-import { projectAgentStatus } from "@/lib/contracts/types";
+import { projectAgentStatus, USER_SETTING_DEFAULTS } from "@/lib/contracts/types";
 import type {
   AgentInspectLive,
   AgentInspectStatistics,
@@ -13,6 +12,13 @@ import type {
   PageRow,
   WireAgentCard,
 } from "@/lib/contracts/types";
+import { useStore } from "@/lib/state/store";
+
+const SETTINGS_QUERY_KEY = ["user-settings"] as const;
+
+notifyManager.setScheduler((cb) => {
+  cb();
+});
 
 export const getAgentInspectStatistics =
   vi.fn<
@@ -33,6 +39,20 @@ export const listPages = vi.fn<(agentId: number) => Promise<PageRow[]>>(() =>
   Promise.resolve([]),
 );
 export const resolveNotice = vi.fn(() => Promise.resolve({ status: "ok" }));
+export const putSetting = vi.fn((key: string, value: unknown) =>
+  Promise.resolve({ key, value, updated_at: "2026-06-14T12:00:00Z" }),
+);
+export const getSettings = vi.fn(() =>
+  Promise.resolve({
+    settings: [
+      {
+        key: "display.inspector_open",
+        value: panelState.open,
+        updated_at: "2026-06-14T12:00:00Z",
+      },
+    ],
+  }),
+);
 
 export const streamHandlers = {
   system: undefined as ((event: unknown) => void) | undefined,
@@ -40,16 +60,36 @@ export const streamHandlers = {
 };
 
 export const panelState = { open: true, hours: 24 as number | null };
-export const toggle = vi.fn(() => {
-  panelState.open = !panelState.open;
-});
-export const setInspectorHours = vi.fn((hours: number | null) => {
-  panelState.hours = hours;
-});
 
-export const isLargeMock = vi.fn<() => boolean>(() => true);
+export function setInspectorOpen(open: boolean, qc?: QueryClient) {
+  panelState.open = open;
+  useStore.getState().setMobileInspectorOpen(open);
+  qc?.setQueryData(SETTINGS_QUERY_KEY, {
+    ...USER_SETTING_DEFAULTS,
+    "display.inspector_open": open,
+  });
+}
+
+export function setInspectorHours(hours: number | null) {
+  panelState.hours = hours;
+  useStore.getState().setInspectorHours(hours);
+}
+
+export function createInspectorQueryClient(
+  defaultOptions: DefaultOptions = { queries: { retry: false } },
+): QueryClient {
+  const qc = new QueryClient({ defaultOptions });
+  qc.setQueryData(SETTINGS_QUERY_KEY, {
+    ...USER_SETTING_DEFAULTS,
+    "display.inspector_open": panelState.open,
+  });
+  return qc;
+}
 
 export function setupInspectorTest() {
+  window.innerWidth = 1024;
+  setInspectorOpen(true);
+  setInspectorHours(24);
   getAgentInspectStatistics.mockResolvedValue(fixture());
   getAgentInspectLive.mockResolvedValue(liveFixture());
   getAgentInspectWidgets.mockResolvedValue([]);
@@ -64,27 +104,34 @@ export function cleanupInspectorTest() {
   getAgentInspectWidgets.mockReset();
   getAgentRoster.mockReset();
   getAgent.mockReset();
-  vi.mocked(formatUpcoming).mockClear();
   resolveNotice.mockClear();
-  toggle.mockReset();
-  panelState.open = true;
-  panelState.hours = 24;
-  setInspectorHours.mockClear();
+  putSetting.mockClear();
+  getSettings.mockClear();
+  window.innerWidth = 1024;
+  setInspectorOpen(true);
+  setInspectorHours(24);
   streamHandlers.system = undefined;
   streamHandlers.connection = undefined;
-  isLargeMock.mockReturnValue(true);
 }
 
 export function render(
   ui: React.ReactElement,
-  qc = new QueryClient({ defaultOptions: { queries: { retry: false } } }),
+  qc = createInspectorQueryClient(),
 ) {
+  if (qc.getQueryData(SETTINGS_QUERY_KEY) === undefined) {
+    qc.setQueryData(SETTINGS_QUERY_KEY, {
+      ...USER_SETTING_DEFAULTS,
+      "display.inspector_open": panelState.open,
+    });
+  }
+  useStore.getState().setMobileInspectorOpen(panelState.open);
+  useStore.getState().setInspectorHours(panelState.hours);
   return rtlRender(<QueryClientProvider client={qc}>{ui}</QueryClientProvider>);
 }
 
 export function renderWithGlobalRetries(ui: React.ReactElement) {
-  const qc = new QueryClient({
-    defaultOptions: { queries: { retry: 3, retryDelay: 0 } },
+  const qc = createInspectorQueryClient({
+    queries: { retry: 3, retryDelay: 0 },
   });
   return rtlRender(<QueryClientProvider client={qc}>{ui}</QueryClientProvider>);
 }

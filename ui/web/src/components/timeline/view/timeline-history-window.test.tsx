@@ -1,48 +1,12 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { BackendTimelineItem } from "@/lib/contracts/types";
 import type { CompactTransitionBuffer } from "@/lib/layout/compact-transition";
-import { ChatMarkdownMock, PythonCodeMock, ScrollAreaMock, cleanupTimelineTest, displayLimits, makeItem, mockSettings, pullOlderAtTop, resetStore, setToggleState, toggleState, userSettingsState } from "./timeline-test-harness";
+import { ChatMarkdownMock, ScrollAreaMock, cleanupTimelineTest, displayLimits, makeItem, pullOlderAtTop, render, setToggleState } from "./timeline-test-harness";
 
-vi.mock("@/lib/format/display-limits", async () => {
-  const { useSyncExternalStore } = await import("react");
-  return {
-    useDisplayLimit: (envVar: string, fallback: number) => {
-      useSyncExternalStore(mockSettings.subscribe, mockSettings.version);
-      return displayLimits.get(envVar) ?? fallback;
-    },
-  };
-});
 vi.mock("@/components/content/markdown", () => ({ ChatMarkdown: ChatMarkdownMock }));
-vi.mock("@/components/content/python-code", () => ({
-  PythonCode: PythonCodeMock,
-  preloadPythonCodeHighlighter: () => Promise.resolve(),
-}));
 vi.mock("@/components/ui/scroll-area", () => ({ ScrollArea: ScrollAreaMock }));
-vi.mock("@/lib/layout/content-toggle-store", async () => {
-  const { useSyncExternalStore } = await import("react");
-  return {
-    useContentToggle: () => {
-      useSyncExternalStore(mockSettings.subscribe, mockSettings.version);
-      toggleState.reads += 1;
-      return {
-        detailsMode: toggleState.detailsMode,
-        setDetailsMode: vi.fn(),
-        isLoading: toggleState.isLoading,
-      };
-    },
-    useContentToggleReset: (selector?: (s: typeof resetStore) => unknown) =>
-      selector ? selector(resetStore) : resetStore,
-  };
-});
-vi.mock("@/lib/state/use-user-settings", () => ({
-  useUserSettings: () => ({
-    settings: userSettingsState,
-    setSetting: vi.fn(),
-    isLoading: false,
-  }),
-}));
 import { TimelineView } from "..";
 import { ItemView } from "../item";
 import { resolveSavedTimelineAnchor } from "../model/use-timeline-window";

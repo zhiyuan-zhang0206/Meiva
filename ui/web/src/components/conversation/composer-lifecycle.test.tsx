@@ -2,7 +2,8 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render as rtlRender, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { api, MessageDeliveryUnknownError } from "@/lib/transport/api";
-import { clearMessageSent, markMessageSent } from "@/lib/format/interaction-timing";
+import { interactionTimingResetForTest, noteTurnStart } from "@/lib/format/interaction-timing";
+import { telemetryTestControl } from "@/lib/telemetry/telemetry";
 import { Composer } from "./composer";
 let commandList: { name: string; description: string; instruction_hint: string }[] = [];
 vi.mock("@/lib/transport/api", () => ({
@@ -26,14 +27,10 @@ vi.mock("@/lib/transport/api", () => ({
       }),
   },
 }));
-vi.mock("@/lib/format/interaction-timing", () => ({
-  clearMessageSent: vi.fn(),
-  markMessageSent: vi.fn(),
-}));
 const getCommandsMock = vi.mocked(api.getCommands);
 beforeEach(() => {
-  vi.mocked(clearMessageSent).mockClear();
-  vi.mocked(markMessageSent).mockClear();
+  interactionTimingResetForTest();
+  telemetryTestControl.reset();
   getCommandsMock.mockImplementation((_agentId?: number | null) =>
     Promise.resolve(commandList),
   );
@@ -143,6 +140,8 @@ describe("Composer input lifecycle", () => {
     expect(retryId).toBe(firstId);
   });
   it("keeps an unknown draft editable and normal Send reuses its identity", async () => {
+    let now = 100;
+    vi.spyOn(performance, "now").mockImplementation(() => now);
     const onSend = vi
       .fn<(content: string, imageUrls: string[], clientMessageId: string) => Promise<boolean>>()
       .mockImplementationOnce((_content, _imageUrls, clientMessageId) =>
@@ -154,7 +153,10 @@ describe("Composer input lifecycle", () => {
     fireEvent.change(ta, { target: { value: "uncertain delivery" } });
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
     await waitFor(() => expect(screen.queryByRole("button", { name: "Sending" })).toBeNull());
-    expect(clearMessageSent).not.toHaveBeenCalled();
+    telemetryTestControl.reset();
+    now = 150;
+    noteTurnStart(7);
+    expect(telemetryTestControl.bufferSize()).toBe(1);
     expect(
       screen.getByRole<HTMLButtonElement>("button", { name: "Send message" }).disabled,
     ).toBe(false);

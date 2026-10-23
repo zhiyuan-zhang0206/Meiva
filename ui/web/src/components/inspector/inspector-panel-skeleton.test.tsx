@@ -1,5 +1,5 @@
 import { render, screen } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import {
   InspectorPanelSkeleton,
@@ -8,18 +8,13 @@ import {
   WindowedSectionsSkeleton,
 } from "./inspector-panel-skeleton";
 
-const isLargeMock = vi.fn<() => boolean>(() => true);
-vi.mock("@/lib/layout/breakpoint", () => ({
-  useBreakpoint: () => ({
-    tier: isLargeMock() ? "xl" : "xs",
-    isNarrow: !isLargeMock(),
-    isLarge: isLargeMock(),
-  }),
-}));
-
 describe("InspectorPanelSkeleton", () => {
   beforeEach(() => {
-    isLargeMock.mockReturnValue(true);
+    window.innerWidth = 1024;
+  });
+
+  afterEach(() => {
+    window.innerWidth = 1024;
   });
 
   it("mirrors the real panel's sections and draws no header on desktop", () => {
@@ -39,7 +34,7 @@ describe("InspectorPanelSkeleton", () => {
   });
 
   it("renders full-screen overlay container on mobile", () => {
-    isLargeMock.mockReturnValue(false);
+    window.innerWidth = 375;
     render(<InspectorPanelSkeleton />);
 
     const aside = screen.getByTestId("inspector-panel-skeleton");

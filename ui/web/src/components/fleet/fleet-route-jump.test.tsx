@@ -8,8 +8,9 @@ import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import type { ReactElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { AgentRow, NoticeItem, TaskRow } from "@/lib/contracts/types";
+import { USER_SETTING_DEFAULTS, type AgentRow, type NoticeItem, type TaskRow } from "@/lib/contracts/types";
 import type { TasksResult } from "@/lib/notifications/use-tasks";
+import { SETTINGS_QUERY_KEY } from "@/lib/state/use-user-settings";
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn() }),
@@ -22,9 +23,11 @@ vi.mock("next/link", () => ({
   ),
 }));
 
+// meiva:note
 // The two left-pane surfaces are stubbed to their identity — these tests
 // assert WHICH surface is mounted and with which selection, not the canvas
 // (graph-view.test / task-graph.test cover the canvases).
+// meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
 vi.mock("@/components/fleet/graph-view", () => ({
   GraphView: () => <div data-testid="graph-view" />,
 }));
@@ -42,15 +45,6 @@ vi.mock("@/components/fleet/task-graph", () => ({
       data-route={String(routeTaskId ?? "")}
     />
   ),
-}));
-
-const isLargeMock = vi.fn<() => boolean>(() => true);
-vi.mock("@/lib/layout/breakpoint", () => ({
-  useBreakpoint: () => ({
-    tier: isLargeMock() ? "xl" : "xs",
-    isNarrow: !isLargeMock(),
-    isLarge: isLargeMock(),
-  }),
 }));
 
 const localStorageMock = (() => {
@@ -89,11 +83,17 @@ const agentsMock = vi.fn<() => AgentRow[]>(() => [
 ]);
 vi.mock("@/lib/agents/use-fleet-agents", () => ({ useFleetAgents: () => agentsMock() }));
 
+const putSettingMock = vi.fn((key: string, value: unknown) =>
+  Promise.resolve({ key, value, updated_at: "2026-06-14T00:00:00Z" }),
+);
+
 vi.mock("@/lib/transport/api", () => ({
   api: {
     getNotices: () =>
       Promise.resolve({ open: [], awaiting: [], resolved_page: [], next_cursor: null }),
     resolveNotice: () => Promise.resolve({ status: "ok" }),
+    getSettings: () => Promise.resolve({ settings: [] }),
+    putSetting: (key: string, value: unknown) => putSettingMock(key, value),
   },
 }));
 
@@ -125,9 +125,6 @@ const useTasksMock = vi.fn<() => TasksResult>(() => ({ tasks: [], loading: false
 vi.mock("@/lib/notifications/use-tasks", () => ({ useTasks: () => useTasksMock() }));
 
 vi.mock("@/lib/agents/use-all-pages", () => ({ useAllPages: () => [] }));
-vi.mock("@/lib/state/use-user-settings", () => import("@/test-support/user-settings-mock"));
-
-import { mockSetSettingCalls, resetMockSettings } from "@/test-support/user-settings-mock";
 
 import { FleetView } from "./fleet-view";
 
@@ -173,16 +170,19 @@ function task(over: Partial<TaskRow> & { id: number }): TaskRow {
 
 function wrap(ui: ReactElement) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  qc.setQueryData(SETTINGS_QUERY_KEY, { ...USER_SETTING_DEFAULTS });
   return render(<QueryClientProvider client={qc}>{ui}</QueryClientProvider>);
 }
 
-beforeEach(() => resetMockSettings());
+beforeEach(() => {
+  window.innerWidth = 1024;
+});
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
   localStorage.clear();
   window.history.replaceState(null, "", "/fleet");
-  isLargeMock.mockReturnValue(true);
+  window.innerWidth = 1024;
 });
 
 describe("fleet route jumps", () => {
@@ -198,7 +198,7 @@ describe("fleet route jumps", () => {
     // selection (task #3500).
     expect(screen.getByTestId("task-graph").getAttribute("data-route")).toBe("42");
     // The jump reveals the view but does not rewrite the durable preference.
-    expect(mockSetSettingCalls().some((c) => c.key === "display.fleet_left_view")).toBe(false);
+    expect(putSettingMock).not.toHaveBeenCalledWith("display.fleet_left_view", expect.anything());
   });
 
   it("without ?task= the default view stays the agent graph", () => {
@@ -250,7 +250,7 @@ describe("fleet route jumps", () => {
   });
 
   it("?task= on mobile switches to the tasks tab", async () => {
-    isLargeMock.mockReturnValue(false);
+    window.innerWidth = 375;
     useTasksMock.mockReturnValue({ tasks: [task({ id: 42, owner: 7 })], loading: false, error: false });
     window.history.replaceState(null, "", "/fleet?task=42");
     wrap(<FleetView />);
