@@ -2,12 +2,10 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable
-from datetime import datetime
 from pathlib import Path
 from typing import Any, cast
 
 import pytest
-from psycopg_pool import ConnectionPool
 
 from base.clock import Clock
 from base.cluster.machine import MachineIdentity
@@ -15,9 +13,7 @@ from base.cluster.machine.tests.identity import machine_identity as machine_iden
 from base.config import ConfigBoot
 from base.daemon.loop_health import LivenessGroup, LoopProgress
 from base.db import Database
-from base.db.code_version_gate import ProcessDbGate
 from base.db.tests.fakes import patch_database
-from base.events.live.bus import EventBus
 from base.native_process.loaded_commit import LoadedCommit
 from services.wake.heartbeat import completion_digest, daemon
 from services.wake.heartbeat.loops import DispatchRound, LivenessRound
@@ -59,15 +55,11 @@ def _patch_run(
     monkeypatch.setattr(daemon, "liveness_loop", liveness_loop)
 
     async def digest_loop(
-        pool: ConnectionPool,
-        db: Database,
-        bus: EventBus,
+        digest: completion_digest.CompletionDigestRound,
         progress: LoopProgress,
-        *,
-        machine: MachineIdentity,
     ) -> None:
-        assert machine is machine_identity
-        await loops["digest"](pool, db, bus, progress)
+        assert digest.machine is machine_identity
+        await loops["digest"](digest.pool, digest.db, digest.bus, progress)
 
     monkeypatch.setattr(daemon.completion_digest, "completion_digest_loop", digest_loop)
 
@@ -171,72 +163,36 @@ def test_a_crashing_loop_cancels_its_siblings_and_ends_the_service(
     assert not (tmp_path / "run" / "heartbeat.pid").exists()
 
 
-async def test_the_digest_loop_flushes_at_once_then_paces(
-    monkeypatch: pytest.MonkeyPatch,
-    *,
-    database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
-) -> None:
-    flushed: list[object] = []
+async def test_the_digest_loop_flushes_at_once_then_paces() -> None:
+    flushed = asyncio.Event()
+    rounds: list[int] = []
 
-    async def flush_once(
-        pool: object,
-        _db: object,
-        _bus: object,
-        *,
-        now: datetime | None = None,
-        machine: MachineIdentity,
-    ) -> int:
-        flushed.append(pool)
-        return 0
+    class Flush:
+        interval_s = completion_digest.FLUSH_INTERVAL_S
 
-    monkeypatch.setattr(completion_digest, "flush_once", flush_once)
-    pool = cast(ConnectionPool, object())
+        async def run_round(self) -> None:
+            rounds.append(1)
+            flushed.set()
+
     task = asyncio.create_task(
-        completion_digest.completion_digest_loop(
-            pool,
-            Database.from_settings(gate=database_gate),
-            EventBus.from_settings(),
-            LoopProgress("digest", 300.0),
-            machine=machine_identity,
-        )
+        completion_digest.completion_digest_loop(Flush(), LoopProgress("digest", 300.0))
     )
     try:
-        for _ in range(200):
-            if flushed:
-                break
-            await asyncio.sleep(0.01)
+        await asyncio.wait_for(flushed.wait(), timeout=5)
         await asyncio.sleep(0.05)
     finally:
         task.cancel()
         await asyncio.gather(task, return_exceptions=True)
 
-    assert flushed == [pool]
+    assert rounds == [1]
 
 
-async def test_a_failing_flush_ends_the_digest_loop(
-    monkeypatch: pytest.MonkeyPatch,
-    *,
-    database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
-) -> None:
-    async def flush_once(
-        pool: object,
-        _db: object,
-        _bus: object,
-        *,
-        now: datetime | None = None,
-        machine: MachineIdentity,
-    ) -> int:
-        raise RuntimeError("digest table unreadable")
+async def test_a_failing_flush_ends_the_digest_loop() -> None:
+    class Flush:
+        interval_s = completion_digest.FLUSH_INTERVAL_S
 
-    monkeypatch.setattr(completion_digest, "flush_once", flush_once)
+        async def run_round(self) -> None:
+            raise RuntimeError("digest table unreadable")
 
     with pytest.raises(RuntimeError, match="digest table unreadable"):
-        await completion_digest.completion_digest_loop(
-            cast(ConnectionPool, object()),
-            Database.from_settings(gate=database_gate),
-            EventBus.from_settings(),
-            LoopProgress("digest", 300.0),
-            machine=machine_identity,
-        )
+        await completion_digest.completion_digest_loop(Flush(), LoopProgress("digest", 300.0))
