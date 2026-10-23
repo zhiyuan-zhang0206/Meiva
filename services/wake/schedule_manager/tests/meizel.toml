@@ -1,11 +1,4 @@
 [debt.first-party-patch]
-"test_manager.py#monkeypatch.setattr base.deploy.lifecycle.start_serving.state_path" = 1
-"test_manager.py#monkeypatch.setattr base.sessions.pty.allocation_freeze.current_generation" = 4
-"test_manager.py#monkeypatch.setattr services.wake.schedule_manager.manager.get_shell_backend" = 1
-"test_manager.py#monkeypatch.setattr services.wake.schedule_manager.manager.time.monotonic" = 3
-"test_manager_state.py#monkeypatch.setattr base.deploy.lifecycle.start_serving.state_path" = 1
-"test_manager_state.py#monkeypatch.setattr base.sessions.pty.allocation_freeze.current_generation" = 1
-"test_manager_state.py#monkeypatch.setattr services.wake.schedule_manager.manager.get_shell_backend" = 1
 "test_runner_composition.py#monkeypatch.setattr base.agents.context.clients.ClientSet.close" = 1
 "test_runner_composition.py#monkeypatch.setattr meiva.sdk_surface.process_context.bind_context" = 2
 "test_runner_composition.py#monkeypatch.setattr meiva.sdk_surface.process_context.loaded_code_image" = 2
@@ -14,11 +7,6 @@
 "test_runner_composition.py#monkeypatch.setattr services.wake.schedule_manager.runner.engine.run" = 2
 "test_runner_composition.py#monkeypatch.setattr services.wake.schedule_manager.runner.meiva.ensure_plugins_loaded" = 2
 "test_runner_composition.py#monkeypatch.setattr services.wake.schedule_manager.runner.prod_service_checkout_error" = 1
-"test_secret_argv.py#monkeypatch.setattr services.wake.schedule_manager.manager.REPO_ROOT" = 1
 
 [debt.stdlib-patch]
 "test_runner_composition.py#monkeypatch.setattr sys.argv" = 1
-
-[debt.unresolved-patch]
-"test_manager.py#monkeypatch.setattr _FakeBackend.new_session" = 1
-"test_manager_state.py#monkeypatch.setattr _FakeBackend.new_session" = 1
