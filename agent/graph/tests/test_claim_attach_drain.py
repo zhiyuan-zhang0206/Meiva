@@ -3,27 +3,31 @@ from __future__ import annotations
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock
 
-import pytest
+import psycopg
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import HumanMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
+from psycopg_pool import AsyncConnectionPool
 
 from agent.graph._attach_drain import build_attach_drain
-from agent.graph.claim import node
 from agent.graph.claim.node import claim_node_impl
 from agent.nodes import CLAIM
 from agent.state import AttachEntry, AttachState, BaseAgentState
 from base.agents.context import MeivaContext
 from base.agents.messages.kwargs import MeivaMsgType
+from base.agents.tests.units import spawn_agent
 from base.clock import Clock
+from base.cluster.machine import MachineIdentity
+from base.config.service_read import ConfigAuthority
 from base.config.tests.configuration import defaults
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
+from base.lm.catalog import ModelCatalog
 from base.packages.plugin_providers import build_model_catalog
 
 
@@ -33,9 +37,11 @@ def _write_png(path: Path) -> None:
     Image.new("RGB", (1, 1)).save(path)
 
 
-def _context(model_name: str, database_gate: ProcessDbGate) -> MeivaContext:
+def _context(
+    model_name: str, database_gate: ProcessDbGate, ops_pool: AsyncConnectionPool | None = None
+) -> MeivaContext:
     return MeivaContext(
-        ops_pool=MagicMock(),
+        ops_pool=ops_pool,
         llm=cast("BaseChatModel", SimpleNamespace(model_name=model_name)),
         event_publisher=MagicMock(),
         agent=AgentSlices.resolve(default_reader=defaults()),
@@ -102,7 +108,15 @@ def test_drain_is_noop_without_pending_attachments(database_gate: ProcessDbGate)
 
 
 async def test_claim_drains_before_turn_boundary_wait(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, database_gate: ProcessDbGate
+    redis_url: str,
+    tmp_path: Path,
+    database_gate: ProcessDbGate,
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
+    machine_identity: MachineIdentity,
 ) -> None:
     image = tmp_path / "render.png"
     _write_png(image)
@@ -110,10 +124,16 @@ async def test_claim_drains_before_turn_boundary_wait(
         halted=True,
         attach=AttachState(pending=[AttachEntry(path=str(image), label=None)]),
     )
-    runtime = Runtime(context=_context("glm-5.3-flash", database_gate=database_gate))
-    config: RunnableConfig = {"configurable": {"thread_id": "42"}}
-
-    monkeypatch.setattr(node, "claim_inbound_batch", AsyncMock(return_value=[]))
+    runtime = Runtime(
+        context=_context("glm-5.3-flash", database_gate=database_gate, ops_pool=aops_pool)
+    )
+    agent_id = spawn_agent(
+        catalog=model_catalog,
+        authority=config_authority,
+        database_gate=database_gate,
+        machine=machine_identity,
+    )
+    config: RunnableConfig = {"configurable": {"thread_id": str(agent_id)}}
 
     command = await claim_node_impl(state, runtime, config)
 
@@ -123,7 +143,15 @@ async def test_claim_drains_before_turn_boundary_wait(
 
 
 async def test_claim_does_not_drain_mid_turn(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, database_gate: ProcessDbGate
+    redis_url: str,
+    tmp_path: Path,
+    database_gate: ProcessDbGate,
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
+    machine_identity: MachineIdentity,
 ) -> None:
     image = tmp_path / "render.png"
     _write_png(image)
@@ -131,10 +159,16 @@ async def test_claim_does_not_drain_mid_turn(
         messages=[HumanMessage(content="continue working")],
         attach=AttachState(pending=[AttachEntry(path=str(image), label=None)]),
     )
-    runtime = Runtime(context=_context("glm-5.3-flash", database_gate=database_gate))
-    config: RunnableConfig = {"configurable": {"thread_id": "42"}}
-
-    monkeypatch.setattr(node, "claim_inbound_batch", AsyncMock(return_value=[]))
+    runtime = Runtime(
+        context=_context("glm-5.3-flash", database_gate=database_gate, ops_pool=aops_pool)
+    )
+    agent_id = spawn_agent(
+        catalog=model_catalog,
+        authority=config_authority,
+        database_gate=database_gate,
+        machine=machine_identity,
+    )
+    config: RunnableConfig = {"configurable": {"thread_id": str(agent_id)}}
 
     command = await claim_node_impl(state, runtime, config)
 

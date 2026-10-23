@@ -386,8 +386,8 @@ def wired(
         """Host orchestration fake; real durable effects use the PG contract tests."""
         return "terminate"
 
-    monkeypatch.setattr(host_mod, "apply_hosted_lifecycle", _apply_lifecycle)
-    monkeypatch.setattr(invocation, "apply_hosted_lifecycle", _apply_lifecycle)
+    monkeypatch.setattr(host_mod, "apply_lifecycle_command", _apply_lifecycle)
+    monkeypatch.setattr(invocation, "apply_lifecycle_command", _apply_lifecycle)
 
     machine_identity.set(name="this-box")
 

@@ -1,7 +1,13 @@
-exports = ["compact_anchor.py", "compact_events.py", "history_dump.py", "repair.py", "security.py", "tests", "understanding_chunks.py"]
+exports = ["chunk_turn.py", "compact_anchor.py", "compact_events.py", "history_dump.py", "repair.py", "security.py", "tests", "understanding_chunks.py"]
 
 [uses]
 "__init__.py" = ["_registry.py"]
+"history_dump.py" = ["dump_name.py"]
 "repair.py" = ["_registry.py"]
 "security.py" = ["_registry.py"]
-"tests" = ["__init__.py", "compact_events.py", "understanding_chunks.py"]
+"tests" = ["__init__.py", "chunk_turn.py", "compact_events.py", "dump_name.py", "snapshot_wait.py", "understanding_chunks.py"]
+"understanding_chunks.py" = ["chunk_turn.py", "snapshot_wait.py"]
+
+[purity]
+"dump_name.py" = "strict"
+"snapshot_wait.py" = "strict"

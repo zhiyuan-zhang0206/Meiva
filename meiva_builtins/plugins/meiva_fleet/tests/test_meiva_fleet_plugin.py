@@ -35,13 +35,7 @@ def _fleet_slices(**changes: Any) -> AgentSlices:
 
 
 @pytest.fixture
-def load_activity_plugin(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
-    from base.agents.sdk import call_policy
-
-    def _policy_for_test(_owner: call_policy.SamplingPolicyOwner) -> call_policy.SamplingPolicy:
-        return call_policy.SamplingPolicy()
-
-    monkeypatch.setattr(call_policy, "policy", _policy_for_test)
+def load_activity_plugin() -> Iterator[None]:
     with installed_fleet_surface():
         yield
 

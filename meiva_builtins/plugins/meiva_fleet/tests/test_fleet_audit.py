@@ -7,9 +7,9 @@ from uuid import uuid4
 import psycopg
 import pytest
 
-from base.telemetry import Event, audit_events
 from meiva.tests.fixtures.pin_agent import pin_agent
 from meiva_builtins.plugins.meiva_fleet import task_registry
+from meiva_builtins.plugins.meiva_fleet.tests.task_registry.seeds import inserts_failing
 
 
 def _seed_agent(db: psycopg.Connection) -> int:
@@ -55,10 +55,6 @@ def _audit(db: psycopg.Connection, agent_id: int, name: str) -> list[dict[str, A
     return [row[0] for row in rows]
 
 
-def _refuse(_conn: object, _event: Event) -> Event:
-    raise RuntimeError("audit write failed")
-
-
 def test_a_created_task_is_recorded_with_its_row(
     redis_url: str, db_conn: psycopg.Connection, agent_id: int, root_task_id: int
 ) -> None:
@@ -74,11 +70,11 @@ def test_a_task_whose_audit_fact_cannot_be_recorded_is_not_created(
     db_conn: psycopg.Connection,
     agent_id: int,
     root_task_id: int,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(audit_events, "record_audit", _refuse)
-
-    with pytest.raises(RuntimeError, match="audit write failed"):
+    with (
+        inserts_failing(db_conn, "audit_events"),
+        pytest.raises(psycopg.errors.RaiseException, match="audit_events inserts refused"),
+    ):
         task_registry.create("never", "detail", parent=root_task_id, operation_key=str(uuid4()))
 
     count = db_conn.execute("SELECT count(*) FROM agent_tasks WHERE title='never'").fetchone()

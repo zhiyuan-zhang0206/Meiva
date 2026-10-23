@@ -8,7 +8,6 @@ from base.agents import impersonation as leases
 from base.agents.history.timeline_inputs import TimelineReadInputs
 from base.agents.impersonation import history as history
 from base.agents.impersonation import sessions as sessions
-from base.agents.impersonation.notes import HandoffNotes
 from base.agents.impersonation.tests.impersonation_support import recorded_tree
 from base.clock import Clock
 from base.cluster.machine import MachineIdentity
@@ -22,10 +21,6 @@ from base.native_process.runtime_incarnation import RuntimeIncarnation
 _TIMELINE_INPUTS = TimelineReadInputs(
     Clock.from_settings, lambda: settings.general.message_timestamps
 )
-
-
-def _handoff_notes() -> HandoffNotes:
-    return HandoffNotes(Clock.from_settings, lambda: settings.general.message_timestamps)
 
 
 @pytest.fixture
@@ -106,7 +101,7 @@ def test_inbound_attachments_survive_timeline_and_handoff(
 ) -> None:
     from psycopg.types.json import Jsonb
 
-    from agent.impersonation_handoff import start_marker
+    from agent.impersonation_handoff import note_stamp, start_update
     from base.agents.history.timeline import build_timeline_items
     from base.agents.history.timeline_item import hydrate
     from base.agents.upload_delivery.paths import upload_url
@@ -150,8 +145,9 @@ def test_inbound_attachments_survive_timeline_and_handoff(
         [inserted[0]],
         local_machine=machine_identity.name(),
     )
+    stamp = note_stamp(Clock.from_settings(), timestamps=settings.general.message_timestamps)
     items, _ = build_timeline_items(
-        [start_marker(lease, notes=_handoff_notes())], inputs=_TIMELINE_INPUTS
+        start_update(lease, introduced=True, stamp=stamp)["messages"], inputs=_TIMELINE_INPUTS
     )
     projected = hydrate(database, items, owner.agent_id, limit=5)
     image_item = next(item for item in projected if item.inbound_id == inserted[0])

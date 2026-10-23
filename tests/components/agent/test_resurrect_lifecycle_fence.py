@@ -98,15 +98,7 @@ async def test_resurrect_supersedes_the_pending_terminate_it_would_replay(
     owner = await _admit(aops_pool, agent_id, db=database)
     batch = await claim_inbound_batch(aops_pool, agent_id, incarnation=owner)
     assert [item.kind for item in batch] == ["resurrect"]
-    assert (
-        await apply_hosted_lifecycle(
-            aops_pool,
-            owner,
-            bus=event_bus,
-            resume_turn=False,
-        )
-        is None
-    )
+    assert await apply_hosted_lifecycle(aops_pool, owner, resume_turn=False) is None
     assert db_conn.execute(
         "SELECT status FROM agents_meta WHERE id=%s", (agent_id,)
     ).fetchone() == ("running",)
@@ -132,15 +124,8 @@ async def test_a_command_created_after_the_resurrect_still_applies(
     newer = _command(db_conn, agent_id, "terminate")
     batch = await claim_inbound_batch(aops_pool, agent_id, incarnation=owner)
     assert [item.kind for item in batch] == ["terminate"]
-    assert (
-        await apply_hosted_lifecycle(
-            aops_pool,
-            owner,
-            bus=event_bus,
-            resume_turn=False,
-        )
-        == "terminate"
-    )
+    applied = await apply_hosted_lifecycle(aops_pool, owner, resume_turn=False)
+    assert applied is not None and applied.kind == "terminate"
     assert db_conn.execute(
         "SELECT status FROM agents_meta WHERE id=%s", (agent_id,)
     ).fetchone() == ("terminated",)

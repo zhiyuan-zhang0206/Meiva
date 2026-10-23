@@ -1,29 +1,34 @@
 """Durable native checkpoint receipts for automatic session endings."""
 
 import asyncio
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Collection
+from pathlib import Path
 from typing import Any, cast
 
 from langchain_core.messages import HumanMessage
+from psycopg.types.json import Jsonb
 
 from agent.messages import system_note_message
+from agent.takeover.notes import (
+    NoteDraft,
+    NoteStamp,
+    SessionRef,
+    handoff_draft,
+    handoff_note_id,
+    handoff_receipt,
+    handoff_summary,
+    introduction_draft,
+    start_drafts,
+)
+from base.agents.impersonation import OPEN, lock_lease, require_native
 from base.agents.impersonation.history import export_handoff, metadata
 from base.agents.impersonation.notes import HandoffNotes
 from base.agents.impersonation.wake import publish_inbound_wake
 from base.agents.messages.kwargs import NoteTag
+from base.clock import Clock
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.native_process.runtime_incarnation import RuntimeIncarnation
-
-_IMPERSONATION_EXPLANATION = (
-    "Impersonation means a trusted external executor temporarily takes over your "
-    "work. You are paused while it acts under your Meiva agent identity. It receives "
-    "incoming messages, can use your tools, and can send replies to the user as "
-    "you; those replies appear to the user as coming from you, an Meiva agent. "
-    "When the takeover ends, you resume with a summary of its work when supplied "
-    "and a path to the session record. Review the handoff and continue any "
-    "unfinished requests."
-)
 
 
 async def flush_checkpoint(checkpointer: object, agent_id: int) -> None:
@@ -34,58 +39,59 @@ async def flush_checkpoint(checkpointer: object, agent_id: int) -> None:
         await flush(str(agent_id))
 
 
-def _make_note(content: str, *, notes: HandoffNotes) -> HumanMessage:
-    clock = notes.clock_factory()
+def note_stamp(clock: Clock, *, timestamps: bool) -> NoteStamp:
     created_at = clock.now()
-    stamp = f"{clock.format_timestamp(created_at)} " if notes.timestamps_enabled() else ""
-    return system_note_message(
-        content=stamp + content,
-        tag=NoteTag.IMPERSONATION,
-        created_at=created_at,
+    return NoteStamp(created_at, f"{clock.format_timestamp(created_at)} " if timestamps else "")
+
+
+def read_note_stamp(notes: HandoffNotes) -> NoteStamp:
+    return note_stamp(notes.clock_factory(), timestamps=notes.timestamps_enabled())
+
+
+def _render(draft: NoteDraft, session: dict[str, Any] | None = None) -> HumanMessage:
+    note = system_note_message(
+        content=draft.text, tag=NoteTag.IMPERSONATION, created_at=draft.created_at
     )
-
-
-def introduction_note(*, notes: HandoffNotes) -> HumanMessage:
-    """Standing native context, introduced only once a takeover is encountered."""
-    note = _make_note(_IMPERSONATION_EXPLANATION, notes=notes)
-    note.id = "impersonation-introduction"
+    note.id = draft.note_id
+    if draft.anchors_session and session is not None:
+        note.additional_kwargs["meiva_impersonation"] = metadata(session).model_dump()
     return note
+
+
+def introduction_note(stamp: NoteStamp) -> HumanMessage:
+    """Standing native context, introduced only once a takeover is encountered."""
+    return _render(introduction_draft(stamp))
 
 
 def start_update(
-    session: dict[str, Any], *, introduced: bool, notes: HandoffNotes
+    session: dict[str, Any],
+    *,
+    introduced: bool,
+    stamp: NoteStamp,
+    existing_ids: Collection[str] = (),
 ) -> dict[str, Any]:
     """Commit the introduction receipt and the takeover anchor together."""
-    introduction = [] if introduced else [introduction_note(notes=notes)]
+    drafts = start_drafts(
+        SessionRef.of(session), stamp, introduced=introduced, existing_ids=existing_ids
+    )
     return {
-        "messages": [*introduction, start_marker(session, notes=notes)],
+        "messages": [_render(draft, session) for draft in drafts],
         "impersonation_introduced": True,
     }
-
-
-def start_marker(session: dict[str, Any], *, notes: HandoffNotes) -> HumanMessage:
-    """Anchor the session's separately retained messages in checkpoint order."""
-    note = _make_note(
-        f"Impersonation session {session['session_id']} has started. "
-        f'An external executor named "{session["name"]}" is taking over your work. '
-        "You are paused until it returns control.",
-        notes=notes,
-    )
-    note.id = f"impersonation-start:{session['agent_id']}:{session['session_id']}"
-    note.additional_kwargs["meiva_impersonation"] = metadata(session).model_dump()
-    return note
 
 
 async def ensure_start_marker(graph: Any, session: dict[str, Any], *, notes: HandoffNotes) -> None:
     """Repair a crash between accepting the request and saving its timeline anchor."""
     config = {"configurable": {"thread_id": str(session["agent_id"])}}
     snapshot = await graph.aget_state(config)
+    introduced = snapshot.values.get("impersonation_introduced", False)
     update = start_update(
-        session, introduced=snapshot.values.get("impersonation_introduced", False), notes=notes
+        session,
+        introduced=introduced,
+        stamp=read_note_stamp(notes),
+        existing_ids={message.id for message in snapshot.values.get("messages", [])},
     )
-    existing = {message.id for message in snapshot.values.get("messages", [])}
-    update["messages"] = [note for note in update["messages"] if note.id not in existing]
-    if update["messages"] or not snapshot.values.get("impersonation_introduced", False):
+    if update["messages"] or not introduced:
         await graph.aupdate_state(config, update)
     await flush_checkpoint(graph.checkpointer, session["agent_id"])
 
@@ -103,40 +109,31 @@ def resume_note_pending(state: Any) -> bool:
     messages = state.messages
     if receipt is None or not messages:
         return False
-    return getattr(messages[-1], "id", None) == f"impersonation-handoff:{receipt}"
+    return getattr(messages[-1], "id", None) == handoff_note_id(receipt)
 
 
 def save_document(
-    db: Database, session: dict[str, Any], incarnation: RuntimeIncarnation
+    db: Database, session: dict[str, Any], incarnation: RuntimeIncarnation, *, workspace: Path
 ) -> tuple[str, str]:
-    from psycopg.types.json import Jsonb
-
-    from base.agents.impersonation import OPEN, lock_lease, require_native
-
     with db.write_transaction() as conn:
         require_native(conn, incarnation)
         lease = lock_lease(conn, session["id"])
         if lease["status"] in OPEN:
             raise RuntimeError("Cannot hand back an open impersonation session")
-        document, path = export_handoff(lease, conn)
+        document, path = export_handoff(lease, conn, workspace=workspace)
         conn.execute(
             "UPDATE agent_impersonations SET handoff_document=%s,handoff_path=%s WHERE id=%s",
             (Jsonb(document), path, lease["id"]),
         )
-    summary = lease["summary"]
-    if summary is None:
-        summary = (
-            f"Session ended with status {lease['status']}. "
-            f"{lease['rejection_reason'] or ''} No external completion summary was supplied."
-        )
+    summary = handoff_summary(
+        lease["summary"], status=lease["status"], rejection_reason=lease["rejection_reason"]
+    )
     return summary, path
 
 
 def record_handoff_receipt(
     db: Database, session: dict[str, Any], incarnation: RuntimeIncarnation
 ) -> None:
-    from base.agents.impersonation import lock_lease, require_native
-
     with db.write_transaction() as conn:
         require_native(conn, incarnation)
         lease = lock_lease(conn, session["id"])
@@ -164,6 +161,7 @@ async def deliver_handoff(
     incarnation: RuntimeIncarnation,
     *,
     notes: HandoffNotes,
+    workspace: Path,
     reason: str | None = None,
 ) -> None:
     """Save file, append the first resumed input, flush checkpoint, then receipt.
@@ -183,29 +181,21 @@ async def deliver_handoff(
     when present, the note names it right after the session-end sentence.
     """
     # Keep the truthful pending record while the durable native handoff proceeds.
-    summary, path = await asyncio.to_thread(save_document, db, session, incarnation)
+    summary, path = await asyncio.to_thread(
+        save_document, db, session, incarnation, workspace=workspace
+    )
     config = {"configurable": {"thread_id": str(incarnation.agent_id)}}
     snapshot = await graph.aget_state(config)
-    receipt = f"{session['agent_id']}:{session['session_id']}"
+    ref = SessionRef.of(session)
+    receipt = handoff_receipt(ref)
     if snapshot.values.get("impersonation_handoff_id") != receipt:
-        stopped = f" This session was stopped early: {reason}." if reason else ""
-        note = _make_note(
-            f"Impersonation session {session['session_id']} has ended.{stopped} "
-            f'You have resumed execution after the takeover by external executor "{session["name"]}".\n\n'
-            f"External summary:\n{summary}\n\n"
-            f"The session record is available at: {path}\n"
-            "Reply to the user in ordinary assistant text in this conversation. "
-            "Review the summary and incoming requests in the record. Continue any "
-            "requests whose completion is not established by the summary or record. "
-            "The activity log may be incomplete; missing entries do not establish "
-            "that an action never happened.",
-            notes=notes,
+        draft = handoff_draft(
+            ref, read_note_stamp(notes), summary=summary, path=path, reason=reason
         )
-        note.id = f"impersonation-handoff:{receipt}"
         await graph.aupdate_state(
             config,
             {
-                "messages": [note],
+                "messages": [_render(draft)],
                 "impersonation_handoff_id": receipt,
                 "halted": False,
                 "turn_idle": False,

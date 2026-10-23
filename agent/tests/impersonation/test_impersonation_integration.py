@@ -1,4 +1,3 @@
-from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -7,24 +6,27 @@ import psycopg
 import pytest
 from psycopg_pool import AsyncConnectionPool
 
-from agent import impersonation, impersonation_handoff
 from agent.impersonation import settle_checkpoint
-from agent.impersonation_handoff import flush_checkpoint
+from agent.impersonation_handoff import deliver_handoff, flush_checkpoint
 from agent.tests.impersonation.handoff_inputs import (
+    RunnerExecProcess,
     assert_end_note_and_handoff_document,
     assert_handoff_precedes_queued_input,
     assert_resumed_transcript,
+    controller_relay_alive,
     deliver_peers_and_ack_first,
     end_external_session,
     executor_acks_says_and_releases,
+    failing_flush,
     handoff_notes,
     prepare_graph,
-    relay_ready,
+    takeover_host,
 )
 from agent.tests.impersonation.handoff_inputs import handoff_clients as handoff_clients
 from base.agents import impersonation as leases
 from base.agents.context.clients import ClientSet
 from base.agents.context.external_attachment.plugin_state_codec import encode_plugin_delta
+from base.agents.impersonation import history
 from base.agents.inbox.insert import insert_inbound_message
 from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
@@ -36,12 +38,12 @@ from meiva.tests.fixtures.pin_agent import hosted_resources as hosted_resources
 
 
 @pytest.mark.parametrize("finish", ["release", "expire"])
-@pytest.mark.usefixtures("runner_exec_env")
 async def test_takeover_inbox_release_and_resume(
     hosted_resources: HostedTurnResources,
+    runner_db_url: str,
     db_conn: psycopg.Connection[Any],
     aops_pool: AsyncConnectionPool[Any],
-    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
     finish: str,
     database: Database,
     event_bus: EventBus,
@@ -58,18 +60,14 @@ async def test_takeover_inbox_release_and_resume(
     graph, saver, ctx, config, reset, owner, requested, model_calls = await prepare_graph(
         db_conn,
         aops_pool,
-        monkeypatch,
+        exec_process=RunnerExecProcess(runner_db_url),
         config_authority=config_authority,
         clients=handoff_clients,
         database_gate=database_gate,
         machine_identity=machine_identity,
     )
     agent_id = owner.agent_id
-
-    def relay_ready(*_args: object, read_local_machine: Callable[[], str]) -> bool:
-        return True
-
-    monkeypatch.setattr(impersonation, "establish_relay", relay_ready)
+    host = takeover_host(tmp_path, machine_identity)
     first = await graph.ainvoke(
         reset,
         config,
@@ -86,6 +84,7 @@ async def test_takeover_inbox_release_and_resume(
         == "accepted"
     )
     await flush_checkpoint(saver, agent_id)
+    controller_relay_alive(db_conn, requested["id"])
     assert await settle_checkpoint(
         graph,
         database,
@@ -94,7 +93,7 @@ async def test_takeover_inbox_release_and_resume(
         ctx.relays,
         incarnation=owner,
         notes=handoff_notes(),
-        read_local_machine=machine_identity.name,
+        host=host,
     )
     assert (
         leases.require_active(
@@ -104,11 +103,7 @@ async def test_takeover_inbox_release_and_resume(
         )["status"]
         == "active"
     )
-    db_conn.execute(
-        "UPDATE agent_impersonations SET relay_heartbeat_at=clock_timestamp() WHERE id=%s",
-        (requested["id"],),
-    )
-    db_conn.commit()
+    controller_relay_alive(db_conn, requested["id"])
     second_peer = deliver_peers_and_ack_first(
         db_conn, database, event_bus, requested, agent_id, machine_identity=machine_identity
     )
@@ -143,7 +138,7 @@ async def test_takeover_inbox_release_and_resume(
         ctx.relays,
         incarnation=owner,
         notes=handoff_notes(),
-        read_local_machine=machine_identity.name,
+        host=host,
     )
     scope = await scope.require_service().turn()
     resumed = await graph.ainvoke(
@@ -171,15 +166,14 @@ async def test_takeover_inbox_release_and_resume(
         ctx.relays,
         incarnation=owner,
         notes=handoff_notes(),
-        read_local_machine=machine_identity.name,
+        host=host,
     )
     assert (await graph.aget_state(config)).values["handoff__total"] == 7
 
 
-async def test_automatic_takeover_handoff_precedes_queued_input(
+async def test_a_lost_database_receipt_does_not_apply_the_plugin_delta_twice(
     db_conn: psycopg.Connection[Any],
     aops_pool: AsyncConnectionPool[Any],
-    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     database: Database,
     event_bus: EventBus,
@@ -189,23 +183,98 @@ async def test_automatic_takeover_handoff_precedes_queued_input(
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
 ) -> None:
-    from base.agents.impersonation import history as history
-
     graph, saver, ctx, config, reset, owner, requested, model_calls = await prepare_graph(
         db_conn,
         aops_pool,
-        monkeypatch,
         config_authority=config_authority,
         clients=handoff_clients,
         database_gate=database_gate,
         machine_identity=machine_identity,
     )
-    monkeypatch.setattr(impersonation, "establish_relay", relay_ready)
+    host = takeover_host(tmp_path, machine_identity)
+    await graph.ainvoke(reset, config, context=replace(ctx, original_incarnation=owner))
+    await flush_checkpoint(saver, owner.agent_id)
+    controller_relay_alive(db_conn, requested["id"])
+    assert await settle_checkpoint(
+        graph,
+        database,
+        event_bus,
+        owner.agent_id,
+        ctx.relays,
+        incarnation=owner,
+        notes=handoff_notes(),
+        host=host,
+    )
+    leases.merge_plugin_delta(
+        database,
+        requested["id"],
+        encode_plugin_delta({"handoff__total": 3}, graph.builder.state_schema),
+        expected_version=0,
+        local_machine=machine_identity.name(),
+    )
+    leases.release(
+        database,
+        event_bus,
+        requested["id"],
+        "Done",
+        local_machine=machine_identity.name(),
+    )
+    assert not await settle_checkpoint(
+        graph,
+        database,
+        event_bus,
+        owner.agent_id,
+        ctx.relays,
+        incarnation=owner,
+        notes=handoff_notes(),
+        host=host,
+    )
+    assert (await graph.aget_state(config)).values["handoff__total"] == 3
+    assert not model_calls
+    db_conn.execute(
+        "UPDATE agent_impersonations SET applied_version=0 WHERE id=%s", (requested["id"],)
+    )
+    db_conn.commit()
+    assert not await settle_checkpoint(
+        graph,
+        database,
+        event_bus,
+        owner.agent_id,
+        ctx.relays,
+        incarnation=owner,
+        notes=handoff_notes(),
+        host=host,
+    )
+    assert (await graph.aget_state(config)).values["handoff__total"] == 3
+    assert (
+        leases.get(database, event_bus, requested["id"], local_machine=machine_identity.name())[
+            "applied_version"
+        ]
+        == 1
+    )
 
-    def workspace_for_agent(_agent_id: int) -> Path:
-        return tmp_path
 
-    monkeypatch.setattr(history, "workspace_dir", workspace_for_agent)
+async def test_automatic_takeover_handoff_precedes_queued_input(
+    db_conn: psycopg.Connection[Any],
+    aops_pool: AsyncConnectionPool[Any],
+    tmp_path: Path,
+    database: Database,
+    event_bus: EventBus,
+    *,
+    config_authority: ConfigAuthority,
+    handoff_clients: ClientSet,
+    database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
+) -> None:
+    graph, saver, ctx, config, reset, owner, requested, model_calls = await prepare_graph(
+        db_conn,
+        aops_pool,
+        config_authority=config_authority,
+        clients=handoff_clients,
+        database_gate=database_gate,
+        machine_identity=machine_identity,
+    )
+    host = takeover_host(tmp_path, machine_identity)
     await graph.ainvoke(
         reset,
         config,
@@ -222,6 +291,7 @@ async def test_automatic_takeover_handoff_precedes_queued_input(
         == "accepted"
     )
     await flush_checkpoint(saver, owner.agent_id)
+    controller_relay_alive(db_conn, requested["id"])
     assert await settle_checkpoint(
         graph,
         database,
@@ -230,7 +300,7 @@ async def test_automatic_takeover_handoff_precedes_queued_input(
         ctx.relays,
         incarnation=owner,
         notes=handoff_notes(),
-        read_local_machine=machine_identity.name,
+        host=host,
     )
     inbound_id = insert_inbound_message(
         db_conn,
@@ -263,10 +333,12 @@ async def test_automatic_takeover_handoff_precedes_queued_input(
         ctx.relays,
         incarnation=owner,
         notes=handoff_notes(),
-        read_local_machine=machine_identity.name,
+        host=host,
     )
     snapshot = await graph.aget_state(config)
-    assert_end_note_and_handoff_document(snapshot.values["messages"][-1], tmp_path)
+    assert_end_note_and_handoff_document(
+        snapshot.values["messages"][-1], host.workspace(owner.agent_id)
+    )
     assert db_conn.execute(
         "SELECT status FROM inbound_messages WHERE id=%s", (later,)
     ).fetchone() == ("pending",)
@@ -278,7 +350,7 @@ async def test_automatic_takeover_handoff_precedes_queued_input(
         ctx.relays,
         incarnation=owner,
         notes=handoff_notes(),
-        read_local_machine=machine_identity.name,
+        host=host,
     )
     await graph.ainvoke(
         reset,
@@ -292,7 +364,7 @@ async def test_automatic_takeover_handoff_precedes_queued_input(
 async def test_accepted_session_repairs_missing_start_checkpoint(
     db_conn: psycopg.Connection[Any],
     aops_pool: AsyncConnectionPool[Any],
-    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
     database: Database,
     event_bus: EventBus,
     *,
@@ -304,13 +376,11 @@ async def test_accepted_session_repairs_missing_start_checkpoint(
     graph, saver, ctx, config, _reset, owner, requested, calls = await prepare_graph(
         db_conn,
         aops_pool,
-        monkeypatch,
         config_authority=config_authority,
         clients=handoff_clients,
         database_gate=database_gate,
         machine_identity=machine_identity,
     )
-    monkeypatch.setattr(impersonation, "establish_relay", relay_ready)
     leases.prepare(
         database,
         event_bus,
@@ -320,6 +390,7 @@ async def test_accepted_session_repairs_missing_start_checkpoint(
         "Saved request, lost checkpoint",
         local_machine=machine_identity.name(),
     )
+    controller_relay_alive(db_conn, requested["id"])
     assert await settle_checkpoint(
         graph,
         database,
@@ -328,7 +399,7 @@ async def test_accepted_session_repairs_missing_start_checkpoint(
         ctx.relays,
         incarnation=owner,
         notes=handoff_notes(),
-        read_local_machine=machine_identity.name,
+        host=takeover_host(tmp_path, machine_identity),
     )
     assert not calls
     durable = await saver.aget_tuple(config)
@@ -353,7 +424,6 @@ async def test_accepted_session_repairs_missing_start_checkpoint(
 async def test_handoff_checkpoint_failure_keeps_gate_and_retry_flushes_receipt(
     db_conn: psycopg.Connection[Any],
     aops_pool: AsyncConnectionPool[Any],
-    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     database: Database,
     event_bus: EventBus,
@@ -363,30 +433,22 @@ async def test_handoff_checkpoint_failure_keeps_gate_and_retry_flushes_receipt(
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
 ) -> None:
-    from agent.impersonation_handoff import deliver_handoff
-    from base.agents.impersonation import history as history
-
     graph, saver, ctx, config, reset, owner, requested, calls = await prepare_graph(
         db_conn,
         aops_pool,
-        monkeypatch,
         config_authority=config_authority,
         clients=handoff_clients,
         database_gate=database_gate,
         machine_identity=machine_identity,
     )
-    monkeypatch.setattr(impersonation, "establish_relay", relay_ready)
-
-    def workspace_for_agent(_agent_id: int) -> Path:
-        return tmp_path
-
-    monkeypatch.setattr(history, "workspace_dir", workspace_for_agent)
+    host = takeover_host(tmp_path, machine_identity)
     await graph.ainvoke(
         reset,
         config,
         context=replace(ctx, original_incarnation=owner, hosted_resources=None),
     )
     await flush_checkpoint(saver, owner.agent_id)
+    controller_relay_alive(db_conn, requested["id"])
     assert await settle_checkpoint(
         graph,
         database,
@@ -395,7 +457,7 @@ async def test_handoff_checkpoint_failure_keeps_gate_and_retry_flushes_receipt(
         ctx.relays,
         incarnation=owner,
         notes=handoff_notes(),
-        read_local_machine=machine_identity.name,
+        host=host,
     )
     leases.release(
         database,
@@ -405,13 +467,20 @@ async def test_handoff_checkpoint_failure_keeps_gate_and_retry_flushes_receipt(
         local_machine=machine_identity.name(),
     )
     lease = history.resolve(database, owner.agent_id, 0, local_machine=machine_identity.name())
-
-    async def failed_flush(*_: object) -> None:
-        raise OSError("checkpoint temporarily unavailable")
-
-    monkeypatch.setattr(impersonation_handoff, "flush_checkpoint", failed_flush)
-    with pytest.raises(OSError, match="checkpoint temporarily"):
-        await deliver_handoff(graph, database, event_bus, lease, owner, notes=handoff_notes())
+    workspace = host.workspace(owner.agent_id)
+    with (
+        failing_flush(saver, OSError("checkpoint temporarily unavailable")),
+        pytest.raises(OSError, match="checkpoint temporarily"),
+    ):
+        await deliver_handoff(
+            graph,
+            database,
+            event_bus,
+            lease,
+            owner,
+            notes=handoff_notes(),
+            workspace=workspace,
+        )
     assert (
         history.resolve(database, owner.agent_id, 0, local_machine=machine_identity.name())[
             "handoff_applied_at"
@@ -419,8 +488,12 @@ async def test_handoff_checkpoint_failure_keeps_gate_and_retry_flushes_receipt(
         is None
     )
     assert not calls
-    monkeypatch.setattr(impersonation_handoff, "flush_checkpoint", flush_checkpoint)
-    await deliver_handoff(graph, database, event_bus, lease, owner, notes=handoff_notes())
+    await deliver_handoff(
+        graph, database, event_bus, lease, owner, notes=handoff_notes(), workspace=workspace
+    )
+    await deliver_handoff(
+        graph, database, event_bus, lease, owner, notes=handoff_notes(), workspace=workspace
+    )
     durable = await saver.aget_tuple(config)
     assert durable is not None
     notes = [
@@ -440,7 +513,6 @@ async def test_handoff_checkpoint_failure_keeps_gate_and_retry_flushes_receipt(
 async def test_handoff_of_a_released_log_native_lease_is_already_complete(
     db_conn: psycopg.Connection[Any],
     aops_pool: AsyncConnectionPool[Any],
-    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     database: Database,
     event_bus: EventBus,
@@ -450,30 +522,22 @@ async def test_handoff_of_a_released_log_native_lease_is_already_complete(
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
 ) -> None:
-    from agent.impersonation_handoff import deliver_handoff
-    from base.agents.impersonation import history as history
-
     graph, saver, ctx, config, reset, owner, requested, _calls = await prepare_graph(
         db_conn,
         aops_pool,
-        monkeypatch,
         config_authority=config_authority,
         clients=handoff_clients,
         database_gate=database_gate,
         machine_identity=machine_identity,
     )
-    monkeypatch.setattr(impersonation, "establish_relay", relay_ready)
-
-    def workspace_for_agent(_agent_id: int) -> Path:
-        return tmp_path
-
-    monkeypatch.setattr(history, "workspace_dir", workspace_for_agent)
+    host = takeover_host(tmp_path, machine_identity)
     await graph.ainvoke(
         reset,
         config,
         context=replace(ctx, original_incarnation=owner, hosted_resources=None),
     )
     await flush_checkpoint(saver, owner.agent_id)
+    controller_relay_alive(db_conn, requested["id"])
     assert await settle_checkpoint(
         graph,
         database,
@@ -482,7 +546,7 @@ async def test_handoff_of_a_released_log_native_lease_is_already_complete(
         ctx.relays,
         incarnation=owner,
         notes=handoff_notes(),
-        read_local_machine=machine_identity.name,
+        host=host,
     )
     leases.release(
         database,
@@ -492,7 +556,15 @@ async def test_handoff_of_a_released_log_native_lease_is_already_complete(
         local_machine=machine_identity.name(),
     )
     lease = history.resolve(database, owner.agent_id, 0, local_machine=machine_identity.name())
-    await deliver_handoff(graph, database, event_bus, lease, owner, notes=handoff_notes())
+    await deliver_handoff(
+        graph,
+        database,
+        event_bus,
+        lease,
+        owner,
+        notes=handoff_notes(),
+        workspace=host.workspace(owner.agent_id),
+    )
 
     landed = history.resolve(database, owner.agent_id, 0, local_machine=machine_identity.name())
     assert landed["handoff_path"] is not None
@@ -500,4 +572,5 @@ async def test_handoff_of_a_released_log_native_lease_is_already_complete(
     assert landed["events_completed_at"] is not None
     assert landed["event_delivery_pending_reason"] is None
     assert landed["handoff_document"]["statistics"]["event_delivery"]["state"] == "complete"
-    assert '"state": "complete"' in (tmp_path / "impersonation" / "0.json").read_text()
+    document = host.workspace(owner.agent_id) / "impersonation" / "0.json"
+    assert '"state": "complete"' in document.read_text()

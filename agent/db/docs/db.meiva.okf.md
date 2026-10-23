@@ -41,7 +41,11 @@ or a blocked graph invocation.
 ## Entry Points
 
 - `agent/db/__init__.py:claim_inbound_batch` — acquires the pool and row locks with bounded
-  waits. Timeout rolls back; a later host wake or scan retries pending work.
+  waits: the pool's own acquire timeout, capped at `CLAIM_ACQUIRE_TIMEOUT_CAP_S`. Timeout
+  rolls back; a later host wake or scan retries pending work.
+- `agent/db/__init__.py:LoggingConnectionPool` — the host's pool class. It times every borrow and logs
+  a borrow at least `slow_acquire_warn_seconds` slow (a constructor value that
+  `services/agent_runner/agent_host/pools.py` reads from settings) or one that times out.
 - `agent/db/__init__.py:has_pending_interrupt` — read-only interrupt detection.
 - `services/agent_runner/agent_host/daemon.py` — shared pool, checkpointer and wake lifecycle.
 - `services/agent_runner/agent_host/host.py` — per-agent admission and checkpoint settlement.

@@ -1,0 +1,12 @@
+exports = ["gate.py", "notes.py", "process.py", "relay.py"]
+
+[uses]
+"process.py" = ["relay.py"]
+"relay.py" = ["gate.py"]
+"tests" = ["gate.py", "notes.py", "relay.py"]
+
+[purity]
+"__init__.py" = "strict"
+"gate.py" = "strict"
+"notes.py" = "strict"
+"relay.py" = "strict"

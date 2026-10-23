@@ -25,27 +25,24 @@ from __future__ import annotations
 
 import asyncio
 import time
-from collections.abc import Callable
 from datetime import datetime
 from typing import Any
 
 from langchain_core.messages import AIMessage, AnyMessage
 from psycopg_pool import AsyncConnectionPool
 
+from agent.state import AgentState
 from agent.state_channels import CompactState
 from base import telemetry
-from base.agents.history.hierarchy.chunks import (
-    chunk_threshold,
-    enqueue_chunk,
-    plan_chunk,
-    plan_closing_chunk,
-    segment_head_len,
-    sendable_len,
-)
-from base.agents.messages.kwargs import message_read_time
-from base.host.env.agent_slices import ModelOverrides
+from base.agents.history.hierarchy.chunks import chunk_threshold, enqueue_chunk
+from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
 from base.log import logger
+
+from .chunk_turn import Baseline, plan_closing, plan_turn
+from .snapshot_wait import SnapshotWait, read_time, snapshot_verdict
+
+DEFAULT_SNAPSHOT_WAIT = SnapshotWait()
 
 
 async def due_chunk_update(
@@ -55,61 +52,39 @@ async def due_chunk_update(
     *,
     pool: AsyncConnectionPool | None,
     agent_id: int,
-    model: str,
-    overrides: ModelOverrides,
+    agent: AgentSlices,
     catalog: ModelCatalog,
-    read_agent: Callable[[str], Any],
 ) -> dict[str, Any]:
     """The state update after one llm turn: `{}`, or the moved cut once a chunk is enqueued.
 
     `request` is the message list the turn sent (head included); `final_msg`
     carries the provider's usage for it.
     """
-    if pool is None or not read_agent("understanding_enabled"):
+    if pool is None or not agent.read("agent", "understanding_enabled"):
         return {}
-    usage = final_msg.usage_metadata
-    input_tokens = int(usage["input_tokens"]) if usage else 0
-    if input_tokens == 0:
-        return {}
-    if compact.understanding_cut_tokens == 0:
-        return {
-            "compact": compact.model_copy(
-                update={
-                    "understanding_cut_index": max(
-                        compact.understanding_cut_index, segment_head_len(request)
-                    ),
-                    "understanding_cut_tokens": input_tokens,
-                }
-            )
-        }
-    chunk = plan_chunk(
-        cut_index=compact.understanding_cut_index,
-        cut_tokens=compact.understanding_cut_tokens,
-        input_tokens=input_tokens,
-        request_len=len(request),
+    plan = plan_turn(
+        compact,
+        request,
+        final_msg,
         threshold=chunk_threshold(
-            model, overrides, read_agent("understanding_chunk_ratio"), catalog=catalog
+            agent.brain.llm_model,
+            agent.overrides,
+            agent.read("agent", "understanding_chunk_ratio"),
+            catalog=catalog,
         ),
     )
-    if chunk is None:
+    if plan is None:
         return {}
+    if isinstance(plan, Baseline):
+        return {"compact": plan.state}
     enqueued = await enqueue_chunk(
         pool,
         agent_id,
         compact_version=compact.version,
-        chunk=chunk,
-        end_msg_id=request[chunk.end_index - 1].id,
+        chunk=plan.chunk,
+        end_msg_id=plan.end_msg_id,
     )
-    if not enqueued:
-        return {}
-    return {
-        "compact": compact.model_copy(
-            update={
-                "understanding_cut_index": chunk.end_index,
-                "understanding_cut_tokens": input_tokens,
-            }
-        )
-    }
+    return {"compact": plan.moved} if enqueued else {}
 
 
 async def enqueue_closing_chunk(
@@ -119,7 +94,7 @@ async def enqueue_closing_chunk(
     pool: AsyncConnectionPool | None,
     agent_id: int,
     boundary: str | None,
-    read_agent: Callable[[str], Any],
+    understanding_enabled: bool,
 ) -> None:
     """Enqueue the closing segment's remainder at compaction (best-effort).
 
@@ -127,47 +102,25 @@ async def enqueue_closing_chunk(
     is the checkpoint stamped for it (None = the stamp failed, nothing to anchor
     the read on, so nothing is enqueued).
     """
-    if pool is None or boundary is None or not read_agent("understanding_enabled"):
+    if pool is None or boundary is None or not understanding_enabled:
         return
-    chunk = plan_closing_chunk(
-        cut_index=max(compact.understanding_cut_index, segment_head_len(messages)),
-        request_len=sendable_len(messages),
-    )
-    if chunk is None:
+    closing = plan_closing(compact, messages)
+    if closing is None:
         return
     await enqueue_chunk(
         pool,
         agent_id,
         compact_version=compact.version,
-        chunk=chunk,
-        end_msg_id=messages[chunk.end_index - 1].id,
+        chunk=closing.chunk,
+        end_msg_id=closing.end_msg_id,
         boundary_checkpoint_id=boundary,
     )
 
-
-# How long a compaction waits for the checkpoint to hold the state's last message before it stamps
-# the boundary anyway: the graph persists a super-step's checkpoint asynchronously, so the newest
-# row can lag the state by one step.
-SNAPSHOT_WAIT_SECONDS = 5.0
-SNAPSHOT_POLL_SECONDS = 0.5
 
 _NEWEST_CHECKPOINT_TS = (
     "SELECT checkpoint->>'ts' FROM checkpoints WHERE thread_id = %s AND checkpoint_ns = ''"
     " ORDER BY checkpoint_id DESC LIMIT 1"
 )
-
-
-def _read_time(message: AnyMessage) -> datetime | None:
-    """When the model read `message` (`meiva_picked_up_at`, else `meiva_created_at`) as an aware
-    time; None for a missing, unparsable or timezone-less stamp (an old message)."""
-    stamp = message_read_time(message)
-    if not stamp:
-        return None
-    try:
-        parsed = datetime.fromisoformat(stamp)
-    except ValueError:
-        return None
-    return parsed if parsed.tzinfo is not None else None
 
 
 async def newest_checkpoint_ts(pool: AsyncConnectionPool, agent_id: int) -> datetime | None:
@@ -178,7 +131,12 @@ async def newest_checkpoint_ts(pool: AsyncConnectionPool, agent_id: int) -> date
 
 
 async def await_snapshot(
-    pool: AsyncConnectionPool | None, state: Any, agent_id: int, *, read_agent: Callable[[str], Any]
+    pool: AsyncConnectionPool | None,
+    state: AgentState | None,
+    agent_id: int,
+    *,
+    understanding_enabled: bool,
+    wait: SnapshotWait = DEFAULT_SNAPSHOT_WAIT,
 ) -> None:
     """Wait (bounded) until the newest checkpoint of the agent is at least as new as the `state`'s
     last message.
@@ -195,9 +153,9 @@ async def await_snapshot(
     understanding is off or there is no state.
     """
     messages: list[AnyMessage] = [] if state is None else list(state.messages)
-    if pool is None or not messages or not read_agent("understanding_enabled"):
+    if pool is None or not messages or not understanding_enabled:
         return
-    last = _read_time(messages[-1])
+    last = read_time(messages[-1])
     started = time.monotonic()
     while last is not None:
         try:
@@ -205,11 +163,12 @@ async def await_snapshot(
         except Exception:
             logger.opt(exception=True).warning("snapshot check failed for agent {}", agent_id)
             return
-        if newest is not None and newest >= last:
+        verdict = snapshot_verdict(newest, last, time.monotonic() - started, wait)
+        if verdict == "caught_up":
             return
-        if time.monotonic() - started >= SNAPSHOT_WAIT_SECONDS:
+        if verdict == "give_up":
             break
-        await asyncio.sleep(SNAPSHOT_POLL_SECONDS)
+        await asyncio.sleep(wait.poll_seconds)
     logger.warning(
         "compaction of agent {agent} stamps its boundary before the checkpoint is known to hold "
         "the last message {message}",

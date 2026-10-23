@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable
 
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, AnyMessage
@@ -13,7 +12,7 @@ from base.lm.errors import normalize_provider_transport_error
 
 
 async def ainvoke_tool_call(
-    llm: BaseChatModel, messages: list[AnyMessage], *, read_timeout: Callable[[], float]
+    llm: BaseChatModel, messages: list[AnyMessage], *, timeout_seconds: float
 ) -> AIMessage:
     """Bind the agent tool and invoke once; transport failures are normalized.
 
@@ -31,4 +30,4 @@ async def ainvoke_tool_call(
                 raise
             raise normalized from exc
 
-    return await asyncio.wait_for(invoke(), timeout=read_timeout())
+    return await asyncio.wait_for(invoke(), timeout=timeout_seconds)

@@ -1,10 +1,9 @@
-from unittest.mock import MagicMock
-
 import psycopg
 from psycopg_pool import AsyncConnectionPool
 
 from agent.graph.claim.tests.claim_support import make_runtime, thread_config
 from agent.graph.claim.tests.cursor_fixture import fresh_snapshot_cursor as fresh_snapshot_cursor
+from agent.graph.node_log.tests.live_events import LiveEvents
 from agent.state import AgentState
 from base.agents.tests.units import spawn_agent
 from base.cluster.machine import MachineIdentity
@@ -49,14 +48,13 @@ async def test_claim_node_idle_enter_publishes_full_window_snapshot(
     redis_url: str,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
+    live_events: LiveEvents,
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
 ):
-    import json
-
     from langchain_core.messages import SystemMessage
 
     from agent.graph.claim.node import claim_node
@@ -68,19 +66,18 @@ async def test_claim_node_idle_enter_publishes_full_window_snapshot(
         machine=machine_identity,
     )
 
-    pub = MagicMock()
     state = AgentState()
     state.messages = [SystemMessage(content="prompt")]
     await claim_node(
         state,
-        make_runtime(ops_pool=aops_pool, event_publisher=pub, database_gate=database_gate),
+        make_runtime(
+            ops_pool=aops_pool, event_publisher=live_events.publisher, database_gate=database_gate
+        ),
         thread_config(
             tid,
         ),
     )
-    snaps = [
-        json.loads(c.args[0]) for c in pub.emit.call_args_list if "timeline_snapshot" in c.args[0]
-    ]
+    snaps = [event for event in await live_events.events() if event["role"] == "timeline_snapshot"]
     assert len(snaps) == 1
     assert snaps[0]["msg_count"] == 1
     assert [it["item_id"] for it in snaps[0]["items"]] == ["0.0"]

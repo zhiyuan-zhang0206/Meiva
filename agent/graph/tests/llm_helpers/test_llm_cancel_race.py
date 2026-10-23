@@ -2,42 +2,63 @@
 
 import asyncio
 from collections.abc import AsyncIterator
+from typing import Any
 from unittest.mock import MagicMock
 
+import psycopg
 from langchain_core.messages import AIMessageChunk, HumanMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.types import Command
+from psycopg_pool import AsyncConnectionPool
 
-from agent.graph.exec.tests.cancel_fixture import (
-    committed_messages,
-    has_cancelled_event,
-    make_runtime,
-    set_after,
-)
-from agent.graph.interrupt import InterruptEvent
+from agent.graph.interrupt.tests.queued_commands import queue_command
 from agent.graph.llm.node import llm_node
 from agent.graph.llm_errors import LlmLedger
+from agent.graph.node_log.tests.live_events import LiveEvents
+from agent.graph.tests.test_llm_helpers import make_runtime
 from agent.state import AgentState
-
-# Most tests here drive exec_node/llm_node with mocked run_in_subprocess / a
-# fake cancel_event, so they are deterministic and run in the parallel pool.
-from base.agents.messages.inbound import InterruptReason
+from base.db import create_agent
 from base.db.code_version_gate import ProcessDbGate
+from base.events.live.projection import Cancelled
+from base.native_process.stop_timing import RESTART_INTERRUPT_GRACE_S
 from base.native_process.turn_identity import HostedTurnResources
 from meiva.tests.fixtures.pin_agent import hosted_resources as hosted_resources
 
-_CONFIG: RunnableConfig = {"configurable": {"thread_id": "7"}}
+
+def _config(agent_id: int) -> RunnableConfig:
+    return {"configurable": {"thread_id": str(agent_id)}}
 
 
+def _committed_messages(update: dict[str, Any]) -> list[Any]:
+    return update.get("messages", [])
+
+
+def _has_cancelled(events: list[Any], agent_id: int) -> bool:
+    return any(isinstance(e, Cancelled) and e.agent_id == agent_id for e in events)
+
+
+async def _queue_later(
+    db_conn: psycopg.Connection, agent_id: int, delay: float, kind: str, *, waited_s: float = 0.0
+) -> None:
+    await asyncio.sleep(delay)
+    queue_command(db_conn, agent_id, kind, waited_s=waited_s)
+
+
+# meiva:note
+# A queued cancel is noticed by the watcher on its poll, so the stream hangs until then: the
+# node is genuinely mid-stream when the command lands, and the cancel branch is the only way out.
+# cancel arriving during the LLM stream → llm_node detects it via asyncio.wait
+# race → discards the entire partial generation: Command(halted=True,
+# goto=after_exec) commits no messages (generation has no side effects,
+# nothing to retain).
 async def test_llm_node_cancel_event_race_discards_partial(
+    redis_url: str,
     hosted_resources: HostedTurnResources,
-    fake_cancel_event: asyncio.Event,
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    live_events: LiveEvents,
     database_gate: ProcessDbGate,
 ) -> None:
-    """cancel_event set during LLM stream → llm_node detects it via asyncio.wait
-    race → discards the entire partial generation: Command(halted=True,
-    goto=after_exec) commits no messages (generation has no side effects,
-    nothing to retain)."""
 
     async def _stream_then_hang():
         yield AIMessageChunk(content="par")
@@ -46,17 +67,18 @@ async def test_llm_node_cancel_event_race_discards_partial(
 
     fake_llm = MagicMock()
     fake_llm.astream.return_value = _stream_then_hang()
-    pub = MagicMock()
+    agent_id = create_agent(db_conn)
     state = AgentState(messages=[HumanMessage(content="hi")], halted=False)
 
-    trigger = asyncio.create_task(set_after(fake_cancel_event, 0.1))
+    trigger = asyncio.create_task(_queue_later(db_conn, agent_id, 0.1, "cancel"))
     runtime = make_runtime(
-        hosted_resources=hosted_resources,
+        resources=hosted_resources,
         llm=fake_llm,
-        event_publisher=pub,
+        event_publisher=live_events.publisher,
         database_gate=database_gate,
+        ops_pool=aops_pool,
     )
-    result = await llm_node(state, runtime, _CONFIG, ledger=LlmLedger())
+    result = await llm_node(state, runtime, _config(agent_id), ledger=LlmLedger())
     await trigger
 
     assert isinstance(result, Command)
@@ -65,16 +87,18 @@ async def test_llm_node_cancel_event_race_discards_partial(
     assert update is not None
     assert update["halted"] is True
     # Clean discard: no partial AIMessage, no marker
-    assert committed_messages(update) == []
-    assert has_cancelled_event(pub, agent_id=7)
+    assert _committed_messages(update) == []
+    assert _has_cancelled(await live_events.typed(), agent_id)
 
 
 # meiva:note
 # A restart's interrupt drops the half-generated reply like any interrupt, and says on the state
 # that the halted turn is unfinished: claim must resume it, not treat it as idle.
 async def test_llm_node_restart_interrupt_discards_partial_and_marks_the_turn_unfinished(
+    redis_url: str,
     hosted_resources: HostedTurnResources,
-    fake_cancel_event: InterruptEvent,
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
     database_gate: ProcessDbGate,
 ) -> None:
 
@@ -84,20 +108,20 @@ async def test_llm_node_restart_interrupt_discards_partial_and_marks_the_turn_un
 
     fake_llm = MagicMock()
     fake_llm.astream.return_value = _stream_then_hang()
+    agent_id = create_agent(db_conn)
     state = AgentState(messages=[HumanMessage(content="hi")], halted=False)
 
-    async def restart_lands() -> None:
-        await asyncio.sleep(0.1)
-        fake_cancel_event.set(InterruptReason.RESTART)
-
-    trigger = asyncio.create_task(restart_lands())
+    trigger = asyncio.create_task(
+        _queue_later(db_conn, agent_id, 0.1, "restart", waited_s=RESTART_INTERRUPT_GRACE_S + 1)
+    )
     runtime = make_runtime(
-        hosted_resources=hosted_resources,
+        resources=hosted_resources,
         llm=fake_llm,
         event_publisher=MagicMock(),
         database_gate=database_gate,
+        ops_pool=aops_pool,
     )
-    result = await llm_node(state, runtime, _CONFIG, ledger=LlmLedger())
+    result = await llm_node(state, runtime, _config(agent_id), ledger=LlmLedger())
     await trigger
 
     assert isinstance(result, Command)
@@ -105,19 +129,22 @@ async def test_llm_node_restart_interrupt_discards_partial_and_marks_the_turn_un
     assert result.update == {"halted": True, "interrupted_by_restart": True}
 
 
+# meiva:note
+# cancel arrives mid tool_call stream → partial AIMessage is entirely
+# discarded, so **no** tool_result debt is incurred: because no complete
+# AIMessage with tool_use is committed, history has no "assistant.tool_calls
+# must be followed by ToolMessage" protocol debt.
+#
+# This is the exact opposite of exec cancel (there tool_use is already
+# committed, exec_node must supply a [cancelled by user] tool_result).
 async def test_llm_node_cancel_event_race_discards_partial_tool_call(
+    redis_url: str,
     hosted_resources: HostedTurnResources,
-    fake_cancel_event: asyncio.Event,
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    live_events: LiveEvents,
     database_gate: ProcessDbGate,
 ) -> None:
-    """cancel arrives mid tool_call stream → partial AIMessage is entirely
-    discarded, so **no** tool_result debt is incurred: because no complete
-    AIMessage with tool_use is committed, history has no "assistant.tool_calls
-    must be followed by ToolMessage" protocol debt.
-
-    This is the exact opposite of exec cancel (there tool_use is already
-    committed, exec_node must supply a [cancelled by user] tool_result).
-    """
 
     async def _stream_tool_call_then_hang():
         yield AIMessageChunk(content=[{"type": "text", "text": "I'll run that.", "index": 0}])
@@ -145,17 +172,18 @@ async def test_llm_node_cancel_event_race_discards_partial_tool_call(
 
     fake_llm = MagicMock()
     fake_llm.astream.return_value = _stream_tool_call_then_hang()
-    pub = MagicMock()
+    agent_id = create_agent(db_conn)
     state = AgentState(messages=[HumanMessage(content="hi")], halted=False)
 
-    trigger = asyncio.create_task(set_after(fake_cancel_event, 0.1))
+    trigger = asyncio.create_task(_queue_later(db_conn, agent_id, 0.1, "cancel"))
     runtime = make_runtime(
-        hosted_resources=hosted_resources,
+        resources=hosted_resources,
         llm=fake_llm,
-        event_publisher=pub,
+        event_publisher=live_events.publisher,
         database_gate=database_gate,
+        ops_pool=aops_pool,
     )
-    result = await llm_node(state, runtime, _CONFIG, ledger=LlmLedger())
+    result = await llm_node(state, runtime, _config(agent_id), ledger=LlmLedger())
     await trigger
 
     assert isinstance(result, Command)
@@ -164,18 +192,22 @@ async def test_llm_node_cancel_event_race_discards_partial_tool_call(
     assert update is not None
     assert update["halted"] is True
     # Entirely discarded: neither partial AIMessage nor supplemental tool_result
-    assert committed_messages(update) == []
-    assert has_cancelled_event(pub, agent_id=7)
+    assert _committed_messages(update) == []
+    assert _has_cancelled(await live_events.typed(), agent_id)
 
 
+# meiva:note
+# cancel set before LLM emits anything → llm_node returns Command(halted=True,
+# goto=after_exec) without committing any message; does not raise CancelledError
+# (which is BaseException and would silently exit the process via asyncio.run).
 async def test_llm_node_cancel_event_race_no_partial_returns_halted(
+    redis_url: str,
     hosted_resources: HostedTurnResources,
-    fake_cancel_event: asyncio.Event,
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    live_events: LiveEvents,
     database_gate: ProcessDbGate,
 ) -> None:
-    """cancel_event set before LLM emits anything → llm_node returns Command(halted=True,
-    goto=after_exec) without committing any message; does not raise CancelledError
-    (which is BaseException and would silently exit the process via asyncio.run)."""
 
     async def _hang_immediately():
         await asyncio.Future()
@@ -183,34 +215,34 @@ async def test_llm_node_cancel_event_race_no_partial_returns_halted(
 
     fake_llm = MagicMock()
     fake_llm.astream.return_value = _hang_immediately()
-    pub = MagicMock()
+    agent_id = create_agent(db_conn)
     state = AgentState(messages=[HumanMessage(content="hi")], halted=False)
 
-    trigger = asyncio.create_task(set_after(fake_cancel_event, 0.05))
+    queue_command(db_conn, agent_id, "cancel")
     runtime = make_runtime(
-        hosted_resources=hosted_resources,
+        resources=hosted_resources,
         llm=fake_llm,
-        event_publisher=pub,
+        event_publisher=live_events.publisher,
         database_gate=database_gate,
+        ops_pool=aops_pool,
     )
-    result = await llm_node(state, runtime, _CONFIG, ledger=LlmLedger())
-    await trigger
-    assert has_cancelled_event(pub, agent_id=7)
+    result = await llm_node(state, runtime, _config(agent_id), ledger=LlmLedger())
+    assert _has_cancelled(await live_events.typed(), agent_id)
 
     assert isinstance(result, Command)
     assert result.goto == "after_exec"
     assert result.update is not None
     assert result.update["halted"] is True
-    assert committed_messages(result.update) == []
+    assert _committed_messages(result.update) == []
 
 
+# meiva:note
+# no interrupt queued, LLM stream completes normally → llm_node returns
+# Command(goto=before_exec).
 async def test_llm_node_cancel_event_race_normal_completion(
     hosted_resources: HostedTurnResources,
-    fake_cancel_event: asyncio.Event,
     database_gate: ProcessDbGate,
 ) -> None:
-    """cancel_event not set, LLM stream completes normally → llm_node returns
-    Command(goto=before_exec)."""
 
     async def _fast_stream() -> AsyncIterator[AIMessageChunk]:
         # tool_use must have non-empty tool_calls (validator enforces "protocol consistency"
@@ -228,10 +260,8 @@ async def test_llm_node_cancel_event_race_normal_completion(
     fake_llm.astream.return_value = _fast_stream()
     state = AgentState(messages=[HumanMessage(content="go")], halted=False)
 
-    runtime = make_runtime(
-        hosted_resources=hosted_resources, llm=fake_llm, database_gate=database_gate
-    )
-    result = await llm_node(state, runtime, _CONFIG, ledger=LlmLedger())
+    runtime = make_runtime(resources=hosted_resources, llm=fake_llm, database_gate=database_gate)
+    result = await llm_node(state, runtime, _config(7), ledger=LlmLedger())
 
     assert isinstance(result, Command)
     assert result.update is not None

@@ -1,0 +1,309 @@
+import json
+import os
+import time
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
+from threading import Timer
+from typing import Any
+
+import pytest
+
+from agent.impersonation import establish_relay
+from agent.takeover.process import spawn_relay
+from agent.takeover.relay import (
+    CREDENTIAL_RENEWED_REASON,
+    NOT_READY_REASON,
+    SESSION_RELAY_DOWN_REASON,
+    UNBOUND_REASON,
+    RelayBinding,
+    RelayWait,
+    startup_failure,
+)
+from agent.tests.impersonation.lease_support import Cluster, relay_program, stub_host
+from agent.tests.impersonation.lease_support import cluster as cluster
+from base.agents import impersonation as leases
+from base.agents.impersonation.host_transport import antigravity_endpoint_path
+from base.agents.observation.relay_supervision import RelaySupervision, terminate_relay
+from base.native_process.runtime_incarnation import RuntimeIncarnation
+
+CREDENTIAL = "private-test-credential"
+SLOW = RelayWait(timeout_s=20.0, poll_s=0.05)
+
+
+def _wait_for(path: Path, *, complete: bytes = b"") -> bytes:
+    deadline = time.monotonic() + 15
+    while time.monotonic() < deadline:
+        if path.exists() and path.read_bytes().endswith(complete) and path.read_bytes():
+            return path.read_bytes()
+        time.sleep(0.02)
+    raise AssertionError(f"{path.name} never appeared")
+
+
+def _establish(
+    cluster: Cluster,
+    session: dict[str, Any],
+    owner: RuntimeIncarnation,
+    relays: RelaySupervision,
+    *,
+    tmp_path: Path,
+    mode: str,
+    wait: RelayWait = SLOW,
+) -> bool:
+    return establish_relay(
+        cluster.database,
+        cluster.event_bus,
+        session,
+        owner,
+        relays,
+        host=stub_host(cluster, tmp_path, mode, wait=wait),
+    )
+
+
+@pytest.mark.parametrize("provider", ["claude", "dsh"])
+def test_a_session_relay_with_a_fresh_heartbeat_stands_without_a_transition(
+    cluster: Cluster, tmp_path: Path, provider: str
+) -> None:
+    owner = cluster.native_agent()
+    accepted = cluster.lease(owner, provider=provider)
+    cluster.heartbeat(accepted["id"], seconds_ago=0.0)
+    session = cluster.status(owner)
+    assert session is not None
+    assert _establish(cluster, session, owner, RelaySupervision(), tmp_path=tmp_path, mode="exit:9")
+    assert cluster.get(accepted["id"])["status"] == "accepted"
+
+
+def test_a_session_relay_without_a_heartbeat_rolls_the_lease_back_when_the_wait_is_spent(
+    cluster: Cluster, tmp_path: Path
+) -> None:
+    owner = cluster.native_agent()
+    accepted = cluster.lease(owner, provider="claude")
+    session = cluster.status(owner)
+    assert session is not None
+    assert not _establish(
+        cluster,
+        session,
+        owner,
+        RelaySupervision(),
+        tmp_path=tmp_path,
+        mode="exit:9",
+        wait=RelayWait(timeout_s=0.2, poll_s=0.05),
+    )
+    ended = cluster.get(accepted["id"])
+    assert ended["status"] == "rejected"
+    assert ended["rejection_reason"] == SESSION_RELAY_DOWN_REASON
+
+
+def test_a_session_relay_that_heartbeats_inside_the_wait_stands(
+    cluster: Cluster, tmp_path: Path
+) -> None:
+    owner = cluster.native_agent()
+    accepted = cluster.lease(owner, provider="dsh")
+    session = cluster.status(owner)
+    assert session is not None
+    late = Timer(0.3, lambda: cluster.heartbeat(accepted["id"], seconds_ago=0.0))
+    late.start()
+    try:
+        assert _establish(
+            cluster, session, owner, RelaySupervision(), tmp_path=tmp_path, mode="exit:9"
+        )
+    finally:
+        late.join()
+    assert cluster.get(accepted["id"])["status"] == "accepted"
+
+
+def test_a_lease_someone_else_already_ended_needs_no_relay_and_keeps_its_own_reason(
+    cluster: Cluster, tmp_path: Path
+) -> None:
+    owner = cluster.native_agent()
+    accepted = cluster.lease(owner, provider="claude")
+    stale = cluster.status(owner)
+    assert stale is not None
+    leases.fail_acceptance(
+        cluster.database, cluster.event_bus, accepted["id"], owner, "ended by the controller"
+    )
+    assert not _establish(
+        cluster, stale, owner, RelaySupervision(), tmp_path=tmp_path, mode="exit:9"
+    )
+    assert cluster.get(accepted["id"])["rejection_reason"] == "ended by the controller"
+
+
+def test_a_lease_without_a_relay_binding_is_rolled_back(cluster: Cluster, tmp_path: Path) -> None:
+    owner = cluster.native_agent()
+    accepted = cluster.lease(owner, provider="claude")
+    session = cluster.status(owner)
+    assert session is not None
+    unbound = {**session, "relay_provider": None}
+    assert not _establish(
+        cluster, unbound, owner, RelaySupervision(), tmp_path=tmp_path, mode="exit:9"
+    )
+    assert cluster.get(accepted["id"])["rejection_reason"] == UNBOUND_REASON
+
+
+def test_a_codex_relay_is_provisioned_spawned_and_awaited_until_its_first_heartbeat(
+    cluster: Cluster, tmp_path: Path
+) -> None:
+    owner = cluster.native_agent()
+    accepted = cluster.lease(owner, provider="codex")
+    session = cluster.status(owner)
+    assert session is not None
+    relays = RelaySupervision()
+    marker = tmp_path / "relay"
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        ready = pool.submit(
+            _establish, cluster, session, owner, relays, tmp_path=tmp_path, mode="serve"
+        )
+        try:
+            token = _wait_for(marker / "token", complete=b"\n").decode().strip()
+            leases.relay_heartbeat(
+                cluster.database, accepted["id"], token, local_machine=cluster.local_machine
+            )
+            assert ready.result(timeout=20) is True
+        finally:
+            for child in relays.children.values():
+                terminate_relay(child)
+    child = relays.children[owner.agent_id]
+    assert child.token == token
+    assert child.lease_id == accepted["id"]
+    assert child.generation == cluster.get(accepted["id"])["relay_generation"] == 1
+    assert json.loads((marker / "argv.json").read_text()) == [
+        "impersonate",
+        "relay",
+        str(owner.agent_id),
+        "--lease-id",
+        accepted["id"],
+        "--provider",
+        "codex",
+        "--thread-id",
+        session["relay_thread_id"],
+        "--token-stdin",
+    ]
+    assert cluster.get(accepted["id"])["status"] == "accepted"
+
+
+def test_a_codex_relay_that_exits_during_startup_rolls_the_lease_back(
+    cluster: Cluster, tmp_path: Path
+) -> None:
+    owner = cluster.native_agent()
+    accepted = cluster.lease(owner, provider="codex")
+    session = cluster.status(owner)
+    assert session is not None
+    relays = RelaySupervision()
+    assert not _establish(cluster, session, owner, relays, tmp_path=tmp_path, mode="exit:5")
+    ended = cluster.get(accepted["id"])
+    assert ended["status"] == "rejected"
+    assert ended["rejection_reason"] == startup_failure("codex", 5)
+    assert "exit code 5" in ended["rejection_reason"]
+    assert not relays.children
+
+
+def test_a_codex_relay_that_never_heartbeats_is_stopped_and_the_lease_rolled_back(
+    cluster: Cluster, tmp_path: Path
+) -> None:
+    owner = cluster.native_agent()
+    accepted = cluster.lease(owner, provider="codex")
+    session = cluster.status(owner)
+    assert session is not None
+    relays = RelaySupervision()
+    assert not _establish(
+        cluster,
+        session,
+        owner,
+        relays,
+        tmp_path=tmp_path,
+        mode="serve",
+        wait=RelayWait(timeout_s=0.5, poll_s=0.05),
+    )
+    ended = cluster.get(accepted["id"])
+    assert ended["status"] == "rejected"
+    assert ended["rejection_reason"] == NOT_READY_REASON
+    assert not relays.children
+    pid = int((tmp_path / "relay" / "pid").read_text())
+    with pytest.raises(ProcessLookupError):
+        os.kill(pid, 0)
+
+
+def test_a_credential_replaced_during_startup_rolls_the_lease_back(
+    cluster: Cluster, tmp_path: Path
+) -> None:
+    owner = cluster.native_agent()
+    accepted = cluster.lease(owner, provider="codex")
+    session = cluster.status(owner)
+    assert session is not None
+    relays = RelaySupervision()
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        outcome = pool.submit(
+            _establish, cluster, session, owner, relays, tmp_path=tmp_path, mode="serve"
+        )
+        try:
+            _wait_for(tmp_path / "relay" / "token", complete=b"\n")
+            cluster.db_conn.execute(
+                "UPDATE agent_impersonations SET relay_token_hash='replaced' WHERE id=%s",
+                (accepted["id"],),
+            )
+            cluster.db_conn.commit()
+            assert outcome.result(timeout=20) is False
+        finally:
+            for child in relays.children.values():
+                terminate_relay(child)
+    assert cluster.get(accepted["id"])["rejection_reason"] == CREDENTIAL_RENEWED_REASON
+
+
+def test_a_codex_lease_that_is_no_longer_native_held_spawns_no_relay(
+    cluster: Cluster, tmp_path: Path
+) -> None:
+    owner = cluster.native_agent()
+    accepted = cluster.lease(owner, provider="codex")
+    stale = cluster.status(owner)
+    assert stale is not None
+    leases.fail_acceptance(
+        cluster.database, cluster.event_bus, accepted["id"], owner, "ended by the controller"
+    )
+    relays = RelaySupervision()
+    assert not _establish(cluster, stale, owner, relays, tmp_path=tmp_path, mode="serve")
+    assert not relays.children
+    assert not (tmp_path / "relay" / "pid").exists()
+
+
+def test_an_unreadable_antigravity_record_rolls_back_with_its_path(
+    cluster: Cluster, tmp_path: Path
+) -> None:
+    # meiva:note
+    # A relay that dies at startup leaves only an exit code in the lease's reason, so
+    # the accepting runtime resolves the destination first and names the record it
+    # could not use. The assertion is the operator-visible rejection reason: resolving
+    # before spawning is what puts the fact there, and no relay process exists to start.
+    # meiva:link docs/conventions/agents/agent-impersonation-hosts.md
+    owner = cluster.native_agent()
+    accepted = cluster.lease(owner, provider="antigravity")
+    session = cluster.status(owner)
+    assert session is not None
+    record = antigravity_endpoint_path(session["relay_thread_id"])
+    record.parent.mkdir(parents=True, exist_ok=True)
+    record.write_text("not json", encoding="utf-8")
+    relays = RelaySupervision()
+    assert not _establish(cluster, session, owner, relays, tmp_path=tmp_path, mode="serve")
+    ended = cluster.get(accepted["id"])
+    assert ended["status"] == "rejected"
+    assert "the Antigravity endpoint is unusable" in ended["rejection_reason"]
+    assert str(record) in ended["rejection_reason"]
+    assert not (tmp_path / "relay" / "pid").exists()
+
+
+def test_the_spawned_relay_receives_its_credential_over_the_pipe_only(tmp_path: Path) -> None:
+    marker = tmp_path / "received"
+    marker.mkdir()
+    binding = RelayBinding(
+        agent_id=1,
+        lease_id="lease",
+        provider="codex",
+        thread_id="thread",
+        codex_remote=None,
+        antigravity_endpoint_file=None,
+        codex_home=None,
+    )
+    child = spawn_relay(relay_program(marker, "record"), binding, token=CREDENTIAL)
+    child.wait(timeout=10)
+    assert (marker / "token").read_bytes() == CREDENTIAL.encode() + b"\n"
+    argv = json.loads((marker / "argv.json").read_text())
+    assert argv[:2] == ["impersonate", "relay"]
+    assert all(CREDENTIAL not in part for part in argv)

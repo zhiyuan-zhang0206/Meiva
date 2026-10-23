@@ -1,30 +1,31 @@
 import asyncio
 import json
-import os
-from collections.abc import Awaitable, Callable
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, cast
-from unittest.mock import MagicMock
 
 import pytest
 from langchain_core.messages import AIMessage, ToolMessage
 from langgraph.runtime import Runtime
 
+from agent.graph.exec._child_boundary import ParentFacts
 from agent.graph.exec._result import ExecDone
 from agent.graph.exec._stream import ExecOutputChunkPublisher
 from agent.graph.exec.node import exec_node, run_agent_code
 from agent.graph.exec.process import SubprocessExecProcess
+from agent.graph.exec.tests.event_capture import idle_publisher
 from agent.state import AgentState
 from base.agents.context import MeivaContext
 from base.agents.context.identity import AgentIdentity
 from base.agents.messages.kwargs import ExecStatus, read_meiva_kwargs
 from base.clock import Clock
-from base.config import ConfigBoot, settings
+from base.config import settings
 from base.config.agent_pins import resolve_agent_config_pins
-from base.config.tests.configuration import defaults, snapshot_process_config
+from base.config.tests.configuration import defaults
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
+from base.host.env.registry import AGENT_BIRTH_CONFIG_ENV, AGENT_CONFIG_OVERLAY_ENV
 from base.lm.catalog import ModelCatalog
 from base.packages.plugin_providers import build_model_catalog
 from base.paths import workspace_dir_readonly
@@ -59,21 +60,26 @@ def _plugin(unit_home: Path) -> None:
     )
 
 
-@pytest.mark.usefixtures("fake_cancel_event")
+# meiva:note
+# The parent's environment carries another agent's pins, as an ambient process would: a child
+# may only see the explicit maps of the turn it was launched for.
+class _AmbientPinsProcess(SubprocessExecProcess):
+    def parent_facts(self) -> ParentFacts:
+        facts = super().parent_facts()
+        ambient = {
+            AGENT_CONFIG_OVERLAY_ENV: json.dumps({"llm_model": "deepseek-v4-pro"}),
+            AGENT_BIRTH_CONFIG_ENV: json.dumps(
+                {"llm_stream_ttft_timeout_seconds": 99.0, "exec_probe_marker": "ambient-parent"}
+            ),
+        }
+        return replace(facts, environ={**facts.environ, **ambient})
+
+
 async def test_concurrent_turn_configs_reach_real_children_without_cross_talk(
     unit_home: Path,
-    monkeypatch: pytest.MonkeyPatch,
     database: Database,
 ) -> None:
     _plugin(unit_home)
-    monkeypatch.setitem(os.environ, "MEIVA_HOME", str(unit_home))
-    monkeypatch.setenv("MEIVA_AGENT_CONFIG_OVERLAY", json.dumps({"llm_model": "deepseek-v4-pro"}))
-    monkeypatch.setenv(
-        "MEIVA_AGENT_BIRTH_CONFIG",
-        json.dumps(
-            {"llm_stream_ttft_timeout_seconds": 99.0, "exec_probe_marker": "ambient-parent"}
-        ),
-    )
     code = (
         "import json, os\n"
         "from meiva.sdk_surface.settings import agent_setting, plugins\n"
@@ -99,8 +105,8 @@ async def test_concurrent_turn_configs_reach_real_children_without_cross_talk(
             ),
             agent_id,
             code,
-            ExecOutputChunkPublisher(MagicMock(), agent_id, str(agent_id)),
-            process=SubprocessExecProcess(),
+            ExecOutputChunkPublisher(idle_publisher(), agent_id, str(agent_id)),
+            process=_AmbientPinsProcess(),
         )
         assert isinstance(result, ExecDone), result
         line = next(line for line in result.output.splitlines() if line.startswith("CONFIG="))
@@ -134,8 +140,7 @@ async def test_concurrent_turn_configs_reach_real_children_without_cross_talk(
 
 
 def _execution_context(
-    owner: ConfigBoot,
-    read: Callable[[str, str], Any],
+    agent: AgentSlices,
     agent_id: int,
     database: Database,
     event_bus: EventBus,
@@ -143,12 +148,12 @@ def _execution_context(
     request: pytest.FixtureRequest,
 ) -> MeivaContext:
     context = MeivaContext(
-        agent=AgentSlices.resolve(default_reader=read),
+        agent=agent,
         db=database,
         bus=event_bus,
-        clients=process_clients(config=owner, database=lambda: database),
+        clients=process_clients(database=lambda: database),
         identity=AgentIdentity(agent_id=agent_id, owns_loop=True),
-        event_publisher=MagicMock(),
+        event_publisher=idle_publisher(),
         catalog=model_catalog,
         clock_factory=Clock.from_settings,
     )
@@ -186,130 +191,65 @@ async def _execution_message(context: MeivaContext, code: str) -> ToolMessage:
     return message
 
 
-@pytest.mark.usefixtures("fake_cancel_event")
-async def test_exec_shield_reads_each_owner_at_the_existing_timeout_points(
-    monkeypatch: pytest.MonkeyPatch,
+async def test_exec_shield_follows_each_turns_own_node_timeout(
+    unit_home: Path,
     database: Database,
     event_bus: EventBus,
     model_catalog: ModelCatalog,
     request: pytest.FixtureRequest,
 ) -> None:
-    first, second = snapshot_process_config(), snapshot_process_config()
-    first.set_field("exec_node_timeout_seconds", 0.002)
-    second.set_field("exec_node_timeout_seconds", 30)
-    first_reads: list[float] = []
-    second_reads: list[float] = []
-
-    def read(owner: ConfigBoot, reads: list[float], domain: str, field: str) -> Any:
-        value = getattr(getattr(owner.view, domain), field)
-        if field == "exec_node_timeout_seconds":
-            reads.append(value)
-        return value
-
+    short, long = (
+        AgentSlices.resolve(default_reader=defaults(sandbox__exec_node_timeout_seconds=seconds))
+        for seconds in (0.6, 30.0)
+    )
     contexts = [
-        _execution_context(
-            first,
-            lambda domain, field: read(first, first_reads, domain, field),
-            424204,
-            database,
-            event_bus,
-            model_catalog,
-            request,
-        ),
-        _execution_context(
-            second,
-            lambda domain, field: read(second, second_reads, domain, field),
-            424205,
-            database,
-            event_bus,
-            model_catalog,
-            request,
-        ),
+        _execution_context(short, 424204, database, event_bus, model_catalog, request),
+        _execution_context(long, 424205, database, event_bus, model_catalog, request),
     ]
-    wait_for = asyncio.wait_for
 
-    async def wait(awaitable: Awaitable[Any], timeout: float | None) -> Any:
-        try:
-            return await wait_for(awaitable, timeout)
-        except TimeoutError:
-            if timeout == 0.002:
-                first.set_field("exec_node_timeout_seconds", 5)
-            raise
-
-    monkeypatch.setattr(asyncio, "wait_for", wait)
     timed_out, fast = await asyncio.gather(
         _execution_message(contexts[0], "import time; time.sleep(60)"),
         _execution_message(contexts[1], "print('done')"),
     )
+
     assert read_meiva_kwargs(timed_out).get("meiva_exec_status") == ExecStatus.TIMED_OUT
-    assert "timeout after 5s" in timed_out.text
+    assert "exec node timeout after 1s" in timed_out.text
     assert read_meiva_kwargs(fast).get("meiva_exec_status") == ExecStatus.COMPLETED
     assert "done" in fast.text
-    assert first_reads == [0.002, 5, 5]
-    assert second_reads == [30]
 
 
-@pytest.mark.usefixtures("fake_cancel_event")
-async def test_crop_inputs_are_lazy_and_keep_two_live_readers_separate(
+async def test_crop_limits_follow_each_turns_own_settings(
+    unit_home: Path,
     database: Database,
     event_bus: EventBus,
     model_catalog: ModelCatalog,
     request: pytest.FixtureRequest,
 ) -> None:
-    first, second = snapshot_process_config(), snapshot_process_config()
-    for owner in (first, second):
-        owner.set_field("exec_output_crop_head_lines", 1)
-        owner.set_field("exec_output_crop_tail_lines", 1)
-    first.set_field("exec_output_crop_after_lines", 2)
-    second.set_field("exec_output_crop_after_lines", 7)
-    reads: dict[str, list[int]] = {"first": [], "second": []}
-
-    def read(owner: ConfigBoot, name: str, domain: str, field: str) -> Any:
-        value = getattr(getattr(owner.view, domain), field)
-        if field == "exec_output_crop_after_lines":
-            reads[name].append(value)
-        return value
+    def crop_after(lines: int) -> AgentSlices:
+        return AgentSlices.resolve(
+            default_reader=defaults(
+                sandbox__exec_output_crop_head_lines=1,
+                sandbox__exec_output_crop_tail_lines=1,
+                sandbox__exec_output_crop_after_lines=lines,
+            )
+        )
 
     contexts = [
-        _execution_context(
-            first,
-            lambda domain, field: read(first, "first", domain, field),
-            424206,
-            database,
-            event_bus,
-            model_catalog,
-            request,
-        ),
-        _execution_context(
-            second,
-            lambda domain, field: read(second, "second", domain, field),
-            424207,
-            database,
-            event_bus,
-            model_catalog,
-            request,
-        ),
+        _execution_context(crop_after(2), 424206, database, event_bus, model_catalog, request),
+        _execution_context(crop_after(7), 424207, database, event_bus, model_catalog, request),
     ]
-    assert reads == {"first": [], "second": []}
     code = "for index in range(6): print(f'line {index} ' + 'content ' * 40)"
     body = "".join(f"line {index} " + "content " * 40 + "\n" for index in range(6))
+
     first_result, second_result = await asyncio.gather(
         _execution_message(contexts[0], code),
         _execution_message(contexts[1], code),
     )
+
     assert "[output cropped:" in first_result.text
     assert "[output cropped:" not in second_result.text
     assert body in second_result.text
     archives = list((workspace_dir_readonly(424206) / ".exec_output").glob("crop_*.txt"))
     assert len(archives) == 1 and archives[0].read_text() == body
     assert str(archives[0]) in first_result.text
-    first.set_field("exec_output_crop_after_lines", 9)
-    updated, unchanged = await asyncio.gather(
-        _execution_message(contexts[0], code),
-        _execution_message(contexts[1], code),
-    )
-    assert "[output cropped:" not in updated.text and body in updated.text
-    assert "[output cropped:" not in unchanged.text and body in unchanged.text
-    assert reads == {"first": [2, 2, 9], "second": [7, 7]}
-    assert list((workspace_dir_readonly(424206) / ".exec_output").glob("crop_*.txt")) == archives
     assert list((workspace_dir_readonly(424207) / ".exec_output").glob("crop_*.txt")) == []

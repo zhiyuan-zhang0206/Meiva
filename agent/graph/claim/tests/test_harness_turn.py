@@ -4,6 +4,7 @@ from collections.abc import AsyncGenerator, Callable
 from dataclasses import replace
 from unittest.mock import MagicMock
 
+import psycopg
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_core.runnables import RunnableConfig
@@ -20,13 +21,17 @@ from agent.graph.claim.harness_turn import (
     turn_key,
 )
 from agent.graph.llm_errors import FatalLLMStreamError
-from agent.hooks.tests.fakes import make_fake_ops_pool
 from agent.state import AgentState
 from base.agents.context import HostedTurnResources, MeivaContext
+from base.agents.tests.units import spawn_agent
 from base.api_contracts.agent_contract import Harness
 from base.clock import Clock
+from base.cluster.machine import MachineIdentity
+from base.config.service_read import ConfigAuthority
 from base.config.tests.configuration import defaults
+from base.db.code_version_gate import ProcessDbGate
 from base.host.env.agent_slices import AgentSlices
+from base.lm.catalog import ModelCatalog
 from base.lm.harness import (
     AssistantText,
     BridgeEvent,
@@ -129,6 +134,14 @@ async def hosted_resources() -> AsyncGenerator[HostedTurnResources]:
         yield await service.turn()
     finally:
         await service.aclose()
+
+
+def _last_message_text(db: psycopg.Connection, agent_id: int) -> str | None:
+    row = db.execute(
+        "SELECT last_message_text FROM agents_meta WHERE id = %s", (agent_id,)
+    ).fetchone()
+    assert row is not None
+    return row[0]
 
 
 def inbound(text: str, inbound_id: int) -> HumanMessage:
@@ -385,31 +398,50 @@ async def test_replayed_completion_does_not_log_provider_usage_twice(
 # does, so the reader needs no branch of its own.
 # meiva:link agent/graph/docs/harness-turn.meiva.okf.md
 async def test_a_completed_turn_stamps_the_reply_as_the_last_message(
+    redis_url: str,
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
     hosted_resources: HostedTurnResources,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
-    ops_pool = make_fake_ops_pool()
+    agent_id = spawn_agent(
+        catalog=model_catalog,
+        authority=config_authority,
+        database_gate=database_gate,
+        machine=machine_identity,
+    )
     engine = FakeEngine(reply="the answer")
 
     await harness_turn_node(
         AgentState(messages=[inbound("do it", 7)], harness_cursor=0),
-        runtime(engine, ops_pool=ops_pool, hosted_resources=hosted_resources),
-        config(),
+        runtime(engine, ops_pool=aops_pool, hosted_resources=hosted_resources),
+        config(agent_id),
     )
 
-    updates = [
-        call.args
-        for call in ops_pool.fake_cursor.execute.call_args_list
-        if call.args and "last_active_at = now()" in str(call.args[0])
-    ]
-    assert len(updates) == 1, "a completed harness turn stamps exactly once"
-    assert "last_message_text" in str(updates[0][0])
-    assert updates[0][1][0] == "the answer", "the stamped text is the turn's reply"
+    assert _last_message_text(db_conn, agent_id) == "the answer"
 
 
 async def test_the_handoff_prelude_is_not_the_last_message(
+    redis_url: str,
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
     hosted_resources: HostedTurnResources,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
 ) -> None:
-    ops_pool = make_fake_ops_pool()
+    agent_id = spawn_agent(
+        catalog=model_catalog,
+        authority=config_authority,
+        database_gate=database_gate,
+        machine=machine_identity,
+    )
     ack = HarnessTurn(
         turn_id="t0",
         text="acknowledged",
@@ -423,16 +455,13 @@ async def test_the_handoff_prelude_is_not_the_last_message(
 
     await harness_turn_node(
         AgentState(messages=[inbound("do it", 7)], harness_cursor=0),
-        runtime(engine, ops_pool=ops_pool, hosted_resources=hosted_resources),
-        config(),
+        runtime(engine, ops_pool=aops_pool, hosted_resources=hosted_resources),
+        config(agent_id),
     )
 
-    updates = [
-        call.args
-        for call in ops_pool.fake_cursor.execute.call_args_list
-        if call.args and "last_message_text" in str(call.args[0])
-    ]
-    assert updates[0][1][0] == "the answer", "a prelude completes first; the reply lands last"
+    assert _last_message_text(db_conn, agent_id) == "the answer", (
+        "a prelude completes first; the reply lands last"
+    )
 
 
 async def test_intra_turn_events_project_to_live_sse_and_committed_messages() -> None:

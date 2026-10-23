@@ -7,72 +7,32 @@ are candidates for eviction, and an exhausted budget leaves the output inline.
 
 import re
 import stat
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol
 from uuid import uuid4
 
 from langchain_core.messages import AIMessage, BaseMessage
 
+from base.host.atomic_io import write_bytes_atomic
 from base.lm.content import content_blocks, message_addl_kwargs, message_content
 from base.log import logger
 
 
-class CropConfig(Protocol):
-    """The crop knobs `crop_output` reads — declared structurally so this module
-    never imports the eager config chain.
-
-    Naming `SandboxSettings` here would import `base.config.domains.sandbox` (and
-    with it pydantic_settings) into every exec child's lite boot — this module
-    sits on the `agent.graph` import path (task #3621). The protocol is also
-    the truthful runtime contract: lite mode hands `crop_output` the config
-    view, not a `SandboxSettings`. A caller whose object lacks a member fails
-    statically at the call site.
-    """
-
-    @property
-    def exec_output_crop_after_lines(self) -> int: ...
-    @property
-    def exec_output_crop_after_chars(self) -> int: ...
-    @property
-    def exec_output_crop_after_bytes(self) -> int: ...
-    @property
-    def exec_output_crop_head_lines(self) -> int: ...
-    @property
-    def exec_output_crop_tail_lines(self) -> int: ...
-    @property
-    def exec_output_crop_archive_max_bytes(self) -> int: ...
-
-
-class CropInputs:
-    """Live crop fields supplied by the execution composition owner."""
-
-    def __init__(self, read: Callable[[str], int]) -> None:
-        self._read = read
-
-    @property
-    def exec_output_crop_after_lines(self) -> int:
-        return self._read("exec_output_crop_after_lines")
-
-    @property
-    def exec_output_crop_after_chars(self) -> int:
-        return self._read("exec_output_crop_after_chars")
-
-    @property
-    def exec_output_crop_after_bytes(self) -> int:
-        return self._read("exec_output_crop_after_bytes")
-
-    @property
-    def exec_output_crop_head_lines(self) -> int:
-        return self._read("exec_output_crop_head_lines")
-
-    @property
-    def exec_output_crop_tail_lines(self) -> int:
-        return self._read("exec_output_crop_tail_lines")
-
-    @property
-    def exec_output_crop_archive_max_bytes(self) -> int:
-        return self._read("exec_output_crop_archive_max_bytes")
+# meiva:note
+# The crop knobs `crop_output` reads, as values. A plain dataclass keeps this module off the
+# eager config chain: naming `SandboxSettings` would import `base.config.domains.sandbox` (and
+# with it pydantic_settings) into every exec child's lite boot, because this module sits on
+# the `agent.graph` import path (task #3621). The exec node builds one per result from the
+# turn's sandbox settings.
+@dataclass(frozen=True)
+class CropLimits:
+    exec_output_crop_after_lines: int
+    exec_output_crop_after_chars: int
+    exec_output_crop_after_bytes: int
+    exec_output_crop_head_lines: int
+    exec_output_crop_tail_lines: int
+    exec_output_crop_archive_max_bytes: int
 
 
 _CROP_NAME = re.compile(r"\bcrop_[0-9a-f]{32}\.txt\b")
@@ -165,7 +125,7 @@ def _make_room(directory: Path, size: int, budget: int, referenced: set[str]) ->
 def crop_output(
     output: str,
     directory: Path,
-    config: CropConfig,
+    config: CropLimits,
     *,
     referenced_messages: Sequence[BaseMessage],
     max_chars: int,
@@ -184,7 +144,6 @@ def crop_output(
     if preview is None or len(preview) > max_chars:
         return None
     encoded = output.encode("utf-8")
-    created = False
     try:
         if not _make_room(
             directory,
@@ -195,16 +154,8 @@ def crop_output(
             logger.info("Soft output crop skipped: referenced archives or output fill byte budget")
             return None
         directory.mkdir(mode=0o700, parents=True, exist_ok=True)
-        with path.open("xb") as archive:
-            created = True
-            path.chmod(0o600)
-            archive.write(encoded)
+        write_bytes_atomic(path, encoded, mode=0o600, sync_file=False, suppress_cleanup_error=True)
     except OSError as exc:
-        if created:
-            try:
-                path.unlink(missing_ok=True)
-            except OSError as cleanup_error:
-                logger.warning("Soft output archive cleanup failed ({error})", error=cleanup_error)
         logger.warning("Soft output crop skipped: archive unavailable ({error})", error=exc)
         return None
     return preview

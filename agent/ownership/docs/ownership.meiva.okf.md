@@ -41,9 +41,11 @@ matches the original incarnation.
 ## Entry points
 
 - `agent/ownership/hosted.py` — admission, settlement, lifecycle apply, the start-up settle
-- `agent/ownership/corpse_reap.py` — crash-dead row termination; scope is the machine, idling, past the grace
+- `agent/ownership/corpse_reap.py` — crash-dead row termination; scope is the machine, idling, past the grace; the host announces what it returned (`services/agent_runner/agent_host/lifecycle/shells.py:reap_and_announce_corpses`: the change hint, then the browser pages)
 - `agent/ownership/inbound.py` — the owner lock every inbound queue mutation takes
-- `agent/ownership/hosted.py:apply_hosted_lifecycle` — executes the claimed restart/terminate command and marks it done in one transaction
+- `agent/ownership/hosted.py:apply_hosted_lifecycle` — executes the claimed restart/terminate command and marks it done in one transaction; returns what it applied (`AppliedLifecycle`)
+- `agent/ownership/lifecycle_plan.py` — the pure decisions of that apply and of closing a turn (executable kind, the continuation note, the shell cutoff, what a turn close stamps and settles)
+- `services/agent_runner/agent_host/lifecycle/shells.py:apply_lifecycle_command` — apply, then the post-commit cleanup a terminate owes
 - `services/agent_runner/agent_host/daemon.py` — the host beat (liveness and the corpse reaper)
 - `base/native_process/runtime_incarnation.py` — context-bound execution identity
 
@@ -89,9 +91,12 @@ Each cleanup attempts only listed IDs below its cutoff, excluding page sessions,
 through the existing backend identity checks. It never holds the lifecycle lock
 across PTY calls or chases later allocations. Errors stay visible without rolling
 back termination; crash leftovers and late sessions require operator cleanup.
-Graceful post-commit notification, browser-page release and requested shell cleanup
-are independently attempted. A cancellation during browser release cannot skip shell
-cleanup; the first failure is raised after the attempts, with later failures attached
-as notes. Ordinary browser-release errors remain best-effort warnings.
+`apply_hosted_lifecycle` runs nothing after its commit: it returns an
+`AppliedLifecycle` (kind, agent, shell cutoff) and the host executes it, because the
+shell backend sits above this package. `apply_lifecycle_command` publishes the change
+hint, releases the agent's browser pages and, when a terminate asked for it, cleans the
+shell sessions below the cutoff. Each is attempted even when an earlier one fails or is
+cancelled, and the first failure is raised after the attempts. Ordinary browser-release
+errors remain best-effort warnings.
 See
 [the cleanup decision](../../../docs/decisions/runtime/processes/2026-10-10-termination-pty-cleanup-after-commit.md).

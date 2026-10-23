@@ -15,12 +15,14 @@ _PROMOTED_MODULES = ("cwd", "files", "shell")
 
 def coding_tools_section(slices: AgentSlices, *, catalog: ModelCatalog) -> str:
     del catalog
+    from agent.graph.prompt.live import effective_sdk_disable, read_plugin_expansions
     from agent.graph.prompt.system_prompt import effective_sdk_expand
 
     expanded = set(
         effective_sdk_expand(
-            slices.prompt.sdk_disable,
-            configured_expansions=slices.read("agent", "sdk_expand_in_system_prompt"),
+            slices.read("agent", "sdk_expand_in_system_prompt"),
+            disabled=effective_sdk_disable(slices.prompt.sdk_disable),
+            plugin_expansions=read_plugin_expansions(),
         )
     )
     pieces: list[str] = []

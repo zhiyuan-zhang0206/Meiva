@@ -2,9 +2,12 @@ exports = ["metrics.py"]
 
 [uses]
 "_escapes.py" = ["_punct.py"]
-"_ruff.py" = ["_imports.py"]
-"agent_runtime.py" = ["_deterministic_fixes.py", "_escapes.py", "_imports.py", "_llm_repair.py", "_punct.py", "_ruff.py"]
-"tests" = ["_deterministic_fixes.py", "_escapes.py", "_imports.py", "_llm_repair.py", "_punct.py", "agent_runtime.py"]
+"_imports.py" = ["_ruff.py", "_ruff_plan.py"]
+"_llm_repair.py" = ["_repair_text.py"]
+"_ruff.py" = ["_ruff_plan.py", "_ruff_run.py"]
+"_ruff_run.py" = ["_ruff_plan.py"]
+"agent_runtime.py" = ["_deterministic_fixes.py", "_escapes.py", "_imports.py", "_llm_repair.py", "_punct.py", "_repair_text.py", "_ruff.py", "_ruff_plan.py", "_ruff_run.py"]
+"tests" = ["_deterministic_fixes.py", "_escapes.py", "_imports.py", "_llm_repair.py", "_punct.py", "_repair_text.py", "_ruff.py", "_ruff_plan.py", "_ruff_run.py", "agent_runtime.py"]
 
 [external]
 "_deterministic_fixes.py" = "the syntax repairer's oracle: compiles agent-authored code"
@@ -15,4 +18,6 @@ exports = ["metrics.py"]
 "__init__.py" = "strict"
 "_escapes.py" = "strict"
 "_punct.py" = "strict"
+"_repair_text.py" = "strict"
+"_ruff_plan.py" = "strict"
 "plugin.py" = "strict"

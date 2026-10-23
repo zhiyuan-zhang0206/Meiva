@@ -22,7 +22,6 @@ from langgraph.runtime import Runtime
 from langgraph.types import Command
 from psycopg_pool import AsyncConnectionPool
 
-from agent.graph import node_log as _node_log
 from agent.graph.claim.node import claim_node
 from agent.messages import NoteTag
 from agent.state import AgentState
@@ -33,8 +32,8 @@ from base.agents.tests.units import spawn_agent
 from base.clock import Clock
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
-from base.config import settings
 from base.config.service_read import ConfigAuthority
+from base.config.tests.configuration import defaults
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
@@ -54,16 +53,12 @@ _USER_NOTE = (
 )
 
 
-@pytest.fixture(autouse=True)
-def _scan_on_with_fresh_snapshot_cursor(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Scanning on; the node-enter snapshot cursor (per-process state, not under
-    test) starts fresh."""
-    monkeypatch.setattr(settings.agent, "security_scan_enabled", True)
-    monkeypatch.setattr(_node_log, "SNAPSHOT_CURSOR", {})
-
-
 async def _claim(
-    pool: AsyncConnectionPool, agent_id: int, database_gate: ProcessDbGate
+    pool: AsyncConnectionPool,
+    agent_id: int,
+    database_gate: ProcessDbGate,
+    *,
+    scan_enabled: bool = True,
 ) -> Command[Any]:
     return await claim_node(
         AgentState(messages=[SystemMessage(content="sys")]),
@@ -73,7 +68,7 @@ async def _claim(
                 llm=MagicMock(),
                 event_publisher=MagicMock(),
                 agent=AgentSlices.resolve(
-                    default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
+                    {"security_scan_enabled": scan_enabled}, default_reader=defaults()
                 ),
                 db=Database.from_settings(gate=database_gate),
                 bus=EventBus.from_settings(),
@@ -212,7 +207,6 @@ async def test_each_flagged_message_in_a_batch_gets_its_own_note(
 async def test_unflagged_inbound_gets_no_note(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
-    monkeypatch: pytest.MonkeyPatch,
     text: str,
     scan_enabled: bool,
     database: Database,
@@ -223,7 +217,6 @@ async def test_unflagged_inbound_gets_no_note(
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
 ) -> None:
-    monkeypatch.setattr(settings.agent, "security_scan_enabled", scan_enabled)
     agent_id = spawn_agent(
         catalog=model_catalog,
         authority=config_authority,
@@ -232,7 +225,9 @@ async def test_unflagged_inbound_gets_no_note(
     )
     insert_inbound_message(db_conn, agent_id, text, source="user", bus=event_bus, database=database)
 
-    delta = _delta(await _claim(aops_pool, agent_id, database_gate=database_gate))
+    delta = _delta(
+        await _claim(aops_pool, agent_id, database_gate=database_gate, scan_enabled=scan_enabled)
+    )
 
     assert len(delta) == 1
     assert isinstance(delta[0], HumanMessage)

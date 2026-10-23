@@ -83,12 +83,11 @@ from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfi
 _log = logging.getLogger("meiva_builtins.plugins.meiva_fleet.task_maintenance.daemon")
 
 
+_DAEMON_MODULE = "meiva_builtins.plugins.meiva_fleet.task_maintenance.daemon"
+
+
 def task_maintenance_endpoint() -> ServiceEndpoint:
     return ServiceEndpoints.from_settings().of("task_maintenance")
-
-
-def _pidfile() -> Path:
-    return task_maintenance_endpoint().pidfile
 
 
 _LIVENESS_TIMEOUT_S = 60.0
@@ -256,26 +255,11 @@ def run_escalate(pool: ConnectionPool, db: Database, bus: EventBus, escalate_n: 
 # ── Daemon lifecycle ─────────────────────────────────────────────────────────
 
 
-def write_pidfile() -> None:
-    if not acquire_pidfile(
-        _pidfile(), "meiva_builtins.plugins.meiva_fleet.task_maintenance.daemon"
-    ):
-        _log.info("[task_maintenance] daemon already running (pidfile=%s), exiting", _pidfile())
-        sys.exit(1)
-
-
-def remove_daemon_pidfile() -> None:
-    remove_pidfile(_pidfile())
-
-
 # meiva:note
 # Whether a daemon is already running via its pidfile; pid-reuse-safe by verifying the live pid's
 # argv names this daemon's module.
-def is_running(*, pidfile: Path | None = None) -> bool:
-    return pidfile_holds_daemon(
-        pidfile or _pidfile(),
-        "meiva_builtins.plugins.meiva_fleet.task_maintenance.daemon",
-    )
+def is_running(pidfile: Path) -> bool:
+    return pidfile_holds_daemon(pidfile, _DAEMON_MODULE)
 
 
 async def _sleep_with_liveness(liveness: Liveness, total_s: float) -> None:
@@ -332,23 +316,25 @@ async def run(
     config: FleetConfig,
     *,
     database: Callable[[], Database],
+    bus: EventBus,
     image: LoadedCommit,
-    check_running: Callable[[], bool] = is_running,
-    cleanup_pidfile: Callable[[], None] = remove_daemon_pidfile,
+    endpoint: ServiceEndpoint,
 ) -> None:
-    if check_running():
+    if is_running(endpoint.pidfile):
         _log.info(
-            "[task-maintenance] daemon already running (pidfile=%s), exiting",
-            _pidfile(),
+            "[task-maintenance] daemon already running (pidfile=%s), exiting", endpoint.pidfile
         )
         sys.exit(1)
 
     # Pidfile before the healthz bind — see services/restarter/daemon.py:run().
-    write_pidfile()
-    _log.info("[task-maintenance] pidfile written: %s", _pidfile())
+    if not acquire_pidfile(endpoint.pidfile, _DAEMON_MODULE):
+        _log.info(
+            "[task_maintenance] daemon already running (pidfile=%s), exiting", endpoint.pidfile
+        )
+        sys.exit(1)
+    _log.info("[task-maintenance] pidfile written: %s", endpoint.pidfile)
 
     liveness = Liveness(_LIVENESS_TIMEOUT_S)
-    endpoint = task_maintenance_endpoint()
     health = await start_health_server(
         "task_maintenance", endpoint.health_port, liveness=liveness, image=image
     )
@@ -357,15 +343,15 @@ async def run(
     db = database()
     pool = db.pool()
     try:
-        await dispatch_loop(pool, db, EventBus.from_settings(), liveness, config=config)
+        await dispatch_loop(pool, db, bus, liveness, config=config)
     finally:
         pool.close()
         await stop_health_server(health)
-        cleanup_pidfile()
+        remove_pidfile(endpoint.pidfile)
         _log.info("[task-maintenance] daemon stopped")
 
 
-def main(*, cleanup_pidfile: Callable[[], None] = remove_daemon_pidfile) -> None:
+def main() -> None:
     from base.deploy.schema.migrations import assert_schema_current
 
     image = LoadedCommit.capture()
@@ -391,18 +377,27 @@ def main(*, cleanup_pidfile: Callable[[], None] = remove_daemon_pidfile) -> None
         image=image,
     )
     install_graceful_shutdown("task_maintenance")
+    endpoint = task_maintenance_endpoint()
     try:
         config = read_service_config("meiva_fleet", FleetConfig)
         if config is None:
             config = read_config_image(FleetConfig, disk_image_path("meiva_fleet"))
-        asyncio.run(run(config, database=database, image=image))
+        asyncio.run(
+            run(
+                config,
+                database=database,
+                bus=EventBus.from_settings(),
+                image=image,
+                endpoint=endpoint,
+            )
+        )
     except KeyboardInterrupt:
         _log.info("[task-maintenance] interrupted, shutting down")
     except Exception:
         _log.exception("[task-maintenance] daemon crashed — uncaught exception escaped run()")
         raise
     finally:
-        cleanup_pidfile()
+        remove_pidfile(endpoint.pidfile)
 
 
 if __name__ == "__main__":

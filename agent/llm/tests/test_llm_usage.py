@@ -6,6 +6,7 @@ langchain-anthropic / langchain-openai all plumb cache + reasoning figures into
 usage_metadata.{input,output}_token_details.
 """
 
+import time
 from datetime import UTC, datetime
 from typing import Any, cast
 
@@ -236,7 +237,6 @@ def test_log_llm_usage_emits_agent_billing_span(
     monkeypatch.setattr(config.settings.observability, "trace_enabled", True)
     monkeypatch.setattr(tracing_mod, "is_initialized", lambda: True)
     monkeypatch.setattr(otel_trace, "get_tracer", lambda _name: tracer)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr("time.time_ns", lambda: 5_000_000_000)
     message = AIMessage(
         content="",
         usage_metadata={
@@ -247,6 +247,7 @@ def test_log_llm_usage_emits_agent_billing_span(
         },
     )
 
+    before_ns = time.time_ns()
     log_llm_usage(
         message,
         agent_id=7,
@@ -255,10 +256,12 @@ def test_log_llm_usage_emits_agent_billing_span(
         priced_at=priced_at,
         catalog=build_model_catalog(),
     )
+    after_ns = time.time_ns()
 
     assert len(tracer.spans) == 1
     span = tracer.spans[0]
-    assert span.start_time == 3_765_500_000
+    assert span.start_time is not None
+    assert before_ns <= span.start_time + 1_234_500_000 <= after_ns
     assert span.attributes["meiva.billing.vendor"] == "deepseek"
     assert span.attributes["meiva.billing.usage_kind"] == "agent"
     assert span.attributes["meiva.billing.tokens_in"] == 1_000

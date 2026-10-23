@@ -1,178 +1,111 @@
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator
-from unittest.mock import MagicMock
 
 import pytest
-from langchain_core.messages import AIMessageChunk, AnyMessage, HumanMessage
+from google.genai.errors import ClientError
+from langchain_core.messages import AIMessageChunk, HumanMessage, SystemMessage
 
-import agent.graph.llm._stream as llm_stream
-from agent.graph._callbacks import RedisStreamHandler
+from agent.graph.llm._deadlines import StreamBounds
 from agent.graph.llm._stream import consume_stream_with_stall_timeout, stream_llm
-from base.agents.observation.turn_progress import TurnProgress
+from agent.graph.llm.tests.llm_support import ScriptedModel, StubHandler, end_turn_chunk
+from agent.llm import execute_code
 from base.config.tests.configuration import defaults
 from base.host.env.agent_slices import AgentSlices
-from base.packages.plugin_providers import build_model_catalog
+from base.lm.catalog import ModelCatalog
+
+_BOUNDS = StreamBounds(ttft_seconds=10.0, inter_chunk_seconds=10.0, total_seconds=None)
+_GAP = 0.05
 
 
-class _FakeClock:
-    def __init__(self, t: float = 1000.0) -> None:
-        self.t = t
-
-    def __call__(self) -> float:
-        return self.t
-
-
-class _FakeHandler(RedisStreamHandler):
-    def __init__(self) -> None:
-        super().__init__(
-            event_publisher=MagicMock(), agent_id=1, msg_idx=0, turn_progress=TurnProgress()
-        )
-        self.chunks_seen: list[AIMessageChunk] = []
-        self.reset_calls = 0
-
-    def process_chunk(self, chunk: AIMessageChunk) -> None:
-        self.chunks_seen.append(chunk)
-
-    def reset(self) -> None:
-        self.reset_calls += 1
-        super().reset()
-
-
-async def test_consume_stream_records_first_last_timestamps(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    clock = _FakeClock()
-    monkeypatch.setattr(llm_stream.time, "monotonic", clock)
-
-    async def _stream() -> AsyncIterator[AIMessageChunk]:
-        clock.t = 1005.0
+async def test_consume_stream_records_first_and_last_arrival() -> None:
+    async def stream() -> AsyncIterator[AIMessageChunk]:
         yield AIMessageChunk(content="a")
-        clock.t = 1008.0
+        await asyncio.sleep(_GAP)
         yield AIMessageChunk(content="b")
-        clock.t = 1013.0
+        await asyncio.sleep(_GAP)
         yield AIMessageChunk(content="c")
 
     chunks: list[AIMessageChunk] = []
-    handler = _FakeHandler()
     first_ts, last_ts = await consume_stream_with_stall_timeout(
-        _stream(),
-        chunks=chunks,
-        handler=handler,
-        ttft_timeout=1.0,
-        inter_chunk_timeout=1.0,
+        stream(), chunks=chunks, handler=StubHandler(), bounds=_BOUNDS
     )
-    assert (first_ts, last_ts) == (1005.0, 1013.0)
-    assert len(chunks) == 3
-    assert len(handler.chunks_seen) == 3
+
+    assert first_ts is not None and last_ts is not None
+    assert 1.5 * _GAP <= last_ts - first_ts < 10.0
+    assert [chunk.content for chunk in chunks] == ["a", "b", "c"]
 
 
-async def test_consume_stream_empty_stream_returns_none(monkeypatch: pytest.MonkeyPatch) -> None:
-    async def _empty() -> AsyncIterator[AIMessageChunk]:
+async def test_consume_stream_empty_stream_returns_none() -> None:
+    async def empty() -> AsyncIterator[AIMessageChunk]:
         if False:
             yield AIMessageChunk(content="x")
 
-    first_ts, last_ts = await consume_stream_with_stall_timeout(
-        _empty(),
-        chunks=[],
-        handler=_FakeHandler(),
-        ttft_timeout=1.0,
-        inter_chunk_timeout=1.0,
-    )
-    assert (first_ts, last_ts) == (None, None)
-
-
-async def test_stream_llm_stamps_decode_ms(monkeypatch: pytest.MonkeyPatch) -> None:
-    clock = _FakeClock()
-    monkeypatch.setattr(llm_stream.time, "monotonic", clock)
-
-    async def _stream() -> AsyncIterator[AIMessageChunk]:
-        clock.t = 1005.0
-        yield AIMessageChunk(content="a")
-        clock.t = 1013.0
-        yield AIMessageChunk(content="b")
-
-    fake_llm = MagicMock()
-    fake_llm.astream.return_value = _stream()
-    fake_llm.bind_tools.return_value = fake_llm
-
-    handler = _FakeHandler()
     chunks: list[AIMessageChunk] = []
-    await stream_llm(
-        fake_llm,
-        [],
-        chunks=chunks,
-        handler=handler,
-        agent=AgentSlices.resolve(default_reader=defaults()),
-        catalog=build_model_catalog(),
+    window = await consume_stream_with_stall_timeout(
+        empty(), chunks=chunks, handler=StubHandler(), bounds=_BOUNDS
     )
 
-    assert handler.llm_decode_ms == 8000.0
-    assert handler.llm_latency_ms == 13000.0
-    assert len(chunks) == 2
-    assert "discarded partial" not in [chunk.content for chunk in chunks]
+    assert window == (None, None)
+    assert chunks == []
 
 
-async def test_empty_stream_decode_ms_none(monkeypatch: pytest.MonkeyPatch) -> None:
-    clock = _FakeClock()
-    monkeypatch.setattr(llm_stream.time, "monotonic", clock)
+async def test_stream_llm_stamps_latency_and_decode_window(model_catalog: ModelCatalog) -> None:
+    model = ScriptedModel(scripts=[[AIMessageChunk(content="a"), _GAP, end_turn_chunk("b")]])
+    handler = StubHandler()
 
-    async def _empty() -> AsyncIterator[AIMessageChunk]:
-        if False:
-            yield AIMessageChunk(content="x")
-
-    fake_llm = MagicMock()
-    fake_llm.astream.return_value = _empty()
-    fake_llm.bind_tools.return_value = fake_llm
-
-    handler = _FakeHandler()
     await stream_llm(
-        fake_llm,
+        model,
         [],
         chunks=[],
         handler=handler,
         agent=AgentSlices.resolve(default_reader=defaults()),
-        catalog=build_model_catalog(),
+        catalog=model_catalog,
     )
-    assert handler.llm_decode_ms is None
-    assert handler.llm_latency_ms == 0.0
+
+    assert handler.llm_decode_ms is not None and handler.llm_latency_ms is not None
+    assert handler.llm_decode_ms >= 0.9 * _GAP * 1000
+    assert handler.llm_decode_ms <= handler.llm_latency_ms < 10_000
 
 
-async def test_stream_preserves_prefix_and_does_not_recover_cache_403() -> None:
-    from google.genai.errors import ClientError
-    from langchain_core.messages import SystemMessage
-
-    from agent.llm import execute_code
-
+async def test_stream_preserves_prefix_and_does_not_recover_cache_403(
+    model_catalog: ModelCatalog,
+) -> None:
     failure = ClientError(
         403, {"error": {"message": "CachedContent not found or permission denied"}}
     )
-
-    async def stream(_messages: list[AnyMessage]) -> AsyncIterator[AIMessageChunk]:
-        yield AIMessageChunk(content="partial")
-        raise failure
-
-    llm = MagicMock()
-    llm.bind_tools.return_value = llm
-    llm.astream.side_effect = stream
-    messages: list[AnyMessage] = [
-        SystemMessage(content="stable head"),
-        HumanMessage(content="conversation"),
-    ]
+    second_request = [end_turn_chunk("a second request would have streamed this")]
+    model = ScriptedModel(scripts=[[AIMessageChunk(content="partial"), failure], second_request])
     chunks: list[AIMessageChunk] = []
-    handler = _FakeHandler()
+
     with pytest.raises(ClientError) as caught:
         await stream_llm(
-            llm,
-            messages,
+            model,
+            [SystemMessage(content="stable head"), HumanMessage(content="conversation")],
             chunks=chunks,
-            handler=handler,
+            handler=StubHandler(),
             agent=AgentSlices.resolve(default_reader=defaults()),
-            catalog=build_model_catalog(),
+            catalog=model_catalog,
         )
+
     assert caught.value is failure
-    llm.bind_tools.assert_called_once_with([execute_code])
-    llm.astream.assert_called_once_with(messages)
-    llm.ainvoke.assert_not_called()
-    assert handler.reset_calls == 0
     assert [chunk.content for chunk in chunks] == ["partial"]
+    assert model.scripts == [second_request]
+
+
+async def test_stream_binds_the_agent_tool_and_sends_the_complete_prefix(
+    model_catalog: ModelCatalog,
+) -> None:
+    chunks: list[AIMessageChunk] = []
+
+    await stream_llm(
+        ScriptedModel(scripts=[["echo"]]),
+        [SystemMessage(content="stable head"), HumanMessage(content="conversation")],
+        chunks=chunks,
+        handler=StubHandler(),
+        agent=AgentSlices.resolve(default_reader=defaults()),
+        catalog=model_catalog,
+    )
+
+    assert chunks[0].content == f"{(execute_code.name,)}: stable head | conversation"

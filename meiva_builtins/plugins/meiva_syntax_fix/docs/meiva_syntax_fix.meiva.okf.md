@@ -59,7 +59,7 @@ the source unchanged; there is no process-wide warning cache.
 
 ### 5. `ruff format` (gated)
 
-- Controlled by `settings.syntax_fix_ruff_format` switch; beyond the deterministically correct path, only does style normalization
+- Controlled by the agent's `sandbox.syntax_fix_ruff_format` slice; beyond the deterministically correct path, only does style normalization
 
 ### 6. Deterministic fix batteries (`_deterministic_fixes.py` / `apply_all_deterministic_fixes`)
 
@@ -70,7 +70,7 @@ first compile-passing fix wins—prevents "legitimate code corrupted" or "greedy
 
 ### 7. compile validation + LLM fallback
 
-`compile()` pre-check; if still failing, calls `_llm_repair_syntax` to let the model fix it (only adopted if its result compiles),
+`compile()` pre-check; if still failing, calls `llm_repair_syntax` to let the model fix it (only adopted if its result compiles),
 if that still fails, a single-call turn returns a compile-error ToolMessage directly. In a multi-call turn, the ordinary child reports that call's syntax error while sibling calls still execute.
 
 ## Key dependencies
@@ -82,9 +82,23 @@ if that still fails, a single-call turn returns a compile-error ToolMessage dire
 ## Configuration
 
 - ruff config in `pyproject.toml [tool.ruff]`
-- `settings.syntax_fix_ruff_format`: whether to run step 5 `ruff format`
+- `sandbox.syntax_fix_ruff_format` (agent slice): whether to run step 5 `ruff format`
+- `lm.llm_override` (cluster setting, read from the agent's slices by the hook): when set, the LLM repair model is the one this `module:factory` builds
 - Chinese punctuation maps: `_PUNCT_MAP` / `_FULLWIDTH_QUOTE_MAP`
 - Import maps: `_BARE_NAME_IMPORTS` etc. (stdlib + third-party aliases + `meiva`)
+
+## Where the decisions live
+
+The hook is the composition root: it reads the agent's slices once per turn into `FixInputs`
+(the `ruff_format` flag, the `RuffRun` and the `RepairInputs`) and hands them down as values.
+`_ruff_plan.py` is the strict pure half of the ruff stages: the argv each stage runs, how an exit
+status and stdout become the stage's result (`rewritten_source`, `undefined_names`) and the warning
+a stage that gave up logs (`give_up_warning`). `_ruff_run.py` is the shell that runs the argv and
+resolves the executable beside the interpreter, never through the ambient PATH. `_repair_text.py`
+is the strict text half of the LLM repair (prompts, the rendered SyntaxError, the reply cleanup);
+`_llm_repair.py` is its loop. The tests give a stage a `RuffRun` over a script in `tmp_path` (a
+real child that echoes, sleeps past a short budget or exits non-zero) and give the repair step a
+model through the `llm_override` the agent's slices carry.
 
 ## Notes
 
@@ -100,7 +114,7 @@ if that still fails, a single-call turn returns a compile-error ToolMessage dire
 inputs, including malformed Python. The format-disabled case uses a duplicate
 import to guarantee a lint fix, then checks that formatting stays disabled;
 it must not depend on whether the current Ruff configuration repairs a missing
-final newline. Deterministic compile-error cases disable LLM repair explicitly,
+final newline. Deterministic compile-error cases point `llm_override` at a repair model that is not configured,
 so their fallback assertions do not call a provider.
 Spacing assertions pin the format setting. Triple-quote closer candidates are
 compile-checked so an earlier embedded delimiter cannot end the repaired string.

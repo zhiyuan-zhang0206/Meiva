@@ -15,7 +15,7 @@ from psycopg_pool import AsyncConnectionPool
 
 from agent.db import claim_inbound_batch
 from agent.graph.claim.node import claim_node
-from agent.impersonation import settle_checkpoint
+from agent.impersonation import process_host, settle_checkpoint
 from agent.ownership.hosted import admit_hosted_runtime, apply_hosted_lifecycle
 from agent.state import BaseAgentState
 from base.agents import impersonation as leases
@@ -237,15 +237,8 @@ async def _terminate_native(
             )
             assert [item.id for item in batch] == [terminate_id]
             assert _native_notices(db_conn, owner.agent_id) == []
-            assert (
-                await apply_hosted_lifecycle(
-                    aops_pool,
-                    owner,
-                    bus=EventBus.from_settings(),
-                    resume_turn=False,
-                )
-                == "terminate"
-            )
+            applied = await apply_hosted_lifecycle(aops_pool, owner, resume_turn=False)
+            assert applied is not None and applied.kind == "terminate"
     notices = _native_notices(db_conn, owner.agent_id)
     assert [row[2] for row in notices] == ["impersonation", "lifecycle_terminate"]
     assert all(row[3] == "pending" for row in notices)
@@ -330,7 +323,7 @@ async def test_termination_notices_precede_resurrection_in_native_claim(
         runtime.context.relays,
         incarnation=successor,
         notes=HandoffNotes(Clock.from_settings, lambda: False),
-        read_local_machine=machine_identity.name,
+        host=process_host(machine_identity.name()),
     )
     resumed = await claim_node(
         BaseAgentState(), runtime, {"configurable": {"thread_id": str(owner.agent_id)}}

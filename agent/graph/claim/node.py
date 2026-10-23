@@ -47,9 +47,9 @@ from langgraph.runtime import Runtime
 from langgraph.types import Command
 
 from agent import state as _state
-from agent.db import claim_inbound_batch
+from agent.db import ClaimedInbound, claim_inbound_batch
 from agent.graph._attach_drain import build_attach_drain
-from agent.graph.node_log import flush_node_exit_aggregate, node_lifecycle
+from agent.graph.node_log import StallConfig, flush_node_exit_aggregate, node_lifecycle
 from agent.impersonation import claim_gate
 from agent.impersonation_handoff import resume_note_pending
 from agent.messages import has_conversation
@@ -142,40 +142,39 @@ async def claim_node_impl(
             goto=route_target(ctx, BEFORE_LLM),
         )
 
-    # ── Routing: resolve winner once ──
-    routing = await resolve_routing(ctx, agent_id, batch)  # pyright: ignore[reportUnknownArgumentType]
+    return await settle_claimed_batch(ctx, state, agent_id, batch)
 
-    # ── Dispatch: run every item through its handler ──
+
+# meiva:note
+# Everything the claim does once it holds a batch: resolve the batch's winner, dispatch every
+# item through its handler, tell the frontend which chat inbounds were committed, decide the one
+# Command, publish the end snapshot, and stamp the turn and exit channels. It takes the batch as a
+# value, so the dispatch and veto rules are exercised with claimed rows of any kind without a claim
+# in front of them.
+async def settle_claimed_batch(
+    ctx: MeivaContext,
+    state: _state.AgentState,
+    agent_id: int,
+    batch: list[ClaimedInbound],
+) -> Command[ClaimGoto]:
+    routing = await resolve_routing(ctx, agent_id, batch)
     st = BatchState()
-    await dispatch_batch(ctx, state, agent_id, batch, routing, st)  # pyright: ignore[reportUnknownArgumentType]
-
-    # ── Display: tell the frontend which chat inbounds were committed ──
+    await dispatch_batch(ctx, state, agent_id, batch, routing, st)
     await publish_inbound_committed(ctx, agent_id, st.committed_chat_ids)
-
-    # ── Decide: post-dispatch decision → single Command ──
     outcome = await decide(ctx, state, agent_id, st, routing)
-
-    # ── END snapshot ──
     if outcome.publish_end_snapshot:
         publish_end_timeline_snapshot(ctx, state, agent_id, st.new_msgs)  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
-
-    # ── Turn/exit stamping (once, for every decide outcome) ──
-    # A dispatched batch means this invocation is mid-turn: stamp turn_active
-    # so a later claim pass that finds nothing to do ends the invocation (the
-    # turn boundary above) instead of blocking. exit_requested carries the
-    # process-exit intent to the runloop; restart_requested carries the hosted
-    # restart intent (drop the runtime, no exit-notify). Both key on the
-    # dispatch verdict (st.next_goto == END: a terminate/restart won the
-    # batch), not on the command's own goto — a compact co-batched with a
-    # terminate routes through INIT_CONTEXT first and only then reaches END
-    # via reset.resume.
+    # meiva:note
+    # A dispatched batch means this invocation is mid-turn: stamp turn_active so a later claim
+    # pass that finds nothing to do ends the invocation (the turn boundary) instead of blocking.
+    # exit_requested carries the process-exit intent to the runloop and restart_requested the
+    # hosted restart intent (drop the runtime, no exit-notify). Both key on the dispatch verdict
+    # (st.next_goto == END: a terminate or restart won the batch), not on the command's own goto:
+    # a compact co-batched with a terminate routes through INIT_CONTEXT first and only then
+    # reaches END via reset.resume. The two channels are mutually exclusive by construction:
+    # restart_requested is only ever set by the hosted restart branch, which never flips the row.
     update = dict(outcome.command.update or {})  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
     update["turn_active"] = True
-    # Hosted restart sets restart_requested and must NOT set exit_requested:
-    # the host drops the runtime and ends the turn task without the
-    # process-exit notify. The two channels are mutually exclusive by
-    # construction (restart_requested is only ever set by the hosted restart
-    # branch, which never flips the row).
     update["exit_requested"] = (st.next_goto == END) and not st.restart_requested
     update["restart_requested"] = st.restart_requested
     if state.interrupted_by_restart:
@@ -217,16 +216,12 @@ async def claim_node(
         event_publisher=event_publisher,
         agent_id=agent_id,
         turn_progress=runtime.context.turn_progress,
-        read_stall_seconds=lambda: runtime.context.require_agent().read(
-            "agent", "node_stall_dump_seconds"
-        ),
+        stall=StallConfig(runtime.context.require_agent().read("agent", "node_stall_dump_seconds")),
         full_window=will_idle,
         timeline_inputs=TimelineReadInputs(
             runtime.context.require_clock,
             lambda: runtime.context.require_agent().read("general", "message_timestamps"),
         ),
-        limit_reader=lambda: runtime.context.require_agent().read(
-            "display", "timeline_default_limit"
-        ),
+        timeline_limit=runtime.context.require_agent().read("display", "timeline_default_limit"),
     ):
         return await claim_node_impl(state, runtime, config)

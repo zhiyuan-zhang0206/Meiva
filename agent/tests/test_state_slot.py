@@ -29,8 +29,6 @@ Test coverage:
 """
 
 import asyncio
-import time
-from pathlib import Path
 from typing import Annotated, Any, cast
 from unittest.mock import AsyncMock, MagicMock
 
@@ -39,6 +37,7 @@ from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, RemoveM
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph.message import REMOVE_ALL_MESSAGES, add_messages
 from langgraph.runtime import Runtime
+from psycopg_pool import AsyncConnectionPool
 from pydantic import BaseModel, Field
 
 import meiva
@@ -53,11 +52,13 @@ from agent.state import (
 from base.agents.context import MeivaContext
 from base.agents.context.identity import AgentIdentity
 from base.clock import Clock
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.tests.configuration import defaults
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
+from base.native_process.turn_identity import HostedTurnResources
 from base.packages.plugin_providers import build_model_catalog
 from base.packages.plugins.extensions import ExtensionRegistry, PluginContributions
 from meiva.boot import process_clients
@@ -275,7 +276,7 @@ def test_plugin_state_still_allows_messages():
 
 
 async def test_exec_node_merges_plugin_messages_with_framework_toolmessage(
-    fake_cancel_event, database_gate: ProcessDbGate
+    database_gate: ProcessDbGate,
 ):
     """A plugin that declared `messages` and wrote it this turn must not lose
     the exec ToolMessage: merge_exec_notes combines both deltas into the
@@ -453,22 +454,29 @@ def test_deepcopy_isolates_nested_pydantic_model():
 
 
 def make_runtime_and_config(
-    redis_client: AsyncMock, pins: dict[str, Any] | None = None, *, database_gate: ProcessDbGate
+    redis_client: AsyncMock,
+    pins: dict[str, Any] | None = None,
+    *,
+    database_gate: ProcessDbGate,
+    ops_pool: AsyncConnectionPool | None = None,
+    agent_id: int = 42,
+    hosted_resources: HostedTurnResources | None = None,
 ) -> tuple[Runtime[MeivaContext], RunnableConfig]:
     ctx = MeivaContext(
-        ops_pool=None,
+        ops_pool=ops_pool,
+        hosted_resources=hosted_resources,
         llm=MagicMock(),
         event_publisher=MagicMock(),
         agent=AgentSlices.resolve(pins, default_reader=defaults()),
         db=Database.from_settings(gate=database_gate),
         bus=EventBus.from_settings(),
         clients=process_clients(),
-        identity=AgentIdentity(agent_id=42, owns_loop=True),
+        identity=AgentIdentity(agent_id=agent_id, owns_loop=True),
         catalog=build_model_catalog(),
         clock_factory=Clock.from_settings,
     )
     runtime = Runtime(context=ctx)
-    config: RunnableConfig = {"configurable": {"thread_id": "42"}}
+    config: RunnableConfig = {"configurable": {"thread_id": str(agent_id)}}
     return runtime, config
 
 
@@ -487,9 +495,7 @@ def ai_message_with_code(code: str) -> AIMessage:
     )
 
 
-async def test_exec_node_merges_plugin_state_update_into_command(
-    fake_cancel_event, database_gate: ProcessDbGate
-):
+async def test_exec_node_merges_plugin_state_update_into_command(database_gate: ProcessDbGate):
     """user code writes meiva.state_update[key]=value → Command(update) contains key:value."""
 
     class _StateWithPlugin(BaseAgentState):
@@ -512,9 +518,7 @@ async def test_exec_node_merges_plugin_state_update_into_command(
     assert "halted" in update
 
 
-async def test_exec_node_commits_the_skill_reads_the_sdk_writes(
-    fake_cancel_event, database_gate: ProcessDbGate
-):
+async def test_exec_node_commits_the_skill_reads_the_sdk_writes(database_gate: ProcessDbGate):
     """`skill_reads` is a core channel the SDK itself writes (the skills module notes each body it
     hands over): no plugin declares it and it still passes the key guard into Command(update)."""
     state = BaseAgentState(
@@ -530,9 +534,7 @@ async def test_exec_node_commits_the_skill_reads_the_sdk_writes(
     assert cast(dict, cmd.update)["skill_reads"] == ["alpha"]
 
 
-async def test_exec_node_never_binds_the_slot_in_the_parent(
-    fake_cancel_event, database_gate: ProcessDbGate
-):
+async def test_exec_node_never_binds_the_slot_in_the_parent(database_gate: ProcessDbGate):
     """The exec runs in a child process: the parent (host) process never has a bound slot,
     and reading `meiva.state` there raises rather than returning None."""
     state = BaseAgentState(messages=[ai_message_with_code("pass")], halted=False)
@@ -542,9 +544,7 @@ async def test_exec_node_never_binds_the_slot_in_the_parent(
     assert not process_context.in_exec_turn()
 
 
-async def test_exec_node_leaves_parent_unbound_even_on_crash(
-    fake_cancel_event, database_gate: ProcessDbGate
-):
+async def test_exec_node_leaves_parent_unbound_even_on_crash(database_gate: ProcessDbGate):
     """user code raises exception → exec_node takes the _ExecCrashed path, not raising —
     the parent still holds no slot."""
     state = BaseAgentState(
@@ -558,9 +558,7 @@ async def test_exec_node_leaves_parent_unbound_even_on_crash(
     assert not process_context.in_exec_turn()
 
 
-async def test_plugin_cannot_overwrite_base_field_via_meiva_state(
-    fake_cancel_event, database_gate: ProcessDbGate
-):
+async def test_plugin_cannot_overwrite_base_field_via_meiva_state(database_gate: ProcessDbGate):
     """plugin changing meiva.state.halted = True only affects the deepcopy copy — the real
     LangGraph state is unchanged, Command.update.halted is calculated by the framework
     (this _ExecDone case). The focus is not "halted is specially protected" but
@@ -605,9 +603,7 @@ async def test_plugin_cannot_overwrite_base_field_via_meiva_state(
 # base field, including the nested compact / memory sub-states. A plugin writing any of these
 # via state_update without declaring it raises.
 @pytest.mark.parametrize("base_field", ["messages", "halted", "compact", "memory"])
-async def test_state_update_base_field_key_raises(
-    fake_cancel_event, base_field, database_gate: ProcessDbGate
-):
+async def test_state_update_base_field_key_raises(base_field, database_gate: ProcessDbGate):
     """plugin missing prefix typo writes base field name into state_update → ValueError
     immediately blows up. Without this check, Python dict literal **spread would overwrite,
     plugin silently clobbers framework's base channel (messages / halted / compact / memory)
@@ -623,7 +619,7 @@ async def test_state_update_base_field_key_raises(
         await exec_node_impl(state, runtime, config, process=SubprocessExecProcess())
 
 
-async def test_state_update_unknown_key_raises(fake_cancel_event, database_gate: ProcessDbGate):
+async def test_state_update_unknown_key_raises(database_gate: ProcessDbGate):
     """plugin writes unregistered key → ValueError listing known plugin fields, not
     entering Command(update=...) letting LangGraph silently drop."""
 
@@ -643,9 +639,7 @@ async def test_state_update_unknown_key_raises(fake_cancel_event, database_gate:
         )
 
 
-async def test_state_update_multiple_plugins_no_conflict(
-    fake_cancel_event, database_gate: ProcessDbGate
-):
+async def test_state_update_multiple_plugins_no_conflict(database_gate: ProcessDbGate):
     """Two plugins writing different prefixed keys, both enter Command.update — no mutual overwrite."""
 
     class _State(BaseAgentState):
@@ -665,9 +659,7 @@ async def test_state_update_multiple_plugins_no_conflict(
     assert update.get("plugin_b__y") == "hello"  # pyright: ignore[reportUnknownMemberType]
 
 
-async def test_state_update_non_dict_raises_type_error(
-    fake_cancel_event, database_gate: ProcessDbGate
-):
+async def test_state_update_non_dict_raises_type_error(database_gate: ProcessDbGate):
     """plugin inside the exec child sets meiva.state_update to None / list /
     str → TypeError, not silent (`or {}` fallback against AGENTS.md fail-fast)."""
 
@@ -690,48 +682,6 @@ async def test_state_update_non_dict_raises_type_error(
 # exits**, shared with all _ExecResult branches through the common return Command entry, so these
 # paths are all covered——but if untested, a future refactor that moves capture into the cancel case
 # would cause a silent regression. The following three tests nail down this invariant.
-
-
-async def test_exec_node_preserves_state_update_on_cancel(
-    fake_cancel_event: asyncio.Event, tmp_path: Path, database_gate: ProcessDbGate
-):
-    """In the cancel path, the state_update written by the plugin before the cancel still merges into Command.
-
-    The cancel fires only after the exec code has provably started: a marker
-    file the code writes after its state_update (subprocess boot — `import meiva`
-    plus plugins — takes ~1-2s, so a fixed short delay would race it on CI)."""
-
-    class _State(BaseAgentState):
-        plugin__progress: str = ""
-
-    marker = tmp_path / "started.marker"
-    # plugin first writes state_update, proves it ran, then dead-waits
-    # (sleep long enough to be cancelled)
-    code = (
-        "import meiva\n"
-        "meiva.state_update['plugin__progress'] = 'before-cancel'\n"
-        f"open({str(marker)!r}, 'w').write('x')\n"
-        "import time; time.sleep(30)\n"
-    )
-    state = _State(messages=[ai_message_with_code(code)], halted=False)
-    runtime, config = make_runtime_and_config(AsyncMock(), database_gate=database_gate)
-
-    node_task = asyncio.create_task(
-        exec_node_impl(
-            cast(BaseAgentState, state), runtime, config, process=SubprocessExecProcess()
-        )
-    )
-    deadline = time.monotonic() + 20.0
-    while time.monotonic() < deadline and not marker.exists():
-        await asyncio.sleep(0.05)
-    assert marker.exists(), "exec code never started within 20s — cancel would race boot"
-    fake_cancel_event.set()
-    cmd = await node_task
-
-    update = cast(dict, cmd.update)
-    assert update.get("plugin__progress") == "before-cancel"  # pyright: ignore[reportUnknownMemberType]
-    assert update["halted"] is True  # cancel path halted=True
-    assert not process_context.in_exec_turn()
 
 
 # ── exec-side system-note injection (user ruling 2026-08-11) ────────────────

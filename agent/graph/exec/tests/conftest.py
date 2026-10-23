@@ -1,8 +1,11 @@
+from datetime import UTC, datetime
+from pathlib import Path
+
 import pytest
 
-from agent.graph.exec.tests.cancel_fixture import fake_cancel_event as fake_cancel_event
-from agent.graph.exec.tests.output_inputs import CropConfig
-from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
+from agent.graph.exec._crop import CropLimits
+from agent.graph.exec.output import OutputLimits
+from agent.graph.exec.tests.event_capture import event_capture as event_capture
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.tests.config_authority import config_authority as config_authority
 from base.log.tests.log_records import loguru_records as loguru_records
@@ -17,17 +20,22 @@ from meiva.tests.fixtures.sdk import sdk_metering as sdk_metering
 
 
 @pytest.fixture
-def crop_config() -> CropConfig:
-    return CropConfig(
-        exec_output_crop_after_lines=300,
-        exec_output_crop_after_chars=65536,
-        exec_output_crop_after_bytes=65536,
-        exec_output_crop_head_lines=25,
-        exec_output_crop_tail_lines=25,
-        exec_output_crop_archive_max_bytes=16777216,
+def limits(tmp_path: Path) -> OutputLimits:
+    return OutputLimits(
+        archive_dir=tmp_path / ".exec_output",
+        crop=CropLimits(
+            exec_output_crop_after_lines=300,
+            exec_output_crop_after_chars=65536,
+            exec_output_crop_after_bytes=65536,
+            exec_output_crop_head_lines=25,
+            exec_output_crop_tail_lines=25,
+            exec_output_crop_archive_max_bytes=16777216,
+        ),
+        timeout_seconds=60,
+        max_chars=30_000,
     )
 
 
 @pytest.fixture
-def output_clock() -> Clock:
-    return Clock(ClockConfig("UTC", "UTC", False), timers=SYSTEM_TIMERS)
+def output_now() -> datetime:
+    return datetime(2026, 1, 1, 12, 0, tzinfo=UTC)

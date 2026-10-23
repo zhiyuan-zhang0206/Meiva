@@ -223,15 +223,8 @@ async def test_resurrection_admits_a_new_incarnation_on_the_same_host(
     assert [item.id for item in await claim_inbound_batch(aops_pool, aid, incarnation=old)] == [
         command
     ]
-    assert (
-        await apply_hosted_lifecycle(
-            aops_pool,
-            old,
-            bus=event_bus,
-            resume_turn=False,
-        )
-        == "terminate"
-    )
+    applied = await apply_hosted_lifecycle(aops_pool, old, resume_turn=False)
+    assert applied is not None and applied.kind == "terminate"
     trigger = insert_inbound_message(
         db_conn, aid, "continue", "user", bus=event_bus, database=database
     )

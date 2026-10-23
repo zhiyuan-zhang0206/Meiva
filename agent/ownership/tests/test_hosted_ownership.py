@@ -12,6 +12,7 @@ from agent.ownership.hosted import (
     settle_running_rows_at_start,
     stamp_turn_fatal,
 )
+from agent.ownership.tests.ownership_support import BusTap
 from base.cluster.machine import MachineIdentity
 from base.db import Database, create_agent
 from base.events.live.bus import EventBus
@@ -27,6 +28,23 @@ def _agent(conn: psycopg.Connection) -> int:
     )
     conn.commit()
     return agent_id
+
+
+async def test_settlement_publishes_the_agent_updated_hint(
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    database: Database,
+    event_bus: EventBus,
+    bus_tap: BusTap,
+) -> None:
+    agent_id = _agent(db_conn)
+    incarnation = await admit_hosted_runtime(aops_pool, agent_id, "host-test", uuid4(), db=database)
+    assert incarnation is not None
+    assert await bus_tap.agent_updated_ids() == []
+
+    assert await settle_hosted_runtime(aops_pool, incarnation, bus=event_bus)
+
+    assert await bus_tap.agent_updated_ids() == [agent_id]
 
 
 async def test_hosted_incarnation_survives_idle_and_next_turn(
@@ -204,11 +222,6 @@ async def test_reap_crash_corpses_terminates_only_grace_elapsed_idling_corpses(
     database: Database,
     event_bus: EventBus,
 ) -> None:
-    published: list[int] = []
-
-    async def _publish(_bus: EventBus, agent_id: int) -> None:
-        published.append(agent_id)
-
     owner = uuid4()
 
     async def _row(
@@ -240,10 +253,7 @@ async def test_reap_crash_corpses_terminates_only_grace_elapsed_idling_corpses(
     db_conn.execute("UPDATE agents_meta SET machine='other-host' WHERE id=%s", (elsewhere,))
     db_conn.commit()
 
-    published.clear()
-    reaped = await reap_crash_corpses(
-        aops_pool, "host-test", bus=event_bus, publish_updated=_publish
-    )
+    reaped = await reap_crash_corpses(aops_pool, "host-test")
     assert sorted(corpse.agent_id for corpse in reaped) == sorted([past_grace, other_owner_corpse])
 
     for corpse in reaped:
@@ -273,11 +283,7 @@ async def test_reap_crash_corpses_terminates_only_grace_elapsed_idling_corpses(
             (other_owner_corpse, "status_change", "corpse_reaper"),
         ]
     )
-    assert sorted(published) == sorted([past_grace, other_owner_corpse])
-    assert (
-        await reap_crash_corpses(aops_pool, "host-test", bus=event_bus, publish_updated=_publish)
-        == []
-    )
+    assert await reap_crash_corpses(aops_pool, "host-test") == []
 
 
 async def test_crash_pipeline_marker_survives_settle_and_reaper_terminates(
@@ -298,10 +304,10 @@ async def test_crash_pipeline_marker_survives_settle_and_reaper_terminates(
     )
     assert _marker(db_conn, agent_id) is not None
 
-    assert await reap_crash_corpses(aops_pool, "host-test", bus=event_bus) == []
+    assert await reap_crash_corpses(aops_pool, "host-test") == []
 
     _set_marker(db_conn, agent_id, minutes_ago=16)
-    reaped = await reap_crash_corpses(aops_pool, "host-test", bus=event_bus)
+    reaped = await reap_crash_corpses(aops_pool, "host-test")
     assert [corpse.agent_id for corpse in reaped] == [agent_id]
     row = db_conn.execute(
         "SELECT status, termination_source FROM agents_meta WHERE id = %s", (agent_id,)

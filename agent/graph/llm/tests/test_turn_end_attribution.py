@@ -1,80 +1,32 @@
 from __future__ import annotations
 
 import time
-from collections.abc import AsyncIterator
-from unittest.mock import MagicMock
 
 import pytest
 from langchain_core.messages import AIMessageChunk, HumanMessage
 from langchain_core.runnables import RunnableConfig
-from langgraph.runtime import Runtime
 
-from agent.graph.interrupt import InterruptEvent
-from agent.graph.llm._retry import Attempt
+from agent.graph.llm._backoff import Attempt
 from agent.graph.llm.node import llm_attempt
+from agent.graph.llm.tests.llm_support import ScriptedModel, end_turn_chunk, llm_runtime
 from agent.graph.llm_errors import LlmLedger
-from agent.hooks.tests.fakes import make_fake_ops_pool
 from agent.state import AgentState
-from base.agents.context import MeivaContext
-from base.clock import Clock
-from base.config.tests.configuration import defaults
-from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
-from base.events.live.bus import EventBus
-from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
 from base.log.tests.log_records import LogRecords
-from base.native_process.turn_identity import HostedTurnResources
-from meiva.tests.fixtures.pin_agent import hosted_resources as hosted_resources
 
 _CONFIG: RunnableConfig = {"configurable": {"thread_id": "1"}}
-
-
-def _make_runtime(
-    hosted_resources: HostedTurnResources,
-    llm: MagicMock,
-    *,
-    model_catalog: ModelCatalog,
-    database_gate: ProcessDbGate,
-) -> Runtime[MeivaContext]:
-    llm.bind_tools.return_value = llm
-    ctx = MeivaContext(
-        hosted_resources=hosted_resources,
-        ops_pool=make_fake_ops_pool(),
-        llm=llm,
-        event_publisher=MagicMock(),
-        agent=AgentSlices.resolve(default_reader=defaults()),
-        db=Database.from_settings(gate=database_gate),
-        bus=EventBus.from_settings(),
-        catalog=model_catalog,
-        clock_factory=Clock.from_settings,
-    )
-    return Runtime(context=ctx)
+_STATE = AgentState(messages=[HumanMessage(content="hi")], halted=False)
 
 
 async def test_turn_end_records_carry_the_owning_agent(
-    hosted_resources: HostedTurnResources,
-    fake_cancel_event: InterruptEvent,
-    loguru_records: LogRecords,
-    model_catalog: ModelCatalog,
-    database_gate: ProcessDbGate,
+    loguru_records: LogRecords, model_catalog: ModelCatalog, database_gate: ProcessDbGate
 ) -> None:
-    async def _complete() -> AsyncIterator[AIMessageChunk]:
-        yield AIMessageChunk(
-            content="ok",
-            response_metadata={"model_provider": "anthropic", "stop_reason": "end_turn"},
-            usage_metadata={"input_tokens": 1, "output_tokens": 1, "total_tokens": 2},
-        )
-
-    llm = MagicMock()
-    llm.astream.return_value = _complete()
-    state = AgentState(messages=[HumanMessage(content="hi")], halted=False)
+    model = ScriptedModel(scripts=[[end_turn_chunk()]])
 
     result = await llm_attempt(
-        state,
-        _make_runtime(
-            hosted_resources, llm, model_catalog=model_catalog, database_gate=database_gate
-        ),
+        _STATE,
+        llm_runtime(model, model_catalog=model_catalog, database_gate=database_gate),
         _CONFIG,
         Attempt(1, time.time()),
         LlmLedger(),
@@ -88,22 +40,14 @@ async def test_turn_end_records_carry_the_owning_agent(
 
 
 async def test_turn_end_failure_records_carry_the_owning_agent(
-    hosted_resources: HostedTurnResources,
-    fake_cancel_event: InterruptEvent,
-    loguru_records: LogRecords,
-    model_catalog: ModelCatalog,
-    database_gate: ProcessDbGate,
+    loguru_records: LogRecords, model_catalog: ModelCatalog, database_gate: ProcessDbGate
 ) -> None:
-    llm = MagicMock()
-    llm.astream.side_effect = RuntimeError("simulated provider failure")
-    state = AgentState(messages=[HumanMessage(content="hi")], halted=False)
+    model = ScriptedModel(scripts=[[RuntimeError("simulated provider failure")]])
 
     with pytest.raises(RuntimeError, match="simulated provider failure"):
         await llm_attempt(
-            state,
-            _make_runtime(
-                hosted_resources, llm, model_catalog=model_catalog, database_gate=database_gate
-            ),
+            _STATE,
+            llm_runtime(model, model_catalog=model_catalog, database_gate=database_gate),
             _CONFIG,
             Attempt(1, time.time()),
             LlmLedger(),
@@ -116,28 +60,18 @@ async def test_turn_end_failure_records_carry_the_owning_agent(
 
 
 async def test_halt_record_carries_the_owning_agent(
-    hosted_resources: HostedTurnResources,
-    fake_cancel_event: InterruptEvent,
-    loguru_records: LogRecords,
-    model_catalog: ModelCatalog,
-    database_gate: ProcessDbGate,
+    loguru_records: LogRecords, model_catalog: ModelCatalog, database_gate: ProcessDbGate
 ) -> None:
-    async def _empty() -> AsyncIterator[AIMessageChunk]:
-        yield AIMessageChunk(
-            content="",
-            response_metadata={"model_provider": "anthropic", "stop_reason": "end_turn"},
-            usage_metadata={"input_tokens": 1, "output_tokens": 0, "total_tokens": 1},
-        )
-
-    llm = MagicMock()
-    llm.astream.return_value = _empty()
-    state = AgentState(messages=[HumanMessage(content="hi")], halted=False)
+    empty = AIMessageChunk(
+        content="",
+        response_metadata={"model_provider": "anthropic", "stop_reason": "end_turn"},
+        usage_metadata={"input_tokens": 1, "output_tokens": 0, "total_tokens": 1},
+    )
+    model = ScriptedModel(scripts=[[empty]])
 
     result = await llm_attempt(
-        state,
-        _make_runtime(
-            hosted_resources, llm, model_catalog=model_catalog, database_gate=database_gate
-        ),
+        _STATE,
+        llm_runtime(model, model_catalog=model_catalog, database_gate=database_gate),
         _CONFIG,
         Attempt(1, time.time()),
         LlmLedger(),

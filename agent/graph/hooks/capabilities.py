@@ -38,7 +38,9 @@ from langgraph.runtime import Runtime
 
 from agent import state as _state
 from agent.graph.hooks.compact import auto_compact_will_fire
-from agent.graph.prompt.capabilities import index_drift, new_skills_note_text, skill_identifiers
+from agent.graph.prompt.capabilities import new_skills_note_text
+from agent.graph.prompt.live import skill_view
+from agent.graph.prompt.skill_selection import index_drift, skill_identifiers
 from agent.hooks import Hook
 from agent.messages import NoteTag, system_note_message
 from agent.state import CapabilitiesState
@@ -90,7 +92,8 @@ class _NewlyInstalledSkillsHook(Hook):
 
         known = state.capabilities.indexed
         drift = index_drift(
-            known if known is not None else set(), runtime.context.require_agent().prompt
+            known if known is not None else set(),
+            skill_view(runtime.context.require_agent().prompt),
         )
         if known is None:
             # No snapshot for this window — a checkpoint written before the

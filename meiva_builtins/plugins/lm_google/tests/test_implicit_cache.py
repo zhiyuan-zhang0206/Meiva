@@ -50,7 +50,7 @@ async def test_google_tool_call_uses_complete_prefix_and_accounts_cache_reads(
     response = await ainvoke_tool_call(
         llm,
         [SystemMessage(content="stable system head"), HumanMessage(content="history")],
-        read_timeout=lambda: settings.lm.llm_compact_timeout_seconds,
+        timeout_seconds=settings.lm.llm_compact_timeout_seconds,
     )
     assert response.text == "summary"
     assert len(requests) == 1
@@ -98,7 +98,7 @@ async def test_cache_403_has_no_application_recovery(
         await ainvoke_tool_call(
             llm,
             [SystemMessage(content="head"), HumanMessage(content="history")],
-            read_timeout=lambda: settings.lm.llm_compact_timeout_seconds,
+            timeout_seconds=settings.lm.llm_compact_timeout_seconds,
         )
     assert caught.value.__cause__ is failure
     assert calls == 1

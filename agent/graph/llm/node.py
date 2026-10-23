@@ -1,9 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import time
-from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from typing import Any, Literal, NoReturn, cast
 
@@ -23,7 +21,7 @@ from agent.graph.llm_errors import (
     LlmLedger,
     LLMRetryBudgetExceededError,
 )
-from agent.graph.node_log import node_lifecycle
+from agent.graph.node_log import StallConfig, node_lifecycle
 from agent.graph.tool_calls import code_from_args
 from agent.hooks.understanding_chunks import due_chunk_update
 from agent.llm.usage import log_llm_usage
@@ -38,12 +36,11 @@ from base.lm.catalog import ModelCatalog
 from base.lm.reasoning import content_blocks
 from base.log import logger
 
+from ._backoff import Attempt, RetryPolicy, assess_failure, budget_spent
 from ._cancel import race_stream_vs_cancel
 from ._chunk import assemble_final_message
 from ._chunk import validate_stop_reason as validate_stop_reason
-from ._retry import RETRY_REMAINING_ATTR
-from ._retry import Attempt as Attempt
-from ._retry import retry_wait as retry_wait
+from ._retry import draw_jitter, record_remaining, retry_policy, retry_wait
 from ._stream import stream_llm
 from .goto import LlmGoto
 
@@ -52,6 +49,7 @@ def _log_llm_retry_duration(
     attempt: Attempt,
     *,
     outcome: Literal["succeeded", "attempts_exhausted", "budget_exhausted"],
+    now: float,
 ) -> None:
     if attempt.number < 2:
         return
@@ -59,14 +57,14 @@ def _log_llm_retry_duration(
         "LLM retry sequence {outcome} after {duration_seconds:.2f}s",
         event="llm_retry",
         outcome=outcome,
-        duration_seconds=attempt.elapsed_seconds(),
+        duration_seconds=attempt.elapsed_seconds(now),
     )
 
 
-def _raise_retry_budget_exhausted(attempt: int, *, read_lm: Callable[[str], Any]) -> NoReturn:
+def _raise_retry_budget_exhausted(attempt: int, policy: RetryPolicy) -> NoReturn:
     raise LLMRetryBudgetExceededError(
         "LLM retry wall-clock budget "
-        f"({read_lm('llm_retry_max_total_seconds'):.0f}s) exhausted before attempt {attempt}"
+        f"({policy.max_total_seconds:.0f}s) exhausted before attempt {attempt}"
     )
 
 
@@ -122,33 +120,22 @@ async def llm_node(
     config: RunnableConfig,
     *,
     ledger: LlmLedger,
-    impl: Callable[..., Awaitable[Command[LlmGoto]]] | None = None,
 ) -> Command[LlmGoto]:
     agent_id = agent_id_from_config(config)
-    model = runtime.context.require_agent().brain.llm_model
+    policy = retry_policy(
+        runtime.context.require_agent(), runtime.context.require_catalog(), agent_id
+    )
     first_started_at = time.time()
     failed = 0
     while True:
         try:
             attempt = Attempt(failed + 1, first_started_at)
-            if impl is None:
-                return await llm_attempt(state, runtime, config, attempt, ledger)
-            return await llm_attempt(state, runtime, config, attempt, ledger, impl=impl)
+            return await llm_attempt(state, runtime, config, attempt, ledger)
         except GraphBubbleUp:
             raise
         except Exception as exc:
             failed += 1
-            wait = retry_wait(
-                exc,
-                failed,
-                model=model,
-                agent_id=agent_id,
-                catalog=runtime.context.require_catalog(),
-                read_lm=lambda field: runtime.context.require_agent().read("lm", field),
-                max_attempts_pin=runtime.context.require_agent().read(
-                    "lm", "llm_retry_max_attempts"
-                ),
-            )
+            wait = retry_wait(exc, failed, policy=policy, jitter_seconds=draw_jitter())
             if wait is None:
                 raise
             await asyncio.sleep(wait)
@@ -160,36 +147,34 @@ async def llm_node(
             )
 
 
-def _enforce_retry_budget(attempt: Attempt, *, read_lm: Callable[[str], Any]) -> None:
-    if attempt.elapsed_seconds() >= read_lm("llm_retry_max_total_seconds"):
-        _log_llm_retry_duration(attempt, outcome="budget_exhausted")
-        _raise_retry_budget_exhausted(attempt.number, read_lm=read_lm)
+def _enforce_retry_budget(attempt: Attempt, policy: RetryPolicy) -> None:
+    now = time.time()
+    if budget_spent(attempt, now, policy):
+        _log_llm_retry_duration(attempt, outcome="budget_exhausted", now=now)
+        _raise_retry_budget_exhausted(attempt.number, policy)
 
 
 def _note_failed_attempt(
-    exc: BaseException, attempt: Attempt, runtime: Runtime[MeivaContext], agent_id: int
+    exc: BaseException,
+    attempt: Attempt,
+    runtime: Runtime[MeivaContext],
+    agent_id: int,
+    policy: RetryPolicy,
 ) -> None:
     runtime.context.turn_progress.mark(agent_id)
-    if isinstance(exc, Exception):
-        remaining_seconds = (
-            runtime.context.require_agent().read("lm", "llm_retry_max_total_seconds")
-            - attempt.elapsed_seconds()
-        )
-        if remaining_seconds <= 0.0 and not isinstance(exc, LLMRetryBudgetExceededError):
-            _log_llm_retry_duration(attempt, outcome="budget_exhausted")
-        elif not isinstance(exc, (FatalLLMStreamError, FatalProviderError)):
-            from base.lm.registry import resolve_setting
-
-            max_attempts = resolve_setting(
-                "llm_retry_max_attempts",
-                model=runtime.context.require_agent().brain.llm_model,
-                models=runtime.context.require_catalog().models,
-                explicit=runtime.context.require_agent().read("lm", "llm_retry_max_attempts"),
-            )
-            if attempt.number >= max_attempts:
-                _log_llm_retry_duration(attempt, outcome="attempts_exhausted")
-        with contextlib.suppress(AttributeError):
-            setattr(exc, RETRY_REMAINING_ATTR, remaining_seconds)
+    if not isinstance(exc, Exception):
+        return
+    now = time.time()
+    failed = assess_failure(
+        attempt,
+        now,
+        policy,
+        budget_error=isinstance(exc, LLMRetryBudgetExceededError),
+        fatal=isinstance(exc, (FatalLLMStreamError, FatalProviderError)),
+    )
+    if failed.ended is not None:
+        _log_llm_retry_duration(attempt, outcome=failed.ended, now=now)
+    record_remaining(exc, failed.remaining_seconds)
 
 
 # meiva:note
@@ -201,40 +186,33 @@ async def llm_attempt(
     config: RunnableConfig,
     attempt: Attempt,
     ledger: LlmLedger,
-    *,
-    impl: Callable[..., Awaitable[Command[LlmGoto]]] | None = None,
 ) -> Command[LlmGoto]:
     turn_start = time.monotonic()
     agent_id = agent_id_from_config(config)
     event_publisher = runtime.context.event_publisher
     if event_publisher is None:
         raise RuntimeError("llm_node requires ctx.event_publisher")
-    runner = _llm_node_impl if impl is None else impl
+    policy = retry_policy(
+        runtime.context.require_agent(), runtime.context.require_catalog(), agent_id
+    )
     async with node_lifecycle(
         "llm",
         messages=state.messages,
         event_publisher=event_publisher,
         agent_id=agent_id,
         turn_progress=runtime.context.turn_progress,
-        read_stall_seconds=lambda: runtime.context.require_agent().read(
-            "agent", "node_stall_dump_seconds"
-        ),
+        stall=StallConfig(runtime.context.require_agent().read("agent", "node_stall_dump_seconds")),
         timeline_inputs=TimelineReadInputs(
             runtime.context.require_clock,
             lambda: runtime.context.require_agent().read("general", "message_timestamps"),
         ),
-        limit_reader=lambda: runtime.context.require_agent().read(
-            "display", "timeline_default_limit"
-        ),
+        timeline_limit=runtime.context.require_agent().read("display", "timeline_default_limit"),
     ):
         try:
-            _enforce_retry_budget(
-                attempt,
-                read_lm=lambda field: runtime.context.require_agent().read("lm", field),
-            )
-            result = await runner(state, runtime, config, ledger)
+            _enforce_retry_budget(attempt, policy)
+            result = await _llm_node_impl(state, runtime, config, ledger)
         except BaseException as exc:
-            _note_failed_attempt(exc, attempt, runtime, agent_id)
+            _note_failed_attempt(exc, attempt, runtime, agent_id, policy)
             logger.opt(exception=True).warning(
                 "turn ended in {duration_seconds:.2f}s ok=False — _llm_node_impl raised",
                 event="turn_end",
@@ -244,7 +222,7 @@ async def llm_attempt(
             )
             raise
         else:
-            _log_llm_retry_duration(attempt, outcome="succeeded")
+            _log_llm_retry_duration(attempt, outcome="succeeded", now=time.time())
             logger.info(
                 "turn ended in {duration_seconds:.2f}s ok=True",
                 event="turn_end",
@@ -286,7 +264,7 @@ def _silent_idle_command(
     ledger: LlmLedger,
     *,
     catalog: ModelCatalog,
-    read_lm: Callable[[str], Any],
+    cap: int,
 ) -> Command[LlmGoto] | None:
     if not _is_silent_idle(final_msg):
         return None
@@ -295,7 +273,6 @@ def _silent_idle_command(
     output_tokens = int(usage.get("output_tokens", 0) or 0)
     budget_tokens = max(output_tokens, 1)
     cumulative_output_tokens = ledger.silent_idle_output_tokens(tid) + budget_tokens
-    cap = read_lm("llm_silent_idle_max_output_tokens")
     from base.lm.pricing import quote
 
     priced = quote(model, 0, output_tokens, 0, prices=catalog.prices)
@@ -406,11 +383,9 @@ async def _llm_node_impl(
         state.compact,
         list(state.messages),
         final_msg,
-        read_agent=lambda field: ctx.require_agent().read("agent", field),
         pool=ctx.ops_pool,
         agent_id=agent_id,
-        model=ctx.require_agent().brain.llm_model,
-        overrides=ctx.require_agent().overrides,
+        agent=ctx.require_agent(),
         catalog=ctx.require_catalog(),
     )
 
@@ -420,7 +395,7 @@ async def _llm_node_impl(
         ctx.require_agent().brain.llm_model,
         ledger,
         catalog=ctx.require_catalog(),
-        read_lm=lambda field: ctx.require_agent().read("lm", field),
+        cap=ctx.require_agent().read("lm", "llm_silent_idle_max_output_tokens"),
     )
     if silent_idle_cmd is not None:
         return Command[LlmGoto](

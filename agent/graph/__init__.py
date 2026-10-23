@@ -27,10 +27,10 @@
 #   - `prompt/_base_prompt.py` — immutable base system prompt + lazily captured `meiva` SDK overview
 #   - `exec/node.py`      — exec node (one disposable subprocess per execute_code call)
 #   - `exec/output.py`    — code execution output envelope: format / truncate / overflow-to-file
-#   - `exec/protocol.py`  — exec child request/result envelopes (shared with `agent/execution/child.py`)
 #   - `exec/_*.py`        — exec subprocess machinery: spawn, process domain, stream, result, alerts
 #   - `_build.py`        — build_graph: assemble the self-cycling topology
-#   - `node_log.py`      — node enter/exit lifecycle log + publish timeline snapshot
+#   - `node_log/`        — node enter/exit lifecycle log + publish timeline snapshot + stall probe
+#   - `interrupt/`       — durable interrupt watcher (cancel/terminate/restart) and the model-vs-interrupt race
 #   - `prompt/system_prompt.py` — system prompt dynamic assembly (base + plugin contributions)
 #   - `prompt/capabilities.py`, `prompt/context_notes.py` — the `# Capabilities` index, standing context notes
 #   - `claim/harness_turn.py` — harness_turn: the whole turn of an external-CLI agent
@@ -39,9 +39,9 @@
 #
 # Public API is lazily re-exported via this __init__.py (PEP 562) — external
 # `from agent.graph import X` callers don't need to know the submodule layout,
-# and importing a light submodule (`exec.protocol`, `agent_traceback`) no
-# longer drags the node set into the importer — the exec child imports those
-# before user code runs (startup-path laziness, task #3585).
+# and importing a light submodule (`agent_traceback`) no longer drags the node
+# set into the importer — the exec child imports those before user code runs
+# (startup-path laziness, task #3585).
 # meiva:link agent/graph/docs/graph.meiva.okf.md
 
 

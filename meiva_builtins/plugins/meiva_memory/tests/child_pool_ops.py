@@ -15,6 +15,14 @@ if fn == "pool_dir":
     print(str(pool_ops.pool_dir()))
 elif fn == "machine_name":
     print(pool_ops.machine_name())
+elif fn == "follows_variable":
+    import os
+
+    from meiva_builtins.plugins.meiva_memory import sdk
+
+    for home in sys.argv[2:]:
+        os.environ["MEIVA_HOME"] = home
+        print(pool_ops.pool_dir(), sdk.PATH)
 elif fn == "import_side_effects":
     # Nothing beyond pool_ops itself and its own (stdlib) imports should load as a side effect --
     # in particular, no sibling submodule that does plugin/hook declaration (plugin.py, sdk.py,

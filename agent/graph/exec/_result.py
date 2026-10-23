@@ -25,16 +25,9 @@ envelope uniformly.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import Enum
 
-from base.agents.lifecycle import (
-    AgentRestart,
-    AgentTermination,
-    LifecycleExit,
-    SystemHalt,
-)
 from base.agents.messages.inbound import InterruptReason
-
-from ._stream import StreamCap
 
 
 class ExecChildError(Exception):
@@ -48,6 +41,28 @@ class ExecChildError(Exception):
         self.exc_msg = exc_msg
         self.full_traceback = full_traceback
         super().__init__(exc_msg or exc_type)
+
+
+# meiva:note
+# Record that the accumulation budget dropped the middle of an exec's output. It travels with
+# the text through the `ExecResult` sum type into `output.wrap_code_output`, which needs both
+# numbers to stay honest: `produced_chars` is the TRUE pre-truncation length the
+# instrumentation log line reports, and the overflow archive can no longer claim to hold the
+# full output — the middle is gone before the archive is ever written.
+@dataclass(frozen=True)
+class StreamCap:
+    produced_chars: int
+    budget_chars: int
+
+
+# meiva:note
+# The framework lifecycle signals agent code can raise. The values are the class names the child
+# reports in its result envelope, so the closed enum is the only vocabulary the parent and the
+# dispatcher share and no module here imports the exception classes.
+class LifecycleKind(Enum):
+    SYSTEM_HALT = "SystemHalt"
+    TERMINATION = "AgentTermination"
+    RESTART = "AgentRestart"
 
 
 @dataclass(frozen=True)
@@ -77,15 +92,14 @@ class ExecTimedOut:
     stream_cap: StreamCap | None = None
 
 
+# meiva:note
+# Agent actively called `meiva.self.{terminate,restart,compact}`, raising a `LifecycleExit`
+# subclass inside the child — lifecycle takes priority over cancel/timeout. The kind is rebuilt
+# parent-side from the envelope's `lifecycle_type` name.
 @dataclass(frozen=True)
 class ExecLifecycle:
-    """Agent actively called `meiva.self.{terminate,restart,compact}`, raising a
-    `LifecycleExit` subclass inside the child — lifecycle takes priority over
-    cancel/timeout. The exception is reconstructed parent-side from the
-    envelope's `lifecycle_type` name (fixed three-class map)."""
-
     output: str
-    exc: LifecycleExit  # SystemHalt | AgentTermination | AgentRestart
+    kind: LifecycleKind
     stream_cap: StreamCap | None = None
 
 
@@ -112,49 +126,43 @@ class ExecCrashed:
 
 type ExecResult = ExecDone | ExecCancelled | ExecTimedOut | ExecLifecycle | ExecCrashed
 
-# The fixed set of lifecycle classes the child can report by name. The subprocess
-# parent turns a missing name into an ExecChildError crash; the dispatcher's
-# exhaustive TypeError separately guards any in-process `LifecycleExit` callers.
-_LIFECYCLE_BY_NAME: dict[str, type[LifecycleExit]] = {
-    cls.__name__: cls for cls in (AgentTermination, AgentRestart, SystemHalt)
-}
+
+# meiva:note
+# The lifecycle kind a child reported by class name, or None for an unknown class so the
+# subprocess parent can surface a protocol crash.
+def lifecycle_kind_from_name(name: str) -> LifecycleKind | None:
+    try:
+        return LifecycleKind(name)
+    except ValueError:
+        return None
 
 
-def lifecycle_exception_from_name(name: str) -> LifecycleExit | None:
-    """Instantiate the lifecycle exception a child reported by name.
-
-    Return None for an unknown class name so the subprocess parent can surface
-    a protocol crash. The dispatcher's exhaustive TypeError remains the guard
-    for in-process callers carrying an unknown `LifecycleExit` subclass.
-    """
-    cls = _LIFECYCLE_BY_NAME.get(name)
-    return cls() if cls is not None else None
-
-
+# meiva:note
+# Dispatch priority: lifecycle > cancel > timeout > crashed > done.
+#
+# Lifecycle always wins (the agent actively calling terminate/restart/compact has higher
+# semantic priority than "was interrupted"; SDK already INSERTed inbound). Cancel > timeout
+# (CLAUDE design: cancel always wins).
+#
+# `code_reached` rides the crash variant only (see `ExecCrashed`): the child's envelope reports
+# whether the agent-authored code ever started.
 def construct_exec_result(
     output: str,
-    exc: BaseException | None,
+    outcome: LifecycleKind | BaseException | None,
     *,
     cancelled: bool,
     timed_out: bool,
     stream_cap: StreamCap | None = None,
     code_reached: bool | None = None,
 ) -> ExecResult:
-    """Dispatch priority: lifecycle > cancel > timeout > crashed > done.
-
-    Lifecycle always wins (the agent actively calling terminate/restart/compact
-    has higher semantic priority than "was interrupted"; SDK already INSERTed
-    inbound). Cancel > timeout (CLAUDE design: cancel always wins).
-
-    `code_reached` rides the crash variant only (see `ExecCrashed`): the
-    child's envelope reports whether the agent-authored code ever started.
-    """
-    if isinstance(exc, LifecycleExit):
-        return ExecLifecycle(output=output, exc=exc, stream_cap=stream_cap)
+    if isinstance(outcome, LifecycleKind):
+        return ExecLifecycle(output=output, kind=outcome, stream_cap=stream_cap)
     if cancelled:
         return ExecCancelled(output=output, stream_cap=stream_cap)
     if timed_out:
         return ExecTimedOut(output=output, stream_cap=stream_cap)
-    if exc is not None:
-        return ExecCrashed(output=output, exc=exc, stream_cap=stream_cap, code_reached=code_reached)
+    if outcome is not None:
+        return ExecCrashed(
+            output=output, exc=outcome, stream_cap=stream_cap, code_reached=code_reached
+        )
     return ExecDone(output=output, stream_cap=stream_cap)

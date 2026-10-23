@@ -7,7 +7,7 @@ import pytest
 from psycopg_pool import AsyncConnectionPool
 
 from agent.db import claim_inbound_batch
-from agent.ownership.hosted import admit_hosted_runtime, apply_hosted_lifecycle
+from agent.ownership.hosted import AppliedLifecycle, admit_hosted_runtime, apply_hosted_lifecycle
 from base.agents.birth.spawn import create_agent_row
 from base.agents.inbox.insert import insert_inbound_message
 from base.agents.messages.inbound import InboundKind
@@ -323,14 +323,8 @@ async def restarted(
     )
     db.commit()
     await claim_inbound_batch(pool, aid, incarnation=owner)
-    assert (
-        await apply_hosted_lifecycle(
-            pool,
-            owner,
-            bus=EventBus.from_settings(),
-            resume_turn=False,
-        )
-        == "restart"
+    assert await apply_hosted_lifecycle(pool, owner, resume_turn=False) == AppliedLifecycle(
+        kind="restart", agent_id=aid, shell_cutoff=None
     )
     return aid
 

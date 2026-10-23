@@ -1,265 +1,104 @@
-"""LLM stream inter-chunk stall timeout — abort turn when the server hangs to prevent
-indefinite blocking.
-
-161 / 165 incident: when DeepSeek service degraded, the stream started but never
-returned another chunk; the default anthropic SDK 600s overall timeout was the only
-safety net, leaving the agent silently stuck for 4-10 minutes; turn_end ok=False never
-even fired, so the frontend saw neither a stream nor an error.
-
-Fix: bound the model's `__anext__` with an owned `asyncio.timeout`,
-`settings.lm.llm_stream_ttft_timeout_seconds` and `settings.lm.llm_stream_inter_chunk_timeout_seconds`
-raise `LLMStreamStallTimeoutError`. Together with PR #60's finally `logger.opt(exception=
-True).warning`, events.payload automatically carries traceback / exception_type.
-"""
-
+# meiva:note
+# 161 / 165 incident: when DeepSeek service degraded, the stream started but never returned another chunk; the default anthropic SDK 600s overall timeout was the only safety net, leaving the agent silently stuck for 4-10 minutes; turn_end ok=False never even fired, so the frontend saw neither a stream nor an error. Fix: bound the model's `__anext__` with an owned `asyncio.timeout` (the agent's TTFT, inter-chunk and total bounds) that raises `LLMStreamStallTimeoutError`, so the failure is a logged turn end with a traceback.
 from __future__ import annotations
 
-import asyncio
 import time
-from collections.abc import AsyncIterator
-from typing import Any, cast
-from unittest.mock import MagicMock
+from typing import Any
 
 import pytest
-from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage
+from langchain_core.messages import AIMessageChunk, HumanMessage
 from langchain_core.runnables import RunnableConfig
-from langgraph.runtime import Runtime
 
-from agent.graph.llm._retry import Attempt
-from agent.graph.llm._stream import consume_llm, consume_stream_with_stall_timeout
+from agent.graph.llm._backoff import Attempt
+from agent.graph.llm._deadlines import StreamBounds
+from agent.graph.llm._stream import consume_llm, consume_stream_with_stall_timeout, stream_bounds
 from agent.graph.llm.node import llm_attempt
-from agent.graph.llm_errors import (
-    LlmLedger,
-    LLMStreamStallTimeoutError,
+from agent.graph.llm.tests.llm_support import (
+    ScriptedModel,
+    StubHandler,
+    end_turn_chunk,
+    llm_runtime,
 )
-from agent.hooks.tests.fakes import make_fake_ops_pool
+from agent.graph.llm_errors import LlmLedger, LLMStreamStallTimeoutError
 from agent.state import AgentState
-from base import config
-from base.agents.context import MeivaContext
-from base.clock import Clock
 from base.config.tests.configuration import defaults
-from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
-from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
-from base.native_process.turn_identity import HostedTurnResources
-from base.packages.plugin_providers import build_model_catalog
-from meiva.tests.fixtures.pin_agent import hosted_resources as hosted_resources
 
 _CONFIG: RunnableConfig = {"configurable": {"thread_id": "7"}}
+_STATE = AgentState(messages=[HumanMessage(content="hi")], halted=False)
 
 
 async def _one_try(
-    state: AgentState,
-    runtime: Runtime[MeivaContext],
-    *,
-    attempt: int = 1,
-    started_ago: float = 0.0,
-    ledger: LlmLedger | None = None,
+    model: ScriptedModel, pins: dict[str, Any], model_catalog: ModelCatalog, gate: ProcessDbGate
 ) -> Any:
-    """One try of the llm node (`llm_node` retries around it): a failure surfaces as raised."""
-    return await llm_attempt(
-        state,
-        runtime,
-        _CONFIG,
-        Attempt(attempt, time.time() - started_ago),
-        ledger or LlmLedger(),
-    )
-
-
-def _make_runtime(
-    hosted_resources: HostedTurnResources,
-    llm: MagicMock,
-    *,
-    model_catalog: ModelCatalog,
-    database_gate: ProcessDbGate,
-) -> Runtime[MeivaContext]:
-    """Same pattern as test_cancel.py: fake llm returns itself via bind_tools (chain method)."""
-    llm.bind_tools.return_value = llm
-    ctx = MeivaContext(
-        hosted_resources=hosted_resources,
-        ops_pool=make_fake_ops_pool(),
-        llm=llm,
-        event_publisher=MagicMock(),
-        agent=AgentSlices.resolve(default_reader=defaults()),
-        db=Database.from_settings(gate=database_gate),
-        bus=EventBus.from_settings(),
-        catalog=model_catalog,
-        clock_factory=Clock.from_settings,
-    )
-    return Runtime(context=ctx)
+    runtime = llm_runtime(model, model_catalog=model_catalog, database_gate=gate, pins=pins)
+    return await llm_attempt(_STATE, runtime, _CONFIG, Attempt(1, time.time()), LlmLedger())
 
 
 async def test_stall_at_ttft_raises_with_ttft_marker(
-    hosted_resources: HostedTurnResources,
-    fake_cancel_event: asyncio.Event,
-    monkeypatch: pytest.MonkeyPatch,
-    *,
-    model_catalog: ModelCatalog,
-    database_gate: ProcessDbGate,
+    model_catalog: ModelCatalog, database_gate: ProcessDbGate
 ) -> None:
-    """Server completely unresponsive (zero bytes emitted) → raise LLMStreamStallTimeoutError containing 'TTFT'."""
+    model = ScriptedModel(scripts=[["hang"]])
 
-    async def _hang_immediately() -> AsyncIterator[AIMessageChunk]:
-        await asyncio.Future()  # never returns — simulates server hang
-        yield  # type: ignore[unreachable]
-
-    monkeypatch.setattr(config.settings.lm, "llm_stream_ttft_timeout_seconds", 0.05)
-    fake_llm = MagicMock()
-    fake_llm.astream.return_value = _hang_immediately()
-
-    # Non-streaming fallback runs under the SAME key/value as the stream
-    # segment (task #3884) and also stalls — the two adjacent stalls must
-    # surface as LLMStreamStallTimeoutError (the delayed-schedule marker), not a
-    # bare TimeoutError.
-    async def _ainvoke_also_stalls(*args, **kwargs):
-        await asyncio.sleep(3600)  # only the fallback's own bound can cut this
-
-    fake_llm.ainvoke = _ainvoke_also_stalls
-    state = AgentState(messages=[HumanMessage(content="hi")], halted=False)
-
-    with pytest.raises(LLMStreamStallTimeoutError, match="stream stalled"):
+    with pytest.raises(LLMStreamStallTimeoutError, match=r"stream stalled.*TTFT"):
         await _one_try(
-            state,
-            _make_runtime(
-                hosted_resources=hosted_resources,
-                llm=fake_llm,
-                model_catalog=model_catalog,
-                database_gate=database_gate,
-            ),
+            model, {"llm_stream_ttft_timeout_seconds": 0.05}, model_catalog, database_gate
         )
 
 
+# meiva:note
+# Emits N chunks then hangs: the message says "mid-stream after N chunks". Triage split: TTFT = server never connected, mid-stream = connected then died.
 async def test_stall_mid_stream_raises_with_chunk_count(
-    hosted_resources: HostedTurnResources,
-    fake_cancel_event: asyncio.Event,
-    monkeypatch: pytest.MonkeyPatch,
-    *,
-    model_catalog: ModelCatalog,
-    database_gate: ProcessDbGate,
+    model_catalog: ModelCatalog, database_gate: ProcessDbGate
 ) -> None:
-    """Emits N chunks then hangs → raise LLMStreamStallTimeoutError containing
-    'mid-stream after N chunks'. Triage split: TTFT = server never connected,
-    mid-stream = connected then died, ops handles them differently."""
-
-    async def _stream_then_hang() -> AsyncIterator[AIMessageChunk]:
-        yield AIMessageChunk(content="hello ")
-        yield AIMessageChunk(content="world")
-        yield AIMessageChunk(content="!")
-        await asyncio.Future()  # hangs after 3 chunks
-
-    monkeypatch.setattr(config.settings.lm, "llm_stream_ttft_timeout_seconds", 10.0)
-    monkeypatch.setattr(config.settings.lm, "llm_stream_inter_chunk_timeout_seconds", 0.05)
-    fake_llm = MagicMock()
-    fake_llm.astream.return_value = _stream_then_hang()
-
-    # Fallback also stalls → the pair error, same as the TTFT case.
-    async def _ainvoke_also_stalls(*args, **kwargs):
-        await asyncio.sleep(3600)
-
-    fake_llm.ainvoke = _ainvoke_also_stalls
-    state = AgentState(messages=[HumanMessage(content="hi")], halted=False)
-
-    with pytest.raises(LLMStreamStallTimeoutError, match="stream stalled"):
-        await _one_try(
-            state,
-            _make_runtime(
-                hosted_resources=hosted_resources,
-                llm=fake_llm,
-                model_catalog=model_catalog,
-                database_gate=database_gate,
-            ),
-        )
-
-
-async def test_normal_stream_completes_no_stall_timeout(
-    hosted_resources: HostedTurnResources,
-    fake_cancel_event: asyncio.Event,
-    monkeypatch: pytest.MonkeyPatch,
-    *,
-    model_catalog: ModelCatalog,
-    database_gate: ProcessDbGate,
-) -> None:
-    """Normal stream completes within timeout → no raise, llm_node finishes and
-    returns Command. Locks the "chunk interval < timeout" path against accidental regression."""
-
-    async def _normal_stream() -> AsyncIterator[AIMessageChunk]:
-        # Last chunk MUST carry usage_metadata (agent #113 incident: fail-fast assert
-        # final_msg.usage_metadata is not None) + response_metadata.stop_reason
-        # (agent #169 incident: without it _validate_stop_reason raises
-        # LLMStreamCorruptedError to prevent silent idle fallthrough).
-        yield AIMessageChunk(
-            content="ok",
-            response_metadata={"model_provider": "anthropic", "stop_reason": "end_turn"},
-            usage_metadata={"input_tokens": 1, "output_tokens": 1, "total_tokens": 2},
-        )
-
-    # 1.0s timeout is generous for a normal stream (zero latency), but it is a test value, not the production default
-    monkeypatch.setattr(config.settings.lm, "llm_stream_ttft_timeout_seconds", 1.0)
-    monkeypatch.setattr(config.settings.lm, "llm_stream_inter_chunk_timeout_seconds", 1.0)
-    fake_llm = MagicMock()
-    fake_llm.astream.return_value = _normal_stream()
-    state = AgentState(messages=[HumanMessage(content="hi")], halted=False)
-
-    # No raise — normal stream completed. The specific return value is handled by
-    # llm_node's existing path (BEFORE_EXEC); this test only locks "not falsely
-    # killed by stall timeout"
-    result = await _one_try(
-        state,
-        _make_runtime(
-            hosted_resources=hosted_resources,
-            llm=fake_llm,
-            model_catalog=model_catalog,
-            database_gate=database_gate,
-        ),
+    model = ScriptedModel(
+        scripts=[
+            [
+                AIMessageChunk(content="hello "),
+                AIMessageChunk(content="world"),
+                AIMessageChunk(content="!"),
+                "hang",
+            ]
+        ]
     )
-    assert result is not None
+    pins = {"llm_stream_ttft_timeout_seconds": 10.0, "llm_stream_inter_chunk_timeout_seconds": 0.05}
+
+    with pytest.raises(LLMStreamStallTimeoutError, match="mid-stream after 3 chunks"):
+        await _one_try(model, pins, model_catalog, database_gate)
 
 
+# meiva:note
+# A stream whose chunks arrive within the bounds is not killed by the stall timeout: the node returns its Command. The 1.0s bounds are a test value, not the production default.
+async def test_normal_stream_completes_no_stall_timeout(
+    model_catalog: ModelCatalog, database_gate: ProcessDbGate
+) -> None:
+    model = ScriptedModel(scripts=[[end_turn_chunk()]])
+    pins = {"llm_stream_ttft_timeout_seconds": 1.0, "llm_stream_inter_chunk_timeout_seconds": 1.0}
+
+    result = await _one_try(model, pins, model_catalog, database_gate)
+
+    assert result.update["messages"][0].content == "ok"
+
+
+# meiva:note
+# A drip-fed stream cannot evade the per-attempt total-duration ceiling, and no second request follows it.
 async def test_total_timeout_ends_the_original_request_while_chunks_keep_arriving(
-    monkeypatch: pytest.MonkeyPatch,
     model_catalog: ModelCatalog,
 ) -> None:
-    """A drip-fed stream cannot evade the per-attempt total-duration ceiling."""
-    import agent.graph.llm._stream as stream_module
-
-    clock = [0.0]
-    fallback_called = False
-    streamed_chunks = 0
-
-    def fake_monotonic() -> float:
-        return clock[0]
-
-    async def _dripping_stream() -> AsyncIterator[AIMessageChunk]:
-        nonlocal streamed_chunks
-        while not fallback_called:
-            streamed_chunks += 1
-            if streamed_chunks > 20:
-                pytest.fail("stream total timeout never stopped the condition-driven fake")
-            clock[0] += 0.4
-            yield AIMessageChunk(content="drip")
-
-    async def _fallback(*args: object, **kwargs: object) -> AIMessage:
-        nonlocal fallback_called
-        fallback_called = True
-        return AIMessage(content="fallback")
-
-    monkeypatch.setattr(stream_module.time, "monotonic", fake_monotonic)
-    fake_llm = MagicMock()
-    fake_llm.astream.return_value = _dripping_stream()
-    fake_llm.ainvoke = _fallback
+    drip = [step for _ in range(40) for step in (AIMessageChunk(content="drip"), 0.05)]
     chunks: list[AIMessageChunk] = []
 
     with pytest.raises(LLMStreamStallTimeoutError, match="total duration"):
         await consume_llm(
-            fake_llm,
+            ScriptedModel(scripts=[drip]),
             [],
             chunks=chunks,
-            handler=MagicMock(),
+            handler=StubHandler(),
             agent=AgentSlices.resolve(
                 default_reader=defaults(
-                    lm__llm_stream_total_timeout_seconds=1.0,
+                    lm__llm_stream_total_timeout_seconds=0.12,
                     lm__llm_stream_ttft_timeout_seconds=10.0,
                     lm__llm_stream_inter_chunk_timeout_seconds=10.0,
                 )
@@ -267,117 +106,56 @@ async def test_total_timeout_ends_the_original_request_while_chunks_keep_arrivin
             catalog=model_catalog,
         )
 
-    assert not fallback_called
-    assert streamed_chunks == 3
-    assert len(chunks) == 2
+    assert 1 <= len(chunks) <= 3
 
 
-async def test_stream_below_total_timeout_is_unchanged(monkeypatch: pytest.MonkeyPatch) -> None:
-    import agent.graph.llm._stream as stream_module
-
-    clock = [0.0]
-
-    async def _stream() -> AsyncIterator[AIMessageChunk]:
-        for content in ("a", "b"):
-            clock[0] += 0.4
-            yield AIMessageChunk(content=content)
-
-    monkeypatch.setattr(stream_module.time, "monotonic", lambda: clock[0])
+async def test_stream_below_total_timeout_is_unchanged() -> None:
     chunks: list[AIMessageChunk] = []
+    model = ScriptedModel(scripts=[[AIMessageChunk(content="a"), AIMessageChunk(content="b")]])
 
     await consume_stream_with_stall_timeout(
-        _stream(),
+        model.astream([]).__aiter__(),
         chunks=chunks,
-        handler=MagicMock(),
-        ttft_timeout=10.0,
-        inter_chunk_timeout=10.0,
-        total_timeout=1.0,
+        handler=StubHandler(),
+        bounds=StreamBounds(ttft_seconds=10.0, inter_chunk_seconds=10.0, total_seconds=10.0),
     )
 
-    assert [cast(str, chunk.content) for chunk in chunks] == [  # pyright: ignore[reportUnknownMemberType]
-        "a",
-        "b",
-    ]
+    assert [chunk.content for chunk in chunks][:2] == ["a", "b"]
 
 
-async def test_none_disables_stream_total_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_none_disables_stream_total_timeout() -> None:
     """The helper's None contract permits an intentionally unbounded caller."""
-    import agent.graph.llm._stream as stream_module
-
-    clock = [0.0]
-
-    async def _long_stream() -> AsyncIterator[AIMessageChunk]:
-        while clock[0] <= 3600.0:
-            clock[0] += 1000.0
-            yield AIMessageChunk(content="still alive")
-
-    monkeypatch.setattr(stream_module.time, "monotonic", lambda: clock[0])
+    slow = [step for _ in range(5) for step in (0.03, AIMessageChunk(content="still alive"))]
     chunks: list[AIMessageChunk] = []
 
     await consume_stream_with_stall_timeout(
-        _long_stream(),
+        ScriptedModel(scripts=[slow]).astream([]).__aiter__(),
         chunks=chunks,
-        handler=MagicMock(),
-        ttft_timeout=10.0,
-        inter_chunk_timeout=10.0,
-        total_timeout=None,
+        handler=StubHandler(),
+        bounds=StreamBounds(ttft_seconds=10.0, inter_chunk_seconds=10.0, total_seconds=None),
     )
 
-    assert clock[0] > 3600.0
-    assert len(chunks) == 4
-
-
-# ---------------------------------------------------------------------------
-# Stall pair — two adjacent stalls terminate early on the SAME segment bound
-# (task #3884: the 09-14/15 deepseek wave burned 600s stream + 600s fallback
-# per episode, then crashed; a pair now costs ~2x the bound and schedules a
-# delayed retry).
-# ---------------------------------------------------------------------------
+    assert [chunk.content for chunk in chunks][:5] == ["still alive"] * 5
 
 
 _STREAM_BOUNDS = {
-    "llm_stream_ttft_timeout_seconds": "ttft_timeout",
-    "llm_stream_total_timeout_seconds": "total_timeout",
-    "llm_stream_inter_chunk_timeout_seconds": "inter_chunk_timeout",
+    "llm_stream_ttft_timeout_seconds": "ttft_seconds",
+    "llm_stream_total_timeout_seconds": "total_seconds",
+    "llm_stream_inter_chunk_timeout_seconds": "inter_chunk_seconds",
 }
 
 
-async def _stream_bounds(
-    monkeypatch: pytest.MonkeyPatch, agent: AgentSlices
-) -> dict[str, float | None]:
-    """The bounds `consume_llm` hands the stream consumer for `agent`."""
-    import agent.graph.llm._stream as stream_module
-
-    seen: dict[str, float | None] = {}
-
-    async def _capture(*_args: object, **kwargs: Any) -> AIMessage:
-        seen.update({k: kwargs[k] for k in _STREAM_BOUNDS.values()})
-        return AIMessage(content="ok")
-
-    monkeypatch.setattr(stream_module, "consume_stream_with_stall_timeout", _capture)
-    await consume_llm(
-        MagicMock(), [], chunks=[], handler=MagicMock(), agent=agent, catalog=build_model_catalog()
-    )
-    return seen
-
-
 @pytest.mark.parametrize("setting", sorted(_STREAM_BOUNDS))
-async def test_an_agents_stream_bound_is_the_one_the_stream_runs_under(
-    setting: str, monkeypatch: pytest.MonkeyPatch
+def test_an_agents_stream_bound_is_the_one_the_stream_runs_under(
+    setting: str, model_catalog: ModelCatalog
 ) -> None:
-    pinned = await _stream_bounds(
-        monkeypatch,
-        AgentSlices.resolve(
-            {setting: 4.25},
-            default_reader=defaults(),
-        ),
+    pinned = stream_bounds(
+        AgentSlices.resolve({setting: 4.25}, default_reader=defaults()), model_catalog
     )
-    assert pinned[_STREAM_BOUNDS[setting]] == 4.25
-    unpinned = await _stream_bounds(
-        monkeypatch,
-        AgentSlices.resolve(default_reader=defaults()),
-    )
+    unpinned = stream_bounds(AgentSlices.resolve(default_reader=defaults()), model_catalog)
+
+    assert getattr(pinned, _STREAM_BOUNDS[setting]) == 4.25
     for other in _STREAM_BOUNDS.values():
         if other != _STREAM_BOUNDS[setting]:
-            assert pinned[other] == unpinned[other]
-    assert unpinned[_STREAM_BOUNDS[setting]] != 4.25
+            assert getattr(pinned, other) == getattr(unpinned, other)
+    assert getattr(unpinned, _STREAM_BOUNDS[setting]) != 4.25

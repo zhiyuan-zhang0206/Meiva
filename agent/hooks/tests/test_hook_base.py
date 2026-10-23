@@ -4,7 +4,6 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 
 from agent.hooks import Hook
-from agent.hooks.tests.fakes import make_fake_ops_pool
 from agent.state import AgentState
 from base.agents.context import MeivaContext
 from base.clock import Clock
@@ -44,7 +43,7 @@ class _NamedHook(Hook):
 
 def _runtime(database_gate: ProcessDbGate) -> Runtime[MeivaContext]:
     ctx = MeivaContext(
-        ops_pool=make_fake_ops_pool(),
+        ops_pool=None,
         llm=MagicMock(),
         event_publisher=MagicMock(),
         agent=AgentSlices.resolve(default_reader=defaults()),

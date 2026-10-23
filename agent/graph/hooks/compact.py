@@ -1,6 +1,5 @@
 __description__ = "Auto-compact history when token count exceeds threshold"
 
-from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any
 
@@ -46,6 +45,7 @@ from base.lm.system_note import wrap_system_note
 from base.log import logger
 from base.packages.plugins import activation
 from base.packages.plugins.extensions import ExtensionRegistry
+from base.paths import workspace_dir
 from base.telemetry.audit_events import prepare_event_log, record_audit_reported_async
 
 COMPACTION_INSTRUCTION = """Context compaction checkpoint: the conversation above is about to be
@@ -78,12 +78,12 @@ async def stamp_compact_boundary(
     state: AgentState | None = None,
     closing: ClosingRequest | None = None,
     *,
-    read_agent: Callable[[str], Any],
+    understanding_enabled: bool,
 ) -> None:
     if pool is None:
         return
     boundary: str | None = None
-    await await_snapshot(pool, state, agent_id, read_agent=read_agent)
+    await await_snapshot(pool, state, agent_id, understanding_enabled=understanding_enabled)
     try:
         boundary = await mark_compact_boundary(pool, str(agent_id), closing=closing)
     except Exception as exc:
@@ -100,7 +100,7 @@ async def stamp_compact_boundary(
             pool=pool,
             agent_id=agent_id,
             boundary=boundary,
-            read_agent=read_agent,
+            understanding_enabled=understanding_enabled,
         )
 
 
@@ -169,7 +169,7 @@ async def generate_summary(
     )
     compaction_input = [*system_head, *content_msgs, instruction]
     response = await ainvoke_tool_call(
-        llm, compaction_input, read_timeout=lambda: slices.read("lm", "llm_compact_timeout_seconds")
+        llm, compaction_input, timeout_seconds=slices.read("lm", "llm_compact_timeout_seconds")
     )
     model = slices.brain.llm_model
     if isinstance(model, str) and model:
@@ -369,7 +369,12 @@ async def auto_compact_for_llm(
     if publisher is not None:
         publisher.emit(CompactDone(agent_id=agent_id).model_dump_json())
 
-    dump_path = dump_history(state.messages, agent_id, runtime.context.require_agent().history_dump)
+    dump_path = dump_history(
+        state.messages,
+        workspace_dir(agent_id),
+        runtime.context.require_agent().history_dump,
+        now=datetime.now(UTC),
+    )
     summary_kwargs: dict[str, Any] = {
         "additional_kwargs": {
             "meiva_msg_type": MeivaMsgType.COMPACT_SUMMARY.value,
@@ -381,7 +386,11 @@ async def auto_compact_for_llm(
     transition = build_compact_transition(
         summary,
         resume=CLAIM,
-        extra_msgs=([history_dump_note(dump_path)] if dump_path is not None else None),
+        extra_msgs=(
+            [history_dump_note(dump_path, created_at=datetime.now(UTC))]
+            if dump_path is not None
+            else None
+        ),
         summary_kwargs=summary_kwargs,
     )
     await stamp_compact_boundary(
@@ -389,7 +398,9 @@ async def auto_compact_for_llm(
         agent_id,
         state,
         closing_of(summary),
-        read_agent=lambda field: runtime.context.require_agent().read("agent", field),
+        understanding_enabled=runtime.context.require_agent().read(
+            "agent", "understanding_enabled"
+        ),
     )
     transition["compact"] = state.compact.next_segment()
     emit_compact_finished(publisher, agent_id, compact_run_id, status=CompactionStatus.SUCCESS)

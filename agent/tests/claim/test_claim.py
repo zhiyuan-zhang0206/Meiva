@@ -17,12 +17,14 @@
 # - auto-compact behavior (now a before_llm hook, tests in agent/tests/test_compact.py)
 
 from collections.abc import Callable
+from dataclasses import replace
 from typing import cast
 
 import psycopg
 import pytest
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from langgraph.graph import END
+from langgraph.runtime import Runtime
 from psycopg_pool import AsyncConnectionPool
 
 from agent.graph import claim_node
@@ -33,7 +35,6 @@ from agent.graph.claim.tests.claim_support import (
     thread_config,
 )
 from agent.graph.hooks.compact import compose_summary_message
-from agent.graph.prompt import context_notes
 from agent.messages import NoteTag, system_note_message
 from agent.state import AgentState
 from agent.tests.claim.claim_status_support import compact_tail
@@ -45,7 +46,7 @@ from base.cluster.machine.tests.identity import machine_identity as machine_iden
 from base.config.service_read import ConfigAuthority
 from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
-from base.packages.plugins.extensions import ExtensionRegistry
+from base.packages.plugins.extensions import ContextNote, ExtensionRegistry, PluginContributions
 
 # Almost all claim tests are short-path dispatch: the inbound is INSERTed before
 # claim_node runs, so its first SELECT gets the batch — pure DB side-effect +
@@ -255,12 +256,44 @@ async def test_claim_auto_resurrect_compact_request_batch_compacts_and_wakes(
 
     assert cmd.goto == "init_context"
     assert cmd.update["context_reset"].resume == "before_llm"  # type: ignore[index]
-    fake_llm.bind_tools.return_value.ainvoke.assert_called_once()  # compact ran
     msgs = compact_tail(cmd.update)
     assert msgs[0].content == compose_summary_message("LLM-generated summary")  # pyright: ignore[reportUnknownMemberType]
     # resurrect marker appended after the summary — the revive still wakes the agent
     contents = [m.content for m in msgs if isinstance(m.content, str)]  # pyright: ignore[reportUnknownMemberType]
     assert any("You have been resurrected by user" in c for c in contents)
+
+
+def _agent_id_note(_ctx: MeivaContext) -> HumanMessage:
+    return system_note_message(content="Your Agent ID is N.", tag=NoteTag.AGENT_ID)
+
+
+def _agent_memory_note(_ctx: MeivaContext) -> HumanMessage:
+    return system_note_message(content="the new agent's memory", tag=NoteTag.AGENT_MEMORY)
+
+
+# meiva:note
+# The fork's own notes come from what the plugins declare: a registry whose plugin contributes
+# these `on_fork` notes, ranked in the order given.
+def _runtime_with_fork_notes(
+    pool: AsyncConnectionPool,
+    database_gate: ProcessDbGate,
+    *builders: Callable[[MeivaContext], HumanMessage],
+) -> Runtime[MeivaContext]:
+    runtime = make_runtime(ops_pool=pool, database_gate=database_gate)
+    registry = ExtensionRegistry(
+        (
+            (
+                "fork-notes",
+                PluginContributions(
+                    context_notes=tuple(
+                        ContextNote(build=build, on_fork=True, rank=rank)
+                        for rank, build in enumerate(builders)
+                    )
+                ),
+            ),
+        )
+    )
+    return Runtime(context=replace(runtime.context, extensions=registry))
 
 
 async def test_claim_fork_kind_appends_identity_marker_and_continues(
@@ -286,22 +319,12 @@ async def test_claim_fork_kind_appends_identity_marker_and_continues(
         machine=machine_identity,
     )
     insert_inbound_kind(db_conn, tid, "", "fork", source="agent:7")
-    monkeypatch = pytest.MonkeyPatch()
 
-    def fork_notes(_extensions: ExtensionRegistry, _ctx: MeivaContext) -> list[HumanMessage]:
-        return [system_note_message(content="Your Agent ID is N.", tag=NoteTag.AGENT_ID)]
-
-    monkeypatch.setattr(context_notes, "fork_notes", fork_notes)
-    try:
-        cmd = await claim_node(
-            AgentState(messages=[SystemMessage(content="sys"), HumanMessage(content="inherited")]),
-            make_runtime(ops_pool=aops_pool, database_gate=database_gate),
-            thread_config(
-                tid,
-            ),
-        )
-    finally:
-        monkeypatch.undo()
+    cmd = await claim_node(
+        AgentState(messages=[SystemMessage(content="sys"), HumanMessage(content="inherited")]),
+        _runtime_with_fork_notes(aops_pool, database_gate, _agent_id_note),
+        thread_config(tid),
+    )
 
     assert cmd.goto == "before_llm"
     msgs = cmd.update["messages"]  # type: ignore[index]
@@ -358,25 +381,12 @@ async def test_claim_fork_preserves_the_inherited_prefix(
     old_preload = _tagged(NoteTag.PRELOADED_SKILLS, "source's preloaded skills", "note-old-preload")
     cluster_index = _tagged(NoteTag.MEMORY, "shared pool index", "note-cluster-index")
     inherited = [SystemMessage(content="sys"), old_id, old_mem, old_preload, cluster_index]
-    monkeypatch = pytest.MonkeyPatch()
 
-    def fork_notes(_extensions: ExtensionRegistry, _ctx: MeivaContext) -> list[HumanMessage]:
-        return [
-            system_note_message(content="Your Agent ID is N.", tag=NoteTag.AGENT_ID),
-            system_note_message(content="the new agent's memory", tag=NoteTag.AGENT_MEMORY),
-        ]
-
-    monkeypatch.setattr(context_notes, "fork_notes", fork_notes)
-    try:
-        cmd = await claim_node(
-            AgentState(messages=list(inherited)),
-            make_runtime(ops_pool=aops_pool, database_gate=database_gate),
-            thread_config(
-                tid,
-            ),
-        )
-    finally:
-        monkeypatch.undo()
+    cmd = await claim_node(
+        AgentState(messages=list(inherited)),
+        _runtime_with_fork_notes(aops_pool, database_gate, _agent_id_note, _agent_memory_note),
+        thread_config(tid),
+    )
 
     assert cmd.goto == "before_llm"
     from agent.messages.guard import guarded_add_messages

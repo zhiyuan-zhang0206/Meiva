@@ -1,16 +1,20 @@
 # meiva:note
-# The parent's side of the exec child boundary: the environment it hands the child, and how it
-# reads the child's outcome back.
+# The parent's side of the exec child boundary: the launch plan it hands the child (argv,
+# environment and working directory as values), and how it reads the child's outcome back.
 #
-# Used by the spawn path in `_subprocess.py`: it builds the child environment and maps the result
+# Used by the spawn path in `_subprocess.py`: it launches the plan and maps the result
 # envelope onto the `ExecResult` sum type.
 
 from __future__ import annotations
 
 import json
 import os
+import sys
+from collections.abc import Mapping
+from dataclasses import dataclass
 from pathlib import Path
 
+from agent.execution.protocol import ResultPayload, read_result
 from base.deploy.release import editable_install
 from base.host.env.registry import AGENT_BIRTH_CONFIG_ENV, AGENT_CONFIG_OVERLAY_ENV
 
@@ -18,16 +22,48 @@ from ._result import (
     ExecChildError,
     ExecCrashed,
     ExecResult,
+    LifecycleKind,
+    StreamCap,
     construct_exec_result,
-    lifecycle_exception_from_name,
+    lifecycle_kind_from_name,
 )
-from ._stream import StreamCap
-from .protocol import ResultPayload, read_result
+
+
+# meiva:note
+# What the parent process looks like at the moment it spawns a child. The spawning shell reads
+# these once (`read_parent_facts`); the launch plan and the editable-install guard
+# decide from the values.
+@dataclass(frozen=True)
+class ParentFacts:
+    environ: Mapping[str, str]
+    cwd: Path
+    executable: str
+    source_root: Path | None
+    editable_roots: tuple[Path, ...]
+
+
+# meiva:note
+# What this process looks like at the moment it spawns a child: the environment the child
+# inherits, its working directory, the interpreter it re-executes, the checkout that
+# interpreter belongs to and the one extra checkout its editable install may name.
+def read_parent_facts() -> ParentFacts:
+    return ParentFacts(
+        environ=dict(os.environ),
+        cwd=Path.cwd().resolve(),
+        executable=sys.executable,
+        source_root=editable_install.current_interpreter_source_root(),
+        editable_roots=(Path.home() / "Meiva",),
+    )
+
+
+@dataclass(frozen=True)
+class ChildLaunch:
+    argv: tuple[str, ...]
+    env: Mapping[str, str]
+    cwd: Path
 
 
 def _cwd_is_inside_checkout(cwd: Path, checkout_root: Path) -> bool:
-    """Whether an exec child cwd may inherit its interpreter's virtualenv."""
-
     return (
         cwd.is_relative_to(checkout_root)
         and not cwd.is_relative_to(checkout_root / ".worktrees")
@@ -35,30 +71,29 @@ def _cwd_is_inside_checkout(cwd: Path, checkout_root: Path) -> bool:
     )
 
 
-def build_child_env(
+# meiva:note
+# The child's launch: the parent's own environment (settings already materialized by
+# dotenv_boot), plus the identity the session env allowlist deliberately drops (Task #856) and
+# the two envelope paths. Only explicit per-agent maps are exported; ambient parent carriers are
+# removed so an unbound child cannot inherit another agent's pins (JSON in env, never argv).
+#
+# A child spawned outside its interpreter checkout drops VIRTUAL_ENV so a bare uv command
+# cannot target a different checkout's editable install. Children running inside their own
+# checkout preserve their venv identity.
+def plan_child_launch(
+    parent: ParentFacts,
     agent_id: int | None,
     request_path: Path,
     result_path: Path,
     *,
-    config_overlay: dict[str, object] | None = None,
-    birth_config: dict[str, object] | None = None,
-) -> dict[str, str]:
-    """The child's environment: the parent's own (settings already materialized
-    by dotenv_boot), plus the identity the session env allowlist deliberately
-    drops (Task #856) and the two envelope paths. Only explicit per-agent maps
-    are exported; ambient parent carriers are removed so an unbound child
-    cannot inherit another agent's pins (JSON in env, never argv).
-
-    A child spawned outside its interpreter checkout drops ``VIRTUAL_ENV`` so
-    a bare uv command cannot target a different checkout's editable install.
-    Children running inside their own checkout preserve their venv identity.
-    """
-    env = os.environ.copy()
+    config_overlay: dict[str, object] | None,
+    birth_config: dict[str, object] | None,
+) -> ChildLaunch:
+    env = dict(parent.environ)
     env.pop(AGENT_CONFIG_OVERLAY_ENV, None)
     env.pop(AGENT_BIRTH_CONFIG_ENV, None)
-    source_root = editable_install.current_interpreter_source_root()
-    if source_root is not None and not _cwd_is_inside_checkout(
-        Path.cwd().resolve(), source_root.resolve()
+    if parent.source_root is not None and not _cwd_is_inside_checkout(
+        parent.cwd, parent.source_root
     ):
         env.pop("VIRTUAL_ENV", None)
     if agent_id is not None:
@@ -70,7 +105,8 @@ def build_child_env(
         env[AGENT_CONFIG_OVERLAY_ENV] = json.dumps(config_overlay, sort_keys=True)
     if birth_config:
         env[AGENT_BIRTH_CONFIG_ENV] = json.dumps(birth_config, sort_keys=True)
-    return env
+    argv = (parent.executable, "-I", "-B", "-X", "utf8", "-m", "agent.execution.child")
+    return ChildLaunch(argv=argv, env=env, cwd=parent.cwd)
 
 
 def read_result_envelope(
@@ -103,26 +139,26 @@ def read_result_envelope(
         return None, f"exec result envelope could not be decoded: {exc}"
 
 
-def _child_exception(
+# meiva:note
+# The lifecycle kind or exception the child's outcome stands for, or None for a clean exit. A
+# crash, or a signal exception the agent raised itself (KeyboardInterrupt / TimeoutError written
+# by its own code), is an `ExecChildError`: when the parent's flags confirm the signal,
+# `construct_exec_result` still lets cancel and timeout outrank it.
+def _child_outcome(
     payload: ResultPayload | None, envelope_error: str | None
-) -> BaseException | None:
-    """The exception the child's outcome stands for, or None for a clean exit."""
+) -> LifecycleKind | BaseException | None:
     if envelope_error is not None:
         return ExecChildError("exec_result_envelope_invalid", envelope_error, None)
     if payload is not None and payload.kind == "lifecycle" and payload.lifecycle_type:
-        exc = lifecycle_exception_from_name(payload.lifecycle_type)
-        if exc is None:
-            exc = ExecChildError(
+        kind = lifecycle_kind_from_name(payload.lifecycle_type)
+        if kind is None:
+            return ExecChildError(
                 "unknown_lifecycle_class",
                 "child reported unknown lifecycle class " + repr(payload.lifecycle_type),
                 None,
             )
-        return exc
+        return kind
     if payload is not None and payload.exc_type:
-        # Crash, or a signal exception the agent raised itself
-        # (KeyboardInterrupt / TimeoutError written by its own code): if the
-        # parent's flags confirm the signal, the construction priority below
-        # still wins (cancel/timeout outrank a crash exc).
         return ExecChildError(payload.exc_type, payload.exc_msg or "", payload.full_traceback)
     if payload is None:
         return ExecChildError(
@@ -156,14 +192,14 @@ def result_from_payload(
     """
     if memory_guard_notice is not None and payload is None:
         output = f"{output}\n{memory_guard_notice}\n" if output else f"{memory_guard_notice}\n"
-        exc: BaseException | None = ExecChildError(
+        outcome: LifecycleKind | BaseException | None = ExecChildError(
             "exec_memory_guard_killed", memory_guard_notice, None
         )
     else:
-        exc = _child_exception(payload, envelope_error)
+        outcome = _child_outcome(payload, envelope_error)
     result = construct_exec_result(
         output,
-        exc,
+        outcome,
         cancelled=cancelled,
         timed_out=timed_out,
         stream_cap=stream_cap,

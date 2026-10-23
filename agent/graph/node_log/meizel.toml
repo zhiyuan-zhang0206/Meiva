@@ -1,0 +1,10 @@
+exports = ["__init__.py", "tests"]
+
+[uses]
+"__init__.py" = ["_lifecycle.py", "_plan.py", "_stall.py"]
+"_lifecycle.py" = ["_plan.py", "_stall.py"]
+"_stall.py" = ["_plan.py"]
+"tests" = ["__init__.py", "_plan.py", "_stall.py"]
+
+[purity]
+"_plan.py" = "strict"

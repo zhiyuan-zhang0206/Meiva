@@ -5,9 +5,6 @@ import psycopg
 import pytest
 from psycopg_pool import AsyncConnectionPool
 
-from agent.tests.impersonation.test_impersonation import gate_ctx as gate_ctx
-from agent.tests.impersonation.test_impersonation import incarnation as incarnation
-from agent.tests.impersonation.test_impersonation import relays as relays
 from base.agents.impersonation.tests.impersonation_support import recorded_tree
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity

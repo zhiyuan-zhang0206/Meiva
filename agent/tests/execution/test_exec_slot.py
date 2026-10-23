@@ -99,7 +99,7 @@ def test_handle_view_and_delta_are_pure_over_the_graph_state():
 
 
 def test_child_clients_are_lazy_and_released_when_the_process_ends(tmp_path: Path) -> None:
-    from agent.graph.exec.protocol import read_result
+    from agent.execution.protocol import read_result
     from agent.tests.execution.test_exec_child import spawn_real_child
 
     marker = tmp_path / "closed"

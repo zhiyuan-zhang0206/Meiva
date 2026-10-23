@@ -1,23 +1,16 @@
-"""`plugins.meiva_fleet.task_maintenance.daemon` — task reminders + escalation.
-
-Two cluster-wide passes, gateway-owned:
-
-- `run_reminders` finds in-progress tasks past their remind_interval_seconds and delivers one
-  chat digest per owner through a direct inbound insert. Terminated owners keep
-  their inbox row without being revived. Each overdue window gets at most one
-  reminder per backoff period; the counters advance only after delivery succeeds.
-- `run_escalate` notifies the parent task's owner when reminder_count reaches the
-  escalation threshold.
-
-Delivery is normally exercised against a stubbed `deliver_message`; the
-terminated-owner test keeps the direct write real. These tests assert digest
-recipients, message contents, counters, telemetry, and no-resurrect delivery. No
-stale sweep, no automatic cancellation. History is preserved: rows are UPDATEd,
-never DELETEd.
-"""
+# meiva:note
+# `plugins.meiva_fleet.task_maintenance.daemon` — task reminders and escalation, cluster-wide and
+# gateway-owned. `run_reminders` finds in-progress tasks past their remind_interval_seconds and
+# commits one digest per owner as a direct inbound insert together with the counters; terminated
+# owners keep their inbox row without being revived, and each overdue window gets at most one
+# reminder per backoff period. `run_escalate` notifies the parent task's owner when reminder_count
+# reaches the escalation threshold. The tests run both against the throwaway Postgres and Redis and
+# read the delivered digests back from the inbound rows. No stale sweep, no automatic cancellation:
+# rows are UPDATEd, never DELETEd.
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from itertools import count
 from typing import Any
@@ -28,11 +21,17 @@ from psycopg_pool import ConnectionPool
 
 from base.config import settings
 from base.db import Database
-from base.events.live.bus import EventBus
+from base.events.live.bus import EventBus, EventBusConfig
 from base.telemetry.tests.capture.event_capture import EmittedEvents
 from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
 from meiva_builtins.plugins.meiva_fleet.task_maintenance import daemon
 from meiva_builtins.plugins.meiva_fleet.task_maintenance.daemon import run_reminders
+from meiva_builtins.plugins.meiva_fleet.tests.task_registry.live_events import snapshots_at_events
+from meiva_builtins.plugins.meiva_fleet.tests.task_registry.notes import TaskNotes, record_notes
+from meiva_builtins.plugins.meiva_fleet.tests.task_registry.seeds import (
+    inserts_failing,
+    reminder_counter_failing,
+)
 
 _DAY_S = 86400.0
 
@@ -47,18 +46,9 @@ def pool(db_url: str):
 
 
 @pytest.fixture
-def deliver(monkeypatch: pytest.MonkeyPatch) -> list[tuple[int, str]]:
-    """Stub `deliver_message`, recording (agent_id, message) per call.
-
-    The real one writes an inbound row; here we only assert the daemon's own
-    responsibility — digest recipients, content, and counter updates."""
-    calls: list[tuple[int, str]] = []
-
-    def _accepted(_db: object, _bus: object, owner: int, _inbound_id: int, content: str) -> None:
-        calls.append((owner, content))
-
-    monkeypatch.setattr(daemon, "announce_reminder", _accepted)
-    return calls
+def deliver(db_conn: psycopg.Connection) -> Iterator[TaskNotes]:
+    with record_notes(db_conn) as notes:
+        yield notes
 
 
 def _maintenance_events(
@@ -175,37 +165,32 @@ class TestRemind:
         self,
         pool: ConnectionPool,
         db_conn: psycopg.Connection,
-        monkeypatch: pytest.MonkeyPatch,
         database: Database,
         event_bus: EventBus,
+        db_url: str,
     ) -> None:
         owner = _make_agent(db_conn)
-        published: list[tuple[int, int]] = []
 
-        def _capture_publish(_bus: object, agent_id: int) -> None:
-            with db_conn.cursor() as cur:
-                cur.execute(
-                    "SELECT count(*) FROM inbound_messages WHERE agent_id = %s", (agent_id,)
-                )
+        def committed_inbound() -> int:
+            with psycopg.connect(db_url) as separate, separate.cursor() as cur:
+                cur.execute("SELECT count(*) FROM inbound_messages WHERE agent_id = %s", (owner,))
                 row = cur.fetchone()
             assert row is not None
-            published.append((agent_id, int(row[0])))
-
-        monkeypatch.setattr(daemon, "publish_agent_updated_sync", _capture_publish)
+            return int(row[0])
 
         _make_task(db_conn, owner=owner, updated_s_ago=7200)
-        assert daemon.run_reminders(pool, database, event_bus, 3600) == 1
+        with snapshots_at_events(event_bus, committed_inbound) as seen:
+            assert daemon.run_reminders(pool, database, event_bus, 3600) == 1
 
-        # This separate connection must already see the committed inbound
-        # when its invalidation hint is published.
-        assert published == [(owner, 1)]
+        hints = [count for event, count in seen if event["role"] == "agent_updated"]
+        assert hints == [1]
         assert _inbound_messages(db_conn, owner)[0][1:] == ("system_note", "system")
 
     def test_single_overdue_task_delivers_single_task_digest(
         self,
         pool: ConnectionPool,
         db_conn: psycopg.Connection,
-        deliver: list[tuple[int, str]],
+        deliver: TaskNotes,
         emitted_events: EmittedEvents,
         database: Database,
         event_bus: EventBus,
@@ -213,8 +198,8 @@ class TestRemind:
         owner = _make_agent(db_conn)
         tid = _make_task(db_conn, owner=owner, remind_interval_seconds=1800, updated_s_ago=3600)
         assert run_reminders(pool, database, event_bus, 3600.0) == 1
-        assert len(deliver) == 1
-        delivered_owner, message = deliver[0]
+        assert len(deliver.deliveries()) == 1
+        delivered_owner, message = deliver.deliveries()[0]
         assert delivered_owner == owner
         assert message.splitlines()[0] == (
             "Task check-in — 1 task(s) reached their reminder interval; "
@@ -244,7 +229,7 @@ class TestRemind:
         self,
         pool: ConnectionPool,
         db_conn: psycopg.Connection,
-        deliver: list[tuple[int, str]],
+        deliver: TaskNotes,
         database: Database,
         event_bus: EventBus,
     ) -> None:
@@ -262,8 +247,8 @@ class TestRemind:
         ]
 
         assert run_reminders(pool, database, event_bus, 3600.0) == 1
-        assert len(deliver) == 1
-        delivered_owner, message = deliver[0]
+        assert len(deliver.deliveries()) == 1
+        delivered_owner, message = deliver.deliveries()[0]
         assert delivered_owner == owner
         assert "Task check-in — 3 task(s) reached their reminder interval" in message
         assert all(f"#{task_id}" in message for task_id in task_ids)
@@ -277,7 +262,7 @@ class TestRemind:
         self,
         pool: ConnectionPool,
         db_conn: psycopg.Connection,
-        deliver: list[tuple[int, str]],
+        deliver: TaskNotes,
         database: Database,
         event_bus: EventBus,
     ) -> None:
@@ -311,8 +296,8 @@ class TestRemind:
         )
 
         assert run_reminders(pool, database, event_bus, 3600.0) == 1
-        assert len(deliver) == 1
-        _delivered_owner, message = deliver[0]
+        assert len(deliver.deliveries()) == 1
+        _delivered_owner, message = deliver.deliveries()[0]
         ids_in_order = [int(line.split(" ")[1].lstrip("#")) for line in message.splitlines()[1:]]
         assert ids_in_order == [p0, p1, p2]
         # The imperative instruction rides each line.
@@ -325,7 +310,7 @@ class TestRemind:
         self,
         pool: ConnectionPool,
         db_conn: psycopg.Connection,
-        deliver: list[tuple[int, str]],
+        deliver: TaskNotes,
         database: Database,
         event_bus: EventBus,
     ) -> None:
@@ -337,7 +322,7 @@ class TestRemind:
         _make_task(db_conn, owner=second_owner, remind_interval_seconds=1800, updated_s_ago=3600)
 
         assert run_reminders(pool, database, event_bus, 3600.0) == 2
-        messages_by_owner = dict(deliver)
+        messages_by_owner = dict(deliver.deliveries())
         assert set(messages_by_owner) == {first_owner, second_owner}
         assert "2 task(s) reached their reminder interval" in messages_by_owner[first_owner]
         assert "1 task(s) reached their reminder interval" in messages_by_owner[second_owner]
@@ -346,14 +331,14 @@ class TestRemind:
         self,
         pool: ConnectionPool,
         db_conn: psycopg.Connection,
-        deliver: list[tuple[int, str]],
+        deliver: TaskNotes,
         database: Database,
         event_bus: EventBus,
     ) -> None:
         owner = _make_agent(db_conn)
         _make_task(db_conn, owner=owner, remind_interval_seconds=3600, updated_s_ago=1800)
         assert run_reminders(pool, database, event_bus, 3600.0) == 0
-        assert deliver == []
+        assert deliver.deliveries() == []
 
     def test_terminated_owner_receives_inbound_without_resurrection(
         self,
@@ -392,7 +377,6 @@ class TestRemind:
         self,
         pool: ConnectionPool,
         db_conn: psycopg.Connection,
-        monkeypatch: pytest.MonkeyPatch,
         database: Database,
         event_bus: EventBus,
     ) -> None:
@@ -401,11 +385,10 @@ class TestRemind:
         owner = _make_agent(db_conn)
         tid = _make_task(db_conn, owner=owner, remind_interval_seconds=1800, updated_s_ago=3600)
 
-        def _boom(*args: object, **kwargs: object) -> None:
-            raise RuntimeError("inbound insert failed")
-
-        monkeypatch.setattr(daemon, "insert_inbound_message_in_transaction", _boom)
-        with pytest.raises(RuntimeError, match="inbound insert failed"):
+        with (
+            inserts_failing(db_conn, "inbound_messages"),
+            pytest.raises(psycopg.errors.RaiseException, match="inbound_messages inserts refused"),
+        ):
             run_reminders(pool, database, event_bus, 3600.0)
         row = _task_row(db_conn, tid)
         assert row is not None
@@ -417,7 +400,7 @@ class TestRemind:
         self,
         pool: ConnectionPool,
         db_conn: psycopg.Connection,
-        deliver: list[tuple[int, str]],
+        deliver: TaskNotes,
         database: Database,
         event_bus: EventBus,
     ) -> None:
@@ -429,7 +412,7 @@ class TestRemind:
         self,
         pool: ConnectionPool,
         db_conn: psycopg.Connection,
-        deliver: list[tuple[int, str]],
+        deliver: TaskNotes,
         database: Database,
         event_bus: EventBus,
     ) -> None:
@@ -448,7 +431,7 @@ class TestRemind:
         self,
         pool: ConnectionPool,
         db_conn: psycopg.Connection,
-        deliver: list[tuple[int, str]],
+        deliver: TaskNotes,
         database: Database,
         event_bus: EventBus,
     ) -> None:
@@ -457,13 +440,13 @@ class TestRemind:
         _make_task(db_conn, owner=owner, parent_id=parent, updated_s_ago=0)
 
         assert run_reminders(pool, database, event_bus, 3600.0) == 0
-        assert deliver == []
+        assert deliver.deliveries() == []
 
     def test_overdue_child_under_a_parent_reminds_on_its_own(
         self,
         pool: ConnectionPool,
         db_conn: psycopg.Connection,
-        deliver: list[tuple[int, str]],
+        deliver: TaskNotes,
         database: Database,
         event_bus: EventBus,
     ) -> None:
@@ -478,8 +461,8 @@ class TestRemind:
         )
 
         assert run_reminders(pool, database, event_bus, 3600.0) == 1
-        assert len(deliver) == 1
-        message = deliver[0][1]
+        assert len(deliver.deliveries()) == 1
+        message = deliver.deliveries()[0][1]
         assert f'- #{child} "' in message
         assert f'- #{parent} "' not in message
         parent_row = _task_row(db_conn, parent)
@@ -499,7 +482,7 @@ class TestRemind:
         child_status: str,
         pool: ConnectionPool,
         db_conn: psycopg.Connection,
-        deliver: list[tuple[int, str]],
+        deliver: TaskNotes,
         database: Database,
         event_bus: EventBus,
     ) -> None:
@@ -514,13 +497,13 @@ class TestRemind:
         )
 
         assert run_reminders(pool, database, event_bus, 3600.0) == 1
-        assert f'- #{parent} "' in deliver[0][1]
+        assert f'- #{parent} "' in deliver.deliveries()[0][1]
 
     def test_task_without_children_still_reminds(
         self,
         pool: ConnectionPool,
         db_conn: psycopg.Connection,
-        deliver: list[tuple[int, str]],
+        deliver: TaskNotes,
         database: Database,
         event_bus: EventBus,
     ) -> None:
@@ -528,7 +511,7 @@ class TestRemind:
         leaf = _make_task(db_conn, owner=owner, remind_interval_seconds=1800, updated_s_ago=3600)
 
         assert run_reminders(pool, database, event_bus, 3600.0) == 1
-        assert f'- #{leaf} "' in deliver[0][1]
+        assert f'- #{leaf} "' in deliver.deliveries()[0][1]
 
     # meiva:note
     # The skip is by direct child, so a two-level container chain drops both container levels and
@@ -537,7 +520,7 @@ class TestRemind:
         self,
         pool: ConnectionPool,
         db_conn: psycopg.Connection,
-        deliver: list[tuple[int, str]],
+        deliver: TaskNotes,
         database: Database,
         event_bus: EventBus,
     ) -> None:
@@ -561,7 +544,7 @@ class TestRemind:
         )
 
         assert run_reminders(pool, database, event_bus, 3600.0) == 1
-        message = deliver[0][1]
+        message = deliver.deliveries()[0][1]
         assert f'- #{leaf} "' in message
         assert f'- #{container} "' not in message
         assert f'- #{grandparent} "' not in message
@@ -570,7 +553,7 @@ class TestRemind:
         self,
         pool: ConnectionPool,
         db_conn: psycopg.Connection,
-        deliver: list[tuple[int, str]],
+        deliver: TaskNotes,
         database: Database,
         event_bus: EventBus,
     ) -> None:
@@ -588,7 +571,7 @@ class TestRemind:
         self,
         pool: ConnectionPool,
         db_conn: psycopg.Connection,
-        deliver: list[tuple[int, str]],
+        deliver: TaskNotes,
         database: Database,
         event_bus: EventBus,
     ) -> None:
@@ -606,7 +589,7 @@ class TestRemind:
         self,
         pool: ConnectionPool,
         db_conn: psycopg.Connection,
-        deliver: list[tuple[int, str]],
+        deliver: TaskNotes,
         database: Database,
         event_bus: EventBus,
     ) -> None:
@@ -623,13 +606,13 @@ class TestRemind:
             last_reminded_s_ago=5400,  # 1.5h ago
         )
         assert run_reminders(pool, database, event_bus, 3600.0) == 0
-        assert deliver == []
+        assert deliver.deliveries() == []
 
     def test_interval_floor_allows_repeat_after_full_interval(
         self,
         pool: ConnectionPool,
         db_conn: psycopg.Connection,
-        deliver: list[tuple[int, str]],
+        deliver: TaskNotes,
         database: Database,
         event_bus: EventBus,
     ) -> None:
@@ -647,8 +630,7 @@ class TestRemind:
         self,
         pool: ConnectionPool,
         db_conn: psycopg.Connection,
-        deliver: list[tuple[int, str]],
-        monkeypatch: pytest.MonkeyPatch,
+        deliver: TaskNotes,
         database: Database,
         event_bus: EventBus,
     ) -> None:
@@ -658,20 +640,12 @@ class TestRemind:
             _make_task(db_conn, owner=owner, remind_interval_seconds=1800, updated_s_ago=3600)
             for _ in range(2)
         ]
-        real = daemon.advance_reminder_counters
-        failed = False
-
-        def flaky(cur: psycopg.Cursor, task_id: int) -> None:
-            nonlocal failed
-            if task_id == task_ids[1] and not failed:
-                failed = True
-                raise psycopg.OperationalError("crash after first counter")
-            real(cur, task_id)
-
-        monkeypatch.setattr(daemon, "advance_reminder_counters", flaky)
-        with pytest.raises(psycopg.OperationalError):
+        with (
+            reminder_counter_failing(db_conn, task_ids[1]),
+            pytest.raises(psycopg.errors.RaiseException, match="reminder counter refused"),
+        ):
             run_reminders(pool, database, event_bus, 3600.0)
-        assert deliver == []
+        assert deliver.deliveries() == []
         with db_conn.cursor() as cur:
             cur.execute("SELECT count(*) FROM inbound_messages WHERE agent_id=%s", (owner,))
             assert cur.fetchone() == (0,)
@@ -679,28 +653,24 @@ class TestRemind:
             row = _task_row(db_conn, task_id)
             assert row is not None and row[2:] == (0, None)
         assert run_reminders(pool, database, event_bus, 3600.0) == 1
-        assert len(deliver) == 1
+        assert len(deliver.deliveries()) == 1
         assert run_reminders(pool, database, event_bus, 3600.0) == 0
 
     def test_committed_reminder_survives_lost_live_hint(
         self,
         pool: ConnectionPool,
         db_conn: psycopg.Connection,
-        monkeypatch: pytest.MonkeyPatch,
         database: Database,
         event_bus: EventBus,
     ) -> None:
-        """Producer restart after commit does not requeue a digest with the same cadence."""
         owner = _make_agent(db_conn)
         tid = _make_task(db_conn, owner=owner, remind_interval_seconds=1800, updated_s_ago=3600)
+        unreachable_bus = EventBus(
+            EventBusConfig(redis_url="redis://127.0.0.1:1/0", events_channel="lost-hints")
+        )
 
-        def lost_hint(*args: object) -> None:
-            raise RuntimeError("process lost after commit")
-
-        monkeypatch.setattr(daemon, "announce_reminder", lost_hint)
-        with pytest.raises(RuntimeError):
-            run_reminders(pool, database, event_bus, 3600.0)
-        assert run_reminders(pool, database, event_bus, 3600.0) == 0
+        assert run_reminders(pool, database, unreachable_bus, 3600.0) == 1
+        assert run_reminders(pool, database, unreachable_bus, 3600.0) == 0
         row = _task_row(db_conn, tid)
         assert row is not None and row[2] == 1
         with db_conn.cursor() as cur:
@@ -713,7 +683,7 @@ def test_concurrent_reminder_sweeps_accept_one_cadence(
     db_conn: psycopg.Connection,
     database: Database,
     event_bus: EventBus,
-    deliver: list[tuple[int, str]],
+    deliver: TaskNotes,
 ) -> None:
     owner = _make_agent(db_conn)
     task_id = _make_task(db_conn, owner=owner, remind_interval_seconds=1800, updated_s_ago=3600)
@@ -725,4 +695,4 @@ def test_concurrent_reminder_sweeps_accept_one_cadence(
     assert len(_inbound_messages(db_conn, owner)) == 1
     row = _task_row(db_conn, task_id)
     assert row is not None and row[2] == 1
-    assert len(deliver) == 1
+    assert len(deliver.deliveries()) == 1

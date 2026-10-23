@@ -1,13 +1,34 @@
+import json
+from collections.abc import AsyncGenerator
+from typing import Any, override
 from uuid import uuid4
 
 import psycopg
+import pytest_asyncio
 from psycopg.types.json import Jsonb
 from psycopg_pool import AsyncConnectionPool
+from redis.asyncio.client import PubSub
 
 from agent.ownership.hosted import admit_hosted_runtime
 from base.db import Database, create_agent
 from base.db.code_version_gate import ProcessDbGate
+from base.events.live.bus import EventBus, EventBusConfig
 from base.native_process.runtime_incarnation import RuntimeIncarnation
+
+
+# meiva:note
+# A bus whose publication raises `failure`: a programming defect, which a real Redis cannot
+# produce (it recovers every transport failure itself).
+class PublicationDefectBus(EventBus):
+    def __init__(self, failure: BaseException) -> None:
+        super().__init__(EventBusConfig(redis_url="redis://127.0.0.1:1/0", events_channel="test"))
+        self.failure = failure
+
+    @override
+    async def publish_best_effort(
+        self, payload: str, *, channel: str | None = None, context: str = ""
+    ) -> int | None:
+        raise self.failure
 
 
 def agent_row(conn: psycopg.Connection) -> int:
@@ -57,3 +78,39 @@ async def admit_owner(
     )
     assert owner is not None
     return owner
+
+
+# meiva:note
+# A real subscriber on the event bus's channel: the hints a test's code published, read back
+# from Redis instead of from a recording double.
+class BusTap:
+    def __init__(self, subscription: PubSub) -> None:
+        self._subscription = subscription
+
+    async def agent_updated_ids(self) -> list[int]:
+        # meiva:note
+        # The agent ids of the change hints that arrived since the previous call, in arrival
+        # order. The redis stubs leave `get_message` untyped.
+        ids: list[int] = []
+        while True:
+            message: dict[str, Any] | None = await self._subscription.get_message(  # pyright: ignore[reportUnknownMemberType]
+                ignore_subscribe_messages=True, timeout=0.3
+            )
+            if message is None:
+                return ids
+            event: dict[str, Any] = json.loads(message["data"])
+            if event["role"] == "agent_updated":
+                ids.append(event["agent_id"])
+
+
+# meiva:note
+# The tap subscribes before the test publishes anything. The redis stubs leave `pubsub`
+# and `get_message` untyped.
+@pytest_asyncio.fixture
+async def bus_tap(event_bus: EventBus) -> AsyncGenerator[BusTap]:
+    client = event_bus.open_async_redis()
+    async with client.pubsub() as subscription:  # pyright: ignore[reportUnknownMemberType]
+        await subscription.subscribe(event_bus.channel)
+        await subscription.get_message(timeout=1.0)  # pyright: ignore[reportUnknownMemberType]
+        yield BusTap(subscription)
+    await client.aclose()

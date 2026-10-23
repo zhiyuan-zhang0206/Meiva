@@ -6,14 +6,11 @@ import psycopg
 from psycopg_pool import AsyncConnectionPool
 
 from agent.db import LoggingConnectionPool
-from base.clock import Timers
 from base.config import settings
 from base.db import Database
 
 
-def build_shared_pool(
-    db: Database, *, timers: Timers
-) -> AsyncConnectionPool[psycopg.AsyncConnection]:
+def build_shared_pool(db: Database) -> AsyncConnectionPool[psycopg.AsyncConnection]:
     """The host's turn/checkpoint pool, independent of active agent count.
 
     Agents waiting on models or tools need no dedicated connection. The client
@@ -26,16 +23,14 @@ def build_shared_pool(
     return db.async_pool(
         LoggingConnectionPool[psycopg.AsyncConnection],
         pool_name="agent-host",
-        timers=timers,
+        slow_acquire_warn_seconds=settings.agent.db_pool_slow_acquire_warn_seconds,
         min_size=0,
         max_size=settings.daemon.host_db_pool_max_size,
         timeout=settings.agent.db_pool_acquire_timeout_seconds,
     )
 
 
-def build_control_pool(
-    db: Database, *, timers: Timers
-) -> AsyncConnectionPool[psycopg.AsyncConnection]:
+def build_control_pool(db: Database) -> AsyncConnectionPool[psycopg.AsyncConnection]:
     """Reserved capacity for host ownership, recovery, and durable scans.
 
     PgBouncer remains the downstream server-connection multiplexer. This
@@ -48,7 +43,7 @@ def build_control_pool(
     return db.async_pool(
         LoggingConnectionPool[psycopg.AsyncConnection],
         pool_name="agent-host-control",
-        timers=timers,
+        slow_acquire_warn_seconds=settings.agent.db_pool_slow_acquire_warn_seconds,
         min_size=0,
         max_size=settings.daemon.host_control_pool_max_size,
         timeout=settings.agent.db_pool_acquire_timeout_seconds,

@@ -16,7 +16,7 @@ from langgraph.runtime import Runtime
 from langgraph.types import Command
 
 from agent import state as _state
-from agent.graph.node_log import node_lifecycle
+from agent.graph.node_log import StallConfig, node_lifecycle
 from agent.hooks import HookName, make_hook_runner
 from agent.nodes import NodeName
 from base.agents.context import MeivaContext, agent_id_from_config
@@ -49,14 +49,14 @@ def hook_node(
             event_publisher=event_publisher,
             agent_id=agent_id_from_config(config),
             turn_progress=runtime.context.turn_progress,
-            read_stall_seconds=lambda: runtime.context.require_agent().read(
-                "agent", "node_stall_dump_seconds"
+            stall=StallConfig(
+                runtime.context.require_agent().read("agent", "node_stall_dump_seconds")
             ),
             timeline_inputs=TimelineReadInputs(
                 runtime.context.require_clock,
                 lambda: runtime.context.require_agent().read("general", "message_timestamps"),
             ),
-            limit_reader=lambda: runtime.context.require_agent().read(
+            timeline_limit=runtime.context.require_agent().read(
                 "display", "timeline_default_limit"
             ),
         ):

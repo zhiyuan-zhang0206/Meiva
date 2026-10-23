@@ -2,7 +2,6 @@
 
 from collections.abc import Callable
 from typing import Any, cast
-from unittest.mock import AsyncMock, MagicMock
 
 import psycopg
 import pytest
@@ -15,12 +14,12 @@ from agent.graph import claim_node
 from agent.graph.claim.tests.claim_support import (
     await_inbound_visible,
     insert_inbound_kind,
-    make_fake_llm,
     make_runtime,
     thread_config,
 )
 from agent.graph.claim.tests.cursor_fixture import fresh_snapshot_cursor as fresh_snapshot_cursor
 from agent.graph.hooks.compact import compose_summary_message
+from agent.graph.node_log.tests.live_events import LiveEvents
 from agent.state import AgentState, CompactState
 from agent.tests.claim.claim_status_support import (
     await_status,
@@ -29,6 +28,7 @@ from agent.tests.claim.claim_status_support import (
     set_agent_status,
 )
 from agent.tests.claim.claim_status_support import running_agent as running_agent
+from agent.tests.scripted_model import ScriptedChatModel
 from base.agents.inbox.insert import insert_inbound_message
 from base.agents.tests.units import spawn_agent
 from base.cluster.machine import MachineIdentity
@@ -81,6 +81,10 @@ async def _insert_inbound_kind_async(
     return row[0]
 
 
+def scripted_llm(summary: str = "synthetic compaction summary") -> ScriptedChatModel:
+    return ScriptedChatModel(replies=[AIMessage(content=summary)])
+
+
 async def test_claim_compact_summary_replaces_messages_with_remove_sentinel(
     redis_url: str,
     db_conn: psycopg.Connection,
@@ -112,7 +116,7 @@ async def test_claim_compact_summary_replaces_messages_with_remove_sentinel(
     ]
     state = AgentState(messages=initial_msgs)
 
-    fake_llm = make_fake_llm("LLM should not be called")
+    fake_llm = scripted_llm("LLM should not be called")
     cmd = await claim_node(
         state,
         make_runtime(ops_pool=aops_pool, llm=fake_llm, database_gate=database_gate),
@@ -121,7 +125,7 @@ async def test_claim_compact_summary_replaces_messages_with_remove_sentinel(
         ),
     )
 
-    fake_llm.bind_tools.return_value.ainvoke.assert_not_called()  # agent-authored summary, skip LLM
+    assert fake_llm.requests == []
     tail = compact_tail(cmd.update)
     assert isinstance(tail[0], HumanMessage)
     assert tail[0].content == compose_summary_message(summary_text)  # pyright: ignore[reportUnknownMemberType]
@@ -158,7 +162,7 @@ async def test_claim_compact_summary_bumps_compact_version(
         state,
         make_runtime(
             ops_pool=aops_pool,
-            llm=make_fake_llm("LLM should not be called"),
+            llm=scripted_llm("LLM should not be called"),
             database_gate=database_gate,
         ),
         thread_config(
@@ -196,7 +200,7 @@ async def test_claim_compact_request_calls_backend_llm(
     ]
     state = AgentState(messages=initial_msgs)
 
-    fake_llm = make_fake_llm("LLM-generated summary")
+    fake_llm = scripted_llm("LLM-generated summary")
     cmd = await claim_node(
         state,
         make_runtime(ops_pool=aops_pool, llm=fake_llm, database_gate=database_gate),
@@ -205,7 +209,6 @@ async def test_claim_compact_request_calls_backend_llm(
         ),
     )
 
-    fake_llm.bind_tools.return_value.ainvoke.assert_called_once()
     tail = compact_tail(cmd.update)
     assert tail[0].content == compose_summary_message("LLM-generated summary")  # pyright: ignore[reportUnknownMemberType]
 
@@ -214,6 +217,7 @@ async def test_claim_compact_request_emits_live_run_pair_with_durable_anchor(
     redis_url: str,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
+    live_events: LiveEvents,
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
@@ -237,20 +241,19 @@ async def test_claim_compact_request_emits_live_run_pair_with_durable_anchor(
             *(HumanMessage(content=f"history-{i}") for i in range(8)),
         ]
     )
-    publisher = MagicMock()
 
     cmd = await claim_node(
         state,
         make_runtime(
             ops_pool=aops_pool,
-            llm=make_fake_llm("LLM-generated summary"),
-            event_publisher=publisher,
+            llm=scripted_llm("LLM-generated summary"),
+            event_publisher=live_events.publisher,
             database_gate=database_gate,
         ),
         thread_config(tid),
     )
 
-    [(started, finished)] = pair_compact_cycles(publisher)
+    [(started, finished)] = await pair_compact_cycles(live_events)
     assert started["mode"] == "request"
     assert finished["status"] == "success"
     assert cmd.goto == "init_context"
@@ -262,6 +265,7 @@ async def test_claim_two_compact_requests_second_replaces_first(
     redis_url: str,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
+    live_events: LiveEvents,
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
@@ -286,23 +290,24 @@ async def test_claim_two_compact_requests_second_replaces_first(
             *(HumanMessage(content=f"history-{i}") for i in range(8)),
         ]
     )
-    llm = MagicMock()
-    llm.bind_tools.return_value.ainvoke = AsyncMock(
-        side_effect=[AIMessage(content="first summary"), AIMessage(content="second summary")]
+    llm = ScriptedChatModel(
+        replies=[AIMessage(content="first summary"), AIMessage(content="second summary")]
     )
-    publisher = MagicMock()
 
     cmd = await claim_node(
         state,
         make_runtime(
-            ops_pool=aops_pool, llm=llm, event_publisher=publisher, database_gate=database_gate
+            ops_pool=aops_pool,
+            llm=llm,
+            event_publisher=live_events.publisher,
+            database_gate=database_gate,
         ),
         thread_config(tid),
     )
 
-    pairs = pair_compact_cycles(publisher)
+    pairs = await pair_compact_cycles(live_events)
     assert [p[1]["status"] for p in pairs] == ["replaced", "success"]
-    assert llm.bind_tools.return_value.ainvoke.await_count == 2
+    assert len(llm.requests) == 2
     tail = compact_tail(cmd.update)
     assert tail[0].content == compose_summary_message("second summary")  # pyright: ignore[reportUnknownMemberType]
     assert tail[0].additional_kwargs["meiva_compact_id"] == pairs[1][0]["compact_id"]  # pyright: ignore[reportUnknownMemberType]
@@ -312,6 +317,7 @@ async def test_claim_compact_summary_supersedes_pending_request_and_closes_it_re
     redis_url: str,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
+    live_events: LiveEvents,
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
@@ -337,21 +343,23 @@ async def test_claim_compact_summary_supersedes_pending_request_and_closes_it_re
             *(HumanMessage(content=f"history-{i}") for i in range(8)),
         ]
     )
-    llm = make_fake_llm("llm-generated summary")
-    publisher = MagicMock()
+    llm = scripted_llm("llm-generated summary")
 
     cmd = await claim_node(
         state,
         make_runtime(
-            ops_pool=aops_pool, llm=llm, event_publisher=publisher, database_gate=database_gate
+            ops_pool=aops_pool,
+            llm=llm,
+            event_publisher=live_events.publisher,
+            database_gate=database_gate,
         ),
         thread_config(tid),
     )
 
-    [(started, finished)] = pair_compact_cycles(publisher)
+    [(started, finished)] = await pair_compact_cycles(live_events)
     assert started["mode"] == "request"
     assert finished["status"] == "replaced"
-    assert llm.bind_tools.return_value.ainvoke.await_count == 1
+    assert len(llm.requests) == 1
     tail = compact_tail(cmd.update)
     assert tail[0].content == compose_summary_message("agent-authored summary")  # pyright: ignore[reportUnknownMemberType]
     assert "meiva_compact_id" not in tail[0].additional_kwargs  # pyright: ignore[reportUnknownMemberType]
@@ -361,6 +369,7 @@ async def test_claim_cancel_beats_pending_compact_and_closes_it_replaced(
     redis_url: str,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
+    live_events: LiveEvents,
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
@@ -384,20 +393,19 @@ async def test_claim_cancel_beats_pending_compact_and_closes_it_replaced(
             *(HumanMessage(content=f"history-{i}") for i in range(8)),
         ]
     )
-    publisher = MagicMock()
 
     cmd = await claim_node(
         state,
         make_runtime(
             ops_pool=aops_pool,
-            llm=make_fake_llm("never applied"),
-            event_publisher=publisher,
+            llm=scripted_llm("never applied"),
+            event_publisher=live_events.publisher,
             database_gate=database_gate,
         ),
         thread_config(tid),
     )
 
-    [(started, finished)] = pair_compact_cycles(publisher)
+    [(started, finished)] = await pair_compact_cycles(live_events)
     assert started["mode"] == "request"
     assert finished["status"] == "replaced"
     assert cmd.goto == "claim"
@@ -430,7 +438,7 @@ async def test_claim_compact_request_empty_conversation_consumed_as_noop(
     sys_msg = SystemMessage(content="<test sys prompt>")
     state = AgentState(messages=[sys_msg])  # only the system prompt, no conversation
 
-    fake_llm = make_fake_llm("should not be generated")
+    fake_llm = scripted_llm("should not be generated")
     cmd = await claim_node(
         state,
         make_runtime(ops_pool=aops_pool, llm=fake_llm, database_gate=database_gate),
@@ -439,7 +447,7 @@ async def test_claim_compact_request_empty_conversation_consumed_as_noop(
         ),
     )
 
-    fake_llm.bind_tools.return_value.ainvoke.assert_not_called()
+    assert fake_llm.requests == []
     assert not any(isinstance(m, RemoveMessage) for m in cmd.update["messages"])  # type: ignore[index]
 
 
@@ -447,6 +455,7 @@ async def test_claim_compact_request_retries_then_raises_compaction_failed(
     redis_url: str,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
+    live_events: LiveEvents,
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
@@ -472,10 +481,7 @@ async def test_claim_compact_request_retries_then_raises_compaction_failed(
     ]
     state = AgentState(messages=initial_msgs)
 
-    failing = AsyncMock(side_effect=RuntimeError("provider 502 on every attempt"))
-    llm = MagicMock()
-    llm.bind_tools.return_value.ainvoke = failing
-    publisher = MagicMock()
+    llm = ScriptedChatModel(replies=[RuntimeError("provider 502 on every attempt")])
 
     from agent.graph.hooks.compact import COMPACT_MAX_ATTEMPTS, CompactionFailedError
 
@@ -483,14 +489,17 @@ async def test_claim_compact_request_retries_then_raises_compaction_failed(
         await claim_node(
             state,
             make_runtime(
-                ops_pool=aops_pool, llm=llm, event_publisher=publisher, database_gate=database_gate
+                ops_pool=aops_pool,
+                llm=llm,
+                event_publisher=live_events.publisher,
+                database_gate=database_gate,
             ),
             thread_config(
                 tid,
             ),
         )
-    assert failing.await_count == COMPACT_MAX_ATTEMPTS
-    [(started, finished)] = pair_compact_cycles(publisher)
+    assert len(llm.requests) == COMPACT_MAX_ATTEMPTS
+    [(started, finished)] = await pair_compact_cycles(live_events)
     assert started["mode"] == "request"
     assert finished["status"] == "failure"
 
@@ -523,9 +532,8 @@ async def test_claim_compact_request_retries_then_succeeds(
     ]
     state = AgentState(messages=initial_msgs)
 
-    llm = MagicMock()
-    llm.bind_tools.return_value.ainvoke = AsyncMock(
-        side_effect=[RuntimeError("transient 503"), AIMessage(content="retried summary")]
+    llm = ScriptedChatModel(
+        replies=[RuntimeError("transient 503"), AIMessage(content="retried summary")]
     )
 
     cmd = await claim_node(
@@ -536,7 +544,7 @@ async def test_claim_compact_request_retries_then_succeeds(
         ),
     )
 
-    assert llm.bind_tools.return_value.ainvoke.await_count == 2
+    assert len(llm.requests) == 2
     tail = compact_tail(cmd.update)
     assert tail[0].content == compose_summary_message("retried summary")  # pyright: ignore[reportUnknownMemberType]
 
@@ -681,7 +689,7 @@ async def test_claim_compact_request_batched_with_restart_is_dropped(
     insert_inbound_kind(db_conn, tid, "", "compact_request", source="user")
     restart_id = insert_inbound_kind(db_conn, tid, "", "restart", source="user")
     await await_inbound_visible(aops_pool, restart_id)
-    llm = make_fake_llm()
+    llm = scripted_llm()
 
     cmd = await claim_node(
         AgentState(messages=[SystemMessage(content="sys")], halted=True),
@@ -693,7 +701,7 @@ async def test_claim_compact_request_batched_with_restart_is_dropped(
 
     assert cmd.goto == END
     # Compaction LLM not called — compact_request is discarded rather than run before exiting
-    llm.bind_tools.return_value.ainvoke.assert_not_called()
+    assert llm.requests == []
     # No compact happened: does not go through REMOVE_ALL replacement path
     assert not any(isinstance(m, RemoveMessage) for m in cmd.update["messages"])  # type: ignore[index]
     # idle preserved unchanged — silent after restart

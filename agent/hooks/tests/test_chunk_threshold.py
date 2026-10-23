@@ -2,12 +2,10 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
-
 import pytest
 from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, SystemMessage
 
-from agent.hooks import understanding_chunks as uc
+from agent.hooks.chunk_turn import Baseline, EnqueueChunk, plan_turn
 from agent.state_channels import CompactState
 from base.agents.history.hierarchy.chunk_plan import plan_replay
 from base.agents.history.hierarchy.chunks import chunk_threshold
@@ -18,10 +16,6 @@ from base.lm.context_budget import UnknownModelWindowError, resolve_context_budg
 
 _FLASH = "deepseek-flash"
 _HAIKU = "claude-haiku-4-5-20251001"
-
-
-def _read_agent(field: str):
-    return getattr(settings.agent, field)
 
 
 def test_the_threshold_is_the_ratio_of_each_models_soft_threshold(
@@ -76,13 +70,9 @@ def test_the_ratio_setting_is_bounded_to_zero_exclusive_one_inclusive(ratio: flo
     type(settings.agent).model_validate({"MEIVA_UNDERSTANDING_CHUNK_RATIO": 1})
 
 
-async def test_the_hook_and_the_build_cut_the_same_chunks(
-    monkeypatch: pytest.MonkeyPatch, *, model_catalog: ModelCatalog
-) -> None:
+def test_the_hook_and_the_build_cut_the_same_chunks(*, model_catalog: ModelCatalog) -> None:
     """The hook's turn-by-turn cuts equal `plan_replay` at the same `chunk_threshold`."""
-    monkeypatch.setattr(settings.agent, "understanding_enabled", True)
     ratio = 0.002  # a real model, a small ratio: the threshold is about 750 tokens
-    monkeypatch.setattr(settings.agent, "understanding_chunk_ratio", ratio)
     threshold = chunk_threshold(_FLASH, ModelOverrides.from_pins({}), ratio, catalog=model_catalog)
     msgs: list[AnyMessage] = [SystemMessage(content="head", id="h")]
     for i in range(40):
@@ -96,27 +86,15 @@ async def test_the_hook_and_the_build_cut_the_same_chunks(
             )
         )
     enqueued: list[tuple[int, int]] = []
-
-    async def fake_enqueue(_pool: object, _agent: int, **kwargs: object) -> bool:
-        enqueued.append((kwargs["chunk"].start_index, kwargs["chunk"].end_index))  # type: ignore[attr-defined]
-        return True
-
-    monkeypatch.setattr(uc, "enqueue_chunk", fake_enqueue)
     compact = CompactState()
     for i, msg in enumerate(msgs):
         if isinstance(msg, AIMessage):
-            update = await uc.due_chunk_update(
-                compact,
-                msgs[:i],
-                msg,
-                pool=MagicMock(),
-                agent_id=1,
-                model=_FLASH,
-                overrides=ModelOverrides.from_pins({}),
-                catalog=model_catalog,
-                read_agent=_read_agent,
-            )
-            compact = update.get("compact", compact)
+            plan = plan_turn(compact, msgs[:i], msg, threshold=threshold)
+            if isinstance(plan, Baseline):
+                compact = plan.state
+            elif isinstance(plan, EnqueueChunk):
+                enqueued.append((plan.chunk.start_index, plan.chunk.end_index))
+                compact = plan.moved
     live = [
         (p.chunk.start_index, p.chunk.end_index)
         for p in plan_replay(msgs, threshold=threshold)

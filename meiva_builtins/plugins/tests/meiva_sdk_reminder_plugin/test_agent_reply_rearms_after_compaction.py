@@ -2,12 +2,23 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import replace
 from datetime import UTC, datetime
 from typing import Any, cast
 
 import pytest
-from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, SystemMessage, ToolMessage
+from langchain_core.callbacks import CallbackManagerForLLMRun
+from langchain_core.language_models.chat_models import BaseChatModel
+from langchain_core.messages import (
+    AIMessage,
+    AnyMessage,
+    BaseMessage,
+    HumanMessage,
+    SystemMessage,
+    ToolMessage,
+)
+from langchain_core.outputs import ChatGeneration, ChatResult
 
 from agent.graph.llm_errors import LlmLedger
 from agent.messages import inbound_message, tail_has_agent_inbound
@@ -18,12 +29,12 @@ from base.lm.catalog import ModelCatalog
 from meiva_builtins.plugins.meiva_sdk_reminder.agent_runtime import AGENT_REPLY_CATEGORY
 from meiva_builtins.plugins.tests.test_meiva_sdk_reminder_plugin import (
     agent_inbound,
+    compact_budget_pins,
     make_config,
     make_runtime,
     make_runtime_for_runner,
     make_state,
     nameerror_output,
-    pin_compact_budget,
 )
 from meiva_builtins.plugins.tests.test_meiva_sdk_reminder_plugin import (
     load_meiva_code_plugin as load_meiva_code_plugin,
@@ -33,9 +44,29 @@ from meiva_builtins.plugins.tests.test_meiva_sdk_reminder_plugin import (
 )
 
 
-async def test_agent_reply_rearms_after_compaction(
-    reminder_plugin_loaded: Any, *, database_gate: ProcessDbGate
-):
+class SummaryModel(BaseChatModel):
+    summary: str
+
+    @property
+    def _llm_type(self) -> str:
+        return "summary-model"
+
+    def bind_tools(self, tools: Sequence[Any], **kwargs: Any) -> SummaryModel:
+        del tools, kwargs
+        return self
+
+    def _generate(
+        self,
+        messages: list[BaseMessage],
+        stop: list[str] | None = None,
+        run_manager: CallbackManagerForLLMRun | None = None,
+        **kwargs: Any,
+    ) -> ChatResult:
+        del messages, stop, run_manager, kwargs
+        return ChatResult(generations=[ChatGeneration(message=AIMessage(content=self.summary))])
+
+
+async def test_agent_reply_rearms_after_compaction(reminder_plugin_loaded: Any):
     hook = reminder_plugin_loaded.sdk_reminder_agent_reply_before_llm
     # agent_reply reminded last window (bookmark 0); compaction advanced to 1 ->
     # the set re-arms and the note fires again.
@@ -45,7 +76,7 @@ async def test_agent_reply_rearms_after_compaction(
         meiva_sdk_reminder__last_seen_compact=0,
         compact=CompactState(version=1),
     )
-    result = await hook(state, make_runtime(database_gate=database_gate), make_config())
+    result = await hook(state, make_runtime(), make_config())
 
     assert result is not None
     [note] = result["messages"]
@@ -54,9 +85,7 @@ async def test_agent_reply_rearms_after_compaction(
     assert result["meiva_sdk_reminder__reminded"] == {AGENT_REPLY_CATEGORY}
 
 
-async def test_agent_reply_user_inbound_is_noop(
-    reminder_plugin_loaded: Any, *, database_gate: ProcessDbGate
-):
+async def test_agent_reply_user_inbound_is_noop(reminder_plugin_loaded: Any):
     hook = reminder_plugin_loaded.sdk_reminder_agent_reply_before_llm
     state = make_state(
         [
@@ -64,19 +93,15 @@ async def test_agent_reply_user_inbound_is_noop(
             inbound_message(content="hi", source="user", inbound_id=2, body_start=0),
         ]
     )
-    result = await hook(state, make_runtime(database_gate=database_gate), make_config())
+    result = await hook(state, make_runtime(), make_config())
     assert result is None
 
 
-async def test_agent_reply_defers_when_compaction_fires(
-    reminder_plugin_loaded: Any, monkeypatch: pytest.MonkeyPatch, *, database_gate: ProcessDbGate
-):
+async def test_agent_reply_defers_when_compaction_fires(reminder_plugin_loaded: Any):
     """When auto-compact would fire this same before_llm node run, the note is
     deferred (no inject, not marked) so it does not clobber / get clobbered by
     compaction's full-history message replacement."""
-    # Force the compact threshold to 1 token so any history triggers it.
-    pin_compact_budget(monkeypatch, hard_tokens=1)
-
+    runtime = make_runtime(**compact_budget_pins(1))
     hook = reminder_plugin_loaded.sdk_reminder_agent_reply_before_llm
     # A non-empty conversation over the (forced-to-1) token threshold -> compaction fires.
     msgs: list[AnyMessage] = [
@@ -85,19 +110,15 @@ async def test_agent_reply_defers_when_compaction_fires(
         agent_inbound(source="agent:9"),
     ]
     state = make_state(msgs)
-    result = await hook(state, make_runtime(database_gate=database_gate), make_config())
+    result = await hook(state, runtime, make_config())
     assert result is None  # deferred; agent_reply not marked
 
 
-async def test_agent_reply_once_cadence_dedups_and_rearms(
-    reminder_plugin_loaded: Any, monkeypatch: pytest.MonkeyPatch, *, database_gate: ProcessDbGate
-):
+async def test_agent_reply_once_cadence_dedups_and_rearms(reminder_plugin_loaded: Any):
     """`once_per_compaction` (the default, set explicitly here): a second inbound
     in the same window no-ops, and a compaction re-arms so the note fires again.
     Pins the behavior to the config value rather than the field default."""
-    from base.config import settings
-
-    monkeypatch.setattr(settings.agent, "agent_reply_reminder_cadence", "once_per_compaction")
+    runtime = make_runtime(agent_reply_reminder_cadence="once_per_compaction")
     hook = reminder_plugin_loaded.sdk_reminder_agent_reply_before_llm
 
     # Same window, already reminded -> no repeat.
@@ -105,7 +126,7 @@ async def test_agent_reply_once_cadence_dedups_and_rearms(
         [AIMessage(content="prev", id="a0"), agent_inbound(source="agent:9")],
         meiva_sdk_reminder__reminded={AGENT_REPLY_CATEGORY},
     )
-    assert await hook(same_window, make_runtime(database_gate=database_gate), make_config()) is None
+    assert await hook(same_window, runtime, make_config()) is None
 
     # Compaction advanced the version past the bookmark -> re-armed, fires again.
     after_compact = make_state(
@@ -114,28 +135,24 @@ async def test_agent_reply_once_cadence_dedups_and_rearms(
         meiva_sdk_reminder__last_seen_compact=0,
         compact=CompactState(version=1),
     )
-    result = await hook(after_compact, make_runtime(database_gate=database_gate), make_config())
+    result = await hook(after_compact, runtime, make_config())
     assert result is not None
     assert result["meiva_sdk_reminder__last_seen_compact"] == 1
     assert result["meiva_sdk_reminder__reminded"] == {AGENT_REPLY_CATEGORY}
 
 
-async def test_agent_reply_every_time_fires_even_when_already_reminded(
-    reminder_plugin_loaded: Any, monkeypatch: pytest.MonkeyPatch, *, database_gate: ProcessDbGate
-):
+async def test_agent_reply_every_time_fires_even_when_already_reminded(reminder_plugin_loaded: Any):
     """`every_time`: the note fires on every agent inbound, even one already
     marked in the shared `reminded` set — and it does not touch that set (the
     after_exec hook owns the code-category re-arm)."""
-    from base.config import settings
-
-    monkeypatch.setattr(settings.agent, "agent_reply_reminder_cadence", "every_time")
+    runtime = make_runtime(agent_reply_reminder_cadence="every_time")
     hook = reminder_plugin_loaded.sdk_reminder_agent_reply_before_llm
 
     state = make_state(
         [AIMessage(content="prev", id="a0"), agent_inbound(source="agent:9")],
         meiva_sdk_reminder__reminded={AGENT_REPLY_CATEGORY, "shell"},
     )
-    result = await hook(state, make_runtime(database_gate=database_gate), make_config())
+    result = await hook(state, runtime, make_config())
 
     assert result is not None
     [note] = result["messages"]
@@ -146,14 +163,10 @@ async def test_agent_reply_every_time_fires_even_when_already_reminded(
     assert "meiva_sdk_reminder__last_seen_compact" not in result
 
 
-async def test_agent_reply_every_time_user_inbound_is_noop(
-    reminder_plugin_loaded: Any, monkeypatch: pytest.MonkeyPatch, *, database_gate: ProcessDbGate
-):
+async def test_agent_reply_every_time_user_inbound_is_noop(reminder_plugin_loaded: Any):
     """`every_time` still gates on an agent-sourced inbound — a user inbound
     never triggers the reminder."""
-    from base.config import settings
-
-    monkeypatch.setattr(settings.agent, "agent_reply_reminder_cadence", "every_time")
+    runtime = make_runtime(agent_reply_reminder_cadence="every_time")
     hook = reminder_plugin_loaded.sdk_reminder_agent_reply_before_llm
 
     state = make_state(
@@ -162,18 +175,13 @@ async def test_agent_reply_every_time_user_inbound_is_noop(
             inbound_message(content="hi", source="user", inbound_id=2, body_start=0),
         ]
     )
-    assert await hook(state, make_runtime(database_gate=database_gate), make_config()) is None
+    assert await hook(state, runtime, make_config()) is None
 
 
-async def test_agent_reply_every_time_still_defers_on_compaction(
-    reminder_plugin_loaded: Any, monkeypatch: pytest.MonkeyPatch, *, database_gate: ProcessDbGate
-):
+async def test_agent_reply_every_time_still_defers_on_compaction(reminder_plugin_loaded: Any):
     """`every_time` defers exactly like `once_per_compaction` when auto-compact
     fires the same turn — the note would be clobbered by the message replacement."""
-    from base.config import settings
-
-    monkeypatch.setattr(settings.agent, "agent_reply_reminder_cadence", "every_time")
-    pin_compact_budget(monkeypatch, hard_tokens=1)
+    runtime = make_runtime(agent_reply_reminder_cadence="every_time", **compact_budget_pins(1))
     hook = reminder_plugin_loaded.sdk_reminder_agent_reply_before_llm
 
     msgs: list[AnyMessage] = [
@@ -181,12 +189,15 @@ async def test_agent_reply_every_time_still_defers_on_compaction(
         *(HumanMessage(content="x" * 200, id=f"h{i}") for i in range(5)),
         agent_inbound(source="agent:9"),
     ]
-    assert (
-        await hook(make_state(msgs), make_runtime(database_gate=database_gate), make_config())
-        is None
-    )
+    assert await hook(make_state(msgs), runtime, make_config()) is None
 
 
+# meiva:note
+# `auto_compact_will_fire(state)` is the single shared gate the reminder plugins call; this pins
+# it to the real `auto_compact_for_llm` firing across the threshold boundary. For each
+# parametrized state, the predicate must equal "does the real auto_compact_for_llm actually
+# return a replacement" (the compaction model answers with a fixed summary so a fire produces a
+# non-None result without a live LLM).
 @pytest.mark.parametrize(
     "history_len_kind,auto_compact_tokens,expect_fire",
     [
@@ -201,23 +212,14 @@ async def test_agent_reply_every_time_still_defers_on_compaction(
     ],
 )
 async def test_defer_predicate_matches_real_gate(
-    reminder_plugin_loaded: Any,
-    monkeypatch: pytest.MonkeyPatch,
-    history_len_kind,
-    auto_compact_tokens,
-    expect_fire,
+    history_len_kind: str,
+    auto_compact_tokens: int | None,
+    expect_fire: bool,
     fake_cancel_event,
     model_catalog: ModelCatalog,
     *,
     database_gate: ProcessDbGate,
 ):
-    """`auto_compact_will_fire(state)` is the single shared gate the reminder plugins
-    call; this pins it to the real `auto_compact_for_llm` firing across the
-    threshold boundary. For each parametrized state, the predicate must equal
-    "does the real auto_compact_for_llm actually return a replacement"
-    (generate_summary stubbed so a fire produces a non-None result without a
-    live LLM).
-    """
     from agent.graph.hooks import compact as compact_mod
     from agent.graph.hooks.compact import auto_compact_will_fire
 
@@ -234,22 +236,17 @@ async def test_defer_predicate_matches_real_gate(
     else:  # "long"
         msgs = [HumanMessage(content="z" * 400, id=f"h{i}") for i in range(8)]
 
-    pin_compact_budget(monkeypatch, hard_tokens=auto_compact_tokens)  # pyright: ignore[reportUnknownArgumentType]
-
-    # Stub generate_summary so a "would fire" path produces a real replacement
-    # dict without invoking a live Compaction LLM. Long enough to clear the
-    # auto-compact retry floor on the first attempt.
-    async def _fake_generate_summary(
-        messages, llm, _model, *, catalog: ModelCatalog, binding: object = None
-    ):
-        assert catalog is model_catalog
-        return "stub summary " * 100
-
-    monkeypatch.setattr(compact_mod, "generate_summary", _fake_generate_summary)  # pyright: ignore[reportUnknownArgumentType]
-
+    assert auto_compact_tokens is not None
     state = make_state(msgs)
-    runtime = make_runtime_for_runner(database_gate=database_gate)
-    runtime = replace(runtime, context=replace(runtime.context, catalog=model_catalog))
+    runtime = make_runtime_for_runner(
+        database_gate=database_gate, **compact_budget_pins(auto_compact_tokens)
+    )
+    runtime = replace(
+        runtime,
+        context=replace(
+            runtime.context, catalog=model_catalog, llm=SummaryModel(summary="stub summary " * 100)
+        ),
+    )
     predicate = auto_compact_will_fire(
         state, runtime.context.require_agent(), catalog=model_catalog
     )
@@ -261,8 +258,7 @@ async def test_defer_predicate_matches_real_gate(
 @pytest.mark.parametrize("reminder_first", [True, False])
 async def test_real_runner_compaction_wins_no_note(
     reminder_plugin_loaded: Any,
-    monkeypatch: pytest.MonkeyPatch,
-    reminder_first,
+    reminder_first: bool,
     fake_cancel_event,
     model_catalog: ModelCatalog,
     *,
@@ -276,24 +272,13 @@ async def test_real_runner_compaction_wins_no_note(
     from langgraph.graph.message import add_messages
 
     from agent.graph.hooks import compact as compact_mod
-    from agent.hooks import make_hook_runner
-
-    # Force auto-compact to fire on any history.
-    pin_compact_budget(monkeypatch, hard_tokens=1)
 
     # The compact hook wrapper lives directly in agent.graph.hooks.compact.
     from agent.graph.hooks.compact import compact_reminder
+    from agent.hooks import make_hook_runner
 
     # Long enough to clear the auto-compact retry floor on the first attempt.
     long_summary = "compacted summary " * 100
-
-    async def _fake_generate_summary(
-        messages, llm, _model, *, catalog: ModelCatalog, binding: object = None
-    ):
-        assert catalog is model_catalog
-        return long_summary
-
-    monkeypatch.setattr(compact_mod, "generate_summary", _fake_generate_summary)  # pyright: ignore[reportUnknownArgumentType]
 
     compact_hook = compact_reminder
     reminder_hook = reminder_plugin_loaded.sdk_reminder_agent_reply_before_llm
@@ -309,8 +294,13 @@ async def test_real_runner_compaction_wins_no_note(
         agent_inbound(source="agent:9"),
     ]
     state = make_state(msgs, compact=CompactState(version=0))
-    runtime = make_runtime_for_runner(database_gate=database_gate)
-    runtime = replace(runtime, context=replace(runtime.context, catalog=model_catalog))
+    runtime = make_runtime_for_runner(database_gate=database_gate, **compact_budget_pins(1))
+    runtime = replace(
+        runtime,
+        context=replace(
+            runtime.context, catalog=model_catalog, llm=SummaryModel(summary=long_summary)
+        ),
+    )
     cmd = await runner(state, runtime, make_config())
 
     assert cmd.goto == "llm"
@@ -337,9 +327,7 @@ async def test_real_runner_compaction_wins_no_note(
     assert AGENT_REPLY_CATEGORY not in update.get("meiva_sdk_reminder__reminded", set())  # pyright: ignore[reportUnknownMemberType]
 
 
-async def test_after_exec_leaves_exec_output_untouched(
-    reminder_plugin_loaded: Any, *, database_gate: ProcessDbGate
-):
+async def test_after_exec_leaves_exec_output_untouched(reminder_plugin_loaded: Any):
     """The hint is a fresh system-note, not a rewrite of the exec-output
     message: the injected message is a new id-less HumanMessage (so the reducer
     appends it after the output rather than replacing it), and the real
@@ -365,7 +353,7 @@ async def test_after_exec_leaves_exec_output_untouched(
     )
     state = make_state([HumanMessage(content="do it", id="h1"), ai, out])
 
-    result = await hook(state, make_runtime(database_gate=database_gate), make_config())
+    result = await hook(state, make_runtime(), make_config())
     assert result is not None
     [note] = result["messages"]
     # a fresh system-note (id-less -> the reducer appends), not the output message
@@ -424,8 +412,6 @@ async def test_multiple_calls_match_results_by_id(
     codes: list[str],
     outputs: list[str],
     expected: set[str],
-    *,
-    database_gate: ProcessDbGate,
 ):
     ai = AIMessage(
         content="",
@@ -437,7 +423,7 @@ async def test_multiple_calls_match_results_by_id(
     results = [ToolMessage(content=output, tool_call_id=str(i)) for i, output in enumerate(outputs)]
     state = make_state([ai, *results, HumanMessage(content="attachment")])
     result = await reminder_plugin_loaded.contribute().after_exec[0](
-        state, make_runtime(database_gate=database_gate), make_config()
+        state, make_runtime(), make_config()
     )
     assert result is not None
     assert result["meiva_sdk_reminder__reminded"] == expected

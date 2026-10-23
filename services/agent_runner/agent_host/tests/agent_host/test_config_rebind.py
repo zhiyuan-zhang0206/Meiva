@@ -200,7 +200,7 @@ class TestTurnLoop:
         assert stamps == []
 
     # meiva:note
-    # The reap publishes each corpse snapshot itself (agent/ownership/corpse_reap.py),
+    # The reap announces each corpse itself (services/agent_runner/agent_host/lifecycle/shells.py),
     # without scheduling an execution replay.
     async def test_reap_corpses_reaps_this_machines_corpses(
         self, wired: Build, monkeypatch: pytest.MonkeyPatch
@@ -213,7 +213,7 @@ class TestTurnLoop:
             calls.append(machine)
             return [ReapedCorpse(7), ReapedCorpse(9)]
 
-        monkeypatch.setattr(host_mod, "reap_crash_corpses", _reap)
+        monkeypatch.setattr(host_mod, "reap_and_announce_corpses", _reap)
 
         host, _, _ = wired({1: Row(status="idling")})
         await host.reap_corpses()
@@ -230,7 +230,7 @@ class TestTurnLoop:
         async def _reap(pool: object, machine: str, *, bus: object) -> list[int]:
             raise RuntimeError("reap exploded")
 
-        monkeypatch.setattr(host_mod, "reap_crash_corpses", _reap)
+        monkeypatch.setattr(host_mod, "reap_and_announce_corpses", _reap)
 
         host, _, _ = wired({1: Row(status="idling")})
         await host.reap_corpses()
@@ -246,7 +246,7 @@ class TestTurnLoop:
         async def _reap(pool: object, machine: str, *, bus: object) -> list[ReapedCorpse]:
             raise failure
 
-        monkeypatch.setattr(host_mod, "reap_crash_corpses", _reap)
+        monkeypatch.setattr(host_mod, "reap_and_announce_corpses", _reap)
         host, _, _ = wired({1: Row(status="idling")})
 
         with pytest.raises(type(failure)) as raised:
@@ -325,8 +325,8 @@ class TestTurnLoop:
             await _flip(pool, incarnation.agent_id, "idling", expected_from="running")
             return "restart"
 
-        monkeypatch.setattr(host_mod, "apply_hosted_lifecycle", apply)
-        monkeypatch.setattr(invocation, "apply_hosted_lifecycle", apply)
+        monkeypatch.setattr(host_mod, "apply_lifecycle_command", apply)
+        monkeypatch.setattr(invocation, "apply_lifecycle_command", apply)
 
         await asyncio.wait_for(host.run_turn(1), 2)
 
@@ -370,8 +370,8 @@ class TestTurnLoop:
             notified.append(incarnation.agent_id)
             return "terminate"
 
-        monkeypatch.setattr(host_mod, "apply_hosted_lifecycle", apply)
-        monkeypatch.setattr(invocation, "apply_hosted_lifecycle", apply)
+        monkeypatch.setattr(host_mod, "apply_lifecycle_command", apply)
+        monkeypatch.setattr(invocation, "apply_lifecycle_command", apply)
         host, graph, _ = wired(
             {1: Row()},
             {1: [{"exit_requested": True, "turn_idle": False, "restart_requested": False}]},
@@ -404,8 +404,8 @@ class TestTurnLoop:
             notified.append(incarnation.agent_id)
             return "restart"
 
-        monkeypatch.setattr(host_mod, "apply_hosted_lifecycle", apply)
-        monkeypatch.setattr(invocation, "apply_hosted_lifecycle", apply)
+        monkeypatch.setattr(host_mod, "apply_lifecycle_command", apply)
+        monkeypatch.setattr(invocation, "apply_lifecycle_command", apply)
         host, graph, _ = wired(
             {1: Row()},
             {

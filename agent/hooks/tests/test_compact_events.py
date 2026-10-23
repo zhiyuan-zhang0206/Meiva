@@ -1,13 +1,18 @@
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime
 from typing import Any, get_type_hints
-from unittest.mock import MagicMock
 
 import pytest
 from pydantic import ValidationError
 
-from agent.hooks.compact_events import emit_compact_finished, emit_compact_started
+from agent.hooks.compact_events import (
+    compact_finished_event,
+    compact_started_event,
+    emit_compact_finished,
+    emit_compact_started,
+)
 from base.events.live.projection import (
     EVENT_ADAPTER,
     CompactFinished,
@@ -26,24 +31,28 @@ def test_producer_and_projection_annotations_have_one_owner_per_dimension() -> N
     assert {member.value for member in CompactionStatus} == {"success", "failure", "replaced"}
 
 
+_STARTED_AT = datetime(2026, 10, 7, 12, 0, 0, tzinfo=UTC)
+_FINISHED_AT = datetime(2026, 10, 7, 12, 0, 9, tzinfo=UTC)
+
+
 @pytest.mark.parametrize("mode", list(CompactionMode))
 @pytest.mark.parametrize("status", list(CompactionStatus))
 def test_each_compaction_pair_serializes_and_restores_existing_wire_values(
     mode: CompactionMode,
     status: CompactionStatus,
 ) -> None:
-    publisher = MagicMock()
-    run_id = emit_compact_started(publisher, 7, mode=mode)
-    assert run_id is not None
-    emit_compact_finished(publisher, 7, run_id, status=status)
-    started_raw, finished_raw = [call.args[0] for call in publisher.emit.call_args_list]
+    started_raw = compact_started_event(7, compact_id="run1", started_at=_STARTED_AT, mode=mode)
+    finished_raw = compact_finished_event(7, "run1", finished_at=_FINISHED_AT, status=status)
+    assert finished_raw is not None
     started = EVENT_ADAPTER.validate_json(started_raw)
     finished = EVENT_ADAPTER.validate_json(finished_raw)
     assert isinstance(started, CompactStarted) and started.mode is mode
     assert isinstance(finished, CompactFinished) and finished.status is status
     assert json.loads(started_raw)["mode"] == mode.value
     assert json.loads(finished_raw)["status"] == status.value
-    assert started.compact_id == finished.compact_id == run_id
+    assert json.loads(started_raw)["started_at"] == _STARTED_AT.isoformat()
+    assert json.loads(finished_raw)["finished_at"] == _FINISHED_AT.isoformat()
+    assert started.compact_id == finished.compact_id == "run1"
 
 
 @pytest.mark.parametrize("invalid", [None, "unknown", "", 3, {}])
@@ -65,6 +74,11 @@ def test_raw_event_domain_rejects_unknown_values(role: str, field: str, invalid:
 
 def test_absent_publisher_does_not_start_a_live_run() -> None:
     assert emit_compact_started(None, 7, mode=CompactionMode.REQUEST) is None
-    publisher = MagicMock()
-    emit_compact_finished(publisher, 7, None, status=CompactionStatus.REPLACED)
-    publisher.emit.assert_not_called()
+
+
+def test_a_finish_without_a_run_id_has_nothing_to_close() -> None:
+    finished = compact_finished_event(
+        7, None, finished_at=_FINISHED_AT, status=CompactionStatus.REPLACED
+    )
+
+    assert finished is None

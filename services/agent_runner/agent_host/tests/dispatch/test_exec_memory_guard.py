@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import os
+import sys
 import time
 from pathlib import Path
 from typing import Any
@@ -11,7 +12,7 @@ import psutil
 import pytest
 from loguru import logger
 
-from agent.graph.exec._child_boundary import result_from_payload
+from agent.graph.exec._child_boundary import ParentFacts, result_from_payload
 from agent.graph.exec._result import ExecCrashed, ExecDone
 from agent.graph.exec._subprocess import run_in_subprocess
 from base.db.code_version_gate import ProcessDbGate
@@ -189,6 +190,13 @@ async def _run(tmp_path: Path, code: str, *, database_gate: ProcessDbGate) -> An
         60.0,
         None,
         exec_dir=tmp_path / "exec",
+        parent=ParentFacts(
+            environ=dict(os.environ),
+            cwd=Path.cwd(),
+            executable=sys.executable,
+            source_root=None,
+            editable_roots=(),
+        ),
         accumulation_max_chars=1_000_000,
     )
     return result

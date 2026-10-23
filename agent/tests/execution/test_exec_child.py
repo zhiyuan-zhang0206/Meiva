@@ -2,27 +2,22 @@ from __future__ import annotations
 
 import json
 import os
-import signal
 import subprocess
 import sys
 from pathlib import Path
 from typing import Any, cast
-from unittest.mock import patch
 
 import pytest
 from langchain_core.messages import HumanMessage
 
 import meiva
-from agent import process_boot
-from agent.graph.exec.protocol import (
+from agent.execution.protocol import (
     make_request_path,
     make_result_path,
     read_result,
     write_request,
 )
 from base.native_process.tests.host_pipe import live_host_control
-from meiva import boot
-from meiva.sdk_surface.installation import Installation
 from meiva.tests.fixtures.pin_agent import exec_context
 
 AGENT_ID = 424242
@@ -234,19 +229,21 @@ def test_missing_request_writes_crashed_envelope_after_healthy_boot(tmp_path: Pa
     assert payload.code_reached is False
 
 
-def test_crash_envelope_uses_stdlib_fallback_when_protocol_writer_fails(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+@pytest.mark.skipif(
+    os.geteuid() == 0, reason="root ignores the directory permission this fault uses"
+)
+def test_crash_envelope_uses_stdlib_fallback_when_protocol_writer_fails(tmp_path: Path) -> None:
     from agent.execution import child as exec_child
-    from agent.execution import protocol
 
-    result = tmp_path / "result.json"
-
-    def fail_write_result(_path: Path, _payload: object) -> None:
-        raise OSError("synthetic protocol write failure")
-
-    monkeypatch.setattr(protocol, "write_result", fail_write_result)
-    exec_child.write_crashed_result(str(result), ValueError("fallback boom"))
+    directory = tmp_path / "envelopes"
+    directory.mkdir()
+    result = directory / "result.json"
+    result.touch()
+    directory.chmod(0o500)
+    try:
+        exec_child.write_crashed_result(str(result), ValueError("fallback boom"))
+    finally:
+        directory.chmod(0o700)
 
     payload = read_result(result)
     assert payload.kind == "crashed"
@@ -448,16 +445,13 @@ def test_child_lifecycle_envelope(tmp_path: Path) -> None:
     assert payload.lifecycle_type == "AgentRestart"
 
 
-def test_child_boot_timing_emits_ready_duration(
-    monkeypatch: pytest.MonkeyPatch, loguru_records: list[dict[str, Any]]
-) -> None:
+def test_child_boot_timing_emits_ready_duration(loguru_records: list[dict[str, Any]]) -> None:
     from agent.execution import child as exec_child
-
-    monkeypatch.setattr(exec_child.time, "perf_counter", lambda: 100.25)
-
     from base.agents.context.clients import ClientSet
 
-    exec_child.emit_child_boot_timing(exec_child.import_runtime(100.0), clients=ClientSet())
+    exec_child.emit_child_boot_timing(
+        exec_child.import_runtime(100.0), clients=ClientSet(), now=100.25
+    )
 
     [record] = [
         record for record in loguru_records if record["extra"].get("event") == "exec_child_boot"
@@ -497,113 +491,44 @@ def test_child_applies_overlay_framework_and_pops_env(tmp_path: Path) -> None:
     assert "GONE" in proc.stdout
 
 
-def test_child_overlay_phases_framework_then_plugin(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, sdk_model_owner: Installation
-) -> None:
-    from agent.execution import child as exec_child
-    from agent.execution import protocol
-    from agent.execution.protocol import RequestPayload, ResultPayload
-
-    events: list[str] = []
-    results: list[ResultPayload] = []
-
-    def fake_read_request(_path: Path) -> RequestPayload:
-        return RequestPayload(
-            code="pass", context=exec_context(None).describe(), timeout_s=0.0, state=None
-        )
-
-    def fake_init_logger(
-        _agent_id: int | None, *, producer: object, machine_reader: object
-    ) -> None:
-        assert callable(producer)
-        assert callable(machine_reader)
-
-    def fake_eval_isolation(*, default_reader: object) -> None:
-        events.append("eval_isolation")
-
-    def fake_sdk_disable(*, default_reader: object) -> None:
-        events.append("sdk_disable")
-
-    def fake_build_state_slot(_child: exec_child.ChildContext, _payload: RequestPayload) -> None:
-        return None
-
-    def fake_run_code(_code: str, _payload: ResultPayload) -> None:
-        _payload.code_reached = True
-
-    def fake_write_result(_path: Path, _payload: ResultPayload) -> None:
-        results.append(_payload)
-
-    def fake_plugins_loaded(
-        *,
-        surface: bool = True,
-        config: object,
-        clock_factory: object,
-        producer: object,
-        context: object,
-        machine: object,
-        validate_state: object = None,
-    ) -> None:
-        assert all(
-            (
-                surface is True,
-                context is meiva.context,
-                machine is meiva.context.machine,
-                clock_factory is meiva.context.clock_factory,
-                callable(producer),
-            )
-        )
-        events.append("plugins")
-
-    monkeypatch.setattr(protocol, "read_request", fake_read_request)
-    monkeypatch.setattr(exec_child, "init_logger", fake_init_logger)
-    monkeypatch.setattr(process_boot, "apply_per_agent_sdk_disable", fake_sdk_disable)
-    monkeypatch.setattr(process_boot, "apply_per_agent_eval_isolation", fake_eval_isolation)
-    monkeypatch.setattr(exec_child, "build_state_slot", fake_build_state_slot)
-    monkeypatch.setattr(exec_child, "run_code", fake_run_code)
-    monkeypatch.setattr(protocol, "write_result", fake_write_result)
-    monkeypatch.setattr(boot, "ensure_plugins_loaded", fake_plugins_loaded)
-
-    def fake_apply_scope(
-        birth: dict[str, object] | None,
-        overlay: dict[str, object] | None,
-        *,
-        scope: str,
-        set_framework_field: object = None,
-    ) -> bool:
-        events.append(f"apply:{scope}")
-        return bool(birth or overlay)
-
-    monkeypatch.setattr(exec_child, "apply_overlay_scope", fake_apply_scope)
-    monkeypatch.setenv("MEIVA_AGENT_CONFIG_OVERLAY", json.dumps({"llm_model": "x"}))
-    monkeypatch.setenv(
-        "MEIVA_AGENT_BIRTH_CONFIG", json.dumps({"llm_stream_ttft_timeout_seconds": 1.0})
+def test_child_applies_per_agent_sdk_disable_from_the_framework_overlay(tmp_path: Path) -> None:
+    proc, _request, result = spawn_real_child(
+        tmp_path,
+        (
+            "import meiva\n"
+            "try:\n"
+            "    meiva.web\n"
+            "except AttributeError as error:\n"
+            "    print('web unavailable:', type(error).__name__)\n"
+            "else:\n"
+            "    print('web available')\n"
+        ),
+        config_overlay={"sdk_disable": ["web"]},
     )
-    monkeypatch.setenv("MEIVA_EXEC_REQUEST_FILE", str(tmp_path / "req.json"))
-    monkeypatch.setenv("MEIVA_EXEC_RESULT_FILE", str(tmp_path / "res.json"))
 
-    old_sigint = signal.getsignal(signal.SIGINT)
-    old_sigterm = signal.getsignal(signal.SIGTERM)
-    try:
-        with patch.dict(os.environ):
-            exec_child.main()
-    finally:
-        signal.signal(signal.SIGINT, old_sigint)
-        signal.signal(signal.SIGTERM, old_sigterm)
+    assert proc.returncode == 0, proc.stderr
+    assert read_result(result).kind == "done"
+    assert "web unavailable" in proc.stdout
 
-    (result,) = results
-    assert (result.kind, result.code_reached, result.exc_type, result.full_traceback) == (
-        "done",
-        True,
-        None,
-        None,
+
+def test_child_applies_per_agent_eval_isolation_from_the_framework_overlay(tmp_path: Path) -> None:
+    proc, _request, result = spawn_real_child(
+        tmp_path,
+        (
+            "import meiva\n"
+            "try:\n"
+            "    meiva.tasks\n"
+            "except AttributeError as error:\n"
+            "    print('tasks unavailable:', type(error).__name__)\n"
+            "else:\n"
+            "    print('tasks available')\n"
+        ),
+        config_overlay={"eval_isolation": True},
     )
-    assert events == [
-        "apply:framework",
-        "plugins",
-        "apply:plugin",
-        "sdk_disable",
-        "eval_isolation",
-    ]
+
+    assert proc.returncode == 0, proc.stderr
+    assert read_result(result).kind == "done"
+    assert "tasks unavailable" in proc.stdout
 
 
 def _declare_machine_name(tmp_path: Path) -> None:

@@ -17,30 +17,38 @@ from unittest.mock import MagicMock
 import anthropic
 import httpx2
 import openai
+import psycopg
 import pytest
 from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import ExecutionInfo, Runtime
 from langgraph.types import Command
+from psycopg_pool import AsyncConnectionPool
 
 from agent.graph import llm_node
+from agent.graph.interrupt.tests.queued_commands import queue_command
 from agent.graph.llm_errors import LlmLedger
+from agent.graph.node_log.tests.live_events import LiveEvents
 from agent.graph.prompt.system_prompt import capture_meiva_overview, get_meiva_overview
-from agent.hooks.tests.fakes import make_fake_ops_pool
 from agent.state import AgentState
 from base.agents.context import MeivaContext
 from base.clock import Clock
 from base.config import settings
-from base.db import Database
+from base.config.tests.configuration import defaults
+from base.db import Database, create_agent
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
-from base.events.live.projection import EVENT_ADAPTER, Cancelled
+from base.events.live.projection import Cancelled
 from base.host.env.agent_slices import AgentSlices, LlmCallPolicy
 from base.native_process.turn_identity import HostedTurnResources
 from base.packages.plugin_providers import build_model_catalog
 from meiva.tests.fixtures.pin_agent import hosted_resources as hosted_resources
 
 CONFIG: RunnableConfig = {"configurable": {"thread_id": "7"}}
+
+
+def _config(agent_id: int) -> RunnableConfig:
+    return {"configurable": {"thread_id": str(agent_id)}}
 
 
 @pytest.fixture
@@ -140,14 +148,19 @@ def test_get_meiva_overview_advertises_installed_plugin_namespace() -> None:
         undo()
 
 
-# ───────────── cancel-detection boundary (mutmut_44: cancel_task in done) ─────────────
-# Baseline doc notes: `if cancel_task in done:` → `if cancel_task not in done:`
-# inversion mutation survived. Current `test_llm_node_cancel_event_race_*` series depends
-# on `fake_cancel_event` fixture directly `event.set()`, but doesn't assert the exact
-# contents of the done set; the inverted in/not in test still passes. Added cases to
-# differentiate the two path invariants: "cancel first in done" vs "stream first in done".
+# meiva:note
+# Cancel-detection boundary (mutmut_44: `if cancel_task in done:` inverted to `not in done`).
+# The race tests do not assert the exact contents of the done set, so the inverted test still
+# passed; the cases below tell the two path invariants apart, "cancel first in done" from "stream
+# first in done", with a real queued cancel command and the events a subscriber receives.
 
 
+# meiva:note
+# Assembles the Runtime a node runs in. Without an `ops_pool` the turn has no inbound queue (the
+# container/eval shape), so nothing can interrupt it and it touches no database; a test that
+# needs an interrupt or reads the database passes the throwaway pool. SSE fan-out goes through
+# `ctx.event_publisher.emit`; the default is a sink so the node's `assert ctx.event_publisher`
+# passes, and a test that reads the events passes `live_events.publisher`.
 def make_runtime(
     *,
     resources: HostedTurnResources,
@@ -156,26 +169,18 @@ def make_runtime(
     execution_info: ExecutionInfo | None = None,
     database_gate: ProcessDbGate,
     pins: Mapping[str, Any] | None = None,
+    ops_pool: AsyncConnectionPool | None = None,
 ) -> Runtime[MeivaContext]:
-    """test helper: assemble Runtime the same way as test_cancel.py.
-
-    llm_node / exec_node don't directly touch ops_pool, so use AsyncMock
-    as placeholders. SSE fan-out goes through `ctx.event_publisher.emit`; default to a MagicMock
-    so the node's `assert ctx.event_publisher` passes; tests that verify SSE can pass their own
-    mock for assertions."""
     if llm is None:
         llm = MagicMock()
     if isinstance(llm, MagicMock):
         llm.bind_tools.return_value = llm
     ctx = MeivaContext(
         hosted_resources=resources,
-        ops_pool=make_fake_ops_pool(),
+        ops_pool=ops_pool,
         llm=llm,  # pyright: ignore[reportUnknownArgumentType]
         event_publisher=event_publisher if event_publisher is not None else MagicMock(),  # pyright: ignore[reportUnknownArgumentType]
-        agent=AgentSlices.resolve(
-            pins,
-            default_reader=lambda domain, field: getattr(getattr(settings, domain), field),
-        ),
+        agent=AgentSlices.resolve(pins, default_reader=defaults()),
         db=Database.from_settings(gate=database_gate),
         bus=EventBus.from_settings(),
         catalog=build_model_catalog(),
@@ -184,22 +189,18 @@ def make_runtime(
     return Runtime(context=ctx, execution_info=execution_info)
 
 
-def _has_cancelled_event(pub: MagicMock, agent_id: int) -> bool:
-    """assert helper: whether any emit call contains a Cancelled(agent_id=...)."""
-    for call in pub.emit.call_args_list:
-        (payload,) = call.args
-        try:
-            ev = EVENT_ADAPTER.validate_json(payload)
-        except Exception:  # noqa: S112 — skip non-event union payloads
-            continue
-        if isinstance(ev, Cancelled) and ev.agent_id == agent_id:
-            return True
-    return False
+# meiva:note
+# Whether the published events contain a Cancelled(agent_id=...).
+def _has_cancelled_event(events: list[Any], agent_id: int) -> bool:
+    return any(isinstance(e, Cancelled) and e.agent_id == agent_id for e in events)
 
 
 async def test_cancel_branch_publishes_cancelled_and_returns_halted(
+    redis_url: str,
     hosted_resources: HostedTurnResources,
-    fake_cancel_event: asyncio.Event,
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    live_events: LiveEvents,
     ledger: LlmLedger,
     database_gate: ProcessDbGate,
 ) -> None:
@@ -220,12 +221,12 @@ async def test_cancel_branch_publishes_cancelled_and_returns_halted(
 
     fake_llm = MagicMock()
     fake_llm.astream.return_value = _stream_then_hang()
-    pub = MagicMock()
+    agent_id = create_agent(db_conn)
     state = AgentState(messages=[HumanMessage(content="hi")], halted=False)
 
     async def _trigger():
         await asyncio.sleep(0.1)
-        fake_cancel_event.set()
+        queue_command(db_conn, agent_id, "cancel")
 
     trigger = asyncio.create_task(_trigger())
     result = await llm_node(
@@ -233,16 +234,18 @@ async def test_cancel_branch_publishes_cancelled_and_returns_halted(
         make_runtime(
             resources=hosted_resources,
             llm=fake_llm,
-            event_publisher=pub,
+            event_publisher=live_events.publisher,
             database_gate=database_gate,
+            ops_pool=aops_pool,
         ),
-        CONFIG,
+        _config(agent_id),
         ledger=ledger,
     )
     await trigger
+    events = await live_events.typed()
 
     # (a) Cancelled event emitted (cancel branch-exclusive side effect)
-    assert _has_cancelled_event(pub, agent_id=7), (
+    assert _has_cancelled_event(events, agent_id), (
         "cancel branch did not emit Cancelled event —— `cancel_task in done` branch not taken"
     )
     # (b) Command shape: goto=after_exec + halted=True
@@ -250,18 +253,18 @@ async def test_cancel_branch_publishes_cancelled_and_returns_halted(
     assert result.goto == "after_exec"
     assert result.update["halted"] is True
     # (c) cancel path does not call handler.finish() —— no llm_done / token_usage emit
-    role_payloads = [c.args[0] for c in pub.emit.call_args_list]
-    assert not any('"role":"llm_done"' in p for p in role_payloads), (
+    roles = [e.role for e in events]
+    assert "llm_done" not in roles, (
         "cancel branch must not emit LLMDone (handler.finish() must not be called)"
     )
-    assert not any('"role":"token_usage"' in p for p in role_payloads), (
+    assert "token_usage" not in roles, (
         "cancel branch must not emit TokenUsage (took normal-completion path)"
     )
 
 
 async def test_stream_normal_completion_no_cancelled_event(
     hosted_resources: HostedTurnResources,
-    fake_cancel_event: asyncio.Event,
+    live_events: LiveEvents,
     ledger: LlmLedger,
     database_gate: ProcessDbGate,
 ) -> None:
@@ -284,24 +287,25 @@ async def test_stream_normal_completion_no_cancelled_event(
 
     fake_llm = MagicMock()
     fake_llm.astream.return_value = _fast_complete()
-    pub = MagicMock()
     state = AgentState(messages=[HumanMessage(content="hi")], halted=False)
 
-    # Note: do not set cancel_event —— stream should complete naturally
+    # meiva:note
+    # No interrupt is queued, so the stream completes naturally.
     result = await llm_node(
         state,
         make_runtime(
             resources=hosted_resources,
             llm=fake_llm,
-            event_publisher=pub,
+            event_publisher=live_events.publisher,
             database_gate=database_gate,
         ),
         CONFIG,
         ledger=ledger,
     )
+    events = await live_events.typed()
 
     # (a) no Cancelled event
-    assert not _has_cancelled_event(pub, agent_id=7), (
+    assert not _has_cancelled_event(events, agent_id=7), (
         "stream-normal branch mistakenly took cancel branch —— `cancel_task in done` mutation flipped"
     )
     # (b) Command shape: end_turn + no tool_calls → halted=True goto=after_exec
@@ -309,8 +313,7 @@ async def test_stream_normal_completion_no_cancelled_event(
     assert result.goto == "after_exec"
     assert result.update["halted"] is True
     # (c) finish() called → LLMDone emitted
-    role_payloads = [c.args[0] for c in pub.emit.call_args_list]
-    assert any('"role":"llm_done"' in p for p in role_payloads), (
+    assert "llm_done" in [e.role for e in events], (
         "stream-normal branch must call handler.finish() and emit LLMDone"
     )
 
@@ -446,8 +449,11 @@ def test_text_display_uses_dot_text_for_list_content() -> None:
 
 
 async def test_cancel_event_set_before_first_chunk_returns_halted_no_publish_done(
+    redis_url: str,
     hosted_resources: HostedTurnResources,
-    fake_cancel_event: asyncio.Event,
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    live_events: LiveEvents,
     ledger: LlmLedger,
     database_gate: ProcessDbGate,
 ) -> None:
@@ -461,23 +467,26 @@ async def test_cancel_event_set_before_first_chunk_returns_halted_no_publish_don
 
     fake_llm = MagicMock()
     fake_llm.astream.return_value = _hang_forever()
-    pub = MagicMock()
+    agent_id = create_agent(db_conn)
     state = AgentState(messages=[HumanMessage(content="hi")], halted=False)
 
-    # set immediately — stream has not yet yielded a first chunk
-    fake_cancel_event.set()
+    # meiva:note
+    # Queued before the node starts, so the stream never yields a first chunk.
+    queue_command(db_conn, agent_id, "cancel")
 
     result = await llm_node(
         state,
         make_runtime(
             resources=hosted_resources,
             llm=fake_llm,
-            event_publisher=pub,
+            event_publisher=live_events.publisher,
             database_gate=database_gate,
+            ops_pool=aops_pool,
         ),
-        CONFIG,
+        _config(agent_id),
         ledger=ledger,
     )
+    events = await live_events.typed()
 
     assert isinstance(result, Command)
     assert result.goto == "after_exec"
@@ -486,10 +495,9 @@ async def test_cancel_event_set_before_first_chunk_returns_halted_no_publish_don
     # clean discard: no message committed
     assert result.update.get("messages", []) == []
     # Cancelled event emitted
-    assert _has_cancelled_event(pub, agent_id=7)
+    assert _has_cancelled_event(events, agent_id)
     # handler.finish() not called → no LLMDone
-    role_payloads = [c.args[0] for c in pub.emit.call_args_list]
-    assert not any('"role":"llm_done"' in p for p in role_payloads)
+    assert "llm_done" not in [e.role for e in events]
 
 
 # ───────────── Silent idle supplementary tests (PR #35 review, agent #976) ─────────────
@@ -655,7 +663,6 @@ async def test_llm_node_permanent_provider_error_fails_fast_with_structured_fiel
     The retry loop excludes FatalProviderError, so the agent idles instead of
     burning the ~16-min backoff budget and dying."""
     from agent.graph.llm_errors import FatalProviderError
-    from base.config import settings
 
     fake_llm = MagicMock()
     fake_llm.astream.return_value = astream_raising(FakeProviderStatusError(400))
