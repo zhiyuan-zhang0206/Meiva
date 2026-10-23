@@ -306,9 +306,9 @@ def _literal(node: ast.expr, constants: dict[str, str]) -> str | None:
 def _scope_nodes(node: ast.AST) -> list[ast.AST]:
     found: list[ast.AST] = []
     for child in ast.iter_child_nodes(node):
+        found.append(child)
         if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)):
             continue
-        found.append(child)
         found.extend(_scope_nodes(child))
     return found
 
@@ -328,9 +328,7 @@ def _frozen_dataclass(node: ast.ClassDef) -> bool:
 
 def _default_instances(tree: ast.Module) -> dict[str, str]:
     assignments = Counter(
-        node.id
-        for node in ast.walk(tree)
-        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store)
+        name for node in _scope_nodes(tree) if (name := _lexical_binding(node)) is not None
     )
     return {
         node.targets[0].id: node.value.func.id
@@ -341,6 +339,7 @@ def _default_instances(tree: ast.Module) -> dict[str, str]:
         and assignments[node.targets[0].id] == 1
         and isinstance(node.value, ast.Call)
         and isinstance(node.value.func, ast.Name)
+        and assignments[node.value.func.id] == 1
         and not node.value.args
         and not node.value.keywords
     }
@@ -377,12 +376,22 @@ def _argument_defaults(function: ast.FunctionDef | ast.AsyncFunctionDef) -> dict
     }
 
 
+def _lexical_binding(node: ast.AST) -> str | None:
+    if isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)):
+        return node.id
+    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+        return node.name
+    if isinstance(node, ast.alias):
+        return node.asname or node.name.split(".")[0]
+    if isinstance(node, (ast.ExceptHandler, ast.MatchAs, ast.MatchStar)):
+        return node.name
+    if isinstance(node, ast.MatchMapping):
+        return node.rest
+    return None
+
+
 def _scope_rebound(nodes: list[ast.AST]) -> set[str]:
-    rebound = {
-        node.id
-        for node in nodes
-        if isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del))
-    }
+    rebound = {name for node in nodes if (name := _lexical_binding(node)) is not None}
     rebound.update(
         node.value.id
         for node in nodes
@@ -613,7 +622,18 @@ def test_the_literal_finder_follows_the_default_frozen_dependency_instance() -> 
     }
 
 
-@pytest.mark.parametrize("change", ["override", "mutable", "rebound", "changed-field"])
+@pytest.mark.parametrize(
+    "change",
+    [
+        "override",
+        "mutable",
+        "rebound",
+        "changed-field",
+        "imported-default",
+        "defined-default",
+        "imported-class",
+    ],
+)
 def test_the_literal_finder_refuses_an_unproven_dependency_instance(change: str) -> None:
     source = (
         "@dataclass(frozen=True)\n"
@@ -628,6 +648,9 @@ def test_the_literal_finder_refuses_an_unproven_dependency_instance(change: str)
         "mutable": source.replace("frozen=True", "frozen=False"),
         "rebound": source.replace("    deps.log(", "    deps = other\n    deps.log("),
         "changed-field": source.replace("    deps.log(", "    deps.log = other\n    deps.log("),
+        "imported-default": source.replace("def boot", "from other import DEFAULT\ndef boot"),
+        "defined-default": source.replace("def boot", "def DEFAULT():\n    pass\ndef boot"),
+        "imported-class": source.replace("DEFAULT =", "from other import Dependencies\nDEFAULT ="),
     }[change]
     assert _daemon_literals(source) == {}
 
@@ -659,6 +682,12 @@ def test_the_literal_finder_exposes_a_real_daemon_shutdown_name_mismatch(
     [
         "start = other\n    start('unknown')",
         "def nested(start):\n        start('unknown')",
+        "from other import start\n    start('unknown')",
+        "import other as start\n    start('unknown')",
+        "def start(name):\n        pass\n    start('unknown')",
+        "class start:\n        pass\n    start('unknown')",
+        "try:\n        pass\n    except Error as start:\n        start('unknown')",
+        "match value:\n        case start:\n            start('unknown')",
     ],
 )
 def test_the_literal_finder_does_not_follow_a_rebound_or_nested_default(body: str) -> None:
