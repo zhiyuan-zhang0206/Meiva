@@ -58,7 +58,9 @@ def _optional_fields(
 # the catalog (`gateway/extensions/notification_categories.py:declared_categories`),
 # never at delivery time.
 # meiva:link docs/conventions/extensions/plugin-spec-v2.md
-def validate_notification_contributions(value: object, errors: list[str]) -> list[dict[str, object]]:
+def validate_notification_contributions(
+    value: object, errors: list[str]
+) -> list[dict[str, object]]:
     if not isinstance(value, list):
         errors.append("contributions.notifications must be a list")
         return []

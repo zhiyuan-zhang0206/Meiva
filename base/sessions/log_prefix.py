@@ -9,9 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 
-def session_log_header(
-    name: str, *, pid: int | None = None, now: datetime | None = None
-) -> bytes:
+def session_log_header(name: str, *, pid: int | None = None, now: datetime | None = None) -> bytes:
     """Return a UTF-8 session identity line with a UTC start timestamp."""
     start = datetime.now(timezone.utc).isoformat()  # noqa: UP017 - task specifies timezone.utc
     if now is not None:

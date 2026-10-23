@@ -30,9 +30,7 @@ def test_header_identity_changes_with_name_pid_and_time() -> None:
     first = log_prefix.session_log_header("one", pid=1, now=instant)
     other_name = log_prefix.session_log_header("two", pid=1, now=instant)
     other_pid = log_prefix.session_log_header("one", pid=2, now=instant)
-    later = log_prefix.session_log_header(
-        "one", pid=1, now=instant.replace(microsecond=123457)
-    )
+    later = log_prefix.session_log_header("one", pid=1, now=instant.replace(microsecond=123457))
     assert len({first, other_name, other_pid, later}) == 4
     assert b".123456+00:00" in first
 
