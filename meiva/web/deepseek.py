@@ -30,21 +30,33 @@ _log = logging.getLogger(__name__)
 _DETAIL_MAX = 200
 
 
+# meiva:note
+# The clock and the sleep are parameters, not reads of the module: the reservation arithmetic
+# (slot k at `start + k*interval`) is the contract this class promises, and a test can only
+# assert it on a clock it controls. Production passes the real ones by default.
 class RateLimiter:
-    def __init__(self, qps: float) -> None:
+    def __init__(
+        self,
+        qps: float,
+        *,
+        monotonic: Callable[[], float] = time.monotonic,
+        sleep: Callable[[float], None] = time.sleep,
+    ) -> None:
         self._interval = 1.0 / qps if qps > 0 else 0.0
         self._lock = threading.Lock()
         self._next_at = 0.0
+        self._monotonic = monotonic
+        self._sleep = sleep
 
     def acquire(self) -> None:
         if not self._interval:
             return
         with self._lock:
-            now = time.monotonic()
+            now = self._monotonic()
             wait = self._next_at - now
             self._next_at = max(now, self._next_at) + self._interval
         if wait > 0:
-            time.sleep(wait)
+            self._sleep(wait)
 
 
 def _provider_message(detail: str) -> str:
