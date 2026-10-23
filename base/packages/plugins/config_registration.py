@@ -63,13 +63,7 @@ __all__ = [
 
 
 def bind_plugin_config(
-    plugin: str,
-    cls: type[BaseModel],
-    configs: dict[str, BaseModel],
-    *,
-    read_plugin_config_fn: Callable[[str, type[BaseModel], Path], BaseModel] = read_plugin_config,
-    write_default_fn: Callable[[str, type[BaseModel]], Path] = write_default_disk_image,
-    config_from_image_fn: Callable[[type[BaseModel], str, Path], BaseModel] = config_from_image,
+    plugin: str, cls: type[BaseModel], configs: dict[str, BaseModel]
 ) -> Callable[[], None]:
     if not (isinstance(cls, type) and issubclass(cls, BaseModel)):
         raise TypeError(
@@ -80,13 +74,7 @@ def bind_plugin_config(
         raise DuplicateRegistration(
             f"plugin {plugin!r} already has a bound config ({type(configs[plugin]).__name__})"
         )
-    instance = _instantiate_from_disk(
-        plugin,
-        cls,
-        read_plugin_config_fn=read_plugin_config_fn,
-        write_default_fn=write_default_fn,
-        config_from_image_fn=config_from_image_fn,
-    )
+    instance = _instantiate_from_disk(plugin, cls)
     configs[plugin] = instance
 
     def undo() -> None:
@@ -95,24 +83,15 @@ def bind_plugin_config(
     return undo
 
 
-def _instantiate_from_disk(
-    plugin: str,
-    cls: type[BaseModel],
-    *,
-    read_plugin_config_fn: Callable[[str, type[BaseModel], Path], BaseModel] = read_plugin_config,
-    write_default_fn: Callable[[str, type[BaseModel]], Path] = write_default_disk_image,
-    config_from_image_fn: Callable[[type[BaseModel], str, Path], BaseModel] = config_from_image,
-) -> BaseModel:
+def _instantiate_from_disk(plugin: str, cls: type[BaseModel]) -> BaseModel:
     from base.packages.plugin_config_images import PluginConfigChangedError
 
     config_path = disk_image_path(plugin)
-    read_plugin_config_fn(plugin, cls, config_path)
+    read_plugin_config(plugin, cls, config_path)
     if not config_path.exists():
         with suppress(PluginConfigChangedError):
-            write_default_fn(plugin, cls)
-    return with_cluster_policy(
-        plugin, config_from_image_fn(cls, config_path.read_text(), config_path)
-    )
+            write_default_disk_image(plugin, cls)
+    return with_cluster_policy(plugin, config_from_image(cls, config_path.read_text(), config_path))
 
 
 def _reconcile_config_image[C: BaseModel](

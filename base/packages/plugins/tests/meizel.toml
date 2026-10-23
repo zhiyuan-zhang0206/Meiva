@@ -1,0 +1,9 @@
+exports = []
+
+[debt.first-party-patch]
+"test_config_boot_race.py#monkeypatch.setattr base.packages.plugins.config_registration.config_from_image" = 1
+"test_config_boot_race.py#monkeypatch.setattr base.packages.plugins.config_registration.read_plugin_config" = 1
+"test_config_boot_race.py#monkeypatch.setattr base.packages.plugins.config_registration.write_default_disk_image" = 3
+
+[debt.restricted-python]
+"test_config_boot_race.py#python -c" = 1
