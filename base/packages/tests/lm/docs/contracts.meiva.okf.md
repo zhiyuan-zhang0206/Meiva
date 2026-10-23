@@ -35,6 +35,16 @@ Behavior owner: [[base/lm/docs/provider-plugins.meiva.okf.md]].
 
 Provider key validation uses the declared environment channel, with the local environment file as fallback. Legacy Settings aliases do not authorize a spawn. Construction can use the fallback after a gateway profile removes a provider key from the process environment without restoring that key to the process.
 
+Provider validation scenarios run in fresh processes with real environment files.
+The file-only cases begin with no live keys and write their fallback file after
+configuration loads. Construction cases receive live keys through the child
+environment. The MIMO/Kimi cases load a real Settings snapshot, withdraw both
+keys through the normal environment-authority pass, then verify the stale
+snapshot cannot authorize a spawn. Invalid model/effort combinations and
+overrides retain their original assertions. The custom-provider case reads a
+real file, while a withdrawn cross-provider model resolves through actual
+catalog rows before its build context is inspected.
+
 ## Explicit tuning
 
 Behavior owner: [[base/lm/docs/model-configuration.meiva.okf.md]].

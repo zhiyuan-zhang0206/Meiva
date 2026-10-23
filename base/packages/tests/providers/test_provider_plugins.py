@@ -4,6 +4,7 @@ import json
 import math
 import shutil
 from collections.abc import Callable
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -12,9 +13,8 @@ from langchain_core.language_models.fake_chat_models import FakeListChatModel
 from langchain_core.messages import AIMessage
 
 from base import paths
-from base.host.env import dotenv_file
 from base.host.env.agent_slices import ModelOverrides
-from base.lm import factory, pricing, provider_api
+from base.lm import pricing, provider_api
 from base.lm.catalog import CatalogBuilder, ModelCatalog
 from base.lm.compat import stop
 from base.lm.factory import (
@@ -405,7 +405,7 @@ def test_plugin_price_vendor_reaches_pricing_lookup(
 
 
 def test_bound_build_preserves_fallback_identity_and_effort(
-    model_catalog: ModelCatalog, add_bindings: AddBindings, monkeypatch: pytest.MonkeyPatch
+    model_catalog: ModelCatalog, add_bindings: AddBindings
 ) -> None:
     contexts: list[provider_api.BuildContext] = []
 
@@ -424,13 +424,16 @@ def test_bound_build_preserves_fallback_identity_and_effort(
 
     from base.lm.factory import build_chat_model_bound
 
-    requested: list[str] = []
-
-    def resolve(model: str, *, models: object) -> str:
-        requested.append(model)
-        return "testctx-model"
-
-    monkeypatch.setattr(factory, "resolve_available_model", resolve)
+    catalog = replace(
+        catalog,
+        models={
+            **catalog.models,
+            "unavailable-other-provider": ModelSpec(
+                provider="unavailable", spawnable=False, unavailable_fallback="testctx-model"
+            ),
+            "testctx-model": ModelSpec(provider="testctx", spawnable=True),
+        },
+    )
     client, selected = build_chat_model_bound(
         "unavailable-other-provider",
         media_resolution="high",
@@ -442,7 +445,7 @@ def test_bound_build_preserves_fallback_identity_and_effort(
     )
     assert isinstance(client, FakeListChatModel)
     assert selected is binding
-    assert requested == ["unavailable-other-provider"]
+    assert "unavailable-other-provider" not in model_catalog.models
     assert contexts[0].model == "testctx-model"
     assert len(contexts) == 1
     assert contexts[0].effort_levels == ("low", "high")
@@ -452,20 +455,16 @@ def test_bound_build_preserves_fallback_identity_and_effort(
 
 
 def test_plugin_model_validation_and_key_check(
-    provider_plugin: Callable[..., None], monkeypatch: pytest.MonkeyPatch
+    unit_home: Path, provider_plugin: Callable[..., None]
 ) -> None:
     provider_plugin()
     catalog = build_model_catalog()
-
-    monkeypatch.setattr(dotenv_file, "read_env_aliases", dict)
+    assert not provider_api.provider_key_present("TESTP_API_KEY")
+    (unit_home / ".env").write_text("")
     with pytest.raises(ValueError, match="TESTP_API_KEY"):
         validate_model_config(model="testp-1", catalog=catalog, llm_override="")
 
-    monkeypatch.setattr(
-        dotenv_file,
-        "read_env_aliases",
-        lambda: {"TESTP_API_KEY": "sk-test"},
-    )
+    (unit_home / ".env").write_text("TESTP_API_KEY=sk-test\n")
     assert validate_model_config(model="testp-1", catalog=catalog, llm_override="") == "testp-1"
 
 
