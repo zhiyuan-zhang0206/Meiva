@@ -4,7 +4,7 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from typing import Annotated
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from services.derived.insights.run_timeline.context import router as context_router
 from services.derived.insights.run_timeline.links import router as links_router
@@ -46,6 +46,13 @@ def _window(
     return start, end
 
 
+def _options(
+    max_units: Annotated[int | None, Query(ge=1, le=10000)] = None,
+    snapshot: Annotated[str | None, Query(min_length=1, max_length=64)] = None,
+) -> tuple[int | None, str | None]:
+    return max_units, snapshot
+
+
 @router.get(
     "/api/agents/{agent_id}/run-timeline",
     description="A time window; bounded reads omit dense message detail and name its snapshot.",
@@ -56,9 +63,9 @@ def get_run_timeline(
     from_: Annotated[datetime | None, Query(alias="from")] = None,
     to: Annotated[datetime | None, Query()] = None,
     recent_hours: Annotated[int | None, Query(ge=1, le=168)] = None,
-    max_units: Annotated[int | None, Query(ge=1, le=10000)] = None,
-    snapshot: Annotated[str | None, Query(min_length=1, max_length=64)] = None,
+    options: Annotated[tuple[int | None, str | None], Depends(_options)] = (None, None),
 ) -> RunTimelineResponse:
+    max_units, snapshot = options
     reader: TimelineReader = request.app.state.run_timeline_reader
     if recent_hours is not None and (from_ is not None or to is not None):
         raise HTTPException(status_code=422, detail="recent_hours cannot be combined with from/to")

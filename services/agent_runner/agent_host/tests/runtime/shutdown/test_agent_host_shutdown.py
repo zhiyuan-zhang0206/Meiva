@@ -108,8 +108,7 @@ def exercise_shutdown(failure: str, home: Path) -> None:
 def _run_shutdown(failure: str, *, database_gate: ProcessDbGate, home: Path) -> None:
     """Run real signal/asyncio unwinding in a disposable child interpreter."""
     from agent import graph, process_boot
-
-    from .... import daemon
+    from services.agent_runner.agent_host import daemon
 
     events: list[str] = []
 
@@ -241,8 +240,7 @@ def _shutdown_child(failure: str, home: Path) -> subprocess.CompletedProcess[str
     return subprocess.run(  # noqa: S603 -- fixed test helper in this checkout
         [
             sys.executable,
-            str(Path(__file__).resolve().parents[2] / "agent_host" / "child_runtime_scenarios.py"),
-            "shutdown",
+            __file__,
             failure,
             str(home),
         ],
@@ -377,3 +375,7 @@ def test_failed_heartbeat_during_boot_still_closes_pools_and_pidfile(unit_home: 
         "pidfile_removed",
         "CancelledError",
     ]
+
+
+if __name__ == "__main__":
+    exercise_shutdown(sys.argv[1], Path(sys.argv[2]))

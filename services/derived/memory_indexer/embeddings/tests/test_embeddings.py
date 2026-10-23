@@ -61,10 +61,13 @@ def _api_key_reader() -> str | None:
 pytestmark = pytest.mark.usefixtures("retry_waits")
 
 
-def _provider() -> GeminiEmbeddingProvider:
+def build_provider() -> GeminiEmbeddingProvider:
     return GeminiEmbeddingProvider(
         build_model_catalog(), timeout_reader=_timeout_reader, api_key_reader=_api_key_reader
     )
+
+
+_provider = build_provider
 
 
 class _FakeResponse(httpx.Response):

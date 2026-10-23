@@ -89,21 +89,6 @@ def test_run_wires_the_liveness_task(
     monkeypatch.setattr(
         daemon, "daemon_acceptance", daemon_acceptance_stub(frozenset({"digest-of-a-token"}))
     )
-
-    def is_running_for_entry(config: ConfigBoot, *, runtime: Path) -> bool:
-        return False
-
-    monkeypatch.setattr(daemon, "_is_running", is_running_for_entry)
-
-    def write_pidfile_for_entry(config: ConfigBoot, *, runtime: Path) -> None:
-        pass
-
-    monkeypatch.setattr(daemon, "write_pidfile", write_pidfile_for_entry)
-
-    def remove_pidfile_for_entry(config: ConfigBoot, *, runtime: Path) -> None:
-        pass
-
-    monkeypatch.setattr(daemon, "_remove_pidfile", remove_pidfile_for_entry)
     monkeypatch.setattr(daemon, "start_health_server", fake_start_health_server)
 
     created_cores: list[Any] = []
@@ -300,28 +285,18 @@ async def test_child_fault_fails_daemon_and_drains_before_resource_cleanup(
     cleanup_fault = RuntimeError("unknown cleanup fault")
     events: list[str] = []
     sibling_started = asyncio.Event()
+
+    def close_pool() -> None:
+        assert (tmp_path / "run" / "im_bridge.pid").exists()
+        events.append("pool_closed")
+
     pool = MagicMock()
-    pool.close.side_effect = lambda: events.append("pool_closed")
+    pool.close.side_effect = close_pool
 
     def make_pool(_self: Database) -> MagicMock:
         return pool
 
     monkeypatch.setattr(daemon.Database, "pool", make_pool)
-
-    def is_running_for_entry(config: ConfigBoot, *, runtime: Path) -> bool:
-        return False
-
-    monkeypatch.setattr(daemon, "_is_running", is_running_for_entry)
-
-    def write_pidfile_for_entry(config: ConfigBoot, *, runtime: Path) -> None:
-        pass
-
-    monkeypatch.setattr(daemon, "write_pidfile", write_pidfile_for_entry)
-
-    def remove_pidfile_for_entry(config: ConfigBoot, *, runtime: Path) -> None:
-        return events.append("pid_removed")
-
-    monkeypatch.setattr(daemon, "_remove_pidfile", remove_pidfile_for_entry)
 
     class Core:
         def __init__(self, config: Any, gateway: Any, db_pool: Any, *, tasks: asyncio.TaskGroup):
@@ -399,8 +374,8 @@ async def test_child_fault_fails_daemon_and_drains_before_resource_cleanup(
         "adapter_stopped",
         "health_stopped",
         "pool_closed",
-        "pid_removed",
     ]
+    assert not (tmp_path / "run" / "im_bridge.pid").exists()
 
 
 def test_invalid_adapter_configuration_is_not_skipped(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -431,9 +406,10 @@ async def test_cleanup_attempts_every_resource_and_reports_unknown_adapter_fault
     health = object()
     stop_health = AsyncMock()
     pool = SimpleNamespace(close=MagicMock())
-    remove_pidfile = MagicMock()
+    pidfile = tmp_path / "run" / "im_bridge.pid"
+    pidfile.parent.mkdir(parents=True, exist_ok=True)
+    pidfile.write_text("1\n")
     monkeypatch.setattr(daemon, "stop_health_server", stop_health)
-    monkeypatch.setattr(daemon, "_remove_pidfile", remove_pidfile)
     errors = await asyncio.wait_for(
         daemon.stop_resources(
             core, [broken, healthy], health, pool, config=process_config, runtime=tmp_path / "run"
@@ -446,7 +422,7 @@ async def test_cleanup_attempts_every_resource_and_reports_unknown_adapter_fault
     healthy.stop.assert_awaited_once()
     stop_health.assert_awaited_once_with(health)
     pool.close.assert_called_once()
-    remove_pidfile.assert_called_once_with(process_config, runtime=tmp_path / "run")
+    assert not pidfile.exists()
 
 
 def test_cleanup_group_with_cancellation_uses_the_bounded_failure_exit(
@@ -468,7 +444,6 @@ def test_cleanup_group_with_cancellation_uses_the_bounded_failure_exit(
     monkeypatch.setattr(daemon, "build_pipeline", MagicMock(return_value=object()))
     monkeypatch.setattr(daemon, "install_graceful_shutdown", MagicMock())
     monkeypatch.setattr(daemon, "gate_httpx_info_logs", lambda: None)
-    monkeypatch.setattr(daemon, "_hard_exit", exit_process)
-    daemon.main()
+    daemon.main(exit_process=exit_process)
     exit_process.assert_called_once_with(1)
     assert group.exceptions[1] is fault

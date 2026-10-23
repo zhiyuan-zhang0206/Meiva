@@ -93,9 +93,9 @@ def test_head_check_cannot_restore_bookkeeping_for_an_evicted_snapshot(
         inputs=world.inputs,
         jobs=world.jobs,
         read_segment=world.read_segment,
-        read_source=evict_during_capture,
         timer=lambda: world.clock,
     )
+    reader.read_source = evict_during_capture
     first = reader.get(1)
     world.clock = 6
     assert reader.get(1) is first

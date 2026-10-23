@@ -168,7 +168,6 @@ def exercise_daemon(root: Path, mode: str, postgres_base: Path) -> None:
 
     ensure_eager()
     state = daemon.BackupState(started_at=SYSTEM_TIMERS.monotonic())
-    pidfile = root / "daemon.pid"
     restore_mode = mode.startswith("restore")
 
     def record_success(_now: datetime) -> None:
@@ -182,18 +181,7 @@ def exercise_daemon(root: Path, mode: str, postgres_base: Path) -> None:
         else:
             await daemon.backup_loop(state, config=config, clock=clock)
 
-    def write_pidfile(_config: ConfigBoot, *, runtime: Path) -> None:
-        assert runtime.name == "run"
-        pidfile.write_text(str(os.getpid()))
-
-    def remove_pidfile(_config: ConfigBoot, *, runtime: Path) -> None:
-        assert runtime.name == "run"
-        pidfile.unlink(missing_ok=True)
-
     with (
-        patch.object(daemon, "_is_running", return_value=False),
-        patch.object(daemon, "write_pidfile", write_pidfile),
-        patch.object(daemon, "_remove_pidfile", remove_pidfile),
         patch.object(daemon, "start_health_server", AsyncMock(return_value=object())),
         patch.object(daemon, "stop_health_server", AsyncMock()),
         patch.object(daemon, "is_due", return_value=True),
@@ -209,15 +197,15 @@ def exercise_daemon(root: Path, mode: str, postgres_base: Path) -> None:
     ):
         if restore_mode:
             with patch.object(daemon, "backup_loop", loop):
-                _run_daemon(Path(os.path.relpath(postgres_base, root)))
+                _run_daemon(root, Path(os.path.relpath(postgres_base, root)))
         else:
-            _run_daemon(Path(os.path.relpath(postgres_base, root)))
+            _run_daemon(root, Path(os.path.relpath(postgres_base, root)))
     (root / "state.json").write_text(
         json.dumps({"running": state.running, "success": state.last_success})
     )
 
 
-def _run_daemon(postgres_base: Path) -> None:
+def _run_daemon(root: Path, postgres_base: Path) -> None:
     daemon.install_graceful_shutdown("backup-shutdown-test")
     config = ConfigBoot()
     config.view.data_plane.pg_throwaway_base = str(postgres_base)
@@ -226,7 +214,7 @@ def _run_daemon(postgres_base: Path) -> None:
             daemon.run(
                 config=config,
                 image=LoadedCommit(Path(), None),
-                runtime=Path(os.environ["MEIVA_HOME"]) / "run",
+                runtime=root / "run",
                 clock=Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS),
             )
         )
@@ -234,7 +222,7 @@ def _run_daemon(postgres_base: Path) -> None:
 
 def _wait_file(path: Path, process: subprocess.Popen[str]) -> None:
     deadline = time.monotonic() + 25
-    while not path.exists():
+    while not path.exists() or not path.read_text().strip():
         assert process.poll() is None, process.communicate(timeout=2)
         assert time.monotonic() < deadline, f"never reached {path.name}"
         time.sleep(0.02)
@@ -252,7 +240,7 @@ def _terminate_and_assert_reaped(tmp_path: Path, process: subprocess.Popen[str])
     pids = [
         int(path.read_text()) for name in ("worker", "child") if (path := tmp_path / name).exists()
     ]
-    assert (tmp_path / "daemon.pid").exists()
+    assert (tmp_path / "run" / "pg_backup.pid").exists()
     started = time.monotonic()
     process.send_signal(signal.SIGTERM)
     stdout, stderr = process.communicate(timeout=9)
@@ -272,9 +260,9 @@ def _kill_harness_processes(tmp_path: Path, process: subprocess.Popen[str]) -> N
 
     for name in ("child", "worker", "postgres"):
         path = tmp_path / name
-        if path.exists():
+        if path.exists() and (raw := path.read_text().strip()):
             with contextlib.suppress(ProcessLookupError):
-                os.kill(int(path.read_text()), signal.SIGKILL)
+                os.kill(int(raw), signal.SIGKILL)
     if process.poll() is None:
         process.kill()
     process.communicate(timeout=5)
@@ -291,7 +279,7 @@ def _assert_sigterm_reaps_job_before_scheduler_exits(
     process = subprocess.Popen(  # noqa: S603
         [
             sys.executable,
-            str(Path(__file__).with_name("shutdown_daemon.py")),
+            __file__,
             str(tmp_path),
             mode,
             str(postgres_base),
@@ -304,7 +292,7 @@ def _assert_sigterm_reaps_job_before_scheduler_exits(
     )
     try:
         _terminate_and_assert_reaped(tmp_path, process)
-        assert not (tmp_path / "daemon.pid").exists()
+        assert not (tmp_path / "run" / "pg_backup.pid").exists()
         assert json.loads((tmp_path / "state.json").read_text()) == {
             "running": False,
             "success": None,
@@ -358,3 +346,7 @@ async def test_restore_job_accepts_clean_foreground_postgres_exit(
     assert not _alive(int((tmp_path / "postgres").read_text()))
     controls = tmp_path / "backups" / "operations" / "restore-drill"
     assert [path.name for path in controls.iterdir()] == [".lock"]
+
+
+if __name__ == "__main__":
+    exercise_daemon(Path(sys.argv[1]), sys.argv[2], Path(sys.argv[3]))

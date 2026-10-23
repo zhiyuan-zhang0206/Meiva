@@ -4,7 +4,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Annotated
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from base.agents.history.timeline import TimelineItem, build_timeline_items
 from services.derived.insights.run_timeline.history import HistoryView
@@ -62,6 +62,15 @@ def _message(
     )
 
 
+def _options(
+    limit: Annotated[int, Query(ge=1, le=_LIMIT_MAX)] = 50,
+    *,
+    full: Annotated[bool, Query()] = False,
+    snapshot: Annotated[str | None, Query(min_length=1, max_length=64)] = None,
+) -> tuple[int, bool, str | None]:
+    return limit, full, snapshot
+
+
 @router.get(
     "/api/agents/{agent_id}/run-timeline/messages",
     description="Messages ``start..end`` of the agent's stitched history, at most ``limit`` of them.",
@@ -71,11 +80,9 @@ def get_run_timeline_messages(
     agent_id: int,
     start: Annotated[int, Query(ge=0)],
     end: Annotated[int, Query(ge=0)],
-    limit: Annotated[int, Query(ge=1, le=_LIMIT_MAX)] = 50,
-    *,
-    full: Annotated[bool, Query()] = False,
-    snapshot: Annotated[str | None, Query(min_length=1, max_length=64)] = None,
+    options: Annotated[tuple[int, bool, str | None], Depends(_options)] = (50, False, None),
 ) -> RunTimelineMessages:
+    limit, full, snapshot = options
     if end < start:
         raise HTTPException(status_code=422, detail="end must not be before start")
     state = request.app.state

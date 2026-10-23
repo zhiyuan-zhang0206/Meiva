@@ -30,9 +30,9 @@ from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
 from services.wake.heartbeat.daemon import (
-    _sweep_backoff_resets,
     reconcile_checkin_outcomes,
     select_idle_agents_needing_heartbeat,
+    sweep_backoff_resets,
 )
 
 # Explicit threshold so the assertions do not ride on the configured default.
@@ -427,7 +427,7 @@ class TestNudgeBackoffB7:
             )
         db_conn.commit()
 
-        _sweep_backoff_resets(pool)
+        sweep_backoff_resets(pool)
 
         with db_conn.cursor() as cur:
             cur.execute("SELECT heartbeat_backoff_level FROM agents_meta WHERE id = %s", (aid,))
@@ -467,7 +467,7 @@ class TestNudgeBackoffB7:
             )
         db_conn.commit()
 
-        _sweep_backoff_resets(pool)
+        sweep_backoff_resets(pool)
 
         with db_conn.cursor() as cur:
             cur.execute("SELECT heartbeat_backoff_level FROM agents_meta WHERE id = %s", (aid,))

@@ -9,6 +9,7 @@ import logging
 import os
 import signal
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from datetime import time as clock_time
@@ -232,7 +233,7 @@ async def run(*, config: ConfigBoot, image: LoadedCommit, runtime: Path, clock: 
 # meiva:note
 # SIGTERM exits within the shutdown bound even while a default-executor job is wedged.
 # meiva:link services/backup/scheduler/docs/timing-and-exit.meiva.okf.md
-def main() -> None:
+def main(*, exit_process: Callable[[int], None] | None = None) -> None:
     from base.deploy.schema.migrations import assert_schema_current
 
     config = ConfigBoot()
@@ -284,7 +285,7 @@ def main() -> None:
         code = 1
     finally:
         _remove_pidfile(config, runtime=process_home / "run")
-    _hard_exit(code)
+    (exit_process or _hard_exit)(code)
 
 
 if __name__ == "__main__":

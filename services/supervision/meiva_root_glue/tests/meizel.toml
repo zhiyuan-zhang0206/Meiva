@@ -36,6 +36,3 @@
 [debt.restricted-python]
 "test_diagnostic_work_ownership.py#python -c" = 1
 "test_meiva_root_glue.py#python -c" = 1
-
-[debt.unresolved-patch]
-"test_root_diagnostics.py#monkeypatch.setattr probe._module._station_answers" = 1

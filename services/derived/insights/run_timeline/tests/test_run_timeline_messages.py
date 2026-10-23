@@ -75,7 +75,7 @@ def request(messages: list[BaseMessage]) -> Request:
 
 def test_a_range_returns_those_messages_in_order() -> None:
     result = route.get_run_timeline_messages(
-        request(history(5)), 1, start=1, end=3, limit=50, full=True
+        request(history(5)), 1, start=1, end=3, options=(50, True, None)
     )
     assert [m.idx for m in result.messages] == [1, 2, 3]
     assert result.next_start is None
@@ -85,23 +85,23 @@ def test_a_range_returns_those_messages_in_order() -> None:
 
 def test_a_long_range_is_cut_at_the_limit_and_says_where_to_continue() -> None:
     first = route.get_run_timeline_messages(
-        request(history(5)), 1, start=0, end=4, limit=2, full=False
+        request(history(5)), 1, start=0, end=4, options=(2, False, None)
     )
     assert [m.idx for m in first.messages] == [0, 1] and first.next_start == 2
     rest = route.get_run_timeline_messages(
-        request(history(5)), 1, start=2, end=4, limit=50, full=False
+        request(history(5)), 1, start=2, end=4, options=(50, False, None)
     )
     assert [m.idx for m in rest.messages] == [2, 3, 4] and rest.next_start is None
 
 
 def test_a_long_part_is_clipped_unless_full_is_asked() -> None:
     clipped = route.get_run_timeline_messages(
-        request(history(5)), 1, start=0, end=0, limit=50, full=False
+        request(history(5)), 1, start=0, end=0, options=(50, False, None)
     )
     (part,) = clipped.messages[0].parts
     assert part.text_truncated and len(part.text) == 20 and part.chars > 20
     full = route.get_run_timeline_messages(
-        request(history(5)), 1, start=0, end=0, limit=50, full=True
+        request(history(5)), 1, start=0, end=0, options=(50, True, None)
     )
     assert not full.messages[0].parts[0].text_truncated
     assert len(full.messages[0].parts[0].text) == full.messages[0].parts[0].chars
@@ -110,7 +110,7 @@ def test_a_long_part_is_clipped_unless_full_is_asked() -> None:
 def test_a_range_past_the_history_is_a_404() -> None:
     with pytest.raises(HTTPException) as caught:
         route.get_run_timeline_messages(
-            request(history(5)), 1, start=3, end=9, limit=50, full=False
+            request(history(5)), 1, start=3, end=9, options=(50, False, None)
         )
     assert caught.value.status_code == 404
 
@@ -118,7 +118,7 @@ def test_a_range_past_the_history_is_a_404() -> None:
 def test_a_reversed_range_is_a_422() -> None:
     with pytest.raises(HTTPException) as caught:
         route.get_run_timeline_messages(
-            request(history(5)), 1, start=3, end=1, limit=50, full=False
+            request(history(5)), 1, start=3, end=1, options=(50, False, None)
         )
     assert caught.value.status_code == 422
 
@@ -132,7 +132,7 @@ def test_ai_parts_carry_their_kinds() -> None:
         )
     ]
     result = route.get_run_timeline_messages(
-        request(messages), 1, start=0, end=0, limit=50, full=True
+        request(messages), 1, start=0, end=0, options=(50, True, None)
     )
     assert [p.kind for p in result.messages[0].parts] == ["think", "text", "call"]
 
@@ -146,7 +146,7 @@ def test_a_message_without_a_read_time_has_no_timestamp() -> None:
         AIMessage(content="written before messages were stamped"),
     ]
     result = route.get_run_timeline_messages(
-        request(messages), 1, start=0, end=1, limit=50, full=True
+        request(messages), 1, start=0, end=1, options=(50, True, None)
     )
     assert [m.ts is None for m in result.messages] == [False, True]
 
@@ -162,7 +162,7 @@ def test_a_message_carries_the_tokens_it_occupies_and_whether_they_are_estimated
             MessageTokens(None, None, None),
         ],
     )
-    result = route.get_run_timeline_messages(req, 1, start=0, end=2, limit=50, full=True)
+    result = route.get_run_timeline_messages(req, 1, start=0, end=2, options=(50, True, None))
     assert [(m.context_tokens, m.estimated) for m in result.messages] == [
         (40, False),
         (7, True),

@@ -32,7 +32,6 @@ from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import ConfigBoot
 from base.config.domains.daemon.settings import DaemonSettings
-from base.daemon.endpoints import ServiceEndpoint
 from base.daemon.health import LivenessGroup, LoopProgress
 from base.db import Database
 from base.events.live.bus import EventBus, EventBusConfig
@@ -228,10 +227,6 @@ class _CallRecorder:
         self.calls += 1
         self.kwargs.append(kwargs)
         return self.result
-
-
-def is_running_for_entry(config: ConfigBoot, *, runtime: Path) -> bool:
-    return False
 
 
 def _instrument_maintenance_slices(
@@ -477,28 +472,8 @@ def test_run_gives_each_loop_its_own_progress_tracker(
     async def gauge(_pool: object, progress: LoopProgress) -> None:
         received["registry_gauge"] = progress
 
-    monkeypatch.setattr(daemon, "_is_running", is_running_for_entry)
-
-    def write_pidfile_for_entry(config: ConfigBoot, *, runtime: Path) -> None:
-        pass
-
-    monkeypatch.setattr(daemon, "write_pidfile", write_pidfile_for_entry)
-
-    def remove_pidfile_for_entry(config: ConfigBoot, *, runtime: Path) -> None:
-        pass
-
-    monkeypatch.setattr(daemon, "_remove_pidfile", remove_pidfile_for_entry)
     monkeypatch.setattr(daemon, "start_health_server", fake_start)
     monkeypatch.setattr(daemon, "stop_health_server", fake_stop)
-
-    def endpoint_for_entry(config: ConfigBoot, *, runtime: Path) -> ServiceEndpoint:
-        return ServiceEndpoint("events_maintenance", 8109, Path("/nonexistent/em.pid"))
-
-    monkeypatch.setattr(
-        daemon,
-        "events_maintenance_endpoint",
-        endpoint_for_entry,
-    )
 
     def fake_pool(_self: object) -> _RunPool:
         return pool
@@ -575,19 +550,9 @@ def test_a_crashing_loop_cancels_its_siblings_and_ends_the_service(
         return object()
 
     async def fake_stop(_server: object) -> None:
+        assert (tmp_path / "run" / "events_maintenance.pid").exists()
         closed.append("health")
 
-    monkeypatch.setattr(daemon, "_is_running", is_running_for_entry)
-
-    def write_pidfile_for_entry(config: ConfigBoot, *, runtime: Path) -> None:
-        pass
-
-    monkeypatch.setattr(daemon, "write_pidfile", write_pidfile_for_entry)
-
-    def remove_pidfile_for_entry(config: ConfigBoot, *, runtime: Path) -> None:
-        return closed.append("pidfile")
-
-    monkeypatch.setattr(daemon, "_remove_pidfile", remove_pidfile_for_entry)
     monkeypatch.setattr(daemon, "start_health_server", fake_start)
     monkeypatch.setattr(daemon, "stop_health_server", fake_stop)
 
@@ -614,7 +579,8 @@ def test_a_crashing_loop_cancels_its_siblings_and_ends_the_service(
 
     assert [str(exc) for exc in raised.value.exceptions] == [f"{crashing} crashed"]
     assert sorted(cancelled) == sorted({"dispatch", "resolution", "registry_gauge"} - {crashing})
-    assert sorted(closed) == ["health", "pidfile", "pool"]
+    assert sorted(closed) == ["health", "pool"]
+    assert not (tmp_path / "run" / "events_maintenance.pid").exists()
 
 
 def _run_with_alert_loop(
@@ -649,28 +615,8 @@ def _run_with_alert_loop(
     async def fake_stop(_server: object) -> None:
         return None
 
-    monkeypatch.setattr(daemon, "_is_running", is_running_for_entry)
-
-    def write_pidfile_for_entry(config: ConfigBoot, *, runtime: Path) -> None:
-        pass
-
-    monkeypatch.setattr(daemon, "write_pidfile", write_pidfile_for_entry)
-
-    def remove_pidfile_for_entry(config: ConfigBoot, *, runtime: Path) -> None:
-        pass
-
-    monkeypatch.setattr(daemon, "_remove_pidfile", remove_pidfile_for_entry)
     monkeypatch.setattr(daemon, "start_health_server", fake_start)
     monkeypatch.setattr(daemon, "stop_health_server", fake_stop)
-
-    def endpoint_for_entry(config: ConfigBoot, *, runtime: Path) -> ServiceEndpoint:
-        return ServiceEndpoint("events_maintenance", 8109, Path("/nonexistent/em.pid"))
-
-    monkeypatch.setattr(
-        daemon,
-        "events_maintenance_endpoint",
-        endpoint_for_entry,
-    )
 
     def fake_pool(_self: object) -> _RunPool:
         return _RunPool()

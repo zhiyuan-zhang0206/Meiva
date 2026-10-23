@@ -43,8 +43,6 @@ def test_scheduler_shares_captured_image_with_health_and_lazy_log_database(
     monkeypatch.setattr(daemon, "build_pipeline", pipeline)
     monkeypatch.setattr(daemon, "init_gateway_process", logging)
     monkeypatch.setattr(daemon, "install_graceful_shutdown", Mock())
-    monkeypatch.setattr(daemon, "_remove_pidfile", Mock())
-    monkeypatch.setattr(daemon, "_hard_exit", exit_process)
     monkeypatch.setattr(daemon, "asyncio", SimpleNamespace(Runner=_Runner))
     monkeypatch.setattr(migrations, "assert_schema_current", schema)
     monkeypatch.setattr(code_version, "first_parent_count", count)
@@ -57,8 +55,8 @@ def test_scheduler_shares_captured_image_with_health_and_lazy_log_database(
         config.view.data_plane.db_url = "postgresql://scheduler-owner.invalid/live"
 
     monkeypatch.setattr(daemon, "run", run)
-    with patch.dict(os.environ):
-        daemon.main()
+    with patch.dict(os.environ, {"MEIVA_HOME": str(tmp_path)}):
+        daemon.main(exit_process=exit_process)
     capture.assert_called_once_with()
     create.assert_not_called()
     count.assert_not_called()
@@ -140,6 +138,7 @@ def test_worker_shares_one_gate_with_work_log_and_scratch_url(
 
 async def test_scheduler_health_uses_entry_image_and_preserves_loop_failure(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     from base.config import ConfigBoot
 
@@ -152,16 +151,16 @@ async def test_scheduler_health_uses_entry_image_and_preserves_loop_failure(
     config.read_process_environment()
     config.view.services.pg_backup_health_port = 18221
     monkeypatch.setattr(settings.services, "pg_backup_health_port", 18222)
+    run_dir = tmp_path / "run"
 
     def write_pidfile(owner: ConfigBoot, *, runtime: Path) -> None:
         assert owner is config
-        assert runtime == Path("run")
+        assert runtime == run_dir
+        runtime.mkdir(parents=True, exist_ok=True)
+        (runtime / "pg_backup.pid").write_text("1\n")
         owner.view.services.pg_backup_health_port = 18223
 
-    monkeypatch.setattr(daemon, "_is_running", Mock(return_value=False))
     monkeypatch.setattr(daemon, "write_pidfile", write_pidfile)
-    remove = Mock()
-    monkeypatch.setattr(daemon, "_remove_pidfile", remove)
     monkeypatch.setattr(daemon, "start_health_server", start)
     monkeypatch.setattr(daemon, "stop_health_server", stop)
     monkeypatch.setattr(daemon, "backup_loop", AsyncMock(side_effect=failure))
@@ -170,7 +169,7 @@ async def test_scheduler_health_uses_entry_image_and_preserves_loop_failure(
         await daemon.run(
             config=config,
             image=image,
-            runtime=Path("run"),
+            runtime=run_dir,
             clock=Clock(ClockConfig("UTC", "UTC", False), timers=SYSTEM_TIMERS),
         )
 
@@ -179,6 +178,4 @@ async def test_scheduler_health_uses_entry_image_and_preserves_loop_failure(
     assert start.call_args.args[1] == 18223
     assert start.call_args.kwargs["components"]()[0]["name"] == "backup"
     stop.assert_awaited_once_with(health)
-    remove.assert_called_once()
-    assert remove.call_args.args[0] is config
-    assert remove.call_args.kwargs["runtime"] == Path("run")
+    assert not (run_dir / "pg_backup.pid").exists()

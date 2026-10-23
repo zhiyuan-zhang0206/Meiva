@@ -402,7 +402,7 @@ def gate_httpx_info_logs() -> None:
     logging.getLogger("httpx").setLevel(logging.WARNING)
 
 
-def main() -> None:
+def main(*, exit_process: Callable[[int], None] | None = None) -> None:
     image = LoadedCommit.capture()
     machine_config = ConfigBoot()
     machine_config.boot()
@@ -458,7 +458,7 @@ def main() -> None:
     except (Exception, BaseExceptionGroup):
         _log.exception("[im_bridge] daemon crashed — uncaught exception escaped run()")
         code = 1
-    _hard_exit(code)
+    (exit_process or _hard_exit)(code)
 
 
 if __name__ == "__main__":

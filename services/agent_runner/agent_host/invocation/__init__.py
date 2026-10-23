@@ -1,6 +1,7 @@
 """Pending invocation state and the host's database-only failure boundary."""
 
 from collections.abc import Callable
+from dataclasses import dataclass
 from functools import partial
 
 from langchain_core.runnables import RunnableConfig
@@ -39,6 +40,22 @@ class PendingWorkResult:
         self.trace_attached = trace_attached
 
 
+@dataclass(frozen=True)
+class HandoffSettlement:
+    db: Database
+    bus: EventBus
+    relays: RelaySupervision
+    notes: HandoffNotes
+
+
+@dataclass(frozen=True)
+class InvocationHooks:
+    settlement: HandoffSettlement
+    drop_agent: Callable[[int], None]
+    kill_shell_sessions: Callable[[int, int], None]
+    wake_resumed: Callable[[int], object]
+
+
 # meiva:note
 # Settle a pending external handoff checkpoint, without activating a new lease.
 async def settle_handoff_before_invocation(
@@ -47,21 +64,18 @@ async def settle_handoff_before_invocation(
     agent_id: int,
     *,
     fresh_input: bool,
-    db: Database,
-    bus: EventBus,
-    relays: RelaySupervision,
-    notes: HandoffNotes,
+    settlement: HandoffSettlement,
 ) -> bool:
     async with database_phase():
         await settle_checkpoint(
             graph,
-            db,
-            bus,
+            settlement.db,
+            settlement.bus,
             agent_id,
-            relays,
+            settlement.relays,
             activate_accepted=False,
             incarnation=ctx.original_incarnation,
-            notes=notes,
+            notes=settlement.notes,
             read_local_machine=lambda: ctx.require_machine().name(),
         )
         if not fresh_input or ctx.original_incarnation is None:
@@ -99,14 +113,7 @@ async def finish_completed_invocation(
     agent_id: int,
     ctx: MeivaContext,
     pending: PendingWorkResult,
-    drop_agent: Callable[[int], None],
-    kill_shell_sessions: Callable[[int, int], None],
-    wake_resumed: Callable[[int], object],
-    *,
-    db: Database,
-    bus: EventBus,
-    relays: RelaySupervision,
-    notes: HandoffNotes,
+    hooks: InvocationHooks,
 ) -> TurnOutcome | None:
     """Settle the original completed work through its admission's checkpoint view."""
     # Correlate the original trace only after its checkpoint is durable.
@@ -119,7 +126,7 @@ async def finish_completed_invocation(
             pending.trace_attached = True
     if pending.result["exit_requested"] or pending.result["restart_requested"]:
         incarnation = ctx.require_original_incarnation(agent_id)
-        drop_agent(agent_id)
+        hooks.drop_agent(agent_id)
         # meiva:note
         # After a restart claim `halted` is the claim's verdict on the agent it found:
         # set, it was idle; clear, its turn was unfinished and the apply queues the note
@@ -130,9 +137,9 @@ async def finish_completed_invocation(
             kind = await apply_hosted_lifecycle(
                 pool,
                 incarnation,
-                bus=bus,
+                bus=hooks.settlement.bus,
                 resume_turn=resume_turn,
-                kill_shell_sessions=kill_shell_sessions,
+                kill_shell_sessions=hooks.kill_shell_sessions,
             )
         logger.info(
             "hosted lifecycle return settled",
@@ -147,18 +154,18 @@ async def finish_completed_invocation(
             # it up to its interval later. A host that is exiting refuses the wake and the
             # next host's scan takes the note.
             # meiva:link services/agent_runner/agent_host/lifecycle/docs/graceful-exit.meiva.okf.md
-            wake_resumed(agent_id)
+            hooks.wake_resumed(agent_id)
         return TurnOutcome(exited=kind == "terminate", crashed=False)
     if pending.result["turn_idle"]:
         async with database_phase():
             await settle_checkpoint(
                 checkpoints.graph,
-                db,
-                bus,
+                hooks.settlement.db,
+                hooks.settlement.bus,
                 agent_id,
-                relays,
+                hooks.settlement.relays,
                 incarnation=ctx.original_incarnation,
-                notes=notes,
+                notes=hooks.settlement.notes,
                 read_local_machine=lambda: ctx.require_machine().name(),
             )
         return TurnOutcome(exited=False, crashed=False)

@@ -461,13 +461,7 @@ def _raise_backoff_level(
         )
 
 
-def _sweep_backoff_resets(pool: ConnectionPool) -> None:
-    """Reset B7 backoff levels whose agent received real inbound or paused.
-
-    Covers agents the daemon is not currently tracking (a fresh resurrect /
-    first real message after a restart), so a stretched reminder interval never
-    outlives the engagement that should end it.
-    """
+def sweep_backoff_resets(pool: ConnectionPool) -> None:
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute(
             "SELECT id, heartbeat_backoff_level, "
@@ -559,7 +553,12 @@ async def sleep_with_liveness(liveness: LoopProgress, total_s: float) -> None:
 
 
 async def dispatch_loop(
-    pool: ConnectionPool, db: Database, bus: EventBus, liveness: LoopProgress
+    pool: ConnectionPool,
+    db: Database,
+    bus: EventBus,
+    liveness: LoopProgress,
+    *,
+    sweep_resets: Callable[[ConnectionPool], None] = sweep_backoff_resets,
 ) -> None:
     """Main loop: on bounded dispatch steps, send a check-in to due idle agents
     that have not paused.
@@ -601,7 +600,7 @@ async def dispatch_loop(
     while True:
         try:
             await sleep_with_liveness(liveness, step)
-            _sweep_backoff_resets(pool)
+            sweep_resets(pool)
             reconcile_checkin_outcomes(
                 pool,
                 pending_checkin=pending_checkin,

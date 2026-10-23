@@ -491,9 +491,8 @@ def test_helper_diagnostics_are_macos_only(
 def test_station_no_credential_is_unknown_and_does_not_send(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    probe = probes.StationProbe(database=_unused_database)
     answers = Mock(return_value=True)
-    monkeypatch.setattr(probe._module, "_station_answers", answers)
+    probe = probes.StationProbe(database=_unused_database, answers=answers)
     monkeypatch.setattr(
         probes, "settings", SimpleNamespace(data_plane=SimpleNamespace(cluster_secret=""))
     )

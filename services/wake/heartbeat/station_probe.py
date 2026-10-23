@@ -152,7 +152,10 @@ def _station_answers(url: str) -> bool:
         return False
 
 
-def main() -> None:
+station_answers = _station_answers
+
+
+def main(*, probe: Callable[[str], bool] = station_answers) -> None:
     image = LoadedCommit.capture()
     machine_config = ConfigBoot()
     machine_config.boot()
@@ -177,7 +180,7 @@ def main() -> None:
     target = resolve_target(database=database)
     if target is None:
         return  # no remote observatory configured — nothing to probe here
-    ok = _station_answers(target.url)
+    ok = probe(target.url)
     if not ok:
         logger.bind(_no_emitter=True, component="station-healthcheck").warning(
             "station probe: {} did not answer a bearer OTLP probe — "

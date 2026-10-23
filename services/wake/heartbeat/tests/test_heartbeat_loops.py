@@ -43,20 +43,6 @@ def _patch_run(
     async def fake_stop(_server: object) -> None:
         events.append("health")
 
-    def is_running_for_entry(config: ConfigBoot, *, runtime: Path) -> bool:
-        return False
-
-    monkeypatch.setattr(daemon, "_is_running", is_running_for_entry)
-
-    def write_pidfile_for_entry(config: ConfigBoot, *, runtime: Path) -> None:
-        pass
-
-    monkeypatch.setattr(daemon, "write_pidfile", write_pidfile_for_entry)
-
-    def remove_pidfile_for_entry(config: ConfigBoot, *, runtime: Path) -> None:
-        return events.append("pidfile")
-
-    monkeypatch.setattr(daemon, "_remove_pidfile", remove_pidfile_for_entry)
     monkeypatch.setattr(daemon, "start_health_server", fake_start)
     monkeypatch.setattr(daemon, "stop_health_server", fake_stop)
     patch_database(monkeypatch, pool=_Pool)
@@ -170,7 +156,8 @@ def test_a_crashing_loop_cancels_its_siblings_and_ends_the_service(
 
     assert [str(exc) for exc in raised.value.exceptions] == [f"{crashing} crashed"]
     assert sorted(cancelled) == sorted({"dispatch", "liveness", "digest"} - {crashing})
-    assert sorted(events) == ["health", "pidfile", "pool"]
+    assert sorted(events) == ["health", "pool"]
+    assert not (tmp_path / "run" / "heartbeat.pid").exists()
 
 
 async def test_the_digest_loop_flushes_at_once_then_paces(

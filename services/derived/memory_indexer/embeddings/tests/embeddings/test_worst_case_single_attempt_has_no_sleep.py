@@ -17,7 +17,7 @@ from services.derived.memory_indexer.embeddings import factory, gemini
 from services.derived.memory_indexer.embeddings.base import EmbeddingAPIError
 from services.derived.memory_indexer.embeddings.gemini import DIM, GeminiEmbeddingProvider
 from services.derived.memory_indexer.embeddings.tests.test_embeddings import (
-    _provider,
+    build_provider,
     embedding_server,
 )
 from services.derived.memory_indexer.embeddings.tests.test_embeddings import (
@@ -280,7 +280,7 @@ def test_embed_framing_drip_deadline(
 def test_embed_gzip_response_round_trip(monkeypatch: pytest.MonkeyPatch, chunked: bool) -> None:
     with embedding_server(compressed=True, chunked=chunked, drip=False) as (endpoint, requests):
         monkeypatch.setattr(gemini, "ENDPOINT", endpoint)
-        result = _provider().embed_batch(["hello"])
+        result = build_provider().embed_batch(["hello"])
         np.testing.assert_array_equal(result, np.ones((1, DIM), dtype=np.float32))
         assert len(requests) == 1
 
