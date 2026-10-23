@@ -101,3 +101,19 @@ post-commit announcement contract. Its cursor-owned SQL writer is
 [creation transaction primitives](../../base/agents/tasks/docs/creation-transactions.meiva.okf.md).
 The writer opens no connection, commits nothing and performs no launch.
 A keyed birth retains its original snapshot in this same transaction; see [[gateway/agents/docs/guarded-drafts.meiva.okf.md]].
+
+## Host configuration and inventory proof
+
+`tests/test_operations_config.py` exercises host reads and reducer writes through
+real unit files. A plugin config face and persisted image provide a sensitive
+host field, so both value masking and omission from raw overrides are observable
+without replacing the panel metadata owner. Existing validators decide valid and
+invalid writes, including atomic rejection and preservation of unnamed fields.
+
+`tests/test_inventory_ops.py` reads the real merged built-in and machine MCP
+declarations and their enabled overlay. Invalid declarations fail before writes;
+disabled servers remain visible in inventory. A child process fixes display
+environment before importing the application and calls the normal operations
+with the existing `Host` port. It verifies browser capability hints and rejection
+of enabling a display-dependent MCP server on a headless host, while allowing
+that server to be disabled.
