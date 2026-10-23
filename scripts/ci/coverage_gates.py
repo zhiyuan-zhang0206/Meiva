@@ -27,7 +27,7 @@ import json
 import os
 import sys
 from collections import defaultdict
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 # The 85% gate denominator — must match [tool.coverage.run].source's core
@@ -116,33 +116,37 @@ def _core_rate(per_domain: dict[str, list[int]]) -> tuple[float, int, int]:
     return _rate(covered, valid), covered, valid
 
 
-def _print_domain_table(per_domain: dict[str, list[int]]) -> None:
+def _print_domain_table(
+    per_domain: dict[str, list[int]], floors: Mapping[str, float] = FLOORS
+) -> None:
     print("all measured domains (covered/total lines):")
     for name, (covered, valid) in sorted(per_domain.items(), key=lambda kv: kv[1][1], reverse=True):
         note = ""
         if name in CORE_DOMAINS:
             note = " — core gate"
-        elif name in FLOORS:
+        elif name in floors:
             rate = _rate(covered, valid)
-            verdict = "ok" if rate >= FLOORS[name] else f"FAIL (floor {FLOORS[name]}%)"
-            note = f" — floor {FLOORS[name]}% {verdict}"
+            verdict = "ok" if rate >= floors[name] else f"FAIL (floor {floors[name]}%)"
+            note = f" — floor {floors[name]}% {verdict}"
         print(f"  {name:>20} {_rate(covered, valid):>6}% ({covered}/{valid}){note}")
 
 
 def _print_floored_subdomains(
-    per_domain: dict[str, list[int]], per_subdomain: dict[str, list[int]]
+    per_domain: dict[str, list[int]],
+    per_subdomain: dict[str, list[int]],
+    floors: Mapping[str, float] = FLOORS,
 ) -> None:
-    floored_subdomains = [p for p in FLOORS if "/" in p]
+    floored_subdomains = [p for p in floors if "/" in p]
     if not floored_subdomains:
         return
     print("floored subdomains:")
     for prefix in floored_subdomains:
         rate, covered, valid = _prefix_rate(per_domain, per_subdomain, prefix)
-        verdict = "ok" if rate >= FLOORS[prefix] else f"FAIL (floor {FLOORS[prefix]}%)"
-        print(f"  {prefix:>20} {rate:>6}% ({covered}/{valid}) — floor {FLOORS[prefix]}% {verdict}")
+        verdict = "ok" if rate >= floors[prefix] else f"FAIL (floor {floors[prefix]}%)"
+        print(f"  {prefix:>20} {rate:>6}% ({covered}/{valid}) — floor {floors[prefix]}% {verdict}")
 
 
-def check(files: dict[str, dict], threshold: float) -> int:
+def check(files: dict[str, dict], threshold: float, *, floors: Mapping[str, float] = FLOORS) -> int:
     """Enforce the gates against a coverage.json `files` map.
 
     Returns 0 when every gate passes, 1 otherwise. Always prints the
@@ -159,10 +163,10 @@ def check(files: dict[str, dict], threshold: float) -> int:
     if core_rate < threshold:
         failures.append(f"core combined coverage {core_rate}% below {threshold}%")
 
-    _print_domain_table(per_domain)
-    _print_floored_subdomains(per_domain, per_subdomain)
+    _print_domain_table(per_domain, floors)
+    _print_floored_subdomains(per_domain, per_subdomain, floors)
 
-    for prefix, floor in FLOORS.items():
+    for prefix, floor in floors.items():
         rate, _covered, valid = _prefix_rate(per_domain, per_subdomain, prefix)
         if valid == 0:
             # Existence check, independent of the floor value: a floored
@@ -185,13 +189,19 @@ def check(files: dict[str, dict], threshold: float) -> int:
     return 0
 
 
-def main(argv: Sequence[str] | None = None) -> int:
+def main(
+    argv: Sequence[str] | None = None,
+    *,
+    floors: Mapping[str, float] = FLOORS,
+    env_threshold: str | None = None,
+) -> int:
     args = list(sys.argv[1:] if argv is None else argv)
     json_path = args[0] if args else "coverage.json"
-    threshold = float(os.environ.get("BACKEND_COVERAGE_THRESHOLD", CORE_THRESHOLD_DEFAULT))
+    raw = os.environ.get("BACKEND_COVERAGE_THRESHOLD") if env_threshold is None else env_threshold
+    threshold = float(CORE_THRESHOLD_DEFAULT if raw is None else raw)
     with Path(json_path).open() as f:
         data = json.load(f)
-    return check(data["files"], threshold)
+    return check(data["files"], threshold, floors=floors)
 
 
 if __name__ == "__main__":

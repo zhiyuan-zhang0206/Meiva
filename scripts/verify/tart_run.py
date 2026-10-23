@@ -200,7 +200,7 @@ def run(ref: str, evidence_root: Path, *, repo: Path, golden: str, tart: Tart) -
         tart.require_stopped(golden)
         tart.require_capacity()
         with evidence.action("export"):
-            export_commit(repo, commit, export)
+            export_commit(repo, commit, export, home=tart._home)
         evidence.step("clone", tart.argv("clone", golden, vm))
         with evidence.action("boot"):
             tart.require_capacity()

@@ -6,4 +6,4 @@ exports = ["agent_surface.py", "audit", "ci", "codegen", "data_plane_ops", "host
 "codegen" = []
 "content_lint" = ["agent_surface.py", "audit", "codegen"]
 "lint" = ["agent_surface.py", "content_lint", "structure"]
-"tests" = ["ci", "codegen", "host_ops", "lint", "verify"]
+"tests" = ["ci", "codegen", "host_ops", "lint", "provision", "verify"]

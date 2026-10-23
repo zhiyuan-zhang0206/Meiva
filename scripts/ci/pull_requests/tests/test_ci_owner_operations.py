@@ -80,16 +80,12 @@ def test_trunk_priority_maps_cli_names_to_submit_values(priority: str, expected:
     assert owner_operations.trunk_priority(priority) == expected
 
 
-def test_queue_resolution_prefers_flag_then_environment_then_trunk_default(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv("CI_QUEUE", "trunk")
+def test_queue_resolution_prefers_flag_then_environment_then_trunk_default() -> None:
+    env = {"CI_QUEUE": "trunk"}
     with pytest.raises(ValueError, match="unknown CI queue"):
-        owner_operations.resolve_queue("retired")
-    assert owner_operations.resolve_queue(None) == "trunk"
-
-    monkeypatch.delenv("CI_QUEUE")
-    assert owner_operations.resolve_queue(None) == "trunk"
+        owner_operations.resolve_queue("retired", env=env)
+    assert owner_operations.resolve_queue(None, env=env) == "trunk"
+    assert owner_operations.resolve_queue(None, env={}) == "trunk"
 
 
 class _TrunkResponse:
@@ -126,12 +122,10 @@ def _urlopen_sequence(
 
 
 def test_trunk_queue_submits_and_reports_merged(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     gh_calls: list[list[str]] = []
     requests: list[urllib.request.Request] = []
-    monkeypatch.setattr(owner_operations, "queue_cooldown_seconds", _no_cooldown)
-    monkeypatch.setattr(status, "check_ci", _all_green)
     open_url = _urlopen_sequence(
         [
             _TrunkResponse({"accepted": True}),
@@ -151,6 +145,8 @@ def test_trunk_queue_submits_and_reports_merged(
         host=_gh_runner(gh_calls),
         clock=_make_clock(),
         open_url=open_url,
+        check_ci_fn=_all_green,
+        cooldown_fn=_no_cooldown,
     )
 
     assert rc == 0
@@ -276,16 +272,15 @@ def test_trunk_submit_returns_enqueue_error_after_second_http_error() -> None:
 
 
 def test_trunk_merge_requires_token_before_waiting(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
-    monkeypatch.delenv("TRUNK_API_TOKEN", raising=False)
-
     assert (
         ci_utils.main(
             ["42", "--merge", "--queue", "trunk"],
             clock=_make_clock(),
             host=fake_host(),
             open_url=FakeUrlOpener(),
+            env={},
         )
         == 3
     )
@@ -320,10 +315,9 @@ def test_real_trunk_queue_checks_do_not_block_all_green_predicate() -> None:
 
 
 def test_json_query_includes_trunk_checks(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     queue_check = {"name": "Trunk Merge Queue (main)", "status": "IN_PROGRESS"}
-    monkeypatch.setattr(status, "check_ci", _all_green_with_trunk_queue_check)
 
     assert (
         monitor.query_once(
@@ -332,6 +326,7 @@ def test_json_query_includes_trunk_checks(
             as_json=True,
             host=_gh_runner([]),
             clock=_make_clock(),
+            check_ci_fn=_all_green_with_trunk_queue_check,
         )
         == 0
     )
@@ -339,7 +334,7 @@ def test_json_query_includes_trunk_checks(
 
 
 def test_query_once_not_ready_is_not_green(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     result = status.CIResult(
         verdict=status.CIStatus.NOT_READY, core_skipped=["backend shard (1/16)"]
@@ -355,10 +350,14 @@ def test_query_once_not_ready_is_not_green(
         del repo, host, clock
         return result
 
-    monkeypatch.setattr(status, "check_ci", _result)
     assert (
         monitor.query_once(
-            "42", "owner/repo", as_json=False, host=_gh_runner([]), clock=_make_clock()
+            "42",
+            "owner/repo",
+            as_json=False,
+            host=_gh_runner([]),
+            clock=_make_clock(),
+            check_ci_fn=_result,
         )
         == 1
     )
@@ -367,7 +366,7 @@ def test_query_once_not_ready_is_not_green(
 
 
 def test_json_query_includes_draft_fields(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     result = status.CIResult(
         verdict=status.CIStatus.NOT_READY,
@@ -385,10 +384,14 @@ def test_json_query_includes_draft_fields(
         del repo, host, clock
         return result
 
-    monkeypatch.setattr(status, "check_ci", _result)
     assert (
         monitor.query_once(
-            "42", "owner/repo", as_json=True, host=_gh_runner([]), clock=_make_clock()
+            "42",
+            "owner/repo",
+            as_json=True,
+            host=_gh_runner([]),
+            clock=_make_clock(),
+            check_ci_fn=_result,
         )
         == 1
     )
@@ -397,13 +400,9 @@ def test_json_query_includes_draft_fields(
     assert payload["core_skipped"] == ["backend shard (1/16)"]
 
 
-def test_trunk_flow_submits_without_reading_pr_labels(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_trunk_flow_submits_without_reading_pr_labels() -> None:
     gh_calls: list[list[str]] = []
     requests: list[urllib.request.Request] = []
-    monkeypatch.setattr(owner_operations, "queue_cooldown_seconds", _no_cooldown)
-    monkeypatch.setattr(status, "check_ci", _all_green)
     open_url = _urlopen_sequence(
         [_TrunkResponse({"accepted": True}), _TrunkResponse({"state": "merged"})], requests
     )
@@ -419,6 +418,8 @@ def test_trunk_flow_submits_without_reading_pr_labels(
             host=_gh_runner(gh_calls),
             clock=_make_clock(),
             open_url=open_url,
+            check_ci_fn=_all_green,
+            cooldown_fn=_no_cooldown,
         )
         == 0
     )
@@ -443,7 +444,7 @@ def test_trunk_flow_submits_without_reading_pr_labels(
 
 
 def test_trunk_submit_resumes_watch_on_real_http_409_error(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     """Real urllib raises HTTPError for a 409 (its str() is "HTTP Error 409:
     Conflict ..."), so the submit must treat THAT shape — not the literal
@@ -451,8 +452,6 @@ def test_trunk_submit_resumes_watch_on_real_http_409_error(
     submissions were retried twice and exited 4 instead of resuming watch)."""
     gh_calls: list[list[str]] = []
     requests: list[urllib.request.Request] = []
-    monkeypatch.setattr(owner_operations, "queue_cooldown_seconds", _no_cooldown)
-    monkeypatch.setattr(status, "check_ci", _all_green)
     responses: list[_TrunkResponse | urllib.error.URLError] = [
         urllib.error.HTTPError(
             "https://api.trunk.io/v1/submitPullRequest",
@@ -476,6 +475,8 @@ def test_trunk_submit_resumes_watch_on_real_http_409_error(
             host=_gh_runner(gh_calls),
             clock=_make_clock(),
             open_url=open_url,
+            check_ci_fn=_all_green,
+            cooldown_fn=_no_cooldown,
         )
         == 0
     )
@@ -514,12 +515,10 @@ def test_trunk_watch_keeps_polling_through_testing_state() -> None:
 
 
 def test_trunk_flow_resumes_watch_when_submit_reports_already_queued(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     gh_calls: list[list[str]] = []
     requests: list[urllib.request.Request] = []
-    monkeypatch.setattr(owner_operations, "queue_cooldown_seconds", _no_cooldown)
-    monkeypatch.setattr(status, "check_ci", _all_green)
     open_url = _urlopen_sequence(
         [_TrunkResponse({}, status=409), _TrunkResponse({"state": "merged"})], requests
     )
@@ -535,6 +534,8 @@ def test_trunk_flow_resumes_watch_when_submit_reports_already_queued(
             host=_gh_runner(gh_calls),
             clock=_make_clock(),
             open_url=open_url,
+            check_ci_fn=_all_green,
+            cooldown_fn=_no_cooldown,
         )
         == 0
     )
@@ -550,15 +551,13 @@ class _PlainTextResponse(_TrunkResponse):
 
 
 def test_trunk_submit_accepts_plain_text_ok_body(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     """submitPullRequest answers 200 with a plain-text 'OK' body (verified live
     2026-09-01); a 200 must count as success regardless of body shape, or a
     successful submit would be misread as an error and retried into a 409."""
     gh_calls: list[list[str]] = []
     requests: list[urllib.request.Request] = []
-    monkeypatch.setattr(owner_operations, "queue_cooldown_seconds", _no_cooldown)
-    monkeypatch.setattr(status, "check_ci", _all_green)
     open_url = _urlopen_sequence(
         [
             _PlainTextResponse({}),
@@ -577,6 +576,8 @@ def test_trunk_submit_accepts_plain_text_ok_body(
         host=_gh_runner(gh_calls),
         clock=_make_clock(),
         open_url=open_url,
+        check_ci_fn=_all_green,
+        cooldown_fn=_no_cooldown,
     )
 
     assert rc == 0
@@ -608,12 +609,10 @@ def _trunk_runner(
 
 
 def test_trunk_flow_warns_but_submits_when_base_lags_main(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     calls: list[list[str]] = []
     requests: list[urllib.request.Request] = []
-    monkeypatch.setattr(owner_operations, "queue_cooldown_seconds", _no_cooldown)
-    monkeypatch.setattr(status, "check_ci", _all_green)
     host = _trunk_runner(base_sha="a" * 40, main_sha="b" * 40, calls=calls)
     open_url = _urlopen_sequence(
         [_TrunkResponse({"accepted": True}), _TrunkResponse({"state": "merged"})], requests
@@ -629,6 +628,8 @@ def test_trunk_flow_warns_but_submits_when_base_lags_main(
         host=host,
         clock=_make_clock(),
         open_url=open_url,
+        check_ci_fn=_all_green,
+        cooldown_fn=_no_cooldown,
     )
 
     assert rc == 0
@@ -638,12 +639,10 @@ def test_trunk_flow_warns_but_submits_when_base_lags_main(
 
 
 def test_trunk_flow_refuses_when_require_fresh_base_and_stale(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     calls: list[list[str]] = []
     requests: list[urllib.request.Request] = []
-    monkeypatch.setattr(owner_operations, "queue_cooldown_seconds", _no_cooldown)
-    monkeypatch.setattr(status, "check_ci", _all_green)
     host = _trunk_runner(base_sha="a" * 40, main_sha="b" * 40, calls=calls)
     open_url = _urlopen_sequence(
         [_TrunkResponse({"accepted": True}), _TrunkResponse({"state": "merged"})], requests
@@ -660,6 +659,8 @@ def test_trunk_flow_refuses_when_require_fresh_base_and_stale(
         host=host,
         clock=_make_clock(),
         open_url=open_url,
+        check_ci_fn=_all_green,
+        cooldown_fn=_no_cooldown,
     )
 
     assert rc == 1
@@ -668,12 +669,10 @@ def test_trunk_flow_refuses_when_require_fresh_base_and_stale(
 
 
 def test_trunk_flow_skips_warning_when_base_is_current_main(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     calls: list[list[str]] = []
     requests: list[urllib.request.Request] = []
-    monkeypatch.setattr(owner_operations, "queue_cooldown_seconds", _no_cooldown)
-    monkeypatch.setattr(status, "check_ci", _all_green)
     host = _trunk_runner(base_sha="a" * 40, main_sha="a" * 40, calls=calls)
     open_url = _urlopen_sequence(
         [_TrunkResponse({"accepted": True}), _TrunkResponse({"state": "merged"})], requests
@@ -689,6 +688,8 @@ def test_trunk_flow_skips_warning_when_base_is_current_main(
         host=host,
         clock=_make_clock(),
         open_url=open_url,
+        check_ci_fn=_all_green,
+        cooldown_fn=_no_cooldown,
     )
 
     assert rc == 0
@@ -697,12 +698,10 @@ def test_trunk_flow_skips_warning_when_base_is_current_main(
 
 
 def test_trunk_flow_degrades_when_freshness_reads_fail(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     calls: list[list[str]] = []
     requests: list[urllib.request.Request] = []
-    monkeypatch.setattr(owner_operations, "queue_cooldown_seconds", _no_cooldown)
-    monkeypatch.setattr(status, "check_ci", _all_green)
     host = _trunk_runner(base_sha=None, main_sha=None, calls=calls)
     open_url = _urlopen_sequence(
         [_TrunkResponse({"accepted": True}), _TrunkResponse({"state": "merged"})], requests
@@ -718,6 +717,8 @@ def test_trunk_flow_degrades_when_freshness_reads_fail(
         host=host,
         clock=_make_clock(),
         open_url=open_url,
+        check_ci_fn=_all_green,
+        cooldown_fn=_no_cooldown,
     )
 
     assert rc == 0
@@ -726,12 +727,10 @@ def test_trunk_flow_degrades_when_freshness_reads_fail(
 
 
 def test_trunk_flow_warns_distinctly_when_require_mode_cannot_verify_freshness(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     calls: list[list[str]] = []
     requests: list[urllib.request.Request] = []
-    monkeypatch.setattr(owner_operations, "queue_cooldown_seconds", _no_cooldown)
-    monkeypatch.setattr(status, "check_ci", _all_green)
     host = _trunk_runner(base_sha=None, main_sha=None, calls=calls)
     open_url = _urlopen_sequence(
         [_TrunkResponse({"accepted": True}), _TrunkResponse({"state": "merged"})], requests
@@ -748,6 +747,8 @@ def test_trunk_flow_warns_distinctly_when_require_mode_cannot_verify_freshness(
         host=host,
         clock=_make_clock(),
         open_url=open_url,
+        check_ci_fn=_all_green,
+        cooldown_fn=_no_cooldown,
     )
 
     assert rc == 0

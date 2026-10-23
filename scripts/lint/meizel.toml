@@ -1,4 +1,4 @@
-exports = ["async_no_sync_blocking.py", "meiva_root_scope.py", "diagnostics", "fixture_scope.py", "host_platform_marks.py", "no_os_environ.py", "plugins", "pool_keepalives.py"]
+exports = ["async_no_sync_blocking.py", "diagnostics", "fixture_scope.py", "host_platform_marks.py", "locks", "meiva_root_scope.py", "no_os_environ.py", "plugins", "pool_keepalives.py"]
 
 [uses]
 "docstring_budget_report.py" = ["agent_docstrings.py"]

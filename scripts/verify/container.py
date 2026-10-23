@@ -99,10 +99,18 @@ def git_objects_dir(repo: Path) -> Path:
     return objects
 
 
-def docker_run_argv(name: str, image: str, objects: Path, memory: str, shm: str) -> list[str]:
+def docker_run_argv(
+    name: str,
+    image: str,
+    objects: Path,
+    memory: str,
+    shm: str,
+    *,
+    home: Path | None = None,
+) -> list[str]:
     """The one `docker run`: no published port, no environment, no socket, no SSH key,
     no host home; the object store read-only; a cache volume that holds no cluster."""
-    refuse_host_state(objects)
+    refuse_host_state(objects, home=home)
     return [
         "docker",
         "run",

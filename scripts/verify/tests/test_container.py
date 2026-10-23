@@ -22,8 +22,10 @@ _REPO_ROOT = Path(__file__).resolve().parents[3]
 _DOCKERFILE = _REPO_ROOT / "scripts/verify/Dockerfile"
 
 
-def _run_argv(objects: Path) -> list[str]:
-    return container.docker_run_argv("meiva-verify-test", "meiva-verify:test", objects, "8g", "1g")
+def _run_argv(objects: Path, *, home: Path | None = None) -> list[str]:
+    return container.docker_run_argv(
+        "meiva-verify-test", "meiva-verify:test", objects, "8g", "1g", home=home
+    )
 
 
 def _git(repo: Path, *args: str) -> str:
@@ -42,19 +44,16 @@ def _git(repo: Path, *args: str) -> str:
     "relative",
     [".", "..", ".meiva", ".meiva/source", ".ssh", ".gnupg", ".aws", ".docker"],
 )
-def test_host_home_and_its_sealed_directories_are_refused(
-    relative: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_host_home_and_its_sealed_directories_are_refused(relative: str, tmp_path: Path) -> None:
     home = tmp_path / "home"
     (home / ".meiva/source").mkdir(parents=True)
     for name in (".ssh", ".gnupg", ".aws", ".docker"):
         (home / name).mkdir()
-    monkeypatch.setenv("HOME", str(home))
 
     with pytest.raises(ValueError, match="refusing to mount host state"):
-        boundary.refuse_host_state(home / relative)
+        boundary.refuse_host_state(home / relative, home=home)
     with pytest.raises(ValueError, match="refusing to mount host state"):
-        _run_argv(home / relative)
+        _run_argv(home / relative, home=home)
 
 
 def test_the_container_runtime_socket_is_refused(tmp_path: Path) -> None:
@@ -64,15 +63,12 @@ def test_the_container_runtime_socket_is_refused(tmp_path: Path) -> None:
         boundary.refuse_host_state(socket)
 
 
-def test_a_repository_object_store_inside_home_is_allowed(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_a_repository_object_store_inside_home_is_allowed(tmp_path: Path) -> None:
     home = tmp_path / "home"
     objects = home / "Meiva/.git/objects"
     objects.mkdir(parents=True)
-    monkeypatch.setenv("HOME", str(home))
 
-    boundary.refuse_host_state(objects)
+    boundary.refuse_host_state(objects, home=home)
 
 
 # ----------------------------------------------------------------- the one docker run

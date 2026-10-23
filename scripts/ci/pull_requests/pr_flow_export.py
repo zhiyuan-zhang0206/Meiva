@@ -199,7 +199,14 @@ def run_gh(args: list[str], *, timeout: float = _GH_TIMEOUT_S) -> str:
     return result.stdout
 
 
-def fetch_closed_prs(repo: str, since: datetime, stats: RunStats) -> list[dict[str, Any]]:
+def fetch_closed_prs(
+    repo: str,
+    since: datetime,
+    stats: RunStats,
+    *,
+    run_gh_fn: Callable[..., str] = run_gh,
+    max_pages: int = MAX_LIST_PAGES,
+) -> list[dict[str, Any]]:
     """Closed PRs updated since `since`, newest-updated first (paginated).
 
     Sorted by ``updated`` desc, so the walk can stop at the first page whose
@@ -208,8 +215,8 @@ def fetch_closed_prs(repo: str, since: datetime, stats: RunStats) -> list[dict[s
     """
     jq = "[.[] | {number, created_at, updated_at, merged_at}] | @json"
     prs: list[dict[str, Any]] = []
-    for page in range(1, MAX_LIST_PAGES + 1):
-        out = run_gh(
+    for page in range(1, max_pages + 1):
+        out = run_gh_fn(
             [
                 "api",
                 f"repos/{repo}/pulls?state=closed&sort=updated&direction=desc"
@@ -232,11 +239,18 @@ def fetch_closed_prs(repo: str, since: datetime, stats: RunStats) -> list[dict[s
         except ValueError:
             continue  # unparsable stamp: keep walking rather than stop early
     raise PrFlowError(
-        f"pulls walk exceeded {MAX_LIST_PAGES} pages — run budget exhausted, window truncated"
+        f"pulls walk exceeded {max_pages} pages — run budget exhausted, window truncated"
     )
 
 
-def fetch_timeline(repo: str, number: int, stats: RunStats) -> list[dict[str, Any]]:
+def fetch_timeline(
+    repo: str,
+    number: int,
+    stats: RunStats,
+    *,
+    run_gh_fn: Callable[..., str] = run_gh,
+    max_pages: int = MAX_TIMELINE_PAGES,
+) -> list[dict[str, Any]]:
     """One PR's issue timeline, projected to the events the aggregates read.
 
     Bounded at ``MAX_TIMELINE_PAGES`` pages; a busier timeline is truncated
@@ -244,8 +258,8 @@ def fetch_timeline(repo: str, number: int, stats: RunStats) -> list[dict[str, An
     """
     jq = "[.[] | {event, created_at}] | @json"
     events: list[dict[str, Any]] = []
-    for page in range(1, MAX_TIMELINE_PAGES + 1):
-        out = run_gh(
+    for page in range(1, max_pages + 1):
+        out = run_gh_fn(
             [
                 "api",
                 f"repos/{repo}/issues/{number}/timeline?per_page={_PAGE_SIZE}&page={page}",
@@ -262,7 +276,7 @@ def fetch_timeline(repo: str, number: int, stats: RunStats) -> list[dict[str, An
             break
     else:
         print(
-            f"pr-flow: PR #{number} timeline truncated at {MAX_TIMELINE_PAGES} pages",
+            f"pr-flow: PR #{number} timeline truncated at {max_pages} pages",
             file=sys.stderr,
         )
     return events
@@ -603,11 +617,17 @@ def build_snapshot(
     }
 
 
-def emit_snapshot(snapshot: dict[str, Any], *, dry_run: bool, pipeline: Any) -> None:
+def emit_snapshot(
+    snapshot: dict[str, Any],
+    *,
+    dry_run: bool,
+    pipeline: Any,
+    emit_fn: Callable[..., None] | None = None,
+) -> None:
     """Emit the daily + run events through the unified telemetry pipeline."""
     if dry_run:
         return
-    emit_events(snapshot, pipeline=pipeline)
+    (emit_fn or emit_events)(snapshot, pipeline=pipeline)
 
 
 def emit_events(snapshot: dict[str, Any], *, pipeline: Any) -> None:

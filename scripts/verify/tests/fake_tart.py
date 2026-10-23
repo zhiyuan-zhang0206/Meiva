@@ -1,13 +1,12 @@
 from __future__ import annotations
 
 import json
-import os
 import sys
 import time
 from pathlib import Path
 from typing import Any
 
-HOME = Path(os.environ["FAKE_TART_HOME"])
+HOME = Path(__file__).resolve().parent
 
 
 def _load() -> dict[str, Any]:

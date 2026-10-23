@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import re
 import subprocess
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
@@ -482,7 +483,14 @@ def limbo_runs(
 
 
 def _empty_rollup_verdict(
-    result: CIResult, head_sha: str, repo: str | None, *, host: Host, clock: Clock
+    result: CIResult,
+    head_sha: str,
+    repo: str | None,
+    *,
+    host: Host,
+    clock: Clock,
+    runs_probe: Callable[..., list[str] | None] = runs_not_yet_reporting,
+    limbo_probe: Callable[..., list[LimboRun] | None] = limbo_runs,
 ) -> None:
     """Resolve an empty `statusCheckRollup` into a verdict on `result`.
     The rollup alone cannot tell "Actions has not attached the first check of a run yet" from
@@ -496,7 +504,7 @@ def _empty_rollup_verdict(
     encodes: a gh / network failure must not produce the very settled NO_CHECKS the probe exists to
     rule out.
     """
-    scheduled = runs_not_yet_reporting(head_sha, repo, host=host)
+    scheduled = runs_probe(head_sha, repo, host=host)
     if scheduled is None:
         result.verdict = CIStatus.ERROR
         result.error_detail = (
@@ -505,7 +513,7 @@ def _empty_rollup_verdict(
     elif scheduled:
         result.pending.extend(scheduled)
         result.verdict = CIStatus.PENDING
-        result.limbo = limbo_runs(head_sha, repo, host=host, clock=clock) or []
+        result.limbo = limbo_probe(head_sha, repo, host=host, clock=clock) or []
     else:
         result.verdict = CIStatus.NO_CHECKS
 
@@ -526,7 +534,16 @@ def _merge_conflict_result(data: dict, result: CIResult) -> CIResult:
 
 
 def _attached_checks_verdict(
-    result: CIResult, head_sha: str, repo: str | None, *, host: Host, clock: Clock
+    result: CIResult,
+    head_sha: str,
+    repo: str | None,
+    *,
+    host: Host,
+    clock: Clock,
+    has_workflows: Callable[[], bool] = repo_has_workflows,
+    runs_probe: Callable[..., list[str] | None] = runs_not_yet_reporting,
+    main_probe: Callable[..., bool | None] = main_workflow_run_completed,
+    limbo_probe: Callable[..., list[LimboRun] | None] = limbo_runs,
 ) -> None:
     """Resolve the verdict once every attached check has passed and none is still pending."""
     # Every check attached so far has passed. Attached, though, is not the same as finished: a
@@ -536,12 +553,12 @@ def _attached_checks_verdict(
     # MonsoraV2 #774: ALL_PASSED in ~2s while ci.yml run 34487002348 was still queued), and a
     # green verdict there ends the watch early. Ask the runs API once, before any green
     # verdict, whether more is coming.
-    scheduled = runs_not_yet_reporting(head_sha, repo, host=host)
+    scheduled = runs_probe(head_sha, repo, host=host)
     if scheduled:
         result.pending.extend(scheduled)
         result.verdict = CIStatus.PENDING
-        result.limbo = limbo_runs(head_sha, repo, host=host, clock=clock) or []
-    elif not result.workflow_checks and repo_has_workflows():
+        result.limbo = limbo_probe(head_sha, repo, host=host, clock=clock) or []
+    elif not result.workflow_checks and has_workflows():
         # Nothing from a workflow is attached — and nothing is confirmed scheduled (an
         # unanswerable probe, None, reads the same here) — while this checkout does define
         # workflows: the suite did not run. Reporting ALL_PASSED here is how a broken `runs-on`
@@ -585,9 +602,7 @@ def _attached_checks_verdict(
         # Not seen -> PENDING with the run name in `pending`: --wait keeps
         # polling (bounded by --timeout), and the one-shot keeps its legacy
         # contract — it prints this pending summary, never "all green".
-        main_run = (
-            main_workflow_run_completed(head_sha, repo, host=host) if repo_has_workflows() else True
-        )
+        main_run = main_probe(head_sha, repo, host=host) if has_workflows() else True
         if main_run is None:
             # Same asymmetry as every probe here: unanswerable is unknown,
             # never green (--wait exits 3 if it persists).
@@ -611,6 +626,10 @@ def check_ci(
     repo: str | None = None,
     host: Host,
     clock: Clock,
+    has_workflows: Callable[[], bool] = repo_has_workflows,
+    runs_probe: Callable[..., list[str] | None] = runs_not_yet_reporting,
+    main_probe: Callable[..., bool | None] = main_workflow_run_completed,
+    limbo_probe: Callable[..., list[LimboRun] | None] = limbo_runs,
 ) -> CIResult:
     """Poll one PR's CI status and mergeability via `gh pr view --json`.
     Returns a CIResult with a clear verdict — no ambiguous exit codes that agents misinterpret.
@@ -688,7 +707,15 @@ def check_ci(
         # An empty rollup is probed before it is called settled: only a
         # confirmed-empty runs API makes NO_CHECKS true (the attach window right
         # after a push looks identical to it — 2026-09-12, PR #2249).
-        _empty_rollup_verdict(result, data.get("headRefOid", ""), repo, host=host, clock=clock)
+        _empty_rollup_verdict(
+            result,
+            data.get("headRefOid", ""),
+            repo,
+            host=host,
+            clock=clock,
+            runs_probe=runs_probe,
+            limbo_probe=limbo_probe,
+        )
         return result
 
     core_skipped = core_suite_skipped(checks)
@@ -703,6 +730,16 @@ def check_ci(
     elif result.pending:
         result.verdict = CIStatus.PENDING
     else:
-        _attached_checks_verdict(result, data.get("headRefOid", ""), repo, host=host, clock=clock)
+        _attached_checks_verdict(
+            result,
+            data.get("headRefOid", ""),
+            repo,
+            host=host,
+            clock=clock,
+            has_workflows=has_workflows,
+            runs_probe=runs_probe,
+            main_probe=main_probe,
+            limbo_probe=limbo_probe,
+        )
 
     return result
