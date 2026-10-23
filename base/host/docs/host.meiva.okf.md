@@ -67,3 +67,8 @@ real client starts a listener on port 0; none patches `urlopen` or `socket`.
 The private-storage live Unix-socket test uses a short `/tmp` root so macOS's
 AF_UNIX path limit does not fail at bind before the test reaches socket skipping
 and ordinary-file mode repair.
+
+Drive convergence receives the existing `Host` and an explicit user home when
+enumerating candidate folders. The lifecycle CLI captures those candidates once,
+passes them to the real write/read/delete probe, and reuses the same paths in its
+warning. A Drive mount is never accepted from directory existence alone.

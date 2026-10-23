@@ -19,3 +19,8 @@ Its component nodes describe the current contracts and implementation.
 - [[base/deploy/schema/docs/reset-generations.meiva.okf.md]] — Schema reset generations.
 - [[base/deploy/schema/docs/rollback_snapshot.meiva.okf.md]] — Recovery Snapshot Convention.
 - [[base/deploy/docs/start-trace.meiva.okf.md]] — Start phase timings (on-demand `meiva start` attribution).
+
+`timing.clock_values()` captures the canonical registered clock sources once at
+agent-host startup. The startup root supplies that complete snapshot to
+`assert_clock_lattice`; validation rejects missing or unknown names and checks
+the same declared ordering and derivations without reading settings again.

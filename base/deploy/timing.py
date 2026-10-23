@@ -15,7 +15,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 
 import base.deploy.progress_timeout as deploy
@@ -299,26 +299,27 @@ CONSTRAINTS: list[Constraint] = [
 ]
 
 
-def _resolve(expr: str) -> float:
-    """Resolve `"NAME"`, `"N * NAME"`, or `"NAME + NAME"` against `CLOCKS`."""
+def clock_values() -> dict[str, float]:
+    return {name: clock.get() for name, clock in CLOCKS.items()}
+
+
+# meiva:note
+# Constraint expressions contain a name, a scaled name, or a sum of those terms.
+def _resolve(expr: str, values: Mapping[str, float]) -> float:
     if " + " in expr:
-        return sum(_resolve(part) for part in expr.split(" + "))
+        return sum(_resolve(part, values) for part in expr.split(" + "))
     if " * " in expr:
         n, name = expr.split(" * ", 1)
-        return float(n) * CLOCKS[name].get()
-    return CLOCKS[expr].get()
+        return float(n) * values[name]
+    return values[expr]
 
 
-def validate_clock_lattice() -> list[str]:
-    """Check every declared ordering against the LIVE clock values.
-
-    Returns a list of human-readable violations (empty when the lattice holds).
-    Values are read lazily at call time, so settings / env overrides and test
-    monkeypatches are all reflected.
-    """
+def validate_clock_lattice(values: Mapping[str, float]) -> list[str]:
+    if values.keys() != CLOCKS.keys():
+        raise ValueError("clock snapshot must contain exactly the registered clock names")
     failures: list[str] = []
     for c in CONSTRAINTS:
-        left, right = _resolve(c.lhs), _resolve(c.rhs)
+        left, right = _resolve(c.lhs, values), _resolve(c.rhs, values)
         holds = {
             "<": left < right,
             "<=": left <= right,
@@ -334,10 +335,10 @@ class ClockLatticeError(RuntimeError):
     """Raised when live clock values violate a declared lattice ordering."""
 
 
-def assert_clock_lattice() -> None:
+def assert_clock_lattice(values: Mapping[str, float]) -> None:
     """Fail fast on any lattice violation. Called at agent-host startup so an
     operator env override that inverts a load-bearing ordering dies loudly on
     the box that lives by these clocks, never silently mid-incident."""
-    failures = validate_clock_lattice()
+    failures = validate_clock_lattice(values)
     if failures:
         raise ClockLatticeError("clock lattice violated:\n  " + "\n  ".join(failures))
