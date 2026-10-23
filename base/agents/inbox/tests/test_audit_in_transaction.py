@@ -4,8 +4,8 @@ from typing import Any
 
 import psycopg
 import pytest
+from psycopg import sql
 
-from base.agents.inbox import insert
 from base.agents.inbox.compact import insert_compact_request_inbound
 from base.agents.inbox.insert import insert_inbound_message, insert_spawn_prompt_in_transaction
 from base.db import Database, create_agent
@@ -25,10 +25,6 @@ def _audit(
     return [(r[0], r[1], r[2]) for r in rows]
 
 
-def _refuse(_conn: psycopg.Connection, _event: Event) -> Event:
-    raise RuntimeError("audit write failed")
-
-
 def test_an_inbound_and_its_audit_fact_commit_together(
     db_conn: psycopg.Connection, database: Database, event_bus: EventBus
 ) -> None:
@@ -43,18 +39,39 @@ def test_an_inbound_and_its_audit_fact_commit_together(
 
 def test_an_inbound_whose_audit_fact_cannot_be_recorded_is_not_written(
     db_conn: psycopg.Connection,
-    monkeypatch: pytest.MonkeyPatch,
     database: Database,
     event_bus: EventBus,
 ) -> None:
     agent_id = create_agent(db_conn)
-    monkeypatch.setattr(insert, "record_audit", _refuse)
-
-    with pytest.raises(RuntimeError, match="audit write failed"):
-        insert_inbound_message(
-            db_conn, agent_id, "", source="user", kind="restart", bus=event_bus, database=database
-        )
-    db_conn.rollback()
+    db_conn.execute(
+        "CREATE FUNCTION pg_temp.reject_restart_audit() RETURNS trigger LANGUAGE plpgsql AS $$ "
+        "BEGIN RAISE EXCEPTION 'audit write failed' USING ERRCODE = '23514'; END $$"
+    )
+    db_conn.execute(
+        sql.SQL(
+            "CREATE TRIGGER reject_restart_audit BEFORE INSERT ON audit_events "
+            "FOR EACH ROW WHEN (NEW.event_name = 'restart' AND NEW.agent_id = {}) "
+            "EXECUTE FUNCTION pg_temp.reject_restart_audit()"
+        ).format(sql.Literal(agent_id))
+    )
+    db_conn.commit()
+    try:
+        with pytest.raises(psycopg.errors.CheckViolation, match="audit write failed"):
+            insert_inbound_message(
+                db_conn,
+                agent_id,
+                "",
+                source="user",
+                kind="restart",
+                bus=event_bus,
+                database=database,
+            )
+        db_conn.rollback()
+    finally:
+        db_conn.rollback()
+        db_conn.execute("DROP TRIGGER reject_restart_audit ON audit_events")
+        db_conn.execute("DROP FUNCTION pg_temp.reject_restart_audit()")
+        db_conn.commit()
 
     count = db_conn.execute(
         "SELECT count(*) FROM inbound_messages WHERE agent_id=%s", (agent_id,)
