@@ -42,13 +42,29 @@ def test_load_durations_rejects_non_mapping(tmp_path: Path, contents: str) -> No
 
 @pytest.mark.parametrize(
     "contents",
-    ['{"some::test": "fast"}', '{"some::test": true}'],
+    [
+        '{"some::test": "fast"}',
+        '{"some::test": true}',
+        '{"some::test": null}',
+        '{"some::test": []}',
+        '{"some::test": {}}',
+    ],
 )
 def test_load_durations_rejects_non_numeric_values(tmp_path: Path, contents: str) -> None:
     bad = tmp_path / "bad.json"
     bad.write_text(contents)
     with pytest.raises(SystemExit, match="non-numeric"):
         refresh.load_durations(bad)
+
+
+def test_load_durations_keeps_integer_float_and_zero_values(tmp_path: Path) -> None:
+    path = tmp_path / "durations.json"
+    path.write_text('{"tests/a::test_one": 2, "tests/a::test_two": 1.25, "tests/a::test_zero": 0}')
+    assert refresh.load_durations(path) == {
+        "tests/a::test_one": 2.0,
+        "tests/a::test_two": 1.25,
+        "tests/a::test_zero": 0.0,
+    }
 
 
 def test_write_durations_committed_format_preserves_fast_measurements(
