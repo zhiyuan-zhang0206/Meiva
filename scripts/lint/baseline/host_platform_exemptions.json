@@ -1,0 +1,7 @@
+{
+  "allowed": 2,
+  "exemptions": {
+    "tests/ci/test_host_platform_marker.py::test_the_named_host_runs_and_every_other_host_skips_with_the_reason": "the assertion is about the skip `tests/fixtures/host_platform.py` produces here.",
+    "tests/fixtures/host_platform.py::_current_system": "this module IS the translation `tests/ci/test_host_platform_marker.py` checks."
+  }
+}

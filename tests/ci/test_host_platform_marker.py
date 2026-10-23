@@ -102,7 +102,7 @@ def test_the_named_host_runs_and_every_other_host_skips_with_the_reason(tmp_path
     from base.native_process.os_platform import Platform
 
     # meiva:note
-    # host-ok: the assertion is about the skip this host produces, so the host is an input.
+    # host-ok: the assertion is about the skip `tests/fixtures/host_platform.py` produces here.
     current = Platform.current().system
     other = "linux" if current == "darwin" else "darwin"
     result = _run(
