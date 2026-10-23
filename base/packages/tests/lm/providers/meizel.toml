@@ -1,14 +1,11 @@
 exports = ["provider_plugin_support.py"]
 
+[uses]
+"_billing_child.py" = ["billing_runtime.py", "billing_sensors.py"]
+"billing_sensors.py" = ["billing_runtime.py"]
+"lm_process.py" = ["_billing_child.py", "_fail_fast_child.py"]
+"test_call_fail_fast.py" = ["lm_process.py"]
+"test_lm_billing.py" = ["lm_process.py"]
+
 [debt.env-patch]
 "test_anthropic_fast.py#monkeypatch.setenv os.environ.ANTHROPIC_API_KEY" = 2
-
-[debt.first-party-patch]
-"test_lm_billing.py#monkeypatch.setattr base.config.settings.observability.trace_enabled" = 2
-"test_lm_billing.py#monkeypatch.setattr base.telemetry.tracing.is_initialized" = 1
-
-[debt.stdlib-patch]
-"test_call_fail_fast.py#monkeypatch.setattr time.sleep" = 1
-
-[debt.third-party-patch]
-"test_lm_billing.py#monkeypatch.setattr opentelemetry.trace.get_tracer" = 3
