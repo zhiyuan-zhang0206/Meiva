@@ -99,6 +99,16 @@ def test_a_skip_that_replaces_another_fails_although_the_count_matches() -> None
     assert "-1 tests/test_x.py  skip('old')" in report
 
 
+def test_a_stale_record_is_named_too() -> None:
+    # meiva:note
+    # The third direction: the tree and the number agree, but the record never learned
+    # about one site. A count alone cannot say which; the record's gaps can.
+    report = skip_sites.judge(_ONE_SKIP, allowed=1, baseline={})
+    assert report is not None
+    assert "the record is missing a site" in report
+    assert "+tests/test_x.py:3  skip('a')" in report
+
+
 def test_lowering_the_number_without_moving_the_tree_says_so() -> None:
     # meiva:note
     # The number and the record are the same fact; editing one is not a skip change, and

@@ -168,7 +168,7 @@ def _report(
     removed: dict[str, Counter[str]],
 ) -> str:
     moved = bool(added or removed)
-    lines = [_headline(total, allowed, moved=moved)]
+    lines = [_headline(total, allowed, added=bool(added), removed=bool(removed))]
     if not moved:
         lines.append(_unmoved(total, baseline))
     for path, counts in sorted(added.items()):
@@ -191,22 +191,32 @@ def _unmoved(total: int, baseline: dict[str, tuple[str, ...]]) -> str:
     )
 
 
-def _headline(total: int, allowed: int, *, moved: bool) -> str:
-    if total > allowed:
-        return f"tests: skip sites {total} > allowed {allowed}" + (
-            " - this run skips where the tree did not, at:"
-            if moved
-            else " - but the tree did not move."
+def _headline(total: int, allowed: int, *, added: bool, removed: bool) -> str:
+    if total > allowed and (added or removed):
+        return (
+            f"tests: skip sites {total} > allowed {allowed} - this run skips where the tree "
+            "did not, at:"
         )
-    if total < allowed:
-        return f"tests: skip sites {total} < allowed {allowed}" + (
-            " - the tree skips less than the number says; record the reduction at:"
-            if moved
-            else " - but the tree did not move."
+    if total < allowed and (added or removed):
+        return (
+            f"tests: skip sites {total} < allowed {allowed} - the tree skips less than the "
+            "number says; record the reduction at:"
+        )
+    if total > allowed or total < allowed:
+        return f"tests: skip sites {total} > allowed {allowed} - but the tree did not move."
+    if added and removed:
+        return (
+            f"tests: skip sites {total} = allowed {allowed}, but not the recorded ones - a "
+            "skip was added and another removed, at:"
+        )
+    if added:
+        return (
+            f"tests: skip sites {total} = allowed {allowed}, but the record is missing a site "
+            "- the tree skips one it never recorded, at:"
         )
     return (
-        f"tests: skip sites {total} = allowed {allowed}, but not the recorded ones - a skip "
-        "was added and another removed, at:"
+        f"tests: skip sites {total} = allowed {allowed}, but the record lists a site the tree "
+        "no longer has, at:"
     )
 
 
