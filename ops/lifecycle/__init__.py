@@ -7,6 +7,7 @@ import json
 import logging
 import re
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass, field
 from typing import Any
 
 from psycopg_pool import ConnectionPool
@@ -319,6 +320,29 @@ async def resurrect_agent_op(
     return ResurrectAgentResponse(status=ResurrectResult.SPAWNED)
 
 
+@dataclass(frozen=True)
+class ResurrectPlacementHooks:
+    status_fn: Callable[[Database, int], AgentStatus] = field(
+        default_factory=lambda: get_agent_status
+    )
+    recovery_halted_fn: Callable[[Database, int], bool] = field(
+        default_factory=lambda: recovery_halted
+    )
+    notice_source_fn: Callable[[Database, int, int], str | None] = field(
+        default_factory=lambda: system_notice_source_of_trigger
+    )
+    machine_fn: Callable[[Database, int], str] = field(default_factory=lambda: get_agent_machine)
+    dispatch_fn: Callable[..., Awaitable[Any]] = field(
+        default_factory=lambda: cluster_rpc.dispatch_to_machine
+    )
+    resurrect_op_fn: Callable[..., Awaitable[ResurrectAgentResponse]] = field(
+        default_factory=lambda: resurrect_agent_op
+    )
+    clear_suppression_fn: Callable[[Database, int], None] = field(
+        default_factory=lambda: clear_wake_suppression
+    )
+
+
 async def resurrect_if_terminated(
     db: Database,
     bus: EventBus,
@@ -327,6 +351,7 @@ async def resurrect_if_terminated(
     trigger_inbound_id: int,
     trigger_inbound_kind: WakeTriggerKind,
     local_machine: str,
+    hooks: ResurrectPlacementHooks | None = None,
 ) -> AgentStatus:
     """Try one home-machine wake for an exact newly delivered input.
 
@@ -337,14 +362,17 @@ async def resurrect_if_terminated(
     the force fence. No watchdog retries a failed attempt. Unknown errors reach
     the sender; known placement/refusal conditions are logged with the input queued.
     A new message or explicit operator resurrection can try again later."""
-    status = await asyncio.to_thread(get_agent_status, db, agent_id)
+    active = hooks or ResurrectPlacementHooks()
+    status = await asyncio.to_thread(active.status_fn, db, agent_id)
     if status is not AgentStatus.TERMINATED:
         return status
-    if trigger_inbound_kind != "chat" and await asyncio.to_thread(recovery_halted, db, agent_id):
+    if trigger_inbound_kind != "chat" and await asyncio.to_thread(
+        active.recovery_halted_fn, db, agent_id
+    ):
         _log.warning("automatic wake stopped after a permanent provider error: agent %s", agent_id)
         return status
     notice_source = await asyncio.to_thread(
-        system_notice_source_of_trigger, db, agent_id, trigger_inbound_id
+        active.notice_source_fn, db, agent_id, trigger_inbound_id
     )
     if notice_source is not None:
         _log.debug(
@@ -358,7 +386,7 @@ async def resurrect_if_terminated(
         return status
     body = ResurrectAgentRequest(resurrected_by="system")
     try:
-        home = await asyncio.to_thread(get_agent_machine, db, agent_id)
+        home = await asyncio.to_thread(active.machine_fn, db, agent_id)
         try:
             lifecycle_payload: dict[str, object] = {
                 "path": f"/api/agents/{agent_id}/resurrect-if-pending-work",
@@ -366,7 +394,7 @@ async def resurrect_if_terminated(
                 "trigger_inbound_id": trigger_inbound_id,
                 "trigger_inbound_kind": trigger_inbound_kind,
             }
-            forwarded = await cluster_rpc.dispatch_to_machine(
+            forwarded = await active.dispatch_fn(
                 db,
                 target_machine=home,
                 kind="lifecycle",
@@ -378,7 +406,7 @@ async def resurrect_if_terminated(
                 # Local ops server not reachable (test / single-process):
                 # fall back to in-process resurrect.
                 result_status = (
-                    await resurrect_agent_op(
+                    await active.resurrect_op_fn(
                         db,
                         bus,
                         agent_id,
@@ -390,8 +418,8 @@ async def resurrect_if_terminated(
             else:
                 raise
         if result_status == ResurrectResult.SPAWNED:
-            await asyncio.to_thread(clear_wake_suppression, db, agent_id)
-            status = await asyncio.to_thread(get_agent_status, db, agent_id)
+            await asyncio.to_thread(active.clear_suppression_fn, db, agent_id)
+            status = await asyncio.to_thread(active.status_fn, db, agent_id)
     except cluster_rpc.ClusterOpUnreachable as exc:
         _log.info(
             "resurrect_if_terminated: agent %s home machine unreachable, skipping "

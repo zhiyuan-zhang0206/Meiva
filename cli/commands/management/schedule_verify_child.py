@@ -40,7 +40,7 @@ import builtins
 import inspect
 import sys
 import types
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from pathlib import Path
 from typing import Any
 
@@ -125,7 +125,9 @@ def _is_sdk(target: object) -> bool:
     return isinstance(target, types.ModuleType) and target.__name__.split(".")[0] == "meiva"
 
 
-def _resolve(namespace: dict[str, Any], chain: tuple[str, list[str]]) -> tuple[Any, str | None]:
+def _resolve(
+    namespace: Mapping[str, object], chain: tuple[str, list[str]]
+) -> tuple[Any, str | None]:
     """The object a callee chain names, and (when a module lost the attribute) the missing name."""
     target: Any = namespace[chain[0]]
     for attr in chain[1]:
@@ -141,7 +143,7 @@ def _resolve(namespace: dict[str, Any], chain: tuple[str, list[str]]) -> tuple[A
 
 
 def _static_calls(
-    tree: ast.Module, namespace: dict[str, Any]
+    tree: ast.Module, namespace: Mapping[str, object]
 ) -> Iterator[tuple[ast.Call, tuple[str, list[str]]]]:
     """Calls rooted in a name the imports bound and the script never rebinds, with a fixed
     argument shape (no `*args` / `**kwargs` at the call site)."""
@@ -160,7 +162,7 @@ def _static_calls(
 
 
 def _problem(
-    node: ast.Call, chain: tuple[str, list[str]], namespace: dict[str, Any], root: Path
+    node: ast.Call, chain: tuple[str, list[str]], namespace: Mapping[str, object], root: Path
 ) -> str | None:
     dotted = ".".join([chain[0], *chain[1]])
     target, missing = _resolve(namespace, chain)
@@ -181,7 +183,7 @@ def _problem(
     return None
 
 
-def call_site_problems(tree: ast.Module, namespace: dict[str, Any], root: Path) -> list[str]:
+def call_site_problems(tree: ast.Module, namespace: Mapping[str, object], root: Path) -> list[str]:
     """One `L<line> <callee>(): <why>` per call whose arguments the callee cannot bind."""
     found = (
         _problem(node, chain, namespace, root) for node, chain in _static_calls(tree, namespace)

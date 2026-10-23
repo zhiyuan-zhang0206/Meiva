@@ -275,7 +275,7 @@ _AUTH_REFUSED = (
 )
 
 
-def _refused(**kwargs: Any) -> str:
+def assert_refused(**kwargs: Any) -> str:
     with pytest.raises(psycopg.OperationalError) as excinfo:
         psycopg.connect(connect_timeout=5, **kwargs).close()
     message = str(excinfo.value)
@@ -314,15 +314,29 @@ def test_birth_refuses_unauthenticated_and_owner_logins(born: Born) -> None:
     for host in ("127.0.0.1", socket_dir):
         # The owner exists but can never log in, with or without a password.
         for password in ("", "anything"):
-            _refused(host=host, port=born.pg_port, user="meiva", password=password, dbname="meiva")
+            assert_refused(
+                host=host, port=born.pg_port, user="meiva", password=password, dbname="meiva"
+            )
     # No password-less door over TCP, even for the OS-user superuser.
-    _refused(
+    assert_refused(
         host="127.0.0.1", port=born.pg_port, user=getpass.getuser(), password="", dbname="meiva"
     )
     # The pooler admits neither the owner nor a login without its password.
-    _refused(host="127.0.0.1", port=born.pooler_port, user="meiva", password="x", dbname="meiva")  # noqa: S106 — a wrong credential by design
+    assert_refused(
+        host="127.0.0.1",
+        port=born.pooler_port,
+        user="meiva",
+        password="x",  # noqa: S106 — a wrong credential by design
+        dbname="meiva",
+    )
     name, _password = born.login("gateway")
-    _refused(host="127.0.0.1", port=born.pooler_port, user=name, password="wrong", dbname="meiva")  # noqa: S106 — a wrong credential by design
+    assert_refused(
+        host="127.0.0.1",
+        port=born.pooler_port,
+        user=name,
+        password="wrong",  # noqa: S106 — a wrong credential by design
+        dbname="meiva",
+    )
     # The OS user reaches the administrator only through peer on the owner-only socket.
     with born.admin() as conn:
         assert conn.execute(
@@ -389,7 +403,9 @@ def test_pooler_restart_revokes_a_removed_user_a_reload_would_keep(
     assert rc == 0
     owner_after = ownership.pooler(base_pooler.ini_path(), base_pooler.pidfile_path())
     assert owner_after is not None and owner_after.pid != owner_before.pid
-    _refused(host="127.0.0.1", port=born.pooler_port, user=name, password=password, dbname="meiva")
+    assert_refused(
+        host="127.0.0.1", port=born.pooler_port, user=name, password=password, dbname="meiva"
+    )
 
 
 def test_unchanged_userlist_reloads_without_restart(
@@ -637,7 +653,7 @@ def test_collector_postgres_receiver_keeps_no_credential(
         with pytest.raises(psycopg.errors.InsufficientPrivilege):
             conn.execute("INSERT INTO agents (id) VALUES (920001)")
     # No password exists for the role: TCP (SCRAM) never admits it.
-    _refused(
+    assert_refused(
         host="127.0.0.1",
         port=born.pg_port,
         user=authority.MONITOR_ROLE,

@@ -48,7 +48,7 @@ from cli.commands.extensions.external_skill_host.ledger import (
     write_ledger,
 )
 
-_SKILL_NAMES: tuple[str, ...] = ("meiva-guide", "impersonator-guide")
+SKILL_NAMES: tuple[str, ...] = ("meiva-guide", "impersonator-guide")
 _MARKER_NAME = ".meiva-managed.json"
 
 
@@ -479,7 +479,12 @@ def _present_clients(home: Path, host: Host) -> list[_Client]:
 # Legacy standalone targets and their ledgers remain untouched: each client and
 # skill owns a separate ledger and the step never adopts or overwrites them.
 # meiva:link meiva_builtins/skills/platform/meiva-guide/external-agents/references/supported-clients.md
-def converge_external_agent_skill(ctx: ConvergeCtx, *, host_home: Path | None = None) -> None:
+def converge_external_agent_skill(
+    ctx: ConvergeCtx,
+    *,
+    host_home: Path | None = None,
+    skill_names: tuple[str, ...] = SKILL_NAMES,
+) -> None:
     home = Path.home() if host_home is None else host_home
     try:
         _validate_directory(home, "host home is not a regular directory")
@@ -496,7 +501,7 @@ def converge_external_agent_skill(ctx: ConvergeCtx, *, host_home: Path | None = 
         for client in present:
             _warn(client.label, f"private ownership ledger unavailable ({type(exc).__name__})")
         return
-    for skill_name in _SKILL_NAMES:
+    for skill_name in skill_names:
         source = ctx.repo / "meiva_builtins" / "skills" / "platform" / skill_name
         _validate_source_path(ctx.repo, source)
         snapshot = source_snapshot(source)

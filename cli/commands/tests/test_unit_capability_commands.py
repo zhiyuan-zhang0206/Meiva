@@ -18,7 +18,7 @@ from cli.commands.data_plane import pgbouncer as pooler
 from cli.commands.data_plane.config import DataPlaneConfig
 from cli.commands.data_plane.tests.data_plane_records import data_plane_config as data_plane_config
 from cli.commands.tests import test_single_box as _single_box
-from cli.commands.tests.test_single_box import Born, _refused
+from cli.commands.tests.test_single_box import Born, assert_refused
 from cli.database.runtime import CommandRuntime
 from cli.database.tests.cli_tests import operator_database as operator_database
 from cli.database.tests.command_inputs import command_runtime as command_runtime
@@ -52,7 +52,7 @@ def test_a_bearer_only_runner_receives_no_database_login(
         assert name not in payload and password not in payload
     endpoint = served["MEIVA_DB_URL"]
     assert urlsplit(endpoint).password is None
-    _refused(conninfo=endpoint)
+    assert_refused(conninfo=endpoint)
 
 
 def test_a_bundle_whose_login_cannot_be_proven_never_installs(

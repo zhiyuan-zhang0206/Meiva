@@ -72,7 +72,6 @@ exports = ["stop_support.py"]
 "test_stop_extras.py#monkeypatch.setattr services.desktop.permissions_helper.launchd_job.unregister_helper" = 2
 "test_stop_shell_sessions.py#monkeypatch.setattr cli.commands.lifecycle._temporary_stop.close_shell_sessions" = 1
 "test_stop_shell_sessions.py#monkeypatch.setattr cli.commands.lifecycle.service_stop.SHELL_SESSION_KILL_WAIT_S" = 1
-"test_stop_shell_sessions.py#monkeypatch.setattr cli.commands.lifecycle.service_stop._SHELL_SESSION_STOP_GRACE_S" = 1
 "test_stop_shell_sessions.py#monkeypatch.setattr cli.commands.lifecycle.service_stop.await_no_shell_sessions" = 1
 "test_stop_shell_sessions.py#monkeypatch.setattr cli.commands.lifecycle.service_stop.close_via_service" = 1
 "test_stop_shell_sessions.py#monkeypatch.setattr cli.commands.lifecycle.service_stop.live_shell_sessions" = 2

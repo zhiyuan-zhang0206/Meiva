@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from collections.abc import Callable
 
 
 def _h_mcp_add(args: argparse.Namespace) -> int:
@@ -83,10 +84,15 @@ def h_memory_init(args: argparse.Namespace) -> int:
     return cmd_memory_init(machine=args.runtime.machine)
 
 
-def _h_memory_search(args: argparse.Namespace) -> int:
+def h_memory_search(
+    args: argparse.Namespace,
+    *,
+    search_fn: Callable[..., int] | None = None,
+) -> int:
     from cli.commands.extensions.memory import cmd_memory_search
 
-    return cmd_memory_search(args.query, limit=args.limit, json_output=args.json)
+    target = cmd_memory_search if search_fn is None else search_fn
+    return target(args.query, limit=args.limit, json_output=args.json)
 
 
 def _nonempty_memory_query(value: str) -> str:
@@ -229,4 +235,4 @@ def add_memory_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) 
         action="store_true",
         help="emit the gateway results list as JSON",
     )
-    search_p.set_defaults(func=_h_memory_search)
+    search_p.set_defaults(func=h_memory_search)

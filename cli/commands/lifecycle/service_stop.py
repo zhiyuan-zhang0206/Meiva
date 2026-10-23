@@ -40,6 +40,7 @@ from services.agent_runner.pty_sessions import ledger
 # meiva:note
 # The unit stop's shell-session closure uses the shared stop bounds (`data_plane/stop_waits.py`).
 _SHELL_SESSION_STOP_GRACE_S = PROCESS_CLEANUP_WAIT_S
+SHELL_SESSION_STOP_WAIT_S = _SHELL_SESSION_STOP_GRACE_S
 SHELL_SESSION_KILL_WAIT_S = PROCESS_KILL_WAIT_S
 
 
@@ -201,8 +202,9 @@ def close_shell_sessions(
     direct_db: bool,
     database_factory: DatabaseFactory,
     local_machine: MachineIdentity,
+    cleanup_wait_s: float = SHELL_SESSION_STOP_WAIT_S,
 ) -> None:
-    grace_s = max(0.0, min(deadline - time.monotonic(), _SHELL_SESSION_STOP_GRACE_S))
+    grace_s = max(0.0, min(deadline - time.monotonic(), cleanup_wait_s))
     outcome, reason = _close_shell_sessions_now(grace_s, SHELL_SESSION_KILL_WAIT_S)
     _record_close_notices(
         outcome.closed,

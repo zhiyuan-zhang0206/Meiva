@@ -12,7 +12,3 @@ exports = ["converge_host.py", "lgtm_toggle.py", "migrations.py", "root_driver.p
 "stop.py" = ["_exclusive_resources.py", "_start_readiness_preflight.py", "_temporary_stop.py", "root_driver.py", "root_readiness.py", "service_stop.py", "start.py"]
 "stand_down.py" = []
 "tests" = ["_exclusive_resources.py", "_start_readiness_preflight.py", "_stop_extras.py", "_temporary_stop.py", "converge_host.py", "lgtm_toggle.py", "login_link.py", "migrations.py", "root_driver.py", "root_readiness.py", "service_stop.py", "stand_down.py", "start.py", "start_generation.py", "status.py", "stop.py"]
-
-[debt.private-name]
-"tests/converge_host/test_converge.py -> converge_host.py#_ensure_permissions_helper" = 1
-"tests/stop/test_stop_shell_sessions.py -> service_stop.py#_SHELL_SESSION_STOP_GRACE_S" = 2

@@ -35,9 +35,8 @@ from cli.database.tests.command_inputs import command_runtime as command_runtime
 SKILL = "operating-meiva-cluster"
 
 
-@pytest.fixture(autouse=True)
-def single_operator_skill(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(bridge, "_SKILL_NAMES", ("operating-meiva-cluster",))
+def _converge(ctx: ConvergeCtx, *, host_home: Path | None = None) -> None:
+    bridge.converge_external_agent_skill(ctx, host_home=host_home, skill_names=(SKILL,))
 
 
 def _world(
@@ -128,7 +127,7 @@ def test_interrupted_stage_publication_is_reported_and_never_resumed(
 
     monkeypatch.setattr(bridge, "rename_no_replace", interrupt_after_stage_publish)
     with pytest.raises(SystemExit, match="stage publication"):
-        bridge.converge_external_agent_skill(context, host_home=client.parent)
+        _converge(context, host_home=client.parent)
 
     assert interrupted
     assert _ledger(context)["transaction"]["stage_state"] == "publishing"
@@ -137,7 +136,7 @@ def test_interrupted_stage_publication_is_reported_and_never_resumed(
     residues_before = sorted(_residues(client))
     capsys.readouterr()
 
-    bridge.converge_external_agent_skill(context, host_home=client.parent)
+    _converge(context, host_home=client.parent)
 
     assert "not resumed" in capsys.readouterr().err
     assert not target.exists()
@@ -145,7 +144,7 @@ def test_interrupted_stage_publication_is_reported_and_never_resumed(
     assert sorted(_residues(client)) == residues_before
 
     _remove_by_hand(client, context)
-    bridge.converge_external_agent_skill(context, host_home=client.parent)
+    _converge(context, host_home=client.parent)
 
     assert (target / "SKILL.md").read_text() == "operator v1\n"
     assert _ledger(context)["transaction"] is None
@@ -167,7 +166,7 @@ def test_interrupted_target_claim_is_reported_and_leaves_a_late_target_alone(
         producer=operator_pipeline,
         command_config_machine=command_config_machine,
     )
-    bridge.converge_external_agent_skill(context, host_home=client.parent)
+    _converge(context, host_home=client.parent)
     target = _target(client)
     source.joinpath("SKILL.md").write_text("operator v2\n")
     original_rename = bridge.rename_no_replace
@@ -182,7 +181,7 @@ def test_interrupted_target_claim_is_reported_and_leaves_a_late_target_alone(
 
     monkeypatch.setattr(bridge, "rename_no_replace", interrupt_after_claim)
     with pytest.raises(SystemExit, match="target claim"):
-        bridge.converge_external_agent_skill(context, host_home=client.parent)
+        _converge(context, host_home=client.parent)
 
     assert interrupted
     assert _ledger(context)["transaction"]["claim_state"] == "claiming"
@@ -193,7 +192,7 @@ def test_interrupted_target_claim_is_reported_and_leaves_a_late_target_alone(
     residues_before = sorted(_residues(client))
     capsys.readouterr()
 
-    bridge.converge_external_agent_skill(context, host_home=client.parent)
+    _converge(context, host_home=client.parent)
 
     assert "not resumed" in capsys.readouterr().err
     assert (target / "user.txt").read_text() == "late user target\n"
@@ -203,7 +202,7 @@ def test_interrupted_target_claim_is_reported_and_leaves_a_late_target_alone(
     _remove_by_hand(client, context)
     (target / "user.txt").unlink()
     target.rmdir()
-    bridge.converge_external_agent_skill(context, host_home=client.parent)
+    _converge(context, host_home=client.parent)
 
     assert (target / "SKILL.md").read_text() == "operator v2\n"
     assert _ledger(context)["transaction"] is None
@@ -224,7 +223,7 @@ def test_cleanup_root_claim_restores_tree_modified_before_private_isolation(
         producer=operator_pipeline,
         command_config_machine=command_config_machine,
     )
-    bridge.converge_external_agent_skill(context, host_home=client.parent)
+    _converge(context, host_home=client.parent)
     source.joinpath("SKILL.md").write_text("operator v2\n")
     outside = tmp_path / "outside.md"
     outside.write_text("outside\n")
@@ -244,7 +243,7 @@ def test_cleanup_root_claim_restores_tree_modified_before_private_isolation(
 
     monkeypatch.setattr(bridge, "rename_no_replace", swap_before_cleanup_claim)
 
-    bridge.converge_external_agent_skill(context, host_home=client.parent)
+    _converge(context, host_home=client.parent)
 
     assert injected
     assert (_target(client) / "SKILL.md").read_text() == "operator v2\n"
@@ -258,7 +257,7 @@ def test_cleanup_root_claim_restores_tree_modified_before_private_isolation(
     monkeypatch.setattr(bridge, "rename_no_replace", original_rename)
     swapped.unlink()
     swapped.write_text("operator v1\n")
-    bridge.converge_external_agent_skill(context, host_home=client.parent)
+    _converge(context, host_home=client.parent)
 
     assert _residues(client) == []
     assert _ledger(context)["garbage"] == []
@@ -279,7 +278,7 @@ def test_restart_reconciles_cleanup_claim_before_post_write(
         producer=operator_pipeline,
         command_config_machine=command_config_machine,
     )
-    bridge.converge_external_agent_skill(context, host_home=client.parent)
+    _converge(context, host_home=client.parent)
     source.joinpath("SKILL.md").write_text("operator v2\n")
     original_rename = bridge.rename_no_replace
     interrupted = False
@@ -293,12 +292,12 @@ def test_restart_reconciles_cleanup_claim_before_post_write(
 
     monkeypatch.setattr(bridge, "rename_no_replace", interrupt_after_cleanup_claim)
     with pytest.raises(SystemExit, match="cleanup claim"):
-        bridge.converge_external_agent_skill(context, host_home=client.parent)
+        _converge(context, host_home=client.parent)
 
     assert interrupted
     assert _ledger(context)["garbage"][0]["location"] == "claiming"
     monkeypatch.setattr(bridge, "rename_no_replace", original_rename)
-    bridge.converge_external_agent_skill(context, host_home=client.parent)
+    _converge(context, host_home=client.parent)
 
     assert (_target(client) / "SKILL.md").read_text() == "operator v2\n"
     assert _ledger(context)["garbage"] == []
@@ -347,7 +346,7 @@ def test_restart_does_not_adopt_ambiguous_per_file_claim(
         producer=operator_pipeline,
         command_config_machine=command_config_machine,
     )
-    bridge.converge_external_agent_skill(context, host_home=client.parent)
+    _converge(context, host_home=client.parent)
     source.joinpath("SKILL.md").write_text("operator v2\n")
     original_rename = bridge.rename_no_replace
     interrupted = False
@@ -370,14 +369,14 @@ def test_restart_does_not_adopt_ambiguous_per_file_claim(
 
     monkeypatch.setattr(bridge, "rename_no_replace", interrupt_after_file_claim)
     with pytest.raises(SystemExit, match="per-file claim"):
-        bridge.converge_external_agent_skill(context, host_home=client.parent)
+        _converge(context, host_home=client.parent)
 
     ledger = _ledger(context)
     assert ledger["garbage"][0]["location"] == "quarantine"
     assert "claiming" in {claim["state"] for claim in ledger["garbage"][0]["file_claims"]}
 
     monkeypatch.setattr(bridge, "rename_no_replace", original_rename)
-    bridge.converge_external_agent_skill(context, host_home=client.parent)
+    _converge(context, host_home=client.parent)
 
     ledger = _ledger(context)
     assert ledger["garbage"] == []
@@ -400,7 +399,7 @@ def test_preexisting_per_file_quarantine_is_preserved_without_adoption(
         producer=operator_pipeline,
         command_config_machine=command_config_machine,
     )
-    bridge.converge_external_agent_skill(context, host_home=client.parent)
+    _converge(context, host_home=client.parent)
     source.joinpath("SKILL.md").write_text("operator v2\n")
     original_preserve = bridge_cleanup.preserve_claimed_tree
     collision: Path | None = None
@@ -422,7 +421,7 @@ def test_preexisting_per_file_quarantine_is_preserved_without_adoption(
     monkeypatch.setattr(
         bridge_cleanup, "preserve_claimed_tree", inject_collision_after_root_verification
     )
-    bridge.converge_external_agent_skill(context, host_home=client.parent)
+    _converge(context, host_home=client.parent)
 
     assert collision is not None
     assert collision.read_text() == "late user path\n"
@@ -448,7 +447,7 @@ def test_per_file_claim_failure_is_terminal_after_private_root_claim(
         producer=operator_pipeline,
         command_config_machine=command_config_machine,
     )
-    bridge.converge_external_agent_skill(context, host_home=client.parent)
+    _converge(context, host_home=client.parent)
     source.joinpath("SKILL.md").write_text("operator v2\n")
     original_rename = bridge.rename_no_replace
     attempts = 0
@@ -461,14 +460,14 @@ def test_per_file_claim_failure_is_terminal_after_private_root_claim(
         original_rename(source_path, destination)
 
     monkeypatch.setattr(bridge, "rename_no_replace", fail_file_claim)
-    bridge.converge_external_agent_skill(context, host_home=client.parent)
+    _converge(context, host_home=client.parent)
     assert attempts >= 1
     attempts_after_cleanup = attempts
     ledger = _ledger(context)
     assert ledger["garbage"] == []
     assert len(ledger["retained"]) == 1
 
-    bridge.converge_external_agent_skill(context, host_home=client.parent)
+    _converge(context, host_home=client.parent)
 
     assert attempts == attempts_after_cleanup
     assert (_target(client) / "SKILL.md").read_text() == "operator v2\n"
@@ -522,7 +521,7 @@ def test_converge_terminally_records_post_verification_replacement(
         producer=operator_pipeline,
         command_config_machine=command_config_machine,
     )
-    bridge.converge_external_agent_skill(context, host_home=client.parent)
+    _converge(context, host_home=client.parent)
     source.joinpath("SKILL.md").write_text("operator v2\n")
     outside = tmp_path / "outside.md"
     outside.write_text("outside\n")
@@ -541,7 +540,7 @@ def test_converge_terminally_records_post_verification_replacement(
             late_replacement = path
 
     monkeypatch.setattr(bridge_cleanup, "verify_cleanup_file", swap_after_verification)
-    bridge.converge_external_agent_skill(context, host_home=client.parent)
+    _converge(context, host_home=client.parent)
 
     assert late_replacement is not None
     assert late_replacement.is_symlink()
@@ -553,7 +552,7 @@ def test_converge_terminally_records_post_verification_replacement(
     assert all(claim["state"] == "retained" for claim in ledger["retained"][0]["file_claims"])
 
     monkeypatch.setattr(bridge_cleanup, "verify_cleanup_file", original_verify)
-    bridge.converge_external_agent_skill(context, host_home=client.parent)
+    _converge(context, host_home=client.parent)
 
     assert late_replacement.is_symlink()
     assert (_target(client) / "SKILL.md").read_text() == "operator v2\n"
@@ -582,7 +581,7 @@ def test_linked_external_roots_are_rejected_without_following(
     else:
         client.mkdir()
         (client / "skills").symlink_to(outside, target_is_directory=True)
-    bridge.converge_external_agent_skill(
+    _converge(
         skill_ctx(
             repo,
             tmp_path,
@@ -612,7 +611,7 @@ def test_linked_host_home_is_rejected_without_inspection(
     linked_home = tmp_path / "linked-home"
     linked_home.symlink_to(outside_home, target_is_directory=True)
 
-    bridge.converge_external_agent_skill(
+    _converge(
         skill_ctx(
             repo,
             tmp_path,
@@ -642,7 +641,7 @@ def test_source_tree_link_is_fatal_before_copy(
     (source / "references" / "linked.md").symlink_to(outside)
     client = client_home(tmp_path)
     with pytest.raises(RuntimeError, match="source"):
-        bridge.converge_external_agent_skill(
+        _converge(
             skill_ctx(
                 repo,
                 tmp_path,
@@ -673,7 +672,7 @@ def test_source_path_component_link_is_fatal_before_copy(
     client = client_home(tmp_path)
 
     with pytest.raises(RuntimeError, match="source"):
-        bridge.converge_external_agent_skill(
+        _converge(
             skill_ctx(
                 repo,
                 tmp_path,
@@ -705,7 +704,7 @@ def test_cleanup_retains_private_residue_without_path_unlink(
         producer=operator_pipeline,
         command_config_machine=command_config_machine,
     )
-    bridge.converge_external_agent_skill(context, host_home=client.parent)
+    _converge(context, host_home=client.parent)
     target = target_path(client, tmp_path)
     (source / "SKILL.md").write_text("operator v2\n")
     original_unlink = Path.unlink
@@ -719,7 +718,7 @@ def test_cleanup_retains_private_residue_without_path_unlink(
         original_unlink(path, missing_ok=missing_ok)
 
     monkeypatch.setattr(Path, "unlink", forbid_cleanup_unlink)
-    bridge.converge_external_agent_skill(context, host_home=client.parent)
+    _converge(context, host_home=client.parent)
     assert unlink_attempts == 0
     ledger = json.loads(
         (context.meiva_home / "configs" / "external-agent-skills" / "codex.json").read_text()
@@ -729,7 +728,7 @@ def test_cleanup_retains_private_residue_without_path_unlink(
     assert [item["kind"] for item in ledger["retained"]] == ["previous"]
     assert ledger["retained"][0]["location"] == "retained"
 
-    bridge.converge_external_agent_skill(context, host_home=client.parent)
+    _converge(context, host_home=client.parent)
     assert (target / "SKILL.md").read_text() == "operator v2\n"
     assert list(target.parent.glob(f".{SKILL}.meiva-*")) == []
 

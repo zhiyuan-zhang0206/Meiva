@@ -133,7 +133,6 @@ def test_stop_kills_a_job_that_ignores_termination_after_its_grace(
 ) -> None:
     dependencies(monkeypatch, machine=command_runtime.machine)
     stop_env(monkeypatch, home)
-    monkeypatch.setattr(strict, "_SHELL_SESSION_STOP_GRACE_S", 1.0)
     name = "meiva-agent-987-shell-2045-stubborn"
     _, running = busy_session(home, name, jobs.STUBBORN, pty_reaper, ready_line="stubborn-ready")
     assert running, "the stubborn job never started"
@@ -153,6 +152,7 @@ def test_stop_kills_a_job_that_ignores_termination_after_its_grace(
             producer=operator_pipeline,
             machine=command_runtime.machine,
             helper=refuse_helper,
+            shell_cleanup_wait_s=1.0,
         )
         == 0
     )
@@ -496,7 +496,7 @@ def test_a_survivor_that_died_before_the_report_does_not_fail_the_stop(
 # with its own bound even when the deadline is already spent.
 @pytest.mark.parametrize(
     ("remaining_s", "expected_grace"),
-    [(3.0, 3.0), (100.0, strict._SHELL_SESSION_STOP_GRACE_S), (-1.0, 0.0)],
+    [(3.0, 3.0), (100.0, strict.SHELL_SESSION_STOP_WAIT_S), (-1.0, 0.0)],
 )
 def test_the_closure_grace_is_the_stops_remaining_time_up_to_its_ceiling(
     remaining_s: float,

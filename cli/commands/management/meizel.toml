@@ -10,3 +10,4 @@ exports = ["config.py", "fleet_gateway.py", "fleet_leases.py", "schedules.py", "
 
 [purity]
 "__init__.py" = "strict"
+"schedule_verify_child.py" = "strict"

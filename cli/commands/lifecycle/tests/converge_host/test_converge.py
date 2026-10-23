@@ -238,8 +238,13 @@ def test_permissions_helper_step_still_aborts_on_a_real_build_defect(
 
     monkeypatch.setattr(permissions_helper, "converge", _boom)
 
+    step = next(
+        s
+        for s in converge_host.CONVERGE_STEPS
+        if s.name == "permissions helper build + sign + load"
+    )
     with pytest.raises(PermissionsHelperBuildError, match="swiftc failed"):
-        converge_host._ensure_permissions_helper(ctx)
+        step.apply(ctx)
 
 
 def test_cmd_converge_unconfigured_returns_zero(

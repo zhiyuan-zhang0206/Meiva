@@ -29,9 +29,8 @@ from cli.database.tests.command_inputs import command_config_machine as command_
 from cli.database.tests.command_inputs import command_runtime as command_runtime
 
 
-@pytest.fixture(autouse=True)
-def single_operator_skill(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(bridge, "_SKILL_NAMES", ("operating-meiva-cluster",))
+def _converge(ctx: Any, *, host_home: Path | None = None) -> None:
+    bridge.converge_external_agent_skill(ctx, host_home=host_home, skill_names=(SKILL,))
 
 
 def test_source_change_after_snapshot_does_not_mix_generations(
@@ -59,7 +58,7 @@ def test_source_change_after_snapshot_does_not_mix_generations(
 
     monkeypatch.setattr(bridge, "stage_copy", change_source_then_stage)
 
-    bridge.converge_external_agent_skill(
+    _converge(
         skill_ctx(
             repo,
             tmp_path,
@@ -93,7 +92,7 @@ def test_linked_target_is_preserved_without_following(
     target.parent.mkdir()
     target.symlink_to(outside, target_is_directory=True)
 
-    bridge.converge_external_agent_skill(
+    _converge(
         skill_ctx(
             repo,
             tmp_path,
@@ -133,7 +132,7 @@ def test_late_edit_between_check_and_claim_is_restored_not_overwritten(
         producer=operator_pipeline,
         command_config_machine=command_config_machine,
     )
-    bridge.converge_external_agent_skill(context, host_home=client.parent)
+    _converge(context, host_home=client.parent)
     target = target_path(client, tmp_path)
     (source / "SKILL.md").write_text("operator v2\n")
     original_stage = bridge.stage_copy
@@ -161,7 +160,7 @@ def test_late_edit_between_check_and_claim_is_restored_not_overwritten(
 
     monkeypatch.setattr(bridge, "stage_copy", edit_after_check)
 
-    bridge.converge_external_agent_skill(context, host_home=client.parent)
+    _converge(context, host_home=client.parent)
     assert (target / "SKILL.md").read_text() == "late user edit\n"
     assert "conflict" in capsys.readouterr().err
 
@@ -185,7 +184,7 @@ def test_target_appearing_after_claim_is_not_replaced(
         producer=operator_pipeline,
         command_config_machine=command_config_machine,
     )
-    bridge.converge_external_agent_skill(context, host_home=client.parent)
+    _converge(context, host_home=client.parent)
     target = target_path(client, tmp_path)
     (source / "SKILL.md").write_text("operator v2\n")
     outside = tmp_path / "late-target"
@@ -200,7 +199,7 @@ def test_target_appearing_after_claim_is_not_replaced(
 
     monkeypatch.setattr(bridge, "rename_no_replace", insert_target_then_rename)
 
-    bridge.converge_external_agent_skill(context, host_home=client.parent)
+    _converge(context, host_home=client.parent)
     assert target.is_symlink()
     assert (outside / "SKILL.md").read_text() == "late user target\n"
     assert "conflict" in capsys.readouterr().err
@@ -224,7 +223,7 @@ def test_late_previous_destination_during_claim_is_not_replaced_or_owned(
         producer=operator_pipeline,
         command_config_machine=command_config_machine,
     )
-    bridge.converge_external_agent_skill(context, host_home=client.parent)
+    _converge(context, host_home=client.parent)
     target = target_path(client, tmp_path)
     installed_before = read_ledger(context)["installed"]
     (source / "SKILL.md").write_text("operator v2\n")
@@ -241,7 +240,7 @@ def test_late_previous_destination_during_claim_is_not_replaced_or_owned(
 
     monkeypatch.setattr(bridge, "rename_no_replace", collide_with_claim)
 
-    bridge.converge_external_agent_skill(context, host_home=client.parent)
+    _converge(context, host_home=client.parent)
     assert collision is not None
     assert (collision / "user.txt").read_text() == "not Meiva owned\n"
     assert (target / "SKILL.md").read_text() == "operator v1\n"
@@ -269,7 +268,7 @@ def test_late_target_during_verification_restore_is_not_replaced_or_disowned(
         producer=operator_pipeline,
         command_config_machine=command_config_machine,
     )
-    bridge.converge_external_agent_skill(context, host_home=client.parent)
+    _converge(context, host_home=client.parent)
     target = target_path(client, tmp_path)
     installed_before = read_ledger(context)["installed"]
     (source / "SKILL.md").write_text("operator v2\n")
@@ -295,7 +294,7 @@ def test_late_target_during_verification_restore_is_not_replaced_or_disowned(
     monkeypatch.setattr(bridge, "verify_marker", reject_claimed_previous)
     monkeypatch.setattr(bridge, "rename_no_replace", collide_with_restore)
 
-    bridge.converge_external_agent_skill(context, host_home=client.parent)
+    _converge(context, host_home=client.parent)
     assert late_target
     assert (target / "user.txt").read_text() == "late user target\n"
     ledger = read_ledger(context)
@@ -322,7 +321,7 @@ def test_late_target_during_activation_restore_is_not_replaced_or_disowned(
         producer=operator_pipeline,
         command_config_machine=command_config_machine,
     )
-    bridge.converge_external_agent_skill(context, host_home=client.parent)
+    _converge(context, host_home=client.parent)
     target = target_path(client, tmp_path)
     installed_before = read_ledger(context)["installed"]
     (source / "SKILL.md").write_text("operator v2\n")
@@ -341,7 +340,7 @@ def test_late_target_during_activation_restore_is_not_replaced_or_disowned(
 
     monkeypatch.setattr(bridge, "rename_no_replace", fail_activation_then_collide_with_restore)
 
-    bridge.converge_external_agent_skill(context, host_home=client.parent)
+    _converge(context, host_home=client.parent)
     assert late_target
     assert (target / "user.txt").read_text() == "late user target\n"
     ledger = read_ledger(context)
@@ -368,7 +367,7 @@ def test_preexisting_generation_sibling_is_preserved_without_false_ownership(
         producer=operator_pipeline,
         command_config_machine=command_config_machine,
     )
-    bridge.converge_external_agent_skill(context, host_home=client.parent)
+    _converge(context, host_home=client.parent)
     target = target_path(client, tmp_path)
     installed_before = read_ledger(context)["installed"]
     (source / "SKILL.md").write_text("operator v2\n")
@@ -378,7 +377,7 @@ def test_preexisting_generation_sibling_is_preserved_without_false_ownership(
     (sibling / "user.txt").write_text("not Meiva owned\n")
     monkeypatch.setattr(bridge.uuid, "uuid4", lambda: SimpleNamespace(hex=generation_id))
 
-    bridge.converge_external_agent_skill(context, host_home=client.parent)
+    _converge(context, host_home=client.parent)
     assert (sibling / "user.txt").read_text() == "not Meiva owned\n"
     assert (target / "SKILL.md").read_text() == "operator v1\n"
     ledger = read_ledger(context)
@@ -405,7 +404,7 @@ def test_concurrent_converges_serialize_transaction_owned_absence(
         producer=operator_pipeline,
         command_config_machine=command_config_machine,
     )
-    bridge.converge_external_agent_skill(context, host_home=client.parent)
+    _converge(context, host_home=client.parent)
     target = target_path(client, tmp_path)
     (source / "SKILL.md").write_text("operator v2\n")
     claimed = threading.Event()
@@ -431,7 +430,7 @@ def test_concurrent_converges_serialize_transaction_owned_absence(
 
     def run() -> None:
         try:
-            bridge.converge_external_agent_skill(context, host_home=client.parent)
+            _converge(context, host_home=client.parent)
         except BaseException as exc:
             errors.append(exc)
 
@@ -479,7 +478,7 @@ def test_marker_spoof_without_external_ledger_is_unmanaged(
         )
     )
 
-    bridge.converge_external_agent_skill(
+    _converge(
         skill_ctx(
             repo,
             tmp_path,
@@ -514,14 +513,14 @@ def test_permission_only_modification_is_a_conflict(
         producer=operator_pipeline,
         command_config_machine=command_config_machine,
     )
-    bridge.converge_external_agent_skill(context, host_home=client.parent)
+    _converge(context, host_home=client.parent)
     target = target_path(client, tmp_path)
     skill_file = target / "SKILL.md"
     changed_mode = 0o600 if stat.S_IMODE(skill_file.stat().st_mode) != 0o600 else 0o644
     skill_file.chmod(changed_mode)
     (source / "SKILL.md").write_text("operator v2\n")
 
-    bridge.converge_external_agent_skill(context, host_home=client.parent)
+    _converge(context, host_home=client.parent)
     assert (target / "SKILL.md").read_text() == "operator v1\n"
     assert stat.S_IMODE(skill_file.stat().st_mode) == changed_mode
     assert "conflict" in capsys.readouterr().err
@@ -548,14 +547,14 @@ def test_source_modes_are_materialized_and_recorded(
         producer=operator_pipeline,
         command_config_machine=command_config_machine,
     )
-    bridge.converge_external_agent_skill(context, host_home=client.parent)
+    _converge(context, host_home=client.parent)
 
     target = target_path(client, tmp_path)
     assert stat.S_IMODE((target / "references").stat().st_mode) == 0o555
     assert stat.S_IMODE((target / "references" / "recovery.md").stat().st_mode) == 0o444
     (source / "SKILL.md").write_text("operator v2\n")
 
-    bridge.converge_external_agent_skill(context, host_home=client.parent)
+    _converge(context, host_home=client.parent)
     assert (target / "SKILL.md").read_text() == "operator v2\n"
     assert list(target.parent.glob(f".{SKILL}.meiva-*")) == []
 
@@ -600,7 +599,7 @@ def test_external_filesystem_failure_is_label_only_and_fail_soft(
 
     monkeypatch.setattr(bridge, "stage_copy", inaccessible)
 
-    bridge.converge_external_agent_skill(
+    _converge(
         skill_ctx(
             repo,
             tmp_path,
@@ -637,7 +636,7 @@ def test_cleanup_failure_after_activation_is_retried_without_rollback(
         producer=operator_pipeline,
         command_config_machine=command_config_machine,
     )
-    bridge.converge_external_agent_skill(context, host_home=client.parent)
+    _converge(context, host_home=client.parent)
     target = target_path(client, tmp_path)
     (source / "SKILL.md").write_text("operator v2\n")
     original_rename = bridge.rename_no_replace
@@ -651,9 +650,9 @@ def test_cleanup_failure_after_activation_is_retried_without_rollback(
         original_rename(source_path, destination)
 
     monkeypatch.setattr(bridge, "rename_no_replace", fail_previous_once)
-    bridge.converge_external_agent_skill(context, host_home=client.parent)
+    _converge(context, host_home=client.parent)
     monkeypatch.setattr(bridge, "rename_no_replace", original_rename)
-    bridge.converge_external_agent_skill(context, host_home=client.parent)
+    _converge(context, host_home=client.parent)
     assert (target / "SKILL.md").read_text() == "operator v2\n"
     assert list(target.parent.glob(f".{SKILL}.meiva-*")) == []
     output = capsys.readouterr()
@@ -679,7 +678,7 @@ def test_interrupted_post_activation_commit_is_reported_and_not_resumed(
         producer=operator_pipeline,
         command_config_machine=command_config_machine,
     )
-    bridge.converge_external_agent_skill(context, host_home=client.parent)
+    _converge(context, host_home=client.parent)
     target = target_path(client, tmp_path)
     (source / "SKILL.md").write_text("operator v2\n")
     original_commit = bridge.commit_activation
@@ -698,13 +697,13 @@ def test_interrupted_post_activation_commit_is_reported_and_not_resumed(
         return original_commit(ledger_path, ledger, transaction, previous)
 
     monkeypatch.setattr(bridge, "commit_activation", interrupt_once)
-    bridge.converge_external_agent_skill(context, host_home=client.parent)
+    _converge(context, host_home=client.parent)
     assert (target / "SKILL.md").read_text() == "operator v2\n"
     ledger_path = context.meiva_home / "configs" / "external-agent-skills" / "codex.json"
     ledger_before = ledger_path.read_text()
     capsys.readouterr()
     monkeypatch.setattr(bridge, "commit_activation", original_commit)
-    bridge.converge_external_agent_skill(context, host_home=client.parent)
+    _converge(context, host_home=client.parent)
 
     assert "not resumed" in capsys.readouterr().err
     assert ledger_path.read_text() == ledger_before
@@ -742,11 +741,11 @@ def test_partial_stage_copy_remains_tracked_until_cleanup_finishes(
         original_materialize(snapshot, destination)
 
     monkeypatch.setattr(bridge, "materialize_source_snapshot", fail_after_one_entry)
-    bridge.converge_external_agent_skill(context, host_home=client.parent)
+    _converge(context, host_home=client.parent)
     monkeypatch.setattr(bridge, "materialize_source_snapshot", original_materialize)
 
-    bridge.converge_external_agent_skill(context, host_home=client.parent)
-    bridge.converge_external_agent_skill(context, host_home=client.parent)
+    _converge(context, host_home=client.parent)
+    _converge(context, host_home=client.parent)
     assert target_path(client, tmp_path).is_dir()
     assert list((client / "skills").glob(f".{SKILL}.meiva-*")) == []
 
@@ -769,7 +768,7 @@ def test_late_target_keeps_stage_and_previous_in_transaction_state(
         producer=operator_pipeline,
         command_config_machine=command_config_machine,
     )
-    bridge.converge_external_agent_skill(context, host_home=client.parent)
+    _converge(context, host_home=client.parent)
     target = target_path(client, tmp_path)
     (source / "SKILL.md").write_text("operator v2\n")
     outside = tmp_path / "late-owned-by-user"
@@ -783,10 +782,10 @@ def test_late_target_keeps_stage_and_previous_in_transaction_state(
         original_rename(source_path, destination)
 
     monkeypatch.setattr(bridge, "rename_no_replace", insert_target)
-    bridge.converge_external_agent_skill(context, host_home=client.parent)
+    _converge(context, host_home=client.parent)
     monkeypatch.setattr(bridge, "rename_no_replace", original_rename)
 
-    bridge.converge_external_agent_skill(context, host_home=client.parent)
+    _converge(context, host_home=client.parent)
     assert target.is_symlink()
     assert (outside / "SKILL.md").read_text() == "user target\n"
     ledger = read_ledger(context)

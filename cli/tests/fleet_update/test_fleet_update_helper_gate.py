@@ -88,7 +88,7 @@ def test_a_host_without_a_baseline_is_refused_rather_than_skipped(
     # The tracked table is what the gate reads, so a host missing from it is the state a new
     # machine arrives in: the window refuses instead of quietly skipping that host.
     cluster, run = env
-    table = fleet_update.REPO / "deploy" / "fleet" / "helper-identities.json"
+    table = cluster.repo / "deploy" / "fleet" / "helper-identities.json"
     table.write_text(json.dumps({"gw": "f" * 40, "mac": "f" * 40}))
     assert run("down") == 2
     assert [kind for kind, _ in cluster.effects if kind == "stop"] == []

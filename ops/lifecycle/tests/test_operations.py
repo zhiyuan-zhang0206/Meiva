@@ -38,7 +38,7 @@ from ops.rpc_schemas import (
 )
 
 
-def _db(*, database_gate: ProcessDbGate) -> Database:
+def db_from_gate(*, database_gate: ProcessDbGate) -> Database:
     return Database.from_settings(gate=database_gate)
 
 

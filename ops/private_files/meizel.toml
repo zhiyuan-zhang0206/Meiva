@@ -1,8 +1,11 @@
-purity = "strict-to-be"
-
 [uses]
+"__init__.py" = ["model.py"]
 "__main__.py" = ["__init__.py"]
 "tests" = ["__init__.py", "__main__.py"]
+
+[purity]
+"." = "strict-to-be"
+"model.py" = "strict"
 
 [debt.impure-call]
 "__init__.py#Path.is_dir" = 1

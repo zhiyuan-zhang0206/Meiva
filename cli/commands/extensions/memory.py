@@ -1,14 +1,27 @@
 from __future__ import annotations
 
+import json
 import sys
-from typing import TypedDict, cast
+from collections.abc import Callable
+from typing import Any, TypedDict, cast
 
 import httpx
 
-from base.cluster.machine import MachineIdentity, gateway_api_base, gateway_auth_headers
+from base.cluster.machine import (
+    GatewayAccess,
+    MachineIdentity,
+    gateway_api_base,
+    gateway_auth_headers,
+)
 from base.cluster.machine.ambient import gateway_access_from_settings
 from base.deploy.git.memory_repo import MemoryBranchMismatch
 from base.host.net.http_dial import post as dial_post
+from cli.commands.extensions._plugin_scaffold import (
+    ScaffoldResult as ScaffoldResult,
+)
+from cli.commands.extensions._plugin_scaffold import (
+    run_plugin_scaffolds as run_plugin_scaffolds,
+)
 
 _TIMEOUT_S = 30.0
 
@@ -28,8 +41,6 @@ def cmd_memory_init(*, machine: MachineIdentity) -> int:
     Memory repository branch validation belongs to this operator-requested
     provisioning path, never to converge or service startup.
     """
-    from cli.commands.extensions._plugin_scaffold import run_plugin_scaffolds
-
     print("initializing memory resources...")
     try:
         result = run_plugin_scaffolds(machine=machine)
@@ -88,21 +99,23 @@ def _print_search_table(results: list[_MemorySearchResult]) -> None:
         )
 
 
-def cmd_memory_search(query: str, *, limit: int, json_output: bool) -> int:
+def cmd_memory_search(
+    query: str,
+    *,
+    limit: int,
+    json_output: bool,
+    api_base_fn: Callable[[str], str] = gateway_api_base,
+    auth_headers_fn: Callable[[GatewayAccess], dict[str, str]] = gateway_auth_headers,
+    post_fn: Callable[..., Any] = dial_post,
+) -> int:
     """Search gateway memory while keeping paths relative to its memory root."""
-    import json
-
-    from base.cluster.machine import gateway_api_base, gateway_auth_headers
-    from base.cluster.machine.ambient import gateway_access_from_settings
-    from base.host.net.http_dial import post as dial_post
-
     access = gateway_access_from_settings()  # ambient: C
-    url = f"{gateway_api_base(access.gateway_url)}/api/memory/search"
-    resp = dial_post(
+    url = f"{api_base_fn(access.gateway_url)}/api/memory/search"
+    resp = post_fn(
         url,
         json={"query": query, "k": limit, "purpose": "search"},
         timeout=_TIMEOUT_S,
-        headers=gateway_auth_headers(access),
+        headers=auth_headers_fn(access),
     )
     if resp.status_code >= 400:
         print(resp.text, file=sys.stderr)

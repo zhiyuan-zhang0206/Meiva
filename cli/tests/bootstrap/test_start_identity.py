@@ -28,7 +28,7 @@ from cli.database import OperatorDatabaseFactory, operator_event_pipeline
 from cli.database.runtime import CommandRuntime
 from cli.database.tests.cli_tests import operator_database as operator_database
 from cli.database.tests.command_inputs import command_runtime as command_runtime
-from cli.tests.bootstrap._init_identity import prepare_init_identity
+from cli.tests.bootstrap.init_identity import prepare_init_identity
 
 
 @pytest.fixture(autouse=True)
