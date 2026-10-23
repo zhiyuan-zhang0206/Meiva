@@ -23,10 +23,6 @@ from cli.commands.lifecycle.start import readiness_preflight as preflight
 from cli.database.runtime import CommandRuntime
 from cli.start_runtime import StartRuntime
 
-# meiva:note
-# A file mode cannot refuse the superuser, so the tests that make a file unreadable need another uid.
-needs_ordinary_user = pytest.mark.skipif(os.geteuid() == 0, reason="root reads any file")
-
 
 @pytest.fixture
 def home(tmp_path: Path) -> Path:
@@ -201,7 +197,6 @@ def test_non_regular_node_inside_a_tree_is_an_observation(
 # meiva:note
 # A preflight must never be the thing that takes an update down: a scan that cannot run is
 # reported and the stop proceeds.
-@needs_ordinary_user
 def test_a_tree_that_cannot_be_scanned_is_an_observation(
     run: Run, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -218,7 +213,6 @@ def test_a_tree_that_cannot_be_scanned_is_an_observation(
 # meiva:note
 # The apply-side vet: a tracked migration the applier cannot open would fail
 # `meiva start`'s apply on the stopped host.
-@needs_ordinary_user
 def test_an_unreadable_tracked_migration_is_fatal(
     run: Run, capsys: pytest.CaptureFixture[str]
 ) -> None:
