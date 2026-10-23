@@ -185,3 +185,23 @@ def test_haiku_5_5_adaptive_capabilities_preserve_manual_predecessor(
     old = catalog.models["claude-haiku-4-5-20251001"]
     assert old.superseded_by == "claude-haiku-5-5" and old.spawnable
     assert old.extended_thinking_only and old.effort_levels == ("none", "high")
+
+
+# meiva:note
+# Highspeed is the same model at a higher serving price, never a second capability row.
+# meiva:link base/lm/docs/pricing-model-rates.meiva.okf.md
+def test_kimi_k3_1_pro_family_and_display_successor(*, model_catalog: ModelCatalog) -> None:
+    pro = model_catalog.models["kimi-k3.1-pro"]
+    highspeed = model_catalog.models["kimi-k3.1-pro-highspeed"]
+    for model, spec in (("kimi-k3.1-pro", pro), ("kimi-k3.1-pro-highspeed", highspeed)):
+        assert spec.spawnable, model
+        assert spec.context_window == 1_048_576, model
+        assert spec.knowledge_cutoff == "2025-12", model
+        assert spec.effort_levels == ("low", "high", "max"), model
+        assert spec.tuning.reasoning_effort == "max", model
+        assert spec.thinking_always_on, model
+        assert spec.media_types == frozenset({"image"}), model
+        assert spec.model_identity == "You are running on Kimi K3.1 Pro (Moonshot).", model
+    assert highspeed.tuning == pro.tuning
+    assert model_catalog.models["kimi-k3"].superseded_by == "kimi-k3.1-pro"
+    assert model_catalog.models["kimi-k3"].spawnable

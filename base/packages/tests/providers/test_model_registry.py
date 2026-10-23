@@ -438,6 +438,8 @@ def test_image_media_types_match_the_verified_model_matrix(*, model_catalog: Mod
         "gpt-5.6-luna",
         "gpt-5.6-luna-fast",
         "kimi-k3",
+        "kimi-k3.1-pro",
+        "kimi-k3.1-pro-highspeed",
         "deepseek-flash",
         "glm-5.3-flash",
         "glm-5.3-flashx",
