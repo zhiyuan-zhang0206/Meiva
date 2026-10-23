@@ -221,7 +221,13 @@ async def list_schedules(request: Request) -> list[ScheduleSummary]:
 
 # meiva:link gateway/schedules/docs/router-contracts.meiva.okf.md
 def create_blocking(
-    pool: ConnectionPool[Any], body: ScheduleCreate, key: str | None = None
+    pool: ConnectionPool[Any],
+    body: ScheduleCreate,
+    key: str | None = None,
+    *,
+    finish_receipt: Callable[
+        [psycopg.Connection[Any], str | None, creation_receipts.Creation], None
+    ] = creation_receipts.finish,
 ) -> tuple[Any, ...]:
 
     _validate_script(body.script)
@@ -255,7 +261,7 @@ def create_blocking(
                 "VALUES (%s, %s, %s, %s)",
                 (row[0], body.script, body.command, "initial"),
             )
-            creation_receipts.finish(conn, key, creation_receipts.Creation(row[0], row[7], row[8]))
+            finish_receipt(conn, key, creation_receipts.Creation(row[0], row[7], row[8]))
     except psycopg.errors.UniqueViolation as exc:
         raise HTTPException(
             status_code=409, detail=f"schedule named {body.name!r} already exists"

@@ -97,18 +97,20 @@ def test_receipt_contains_no_raw_script_request(db_conn: psycopg.Connection) -> 
 
 
 def test_receipt_failure_rolls_back_created_resource_and_version(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch, *, database_gate: ProcessDbGate
+    db_conn: psycopg.Connection, *, database_gate: ProcessDbGate
 ) -> None:
     def fail(*_args: object) -> None:
         raise RuntimeError("receipt failed")
 
-    monkeypatch.setattr(creation_receipts, "finish", fail)
     with (
         base.db.pool(gate=database_gate) as pool,
         pytest.raises(RuntimeError, match="receipt failed"),
     ):
         schedules.create_blocking(
-            pool, schedules.ScheduleCreate(name="rollback", script="pass"), "rollback"
+            pool,
+            schedules.ScheduleCreate(name="rollback", script="pass"),
+            "rollback",
+            finish_receipt=fail,
         )
     assert db_conn.execute("SELECT count(*) FROM schedules").fetchone() == (0,)
     assert db_conn.execute("SELECT count(*) FROM schedule_versions").fetchone() == (0,)

@@ -104,7 +104,12 @@ def register(
     body: PageRegisterRequest,
     absolute_base: str,
     validate_target: Callable[[Connection], None],
+    *,
+    port_free_checker: Callable[[Connection, int, str, int], None] | None = None,
+    finish_receipt: Callable[[Connection, str, str, PageRow], None] | None = None,
 ) -> PageAcceptance:
+    check_port_free = assert_port_free if port_free_checker is None else port_free_checker
+    save_receipt = _finish if finish_receipt is None else finish_receipt
     try:
         with write_transaction(pool) as conn:
             digest, replay = _begin(conn, key, body.model_dump(mode="json"))
@@ -112,7 +117,7 @@ def register(
                 return PageAcceptance(replay, [], replayed=True)
             _target(conn, agent_id, register=True)
             validate_target(conn)
-            assert_port_free(conn, agent_id, body.host, body.port)
+            check_port_free(conn, agent_id, body.host, body.port)
             closed = close_all_agent_pages_in_transaction(conn, agent_id)
             record = register_page_in_transaction(
                 conn,
@@ -125,7 +130,7 @@ def register(
                 body.ttl_seconds,
             )
             record = record.model_copy(update={"url": absolute_base + record.url})
-            _finish(conn, key, digest, record)
+            save_receipt(conn, key, digest, record)
             return PageAcceptance(record, closed, replayed=False)
     except PagePortConflictError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
