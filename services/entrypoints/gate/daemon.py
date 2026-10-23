@@ -36,10 +36,11 @@ import json
 import logging
 import os
 import re
+import sys
 import time
 import urllib.error
 import urllib.request
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from functools import partial
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -404,11 +405,11 @@ def _serve_http(args: argparse.Namespace, *, local_host: Callable[[], str]) -> N
             primary.add_note(f"Gate HTTP close also failed: {cleanup!r}")
 
 
-def main() -> None:
+def main(argv: Sequence[str]) -> None:
     parser = argparse.ArgumentParser(description="Fleet UI entry service")
     parser.add_argument("--port", type=int, default=None, help="bind port (default: entry port)")
     parser.add_argument("--static-dir", type=Path, default=None, help="static pages directory")
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     from base.daemon.shutdown import install_graceful_shutdown
     from base.db import Database
@@ -457,4 +458,4 @@ if __name__ == "__main__":
     from base.log import prepare_process_logging
 
     prepare_process_logging()
-    main()
+    main(sys.argv[1:])

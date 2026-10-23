@@ -6,7 +6,3 @@
 "test_runner_composition.py#monkeypatch.setattr services.wake.schedule_manager.runner.Database" = 1
 "test_runner_composition.py#monkeypatch.setattr services.wake.schedule_manager.runner.engine.run" = 2
 "test_runner_composition.py#monkeypatch.setattr services.wake.schedule_manager.runner.meiva.ensure_plugins_loaded" = 2
-"test_runner_composition.py#monkeypatch.setattr services.wake.schedule_manager.runner.prod_service_checkout_error" = 1
-
-[debt.stdlib-patch]
-"test_runner_composition.py#monkeypatch.setattr sys.argv" = 1

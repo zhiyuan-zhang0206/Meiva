@@ -5,7 +5,7 @@
 from __future__ import annotations
 
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from functools import partial
 from pathlib import Path
 
@@ -98,8 +98,8 @@ def run(schedule_id: int, revision: int | None = None) -> int:
             primary.add_note(f"schedule clients cleanup failed: {cleanup!r}")
 
 
-def main() -> None:
-    if len(sys.argv) not in (2, 3):
+def main(argv: Sequence[str]) -> None:
+    if len(argv) not in (1, 2):
         logger.error(
             "Usage: python -m services.wake.schedule_manager.runner <schedule_id> [revision]"
         )
@@ -109,11 +109,11 @@ def main() -> None:
     if refusal is not None:
         logger.error("schedule runner refused: {}", refusal)
         raise SystemExit(3)
-    revision = int(sys.argv[2]) if len(sys.argv) == 3 else None
+    revision = int(argv[1]) if len(argv) == 2 else None
     if revision is not None and revision < 0:
         raise SystemExit(2)
-    raise SystemExit(run(int(sys.argv[1]), revision))
+    raise SystemExit(run(int(argv[0]), revision))
 
 
 if __name__ == "__main__":
-    main()
+    main(sys.argv[1:])
