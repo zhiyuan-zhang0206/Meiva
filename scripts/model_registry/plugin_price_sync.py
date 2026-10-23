@@ -70,18 +70,21 @@ def _clock(value: object, *, context: str) -> str:
 def _archive_windows(windows_raw: object, *, tier_context: str) -> tuple[WindowDeclaration, ...]:
     if not isinstance(windows_raw, list):
         raise TypeError(f"{tier_context} utc_daily_overrides must be an array")
-    windows = tuple(
-        WindowDeclaration(
-            start=_clock(window["start"], context=f"{tier_context} window {index} start"),
-            end=_clock(window["end"], context=f"{tier_context} window {index} end"),
-            rates=archive_rates(window["rates"], context=f"{tier_context} window {index} rates"),
+    windows: list[WindowDeclaration] = []
+    for index, window in enumerate(cast("list[object]", windows_raw)):
+        if not isinstance(window, dict):
+            raise TypeError(f"{tier_context} windows must be objects")
+        fields = cast("dict[object, object]", window)
+        windows.append(
+            WindowDeclaration(
+                start=_clock(fields["start"], context=f"{tier_context} window {index} start"),
+                end=_clock(fields["end"], context=f"{tier_context} window {index} end"),
+                rates=archive_rates(
+                    fields["rates"], context=f"{tier_context} window {index} rates"
+                ),
+            )
         )
-        for index, window in enumerate(windows_raw)
-        if isinstance(window, dict)
-    )
-    if len(windows) != len(windows_raw):
-        raise TypeError(f"{tier_context} windows must be objects")
-    return windows
+    return tuple(windows)
 
 
 def _archive_tier(
@@ -89,19 +92,20 @@ def _archive_tier(
 ) -> TierDeclaration:
     if not isinstance(tier_raw, dict):
         raise TypeError(f"{tier_context} must be an object")
-    lower = tier_raw["input_tokens_min"]
-    upper = tier_raw["input_tokens_max"]
+    fields = cast("dict[object, object]", tier_raw)
+    lower = fields["input_tokens_min"]
+    upper = fields["input_tokens_max"]
     if isinstance(lower, bool) or not isinstance(lower, int):
         raise TypeError(f"{tier_context} input_tokens_min must be an integer")
     if upper is not None and (isinstance(upper, bool) or not isinstance(upper, int)):
         raise TypeError(f"{tier_context} input_tokens_max must be an integer or null")
     if lower != expected_min or (upper is not None and upper < lower):
         raise RuntimeError(f"archive {model!r} has a gap or overlap in tiers")
-    windows = _archive_windows(tier_raw["utc_daily_overrides"], tier_context=tier_context)
+    windows = _archive_windows(fields["utc_daily_overrides"], tier_context=tier_context)
     return TierDeclaration(
         input_tokens_min=lower,
         input_tokens_max=upper,
-        rates=archive_rates(tier_raw["rates"], context=f"{tier_context} rates"),
+        rates=archive_rates(fields["rates"], context=f"{tier_context} rates"),
         windows=windows,
     )
 
@@ -111,7 +115,7 @@ def _archive_tiers(model: str, tiers_raw: object, *, context: str) -> tuple[Tier
         raise RuntimeError(f"{context} must contain tiers")
     tiers: list[TierDeclaration] = []
     expected_min = 0
-    for tier_index, tier_raw in enumerate(tiers_raw):
+    for tier_index, tier_raw in enumerate(cast("list[object]", tiers_raw)):
         tier = _archive_tier(
             model, tier_raw, tier_context=f"{context} tier {tier_index}", expected_min=expected_min
         )
@@ -122,17 +126,28 @@ def _archive_tiers(model: str, tiers_raw: object, *, context: str) -> tuple[Tier
     return tuple(tiers)
 
 
+def _period_boundary(value: object, *, context: str) -> str | None:
+    if value is not None and not isinstance(value, str):
+        raise TypeError(f"{context} must be an ISO-8601 string or null")
+    return value
+
+
 def _archive_periods(model: str, raw: object) -> tuple[PeriodDeclaration, ...]:
     if not isinstance(raw, list) or not raw:
         raise RuntimeError(f"archive {model!r} must contain periods")
     periods: list[PeriodDeclaration] = []
     previous_until: str | None = None
-    for period_index, period_raw in enumerate(raw):
+    for period_index, period_raw in enumerate(cast("list[object]", raw)):
         context = f"archive {model!r} period {period_index}"
         if not isinstance(period_raw, dict):
             raise TypeError(f"{context} must be an object")
-        effective_from = cast(str | None, period_raw["effective_from"])
-        effective_until = cast(str | None, period_raw["effective_until"])
+        fields = cast("dict[object, object]", period_raw)
+        effective_from = _period_boundary(
+            fields["effective_from"], context=f"{context} effective_from"
+        )
+        effective_until = _period_boundary(
+            fields["effective_until"], context=f"{context} effective_until"
+        )
         start = _instant(effective_from, context=f"{context} effective_from")
         end = _instant(effective_until, context=f"{context} effective_until")
         if period_index == 0 and start is not None:
@@ -141,7 +156,7 @@ def _archive_periods(model: str, raw: object) -> tuple[PeriodDeclaration, ...]:
             raise RuntimeError(f"archive {model!r} has a gap or overlap in periods")
         if start is not None and end is not None and end <= start:
             raise RuntimeError(f"{context} is empty")
-        tiers = _archive_tiers(model, period_raw["tiers"], context=context)
+        tiers = _archive_tiers(model, fields["tiers"], context=context)
         periods.append(PeriodDeclaration(effective_from, effective_until, tiers))
         previous_until = effective_until
     if periods[-1].effective_until is not None:
