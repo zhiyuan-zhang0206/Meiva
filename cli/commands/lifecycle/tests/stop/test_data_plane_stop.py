@@ -208,8 +208,7 @@ class Redis:
 def running_redis(directory: Path, *, password: str | None = None) -> Generator[Redis]:
     from base.deploy.tests.containers import free_port, wait_port
 
-    if shutil.which("redis-server") is None:
-        pytest.skip("redis-server is not installed")
+    assert shutil.which("redis-server") is not None, "the suite's CI image installs redis-server"
     directory.mkdir(parents=True, exist_ok=True)
     port = free_port()
     argv = [
