@@ -25,30 +25,12 @@ eagerly is worse than none:
 
 from __future__ import annotations
 
-from collections.abc import Callable
-
 import pytest
 
-import cli.commands.lifecycle.root_driver as _root_driver_commands
-import cli.commands.lifecycle.root_readiness as _root_readiness_commands
-import cli.commands.lifecycle.start as _start_commands
-import cli.commands.probe as _probe_commands
-import services.supervision.roster.spec as roster_spec
-from base.cluster.machine import MachineIdentity
 from base.daemon.health import DaemonProbe
-from base.host.system.hostport import Host
-from base.telemetry import EventPipeline
-from cli.commands.lifecycle import start as start_mod
-from cli.commands.lifecycle.root_driver import LaunchOutcome
-from cli.commands.lifecycle.tests.startup.test_start_readiness_gate import (
-    hermetic_start as _base_start,  # noqa: F401 — shared fixture  # pyright: ignore[reportUnusedImport] — pytest fixture import
-)
-from cli.commands.probe import ReadinessWait
-from cli.database import OperatorDatabaseFactory
-from cli.database.runtime import CommandRuntime
-from cli.database.tests.cli_tests import operator_database as operator_database
-from cli.database.tests.cli_tests import operator_pipeline as operator_pipeline
-from cli.database.tests.command_inputs import command_runtime as command_runtime
+from cli.commands import probe
+from cli.commands.lifecycle.start import refuse_occupied_health_ports
+from cli.commands.lifecycle.tests.startup.start_harness import StartRun
 from services.supervision.roster.service_spec import AGENT_RUNNER, GATEWAY, ServiceSpec
 
 # The gate IS the subject here, so stand the global autouse net down for this
@@ -56,8 +38,10 @@ from services.supervision.roster.service_spec import AGENT_RUNNER, GATEWAY, Serv
 pytestmark = pytest.mark.real_health_port_gate
 
 
-def _healthz_spec(service: str, port: int) -> ServiceSpec:
-    """A daemon whose probe target is an Meiva `/healthz` — i.e. a daemon health port."""
+# meiva:note
+# A daemon whose probe target is an Meiva `/healthz` (a daemon health port); its identity
+# probe answers `answer`, the verdict a dial of that port would have produced.
+def _healthz_spec(service: str, port: int, answer: DaemonProbe) -> ServiceSpec:
     return ServiceSpec(
         session=service,
         cmd="x",
@@ -65,276 +49,132 @@ def _healthz_spec(service: str, port: int) -> ServiceSpec:
         requires_db=True,
         curl_url=f"http://localhost:{port}/healthz",
         health_name=service.replace("-", "_"),
+        identity_probe=lambda: answer,
     )
 
 
-def _other_endpoint_spec(service: str, url: str) -> ServiceSpec:
-    """A service whose port is NOT in the health-port block (the gateway's
-    `/api/health`, the browser's CDP `/json/version`, the frontend)."""
+# meiva:note
+# A service whose port is NOT in the health-port block (the gateway's `/api/health`, the
+# browser's CDP `/json/version`, the frontend).
+def _other_endpoint_spec(service: str, url: str, answer: DaemonProbe) -> ServiceSpec:
     return ServiceSpec(
         session=service,
         cmd="x",
         capabilities=GATEWAY,
         requires_db=False,
         curl_url=url,
+        identity_probe=lambda: answer,
     )
 
 
 _FOREIGN = (
     "identity mismatch on http://localhost:8103/healthz: home='/home/meiva/.meiva' != "
-    "'/home/other/.meiva' — another unit's daemon holds this port"
+    "'/home/other/.meiva' \u2014 another unit's daemon holds this port"
 )
 
 
-def _verdicts(monkeypatch: pytest.MonkeyPatch, by_session: dict[str, DaemonProbe]) -> None:
-    """Pin `probe_service` from a per-session `DaemonProbe`, through the same
-    translation the real one performs — so what these tests exercise is the
-    gate's reading of a verdict, not a hand-built `ServiceProbe`."""
-
-    def _probe(spec: ServiceSpec) -> _probe_commands.ServiceProbe:
-        probe = by_session[spec.session]
-        return _probe_commands.ServiceProbe(
-            probe.alive, "identity", "" if probe.alive else probe.detail, probe.terminal
-        )
-
-    monkeypatch.setattr(_probe_commands, "probe_service", _probe)
+# meiva:note
+# ─── which verdicts are conflicts ───────────────────────────────────────────────
 
 
-# ─── which verdicts are conflicts ────────────────────────────────────────────
+def test_a_foreign_units_daemon_on_a_health_port_is_a_conflict() -> None:
+    labeler = _healthz_spec("labeler", 8103, DaemonProbe.port_taken(_FOREIGN))
 
-
-def test_a_foreign_units_daemon_on_a_health_port_is_a_conflict(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-
-    labeler = _healthz_spec("labeler", 8103)
-    _verdicts(monkeypatch, {"labeler": DaemonProbe.port_taken(_FOREIGN)})
-
-    occupied = _probe_commands.occupied_health_ports((labeler,))
+    occupied = probe.occupied_health_ports((labeler,))
 
     assert [o.spec.session for o in occupied] == ["labeler"]
     assert occupied[0].detail == _FOREIGN
 
 
-def test_our_own_running_daemon_is_not_a_conflict(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The idempotent case. `meiva start` over a healthy host re-probes every port
-    it is about to use and finds its own daemons — a start that refused here
-    would make restart impossible on exactly the hosts that are working."""
+# meiva:note
+# The idempotent case. `meiva start` over a healthy host re-probes every port it is about
+# to use and finds its own daemons: a start that refused here would make restart impossible on
+# exactly the hosts that are working.
+def test_our_own_running_daemon_is_not_a_conflict() -> None:
+    labeler = _healthz_spec("labeler", 8103, DaemonProbe.up("pid 4242"))
 
-    labeler = _healthz_spec("labeler", 8103)
-    _verdicts(monkeypatch, {"labeler": DaemonProbe.up("pid 4242")})
-
-    assert _probe_commands.occupied_health_ports((labeler,)) == ()
+    assert probe.occupied_health_ports((labeler,)) == ()
 
 
-def test_a_dead_or_cold_port_is_not_a_conflict(monkeypatch: pytest.MonkeyPatch) -> None:
-    """DOWN covers both a port nothing answers on and a stray of our OWN home
-    (`probe_daemon` reaches the pid arm only after name and home matched). Both
-    are cleared by the launch that follows — the kill-session a respawn does
-    first is exactly the fix — so neither may stop the start."""
-
-    labeler = _healthz_spec("labeler", 8103)
-    ops = _healthz_spec("ops", 8113)
-    _verdicts(
-        monkeypatch,
-        {
-            "labeler": DaemonProbe.down("healthz unreachable: URLError: refused"),
-            "ops": DaemonProbe.down("healthz pid=9 != pidfile pid=8 — a stray process"),
-        },
+# meiva:note
+# DOWN covers both a port nothing answers on and a stray of our OWN home (`probe_daemon`
+# reaches the pid arm only after name and home matched). Both are cleared by the launch that
+# follows, so neither may stop the start.
+def test_a_dead_or_cold_port_is_not_a_conflict() -> None:
+    labeler = _healthz_spec(
+        "labeler", 8103, DaemonProbe.down("healthz unreachable: URLError: refused")
+    )
+    ops = _healthz_spec(
+        "ops", 8113, DaemonProbe.down("healthz pid=9 != pidfile pid=8 \u2014 a stray process")
     )
 
-    assert _probe_commands.occupied_health_ports((labeler, ops)) == ()
+    assert probe.occupied_health_ports((labeler, ops)) == ()
 
 
-def test_only_daemon_health_ports_are_gated(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A terminal verdict on the gateway or the browser is not this gate's
-    business, and folding them in would be a regression: the browser healthcheck
-    deliberately tolerates another unit's Chrome on the CDP port, so a start that
-    refused would leave a headed box unable to come up at all."""
+# meiva:note
+# A terminal verdict on the gateway or the browser is not this gate's business, and folding
+# them in would be a regression: the browser healthcheck deliberately tolerates another unit's
+# Chrome on the CDP port, so a start that refused would leave a headed box unable to come up.
+def test_only_daemon_health_ports_are_gated() -> None:
+    gateway = _other_endpoint_spec(
+        "gateway", "http://localhost:8000/api/health", DaemonProbe.port_taken("another gateway")
+    )
+    browser = _other_endpoint_spec(
+        "browser", "http://localhost:9222/json/version", DaemonProbe.port_taken("another Chrome")
+    )
+    labeler = _healthz_spec("labeler", 8103, DaemonProbe.up("pid 1"))
 
-    gateway = _other_endpoint_spec("gateway", "http://localhost:8000/api/health")
-    browser = _other_endpoint_spec("browser", "http://localhost:9222/json/version")
-    labeler = _healthz_spec("labeler", 8103)
-    _verdicts(
-        monkeypatch,
-        {
-            "gateway": DaemonProbe.port_taken("another unit's gateway"),
-            "browser": DaemonProbe.port_taken("another unit's Chrome"),
-            "labeler": DaemonProbe.up("pid 1"),
-        },
+    assert probe.occupied_health_ports((gateway, browser, labeler)) == ()
+
+
+def test_every_conflicting_port_is_reported_not_just_the_first() -> None:
+    specs = (
+        _healthz_spec("labeler", 8103, DaemonProbe.port_taken("a")),
+        _healthz_spec("ops", 8113, DaemonProbe.port_taken("b")),
     )
 
-    assert _probe_commands.occupied_health_ports((gateway, browser, labeler)) == ()
+    assert [o.spec.session for o in probe.occupied_health_ports(specs)] == ["labeler", "ops"]
 
 
-def test_every_conflicting_port_is_reported_not_just_the_first(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """An operator moving a unit needs the whole overlap in one pass: reporting
-    only the first port turns one fix into a sequence of restarts, each revealing
-    the next collision."""
-
-    specs = (_healthz_spec("labeler", 8103), _healthz_spec("ops", 8113))
-    _verdicts(
-        monkeypatch,
-        {"labeler": DaemonProbe.port_taken("a"), "ops": DaemonProbe.port_taken("b")},
-    )
-
-    assert [o.spec.session for o in _probe_commands.occupied_health_ports(specs)] == [
-        "labeler",
-        "ops",
-    ]
+# meiva:note
+# ─── what the start does with a conflict ───────────────────────────────────────────
 
 
-# ─── what the start does with a conflict ─────────────────────────────────────
-
-
-_REAL_GATE = start_mod.refuse_occupied_health_ports
-
-
-@pytest.fixture
-def hermetic_start(monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest) -> None:
-    request.getfixturevalue("_base_start")
-    monkeypatch.setattr(start_mod, "refuse_occupied_health_ports", _REAL_GATE)
-    monkeypatch.setattr(
-        _root_readiness_commands,
-        "wait_for_service_tree",
-        lambda *_a, **_kw: ReadinessWait((), 0.0, sessions_gone=False),  # pyright: ignore[reportUnknownArgumentType] — variadic readiness test double
-    )
-
-
-def _roster(monkeypatch: pytest.MonkeyPatch, specs: tuple[ServiceSpec, ...]) -> list[str]:
-    launched: list[str] = []
-
-    def annotated_roster(
-        roles: frozenset[str], *, machine: MachineIdentity, host: Host
-    ) -> tuple[tuple[ServiceSpec, None], ...]:
-        assert isinstance(machine, MachineIdentity)
-        del roles
-        return tuple((spec, None) for spec in specs)
-
-    def start_roster(
-        roles: frozenset[str], skip: set[str], *, machine: MachineIdentity, host: Host
-    ) -> tuple[ServiceSpec, ...]:
-        assert isinstance(machine, MachineIdentity)
-        del roles
-        return tuple(spec for spec in specs if spec.session not in skip)
-
-    monkeypatch.setattr(roster_spec, "services_for_capabilities_annotated", annotated_roster)
-    monkeypatch.setattr(_root_driver_commands, "start_roster", start_roster)
-
-    def launch(roster: tuple[ServiceSpec, ...], *_a: object, **_kw: object) -> LaunchOutcome:
-        launched.extend(s.session for s in roster)
-        return LaunchOutcome(roster, ())
-
-    monkeypatch.setattr(_root_driver_commands, "launch_service_tree", launch)
-    return launched
-
-
-def test_start_refuses_and_launches_nothing(
-    monkeypatch: pytest.MonkeyPatch,
+def test_a_conflict_on_a_core_daemon_refuses_the_start_and_names_the_remedy(
     capsys: pytest.CaptureFixture[str],
-    hermetic_start: None,
-    operator_database: OperatorDatabaseFactory,
-    operator_pipeline: Callable[[], EventPipeline],
-    *,
-    command_runtime: CommandRuntime,
 ) -> None:
-    launched = _roster(monkeypatch, (_healthz_spec("agent-host", 8113),))
-    _verdicts(monkeypatch, {"agent-host": DaemonProbe.port_taken(_FOREIGN)})
-    assert (
-        _start_commands.cmd_start(
-            disabled_services=(),
-            only_services=(),
-            all_services=True,
-            retained_children=[],
-            database_factory=operator_database,
-            producer=operator_pipeline,
-            command=command_runtime,
-        )
-        == 1
-    )
-    assert launched == []
+    agent_host = _healthz_spec("agent-host", 8113, DaemonProbe.port_taken(_FOREIGN))
+
+    assert refuse_occupied_health_ports((agent_host,)) == 1
+
     message = "".join(capsys.readouterr())
     assert "/home/meiva/.meiva" in message
     assert "Stop the listed daemon" in message
     assert "--disable-service agent-host" in message
 
 
-def test_a_clear_roster_starts_normally(
-    monkeypatch: pytest.MonkeyPatch,
-    hermetic_start: None,
-    operator_database: OperatorDatabaseFactory,
-    operator_pipeline: Callable[[], EventPipeline],
-    *,
-    command_runtime: CommandRuntime,
-) -> None:
-    launched = _roster(monkeypatch, (_healthz_spec("ops", 8113),))
-    _verdicts(monkeypatch, {"ops": DaemonProbe.down("cold")})
-    assert (
-        _start_commands.cmd_start(
-            disabled_services=(),
-            only_services=(),
-            all_services=True,
-            retained_children=[],
-            database_factory=operator_database,
-            producer=operator_pipeline,
-            command=command_runtime,
-        )
-        == 0
-    )
-    assert launched == ["ops"]
+def test_a_clear_roster_starts_normally(capsys: pytest.CaptureFixture[str]) -> None:
+    agent_host = _healthz_spec("agent-host", 8113, DaemonProbe.down("cold"))
+
+    assert refuse_occupied_health_ports((agent_host,)) == 0
+    assert capsys.readouterr().err == ""
 
 
-def test_a_disabled_service_cannot_block_start(
-    monkeypatch: pytest.MonkeyPatch,
-    hermetic_start: None,
-    operator_database: OperatorDatabaseFactory,
-    operator_pipeline: Callable[[], EventPipeline],
-    *,
-    command_runtime: CommandRuntime,
-) -> None:
-    launched = _roster(monkeypatch, (_healthz_spec("labeler", 8103), _healthz_spec("ops", 8113)))
-    _verdicts(
-        monkeypatch, {"labeler": DaemonProbe.port_taken(_FOREIGN), "ops": DaemonProbe.down("cold")}
-    )
-    assert (
-        _start_commands.cmd_start(
-            disabled_services=("labeler",),
-            only_services=(),
-            all_services=False,
-            retained_children=[],
-            database_factory=operator_database,
-            producer=operator_pipeline,
-            command=command_runtime,
-        )
-        == 0
-    )
-    assert launched == ["ops"]
+def test_an_optional_port_conflict_does_not_block_a_core_start() -> None:
+    labeler = _healthz_spec("labeler", 8103, DaemonProbe.port_taken(_FOREIGN))
+
+    assert refuse_occupied_health_ports((labeler,)) == 0
 
 
-def test_optional_port_conflict_does_not_block_core_start(
-    monkeypatch: pytest.MonkeyPatch,
-    hermetic_start: None,
-    operator_database: OperatorDatabaseFactory,
-    operator_pipeline: Callable[[], EventPipeline],
-    *,
-    command_runtime: CommandRuntime,
-) -> None:
-    launched = _roster(monkeypatch, (_healthz_spec("labeler", 8103),))
-    _verdicts(monkeypatch, {"labeler": DaemonProbe.port_taken(_FOREIGN)})
-    assert (
-        _start_commands.cmd_start(
-            disabled_services=(),
-            only_services=(),
-            all_services=True,
-            retained_children=[],
-            database_factory=operator_database,
-            producer=operator_pipeline,
-            command=command_runtime,
-        )
-        == 0
-    )
-    assert launched == ["labeler"]
+# meiva:note
+# The gate probes the roster this start launches: a daemon the operator disabled cannot
+# block it.
+def test_a_disabled_service_is_not_in_the_roster_the_gate_probes(start_run: StartRun) -> None:
+    roles = frozenset({"gateway"})
+    run = start_run
+
+    full = {spec.session for spec in run.roster(roles)}
+    narrowed = {spec.session for spec in run.roster(roles, disabled=("labeler",))}
+
+    assert "labeler" in full
+    assert narrowed == full - {"labeler"}

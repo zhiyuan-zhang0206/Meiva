@@ -1,19 +1,32 @@
+# meiva:note
+# An agent-profile unit on a remote-managed plane launches with the provider runner login.
+#
+# A remote-managed plane has no write generation, so the agents of a gateway-config unit dial the
+# provider-provisioned runner role with the credential the gateway's `.env` records. The `.env` here
+# is the real file of the test's home.
+
 from pathlib import Path
 
-import pytest
-
-from base.host.env import bootstrap
-from base.host.env.tests.env_files import constant
-from cli.commands.data_plane import bringup
+from base.cluster.derive import project_runner_db_url
 from cli.commands.lifecycle import root_driver
 from services.supervision.meiva_root.manifest import load_manifests
 from services.supervision.meiva_root_glue.manifests import generate
 from services.supervision.roster.service_spec import AGENT_RUNNER, ServiceSpec
 
+_PROVIDER_URL = "postgresql://owner@db.example:5432/meiva"
+# meiva:note
+# The password is a literal of a fixture runner login that exists only in this test.
+_RUNNER_PASSWORD = "fixture-runner-password"  # noqa: S105
+
 
 def test_root_manifest_projects_runner_url_for_agent_profile(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    unit_home: Path, tmp_path: Path
 ) -> None:
+    (unit_home / ".env").write_text(
+        "MEIVA_MACHINE_SERVE_GATEWAY=true\n"
+        f"MEIVA_DB_URL={_PROVIDER_URL}\n"
+        f"MEIVA_RUNNER_DB_PASSWORD={_RUNNER_PASSWORD}\n"
+    )
     agent = ServiceSpec(
         session="agent-host",
         cmd=".venv/bin/python -m services.agent_runner.agent_host.daemon",
@@ -27,13 +40,7 @@ def test_root_manifest_projects_runner_url_for_agent_profile(
         capabilities=AGENT_RUNNER,
         requires_db=True,
     )
-    projected = "postgresql://meiva_runner:fixture@127.0.0.1:1/meiva"
-
-    def _fake_projection() -> str:
-        return projected
-
-    monkeypatch.setattr(bootstrap, "config_source_is_local", constant(True))
-    monkeypatch.setattr(bringup, "runner_db_url", _fake_projection)
+    projected = project_runner_db_url(_PROVIDER_URL, _RUNNER_PASSWORD)
     environments = {
         spec.session: root_driver.service_extra_env(spec, remote_data_plane=True)
         for spec in (agent, ops)

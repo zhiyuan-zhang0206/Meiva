@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-import os
-import re
 import subprocess
 import sys
 from pathlib import Path
 
 from base.host.private_storage import converge_private_tree, ensure_private_file
+from cli.commands.converge.plans.checkout_warnings import hook_scan_argv, hook_scan_warnings
+from cli.commands.converge.plans.shell_rc import rc_file_name, with_path_block
 from cli.commands.converge.spec import ConvergeCtx
 
 # --- host-wiring steps (no preconditions) ---------------------------------
@@ -31,31 +31,17 @@ def ensure_meiva_on_path(ctx: ConvergeCtx) -> None:
     checkout that is not the home's own. An existing link to anything else is
     repointed.
     """
-    _ensure_symlink(Path.home() / ".local" / "bin" / "meiva", ctx.repo / ".venv" / "bin" / "meiva")
+    _ensure_symlink(
+        ctx.session.user_home / ".local" / "bin" / "meiva", ctx.repo / ".venv" / "bin" / "meiva"
+    )
 
 
-PATH_BEGIN = "# >>> meiva path >>>"
-PATH_END = "# <<< meiva path <<<"
-
-
-def shell_rc_path() -> Path:
-    return Path.home() / (".zshrc" if os.environ.get("SHELL", "").endswith("zsh") else ".bashrc")
-
-
-def ensure_local_bin_on_path(ctx: ConvergeCtx) -> None:  # noqa: ARG001
-    local_bin = Path.home() / ".local" / "bin"
-    rc = shell_rc_path()
-    line = f'case ":$PATH:" in *":{local_bin}:"*) ;; *) export PATH="{local_bin}:$PATH" ;; esac'
-    block = f"{PATH_BEGIN}\n{line}\n{PATH_END}"
+def ensure_local_bin_on_path(ctx: ConvergeCtx) -> None:
+    rc = ctx.session.user_home / rc_file_name(ctx.session.login_shell)
     existing = rc.read_text() if rc.exists() else ""
-    pattern = re.compile(re.escape(PATH_BEGIN) + r".*?" + re.escape(PATH_END), re.DOTALL)
-    if pattern.search(existing):
-        new = pattern.sub(block, existing)
-    else:
-        sep = "" if existing == "" or existing.endswith("\n") else "\n"
-        new = f"{existing}{sep}{block}\n"
-    if new != existing:
-        rc.write_text(new)
+    updated = with_path_block(existing, ctx.session.user_home / ".local" / "bin")
+    if updated != existing:
+        rc.write_text(updated)
 
 
 def ensure_meiva_home_dirs(ctx: ConvergeCtx) -> None:
@@ -78,39 +64,35 @@ def ensure_pg_binaries_step(ctx: ConvergeCtx) -> None:
 
 
 # meiva:note
-# The hook checker in THIS checkout.
-GIT_HOOKS_SCAN = (
-    Path(__file__).resolve().parents[3] / "base" / "deploy" / "git" / "check_git_hooks.py"
-)
+# The hook checker lives in the checkout converge runs from.
+_GIT_HOOKS_SCAN = Path("base") / "deploy" / "git" / "check_git_hooks.py"
+_GIT_HOOKS_SCAN_TIMEOUT_S = 30.0
 
 
-def ensure_local_git_hooks(ctx: ConvergeCtx) -> None:  # noqa: ARG001
-    """Warn when a conventional local checkout's Git hook installation is
-    missing or drifted; never repair or block start.
-
-    Runs the stdlib-only checker (``scripts/provision/check_git_hooks.py
-    --scan-machine``) from THIS checkout and mirrors its ``WARNING`` lines to
-    stderr. A checkout that predates the flag (usage error), a missing script,
-    or any subprocess failure degrades to silence — a warn-only assertion must
-    never make converge noisy or fatal on its own account.
-    """
-    if not GIT_HOOKS_SCAN.exists():
+# meiva:note
+# Warn when a conventional local checkout's Git hook installation is
+# missing or drifted; never repair or block start.
+#
+# Runs the stdlib-only checker (``base/deploy/git/check_git_hooks.py
+# --scan-machine``) from THIS checkout and mirrors its ``WARNING`` lines to
+# stderr. A checkout that predates the flag (usage error), a missing script,
+# or any subprocess failure degrades to silence — a warn-only assertion must
+# never make converge noisy or fatal on its own account.
+def ensure_local_git_hooks(ctx: ConvergeCtx) -> None:
+    script = ctx.repo / _GIT_HOOKS_SCAN
+    if not script.exists():
         return
     try:
-        result = subprocess.run(
-            [sys.executable, str(GIT_HOOKS_SCAN), "--scan-machine"],
+        result = ctx.host.run(
+            list(hook_scan_argv(sys.executable, script)),
             capture_output=True,
             text=True,
-            check=False,
-            timeout=30,
+            timeout=_GIT_HOOKS_SCAN_TIMEOUT_S,
         )
     except (OSError, subprocess.SubprocessError):
         return
-    if result.returncode not in (0, 1):
-        return  # pre-flag checkout or unexpected failure: stay silent
-    for line in result.stdout.splitlines():
-        if line.startswith("WARNING:"):
-            print(f"  ! hooks: {line.removeprefix('WARNING: ').strip()}", file=sys.stderr)
+    for line in hook_scan_warnings(result.returncode, result.stdout):
+        print(line, file=sys.stderr)
 
 
 # --- unit-state steps (need a configured unit) ----------------------------

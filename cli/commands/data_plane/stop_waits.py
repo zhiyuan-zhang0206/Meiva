@@ -1,12 +1,12 @@
-"""Bounded stop waits and the Postgres escalation report, shared by the data-plane stop
-(`maintenance_stop`) and the unit stop (`cli/commands/lifecycle/service_stop.py`).
-
-They live under `data_plane` because the data-plane stop is the lower caller: the unit stop
-imports them, never the reverse."""
+# meiva:note
+# Bounded stop waits and the Postgres escalation report, shared by the data-plane stop
+# (`maintenance_stop`) and the unit stop (`cli/commands/lifecycle/stop/shell_sessions.py`).
+#
+# They live under `data_plane` because the data-plane stop is the lower caller: the unit stop
+# imports them, never the reverse.
 
 from __future__ import annotations
 
-import math
 import sys
 import time
 from collections.abc import Callable
@@ -15,7 +15,7 @@ from base import telemetry
 from base.cluster import postgres as owned_postgres
 from base.native_process.ownership import OwnedProcess, capture_tree, retain_processes
 from base.telemetry import EventPipeline
-from cli.commands.data_plane.maintenance_stop_report import occupied_groups
+from cli.commands.data_plane.stop_budget import poll_delay, require_valid_timeout, time_left
 
 # meiva:note
 # How long a normal stop's shell-session closure waits between its HUP/TERM and the
@@ -35,70 +35,59 @@ PROCESS_CLEANUP_WAIT_S = 10.0
 # bounded leg.
 PROCESS_KILL_WAIT_S = 3.0
 
+# meiva:note
+# How often a wait for processes to exit observes them again.
+_POLL_INTERVAL_S = 0.05
+
 
 def deadline_after(timeout: float) -> float:
-    if not math.isfinite(timeout) or timeout <= 0:
-        raise ValueError("maintenance stop timeout must be finite and positive")
-    return time.monotonic() + timeout
+    return time.monotonic() + require_valid_timeout(timeout)
 
 
 def remaining(deadline: float) -> float:
-    value = deadline - time.monotonic()
-    if value <= 0:
+    left = time_left(deadline, time.monotonic())
+    if left is None:
         raise TimeoutError("maintenance kept its hold; stop deadline expired")
-    return value
+    return left
 
 
-def wait_for_exit(
-    tracked: set[OwnedProcess],
-    deadline: float,
-    *,
-    groups: tuple[int, ...] = (),
-    escalate: Callable[[set[OwnedProcess]], None] | None = None,
-) -> None:
-    """Wait for `tracked` identities and `groups` to empty, within `deadline`.
-
-    `escalate`, when given, is called once per iteration with the current
-    living identities, AFTER the descendant re-capture: it may deliver further
-    graceful signals to confirmed-owned identities (issue #2123 — a leader that
-    exits without closing its children must not stall the stop until the
-    deadline; the caller's escalator owns the ownership validation). Never
-    escalates to SIGKILL and never certifies success while anything is alive.
-    """
+# meiva:note
+# Wait for the `tracked` identities to empty, within `deadline`.
+#
+# Never escalates a signal and never certifies success while anything is alive. A
+# descendant of a living identity joins `tracked`, so a leader that exits without closing
+# its children does not let the wait finish early.
+def wait_for_exit(tracked: set[OwnedProcess], deadline: float) -> None:
     while True:
         living = {identity for identity in tracked if identity.live()}
-        occupied = occupied_groups(groups)
-        if not living and not occupied:
+        if not living:
             return
         for identity in living:
             retain_processes(tracked, capture_tree(identity))
-        if escalate is not None:
-            escalate(living)
-        try:
-            budget = remaining(deadline)
-        except TimeoutError:
+        delay = poll_delay(time_left(deadline, time.monotonic()), _POLL_INTERVAL_S)
+        if delay is None:
             raise TimeoutError(
-                f"maintenance kept its hold; processes did not exit: "
-                f"{sorted(identity.pid for identity in living)}; occupied process groups: {occupied}"
-            ) from None
-        time.sleep(min(0.05, budget))
+                "maintenance kept its hold; processes did not exit: "
+                f"{sorted(identity.pid for identity in living)}"
+            )
+        time.sleep(delay)
 
 
+# meiva:note
+# Report a Postgres shutdown that had to be ended by an immediate one.
+#
+# The owner (`base.cluster.postgres`) logs the escalation; this adds the
+# operator line and the `postgres_stop_escalated` event. `notes`, when the
+# caller owns a stop journal, collects the line for it
+# (`stop.report.finish_stop`); a leg that owns no journal passes
+# nothing and still gets stderr and the event
+# (docs/decisions/data/database/2026-10-02-pg-stop-escalates-to-immediate.md).
 def report_postgres_stop_escalation(
     escalation: owned_postgres.Escalation,
     notes: list[str] | None = None,
     *,
     producer: Callable[[], EventPipeline],
 ) -> None:
-    """Report a Postgres shutdown that had to be ended by an immediate one.
-
-    The owner (`base.cluster.postgres`) logs the escalation; this adds the
-    operator line and the `postgres_stop_escalated` event. `notes`, when the
-    caller owns a stop journal, collects the line for it
-    (`_temporary_stop._finish_stop`); a leg that owns no journal passes
-    nothing and still gets stderr and the event
-    (docs/decisions/data/database/2026-10-02-pg-stop-escalates-to-immediate.md).
-    """
     killed = ", ".join(str(pid) for pid in escalation.killed) or "none"
     note = (
         f"postgres {escalation.detail}; ended by an immediate shutdown "

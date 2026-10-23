@@ -429,7 +429,7 @@ cache_dir = ".cache/pytest"
 addopts = ["-ra", "--strict-markers", "--import-mode=importlib"]
 markers = [
     "native_permissions_helper: explicit isolated native helper proof; owns artifact, signing and exact-home job cleanup",
-    "real_service_readiness_gate: let this test call the real root_driver readiness waits (wait_for_service_tree, _wait_for_root_services_ready)",
+    "real_service_readiness_gate: let this test call the real root readiness wait (root_readiness.wait_for_service_tree)",
     "real_health_port_gate: let this test call the real _occupied_health_ports",
     # Tests that are timing-sensitive, race-prone, or use real DB LISTEN/NOTIFY —
     # run serial (-n 1) while stable tests run parallel (-n auto).
@@ -1092,6 +1092,11 @@ reportUnknownArgumentType = "error"
 
 [[tool.pyright.executionEnvironments]]
 root = "cli/parsers/tests"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "cli/startup/tests"
 reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 

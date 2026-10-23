@@ -9,8 +9,6 @@ from typing import cast
 
 import pytest
 
-from cli.commands.data_plane import bringup
-
 os.environ["MEIVA_CONFIG_FETCH"] = "skip"
 
 _GATEWAY_SOURCE_ROOTS = (
@@ -429,21 +427,20 @@ def test_profile_consumption_distinguishes_runtime_facts_from_domains(tmp_path: 
     assert _closure_domains({source}) == {"data_plane", "undeclared_domain"}
 
 
-def test_agent_host_launches_under_the_agent_profile(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_agent_host_launches_under_the_agent_profile(unit_home: Path) -> None:
     from base.config import PROCESS_PROFILES
     from cli.commands.lifecycle import root_driver
     from services.supervision.roster import build_services
 
-    def delivery(_cls: str, *, remote_data_plane: bool) -> dict[str, str]:
-        return {"MEIVA_DB_URL": "postgresql://meiva_g0_runner@fixture/meiva"}
-
-    def token_delivery(_cls: str, *, remote_data_plane: bool) -> dict[str, str]:
-        return {"MEIVA_API_TOKEN": "fixture-token"}
-
-    monkeypatch.setattr(bringup, "db_delivery", delivery)
-    monkeypatch.setattr(bringup, "api_delivery", token_delivery)
+    # meiva:note
+    # A gateway-config unit on a remote-managed plane: the agent projects the provider runner login.
+    (unit_home / ".env").write_text(
+        "MEIVA_MACHINE_SERVE_GATEWAY=true\n"
+        "MEIVA_DB_URL=postgresql://owner@db.example:5432/meiva\n"
+        "MEIVA_RUNNER_DB_PASSWORD=fixture\n"
+    )
     agent_host = next(spec for spec in build_services() if spec.session == "agent-host")
-    profile = root_driver.service_extra_env(agent_host, remote_data_plane=False)[
+    profile = root_driver.service_extra_env(agent_host, remote_data_plane=True)[
         "MEIVA_PROCESS_PROFILE"
     ]
     assert profile in PROCESS_PROFILES, f"{profile} is not a process profile"

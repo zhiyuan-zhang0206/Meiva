@@ -14,7 +14,7 @@ from base.clock.tests.manual_timers import ManualTimers
 from base.host.system.tests.fake_commands import fake_host
 from base.sessions.tests.refuse_helper import refuse_helper
 from base.telemetry import EventPipeline
-from cli.commands.converge.spec import ConvergeCtx
+from cli.commands.converge.spec import ConvergeCtx, UserSession
 from cli.commands.extensions import external_skills
 from cli.commands.extensions.skills_sync import converge_skills
 from cli.database.runtime import CommandRuntime
@@ -126,6 +126,7 @@ def test_external_guide_preserves_legacy_copies_and_publishes_nested_resources(
         machine=command_runtime.machine,
         helper=refuse_helper,
         host=fake_host(),
+        session=UserSession(user_home=meiva_home, login_shell="/bin/zsh", interactive=False),
         services=frozenset(),
         timers=ManualTimers(),
     )

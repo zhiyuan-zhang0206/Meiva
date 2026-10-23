@@ -210,7 +210,12 @@ def test_borrowed_cli_context_keeps_the_original_operator_factory(
 
     operator_database = _factory(command_runtime, open_database)
     context = converge_context(
-        tmp_path, tmp_path, operator_database=operator_database, producer=operator_pipeline
+        tmp_path,
+        tmp_path,
+        user_home=tmp_path,
+        command_runtime=command_runtime,
+        database_factory=operator_database,
+        producer=operator_pipeline,
     )
     assert context.database_factory is operator_database
     assert not seen

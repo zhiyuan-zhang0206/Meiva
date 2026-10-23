@@ -1,109 +1,90 @@
-from collections.abc import Callable
-from pathlib import Path
-from typing import Any
+# meiva:note
+# The GitHub PR capability check: which hosts it applies to, and how it fails.
+#
+# The `gh` CLI is the one program the check cannot run for real, so the hosts here answer its
+# commands from a script (`FakeCommands` refuses any command the script does not name, which also
+# proves the single-box and opt-out cases never reach for `gh`).
+
+from __future__ import annotations
+
+from dataclasses import replace
 
 import pytest
 
 import cli.commands.lifecycle.converge_host as cv
-from base.clock.tests.manual_timers import ManualTimers
-from base.cluster.machine import MachineRoles
-from base.cluster.machine.boot import machine_from_boot
-from base.config import ConfigBoot
-from base.host.system.hostport import Host
 from base.host.system.tests.fake_commands import FakeCommands, Reply, fake_host
-from base.sessions.tests.refuse_helper import refuse_helper
-from base.telemetry import EventPipeline
-from cli.database.tests.cli_tests import operator_database as operator_database
-from cli.database.tests.cli_tests import operator_pipeline as operator_pipeline
-from cli.database.tests.command_inputs import command_runtime as command_runtime
+from cli.commands.converge.plans.split_host_checks import github_pr_failure, requires_github_pr
+from cli.commands.converge.spec import ConvergeCtx
+
+# meiva:note
+# --- which hosts must be able to open PRs (pure) ------------------------------------
 
 
-def _ctx(
-    home: Path,
-    *,
-    operator_database: Callable[[], Any],
-    producer: Callable[[], EventPipeline],
-    host: Host,
-    roles: MachineRoles = frozenset({"agent-runner"}),
-) -> cv.ConvergeCtx:
-    machine_config = ConfigBoot()
-    return cv.ConvergeCtx(
-        repo=Path("/repo"),
-        meiva_home=home,
-        roles=roles,
-        config=machine_config,
-        database_factory=operator_database,
-        producer=producer,
-        machine=machine_from_boot(machine_config),
-        helper=refuse_helper,
-        host=host,
-        services=frozenset(),
-        timers=ManualTimers(),
-    )
-
-
-def test_raises_when_gh_is_not_authenticated(
-    tmp_path: Path,
-    operator_database: Callable[[], Any],
-    operator_pipeline: Callable[[], EventPipeline],
+@pytest.mark.parametrize(
+    ("roles", "keep_local", "require_pr", "required"),
+    [
+        (frozenset({"agent-runner"}), False, True, True),
+        (None, False, True, True),
+        # meiva:note
+        # consolidates locally
+        (frozenset({"gateway", "agent-runner"}), False, True, False),
+        # meiva:note
+        # a local-only memory pool
+        (frozenset({"agent-runner"}), True, True, False),
+        # meiva:note
+        # a runner that opted out
+        (frozenset({"agent-runner"}), False, False, False),
+    ],
+)
+def test_only_a_split_runner_that_consolidates_via_prs_must_open_them(
+    roles: frozenset[str] | None, keep_local: bool, require_pr: bool, required: bool
 ) -> None:
+    assert requires_github_pr(roles=roles, keep_local=keep_local, require_pr=require_pr) is required
+
+
+def test_the_failure_names_the_reason_and_the_repair() -> None:
+    message = github_pr_failure("gh CLI not installed")
+
+    assert message.startswith("this agent-runner cannot open+merge GitHub PRs")
+    assert "gh CLI not installed" in message
+    assert "gh auth login" in message
+
+
+# meiva:note
+# --- the step against a host --------------------------------------------------------
+
+
+def test_raises_when_gh_is_not_authenticated(ctx: ConvergeCtx) -> None:
     commands = FakeCommands()
     commands.on(["gh", "auth", "status"], Reply(returncode=1))
-    ctx = _ctx(
-        tmp_path,
-        operator_database=operator_database,
-        producer=operator_pipeline,
-        host=fake_host(commands, programs={"gh": "/usr/bin/gh"}),
-    )
+    runner = replace(ctx, host=fake_host(commands, programs={"gh": "/usr/bin/gh"}))
+
     with pytest.raises(RuntimeError, match="not authenticated"):
-        cv.ensure_github_pr(ctx)
-    assert commands.argvs == [("gh", "auth", "status")]
+        cv.ensure_github_pr(runner)
 
 
-def test_raises_when_pr_blocked(
-    tmp_path: Path,
-    operator_database: Callable[[], Any],
-    operator_pipeline: Callable[[], EventPipeline],
-) -> None:
-    ctx = _ctx(
-        tmp_path,
-        operator_database=operator_database,
-        producer=operator_pipeline,
-        host=fake_host(),
-    )
+def test_raises_when_gh_is_not_installed(ctx: ConvergeCtx) -> None:
     with pytest.raises(RuntimeError, match="gh CLI not installed"):
         cv.ensure_github_pr(ctx)
 
 
-def test_skips_on_single_box(
-    tmp_path: Path,
-    operator_database: Callable[[], Any],
-    operator_pipeline: Callable[[], EventPipeline],
-) -> None:
-    commands = FakeCommands()
-    ctx = _ctx(
-        tmp_path,
-        operator_database=operator_database,
-        producer=operator_pipeline,
-        host=fake_host(commands),
-        roles=frozenset({"gateway", "agent-runner"}),
-    )
-    cv.ensure_github_pr(ctx)
-    assert commands.calls == []
+def test_skips_on_single_box(ctx: ConvergeCtx) -> None:
+    single_box = replace(ctx, roles=frozenset({"gateway", "agent-runner"}))
+
+    # meiva:note
+    # no gh on this host, and no failure
+    cv.ensure_github_pr(single_box)
 
 
-def test_skips_when_opt_out(
-    tmp_path: Path,
-    operator_database: Callable[[], Any],
-    operator_pipeline: Callable[[], EventPipeline],
-) -> None:
-    ctx = _ctx(
-        tmp_path,
-        operator_database=operator_database,
-        producer=operator_pipeline,
-        host=fake_host(),
-    )
+def test_skips_when_opt_out(ctx: ConvergeCtx) -> None:
     ctx.config.set_field("require_github_pr", False)
+
+    cv.ensure_github_pr(ctx)
+
+
+def test_skips_when_the_memory_pool_stays_local(ctx: ConvergeCtx) -> None:
+    ctx.config.set_field("memory_keep_local", True)
+
     cv.ensure_github_pr(ctx)
 
 
