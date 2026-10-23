@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 import psycopg
 from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
@@ -91,6 +93,8 @@ def _insert_termination_inbounds(
     source: str,
     message: str | None,
     kill_all_shell_sessions: bool = False,
+    insert_pair_fn: Callable[..., tuple[int | None, int]] | None = None,
+    insert_retry_fn: Callable[..., int] | None = None,
 ) -> tuple[int | None, int]:
     """Insert termination inbounds, preserving terminate on message failure.
 
@@ -98,14 +102,14 @@ def _insert_termination_inbounds(
     the first keeps the chat and command atomic, while the second contains a
     failed best-effort chat retry without rolling back the durable command.
     """
+    pair_fn = insert_pair_fn or insert_termination_pair
+    retry_fn = insert_retry_fn or insert_pending_termination_message
     kill = kill_all_shell_sessions
     if message is None:
-        return insert_termination_pair(
-            conn, agent_id, source=source, message=None, kill_all_shell_sessions=kill
-        )
+        return pair_fn(conn, agent_id, source=source, message=None, kill_all_shell_sessions=kill)
     try:
         with conn.transaction():
-            return insert_termination_pair(
+            return pair_fn(
                 conn, agent_id, source=source, message=message, kill_all_shell_sessions=kill
             )
     except Exception as exc:
@@ -115,13 +119,13 @@ def _insert_termination_inbounds(
             agent_id=agent_id,
             exc=exc,
         )
-    _, terminate_id = insert_termination_pair(
+    _, terminate_id = pair_fn(
         conn, agent_id, source=source, message=None, kill_all_shell_sessions=kill
     )
     message_id: int | None = None
     try:
         with conn.transaction():
-            message_id = insert_pending_termination_message(
+            message_id = retry_fn(
                 conn,
                 agent_id,
                 source=source,
@@ -144,6 +148,7 @@ def _stage_termination_event(
     source: str,
     inbound_id: int,
     kill_all_shell_sessions: bool,
+    record_audit_fn: Callable[[psycopg.Connection, telemetry.Event], telemetry.Event] | None = None,
 ) -> telemetry.Event:
     """Register a terminate audit fact before its operation commits.
 
@@ -158,6 +163,8 @@ def _stage_termination_event(
     )
     from base.agents.impersonation.manifest import record_central_event
 
+    if record_audit_fn is not None:
+        return record_audit_fn(conn, record_central_event(conn, event))
     return record_audit(conn, record_central_event(conn, event))
 
 
@@ -170,6 +177,8 @@ def enqueue_termination_inbounds(
     source: str,
     message: str | None,
     kill_all_shell_sessions: bool = False,
+    insert_pair_fn: Callable[..., tuple[int | None, int]] | None = None,
+    insert_retry_fn: Callable[..., int] | None = None,
 ) -> tuple[int | None, int | None]:
     """Persist graceful termination and publish its audit/wake effects.
 
@@ -197,6 +206,8 @@ def enqueue_termination_inbounds(
             source=source,
             message=message,
             kill_all_shell_sessions=kill_all_shell_sessions,
+            insert_pair_fn=insert_pair_fn,
+            insert_retry_fn=insert_retry_fn,
         )
         prepared_event = _stage_termination_event(
             conn,
@@ -231,6 +242,9 @@ def force_terminate_transaction(
     source: str,
     message: str | None = None,
     kill_all_shell_sessions: bool = False,
+    insert_pair_fn: Callable[..., tuple[int | None, int]] | None = None,
+    insert_retry_fn: Callable[..., int] | None = None,
+    record_audit_fn: Callable[[psycopg.Connection, telemetry.Event], telemetry.Event] | None = None,
 ) -> tuple[AgentStatus, list[str], int, int]:
     with db_pool.connection() as conn, conn.cursor() as cur:
         conn.execute("SET TRANSACTION READ WRITE")
@@ -249,6 +263,8 @@ def force_terminate_transaction(
             source=source,
             message=message,
             kill_all_shell_sessions=kill_all_shell_sessions,
+            insert_pair_fn=insert_pair_fn,
+            insert_retry_fn=insert_retry_fn,
         )
         # meiva:note
         # Older commands are closed visibly, never silently dropped; the force's
@@ -282,6 +298,7 @@ def force_terminate_transaction(
             source=source,
             inbound_id=terminate_inbound_id,
             kill_all_shell_sessions=kill_all_shell_sessions,
+            record_audit_fn=record_audit_fn,
         )
     telemetry.emit_prepared(prepared_event)
     return old_status, page_names, terminate_inbound_id, row[1]
@@ -290,9 +307,16 @@ def force_terminate_transaction(
 # meiva:note
 # Publish the non-transactional wake after the audit commit.
 def publish_force_terminate_inbound(
-    db: Database, bus: EventBus, agent_id: int, inbound_id: int, _source: str
+    db: Database,
+    bus: EventBus,
+    agent_id: int,
+    inbound_id: int,
+    _source: str,
+    *,
+    publish_wake_fn: Callable[[Database, EventBus, int, str], object] | None = None,
 ) -> None:
-    publish_inbound_wake(db, bus, agent_id, str(inbound_id))
+    publish_wake = publish_wake_fn or publish_inbound_wake
+    publish_wake(db, bus, agent_id, str(inbound_id))
 
 
 # meiva:note
@@ -305,6 +329,7 @@ def force_mark_terminated(
     *,
     source: str = "user",
     message: str | None = None,
+    publish_wake_fn: Callable[[Database, EventBus, int, str], object] | None = None,
 ) -> list[str]:
     _, page_names, inbound_id, _cutoff = force_terminate_transaction(
         agent_id,
@@ -312,5 +337,7 @@ def force_mark_terminated(
         source=source,
         message=message,
     )
-    publish_force_terminate_inbound(db, bus, agent_id, inbound_id, source)
+    publish_force_terminate_inbound(
+        db, bus, agent_id, inbound_id, source, publish_wake_fn=publish_wake_fn
+    )
     return page_names

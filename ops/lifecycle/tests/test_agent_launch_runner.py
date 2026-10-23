@@ -15,7 +15,6 @@ from base.config import settings
 from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.events.live.bus import EventBus
-from base.lm import factory
 from base.packages.plugin_providers import build_model_catalog
 from ops import lifecycle
 from ops.lifecycle import launch
@@ -57,7 +56,6 @@ def test_a_harness_without_a_launcher_is_refused(
 
 @pytest.mark.asyncio
 async def test_new_launch_attempt_is_repeatable_without_prompt_insertion(
-    monkeypatch: pytest.MonkeyPatch,
     database: Database,
     event_bus: EventBus,
     db_conn: psycopg.Connection,
@@ -82,8 +80,6 @@ async def test_new_launch_attempt_is_repeatable_without_prompt_insertion(
     def _validate_model(**_kwargs: object) -> None:
         return None
 
-    monkeypatch.setattr(factory, "validate_model_config", _validate_model)
-    monkeypatch.setattr(launch, "publish_inbound_wake", _wake)
     body = LaunchAgentRequest(
         agent_id=agent_id, launch_attempt_id=attempt, birth_config=birth_config
     )
@@ -96,6 +92,8 @@ async def test_new_launch_attempt_is_repeatable_without_prompt_insertion(
             pool,
             catalog=build_model_catalog(),
             local_machine=machine_identity.name(),
+            validate_model_fn=_validate_model,
+            publish_wake_fn=_wake,
         )
         await lifecycle.launch_agent_op(
             database,
@@ -104,6 +102,8 @@ async def test_new_launch_attempt_is_repeatable_without_prompt_insertion(
             pool,
             catalog=build_model_catalog(),
             local_machine=machine_identity.name(),
+            validate_model_fn=_validate_model,
+            publish_wake_fn=_wake,
         )
         stale = body.model_copy(update={"launch_attempt_id": uuid4()})
         with pytest.raises(ValueError, match="stale or misplaced"):
@@ -114,6 +114,8 @@ async def test_new_launch_attempt_is_repeatable_without_prompt_insertion(
                 pool,
                 catalog=build_model_catalog(),
                 local_machine=machine_identity.name(),
+                validate_model_fn=_validate_model,
+                publish_wake_fn=_wake,
             )
         db_conn.execute("UPDATE agents_meta SET machine='later-placement' WHERE id=%s", (agent_id,))
         db_conn.commit()
@@ -125,6 +127,8 @@ async def test_new_launch_attempt_is_repeatable_without_prompt_insertion(
                 pool,
                 catalog=build_model_catalog(),
                 local_machine=machine_identity.name(),
+                validate_model_fn=_validate_model,
+                publish_wake_fn=_wake,
             )
     assert wakes == [(agent_id, "0"), (agent_id, "0")]
     assert db_conn.execute(

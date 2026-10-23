@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Callable
-from typing import Any, cast
+from typing import Any
 
 import psycopg
 import pytest
@@ -17,7 +16,7 @@ from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
-from ops.agents import resurrect_agent, wake
+from ops.agents import resurrect_agent
 from ops.lifecycle.tests.resurrection_setup import (
     agents_row,
     hosted_agent,
@@ -242,7 +241,6 @@ class TestResurrectAgent:
     def test_resurrect_select_update_race_does_not_insert_inbound(
         self,
         db_conn: psycopg.Connection,
-        monkeypatch: pytest.MonkeyPatch,
         database: Database,
         event_bus: EventBus,
         *,
@@ -259,26 +257,10 @@ class TestResurrectAgent:
             local_machine=machine_identity,
         )
 
-        original_execute = cast(Callable[..., Any], psycopg.Cursor.execute)
-        original_fetchone = psycopg.Cursor.fetchone
-        status_select_cursors: set[int] = set()
-
-        def tracking_execute(self: Any, query: Any, *args: Any, **kwargs: Any) -> Any:
-            result = original_execute(self, query, *args, **kwargs)
-            if query == wake.RESURRECTION_ROW:
-                status_select_cursors.add(id(self))
-            return result
-
-        def lying_fetchone(self: Any) -> Any:
-            if id(self) in status_select_cursors:
-                status_select_cursors.remove(id(self))
-                row = original_fetchone(self)
-                assert row is not None
-                return ("terminated", *row[1:])
-            return original_fetchone(self)
-
-        monkeypatch.setattr(psycopg.Cursor, "execute", tracking_execute)
-        monkeypatch.setattr(psycopg.Cursor, "fetchone", lying_fetchone)
+        def lying_fetchone(cur: psycopg.Cursor) -> tuple[Any, ...]:
+            row = cur.fetchone()
+            assert row is not None
+            return ("terminated", *row[1:])
 
         with pytest.raises(ResurrectAlreadyAlive, match="concurrently modified"):
             resurrect_agent(
@@ -287,9 +269,9 @@ class TestResurrectAgent:
                 agent_id,
                 resurrected_by="user",
                 prompt="test",
+                row_fetcher=lying_fetchone,
             )
 
-        monkeypatch.undo()
         assert inbound_count(db_conn, agent_id) == 0
         row = agents_row(db_conn, agent_id)
         assert row is not None and row[2] == "idling"

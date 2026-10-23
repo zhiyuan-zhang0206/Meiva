@@ -73,40 +73,28 @@ class TestRestartAgentRequestConfigOverlay:
     """Restart overlays fail at both HTTP and runner schema boundaries."""
 
     @pytest.mark.parametrize("profile", ["gateway", "runner"])
-    def test_accepts_agent_domain_overlay_in_boundary_profiles(
-        self, monkeypatch: pytest.MonkeyPatch, profile: str
-    ) -> None:
-        """Schema validation must not depend on the boundary process's domains."""
-        import base.config as base_config
-        from base.config import Settings
+    def test_accepts_agent_domain_overlay_in_boundary_profiles(self, profile: str) -> None:
+        from base.config.profiles import PROCESS_PROFILES, ProcessProfile
 
-        monkeypatch.setattr(base_config, "settings", Settings(profile=profile))
+        assert "agent" not in PROCESS_PROFILES[cast(ProcessProfile, profile)]
 
         body = RestartAgentRequest(config_overlay={"completion_notice_policy": "hourly"})
 
         assert body.config_overlay == {"completion_notice_policy": "hourly"}
 
     @pytest.mark.parametrize("profile", ["gateway", "runner"])
-    def test_rejects_invalid_agent_domain_overlay_in_boundary_profiles(
-        self, monkeypatch: pytest.MonkeyPatch, profile: str
-    ) -> None:
-        """Profile-limited schema validation still rejects invalid agent settings."""
-        import base.config as base_config
-        from base.config import Settings
+    def test_rejects_invalid_agent_domain_overlay_in_boundary_profiles(self, profile: str) -> None:
+        from base.config.profiles import PROCESS_PROFILES, ProcessProfile
 
-        monkeypatch.setattr(base_config, "settings", Settings(profile=profile))
+        assert "agent" not in PROCESS_PROFILES[cast(ProcessProfile, profile)]
 
         with pytest.raises(ValidationError):
             RestartAgentRequest(config_overlay={"completion_notice_policy": "bogus"})
 
-    def test_validates_sandbox_overlay_in_gateway_profile(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """The gateway does not construct sandbox, but must validate its fields."""
-        import base.config as base_config
-        from base.config import Settings
+    def test_validates_sandbox_overlay_in_gateway_profile(self) -> None:
+        from base.config.profiles import PROCESS_PROFILES
 
-        monkeypatch.setattr(base_config, "settings", Settings(profile="gateway"))
+        assert "sandbox" not in PROCESS_PROFILES["gateway"]
 
         body = RestartAgentRequest(config_overlay={"syntax_fix_ruff_format": True})
 
@@ -145,14 +133,9 @@ class TestSpawnPrechecksBlocking:
     inside spawn_agent_op — now called by create_and_launch_agent before the row
     INSERT."""
 
-    @pytest.fixture(autouse=True)
-    def model_preflight(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """These tests isolate checkpoint lookup; DB-backed model checks have their own tests."""
-        from base.agents.model import model_config
-
-        monkeypatch.setattr(
-            model_config, "validate_spawn_model_config", lambda *_args, **_kwargs: "deepseek-flash"
-        )
+    @staticmethod
+    def _noop_validate_spawn(*_args: object, **_kwargs: object) -> str:
+        return "deepseek-flash"
 
     class _FakeCursor:
         def __enter__(self):
@@ -175,57 +158,50 @@ class TestSpawnPrechecksBlocking:
         def connection(self):
             return TestSpawnPrechecksBlocking._FakeConn()
 
-    def test_fork_resolves_checkpoint(
-        self, monkeypatch: pytest.MonkeyPatch, *, config_authority: ConfigAuthority
-    ) -> None:
-        """fork_from -> latest_checkpoint_id resolves to an explicit id, not 'latest'."""
-        monkeypatch.setattr(launch, "latest_checkpoint_id", lambda _cur, _aid: "ckpt:v1")
+    def test_fork_resolves_checkpoint(self, *, config_authority: ConfigAuthority) -> None:
         checkpoint = launch.spawn_prechecks_blocking(
             SpawnAgentRequest(spawner="user", fork_from=3),
             cast(ConnectionPool, self._FakePool()),
-            catalog=build_model_catalog(),  # type: ignore[arg-type]
+            catalog=build_model_catalog(),
             authority=config_authority,
+            validate_spawn_model_fn=self._noop_validate_spawn,
+            checkpoint_id_fn=lambda _cur, _aid: "ckpt:v1",
         )
         assert checkpoint == "ckpt:v1"
 
-    def test_fork_empty_raises(
-        self, monkeypatch: pytest.MonkeyPatch, *, config_authority: ConfigAuthority
-    ) -> None:
-        """fork_from with no checkpoint raises ForkSourceEmpty (wire-mapped to 409)."""
+    def test_fork_empty_raises(self, *, config_authority: ConfigAuthority) -> None:
         from base.api_contracts.agent_contract import ForkSourceEmpty
 
-        monkeypatch.setattr(launch, "latest_checkpoint_id", lambda _cur, _aid: None)
         with pytest.raises(ForkSourceEmpty):
             launch.spawn_prechecks_blocking(
                 SpawnAgentRequest(spawner="user", fork_from=3),
                 cast(ConnectionPool, self._FakePool()),
-                catalog=build_model_catalog(),  # type: ignore[arg-type]
+                catalog=build_model_catalog(),
                 authority=config_authority,
+                validate_spawn_model_fn=self._noop_validate_spawn,
+                checkpoint_id_fn=lambda _cur, _aid: None,
             )
 
-    def test_plain_spawn_no_checkpoint_lookup(
-        self, monkeypatch: pytest.MonkeyPatch, *, config_authority: ConfigAuthority
-    ) -> None:
-        """No fork_from -> no checkpoint lookup, returns None."""
+    def test_plain_spawn_no_checkpoint_lookup(self, *, config_authority: ConfigAuthority) -> None:
         looked_up: list[object] = []
 
         def _fake_lookup(_cur: object, _aid: object) -> str:
             looked_up.append(1)
             return "never"
 
-        monkeypatch.setattr(launch, "latest_checkpoint_id", _fake_lookup)
         checkpoint = launch.spawn_prechecks_blocking(
             SpawnAgentRequest(spawner="user"),
             cast(ConnectionPool, self._FakePool()),
-            catalog=build_model_catalog(),  # type: ignore[arg-type]
+            catalog=build_model_catalog(),
             authority=config_authority,
+            validate_spawn_model_fn=self._noop_validate_spawn,
+            checkpoint_id_fn=_fake_lookup,
         )
         assert checkpoint is None
         assert looked_up == []
 
 
 async def test_restart_agent_op_terminated_short_circuits(
-    monkeypatch: pytest.MonkeyPatch,
     db_conn: psycopg.Connection,
     database: Database,
     event_bus: EventBus,
@@ -247,7 +223,6 @@ async def test_restart_agent_op_terminated_short_circuits(
     db_conn.execute("UPDATE agents_meta SET status='terminated' WHERE id=%s", (agent_id,))
     db_conn.commit()
     wake = AsyncMock()
-    monkeypatch.setattr(lifecycle, "publish_inbound_arrived", wake)
     with make_test_pool() as pool:
         resp = await lifecycle.restart_agent_op(
             database,
@@ -256,6 +231,7 @@ async def test_restart_agent_op_terminated_short_circuits(
             RestartAgentRequest(source="user"),
             pool,
             catalog=build_model_catalog(),
+            inbound_arrived_fn=wake,
         )
     assert resp.status == "already_terminated"
     wake.assert_not_awaited()
@@ -280,13 +256,12 @@ async def test_restart_lifecycle_op_validates_overlay_on_the_runner(
             "/api/agents/9/restart",
             {"config_overlay": {"definitely_not_a_config_field": "x"}},
             stub_pool,
-            catalog=build_model_catalog(),  # type: ignore[arg-type]
+            catalog=build_model_catalog(),
         )
 
 
 @pytest.mark.asyncio
 async def test_resurrect_agent_op_alive_returns_already_alive(
-    monkeypatch: pytest.MonkeyPatch,
     database: Database,
     event_bus: EventBus,
     *,
@@ -294,38 +269,32 @@ async def test_resurrect_agent_op_alive_returns_already_alive(
 ) -> None:
     from base.api_contracts.agent_contract import AgentStatus
 
-    monkeypatch.setattr(lifecycle, "get_agent_status", lambda _db, _aid: AgentStatus.RUNNING)
     resp = await lifecycle.resurrect_agent_op(
         database,
         event_bus,
         9,
         ResurrectAgentRequest(prompt="test"),
+        status_fn=lambda _db, _aid: AgentStatus.RUNNING,
     )
     assert resp.status == "already_alive"
 
 
 @pytest.mark.asyncio
 async def test_resurrect_agent_op_stale_trigger_returns_idempotent_noop(
-    monkeypatch: pytest.MonkeyPatch,
     database: Database,
     event_bus: EventBus,
     *,
     machine_identity: MachineIdentity,
 ) -> None:
-    """The internal guarded path treats a stale chat as an expected no-launch
-    race, while leaving the still-terminated status for its caller to return."""
     from base.api_contracts.agent_contract import AgentStatus
     from ops.agents.wake import ResurrectTriggerStaleError
 
     def _terminated(_db: object, _agent_id: int) -> AgentStatus:
         return AgentStatus.TERMINATED
 
-    monkeypatch.setattr(lifecycle, "get_agent_status", _terminated)
-
-    def _stale(_db: object, _bus: object, *_args: object, **_kwargs: object) -> None:
+    def _stale(_db: object, _bus: object, *_args: object, **_kwargs: object) -> int:
         raise ResurrectTriggerStaleError("trigger chat no longer qualifies")
 
-    monkeypatch.setattr(lifecycle, "resurrect_agent", _stale)
     resp = await lifecycle.resurrect_agent_op(
         database,
         event_bus,
@@ -333,28 +302,29 @@ async def test_resurrect_agent_op_stale_trigger_returns_idempotent_noop(
         ResurrectAgentRequest(resurrected_by="system"),
         trigger_inbound_id=123,
         trigger_inbound_kind=InboundKind.CHAT,
+        status_fn=_terminated,
+        resurrect_fn=_stale,
     )
     assert resp.status == "already_alive"
 
 
 @pytest.mark.asyncio
 async def test_terminate_agent_op_terminated_short_circuits(
-    monkeypatch: pytest.MonkeyPatch, stub_pool: MagicMock, database: Database, event_bus: EventBus
+    stub_pool: MagicMock, database: Database, event_bus: EventBus
 ) -> None:
     from base.api_contracts.agent_contract import AgentStatus
 
-    monkeypatch.setattr(lifecycle, "get_agent_status", lambda _db, _aid: AgentStatus.TERMINATED)
-
-    def _no_kill(_aid: int) -> list[int]:
+    def _no_kill(_aid: int, **_kwargs: object) -> list[int]:
         raise AssertionError("a terminate without the option never kills shell sessions")
 
-    monkeypatch.setattr(lifecycle, "kill_agent_shells", _no_kill)
     resp = await lifecycle.terminate_agent_op(
         database,
         event_bus,
         9,
         TerminateAgentRequest(),
-        stub_pool,  # type: ignore[arg-type]
+        cast(ConnectionPool, stub_pool),
+        status_fn=lambda _db, _aid: AgentStatus.TERMINATED,
+        kill_shells_fn=_no_kill,
     )
     assert resp.status == "already_terminated"
     assert resp.shell_sessions is None
@@ -362,7 +332,6 @@ async def test_terminate_agent_op_terminated_short_circuits(
 
 @pytest.mark.asyncio
 async def test_lifecycle_op_parses_path_to_terminate(
-    monkeypatch: pytest.MonkeyPatch,
     stub_pool: MagicMock,
     database: Database,
     event_bus: EventBus,
@@ -372,23 +341,24 @@ async def test_lifecycle_op_parses_path_to_terminate(
 
     captured: dict[str, object] = {}
 
-    async def _fake_terminate(_db: object, _bus: object, agent_id, body, pool):  # type: ignore[no-untyped-def]
-        captured["agent_id"] = agent_id
-        captured["force"] = body.force  # pyright: ignore[reportUnknownMemberType]
-        from ops.rpc_schemas import TerminateAgentResponse
+    from ops.rpc_schemas import TerminateAgentResponse
 
+    async def _fake_terminate(
+        _db: object, _bus: object, agent_id: int, body: TerminateAgentRequest, _pool: object
+    ) -> TerminateAgentResponse:
+        captured["agent_id"] = agent_id
+        captured["force"] = body.force
         return TerminateAgentResponse(status=TerminateResult.ENQUEUED)
 
-    monkeypatch.setattr(lifecycle, "terminate_agent_op", _fake_terminate)
     result = await lifecycle.lifecycle_op(
         database,
         event_bus,
         "/api/agents/42/terminate",
         {"source": "user"},
         stub_pool,
-        catalog=build_model_catalog(),  # type: ignore[arg-type]
+        catalog=build_model_catalog(),
+        terminate_op_fn=_fake_terminate,
     )
-    # lifecycle_op now returns the per-action response model (not its dict form).
     assert result.status == "enqueued"
     assert captured["agent_id"] == 42
     assert captured["force"] is False
@@ -458,16 +428,12 @@ async def test_manual_lifecycle_path_rejects_auto_resurrect_trigger(
 
 @pytest.mark.asyncio
 async def test_explicit_resurrect_dispatches_manual_op(
-    monkeypatch: pytest.MonkeyPatch,
     stub_pool: MagicMock,
     database: Database,
     event_bus: EventBus,
     *,
     machine_identity: MachineIdentity,
 ) -> None:
-    """The explicit unguarded path is the only runner path used by a new
-    gateway for a deliberate manual or system lifecycle resurrection."""
-
     captured: dict[str, object] = {}
 
     async def _fake_resurrect(
@@ -487,15 +453,14 @@ async def test_explicit_resurrect_dispatches_manual_op(
         )
         return ResurrectAgentResponse(status=ResurrectResult.SPAWNED)
 
-    monkeypatch.setattr(lifecycle, "resurrect_agent_op", _fake_resurrect)
-
     result = await lifecycle.lifecycle_op(
         database,
         event_bus,
         "/api/agents/42/resurrect-explicit",
         {"resurrected_by": "user"},
         stub_pool,
-        catalog=build_model_catalog(),  # type: ignore[arg-type]
+        catalog=build_model_catalog(),
+        resurrect_op_fn=_fake_resurrect,
     )
 
     assert result.status == "spawned"
