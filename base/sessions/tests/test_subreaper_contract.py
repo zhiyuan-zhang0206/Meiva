@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 
-@pytest.mark.skipif(sys.platform != "linux", reason="Linux child-subreaper contract")
+@pytest.mark.requires_host("linux")
 def test_caller_exit_preserves_child_adopted_by_ancestor_subreaper(
     tmp_path: Path,
     record_property: Callable[[str, object], None],

@@ -8,7 +8,6 @@ import psutil
 import pytest
 
 from base.native_process import pid_starttime_ticks
-from base.native_process.os_platform import is_linux
 from base.paths import meiva_home, run_dir
 from base.sessions.hosting import hosting_supervised_session
 from base.sessions.record import SessionRecord
@@ -31,7 +30,7 @@ def test_hosting_supervised_session_resolves_home_when_called(unit_home: Path) -
         path.unlink(missing_ok=True)
 
 
-@pytest.mark.skipif(not is_linux(), reason="Linux /proc start-time identity")
+@pytest.mark.requires_host("linux")
 def test_hosting_supervised_session_uses_starttime_despite_wall_clock_drift(
     unit_home: Path,
 ) -> None:

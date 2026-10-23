@@ -17,34 +17,8 @@
   "base/lm/harness/deepseek/tests/test_usage.py": [
     "importorskip('zstandard')"
   ],
-  "base/native_process/tests/test_os_platform.py": [
-    "skipif(not plat.is_macos())"
-  ],
-  "base/native_process/tests/test_proc_tree.py": [
-    "skipif(not is_linux())",
-    "skipif(not is_linux())",
-    "skipif(sys.platform != 'darwin')",
-    "skipif(sys.platform != 'darwin')"
-  ],
-  "base/native_process/tests/test_proc_tree_identity.py": [
-    "skipif(sys.platform != 'linux')"
-  ],
-  "base/native_process/tests/test_pytest_env_locale.py": [
-    "skipif(not plat.is_macos())"
-  ],
   "base/sessions/tests/test_daemon_venv_activation.py": [
     "skipif(shutil.which('bash') is None)"
-  ],
-  "base/sessions/tests/test_hosting.py": [
-    "skipif(not is_linux())"
-  ],
-  "base/sessions/tests/test_posixproc.py": [
-    "skipif(not is_linux())",
-    "skipif(not is_linux())",
-    "skipif(sys.platform != 'darwin')"
-  ],
-  "base/sessions/tests/test_subreaper_contract.py": [
-    "skipif(sys.platform != 'linux')"
   ],
   "base/tests/test_qwen_live_smoke.py": [
     "skipif(not _LIVE_KEY)"
@@ -76,8 +50,7 @@
     "skip('native pgbouncer is not installed')",
     "skip('native pgbouncer is not installed')",
     "skip('native pgbouncer is not installed')",
-    "skip('this host has no non-loopback address for the reachable bind')",
-    "skipif(sys.platform != 'linux')"
+    "skip('this host has no non-loopback address for the reachable bind')"
   ],
   "cli/commands/tests/test_single_box.py": [
     "skipif(not (Path(base_pooler.pgbouncer_bin()).exists() or shutil.which(base_pooler.pgbouncer_bin())))"
@@ -134,11 +107,7 @@
     "skipif(not restore_drill.pg_tool('pg_dump').exists())"
   ],
   "services/desktop/permissions_helper/tests/permissions_helper/test_grant_prompt_once.py": [
-    "skip('swiftc is unavailable')",
-    "skipif(sys.platform != 'darwin')",
-    "skipif(sys.platform != 'darwin')",
-    "skipif(sys.platform != 'darwin')",
-    "skipif(sys.platform != 'darwin')"
+    "skip('swiftc is unavailable')"
   ],
   "services/desktop/permissions_helper/tests/test_helper_retirement.py": [
     "skipif(sys.platform != 'darwin' or shutil.which('swift') is None)",

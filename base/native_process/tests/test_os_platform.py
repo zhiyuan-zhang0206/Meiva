@@ -59,7 +59,7 @@ class TestPtyMax:
         monkeypatch.setattr(plat, "is_macos", lambda: False)
         assert pty_max() is None
 
-    @pytest.mark.skipif(not plat.is_macos(), reason="reads kern.tty.ptmx_max, macOS-only")
+    @pytest.mark.requires_host("darwin")
     def test_macos_reads_positive_ceiling(self) -> None:
         """On macOS it returns the live `kern.tty.ptmx_max` — a positive int
         (511 by default)."""
