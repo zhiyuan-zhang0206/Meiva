@@ -29,6 +29,7 @@ from base.host.db_authority.api import AcceptanceCache
 from base.host.net.auth import cookie_name
 from base.host.system.cron import register_os_cron
 from base.host.system.hostport import Host
+from base.lm.factory import build_chat_model, process_provider_keys
 from base.packages.composer_commands import CommandCatalog, load_skill_names
 from base.packages.plugin_providers import build_model_catalog
 from gateway.agents import launch_retry as agents_launch_retry_router
@@ -212,7 +213,9 @@ def _build_request_resources(
         config,
         db=app.state.db,
         catalog_reader=partial(require_catalog, app.state.catalog),
+        keys_reader=process_provider_keys,
         rendering=app.state.timeline_policy.rendering,
+        model_builder=build_chat_model,
     )
     app.state.memory_search_gate = memory_router.build_search_gate(
         config.view.services.memory_search_max_concurrency

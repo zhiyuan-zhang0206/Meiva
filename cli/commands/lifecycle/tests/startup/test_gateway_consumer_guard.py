@@ -167,13 +167,7 @@ _AGENT_ONLY_ALLOWLIST = frozenset(
     }
 )
 
-_FALLBACK_CONSUMED_READS: dict[tuple[str, str], str] = {
-    ("meiva_builtins/plugins/lm_deepseek/provider.py", "deepseek_api_key"): (
-        "gateway in-process drafts (reply-suggestion) need the deepseek key the "
-        "gateway profile popped; consume-only .env fallback in "
-        "_require_deepseek_key()"
-    ),
-}
+_FALLBACK_CONSUMED_READS: dict[tuple[str, str], str] = {}
 
 
 _GATEWAY_CLOSURE_PACKAGES = (

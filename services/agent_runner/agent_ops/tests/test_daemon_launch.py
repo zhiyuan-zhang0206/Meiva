@@ -40,6 +40,7 @@ async def test_launch_dispatch(
         *,
         local_machine: str,
         catalog: ModelCatalog,
+        authority: ConfigAuthority,
     ) -> SpawnedAgent:
         assert local_machine == machine_identity.name()
         seen.append((body.agent_id, received_pool))

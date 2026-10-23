@@ -6,16 +6,23 @@ from dataclasses import replace
 import pytest
 
 from base.lm.catalog import ModelCatalog
+from base.lm.catalog.provider_keys import ProviderKeys
 from base.lm.pricing import PriceBook
 from base.lm.provider_api import ProviderBinding
 from base.lm.registry import ModelSpec
 from base.packages.plugin_providers import build_model_catalog
 
-__all__ = ["model_catalog"]
+__all__ = ["inert_keys", "model_catalog"]
 
 AddModels = Callable[[ModelCatalog, Mapping[str, ModelSpec]], ModelCatalog]
 AddBindings = Callable[[ModelCatalog, Mapping[str, ProviderBinding]], ModelCatalog]
 SetPrices = Callable[[ModelCatalog, PriceBook], ModelCatalog]
+
+
+# meiva:note
+# An inert key for every provider of `catalog`, so a test can select any registered model.
+def inert_keys(catalog: ModelCatalog) -> ProviderKeys:
+    return ProviderKeys(dict.fromkeys(catalog.key_envs, "sk-test"))
 
 
 @pytest.fixture

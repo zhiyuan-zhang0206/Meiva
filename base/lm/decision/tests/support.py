@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 
 from base.lm.catalog import CatalogBuilder, ModelCatalog
+from base.lm.catalog.provider_keys import ProviderKeys
 from base.lm.provider_api import (
     Decision,
     DecisionBinding,
@@ -17,6 +18,7 @@ from base.lm.provider_api import (
 )
 
 MODEL = "fake-1"
+KEYS = ProviderKeys({"FAKE_API_KEY": "sk-fake"})
 
 
 class FakeBinding:

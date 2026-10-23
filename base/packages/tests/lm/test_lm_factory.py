@@ -1,223 +1,76 @@
 from __future__ import annotations
 
-from pathlib import Path
+from dataclasses import replace
 
 import pytest
 
-from base.config import settings
-from base.host.env import dotenv_file
-from base.host.env.tests.env_files import aliases_of, env_path_of
 from base.lm.catalog import ModelCatalog
-from base.lm.factory import model_supports_vision, provider_key_map, validate_model_config
+from base.lm.catalog.provider_keys import ProviderKeys
+from base.lm.factory import (
+    model_supports_vision,
+    provider_key_map,
+    validate_model_config,
+    validate_model_launch,
+)
 from base.packages.tests.model_catalog import AddModels
 
 
-@pytest.fixture
-def env_file(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
-    from base.host.env import dotenv_file
-
-    env_path = tmp_path / ".env"
-    monkeypatch.setattr(dotenv_file, "env_file_path", env_path_of(env_path))
-    monkeypatch.setattr(settings.lm, "anthropic_api_key", None)
-    monkeypatch.setattr(settings.lm, "deepseek_api_key", None)
-    monkeypatch.setattr(settings.lm, "llm_override", "")
-    return env_path
-
-
-def test_plugin_key_env_injection_authorizes_without_env_file(
-    monkeypatch: pytest.MonkeyPatch, env_file: Path, *, model_catalog: ModelCatalog
-) -> None:
-    env_file.write_text("")
-    monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-env")
-
+def test_a_key_in_the_held_keys_authorizes_the_model(model_catalog: ModelCatalog) -> None:
     assert (
-        validate_model_config(
+        validate_model_launch(
             model="deepseek-flash",
             config={},
             catalog=model_catalog,
+            keys=ProviderKeys({"DEEPSEEK_API_KEY": "sk-env"}),
             llm_override="",
         )
         == "deepseek-flash"
     )
 
 
-def test_plugin_key_missing_in_both_channels_raises(
-    monkeypatch: pytest.MonkeyPatch, env_file: Path, *, model_catalog: ModelCatalog
-) -> None:
-    env_file.write_text("")
-    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
-
+def test_a_model_whose_key_is_not_held_fails(model_catalog: ModelCatalog) -> None:
     with pytest.raises(ValueError, match="DEEPSEEK_API_KEY"):
-        validate_model_config(
+        validate_model_launch(
             model="deepseek-flash",
             config={},
             catalog=model_catalog,
+            keys=ProviderKeys({"SOME_OTHER_KEY": "x"}),
             llm_override="",
         )
 
 
-def test_plugin_key_ignores_legacy_settings_field(
-    monkeypatch: pytest.MonkeyPatch, *, model_catalog: ModelCatalog
+# meiva:link base/packages/tests/lm/docs/contracts.meiva.okf.md
+@pytest.mark.parametrize(
+    ("prefix", "model", "display", "key_env"),
+    (
+        ("deepseek-", "deepseek-flash", "DeepSeek", "DEEPSEEK_API_KEY"),
+        ("gemini-", "gemini-3.5-flash", "Google", "GEMINI_API_KEY"),
+        ("claude-", "claude-sonnet-5", "Anthropic", "ANTHROPIC_API_KEY"),
+        ("gpt-", "gpt-5.6-sol", "OpenAI", "OPENAI_API_KEY"),
+        ("qwen", "qwen3.8-max", "Alibaba", "DASHSCOPE_API_KEY"),
+        ("glm-", "glm-5.2", "Zhipu", "GLM_API_KEY"),
+        ("kimi-", "kimi-k3", "Moonshot", "MOONSHOT_API_KEY"),
+        ("mimo-", "mimo-v2.6-pro", "Xiaomi", "MIMO_API_KEY"),
+    ),
+)
+def test_a_provider_key_is_only_ever_the_declared_env_name(
+    prefix: str, model: str, display: str, key_env: str, model_catalog: ModelCatalog
 ) -> None:
-    # meiva:link base/packages/tests/lm/docs/contracts.meiva.okf.md
-    monkeypatch.setattr(settings.lm, "deepseek_api_key", "sk-test")
-    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
-    monkeypatch.setattr(dotenv_file, "read_env_aliases", aliases_of({}))
-
-    assert provider_key_map(catalog=model_catalog)["deepseek-"] == ("DeepSeek", "DEEPSEEK_API_KEY")
-    with pytest.raises(ValueError, match="DEEPSEEK_API_KEY"):
-        validate_model_config(
-            model="deepseek-flash",
+    legacy_field_name = key_env.lower()
+    assert provider_key_map(catalog=model_catalog)[prefix] == (display, key_env)
+    with pytest.raises(ValueError, match=key_env):
+        validate_model_launch(
+            model=model,
             config={},
             catalog=model_catalog,
-            llm_override="",
-        )
-
-
-def test_gemini_plugin_key_ignores_legacy_settings_field(
-    monkeypatch: pytest.MonkeyPatch, *, model_catalog: ModelCatalog
-) -> None:
-    monkeypatch.setattr(settings.lm, "gemini_api_key", "sk-test")
-    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
-    monkeypatch.setattr(dotenv_file, "read_env_aliases", aliases_of({}))
-
-    assert provider_key_map(catalog=model_catalog)["gemini-"] == ("Google", "GEMINI_API_KEY")
-    with pytest.raises(ValueError, match="GEMINI_API_KEY"):
-        validate_model_config(
-            model="gemini-3.5-flash",
-            config={},
-            catalog=model_catalog,
-            llm_override="",
-        )
-
-
-def test_anthropic_plugin_key_ignores_legacy_settings_field(
-    monkeypatch: pytest.MonkeyPatch, *, model_catalog: ModelCatalog
-) -> None:
-    monkeypatch.setattr(settings.lm, "anthropic_api_key", "sk-test")
-    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-    monkeypatch.setattr(dotenv_file, "read_env_aliases", aliases_of({}))
-
-    assert provider_key_map(catalog=model_catalog)["claude-"] == ("Anthropic", "ANTHROPIC_API_KEY")
-    with pytest.raises(ValueError, match="ANTHROPIC_API_KEY"):
-        validate_model_config(
-            model="claude-sonnet-5",
-            config={},
-            catalog=model_catalog,
-            llm_override="",
-        )
-
-
-def test_openai_plugin_key_ignores_legacy_settings_field(
-    monkeypatch: pytest.MonkeyPatch, *, model_catalog: ModelCatalog
-) -> None:
-    monkeypatch.setattr(settings.lm, "openai_api_key", "sk-test")
-    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-    monkeypatch.setattr(dotenv_file, "read_env_aliases", aliases_of({}))
-
-    assert provider_key_map(catalog=model_catalog)["gpt-"] == ("OpenAI", "OPENAI_API_KEY")
-    with pytest.raises(ValueError, match="OPENAI_API_KEY"):
-        validate_model_config(
-            model="gpt-5.6-sol",
-            config={},
-            catalog=model_catalog,
-            llm_override="",
-        )
-
-
-def test_qwen_plugin_key_ignores_legacy_settings_field(
-    monkeypatch: pytest.MonkeyPatch, *, model_catalog: ModelCatalog
-) -> None:
-    monkeypatch.setattr(settings.lm, "dashscope_api_key", "sk-test")
-    monkeypatch.delenv("DASHSCOPE_API_KEY", raising=False)
-    monkeypatch.setattr(dotenv_file, "read_env_aliases", aliases_of({}))
-
-    assert provider_key_map(catalog=model_catalog)["qwen"] == ("Alibaba", "DASHSCOPE_API_KEY")
-    with pytest.raises(ValueError, match="DASHSCOPE_API_KEY"):
-        validate_model_config(
-            model="qwen3.8-max",
-            config={},
-            catalog=model_catalog,
-            llm_override="",
-        )
-
-
-def test_glm_plugin_key_ignores_legacy_settings_field(
-    monkeypatch: pytest.MonkeyPatch, *, model_catalog: ModelCatalog
-) -> None:
-    monkeypatch.setattr(settings.lm, "zhipu_api_key", "sk-test")
-    monkeypatch.delenv("GLM_API_KEY", raising=False)
-    monkeypatch.setattr(dotenv_file, "read_env_aliases", aliases_of({}))
-
-    assert provider_key_map(catalog=model_catalog)["glm-"] == ("Zhipu", "GLM_API_KEY")
-    with pytest.raises(ValueError, match="GLM_API_KEY"):
-        validate_model_config(model="glm-5.2", config={}, catalog=model_catalog, llm_override="")
-
-
-def test_kimi_plugin_key_ignores_legacy_settings_field(
-    monkeypatch: pytest.MonkeyPatch, *, model_catalog: ModelCatalog
-) -> None:
-    monkeypatch.setattr(settings.lm, "moonshot_api_key", "sk-test")
-    monkeypatch.delenv("MOONSHOT_API_KEY", raising=False)
-    monkeypatch.setattr(dotenv_file, "read_env_aliases", aliases_of({}))
-
-    assert provider_key_map(catalog=model_catalog)["kimi-"] == ("Moonshot", "MOONSHOT_API_KEY")
-    with pytest.raises(ValueError, match="MOONSHOT_API_KEY"):
-        validate_model_config(model="kimi-k3", config={}, catalog=model_catalog, llm_override="")
-
-
-def test_mimo_plugin_key_ignores_legacy_settings_field(
-    monkeypatch: pytest.MonkeyPatch, *, model_catalog: ModelCatalog
-) -> None:
-    monkeypatch.setattr(settings.lm, "xiaomi_api_key", "sk-test")
-    monkeypatch.delenv("MIMO_API_KEY", raising=False)
-    monkeypatch.setattr(dotenv_file, "read_env_aliases", aliases_of({}))
-
-    assert provider_key_map(catalog=model_catalog)["mimo-"] == ("Xiaomi", "MIMO_API_KEY")
-    with pytest.raises(ValueError, match="MIMO_API_KEY"):
-        validate_model_config(
-            model="mimo-v2.6-pro",
-            config={},
-            catalog=model_catalog,
-            llm_override="",
-        )
-
-
-def test_file_fallback_allows_key_after_gateway_pop(
-    env_file: Path, *, model_catalog: ModelCatalog
-) -> None:
-    env_file.write_text("DEEPSEEK_API_KEY=sk-file-value\n")
-    assert (
-        validate_model_config(
-            model="deepseek-flash",
-            config={},
-            catalog=model_catalog,
-            llm_override="",
-        )
-        == "deepseek-flash"
-    )
-
-
-def test_missing_key_still_fails(
-    env_file: Path, monkeypatch: pytest.MonkeyPatch, *, model_catalog: ModelCatalog
-) -> None:
-    env_file.write_text("SOME_OTHER_KEY=x\n")
-    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
-    with pytest.raises(ValueError, match="DEEPSEEK_API_KEY"):
-        validate_model_config(
-            model="deepseek-flash",
-            config={},
-            catalog=model_catalog,
+            keys=ProviderKeys({legacy_field_name: "sk-test"}),
             llm_override="",
         )
 
 
 def test_withdrawn_model_resolves_to_its_fallback_at_the_spawn_boundary(
-    env_file: Path, add_models: AddModels, *, model_catalog: ModelCatalog
+    add_models: AddModels, *, model_catalog: ModelCatalog
 ) -> None:
-    from dataclasses import replace
-
-    env_file.write_text("DEEPSEEK_API_KEY=sk-file-value\n")
     model = "deepseek-retired-fixture"
     model_catalog = add_models(
         model_catalog,
@@ -229,15 +82,19 @@ def test_withdrawn_model_resolves_to_its_fallback_at_the_spawn_boundary(
             )
         },
     )
+    keys = ProviderKeys({"DEEPSEEK_API_KEY": "sk-file-value"})
     assert (
-        validate_model_config(model=model, config={}, catalog=model_catalog, llm_override="")
+        validate_model_launch(
+            model=model, config={}, catalog=model_catalog, keys=keys, llm_override=""
+        )
         == "deepseek-flash"
     )
     assert (
-        validate_model_config(
+        validate_model_launch(
             model=None,
             config={"llm_model": model},
             catalog=model_catalog,
+            keys=keys,
             llm_override="",
         )
         == "deepseek-flash"
@@ -254,30 +111,16 @@ def test_withdrawn_model_resolves_to_its_fallback_at_the_spawn_boundary(
         "mimo-v2.5-pro-ultraspeed",
     ),
 )
-def test_removed_model_fails_spawn_validation(
-    env_file: Path, model: str, *, model_catalog: ModelCatalog
-) -> None:
-    env_file.write_text("DEEPSEEK_API_KEY=sk-file-value\n")
+def test_removed_model_fails_spawn_validation(model: str, *, model_catalog: ModelCatalog) -> None:
     with pytest.raises(ValueError, match=f"unknown model '{model}'"):
-        validate_model_config(model=model, config={}, catalog=model_catalog, llm_override="")
+        validate_model_config(model=model, config={}, catalog=model_catalog)
     with pytest.raises(ValueError, match=f"unknown model '{model}'"):
-        validate_model_config(
-            model=None,
-            config={"llm_model": model},
-            catalog=model_catalog,
-            llm_override="",
-        )
+        validate_model_config(model=None, config={"llm_model": model}, catalog=model_catalog)
 
 
-def test_unknown_model_still_fails(env_file: Path, *, model_catalog: ModelCatalog) -> None:
-    env_file.write_text("DEEPSEEK_API_KEY=x\n")
+def test_unknown_model_still_fails(model_catalog: ModelCatalog) -> None:
     with pytest.raises(ValueError, match="unknown model"):
-        validate_model_config(
-            model="no-such-model-xyz",
-            config={},
-            catalog=model_catalog,
-            llm_override="",
-        )
+        validate_model_config(model="no-such-model-xyz", config={}, catalog=model_catalog)
 
 
 class TestModelSupportsVision:

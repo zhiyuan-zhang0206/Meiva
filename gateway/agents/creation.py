@@ -27,13 +27,14 @@ from base.api_contracts.agent_contract import (
     ForkConfigChangeNotAllowed,
     SpawnTargetNotAgentRunner,
 )
-from base.config import settings
 from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.db.transaction import write_transaction
 from base.events.live.announce import publish_agent_updated_sync
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
+from base.lm.catalog.provider_keys import ProviderKeys
+from base.lm.factory import process_provider_keys
 from base.log import logger
 from gateway.agents import forward
 from gateway.agents.forward import forward_spawn_to_remote
@@ -108,6 +109,7 @@ async def create_and_launch_agent(
             catalog=catalog,
             default_model_reader=default_model_reader,
         )
+    keys = await asyncio.to_thread(process_provider_keys, catalog)
     tail_skills, model_receipt = await asyncio.to_thread(
         spawn_preflight_blocking,
         db,
@@ -115,13 +117,14 @@ async def create_and_launch_agent(
         body,
         pool,
         catalog=catalog,
+        keys=keys,
         authority=authority,
     )
     # fork_checkpoint resolution stays gateway-side: LangGraph checkpoints are
     # append-only and "latest" drifts under concurrent writes, so the gateway
     # resolves an explicit id before creating the row.
     fork_checkpoint = await asyncio.to_thread(
-        spawn_prechecks_blocking, body, pool, catalog=catalog, authority=authority
+        spawn_prechecks_blocking, body, pool, catalog=catalog, keys=keys, authority=authority
     )
     try:
         new_id, birth_config, prompt_inbound_id, launch_attempt_id = await asyncio.to_thread(
@@ -261,6 +264,7 @@ def spawn_preflight_blocking(
     pool: ConnectionPool,
     *,
     catalog: ModelCatalog,
+    keys: ProviderKeys,
     authority: ConfigAuthority,
 ) -> tuple[list[str] | None, tuple[str, str] | None]:
     from base.api_contracts.agent_contract import MachinePaused
@@ -316,8 +320,9 @@ def spawn_preflight_blocking(
             body.config,
             body.fork_from,
             catalog=catalog,
+            keys=keys,
             authority=authority,
-            llm_override=settings.lm.llm_override,
+            llm_override=authority.service_field_value("llm_override"),
         )
     if model_receipt is not None:
         logger.warning(

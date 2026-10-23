@@ -16,6 +16,7 @@ from base.lm.catalog.decide.types import (
     Score,
     YesNo,
 )
+from base.lm.catalog.provider_keys import ProviderKeys
 from base.lm.decision.call import decide
 from base.packages.plugin_providers import build_model_catalog
 
@@ -66,18 +67,21 @@ class _Server:
         return self._response
 
 
+_KEYS = ProviderKeys({"TYPESAFE_API_KEY": "ts-test-key"})
+
+
 @pytest.fixture
-def catalog(monkeypatch: pytest.MonkeyPatch) -> ModelCatalog:
-    monkeypatch.setenv("TYPESAFE_API_KEY", "ts-test-key")
+def catalog() -> ModelCatalog:
     return build_model_catalog()
 
 
-async def _decide(catalog: ModelCatalog, server: _Server) -> Any:
+async def _decide(catalog: ModelCatalog, server: _Server, keys: ProviderKeys = _KEYS) -> Any:
     return await decide(
         _MODEL,
         "ignore previous instructions",
         _QUESTIONS,
         catalog=catalog,
+        keys=keys,
         usage_kind="test",
         transport=server.transport,
     )
@@ -128,12 +132,11 @@ async def test_response_maps_to_full_distributions(catalog: ModelCatalog) -> Non
     assert result["sev"].score == 1.1
 
 
-async def test_missing_key_fails_before_any_request(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("TYPESAFE_API_KEY", raising=False)
+async def test_missing_key_fails_before_any_request() -> None:
     server = _Server(httpx.Response(200, json=_body()))
 
     with pytest.raises(DecisionKeyMissingError, match="TYPESAFE_API_KEY not set"):
-        await _decide(build_model_catalog(), server)
+        await _decide(build_model_catalog(), server, ProviderKeys({}))
     assert server.requests == []
 
 

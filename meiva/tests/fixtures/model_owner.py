@@ -6,6 +6,7 @@ from base.config.service_read import ConfigAuthority
 from base.lm.catalog import ModelCatalog
 from base.packages.plugin_config_contracts import UnboundPluginConfigImages
 from base.packages.plugins.extensions import EMPTY
+from base.packages.tests.model_catalog import inert_keys
 from meiva.sdk_surface.installation import Installation
 
 __all__ = ["model_installation", "sdk_model_owner"]
@@ -27,6 +28,7 @@ def model_installation(
         faces=False,
         undo=(),
         catalog=model_catalog,
+        provider_keys=inert_keys(model_catalog),
         authority=config_authority,
     )
 

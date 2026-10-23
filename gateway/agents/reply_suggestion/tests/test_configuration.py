@@ -8,7 +8,9 @@ from pydantic import ValidationError
 
 from base.config.domains.lm import LmSettings
 from base.lm.catalog import ModelCatalog
+from base.lm.catalog.provider_keys import ProviderKeys
 from base.lm.effort import ReasoningEffort
+from base.packages.tests.model_catalog import inert_keys
 from gateway.agents.reply_suggestion.configuration import reply_suggestion_service
 from gateway.agents.reply_suggestion.service import validate_models
 from gateway.agents.reply_suggestion.tests.support import Settings
@@ -99,12 +101,15 @@ def test_the_draft_model_is_built_with_reasoning_off(
         config,  # pyright: ignore[reportArgumentType]
         db=object(),  # pyright: ignore[reportArgumentType]
         catalog_reader=lambda: model_catalog,
+        keys_reader=inert_keys,
         rendering=object(),  # pyright: ignore[reportArgumentType]
         model_builder=fake_build,
     )
-    service._draft_model("deepseek-flash", model_catalog)
+    keys = ProviderKeys({"DEEPSEEK_API_KEY": "sk-test"})
+    service._draft_model("deepseek-flash", model_catalog, keys)
 
     ((model, kwargs),) = built
     assert model == "deepseek-flash"
     assert kwargs["reasoning_effort"] is ReasoningEffort.NONE
     assert kwargs["catalog"] is model_catalog
+    assert kwargs["keys"] is keys

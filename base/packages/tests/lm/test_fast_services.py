@@ -10,6 +10,7 @@ from langchain_openai import ChatOpenAI
 
 from base.config.tests.configuration import model_overrides
 from base.lm.catalog import ModelCatalog
+from base.lm.catalog.provider_keys import ProviderKeys
 from base.lm.compat.anthropic_thinking import ThinkingTokensChatAnthropic
 from base.lm.factory import build_chat_model
 from base.lm.pricing import Rates, rates_at, tally_tokens
@@ -48,10 +49,10 @@ def test_fast_picker_entry_inherits_facts_and_effort(
 def test_openai_wire_model_and_service_tier(
     monkeypatch: pytest.MonkeyPatch, fast: bool, *, model_catalog: ModelCatalog
 ) -> None:
-    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     model = build_chat_model(
         "gpt-6.1-sol-fast" if fast else "gpt-6.1-sol",
         catalog=model_catalog,
+        keys=ProviderKeys({"OPENAI_API_KEY": "test-key"}),
         llm_override="",
         overrides=model_overrides(),
     )
@@ -67,10 +68,10 @@ def test_openai_wire_model_and_service_tier(
 def test_anthropic_wire_model_speed_and_beta(
     monkeypatch: pytest.MonkeyPatch, fast: bool, *, model_catalog: ModelCatalog
 ) -> None:
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
     model = build_chat_model(
         "claude-opus-5-5-fast" if fast else "claude-opus-5-5",
         catalog=model_catalog,
+        keys=ProviderKeys({"ANTHROPIC_API_KEY": "test-key"}),
         llm_override="",
         overrides=model_overrides(),
     )

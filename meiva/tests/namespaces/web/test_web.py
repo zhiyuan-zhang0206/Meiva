@@ -25,6 +25,7 @@ from pydantic import SecretStr
 import meiva
 from base.host.env.agent_slices import ModelOverrides
 from base.lm.catalog import ModelCatalog
+from base.lm.catalog.provider_keys import ProviderKeys
 from meiva.sdk_surface.batch import DEFAULT_BATCH_MAX_CONCURRENT
 from meiva.tests.namespaces.web._web_helpers import FakeResp, WebHarness
 from meiva.tests.namespaces.web._web_helpers import web_harness as web_harness
@@ -103,6 +104,7 @@ def mock_llm(web_harness: WebHarness, model_catalog: ModelCatalog) -> dict[str, 
         streaming: object = None,
         timeout: float | None = None,
         catalog: ModelCatalog,
+        keys: ProviderKeys,
         llm_override: str,
         overrides: ModelOverrides,
     ) -> _FakeLLM:
@@ -651,6 +653,7 @@ def test_fetch_llm_build_error_wraps_as_fetcherror(
         streaming: object = None,
         timeout: float | None = None,
         catalog: ModelCatalog,
+        keys: ProviderKeys,
         llm_override: str,
         overrides: ModelOverrides,
     ):

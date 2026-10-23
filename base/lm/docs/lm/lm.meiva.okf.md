@@ -15,7 +15,7 @@ tags:
 ## Core Responsibilities
 
 ### factory (`factory.py`)
-`build_chat_model(model, *, catalog, llm_override, overrides)` dispatches through plugin-owned prefix bindings:
+`build_chat_model(model, *, catalog, keys, llm_override, overrides)` dispatches through plugin-owned prefix bindings:
 
 | Prefix | LangChain Class | Key Env |
 |---|---|---|
@@ -29,11 +29,11 @@ tags:
 | `qwen` | ReasoningContentChatModel (Alibaba) | DASHSCOPE_API_KEY + `MEIVA_DASHSCOPE_BASE_URL` |
 
 - `base/lm/catalog/__init__.py:ModelCatalog` is an immutable value built from the enabled plugins (`plugin_providers.build_model_catalog()`). A withdrawn model resolves persisted config to its declared spawnable fallback, never after provider failure.
-- `validate_model_config()` — spawn-boundary pre-check (`POST /api/keyed/v1/agents`): model registered, explicit effort supported, and key configured, else 400. Effort is validated exactly, never translated to a nearby grade.
+- `validate_model_config()` / `validate_model_launch()` — pre-checks (`POST /api/keyed/v1/agents`): model registered, explicit effort supported; launch also needs the key in `keys` ([[base/lm/docs/provider-plugins.meiva.okf.md]]), else 400. Effort is exact, never translated.
 - [[base/lm/docs/model-configuration.meiva.okf.md]] — effective agent model validation.
-- Gateway lifespan builds and retains its catalog; zero bindings rejects boot, and a fresh construction can retry corrected configuration.
+- Gateway lifespan builds and retains its catalog; zero bindings rejects boot, and a fresh construction can retry.
 - [[media-capabilities.meiva.okf.md]] — per-model media resolution and attachment packing.
-- `MEIVA_LLM_OVERRIDE=mod:factory` injects a fake factory (e2e/multi-instance); key checks skipped. Factories receive `factory(model, *, agent_id)`; None means a non-agent caller. Use the argument, not a host SDK binding.
+- `MEIVA_LLM_OVERRIDE=mod:factory` injects a fake factory (e2e/multi-instance); key checks skipped. Factories receive `factory(model, *, agent_id)`; None means a non-agent caller.
 - `thinking: ThinkingConfig | None` — `TypedDict` for Anthropic extended-thinking (`{"type":"disabled"}`/`{"type":"enabled","budget_tokens":N}`); gemini-*/gpt-* read only `type`, mirroring on/off to reasoning toggles.
 
 ### content block shapes (`content.py`)

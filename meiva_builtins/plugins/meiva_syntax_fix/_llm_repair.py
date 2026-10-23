@@ -14,6 +14,7 @@ from loguru import logger
 
 from base.host.env.agent_slices import ModelOverrides
 from base.lm.catalog import ModelCatalog
+from base.lm.catalog.provider_keys import ProviderKeys
 
 from ._repair_text import (
     REPAIR_MAX_ATTEMPTS,
@@ -32,6 +33,7 @@ _REPAIR_TIMEOUT = 60.0
 @dataclass(frozen=True)
 class RepairInputs:
     catalog: ModelCatalog
+    keys: ProviderKeys
     overrides: ModelOverrides
     llm_override: str
 
@@ -79,6 +81,7 @@ async def llm_repair_syntax(code: str, rendered_error: str, repair: RepairInputs
         llm = build_chat_model(
             _REPAIR_MODEL,
             catalog=repair.catalog,
+            keys=repair.keys,
             llm_override=repair.llm_override,
             overrides=repair.overrides,
         )

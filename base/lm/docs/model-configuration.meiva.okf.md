@@ -30,8 +30,8 @@ model use the caller's explicit current default; pinned rows retain their
 model. Unsupported model/effort combinations raise `InvalidModelConfig` before
 configuration or restart writes. Guarded receipt replay precedes validation.
 
-The factory's `check_provider_key=False` skips credentials only; model membership
-and exact effort validation still apply. Self restart commits the config edit
+`validate_model_config` checks model membership and exact effort only; `validate_model_launch`
+adds the provider key held in the caller's `ProviderKeys`. Self restart commits the config edit
 and restart inbound together before raising `AgentRestart`.
 
 Catalog membership belongs to admission, using the corresponding Installation or

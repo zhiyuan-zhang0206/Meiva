@@ -93,7 +93,7 @@ REPO_BLOCKING_HELPERS = {
     "get_open_page_target",
     "close_all_agent_pages_in_transaction",
     "lookup_role",
-    "validate_model_config",
+    "process_provider_keys",
     "write_fields",
     # the cross-process registry lock (blocks the calling thread while another
     # process holds it; the gateway reaches it from a sync handler)

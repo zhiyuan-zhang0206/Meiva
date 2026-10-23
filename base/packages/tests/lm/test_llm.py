@@ -5,6 +5,7 @@ from langchain_anthropic import ChatAnthropic
 
 from base.config.tests.configuration import model_overrides
 from base.lm.catalog import ModelCatalog
+from base.lm.catalog.provider_keys import ProviderKeys
 from base.lm.factory import build_chat_model
 
 
@@ -12,10 +13,10 @@ class TestDeepseekMaxTokens:
     def test_flash_max_tokens(
         self, monkeypatch: pytest.MonkeyPatch, *, model_catalog: ModelCatalog
     ) -> None:
-        monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test-deepseek")
         llm = build_chat_model(
             "deepseek-flash",
             catalog=model_catalog,
+            keys=ProviderKeys({"DEEPSEEK_API_KEY": "sk-test-deepseek"}),
             llm_override="",
             overrides=model_overrides(),
         )
@@ -25,11 +26,11 @@ class TestDeepseekMaxTokens:
     def test_unknown_deepseek_model_fails_fast(
         self, monkeypatch: pytest.MonkeyPatch, *, model_catalog: ModelCatalog
     ) -> None:
-        monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test-deepseek")
         with pytest.raises(ValueError, match="Unknown deepseek model") as exc_info:
             build_chat_model(
                 "deepseek-v4-nonexistent",
                 catalog=model_catalog,
+                keys=ProviderKeys({"DEEPSEEK_API_KEY": "sk-test-deepseek"}),
                 llm_override="",
                 overrides=model_overrides(),
             )

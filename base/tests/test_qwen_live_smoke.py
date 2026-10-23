@@ -93,6 +93,7 @@ from base.host.env.agent_slices import ModelOverrides
 from base.lm.catalog import ModelCatalog
 from base.lm.content import content_blocks, message_addl_kwargs, message_content
 from base.lm.factory import build_chat_model
+from base.packages.tests.model_catalog import inert_keys
 
 # All three registered Qwen models — the vendor could revise any of them
 # independently, and the two facts below were measured on the first two. For
@@ -140,6 +141,7 @@ def _stream(
         model,
         thinking={"type": "disabled"} if thinking_disabled else None,
         catalog=model_catalog,
+        keys=inert_keys(model_catalog),
         llm_override="",
         overrides=ModelOverrides.from_pins({}),
     )

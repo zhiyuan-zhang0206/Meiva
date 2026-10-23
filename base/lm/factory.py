@@ -84,6 +84,7 @@ from loguru import logger
 from base.host.env.agent_slices import ModelOverrides
 from base.lm import provider_api
 from base.lm.catalog import ModelCatalog
+from base.lm.catalog.provider_keys import ProviderKeys
 
 # Reasoning-effort dispatch lives in the companion module base/lm/effort.py
 # (split for the file-size ceiling); per-model facts and the media-capability
@@ -150,52 +151,63 @@ def provider_key_of_model(model: str, *, catalog: ModelCatalog) -> str | None:
     return catalog.provider_key_of(model)
 
 
-def provider_key_map(*, catalog: ModelCatalog) -> dict[str, tuple[str, str]]:
-    """Provider dispatch prefix/key → (display name, key env var).
+# meiva:note
+# This process's provider keys: the composition-root door.
+#
+# A root (the gateway, an agent host, a daemon, the SDK installation) calls it where it hands
+# keys to a model build or a launch check; everything below takes the `ProviderKeys` value. The
+# gateway reads at each use so a key edited in the cluster `.env` is served without a restart; a
+# split runner's keys arrive in its environment through the bootstrap before its first build. The
+# `.env` is read only when some declared key is absent from the environment.
+def process_provider_keys(catalog: ModelCatalog) -> ProviderKeys:
+    from base.host.env.bootstrap import process_environment
+    from base.host.env.dotenv_file import process_env_file, read_env_aliases
 
-    The single source for `_ensure_provider_key`. The key lives in the process environment only (bootstrap
-    plugin-secrets section on a split runner; the cluster `.env` file at the
-    spawn boundary).
-    """
+    environ = process_environment()
+    absent = [name for name in catalog.key_envs if not environ.get(name)]
+    env_file = read_env_aliases(process_env_file()) if absent else {}
+    return ProviderKeys.read(catalog.key_envs, environ=environ, env_file=env_file)
+
+
+# meiva:note
+# Provider dispatch prefix/key → (display name, key env var).
+#
+# The single source for `_ensure_provider_key`.
+def provider_key_map(*, catalog: ModelCatalog) -> dict[str, tuple[str, str]]:
     return {
         binding.provider_key or prefix: (binding.display_name, binding.key_env)
         for prefix, binding in catalog.bindings.items()
     }
 
 
+# meiva:note
+# Validate the selected model and its explicit effort.
+#
+# Resolves the effective model from ``config.llm_model`` first, falling back
+# to ``model`` (the cluster default), then checks:
+# 1. The model name is a spawnable model of the catalog.
+# 2. An explicit effort is one of the selected model's declared options.
+#
+# Launch credentials are `validate_model_launch`'s: a config-only edit does not
+# need them.
+#
+# Args:
+#     model: fallback model name (cluster default). Ignored when
+#         ``config["llm_model"]`` is set.
+#     config: per-agent config overlay, may contain ``llm_model``.
+#
+# Returns:
+#     The resolved model name on success — the caller may use it directly.
+#
+# Raises:
+#     ValueError: model unknown or its effort unsupported. The message is
+#         user-facing (fit for an HTTP 400 body).
 def validate_model_config(
     *,
     model: str | None = None,
     config: dict[str, object] | None = None,
-    check_provider_key: bool = True,
     catalog: ModelCatalog,
-    llm_override: str,
 ) -> str:
-    """Validate the selected model, its explicit effort and launch credentials.
-
-    Called at the spawn boundary (gateway keyed spawn handler) to fail
-    fast before forwarding to the runner — a 400 with a clear message is
-    better than an agent process starting and silently hanging.
-
-    Resolves the effective model from ``config.llm_model`` first, falling back
-    to ``model`` (the cluster default), then checks:
-    1. The model name is a spawnable model of the catalog.
-    2. The required API key is configured when ``check_provider_key`` is true.
-    3. An explicit effort is one of the selected model's declared options.
-
-    Args:
-        model: fallback model name (cluster default). Ignored when
-            ``config["llm_model"]`` is set.
-        config: per-agent config overlay, may contain ``llm_model``.
-        check_provider_key: check launch credentials; false for config-only edits.
-
-    Returns:
-        The resolved model name on success — the caller may use it directly.
-
-    Raises:
-        ValueError: model unknown or its API key is not configured. The
-            message is user-facing (fit for an HTTP 400 body).
-    """
     # Resolve effective model: per-agent overlay wins over cluster default.
     effective_model: str | None = None
     if config is not None:
@@ -221,14 +233,28 @@ def validate_model_config(
         )
 
     _validate_model_effort(effective_model, config, catalog=catalog)
+    return effective_model
 
-    # 2. API key must be configured — unless an LLM override is active
-    # (e2e tests inject fake chat models via MEIVA_LLM_OVERRIDE and don't need
-    # real keys; the override path in build_chat_model skips the real LLM).
-    if not check_provider_key or llm_override:
-        return effective_model
 
-    _ensure_provider_key(effective_model, catalog=catalog)
+# meiva:note
+# `validate_model_config` plus the launch credentials of the resolved model.
+#
+# Called at the spawn boundary (gateway keyed spawn handler) to fail
+# fast before forwarding to the runner — a 400 with a clear message is
+# better than an agent process starting and silently hanging. The model's provider
+# key must be in ``keys``, unless an LLM override is active (e2e tests inject fake
+# chat models via MEIVA_LLM_OVERRIDE and need no real keys).
+def validate_model_launch(
+    *,
+    model: str | None = None,
+    config: dict[str, object] | None = None,
+    catalog: ModelCatalog,
+    keys: ProviderKeys,
+    llm_override: str,
+) -> str:
+    effective_model = validate_model_config(model=model, config=config, catalog=catalog)
+    if not llm_override:
+        _ensure_provider_key(effective_model, catalog=catalog, keys=keys)
     return effective_model
 
 
@@ -255,27 +281,18 @@ def _validate_model_effort(
     validate_effort(effort, spec.effort_levels or (), target=model)
 
 
-def _ensure_provider_key(effective_model: str, *, catalog: ModelCatalog) -> None:
-    """Fail fast when the effective model's provider API key is not configured.
-
-    Drives the lookup from `provider_key_map()`. The key has no Settings field, so it
-    is read from the process env and the `.env` file directly. An unregistered model
-    that slipped past the spawnable-model check raises.
-    """
+# meiva:note
+# Fail fast when the effective model's provider API key is not in ``keys``.
+#
+# Drives the lookup from `provider_key_map()`. An unregistered model that slipped past the
+# spawnable-model check raises.
+def _ensure_provider_key(
+    effective_model: str, *, catalog: ModelCatalog, keys: ProviderKeys
+) -> None:
     for prefix, (_display, env_var) in provider_key_map(catalog=catalog).items():
         if not effective_model.startswith(prefix):
             continue
-        # The key arrives on this unit's effective channel: a pure agent-runner
-        # receives it from /api/bootstrap injected into os.environ (no
-        # materialized .env cache of cluster facts since 2026-08-01), the gateway
-        # loads its own .env into the process env at boot. The file
-        # fallback covers the gateway profile that pops provider keys
-        # from os.environ (Task #856 / regression #1562).
-        from base.host.env.dotenv_file import process_env_file, read_env_aliases
-
-        if provider_api.provider_key_present(env_var) or env_var in read_env_aliases(
-            process_env_file()
-        ):
+        if keys.present(env_var):
             return
         raise ValueError(
             f"{effective_model} requires {env_var} which is not "
@@ -338,6 +355,76 @@ def _metered(
     return install_usage_meter(client, model_name=model, catalog=catalog)
 
 
+# meiva:note
+# Pick the provider by model name prefix and return the corresponding ChatModel.
+#
+# The returned ChatModel does not have tools bound — the caller binds them
+# at use site via `llm.bind_tools([execute_code])`. This way paths that
+# don't need tools (compaction etc.) can use the same ChatModel instance.
+#
+# Dispatches to a registered provider-plugin binding (each documents its own
+# key / thinking / reasoning-effort wiring). The
+# cross-provider resolution shared by every branch happens here:
+# `MEIVA_LLM_OVERRIDE`, the streaming default, and the reasoning-effort knob
+# (`resolved_effort` — explicit env/.env/overlay value wins, else the model's
+# registry default, else the provider default).
+#
+# Args:
+#     model: e.g. `claude-sonnet-5` / `deepseek-flash`.
+#     agent_id: explicit owner for an override factory. None for non-agent
+#         callers; real provider construction does not use this metadata.
+#     thinking: cross-provider thinking switch (Anthropic Messages API
+#         shape). `{"type": "disabled"}` turns reasoning off where the
+#         provider supports it (short-text paths like label generation —
+#         thinking is slow/expensive and turns content into list-of-blocks);
+#         it also skips reasoning-effort injection where both would conflict
+#         (deepseek 400) or contradict intent (claude / glm / gemini /
+#         mimo / qwen). kimi-k3 cannot disable reasoning — logged
+#         and ignored. `{"type": "enabled", "budget_tokens": N}` is manual
+#         extended thinking — see the claude helper for the per-model rules.
+#         None = provider default.
+#     reasoning_effort: overrides the resolved effort for this call. Graded
+#         values must be exact members of the model's `effort_levels`.
+#         Provider-specific thinking switches retain their native on/off
+#         conversion; unsupported grades never change to another grade.
+#     streaming: whether to enable LLM streaming. None (default) resolves
+#         from the model's registry entry (`ModelSpec.streaming` — True for
+#         every spawnable model). Explicit True/False overrides the model
+#         default; this is a construction-time default, not a retry policy
+#         (`_consume_llm`'s fatal-provider-error fallback stays active
+#         regardless).
+#
+#     timeout: per-request wall-clock ceiling passed to the provider
+#         client (request_timeout on anthropic-protocol providers,
+#         timeout elsewhere). None = the provider SDK's own default. The
+#         agent's streaming path deliberately leaves it None (its own
+#         TTFT / inter-chunk timeouts govern); the non-streaming SDK
+#         paths (meiva.understand / meiva.web.fetch answer) pass
+#         settings.lm.llm_invoke_timeout_seconds so a wedged provider
+#         surfaces in tens of seconds instead of the SDK default (~600s).
+#
+#     media_resolution: media-path only (meiva.understand) — the Gemini
+#         low/medium/high resolution setting, mapped onto Google's
+#         MediaResolution enum by the gemini branch; ignored by other
+#         providers. None = the SDK default.
+#     media_thinking_level: media-path only (meiva.understand) — the Gemini
+#         thinking_level vocabulary carried explicitly (the media path maps
+#         `effort` itself, including the `max` → configured-knob special
+#         case) instead of the resolved cross-provider effort; also keeps
+#         include_thoughts at the SDK default, matching the media path's
+#         historic wire shape. Ignored by other providers.
+#     base_url: media-path only (meiva.understand) — endpoint override for
+#         the gemini branch (e.g. a self-hosted relay / provider mirror);
+#         None = the SDK default official endpoint. Ignored by other
+#         providers.
+#     overrides: the agent's explicit tuning values (its slices' `overrides`): the
+#         reasoning effort and the thinking budget the model is built with.
+#     keys: the process's provider API keys; the binding takes its own from them.
+#
+# Raises:
+#     ValueError: model prefix did not match — prompts to add a branch.
+#     RuntimeError: a provider path needs its API key env; if missing,
+#         blows up immediately rather than reaching a server 401.
 def build_chat_model(
     model: str,
     *,
@@ -352,78 +439,9 @@ def build_chat_model(
     overrides: ModelOverrides,
     meter: bool = True,
     catalog: ModelCatalog,
+    keys: ProviderKeys,
     llm_override: str,
 ) -> BaseChatModel:
-    """Pick the provider by model name prefix and return the corresponding ChatModel.
-
-    The returned ChatModel does not have tools bound — the caller binds them
-    at use site via `llm.bind_tools([execute_code])`. This way paths that
-    don't need tools (compaction etc.) can use the same ChatModel instance.
-
-    Dispatches to a registered provider-plugin binding (each documents its own
-    key / thinking / reasoning-effort wiring). The
-    cross-provider resolution shared by every branch happens here:
-    `MEIVA_LLM_OVERRIDE`, the streaming default, and the reasoning-effort knob
-    (`resolved_effort` — explicit env/.env/overlay value wins, else the model's
-    registry default, else the provider default).
-
-    Args:
-        model: e.g. `claude-sonnet-5` / `deepseek-flash`.
-        agent_id: explicit owner for an override factory. None for non-agent
-            callers; real provider construction does not use this metadata.
-        thinking: cross-provider thinking switch (Anthropic Messages API
-            shape). `{"type": "disabled"}` turns reasoning off where the
-            provider supports it (short-text paths like label generation —
-            thinking is slow/expensive and turns content into list-of-blocks);
-            it also skips reasoning-effort injection where both would conflict
-            (deepseek 400) or contradict intent (claude / glm / gemini /
-            mimo / qwen). kimi-k3 cannot disable reasoning — logged
-            and ignored. `{"type": "enabled", "budget_tokens": N}` is manual
-            extended thinking — see the claude helper for the per-model rules.
-            None = provider default.
-        reasoning_effort: overrides the resolved effort for this call. Graded
-            values must be exact members of the model's `effort_levels`.
-            Provider-specific thinking switches retain their native on/off
-            conversion; unsupported grades never change to another grade.
-        streaming: whether to enable LLM streaming. None (default) resolves
-            from the model's registry entry (`ModelSpec.streaming` — True for
-            every spawnable model). Explicit True/False overrides the model
-            default; this is a construction-time default, not a retry policy
-            (`_consume_llm`'s fatal-provider-error fallback stays active
-            regardless).
-
-        timeout: per-request wall-clock ceiling passed to the provider
-            client (request_timeout on anthropic-protocol providers,
-            timeout elsewhere). None = the provider SDK's own default. The
-            agent's streaming path deliberately leaves it None (its own
-            TTFT / inter-chunk timeouts govern); the non-streaming SDK
-            paths (meiva.understand / meiva.web.fetch answer) pass
-            settings.lm.llm_invoke_timeout_seconds so a wedged provider
-            surfaces in tens of seconds instead of the SDK default (~600s).
-
-        media_resolution: media-path only (meiva.understand) — the Gemini
-            low/medium/high resolution setting, mapped onto Google's
-            MediaResolution enum by the gemini branch; ignored by other
-            providers. None = the SDK default.
-        media_thinking_level: media-path only (meiva.understand) — the Gemini
-            thinking_level vocabulary carried explicitly (the media path maps
-            `effort` itself, including the `max` → configured-knob special
-            case) instead of the resolved cross-provider effort; also keeps
-            include_thoughts at the SDK default, matching the media path's
-            historic wire shape. Ignored by other providers.
-        base_url: media-path only (meiva.understand) — endpoint override for
-            the gemini branch (e.g. a self-hosted relay / provider mirror);
-            None = the SDK default official endpoint. Ignored by other
-            providers.
-        overrides: the agent's explicit tuning values (its slices' `overrides`): the
-            reasoning effort and the thinking budget the model is built with. None =
-            the cluster's, for a build that does not serve one agent.
-
-    Raises:
-        ValueError: model prefix did not match — prompts to add a branch.
-        RuntimeError: a provider path needs its API key env; if missing,
-            blows up immediately rather than reaching a server 401.
-    """
     return build_chat_model_bound(
         model,
         agent_id=agent_id,
@@ -437,6 +455,7 @@ def build_chat_model(
         overrides=overrides,
         meter=meter,
         catalog=catalog,
+        keys=keys,
         llm_override=llm_override,
     )[0]
 
@@ -460,6 +479,7 @@ def build_chat_model_bound(
     overrides: ModelOverrides,
     meter: bool = True,
     catalog: ModelCatalog,
+    keys: ProviderKeys,
     llm_override: str,
 ) -> tuple[BaseChatModel, provider_api.ProviderBinding | None]:
     """Internal companion: return the client and binding selected by this build."""
@@ -523,6 +543,7 @@ def build_chat_model_bound(
                     disable_streaming=disable_streaming,
                     timeout=timeout,
                     effort_levels=binding.effort_levels,
+                    keys=keys,
                     media_resolution=media_resolution,
                     media_thinking_level=media_thinking_level,
                     base_url=base_url,

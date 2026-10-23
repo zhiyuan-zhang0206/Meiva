@@ -24,7 +24,6 @@ from base.lm.provider_api import (
     PriceTier,
     ProviderBinding,
     ProviderContribution,
-    require_key,
     with_fast_variants,
 )
 from base.lm.registry import ModelSpec, ModelTuning
@@ -124,7 +123,7 @@ def build(ctx: BuildContext) -> BaseChatModel:
     # Fail fast on missing key — the same posture as every other provider
     # branch. Without it, ChatAnthropic reads ANTHROPIC_API_KEY from env
     # (or not) and hangs rather than surfacing a clear error.
-    api_key = require_key("ANTHROPIC_API_KEY")
+    api_key = ctx.keys.require("ANTHROPIC_API_KEY")
 
     # Per-model output cap (ModelSpec.max_output_tokens). Same fail-fast
     # posture as the deepseek branch — an unregistered claude model raises

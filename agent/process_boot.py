@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import os
 import shutil
 from collections.abc import Callable
@@ -8,6 +10,8 @@ import meiva
 from base.cluster.machine import MachineIdentity
 from base.db import Database
 from base.host.env.agent_slices import ModelOverrides, agent_setting
+from base.lm.catalog import ModelCatalog
+from base.lm.catalog.provider_keys import ProviderKeys
 from base.log import logger
 from base.paths import exec_run_dir, workspace_dir
 from base.telemetry.otlp.trace_config import TraceConfig
@@ -94,7 +98,13 @@ def land_cluster_extensions(db: Database) -> None:
 
 
 async def boot_agent_scope(
-    agent_id: int, llm_model: str, overrides: ModelOverrides, *, catalog: Any, llm_override: str
+    agent_id: int,
+    llm_model: str,
+    overrides: ModelOverrides,
+    *,
+    catalog: ModelCatalog,
+    keys: ProviderKeys,
+    llm_override: str,
 ) -> Any:
     workspace = workspace_dir(agent_id)
 
@@ -114,5 +124,6 @@ async def boot_agent_scope(
         overrides=overrides,
         meter=False,
         catalog=catalog,
+        keys=keys,
         llm_override=llm_override,
     )

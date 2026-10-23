@@ -13,6 +13,7 @@ from base.host.env.agent_slices import ModelOverrides
 from base.lm.catalog import ModelCatalog
 from base.lm.effort import ReasoningEffort
 from base.lm.factory import build_chat_model
+from base.packages.tests.model_catalog import inert_keys
 
 
 class Replies(BaseModel):
@@ -97,6 +98,7 @@ async def test_native_schema_output_uses_responses_and_preserves_model_settings_
         reasoning_effort=effort,
         timeout=20,
         catalog=model_catalog,
+        keys=inert_keys(model_catalog),
         llm_override="",
         overrides=ModelOverrides.from_pins({}),
     )
@@ -128,6 +130,7 @@ def test_ordinary_chat_keeps_the_anthropic_transport(model_catalog: ModelCatalog
         "deepseek-flash",
         reasoning_effort=ReasoningEffort.NONE,
         catalog=model_catalog,
+        keys=inert_keys(model_catalog),
         llm_override="",
         overrides=ModelOverrides.from_pins({}),
     )

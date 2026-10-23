@@ -16,7 +16,6 @@ from base.lm.provider_api import (
     PriceWindow,
     ProviderBinding,
     ProviderContribution,
-    require_key,
 )
 from base.lm.registry import ModelSpec, ModelTuning
 from base.packages.plugins.extensions import PluginContributions
@@ -30,26 +29,13 @@ def deepseek_wire_effort(effort: str, levels: tuple[str, ...], *, target: str) -
     return validate_effort(effort, levels, target=target)
 
 
-def _require_deepseek_key() -> str:
-    try:
-        return require_key("DEEPSEEK_API_KEY")
-    except RuntimeError:
-        from base.config import field_alias
-        from base.host.env.dotenv_file import process_env_file, read_env_aliases
-
-        key = read_env_aliases(process_env_file()).get(field_alias("deepseek_api_key"))
-        if key:
-            return key
-        raise
-
-
 def build(ctx: BuildContext) -> BaseChatModel:
     from meiva_builtins.plugins.lm_deepseek.chat import (
         DEEPSEEK_ANTHROPIC_API_BASE,
         DeepSeekChatModel,
     )
 
-    api_key = _require_deepseek_key()
+    api_key = ctx.keys.require("DEEPSEEK_API_KEY")
 
     extra_kwargs: dict[str, Any] = {}
     if ctx.thinking is not None:

@@ -6,6 +6,7 @@ from base.config.tests.configuration import model_overrides
 from base.lm.catalog import ModelCatalog
 from base.lm.factory import build_chat_model, resolve_override
 from base.packages.tests.lm.llm_factory.factory_support import FakeLLM, install_fake_module
+from base.packages.tests.model_catalog import inert_keys
 
 
 class TestResolveOverride:
@@ -78,6 +79,7 @@ class TestResolveOverride:
             "claude-opus-4-7",
             agent_id=8,
             catalog=model_catalog,
+            keys=inert_keys(model_catalog),
             llm_override="tests._llm_override_e2e:build",
             overrides=model_overrides(),
         )
@@ -85,6 +87,7 @@ class TestResolveOverride:
         bound, binding = build_chat_model_bound(
             "claude-opus-4-7",
             catalog=model_catalog,
+            keys=inert_keys(model_catalog),
             llm_override="tests._llm_override_e2e:build",
             overrides=model_overrides(),
         )
@@ -99,6 +102,7 @@ class TestResolveOverride:
             build_chat_model(
                 "claude-opus-4-7",
                 catalog=model_catalog,
+                keys=inert_keys(model_catalog),
                 llm_override="bad_format_no_colon",
                 overrides=model_overrides(),
             )

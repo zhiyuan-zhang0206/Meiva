@@ -171,7 +171,6 @@ def restart(config_overlay: dict[str, object] | None = None) -> NoReturn:
                 agent_identity.require_agent_id(),
                 config_overlay,
                 catalog=_settings.model_catalog(),
-                llm_override=_settings.settings.lm.llm_override,
                 default_model=_settings.agent_setting("llm_model"),
             )
             cur.execute(

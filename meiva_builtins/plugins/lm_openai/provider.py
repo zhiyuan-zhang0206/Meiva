@@ -27,7 +27,6 @@ from base.lm.provider_api import (
     PriceTier,
     ProviderBinding,
     ProviderContribution,
-    require_key,
     with_fast_variants,
 )
 from base.lm.registry import ModelSpec, ModelTuning, ReferenceTps
@@ -60,7 +59,7 @@ def build(ctx: BuildContext) -> BaseChatModel:
     from langchain_openai import ChatOpenAI
 
     # Direct construction keeps this SDK-specific path explicit.
-    api_key = require_key("OPENAI_API_KEY")
+    api_key = ctx.keys.require("OPENAI_API_KEY")
     # The Chat Completions path returns zero reasoning. The Responses API
     # with `reasoning.{effort,summary}` returns the model's reasoning
     # summary as a `{"type":"reasoning","summary":[{"type":"summary_text",
@@ -450,7 +449,7 @@ PROVIDER = ProviderContribution(
 
 def build_decision(ctx: DecisionBuildContext) -> DecisionBinding:
     """The Decisions API client; fails at once when ``OPENAI_API_KEY`` is missing."""
-    return DecisionsBinding(ctx, require_key("OPENAI_API_KEY"))
+    return DecisionsBinding(ctx, ctx.keys.require("OPENAI_API_KEY"))
 
 
 # Decision ids are separate from chat ids: the same wire model (gpt-6-luna) is priced

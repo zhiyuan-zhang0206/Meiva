@@ -18,6 +18,7 @@ from typing import Any
 from base.host.env.agent_slices import ModelOverrides
 from base.lm.call import extract_text, invoke_response
 from base.lm.catalog import ModelCatalog
+from base.lm.catalog.provider_keys import ProviderKeys
 
 
 class GenerateError(Exception):
@@ -60,6 +61,7 @@ def build_generation_llm(
     overrides: ModelOverrides,
     thinking_off: bool = False,
     catalog: ModelCatalog,
+    keys: ProviderKeys,
     llm_override: str,
 ) -> Any:
     """Build the generation chat model the way the agent builds its own.
@@ -77,6 +79,7 @@ def build_generation_llm(
         model,
         meter=False,
         catalog=catalog,
+        keys=keys,
         llm_override=llm_override,
         reasoning_effort=p.reasoning_effort,
         overrides=overrides,

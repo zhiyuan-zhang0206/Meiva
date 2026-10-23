@@ -14,6 +14,8 @@ from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import ModelOverrides
 from base.lm.catalog import ModelCatalog
+from base.lm.catalog.provider_keys import ProviderKeys
+from base.packages.tests.model_catalog import inert_keys
 from services.derived.labeler import daemon
 from services.derived.labeler.tests.slices import labeler_db
 
@@ -60,6 +62,7 @@ async def test_dispatch_loop_uses_labeler_model_not_main_model(
         *,
         build_chat_model: object,
         catalog: ModelCatalog,
+        keys: ProviderKeys,
         llm_override: str,
         overrides: ModelOverrides,
     ) -> None:
@@ -81,6 +84,7 @@ async def test_dispatch_loop_uses_labeler_model_not_main_model(
                 config,
                 build_chat_model=_reject_build,
                 catalog=model_catalog,
+                keys=inert_keys(model_catalog),
                 llm_override=config_authority.runtime.lm.llm_override,
                 overrides=ModelOverrides.from_pins({}),
             )
@@ -201,6 +205,7 @@ async def test_failed_label_is_not_retried_but_new_agents_are_processed(
                 daemon.labeler_config(),
                 build_chat_model=_reject_build,
                 catalog=model_catalog,
+                keys=inert_keys(model_catalog),
                 llm_override=config_authority.runtime.lm.llm_override,
                 overrides=ModelOverrides.from_pins({}),
             )
@@ -247,6 +252,7 @@ async def test_dispatch_loop_hands_injected_factory_to_real_generate_label(
                 config,
                 build_chat_model=build,
                 catalog=model_catalog,
+                keys=inert_keys(model_catalog),
                 llm_override=config_authority.runtime.lm.llm_override,
                 overrides=overrides,
             )

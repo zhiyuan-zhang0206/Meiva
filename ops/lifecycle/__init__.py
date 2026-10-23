@@ -492,7 +492,6 @@ def restart_blocking(
                     agent_id,
                     overlay,
                     catalog=catalog,
-                    llm_override=settings.lm.llm_override,
                     default_model=settings.lm.llm_model,
                 )
             if model_receipt is not None:

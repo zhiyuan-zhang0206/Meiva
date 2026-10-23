@@ -14,6 +14,7 @@ from base.config import Settings, settings
 from base.config.service_read import ConfigAuthority
 from base.db import create_agent
 from base.lm.catalog import ModelCatalog
+from base.packages.tests.model_catalog import inert_keys
 
 
 def test_fork_preflight_keeps_its_birth_model_after_default_changes(
@@ -36,6 +37,7 @@ def test_fork_preflight_keeps_its_birth_model_after_default_changes(
                 None,
                 agent_id,
                 catalog=model_catalog,
+                keys=inert_keys(model_catalog),
                 llm_override=settings.lm.llm_override,
                 authority=ConfigAuthority(settings, Settings(profile=None), tmp_path / ".env"),
             )
@@ -58,7 +60,6 @@ def test_restart_validates_birth_effort_when_only_the_model_changes(
                 agent_id,
                 {"llm_model": "deepseek-flash"},
                 catalog=model_catalog,
-                llm_override=settings.lm.llm_override,
                 default_model=settings.lm.llm_model,
             )
         validate_restart_model_config(
@@ -66,7 +67,6 @@ def test_restart_validates_birth_effort_when_only_the_model_changes(
             agent_id,
             {"llm_model": "deepseek-flash", "reasoning_effort": "max"},
             catalog=model_catalog,
-            llm_override=settings.lm.llm_override,
             default_model=settings.lm.llm_model,
         )
 
@@ -86,7 +86,6 @@ def test_legacy_restart_validates_effort_against_the_unpinned_model(
                 agent_id,
                 {"reasoning_effort": "max"},
                 catalog=model_catalog,
-                llm_override=settings.lm.llm_override,
                 default_model="mimo-v2.6-pro",
             )
         validate_restart_model_config(
@@ -94,6 +93,5 @@ def test_legacy_restart_validates_effort_against_the_unpinned_model(
             agent_id,
             {"reasoning_effort": "high"},
             catalog=model_catalog,
-            llm_override=settings.lm.llm_override,
             default_model="mimo-v2.6-pro",
         )

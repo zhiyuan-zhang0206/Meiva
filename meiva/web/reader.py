@@ -181,6 +181,7 @@ def _answer(
         timeout=fm.timeout_seconds,
         usage_source="web.fetch",
         catalog=fm.catalog,
+        keys=fm.keys,
         llm_override=fm.llm_override,
         overrides=fm.overrides,
         build_chat_model=deps.build_chat_model,

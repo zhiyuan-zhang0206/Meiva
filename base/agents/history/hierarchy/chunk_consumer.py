@@ -94,6 +94,7 @@ from base.agents.observation.snapshot import agent_model_target
 from base.db import Database
 from base.host.env.agent_slices import ModelOverrides
 from base.lm.catalog import ModelCatalog
+from base.lm.catalog.provider_keys import ProviderKeys
 from base.log import logger
 
 POLL_SECONDS = 2.0
@@ -133,8 +134,9 @@ class ModelCache:
     configurations, so the cache stays small.
     """
 
-    def __init__(self, catalog: ModelCatalog, llm_override: str) -> None:
+    def __init__(self, catalog: ModelCatalog, keys: ProviderKeys, llm_override: str) -> None:
         self.catalog = catalog
+        self.keys = keys
         self.llm_override = llm_override
         self._models: dict[tuple[str, ModelOverrides, str], Any] = {}
         self._lock = threading.Lock()  # jobs build models from several worker threads
@@ -150,6 +152,7 @@ class ModelCache:
                     GenParams(reasoning_effort=reasoning) if reasoning not in ("", "off") else None,
                     overrides=overrides,
                     catalog=self.catalog,
+                    keys=self.keys,
                     llm_override=self.llm_override,
                     thinking_off=reasoning == "off",
                 )
@@ -382,11 +385,12 @@ class Consumer:
         replay: Replay | None = None,
         *,
         catalog: ModelCatalog,
+        keys: ProviderKeys,
         llm_override: str,
         inputs: UnderstandingReadInputs,
     ) -> None:
         self.pool, self.db, self.tools, self.replay = pool, db, tools, replay
-        self.models = ModelCache(catalog, llm_override)
+        self.models = ModelCache(catalog, keys, llm_override)
         self.inputs = inputs
         self.in_flight = 0
         self.finished = asyncio.Event()  # set whenever a job ends
@@ -606,12 +610,20 @@ async def replay_jobs(
     agent_id: int,
     *,
     catalog: ModelCatalog,
+    keys: ProviderKeys,
     llm_override: str,
     inputs: UnderstandingReadInputs,
 ) -> None:
     """Describe every enqueued job of one agent, its segments in parallel (the replay tool)."""
     await Consumer(
-        pool, db, tools, Replay(agent_id), catalog=catalog, llm_override=llm_override, inputs=inputs
+        pool,
+        db,
+        tools,
+        Replay(agent_id),
+        catalog=catalog,
+        keys=keys,
+        llm_override=llm_override,
+        inputs=inputs,
     ).run_until_idle()
 
 
@@ -621,6 +633,7 @@ async def understanding_loop_forever(
     tools: Sequence[Any],
     *,
     catalog: ModelCatalog,
+    keys: ProviderKeys,
     llm_override: str,
     inputs: UnderstandingReadInputs,
 ) -> None:
@@ -634,5 +647,5 @@ async def understanding_loop_forever(
         logger.info("[agent-host] understanding consumer idle — MEIVA_UNDERSTANDING_ENABLED is off")
         return
     await Consumer(
-        pool, db, tools, catalog=catalog, llm_override=llm_override, inputs=inputs
+        pool, db, tools, catalog=catalog, keys=keys, llm_override=llm_override, inputs=inputs
     ).run_forever()

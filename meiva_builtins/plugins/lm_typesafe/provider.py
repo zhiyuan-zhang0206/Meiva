@@ -28,7 +28,6 @@ from base.lm.provider_api import (
     Score,
     YesNo,
     post_json,
-    require_key,
 )
 from base.log import logger
 from base.packages.plugins.extensions import PluginContributions
@@ -162,7 +161,7 @@ def _parse_answer(qid: str, question: Question, answer: Mapping[str, Any]) -> De
 
 
 def build(ctx: DecisionBuildContext) -> DecisionBinding:
-    return JevBinding(ctx, require_key("TYPESAFE_API_KEY"))
+    return JevBinding(ctx, ctx.keys.require("TYPESAFE_API_KEY"))
 
 
 PROVIDER = DecisionProviderContribution(

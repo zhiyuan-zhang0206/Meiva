@@ -49,6 +49,7 @@ from base.api_contracts.agent_contract import Harness
 from base.clock import Clock
 from base.cluster.machine import MachineIdentity
 from base.lm.catalog import ModelCatalog
+from base.lm.catalog.provider_keys import ProviderKeys
 from base.lm.harness.engine import TurnEngine
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.native_process.turn_identity import HostedTurnResources
@@ -99,6 +100,11 @@ class MeivaContext:
 
     catalog: ModelCatalog | None = None
     """Provider facts built and retained by this run's process composition root."""
+
+    # meiva:note
+    # The provider API keys this run's process composition root holds, for the decision calls
+    # a node makes.
+    provider_keys: ProviderKeys | None = None
 
     event_publisher: AgentEventPublisher | None = None
     """Best-effort SSE event fan-out (chat / reasoning / code deltas, exec
@@ -290,6 +296,15 @@ class MeivaContext:
         if self.commands is None:
             raise RuntimeError("this MeivaContext carries no CommandCatalog (ctx.commands is None)")
         return self.commands
+
+    # meiva:note
+    # The process-held provider keys; a run without them fails explicitly.
+    def require_provider_keys(self) -> ProviderKeys:
+        if self.provider_keys is None:
+            raise RuntimeError(
+                "this MeivaContext carries no ProviderKeys (ctx.provider_keys is None)"
+            )
+        return self.provider_keys
 
     def require_catalog(self) -> ModelCatalog:
         """The process-owned provider catalog; a run without one fails explicitly."""

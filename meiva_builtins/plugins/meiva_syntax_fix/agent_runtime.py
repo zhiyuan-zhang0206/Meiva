@@ -312,6 +312,7 @@ class _SyntaxFixHook(Hook):
             ruff=system_ruff(),
             repair=RepairInputs(
                 catalog=runtime.context.require_catalog(),
+                keys=runtime.context.require_provider_keys(),
                 overrides=slices.overrides,
                 llm_override=slices.read("lm", "llm_override"),
             ),

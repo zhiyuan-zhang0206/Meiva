@@ -7,6 +7,7 @@ from langchain_anthropic import ChatAnthropic
 
 from base.config.tests.configuration import model_overrides
 from base.lm.catalog import ModelCatalog
+from base.lm.catalog.provider_keys import ProviderKeys
 from base.lm.factory import build_chat_model
 
 
@@ -14,12 +15,12 @@ class TestGpt6Builds:
     def test_gpt6_1_sol_defaults_and_rejects_none(
         self, monkeypatch: pytest.MonkeyPatch, *, model_catalog: ModelCatalog
     ) -> None:
-        monkeypatch.setenv("OPENAI_API_KEY", "k")
         from langchain_openai import ChatOpenAI
 
         model = build_chat_model(
             "gpt-6.1-sol",
             catalog=model_catalog,
+            keys=ProviderKeys({"OPENAI_API_KEY": "k"}),
             llm_override="",
             overrides=model_overrides(),
         )
@@ -29,6 +30,7 @@ class TestGpt6Builds:
             "gpt-6.1-sol",
             thinking={"type": "disabled"},
             catalog=model_catalog,
+            keys=ProviderKeys({"OPENAI_API_KEY": "k"}),
             llm_override="",
             overrides=model_overrides(),
         )
@@ -38,6 +40,7 @@ class TestGpt6Builds:
             build_chat_model(
                 "gpt-6.1-sol",
                 catalog=model_catalog,
+                keys=ProviderKeys({"OPENAI_API_KEY": "k"}),
                 llm_override="",
                 overrides=model_overrides(reasoning_effort="none"),
             )
@@ -45,12 +48,12 @@ class TestGpt6Builds:
     def test_gpt6_astra_defaults_to_medium_effort(
         self, monkeypatch: pytest.MonkeyPatch, *, model_catalog: ModelCatalog
     ) -> None:
-        monkeypatch.setenv("OPENAI_API_KEY", "k")
         from langchain_openai import ChatOpenAI
 
         m = build_chat_model(
             "gpt-6-astra",
             catalog=model_catalog,
+            keys=ProviderKeys({"OPENAI_API_KEY": "k"}),
             llm_override="",
             overrides=model_overrides(),
         )
@@ -62,12 +65,12 @@ class TestGpt6Builds:
     def test_gpt6_sol_luna_default_and_none_effort(
         self, monkeypatch: pytest.MonkeyPatch, model: str, *, model_catalog: ModelCatalog
     ) -> None:
-        monkeypatch.setenv("OPENAI_API_KEY", "k")
         from langchain_openai import ChatOpenAI
 
         m = build_chat_model(
             model,
             catalog=model_catalog,
+            keys=ProviderKeys({"OPENAI_API_KEY": "k"}),
             llm_override="",
             overrides=model_overrides(),
         )
@@ -79,6 +82,7 @@ class TestGpt6Builds:
             model,
             thinking={"type": "disabled"},
             catalog=model_catalog,
+            keys=ProviderKeys({"OPENAI_API_KEY": "k"}),
             llm_override="",
             overrides=model_overrides(),
         )
@@ -88,6 +92,7 @@ class TestGpt6Builds:
         m = build_chat_model(
             model,
             catalog=model_catalog,
+            keys=ProviderKeys({"OPENAI_API_KEY": "k"}),
             llm_override="",
             overrides=model_overrides(reasoning_effort="none"),
         )
@@ -97,12 +102,12 @@ class TestGpt6Builds:
     def test_gpt6_astra_rejects_none_and_minimal(
         self, monkeypatch: pytest.MonkeyPatch, *, model_catalog: ModelCatalog
     ) -> None:
-        monkeypatch.setenv("OPENAI_API_KEY", "k")
         for effort in ("none", "minimal"):
             with pytest.raises(ValueError, match="unsupported reasoning effort"):
                 build_chat_model(
                     "gpt-6-astra",
                     catalog=model_catalog,
+                    keys=ProviderKeys({"OPENAI_API_KEY": "k"}),
                     llm_override="",
                     overrides=model_overrides(reasoning_effort=effort),
                 )
@@ -110,13 +115,13 @@ class TestGpt6Builds:
     def test_gpt6_astra_thinking_disabled_uses_minimum_effort(
         self, monkeypatch: pytest.MonkeyPatch, *, model_catalog: ModelCatalog
     ) -> None:
-        monkeypatch.setenv("OPENAI_API_KEY", "k")
         from langchain_openai import ChatOpenAI
 
         model = build_chat_model(
             "gpt-6-astra",
             thinking={"type": "disabled"},
             catalog=model_catalog,
+            keys=ProviderKeys({"OPENAI_API_KEY": "k"}),
             llm_override="",
             overrides=model_overrides(),
         )
@@ -128,11 +133,11 @@ class TestClaudeAlwaysOnBuilds:
     def test_claude_sonnet_5_5_ignores_disabled_thinking(
         self, monkeypatch: pytest.MonkeyPatch, *, model_catalog: ModelCatalog
     ) -> None:
-        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
         llm = build_chat_model(
             "claude-sonnet-5-5",
             thinking={"type": "disabled"},
             catalog=model_catalog,
+            keys=ProviderKeys({"ANTHROPIC_API_KEY": "sk-ant-test"}),
             llm_override="",
             overrides=model_overrides(),
         )
@@ -143,10 +148,10 @@ class TestClaudeAlwaysOnBuilds:
     def test_claude_opus_5_5_default_effort_and_thinking(
         self, monkeypatch: pytest.MonkeyPatch, *, model_catalog: ModelCatalog
     ) -> None:
-        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
         llm = build_chat_model(
             "claude-opus-5-5",
             catalog=model_catalog,
+            keys=ProviderKeys({"ANTHROPIC_API_KEY": "sk-ant-test"}),
             llm_override="",
             overrides=model_overrides(),
         )
@@ -167,11 +172,11 @@ class TestClaudeAlwaysOnBuilds:
         *,
         model_catalog: ModelCatalog,
     ) -> None:
-        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
         llm = build_chat_model(
             model,
             thinking={"type": "disabled"},
             catalog=model_catalog,
+            keys=ProviderKeys({"ANTHROPIC_API_KEY": "sk-ant-test"}),
             llm_override="",
             overrides=model_overrides(),
         )
@@ -189,10 +194,10 @@ class TestHaiku55Builds:
     def test_default_adaptive_thinking_ignores_manual_budget(
         self, monkeypatch: pytest.MonkeyPatch, *, model_catalog: ModelCatalog
     ) -> None:
-        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
         llm = build_chat_model(
             "claude-haiku-5-5",
             catalog=model_catalog,
+            keys=ProviderKeys({"ANTHROPIC_API_KEY": "sk-ant-test"}),
             llm_override="",
             overrides=model_overrides(claude_thinking_budget_tokens=4096),
         )
@@ -204,11 +209,11 @@ class TestHaiku55Builds:
     def test_disabled_thinking_is_preserved(
         self, monkeypatch: pytest.MonkeyPatch, *, model_catalog: ModelCatalog
     ) -> None:
-        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
         llm = build_chat_model(
             "claude-haiku-5-5",
             thinking={"type": "disabled"},
             catalog=model_catalog,
+            keys=ProviderKeys({"ANTHROPIC_API_KEY": "sk-ant-test"}),
             llm_override="",
             overrides=model_overrides(),
         )
@@ -220,10 +225,10 @@ class TestHaiku55Builds:
     def test_exact_effort_vocabulary(
         self, monkeypatch: pytest.MonkeyPatch, effort: str, *, model_catalog: ModelCatalog
     ) -> None:
-        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
         llm = build_chat_model(
             "claude-haiku-5-5",
             catalog=model_catalog,
+            keys=ProviderKeys({"ANTHROPIC_API_KEY": "sk-ant-test"}),
             llm_override="",
             overrides=model_overrides(reasoning_effort=effort),
         )
@@ -233,11 +238,11 @@ class TestHaiku55Builds:
     def test_manual_predecessor_none_is_not_adaptive_effort(
         self, monkeypatch: pytest.MonkeyPatch, *, model_catalog: ModelCatalog
     ) -> None:
-        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
         with pytest.raises(ValueError, match="unsupported reasoning effort"):
             build_chat_model(
                 "claude-haiku-5-5",
                 catalog=model_catalog,
+                keys=ProviderKeys({"ANTHROPIC_API_KEY": "sk-ant-test"}),
                 llm_override="",
                 overrides=model_overrides(reasoning_effort="none"),
             )
