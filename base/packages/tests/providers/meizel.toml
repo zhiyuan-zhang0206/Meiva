@@ -1,6 +1,7 @@
 exports = ["test_provider_plugins.py"]
 
 [uses]
+"test_provider_key_fallback.py" = ["_provider_key_child.py"]
 "test_fresh_catalog_process.py" = ["_fresh_catalog_child.py"]
 
 [debt.env-patch]
