@@ -1,35 +1,35 @@
-"""Schedule execution engine, composed by ``services.wake.schedule_manager.runner``.
-
-Loads schedule ``<id>`` from the DB, materializes its script under
-``$MEIVA_HOME/schedules/<id>/``, binds a ``schedule:<id>`` actor identity (so the
-script's ``meiva.agents.*`` calls attribute to the schedule instead of failing for
-lack of an agent id), then runs it. A ``.py`` script runs in-process via runpy so
-it shares the bound actor; any other command runs as a subprocess. An uncaught
-crash's traceback is written to ``schedules.last_error`` (the latest crash) and, truncated
-to its last ``_NOTE_TRACEBACK_MAX`` characters, to the run's ``schedule_runs.note`` (one
-per crash).
-
-Version-controlled schedule templates (manifest + scripts) live in
-``schedules/`` — provisioned via ``base/daemon/schedules/builtin_schedules.py``.
-
-Every process execution appends one row to ``schedule_runs`` (the run-history
-drawer's data source): opened with ``ok = NULL`` (in-progress) when the runner
-starts, closed with the outcome when it exits. This is process-level history —
-one row per process lifetime, not per fire — and it is severable observability:
-a run-record write failure never affects the schedule itself. A run the runner
-cannot close (a SIGTERM/SIGHUP kill, a manager SIGKILL on stop/restart/
-edited-script save) stays ``ok = NULL`` until the ScheduleManager next
-launches or reaps that schedule's session and closes it as ``interrupted``; no
-periodic sweep closes it. A stall-guard hard exit reaps owned descendants,
-then attempts to close it ``ok = false`` within a bounded record deadline.
-
-The ScheduleManager launches this inside a session named
-``meiva-schedule-<id>`` with one admitted launch per desired revision. A schedule is a supervised resident process, so an exit-0 is treated as
-a deliberate finish: the runner records ``status='completed'`` and the manager
-leaves it alone. A nonzero exit / uncaught exception records its traceback in
-``schedules.last_error``. Process loss becomes terminal error; only an explicit
-new revision authorizes another launch. A deliberate kill (SIGTERM/SIGHUP) writes nothing and is not counted a crash.
-"""
+# meiva:note
+# Schedule execution engine, composed by ``services.wake.schedule_manager.runner``.
+#
+# Loads schedule ``<id>`` from the DB, materializes its script under
+# ``$MEIVA_HOME/schedules/<id>/``, binds a ``schedule:<id>`` actor identity (so the
+# script's ``meiva.agents.*`` calls attribute to the schedule instead of failing for
+# lack of an agent id), then runs it. A ``.py`` script runs in-process via runpy so
+# it shares the bound actor; any other command runs as a subprocess. An uncaught
+# crash's traceback is written to ``schedules.last_error`` (the latest crash) and, truncated
+# to its last 3000 characters, to the run's ``schedule_runs.note`` (one
+# per crash).
+#
+# Version-controlled schedule templates (manifest + scripts) live in
+# ``schedules/`` — provisioned via ``base/daemon/schedules/builtin_schedules.py``.
+#
+# Every process execution appends one row to ``schedule_runs`` (the run-history
+# drawer's data source): opened with ``ok = NULL`` (in-progress) when the runner
+# starts, closed with the outcome when it exits. This is process-level history —
+# one row per process lifetime, not per fire — and it is severable observability:
+# a run-record write failure never affects the schedule itself. A run the runner
+# cannot close (a SIGTERM/SIGHUP kill, a manager SIGKILL on stop/restart/
+# edited-script save) stays ``ok = NULL`` until the ScheduleManager next
+# launches or reaps that schedule's session and closes it as ``interrupted``; no
+# periodic sweep closes it. A stall-guard hard exit reaps owned descendants,
+# then attempts to close it ``ok = false`` within a bounded record deadline.
+#
+# The ScheduleManager launches this inside a session named
+# ``meiva-schedule-<id>`` with one admitted launch per desired revision. A schedule is a supervised resident process, so an exit-0 is treated as
+# a deliberate finish: the runner records ``status='completed'`` and the manager
+# leaves it alone. A nonzero exit / uncaught exception records its traceback in
+# ``schedules.last_error``. Process loss becomes terminal error; only an explicit
+# new revision authorizes another launch. A deliberate kill (SIGTERM/SIGHUP) writes nothing and is not counted a crash.
 
 from __future__ import annotations
 
@@ -44,16 +44,65 @@ import threading
 import time
 import traceback
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 from types import FrameType
+from typing import Any
 
 from loguru import logger
 
 import base.host.proc
-from base.config import settings
+import meiva
+from base.clock import Clock
+from base.config import ConfigBoot
 from base.daemon.schedules.inputs import ScheduleInputs
 from base.db import Database
-from base.paths import meiva_home
+from services.wake.schedule_manager.guard_admission import (
+    Admission,
+    Frame,
+    ParkFiles,
+    admit_stall,
+    close_failure_is_fatal,
+    is_parked,
+    stop_admission,
+)
+from services.wake.schedule_manager.script_outcome import (
+    command_failure_message,
+    command_timeout_message,
+    crash_note,
+    exit_code_of,
+    exit_detail,
+)
+from services.wake.schedule_manager.stall_policy import (
+    Signature,
+    StallPolicy,
+    Watch,
+    check_interval_s,
+    close_wait_s,
+    stall_message,
+    stall_note,
+    watch_step,
+)
+
+
+# meiva:note
+# What ``meiva.ensure_plugins_loaded`` is given to install the plugin namespaces.
+@dataclass(frozen=True)
+class PluginInputs:
+    config: ConfigBoot
+    clock_factory: Callable[[], Clock]
+    producer: Callable[[], Any]
+
+
+# meiva:note
+# What the runner's composition root hands the engine for one process execution.
+@dataclass(frozen=True)
+class RunnerRoot:
+    database: Database
+    inputs: ScheduleInputs
+    plugins: PluginInputs
+    policy: StallPolicy
+    home: Path
 
 
 # A .py schedule script is run in-process, so a single call that hangs (a
@@ -61,46 +110,23 @@ from base.paths import meiva_home
 # runner with no crash and no last_error — 2026-08-03: the self-evolution
 # weekly schedule sat "alive" through the gateway's 08:28-09:23 freeze window
 # and silently missed its Monday 9am fire. The stall guard watches the main
-# thread's stack and hard-exits after a frame has not advanced for this long,
-# so the schedule is recorded as failed (last_error) instead of a zombie.
-def schedule_stall_timeout_seconds() -> float:
-    return settings.gateway.schedule_stall_timeout_seconds
-
-
-# The guard samples the main thread this often (a quarter of the timeout when
-# that is shorter, which only tests configure).
-_SAMPLE_INTERVAL_MAX_S = 30.0
-
-# Both failure writes together get this long after child cleanup; a DB that is
-# the reason for the stall cannot keep the runner alive past it.
-FAILURE_RECORD_DEADLINE_S = 10.0
-
-# What ``close`` waits for an admitted action: child cleanup (3s TERM grace +
-# 5s reap), the record deadline, and 1s margin.
-_HARD_EXIT_WAIT_S = 9.0 + FAILURE_RECORD_DEADLINE_S
-
-
-def _stall_check_interval_s() -> float:
-    return min(_SAMPLE_INTERVAL_MAX_S, schedule_stall_timeout_seconds() / 4)
-
-
-# Frames that legitimately park the main thread for unbounded time — a
-# resident schedule's whole reason for existing is a long sleep between fire
-# windows. The DEEPEST frame decides: a sleep on top of the stack means the
-# script is deliberately parked, not stalled. Child waits also park in
-# subprocess's blocking waitpid or the selector wait immediately inside
-# _communicate. Spawn, argument conversion, and stdin.flush stay guarded.
-_PARK_FRAME_NAMES = frozenset({"sleep", "wait", "wait_for", "run_forever", "acquire"})
+# meiva:note
+# thread's stack and hard-exits after a frame has not advanced for
+# `StallPolicy.timeout_s`, so the schedule is recorded as failed (last_error)
+# instead of a zombie. The verdicts are the pure functions of `stall_policy` and
+# `guard_admission`; this module samples, locks and acts.
 
 # Cache the code's filenames, the same identities the sampled frames carry.
 # Unlike module __file__, these also work with loaders that omit __file__;
 # a missing attribute must not turn every guard tick into a skipped check.
-_SUBPROCESS_FILENAME = subprocess.Popen[bytes].wait.__code__.co_filename
-_SELECTORS_FILENAME = selectors.SelectSelector.select.__code__.co_filename
+_PARK_FILES = ParkFiles(
+    subprocess=subprocess.Popen[bytes].wait.__code__.co_filename,
+    selectors=selectors.SelectSelector.select.__code__.co_filename,
+)
 
 
-def schedule_dir(schedule_id: int) -> Path:
-    return meiva_home() / "schedules" / str(schedule_id)
+def schedule_dir(home: Path, schedule_id: int) -> Path:
+    return home / "schedules" / str(schedule_id)
 
 
 # Filename suffixes that mean "this token IS the script" — a bare token with
@@ -218,19 +244,6 @@ def record_run_end(database: Database, run_id: int | None, *, ok: bool, note: st
         logger.exception("schedule run-record end failed (run {})", run_id)
 
 
-# A crashed run's note keeps this much of the traceback's END (the exception and the innermost
-# frames): the session's output log is torn down with the session, and `schedules.last_error`
-# holds only the latest crash, so this row is the history of why each run died.
-_NOTE_TRACEBACK_MAX = 3000
-
-
-def _crash_note(exc: BaseException, tb: str) -> str:
-    tail = tb.strip()
-    if len(tail) > _NOTE_TRACEBACK_MAX:
-        tail = "[...truncated]\n" + tail[-_NOTE_TRACEBACK_MAX:]
-    return f"crashed: {type(exc).__name__}\n{tail}"
-
-
 _ORIGINAL_SLEEP = time.sleep
 
 
@@ -264,7 +277,9 @@ def restore_park_detection() -> None:
     time.sleep = _ORIGINAL_SLEEP
 
 
-def stall_action(database: Database, schedule_id: int, message: str, run_id: int | None) -> None:
+def stall_action(
+    database: Database, schedule_id: int, message: str, run_id: int | None, *, policy: StallPolicy
+) -> None:
     """Reap descendants, record the failure within a fixed deadline, hard-exit 1."""
     try:
         try:
@@ -278,7 +293,7 @@ def stall_action(database: Database, schedule_id: int, message: str, run_id: int
         # One interpreter-level deadline covers both writes: if the DB never
         # answers, faulthandler dumps every thread's stack (the hang's location)
         # and exits 1.
-        faulthandler.dump_traceback_later(FAILURE_RECORD_DEADLINE_S, exit=True)
+        faulthandler.dump_traceback_later(policy.record_deadline_s, exit=True)
         try:
             record_error(database, schedule_id, message)
         except Exception:
@@ -286,27 +301,19 @@ def stall_action(database: Database, schedule_id: int, message: str, run_id: int
                 "Schedule {} stall message could not be recorded in last_error; exiting without it",
                 schedule_id,
             )
-        record_run_end(
-            database, run_id, ok=False, note=f"stalled ({schedule_stall_timeout_seconds():.0f}s)"
-        )
+        record_run_end(database, run_id, ok=False, note=stall_note(policy))
     finally:
         os._exit(1)  # hard exit; the manager records the process loss
 
 
-def _is_parked_frame(frame: FrameType) -> bool:
-    """Recognize sleep-family parks and the actual subprocess wait operations."""
-    if frame.f_code.co_name in _PARK_FRAME_NAMES:
-        return True
-    signature = (frame.f_code.co_filename, frame.f_code.co_name)
-    if signature == (_SUBPROCESS_FILENAME, "_wait"):
-        return True
-    if signature != (_SELECTORS_FILENAME, "select"):
-        return False
+def _frame_facts(frame: FrameType) -> Frame:
     parent = frame.f_back
-    return parent is not None and (
-        parent.f_code.co_filename,
-        parent.f_code.co_name,
-    ) == (_SUBPROCESS_FILENAME, "_communicate")
+    return Frame(
+        filename=frame.f_code.co_filename,
+        function=frame.f_code.co_name,
+        parent_filename=None if parent is None else parent.f_code.co_filename,
+        parent_function=None if parent is None else parent.f_code.co_name,
+    )
 
 
 class StallGuard:
@@ -318,19 +325,27 @@ class StallGuard:
     guarded. An unexpected guard failure is retained and raised by ``close``.
     """
 
-    def __init__(self, database: Database, schedule_id: int, run_id: int | None) -> None:
+    def __init__(
+        self, database: Database, schedule_id: int, run_id: int | None, *, policy: StallPolicy
+    ) -> None:
         self.database = database
         self.schedule_id = schedule_id
         self.run_id = run_id
+        self.policy = policy
         self.main_thread_id = threading.get_ident()
         self.stop = threading.Event()
         self.admission = threading.Lock()
-        self.action_started = False
+        self._admitted = Admission()
         self.error: BaseException | None = None
         self.thread = threading.Thread(
             target=self._guard, name=f"schedule-{schedule_id}-stall-guard", daemon=True
         )
         self.thread.start()
+
+    @property
+    def action_started(self) -> bool:
+        with self.admission:
+            return self._admitted.stalled
 
     def _guard(self) -> None:
         try:
@@ -339,48 +354,42 @@ class StallGuard:
             self.error = exc
             logger.opt(exception=exc).error("Schedule {} stall guard failed", self.schedule_id)
 
-    def _sample(self) -> tuple[str, int, str] | None:
+    def sample(self) -> Signature | None:
         frame = sys._current_frames().get(self.main_thread_id)
-        if frame is None or _is_parked_frame(frame):
+        if frame is None or is_parked(_frame_facts(frame), _PARK_FILES):
             return None
         return frame.f_code.co_filename, frame.f_lineno, frame.f_code.co_name
 
     def _claim_stall(self) -> bool:
         with self.admission:
-            if self.stop.is_set():
-                return False
-            self.action_started = True
-            return True
+            self._admitted, admitted = admit_stall(self._admitted)
+            return admitted
 
     def _observe(self) -> None:
-        last_sig: tuple[str, int, str] | None = None
-        stalled_since = 0.0
-        while not self.stop.wait(_stall_check_interval_s()):
-            sig = self._sample()
-            now = time.monotonic()
-            if sig is None or sig != last_sig:
-                last_sig = sig
-                stalled_since = now
-                continue
-            if now - stalled_since >= schedule_stall_timeout_seconds():
-                message = (
-                    f"schedule runner stalled {now - stalled_since:.0f}s in "
-                    f"{sig[2]} ({sig[0]}:{sig[1]}) — hard-exiting; check the "
-                    "gateway / DB / network the script calls into"
-                )
+        watch: Watch | None = None
+        while not self.stop.wait(check_interval_s(self.policy)):
+            signature = self.sample()
+            watch, stood_s = watch_step(watch, signature, time.monotonic(), self.policy)
+            if stood_s is not None and signature is not None:
                 if self._claim_stall():
-                    stall_action(self.database, self.schedule_id, message, self.run_id)
+                    stall_action(
+                        self.database,
+                        self.schedule_id,
+                        stall_message(stood_s, signature),
+                        self.run_id,
+                        policy=self.policy,
+                    )
                 return
 
     def close(self, timeout: float = 1.0) -> None:
         # Closing admission and claiming a real stall share one decision point.
         # Never hold this lock through cleanup or a synchronous database write.
         with self.admission:
+            self._admitted, action_started = stop_admission(self._admitted)
             self.stop.set()
-            action_started = self.action_started
         # Ordinary stop wakes immediately. An admitted action keeps the 3s TERM
         # + 5s reap and the record deadline before its hard exit.
-        self.thread.join(timeout=_HARD_EXIT_WAIT_S if action_started else timeout)
+        self.thread.join(timeout=close_wait_s(self.policy) if action_started else timeout)
         alive = self.thread.is_alive()
         if self.error is not None:
             raise self.error
@@ -388,58 +397,8 @@ class StallGuard:
             raise RuntimeError(f"Schedule {self.schedule_id} stall guard did not stop")
 
 
-def _script_exit_code(exc: SystemExit) -> int:
-    """Normalize a deliberate script exit with the interpreter's bool/message semantics."""
-    return int(exc.code) if isinstance(exc.code, int) else (0 if exc.code is None else 1)
-
-
-def _record_script_exit(
-    database: Database, schedule_id: int, run_id: int | None, exc: SystemExit
-) -> int:
-    """Record a .py script's deliberate sys.exit() like a command's exit code
-    (QA P3-3 — it must not leave the run row in-progress forever). A None code
-    is 0; a non-int code (a message string) is 1. int() normalizes bools (the
-    interpreter treats them as exit codes: True -> 1, False -> 0); a non-int
-    code is a message the interpreter would print to stderr, so it rides the
-    note instead of being swallowed (QA N1)."""
-    code = _script_exit_code(exc)
-    if code == 0:
-        finish_completed(database, schedule_id, run_id)
-    else:
-        message = "" if isinstance(exc.code, int) else f": {exc.code}"
-        record_error(database, schedule_id, f"script exited {code}{message}")
-        record_run_end(database, run_id, ok=False, note=f"script exited {code}{message}")
-    return code
-
-
-def run(
-    schedule_id: int,
-    revision: int | None = None,
-    *,
-    database: Callable[[], Database],
-    bind_actor: Callable[[int], None],
-    load_plugins: Callable[[], None],
-    inputs: ScheduleInputs,
-) -> int:
-    """Materialize + run the schedule. Returns a process exit code."""
-    return _run(
-        database(),
-        schedule_id,
-        revision,
-        bind_actor=bind_actor,
-        load_plugins=load_plugins,
-        inputs=inputs,
-    )
-
-
 def run_python_script(
-    database: Database,
-    schedule_id: int,
-    run_id: int | None,
-    script_path: Path,
-    *,
-    load_plugins: Callable[[], None],
-    inputs: ScheduleInputs,
+    schedule_id: int, run_id: int | None, script_path: Path, root: RunnerRoot
 ) -> None:
     """Run with isolated argv and collect the watchdog before any terminal write."""
     # Load plugin namespaces (meiva.tasks etc.) into this process before the
@@ -454,7 +413,7 @@ def run_python_script(
     # so an import hang is covered too. Stopped before _mark_completed
     # so a clean return cannot be overtaken by a spurious kill.
     patch_park_detection()
-    guard = StallGuard(database, schedule_id, run_id)
+    guard = StallGuard(root.database, schedule_id, run_id, policy=root.policy)
     # The gateway launches this runner as `python -m services.wake.schedule_manager.runner
     # <id>`, so sys.argv carries the schedule id. The script must not
     # inherit that runner-only argv: hand it the argv `python <script>`
@@ -465,9 +424,15 @@ def run_python_script(
     runner_argv = sys.argv
     sys.argv = [str(script_path)]
     try:
-        load_plugins()
+        meiva.ensure_plugins_loaded(
+            config=root.plugins.config,
+            clock_factory=root.plugins.clock_factory,
+            producer=root.plugins.producer,
+        )
         runpy.run_path(
-            str(script_path), run_name="__main__", init_globals={"MEIVA_SCHEDULE_INPUTS": inputs}
+            str(script_path),
+            run_name="__main__",
+            init_globals={"MEIVA_SCHEDULE_INPUTS": root.inputs},
         )
     finally:
         sys.argv = runner_argv
@@ -475,9 +440,7 @@ def run_python_script(
         try:
             guard.close()
         except BaseException:
-            if primary is None or (
-                isinstance(primary, SystemExit) and _script_exit_code(primary) == 0
-            ):
+            if close_failure_is_fatal(primary):
                 raise
             # Successful SystemExit is completion, so cleanup failure wins.
             # Preserve a failed script's primary failure; the guard keeps
@@ -488,33 +451,46 @@ def run_python_script(
             if guard.action_started:
                 # A real stall won admission before script completion.
                 # Never mark it completed, even if cleanup exhausted
-                # the bounded join or a test replaced the hard exit.
+                # meiva:note
+                # the bounded join.
                 os._exit(1)
 
 
-def _run(
-    database: Database,
-    schedule_id: int,
-    revision: int | None = None,
-    *,
-    bind_actor: Callable[[int], None],
-    load_plugins: Callable[[], None],
-    inputs: ScheduleInputs,
+def _record_script_exit(
+    database: Database, schedule_id: int, run_id: int | None, exc: SystemExit
 ) -> int:
+    """Record a .py script's deliberate sys.exit() like a command's exit code
+    (QA P3-3 — it must not leave the run row in-progress forever). A None code
+    is 0; a non-int code (a message string) is 1. int() normalizes bools (the
+    interpreter treats them as exit codes: True -> 1, False -> 0); a non-int
+    code is a message the interpreter would print to stderr, so it rides the
+    note instead of being swallowed (QA N1)."""
+    code = exit_code_of(exc.code)
+    if code == 0:
+        finish_completed(database, schedule_id, run_id)
+    else:
+        message = exit_detail(exc.code)
+        record_error(database, schedule_id, f"script exited {code}{message}")
+        record_run_end(database, run_id, ok=False, note=f"script exited {code}{message}")
+    return code
+
+
+def run(schedule_id: int, revision: int | None, root: RunnerRoot) -> int:
+    """Materialize + run the schedule. Returns a process exit code."""
+    database = root.database
     loaded = load(database, schedule_id, revision)
     if loaded is None:
         logger.warning("Schedule {} is gone or disabled; nothing to run", schedule_id)
         return 0
     script, command = loaded
 
-    work_dir = schedule_dir(schedule_id)
+    work_dir = schedule_dir(root.home, schedule_id)
     work_dir.mkdir(parents=True, exist_ok=True)
     script_name = script_filename(command)
     script_path = work_dir / script_name
     script_path.write_text(script)
 
-    bind_actor(schedule_id)
-
+    # meiva:note
     # Run history: one row per process execution, opened in-progress (ok=NULL)
     # here and closed with the outcome on every exit path below — including the
     # stall guard, which receives run_id and closes the row ok=false within its
@@ -526,11 +502,12 @@ def _run(
 
     try:
         if script_name.endswith(".py"):
-            run_python_script(
-                database, schedule_id, run_id, script_path, load_plugins=load_plugins, inputs=inputs
-            )
-            finish_completed(database, schedule_id, run_id)  # clean return => finished, not crashed
+            run_python_script(schedule_id, run_id, script_path, root)
+            # meiva:note
+            # clean return => finished, not crashed
+            finish_completed(database, schedule_id, run_id)
             return 0
+        # meiva:note
         # A non-.py command runs as a child process — the stall guard's main-
         # thread frame watch cannot see inside it, and the runner parked in
         # subprocess.run would read as a legitimate park anyway (a subprocess
@@ -542,18 +519,18 @@ def _run(
         # after the 2026-08-03 self-evolution miss; the command branch was
         # still open). subprocess.run kills the child on expiry and raises
         # TimeoutExpired; the manager reports terminal process loss without replay.
-        stall_timeout_s = schedule_stall_timeout_seconds()
+        stall_timeout_s = root.policy.timeout_s
         try:
-            result = subprocess.run(  # noqa: S603 — command is the operator-authored schedule command
+            # meiva:note
+            # command is the operator-authored schedule command.
+            result = subprocess.run(  # noqa: S603
                 shlex.split(command),
                 cwd=str(work_dir),
                 check=False,
                 timeout=stall_timeout_s,
             )
         except subprocess.TimeoutExpired:
-            message = (
-                f"command did not finish within {stall_timeout_s:.0f}s (stall timeout): {command!r}"
-            )
+            message = command_timeout_message(stall_timeout_s, command)
             record_error(database, schedule_id, message)
             logger.error("Schedule {} {}", schedule_id, message)
             record_run_end(
@@ -561,7 +538,7 @@ def _run(
             )
             return 1
         if result.returncode != 0:
-            record_error(database, schedule_id, f"command exited {result.returncode}: {command!r}")
+            record_error(database, schedule_id, command_failure_message(result.returncode, command))
             record_run_end(database, run_id, ok=False, note=f"command exited {result.returncode}")
         else:
             finish_completed(database, schedule_id, run_id)
@@ -572,5 +549,5 @@ def _run(
         tb = traceback.format_exc()
         record_error(database, schedule_id, tb)
         logger.error("Schedule runner execution failed: {}", tb)
-        record_run_end(database, run_id, ok=False, note=_crash_note(exc, tb))
+        record_run_end(database, run_id, ok=False, note=crash_note(type(exc).__name__, tb))
         return 1

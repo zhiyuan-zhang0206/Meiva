@@ -6,10 +6,10 @@ that continue after their database connection has died.
 """
 
 import hashlib
-import json
 import os
 import shutil
 import uuid
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -24,10 +24,15 @@ from base.db import agent_exists
 from base.db.transaction import write_transaction
 from base.host.private_storage import create_private_bytes
 from base.paths.private_dir import ensure_private_dir
+from gateway.routers.upload.upload_plan import (
+    SuffixRefusal,
+    UploadItem,
+    batch_fingerprint,
+    plan_manifest,
+)
 from gateway.schemas.uploads import UploadedBatch, UploadedFile
 
-RESERVED_PREFIX = "meiva-upload-"
-type UploadItem = tuple[str, bytes, str]
+__all__ = ["Claim", "UploadItem", "claim_batch", "publish_files", "save_keyed_batch"]
 
 
 def lock_agent(conn: Connection[Any], agent_id: int) -> None:
@@ -67,73 +72,56 @@ def check_quota(
         raise HTTPException(413, str(exc)) from exc
 
 
-def _fingerprint(batch: list[UploadItem], original_names: list[str]) -> str:
-    manifest = [
-        [name, len(contents), hashlib.sha256(contents).hexdigest(), content_type]
-        for name, (_, contents, content_type) in zip(original_names, batch, strict=True)
-    ]
-    canonical = json.dumps(manifest, ensure_ascii=True, separators=(",", ":"))
-    return hashlib.sha256(canonical.encode()).hexdigest()
+# meiva:note
+# The committed identity of one upload operation: what it is, its objects, its receipt.
+#
+# `receipt` is None until the files are published and the receipt committed.
+@dataclass(frozen=True)
+class Claim:
+    fingerprint: str
+    manifest: list[dict[str, Any]]
+    receipt: dict[str, Any] | None
 
 
-def _manifest(batch: list[UploadItem], original_names: list[str]) -> list[dict[str, Any]]:
-    batch_id = uuid.uuid4().hex
-    items: list[dict[str, Any]] = []
-    for ordinal, (name, (_, contents, content_type)) in enumerate(
-        zip(original_names, batch, strict=True)
-    ):
-        suffix = Path(name.replace("\\", "/")).suffix
-        if (
-            "\x00" in name
-            or len(suffix.encode()) > 128
-            or any(char in "?#%" or ord(char) < 32 or ord(char) == 127 for char in suffix)
-        ):
-            raise HTTPException(
-                422, "upload suffix cannot be represented in an immutable object URL"
-            )
-        items.append(
-            {
-                "filename": name,
-                "stored_name": f"{RESERVED_PREFIX}{batch_id}-{ordinal}{suffix}",
-                "size": len(contents),
-                "sha256": hashlib.sha256(contents).hexdigest(),
-                "content_type": content_type,
-            }
-        )
-    return items
-
-
-def _lookup(conn: Connection[Any], key: str, fingerprint: str) -> tuple[Any, ...] | None:
+def _lookup(conn: Connection[Any], key: str, fingerprint: str) -> Claim | None:
     row = conn.execute(
         "SELECT request_fingerprint, manifest, receipt FROM agent_upload_batches WHERE operation_key = %s",
         (key,),
     ).fetchone()
-    if row is not None and row[0] != fingerprint:
+    if row is None:
+        return None
+    if row[0] != fingerprint:
         raise HTTPException(409, "idempotency key was already used for a different upload manifest")
-    return row
+    return Claim(row[0], row[1], row[2])
 
 
-def _claim(
+# meiva:note
+# Commit the receiving identity and reserve its quota, or return the one already there.
+def claim_batch(
     pool: ConnectionPool,
     key: str,
     agent_id: int,
     directory: Path,
     batch: list[UploadItem],
     names: list[str],
-    fingerprint: str,
     *,
     max_bytes: int,
     max_files: int,
     local_machine: str,
-) -> tuple[Any, ...]:
+) -> Claim:
+    fingerprint = batch_fingerprint(batch, names)
     with write_transaction(pool) as conn:
         lock_agent(conn, agent_id)
-        row = _lookup(conn, key, fingerprint)
-        if row is not None:
-            return row
+        found = _lookup(conn, key, fingerprint)
+        if found is not None:
+            return found
         if not agent_exists(conn, agent_id):
             raise AgentNotFound(agent_id)
-        manifest = _manifest(batch, names)
+        manifest = plan_manifest(batch, names, uuid.uuid4().hex)
+        if isinstance(manifest, SuffixRefusal):
+            raise HTTPException(
+                422, "upload suffix cannot be represented in an immutable object URL"
+            )
         ensure_private_dir(directory)
         check_quota(
             conn,
@@ -150,7 +138,7 @@ def _claim(
             "VALUES (%s, %s, %s, %s)",
             (key, agent_id, fingerprint, Jsonb(manifest)),
         )
-        return fingerprint, manifest, None
+        return Claim(fingerprint, manifest, None)
 
 
 def _verify(path: Path, item: dict[str, Any]) -> None:
@@ -202,29 +190,27 @@ def save_keyed_batch(
     local_machine: str,
 ) -> UploadedBatch:
     """Claim first, then publish and commit an immutable receipt in a second transaction."""
-    fingerprint = _fingerprint(batch, names)
-    claimed = _claim(
+    claimed = claim_batch(
         pool,
         key,
         agent_id,
         directory,
         batch,
         names,
-        fingerprint,
         max_bytes=max_bytes,
         max_files=max_files,
         local_machine=local_machine,
     )
-    if claimed[2] is not None:
-        return UploadedBatch.model_validate(claimed[2])
+    if claimed.receipt is not None:
+        return UploadedBatch.model_validate(claimed.receipt)
     with write_transaction(pool) as conn:
         lock_agent(conn, agent_id)
-        row = _lookup(conn, key, fingerprint)
-        assert row is not None  # noqa: S101 -- committed receiving identity is never removed
-        if row[2] is not None:
-            return UploadedBatch.model_validate(row[2])
+        found = _lookup(conn, key, claimed.fingerprint)
+        assert found is not None  # noqa: S101 -- committed receiving identity is never removed
+        if found.receipt is not None:
+            return UploadedBatch.model_validate(found.receipt)
         ensure_private_dir(directory)
-        publish_files(directory, row[1], batch)
+        publish_files(directory, found.manifest, batch)
         receipt = UploadedBatch(
             files=[
                 UploadedFile(
@@ -234,7 +220,7 @@ def save_keyed_batch(
                     size=item["size"],
                     content_type=item["content_type"],
                 )
-                for item in row[1]
+                for item in found.manifest
             ]
         )
         conn.execute(

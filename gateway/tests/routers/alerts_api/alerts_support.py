@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Generator
+from contextlib import contextmanager
 from typing import Any
 
 import psycopg
@@ -82,25 +83,34 @@ def ingest(
     )
 
 
-@pytest.fixture
-def client() -> Any:
-    """TestClient with the gateway app (lifespan: db pool + scheduler)."""
-
-    with gateway_test_client() as c:
+# meiva:note
+# The gateway app with the webhook token set (loopback trust off) and IM fan-out enabled.
+@contextmanager
+def alerts_client() -> Generator[GatewayTestClient]:
+    fields = {"webhook_token": SecretStr("test-token"), "im_notify_enabled": True}
+    with gateway_test_client(fields=fields) as c:
         yield c
 
 
+@pytest.fixture
+def client() -> Generator[GatewayTestClient]:
+    """TestClient with the gateway app (lifespan: db pool + scheduler)."""
+    with alerts_client() as c:
+        yield c
+
+
+def install_im(monkeypatch: pytest.MonkeyPatch, callback: Callable[[str], bool]) -> None:
+    # meiva:note
+    # The IM bridge is reached by `base.telemetry.alerts.native.notify_alert_group`, which reads
+    # the bridge address and the enable switch from the ambient process settings, so the send is
+    # the one thing a test of this router cannot redirect by value; it is replaced here, once.
+    monkeypatch.setattr(alerts_router, "notify_alert_group", native_sender(callback))
+
+
 @pytest.fixture(autouse=True)
-def alerts_auth_and_im(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Webhook token set (loopback trust off) + IM fan-out mocked."""
-
-    monkeypatch.setattr(settings.alerts, "webhook_token", SecretStr("test-token"))
-    monkeypatch.setattr(settings.alerts, "im_notify_enabled", True)
-
-    def _fake_notify(text: str) -> bool:
-        return True
-
-    monkeypatch.setattr(alerts_router, "notify_alert_group", native_sender(_fake_notify))
+def alerts_im(monkeypatch: pytest.MonkeyPatch) -> None:
+    """IM fan-out accepts every group."""
+    install_im(monkeypatch, lambda _text: True)
 
 
 def seed_alert_rows(db: psycopg.Connection, rows: list[dict[str, Any]]) -> None:
@@ -122,12 +132,12 @@ def seed_alert_rows(db: psycopg.Connection, rows: list[dict[str, Any]]) -> None:
     db.commit()
 
 
-def capture_im(client: GatewayTestClient, *, ok: bool = True) -> list[str]:
+def capture_im(monkeypatch: pytest.MonkeyPatch, *, ok: bool = True) -> list[str]:
     sent: list[str] = []
 
     def _capture(text: str) -> bool:
         sent.append(text)
         return ok
 
-    client.app.state.alert_group_notifier = native_sender(_capture)
+    install_im(monkeypatch, _capture)
     return sent

@@ -1,55 +1,39 @@
-import json
-
 import httpx
 import psycopg
 import pytest
-from fastapi.testclient import TestClient
 
 from base.api_contracts.agent_contract import GatewayUnavailable
 from base.host.net.tests.retry_waits import retry_waits as retry_waits
+from gateway.tests.auth.gateway_config import GatewayTestClient
+from gateway.tests.auth.sdk_transport import AppTransport
 from gateway.tests.lifecycle.test_keyed_launch_retry import birth
 from gateway.tests.lifecycle.test_keyed_launch_retry import client as client
+from gateway.tests.lifecycle.test_keyed_launch_retry import runner as runner
 from meiva import agents
 from meiva.gateway_client import use_client
 
 
 @pytest.mark.usefixtures("retry_waits")
 def test_sdk_observation_lost_response_and_historical_replay(
-    client: TestClient, db_conn: psycopg.Connection
+    client: GatewayTestClient, db_conn: psycopg.Connection
 ) -> None:
     agent_id, prior = birth(client)
-    posts: list[httpx.Request] = []
-    lose = True
-
-    def handle(request: httpx.Request) -> httpx.Response:
-        if request.method == "GET":
-            result = client.get(request.url.path)
-        else:
-            posts.append(request)
-            result = client.post(
-                request.url.path, json=json.loads(request.content), headers=dict(request.headers)
-            )
-            if lose:
-                assert result.status_code == 200, result.text
-                raise httpx.ReadTimeout("committed response lost", request=request)
-        return httpx.Response(
-            result.status_code, content=result.content, headers=dict(result.headers)
-        )
-
+    wire = AppTransport(client)
     with (
-        httpx.Client(base_url="http://gateway", transport=httpx.MockTransport(handle)) as http,
+        httpx.Client(base_url="http://gateway", transport=wire) as http,
         use_client(http),
     ):
         observed = agents.get_launch_attempt(agent_id)
         assert str(observed) == prior
+        wire.losing_responses = True
         with pytest.raises(GatewayUnavailable):
             agents.retry_launch(
                 agent_id,
                 idempotency_key="intent",
                 expected_prior_attempt_id=observed,
             )
-        assert len(posts) > 1
-        lose = False
+        assert len([request for request in wire.requests if request.method == "POST"]) > 1
+        wire.losing_responses = False
         replacement = agents.get_launch_attempt(agent_id)
         assert replacement != observed
         for _ in range(2):

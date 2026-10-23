@@ -4,7 +4,7 @@ from gateway.tests.auth.integration_tests import (
     gateway_client as gateway_client,
 )
 from gateway.tests.auth.integration_tests import (
-    local_spawn_in_process as local_spawn_in_process,
+    integration_data_plane as integration_data_plane,
 )
 from gateway.tests.auth.integration_tests import (
     mock_api_keys as mock_api_keys,
@@ -15,7 +15,7 @@ from gateway.tests.auth.integration_tests import (
 
 __all__ = [
     "gateway_client",
-    "local_spawn_in_process",
+    "integration_data_plane",
     "mock_api_keys",
     "model_catalog",
 ]

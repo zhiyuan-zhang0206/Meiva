@@ -57,6 +57,12 @@ def native_checkpoint(
         (("integration", PluginContributions(state=(IntegrationPlugin,))),)
     )
 
+    # meiva:note
+    # Two retained patches, both for the integration plugin that exists only in this test:
+    # `load_snapshot` rediscovers plugins from disk through `build_registry` (needs base: it
+    # should read the installed registry), and the SDK's installation is the one process-wide
+    # slot on the `meiva` module; the real installer would also turn on usage metering, whose
+    # sampling policy is fetched from a gateway bootstrap.
     def build_registry(*, validate_state: object = None) -> ExtensionRegistry:
         return registry
 
@@ -68,10 +74,6 @@ def native_checkpoint(
     installation = replace(model_installation, registry=registry, faces=True)
     monkeypatch.setattr(meiva, "__plugin_installation__", installation, raising=False)
 
-    def loader_stub(**_kwargs: object) -> None:
-        pass
-
-    monkeypatch.setattr(meiva, "ensure_plugins_loaded", loader_stub)
     handle = state_module.PluginStateHandle(IntegrationPlugin, "integration")
     state_module.build_agent_state(registry)
 
@@ -187,7 +189,6 @@ def test_external_attach_reads_native_checkpoint_and_only_journals_delta(
 def test_borrowed_sender_reaches_peer_through_gateway_and_returns_real_provenance(
     native_checkpoint: tuple[RuntimeIncarnation, state_module.PluginStateHandle[IntegrationPlugin]],
     db_conn: psycopg.Connection,
-    monkeypatch: pytest.MonkeyPatch,
     database: Database,
     event_bus: EventBus,
     config_authority: ConfigAuthority,
@@ -195,9 +196,6 @@ def test_borrowed_sender_reaches_peer_through_gateway_and_returns_real_provenanc
     machine_identity: MachineIdentity,
 ) -> None:
     owner, _ = native_checkpoint
-    monkeypatch.setenv(
-        "MEIVA_CALLER_IDENTITY", '{"kind":"external_agent","subject":"codex","instance":"test"}'
-    )
     peer_id = create_agent(db_conn)
     db_conn.execute(
         "INSERT INTO agents_meta(id,status,machine) VALUES(%s,'idling',%s)",

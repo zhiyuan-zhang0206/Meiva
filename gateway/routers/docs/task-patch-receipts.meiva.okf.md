@@ -36,10 +36,11 @@ before reading `task_patch_receipts` or acquiring the existing task row lock.
 A fresh request follows the existing task rules, reminder reset and notification
 policy. Its immutable response is inserted before that same transaction commits.
 Failure in task, notification or receipt production rolls back every effect.
-The app factory supplies the notification and receipt writers as required
-transaction collaborators, and supplies wake/resurrection operations separately.
-Fault tests execute the real transaction and verify durable rows after a writer
-failure; the injected writer does not own commit or rollback.
+The notification and receipt writers run inside that transaction and the handler
+wakes and resurrects after it commits. Fault tests make the real insert fail
+(an `AFTER INSERT` trigger that raises, `gateway/tests/support/db_faults`) or make the
+bus raise after the commit, and verify the durable rows; the writers do not own
+commit or rollback.
 
 A replay returns the original response snapshot. It does not reset reminder
 counters, update timestamps, overwrite an intervening owner change, supersede

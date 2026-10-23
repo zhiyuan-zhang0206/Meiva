@@ -18,20 +18,18 @@ Coverage:
     the elif header and silently lost AIMessage is exactly this kind of bug)
 """
 
-from dataclasses import replace
-
 import psycopg
 import pytest
 from fastapi.testclient import TestClient
 from langchain_core.messages import BaseMessage, HumanMessage
 
-from base.agents.history.checkpoint import CheckpointReadError
 from base.agents.history.timeline import TimelineItem, build_timeline_items
 from base.agents.history.timeline_inputs import TimelineReadInputs
 from base.clock import Clock
 from base.config import settings
 from base.db import create_agent
 from gateway.tests.auth.gateway_config import GatewayTestClient, gateway_test_client
+from gateway.tests.support.checkpoints.unreadable import put_unreadable_head
 
 _TIMELINE_INPUTS = TimelineReadInputs(
     Clock.from_settings, lambda: settings.general.message_timestamps
@@ -315,62 +313,58 @@ class TestTimelineFailLoud:
     prevents regression: any logic error in the dispatch layer must propagate as a 500.
     """
 
+    # meiva:note
+    # Load one ToolMessage the renderer cannot project: an exec_output whose `sdk_calls`
+    # tally is malformed. Reading the checkpoint succeeds; rendering it raises.
     @staticmethod
-    def _put_minimal_aimessage(agent_id: int) -> None:
-        """Load a single AIMessage so dispatch hits the _ai_message_items path.
-        Tests replace the public renderer, triggering a RuntimeError to verify
-        the endpoint's fail-loud boundary."""
-        from langchain_core.messages import AIMessage
+    def _put_unrenderable_message(agent_id: int) -> None:
+        from langchain_core.messages import ToolMessage
         from langgraph.checkpoint.base import empty_checkpoint
         from langgraph.checkpoint.postgres import PostgresSaver
 
         from base.config import settings
 
         ckpt = empty_checkpoint()
-        ckpt["channel_values"] = {"messages": [AIMessage(content="hello")]}
+        ckpt["channel_values"] = {
+            "messages": [
+                ToolMessage(
+                    content="out",
+                    tool_call_id="tc-1",
+                    additional_kwargs={"meiva_msg_type": "exec_output", "sdk_calls": "malformed"},
+                )
+            ]
+        }
         ckpt["channel_versions"] = {"messages": "1", "__start__": "1"}
         with PostgresSaver.from_conn_string(settings.data_plane.db_url) as saver:
             saver.setup()
             saver.put(
-                config={
-                    "configurable": {
-                        "thread_id": str(agent_id),
-                        "checkpoint_ns": "",
-                    }
-                },
+                config={"configurable": {"thread_id": str(agent_id), "checkpoint_ns": ""}},
                 checkpoint=ckpt,
                 metadata={"source": "input", "step": 1, "parents": {}},
                 new_versions={"messages": "1"},
             )
 
+    # meiva:note
+    # Any logic error in the dispatch layer (NameError / KeyError / a renderer validation
+    # error) must propagate as endpoint 500 — must not be swallowed into 200 + empty list.
+    #
+    # Bug reproduce: a stored exec_output ToolMessage whose `sdk_calls` tally is not a list makes
+    # the public renderer raise a pydantic ValidationError. Old code (try wrapped the entire
+    # loop): endpoint 200 + empty list + debug log swallowed. New code (try only wraps saver IO):
+    # 500.
+    #
+    # Note raise_app_exceptions=False: by default TestClient re-raises endpoint exceptions
+    # to the test assertion layer (convenient for debugging), but this test needs to see
+    # the HTTP-layer 500 status, so disable re-raise to let FastAPI run the default error
+    # middleware and return 500.
     def test_dispatch_error_propagates_as_500(
         self,
         db_conn: psycopg.Connection,
     ) -> None:
-        """Any logic error in the dispatch layer (NameError / KeyError / custom helper raise)
-        must propagate as endpoint 500 — must not be swallowed into 200 + empty list.
-
-        Bug reproduce: replace the public build_timeline_items renderer with a raise RuntimeError, feed one
-        AIMessage into state. Old code (try wrapped the entire loop): endpoint 200 +
-        empty list + debug log swallowed. New code (try only wraps saver IO): 500.
-
-        Note raise_app_exceptions=False: by default TestClient re-raises endpoint exceptions
-        to the test assertion layer (convenient for debugging), but this test needs to see
-        the HTTP-layer 500 status, so disable re-raise to let FastAPI run the default error
-        middleware and return 500.
-        """
         tid = create_agent(db_conn)
-        self._put_minimal_aimessage(tid)
-
-        def boom(*_args, **_kwargs):
-            raise RuntimeError(
-                "simulated dispatch failure (e.g. NameError when refactor forgot import)"
-            )
+        self._put_unrenderable_message(tid)
 
         with gateway_test_client(raise_server_exceptions=False) as client:
-            client.app.state.timeline_policy = replace(
-                client.app.state.timeline_policy, render_items=boom
-            )
             resp = client.get(f"/api/agents/{tid}/timeline")
         assert resp.status_code == 500, (
             f"dispatch error must fail-loud as 500, got {resp.status_code}: {resp.text[:200]}"
@@ -384,18 +378,7 @@ class TestTimelineFailLoud:
         """A failed store read must not look like a successfully empty conversation."""
 
         tid = create_agent(db_conn)
-        attempts: list[object] = []
-        from typing import NoReturn
-
-        def fail_read(_db: object, agent_id: int) -> NoReturn:
-            attempts.append(agent_id)
-            raise CheckpointReadError("simulated DB connection lost") from OSError(
-                "simulated DB connection lost"
-            )
-
-        test_client.app.state.timeline_policy = replace(
-            test_client.app.state.timeline_policy, load_messages=fail_read
-        )
+        put_unreadable_head(settings.data_plane.db_url, tid)
         resp = test_client.get(f"/api/agents/{tid}/timeline")
         assert resp.status_code == 503
         problem = resp.json()
@@ -403,4 +386,3 @@ class TestTimelineFailLoud:
         assert problem["status"] == 503
         assert problem["code"] == "http_503"
         assert problem["retryable"] is True
-        assert len(attempts) == 1

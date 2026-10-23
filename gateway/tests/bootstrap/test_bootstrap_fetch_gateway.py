@@ -1,6 +1,5 @@
 """A runner's bootstrap fetch against the live gateway endpoint."""
 
-import os
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -17,6 +16,10 @@ from base.host.net.tests.local_http import serve_asgi
 from base.host.net.url_secret import url_with_host
 from gateway.tests.auth.gateway_config import gateway_test_client
 
+# meiva:note
+# An isolated test credential, never a real secret.
+_SECRET = "live-secret"  # noqa: S105
+
 
 def test_fetch_bootstrap_config_against_live_endpoint(
     db_conn,
@@ -27,12 +30,12 @@ def test_fetch_bootstrap_config_against_live_endpoint(
 ) -> None:
     # An authenticated gateway: the runner presents its delivered machine API
     # token (the active generation's runner token), never the human secret.
-    monkeypatch.setattr(config.settings.data_plane, "cluster_secret", "live-secret")
-    monkeypatch.delitem(os.environ, "MEIVA_CLUSTER_SECRET")
-
     # meiva:note
     # The runner dials the assembled gateway app through a real loopback listener.
-    with gateway_test_client(machine=machine_identity) as client, serve_asgi(client.app) as url:
+    with (
+        gateway_test_client(machine=machine_identity, cluster_secret=_SECRET) as client,
+        serve_asgi(client.app) as url,
+    ):
         values = bootstrap.fetch_bootstrap_config(
             url, bearer=served_gateway_home.api.runner, tuning=BootstrapFetch()
         )

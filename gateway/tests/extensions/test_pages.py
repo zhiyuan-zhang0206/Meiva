@@ -25,7 +25,6 @@ from pathlib import Path
 from typing import Any
 
 import psycopg
-import pytest
 from fastapi.testclient import TestClient
 
 from base.db import create_agent
@@ -123,15 +122,12 @@ def test_register_page_url_uses_gateway_url_var_not_request_host(
 
 
 def test_register_page_url_falls_back_to_request_base_without_gateway_url(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    db_conn: psycopg.Connection,
 ) -> None:
     """No Gateway URL configured (dev/tests) -> request base, so callers still
     get a usable absolute URL instead of a bare path."""
-    from base.config import settings
-
-    monkeypatch.setattr(settings.gateway, "gateway_url", "")
     aid = create_agent(db_conn)
-    with gateway_test_client() as client:
+    with gateway_test_client(fields={"gateway_url": ""}) as client:
         resp = _post_page(client, aid, {"name": "p", "port": 8001, "host": _HOST})
     assert resp.status_code == 201
     assert resp.json()["url"] == f"http://testserver/pages/{aid}-p/"
@@ -203,15 +199,10 @@ def test_register_page_sets_explicit_expiry(db_conn: psycopg.Connection) -> None
     assert expired_at is None
 
 
-def test_register_page_applies_gateway_default_expiry(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    from base.config import settings
-
-    monkeypatch.setattr(settings.daemon, "page_default_ttl_seconds", 300.0)
+def test_register_page_applies_gateway_default_expiry(db_conn: psycopg.Connection) -> None:
     aid = create_agent(db_conn)
     before = datetime.now(UTC)
-    with gateway_test_client() as client:
+    with gateway_test_client(fields={"page_default_ttl_seconds": 300.0}) as client:
         response = _post_page(client, aid, {"name": "defaulted", "port": 8001, "host": _HOST})
     assert response.status_code == 201
     db_conn.rollback()

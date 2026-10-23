@@ -24,8 +24,10 @@ from fastapi.testclient import TestClient
 
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
+from base.config import settings
 from base.db import create_agent
 from gateway.tests.auth.gateway_config import gateway_test_client
+from gateway.tests.support.checkpoints.unreadable import put_unreadable_head
 
 
 @pytest.fixture
@@ -138,24 +140,18 @@ def test_default_window_returns_newest_hundred_with_older_page(
     assert [m["content"] for m in body["messages"]] == [f"m{i}" for i in range(5, 105)]
 
 
-def test_default_window_comes_from_display_config(
-    monkeypatch: pytest.MonkeyPatch,
-    db_conn: psycopg.Connection,
-    test_client: TestClient,
-) -> None:
-    """The implicit window is ``settings.display.messages_default_limit``
-    (``MEIVA_MESSAGES_DEFAULT_LIMIT``); the literal 100 is only that field's
-    default, not a hard-coded page size."""
+# meiva:note
+# The implicit window is ``display.messages_default_limit``
+# (``MEIVA_MESSAGES_DEFAULT_LIMIT``); the literal 100 is only that field's
+# default, not a hard-coded page size.
+def test_default_window_comes_from_display_config(db_conn: psycopg.Connection) -> None:
     from langchain_core.messages import HumanMessage
-
-    from base.config import settings
-
-    monkeypatch.setattr(settings.display, "messages_default_limit", 2)
 
     tid = create_agent(db_conn)
     _put_checkpoint(tid, [HumanMessage(content=f"m{i}") for i in range(4)])
 
-    resp = test_client.get(f"/api/agents/{tid}/messages")
+    with gateway_test_client(fields={"messages_default_limit": 2}) as client:
+        resp = client.get(f"/api/agents/{tid}/messages")
     assert resp.status_code == 200
     body = resp.json()
     assert body["start_index"] == 2
@@ -328,34 +324,19 @@ def test_before_zero_returns_empty_window(
     assert response.json() == {"messages": [], "msg_count": 1, "start_index": 0, "has_more": False}
 
 
+# meiva:note
+# A checkpoint store read failure surfaces as 503 — the programmatic data
+# endpoint does not disguise an IO failure as an empty history (contrast the
+# timeline GET, which tolerates the same failure to an empty view + 200).
+#
+# The stored head cannot be deserialized, exercising the CheckpointReadError -> 503 path.
 def test_checkpoint_read_failure_returns_503(
-    db_conn: psycopg.Connection,
-    monkeypatch: pytest.MonkeyPatch,
-    *,
-    machine_identity: MachineIdentity,
+    db_conn: psycopg.Connection, *, machine_identity: MachineIdentity
 ) -> None:
-    """A checkpoint store read failure surfaces as 503 — the programmatic data
-    endpoint does not disguise an IO failure as an empty history (contrast the
-    timeline GET, which tolerates the same failure to an empty view + 200).
-
-    Make Meiva's explicitly constructed saver adapter fail at its tuple read,
-    exercising the CheckpointReadError -> 503 path.
-    """
-    from typing import NoReturn
-
-    import base.agents.history.checkpoint_postgres_walks as ckpt_mod
-
     tid = create_agent(db_conn)
-    attempts: list[object] = []
-
-    def fail_read(_saver: object, config: object) -> NoReturn:
-        attempts.append(config)
-        raise OSError("simulated DB connection lost")
-
-    monkeypatch.setattr(ckpt_mod.HistoryPostgresSaver, "get_tuple", fail_read)
+    put_unreadable_head(settings.data_plane.db_url, tid)
     # raise_server_exceptions=False so FastAPI's error middleware turns the
     # HTTPException into a real HTTP 503 instead of re-raising into the test.
     with gateway_test_client(raise_server_exceptions=False, machine=machine_identity) as client:
         resp = client.get(f"/api/agents/{tid}/messages")
     assert resp.status_code == 503, f"expected 503, got {resp.status_code}: {resp.text[:200]}"
-    assert len(attempts) == 1

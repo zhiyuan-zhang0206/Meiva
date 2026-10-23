@@ -1,8 +1,6 @@
-[debt.first-party-patch]
-"test_runner_composition.py#monkeypatch.setattr base.agents.context.clients.ClientSet.close" = 1
-"test_runner_composition.py#monkeypatch.setattr meiva.sdk_surface.process_context.bind_context" = 2
-"test_runner_composition.py#monkeypatch.setattr meiva.sdk_surface.process_context.loaded_code_image" = 2
-"test_runner_composition.py#monkeypatch.setattr services.wake.schedule_manager.runner.CodeVersion" = 1
-"test_runner_composition.py#monkeypatch.setattr services.wake.schedule_manager.runner.Database" = 1
-"test_runner_composition.py#monkeypatch.setattr services.wake.schedule_manager.runner.engine.run" = 2
-"test_runner_composition.py#monkeypatch.setattr services.wake.schedule_manager.runner.meiva.ensure_plugins_loaded" = 1
+exports = ["manager_support.py", "session_fakes.py"]
+
+[uses]
+"test_manager.py" = ["manager_support.py"]
+"test_manager_state.py" = ["manager_support.py"]
+"test_secret_argv.py" = ["manager_support.py"]

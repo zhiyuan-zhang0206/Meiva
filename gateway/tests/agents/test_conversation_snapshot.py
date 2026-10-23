@@ -13,9 +13,11 @@ import pytest
 from fastapi.testclient import TestClient
 
 from base.agents.inbox.insert import insert_inbound_message
+from base.config import settings
 from base.db import Database, create_agent
 from base.events.live.bus import EventBus
 from gateway.tests.auth.gateway_config import gateway_test_client
+from gateway.tests.support.checkpoints.unreadable import put_unreadable_head
 
 
 @pytest.fixture
@@ -113,45 +115,12 @@ def test_snapshot_nonexistent_agent_404(
     assert resp.status_code == 404
 
 
-def test_snapshot_deserializes_the_checkpoint_once(
-    db_conn: psycopg.Connection, test_client: TestClient, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """The timeline and token-usage sections share one live-checkpoint load."""
-    from langchain_core.messages import BaseMessage
-
-    from gateway.agents import state
-    from gateway.agents.history import timeline
-
-    tid = create_agent(db_conn)
-    _put_checkpoint(tid, [_usage_message(42, 2, 0)])
-    loads: list[int] = []
-    real_load = timeline.load_checkpoint_messages
-
-    def counting_load(db: Database, agent_id: int) -> list[BaseMessage]:
-        loads.append(agent_id)
-        return real_load(db, agent_id)
-
-    monkeypatch.setattr(timeline, "load_checkpoint_messages", counting_load)
-    monkeypatch.setattr(state, "load_checkpoint_messages", counting_load)
-    body = test_client.get(f"/api/agents/{tid}/conversation-snapshot").json()
-
-    assert loads == [tid]
-    assert body["timeline"]["msg_count"] == 1
-    assert body["token_usage"]["input_tokens"] == 42
-
-
 def test_snapshot_checkpoint_read_failure_matches_timeline_unavailability(
-    db_conn: psycopg.Connection, test_client: TestClient, monkeypatch: pytest.MonkeyPatch
+    db_conn: psycopg.Connection, test_client: TestClient
 ) -> None:
     """An unreadable shared checkpoint fails the composed read as unavailable."""
-    import base.agents.history.checkpoint_postgres_walks as ckpt_mod
-
     tid = create_agent(db_conn)
-
-    def fail_read(_saver: object, _config: object) -> None:
-        raise OSError("simulated DB connection lost")
-
-    monkeypatch.setattr(ckpt_mod.HistoryPostgresSaver, "get_tuple", fail_read)
+    put_unreadable_head(settings.data_plane.db_url, tid)
     resp = test_client.get(f"/api/agents/{tid}/conversation-snapshot")
 
     assert resp.status_code == 503

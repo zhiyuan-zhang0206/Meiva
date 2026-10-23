@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
@@ -16,14 +17,16 @@ from base.cluster.machine.tests.identity import machine_identity as machine_iden
 from base.config.service_read import ConfigAuthority
 from base.db.code_version_gate import ProcessDbGate
 from gateway.tests.agents.sdk_support import (
-    sdk_via_gateway as sdk_via_gateway,
+    authority_with,
+    gateway_wire,
+    inbound_rows,
+    spawn_agent,
 )
-from gateway.tests.agents.sdk_support import spawn_agent
+from gateway.tests.agents.sdk_support import sdk_via_gateway as sdk_via_gateway
+from gateway.tests.agents.sdk_support import self_agent as self_agent
 from meiva import gateway_client
 from meiva.agents import AgentNotFound, AgentStatus
 from meiva.gateway_client import use_client
-from meiva.sdk_surface.installation import Installation
-from meiva.tests.fixtures.pin_agent import pin_agent
 
 
 class TestGetNeighbors:
@@ -73,30 +76,49 @@ class TestGetNeighbors:
         assert rows[0].score > rows[1].score
         assert f"#{fresh}" in str(rows[0]) and "depth=1" in str(rows[0])
 
-    def test_defaults_come_from_display_config(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Omitted depth/limit resolve from settings.display.neighbors_default_*
-        (``MEIVA_NEIGHBORS_DEFAULT_DEPTH`` / ``MEIVA_NEIGHBORS_DEFAULT_LIMIT``); the
-        literals 1/20 are only the fields' defaults, not hard-coded call
-        parameters."""
-        from base.config import settings
-
-        seen: dict[str, int] = {}
-
-        def _record(_agent_id: int, *, depth: int, limit: int) -> list[dict[str, object]]:
-            seen["depth"] = depth
-            seen["limit"] = limit
-            return []
-
-        monkeypatch.setattr(gateway_client, "get_neighbors", _record)
-        monkeypatch.setattr(settings.display, "neighbors_default_depth", 3)
-        monkeypatch.setattr(settings.display, "neighbors_default_limit", 7)
-
-        assert meiva.agents.get_neighbors(11) == []
-        assert seen == {"depth": 3, "limit": 7}
-
     def test_nonexistent_raises(self, db_conn: psycopg.Connection) -> None:
         with pytest.raises(AgentNotFound):
             meiva.agents.get_neighbors(9999)
+
+
+# meiva:note
+# Omitted depth/limit resolve from the SDK's configuration authority
+# (``display.neighbors_default_depth`` / ``display.neighbors_default_limit``, set by
+# ``MEIVA_NEIGHBORS_DEFAULT_DEPTH`` / ``MEIVA_NEIGHBORS_DEFAULT_LIMIT``); the literals 1/20 are
+# only the fields' defaults, not hard-coded call parameters.
+class TestNeighborDefaultsFollowDisplayConfig:
+    @pytest.fixture
+    def config_authority(self, unit_home: Path, request: pytest.FixtureRequest) -> ConfigAuthority:
+        return authority_with(unit_home, **request.param)
+
+    # meiva:note
+    # a - near (today) and near - far (today): `far` is two hops from `a`.
+    @staticmethod
+    def _chain(db: psycopg.Connection) -> tuple[int, int, int]:
+        seed = TestGetNeighbors._seed
+        tie = TestGetNeighbors._tie
+        a, near, far = seed(db), seed(db), seed(db)
+        tie(db, near, a, days_ago=0.0)
+        tie(db, far, near, days_ago=0.0)
+        return a, near, far
+
+    @pytest.mark.parametrize("config_authority", [{"neighbors_default_depth": 2}], indirect=True)
+    def test_depth_default_reaches_two_hops(self, db_conn: psycopg.Connection) -> None:
+        a, near, far = self._chain(db_conn)
+
+        rows = meiva.agents.get_neighbors(a)
+
+        assert {(r.agent_id, r.depth) for r in rows} == {(near, 1), (far, 2)}
+
+    @pytest.mark.parametrize("config_authority", [{"neighbors_default_limit": 1}], indirect=True)
+    def test_limit_default_caps_the_rows(self, db_conn: psycopg.Connection) -> None:
+        a, near, _far = self._chain(db_conn)
+        extra = TestGetNeighbors._seed(db_conn)
+        TestGetNeighbors._tie(db_conn, extra, a, days_ago=30.0)
+
+        rows = meiva.agents.get_neighbors(a)
+
+        assert [r.agent_id for r in rows] == [near]
 
 
 class TestGetAncestors:
@@ -264,15 +286,10 @@ class TestListAgents:
             {"query": "x" * 201},
         ],
     )
-    def test_invalid_page_arguments_fail_before_reading(
-        self, kwargs: dict[str, Any], monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        def forbidden(**_kwargs: Any) -> None:
-            pytest.fail("invalid page arguments must not make a request")
-
-        monkeypatch.setattr(gateway_client, "list_agents", forbidden)
-        with pytest.raises(ValueError):
+    def test_invalid_page_arguments_fail_before_reading(self, kwargs: dict[str, Any]) -> None:
+        with gateway_wire() as requests, pytest.raises(ValueError):
             meiva.agents.list_agents(**kwargs)
+        assert requests == []
 
     def test_get_status_uses_direct_detail_not_directory(self) -> None:
         calls: list[httpx.Request] = []
@@ -293,49 +310,29 @@ class TestListAgents:
         with pytest.raises(AgentNotFound):
             meiva.agents.get_status(999999)
 
-    @pytest.mark.parametrize("fork_source_agent_id", [None, 3])
+    @pytest.mark.parametrize("forked", [False, True])
     def test_directory_row_preserves_fork_source(
-        self, monkeypatch: pytest.MonkeyPatch, fork_source_agent_id: int | None
+        self, db_conn: psycopg.Connection, forked: bool
     ) -> None:
-        def directory_page(**_kwargs: object) -> dict[str, object]:
-            return {
-                "agents": [
-                    {
-                        "agent_id": 9,
-                        "label": "forked worker",
-                        "status": "idling",
-                        "spawner": "agent:8",
-                        "fork_source_agent_id": fork_source_agent_id,
-                        "machine": "mini",
-                        "spawned_at": "2026-09-17T00:00:00Z",
-                        "last_active_at": "2026-09-17T00:00:00Z",
-                        "last_inbound_at": "2026-09-17T00:00:00Z",
-                        "heartbeat_paused_until": None,
-                    }
-                ],
-                "next_cursor": None,
-            }
+        source = TestGetNeighbors._seed(db_conn)
+        agent_id = TestGetNeighbors._seed(db_conn)
+        db_conn.execute(
+            "UPDATE agents_meta SET spawner = 'agent:8', fork_source_agent_id = %s, "
+            "fork_source_checkpoint_id = %s WHERE id = %s",
+            (source if forked else None, "ck" if forked else None, agent_id),
+        )
+        db_conn.commit()
 
-        monkeypatch.setattr(gateway_client, "list_agents", directory_page)
-        row = meiva.agents.list_agents().agents[0]
-        assert row.fork_source_agent_id == fork_source_agent_id
+        page = meiva.agents.list_agents(query=str(agent_id))
+
+        [row] = page.agents
+        assert row.agent_id == agent_id
+        assert row.fork_source_agent_id == (source if forked else None)
         assert row.spawner == "agent:8"
 
     def test_agent_row_keeps_domain_fields(
-        self,
-        db_conn: psycopg.Connection,
-        *,
-        config_authority: ConfigAuthority,
-        database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        self, db_conn: psycopg.Connection, self_agent: int
     ) -> None:
-        pin_agent(
-            spawn_agent(
-                config_authority=config_authority,
-                database_gate=database_gate,
-                local_machine=machine_identity,
-            )
-        )
         agent_id = meiva.agents.spawn(idempotency_key=str(uuid4()))
         db_conn.execute("UPDATE agents SET label = 'test-agent' WHERE id = %s", (agent_id,))
         db_conn.execute("UPDATE agents_meta SET status = 'running' WHERE id = %s", (agent_id,))
@@ -346,7 +343,7 @@ class TestListAgents:
         row = page.agents[0]
         assert row.agent_id == agent_id
         assert row.status is AgentStatus.RUNNING
-        assert row.spawner == f"agent:{meiva.self.AGENT_ID}"
+        assert row.spawner == f"agent:{self_agent}"
         assert row.fork_source_agent_id is None
         assert row.label == "test-agent"
         assert row.spawned_at is not None and row.last_active_at is not None
@@ -357,90 +354,84 @@ class TestListAgents:
 
 
 class TestSpawnConfig:
+    # meiva:note
+    # spawn(config_overlay=...) stores the validated overlay on the new agent.
     def test_spawn_passes_validated_config(
-        self, monkeypatch: pytest.MonkeyPatch, model_installation: Installation
+        self, db_conn: psycopg.Connection, self_agent: int
     ) -> None:
-        """spawn(config_overlay=...) passes validated config through to _client.spawn."""
-        from meiva import agents
+        agent_id = meiva.agents.spawn(
+            config_overlay={"llm_model": "claude-sonnet-5"}, idempotency_key=str(uuid4())
+        )
 
-        monkeypatch.setattr(meiva, "__plugin_installation__", model_installation, raising=False)
-        seen: dict[str, Any] = {}
-        monkeypatch.setattr(gateway_client, "spawn", lambda **kw: seen.update(kw) or 3)  # pyright: ignore[reportUnknownArgumentType]
-        monkeypatch.setattr(meiva, "AGENT_ID", 1, raising=False)
-        agents.spawn(config_overlay={"llm_model": "claude-sonnet-5"}, idempotency_key=str(uuid4()))
-        assert seen["config"] == {"llm_model": "claude-sonnet-5"}
+        row = db_conn.execute(
+            "SELECT config_overlay FROM agents_meta WHERE id = %s", (agent_id,)
+        ).fetchone()
+        assert row == ({"llm_model": "claude-sonnet-5"},)
 
-    def test_spawn_rejects_preset_overlay_key(
-        self, monkeypatch: pytest.MonkeyPatch, model_installation: Installation
-    ) -> None:
+    def test_spawn_rejects_preset_overlay_key(self, self_agent: int) -> None:
         from base.packages.plugins.plugin_errors import InvalidConfigOverlay
-        from meiva import agents
 
-        monkeypatch.setattr(meiva, "__plugin_installation__", model_installation, raising=False)
-        monkeypatch.setattr(meiva, "AGENT_ID", 1, raising=False)
-        with pytest.raises(InvalidConfigOverlay):
-            agents.spawn(
+        with gateway_wire() as requests, pytest.raises(InvalidConfigOverlay):
+            meiva.agents.spawn(
                 config_overlay={"preset": "coder", "llm_model": "claude-sonnet-5"},
                 idempotency_key=str(uuid4()),
             )
+        assert requests == []
 
-    def test_spawn_rejects_non_per_agent_config(
-        self, monkeypatch: pytest.MonkeyPatch, model_installation: Installation
-    ) -> None:
+    def test_spawn_rejects_non_per_agent_config(self, self_agent: int) -> None:
         """spawn(config_overlay=...) rejects fields not marked per_agent — raises before spawning."""
         from base.packages.plugins.plugin_errors import InvalidConfigOverlay
-        from meiva import agents
 
-        monkeypatch.setattr(meiva, "__plugin_installation__", model_installation, raising=False)
-        monkeypatch.setattr(meiva, "AGENT_ID", 1, raising=False)
-        with pytest.raises(InvalidConfigOverlay):
-            agents.spawn(config_overlay={"db_url": "postgres://nope"}, idempotency_key=str(uuid4()))
+        with gateway_wire() as requests, pytest.raises(InvalidConfigOverlay):
+            meiva.agents.spawn(
+                config_overlay={"db_url": "postgres://nope"}, idempotency_key=str(uuid4())
+            )
+        assert requests == []
 
 
 class TestResurrect:
-    def test_resurrect_returns_resurrect_result(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """resurrect(agent_id, prompt) calls gateway client and wraps status."""
-        from base.api_contracts.agent_contract import ResurrectResult
-        from meiva import agents
+    @staticmethod
+    def _terminated_peer(db: psycopg.Connection) -> int:
+        peer = meiva.agents.spawn(idempotency_key=str(uuid4()))
+        db.execute("UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (peer,))
+        db.commit()
+        return peer
 
-        seen: dict[str, Any] = {}
-        monkeypatch.setattr(
-            gateway_client,
-            "resurrect",
-            lambda agent_id, **kw: seen.update({"agent_id": agent_id, **kw}) or "spawned",  # pyright: ignore[reportUnknownArgumentType]
-        )
-
-        result = agents.resurrect(42, "wake up!")
-        assert result == ResurrectResult.SPAWNED
-        assert seen["agent_id"] == 42
-        assert seen["prompt"] == "wake up!"
-        # resurrected_by is set by the client default, not by the SDK wrapper
-        assert "resurrected_by" not in seen
-
-    def test_resurrect_joins_tuple_prompt_before_gateway_call(
-        self, monkeypatch: pytest.MonkeyPatch
+    # meiva:note
+    # resurrect(agent_id, prompt) wakes the agent and wraps the status.
+    def test_resurrect_returns_resurrect_result(
+        self, db_conn: psycopg.Connection, self_agent: int
     ) -> None:
         from base.api_contracts.agent_contract import ResurrectResult
-        from meiva import agents
 
-        seen: dict[str, Any] = {}
-        monkeypatch.setattr(
-            gateway_client,
-            "resurrect",
-            lambda agent_id, **kw: seen.update({"agent_id": agent_id, **kw}) or "spawned",  # pyright: ignore[reportUnknownArgumentType]
-        )
+        peer = self._terminated_peer(db_conn)
 
-        result = agents.resurrect(42, ("wake",))  # pyright: ignore[reportArgumentType]
+        result = meiva.agents.resurrect(peer, "wake up!")
+
         assert result == ResurrectResult.SPAWNED
-        assert seen["prompt"] == "wake"
+        # meiva:note
+        # resurrected_by is set by the client default (the caller's identity), not by the wrapper
+        assert ("wake up!", "chat", f"agent:{self_agent}") in inbound_rows(db_conn, peer)
 
-    def test_resurrect_already_alive(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_resurrect_joins_tuple_prompt_before_gateway_call(
+        self, db_conn: psycopg.Connection, self_agent: int
+    ) -> None:
+        from base.api_contracts.agent_contract import ResurrectResult
+
+        peer = self._terminated_peer(db_conn)
+
+        result = meiva.agents.resurrect(peer, ("wake",))  # pyright: ignore[reportArgumentType]
+
+        assert result == ResurrectResult.SPAWNED
+        assert ("wake", "chat", f"agent:{self_agent}") in inbound_rows(db_conn, peer)
+
+    def test_resurrect_already_alive(self, db_conn: psycopg.Connection, self_agent: int) -> None:
         """When the agent is still alive, resurrect returns ALREADY_ALIVE."""
         from base.api_contracts.agent_contract import ResurrectResult
-        from meiva import agents
 
-        monkeypatch.setattr(gateway_client, "resurrect", lambda _agent_id, **_kw: "already_alive")  # pyright: ignore[reportUnknownArgumentType]
-        assert agents.resurrect(1, "ping") == ResurrectResult.ALREADY_ALIVE
+        peer = meiva.agents.spawn(idempotency_key=str(uuid4()))
+
+        assert meiva.agents.resurrect(peer, "ping") == ResurrectResult.ALREADY_ALIVE
 
     def test_resurrect_prompt_is_required_positional(self) -> None:
         """prompt is a required positional arg at the SDK level."""

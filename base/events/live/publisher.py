@@ -240,7 +240,8 @@ class AgentEventPublisher:
         # local backpressure (queue full) without a debugger. The line is
         # also a structured `sse_drop` agent_event: the ops monitor panel
         # counts queue backlog over time from these rows (see
-        # gateway/cluster/ops_series.py). Rate-limited to _WARN_INTERVAL_S, so a
+        # meiva:note
+        # gateway/cluster/monitor/ops_series.py). Rate-limited to _WARN_INTERVAL_S, so a
         # sustained burst reports once per interval with the delta n.
         #
         # Severity follows the cause (2026-10-03 triage): a transport-side

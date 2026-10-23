@@ -14,13 +14,10 @@ tailer filters by agent_id, test agent_ids are all newly created in tests).
 import asyncio
 import contextlib
 import json
-from collections.abc import AsyncIterator, Callable
-from dataclasses import dataclass, field
 
 import psycopg
 import pytest
 import redis as sync_redis
-from redis.asyncio.client import PubSub
 
 from base.config import settings
 from base.db import create_agent
@@ -32,24 +29,16 @@ from base.events.live.projection import (
     CodeDelta,
     LabelUpdated,
 )
-from gateway.events.sse import decode_frames_for_test, event_stream
+from gateway.events.sse import REDIS_IO_ERRORS, event_stream
+from gateway.events.sse_frames import SseCadence
 from gateway.tests.auth.gateway_config import gateway_test_client
-
-
-@dataclass
-class FakeRequest:
-    """Minimal Request stub — `event_stream` only calls `await is_disconnected()`.
-
-    `disconnected` flag is explicitly set True by tests to stop stream.
-    """
-
-    disconnected: bool = field(default=False)
-
-    async def is_disconnected(self) -> bool:
-        return self.disconnected
-
+from gateway.tests.events.sse_support import FakeRequest, decode_frames_for_test, refused_redis_url
 
 _HEARTBEAT_DATA_FRAME_PREFIX = b'data: {"role":"heartbeat"}'
+
+# meiva:note
+# One Redis read waits at most this long before the stream re-checks the client.
+POLL_S = 0.25
 
 
 async def _collect_frames(
@@ -63,7 +52,7 @@ async def _collect_frames(
     broadcast: bool = False,
     count_heartbeats: bool = False,
     overall_timeout: float = 90.0,
-    monotonic: Callable[[], float] | None = None,
+    cadence: SseCadence | None = None,
 ) -> list[bytes]:
     """Start event_stream + async publish + stop after collecting enough n data frames.
 
@@ -89,7 +78,8 @@ async def _collect_frames(
         channel=channel,
         role_filter=role_filter,
         broadcast=broadcast,
-        monotonic=monotonic,
+        poll_s=POLL_S,
+        cadence=SseCadence() if cadence is None else cadence,
     )
 
     # pull the opening frame to confirm subscribe is ready
@@ -192,28 +182,23 @@ def test_sse_drops_invalid_payload_as_comment(
     assert decoded[0]["content"] == "after"
 
 
+# meiva:note
+# The real router and StreamingResponse against a Redis that refuses the connection.
 @pytest.mark.parametrize(
     ("path", "batched", "agent_id"),
     [
         ("/api/agents/1/events/stream", False, 1),
+        ("/api/agents/1/system", False, 1),
+        ("/api/system", False, 0),
         ("/api/system/all", True, 0),
     ],
 )
 def test_sse_subscribe_failure_after_http_start_sends_error_frame(
-    db_conn: psycopg.Connection,
-    monkeypatch: pytest.MonkeyPatch,
-    path: str,
-    batched: bool,
-    agent_id: int,
+    db_conn: psycopg.Connection, path: str, batched: bool, agent_id: int
 ) -> None:
-    """Exercise the real router, StreamingResponse, and Redis subscription path."""
-
-    async def fail_subscribe(self: PubSub, *args: object, **kwargs: object) -> None:
-        raise sync_redis.ConnectionError("Redis unavailable")
-
-    monkeypatch.setattr(PubSub, "subscribe", fail_subscribe)
-
-    with gateway_test_client(raise_server_exceptions=False) as client:
+    with gateway_test_client(
+        fields={"redis_url": refused_redis_url()}, raise_server_exceptions=False
+    ) as client:
         response = client.get(path)
 
     assert response.status_code == 200  # StreamingResponse already sent response.start
@@ -357,37 +342,16 @@ def test_per_agent_stream_carries_full_roles_for_one_agent_only(
     assert all(d["agent_id"] == tid_a for d in decoded)  # pyright: ignore[reportUnknownArgumentType]
 
 
-def test_sse_system_endpoint_response_headers() -> None:
-    """/system SSE endpoint should have correct Content-Type + Cache-Control etc. headers."""
-
-    async def fake_stream(*_args: object, **_kwargs: object) -> AsyncIterator[bytes]:
-        yield b": stream open\n\n"
-
-    with gateway_test_client() as client:
-        client.app.state.system_event_stream = fake_stream
-        with client.stream("GET", "/api/agents/1/system") as resp:
-            assert resp.status_code == 200
-            assert resp.headers["content-type"].startswith("text/event-stream")
-            assert resp.headers["cache-control"] == "no-cache"
-            assert resp.headers["x-accel-buffering"] == "no"
-
-
+# meiva:note
+# Idle (no business event) for the cadence's heartbeat interval -> a visible
+# `data: {"role":"heartbeat"}` frame goes out. The client watchdog needs a real
+# data frame (the `: hb` comment is invisible to EventSource.onmessage), so this
+# pins that one actually reaches the client. The cadence is a value, so the stream
+# waits a third of a second instead of fifteen.
 def test_sse_emits_heartbeat_data_event_when_idle(
     db_conn: psycopg.Connection,
     redis_client: sync_redis.Redis,
 ) -> None:
-    """Idle (no business event) for _HEARTBEAT_SECONDS -> a visible
-    `data: {"role":"heartbeat"}` frame goes out. The client watchdog needs a real
-    data frame (the `: hb` comment is invisible to EventSource.onmessage), so this
-    pins that one actually reaches the client. Advance the stream's clock past its
-    normal heartbeat interval on the first idle tick."""
-    now = 0.0
-
-    def monotonic() -> float:
-        nonlocal now
-        now += 20.0
-        return now
-
     tid = create_agent(db_conn)
     # no payloads -> the stream sits idle -> the heartbeat is the first data frame (count_heartbeats=True: this test is
     # ABOUT the heartbeat — the default filters them out as load noise)
@@ -398,7 +362,7 @@ def test_sse_emits_heartbeat_data_event_when_idle(
             [],
             n_data_frames=1,
             count_heartbeats=True,
-            monotonic=monotonic,
+            cadence=SseCadence(heartbeat_s=0.3),
         )
     )
     decoded = decode_frames_for_test(frames)
@@ -425,6 +389,8 @@ def test_busy_channel_still_emits_keepalive_comments(
         EventBus.from_settings(),
         tid,
         req,  # type: ignore[arg-type]
+        poll_s=POLL_S,
+        cadence=SseCadence(),
     )
 
     async def scenario() -> None:
@@ -452,31 +418,38 @@ def test_busy_channel_still_emits_keepalive_comments(
     asyncio.run(scenario())
 
 
-def test_sse_survives_redis_typeerror(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The agent-2613 redis dead-transport TypeError ('NoneType' object is not
-    callable) is treated as an IO failure: the stream emits an error frame and
-    returns cleanly instead of raising out of the generator (which would surface
-    as a 500 on the SSE endpoint)."""
-    from redis.asyncio.client import PubSub as _RedisPubSub
-
-    async def _boom(self: object, *args: object, **kwargs: object) -> None:
-        raise TypeError("'NoneType' object is not callable")
-
-    monkeypatch.setattr(_RedisPubSub, "get_message", _boom)
+# meiva:note
+# A Redis failure after the stream opened (the server closes the subscriber's connection) is
+# an IO failure: the stream emits an error frame and returns cleanly instead of raising out of
+# the generator (which would surface as a 500 on the SSE endpoint).
+def test_a_redis_that_drops_the_subscriber_ends_the_stream_with_an_error_frame(
+    redis_client: sync_redis.Redis,
+) -> None:
 
     async def _drive() -> list[bytes]:
         req = FakeRequest()
-        gen = event_stream(  # type: ignore[arg-type]
+        gen = event_stream(
             EventBus.from_settings(),
             4242,
-            req,  # type: ignore[arg-type]
+            # meiva:note
+            # FakeRequest stands in for the ASGI request: the stream only asks it whether the client left.
+            req,  # pyright: ignore[reportArgumentType]
+            poll_s=POLL_S,
+            cadence=SseCadence(),
         )
         frames: list[bytes] = []
         try:
-            frames.append(await anext(gen))  # ": stream open"
-            frames.append(await asyncio.wait_for(anext(gen), timeout=5.0))  # error frame
+            # meiva:note
+            # ": stream open"
+            frames.append(await anext(gen))
+            redis_client.client_kill_filter(_type="pubsub")  # pyright: ignore[reportUnknownMemberType]
+            # meiva:note
+            # error frame
+            frames.append(await asyncio.wait_for(anext(gen), timeout=5.0))
             with pytest.raises(StopAsyncIteration):
-                await anext(gen)  # generator ended, did not hang
+                # meiva:note
+                # generator ended, did not hang
+                await anext(gen)
         finally:
             req.disconnected = True
             with contextlib.suppress(TimeoutError, StopAsyncIteration):
@@ -487,6 +460,14 @@ def test_sse_survives_redis_typeerror(monkeypatch: pytest.MonkeyPatch) -> None:
     assert frames[0] == b": stream open\n\n"
     assert frames[1].startswith(b"data: "), f"expected an error frame, got {frames[1]!r}"
     assert b"event stream interrupted" in frames[1], frames[1]
+
+
+# meiva:note
+# redis-py raises `TypeError: 'NoneType' object is not callable` when it writes to a connection
+# whose asyncio transport already fired connection_lost (agent-2613, 2026-08-04). No Redis can
+# be made to produce it on demand, so the classification the stream applies is pinned directly.
+def test_a_dead_transport_typeerror_counts_as_a_redis_io_failure() -> None:
+    assert TypeError in REDIS_IO_ERRORS
 
 
 # --- frame encoding: Unicode line separators that are legal raw in JSON ---

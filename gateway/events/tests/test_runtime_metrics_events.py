@@ -7,10 +7,10 @@ import pytest
 from fastapi import Request
 
 from base.events.live.bus import EventBus
-from base.events.live.tests.fakes import patch_open_async_redis
 from base.telemetry.tests.capture.event_capture import EmittedEvents
 from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
 from gateway.events import sse
+from gateway.events.sse_frames import SseCadence
 from gateway.http.middleware import runtime_metrics
 
 
@@ -19,42 +19,15 @@ class _Request:
         return True
 
 
-class _PubSub:
-    async def subscribe(self, _channel: str) -> None:
-        return None
-
-    async def unsubscribe(self, _channel: str) -> None:
-        return None
-
-    async def aclose(self) -> None:
-        return None
-
-
-class _RedisClient:
-    def __init__(self) -> None:
-        self._pubsub = _PubSub()
-
-    def pubsub(self) -> _PubSub:
-        return self._pubsub
-
-    async def aclose(self) -> None:
-        return None
-
-
 @pytest.mark.parametrize(
     "mode",
     ("filtered", "throttled"),
 )
 def test_sse_stream_lifecycle_increments_and_decrements_active_gauge(
-    monkeypatch: pytest.MonkeyPatch,
+    event_bus: EventBus,
     mode: Literal["filtered", "throttled"],
     emitted_events: EmittedEvents,
 ) -> None:
-
-    def open_redis(_url: str, **_kw: object) -> _RedisClient:
-        return _RedisClient()
-
-    patch_open_async_redis(monkeypatch, open_redis)
 
     runtime_metrics.initialize_sse_metrics()
     emitted_events.clear()
@@ -62,10 +35,10 @@ def test_sse_stream_lifecycle_increments_and_decrements_active_gauge(
     async def run_stream() -> None:
         request = cast(Request, _Request())
         if mode == "filtered":
-            stream = sse.event_stream(EventBus.from_settings(), 7, request)
+            stream = sse.event_stream(event_bus, 7, request, poll_s=0.25, cadence=SseCadence())
         else:
             stream = sse.throttled_event_stream(
-                EventBus.from_settings(), request, throttle_rate=10.0
+                event_bus, request, throttle_rate=10.0, cadence=SseCadence()
             )
         assert await anext(stream) == b": stream open\n\n"
         with pytest.raises(StopAsyncIteration):

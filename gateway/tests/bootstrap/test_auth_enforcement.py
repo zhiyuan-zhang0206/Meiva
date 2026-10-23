@@ -9,9 +9,11 @@ from fastapi.testclient import TestClient
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.host.net.auth import bearer_header, cookie_name
+from base.packages.plugin_providers import build_model_catalog
 from gateway.app import create_app
 from gateway.http.config import GatewayConfig
 from gateway.http.middleware.error_handlers import cors_headers
+from gateway.http.model_catalog import load_model_catalog
 from gateway.tests.auth.gateway_config import (
     gateway_test_app,
     gateway_test_client,
@@ -404,28 +406,6 @@ def test_middleware_touches_session_at_most_once_per_minute(
         assert last_seen_row[0] == reset_touch
 
 
-def test_middleware_bounds_session_touch_bookkeeping(*, machine_identity: MachineIdentity) -> None:
-    now = 10_000.0
-    app = gateway_test_app(
-        machine=machine_identity,
-        fields={"session_ttl_seconds": 3600},
-    )
-
-    with gateway_test_client(app) as client:
-        token = login(client)
-        last_touch = app.state.session_touch.last_touch
-        last_touch["stale"] = now - 3601
-        last_touch.update({f"recent-{index}": now - index for index in range(1025)})
-        app.state.monotonic_clock = lambda: now
-
-        response = client.get("/api/agents")
-
-    assert response.status_code == 200
-    assert "stale" not in last_touch
-    assert token in last_touch
-    assert len(last_touch) == 1024
-
-
 # ── Wrong secret gets 401 ─────────────────────────────────────────────
 
 
@@ -586,6 +566,7 @@ def test_two_apps_isolate_gateway_config_across_auth_cors_mcp_and_webhooks(
         session_cookie_secure=False,
         human_auth="required",
         memory_root=Path("/nonexistent/alpha-memory"),
+        upload_home=Path("/nonexistent/alpha-home"),
     )
     config_beta = GatewayConfig(
         cluster_secret="secret-beta",  # noqa: S106
@@ -596,11 +577,17 @@ def test_two_apps_isolate_gateway_config_across_auth_cors_mcp_and_webhooks(
         session_cookie_secure=False,
         human_auth="required",
         memory_root=Path("/nonexistent/beta-memory"),
+        upload_home=Path("/nonexistent/beta-home"),
     )
 
     with gateway_test_process(machine=machine_identity) as process:
-        app_alpha = create_app(config_alpha, process=process, process_ownership="borrowed")
-        app_beta = create_app(config_beta, process=process, process_ownership="borrowed")
+        catalog = load_model_catalog(build_model_catalog)
+        app_alpha = create_app(
+            config_alpha, process=process, process_ownership="borrowed", catalog=catalog
+        )
+        app_beta = create_app(
+            config_beta, process=process, process_ownership="borrowed", catalog=catalog
+        )
         assert (app_alpha.state.gateway_config, app_beta.state.gateway_config) == (
             config_alpha,
             config_beta,

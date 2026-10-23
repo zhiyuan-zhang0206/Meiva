@@ -4,11 +4,16 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import time
 
 from fastapi import Request
 
 from base import telemetry
+from gateway.http.auth.rejection_policy import (
+    WARN_COOLDOWN_S,
+    idle_keys,
+    is_expected_noise,
+    rejection_verdict,
+)
 
 _log = logging.getLogger(__name__)
 
@@ -20,26 +25,8 @@ _log = logging.getLogger(__name__)
 # per FLUSH_INTERVAL_S. Bounded row rate (1/min), never per rejection.
 _AUTH401_FLUSH_INTERVAL_S = 60.0
 
-_AUTH401_WARN_COOLDOWN_S = 300.0
-
-
-def _is_sse_poll_path(path: str) -> bool:
-    """Return whether repeated auth failures are expected SSE reconnect noise."""
-    # Live SSE routes end in /stream or /system, except the aggregate
-    # system feed at /api/system/all.
-    return path.endswith(("/stream", "/system")) or path == "/api/system/all"
-
-
-def _is_browser_user_agent(user_agent: str) -> bool:
-    """Return whether the UA names a browser engine (the console's own tabs).
-
-    A rollout invalidates the browser session, and every open console tab
-    retries its requests once with a 401 the UI itself surfaces — expected
-    post-rollout noise, not a client misconfiguration (2026-10-03 triage #7).
-    Scripted clients (curl / httpx / wget) do not carry `Mozilla/`."""
-    return "Mozilla/" in user_agent
-
-
+# meiva:note
+# Which rejections are noise and when a repeat warns: `gateway.http.auth.rejection_policy`.
 # Task #1635 / PR #610 stopped new bundles from blind-retrying 401'd SSE streams;
 # Task #1694 treats SSE 401s as stale old-bundle tabs: expected reconnect noise.
 # Uvicorn access logs are WARNING-gated (`base/log/__init__.py` `install_stdlib_intercept`),
@@ -56,26 +43,19 @@ class AuthRejectionLog:
         self.last_warn: dict[tuple[str, str], float] = {}
         self.suppressed: dict[tuple[str, str], int] = {}
 
-    def _prune(self, now: float) -> None:
-        """Forget client/path keys idle for more than two warning windows."""
-        stale_before = now - (2 * _AUTH401_WARN_COOLDOWN_S)
-        for key, last_warn in tuple(self.last_warn.items()):
-            if last_warn < stale_before:
-                self.last_warn.pop(key, None)
-                self.suppressed.pop(key, None)
-
-    def log(self, request: Request) -> None:
-        """Log an auth rejection at the route-appropriate severity and cadence.
-
-        Counts EVERY rejection (flooded SSE reconnects and throttled repeats
-        included) into the process-local aggregate — the log severity cadence
-        decides what a human sees, never whether the count is observable.
-        """
+    # meiva:note
+    # Log an auth rejection at the route-appropriate severity and cadence.
+    #
+    # Counts EVERY rejection (flooded SSE reconnects and throttled repeats
+    # included) into the process-local aggregate — the log severity cadence
+    # decides what a human sees, never whether the count is observable. `now` is the
+    # monotonic time of the rejection.
+    def log(self, request: Request, now: float) -> None:
         self.total += 1
         path = request.url.path
         client = request.client.host if request.client else "unknown"
         user_agent = request.headers.get("user-agent", "-")
-        if _is_sse_poll_path(path) or _is_browser_user_agent(user_agent):
+        if is_expected_noise(path, user_agent):
             _log.debug(
                 "auth 401: path=%s client=%s ua=%s",
                 path,
@@ -84,44 +64,37 @@ class AuthRejectionLog:
             )
             return
 
-        now = time.monotonic()
-        self._prune(now)
+        for stale in idle_keys(self.last_warn, now):
+            self.last_warn.pop(stale, None)
+            self.suppressed.pop(stale, None)
         key = (client, path)
-        last_warn = self.last_warn.get(key)
-        if last_warn is None:
-            self.last_warn[key] = now
-            self.suppressed.pop(key, None)
-            _log.warning(
-                "auth 401: path=%s client=%s ua=%s",
-                path,
-                client,
-                user_agent,
-            )
-            return
-
-        if now - last_warn < _AUTH401_WARN_COOLDOWN_S:
-            suppressed = self.suppressed.get(key, 0) + 1
-            self.suppressed[key] = suppressed
+        verdict = rejection_verdict(
+            now=now, last_warn=self.last_warn.get(key), suppressed=self.suppressed.get(key, 0)
+        )
+        if verdict.kind == "suppressed":
+            self.suppressed[key] = verdict.repeats
             _log.debug(
                 "auth 401: path=%s client=%s ua=%s "
                 "(suppressed repeat %d until the %ds warning cooldown elapses)",
                 path,
                 client,
                 user_agent,
-                suppressed,
-                _AUTH401_WARN_COOLDOWN_S,
+                verdict.repeats,
+                WARN_COOLDOWN_S,
             )
             return
-
-        suppressed = self.suppressed.pop(key, 0)
         self.last_warn[key] = now
+        self.suppressed.pop(key, None)
+        if verdict.kind == "first":
+            _log.warning("auth 401: path=%s client=%s ua=%s", path, client, user_agent)
+            return
         _log.warning(
             "auth 401: path=%s client=%s ua=%s (suppressed %d repeats in the last %ds)",
             path,
             client,
             user_agent,
-            suppressed,
-            _AUTH401_WARN_COOLDOWN_S,
+            verdict.repeats,
+            WARN_COOLDOWN_S,
         )
 
     def drain(self) -> int:

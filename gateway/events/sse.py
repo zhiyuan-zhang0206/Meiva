@@ -23,10 +23,9 @@ gets the same ``{role, agent_id, content, ...}`` shape.
 ``broadcast`` parameters. ``broadcast=True`` disables agent_id filtering.
 """
 
-import json
 import logging
 import time
-from collections.abc import AsyncGenerator, Callable, Sequence
+from collections.abc import AsyncGenerator, Sequence
 from typing import Any
 
 import redis
@@ -34,10 +33,16 @@ from fastapi import Request
 from pydantic import ValidationError
 from redis.exceptions import AuthenticationError, NoPermissionError
 
-from base.config import settings
 from base.events.live.bus import EventBus
 from base.events.live.projection import EVENT_ADAPTER, Error
 from base.events.live.redis_client import retry_auth_failures_async
+from gateway.events.sse_frames import (
+    HEARTBEAT_FRAME,
+    SseCadence,
+    sse_batch_frame,
+    sse_frame,
+    warm_frame,
+)
 from gateway.http.middleware import runtime_metrics, stopping
 
 _log = logging.getLogger(__name__)
@@ -52,37 +57,6 @@ _log = logging.getLogger(__name__)
 # other IO failure: emit an error frame and let the frontend reconnect.
 REDIS_IO_ERRORS = (redis.ConnectionError, redis.TimeoutError, OSError, TypeError)
 REDIS_ACL_ERRORS = (AuthenticationError, NoPermissionError)
-
-# Heartbeat: after this much silence, emit a real `data:` event the browser
-# EventSource `onmessage` can see — so a client-side watchdog can detect a
-# half-dead connection (server graceful restart / a proxy hop that stays OPEN
-# but stops delivering data). The `: hb` comment keeps the TCP / proxy hop warm
-# but is invisible to `onmessage`, so it cannot drive the watchdog on its own.
-_HEARTBEAT_SECONDS = 15.0
-HEARTBEAT_FRAME = b'data: {"role":"heartbeat"}\n\n'
-
-# Keep-alive comment cadence: at most one `: hb` per second on paths that
-# yield nothing else. A busy events channel must not turn the wire silent
-# (read-timeout clients — httpx/curl — would disconnect), and a quiet one
-# must not get a comment per poll tick.
-_KEEPALIVE_COMMENT_INTERVAL_S = 1.0
-
-
-# meiva:note
-# A frame that keeps the wire warm, or None: heartbeat when the last data frame is
-# older than `_HEARTBEAT_SECONDS` (the visible event drives client watchdogs),
-# otherwise a `: hb` comment at most once a second. Returns
-# `(frame, last_comment, last_data_frame)` — the caller stamps both clocks, so any
-# yielded frame counts as traffic. Shared with the merged stream.
-# meiva:link gateway/events/docs/sse.meiva.okf.md
-def warm_frame(
-    now: float, last_comment: float, last_data_frame: float
-) -> tuple[bytes | None, float, float]:
-    if now - last_data_frame >= _HEARTBEAT_SECONDS:
-        return HEARTBEAT_FRAME, now, now
-    if now - last_comment >= _KEEPALIVE_COMMENT_INTERVAL_S:
-        return b": hb\n\n", now, last_data_frame
-    return None, now, last_data_frame
 
 
 def _error_payload(agent_id: int, exc: Exception) -> str:
@@ -117,7 +91,7 @@ async def _subscribe_error_frame(
 # Each cleanup step is independently suppressed + logged so one failure does not
 # swallow another; `channels` accepts the whole subscription set of one pubsub
 # connection, which the merged stream subscribes to both of its sources on.
-# meiva:link gateway/events/docs/sse.meiva.okf.md
+# meiva:link gateway/events/docs/sse/sse.meiva.okf.md
 async def close_pubsub(pubsub: Any, client: Any, channels: str | Sequence[str]) -> None:
     names = (channels,) if isinstance(channels, str) else tuple(channels)
     for step, coro_fn in (
@@ -131,6 +105,50 @@ async def close_pubsub(pubsub: Any, client: Any, channels: str | Sequence[str]) 
             _log.warning("sse cleanup %s failed: %r", step, exc)
 
 
+# meiva:note
+# Yield a stream of SSE frames (bytes) until the client disconnects
+#     or Redis goes down.
+#
+#     Lifetime defenses:
+#     - `await pubsub.subscribe(...)` runs before the first yield, but
+#       StreamingResponse has already sent HTTP 200 by then. If Redis rejects
+#       the subscription, emit an `error` data frame and close the stream.
+#       The surrounding try/finally still cleans up the pubsub connection.
+#     - The `yield` is inside the try — when a client aborts on the first
+#       frame, `GeneratorExit` is raised; finally must run, otherwise the
+#       Redis pubsub socket leaks and a long run hits maxclients.
+#     - In the `while` loop, when `get_message` / `is_disconnected` raise
+#       (Redis restart / ASGI receive exception): publish a single `error`
+#       event frame to the client and return — the frontend sees a toast
+#       instead of just console noise.
+#     - In finally, each cleanup step is independently suppressed + logged
+#       so one failure does not swallow another.
+#
+#     Args:
+#         bus: the cluster event bus. Each connection gets its own pubsub socket — FastAPI concurrent
+#             requests are naturally isolated.
+#         agent_id: only forward events where `event.agent_id == agent_id`
+#             (ignored in broadcast mode).
+#         request: Starlette `Request`; use `is_disconnected()` for quick
+#             exit (otherwise pubsub blocking holds until Redis heartbeat
+#             timeout).
+#         channel: Redis channel to subscribe to (default the bus's events channel).
+#         role_filter: only forward events whose role is in this set; None
+#             or empty -> no filter.
+#         broadcast: True -> do not filter by agent_id, forward all.
+#         poll_s: the client-disconnect polling window of one Redis read
+#             (``gateway.sse_disconnect_poll_seconds``).
+#         cadence: when a quiet stream still speaks (heartbeat, keep-alive comment).
+#         validator: the pydantic validator each frame must parse as (default
+#             EVENT_ADAPTER). A non-agent-events channel (e.g. the alerts
+#             stream) passes its own TypeAdapter so frames are validated
+#             against the channel's shape instead of being dropped.
+#
+#     Yields:
+#         bytes: SSE frame (`data: ...
+#
+# `).
+#
 async def event_stream(
     bus: EventBus,
     agent_id: int,  # ignored in broadcast mode
@@ -140,55 +158,17 @@ async def event_stream(
     role_filter: frozenset[str] | None = None,
     broadcast: bool = False,
     validator: Any = EVENT_ADAPTER,
-    monotonic: Callable[[], float] | None = None,
+    poll_s: float,
+    cadence: SseCadence,
 ) -> AsyncGenerator[bytes, None]:
-    """Yield a stream of SSE frames (bytes) until the client disconnects
-    or Redis goes down.
-
-    Lifetime defenses:
-    - `await pubsub.subscribe(...)` runs before the first yield, but
-      StreamingResponse has already sent HTTP 200 by then. If Redis rejects
-      the subscription, emit an `error` data frame and close the stream.
-      The surrounding try/finally still cleans up the pubsub connection.
-    - The `yield` is inside the try — when a client aborts on the first
-      frame, `GeneratorExit` is raised; finally must run, otherwise the
-      Redis pubsub socket leaks and a long run hits maxclients.
-    - In the `while` loop, when `get_message` / `is_disconnected` raise
-      (Redis restart / ASGI receive exception): publish a single `error`
-      event frame to the client and return — the frontend sees a toast
-      instead of just console noise.
-    - In finally, each cleanup step is independently suppressed + logged
-      so one failure does not swallow another.
-
-    Args:
-        bus: the cluster event bus. Each connection gets its own pubsub socket — FastAPI concurrent
-            requests are naturally isolated.
-        agent_id: only forward events where `event.agent_id == agent_id`
-            (ignored in broadcast mode).
-        request: Starlette `Request`; use `is_disconnected()` for quick
-            exit (otherwise pubsub blocking holds until Redis heartbeat
-            timeout).
-        channel: Redis channel to subscribe to (default the bus's events channel).
-        role_filter: only forward events whose role is in this set; None
-            or empty -> no filter.
-        broadcast: True -> do not filter by agent_id, forward all.
-        validator: the pydantic validator each frame must parse as (default
-            EVENT_ADAPTER). A non-agent-events channel (e.g. the alerts
-            stream) passes its own TypeAdapter so frames are validated
-            against the channel's shape instead of being dropped.
-
-    Yields:
-        bytes: SSE frame (`data: ...\n\n`).
-    """
     _channel = channel if channel is not None else bus.channel
-    clock = time.monotonic if monotonic is None else monotonic
     client = bus.open_async_redis()
     pubsub: Any = client.pubsub()  # pyright: ignore[reportUnknownMemberType]
     # Attach/detach bracket: a reconnect storm (client watchdog cycling) or a
     # subscriber that never detaches is invisible without the pair; the detach
     # line carries duration + frames so a half-open stream is distinguishable
     # from a healthy long-lived one.
-    opened = clock()
+    opened = time.monotonic()
     data_frames = 0
     metrics_opened = False
     _log.info("sse attach: agent_id=%s channel=%s broadcast=%s", agent_id, _channel, broadcast)
@@ -204,8 +184,8 @@ async def event_stream(
         # Last time a real `data:` frame went out (business event or heartbeat).
         # The `: hb` comment does NOT count — the browser can't see it, so it
         # can't keep the client watchdog alive.
-        last_data_frame = clock()
-        last_comment = clock()
+        last_data_frame = time.monotonic()
+        last_comment = time.monotonic()
 
         while True:
             if stopping.is_stopping():
@@ -219,7 +199,7 @@ async def event_stream(
                         # Client disconnect-detection polling window; deltas shorter
                         # than this are negligible compared to network RTT. env
                         # override: `MEIVA_SSE_DISCONNECT_POLL_SECONDS`.
-                        timeout=settings.gateway.sse_disconnect_poll_seconds,
+                        timeout=poll_s,
                     )
                 )
             except REDIS_IO_ERRORS + REDIS_ACL_ERRORS as exc:
@@ -227,7 +207,7 @@ async def event_stream(
                 yield sse_frame(_error_payload(agent_id, exc))
                 return
 
-            now = clock()
+            now = time.monotonic()
             if msg is not None and isinstance(msg["data"], str):
                 try:
                     event = validator.validate_json(msg["data"])
@@ -245,9 +225,12 @@ async def event_stream(
 
             # Nothing business-relevant this tick (quiet channel, a filtered
             # event, a non-str or unparseable payload): keep the wire warm —
-            # heartbeat once the silence crosses _HEARTBEAT_SECONDS, otherwise
+            # meiva:note
+            # heartbeat once the silence crosses cadence.heartbeat_s, otherwise
             # a throttled keep-alive comment.
-            frame, last_comment, last_data_frame = warm_frame(now, last_comment, last_data_frame)
+            frame, last_comment, last_data_frame = warm_frame(
+                now, last_comment, last_data_frame, cadence
+            )
             if frame is not None:
                 yield frame
     finally:
@@ -256,7 +239,7 @@ async def event_stream(
         _log.info(
             "sse detach: agent_id=%s duration=%.1fs data_frames=%d",
             agent_id,
-            clock() - opened,
+            time.monotonic() - opened,
             data_frames,
         )
         await close_pubsub(pubsub, client, _channel)
@@ -317,40 +300,47 @@ async def _drain_redis_messages(
     return buffer, False
 
 
+# meiva:note
+# Yield a throttled, batched SSE stream of events.
+#
+#     With no ``agent_filter``, every agent's events pass. With a filter,
+#     selected agents and system-level ``agent_id == 0`` events pass. There is
+#     no role filter. Events are drained from Redis in batches and flushed at a
+#     fixed cadence (``1 / throttle_rate`` seconds). Each flush sends a JSON
+#     array of raw event payloads as a single SSE data frame:
+#
+#         data: [{...}, {...}, ...]
+#
+#
+#
+#     Lifetime defenses mirror ``event_stream``: a subscription failure after
+#     HTTP 200 sends a batch-shaped error frame; GeneratorExit-safe finally,
+#     Redis-IO recovery, and client disconnect detection also apply.
+#
+#     Args:
+#         bus: the cluster event bus.
+#         request: Starlette ``Request`` for disconnect detection.
+#         channel: Redis channel (default the bus's events channel).
+#         throttle_rate: SSE pushes per second — required (the caller reads
+#             ``gateway.sse_throttle_rate``).
+#         cadence: when a quiet stream still speaks.
+#         agent_filter: agent ids to forward. None forwards every agent; system-level
+#             ``agent_id == 0`` events always pass.
+#
+#     Yields:
+#         bytes: SSE frame (``data: [...]
+#
+# ``).
+#
 async def throttled_event_stream(
     bus: EventBus,
     request: Request,
     *,
     channel: str | None = None,
     throttle_rate: float,
+    cadence: SseCadence,
     agent_filter: set[int] | None = None,
 ) -> AsyncGenerator[bytes, None]:
-    """Yield a throttled, batched SSE stream of events.
-
-    With no ``agent_filter``, every agent's events pass. With a filter,
-    selected agents and system-level ``agent_id == 0`` events pass. There is
-    no role filter. Events are drained from Redis in batches and flushed at a
-    fixed cadence (``1 / throttle_rate`` seconds). Each flush sends a JSON
-    array of raw event payloads as a single SSE data frame:
-
-        data: [{...}, {...}, ...]\n\n
-
-    Lifetime defenses mirror ``event_stream``: a subscription failure after
-    HTTP 200 sends a batch-shaped error frame; GeneratorExit-safe finally,
-    Redis-IO recovery, and client disconnect detection also apply.
-
-    Args:
-        bus: the cluster event bus.
-        request: Starlette ``Request`` for disconnect detection.
-        channel: Redis channel (default the bus's events channel).
-        throttle_rate: SSE pushes per second — required (the sole caller passes
-            ``settings.gateway.sse_throttle_rate``).
-        agent_filter: agent ids to forward. None forwards every agent; system-level
-            ``agent_id == 0`` events always pass.
-
-    Yields:
-        bytes: SSE frame (``data: [...]\n\n``).
-    """
     _channel = channel if channel is not None else bus.channel
     client = bus.open_async_redis()
     pubsub: Any = client.pubsub()  # pyright: ignore[reportUnknownMemberType]
@@ -397,7 +387,7 @@ async def throttled_event_stream(
                 data_frames += 1
                 total_events += len(buffer)
                 last_flush = now
-            elif now - last_flush >= _HEARTBEAT_SECONDS:
+            elif now - last_flush >= cadence.heartbeat_s:
                 yield HEARTBEAT_FRAME
                 last_flush = now
             else:
@@ -422,72 +412,10 @@ async def throttled_event_stream(
                 _log.warning("sse throttle cleanup %s failed: %r", step, exc)
 
 
-def sse_frame(payload: str) -> bytes:
-    """Wrap a data frame per the SSE protocol.
-
-    Multi-line payloads must prefix each line with `data:` to be
-    compliant. Our event JSON is single-line, but we split defensively
-    and only on "\n" - never str.splitlines(): that also breaks on
-    U+0085 / U+2028 / U+2029, which are legal unescaped inside JSON
-    strings, and the client rejoins data lines with "\n", so a split
-    there plants a raw newline inside the JSON literal and JSON.parse
-    fails ("Bad control character in string literal"). The trailing
-    empty line (`\n\n`) is the SSE frame separator.
-    """
-    lines = payload.split("\n") or [""]
-    return ("".join(f"data: {line}\n" for line in lines) + "\n").encode()
-
-
-def sse_batch_frame(events: list[str]) -> bytes:
-    """Wrap a batch of already-serialized event JSON strings into ONE SSE
-    frame carrying a JSON array of objects: `data: [{...},{...}]`.
-
-    Each element of `events` is ALREADY valid JSON (a `model_dump_json()`
-    payload straight off Redis), so the array is built by joining the raw
-    strings — NOT `json.dumps(events)`, which would re-encode each element
-    as a JSON string and emit `data: ["{...}","{...}"]` (an array of
-    strings). The browser does a single `JSON.parse`, so a string element
-    has no `.role` / `.agent_id`, fails the active-thread guard, and is
-    silently dropped — the live timeline / token / pending streams go dark
-    while only the separate `/api/system` object-stream (last-active) keeps
-    working. Join raw so the client folds real objects.
-    """
-    return sse_frame("[" + ",".join(events) + "]")
-
-
-# --- For tests only ---
-
-
-def decode_frames_for_test(chunks: list[bytes]) -> list[dict[str, Any]]:
-    """Test helper: slice an SSE byte stream into frames + parse the JSON
-    on data lines, the way the browser does: split lines on "\n" only
-    (str.splitlines() would also break on U+0085 / U+2028 / U+2029 and
-    silently re-merge a payload the writer split there) and rejoin data
-    lines with "\n", so writer corruption fails here as a parse error.
-
-    Ignores `:` comment frames (heartbeat / stream open / dropped).
-    """
-    out: list[dict[str, Any]] = []
-    text = b"".join(chunks).decode()
-    for frame in text.split("\n\n"):
-        data_lines = [
-            line[len("data: ") :] for line in frame.split("\n") if line.startswith("data: ")
-        ]
-        if not data_lines:
-            continue
-        out.append(json.loads("\n".join(data_lines)))  # pyright: ignore[reportUnknownArgumentType]
-    return out
-
-
 __all__ = [
-    "HEARTBEAT_FRAME",
     "REDIS_ACL_ERRORS",
     "REDIS_IO_ERRORS",
     "close_pubsub",
-    "decode_frames_for_test",
     "event_stream",
-    "sse_batch_frame",
-    "sse_frame",
     "throttled_event_stream",
-    "warm_frame",
 ]

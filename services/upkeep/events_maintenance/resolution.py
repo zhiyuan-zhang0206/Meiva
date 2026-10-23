@@ -1,28 +1,28 @@
-"""Immutable event-class resolution — event-class counts -> dismissal state -> gauges.
-
-The event record is append-only, so no resolution path may write a
-``resolved_by`` attribute back onto historical events. Active rows in
-``event_dismissals`` instead remove one (level, event_name, source, process)
-event class from the count — the emission category (log | telemetry) is not
-part of the dismissal identity, so a row survives its event's reclassification
-between the two transports (task #4964). A row whose ``process`` is empty is a
-wildcard that cancels every process of its base, the scope every pre-dimension
-row keeps (task #4329 B5). The companion ten-minute query is the safety
-valve: a renewed burst reopens the class before it can hide a new incident.
-
-The class arithmetic is window-agnostic: :func:`level_splits` turns any
-window's per-class counts plus the active dismissals into per-level
-total / dismissed / net triples; the daemon's :func:`run_resolution_slice`
-applies it to its fixed six-hour window and publishes the unresolved and
-dismissed gauges. The gateway's alert-class surface
-(``gateway/cluster/alert_classes.py``) reads the same classes over the
-frontend-selected window with :func:`alert_classes` and resolves each one's
-dismissal with :func:`matching_dismissal`, the same match the arithmetic uses.
-
-The counts are read from `telemetry_events` by :func:`class_counts`. The public seams are
-:func:`run_resolution_slice`, :func:`level_splits`, :func:`class_counts`,
-:func:`alert_classes`, :func:`matching_dismissal` and :func:`active_dismissals`.
-"""
+# meiva:note
+# Immutable event-class resolution — event-class counts -> dismissal state -> gauges.
+#
+# The event record is append-only, so no resolution path may write a
+# ``resolved_by`` attribute back onto historical events. Active rows in
+# ``event_dismissals`` instead remove one (level, event_name, source, process)
+# event class from the count — the emission category (log | telemetry) is not
+# part of the dismissal identity, so a row survives its event's reclassification
+# between the two transports (task #4964). A row whose ``process`` is empty is a
+# wildcard that cancels every process of its base, the scope every pre-dimension
+# row keeps (task #4329 B5). The companion ten-minute query is the safety
+# valve: a renewed burst reopens the class before it can hide a new incident.
+#
+# The class arithmetic is window-agnostic: :func:`level_splits` turns any
+# window's per-class counts plus the active dismissals into per-level
+# total / dismissed / net triples; the daemon's :func:`run_resolution_slice`
+# applies it to its fixed six-hour window and publishes the unresolved and
+# dismissed gauges. The gateway's alert-class surface
+# (``gateway/cluster/monitor/alert_classes.py``) reads the same classes over the
+# frontend-selected window with :func:`alert_classes` and resolves each one's
+# dismissal with :func:`matching_dismissal`, the same match the arithmetic uses.
+#
+# The counts are read from `telemetry_events` by :func:`class_counts`. The public seams are
+# :func:`run_resolution_slice`, :func:`level_splits`, :func:`class_counts`,
+# :func:`alert_classes`, :func:`matching_dismissal` and :func:`active_dismissals`.
 
 from __future__ import annotations
 

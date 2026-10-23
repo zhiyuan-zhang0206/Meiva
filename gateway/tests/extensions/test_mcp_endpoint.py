@@ -9,17 +9,17 @@ from typing import Any, cast
 import psycopg
 import pytest
 
-from base import config
 from base.host.net.auth import bearer_header
-from gateway.tests.auth.gateway_config import GatewayTestClient, gateway_test_client
-from gateway.tests.mcp_calls import enable_endpoint as enable_endpoint
+from gateway.tests.auth.gateway_config import GatewayTestClient
 from gateway.tests.mcp_calls import (
     initialize,
+    mcp_client,
     post_mcp,
     post_message,
     tool_call,
     tool_result,
 )
+from gateway.tests.support.runner_ops.ops_stub import OpsReply, RunnerOps, runner_ops
 
 _SECRET = "test-cluster-secret"  # noqa: S105 — test fixture
 _TOOLS_LIST = {"jsonrpc": "2.0", "id": 1, "method": "tools/list"}
@@ -47,9 +47,8 @@ def _spawn(client: GatewayTestClient, key: str = "birth-intent") -> int:
     return int(spawned["id"])
 
 
-def test_disabled_endpoint_answers_404(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(config.settings.gateway, "mcp_endpoint_enabled", False)
-    with gateway_test_client() as client:
+def test_disabled_endpoint_answers_404() -> None:
+    with mcp_client(enabled=False) as client:
         resp = post_mcp(client, _TOOLS_LIST)
     assert resp.status_code == 404
     assert resp.json()["detail"] == "mcp endpoint is disabled"
@@ -57,7 +56,7 @@ def test_disabled_endpoint_answers_404(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_initialize_negotiates_and_lists_the_tool_surface() -> None:
-    with gateway_test_client() as client:
+    with mcp_client() as client:
         init = initialize(client)
         assert init[0]["result"]["protocolVersion"]
         messages = post_message(client, _TOOLS_LIST)
@@ -81,21 +80,17 @@ def test_initialize_negotiates_and_lists_the_tool_surface() -> None:
 
 
 @pytest.mark.parametrize("authorization", [None, "Bearer not-the-cluster-secret"])
-def test_required_mode_refuses_missing_or_bad_credentials(
-    monkeypatch: pytest.MonkeyPatch, authorization: str | None
-) -> None:
-    monkeypatch.setattr(config.settings.data_plane, "cluster_secret", _SECRET)
+def test_required_mode_refuses_missing_or_bad_credentials(authorization: str | None) -> None:
     headers = {} if authorization is None else {"Authorization": authorization}
-    with gateway_test_client() as client:
+    with mcp_client(cluster_secret=_SECRET) as client:
         client.headers.pop("Authorization")
         resp = post_mcp(client, _TOOLS_LIST, headers)
     assert resp.status_code == 401
     assert resp.json()["code"] == "authentication_required"
 
 
-def test_the_cluster_bearer_calls_tools(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(config.settings.data_plane, "cluster_secret", _SECRET)
-    with gateway_test_client() as client:
+def test_the_cluster_bearer_calls_tools() -> None:
+    with mcp_client(cluster_secret=_SECRET) as client:
         client.headers.pop("Authorization")
         listed = tool_call(client, "list_agents", {}, headers=bearer_header(_SECRET))
         anonymous = post_mcp(
@@ -114,7 +109,7 @@ def test_the_cluster_bearer_calls_tools(monkeypatch: pytest.MonkeyPatch) -> None
 @contextmanager
 def _trusted_network_client(base: GatewayTestClient) -> Generator[GatewayTestClient]:
     cfg = base.app.state.gateway_config
-    with gateway_test_client(
+    with mcp_client(
         process=base.app.state.gateway_process,
         config=replace(
             cfg,
@@ -127,7 +122,7 @@ def _trusted_network_client(base: GatewayTestClient) -> Generator[GatewayTestCli
 
 
 def test_trusted_network_serves_an_anonymous_call(db_conn: psycopg.Connection) -> None:
-    with gateway_test_client() as base, _trusted_network_client(base) as client:
+    with mcp_client() as base, _trusted_network_client(base) as client:
         agent_id = _spawn(client)
         row = tool_result(tool_call(client, "get_agent", {"agent_id": agent_id}))
     assert row["agent_id"] == agent_id
@@ -135,13 +130,13 @@ def test_trusted_network_serves_an_anonymous_call(db_conn: psycopg.Connection) -
 
 
 def test_trusted_network_still_refuses_an_unknown_host() -> None:
-    with gateway_test_client() as base, _trusted_network_client(base) as client:
+    with mcp_client() as base, _trusted_network_client(base) as client:
         resp = post_mcp(client, _TOOLS_LIST, {"Host": "rebind.attacker.example"})
     assert resp.status_code == 403
 
 
 def test_tool_results_equal_the_direct_api_responses() -> None:
-    with gateway_test_client() as client:
+    with mcp_client() as client:
         agent_id = _spawn(client)
         listed = tool_result(tool_call(client, "list_agents", {}))
         assert _stable(listed) == _stable(client.get("/api/agents").json())
@@ -154,7 +149,7 @@ def test_tool_results_equal_the_direct_api_responses() -> None:
 
 
 def test_list_agents_passes_its_arguments_as_query_parameters() -> None:
-    with gateway_test_client() as client:
+    with mcp_client() as client:
         _spawn(client)
         args = {"scope": "terminated", "query": "x", "before_id": 5, "limit": 3}
         result = tool_result(tool_call(client, "list_agents", args))
@@ -163,7 +158,7 @@ def test_list_agents_passes_its_arguments_as_query_parameters() -> None:
 
 
 def test_cluster_status_reports_this_host() -> None:
-    with gateway_test_client() as client:
+    with mcp_client() as client:
         client.app.state.machine.set(role="gateway")
         payload = tool_result(tool_call(client, "cluster_status", {}))
         assert _stable(payload) == _stable(client.get("/api/cluster/status").json())
@@ -171,7 +166,7 @@ def test_cluster_status_reports_this_host() -> None:
 
 
 def test_spawn_message_terminate_round_trip(db_conn: psycopg.Connection) -> None:
-    with gateway_test_client() as client:
+    with mcp_client() as client:
         agent_id = _spawn(client)
         sent = tool_result(
             tool_call(client, "send_message", {"agent_id": agent_id, "content": "hi"})
@@ -199,7 +194,7 @@ def test_spawn_message_terminate_round_trip(db_conn: psycopg.Connection) -> None
 def test_send_message_passes_the_declared_source_to_the_api(
     db_conn: psycopg.Connection,
 ) -> None:
-    with gateway_test_client() as client:
+    with mcp_client() as client:
         agent_id = _spawn(client)
         tool_call(client, "send_message", {"agent_id": agent_id, "content": "as the user"})
         peer = {"agent_id": agent_id, "content": "as a peer", "source": "external_agent:codex:r1"}
@@ -223,7 +218,7 @@ def test_send_message_passes_the_declared_source_to_the_api(
 
 
 def test_spawn_passes_prompt_source_and_spawner_to_the_api(db_conn: psycopg.Connection) -> None:
-    with gateway_test_client() as client:
+    with mcp_client() as client:
         spawned = tool_result(
             tool_call(
                 client,
@@ -248,7 +243,7 @@ def test_spawn_passes_prompt_source_and_spawner_to_the_api(db_conn: psycopg.Conn
 
 
 def test_idempotency_keys_reach_the_api() -> None:
-    with gateway_test_client() as client:
+    with mcp_client() as client:
         first = _spawn(client)
         assert _spawn(client) == first
         args = {"agent_id": first, "content": "same", "idempotency_key": "same-key"}
@@ -264,7 +259,7 @@ def test_idempotency_keys_reach_the_api() -> None:
 
 
 def test_an_api_error_is_a_tool_error_with_the_api_envelope() -> None:
-    with gateway_test_client() as client:
+    with mcp_client() as client:
         result = tool_call(client, "get_agent", {"agent_id": 999999})
         direct = client.get("/api/agents/999999")
     envelope = _error_envelope(result)
@@ -281,24 +276,19 @@ def test_an_api_error_is_a_tool_error_with_the_api_envelope() -> None:
     [{"limit": 0}, {"limit": 201}, {"before_id": 0}, {"query": "x" * 201}],
 )
 def test_the_api_rejects_invalid_directory_arguments(arguments: dict[str, object]) -> None:
-    with gateway_test_client() as client:
+    with mcp_client() as client:
         result = tool_call(client, "list_agents", arguments)
     assert _error_envelope(result)["status"] == 422
 
 
 def test_spawn_launch_failure_tool_error_names_committed_agent(
-    monkeypatch: pytest.MonkeyPatch,
+    db_conn: psycopg.Connection, gateway_local_runner: RunnerOps
 ) -> None:
-    from base.agents.observation.evidence import AvailabilityReason
-    from gateway.agents import creation
-    from gateway.agents.forward import LaunchForwardError
-    from ops.rpc_schemas import LaunchAgentRequest, SpawnedAgent
-
-    async def _fail(_db: object, _target: str, _body: LaunchAgentRequest) -> SpawnedAgent:
-        raise LaunchForwardError(AvailabilityReason.LAUNCH_UNREACHABLE, "runner offline")
-
-    monkeypatch.setattr(creation, "forward_spawn_to_remote", _fail)
-    with gateway_test_client() as client:
+    unreachable = OpsReply(404, "runner offline")
+    with (
+        runner_ops(db_conn, gateway_local_runner.name, {"spawn-launch": unreachable}),
+        mcp_client() as client,
+    ):
         response = tool_call(
             client,
             "spawn_agent_guarded_v1",

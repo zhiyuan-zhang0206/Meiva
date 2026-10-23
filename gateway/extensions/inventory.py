@@ -22,15 +22,15 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, HTTPException, Request
 from psycopg_pool import ConnectionPool
 from pydantic import BaseModel
 
 from base.db import Database
-from gateway.cluster import snapshots
-from gateway.cluster.snapshots import Snapshot
-from gateway.extensions.inventory_matrix import collapse_inventory
+from gateway.cluster.roster import snapshots
+from gateway.extensions.inventory_matrix import collapse_inventory, plan_dials
 from gateway.extensions.schemas import (
     InventoryAggregate,
     InventoryItem,
@@ -43,12 +43,6 @@ from ops.rpc_schemas import InventoryReadResult, InventoryWriteOpResult
 
 router = APIRouter()
 _log = logging.getLogger(__name__)
-
-# First-contact per-host budget for a remote inventory_read in the aggregate
-# fan-out, so one offline host doesn't stall the whole matrix on the default
-# deadline. A host that already carries reachability failures gets the roster's
-# fast-fail budget instead (_dial_inventory_read, task #4127).
-AGGREGATE_READ_TIMEOUT_S = 15.0
 
 
 def _assert_inventory_target(pool: ConnectionPool, target: str) -> None:
@@ -134,54 +128,49 @@ def _agent_runner_rows(pool: ConnectionPool) -> list[tuple[str, bool]]:
         return [(row[0], row[1]) for row in cur.fetchall()]
 
 
-def _agent_runner_snapshots(pool: ConnectionPool) -> dict[str, Snapshot]:
-    """The heartbeat liveness pass's last probe of every machine, by name."""
-    return snapshots.read_all_blocking(pool)
-
-
-async def _dial_inventory_read(db: Database, target: str) -> InventoryReadResult:
-    """Dial one host under a bounded transport policy.
-
-    The whole dial — one fast retry included — is capped by the aggregate read
-    budget, mirroring `roster_probe.dispatch_status_probe`. Without the cap, a
-    blackholed host's dial burns the full budget across the cluster RPC retry chain
-    and drags the aggregate tail to tens of seconds (task #4127).
-    """
-    budget = AGGREGATE_READ_TIMEOUT_S
+# meiva:note
+# Dial one host under a bounded transport policy.
+#
+# The whole dial — one fast retry included — is capped by the aggregate read
+# budget (`GatewayConfig.inventory_host_wait_seconds`), mirroring
+# `roster_probe.dispatch_status_probe`. Without the cap, a blackholed host's dial burns the
+# full budget across the cluster RPC retry chain and drags the aggregate tail to tens of
+# seconds (task #4127). A host that already carries reachability failures gets the roster's
+# fast-fail budget instead of the default deadline.
+async def _dial_inventory_read(
+    db: Database, target: str, *, budget_s: float
+) -> InventoryReadResult:
     try:
-        async with asyncio.timeout(budget):
-            return await _dispatch_inventory_read(db, target, timeout_s=budget, retries=1)
+        async with asyncio.timeout(budget_s):
+            return await _dispatch_inventory_read(db, target, timeout_s=budget_s, retries=1)
     except TimeoutError as exc:
         raise cluster_rpc.ClusterOpUnreachable(
-            f"inventory_read for machine={target!r} exceeded its {budget:.1f}s total budget"
+            f"inventory_read for machine={target!r} exceeded its {budget_s:.1f}s total budget"
         ) from exc
 
 
-async def _aggregate(db: Database, pool: ConnectionPool) -> InventoryAggregate:
-    """Fan out inventory_read to every agent-runner concurrently and collapse the
-    results; a host whose read raised goes in `unreachable`.
-
-    Hosts already known down are never dialed: an intentionally stopped row and
-    a host the heartbeat liveness pass has just failed twice (the roster's
-    snapshot, `gateway/cluster/snapshots.py`) report `unreachable` directly (a
-    dial could only hang; task #4127). Dialed hosts run under a bounded transport
-    policy — the roster and this aggregate keep one liveness view, the pass's."""
+# meiva:note
+# Fan out inventory_read to every agent-runner concurrently and collapse the
+# results; a host whose read raised goes in `unreachable`.
+#
+# `plan_dials` decides which hosts are dialed; the rest report `unreachable` directly.
+# Dialed hosts run under a bounded transport policy.
+async def _aggregate(db: Database, pool: ConnectionPool, *, budget_s: float) -> InventoryAggregate:
     rows = _agent_runner_rows(pool)
     machines = [name for name, _stopped in rows]
-    skipped = {name for name, stopped in rows if stopped}
-    known_down = _agent_runner_snapshots(pool)
-    skipped |= {m for m in machines if m in known_down and known_down[m].known_down()}
-    to_dial = [m for m in machines if m not in skipped]
-    if skipped:
-        _log.debug("inventory aggregate: not dialing known-down host(s) %s", sorted(skipped))
+    plan = plan_dials(
+        rows, await asyncio.to_thread(snapshots.read_all_blocking, pool), now=datetime.now(UTC)
+    )
+    if plan.skipped:
+        _log.debug("inventory aggregate: not dialing known-down host(s) %s", sorted(plan.skipped))
 
     results = await asyncio.gather(
-        *(_dial_inventory_read(db, m) for m in to_dial),
+        *(_dial_inventory_read(db, m, budget_s=budget_s) for m in plan.to_dial),
         return_exceptions=True,
     )
     reads: dict[str, InventoryReadResult] = {}
-    unreachable: list[str] = sorted(skipped)
-    for m, res in zip(to_dial, results, strict=True):
+    unreachable: list[str] = sorted(plan.skipped)
+    for m, res in zip(plan.to_dial, results, strict=True):
         if isinstance(res, (cluster_rpc.ClusterOpUnreachable, cluster_rpc.ClusterOpFailed)):
             # The host couldn't serve its inventory (unreachable, or it answered and
             # its op failed) — bucket it.
@@ -208,7 +197,11 @@ async def get_inventory(
     non-agent-runner machine, 503 offline / timed out).
     """
     if machine is None:
-        return await _aggregate(request.app.state.db, request.app.state.db_pool)
+        return await _aggregate(
+            request.app.state.db,
+            request.app.state.db_pool,
+            budget_s=request.app.state.gateway_config.inventory_host_wait_seconds,
+        )
 
     await asyncio.to_thread(_assert_inventory_target, request.app.state.db_pool, machine)
     try:

@@ -1,3 +1,6 @@
+exports = ["staleness_support.py"]
+
 [uses]
+"test_route_degradation.py" = ["staleness_support.py"]
 "test_fleet_graph.py" = ["staleness_support.py"]
 "test_fleet_graph_resilience.py" = ["staleness_support.py"]

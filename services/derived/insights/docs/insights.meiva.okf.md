@@ -18,7 +18,7 @@ A gateway-side daemon (`ServiceSpec.capabilities=GATEWAY`; no port and no fixed-
 - `run_timeline/` — the per-agent reads behind the agent view, see [[run_timeline.meiva.okf.md|run timeline reads]].
 
 ## Transport and trust
-The service binds `$MEIVA_HOME/run/insights.sock` (`base.paths.insights_socket`, created under umask 0177, so mode 0600) and listens on no TCP port. It performs no authentication: the gateway admits the caller (session or bearer, pause policy, the eval-isolation check) and then forwards the request over the socket (`gateway/routers/insights.py`). Paths in the service equal the public paths, so the gateway forwards path and query unchanged. The browser never dials the service.
+The service binds `$MEIVA_HOME/run/insights.sock` (`base.paths.insights_socket`, created under umask 0177, so mode 0600) and listens on no TCP port. It performs no authentication: the gateway admits the caller (session or bearer, pause policy, the eval-isolation check) and then forwards the request over the socket (`gateway/routers/proxies/insights.py`). Paths in the service equal the public paths, so the gateway forwards path and query unchanged. The browser never dials the service.
 
 Typed routes are declared in both places: the service owns validation and the response model; the gateway repeats the query parameters and `response_model` so the OpenAPI contract and the generated frontend types describe them (a test compares the two). `/api/insights/{rest}` forwards the rest of that namespace without a gateway declaration.
 

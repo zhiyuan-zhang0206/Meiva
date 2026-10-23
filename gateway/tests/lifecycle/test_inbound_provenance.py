@@ -12,7 +12,6 @@ from starlette.requests import Request
 from base.agents.inbox.chat_delivery import insert_chat_inbound_once
 from base.agents.inbox.insert import insert_inbound_message
 from base.agents.messages.inbound_provenance import InboundProvenance, source_assertion_match
-from base.config import settings
 from base.db import Database, create_agent
 from base.events.live.bus import EventBus
 from gateway.agents.inbound_provenance import request_inbound_provenance
@@ -41,13 +40,10 @@ def _stored_provenance(conn: psycopg.Connection, agent_id: int) -> tuple[object,
     return row
 
 
-def test_cluster_bearer_message_records_http_provenance(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_cluster_bearer_message_records_http_provenance(db_conn: psycopg.Connection) -> None:
     agent_id = _seed_live_agent(db_conn)
-    monkeypatch.setattr(settings.data_plane, "cluster_secret", _SECRET)
 
-    with gateway_test_client() as client:
+    with gateway_test_client(cluster_secret=_SECRET) as client:
         response = client.post(
             f"/api/agents/{agent_id}/messages",
             headers={"Authorization": f"Bearer {_SECRET}"},
@@ -64,13 +60,10 @@ def test_cluster_bearer_message_records_http_provenance(
     )
 
 
-def test_browser_message_records_user_session(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_browser_message_records_user_session(db_conn: psycopg.Connection) -> None:
     agent_id = _seed_live_agent(db_conn)
-    monkeypatch.setattr(settings.data_plane, "cluster_secret", _SECRET)
 
-    with gateway_test_client() as client:
+    with gateway_test_client(cluster_secret=_SECRET) as client:
         login = client.post("/api/auth/login", json={"password": _SECRET})
         assert login.status_code == 200
         response = client.post(

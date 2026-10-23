@@ -1,35 +1,15 @@
-exports = ["configuration.py", "router.py"]
+exports = ["configuration.py", "router.py", "service.py", "tests"]
 
 [uses]
-"configuration.py" = ["service.py"]
-"router.py" = ["schemas.py", "service.py"]
-"service.py" = ["excerpt.py", "schemas.py"]
-"tests" = ["configuration.py", "excerpt.py", "router.py", "schemas.py", "service.py"]
+"cache.py" = ["schemas.py"]
+"configuration.py" = ["plan.py", "service.py"]
+"plan.py" = ["schemas.py"]
+"router.py" = ["configuration.py", "schemas.py", "service.py"]
+"service.py" = ["cache.py", "excerpt.py", "plan.py", "schemas.py"]
+"tests" = ["cache.py", "configuration.py", "excerpt.py", "plan.py", "schemas.py", "service.py"]
 
 [purity]
-"." = "strict-to-be"
 "__init__.py" = "strict"
 "excerpt.py" = "strict"
+"plan.py" = "strict"
 "schemas.py" = "strict"
-
-[debt.impure-call]
-"router.py#async def post_reply_suggestion" = 1
-"router.py#import fastapi" = 2
-"service.py#async def _draft" = 1
-"service.py#async def _gate_and_draft" = 1
-"service.py#async def _useful_reply_probability" = 1
-"service.py#async def suggest" = 1
-
-[debt.impure-edge]
-"configuration.py#base/config/__init__.py" = 1
-"configuration.py#base/db/__init__.py" = 1
-"configuration.py#base/host/env/agent_slices.py" = 1
-"configuration.py#base/lm/decision/call.py" = 1
-"configuration.py#gateway/agents/history/timeline.py" = 1
-"configuration.py#ops/agents/__init__.py" = 1
-"router.py#gateway/agents/eval_guard.py" = 1
-"router.py#gateway/http/disconnect.py" = 1
-"router.py#gateway/http/middleware/error_envelope.py" = 1
-"service.py#base/lm/call.py" = 1
-"service.py#base/lm/errors.py" = 1
-"service.py#base/log/__init__.py" = 1

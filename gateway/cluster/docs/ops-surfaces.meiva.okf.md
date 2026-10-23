@@ -28,9 +28,24 @@ network, because they are operator tools and the SDK surface is for agents.
 
 Admin events request only telemetry/log categories and treat `level` as a
 minimum. The limit defaults to display configuration; omitting `since` uses a
-24-hour floor. `gateway/tests/routers/cluster_endpoints/test_admin_events.py`
-checks these forwarded arguments with a fake reader. Its row assertions check
-pass-through order, not database filtering or sorting.
+24-hour floor. `gateway/cluster/admin_events_plan.py` turns the request's filters
+into the exact query (or a refusal answered as 400), a pure function whose rules
+`gateway/cluster/tests/test_admin_events_plan.py` asserts on the returned plan;
+`gateway/tests/routers/cluster_endpoints/test_admin_events.py` seeds real
+`telemetry_events` rows and checks which of them the endpoint returns.
+
+## The roster: plan, then shell
+
+`GET /api/cluster/roster`, `/api/cluster/machines` and the `/api/status` cluster panel read
+the same roster. What is done for each machine is a pure plan
+(`gateway/cluster/roster/roster_plan.py`): the gateway's own machine without the agent-runner
+capability reads itself, a machine with a fresh heartbeat snapshot renders from it
+(`gateway/cluster/roster/liveness_snapshot.py`), and every other machine, or every runner on a
+`fresh=true` read, is dialed. The row shapes are `gateway/cluster/roster/roster_rows.py`. The shell
+(`gateway/cluster/status.py`) reads the machines table, the snapshots and the local facts, then
+executes the plan; a dial is a real `status_probe` round trip to the row's registered URL under
+`gateway.status_probe_timeout_seconds`. Tests serve a runner on a real listener
+(`gateway/tests/support/runner_ops`) and assert on the plan and on the rows.
 
 The cluster router exposes no source-checkout update, rollout, restart or
 update-check endpoint. The status page displays observations and does not
@@ -52,7 +67,7 @@ are mounted. `hours` is the aggregation window, whitelisted to
 
 Every request computes its window in one pooled connection with an 8-second
 statement timeout (a timeout is a retriable 503): one scan of the window's
-`llm_usage` and `turn_end` rows (`gateway/cluster/_stats_events.py`) gives the
+`llm_usage` and `turn_end` rows (`gateway/cluster/monitor/stats_events.py`) gives the
 token, cost and turn sums, and one grouped count of the warning, error and
 critical rows (served by the partial index `telemetry_events_anomaly_ts`) gives
 the alert classes. The window is the requested one (7 days included), so

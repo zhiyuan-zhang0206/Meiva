@@ -1,54 +1,21 @@
 exports = ["agents", "auth", "extensions", "routers", "test_agents_endpoints.py", "test_idempotency.py"]
 
 [uses]
-"agents" = ["auth", "test_agents_endpoints.py"]
+"agents" = ["auth", "support", "test_agents_endpoints.py"]
+"auth" = ["support"]
 "bootstrap" = ["agents", "auth", "events", "mcp_calls.py"]
-"events" = ["agents", "auth", "test_idempotency.py"]
-"extensions" = ["auth", "lifecycle", "mcp_calls.py"]
-"history" = ["agents", "auth"]
-"lifecycle" = ["agents", "auth", "test_agents_endpoints.py"]
-"observability" = ["agents", "auth"]
+"events" = ["agents", "auth", "support", "test_idempotency.py"]
+"extensions" = ["auth", "lifecycle", "mcp_calls.py", "schedules", "support"]
+"history" = ["agents", "auth", "support"]
+"lifecycle" = ["agents", "auth", "support", "test_agents_endpoints.py"]
+"mcp_calls.py" = ["auth"]
+"observability" = ["agents", "auth", "events"]
 "path_scopes.toml" = ["auth"]
-"receipts" = ["auth", "events", "routers"]
-"routers" = ["agents", "auth"]
+"receipts" = ["auth", "events", "routers", "support"]
+"routers" = ["agents", "auth", "events", "support"]
 "schedules" = ["auth"]
-"test_agent_inspect.py" = ["auth"]
-"test_agents_endpoints.py" = ["auth"]
+"test_agent_inspect.py" = ["auth", "support"]
+"test_agents_endpoints.py" = ["auth", "support"]
 "test_error_envelope.py" = ["auth"]
-"test_idempotency.py" = ["auth"]
-"test_status_cluster.py" = ["auth"]
-"test_understanding_build_endpoints.py" = ["auth"]
-"upload_delivery" = ["auth", "events"]
-
-[debt.env-patch]
-"test_idempotency.py#patch.dict os.environ" = 1
-"test_understanding_build_endpoints.py#monkeypatch.delenv os.environ.MEIVA_PROCESS_PROFILE" = 1
-"test_understanding_build_endpoints.py#monkeypatch.setenv os.environ.MEIVA_PROCESS_PROFILE" = 1
-"test_understanding_build_endpoints.py#patch.dict os.environ" = 2
-
-[debt.first-party-patch]
-"mcp_calls.py#monkeypatch.setattr base.config.settings.gateway.mcp_endpoint_enabled" = 1
-"test_agent_inspect.py#monkeypatch.setattr ops.cluster.rpc.dispatch_to_machine" = 7
-"test_agents_endpoints.py#monkeypatch.setattr base.config.settings.lm.reasoning_effort" = 1
-"test_agents_endpoints.py#monkeypatch.setattr gateway.agents.creation.forward_spawn_to_remote" = 1
-"test_agents_endpoints.py#monkeypatch.setattr gateway.app.build_model_catalog" = 2
-"test_agents_endpoints.py#monkeypatch.setattr gateway.events.agent_events.event_stream" = 1
-"test_agents_endpoints.py#monkeypatch.setattr services.derived.memory_indexer.backends.factory.get_backend" = 1
-"test_agents_endpoints.py#monkeypatch.setattr services.derived.memory_indexer.embeddings.factory.get_provider" = 1
-"test_error_envelope.py#monkeypatch.setattr base.config.settings.data_plane.cluster_secret" = 5
-"test_error_envelope.py#monkeypatch.setattr gateway.http.auth.rejection_log.time.monotonic" = 2
-"test_error_envelope.py#monkeypatch.setattr gateway.http.middleware.error_envelope.telemetry.capture_trace_ids" = 1
-"test_idempotency.py#monkeypatch.setattr base.lm.factory.model_supports_vision" = 2
-"test_idempotency.py#monkeypatch.setattr ops.lifecycle.publish_inbound_arrived" = 1
-"test_idempotency.py#monkeypatch.setattr ops.lifecycle.resurrect_if_terminated" = 2
-"test_status_cluster.py#monkeypatch.setattr base.config.settings.gateway.status_probe_timeout_seconds" = 2
-"test_status_cluster.py#monkeypatch.setattr base.deploy.lifecycle.start_serving.is_serving" = 1
-"test_status_cluster.py#monkeypatch.setattr gateway.cluster.roster_probe.dispatch_status_probe" = 1
-"test_status_cluster.py#monkeypatch.setattr gateway.cluster.status.prod_source_head_sha" = 1
-"test_status_cluster.py#monkeypatch.setattr ops.cluster.rpc.dispatch_to_url" = 8
-"test_understanding_build_endpoints.py#monkeypatch.setattr base.agents.history.hierarchy.build.quote" = 1
-"test_understanding_build_endpoints.py#monkeypatch.setattr base.config.ConfigBoot.get_field" = 1
-"test_understanding_build_endpoints.py#monkeypatch.setattr gateway.agents.history.understanding.build_model" = 1
-"test_understanding_build_endpoints.py#monkeypatch.setattr gateway.agents.history.understanding.chunk_size" = 1
-"test_understanding_build_endpoints.py#monkeypatch.setattr gateway.agents.history.understanding.list_compact_boundary_checkpoint_ids" = 1
-"test_understanding_build_endpoints.py#monkeypatch.setattr gateway.agents.history.understanding.load_checkpoint_history_full" = 2
+"test_idempotency.py" = ["auth", "support"]
+"upload_delivery" = ["auth", "events", "support"]

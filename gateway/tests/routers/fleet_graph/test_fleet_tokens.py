@@ -7,7 +7,7 @@ from datetime import UTC, datetime, timedelta
 import psycopg
 import pytest
 
-from gateway.routers.fleet_tokens import agent_tokens
+from gateway.routers.fleet.fleet_tokens import agent_tokens
 from services.upkeep.events_maintenance import rollup, token_totals
 
 _NOW = datetime(2026, 6, 30, 15, 30, tzinfo=UTC)

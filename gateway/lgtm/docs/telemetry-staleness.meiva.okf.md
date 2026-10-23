@@ -20,6 +20,13 @@ minutes. Heartbeat queries run at most once per minute; callers within that
 window reuse the last verdict. Check errors fail open because each caller
 retains its own backend exception degradation.
 
+The guard is a thin shell. When a check is due and what one reading of the heartbeat
+means (stale entered, ongoing, recovered, and the event each emits) are values-in,
+plan-out functions in `gateway/lgtm/staleness_plan.py`; `telemetry_staleness.py` runs the
+heartbeat query, holds the per-source state under a lock and emits the planned event.
+The caller supplies `now`, so a test drives the guard with real heartbeat rows and
+explicit times, never a fake reader or clock.
+
 ## Heartbeat and threshold
 
 The gateway latency flusher emits once per active route every 60 seconds. That

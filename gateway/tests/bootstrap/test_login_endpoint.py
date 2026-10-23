@@ -11,6 +11,7 @@ not evaluate the credential at all.
 
 from __future__ import annotations
 
+import time
 from collections.abc import Iterator
 
 import pytest
@@ -102,14 +103,16 @@ def test_successful_login_resets_failure_counter(*, machine_identity: MachineIde
 
 
 def test_lockout_expires_and_recovers(*, machine_identity: MachineIdentity) -> None:
-    fake = _FakeClock()
-    with gateway_test_client(machine=machine_identity, login_limiter_clock=fake.time) as client:
+    window_s = 1
+    with gateway_test_client(
+        machine=machine_identity, fields={"login_lockout_seconds": window_s}
+    ) as client:
         for _ in range(config.settings.gateway.login_max_failures):
             _wrong_login(client)
         assert (
             client.post("/api/auth/login", json={"password": "wrong-password"}).status_code == 429
         )
-        fake.t += config.settings.gateway.login_lockout_seconds + 1
+        time.sleep(window_s + 0.2)
         # Expired: a wrong password is a plain 401 again, the correct one works.
         _wrong_login(client)
         resp = client.post("/api/auth/login", json={"password": _SECRET})
@@ -164,21 +167,19 @@ def test_lockout_threshold_and_window_follow_config(*, machine_identity: Machine
     """The lockout numbers resolve from config at call time — a cluster can
     tighten the policy without a new release (task #3696: every user-facing
     limit carries a config home)."""
-    fake = _FakeClock()
     with gateway_test_client(
         machine=machine_identity,
-        login_limiter_clock=fake.time,
         fields={
             "login_max_failures": 2,
-            "login_lockout_seconds": 123,
+            "login_lockout_seconds": 2,
         },
     ) as client:
         _wrong_login(client)  # failure 1 — below the configured threshold
         _wrong_login(client)  # failure 2 — trips it
         resp = client.post("/api/auth/login", json={"password": "wrong-password"})
         assert resp.status_code == 429
-        assert 0 < int(resp.headers["retry-after"]) <= 123
-        fake.t += 124  # the configured window has passed
+        assert 0 < int(resp.headers["retry-after"]) <= 2
+        time.sleep(2.2)  # the configured window has passed
         _wrong_login(client)  # expired: a plain 401 again
 
 

@@ -27,7 +27,9 @@ async def upload(
     key: Annotated[str, Depends(operation_key)],
     files: Annotated[list[UploadFile], File()],
 ) -> Acceptance:
-    batch = await read_upload_batch(files)
+    batch = await read_upload_batch(
+        files, max_file_bytes=request.app.state.gateway_config.max_upload_bytes
+    )
     names = [file.filename or "untitled" for file in files]
     try:
         return await request.app.state.upload_recovery.native(

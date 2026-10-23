@@ -10,27 +10,27 @@ paths, `false` for the crash paths) — the runner's real script execution and
 status semantics are covered by test_schedule_runner.py.
 """
 
-import contextlib
-import os
 import shlex
 import time
 from collections.abc import Iterator
 from pathlib import Path
-from unittest.mock import MagicMock
 
 import psycopg
 import pytest
 from psycopg_pool import ConnectionPool
 
-from base.clock import SYSTEM_TIMERS
 from base.cluster import session_name
 from base.deploy.lifecycle.start_serving import RootBirth
 from base.sessions.backend import get_shell_backend
+from base.sessions.env_forwarding import forward_env_dict
 from base.sessions.pty import client
 from base.sessions.pty.tests.pty_service import PtyServiceProcess
+from base.sessions.pty.tests.pty_service import pty_service as pty_service
 from base.sessions.pty.tests.pty_shells import wait_for
 from gateway.schedules import session_control
+from gateway.schedules.tests.db_faults import failing_write
 from services.wake.schedule_manager import manager as sm
+from services.wake.schedule_manager.tests.manager_support import NOW, schedule_manager
 
 REPO = Path(__file__).resolve().parents[4]
 
@@ -40,31 +40,18 @@ pytestmark = [
 
 
 @pytest.fixture
-def _pty_home(
-    db_url: str, tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch
-) -> Iterator[str]:
-    """A DEDICATED home, with its own pty-sessions service, for the schedule sessions.
+def _pty_home(unit_home: Path, db_url: str, pty_service: PtyServiceProcess) -> str:
+    """The test's home, with its own pty-sessions service, for the schedule sessions.
 
-    The service is a subprocess pinned to this home; each schedule launch creates a
-    session in it. Torn down by closing every session and stopping the service, so
-    no shell outlives the test run."""
-    home = tmp_path_factory.mktemp("pty-sched-home")
-    # The schedule runner builds the full gateway settings from the home's
-    # .env; point it at the test database so a `sleep 30` schedule stays up
-    # long enough to observe (the runner's own semantics are covered by
-    # test_schedule_runner.py).
-    from base.config import settings as _settings
-
-    (home / ".env").write_text(f"MEIVA_DB_URL={_settings.data_plane.db_url}\n")
-    monkeypatch.setenv("MEIVA_HOME", str(home))
-    service = PtyServiceProcess(home)
-    try:
-        service.start()
-        yield str(home)
-    finally:
-        with contextlib.suppress(client.ServiceUnavailableError, client.ServiceError):
-            client.close_all(grace_s=0.5, kill_s=2.0)
-        service.stop()
+    The service is a subprocess pinned to this home; each schedule launch creates a session in
+    it. The runner is a separate process that builds its settings from the home's `.env`: name
+    the test database there so a `sleep 30` schedule stays up long enough to observe (the
+    runner's own semantics are covered by test_schedule_runner.py). The `pty_service` fixture
+    closes every session and stops the service, so no shell outlives the test run.
+    """
+    del pty_service
+    (unit_home / ".env").write_text(f"MEIVA_DB_URL={db_url}\n")
+    return str(unit_home)
 
 
 @pytest.fixture
@@ -101,14 +88,7 @@ def _insert_schedule(
 
 
 @pytest.fixture
-def _point_backend_home(monkeypatch: pytest.MonkeyPatch, _pty_home: str) -> None:
-    # One variable names the dedicated home for every resolver: the client dials the
-    # service socket under it, so the in-process resolver and the service agree.
-    monkeypatch.setitem(os.environ, "MEIVA_HOME", _pty_home)
-
-
-@pytest.fixture
-def _host_is_serving(serving_root: RootBirth, _point_backend_home: None) -> Iterator[None]:
+def _host_is_serving(serving_root: RootBirth, _pty_home: str) -> Iterator[None]:
     """PTY schedule cases model a gateway that completed its start gate."""
     from base.deploy.lifecycle import start_serving
 
@@ -118,6 +98,14 @@ def _host_is_serving(serving_root: RootBirth, _point_backend_home: None) -> Iter
         yield
     finally:
         start_serving.clear_serving()
+
+
+# meiva:note
+# A manager launching the way the daemon does: the real session backend and the forwarded env.
+def _manager(pool: ConnectionPool, *, repo_root: Path = REPO) -> sm.ScheduleManager:
+    return schedule_manager(
+        pool, get_shell_backend(), repo_root=repo_root, launch_env=forward_env_dict()
+    )
 
 
 def _dump_logs(home: Path) -> str:
@@ -161,16 +149,14 @@ def test_pty_launch_live_capture(
         "print('RUNNER_ALIVE', require_actor()); time.sleep(30)",
         "python schedule.py",
     )
-    mgr = sm.ScheduleManager(
-        pool, backend=get_shell_backend(), timers=SYSTEM_TIMERS, repo_root=REPO
-    )
-    mgr.reconcile()
+    mgr = _manager(pool)
+    mgr.reconcile(now=NOW)
 
     name = session_name(f"schedule-{sid}")
     backend = get_shell_backend()
     assert backend.has_session(name)
     assert name in [info.name for info in client.list_sessions()], "service does not list it"
-    assert sid in mgr._live_ids()
+    assert sid in mgr._live_ids(NOW)
     # Poll for the runner's output instead of one immediate capture: under a
     # slow CI login shell the launch-to-output window is variable, and a
     # single probe can land before the command is delivered or after the
@@ -181,7 +167,7 @@ def test_pty_launch_live_capture(
     deadline = time.monotonic() + 60.0
     while time.monotonic() < deadline:
         try:
-            captured = session_control.capture_blocking(sid, 50)
+            captured = session_control.capture_blocking(get_shell_backend(), sid, 50)
         except Exception as exc:
             raise AssertionError(
                 f"capture failed ({exc}); session logs:\n{_dump_logs(home)}"
@@ -192,7 +178,7 @@ def test_pty_launch_live_capture(
     if not (captured and f"RUNNER_ALIVE schedule:{sid}" in captured):
         raise AssertionError("runner output never appeared; session logs:\n" + _dump_logs(home))
 
-    assert mgr._reap(sid)
+    assert mgr._reap(sid, NOW)
     _wait_session_gone(name)
 
 
@@ -203,10 +189,8 @@ def test_pty_crash_is_not_replayed_after_manager_restart(
     marker = Path(_pty_home) / "crash-effects"
     script = f"printf 'effect\\n' >> {marker}; exit 1"
     sid = _insert_schedule(db_conn, "pty-crash", script, "bash run.sh")
-    mgr = sm.ScheduleManager(
-        pool, backend=get_shell_backend(), timers=SYSTEM_TIMERS, repo_root=REPO
-    )
-    mgr.reconcile()
+    mgr = _manager(pool)
+    mgr.reconcile(now=NOW)
     name = session_name(f"schedule-{sid}")
     backend = get_shell_backend()
     assert backend.has_session(name)
@@ -215,9 +199,7 @@ def test_pty_crash_is_not_replayed_after_manager_restart(
     _wait_session_gone(name)
 
     for _ in range(3):
-        sm.ScheduleManager(
-            pool, backend=get_shell_backend(), timers=SYSTEM_TIMERS, repo_root=REPO
-        ).reconcile()
+        _manager(pool).reconcile(now=NOW)
         assert not backend.has_session(name)
     row = db_conn.execute(
         "SELECT status, launch_count FROM schedules WHERE id = %s", (sid,)
@@ -232,22 +214,14 @@ def test_pty_crash_is_not_replayed_after_manager_restart(
         (sid,),
     )
     db_conn.commit()
-    assert sm.ScheduleManager(
-        pool, backend=get_shell_backend(), timers=SYSTEM_TIMERS, repo_root=REPO
-    ).sync_one(sid)
+    assert _manager(pool).sync_one(sid, now=NOW)
     _wait_session_gone(name)
-    sm.ScheduleManager(
-        pool, backend=get_shell_backend(), timers=SYSTEM_TIMERS, repo_root=REPO
-    ).reconcile()
+    _manager(pool).reconcile(now=NOW)
     assert marker.read_text().splitlines() == ["effect", "effect"]
 
 
 def test_real_pty_revision_is_adopted_after_lost_acknowledgement(
-    db_conn: psycopg.Connection,
-    pool: ConnectionPool,
-    _pty_home: str,
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
+    db_conn: psycopg.Connection, pool: ConnectionPool, _pty_home: str, tmp_path: Path
 ) -> None:
     from services.wake.schedule_manager import revisions
 
@@ -266,13 +240,18 @@ def test_real_pty_revision_is_adopted_after_lost_acknowledgement(
     db_conn.execute("UPDATE schedules SET desired_revision = 1 WHERE id = %s", (sid,))
     db_conn.commit()
     name = session_name(f"schedule-{sid}")
-    mgr = sm.ScheduleManager(
-        pool, backend=get_shell_backend(), timers=SYSTEM_TIMERS, repo_root=tmp_path
-    )
-    monkeypatch.setattr(mgr, "_mark_running", MagicMock(side_effect=RuntimeError("lost ack")))
+    mgr = _manager(pool, repo_root=tmp_path)
     try:
-        with pytest.raises(RuntimeError, match="lost ack"):
-            mgr.sync_one(sid)
+        # meiva:note
+        # The write that acknowledges the running process is the one that fails: the process
+        # was born, the manager lost its acknowledgement.
+        with (
+            failing_write(
+                db_conn, table="schedules", events="UPDATE", when="NEW.status = 'running'"
+            ),
+            pytest.raises(psycopg.errors.RaiseException, match="injected fault"),
+        ):
+            mgr.sync_one(sid, now=NOW)
         assert revisions.launched_revision(sid) == 1, repr(client.live_sessions(name))
         before = get_shell_backend().session_started_at(name)
         assert before is not None
@@ -280,14 +259,12 @@ def test_real_pty_revision_is_adopted_after_lost_acknowledgement(
         assert db_conn.execute(
             "SELECT status, launch_count FROM schedules WHERE id = %s", (sid,)
         ).fetchone() == ("error", 1)
-        sm.ScheduleManager(
-            pool, backend=get_shell_backend(), timers=SYSTEM_TIMERS, repo_root=tmp_path
-        ).reconcile()
+        _manager(pool, repo_root=tmp_path).reconcile(now=NOW)
         assert get_shell_backend().session_started_at(name) == before
         assert db_conn.execute(
             "SELECT status, launch_count, last_error FROM schedules WHERE id = %s", (sid,)
         ).fetchone() == ("running", 1, None)
         assert marker.read_text().splitlines() == ["birth"]
     finally:
-        mgr._reap(sid)
+        mgr._reap(sid, NOW)
         _wait_session_gone(name)

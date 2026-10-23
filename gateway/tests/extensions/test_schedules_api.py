@@ -1,10 +1,20 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import psycopg
-import pytest
 from fastapi.testclient import TestClient
 
+import base.db
+from base.cluster import session_name
+from base.db.code_version_gate import ProcessDbGate
+from base.sessions.env_forwarding import forward_env_dict
+from base.sessions.pty.tests.pty_service import PtyServiceProcess
+from base.sessions.pty.tests.pty_service import pty_service as pty_service
+from base.sessions.pty.tests.pty_shells import wait_for
 from gateway.tests.auth.gateway_config import gateway_test_client
+from gateway.tests.schedules.api_support import converging, schedule_client
+from services.wake.schedule_manager.tests.session_fakes import Backend
 
 
 def _create(client: TestClient, **kw: object):
@@ -26,7 +36,7 @@ class TestCreate:
     def test_create_returns_full_view_and_initial_version(
         self, db_conn: psycopg.Connection
     ) -> None:
-        with gateway_test_client() as client:
+        with schedule_client() as client:
             r = _create(client, name="daily", script="print(1)\n", description="hi")
         assert r.status_code == 201
         body = r.json()
@@ -39,13 +49,13 @@ class TestCreate:
         assert _versions(db_conn, "daily") == ["initial"]
 
     def test_create_bad_script_400(self, db_conn: psycopg.Connection) -> None:
-        with gateway_test_client() as client:
+        with schedule_client() as client:
             r = _create(client, name="bad", script="def (:\n")
         assert r.status_code == 400
         assert "syntax error" in r.json()["detail"]
 
     def test_create_duplicate_name_409(self, db_conn: psycopg.Connection) -> None:
-        with gateway_test_client() as client:
+        with schedule_client() as client:
             assert _create(client, name="dup").status_code == 201
             r = _create(client, name="dup")
         assert r.status_code == 409
@@ -53,11 +63,11 @@ class TestCreate:
 
 class TestReadUpdateDelete:
     def test_get_missing_404(self, db_conn: psycopg.Connection) -> None:
-        with gateway_test_client() as client:
+        with schedule_client() as client:
             assert client.get("/api/schedules/9999").status_code == 404
 
     def test_list_omits_script(self, db_conn: psycopg.Connection) -> None:
-        with gateway_test_client() as client:
+        with schedule_client() as client:
             _create(client, name="a")
             rows = client.get("/api/schedules").json()
         assert [r["name"] for r in rows] == ["a"]
@@ -65,7 +75,7 @@ class TestReadUpdateDelete:
         assert rows[0]["enabled"] is True
 
     def test_put_description_only_writes_no_new_version(self, db_conn: psycopg.Connection) -> None:
-        with gateway_test_client() as client:
+        with schedule_client() as client:
             sid = _create(client, name="e").json()["id"]
             r = client.put(f"/api/schedules/{sid}", json={"description": "changed"})
         assert r.status_code == 200
@@ -73,64 +83,64 @@ class TestReadUpdateDelete:
         assert _versions(db_conn, "e") == ["initial"]
 
     def test_put_invalid_script_400(self, db_conn: psycopg.Connection) -> None:
-        with gateway_test_client() as client:
+        with schedule_client() as client:
             sid = _create(client, name="e").json()["id"]
             r = client.put(f"/api/schedules/{sid}", json={"script": "def (:\n"})
         assert r.status_code == 400
 
     def test_put_script_writes_edit_version(self, db_conn: psycopg.Connection) -> None:
-        with gateway_test_client() as client:
+        with schedule_client() as client:
             sid = _create(client, name="e").json()["id"]
             r = client.put(f"/api/schedules/{sid}", json={"script": "print(2)\n"})
         assert r.status_code == 200
         assert r.json()["script"] == "print(2)\n"
         assert _versions(db_conn, "e") == ["initial", "edit"]
 
-    def test_put_enabled_change_routes_through_immediate_session_sync(
-        self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    def test_put_enabled_change_is_converged_before_the_response(
+        self, db_conn: psycopg.Connection, *, database_gate: ProcessDbGate
     ) -> None:
-        from gateway.schedules import session_control
+        backend = Backend()
+        with (
+            base.db.pool(gate=database_gate) as pool,
+            gateway_test_client() as client,
+            converging(pool, backend),
+        ):
+            sid = _create(client, name="e").json()["id"]
+            backend.hold(session_name(f"schedule-{sid}"), "running")
+            stopped = client.put(f"/api/schedules/{sid}", json={"enabled": False})
 
-        synced: list[int] = []
+        assert stopped.status_code == 200
+        assert stopped.json()["enabled"] is False
+        assert backend.killed == [session_name(f"schedule-{sid}")]
+        assert db_conn.execute("SELECT schedule_id FROM schedule_sync_requests").fetchall() == []
 
-        async def _record_sync(pool: object, schedule_id: int) -> None:
-            synced.append(schedule_id)
-
-        monkeypatch.setattr(session_control, "wait_consumed", _record_sync)
-        with gateway_test_client() as client:
+    def test_put_enabled_change_queues_a_sync_request(self, db_conn: psycopg.Connection) -> None:
+        with schedule_client() as client:
             sid = _create(client, name="e").json()["id"]
             stopped = client.put(f"/api/schedules/{sid}", json={"enabled": False})
 
         assert stopped.status_code == 200
         assert stopped.json()["enabled"] is False
-        assert synced == [sid]
+        assert db_conn.execute("SELECT schedule_id FROM schedule_sync_requests").fetchall() == [
+            (sid,)
+        ]
 
-    def test_put_same_enabled_value_does_not_sync(
-        self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        from gateway.schedules import session_control
-
-        synced: list[int] = []
-
-        async def _record_sync(pool: object, schedule_id: int) -> None:
-            synced.append(schedule_id)
-
-        monkeypatch.setattr(session_control, "wait_consumed", _record_sync)
-        with gateway_test_client() as client:
+    def test_put_same_enabled_value_does_not_sync(self, db_conn: psycopg.Connection) -> None:
+        with schedule_client() as client:
             sid = _create(client, name="e").json()["id"]
             enabled = client.put(f"/api/schedules/{sid}", json={"enabled": True})
 
         assert enabled.status_code == 200
         assert enabled.json()["enabled"] is True
-        assert synced == []
+        assert db_conn.execute("SELECT schedule_id FROM schedule_sync_requests").fetchall() == []
 
     def test_put_no_fields_400(self, db_conn: psycopg.Connection) -> None:
-        with gateway_test_client() as client:
+        with schedule_client() as client:
             sid = _create(client, name="e").json()["id"]
             assert client.put(f"/api/schedules/{sid}", json={}).status_code == 400
 
     def test_delete_then_404(self, db_conn: psycopg.Connection) -> None:
-        with gateway_test_client() as client:
+        with schedule_client() as client:
             sid = _create(client, name="d").json()["id"]
             assert client.delete(f"/api/schedules/{sid}").status_code == 200
             assert client.get(f"/api/schedules/{sid}").status_code == 404
@@ -141,7 +151,7 @@ class TestSyncRequests:
     def test_control_writes_one_queued_request_per_schedule(
         self, db_conn: psycopg.Connection
     ) -> None:
-        with gateway_test_client() as client:
+        with schedule_client() as client:
             sid = _create(client, name="q", enabled=False).json()["id"]
             client.post(f"/api/schedules/{sid}/start")
             client.post(f"/api/schedules/{sid}/stop")
@@ -157,39 +167,46 @@ class TestSyncRequests:
 
 
 class TestControl:
-    def test_start_stop_toggle_enabled_and_sync_the_session(
-        self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        from gateway.schedules import session_control
-
-        synced: list[int] = []
-
-        async def _record_sync(pool: object, schedule_id: int) -> None:
-            synced.append(schedule_id)
-
-        monkeypatch.setattr(session_control, "wait_consumed", _record_sync)
-        with gateway_test_client() as client:
+    def test_start_toggles_enabled_and_queues_a_sync(self, db_conn: psycopg.Connection) -> None:
+        with schedule_client() as client:
             sid = _create(client, name="c", enabled=False).json()["id"]
-            assert client.post(f"/api/schedules/{sid}/start").json()["enabled"] is True
+            started = client.post(f"/api/schedules/{sid}/start").json()
+        assert started["enabled"] is True
+        assert db_conn.execute("SELECT schedule_id FROM schedule_sync_requests").fetchall() == [
+            (sid,)
+        ]
+
+    def test_stop_is_converged_before_the_response(
+        self, db_conn: psycopg.Connection, *, database_gate: ProcessDbGate
+    ) -> None:
+        backend = Backend()
+        with (
+            base.db.pool(gate=database_gate) as pool,
+            gateway_test_client() as client,
+            converging(pool, backend),
+        ):
+            sid = _create(client, name="c").json()["id"]
+            backend.hold(session_name(f"schedule-{sid}"), "running")
             stopped = client.post(f"/api/schedules/{sid}/stop").json()
         assert stopped["enabled"] is False
-        assert synced == [sid, sid]
+        assert backend.killed == [session_name(f"schedule-{sid}")]
+        assert db_conn.execute("SELECT schedule_id FROM schedule_sync_requests").fetchall() == []
 
     def test_restart_disabled_409(self, db_conn: psycopg.Connection) -> None:
-        with gateway_test_client() as client:
+        with schedule_client() as client:
             sid = _create(client, name="c", enabled=False).json()["id"]
             r = client.post(f"/api/schedules/{sid}/restart")
         assert r.status_code == 409
 
     def test_restart_enabled_ok(self, db_conn: psycopg.Connection) -> None:
-        with gateway_test_client() as client:
+        with schedule_client() as client:
             sid = _create(client, name="c", enabled=True).json()["id"]
             assert client.post(f"/api/schedules/{sid}/restart").status_code == 200
 
 
 class TestLogsRuns:
     def test_logs_falls_back_to_last_error(self, db_conn: psycopg.Connection) -> None:
-        with gateway_test_client() as client:
+        with schedule_client() as client:
             sid = _create(client, name="l").json()["id"]
             with db_conn.cursor() as cur:
                 cur.execute(
@@ -200,42 +217,28 @@ class TestLogsRuns:
         assert body["source"] == "last_error"
         assert body["lines"] == ["boom", "trace"]
 
-    def test_logs_strips_trailing_blank_rows(
-        self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    def test_logs_live_session_shows_its_output_without_the_blank_screen_rows(
+        self, db_conn: psycopg.Connection, pty_service: PtyServiceProcess, tmp_path: Path
     ) -> None:
-        from gateway.schedules import session_control
+        from base.sessions.backend import get_shell_backend
 
-        async def _fake_capture(schedule_id: int, lines: int) -> str:
-            return "line one\nline two\n\n\n\n"
-
-        monkeypatch.setattr(session_control, "capture", _fake_capture)
-        with gateway_test_client() as client:
+        with schedule_client() as client:
             sid = _create(client, name="l").json()["id"]
-            body = client.get(f"/api/schedules/{sid}/logs").json()
-        assert body["source"] == "live"
-        assert body["lines"] == ["line one", "line two"]
+            get_shell_backend().new_session(
+                session_name(f"schedule-{sid}"),
+                "echo line one; echo line two; sleep 30",
+                tmp_path,
+                env=forward_env_dict(),
+            )
 
-    def test_logs_small_lines_window_expands_to_display_height(
-        self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        from gateway.schedules import session_control
+            def shown() -> bool:
+                body = client.get(f"/api/schedules/{sid}/logs?lines=3").json()
+                return body["source"] == "live" and body["lines"][-2:] == ["line one", "line two"]
 
-        seen: list[int] = []
-
-        async def _fake_capture(schedule_id: int, lines: int) -> str:
-            seen.append(lines)
-            return "line one\nline two\n\n\n\n"
-
-        monkeypatch.setattr(session_control, "capture", _fake_capture)
-        with gateway_test_client() as client:
-            sid = _create(client, name="l").json()["id"]
-            body = client.get(f"/api/schedules/{sid}/logs?lines=3").json()
-        assert seen == [200]
-        assert body["source"] == "live"
-        assert body["lines"] == ["line one", "line two"]
+            assert wait_for(shown)
 
     def test_logs_none_when_no_output(self, db_conn: psycopg.Connection) -> None:
-        with gateway_test_client() as client:
+        with schedule_client() as client:
             sid = _create(client, name="l").json()["id"]
             body = client.get(f"/api/schedules/{sid}/logs").json()
         assert body["source"] == "none"
@@ -245,7 +248,7 @@ class TestLogsRuns:
         from base.cluster import session_name
         from base.sessions.backend import get_shell_backend
 
-        with gateway_test_client() as client:
+        with schedule_client() as client:
             sid = _create(client, name="l").json()["id"]
             log_path = get_shell_backend().session_log_path(session_name(f"schedule-{sid}"))
             assert log_path is not None
@@ -256,17 +259,14 @@ class TestLogsRuns:
         assert body["lines"] == ["line one", "line two"]
 
     def test_runs_empty(self, db_conn: psycopg.Connection) -> None:
-        with gateway_test_client() as client:
+        with schedule_client() as client:
             sid = _create(client, name="r").json()["id"]
             assert client.get(f"/api/schedules/{sid}/runs").json() == []
 
     def test_runs_default_limit_comes_from_display_config(
-        self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+        self, db_conn: psycopg.Connection
     ) -> None:
-        from base.config import settings
-
-        monkeypatch.setattr(settings.display, "schedules_runs_default_limit", 1)
-        with gateway_test_client() as client:
+        with schedule_client(fields={"schedules_runs_default_limit": 1}) as client:
             sid = _create(client, name="r").json()["id"]
             with db_conn.cursor() as cur:
                 cur.execute("INSERT INTO schedule_runs (schedule_id) VALUES (%s)", (sid,))
@@ -276,11 +276,11 @@ class TestLogsRuns:
         assert len(body) == 1
 
     def test_runs_missing_schedule_404(self, db_conn: psycopg.Connection) -> None:
-        with gateway_test_client() as client:
+        with schedule_client() as client:
             assert client.get("/api/schedules/9999/runs").status_code == 404
 
     def test_runs_shows_in_progress_null_row(self, db_conn: psycopg.Connection) -> None:
-        with gateway_test_client() as client:
+        with schedule_client() as client:
             sid = _create(client, name="r2").json()["id"]
             with db_conn.cursor() as cur:
                 cur.execute("INSERT INTO schedule_runs (schedule_id) VALUES (%s)", (sid,))
@@ -291,7 +291,7 @@ class TestLogsRuns:
         assert body[0]["note"] is None
 
     def test_runs_orders_newest_first_with_id_tiebreak(self, db_conn: psycopg.Connection) -> None:
-        with gateway_test_client() as client:
+        with schedule_client() as client:
             sid = _create(client, name="r3").json()["id"]
             with db_conn.cursor() as cur:
                 cur.execute(

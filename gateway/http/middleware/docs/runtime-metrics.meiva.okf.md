@@ -24,6 +24,11 @@ next tick from the recovery time avoids a catch-up callback storm after a long
 freeze. The same flush reads non-blocking `psutil.Process` CPU, RSS, and file
 descriptor values.
 
+What a tick decides (the lag, the slow-tick count, when the window closes, when the next
+callback is due) is `gateway/http/middleware/loop_lag.py`, a strict module over values; the monitor
+only schedules the callback on the loop and emits the report. Its tests run the monitor on a real
+event loop with short intervals and assert the pure plan by value.
+
 The unified event-to-OTLP mapping produces:
 
 - `meiva_gateway_process_cpu_percent`, `meiva_gateway_process_rss_bytes`, and

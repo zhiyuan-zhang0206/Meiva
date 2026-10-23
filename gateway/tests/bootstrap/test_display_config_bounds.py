@@ -68,9 +68,12 @@ def test_implicit_notice_reads_use_validated_boundary_defaults(
         )
     db_conn.commit()
 
-    with gateway_test_client() as client:
-        client.app.state.notices_open_default_limit = configured.notices_open_default_limit
-        client.app.state.notices_resolved_default_page = configured.notices_resolved_default_page
+    with gateway_test_client(
+        fields={
+            "notices_open_default_limit": configured.notices_open_default_limit,
+            "notices_resolved_default_page": configured.notices_resolved_default_page,
+        }
+    ) as client:
         for path, expected in (
             ("/api/notices/open", open_limit),
             ("/api/notices/live", open_limit),

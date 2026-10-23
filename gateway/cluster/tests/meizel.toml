@@ -1,5 +1,0 @@
-[debt.first-party-patch]
-"test_bootstrap_admission.py#monkeypatch.setattr base.config.service_read.ConfigAuthority.read_env_aliases" = 1
-"test_bootstrap_admission.py#monkeypatch.setattr base.config.settings.daemon.host_control_pool_max_size" = 1
-"test_bootstrap_admission.py#monkeypatch.setattr base.config.settings.daemon.host_db_pool_max_size" = 1
-"test_bootstrap_admission.py#monkeypatch.setattr base.config.settings.daemon.host_max_concurrent_turns" = 1

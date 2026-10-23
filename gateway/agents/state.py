@@ -3,8 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from collections.abc import Callable, Sequence
-from functools import partial
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any, cast
 
@@ -30,7 +29,6 @@ from base.agents.messages.inbound import InboundKind
 from base.agents.messages.inbound_images import image_mime_for, inbound_image_urls, parse_upload_url
 from base.agents.model.model_overrides import agent_overrides
 from base.agents.upload_delivery.paths import resolve_upload_path
-from base.config import settings
 from base.config.service_read import ConfigAuthority
 from base.daemon.schedules.completion_notices import (
     CompletionNotice,
@@ -50,6 +48,7 @@ from gateway.agents.schemas import (
     TraceCheckpointMessagesResponse,
 )
 from gateway.agents.system_note import system_note_blocking as system_note_blocking
+from gateway.http.config import runtime_view
 from gateway.http.model_catalog import require_model_catalog
 from ops import lifecycle as _ops
 from ops.agents import get_agent_status
@@ -63,9 +62,7 @@ _log = logging.getLogger(__name__)
 _MAX_MESSAGE_CONTENT_BYTES = 1_048_576
 
 
-def _validate_image_ref(
-    agent_id: int, url: str, *, path_resolver: Callable[[int, str], Any] | None = None
-) -> None:
+def _validate_image_ref(agent_id: int, url: str, *, upload_home: Path) -> None:
 
     parsed = parse_upload_url(url)
     if parsed is None:
@@ -75,11 +72,8 @@ def _validate_image_ref(
         raise HTTPException(422, f"image_url {url!r} references a different agent's upload")
     if image_mime_for(name) is None:
         raise HTTPException(422, f"image_url {url!r} is not a recognized image type")
-    resolver = (
-        partial(resolve_upload_path, home=Path.home()) if path_resolver is None else path_resolver
-    )
     try:
-        path = resolver(agent_id, name)
+        path = resolve_upload_path(agent_id, name, home=upload_home)
     except ValueError as e:
         raise HTTPException(422, str(e)) from e
     if not path.is_file():
@@ -113,10 +107,10 @@ def _prepare_message_content(
                 "switch it to a vision-capable model "
                 f"({', '.join(vision_capable_provider_names(catalog=catalog))})",
             )
-        path_resolver = getattr(request.app.state, "upload_path_resolver", None)
+        upload_home = request.app.state.gateway_config.upload_home
         for b in blocks:
             if isinstance(b, ImageUrlContentBlock):
-                _validate_image_ref(agent_id, b.image_url.url, path_resolver=path_resolver)
+                _validate_image_ref(agent_id, b.image_url.url, upload_home=upload_home)
 
     return _normalize_message_content(content)
 
@@ -386,7 +380,9 @@ def get_agent_messages(
     msg_count = len(messages)
 
     end = msg_count if before is None else min(before, msg_count)
-    effective_limit = limit if limit is not None else settings.display.messages_default_limit
+    effective_limit = (
+        limit if limit is not None else runtime_view(request).display.messages_default_limit
+    )
     start = max(0, end - effective_limit)
     window = messages[start:end]
     return AgentMessagesResponse(
@@ -410,13 +406,8 @@ def get_trace_checkpoint_messages(
     with request.app.state.db_pool.connection() as conn:
         if not agent_exists(conn, agent_id):
             raise HTTPException(status_code=404, detail=f"agent {agent_id} not found")
-    trace_loader = getattr(
-        request.app.state,
-        "trace_checkpoint_messages_loader",
-        load_checkpoint_messages_by_trace,
-    )
     try:
-        checkpoint_id, messages = trace_loader(db, agent_id, trace_id)
+        checkpoint_id, messages = load_checkpoint_messages_by_trace(db, agent_id, trace_id)
     except CheckpointReadError as exc:
         _log.warning(
             "trace messages endpoint: checkpoint read failed for agent %s trace %s: %r",
@@ -484,11 +475,8 @@ def get_pending_messages(agent_id: int, request: Request) -> list[PendingInbound
 )
 def get_token_usage(agent_id: int, request: Request) -> TokenUsageResponse:
 
-    messages_loader = getattr(
-        request.app.state, "checkpoint_messages_loader", load_checkpoint_messages
-    )
     try:
-        messages = messages_loader(request.app.state.db, agent_id)
+        messages = load_checkpoint_messages(request.app.state.db, agent_id)
     except CheckpointReadError as exc:
         _log.warning(
             "token-usage: checkpoint read failed for agent %s, returning 0/0/0: %r",
@@ -518,9 +506,7 @@ def token_usage_response(
         overrides = agent_overrides(config_overlay, row[1] if row else None)
         model: str | None = config_overlay.get("llm_model") if config_overlay else None
         if not model:
-            from base.config import settings
-
-            model = settings.lm.llm_model
+            model = runtime_view(request).lm.llm_model
         if model:
             budget = resolve_context_budget(model, catalog=catalog, overrides=overrides)
             max_input_tokens = budget.max_context_tokens

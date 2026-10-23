@@ -109,7 +109,7 @@ def test_timeline_pages_inside_a_session_using_existing_numeric_cursors(
     from agent.impersonation_handoff import note_stamp, start_update
     from base.agents.history.timeline import build_timeline_items
     from base.agents.history.timeline_item import hydrate
-    from gateway.agents.history.timeline import window_before
+    from gateway.agents.history.paging import window_before
 
     lease = start(
         owner,

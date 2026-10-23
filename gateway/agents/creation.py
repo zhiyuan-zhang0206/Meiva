@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import cast
 from uuid import UUID
@@ -21,12 +20,8 @@ from base.agents.birth.spawn import create_agent_row
 from base.agents.labels import spawn_prompt_with_label
 from base.agents.observation import snapshot as snapshot_module
 from base.agents.observation.evidence import AgentAvailability, AvailabilityReason
-from base.api_contracts.agent_contract import (
-    AgentLaunchFailed,
-    AgentNotFound,
-    ForkConfigChangeNotAllowed,
-    SpawnTargetNotAgentRunner,
-)
+from base.api_contracts.agent_contract import AgentNotFound, ForkConfigChangeNotAllowed
+from base.cluster.machines import is_paused, lookup_role
 from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.db.transaction import write_transaction
@@ -36,8 +31,8 @@ from base.lm.catalog import ModelCatalog
 from base.lm.catalog.provider_keys import ProviderKeys
 from base.lm.factory import process_provider_keys
 from base.log import logger
-from gateway.agents import forward
-from gateway.agents.forward import forward_spawn_to_remote
+from gateway.agents.launch import fork_plan, launch_plan, launch_state
+from gateway.agents.launch.forward import forward_spawn_to_remote
 from gateway.http.auth.request_principal import (
     PRINCIPAL_SCOPE,
     SCOPE_HEADER,
@@ -45,7 +40,7 @@ from gateway.http.auth.request_principal import (
     request_key,
 )
 from ops.lifecycle.launch import spawn_prechecks_blocking
-from ops.rpc_schemas import ConfigNormalization, LaunchAgentRequest, SpawnAgentRequest, SpawnedAgent
+from ops.rpc_schemas import LaunchAgentRequest, SpawnAgentRequest, SpawnedAgent
 
 
 def scoped_creation_key(request: Request, key: str, *, operation_path: str) -> str:
@@ -93,9 +88,7 @@ async def create_and_launch_agent(
     the parsed request) is what a replay must match.
     """
 
-    def default_model_reader() -> str:
-        return cast(str, authority.service_field_value("llm_model"))
-
+    default_model = cast(str, authority.service_field_value("llm_model"))
     request_hash = creation_request_hash(
         creation_identity if creation_identity is not None else body.model_dump(mode="json")
     )
@@ -107,7 +100,7 @@ async def create_and_launch_agent(
             bus,
             existing,
             catalog=catalog,
-            default_model_reader=default_model_reader,
+            default_model=default_model,
         )
     keys = await asyncio.to_thread(process_provider_keys, catalog)
     tail_skills, model_receipt = await asyncio.to_thread(
@@ -160,7 +153,7 @@ async def create_and_launch_agent(
             bus,
             committed,
             catalog=catalog,
-            default_model_reader=default_model_reader,
+            default_model=default_model,
         )
     target, birth_config, launch_attempt_id = (
         committed.machine,
@@ -179,18 +172,10 @@ async def create_and_launch_agent(
     # equal to new_id in production; the runner answers for the launch). A
     # withdrawal settlement travels as the spawner's receipt (task #4306).
     spawned = await _dispatch_committed_launch(
-        pool, db, bus, target, launch, catalog=catalog, default_model_reader=default_model_reader
+        pool, db, bus, target, launch, catalog=catalog, default_model=default_model
     )
-    if model_receipt is not None:
-        spawned = spawned.model_copy(
-            update={
-                "config_normalized": ConfigNormalization(
-                    requested=model_receipt[0], resolved=model_receipt[1]
-                )
-            }
-        )
     return await _accepted_launch_receipt(
-        pool, spawned, catalog=catalog, default_model_reader=default_model_reader
+        pool, spawned, model_receipt, catalog=catalog, default_model=default_model
     )
 
 
@@ -201,7 +186,7 @@ async def recover_launch(
     existing: CreationReceipt,
     *,
     catalog: ModelCatalog,
-    default_model_reader: Callable[[], str],
+    default_model: str,
 ) -> SpawnedAgent:
     """Recover only an unadmitted birth; a completed incarnation is never revived."""
     if not existing.launch_pending:
@@ -218,10 +203,10 @@ async def recover_launch(
             birth_config=existing.birth_config,
         ),
         catalog=catalog,
-        default_model_reader=default_model_reader,
+        default_model=default_model,
     )
     return await _accepted_launch_receipt(
-        pool, spawned, catalog=catalog, default_model_reader=default_model_reader
+        pool, spawned, None, catalog=catalog, default_model=default_model
     )
 
 
@@ -267,36 +252,23 @@ def spawn_preflight_blocking(
     keys: ProviderKeys,
     authority: ConfigAuthority,
 ) -> tuple[list[str] | None, tuple[str, str] | None]:
-    from base.api_contracts.agent_contract import MachinePaused
-    from base.cluster.machines import is_paused, lookup_role
-
-    # Capability is read from the cluster registry — the same source the forward
-    # resolves the target's ops URL from — uniformly for every target, local
-    # included. The gateway is a pure router: it never introspects its own process
-    # role, so a co-located runner is just a registry entry whose ops URL happens
-    # to be localhost. An unregistered target raises MachineNotRegistered (404 +
+    # meiva:note
+    # Capability and the pause latch are read from the cluster registry — the same
+    # source the forward resolves the target's ops URL from — uniformly for every
+    # target, local included. The gateway is a pure router: it never introspects its
+    # own process role, so a co-located runner is just a registry entry whose ops URL
+    # happens to be localhost. An unregistered target raises MachineNotRegistered (404 +
     # reason via the app's MeivaAgentError handler) straight out of lookup_role.
-    if "agent-runner" not in lookup_role(db, target):
-        # A proper wire error (carries `reason`) — not a bare HTTPException, whose
-        # reason-less body trips the SDK's `raise_from_response` into a confusing
-        # `KeyError: 'reason'` that masks this message.
-        raise SpawnTargetNotAgentRunner(
-            f"spawn target {target!r} has no agent-runner capability; agents run on "
-            "agent-runner machines. Pass body.machine = <an agent-runner name> "
-            "(see meiva.agents.list_machines())."
-        )
     # A paused machine is deliberately out of the cluster: its ops server may be
-    # unreachable and its agents were terminated on pause. Refuse with a precise
-    # 409 (MachinePaused) instead of forwarding into an unreachable dial — this
-    # is the one enforcement point every spawn goes through, so schedules /
-    # watcher respawns / peer spawns targeting a paused machine all fail with
-    # the same clear reason instead of a transport error.
-    if is_paused(db, target):
-        raise MachinePaused(
-            f"spawn target {target!r} is paused (temporarily removed from the "
-            "cluster); resume it first with `meiva cluster resume <name>` on the "
-            "gateway, then spawn."
-        )
+    # meiva:note
+    # unreachable and its agents were terminated on pause, so every spawn (schedules,
+    # watcher respawns, peer spawns) is refused here with the same clear reason
+    # instead of a transport error at dial time.
+    refusal = launch_plan.spawn_target_refusal(
+        target, lookup_role(db, target), paused=is_paused(db, target)
+    )
+    if refusal is not None:
+        raise refusal
     tail_skills: list[str] | None = None
     if body.fork_from is not None:
         tail_skills = _validate_fork_config(pool, body)
@@ -335,20 +307,6 @@ def spawn_preflight_blocking(
     return tail_skills, model_receipt
 
 
-_FORK_SKILL_KEYS = ("skills_to_inject_into_system_prompt", "skills_to_expand_at_start")
-
-
-def _as_str_list(value: object) -> list[str] | None:
-    """A skill list as typed as it can be: None for anything that is not a
-    list of strings (missing key included) — the fork rule only reasons about
-    real skill lists."""
-    return (
-        cast(list[str], value)
-        if isinstance(value, list) and all(isinstance(x, str) for x in cast(list[object], value))
-        else None
-    )
-
-
 def _fork_source(
     pool: ConnectionPool, source_id: int | None
 ) -> tuple[dict[str, object], dict[str, object]]:
@@ -363,84 +321,27 @@ def _fork_source(
     return row[0] or {}, row[1] or {}
 
 
-def _offending_fork_keys(
-    merged: dict[str, object],
-    source_overlay: dict[str, object],
-    source_effective: dict[str, object],
-    fork_effective: dict[str, object],
-) -> list[str]:
-    """Overlay keys the fork may not change: any non-skill-list difference or a skill reduction."""
-    offending: list[str] = []
-    for key in set(merged) | set(source_overlay):
-        if fork_effective.get(key) == source_effective.get(key):
-            continue
-        if key not in _FORK_SKILL_KEYS:
-            offending.append(key)
-            continue
-        fork_list = _as_str_list(fork_effective.get(key))
-        source_list = _as_str_list(source_effective.get(key))
-        if fork_list is None or source_list is None or not set(source_list) <= set(fork_list):
-            offending.append(key)
-    return offending
-
-
 def _validate_fork_config(pool: ConnectionPool, body: SpawnAgentRequest) -> list[str] | None:
     source_overlay, source_birth = _fork_source(pool, body.fork_from)
-
-    fork_overlay = body.config
-    if fork_overlay is None:
-        # No config change requested: inherit the source's overlay verbatim so
-        # the fork's effective config equals the source's (the pre-2026-09-10
-        # behavior dropped the source's overlay, silently re-braining the fork).
-        body.config = dict(source_overlay) if source_overlay else None
-        return None
-
-    # The fork's stored overlay is the SOURCE's overlay plus the fork's own
-    # fields; the diff runs on that merged map (fields the fork names that
-    # simply repeat the source's value are a no-op, not a change).
-    merged = {**source_overlay, **fork_overlay}
-    source_effective = {**source_birth, **source_overlay}
-    fork_effective = {**source_birth, **merged}
-    offending = _offending_fork_keys(merged, source_overlay, source_effective, fork_effective)
-    if offending:
-        raise ForkConfigChangeNotAllowed(
-            f"fork may not change config overlay keys {sorted(offending)!r} — a fork "
-            f"keeps the source agent's config so its context cache stays valid; only "
-            f"ADDING skills to {_FORK_SKILL_KEYS!r} is allowed (loaded at the context "
-            "tail). Change the fork after it exists via restart(config_overlay=...) "
-            "instead."
-        )
-    body.config = merged
-    inject_key, expand_key = _FORK_SKILL_KEYS
-    source_inject = set(_as_str_list(source_effective.get(inject_key)) or [])
-    fork_inject = set(_as_str_list(fork_effective.get(inject_key)) or [])
-    fork_expand = set(_as_str_list(fork_effective.get(expand_key)) or [])
-    delta = sorted(s for s in fork_inject - source_inject if s not in fork_expand)
-    return delta or None
+    plan = fork_plan.fork_config_plan(source_overlay, source_birth, body.config)
+    if isinstance(plan, ForkConfigChangeNotAllowed):
+        raise plan
+    body.config = plan.config
+    return plan.tail_skills
 
 
 async def _accepted_launch_receipt(
     pool: ConnectionPool,
     spawned: SpawnedAgent,
+    normalization: tuple[str, str] | None,
     *,
     catalog: ModelCatalog,
-    default_model_reader: Callable[[], str],
+    default_model: str,
 ) -> SpawnedAgent:
     observed = await asyncio.to_thread(
-        _creation_availability,
-        pool,
-        spawned.id,
-        catalog=catalog,
-        default_model_reader=default_model_reader,
+        creation_availability, pool, spawned.id, catalog=catalog, default_model=default_model
     )
-    return spawned.model_copy(
-        update={
-            "accepted": True,
-            "execution_observed": False,
-            "reason": observed.reason,
-            "observed_at": observed.observed_at,
-        }
-    )
+    return launch_state.accepted_launch(spawned, observed, normalization)
 
 
 def _mark_launch_failure(
@@ -478,8 +379,8 @@ def _read_launch_state(
     agent_id: int,
     *,
     catalog: ModelCatalog,
-    default_model_reader: Callable[[], str],
-) -> tuple[dict[str, object], bool, bool]:
+    default_model: str,
+) -> launch_state.LaunchState:
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute(
             "SELECT status, last_admission_at, last_launch_attempt_id FROM agents_meta WHERE id=%s",
@@ -487,21 +388,12 @@ def _read_launch_state(
         )
         row = cur.fetchone()
         snapshot = snapshot_module.select_one(
-            conn, agent_id, catalog=catalog, default_model_reader=default_model_reader
+            conn, agent_id, catalog=catalog, default_model_reader=lambda: default_model
         )
     if row is None or snapshot is None:
-        return {"status": "unknown", "availability": None}, False, False
+        return launch_state.launch_state(None, None, None, None)
     status, admission_at, attempt_id = row
-    return (
-        {
-            "status": status,
-            "availability": snapshot.availability.model_dump(mode="json")
-            if snapshot.availability is not None
-            else None,
-        },
-        admission_at is not None and status != "terminated",
-        status == "idling" and admission_at is None and attempt_id is not None,
-    )
+    return launch_state.launch_state(status, admission_at, attempt_id, snapshot.availability)
 
 
 async def _dispatch_committed_launch(
@@ -512,55 +404,40 @@ async def _dispatch_committed_launch(
     launch: LaunchAgentRequest,
     *,
     catalog: ModelCatalog,
-    default_model_reader: Callable[[], str],
+    default_model: str,
 ) -> SpawnedAgent:
     attempt_id = launch.launch_attempt_id
     try:
         spawned = await forward_spawn_to_remote(db, target, launch)
-        _require_matching_launch_receipt(spawned, launch.agent_id, target)
     except Exception as exc:
-        reason = (
-            exc.reason
-            if isinstance(exc, forward.LaunchForwardError)
-            else AvailabilityReason.LAUNCH_UNKNOWN
-        )
-        detail = str(exc) if isinstance(exc, forward.LaunchForwardError) else type(exc).__name__
+        failure = launch_plan.launch_failure(exc)
+        detail = failure.detail
         logger.warning(
             "agent {} launch dispatch failed on {} attempt {}: {} ({})",
             launch.agent_id,
             target,
             attempt_id,
-            reason.value,
+            failure.reason.value,
             detail,
         )
-        state: dict[str, object]
         try:
             await asyncio.to_thread(
-                _mark_launch_failure, pool, bus, launch.agent_id, attempt_id, reason
+                _mark_launch_failure, pool, bus, launch.agent_id, attempt_id, failure.reason
             )
-            state, admitted, retry_legal = await asyncio.to_thread(
+            state = await asyncio.to_thread(
                 _read_launch_state,
                 pool,
                 launch.agent_id,
                 catalog=catalog,
-                default_model_reader=default_model_reader,
+                default_model=default_model,
             )
         except Exception as persistence_exc:
             # The retry endpoint re-reads status/attempt once Postgres returns.
-            state = {"status": "unknown", "availability": None}
-            admitted = False
-            retry_legal = True
+            state = launch_state.STORE_UNREADABLE
             detail += f"; launch-state persistence/read failed ({type(persistence_exc).__name__})"
-        if admitted:
+        if state.admitted:
             return SpawnedAgent(id=launch.agent_id)
-        raise AgentLaunchFailed(
-            f"Agent #{launch.agent_id} was created; launch dispatch to {target} failed: {detail}",
-            agent_id=launch.agent_id,
-            state=state,
-            retry_launch_path=(
-                f"/api/keyed/v1/agents/{launch.agent_id}/retry-launch" if retry_legal else None
-            ),
-        ) from exc
+        raise launch_state.launch_failed_error(launch.agent_id, target, detail, state) from exc
     try:
         await asyncio.to_thread(_clear_launch_failure, pool, bus, launch.agent_id, attempt_id)
     except Exception as exc:
@@ -572,25 +449,19 @@ async def _dispatch_committed_launch(
     return spawned
 
 
-def _require_matching_launch_receipt(spawned: SpawnedAgent, agent_id: int, target: str) -> None:
-    if spawned.id != agent_id:
-        raise forward.LaunchForwardError(
-            AvailabilityReason.LAUNCH_UNREACHABLE,
-            f"target machine={target!r} returned agent {spawned.id} for {agent_id}",
-        )
-
-
-def _creation_availability(
+# meiva:note
+# What the gateway can say about a created agent's launch; `unknown` when it cannot read.
+def creation_availability(
     pool: ConnectionPool,
     agent_id: int,
     *,
     catalog: ModelCatalog,
-    default_model_reader: Callable[[], str],
+    default_model: str,
 ) -> AgentAvailability:
     try:
         with pool.connection() as conn:
             snap = snapshot_module.select_one(
-                conn, agent_id, catalog=catalog, default_model_reader=default_model_reader
+                conn, agent_id, catalog=catalog, default_model_reader=lambda: default_model
             )
     except Exception as exc:
         logger.warning(

@@ -80,12 +80,15 @@ must not leave the watcher running after failed work ends.
 
 ## Configuration
 
-Cluster settings in `LmSettings`, read by the gateway from the configuration snapshot
-captured at its process start: `reply_suggestion_enabled`, `reply_suggestion_model`,
+Cluster settings in `LmSettings`: `reply_suggestion_enabled`, `reply_suggestion_model`,
 `reply_suggestion_gate_model`, `reply_suggestion_gate_threshold`,
-`reply_suggestion_max_input_tokens`, `reply_suggestion_max_candidates`. A changed value takes effect on the next gateway
-restart. The per-user `behavior.replySuggestions` preference is separate and takes effect
-without one. Construction captures readers without reading models or policy. After the request
+`reply_suggestion_max_input_tokens`, `reply_suggestion_max_candidates`. Each request builds a
+`ReplySuggestionPolicy` (plain values) from the gateway's own configuration owner, so a changed
+value shows in the next request. The per-user `behavior.replySuggestions` preference is
+separate. The judgments (what is refused before the conversation is read, whether the models fit
+their roles, whether the gate passes, whether a draft is usable) are pure functions in `plan.py`;
+`service.py` reads the store and makes the two model calls, which arrive as its required
+`decide` and `draft_model`. After the request
 passes the enabled, idle and excerpt checks, the draft model must be a registered
 chat model and the gate model a registered decision model
 (see [[base/lm/docs/decision-models.meiva.okf.md]]). Validation runs before cache lookup:
@@ -99,8 +102,8 @@ must be complete JSON before its parsed result is accepted; LangChain's parser
 can repair truncated JSON, which must not turn an unfinished reply into success.
 The per-call timeouts bound an enhancement whose late result is no longer useful.
 
-Code: `gateway/agents/reply_suggestion/` (`router.py`, `service.py`, `excerpt.py`,
-`configuration.py`).
+Code: `gateway/agents/reply_suggestion/` (`router.py`, `service.py`, `plan.py`, `cache.py`,
+`excerpt.py`, `configuration.py`).
 
 ## Verification scope
 

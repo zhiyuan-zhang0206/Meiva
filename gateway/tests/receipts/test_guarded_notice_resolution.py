@@ -4,11 +4,13 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
-from gateway.agents import notices
+from base.events.live.bus import EventBus
 from gateway.app import openapi_schema
+from gateway.tests.auth.gateway_config import GatewayTestClient
 from gateway.tests.events.test_notices_endpoint import insert_notice, seed_agent
 from gateway.tests.receipts.test_current_notice_receipts import HEADERS
 from gateway.tests.receipts.test_current_notice_receipts import client as client
+from gateway.tests.support.live_events.faults import unpublishable_bus
 
 
 def _path(agent: int, notice: int) -> str:
@@ -70,19 +72,16 @@ def test_concurrent_answer_reply_replays_one_inbound(
 
 
 def test_lost_tail_replays_after_notice_deletion_without_touching_later_row(
-    client: TestClient, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    client: GatewayTestClient, db_conn: psycopg.Connection, event_bus: EventBus
 ) -> None:
     agent = seed_agent(db_conn)
     notice = insert_notice(db_conn, agent, "A", require_response=True)
     path = _path(agent, notice)
     body = {"action": "answer", "reply": "yes"}
 
-    def unavailable(*args: object) -> bool:
-        raise RuntimeError("response lost after acceptance")
-
-    with monkeypatch.context() as lost:
-        lost.setattr(notices, "publish_inbound_wake", unavailable)
-        assert client.post(path, json=body, headers=HEADERS).status_code == 500
+    client.app.state.bus = unpublishable_bus()
+    assert client.post(path, json=body, headers=HEADERS).status_code == 500
+    client.app.state.bus = event_bus
     original = db_conn.execute(
         "SELECT id FROM inbound_messages WHERE agent_id=%s", (agent,)
     ).fetchone()

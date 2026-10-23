@@ -7,10 +7,9 @@ from typing import NamedTuple
 
 from starlette.requests import Request
 
-from base.config import settings
 from base.host.net.auth import verify_bearer
 from gateway.http.auth.request_principal import cluster_credential
-from gateway.http.config import GatewayConfig
+from gateway.http.config import GatewayConfig, runtime_view
 
 
 class WebhookAuthentication(NamedTuple):
@@ -23,7 +22,7 @@ class WebhookAuthentication(NamedTuple):
 def authenticate_webhook(request: Request, *, provider: str) -> WebhookAuthentication:
     """Verify the alert-scoped token, a cluster bearer (the human secret or the
     active generation's machine API token), or tokenless loopback."""
-    token = settings.alerts.webhook_token
+    token = runtime_view(request).alerts.webhook_token
     token_value = token.get_secret_value() if token is not None else ""
     if token_value:
         presented = request.headers.get("X-Alerts-Token")

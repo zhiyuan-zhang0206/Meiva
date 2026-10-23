@@ -36,9 +36,11 @@ from base.agents.history.hierarchy.units import read_times
 from base.agents.history.message_tokens import summarize_segments
 from base.agents.observation.snapshot import agent_model_target
 from base.db import Database, agent_exists
+from base.host.env.agent_slices import ModelOverrides
 from base.lm.catalog import ModelCatalog
 from base.lm.context_budget import UnknownModelWindowError
-from gateway.agents.history.read_inputs import UnderstandingReadPolicy
+from gateway.agents.history.configuration import request_understanding_read
+from gateway.agents.history.read_inputs import UnderstandingRead
 from gateway.http.model_catalog import require_model_catalog
 
 router = APIRouter()
@@ -263,62 +265,50 @@ def _require_agent(request: Request, agent_id: int) -> None:
 
 
 def _load(
-    db: Database, agent_id: int, *, policy: UnderstandingReadPolicy
+    db: Database, agent_id: int, *, read: UnderstandingRead
 ) -> tuple[FullHistory, list[Session]]:
 
     history = load_checkpoint_history_full(db, agent_id)
     boundaries = list(reversed(list_compact_boundary_checkpoint_ids(db, agent_id)))
     return history, build_sessions(
-        history, boundaries, read_times(history.messages, timeline_inputs=policy.rendering)
+        history, boundaries, read_times(history.messages, timeline_inputs=read.rendering)
     )
 
 
-def build_model(
-    db: Database, agent_id: int, *, catalog: ModelCatalog, policy: UnderstandingReadPolicy
-) -> str:
+def _model_target(
+    db: Database, agent_id: int, *, catalog: ModelCatalog, read: UnderstandingRead
+) -> tuple[str, ModelOverrides]:
+    # meiva:note
+    # `agent_model_target` takes the default model as a reader; the value is already read.
     return agent_model_target(
         db,
         agent_id,
-        fallback=policy.hierarchy_model(),
+        fallback=read.hierarchy_model,
         catalog=catalog,
-        default_model_reader=policy.default_model,
-    )[0]
-
-
-def chunk_size(
-    db: Database, agent_id: int, *, catalog: ModelCatalog, policy: UnderstandingReadPolicy
-) -> int:
-
-    model, overrides = agent_model_target(
-        db,
-        agent_id,
-        fallback=policy.hierarchy_model(),
-        catalog=catalog,
-        default_model_reader=policy.default_model,
+        default_model_reader=lambda: read.default_model,
     )
-    return chunk_threshold(model, overrides, policy.chunk_ratio(), catalog=catalog)
 
 
 def _sessions_blocking(request: Request, agent_id: int) -> SessionsResponse:
     _require_agent(request, agent_id)
     catalog = require_model_catalog(request)
     db: Database = request.app.state.db
-    policy: UnderstandingReadPolicy = request.app.state.understanding_policy
-    history, sessions = _load(db, agent_id, policy=policy)
+    read = request_understanding_read(request)
+    history, sessions = _load(db, agent_id, read=read)
     covered = load_covered_spans(request.app.state.db_pool, agent_id)
-    model = build_model(db, agent_id, catalog=catalog, policy=policy)
+    model, overrides = _model_target(db, agent_id, catalog=catalog, read=read)
     jobs = plan_jobs(
         history,
         sessions,
         covered,
-        threshold=chunk_size(db, agent_id, catalog=catalog, policy=policy),
-        timeline_inputs=policy.rendering,
+        threshold=chunk_threshold(model, overrides, read.chunk_ratio, catalog=catalog),
+        timeline_inputs=read.rendering,
     )
     totals = summarize_segments(history)
     return SessionsResponse(
         agent_id=agent_id,
         model=model,
-        understanding_enabled=policy.enabled(),
+        understanding_enabled=read.enabled,
         cost_basis=COST_BASIS,
         sessions=[
             SessionOut(
@@ -333,7 +323,7 @@ def _sessions_blocking(request: Request, agent_id: int) -> SessionsResponse:
                 estimated=totals[s.segment].estimated,
                 exact_fraction=totals[s.segment].exact_fraction,
                 coverage=SessionCoverage(
-                    **asdict(coverage_of(history, s, covered, timeline_inputs=policy.rendering))
+                    **asdict(coverage_of(history, s, covered, timeline_inputs=read.rendering))
                 ),
                 estimate=_estimate_out(
                     estimate_cost(
@@ -385,26 +375,21 @@ def _build_blocking(request: Request, agent_id: int, body: BuildRequest) -> Buil
     _require_agent(request, agent_id)
     catalog = require_model_catalog(request)
     db: Database = request.app.state.db
-    policy: UnderstandingReadPolicy = request.app.state.understanding_policy
-    history, sessions = _load(db, agent_id, policy=policy)
+    read = request_understanding_read(request)
+    history, sessions = _load(db, agent_id, read=read)
     chosen = _select(sessions, body)
     covered = load_covered_spans(request.app.state.db_pool, agent_id)
+    model, overrides = _model_target(db, agent_id, catalog=catalog, read=read)
     planned = plan_jobs(
         history,
         chosen,
         covered,
-        threshold=chunk_size(db, agent_id, catalog=catalog, policy=policy),
-        timeline_inputs=policy.rendering,
+        threshold=chunk_threshold(model, overrides, read.chunk_ratio, catalog=catalog),
+        timeline_inputs=read.rendering,
     )
-    estimate = _estimate_out(
-        estimate_cost(
-            build_model(db, agent_id, catalog=catalog, policy=policy),
-            planned,
-            prices=catalog.prices,
-        )
-    )
+    estimate = _estimate_out(estimate_cost(model, planned, prices=catalog.prices))
     numbers = [s.number for s in chosen]
-    enabled = policy.enabled()
+    enabled = read.enabled
     if body.dry_run:
         return BuildResponse(
             agent_id=agent_id,
@@ -435,7 +420,9 @@ def _build_blocking(request: Request, agent_id: int, body: BuildRequest) -> Buil
     )
 
 
-async def _run[T](fn: Callable[..., T], *args: object) -> T:
+# meiva:note
+# Run a blocking history read off the loop, answering its known failures as HTTP errors.
+async def run_history_read[T](fn: Callable[..., T], *args: object) -> T:
     try:
         return await asyncio.to_thread(fn, *args)
     except CheckpointReadError as exc:
@@ -454,7 +441,7 @@ async def _run[T](fn: Callable[..., T], *args: object) -> T:
 )
 async def get_agent_sessions(agent_id: int, request: Request) -> SessionsResponse:
 
-    return await _run(_sessions_blocking, request, agent_id)
+    return await run_history_read(_sessions_blocking, request, agent_id)
 
 
 @router.post(
@@ -465,7 +452,7 @@ async def post_understanding_build(
     agent_id: int, body: BuildRequest, request: Request
 ) -> BuildResponse:
 
-    return await _run(_build_blocking, request, agent_id, body)
+    return await run_history_read(_build_blocking, request, agent_id, body)
 
 
 def _progress_blocking(request: Request, agent_id: int, build_id: int) -> BuildProgressResponse:
@@ -487,4 +474,4 @@ async def get_understanding_build(
     agent_id: int, build_id: int, request: Request
 ) -> BuildProgressResponse:
 
-    return await _run(_progress_blocking, request, agent_id, build_id)
+    return await run_history_read(_progress_blocking, request, agent_id, build_id)

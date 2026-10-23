@@ -1,17 +1,27 @@
-exports = ["daemon.py", "engine.py", "host_restart.py", "manager.py", "recovery_gate.py", "requests.py", "revisions.py", "runner.py"]
+exports = ["blocked_streak.py", "daemon.py", "engine.py", "host_restart.py", "launch_events.py", "manager.py", "requests.py", "revisions.py", "runner.py", "stall_policy.py", "tests"]
 
 [uses]
-"daemon.py" = ["manager.py", "requests.py"]
-"manager.py" = ["host_restart.py", "recovery_gate.py", "revisions.py"]
+"daemon.py" = ["manager.py", "manager_policy.py", "requests.py"]
+"engine.py" = ["guard_admission.py", "script_outcome.py", "stall_policy.py"]
+"guard_admission.py" = ["script_outcome.py"]
+"manager.py" = ["blocked_streak.py", "convergence.py", "host_restart.py", "launch_events.py", "manager_policy.py", "recovery_gate.py", "revisions.py"]
 "requests.py" = ["manager.py"]
-"runner.py" = ["engine.py"]
-"tests" = ["daemon.py", "manager.py", "recovery_gate.py", "runner.py"]
+"revisions.py" = ["convergence.py"]
+"runner.py" = ["engine.py", "stall_policy.py"]
+"tests" = ["blocked_streak.py", "convergence.py", "daemon.py", "guard_admission.py", "manager.py", "manager_policy.py", "recovery_gate.py", "runner.py", "script_outcome.py", "stall_policy.py"]
 
 [external]
 "engine.py" = "runs schedule scripts (the one materialized from the database under $MEIVA_HOME/schedules, and the built-in templates in schedules/); run content, not a dependency"
 
 [purity]
 "__init__.py" = "strict"
+"blocked_streak.py" = "strict"
+"convergence.py" = "strict"
+"guard_admission.py" = "strict"
+"manager_policy.py" = "strict"
+"recovery_gate.py" = "strict"
+"script_outcome.py" = "strict"
+"stall_policy.py" = "strict"
 
 [debt.stdlib-patch]
 "engine.py#assignment sys.argv" = 2

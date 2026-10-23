@@ -59,7 +59,7 @@ def test_active_archives_and_unknown_files_stay_attachments(name: str) -> None:
 )
 def test_client_paths_and_unbounded_chains_are_rejected(references: list[str]) -> None:
     with pytest.raises(HTTPException) as error:
-        resource_request(1, references)
+        resource_request(1, references, max_depth=settings.to_user.max_chain_depth)
     assert error.value.status_code == 422
 
 
@@ -76,6 +76,7 @@ async def test_binary_response_and_auth_are_preserved() -> None:
             "http://runner/to-user/resource",
             ToUserReadRequest(agent_id=1),
             {"Authorization": "Bearer test"},
+            limit=settings.to_user.max_resource_bytes,
         )
     assert result == b"\x00\xffbinary"
 
@@ -101,6 +102,10 @@ async def test_missing_file_and_oversize_fail_explicitly() -> None:
         ) as client:
             with pytest.raises(HTTPException) as error:
                 await fetch_resource(
-                    client, "http://runner/to-user/resource", ToUserReadRequest(agent_id=1), {}
+                    client,
+                    "http://runner/to-user/resource",
+                    ToUserReadRequest(agent_id=1),
+                    {},
+                    limit=settings.to_user.max_resource_bytes,
                 )
             assert error.value.status_code == expected

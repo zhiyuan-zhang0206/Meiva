@@ -1,6 +1,4 @@
-"""Real HTTP retry receipts, frozen identities and repeatable native wake fences."""
-
-from collections.abc import Callable, Iterator
+import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from typing import Any
@@ -13,38 +11,13 @@ from fastapi.testclient import TestClient
 
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
-from base.config import settings
-from gateway.agents import creation, launch_retry
 from gateway.tests.auth.gateway_config import GatewayTestClient, gateway_test_client, spawn_via_http
-from ops.rpc_schemas import LaunchAgentRequest, SpawnedAgent
-
-
-@pytest.fixture
-def client(
-    gateway_data_plane: None,
-    monkeypatch: pytest.MonkeyPatch,
-    set_machine_identity: Callable[..., None],
-    db_conn: psycopg.Connection[Any],
-    *,
-    machine_identity: MachineIdentity,
-) -> Iterator[GatewayTestClient]:
-    set_machine_identity(role="agent-runner", name="local-test")
-    db_conn.execute("INSERT INTO machines(name) VALUES ('local-test') ON CONFLICT DO NOTHING")
-    db_conn.commit()
-    monkeypatch.setattr(settings.data_plane, "cluster_secret", "retry-test-secret")
-
-    async def born(_db: object, _target: str, body: LaunchAgentRequest) -> SpawnedAgent:
-        return SpawnedAgent(id=body.agent_id)
-
-    async def reconcile(*_args: object, **_kwargs: object) -> dict[str, bool]:
-        return {"wake_published": False}
-
-    monkeypatch.setattr(creation, "forward_spawn_to_remote", born)
-    monkeypatch.setattr(launch_retry.rpc, "dispatch_to_machine", reconcile)
-    with gateway_test_client(
-        headers={"Authorization": "Bearer retry-test-secret"}, machine=machine_identity
-    ) as value:
-        yield value
+from gateway.tests.lifecycle.creation.test_guarded_creation import SECRET
+from gateway.tests.lifecycle.creation.test_guarded_creation import client as client
+from gateway.tests.lifecycle.creation.test_guarded_creation import runner as runner
+from gateway.tests.support.live_events.faults import unpublishable_bus
+from gateway.tests.support.live_events.wakes import recording_wakes
+from gateway.tests.support.runner_ops.ops_stub import failed, launched, runner_ops
 
 
 def birth(client: TestClient) -> tuple[int, str]:
@@ -96,11 +69,11 @@ def test_lost_response_concurrency_and_deliberate_new_attempt(
 
 
 def test_replay_survives_mutable_config_admission_and_target_deletion(
-    client: GatewayTestClient, db_conn: psycopg.Connection[Any], monkeypatch: pytest.MonkeyPatch
+    client: GatewayTestClient, db_conn: psycopg.Connection[Any]
 ) -> None:
     agent_id, prior = birth(client)
     accepted = submit(client, agent_id, prior).json()
-    monkeypatch.setattr(settings.lm, "llm_model", "changed-after-acceptance")
+    client.app.state.gateway_process.config.set_field("llm_model", "changed-after-acceptance")
     snapshot = db_conn.execute(
         "SELECT config_overlay, birth_config FROM agent_launch_retry_receipts"
     ).fetchone()
@@ -162,7 +135,7 @@ def test_bad_body_and_revoked_auth_do_not_execute(
     with gateway_test_client(
         process=client.app.state.gateway_process,
         config=replace(client.app.state.gateway_config, cluster_secret="rotated"),  # noqa: S106 -- isolated test credential
-        headers={"Authorization": "Bearer retry-test-secret"},
+        headers={"Authorization": f"Bearer {SECRET}"},
     ) as rotated:
         assert submit(rotated, agent_id, prior).status_code == 401
     assert db_conn.execute(
@@ -171,27 +144,24 @@ def test_bad_body_and_revoked_auth_do_not_execute(
 
 
 def test_unsupported_old_runner_has_no_fallback_and_keeps_acceptance(
-    client: GatewayTestClient, monkeypatch: pytest.MonkeyPatch
+    client: GatewayTestClient, db_conn: psycopg.Connection[Any]
 ) -> None:
-    calls: list[dict[str, Any]] = []
-
-    async def old(_db: object, **kwargs: Any) -> dict[str, Any]:
-        calls.append(kwargs)
-        raise launch_retry.rpc.ClusterOpFailed({"error": "unknown kind"})
-
-    monkeypatch.setattr(launch_retry.rpc, "dispatch_to_machine", old)
-    agent_id, prior = birth(client)
-    first = submit(client, agent_id, prior)
-    assert first.status_code == 200, first.text
-    assert submit(client, agent_id, prior).json() == first.json()
-    assert [c["kind"] for c in calls] == ["launch-reconcile", "launch-reconcile"]
+    old_runner = {"spawn-launch": launched, "launch-reconcile": failed({"error": "unknown kind"})}
+    with runner_ops(db_conn, "local-test", old_runner) as old:
+        agent_id, prior = birth(client)
+        first = submit(client, agent_id, prior)
+        assert first.status_code == 200, first.text
+        assert submit(client, agent_id, prior).json() == first.json()
+    assert [call.kind for call in old.calls if call.kind != "spawn-launch"] == [
+        "launch-reconcile",
+        "launch-reconcile",
+    ]
 
 
 @pytest.mark.parametrize("changed", ["admitted", "terminated", "new-attempt", "machine", "deleted"])
 def test_native_repeat_rejects_superseded_target(
     client: GatewayTestClient,
     db_conn: psycopg.Connection[Any],
-    monkeypatch: pytest.MonkeyPatch,
     changed: str,
     *,
     machine_identity: MachineIdentity,
@@ -201,50 +171,38 @@ def test_native_repeat_rejects_superseded_target(
 
     agent_id, prior = birth(client)
     accepted = submit(client, agent_id, prior).json()
-    wakes: list[tuple[object, ...]] = []
-
-    def wake(*args: object) -> bool:
-        wakes.append(args)
-        return True
-
-    monkeypatch.setattr(launch_reconcile, "publish_inbound_wake", wake)
     payload = LaunchReconcileRequest(launch_attempt_id=accepted["launch_attempt_id"])
-    assert launch_reconcile.reconcile(
-        client.app.state.db,
-        client.app.state.bus,
-        payload,
-        client.app.state.db_pool,
-        local_machine=machine_identity.name(),
-    ).wake_published
-    assert launch_reconcile.reconcile(
-        client.app.state.db,
-        client.app.state.bus,
-        payload,
-        client.app.state.db_pool,
-        local_machine=machine_identity.name(),
-    ).wake_published
-    if changed == "admitted":
-        db_conn.execute(
-            "UPDATE agents_meta SET last_admission_at=now() WHERE id=%s",
-            (agent_id,),
-        )
-    elif changed == "terminated":
-        db_conn.execute("UPDATE agents_meta SET status='terminated' WHERE id=%s", (agent_id,))
-    elif changed == "new-attempt":
-        submit(client, agent_id, accepted["launch_attempt_id"], "next")
-    elif changed == "machine":
-        db_conn.execute("UPDATE agents_meta SET machine='other' WHERE id=%s", (agent_id,))
-    else:
-        db_conn.execute("DELETE FROM agents_meta WHERE id=%s", (agent_id,))
-    db_conn.commit()
-    assert not launch_reconcile.reconcile(
-        client.app.state.db,
-        client.app.state.bus,
-        payload,
-        client.app.state.db_pool,
-        local_machine=machine_identity.name(),
-    ).wake_published
-    assert len(wakes) == 2
+
+    def reconcile() -> bool:
+        return launch_reconcile.reconcile(
+            client.app.state.db,
+            client.app.state.bus,
+            payload,
+            client.app.state.db_pool,
+            local_machine=machine_identity.name(),
+        ).wake_published
+
+    with recording_wakes(client.app.state.bus, agent_id) as wakes:
+        assert reconcile()
+        assert reconcile()
+        wakes.settle(2)
+        if changed == "admitted":
+            db_conn.execute(
+                "UPDATE agents_meta SET last_admission_at=now() WHERE id=%s",
+                (agent_id,),
+            )
+        elif changed == "terminated":
+            db_conn.execute("UPDATE agents_meta SET status='terminated' WHERE id=%s", (agent_id,))
+        elif changed == "new-attempt":
+            submit(client, agent_id, accepted["launch_attempt_id"], "next")
+        elif changed == "machine":
+            db_conn.execute("UPDATE agents_meta SET machine='other' WHERE id=%s", (agent_id,))
+        else:
+            db_conn.execute("DELETE FROM agents_meta WHERE id=%s", (agent_id,))
+        db_conn.commit()
+        assert not reconcile()
+        wakes.quiet()
+        assert wakes.count() == 2
     count = db_conn.execute("SELECT count(*) FROM agent_launch_retry_receipts").fetchone()
     assert count is not None and count[0] >= 1
 
@@ -252,7 +210,6 @@ def test_native_repeat_rejects_superseded_target(
 def test_native_crash_before_wake_and_result_ack_loss_preserve_attempt(
     client: GatewayTestClient,
     db_conn: psycopg.Connection[Any],
-    monkeypatch: pytest.MonkeyPatch,
     *,
     machine_identity: MachineIdentity,
 ) -> None:
@@ -263,42 +220,25 @@ def test_native_crash_before_wake_and_result_ack_loss_preserve_attempt(
     accepted = submit(client, agent_id, prior).json()
     payload = LaunchReconcileRequest(launch_attempt_id=accepted["launch_attempt_id"])
 
-    def crash(*_args: object) -> bool:
-        raise RuntimeError("native crash before publication")
-
-    monkeypatch.setattr(launch_reconcile, "publish_inbound_wake", crash)
-    with pytest.raises(RuntimeError, match="native crash"):
-        launch_reconcile.reconcile(
+    def reconcile(bus: Any) -> bool:
+        return launch_reconcile.reconcile(
             client.app.state.db,
-            client.app.state.bus,
+            bus,
             payload,
             client.app.state.db_pool,
             local_machine=machine_identity.name(),
-        )
-    wakes: list[tuple[object, ...]] = []
+        ).wake_published
 
-    def wake(*args: object) -> bool:
-        wakes.append(args)
-        return True
-
-    monkeypatch.setattr(launch_reconcile, "publish_inbound_wake", wake)
-    # Discard the successful result just as a lost RPC ACK; repeat the same
-    # natural wake without introducing a second queue item or rotating identity.
-    launch_reconcile.reconcile(
-        client.app.state.db,
-        client.app.state.bus,
-        payload,
-        client.app.state.db_pool,
-        local_machine=machine_identity.name(),
-    )
-    launch_reconcile.reconcile(
-        client.app.state.db,
-        client.app.state.bus,
-        payload,
-        client.app.state.db_pool,
-        local_machine=machine_identity.name(),
-    )
-    assert len(wakes) == 2
+    with pytest.raises(ValueError, match="URL"):
+        # meiva:note
+        # the native process dies before the wake is published
+        reconcile(unpublishable_bus())
+    with recording_wakes(client.app.state.bus, agent_id) as wakes:
+        # Discard the successful result just as a lost RPC ACK; repeat the same
+        # natural wake without introducing a second queue item or rotating identity.
+        reconcile(client.app.state.bus)
+        reconcile(client.app.state.bus)
+        wakes.settle(2)
     assert db_conn.execute(
         "SELECT last_launch_attempt_id FROM agents_meta WHERE id=%s", (agent_id,)
     ).fetchone() == (payload.launch_attempt_id,)
@@ -313,46 +253,49 @@ def test_native_crash_before_wake_and_result_ack_loss_preserve_attempt(
 def test_reconcile_holds_row_fence_until_publication(
     client: GatewayTestClient,
     db_conn: psycopg.Connection[Any],
-    monkeypatch: pytest.MonkeyPatch,
     *,
     machine_identity: MachineIdentity,
 ) -> None:
-    from threading import Event
-
     from base.api_contracts.launch_retry import LaunchReconcileRequest
     from ops.lifecycle import launch_reconcile
 
     agent_id, prior = birth(client)
     accepted = submit(client, agent_id, prior).json()
     payload = LaunchReconcileRequest(launch_attempt_id=accepted["launch_attempt_id"])
-    publishing, release = Event(), Event()
+    redis = client.app.state.bus.sync_redis()
+    # meiva:note
+    # Redis answers no command for a while: the publication is slow, for real.
+    redis.client_pause(1500, all=True)
+    try:
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            pending = executor.submit(
+                launch_reconcile.reconcile,
+                client.app.state.db,
+                client.app.state.bus,
+                payload,
+                client.app.state.db_pool,
+                local_machine=machine_identity.name(),
+            )
+            _wait_until_row_is_fenced(db_conn, agent_id)
+            assert pending.result(timeout=10).wake_published
+    finally:
+        redis.close()
 
-    def wake(*_args: object) -> bool:
-        publishing.set()
-        assert release.wait(5)
-        return True
 
-    monkeypatch.setattr(launch_reconcile, "publish_inbound_wake", wake)
-    with ThreadPoolExecutor(max_workers=1) as executor:
-        pending = executor.submit(
-            launch_reconcile.reconcile,
-            client.app.state.db,
-            client.app.state.bus,
-            payload,
-            client.app.state.db_pool,
-            local_machine=machine_identity.name(),
-        )
+# meiva:note
+# The reconcile holds the agent row while its wake is stuck in Redis: the row cannot be taken.
+def _wait_until_row_is_fenced(db_conn: psycopg.Connection[Any], agent_id: int) -> None:
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
         try:
-            assert publishing.wait(5)
             db_conn.execute("SET LOCAL lock_timeout='100ms'")
-            with pytest.raises(psycopg.errors.LockNotAvailable):
-                db_conn.execute(
-                    "UPDATE agents_meta SET status='terminated' WHERE id=%s", (agent_id,)
-                )
+            db_conn.execute("SELECT 1 FROM agents_meta WHERE id=%s FOR UPDATE NOWAIT", (agent_id,))
+        except psycopg.errors.LockNotAvailable:
             db_conn.rollback()
-        finally:
-            release.set()
-        assert pending.result(timeout=5).wake_published
+            return
+        db_conn.rollback()
+        time.sleep(0.02)
+    raise AssertionError("the reconcile never held the agent row")
 
 
 def test_receipt_insert_and_pointer_rotation_roll_back_together(

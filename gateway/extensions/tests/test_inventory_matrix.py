@@ -1,6 +1,8 @@
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from gateway.extensions.inventory_matrix import collapse_inventory
+from gateway.cluster.roster.liveness_snapshot import Snapshot
+from gateway.extensions.inventory_matrix import collapse_inventory, plan_dials
 from ops.rpc_schemas import InventoryReadResult
 
 
@@ -65,3 +67,43 @@ def test_collapse_mcp_carries_capability_verdict() -> None:
     assert srv.hosts["A"].enabled is False
     assert srv.hosts["A"].can_enable is False
     assert srv.hosts["A"].reason == "needs token"
+
+
+_NOW = datetime(2026, 10, 2, 12, 0, tzinfo=UTC)
+
+
+def _snapshot(*, failures: int, age_s: float = 5.0) -> Snapshot:
+    return Snapshot(
+        observed_at=_NOW - timedelta(seconds=age_s),
+        reachable=failures == 0,
+        consecutive_failures=failures,
+        status=None,
+        status_at=None,
+    )
+
+
+def test_plan_dials_skips_stopped_and_known_down_hosts() -> None:
+    plan = plan_dials(
+        [("A", False), ("B", True), ("C", False), ("D", False), ("E", False)],
+        {
+            # meiva:note
+            # fresh, failed twice: known down
+            "C": _snapshot(failures=2),
+            # meiva:note
+            # fresh, failed once: still dialed
+            "D": _snapshot(failures=1),
+            # meiva:note
+            # stale: no evidence, dialed
+            "E": _snapshot(failures=5, age_s=3600),
+        },
+        now=_NOW,
+    )
+
+    assert plan.to_dial == ("A", "D", "E")
+    assert plan.skipped == ("B", "C")
+
+
+def test_plan_dials_without_snapshots_dials_every_running_host() -> None:
+    plan = plan_dials([("A", False), ("B", True)], {}, now=_NOW)
+
+    assert (plan.to_dial, plan.skipped) == (("A",), ("B",))

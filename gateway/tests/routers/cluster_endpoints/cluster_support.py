@@ -1,39 +1,69 @@
 from __future__ import annotations
 
-from collections.abc import Generator
-from typing import Any
+import uuid
+from pathlib import Path
 
 import psycopg
 import pytest
+from psycopg.types.json import Jsonb
 
 from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
+from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
-
-_active_admin_query: list[Any] = []
-
-
-def active_admin_query() -> Any:
-    return _active_admin_query[-1] if _active_admin_query else None
+from gateway.cluster.process_boot import LOADED_IMAGE
+from gateway.cluster.roster.roster_probe import IdentityMismatchLog
+from gateway.cluster.status import RosterEnv
 
 
-@pytest.fixture
-def fake_admin_events() -> Generator[dict[str, Any]]:
-    """Configure a cluster_events_reader stub; record kwargs and return canned rows."""
+# meiva:note
+# The gateway-process facts one roster read needs, with a fresh mismatch log.
+def roster_env(
+    database: Database,
+    machine: MachineIdentity,
+    *,
+    home: Path,
+    probe_timeout_s: float = 8.0,
+) -> RosterEnv:
+    return RosterEnv(
+        db=database,
+        identity_log=IdentityMismatchLog(),
+        image=LOADED_IMAGE,
+        home=home,
+        machine=machine,
+        probe_timeout_s=probe_timeout_s,
+    )
 
-    calls: list[dict[str, Any]] = []
-    rows: list[dict[str, Any]] = []
 
-    def _query(_conn: object, **kwargs: Any) -> tuple[list[dict[str, Any]], bool]:
-        calls.append(kwargs)
-        return rows, False
-
-    _active_admin_query.append(_query)
-    try:
-        yield {"calls": calls, "rows": rows, "query": _query}
-    finally:
-        _active_admin_query.clear()
+# meiva:note
+# One `telemetry_events` row the admin events endpoint reads, committed.
+def seed_event(
+    conn: psycopg.Connection,
+    *,
+    event_name: str = "log",
+    level: str = "info",
+    agent_id: int | None = None,
+    msg: str = "hi",
+    seconds_ago: float = 60.0,
+    category: str = "telemetry",
+) -> None:
+    conn.execute(
+        "INSERT INTO telemetry_events (event_uid, ts, machine, cluster, process, category, "
+        "event_name, level, source, agent_id, attributes) "
+        "VALUES (%s, now() - make_interval(secs => %s), 'machine-1', 'c', 'gateway', %s, %s, %s, "
+        "'test', %s, %s)",
+        (
+            uuid.uuid4().int % (1 << 62),
+            seconds_ago,
+            category,
+            event_name,
+            level,
+            agent_id,
+            Jsonb({"msg": msg}),
+        ),
+    )
+    conn.commit()
 
 
 @pytest.fixture(autouse=True)

@@ -1,24 +1,50 @@
+# meiva:note
+# A reply-suggestion harness over the real store.
+#
+# The agent, its status and its conversation live in the throwaway Postgres; the service reads them
+# as it does in the gateway. Only the two model calls are doubles (`FakeDecide`, `FakeChat`), handed
+# to the service as its required `decide` and `draft_model`.
+
 from __future__ import annotations
 
 import json
 from collections.abc import Mapping, Sequence
+from dataclasses import replace
 from typing import Any
 
+import psycopg
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
+from langgraph.checkpoint.base import CheckpointMetadata, empty_checkpoint
+from langgraph.checkpoint.postgres import PostgresSaver
 
-from base.agents.history.timeline import TimelineItem, build_timeline_items
 from base.agents.history.timeline_inputs import TimelineReadInputs
 from base.api_contracts.agent_contract import AgentStatus
+from base.config import settings
+from base.db import Database, create_agent
 from base.lm.catalog import ModelCatalog
 from base.lm.catalog.decide.types import Decision, Question
 from base.lm.catalog.provider_keys import ProviderKeys
 from base.packages.tests.model_catalog import inert_keys
-from gateway.agents.reply_suggestion.service import (
-    DraftRuntime,
-    ModelReaders,
-    ReplySuggestionPolicy,
-    ReplySuggestionService,
-)
+from gateway.agents.reply_suggestion.plan import ReplySuggestionPolicy
+from gateway.agents.reply_suggestion.schemas import ReplySuggestionResponse
+from gateway.agents.reply_suggestion.service import ReplySuggestionService
+from gateway.http.model_catalog import CatalogLoadFailure
+
+
+# meiva:note
+# Store `messages` as the agent's checkpoint `version` (the highest version is the live head).
+def put_checkpoint(agent_id: int, messages: list[BaseMessage], *, version: str) -> None:
+    checkpoint = empty_checkpoint()
+    checkpoint["channel_values"] = {"messages": messages}
+    checkpoint["channel_versions"] = {"messages": version, "__start__": "1"}
+    with PostgresSaver.from_conn_string(settings.data_plane.db_url) as saver:
+        saver.setup()
+        saver.put(
+            config={"configurable": {"thread_id": str(agent_id), "checkpoint_ns": ""}},
+            checkpoint=checkpoint,
+            metadata=CheckpointMetadata(source="input", step=int(version), parents={}),
+            new_versions={"messages": version},
+        )
 
 
 def inbound(text: str, source: str = "user") -> HumanMessage:
@@ -53,24 +79,15 @@ def useful_reply(probability: float) -> Mapping[str, Decision]:
     }
 
 
-class Settings:
-    def __init__(self) -> None:
-        self.enabled = True
-        self.model = "deepseek-flash"
-        self.gate_model = "jev-1.13.0"
-        self.threshold = 0.5
-        self.max_input_tokens = 1500
-        self.max_candidates = 3
-
-    def policy(self) -> ReplySuggestionPolicy:
-        return ReplySuggestionPolicy(
-            enabled=lambda: self.enabled,
-            model=lambda: self.model,
-            gate_model=lambda: self.gate_model,
-            gate_threshold=lambda: self.threshold,
-            max_input_tokens=lambda: self.max_input_tokens,
-            max_candidates=lambda: self.max_candidates,
-        )
+def default_policy() -> ReplySuggestionPolicy:
+    return ReplySuggestionPolicy(
+        enabled=True,
+        model="deepseek-flash",
+        gate_model="jev-1.13.0",
+        gate_threshold=0.5,
+        max_input_tokens=1500,
+        max_candidates=3,
+    )
 
 
 class FakeDecide:
@@ -98,6 +115,7 @@ class FakeChat:
         self.built: list[str] = []
         self.invocations: list[Sequence[BaseMessage]] = []
         self.bindings: list[tuple[dict[str, Any], dict[str, Any]]] = []
+        self.usage = {"input_tokens": 120, "output_tokens": 14, "total_tokens": 134}
         self.raw = AIMessage(content=reply)
         self.metadata = {"model_provider": "anthropic", "stop_reason": "end_turn"}
 
@@ -113,7 +131,9 @@ class FakeChat:
         self.invocations.append(messages)
         if self.error is not None:
             raise self.error
-        self.raw = AIMessage(content=self.reply, response_metadata=self.metadata)
+        self.raw = AIMessage(
+            content=self.reply, response_metadata=self.metadata, usage_metadata=self.usage
+        )
         try:
             parsed = json.loads(self.reply)
         except json.JSONDecodeError as error:
@@ -121,41 +141,62 @@ class FakeChat:
         return {"raw": self.raw, "parsed": parsed, "parsing_error": None}
 
 
+# meiva:note
+# One idle agent whose newest message is a question, plus a service with model doubles.
 class Harness:
-    def __init__(self, catalog: ModelCatalog) -> None:
-        self.catalog = catalog
-        self.catalog_reads = 0
-        self.catalog_error: Exception | None = None
-        self.settings = Settings()
+    def __init__(
+        self, db_conn: psycopg.Connection, database: Database, catalog: ModelCatalog
+    ) -> None:
+        self.db_conn = db_conn
+        self.database = database
+        self.catalog: ModelCatalog | CatalogLoadFailure = catalog
+        self.policy = default_policy()
         self.decide = FakeDecide()
         self.chat = FakeChat()
-        self.status = AgentStatus.IDLING
-        self.messages: list[BaseMessage] = conversation()
-        self.loads: list[int] = []
-        self.usage_rows: list[dict[str, Any]] = []
-        self._rendering = TimelineReadInputs(_no_clock, lambda: False)
-        self.service = ReplySuggestionService(
-            policy=self.settings.policy(),
-            models=ModelReaders(catalog=self._read_catalog, keys=inert_keys),
-            load_timeline=self._load_timeline,
-            agent_status=lambda _agent_id: self.status,
-            decide=self.decide,
-            draft=DraftRuntime(draft_model=self.chat.factory, log_usage=self._record_usage),
+        self.service = ReplySuggestionService(decide=self.decide, draft_model=self.chat.factory)
+        self.rendering = TimelineReadInputs(_no_clock, lambda: False)
+        self.agent_id = self._create_idle_agent()
+        self._versions = 0
+        self.store(conversation())
+
+    def _create_idle_agent(self) -> int:
+        agent_id = create_agent(self.db_conn)
+        self.db_conn.execute(
+            "INSERT INTO agents_meta (id, spawner, status, machine) VALUES (%s, 'test', 'idling', 'm')",
+            (agent_id,),
+        )
+        self.db_conn.commit()
+        return agent_id
+
+    def store(self, messages: list[BaseMessage], *, agent_id: int | None = None) -> None:
+        self._versions += 1
+        put_checkpoint(
+            self.agent_id if agent_id is None else agent_id, messages, version=str(self._versions)
         )
 
-    def _record_usage(self, message: AIMessage, model: str, **kwargs: Any) -> None:
-        self.usage_rows.append({"message": message, "model": model, **kwargs})
+    def new_agent(self, messages: list[BaseMessage] | None = None) -> int:
+        agent_id = self._create_idle_agent()
+        self.store(conversation() if messages is None else messages, agent_id=agent_id)
+        return agent_id
 
-    def _read_catalog(self) -> ModelCatalog:
-        self.catalog_reads += 1
-        if self.catalog_error is not None:
-            raise self.catalog_error
-        return self.catalog
+    def set_status(self, status: AgentStatus) -> None:
+        self.db_conn.execute(
+            "UPDATE agents_meta SET status = %s WHERE id = %s", (status.value, self.agent_id)
+        )
+        self.db_conn.commit()
 
-    def _load_timeline(self, agent_id: int) -> list[TimelineItem]:
-        self.loads.append(agent_id)
-        items, _ = build_timeline_items(self.messages, inputs=self._rendering)
-        return items
+    def configure(self, **changes: Any) -> None:
+        self.policy = replace(self.policy, **changes)
+
+    async def suggest(self, agent_id: int | None = None) -> ReplySuggestionResponse:
+        return await self.service.suggest(
+            self.agent_id if agent_id is None else agent_id,
+            db=self.database,
+            policy=self.policy,
+            rendering=self.rendering,
+            catalog=self.catalog,
+            keys=None if isinstance(self.catalog, CatalogLoadFailure) else inert_keys(self.catalog),
+        )
 
 
 def _no_clock() -> Any:

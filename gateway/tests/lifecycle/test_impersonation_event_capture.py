@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import dataclasses
 from collections.abc import Iterator
+from dataclasses import replace
 from typing import Any
 
 import psycopg
 import pytest
 from psycopg import sql
 
-from base import telemetry
 from base.agents import impersonation as leases
 from base.agents.impersonation import history as history
 from base.agents.impersonation import manifest as capture
@@ -41,15 +41,19 @@ from base.cluster.authority.event_grants import grant_event_log_runner_access
 from base.cluster.authority.tests.runner_logins import grant_runner_login
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
-from base.config import settings
 from base.config.service_read import ConfigAuthority
 from base.config.tests.config_authority import config_authority as config_authority
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
+from base.db.config import db_config_from_settings
 from base.events.live.bus import EventBus
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.telemetry import Event
 from base.telemetry.audit_events import audit_event_uid, prepare_event_log
+from base.telemetry.tests.capture.event_capture import EmittedEvents
+from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
+from gateway.tests.support.db_faults.insert_fault import failing_insert
+from gateway.tests.support.db_faults.outage import transient_outage
 
 # The capability group the grants target, and the generation-shaped login that
 # inherits it (the only identity that logs in).
@@ -129,35 +133,45 @@ def test_a_label_the_agent_sets_while_borrowed_lands_in_its_lease_log(
     assert "impersonation_session" not in audited[1][1]
 
 
-def test_a_service_owned_central_event_is_recorded_in_both_logs_before_it_is_emitted(
+def test_a_service_owned_central_event_is_recorded_in_both_logs_and_emitted(
     db_conn: psycopg.Connection[Any],
     owner: RuntimeIncarnation,
     lease: dict[str, Any],
-    monkeypatch: pytest.MonkeyPatch,
     database: Database,
+    emitted_events: EmittedEvents,
     *,
     machine_identity: MachineIdentity,
 ) -> None:
-    local_machine = machine_identity.name()
-    recipient = create_capture_owner(db_conn, local_machine=local_machine)
-    seen_at_emit: list[tuple[int, int]] = []
+    recipient = create_capture_owner(db_conn, local_machine=machine_identity.name())
+    event = _send_event(owner.agent_id, recipient.agent_id)
 
-    def emit(event: Event) -> None:
-        recorded = db_conn.execute(
-            "SELECT count(*) FROM audit_events WHERE event_uid=%s",
-            (audit_event_uid(event),),
-        ).fetchone()
-        db_conn.commit()
-        assert recorded is not None
-        seen_at_emit.append(
-            (int(recorded[0]), capture_rows(db_conn, lease["id"], capture.CENTRAL_SOURCE))
-        )
+    emit_recorded_central_event(database, event)
 
-    monkeypatch.setattr(telemetry, "emit_prepared", emit)
+    (emitted,) = emitted_events.named("send_message")
+    recorded = db_conn.execute(
+        "SELECT count(*) FROM audit_events WHERE event_uid=%s", (audit_event_uid(emitted),)
+    ).fetchone()
+    assert recorded == (1,)
+    assert capture_rows(db_conn, lease["id"], capture.CENTRAL_SOURCE) == 1
 
-    emit_recorded_central_event(database, _send_event(owner.agent_id, recipient.agent_id))
 
-    assert seen_at_emit == [(1, 1)]
+def test_a_central_event_that_cannot_be_recorded_is_never_emitted(
+    db_conn: psycopg.Connection[Any],
+    owner: RuntimeIncarnation,
+    lease: dict[str, Any],
+    database: Database,
+    emitted_events: EmittedEvents,
+    *,
+    machine_identity: MachineIdentity,
+) -> None:
+    recipient = create_capture_owner(db_conn, local_machine=machine_identity.name())
+    with (
+        failing_insert(db_conn, "audit_events", message="audit log unavailable"),
+        pytest.raises(psycopg.errors.RaiseException, match="audit log unavailable"),
+    ):
+        emit_recorded_central_event(database, _send_event(owner.agent_id, recipient.agent_id))
+    assert emitted_events.names() == []
+    assert capture_rows(db_conn, lease["id"], capture.CENTRAL_SOURCE) == 0
 
 
 def test_protocol_less_history_keeps_unknown_event_coverage(
@@ -296,7 +310,6 @@ def test_a_transient_failure_stays_sticky_until_the_failed_source_persists(
     db_conn: psycopg.Connection[Any],
     owner: RuntimeIncarnation,
     lease: dict[str, Any],
-    monkeypatch: pytest.MonkeyPatch,
     database: Database,
     database_gate: ProcessDbGate,
     *,
@@ -306,27 +319,18 @@ def test_a_transient_failure_stays_sticky_until_the_failed_source_persists(
     local_machine = machine_identity.name()
     participant = open_capture(lease, owner.agent_id, "sticky", database_gate=database_gate)
     gate = capture.LocalCaptureGate(participant)
-    original_lock = capture.locked_receipt_state
-    locks = 0
-
-    def lock_with_one_outage(conn: psycopg.Connection[Any], lease_id: str, key: str) -> str | None:
-        nonlocal locks
-        locks += 1
-        # Call 1 is the capture write itself; call 2 is the first failure-persist attempt.
-        if locks == 2:
-            raise psycopg.OperationalError("temporary writer outage")
-        return original_lock(conn, lease_id, key)
-
-    def failed_write(*_args: Any, **_kwargs: Any) -> None:
-        raise OSError("write failed")
-
-    monkeypatch.setattr(capture, "append_source_event", failed_write)
-    monkeypatch.setattr(capture, "locked_receipt_state", lock_with_one_outage)
-    with pytest.raises(OSError, match="write failed"):
-        capture_local_event(sdk_event(owner.agent_id, "lost-during-outage"), gate=gate)
-    assert capture_state(db_conn, participant) == ("open",)
-    with pytest.raises(RuntimeError, match="Failed local impersonation event receipt"):
-        seal_local_participant(gate)
+    with (
+        # meiva:note
+        # The capture write itself fails; then the first attempt to record that failure meets
+        # a lost connection, and only the next attempt can persist it.
+        failing_insert(db_conn, "agent_impersonation_entries", message="write failed"),
+        transient_outage(db_conn, "agent_impersonation_event_participants"),
+    ):
+        with pytest.raises(psycopg.errors.RaiseException, match="write failed"):
+            capture_local_event(sdk_event(owner.agent_id, "lost-during-outage"), gate=gate)
+        assert capture_state(db_conn, participant) == ("open",)
+        with pytest.raises(RuntimeError, match="Failed local impersonation event receipt"):
+            seal_local_participant(gate)
     assert capture_state(db_conn, participant) == ("failed",)
     assert (
         pending_reason(history.resolve(database, owner.agent_id, 0, local_machine=local_machine))
@@ -339,15 +343,14 @@ def restricted_source(
     db_conn: psycopg.Connection[Any],
     owner: RuntimeIncarnation,
     lease: dict[str, Any],
-    monkeypatch: pytest.MonkeyPatch,
+    db_url: str,
     database_gate: ProcessDbGate,
 ) -> Iterator[LocalParticipant]:
     participant = open_capture(
         lease, owner.agent_id, "restricted-runner", database_gate=database_gate
     )
-    owner_url = settings.data_plane.db_url
     runner_url = grant_runner_login(
-        owner_url,
+        db_url,
         owner="meiva_citest",
         login=_RUNNER_LOGIN,
         password="test-runner-password",  # noqa: S106 -- throwaway role credential
@@ -369,12 +372,13 @@ def restricted_source(
             "SELECT has_column_privilege(current_user, 'agent_impersonations', "
             "'events_completed_at', 'UPDATE')"
         ).fetchone() == (False,)
-    monkeypatch.setattr(settings.data_plane, "db_url", runner_url)
-    participant = dataclasses.replace(participant, db=Database.from_settings(gate=database_gate))
+    runner_database = Database(
+        replace(db_config_from_settings(), db_url=runner_url), gate=database_gate
+    )
+    participant = dataclasses.replace(participant, db=runner_database)
     try:
         yield participant
     finally:
-        monkeypatch.setattr(settings.data_plane, "db_url", owner_url)
         db_conn.rollback()
         grant_event_log_runner_access(db_conn, _RUNNER_GROUP)
         db_conn.commit()
@@ -405,19 +409,12 @@ def test_a_runner_failure_is_recorded_once_the_narrow_lock_is_available(
     db_conn: psycopg.Connection[Any],
     owner: RuntimeIncarnation,
     restricted_source: LocalParticipant,
-    monkeypatch: pytest.MonkeyPatch,
     database: Database,
     *,
     machine_identity: MachineIdentity,
 ) -> None:
     local_machine = machine_identity.name()
     participant = restricted_source
-    gate = capture.LocalCaptureGate(participant)
-
-    def failed_write(*_args: Any, **_kwargs: Any) -> None:
-        raise OSError("write failed")
-
-    monkeypatch.setattr(capture, "append_source_event", failed_write)
     gate = capture.LocalCaptureGate(participant)
     # Without the lock the failure cannot be persisted, so the source stays open ...
     with pytest.raises(psycopg.errors.InsufficientPrivilege):
@@ -487,7 +484,6 @@ async def test_sdk_emit_failure_marks_original_receipt_after_rebind(
     db_conn: psycopg.Connection[Any],
     owner: RuntimeIncarnation,
     lease: dict[str, Any],
-    monkeypatch: pytest.MonkeyPatch,
     body_failed: bool,
     async_call: bool,
     database_gate: ProcessDbGate,
@@ -503,12 +499,10 @@ async def test_sdk_emit_failure_marks_original_receipt_after_rebind(
     cause = LookupError("body cause")
     tally = SdkCallTally()
 
-    def _policy_for_test(
-        create_capture_owner: call_policy.SamplingPolicyOwner,
-    ) -> call_policy.SamplingPolicy:
+    def local_policy() -> call_policy.SamplingPolicy:
         return call_policy.SamplingPolicy()
 
-    monkeypatch.setattr(call_policy, "policy", _policy_for_test)
+    sampling_owner = call_policy.SamplingPolicyOwner(reader=local_policy)
     db_conn.execute("CREATE TEMP TABLE sdk_committed_effects(marker TEXT)")
     db_conn.commit()
     previous_gate = capture.LocalCaptureGate(previous)
@@ -544,7 +538,7 @@ async def test_sdk_emit_failure_marks_original_receipt_after_rebind(
                     identity={"unexpected_identity": owner.agent_id},
                     tally=tally,
                     capture_owner=Owner(),
-                    sampling_owner=call_policy.SamplingPolicyOwner(),
+                    sampling_owner=sampling_owner,
                 )
             else:
                 sdk_usage.run_metered(
@@ -555,7 +549,7 @@ async def test_sdk_emit_failure_marks_original_receipt_after_rebind(
                     identity={"unexpected_identity": owner.agent_id},
                     tally=tally,
                     capture_owner=Owner(),
-                    sampling_owner=call_policy.SamplingPolicyOwner(),
+                    sampling_owner=sampling_owner,
                 )
         if body_failed:
             assert raised.value is primary and primary.__cause__ is cause

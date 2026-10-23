@@ -41,10 +41,7 @@ def deny_isolated_result_read(request: Request) -> None:
     caller_agent_id = _caller_agent_id(request.query_params.get("caller", ""))
     if caller_agent_id is None:
         return
-    isolation_checker = getattr(
-        request.app.state, "caller_eval_isolation_checker", caller_eval_isolation
-    )
-    if not isolation_checker(request.app.state.db_pool, caller_agent_id):
+    if not caller_eval_isolation(request.app.state.db_pool, caller_agent_id):
         return
     surface = "last-message" if request.url.path.endswith("/last-message") else "result"
     raise HTTPException(

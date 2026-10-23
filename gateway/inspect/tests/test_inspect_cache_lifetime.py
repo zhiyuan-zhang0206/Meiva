@@ -22,7 +22,7 @@ async def test_cancelled_leader_keeps_one_shared_native_load_until_close() -> No
         assert release.wait(timeout=5)
         return expected
 
-    leader = asyncio.create_task(cache.get_or_load_async("same", load, ttl_s=0, now=lambda: 0))
+    leader = asyncio.create_task(cache.get_or_load_async("same", load, ttl_s=0, now=0.0))
     follower = None
     try:
         assert await asyncio.to_thread(started.wait, 1)
@@ -30,15 +30,13 @@ async def test_cancelled_leader_keeps_one_shared_native_load_until_close() -> No
         with pytest.raises(asyncio.CancelledError):
             await leader
         with pytest.raises(InspectCacheFullError):
-            await cache.get_or_load_async("other", load, ttl_s=0, now=lambda: 0)
-        follower = asyncio.create_task(
-            cache.get_or_load_async("same", load, ttl_s=0, now=lambda: 0)
-        )
+            await cache.get_or_load_async("other", load, ttl_s=0, now=0.0)
+        follower = asyncio.create_task(cache.get_or_load_async("same", load, ttl_s=0, now=0.0))
         await asyncio.sleep(0)
         release.set()
         assert await follower is expected
         assert calls == 1
-        assert await cache.get_or_load_async("same", load, ttl_s=0, now=lambda: 0) is expected
+        assert await cache.get_or_load_async("same", load, ttl_s=0, now=0.0) is expected
         assert calls == 2
     finally:
         release.set()
@@ -56,7 +54,7 @@ async def test_cancelled_close_waits_for_physical_completion_and_stops_admission
         finished.set()
         return "done"
 
-    request = asyncio.create_task(cache.get_or_load_async("sql", load, ttl_s=0, now=lambda: 0))
+    request = asyncio.create_task(cache.get_or_load_async("sql", load, ttl_s=0, now=0.0))
     close = None
     try:
         assert await asyncio.to_thread(started.wait, 1)
@@ -70,7 +68,7 @@ async def test_cancelled_close_waits_for_physical_completion_and_stops_admission
             assert not (await asyncio.wait({close}, timeout=0.01))[0]
         assert not finished.is_set()
         with pytest.raises(RuntimeError, match="owner is closed"):
-            await cache.get_or_load_async("sql", load, ttl_s=0, now=lambda: 0)
+            await cache.get_or_load_async("sql", load, ttl_s=0, now=0.0)
         release.set()
         with pytest.raises(asyncio.CancelledError):
             await close
@@ -98,9 +96,7 @@ async def test_orphaned_native_error_reaches_existing_loop_diagnostics() -> None
         assert release.wait(timeout=5)
         raise failure
 
-    request = asyncio.create_task(
-        cache.get_or_load_async("agent:7/24h", load, ttl_s=0, now=lambda: 0)
-    )
+    request = asyncio.create_task(cache.get_or_load_async("agent:7/24h", load, ttl_s=0, now=0.0))
     try:
         assert await asyncio.to_thread(started.wait, 1)
         request.cancel()
@@ -137,11 +133,11 @@ async def test_native_query_keeps_parent_span_without_mutating_its_lifetime() ->
     try:
         with use_span(parent, end_on_exit=False):
             assert (
-                await cache.get_or_load_async("success", get_current_span, ttl_s=0, now=lambda: 0)
+                await cache.get_or_load_async("success", get_current_span, ttl_s=0, now=0.0)
                 is parent
             )
             with pytest.raises(RuntimeError) as raised:
-                await cache.get_or_load_async("failure", broken, ttl_s=0, now=lambda: 0)
+                await cache.get_or_load_async("failure", broken, ttl_s=0, now=0.0)
             assert raised.value is failure
             assert get_current_span() is parent
             assert parent.is_recording()
@@ -173,13 +169,11 @@ async def test_native_failure_reaches_leader_and_follower_without_cancelling_own
     try:
         async with asyncio.TaskGroup() as unrelated_service:
             live = unrelated_service.create_task(asyncio.sleep(5))
-            leader = asyncio.create_task(
-                cache.get_or_load_async("sql", load, ttl_s=0, now=lambda: 0)
-            )
+            leader = asyncio.create_task(cache.get_or_load_async("sql", load, ttl_s=0, now=0.0))
             assert await asyncio.to_thread(started.wait, 1)
             follower = asyncio.create_task(
                 cache.get_or_load_async(
-                    "sql", lambda: pytest.fail("duplicate SQL"), ttl_s=0, now=lambda: 0
+                    "sql", lambda: pytest.fail("duplicate SQL"), ttl_s=0, now=0.0
                 )
             )
             await asyncio.sleep(0)
@@ -190,7 +184,7 @@ async def test_native_failure_reaches_leader_and_follower_without_cancelling_own
                 assert raised.value is failure
             assert not live.done()
             assert (
-                await cache.get_or_load_async("sql", lambda: "healthy", ttl_s=0, now=lambda: 0)
+                await cache.get_or_load_async("sql", lambda: "healthy", ttl_s=0, now=0.0)
                 == "healthy"
             )
             live.cancel()

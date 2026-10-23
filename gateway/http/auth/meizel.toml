@@ -1,10 +1,12 @@
 exports = ["rejection_log.py", "request_principal.py", "router.py", "session_store.py", "webhook.py"]
 
 [uses]
+"rejection_log.py" = ["rejection_policy.py"]
 "request_principal.py" = ["session_store.py"]
 "router.py" = ["request_principal.py", "session_store.py"]
-"tests" = ["request_principal.py", "session_store.py"]
+"tests" = ["rejection_policy.py", "request_principal.py", "session_store.py"]
 "webhook.py" = ["request_principal.py"]
 
 [purity]
 "__init__.py" = "strict"
+"rejection_policy.py" = "strict"

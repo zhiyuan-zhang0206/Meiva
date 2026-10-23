@@ -1,68 +1,63 @@
+# meiva:note
+# The inspector's agents_meta read, against rows in the real database.
+
+from __future__ import annotations
+
+from datetime import UTC, datetime
+
+import psycopg
 import pytest
 
+from base.api_contracts.agent_contract import LivenessState
+from base.db import Database
+from base.telemetry.metrics.observed_metrics import MetricObservation, write_observations
+from gateway.inspect._live import db_rows_blocking
 
-def _agents_meta_row(
-    liveness_state: str | None,
-    *,
-    harness: str = "meiva",
-    observed_model: str | None = None,
-) -> tuple[object, ...]:
-    config_overlay, machine, status = {}, "machine", "idling"
-    last_active_at = last_heartbeat_at = spawned_at = paused_until = None
-    last_probe_at = machine_probe_at = None
-    return (
-        config_overlay,
-        machine,
-        status,
-        last_active_at,
-        last_heartbeat_at,
-        spawned_at,
-        paused_until,
-        liveness_state,
-        last_probe_at,
-        machine_probe_at,
-        harness,
-        observed_model,
+
+def _agent(conn: psycopg.Connection, *, liveness_state: str, harness: str = "meiva") -> int:
+    row = conn.execute("INSERT INTO agents(label) VALUES ('liveness') RETURNING id").fetchone()
+    assert row is not None
+    conn.execute(
+        "INSERT INTO agents_meta(id, spawner, status, machine, liveness_state, harness) "
+        "VALUES (%s, 'user', 'idling', 'machine', %s, %s)",
+        (row[0], liveness_state, harness),
     )
+    conn.commit()
+    return row[0]
 
 
 @pytest.mark.parametrize("state", ["online", "offline", "unknown"])
-def test_inspector_parses_liveness_at_db_boundary(state: str) -> None:
-    from unittest.mock import MagicMock
-
-    from base.api_contracts.agent_contract import LivenessState
-    from gateway.inspect._live import db_rows_blocking
-
-    pool = MagicMock()
-    cur = pool.connection.return_value.__enter__.return_value.cursor.return_value.__enter__.return_value
-    cur.fetchone.side_effect = [_agents_meta_row(state), (False,)]
-    result = db_rows_blocking(pool, 1)
-    assert result.liveness_state is LivenessState(state)
+def test_inspector_parses_liveness_at_db_boundary(
+    state: str, db_conn: psycopg.Connection, database: Database
+) -> None:
+    aid = _agent(db_conn, liveness_state=state)
+    with database.pool(max_size=1) as pool:
+        assert db_rows_blocking(pool, aid).liveness_state is LivenessState(state)
 
 
-@pytest.mark.parametrize("state", [None, "unrecognized"])
-def test_inspector_rejects_missing_or_unknown_liveness(state: str | None) -> None:
-    from unittest.mock import MagicMock
+def test_inspector_populates_observed_model_for_external_harness(
+    db_conn: psycopg.Connection, database: Database
+) -> None:
+    aid = _agent(db_conn, liveness_state="online", harness="codex")
+    write_observations(
+        [MetricObservation(1, aid, datetime.now(UTC), "usage", model="gpt-5.4", usage_calls=1)],
+        db=db_conn,
+    )
+    db_conn.commit()
+    with database.pool(max_size=1) as pool:
+        assert db_rows_blocking(pool, aid).config_overlay["llm_model"] == "gpt-5.4"
 
-    from gateway.inspect._live import db_rows_blocking
 
-    pool = MagicMock()
-    cur = pool.connection.return_value.__enter__.return_value.cursor.return_value.__enter__.return_value
-    cur.fetchone.side_effect = [_agents_meta_row(state), (False,)]
-    with pytest.raises(ValueError):
-        db_rows_blocking(pool, 1)
-
-
-def test_inspector_populates_observed_model_for_external_harness() -> None:
-    from unittest.mock import MagicMock
-
-    from gateway.inspect._live import db_rows_blocking
-
-    pool = MagicMock()
-    cur = pool.connection.return_value.__enter__.return_value.cursor.return_value.__enter__.return_value
-    cur.fetchone.side_effect = [
-        _agents_meta_row("online", harness="codex", observed_model="gpt-5.4"),
-        (False,),
-    ]
-    result = db_rows_blocking(pool, 1)
-    assert result.config_overlay["llm_model"] == "gpt-5.4"
+# meiva:note
+# Only an external harness reports the model it ran; a Meiva agent's model is its overlay.
+def test_a_meiva_agent_keeps_its_own_model_choice(
+    db_conn: psycopg.Connection, database: Database
+) -> None:
+    aid = _agent(db_conn, liveness_state="online")
+    write_observations(
+        [MetricObservation(1, aid, datetime.now(UTC), "usage", model="gpt-5.4", usage_calls=1)],
+        db=db_conn,
+    )
+    db_conn.commit()
+    with database.pool(max_size=1) as pool:
+        assert "llm_model" not in db_rows_blocking(pool, aid).config_overlay

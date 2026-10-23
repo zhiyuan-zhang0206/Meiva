@@ -1,30 +1,26 @@
-"""GET /api/events — unified event stream query.
-
-The route is an adapter over `telemetry_rows.query_events` / `count_events` (and
-`audit_rows` for audit). This file locks the endpoint contract: filter composition
-(category / event_name / agent_id / trace_id / machine / level), the time window
-(`from`/`to` and `hours`), offset paging with the `meta` envelope (opt-in exact `total`
-from the count path / window / lookahead has_more), the unified row shape, and the 422s
-for illegal parameters. The telemetry reader is mocked;
-`gateway/events/tests/test_telemetry_rows.py` covers the SQL.
-"""
+# meiva:note
+# GET /api/events — unified event stream query, against rows in the real stores.
+#
+# The request-to-read decisions (filters, window, stores, page depth) are asserted over plain
+# values in `gateway/events/tests/test_events_plan.py`; the two-store merge is in
+# `test_events_api_audit.py`. This file locks what the endpoint adds around them: the unified row
+# shape and tiers, newest-first order, the opt-in exact total, the lookahead `has_more`, paging, the
+# configured default window, the 422 mapping and the 503 on a read past its statement timeout.
 
 from __future__ import annotations
 
 from collections.abc import Generator
 from contextlib import contextmanager
-from datetime import UTC, datetime, timedelta
+from dataclasses import replace
 from typing import Any
 
 import psycopg
 import pytest
 
-from gateway.tests.auth.gateway_config import (
-    GatewayTestClient,
-)
-from gateway.tests.auth.gateway_config import (
-    gateway_test_client as _base_gateway_test_client,
-)
+from base.config.tests.configuration import snapshot_process_config
+from gateway.http.config import GatewayConfig, gateway_config_from_boot
+from gateway.tests.auth.gateway_config import gateway_test_client
+from gateway.tests.events.event_rows import audit_event, telemetry_event
 
 _EVENT_KEYS = {
     "id",
@@ -45,82 +41,20 @@ _EVENT_KEYS = {
 }
 
 
-def _row(**over: Any) -> dict[str, Any]:
-    base: dict[str, Any] = {
-        "id": 1,
-        "line_sha256": "a" * 64,
-        "ts": datetime(2026, 8, 12, tzinfo=UTC),
-        "trace_id": None,
-        "span_id": None,
-        "agent_id": 7,
-        "machine": "gateway-host",
-        "process": "agent-kernel",
-        "category": "telemetry",
-        "event_name": "turn_end",
-        "level": "info",
-        "source": "agent",
-        "target_agent_id": None,
-        "attributes": {"msg": "hi"},
-    }
-    base.update(over)
-    return base
+def _get(**params: Any) -> dict[str, Any]:
+    with gateway_test_client() as client:
+        response = client.get("/api/events", params=params)
+    assert response.status_code == 200, response.text
+    return response.json()
 
 
-class _FakeEvents:
-    """Recorded telemetry_rows calls + canned rows/total/has_more."""
-
-    def __init__(self) -> None:
-        self.calls: list[dict[str, Any]] = []
-        self.rows: list[dict[str, Any]] = []
-        self.totals: list[int] = []
-        self.has_more = False
-
-    def query(self, _conn: object, **kwargs: Any) -> tuple[list[dict[str, Any]], bool]:
-        self.calls.append(kwargs)
-        return self.rows, self.has_more
-
-    def count(self, _conn: object, **kwargs: Any) -> int:
-        self.calls.append(kwargs)
-        return self.totals[-1] if self.totals else len(self.rows)
-
-
-_active_fake_events: list[_FakeEvents] = []
-
-
-@contextmanager
-def gateway_test_client(
-    *,
-    query_events: Any = None,
-    default_limit: int | None = None,
-) -> Generator[GatewayTestClient]:
-    with _base_gateway_test_client() as client:
-        if _active_fake_events:
-            client.app.state.telemetry_events_reader = _active_fake_events[-1].query
-            client.app.state.telemetry_events_counter = _active_fake_events[-1].count
-        if query_events is not None:
-            client.app.state.telemetry_events_reader = query_events
-        if default_limit is not None:
-            client.app.state.events_default_limit = default_limit
-        yield client
-
-
-@pytest.fixture
-def fake_events() -> Generator[_FakeEvents]:
-    """Configure telemetry_events_reader + telemetry_events_counter; record kwargs."""
-    fake = _FakeEvents()
-    _active_fake_events.append(fake)
-    try:
-        yield fake
-    finally:
-        _active_fake_events.clear()
+def _names(body: dict[str, Any]) -> list[str]:
+    return [item["event_name"] for item in body["items"]]
 
 
 class TestEventsApi:
-    def test_empty_returns_empty_envelope(self, fake_events: _FakeEvents) -> None:
-        with gateway_test_client() as client:
-            r = client.get("/api/events")
-        assert r.status_code == 200
-        body = r.json()
+    def test_empty_returns_empty_envelope(self, db_conn: psycopg.Connection) -> None:
+        body = _get()
         assert body["items"] == []
         assert body["meta"]["total"] is None  # exact count is opt-in
         assert body["meta"]["has_more"] is False
@@ -128,248 +62,158 @@ class TestEventsApi:
         assert body["meta"]["offset"] == 0
         assert body["meta"]["window_from"] is not None  # 24h default echoes
 
-    def test_a_read_that_exceeds_its_statement_timeout_returns_503(self) -> None:
-        def _boom(_conn: object, **kwargs: Any) -> tuple[list[dict[str, Any]], bool]:
-            raise psycopg.errors.QueryCanceled("canceling statement due to statement timeout")
-
-        with gateway_test_client(query_events=_boom) as client:
-            r = client.get("/api/events")
-        assert r.status_code == 503
-        assert r.json()["detail"] == "events read timed out"
-
-    def test_returns_newest_first_with_unified_shape(self, fake_events: _FakeEvents) -> None:
-        fake_events.rows.extend([_row(), _row(event_name="llm_usage")])
-        with gateway_test_client() as client:
-            r = client.get("/api/events")
-        assert r.status_code == 200
-        items = r.json()["items"]
+    def test_returns_newest_first_with_unified_shape(self, db_conn: psycopg.Connection) -> None:
+        telemetry_event(db_conn, "llm_usage", minutes_ago=30, attributes={"msg": "old"})
+        telemetry_event(db_conn, "turn_end", minutes_ago=5, attributes={"msg": "new"})
+        items = _get()["items"]
+        assert [item["event_name"] for item in items] == ["turn_end", "llm_usage"]
         assert set(items[0]) == _EVENT_KEYS
+        assert items[0]["attributes"] == {"msg": "new"}
 
-    def test_response_rows_include_computed_tiers(self, fake_events: _FakeEvents) -> None:
-        fake_events.rows.extend(
-            [
-                _row(category="audit", event_name="spawn"),
-                _row(event_name="llm_usage"),
-                _row(event_name="node_exit"),
-                _row(event_name="llm_usage", level="warning"),
-            ]
-        )
-        with gateway_test_client() as client:
-            r = client.get("/api/events")
-
-        assert [item["tier"] for item in r.json()["items"]] == [
+    def test_response_rows_include_computed_tiers(self, db_conn: psycopg.Connection) -> None:
+        audit_event(db_conn, "spawn", minutes_ago=1)
+        telemetry_event(db_conn, "llm_usage", minutes_ago=2)
+        telemetry_event(db_conn, "node_exit", minutes_ago=3)
+        telemetry_event(db_conn, "llm_usage", minutes_ago=4, level="warning")
+        assert [item["tier"] for item in _get()["items"]] == [
             "business",
             "observation",
             "noise",
             "anomaly",
         ]
 
-    def test_filter_category_maps_to_categories(self, fake_events: _FakeEvents) -> None:
-        with gateway_test_client() as client:
-            client.get("/api/events", params={"category": "telemetry"})
-        assert fake_events.calls[0]["categories"] == ["telemetry"]
+    def test_filters_compose_and(self, db_conn: psycopg.Connection) -> None:
+        telemetry_event(db_conn, "llm_usage", minutes_ago=1, agent_id=7, machine="machine-1")
+        telemetry_event(db_conn, "llm_usage", minutes_ago=2, agent_id=8, machine="machine-1")
+        telemetry_event(db_conn, "llm_usage", minutes_ago=3, agent_id=7, machine="machine-2")
+        telemetry_event(db_conn, "turn_end", minutes_ago=4, agent_id=7, machine="machine-1")
+        telemetry_event(
+            db_conn, "llm_usage", minutes_ago=5, agent_id=7, machine="machine-1", level="warning"
+        )
+        body = _get(
+            category="telemetry",
+            event_name="llm_usage",
+            agent_id=7,
+            machine="machine-1",
+            level="INFO",
+        )
+        assert _names(body) == ["llm_usage"]
+        assert [item["agent_id"] for item in body["items"]] == [7]
+        assert [item["level"] for item in body["items"]] == ["info"]
 
-    def test_no_category_reads_telemetry_and_log_from_telemetry_events(
-        self, fake_events: _FakeEvents
-    ) -> None:
-        # /api/events serves ALL categories: audit rows come from audit_events, so the
-        # telemetry side asks for telemetry and log only.
-        with gateway_test_client() as client:
-            client.get("/api/events")
-        assert fake_events.calls[0]["categories"] == ["telemetry", "log"]
+    def test_tier_filter_maps_a_comma_separated_list(self, db_conn: psycopg.Connection) -> None:
+        audit_event(db_conn, "spawn", minutes_ago=1)
+        telemetry_event(db_conn, "llm_usage", minutes_ago=2)
+        telemetry_event(db_conn, "llm_usage", minutes_ago=3, level="warning")
+        assert _names(_get(tier="business,anomaly")) == ["spawn", "llm_usage"]
 
-    def test_filter_event_name(self, fake_events: _FakeEvents) -> None:
-        with gateway_test_client() as client:
-            client.get("/api/events", params={"event_name": "llm_usage"})
-        assert fake_events.calls[0]["event_names"] == ["llm_usage"]
-
-    def test_filter_tier_maps_a_comma_separated_list(self, fake_events: _FakeEvents) -> None:
-        with gateway_test_client() as client:
-            client.get("/api/events", params={"tier": "business,anomaly"})
-        assert fake_events.calls[0]["tiers"] == ["business", "anomaly"]
-
-    def test_kind_param_is_ignored_not_filtered(self, fake_events: _FakeEvents) -> None:
+    def test_kind_param_is_ignored_not_filtered(self, db_conn: psycopg.Connection) -> None:
         """Legacy `kind=` alias removed (2026-09-21): an undeclared query
         param is ignored by FastAPI, so the request runs unfiltered — pinned
         deliberately as the post-removal wire semantics."""
-        with gateway_test_client() as client:
-            r = client.get("/api/events", params={"kind": "llm_usage"})
-        assert r.status_code == 200
-        assert fake_events.calls[0]["event_names"] is None
+        telemetry_event(db_conn, "turn_end", minutes_ago=1)
+        assert _names(_get(kind="llm_usage")) == ["turn_end"]
 
-    def test_filter_agent_id(self, fake_events: _FakeEvents) -> None:
-        with gateway_test_client() as client:
-            client.get("/api/events", params={"agent_id": 42})
-        assert fake_events.calls[0]["agent_id"] == 42
+    def test_window_by_hours_and_default_day(self, db_conn: psycopg.Connection) -> None:
+        telemetry_event(db_conn, "llm_usage", minutes_ago=30)
+        telemetry_event(db_conn, "turn_end", minutes_ago=90)
+        telemetry_event(db_conn, "node_exit", minutes_ago=60 * 30)
+        assert _names(_get(hours=1)) == ["llm_usage"]
+        assert _names(_get()) == ["llm_usage", "turn_end"]
 
-    def test_filter_trace_id_lowercased(self, fake_events: _FakeEvents) -> None:
-        with gateway_test_client() as client:
-            client.get("/api/events", params={"trace_id": "ABCDEF"})
-        assert fake_events.calls[0]["trace_id"] == "abcdef"
+    def test_explicit_window(self, db_conn: psycopg.Connection) -> None:
+        telemetry_event(db_conn, "llm_usage", minutes_ago=30)
+        body = _get(**{"from": "2020-01-01T00:00:00Z", "to": "2020-01-02T00:00:00Z"})
+        assert body["items"] == []
+        assert body["meta"]["window_from"].startswith("2020-01-01T00:00:00")
+        assert body["meta"]["window_to"].startswith("2020-01-02T00:00:00")
 
-    def test_filter_machine(self, fake_events: _FakeEvents) -> None:
-        with gateway_test_client() as client:
-            client.get("/api/events", params={"machine": "machine-1"})
-        assert fake_events.calls[0]["machine"] == "machine-1"
+    def test_total_skipped_by_default(self, db_conn: psycopg.Connection) -> None:
+        telemetry_event(db_conn, "llm_usage", minutes_ago=1)
+        assert _get()["meta"]["total"] is None
 
-    def test_filter_level_lowercased_exact(self, fake_events: _FakeEvents) -> None:
-        with gateway_test_client() as client:
-            client.get("/api/events", params={"level": "WARNING"})
-        assert fake_events.calls[0]["level"] == "warning"
-        assert "level_min" not in fake_events.calls[0]
-
-    def test_from_to_window_passed_through(self, fake_events: _FakeEvents) -> None:
-        with gateway_test_client() as client:
-            client.get(
-                "/api/events",
-                params={"from": "2026-08-01T00:00:00Z", "to": "2026-08-02T00:00:00Z"},
-            )
-        kw = fake_events.calls[0]
-        assert kw["from_"] == datetime(2026, 8, 1, tzinfo=UTC)
-        assert kw["to"] == datetime(2026, 8, 2, tzinfo=UTC)
-
-    def test_hours_window(self, fake_events: _FakeEvents) -> None:
-        before = datetime.now(UTC)
-        with gateway_test_client() as client:
-            client.get("/api/events", params={"hours": 2})
-        after = datetime.now(UTC)
-        from_ = fake_events.calls[0]["from_"]
-        assert from_ is not None
-        assert (
-            before - timedelta(hours=2, seconds=10)
-            <= from_
-            <= after - timedelta(hours=2, seconds=-10)
-        )
-
-    def test_default_window_is_24h(self, fake_events: _FakeEvents) -> None:
-        before = datetime.now(UTC)
-        with gateway_test_client() as client:
-            client.get("/api/events")
-        after = datetime.now(UTC)
-        from_ = fake_events.calls[0]["from_"]
-        assert from_ is not None
-        assert before - timedelta(hours=25) <= from_ <= after - timedelta(hours=23, seconds=59)
-
-    def test_total_skipped_by_default(self, fake_events: _FakeEvents) -> None:
-        """Without with_total the count path never runs — the only telemetry read
-        is the list fetch, and meta.total is null."""
-        fake_events.rows.extend([_row()])
-        with gateway_test_client() as client:
-            r = client.get("/api/events")
-        body = r.json()
-        assert body["meta"]["total"] is None
-        assert len(fake_events.calls) == 1  # query_events only, no count
-
-    def test_meta_total_opt_in_comes_from_count(self, fake_events: _FakeEvents) -> None:
-        fake_events.rows.extend([_row()])
-        fake_events.totals.append(3)
-        fake_events.has_more = True
-        with gateway_test_client() as client:
-            r = client.get("/api/events", params={"limit": 1, "with_total": 1})
-        body = r.json()
+    def test_meta_total_opt_in_counts_the_whole_filtered_window(
+        self, db_conn: psycopg.Connection
+    ) -> None:
+        for minutes in range(3):
+            telemetry_event(db_conn, "llm_usage", minutes_ago=minutes + 1)
+        body = _get(limit=1, with_total=1)
         assert body["meta"]["total"] == 3
-        assert len(fake_events.calls) == 2  # count + query
-        assert body["meta"]["has_more"] is True  # the fetch's +1 lookahead
+        assert len(body["items"]) == 1
+        # meiva:note
+        # the fetch's +1 lookahead
+        assert body["meta"]["has_more"] is True
 
-    def test_has_more_from_lookahead(self, fake_events: _FakeEvents) -> None:
-        """has_more echoes query_events' +1-lookahead result — no count
-        aggregation involved."""
-        fake_events.rows.extend([_row()])
-        fake_events.has_more = True
-        with gateway_test_client() as client:
-            r = client.get("/api/events")
-        assert r.json()["meta"]["has_more"] is True
+    def test_has_more_comes_from_the_lookahead(self, db_conn: psycopg.Connection) -> None:
+        telemetry_event(db_conn, "llm_usage", minutes_ago=1)
+        telemetry_event(db_conn, "turn_end", minutes_ago=2)
+        assert _get(limit=1)["meta"]["has_more"] is True
+        assert _get(limit=2)["meta"]["has_more"] is False
 
-    def test_limit_offset_paging(self, fake_events: _FakeEvents) -> None:
-        with gateway_test_client() as client:
-            client.get("/api/events", params={"category": "telemetry", "limit": 5, "offset": 10})
-        kw = fake_events.calls[0]  # the query call (no count by default)
-        assert kw["limit"] == 5
-        assert kw["offset"] == 10
+    def test_limit_offset_paging(self, db_conn: psycopg.Connection) -> None:
+        for minutes, name in enumerate(["a_event", "b_event", "c_event", "d_event"], start=1):
+            telemetry_event(db_conn, name, minutes_ago=minutes)
+        page = _get(category="telemetry", limit=2, offset=1)
+        assert _names(page) == ["b_event", "c_event"]
+        assert (page["meta"]["limit"], page["meta"]["offset"]) == (2, 1)
 
-    def test_default_limit_comes_from_display_config(self, fake_events: _FakeEvents) -> None:
-        """The implicit window is ``settings.display.events_default_limit``
-        (``MEIVA_EVENTS_DEFAULT_LIMIT``); the literal 100 is only that field's
-        default, not a hard-coded page size. The meta echo reports the
-        resolved window, not the raw None."""
-        with gateway_test_client(default_limit=7) as client:
-            r = client.get("/api/events")
-        assert r.status_code == 200
-        assert fake_events.calls[0]["limit"] == 7
-        assert r.json()["meta"]["limit"] == 7
+    # meiva:note
+    # The implicit window is the ``display.events_default_limit`` field
+    # (``MEIVA_EVENTS_DEFAULT_LIMIT``); the literal 100 is only that field's
+    # default, not a hard-coded page size. The meta echo reports the
+    # resolved window, not the raw None.
+    def test_default_limit_comes_from_display_config(self, db_conn: psycopg.Connection) -> None:
+        for minutes in range(3):
+            telemetry_event(db_conn, "llm_usage", minutes_ago=minutes + 1)
+        with gateway_test_client(fields={"events_default_limit": 2}) as client:
+            response = client.get("/api/events")
+        assert response.status_code == 200
+        assert len(response.json()["items"]) == 2
+        assert response.json()["meta"]["limit"] == 2
 
-    def test_offset_over_hard_cap_422(self, fake_events: _FakeEvents) -> None:
-        with gateway_test_client() as client:
-            response = client.get("/api/events", params={"offset": 10_001})
-        assert response.status_code == 422
-        assert fake_events.calls == []
-
-    def test_filters_compose_and(self, fake_events: _FakeEvents) -> None:
-        with gateway_test_client() as client:
-            client.get(
-                "/api/events",
-                params={
-                    "category": "telemetry",
-                    "event_name": "llm_usage",
-                    "agent_id": 7,
-                    "machine": "machine-1",
-                    "level": "info",
-                },
-            )
-        kw = fake_events.calls[0]
-        assert kw["categories"] == ["telemetry"]
-        assert kw["event_names"] == ["llm_usage"]
-        assert kw["agent_id"] == 7
-        assert kw["machine"] == "machine-1"
-        assert kw["level"] == "info"
-
-    def test_no_match_returns_empty(self, fake_events: _FakeEvents) -> None:
-        with gateway_test_client() as client:
-            r = client.get("/api/events", params={"event_name": "does_not_exist"})
-        body = r.json()
+    def test_no_match_returns_empty(self, db_conn: psycopg.Connection) -> None:
+        body = _get(event_name="does_not_exist")
         assert body["items"] == []
         assert body["meta"]["total"] is None
 
-    def test_invalid_category_422(self, fake_events: _FakeEvents) -> None:
+    @pytest.mark.parametrize(
+        "params",
+        [
+            {"category": "bogus"},
+            {"level": "fatal"},
+            {"tier": "business,urgent"},
+            {"from": "not-a-date"},
+            {"from": "2026-08-04T00:00:00"},
+            {"to": "2026-08-04T00:00:00"},
+            {"from": "2026-08-04T00:00:00Z", "hours": 1},
+            {"limit": 1001},
+            {"offset": 10_001},
+        ],
+    )
+    def test_an_illegal_request_is_422(self, params: dict[str, Any]) -> None:
         with gateway_test_client() as client:
-            r = client.get("/api/events", params={"category": "bogus"})
-        assert r.status_code == 422
+            assert client.get("/api/events", params=params).status_code == 422
 
-    def test_invalid_level_422(self, fake_events: _FakeEvents) -> None:
-        with gateway_test_client() as client:
-            r = client.get("/api/events", params={"level": "fatal"})
-        assert r.status_code == 422
 
-    def test_invalid_tier_422(self, fake_events: _FakeEvents) -> None:
-        with gateway_test_client() as client:
-            r = client.get("/api/events", params={"tier": "business,urgent"})
-        assert r.status_code == 422
-        assert fake_events.calls == []
+# meiva:note
+# Hold the telemetry store exclusively, so a read of it waits for the lock.
+@contextmanager
+def _telemetry_store_locked(db_url: str) -> Generator[None]:
+    with psycopg.connect(db_url) as holder:
+        holder.execute("LOCK TABLE telemetry_events IN ACCESS EXCLUSIVE MODE")
+        try:
+            yield
+        finally:
+            holder.rollback()
 
-    def test_invalid_from_timestamp_422(self, fake_events: _FakeEvents) -> None:
-        with gateway_test_client() as client:
-            r = client.get("/api/events", params={"from": "not-a-date"})
-        assert r.status_code == 422
 
-    def test_naive_from_timestamp_422(self, fake_events: _FakeEvents) -> None:
-        with gateway_test_client() as client:
-            r = client.get("/api/events", params={"from": "2026-08-04T00:00:00"})
-        assert r.status_code == 422
-
-    def test_naive_to_timestamp_422(self, fake_events: _FakeEvents) -> None:
-        with gateway_test_client() as client:
-            r = client.get("/api/events", params={"to": "2026-08-04T00:00:00"})
-        assert r.status_code == 422
-
-    def test_limit_over_max_422(self, fake_events: _FakeEvents) -> None:
-        with gateway_test_client() as client:
-            r = client.get("/api/events", params={"limit": 1001})
-        assert r.status_code == 422
-
-    def test_from_and_hours_conflict_422(self, fake_events: _FakeEvents) -> None:
-        with gateway_test_client() as client:
-            r = client.get(
-                "/api/events",
-                params={"from": "2026-08-04T00:00:00Z", "hours": 1},
-            )
-        assert r.status_code == 422
+def test_a_read_that_exceeds_its_statement_timeout_returns_503(db_url: str) -> None:
+    config: GatewayConfig = replace(
+        gateway_config_from_boot(snapshot_process_config()),
+        human_auth="required",
+        events_read_timeout_ms=150,
+    )
+    with _telemetry_store_locked(db_url), gateway_test_client(config=config) as client:
+        response = client.get("/api/events", params={"category": "telemetry"})
+    assert response.status_code == 503
+    assert response.json()["detail"] == "events read timed out"
