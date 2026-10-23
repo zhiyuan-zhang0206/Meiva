@@ -123,7 +123,7 @@ def run(
     return proc
 
 
-def wait_for(what: str, predicate, timeout: float, phase: str):
+def wait_for[T](what: str, predicate: Callable[[], T | None], timeout: float, phase: str) -> T:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         result = predicate()
@@ -197,14 +197,16 @@ def refusal(call: Callable[[], object]) -> str:
 _NOT_ANSWERING = (OSError, ValueError, RuntimeError)
 
 
-def ping_or_none(helper_client):
+def ping_or_none(helper_client: Any) -> Any:
     try:
         return helper_client.ping()["pong"]
     except _NOT_ANSWERING:
         return None
 
 
-def status_if_running(root_status, *, excluding: int | None = None):
+def status_if_running(
+    root_status: Callable[[], dict[str, Any]], *, excluding: int | None = None
+) -> dict[str, Any] | None:
     try:
         status = root_status()
     except _NOT_ANSWERING:
@@ -217,7 +219,9 @@ def status_if_running(root_status, *, excluding: int | None = None):
     return None
 
 
-def status_if_keeper_running(helper_root_status):
+def status_if_keeper_running(
+    helper_root_status: Callable[[], dict[str, Any]],
+) -> dict[str, Any] | None:
     try:
         status = helper_root_status()
     except _NOT_ANSWERING:
@@ -227,7 +231,9 @@ def status_if_keeper_running(helper_root_status):
     return None
 
 
-def status_if_conflict(helper_root_status):
+def status_if_conflict(
+    helper_root_status: Callable[[], dict[str, Any]],
+) -> dict[str, Any] | None:
     try:
         status = helper_root_status()
     except _NOT_ANSWERING:
@@ -235,15 +241,15 @@ def status_if_conflict(helper_root_status):
     return status if status.get("state") == "conflict" else None
 
 
-def relaunched_helper(label: str, old_pid: int):
+def relaunched_helper(label: str, old_pid: int) -> int | None:
     pid = job_pid(label)
     if pid is None or pid == old_pid:
         return None
     return pid
 
 
-def unit_entry(status: dict, unit_id: str) -> dict:
-    for entry in status["units"]:
+def unit_entry(status: dict[str, Any], unit_id: str) -> dict[str, Any]:
+    for entry in cast("list[dict[str, Any]]", status["units"]):
         if entry["id"] == unit_id and isinstance(entry["pid"], int):
             return entry
     fail("chain", f"unit {unit_id!r} has no live pid in {json.dumps(status)[:400]}")

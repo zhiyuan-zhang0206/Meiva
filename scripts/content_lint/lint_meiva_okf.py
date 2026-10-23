@@ -10,7 +10,7 @@ import sys
 from collections import defaultdict
 from collections.abc import Sequence
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import yaml
 
@@ -71,7 +71,7 @@ class LintError:
 def find_files(paths: list[str]) -> list[Path]:
     if not paths:
         paths = ["."]
-    files = []
+    files: list[Path] = []
     for p in paths:
         root = Path(p)
         if not root.exists():
@@ -88,7 +88,7 @@ def find_files(paths: list[str]) -> list[Path]:
     return sorted(set(files))
 
 
-def parse_frontmatter(text: str) -> tuple[dict, str, int]:
+def parse_frontmatter(text: str) -> tuple[dict[str, Any], str, int]:
     lines = text.split("\n")
     if not lines or lines[0].strip() != "---":
         return {}, text, 0
@@ -96,11 +96,10 @@ def parse_frontmatter(text: str) -> tuple[dict, str, int]:
         if lines[i].strip() == "---":
             fm_text = "\n".join(lines[1:i])
             try:
-                fm = yaml.safe_load(fm_text) or {}
+                fm_raw: Any = yaml.safe_load(fm_text) or {}
             except yaml.YAMLError:
                 return {}, text, i + 1
-            if not isinstance(fm, dict):
-                fm = {}
+            fm: dict[str, Any] = cast("dict[str, Any]", fm_raw) if isinstance(fm_raw, dict) else {}
             return fm, "\n".join(lines[i + 1 :]).lstrip("\n"), i + 1
     return {}, text, 0
 
@@ -266,7 +265,7 @@ def _wikilink_error(
 
 
 # meiva:link scripts/content_lint/docs/lint-meiva-okf.meiva.okf.md
-def _tags_errors(path_str: str, fm: dict) -> list[LintError]:
+def _tags_errors(path_str: str, fm: dict[str, Any]) -> list[LintError]:
     errors: list[LintError] = []
     if "tags" not in fm:
         return errors
@@ -274,7 +273,7 @@ def _tags_errors(path_str: str, fm: dict) -> list[LintError]:
     if not isinstance(tags, list):
         errors.append(LintError(path_str, 1, "E005", "'tags' must be a list of strings"))
         return errors
-    for i, t in enumerate(tags):
+    for i, t in enumerate(cast("list[Any]", tags)):
         if not isinstance(t, str):
             errors.append(
                 LintError(
@@ -285,7 +284,7 @@ def _tags_errors(path_str: str, fm: dict) -> list[LintError]:
 
 
 # meiva:link scripts/content_lint/docs/lint-meiva-okf.meiva.okf.md
-def _forbidden_key_errors(path_str: str, fm: dict) -> list[LintError]:
+def _forbidden_key_errors(path_str: str, fm: dict[str, Any]) -> list[LintError]:
     errors: list[LintError] = []
     for key in FORBIDDEN_KEYS:
         if key in fm:
@@ -304,7 +303,7 @@ def _forbidden_key_errors(path_str: str, fm: dict) -> list[LintError]:
 # meiva:link scripts/content_lint/docs/lint-meiva-okf-size-and-links.meiva.okf.md
 def _mask_code(text: str) -> str:
     lines = text.split("\n")
-    out = []
+    out: list[str] = []
     in_fence = False
     for line in lines:
         if _FENCE_RE.match(line):
@@ -444,7 +443,7 @@ def _required_field_errors(path_str: str, fm: dict[str, Any]) -> list[LintError]
 
 
 def lint_file(filepath: Path, all_paths: set[str], repo_root: Path) -> list[LintError]:
-    errors = []
+    errors: list[LintError] = []
     path_str = str(filepath)
 
     if not filepath.name.endswith(".meiva.okf.md"):

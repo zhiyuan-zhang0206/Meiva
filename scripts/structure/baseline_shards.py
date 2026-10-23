@@ -25,7 +25,7 @@ import json
 import subprocess
 from collections.abc import Iterable
 from pathlib import Path, PurePosixPath
-from typing import cast
+from typing import Any, cast
 
 SHARD_DIR = "scripts/structure/baseline"
 RULES_FILE = "rules.json"
@@ -74,12 +74,12 @@ def merge(texts: dict[str, str], sections: Iterable[str]) -> dict[str, dict[str,
         shard = json.loads(text)
         if not isinstance(shard, dict):
             raise ValueError(f"shard {name}.json must be an object")  # noqa: TRY004 — schema error
-        for kind, entries in shard.items():
+        for kind, entries in cast("dict[str, Any]", shard).items():
             if kind not in merged:
                 raise ValueError(f"shard {name}.json has unknown section {kind!r}")
             if not isinstance(entries, dict):
                 raise ValueError(f"shard {name}.json section {kind!r} must be an object")  # noqa: TRY004
-            for key, count in entries.items():
+            for key, count in cast("dict[str, int]", entries).items():
                 if key in merged[kind]:
                     raise ValueError(
                         f"shard {name}.json duplicates {kind} entry {key!r} from another shard"

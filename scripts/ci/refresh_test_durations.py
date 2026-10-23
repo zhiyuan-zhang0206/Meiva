@@ -54,6 +54,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from typing import Any, cast
 
 from base.host.atomic_io import write_text_atomic
 
@@ -94,11 +95,13 @@ def load_durations(path: Path) -> dict[str, float]:
         return {}
     if not isinstance(data, dict):
         raise SystemExit(f"unexpected durations shape in {path}: {type(data).__name__}")
+    data_dict = cast("dict[Any, Any]", data)
     if not all(
-        isinstance(value, (int, float)) and not isinstance(value, bool) for value in data.values()
+        isinstance(value, (int, float)) and not isinstance(value, bool)
+        for value in data_dict.values()
     ):
         raise SystemExit(f"non-numeric duration in {path}")
-    return {str(nodeid): float(value) for nodeid, value in data.items()}
+    return {str(nodeid): float(value) for nodeid, value in data_dict.items()}
 
 
 def run_suite(

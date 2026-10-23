@@ -23,6 +23,7 @@ from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any, cast
 
 import redis
 from dotenv import dotenv_values
@@ -153,7 +154,7 @@ def redis_probe(host: str, port: int, password: str, *, username: str) -> bool:
             socket_connect_timeout=3,
             socket_timeout=3,
         ) as client:
-            return bool(client.ping())
+            return bool(cast("Any", client).ping())
     except (RedisError, OSError):
         return False
 
@@ -203,7 +204,9 @@ def apply_admin(state: RotationState) -> None:
         socket_connect_timeout=3,
         socket_timeout=3,
     ) as client:
-        client.execute_command("CONFIG", "SET", "requirepass", state.new_redis_admin_password)
+        cast("Any", client).execute_command(
+            "CONFIG", "SET", "requirepass", state.new_redis_admin_password
+        )
 
 
 def apply_runner(state: RotationState) -> None:

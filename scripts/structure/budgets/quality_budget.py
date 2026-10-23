@@ -5,9 +5,10 @@ from __future__ import annotations
 import ast
 import sys
 from collections import Counter
+from typing import Any, cast
 
 from radon.complexity import ComplexityVisitor
-from radon.visitors import Class, Function
+from radon.visitors import Class
 
 COMPLEXITY_HARD = 15
 COMPLEXITY_WARN = 10
@@ -43,15 +44,16 @@ def function_nodes(tree: ast.AST, path: str) -> dict[str, ast.FunctionDef | ast.
     return result
 
 
-def _block_scores(blocks: list[Class | Function]) -> dict[tuple[int, str], int]:
+def _block_scores(blocks: list[Any]) -> dict[tuple[int, str], int]:
     """Include methods, closures and inner classes without double-counting methods."""
     result: dict[tuple[int, str], int] = {}
     for block in blocks:
         if isinstance(block, Class):
-            result.update(_block_scores([*block.methods, *block.inner_classes]))
+            cls_block = cast("Any", block)
+            result.update(_block_scores([*cls_block.methods, *cls_block.inner_classes]))
         else:
-            result[block.lineno, block.name] = block.complexity
-            result.update(_block_scores(block.closures))
+            result[int(block.lineno), str(block.name)] = int(block.complexity)
+            result.update(_block_scores(list(block.closures)))
     return result
 
 
@@ -59,14 +61,15 @@ def complexity_scores(
     tree: ast.AST, nodes: dict[str, ast.FunctionDef | ast.AsyncFunctionDef]
 ) -> dict[str, int]:
     """Use Radon 6.0.1 on the shared AST, including its local-class collection gap."""
-    scores = _block_scores(ComplexityVisitor.from_ast(tree).blocks)
+    visitor_cls = cast("Any", ComplexityVisitor)
+    scores = _block_scores(visitor_cls.from_ast(tree).blocks)
     result: dict[str, int] = {}
     for key, node in nodes.items():
         identity = (node.lineno, node.name)
         if identity not in scores:
             # Radon discards classes inside functions (and their methods/closures).
             # Reuse the existing node and the same visitor, never reparse source.
-            scores.update(_block_scores(ComplexityVisitor.from_ast(node).blocks))
+            scores.update(_block_scores(visitor_cls.from_ast(node).blocks))
         result[key] = scores[identity]
     return result
 

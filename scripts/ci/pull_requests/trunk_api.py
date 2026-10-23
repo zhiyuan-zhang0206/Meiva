@@ -7,6 +7,7 @@ import re
 import subprocess
 import urllib.error
 import urllib.request
+from typing import cast
 
 from base.host.git.gitenv import git_env
 from base.host.net.ports import UrlOpener
@@ -134,4 +135,4 @@ def post(
         return {}, None
     if not isinstance(data, dict):
         return None, "response was not a JSON object"
-    return data, None
+    return cast("dict[str, object]", data), None

@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from datetime import time as day_time
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from zoneinfo import ZoneInfo
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -219,9 +219,11 @@ def _json_list(output: str, description: str) -> list[dict[str, Any]]:
         parsed = json.loads(output)
     except json.JSONDecodeError as exc:
         raise CiRunsError(f"invalid JSON from {description}") from exc
-    if not isinstance(parsed, list) or not all(isinstance(item, dict) for item in parsed):
+    if not isinstance(parsed, list) or not all(
+        isinstance(x, dict) for x in cast("list[Any]", parsed)
+    ):
         raise CiRunsError(f"unexpected {description} payload")
-    return parsed
+    return cast("list[dict[str, Any]]", parsed)
 
 
 def fetch_runs(
@@ -288,12 +290,11 @@ def load_cache(path: Path) -> dict[str, Any]:
         cached = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return {"runs": {}, "prs": {}, "last_fetch_end": None}
-    if not isinstance(cached, dict):
-        return {"runs": {}, "prs": {}, "last_fetch_end": None}
+    d = cast("dict[str, Any]", cached) if isinstance(cached, dict) else {}
     return {
-        "runs": cached["runs"] if isinstance(cached.get("runs"), dict) else {},
-        "prs": cached["prs"] if isinstance(cached.get("prs"), dict) else {},
-        "last_fetch_end": cached.get("last_fetch_end"),
+        "runs": d["runs"] if isinstance(d.get("runs"), dict) else {},
+        "prs": d["prs"] if isinstance(d.get("prs"), dict) else {},
+        "last_fetch_end": d.get("last_fetch_end"),
     }
 
 
@@ -310,8 +311,8 @@ def merge_cache(
     fetched_end: datetime,
 ) -> dict[str, Any]:
     """Merge updated API records by stable id and prune only old cache state."""
-    runs = {str(key): value for key, value in cache["runs"].items() if isinstance(value, dict)}
-    prs = {str(key): value for key, value in cache["prs"].items() if isinstance(value, dict)}
+    runs: dict[str, Any] = {str(k): v for k, v in cache["runs"].items() if isinstance(v, dict)}
+    prs: dict[str, Any] = {str(k): v for k, v in cache["prs"].items() if isinstance(v, dict)}
     for run in fresh_runs:
         runs[str(run["id"])] = run
     for pr in fresh_prs:

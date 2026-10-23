@@ -7,7 +7,7 @@ import json
 import re
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from urllib.parse import quote
 
 BUILD_NUMBER_BASE = 1_000_000
@@ -74,7 +74,7 @@ def assert_version_code_advances(*, current: Path, version_code: int) -> None:
     body: Any = json.loads(current.read_text(encoding="utf-8"))
     if not isinstance(body, dict):
         raise TypeError(f"{current} is not a manifest object")
-    previous = body.get("versionCode")
+    previous = cast("dict[str, Any]", body).get("versionCode")
     if isinstance(previous, bool) or not isinstance(previous, int):
         raise TypeError(f"{current} has no integer versionCode")
     if version_code <= previous:

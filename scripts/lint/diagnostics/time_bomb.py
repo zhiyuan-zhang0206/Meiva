@@ -396,7 +396,7 @@ class _Index:
         return uses, covered, family
 
     def summary(
-        self, mod: str, name: str, depth: int = 0, seen: frozenset | None = None
+        self, mod: str, name: str, depth: int = 0, seen: frozenset[tuple[str, str]] | None = None
     ) -> tuple[bool, bool, bool]:
         """(uses_real_now, clock_covered, reaches_family) — transitive, memoized.
 

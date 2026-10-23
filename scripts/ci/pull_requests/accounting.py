@@ -9,7 +9,7 @@ import subprocess
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from base.host.system.hostport import Host
 
@@ -59,15 +59,22 @@ def _read_page(path: str, key: str, *, host: Host) -> tuple[int, list[dict[str, 
     payload = _gh_api(path, host=host)
     if not isinstance(payload, dict):
         raise CiUsageReadError(f"{path}: expected a GitHub page object")
-    total, rows = payload.get("total_count"), payload.get(key)
+    payload_dict = cast("dict[str, Any]", payload)
+    total, rows = payload_dict.get("total_count"), payload_dict.get(key)
     if type(total) is not int or total < 0 or not isinstance(rows, list):
         raise CiUsageReadError(f"{path}: missing or invalid page fields")
-    if len(rows) > 100:
+    rows_list = cast("list[Any]", rows)
+    if len(rows_list) > 100:
         raise CiUsageReadError(f"{path}: inconsistent page count")
-    for row in rows:
-        if not isinstance(row, dict) or type(row.get("id")) is not int:
+    validated_rows: list[dict[str, Any]] = []
+    for row in rows_list:
+        if not isinstance(row, dict):
             raise CiUsageReadError(f"{path}: invalid row identity")
-    return total, rows
+        row_dict = cast("dict[str, Any]", row)
+        if type(row_dict.get("id")) is not int:
+            raise CiUsageReadError(f"{path}: invalid row identity")
+        validated_rows.append(row_dict)
+    return total, validated_rows
 
 
 # meiva:link scripts/ci/pull_requests/docs/ci-usage.meiva.okf.md
@@ -143,12 +150,16 @@ def _identity_from_prs(
     run: dict[str, Any], repo: str, real_pr: int | None, *, host: Host
 ) -> tuple[int | None, int | None, int | None]:
     pull_requests = run.get("pull_requests")
-    if not isinstance(pull_requests, list) or any(
-        not isinstance(pr, dict) or type(pr.get("number")) is not int for pr in pull_requests
+    if not isinstance(pull_requests, list):
+        raise CiUsageReadError("workflow run: invalid pull_requests")
+    pr_list = cast("list[Any]", pull_requests)
+    if any(
+        not isinstance(pr, dict) or type(cast("dict[str, Any]", pr).get("number")) is not int
+        for pr in pr_list
     ):
         raise CiUsageReadError("workflow run: invalid pull_requests")
-    if pull_requests:
-        pr_number = pull_requests[0]["number"]
+    if pr_list:
+        pr_number = int(cast("dict[str, Any]", pr_list[0])["number"])
         title = _pr_title(repo, real_pr if real_pr else pr_number, host=host)
         agent_id, task_id = parse_identity(title)
         return (real_pr or pr_number), agent_id, task_id
@@ -163,11 +174,15 @@ def _merged_pr_of(run: dict[str, Any], repo: str, *, host: Host) -> int | None:
     if not head_sha:
         return None
     merged_prs = _gh_api(f"repos/{repo}/commits/{head_sha}/pulls", host=host)
-    if not isinstance(merged_prs, list) or any(
-        not isinstance(pr, dict) or type(pr.get("number")) is not int for pr in merged_prs
+    if not isinstance(merged_prs, list):
+        raise CiUsageReadError(f"commit {head_sha}: invalid pull request associations")
+    merged_list = cast("list[Any]", merged_prs)
+    if any(
+        not isinstance(pr, dict) or type(cast("dict[str, Any]", pr).get("number")) is not int
+        for pr in merged_list
     ):
         raise CiUsageReadError(f"commit {head_sha}: invalid pull request associations")
-    return merged_prs[0]["number"] if merged_prs else None
+    return int(cast("dict[str, Any]", merged_list[0])["number"]) if merged_list else None
 
 
 # meiva:note
@@ -188,7 +203,13 @@ def _run_identity(
             pr_number = merged
             agent_id, task_id = parse_identity(_pr_title(repo, pr_number, host=host))
     if task_id is None:
-        _, task_id = parse_identity(str((run.get("head_commit") or {}).get("message") or ""))
+        head_commit = run.get("head_commit")
+        msg = (
+            str(cast("dict[str, Any]", head_commit).get("message") or "")
+            if isinstance(head_commit, dict)
+            else ""
+        )
+        _, task_id = parse_identity(msg)
     return pr_number, agent_id, task_id
 
 
@@ -295,8 +316,10 @@ def load_ledger(path: Path) -> dict[int, dict[str, Any]]:
             entry = json.loads(line)
         except json.JSONDecodeError:
             continue
-        if isinstance(entry, dict) and isinstance(entry.get("run_id"), int):
-            ledger[entry["run_id"]] = entry
+        if isinstance(entry, dict):
+            entry_dict = cast("dict[str, Any]", entry)
+            if isinstance(entry_dict.get("run_id"), int):
+                ledger[int(entry_dict["run_id"])] = entry_dict
     return ledger
 
 

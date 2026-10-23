@@ -73,7 +73,7 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from datetime import time as dtime
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from zoneinfo import ZoneInfo
 
 # Script-mode path guard (PYTHONSAFEPATH=1 removed the implicit script-dir
@@ -222,10 +222,11 @@ def fetch_closed_prs(repo: str, since: datetime, stats: RunStats) -> list[dict[s
         batch = json.loads(out)
         if not isinstance(batch, list):
             raise PrFlowError(f"unexpected pulls payload on page {page}")
-        prs.extend(batch)
-        if len(batch) < _PAGE_SIZE:
+        batch_list = cast("list[dict[str, Any]]", batch)
+        prs.extend(batch_list)
+        if len(batch_list) < _PAGE_SIZE:
             return prs
-        oldest = min((str(item.get("updated_at") or "") for item in batch), default="")
+        oldest = min((str(item.get("updated_at") or "") for item in batch_list), default="")
         try:
             if oldest and datetime.fromisoformat(oldest) < since:
                 return prs
@@ -257,8 +258,9 @@ def fetch_timeline(repo: str, number: int, stats: RunStats) -> list[dict[str, An
         batch = json.loads(out)
         if not isinstance(batch, list):
             raise PrFlowError(f"unexpected timeline payload for PR #{number}")
-        events.extend(batch)
-        if len(batch) < _PAGE_SIZE:
+        batch_list = cast("list[dict[str, Any]]", batch)
+        events.extend(batch_list)
+        if len(batch_list) < _PAGE_SIZE:
             break
     else:
         print(
@@ -389,8 +391,10 @@ def fetch_queue_depth(repo: str, token: str, stats: RunStats, *, open_url: UrlOp
     if error is not None or data is None:
         stats.trunk_error = error or "no data"
         return None
-    items = data.get("enqueuedPullRequests") or []
-    return len(items) if isinstance(items, list) else None
+    items = data.get("enqueuedPullRequests")
+    if not items:
+        return 0 if items is None or isinstance(items, list) else None
+    return len(cast("list[Any]", items)) if isinstance(items, list) else None
 
 
 def fetch_quarantined(
@@ -427,14 +431,22 @@ def fetch_quarantined(
             if error is not None or data is None:
                 stats.trunk_error = error or "no data"
                 return None
-            batch = data.get("quarantined_tests") or []
+            raw_batch = data.get("quarantined_tests")
+            batch: object = raw_batch if raw_batch else []
             if not isinstance(batch, list):
                 stats.trunk_error = "unexpected quarantined_tests payload"
                 return None
-            collected.extend(item for item in batch if isinstance(item, dict))
-            page = data.get("page") or {}
-            page_token = page.get("next_page_token") if isinstance(page, dict) else None
-            if not batch or not page_token:
+            batch_list = cast("list[Any]", batch)
+            collected.extend(
+                cast("dict[str, Any]", item) for item in batch_list if isinstance(item, dict)
+            )
+            page = data.get("page")
+            page_token = (
+                cast("dict[str, Any]", page).get("next_page_token")
+                if isinstance(page, dict)
+                else None
+            )
+            if not batch_list or not page_token:
                 return collected
         print(
             f"pr-flow: quarantined walk capped at {_MAX_FLAKY_PAGES} pages; "
@@ -469,8 +481,8 @@ def load_cache(path: Path) -> dict[str, dict[str, Any]]:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return {}
-    entries = data.get("prs") if isinstance(data, dict) else None
-    return entries if isinstance(entries, dict) else {}
+    entries = cast("dict[str, Any]", data).get("prs") if isinstance(data, dict) else None
+    return cast("dict[str, dict[str, Any]]", entries) if isinstance(entries, dict) else {}
 
 
 def save_json(path: Path, payload: dict[str, Any]) -> None:

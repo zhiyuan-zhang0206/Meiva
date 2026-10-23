@@ -10,13 +10,11 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
 import pytest
 
 from scripts.ci import coverage_gates as gates
-
-# The script's report parameters are unparameterized dicts: the call-site rules stay at warning.
-# pyright: reportUnknownMemberType = warning
 
 
 @pytest.fixture(autouse=True)
@@ -25,7 +23,7 @@ def _no_floors(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(gates, "FLOORS", {})
 
 
-def _files(classes: dict[str, tuple[int, int]]) -> dict[str, dict]:
+def _files(classes: dict[str, tuple[int, int]]) -> dict[str, dict[str, Any]]:
     """A synthetic coverage.json `files` map: {path: (covered, valid)}."""
     return {
         path: {"summary": {"covered_lines": covered, "num_statements": valid}}

@@ -88,7 +88,7 @@ def collect_probe(host: Host, checkout: str, interpreter: str) -> list[dict[str,
         if line.startswith("__PROBE__"):
             rows = json.loads(line[len("__PROBE__") :])
             if isinstance(rows, list):
-                return rows
+                return cast("list[dict[str, object]]", rows)
     raise RuntimeError(f"{host}: the harness probe printed no rows")
 
 
@@ -470,7 +470,7 @@ def match_version(
 
 
 def version_key(text: str) -> tuple[int, ...]:
-    keys = []
+    keys: list[int] = []
     for chunk in text.split("."):
         digits = "".join(character for character in chunk if character.isdigit())
         keys.append(int(digits) if digits else 0)

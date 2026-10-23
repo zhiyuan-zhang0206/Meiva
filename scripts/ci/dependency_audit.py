@@ -116,7 +116,7 @@ def _dev_only(nodes: list[str], packages: dict[str, Any]) -> bool:
         return False
     for node in nodes:
         entry = packages.get(node)
-        if not isinstance(entry, dict) or entry.get("dev") is not True:
+        if not isinstance(entry, dict) or cast("dict[str, Any]", entry).get("dev") is not True:
             return False
     return True
 
@@ -126,12 +126,13 @@ def _no_forward_fix(fix: Any, packages: dict[str, Any]) -> bool:
         return True
     if not isinstance(fix, dict):
         return False
-    name = fix.get("name")
-    suggested = fix.get("version")
+    fix_dict = cast("dict[str, Any]", fix)
+    name = fix_dict.get("name")
+    suggested = fix_dict.get("version")
     installed = packages.get(f"node_modules/{name}")
     if not isinstance(suggested, str) or not isinstance(installed, dict):
         return False
-    version = installed.get("version")
+    version = cast("dict[str, Any]", installed).get("version")
     if not isinstance(version, str):
         return False
     return _version_key(suggested) <= _version_key(version)
@@ -144,11 +145,16 @@ def npm_vulnerabilities(
     lock = packages if packages is not None else {}
     found: list[Vulnerability] = []
     for name, entry in audit_json["vulnerabilities"].items():
-        titles: list[str] = [via["title"] for via in entry["via"] if isinstance(via, dict)]
+        titles: list[str] = [
+            str(cast("dict[str, Any]", via)["title"])
+            for via in entry["via"]
+            if isinstance(via, dict)
+        ]
         fix = entry["fixAvailable"]
         if isinstance(fix, dict):
-            fix_text = f"{fix['name']}@{fix['version']}" + (
-                " (major)" if fix["isSemVerMajor"] else ""
+            fix_dict = cast("dict[str, Any]", fix)
+            fix_text = f"{fix_dict['name']}@{fix_dict['version']}" + (
+                " (major)" if fix_dict["isSemVerMajor"] else ""
             )
         else:
             fix_text = "available" if fix else "none"

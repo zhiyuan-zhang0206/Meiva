@@ -13,6 +13,7 @@ import json
 import sys
 from collections.abc import Iterator
 from pathlib import Path
+from typing import cast
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(_REPO_ROOT))
@@ -167,7 +168,7 @@ def _read_baseline(root: Path) -> dict[str, int]:
     if not isinstance(raw, dict):
         raise SystemExit(f"{BASELINE}: expected a JSON object of path -> count")
     counts: dict[str, int] = {}
-    for key, value in raw.items():
+    for key, value in cast("dict[object, object]", raw).items():
         if not isinstance(key, str) or not isinstance(value, int):
             raise SystemExit(f"{BASELINE}: {key!r} must map to a count, not {value!r}")
         counts[key] = value

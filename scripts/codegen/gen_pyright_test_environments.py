@@ -110,7 +110,7 @@ def _toml_value(value: object) -> str:
         if all(isinstance(item, str) for item in items):
             return json.dumps(items)
     raise SystemExit(
-        f"cannot repeat a {type(value).__name__} setting in a generated entry: {value!r}"
+        f"cannot repeat a {type(cast('object', value)).__name__} setting in a generated entry: {value!r}"
     )
 
 
@@ -120,7 +120,7 @@ def _entries(config: dict[str, Any], roots: list[str]) -> list[dict[str, Any]]:
     for root in roots:
         if effective_rules(config, root) == TESTS_STANDARD:
             continue
-        inherited = {
+        inherited: dict[str, object] = {
             key: value
             for key, value in _covering_environment(config, root).items()
             if key != "root" and key not in TESTS_STANDARD

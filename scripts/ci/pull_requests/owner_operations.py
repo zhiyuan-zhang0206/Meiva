@@ -8,6 +8,7 @@ import os
 import subprocess
 import sys
 from math import ceil
+from typing import Any, cast
 
 from base.clock import Clock, Timers
 from base.host.net.ports import UrlOpener
@@ -161,7 +162,7 @@ def _trunk_queue_status(repo: str, *, token: str, as_json: bool, open_url: UrlOp
     state = data.get("state", "unknown")
     print(f"Trunk merge queue: state={state} concurrency={data.get('concurrency', '?')}")
     raw_items = data.get("enqueuedPullRequests", [])
-    items = raw_items if isinstance(raw_items, list) else []
+    items = cast("list[dict[str, Any]]", raw_items) if isinstance(raw_items, list) else []
     if not items:
         print("No PRs in the queue.")
         return 0

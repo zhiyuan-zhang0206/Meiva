@@ -4,7 +4,7 @@ import json
 import re
 import subprocess
 import sys
-from typing import Any
+from typing import Any, cast
 
 from base.host.net.ports import UrlOpener
 from base.host.system.hostport import Host
@@ -62,7 +62,7 @@ def _pr_view(pr: str, repo: str, fields: str, *, host: Host) -> dict[str, object
         data = json.loads(result.stdout)
     except json.JSONDecodeError:
         return None
-    return data if isinstance(data, dict) else None
+    return cast("dict[str, object]", data) if isinstance(data, dict) else None
 
 
 def _job_log_tail(job_id: int, repo: str, *, host: Host) -> str:
@@ -93,7 +93,7 @@ def _pull_head_ref(pull: dict[str, object]) -> str:
     head = pull.get("head")
     if not isinstance(head, dict):
         return ""
-    return str(head.get("ref") or "")
+    return str(cast("dict[str, object]", head).get("ref") or "")
 
 
 def _synthetic_test_prs(pr: str, repo: str, *, host: Host) -> list[dict[str, object]]:
@@ -127,8 +127,13 @@ def _synthetic_test_prs(pr: str, repo: str, *, host: Host) -> list[dict[str, obj
     except json.JSONDecodeError:
         return []
     prefix = f"trunk-merge/pr-{pr}/"
+    if not isinstance(pulls, list):
+        return []
     return [
-        pull for pull in pulls if isinstance(pull, dict) and _pull_head_ref(pull).startswith(prefix)
+        cast("dict[str, object]", pull)
+        for pull in cast("list[Any]", pulls)
+        if isinstance(pull, dict)
+        and _pull_head_ref(cast("dict[str, object]", pull)).startswith(prefix)
     ][:_DIAGNOSE_MAX_SYNTHETIC_PRS]
 
 
@@ -179,8 +184,8 @@ def _failing_check_entries(
     except CiJobRerunError:
         failed_jobs = []
     raw_rollup = view.get("statusCheckRollup", [])
-    rollup_rows = raw_rollup if isinstance(raw_rollup, list) else []
-    rollup = [c for c in rollup_rows if isinstance(c, dict)]
+    rollup_rows = cast("list[Any]", raw_rollup) if isinstance(raw_rollup, list) else []
+    rollup = [cast("dict[str, object]", c) for c in rollup_rows if isinstance(c, dict)]
     failing_checks = [c for c in rollup if c.get("conclusion") in FAILING][:_DIAGNOSE_MAX_JOB_LOGS]
     entries: list[dict[str, object]] = []
     for check in failing_checks:
@@ -271,10 +276,11 @@ def print_diagnosis(diag: dict[str, Any]) -> None:
         print(f"  check {check['check']}: {check['classification']} → {check['action']}")
     trunk = diag.get("trunk")
     if isinstance(trunk, dict):
-        if trunk.get("error"):
-            print(f"Trunk queue: not queryable ({trunk['error']})")
+        trunk_dict = cast("dict[str, Any]", trunk)
+        if trunk_dict.get("error"):
+            print(f"Trunk queue: not queryable ({trunk_dict['error']})")
         else:
-            print(f"Trunk queue: state={trunk.get('state')} reason={trunk.get('reason')}")
+            print(f"Trunk queue: state={trunk_dict.get('state')} reason={trunk_dict.get('reason')}")
     synthetic = diag.get("synthetic_test_prs", [])
     for pull in synthetic:
         print(

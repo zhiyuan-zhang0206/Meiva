@@ -29,6 +29,7 @@ import sys
 from collections import defaultdict
 from collections.abc import Sequence
 from pathlib import Path
+from typing import Any
 
 # The 85% gate denominator — must match [tool.coverage.run].source's core
 # set and the comment in ci.yml's gate step. ops/services/meiva_builtins are
@@ -71,7 +72,9 @@ def _matches_prefix(path: str, prefix: str) -> bool:
     return path == prefix or path.startswith(prefix + "/")
 
 
-def _aggregate(files: dict[str, dict]) -> tuple[dict[str, list[int]], dict[str, list[int]]]:
+def _aggregate(
+    files: dict[str, dict[str, Any]],
+) -> tuple[dict[str, list[int]], dict[str, list[int]]]:
     """Aggregate covered/valid line counts from the coverage.json file map.
 
     Returns (per_domain, per_subdomain): per_domain keys are top-level
@@ -142,7 +145,7 @@ def _print_floored_subdomains(
         print(f"  {prefix:>20} {rate:>6}% ({covered}/{valid}) — floor {FLOORS[prefix]}% {verdict}")
 
 
-def check(files: dict[str, dict], threshold: float) -> int:
+def check(files: dict[str, dict[str, Any]], threshold: float) -> int:
     """Enforce the gates against a coverage.json `files` map.
 
     Returns 0 when every gate passes, 1 otherwise. Always prints the

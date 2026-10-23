@@ -7,7 +7,7 @@ import json
 import re
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from .support import SmokeError, fail, pid_alive, run, save, wait_for
 
@@ -30,12 +30,12 @@ def _f12_chain_line(pid: int) -> str:
 def _f12_round(workdir: Path, unit_id: str, tag: str, pid: int, timeout: float) -> dict[str, Any]:
     rounds_path = workdir / f"unit-results-{unit_id}.json.rounds"
 
-    def _found():
+    def _found() -> dict[str, Any] | None:
         if not rounds_path.exists():
             return None
         for line in reversed(rounds_path.read_text().splitlines()):
             try:
-                record = json.loads(line)
+                record = cast("dict[str, Any]", json.loads(line))
             except json.JSONDecodeError:
                 continue
             if record.get("round") == tag and record.get("pid") == pid:
@@ -57,7 +57,7 @@ def f12_point(
     smoke_ts = round(time.time(), 3)
     for unit_id in sorted({unit_id for unit_id, _ in units}):
         (workdir / f"unit-results-{unit_id}.json.req").write_text(tag)
-    rows = []
+    rows: list[dict[str, Any]] = []
     for unit_id, pid in units:
         if not pid_alive(pid):
             record: dict[str, Any] = {"round": tag, "pid": pid, "error": "unit dead"}
@@ -92,12 +92,12 @@ def f12_join(
     samples: dict[str, Any], lines: dict[int, list[tuple[float, str]]]
 ) -> list[dict[str, Any]]:
     """Join probe rounds against the parsed window: first 3 requests at/after ts - 0.15s."""
-    joined = []
+    joined: list[dict[str, Any]] = []
     for point in samples["points"].values():
         for record in point["rows"]:
             if not isinstance(record.get("ts"), (int, float)):
                 continue
-            requests = []
+            requests: list[dict[str, Any]] = []
             for ts, line in lines.get(int(record["pid"]), []):
                 if ts < record["ts"] - 0.15:
                     continue

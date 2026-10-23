@@ -1764,6 +1764,16 @@ reportMissingParameterType = "error"
 reportUnknownLambdaType = "error"
 reportMissingTypeArgument = "error"
 
+[[tool.pyright.executionEnvironments]]
+root = "scripts"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+reportUnknownVariableType = "error"
+reportUnknownParameterType = "error"
+reportMissingParameterType = "error"
+reportUnknownLambdaType = "error"
+reportMissingTypeArgument = "error"
+
 # Ladder rung — tests/ call-site rules (audit round-2 tests-ci P1, task
 # #1143). The two call-signature rules gate merge on these test directories:
 # the first ones zeroed by the tests/ annotation sweep (integration 16, e2e

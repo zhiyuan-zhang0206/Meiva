@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import Any, TypedDict
+from typing import Any, TypedDict, cast
 
 from base.clock import Clock
 from base.host.proc import run_bounded
@@ -92,7 +92,7 @@ class LimboRun(TypedDict):
 @dataclass
 class CIResult:
     verdict: CIStatus
-    checks: list[dict] = field(default_factory=list)
+    checks: list[dict[str, Any]] = field(default_factory=list)
 
     # Derived convenience fields (populated by check_ci)
     completed: list[str] = field(default_factory=list)
@@ -158,7 +158,7 @@ def repo_has_workflows() -> bool:
     return any(wf_dir.glob("*.yml")) or any(wf_dir.glob("*.yaml"))
 
 
-def core_suite_skipped(checks: list[dict]) -> list[str] | None:
+def core_suite_skipped(checks: list[dict[str, Any]]) -> list[str] | None:
     """Names of the core suite checks when every attached core check is SKIPPED."""
     core = [c for c in checks if str(c.get("name", "")).startswith(CORE_SUITE_CHECK_PREFIXES)]
     if not core or any(
@@ -189,7 +189,7 @@ def pending_reason(result: CIResult) -> str:
     )
 
 
-def _drop_unexpanded_cancellations(checks: list[dict]) -> list[dict]:
+def _drop_unexpanded_cancellations(checks: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Drop the CANCELLED entries a run leaves when it is cut down before its jobs are named.
 
     A run killed in the cancel-in-progress race leaves check entries whose `name` is still the
@@ -216,7 +216,7 @@ def _drop_unexpanded_cancellations(checks: list[dict]) -> list[dict]:
     ]
 
 
-def _latest_completed_per_name(checks: list[dict]) -> list[dict]:
+def _latest_completed_per_name(checks: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Keep the newest COMPLETED check run per name.
     GitHub lists every check run on a commit, but branch protection and the required-status UI
     treat same-named runs as ONE logical check whose state is the newest COMPLETED run's. A stale
@@ -226,7 +226,7 @@ def _latest_completed_per_name(checks: list[dict]) -> list[dict]:
 
     Commit statuses are exempt: GitHub already deduplicates StatusContext by
     context, and they carry `state`, not `status`/`conclusion`."""
-    latest: dict[str, dict] = {}
+    latest: dict[str, dict[str, Any]] = {}
     for c in checks:
         name = c.get("name")
         if not isinstance(name, str) or c.get("__typename") == "StatusContext":
@@ -239,7 +239,7 @@ def _latest_completed_per_name(checks: list[dict]) -> list[dict]:
             continue
         if (parse_ts(c.get("completedAt")) or 0) >= (parse_ts(current.get("completedAt")) or 0):
             latest[name] = c
-    kept: list[dict] = []
+    kept: list[dict[str, Any]] = []
     for c in checks:
         name = c.get("name")
         if (
@@ -356,7 +356,7 @@ def runs_not_yet_reporting(head_sha: str, repo: str | None, *, host: Host) -> li
         names = json.loads(r.stdout.strip() or "[]")
     except json.JSONDecodeError:
         return None
-    return [str(n) for n in names] if isinstance(names, list) else None
+    return [str(n) for n in cast("list[Any]", names)] if isinstance(names, list) else None
 
 
 def main_workflow_run_completed(head_sha: str, repo: str | None, *, host: Host) -> bool | None:
@@ -425,7 +425,7 @@ def _queued_run_candidates(owner: str, head_sha: str, *, host: Host) -> list[Any
         candidates = json.loads(r.stdout.strip() or "[]")
     except json.JSONDecodeError:
         return None
-    return candidates if isinstance(candidates, list) else None
+    return cast("list[Any]", candidates) if isinstance(candidates, list) else None
 
 
 def _run_job_count(owner: str, run_id: int, *, host: Host) -> int | None:
@@ -466,8 +466,9 @@ def limbo_runs(
     for candidate in candidates:
         if not isinstance(candidate, dict):
             continue
-        raw_id = candidate.get("id")
-        created_at = candidate.get("created_at")
+        cand_dict = cast("dict[str, Any]", candidate)
+        raw_id = cand_dict.get("id")
+        created_at = cand_dict.get("created_at")
         created_ts = parse_ts(created_at if isinstance(created_at, str) else None)
         if type(raw_id) is not int or created_ts is None:
             continue
@@ -476,7 +477,7 @@ def limbo_runs(
             continue
         if _run_job_count(owner, raw_id, host=host) == 0:
             limbo.append(
-                {"id": raw_id, "name": str(candidate.get("name") or "?"), "age_s": round(age)}
+                {"id": raw_id, "name": str(cand_dict.get("name") or "?"), "age_s": round(age)}
             )
     return limbo
 
@@ -510,7 +511,7 @@ def _empty_rollup_verdict(
         result.verdict = CIStatus.NO_CHECKS
 
 
-def _merge_conflict_result(data: dict, result: CIResult) -> CIResult:
+def _merge_conflict_result(data: dict[str, Any], result: CIResult) -> CIResult:
     """Keep the conflict verdict's check detail without entering CI evaluation."""
     result.verdict = CIStatus.MERGE_CONFLICT
     checks = data.get("statusCheckRollup", [])

@@ -9,6 +9,7 @@ import stat as stat_module
 import sys
 import time
 from pathlib import Path
+from typing import cast
 
 _DEFAULTED = re.compile(r"\$\{(\w+):-([^}]*)\}")
 
@@ -100,7 +101,7 @@ def _paths(request: dict[str, object]) -> list[object]:
     paths = request.get("paths")
     if not isinstance(paths, list):
         raise TypeError("request is missing a 'paths' list")
-    return paths
+    return cast("list[object]", paths)
 
 
 def _one_path(request: dict[str, object]) -> str:
@@ -121,12 +122,13 @@ def main() -> int:
     if not isinstance(request, dict):
         print(json.dumps({"error": "no __REQUEST__ literal was appended"}))
         return 1
-    operation = OPERATIONS.get(str(request.get("op")))
+    req_dict = cast("dict[str, object]", request)
+    operation = OPERATIONS.get(str(req_dict.get("op")))
     if operation is None:
-        print(json.dumps({"error": f"unknown op {request.get('op')!r}"}))
+        print(json.dumps({"error": f"unknown op {req_dict.get('op')!r}"}))
         return 1
     try:
-        print(json.dumps(operation(request)))
+        print(json.dumps(operation(req_dict)))
     except OSError as error:
         print(json.dumps({"error": f"{type(error).__name__}: {error}"}))
         return 1

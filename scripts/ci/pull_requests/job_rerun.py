@@ -32,7 +32,7 @@ from __future__ import annotations
 
 import json
 import subprocess
-from typing import Any
+from typing import Any, cast
 
 from base.host.system.hostport import Host
 
@@ -112,7 +112,7 @@ def _head_sha_of(pr: str | int, repo: str, *, host: Host) -> str:
     return sha
 
 
-def _current_runs(head_sha: str, repo: str, *, host: Host) -> list[dict]:
+def _current_runs(head_sha: str, repo: str, *, host: Host) -> list[dict[str, Any]]:
     """The newest run per workflow name for the PR head, with its REST status.
 
     One head commit hosts several workflow runs (CI, QA reviews, re-runs). A
@@ -128,28 +128,31 @@ def _current_runs(head_sha: str, repo: str, *, host: Host) -> list[dict]:
         host=host,
     )
     newest: dict[str, tuple[str, int, str]] = {}
-    for run in data.get("workflow_runs") or []:
+    for run in cast("list[Any]", data.get("workflow_runs") or []):
         if not isinstance(run, dict):
             continue
-        run_id = run.get("id")
-        name = run.get("name")
-        created_at = run.get("created_at")
-        status = run.get("status")
+        run_dict = cast("dict[str, Any]", run)
+        run_id = run_dict.get("id")
+        name = run_dict.get("name")
+        created_at = run_dict.get("created_at")
+        status = run_dict.get("status")
         if (
-            run_id is None
+            not isinstance(run_id, int)
             or not isinstance(name, str)
-            or created_at is None
+            or not isinstance(created_at, str)
             or not isinstance(status, str)
         ):
             continue
         if name not in newest or created_at > newest[name][0]:
             newest[name] = (created_at, run_id, status)
-    runs = [{"run_id": run_id, "status": status} for _, run_id, status in newest.values()]
+    runs: list[dict[str, Any]] = [
+        {"run_id": run_id, "status": status} for _, run_id, status in newest.values()
+    ]
     runs.sort(key=lambda run: run["run_id"])
     return runs
 
 
-def _all_jobs(head_sha: str, repo: str, *, host: Host) -> list[dict]:
+def _all_jobs(head_sha: str, repo: str, *, host: Host) -> list[dict[str, Any]]:
     """Every completed-or-pending job of the head's current workflow runs.
 
     The projection keeps the REST job id (`.id`, the numeric identifier used by
@@ -157,22 +160,23 @@ def _all_jobs(head_sha: str, repo: str, *, host: Host) -> list[dict]:
     objects do not carry (issue #1945) — and the containing run's `status` and
     `run_id`, on which re-run eligibility turns (task #3764).
     """
-    jobs: list[dict] = []
+    jobs: list[dict[str, Any]] = []
     for run in _current_runs(head_sha, repo, host=host):
         data = _gh_api_json(
             [f"repos/{repo}/actions/runs/{run['run_id']}/jobs?per_page=100"],
             f"run {run['run_id']} jobs",
             host=host,
         )
-        for job in data.get("jobs") or []:
+        for job in cast("list[Any]", data.get("jobs") or []):
             if not isinstance(job, dict):
                 continue
+            job_dict = cast("dict[str, Any]", job)
             jobs.append(
                 {
-                    "name": job.get("name"),
-                    "job_id": job.get("id"),
-                    "run_id": job.get("run_id", run["run_id"]),
-                    "conclusion": job.get("conclusion"),
+                    "name": job_dict.get("name"),
+                    "job_id": job_dict.get("id"),
+                    "run_id": job_dict.get("run_id", run["run_id"]),
+                    "conclusion": job_dict.get("conclusion"),
                     "run_status": run["status"],
                 }
             )
@@ -198,7 +202,7 @@ def list_failed_jobs(pr: str | int, repo: str, *, host: Host) -> list[dict[str, 
 
 def rerun_failed_jobs(
     pr: str | int, repo: str, *, host: Host
-) -> tuple[list[dict], list[dict], list[str]]:
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[str]]:
     """Re-run the failed jobs of the PR head's current runs.
 
     Returns `(reran, waiting, errors)`: jobs whose re-run was accepted; jobs
@@ -210,10 +214,10 @@ def rerun_failed_jobs(
     `rerun-failed-jobs` call, because a second job-level rerun of the same run
     is refused while the first's new attempt runs.
     """
-    reran: list[dict] = []
-    waiting: list[dict] = []
+    reran: list[dict[str, Any]] = []
+    waiting: list[dict[str, Any]] = []
     errors: list[str] = []
-    by_run: dict[int, list[dict]] = {}
+    by_run: dict[int, list[dict[str, Any]]] = {}
     for job in list_failed_jobs(pr, repo, host=host):
         by_run.setdefault(job["run_id"], []).append(job)
     for run_id, jobs in by_run.items():

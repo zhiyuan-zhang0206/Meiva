@@ -5,7 +5,7 @@ from __future__ import annotations
 import ast
 import json
 from decimal import Decimal, InvalidOperation
-from typing import NamedTuple
+from typing import Any, NamedTuple, cast
 
 
 class FlatRates(NamedTuple):
@@ -81,13 +81,14 @@ def _archive_decimal(value: object, *, context: str) -> Decimal:
 def archive_rates(raw: object, *, context: str) -> FlatRates:
     if not isinstance(raw, dict):
         raise TypeError(f"{context} must be a rates object")
+    raw_dict = cast("dict[str, Any]", raw)
     return FlatRates(
-        cache_miss=_archive_decimal(raw["input"], context=f"{context} input"),
-        cache_hit=_archive_decimal(raw["cache_read"], context=f"{context} cache_read"),
-        output=_archive_decimal(raw["output"], context=f"{context} output"),
+        cache_miss=_archive_decimal(raw_dict["input"], context=f"{context} input"),
+        cache_hit=_archive_decimal(raw_dict["cache_read"], context=f"{context} cache_read"),
+        output=_archive_decimal(raw_dict["output"], context=f"{context} output"),
         **{
-            key: _archive_decimal(raw[key], context=f"{context} {key}")
-            if raw.get(key) is not None
+            key: _archive_decimal(raw_dict[key], context=f"{context} {key}")
+            if raw_dict.get(key) is not None
             else None
             for key in ("cache_write_5m", "cache_write_1h")
         },

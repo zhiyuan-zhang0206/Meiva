@@ -25,12 +25,13 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+from typing import Any
 
 # Put project root on sys.path so `from base.events.live.projection import ...` finds the module
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 
-def _samples() -> dict[str, dict]:
+def _samples() -> dict[str, dict[str, Any]]:
     """One sample dict per event — field values only need to be type- and
     business-correct, not real.
 

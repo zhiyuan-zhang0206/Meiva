@@ -295,7 +295,7 @@ def main() -> int:  # noqa: PLR0915 - one bounded smoke lifecycle: every phase, 
         return root_pid, initial_units
 
     def attribution_rows(log_text: str) -> list[str]:
-        attributed = []
+        attributed: list[str] = []
         for unit_id, unit_pid in initial_units.items():
             matched = None
             for line in log_text.splitlines():
@@ -324,7 +324,7 @@ def main() -> int:  # noqa: PLR0915 - one bounded smoke lifecycle: every phase, 
         if args.skip_attribution:
             print("PHASE attribute: SKIP (--skip-attribution)")
         else:
-            unit_results = {}
+            unit_results: dict[str, dict[str, Any]] = {}
             for unit_id in initial_units:
                 results_path = workdir / f"unit-results-{unit_id}.json"
                 wait_for(

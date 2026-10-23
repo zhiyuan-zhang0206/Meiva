@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import Literal
+from typing import Any, Literal, cast
 
 Rotation = Literal["static", "rotating", "unknown"]
 InstallKind = Literal["script", "npm"]
@@ -188,7 +188,8 @@ def credential_risk(harness: HarnessSpec, path: str, content: bytes) -> Rotation
         return _rotation_of(harness, path)
     if not isinstance(parsed, dict):
         return _rotation_of(harness, path)
-    if parsed.get("auth_mode") == "apikey" or parsed.get("OPENAI_API_KEY"):
+    parsed_dict = cast("dict[str, Any]", parsed)
+    if parsed_dict.get("auth_mode") == "apikey" or parsed_dict.get("OPENAI_API_KEY"):
         return "static"
     return _rotation_of(harness, path)
 

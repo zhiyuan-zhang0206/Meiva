@@ -4,6 +4,7 @@ import json
 import shlex
 import subprocess
 from dataclasses import dataclass
+from typing import cast
 
 LOCAL_HOST_NAMES = frozenset({"local", "localhost"})
 
@@ -46,7 +47,7 @@ class Result:
             if line.startswith("{"):
                 parsed = json.loads(line)
                 if isinstance(parsed, dict):
-                    return parsed
+                    return cast("dict[str, object]", parsed)
         raise ValueError(
             f"{self.host}: no JSON on stdout of {self.command!r}: {self.stderr[-400:]}"
         )
