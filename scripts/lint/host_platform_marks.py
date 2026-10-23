@@ -240,29 +240,42 @@ def _report_over_baseline(
     judged: dict[str, list[tuple[int, str, str]]],
     baseline: dict[str, int],
     *,
-    shown: dict[str, list[tuple[int, str, str]]] | None = None,
+    scope: frozenset[str] | None = None,
 ) -> bool:
     # meiva:note
     # `judged` is the whole tree even on a `--only` run: a count only means something
-    # against every place the read appears, and `shown` narrows what is printed to the
-    # files the caller asked about.
+    # against every place the read appears. The remedy is written once per kind and the
+    # sites stay one line each, because the pre-existing sites are context, not findings:
+    # a site outside `scope` is marked, since a report that names a file the author never
+    # opened reads as a broken gate, and a gate that looks broken is a gate people switch off.
     failed = False
-    printed = judged if shown is None else shown
     counts = Counter(what for items in judged.values() for _, what, _ in items)
     for what, count in sorted(counts.items()):
         allowed = baseline.get(what, 0)
         if count <= allowed:
             continue
         failed = True
-        print(
-            f"{what}: {count} unmarked read(s), the baseline allows {allowed}. The findings:",
-            file=sys.stderr,
-        )
-        for rel, items in sorted(printed.items()):
-            for lineno, finding, message in items:
-                if finding == what:
-                    print(f"  {rel}:{lineno}: error: {message}", file=sys.stderr)
+        print(f"{what}: {count} unmarked read(s), the baseline allows {allowed}.", file=sys.stderr)
+        _print_sites(judged, what, scope)
     return failed
+
+
+def _print_sites(
+    judged: dict[str, list[tuple[int, str, str]]], what: str, scope: frozenset[str] | None
+) -> None:
+    sites = [
+        (rel, lineno, "" if scope is None or rel in scope else "  [outside your change]")
+        for rel, items in sorted(judged.items())
+        for lineno, finding, _ in items
+        if finding == what
+    ]
+    remedy = next(
+        (message for items in judged.values() for _, finding, message in items if finding == what),
+        "",
+    )
+    print(f"  {remedy}", file=sys.stderr)
+    for rel, lineno, mark in sorted(sites, key=lambda site: (bool(site[2]), site[0], site[1])):
+        print(f"  {rel}:{lineno}{mark}", file=sys.stderr)
 
 
 def _report_baseline_drift(
@@ -313,11 +326,8 @@ def _verdict(
     scope = lint_common.changed_scope(only, root, inputs=("pyproject.toml",))
     if scope is not None and not scope:
         return 0
-    shown = (
-        judged if scope is None else {rel: items for rel, items in judged.items() if rel in scope}
-    )
     baseline = _read_baseline(root)
-    over = _report_over_baseline(judged, baseline, shown=shown)
+    over = _report_over_baseline(judged, baseline, scope=scope)
     drift = _report_baseline_drift(judged, baseline, scope)
     if not (over or drift):
         return 0

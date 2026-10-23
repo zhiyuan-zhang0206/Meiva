@@ -80,8 +80,11 @@ count, while every new read of a counted kind raises one and fails. A kind may
 shrink below its count (a note says so) but never grow past it; `--write-baseline`
 regenerates the file after a deliberate repair. A `--only` run still compares
 against the whole tree — otherwise a new read in the file under review would
-pass locally and fail in CI — and prints the findings of the files it was asked
-about. The baseline
+pass locally and fail in CI. It then lists every site of the kind that grew, one
+line each, and marks the ones outside the change with `[outside your change]`:
+the count is the whole tree's, so the report can name a file the author never
+opened, and saying which sites are theirs is the difference between a gate and a
+mystery. The baseline
 only shrinks; when the last entry goes, the file and this section go with it.
 
 ## Scope
