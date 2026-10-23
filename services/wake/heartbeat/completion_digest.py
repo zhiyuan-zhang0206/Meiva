@@ -15,10 +15,13 @@ errors propagate through this caller to the heartbeat service's
 from __future__ import annotations
 
 import asyncio
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from typing import Protocol
 
 from psycopg_pool import ConnectionPool
 
+from base.clock import Clock
 from base.cluster.machine import MachineIdentity
 from base.daemon import round_loop
 from base.daemon.loop_health import LoopProgress
@@ -100,18 +103,42 @@ async def flush_once(
     return delivered
 
 
-async def completion_digest_loop(
-    pool: ConnectionPool,
-    db: Database,
-    bus: EventBus,
-    progress: LoopProgress,
-    *,
-    machine: MachineIdentity,
-) -> None:
-    """The completion-digest flush as a resident sequential loop: one pass at
-    start, then every `FLUSH_INTERVAL_S`."""
+@dataclass(frozen=True)
+class DigestConfig:
+    flush_interval_s: float = FLUSH_INTERVAL_S
 
-    async def one_round() -> None:
-        await flush_once(pool, db, bus, machine=machine)
 
-    await round_loop.run_rounds("completion-digest", progress, FLUSH_INTERVAL_S, one_round)
+class DigestRound(Protocol):
+    @property
+    def interval_s(self) -> float: ...
+
+    async def run_round(self) -> None: ...
+
+
+# meiva:link services/wake/heartbeat/docs/completion-digest.meiva.okf.md
+@dataclass(frozen=True)
+class CompletionDigestRound:
+    pool: ConnectionPool
+    db: Database
+    bus: EventBus
+    machine: MachineIdentity
+    clock: Clock
+    config: DigestConfig
+
+    @property
+    def interval_s(self) -> float:
+        return self.config.flush_interval_s
+
+    async def run_round(self) -> None:
+        await flush_once(
+            self.pool,
+            self.db,
+            self.bus,
+            machine=self.machine,
+            now=self.clock.now(),
+        )
+
+
+# meiva:link services/wake/heartbeat/docs/completion-digest.meiva.okf.md
+async def completion_digest_loop(digest: DigestRound, progress: LoopProgress) -> None:
+    await round_loop.run_rounds("completion-digest", progress, digest.interval_s, digest.run_round)
