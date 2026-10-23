@@ -564,6 +564,8 @@ class TestSpawnFork:
                 pass
 
         class _SpyBus:
+            channel = "meiva:test-events"
+
             def sync_redis(self) -> _SpyRedis:
                 return _SpyRedis()
 
