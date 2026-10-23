@@ -6,12 +6,12 @@ import { keyedHeaders } from "./operation-key";
 
 import { ApiError, api, MessageDeliveryUnknownError } from "./api";
 import {
-  telemetryTestControl,
-  type TelemetryElement,
-  type TrackOptions,
-} from "../telemetry/telemetry";
+  registerTransportTelemetry,
+  type TransportTelemetryElement,
+  type TransportTrackOptions,
+} from "./api-base";
 
-const track = vi.fn<(element: TelemetryElement, opts?: TrackOptions) => void>();
+const track = vi.fn<(element: TransportTelemetryElement, opts?: TransportTrackOptions) => void>();
 
 interface FetchCall {
   url: string;
@@ -25,7 +25,7 @@ let calls: FetchCall[];
 beforeEach(() => {
   calls = [];
   track.mockReset();
-  telemetryTestControl.intercept({ onTrack: track });
+  registerTransportTelemetry(track);
   vi.stubGlobal(
     "fetch",
     vi.fn((url: string, init?: RequestInit) => {
@@ -43,7 +43,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  telemetryTestControl.reset();
+  registerTransportTelemetry(null);
   vi.useRealTimers();
   vi.unstubAllGlobals();
 });

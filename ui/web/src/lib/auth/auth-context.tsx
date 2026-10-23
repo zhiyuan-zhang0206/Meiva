@@ -17,6 +17,13 @@ import {
 } from "react";
 
 import { ApiError, api } from "../transport/api";
+import {
+  notifySessionInvalid,
+  registerSseRuntime,
+  setSessionInvalidHandler,
+} from "../transport/sse-lifecycle";
+
+export { notifySessionInvalid, setSessionInvalidHandler };
 
 type AuthStatus = "loading" | "authenticated" | "unauthenticated";
 
@@ -35,15 +42,6 @@ interface AuthState {
 }
 
 const AuthContext = createContext<AuthState | null>(null);
-let sessionInvalidHandler: (() => void) | null = null;
-
-export function setSessionInvalidHandler(handler: (() => void) | null): void {
-  sessionInvalidHandler = handler;
-}
-
-export function notifySessionInvalid(): void {
-  sessionInvalidHandler?.();
-}
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<AuthStatus>("loading");
@@ -122,3 +120,5 @@ export function useAuth(): AuthState {
   if (!ctx) throw new Error("useAuth must be used inside <AuthProvider>");
   return ctx;
 }
+
+registerSseRuntime({ useAuthStatus: () => useAuth().status });

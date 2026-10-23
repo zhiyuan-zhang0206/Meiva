@@ -18,6 +18,7 @@ exports = ["timeline-colors.ts", "timeline-store.ts", "timeline-width.ts", "time
 "." = "strict-to-be"
 "timeline-store-events.ts" = "strict"
 "timeline-store.ts" = "strict"
+"timeline-width.ts" = "strict"
 "timeline.ts" = "strict"
 "use-timeline-colors.ts" = "strict"
 
@@ -54,6 +55,3 @@ exports = ["timeline-colors.ts", "timeline-store.ts", "timeline-width.ts", "time
 
 [debt.wide-exports]
 "meizel.toml#exports" = 1
-
-[debt.wide-public-surface]
-"timeline-width.ts#__all__" = 1

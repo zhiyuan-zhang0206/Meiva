@@ -19,7 +19,7 @@
 // ≤64-char scalars. Session id is a random per-tab uuid — it groups one
 // browser session without carrying identity.
 
-import { API_BASE } from "../transport/api-base";
+import { API_BASE, registerTransportTelemetry } from "../transport/api-base";
 
 const TELEMETRY_ENDPOINT = "/api/frontend-telemetry";
 // Dedupe window per (page, element, key) — a double-click or a slider
@@ -259,7 +259,10 @@ function __telemetryResetForTest(): void {
   delete testListeners.onTrack;
   delete testListeners.onSetPage;
   delete testListeners.onFlush;
+  registerTransportTelemetry(track);
 }
+
+registerTransportTelemetry(track);
 
 /** Force a flush now — tests only. Returns the number of events sent. */
 function __telemetryFlushForTest(): number {

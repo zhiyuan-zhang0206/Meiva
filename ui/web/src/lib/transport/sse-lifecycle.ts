@@ -1,6 +1,48 @@
 // Timers and legacy EventSource error handling shared by the system and alert
 // streams. Each provider owns its frame parsing, state changes, and transport.
 
+export type SseAuthStatus = "loading" | "authenticated" | "unauthenticated";
+
+export interface SseStoreSlice {
+  reconnectNonce: number;
+  bumpReconnect: () => void;
+  activeId: number | null;
+}
+
+export interface SseRuntimeHooks {
+  useAuthStatus: () => SseAuthStatus;
+  useStore: <T>(selector: (state: SseStoreSlice) => T) => T;
+  useMergedChannels: () => readonly ("system" | "alerts" | "systemAll")[];
+  useDocumentVisible: () => boolean;
+}
+
+const DEFAULT_MERGED_CHANNELS: readonly ("system" | "alerts" | "systemAll")[] = [];
+const DEFAULT_STORE_SLICE: SseStoreSlice = {
+  reconnectNonce: 0,
+  bumpReconnect: () => undefined,
+  activeId: null,
+};
+const sessionInvalidSink: { handler: (() => void) | null } = { handler: null };
+
+export function setSessionInvalidHandler(handler: (() => void) | null): void {
+  sessionInvalidSink.handler = handler;
+}
+
+export function notifySessionInvalid(): void {
+  sessionInvalidSink.handler?.();
+}
+
+export const sseRuntime: SseRuntimeHooks = {
+  useAuthStatus: () => "authenticated",
+  useStore: (selector) => selector(DEFAULT_STORE_SLICE),
+  useMergedChannels: () => DEFAULT_MERGED_CHANNELS,
+  useDocumentVisible: () => true,
+};
+
+export function registerSseRuntime(hooks: Partial<SseRuntimeHooks>): void {
+  Object.assign(sseRuntime, hooks);
+}
+
 interface SseLifecycleOptions {
   failCount: { current: number };
   watchdogMs: number;

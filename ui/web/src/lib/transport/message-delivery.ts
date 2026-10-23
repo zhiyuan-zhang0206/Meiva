@@ -1,5 +1,5 @@
 import type { AgentMessageEnqueued, ContentBlock } from "../contracts/types";
-import { keyedHeaders } from "../transport/operation-key";
+import { keyedHeaders } from "./operation-key";
 
 const MESSAGE_POST_TIMEOUT_MS = 10_000;
 const MESSAGE_RECONCILE_TIMEOUT_MS = 3_000;
@@ -60,9 +60,6 @@ export async function sendMessageWithReconciliation(
     } catch (error: unknown) {
       if (hasHttpStatus(error, 404)) {
         if (!resent) {
-          // The first POST may not have reached its INSERT. Re-submit exactly
-          // once with the SAME key; if this request is also ambiguous, every
-          // later 404 remains ambiguous until the reconciliation deadline.
           resent = true;
           try {
             return await request<AgentMessageEnqueued>(path, init, MESSAGE_POST_TIMEOUT_MS);

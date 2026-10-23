@@ -1,13 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
-  telemetryTestControl,
-  type TelemetryElement,
-  type TrackOptions,
-} from "../telemetry/telemetry";
+  registerTransportTelemetry,
+  type TransportTelemetryElement,
+  type TransportTrackOptions,
+} from "./api-base";
 import { ProfileSseTransport, reportSseTransportMode, sharedSseSupported, type SseChannel, type SseListener } from "./sse-share";
 
-const track = vi.fn<(element: TelemetryElement, opts?: TrackOptions) => void>();
+const track = vi.fn<(element: TransportTelemetryElement, opts?: TransportTrackOptions) => void>();
 
 class FakeChannel {
   static channels = new Set<FakeChannel>();
@@ -148,7 +148,7 @@ async function settle(): Promise<void> {
 
 beforeEach(() => {
   track.mockReset();
-  telemetryTestControl.intercept({ onTrack: track });
+  registerTransportTelemetry(track);
   vi.useFakeTimers();
   vi.stubGlobal("EventSource", FakeSource);
   FakeChannel.channels.clear();
@@ -156,7 +156,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  telemetryTestControl.reset();
+  registerTransportTelemetry(null);
   vi.useRealTimers();
   vi.unstubAllGlobals();
   FakeChannel.channels.clear();

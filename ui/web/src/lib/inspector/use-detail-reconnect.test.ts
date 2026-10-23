@@ -4,19 +4,19 @@ import { createElement, useEffect } from "react";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { api } from "./api";
+import { api } from "../transport/api";
 import { usePendingMessages } from "../agents/use-pending-messages";
-import { useTokenUsage } from "../inspector/use-token-usage";
+import { useTokenUsage } from "./use-token-usage";
 import type { ConversationSnapshotResponse, SystemEvent, TokenUsageResponse } from "../contracts/types";
-import type { ConnectionEvent } from "./useEventStream";
+import type { ConnectionEvent } from "../transport/useEventStream";
 
-vi.mock("./api", () => ({
+vi.mock("../transport/api", () => ({
   api: { getPendingMessages: vi.fn(), getTokenUsage: vi.fn(), getConversationSnapshot: vi.fn() },
 }));
 
 const connectionHandlers = new Set<(event: ConnectionEvent) => void>();
 const systemHandlers = new Set<(event: SystemEvent) => void>();
-vi.mock("./useEventStream", () => ({
+vi.mock("../transport/useEventStream", () => ({
   useAgentEventStream: (
     onEvent: (event: SystemEvent) => void,
     onConnectionEvent: (event: ConnectionEvent) => void,
@@ -36,7 +36,6 @@ function pushOpen(): void {
 }
 
 type Domain = "token-usage" | "pending";
-// "snapshot" = the composed re-attach reconcile read (agent-reconcile.ts).
 interface Read {
   id: number;
   domain: Domain | "snapshot";
@@ -101,12 +100,12 @@ describe.each<Domain>(["token-usage", "pending"])("%s selected read ownership", 
     const { result } = renderHook(() => useRead(domain, 42), { wrapper });
     await waitFor(() => expect(reads).toHaveLength(1));
     pushOpen();
-    pushOpen(); // same-tick burst of the gap repair
-    expect(reads).toHaveLength(1); // joined the in-flight read, not stacked
+    pushOpen();
+    expect(reads).toHaveLength(1);
     await act(async () => { reads[0].finish(1); await Promise.resolve(); });
     await waitFor(() => expect(reads).toHaveLength(2));
-    expect(reads[1].domain).toBe("snapshot"); // one composed read
-    pushOpen(); // a second gap while the composed read is in flight
+    expect(reads[1].domain).toBe("snapshot");
+    pushOpen();
     await act(async () => { reads[1].finish(2); await Promise.resolve(); });
     await waitFor(() => expect(reads).toHaveLength(3));
     await act(async () => { reads[2].finish(3); await Promise.resolve(); });

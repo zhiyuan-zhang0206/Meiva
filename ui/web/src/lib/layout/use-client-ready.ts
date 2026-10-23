@@ -46,10 +46,10 @@ export function useClientReady(): boolean {
 export const DEFERRED_MOUNT_SLICE_TIMEOUT_MS = 50;
 
 const waiting: (() => void)[] = [];
-let pumpScheduled = false;
+const pumpState = { scheduled: false };
 
 function releaseOne(): void {
-  pumpScheduled = false;
+  pumpState.scheduled = false;
   const next = waiting.shift();
   if (next === undefined) return;
   next();
@@ -57,8 +57,8 @@ function releaseOne(): void {
 }
 
 function schedulePump(): void {
-  if (pumpScheduled || waiting.length === 0) return;
-  pumpScheduled = true;
+  if (pumpState.scheduled || waiting.length === 0) return;
+  pumpState.scheduled = true;
   if (typeof requestIdleCallback === "function") {
     requestIdleCallback(releaseOne, { timeout: DEFERRED_MOUNT_SLICE_TIMEOUT_MS });
   } else {

@@ -9,13 +9,9 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 
 import { API_BASE, api } from "./api";
-import { notifySessionInvalid, useAuth } from "../auth/auth-context";
 import { useFoldOwner } from "../fold/owner";
-import { useDocumentVisible } from "../layout/use-document-visible";
-import { createSseLifecycle } from "@/lib/transport/sse-lifecycle";
+import { createSseLifecycle, notifySessionInvalid, sseRuntime } from "./sse-lifecycle";
 import { reportSseTransportMode, sseTransport, type SseChannel } from "./sse-share";
-import { useMergedSseChannels } from "../state/sse-merge";
-import { useStore } from "../state/store";
 import type { ConnectionEvent, SystemEvent } from "../contracts/types";
 
 export type { ConnectionEvent } from "../contracts/types";
@@ -72,16 +68,16 @@ function useSseConnection(
   subscribersRef: React.RefObject<Set<Subscriber>>,
   onOpenChange: (open: boolean) => void,
 ): void {
-  const { status: authStatus } = useAuth();
+  const authStatus = sseRuntime.useAuthStatus();
   // A cluster-update reconnect bump re-runs this effect; the leader replaces
   // its source and the subsequent open reconciles missed events.
-  const reconnectNonce = useStore((s) => s.reconnectNonce);
-  const bumpReconnect = useStore((s) => s.bumpReconnect);
+  const reconnectNonce = sseRuntime.useStore((s) => s.reconnectNonce);
+  const bumpReconnect = sseRuntime.useStore((s) => s.bumpReconnect);
   // Legacy-only CLOSED retry, separate from the global reconnect lever.
   const [retryNonce, setRetryNonce] = useState(0);
   const failCountRef = useRef(0);
   const lastReconnectNonce = useRef(reconnectNonce);
-  const transport = sseTransport(useMergedSseChannels());
+  const transport = sseTransport(sseRuntime.useMergedChannels());
 
   useEffect(() => {
     if (authStatus !== "authenticated" || !isVisible || (!transport && url === null)) {
@@ -318,7 +314,7 @@ export function EventStreamProvider({
   const subscribersRef = useRef<Set<Subscriber>>(new Set());
   const [sseOpen, setSseOpen] = useState(false);
   // Reopening reconciles any events missed while the page was hidden.
-  const isVisible = useDocumentVisible();
+  const isVisible = sseRuntime.useDocumentVisible();
 
   useSseConnection(
     isVisible ? `${API_BASE}/api/system` : null,
@@ -391,8 +387,8 @@ const NOOP_OPEN_CHANGE = (_open: boolean): void => undefined;
 /** The detailed feed belongs exclusively to the selected, visible agent. */
 export function AgentEventStreamProvider({ children }: { children: React.ReactNode }) {
   const subscribersRef = useRef<Set<Subscriber>>(new Set());
-  const activeId = useStore((s) => s.activeId);
-  const isVisible = useDocumentVisible();
+  const activeId = sseRuntime.useStore((s) => s.activeId);
+  const isVisible = sseRuntime.useDocumentVisible();
   const url = isVisible && activeId !== null
     ? `${API_BASE}/api/system/all?agents=${activeId}`
     : null;

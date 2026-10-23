@@ -36,18 +36,21 @@ export interface BeforeCompactDisplayChange {
   rankShift: number;
 }
 
-const beforeDisplayChange = new Set<(change: BeforeCompactDisplayChange) => void>();
+const beforeDisplayChange: ((change: BeforeCompactDisplayChange) => void)[] = [];
 
 /** The store calls listeners before publishing a transition to React. */
 export function subscribeBeforeCompactDisplayChange(
   listener: (change: BeforeCompactDisplayChange) => void,
 ): () => void {
-  beforeDisplayChange.add(listener);
-  return () => { beforeDisplayChange.delete(listener); };
+  beforeDisplayChange.push(listener);
+  return () => {
+    const idx = beforeDisplayChange.indexOf(listener);
+    if (idx >= 0) beforeDisplayChange.splice(idx, 1);
+  };
 }
 
 export function announceBeforeCompactDisplayChange(change: BeforeCompactDisplayChange): void {
-  for (const listener of beforeDisplayChange) listener(change);
+  for (const listener of [...beforeDisplayChange]) listener(change);
 }
 
 function rowNeedsCanonicalItem(

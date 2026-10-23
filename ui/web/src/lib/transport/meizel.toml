@@ -4,17 +4,17 @@ exports = ["api-base.ts", "api.ts", "gateway-origin.ts", "operation-key.ts", "ss
 "api-base.ts" = ["gateway-origin.ts"]
 "api-drafts.test.ts" = ["api.ts"]
 "api-guarded-lifecycle.test.ts" = ["api.ts"]
-"api.test.ts" = ["api.ts", "operation-key.ts"]
+"api.test.ts" = ["api-base.ts", "api.ts", "operation-key.ts"]
 "api-control.ts" = ["operation-key.ts"]
-"api.ts" = ["api-base.ts", "api-control.ts", "operation-key.ts", "upload-delivery.ts"]
+"api.ts" = ["api-base.ts", "api-control.ts", "message-delivery.ts", "operation-key.ts", "upload-delivery.ts"]
+"message-delivery.ts" = ["operation-key.ts"]
 "notice-resolution.test.ts" = ["api.ts"]
-"sse-share.test.ts" = ["sse-share.ts"]
-"sse-share.ts" = ["api.ts"]
+"sse-share.test.ts" = ["api-base.ts", "sse-share.ts"]
+"sse-share.ts" = ["api-base.ts", "api.ts", "sse-lifecycle.ts"]
 "tests" = ["gateway-origin.ts", "useEventStream.tsx"]
 "upload-delivery.test.ts" = ["upload-delivery.ts"]
 "upload-delivery.ts" = ["api-base.ts", "operation-key.ts"]
-"use-detail-reconnect.test.ts" = ["api.ts", "useEventStream.tsx"]
-"useEventStream.test.ts" = ["api.ts", "tests", "useEventStream.tsx"]
+"useEventStream.test.ts" = ["api.ts", "sse-lifecycle.ts", "tests", "useEventStream.tsx"]
 "useEventStream.tsx" = ["api.ts", "sse-lifecycle.ts", "sse-share.ts"]
 
 [purity]
@@ -23,8 +23,6 @@ exports = ["api-base.ts", "api.ts", "gateway-origin.ts", "operation-key.ts", "ss
 "gateway-origin.ts" = "strict"
 
 [debt.first-party-patch]
-"use-detail-reconnect.test.ts#vi.mock ui/web/src/lib/transport/api.ts" = 1
-"use-detail-reconnect.test.ts#vi.mock ui/web/src/lib/transport/useEventStream.tsx" = 1
 "useEventStream.test.ts#vi.mock ui/web/src/lib/transport/api.ts" = 1
 
 [debt.impure-call]
@@ -36,6 +34,7 @@ exports = ["api-base.ts", "api.ts", "gateway-origin.ts", "operation-key.ts", "ss
 "api.ts#f#performance.now" = 1
 "api.ts#jsonWithTimeout#clearTimeout" = 1
 "api.ts#jsonWithTimeout#setTimeout" = 1
+"message-delivery.ts#<module>#setTimeout" = 1
 "operation-key.ts#newOperationKey#crypto.getRandomValues" = 1
 "operation-key.ts#newOperationKey#crypto.randomUUID" = 1
 "sse-lifecycle.ts#createSseLifecycle#EventSource" = 1
@@ -92,7 +91,6 @@ exports = ["api-base.ts", "api.ts", "gateway-origin.ts", "operation-key.ts", "ss
 "sse-share.test.ts#vi.stubGlobal BroadcastChannel" = 2
 "sse-share.test.ts#vi.stubGlobal EventSource" = 1
 "upload-delivery.test.ts#vi.stubGlobal XMLHttpRequest" = 1
-"use-detail-reconnect.test.ts#vi.spyOn document.visibilityState" = 2
 "useEventStream.test.ts#vi.spyOn console.error" = 2
 "useEventStream.test.ts#vi.spyOn qc.invalidateQueries" = 1
 "useEventStream.test.ts#vi.stubGlobal BroadcastChannel" = 2

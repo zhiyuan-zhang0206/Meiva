@@ -11,12 +11,13 @@ import { describe, expect, it, vi } from "vitest";
 import {
   BREAKPOINT_LG_PX,
   BREAKPOINT_MD_PX,
-  BREAKPOINT_SM_PX,
   BREAKPOINT_WIDE_PX,
-  BREAKPOINT_XS_PX,
   tierForWidth,
   useBreakpoint,
 } from "./breakpoint";
+
+const BREAKPOINT_XS_PX = 320;
+const BREAKPOINT_SM_PX = 390;
 
 const { mdMatches, lgMatches, wideMatches } = vi.hoisted(() => ({
   mdMatches: vi.fn<() => boolean>(() => false),

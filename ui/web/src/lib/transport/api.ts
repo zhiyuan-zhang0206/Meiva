@@ -1,9 +1,8 @@
 // meiva:note
 // The timeout and caller cancellation remain connected through both response headers and response-body consumption. The Inspector client budget leaves serialization and network headroom above the backend work budget. HTTP rejection retains its status separately from network failure. Cross-origin gateway requests include session cookies. Slow-request telemetry removes query strings and normalizes numeric IDs, and telemetry requests do not report themselves.
 // meiva:link ui/web/src/docs/frontend-state/api-requests.meiva.okf.md
-import { API_BASE } from "./api-base";
+import { API_BASE, trackTransport } from "./api-base";
 import { createControlApi } from "./api-control";
-import { track } from "../telemetry/telemetry";
 import type {
   NoticesFeed,
   AgentInspectStatistics,
@@ -38,11 +37,11 @@ import type {
   UploadedBatch,
 } from "../contracts/types";
 import { projectAgentStatus } from "../contracts/types";
-import { sendMessageWithReconciliation } from "../agents/message-delivery";
+import { sendMessageWithReconciliation, MessageDeliveryUnknownError } from "./message-delivery";
 import { submitUploadedFiles } from "./upload-delivery";
 import { keyedHeaders, newOperationKey } from "./operation-key";
 
-export { MessageDeliveryUnknownError } from "../agents/message-delivery";
+export { MessageDeliveryUnknownError };
 export { API_BASE } from "./api-base";
 
 export class ApiError extends Error {
@@ -133,7 +132,7 @@ async function f(path: string, init?: RequestInit): Promise<Response> {
   } finally {
     const durationMs = performance.now() - startedAt;
     if (durationMs > 800 && path.split("?", 1)[0] !== "/api/frontend-telemetry") {
-      track("api-timing", {
+      trackTransport("api-timing", {
         key: apiTimingKey(path),
         value: Math.round(durationMs),
         dedupe: false,

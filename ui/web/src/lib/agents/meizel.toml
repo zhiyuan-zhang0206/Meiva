@@ -4,6 +4,7 @@ exports = ["agent-reconcile.ts", "agent-tree.ts", "sidebar.ts", "use-agent-pages
 "agent-reconcile.test.ts" = ["agent-reconcile.ts"]
 "agent-tree.test.ts" = ["agent-tree.ts"]
 "sidebar.test.ts" = ["sidebar.ts"]
+"sidebar.ts" = ["sidebar-stats.ts"]
 "use-agent-actions.test.tsx" = ["use-agent-actions.ts"]
 "use-agent-pages.test.ts" = ["use-agent-pages.ts"]
 "use-agents.test.ts" = ["use-agents.ts"]
@@ -36,12 +37,11 @@ exports = ["agent-reconcile.ts", "agent-tree.ts", "sidebar.ts", "use-agent-pages
 "agent-reconcile.ts#<module>#useSyncExternalStore" = 1
 "agent-reconcile.ts#createAgentReconcile#clearTimeout" = 1
 "agent-reconcile.ts#createAgentReconcile#setTimeout" = 1
-"message-delivery.ts#<module>#setTimeout" = 1
-"sidebar.ts#<module>#useEffect" = 1
-"sidebar.ts#<module>#useQuery" = 1
-"sidebar.ts#<module>#useQueryClient" = 1
-"sidebar.ts#subscribeStatsPoll#clearTimeout" = 1
-"sidebar.ts#subscribeStatsPoll#setTimeout" = 1
+"sidebar-stats.ts#<module>#useEffect" = 1
+"sidebar-stats.ts#<module>#useQuery" = 1
+"sidebar-stats.ts#<module>#useQueryClient" = 1
+"sidebar-stats.ts#subscribeStatsPoll#clearTimeout" = 1
+"sidebar-stats.ts#subscribeStatsPoll#setTimeout" = 1
 "use-agent-actions.ts#useAgentActions#useEffect" = 1
 "use-agent-actions.ts#useAgentActions#useMutation" = 1
 "use-agent-actions.ts#useAgentActions#useQueryClient" = 1
@@ -80,6 +80,3 @@ exports = ["agent-reconcile.ts", "agent-tree.ts", "sidebar.ts", "use-agent-pages
 
 [debt.wide-exports]
 "meizel.toml#exports" = 1
-
-[debt.wide-public-surface]
-"sidebar.ts#__all__" = 1

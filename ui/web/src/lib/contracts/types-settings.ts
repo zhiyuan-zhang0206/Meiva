@@ -190,7 +190,7 @@ export type DateFormat = "relative" | "absolute";
 
 export type ToUserDocument = Schemas["ToUserDocument"];
 
-export type TaskStatus = Schemas["TaskStatus"];
+type TaskStatus = Schemas["TaskStatus"];
 
 export type TaskPriority = "P0" | "P1" | "P2" | "P3";
 

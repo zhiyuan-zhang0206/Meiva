@@ -36,14 +36,14 @@ export interface SavedScroll {
   followBottom: boolean;
 }
 
-const memory = new Map<string, SavedScroll>();
+const memory: Record<string, SavedScroll | undefined> = {};
 
 /** The position saved for this history entry, or null when none is. */
 export function readScrollMemory(entryKey: string): SavedScroll | null {
-  return memory.get(entryKey) ?? null;
+  return memory[entryKey] ?? null;
 }
 
 /** Remember this history entry's position; a later save overwrites. */
 export function saveScrollMemory(entryKey: string, value: SavedScroll): void {
-  memory.set(entryKey, value);
+  memory[entryKey] = value;
 }

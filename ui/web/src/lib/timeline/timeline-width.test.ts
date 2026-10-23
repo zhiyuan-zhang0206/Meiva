@@ -9,9 +9,10 @@ import {
   TIMELINE_WIDTH_RATIO_DEFAULT,
   TIMELINE_WIDTH_RATIO_MAX,
   TIMELINE_WIDTH_RATIO_MIN,
-  TIMELINE_MAX_CAP_PX,
   timelineMaxWidthCss,
 } from "./timeline-width";
+
+const TIMELINE_MAX_CAP_PX = 1280;
 
 // Task #805: below this width the timeline is full-width and the ratio is
 // ignored. Locked to Tailwind's md breakpoint — the same 768px boundary the

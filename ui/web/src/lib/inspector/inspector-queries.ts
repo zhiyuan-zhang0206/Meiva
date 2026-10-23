@@ -8,10 +8,8 @@ export const inspectWindowedQueryKey = (agentId: number, hours: number | null) =
 export const inspectWidgetsQueryKey = (agentId: number) =>
   ["agent-inspect-widgets", agentId] as const;
 
-export function fetchWindowedInspect(
+export const fetchWindowedInspect = (
   agentId: number,
   hours: number | null,
   signal?: AbortSignal,
-) {
-  return api.getAgentInspectStatistics(agentId, hours, signal);
-}
+) => api.getAgentInspectStatistics(agentId, hours, signal);
