@@ -2,19 +2,21 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Iterator
-from typing import Any, cast
+from typing import Any
 
 import psycopg
 import pytest
 from psycopg_pool import ConnectionPool
 
 import base.db
+from base.clock import Clock, ClockConfig
+from base.clock.tests.manual_timers import ManualTimers
 from base.daemon.loop_health import LoopProgress
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from ops.cluster.rpc import ClusterOpUnreachable
-from services.wake.heartbeat import daemon as heartbeat_daemon
+from services.wake.heartbeat import loops as heartbeat_loops
 from services.wake.heartbeat.liveness import probe_machine, run_liveness_pass
 
 
@@ -208,62 +210,58 @@ def test_paused_and_non_runner_machines_are_not_probed(
     assert _snapshot(db_conn, "held") is None and _snapshot(db_conn, "station") is None
 
 
-def test_the_first_liveness_pass_runs_at_start_not_after_an_interval(
-    monkeypatch: pytest.MonkeyPatch, *, database_gate: ProcessDbGate
-) -> None:
+class _ObservedRound:
+    def __init__(self, events: list[str], error: Exception | None = None) -> None:
+        self._events = events
+        self._error = error
+
+    async def run_round(self) -> None:
+        self._events.append("pass")
+        if self._error is not None:
+            raise self._error
+
+
+class _ObservedTimers(ManualTimers):
+    def __init__(self, events: list[str], stop_after: int) -> None:
+        super().__init__()
+        self._events = events
+        self._stop_after = stop_after
+
+    async def asleep(self, seconds: float) -> None:
+        self._events.append("sleep")
+        self.sleeps.append(seconds)
+        if self._events.count("sleep") == self._stop_after:
+            raise asyncio.CancelledError
+        self.advance(seconds)
+
+
+def test_the_first_liveness_pass_runs_at_start_not_after_an_interval() -> None:
     events: list[str] = []
-
-    async def fake_pass(_db: object, _pool: object, _bus: object) -> None:
-        events.append("pass")
-
-    async def fake_sleep(_liveness: object, _total_s: float) -> None:
-        events.append("sleep")
-        raise asyncio.CancelledError
-
-    monkeypatch.setattr(heartbeat_daemon, "run_liveness_pass", fake_pass)
-    monkeypatch.setattr(heartbeat_daemon, "sleep_with_liveness", fake_sleep)
-
+    timers = _ObservedTimers(events, stop_after=1)
+    clock = Clock(ClockConfig("UTC", "UTC", False), timers=timers, now=timers.now)
     with pytest.raises(asyncio.CancelledError):
         asyncio.run(
-            heartbeat_daemon.liveness_loop(
-                Database.from_settings(gate=database_gate),
-                cast(ConnectionPool, object()),
-                EventBus.from_settings(),
-                LoopProgress("liveness", 60.0),
+            heartbeat_loops.liveness_loop(
+                _ObservedRound(events), LoopProgress("liveness", 60.0), clock=clock
             )
         )
-
     assert events == ["pass", "sleep"]
 
 
-def test_a_failing_pass_waits_out_the_interval_before_retrying(
-    monkeypatch: pytest.MonkeyPatch, *, database_gate: ProcessDbGate
-) -> None:
+def test_a_failing_pass_waits_out_the_interval_before_retrying() -> None:
     events: list[str] = []
-
-    async def failing_pass(_db: object, _pool: object, _bus: object) -> None:
-        events.append("pass")
-        raise RuntimeError("probe fan-out failed")
-
-    async def sleep(_liveness: object, _total_s: float) -> None:
-        events.append("sleep")
-        if events.count("sleep") == 2:
-            raise asyncio.CancelledError
-
-    monkeypatch.setattr(heartbeat_daemon, "run_liveness_pass", failing_pass)
-    monkeypatch.setattr(heartbeat_daemon, "sleep_with_liveness", sleep)
-
+    timers = _ObservedTimers(events, stop_after=3)
+    clock = Clock(ClockConfig("UTC", "UTC", False), timers=timers, now=timers.now)
     with pytest.raises(asyncio.CancelledError):
         asyncio.run(
-            heartbeat_daemon.liveness_loop(
-                Database.from_settings(gate=database_gate),
-                cast(ConnectionPool, object()),
-                EventBus.from_settings(),
+            heartbeat_loops.liveness_loop(
+                _ObservedRound(events, RuntimeError("probe fan-out failed")),
                 LoopProgress("liveness", 60.0),
+                clock=clock,
             )
         )
-
-    assert events == ["pass", "sleep", "pass", "sleep"]
+    assert events == ["pass", "sleep", "sleep", "pass", "sleep"]
+    assert timers.sleeps == [30.0, 30.0, 30.0]
 
 
 def test_an_unexpected_probe_error_is_not_counted_as_an_unreachable_host() -> None:

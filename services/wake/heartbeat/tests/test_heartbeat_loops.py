@@ -9,6 +9,7 @@ from typing import Any, cast
 import pytest
 from psycopg_pool import ConnectionPool
 
+from base.clock import Clock
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import ConfigBoot
@@ -19,6 +20,7 @@ from base.db.tests.fakes import patch_database
 from base.events.live.bus import EventBus
 from base.native_process.loaded_commit import LoadedCommit
 from services.wake.heartbeat import completion_digest, daemon
+from services.wake.heartbeat.loops import DispatchRound, LivenessRound
 
 
 def _patch_run(
@@ -46,8 +48,15 @@ def _patch_run(
     monkeypatch.setattr(daemon, "start_health_server", fake_start)
     monkeypatch.setattr(daemon, "stop_health_server", fake_stop)
     patch_database(monkeypatch, pool=_Pool)
-    monkeypatch.setattr(daemon, "dispatch_loop", loops["dispatch"])
-    monkeypatch.setattr(daemon, "liveness_loop", loops["liveness"])
+
+    async def dispatch_loop(round: DispatchRound, progress: LoopProgress, *, clock: Clock) -> None:
+        await loops["dispatch"](round, progress)
+
+    async def liveness_loop(round: LivenessRound, progress: LoopProgress, *, clock: Clock) -> None:
+        await loops["liveness"](round, progress)
+
+    monkeypatch.setattr(daemon, "dispatch_loop", dispatch_loop)
+    monkeypatch.setattr(daemon, "liveness_loop", liveness_loop)
 
     async def digest_loop(
         pool: ConnectionPool,
@@ -96,6 +105,7 @@ def test_every_loop_gets_its_own_progress_tracker(
                 database=lambda: database,
                 image=LoadedCommit(Path(), None),
                 machine=machine_identity,
+                clock=Clock.from_settings(),
             ),
             timeout=5.0,
         )
@@ -149,6 +159,7 @@ def test_a_crashing_loop_cancels_its_siblings_and_ends_the_service(
                     database=lambda: database,
                     image=LoadedCommit(Path(), None),
                     machine=machine_identity,
+                    clock=Clock.from_settings(),
                 ),
                 timeout=5.0,
             )
