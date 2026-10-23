@@ -15,7 +15,7 @@ _PYPROJECT = '[tool.pytest.ini_options]\ntestpaths = ["tests"]\n'
 
 
 def _findings(src: str) -> list[str]:
-    return [message for _, message in _lint.findings_in_source(src)]
+    return [message for _, _, message in _lint.findings_in_source(src)]
 
 
 def _repo(tmp_path: Path) -> Path:
@@ -40,6 +40,26 @@ def test_building_the_real_host_is_a_finding() -> None:
 @pytest.mark.parametrize("read", ["Host.system()", "Platform.current()"])
 def test_every_constructor_of_the_real_host_is_covered(read: str) -> None:
     assert _findings(f"def test_x():\n    return {read}\n")
+
+
+@pytest.mark.parametrize("read", ["is_macos()", "plat.is_linux()"])
+def test_the_tree_own_host_predicates_are_findings(read: str) -> None:
+    # meiva:note
+    # The predicates reach `sys.platform` underneath; exempting them by name would leave
+    # the same read one call deeper.
+    found = _findings(f"def test_x():\n    return {read}\n")
+    assert len(found) == 1
+    assert read.rsplit(".", maxsplit=1)[-1] in found[0]
+
+
+def test_os_name_is_a_finding() -> None:
+    found = _findings("import os\n\n\ndef test_x():\n    assert os.name == 'posix'\n")
+    assert len(found) == 1 and "`os.name`" in found[0]
+
+
+def test_an_import_skip_is_a_finding() -> None:
+    found = _findings("import pytest\n\n\ndef test_x():\n    pytest.importorskip('zstd')\n")
+    assert len(found) == 1 and "`pytest.importorskip(...)`" in found[0]
 
 
 def test_resolving_through_the_ambient_path_is_a_finding() -> None:
@@ -84,7 +104,7 @@ def test_the_exemption_covers_the_function_it_sits_in() -> None:
 def test_the_exemption_says_where_it_stops_at_module_level() -> None:
     src = "import sys\n\nFLAG = sys.platform == 'darwin'\nOTHER = sys.platform == 'linux'\n"
     src = src.replace("FLAG", "FLAG  # host-ok: asserted by the launchd lane")
-    assert [line for line, _ in _lint.findings_in_source(src)] == [4]
+    assert [line for line, _, _ in _lint.findings_in_source(src)] == [4]
 
 
 def test_a_marker_inside_a_class_covers_its_methods() -> None:
@@ -103,7 +123,7 @@ def test_a_baseline_entry_allows_exactly_its_count(tmp_path: Path) -> None:
     test.write_text("import sys\n\n\ndef test_x():\n    assert sys.platform\n", encoding="utf-8")
     baseline = root / _lint.BASELINE
     baseline.parent.mkdir(parents=True)
-    baseline.write_text(json.dumps({"tests/test_x.py": 1}), encoding="utf-8")
+    baseline.write_text(json.dumps({"sys.platform": 1}), encoding="utf-8")
     assert _lint.main([], repo_root=root) == 0
 
     test.write_text(
@@ -114,16 +134,45 @@ def test_a_baseline_entry_allows_exactly_its_count(tmp_path: Path) -> None:
     assert _lint.main([], repo_root=root) == 1
 
 
-def test_a_baseline_entry_for_a_deleted_file_is_an_error(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+def test_renaming_a_file_that_carries_a_recorded_read_is_not_a_finding(
+    tmp_path: Path,
 ) -> None:
+    # meiva:note
+    # A per-path baseline reddened on a rename, which is how a gate gets switched off. The
+    # count follows the read, not the file, so moving the same code changes nothing.
     root = _repo(tmp_path)
-    (root / "tests" / "test_x.py").write_text("x = 1\n", encoding="utf-8")
+    (root / "tests" / "test_x.py").write_text(
+        "import sys\n\n\ndef test_x():\n    assert sys.platform\n", encoding="utf-8"
+    )
     baseline = root / _lint.BASELINE
     baseline.parent.mkdir(parents=True)
-    baseline.write_text(json.dumps({"tests/gone.py": 2}), encoding="utf-8")
-    assert _lint.main([], repo_root=root) == 1
-    assert "no longer exists" in capsys.readouterr().err
+    baseline.write_text(json.dumps({"sys.platform": 1}), encoding="utf-8")
+    assert _lint.main([], repo_root=root) == 0
+
+    (root / "tests" / "test_x.py").rename(root / "tests" / "test_renamed.py")
+    assert _lint.main([], repo_root=root) == 0
+
+
+def test_a_scoped_run_judges_the_whole_tree_but_prints_its_files(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # meiva:note
+    # `--only` is the pre-commit path: it must still catch a read added to the file under
+    # review, so the comparison runs over the whole tree.
+    root = _repo(tmp_path)
+    (root / "tests" / "test_a.py").write_text(
+        "import sys\n\n\ndef test_a():\n    assert sys.platform\n", encoding="utf-8"
+    )
+    baseline = root / _lint.BASELINE
+    baseline.parent.mkdir(parents=True)
+    baseline.write_text(json.dumps({"sys.platform": 1}), encoding="utf-8")
+    (root / "tests" / "test_a.py").write_text(
+        "import sys\n\n\ndef test_a():\n    assert sys.platform\n"
+        "def test_b():\n    assert sys.platform\n",
+        encoding="utf-8",
+    )
+    assert _lint.main(["--only", "tests/test_a.py"], repo_root=root) == 1
+    assert "tests/test_a.py:7" in capsys.readouterr().err
 
 
 def test_write_baseline_records_the_current_findings(tmp_path: Path) -> None:
@@ -133,7 +182,7 @@ def test_write_baseline_records_the_current_findings(tmp_path: Path) -> None:
     )
     assert _lint.main(["--write-baseline"], repo_root=root) == 0
     written = json.loads((root / _lint.BASELINE).read_text(encoding="utf-8"))
-    assert written == {"tests/test_x.py": 1}
+    assert written == {"sys.platform": 1}
     assert _lint.main([], repo_root=root) == 0
 
 
