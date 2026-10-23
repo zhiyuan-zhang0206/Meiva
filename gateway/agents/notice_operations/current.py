@@ -127,9 +127,10 @@ def mutate(
     agent_id: int,
     body: ObservedNotice,
     *,
-    receipt_writer: Callable[..., None] = save_receipt,
+    receipt_writer: Callable[..., None] | None = None,
 ) -> NoticeAcceptance:
     """Commit the observed mutation and receipt together, replay before mutable guards."""
+    writer = save_receipt if receipt_writer is None else receipt_writer
     payload = body.model_dump(mode="json", exclude_unset=True)
     with write_transaction(pool) as conn:
         previous = existing_receipt(conn, path, key, payload)
@@ -144,7 +145,7 @@ def mutate(
         dismiss = not isinstance(body, GuardedNoticeEdit)
         record = _target(conn, agent_id, body.observed_notice_id, require_open=not dismiss)
         if dismiss and record.resolved_at is not None:
-            receipt_writer(conn, path, key, payload, record.model_dump(mode="json"))
+            writer(conn, path, key, payload, record.model_dump(mode="json"))
             return NoticeAcceptance(record, replayed=False, already_closed=True)
         notification_id = None
         if isinstance(body, GuardedNoticeEdit):
@@ -158,7 +159,7 @@ def mutate(
                 (record.id,),
             )
         updated = _snapshot(conn, record.id)
-        receipt_writer(conn, path, key, payload, updated.model_dump(mode="json"))
+        writer(conn, path, key, payload, updated.model_dump(mode="json"))
     return NoticeAcceptance(updated, replayed=False, notification_id=notification_id)
 
 

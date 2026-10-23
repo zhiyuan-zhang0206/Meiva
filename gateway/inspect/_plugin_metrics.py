@@ -90,17 +90,15 @@ _MACRO_RANGE_LOKI = f"{_INSPECTOR_WINDOW_HOURS}h"
 
 
 def plugin_metric_modules(
-    plugins_dir: Path = PLUGINS_DIR,
+    plugins_dir: Path | None = None,
     *,
-    installed_dirs: Callable[[], Mapping[str, Path]] = enable_config.installed_plugin_dirs,
-    runtime_loader: Callable[[set[str]], enable_config.PluginsConfig] = (
-        enable_config.load_for_runtime
-    ),
+    installed_dirs: Callable[[], Mapping[str, Path]] | None = None,
+    runtime_loader: Callable[[set[str]], enable_config.PluginsConfig] | None = None,
 ) -> list[Path]:
     """``metrics.py`` of every ENABLED shipped plugin, sorted — the import set of one registry
     build (the same enable rule the widget loader applies)."""
     return enabled_face_files(
-        plugins_dir,
+        PLUGINS_DIR if plugins_dir is None else plugins_dir,
         "metrics.py",
         installed_dirs=installed_dirs,
         runtime_loader=runtime_loader,
@@ -110,11 +108,9 @@ def plugin_metric_modules(
 def load_plugin_metrics(
     modules: Sequence[Path] | None = None,
     *,
-    plugins_dir: Path = PLUGINS_DIR,
-    installed_dirs: Callable[[], Mapping[str, Path]] = enable_config.installed_plugin_dirs,
-    runtime_loader: Callable[[set[str]], enable_config.PluginsConfig] = (
-        enable_config.load_for_runtime
-    ),
+    plugins_dir: Path | None = None,
+    installed_dirs: Callable[[], Mapping[str, Path]] | None = None,
+    runtime_loader: Callable[[set[str]], enable_config.PluginsConfig] | None = None,
 ) -> list[MetricSpec]:
     """The in-process metric registry: every ENABLED shipped plugin's ``metrics.py``
     declaration (``contribute()``) admitted into a data registry, plus the core
@@ -313,7 +309,7 @@ def metrics_for_agent(
     pool: ConnectionPool[Any],
     agent_id: int,
     *,
-    loader: Callable[[], list[MetricSpec]] = load_plugin_metrics,
+    loader: Callable[[], list[MetricSpec]] | None = None,
 ) -> list[PluginMetricResult]:
     """Sync twin of the metrics endpoint — runs via asyncio.to_thread.
 
@@ -325,7 +321,8 @@ def metrics_for_agent(
     on the pooled connection object after return, so a later borrower could
     inherit a read-only session and its writes would fail. The SET TRANSACTION
     form leaves nothing behind when the transaction rolls back."""
-    specs = [s for s in loader() if "inspector" in s.output]
+    loader_fn = load_plugin_metrics if loader is None else loader
+    specs = [s for s in loader_fn() if "inspector" in s.output]
     results: list[PluginMetricResult] = []
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute("SET TRANSACTION READ ONLY")

@@ -215,7 +215,7 @@ def inspect_snapshot(
     hours: StatsWindowHours | None,
     *,
     spawned_at: datetime,
-    note_coverage: Callable[..., None] = note_inspect_metrics_coverage,
+    note_coverage: Callable[..., None] | None = None,
 ) -> MetricsSnapshot:
     """Read one consistent DB snapshot; no HTTP/Loki request belongs on this path.
 
@@ -235,7 +235,8 @@ def inspect_snapshot(
     # Outside the read transaction: the coverage note is a diagnostic side
     # channel (background log + event; task #3869) and never joins
     # the snapshot itself.
-    note_coverage(agent_id, snapshot.metadata, spawned_at=spawned_at)
+    coverage_fn = note_inspect_metrics_coverage if note_coverage is None else note_coverage
+    coverage_fn(agent_id, snapshot.metadata, spawned_at=spawned_at)
     return snapshot
 
 

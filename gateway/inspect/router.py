@@ -146,7 +146,7 @@ async def _inspect_rows_cached_async(
     hours: StatsWindowHours | None,
     *,
     spawned_at: datetime,
-    note_coverage: Callable[..., None] = _metrics.note_inspect_metrics_coverage,
+    note_coverage: Callable[..., None] | None = None,
 ) -> _metrics.MetricsSnapshot:
     key = (agent_id, None if hours is None else int(hours))
     try:
