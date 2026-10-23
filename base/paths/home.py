@@ -41,21 +41,20 @@ def resolve_meiva_home() -> Path:
     return home
 
 
-def home_checkout_error(repo: Path) -> str | None:
-    """Why `repo` may not operate this process's home, or None when it may.
-
-    A home that carries its own `<home>/source` checkout (the production home
-    `~/.meiva`, and every unit started from source) is operated only by that
-    checkout's code: a disposable checkout driving it would bind its daemons to
-    code that disappears with the checkout (the 01:13 worktree accident, Task
-    #966) or apply un-reviewed migrations to its database. A home with no
-    `source` (a test session's temporary home, a scratch `MEIVA_HOME`) accepts any
-    checkout.
-
-    Both sides are compared resolved, so a symlinked or `..`-spelled path to
-    the same directory is the same checkout.
-    """
-    home = resolve_meiva_home()
+# meiva:note
+# Why `repo` may not operate `home`, or None when it may.
+#
+# A home that carries its own `<home>/source` checkout (the production home
+# `~/.meiva`, and every unit started from source) is operated only by that
+# checkout's code: a disposable checkout driving it would bind its daemons to
+# code that disappears with the checkout (the 01:13 worktree accident, Task
+# #966) or apply un-reviewed migrations to its database. A home with no
+# `source` (a test session's temporary home, a scratch `MEIVA_HOME`) accepts any
+# checkout.
+#
+# Both sides are compared resolved, so a symlinked or `..`-spelled path to
+# the same directory is the same checkout.
+def home_checkout_error(repo: Path, *, home: Path) -> str | None:
     source = home / "source"
     if not source.is_dir() or repo.resolve() == source.resolve():
         return None

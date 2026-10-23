@@ -21,6 +21,7 @@ import cli.commands._repo as commands_repo
 from base import paths
 from base.cluster.machine import MachineIdentity
 from base.deploy.schema import migrations
+from base.deploy.schema.migration_layout import MIGRATIONS_DIR
 from base.host.system import backend
 from base.host.system.tests.fake_commands import fake_host
 from cli.commands import probe
@@ -62,7 +63,12 @@ def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
         "root_tree_roster",
         lambda *_a, **_k: (),  # pyright: ignore[reportUnknownArgumentType]
     )
-    monkeypatch.setattr(migrations, "unreadable_migration_files", list)
+
+    def unreadable(*, migrations_dir: Path) -> list[tuple[str, str]]:
+        assert migrations_dir == MIGRATIONS_DIR
+        return []
+
+    monkeypatch.setattr(migrations, "unreadable_migration_files", unreadable)
     return home
 
 
@@ -267,11 +273,12 @@ def test_migration_readability_is_fatal(
 ) -> None:
     """The apply-side vet: a tracked migration the applier cannot open would fail
     `meiva start`'s apply on the stopped host."""
-    monkeypatch.setattr(
-        migrations,
-        "unreadable_migration_files",
-        lambda: [("20260912T010000_x", "Permission denied: 'x.sql'")],
-    )
+
+    def unreadable(*, migrations_dir: Path) -> list[tuple[str, str]]:
+        assert migrations_dir == MIGRATIONS_DIR
+        return [("20260912T010000_x", "Permission denied: 'x.sql'")]
+
+    monkeypatch.setattr(migrations, "unreadable_migration_files", unreadable)
 
     assert _run(repo, command_runtime=command_runtime) == 1
     err = capsys.readouterr().err
@@ -291,7 +298,8 @@ def test_migration_enumeration_failure_is_fatal(
     the apply; it must refuse here, not surprise the stopped host."""
     from base.deploy.schema.migrations import MigrationLayoutError
 
-    def _raise() -> list[tuple[str, str]]:
+    def _raise(*, migrations_dir: Path) -> list[tuple[str, str]]:
+        del migrations_dir
         raise MigrationLayoutError("migrations dir does not exist: /x/migrations")
 
     monkeypatch.setattr(migrations, "unreadable_migration_files", _raise)

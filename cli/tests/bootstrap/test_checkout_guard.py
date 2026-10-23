@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from base.paths import meiva_home
-from base.paths.home import home_checkout_error
+from base.paths.home import home_checkout_error, resolve_meiva_home
 from cli import fleet_update, init_intent, preflight, start_intent
 from cli.database import OperatorDatabaseFactory, operator_event_pipeline
 from cli.database.runtime import CommandRuntime
@@ -25,19 +25,19 @@ def test_a_home_without_source_accepts_any_checkout(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("MEIVA_HOME", str(tmp_path))
-    assert home_checkout_error(tmp_path / "some-worktree") is None
+    assert home_checkout_error(tmp_path / "some-worktree", home=resolve_meiva_home()) is None
 
 
 def test_the_homes_own_source_is_accepted(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     home = _home_with_source(tmp_path, monkeypatch)
-    assert home_checkout_error(home / "source") is None
+    assert home_checkout_error(home / "source", home=resolve_meiva_home()) is None
 
 
 def test_another_checkout_is_refused_with_both_paths_and_the_way_out(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     home = _home_with_source(tmp_path, monkeypatch)
-    error = home_checkout_error(tmp_path / "worktrees" / "dev")
+    error = home_checkout_error(tmp_path / "worktrees" / "dev", home=resolve_meiva_home())
     assert error is not None
     assert str(tmp_path / "worktrees" / "dev") in error
     assert str(home) in error
@@ -51,7 +51,7 @@ def test_a_symlinked_spelling_of_the_same_checkout_is_the_same_checkout(
     home = _home_with_source(tmp_path, monkeypatch)
     alias = tmp_path / "alias"
     alias.symlink_to(home / "source")
-    assert home_checkout_error(alias) is None
+    assert home_checkout_error(alias, home=resolve_meiva_home()) is None
 
 
 def test_the_default_home_is_guarded_when_it_has_a_source(
@@ -60,8 +60,8 @@ def test_the_default_home_is_guarded_when_it_has_a_source(
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.delenv("MEIVA_HOME", raising=False)
     (tmp_path / ".meiva" / "source").mkdir(parents=True)
-    assert home_checkout_error(tmp_path / ".meiva" / "source") is None
-    assert home_checkout_error(tmp_path / "Meiva") is not None
+    assert home_checkout_error(tmp_path / ".meiva" / "source", home=resolve_meiva_home()) is None
+    assert home_checkout_error(tmp_path / "Meiva", home=resolve_meiva_home()) is not None
 
 
 @pytest.mark.parametrize(

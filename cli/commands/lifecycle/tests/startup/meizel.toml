@@ -18,7 +18,6 @@ exports = ["test_start_readiness_gate.py"]
 "test_checkpoint_migration_phase.py#monkeypatch.setattr base.cluster.provision.CHECKPOINT_SCHEMA_MEIVA_MIGRATIONS" = 4
 "test_checkpoint_migration_phase.py#monkeypatch.setattr base.config.settings.data_plane.db_url" = 1
 "test_checkpoint_migration_phase.py#monkeypatch.setattr base.config.settings.data_plane.redis_url" = 1
-"test_checkpoint_migration_phase.py#monkeypatch.setattr base.deploy.schema.migration_layout.MIGRATIONS_DIR" = 2
 "test_checkpoint_migration_phase.py#monkeypatch.setattr base.deploy.schema.migrations.apply_pending_migrations" = 1
 "test_commands_start.py#monkeypatch.setattr base.paths.meiva_home" = 5
 "test_commands_start.py#monkeypatch.setattr cli.commands._repo.assert_schema_current_or_die" = 1

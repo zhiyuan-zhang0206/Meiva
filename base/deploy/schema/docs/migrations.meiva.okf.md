@@ -59,8 +59,9 @@ then boots into `CodeBehindSchema` and rejects every agent.
 
 `apply_pending_migrations` therefore reads the cluster's identity from the DB
 (`machine_units` rows with `serve_gateway`) and refuses unless the executing
-checkout claims the same `(machine_name, home)`. The claim is the process's home
-(`base.paths.home.resolve_meiva_home()`) together with the rule that a
+checkout claims the same `(machine_name, home)`. The lifecycle composition passes
+its resolved home and checkout migration directory as required inputs, together
+with the machine-name reader. The claim obeys the rule that a
 home carrying its own `<home>/source` checkout is changed only by that checkout
 (`home_checkout_error`): a process that inherited `MEIVA_HOME` from another cluster's
 environment has that cluster's DB URL *and* its home, while still carrying its own
@@ -71,7 +72,10 @@ ordinary `meiva start` — which calls this and applies nothing — is unaffecte
 empty `machine_units` means a fresh birth (step 2.5 migrates before step 3
 registers the unit) and is allowed.
 
-Checkout enumeration is Git-bound. Integer-keyed migration history is unsupported and fails before mutation.
+Migration readers require their directory explicitly; `MIGRATIONS_DIR` owns the
+running image's path, supplied by CLI, status and startup composition. The
+`assert_schema_current(db_url)` startup door supplies that same image path.
+Checkout enumeration is Git-bound. Integer-keyed history fails before mutation.
 
 Rationale and the rejected alternatives:
 [2026-07-31-migrations-are-gateway-only](../../../../docs/decisions/data/database/2026-07-31-migrations-are-gateway-only.md).

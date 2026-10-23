@@ -60,7 +60,7 @@ def prod_service_checkout_error(repo: Path) -> str | None:
     test home) accepts any. The rule is `base.paths.home.home_checkout_error`, shared
     with the CLI's pre-Settings gate.
     """
-    return home_checkout_error(repo)
+    return home_checkout_error(repo, home=resolve_meiva_home())
 
 
 def repo_plugins_dir() -> Path:

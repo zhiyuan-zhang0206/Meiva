@@ -13,6 +13,8 @@ from typing import Any
 
 import psycopg
 
+from base.deploy.schema.migration_layout import MIGRATIONS_DIR
+from base.paths.home import resolve_meiva_home
 from cli.database import OperatorDatabaseFactory
 
 
@@ -44,7 +46,9 @@ def cmd_migrations_apply(
     # Dependency drift is a pre-DB gate: a new upstream checkpoint migration
     # must first be mirrored in an Meiva migration. Failing before
     # Meiva SQL runs keeps update recovery on the old code + old schema.
-    cluster.assert_checkpoint_dependency_pinned(required_migration_set())
+    cluster.assert_checkpoint_dependency_pinned(
+        required_migration_set(migrations_dir=MIGRATIONS_DIR)
+    )
 
     if settings.data_plane.is_remote:
         with database_factory().connect(unbounded=True) as conn:
@@ -67,4 +71,6 @@ def cmd_migrations_apply(
 def _apply(conn: psycopg.Connection[Any], *, machine_name: Callable[[], str]) -> list[str]:
     from base.deploy.schema.migrations import apply_pending_migrations
 
-    return apply_pending_migrations(conn, machine_name=machine_name)
+    return apply_pending_migrations(
+        conn, machine_name=machine_name, migrations_dir=MIGRATIONS_DIR, home=resolve_meiva_home()
+    )

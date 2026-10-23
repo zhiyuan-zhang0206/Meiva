@@ -10,7 +10,7 @@ import psycopg
 from base.api_contracts.status import SchemaMismatchStatus
 from base.db import Database
 from base.deploy.schema.migration_errors import MigrationLayoutError
-from base.deploy.schema.migration_layout import required_migration_set
+from base.deploy.schema.migration_layout import MIGRATIONS_DIR, required_migration_set
 from base.deploy.schema.migrations import applied_migration_names
 from ops.cluster_status.model import Mismatch as Mismatch
 from ops.cluster_status.model import classify as classify
@@ -27,7 +27,6 @@ def detect(
 ) -> Mismatch | None:
     """Read applied names once; required names come from the running image's SQL."""
     read_applied = applied_reader or applied_migration_names
-    read_required = required_reader or required_migration_set
     try:
         if conn is None:
             with db.connect(autocommit=True) as borrowed:
@@ -40,7 +39,11 @@ def detect(
         _log.warning("[schema-mismatch] DB facts unavailable: %r", exc)
         return Mismatch("unavailable", f"applied migration set unavailable ({type(exc).__name__})")
     try:
-        required = read_required()
+        required = (
+            required_reader()
+            if required_reader is not None
+            else required_migration_set(migrations_dir=MIGRATIONS_DIR)
+        )
     except MigrationLayoutError as exc:
         return Mismatch("invalid-migration-layout", f"image migration layout is invalid: {exc}")
     return classify(applied, required)

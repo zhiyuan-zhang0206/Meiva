@@ -6,11 +6,5 @@ exports = ["migration_support.py", "schema_gate.py"]
 "test_migration_reset.py" = ["migration_support.py"]
 "test_timeline_projection_upgrade.py" = ["migration_support.py"]
 
-[debt.env-patch]
-"test_migration_reset.py#monkeypatch.setenv os.environ.MEIVA_HOME" = 1
-
 [debt.first-party-patch]
 "schema_gate.py#assignment base.deploy.schema.migrations.assert_schema_current" = 1
-"test_migration_layout.py#monkeypatch.setattr base.deploy.schema.migration_layout.MIGRATIONS_DIR" = 5
-"test_migration_reset.py#monkeypatch.setattr base.deploy.schema.migration_layout.MIGRATIONS_DIR" = 10
-"test_migration_reset.py#monkeypatch.setattr base.deploy.schema.migrations.squash_history" = 2

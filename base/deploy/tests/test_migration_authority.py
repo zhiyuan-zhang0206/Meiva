@@ -29,7 +29,7 @@ import pytest
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import settings
-from base.deploy.schema import migration_layout
+from base.deploy.schema.migration_layout import MIGRATIONS_DIR
 from base.deploy.schema.migrations import MigrationAuthorityMismatch, apply_pending_migrations
 
 # This host is the gateway of the DB under test in the "matching" cases.
@@ -49,8 +49,8 @@ def _clean_units_and_synthetic(db_conn: None) -> Iterator[None]:
     topology, not business data), so this module clears it before and after
     rather than inheriting whatever another module registered.
 
-    schema_migrations needs the same ownership. The tests that point
-    MIGRATIONS_DIR at a tmp dir holding only the synthetic migration make every
+    schema_migrations needs the same ownership. Tests supplying a tmp directory
+    holding only the synthetic migration make every
     REAL migration name a squash candidate, and a squash DELETEs those rows from
     the suite's shared database for the rest of the session. Left unrestored,
     what the next test sees depends on which sibling ran first — an ordering
@@ -59,9 +59,7 @@ def _clean_units_and_synthetic(db_conn: None) -> Iterator[None]:
     """
     from base.deploy.schema.migrations import required_migration_set
 
-    # Snapshot before any test monkeypatches MIGRATIONS_DIR, so teardown
-    # restores the checkout's real set rather than some tmp dir's.
-    required = sorted(required_migration_set())
+    required = sorted(required_migration_set(migrations_dir=MIGRATIONS_DIR))
 
     def _clear() -> None:
         with psycopg.connect(settings.data_plane.db_url, autocommit=True) as conn:
@@ -89,18 +87,17 @@ def _register_gateway_unit(machine: str, home: str) -> None:
         )
 
 
-def _claim_checkout(
-    monkeypatch: pytest.MonkeyPatch, identity: MachineIdentity, machine: str, home: str
-) -> None:
+def _claim_checkout(identity: MachineIdentity, machine: str, home: str) -> Path:
     """Make the executing process claim `machine:home`."""
     identity.set(name=machine)
-    monkeypatch.setenv("MEIVA_HOME", home)
+    return Path(home)
 
 
+# meiva:note
+# Commit whatever is in tmp_path so the loader's git-tracking gate (#998)
+# sees a real checkout — untracked migration files are skipped, so a fixture
+# supplying tmp_path as the migration directory must model one.
 def _as_git_worktree(tmp_path: Path) -> None:
-    """Commit whatever is in tmp_path so the loader's git-tracking gate (#998)
-    sees a real checkout — untracked migration files are skipped, so a fixture
-    pointing MIGRATIONS_DIR at tmp_path must model one."""
     import subprocess
 
     subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True, capture_output=True)
@@ -119,11 +116,10 @@ def _as_git_worktree(tmp_path: Path) -> None:
     )
 
 
-def _pending_migration(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """Point MIGRATIONS_DIR at one synthetic post-baseline migration (tracked)."""
+def _pending_migration(tmp_path: Path) -> Path:
     (tmp_path / f"{_SYN}.sql").write_text("CREATE TABLE syn_authority_t (id int);")
     _as_git_worktree(tmp_path)
-    monkeypatch.setattr(migration_layout, "MIGRATIONS_DIR", tmp_path)
+    return tmp_path
 
 
 def _synthetic_table_exists() -> bool:
@@ -133,21 +129,25 @@ def _synthetic_table_exists() -> bool:
 
 
 def test_refuses_when_another_unit_owns_the_cluster(
-    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     machine_identity: MachineIdentity,
 ) -> None:
     """The incident itself: the runner's checkout has a migration the gateway
     lacks, and applying it would strand the gateway behind the schema."""
     _register_gateway_unit(*_GATEWAY)
-    _claim_checkout(monkeypatch, machine_identity, *_RUNNER)
-    _pending_migration(monkeypatch, tmp_path)
+    claimed_home = _claim_checkout(machine_identity, *_RUNNER)
+    migrations_dir = _pending_migration(tmp_path)
 
     with (
         psycopg.connect(settings.data_plane.db_url) as conn,
         pytest.raises(MigrationAuthorityMismatch) as exc,
     ):
-        apply_pending_migrations(conn, machine_name=machine_identity.name)
+        apply_pending_migrations(
+            conn,
+            machine_name=machine_identity.name,
+            migrations_dir=migrations_dir,
+            home=claimed_home,
+        )
 
     # The message must name both identities — the operator's first question is
     # "which host am I on, and which one owns this DB".
@@ -157,61 +157,74 @@ def test_refuses_when_another_unit_owns_the_cluster(
 
 
 def test_allows_a_fresh_birth_with_no_recorded_identity(
-    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     machine_identity: MachineIdentity,
 ) -> None:
     """A brand-new cluster migrates at `meiva start` step 2.5, before step 3 writes
     machine_units — an empty table means "no owner yet", not "not you"."""
-    _claim_checkout(monkeypatch, machine_identity, *_RUNNER)
-    _pending_migration(monkeypatch, tmp_path)
+    claimed_home = _claim_checkout(machine_identity, *_RUNNER)
+    migrations_dir = _pending_migration(tmp_path)
 
     with psycopg.connect(settings.data_plane.db_url) as conn:
-        assert apply_pending_migrations(conn, machine_name=machine_identity.name) == [_SYN]
+        assert apply_pending_migrations(
+            conn,
+            machine_name=machine_identity.name,
+            migrations_dir=migrations_dir,
+            home=claimed_home,
+        ) == [_SYN]
     assert _synthetic_table_exists()
 
 
 def test_allows_the_gateway_unit(
-    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     machine_identity: MachineIdentity,
 ) -> None:
     """The sanctioned path — the fleet update's migrate step on the cluster's own
     gateway — is unaffected."""
     _register_gateway_unit(*_GATEWAY)
-    _claim_checkout(monkeypatch, machine_identity, *_GATEWAY)
-    _pending_migration(monkeypatch, tmp_path)
+    claimed_home = _claim_checkout(machine_identity, *_GATEWAY)
+    migrations_dir = _pending_migration(tmp_path)
 
     with psycopg.connect(settings.data_plane.db_url) as conn:
-        assert apply_pending_migrations(conn, machine_name=machine_identity.name) == [_SYN]
+        assert apply_pending_migrations(
+            conn,
+            machine_name=machine_identity.name,
+            migrations_dir=migrations_dir,
+            home=claimed_home,
+        ) == [_SYN]
     assert _synthetic_table_exists()
 
 
+# meiva:note
+# An agent-runner's ordinary `meiva start` calls this against the central DB
+# and legitimately applies nothing. Authority is checked only when something
+# would actually be written, so the guard must not turn every runner start into
+# a hard failure.
+#
+# Runs against the checkout's REAL migrations dir, which is what makes this a
+# genuine no-op: the suite provisions its database with exactly those
+# migrations applied, so nothing is pending and nothing is squashed. Pointing
+# the migration reader at an empty dir instead would make every applied migration a
+# squash candidate — a mutation, which the guard is supposed to refuse.
 def test_allows_a_non_gateway_host_with_nothing_to_apply(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
     machine_identity: MachineIdentity,
 ) -> None:
-    """An agent-runner's ordinary `meiva start` calls this against the central DB
-    and legitimately applies nothing. Authority is checked only when something
-    would actually be written, so the guard must not turn every runner start into
-    a hard failure.
-
-    Runs against the checkout's REAL migrations dir, which is what makes this a
-    genuine no-op: the suite provisions its database with exactly those
-    migrations applied, so nothing is pending and nothing is squashed. Pointing
-    MIGRATIONS_DIR at an empty dir instead would make every applied migration a
-    squash candidate — a mutation, which the guard is supposed to refuse.
-    """
     _register_gateway_unit(*_GATEWAY)
-    _claim_checkout(monkeypatch, machine_identity, *_RUNNER)
+    claimed_home = _claim_checkout(machine_identity, *_RUNNER)
 
     with psycopg.connect(settings.data_plane.db_url) as conn:
-        assert apply_pending_migrations(conn, machine_name=machine_identity.name) == []
+        assert (
+            apply_pending_migrations(
+                conn,
+                machine_name=machine_identity.name,
+                home=claimed_home,
+                migrations_dir=MIGRATIONS_DIR,
+            )
+            == []
+        )
 
 
 def test_refuses_a_foreign_checkout_even_at_the_owning_home(
-    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     machine_identity: MachineIdentity,
 ) -> None:
@@ -222,22 +235,25 @@ def test_refuses_a_foreign_checkout_even_at_the_owning_home(
     home = tmp_path / "gateway-home"
     (home / "source").mkdir(parents=True)
     _register_gateway_unit(_GATEWAY[0], str(home))
-    _claim_checkout(monkeypatch, machine_identity, _GATEWAY[0], str(home))
-    _pending_migration(monkeypatch, tmp_path)
+    claimed_home = _claim_checkout(machine_identity, _GATEWAY[0], str(home))
+    migrations_dir = _pending_migration(tmp_path)
 
     with (
         psycopg.connect(settings.data_plane.db_url) as conn,
         pytest.raises(MigrationAuthorityMismatch) as exc,
     ):
-        apply_pending_migrations(conn, machine_name=machine_identity.name)
+        apply_pending_migrations(
+            conn,
+            machine_name=machine_identity.name,
+            migrations_dir=migrations_dir,
+            home=claimed_home,
+        )
 
     assert "foreign checkout" in str(exc.value)
     assert not _synthetic_table_exists()
 
 
-def test_untracked_migration_files_names_only_untracked_sql(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_untracked_migration_files_names_only_untracked_sql(tmp_path: Path) -> None:
     """The converge warning surfaces exactly what the loader skips: untracked
     `.sql` up-files — nothing else (tracked files, dotfiles)."""
     (tmp_path / "20260808T010000_tracked.sql").write_text("-- up")
@@ -245,52 +261,44 @@ def test_untracked_migration_files_names_only_untracked_sql(
     # Written AFTER the commit, so git does not track them:
     (tmp_path / "20260808T020000_untracked.sql").write_text("-- up")
     (tmp_path / ".hidden.sql").write_text("-- hidden")
-    monkeypatch.setattr(migration_layout, "MIGRATIONS_DIR", tmp_path)
 
     from base.deploy.schema import migrations as m
 
-    assert m.untracked_migration_files() == ["20260808T020000_untracked.sql"]
+    assert m.untracked_migration_files(migrations_dir=tmp_path) == ["20260808T020000_untracked.sql"]
 
 
-def test_untracked_migration_files_empty_outside_a_worktree(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_untracked_migration_files_empty_outside_a_worktree(tmp_path: Path) -> None:
     """Not a git worktree → empty, not an error: the loader fails closed there
     (nothing would be applied), so the warning surface has nothing to add."""
     (tmp_path / "20260808T010000_x.sql").write_text("-- up")
-    monkeypatch.setattr(migration_layout, "MIGRATIONS_DIR", tmp_path)
 
     from base.deploy.schema import migrations as m
 
-    assert m.untracked_migration_files() == []
+    assert m.untracked_migration_files(migrations_dir=tmp_path) == []
 
 
 @pytest.mark.skipif(os.geteuid() == 0, reason="root reads through mode 0")
-def test_unreadable_migration_files_names_a_denied_tracked_file(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_unreadable_migration_files_names_a_denied_tracked_file(tmp_path: Path) -> None:
     """The apply-side vet: a tracked migration the applier cannot open is named
     before an update stops the host (`validate_migrations_at_ref` vets names)."""
     locked = tmp_path / "20260808T010000_locked.sql"
     locked.write_text("-- up")
     _as_git_worktree(tmp_path)
     locked.chmod(0)
-    monkeypatch.setattr(migration_layout, "MIGRATIONS_DIR", tmp_path)
 
     from base.deploy.schema import migrations as m
 
-    problems = m.unreadable_migration_files()
+    problems = m.unreadable_migration_files(migrations_dir=tmp_path)
     assert [name for name, _ in problems] == ["20260808T010000_locked"]
     assert problems[0][1]
 
 
 def test_unreadable_migration_files_empty_when_every_tracked_file_reads(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    tmp_path: Path,
 ) -> None:
     (tmp_path / "20260808T010000_ok.sql").write_text("-- up")
     _as_git_worktree(tmp_path)
-    monkeypatch.setattr(migration_layout, "MIGRATIONS_DIR", tmp_path)
 
     from base.deploy.schema import migrations as m
 
-    assert m.unreadable_migration_files() == []
+    assert m.unreadable_migration_files(migrations_dir=tmp_path) == []

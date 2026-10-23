@@ -5,8 +5,10 @@ from typing import LiteralString, cast
 import psycopg
 
 from base.cluster.machine import MachineIdentity
+from base.deploy.schema.migration_layout import MIGRATIONS_DIR
 from base.deploy.schema.migrations import apply_pending_migrations
 from base.deploy.schema.tests.migration_support import SCHEMA_SQL, throwaway_database
+from base.paths.home import resolve_meiva_home
 
 _BOUNDARY_INDEX = "20261017T203552_checkpoints-compact-boundary-index"
 _CREATE_CHECKPOINTS = """
@@ -36,14 +38,27 @@ def test_compact_boundary_index_upgrade_indexes_the_upstream_table(
             conn.execute(cast(LiteralString, SCHEMA_SQL.read_text()))
             conn.execute(_CREATE_CHECKPOINTS)
         with psycopg.connect(url) as conn:
-            applied = apply_pending_migrations(conn, machine_name=machine_identity.name)
+            applied = apply_pending_migrations(
+                conn,
+                machine_name=machine_identity.name,
+                migrations_dir=MIGRATIONS_DIR,
+                home=resolve_meiva_home(),
+            )
             assert _BOUNDARY_INDEX in applied
             assert conn.execute(
                 "SELECT indisvalid FROM pg_index"
                 " WHERE indexrelid = to_regclass('public.checkpoints_compact_boundary_idx')"
             ).fetchone() == (True,)
         with psycopg.connect(url) as conn:
-            assert apply_pending_migrations(conn, machine_name=machine_identity.name) == []
+            assert (
+                apply_pending_migrations(
+                    conn,
+                    machine_name=machine_identity.name,
+                    migrations_dir=MIGRATIONS_DIR,
+                    home=resolve_meiva_home(),
+                )
+                == []
+            )
 
 
 def test_compact_boundary_index_is_skipped_without_the_upstream_table(
@@ -60,7 +75,12 @@ def test_compact_boundary_index_is_skipped_without_the_upstream_table(
         with psycopg.connect(url, autocommit=True) as conn:
             conn.execute(cast(LiteralString, SCHEMA_SQL.read_text()))
         with psycopg.connect(url) as conn:
-            applied = apply_pending_migrations(conn, machine_name=machine_identity.name)
+            applied = apply_pending_migrations(
+                conn,
+                machine_name=machine_identity.name,
+                migrations_dir=MIGRATIONS_DIR,
+                home=resolve_meiva_home(),
+            )
             assert _BOUNDARY_INDEX in applied
             assert conn.execute(
                 "SELECT to_regclass('public.checkpoints_compact_boundary_idx')"

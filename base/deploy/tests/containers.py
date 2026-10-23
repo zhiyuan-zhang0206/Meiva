@@ -33,6 +33,8 @@ import psycopg
 import redis
 
 from base.cluster.dataplane.pg_throwaway_base import ThrowawayConfig
+from base.deploy.schema.migration_layout import MIGRATIONS_DIR
+from base.paths.home import resolve_meiva_home
 
 _SCHEMA_SQL = Path(__file__).resolve().parents[3] / "db" / "schema.sql"
 
@@ -91,7 +93,12 @@ def postgres(
         # Non-autocommit conn: apply_pending_migrations manages its own
         # per-migration transactions + advisory lock.
         with psycopg.connect(url) as conn:
-            apply_pending_migrations(conn, machine_name=machine_name)
+            apply_pending_migrations(
+                conn,
+                machine_name=machine_name,
+                migrations_dir=MIGRATIONS_DIR,
+                home=resolve_meiva_home(),
+            )
         yield url
 
 

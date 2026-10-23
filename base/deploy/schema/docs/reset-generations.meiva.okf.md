@@ -17,7 +17,9 @@ generation raises `MigrationHistoryGap`. Without the current reset anchor, the
 complete 101-name predecessor set is mandatory, including on baseline-only
 restores. Fresh databases stamp the new anchor directly. The upgrade inserts
 the anchor and deletes folded tracking rows in one transaction, so an
-interruption preserves a retryable generation.
+interruption preserves a retryable generation. A real Postgres `AFTER DELETE`
+trigger failure verifies that history deletion and anchor insertion roll back
+together; a failed anchor SQL body also preserves the predecessor set for retry.
 
 An older release cannot safely replay the folded strict DDL. Restore a matching
 pre-reset backup or fix forward when recovery would cross this boundary.

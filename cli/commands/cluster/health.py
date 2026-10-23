@@ -33,6 +33,7 @@ from base import telemetry
 from base.agents.context.clients import DatabaseFactory
 from base.cluster.machine import MachineIdentity
 from base.config import ConfigBoot
+from base.deploy.schema.migration_layout import MIGRATIONS_DIR
 from base.host.system.hostport import Host
 from cli.commands.cluster._provider_guard import run_provider_guard
 from cli.database.runtime import CommandRuntime
@@ -224,7 +225,7 @@ def schema_health(*, database_factory: DatabaseFactory) -> bool:
         # check_schema_version expects a connection; connect+check inline
 
         with database_factory().connect(autocommit=True) as conn:
-            check_schema_version(conn)
+            check_schema_version(conn, migrations_dir=MIGRATIONS_DIR)
         return True
     except (CodeBehindSchema, SchemaVersionMismatch):
         # A real skew between the applied set and this checkout's migrations.

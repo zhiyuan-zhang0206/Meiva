@@ -45,9 +45,11 @@ from base.cluster.dataplane.pg_tools import pg_start_env, pg_tool, throwaway_pos
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot
+from base.deploy.schema.migration_layout import MIGRATIONS_DIR
 from base.deploy.schema.migrations import apply_pending_migrations
 from base.host.db_authority.ledger import activate, create_ledger, read_secret, require_ledger
 from base.host.db_authority.model import GATEWAY_GROUP, RUNNER_GROUP, GenerationSecret, Groups
+from base.paths.home import resolve_meiva_home
 
 OWNER = "meiva_test_owner"
 _TEMPLATE = "meiva_test_tmpl"
@@ -112,7 +114,12 @@ def _build_template(tcp: str, *, machine: MachineIdentity) -> None:
     with PostgresSaver.from_conn_string(as_owner) as saver:
         saver.setup()
     with psycopg.connect(as_owner) as conn:
-        apply_pending_migrations(conn, machine_name=machine.name)
+        apply_pending_migrations(
+            conn,
+            machine_name=machine.name,
+            migrations_dir=MIGRATIONS_DIR,
+            home=resolve_meiva_home(),
+        )
 
 
 def _authenticate(instance: Instance, tcp: str, data_dir: Path) -> None:
