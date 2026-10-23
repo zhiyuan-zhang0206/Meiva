@@ -1,0 +1,2 @@
+[debt.first-party-patch]
+"test_audit_in_transaction.py#monkeypatch.setattr base.agents.inbox.insert.record_audit" = 1
