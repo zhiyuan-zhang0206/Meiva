@@ -1,88 +1,96 @@
 import type { CSSProperties, ReactNode } from "react";
+import type * as ResizablePanels from "react-resizable-panels";
 import { renderToString } from "react-dom/server";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-// The ui/resizable wrapper is mocked: the library's real layout engine needs a
-// measured container, so these tests pin the home frame contract instead —
-// which frames mount, with which panels and defaults, and what may persist. The real
-// persistence path runs through useDefaultLayout (not mocked) + lib/panel-layout-storage.
-vi.mock("@/components/ui/resizable", () => ({
-  ResizablePanelGroup: ({
-    children,
-    defaultLayout,
-    onLayoutChanged,
-    orientation,
-  }: {
-    children: ReactNode;
-    defaultLayout?: Record<string, number> | undefined;
-    onLayoutChanged?: (
-      layout: Record<string, number>,
-      meta: { isUserInteraction: boolean },
-    ) => void;
-    orientation: string;
-  }) => (
-    <div
-      data-testid="resizable-panel-group"
-      data-slot="resizable-panel-group"
-      data-orientation={orientation}
-      data-default-layout={JSON.stringify(defaultLayout ?? null)}
-    >
-      {/* The library commits a layout on mount / on a shape or container
-          change (programmatic), and a real drag commits with
-          isUserInteraction: true — one button each so tests can drive both. */}
-      <button
-        data-testid="layout-commit-programmatic"
-        onClick={() =>
-          onLayoutChanged?.(
-            { "panel-sidebar": 30, "panel-main": 70 },
-            { isUserInteraction: false },
-          )
-        }
-      />
-      <button
-        data-testid="layout-commit-drag"
-        onClick={() =>
-          onLayoutChanged?.(
-            { "panel-sidebar": 41, "panel-main": 59 },
-            { isUserInteraction: true },
-          )
-        }
-      />
-      {children}
-    </div>
-  ),
-  ResizablePanel: ({
-    children,
-    defaultSize,
-    id,
-    maxSize,
-    minSize,
-  }: {
-    children: ReactNode;
-    defaultSize: string;
-    id: string;
-    maxSize?: string;
-    minSize: string;
-  }) => (
-    <div
-      data-slot="resizable-panel"
-      data-panel-id={id}
-      data-default-size={defaultSize}
-      data-min-size={minSize}
-      data-max-size={maxSize}
-    >
-      {children}
-    </div>
-  ),
-  ResizableHandle: ({
-    className,
-    style,
-  }: {
-    className?: string;
-    style?: CSSProperties;
-  }) => <div data-slot="resizable-handle" className={className} style={style} />,
-}));
+// meiva:note
+// The measured layout engine stays at the library boundary; local wrappers and
+// useDefaultLayout execute with their real prop and persistence contracts.
+// meiva:link ui/web/src/docs/frontend-components/home-shell-chrome/home-shell-chrome.meiva.okf.md
+vi.mock("react-resizable-panels", async (importOriginal) => {
+  const actual = await importOriginal<typeof ResizablePanels>();
+  return {
+    ...actual,
+    Group: ({
+      children,
+      defaultLayout,
+      onLayoutChanged,
+      orientation,
+      className,
+      style,
+    }: {
+      children: ReactNode;
+      defaultLayout?: Record<string, number> | undefined;
+      onLayoutChanged?: (
+        layout: Record<string, number>,
+        meta: { isUserInteraction: boolean },
+      ) => void;
+      orientation: string;
+      className?: string;
+      style?: CSSProperties;
+    }) => (
+      <div
+        data-testid="resizable-panel-group"
+        data-slot="resizable-panel-group"
+        data-orientation={orientation}
+        data-default-layout={JSON.stringify(defaultLayout ?? null)}
+        className={className}
+        style={style}
+      >
+        <button
+          data-testid="layout-commit-programmatic"
+          onClick={() =>
+            onLayoutChanged?.(
+              { "panel-sidebar": 30, "panel-main": 70 },
+              { isUserInteraction: false },
+            )
+          }
+        />
+        <button
+          data-testid="layout-commit-drag"
+          onClick={() =>
+            onLayoutChanged?.(
+              { "panel-sidebar": 41, "panel-main": 59 },
+              { isUserInteraction: true },
+            )
+          }
+        />
+        {children}
+      </div>
+    ),
+    Panel: ({
+      children,
+      defaultSize,
+      id,
+      maxSize,
+      minSize,
+    }: {
+      children: ReactNode;
+      defaultSize: string;
+      id: string;
+      maxSize?: string;
+      minSize: string;
+    }) => (
+      <div
+        data-slot="resizable-panel"
+        data-panel-id={id}
+        data-default-size={defaultSize}
+        data-min-size={minSize}
+        data-max-size={maxSize}
+      >
+        {children}
+      </div>
+    ),
+    Separator: ({
+      className,
+      style,
+    }: {
+      className?: string;
+      style?: CSSProperties;
+    }) => <div data-slot="resizable-handle" className={className} style={style} />,
+  };
+});
 
 import { HomeLayout } from "./home-layout";
 
@@ -105,11 +113,15 @@ function installLocalStoragePolyfill(): void {
   });
 }
 
+const originalStorage = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
+
 beforeEach(installLocalStoragePolyfill);
 
 afterEach(() => {
   cleanup();
   localStorage.clear();
+  if (originalStorage) Object.defineProperty(globalThis, "localStorage", originalStorage);
+  else Reflect.deleteProperty(globalThis, "localStorage");
 });
 
 function panes() {
@@ -334,6 +346,8 @@ describe("HomeLayout frame contract", () => {
 
     const groups = screen.getAllByTestId("resizable-panel-group");
     for (const group of groups) {
+      expect(group.className).toContain("h-full");
+      expect(group.className).toContain("w-full");
       clickDirect(group, "layout-commit-programmatic");
     }
     expect(localStorage.length).toBe(0);
