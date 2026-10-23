@@ -91,3 +91,11 @@ The complete per-agent overlay surface with a value universe is range-checked: m
 A launched service validates its birth snapshot: a present packet must name this plugin and contain its complete declared image; malformed packets never fall back to disk or defaults, and an absent carrier is distinct from an invalid one.
 
 View contracts: [[config-view.meiva.okf.md]]
+
+The service carrier is delivered by the launcher before process imports. Its
+snapshot contract tests run a fresh interpreter with an explicit, minimal
+environment: the captured image remains stable after authority-file edits,
+absence returns no snapshot, and malformed or incomplete packets still raise.
+Flag admission is exercised through an actual gateway profile and a valid
+agent-domain declaration, rather than pretending a constructed daemon domain
+is unavailable. Neither path changes the process-wide configuration owner.
