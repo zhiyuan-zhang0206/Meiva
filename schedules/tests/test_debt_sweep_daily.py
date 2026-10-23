@@ -11,15 +11,12 @@ from uuid import UUID
 
 import pytest
 
-from meiva.agents import AgentStatus as S
-from base.config import settings
 from base.cluster.machine import MachineIdentity
+from base.config import settings
 from base.native_process.loaded_commit import LoadedCommit
-from meiva.sdk_surface import process_context
-from schedules import entry
-from base import db
 from base.telemetry.tests.capture.event_capture import EmittedEvents
 from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
+from meiva.agents import AgentStatus as S
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCHEDULE_PATH = REPO_ROOT / "schedules" / "debt-sweep-daily-schedule.py"
@@ -44,7 +41,6 @@ def _agent(agent_id: int, status: S, label: str = "debt-sweep-daily") -> SimpleN
 
 
 def test_dry_run_performs_no_agent_claim_database_or_telemetry_side_effects(
-    monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     tmp_path: Path,
     emitted_events: EmittedEvents,
@@ -52,7 +48,7 @@ def test_dry_run_performs_no_agent_claim_database_or_telemetry_side_effects(
     module = _load_schedule_module()
     calls: list[str] = []
 
-    def forbidden(*args: object, **kwargs: object) -> None:
+    def forbidden(*args: object, **kwargs: object) -> Any:
         del args, kwargs
         calls.append("side-effect")
         raise AssertionError("dry run made a side effect")
@@ -65,19 +61,12 @@ def test_dry_run_performs_no_agent_claim_database_or_telemetry_side_effects(
             summary="mechanical scan completed (3 lines)",
         )
 
-    monkeypatch.setattr(module, "_run_mechanical_scan", fake_scan)
-    monkeypatch.setattr(module.meiva.agents, "list_agents", forbidden)
-    monkeypatch.setattr(module.meiva.agents, "spawn", forbidden)
-    monkeypatch.setattr(module.meiva.agents, "resurrect", forbidden)
-    monkeypatch.setattr(module.meiva.agents, "send_message", forbidden)
-    monkeypatch.setattr(process_context, "loaded_code_image", forbidden)
-    monkeypatch.setattr(entry, "Database", forbidden)
-    monkeypatch.setattr(module, "fire_slot_once", forbidden)
-    monkeypatch.setattr(module, "meiva_home", forbidden)
-    monkeypatch.setattr(db, "connect", forbidden)
-    monkeypatch.setattr(db, "pool", forbidden)
-
-    module.main(["--once", "--dry-run", "--repo", str(REPO_ROOT)])
+    module.main(
+        ["--once", "--dry-run", "--repo", str(REPO_ROOT)],
+        entry_factory=forbidden,
+        scan_runner=fake_scan,
+        claim_fn=forbidden,
+    )
 
     assert calls == []
     assert emitted_events.names() == []
@@ -98,7 +87,6 @@ def test_dry_run_performs_no_agent_claim_database_or_telemetry_side_effects(
     ],
 )
 def test_ensure_worker_reuses_or_spawns_by_status(
-    monkeypatch: pytest.MonkeyPatch,
     agents: list[SimpleNamespace],
     expected_action: str,
 ) -> None:
@@ -123,12 +111,16 @@ def test_ensure_worker_reuses_or_spawns_by_status(
         calls.append(("spawn", label))
         return 14
 
-    monkeypatch.setattr(module.meiva.agents, "list_agents", list_agents)
-    monkeypatch.setattr(module.meiva.agents, "resurrect", resurrect)
-    monkeypatch.setattr(module.meiva.agents, "send_message", send_message)
-    monkeypatch.setattr(module.meiva.agents, "spawn", spawn)
-
-    dispatch = module.ensure_worker("debt-sweep-daily", "clear debt")
+    dispatch = module.ensure_worker(
+        "debt-sweep-daily",
+        "clear debt",
+        hooks=module.EnsureWorkerHooks(
+            list_agents_fn=list_agents,
+            resurrect_fn=resurrect,
+            send_message_fn=send_message,
+            spawn_fn=spawn,
+        ),
+    )
 
     assert dispatch.action == expected_action
     assert dispatch.agent_id == (agents[0].agent_id if agents else 14)
@@ -161,7 +153,6 @@ def test_worker_prompt_names_ledger_scan_artifact_and_one_pr(tmp_path: Path) -> 
 
 
 def test_scan_failure_is_passed_to_worker_and_registered(
-    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     machine_identity: MachineIdentity,
     emitted_events: EmittedEvents,
@@ -174,12 +165,10 @@ def test_scan_failure_is_passed_to_worker_and_registered(
     )
     prompts: list[str] = []
 
-    monkeypatch.setattr(settings.general, "timezone", "Asia/Shanghai")
-
-    def fake_scan(repo: Path, artifact_path: Path | None) -> object:
+    def fake_scan(repo: Path, artifact_path: Path | None) -> Any:
         return scan
 
-    def ensure_worker(label: str, prompt: str) -> object:
+    def ensure_worker(label: str, prompt: str) -> Any:
         prompts.append(prompt)
         return module.WorkerDispatch(agent_id=44, action="spawned")
 
@@ -190,16 +179,18 @@ def test_scan_failure_is_passed_to_worker_and_registered(
         assert callable(producer) and callable(machine_reader)
         assert image.sha is None
 
-    monkeypatch.setattr(module, "_run_mechanical_scan", fake_scan)
-    monkeypatch.setattr(module, "ensure_worker", ensure_worker)
-    monkeypatch.setattr(module, "init_gateway_process", init_gateway_process)
-
     module._fire(
         datetime(2026, 9, 21, 22, 30, tzinfo=UTC),
         None,
         producer=lambda: None,
         image=LoadedCommit(REPO_ROOT, None),
         machine_reader=machine_identity.name,
+        hooks=module.DebtSweepFireHooks(
+            tz_fn=lambda: "Asia/Shanghai",
+            scan_runner=fake_scan,
+            worker_dispatcher=ensure_worker,
+            gateway_init=init_gateway_process,
+        ),
     )
 
     assert len(prompts) == 1
@@ -244,9 +235,7 @@ def test_event_payload_and_cluster_clock_constants() -> None:
     }
 
 
-def test_ensure_worker_reuses_worker_from_later_search_page(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_ensure_worker_reuses_worker_from_later_search_page() -> None:
     module = _load_schedule_module()
     unrelated = _agent(300, S.IDLING, label="steward-old")
     target = _agent(200, S.TERMINATED)
@@ -263,21 +252,24 @@ def test_ensure_worker_reuses_worker_from_later_search_page(
         return pages[len(seen_before_ids) - 1]
 
     resurrect = Mock()
-    monkeypatch.setattr(module.meiva.agents, "list_agents", list_agents)
-    monkeypatch.setattr(module.meiva.agents, "resurrect", resurrect)
-    monkeypatch.setattr(module.meiva.agents, "send_message", Mock())
-    monkeypatch.setattr(module.meiva.agents, "spawn", Mock())
 
-    dispatch = module.ensure_worker("debt-sweep-daily", "clear debt")
+    dispatch = module.ensure_worker(
+        "debt-sweep-daily",
+        "clear debt",
+        hooks=module.EnsureWorkerHooks(
+            list_agents_fn=list_agents,
+            resurrect_fn=resurrect,
+            send_message_fn=Mock(),
+            spawn_fn=Mock(),
+        ),
+    )
 
     assert dispatch == module.WorkerDispatch(agent_id=200, action="resurrected")
     resurrect.assert_called_once_with(200, "clear debt")
     assert seen_before_ids == [None, 300]
 
 
-def test_ensure_worker_spawns_only_after_matching_pages_are_exhausted(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_ensure_worker_spawns_only_after_matching_pages_are_exhausted() -> None:
     module = _load_schedule_module()
     pages = [
         SimpleNamespace(agents=[], next_cursor=300),
@@ -293,11 +285,16 @@ def test_ensure_worker_spawns_only_after_matching_pages_are_exhausted(
 
     spawn = Mock(return_value=400)
     key = UUID("0eb49ad1-0b9b-4bde-b783-d0c3e4359c33")
-    monkeypatch.setattr(module, "uuid4", lambda: key)
-    monkeypatch.setattr(module.meiva.agents, "list_agents", list_agents)
-    monkeypatch.setattr(module.meiva.agents, "spawn", spawn)
 
-    dispatch = module.ensure_worker("missing", "clear debt")
+    dispatch = module.ensure_worker(
+        "missing",
+        "clear debt",
+        hooks=module.EnsureWorkerHooks(
+            list_agents_fn=list_agents,
+            spawn_fn=spawn,
+            uuid_fn=lambda: key,
+        ),
+    )
 
     assert dispatch == module.WorkerDispatch(agent_id=400, action="spawned")
     spawn.assert_called_once_with(prompt="clear debt", label="missing", idempotency_key=str(key))
@@ -319,23 +316,17 @@ def test_cli_takes_flags_only() -> None:
         parser.parse_args(["--unknown-flag"])
 
 
-def test_failure_notification_propagates_when_p0_lead_is_unavailable(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_failure_notification_propagates_when_p0_lead_is_unavailable() -> None:
     module = _load_schedule_module()
 
     def unavailable() -> int:
         raise RuntimeError("P0 lead unavailable")
 
-    monkeypatch.setattr(module, "_report_agent", unavailable)
-
     with pytest.raises(RuntimeError, match="P0 lead unavailable"):
-        module._report_failure("worker dispatch failed")
+        module._report_failure("worker dispatch failed", report_agent_fn=unavailable)
 
 
-def test_scan_uses_public_candidate_tool_and_preserves_report(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_scan_uses_public_candidate_tool_and_preserves_report(tmp_path: Path) -> None:
     import subprocess
 
     module = _load_schedule_module()
@@ -348,8 +339,7 @@ def test_scan_uses_public_candidate_tool_and_preserves_report(
         assert kwargs["timeout"] == module._SCAN_TIMEOUT_SECONDS
         return subprocess.CompletedProcess(args, 0, "candidate evidence\n", "")
 
-    monkeypatch.setattr(module.subprocess, "run", run)
-    scan = module._run_mechanical_scan(REPO_ROOT, artifact)
+    scan = module._run_mechanical_scan(REPO_ROOT, artifact, run_fn=run)
     assert scan.succeeded
     assert artifact.read_text() == "candidate evidence\n"
     prompt = module.worker_prompt("2026-10-05", scan)

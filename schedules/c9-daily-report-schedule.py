@@ -15,7 +15,7 @@ from schedules.agent_status_guard import ensure_agent_status_members
 from base.host.system.hostport import Host
 from base.native_process.loaded_commit import LoadedCommit
 from schedules.catchup import cluster_timezone
-from schedules.daily_host import report_agent, run_daily_loop
+from schedules.daily_host import DailyLoopHooks, report_agent, run_daily_loop
 from base.daemon.schedules.inputs import ScheduleInputs
 from schedules.entry import fresh_schedule_entry, schedule_entry
 from base.telemetry.process_logging import init_gateway_process
@@ -167,7 +167,13 @@ def _fire(
         active.failure_reporter(f"{type(exc).__name__}: {exc}")
 
 
-def _main_loop(*, inputs: ScheduleInputs, host: Host) -> None:
+def _main_loop(
+    *,
+    inputs: ScheduleInputs,
+    host: Host,
+    loop_fn: Callable[..., None] | None = None,
+    loop_hooks: DailyLoopHooks | None = None,
+) -> None:
     db = inputs.database()
     fire = partial(
         _fire,
@@ -176,7 +182,11 @@ def _main_loop(*, inputs: ScheduleInputs, host: Host) -> None:
         machine_reader=inputs.machine.name,
         host=host,
     )
-    run_daily_loop(db, CRON, cluster_timezone(), fire)
+    runner = loop_fn or run_daily_loop
+    if loop_hooks is not None:
+        runner(db, CRON, cluster_timezone(), fire, hooks=loop_hooks)
+    else:
+        runner(db, CRON, cluster_timezone(), fire)
 
 
 if __name__ == "__main__":

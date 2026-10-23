@@ -65,13 +65,20 @@ def fire_memory_maintenance(_slot: datetime, message: str) -> None:
         print(f"[schedule] Failed: {exc}")
 
 
-def main(*, inputs: ScheduleInputs) -> None:
+def main(
+    *,
+    inputs: ScheduleInputs,
+    next_fire_fn: Callable[..., datetime] | None = None,
+    claim_fn: Callable[..., bool] | None = None,
+) -> None:
+    compute_next_fire = next_fire_fn or next_fire
+    claim_slot = claim_fn or fire_slot_once
     db = inputs.database()
     while True:
         now = datetime.now(UTC)
         next_times = []
         for cron_expr, message in TRIGGERS:
-            nxt = next_fire(cron_expr, after=now, timezone=cluster_timezone())
+            nxt = compute_next_fire(cron_expr, after=now, timezone=cluster_timezone())
             next_times.append((nxt, cron_expr, message))
 
         next_fire_time, cron_expr, message = min(next_times, key=lambda x: x[0])
@@ -81,7 +88,7 @@ def main(*, inputs: ScheduleInputs) -> None:
             print(f"[schedule] Next: {next_fire_time} ({cron_expr}) — sleeping {wait:.0f}s")
             time.sleep(wait)
 
-        fire_slot_once(db, next_fire_time, message, fire=fire_memory_maintenance)
+        claim_slot(db, next_fire_time, message, fire=fire_memory_maintenance)
 
         time.sleep(60)
 

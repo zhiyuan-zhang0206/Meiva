@@ -143,7 +143,29 @@ def should_fire_thursday() -> bool:
     return count >= bar
 
 
-def _main_loop(*, inputs: ScheduleInputs) -> None:
+@dataclass(frozen=True)
+class LoopHooks:
+    now_fn: Callable[[], datetime] = field(default_factory=lambda: lambda: datetime.now(UTC))
+    tz_fn: Callable[[], str] = field(default_factory=lambda: cluster_timezone)
+    next_fire_fn: Callable[..., datetime] = field(default_factory=lambda: next_fire)
+    claim_fn: Callable[..., bool] = field(default_factory=lambda: fire_slot_once)
+    sleep_fn: Callable[[float], None] = field(default_factory=lambda: time.sleep)
+    monday_cron: str = MONDAY_CRON
+    thursday_cron: str = THURSDAY_CRON
+
+
+def _main_loop(
+    *,
+    inputs: ScheduleInputs,
+    hooks: LoopHooks | None = None,
+    next_fire_fn: Callable[..., datetime] | None = None,
+    claim_fn: Callable[..., bool] | None = None,
+) -> None:
+    active = hooks or LoopHooks(
+        next_fire_fn=next_fire_fn or next_fire,
+        claim_fn=claim_fn or fire_slot_once,
+    )
+    cluster_timezone = active.tz_fn
     db = inputs.database()
     thursday_enabled = False
 
@@ -152,12 +174,12 @@ def _main_loop(*, inputs: ScheduleInputs) -> None:
         if trigger == MONDAY_TRIGGER:
             if should_fire_monday():
                 fire(PROMPT)
-                week_ago = datetime.now(UTC) - timedelta(days=7)
+                week_ago = active.now_fn() - timedelta(days=7)
                 total = count_events(week_ago)
                 thursday_enabled = total >= HIGH_WEEKLY_EVENTS
                 if thursday_enabled:
                     print(
-                        f"[{datetime.now(UTC).isoformat()}] self-evolution: "
+                        f"[{active.now_fn().isoformat()}] self-evolution: "
                         f"Thursday follow-up enabled ({total} >= {HIGH_WEEKLY_EVENTS})"
                     )
             else:
@@ -170,23 +192,23 @@ def _main_loop(*, inputs: ScheduleInputs) -> None:
             return
         raise ValueError(f"unknown self-evolution weekly trigger: {trigger}")
 
-    started_at = datetime.now(UTC)
+    started_at = active.now_fn()
     while True:
-        now = datetime.now(UTC)
+        now = active.now_fn()
 
         # meiva:note
         # `after=now-2min` is the trigger tolerance: croniter's get_next is strictly greater
         # than its base, so a `now` a fraction of a second past the hour would jump to the
         # next day (deterministic miss, observed 2026-08-06). Window: [-120s, +90s].
-        nxt_monday = next_fire(
-            MONDAY_CRON,
+        nxt_monday = active.next_fire_fn(
+            active.monday_cron,
             after=max(started_at, now - timedelta(minutes=2)),
             timezone=cluster_timezone(),
         )
         wait_monday = (nxt_monday - now).total_seconds()
 
-        nxt_thursday = next_fire(
-            THURSDAY_CRON,
+        nxt_thursday = active.next_fire_fn(
+            active.thursday_cron,
             after=max(started_at, now - timedelta(minutes=2)),
             timezone=cluster_timezone(),
         )
@@ -195,27 +217,27 @@ def _main_loop(*, inputs: ScheduleInputs) -> None:
         wait = min(wait_monday, wait_thursday)
 
         if wait > 90:
-            time.sleep(min(wait, 3600))
+            active.sleep_fn(min(wait, 3600))
             continue
 
         if wait_monday <= 90:
-            fire_slot_once(
+            active.claim_fn(
                 db,
                 nxt_monday,
                 MONDAY_TRIGGER,
                 fire=fire_weekly_trigger,
             )
-            time.sleep(120)
+            active.sleep_fn(120)
             continue
 
         if wait_thursday <= 90:
-            fire_slot_once(
+            active.claim_fn(
                 db,
                 nxt_thursday,
                 THURSDAY_TRIGGER,
                 fire=fire_weekly_trigger,
             )
-            time.sleep(120)
+            active.sleep_fn(120)
             continue
 
 

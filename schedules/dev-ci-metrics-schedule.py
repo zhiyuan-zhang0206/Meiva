@@ -13,7 +13,7 @@ import base
 from meiva.agents import AgentStatus as S
 from schedules.agent_status_guard import ensure_agent_status_members
 from schedules.catchup import cluster_timezone
-from schedules.daily_host import report_agent, run_daily_loop
+from schedules.daily_host import DailyLoopHooks, report_agent, run_daily_loop
 from base.daemon.schedules.inputs import ScheduleInputs
 from schedules.entry import fresh_schedule_entry, schedule_entry
 
@@ -181,9 +181,18 @@ def _fire(
         report_failure(f"{type(exc).__name__}: {exc}")
 
 
-def _main_loop(*, inputs: ScheduleInputs) -> None:
+def _main_loop(
+    *,
+    inputs: ScheduleInputs,
+    loop_fn: Callable[..., None] | None = None,
+    loop_hooks: DailyLoopHooks | None = None,
+) -> None:
     db = inputs.database()
-    run_daily_loop(db, CRON, cluster_timezone(), _fire)
+    runner = loop_fn or run_daily_loop
+    if loop_hooks is not None:
+        runner(db, CRON, cluster_timezone(), _fire, hooks=loop_hooks)
+    else:
+        runner(db, CRON, cluster_timezone(), _fire)
 
 
 if __name__ == "__main__":

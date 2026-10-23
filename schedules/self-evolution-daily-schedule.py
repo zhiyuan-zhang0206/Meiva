@@ -136,24 +136,47 @@ def _fire_scan(_slot: datetime, _trigger: None) -> None:
     run_scan()
 
 
-def main(*, inputs: ScheduleInputs) -> None:
+@dataclass(frozen=True)
+class LoopHooks:
+    now_fn: Callable[[], datetime] = field(default_factory=lambda: lambda: datetime.now(UTC))
+    tz_fn: Callable[[], str] = field(default_factory=lambda: cluster_timezone)
+    next_fire_fn: Callable[..., datetime] = field(default_factory=lambda: next_fire)
+    claim_fn: Callable[..., bool] = field(default_factory=lambda: fire_slot_once)
+    sleep_fn: Callable[[float], None] = field(default_factory=lambda: time.sleep)
+    cron: str = CRON
+
+
+def main(
+    *,
+    inputs: ScheduleInputs,
+    hooks: LoopHooks | None = None,
+    next_fire_fn: Callable[..., datetime] | None = None,
+    claim_fn: Callable[..., bool] | None = None,
+) -> None:
+    active = hooks or LoopHooks(
+        next_fire_fn=next_fire_fn or next_fire,
+        claim_fn=claim_fn or fire_slot_once,
+    )
+    cluster_timezone = active.tz_fn
     db = inputs.database()
-    started_at = datetime.now(UTC)
+    started_at = active.now_fn()
     while True:
         # meiva:note
         # `after=now-2min` is the trigger tolerance: croniter's get_next is strictly
         # greater than its base, so a `now` a fraction of a second past the hour would jump
         # to the next day (deterministic miss, observed 2026-08-06). Window: [-120s, +60s].
-        now = datetime.now(UTC)
-        nxt = next_fire(
-            CRON, after=max(started_at, now - timedelta(minutes=2)), timezone=cluster_timezone()
+        now = active.now_fn()
+        nxt = active.next_fire_fn(
+            active.cron,
+            after=max(started_at, now - timedelta(minutes=2)),
+            timezone=cluster_timezone(),
         )
         wait = (nxt - now).total_seconds()
         if wait > 60:
-            time.sleep(min(wait, 3600))
+            active.sleep_fn(min(wait, 3600))
             continue
-        fire_slot_once(db, nxt, None, fire=_fire_scan)
-        time.sleep(120)
+        active.claim_fn(db, nxt, None, fire=_fire_scan)
+        active.sleep_fn(120)
 
 
 if __name__ == "__main__":
