@@ -9,7 +9,7 @@ import subprocess
 import time
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from contextlib import AbstractContextManager
 from functools import partial
 from pathlib import Path
@@ -64,8 +64,14 @@ def _worker_label() -> str:
     )
 
 
-def _report_agent() -> int:
-    configured = os.environ.get(_REPORT_AGENT_ENV)
+def _report_agent(
+    *,
+    env: Mapping[str, str] | None = None,
+    list_agents_fn: Callable[..., Any] | None = None,
+) -> int:
+    source_env = os.environ if env is None else env
+    list_agents = list_agents_fn or meiva.agents.list_agents
+    configured = source_env.get(_REPORT_AGENT_ENV)
     if configured is not None and configured.strip():
         try:
             agent_id = int(configured)
@@ -77,7 +83,7 @@ def _report_agent() -> int:
 
     before_id = None
     while True:
-        page = meiva.agents.list_agents(scope="all", query=_REPORT_LABEL, before_id=before_id)
+        page = list_agents(scope="all", query=_REPORT_LABEL, before_id=before_id)
         for agent in page.agents:
             if agent.label == _REPORT_LABEL and agent.status in (S.RUNNING, S.IDLING, S.TERMINATED):
                 return agent.agent_id

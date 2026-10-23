@@ -1,5 +1,6 @@
 [uses]
 "adversarial-eval-weekly-schedule.py" = ["adversarial_eval_cases.py", "agent_status_guard.py", "catchup.py", "entry.py"]
+"adversarial_eval_cases.py" = ["adversarial_eval_model.py"]
 "c9-daily-report-schedule.py" = ["agent_status_guard.py", "catchup.py", "daily_host.py", "entry.py"]
 "daily_host.py" = ["catchup.py"]
 "db-write-stall-watch-schedule.py" = ["catchup.py"]
@@ -12,6 +13,7 @@
 "tests" = ["adversarial_eval_cases.py", "agent_status_guard.py", "catchup.py", "entry.py"]
 
 [purity]
+"adversarial_eval_model.py" = "strict"
 "agent_status_guard.py" = "strict"
 
 [debt.restricted-python]

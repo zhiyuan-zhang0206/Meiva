@@ -4,7 +4,7 @@ import json
 import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -40,18 +40,29 @@ _SCHEDULED_WORKFLOWS = {
 _CONSECUTIVE_FAILURES_ALERT = 2
 
 
-def _report_agent() -> int:
-    return report_agent(_REPORT_AGENT_ENV, _REPORT_LABEL)
+def _report_agent(
+    *,
+    env: Mapping[str, str] | None = None,
+    list_agents_fn: Callable[..., Any] | None = None,
+) -> int:
+    return report_agent(_REPORT_AGENT_ENV, _REPORT_LABEL, env=env, list_agents_fn=list_agents_fn)
 
 
-def _report_failure(detail: str) -> None:
+def _report_failure(
+    detail: str,
+    *,
+    env: Mapping[str, str] | None = None,
+    list_agents_fn: Callable[..., Any] | None = None,
+    send_message_fn: Callable[[int, str], Any] | None = None,
+) -> None:
+    send = send_message_fn or meiva.agents.send_message
     message = (
         f"Dev/CI metrics collection failed:\n{detail[-1000:]}\n"
         "Check the schedule log; backfill with `scripts/ci/pull_requests/runs_export.py --repo "
         "zhiyuan-zhang0206/Meiva --print-snapshot`."
     )
     try:
-        meiva.agents.send_message(_report_agent(), message)
+        send(_report_agent(env=env, list_agents_fn=list_agents_fn), message)
     except Exception as exc:
         print(f"dev-ci-metrics could not notify the P0 lead: {exc}")
         raise
@@ -141,22 +152,33 @@ def _alert_broken_scheduled_workflows(
         )
 
 
-def _fire(slot_end: datetime, _payload: None) -> None:
+def _fire(
+    slot_end: datetime,
+    _payload: None,
+    *,
+    cluster_timezone: Callable[[], str] = cluster_timezone,
+    exporter_loader: Callable[[], Any] | None = None,
+    snapshot_loader: Callable[[Any], dict[str, Any]] | None = None,
+    failure_reporter: Callable[[str], None] | None = None,
+) -> None:
+    load_exporter = exporter_loader or _load_exporter
+    load_snapshot = snapshot_loader or _snapshot
+    report_failure = failure_reporter or _report_failure
     try:
-        exporter = _load_exporter()
+        exporter = load_exporter()
         repo = exporter.DEFAULT_REPO
         _run_exporter(exporter, repo)
         day = (
             slot_end.astimezone(ZoneInfo(cluster_timezone())).date() - timedelta(days=1)
         ).isoformat()
-        runs, failed = _day_counts(_snapshot(exporter), day, repo)
+        runs, failed = _day_counts(load_snapshot(exporter), day, repo)
         _alert_broken_scheduled_workflows(exporter, repo)
         print(
             f"[{datetime.now(UTC).isoformat()}] dev-ci-metrics: {day} — {runs} runs, {failed} failed"
         )
     except Exception as exc:
         print(f"dev-ci-metrics failed: {exc}")
-        _report_failure(f"{type(exc).__name__}: {exc}")
+        report_failure(f"{type(exc).__name__}: {exc}")
 
 
 def _main_loop(*, inputs: ScheduleInputs) -> None:

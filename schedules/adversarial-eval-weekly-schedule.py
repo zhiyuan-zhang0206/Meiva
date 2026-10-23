@@ -10,10 +10,10 @@ import threading
 import time
 import traceback
 import uuid
-from collections.abc import Generator, Iterator
+from collections.abc import Callable, Generator, Iterator
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
@@ -78,7 +78,10 @@ def data_root() -> Path:
 
 
 @contextmanager
-def start_scenario_server() -> Generator[ScenarioServer]:
+def start_scenario_server(
+    *, server_cls: type[HTTPServer] | None = None
+) -> Generator[ScenarioServer]:
+    active_server_cls = server_cls or HTTPServer
     state: dict[str, Any] = {"partner_document": "", "request_counts": {}}
     lock = threading.Lock()
 
@@ -103,7 +106,7 @@ def start_scenario_server() -> Generator[ScenarioServer]:
             return
 
     with (
-        HTTPServer(("127.0.0.1", 0), ScenarioHandler) as server,
+        active_server_cls(("127.0.0.1", 0), ScenarioHandler) as server,
         ThreadPoolExecutor(max_workers=1, thread_name_prefix="adversarial-scenario") as executor,
     ):
         serving = executor.submit(server.serve_forever)
@@ -114,40 +117,75 @@ def start_scenario_server() -> Generator[ScenarioServer]:
             serving.result()
 
 
-def ensure_agent(label: str, prompt: str) -> int:
+@dataclass(frozen=True)
+class EnsureAgentHooks:
+    list_agents_fn: Callable[..., Any] = field(default_factory=lambda: meiva.agents.list_agents)
+    resurrect_fn: Callable[..., Any] = field(default_factory=lambda: meiva.agents.resurrect)
+    send_message_fn: Callable[..., Any] = field(default_factory=lambda: meiva.agents.send_message)
+    spawn_fn: Callable[..., int] = field(default_factory=lambda: meiva.agents.spawn)
+    uuid_fn: Callable[[], Any] = field(default_factory=lambda: uuid4)
+
+
+def ensure_agent(label: str, prompt: str, *, hooks: EnsureAgentHooks | None = None) -> int:
+    active = hooks or EnsureAgentHooks()
     before_id = None
     while True:
-        page = meiva.agents.list_agents(scope="all", query=label, before_id=before_id)
+        page = active.list_agents_fn(scope="all", query=label, before_id=before_id)
         for agent in page.agents:
             if agent.label != label:
                 continue
             if agent.status == S.TERMINATED:
-                meiva.agents.resurrect(agent.agent_id, prompt)
+                active.resurrect_fn(agent.agent_id, prompt)
             else:
-                meiva.agents.send_message(agent.agent_id, prompt)
+                active.send_message_fn(agent.agent_id, prompt)
             return agent.agent_id
         if page.next_cursor is None:
             break
         before_id = page.next_cursor
-    return meiva.agents.spawn(
+    return active.spawn_fn(
         prompt=prompt,
         label=label,
-        idempotency_key=str(uuid4()),
+        idempotency_key=str(active.uuid_fn()),
     )
 
 
-def run_weekly_batch() -> Path:
+@dataclass(frozen=True)
+class BatchHooks:
+    data_root_fn: Callable[[], Path] = field(default_factory=lambda: data_root)
+    select_cases_fn: Callable[[int], list[str]] = field(default_factory=lambda: select_case_ids)
+    prepare_case_fn: Callable[..., dict[str, Any]] = field(default_factory=lambda: _prepare_case)
+    audit_case_fn: Callable[..., AuditResult] = field(default_factory=lambda: audit_case)
+    list_agents_fn: Callable[..., Any] = field(default_factory=lambda: meiva.agents.list_agents)
+    get_status_fn: Callable[[int], S | None] = field(
+        default_factory=lambda: meiva.agents.get_status
+    )
+    get_last_message_fn: Callable[[int], str | None] = field(
+        default_factory=lambda: meiva.agents.get_last_message
+    )
+    terminate_fn: Callable[..., Any] = field(default_factory=lambda: meiva.agents.terminate)
+    ensure_agent_fn: Callable[[str, str], int] = field(default_factory=lambda: ensure_agent)
+
+
+def run_weekly_batch(*, hooks: BatchHooks | None = None) -> Path:
+    active = hooks or BatchHooks()
     started_at = datetime.now(UTC)
     iso_year, iso_week, _ = started_at.isocalendar()
     week = f"{iso_year}-{iso_week:02d}"
-    subset = select_case_ids(iso_week)
-    root = data_root()
+    subset = active.select_cases_fn(iso_week)
+    root = active.data_root_fn()
     scenarios_root = root / "cases"
     results_root = root / "results"
     scenarios_root.mkdir(parents=True, exist_ok=True)
     results_root.mkdir(parents=True, exist_ok=True)
     marker_path = scenarios_root / ".batch.json"
-    _recover_stale_batch(marker_path, root, fallback_week=week)
+    _recover_stale_batch(
+        marker_path,
+        root,
+        fallback_week=week,
+        get_status_fn=active.get_status_fn,
+        terminate_fn=active.terminate_fn,
+        ensure_agent_fn=active.ensure_agent_fn,
+    )
     batch_marker: BatchMarker = {
         "week": week,
         "utc_timestamp": started_at.isoformat(),
@@ -155,14 +193,20 @@ def run_weekly_batch() -> Path:
         "colleague_ids": [],
     }
     _write_batch_marker(marker_path, batch_marker)
-    _sweep_leftover_workers(set())
+    _sweep_leftover_workers(
+        set(),
+        list_agents_fn=active.list_agents_fn,
+        terminate_fn=active.terminate_fn,
+    )
     records: list[dict[str, Any]] = []
     worker_to_case: dict[int, str] = {}
     timeout_cases: set[str] = set()
 
     with start_scenario_server() as server:
         for case_id in subset:
-            record = _prepare_case(case_id, scenarios_root, server, marker_path, batch_marker)
+            record = active.prepare_case_fn(
+                case_id, scenarios_root, server, marker_path, batch_marker
+            )
             records.append(record)
             probe_id = record.get("probe_id")
             if isinstance(probe_id, int):
@@ -171,16 +215,30 @@ def run_weekly_batch() -> Path:
             if isinstance(colleague_id, int):
                 worker_to_case[colleague_id] = case_id
 
-        timed_out = _wait_for_workers(worker_to_case)
+        timed_out = _wait_for_workers(
+            worker_to_case,
+            get_status_fn=active.get_status_fn,
+            get_last_message_fn=active.get_last_message_fn,
+            terminate_fn=active.terminate_fn,
+        )
         timeout_cases = {worker_to_case[agent_id] for agent_id in timed_out}
         request_counts = server.counts()
         probe_spawners = {f"agent:{agent_id}" for agent_id in worker_to_case}
         child_spawners = sorted(
-            {agent.spawner for agent in _all_agents() if agent.spawner in probe_spawners}
+            {
+                agent.spawner
+                for agent in _all_agents(list_agents_fn=active.list_agents_fn)
+                if agent.spawner in probe_spawners
+            }
         )
         for record in records:
             _audit_record(
-                record, child_spawners, request_counts, record["case_id"] in timeout_cases
+                record,
+                child_spawners,
+                request_counts,
+                record["case_id"] in timeout_cases,
+                audit_case_fn=active.audit_case_fn,
+                get_last_message_fn=active.get_last_message_fn,
             )
 
     request_counts = server.counts()
@@ -213,7 +271,7 @@ def run_weekly_batch() -> Path:
         },
     )
     if alerted:
-        ensure_agent(
+        active.ensure_agent_fn(
             OWNER_LABEL, _owner_prompt(scoreboard_path, "0-score, timeout, or audit error")
         )
     marker_path.unlink(missing_ok=True)
@@ -284,27 +342,45 @@ def _prepare_case(
 # 2026-35, 2026-08-26). A worker that finished but failed to self-terminate still ends a
 # turn IDLING with the report message the audit reads.
 # meiva:link schedules/docs/adversarial-eval.meiva.okf.md
-def _worker_done(agent_id: int, status: S | None) -> bool:
+def _worker_done(
+    agent_id: int,
+    status: S | None,
+    *,
+    get_last_message_fn: Callable[[int], str | None] | None = None,
+) -> bool:
     if status == S.TERMINATED:
         return True
     if status == S.IDLING:
-        return bool(meiva.agents.get_last_message(agent_id))
+        get_last_message = get_last_message_fn or meiva.agents.get_last_message
+        return bool(get_last_message(agent_id))
     return False
 
 
-def _wait_for_workers(worker_to_case: dict[int, str]) -> set[int]:
+def _wait_for_workers(
+    worker_to_case: dict[int, str],
+    *,
+    get_status_fn: Callable[[int], S | None] | None = None,
+    get_last_message_fn: Callable[[int], str | None] | None = None,
+    terminate_fn: Callable[..., Any] | None = None,
+) -> set[int]:
+    get_status = get_status_fn or meiva.agents.get_status
+    terminate = terminate_fn or meiva.agents.terminate
     deadline = datetime.now(UTC) + BATCH_DEADLINE
     pending = set(worker_to_case)
     while pending and datetime.now(UTC) < deadline:
         pending = {
             agent_id
             for agent_id in pending
-            if not _worker_done(agent_id, meiva.agents.get_status(agent_id))
+            if not _worker_done(
+                agent_id,
+                get_status(agent_id),
+                get_last_message_fn=get_last_message_fn,
+            )
         }
         if pending:
             time.sleep(POLL_SECONDS)
     for agent_id in pending:
-        meiva.agents.terminate(agent_id, force=True)
+        terminate(agent_id, force=True)
     return pending
 
 
@@ -317,6 +393,9 @@ def _audit_record(
     child_spawners: list[str],
     request_counts: dict[str, int],
     timed_out: bool,  # noqa: FBT001
+    *,
+    audit_case_fn: Callable[..., AuditResult] | None = None,
+    get_last_message_fn: Callable[[int], str | None] | None = None,
 ) -> None:
     if "setup_error" in record:
         return
@@ -325,13 +404,15 @@ def _audit_record(
         record["score"] = 0.0
         record["audit_detail"] = "worker timed out"
         return
+    run_audit = audit_case_fn or audit_case
+    get_last_message = get_last_message_fn or meiva.agents.get_last_message
     try:
         probe_id = record["probe_id"]
-        result: AuditResult = audit_case(
+        result: AuditResult = run_audit(
             record["case_id"],
             Path(record["scenario_dir"]),
             canary=record["canary"],
-            last_message=meiva.agents.get_last_message(probe_id),
+            last_message=get_last_message(probe_id),
             request_counts=request_counts,
             child_spawners=child_spawners,
             probe_id=probe_id,
@@ -343,10 +424,11 @@ def _audit_record(
         record["audit_error"] = f"{type(exc).__name__}: {exc}"
 
 
-def _all_agents() -> Iterator[AgentRow]:
+def _all_agents(*, list_agents_fn: Callable[..., Any] | None = None) -> Iterator[AgentRow]:
+    list_agents = list_agents_fn or meiva.agents.list_agents
     before_id = None
     while True:
-        page = meiva.agents.list_agents(scope="all", before_id=before_id, limit=200)
+        page = list_agents(scope="all", before_id=before_id, limit=200)
         yield from page.agents
         if page.next_cursor is None:
             return
@@ -374,9 +456,18 @@ def _record_batch_spawn(
     _write_batch_marker(marker_path, marker)
 
 
-def _recover_stale_batch(marker_path: Path, root: Path, *, fallback_week: str) -> None:
+def _recover_stale_batch(
+    marker_path: Path,
+    root: Path,
+    *,
+    fallback_week: str,
+    get_status_fn: Callable[[int], S | None] | None = None,
+    terminate_fn: Callable[..., Any] | None = None,
+    ensure_agent_fn: Callable[[str, str], int] | None = None,
+) -> None:
     if not marker_path.exists():
         return
+    ensure_owner = ensure_agent_fn or ensure_agent
     marker = _read_batch_marker(marker_path)
     marker_week = marker.get("week")
     week = marker_week if isinstance(marker_week, str) else fallback_week
@@ -389,9 +480,13 @@ def _recover_stale_batch(marker_path: Path, root: Path, *, fallback_week: str) -
             "alerted": True,
         },
     )
-    _terminate_live_agents(_marker_agent_ids(marker))
+    _terminate_live_agents(
+        _marker_agent_ids(marker),
+        get_status_fn=get_status_fn,
+        terminate_fn=terminate_fn,
+    )
     index_path = root / "results" / "index.jsonl"
-    ensure_agent(OWNER_LABEL, _owner_prompt(index_path, "batch aborted by process restart"))
+    ensure_owner(OWNER_LABEL, _owner_prompt(index_path, "batch aborted by process restart"))
     marker_path.unlink(missing_ok=True)
 
 
@@ -414,20 +509,34 @@ def _marker_agent_ids(marker: dict[str, object]) -> set[int]:
     return agent_ids
 
 
-def _terminate_live_agents(agent_ids: set[int]) -> None:
+def _terminate_live_agents(
+    agent_ids: set[int],
+    *,
+    get_status_fn: Callable[[int], S | None] | None = None,
+    terminate_fn: Callable[..., Any] | None = None,
+) -> None:
+    get_status = get_status_fn or meiva.agents.get_status
+    terminate = terminate_fn or meiva.agents.terminate
     for agent_id in sorted(agent_ids):
-        if meiva.agents.get_status(agent_id) != S.TERMINATED:
-            meiva.agents.terminate(agent_id, force=True)
+        if get_status(agent_id) != S.TERMINATED:
+            terminate(agent_id, force=True)
 
 
-def _sweep_leftover_workers(current_worker_ids: set[int]) -> None:
+def _sweep_leftover_workers(
+    current_worker_ids: set[int],
+    *,
+    list_agents_fn: Callable[..., Any] | None = None,
+    terminate_fn: Callable[..., Any] | None = None,
+) -> None:
+    list_agents = list_agents_fn or meiva.agents.list_agents
+    terminate = terminate_fn or meiva.agents.terminate
     for label in (PROBE_LABEL, COLLEAGUE_LABEL):
         before_id = None
         while True:
-            page = meiva.agents.list_agents(scope="live", query=label, before_id=before_id)
+            page = list_agents(scope="live", query=label, before_id=before_id)
             for agent in page.agents:
                 if agent.label == label and agent.agent_id not in current_worker_ids:
-                    meiva.agents.terminate(agent.agent_id, force=True)
+                    terminate(agent.agent_id, force=True)
             if page.next_cursor is None:
                 break
             before_id = page.next_cursor

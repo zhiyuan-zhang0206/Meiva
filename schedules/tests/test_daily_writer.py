@@ -1,25 +1,21 @@
-import os
 from pathlib import Path
-from unittest.mock import Mock, patch
+from unittest.mock import Mock
 
 import pytest
 
 import meiva
 from base.cluster.machine import MachineIdentity
-from base.telemetry import EventPipeline
-from base.native_process.loaded_commit import LoadedCommit
 from base.daemon.schedules.inputs import ScheduleInputs
-from schedules.entry import fresh_schedule_entry, schedule_entry
-from schedules import entry
-from meiva.sdk_surface import process_context
+from base.native_process.loaded_commit import LoadedCommit
+from base.telemetry import EventPipeline
+from schedules.entry import ScheduleEntryHooks, fresh_schedule_entry, schedule_entry
 
 
-def test_quiet_schedule_exit_never_builds_a_writer(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_quiet_schedule_exit_never_builds_a_writer() -> None:
     def forbidden(*_args: object, **_kwargs: object) -> None:
         raise AssertionError("quiet schedule must not start a writer")
 
-    monkeypatch.setattr("threading.Thread", forbidden)
-    with patch.dict(os.environ), fresh_schedule_entry() as inputs:
+    with fresh_schedule_entry(hooks=ScheduleEntryHooks(pipeline_builder=forbidden)) as inputs:
         assert callable(inputs.producer)
         assert meiva.context.require_machine() is inputs.machine
 
@@ -31,7 +27,6 @@ def test_schedule_closes_constructed_writer_and_preserves_loop_error() -> None:
     prior = getattr(meiva, "context", None)
     with (
         pytest.raises(RuntimeError) as caught,
-        patch.dict(os.environ),
         fresh_schedule_entry() as inputs,
     ):
         pipeline = inputs.producer()
@@ -44,14 +39,8 @@ def test_schedule_closes_constructed_writer_and_preserves_loop_error() -> None:
 
 
 def test_runner_inputs_are_borrowed_without_rebuilding_or_closing(
-    monkeypatch: pytest.MonkeyPatch,
     machine_identity: MachineIdentity,
 ) -> None:
-    def forbidden(*_args: object, **_kwargs: object) -> None:
-        raise AssertionError("a template must not build a second entry owner")
-
-    monkeypatch.setattr(process_context, "loaded_code_image", forbidden)
-    monkeypatch.setattr(entry, "ClientSet", forbidden)
     database = Mock()
     producer = Mock()
     inputs = ScheduleInputs(

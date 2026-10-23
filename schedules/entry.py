@@ -2,8 +2,10 @@
 # A fresh schedule entry retains the loaded image and one admission gate for database handles instead of relabeling code after checkout changes.
 # meiva:link schedules/docs/entry-composition.meiva.okf.md
 
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 from contextlib import contextmanager
+from dataclasses import dataclass, field
+from typing import Any
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.agents.context import MeivaContext
 from base.agents.context.clients import ClientSet
@@ -16,27 +18,42 @@ from base.db.code_version_gate import ProcessDbGate
 from base.db.config import db_config_from_boot
 from base.paths.home import resolve_meiva_home
 from base.native_process.code_version import CodeVersion
+from base.native_process.loaded_commit import LoadedCommit
 from base.telemetry import build_pipeline, process_name
 from base.daemon.schedules.inputs import ScheduleInputs, schedule_entry
 from meiva.sdk_surface import process_context
 
-__all__ = ["fresh_schedule_entry", "schedule_entry"]
+__all__ = ["ScheduleEntryHooks", "fresh_schedule_entry", "schedule_entry"]
+
+
+@dataclass(frozen=True)
+class ScheduleEntryHooks:
+    image_loader: Callable[[], LoadedCommit] = field(
+        default_factory=lambda: process_context.loaded_code_image
+    )
+    process_name_fn: Callable[[], str] = field(default_factory=lambda: process_name)
+    database_cls: Callable[..., Database] = field(default_factory=lambda: Database)
+    pipeline_builder: Callable[..., Any] = field(default_factory=lambda: build_pipeline)
 
 
 @contextmanager
-def fresh_schedule_entry() -> Generator[ScheduleInputs]:
+def fresh_schedule_entry(
+    *,
+    hooks: ScheduleEntryHooks | None = None,
+) -> Generator[ScheduleInputs]:
     import meiva
 
-    image = process_context.loaded_code_image()
+    active = hooks or ScheduleEntryHooks()
+    image = active.image_loader()
     config = ConfigBoot()
     config.boot()
     machine = machine_from_boot(config)
     home = resolve_meiva_home()
     version = CodeVersion(image)
-    gate = ProcessDbGate(process=process_name(), version=version.get)
+    gate = ProcessDbGate(process=active.process_name_fn(), version=version.get)
 
     def database() -> Database:
-        return Database(
+        return active.database_cls(
             db_config_from_boot(config),
             gate=gate,
             direct_url=ClusterDirectUrl(machine.host),
@@ -44,7 +61,9 @@ def fresh_schedule_entry() -> Generator[ScheduleInputs]:
 
     clients = ClientSet(
         database=database,
-        pipeline_factory=lambda: build_pipeline(database=database, machine=machine, home=home),
+        pipeline_factory=lambda: active.pipeline_builder(
+            database=database, machine=machine, home=home
+        ),
     )
     prior = getattr(meiva, "context", None)
     process_context.bind_context(

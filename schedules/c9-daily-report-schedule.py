@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass, field
 from functools import partial
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -32,18 +33,29 @@ _LINUX_MINUTE_USD = 0.006
 _MACOS_MINUTE_USD = 0.062
 
 
-def _report_agent() -> int:
-    return report_agent(_REPORT_AGENT_ENV, _REPORT_LABEL)
+def _report_agent(
+    *,
+    env: Mapping[str, str] | None = None,
+    list_agents_fn: Callable[..., Any] | None = None,
+) -> int:
+    return report_agent(_REPORT_AGENT_ENV, _REPORT_LABEL, env=env, list_agents_fn=list_agents_fn)
 
 
-def _report_failure(detail: str) -> None:
+def _report_failure(
+    detail: str,
+    *,
+    env: Mapping[str, str] | None = None,
+    list_agents_fn: Callable[..., Any] | None = None,
+    send_message_fn: Callable[[int, str], Any] | None = None,
+) -> None:
+    send = send_message_fn or meiva.agents.send_message
     message = (
         f"C9 daily reconciliation failed:\n{detail[-1000:]}\n"
         "Check the schedule log; backfill the missed window manually with "
         "`scripts/ci/pull_requests/accounting.py --since ... --until ... --append-ledger`."
     )
     try:
-        meiva.agents.send_message(_report_agent(), message)
+        send(_report_agent(env=env, list_agents_fn=list_agents_fn), message)
     except Exception as exc:
         print(f"c9-daily-report could not notify the P0 lead: {exc}")
         raise
@@ -52,7 +64,11 @@ def _report_failure(detail: str) -> None:
 # meiva:note
 # Slot-based, not trailing-now: a late catch-up fire still covers its own 05:00-05:00 day,
 # and the day label is the slot's cluster-tz date, which can differ from its UTC date.
-def window_bounds(slot_end: datetime) -> tuple[str, str, str]:
+def window_bounds(
+    slot_end: datetime,
+    *,
+    cluster_timezone: Callable[[], str] = cluster_timezone,
+) -> tuple[str, str, str]:
     since = slot_end - timedelta(hours=24)
     day = slot_end.astimezone(ZoneInfo(cluster_timezone()))
     return (
@@ -101,6 +117,14 @@ def summarize(
     }
 
 
+@dataclass(frozen=True)
+class C9FireHooks:
+    tz_fn: Callable[[], str] = field(default_factory=lambda: cluster_timezone)
+    accounting_loader: Callable[[], Any] = field(default_factory=lambda: _load_accounting)
+    gateway_init: Callable[..., None] = field(default_factory=lambda: init_gateway_process)
+    failure_reporter: Callable[[str], None] = field(default_factory=lambda: _report_failure)
+
+
 def _fire(
     slot_end: datetime,
     _payload: None,
@@ -109,13 +133,15 @@ def _fire(
     image: LoadedCommit,
     machine_reader: Callable[[], str],
     host: Host,
+    hooks: C9FireHooks | None = None,
 ) -> None:
+    active = hooks or C9FireHooks()
     try:
-        accounting = _load_accounting()
-        since, until, day = window_bounds(slot_end)
+        accounting = active.accounting_loader()
+        since, until, day = window_bounds(slot_end, cluster_timezone=active.tz_fn)
         entries = accounting.collect(accounting.DEFAULT_REPO, since, until, host=host)
         appended = accounting.append_ledger(accounting.DEFAULT_LEDGER, entries)
-        init_gateway_process(
+        active.gateway_init(
             name=_PROCESS_NAME, producer=producer, machine_reader=machine_reader, image=image
         )
         from base import telemetry
@@ -138,7 +164,7 @@ def _fire(
         )
     except Exception as exc:
         print(f"c9-daily-report failed: {exc}")
-        _report_failure(f"{type(exc).__name__}: {exc}")
+        active.failure_reporter(f"{type(exc).__name__}: {exc}")
 
 
 def _main_loop(*, inputs: ScheduleInputs, host: Host) -> None:

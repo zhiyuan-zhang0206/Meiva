@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import importlib.util
 import sys
+from collections.abc import Callable
 from pathlib import Path
-from types import ModuleType, SimpleNamespace
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import Mock
 from uuid import UUID
@@ -33,7 +34,7 @@ def _load(filename: str) -> Any:
     return module
 
 
-def _directory(monkeypatch: pytest.MonkeyPatch, module: ModuleType, pages: list[Any]) -> Mock:
+def _directory(pages: list[Any]) -> tuple[Mock, Callable[..., Any]]:
     fetch = Mock(side_effect=pages)
 
     def list_agents(
@@ -41,32 +42,36 @@ def _directory(monkeypatch: pytest.MonkeyPatch, module: ModuleType, pages: list[
     ) -> Any:
         return fetch(scope=scope, query=query, before_id=before_id, limit=limit)
 
-    monkeypatch.setattr(module.meiva.agents, "list_agents", list_agents)
-    return fetch
+    return fetch, list_agents
 
 
 @pytest.mark.parametrize("filename", ROLE_SCHEDULES)
-def test_reuses_exact_role_from_later_search_page(
-    filename: str, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_reuses_exact_role_from_later_search_page(filename: str) -> None:
     module = _load(filename)
     unrelated = SimpleNamespace(agent_id=300, label="steward-old", status=module.S.IDLING)
     target = SimpleNamespace(agent_id=200, label="steward", status=module.S.TERMINATED)
     older = SimpleNamespace(agent_id=100, label="steward", status=module.S.IDLING)
-    fetch = _directory(
-        monkeypatch,
-        module,
+    fetch, list_agents = _directory(
         [
             SimpleNamespace(agents=[unrelated], next_cursor=300),
             SimpleNamespace(agents=[target, older], next_cursor=100),
-        ],
+        ]
     )
     resurrect, send, spawn = Mock(), Mock(), Mock()
-    monkeypatch.setattr(module.meiva.agents, "resurrect", resurrect)
-    monkeypatch.setattr(module.meiva.agents, "send_message", send)
-    monkeypatch.setattr(module.meiva.agents, "spawn", spawn)
 
-    assert module.ensure_agent("steward", "work") == 200
+    assert (
+        module.ensure_agent(
+            "steward",
+            "work",
+            hooks=module.EnsureAgentHooks(
+                list_agents_fn=list_agents,
+                resurrect_fn=resurrect,
+                send_message_fn=send,
+                spawn_fn=spawn,
+            ),
+        )
+        == 200
+    )
     resurrect.assert_called_once_with(200, "work")
     send.assert_not_called()
     spawn.assert_not_called()
@@ -75,17 +80,24 @@ def test_reuses_exact_role_from_later_search_page(
 
 
 @pytest.mark.parametrize("filename", ROLE_SCHEDULES)
-def test_spawns_only_after_all_matching_pages_are_exhausted(
-    filename: str, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_spawns_only_after_all_matching_pages_are_exhausted(filename: str) -> None:
     module = _load(filename)
-    _directory(monkeypatch, module, [SimpleNamespace(agents=[], next_cursor=None)])
+    _, list_agents = _directory([SimpleNamespace(agents=[], next_cursor=None)])
     spawn = Mock(return_value=400)
     key = UUID("0eb49ad1-0b9b-4bde-b783-d0c3e4359c33")
-    monkeypatch.setattr(module, "uuid4", lambda: key)
-    monkeypatch.setattr(module.meiva.agents, "spawn", spawn)
 
-    assert module.ensure_agent("missing", "work") == 400
+    assert (
+        module.ensure_agent(
+            "missing",
+            "work",
+            hooks=module.EnsureAgentHooks(
+                list_agents_fn=list_agents,
+                spawn_fn=spawn,
+                uuid_fn=lambda: key,
+            ),
+        )
+        == 400
+    )
     spawn.assert_called_once_with(prompt="work", label="missing", idempotency_key=str(key))
 
 
@@ -98,64 +110,61 @@ def test_spawns_only_after_all_matching_pages_are_exhausted(
         "dev-ci-metrics-schedule.py",
     ),
 )
-def test_report_recipient_can_be_beyond_first_search_page(
-    filename: str, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_report_recipient_can_be_beyond_first_search_page(filename: str) -> None:
     module = _load(filename)
-    monkeypatch.delenv(module._REPORT_AGENT_ENV, raising=False)
     target = SimpleNamespace(agent_id=200, label=module._REPORT_LABEL, status=module.S.IDLING)
-    _directory(
-        monkeypatch,
-        module,
+    _, list_agents = _directory(
         [
             SimpleNamespace(agents=[], next_cursor=300),
             SimpleNamespace(agents=[target], next_cursor=None),
-        ],
+        ]
     )
-    assert module._report_agent() == 200
+    assert module._report_agent(env={}, list_agents_fn=list_agents) == 200
 
 
-def test_evaluation_explicitly_enumerates_the_complete_directory(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_evaluation_explicitly_enumerates_the_complete_directory() -> None:
     module = _load("adversarial-eval-weekly-schedule.py")
     rows = [SimpleNamespace(agent_id=300), SimpleNamespace(agent_id=200)]
-    fetch = _directory(
-        monkeypatch,
-        module,
+    fetch, list_agents = _directory(
         [
             SimpleNamespace(agents=rows[:1], next_cursor=300),
             SimpleNamespace(agents=rows[1:], next_cursor=None),
-        ],
+        ]
     )
-    agents = module._all_agents()
+    agents = module._all_agents(list_agents_fn=list_agents)
     fetch.assert_not_called()
     assert list(agents) == rows
     assert [call.kwargs["before_id"] for call in fetch.call_args_list] == [None, 300]
 
 
-def test_known_workers_never_enumerate_the_directory(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_known_workers_never_enumerate_the_directory() -> None:
     module = _load("adversarial-eval-weekly-schedule.py")
-    fetch = _directory(monkeypatch, module, [])
+    fetch, _ = _directory([])
     status = Mock(side_effect=[module.S.TERMINATED, module.S.IDLING])
-    monkeypatch.setattr(module.meiva.agents, "get_status", status)
-    monkeypatch.setattr(module.meiva.agents, "get_last_message", Mock(return_value="done"))
-    assert module._wait_for_workers({10: "first", 20: "second"}) == set()
+    assert (
+        module._wait_for_workers(
+            {10: "first", 20: "second"},
+            get_status_fn=status,
+            get_last_message_fn=Mock(return_value="done"),
+        )
+        == set()
+    )
     assert {call.args[0] for call in status.call_args_list} == {10, 20}
 
     status.side_effect = [module.S.TERMINATED, module.S.RUNNING]
     terminate = Mock()
-    monkeypatch.setattr(module.meiva.agents, "terminate", terminate)
-    module._terminate_live_agents({10, 20})
+    module._terminate_live_agents(
+        {10, 20},
+        get_status_fn=status,
+        terminate_fn=terminate,
+    )
     terminate.assert_called_once_with(20, force=True)
     fetch.assert_not_called()
 
 
-def test_worker_cleanup_searches_only_live_worker_labels(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_worker_cleanup_searches_only_live_worker_labels() -> None:
     module = _load("adversarial-eval-weekly-schedule.py")
-    fetch = _directory(
-        monkeypatch,
-        module,
+    fetch, list_agents = _directory(
         [
             SimpleNamespace(agents=[], next_cursor=300),
             SimpleNamespace(
@@ -166,11 +175,14 @@ def test_worker_cleanup_searches_only_live_worker_labels(monkeypatch: pytest.Mon
                 agents=[SimpleNamespace(agent_id=100, label=module.COLLEAGUE_LABEL)],
                 next_cursor=None,
             ),
-        ],
+        ]
     )
     terminate = Mock()
-    monkeypatch.setattr(module.meiva.agents, "terminate", terminate)
-    module._sweep_leftover_workers({100})
+    module._sweep_leftover_workers(
+        {100},
+        list_agents_fn=list_agents,
+        terminate_fn=terminate,
+    )
     terminate.assert_called_once_with(200, force=True)
     assert [call.kwargs["scope"] for call in fetch.call_args_list] == ["live"] * 3
     assert [call.kwargs["query"] for call in fetch.call_args_list] == [
