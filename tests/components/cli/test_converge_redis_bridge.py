@@ -20,7 +20,7 @@ from base.host.system.tests.fake_commands import fake_host
 from base.sessions.tests.refuse_helper import refuse_helper
 from base.telemetry import EventPipeline
 from cli.commands.converge import redis_bridge as bridge
-from cli.commands.converge.spec import ConvergeCtx
+from cli.commands.converge.spec import ConvergeCtx, UserSession
 from cli.commands.lifecycle import converge_host
 from cli.database.runtime import CommandRuntime
 from cli.database.tests.command_inputs import command_runtime as command_runtime
@@ -145,6 +145,7 @@ def test_converge_retires_the_standalone_launchd_job_and_installed_copy(
         producer=operator_pipeline,
         helper=refuse_helper,
         host=fake_host(),
+        session=UserSession(user_home=home, login_shell="/bin/zsh", interactive=False),
         services=frozenset(),
         timers=ManualTimers(),
     )
@@ -332,6 +333,7 @@ def test_probe_uses_each_owners_live_url_and_recorded_port(
     second_config = snapshot_process_config()
     second = CommandRuntime(
         config=second_config,
+        home=command_runtime.home,
         machine=machine_from_boot(second_config),
         helper=refuse_helper,
         host=command_runtime.host,

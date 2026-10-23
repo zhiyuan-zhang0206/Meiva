@@ -14,7 +14,7 @@ from base.host.system.hostport import Host
 from base.host.system.tests.fake_commands import fake_host
 from base.sessions.tests.refuse_helper import refuse_helper
 from base.telemetry import EventPipeline
-from cli.commands.converge.spec import ConvergeCtx
+from cli.commands.converge.spec import ConvergeCtx, UserSession
 from cli.database.tests.cli_tests import operator_database as operator_database
 from cli.database.tests.cli_tests import operator_pipeline as operator_pipeline
 from cli.database.tests.command_inputs import command_runtime as command_runtime
@@ -46,6 +46,7 @@ def test_converge_registers_logs_maintenance(
         machine=machine_from_boot(machine_config),
         helper=refuse_helper,
         host=fake_host(),
+        session=UserSession(user_home=tmp_path, login_shell="/bin/zsh", interactive=False),
         services=frozenset(),
         timers=ManualTimers(),
     )

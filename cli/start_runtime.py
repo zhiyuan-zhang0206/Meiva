@@ -1,9 +1,10 @@
-"""Explicit executable identity for the single start lifecycle.
-
-A start runs the checkout that loaded this code, with the interpreter that loaded
-it. The identity is captured once and rechecked before each lifecycle phase; it
-does not grant migration, writer closure, or any other operation right.
-"""
+# meiva:note
+# Explicit executable identity for the single start lifecycle, and the site it acts on.
+#
+# A start runs the checkout that loaded this code, with the interpreter that loaded
+# it. The identity is captured once and rechecked before each lifecycle phase; it
+# does not grant migration, writer closure, or any other operation right. `HomeSite`
+# is the home and checkout `meiva init` and `meiva start` are handed by the entry.
 
 from __future__ import annotations
 
@@ -17,6 +18,18 @@ from base.host.runtime_interpreter import LoadedRuntimeIdentity
 
 class StartRuntimeChangedError(ValueError):
     """The captured start runtime no longer matches the executing checkout."""
+
+
+# meiva:note
+# The home one `meiva init` or `meiva start` acts on, and the checkout whose CLI runs it.
+#
+# `cli.main` reads both once, after the checkout gate (`cli.preflight`) has accepted this
+# checkout for this home; init and start take them as values and read neither the
+# environment nor `__file__`.
+@dataclass(frozen=True)
+class HomeSite:
+    home: Path
+    checkout: Path
 
 
 @dataclass(frozen=True)

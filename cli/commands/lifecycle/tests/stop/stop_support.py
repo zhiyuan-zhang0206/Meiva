@@ -1,38 +1,39 @@
 # meiva:note
-# Helpers of the stop tests: a private home, the processes a stop must leave alone, and the stop's collaborators stubbed.
+# Helpers of the stop tests: a private home, the processes a stop must leave alone, real shells, and the
+# notices a stop wrote.
 #
 # Shell sessions live in the pty-sessions service. A test that needs real shells takes
 # the `pty_service` fixture (re-exported here) next to `home`: the service runs
 # under the same private home, so the stop under test dials it exactly as it dials
 # the unit's own. Without the fixture no service listens, which is the state of a
-# unit whose service is down. `stub_closure` stands in for the service's closure where
-# a test needs processes it may not signal (another user's), which no test can create
-# for real.
+# unit whose service is down. A home with no root holds no application: the stop meets "no
+# live owner", as it does on a unit that was never started. A test that needs a root takes
+# `scripted_root`, a real control socket under a short home.
 
 from __future__ import annotations
 
+import json
 import os
+import socket
 import subprocess
 import sys
+import threading
 import time
-from collections.abc import Generator, Iterator, Sequence
+from collections.abc import Callable, Generator, Iterator
 from contextlib import contextmanager
+from dataclasses import replace
 from pathlib import Path
-from types import SimpleNamespace
-from typing import Any, Literal, Protocol
-from unittest.mock import Mock
+from typing import Any, Literal, Protocol, TextIO
 
 import psutil
+import psycopg
 import pytest
 
-import base.sessions.hosting as sessions_hosting
-import cli.commands.lifecycle.root_driver as _root_driver_commands
-from base.cluster.machine import MachineIdentity
+from base.agents.context.clients import DatabaseFactory
 from base.native_process import pid_starttime_ticks
 from base.native_process.ownership import OwnedProcess
 from base.sessions.posixproc import process_group_has_live_members
-from base.sessions.pty import closure
-from base.sessions.pty.paths import SERVICE_UNIT
+from base.sessions.pty import closure, protocol
 from base.sessions.pty.tests import pty_jobs as jobs
 from base.sessions.pty.tests.process_groups import kill_group_if_alive
 from base.sessions.pty.tests.pty_reaper import PtyReaper
@@ -40,10 +41,10 @@ from base.sessions.pty.tests.pty_service import PtyServiceProcess as PtyServiceP
 from base.sessions.pty.tests.pty_service import pty_service as pty_service
 from base.sessions.pty.tests.pty_shells import output_until
 from base.sessions.record import SessionRecord
-from cli.commands.lifecycle import _stop_extras, root_driver
-from cli.commands.lifecycle import _temporary_stop as command
-from cli.commands.lifecycle import service_stop as strict
-from ops import pty_close_notices
+from base.telemetry import EventPipeline
+from cli.commands.lifecycle.stop.choices import StopChoices, StopRequest, StopWindow
+from cli.commands.lifecycle.stop.execute import StopEnvironment
+from cli.database.runtime import CommandRuntime
 
 
 class Launcher(Protocol):
@@ -57,51 +58,24 @@ class Launcher(Protocol):
     ) -> subprocess.Popen[str]: ...
 
 
-_PROCESS_SOURCE = r"""
-import signal
-import subprocess
-import sys
-import time
-
-term, hangup, armed = sys.argv[1:]
-if term == "ignore":
-    signal.signal(signal.SIGTERM, signal.SIG_IGN)
-elif term == "exit":
-    signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
-elif term != "default":
-    raise ValueError("invalid fixture SIGTERM behavior")
-if hangup == "ignore":
-    signal.signal(signal.SIGHUP, signal.SIG_IGN)
-if armed:
-    child_source = '''
-import pathlib
-import signal
-import sys
-import time
-
-signal.signal(signal.SIGTERM, signal.SIG_IGN)
-pathlib.Path(sys.argv[1]).touch()
-time.sleep(60)
-'''
-    subprocess.Popen([sys.executable, "-u", "-c", child_source, armed])
-print("ready", flush=True)
-time.sleep(60)
-"""
+CHILD = Path(__file__).with_name("_child.py")
 
 
 @pytest.fixture
-def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    monkeypatch.setenv("MEIVA_HOME", str(tmp_path))
-    monkeypatch.setattr(root_driver, "root_tree_selection", dict)
-    monkeypatch.setattr(root_driver, "stop_root_service_tree", Mock(return_value=0))
-    monkeypatch.setattr(_root_driver_commands, "stop_root_service_tree", Mock(return_value=0))
-    monkeypatch.setattr(_root_driver_commands, "root_tree_plan", Mock(return_value=[]))
+def home(unit_home: Path) -> Path:
+    """The private home of one stop: the invocation's `MEIVA_HOME`, the service's, the ledger's."""
+    return unit_home
 
-    # Stop intentionally consumes the ambient override. Every independent test
-    # CLI still needs its explicit private binding when the checkout currently
-    # points at an isolated native-proof home: the PTY CLI children inherit it.
-    monkeypatch.setenv("HOME", str(tmp_path))
-    return tmp_path
+
+@pytest.fixture
+def stop_runtime(command_runtime: CommandRuntime, home: Path) -> CommandRuntime:
+    """The invocation of a stop in `home`: an agent-runner on a platform with no permissions helper,
+    whose browser's debugging port nothing answers on (so a stop never records a stranger's tabs)."""
+    from base.deploy.tests.containers import free_port
+
+    command_runtime.machine.set(role="agent-runner")
+    command_runtime.config.set_field("browser_cdp_port", free_port())
+    return replace(command_runtime, home=home, helper=None)
 
 
 @contextmanager
@@ -122,8 +96,8 @@ def launched_processes(home: Path) -> Generator[Launcher, None, None]:
             [
                 sys.executable,
                 "-u",
-                "-c",
-                _PROCESS_SOURCE,
+                str(CHILD),
+                "session",
                 term,
                 "ignore" if ignore_hangup else "default",
                 str(child_armed) if child_armed is not None else "",
@@ -184,71 +158,6 @@ def assert_group_drained(pgid: int, *, timeout_s: float = 5.0) -> None:
         time.sleep(0.02)
 
 
-def dependencies(monkeypatch: pytest.MonkeyPatch, *, machine: MachineIdentity) -> None:
-    monkeypatch.setattr(_root_driver_commands, "stop_root_service_tree", lambda **_kwargs: 0)  # pyright: ignore[reportUnknownArgumentType] — untyped test double
-    monkeypatch.setattr(_root_driver_commands, "root_tree_plan", lambda _preserve: [])  # pyright: ignore[reportUnknownArgumentType] — untyped test double
-    machine.set(role="agent-runner")
-    monkeypatch.setattr(
-        command,
-        "build_services",
-        lambda: [
-            SimpleNamespace(session="worker", requires_db=False),
-            SimpleNamespace(session="browser", requires_db=False),
-            SimpleNamespace(session=SERVICE_UNIT, requires_db=False),
-        ],
-    )
-    monkeypatch.setattr(sessions_hosting, "hosting_supervised_session", lambda: None)
-
-
-def record_root_stops(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
-    """Stand-in for the root owner's service-tree stop: every call's keyword arguments, in order.
-
-    The pty-sessions service is the real subprocess of the `pty_service` fixture,
-    so the stand-in never stops it: what a stop asked of the root owner is what
-    the test reads.
-    """
-    calls: list[dict[str, Any]] = []
-
-    def record(**kwargs: Any) -> int:
-        calls.append(kwargs)
-        return 0
-
-    monkeypatch.setattr(_root_driver_commands, "stop_root_service_tree", record)
-    return calls
-
-
-WRITE_NOTICES = pty_close_notices.write_notices
-
-
-@pytest.fixture
-def written(monkeypatch: pytest.MonkeyPatch) -> list[pty_close_notices.ClosureNotice]:
-    """Stand-in for the stop's database write: every notice it would write, in order."""
-    notices: list[pty_close_notices.ClosureNotice] = []
-
-    def record(
-        _db: object, _bus: object, batch: Sequence[pty_close_notices.ClosureNotice], *, direct: bool
-    ) -> list[tuple[pty_close_notices.ClosureNotice, Exception]]:
-        del direct
-        notices.extend(batch)
-        return []
-
-    monkeypatch.setattr(pty_close_notices, "write_notices", record)
-    return notices
-
-
-def stop_env(monkeypatch: pytest.MonkeyPatch, home: Path) -> None:
-    """What a real `meiva stop` of this home needs beyond `dependencies`: its raw home and no extras."""
-    monkeypatch.setitem(os.environ, "MEIVA_HOME", str(home))
-    monkeypatch.setenv("HOME", str(home))
-    for hook in ("stop_permissions_helper",):
-        monkeypatch.setattr(_stop_extras, hook, lambda **_kw: None)  # pyright: ignore[reportUnknownArgumentType]
-
-    def announce(*, machine: MachineIdentity, **_: object) -> None:
-        del machine
-
-    monkeypatch.setattr(command, "announce_stopping", announce)
-
-
 def busy_session(
     home: Path, name: str, source: str, reaper: PtyReaper, *, ready_line: str = "job-ready"
 ) -> tuple[psutil.Process, list[psutil.Process]]:
@@ -262,26 +171,131 @@ def busy_session(
     return shell, running
 
 
-def identity_of(process: subprocess.Popen[str]) -> OwnedProcess:
+def identity_of(process: subprocess.Popen[str] | subprocess.Popen[bytes]) -> OwnedProcess:
     """The exact identity (pid and birth) of a process a test launched."""
     return OwnedProcess.capture(psutil.Process(process.pid))
-
-
-def stub_closure(
-    monkeypatch: pytest.MonkeyPatch, *outcomes: closure.Outcome
-) -> list[tuple[float, float]]:
-    """Make each stop's closure return the next of `outcomes`; record the (grace, kill) it was asked for."""
-    asked: list[tuple[float, float]] = []
-    pending = list(outcomes)
-
-    def close(grace_s: float, kill_s: float) -> closure.Outcome:
-        asked.append((grace_s, kill_s))
-        return pending.pop(0) if len(pending) > 1 else pending[0]
-
-    monkeypatch.setattr(strict, "close_via_service", close)
-    return asked
 
 
 def closed_session(name: str, left: tuple[tuple[int, str], ...] = ()) -> closure.ClosedSession:
     """A busy session the closure verified gone (its shell is a long-dead identity)."""
     return closure.ClosedSession(name, OwnedProcess(2_000_000_000, 1.0, None), left)
+
+
+# meiva:note
+# Every closure notice the stops wrote to the database, oldest first.
+#
+# A notice's idempotency claim is written for every notice, delivered to its owner or dropped
+# (a terminated or unknown owner), so the claims are the record of what a stop wrote.
+def written_notices(conn: psycopg.Connection) -> list[dict[str, Any]]:
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT response_body FROM api_idempotency WHERE path = 'closure-notice' "
+            "ORDER BY completed_at, response_body::text"
+        )
+        bodies = [row[0] for row in cur.fetchall()]
+    conn.commit()
+    return [body if isinstance(body, dict) else json.loads(body) for body in bodies]
+
+
+# meiva:note
+# One stop as the operator would state it; every choice has a neutral answer here.
+def stop_request(
+    *,
+    keep_infra: bool | None = None,
+    preserve: frozenset[str] = frozenset(),
+    keep_browser: bool = True,
+    keep_shell_sessions: bool = False,
+    announce: bool = False,
+    teardown_extras: bool = False,
+    force: bool = False,
+    window: StopWindow | None = None,
+    require_confirmation: bool = False,
+    timeout: float = 15.0,
+) -> StopRequest:
+    return StopRequest(
+        choices=StopChoices(
+            keep_infra=keep_infra,
+            preserve_sessions=preserve,
+            keep_browser=keep_browser,
+            keep_shell_sessions=keep_shell_sessions,
+            announce=announce,
+            teardown_extras=teardown_extras,
+            force=force,
+        ),
+        window=window or StopWindow(for_seconds=None, reason=None),
+        require_confirmation=require_confirmation,
+        timeout=timeout,
+    )
+
+
+# meiva:note
+# The invocation of a stop: its runtime, its database and pipeline, and its stdin.
+def stop_environment(
+    runtime: CommandRuntime,
+    database_factory: DatabaseFactory,
+    producer: Callable[[], EventPipeline],
+    *,
+    stdin: TextIO | None = None,
+    shell_cleanup_wait_s: float | None = None,
+) -> StopEnvironment:
+    environment = StopEnvironment(
+        command=runtime,
+        database_factory=database_factory,
+        producer=producer,
+        retained_children=[],
+        stdin=stdin,
+    )
+    if shell_cleanup_wait_s is None:
+        return environment
+    return replace(environment, shell_cleanup_wait_s=shell_cleanup_wait_s)
+
+
+# meiva:note
+# A pty-sessions service that answers every request with an operational error.
+#
+# It listens where the real service would, so the stop dials it exactly as it dials the unit's
+# own; a closure the real service cannot be made to fail (a denied group signal) fails here.
+class RefusingPtyService:
+    def __init__(self, message: str) -> None:
+        from base.sessions.pty.paths import fallback_dir, service_socket_path
+
+        path = service_socket_path()
+        if path.parent == fallback_dir():
+            path.parent.mkdir(mode=0o700, exist_ok=True)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.unlink(missing_ok=True)
+        self._path = path
+        self._message = message
+        self._server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        self._server.bind(str(path))
+        self._server.listen(8)
+        self._thread = threading.Thread(target=self._serve, daemon=True)
+        self._thread.start()
+
+    def _serve(self) -> None:
+        while True:
+            try:
+                conn, _ = self._server.accept()
+            except OSError:
+                return
+            with conn:
+                line = protocol.read_line(conn)
+                if line is None:
+                    continue
+                request = protocol.decode_object(line)
+                conn.sendall(protocol.encode(protocol.err(request["id"], 1, self._message)))
+
+    def close(self) -> None:
+        self._server.close()
+        self._thread.join(timeout=5)
+        self._path.unlink(missing_ok=True)
+
+
+@pytest.fixture
+def refusing_pty_service(home: Path) -> Iterator[RefusingPtyService]:
+    del home
+    service = RefusingPtyService("known group signal denied")
+    try:
+        yield service
+    finally:
+        service.close()

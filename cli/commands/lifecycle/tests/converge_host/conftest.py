@@ -1,5 +1,10 @@
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.paths.tests.homes import default_home as default_home
+from cli.commands.lifecycle.tests.converge_host.context_inputs import ctx as ctx
+from cli.commands.lifecycle.tests.converge_host.context_inputs import user_home as user_home
+from cli.database.tests.cli_tests import operator_database as operator_database
+from cli.database.tests.cli_tests import operator_pipeline as operator_pipeline
+from cli.database.tests.command_inputs import command_runtime as command_runtime
 from meiva.tests.fixtures.sdk import sdk_environment as sdk_environment
 from meiva.tests.fixtures.sdk import sdk_identity as sdk_identity
 from meiva.tests.fixtures.sdk import sdk_metering as sdk_metering

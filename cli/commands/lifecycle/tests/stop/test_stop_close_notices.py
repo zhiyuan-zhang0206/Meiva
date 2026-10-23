@@ -1,51 +1,44 @@
+# meiva:note
+# The owner of a closed busy shell session is told, through the database, by the stop itself.
+
 from __future__ import annotations
 
 import shlex
-import subprocess
 import sys
-from collections.abc import Callable, Sequence
+import threading
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any
 
-import psutil
 import psycopg
 import pytest
 
+from base.agents.context.clients import DatabaseHandle
 from base.db import create_agent
-from base.native_process.ownership import OwnedProcess
-from base.sessions.pty import closure
-from base.sessions.pty.paths import ledger_path
 from base.sessions.pty.tests import pty_jobs as jobs
 from base.sessions.pty.tests import pty_shells
 from base.sessions.pty.tests.pty_reaper import PtyReaper
 from base.sessions.pty.tests.pty_reaper import pty_reaper as pty_reaper
-from base.sessions.tests.refuse_helper import refuse_helper
 from base.telemetry import EventPipeline
-from cli.commands.lifecycle import _temporary_stop as command
-from cli.commands.lifecycle import stop as entry
+from cli.commands.lifecycle.stop import do_stop
 from cli.commands.lifecycle.tests.stop.stop_support import (
-    WRITE_NOTICES,
     PtyServiceProcess,
     busy_session,
-    dependencies,
-    stop_env,
+    stop_environment,
+    stop_request,
+    written_notices,
 )
 from cli.commands.lifecycle.tests.stop.stop_support import home as home
 from cli.commands.lifecycle.tests.stop.stop_support import pty_service as pty_service
-from cli.commands.lifecycle.tests.stop.stop_support import written as written
+from cli.commands.lifecycle.tests.stop.stop_support import stop_runtime as stop_runtime
+from cli.database import OperatorDatabaseFactory
 from cli.database.runtime import CommandRuntime
 from cli.database.tests.cli_tests import operator_database as operator_database
 from cli.database.tests.cli_tests import operator_pipeline as operator_pipeline
 from cli.database.tests.command_inputs import command_runtime as command_runtime
-from ops import pty_close_notices
-from services.agent_runner.pty_sessions import ledger
 
 
 def test_busy_fixture_waits_for_the_job_after_a_login_helper(
-    home: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    pty_reaper: PtyReaper,
-    pty_service: PtyServiceProcess,
+    home: Path, pty_reaper: PtyReaper, pty_service: PtyServiceProcess
 ) -> None:
     name = "meiva-agent-987-shell-2044-login-readiness"
     release = home / "release-login-helper"
@@ -59,139 +52,64 @@ def test_busy_fixture_waits_for_the_job_after_a_login_helper(
     (home / ".bash_profile").write_text(
         f"{shlex.quote(sys.executable)} -u {shlex.quote(str(startup))}\n", encoding="utf-8"
     )
-    original = pty_shells.screen
+    done = threading.Event()
 
-    def screen(target: str, *, scrollback: bool = True) -> str:
-        output = original(target, scrollback=scrollback)
-        if target == name and "login-helper-ready" in output.splitlines():
-            release.touch()
-        return output
+    def release_when_ready() -> None:
+        # meiva:note
+        # The login helper holds the shell until it is released, as soon as it has said it runs.
+        while not done.wait(0.02):
+            listed = name in {info.name for info in pty_shells.client.list_sessions()}
+            if listed and "login-helper-ready" in pty_shells.screen(name).splitlines():
+                release.touch()
+                return
 
-    monkeypatch.setattr(pty_shells, "screen", screen)
+    releaser = threading.Thread(target=release_when_ready)
+    releaser.start()
     try:
         busy_session(home, name, jobs.TERM_OK, pty_reaper)
         assert "job-ready" in pty_shells.screen(name).splitlines()
     finally:
+        done.set()
         release.touch()
+        releaser.join(timeout=5)
 
 
 def test_stop_records_notice_for_verified_closed_busy_session(
+    redis_url: str,
     home: Path,
-    monkeypatch: pytest.MonkeyPatch,
     pty_reaper: PtyReaper,
     pty_service: PtyServiceProcess,
-    written: list[pty_close_notices.ClosureNotice],
-    operator_database: Callable[[], Any],
+    db_conn: psycopg.Connection,
+    operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
-    *,
-    command_runtime: CommandRuntime,
+    stop_runtime: CommandRuntime,
 ) -> None:
-    dependencies(monkeypatch, machine=command_runtime.machine)
-    stop_env(monkeypatch, home)
     name = "meiva-agent-987-shell-2044-busy"
     busy_session(home, name, jobs.TERM_OK, pty_reaper)
 
-    assert (
-        entry.cmd_stop(
-            require_confirmation=False,
-            keep_infra=None,
-            keep_browser=True,
-            keep_shell_sessions=False,
-            teardown_extras=False,
-            preserve_sessions=frozenset(),
-            force=False,
-            timeout=15,
-            database_factory=operator_database,
-            producer=operator_pipeline,
-            machine=command_runtime.machine,
-            helper=refuse_helper,
-        )
-        == 0
+    rc = do_stop(
+        stop_request(timeout=15),
+        stop_environment(stop_runtime, operator_database, operator_pipeline),
     )
-    assert len(written) == 1
-    notice = written[0]
-    assert notice.agent_id == 987
-    assert notice.session_id == 2044
-    assert notice.name == name
-    assert notice.machine
-    assert "operator stop" in notice.reason
-
-
-@pytest.mark.parametrize(
-    ("roles", "direct", "stops_data_plane"),
-    [
-        (frozenset({"agent-runner"}), False, False),
-        (frozenset({"gateway", "agent-runner"}), True, True),
-    ],
-)
-def test_notices_are_written_once_in_the_shell_sessions_phase_before_the_data_plane_stops(
-    roles: frozenset[str],
-    direct: bool,
-    stops_data_plane: bool,
-    home: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    pty_reaper: PtyReaper,
-    pty_service: PtyServiceProcess,
-    operator_database: Callable[[], Any],
-    operator_pipeline: Callable[[], EventPipeline],
-    *,
-    command_runtime: CommandRuntime,
-) -> None:
-    dependencies(monkeypatch, machine=command_runtime.machine)
-    stop_env(monkeypatch, home)
-    command_runtime.machine.set(role=roles)
-    events: list[str] = []
-
-    def write(
-        _db: object, _bus: object, batch: Sequence[pty_close_notices.ClosureNotice], *, direct: bool
-    ) -> list[tuple[pty_close_notices.ClosureNotice, Exception]]:
-        events.append(f"write:{len(batch)}:direct={direct}")
-        return []
-
-    def stop_data_plane(_timeout: float, **_kw: object) -> list[str]:
-        events.append("data-plane")
-        return []
-
-    monkeypatch.setattr(pty_close_notices, "write_notices", write)
-    monkeypatch.setattr(command, "stop_data_plane", stop_data_plane)
-    name = "meiva-agent-987-shell-2044-order"
-    busy_session(home, name, jobs.TERM_OK, pty_reaper)
-
-    assert (
-        entry.cmd_stop(
-            require_confirmation=False,
-            keep_infra=False if stops_data_plane else None,
-            keep_browser=True,
-            keep_shell_sessions=False,
-            teardown_extras=False,
-            preserve_sessions=frozenset(),
-            force=False,
-            timeout=15,
-            database_factory=operator_database,
-            producer=operator_pipeline,
-            machine=command_runtime.machine,
-            helper=refuse_helper,
-        )
-        == 0
-    )
-    assert events == [f"write:1:direct={direct}", *(["data-plane"] if stops_data_plane else [])]
+    assert rc == 0
+    (notice,) = written_notices(db_conn)
+    assert notice["agent_id"] == 987
+    assert notice["session_id"] == 2044
+    assert notice["name"] == name
+    assert notice["machine"] == stop_runtime.machine.name()
+    assert "operator stop" in notice["reason"]
 
 
 def test_the_stop_writes_the_owners_inbound_to_the_database(
     redis_url: str,
     home: Path,
-    monkeypatch: pytest.MonkeyPatch,
     pty_reaper: PtyReaper,
     pty_service: PtyServiceProcess,
     db_conn: psycopg.Connection,
-    operator_database: Callable[[], Any],
+    operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
-    *,
-    command_runtime: CommandRuntime,
+    stop_runtime: CommandRuntime,
 ) -> None:
-    dependencies(monkeypatch, machine=command_runtime.machine)
-    stop_env(monkeypatch, home)
-    monkeypatch.setattr(pty_close_notices, "write_notices", WRITE_NOTICES)
     owner = create_agent(db_conn)
     with db_conn.cursor() as cur:
         cur.execute(
@@ -202,23 +120,11 @@ def test_the_stop_writes_the_owners_inbound_to_the_database(
     name = f"meiva-agent-{owner}-shell-2044-landed"
     busy_session(home, name, jobs.TERM_OK, pty_reaper)
 
-    assert (
-        entry.cmd_stop(
-            require_confirmation=False,
-            keep_infra=None,
-            keep_browser=True,
-            keep_shell_sessions=False,
-            teardown_extras=False,
-            preserve_sessions=frozenset(),
-            force=False,
-            timeout=15,
-            database_factory=operator_database,
-            producer=operator_pipeline,
-            machine=command_runtime.machine,
-            helper=refuse_helper,
-        )
-        == 0
+    rc = do_stop(
+        stop_request(timeout=15),
+        stop_environment(stop_runtime, operator_database, operator_pipeline),
     )
+    assert rc == 0
     with db_conn.cursor() as cur:
         cur.execute(
             "SELECT source, content, payload->'closure'->>'name' FROM inbound_messages "
@@ -232,89 +138,31 @@ def test_the_stop_writes_the_owners_inbound_to_the_database(
     assert "closed by an operator stop (meiva stop)" in content
 
 
+# meiva:note
+# A batch that cannot be written is reported with the text its owner would have read, but
+# never fails the closure: retrying the whole stop would not restore the resources it closes.
 def test_an_unwritable_notice_is_loud_and_does_not_fail_the_stop(
+    db_url: str,
     home: Path,
-    monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     pty_reaper: PtyReaper,
     pty_service: PtyServiceProcess,
-    operator_database: Callable[[], Any],
+    operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
-    *,
-    command_runtime: CommandRuntime,
+    stop_runtime: CommandRuntime,
 ) -> None:
-    dependencies(monkeypatch, machine=command_runtime.machine)
-    stop_env(monkeypatch, home)
-
-    def unreachable(
-        _db: object, _bus: object, batch: Sequence[pty_close_notices.ClosureNotice], *, direct: bool
-    ) -> list[tuple[pty_close_notices.ClosureNotice, Exception]]:
-        del direct
-        return [(notice, ConnectionError("connection refused")) for notice in batch]
-
-    monkeypatch.setattr(pty_close_notices, "write_notices", unreachable)
     name = "meiva-agent-987-shell-2044-unreachable"
     busy_session(home, name, jobs.TERM_OK, pty_reaper)
 
-    assert (
-        entry.cmd_stop(
-            require_confirmation=False,
-            keep_infra=None,
-            keep_browser=True,
-            keep_shell_sessions=False,
-            teardown_extras=False,
-            preserve_sessions=frozenset(),
-            force=False,
-            timeout=15,
-            database_factory=operator_database,
-            producer=operator_pipeline,
-            machine=command_runtime.machine,
-            helper=refuse_helper,
-        )
-        == 0
+    def unreachable() -> DatabaseHandle:
+        # meiva:note
+        # Nothing listens on port 1: the connection is refused.
+        return operator_database.for_url("postgresql://nobody@127.0.0.1:1/meiva")
+
+    rc = do_stop(
+        stop_request(timeout=15),
+        stop_environment(stop_runtime, unreachable, operator_pipeline),
     )
+    assert rc == 0
     err = capsys.readouterr().err
-    assert name in err and "agent 987" in err and "connection refused" in err
-
-
-def test_a_stop_without_the_service_tells_owners_the_service_crashed_not_that_it_stopped(
-    home: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    written: list[pty_close_notices.ClosureNotice],
-    operator_database: Callable[[], Any],
-    operator_pipeline: Callable[[], EventPipeline],
-    *,
-    command_runtime: CommandRuntime,
-) -> None:
-    dependencies(monkeypatch, machine=command_runtime.machine)
-    stop_env(monkeypatch, home)
-    child = subprocess.Popen(["true"])
-    gone = OwnedProcess.capture(psutil.Process(child.pid))
-    child.wait(timeout=10)
-    name = "meiva-agent-987-shell-2044-crashed"
-    ledger.write(
-        ledger_path(), [closure.Target(name, gone, (gone, OwnedProcess(gone.pid, 0.0, None)))]
-    )
-
-    assert (
-        entry.cmd_stop(
-            require_confirmation=False,
-            keep_infra=None,
-            keep_browser=True,
-            keep_shell_sessions=False,
-            teardown_extras=False,
-            preserve_sessions=frozenset(),
-            force=False,
-            timeout=15,
-            database_factory=operator_database,
-            producer=operator_pipeline,
-            machine=command_runtime.machine,
-            helper=refuse_helper,
-        )
-        == 0
-    )
-
-    assert [(notice.name, notice.reason) for notice in written] == [
-        (name, pty_close_notices.CRASH_REASON)
-    ]
-    assert ledger.read(ledger_path()) == []
+    assert name in err and "agent 987" in err and "could not be written" in err

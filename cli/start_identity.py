@@ -53,6 +53,9 @@ class IdentityInput:
     roles: frozenset[str]
     values: dict[str, str]
     config_digest: str | None = None
+    # meiva:note
+    # Ports of the fixed table that something already holds: the entry probes them once.
+    occupied_ports: frozenset[int] = frozenset()
 
 
 def _write(path: Path, data: dict[str, Any]) -> None:
@@ -154,7 +157,7 @@ def needs_provision(home: Path) -> bool:
 
 def _new_record(inputs: IdentityInput) -> cluster.ClusterRecord:
     ports = cluster.new_home_ports()
-    if not all(cluster.port_free(p) for p in cast("dict[str, int]", ports).values()):
+    if inputs.occupied_ports.intersection(cast("dict[str, int]", ports).values()):
         raise RuntimeError("the home's ports are already occupied")
     return cluster.ClusterRecord(
         ports=ports,

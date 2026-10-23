@@ -3,7 +3,7 @@
 #
 # Reports retain the captured birth even when live facts cannot be read. The
 # shell-session boundary raises StopIncompleteError; its lifecycle journal stores the
-# same structured inventory. Process groups are observation-only facts.
+# same structured inventory.
 
 from __future__ import annotations
 
@@ -15,28 +15,6 @@ import psutil
 
 from base.native_process import pid_starttime_ticks
 from base.native_process.ownership import OwnedProcess
-
-
-def occupied_groups(groups: tuple[int, ...]) -> list[int]:
-    """Which of `groups` still hold live members, by scanning membership.
-
-    `killpg(..., 0)` can report EPERM for an empty group on macOS, so read the
-    actual membership instead; an unreadable member cannot certify emptiness.
-    """
-    if not groups:
-        return []
-    occupied: set[int] = set()
-    for process in psutil.process_iter():
-        try:
-            group = os.getpgid(process.pid)
-            if group in groups and process.status() not in (
-                psutil.STATUS_ZOMBIE,
-                psutil.STATUS_DEAD,
-            ):
-                occupied.add(group)
-        except (psutil.NoSuchProcess, ProcessLookupError):
-            continue
-    return sorted(occupied)
 
 
 # meiva:note
@@ -114,22 +92,19 @@ class StopSurvivor:
         }
 
 
+# meiva:note
+# A held stop's deadline report: who is left.
 @dataclass(frozen=True)
 class SurvivorInventory:
-    """A held stop's deadline report: who is left, and in which recorded group."""
-
     survivors: list[StopSurvivor]
-    groups: list[int]
 
     def render(self, *, stage: str, killed: bool = False) -> str:
         """The printable inventory; `killed` when the survivors outlived a SIGKILL."""
         outcome = "these outlived their SIGKILL" if killed else "nothing was force-killed"
         header = f"remaining process inventory (stage={stage}; {outcome}):"
-        if not self.survivors and not self.groups:
+        if not self.survivors:
             return f"{header} no survivor readable at the deadline"
         lines = [header, *(survivor.render() for survivor in self.survivors)]
-        if self.groups:
-            lines.append(f"  occupied recorded process groups: {sorted(self.groups)}")
         if killed:
             lines.append(
                 "  recovery: a process that outlives SIGKILL is usually another user's (a "
