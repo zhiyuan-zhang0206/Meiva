@@ -21,7 +21,9 @@ the database layer imports none of them.
   wake), `insert_inbound_message_in_transaction` (the caller owns commit and wake),
   `insert_spawn_prompt_in_transaction` / `announce_spawn_prompt` and `emit_prepared_event`. The
   lineage audit fact (`send_message`, `terminate`, `restart`, `cancel`, `resurrect`, `fork`, …) is
-  recorded in the same transaction as the row.
+  recorded in the same transaction as the row. If Postgres rejects the audit
+  insert, the failed transaction must be rolled back without any committed inbound
+  row or audit fact; post-commit emit and wake cannot run.
 - `wake.py` — `publish_inbound_wake`: best-effort Redis publish plus the durable wake-key
   breadcrumb. It returns whether the wake reached Redis; callers that meter delivery must read it.
 - `compact.py` — `insert_compact_request_inbound`, the native compact envelope.

@@ -28,6 +28,10 @@ and none of it is a graph-state fact, so `MeivaContext.clients` holds it as a `C
   among them), and carries no event-pipeline factory (a process has one writer).
 
 A failure to build a client raises at the call that needed it; nothing here swallows one.
+An explicit `Database` factory remains the only source of SQL configuration even
+when the process has no configured database URL. The handle retains its own
+connection posture and its entry-owned code-version gate; the set never falls
+back to process settings.
 
 ## One owner per set
 
