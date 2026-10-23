@@ -85,6 +85,8 @@ _REPO_MODEL_VENDORS = {
     "gpt-6-luna-fast": "openai",
     "jev-1.13.0": "typesafe",
     "kimi-k3": "moonshot",
+    "kimi-k3.1-pro": "moonshot",
+    "kimi-k3.1-pro-highspeed": "moonshot",
     "mimo-v2.6-pro": "xiaomi",
     "mimo-v2.6-pro-ultraspeed": "xiaomi",
     "qwen3.8-27b": "alibaba",
@@ -308,8 +310,12 @@ def test_repo_moonshot_provider_is_enabled_and_registers_complete_contract() -> 
     assert config.plugins["lm_moonshot"].enabled
     catalog = build_model_catalog()
 
-    assert "kimi-k3" in catalog.models
-    assert set(catalog.supported_models["kimi"]) == {"kimi-k3"}
+    assert {"kimi-k3", "kimi-k3.1-pro", "kimi-k3.1-pro-highspeed"} <= catalog.models.keys()
+    assert set(catalog.supported_models["kimi"]) == {
+        "kimi-k3",
+        "kimi-k3.1-pro",
+        "kimi-k3.1-pro-highspeed",
+    }
     assert pricing.model_vendor("kimi-k3", prices=catalog.prices) == "moonshot"
 
     from base.lm.factory import provider_key_map, provider_key_of_model

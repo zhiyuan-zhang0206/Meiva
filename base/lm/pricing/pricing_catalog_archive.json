@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "catalog_version": "2026-10-14-gemini-4-argon",
+  "catalog_version": "2026-10-24-kimi-k3.1-pro",
   "currency": "USD",
   "unit_tokens": 1000000,
   "models": {
@@ -1130,6 +1130,52 @@
                 "input": "3.0",
                 "cache_read": "0.30",
                 "output": "15.0"
+              },
+              "utc_daily_overrides": []
+            }
+          ]
+        }
+      ]
+    },
+    "kimi-k3.1-pro": {
+      "vendor": "moonshot",
+      "source_url": "https://platform.moonshot.ai/docs/pricing",
+      "source_checked_at": "2026-10-24",
+      "periods": [
+        {
+          "effective_from": null,
+          "effective_until": null,
+          "tiers": [
+            {
+              "input_tokens_min": 0,
+              "input_tokens_max": null,
+              "rates": {
+                "input": "2.0",
+                "cache_read": "0.20",
+                "output": "10.0"
+              },
+              "utc_daily_overrides": []
+            }
+          ]
+        }
+      ]
+    },
+    "kimi-k3.1-pro-highspeed": {
+      "vendor": "moonshot",
+      "source_url": "https://platform.moonshot.ai/docs/pricing",
+      "source_checked_at": "2026-10-24",
+      "periods": [
+        {
+          "effective_from": null,
+          "effective_until": null,
+          "tiers": [
+            {
+              "input_tokens_min": 0,
+              "input_tokens_max": null,
+              "rates": {
+                "input": "4.0",
+                "cache_read": "0.20",
+                "output": "20.0"
               },
               "utc_daily_overrides": []
             }
