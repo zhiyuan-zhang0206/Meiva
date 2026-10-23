@@ -14,6 +14,7 @@ from base.events.live.bus import EventBus
 from base.telemetry.tests.capture.event_capture import EmittedEvents
 from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
 from services.wake.heartbeat.liveness import (
+    LivenessConfig,
     run_liveness_pass,
 )
 from services.wake.heartbeat.tests.machine_probe_setup import (
@@ -34,7 +35,11 @@ class TestMachineProbeFailedSignal:
         self, pool: ConnectionPool, probe: FakeProbe, *, database_gate: ProcessDbGate
     ) -> None:
         await run_liveness_pass(
-            Database.from_settings(gate=database_gate), pool, EventBus.from_settings(), probe=probe
+            Database.from_settings(gate=database_gate),
+            pool,
+            EventBus.from_settings(),
+            probe=probe,
+            config=LivenessConfig(8.0),
         )
 
     @pytest.mark.usefixtures(pool.__name__)
