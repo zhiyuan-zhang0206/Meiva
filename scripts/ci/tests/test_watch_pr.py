@@ -13,6 +13,7 @@ from base.clock import Clock, ClockConfig
 from base.clock.tests.manual_timers import ManualTimers
 from base.host.system.tests.fake_commands import fake_host
 from scripts.ci.cli import CIStatus
+from scripts.ci.pull_requests.status import repo_has_workflows
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _TEMPLATE = _REPO_ROOT / "scripts" / "ci" / "pull_requests" / "watch_pr.py"
@@ -79,6 +80,8 @@ def _run_watcher(
     raise_on_poll: Exception | None = None,
     run_name: str = "__ci_watcher__",
     forbid_sleep: bool = False,
+    utility_root: Path | None = None,
+    workflow_presence: bool = False,
     on_atexit: Callable[..., None] | None = None,
 ) -> tuple[list[tuple[int, str]], list[Any], _FakeMeiva]:
     polled: list[Any] = []
@@ -99,8 +102,10 @@ def _run_watcher(
         *,
         host: object = None,
         clock: object = None,
+        workflows: bool,
     ) -> _Result:
         assert host is not None and clock is not None
+        assert workflows is workflow_presence
         if raise_on_poll is not None:
             raise raise_on_poll
         verdict = verdicts[min(len(polled), len(verdicts) - 1)]
@@ -119,13 +124,16 @@ def _run_watcher(
     substitutions = (
         ('REPO_ROOT = ""', f'REPO_ROOT = "{tmp_path}"'),
         ('PR_NUMBER = ""', 'PR_NUMBER = "1234"'),
-        ('CI_UTILS = ""', f'CI_UTILS = "{tmp_path}"'),
+        ('CI_UTILS = ""', f'CI_UTILS = "{utility_root if utility_root is not None else tmp_path}"'),
         ("WATCHER_ID = 0", "WATCHER_ID = 42"),
         ("import atexit\n", ""),
         ("import meiva\n", ""),
         ("from base.clock import Clock\n", ""),
         ("from base.host.system.hostport import Host\n", ""),
-        ("from scripts.ci.pull_requests.status import CIStatus, check_ci  # noqa: E402\n", ""),
+        (
+            "from scripts.ci.pull_requests.status import CIStatus, check_ci, repo_has_workflows  # noqa: E402\n",
+            "",
+        ),
     )
     for old, new in substitutions:
         assert old in code, f"template no longer contains {old!r} — update this test"
@@ -143,11 +151,13 @@ def _run_watcher(
                 "Host": types.SimpleNamespace(system=lambda: host),
                 "CIStatus": CIStatus,
                 "check_ci": _check_ci,
+                "repo_has_workflows": repo_has_workflows,
             },
         )
     finally:
-        if str(tmp_path) in sys.path:
-            sys.path.remove(str(tmp_path))
+        utility_path = str(utility_root if utility_root is not None else tmp_path)
+        if utility_path in sys.path:
+            sys.path.remove(utility_path)
         if forbid_sleep:
             assert timers.sleeps == [], f"slept {timers.sleeps} after a failed wake"
     return fake_meiva.wakes, polled, fake_meiva
@@ -333,3 +343,21 @@ def test_pending_watcher_reaches_its_deadline_without_real_sleep(
     assert len(wakes) == 1
     assert "timed out" in wakes[0][1]
     assert "still pending" in wakes[0][1]
+
+
+def test_watcher_reads_workflow_presence_from_ci_utilities_checkout(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    utilities = tmp_path / "utilities"
+    workflows = utilities / ".github" / "workflows"
+    workflows.mkdir(parents=True)
+    (workflows / "ci.yaml").write_text("name: CI\n")
+    wakes, polled, _ = _run_watcher(
+        monkeypatch,
+        tmp_path,
+        [CIStatus.ALL_PASSED],
+        utility_root=utilities,
+        workflow_presence=True,
+    )
+    assert polled == [CIStatus.ALL_PASSED]
+    assert len(wakes) == 1

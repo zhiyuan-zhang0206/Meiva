@@ -65,7 +65,9 @@ def test_status_timeout_never_claims_green_or_no_checks(probe: str) -> None:
     runner.on(
         ["gh", "api", "repos/o/r/actions/runs?head_sha=abc123&status=completed&per_page=100"], error
     )
-    result = status.check_ci("42", repo="o/r", host=fake_host(runner), clock=_clock())
+    result = status.check_ci(
+        "42", repo="o/r", host=fake_host(runner), clock=_clock(), workflows=True
+    )
     assert result.verdict is status.CIStatus.ERROR
     assert result.error_detail
 
@@ -80,6 +82,8 @@ def test_wait_reports_three_command_timeouts_as_query_failure(
         host=fake_host(runner),
         clock=_clock(),
         open_url=FakeUrlOpener(),
+        workflows=True,
+        env={},
     )
     assert result == 3
     assert len(runner.calls) == status.MAX_CONSECUTIVE_ERRORS
@@ -137,6 +141,7 @@ def test_freshness_timeout_still_submits_the_green_pr(probe: str) -> None:
         host=fake_host(runner),
         clock=_clock(),
         open_url=opener,
+        workflows=True,
     )
     assert result == 0
     assert opener.urls == [
@@ -222,6 +227,8 @@ def test_rerun_post_timeout_reports_unconfirmed_outcome(
         host=fake_host(runner),
         clock=_clock(),
         open_url=FakeUrlOpener(),
+        workflows=True,
+        env={},
     )
     assert result == 3
     out = capsys.readouterr().out
@@ -238,6 +245,8 @@ def test_rerun_query_timeout_is_reported_by_cli(capsys: pytest.CaptureFixture[st
         host=fake_host(runner),
         clock=_clock(),
         open_url=FakeUrlOpener(),
+        workflows=True,
+        env={},
     )
     assert result == 1
     assert "Failed to list failed jobs" in capsys.readouterr().err
@@ -275,7 +284,7 @@ def test_unexpected_command_error_is_never_a_missing_evidence_default(operation:
     host = fake_host(runner)
     with pytest.raises(RuntimeError) as caught:
         if operation == "status":
-            status.check_ci("42", repo="o/r", host=host, clock=_clock())
+            status.check_ci("42", repo="o/r", host=host, clock=_clock(), workflows=True)
         elif operation == "runs":
             status.runs_not_yet_reporting("abc123", "o/r", host=host)
         elif operation == "completed":
