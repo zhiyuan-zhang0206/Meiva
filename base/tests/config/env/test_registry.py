@@ -95,23 +95,17 @@ class TestScopeDerivationRules:
         )
 
     @pytest.mark.parametrize("role", ["gateway", "runner"])
-    def test_child_env_carries_the_login_identity(
-        self, monkeypatch: pytest.MonkeyPatch, role: Literal["gateway", "runner"]
-    ) -> None:
+    def test_child_env_carries_the_login_identity(self, role: Literal["gateway", "runner"]) -> None:
         # meiva:note
         # A PTY child without USER reads a logged-in macOS Claude Code CLI as
         # "Not logged in" (its keychain lookup keys on the account name).
         from base.host.env.registry import child_env
 
-        monkeypatch.setenv("USER", "operator")
-        monkeypatch.setenv("LOGNAME", "operator")
-        env = child_env(role)
+        env = child_env(role, {"USER": "operator", "LOGNAME": "operator"})
         assert env["USER"] == "operator"
         assert env["LOGNAME"] == "operator"
 
-    def test_child_env_carries_the_machine_network_proxy_configuration(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_child_env_carries_the_machine_network_proxy_configuration(self) -> None:
         # meiva:note
         # Issue #2095: the machine's proxy configuration is ambient host config —
         # the egress a building child (`npm run build` fetching Google Fonts for
@@ -130,38 +124,35 @@ class TestScopeDerivationRules:
             "all_proxy",
             "no_proxy",
         } == NETWORK_PROXY_KEYS
-        for key in NETWORK_PROXY_KEYS:
-            monkeypatch.delenv(key, raising=False)
-        assert network_proxy_configured() is False
+        direct: dict[str, str] = {}
+        proxied = {
+            "HTTPS_PROXY": "http://127.0.0.1:7897",
+            "no_proxy": "localhost,127.0.0.1",
+            "ALL_PROXY": "",
+        }
         for role in ("gateway", "runner"):
-            assert not (NETWORK_PROXY_KEYS & set(child_env(role)))
-        monkeypatch.setenv("HTTPS_PROXY", "http://127.0.0.1:7897")
-        monkeypatch.setenv("no_proxy", "localhost,127.0.0.1")
-        monkeypatch.setenv("ALL_PROXY", "")
+            assert not (NETWORK_PROXY_KEYS & set(child_env(role, direct)))
         # meiva:note
         # The family's single reader (the Feishu ws handshake asks it): any
         # non-empty proxy key, either spelling.
-        assert network_proxy_configured() is True
+        assert network_proxy_configured(proxied) is True
+        assert network_proxy_configured(direct) is False
         for role in ("gateway", "runner"):
-            env = child_env(role)
+            env = child_env(role, proxied)
             assert env["HTTPS_PROXY"] == "http://127.0.0.1:7897"
             assert env["no_proxy"] == "localhost,127.0.0.1"
             assert "ALL_PROXY" not in env
 
-    def test_the_cluster_secret_rides_no_forwarded_view(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_the_cluster_secret_rides_no_forwarded_view(self) -> None:
         # meiva:note
         # The human bearer stays on the gateway: no daemon / session child receives
         # it, even when the launcher's environment carries it.
         from base.host.env.registry import child_env, session_forward_keys
 
-        # meiva:note
-        # `child_env` reads the live environment, so the environment is the seam here.
-        monkeypatch.setitem(os.environ, "MEIVA_CLUSTER_SECRET", "human-bearer")
+        launcher = {"MEIVA_CLUSTER_SECRET": "human-bearer"}
         assert "MEIVA_CLUSTER_SECRET" not in session_forward_keys()
         for role in ("gateway", "runner"):
-            assert "MEIVA_CLUSTER_SECRET" not in child_env(role)
+            assert "MEIVA_CLUSTER_SECRET" not in child_env(role, launcher)
 
     def test_agent_runner_cluster_aliases_are_capability_plus_cluster_scope(self) -> None:
         from base.host.env.registry import agent_runner_cluster_aliases
@@ -184,7 +175,7 @@ class TestDaemonChildEnv:
 
         removed_role: Any = "agent"
         with pytest.raises(ValueError, match="daemon role"):
-            child_env(removed_role)
+            child_env(removed_role, {})
 
     def test_session_view_carries_the_gateway_url_and_port(self) -> None:
         from base.host.env.registry import session_forward_keys
@@ -279,7 +270,7 @@ class TestRegistryInvariants:
 
         # meiva:note
         # Exercises _ensure_validated(); raises RuntimeError on a collision.
-        child_env("gateway")
+        child_env("gateway", {})
 
     def test_every_projection_key_is_registered(self) -> None:
         # meiva:note

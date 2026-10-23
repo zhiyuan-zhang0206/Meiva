@@ -20,7 +20,7 @@ from base.telemetry.otlp.trace_config import TraceConfig
 
 
 def disabled() -> None:
-    config = TraceConfig.of(settings.observability)
+    config = TraceConfig.of(settings.observability, endpoint_explicit=False)
     assert config.enabled is False
     machine = MachineIdentity(
         name=lambda: "billing-child",

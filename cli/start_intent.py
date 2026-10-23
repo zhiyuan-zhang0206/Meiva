@@ -15,11 +15,13 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+import psutil
+
 from base.host.db_authority.delivery import GENERATION_ENV
 from base.host.env.registry import derived_env_keys, env_identity_keys
 from base.host.permissions_helper.client import HelperFactory
 from base.host.system.hostport import Host
-from base.native_process.os_platform import file_lock
+from base.native_process.os_platform import file_lock, is_macos
 from base.paths.home import home_checkout_error, resolve_meiva_home
 from base.paths.private_dir import ensure_private_dir
 from base.telemetry import EventPipeline
@@ -101,10 +103,12 @@ def run_start(
     except ValueError as exc:
         print(f"meiva start: {exc}", file=sys.stderr)
         return 1
-    return run_boot_attempt(home, lambda: start(boot=True))
+    return run_boot_attempt(
+        home, lambda: start(boot=True), boot_time=psutil.boot_time(), macos=is_macos()
+    )
 
 
-def run_boot_attempt(home: Path, start: Callable[[], int]) -> int:
+def run_boot_attempt(home: Path, start: Callable[[], int], *, boot_time: float, macos: bool) -> int:
     # meiva:note
     # One boot-job start: a failed attempt asks to be retried until the budget is spent.
     #
@@ -112,7 +116,7 @@ def run_boot_attempt(home: Path, start: Callable[[], int]) -> int:
     # decides what a *failed* attempt tells its scheduler.
     from base.host.system import boot_policy
 
-    attempt = boot_policy.begin_attempt(home)
+    attempt = boot_policy.begin_attempt(home, boot_time=boot_time)
     code = start()
     if code == 0:
         boot_policy.clear_attempts(home)
@@ -133,7 +137,7 @@ def run_boot_attempt(home: Path, start: Callable[[], int]) -> int:
         source="start",
         attributes={"attempts": attempt, "exit_code": code},
     )
-    return boot_policy.exit_code_after_budget(code)
+    return boot_policy.exit_code_after_budget(code, macos=macos)
 
 
 def start_once(

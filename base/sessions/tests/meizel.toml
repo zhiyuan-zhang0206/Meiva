@@ -9,7 +9,6 @@ exports = ["poll_until.py", "refuse_helper.py", "scripted_helper.py"]
 
 [debt.env-patch]
 "test_coding_session_owner.py#monkeypatch.setenv os.environ.MEIVA_HOME" = 1
-"test_env_forwarding.py#monkeypatch.setenv os.environ.PATH" = 2
 
 [debt.first-party-patch]
 "test_backend.py#monkeypatch.setattr base.paths.repo_root" = 1
@@ -32,9 +31,6 @@ exports = ["poll_until.py", "refuse_helper.py", "scripted_helper.py"]
 "test_posixproc.py#python -c" = 10
 "test_posixproc_expected_signal.py#python -c" = 2
 "test_posixproc_liveness.py#python -c" = 1
-
-[debt.stdlib-patch]
-"test_env_forwarding.py#monkeypatch.setattr os.environ" = 4
 
 [debt.unresolved-patch]
 "test_posixproc.py#monkeypatch.setattr psosx.INIT_BOOT_TIME" = 2

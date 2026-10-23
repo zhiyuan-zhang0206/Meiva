@@ -7,7 +7,7 @@ from pathlib import Path
 
 from base.api_contracts.agent_contract import Harness
 from base.host.env.harness_binaries import with_harness_path
-from base.host.env.registry import child_env
+from base.host.env.registry import child_env, process_environment
 from base.lm.harness.antigravity import AgySession, AntigravityConfig
 from base.lm.harness.antigravity import build_handoff as antigravity_handoff
 from base.lm.harness.bridge import HarnessBridge, HarnessSession, ScopedSessionRegistry
@@ -42,7 +42,7 @@ HANDOFF_INSTRUCTION = (
 # it is rebuilt — the CLI and everything it runs resolve through this (#5491).
 # meiva:link base/lm/harness/docs/harness.meiva.okf.md
 def session_environ(environ: Mapping[str, str] | None) -> dict[str, str]:
-    base = dict(child_env("runner") if environ is None else environ)
+    base = dict(child_env("runner", process_environment()) if environ is None else environ)
     venv_bin = str(Path(sys.executable).parent)
     existing = base.get("PATH")
     base["PATH"] = f"{venv_bin}{os.pathsep}{existing}" if existing else venv_bin

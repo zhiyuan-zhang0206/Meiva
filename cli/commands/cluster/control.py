@@ -14,7 +14,7 @@ from pathlib import Path
 import httpx
 
 from base.api_contracts.status import MachineStatus
-from base.cluster.machine import format_capabilities
+from base.cluster.machine import GatewayAccess, format_capabilities
 
 _CLUSTER_STATUS_PROBE_TIMEOUT_S = 8.0
 # `meiva cluster status` reads the *fresh* roster, whose server-side fan-out
@@ -335,20 +335,19 @@ def code_cell(running_sha: str | None, head_sha: str | None) -> str:
     return short
 
 
-def fetch_gateway_cluster_status() -> dict[str, object]:
-    """GET `/api/cluster/status` and return the decoded ClusterStatus body.
-
-    Used by `meiva status`'s gateway-view supplement. Presents the cluster-secret
-    bearer (the endpoint is authenticated, like every `/api/cluster/*`) so a
-    healthy-but-authed gateway reads as up instead of a false `401 unreachable`.
-    Fails fast (`raise_for_status()`) on any HTTP error rather than masking an
-    unreachable gateway.
-    """
+# meiva:note
+# GET `/api/cluster/status` and return the decoded ClusterStatus body.
+#
+# Used by `meiva status`'s gateway-view supplement. Presents the credential of
+# `access` (the endpoint is authenticated, like every `/api/cluster/*`) so a
+# healthy-but-authed gateway reads as up instead of a false `401 unreachable`.
+# Fails fast (`raise_for_status()`) on any HTTP error rather than masking an
+# unreachable gateway. The status command builds `access` from its own
+# configuration (`gateway_access_from_boot`).
+def fetch_gateway_cluster_status(access: GatewayAccess) -> dict[str, object]:
     from base.cluster.machine import gateway_api_base, gateway_auth_headers
-    from base.cluster.machine.ambient import gateway_access_from_settings
     from base.host.net.http_dial import get as dial_get
 
-    access = gateway_access_from_settings()  # ambient: C
     url = f"{gateway_api_base(access.gateway_url)}/api/cluster/status"
     resp = dial_get(url, timeout=10.0, headers=gateway_auth_headers(access))
     resp.raise_for_status()

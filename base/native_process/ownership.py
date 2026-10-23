@@ -105,17 +105,30 @@ class OwnedProcess:
         """Whether a fresh observation still identifies this captured birth."""
         return self.same_birth(OwnedProcess.capture(process))
 
-    def live(self) -> bool:
-        """Whether the pid still is this recorded process.
+    # meiva:note
+    # Whether a start-tick read still names this recorded process.
+    #
+    # `observed` is the pid's start ticks as read now (`None` when the read
+    # found no /proc entry) and `pid_exists` whether the pid is still in the
+    # process table. A tracked process exiting and being reaped exactly between
+    # psutil's eager validation and the raw start-time read leaves that read
+    # without a /proc entry — that IS the exit, not an unverifiable identity: a
+    # vanished pid converges as gone (the 2026-09-20 wave-2 window raised out of
+    # a stop this way and aborted the cluster update with the tracked daemon
+    # already exiting). Only a pid that still exists while its start time cannot
+    # be read keeps the loud error.
+    def ticks_match(self, observed: int | None, *, pid_exists: bool) -> bool:
+        if self.starttime is None:
+            raise ValueError(f"PID {self.pid} has no recorded start ticks to compare")
+        if observed is None:
+            if not pid_exists:
+                return False
+            raise RuntimeError(f"cannot verify process identity for PID {self.pid}")
+        return observed == self.starttime
 
-        A tracked process exiting and being reaped exactly between psutil's
-        eager validation and the raw start-time read leaves that read without a
-        /proc entry — that IS the exit, not an unverifiable identity: existence
-        is re-asked, and a vanished pid converges as gone (the 2026-09-20
-        wave-2 window raised out of a stop this way and aborted the cluster
-        update with the tracked daemon already exiting). Only a pid that still
-        exists while its start time cannot be read keeps the loud error.
-        """
+    # meiva:note
+    # Whether the pid still is this recorded process.
+    def live(self) -> bool:
         try:
             process = psutil.Process(self.pid)
             # Branch on the recorded field first: a platform-first test lets
@@ -126,13 +139,11 @@ class OwnedProcess:
                 if not self.birth_matches(process):
                     return False
             else:
-                actual = _start_ticks(self.pid)
-                if actual is None:
-                    if not psutil.pid_exists(self.pid):
-                        # Reaped in the validation -> read window: exited.
-                        return False
-                    raise RuntimeError(f"cannot verify process identity for PID {self.pid}")
-                if actual != self.starttime:
+                observed = _start_ticks(self.pid)
+                # meiva:note
+                # Existence is asked only when the read found nothing.
+                exists = observed is not None or psutil.pid_exists(self.pid)
+                if not self.ticks_match(observed, pid_exists=exists):
                     return False
             return process.status() not in (psutil.STATUS_ZOMBIE, psutil.STATUS_DEAD)
         except psutil.NoSuchProcess:

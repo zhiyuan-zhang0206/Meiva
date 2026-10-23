@@ -19,7 +19,7 @@ is on the `import meiva` path, which stays driver-free (task #3816).
 
 from __future__ import annotations
 
-from collections.abc import Collection, Mapping
+from collections.abc import Collection, Mapping, Sequence
 from pathlib import Path
 from types import MappingProxyType
 
@@ -293,9 +293,9 @@ class CheckpointSchemaMismatchError(CheckpointSchemaError):
     """The database checkpoint migration set is not exactly current."""
 
 
-def _check_checkpoint_manifest_shape() -> list[int]:
+def _check_checkpoint_manifest_shape(manifest: Mapping[int, str]) -> list[int]:
     """The manifest's versions, contiguous after the baseline and named in version order."""
-    declared_versions = sorted(CHECKPOINT_SCHEMA_MEIVA_MIGRATIONS)
+    declared_versions = sorted(manifest)
     expected_declared = list(
         range(
             CHECKPOINT_SCHEMA_UPSTREAM_BASELINE_VERSION + 1,
@@ -309,7 +309,7 @@ def _check_checkpoint_manifest_shape() -> list[int]:
             f"declared={declared_versions}, expected={expected_declared}"
         )
 
-    declared_names = [CHECKPOINT_SCHEMA_MEIVA_MIGRATIONS[version] for version in declared_versions]
+    declared_names = [manifest[version] for version in declared_versions]
     if declared_names != sorted(declared_names):
         raise CheckpointDependencyDriftError(
             "checkpoint migration manifest names must follow upstream version order: "
@@ -318,11 +318,13 @@ def _check_checkpoint_manifest_shape() -> list[int]:
     return declared_versions
 
 
-def _expected_checkpoint_schema_versions(schema: CheckpointSchema) -> frozenset[int]:
+def _expected_checkpoint_schema_versions(
+    upstream_migrations: Sequence[str], manifest: Mapping[int, str]
+) -> frozenset[int]:
     """The upstream versions explicitly approved by Meiva's checkpoint migration manifest."""
-    declared_versions = _check_checkpoint_manifest_shape()
+    declared_versions = _check_checkpoint_manifest_shape(manifest)
     approved_target = CHECKPOINT_SCHEMA_UPSTREAM_BASELINE_VERSION + len(declared_versions)
-    dependency_target = len(schema.migrations) - 1
+    dependency_target = len(upstream_migrations) - 1
     if dependency_target != approved_target:
         raise CheckpointDependencyDriftError(
             "LangGraph checkpoint migrations changed without an Meiva migration: "
@@ -335,22 +337,30 @@ def _expected_checkpoint_schema_versions(schema: CheckpointSchema) -> frozenset[
     return frozenset(range(approved_target + 1))
 
 
-def assert_checkpoint_dependency_pinned(tracked_migrations: Collection[str]) -> None:
-    """Fail before any DB work when the dependency schema contract drifted.
-
-    `tracked_migrations` is the caller's set of git-tracked Meiva migration names
-    (`base.deploy.schema.migration_layout.required_migration_set()`): `cluster`
-    sits below the schema owner, so the caller supplies it. Every manifest entry
-    must name one of them.
-    """
-    _check_checkpoint_manifest_shape()
-    for version, name in CHECKPOINT_SCHEMA_MEIVA_MIGRATIONS.items():
+# meiva:note
+# Fail before any DB work when the dependency schema contract drifted.
+#
+# `tracked_migrations` is the caller's set of git-tracked Meiva migration names
+# (`base.deploy.schema.migration_layout.required_migration_set()`): `cluster`
+# sits below the schema owner, so the caller supplies it. Every `manifest` entry
+# must name one of them, and the manifest must approve exactly the
+# `upstream_migrations` the installed dependency ships. The composition root
+# passes `CHECKPOINT_SCHEMA_MEIVA_MIGRATIONS` and
+# `PostgresCheckpointSchema().migrations`.
+def assert_checkpoint_dependency_pinned(
+    tracked_migrations: Collection[str],
+    *,
+    manifest: Mapping[int, str],
+    upstream_migrations: Sequence[str],
+) -> None:
+    _check_checkpoint_manifest_shape(manifest)
+    for version, name in manifest.items():
         if name not in tracked_migrations:
             raise CheckpointDependencyDriftError(
                 f"checkpoint version {version} must name a git-tracked Meiva "
                 f"migration: name={name!r}, tracked={name in tracked_migrations}"
             )
-    _expected_checkpoint_schema_versions(PostgresCheckpointSchema())
+    _expected_checkpoint_schema_versions(upstream_migrations, manifest)
 
 
 def checkpoint_schema_versions(
@@ -376,7 +386,9 @@ def assert_checkpoint_schema_current(db_url: str, *, expected_data_dir: Path | N
     acquiring DDL capability.  Ahead is also refused: upstream gives no old-
     runtime/new-schema compatibility guarantee.
     """
-    expected = _expected_checkpoint_schema_versions(PostgresCheckpointSchema())
+    expected = _expected_checkpoint_schema_versions(
+        PostgresCheckpointSchema().migrations, CHECKPOINT_SCHEMA_MEIVA_MIGRATIONS
+    )
     actual = checkpoint_schema_versions(db_url, expected_data_dir=expected_data_dir)
     if actual != expected:
         found: frozenset[int] = frozenset() if actual is None else actual
@@ -423,7 +435,9 @@ def ensure_checkpoint_schema(
     # Act as the schema owner and retain the validated native connection
     # throughout setup; PostgresSaver must not open an unchecked second dial.
     owner_dsn = owner_conninfo(base_admin_url, database=identity, owner=identity)
-    expected = _expected_checkpoint_schema_versions(schema)
+    expected = _expected_checkpoint_schema_versions(
+        schema.migrations, CHECKPOINT_SCHEMA_MEIVA_MIGRATIONS
+    )
     actual = checkpoint_schema_versions(owner_dsn, expected_data_dir=expected_data_dir)
     if actual == expected:
         return

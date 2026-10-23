@@ -37,6 +37,7 @@ from collections.abc import Callable
 from base.cluster.dataplane.redis_bridge import RedisBridgeUnconfiguredError, redis_bridge_endpoint
 from base.cluster.machine import MachineIdentity, MachineRoles
 from base.config import settings
+from base.host.env.registry import process_environment
 from base.host.system.hostport import Host
 from base.host.system.probes import (
     browser_incapability,
@@ -44,7 +45,11 @@ from base.host.system.probes import (
 )
 from base.log import logger
 from base.paths import meiva_home
-from base.telemetry.observability import collector_allowed_for_home, gateway_observability_home
+from base.telemetry.observability import (
+    collector_allowed_for_home,
+    endpoint_override_is_explicit,
+    gateway_observability_home,
+)
 from services.supervision.roster import build_services
 from services.supervision.roster.plugin_services import PluginServiceError
 from services.supervision.roster.service_spec import (
@@ -98,7 +103,12 @@ def _otel_collector_gate_reason(*, machine: MachineIdentity) -> str | None:
     """
     home = meiva_home()
     if not collector_allowed_for_home(
-        gateway_observability_home(machine, home=home), machine=machine, unit_home=home
+        gateway_observability_home(machine, home=home),
+        machine=machine,
+        unit_home=home,
+        endpoint_explicit=endpoint_override_is_explicit(
+            "MEIVA_TELEMETRY_OTLP_ENDPOINT", process_environment()
+        ),
     ):
         return (
             "this gateway home is not the observability station (lgtm-host "

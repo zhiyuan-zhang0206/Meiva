@@ -16,7 +16,7 @@ from __future__ import annotations
 import inspect
 from typing import Any
 
-from base.host.env.registry import network_proxy_configured
+from base.host.env.registry import network_proxy_configured, process_environment
 
 
 def ws_connect_kwargs() -> dict[str, Any]:
@@ -42,7 +42,9 @@ def ws_connect_kwargs() -> dict[str, Any]:
 
     if "proxy" not in inspect.signature(websockets.connect).parameters:
         return {}
-    return {} if network_proxy_configured() else {"proxy": None}
+    # meiva:note
+    # The SDK calls this hook with no arguments, so the process environment is read here.
+    return {} if network_proxy_configured(process_environment()) else {"proxy": None}
 
 
 def allow_env_proxy_for_ws() -> None:

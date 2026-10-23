@@ -17,7 +17,8 @@ from pathlib import Path
 
 from base.agents.context.clients import DatabaseFactory
 from base.cluster import session_name
-from base.cluster.machine import MachineIdentity, MachineRoles
+from base.cluster.machine import GatewayAccess, MachineIdentity, MachineRoles
+from base.cluster.machine.boot import gateway_access_from_boot
 from base.config import ConfigBoot
 from base.deploy.git import cluster_drift
 from base.host.system.hostport import Host
@@ -168,7 +169,7 @@ def cmd_status(
     print()
     print(source_identity_line(Path(repo)))
 
-    print_gateway_cluster_status()
+    print_gateway_cluster_status(gateway_access_from_boot(config))
     return 0
 
 
@@ -201,7 +202,7 @@ def _print_host_resources() -> None:
     )
 
 
-def print_gateway_cluster_status() -> None:
+def print_gateway_cluster_status(access: GatewayAccess) -> None:
     """Fetch + print the gateway's own cluster-status snapshot.
 
     GET `/api/cluster/status` — this is the thin-client view (what the gateway
@@ -223,7 +224,7 @@ def print_gateway_cluster_status() -> None:
 
     print("\ngateway cluster status (GET /api/cluster/status):")
     try:
-        body = fetch_gateway_cluster_status()
+        body = fetch_gateway_cluster_status(access)
     except httpx.HTTPError as e:
         print(f"  ✗ gateway unreachable: {e}")
         return

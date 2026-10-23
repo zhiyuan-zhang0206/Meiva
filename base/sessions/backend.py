@@ -98,7 +98,7 @@ class PtySessionBackend(SessionBackend):
         cmd: str,
         cwd: Path,
         *,
-        env: dict[str, str] | None = None,
+        env: dict[str, str],
         login_shell: bool = True,
         exec_cmd: bool = True,  # noqa: ARG002
     ) -> bool:
@@ -107,11 +107,6 @@ class PtySessionBackend(SessionBackend):
         # meiva:link base/sessions/docs/session-backend.meiva.okf.md
         if not login_shell:
             raise NotImplementedError(f"{type(self).__name__} only creates login shells")
-        if env is None:
-            from base.paths import repo_root
-            from base.sessions.env_forwarding import cwd_is_inside_checkout, forward_env_dict
-
-            env = forward_env_dict(activate_venv=cwd_is_inside_checkout(cwd, repo_root()))
         try:
             client.create_session(name, str(cwd), env, cmd or None, config=self._config)
         except (client.ServiceError, client.ServiceUnavailableError) as exc:

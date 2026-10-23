@@ -1,47 +1,48 @@
-"""Session env forwarding — the MECHANISM for handing env to session children.
-
-Environment assembly and session activation:
-- `managed_service_env` builds a root generation's PATH from the persisted host
-  declaration, independent of its interactive or OS-manager caller.
-- `forward_env_dict` builds the full child env dict for a daemon/service session
-  (the registry's session forward view + PATH + venv activation). The backend
-  hands it to the child as its real environment — nothing ever lands on an argv
-  (issue #974: the old handoff put the cluster secret and every provider key
-  on the client's command line; the 0600 env-file handoff that replaced it is
-  gone too, since the native supervisors take a dict out-of-band).
-- `venv_activation_prefix` re-activates this checkout's `.venv` inside a session
-  command (the login shell's profile rebuilds PATH, dropping a forwarded venv
-  prefix).
-- `exec_into` makes the login shell hand its pid to the daemon, so the supervisor's
-  recorded pid IS the daemon and a graceful SIGTERM reaches it.
-- `_session_forward_env` is the registry projection both build on.
-
-The POSIX PTY backend clears inherited VIRTUAL_ENV before overlaying this
-dict onto the launcher's env; daemon backends use it as their complete env.
-Watchers explicitly validate and override runner credentials before that PTY
-handoff.
-
-**The env POLICY lives elsewhere** (Task #856 Phase C + R2 design convergence
-point A): which keys a child receives is the `child_env(role)`
-projection of the env registry (`base/host/env/registry.py` — host-scope facts +
-MEIVA_HOME for daemon/session children, NOT "everything MEIVA_* minus a drop set"; the old denylist
-forwarded MEIVA_AGENT_ID and every non-cluster knob into daemon sessions, a
-leak that made a prod gateway carry MEIVA_AGENT_ID and load the whole
-agent stack, +11MB resident). The builders here stay thin mechanisms over that
-projection — iterate + build the dict, plus the venv activation (VIRTUAL_ENV +
-PATH) a login shell's profile would otherwise drop; the allow/drop decision is
-the data in the registry. The session builders live here because five callers
-across four layers (meiva SDK shell sessions, shared
-service respawn, cli start, ops operator shells, gateway schedule runner) need
-identical semantics and layering forbids a lower layer importing a process
-package. The child re-sources cluster-scope values at its own boot (gateway
-fetch on a runner, its own .env on a gateway-capable unit), so a spawner's
-frozen copy is redundant and a third-party library that reads os.environ
-directly would only ever see the stale one.
-
-This module reads os.environ by nature (it forwards the live env), so it is on
-no_os_environ's allowlist.
-"""
+# meiva:note
+# Session env forwarding — the MECHANISM for handing env to session children.
+#
+# Environment assembly and session activation:
+# - `managed_service_env` builds a root generation's PATH from the persisted host
+#   declaration, independent of its interactive or OS-manager caller.
+# - `forward_env_dict` builds the full child env dict for a daemon/service session
+#   (the registry's session forward view + PATH + venv activation). The backend
+#   hands it to the child as its real environment — nothing ever lands on an argv
+#   (issue #974: the old handoff put the cluster secret and every provider key
+#   on the client's command line; the 0600 env-file handoff that replaced it is
+#   gone too, since the native supervisors take a dict out-of-band).
+# - `venv_activation_prefix` re-activates this checkout's `.venv` inside a session
+#   command (the login shell's profile rebuilds PATH, dropping a forwarded venv
+#   prefix).
+# - `exec_into` makes the login shell hand its pid to the daemon, so the supervisor's
+#   recorded pid IS the daemon and a graceful SIGTERM reaches it.
+# - `_session_forward_env` is the registry projection both build on.
+#
+# The POSIX PTY backend clears inherited VIRTUAL_ENV before overlaying this
+# dict onto the launcher's env; daemon backends use it as their complete env.
+# Watchers explicitly validate and override runner credentials before that PTY
+# handoff.
+#
+# **The env POLICY lives elsewhere** (Task #856 Phase C + R2 design convergence
+# point A): which keys a child receives is the `child_env(role)`
+# projection of the env registry (`base/host/env/registry.py` — host-scope facts +
+# MEIVA_HOME for daemon/session children, NOT "everything MEIVA_* minus a drop set"; the old denylist
+# forwarded MEIVA_AGENT_ID and every non-cluster knob into daemon sessions, a
+# leak that made a prod gateway carry MEIVA_AGENT_ID and load the whole
+# agent stack, +11MB resident). The builders here stay thin mechanisms over that
+# projection — iterate + build the dict, plus the venv activation (VIRTUAL_ENV +
+# PATH) a login shell's profile would otherwise drop; the allow/drop decision is
+# the data in the registry. The session builders live here because five callers
+# across four layers (meiva SDK shell sessions, shared
+# service respawn, cli start, ops operator shells, gateway schedule runner) need
+# identical semantics and layering forbids a lower layer importing a process
+# package. The child re-sources cluster-scope values at its own boot (gateway
+# fetch on a runner, its own .env on a gateway-capable unit), so a spawner's
+# frozen copy is redundant and a third-party library that reads os.environ
+# directly would only ever see the stale one.
+#
+# Every builder takes the environment it forwards as a ``Mapping`` value; the
+# composition root of a spawner builds it once with
+# ``base.host.env.registry.process_environment()``.
 
 from __future__ import annotations
 
@@ -49,6 +50,7 @@ import io
 import os
 import re
 import shlex
+from collections.abc import Mapping
 from pathlib import Path
 
 from dotenv import dotenv_values
@@ -82,14 +84,14 @@ def frontend_toolchain_path(inherited_path: str) -> str:
     )
 
 
-def frontend_toolchain_env() -> dict[str, str]:
-    """The inherited environment for a direct frontend-toolchain subprocess.
-
-    `npm ci` already inherited this process's complete environment; copying it
-    preserves npm's user cache and credential behavior while replacing only its
-    PATH with the deterministic Node search path.
-    """
-    env = dict(os.environ)
+# meiva:note
+# The environment for a direct frontend-toolchain subprocess, built from `environ`.
+#
+# `npm ci` inherited the complete environment of its spawner; copying it
+# preserves npm's user cache and credential behavior while replacing only its
+# PATH with the deterministic Node search path.
+def frontend_toolchain_env(environ: Mapping[str, str]) -> dict[str, str]:
+    env = dict(environ)
     env["PATH"] = frontend_toolchain_path(env.get("PATH", ""))
     return env
 
@@ -125,11 +127,11 @@ def admit_service_path(value: str, *, excluded: tuple[Path, ...] = ()) -> str:
     return normalized
 
 
-def managed_service_env(service_path: str) -> dict[str, str]:
+def managed_service_env(service_path: str, *, environ: Mapping[str, str]) -> dict[str, str]:
     """Use the admitted host PATH; interactive session forwarding is separate."""
     from base.host.runtime_interpreter import runtime_venv
 
-    env = forward_env_dict()
+    env = forward_env_dict(environ)
     bindir = runtime_venv() / get_backend().venv_bin_dir_name()
     host_path = normalize_service_path(service_path, excluded=(bindir,))
     env["MEIVA_SERVICE_PATH"] = host_path
@@ -139,23 +141,21 @@ def managed_service_env(service_path: str) -> dict[str, str]:
     return env
 
 
-def _session_forward_env(extra: dict[str, str] | None = None) -> dict[str, str]:
-    """The caller-built env dict a daemon/session child receives: the
-    registry's session forward view (`child_env`) plus `extra`.
-
-    Daemons belong to the gateway/runner process profiles, whose session view
-    is identical (host-scope settings aliases + MEIVA_HOME, the ambient display
-    passthroughs and temp-dir vars non-empty only). POSITIVE allowlist, not a
-    drop list (Task #856 Phase C, audit F-s3-4): a non-modeled knob
-    (MEIVA_AGENT_ID, ...) or agent-scope override never rides into a daemon
-    session. The allow/drop decision is the DATA in base/host/env/registry.py;
-    this function is the mechanism that applies it.
-    """
+# meiva:note
+# The caller-built env dict a daemon/session child receives: the
+# registry's session forward view (`child_env`) of `environ`.
+#
+# Daemons belong to the gateway/runner process profiles, whose session view
+# is identical (host-scope settings aliases + MEIVA_HOME, the ambient display
+# passthroughs and temp-dir vars non-empty only). POSITIVE allowlist, not a
+# drop list (Task #856 Phase C, audit F-s3-4): a non-modeled knob
+# (MEIVA_AGENT_ID, ...) or agent-scope override never rides into a daemon
+# session. The allow/drop decision is the DATA in base/host/env/registry.py;
+# this function is the mechanism that applies it.
+def _session_forward_env(environ: Mapping[str, str]) -> dict[str, str]:
     from base.host.env.registry import child_env
 
-    forward = child_env("gateway")
-    forward.update(extra or {})
-    return forward
+    return child_env("gateway", environ)
 
 
 def cwd_is_inside_checkout(session_cwd: Path, checkout_root: Path) -> bool:
@@ -173,40 +173,40 @@ def cwd_is_inside_checkout(session_cwd: Path, checkout_root: Path) -> bool:
     )
 
 
-def forward_env_dict(*, activate_venv: bool = True) -> dict[str, str]:
-    """The full child env dict for a daemon/service session.
-
-    Each child gets a built dict: the registry's session forward view
-    (`_session_forward_env`) — host-scope MEIVA_* config + the ambient display
-    passthroughs — *and* PATH, which the child genuinely needs. Cluster-scope
-    values and agent-scope/non-modeled knobs are not carried (positive
-    allowlist, Task #856 Phase C / audit F-s3-4): the child re-sources them at
-    its own boot, so a spawner's frozen copy is redundant and a third-party
-    library that reads os.environ directly would only ever see a stale one.
-
-    Also activates the venv the way `uv run` used to: service cmds now exec the
-    venv interpreter directly (`.venv/bin/python -m …`, no resident `uv run`
-    parent per daemon), so this reproduces what `uv run` injected — VIRTUAL_ENV +
-    the venv bin dir prepended to PATH — so a daemon that shells out to bare
-    `python` / `meiva` still resolves into the venv. The provisioned Node
-    locations follow it, so the frontend's bare `npm` is found even when a
-    remote shell starts with only system PATH entries.
-
-    ``VIRTUAL_ENV`` selects uv's sync target. A session whose cwd is outside
-    this checkout must not receive it: its PATH remains venv-prefixed for
-    tooling, but an accidental bare uv command cannot mutate this checkout's
-    editable install. ``activate_venv=False`` applies that projection.
-
-    The dict is handed to the session backend as the child's real environment
-    (`new_session(..., env=...)`) — the out-of-band env handoff
-    that replaced the old env-file handoff (issue #974), so the activation
-    here is authoritative. The
-    daemon session still runs under a login shell (`bash -lc`) whose profile /
-    macOS `path_helper` rebuilds PATH and drops this venv prefix — so POSIX PATH
-    activation is re-applied inside the session command via
-    `venv_activation_prefix` instead.
-    """
-    env = _session_forward_env()
+# meiva:note
+# The full child env dict for a daemon/service session, built from `environ`.
+#
+# Each child gets a built dict: the registry's session forward view
+# (`_session_forward_env`) — host-scope MEIVA_* config + the ambient display
+# passthroughs — *and* PATH, which the child genuinely needs. Cluster-scope
+# values and agent-scope/non-modeled knobs are not carried (positive
+# allowlist, Task #856 Phase C / audit F-s3-4): the child re-sources them at
+# its own boot, so a spawner's frozen copy is redundant and a third-party
+# library that reads os.environ directly would only ever see a stale one.
+#
+# Also activates the venv the way `uv run` used to: service cmds now exec the
+# venv interpreter directly (`.venv/bin/python -m …`, no resident `uv run`
+# parent per daemon), so this reproduces what `uv run` injected — VIRTUAL_ENV +
+# the venv bin dir prepended to PATH — so a daemon that shells out to bare
+# `python` / `meiva` still resolves into the venv. The provisioned Node
+# locations follow it, so the frontend's bare `npm` is found even when a
+# remote shell starts with only system PATH entries.
+#
+# ``VIRTUAL_ENV`` selects uv's sync target. A session whose cwd is outside
+# this checkout must not receive it: its PATH remains venv-prefixed for
+# tooling, but an accidental bare uv command cannot mutate this checkout's
+# editable install. ``activate_venv=False`` applies that projection.
+#
+# The dict is handed to the session backend as the child's real environment
+# (`new_session(..., env=...)`) — the out-of-band env handoff
+# that replaced the old env-file handoff (issue #974), so the activation
+# here is authoritative. The
+# daemon session still runs under a login shell (`bash -lc`) whose profile /
+# macOS `path_helper` rebuilds PATH and drops this venv prefix — so POSIX PATH
+# activation is re-applied inside the session command via
+# `venv_activation_prefix` instead.
+def forward_env_dict(environ: Mapping[str, str], *, activate_venv: bool = True) -> dict[str, str]:
+    env = _session_forward_env(environ)
     # Venv activation (the `uv run` injection this dict reproduces): the
     # allowlist never carried PATH/VIRTUAL_ENV, so the child must get them here.
     from base.host.runtime_interpreter import runtime_venv
@@ -215,7 +215,7 @@ def forward_env_dict(*, activate_venv: bool = True) -> dict[str, str]:
     venv_bin = venv / get_backend().venv_bin_dir_name()
     if activate_venv:
         env["VIRTUAL_ENV"] = str(venv)
-    env["PATH"] = str(venv_bin) + os.pathsep + frontend_toolchain_path(os.environ.get("PATH", ""))
+    env["PATH"] = str(venv_bin) + os.pathsep + frontend_toolchain_path(environ.get("PATH", ""))
     return env
 
 

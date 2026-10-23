@@ -15,6 +15,7 @@ from base.cluster import session_name
 from base.cluster.machine import MachineIdentity, MachineRoles
 from base.config import settings
 from base.deploy import start_trace
+from base.host.env.registry import process_environment
 from base.host.permissions_helper.client import HelperFactory
 from base.host.system.hostport import Host
 from base.sessions.helperproc import HELPER_PROTOCOLS, helper_wire_ok
@@ -106,10 +107,11 @@ def root_tree_roster(
 
 def root_client(*, timeout: float = 5.0) -> Any:
     """A blocking client bound to this cluster's root control socket."""
-    from base.native_process.root_control.client import RootClient
+    from base.native_process.root_control.client import RootClient, caller_identity
     from base.paths import meiva_home, root_run_dir
 
-    return RootClient(root_run_dir(meiva_home()) / _ROOT_SOCKET_NAME, timeout=timeout)
+    socket = root_run_dir(meiva_home()) / _ROOT_SOCKET_NAME
+    return RootClient(socket, caller=caller_identity(process_environment()), timeout=timeout)
 
 
 def root_status(client: Any) -> dict[str, Any] | None:
@@ -203,7 +205,7 @@ def root_child_env() -> dict[str, str]:
     """The root env."""
     from base.sessions.env_forwarding import managed_service_env
 
-    return managed_service_env(settings.general.service_path)
+    return managed_service_env(settings.general.service_path, environ=process_environment())
 
 
 def tree_manifest(

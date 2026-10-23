@@ -71,11 +71,7 @@ from base.telemetry.delivery.reporting import (
 )
 from base.telemetry.emitter import emit, pipeline_bound
 from base.telemetry.metrics import ci_runs_metrics
-from base.telemetry.observability import (
-    cluster_label,
-    endpoint_override_is_explicit,
-    gateway_observability_home,
-)
+from base.telemetry.observability import cluster_label, gateway_observability_home
 from base.telemetry.otlp import telemetry_otlp_metrics
 from base.telemetry.otlp.telemetry_otlp_defer import ChildDeferral
 from base.telemetry.otlp.telemetry_otlp_gauges import (
@@ -214,9 +210,12 @@ METRIC_DISPOSITION: dict[tuple[str, str], str | None] = {
 NO_EMITTER = "_no_emitter"
 
 
-def observability_export_allowed(machine: MachineIdentity, *, home: Path) -> bool:
-    """Decide export eligibility from the caller's machine and unit home."""
-    if endpoint_override_is_explicit("MEIVA_TELEMETRY_OTLP_ENDPOINT"):
+# meiva:note
+# Decide export eligibility from the caller's machine, unit home and environment.
+def observability_export_allowed(
+    machine: MachineIdentity, *, home: Path, endpoint_explicit: bool
+) -> bool:
+    if endpoint_explicit:
         return True
     if not production_identity(machine, home=home):
         return False

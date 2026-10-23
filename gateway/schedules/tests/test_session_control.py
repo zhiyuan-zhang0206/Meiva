@@ -6,6 +6,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from base.cluster import session_name
+from base.host.env.registry import process_environment
 from base.sessions.backend import get_shell_backend
 from base.sessions.env_forwarding import forward_env_dict
 from base.sessions.pty.tests.pty_service import PtyServiceProcess
@@ -26,7 +27,7 @@ def test_capture_reads_the_live_sessions_pane(
         session_name("schedule-123"),
         "echo SCHEDULE_OUTPUT; sleep 30",
         tmp_path,
-        env=forward_env_dict(),
+        env=forward_env_dict(process_environment()),
     )
 
     def captured() -> bool:

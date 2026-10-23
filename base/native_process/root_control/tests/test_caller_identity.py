@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+from pathlib import Path
 
 import pytest
 
@@ -74,9 +75,18 @@ def test_identity_records_names_not_values() -> None:
     )
 
     assert names == ["SOME_TOKEN"]
-    identity = client.caller_identity()
+    identity = client.caller_identity(
+        {
+            "SOME_TOKEN": "value-that-must-not-leak",
+            "MEIVA_AGENT_ID": "7",
+            "MEIVA_OPERATION_ID": "op-1",
+        }
+    )
     assert "value-that-must-not-leak" not in json.dumps(identity)
     assert identity["pid"] == os.getpid()
+    assert identity["agent_id"] == "7"
+    assert identity["operation_id"] == "op-1"
+    assert identity["env_keys"] == ["SOME_TOKEN"]
 
 
 def test_redaction_covers_attached_and_underscored_forms() -> None:
@@ -103,3 +113,10 @@ def test_redaction_covers_attached_and_underscored_forms() -> None:
         "--keyword",
         "kept",
     ]
+
+
+def test_a_state_verb_without_a_caller_is_refused_before_dialing(tmp_path: Path) -> None:
+    unreachable = client.RootClient(tmp_path / "absent.sock")
+
+    with pytest.raises(client.RootClientError, match="needs the client's caller identity"):
+        unreachable.down("gateway")

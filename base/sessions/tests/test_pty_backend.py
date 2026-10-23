@@ -25,8 +25,10 @@ import pytest
 
 import base.sessions.backend as sb
 from base.host.atomic_io import SYSTEM_FS, AtomicWriter
+from base.host.env.registry import process_environment
 from base.paths import meiva_home
 from base.sessions.backend import PosixProcSessionBackend, PtySessionBackend
+from base.sessions.env_forwarding import forward_env_dict
 from base.sessions.protocol import SessionBackend
 from base.sessions.pty import allocation_freeze, client
 from base.sessions.pty.client import PtyClientConfig
@@ -123,10 +125,14 @@ def test_new_session_is_idempotent_for_a_live_session(unit_home: Path) -> None:
     assert second == first
 
 
+# meiva:note
+# The caller-built forward projection is enough for a shell that runs commands.
 @pytest.mark.usefixtures("pty_service")
-def test_new_session_without_env_creates_the_standard_projection(unit_home: Path) -> None:
-    """`env` omitted: the backend builds the standard forward projection itself."""
-    assert _backend().new_session(_NAME, "", unit_home) is True
+def test_new_session_with_the_standard_projection_gets_a_working_shell(unit_home: Path) -> None:
+    assert (
+        _backend().new_session(_NAME, "", unit_home, env=forward_env_dict(process_environment()))
+        is True
+    )
     type_line(_NAME, "echo projection-ready")
     output_until(_NAME, "projection-ready")
 

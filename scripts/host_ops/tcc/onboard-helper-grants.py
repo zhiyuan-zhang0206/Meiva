@@ -189,9 +189,10 @@ def helper_client() -> Any:
 
 
 def child_env() -> dict[str, str]:
+    from base.host.env.registry import process_environment
     from base.sessions import env_forwarding
 
-    return env_forwarding.forward_env_dict(activate_venv=False)
+    return env_forwarding.forward_env_dict(process_environment(), activate_venv=False)
 
 
 def spawn_child(client: Any, workdir: Path, name: str, argv: list[str], tag: str) -> int:
