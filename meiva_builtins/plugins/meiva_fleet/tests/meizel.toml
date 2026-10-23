@@ -24,4 +24,3 @@ exports = ["registry_support.py", "task_registry"]
 "test_owned_configuration.py#monkeypatch.setattr base.host.env.bootstrap.config_source_is_local" = 3
 "test_owned_configuration.py#monkeypatch.setattr base.host.env.bootstrap.should_fetch_from_gateway" = 1
 "test_plugin_config_admin.py#monkeypatch.setattr base.packages.plugin_config_admin.config_owners" = 1
-"test_task_registry.py#monkeypatch.setattr base.config.settings.general.timezone" = 1

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import builtins
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from base.agents.tasks import priority as _task_priority
@@ -58,7 +59,9 @@ _resolve_create_args = _task_priority.resolve_create_args
 def _append_note_to_results(cur: psycopg.Cursor, task_id: int, note: str) -> None:
     """Append a timestamped note line to a task's results within the
     current transaction.  Caller must hold FOR UPDATE on the row."""
-    line = task_note_line(note)
+    from meiva.sdk_surface import settings as sdk_settings
+
+    line = task_note_line(note, clock=sdk_settings.clock(), now=datetime.now(UTC))
     cur.execute(
         "SELECT results FROM agent_tasks WHERE id = %s FOR UPDATE",
         (task_id,),
