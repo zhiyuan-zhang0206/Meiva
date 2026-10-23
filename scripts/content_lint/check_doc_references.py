@@ -515,12 +515,12 @@ def main(
     commands: dict[tuple[str, ...], set[str]] | None = None,
     docs: Sequence[Path] | None = None,
 ) -> int:
-    repo = repo.resolve()
+    repo = repo.absolute()
     cmds = dict(meiva_flags() if commands is None else commands)
     for script in (repo / "scripts").glob("*.sh"):
         cmds[(script.name,)] = shell_flags(script)
 
-    doc_list = tracked_docs(repo) if docs is None else list(docs)
+    doc_list = tracked_docs(repo) if docs is None else [doc.absolute() for doc in docs]
     nodes = okf_nodes(repo)
     problems: list[str] = []
     for doc in doc_list:
