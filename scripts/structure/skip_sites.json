@@ -1,0 +1,205 @@
+{
+  "base/deploy/git/tests/test_worktree_guard.py": [
+    "skip('requires a case-insensitive filesystem (macOS APFS)')"
+  ],
+  "base/deploy/release/tests/test_editable_install.py": [
+    "skipif(shutil.which('uv') is None)"
+  ],
+  "base/deploy/tests/test_migration_authority.py": [
+    "skipif(os.geteuid() == 0)"
+  ],
+  "base/host/converge/tests/test_google_drive.py": [
+    "skipif(os.geteuid() == 0)"
+  ],
+  "base/host/tests/test_config_validators.py": [
+    "skipif(bool(os.environ.get('DISPLAY') or os.environ.get('WAYLAND_DISPLAY')))"
+  ],
+  "base/lm/harness/deepseek/tests/test_usage.py": [
+    "importorskip('zstandard')"
+  ],
+  "base/native_process/tests/test_os_platform.py": [
+    "skipif(not plat.is_macos())"
+  ],
+  "base/native_process/tests/test_proc_tree.py": [
+    "skipif(not is_linux())",
+    "skipif(not is_linux())",
+    "skipif(sys.platform != 'darwin')",
+    "skipif(sys.platform != 'darwin')"
+  ],
+  "base/native_process/tests/test_proc_tree_identity.py": [
+    "skipif(sys.platform != 'linux')"
+  ],
+  "base/native_process/tests/test_pytest_env_locale.py": [
+    "skipif(not plat.is_macos())"
+  ],
+  "base/sessions/tests/test_daemon_venv_activation.py": [
+    "skipif(shutil.which('bash') is None)"
+  ],
+  "base/sessions/tests/test_hosting.py": [
+    "skipif(not is_linux())"
+  ],
+  "base/sessions/tests/test_posixproc.py": [
+    "skipif(not is_linux())",
+    "skipif(not is_linux())",
+    "skipif(sys.platform != 'darwin')"
+  ],
+  "base/sessions/tests/test_subreaper_contract.py": [
+    "skipif(sys.platform != 'linux')"
+  ],
+  "base/tests/test_qwen_live_smoke.py": [
+    "skipif(not _LIVE_KEY)"
+  ],
+  "cli/commands/agents/tests/test_impersonation_dsh_relay.py": [
+    "skipif(shutil.which('node') is None)",
+    "skipif(shutil.which('node') is None)"
+  ],
+  "cli/commands/data_plane/tests/instance/test_host_dependencies.py": [
+    "skipif(not Path('/run/systemd/system').is_dir())"
+  ],
+  "cli/commands/data_plane/tests/test_pooler_clients.py": [
+    "skipif(not pgbouncer_available())"
+  ],
+  "cli/commands/data_plane/tests/test_pooler_stop.py": [
+    "skip('native PgBouncer is not installed')"
+  ],
+  "cli/commands/extensions/tests/test_external_skills_adversarial.py": [
+    "skipif(not hasattr(Path, 'chmod'))"
+  ],
+  "cli/commands/extensions/tests/test_mcp_install.py": [
+    "skipif(shutil.which('uv') is None)",
+    "skipif(shutil.which('uv') is None)"
+  ],
+  "cli/commands/lifecycle/tests/converge_host/test_converge.py": [
+    "skipif(os.name == 'nt')"
+  ],
+  "cli/commands/lifecycle/tests/stop/test_data_plane_stop.py": [
+    "skip('native pgbouncer is not installed')",
+    "skip('native pgbouncer is not installed')",
+    "skip('native pgbouncer is not installed')",
+    "skip('this host has no non-loopback address for the reachable bind')",
+    "skipif(sys.platform != 'linux')"
+  ],
+  "cli/commands/tests/test_single_box.py": [
+    "skipif(not (Path(base_pooler.pgbouncer_bin()).exists() or shutil.which(base_pooler.pgbouncer_bin())))"
+  ],
+  "cli/tests/fleet_update/test_fleet_update.py": [
+    "skip(f'{shell} is not installed')",
+    "skip(f'{shell} is not installed')",
+    "skip(f'{shell} is not installed')"
+  ],
+  "meiva/self/harness/tests/test_registration.py": [
+    "skip('this session exports a harness handle of its own')"
+  ],
+  "meiva/tests/namespaces/sdk_surface/test_help_profile.py": [
+    "skip('no model declares a help doc style yet')"
+  ],
+  "meiva/tests/namespaces/self/test_attach_import.py": [
+    "skip(\"a real harness registration already owns this probe's agent id\")"
+  ],
+  "meiva/tests/test_files.py": [
+    "skipif(os.geteuid() == 0)"
+  ],
+  "meiva_builtins/plugins/meiva_code/tests/test_meiva_code_walk.py": [
+    "skipif(not subprocess.run(['which', 'git'], capture_output=True, check=False).stdout)"
+  ],
+  "meiva_builtins/plugins/meiva_syntax_fix/tests/test_syntax_fix.py": [
+    "skipif(sys.version_info < (3, 12))",
+    "skipif(sys.version_info < (3, 12))",
+    "skipif(sys.version_info < (3, 12))",
+    "skipif(sys.version_info < (3, 12))"
+  ],
+  "meiva_builtins/skills/tests/test_gmail.py": [
+    "skip('Keychain entry not available in this environment')",
+    "skip('Keychain entry not available')"
+  ],
+  "meiva_builtins/skills/tests/test_page_reply.py": [
+    "skip('Node.js is required to execute the shipped browser resource')"
+  ],
+  "scripts/provision/tests/test_apt_lock.py": [
+    "skipif(not Path('/proc').is_dir())"
+  ],
+  "scripts/tests/test_setup_worktree.py": [
+    "skip('a system uv is installed in /usr/bin')"
+  ],
+  "services/agent_runner/agent_host/tests/runtime/test_host_pool_capacity.py": [
+    "skipif(not pgbouncer_available())"
+  ],
+  "services/agent_runner/agent_ops/tests/test_to_user_watch.py": [
+    "skip('Root can read mode-000 directories')"
+  ],
+  "services/backup/tests/test_backup.py": [
+    "skipif(not backup.pg_tool('pg_dump').exists())"
+  ],
+  "services/backup/tests/test_restore_drill.py": [
+    "skipif(not restore_drill.pg_tool('pg_dump').exists())"
+  ],
+  "services/desktop/permissions_helper/tests/permissions_helper/test_grant_prompt_once.py": [
+    "skip('swiftc is unavailable')",
+    "skipif(sys.platform != 'darwin')",
+    "skipif(sys.platform != 'darwin')",
+    "skipif(sys.platform != 'darwin')",
+    "skipif(sys.platform != 'darwin')"
+  ],
+  "services/desktop/permissions_helper/tests/test_helper_retirement.py": [
+    "skipif(sys.platform != 'darwin' or shutil.which('swift') is None)",
+    "skipif(sys.platform != 'darwin' or shutil.which('swiftc') is None)"
+  ],
+  "services/desktop/permissions_helper/tests/test_native_ax_actions.py": [
+    "skipif(sys.platform != 'darwin' or shutil.which('swift') is None)"
+  ],
+  "services/desktop/permissions_helper/tests/test_native_ax_selection.py": [
+    "skipif(sys.platform != 'darwin' or shutil.which('swift') is None)"
+  ],
+  "services/desktop/permissions_helper/tests/test_native_clipboard.py": [
+    "skipif(sys.platform != 'darwin' or shutil.which('swift') is None)"
+  ],
+  "services/desktop/permissions_helper/tests/test_native_drag.py": [
+    "skipif(sys.platform != 'darwin' or shutil.which('swift') is None)"
+  ],
+  "services/desktop/permissions_helper/tests/test_native_indicator.py": [
+    "skipif(sys.platform != 'darwin' or shutil.which('swift') is None)"
+  ],
+  "services/desktop/permissions_helper/tests/test_native_input.py": [
+    "skipif(sys.platform != 'darwin' or shutil.which('swift') is None)"
+  ],
+  "services/desktop/permissions_helper/tests/test_native_mouse_hold.py": [
+    "skipif(sys.platform != 'darwin' or shutil.which('swift') is None)"
+  ],
+  "services/desktop/permissions_helper/tests/test_native_observations.py": [
+    "skipif(sys.platform != 'darwin' or shutil.which('swift') is None)"
+  ],
+  "services/entrypoints/gate/tests/test_gate.py": [
+    "skip('node is not installed')"
+  ],
+  "services/supervision/meiva_root/tests/test_meiva_root_daemon.py": [
+    "skip('native Linux systemd required')",
+    "skip('native Linux systemd required')",
+    "skip('native systemd test requires passwordless sudo')",
+    "skip('this host has its own meiva-boot unit; the test would act on it')"
+  ],
+  "tests/components/cli/test_pgbouncer_wire.py": [
+    "skip('127.0.0.2 needs an lo0 alias on macOS')",
+    "skipif(not pgbouncer_available())"
+  ],
+  "tests/components/lifecycle/db_authority/test_backup_owner.py": [
+    "skipif(not (Path(pooler.pgbouncer_bin()).exists() or shutil.which(pooler.pgbouncer_bin())))"
+  ],
+  "tests/components/services/test_meiva_root_custody_contract.py": [
+    "skipif(sys.platform != 'darwin' or shutil.which('swift') is None)"
+  ],
+  "tests/e2e/visual/test_layout_invariants.py": [
+    "skip('the inspector scroll matrix requires deterministic stubbed sections')"
+  ],
+  "tests/e2e/visual/test_mobile_no_horizontal_overflow.py": [
+    "skipif(not _OVERRIDE_BASE_URL)"
+  ],
+  "tests/e2e/visual/test_spawn_button_mobile.py": [
+    "skipif(not _OVERRIDE_BASE_URL)"
+  ],
+  "tests/harness/test_ci_rerun_workflow.py": [
+    "skipif(BASH is None and sys.platform == 'darwin')"
+  ],
+  "tests/integration/test_grafana_native_runtime.py": [
+    "skip('set MEIVA_TEST_GRAFANA_BIN and MEIVA_TEST_GRAFANA_HOME to run the native Grafana contract')"
+  ]
+}

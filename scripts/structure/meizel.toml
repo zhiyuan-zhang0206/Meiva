@@ -1,10 +1,10 @@
-exports = ["baseline_shards.py", "budgets", "imports", "lazy_modules.py", "locality.py", "placement.py", "tests"]
+exports = ["baseline_shards.py", "budgets", "imports", "lazy_modules.py", "locality.py", "placement.py", "skip_sites.py", "tests"]
 
 [uses]
 "cochange.py" = ["imports"]
 "locality.py" = ["baseline_shards.py"]
 "placement.py" = ["imports", "service_units.py"]
 "placement_evidence.py" = ["imports", "placement.py"]
-"tests" = ["baseline_shards.py", "cochange.py", "imports", "locality.py", "placement.py", "placement_evidence.py", "service_units.py", "tests_location.py", "tests_location_allowed.py", "tests_location_suggest.py"]
+"tests" = ["baseline_shards.py", "cochange.py", "imports", "locality.py", "placement.py", "placement_evidence.py", "service_units.py", "skip_sites.py", "tests_location.py", "tests_location_allowed.py", "tests_location_suggest.py"]
 "tests_location.py" = ["placement.py", "placement_evidence.py", "tests_location_allowed.py", "tests_location_suggest.py"]
 "tests_location_suggest.py" = ["placement.py", "placement_evidence.py", "tests_location_allowed.py"]
