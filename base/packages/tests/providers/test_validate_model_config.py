@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 from langchain_core.language_models.chat_models import BaseChatModel
 
@@ -225,6 +227,35 @@ class TestValidateModelConfig:
             key_present_fn=lambda _k: False,
         )
         assert result == "claude-sonnet-5"
+
+    def test_present_key_does_not_read_the_dotenv_fallback(
+        self, model_catalog: ModelCatalog, unit_home: Path
+    ) -> None:
+        env_file = unit_home / ".env"
+        prior = env_file.read_bytes() if env_file.exists() else None
+        env_file.write_bytes(b"ANTHROPIC_API_KEY=\xff\n")
+        try:
+            assert (
+                validate_model_config(
+                    model="claude-sonnet-5",
+                    catalog=model_catalog,
+                    llm_override="",
+                    key_present_fn=lambda _key: True,
+                )
+                == "claude-sonnet-5"
+            )
+            with pytest.raises(UnicodeDecodeError):
+                validate_model_config(
+                    model="claude-sonnet-5",
+                    catalog=model_catalog,
+                    llm_override="",
+                    key_present_fn=lambda _key: False,
+                )
+        finally:
+            if prior is None:
+                env_file.unlink()
+            else:
+                env_file.write_bytes(prior)
 
     def test_config_model_with_missing_key_raises(self, model_catalog: ModelCatalog) -> None:
         with pytest.raises(ValueError, match="ANTHROPIC_API_KEY"):

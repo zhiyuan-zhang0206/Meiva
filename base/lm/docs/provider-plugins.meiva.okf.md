@@ -79,7 +79,8 @@ both literal rate tables without executing plugin code.
   `validate_effort`; `require_key(key_env)` fails at build time if the bootstrap
   environment lacks the key.
 - The spawn boundary reads a plugin key from `os.environ` first, then the local
-  cluster `.env` fallback; split runners
+  cluster `.env` fallback only when that key is absent; an available key does
+  not depend on reading the fallback file. Split runners
   receive enabled bindings' present keys through bootstrap plugin-secrets, and
   a single-box agent child receives only those declared keys from its parent's
   env. A provider-plugin key is deliberately not a Settings field. `build_chat_model`,

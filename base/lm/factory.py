@@ -285,6 +285,8 @@ def _ensure_provider_key(
         # loads its own .env into the process env at boot. The file
         # fallback covers the gateway profile that pops provider keys
         # from os.environ (Task #856 / regression #1562).
+        if key_present_fn(env_var):
+            return
         if env_aliases is None:
             from base.host.env.dotenv_file import read_env_aliases
 
@@ -292,7 +294,7 @@ def _ensure_provider_key(
         else:
             aliases = env_aliases
 
-        if key_present_fn(env_var) or env_var in aliases:
+        if env_var in aliases:
             return
         raise ValueError(
             f"{effective_model} requires {env_var} which is not "
