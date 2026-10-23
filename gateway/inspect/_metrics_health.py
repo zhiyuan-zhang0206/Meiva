@@ -68,13 +68,14 @@ def note_inspect_metrics_coverage(
     metadata: InspectMetricsMetadata,
     *,
     spawned_at: datetime,
-    is_historical: Callable[..., bool] = window_is_historical,
+    is_historical: Callable[..., bool] | None = None,
 ) -> None:
     """Log every coverage limit of one read; the unexpected ones as the
     ``inspect_metrics_coverage_gap`` WARNING event. Never raises — see the
     module docstring."""
+    historical_fn = window_is_historical if is_historical is None else is_historical
     try:
-        historical = is_historical(metadata, spawned_at=spawned_at)
+        historical = historical_fn(metadata, spawned_at=spawned_at)
         for family, condition, availability in conditions(metadata):
             if _unexpected(condition, historical=historical):
                 logger.warning(

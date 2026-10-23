@@ -99,11 +99,12 @@ async def terminate_agent_with_open_tasks(
     pool: ConnectionPool,
     *,
     db: Database,
-    forward_op: Callable[..., Any] = forward_to_home_machine,
+    forward_op: Callable[..., Any] | None = None,
     read_open_tasks: Callable[[ConnectionPool, int], OpenTasksHint | None] | None = None,
 ) -> TerminateAgentResponse:
 
-    forwarded = await forward_op(
+    forwarder = forward_to_home_machine if forward_op is None else forward_op
+    forwarded = await forwarder(
         agent_id, f"/api/agents/{agent_id}/terminate", body.model_dump(), db=db, pool=pool
     )
     response = TerminateAgentResponse.model_validate(forwarded)

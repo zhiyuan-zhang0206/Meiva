@@ -50,17 +50,15 @@ PLUGINS_DIR = Path(__file__).resolve().parents[2] / "meiva_builtins" / "plugins"
 
 
 def enabled_inspector_modules(
-    plugins_dir: Path = PLUGINS_DIR,
+    plugins_dir: Path | None = None,
     *,
-    installed_dirs: Callable[[], Mapping[str, Path]] = enable_config.installed_plugin_dirs,
-    runtime_loader: Callable[[set[str]], enable_config.PluginsConfig] = (
-        enable_config.load_for_runtime
-    ),
+    installed_dirs: Callable[[], Mapping[str, Path]] | None = None,
+    runtime_loader: Callable[[set[str]], enable_config.PluginsConfig] | None = None,
 ) -> list[Path]:
     """``inspector.py`` of every ENABLED builtin plugin, sorted — the import
     set of one registry build."""
     return enabled_face_files(
-        plugins_dir,
+        PLUGINS_DIR if plugins_dir is None else plugins_dir,
         "inspector.py",
         installed_dirs=installed_dirs,
         runtime_loader=runtime_loader,
@@ -116,10 +114,11 @@ def widgets_for_agent(
     pool: ConnectionPool[Any],
     agent_id: int,
     *,
-    loader: Callable[[], list[InspectWidgetSpec]] = load_inspect_widgets,
+    loader: Callable[[], list[InspectWidgetSpec]] | None = None,
 ) -> list[InspectWidgetResult]:
     """Sync twin of the widgets endpoint — runs via asyncio.to_thread."""
-    specs = loader()
+    loader_fn = load_inspect_widgets if loader is None else loader
+    specs = loader_fn()
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute("SELECT 1 FROM agents_meta WHERE id = %s", (agent_id,))
         if cur.fetchone() is None:
