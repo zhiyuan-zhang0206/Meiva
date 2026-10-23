@@ -1,4 +1,4 @@
-exports = ["fakes.py"]
+exports = ["fakes.py", "live_capture.py"]
 
 [uses]
 "test_publish_best_effort.py" = ["fakes.py"]

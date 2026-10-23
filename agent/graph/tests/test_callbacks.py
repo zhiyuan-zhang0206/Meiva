@@ -22,7 +22,6 @@ Tests directly call `process_chunk(chunk)` + `finish()` + assert emitted args.
 from langchain_core.messages import AIMessageChunk
 
 from agent.graph._callbacks import RedisStreamHandler
-from agent.graph.node_log.tests.live_events import LiveEvents
 from base.agents.observation.turn_progress import TurnProgress
 from base.events.live.projection import (
     ChatDelta,
@@ -33,6 +32,7 @@ from base.events.live.projection import (
     ReasoningDelta,
     ReasoningStart,
 )
+from base.events.live.tests.live_capture import LiveEvents
 
 # Test msg_idx — different tests use the same value, item_id is easy to compare
 MSG_IDX = 5

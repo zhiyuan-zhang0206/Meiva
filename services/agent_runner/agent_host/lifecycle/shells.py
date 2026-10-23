@@ -13,6 +13,7 @@ from base.events.live.announce import publish_agent_updated
 from base.events.live.bus import EventBus
 from base.log import logger
 from base.native_process.runtime_incarnation import RuntimeIncarnation
+from base.paths import meiva_home
 
 
 # meiva:note
@@ -65,7 +66,7 @@ async def apply_lifecycle_command(
             await publish_agent_updated(bus, applied.agent_id)
         finally:
             try:
-                await release_browser_pages(applied.agent_id)
+                await release_browser_pages(applied.agent_id, home=meiva_home())
             finally:
                 if applied.shell_cutoff is not None:
                     await asyncio.to_thread(
@@ -91,5 +92,5 @@ async def reap_and_announce_corpses(
                 event="corpse_reaper_publish_failed",
                 agent_id=corpse.agent_id,
             )
-        await release_browser_pages(corpse.agent_id)
+        await release_browser_pages(corpse.agent_id, home=meiva_home())
     return reaped

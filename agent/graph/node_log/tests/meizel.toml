@@ -1,6 +1,3 @@
-exports = ["live_events.py"]
 
 [uses]
-"conftest.py" = ["live_events.py"]
-"test_lifecycle.py" = ["live_events.py"]
 "test_stall.py" = ["stall_child.py"]

@@ -13,10 +13,10 @@ from opentelemetry.sdk.trace import Span, SpanProcessor, TracerProvider
 from base.cluster.machine import MachineIdentity
 from base.config import settings
 from base.lm.usage import emit_billing_event
-from base.packages.tests.lm.providers.billing_runtime import BillingRuntime
 from base.paths import meiva_home
 from base.telemetry import tracing
 from base.telemetry.otlp.trace_config import TraceConfig
+from base.telemetry.tests.capture.armed_tracing import BillingRuntime
 
 
 def disabled() -> None:

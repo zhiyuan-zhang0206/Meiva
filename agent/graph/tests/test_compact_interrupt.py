@@ -21,7 +21,6 @@ from agent.graph.hooks.tests.scripted_model import HangingSummarizer, ScriptedMo
 from agent.graph.interrupt.tests.queued_commands import queue_command
 from agent.graph.llm.node import llm_node
 from agent.graph.llm_errors import LlmLedger
-from agent.graph.node_log.tests.live_events import LiveEvents
 from agent.state import AgentState, CompactState, checkpoint_msgpack_allowlist
 from base.agents.context import MeivaContext
 from base.agents.tests.units import spawn_agent
@@ -32,6 +31,7 @@ from base.config.tests.configuration import defaults
 from base.db import Database, create_agent
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
+from base.events.live.tests.live_capture import LiveEvents
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
 from base.native_process.stop_timing import RESTART_INTERRUPT_GRACE_S

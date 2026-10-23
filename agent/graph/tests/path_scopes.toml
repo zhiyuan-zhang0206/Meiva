@@ -5,7 +5,7 @@
 ]
 "base.paths.tests.homes" = ["."]
 "base.cluster.machine.tests.identity" = ["."]
-"agent.graph.node_log.tests.live_events" = [
+"base.events.live.tests.live_capture" = [
     "test_callbacks.py",
     "test_compact_interrupt.py",
     "test_graph_stream.py",

@@ -1,17 +1,13 @@
 exports = ["cancel_fixture.py", "real_child"]
 
 [uses]
-"conftest.py" = ["event_capture.py"]
-"process_inputs.py" = ["event_capture.py"]
-"real_child" = ["event_capture.py", "process_inputs.py"]
-"test_cancel.py" = ["cancel_fixture.py", "event_capture.py", "process_inputs.py"]
-"test_cross_agent_findings.py" = ["event_capture.py", "process_inputs.py"]
+"real_child" = ["process_inputs.py"]
+"test_cancel.py" = ["cancel_fixture.py", "process_inputs.py"]
+"test_cross_agent_findings.py" = ["process_inputs.py"]
 "test_exec_editable_guard.py" = ["process_inputs.py"]
-"test_exec_output.py" = ["event_capture.py"]
 "test_exec_output_cap.py" = ["process_inputs.py"]
 "test_exec_process.py" = ["process_inputs.py", "resources"]
-"test_exec_turn_config.py" = ["event_capture.py"]
-"test_multiple_tool_calls.py" = ["event_capture.py", "process_inputs.py"]
+"test_multiple_tool_calls.py" = ["process_inputs.py"]
 
 [debt.first-party-patch]
 "cancel_fixture.py#monkeypatch.setattr agent.graph.exec.node.subscribe_interrupt" = 1

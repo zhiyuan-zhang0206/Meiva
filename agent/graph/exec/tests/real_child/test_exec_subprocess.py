@@ -26,9 +26,9 @@ from agent.graph.exec.node import (
     ExecOutputChunkPublisher,
     ExecTimedOut,
 )
-from agent.graph.exec.tests.event_capture import EventCapture
 from agent.graph.exec.tests.process_inputs import real_parent
 from base.config import settings
+from base.events.live.tests.live_capture import LiveEvents
 from base.host.env.dotenv_file import upsert_env
 from base.host.proc import kill_process_tree
 from base.native_process.exec_domain import ExecProcessDomain
@@ -404,9 +404,9 @@ async def test_outer_task_cancel_reaps_child_and_descendant(tmp_path: Path) -> N
 
 
 async def test_subprocess_streaming_chunks_published_incrementally(
-    tmp_path: Path, event_capture: EventCapture
+    tmp_path: Path, live_events: LiveEvents
 ) -> None:
-    publisher = ExecOutputChunkPublisher(event_capture.publisher, agent_id=_AGENT_ID, item_id="7.0")
+    publisher = ExecOutputChunkPublisher(live_events.publisher, agent_id=_AGENT_ID, item_id="7.0")
     result = await _run(
         tmp_path,
         "import time\nfor i in range(5):\n    print(f'line {i}')\n    time.sleep(0.15)",
@@ -414,16 +414,16 @@ async def test_subprocess_streaming_chunks_published_incrementally(
         chunk_publisher=publisher,
     )
     assert isinstance(result, ExecDone)
-    chunks = [event for event in await event_capture.events() if not event["keepalive"]]
+    chunks = [event for event in await live_events.events() if not event["keepalive"]]
     assert len(chunks) >= 2
     assert "".join(event["content"] for event in chunks) == result.output
     assert all(event["item_id"] == "7.0" for event in chunks)
 
 
 async def test_subprocess_silent_child_publishes_keepalive(
-    tmp_path: Path, event_capture: EventCapture
+    tmp_path: Path, live_events: LiveEvents
 ) -> None:
-    publisher = ExecOutputChunkPublisher(event_capture.publisher, agent_id=_AGENT_ID, item_id="7.0")
+    publisher = ExecOutputChunkPublisher(live_events.publisher, agent_id=_AGENT_ID, item_id="7.0")
 
     result = await _run(
         tmp_path,
@@ -434,7 +434,7 @@ async def test_subprocess_silent_child_publishes_keepalive(
 
     assert isinstance(result, ExecDone)
     assert result.output == ""
-    events = await event_capture.events()
+    events = await live_events.events()
     keepalives = [event for event in events if event["keepalive"] is True]
     assert keepalives
     assert all(event["content"] == "" for event in keepalives)

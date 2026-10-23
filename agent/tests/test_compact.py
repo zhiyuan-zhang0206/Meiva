@@ -23,7 +23,6 @@ from agent.graph.hooks.compact import (
     auto_compact_for_llm,
     compose_summary_message,
 )
-from agent.graph.node_log.tests.live_events import LiveEvents
 from agent.hooks import Hook
 from agent.state import AgentState, CompactState
 from agent.tests.scripted_model import ScriptedChatModel
@@ -34,6 +33,7 @@ from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.events.live.publisher import AgentEventPublisher
+from base.events.live.tests.live_capture import LiveEvents
 from base.host.env.agent_slices import AgentSlices
 from base.packages.plugin_providers import build_model_catalog
 from base.packages.plugins.extensions import EMPTY

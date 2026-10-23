@@ -12,7 +12,6 @@ from langgraph.graph.message import REMOVE_ALL_MESSAGES
 from psycopg_pool import AsyncConnectionPool
 
 import meiva
-from agent.graph.node_log.tests.live_events import LiveEvents
 from agent.state import ContextReset
 from base.agents.tests.units import spawn_agent
 from base.cluster.machine import MachineIdentity
@@ -20,6 +19,7 @@ from base.cluster.machine.tests.identity import machine_identity as machine_iden
 from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
+from base.events.live.tests.live_capture import LiveEvents
 from base.lm.catalog import ModelCatalog
 
 __all__ = ["committed_publishes", "compact_tail", "running_agent", "set_agent_status"]

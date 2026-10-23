@@ -2,8 +2,9 @@ import json
 import math
 from collections.abc import Callable, Mapping
 from contextlib import suppress
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal, cast
+from typing import Any, cast
 
 from pydantic import BaseModel, ValidationError
 from pydantic.fields import FieldInfo
@@ -40,9 +41,9 @@ __all__ = [
     "DuplicateRegistration",
     "InvalidConfigData",
     "InvalidConfigOverlay",
+    "OverlayPlan",
     "SchemaDriftError",
     "all_plugin_configs",
-    "apply_config_overlay",
     "bind_plugin_config",
     "config_from_image",
     "disk_image_path",
@@ -50,6 +51,7 @@ __all__ = [
     "is_per_agent_field",
     "merge_disk_image_schema",
     "overlay_config_classes",
+    "plan_config_overlay",
     "plugin_bootstrap_config",
     "process_plugin_config",
     "read_config_image",
@@ -362,38 +364,37 @@ def validate_config_overlay(
                 raise InvalidConfigOverlay(f"overlay key {field!r} {error}")
 
 
-def apply_config_overlay(
-    overlay: dict[str, object],
-    *,
-    configs: Mapping[str, BaseModel] | None = None,
-    scope: Literal["framework", "plugin", "all"] = "all",
-    set_framework_field: Callable[[str, object], None] | None = None,
-) -> dict[str, BaseModel]:
-    targets = resolve_overlay_targets(overlay, configs)
-    resolved = dict(configs or {})
-    grouped: dict[str | None, dict[str, object]] = {}
-    for key, (plugin, field) in targets.items():
-        if scope == "framework" and plugin is not None:
-            continue
-        if scope == "plugin" and plugin is None:
-            continue
-        grouped.setdefault(plugin, {})[field] = overlay[key]
+# meiva:note
+# What an overlay does, as a plan: the framework fields it assigns, in overlay order, and the
+# plugin configs after its plugin fields (a new instance per touched plugin, the others unchanged).
+#
+# Nothing is mutated here. The caller's shell sets each framework (field, value) on the
+# configuration owner it holds and raises `InvalidConfigOverlay` for a failing field; plugin
+# configs are only planned when `configs` is given.
+@dataclass(frozen=True)
+class OverlayPlan:
+    framework_fields: tuple[tuple[str, object], ...]
+    plugin_configs: dict[str, BaseModel]
 
+
+def plan_config_overlay(
+    overlay: dict[str, object], configs: Mapping[str, BaseModel] | None = None
+) -> OverlayPlan:
+    targets = resolve_overlay_targets(overlay, configs)
+    framework = tuple(
+        (field, overlay[key]) for key, (plugin, field) in targets.items() if plugin is None
+    )
+    resolved = dict(configs or {})
+    grouped: dict[str, dict[str, object]] = {}
+    for key, (plugin, field) in targets.items():
+        if plugin is not None and configs is not None:
+            grouped.setdefault(plugin, {})[field] = overlay[key]
     for plugin, updates in grouped.items():
+        instance = resolved[plugin]
         try:
-            if plugin is None:
-                if set_framework_field is None:
-                    raise RuntimeError(
-                        "framework overlay requires its configuration owner's setter"
-                    )
-                for field, value in updates.items():
-                    set_framework_field(field, value)
-            else:
-                instance = resolved[plugin]
-                resolved[plugin] = type(instance)(**{**instance.model_dump(), **updates})
+            resolved[plugin] = type(instance)(**{**instance.model_dump(), **updates})
         except ValidationError as e:
-            owner = "framework" if plugin is None else f"plugin {plugin!r}"
             raise InvalidConfigOverlay(
-                f"overlay field type validation failed ({owner}): {e}"
+                f"overlay field type validation failed (plugin {plugin!r}): {e}"
             ) from e
-    return resolved
+    return OverlayPlan(framework, resolved)

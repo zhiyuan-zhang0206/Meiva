@@ -3,13 +3,13 @@ from psycopg_pool import AsyncConnectionPool
 
 from agent.graph.claim.tests.claim_support import make_runtime, thread_config
 from agent.graph.claim.tests.cursor_fixture import fresh_snapshot_cursor as fresh_snapshot_cursor
-from agent.graph.node_log.tests.live_events import LiveEvents
 from agent.state import AgentState
 from base.agents.tests.units import spawn_agent
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
 from base.db.code_version_gate import ProcessDbGate
+from base.events.live.tests.live_capture import LiveEvents
 from base.lm.catalog import ModelCatalog
 
 

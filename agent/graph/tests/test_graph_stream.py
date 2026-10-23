@@ -27,7 +27,6 @@ from psycopg_pool import AsyncConnectionPool
 from agent.graph import LlmLedger, exec_node, llm_node
 from agent.graph.exec.output import overflow_dir
 from agent.graph.exec.process import SubprocessExecProcess
-from agent.graph.node_log.tests.live_events import LiveEvents
 from agent.state import AgentState
 from base.agents.context import MeivaContext
 from base.agents.context.identity import AgentIdentity
@@ -40,6 +39,7 @@ from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.events.live.projection import ExecOutput, ExecStart
+from base.events.live.tests.live_capture import LiveEvents
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
 from base.native_process.turn_identity import HostedTurnResources

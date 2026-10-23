@@ -9,12 +9,12 @@ import psycopg
 import pytest
 
 from base.events.live.bus import EventBus
+from base.events.live.tests.live_capture import recorded_events
 from meiva.tests.fixtures.pin_agent import pin_agent
 from meiva_builtins.plugins.meiva_fleet import task_registry
 from meiva_builtins.plugins.meiva_fleet.tests.task_registry.concurrent_claim import (
     run_against_concurrent_claim,
 )
-from meiva_builtins.plugins.meiva_fleet.tests.task_registry.live_events import recorded_events
 from meiva_builtins.plugins.meiva_fleet.tests.task_registry.notes import record_notes
 from meiva_builtins.plugins.meiva_fleet.tests.task_registry.seeds import (
     persisted_parent,

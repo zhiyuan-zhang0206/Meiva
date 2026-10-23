@@ -19,8 +19,8 @@ import pytest
 
 from agent.graph.exec.node import dispatch_exec_result
 from agent.graph.exec.output import OutputLimits, format_elapsed, wrap_code_output
-from agent.graph.exec.tests.event_capture import idle_publisher
 from base.agents.messages.inbound import InterruptReason
+from base.events.live.tests.live_capture import idle_publisher
 
 _TIMESTAMP = "[2026-05-06 14:32:05]"
 _TS = _TIMESTAMP  # shorthand

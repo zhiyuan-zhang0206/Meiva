@@ -16,8 +16,8 @@ from opentelemetry.util.types import AttributeValue
 
 from base.lm.catalog import ModelCatalog
 from base.packages.plugin_providers import build_model_catalog
-from base.packages.tests.lm.providers.billing_runtime import BillingRuntime, armed_billing
 from base.packages.tests.lm.providers.billing_sensors import disabled, failing
+from base.telemetry.tests.capture.armed_tracing import BillingRuntime, armed_billing
 
 
 def span_attributes(span: ReadableSpan) -> Mapping[str, AttributeValue]:

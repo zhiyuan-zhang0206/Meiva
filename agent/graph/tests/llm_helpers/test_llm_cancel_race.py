@@ -14,12 +14,12 @@ from psycopg_pool import AsyncConnectionPool
 from agent.graph.interrupt.tests.queued_commands import queue_command
 from agent.graph.llm.node import llm_node
 from agent.graph.llm_errors import LlmLedger
-from agent.graph.node_log.tests.live_events import LiveEvents
 from agent.graph.tests.test_llm_helpers import make_runtime
 from agent.state import AgentState
 from base.db import create_agent
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.projection import Cancelled
+from base.events.live.tests.live_capture import LiveEvents
 from base.native_process.stop_timing import RESTART_INTERRUPT_GRACE_S
 from base.native_process.turn_identity import HostedTurnResources
 from meiva.tests.fixtures.pin_agent import hosted_resources as hosted_resources

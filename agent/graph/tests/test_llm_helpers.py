@@ -28,7 +28,6 @@ from psycopg_pool import AsyncConnectionPool
 from agent.graph import llm_node
 from agent.graph.interrupt.tests.queued_commands import queue_command
 from agent.graph.llm_errors import LlmLedger
-from agent.graph.node_log.tests.live_events import LiveEvents
 from agent.graph.prompt.system_prompt import capture_meiva_overview, get_meiva_overview
 from agent.state import AgentState
 from base.agents.context import MeivaContext
@@ -39,6 +38,7 @@ from base.db import Database, create_agent
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.events.live.projection import Cancelled
+from base.events.live.tests.live_capture import LiveEvents
 from base.host.env.agent_slices import AgentSlices, LlmCallPolicy
 from base.native_process.turn_identity import HostedTurnResources
 from base.packages.plugin_providers import build_model_catalog
