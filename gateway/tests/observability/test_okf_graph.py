@@ -105,10 +105,9 @@ _ROOT = "docs/index.meiva.okf.md"
 
 
 def _parents(paths: set[str]) -> dict[str, str | None]:
-    from base.packages.docs.okf_graph import compute_parent, find_root
+    from base.packages.docs.okf_graph import compute_parent
 
-    root = find_root(paths)
-    return {p: compute_parent(p, paths, root) for p in sorted(paths)}
+    return {p: compute_parent(p, paths) for p in sorted(paths)}
 
 
 def test_layered_document_parents_to_the_layered_overview() -> None:

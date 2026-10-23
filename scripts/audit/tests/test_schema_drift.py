@@ -5,7 +5,6 @@ from scripts.audit.schema_drift import (
     classify_column,
     classify_table,
     compare,
-    render,
     schema_columns,
     strip_comments,
 )
@@ -119,7 +118,7 @@ def test_classify_column_treats_a_defaulted_column_as_historical() -> None:
 
 
 def test_render_prints_clean_without_drift() -> None:
-    assert render(Drift(), set()) == "# schema drift\n\nclean"
+    assert Drift().render(set()) == "# schema drift\n\nclean"
 
 
 def test_render_annotates_every_finding_with_its_class() -> None:
@@ -128,7 +127,7 @@ def test_render_annotates_every_finding_with_its_class() -> None:
         extra_columns=[("agents_meta", "watchers", "NO|'[]'::jsonb")],
         missing_columns=[("agents_meta", "retired")],
     )
-    assert render(drift, {"agents_meta"}).splitlines() == [
+    assert drift.render({"agents_meta"}).splitlines() == [
         "# schema drift",
         "",
         "extra table   checkpoints  [design/runtime-ddl]",

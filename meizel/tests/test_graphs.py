@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from meizel.graph.graphs import feedback_edges, is_acyclic, unneeded_back_edges
+from meizel.graph.graphs import feedback_edges, strongly_connected, unneeded_back_edges
 
 
 def without(graph: dict[str, list[str]], edges: list[tuple[str, str]]) -> dict[str, list[str]]:
@@ -10,7 +10,7 @@ def without(graph: dict[str, list[str]], edges: list[tuple[str, str]]) -> dict[s
 def test_an_acyclic_graph_has_no_feedback_edges() -> None:
     graph = {"a": ["b", "c"], "b": ["c"], "c": []}
     assert feedback_edges(graph) == []
-    assert is_acyclic(graph)
+    assert not strongly_connected(graph)
 
 
 def test_removing_the_feedback_edges_leaves_the_graph_acyclic() -> None:
@@ -22,8 +22,8 @@ def test_removing_the_feedback_edges_leaves_the_graph_acyclic() -> None:
         "e": [],
     }
     back = feedback_edges(graph)
-    assert not is_acyclic(graph)
-    assert is_acyclic(without(graph, back))
+    assert strongly_connected(graph)
+    assert not strongly_connected(without(graph, back))
     assert len(back) <= 2
 
 

@@ -11,6 +11,7 @@ exports = ["auth.py", "tests", "transport.py"]
 [purity]
 "." = "strict-to-be"
 "__init__.py" = "strict"
+"mapping.py" = "strict"
 
 [debt.impure-call]
 "session.py#async def __aenter__" = 1
@@ -44,6 +45,3 @@ exports = ["auth.py", "tests", "transport.py"]
 "config.py#base/host/env/harness_binaries.py" = 1
 "session.py#base/lm/harness/process.py" = 1
 "session.py#base/lm/harness/registry.py" = 1
-
-[debt.wide-public-surface]
-"mapping.py#public-surface" = 1

@@ -351,4 +351,4 @@ def test_the_closed_lists_carry_a_reason_for_every_entry() -> None:
     ],
 )
 def test_a_baseline_key_must_name_a_known_rule_and_a_name(target: str, known: bool) -> None:
-    assert ambient_state.is_target(target) is known
+    assert (ambient_state.site_message(target) is not None) is known

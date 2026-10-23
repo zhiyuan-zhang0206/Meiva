@@ -6,7 +6,7 @@ from collections import defaultdict
 from collections.abc import Iterable
 from dataclasses import dataclass
 
-from meizel.contracts.debt import PURITY_CODES, edge_key, file_key, source_of
+from meizel.contracts.debt import PURITY_CODES, file_key, source_of
 from meizel.contracts.manifest import Manifest, effective_purity, manifest_path, within
 from meizel.contracts.policy import Policy
 from meizel.graph.graphs import reachable
@@ -18,13 +18,11 @@ from meizel.language.scan import FileScan
 
 __all__ = [
     "Projection",
-    "cycle_edge",
     "is_private",
     "judge",
     "paid_strict_to_be",
     "project",
     "purity_diagnostics",
-    "relative",
     "stale_exports",
 ]
 
@@ -51,6 +49,35 @@ class Projection:
             return False
         owner = fact.dst.rpartition("/")[0]
         return not owner or fact.src.startswith(f"{owner}/")
+
+    # meiva:note
+    # The fact's source and target, relative to the directory that judges it.
+    def relative(self) -> tuple[str, str]:
+        cut = len(self.lca) + 1 if self.lca else 0
+        return self.fact.src[cut:], self.fact.dst[cut:]
+
+    # meiva:note
+    # The debt a violation of this projection would be recorded as, owned by its `lca`.
+    def debt_key(self, name: str | None = None) -> DebtKey:
+        src, dst = self.relative()
+        key = f"{src} -> {dst}"
+        return DebtKey(self.lca, f"{key}#{name}" if name else key)
+
+    # meiva:note
+    # A fact whose local edge is a recorded back-edge: it closes a cycle in `lca`.
+    def cycle_edge(self) -> Diagnostic:
+        fact = self.fact
+        return Diagnostic(
+            *_site(fact),
+            Code.CYCLE_EDGE,
+            f"{fact.edge()} ({fact.detail}) closes a cycle: {self.cf} -> {self.ct} is a back-edge "
+            f"of {_where(self.lca)}",
+            (
+                "break the cycle: use a public door, inject the collaborator, or move the code so "
+                "the dependency points the other way",
+            ),
+            self.debt_key(),
+        )
 
 
 def project(fact: Fact) -> Projection | None:
@@ -85,20 +112,8 @@ def _site(fact: Fact) -> tuple[str, int]:
     return fact.src, fact.line
 
 
-def relative(proj: Projection) -> tuple[str, str]:
-    """The fact's source and target, relative to the directory that judges it."""
-    cut = len(proj.lca) + 1 if proj.lca else 0
-    return proj.fact.src[cut:], proj.fact.dst[cut:]
-
-
 def _where(directory: str) -> str:
     return directory or "."
-
-
-def _debt(proj: Projection, name: str | None = None) -> DebtKey:
-    """The debt a violation of this projection would be recorded as, owned by its `lca`."""
-    fact = proj.fact
-    return DebtKey(proj.lca, edge_key(proj.lca, fact.src, fact.dst, name))
 
 
 def _undeclared(proj: Projection, manifests: dict[str, Manifest]) -> Diagnostic:
@@ -125,7 +140,7 @@ def _undeclared(proj: Projection, manifests: dict[str, Manifest]) -> Diagnostic:
         Code.UNDECLARED_EDGE,
         f"{fact.edge()} ({fact.detail}) is not declared",
         tuple(hints),
-        _debt(proj),
+        proj.debt_key(),
     )
 
 
@@ -142,7 +157,7 @@ def _blocked(proj: Projection, manifests: dict[str, Manifest]) -> Diagnostic | N
                 Code.PRIVATE_MODULE,
                 f"{fact.edge()} ({fact.detail}) goes through the underscore child {child!r}",
                 (hint,),
-                _debt(proj),
+                proj.debt_key(),
             )
         exported = manifests[directory].exports if directory in manifests else ()
         if child not in exported:
@@ -152,25 +167,9 @@ def _blocked(proj: Projection, manifests: dict[str, Manifest]) -> Diagnostic | N
                 Code.NOT_EXPORTED,
                 f"{fact.edge()} ({fact.detail}) enters {_where(directory)} through {child!r}, which is not exported",
                 (hint,),
-                _debt(proj),
+                proj.debt_key(),
             )
     return None
-
-
-def cycle_edge(proj: Projection) -> Diagnostic:
-    """A fact whose local edge is a recorded back-edge: it closes a cycle in `lca`."""
-    fact = proj.fact
-    return Diagnostic(
-        *_site(fact),
-        Code.CYCLE_EDGE,
-        f"{fact.edge()} ({fact.detail}) closes a cycle: {proj.cf} -> {proj.ct} is a back-edge "
-        f"of {_where(proj.lca)}",
-        (
-            "break the cycle: use a public door, inject the collaborator, or move the code so "
-            "the dependency points the other way",
-        ),
-        _debt(proj),
-    )
 
 
 def judge(proj: Projection, manifests: dict[str, Manifest]) -> list[Diagnostic]:
@@ -179,14 +178,14 @@ def judge(proj: Projection, manifests: dict[str, Manifest]) -> list[Diagnostic]:
     found: list[Diagnostic] = []
     if not proj.exempt:
         manifest = manifests.get(proj.lca)
-        if manifest is None or not manifest.covering(*relative(proj)):
+        if manifest is None or not manifest.covering(*proj.relative()):
             found.append(_undeclared(proj, manifests))
         blocked = _blocked(proj, manifests)
         if blocked is not None:
             found.append(blocked)
     manifest = manifests.get(proj.lca)
     if not proj.exempt and manifest is not None and (proj.cf, proj.ct) in manifest.back:
-        found.append(cycle_edge(proj))
+        found.append(proj.cycle_edge())
     found.extend(
         Diagnostic(
             *_site(fact),
@@ -195,7 +194,7 @@ def judge(proj: Projection, manifests: dict[str, Manifest]) -> list[Diagnostic]:
             (
                 "underscore names belong to the file that defines them, tests included; use a public name",
             ),
-            _debt(proj, name),
+            proj.debt_key(name),
         )
         for name in fact.names
         if is_private(name)

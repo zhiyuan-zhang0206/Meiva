@@ -1,11 +1,10 @@
 from __future__ import annotations
 
 from base.lm.harness.codex.mapping import (
+    TurnFields,
     approval_denial,
     assistant_text,
-    is_final_answer,
     item_event,
-    parse_turn,
     text_delta,
     usage_from,
 )
@@ -129,8 +128,13 @@ def test_unknown_item_maps_to_nothing() -> None:
 def test_assistant_text_and_phase() -> None:
     item = {"type": "agentMessage", "text": "hello", "phase": "final_answer"}
     assert assistant_text(item) == "hello"
-    assert is_final_answer(item) is True
-    assert is_final_answer({"type": "agentMessage", "phase": "commentary"}) is False
+    assert assistant_text(item, final_only=True) == "hello"
+    assert (
+        assistant_text(
+            {"type": "agentMessage", "text": "hello", "phase": "commentary"}, final_only=True
+        )
+        is None
+    )
 
 
 def test_usage_reads_the_last_turn_breakdown() -> None:
@@ -153,7 +157,9 @@ def test_usage_reads_the_last_turn_breakdown() -> None:
 
 
 def test_parse_turn_carries_the_error_message() -> None:
-    fields = parse_turn({"status": "failed", "error": {"message": "overloaded"}, "durationMs": 90})
+    fields = TurnFields.parse(
+        {"status": "failed", "error": {"message": "overloaded"}, "durationMs": 90}
+    )
     assert fields.status == "failed"
     assert fields.error_message == "overloaded"
     assert fields.duration_ms == 90

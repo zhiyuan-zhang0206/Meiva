@@ -18,10 +18,9 @@ from meizel.contracts.debt import (
     TABLE_KEY,
     DebtTable,
     parse_debt,
-    target_of,
-    target_under,
     total,
 )
+from meizel.contracts.debt_sites import target_under
 from meizel.contracts.manifest import manifest_path
 from meizel.graph.model import Code, MeizelError
 from meizel.graph.universe import MANIFEST, Universe, load_universe, parent_of
@@ -236,6 +235,12 @@ Targets = Counter[tuple[str, str]]
 _OTHER = "(other)"
 
 
+# meiva:note
+# The target of a patch entry `file#form target`.
+def _target_of(key: str) -> str:
+    return key.partition("#")[2].partition(" ")[2]
+
+
 def _targets(tables: list[dict[str, dict[str, object]]]) -> Targets:
     """Recorded patch counts per `(code, target)`, read leniently from `code -> key -> count`."""
     counts: Targets = Counter()
@@ -245,7 +250,7 @@ def _targets(tables: list[dict[str, dict[str, object]]]) -> Targets:
             if code in patch_codes:
                 for key, count in rows.items():
                     if isinstance(count, int):
-                        counts[(code, target_of(key))] += count
+                        counts[(code, _target_of(key))] += count
     return counts
 
 

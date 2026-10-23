@@ -2,6 +2,7 @@ exports = ["bindings.py", "fixtures.py", "mounts.py", "no_script_sibling_imports
 
 [purity]
 "." = "strict-to-be"
+"fixtures.py" = "strict"
 "path_imports.py" = "strict"
 "purity_structure.py" = "strict"
 "python_commands.py" = "strict"
@@ -28,7 +29,3 @@ exports = ["bindings.py", "fixtures.py", "mounts.py", "no_script_sibling_imports
 
 [debt.wide-exports]
 "meizel.toml#exports" = 1
-
-[debt.wide-public-surface]
-"fixtures.py#public-surface" = 1
-"purity.py#public-surface" = 1

@@ -20,7 +20,6 @@ from meizel.contracts.rule import (
     paid_strict_to_be,
     project,
     purity_diagnostics,
-    relative,
     stale_exports,
 )
 from meizel.graph.model import Code, DebtKey, Diagnostic, Fact, FactKind
@@ -325,7 +324,7 @@ def _judge_facts(
         found.extend(judge(proj, manifests))
         manifest = manifests.get(proj.lca)
         if not proj.exempt and manifest is not None:
-            for source, target in manifest.covering(*relative(proj)):
+            for source, target in manifest.covering(*proj.relative()):
                 needed[(proj.lca, source, target)].append(proj.fact)
     return projections, found, dict(needed)
 

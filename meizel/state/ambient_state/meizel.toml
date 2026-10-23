@@ -42,7 +42,3 @@ exports = ["tests"]
 "module.py#Path.read_text" = 1
 "module.py#Path.stat" = 1
 "roots.py#Path.read_text" = 1
-
-[debt.wide-public-surface]
-"__init__.py#public-surface" = 1
-"module.py#public-surface" = 1

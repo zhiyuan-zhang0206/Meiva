@@ -83,8 +83,9 @@ def _patch_injected(deco: ast.Call, callee: str) -> bool:
     )
 
 
-def requested_names(node: ast.FunctionDef | ast.AsyncFunctionDef, dotted: _Dotted) -> list[str]:
-    """Parameters that pytest resolves as fixtures."""
+# meiva:note
+# Parameters that pytest resolves as fixtures.
+def _requested_names(node: ast.FunctionDef | ast.AsyncFunctionDef, dotted: _Dotted) -> list[str]:
     params = _defaultless(node.args)
     excluded: set[str] = set()
     injected = 0
@@ -115,7 +116,7 @@ def record_function(
     is_test = test_file and top_level and node.name.startswith("test")
     if registered is None and not is_test:
         return
-    for name in requested_names(node, dotted):
+    for name in _requested_names(node, dotted):
         state.requests.append(FixtureRequest(name, node.lineno, skip_self=name == registered))
 
 

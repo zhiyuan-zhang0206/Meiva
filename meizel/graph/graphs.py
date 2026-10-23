@@ -7,7 +7,6 @@ from collections.abc import Hashable, Iterable, Mapping
 __all__ = [
     "cycle_through",
     "feedback_edges",
-    "is_acyclic",
     "reachable",
     "strongly_connected",
     "transitive_reduction_size",
@@ -106,7 +105,7 @@ def transitive_reduction_size[N: Hashable](graph: Mapping[N, Iterable[N]]) -> in
     return kept
 
 
-def is_acyclic[N: Hashable](graph: Mapping[N, Iterable[N]]) -> bool:
+def _is_acyclic[N: Hashable](graph: Mapping[N, Iterable[N]]) -> bool:
     return not strongly_connected(graph)
 
 
@@ -186,7 +185,7 @@ def unneeded_back_edges[N: Hashable](
     unneeded: list[tuple[N, N]] = []
     for edge in sorted(needed, key=str):
         src, dst = edge
-        if dst not in edges.get(src, ()) or is_acyclic(_without(edges, needed - {edge})):
+        if dst not in edges.get(src, ()) or _is_acyclic(_without(edges, needed - {edge})):
             unneeded.append(edge)
             needed.discard(edge)
     return unneeded

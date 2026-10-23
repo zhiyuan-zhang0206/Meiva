@@ -22,18 +22,13 @@ __all__ = [
     "DEFAULT_IMPURE_FIXTURES",
     "DEFAULT_IMPURE_IMPORTS",
     "PurityState",
-    "finalize_subsets",
     "make_state",
     "record_assign",
     "record_attr_write",
     "record_call",
     "record_class",
     "record_enum_subsets",
-    "record_env_access",
     "record_function",
-    "record_import",
-    "record_import_from",
-    "record_module",
     "record_nested_patch",
 ]
 
@@ -151,11 +146,56 @@ class PurityState:
     enum_subsets: list[EnumSubsetUse] = field(default_factory=list[EnumSubsetUse])
     defined_classes: set[str] = field(default_factory=set[str])
 
+    def finalize_subsets(self) -> list[EnumSubsetUse]:
+        return [u for u in self.enum_subsets if u.cls_name not in self.defined_classes]
 
-def finalize_subsets(
-    subsets: list[EnumSubsetUse], defined_classes: set[str]
-) -> list[EnumSubsetUse]:
-    return [u for u in subsets if u.cls_name not in defined_classes]
+    def record_module(self, tree: ast.Module) -> None:
+        record_module_structure(self.items, tree, self.max_public_symbols, self.max_attr_hops)
+
+    def record_import(self, node: ast.Import) -> None:
+        for alias in node.names:
+            top = alias.name.split(".", 1)[0]
+            if top in self.impure_imports:
+                self.items.append(
+                    PurityItem(
+                        node.lineno,
+                        Code.IMPURE_CALL,
+                        f"import {top}",
+                        f"impure import `{alias.name}` in strict module",
+                        _IMPURE_IMPORT_HINT,
+                    )
+                )
+
+    def record_import_from(self, node: ast.ImportFrom) -> None:
+        if node.level == 0 and node.module:
+            top = node.module.split(".", 1)[0]
+            if top in self.impure_imports:
+                self.items.append(
+                    PurityItem(
+                        node.lineno,
+                        Code.IMPURE_CALL,
+                        f"import {top}",
+                        f"impure import `{node.module}` in strict module",
+                        _IMPURE_IMPORT_HINT,
+                    )
+                )
+
+    def record_env_access(self, dotted_name: str | None, line: int) -> None:
+        if (
+            dotted_name is not None
+            and (dotted_name == _OS_ENVIRON or dotted_name.startswith(f"{_OS_ENVIRON}."))
+            and line not in self.env_lines
+        ):
+            self.env_lines.add(line)
+            self.items.append(
+                PurityItem(
+                    line,
+                    Code.IMPURE_CALL,
+                    _OS_ENVIRON,
+                    f"impure environment access `{_OS_ENVIRON}` in strict module",
+                    _IMPURE_CALL_HINT,
+                )
+            )
 
 
 def _policy_int(policy: allowances.Policy, section: str, default: int) -> int:
@@ -183,40 +223,6 @@ def _rules_for_root(root: Path) -> tuple[frozenset[str], frozenset[str], int, in
 def make_state(root: Path) -> PurityState:
     imports, calls, max_pub, max_params, max_hops = _rules_for_root(root)
     return PurityState(imports, calls, max_pub, max_params, max_hops)
-
-
-def record_module(state: PurityState, tree: ast.Module) -> None:
-    record_module_structure(state.items, tree, state.max_public_symbols, state.max_attr_hops)
-
-
-def record_import(state: PurityState, node: ast.Import) -> None:
-    for alias in node.names:
-        top = alias.name.split(".", 1)[0]
-        if top in state.impure_imports:
-            state.items.append(
-                PurityItem(
-                    node.lineno,
-                    Code.IMPURE_CALL,
-                    f"import {top}",
-                    f"impure import `{alias.name}` in strict module",
-                    _IMPURE_IMPORT_HINT,
-                )
-            )
-
-
-def record_import_from(state: PurityState, node: ast.ImportFrom) -> None:
-    if node.level == 0 and node.module:
-        top = node.module.split(".", 1)[0]
-        if top in state.impure_imports:
-            state.items.append(
-                PurityItem(
-                    node.lineno,
-                    Code.IMPURE_CALL,
-                    f"import {top}",
-                    f"impure import `{node.module}` in strict module",
-                    _IMPURE_IMPORT_HINT,
-                )
-            )
 
 
 def _annotation_ast(ann: ast.expr) -> ast.AST:
@@ -427,24 +433,6 @@ def record_call(
                 Code.IMPURE_CALL,
                 f"Path.{attr}",
                 f"impure filesystem call `Path.{attr}` in strict module",
-                _IMPURE_CALL_HINT,
-            )
-        )
-
-
-def record_env_access(state: PurityState, dotted_name: str | None, line: int) -> None:
-    if (
-        dotted_name is not None
-        and (dotted_name == _OS_ENVIRON or dotted_name.startswith(f"{_OS_ENVIRON}."))
-        and line not in state.env_lines
-    ):
-        state.env_lines.add(line)
-        state.items.append(
-            PurityItem(
-                line,
-                Code.IMPURE_CALL,
-                _OS_ENVIRON,
-                f"impure environment access `{_OS_ENVIRON}` in strict module",
                 _IMPURE_CALL_HINT,
             )
         )

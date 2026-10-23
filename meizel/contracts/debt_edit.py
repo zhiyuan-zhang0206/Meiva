@@ -12,7 +12,6 @@ from meizel.contracts.analysis import Analysis, analyze
 from meizel.contracts.debt import CYCLE_EDGE, TABLE_KEY, DebtTable, local_edge, set_debt, total
 from meizel.contracts.ledger import tally
 from meizel.contracts.manifest import Manifest, manifest_path
-from meizel.contracts.rule import cycle_edge
 from meizel.graph.graphs import feedback_edges, unneeded_back_edges
 from meizel.graph.model import Code, Diagnostic, MeizelError
 
@@ -71,7 +70,7 @@ def _cycle_facts(analysis: Analysis, manifest: Manifest) -> dict[str, int]:
     for proj in analysis.projections:
         if proj.exempt or proj.lca != manifest.directory or (proj.cf, proj.ct) not in new:
             continue
-        diagnostic = cycle_edge(proj)
+        diagnostic = proj.cycle_edge()
         if diagnostic.debt is not None:
             seen[(diagnostic.path, diagnostic.line, diagnostic.message)] = diagnostic.debt.key
     counts: dict[str, int] = {}

@@ -65,17 +65,17 @@ def content_blocks(content: Sequence[object]) -> list[str | ContentBlock]:
 # call sites in timeline / stop / reasoning-compat / labeler stay annotation-clean.
 
 
-def message_content(msg: BaseMessage) -> str | list[str | dict[str, Any]]:
+def message_content(msg: BaseMessage) -> str | list[str | dict[str, object]]:
     """`msg.content` with its content-list block dicts retyped `dict[str, Any]`."""
     # langchain types content-list blocks as bare dict, whose Unknown keys leak.
-    return cast("str | list[str | dict[str, Any]]", msg.content)  # pyright: ignore[reportUnknownMemberType]
+    return cast("str | list[str | dict[str, object]]", msg.content)  # pyright: ignore[reportUnknownMemberType]
 
 
-def message_addl_kwargs(msg: BaseMessage) -> dict[str, Any]:
+def message_addl_kwargs(msg: BaseMessage) -> dict[str, object]:
     """`msg.additional_kwargs` as a plain `dict[str, Any]` (langchain types it bare)."""
-    return cast("dict[str, Any]", msg.additional_kwargs)  # pyright: ignore[reportUnknownMemberType]
+    return cast("dict[str, object]", msg.additional_kwargs)  # pyright: ignore[reportUnknownMemberType]
 
 
-def message_response_metadata(msg: BaseMessage) -> dict[str, Any]:
+def message_response_metadata(msg: BaseMessage) -> dict[str, object]:
     """`msg.response_metadata` as a plain `dict[str, Any]` (langchain types it bare)."""
-    return cast("dict[str, Any]", msg.response_metadata)  # pyright: ignore[reportUnknownMemberType]
+    return cast("dict[str, object]", msg.response_metadata)  # pyright: ignore[reportUnknownMemberType]

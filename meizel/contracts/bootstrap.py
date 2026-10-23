@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from meizel.contracts.analysis import Analysis, analyze
-from meizel.contracts.debt import DebtTable, render_debt
+from meizel.contracts.debt import DebtTable, set_debt
 from meizel.contracts.manifest import manifest_path
 from meizel.contracts.rule import Projection
 from meizel.graph.graphs import cycle_through, strongly_connected, transitive_reduction_size
@@ -51,7 +51,7 @@ def render_manifest(
         rows = "\n".join(f"{role} = {listing(list(names))}" for role, names in roles.items())
         blocks.append(f"[roles]\n{rows}")
     if debt:
-        blocks.append(render_debt(debt).rstrip("\n"))
+        blocks.append(set_debt("", debt).rstrip("\n"))
     return "\n\n".join(blocks) + "\n"
 
 

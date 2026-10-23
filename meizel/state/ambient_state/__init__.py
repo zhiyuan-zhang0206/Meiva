@@ -77,7 +77,7 @@ def _is_facade_state(rel: str, hit: scan.Hit) -> bool:
     return rel in allow.SINK_FACADES and hit.rule not in _BACKGROUND_WORK
 
 
-def site_key(rel: str, hit: scan.Hit) -> str:
+def _site_key(rel: str, hit: scan.Hit) -> str:
     return f"{rel}::{hit.rule}:{hit.name}"
 
 
@@ -98,7 +98,7 @@ def measure(tree: ast.Module, rel: str, repo_root: Path) -> Sites:
     """The site keys of one module with the closed lists applied, `path::rule:name -> [line]`."""
     sites: Sites = {}
     for hit in _hits(tree, rel, repo_root):
-        key = site_key(rel, hit)
+        key = _site_key(rel, hit)
         if key not in allow.ALLOWED and not _is_facade_state(rel, hit):
             sites.setdefault(key, []).append(hit.line)
     return sites
@@ -116,7 +116,7 @@ def allowlist_errors(tree: ast.Module, rel: str, repo_root: Path) -> list[tuple[
     if not listed and rel not in allow.SINK_FACADES:
         return []
     hits = _hits(tree, rel, repo_root)
-    present = {site_key(rel, hit) for hit in hits}
+    present = {_site_key(rel, hit) for hit in hits}
     errors = [
         (1, f"stale ambient_state list entry {key} — the site is gone; remove it from {_LIST_FILE}")
         for key in sorted(listed)
@@ -177,15 +177,12 @@ def missing_allowlist_errors(repo_root: Path) -> list[str]:
     return errors
 
 
-def is_target(target: str) -> bool:
-    """Whether a baseline key's `rule:name` part names a rule this module knows."""
+# meiva:note
+# The failure text for a new or grown site, or None when `target` is not a known `rule:name`.
+def site_message(target: str) -> str | None:
     rule, separator, name = target.partition(":")
-    return rule in _FIXES and bool(separator and name)
-
-
-def site_message(target: str) -> str:
-    """The failure text for a new or grown site, by the rule named in its `rule:name` key."""
-    rule, _, name = target.partition(":")
+    if rule not in _FIXES or not (separator and name):
+        return None
     return f"`{rule}` `{name}`: {_FIXES[rule]}"
 
 

@@ -108,7 +108,7 @@ def render_message(message: BaseMessage) -> str:
         block
         if isinstance(block, str)
         else (
-            block["text"]
+            str(block["text"])
             if block.get("type") == "text" and isinstance(block.get("text"), str)
             else f"[{block.get('type', 'attachment')}]"
         )
