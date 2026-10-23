@@ -7,11 +7,12 @@ from pathlib import Path
 from typing import Any
 
 from base.native_process.os_platform import is_macos
-from base.paths import logs_dir
+from base.paths import logs_dir, meiva_home, run_dir
 from base.sessions.helperproc import HelperProcSessionBackend, helper_client
 from base.sessions.protocol import SessionBackend
 from base.sessions.pty import client
 from base.sessions.pty.keys import keys_to_bytes
+from base.sessions.pty.paths import service_socket_path
 from base.sessions.record import SessionRecord
 
 _log = logging.getLogger(__name__)
@@ -88,9 +89,10 @@ class PosixProcSessionBackend(SessionBackend):
 class PtySessionBackend(SessionBackend):
     def __init__(self, config: client.PtyClientConfig) -> None:
         self._config = config
+        self._socket = config.socket_path
 
     def has_session(self, name: str) -> bool:
-        return client.has_session(name)
+        return client.has_session(name, socket_path=self._config.socket_path)
 
     def new_session(
         self,
@@ -118,16 +120,26 @@ class PtySessionBackend(SessionBackend):
         # meiva:note
         # The generation probe is the one question an absent service answers differently: `list` and `has` report an absent service as "no sessions", so a caller that read those would admit nothing and still call the service healthy. A live service always reports a generation.
         # meiva:link base/sessions/docs/session-backend.meiva.okf.md
-        return client.host_generation() is not None
+        return client.host_generation(socket_path=self._config.socket_path) is not None
 
     def send(self, name: str, text: str) -> None:
-        self._call("send", name, client.send, name, text.encode())
+        self._call("send", name, client.send, name, text.encode(), socket_path=self._socket)
 
     def send_keys(self, name: str, *keys: str) -> None:
-        self._call("send_keys", name, client.send, name, keys_to_bytes(keys))
+        self._call(
+            "send_keys", name, client.send, name, keys_to_bytes(keys), socket_path=self._socket
+        )
 
     def capture_pane(self, name: str, lines: int = 200, *, scrollback: bool = True) -> str:
-        return self._call("capture", name, client.capture, name, lines, scrollback=scrollback)
+        return self._call(
+            "capture",
+            name,
+            client.capture,
+            name,
+            lines,
+            scrollback=scrollback,
+            socket_path=self._socket,
+        )
 
     @staticmethod
     def _call[T](op: str, name: str, call: Callable[..., T], *args: Any, **kwargs: Any) -> T:
@@ -161,14 +173,14 @@ class PtySessionBackend(SessionBackend):
         # meiva:link base/sessions/docs/session-backend.meiva.okf.md
         del timeout, expected
         try:
-            verdict = client.kill(name, graceful=graceful)
+            verdict = client.kill(name, graceful=graceful, socket_path=self._socket)
         except (client.ServiceError, client.ServiceUnavailableError) as exc:
             _log.warning("pty kill of %s failed: %s", name, exc)
             return False, "graceful" if graceful else "forced", True
         return True, verdict.mode, verdict.interrupted
 
     def list_sessions(self, prefix: str = "") -> list[str]:
-        return [info.name for info in client.list_sessions(prefix)]
+        return [info.name for info in client.list_sessions(prefix, socket_path=self._socket)]
 
     def session_started_at(self, name: str) -> float | None:
         return self.session_started_ats([name])[name]
@@ -179,18 +191,20 @@ class PtySessionBackend(SessionBackend):
         # meiva:link base/sessions/docs/session-backend.meiva.okf.md
         if not names:
             return {}
-        started = {info.name: info.started_at for info in client.list_sessions()}
+        started = {
+            info.name: info.started_at for info in client.list_sessions(socket_path=self._socket)
+        }
         return {name: started.get(name) for name in names}
 
     def session_generation(self, name: str) -> str | None:
-        for info in client.list_sessions(name):
+        for info in client.list_sessions(name, socket_path=self._socket):
             if info.name == name:
                 return info.generation
         return None
 
     # meiva:link base/sessions/docs/host-generation.meiva.okf.md
     def host_generation(self) -> str | None:
-        return client.host_generation()
+        return client.host_generation(socket_path=self._socket)
 
     def session_log_path(self, name: str) -> Path | None:
         return logs_dir() / f"{name}.out.log"
@@ -225,4 +239,10 @@ def get_backend() -> SessionBackend:
 
 # meiva:link base/sessions/docs/session-backend.meiva.okf.md
 def get_shell_backend() -> SessionBackend:
-    return PtySessionBackend(client.PtyClientConfig())
+    # meiva:note
+    # The shell backend of this process's own home: the ambient door the composition roots
+    # (the gateway, the agent host, the shell SDK) call; a caller holding a home builds
+    # `PtyClientConfig(socket_path=service_socket_path(run_dir(home)))` itself.
+    return PtySessionBackend(
+        client.PtyClientConfig(socket_path=service_socket_path(run_dir(meiva_home())))
+    )

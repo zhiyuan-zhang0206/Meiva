@@ -25,6 +25,7 @@ from base.native_process.tests.fake_process_control import FakeProcessControl
 from base.paths import meiva_home
 from base.sessions.pty import client
 from base.sessions.pty.tests.pty_reaper import pty_reaper as pty_reaper
+from base.sessions.pty.tests.pty_service import service_socket
 from base.sessions.record import SessionRecord
 from services.agent_runner.pty_sessions import session as session_module
 from services.agent_runner.pty_sessions.service import PtyService
@@ -279,6 +280,6 @@ def test_the_client_reads_survivors_from_a_kill_answer(monkeypatch: pytest.Monke
 
     monkeypatch.setattr(client, "request", request)
 
-    assert client.kill("meiva-test-race-2", graceful=False) == client.KillVerdict(
-        "forced", True, (4242,)
-    )
+    assert client.kill(
+        "meiva-test-race-2", graceful=False, socket_path=service_socket()
+    ) == client.KillVerdict("forced", True, (4242,))

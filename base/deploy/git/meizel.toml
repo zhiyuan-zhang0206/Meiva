@@ -2,7 +2,6 @@ exports = ["check_git_hooks.py", "cluster_drift.py", "github_pr.py", "memory_rep
 
 [uses]
 "github_pr.py" = ["memory_repo.py"]
-"source_tree_guard.py" = ["cluster_drift.py"]
 "tests" = ["cluster_drift.py", "github_pr.py", "memory_repo.py", "repo_change.py", "source_tree_guard.py", "worktree_guard.py"]
 
 [purity]

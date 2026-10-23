@@ -43,11 +43,12 @@ from base.events.live.bus import EventBus
 from base.host.exit_codes import hard_exit as _hard_exit
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
-from base.paths import meiva_home
+from base.paths import meiva_home, run_dir
 from base.sessions.backend import get_shell_backend
 from base.sessions.page_session import page_session_name
 from base.sessions.protocol import SessionBackend
 from base.sessions.pty import client as pty_client
+from base.sessions.pty.paths import service_socket_path
 from base.sessions.record import SessionRecord
 from base.telemetry import build_pipeline
 from base.telemetry.process_logging import init_gateway_process
@@ -293,7 +294,7 @@ def live_session_records() -> dict[str, SessionRecord]:
     when each ask cost a Python startup and serve()'s 15 s wait timed out about
     half the time); one listing answers every row.
     """
-    return pty_client.live_sessions()
+    return pty_client.live_sessions(socket_path=service_socket_path(run_dir(meiva_home())))
 
 
 def page_session_shell_pids(

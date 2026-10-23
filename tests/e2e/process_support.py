@@ -21,7 +21,9 @@ import psutil
 import pytest
 
 from base.deploy.lifecycle.tests.serving_entrypoint import inject_fixture_gate
+from base.paths import meiva_home, run_dir
 from base.sessions.pty import client as pty_client
+from base.sessions.pty.paths import service_socket_path
 from base.sessions.pty.tests.process_groups import kill_group_or_prove_already_gone
 from tests.e2e._credentials import current_credentials
 from tests.e2e._ports import GATEWAY_PORT, GATEWAY_SOCKET
@@ -752,7 +754,7 @@ def pty_sessions_proc() -> Iterator[None]:
                     f"pty-sessions exited early; log tail:\n{proc_log_tail(str(log_path))}"
                 )
             try:
-                pty_client.request("ping")
+                pty_client.request("ping", socket_path=service_socket_path(run_dir(meiva_home())))
                 break
             except pty_client.ServiceUnavailableError:
                 if time.monotonic() >= deadline:

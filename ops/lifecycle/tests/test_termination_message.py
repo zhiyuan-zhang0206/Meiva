@@ -20,6 +20,7 @@ from base.sessions.pty.client import PtyClientConfig
 from base.sessions.pty.tests.pty_reaper import PtyReaper
 from base.sessions.pty.tests.pty_reaper import pty_reaper as pty_reaper
 from base.sessions.pty.tests.pty_service import pty_service as pty_service
+from base.sessions.pty.tests.pty_service import service_socket
 from base.telemetry.tests.capture.event_capture import EmittedEvents
 from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
 from ops.lifecycle import termination
@@ -491,7 +492,7 @@ async def test_kill_terminates_only_the_owners_real_shell_sessions(
     watcher = session_name(f"agent-{running_agent_id}-shell-1-watcher")
     page = page_session_name(running_agent_id, "dash_board", 2)
     foreign = session_name(f"agent-{other_agent_id}-shell-0")
-    backend = PtySessionBackend(config=PtyClientConfig())
+    backend = PtySessionBackend(config=PtyClientConfig(socket_path=service_socket()))
     replacement = session_name(f"agent-{running_agent_id}-shell-3-replacement")
 
     async def _allocate_after_acceptance(_aid: int) -> None:

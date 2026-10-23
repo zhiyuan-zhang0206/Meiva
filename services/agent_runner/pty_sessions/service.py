@@ -39,6 +39,7 @@ from base.log import logger
 from base.native_process import child_env, pid_starttime_ticks
 from base.native_process.ownership import stable_create_time
 from base.native_process.process_control import ProcessControl
+from base.paths import logs_dir, run_dir
 from base.sessions.pty import closure, process_groups, protocol
 from base.sessions.pty.allocation_freeze import locked_freeze_state, state_path
 from base.sessions.pty.paths import (
@@ -181,7 +182,7 @@ class PtyService:
             closure.Target(name, s.shell, s.known_groups) for name, s in self._sessions.items()
         ]
         try:
-            ledger.write(ledger_path(), targets)
+            ledger.write(ledger_path(run_dir(self._home)), targets)
         except OSError as exc:
             logger.warning("pty ledger write failed: {exc}", exc=exc)
 
@@ -298,7 +299,7 @@ class PtyService:
                 pid, create_time, session.SHELL_COMMAND, cwd, time.time(), starttime, generation
             )
             created = session.PtySession(
-                name, pid, master, cols, rows, record, transcript_path(name)
+                name, pid, master, cols, rows, record, transcript_path(logs_dir(), name)
             )
         except BaseException:
             # The shell exists but no session owns it: end it rather than orphan it.

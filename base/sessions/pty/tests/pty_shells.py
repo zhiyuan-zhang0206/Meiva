@@ -9,6 +9,7 @@ import psutil
 from base.sessions.pty import client
 from base.sessions.pty.client import PtyClientConfig
 from base.sessions.pty.keys import keys_to_bytes
+from base.sessions.pty.tests.pty_service import service_socket
 
 WAIT_S = 30.0
 
@@ -32,19 +33,25 @@ def new(
     *,
     config: PtyClientConfig | None = None,
 ) -> bool:
-    return client.create_session(name, str(cwd), env or {}, cmd, config=config or PtyClientConfig())
+    return client.create_session(
+        name,
+        str(cwd),
+        env or {},
+        cmd,
+        config=config or PtyClientConfig(socket_path=service_socket()),
+    )
 
 
 def type_line(name: str, text: str) -> None:
-    client.send(name, text.encode() + b"\r")
+    client.send(name, text.encode() + b"\r", socket_path=service_socket())
 
 
 def press(name: str, *keys: str) -> None:
-    client.send(name, keys_to_bytes(keys))
+    client.send(name, keys_to_bytes(keys), socket_path=service_socket())
 
 
 def screen(name: str, *, scrollback: bool = True) -> str:
-    return client.capture(name, 200, scrollback=scrollback)
+    return client.capture(name, 200, scrollback=scrollback, socket_path=service_socket())
 
 
 def output_until(name: str, word: str, *, timeout: float = WAIT_S) -> str:
@@ -57,7 +64,7 @@ def output_until(name: str, word: str, *, timeout: float = WAIT_S) -> str:
 
 
 def shell_process(name: str) -> psutil.Process:
-    (info,) = [s for s in client.list_sessions() if s.name == name]
+    (info,) = [s for s in client.list_sessions(socket_path=service_socket()) if s.name == name]
     return psutil.Process(info.pid)
 
 

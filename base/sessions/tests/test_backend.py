@@ -18,7 +18,7 @@ from base.sessions.backend import (
 from base.sessions.env_forwarding import cwd_is_inside_checkout, forward_env_dict
 from base.sessions.protocol import SessionBackend
 from base.sessions.pty.client import PtyClientConfig
-from base.sessions.pty.tests.pty_service import PtyServiceProcess
+from base.sessions.pty.tests.pty_service import PtyServiceProcess, service_socket
 from base.sessions.pty.tests.pty_service import pty_service as pty_service
 
 
@@ -71,7 +71,7 @@ def test_pty_child_virtual_env_projection(
         },
     )
     service.start()
-    backend = PtySessionBackend(config=PtyClientConfig())
+    backend = PtySessionBackend(config=PtyClientConfig(socket_path=service_socket()))
     name = "meiva-test-venv-projection"
     report = unit_home / "child-env.json"
     code = (

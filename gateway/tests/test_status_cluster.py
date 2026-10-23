@@ -8,6 +8,7 @@ that async fan-out path and only validate the SystemStatus.cluster data pipeline
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
 
@@ -27,6 +28,17 @@ from gateway.tests.auth.gateway_config import gateway_test_client
 from ops.cluster import rpc as cluster_rpc
 
 _OPS_URL = "http://runner-a:18121"
+
+
+# meiva:note
+# A prod-source HEAD reader that answers `sha`; the real git read is covered in
+# `base/deploy/git/tests/test_cluster_drift.py`.
+def _head_sha(sha: str) -> Callable[..., str | None]:
+    def head_sha(_home: Path, *, environ: Mapping[str, str]) -> str | None:
+        del environ
+        return sha
+
+    return head_sha
 
 
 class _RemoteProbeResults(dict[str, tuple[bool, bool | None]]):
@@ -593,7 +605,7 @@ class TestPanelCarriesNoFrozenPin:
         _ = fake_flag, stub_machine_identity
         _insert_machine(db_conn, "cloud-test", "https://meiva.example.com", "gateway")
 
-        monkeypatch.setattr(status_router, "prod_source_head_sha", lambda: "abc1234")
+        monkeypatch.setattr(status_router, "prod_source_head_sha", _head_sha("abc1234"))
         with db_conn.cursor() as cur:
             panel = status_router.get_cluster_status(
                 database,
