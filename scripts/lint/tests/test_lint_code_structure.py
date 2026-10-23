@@ -10,6 +10,7 @@ from typing import Any, cast
 from unittest.mock import Mock
 
 import pytest
+from radon.complexity import ComplexityVisitor
 
 from base.host.proc import run_bounded
 from scripts.lint import code_structure as lcs
@@ -548,7 +549,9 @@ def test_function_qualnames_duplicates_and_lambda_exclusion() -> None:
         "try:\n    pass\nexcept Exception:\n    def recovered(): pass\n"
         "match value:\n    case 1:\n        def matched(): pass\n"
     )
-    measured = quality.measure_quality(tree, "tests/q.py")
+    measured = quality.measure_quality(
+        tree, "tests/q.py", visitor_from_ast=cast(Any, ComplexityVisitor).from_ast
+    )
     expected = {
         "tests/q.py::Outer.Inner.method",
         "tests/q.py::p",
@@ -566,7 +569,9 @@ def test_function_local_class_method_and_closure_are_measured() -> None:
     tree = ast.parse(
         "def outer():\n    class Local:\n        def method(self):\n            def closure(x):\n                if x: return 1\n            return closure\n"
     )
-    assert quality.measure_quality(tree, "tests/q.py") == {
+    assert quality.measure_quality(
+        tree, "tests/q.py", visitor_from_ast=cast(Any, ComplexityVisitor).from_ast
+    ) == {
         "complexity": {
             "tests/q.py::outer": 1,
             "tests/q.py::outer.<locals>.Local.method": 1,
@@ -740,7 +745,7 @@ def test_ast_and_radon_share_one_parse(
 ) -> None:
     _source(tmp_path, _branches(2), "base/q.py")
     parse = Mock(wraps=ast.parse)
-    visitor = Mock(wraps=cast(Any, quality.ComplexityVisitor).from_ast)
+    visitor = Mock(wraps=cast(Any, ComplexityVisitor).from_ast)
 
     def _measure(tree: ast.AST, rel: str) -> dict[str, dict[str, int]]:
         return quality.measure_quality(tree, rel, visitor_from_ast=visitor)

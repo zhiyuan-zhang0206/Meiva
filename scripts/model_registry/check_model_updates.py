@@ -1,10 +1,7 @@
 #!/usr/bin/env python3
-"""Fail-closed daily comparison of official provider models and Meiva's registry.
-
-`check_sources` loads the enabled provider plugins in-process first, so
-"already registered" and same-series supersession answer for the roster Meiva
-actually runs (see `base/packages/plugin_providers.py`).
-"""
+# meiva:note
+# The CLI compares provider models against the enabled catalog so registered IDs
+# and same-series supersession follow the live roster.
 
 from __future__ import annotations
 
@@ -16,6 +13,7 @@ import re
 import socket
 from collections.abc import Callable, Mapping
 from dataclasses import asdict, dataclass
+from functools import partial
 from pathlib import Path
 from typing import Any, Literal, cast, override
 from urllib.parse import urlparse
@@ -199,7 +197,7 @@ def _first_real_doh_address(value: object, endpoint: str, host: str) -> str:
     raise ValueError(f"{endpoint} returned no usable A answer for {host}")
 
 
-def _doh_real_ip(host: str, *, http_get: Callable[..., Any] = requests.get) -> str:
+def _doh_real_ip(host: str, *, http_get: Callable[..., Any]) -> str:
     if host in doh_cache:
         return doh_cache[host]
     last_error: Exception | None = None
@@ -223,8 +221,8 @@ def _doh_real_ip(host: str, *, http_get: Callable[..., Any] = requests.get) -> s
 def _session_for_host(
     host: str,
     *,
-    addrinfo: Callable[..., Any] = socket.getaddrinfo,
-    doh_resolver: Callable[[str], str] = _doh_real_ip,
+    addrinfo: Callable[..., Any],
+    doh_resolver: Callable[[str], str],
 ) -> requests.Session | None:
     try:
         address_rows = addrinfo(host, 443, type=socket.SOCK_STREAM)
@@ -303,8 +301,8 @@ def fetch_json(
     *,
     headers: dict[str, str],
     params: dict[str, str | int],
-    session_for_host: Callable[[str], Any] = _session_for_host,
-    http_get: Callable[..., Any] = requests.get,
+    session_for_host: Callable[[str], Any],
+    http_get: Callable[..., Any],
 ) -> dict[str, Any]:
     def _attempt() -> dict[str, Any]:
         host = urlparse(url).hostname or ""
@@ -333,7 +331,7 @@ def _headers(source: SourceDescriptor, api_key: str) -> dict[str, str]:
 
 
 def _openai_models(
-    source: SourceDescriptor, api_key: str, *, fetcher: Callable[..., dict[str, Any]] = fetch_json
+    source: SourceDescriptor, api_key: str, *, fetcher: Callable[..., dict[str, Any]]
 ) -> list[str]:
     payload = fetcher(
         source.base_url + source.models_path, headers=_headers(source, api_key), params={}
@@ -344,7 +342,7 @@ def _openai_models(
 
 
 def _anthropic_models(
-    source: SourceDescriptor, api_key: str, *, fetcher: Callable[..., dict[str, Any]] = fetch_json
+    source: SourceDescriptor, api_key: str, *, fetcher: Callable[..., dict[str, Any]]
 ) -> list[str]:
     ids: list[str] = []
     after_id: str | None = None
@@ -370,7 +368,7 @@ def _anthropic_models(
 
 
 def _gemini_models(
-    source: SourceDescriptor, api_key: str, *, fetcher: Callable[..., dict[str, Any]] = fetch_json
+    source: SourceDescriptor, api_key: str, *, fetcher: Callable[..., dict[str, Any]]
 ) -> list[str]:
     ids: list[str] = []
     params: dict[str, str | int] = {"key": api_key}
@@ -397,7 +395,7 @@ def _gemini_models(
 
 
 def _dashscope_models(
-    source: SourceDescriptor, api_key: str, *, fetcher: Callable[..., dict[str, Any]] = fetch_json
+    source: SourceDescriptor, api_key: str, *, fetcher: Callable[..., dict[str, Any]]
 ) -> list[str]:
     ids: list[str] = []
     total: int | None = None
@@ -436,17 +434,16 @@ def fetch_provider_models(
     source: SourceDescriptor,
     api_key: str,
     *,
-    fetcher: Callable[..., dict[str, Any]] | None = None,
+    fetcher: Callable[..., dict[str, Any]],
 ) -> list[str]:
-    fn = fetch_json if fetcher is None else fetcher
     if source.response_kind == "openai":
-        return _openai_models(source, api_key, fetcher=fn)
+        return _openai_models(source, api_key, fetcher=fetcher)
     if source.response_kind == "anthropic":
-        return _anthropic_models(source, api_key, fetcher=fn)
+        return _anthropic_models(source, api_key, fetcher=fetcher)
     if source.response_kind == "gemini":
-        return _gemini_models(source, api_key, fetcher=fn)
+        return _gemini_models(source, api_key, fetcher=fetcher)
     if source.response_kind == "dashscope":
-        return _dashscope_models(source, api_key, fetcher=fn)
+        return _dashscope_models(source, api_key, fetcher=fetcher)
     raise RuntimeError(f"unknown response kind {source.response_kind!r}")
 
 
@@ -649,13 +646,8 @@ def check_sources(
     *,
     models: Mapping[str, ModelSpec],
     env_lookup: Callable[[str], str | None] | None = None,
-    model_fetcher: Callable[[SourceDescriptor, str], list[str]] | None = None,
+    model_fetcher: Callable[[SourceDescriptor, str], list[str]],
 ) -> dict[str, ProviderReport]:
-    # The comparison consults the registered models twice over — a registered id is
-    # skipped, a same-series older id is suppressed against registered versions — so it
-    # compares against the catalog the enabled provider plugins build. Comparing against
-    # nothing would re-report every registered id as new (deduped only by its own state file).
-    fetcher = fetch_provider_models if model_fetcher is None else model_fetcher
     reports: dict[str, ProviderReport] = {}
     providers = state["providers"]
     for provider, source in SOURCES.items():
@@ -668,7 +660,7 @@ def check_sources(
             )
             continue
         try:
-            comparison = compare_models(source, fetcher(source, api_key), models)
+            comparison = compare_models(source, model_fetcher(source, api_key), models)
         except Exception as exc:
             status = f"error: {str(exc) or type(exc).__name__}"
             reports[provider] = ProviderReport(
@@ -755,6 +747,14 @@ def main(
     model_fetcher: Callable[[SourceDescriptor, str], list[str]] | None = None,
     models: Mapping[str, Any] | None = None,
 ) -> int:
+    if model_fetcher is None:
+        session = partial(
+            _session_for_host,
+            addrinfo=socket.getaddrinfo,
+            doh_resolver=partial(_doh_real_ip, http_get=requests.get),
+        )
+        fetcher = partial(fetch_json, session_for_host=session, http_get=requests.get)
+        model_fetcher = partial(fetch_provider_models, fetcher=fetcher)
     parser = argparse.ArgumentParser(
         description="Check official provider model lists for Meiva updates."
     )

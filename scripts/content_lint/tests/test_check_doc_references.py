@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+from base.host.proc import run_bounded
 from scripts.content_lint import check_doc_references
 from scripts.content_lint.check_doc_references import REPO, check_doc
 
@@ -221,3 +222,36 @@ def test_skill_prose_about_load_dir_is_clean(tmp_path: Path) -> None:
         "Scripts run from `$MEIVA_HOME/skills/<name>/` (the load dir).\n", encoding="utf-8"
     )
     assert check_doc(doc, {}) == []
+
+
+@pytest.mark.parametrize("explicit_docs", [False, True])
+def test_scan_uses_one_repository_for_docs_and_relative_wikilinks(
+    tmp_path: Path, explicit_docs: bool
+) -> None:
+    for name, target_exists in (("present", True), ("absent", False)):
+        repo = tmp_path / name
+        guide = repo / "docs" / "area" / "guide.md"
+        guide.parent.mkdir(parents=True)
+        guide.write_text("See [[../target.meiva.okf.md]].\n")
+        if target_exists:
+            (repo / "docs" / "target.meiva.okf.md").write_text("Local node.\n")
+            other = repo / "other" / "target.meiva.okf.md"
+            other.parent.mkdir()
+            other.write_text("A second basename forces relative resolution.\n")
+        run_bounded(["git", "init", "-q", str(repo)], timeout=10).check_returncode()
+        run_bounded(["git", "-C", str(repo), "add", "."], timeout=10).check_returncode()
+        assert check_doc_references.main(
+            repo=repo, commands={}, docs=[guide] if explicit_docs else None
+        ) == (0 if target_exists else 1)
+
+
+def test_skill_reference_cannot_escape_the_selected_repository(tmp_path: Path) -> None:
+    repo = tmp_path / "checkout"
+    doc = repo / ".agents" / "skills" / "sample" / "SKILL.md"
+    doc.parent.mkdir(parents=True)
+    doc.write_text("See `references/outside.md`.\n")
+    (tmp_path / "references").mkdir()
+    (tmp_path / "references" / "outside.md").write_text("Outside the checkout.\n")
+    assert check_doc_references.check_skill_backtick_refs(doc, doc.read_text(), repo=repo) == [
+        "references/outside.md"
+    ]

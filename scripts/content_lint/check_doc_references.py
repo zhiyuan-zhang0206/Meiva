@@ -106,7 +106,6 @@ and each one backtracked catastrophically on ordinary prose.
 
 from __future__ import annotations
 
-import functools
 import re
 import subprocess
 import sys
@@ -171,14 +170,16 @@ def shell_flags(script: Path) -> set[str]:
     return flags
 
 
-def tracked_docs() -> list[Path]:
-    out = subprocess.run(  # noqa: S603 — fixed argv; REPO comes from git rev-parse, not input
-        ["git", "-C", str(REPO), "ls-files", "*.md"],
+def tracked_docs(repo: Path = REPO) -> list[Path]:
+    # meiva:note
+    # Git receives fixed arguments and an explicit checkout without a shell.
+    out = subprocess.run(  # noqa: S603
+        ["git", "-C", str(repo), "ls-files", "*.md"],
         capture_output=True,
         text=True,
         check=True,
     ).stdout.split()
-    return [REPO / rel for rel in out]
+    return [repo / rel for rel in out]
 
 
 def _command_segments(line: str, *, fenced: bool) -> list[str]:
@@ -288,13 +289,7 @@ def _indented_code(line: str, *, open_now: bool, prev_blank: bool, in_list: bool
 _SKILL_REF = re.compile(r"`references/([A-Za-z0-9._/-]+\.md)`")
 
 
-_SKILL_ROOTS = (
-    REPO / "meiva_builtins" / "skills",
-    REPO / ".agents" / "skills",
-)
-
-
-def _resolve_skill_reference(skill_dir: Path, name: str) -> bool:
+def _resolve_skill_reference(skill_dir: Path, name: str, repo: Path) -> bool:
     """True when `references/<name>` exists in `skill_dir` or any ancestor up to
     either repo skill root. The nearest match wins, so a nested skill with its own
     library shadows the parent's for that file.
@@ -306,12 +301,15 @@ def _resolve_skill_reference(skill_dir: Path, name: str) -> bool:
     while True:
         if (cur / "references" / name).exists():
             return True
-        if cur in (*_SKILL_ROOTS, REPO) or cur.parent == cur:
+        if (
+            cur in (repo / "meiva_builtins/skills", repo / ".agents/skills", repo)
+            or cur.parent == cur
+        ):
             return False
         cur = cur.parent
 
 
-def check_skill_backtick_refs(doc: Path, line: str) -> list[str]:
+def check_skill_backtick_refs(doc: Path, line: str, *, repo: Path = REPO) -> list[str]:
     """Backticked `` `references/<file>.md` `` refs in a SKILL.md that do not
     resolve. Placeholders (`<name>`, `*`) are skipped — a template, not a
     pointer."""
@@ -320,7 +318,7 @@ def check_skill_backtick_refs(doc: Path, line: str) -> list[str]:
         name = match.group(1)
         if any(ch in name for ch in "<*?"):
             continue
-        if not _resolve_skill_reference(doc.parent, name):
+        if not _resolve_skill_reference(doc.parent, name, repo):
             missing.append(f"references/{name}")
     return missing
 
@@ -373,11 +371,12 @@ def check_links(doc: Path, line: str, *, allow_planned: bool = False) -> list[st
     return missing
 
 
-@functools.cache
-def okf_nodes() -> frozenset[str]:
+def okf_nodes(repo: Path = REPO) -> frozenset[str]:
     """Every tracked `.meiva.okf.md` path — the universe a wikilink resolves in."""
-    out = subprocess.run(  # noqa: S603 — fixed argv; REPO comes from git rev-parse, not input
-        ["git", "-C", str(REPO), "ls-files", "*.meiva.okf.md"],
+    # meiva:note
+    # Git receives fixed arguments and an explicit checkout without a shell.
+    out = subprocess.run(  # noqa: S603
+        ["git", "-C", str(repo), "ls-files", "*.meiva.okf.md"],
         capture_output=True,
         text=True,
         check=True,
@@ -391,6 +390,7 @@ def check_wikilinks(
     *,
     allow_planned: bool = False,
     nodes: frozenset[str] | None = None,
+    repo: Path = REPO,
 ) -> list[str]:
     """`[[target]]` / `[[target|label]]` targets on this line that name no OKF node.
 
@@ -402,10 +402,10 @@ def check_wikilinks(
     # `enter_scratch_home()` below.
     from base.packages.docs.okf_graph import WIKILINK_RE, resolve_wikilink
 
-    all_nodes = okf_nodes() if nodes is None else nodes
+    all_nodes = okf_nodes(repo) if nodes is None else nodes
     missing: list[str] = []
     try:
-        cur = doc.relative_to(REPO).as_posix()
+        cur = doc.relative_to(repo).as_posix()
     except ValueError:
         cur = doc.name
     for match in WIKILINK_RE.finditer(line):
@@ -426,12 +426,13 @@ def _prose_problems(
     *,
     allow_planned: bool,
     nodes: frozenset[str] | None = None,
+    repo: Path = REPO,
 ) -> list[str]:
     """The messages for the links this prose line (not code) holds that do not resolve."""
     out = [f"`{t}` — no such file" for t in check_links(doc, line, allow_planned=allow_planned)]
     out += [
         f"`[[{t}]]` — no such OKF node"
-        for t in check_wikilinks(doc, line, allow_planned=allow_planned, nodes=nodes)
+        for t in check_wikilinks(doc, line, allow_planned=allow_planned, nodes=nodes, repo=repo)
     ]
     # Only skills carry the backtick references/ convention — a plain
     # doc's `` `references/x.md` `` stays deliberately unchecked (it may
@@ -439,7 +440,7 @@ def _prose_problems(
     if doc.name == "SKILL.md" and ".agents" in doc.parts:
         out += [
             f"`{t}` — no such file (skill references/)"
-            for t in check_skill_backtick_refs(doc, line)
+            for t in check_skill_backtick_refs(doc, line, repo=repo)
         ]
     return out
 
@@ -451,6 +452,7 @@ def check_doc(
     skip_flags: bool = False,
     allow_planned: bool = False,
     nodes: frozenset[str] | None = None,
+    repo: Path = REPO,
 ) -> list[tuple[int, str]]:
     """Every dangling reference in one doc, as `(line number, message)`.
 
@@ -462,6 +464,7 @@ def check_doc(
     propose a flag that does not exist yet; a link may name a file not yet
     built if marked `(planned)`) — both default off, so every other doc is
     checked in full."""
+    all_nodes = okf_nodes(repo) if nodes is None else nodes
     problems: list[tuple[int, str]] = []
     carry: tuple[str, ...] | None = None
     fenced = False
@@ -485,7 +488,9 @@ def check_doc(
         if not (fenced or indented):
             problems.extend(
                 (lineno, message)
-                for message in _prose_problems(doc, line, allow_planned=allow_planned, nodes=nodes)
+                for message in _prose_problems(
+                    doc, line, allow_planned=allow_planned, nodes=all_nodes, repo=repo
+                )
             )
         # Bare `skills/<name>/...` refs are checked in fenced code too — the
         # dead `.venv/bin/python skills/...` invocations live inside code
@@ -510,11 +515,13 @@ def main(
     commands: dict[tuple[str, ...], set[str]] | None = None,
     docs: Sequence[Path] | None = None,
 ) -> int:
+    repo = repo.resolve()
     cmds = dict(meiva_flags() if commands is None else commands)
     for script in (repo / "scripts").glob("*.sh"):
         cmds[(script.name,)] = shell_flags(script)
 
-    doc_list = tracked_docs() if docs is None else list(docs)
+    doc_list = tracked_docs(repo) if docs is None else list(docs)
+    nodes = okf_nodes(repo)
     problems: list[str] = []
     for doc in doc_list:
         rel = doc.relative_to(repo)
@@ -530,7 +537,9 @@ def main(
         # but a link it names must resolve UNLESS marked `(planned)`
         # (allow_planned) — see the module docstring / issue #1045.
         future = rel.parts[0] == "future"
-        for lineno, message in check_doc(doc, cmds, skip_flags=future, allow_planned=future):
+        for lineno, message in check_doc(
+            doc, cmds, skip_flags=future, allow_planned=future, nodes=nodes, repo=repo
+        ):
             problems.append(f"{rel}:{lineno}: {message}")
 
     unique = sorted(set(problems))
