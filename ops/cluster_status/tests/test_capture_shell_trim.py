@@ -11,12 +11,6 @@ is never meaningful output; interleaved blanks are preserved.
 
 from __future__ import annotations
 
-from collections.abc import Callable
-
-import pytest
-
-import base.sessions.backend as sessions_backend
-from ops import cluster_status
 from ops.cluster_status import capture_shell
 from ops.rpc_schemas import ShellInfo
 
@@ -31,36 +25,16 @@ class _FakeBackend:
         return self._captured
 
 
-@pytest.fixture
-def fake_backend(monkeypatch: pytest.MonkeyPatch) -> Callable[[str], _FakeBackend]:
-    def _install(captured: str) -> _FakeBackend:
-        backend = _FakeBackend(captured)
-        monkeypatch.setattr(sessions_backend, "get_shell_backend", lambda: backend)
-        return backend
+def test_capture_trims_leading_and_trailing_blank_padding() -> None:
+    backend = _FakeBackend("\n\n\nreal line one\nreal line two\n\nreal line three\n\n\n")
 
-    return _install
-
-
-@pytest.fixture
-def shell_sessions(monkeypatch: pytest.MonkeyPatch) -> Callable[[ShellInfo], None]:
-    def _install(shell: ShellInfo) -> None:
-        monkeypatch.setattr(
-            cluster_status,
-            "agent_shell_sessions",
-            lambda _agent_id: [shell],  # pyright: ignore[reportUnknownArgumentType]
-        )
-
-    return _install
-
-
-def test_capture_trims_leading_and_trailing_blank_padding(
-    fake_backend: Callable[[str], _FakeBackend],
-    shell_sessions: Callable[[ShellInfo], None],
-) -> None:
-    shell_sessions(ShellInfo(id=7))
-    backend = fake_backend("\n\n\nreal line one\nreal line two\n\nreal line three\n\n\n")
-
-    name, lines, created_at, uptime = capture_shell(42, 7, lines=200)
+    name, lines, created_at, uptime = capture_shell(
+        42,
+        7,
+        lines=200,
+        shell_sessions_fn=lambda _agent_id: [ShellInfo(id=7)],
+        shell_backend=backend,
+    )
 
     assert created_at is None
     assert uptime == 0
@@ -70,28 +44,32 @@ def test_capture_trims_leading_and_trailing_blank_padding(
     assert name.endswith("-agent-42-shell-7")
 
 
-def test_capture_of_all_blank_output_is_empty(
-    fake_backend: Callable[[str], _FakeBackend],
-    shell_sessions: Callable[[ShellInfo], None],
-) -> None:
+def test_capture_of_all_blank_output_is_empty() -> None:
     """A session that has produced no real output yet must not render as a
     wall of blank lines — the monitor page shows its "(no output)" state."""
-    shell_sessions(ShellInfo(id=3))
-    fake_backend("\n\n\n")
+    backend = _FakeBackend("\n\n\n")
 
-    _, lines, _, _ = capture_shell(42, 3, lines=200)
+    _, lines, _, _ = capture_shell(
+        42,
+        3,
+        lines=200,
+        shell_sessions_fn=lambda _agent_id: [ShellInfo(id=3)],
+        shell_backend=backend,
+    )
 
     assert lines == []
 
 
-def test_capture_without_blank_padding_is_unchanged(
-    fake_backend: Callable[[str], _FakeBackend],
-    shell_sessions: Callable[[ShellInfo], None],
-) -> None:
+def test_capture_without_blank_padding_is_unchanged() -> None:
     """A plain log tail (the normal case) passes through byte-for-byte."""
-    shell_sessions(ShellInfo(id=9))
-    fake_backend("line one\nline two\nline three\n")
+    backend = _FakeBackend("line one\nline two\nline three\n")
 
-    _, lines, _, _ = capture_shell(42, 9, lines=200)
+    _, lines, _, _ = capture_shell(
+        42,
+        9,
+        lines=200,
+        shell_sessions_fn=lambda _agent_id: [ShellInfo(id=9)],
+        shell_backend=backend,
+    )
 
     assert lines == ["line one", "line two", "line three"]

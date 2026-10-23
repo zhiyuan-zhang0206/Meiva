@@ -6,15 +6,15 @@ with the agent row or neither does.
 
 from __future__ import annotations
 
+import contextlib
 from collections.abc import Generator
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import psycopg
 import pytest
 
 from base import telemetry
-from base.agents.birth import transaction
 from base.agents.birth.spawn import create_agent_row
 from base.agents.inbox.insert import insert_inbound_message
 from base.cluster.machine import MachineIdentity
@@ -135,7 +135,6 @@ def test_an_agent_sourced_first_prompt_is_recorded_as_a_message(
 
 def test_a_spawn_whose_audit_fact_cannot_be_recorded_creates_no_agent(
     db_conn: psycopg.Connection,
-    monkeypatch: pytest.MonkeyPatch,
     database: Database,
     event_bus: EventBus,
     *,
@@ -145,14 +144,47 @@ def test_a_spawn_whose_audit_fact_cannot_be_recorded_creates_no_agent(
     before = db_conn.execute("SELECT count(*) FROM agents").fetchone()
     db_conn.commit()
 
-    def refuse(_conn: psycopg.Connection, _event: object) -> None:
-        raise RuntimeError("audit write failed")
+    class _RefuseAuditCursor:
+        def __init__(self, cur: psycopg.Cursor[Any], conn: _RefuseAuditConn) -> None:
+            self._cur = cur
+            self.connection = conn
 
-    monkeypatch.setattr(transaction, "record_audit", refuse)
+        def __getattr__(self, name: str) -> Any:
+            return getattr(self._cur, name)
+
+    class _RefuseAuditConn:
+        def __init__(self, conn: psycopg.Connection) -> None:
+            self._conn = conn
+
+        def __enter__(self) -> _RefuseAuditConn:
+            self._conn.__enter__()
+            return self
+
+        def __exit__(self, *args: Any) -> bool | None:
+            return self._conn.__exit__(*args)
+
+        @contextlib.contextmanager
+        def cursor(self, *args: Any, **kwargs: Any) -> Generator[_RefuseAuditCursor, None, None]:
+            with self._conn.cursor(*args, **kwargs) as cur:
+                yield _RefuseAuditCursor(cur, self)
+
+        def execute(self, query: Any, *args: Any, **kwargs: Any) -> Any:
+            if "INSERT INTO audit_events" in str(query):
+                raise RuntimeError("audit write failed")
+            return self._conn.execute(query, *args, **kwargs)
+
+        def commit(self) -> None:
+            self._conn.commit()
+
+    class _RefuseAuditDb:
+        @contextlib.contextmanager
+        def connect(self, *args: Any, **kwargs: Any) -> Generator[_RefuseAuditConn, None, None]:
+            with database.connect(*args, **kwargs) as conn:
+                yield _RefuseAuditConn(conn)
 
     with pytest.raises(RuntimeError, match="audit write failed"):
         create_agent_row(
-            database,
+            cast(Database, _RefuseAuditDb()),
             event_bus,
             spawner="user",
             machine=machine_identity.name(),

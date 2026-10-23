@@ -6,16 +6,18 @@ triggers, and caller fences. Host wake publication follows committed state.
 
 from __future__ import annotations
 
+from typing import Any, cast
+
 import psycopg
 import pytest
 
 import base.db
-from base.agents.inbox import insert
 from base.api_contracts.agent_contract import ForkCheckpointNotFound
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
 from base.db.code_version_gate import ProcessDbGate
+from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 from ops.agents.tests.test_agents_internals import (
     blob_rows,
@@ -543,18 +545,28 @@ class TestSpawnFork:
         )
         insert_checkpoint(db_conn, source, "ck")
 
-        seen: list[list[tuple]] = []
+        seen: list[list[tuple[Any, ...]]] = []
 
-        def _spy_wake(_db: object, _bus: object, agent_id: int, _payload: str) -> None:
-            with base.db.connect(gate=database_gate) as conn, conn.cursor() as cur:
-                cur.execute(
-                    "SELECT content, kind, source FROM inbound_messages "
-                    "WHERE agent_id = %s ORDER BY id ASC",
-                    (agent_id,),
-                )
-                seen.append(cur.fetchall())  # pyright: ignore[reportUnknownMemberType]
+        class _SpyRedis:
+            def publish(self, channel: str, _payload: str) -> None:
+                if ":inbound:" not in channel:
+                    return
+                agent_id = int(channel.rsplit(":", 1)[-1])
+                with base.db.connect(gate=database_gate) as conn, conn.cursor() as cur:
+                    cur.execute(
+                        "SELECT content, kind, source FROM inbound_messages "
+                        "WHERE agent_id = %s ORDER BY id ASC",
+                        (agent_id,),
+                    )
+                    seen.append(cur.fetchall())
 
-        monkeypatch.setattr(insert, "publish_inbound_wake", _spy_wake)
+            def close(self) -> None:
+                pass
+
+        class _SpyBus:
+            def sync_redis(self) -> _SpyRedis:
+                return _SpyRedis()
+
         spawn_agent(
             fork_from=source,
             fork_checkpoint="ck",
@@ -564,6 +576,7 @@ class TestSpawnFork:
             model_catalog=model_catalog,
             database_gate=database_gate,
             local_machine=machine_identity,
+            bus=cast(EventBus, _SpyBus()),
         )
 
         assert seen and all(

@@ -1,14 +1,17 @@
 """Unit tests for the per-host status fields added to ClusterStatus."""
 
+from __future__ import annotations
+
 import os
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 import pytest
 
-import base.sessions.backend as sessions_backend
 from ops import cluster_status
 from ops.cluster_status import agent_shell_sessions, check_pidfile, count_agent_shells
-from ops.rpc_schemas import SessionInfo
+from ops.rpc_schemas import SessionInfo, ShellInfo
 
 
 def _rows(*names: str) -> list[SessionInfo]:
@@ -16,21 +19,23 @@ def _rows(*names: str) -> list[SessionInfo]:
     return [SessionInfo(name=n) for n in names]
 
 
-def test_collect_sessions_enumerates_both_backends(monkeypatch):
+def test_collect_sessions_enumerates_both_backends() -> None:
     """`collect_sessions` merges the service backend and the shell backend,
     scoped to the cluster prefix, with timestamps where the backend records
     them."""
 
     class _FakeBackend:
-        def __init__(self, names, started=None):
+        def __init__(
+            self, names: list[str], started: Callable[[str], float | None] | None = None
+        ) -> None:
             self._names = names
-            self._started = started  # pyright: ignore[reportUnknownMemberType]
+            self._started = started
 
-        def list_sessions(self, prefix=""):
-            return [n for n in self._names if n.startswith(prefix)]  # pyright: ignore[reportUnknownMemberType]
+        def list_sessions(self, prefix: str = "") -> list[str]:
+            return [n for n in self._names if n.startswith(prefix)]
 
         def session_started_at(self, name: str) -> float | None:
-            return self._started(name) if self._started else None  # pyright: ignore[reportUnknownMemberType]
+            return self._started(name) if self._started else None
 
         def session_started_ats(self, names: list[str]) -> dict[str, float | None]:
             return {n: self.session_started_at(n) for n in names}
@@ -39,10 +44,11 @@ def test_collect_sessions_enumerates_both_backends(monkeypatch):
         ["meiva-main-restarter", "meiva-main-gateway", "meiva-main-agent-9", "other-stray"]
     )
     shell = _FakeBackend(["meiva-main-agent-7-shell-0", "meiva-main-agent-7-shell-0-watcher"])
-    monkeypatch.setattr(sessions_backend, "get_backend", lambda: svc)  # pyright: ignore[reportUnknownMemberType]
-    monkeypatch.setattr(sessions_backend, "get_shell_backend", lambda: shell)  # pyright: ignore[reportUnknownMemberType]
 
-    sessions, shell_count, total = cluster_status.collect_sessions()
+    sessions, shell_count, total = cluster_status.collect_sessions(
+        service_backend=svc,
+        shell_backend=shell,
+    )
     names = {s.name for s in sessions}
     assert names == {
         "meiva-main-restarter",
@@ -54,9 +60,9 @@ def test_collect_sessions_enumerates_both_backends(monkeypatch):
     assert total == 4
 
 
-def test_collect_sessions_records_uptime_when_started_at_known(monkeypatch):
+def test_collect_sessions_records_uptime_when_started_at_known() -> None:
     class _FakeBackend:
-        def list_sessions(self, prefix=""):
+        def list_sessions(self, prefix: str = "") -> list[str]:
             return ["meiva-main-restarter"]
 
         def session_started_at(self, name: str) -> float | None:
@@ -65,24 +71,24 @@ def test_collect_sessions_records_uptime_when_started_at_known(monkeypatch):
         def session_started_ats(self, names: list[str]) -> dict[str, float | None]:
             return {n: self.session_started_at(n) for n in names}
 
-    backend = _FakeBackend()
-    monkeypatch.setattr(sessions_backend, "get_backend", lambda: backend)  # pyright: ignore[reportUnknownMemberType]
+    class _EmptyBackend:
+        @staticmethod
+        def list_sessions(_prefix: str = "") -> list[str]:
+            return []
 
-    empty = type(
-        "_Empty",
-        (),
-        {
-            "list_sessions": staticmethod(lambda _p="": []),  # pyright: ignore[reportUnknownArgumentType]
-            "session_started_ats": staticmethod(lambda _names: {}),  # pyright: ignore[reportUnknownArgumentType]
-        },
+        @staticmethod
+        def session_started_ats(_names: list[str]) -> dict[str, float | None]:
+            return {}
+
+    sessions, _, _ = cluster_status.collect_sessions(
+        service_backend=_FakeBackend(),
+        shell_backend=_EmptyBackend(),
     )
-    monkeypatch.setattr(sessions_backend, "get_shell_backend", lambda: empty)  # pyright: ignore[reportUnknownMemberType]
-    sessions, _, _ = cluster_status.collect_sessions()
     assert sessions[0].created_at is not None
     assert sessions[0].uptime_seconds > 0
 
 
-def test_count_agent_shells():
+def test_count_agent_shells() -> None:
     sessions = _rows(
         "meiva-main-agent-7-shell-0",
         "meiva-main-agent-7-shell-0-watcher",
@@ -92,24 +98,26 @@ def test_count_agent_shells():
     assert count_agent_shells(sessions) == 3
 
 
-def test_count_agent_shells_empty():
+def test_count_agent_shells_empty() -> None:
     assert count_agent_shells([]) == 0
 
 
-def _stub_sessions(monkeypatch: pytest.MonkeyPatch, *names: str) -> None:
-    # agent_shell_sessions reads `collect_sessions()` (sessions, *counts);
-    # stub it to the named rows so the test exercises only the filter.
+def _session_collector(*names: str) -> Callable[[], tuple[list[SessionInfo], int, int]]:
     sessions = _rows(*names)
-    monkeypatch.setattr(cluster_status, "collect_sessions", lambda: (sessions, 0, 0))
+    return lambda: (sessions, 0, 0)
 
 
-def test_agent_shell_sessions_parses_and_filters(monkeypatch: pytest.MonkeyPatch):
+def _shell_sessions_for(*names: str) -> Callable[[int], list[ShellInfo]]:
+    collector = _session_collector(*names)
+    return lambda agent_id: agent_shell_sessions(agent_id, session_collector=collector)
+
+
+def test_agent_shell_sessions_parses_and_filters() -> None:
     """Only the target agent's `-shell-<sid>[-<name>]` sessions, parsed to
     {id, name}, sorted by id. The agent's main session (no `-shell-`) and other
     agents' shells are excluded; an unnamed shell -> name None, a watcher ->
     name 'watcher', a named shell -> its slug."""
-    _stub_sessions(
-        monkeypatch,
+    collector = _session_collector(
         "meiva-main-agent-7",  # main, excluded
         "meiva-main-agent-7-shell-2-watcher",
         "meiva-main-agent-7-shell-0",
@@ -118,7 +126,7 @@ def test_agent_shell_sessions_parses_and_filters(monkeypatch: pytest.MonkeyPatch
         "meiva-main-agent-12-shell-3",  # other agent
         "meiva-main-restarter",  # not an agent
     )
-    shells = agent_shell_sessions(7)
+    shells = agent_shell_sessions(7, session_collector=collector)
     assert [(s.id, s.name) for s in shells] == [
         (0, None),
         (1, "dev-server"),
@@ -127,23 +135,20 @@ def test_agent_shell_sessions_parses_and_filters(monkeypatch: pytest.MonkeyPatch
     ]
 
 
-def test_agent_shell_sessions_none_for_agent_without_shells(monkeypatch: pytest.MonkeyPatch):
-    _stub_sessions(monkeypatch, "meiva-main-agent-7-shell-0")
-    assert agent_shell_sessions(99) == []
+def test_agent_shell_sessions_none_for_agent_without_shells() -> None:
+    collector = _session_collector("meiva-main-agent-7-shell-0")
+    assert agent_shell_sessions(99, session_collector=collector) == []
 
 
 # ─── capture_shell (the runner-side half of the shell monitor op) ─────────────
 
 
-def _stub_capture_backend(
-    monkeypatch: pytest.MonkeyPatch,
+def _make_capture_backend(
     captured: dict[str, object] | None = None,
     *,
     output: str = "",
     error: Exception | None = None,
-) -> None:
-    # capture_shell imports get_shell_backend inside the function; patch the
-    # module attribute so the per-call import picks the stub up.
+) -> Any:
     class _FakeBackend:
         def capture_pane(self, name: str, lines: int, *, scrollback: bool = True) -> str:
             if captured is not None:
@@ -154,10 +159,10 @@ def _stub_capture_backend(
                 raise error
             return output
 
-    monkeypatch.setattr(sessions_backend, "get_shell_backend", _FakeBackend)
+    return _FakeBackend()
 
 
-def test_capture_shell_reconstructs_name_and_captures(monkeypatch: pytest.MonkeyPatch):
+def test_capture_shell_reconstructs_name_and_captures() -> None:
     """capture_shell resolves the session via agent_shell_sessions, rebuilds the
     full session name (with `-<name>` suffix), captures with the requested
     depth through the shell backend, and returns (name, lines) with the
@@ -165,10 +170,15 @@ def test_capture_shell_reconstructs_name_and_captures(monkeypatch: pytest.Monkey
     from base.cluster import session_name
 
     stub = f"{session_name('agent-7')}-shell-3-watcher"
-    _stub_sessions(monkeypatch, stub)
     captured: dict[str, object] = {}
-    _stub_capture_backend(monkeypatch, captured, output="line one\nline two\n")
-    name, lines, _, _ = cluster_status.capture_shell(7, 3, lines=200)
+    backend = _make_capture_backend(captured, output="line one\nline two\n")
+    name, lines, _, _ = cluster_status.capture_shell(
+        7,
+        3,
+        lines=200,
+        shell_sessions_fn=_shell_sessions_for(stub),
+        shell_backend=backend,
+    )
     assert name == f"{session_name('agent-7-shell-3')}-watcher"
     assert lines == ["line one", "line two"]
     assert captured["name"] == name
@@ -176,33 +186,37 @@ def test_capture_shell_reconstructs_name_and_captures(monkeypatch: pytest.Monkey
     assert captured["scrollback"] is True
 
 
-def test_capture_shell_unnamed_session_no_suffix(monkeypatch: pytest.MonkeyPatch):
+def test_capture_shell_unnamed_session_no_suffix() -> None:
     """An unnamed shell (no `-<name>` segment) → full name without suffix."""
     from base.cluster import session_name
 
     stub = f"{session_name('agent-7')}-shell-1"
-    _stub_sessions(monkeypatch, stub)
-    _stub_capture_backend(monkeypatch, output="")
-    name, lines, _, _ = cluster_status.capture_shell(7, 1)
+    backend = _make_capture_backend(output="")
+    name, lines, _, _ = cluster_status.capture_shell(
+        7,
+        1,
+        shell_sessions_fn=_shell_sessions_for(stub),
+        shell_backend=backend,
+    )
     assert name == f"{session_name('agent-7-shell-1')}"
     assert lines == []
 
 
-def test_capture_shell_unknown_session_raises(monkeypatch: pytest.MonkeyPatch):
+def test_capture_shell_unknown_session_raises() -> None:
     """No live shell with that id on this host → ShellNotFoundError (surfaces as
     a failed shell_capture op; the gateway 404s)."""
-    _stub_sessions(monkeypatch, "meiva-main-agent-7-shell-3")
-    import pytest
-
     from ops.cluster_status import ShellNotFoundError
 
     with pytest.raises(ShellNotFoundError):
-        cluster_status.capture_shell(7, 99)
+        cluster_status.capture_shell(
+            7,
+            99,
+            shell_sessions_fn=_shell_sessions_for("meiva-main-agent-7-shell-3"),
+        )
 
 
-def test_kill_shell_resolves_full_name(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_kill_shell_resolves_full_name() -> None:
     from base.cluster import session_name
-    from ops.rpc_schemas import ShellInfo
 
     killed: list[str] = []
 
@@ -212,25 +226,20 @@ def test_kill_shell_resolves_full_name(monkeypatch: pytest.MonkeyPatch) -> None:
             killed.append(name)
             return True, "forced", True
 
-    monkeypatch.setattr(
-        cluster_status,
-        "agent_shell_sessions",
-        lambda _agent_id: [ShellInfo(id=3, name="build", uptime_seconds=1)],  # pyright: ignore[reportUnknownArgumentType]
-    )
-    monkeypatch.setattr(sessions_backend, "get_shell_backend", _Backend)
-
     # the verdict rides the kill itself (one call, no separate probe)
-    assert cluster_status.kill_shell(7, 3) == ("killed", True, "build")
+    assert cluster_status.kill_shell(
+        7,
+        3,
+        shell_sessions_fn=lambda _agent_id: [ShellInfo(id=3, name="build", uptime_seconds=1)],
+        shell_backend=_Backend(),
+    ) == ("killed", True, "build")
     assert killed == [session_name("agent-7-shell-3-build")]
 
 
-def test_kill_shell_uninspectable_backend_reports_interrupted(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_kill_shell_uninspectable_backend_reports_interrupted() -> None:
     """A backend without a kill verdict is treated as interrupted (fail-open):
     the reap may interrupt work it cannot see, so the notice must not be
     dropped."""
-    from ops.rpc_schemas import ShellInfo
 
     class _Backend:
         @staticmethod
@@ -241,41 +250,37 @@ def test_kill_shell_uninspectable_backend_reports_interrupted(
         def kill_session(_name: str) -> tuple[bool, str]:
             return True, "forced"
 
-    monkeypatch.setattr(
-        cluster_status,
-        "agent_shell_sessions",
-        lambda _agent_id: [ShellInfo(id=3, name=None, uptime_seconds=1)],  # pyright: ignore[reportUnknownArgumentType]
-    )
-    monkeypatch.setattr(sessions_backend, "get_shell_backend", _Backend)
-
-    assert cluster_status.kill_shell(7, 3) == ("killed", True, None)
+    assert cluster_status.kill_shell(
+        7,
+        3,
+        shell_sessions_fn=lambda _agent_id: [ShellInfo(id=3, name=None, uptime_seconds=1)],
+        shell_backend=_Backend(),
+    ) == ("killed", True, None)
 
 
-def test_kill_shell_idle_session_reports_not_interrupted(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_kill_shell_idle_session_reports_not_interrupted() -> None:
     """An idle shell (no running job) is reclaimed silently — interrupted
     False is what makes the gateway skip the notice."""
-    from ops.rpc_schemas import ShellInfo
 
     class _Backend:
         @staticmethod
         def kill_session_with_verdict(_name: str) -> tuple[bool, str, bool]:
             return True, "forced", False
 
-    monkeypatch.setattr(
-        cluster_status,
-        "agent_shell_sessions",
-        lambda _agent_id: [ShellInfo(id=3, name=None, uptime_seconds=1)],  # pyright: ignore[reportUnknownArgumentType]
-    )
-    monkeypatch.setattr(sessions_backend, "get_shell_backend", _Backend)
-
-    assert cluster_status.kill_shell(7, 3) == ("killed", False, None)
+    assert cluster_status.kill_shell(
+        7,
+        3,
+        shell_sessions_fn=lambda _agent_id: [ShellInfo(id=3, name=None, uptime_seconds=1)],
+        shell_backend=_Backend(),
+    ) == ("killed", False, None)
 
 
-def test_kill_shell_missing_session_is_absent(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(cluster_status, "agent_shell_sessions", lambda _agent_id: [])  # pyright: ignore[reportUnknownArgumentType]
-    assert cluster_status.kill_shell(7, 99) == ("absent", False, None)
+def test_kill_shell_missing_session_is_absent() -> None:
+    assert cluster_status.kill_shell(
+        7,
+        99,
+        shell_sessions_fn=lambda _agent_id: [],
+    ) == ("absent", False, None)
 
 
 class _KillAllBackend:
@@ -295,9 +300,7 @@ class _KillAllBackend:
         return True, "forced"
 
 
-def test_kill_agent_shells_kills_only_the_owners_shell_sessions(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_kill_agent_shells_kills_only_the_owners_shell_sessions() -> None:
     """Every `-agent-<id>-shell-<sid>[-<name>]` session of the owner goes —
     watchers included; another agent's shells, non-shell sessions and the
     owner's `meiva.ui.serve` page sessions (named by the page daemon's grammar)
@@ -306,8 +309,7 @@ def test_kill_agent_shells_kills_only_the_owners_shell_sessions(
     from base.sessions.page_session import page_session_name
 
     page = page_session_name(7, "dash_board", 3)
-    _stub_sessions(
-        monkeypatch,
+    shells_fn = _shell_sessions_for(
         "meiva-agent-7",
         "meiva-agent-7-shell-0",
         "meiva-agent-7-shell-2-watcher",
@@ -320,9 +322,13 @@ def test_kill_agent_shells_kills_only_the_owners_shell_sessions(
         "meiva-restarter",
     )
     backend = _KillAllBackend()
-    monkeypatch.setattr(sessions_backend, "get_shell_backend", lambda: backend)
 
-    assert cluster_status.kill_agent_shells(7, before_session_index=6) == [0, 2, 5]
+    assert cluster_status.kill_agent_shells(
+        7,
+        before_session_index=6,
+        shell_sessions_fn=shells_fn,
+        shell_backend=backend,
+    ) == [0, 2, 5]
     assert sorted(backend.killed) == sorted(
         [
             session_name("agent-7-shell-0"),
@@ -331,34 +337,47 @@ def test_kill_agent_shells_kills_only_the_owners_shell_sessions(
         ]
     )
     assert page not in backend.killed
-    assert cluster_status.kill_agent_shells(99, before_session_index=6) == []
+    assert (
+        cluster_status.kill_agent_shells(
+            99,
+            before_session_index=6,
+            shell_sessions_fn=shells_fn,
+            shell_backend=backend,
+        )
+        == []
+    )
 
 
-def test_kill_agent_shells_raises_after_trying_every_session(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_kill_agent_shells_raises_after_trying_every_session() -> None:
     from base.cluster import session_name
 
-    _stub_sessions(monkeypatch, "meiva-agent-7-shell-0", "meiva-agent-7-shell-1")
+    shells_fn = _shell_sessions_for("meiva-agent-7-shell-0", "meiva-agent-7-shell-1")
     backend = _KillAllBackend(survives=frozenset({session_name("agent-7-shell-0")}))
-    monkeypatch.setattr(sessions_backend, "get_shell_backend", lambda: backend)
 
     with pytest.raises(RuntimeError, match=r"shell session\(s\) \[0\] of agent 7"):
-        cluster_status.kill_agent_shells(7, before_session_index=6)
+        cluster_status.kill_agent_shells(
+            7,
+            before_session_index=6,
+            shell_sessions_fn=shells_fn,
+            shell_backend=backend,
+        )
     assert backend.killed == [session_name("agent-7-shell-1")]
 
 
-def test_capture_shell_capture_failure_raises(monkeypatch: pytest.MonkeyPatch):
+def test_capture_shell_capture_failure_raises() -> None:
     """A backend capture failure (session died after probe) → RuntimeError."""
-    _stub_sessions(monkeypatch, "meiva-main-agent-7-shell-1")
-    _stub_capture_backend(monkeypatch, error=RuntimeError("can't find pane"))
-    import pytest
+    backend = _make_capture_backend(error=RuntimeError("can't find pane"))
 
     with pytest.raises(RuntimeError, match="can't find pane"):
-        cluster_status.capture_shell(7, 1)
+        cluster_status.capture_shell(
+            7,
+            1,
+            shell_sessions_fn=_shell_sessions_for("meiva-main-agent-7-shell-1"),
+            shell_backend=backend,
+        )
 
 
-def testcheck_pidfile_alive(tmp_path: Path):
+def testcheck_pidfile_alive(tmp_path: Path) -> None:
     pf = tmp_path / "live.pid"
     pf.write_text(str(os.getpid()))
     alive, pid = check_pidfile(str(pf))
@@ -366,23 +385,16 @@ def testcheck_pidfile_alive(tmp_path: Path):
     assert pid == os.getpid()
 
 
-def testcheck_pidfile_missing(tmp_path: Path):
+def testcheck_pidfile_missing(tmp_path: Path) -> None:
     alive, pid = check_pidfile(str(tmp_path / "nope.pid"))
     assert alive is False
     assert pid is None
 
 
-def testcheck_pidfile_dead(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+def testcheck_pidfile_dead(tmp_path: Path) -> None:
     pf = tmp_path / "dead.pid"
     pf.write_text("999999")
 
-    def _raise_oserror(*args: object, **kwargs: object) -> None:
-        raise OSError(3, "No such process")
-
-    monkeypatch.setattr(os, "kill", _raise_oserror)
-    alive, pid = check_pidfile(str(pf))
+    alive, pid = check_pidfile(str(pf), alive_probe=lambda _pid: False)
     assert alive is False
     assert pid == 999999
-
-
-# ─── row order ────────────────────────────────────────────────────────────────

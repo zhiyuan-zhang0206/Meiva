@@ -16,7 +16,9 @@ from __future__ import annotations
 
 import logging
 import re
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -34,8 +36,20 @@ from base.host.proc import process_alive
 from base.host.resource_sample import ResourceSample
 from base.native_process.loaded_commit import LoadedCommit
 from base.sessions.page_session import is_page_label
+from ops.cluster_status.model import (
+    AGENT_SHELL_RE as AGENT_SHELL_RE,
+)
+from ops.cluster_status.model import (
+    count_agent_shells as count_agent_shells,
+)
+from ops.cluster_status.model import (
+    group_agent_sessions as _group_agent_sessions,
+)
+from ops.cluster_status.model import (
+    trim_captured_lines,
+)
 from ops.cluster_status.schema_mismatch import status as schema_mismatch_status
-from ops.rpc_schemas import AgentSessionGroup, SessionInfo, ShellInfo
+from ops.rpc_schemas import SessionInfo, ShellInfo
 
 _log = logging.getLogger(__name__)
 
@@ -118,7 +132,9 @@ class ClusterStatus(BaseModel):
     resource: ResourceSample | None = None
 
 
-def check_pidfile(pidfile_path: str) -> tuple[bool, int | None]:
+def check_pidfile(
+    pidfile_path: str, *, alive_probe: Callable[[int], bool] | None = None
+) -> tuple[bool, int | None]:
     """Read a pidfile + `process_alive(pid)` to test liveness. Returns (alive, pid).
 
     Missing/empty/non-int file -> (False, None). Pidfile present but the process
@@ -128,12 +144,8 @@ def check_pidfile(pidfile_path: str) -> tuple[bool, int | None]:
         pid = int(pf.read_text().strip())
     except (FileNotFoundError, ValueError):
         return False, None
-    return process_alive(pid), pid
-
-
-def count_agent_shells(sessions: list[SessionInfo]) -> int:
-    """Count agent shell + watcher sessions from the session list."""
-    return sum(1 for s in sessions if re.search(r"-agent-(\d+)-shell-", s.name))
+    probe = alive_probe or process_alive
+    return probe(pid), pid
 
 
 def count_local_agents(conn: Any, *, local_machine: str) -> int:
@@ -145,28 +157,6 @@ def count_local_agents(conn: Any, *, local_machine: str) -> int:
     if row is None:
         raise RuntimeError("local agent count returned no row")
     return int(row[0])
-
-
-def _group_agent_sessions(
-    sessions: list[SessionInfo],
-) -> list[AgentSessionGroup]:
-    """Group cluster sessions by agent ID into a structured list for the frontend.
-
-    Each group is an AgentSessionGroup (agent_id, label, shells). Only the
-    agent's shell/watcher sessions appear — the agent process itself is not a
-    session — so a group forms for every agent that has at least one shell. The label is an empty string for now (resolved later via
-    agents_meta lookup if available).
-    """
-    groups: dict[int, AgentSessionGroup] = {}
-    for s in sessions:
-        m = _AGENT_SESSION_RE.search(s.name)
-        if m is None:
-            continue
-        agent_id = int(m.group(1))
-        if agent_id not in groups:
-            groups[agent_id] = AgentSessionGroup(agent_id=agent_id, label="", shells=[])
-        groups[agent_id].shells.append(s)
-    return list(groups.values())
 
 
 # Session name prefix — sessions are named `meiva-<service>` (see
@@ -182,13 +172,12 @@ _AGENT_PROCESS_RE = re.compile(
     r"^meiva-(?:[a-z0-9]+-)*(?:agent-\d+|boot-\d+-(?:\d+-\d+|[a-f0-9]{32}))$"
 )
 
-_AGENT_SESSION_RE = re.compile(r"-agent-(\d+)")
-# Parse one agent's persistent-shell session name: `…-agent-<id>-shell-<sid>[-<name>]`.
-# The agent's own process session (`…-agent-<id>`, no `-shell-`) does not match.
-AGENT_SHELL_RE = re.compile(r"-agent-(\d+)-shell-(\d+)(?:-(.+))?$")
 
-
-def agent_shell_sessions(agent_id: int) -> list[ShellInfo]:
+def agent_shell_sessions(
+    agent_id: int,
+    *,
+    session_collector: Callable[[], tuple[list[SessionInfo], int, int]] | None = None,
+) -> list[ShellInfo]:
     """This host's live persistent-shell sessions for one agent, newest id last.
 
     Reuses the same session enumeration as the cluster status snapshot
@@ -202,7 +191,8 @@ def agent_shell_sessions(agent_id: int) -> list[ShellInfo]:
     dispatch `shell_probe` / `shell_capture` ops to the agent's own machine
     otherwise — a remote runner's shells never appear in a local probe.
     """
-    sessions, *_ = collect_sessions()
+    collector = session_collector or collect_sessions
+    sessions, *_ = collector()
     shells: list[ShellInfo] = []
     for s in sessions:
         m = AGENT_SHELL_RE.search(s.name)
@@ -225,7 +215,12 @@ class ShellNotFoundError(LookupError):
 
 
 def capture_shell(
-    agent_id: int, session_id: int, lines: int = 200
+    agent_id: int,
+    session_id: int,
+    lines: int = 200,
+    *,
+    shell_sessions_fn: Callable[[int], list[ShellInfo]] | None = None,
+    shell_backend: Any | None = None,
 ) -> tuple[str, list[str], datetime | None, int]:
     """Capture the terminal tail of one of an agent's persistent shells.
 
@@ -248,35 +243,34 @@ def capture_shell(
         RuntimeError: the capture failed (the session died between the
             probe and the capture).
     """
-    shell = next((s for s in agent_shell_sessions(agent_id) if s.id == session_id), None)
+    list_shells = shell_sessions_fn or agent_shell_sessions
+    shell = next((s for s in list_shells(agent_id) if s.id == session_id), None)
     if shell is None:
         raise ShellNotFoundError(f"agent {agent_id} has no live shell {session_id} on this host")
 
     full_name = _shell_session_name(agent_id, shell)
-    from base.sessions.backend import get_shell_backend
+    if shell_backend is None:
+        from base.sessions.backend import get_shell_backend
+
+        backend = get_shell_backend()
+    else:
+        backend = shell_backend
 
     try:
-        captured = get_shell_backend().capture_pane(full_name, lines)
+        captured = backend.capture_pane(full_name, lines)
     except Exception as exc:
         raise RuntimeError(f"session capture on {full_name!r} failed: {exc}") from exc
-    captured_lines = captured.splitlines()
-    # Trim blank padding from both ends of the tail. A cursor-addressed TUI
-    # (claude/codex-class CLIs) redraws via escape sequences, and each
-    # full-screen redraw scrolls cleared rows into the pyte scrollback — so a
-    # capture can open with dozens of blank rows the shell-monitor page
-    # renders as a huge blank region above the real output. Trailing blank
-    # screen rows below the last line of a short session do the mirror-image
-    # damage: the bottom-anchored pane scrolls the real output above the fold.
-    # Blank padding at the extremes of a capture is never meaningful output;
-    # interleaved blanks stay.
-    while captured_lines and not captured_lines[0].strip():
-        captured_lines.pop(0)
-    while captured_lines and not captured_lines[-1].strip():
-        captured_lines.pop()
+    captured_lines = trim_captured_lines(captured)
     return full_name, captured_lines, shell.created_at, shell.uptime_seconds
 
 
-def kill_shell(agent_id: int, session_id: int) -> tuple[ShellKillMode, bool, str | None]:
+def kill_shell(
+    agent_id: int,
+    session_id: int,
+    *,
+    shell_sessions_fn: Callable[[int], list[ShellInfo]] | None = None,
+    shell_backend: Any | None = None,
+) -> tuple[ShellKillMode, bool, str | None]:
     """Kill one host-local persistent shell, or report that it is already absent.
 
     Returns ``(mode, interrupted, name)``: ``mode`` is ``"killed"`` or
@@ -289,13 +283,17 @@ def kill_shell(agent_id: int, session_id: int) -> tuple[ShellKillMode, bool, str
     separate idle probe and the kill cannot be missed; a backend without
     verdict support reports interrupted=True (fail-open: a session that
     cannot be proven idle may well be running work)."""
-    shell = next((s for s in agent_shell_sessions(agent_id) if s.id == session_id), None)
+    list_shells = shell_sessions_fn or agent_shell_sessions
+    shell = next((s for s in list_shells(agent_id) if s.id == session_id), None)
     if shell is None:
         return ShellKillMode.ABSENT, False, None
     full_name = _shell_session_name(agent_id, shell)
-    from base.sessions.backend import get_shell_backend
+    if shell_backend is None:
+        from base.sessions.backend import get_shell_backend
 
-    backend = get_shell_backend()
+        backend = get_shell_backend()
+    else:
+        backend = shell_backend
     try:
         ok, _mode, interrupted = backend.kill_session_with_verdict(full_name)
     except NotImplementedError:
@@ -311,7 +309,13 @@ def kill_shell(agent_id: int, session_id: int) -> tuple[ShellKillMode, bool, str
 _KILL_ALL_WORKERS = 8
 
 
-def kill_agent_shells(agent_id: int, *, before_session_index: int) -> list[int]:
+def kill_agent_shells(
+    agent_id: int,
+    *,
+    before_session_index: int,
+    shell_sessions_fn: Callable[[int], list[ShellInfo]] | None = None,
+    shell_backend: Any | None = None,
+) -> list[int]:
     """Kill listed host-local shells below the owner's cutoff; return their ids.
 
     The `kill_all_shell_sessions` primitive
@@ -330,16 +334,20 @@ def kill_agent_shells(agent_id: int, *, before_session_index: int) -> list[int]:
     Every selected session is attempted; a kill the backend could not
     confirm raises one RuntimeError naming those ids after the others ran.
     """
+    list_shells = shell_sessions_fn or agent_shell_sessions
     shells = [
         shell
-        for shell in agent_shell_sessions(agent_id)
+        for shell in list_shells(agent_id)
         if shell.id < before_session_index and not is_page_label(shell.name)
     ]
     if not shells:
         return []
-    from base.sessions.backend import get_shell_backend
+    if shell_backend is None:
+        from base.sessions.backend import get_shell_backend
 
-    backend = get_shell_backend()
+        backend = get_shell_backend()
+    else:
+        backend = shell_backend
 
     def _kill(shell: ShellInfo) -> bool:
         ok, _mode = backend.kill_session(_shell_session_name(agent_id, shell), graceful=False)
@@ -360,7 +368,12 @@ def _shell_session_name(agent_id: int, shell: ShellInfo) -> str:
     )
 
 
-def collect_sessions() -> tuple[list[SessionInfo], int, int]:
+def collect_sessions(
+    *,
+    service_backend: Any | None = None,
+    shell_backend: Any | None = None,
+    clock: Clock | None = None,
+) -> tuple[list[SessionInfo], int, int]:
     """Enumerate this host's live sessions from the session backends, and return
     (sessions, shell_count, total).
 
@@ -377,9 +390,11 @@ def collect_sessions() -> tuple[list[SessionInfo], int, int]:
     from base.sessions.backend import get_backend, get_shell_backend
 
     rows: dict[str, SessionInfo] = {}
-    zone = Clock.from_settings().zone()
+    zone = (clock or Clock.from_settings()).zone()
     now = datetime.now().astimezone(zone)
-    for backend in (get_backend(), get_shell_backend()):
+    svc = get_backend() if service_backend is None else service_backend
+    sh = get_shell_backend() if shell_backend is None else shell_backend
+    for backend in (svc, sh):
         try:
             names = backend.list_sessions(_CLUSTER_SESSION_PREFIX)
         except Exception:
@@ -414,8 +429,15 @@ def collect_sessions() -> tuple[list[SessionInfo], int, int]:
 # The first element says whether the read succeeded: a host whose database
 # snapshot failed cannot claim readiness.
 def read_db_snapshot(
-    db: Database, pool: Any | None, *, local_machine: MachineIdentity
+    db: Database,
+    pool: Any | None,
+    *,
+    local_machine: MachineIdentity,
+    agent_counter: Callable[..., int] | None = None,
+    schema_status_fn: Callable[..., SchemaMismatchStatus | None] | None = None,
 ) -> tuple[bool, int, SchemaMismatchStatus | None]:
+    counter = agent_counter or count_local_agents
+    status_fn = schema_status_fn or schema_mismatch_status
     try:
         connection = (
             db.connect(autocommit=True)
@@ -424,13 +446,11 @@ def read_db_snapshot(
         )
         with connection as conn:
             agent_count = (
-                count_local_agents(conn, local_machine=local_machine.name())
+                counter(conn, local_machine=local_machine.name())
                 if ("agent-runner" in local_machine.role())
                 else 0
             )
-            schema_status = schema_mismatch_status(
-                db, conn=conn, local_machine=local_machine.name()
-            )
+            schema_status = status_fn(db, conn=conn, local_machine=local_machine.name())
         return True, agent_count, schema_status
     except Exception as exc:
         # meiva:note
@@ -449,9 +469,13 @@ def read_db_snapshot(
         )
 
 
-def read_resource_sample() -> ResourceSample | None:
+def read_resource_sample(
+    *, sampler: Callable[[], ResourceSample] | None = None
+) -> ResourceSample | None:
     """One live resource sample, degraded to None on any psutil failure."""
     try:
+        if sampler is not None:
+            return sampler()
         from base.host.resource_sample import resource_sample
 
         return resource_sample()
@@ -465,10 +489,14 @@ def read_resource_sample() -> ResourceSample | None:
 #
 # A start is in flight, a stop has begun, or a failed start parked the gate and
 # recovery stays gated. A local fact: no database read.
-def serving_gate_reason() -> PausedReason | None:
-    from base.deploy.lifecycle import start_serving
+def serving_gate_reason(*, is_serving_fn: Callable[[], bool] | None = None) -> PausedReason | None:
+    if is_serving_fn is None:
+        from base.deploy.lifecycle import start_serving
 
-    return None if start_serving.is_serving() else "startup"
+        serving = start_serving.is_serving()
+    else:
+        serving = is_serving_fn()
+    return None if serving else "startup"
 
 
 # meiva:note
@@ -476,10 +504,12 @@ def serving_gate_reason() -> PausedReason | None:
 #
 # `no_state` (the database snapshot read failed), then `startup` (see
 # `serving_gate_reason`). None when neither fired.
-def _paused_reason(*, db_ok: bool) -> PausedReason | None:
+def _paused_reason(
+    *, db_ok: bool, is_serving_fn: Callable[[], bool] | None = None
+) -> PausedReason | None:
     if not db_ok:
         return "no_state"
-    return serving_gate_reason()
+    return serving_gate_reason(is_serving_fn=is_serving_fn)
 
 
 def _supervisor_online() -> bool | None:
@@ -493,8 +523,31 @@ def _supervisor_online() -> bool | None:
         return None
 
 
+@dataclass(frozen=True)
+class StatusSnapshotHooks:
+    pidfile_checker: Callable[[str], tuple[bool, int | None]] = field(
+        default_factory=lambda: check_pidfile
+    )
+    session_collector: Callable[[], tuple[list[SessionInfo], int, int]] = field(
+        default_factory=lambda: collect_sessions
+    )
+    agent_counter: Callable[..., int] = field(default_factory=lambda: count_local_agents)
+    schema_status_fn: Callable[..., SchemaMismatchStatus | None] = field(
+        default_factory=lambda: schema_mismatch_status
+    )
+    resource_sampler: Callable[[], ResourceSample] | None = None
+    resource_reader: Callable[[], ResourceSample | None] | None = None
+    is_serving_fn: Callable[[], bool] | None = None
+    head_sha_reader: Callable[[], str | None] | None = None
+
+
 def status_snapshot(
-    db: Database, pool: Any | None = None, *, image: LoadedCommit, local_machine: MachineIdentity
+    db: Database,
+    pool: Any | None = None,
+    *,
+    image: LoadedCommit,
+    local_machine: MachineIdentity,
+    hooks: StatusSnapshotHooks | None = None,
 ) -> ClusterStatus:
     """Assemble this host's cluster state — used by `/api/cluster/status`.
 
@@ -503,29 +556,44 @@ def status_snapshot(
     through and FastAPI surfaces as default 500 (admin endpoint, not
     consumed by SDK).
     """
-    from base.deploy.git.cluster_drift import prod_source_head_sha
+    active = hooks or StatusSnapshotHooks()
+    if active.head_sha_reader is None:
+        from base.deploy.git.cluster_drift import prod_source_head_sha
+
+        head_sha = prod_source_head_sha()
+    else:
+        head_sha = active.head_sha_reader()
 
     agent_host_alive = (
-        check_pidfile(str(ServiceEndpoints.from_settings().of("agent_host").pidfile))[0]
+        active.pidfile_checker(str(ServiceEndpoints.from_settings().of("agent_host").pidfile))[0]
         if ("agent-runner" in local_machine.role())
         else None
     )
     supervisor_alive = _supervisor_online()
-    sessions, shell_count, session_total = collect_sessions()
+    sessions, shell_count, session_total = active.session_collector()
     # The producer is typed (AgentSessionGroup); ClusterStatus.agent_groups stays
     # an open dict list so the frontend-facing status schema (and its generated TS
     # types) is unchanged — serialize the models to JSON dicts at the boundary.
     agent_groups = [g.model_dump(mode="json") for g in _group_agent_sessions(sessions)]
+    sample_fn = active.resource_reader or (
+        lambda: read_resource_sample(sampler=active.resource_sampler)
+    )
     # The live one-shot resource sample blocks for its CPU interval. Run it in
     # parallel with the central-DB reads so snapshot latency pays the slower
     # of those independent operations, not their sum.
     with ThreadPoolExecutor(max_workers=1) as executor:
-        resource_future = executor.submit(read_resource_sample)
-        db_ok, agent_count, schema_status = read_db_snapshot(db, pool, local_machine=local_machine)
+        resource_future = executor.submit(sample_fn)
+        db_ok, agent_count, schema_status = read_db_snapshot(
+            db,
+            pool,
+            local_machine=local_machine,
+            agent_counter=active.agent_counter,
+            schema_status_fn=active.schema_status_fn,
+        )
         resource = resource_future.result()
     # One source of truth for the pair: `paused` is exactly "a clause fired",
     # so the bool can never drift from its reason.
-    paused_reason = _paused_reason(db_ok=db_ok)
+    paused_reason = _paused_reason(db_ok=db_ok, is_serving_fn=active.is_serving_fn)
     return ClusterStatus(
         machine_name=local_machine.name(),
         serve_gateway=("gateway" in local_machine.role()),
@@ -533,7 +601,7 @@ def status_snapshot(
         serve_observability_station=("observability-station" in local_machine.role()),
         paused=paused_reason is not None,
         paused_reason=paused_reason,
-        head_sha=prod_source_head_sha(),
+        head_sha=head_sha,
         running_sha=image.sha,
         schema_mismatch=schema_status,
         shell_count=shell_count,
