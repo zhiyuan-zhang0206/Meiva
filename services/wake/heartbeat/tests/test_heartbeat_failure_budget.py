@@ -1,99 +1,86 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable, Callable
-from typing import cast
+from collections.abc import Awaitable
 
 import psycopg
 import pytest
-from psycopg_pool import ConnectionPool
 
+from base.clock import Clock, ClockConfig
+from base.clock.tests.manual_timers import ManualTimers
 from base.daemon.loop_health import LoopProgress
 from base.daemon.round_loop import CONSECUTIVE_ROUND_FAILURE_LIMIT, RoundFailureLimitError
-from base.db import Database
-from base.db.code_version_gate import ProcessDbGate
-from base.events.live.bus import EventBus
-from services.wake.heartbeat import daemon as heartbeat_daemon
+from services.wake.heartbeat import loops
 
 
-def _drive(loop: str, gate: ProcessDbGate) -> Awaitable[None]:
-    pool = cast(ConnectionPool, object())
-    database = Database.from_settings(gate=gate)
-    bus = EventBus.from_settings()
-    progress = LoopProgress(loop, 60.0)
-    if loop == "poll":
-        return heartbeat_daemon.dispatch_loop(
-            pool, database, bus, progress, sweep_resets=lambda _pool: None
-        )
-    return heartbeat_daemon.liveness_loop(database, pool, bus, progress)
+class _Script:
+    def __init__(self, outcomes: list[BaseException | None]) -> None:
+        self.outcomes = outcomes
+        self.rounds = 0
 
-
-def _script(
-    monkeypatch: pytest.MonkeyPatch, loop: str, outcomes: list[BaseException | None]
-) -> Callable[[], int]:
-    rounds = 0
-
-    def next_outcome() -> None:
-        nonlocal rounds
-        if rounds == len(outcomes):
+    def advance(self) -> None:
+        if self.rounds == len(self.outcomes):
             raise asyncio.CancelledError
-        outcome = outcomes[rounds]
-        rounds += 1
+        outcome = self.outcomes[self.rounds]
+        self.rounds += 1
         if outcome is not None:
             raise outcome
 
-    async def no_sleep(_liveness: object, _total_s: float) -> None:
-        return None
 
-    async def liveness_pass(*_args: object) -> None:
-        next_outcome()
+class _Dispatch:
+    interval_s = 15.0
 
-    def empty_poll(*_args: object, **_kwargs: object) -> list[tuple[int, float]]:
-        next_outcome()
-        return []
+    def __init__(self, script: _Script) -> None:
+        self._script = script
 
-    def nothing(*_args: object, **_kwargs: object) -> None:
-        return None
+    def run_round(self) -> None:
+        self._script.advance()
 
-    def no_deadlines(*_args: object, **_kwargs: object) -> dict[int, float]:
-        return {}
 
-    monkeypatch.setattr(heartbeat_daemon, "sleep_with_liveness", no_sleep)
+class _Liveness:
+    def __init__(self, script: _Script) -> None:
+        self._script = script
+
+    async def run_round(self) -> None:
+        self._script.advance()
+
+
+def _drive(loop: str, script: _Script) -> Awaitable[None]:
+    timers = ManualTimers()
+    clock = Clock(ClockConfig("UTC", "UTC", False), timers=timers, now=timers.now)
+    progress = LoopProgress(loop, 60.0)
     if loop == "poll":
-        monkeypatch.setattr(heartbeat_daemon, "reconcile_checkin_outcomes", nothing)
-        monkeypatch.setattr(heartbeat_daemon, "select_idle_agents_needing_heartbeat", empty_poll)
-        monkeypatch.setattr(heartbeat_daemon, "backoff_deadlines", no_deadlines)
-    else:
-        monkeypatch.setattr(heartbeat_daemon, "run_liveness_pass", liveness_pass)
-    return lambda: rounds
+        return loops.dispatch_loop(_Dispatch(script), progress, clock=clock)
+    return loops.liveness_loop(_Liveness(script), progress, clock=clock)
 
 
 @pytest.mark.parametrize("loop", ["poll", "liveness"])
-async def test_consecutive_failed_rounds_end_the_loop(
-    monkeypatch: pytest.MonkeyPatch, loop: str, database_gate: ProcessDbGate
-) -> None:
+async def test_consecutive_failed_rounds_end_the_loop(loop: str) -> None:
     limit = CONSECUTIVE_ROUND_FAILURE_LIMIT
-    rounds = _script(monkeypatch, loop, [RuntimeError("boom")] * (limit + 3))
-
+    script = _Script([RuntimeError("boom")] * (limit + 3))
     with pytest.raises(RoundFailureLimitError):
-        await _drive(loop, database_gate)
-
-    assert rounds() == limit, "the loop must stop at the limit, not keep retrying"
+        await _drive(loop, script)
+    assert script.rounds == limit, "the loop must stop at the limit, not keep retrying"
 
 
 @pytest.mark.parametrize("loop", ["poll", "liveness"])
-async def test_a_completed_round_and_a_db_outage_do_not_exhaust_the_budget(
-    monkeypatch: pytest.MonkeyPatch, loop: str, database_gate: ProcessDbGate
-) -> None:
+async def test_a_completed_round_and_a_db_outage_do_not_exhaust_the_budget(loop: str) -> None:
     limit = CONSECUTIVE_ROUND_FAILURE_LIMIT
     boom = RuntimeError("boom")
     outcomes: list[BaseException | None] = [boom] * (limit - 1)
     outcomes += [None]
     outcomes += [psycopg.OperationalError("db down")] * limit
     outcomes += [boom] * (limit - 1)
-    rounds = _script(monkeypatch, loop, outcomes)
-
+    script = _Script(outcomes)
     with pytest.raises(asyncio.CancelledError):
-        await _drive(loop, database_gate)
+        await _drive(loop, script)
+    assert script.rounds == len(outcomes)
 
-    assert rounds() == len(outcomes)
+
+async def test_a_dispatch_schema_error_ends_the_first_round() -> None:
+    error = psycopg.ProgrammingError("schema mismatch")
+    script = _Script([error] * CONSECUTIVE_ROUND_FAILURE_LIMIT)
+    with pytest.raises(psycopg.ProgrammingError) as caught:
+        await _drive("poll", script)
+    assert caught.value is error
+    assert script.rounds == 1

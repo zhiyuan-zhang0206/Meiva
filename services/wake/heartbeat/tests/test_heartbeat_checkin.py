@@ -13,6 +13,7 @@ from psycopg_pool import ConnectionPool
 
 from base import telemetry
 from base.agents.tests.units import spawn_agent
+from base.clock import Clock
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import settings
@@ -51,7 +52,9 @@ def event_pipeline(
 
 def _selected(pool: ConnectionPool) -> dict[int, float]:
     """agent_id -> idle_minutes for every agent the daemon would check in on."""
-    return dict(select_idle_agents_needing_heartbeat(pool, THRESHOLD_S))
+    return dict(
+        select_idle_agents_needing_heartbeat(pool, THRESHOLD_S, clock=Clock.from_settings())
+    )
 
 
 def _mirror_nudged(agent_id: int) -> tuple[str, str, int] | None:
@@ -198,10 +201,14 @@ class TestSendHeartbeatCheckin:
         db_conn.commit()
 
         assert aid not in dict(
-            select_idle_agents_needing_heartbeat(pool, THRESHOLD_S, heartbeat_interval_s=300.0)
+            select_idle_agents_needing_heartbeat(
+                pool, THRESHOLD_S, heartbeat_interval_s=300.0, clock=Clock.from_settings()
+            )
         )
         assert aid in dict(
-            select_idle_agents_needing_heartbeat(pool, THRESHOLD_S, heartbeat_interval_s=15.0)
+            select_idle_agents_needing_heartbeat(
+                pool, THRESHOLD_S, heartbeat_interval_s=15.0, clock=Clock.from_settings()
+            )
         )
 
     async def test_publishes_redis_wake_to_target(
@@ -271,12 +278,15 @@ class TestConsecutiveFailureBackoff:
         # Deadline in the future -> excluded; deadline passed -> selected.
         assert aid not in dict(
             select_idle_agents_needing_heartbeat(
-                pool, THRESHOLD_S, backoff_until={aid: time.time() + 1000}
+                pool,
+                THRESHOLD_S,
+                backoff_until={aid: time.time() + 1000},
+                clock=Clock.from_settings(),
             )
         )
         assert aid in dict(
             select_idle_agents_needing_heartbeat(
-                pool, THRESHOLD_S, backoff_until={aid: time.time() - 1}
+                pool, THRESHOLD_S, backoff_until={aid: time.time() - 1}, clock=Clock.from_settings()
             )
         )
 
@@ -315,6 +325,7 @@ class TestConsecutiveFailureBackoff:
             THRESHOLD_S,
             limit=1,
             backoff_until={wedged: time.time() + 10_000},
+            clock=Clock.from_settings(),
         )
         assert [r[0] for r in selected] == [healthy]
 
@@ -498,9 +509,9 @@ class TestConsecutiveFailureBackoff:
         BACKOFF_MAX_WINDOWS so the daemon still probes a wedged agent."""
         from services.wake.heartbeat.daemon import BACKOFF_MAX_WINDOWS
 
-        d1 = backoff_deadlines({1: 1}, THRESHOLD_S)
-        d2 = backoff_deadlines({1: 2}, THRESHOLD_S)
-        d10 = backoff_deadlines({1: 10}, THRESHOLD_S)
+        d1 = backoff_deadlines({1: 1}, THRESHOLD_S, clock=Clock.from_settings())
+        d2 = backoff_deadlines({1: 2}, THRESHOLD_S, clock=Clock.from_settings())
+        d10 = backoff_deadlines({1: 10}, THRESHOLD_S, clock=Clock.from_settings())
         assert d1[1] - time.time() == pytest.approx(2 * THRESHOLD_S, abs=1.0)  # pyright: ignore[reportUnknownMemberType]
         assert d2[1] - d1[1] == pytest.approx(2 * THRESHOLD_S, abs=1.0)  # pyright: ignore[reportUnknownMemberType]
         assert d10[1] - d2[1] == pytest.approx((BACKOFF_MAX_WINDOWS - 4) * THRESHOLD_S, abs=1.0)  # pyright: ignore[reportUnknownMemberType]
