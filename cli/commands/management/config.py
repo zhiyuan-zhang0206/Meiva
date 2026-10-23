@@ -17,6 +17,7 @@ import argparse
 import getpass
 import os
 import sys
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
@@ -52,14 +53,15 @@ def _home_gateway_base() -> str | None:
     return None
 
 
-def gateway_base() -> str:
+def gateway_base(*, env: Mapping[str, str] | None = None) -> str:
     """Resolve the configured gateway without constructing ``Settings``.
 
     Explicit env wins (deliberate cross-cluster intent). Otherwise the
     home's own gateway identity wins. A home with no identity yet gets a
     refusal with guidance instead of a silent fallback."""
+    source_env = os.environ if env is None else env
     for key in _GATEWAY_URL_KEYS:
-        gateway_url = os.environ.get(key, "").strip()
+        gateway_url = source_env.get(key, "").strip()
         if gateway_url:
             return gateway_url.rstrip("/")
     home_base = _home_gateway_base()
@@ -147,13 +149,19 @@ def get_config_audit(machine: str | None, last: int) -> ConfigAuditView:
     return ConfigAuditView.model_validate(resp.json())
 
 
-def put_config(body: dict[str, Any], machine: str | None) -> ConfigWriteResult:
+def put_config(
+    body: dict[str, Any],
+    machine: str | None,
+    *,
+    env: Mapping[str, str] | None = None,
+) -> ConfigWriteResult:
     from base.host.net.http_dial import put as dial_put
 
-    _guard_gateway_write(gateway_base())
+    target = gateway_base(env=env)
+    _guard_gateway_write(target)
     params = {"machine": machine} if machine else None
     resp = dial_put(
-        f"{gateway_base()}/api/config",
+        f"{target}/api/config",
         json=body,
         params=params,
         timeout=_HTTP_TIMEOUT_S,
@@ -399,7 +407,12 @@ def _print_audit_record(record: dict[str, object]) -> None:
 
 
 def cmd_config_audit(
-    last: int, key: str | None, machine: str | None, *, identity: MachineIdentity
+    last: int,
+    key: str | None,
+    machine: str | None,
+    *,
+    identity: MachineIdentity,
+    get_config_audit_fn: Callable[[str | None, int], ConfigAuditView] | None = None,
 ) -> int:
     """`meiva config audit [--last N] [--key K] [--machine M]` — the `.env` write trail.
 
@@ -419,8 +432,9 @@ def cmd_config_audit(
     else:
         import httpx
 
+        active_get_audit = get_config_audit_fn or get_config_audit
         try:
-            records = get_config_audit(machine, last).records
+            records = active_get_audit(machine, last).records
         except ConfigError as e:
             print(f"[meiva config audit] {e}", file=sys.stderr)
             return 1
@@ -437,15 +451,22 @@ def cmd_config_audit(
     return 0
 
 
-def cmd_config_get(key: str | None, machine: str | None, *, local: bool = False) -> int:
+def cmd_config_get(
+    key: str | None,
+    machine: str | None,
+    *,
+    local: bool = False,
+    get_config_fn: Callable[[str | None], ConfigView] | None = None,
+) -> int:
     """`meiva config get [KEY] [--machine M] [--local]` — print config values."""
     if local:
         rejected = _reject_local_machine(machine, "get")
         return rejected if rejected is not None else _local_get(key)
     import httpx
 
+    active_get = get_config_fn or get_config
     try:
-        view = get_config(machine)
+        view = active_get(machine)
     except ConfigError as e:
         print(f"[meiva config get] {e}", file=sys.stderr)
         return 1
@@ -575,7 +596,13 @@ def _edit_local_config(
 
 
 def _edit_config(
-    pairs: dict[str, Any] | None, unset_keys: list[str] | None, machine: str | None, verb: str
+    pairs: dict[str, Any] | None,
+    unset_keys: list[str] | None,
+    machine: str | None,
+    verb: str,
+    *,
+    get_config_fn: Callable[[str | None], ConfigView] | None = None,
+    put_config_fn: Callable[[dict[str, Any], str | None], ConfigWriteResult] | None = None,
 ) -> int:
     """Shared set/unset path: GET config (to resolve key aliases + gate read-only),
     build the merge patch, PUT it.
@@ -584,8 +611,10 @@ def _edit_config(
     changed keys — a set as {field: value}, an unset as {field: None}."""
     import httpx
 
+    active_get = get_config_fn or get_config
+    active_put = put_config_fn or put_config
     try:
-        view = get_config(machine)
+        view = active_get(machine)
     except ConfigError as e:
         print(f"[meiva config {verb}] {e}", file=sys.stderr)
         return 1
@@ -600,7 +629,7 @@ def _edit_config(
         return 1
 
     try:
-        result = put_config(body, machine)
+        result = active_put(body, machine)
     except ConfigError as e:
         print(f"[meiva config {verb}] {e}", file=sys.stderr)
         return 1
@@ -620,7 +649,14 @@ def _edit_config(
     return 0
 
 
-def cmd_config_set(assignments: list[str], machine: str | None, *, local: bool = False) -> int:
+def cmd_config_set(
+    assignments: list[str],
+    machine: str | None,
+    *,
+    local: bool = False,
+    get_config_fn: Callable[[str | None], ConfigView] | None = None,
+    put_config_fn: Callable[[dict[str, Any], str | None], ConfigWriteResult] | None = None,
+) -> int:
     """`meiva config set KEY=VALUE [KEY=VALUE ...] [--machine M] [--local]`."""
     pairs: dict[str, str] = {}
     for item in assignments:
@@ -632,15 +668,36 @@ def cmd_config_set(assignments: list[str], machine: str | None, *, local: bool =
     if local:
         rejected = _reject_local_machine(machine, "set")
         return rejected if rejected is not None else _edit_local_config(pairs, None, "set")
-    return _edit_config(pairs, None, machine, "set")
+    return _edit_config(
+        pairs,
+        None,
+        machine,
+        "set",
+        get_config_fn=get_config_fn,
+        put_config_fn=put_config_fn,
+    )
 
 
-def cmd_config_unset(keys: list[str], machine: str | None, *, local: bool = False) -> int:
+def cmd_config_unset(
+    keys: list[str],
+    machine: str | None,
+    *,
+    local: bool = False,
+    get_config_fn: Callable[[str | None], ConfigView] | None = None,
+    put_config_fn: Callable[[dict[str, Any], str | None], ConfigWriteResult] | None = None,
+) -> int:
     """`meiva config unset KEY [KEY ...] [--machine M] [--local]` — revert fields."""
     if local:
         rejected = _reject_local_machine(machine, "unset")
         return rejected if rejected is not None else _edit_local_config(None, keys, "unset")
-    return _edit_config(None, keys, machine, "unset")
+    return _edit_config(
+        None,
+        keys,
+        machine,
+        "unset",
+        get_config_fn=get_config_fn,
+        put_config_fn=put_config_fn,
+    )
 
 
 # argparse handlers (co-located with the commands; wired by the cli/parsers tree)

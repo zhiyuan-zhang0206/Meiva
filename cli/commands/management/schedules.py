@@ -24,8 +24,10 @@ from __future__ import annotations
 import argparse
 import contextlib
 import sys
+from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, TextIO
 
 import httpx
 
@@ -34,7 +36,19 @@ from base.agents.context.clients import DatabaseFactory
 _TIMEOUT_S = 15.0
 
 
-def _gateway_base() -> str:
+@dataclass(frozen=True)
+class SchedulesTransport:
+    gateway_base: Callable[[], str] | None = None
+    headers: Callable[[], dict[str, str]] | None = None
+    get: Callable[..., Any] | None = None
+    post: Callable[..., Any] | None = None
+    put: Callable[..., Any] | None = None
+    delete: Callable[..., Any] | None = None
+
+
+def _gateway_base(transport: SchedulesTransport | None = None) -> str:
+    if transport is not None and transport.gateway_base is not None:
+        return transport.gateway_base()
     from base.cluster.machine import gateway_api_base
     from base.cluster.machine.ambient import gateway_access_from_settings
 
@@ -42,7 +56,9 @@ def _gateway_base() -> str:
     return gateway_api_base(access.gateway_url)
 
 
-def _headers() -> dict[str, str]:
+def _headers(transport: SchedulesTransport | None = None) -> dict[str, str]:
+    if transport is not None and transport.headers is not None:
+        return transport.headers()
     from base.cluster.machine import gateway_auth_headers
     from base.cluster.machine.ambient import gateway_access_from_settings
 
@@ -50,25 +66,30 @@ def _headers() -> dict[str, str]:
     return gateway_auth_headers(access)
 
 
-def _mutation_headers() -> dict[str, str]:
+def _mutation_headers(transport: SchedulesTransport | None = None) -> dict[str, str]:
     from uuid import uuid4
 
     from base.api_contracts.idempotency import keyed_headers
 
-    return {**_headers(), **keyed_headers(str(uuid4()))}
+    return {**_headers(transport), **keyed_headers(str(uuid4()))}
 
 
 # ── list ──
 
 
-def cmd_schedules_ls() -> int:
+def cmd_schedules_ls(*, transport: SchedulesTransport | None = None) -> int:
     """`meiva schedules ls` — list every schedule (id / enabled / status / name).
 
     Disabled schedules are listed too; `status` is the ScheduleManager's live
     supervision state, `enabled` is the desired state stored on the row."""
     from base.host.net.http_dial import get as dial_get
 
-    resp = dial_get(f"{_gateway_base()}/api/schedules", timeout=_TIMEOUT_S, headers=_headers())
+    active_get = (transport.get if transport is not None else None) or dial_get
+    resp = active_get(
+        f"{_gateway_base(transport)}/api/schedules",
+        timeout=_TIMEOUT_S,
+        headers=_headers(transport),
+    )
     resp.raise_for_status()
     rows = resp.json()
 
@@ -88,9 +109,13 @@ def cmd_schedules_ls() -> int:
 # ── get ──
 
 
-def cmd_schedules_get(identifier: str) -> int:
+def cmd_schedules_get(
+    identifier: str,
+    *,
+    transport: SchedulesTransport | None = None,
+) -> int:
     """`meiva schedules get <name-or-id>` — the full schedule including its script."""
-    row = _fetch(identifier)
+    row = _fetch(identifier, transport=transport)
     if row is None:
         return 1
     _print_schedule(row, with_script=True)
@@ -108,6 +133,8 @@ def cmd_schedules_create(
     description: str | None,
     *,
     disabled: bool = False,
+    transport: SchedulesTransport | None = None,
+    stdin: TextIO | None = None,
 ) -> int:
     """`meiva schedules create --name N (--script S | --script-file F) [...]`.
 
@@ -118,7 +145,7 @@ def cmd_schedules_create(
     launched by the reconcile loop within a poll interval."""
     from base.host.net.http_dial import post as dial_post
 
-    source = _read_script(script, script_file)
+    source = _read_script(script, script_file, stdin=stdin)
     if source is None:
         return 1
 
@@ -128,11 +155,12 @@ def cmd_schedules_create(
     if description is not None:
         body["description"] = description
 
-    resp = dial_post(
-        f"{_gateway_base()}/api/schedules",
+    active_post = (transport.post if transport is not None else None) or dial_post
+    resp = active_post(
+        f"{_gateway_base(transport)}/api/schedules",
         json=body,
         timeout=_TIMEOUT_S,
-        headers=_mutation_headers(),
+        headers=_mutation_headers(transport),
     )
     if resp.status_code == 409:
         print(f"schedule named {name!r} already exists", file=sys.stderr)
@@ -159,6 +187,8 @@ def cmd_schedules_update(
     description: str | None,
     *,
     enabled: bool | None,
+    transport: SchedulesTransport | None = None,
+    stdin: TextIO | None = None,
 ) -> int:
     """`meiva schedules update <name-or-id> [--name N] [--script S | --script-file F] ...`.
 
@@ -170,7 +200,7 @@ def cmd_schedules_update(
     creation before the command returns, while a same-value update is a no-op."""
     from base.host.net.http_dial import put as dial_put
 
-    schedule_id = _resolve_id(identifier)
+    schedule_id = _resolve_id(identifier, transport=transport)
     if schedule_id is None:
         return 1
 
@@ -178,7 +208,7 @@ def cmd_schedules_update(
     if name is not None:
         body["name"] = name
     if script is not None or script_file is not None:
-        source = _read_script(script, script_file)
+        source = _read_script(script, script_file, stdin=stdin)
         if source is None:
             return 1
         body["script"] = source
@@ -197,11 +227,12 @@ def cmd_schedules_update(
         )
         return 1
 
-    resp = dial_put(
-        f"{_gateway_base()}/api/schedules/{schedule_id}",
+    active_put = (transport.put if transport is not None else None) or dial_put
+    resp = active_put(
+        f"{_gateway_base(transport)}/api/schedules/{schedule_id}",
         json=body,
         timeout=_TIMEOUT_S,
-        headers=_mutation_headers(),
+        headers=_mutation_headers(transport),
     )
     if resp.status_code in (400, 404, 409):
         print(_detail(resp), file=sys.stderr)
@@ -216,25 +247,35 @@ def cmd_schedules_update(
 # ── delete ──
 
 
-def cmd_schedules_delete(identifier: str, *, force: bool = False) -> int:
+def cmd_schedules_delete(
+    identifier: str,
+    *,
+    force: bool = False,
+    transport: SchedulesTransport | None = None,
+    input_fn: Callable[[str], str] | None = None,
+) -> int:
     """`meiva schedules delete <name-or-id> [--force]`.
 
     Prompts unless --force. The gateway kills the now-orphaned session and
     removes the schedule's work dir; its run history goes with the row."""
     from base.host.net.http_dial import delete as dial_delete
 
-    schedule_id = _resolve_id(identifier)
+    schedule_id = _resolve_id(identifier, transport=transport)
     if schedule_id is None:
         return 1
 
     if not force:
-        answer = input(f"Delete schedule {identifier!r} (id={schedule_id})? [y/N] ")
+        active_input = input_fn or input
+        answer = active_input(f"Delete schedule {identifier!r} (id={schedule_id})? [y/N] ")
         if answer.strip().lower() not in ("y", "yes"):
             print("cancelled")
             return 0
 
-    resp = dial_delete(
-        f"{_gateway_base()}/api/schedules/{schedule_id}", timeout=_TIMEOUT_S, headers=_headers()
+    active_delete = (transport.delete if transport is not None else None) or dial_delete
+    resp = active_delete(
+        f"{_gateway_base(transport)}/api/schedules/{schedule_id}",
+        timeout=_TIMEOUT_S,
+        headers=_headers(transport),
     )
     if resp.status_code == 404:
         print(f"schedule {schedule_id} not found", file=sys.stderr)
@@ -247,18 +288,23 @@ def cmd_schedules_delete(identifier: str, *, force: bool = False) -> int:
 # ── control ──
 
 
-def _control(identifier: str, verb: str) -> int:
-    """Shared POST for start / stop / restart — same shape, different sub-path."""
+def _control(
+    identifier: str,
+    verb: str,
+    *,
+    transport: SchedulesTransport | None = None,
+) -> int:
     from base.host.net.http_dial import post as dial_post
 
-    schedule_id = _resolve_id(identifier)
+    schedule_id = _resolve_id(identifier, transport=transport)
     if schedule_id is None:
         return 1
 
-    resp = dial_post(
-        f"{_gateway_base()}/api/schedules/{schedule_id}/{verb}",
+    active_post = (transport.post if transport is not None else None) or dial_post
+    resp = active_post(
+        f"{_gateway_base(transport)}/api/schedules/{schedule_id}/{verb}",
         timeout=_TIMEOUT_S,
-        headers=_mutation_headers(),
+        headers=_mutation_headers(transport),
     )
     if resp.status_code in (404, 409):
         print(_detail(resp), file=sys.stderr)
@@ -269,26 +315,43 @@ def _control(identifier: str, verb: str) -> int:
     return 0
 
 
-def cmd_schedules_start(identifier: str) -> int:
+def cmd_schedules_start(
+    identifier: str,
+    *,
+    transport: SchedulesTransport | None = None,
+) -> int:
     """`meiva schedules start <name-or-id>` — enable + launch the session now."""
-    return _control(identifier, "start")
+    return _control(identifier, "start", transport=transport)
 
 
-def cmd_schedules_stop(identifier: str) -> int:
+def cmd_schedules_stop(
+    identifier: str,
+    *,
+    transport: SchedulesTransport | None = None,
+) -> int:
     """`meiva schedules stop <name-or-id>` — disable + kill the session now."""
-    return _control(identifier, "stop")
+    return _control(identifier, "stop", transport=transport)
 
 
-def cmd_schedules_restart(identifier: str) -> int:
+def cmd_schedules_restart(
+    identifier: str,
+    *,
+    transport: SchedulesTransport | None = None,
+) -> int:
     """`meiva schedules restart <name-or-id>` — relaunch on the current script,
     clearing crash backoff. 409 if the schedule is disabled (use `start`)."""
-    return _control(identifier, "restart")
+    return _control(identifier, "restart", transport=transport)
 
 
 # ── observation ──
 
 
-def cmd_schedules_logs(identifier: str, lines: int) -> int:
+def cmd_schedules_logs(
+    identifier: str,
+    lines: int,
+    *,
+    transport: SchedulesTransport | None = None,
+) -> int:
     """`meiva schedules logs <name-or-id> [--lines N]` — recent output.
 
     Source is the live session capture when a session is up, the session's
@@ -296,15 +359,16 @@ def cmd_schedules_logs(identifier: str, lines: int) -> int:
     survives there), `last_error` (the last crash traceback), or `none`."""
     from base.host.net.http_dial import get as dial_get
 
-    schedule_id = _resolve_id(identifier)
+    schedule_id = _resolve_id(identifier, transport=transport)
     if schedule_id is None:
         return 1
 
-    resp = dial_get(
-        f"{_gateway_base()}/api/schedules/{schedule_id}/logs",
+    active_get = (transport.get if transport is not None else None) or dial_get
+    resp = active_get(
+        f"{_gateway_base(transport)}/api/schedules/{schedule_id}/logs",
         params={"lines": lines},
         timeout=_TIMEOUT_S,
-        headers=_headers(),
+        headers=_headers(transport),
     )
     if resp.status_code == 404:
         print(f"schedule {schedule_id} not found", file=sys.stderr)
@@ -320,19 +384,25 @@ def cmd_schedules_logs(identifier: str, lines: int) -> int:
     return 0
 
 
-def cmd_schedules_runs(identifier: str, limit: int) -> int:
+def cmd_schedules_runs(
+    identifier: str,
+    limit: int,
+    *,
+    transport: SchedulesTransport | None = None,
+) -> int:
     """`meiva schedules runs <name-or-id> [--limit N]` — run history, newest first."""
     from base.host.net.http_dial import get as dial_get
 
-    schedule_id = _resolve_id(identifier)
+    schedule_id = _resolve_id(identifier, transport=transport)
     if schedule_id is None:
         return 1
 
-    resp = dial_get(
-        f"{_gateway_base()}/api/schedules/{schedule_id}/runs",
+    active_get = (transport.get if transport is not None else None) or dial_get
+    resp = active_get(
+        f"{_gateway_base(transport)}/api/schedules/{schedule_id}/runs",
         params={"limit": limit},
         timeout=_TIMEOUT_S,
-        headers=_headers(),
+        headers=_headers(transport),
     )
     if resp.status_code == 404:
         print(f"schedule {schedule_id} not found", file=sys.stderr)
@@ -383,11 +453,12 @@ def cmd_schedules_provision(*, database_factory: DatabaseFactory) -> int:
     return 0
 
 
-def _read_script(script: str | None, script_file: str | None) -> str | None:
-    """Resolve the script body from --script / --script-file (`-` = stdin).
-
-    Exactly one source must be given; returns None + prints to stderr otherwise
-    (or if the file is unreadable)."""
+def _read_script(
+    script: str | None,
+    script_file: str | None,
+    *,
+    stdin: TextIO | None = None,
+) -> str | None:
     if (script is None) == (script_file is None):
         print("exactly one of --script / --script-file is required", file=sys.stderr)
         return None
@@ -395,7 +466,7 @@ def _read_script(script: str | None, script_file: str | None) -> str | None:
         return script
     assert script_file is not None  # noqa: S101 — narrowed by the XOR check above
     if script_file == "-":
-        return sys.stdin.read()
+        return (stdin or sys.stdin).read()
     try:
         return Path(script_file).read_text(encoding="utf-8")
     except OSError as e:
@@ -403,15 +474,22 @@ def _read_script(script: str | None, script_file: str | None) -> str | None:
         return None
 
 
-def _resolve_id(identifier: str) -> int | None:
-    """Resolve a name-or-id string to a numeric schedule id. Returns None +
-    prints to stderr when the name matches nothing."""
+def _resolve_id(
+    identifier: str,
+    *,
+    transport: SchedulesTransport | None = None,
+) -> int | None:
     from base.host.net.http_dial import get as dial_get
 
     with contextlib.suppress(ValueError):
         return int(identifier)
 
-    resp = dial_get(f"{_gateway_base()}/api/schedules", timeout=_TIMEOUT_S, headers=_headers())
+    active_get = (transport.get if transport is not None else None) or dial_get
+    resp = active_get(
+        f"{_gateway_base(transport)}/api/schedules",
+        timeout=_TIMEOUT_S,
+        headers=_headers(transport),
+    )
     resp.raise_for_status()
     match = next((r for r in resp.json() if r["name"] == identifier), None)
     if match is None:
@@ -420,15 +498,21 @@ def _resolve_id(identifier: str) -> int | None:
     return int(match["id"])
 
 
-def _fetch(identifier: str) -> dict[str, Any] | None:
-    """GET one full schedule (with script) by name or id."""
+def _fetch(
+    identifier: str,
+    *,
+    transport: SchedulesTransport | None = None,
+) -> dict[str, Any] | None:
     from base.host.net.http_dial import get as dial_get
 
-    schedule_id = _resolve_id(identifier)
+    schedule_id = _resolve_id(identifier, transport=transport)
     if schedule_id is None:
         return None
-    resp = dial_get(
-        f"{_gateway_base()}/api/schedules/{schedule_id}", timeout=_TIMEOUT_S, headers=_headers()
+    active_get = (transport.get if transport is not None else None) or dial_get
+    resp = active_get(
+        f"{_gateway_base(transport)}/api/schedules/{schedule_id}",
+        timeout=_TIMEOUT_S,
+        headers=_headers(transport),
     )
     if resp.status_code == 404:
         print(f"schedule {schedule_id} not found", file=sys.stderr)

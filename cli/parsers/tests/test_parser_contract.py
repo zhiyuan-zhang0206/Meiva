@@ -42,10 +42,27 @@ def test_help_and_errors_keep_argparse_output(
     assert capsys.readouterr() == expected
 
 
-def test_omitted_arguments_read_the_process_argv(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(sys, "argv", ["meiva", "memory", "search", "text", "--limit", "8"])
-    args = parse_args()
-    assert args.query == "text" and args.limit == 8
+# meiva:note
+# Runs the repository-owned child helper with a fixed interpreter and argv so
+# the parser reads a real process `sys.argv` without mutating the parent's.
+def test_omitted_arguments_read_the_process_argv() -> None:
+    child = subprocess.run(  # noqa: S603
+        [
+            sys.executable,
+            "-I",
+            str(Path(__file__).with_name("child_public_queries.py")),
+            "memory",
+            "search",
+            "text",
+            "--limit",
+            "8",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=20,
+        check=False,
+    )
+    assert child.returncode == 0, child.stderr
 
 
 def test_options_keep_command_paths_and_fresh_snapshots() -> None:

@@ -204,17 +204,19 @@ def cmd_schedules_verify(
     ports: VerifyPorts | None = None,
     access: Callable[[], GatewayAccess],
     producer: Callable[[], EventPipeline],
+    report_fn: Callable[..., None] | None = None,
 ) -> int:
     if check_file is not None:
         return _verify_file(check_file)
     if rows_file is not None:
         notify = False
+    active_report = report_fn or report_verify
     ports = ports or VerifyPorts(
         read_rows=partial(_read_rows_file, rows_file)
         if rows_file
         else lambda: read_schedule_rows(access()),
         check_script=check_script,
-        report=partial(report_verify, producer=producer),
+        report=partial(active_report, producer=producer),
     )
     return _verify_sweep(notify=notify, ports=ports)
 

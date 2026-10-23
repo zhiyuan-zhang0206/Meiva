@@ -30,8 +30,10 @@ import ipaddress
 import json
 import platform
 import sys
+from collections.abc import Callable
 from pathlib import Path
 from string import Template
+from typing import Any
 from urllib.parse import unquote, urlsplit
 
 from base.agents.context.clients import DatabaseFactory
@@ -517,6 +519,7 @@ def ensure_otel_collector(
     *,
     database_factory: DatabaseFactory,
     machine: MachineIdentity,
+    download_fn: Callable[..., Any] | None = None,
 ) -> None:
     """Idempotent install: pinned binary present + config regenerated.
 
@@ -544,7 +547,8 @@ def ensure_otel_collector(
         binary.exists()
         and marker.read_text(encoding="utf-8").strip() == collector_artifact.OTELCOL_CONTRIB_VERSION
     ):
-        collector_artifact.download_and_verify(
+        active_download = download_fn or collector_artifact.download_and_verify
+        active_download(
             tag,
             dest_dir,
             open_url=SYSTEM_URL_OPENER,

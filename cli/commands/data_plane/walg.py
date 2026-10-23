@@ -4,8 +4,12 @@ from __future__ import annotations
 
 import sys
 from collections.abc import Callable
+from contextlib import AbstractContextManager
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
+
+import psycopg
 
 from base.cluster.dataplane import walg_binary
 from base.cluster.dataplane.pg_throwaway_base import ThrowawayConfig, configured_base
@@ -17,16 +21,22 @@ from services.backup.walg.archive import expected_archive
 from services.backup.walg.restore import RecoveryTarget, RestoreError, restored_instance
 
 
-def cmd_walg_check() -> int:
+def cmd_walg_check(
+    *,
+    config_boot_factory: Callable[[], ConfigBoot] | None = None,
+    run_check_fn: Callable[..., list[check.Step]] | None = None,
+) -> int:
     """Run the pre-flight steps; the exit code is non-zero when any step failed."""
-    config = ConfigBoot()
+    active_boot = config_boot_factory or ConfigBoot
+    config = active_boot()
 
     def path_reader() -> Path | None:
         if not config.prepared:
             config.read_process_environment()
         return config.view.walg.walg_config_file
 
-    steps = check.run_check(path_reader=path_reader)
+    active_run_check = run_check_fn or check.run_check
+    steps = active_run_check(path_reader=path_reader)
     for step in steps:
         print(f"  {'✓' if step.ok else '✗'} {step.name}: {step.detail}")
     return 0 if all(step.ok for step in steps) else 1
@@ -37,13 +47,19 @@ def _stamped(line: str) -> None:
     print(f"{datetime.now(UTC):%Y-%m-%dT%H:%M:%SZ} {line}", flush=True)
 
 
-def cmd_walg_run(*, database_for_url: Callable[[str], Database]) -> int:
+def cmd_walg_run(
+    *,
+    database_for_url: Callable[[str], Database],
+    config_boot_factory: Callable[[], ConfigBoot] | None = None,
+    run_tick_fn: Callable[..., int] | None = None,
+) -> int:
     """Run one daily tick (backup, verify, retention); non-zero only when a step failed.
 
     The OS job runs exactly this, and so can an operator: concurrent runs stand down
     and a skipped or repeated run is harmless.
     """
-    config = ConfigBoot()
+    active_boot = config_boot_factory or ConfigBoot
+    config = active_boot()
 
     def path_reader() -> Path | None:
         if not config.prepared:
@@ -53,7 +69,8 @@ def cmd_walg_run(*, database_for_url: Callable[[str], Database]) -> int:
     if not config.prepared:
         config.read_process_environment()
     throwaway = ThrowawayConfig(configured_base(config.view.data_plane.pg_throwaway_base))
-    return tick.run_tick(
+    active_run_tick = run_tick_fn or tick.run_tick
+    return active_run_tick(
         _stamped,
         path_reader=path_reader,
         database_for_url=database_for_url,
@@ -61,13 +78,19 @@ def cmd_walg_run(*, database_for_url: Callable[[str], Database]) -> int:
     )
 
 
-def cmd_walg_drill(*, database_for_url: Callable[[str], Database]) -> int:
+def cmd_walg_drill(
+    *,
+    database_for_url: Callable[[str], Database],
+    config_boot_factory: Callable[[], ConfigBoot] | None = None,
+    run_drill_fn: Callable[..., int] | None = None,
+) -> int:
     """Run the recovery drill on the newest backup now; non-zero unless it passed.
 
     The tick runs the same drill once a week before its backup; a success here counts
     as that week's drill.
     """
-    config = ConfigBoot()
+    active_boot = config_boot_factory or ConfigBoot
+    config = active_boot()
 
     def path_reader() -> Path | None:
         if not config.prepared:
@@ -77,13 +100,21 @@ def cmd_walg_drill(*, database_for_url: Callable[[str], Database]) -> int:
     if not config.prepared:
         config.read_process_environment()
     throwaway = ThrowawayConfig(configured_base(config.view.data_plane.pg_throwaway_base))
-    return tick.run_drill_now(
+    active_run_drill = run_drill_fn or tick.run_drill_now
+    return active_run_drill(
         _stamped, path_reader=path_reader, database_for_url=database_for_url, throwaway=throwaway
     )
 
 
 def cmd_walg_restore(
-    *, directory: str, backup: str, time: str | None, lsn: str | None, user: str | None = None
+    *,
+    directory: str,
+    backup: str,
+    time: str | None,
+    lsn: str | None,
+    user: str | None = None,
+    config_boot_factory: Callable[[], ConfigBoot] | None = None,
+    restored_instance_fn: Callable[..., AbstractContextManager[Any]] | None = None,
 ) -> int:
     """Restore a backup into an empty directory and recover it to the target.
 
@@ -91,7 +122,8 @@ def cmd_walg_restore(
     not started, and it is never this home's live data directory. `user` is the restored
     cluster's superuser (the OS user that ran initdb on the source; default: this OS user).
     """
-    config = ConfigBoot()
+    active_boot = config_boot_factory or ConfigBoot
+    config = active_boot()
 
     def path_reader() -> Path | None:
         if not config.prepared:
@@ -111,8 +143,9 @@ def cmd_walg_restore(
     except (walg_config.WalgConfigError, ValueError) as exc:
         print(f"restore failed: {exc}", file=sys.stderr)
         return 1
+    active_restore = restored_instance_fn or restored_instance
     try:
-        with restored_instance(
+        with active_restore(
             Path(directory).resolve(),
             backup=backup,
             target=target,
@@ -211,9 +244,13 @@ def _tick_lines() -> list[str]:
     return lines
 
 
-def cmd_walg_status() -> int:
+def cmd_walg_status(
+    *,
+    config_boot_factory: Callable[[], ConfigBoot] | None = None,
+) -> int:
     """Print configuration, binary, key fingerprint, archiver, daily-tick and drill facts; exits 0."""
-    config = ConfigBoot()
+    active_boot = config_boot_factory or ConfigBoot
+    config = active_boot()
 
     def path_reader() -> Path | None:
         if not config.prepared:
@@ -233,7 +270,12 @@ def cmd_walg_status() -> int:
     return 0
 
 
-def warn_archive_inactive(*, path_reader: Callable[[], Path | None]) -> None:
+def warn_archive_inactive(
+    *,
+    path_reader: Callable[[], Path | None],
+    admin_connection_fn: Callable[[], AbstractContextManager[psycopg.Connection[Any]]]
+    | None = None,
+) -> None:
     """Say so when WAL archiving is configured but this Postgres is not carrying it.
 
     A retained postmaster is only reloaded, so it keeps the launch arguments of its
@@ -243,8 +285,9 @@ def warn_archive_inactive(*, path_reader: Callable[[], Path | None]) -> None:
     expected = expected_archive(path_reader=path_reader)
     if expected is None:
         return
+    active_admin_connection = admin_connection_fn or probe.admin_connection
     try:
-        with probe.admin_connection() as conn:
+        with active_admin_connection() as conn:
             state = probe.read_archiver_state(conn)
     except Exception as exc:
         print(f"  ! WAL archiving state not read ({type(exc).__name__}: {exc})", file=sys.stderr)

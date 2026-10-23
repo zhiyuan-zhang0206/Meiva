@@ -6,10 +6,11 @@ import os
 import re
 import shutil
 import sys
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any
 
 import psutil
 
@@ -134,10 +135,13 @@ def _retention_candidates(
     current: datetime,
     family_days: Mapping[str, int],
     active_paths: set[Path],
+    *,
+    scandir_fn: Callable[[Path], Any] | None = None,
 ) -> tuple[list[RetentionCandidate], list[RetentionFailure]]:
     candidates: list[RetentionCandidate] = []
     failures: list[RetentionFailure] = []
-    with os.scandir(logs_path) as entries:
+    active_scandir = scandir_fn or os.scandir
+    with active_scandir(logs_path) as entries:
         for entry in entries:
             match = MANAGED_LOG_NAME.fullmatch(entry.name)
             if match is None:
@@ -181,6 +185,8 @@ def _retention_scan(
     target: Path,
     current: datetime,
     family_days: Mapping[str, int],
+    *,
+    scandir_fn: Callable[[Path], Any] | None = None,
 ) -> tuple[list[RetentionCandidate], list[RetentionFailure]]:
     candidates: list[RetentionCandidate] = []
     failures: list[RetentionFailure] = []
@@ -191,6 +197,7 @@ def _retention_scan(
                 current,
                 family_days,
                 _active_log_paths(root),
+                scandir_fn=scandir_fn,
             )
         except FileNotFoundError as exc:
             if root != target:
@@ -242,14 +249,20 @@ def _print_dry_run(
     )
 
 
-def _delete_candidates(candidates: list[RetentionCandidate], scan_failed: int) -> int:
+def _delete_candidates(
+    candidates: list[RetentionCandidate],
+    scan_failed: int,
+    *,
+    unlink_fn: Callable[[Path], None] | None = None,
+) -> int:
     """Unlink every candidate and print the summary; the failure count (scan failures included)."""
     deleted = 0
     reclaimed_bytes = 0
     failed = scan_failed
+    active_unlink = unlink_fn or Path.unlink
     for candidate in candidates:
         try:
-            candidate.path.unlink()
+            active_unlink(candidate.path)
         except OSError as exc:
             failed += 1
             print(
@@ -292,6 +305,8 @@ def cmd_logs_retention(
     dry_run: bool,
     logs_path: Path | None = None,
     now: datetime | None = None,
+    unlink_fn: Callable[[Path], None] | None = None,
+    scandir_fn: Callable[[Path], Any] | None = None,
 ) -> int:
     """Apply local log retention and return a CLI exit code."""
     if older_than_days is not None and family_days is not None:
@@ -305,6 +320,7 @@ def cmd_logs_retention(
         target,
         current,
         resolved_family_days,
+        scandir_fn=scandir_fn,
     )
     for failure in scan_failures:
         print(
@@ -316,7 +332,7 @@ def cmd_logs_retention(
         _print_dry_run(candidates, scan_failures, family_days, resolved_family_days)
         return 1 if scan_failures else 0
 
-    failed = _delete_candidates(candidates, len(scan_failures))
+    failed = _delete_candidates(candidates, len(scan_failures), unlink_fn=unlink_fn)
     return 1 if failed else 0
 
 

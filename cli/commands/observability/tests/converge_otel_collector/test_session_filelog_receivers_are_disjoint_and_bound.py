@@ -8,8 +8,8 @@ from typing import Any
 
 import pytest
 
-import base.config as base_config
 from base.clock import SYSTEM_TIMERS
+from base.config import get_field, set_field
 from base.deploy.release import collector_artifact as artifact
 from base.host.net.tests.fake_url_opener import Answer, FakeUrlOpener
 from cli.commands.observability import otel_collector as oc
@@ -247,13 +247,17 @@ def test_station_otlp_ingress_port_follows_single_source(
     """The station's advertised unit url (base.cluster.machines.unit_dial_url) and
     its remote receiver bind the SAME port — MEIVA_TELEMETRY_OTLP_PORT is the
     single knob for both (WP4, task #1946)."""
-    monkeypatch.setattr(base_config.settings.observability, "telemetry_otlp_port", 4321)
-    cfg = render_real_template(
-        monkeypatch,
-        frozenset({"observability-station"}),
-        operator_database=operator_database,
-        command_runtime=command_runtime,
-    )
+    saved_port = get_field("telemetry_otlp_port")
+    set_field("telemetry_otlp_port", 4321)
+    try:
+        cfg = render_real_template(
+            monkeypatch,
+            frozenset({"observability-station"}),
+            operator_database=operator_database,
+            command_runtime=command_runtime,
+        )
+    finally:
+        set_field("telemetry_otlp_port", saved_port)
     assert cfg["receivers"]["otlp/remote"]["protocols"]["http"]["endpoint"] == ("10.0.0.10:4321")
     from base.cluster.machines import unit_dial_url
 
@@ -277,23 +281,29 @@ def test_local_ingress_port_does_not_change_gateway_projection(
     command_runtime: CommandRuntime,
 ) -> None:
     """Local receivers follow this unit's port; relay targets follow bootstrap."""
-    monkeypatch.setattr(base_config.settings.observability, "telemetry_otlp_port", 4319)
-    gateway_cfg = render_real_template(
-        monkeypatch,
-        frozenset({"gateway"}),
-        operator_database=operator_database,
-        command_runtime=command_runtime,
-    )
-    assert gateway_cfg["receivers"]["otlp"]["protocols"]["http"] == {"endpoint": "127.0.0.1:4319"}
-    assert gateway_cfg["receivers"]["otlp/remote"]["protocols"]["http"]["endpoint"] == (
-        "10.0.0.10:4319"
-    )
-    runner_cfg = render_real_template(
-        monkeypatch,
-        frozenset({"agent-runner"}),
-        operator_database=operator_database,
-        command_runtime=command_runtime,
-    )
+    saved_port = get_field("telemetry_otlp_port")
+    set_field("telemetry_otlp_port", 4319)
+    try:
+        gateway_cfg = render_real_template(
+            monkeypatch,
+            frozenset({"gateway"}),
+            operator_database=operator_database,
+            command_runtime=command_runtime,
+        )
+        assert gateway_cfg["receivers"]["otlp"]["protocols"]["http"] == {
+            "endpoint": "127.0.0.1:4319"
+        }
+        assert gateway_cfg["receivers"]["otlp/remote"]["protocols"]["http"]["endpoint"] == (
+            "10.0.0.10:4319"
+        )
+        runner_cfg = render_real_template(
+            monkeypatch,
+            frozenset({"agent-runner"}),
+            operator_database=operator_database,
+            command_runtime=command_runtime,
+        )
+    finally:
+        set_field("telemetry_otlp_port", saved_port)
     for exporter_id in ("otlphttp/tempo", "otlphttp/loki", "otlphttp/prometheus"):
         assert runner_cfg["exporters"][exporter_id]["endpoint"] == "http://10.0.0.10:4318"
 
@@ -542,7 +552,6 @@ def test_collector_self_metrics_are_scraped_for_queue_and_drop_visibility(
 
 
 def test_config_file_is_owner_only(
-    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     operator_database: Callable[[], Any],
     *,
@@ -555,24 +564,31 @@ def test_config_file_is_owner_only(
     (tmp_path / "otel-collector/version").write_text(
         artifact.OTELCOL_CONTRIB_VERSION, encoding="utf-8"
     )
-    monkeypatch.setattr(artifact, "download_and_verify", lambda _tag, _dir, **_ports: None)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(
-        base_config.settings.observability, "gateway_otlp_endpoint", "http://10.0.0.10:4318"
-    )
-    monkeypatch.setattr(base_config.settings.data_plane, "cluster_secret", "cluster-token")
+    saved_endpoint = get_field("gateway_otlp_endpoint")
+    saved_secret = get_field("cluster_secret")
+    set_field("gateway_otlp_endpoint", "http://10.0.0.10:4318")
+    set_field("cluster_secret", "cluster-token")
     command_runtime.machine.set(host="10.0.0.10")
     repo = Path(__file__).resolve().parents[5]
 
-    oc.ensure_otel_collector(
-        repo,
-        tmp_path,
-        frozenset({"agent-runner"}),
-        database_factory=operator_database,
-        machine=command_runtime.machine,
-    )
-    config = tmp_path / "otel-collector/config.yaml"
-    assert config.stat().st_mode & 0o777 == 0o600
-    assert f"Bearer {oc.telemetry_bearer()}" in config.read_text(encoding="utf-8")
+    def noop_download(_tag: str, _dir: Path, **_ports: object) -> None:
+        return None
+
+    try:
+        oc.ensure_otel_collector(
+            repo,
+            tmp_path,
+            frozenset({"agent-runner"}),
+            database_factory=operator_database,
+            machine=command_runtime.machine,
+            download_fn=noop_download,
+        )
+        config = tmp_path / "otel-collector/config.yaml"
+        assert config.stat().st_mode & 0o777 == 0o600
+        assert f"Bearer {oc.telemetry_bearer()}" in config.read_text(encoding="utf-8")
+    finally:
+        set_field("gateway_otlp_endpoint", saved_endpoint)
+        set_field("cluster_secret", saved_secret)
 
 
 def test_stream_download_writes_all_chunks(

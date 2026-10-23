@@ -2,25 +2,23 @@
 
 from __future__ import annotations
 
-import os
 import re
 from collections.abc import Callable, Generator
-from contextlib import contextmanager
+from contextlib import AbstractContextManager, contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
-from unittest.mock import patch
 
 import psycopg
 import pytest
 
-from base.config import ConfigBoot, settings
+from base.config import ConfigBoot, get_field, set_field, settings
 from cli.commands.data_plane import walg as walg_cmd
 from cli.database.tests.cli_tests import operator_database as operator_database
 from cli.database.tests.command_inputs import command_runtime as command_runtime
 from cli.parsers import build_parser
 from services.backup.walg import config as walg_config
-from services.backup.walg import probe, state
+from services.backup.walg import state
 from services.backup.walg.check import Step
 from services.backup.walg.tests.support import (
     SECRETS,
@@ -31,31 +29,16 @@ from services.backup.walg.tests.support import (
 )
 
 
-@pytest.fixture(autouse=True)
-def config_boot_environment(monkeypatch: pytest.MonkeyPatch) -> Generator[None]:
-    """Restore process delivery from each independent operation's boot."""
-
-    def build_owner() -> ConfigBoot:
-        config = ConfigBoot()
-        config.view.walg.walg_config_file = settings.walg.walg_config_file
-        return config
-
-    monkeypatch.setattr(walg_cmd, "ConfigBoot", build_owner)
-    with patch.dict(os.environ):
-        yield
+def _build_owner() -> ConfigBoot:
+    config = ConfigBoot()
+    config.read_process_environment()
+    config.set_field("walg_config_file", get_field("walg_config_file"))
+    return config
 
 
 @pytest.fixture
 def sandbox(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Sandbox:
-    sandbox = make_sandbox(tmp_path, monkeypatch)
-
-    @contextmanager
-    def no_postgres() -> Generator[psycopg.Connection[Any]]:
-        raise psycopg.OperationalError("connection refused")
-        yield  # pragma: no cover
-
-    monkeypatch.setattr(probe, "admin_connection", no_postgres)
-    return sandbox
+    return make_sandbox(tmp_path, monkeypatch)
 
 
 def test_the_parser_reaches_every_verb() -> None:
@@ -85,7 +68,7 @@ def test_the_parser_reaches_every_verb() -> None:
 
 
 def test_run_hands_the_tick_a_timestamping_reporter_and_returns_its_exit_code(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], operator_database: Any
+    capsys: pytest.CaptureFixture[str], operator_database: Any
 ) -> None:
     database_for_url = operator_database.for_url
 
@@ -94,9 +77,14 @@ def test_run_hands_the_tick_a_timestamping_reporter_and_returns_its_exit_code(
         report("skipped: postgres is not accepting connections")
         return 1
 
-    monkeypatch.setattr(walg_cmd.tick, "run_tick", fake_tick)
-
-    assert walg_cmd.cmd_walg_run(database_for_url=database_for_url) == 1
+    assert (
+        walg_cmd.cmd_walg_run(
+            database_for_url=database_for_url,
+            config_boot_factory=_build_owner,
+            run_tick_fn=fake_tick,
+        )
+        == 1
+    )
 
     out = capsys.readouterr().out
     assert re.fullmatch(
@@ -108,7 +96,7 @@ def test_run_hands_the_tick_a_timestamping_reporter_and_returns_its_exit_code(
 def test_status_says_when_the_tick_never_ran(
     sandbox: Sandbox, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    assert walg_cmd.cmd_walg_status() == 0
+    assert walg_cmd.cmd_walg_status(config_boot_factory=_build_owner) == 0
 
     assert "daily tick: never ran" in capsys.readouterr().out
 
@@ -131,7 +119,7 @@ def test_status_shows_the_last_run_and_its_failed_step(
         )
     )
 
-    assert walg_cmd.cmd_walg_status() == 0
+    assert walg_cmd.cmd_walg_status(config_boot_factory=_build_owner) == 0
 
     out = capsys.readouterr().out
     assert "daily tick: last started 2026-10-02T06:25:00+00:00" in out
@@ -145,7 +133,7 @@ def test_status_reports_an_unreadable_state_file(
     state.state_path().parent.mkdir(parents=True)
     state.state_path().write_text("{broken")
 
-    assert walg_cmd.cmd_walg_status() == 0
+    assert walg_cmd.cmd_walg_status(config_boot_factory=_build_owner) == 0
 
     assert "daily tick: state UNREADABLE" in capsys.readouterr().out
 
@@ -153,7 +141,7 @@ def test_status_reports_an_unreadable_state_file(
 def test_check_prints_a_mark_per_step_and_exits_zero_when_all_pass(
     sandbox: Sandbox, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    assert walg_cmd.cmd_walg_check() == 0
+    assert walg_cmd.cmd_walg_check(config_boot_factory=_build_owner) == 0
 
     out = capsys.readouterr().out
     assert [line.split(":")[0] for line in out.splitlines()] == [
@@ -171,7 +159,7 @@ def test_check_exits_non_zero_and_names_the_failing_step(
 ) -> None:
     sandbox.set_mode("nodelete")
 
-    assert walg_cmd.cmd_walg_check() == 1
+    assert walg_cmd.cmd_walg_check(config_boot_factory=_build_owner) == 1
 
     assert "  ✗ storage: cannot delete" in capsys.readouterr().out
 
@@ -181,7 +169,7 @@ def test_status_when_off_says_so(
 ) -> None:
     make_sandbox(tmp_path, monkeypatch, enabled=False)
 
-    assert walg_cmd.cmd_walg_status() == 0
+    assert walg_cmd.cmd_walg_status(config_boot_factory=_build_owner) == 0
 
     assert capsys.readouterr().out == "WAL-G archiving is off (MEIVA_WALG_CONFIG_FILE is not set)\n"
 
@@ -191,7 +179,7 @@ def test_status_shows_the_fingerprint_not_the_key(
 ) -> None:
     fingerprint = walg_config.read_config(sandbox.config_file).key_fingerprint
 
-    assert walg_cmd.cmd_walg_status() == 0
+    assert walg_cmd.cmd_walg_status(config_boot_factory=_build_owner) == 0
 
     out = capsys.readouterr().out
     assert f"key fingerprint: {fingerprint} (pinned: not yet)" in out
@@ -206,7 +194,7 @@ def test_status_reports_an_unusable_configuration_instead_of_raising(
 ) -> None:
     sandbox.config_file.write_text("{broken")
 
-    assert walg_cmd.cmd_walg_status() == 0
+    assert walg_cmd.cmd_walg_status(config_boot_factory=_build_owner) == 0
 
     out = capsys.readouterr().out
     assert "configuration: UNUSABLE" in out
@@ -216,13 +204,13 @@ def test_status_reports_an_unusable_configuration_instead_of_raising(
 # ── the start-time warning for a retained postmaster ─────────────────────────
 
 
-def _dial(pg: PgInstance, monkeypatch: pytest.MonkeyPatch) -> None:
+def _dial_fn(pg: PgInstance) -> Callable[[], AbstractContextManager[psycopg.Connection[Any]]]:
     @contextmanager
     def admin() -> Generator[psycopg.Connection[Any]]:
         with pg.connect() as conn:
             yield conn
 
-    monkeypatch.setattr(probe, "admin_connection", admin)
+    return admin
 
 
 def test_a_postgres_that_kept_its_old_launch_arguments_is_flagged_at_start(
@@ -234,10 +222,15 @@ def test_a_postgres_that_kept_its_old_launch_arguments_is_flagged_at_start(
     """The retained-postmaster case: archiving was configured after Postgres launched."""
     sandbox = make_sandbox(tmp_path, monkeypatch, enabled=False)
     with archiving_postgres() as pg:
-        _dial(pg, monkeypatch)
-        monkeypatch.setattr(settings.walg, "walg_config_file", sandbox.config_file)
-
-        walg_cmd.warn_archive_inactive(path_reader=lambda: settings.walg.walg_config_file)
+        saved_config_file = get_field("walg_config_file")
+        set_field("walg_config_file", sandbox.config_file)
+        try:
+            walg_cmd.warn_archive_inactive(
+                path_reader=lambda: settings.walg.walg_config_file,
+                admin_connection_fn=_dial_fn(pg),
+            )
+        finally:
+            set_field("walg_config_file", saved_config_file)
 
     err = capsys.readouterr().err
     assert "this Postgres is not running with the configured archive settings" in err
@@ -252,9 +245,10 @@ def test_a_postgres_launched_with_the_arguments_is_not_flagged(
 ) -> None:
     make_sandbox(tmp_path, monkeypatch)
     with archiving_postgres() as pg:
-        _dial(pg, monkeypatch)
-
-        walg_cmd.warn_archive_inactive(path_reader=lambda: settings.walg.walg_config_file)
+        walg_cmd.warn_archive_inactive(
+            path_reader=lambda: settings.walg.walg_config_file,
+            admin_connection_fn=_dial_fn(pg),
+        )
 
     assert capsys.readouterr().err == ""
 
@@ -264,12 +258,13 @@ def test_nothing_is_dialed_while_wal_g_is_off(
 ) -> None:
     make_sandbox(tmp_path, monkeypatch, enabled=False)
 
-    def explode() -> object:
+    def explode() -> AbstractContextManager[psycopg.Connection[Any]]:
         raise AssertionError("dialed Postgres while WAL-G is off")
 
-    monkeypatch.setattr(probe, "admin_connection", explode)
-
-    walg_cmd.warn_archive_inactive(path_reader=lambda: settings.walg.walg_config_file)
+    walg_cmd.warn_archive_inactive(
+        path_reader=lambda: settings.walg.walg_config_file,
+        admin_connection_fn=explode,
+    )
 
     assert capsys.readouterr().err == ""
 
@@ -277,7 +272,15 @@ def test_nothing_is_dialed_while_wal_g_is_off(
 def test_an_unreadable_postgres_is_a_warning_not_a_failure(
     sandbox: Sandbox, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    walg_cmd.warn_archive_inactive(path_reader=lambda: settings.walg.walg_config_file)
+    @contextmanager
+    def no_postgres() -> Generator[psycopg.Connection[Any]]:
+        raise psycopg.OperationalError("connection refused")
+        yield
+
+    walg_cmd.warn_archive_inactive(
+        path_reader=lambda: settings.walg.walg_config_file,
+        admin_connection_fn=no_postgres,
+    )
 
     assert "WAL archiving state not read (OperationalError" in capsys.readouterr().err
 
@@ -290,7 +293,6 @@ def _fake_restore(calls: list[dict[str, Any]], **kwargs: Any) -> Generator[None]
 
 def test_restore_passes_the_target_and_keeps_the_data_directory(
     sandbox: Sandbox,
-    monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     tmp_path: Path,
 ) -> None:
@@ -299,14 +301,14 @@ def test_restore_passes_the_target_and_keeps_the_data_directory(
     def fake(directory: Path, **kwargs: Any) -> Any:
         return _fake_restore(calls, directory=directory, **kwargs)
 
-    monkeypatch.setattr(walg_cmd, "restored_instance", fake)
-
     code = walg_cmd.cmd_walg_restore(
         directory=str(tmp_path / "out"),
         backup="base_0001",
         time=None,
         lsn="0/3000060",
         user="zyonzhang",
+        config_boot_factory=_build_owner,
+        restored_instance_fn=fake,
     )
 
     assert code == 0
@@ -333,7 +335,12 @@ def test_restore_rejects_a_bad_target_before_fetching(
     kwargs: dict[str, str | None],
     message: str,
 ) -> None:
-    code = walg_cmd.cmd_walg_restore(directory=str(tmp_path / "out"), backup="LATEST", **kwargs)  # type: ignore[arg-type]
+    code = walg_cmd.cmd_walg_restore(
+        directory=str(tmp_path / "out"),
+        backup="LATEST",
+        config_boot_factory=_build_owner,
+        **kwargs,  # type: ignore[arg-type]
+    )
 
     assert code == 1
     assert message in capsys.readouterr().err
@@ -341,7 +348,7 @@ def test_restore_rejects_a_bad_target_before_fetching(
 
 
 def test_restore_reports_a_failed_recovery_and_exits_non_zero(
-    sandbox: Sandbox, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    sandbox: Sandbox, capsys: pytest.CaptureFixture[str]
 ) -> None:
     from services.backup.walg.restore import RestoreError
 
@@ -350,10 +357,13 @@ def test_restore_reports_a_failed_recovery_and_exits_non_zero(
         raise RestoreError("recovery failed, postgres exited 1: FATAL: no segment")
         yield  # pragma: no cover
 
-    monkeypatch.setattr(walg_cmd, "restored_instance", failing)
-
     code = walg_cmd.cmd_walg_restore(
-        directory="/srv/restored", backup="LATEST", time=None, lsn=None
+        directory="/srv/restored",
+        backup="LATEST",
+        time=None,
+        lsn=None,
+        config_boot_factory=_build_owner,
+        restored_instance_fn=failing,
     )
 
     assert code == 1
@@ -367,12 +377,21 @@ def test_restore_while_wal_g_is_off_says_so(
 ) -> None:
     make_sandbox(tmp_path, monkeypatch, enabled=False)
 
-    assert walg_cmd.cmd_walg_restore(directory="/x", backup="LATEST", time=None, lsn=None) == 1
+    assert (
+        walg_cmd.cmd_walg_restore(
+            directory="/x",
+            backup="LATEST",
+            time=None,
+            lsn=None,
+            config_boot_factory=_build_owner,
+        )
+        == 1
+    )
     assert "WAL-G is off" in capsys.readouterr().out
 
 
 def test_drill_hands_the_tick_module_a_timestamping_reporter_and_returns_its_exit_code(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], operator_database: Any
+    capsys: pytest.CaptureFixture[str], operator_database: Any
 ) -> None:
     database_for_url = operator_database.for_url
 
@@ -381,9 +400,14 @@ def test_drill_hands_the_tick_module_a_timestamping_reporter_and_returns_its_exi
         report("drill: FAILED after 3s: recovery failed")
         return 1
 
-    monkeypatch.setattr(walg_cmd.tick, "run_drill_now", fake_drill)
-
-    assert walg_cmd.cmd_walg_drill(database_for_url=database_for_url) == 1
+    assert (
+        walg_cmd.cmd_walg_drill(
+            database_for_url=database_for_url,
+            config_boot_factory=_build_owner,
+            run_drill_fn=fake_drill,
+        )
+        == 1
+    )
     assert re.fullmatch(
         r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z drill: FAILED after 3s: recovery failed\n",
         capsys.readouterr().out,
@@ -409,7 +433,7 @@ def test_status_shows_the_last_drill_and_the_last_success(
         )
     )
 
-    assert walg_cmd.cmd_walg_status() == 0
+    assert walg_cmd.cmd_walg_status(config_boot_factory=_build_owner) == 0
 
     out = capsys.readouterr().out
     assert (
@@ -419,12 +443,10 @@ def test_status_shows_the_last_drill_and_the_last_success(
     assert "last successful drill: never" in out
 
 
-def test_check_uses_one_lazy_owner_and_keeps_its_reader_live(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_check_uses_one_lazy_owner_and_keeps_its_reader_live(tmp_path: Path) -> None:
     owner = ConfigBoot()
     first, second = tmp_path / "first.json", tmp_path / "second.json"
-    owner.view.walg.walg_config_file = first
+    owner.set_field("walg_config_file", first)
     owners: list[ConfigBoot] = []
 
     def build_owner() -> ConfigBoot:
@@ -432,17 +454,19 @@ def test_check_uses_one_lazy_owner_and_keeps_its_reader_live(
         return owner
 
     def check_reader(*, path_reader: Callable[[], Path | None]) -> list[Step]:
+        assert not owner.prepared
         assert path_reader() == first
-        owner.view.walg.walg_config_file = second
+        assert owner.prepared and owner.environment is not None
+        owner.set_field("walg_config_file", second)
         assert path_reader() == second
         return []
 
-    def no_boot(_owner: ConfigBoot) -> None:
-        pytest.fail("a CLI root must not eagerly boot its reader")
-
-    monkeypatch.setattr(walg_cmd, "ConfigBoot", build_owner)
-    monkeypatch.setattr(ConfigBoot, "boot", no_boot)
-    monkeypatch.setattr(walg_cmd.check, "run_check", check_reader)
-    monkeypatch.setattr(settings.walg, "walg_config_file", tmp_path / "ambient.json")
-    assert walg_cmd.cmd_walg_check() == 0
+    saved_config_file = get_field("walg_config_file")
+    set_field("walg_config_file", tmp_path / "ambient.json")
+    try:
+        assert (
+            walg_cmd.cmd_walg_check(config_boot_factory=build_owner, run_check_fn=check_reader) == 0
+        )
+    finally:
+        set_field("walg_config_file", saved_config_file)
     assert owners == [owner]

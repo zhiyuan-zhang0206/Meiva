@@ -5,12 +5,10 @@ from __future__ import annotations
 import pytest
 
 import cli.commands.cluster.control as cluster_control
-from base.cluster import machine
 from base.cluster.machine.tests.gateway_stubs import (
     gateway_api_base_stub,
     gateway_auth_headers_stub,
 )
-from base.host.net import http_dial
 from cli.database.tests.command_fakes import FakeResponse
 from cli.database.tests.command_fakes import fake_session_backends as fake_session_backends
 from cli.database.tests.command_fakes import gateway_role_pinned as gateway_role_pinned
@@ -19,7 +17,7 @@ from cli.database.tests.command_inputs import command_runtime as command_runtime
 
 
 def test_cmd_cluster_resume_checklist_names_only_commands_that_parse(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     """Every `meiva ...` command the resume checklist prints must parse with the real
     CLI parser — an operator following it after an address change is exactly the
@@ -30,14 +28,15 @@ def test_cmd_cluster_resume_checklist_names_only_commands_that_parse(
 
     from cli.parsers import build_parser
 
-    monkeypatch.setattr(machine, "gateway_api_base", gateway_api_base_stub("http://gw:8000"))
-    monkeypatch.setattr(machine, "gateway_auth_headers", gateway_auth_headers_stub({}))
-    monkeypatch.setattr(
-        http_dial,
-        "post",
-        lambda *_a, **_kw: FakeResponse({"name": "runner-a", "resumed": True}),  # pyright: ignore[reportUnknownArgumentType]
+    assert (
+        cluster_control.cmd_cluster_resume(
+            "runner-a",
+            api_base_fn=gateway_api_base_stub("http://gw:8000"),
+            auth_headers_fn=gateway_auth_headers_stub({}),
+            post_fn=lambda *_a, **_kw: FakeResponse({"name": "runner-a", "resumed": True}),
+        )
+        == 0
     )
-    assert cluster_control.cmd_cluster_resume("runner-a") == 0
     out = capsys.readouterr().out
     commands = re.findall(r"`(meiva [^`]+)`", out)
     assert commands, out

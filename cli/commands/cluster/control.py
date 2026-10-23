@@ -8,8 +8,10 @@ the status_probe op. The CLI just renders the returned table.
 from __future__ import annotations
 
 import sys
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 import httpx
 
@@ -125,7 +127,13 @@ def cmd_cluster_pause(name: str, *, reason: str | None = None) -> int:
     return 0
 
 
-def cmd_cluster_resume(name: str) -> int:
+def cmd_cluster_resume(
+    name: str,
+    *,
+    api_base_fn: Callable[[str], str] | None = None,
+    auth_headers_fn: Callable[[Any], dict[str, str]] | None = None,
+    post_fn: Callable[..., Any] | None = None,
+) -> int:
     """`meiva cluster resume NAME` — restore a paused machine as a normal
     cluster member.
 
@@ -140,11 +148,14 @@ def cmd_cluster_resume(name: str) -> int:
     from base.host.net.http_dial import post as dial_post
 
     access = gateway_access_from_settings()  # ambient: C
-    url = f"{gateway_api_base(access.gateway_url)}/api/cluster/machines/{name}/resume"
-    resp = dial_post(
+    active_api_base = api_base_fn or gateway_api_base
+    active_auth_headers = auth_headers_fn or gateway_auth_headers
+    active_post = post_fn or dial_post
+    url = f"{active_api_base(access.gateway_url)}/api/cluster/machines/{name}/resume"
+    resp = active_post(
         url,
         timeout=_CLUSTER_STATUS_PROBE_TIMEOUT_S,
-        headers=gateway_auth_headers(access),
+        headers=active_auth_headers(access),
         json={},
     )
     if resp.status_code == 404:

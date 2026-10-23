@@ -257,7 +257,6 @@ def test_delete_reports_reclaimed_bytes_and_is_idempotent(
 
 def test_delete_failure_is_reported_and_other_candidates_continue(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     from cli.commands.observability.logs import cmd_logs_retention
@@ -266,18 +265,17 @@ def test_delete_failure_is_reported_and_other_candidates_continue(
     deleted = _stale_file(tmp_path, "meiva-agent-13.out.log", b"good")
     real_unlink = Path.unlink
 
-    def refuse_one(path: Path, *args: object, **kwargs: object) -> None:
+    def refuse_one(path: Path) -> None:
         if path == failed:
             raise PermissionError("denied by test")
-        real_unlink(path, *args, **kwargs)  # pyright: ignore[reportArgumentType]
-
-    monkeypatch.setattr(Path, "unlink", refuse_one)
+        real_unlink(path)
 
     rc = cmd_logs_retention(
         older_than_days=14,
         dry_run=False,
         logs_path=tmp_path,
         now=_NOW,
+        unlink_fn=refuse_one,
     )
 
     captured = capsys.readouterr()
@@ -290,7 +288,6 @@ def test_delete_failure_is_reported_and_other_candidates_continue(
 
 def test_unreadable_matching_path_is_reported(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     from cli.commands.observability import logs
@@ -319,13 +316,12 @@ def test_unreadable_matching_path_is_reported(
     def fake_scandir(_path: Path) -> EntryScan:
         return EntryScan()
 
-    monkeypatch.setattr(logs.os, "scandir", fake_scandir)
-
     rc = logs.cmd_logs_retention(
         older_than_days=14,
         dry_run=False,
         logs_path=tmp_path,
         now=_NOW,
+        scandir_fn=fake_scandir,
     )
 
     captured = capsys.readouterr()
@@ -388,22 +384,24 @@ def test_retention_preserves_every_path_outside_the_exact_boundary(
 
 def test_configured_days_apply_when_the_flag_is_omitted(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    from base.config import settings
+    from base.config import get_field, set_field
     from cli.commands.observability.logs import cmd_logs_retention
 
     managed = _stale_file(tmp_path, "meiva-agent-12.out.log", b"keep")
-    monkeypatch.setattr(settings.observability, "log_retention_days", 16)
-
-    rc = cmd_logs_retention(
-        older_than_days=None,
-        family_days=None,
-        dry_run=False,
-        logs_path=tmp_path,
-        now=_NOW,
-    )
+    saved_days = get_field("log_retention_days")
+    set_field("log_retention_days", 16)
+    try:
+        rc = cmd_logs_retention(
+            older_than_days=None,
+            family_days=None,
+            dry_run=False,
+            logs_path=tmp_path,
+            now=_NOW,
+        )
+    finally:
+        set_field("log_retention_days", saved_days)
 
     assert rc == 0
     assert managed.exists()
