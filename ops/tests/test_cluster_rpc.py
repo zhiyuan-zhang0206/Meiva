@@ -9,13 +9,16 @@ contract. Each test drives one outcome arm over a fake HTTP transport.
 
 from __future__ import annotations
 
+import json
 import logging
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 import httpx
 import pytest
 
 from base.cluster.machines import MachineGatewayUrlMissing, MachineNotRegistered
+from base.config import get_field, set_field
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from ops.cluster import rpc as cluster_rpc
@@ -27,47 +30,43 @@ def _db(*, database_gate: ProcessDbGate) -> Database:
 
 
 def _patch(
-    monkeypatch: pytest.MonkeyPatch,
     *,
     url: str = "http://host:8106",
-    handler=None,  # type: ignore[no-untyped-def]
+    handler: Callable[[httpx.Request], httpx.Response] | None = None,
     lookup_exc: Exception | None = None,
-) -> dict[str, Any]:
-    """Patch the machines lookup + httpx.AsyncClient. Returns a dict that captures
-    the outgoing request(s) so the test can assert on URL / body: `request` is the
-    last one, `requests` is every one (retry tests need all attempts)."""
+) -> tuple[dict[str, Any], dict[str, Any]]:
     captured: dict[str, Any] = {}
 
-    def _lookup(_db: object, name: str) -> str:
+    def _lookup(_db: Database, _name: str) -> str:
         if lookup_exc is not None:
             raise lookup_exc
         return url
 
-    monkeypatch.setattr(cluster_rpc, "lookup_machine_url", _lookup)
+    rpc_kwargs: dict[str, Any] = {"lookup_fn": _lookup}
 
     if handler is not None:
-        real_client = httpx.AsyncClient  # capture before patching to avoid recursion
+        active_handler = handler
 
         def _capturing_handler(request: httpx.Request) -> httpx.Response:
             captured["request"] = request
             captured.setdefault("requests", []).append(request)
-            return handler(request)
+            return active_handler(request)
 
-        def _client_factory(**kwargs: object) -> httpx.AsyncClient:
+        def _client_factory(**kwargs: Any) -> httpx.AsyncClient:
             kwargs.pop("transport", None)
-            return real_client(transport=httpx.MockTransport(_capturing_handler), **kwargs)  # type: ignore[arg-type]
+            return httpx.AsyncClient(
+                transport=httpx.MockTransport(_capturing_handler),
+                **kwargs,
+            )
 
-        monkeypatch.setattr(cluster_rpc.httpx, "AsyncClient", _client_factory)
-    return captured
+        rpc_kwargs["client_factory"] = _client_factory
+    return captured, rpc_kwargs
 
 
 @pytest.mark.asyncio
-async def test_completed_returns_result(
-    monkeypatch: pytest.MonkeyPatch, *, database_gate: ProcessDbGate
-) -> None:
+async def test_completed_returns_result(*, database_gate: ProcessDbGate) -> None:
     """200 + status=completed -> returns the result dict; the request hits /ops with the body."""
-    captured = _patch(
-        monkeypatch,
+    captured, rpc_kwargs = _patch(
         url="http://host:8106",
         handler=lambda _r: httpx.Response(200, json={"status": "completed", "result": {"id": 5}}),
     )
@@ -77,12 +76,11 @@ async def test_completed_returns_result(
         "spawn-launch",
         {"agent_id": 5, "launch_attempt_id": "00000000-0000-0000-0000-000000000001"},
         retries=0,
+        **rpc_kwargs,
     )
     assert result == {"id": 5}
     req = captured["request"]
     assert str(req.url) == "http://host:8106/ops"
-    import json
-
     body = json.loads(req.content)
     assert body["kind"] == "spawn-launch"
     assert body["payload"] == {
@@ -94,70 +92,79 @@ async def test_completed_returns_result(
 
 
 @pytest.mark.asyncio
-async def test_failed_raises_cluster_op_failed(
-    monkeypatch: pytest.MonkeyPatch, *, database_gate: ProcessDbGate
-) -> None:
+async def test_failed_raises_cluster_op_failed(*, database_gate: ProcessDbGate) -> None:
     """200 + status=failed -> ClusterOpFailed carrying the result payload."""
-    _patch(
-        monkeypatch,
+    _captured, rpc_kwargs = _patch(
         handler=lambda _r: httpx.Response(
             200, json={"status": "failed", "result": {"error": "boom"}}
         ),
     )
     with pytest.raises(cluster_rpc.ClusterOpFailed) as ei:
         await cluster_rpc.dispatch_to_machine(
-            _db(database_gate=database_gate), "runner-a", "lifecycle", {}, retries=0
+            _db(database_gate=database_gate),
+            "runner-a",
+            "lifecycle",
+            {},
+            retries=0,
+            **rpc_kwargs,
         )
     assert ei.value.result == {"error": "boom"}
 
 
 @pytest.mark.asyncio
-async def test_unknown_status_raises_unreachable(
-    monkeypatch: pytest.MonkeyPatch, *, database_gate: ProcessDbGate
-) -> None:
+async def test_unknown_status_raises_unreachable(*, database_gate: ProcessDbGate) -> None:
     """A status outside {completed, failed} fails OpResponse validation -> a
     malformed-response ClusterOpUnreachable, never a silently-returned garbage result."""
-    _patch(
-        monkeypatch,
+    _captured, rpc_kwargs = _patch(
         handler=lambda _r: httpx.Response(200, json={"status": "pending", "result": {}}),
     )
     with pytest.raises(cluster_rpc.ClusterOpUnreachable, match="malformed response"):
         await cluster_rpc.dispatch_to_machine(
-            _db(database_gate=database_gate), "runner-a", "status_probe", {}, retries=0
+            _db(database_gate=database_gate),
+            "runner-a",
+            "status_probe",
+            {},
+            retries=0,
+            **rpc_kwargs,
         )
 
 
 @pytest.mark.asyncio
-async def test_non_200_raises_unreachable(
-    monkeypatch: pytest.MonkeyPatch, *, database_gate: ProcessDbGate
-) -> None:
+async def test_non_200_raises_unreachable(*, database_gate: ProcessDbGate) -> None:
     """A non-200 from the ops server -> ClusterOpUnreachable (not ClusterOpFailed)."""
-    _patch(monkeypatch, handler=lambda _r: httpx.Response(503, text="ops down"))
+    _captured, rpc_kwargs = _patch(handler=lambda _r: httpx.Response(503, text="ops down"))
     with pytest.raises(cluster_rpc.ClusterOpUnreachable, match="503"):
         await cluster_rpc.dispatch_to_machine(
-            _db(database_gate=database_gate), "runner-a", "status_probe", {}, retries=0
+            _db(database_gate=database_gate),
+            "runner-a",
+            "status_probe",
+            {},
+            retries=0,
+            **rpc_kwargs,
         )
 
 
 @pytest.mark.asyncio
-async def test_httpx_error_raises_unreachable(
-    monkeypatch: pytest.MonkeyPatch, *, database_gate: ProcessDbGate
-) -> None:
+async def test_httpx_error_raises_unreachable(*, database_gate: ProcessDbGate) -> None:
     """A transport error (connect/read timeout) -> ClusterOpUnreachable."""
 
     def _boom(_r: httpx.Request) -> httpx.Response:
         raise httpx.ConnectError("connection refused")
 
-    _patch(monkeypatch, handler=_boom)
+    _captured, rpc_kwargs = _patch(handler=_boom)
     with pytest.raises(cluster_rpc.ClusterOpUnreachable, match="unreachable"):
         await cluster_rpc.dispatch_to_machine(
-            _db(database_gate=database_gate), "runner-a", "status_probe", {}, retries=0
+            _db(database_gate=database_gate),
+            "runner-a",
+            "status_probe",
+            {},
+            retries=0,
+            **rpc_kwargs,
         )
 
 
 @pytest.mark.asyncio
 async def test_status_probe_unreachable_logs_debug(
-    monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
     *,
     database_gate: ProcessDbGate,
@@ -168,13 +175,18 @@ async def test_status_probe_unreachable_logs_debug(
     def _boom(_r: httpx.Request) -> httpx.Response:
         raise httpx.ConnectError("connection refused")
 
-    _patch(monkeypatch, handler=_boom)
+    _captured, rpc_kwargs = _patch(handler=_boom)
     with (
         caplog.at_level(logging.DEBUG, logger="ops.cluster.rpc"),
         pytest.raises(cluster_rpc.ClusterOpUnreachable),
     ):
         await cluster_rpc.dispatch_to_machine(
-            _db(database_gate=database_gate), "runner-a", "status_probe", {}, retries=0
+            _db(database_gate=database_gate),
+            "runner-a",
+            "status_probe",
+            {},
+            retries=0,
+            **rpc_kwargs,
         )
     recs = [r for r in caplog.records if "unreachable after" in r.getMessage()]
     assert recs and all(r.levelno == logging.DEBUG for r in recs)
@@ -182,7 +194,6 @@ async def test_status_probe_unreachable_logs_debug(
 
 @pytest.mark.asyncio
 async def test_non_probe_unreachable_stays_warning(
-    monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
     *,
     database_gate: ProcessDbGate,
@@ -193,142 +204,162 @@ async def test_non_probe_unreachable_stays_warning(
     def _boom(_r: httpx.Request) -> httpx.Response:
         raise httpx.ConnectError("connection refused")
 
-    _patch(monkeypatch, handler=_boom)
+    _captured, rpc_kwargs = _patch(handler=_boom)
     with (
         caplog.at_level(logging.DEBUG, logger="ops.cluster.rpc"),
         pytest.raises(cluster_rpc.ClusterOpUnreachable),
     ):
         await cluster_rpc.dispatch_to_machine(
-            _db(database_gate=database_gate), "runner-a", "spawn-launch", {}, retries=0
+            _db(database_gate=database_gate),
+            "runner-a",
+            "spawn-launch",
+            {},
+            retries=0,
+            **rpc_kwargs,
         )
     recs = [r for r in caplog.records if "unreachable after" in r.getMessage()]
     assert recs and all(r.levelno == logging.WARNING for r in recs)
 
 
 @pytest.mark.asyncio
-async def test_unregistered_machine_raises_target_absent(
-    monkeypatch: pytest.MonkeyPatch, *, database_gate: ProcessDbGate
-) -> None:
+async def test_unregistered_machine_raises_target_absent(*, database_gate: ProcessDbGate) -> None:
     """A missing machines row -> ClusterOpTargetAbsent, the definitive-absence
     subclass of ClusterOpUnreachable (task #4143): consumers that own
     terminal-state cleanup branch on it; every existing handler that catches
     the parent keeps working (asserted here)."""
-    _patch(monkeypatch, lookup_exc=MachineNotRegistered("no machine named 'ghost'"))
+    _captured, rpc_kwargs = _patch(lookup_exc=MachineNotRegistered("no machine named 'ghost'"))
     with pytest.raises(cluster_rpc.ClusterOpTargetAbsent) as excinfo:
         await cluster_rpc.dispatch_to_machine(
-            _db(database_gate=database_gate), "ghost", "status_probe", {}
+            _db(database_gate=database_gate),
+            "ghost",
+            "status_probe",
+            {},
+            **rpc_kwargs,
         )
     assert isinstance(excinfo.value, cluster_rpc.ClusterOpUnreachable)
     assert "absent from the machines registry" in str(excinfo.value)
 
 
 @pytest.mark.asyncio
-async def test_null_gateway_url_raises_unreachable(
-    monkeypatch: pytest.MonkeyPatch, *, database_gate: ProcessDbGate
-) -> None:
+async def test_null_gateway_url_raises_unreachable(*, database_gate: ProcessDbGate) -> None:
     """A row with NULL gateway_url (host not yet started on new code) ->
     ClusterOpUnreachable (translated from MachineGatewayUrlMissing), NOT the
     target-absent subclass: the row exists, so the machine is not definitively
     gone (task #4143)."""
-    _patch(monkeypatch, lookup_exc=MachineGatewayUrlMissing("runner-a advertises no gateway_url"))
+    _captured, rpc_kwargs = _patch(
+        lookup_exc=MachineGatewayUrlMissing("runner-a advertises no gateway_url")
+    )
     with pytest.raises(cluster_rpc.ClusterOpUnreachable) as excinfo:
         await cluster_rpc.dispatch_to_machine(
-            _db(database_gate=database_gate), "runner-a", "status_probe", {}, retries=0
+            _db(database_gate=database_gate),
+            "runner-a",
+            "status_probe",
+            {},
+            retries=0,
+            **rpc_kwargs,
         )
     assert not isinstance(excinfo.value, cluster_rpc.ClusterOpTargetAbsent)
     assert "cannot resolve an address" in str(excinfo.value)
 
 
 @pytest.mark.asyncio
-async def test_provided_ops_url_bypasses_machines_lookup(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_provided_ops_url_bypasses_machines_lookup() -> None:
     """`dispatch_to_url` dials a pre-resolved `ops_url` and NEVER reads the machines table:
     the lookup here is wired to raise, yet the dispatch still round-trips to the
     given URL. This is what keeps the failed-rollout compensating resume
     Postgres-free — the 2026-07-20 incident, where the resume's own machines read
     raised (data plane down) and left every host stop-the-world + paused."""
-    captured = _patch(
-        monkeypatch,
+    captured, rpc_kwargs = _patch(
         lookup_exc=MachineNotRegistered("lookup must not run when ops_url is provided"),
         handler=lambda _r: httpx.Response(200, json={"status": "completed", "result": {"ok": 1}}),
     )
     result = await cluster_rpc.dispatch_to_url(
-        "runner-a", "status_probe", {}, ops_url="http://direct:8106"
+        "runner-a",
+        "status_probe",
+        {},
+        ops_url="http://direct:8106",
+        client_factory=rpc_kwargs["client_factory"],
     )
     assert result == {"ok": 1}
     assert str(captured["request"].url) == "http://direct:8106/ops"
 
 
 @pytest.mark.asyncio
-async def test_default_timeout_comes_from_settings(
-    monkeypatch: pytest.MonkeyPatch, *, database_gate: ProcessDbGate
-) -> None:
+async def test_default_timeout_comes_from_settings(*, database_gate: ProcessDbGate) -> None:
     """Omitting timeout_s uses MEIVA_CLUSTER_RPC_TIMEOUT_SECONDS (task #698 G8)
     — the default is config, not a module literal."""
-    from base.config import settings
-
-    monkeypatch.setattr(settings.gateway, "cluster_rpc_timeout_seconds", 12.5)
-    monkeypatch.setattr(cluster_rpc, "lookup_machine_url", lambda _d, _n: "http://host:8106")  # pyright: ignore[reportUnknownArgumentType]
-    real_client = httpx.AsyncClient
     seen: dict[str, httpx.Timeout] = {}
 
-    def _client_factory(**kwargs):  # type: ignore[no-untyped-def]
+    def _client_factory(**kwargs: Any) -> httpx.AsyncClient:
         seen["timeout"] = kwargs["timeout"]
         kwargs["transport"] = httpx.MockTransport(
             lambda _r: httpx.Response(200, json={"status": "completed", "result": {}})
         )
-        return real_client(**kwargs)  # pyright: ignore[reportUnknownArgumentType]
+        return httpx.AsyncClient(**kwargs)
 
-    monkeypatch.setattr(cluster_rpc.httpx, "AsyncClient", _client_factory)  # pyright: ignore[reportUnknownArgumentType]
-    await cluster_rpc.dispatch_to_machine(
-        _db(database_gate=database_gate), "runner-a", "status_probe", {}, retries=0
-    )
+    prior = get_field("cluster_rpc_timeout_seconds")
+    set_field("cluster_rpc_timeout_seconds", 12.5)
+    try:
+        await cluster_rpc.dispatch_to_machine(
+            _db(database_gate=database_gate),
+            "runner-a",
+            "status_probe",
+            {},
+            retries=0,
+            lookup_fn=lambda _d, _n: "http://host:8106",
+            client_factory=_client_factory,
+        )
+    finally:
+        set_field("cluster_rpc_timeout_seconds", prior)
     assert seen["timeout"].read == 12.5
 
 
 @pytest.mark.asyncio
-async def test_client_ignores_system_proxy(
-    monkeypatch: pytest.MonkeyPatch, *, database_gate: ProcessDbGate
-) -> None:
+async def test_client_ignores_system_proxy(*, database_gate: ProcessDbGate) -> None:
     """Cluster-private RPC dials never inherit the host's proxy settings."""
-    monkeypatch.setattr(cluster_rpc, "lookup_machine_url", lambda _d, _n: "http://host:8106")  # pyright: ignore[reportUnknownArgumentType]
-    real_client = httpx.AsyncClient
     seen: dict[str, object] = {}
 
-    def _client_factory(**kwargs):  # type: ignore[no-untyped-def]
+    def _client_factory(**kwargs: Any) -> httpx.AsyncClient:
         seen["trust_env"] = kwargs["trust_env"]
         kwargs["transport"] = httpx.MockTransport(
             lambda _r: httpx.Response(200, json={"status": "completed", "result": {}})
         )
-        return real_client(**kwargs)  # pyright: ignore[reportUnknownArgumentType]
+        return httpx.AsyncClient(**kwargs)
 
-    monkeypatch.setattr(cluster_rpc.httpx, "AsyncClient", _client_factory)  # pyright: ignore[reportUnknownArgumentType]
     await cluster_rpc.dispatch_to_machine(
-        _db(database_gate=database_gate), "runner-a", "status_probe", {}, retries=0
+        _db(database_gate=database_gate),
+        "runner-a",
+        "status_probe",
+        {},
+        retries=0,
+        lookup_fn=lambda _d, _n: "http://host:8106",
+        client_factory=_client_factory,
     )
     assert seen["trust_env"] is False
 
 
 @pytest.mark.asyncio
-async def test_connect_timeout_capped_by_timeout_s(
-    monkeypatch: pytest.MonkeyPatch, *, database_gate: ProcessDbGate
-) -> None:
+async def test_connect_timeout_capped_by_timeout_s(*, database_gate: ProcessDbGate) -> None:
     """A short probe timeout_s bounds the connect phase too. The connect floor
     used to be a flat 10s, so a blackholed host (powered-off private-network peer)
     stretched every 3s roster probe to ~10s and /api/status with it."""
-    monkeypatch.setattr(cluster_rpc, "lookup_machine_url", lambda _d, _n: "http://host:8106")  # pyright: ignore[reportUnknownArgumentType]
-    real_client = httpx.AsyncClient
     seen: dict[str, httpx.Timeout] = {}
 
-    def _client_factory(**kwargs):  # type: ignore[no-untyped-def]
+    def _client_factory(**kwargs: Any) -> httpx.AsyncClient:
         seen["timeout"] = kwargs["timeout"]
         kwargs["transport"] = httpx.MockTransport(
             lambda _r: httpx.Response(200, json={"status": "completed", "result": {}})
         )
-        return real_client(**kwargs)  # pyright: ignore[reportUnknownArgumentType]
+        return httpx.AsyncClient(**kwargs)
 
-    monkeypatch.setattr(cluster_rpc.httpx, "AsyncClient", _client_factory)  # pyright: ignore[reportUnknownArgumentType]
     await cluster_rpc.dispatch_to_machine(
-        _db(database_gate=database_gate), "runner-a", "status_probe", {}, timeout_s=3.0
+        _db(database_gate=database_gate),
+        "runner-a",
+        "status_probe",
+        {},
+        timeout_s=3.0,
+        lookup_fn=lambda _d, _n: "http://host:8106",
+        client_factory=_client_factory,
     )
     assert seen["timeout"].connect == 3.0
 
@@ -336,23 +367,21 @@ async def test_connect_timeout_capped_by_timeout_s(
 # ─── retry loop ──────────────────────────────────────────────────────────────
 
 
-def _pin_retry(monkeypatch: pytest.MonkeyPatch) -> list[float]:
-    """Pin the retry machinery deterministic: fixed (un-jittered) delays and a
-    recorded sleep log. Returns the list of delays actually slept."""
+def _pin_retry() -> tuple[list[float], dict[str, Any]]:
     sleeps: list[float] = []
 
     async def _fake_sleep(delay: float) -> None:
         sleeps.append(delay)
 
-    monkeypatch.setattr(cluster_rpc, "rpc_sleep", _fake_sleep)
-    monkeypatch.setattr(cluster_rpc.random, "uniform", lambda _a, _b: 1.0)  # pyright: ignore[reportUnknownArgumentType]
-    return sleeps
+    retry_kwargs: dict[str, Callable[..., Any] | Callable[[float], Awaitable[None]]] = {
+        "sleep_fn": _fake_sleep,
+        "uniform_fn": lambda _a, _b: 1.0,
+    }
+    return sleeps, retry_kwargs
 
 
 @pytest.mark.asyncio
-async def test_transient_failure_retries_then_succeeds(
-    monkeypatch: pytest.MonkeyPatch, *, database_gate: ProcessDbGate
-) -> None:
+async def test_transient_failure_retries_then_succeeds(*, database_gate: ProcessDbGate) -> None:
     """A connection reset on the first attempt is retried once; the op succeeds
     on the fresh second connection."""
     calls = {"n": 0}
@@ -363,11 +392,17 @@ async def test_transient_failure_retries_then_succeeds(
             raise httpx.ReadError("connection reset by peer")
         return httpx.Response(200, json={"status": "completed", "result": {"ok": 1}})
 
-    captured = _patch(monkeypatch, handler=_flaky)
-    sleeps = _pin_retry(monkeypatch)
+    captured, rpc_kwargs = _patch(handler=_flaky)
+    sleeps, retry_kwargs = _pin_retry()
 
     result = await cluster_rpc.dispatch_to_machine(
-        _db(database_gate=database_gate), "runner-a", "status_probe", {}, retries=1
+        _db(database_gate=database_gate),
+        "runner-a",
+        "status_probe",
+        {},
+        retries=1,
+        **rpc_kwargs,
+        **retry_kwargs,
     )
 
     assert result == {"ok": 1}
@@ -377,21 +412,25 @@ async def test_transient_failure_retries_then_succeeds(
 
 
 @pytest.mark.asyncio
-async def test_two_connection_resets_exhaust_single_retry(
-    monkeypatch: pytest.MonkeyPatch, *, database_gate: ProcessDbGate
-) -> None:
+async def test_two_connection_resets_exhaust_single_retry(*, database_gate: ProcessDbGate) -> None:
     """Two fast transport failures consume the initial attempt plus one retry,
     then surface ClusterOpUnreachable to the roster's offline/backoff path."""
 
     def _reset(_r: httpx.Request) -> httpx.Response:
         raise httpx.ReadError("connection reset by peer")
 
-    captured = _patch(monkeypatch, handler=_reset)
-    sleeps = _pin_retry(monkeypatch)
+    captured, rpc_kwargs = _patch(handler=_reset)
+    sleeps, retry_kwargs = _pin_retry()
 
     with pytest.raises(cluster_rpc.ClusterOpUnreachable, match="after 2 attempt"):
         await cluster_rpc.dispatch_to_machine(
-            _db(database_gate=database_gate), "runner-a", "status_probe", {}, retries=1
+            _db(database_gate=database_gate),
+            "runner-a",
+            "status_probe",
+            {},
+            retries=1,
+            **rpc_kwargs,
+            **retry_kwargs,
         )
 
     assert len(captured["requests"]) == 2
@@ -399,9 +438,7 @@ async def test_two_connection_resets_exhaust_single_retry(
 
 
 @pytest.mark.asyncio
-async def test_retries_exhausted_raises_after_all_attempts(
-    monkeypatch: pytest.MonkeyPatch, *, database_gate: ProcessDbGate
-) -> None:
+async def test_retries_exhausted_raises_after_all_attempts(*, database_gate: ProcessDbGate) -> None:
     """Every attempt fails with a transport error; after the retry budget the
     dispatch raises ClusterOpUnreachable naming the attempt count, and the
     backoff delays follow the bounded exponential schedule (0.5, 1.0, 2.0)."""
@@ -409,12 +446,18 @@ async def test_retries_exhausted_raises_after_all_attempts(
     def _boom(_r: httpx.Request) -> httpx.Response:
         raise httpx.ReadTimeout("no answer")
 
-    captured = _patch(monkeypatch, handler=_boom)
-    sleeps = _pin_retry(monkeypatch)
+    captured, rpc_kwargs = _patch(handler=_boom)
+    sleeps, retry_kwargs = _pin_retry()
 
     with pytest.raises(cluster_rpc.ClusterOpUnreachable, match="after 3 attempt"):
         await cluster_rpc.dispatch_to_machine(
-            _db(database_gate=database_gate), "runner-a", "lifecycle", {}, retries=2
+            _db(database_gate=database_gate),
+            "runner-a",
+            "lifecycle",
+            {},
+            retries=2,
+            **rpc_kwargs,
+            **retry_kwargs,
         )
 
     assert len(captured["requests"]) == 3  # 1 + 2 retries
@@ -422,32 +465,28 @@ async def test_retries_exhausted_raises_after_all_attempts(
 
 
 @pytest.mark.asyncio
-async def test_retry_delay_is_bounded_and_jittered(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_retry_delay_is_bounded_and_jittered() -> None:
     """The raw (un-jittered) schedule is bounded: 0.5 · 2**attempt, capped at
     4s — a long outage never grows the gap unboundedly."""
     from ops.cluster import rpc as cr
 
-    monkeypatch.setattr(
-        cr.random,
-        "uniform",
-        lambda _a, _b: 1.0,  # pyright: ignore[reportUnknownArgumentType]
-    )  # pin jitter
-    assert cr.retry_delay_s(0) == 0.5
-    assert cr.retry_delay_s(1) == 1.0
-    assert cr.retry_delay_s(2) == 2.0
-    assert cr.retry_delay_s(3) == 4.0
-    assert cr.retry_delay_s(10) == 4.0  # cap holds for any attempt count
+    def _pin_uniform(_a: float, _b: float) -> float:
+        return 1.0
+
+    assert cr.retry_delay_s(0, uniform_fn=_pin_uniform) == 0.5
+    assert cr.retry_delay_s(1, uniform_fn=_pin_uniform) == 1.0
+    assert cr.retry_delay_s(2, uniform_fn=_pin_uniform) == 2.0
+    assert cr.retry_delay_s(3, uniform_fn=_pin_uniform) == 4.0
+    assert cr.retry_delay_s(10, uniform_fn=_pin_uniform) == 4.0  # cap holds for any attempt count
 
 
 @pytest.mark.asyncio
 async def test_non_idempotent_kind_retries_with_stable_idempotency_key(
-    monkeypatch: pytest.MonkeyPatch, *, database_gate: ProcessDbGate
+    *, database_gate: ProcessDbGate
 ) -> None:
     """spawn (non-idempotent) retries under an auto-generated idempotency key:
     EVERY attempt of one dispatch carries the SAME key, so the ops server can
     dedupe (replay the first run's stored outcome) instead of double-creating."""
-    import json
-
     calls = {"n": 0}
 
     def _flaky(_r: httpx.Request) -> httpx.Response:
@@ -456,8 +495,8 @@ async def test_non_idempotent_kind_retries_with_stable_idempotency_key(
             raise httpx.ReadTimeout("response lost after the op ran")
         return httpx.Response(200, json={"status": "completed", "result": {"id": 7}})
 
-    captured = _patch(monkeypatch, handler=_flaky)
-    _pin_retry(monkeypatch)
+    captured, rpc_kwargs = _patch(handler=_flaky)
+    _sleeps, retry_kwargs = _pin_retry()
 
     result = await cluster_rpc.dispatch_to_machine(
         _db(database_gate=database_gate),
@@ -465,6 +504,8 @@ async def test_non_idempotent_kind_retries_with_stable_idempotency_key(
         "spawn-launch",
         {"agent_id": 5, "launch_attempt_id": "00000000-0000-0000-0000-000000000001"},
         retries=2,
+        **rpc_kwargs,
+        **retry_kwargs,
     )
 
     assert result == {"id": 7}
@@ -476,14 +517,11 @@ async def test_non_idempotent_kind_retries_with_stable_idempotency_key(
 
 @pytest.mark.asyncio
 async def test_caller_supplied_idempotency_key_rides_envelope(
-    monkeypatch: pytest.MonkeyPatch, *, database_gate: ProcessDbGate
+    *, database_gate: ProcessDbGate
 ) -> None:
     """An explicit idempotency_key is forwarded verbatim — a caller that
     re-dispatches the same logical op across calls passes its own key."""
-    import json
-
-    captured = _patch(
-        monkeypatch,
+    captured, rpc_kwargs = _patch(
         handler=lambda _r: httpx.Response(200, json={"status": "completed", "result": {}}),
     )
     await cluster_rpc.dispatch_to_machine(
@@ -492,6 +530,7 @@ async def test_caller_supplied_idempotency_key_rides_envelope(
         "spawn-launch",
         {},
         idempotency_key="my-logical-op-1",
+        **rpc_kwargs,
     )
     body = json.loads(captured["request"].content)
     assert body["idempotency_key"] == "my-logical-op-1"
@@ -499,13 +538,10 @@ async def test_caller_supplied_idempotency_key_rides_envelope(
 
 @pytest.mark.asyncio
 async def test_spawn_launch_defaults_to_its_agent_idempotency_key(
-    monkeypatch: pytest.MonkeyPatch, *, database_gate: ProcessDbGate
+    *, database_gate: ProcessDbGate
 ) -> None:
     """Business keys replay one effect, but never cross target/payload boundaries."""
-    import json
-
-    captured = _patch(
-        monkeypatch,
+    captured, rpc_kwargs = _patch(
         handler=lambda _r: httpx.Response(200, json={"status": "completed", "result": {"id": 42}}),
     )
 
@@ -516,7 +552,12 @@ async def test_spawn_launch_defaults_to_its_agent_idempotency_key(
         ("runner-a", {"agent_id": 42, "launch_attempt_id": "00000000-0000-0000-0000-000000000002"}),
     ):
         result = await cluster_rpc.dispatch_to_machine(
-            _db(database_gate=database_gate), target, "spawn-launch", payload, retries=0
+            _db(database_gate=database_gate),
+            target,
+            "spawn-launch",
+            payload,
+            retries=0,
+            **rpc_kwargs,
         )
         assert result == {"id": 42}
 
@@ -538,13 +579,10 @@ def test_launch_key_is_stable_within_attempt_and_rotates_between_attempts() -> N
 
 @pytest.mark.asyncio
 async def test_only_spawn_launch_reuses_a_business_idempotency_key(
-    monkeypatch: pytest.MonkeyPatch, *, database_gate: ProcessDbGate
+    *, database_gate: ProcessDbGate
 ) -> None:
     """Separate lifecycle requests get fresh dispatch keys to run again."""
-    import json
-
-    captured = _patch(
-        monkeypatch,
+    captured, rpc_kwargs = _patch(
         handler=lambda _r: httpx.Response(200, json={"status": "completed", "result": {}}),
     )
 
@@ -553,10 +591,20 @@ async def test_only_spawn_launch_reuses_a_business_idempotency_key(
     )
     for kind, payload in operations:
         await cluster_rpc.dispatch_to_machine(
-            _db(database_gate=database_gate), "runner-a", kind, payload, retries=0
+            _db(database_gate=database_gate),
+            "runner-a",
+            kind,
+            payload,
+            retries=0,
+            **rpc_kwargs,
         )
         await cluster_rpc.dispatch_to_machine(
-            _db(database_gate=database_gate), "runner-a", kind, payload, retries=0
+            _db(database_gate=database_gate),
+            "runner-a",
+            kind,
+            payload,
+            retries=0,
+            **rpc_kwargs,
         )
 
     keys = [json.loads(request.content)["idempotency_key"] for request in captured["requests"]]
@@ -565,28 +613,25 @@ async def test_only_spawn_launch_reuses_a_business_idempotency_key(
 
 
 @pytest.mark.asyncio
-async def test_idempotent_kind_carries_no_key(
-    monkeypatch: pytest.MonkeyPatch, *, database_gate: ProcessDbGate
-) -> None:
+async def test_idempotent_kind_carries_no_key(*, database_gate: ProcessDbGate) -> None:
     """Idempotent kinds (status_probe etc.) send no idempotency_key — no dedup
     row, no server-side storage."""
-    import json
-
-    captured = _patch(
-        monkeypatch,
+    captured, rpc_kwargs = _patch(
         handler=lambda _r: httpx.Response(200, json={"status": "completed", "result": {}}),
     )
     await cluster_rpc.dispatch_to_machine(
-        _db(database_gate=database_gate), "runner-a", "status_probe", {}
+        _db(database_gate=database_gate),
+        "runner-a",
+        "status_probe",
+        {},
+        **rpc_kwargs,
     )
     body = json.loads(captured["request"].content)
     assert body.get("idempotency_key") is None
 
 
 @pytest.mark.asyncio
-async def test_5xx_is_retried(
-    monkeypatch: pytest.MonkeyPatch, *, database_gate: ProcessDbGate
-) -> None:
+async def test_5xx_is_retried(*, database_gate: ProcessDbGate) -> None:
     """A 503 from the ops server (server mid-restart / proxy hiccup) is a
     transient infrastructure failure — retried, and a later success wins."""
     calls = {"n": 0}
@@ -597,11 +642,17 @@ async def test_5xx_is_retried(
             return httpx.Response(503, text="ops server restarting")
         return httpx.Response(200, json={"status": "completed", "result": {"paused": True}})
 
-    captured = _patch(monkeypatch, handler=_flaky)
-    _pin_retry(monkeypatch)
+    captured, rpc_kwargs = _patch(handler=_flaky)
+    _sleeps, retry_kwargs = _pin_retry()
 
     result = await cluster_rpc.dispatch_to_machine(
-        _db(database_gate=database_gate), "runner-a", "status_probe", {}, retries=2
+        _db(database_gate=database_gate),
+        "runner-a",
+        "status_probe",
+        {},
+        retries=2,
+        **rpc_kwargs,
+        **retry_kwargs,
     )
 
     assert result == {"paused": True}
@@ -610,73 +661,79 @@ async def test_5xx_is_retried(
 
 
 @pytest.mark.asyncio
-async def test_4xx_is_not_retried(
-    monkeypatch: pytest.MonkeyPatch, *, database_gate: ProcessDbGate
-) -> None:
+async def test_4xx_is_not_retried(*, database_gate: ProcessDbGate) -> None:
     """A 404 is deterministic (wrong path / wrong server) — single attempt even
     with a large retry budget; retrying cannot change the outcome."""
-    captured = _patch(monkeypatch, handler=lambda _r: httpx.Response(404, text="nope"))
-    _pin_retry(monkeypatch)
+    captured, rpc_kwargs = _patch(handler=lambda _r: httpx.Response(404, text="nope"))
+    _sleeps, retry_kwargs = _pin_retry()
 
     with pytest.raises(cluster_rpc.ClusterOpUnreachable, match="returned 404"):
         await cluster_rpc.dispatch_to_machine(
-            _db(database_gate=database_gate), "runner-a", "status_probe", {}, retries=3
+            _db(database_gate=database_gate),
+            "runner-a",
+            "status_probe",
+            {},
+            retries=3,
+            **rpc_kwargs,
+            **retry_kwargs,
         )
 
     assert len(captured["requests"]) == 1
 
 
 @pytest.mark.asyncio
-async def test_cluster_op_failed_is_not_retried(
-    monkeypatch: pytest.MonkeyPatch, *, database_gate: ProcessDbGate
-) -> None:
+async def test_cluster_op_failed_is_not_retried(*, database_gate: ProcessDbGate) -> None:
     """A business failure (status=failed — the op RAN and reported failure) is
     terminal; retrying a business failure is meaningless and would re-run the
     op (e.g. a second spawn)."""
-    captured = _patch(
-        monkeypatch,
+    captured, rpc_kwargs = _patch(
         handler=lambda _r: httpx.Response(
             200, json={"status": "failed", "result": {"error": "boom"}}
         ),
     )
-    _pin_retry(monkeypatch)
+    _sleeps, retry_kwargs = _pin_retry()
 
     with pytest.raises(cluster_rpc.ClusterOpFailed):
         await cluster_rpc.dispatch_to_machine(
-            _db(database_gate=database_gate), "runner-a", "spawn-launch", {}, retries=3
+            _db(database_gate=database_gate),
+            "runner-a",
+            "spawn-launch",
+            {},
+            retries=3,
+            **rpc_kwargs,
+            **retry_kwargs,
         )
 
     assert len(captured["requests"]) == 1
 
 
 @pytest.mark.asyncio
-async def test_malformed_response_is_not_retried(
-    monkeypatch: pytest.MonkeyPatch, *, database_gate: ProcessDbGate
-) -> None:
+async def test_malformed_response_is_not_retried(*, database_gate: ProcessDbGate) -> None:
     """A malformed response body (version skew / wrong server) is terminal —
     retrying cannot heal a contract mismatch."""
-    captured = _patch(
-        monkeypatch,
+    captured, rpc_kwargs = _patch(
         handler=lambda _r: httpx.Response(200, json={"status": "pending", "result": {}}),
     )
-    _pin_retry(monkeypatch)
+    _sleeps, retry_kwargs = _pin_retry()
 
     with pytest.raises(cluster_rpc.ClusterOpUnreachable, match="malformed response"):
         await cluster_rpc.dispatch_to_machine(
-            _db(database_gate=database_gate), "runner-a", "spawn-launch", {}, retries=3
+            _db(database_gate=database_gate),
+            "runner-a",
+            "spawn-launch",
+            {},
+            retries=3,
+            **rpc_kwargs,
+            **retry_kwargs,
         )
 
     assert len(captured["requests"]) == 1
 
 
 @pytest.mark.asyncio
-async def test_retries_default_from_settings(
-    monkeypatch: pytest.MonkeyPatch, *, database_gate: ProcessDbGate
-) -> None:
+async def test_retries_default_from_settings(*, database_gate: ProcessDbGate) -> None:
     """Omitting `retries` uses MEIVA_CLUSTER_RPC_MAX_RETRIES — the retry budget is
     config, not a module literal."""
-    from base.config import settings
-
     calls = {"n": 0}
 
     def _flaky(_r: httpx.Request) -> httpx.Response:
@@ -685,25 +742,31 @@ async def test_retries_default_from_settings(
             raise httpx.ConnectError("blip")
         return httpx.Response(200, json={"status": "completed", "result": {}})
 
-    _patch(monkeypatch, handler=_flaky)
-    _pin_retry(monkeypatch)
-    monkeypatch.setattr(settings.gateway, "cluster_rpc_max_retries", 2)
-
-    await cluster_rpc.dispatch_to_machine(
-        _db(database_gate=database_gate), "runner-a", "status_probe", {}
-    )
+    _captured, rpc_kwargs = _patch(handler=_flaky)
+    _sleeps, retry_kwargs = _pin_retry()
+    prior = get_field("cluster_rpc_max_retries")
+    set_field("cluster_rpc_max_retries", 2)
+    try:
+        await cluster_rpc.dispatch_to_machine(
+            _db(database_gate=database_gate),
+            "runner-a",
+            "status_probe",
+            {},
+            **rpc_kwargs,
+            **retry_kwargs,
+        )
+    finally:
+        set_field("cluster_rpc_max_retries", prior)
     assert calls["n"] == 3  # 1 + 2 configured retries
 
 
 @pytest.mark.asyncio
 async def test_unknown_kind_is_rejected_before_machine_lookup(
-    monkeypatch: pytest.MonkeyPatch, *, database_gate: ProcessDbGate
+    *, database_gate: ProcessDbGate
 ) -> None:
     def forbidden(*_args: object, **_kwargs: object) -> str:
         raise AssertionError("an unknown operation cannot resolve or contact a machine")
 
-    monkeypatch.setattr(cluster_rpc, "lookup_machine_url", forbidden)
-    monkeypatch.setattr(cluster_rpc, "default_idempotency_key", forbidden)
     with pytest.raises(ValueError, match="unknown op kind"):
         await cluster_rpc.dispatch_to_machine(
             _db(database_gate=database_gate),
@@ -711,4 +774,6 @@ async def test_unknown_kind_is_rejected_before_machine_lookup(
             "no-such-op",  # pyright: ignore[reportArgumentType]
             {},
             idempotency_key="explicit-key",
+            lookup_fn=forbidden,
+            idempotency_key_fn=forbidden,
         )

@@ -39,6 +39,7 @@ import logging
 import random
 import time
 import uuid
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 import httpx
@@ -100,7 +101,11 @@ _BUSINESS_ID_KEYS = {"spawn-launch": "agent_id"}
 rpc_sleep = asyncio.sleep
 
 
-def retry_delay_s(attempt: int) -> float:
+def retry_delay_s(
+    attempt: int,
+    *,
+    uniform_fn: Callable[[float, float], float] | None = None,
+) -> float:
     """Bounded exponential backoff for retry `attempt` (0-based), jittered ±50%.
 
     base = min(0.5 * 2**attempt, 4.0) seconds — 0.5, 1, 2, then capped at 4.
@@ -109,9 +114,10 @@ def retry_delay_s(attempt: int) -> float:
     and the retries would land as a synchronized burst).
     """
     base = min(_RETRY_BASE_DELAY_S * (2**attempt), _RETRY_MAX_DELAY_S)
+    active_uniform = uniform_fn or random.uniform
     # S311: jitter needs spread, not secrecy — stdlib random is right (same
     # ruling as base/lm/call.py's retry jitter).
-    return base * random.uniform(0.5, 1.5)  # noqa: S311
+    return base * active_uniform(0.5, 1.5)
 
 
 def worst_case_dispatch_seconds(timeout_s: float | None = None) -> float:
@@ -202,6 +208,7 @@ async def _dispatch_once(
     timeout_s: float,
     ops_url: str,
     idempotency_key: str | None,
+    client_factory: Callable[..., httpx.AsyncClient] | None = None,
 ) -> dict[str, Any]:
     """One POST round-trip to `{ops_url}/ops`; returns the op's result dict.
 
@@ -217,6 +224,7 @@ async def _dispatch_once(
     url = f"{ops_url.rstrip('/')}/ops"
     started = time.monotonic()
     access = gateway_access_from_settings()  # ambient: O
+    active_client_factory = client_factory or httpx.AsyncClient
     try:
         # connect is capped by timeout_s: a blackholed host (powered-off private-
         # network peer) hangs in connect, so a connect floor above timeout_s would defeat
@@ -229,7 +237,7 @@ async def _dispatch_once(
         # private peers are not proxy-routable. This matches base/host/net/http_dial.py's
         # PinnedIPv4Transport, which is sync-only; async httpx already handles
         # IPv4-literal hosts natively.
-        async with httpx.AsyncClient(
+        async with active_client_factory(
             timeout=httpx.Timeout(timeout_s, connect=min(10.0, timeout_s)),
             trust_env=False,
         ) as client:
@@ -291,6 +299,11 @@ async def dispatch_to_machine(
     timeout_s: float | None = None,
     retries: int | None = None,
     idempotency_key: str | None = None,
+    lookup_fn: Callable[[Database, str], str] | None = None,
+    client_factory: Callable[..., httpx.AsyncClient] | None = None,
+    sleep_fn: Callable[[float], Awaitable[None]] | None = None,
+    uniform_fn: Callable[[float, float], float] | None = None,
+    idempotency_key_fn: Callable[[str, OpKind, dict[str, Any]], str] | None = None,
 ) -> dict[str, Any]:
     """Resolve `target_machine`'s ops URL from the `machines` table, then `dispatch_to_url`.
 
@@ -301,8 +314,9 @@ async def dispatch_to_machine(
     """
     if not is_op_kind(kind):
         raise ValueError(f"unknown op kind: {kind!r}")
+    active_lookup = lookup_fn or lookup_machine_url
     try:
-        ops_url = lookup_machine_url(db, target_machine)
+        ops_url = active_lookup(db, target_machine)
     except MachineNotRegistered as exc:
         # No machines row at all — the machine is definitively absent under
         # this name (deleted in a decommission / rename cleanup). Callers
@@ -324,6 +338,10 @@ async def dispatch_to_machine(
         timeout_s=timeout_s,
         retries=retries,
         idempotency_key=idempotency_key,
+        client_factory=client_factory,
+        sleep_fn=sleep_fn,
+        uniform_fn=uniform_fn,
+        idempotency_key_fn=idempotency_key_fn,
     )
 
 
@@ -336,6 +354,10 @@ async def dispatch_to_url(
     timeout_s: float | None = None,
     retries: int | None = None,
     idempotency_key: str | None = None,
+    client_factory: Callable[..., httpx.AsyncClient] | None = None,
+    sleep_fn: Callable[[float], Awaitable[None]] | None = None,
+    uniform_fn: Callable[[float, float], float] | None = None,
+    idempotency_key_fn: Callable[[str, OpKind, dict[str, Any]], str] | None = None,
 ) -> dict[str, Any]:
     """POST one op to `target_machine`'s ops server at `ops_url`, block on the response.
 
@@ -379,7 +401,8 @@ async def dispatch_to_url(
     # same already-created agent must replay, not start a second child.
     # Operations without one retain a fresh UUID.
     if kind in NON_IDEMPOTENT_KINDS and idempotency_key is None:
-        idempotency_key = default_idempotency_key(target_machine, kind, payload)
+        active_key_fn = idempotency_key_fn or default_idempotency_key
+        idempotency_key = active_key_fn(target_machine, kind, payload)
     if retries is None:
         retries = settings.gateway.cluster_rpc_max_retries
     retries = max(retries, 0)  # a negative budget means "no attempts" — never
@@ -395,11 +418,12 @@ async def dispatch_to_url(
                 timeout_s=timeout_s,
                 ops_url=ops_url,
                 idempotency_key=idempotency_key,
+                client_factory=client_factory,
             )
         except _RetryableFailure as exc:
             last = exc
             if attempt < retries:
-                delay = retry_delay_s(attempt)
+                delay = retry_delay_s(attempt, uniform_fn=uniform_fn)
                 # Intermediate transport retries stay quiet; exhaustion is reported below.
                 _log.debug(
                     "cluster_rpc %s -> machine=%s attempt %d/%d failed, retrying in %.1fs: %r",
@@ -410,7 +434,8 @@ async def dispatch_to_url(
                     delay,
                     exc.cause,
                 )
-                await rpc_sleep(delay)
+                active_sleep = sleep_fn or rpc_sleep
+                await active_sleep(delay)
     # Retries exhausted — loud failure for a load-bearing op. status_probe
     # reachability failures stay DEBUG (an offline host at panel cadence is
     # steady-state; the roster's own per-machine backoff widens the gap), every

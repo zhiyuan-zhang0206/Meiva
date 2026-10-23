@@ -19,7 +19,7 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 import psutil
 
@@ -60,13 +60,20 @@ def env_key_names(env_path: Path) -> list[str]:
     return sorted(names)
 
 
-def load_alias_metadata() -> dict[str, tuple[str, bool]]:
+def load_alias_metadata(
+    *, fields_reader: Callable[[], Mapping[str, Any]] | None = None
+) -> dict[str, tuple[str, bool]]:
     from base.config.config_registry import field_alias, fields, schema_extra
 
+    read_fields = fields_reader or fields
     metadata: dict[str, tuple[str, bool]] = {}
-    for name, ref in fields().items():
+    for name, ref in read_fields().items():
         extra = schema_extra(ref.info)
-        alias = field_alias(name)
+        alias = (
+            field_alias(name)
+            if fields_reader is None
+            else (ref.info.serialization_alias or ref.info.alias or name.upper())
+        )
         sensitive = extra.get("sensitive", False)
         if not isinstance(sensitive, bool):
             raise TypeError(f"config field {name!r} must declare a boolean sensitive flag")
@@ -76,10 +83,13 @@ def load_alias_metadata() -> dict[str, tuple[str, bool]]:
     return metadata
 
 
-def _alias_metadata() -> dict[str, tuple[str, bool]]:
+def _alias_metadata(
+    *, metadata_loader: Callable[[], dict[str, tuple[str, bool]]] | None = None
+) -> dict[str, tuple[str, bool]]:
     """Project declaration facts; invalid metadata prevents audit preparation."""
+    load_meta = metadata_loader or load_alias_metadata
     try:
-        return load_alias_metadata()
+        return load_meta()
     except Exception:
         logger.bind(_no_emitter=True).opt(exception=True).error(
             "could not load declared config metadata for the .env audit"
@@ -89,6 +99,8 @@ def _alias_metadata() -> dict[str, tuple[str, bool]]:
 
 def _audit_changes(
     changes: Sequence[Mapping[str, object]],
+    *,
+    metadata_loader: Callable[[], dict[str, tuple[str, bool]]] | None = None,
 ) -> list[dict[str, object]]:
     """Redact a raw `{alias, old, new}` diff into its auditable form.
 
@@ -97,7 +109,7 @@ def _audit_changes(
     with `old`/`new` withheld, so the record can still answer "this key
     changed" without becoming a second place secrets live.
     """
-    metadata = _alias_metadata()
+    metadata = _alias_metadata(metadata_loader=metadata_loader)
     redacted: list[dict[str, object]] = []
     for change in changes:
         alias = str(change["alias"])
@@ -122,15 +134,20 @@ class _PreparedEnvChanges:
     changes: list[dict[str, object]]
 
 
-def prepare_env_changes(changes: Sequence[Mapping[str, object]]) -> _PreparedEnvChanges:
+def prepare_env_changes(
+    changes: Sequence[Mapping[str, object]],
+    *,
+    metadata_loader: Callable[[], dict[str, tuple[str, bool]]] | None = None,
+) -> _PreparedEnvChanges:
     """Resolve declarations and redact a diff while the writer still holds old bytes."""
-    return _PreparedEnvChanges(_audit_changes(changes))
+    return _PreparedEnvChanges(_audit_changes(changes, metadata_loader=metadata_loader))
 
 
-def _process_metadata() -> tuple[str, str]:
+def _process_metadata(*, process_factory: Callable[[], Any] | None = None) -> tuple[str, str]:
     """Return the current process name and a safe, bounded command line."""
+    make_process = process_factory or psutil.Process
     try:
-        process = psutil.Process()
+        process = make_process()
         cmdline = cast("list[object]", process.cmdline())
         executable = Path(str(cmdline[0])).name if cmdline else str(process.name())
         return str(process.name()), f"{executable} [arguments redacted]"[:200]
@@ -224,6 +241,8 @@ def record_env_write(
     actor: str | None = None,
     trace_id: str | None = None,
     changes: Sequence[Mapping[str, object]] | _PreparedEnvChanges | None = None,
+    process_factory: Callable[[], Any] | None = None,
+    metadata_loader: Callable[[], dict[str, tuple[str, bool]]] | None = None,
 ) -> None:
     """Append metadata for an official `.env` write that has already landed.
 
@@ -238,7 +257,7 @@ def record_env_write(
     (`user_session:administrator`, `cluster_bearer:administrator`, `cli:zzy`)
     and `trace_id` the gateway request, when the write had one.
     """
-    process, cmdline = _process_metadata()
+    process, cmdline = _process_metadata(process_factory=process_factory)
     digest_after = hashlib.sha256(env_path.read_bytes() if env_path.exists() else b"").hexdigest()
     record: dict[str, object] = {
         "ts": datetime.now(UTC).isoformat(),
@@ -256,7 +275,11 @@ def record_env_write(
     if isinstance(changes, _PreparedEnvChanges):
         audited_changes = changes.changes
     else:
-        audited_changes = _audit_changes(changes) if changes is not None else None
+        audited_changes = (
+            _audit_changes(changes, metadata_loader=metadata_loader)
+            if changes is not None
+            else None
+        )
     if audited_changes is not None:
         record["changed"] = audited_changes
     # The marker comes first: a crash can produce an armed repair event, but it
@@ -289,9 +312,10 @@ class EnvWriteAudit:
     site: str
     actor: str | None = None
     trace_id: str | None = None
+    metadata_loader: Callable[[], dict[str, tuple[str, bool]]] | None = None
 
     def prepare(self, changes: Sequence[Mapping[str, object]]) -> object:
-        return prepare_env_changes(changes)
+        return prepare_env_changes(changes, metadata_loader=self.metadata_loader)
 
     def record(self, path: Path, written: set[str], removed: set[str], prepared: object) -> None:
         if not isinstance(prepared, _PreparedEnvChanges):

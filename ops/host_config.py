@@ -12,6 +12,7 @@ router to render masked fields consistently.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
 from base.config import field_domain, runtime_config, settings
@@ -41,7 +42,13 @@ SENSITIVE_MASK = "••••••••"
 
 
 def config_read_op(
-    *, authority: ConfigAuthority, local_machine: str, host: Host
+    *,
+    authority: ConfigAuthority,
+    local_machine: str,
+    host: Host,
+    metadata_fn: Callable[..., list[Any]] | None = None,
+    overrides_fn: Callable[..., dict[str, Any]] | None = None,
+    capability_fn: Callable[..., config_validators.ValidationResult | None] | None = None,
 ) -> ConfigReadResult:
     """Read this machine's host-scope config fields and return them with metadata.
 
@@ -54,11 +61,14 @@ def config_read_op(
         remotely-writable host fields set in this machine's .env), sensitive keys
         omitted (the frontend deltas against this to build a write payload)
     """
-    metas = panel_metadata(authority=authority)
+    read_meta = metadata_fn or panel_metadata
+    read_overrides = overrides_fn or panel_overrides
+    read_capability = capability_fn or config_validators.read_time_capability
+    metas = read_meta(authority=authority)
     metas_by_name = {m.name: m for m in metas}
     set_fields = set(runtime_config.env_set_field_names())
-    set_fields.update(panel_overrides(authority=authority))
-    overrides = panel_overrides(authority=authority)
+    overrides = read_overrides(authority=authority)
+    set_fields.update(overrides)
     host_fields: dict[str, HostConfigField] = {}
     for meta in metas:
         if meta.scope != "host":
@@ -66,9 +76,7 @@ def config_read_op(
         value = meta.current_value
         if meta.sensitive and value:
             value = SENSITIVE_MASK
-        cap = config_validators.read_time_capability(
-            meta.name, chrome_binary=settings.services.chrome_binary, host=host
-        )
+        cap = read_capability(meta.name, chrome_binary=settings.services.chrome_binary, host=host)
         host_fields[meta.name] = HostConfigField(
             value=value,
             overridden=meta.name in set_fields,
@@ -96,9 +104,15 @@ def config_audit_read_op(last: int, *, local_machine: str) -> ConfigAuditReadRes
 
 
 def _field_verdicts(
-    overrides: dict[str, Any], metas: dict[str, Any], *, local: bool, host: Host
+    overrides: dict[str, Any],
+    metas: dict[str, Any],
+    *,
+    local: bool,
+    host: Host,
+    validate_fn: Callable[..., config_validators.ValidationResult] | None = None,
 ) -> dict[str, FieldWriteResult]:
     """Per-field gate: known, host-scope, editable here, and (unless an unset) valid."""
+    do_validate = validate_fn or config_validators.validate
     results: dict[str, FieldWriteResult] = {}
     for field, value in overrides.items():
         if field not in metas:
@@ -124,9 +138,7 @@ def _field_verdicts(
             except (ValueError, TypeError):
                 results[field] = FieldWriteResult(ok=False, reason="invalid declared scalar")
             continue
-        vr = config_validators.validate(
-            field, value, chrome_binary=settings.services.chrome_binary, host=host
-        )
+        vr = do_validate(field, value, chrome_binary=settings.services.chrome_binary, host=host)
         results[field] = FieldWriteResult(ok=vr.ok, reason=vr.reason)
     return results
 
@@ -221,6 +233,7 @@ def config_write_op(
     trace_id: str | None = None,
     local_machine: str,
     host: Host,
+    validate_fn: Callable[..., config_validators.ValidationResult] | None = None,
 ) -> ConfigWriteOpResult:
     """Validate and merge this machine's host overrides into its .env (reducer semantics).
 
@@ -253,7 +266,7 @@ def config_write_op(
             restart_required=[],
         )
 
-    results = _field_verdicts(overrides, metas, local=local, host=host)
+    results = _field_verdicts(overrides, metas, local=local, host=host, validate_fn=validate_fn)
 
     # all() over an empty dict is True, so an empty payload is trivially applied.
     applied = all(r.ok for r in results.values())

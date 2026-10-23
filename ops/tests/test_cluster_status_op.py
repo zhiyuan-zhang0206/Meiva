@@ -2,8 +2,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.db import Database
@@ -12,7 +10,7 @@ from ops.cluster import operations as cluster
 
 
 def test_cluster_status_op_returns_snapshot(
-    monkeypatch: pytest.MonkeyPatch, database: Database, *, machine_identity: MachineIdentity
+    database: Database, *, machine_identity: MachineIdentity
 ) -> None:
     from ops.cluster_status import ClusterStatus
 
@@ -36,11 +34,13 @@ def test_cluster_status_op_returns_snapshot(
         seen.append(pool)
         return snap
 
-    monkeypatch.setattr(cluster, "status_snapshot", _snapshot)
-
     assert (
         cluster.cluster_status_op(
-            database, expected_pool, image=expected_image, local_machine=machine_identity
+            database,
+            expected_pool,
+            image=expected_image,
+            local_machine=machine_identity,
+            snapshot_fn=_snapshot,
         )
         is snap
     )

@@ -12,6 +12,7 @@ gateway. Dispatched by the agent-runner ops server (`services/agent_runner/agent
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
 from base.cluster.machine import MachineIdentity
@@ -58,7 +59,13 @@ def _assert_agent_runner(*, local_machine: MachineIdentity) -> None:
         )
 
 
-def inventory_read_op(*, local_machine: MachineIdentity, host: Host) -> InventoryReadResult:
+def inventory_read_op(
+    *,
+    local_machine: MachineIdentity,
+    host: Host,
+    mcp_loader: Callable[..., dict[str, dict[str, Any]]] | None = None,
+    capability_fn: Callable[..., tuple[bool, str | None]] | None = None,
+) -> InventoryReadResult:
     """Read this host's plugin + MCP enable inventory, each with metadata.
 
     Returns an InventoryReadResult with:
@@ -89,11 +96,13 @@ def inventory_read_op(*, local_machine: MachineIdentity, host: Host) -> Inventor
             description=description,
         )
 
-    merged = load_mcp_config(include_disabled=True)
+    load_mcp = mcp_loader or load_mcp_config
+    check_capability = capability_fn or server_capability
+    merged = load_mcp(include_disabled=True)
     overlay = mcp_enabled.read_enabled()
     mcp_servers: dict[str, InventoryReadItem] = {}
     for name, spec in merged.items():
-        ok, reason = server_capability(spec, host=host)
+        ok, reason = check_capability(spec, host=host)
         mcp_servers[name] = InventoryReadItem(
             enabled=overlay.get(name, True),
             can_enable=ok,
@@ -114,6 +123,8 @@ def inventory_write_op(
     *,
     local_machine: MachineIdentity,
     host: Host,
+    mcp_loader: Callable[..., dict[str, dict[str, Any]]] | None = None,
+    capability_fn: Callable[..., tuple[bool, str | None]] | None = None,
 ) -> InventoryWriteOpResult:
     """Validate and atomically apply a set of plugin + MCP enable toggles.
 
@@ -139,7 +150,9 @@ def inventory_write_op(
         else:
             plugin_results[name] = FieldWriteResult(ok=True, reason=None)
 
-    merged = load_mcp_config(include_disabled=True)
+    load_mcp = mcp_loader or load_mcp_config
+    check_capability = capability_fn or server_capability
+    merged = load_mcp(include_disabled=True)
     mcp_results: dict[str, FieldWriteResult] = {}
     for name, want_enabled in mcp_servers.items():
         if name not in merged:
@@ -147,7 +160,7 @@ def inventory_write_op(
                 ok=False, reason="not a known MCP server on this host"
             )
         elif want_enabled:
-            ok, reason = server_capability(merged[name], host=host)
+            ok, reason = check_capability(merged[name], host=host)
             mcp_results[name] = FieldWriteResult(ok=ok, reason=reason)
         else:
             mcp_results[name] = FieldWriteResult(ok=True, reason=None)

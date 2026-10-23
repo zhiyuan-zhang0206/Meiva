@@ -11,6 +11,7 @@ the gateway cluster router calls.
 
 from __future__ import annotations
 
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any, cast
 
@@ -68,10 +69,16 @@ def cluster_stopping_op(
 
 
 def cluster_status_op(
-    db: Database, pool: Any | None = None, *, image: LoadedCommit, local_machine: MachineIdentity
+    db: Database,
+    pool: Any | None = None,
+    *,
+    image: LoadedCommit,
+    local_machine: MachineIdentity,
+    snapshot_fn: Callable[..., ClusterStatus] | None = None,
 ) -> ClusterStatus:
     """Local snapshot — assembled by `status_snapshot()`."""
-    return status_snapshot(db, pool=pool, image=image, local_machine=local_machine)
+    take_snapshot = snapshot_fn or status_snapshot
+    return take_snapshot(db, pool=pool, image=image, local_machine=local_machine)
 
 
 # meiva:note
@@ -114,12 +121,18 @@ def shell_probe_op(agent_id: int) -> ShellProbeResult:
     return ShellProbeResult(shells=agent_shell_sessions(agent_id))
 
 
-def shell_kill_op(agent_id: int, session_id: int) -> ShellKillResult:
+def shell_kill_op(
+    agent_id: int,
+    session_id: int,
+    *,
+    kill_shell_fn: Callable[[int, int], tuple[Any, bool, str | None]] | None = None,
+) -> ShellKillResult:
     """Kill one persistent shell on this runner for TTL reclamation.
 
     ``interrupted`` reports whether the kill cut short a running job — the
     gateway notifies the owner only then (an empty shell's reaping is silent)."""
-    raw_mode, interrupted, name = kill_shell(agent_id, session_id)
+    do_kill = kill_shell_fn or kill_shell
+    raw_mode, interrupted, name = do_kill(agent_id, session_id)
     mode = ShellKillMode(raw_mode)
     if mode is ShellKillMode.ABSENT:
         return ShellKillResult(mode=mode)
@@ -196,7 +209,16 @@ def _narrow_commands(commands: list[Any], wanted: list[str] | None, loaded: list
     ]
 
 
-def agent_skill_view_op(agent_id: int, pool: Any) -> AgentSkillViewResult:
+def agent_skill_view_op(
+    agent_id: int,
+    pool: Any,
+    *,
+    inputs_fn: Callable[[Any, int], tuple[Path | None, list[str] | None]] | None = None,
+    skill_loader: Callable[[Sequence[Path]], list[Any]] | None = None,
+    command_discoverer: Callable[[Callable[[], Sequence[Any]]], list[Any]] | None = None,
+    mcp_loader: Callable[..., dict[str, dict[str, Any]]] | None = None,
+    mcp_enabled_reader: Callable[[], dict[str, bool]] | None = None,
+) -> AgentSkillViewResult:
     """Build the command-autocomplete view that ``agent_id`` sees on this host.
 
     Converged skills are discovered on the target runner, with the agent's
@@ -209,11 +231,20 @@ def agent_skill_view_op(agent_id: int, pool: Any) -> AgentSkillViewResult:
     from base.packages.mcp_config import load_mcp_config
     from base.packages.plugins.mcp_enabled import read_enabled
 
-    cwd, wanted = agent_skill_view_inputs(pool, agent_id)
-    loaded = load_skill_names(_project_skill_roots(cwd))
-    commands = _narrow_commands(CommandCatalog(skills=lambda: loaded).discover(), wanted, loaded)
-    merged_mcp = load_mcp_config(include_disabled=True)
-    mcp_overlay = read_enabled()
+    def _default_discover_commands(skills_fn: Callable[[], Sequence[Any]]) -> list[Any]:
+        return CommandCatalog(skills=skills_fn).discover()
+
+    read_inputs = inputs_fn or agent_skill_view_inputs
+    load_skills = skill_loader or load_skill_names
+    discover_commands = command_discoverer or _default_discover_commands
+    load_mcp = mcp_loader or load_mcp_config
+    read_mcp_enabled = mcp_enabled_reader or read_enabled
+
+    cwd, wanted = read_inputs(pool, agent_id)
+    loaded = load_skills(_project_skill_roots(cwd))
+    commands = _narrow_commands(discover_commands(lambda: loaded), wanted, loaded)
+    merged_mcp = load_mcp(include_disabled=True)
+    mcp_overlay = read_mcp_enabled()
     return AgentSkillViewResult(
         commands=[
             OpsCommandItem(

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import contextlib
 import subprocess
-from collections.abc import Callable, Generator
+from collections.abc import Callable, Generator, Sequence
 from pathlib import Path
 from typing import Any, cast
 
@@ -13,11 +13,12 @@ from langgraph.checkpoint.postgres import PostgresSaver
 from psycopg.types.json import Jsonb
 
 from base.db import create_agent
-from base.packages import composer_commands, mcp_config
-from base.packages.extensions import install_registry
-from base.packages.plugins import mcp_enabled
+from base.packages import composer_commands
+from base.packages.skills import scan_tree
+from base.packages.skills.tree import Skill, flatten
 from base.paths import meiva_home, skills_dir
 from ops.cluster import operations as cluster
+from ops.rpc_schemas import AgentSkillViewResult
 
 
 def _write_skill(root: Path, name: str, description: str = "project skill") -> None:
@@ -30,17 +31,10 @@ def _write_skill(root: Path, name: str, description: str = "project skill") -> N
 
 
 @pytest.fixture
-def load_dir(unit_home: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+def load_dir(unit_home: Path) -> Path:
     root = skills_dir(meiva_home())
     root.mkdir()
     _write_skill(root, "load-skill", "converged skill")
-    monkeypatch.setattr(install_registry, "loadable_skill_names", lambda: {"load-skill"})
-    command_sources = unit_home / "empty-command-sources"
-    monkeypatch.setattr(composer_commands, "repo_root", lambda: command_sources)
-    monkeypatch.setattr(composer_commands, "repo_plugins_dir", lambda: command_sources / "plugins")
-    monkeypatch.setattr(
-        composer_commands, "external_plugin_read_root", lambda: command_sources / "external-plugins"
-    )
     return root
 
 
@@ -55,8 +49,8 @@ def _project_with_skill(tmp_path: Path) -> tuple[Path, Path]:
 
 def _view_inputs(
     cwd: Path | None, wanted: list[str]
-) -> Callable[[Any, int], tuple[Path | None, list[str]]]:
-    def _inputs(_pool: Any, _agent_id: int) -> tuple[Path | None, list[str]]:
+) -> Callable[[Any, int], tuple[Path | None, list[str] | None]]:
+    def _inputs(_pool: Any, _agent_id: int) -> tuple[Path | None, list[str] | None]:
         return cwd, wanted
 
     return _inputs
@@ -72,10 +66,36 @@ def _mcp_source(
     return _load
 
 
-@pytest.fixture(autouse=True)
-def _empty_mcp_sources(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(mcp_config, "load_mcp_config", _mcp_source({}))
-    monkeypatch.setattr(mcp_enabled, "read_enabled", dict)
+def _skill_loader(loadable: set[str]) -> Callable[[Sequence[Path]], list[Skill]]:
+    def _load(provider_roots: Sequence[Path] = ()) -> list[Skill]:
+        return flatten(scan_tree(skills_dir(meiva_home()), loadable, provider_roots))
+
+    return _load
+
+
+def _discover_skill_commands(skills_fn: Callable[[], Sequence[Any]]) -> list[Any]:
+    out = composer_commands.skill_commands(skills_fn())
+    return [out[name] for name in sorted(out)]
+
+
+def _view_op(
+    agent_id: int,
+    pool: Any,
+    *,
+    inputs_fn: Callable[[Any, int], tuple[Path | None, list[str] | None]] | None = None,
+    loadable: set[str] | None = None,
+    mcp_servers: dict[str, dict[str, Any]] | None = None,
+    mcp_enabled: dict[str, bool] | None = None,
+) -> AgentSkillViewResult:
+    return cluster.agent_skill_view_op(
+        agent_id,
+        pool,
+        inputs_fn=inputs_fn,
+        skill_loader=_skill_loader(loadable if loadable is not None else {"load-skill"}),
+        command_discoverer=_discover_skill_commands,
+        mcp_loader=_mcp_source(mcp_servers if mcp_servers is not None else {}),
+        mcp_enabled_reader=lambda: mcp_enabled if mcp_enabled is not None else {},
+    )
 
 
 class _OneConnectionPool:
@@ -119,111 +139,84 @@ def test_agent_skill_view_inputs_read_checkpointed_cwd_and_pinned_narrowing(
 def test_agent_skill_view_missing_row_is_load_dir_only(
     db_conn: psycopg.Connection, load_dir: Path
 ) -> None:
-    view = cluster.agent_skill_view_op(999_999_999, _OneConnectionPool(db_conn))
+    view = _view_op(999_999_999, _OneConnectionPool(db_conn))
 
     assert [command.name for command in view.commands] == ["load-skill"]
 
 
 def test_agent_skill_view_includes_project_skills_for_persisted_cwd(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, load_dir: Path
+    tmp_path: Path, load_dir: Path
 ) -> None:
     repo, _ = _project_with_skill(tmp_path)
-    monkeypatch.setattr(cluster, "agent_skill_view_inputs", _view_inputs(repo, ["*"]))
 
-    view = cluster.agent_skill_view_op(42, object())
+    view = _view_op(42, object(), inputs_fn=_view_inputs(repo, ["*"]))
 
     assert {command.name for command in view.commands} >= {"load-skill", "project-skill"}
 
 
 def test_agent_skill_view_without_cwd_or_repo_is_load_dir_only(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, load_dir: Path
+    tmp_path: Path, load_dir: Path
 ) -> None:
-    monkeypatch.setattr(cluster, "agent_skill_view_inputs", _view_inputs(None, ["*"]))
-    missing_cwd_view = cluster.agent_skill_view_op(42, object())
-
-    monkeypatch.setattr(
-        cluster,
-        "agent_skill_view_inputs",
-        _view_inputs(tmp_path / "not-a-repo", ["*"]),
-    )
-    non_repo_view = cluster.agent_skill_view_op(42, object())
+    missing_cwd_view = _view_op(42, object(), inputs_fn=_view_inputs(None, ["*"]))
+    non_repo_view = _view_op(42, object(), inputs_fn=_view_inputs(tmp_path / "not-a-repo", ["*"]))
 
     assert {command.name for command in missing_cwd_view.commands} == {"load-skill"}
     assert {command.name for command in non_repo_view.commands} == {"load-skill"}
 
 
 def test_agent_skill_view_clears_project_provider_after_each_op(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, load_dir: Path
+    tmp_path: Path, load_dir: Path
 ) -> None:
     repo, _ = _project_with_skill(tmp_path)
-    monkeypatch.setattr(cluster, "agent_skill_view_inputs", _view_inputs(repo, ["*"]))
     assert "project-skill" in {
-        command.name for command in cluster.agent_skill_view_op(42, object()).commands
+        command.name
+        for command in _view_op(42, object(), inputs_fn=_view_inputs(repo, ["*"])).commands
     }
 
-    monkeypatch.setattr(cluster, "agent_skill_view_inputs", _view_inputs(None, ["*"]))
     assert "project-skill" not in {
-        command.name for command in cluster.agent_skill_view_op(43, object()).commands
+        command.name
+        for command in _view_op(43, object(), inputs_fn=_view_inputs(None, ["*"])).commands
     }
 
 
-def test_agent_skill_view_honors_per_agent_skill_narrowing(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, load_dir: Path
-) -> None:
+def test_agent_skill_view_honors_per_agent_skill_narrowing(tmp_path: Path, load_dir: Path) -> None:
     _write_skill(load_dir, "other-skill", "other converged skill")
-    monkeypatch.setattr(
-        install_registry,
-        "loadable_skill_names",
-        lambda: {"load-skill", "other-skill"},
-    )
-    monkeypatch.setattr(
-        cluster,
-        "agent_skill_view_inputs",
-        _view_inputs(None, ["load_skill"]),
-    )
 
-    view = cluster.agent_skill_view_op(42, object())
+    view = _view_op(
+        42,
+        object(),
+        inputs_fn=_view_inputs(None, ["load_skill"]),
+        loadable={"load-skill", "other-skill"},
+    )
 
     assert [command.name for command in view.commands] == ["load-skill"]
 
 
-def test_agent_skill_view_includes_sorted_enabled_mcp_names(
-    monkeypatch: pytest.MonkeyPatch, load_dir: Path
-) -> None:
-    monkeypatch.setattr(
-        mcp_config,
-        "load_mcp_config",
-        _mcp_source({"zeta": {"command": "z"}, "alpha": {"command": "a"}}),
+def test_agent_skill_view_includes_sorted_enabled_mcp_names(load_dir: Path) -> None:
+    view = _view_op(
+        42,
+        object(),
+        inputs_fn=_view_inputs(None, ["*"]),
+        mcp_servers={"zeta": {"command": "z"}, "alpha": {"command": "a"}},
+        mcp_enabled={"zeta": True},
     )
-    monkeypatch.setattr(mcp_enabled, "read_enabled", lambda: {"zeta": True})
-    monkeypatch.setattr(cluster, "agent_skill_view_inputs", _view_inputs(None, ["*"]))
-
-    view = cluster.agent_skill_view_op(42, object())
 
     assert view.mcp_names == ["alpha", "zeta"]
 
 
-def test_agent_skill_view_excludes_disabled_mcp_names(
-    monkeypatch: pytest.MonkeyPatch, load_dir: Path
-) -> None:
-    monkeypatch.setattr(
-        mcp_config,
-        "load_mcp_config",
-        _mcp_source({"disabled": {"command": "off"}, "enabled": {"command": "on"}}),
+def test_agent_skill_view_excludes_disabled_mcp_names(load_dir: Path) -> None:
+    view = _view_op(
+        42,
+        object(),
+        inputs_fn=_view_inputs(None, ["*"]),
+        mcp_servers={"disabled": {"command": "off"}, "enabled": {"command": "on"}},
+        mcp_enabled={"disabled": False},
     )
-    monkeypatch.setattr(mcp_enabled, "read_enabled", lambda: {"disabled": False})
-    monkeypatch.setattr(cluster, "agent_skill_view_inputs", _view_inputs(None, ["*"]))
-
-    view = cluster.agent_skill_view_op(42, object())
 
     assert view.mcp_names == ["enabled"]
 
 
-def test_agent_skill_view_without_mcp_config_returns_empty_names(
-    monkeypatch: pytest.MonkeyPatch, load_dir: Path
-) -> None:
-    monkeypatch.setattr(cluster, "agent_skill_view_inputs", _view_inputs(None, ["*"]))
-
-    view = cluster.agent_skill_view_op(42, object())
+def test_agent_skill_view_without_mcp_config_returns_empty_names(load_dir: Path) -> None:
+    view = _view_op(42, object(), inputs_fn=_view_inputs(None, ["*"]))
 
     assert view.mcp_names == []

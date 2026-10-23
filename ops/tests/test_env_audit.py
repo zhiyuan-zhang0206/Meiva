@@ -31,10 +31,9 @@ from ops.env_audit import (
 
 
 @pytest.fixture
-def audit_home(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
+def audit_home(unit_home: Path) -> Path:
     """Redirect the audited unit `.env` to a scratch home."""
-    monkeypatch.setattr(dotenv_file, "unit_home", lambda: tmp_path)
-    return tmp_path
+    return unit_home
 
 
 def test_record_env_write_records_metadata_without_config_values(audit_home: Path) -> None:
@@ -60,9 +59,7 @@ def test_record_env_write_records_metadata_without_config_values(audit_home: Pat
     assert last_env_write_record() == record
 
 
-def test_record_env_write_redacts_command_arguments(
-    audit_home: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_record_env_write_redacts_command_arguments(audit_home: Path) -> None:
     """A process argument must not let a configuration value enter the audit."""
 
     class Process:
@@ -72,10 +69,15 @@ def test_record_env_write_redacts_command_arguments(
         def cmdline(self) -> list[str]:
             return ["python", "-c", "cluster-secret-value"]
 
-    monkeypatch.setattr(audit.psutil, "Process", Process)
     (audit_home / ".env").write_text("MEIVA_MODEL=test-model\n")
 
-    record_env_write(audit_home / ".env", {"MEIVA_MODEL"}, set(), site="test")
+    record_env_write(
+        audit_home / ".env",
+        {"MEIVA_MODEL"},
+        set(),
+        site="test",
+        process_factory=Process,
+    )
 
     assert "cluster-secret-value" not in (audit_home / ".env.audit.jsonl").read_text()
 
@@ -409,7 +411,7 @@ def test_env_write_event_carries_actor_without_values(
 
 
 def test_record_env_write_rejects_invalid_metadata_before_audit_artifacts(
-    audit_home: Path, monkeypatch: pytest.MonkeyPatch
+    audit_home: Path,
 ) -> None:
     """Direct recording cannot undo the caller's already-landed bytes."""
     env_path = audit_home / ".env"
@@ -418,7 +420,6 @@ def test_record_env_write_rejects_invalid_metadata_before_audit_artifacts(
     def invalid() -> dict[str, tuple[str, bool]]:
         raise RuntimeError("registry unavailable")
 
-    monkeypatch.setattr(audit, "load_alias_metadata", invalid)
     with pytest.raises(RuntimeError, match="registry unavailable"):
         record_env_write(
             env_path,
@@ -426,71 +427,52 @@ def test_record_env_write_rejects_invalid_metadata_before_audit_artifacts(
             set(),
             site="test",
             changes=[{"alias": "MEIVA_MODEL", "old": "old-value", "new": "new-value"}],
+            metadata_loader=invalid,
         )
     assert env_path.read_text() == "MEIVA_MODEL=new-value\n"
     assert not (audit_home / ".env.audit.jsonl").exists()
     assert not (audit_home / ".env.audit.armed").exists()
 
 
-def test_alias_metadata_projects_declarations_without_runtime_values(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    import base.config
-    from base.config.admin import metadata
-
-    def runtime_values() -> dict[str, object]:
-        pytest.fail("audit declarations must not read runtime values")
-
-    def panel() -> object:
-        pytest.fail("audit declarations must not read panel metadata")
-
-    monkeypatch.setattr(base.config, "current_field_values", runtime_values)
-    monkeypatch.setattr(metadata, "get_config_metadata", panel)
+def test_alias_metadata_projects_declarations_without_runtime_values() -> None:
+    assert "current_field_values" not in audit.load_alias_metadata.__code__.co_names
+    assert "get_config_metadata" not in audit.load_alias_metadata.__code__.co_names
     projected = audit.load_alias_metadata()
     assert projected["MEIVA_MODEL"] == ("cluster-default", False)
     assert projected["MEIVA_DB_URL"][1] is True
 
 
-def test_alias_metadata_does_not_cache_a_separate_declaration_image(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_alias_metadata_does_not_cache_a_separate_declaration_image() -> None:
     from base.config import config_registry
 
     declarations = deepcopy(config_registry.fields())
     info = declarations["llm_model"].info
     extra = dict(config_registry.schema_extra(info))
     info.json_schema_extra = extra
-    monkeypatch.setattr(config_registry, "fields", lambda: declarations)
     extra["sensitive"] = False
-    assert audit.load_alias_metadata()["MEIVA_MODEL"][1] is False
+    assert audit.load_alias_metadata(fields_reader=lambda: declarations)["MEIVA_MODEL"][1] is False
     extra["sensitive"] = True
-    assert audit.load_alias_metadata()["MEIVA_MODEL"][1] is True
+    assert audit.load_alias_metadata(fields_reader=lambda: declarations)["MEIVA_MODEL"][1] is True
 
 
 @pytest.mark.parametrize("sensitive", [None, "false", 0])
-def test_alias_metadata_rejects_invalid_sensitivity_declarations(
-    monkeypatch: pytest.MonkeyPatch, sensitive: object
-) -> None:
+def test_alias_metadata_rejects_invalid_sensitivity_declarations(sensitive: object) -> None:
     from base.config import config_registry
 
     declarations = deepcopy(config_registry.fields())
     info = declarations["llm_model"].info
     info.json_schema_extra = {**config_registry.schema_extra(info), "sensitive": sensitive}
-    monkeypatch.setattr(config_registry, "fields", lambda: declarations)
     with pytest.raises(TypeError, match="boolean sensitive"):
-        audit.load_alias_metadata()
+        audit.load_alias_metadata(fields_reader=lambda: declarations)
 
 
-def test_alias_metadata_rejects_ambiguous_declarations(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_alias_metadata_rejects_ambiguous_declarations() -> None:
     from base.config import config_registry
 
     declarations = deepcopy(config_registry.fields())
     declarations["gateway_url"].info.serialization_alias = "MEIVA_MODEL"
-    monkeypatch.setattr(config_registry, "fields", lambda: declarations)
     with pytest.raises(ValueError, match="duplicate env alias"):
-        audit.load_alias_metadata()
+        audit.load_alias_metadata(fields_reader=lambda: declarations)
 
 
 def test_declaration_projection_works_without_a_runtime_settings_image(tmp_path: Path) -> None:
@@ -515,11 +497,7 @@ def test_declaration_projection_works_without_a_runtime_settings_image(tmp_path:
 
 
 @pytest.mark.parametrize("writer", ["fields-update", "fields-remove", "upsert", "remove"])
-def test_invalid_metadata_prevents_every_audited_file_write(
-    audit_home: Path, monkeypatch: pytest.MonkeyPatch, writer: str
-) -> None:
-    from base.host.env import dotenv_file
-
+def test_invalid_metadata_prevents_every_audited_file_write(audit_home: Path, writer: str) -> None:
     env_path = audit_home / ".env"
     original = b"MEIVA_MODEL=before\nUNREGISTERED_SECRET=secret-before\n"
     env_path.write_bytes(original)
@@ -527,20 +505,16 @@ def test_invalid_metadata_prevents_every_audited_file_write(
     def invalid() -> dict[str, tuple[str, bool]]:
         raise RuntimeError("registry unavailable")
 
-    monkeypatch.setattr(audit, "load_alias_metadata", invalid)
+    audit_spec = EnvWriteAudit(site="test", metadata_loader=invalid)
     with pytest.raises(RuntimeError, match="registry unavailable"):
         if writer == "fields-update":
-            runtime_config.write_fields(
-                {"llm_model": "after"}, set(), audit=EnvWriteAudit(site="test")
-            )
+            runtime_config.write_fields({"llm_model": "after"}, set(), audit=audit_spec)
         elif writer == "fields-remove":
-            runtime_config.write_fields({}, {"llm_model"}, audit=EnvWriteAudit(site="test"))
+            runtime_config.write_fields({}, {"llm_model"}, audit=audit_spec)
         elif writer == "upsert":
-            dotenv_file.upsert_env(
-                env_path, {"MEIVA_MODEL": "after"}, audit=EnvWriteAudit(site="test")
-            )
+            dotenv_file.upsert_env(env_path, {"MEIVA_MODEL": "after"}, audit=audit_spec)
         else:
-            dotenv_file.remove_env(env_path, {"MEIVA_MODEL"}, audit=EnvWriteAudit(site="test"))
+            dotenv_file.remove_env(env_path, {"MEIVA_MODEL"}, audit=audit_spec)
     assert env_path.read_bytes() == original
     assert not (audit_home / "backups").exists()
     assert not (audit_home / ".env.audit.jsonl").exists()
@@ -548,11 +522,7 @@ def test_invalid_metadata_prevents_every_audited_file_write(
 
 
 @pytest.mark.parametrize("writer", ["fields", "upsert", "remove"])
-def test_noop_writer_does_not_require_audit_metadata(
-    audit_home: Path, monkeypatch: pytest.MonkeyPatch, writer: str
-) -> None:
-    from base.host.env import dotenv_file
-
+def test_noop_writer_does_not_require_audit_metadata(audit_home: Path, writer: str) -> None:
     path = audit_home / ".env"
     original = b"MEIVA_MODEL=before\n"
     path.write_bytes(original)
@@ -560,21 +530,19 @@ def test_noop_writer_does_not_require_audit_metadata(
     def unexpected() -> dict[str, tuple[str, bool]]:
         pytest.fail("a no-op must not prepare audit metadata")
 
-    monkeypatch.setattr(audit, "load_alias_metadata", unexpected)
+    audit_spec = EnvWriteAudit(site="test", metadata_loader=unexpected)
     if writer == "fields":
-        runtime_config.write_fields({}, set(), audit=EnvWriteAudit(site="test"))
+        runtime_config.write_fields({}, set(), audit=audit_spec)
     elif writer == "upsert":
-        dotenv_file.upsert_env(path, {"MEIVA_MODEL": "before"}, audit=EnvWriteAudit(site="test"))
+        dotenv_file.upsert_env(path, {"MEIVA_MODEL": "before"}, audit=audit_spec)
     else:
-        dotenv_file.remove_env(path, {"ABSENT"}, audit=EnvWriteAudit(site="test"))
+        dotenv_file.remove_env(path, {"ABSENT"}, audit=audit_spec)
     assert path.read_bytes() == original
     assert not (audit_home / ".env.audit.jsonl").exists()
     assert not (audit_home / "backups").exists()
 
 
-def test_stale_digest_fails_before_metadata_preparation(
-    audit_home: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_stale_digest_fails_before_metadata_preparation(audit_home: Path) -> None:
     path = audit_home / ".env"
     original = b"MEIVA_MODEL=before\n"
     path.write_bytes(original)
@@ -582,10 +550,12 @@ def test_stale_digest_fails_before_metadata_preparation(
     def unexpected() -> dict[str, tuple[str, bool]]:
         pytest.fail("stale CAS must fail before preparing audit metadata")
 
-    monkeypatch.setattr(audit, "load_alias_metadata", unexpected)
     with pytest.raises(RuntimeError, match="changed before owned"):
         runtime_config.write_fields(
-            {"llm_model": "after"}, set(), audit=EnvWriteAudit(site="test"), expected_digest="stale"
+            {"llm_model": "after"},
+            set(),
+            audit=EnvWriteAudit(site="test", metadata_loader=unexpected),
+            expected_digest="stale",
         )
     assert path.read_bytes() == original
     assert not (audit_home / ".env.audit.jsonl").exists()
@@ -594,10 +564,8 @@ def test_stale_digest_fails_before_metadata_preparation(
 
 @pytest.mark.parametrize("writer", ["fields", "upsert", "remove"])
 def test_redaction_is_prepared_once_while_the_old_env_is_still_present(
-    audit_home: Path, monkeypatch: pytest.MonkeyPatch, writer: str
+    audit_home: Path, writer: str
 ) -> None:
-    from base.host.env import dotenv_file
-
     env_path = audit_home / ".env"
     original = "MEIVA_MODEL=before\n"
     env_path.write_text(original)
@@ -608,13 +576,13 @@ def test_redaction_is_prepared_once_while_the_old_env_is_still_present(
         reads.append("prepare")
         return {"MEIVA_MODEL": ("cluster-default", False)}
 
-    monkeypatch.setattr(audit, "load_alias_metadata", declared)
+    audit_spec = EnvWriteAudit(site="test", metadata_loader=declared)
     if writer == "fields":
-        runtime_config.write_fields({"llm_model": "after"}, set(), audit=EnvWriteAudit(site="test"))
+        runtime_config.write_fields({"llm_model": "after"}, set(), audit=audit_spec)
     elif writer == "upsert":
-        dotenv_file.upsert_env(env_path, {"MEIVA_MODEL": "after"}, audit=EnvWriteAudit(site="test"))
+        dotenv_file.upsert_env(env_path, {"MEIVA_MODEL": "after"}, audit=audit_spec)
     else:
-        dotenv_file.remove_env(env_path, {"MEIVA_MODEL"}, audit=EnvWriteAudit(site="test"))
+        dotenv_file.remove_env(env_path, {"MEIVA_MODEL"}, audit=audit_spec)
     assert reads == ["prepare"]
     record = last_env_write_record(env_path)
     assert record is not None

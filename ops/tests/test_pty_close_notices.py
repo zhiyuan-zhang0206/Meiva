@@ -258,33 +258,44 @@ def test_a_batch_skips_a_key_an_earlier_write_claimed(
 
 
 def test_an_unreachable_database_returns_every_notice_with_the_error(
-    monkeypatch: pytest.MonkeyPatch,
     database: Database,
     event_bus: EventBus,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     error = psycopg.OperationalError("connection refused")
 
-    def refuse(**_kwargs: object) -> psycopg.Connection:
-        raise error
+    class _RefusingDatabase(Database):
+        def connect(
+            self, *, autocommit: bool = False, direct: bool | None = None, unbounded: bool = False
+        ) -> psycopg.Connection:
+            raise error
 
-    monkeypatch.setattr(database, "connect", refuse)
+    refusing = _RefusingDatabase(
+        database._config, gate=database_gate, direct_url=database._direct_url
+    )
     batch = [_notice(), _notice(session_id=12)]
 
-    failed = notices.write_notices(database, event_bus, batch, direct=False)
+    failed = notices.write_notices(refusing, event_bus, batch, direct=False)
 
     assert [n for n, _exc in failed] == batch
     assert all(exc is error for _n, exc in failed)
 
 
 def test_no_notice_means_no_connection(
-    monkeypatch: pytest.MonkeyPatch, database: Database, event_bus: EventBus
+    database: Database, event_bus: EventBus, *, database_gate: ProcessDbGate
 ) -> None:
-    def never(**_kwargs: object) -> psycopg.Connection:
-        raise AssertionError("an empty write dialed the database")
+    class _NeverConnectDatabase(Database):
+        def connect(
+            self, *, autocommit: bool = False, direct: bool | None = None, unbounded: bool = False
+        ) -> psycopg.Connection:
+            raise AssertionError("an empty write dialed the database")
 
-    monkeypatch.setattr(database, "connect", never)
+    never = _NeverConnectDatabase(
+        database._config, gate=database_gate, direct_url=database._direct_url
+    )
 
-    assert notices.write_notices(database, event_bus, [], direct=True) == []
+    assert notices.write_notices(never, event_bus, [], direct=True) == []
 
 
 @pytest.mark.parametrize("direct", [True, False])
