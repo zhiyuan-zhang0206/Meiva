@@ -21,6 +21,7 @@ and every other plugin load after this module and read what it established.
 # what E402 can express here.
 
 import contextlib
+import hashlib
 import os
 import socket
 import sys
@@ -36,6 +37,59 @@ from pathlib import Path
 import pytest
 
 import tests._test_env_file
+
+# meiva:note
+# The credentials this bootstrap found in its own environment, by name and by DIGEST of the
+# value each carried. `survived_credential_names()` is what fails a run in which one of them
+# still holds the launching process's value: the symptom it prevents is two unrelated tests
+# reddening on one developer's box while CI stays green (#5532, MEIVA_API_TOKEN).
+#
+# The value is digested, never kept — a snapshot that kept it would be the leak it guards
+# against. Digested rather than listed, because a list can only name the credentials someone
+# remembered: this way the block below decides each name it recognizes and the rest arrive
+# as one failing test that names them, instead of as a suite that quietly behaves
+# differently where a launcher's environment reached it.
+#
+# A credential is a whole name element, never a substring: `MEIVA_API_TOKEN`,
+# `MEIVA_FEISHU_APP_SECRET`, `MEIVA_DB_CAPABILITY_KEY` are credentials;
+# `MEIVA_LLM_SILENT_IDLE_MAX_OUTPUT_TOKENS` is a budget and
+# `MEIVA_BACKUP_OFFSITE_CREDENTIALS_FILE` is a path TO a credential — a rule that called
+# those two credentials would teach the reader to ignore this one. `MEIVA_PROCESS_PROFILE`
+# is no credential and rides along anyway: it names which profile the LAUNCHER ran, and the
+# suite always runs with none.
+_CREDENTIAL_NAME_ELEMENTS: frozenset[str] = frozenset(
+    {"TOKEN", "SECRET", "PASSWORD", "KEY", "PROFILE"}
+)
+
+
+def is_credential_name(name: str) -> bool:
+    return name.startswith("MEIVA_") and not _CREDENTIAL_NAME_ELEMENTS.isdisjoint(name.split("_"))
+
+
+# meiva:note
+# Sixteen hex characters tell two real tokens apart and recover neither. `sha256` of the
+# empty string is what an absent or emptied name hashes to, so "replaced with nothing" and
+# "replaced with a sentinel" both read as replaced.
+def _digest(value: str) -> str:
+    return hashlib.sha256(value.encode()).hexdigest()[:16]
+
+
+AMBIENT_CREDENTIAL_DIGESTS: Mapping[str, str] = {
+    name: _digest(value) for name, value in os.environ.items() if value and is_credential_name(name)
+}
+
+
+# meiva:note
+# The credential names still holding the value this process started with. Empty is the
+# healthy answer on every machine: the block below replaces each name it knows, and a name
+# it does not know is the leak to name out loud rather than to inherit.
+def survived_credential_names() -> list[str]:
+    return sorted(
+        name
+        for name, digest in AMBIENT_CREDENTIAL_DIGESTS.items()
+        if _digest(os.environ.get(name, "")) == digest
+    )
+
 
 # ═══ THIS BLOCK MUST STAY ABOVE EVERY PROJECT IMPORT ═══════════════════════════
 #
@@ -126,6 +180,33 @@ os.environ["MEIVA_COMPACT_HISTORY_DUMP"] = "false"
 # stays green. Pop the marker here, before the first Settings() construction,
 # so local runs match CI (2026-08-06, PR #1650 verification).
 os.environ.pop("MEIVA_PROCESS_PROFILE", None)
+
+# meiva:note
+# Credentials the launching process carries do not reach the suite. Two ways one arrives
+# here and never arrives in CI: the login shell exports the operator's real ~/.meiva/.env
+# into every child process (the 2026-08-04 shell-env leak class the telegram block above
+# describes), and a launcher hands the process it starts its own machine token. Either way a
+# test that reads one asserts a different world depending on where it ran — green in CI, red
+# on one box, for a reason no diff explains.
+#
+# `base.cluster.machine.gateway_bearer` is the case that cost us: it prefers
+# `MEIVA_API_TOKEN` over the cluster secret, so the two tests asserting the secret path
+# (`services/desktop/browser/tests/test_browser_session.py`'s `test_inject_once_*`) failed
+# on a developer's box and passed in CI (#5532). Popped, never pinned and never replaced by
+# a sentinel: absent is the state CI runs in, and a test that needs a token sets it with
+# monkeypatch (`meiva/tests/namespaces/sdk_surface/test_process_clients.py`).
+os.environ.pop("MEIVA_API_TOKEN", None)
+# meiva:note
+# The same delivery, four more ways: the Cloudflare provisioning token, the Feishu app
+# secret the IM bridge signs with, the relay token an impersonation session opens with (the
+# lease exports it into the session's environment), and the alerts webhook token. Nothing in
+# the suite needs any of them: `settings.feishu` reads an absent secret as "channel
+# unavailable" and the ingest endpoint reads an absent webhook token as "loopback callers
+# only", which is what CI reads.
+os.environ.pop("MEIVA_CF_API_TOKEN", None)
+os.environ.pop("MEIVA_FEISHU_APP_SECRET", None)
+os.environ.pop("MEIVA_IMPERSONATION_RELAY_TOKEN", None)
+os.environ.pop("MEIVA_ALERTS_WEBHOOK_TOKEN", None)
 
 # ── Boot mode: the suite exercises the eager config chain ──
 #
