@@ -48,7 +48,12 @@ def credentials() -> None:
         secret = "rpc-first" if not events else "rpc-second"
         events.append("credentials:1" if not events else "credentials:2")
         return GatewayAccess(
-            gateway_url="http://gateway", cluster_secret=secret, remote_plane=False
+            gateway_url="http://gateway",
+            cluster_secret=secret,
+            remote_plane=False,
+            machine_token=None,
+            launcher_profile=None,
+            gateway_home=False,
         )
 
     def post(_request: httpx.Request) -> httpx.Response:

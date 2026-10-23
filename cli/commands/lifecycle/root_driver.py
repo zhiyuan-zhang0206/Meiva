@@ -12,7 +12,6 @@ from pathlib import Path
 from typing import Any, NamedTuple, cast
 
 from base.cluster import session_name
-from base.cluster.derive import runner_db_url_projection
 from base.cluster.machine import MachineIdentity, MachineRoles
 from base.config import settings
 from base.deploy import start_trace
@@ -70,7 +69,7 @@ class LaunchOutcome(NamedTuple):
 def service_extra_env(spec: ServiceSpec, *, remote_data_plane: bool) -> dict[str, str]:
     """Bind profile, database login and API token to one service, never its parent."""
     from base.telemetry.lgtm_local import BACKENDS, service_environment
-    from cli.commands.data_plane.bringup import api_delivery, db_delivery
+    from cli.commands.data_plane.bringup import api_delivery, db_delivery, runner_db_url
 
     extra = service_environment(spec.session) if spec.session in BACKENDS else {}
     marker = service_spec.profile_marker(spec)
@@ -81,7 +80,7 @@ def service_extra_env(spec: ServiceSpec, *, remote_data_plane: bool) -> dict[str
     if delivery:
         extra.update(delivery)
     elif marker == "agent":
-        extra["MEIVA_DB_URL"] = runner_db_url_projection()
+        extra["MEIVA_DB_URL"] = runner_db_url()
     if (api := service_spec.api_access(spec)) is not None:
         extra.update(api_delivery(api, remote_data_plane=remote_data_plane))
     if spec.plugin_config is not None:

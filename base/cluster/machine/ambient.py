@@ -16,10 +16,14 @@ __all__ = ["gateway_access_from_settings"]
 
 def gateway_access_from_settings() -> GatewayAccess:
     """The gateway access the process-wide settings describe, read now."""
-    from base.config import settings
+    from base.config import launch_facts, settings
 
+    facts = launch_facts()
     return GatewayAccess(
         gateway_url=settings.gateway.gateway_url,
         cluster_secret=settings.data_plane.cluster_secret,
         remote_plane=settings.data_plane.is_remote,
+        machine_token=facts.machine_token,
+        launcher_profile=facts.launcher_profile,
+        gateway_home=facts.gateway_home,
     )

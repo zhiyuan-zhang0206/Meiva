@@ -24,6 +24,7 @@ def join_gateway(values: dict[str, str], home: Path, capability: str | None) -> 
     installed one's afterwards.
     """
     from base.host.db_authority.unit import install_bundle
+    from base.host.env.boot_policy import BootstrapFetch
     from base.host.env.bootstrap import fetch_bootstrap_config
 
     if "MEIVA_CLUSTER_SECRET" in values:
@@ -38,7 +39,7 @@ def join_gateway(values: dict[str, str], home: Path, capability: str | None) -> 
     if remote and (not host or is_loopback_host(host)):
         raise ValueError("joining a remote gateway requires a reachable --machine-host")
     bundle, token = _join_credential(home, capability)
-    payload = fetch_bootstrap_config(gateway, bearer=token)
+    payload = fetch_bootstrap_config(gateway, bearer=token, tuning=BootstrapFetch())
     if remote and any(
         is_loopback_host(urlsplit(payload[key]).hostname or "")
         for key in ("MEIVA_DB_URL", "MEIVA_REDIS_URL")

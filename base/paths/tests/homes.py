@@ -1,13 +1,23 @@
 """Isolated bare and default-home fixtures, declared beside their consumers."""
 
-from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
 
 
+# meiva:note
+# Make `home` this process's home (`MEIVA_HOME`) for the rest of the test; return it.
+#
+# For a test of a door that still resolves its home from the process environment (a CLI
+# command, an ops handler). A test of code that takes its home as a value passes the path to
+# that code instead. This is the one place a test sets `MEIVA_HOME`.
+def point_home(monkeypatch: pytest.MonkeyPatch, home: Path) -> Path:
+    monkeypatch.setenv("MEIVA_HOME", str(home))
+    return home
+
+
 @pytest.fixture
-def unit_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
+def unit_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """Point this unit's home at a fresh per-test tmp dir. Machine caches belong
     to explicit consumer roots; this fixture only owns the home environment.
 
@@ -35,8 +45,7 @@ def unit_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]
     `cli/database/tests/cli_tests.py` — a module takes it with one line:
     `pytestmark = pytest.mark.usefixtures("installed_machine_identity")`.
     """
-    monkeypatch.setenv("MEIVA_HOME", str(tmp_path))
-    yield tmp_path
+    return point_home(monkeypatch, tmp_path)
 
 
 @pytest.fixture
@@ -51,5 +60,5 @@ def default_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     user_home = tmp_path / "user"
     user_home.mkdir()
     monkeypatch.setenv("HOME", str(user_home))
-    monkeypatch.setenv("MEIVA_HOME", str(user_home / ".meiva"))
+    point_home(monkeypatch, user_home / ".meiva")
     return user_home

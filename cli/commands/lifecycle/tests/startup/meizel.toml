@@ -9,7 +9,7 @@ exports = ["test_start_readiness_gate.py"]
 
 [debt.first-party-patch]
 "test_agent_profile_launch_env.py#monkeypatch.setattr base.host.env.bootstrap.config_source_is_local" = 1
-"test_agent_profile_launch_env.py#monkeypatch.setattr cli.commands.lifecycle.root_driver.runner_db_url_projection" = 1
+"test_agent_profile_launch_env.py#monkeypatch.setattr cli.commands.data_plane.bringup.runner_db_url" = 1
 "test_checkpoint_migration_phase.py#monkeypatch.setattr base.cluster.assert_checkpoint_dependency_pinned" = 1
 "test_checkpoint_migration_phase.py#monkeypatch.setattr base.cluster.assert_checkpoint_schema_current" = 1
 "test_checkpoint_migration_phase.py#monkeypatch.setattr base.cluster.dataplane.pg_admin.local_owner_authority" = 3

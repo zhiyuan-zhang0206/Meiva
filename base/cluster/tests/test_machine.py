@@ -420,9 +420,36 @@ def test_gateway_access_from_boot_reads_the_roots_own_configuration(
     access = gateway_access_from_boot(machine_config)
 
     assert access == GatewayAccess(
-        gateway_url="http://gw.vpn:8000", cluster_secret=_SECRET, remote_plane=False
+        gateway_url="http://gw.vpn:8000",
+        cluster_secret=_SECRET,
+        remote_plane=False,
+        machine_token=None,
+        launcher_profile=None,
+        gateway_home=False,
     )
     assert _SECRET not in repr(access)
+
+
+def test_gateway_access_from_boot_carries_the_roots_launch_environment(
+    machine_config: ConfigBoot,
+) -> None:
+    environment = machine_config.environment
+    assert environment is not None
+    delivered = "delivered-" + "t" * 8
+    environment.update(
+        {
+            "MEIVA_API_TOKEN": delivered,
+            "MEIVA_PROCESS_PROFILE": "agent",
+            "MEIVA_MACHINE_SERVE_GATEWAY": "true",
+        }
+    )
+
+    access = gateway_access_from_boot(machine_config)
+
+    assert access.machine_token == delivered
+    assert access.launcher_profile == "agent"
+    assert access.gateway_home is True
+    assert delivered not in repr(access)
 
 
 def test_a_foreign_database_host_makes_the_plane_remote(machine_config: ConfigBoot) -> None:

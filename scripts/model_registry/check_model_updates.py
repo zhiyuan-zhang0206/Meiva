@@ -25,7 +25,7 @@ from urllib3.connection import HTTPSConnection
 from urllib3.connectionpool import HTTPConnectionPool, HTTPSConnectionPool
 from urllib3.poolmanager import PoolManager
 
-from base.host.env.dotenv_file import read_env_aliases
+from base.host.env.dotenv_file import process_env_file, read_env_aliases
 from base.host.net.resilience import ExponentialBackoff, Policy, http_classifier, retry
 from base.lm.registry import ModelSpec
 from base.packages.plugin_providers import build_model_catalog
@@ -503,7 +503,7 @@ def compare_models(
 
 def _read_env_file(path: Path | None) -> dict[str, str]:
     if path is None:
-        return read_env_aliases()
+        return read_env_aliases(process_env_file())
     return {key: value for key, value in dotenv_values(path).items() if value is not None}
 
 

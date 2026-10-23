@@ -9,6 +9,7 @@ from pydantic import SecretStr
 from base.config import settings
 from base.config.tests.configuration import model_overrides
 from base.host.env import dotenv_file
+from base.host.env.tests.env_files import aliases_of
 from base.lm.catalog import ModelCatalog
 from base.lm.factory import (
     build_chat_model,
@@ -402,7 +403,7 @@ class TestProviderConstruction:
         monkeypatch.setattr(
             dotenv_file,
             "read_env_aliases",
-            lambda: {"DEEPSEEK_API_KEY": "sk-file-value"},
+            aliases_of({"DEEPSEEK_API_KEY": "sk-file-value"}),
         )
 
         m = build_chat_model(
@@ -423,7 +424,7 @@ class TestProviderConstruction:
         monkeypatch.setattr(
             dotenv_file,
             "read_env_aliases",
-            lambda: {"DEEPSEEK_API_KEY": "sk-file-value"},
+            aliases_of({"DEEPSEEK_API_KEY": "sk-file-value"}),
         )
 
         m = build_chat_model(
@@ -440,7 +441,7 @@ class TestProviderConstruction:
         self, monkeypatch: pytest.MonkeyPatch, *, model_catalog: ModelCatalog
     ) -> None:
         monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
-        monkeypatch.setattr(dotenv_file, "read_env_aliases", dict)
+        monkeypatch.setattr(dotenv_file, "read_env_aliases", aliases_of({}))
 
         with pytest.raises(RuntimeError, match="DEEPSEEK_API_KEY"):
             build_chat_model(

@@ -10,14 +10,15 @@ retain their previous timing.
 from __future__ import annotations
 
 import os
-import re
 import sys
-from collections.abc import Callable
+import time
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from threading import RLock, get_ident
 from typing import Any, cast
 
 from base.config.config_registry import DOMAIN_ATTRS
+from base.config.lite_parse import parse_field
 from base.config.profiles import (
     MEIVA_PROCESS_PROFILE_ENV,
     PROCESS_PROFILES,
@@ -25,10 +26,14 @@ from base.config.profiles import (
     profile_domain_error,
     profile_unknown_error,
 )
+from base.host.env.boot_policy import BootstrapFetch
 from base.host.env.bootstrap import (
     CONFIG_FETCH_ENV,
     CONFIG_FETCH_SKIP,
+    LaunchFacts,
     config_source_is_local,
+    inject_config_from_gateway,
+    launch_facts,
     should_fetch_from_gateway,
 )
 from base.host.env.config_lite_table import (
@@ -44,6 +49,7 @@ from base.host.env.dotenv_boot import (
     load_meiva_env,
     read_database_delivery,
 )
+from base.paths.home import home_from_env, resolve_meiva_home
 
 # `MEIVA_CONFIG_BOOT=eager` — the operator's instant rollback to the eager boot.
 BOOT_MODE_ENV = "MEIVA_CONFIG_BOOT"
@@ -68,108 +74,6 @@ BUILD_WAIT_TIMEOUT_SECONDS = 30.0
 # boot path); the db placeholder is PLACEHOLDER_DB_URL, which base/db
 # refuses with an actionable error.
 _LITE_REDIS_URL = "redis://config-lite@127.0.0.1:1/0"
-
-
-#
-# The parse kinds mirror pydantic's non-strict coercion for the field types the
-# table declares (bool strings, int from a trimmed integer literal or an
-# integral decimal, float, Path, the CSV split of the eval allowlist). The
-# parity test (base/tests/config/bootstrap/test_config_lite_parity.py) locks every kind
-# against the eager sub-model construction, error for error.
-
-_BOOL_TRUE = frozenset({"1", "true", "yes", "on", "t", "y"})
-_BOOL_FALSE = frozenset({"0", "false", "no", "off", "f", "n"})
-# Python's `int()` accepts the optional sign and underscores; pydantic's int
-# additionally accepts a plain decimal that is integral ("5.0", not "5.", not
-# ".5", not "5e1") — and rejects non-ASCII digits (Python would accept them).
-_INT_LITERAL = re.compile(r"[+-]?[0-9][0-9_]*\Z")
-_INT_DECIMAL = re.compile(r"[+-]?[0-9]+\.[0-9]+\Z")
-
-
-def _parse_bool(raw: str) -> bool:
-    lowered = raw.lower()
-    if lowered in _BOOL_TRUE:
-        return True
-    if lowered in _BOOL_FALSE:
-        return False
-    raise ValueError("not a boolean")
-
-
-def _parse_int(raw: str) -> int:
-    text = raw.strip()
-    if _INT_LITERAL.match(text):
-        return int(text)
-    if _INT_DECIMAL.match(text):
-        value = float(text)
-        if value.is_integer():
-            return int(value)
-    raise ValueError("not an integer")
-
-
-def _check_iana(alias: str, value: Any) -> None:
-    """Mirror of GeneralSettings._validate_timezone (same message)."""
-    from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
-
-    try:
-        ZoneInfo(value)
-    except (ZoneInfoNotFoundError, ValueError) as exc:
-        raise ValueError(
-            f"{alias}={value!r} is not a valid IANA timezone name "
-            f"(e.g. America/Los_Angeles, Asia/Shanghai, UTC)"
-        ) from exc
-
-
-def _check_port(alias: str, value: Any) -> None:
-    """Mirror of telemetry_otlp_port's Field(ge=1, le=65535)."""
-    if not 1 <= value <= 65535:
-        raise ValueError(f"{alias}={value!r} must be a TCP port between 1 and 65535")
-
-
-def _check_eval_allowlist(alias: str, value: Any) -> None:
-    """Mirror of AgentEvalSettings._validate_eval_network_allowlist (same message)."""
-    unsupported = sorted(set(value) - {"web", "understand"})
-    if unsupported:
-        raise ValueError(
-            f"{alias}: eval network allowlist only accepts 'web' and 'understand'; "
-            f"unsupported entries: {unsupported}"
-        )
-
-
-_CHECKS = {
-    "iana": _check_iana,
-    "port": _check_port,
-    "eval_allowlist": _check_eval_allowlist,
-}
-_PARSE_KINDS = frozenset({"str", "int", "float", "bool", "bool_or_none", "path", "csv_str_list"})
-
-
-def _parse(name: str, alias: str, kind: str, check: str | None, raw: str) -> Any:
-    """Coerce one env value to the field's type — ValueError on a bad value."""
-    if (
-        kind not in _PARSE_KINDS
-    ):  # pragma: no cover - the table is generated; a new kind adds a parser
-        raise ValueError(f"unknown parse kind {kind!r}")
-    try:
-        if kind == "str":
-            value: Any = raw
-        elif kind == "int":
-            value = _parse_int(raw)
-        elif kind == "float":
-            value = float(raw.strip())
-        elif kind in ("bool", "bool_or_none"):
-            value = _parse_bool(raw)
-        elif kind == "path":
-            value = Path(raw)
-        else:
-            value = [item.strip() for item in raw.split(",") if item.strip()]
-    except (ValueError, TypeError) as exc:
-        raise ValueError(
-            f"{alias}={raw!r} is not a valid {kind} for config field {name!r} "
-            f"(boot-lite parse; the field type is declared in base/config/)"
-        ) from exc
-    if check is not None:
-        _CHECKS[check](alias, value)
-    return value
 
 
 def _default_value(owner: ConfigBoot, name: str, default_kind: str, literal: Any) -> Any:
@@ -391,6 +295,23 @@ class ConfigBoot:
     def _current_settings(self) -> Any:
         return self.settings
 
+    # meiva:note
+    # The launch environment this owner reads: the captured delivery of a read-only
+    # attachment, else the live `os.environ` of a booting process.
+    def process_environment(self) -> Mapping[str, str]:
+        return os.environ if self.environment is None else self.environment
+
+    # meiva:note
+    # What this owner's launch environment says about the credential it presents to the
+    # gateway (`GatewayAccess` takes it): the delivered machine token, the launcher profile
+    # and whether this unit serves the gateway. Reads the home's `.env` as it is now.
+    def launch_facts(self) -> LaunchFacts:
+        from base.host.env.dotenv_file import env_file_path, read_env_aliases
+
+        env = self.process_environment()
+        home = home_from_env(env, user_home=Path.home())
+        return launch_facts(env, env_file=read_env_aliases(env_file_path(home)))
+
     def _apply_cluster_timezone(self) -> None:
         name = self.get_field("timezone") if self.field_explicitly_set("timezone") else None
         apply_process_timezone(name)
@@ -411,7 +332,7 @@ class ConfigBoot:
                 for key in [k for k, v in os.environ.items() if k.startswith("MEIVA_") and v == ""]:
                     os.environ.pop(key, None)
                 if not os.environ.get("MEIVA_DB_URL"):
-                    load_meiva_env()
+                    load_meiva_env(os.environ, home=resolve_meiva_home())
             environment = dict(os.environ)
             profile = environment.get(MEIVA_PROCESS_PROFILE_ENV)
             if profile is not None and profile not in PROCESS_PROFILES:
@@ -419,10 +340,12 @@ class ConfigBoot:
             for _name, row in LITE_FIELDS.items():
                 raw = environment.get(row[1])
                 if raw is not None:
-                    _parse(_name, row[1], row[2], row[5], raw)
+                    parse_field(_name, row[1], row[2], row[5], raw)
             self.environment = environment
             self.profile = cast(ProcessProfile, profile)
-            self.env_boot = read_database_delivery(environment)
+            self.env_boot = read_database_delivery(
+                environment, home=home_from_env(environment, user_home=Path.home())
+            )
             self.prepared = True
 
     def complete_read_model(self) -> Any:
@@ -452,7 +375,7 @@ class ConfigBoot:
         _domain, alias, kind, default_kind, literal, check = LITE_FIELDS[name]
         raw = (os.environ if self.environment is None else self.environment).get(alias)
         if raw is not None:
-            return _parse(name, alias, kind, check, raw)
+            return parse_field(name, alias, kind, check, raw)
         return _default_value(self, name, default_kind, literal)
 
     def field_explicitly_set(self, name: str) -> bool:
@@ -540,32 +463,36 @@ class ConfigBoot:
             # Latched first: a re-entrant read during step 4 (cluster_tz_name reads
             # through the view) must not prepare again.
             self.prepared = True
-            self.env_boot = load_meiva_env()
+            home = resolve_meiva_home()
+            self.env_boot = load_meiva_env(os.environ, home=home)
             profile = os.environ.get(MEIVA_PROCESS_PROFILE_ENV)
             if profile is not None and profile not in PROCESS_PROFILES:
                 raise profile_unknown_error(profile)
             self.profile = cast(ProcessProfile, profile)
-            self._apply_source_decision()
+            self._apply_source_decision(home)
             for name, row in LITE_FIELDS.items():
                 raw = os.environ.get(row[1])
                 if raw is not None:
-                    _parse(name, row[1], row[2], row[5], raw)
+                    parse_field(name, row[1], row[2], row[5], raw)
             self._apply_cluster_timezone()
 
-    def _apply_source_decision(self) -> None:
+    def _apply_source_decision(self, home: Path) -> None:
         """The eager boot's source decision, minus the construction it guarded.
 
         `_plant_placeholders` keeps the eager boot's env side effect (the
         never-dialed URLs) so a later `Settings()` construction finds the same
         environment it would have found eagerly."""
-        if config_source_is_local():
+        from base.host.env.dotenv_file import env_file_path, read_env_aliases
+
+        env_file = read_env_aliases(env_file_path(home))
+        if config_source_is_local(os.environ, env_file=env_file):
             _require_local_fields()
         elif os.environ.get(CONFIG_FETCH_ENV) == CONFIG_FETCH_SKIP:
             _plant_placeholders()
-        elif should_fetch_from_gateway():
-            from base.host.env.bootstrap import inject_config_from_gateway
-
-            self.env_boot = inject_config_from_gateway()
+        elif should_fetch_from_gateway(os.environ, env_file=env_file):
+            self.env_boot = inject_config_from_gateway(
+                os.environ, home=home, now=time.time(), tuning=BootstrapFetch()
+            )
         else:
             _plant_placeholders()
 
@@ -782,6 +709,10 @@ def is_full() -> bool:
 
 def boot_state() -> dict[str, Any]:
     return _state.boot_state()
+
+
+def process_launch_facts() -> LaunchFacts:
+    return _state.launch_facts()
 
 
 def settings_view() -> _SettingsView:

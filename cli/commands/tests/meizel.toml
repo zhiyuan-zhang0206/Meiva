@@ -41,7 +41,6 @@ exports = ["health_port_guard.py", "test_single_box.py"]
 "test_single_box.py#monkeypatch.setattr base.config.settings.observability.telemetry_otlp_enabled" = 1
 "test_single_box.py#monkeypatch.setattr cli.commands.data_plane.bringup.prove_generation_logins" = 2
 "test_unit_capability_commands.py#monkeypatch.setattr base.config.settings.general.machine_host" = 1
-"test_unit_capability_commands.py#monkeypatch.setattr base.host.env.dotenv_file.unit_home" = 1
 
 [debt.stdlib-patch]
 "test_single_box.py#monkeypatch.setattr socket.socket" = 1

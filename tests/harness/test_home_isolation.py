@@ -112,17 +112,17 @@ def test_data_plane_and_gateway_urls_are_not_the_real_ones() -> None:
         assert "127.0.0.1" in os.environ[key] or "localhost" in os.environ[key]
 
 
+# meiva:note
+# No import-time fetch to a live gateway.
+#
+# The config source is role-derived (MEIVA_CONFIG_SOURCE is gone): this test
+# process is agent-runner-only, so without the suite's pin its Settings build
+# would call `inject_config_from_gateway()` and make a real authenticated GET
+# to whatever gateway URL leaked into the env — at import, before any fixture
+# exists, so no fixture can reach it. The suite
+# pins MEIVA_CONFIG_FETCH=skip in the env_bootstrap env block; asserting it here is
+# the guard that the pin stays.
 def test_config_fetch_is_skipped() -> None:
-    """No import-time fetch to a live gateway.
-
-    The config source is role-derived (MEIVA_CONFIG_SOURCE is gone): this test
-    process is agent-runner-only, so without the suite's pin its Settings build
-    would call `inject_config_from_gateway()` and make a real authenticated GET
-    to whatever gateway URL leaked into the env — at import, before any fixture
-    exists, so the autouse `_guard_bootstrap_fetch` cannot reach it. The suite
-    pins MEIVA_CONFIG_FETCH=skip in the env_bootstrap env block; asserting it here is
-    the guard that the pin stays.
-    """
     assert os.environ.get("MEIVA_CONFIG_FETCH") == "skip"
 
 

@@ -44,7 +44,7 @@ def _home_gateway_base() -> str | None:
     identity yet (before `meiva init`)."""
     from base.host.env import dotenv_file
 
-    aliases = dotenv_file.read_env_aliases()
+    aliases = dotenv_file.read_env_aliases(dotenv_file.process_env_file())
     for key in _GATEWAY_URL_KEYS:
         gateway_url = aliases.get(key, "").strip()
         if gateway_url:
@@ -105,11 +105,14 @@ def _auth_headers() -> dict[str, str]:
     """
     from base.host.env import dotenv_file
     from base.host.net.auth import bearer_header, delivered_token
+    from base.paths.home import resolve_meiva_home
 
-    bearer = delivered_token() or os.environ.get("MEIVA_CLUSTER_SECRET")
+    home = resolve_meiva_home()
+    bearer = delivered_token(os.environ) or os.environ.get("MEIVA_CLUSTER_SECRET")
     if bearer is None:
-        bearer = dotenv_file.read_env_aliases().get("MEIVA_CLUSTER_SECRET", "")
-    home = dotenv_file.env_file_path().parent
+        bearer = dotenv_file.read_env_aliases(dotenv_file.env_file_path(home)).get(
+            "MEIVA_CLUSTER_SECRET", ""
+        )
     if not bearer and (home / "db-authority" / "unit.json").exists():
         from base.host.db_authority.unit import consume_unit
 
@@ -238,8 +241,9 @@ def _resolve_local_field(key: str, index: dict[str, _LocalConfigField]) -> _Loca
 
 def _config_source_is_local() -> bool:
     from base.host.env.bootstrap import config_source_is_local
+    from base.host.env.dotenv_file import process_env_file, read_env_aliases
 
-    return config_source_is_local()
+    return config_source_is_local(os.environ, env_file=read_env_aliases(process_env_file()))
 
 
 def _check_local_writable(field: _LocalConfigField) -> None:
@@ -274,7 +278,7 @@ def _reject_local_machine(machine: str | None, verb: str) -> int | None:
 def _local_get(key: str | None) -> int:
     from base.host.env import dotenv_file
 
-    aliases = dotenv_file.read_env_aliases()
+    aliases = dotenv_file.read_env_aliases(dotenv_file.process_env_file())
     fields = _local_fields()
     if key is not None:
         try:

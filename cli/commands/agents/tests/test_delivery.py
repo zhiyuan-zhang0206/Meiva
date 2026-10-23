@@ -21,6 +21,7 @@ from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.events.live.tests.fakes import recording
 from base.native_process.runtime_incarnation import RuntimeIncarnation
+from base.paths.tests.homes import point_home
 
 type ActiveSession = tuple[dict[str, Any], RuntimeIncarnation, int]
 
@@ -37,10 +38,8 @@ def active(
     config_authority: ConfigAuthority,
     machine_identity: MachineIdentity,
 ) -> ActiveSession:
-    from base.host.env import dotenv_file
-
     window, attempts = getattr(request, "param", (180, 2))
-    monkeypatch.setattr(dotenv_file, "unit_home", lambda: tmp_path)
+    point_home(monkeypatch, tmp_path)
     (tmp_path / ".env").write_text(
         f"MEIVA_IMPERSONATION_ACK_WINDOW_SECONDS={window}\n"
         f"MEIVA_IMPERSONATION_MAX_DELIVERY_ATTEMPTS={attempts}\n"

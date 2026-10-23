@@ -23,7 +23,12 @@ from typing import cast
 
 import psutil
 
-from base.host.env.dotenv_file import ENV_LOCK_TIMEOUT_S, env_line_key, env_lock_path
+from base.host.env.dotenv_file import (
+    ENV_LOCK_TIMEOUT_S,
+    env_line_key,
+    env_lock_path,
+    process_env_file,
+)
 from base.host.private_storage import write_private_bytes
 from base.log import logger
 from base.native_process.os_platform import file_lock
@@ -33,9 +38,8 @@ _AUDIT_TAIL_BYTES = 64 * 1024
 
 def _env_path() -> Path:
     """Resolve the unit `.env` without adding a runtime-config import cycle."""
-    from base.host.env.dotenv_file import env_file_path
 
-    return env_file_path()
+    return process_env_file()
 
 
 def _audit_path(env_path: Path) -> Path:

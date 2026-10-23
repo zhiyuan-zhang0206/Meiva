@@ -40,6 +40,7 @@ _PINMAP: dict[str, object] = {
 _LITE_CONFIG_MODULES = {
     "base.config",
     "base.config._lite",
+    "base.config.lite_parse",
     "base.config.profiles",
     "base.config.service_read",
     "base.host.env.config_lite_table",

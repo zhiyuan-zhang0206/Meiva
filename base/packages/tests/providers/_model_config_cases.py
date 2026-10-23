@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import sys
 from collections.abc import Callable
 from dataclasses import replace
@@ -306,7 +307,7 @@ def main() -> None:
         assert snapshot.moonshot_api_key.get_secret_value() == "legacy-settings-key"
     (home / ".env").write_text("".join(f"{name}={value}\n" for name, value in keys.items()))
     if legacy:
-        enforce_cluster_env_authority(home)
+        enforce_cluster_env_authority(os.environ, home)
         assert not provider_key_present("MIMO_API_KEY")
         assert not provider_key_present("MOONSHOT_API_KEY")
     if case.startswith("validate_"):

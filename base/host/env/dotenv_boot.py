@@ -1,46 +1,53 @@
-"""Single .env load entry — every process entry point imports this.
+# meiva:note
+# Single .env load entry — every process entry point imports this.
+#
+# The `.env` source lives under this unit's home: `$MEIVA_HOME/.env`. The home is
+# `$MEIVA_HOME` when that variable is set, else `~/.meiva`. `resolve_meiva_home` reads
+# the variable every time it is called, so no module captures the home at import
+# and the variable is the only source: there is no checkout pointer, no
+# per-process override and no second in-process channel, so a process and its
+# children cannot disagree about their home. No `.env` lives in the repo root.
+#
+# Production does not depend on the variable. Only a process tree that must not
+# touch the host's cluster sets it, once, at its top: the test session, and the
+# hooks and tools that import application code. Every descendant inherits it.
+#
+# What keeps development code off the host's cluster is that rule plus the
+# checkout guard (`home_checkout_error`): a home that carries its own
+# `<home>/source` checkout is operated only by that checkout's code.
+#
+# The boot functions work on the environment mapping they are given (`os.environ` at
+# the one composition root, `base.config._lite.ConfigBoot`) and on a `home` path; a test
+# passes a dict and a `tmp_path`. Only `apply_process_timezone`, `skip_config_fetch` and
+# `enter_scratch_home` touch the process itself (`time.tzset`, a program's own
+# environment), and they are for a program's top level.
+#
+# Callers:
+#     base/config.py            - before importing Settings
+#     scripts/entrypoints/agent.py      - bootstrap root agent
+#
+# `load_meiva_env` is idempotent and does not overwrite already-set keys; repeated
+# calls have no side effects. Explicit startup boot also
+# uses `apply_process_timezone` with its resolved authoritative timezone. Importing
+# this module or reading an existing environment never applies that operation.
 
-The `.env` source lives under this unit's home: `$MEIVA_HOME/.env`. The home is
-`$MEIVA_HOME` when that variable is set, else `~/.meiva`. `resolve_meiva_home` reads
-the variable every time it is called, so no module captures the home at import
-and the variable is the only source: there is no checkout pointer, no
-per-process override and no second in-process channel, so a process and its
-children cannot disagree about their home. No `.env` lives in the repo root.
-
-Production does not depend on the variable. Only a process tree that must not
-touch the host's cluster sets it, once, at its top: the test session, and the
-hooks and tools that import application code. Every descendant inherits it.
-
-What keeps development code off the host's cluster is that rule plus the
-checkout guard (`home_checkout_error`): a home that carries its own
-`<home>/source` checkout is operated only by that checkout's code.
-
-Callers:
-    base/config.py            - before importing Settings
-    scripts/entrypoints/agent.py      - bootstrap root agent
-
-`load_dotenv` itself is idempotent + does not overwrite already-set
-os.environ keys; repeated calls have no side effects. Explicit startup boot also
-uses `apply_process_timezone` with its resolved authoritative timezone. Importing
-this module or reading an existing environment never applies that operation.
-"""
 
 from __future__ import annotations
 
 import os
 import re
 import time
-from collections.abc import Collection, Mapping
+from collections.abc import Collection, Mapping, MutableMapping
 from pathlib import Path
 from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from dotenv import dotenv_values, load_dotenv
+from dotenv import dotenv_values
+from dotenv.variables import parse_variables
 
 from base.host.env.bootstrap import (
     LAUNCHER_PROFILE_ENV_KEY,
     EnvBootResult,
-    deliver_unit_authority,
     is_delivered_unit_login,
     launcher_context,
 )
@@ -51,12 +58,11 @@ __all__ = [
     "PLACEHOLDER_DB_URL",
     "EnvBootResult",
     "apply_process_timezone",
-    "deliver_unit_authority",
+    "enforce_cluster_env_authority",
     "enter_scratch_home",
-    "is_delivered_unit_login",
-    "launcher_context",
     "load_meiva_env",
     "operator_db_delivery",
+    "project_watcher_runner_env",
     "read_database_delivery",
     "skip_config_fetch",
     "watcher_runner_env",
@@ -79,17 +85,14 @@ _GENERATION_ENV = "MEIVA_DB_GENERATION"
 _API_TOKEN_ENV = "MEIVA_API_TOKEN"  # noqa: S105 — env key name, not a credential
 
 
-def read_database_delivery(environment: Mapping[str, str]) -> EnvBootResult:
-    """Read existing login admission without consuming or delivering credentials.
-
-    A controller can read startup configuration without repeating dotenv boot.
-    A credential-free endpoint on an authority-managed home still must refuse
-    before its first dial, even when that controller has no startup owner to borrow.
-    """
-    root = environment.get("MEIVA_HOME")
-    home = Path(root).expanduser() if root else Path.home() / ".meiva"
-    if not home.is_absolute():
-        raise ValueError(f"MEIVA_HOME must be an absolute path, got {root!r}")
+# meiva:note
+# Read existing login admission without consuming or delivering credentials.
+#
+# A controller can read startup configuration without repeating dotenv boot.
+# A credential-free endpoint on an authority-managed home still must refuse
+# before its first dial, even when that controller has no startup owner to borrow.
+# `home` is the home `environment` names (`base.paths.home.home_from_env`).
+def read_database_delivery(environment: Mapping[str, str], *, home: Path) -> EnvBootResult:
     authority = home / "db-authority"
     if not ((authority / "ledger.json").exists() or (authority / "unit.json").exists()):
         return EnvBootResult()
@@ -175,43 +178,71 @@ def enter_scratch_home() -> Path:
     return home
 
 
-def _load_dotenv_layer(path: Path) -> None:
-    """Preserve one default Python index across its two environment aliases."""
-    inherited_index = os.environ.get("UV_DEFAULT_INDEX") or os.environ.get("UV_INDEX_URL")
-    load_dotenv(path)
-    selected = (
-        inherited_index or os.environ.get("UV_DEFAULT_INDEX") or os.environ.get("UV_INDEX_URL")
-    )
+# meiva:note
+# The `${VAR}`-interpolated values of one dotenv file, resolved against `env`.
+#
+# python-dotenv's own resolution, with `env` standing in for `os.environ`:
+# `override=True` lets a file value shadow an `env` key of the same name while
+# interpolating (`dotenv_values`), `override=False` lets `env` win (`load_dotenv`).
+# Absent file -> `{}`.
+def _dotenv_values(path: Path, env: Mapping[str, str], *, override: bool) -> dict[str, str | None]:
+    raw = dotenv_values(path, interpolate=False)
+    resolved: dict[str, str | None] = {}
+    for name, value in raw.items():
+        if value is None:
+            resolved[name] = None
+            continue
+        scope: dict[str, str | None] = {}
+        if override:
+            scope.update(env)
+            scope.update(resolved)
+        else:
+            scope.update(resolved)
+            scope.update(env)
+        resolved[name] = "".join(atom.resolve(scope) for atom in parse_variables(value))
+    return resolved
+
+
+# meiva:note
+# Load one dotenv file into `env` without overriding a key already there, and
+# preserve one default Python index across its two environment aliases.
+def _load_dotenv_layer(env: MutableMapping[str, str], path: Path) -> None:
+    inherited_index = env.get("UV_DEFAULT_INDEX") or env.get("UV_INDEX_URL")
+    for key, value in _dotenv_values(path, env, override=False).items():
+        if key not in env and value is not None:
+            env[key] = value
+    selected = inherited_index or env.get("UV_DEFAULT_INDEX") or env.get("UV_INDEX_URL")
     if selected is not None:
-        os.environ["UV_DEFAULT_INDEX"] = selected
+        env["UV_DEFAULT_INDEX"] = selected
 
 
-def load_meiva_env() -> EnvBootResult:
-    """Load this process's `$MEIVA_HOME/.env` (then `mirror.env`) into os.environ.
-
-    Pins MEIVA_HOME to the resolved home, so every descendant inherits it;
-    resolution itself never depends on the pin. The authority pass then
-    forces the unit's own `.env` declarations over a polluted parent
-    environment and drops the cluster values the `.env` does not declare —
-    EXCEPT the never-drop identity exemptions (`_force_also`:
-    MEIVA_GATEWAY_URL, the health ports, ...), which the deliberate "explicit env
-    wins" rule keeps.
-
-    mirror.env loads last and, like .env, never overrides an already-set key, so
-    precedence is: real environment > .env > mirror.env. It is a no-op when the
-    file is absent (the common, non-mirror case). UV_DEFAULT_INDEX and
-    UV_INDEX_URL represent one setting across these layers; an inherited legacy
-    alias is normalized before a lower-priority layer can supply the other alias.
-    Additional index settings remain separate and are never merged here.
-    """
-    if os.environ.get("MEIVA_HARNESS_HANDLE"):
-        for key in [k for k, v in os.environ.items() if k.startswith("MEIVA_") and v == ""]:
-            os.environ.pop(key, None)
-    home = resolve_meiva_home()
-    os.environ.setdefault("MEIVA_HOME", str(home))
-    _load_dotenv_layer(home / ".env")
-    _load_dotenv_layer(home / "mirror.env")
-    return enforce_cluster_env_authority(home)
+# meiva:note
+# Load the `.env` (then `mirror.env`) of `home` into `env`.
+#
+# The config boot passes `os.environ` and the resolved home
+# (`base.paths.home.resolve_meiva_home()`); a test passes a dict and a `tmp_path`.
+# Pins MEIVA_HOME to `home` when `env` names none, so every descendant of a
+# process that passed `os.environ` inherits it; resolution itself never depends
+# on the pin. The authority pass then forces the unit's own `.env` declarations
+# over a polluted parent environment and drops the cluster values the `.env`
+# does not declare — EXCEPT the never-drop identity exemptions (`_force_also`:
+# MEIVA_GATEWAY_URL, the health ports, ...), which the deliberate "explicit env
+# wins" rule keeps.
+#
+# mirror.env loads last and, like .env, never overrides an already-set key, so
+# precedence is: real environment > .env > mirror.env. It is a no-op when the
+# file is absent (the common, non-mirror case). UV_DEFAULT_INDEX and
+# UV_INDEX_URL represent one setting across these layers; an inherited legacy
+# alias is normalized before a lower-priority layer can supply the other alias.
+# Additional index settings remain separate and are never merged here.
+def load_meiva_env(env: MutableMapping[str, str], *, home: Path) -> EnvBootResult:
+    if env.get("MEIVA_HARNESS_HANDLE"):
+        for key in [k for k, v in env.items() if k.startswith("MEIVA_") and v == ""]:
+            env.pop(key, None)
+    env.setdefault("MEIVA_HOME", str(home))
+    _load_dotenv_layer(env, home / ".env")
+    _load_dotenv_layer(env, home / "mirror.env")
+    return enforce_cluster_env_authority(env, home)
 
 
 def _identity_env_only() -> frozenset[str]:
@@ -225,7 +256,7 @@ def _identity_env_only() -> frozenset[str]:
     return frozenset({"MEIVA_GATEWAY_URL"})
 
 
-def _is_launcher_runner_projection(value: str | None) -> bool:
+def _is_launcher_runner_projection(env: Mapping[str, str], value: str | None) -> bool:
     """Whether `value` is the launcher-injected runner DB projection to keep.
 
     The agent launcher injects an `meiva_runner` URL into every agent-profile
@@ -254,7 +285,7 @@ def _is_launcher_runner_projection(value: str | None) -> bool:
     """
     if not value:
         return False
-    if launcher_context() != "agent":
+    if launcher_context(env) != "agent":
         return False
     try:
         username = urlsplit(value).username
@@ -266,7 +297,7 @@ def _is_launcher_runner_projection(value: str | None) -> bool:
     return _RUNNER_LOGIN.fullmatch(username or "") is not None
 
 
-def _is_launcher_redis_url(value: str | None) -> bool:
+def _is_launcher_redis_url(env: Mapping[str, str], value: str | None) -> bool:
     """Whether `value` is the launcher-supplied Redis URL to keep.
 
     The MEIVA_REDIS_URL mirror of `_is_launcher_runner_projection` (#4334): the
@@ -284,7 +315,7 @@ def _is_launcher_redis_url(value: str | None) -> bool:
     """
     if not value:
         return False
-    if launcher_context() != "agent":
+    if launcher_context(env) != "agent":
         return False
     try:
         return bool(urlsplit(value).hostname)
@@ -292,25 +323,39 @@ def _is_launcher_redis_url(value: str | None) -> bool:
         return False
 
 
+# meiva:note
+# `project_watcher_runner_env` over this process's own environment and homes.
+#
+# The SDK's watcher wiring (`meiva/watcher/wiring.py`) is the one caller: it hands a
+# watcher session the launcher's runner projection.
 def watcher_runner_env() -> dict[str, str]:
-    """Return the launcher's validated data-plane URLs for a watcher session.
+    return project_watcher_runner_env(os.environ, home=resolve_meiva_home(), user_home=Path.home())
 
-    A shell's base env is the pty-sessions service's own env, not the
-    launcher's, and a watcher must not rely on any ambient inheritance for its
-    runner credentials. Only an agent launch
-    tree may explicitly forward them. A profile-less process on
-    the secured default-home gateway can carry the owner URL after config
-    import; refuse that launch before it creates a doomed watcher session.
-    Redis always authenticates, so only a named, password-carrying runtime ACL
-    URL is forwarded, never the `default` admin user, whatever the bearer.
-    """
-    db_url = os.environ.get("MEIVA_DB_URL")
-    redis_url = os.environ.get("MEIVA_REDIS_URL")
+
+# meiva:note
+# Return the launcher's validated data-plane URLs for a watcher session.
+#
+# A shell's base env is the pty-sessions service's own env, not the
+# launcher's, and a watcher must not rely on any ambient inheritance for its
+# runner credentials. Only an agent launch
+# tree may explicitly forward them. A profile-less process on
+# the secured default-home gateway can carry the owner URL after config
+# import; refuse that launch before it creates a doomed watcher session.
+# Redis always authenticates, so only a named, password-carrying runtime ACL
+# URL is forwarded, never the `default` admin user, whatever the bearer.
+#
+# `env` is the agent process's environment (`os.environ` at the SDK composition
+# root, `meiva/watcher/wiring.py`), `home` its home and `user_home` the OS user's.
+def project_watcher_runner_env(
+    env: Mapping[str, str], *, home: Path, user_home: Path
+) -> dict[str, str]:
+    db_url = env.get("MEIVA_DB_URL")
+    redis_url = env.get("MEIVA_REDIS_URL")
     if (
         db_url
         and redis_url
-        and _is_launcher_runner_projection(db_url)
-        and _is_launcher_redis_url(redis_url)
+        and _is_launcher_runner_projection(env, db_url)
+        and _is_launcher_redis_url(env, redis_url)
     ):
         try:
             db_host = urlsplit(db_url).hostname
@@ -323,15 +368,14 @@ def watcher_runner_env() -> dict[str, str]:
             return {
                 "MEIVA_DB_URL": db_url,
                 "MEIVA_REDIS_URL": redis_url,
-                **{key: os.environ[key] for key in carried if os.environ.get(key)},
+                **{key: env[key] for key in carried if env.get(key)},
             }
 
-    if resolve_meiva_home().resolve() == (Path.home() / ".meiva").resolve() and os.environ.get(
-        "MEIVA_CLUSTER_SECRET"
-    ):
+    if home.resolve() == (user_home / ".meiva").resolve() and env.get("MEIVA_CLUSTER_SECRET"):
         from base.host.env.bootstrap import config_source_is_local
+        from base.host.env.dotenv_file import env_file_path, read_env_aliases
 
-        if config_source_is_local():
+        if config_source_is_local(env, env_file=read_env_aliases(env_file_path(home))):
             raise RuntimeError(
                 "watcher launch needs an agent-profile process with an meiva_runner "
                 "MEIVA_DB_URL and runner MEIVA_REDIS_URL; this secured default home "
@@ -341,102 +385,110 @@ def watcher_runner_env() -> dict[str, str]:
     return {}
 
 
-def _force_declared(keys: Collection[str], file_vals: dict[str, str | None]) -> None:
+def _force_declared(
+    env: MutableMapping[str, str], keys: Collection[str], file_vals: dict[str, str | None]
+) -> None:
     """Set each key the unit's own files declare, overriding an inherited value."""
     for key in keys:
         val = file_vals.get(key)
-        if key == "MEIVA_DB_URL" and _keeps_injected_db_url(val):
+        if key == "MEIVA_DB_URL" and _keeps_injected_db_url(env, val):
             continue
         # The placeholder outranks the file: once a process tree carries it
         # (planted by a lite boot), no `.env` this pass reads may swap a real
         # database URL in behind it. The drop loop's identical guard keeps it on
         # the undeclared side; this one keeps it on the declared side.
-        if val is not None and os.environ.get(key) != PLACEHOLDER_DB_URL:
-            os.environ[key] = val
+        if val is not None and env.get(key) != PLACEHOLDER_DB_URL:
+            env[key] = val
 
 
-def _drop_undeclared(keys: Collection[str], file_vals: dict[str, str | None]) -> None:
+def _drop_undeclared(
+    env: MutableMapping[str, str],
+    keys: Collection[str],
+    file_vals: dict[str, str | None],
+    *,
+    home: Path,
+) -> None:
     """Pop each key the unit's own files do not declare (bar the launcher-injected projections)."""
     for key in keys:
-        if file_vals.get(key) is None and os.environ.get(key) != PLACEHOLDER_DB_URL:
-            if key == "MEIVA_DB_URL" and _keeps_undeclared_db_url(os.environ.get(key)):
+        if file_vals.get(key) is None and env.get(key) != PLACEHOLDER_DB_URL:
+            if key == "MEIVA_DB_URL" and _keeps_undeclared_db_url(env, env.get(key), home=home):
                 # Mirrored force-loop exemption (#4334): the launcher's runner
                 # projection is the agent child's DB source; a pure runner's
                 # launcher delivers its installed unit login to every class.
                 continue
-            if key == "MEIVA_REDIS_URL" and _is_launcher_redis_url(os.environ.get(key)):
+            if key == "MEIVA_REDIS_URL" and _is_launcher_redis_url(env, env.get(key)):
                 # The Redis mirror (#4334): same launcher context, no username
                 # shape to gate on (see `_is_launcher_redis_url`).
                 continue
-            os.environ.pop(key, None)
+            env.pop(key, None)
 
 
-def enforce_cluster_env_authority(home: Path) -> EnvBootResult:
-    """Force this unit's derived env keys from its own `.env`, overriding a polluted parent
-    environment.
-
-    `load_dotenv(override=False)` leaves an already-set key untouched, which is right for most
-    config (a real env var should win). But for the cluster-isolation keys (health ports,
-    db/redis URLs, channels, gateway port/URL, secrets) it is a footgun: if the shell — or a
-    watchdog whose own env was inherited from a sibling cluster's context — already carries
-    another cluster's value, `.env` cannot correct it, so the session-env allowlist
-    (`child_env`, base/host/env/registry.py) copies the wrong value into the service's session and
-    it binds another cluster's port. Re-read the file values and set them authoritatively. On a
-    pure agent-runner this runs BEFORE the gateway config fetch
-    (`base.host.env.bootstrap.inject_config_from_gateway`, at Settings build), so a stale cluster fact
-    a pre-cutover `.env` still materializes is pushed here and then overridden by the fetched
-    value — migration-tolerant by construction.
-
-    The complementary treatment is general: a cluster-scope alias this unit's own `.env` does
-    NOT declare is DROPPED from the environment. The drop covers every cluster-scope alias key
-    (base/host/env/registry.py — the field registry's cluster-pinned AND cluster-default aliases,
-    163 keys): a pure agent-runner's `.env` carries no cluster data-plane keys (MEIVA_DB_URL /
-    MEIVA_REDIS_URL / MEIVA_APP_PORT / ... — they come from the gateway's /api/bootstrap at
-    Settings build), so an inherited value — a sibling cluster's .env sourced into the shell,
-    e.g. prod's MEIVA_APP_PORT=3001 — would otherwise stand and leak into every child process
-    (pytest, agent shells, scripts) and could be dialed by mistake. Dropping it lets bootstrap
-    inject the real value (runner) or the field default apply (a gateway whose .env
-    deliberately omits a key).
-
-    One pair of undeclared keys is NOT dropped, in one context: the launcher-injected
-    data-plane projections an agent-launched tree carries — the runner DB projection
-    (`meiva_runner`-shaped URL) and the Redis URL (`urlsplit`-parseable with a host). The
-    context is the live `MEIVA_PROCESS_PROFILE=agent` marker or the value
-    a CLI entry point recorded before popping it (cli/main.py `_normalize_process_profile` →
-    `launcher_context`); with only the live marker consulted, the CLI pop made the exemption
-    unreachable and a probe run from an agent child on a pure agent-runner fell back to the
-    placeholder URL (#4334). The force loop above already refuses to let the unit's `.env` owner URL
-    replace the DB projection; the drop loop must not revoke either projection — on a unit
-    whose `.env` does not declare them (a pure agent-runner), the pop left settings-lite and
-    CLI paths with no DB or Redis source at all (`PlaceholderDbUrlError`; #4036). Every other
-    inherited value — owner-shaped DB URLs, plain-shell values — keeps the original drop
-    behavior.
-
-    Host-scope keys are never in the cluster set (their scope=host fields are per-box facts
-    with no bootstrap source: a not-yet-started runner or the test suites supply them from the
-    environment alone — MEIVA_GATEWAY_URL / MEIVA_CLUSTER_SECRET etc. — and popping them would
-    silently un-configure the fetch). The per-unit health ports and the placeholder DB URL are
-    likewise outside the cluster set: the e2e suite states its dynamic block via env only, and a
-    process tree carrying the placeholder keeps it, so popping it would replace the named
-    refusal with a no-default Settings failure.
-
-    The MACHINE-IDENTITY keys (`env_identity_keys()`: the serve-capability flags, machine
-    name/description, memory remote) get the same treatment, with one exemption: a value the
-    unit's own `.env` declares is forced in, an inherited one is DROPPED. A unit's machine
-    identity is a per-unit fact — it belongs in its own `.env` (`meiva init` writes it there),
-    never in whatever a parent process happened to inherit.
-    The leak that motivated this was real: the gateway host's login shell carries prod's
-    `~/.meiva/.env` (MEIVA_MACHINE_SERVE_GATEWAY=true among it), so a watcher child booting an
-    isolated $MEIVA_HOME with no `.env` resolved as a gateway-capable unit —
-    `config_source_is_local()` went True, the settings-lite placeholders were skipped, and the
-    authority drop then left MEIVA_DB_URL / MEIVA_REDIS_URL missing (Settings: Field required).
-    Dropping the undeclared flag makes the child fall through to its own files / False, the
-    config source stays local-bare, and the leaked flag can never reach an agent runner or
-    agent process again. The host-scoped gateway URL key (MEIVA_GATEWAY_URL) stays exempt for the
-    same reason as the host-scope keys above: a remote unit's first start writes it to
-    `.env`, but a not-yet-started runner and the test suites supply it from the environment alone, and
-    dropping that would silently un-configure the fetch.
-    """
+# meiva:note
+# Force this unit's derived env keys from its own `.env`, overriding a polluted parent
+# environment `env` (`os.environ` at the config boot).
+#
+# `load_dotenv(override=False)` leaves an already-set key untouched, which is right for most
+# config (a real env var should win). But for the cluster-isolation keys (health ports,
+# db/redis URLs, channels, gateway port/URL, secrets) it is a footgun: if the shell — or a
+# watchdog whose own env was inherited from a sibling cluster's context — already carries
+# another cluster's value, `.env` cannot correct it, so the session-env allowlist
+# (`child_env`, base/host/env/registry.py) copies the wrong value into the service's session and
+# it binds another cluster's port. Re-read the file values and set them authoritatively. On a
+# pure agent-runner this runs BEFORE the gateway config fetch
+# (`base.host.env.bootstrap.inject_config_from_gateway`, at Settings build), so a stale cluster fact
+# a pre-cutover `.env` still materializes is pushed here and then overridden by the fetched
+# value — migration-tolerant by construction.
+#
+# The complementary treatment is general: a cluster-scope alias this unit's own `.env` does
+# NOT declare is DROPPED from the environment. The drop covers every cluster-scope alias key
+# (base/host/env/registry.py — the field registry's cluster-pinned AND cluster-default aliases,
+# 163 keys): a pure agent-runner's `.env` carries no cluster data-plane keys (MEIVA_DB_URL /
+# MEIVA_REDIS_URL / MEIVA_APP_PORT / ... — they come from the gateway's /api/bootstrap at
+# Settings build), so an inherited value — a sibling cluster's .env sourced into the shell,
+# e.g. prod's MEIVA_APP_PORT=3001 — would otherwise stand and leak into every child process
+# (pytest, agent shells, scripts) and could be dialed by mistake. Dropping it lets bootstrap
+# inject the real value (runner) or the field default apply (a gateway whose .env
+# deliberately omits a key).
+#
+# One pair of undeclared keys is NOT dropped, in one context: the launcher-injected
+# data-plane projections an agent-launched tree carries — the runner DB projection
+# (`meiva_runner`-shaped URL) and the Redis URL (`urlsplit`-parseable with a host). The
+# context is the live `MEIVA_PROCESS_PROFILE=agent` marker or the value
+# a CLI entry point recorded before popping it (cli/main.py `_normalize_process_profile` →
+# `launcher_context`); with only the live marker consulted, the CLI pop made the exemption
+# unreachable and a probe run from an agent child on a pure agent-runner fell back to the
+# placeholder URL (#4334). The force loop above already refuses to let the unit's `.env` owner URL
+# replace the DB projection; the drop loop must not revoke either projection — on a unit
+# whose `.env` does not declare them (a pure agent-runner), the pop left settings-lite and
+# CLI paths with no DB or Redis source at all (`PlaceholderDbUrlError`; #4036). Every other
+# inherited value — owner-shaped DB URLs, plain-shell values — keeps the original drop
+# behavior.
+#
+# Host-scope keys are never in the cluster set (their scope=host fields are per-box facts
+# with no bootstrap source: a not-yet-started runner or the test suites supply them from the
+# environment alone — MEIVA_GATEWAY_URL / MEIVA_CLUSTER_SECRET etc. — and popping them would
+# silently un-configure the fetch). The per-unit health ports and the placeholder DB URL are
+# likewise outside the cluster set: the e2e suite states its dynamic block via env only, and a
+# process tree carrying the placeholder keeps it, so popping it would replace the named
+# refusal with a no-default Settings failure.
+#
+# The MACHINE-IDENTITY keys (`env_identity_keys()`: the serve-capability flags, machine
+# name/description, memory remote) get the same treatment, with one exemption: a value the
+# unit's own `.env` declares is forced in, an inherited one is DROPPED. A unit's machine
+# identity is a per-unit fact — it belongs in its own `.env` (`meiva init` writes it there),
+# never in whatever a parent process happened to inherit.
+# The leak that motivated this was real: the gateway host's login shell carries prod's
+# `~/.meiva/.env` (MEIVA_MACHINE_SERVE_GATEWAY=true among it), so a watcher child booting an
+# isolated $MEIVA_HOME with no `.env` resolved as a gateway-capable unit —
+# `config_source_is_local()` went True, the settings-lite placeholders were skipped, and the
+# authority drop then left MEIVA_DB_URL / MEIVA_REDIS_URL missing (Settings: Field required).
+# Dropping the undeclared flag makes the child fall through to its own files / False, the
+# config source stays local-bare, and the leaked flag can never reach an agent runner or
+# agent process again. The host-scoped gateway URL key (MEIVA_GATEWAY_URL) stays exempt for the
+# same reason as the host-scope keys above: a remote unit's first start writes it to
+# `.env`, but a not-yet-started runner and the test suites supply it from the environment alone, and
+# dropping that would silently un-configure the fetch.
+def enforce_cluster_env_authority(env: MutableMapping[str, str], home: Path) -> EnvBootResult:
     # The force/drop families come from the env registry's projections
     # (base/host/env/registry.py): cluster-scope and machine-identity aliases
     # derived from Settings metadata. Declared in .env -> force; undeclared ->
@@ -474,36 +526,45 @@ def enforce_cluster_env_authority(home: Path) -> EnvBootResult:
         "MEIVA_TELEMETRY_TEMPO_QUERY_URL",
         "MEIVA_TELEMETRY_TEMPO_ENDPOINT",
     } | set(health_port_env_aliases().values())
-    file_vals = {**dotenv_values(home / ".env"), **dotenv_values(home / "mirror.env")}
-    role = "gateway" if _is_gateway_process() else "agent"
-    _force_declared(env_keep_set(role) | _force_also, file_vals)
+    file_vals = {
+        **_dotenv_values(home / ".env", env, override=True),
+        **_dotenv_values(home / "mirror.env", env, override=True),
+    }
+    role = "gateway" if _is_gateway_process(env) else "agent"
+    _force_declared(env, env_keep_set(role) | _force_also, file_vals)
     # The drop family minus the never-drop exemptions: cluster-scope aliases the
     # unit's .env does not declare, and machine-identity keys it does not declare
     # (the env-suppliable gateway-URL pair stays exempt).
-    _drop_undeclared(env_authority_drop_set(role) - _force_also - _identity_env_only(), file_vals)
+    _drop_undeclared(
+        env,
+        env_authority_drop_set(role) - _force_also - _identity_env_only(),
+        file_vals,
+        home=home,
+    )
 
     # Gateway profile: drop agent-runner capability keys. They pull agent
     # modules, plugin registrations and API keys into the gateway (+11MB
     # resident) and, by env forwarding, its daemon sessions; /api/bootstrap reads
     # the .env FILE (base.host.env.dotenv_file.read_env_aliases), so it is unaffected.
-    if _is_gateway_process():
+    if _is_gateway_process(env):
         for key in agent_runner_cluster_aliases():
-            os.environ.pop(key, None)
-    if os.environ.get("MEIVA_PROCESS_PROFILE") == "agent":
+            env.pop(key, None)
+    if env.get("MEIVA_PROCESS_PROFILE") == "agent":
         for key in ADMIN_DATA_PLANE_ALIASES:
-            os.environ.pop(key, None)
-    return _deliver_operator_authority(file_vals.get("MEIVA_DB_URL"))
+            env.pop(key, None)
+    return _deliver_operator_authority(env, file_vals.get("MEIVA_DB_URL"), home=home)
 
 
-def _keeps_injected_db_url(file_url: str | None) -> bool:
-    """Whether the force loop leaves os.environ's MEIVA_DB_URL in place.
-
-    The injected runner projection is authoritative for an agent process; the
-    drop loop mirrors this exemption (#4334). Any process carrying a launcher-
-    delivered write generation for THIS home's endpoint keeps it too: `.env`
-    holds only the credential-free endpoint and never overwrites a delivered
-    login."""
-    return os.environ.get("MEIVA_PROCESS_PROFILE") == "agent" or _is_delivered_generation(file_url)
+# meiva:note
+# Whether the force loop leaves the environment's MEIVA_DB_URL in place.
+#
+# The injected runner projection is authoritative for an agent process; the
+# drop loop mirrors this exemption (#4334). Any process carrying a launcher-
+# delivered write generation for THIS home's endpoint keeps it too: `.env`
+# holds only the credential-free endpoint and never overwrites a delivered
+# login.
+def _keeps_injected_db_url(env: Mapping[str, str], file_url: str | None) -> bool:
+    return env.get("MEIVA_PROCESS_PROFILE") == "agent" or _is_delivered_generation(env, file_url)
 
 
 def _endpoint_key(url: str | None) -> tuple[int | None, str] | None:
@@ -518,25 +579,28 @@ def _endpoint_key(url: str | None) -> tuple[int | None, str] | None:
         return None
 
 
-def _is_delivered_generation(file_url: str | None) -> bool:
-    """Whether os.environ carries a launcher-delivered login for THIS home.
-
-    A delivery is an MEIVA_DB_URL plus the non-secret generation marker, naming
-    the same (port, database) as the home's own `.env` endpoint — so a sibling
-    cluster's leaked delivery never survives the authority pass."""
-    if not os.environ.get(_GENERATION_ENV):
+# meiva:note
+# Whether the environment carries a launcher-delivered login for THIS home.
+#
+# A delivery is an MEIVA_DB_URL plus the non-secret generation marker, naming
+# the same (port, database) as the home's own `.env` endpoint — so a sibling
+# cluster's leaked delivery never survives the authority pass.
+def _is_delivered_generation(env: Mapping[str, str], file_url: str | None) -> bool:
+    if not env.get(_GENERATION_ENV):
         return False
-    delivered = _endpoint_key(os.environ.get("MEIVA_DB_URL"))
+    delivered = _endpoint_key(env.get("MEIVA_DB_URL"))
     return delivered is not None and delivered == _endpoint_key(file_url)
 
 
-def operator_db_delivery(endpoint: str | None) -> dict[str, str] | str:
+def operator_db_delivery(
+    env: Mapping[str, str], endpoint: str | None, *, home: Path
+) -> dict[str, str] | str:
     """This operator process's gateway login on its home as environment, or why
     it holds none (`base.host.db_authority.delivery.operator_environment`). Nothing for
     a home without a ledger, or over a delivery naming this home's `endpoint`
     that the process already carries."""
-    home = resolve_meiva_home().expanduser().resolve()
-    if not endpoint or _is_delivered_generation(endpoint):
+    home = home.expanduser().resolve()
+    if not endpoint or _is_delivered_generation(env, endpoint):
         return {}
     if not (home / "db-authority" / "ledger.json").exists():
         return {}
@@ -544,28 +608,30 @@ def operator_db_delivery(endpoint: str | None) -> dict[str, str] | str:
     from base.host.db_authority.model import AuthorityRefusedError
 
     try:
-        return operator_environment(home, endpoint, launcher=launcher_context())
+        return operator_environment(home, endpoint, launcher=launcher_context(env))
     except AuthorityRefusedError as exc:
         return str(exc)
 
 
-def _deliver_operator_authority(endpoint: str | None) -> EnvBootResult:
+def _deliver_operator_authority(
+    env: MutableMapping[str, str], endpoint: str | None, *, home: Path
+) -> EnvBootResult:
     """Deliver the operator login, returning this boot's authority result."""
-    if os.environ.get(_GENERATION_ENV):
+    if env.get(_GENERATION_ENV):
         return EnvBootResult()
-    delivery = operator_db_delivery(endpoint)
+    delivery = operator_db_delivery(env, endpoint, home=home)
     if isinstance(delivery, str):
         return EnvBootResult(db_authority_refusal=delivery)
-    os.environ.update(delivery)
+    env.update(delivery)
     return EnvBootResult()
 
 
-def _keeps_undeclared_db_url(value: str | None) -> bool:
+def _keeps_undeclared_db_url(env: Mapping[str, str], value: str | None, *, home: Path) -> bool:
     """Whether the drop pass keeps an MEIVA_DB_URL the unit's `.env` omits."""
-    return _is_launcher_runner_projection(value) or is_delivered_unit_login()
+    return _is_launcher_runner_projection(env, value) or is_delivered_unit_login(env, home=home)
 
 
-def _is_gateway_process() -> bool:
+def _is_gateway_process(env: Mapping[str, str]) -> bool:
     """Whether the current process is a gateway process.
 
     Checks MEIVA_PROCESS_PROFILE — an explicit marker set by the process launcher
@@ -575,4 +641,4 @@ def _is_gateway_process() -> bool:
     Only the process that sets MEIVA_PROCESS_PROFILE=gateway triggers the
     agent-runner key drop.
     """
-    return os.environ.get("MEIVA_PROCESS_PROFILE", "") == "gateway"
+    return env.get("MEIVA_PROCESS_PROFILE", "") == "gateway"

@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import hashlib
 import shlex
+from collections.abc import Mapping
 from pathlib import Path
 from typing import cast
 from urllib.parse import urlsplit, urlunsplit
@@ -226,29 +227,32 @@ def redis_password_from_env() -> str:
     return (dotenv_values(meiva_home() / ".env").get(REDIS_PASSWORD_ENV) or "").strip()
 
 
-def runner_db_url_projection() -> str:
-    """The provider runner login for agents on a remote-managed gateway plane.
-
-    A remote-managed (provider) plane has no write generation: its agents dial
-    the provider-provisioned `meiva_runner` with the gateway `.env`'s recorded
-    provider credential, read with its URL from one current file snapshot, never
-    a cached URL combined with a newly rotated password. Only a gateway-config
-    unit projects this; a pure agent-runner's services receive their installed
-    unit capability instead (`base.host.db_authority.unit`).
-    """
+# meiva:note
+# The provider runner login for agents on a remote-managed gateway plane.
+#
+# A remote-managed (provider) plane has no write generation: its agents dial
+# the provider-provisioned `meiva_runner` with the gateway `.env`'s recorded
+# provider credential, read with its URL from one current file snapshot, never
+# a cached URL combined with a newly rotated password. Only a gateway-config
+# unit projects this; a pure agent-runner's services receive their installed
+# unit capability instead (`base.host.db_authority.unit`).
+#
+# `env` is the process environment and `env_file` one snapshot of the gateway
+# home's `.env` values (`dotenv_file.read_env_aliases`); the CLI roots that
+# start the data plane (`cli/commands/data_plane/bringup.py`,
+# `cli/commands/lifecycle/root_driver.py`) read both.
+def runner_db_url_projection(env: Mapping[str, str], *, env_file: Mapping[str, str]) -> str:
     from base.host.env.bootstrap import config_source_is_local
-    from base.host.env.dotenv_file import read_env_aliases
 
-    if not config_source_is_local():
+    if not config_source_is_local(env, env_file=env_file):
         raise RuntimeError(
             "a pure agent-runner never projects a runner login; its services receive the "
             "installed unit capability"
         )
-    aliases = read_env_aliases()
-    snapshot_url = aliases.get("MEIVA_DB_URL")
+    snapshot_url = env_file.get("MEIVA_DB_URL")
     if not snapshot_url:
         raise RuntimeError("MEIVA_DB_URL is missing from the gateway config snapshot")
-    return project_runner_db_url(snapshot_url, aliases.get(RUNNER_DB_PASSWORD_ENV) or "")
+    return project_runner_db_url(snapshot_url, env_file.get(RUNNER_DB_PASSWORD_ENV) or "")
 
 
 def project_runner_db_url(db_url: str, runner_password: str) -> str:

@@ -7,7 +7,6 @@
 "test_gate_root.py#monkeypatch.setattr services.supervision.healthchecks.gate.urllib.request.urlopen" = 1
 "test_gateway_readiness.py#monkeypatch.setattr base.config.settings.data_plane.cluster_secret" = 1
 "test_gateway_readiness.py#monkeypatch.setattr base.host.db_authority.unit.install_bundle" = 1
-"test_gateway_readiness.py#monkeypatch.setattr base.host.env.bootstrap.dial_get" = 1
 "test_meiva_root_glue_manifests.py#monkeypatch.setattr base.config.settings.gateway.gateway_graceful_shutdown_timeout_seconds" = 1
 "test_meiva_root_glue_manifests.py#monkeypatch.setattr base.paths.meiva_home" = 1
 "test_meiva_root_glue_manifests.py#monkeypatch.setattr services.supervision.roster.meiva_home" = 1

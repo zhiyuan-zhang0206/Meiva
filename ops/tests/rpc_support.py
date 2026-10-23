@@ -62,7 +62,12 @@ def rpc_harness(handler: Callable[[httpx.Request], httpx.Response]) -> RpcHarnes
 
     def access() -> GatewayAccess:
         return GatewayAccess(
-            gateway_url="http://gateway", cluster_secret=RPC_TEST_CREDENTIAL, remote_plane=False
+            gateway_url="http://gateway",
+            cluster_secret=RPC_TEST_CREDENTIAL,
+            remote_plane=False,
+            machine_token=None,
+            launcher_profile=None,
+            gateway_home=False,
         )
 
     return RpcHarness(

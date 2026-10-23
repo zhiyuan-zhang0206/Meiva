@@ -14,6 +14,8 @@ from pydantic import ValidationError
 
 from base.agents.sdk import call_policy
 from base.agents.sdk.call_policy import SamplingPolicy
+from base.host.env.boot_policy import BootstrapFetch
+from base.host.env.tests.env_files import constant, env_path_of
 
 
 @pytest.mark.parametrize("gateway", [True, False])
@@ -23,9 +25,9 @@ def test_local_policy_reads_live_file(
     from base.host.env import bootstrap, dotenv_file
 
     env_file = tmp_path / ".env"
-    monkeypatch.setattr(bootstrap, "config_source_is_local", lambda: gateway)
-    monkeypatch.setattr(bootstrap, "should_fetch_from_gateway", lambda: False)
-    monkeypatch.setattr(dotenv_file, "env_file_path", lambda: env_file)
+    monkeypatch.setattr(bootstrap, "config_source_is_local", constant(gateway))
+    monkeypatch.setattr(bootstrap, "should_fetch_from_gateway", constant(False))
+    monkeypatch.setattr(dotenv_file, "env_file_path", env_path_of(env_file))
     env_file.write_text("MEIVA_SDK_CALL_SAMPLING_ENABLED=true\nMEIVA_SDK_CALL_SAMPLE_EVERY=4\n")
     assert call_policy.read_policy() == SamplingPolicy(sampling_enabled=True, sample_every=4)
     env_file.write_text("MEIVA_SDK_CALL_SAMPLING_ENABLED=false\nMEIVA_SDK_CALL_SAMPLE_EVERY=7\n")
@@ -106,8 +108,8 @@ def test_ratio_rejects_invalid_values(value: Any) -> None:
 def test_enrolled_process_reads_gateway_policy(monkeypatch: pytest.MonkeyPatch) -> None:
     from base.host.env import bootstrap
 
-    monkeypatch.setattr(bootstrap, "config_source_is_local", lambda: False)
-    monkeypatch.setattr(bootstrap, "should_fetch_from_gateway", lambda: True)
+    monkeypatch.setattr(bootstrap, "config_source_is_local", constant(False))
+    monkeypatch.setattr(bootstrap, "should_fetch_from_gateway", constant(True))
     requests: list[dict[str, Any]] = []
 
     def fetch(_url: str, **kwargs: Any) -> dict[str, str]:
@@ -116,7 +118,7 @@ def test_enrolled_process_reads_gateway_policy(monkeypatch: pytest.MonkeyPatch) 
 
     monkeypatch.setattr(bootstrap, "fetch_bootstrap_config", fetch)
     assert call_policy.read_policy() == SamplingPolicy(sampling_enabled=True, sample_every=2)
-    assert requests == [{"timeout": 2.0, "attempts": 1}]
+    assert requests == [{"bearer": None, "tuning": BootstrapFetch(timeout_s=2.0, attempts=1)}]
 
 
 def _http_failure(status: int) -> httpx.HTTPStatusError:

@@ -49,7 +49,7 @@ def count_events(since: datetime) -> int:
     from base.host.net.auth import delivered_token
 
     env_file = Path(meiva_home()) / ".env"
-    secret = delivered_token() or ""
+    secret = delivered_token(os.environ) or ""
     if not secret and env_file.exists():
         for line in env_file.read_text().splitlines():
             if line.startswith("MEIVA_CLUSTER_SECRET="):

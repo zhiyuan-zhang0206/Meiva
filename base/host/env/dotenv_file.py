@@ -150,35 +150,35 @@ def snapshot_env(path: Path, *, keep: int = ENV_BACKUP_KEEP) -> Path | None:
         return None
 
 
-def unit_home() -> Path:
-    """$MEIVA_HOME directory, created if missing.
+# meiva:note
+# The `.env` of the unit whose home is `home` — the single config source of truth.
+#
+# Pure: the home is a value. A composition root resolves it once
+# (`base.paths.home.resolve_meiva_home()`) and passes it down.
+def env_file_path(home: Path) -> Path:
+    return home / ".env"
 
-    Routed through `base.paths.home.resolve_meiva_home()`: callers run before
-    `load_meiva_env` pins `MEIVA_HOME` into the environment (the Settings-lite
-    maintenance commands defer it — see `base.host.env.bootstrap._serve_flag`)."""
+
+# meiva:note
+# The `.env` of this process's own home: the ambient door for a composition root.
+#
+# Code below a root takes the home or the `.env` path as a value (`env_file_path(home)`).
+def process_env_file() -> Path:
     from base.paths.home import resolve_meiva_home
 
-    root = resolve_meiva_home()
-    root.mkdir(parents=True, exist_ok=True)
-    return root
+    return env_file_path(resolve_meiva_home())
 
 
-def env_file_path() -> Path:
-    """This unit's `.env` — the single config source of truth."""
-    return unit_home() / ".env"
-
-
-def read_env_aliases() -> dict[str, str]:
-    """Raw `{ALIAS: value}` currently set in this unit's `.env` file.
-
-    Reads the FILE (not `os.environ`), so a value written since process start is
-    reflected — the gateway can serve a freshly-edited value without restarting
-    itself. Absent file -> `{}`. A bare key with no value is dropped.
-    """
-    path = env_file_path()
-    if not path.exists():
+# meiva:note
+# Raw `{ALIAS: value}` currently set in the `.env` file at `env_path`.
+#
+# Reads the FILE (not `os.environ`), so a value written since process start is
+# reflected — the gateway can serve a freshly-edited value without restarting
+# itself. Absent file -> `{}`. A bare key with no value is dropped.
+def read_env_aliases(env_path: Path) -> dict[str, str]:
+    if not env_path.exists():
         return {}
-    return {k: v for k, v in dotenv_values(path).items() if v is not None}
+    return {k: v for k, v in dotenv_values(env_path).items() if v is not None}
 
 
 class EnvAudit(Protocol):

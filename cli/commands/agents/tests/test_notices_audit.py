@@ -13,7 +13,14 @@ from base.cluster.machine import GatewayAccess, gateway_auth_headers
 from cli.commands.agents.notices_audit import cmd_notices_audit, render_json, render_text
 
 _CLUSTER_AUTH = "audit-test-value"
-_ACCESS = GatewayAccess(gateway_url="http://gw", cluster_secret=_CLUSTER_AUTH, remote_plane=False)
+_ACCESS = GatewayAccess(
+    gateway_url="http://gw",
+    cluster_secret=_CLUSTER_AUTH,
+    remote_plane=False,
+    machine_token=None,
+    launcher_profile=None,
+    gateway_home=False,
+)
 
 _LAST_DAY = (datetime(2026, 10, 2, tzinfo=UTC) - timedelta(days=1)).date().isoformat()
 

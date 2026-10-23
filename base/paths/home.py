@@ -1,44 +1,68 @@
-"""The home directory a process acts on, and which checkout may operate it.
+# meiva:note
+# The home directory a process acts on, and which checkout may operate it.
+#
+# `home_from_env` is pure over the values it is given; `resolve_meiva_home` and
+# `default_home` are the ambient readers of `os.environ` and `Path.home()` that a
+# composition root calls once. Everything that needs `$MEIVA_HOME`
+# (the `.env` boot, the path helpers, the CLI's pre-Settings gate) can import this
+# module without Settings, a log sink or a database.
 
-Pure `os.environ` and `Path` reads, so everything that needs `$MEIVA_HOME` (the `.env`
-boot, the path helpers, the CLI's pre-Settings gate) can import it without
-Settings, a log sink or a database.
-"""
 
 from __future__ import annotations
 
 import os
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from pathlib import Path
 
 __all__ = [
     "default_home",
     "home_checkout_error",
+    "home_from_env",
     "is_default_home",
     "is_prod_install",
     "resolve_meiva_home",
 ]
 
 
-def resolve_meiva_home() -> Path:
-    """This process's home: `$MEIVA_HOME` when set, else `~/.meiva`.
-
-    Read on every call — never cached — so a caller that changes the variable
-    (a test session, a tool that sets it once at its top) is followed by every
-    later call. The path is neither created nor checked here
-    (`base.paths.meiva_home` creates it).
-
-    Raises:
-        ValueError: `$MEIVA_HOME` is not an absolute path; a relative home would
-            follow the working directory.
-    """
-    env = os.environ.get("MEIVA_HOME")
-    if not env:
-        return Path.home() / ".meiva"
-    home = Path(env).expanduser()
+# meiva:note
+# The home `env` names: `MEIVA_HOME` when set and non-empty, else `<user_home>/.meiva`.
+#
+# Pure: the user's home directory is a value too, so a leading `~` in `MEIVA_HOME`
+# expands against `user_home`, never against the process's own `HOME`. A `~user`
+# spelling is not a home and is refused like any other non-absolute path.
+#
+# Raises:
+#     ValueError: `MEIVA_HOME` is not an absolute path; a relative home would
+#         follow the working directory.
+def home_from_env(env: Mapping[str, str], *, user_home: Path) -> Path:
+    raw = env.get("MEIVA_HOME")
+    if not raw:
+        return user_home / ".meiva"
+    if raw == "~":
+        home = user_home
+    elif raw.startswith("~/"):
+        home = user_home / raw[2:]
+    else:
+        home = Path(raw)
     if not home.is_absolute():
-        raise ValueError(f"MEIVA_HOME must be an absolute path, got {env!r}")
+        raise ValueError(f"MEIVA_HOME must be an absolute path, got {raw!r}")
     return home
+
+
+# meiva:note
+# This process's home: `$MEIVA_HOME` when set, else `~/.meiva`.
+#
+# The ambient reader for composition roots (process entry points and CLI command
+# entries): it reads `os.environ` and `Path.home()` on every call, never cached,
+# so a caller that changes the variable (a test session, a tool that sets it once
+# at its top) is followed by every later call. Code below a root takes the home
+# (or `home_from_env`'s inputs) as a value. The path is neither created nor checked
+# here (`base.paths.meiva_home` creates it).
+#
+# Raises:
+#     ValueError: `$MEIVA_HOME` is not an absolute path.
+def resolve_meiva_home() -> Path:
+    return home_from_env(os.environ, user_home=Path.home())
 
 
 # meiva:note
@@ -67,10 +91,11 @@ def home_checkout_error(repo: Path, *, home: Path) -> str | None:
     )
 
 
+# meiva:note
+# The default (prod) cluster home, `~/.meiva` — the one home whose initialization
+# uses the fixed default port block and whose checkout anchors without a
+# pointer. The ambient reader for composition roots.
 def default_home() -> Path:
-    """The default (prod) cluster home, `~/.meiva` — the one home whose initialization
-    uses the fixed default port block and whose checkout anchors without a
-    pointer."""
     return Path.home() / ".meiva"
 
 

@@ -27,9 +27,9 @@ def load_skill_names(provider_roots: Sequence[Path] = ()) -> list[Skill]:
 def _commands_enabled() -> bool:
     if settings.has_domain("agent"):
         return settings.agent.commands_enabled
-    from base.host.env.dotenv_file import read_env_aliases
+    from base.host.env.dotenv_file import process_env_file, read_env_aliases
 
-    value = read_env_aliases().get("MEIVA_COMMANDS_ENABLED")
+    value = read_env_aliases(process_env_file()).get("MEIVA_COMMANDS_ENABLED")
     if value is None:
         return True
     return value.strip().lower() in {"1", "true", "yes", "on"}

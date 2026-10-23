@@ -118,14 +118,14 @@ def _deliver_lite_api_token() -> None:
     descendant must keep its delivered authority boundary, even when a token is
     missing; no source leaves the existing bearer behavior in place.
     """
-    from base.host.env.bootstrap import config_source_is_local
-    from base.host.env.dotenv_boot import launcher_context
+    from base.host.env.bootstrap import config_source_is_local, launcher_context
+    from base.host.env.dotenv_file import process_env_file, read_env_aliases
     from base.host.net.auth import API_TOKEN_ENV
     from base.paths.home import resolve_meiva_home
 
-    if os.environ.get(API_TOKEN_ENV) or launcher_context() is not None:
+    if os.environ.get(API_TOKEN_ENV) or launcher_context(os.environ) is not None:
         return
-    if config_source_is_local():
+    if config_source_is_local(os.environ, env_file=read_env_aliases(process_env_file())):
         return
 
     from base.host.db_authority.model import AuthorityRefusedError

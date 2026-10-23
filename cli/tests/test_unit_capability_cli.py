@@ -19,6 +19,7 @@ from base.host.db_authority import delivery, unit
 from base.host.env import bootstrap
 from base.packages.plugin_providers import build_model_catalog
 from base.packages.plugins.config_registration import plugin_bootstrap_config
+from base.paths.tests.homes import point_home
 from cli import start_intent
 from cli.commands.cluster import unit_join
 from cli.commands.data_plane import bringup
@@ -32,10 +33,12 @@ configured = _single_box.configured
 born = _single_box.born
 
 
-def _serve_on_loopback(monkeypatch: pytest.MonkeyPatch, born: Born) -> ConfigAuthority:
-    from base.host.env import dotenv_file
+def _never_local(*_args: object, **_kwargs: object) -> bool:
+    return False
 
-    monkeypatch.setattr(dotenv_file, "unit_home", lambda: born.home)
+
+def _serve_on_loopback(monkeypatch: pytest.MonkeyPatch, born: Born) -> ConfigAuthority:
+    point_home(monkeypatch, born.home)
     monkeypatch.setattr(config.settings.general, "machine_host", "localhost")
     monkeypatch.setitem(os.environ, "MEIVA_MACHINE_SERVE_GATEWAY", "true")
     complete = config.settings if config.settings.profile is None else config.Settings(profile=None)
@@ -82,7 +85,10 @@ def _install_on_initialized_unit(bundle: Path, key: str) -> None:
 
 
 def test_issued_bundle_starts_a_runner_that_connects_as_the_generation_login(
-    born: Born, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    born: Born,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     bootstrap_authority = _serve_on_loopback(monkeypatch, born)
     monkeypatch.setattr(settings.data_plane, "cluster_secret", HUMAN)
@@ -132,7 +138,7 @@ def test_issued_bundle_starts_a_runner_that_connects_as_the_generation_login(
         assert conn.execute("SELECT count(*) FROM agents_meta").fetchone() is not None
     with monkeypatch.context() as scoped:
         scoped.setenv("MEIVA_HOME", str(runner))
-        scoped.setattr("base.host.env.bootstrap.config_source_is_local", lambda: False)
+        scoped.setattr("base.host.env.bootstrap.config_source_is_local", _never_local)
         assert bringup.db_delivery("runner", remote_data_plane=False) == {
             "MEIVA_DB_URL": capability.dsn,
             delivery.GENERATION_ENV: "0",

@@ -114,7 +114,6 @@ def restart_command_environment(
     monkeypatch.setattr(_repo_commands, "assert_schema_current_or_die", lambda _db_url: 0)  # pyright: ignore[reportUnknownArgumentType]
     # Root service preparation must not install frontend dependencies in unit tests.
     from cli.commands import _repo
-    from cli.commands.lifecycle import root_driver
 
     monkeypatch.setattr(_repo, "ensure_frontend_deps", lambda _repo: None)  # pyright: ignore[reportUnknownArgumentType]
 
@@ -124,7 +123,7 @@ def restart_command_environment(
     def _fixture_runner_url() -> str:
         return "postgresql://meiva_runner:test-runner@127.0.0.1:1/meiva_citest"
 
-    monkeypatch.setattr(root_driver, "runner_db_url_projection", _fixture_runner_url)
+    monkeypatch.setattr(bringup, "runner_db_url", _fixture_runner_url)
 
 
 @pytest.fixture(autouse=True)

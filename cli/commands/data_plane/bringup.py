@@ -319,6 +319,31 @@ def db_endpoint() -> str:
     return endpoint
 
 
+# meiva:note
+# Whether this unit's config source is its own `.env` (a gateway home), read from the
+# process environment and the home's `.env` at this CLI door.
+def _config_source_is_local() -> bool:
+    from base.host.env.bootstrap import config_source_is_local, process_environment
+    from base.host.env.dotenv_file import process_env_file, read_env_aliases
+
+    return config_source_is_local(
+        process_environment(), env_file=read_env_aliases(process_env_file())
+    )
+
+
+# meiva:note
+# The provider runner login that agents on a remote-managed plane dial: the projection
+# of this process's environment and its gateway home's `.env`.
+def runner_db_url() -> str:
+    from base.cluster.derive import runner_db_url_projection
+    from base.host.env.bootstrap import process_environment
+    from base.host.env.dotenv_file import process_env_file, read_env_aliases
+
+    return runner_db_url_projection(
+        process_environment(), env_file=read_env_aliases(process_env_file())
+    )
+
+
 def db_delivery(cls: DbAccess, *, remote_data_plane: bool) -> dict[str, str]:
     """The launch-environment database delivery for one service of class `cls`.
 
@@ -331,9 +356,8 @@ def db_delivery(cls: DbAccess, *, remote_data_plane: bool) -> dict[str, str]:
     provider projection.
     """
     from base.host.db_authority.delivery import GENERATION_ENV, write_grant
-    from base.host.env.bootstrap import config_source_is_local
 
-    if not config_source_is_local():
+    if not _config_source_is_local():
         from base.host.db_authority.unit import unit_delivery
 
         if cls != "runner":
@@ -355,9 +379,8 @@ def api_delivery(cls: DbAccess, *, remote_data_plane: bool) -> dict[str, str]:
     nothing; its gateway-local services present the human secret.
     """
     from base.host.db_authority.api import API_TOKEN_ENV, api_token
-    from base.host.env.bootstrap import config_source_is_local
 
-    if not config_source_is_local():
+    if not _config_source_is_local():
         from base.host.db_authority.unit import unit_api_delivery
 
         if cls != "runner":
@@ -502,9 +525,7 @@ def complete_gateway_data_plane(
     if config.is_remote:
         if refresh_schema:
             prepare_memory_vectors(config, database_factory=database_factory)
-        from base.cluster.derive import runner_db_url_projection
-
-        urls = [config.db_url, runner_db_url_projection()]
+        urls = [config.db_url, runner_db_url()]
         for url in urls:
             if error := probe_postgres(url):
                 raise RuntimeError(f"consumer database readiness failed: {error}")

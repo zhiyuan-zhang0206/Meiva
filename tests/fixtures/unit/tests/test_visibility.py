@@ -68,7 +68,7 @@ def test_guarded_pure_case(request):
     assert "meiva" not in sys.modules
     assert "meiva.sdk_surface.install" not in sys.modules
     assert {"base.config", "base.db", "base.telemetry", "cli.commands.probe"}.isdisjoint(sys.modules)
-    assert {"_restore_agent_identity", "_restore_metering", "_guard_bootstrap_fetch",
+    assert {"_restore_agent_identity", "_restore_metering",
             "_guard_process_exec", "_guard_permissions_helper_native_io"} <= set(request.fixturenames)
     assert request.getfixturevalue("sdk_identity") is None
 """
