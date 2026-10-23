@@ -25,10 +25,24 @@ process runs on Linux, because the platform comes from `Host`, never from
 
 ## Rule 1 — the process platform
 
-`sys.platform`, `os.name`, `Host.system()`, `Platform.current()`, and the tree's
-own `is_macos()` / `is_linux()` predicates read the platform of the process that
-happens to run the test. The predicates are covered because they reach the same
-read underneath: exempting them by name would leave the fact one call deeper. A test that needs one platform's behavior
+`sys.platform`, `os.name`, `Host.system()`, `Platform.current()`, the tree's own
+`is_macos()` / `is_linux()` predicates, and the six host calls of the standard
+`platform` module — `platform.system()`, `platform.platform()`, `platform.uname()`,
+`platform.release()`, `platform.mac_ver()`, `platform.win32_ver()` — read the
+platform of the process that happens to run the test. The predicates are covered
+because they reach the same read underneath: exempting them by name would leave
+the fact one call deeper.
+
+`platform` is a bounded module, so this list is finite rather than a snapshot.
+`platform.python_version()` and `platform.python_implementation()` are **not**
+covered: the interpreter version is not a host fact. `platform.machine()` is
+**not** covered either: it answers the architecture, and no marker carries that
+dimension, so counting it would only produce noise.
+
+**The boundary:** a dynamically named read — `getattr(platform, "system")`,
+`importlib.import_module("platform")`, an aliased `import platform as p` — is
+outside this rule. Static analysis cannot see the name, and a boundary written
+down is not the same thing as a gap discovered later. A test that needs one platform's behavior
 injects a `Host` with that platform. When the subject itself only exists there —
 launchd, TCC, codesign, swiftc — the test carries
 `@pytest.mark.requires_host("darwin")`, which `tests/fixtures/host_platform.py`
