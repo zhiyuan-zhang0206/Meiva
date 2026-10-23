@@ -12,4 +12,5 @@ exports = ["alert_classes.py", "bootstrap.py", "harness_probe.py", "machine_paus
 
 [purity]
 "__init__.py" = "strict"
+"_roster_rows.py" = "strict"
 "schemas.py" = "strict"

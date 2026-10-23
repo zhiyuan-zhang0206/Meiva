@@ -18,20 +18,20 @@ Coverage:
     the elif header and silently lost AIMessage is exactly this kind of bug)
 """
 
-import os
-from unittest.mock import patch
+from dataclasses import replace
 
 import psycopg
 import pytest
 from fastapi.testclient import TestClient
 from langchain_core.messages import BaseMessage, HumanMessage
 
+from base.agents.history.checkpoint import CheckpointReadError
 from base.agents.history.timeline import TimelineItem, build_timeline_items
 from base.agents.history.timeline_inputs import TimelineReadInputs
 from base.clock import Clock
 from base.config import settings
 from base.db import create_agent
-from gateway.tests.auth.gateway_config import gateway_test_client
+from gateway.tests.auth.gateway_config import GatewayTestClient, gateway_test_client
 
 _TIMELINE_INPUTS = TimelineReadInputs(
     Clock.from_settings, lambda: settings.general.message_timestamps
@@ -43,7 +43,7 @@ def test_client(db_conn: psycopg.Connection):
     """TestClient + lifespan. db_conn's TRUNCATE runs before the lifespan —
     the DB pool reuses the same test library (settings.data_plane.db_url is
     already replaced by conftest)."""
-    with patch.dict(os.environ), gateway_test_client() as client:
+    with gateway_test_client() as client:
         yield client
 
 
@@ -242,7 +242,7 @@ class TestMeivaMsgTypeDispatch:
         # Do not assert log content — avoid coupling with logger implementation details
 
 
-def _items(*ids: str) -> list[TimelineItem]:
+def timeline_items(*ids: str) -> list[TimelineItem]:
     return [TimelineItem(item_id=i, kind="agent_chat", payload=i) for i in ids]
 
 
@@ -346,7 +346,6 @@ class TestTimelineFailLoud:
     def test_dispatch_error_propagates_as_500(
         self,
         db_conn: psycopg.Connection,
-        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """Any logic error in the dispatch layer (NameError / KeyError / custom helper raise)
         must propagate as endpoint 500 — must not be swallowed into 200 + empty list.
@@ -360,8 +359,6 @@ class TestTimelineFailLoud:
         the HTTP-layer 500 status, so disable re-raise to let FastAPI run the default error
         middleware and return 500.
         """
-        from gateway.agents.history import timeline as gateway_timeline
-
         tid = create_agent(db_conn)
         self._put_minimal_aimessage(tid)
 
@@ -370,8 +367,10 @@ class TestTimelineFailLoud:
                 "simulated dispatch failure (e.g. NameError when refactor forgot import)"
             )
 
-        monkeypatch.setattr(gateway_timeline, "build_timeline_items", boom)  # pyright: ignore[reportUnknownArgumentType]
-        with patch.dict(os.environ), gateway_test_client(raise_server_exceptions=False) as client:
+        with gateway_test_client(raise_server_exceptions=False) as client:
+            client.app.state.timeline_policy = replace(
+                client.app.state.timeline_policy, render_items=boom
+            )
             resp = client.get(f"/api/agents/{tid}/timeline")
         assert resp.status_code == 500, (
             f"dispatch error must fail-loud as 500, got {resp.status_code}: {resp.text[:200]}"
@@ -380,24 +379,23 @@ class TestTimelineFailLoud:
     def test_io_error_returns_unavailable_instead_of_empty_success(
         self,
         db_conn: psycopg.Connection,
-        test_client: TestClient,
-        monkeypatch: pytest.MonkeyPatch,
+        test_client: GatewayTestClient,
     ) -> None:
         """A failed store read must not look like a successfully empty conversation."""
 
         tid = create_agent(db_conn)
         attempts: list[object] = []
-        # Fail at the adapter's tuple read to simulate a database disruption.
         from typing import NoReturn
 
-        def fail_read(_saver: object, config: object) -> NoReturn:
-            attempts.append(config)
-            raise OSError("simulated DB connection lost")
+        def fail_read(_db: object, agent_id: int) -> NoReturn:
+            attempts.append(agent_id)
+            raise CheckpointReadError("simulated DB connection lost") from OSError(
+                "simulated DB connection lost"
+            )
 
-        # load_checkpoint_messages imports the adapter inside the function.
-        import base.agents.history.checkpoint_postgres_walks as ckpt_mod
-
-        monkeypatch.setattr(ckpt_mod.HistoryPostgresSaver, "get_tuple", fail_read)
+        test_client.app.state.timeline_policy = replace(
+            test_client.app.state.timeline_policy, load_messages=fail_read
+        )
         resp = test_client.get(f"/api/agents/{tid}/timeline")
         assert resp.status_code == 503
         problem = resp.json()

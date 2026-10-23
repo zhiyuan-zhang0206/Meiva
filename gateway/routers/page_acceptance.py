@@ -19,7 +19,7 @@ from gateway.http.auth.request_principal import (
     PrincipalScopeError,
     principal_key,
 )
-from gateway.schemas.pages import PageRegisterRequest
+from gateway.schemas import PageRegisterRequest
 from ops.pages import (
     PagePortConflictError,
     PageTargetChangedError,

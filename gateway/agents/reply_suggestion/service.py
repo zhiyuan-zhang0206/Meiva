@@ -8,11 +8,9 @@ from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
-from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
+from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import ValidationError
 
-from base.agents.history.timeline import TimelineItem, build_timeline_items
-from base.agents.history.timeline_inputs import TimelineReadInputs
 from base.api_contracts.agent_contract import AgentStatus
 from base.lm.call import extract_text
 from base.lm.catalog import ModelCatalog
@@ -21,7 +19,11 @@ from base.lm.compat.stop import StopCategory, classify_stop
 from base.lm.errors import ErrorClass, classify_error, normalize_provider_transport_error
 from base.lm.usage import log_usage_from_message
 from base.log import logger
-from gateway.agents.reply_suggestion.excerpt import ConversationExcerpt, build_excerpt
+from gateway.agents.reply_suggestion.excerpt import (
+    ConversationExcerpt,
+    ExcerptItem,
+    build_excerpt,
+)
 from gateway.agents.reply_suggestion.schemas import (
     DraftReplies,
     ReplySuggestionResponse,
@@ -57,11 +59,18 @@ def draft_instruction(max_candidates: int) -> str:
     )
 
 
-LoadMessages = Callable[[int], Sequence[BaseMessage]]
+LoadTimeline = Callable[[int], Sequence[ExcerptItem]]
 AgentStatusReader = Callable[[int], AgentStatus]
 DecideCall = Callable[..., Awaitable[Mapping[str, Decision]]]
 DraftModelFactory = Callable[[str, ModelCatalog], Any]
 UsageLogger = Callable[..., object]
+
+
+@dataclass(frozen=True)
+class DraftRuntime:
+    draft_model: DraftModelFactory
+    log_usage: UsageLogger = log_usage_from_message
+    monotonic: Callable[[], float] = time.monotonic
 
 
 @dataclass(frozen=True)
@@ -101,21 +110,19 @@ class ReplySuggestionService:
         *,
         policy: ReplySuggestionPolicy,
         catalog_reader: Callable[[], ModelCatalog],
-        rendering: TimelineReadInputs,
-        load_messages: LoadMessages,
+        load_timeline: LoadTimeline,
         agent_status: AgentStatusReader,
         decide: DecideCall,
-        draft_model: DraftModelFactory,
-        log_usage: UsageLogger = log_usage_from_message,
+        draft: DraftRuntime,
     ) -> None:
         self._policy = policy
         self._catalog_reader = catalog_reader
-        self._rendering = rendering
-        self._load_messages = load_messages
+        self._load_timeline = load_timeline
         self._agent_status = agent_status
         self._decide = decide
-        self._draft_model = draft_model
-        self._log_usage = log_usage
+        self._draft_model = draft.draft_model
+        self._log_usage = draft.log_usage
+        self._monotonic = draft.monotonic
         self._cache: OrderedDict[tuple[int, str], ReplySuggestionResponse] = OrderedDict()
 
     async def suggest(self, agent_id: int) -> ReplySuggestionResponse:
@@ -141,9 +148,7 @@ class ReplySuggestionService:
         return result
 
     def _excerpt(self, agent_id: int) -> ConversationExcerpt | None:
-        messages = self._load_messages(agent_id)
-        items: list[TimelineItem]
-        items, _ = build_timeline_items(messages, inputs=self._rendering)
+        items = self._load_timeline(agent_id)
         return build_excerpt(items, self._policy.max_input_tokens())
 
     def _remember(self, key: tuple[int, str], result: ReplySuggestionResponse) -> None:
@@ -202,7 +207,7 @@ class ReplySuggestionService:
             strict=True,
             include_raw=True,
         )
-        started = time.monotonic()
+        started = self._monotonic()
         try:
             response = await llm.ainvoke(
                 [
@@ -224,7 +229,7 @@ class ReplySuggestionService:
             response["raw"],
             model=model_id,
             usage_kind=DRAFT_USAGE_KIND,
-            latency_ms=(time.monotonic() - started) * 1000,
+            latency_ms=(self._monotonic() - started) * 1000,
             for_agent_id=agent_id,
             catalog=catalog,
         )

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import replace
+
 import psycopg
 import pytest
 from langchain_core.messages import BaseMessage
@@ -211,11 +213,8 @@ class TestTimelineCompactHistoryBoundaries(CompactHistoryCases):
         self,
         db_conn: psycopg.Connection,
         test_client: GatewayTestClient,
-        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         from langchain_core.messages import AIMessage
-
-        import gateway.agents.history.timeline as timeline_router
 
         tid = create_agent(db_conn)
         self._put_checkpoint(
@@ -229,7 +228,9 @@ class TestTimelineCompactHistoryBoundaries(CompactHistoryCases):
             requested_limits.append(limit)
             return []
 
-        monkeypatch.setattr(timeline_router, "list_compact_boundary_checkpoint_ids", boundary_ids)
+        test_client.app.state.timeline_policy = replace(
+            test_client.app.state.timeline_policy, list_boundary_ids=boundary_ids
+        )
         test_client.app.state.config_authority.runtime.gateway.timeline_compact_history = 3
         response = test_client.get(f"/api/agents/{tid}/timeline")
 
@@ -304,11 +305,8 @@ class TestTimelineCompactHistoryBoundaries(CompactHistoryCases):
         self,
         db_conn: psycopg.Connection,
         test_client: GatewayTestClient,
-        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         from langchain_core.messages import AIMessage
-
-        import gateway.agents.history.timeline as timeline_router
 
         tid = create_agent(db_conn)
         boundary_id = self._put_checkpoint(
@@ -324,7 +322,9 @@ class TestTimelineCompactHistoryBoundaries(CompactHistoryCases):
         def fail_current_read(_db: object, _agent_id: int) -> list[BaseMessage]:
             raise AssertionError("historical paging must not deserialize the live segment")
 
-        monkeypatch.setattr(timeline_router, "load_checkpoint_messages", fail_current_read)
+        test_client.app.state.timeline_policy = replace(
+            test_client.app.state.timeline_policy, load_messages=fail_current_read
+        )
 
         page = test_client.get(
             f"/api/agents/{tid}/timeline",

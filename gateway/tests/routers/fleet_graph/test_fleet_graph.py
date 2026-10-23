@@ -24,8 +24,9 @@ from psycopg import errors as pg_errors
 
 from base.events.live.tests.fakes import patch_sync_redis
 from base.events.reads import audit_rows
-from gateway.tests.auth.gateway_config import gateway_test_client
-from gateway.tests.routers.fleet_graph.staleness_support import use_heartbeat_age
+from gateway.tests.routers.fleet_graph.staleness_support import (
+    fleet_graph_client as gateway_test_client,
+)
 from services.upkeep.events_maintenance import rollup
 
 
@@ -47,17 +48,6 @@ def _seed_agent(
         )
     db_conn.commit()
     return new_id
-
-
-def _fresh_heartbeat_age(pool: object, *, now: datetime) -> float:
-    del pool, now
-    return 30.0
-
-
-@pytest.fixture(autouse=True)
-def _fresh_telemetry_heartbeat(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Existing route tests describe fresh-source behavior."""
-    use_heartbeat_age(monkeypatch, _fresh_heartbeat_age)
 
 
 def _usage(
@@ -111,14 +101,12 @@ def _event(
 
 
 def test_decay_lambda_comes_from_display_config(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    db_conn: psycopg.Connection,
 ) -> None:
     """Omitted `?decay_lambda=` is settings.display.fleet_graph_decay_lambda
     (``MEIVA_FLEET_GRAPH_DECAY_LAMBDA``); the literal 0.5 is only that field's
     default, not a hard-coded decay constant. A zero decay keeps an old message
     edge above the 0.01 drop threshold."""
-    from base.config import settings
-
     source = _seed_agent(db_conn)
     target = _seed_agent(db_conn)
     _event(
@@ -129,8 +117,8 @@ def test_decay_lambda_comes_from_display_config(
         age_hours=360,
     )
 
-    monkeypatch.setattr(settings.display, "fleet_graph_decay_lambda", 0.0)
     with gateway_test_client() as client:
+        client.app.state.config_authority.runtime.display.fleet_graph_decay_lambda = 0.0
         resp = client.get("/api/fleet/graph")
 
     assert resp.status_code == 200, resp.text

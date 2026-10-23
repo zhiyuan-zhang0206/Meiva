@@ -1,11 +1,9 @@
-"""`_event_metrics.points` evaluates the registry's LogQL templates on the event record."""
-
 from __future__ import annotations
 
 import json
 import uuid
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any, Literal
 
 import psycopg
 import pytest
@@ -22,7 +20,7 @@ def _put(
     name: str,
     *,
     minutes_before_stop: float,
-    table: str = "telemetry_events",
+    table: Literal["telemetry_events", "audit_events"] = "telemetry_events",
     agent_id: int = 7,
     level: str = "info",
     attributes: dict[str, Any] | None = None,
@@ -34,7 +32,7 @@ def _put(
     )
     query = f"INSERT INTO {table} {columns}{extra_columns}) {values}{extra_values})"
     db.execute(
-        query,  # type: ignore[arg-type]
+        query,
         (
             uuid.uuid4().int % (1 << 62),
             _STOP,
@@ -56,7 +54,7 @@ def test_a_ratio_counts_each_window_that_ends_at_a_step(db_conn: psycopg.Connect
     _put(db_conn, "turn_end", minutes_before_stop=10, attributes={"ok": True})
     _put(db_conn, "turn_end", minutes_before_stop=20, attributes={"ok": False})
     _put(db_conn, "turn_end", minutes_before_stop=30, attributes={"ok": True})
-    _put(db_conn, "turn_end", minutes_before_stop=100, attributes={"ok": True})  # previous hour
+    _put(db_conn, "turn_end", minutes_before_stop=100, attributes={"ok": True})
 
     ratio = _eval(
         db_conn,
@@ -67,13 +65,13 @@ def test_a_ratio_counts_each_window_that_ends_at_a_step(db_conn: psycopg.Connect
 
     assert ratio[_STOP] == pytest.approx(200 / 3)
     assert ratio[_STOP - timedelta(hours=1)] == pytest.approx(100.0)
-    assert _START not in ratio  # no row in its window: the denominator is zero
+    assert _START not in ratio
 
 
 def test_a_constant_divisor_and_a_window_shorter_than_the_step(db_conn: psycopg.Connection) -> None:
     _put(db_conn, "turn_end", minutes_before_stop=2)
     _put(db_conn, "turn_end", minutes_before_stop=3)
-    _put(db_conn, "turn_end", minutes_before_stop=30)  # outside the 5m window
+    _put(db_conn, "turn_end", minutes_before_stop=30)
 
     rate = _eval(
         db_conn,
@@ -117,7 +115,6 @@ def test_filters_on_level_agent_regex_and_not_equal(db_conn: psycopg.Connection)
     assert count('attributes_body =~ ".*-> 0 kept.*" | agent_id="7"') == 1
     assert count('level="error"') == 1
     assert count('attributes_body!=""') == 3
-    # a row with no body is not a match, so it stays in
     assert count('attributes_body !~ ".*0 kept.*" | agent_id="7"') == 2
 
 

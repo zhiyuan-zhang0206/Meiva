@@ -5,14 +5,34 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
+from typing import Protocol
 
-from base.agents.history.timeline import TimelineItem
 from base.lm.catalog.decide.types import estimate_tokens
 
 _USER = "User"
 _ASSISTANT = "Assistant"
 _ELLIPSIS = "…"
 _SEPARATOR = "\n\n"
+
+
+class ExcerptItem(Protocol):
+    @property
+    def item_id(self) -> str: ...
+
+    @property
+    def kind(self) -> str: ...
+
+    @property
+    def payload(self) -> str: ...
+
+    @property
+    def source(self) -> str | None: ...
+
+    @property
+    def created_at(self) -> str | None: ...
+
+    @property
+    def source_message_id(self) -> str | None: ...
 
 
 @dataclass(frozen=True)
@@ -25,7 +45,7 @@ def is_human_source(source: str | None) -> bool:
     return source is not None and (source == "user" or source.startswith("ui:page:"))
 
 
-def build_excerpt(items: Sequence[TimelineItem], max_tokens: int) -> ConversationExcerpt | None:
+def build_excerpt(items: Sequence[ExcerptItem], max_tokens: int) -> ConversationExcerpt | None:
     if max_tokens <= 0:
         raise ValueError(f"max_tokens must be positive, got {max_tokens}")
     agent_items = _last_turn_agent_text(items)
@@ -44,7 +64,7 @@ def build_excerpt(items: Sequence[TimelineItem], max_tokens: int) -> Conversatio
     return ConversationExcerpt(text, identity)
 
 
-def _last_turn_agent_text(items: Sequence[TimelineItem]) -> list[TimelineItem]:
+def _last_turn_agent_text(items: Sequence[ExcerptItem]) -> list[ExcerptItem]:
     last_inbound = max(
         (i for i, item in enumerate(items) if item.kind == "inbound_chat"), default=-1
     )
@@ -55,7 +75,7 @@ def _last_turn_agent_text(items: Sequence[TimelineItem]) -> list[TimelineItem]:
     ]
 
 
-def _latest_human_text(items: Sequence[TimelineItem]) -> str | None:
+def _latest_human_text(items: Sequence[ExcerptItem]) -> str | None:
     for item in reversed(items):
         if item.kind == "inbound_chat" and is_human_source(item.source) and item.payload.strip():
             return item.payload.strip()

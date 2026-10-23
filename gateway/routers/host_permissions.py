@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends
 
 from base.host.permissions_helper.grants import checklist
 from base.host.permissions_helper.grants.gate import GateReport
-from gateway.schemas.host_permissions import HostPermissionsPayload, PermissionItemRow
+from gateway.schemas import HostPermissionsPayload, PermissionItemRow
 from services.desktop.permissions_helper.onboarding import GateService
 
 router = APIRouter()

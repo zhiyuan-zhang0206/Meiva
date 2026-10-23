@@ -49,7 +49,7 @@ from base.packages.docs.pages_copy import (
 )
 from base.telemetry.alerts import display_language
 from gateway.routers import page_acceptance
-from gateway.schemas.pages import PageCloseRequest, PageRegisterRequest
+from gateway.schemas import PageCloseRequest, PageRegisterRequest
 from ops.pages import (
     get_open_page_target,
     list_all_open_pages,

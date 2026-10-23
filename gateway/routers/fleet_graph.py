@@ -36,7 +36,7 @@ from base.events.reads import audit_rows
 from base.log import logger
 from gateway.lgtm.telemetry_staleness import TelemetryStaleness
 from gateway.routers.fleet_tokens import AgentTokens, agent_tokens
-from gateway.schemas.fleet_graph import FleetGraphEdge, FleetGraphNode, FleetGraphResponse
+from gateway.schemas import FleetGraphEdge, FleetGraphNode, FleetGraphResponse
 from gateway.schemas.stats import StatsWindowHours, window_delta
 
 router = APIRouter()
@@ -254,7 +254,12 @@ def get_fleet_graph(
             (recency-decayed; dropped below 0.01)
     """
     if decay_lambda is None:
-        decay_lambda = settings.display.fleet_graph_decay_lambda
+        authority = getattr(request.app.state, "config_authority", None)
+        decay_lambda = (
+            float(authority.runtime.display.fleet_graph_decay_lambda)
+            if authority is not None
+            else settings.display.fleet_graph_decay_lambda
+        )
     decay_lambda = round(decay_lambda, 2)
 
     now = datetime.now(UTC)

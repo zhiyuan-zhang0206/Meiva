@@ -56,13 +56,11 @@ def app(
         pg_errors.OperationalError("connection refused"),
     ],
 )
-def test_pg_failure_is_a_typed_500_not_a_fallback_graph(
-    app: FastAPI, monkeypatch: pytest.MonkeyPatch, failure: Exception
-) -> None:
+def test_pg_failure_is_a_typed_500_not_a_fallback_graph(app: FastAPI, failure: Exception) -> None:
     """Neither a statement timeout nor another PG failure is answered with a graph."""
     pool = MagicMock()
     pool.connection.side_effect = failure
-    monkeypatch.setattr(app.state, "db_pool", pool)
+    app.state.db_pool = pool
 
     with TestClient(app, raise_server_exceptions=False) as client:
         response = client.get("/api/fleet/graph")
