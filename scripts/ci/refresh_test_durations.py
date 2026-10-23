@@ -54,6 +54,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from typing import cast
 
 from base.host.atomic_io import write_text_atomic
 
@@ -83,7 +84,7 @@ DURATIONS_PATH = _REPO_ROOT / ".test_durations"
 def load_durations(path: Path) -> dict[str, float]:
     """Load a pytest-split durations file; missing or corrupt -> empty dict."""
     try:
-        data = json.loads(path.read_text())
+        data: object = json.loads(path.read_text())
     except FileNotFoundError:
         return {}
     except json.JSONDecodeError as exc:
@@ -94,11 +95,12 @@ def load_durations(path: Path) -> dict[str, float]:
         return {}
     if not isinstance(data, dict):
         raise SystemExit(f"unexpected durations shape in {path}: {type(data).__name__}")
-    if not all(
-        isinstance(value, (int, float)) and not isinstance(value, bool) for value in data.values()
-    ):
-        raise SystemExit(f"non-numeric duration in {path}")
-    return {str(nodeid): float(value) for nodeid, value in data.items()}
+    durations: dict[str, float] = {}
+    for nodeid, value in cast("dict[str, object]", data).items():
+        if not isinstance(value, (int, float)) or isinstance(value, bool):
+            raise SystemExit(f"non-numeric duration in {path}")
+        durations[nodeid] = float(value)
+    return durations
 
 
 def run_suite(

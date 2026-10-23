@@ -27,8 +27,9 @@ import json
 import os
 import sys
 from collections import defaultdict
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
+from typing import cast
 
 # The 85% gate denominator — must match [tool.coverage.run].source's core
 # set and the comment in ci.yml's gate step. ops/services/meiva_builtins are
@@ -71,7 +72,24 @@ def _matches_prefix(path: str, prefix: str) -> bool:
     return path == prefix or path.startswith(prefix + "/")
 
 
-def _aggregate(files: dict[str, dict]) -> tuple[dict[str, list[int]], dict[str, list[int]]]:
+def _line_counts(path: str, entry: object) -> tuple[int, int]:
+    if not isinstance(entry, dict):
+        raise TypeError(f"{path}: coverage entry must be an object")
+    summary = cast("dict[object, object]", entry).get("summary")
+    if not isinstance(summary, dict):
+        raise TypeError(f"{path}: coverage summary must be an object")
+    counts = cast("dict[object, object]", summary)
+    covered, valid = counts.get("covered_lines"), counts.get("num_statements")
+    if type(covered) is not int or type(valid) is not int:
+        raise TypeError(f"{path}: coverage line counts must be integers")
+    if not 0 <= covered <= valid:
+        raise ValueError(f"{path}: coverage line counts must satisfy 0 <= covered <= total")
+    return covered, valid
+
+
+def _aggregate(
+    files: Mapping[str, object],
+) -> tuple[dict[str, list[int]], dict[str, list[int]]]:
     """Aggregate covered/valid line counts from the coverage.json file map.
 
     Returns (per_domain, per_subdomain): per_domain keys are top-level
@@ -81,9 +99,7 @@ def _aggregate(files: dict[str, dict]) -> tuple[dict[str, list[int]], dict[str, 
     per_domain: dict[str, list[int]] = defaultdict(lambda: [0, 0])
     per_subdomain: dict[str, list[int]] = defaultdict(lambda: [0, 0])
     for path, entry in files.items():
-        summary = entry["summary"]
-        covered = int(summary["covered_lines"])
-        valid = int(summary["num_statements"])
+        covered, valid = _line_counts(path, entry)
         per_domain[_domain_of(path)][0] += covered
         per_domain[_domain_of(path)][1] += valid
         per_subdomain[_subdomain_of(path)][0] += covered
@@ -142,7 +158,7 @@ def _print_floored_subdomains(
         print(f"  {prefix:>20} {rate:>6}% ({covered}/{valid}) — floor {FLOORS[prefix]}% {verdict}")
 
 
-def check(files: dict[str, dict], threshold: float) -> int:
+def check(files: Mapping[str, object], threshold: float) -> int:
     """Enforce the gates against a coverage.json `files` map.
 
     Returns 0 when every gate passes, 1 otherwise. Always prints the
@@ -190,8 +206,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     json_path = args[0] if args else "coverage.json"
     threshold = float(os.environ.get("BACKEND_COVERAGE_THRESHOLD", CORE_THRESHOLD_DEFAULT))
     with Path(json_path).open() as f:
-        data = json.load(f)
-    return check(data["files"], threshold)
+        data: object = json.load(f)
+    if not isinstance(data, dict):
+        raise TypeError("coverage report must be an object")
+    files = cast("dict[str, object]", data).get("files")
+    if not isinstance(files, dict):
+        raise TypeError("coverage report files must be an object")
+    return check(cast("dict[str, object]", files), threshold)
 
 
 if __name__ == "__main__":

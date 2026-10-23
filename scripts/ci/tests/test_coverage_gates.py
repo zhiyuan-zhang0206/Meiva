@@ -15,9 +15,6 @@ import pytest
 
 from scripts.ci import coverage_gates as gates
 
-# The script's report parameters are unparameterized dicts: the call-site rules stay at warning.
-# pyright: reportUnknownMemberType = warning
-
 
 @pytest.fixture(autouse=True)
 def _no_floors(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -25,7 +22,7 @@ def _no_floors(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(gates, "FLOORS", {})
 
 
-def _files(classes: dict[str, tuple[int, int]]) -> dict[str, dict]:
+def _files(classes: dict[str, tuple[int, int]]) -> dict[str, object]:
     """A synthetic coverage.json `files` map: {path: (covered, valid)}."""
     return {
         path: {"summary": {"covered_lines": covered, "num_statements": valid}}
@@ -136,3 +133,44 @@ def test_env_threshold_override(monkeypatch: pytest.MonkeyPatch, tmp_path: Path)
     assert gates.main([str(report)]) == 1  # 80% below the 85% default
     monkeypatch.setenv("BACKEND_COVERAGE_THRESHOLD", "80")
     assert gates.main([str(report)]) == 0
+
+
+@pytest.mark.parametrize(
+    "payload, message",
+    [
+        ([], "report must be an object"),
+        ({}, "report files must be an object"),
+        ({"files": []}, "report files must be an object"),
+        ({"files": {"agent/x.py": []}}, "agent/x.py: coverage entry must be an object"),
+        ({"files": {"agent/x.py": {}}}, "agent/x.py: coverage summary must be an object"),
+        (
+            {"files": {"agent/x.py": {"summary": []}}},
+            "agent/x.py: coverage summary must be an object",
+        ),
+    ],
+)
+def test_main_rejects_malformed_report(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], payload: object, message: str
+) -> None:
+    report = tmp_path / "coverage.json"
+    report.write_text(json.dumps(payload))
+    with pytest.raises(TypeError, match=message):
+        gates.main([str(report)])
+    assert "coverage gates passed" not in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("field", ["covered_lines", "num_statements"])
+@pytest.mark.parametrize("value", [True, 1.5, "10", None, [], {}])
+def test_line_counts_reject_non_integer_values(
+    capsys: pytest.CaptureFixture[str], field: str, value: object
+) -> None:
+    summary: dict[str, object] = {"covered_lines": 9, "num_statements": 10, field: value}
+    with pytest.raises(TypeError, match=r"agent/x\.py: coverage line counts must be integers"):
+        gates.check({"agent/x.py": {"summary": summary}}, threshold=0)
+    assert "coverage gates passed" not in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("covered, total", [(-1, 10), (0, -1), (11, 10)])
+def test_line_counts_reject_impossible_totals(covered: int, total: int) -> None:
+    with pytest.raises(ValueError, match="0 <= covered <= total"):
+        gates.check(_files({"agent/x.py": (covered, total)}), threshold=0)

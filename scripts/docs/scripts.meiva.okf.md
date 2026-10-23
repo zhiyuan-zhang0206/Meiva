@@ -38,6 +38,8 @@ The weekly dependency report and its single tracked issue are owned by
 
 CI entry points supply required host, clock and URL ports; timeouts preserve
 failed-read and unconfirmed-write outcomes. Stdlib-only tools stay dependency-free.
+Coverage reports require integer line counts with `0 <= covered <= total`;
+malformed report objects fail before any coverage verdict is printed.
 Visual baseline refresh uses the workflow's 45-minute child budget and restores
 moved references on failure. Demo and deployment probes share the passed opener.
 
