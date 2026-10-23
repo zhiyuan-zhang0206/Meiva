@@ -381,6 +381,8 @@ _ACCESS_CHECKOUT = {
         "    config = SimpleNamespace(view=SimpleNamespace(\n"
         "        gateway=SimpleNamespace(gateway_url='http://gateway:8000'),\n"
         "        data_plane=SimpleNamespace(cluster_secret='unused', is_remote=False),\n"
+        "    ), launch_facts=lambda: SimpleNamespace(\n"
+        "        machine_token=None, launcher_profile=None, gateway_home=False,\n"
         "    ))\n\n"
         "    @classmethod\n    def create(cls):\n        return cls()\n"
     ),
