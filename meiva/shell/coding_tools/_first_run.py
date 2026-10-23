@@ -11,6 +11,7 @@ import stat
 import tempfile
 import time
 from pathlib import Path
+from typing import cast
 
 
 def _preset_json_file(path: Path, updates: dict[str, object], *, label: str) -> None:
@@ -22,18 +23,19 @@ def _preset_json_file(path: Path, updates: dict[str, object], *, label: str) -> 
     """
     try:
         raw = path.read_text(encoding="utf-8")
-        data = json.loads(raw) if raw.strip() else {}
+        loaded: object = json.loads(raw) if raw.strip() else {}
     except FileNotFoundError:
-        data = None
+        loaded = None
     except json.JSONDecodeError as exc:
         _backup_before_write(path)
         raise RuntimeError(
             f"{label} is not valid JSON ({exc}); left as-is with a backup taken. "
             "Fix or remove it, then relaunch."
         ) from exc
-    if data is not None and not isinstance(data, dict):
+    if loaded is not None and not isinstance(loaded, dict):
         _backup_before_write(path)
         raise RuntimeError(f"{label} is not a JSON object; left as-is with a backup taken.")
+    data: dict[str, object] | None = cast(dict[str, object], loaded) if loaded is not None else None
     if data is not None and all(_preset_satisfied(data.get(k), v) for k, v in updates.items()):
         print(f"(already preset: {label})")
         return

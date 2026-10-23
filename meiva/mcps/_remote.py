@@ -112,7 +112,7 @@ class RemoteMCPClient:
         lines are skipped; the unread tail stays buffered. Bounded by the same
         timeout budget as the connect phase, supplied by the caller per request.
         """
-        buf = b""
+        buf: bytes = b""
         deadline = time.time() + timeout_seconds
         while True:
             remaining = deadline - time.time()
@@ -127,7 +127,9 @@ class RemoteMCPClient:
                 raise MCPConnectError("MCP daemon connection closed")
             buf += chunk
             while b"\n" in buf:
-                line, buf = buf.split(b"\n", 1)
+                parts = buf.split(b"\n", 1)
+                line = parts[0]
+                buf = parts[1]
                 try:
                     parsed = json.loads(line.decode("utf-8"))
                 except json.JSONDecodeError:

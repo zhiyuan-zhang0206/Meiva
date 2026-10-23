@@ -410,7 +410,7 @@ def _availability_from_probe(row: HarnessProbe) -> HarnessAvailability:
     )
 
 
-def _row_from_dict(data: dict) -> AgentRow:
+def _row_from_dict(data: dict[str, Any]) -> AgentRow:
     """Gateway JSON dict → AgentRow dataclass."""
     return AgentRow(
         agent_id=data["agent_id"],
@@ -430,7 +430,7 @@ def _row_from_dict(data: dict) -> AgentRow:
     )
 
 
-def _open_tasks_from_dict(data: dict | None) -> OpenTasksHint | None:
+def _open_tasks_from_dict(data: dict[str, Any] | None) -> OpenTasksHint | None:
     """Gateway JSON dict → OpenTasksHint; null passes through."""
     if data is None:
         return None

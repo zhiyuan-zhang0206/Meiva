@@ -9,7 +9,7 @@ import time
 import urllib.error
 import urllib.request
 from collections.abc import Callable
-from typing import Any
+from typing import Any, cast
 
 from base.host.net.ports import UrlOpener
 from base.host.net.resilience import retry
@@ -52,9 +52,11 @@ def _provider_message(detail: str) -> str:
         parsed = json.loads(detail)
     except json.JSONDecodeError:
         return detail[:_DETAIL_MAX]
-    error = parsed.get("error") if isinstance(parsed, dict) else None
-    if isinstance(error, dict) and isinstance(error.get("message"), str):
-        return error["message"]
+    error: object = cast(dict[str, Any], parsed).get("error") if isinstance(parsed, dict) else None
+    if isinstance(error, dict):
+        message: object = cast(dict[str, Any], error).get("message")
+        if isinstance(message, str):
+            return message
     return detail[:_DETAIL_MAX]
 
 
@@ -135,14 +137,15 @@ def search_one[Result](
         error_type=SearchError,
         label="DeepSeek Search",
     )
+    results: list[dict[str, Any]] = data.get("results") or []
     return [
         make_result(
-            title=deps.scan(item.get("title") or "", "web.search"),
-            url=item.get("url") or "",
-            snippet=deps.scan(item.get("snippet") or item.get("summary") or "", "web.search"),
+            title=deps.scan(str(item.get("title") or ""), "web.search"),
+            url=str(item.get("url") or ""),
+            snippet=deps.scan(str(item.get("snippet") or item.get("summary") or ""), "web.search"),
             kind="web",
         )
-        for item in data.get("results") or []
+        for item in results
     ]
 
 

@@ -138,7 +138,7 @@ def _refuse_framework_module(entry: str) -> None:
     is on the surface, or not a real `meiva` submodule at all (a plugin namespace
     registered later), stays disable-able."""
     name = entry.split(".", 1)[0]
-    surface = getattr(meiva_module(), "__all_for_meiva__", None) or []
+    surface: list[str] = getattr(meiva_module(), "__all_for_meiva__", None) or []
     if name in surface or isinstance(_sys.modules.get(f"meiva.{name}"), DisabledSDKModule):
         return  # agent-facing, or already disabled by an earlier entry
     bound = getattr(meiva_module(), name, None)

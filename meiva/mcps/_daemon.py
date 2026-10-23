@@ -260,8 +260,8 @@ async def connect_server(
             f'(expected true, "browser", or "computer_use")'
         )
     cmd = spec["command"]
-    args_list = spec.get("args") or []
-    env_dict = spec.get("env") or {}
+    args_list: list[str] = spec.get("args") or []
+    env_dict: dict[str, str] = spec.get("env") or {}
 
     # Our own servers launch their interpreter by a relative path, which resolves
     # against the child's cwd — installed packages from their own dir (isolated
@@ -349,7 +349,7 @@ async def _handle_list_tools(
     """List the configured server's tools in the daemon wire format."""
     session = await get_session(server, scope, host=host)
     result = await session.list_tools()
-    tools = [
+    tools: list[dict[str, Any]] = [
         {
             "name": t.name,
             "description": t.description or "",
@@ -371,7 +371,7 @@ async def _handle_call_tool(
 ) -> dict[str, Any]:
     """Call one MCP tool and serialize its result for the daemon wire protocol."""
     tool = params.get("tool", "")
-    args = params.get("args") or {}
+    args: dict[str, Any] = params.get("args") or {}
     session = await get_session(server, scope, host=host)
     # The computer-mcp direct-dial session carries the calling agent's identity
     # to the computer daemon (governance + audit). Duck-typed: only
@@ -388,8 +388,9 @@ async def _handle_call_tool(
             f"MCP tool result unknown for {server}.{tool}; request may have executed: "
             f"{type(e).__name__}: {e}"
         ) from e
-    content = []
-    for c in result.content or []:
+    content: list[dict[str, Any]] = []
+    raw_content: list[Any] = result.content or []
+    for c in raw_content:
         # Fail fast on an unknown content block: the MCP
         # SDK contract requires ContentBlock to be a pydantic
         # model; absence of model_dump means the SDK type
@@ -438,8 +439,8 @@ async def dispatch_with_retry(req: dict[str, Any], scope: Scope, *, host: Host) 
     """Serve one request; one bad call becomes an error response, not a dropped connection."""
     req_id = req.get("id")
     method = req.get("method")
-    params = req.get("params") or {}
-    server = params.get("server", "")
+    params: dict[str, Any] = req.get("params") or {}
+    server: str = params.get("server", "")
     try:
         # Retry transport errors before a tool call starts, or while
         # listing tools. A started tool call converts an uncertain
