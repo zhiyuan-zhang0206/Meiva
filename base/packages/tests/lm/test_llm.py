@@ -66,6 +66,10 @@ class TestModelContextWindow:
     def test_mimo_v2_6_pro_ultraspeed_is_1m(self, *, model_catalog: ModelCatalog) -> None:
         assert model_catalog.context_windows["mimo-v2.6-pro-ultraspeed"] == 1_000_000
 
+    def test_kimi_k3_1_pro_family_is_1m(self, *, model_catalog: ModelCatalog) -> None:
+        for model in ("kimi-k3.1-pro", "kimi-k3.1-pro-highspeed"):
+            assert model_catalog.context_windows[model] == 1_048_576
+
     def test_qwen3_8_flash_window_is_thinking_mode_input(
         self, *, model_catalog: ModelCatalog
     ) -> None:
@@ -75,3 +79,7 @@ class TestModelContextWindow:
 class TestModelIdentity:
     def test_kimi_k3_identity(self, *, model_catalog: ModelCatalog) -> None:
         assert model_catalog.identities["kimi-k3"] == "You are running on Kimi K3 (Moonshot)."
+
+    def test_kimi_k3_1_pro_family_identity(self, *, model_catalog: ModelCatalog) -> None:
+        for model in ("kimi-k3.1-pro", "kimi-k3.1-pro-highspeed"):
+            assert model_catalog.identities[model] == "You are running on Kimi K3.1 Pro (Moonshot)."

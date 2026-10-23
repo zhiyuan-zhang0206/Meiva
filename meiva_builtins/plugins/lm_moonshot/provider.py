@@ -92,9 +92,14 @@ PROVIDER = ProviderContribution(
         ),
     ),
     models={
+        # meiva:note
+        # Display-only supersession (task #5609): `kimi-k3` stays spawnable for the configs
+        # that already name it, while the picker offers Moonshot's post-trained successor.
+        # meiva:link base/lm/docs/pricing-model-rates.meiva.okf.md
         "kimi-k3": ModelSpec(
             provider="kimi",
             spawnable=True,
+            superseded_by="kimi-k3.1-pro",
             context_window=1_048_576,
             knowledge_cutoff="2025-12",
             model_identity="You are running on Kimi K3 (Moonshot).",
@@ -125,6 +130,44 @@ PROVIDER = ProviderContribution(
             ),
             media_types=frozenset({"image"}),
         ),
+        # meiva:note
+        # K3.1 Pro repeats K3's capability facts — the K3-series 1,048,576-token window,
+        # always-on thinking on low/high/max with `max` as the default, and a 2025-12 cutoff
+        # carried forward because Moonshot publishes none for this release. Highspeed is the
+        # same model served 2-3x faster at twice the input/output rate, so it keeps its own id
+        # and every fact instead of becoming a `fast_of` row, which derives `<id>-fast` and
+        # needs a served-speed receipt.
+        # meiva:link base/lm/docs/pricing-model-rates.meiva.okf.md
+        "kimi-k3.1-pro": ModelSpec(
+            provider="kimi",
+            spawnable=True,
+            context_window=1_048_576,
+            knowledge_cutoff="2025-12",
+            model_identity="You are running on Kimi K3.1 Pro (Moonshot).",
+            effort_levels=("low", "high", "max"),
+            thinking_always_on=True,
+            tuning=ModelTuning(
+                reasoning_effort="max",
+                llm_retry_max_attempts=10,
+                llm_stream_ttft_timeout_seconds=120.0,
+            ),
+            media_types=frozenset({"image"}),
+        ),
+        "kimi-k3.1-pro-highspeed": ModelSpec(
+            provider="kimi",
+            spawnable=True,
+            context_window=1_048_576,
+            knowledge_cutoff="2025-12",
+            model_identity="You are running on Kimi K3.1 Pro (Moonshot).",
+            effort_levels=("low", "high", "max"),
+            thinking_always_on=True,
+            tuning=ModelTuning(
+                reasoning_effort="max",
+                llm_retry_max_attempts=10,
+                llm_stream_ttft_timeout_seconds=120.0,
+            ),
+            media_types=frozenset({"image"}),
+        ),
     },
     pricing={
         "kimi-k3": PriceRates(
@@ -145,6 +188,52 @@ PROVIDER = ProviderContribution(
                             cache_miss="3.0",
                             cache_hit="0.30",
                             output="15.0",
+                        ),
+                    ),
+                ),
+            ),
+        ),
+        "kimi-k3.1-pro": PriceRates(
+            cache_miss=2.0,
+            cache_hit=0.20,
+            output=10.0,
+            source_url="https://platform.moonshot.ai/docs/pricing",
+            source_checked_at="2026-10-24",
+            vendor="moonshot",
+            periods=(
+                PricePeriod(
+                    effective_from=None,
+                    effective_until=None,
+                    tiers=(
+                        PriceTier(
+                            input_tokens_min=0,
+                            input_tokens_max=None,
+                            cache_miss="2.0",
+                            cache_hit="0.20",
+                            output="10.0",
+                        ),
+                    ),
+                ),
+            ),
+        ),
+        "kimi-k3.1-pro-highspeed": PriceRates(
+            cache_miss=4.0,
+            cache_hit=0.20,
+            output=20.0,
+            source_url="https://platform.moonshot.ai/docs/pricing",
+            source_checked_at="2026-10-24",
+            vendor="moonshot",
+            periods=(
+                PricePeriod(
+                    effective_from=None,
+                    effective_until=None,
+                    tiers=(
+                        PriceTier(
+                            input_tokens_min=0,
+                            input_tokens_max=None,
+                            cache_miss="4.0",
+                            cache_hit="0.20",
+                            output="20.0",
                         ),
                     ),
                 ),

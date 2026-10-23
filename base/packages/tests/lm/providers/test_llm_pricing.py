@@ -179,7 +179,7 @@ def test_glm_catalog_entries_are_in_the_archive() -> None:
 
 def test_kimi_catalog_entries_are_in_the_archive() -> None:
     archive_models = _pricing_catalog_models(_pricing_catalog_raw())
-    expected = {"kimi-k3"}
+    expected = {"kimi-k3", "kimi-k3.1-pro", "kimi-k3.1-pro-highspeed"}
 
     assert expected <= archive_models.keys()
 
@@ -660,20 +660,28 @@ def test_glm_plugin_prices_equal_archive_current_base_tier(
 def test_kimi_plugin_prices_equal_archive_current_base_tier(
     model_catalog: ModelCatalog, prices: pricing.PriceBook
 ) -> None:
-    model = "kimi-k3"
+    model_ids = (
+        "kimi-k3",
+        "kimi-k3.1-pro",
+        "kimi-k3.1-pro-highspeed",
+    )
     current_instant = datetime(2026, 9, 5, tzinfo=UTC)
-    plugin_rates = _plugin_rates(model, current_instant, model_catalog=model_catalog)
+    plugin_rates = {
+        model: _plugin_rates(model, current_instant, model_catalog=model_catalog)
+        for model in model_ids
+    }
     archive_raw = _pricing_catalog_raw()
     archive_models = _pricing_catalog_models(archive_raw)
     archive_book = pricing.PriceBook(parse_catalog(archive_raw), {})
 
-    selected = archive_book.rates_at(model, current_instant, input_tokens=0)
-    assert selected is not None
-    assert plugin_rates.as_tuple() == pytest.approx(selected.as_tuple())  # pyright: ignore[reportUnknownMemberType]
-    assert pricing.plugin_price_provenance(model, prices=prices) == (
-        archive_models[model]["source_url"],
-        archive_models[model]["source_checked_at"],
-    )
+    for model in model_ids:
+        selected = archive_book.rates_at(model, current_instant, input_tokens=0)
+        assert selected is not None
+        assert plugin_rates[model].as_tuple() == pytest.approx(selected.as_tuple())  # pyright: ignore[reportUnknownMemberType]
+        assert pricing.plugin_price_provenance(model, prices=prices) == (
+            archive_models[model]["source_url"],
+            archive_models[model]["source_checked_at"],
+        )
 
 
 def test_mimo_plugin_prices_equal_archive_current_base_tier(
