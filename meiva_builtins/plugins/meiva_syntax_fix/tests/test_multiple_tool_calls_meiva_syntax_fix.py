@@ -24,6 +24,7 @@ from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.packages.plugin_providers import build_model_catalog
+from base.packages.tests.model_catalog import inert_keys
 from meiva.boot import process_clients
 from meiva_builtins.plugins.meiva_syntax_fix.agent_runtime import syntax_fix_before_exec
 from meiva_builtins.plugins.meiva_syntax_fix.tests.hook_support import (
@@ -67,6 +68,7 @@ def runtime_for(database_gate: ProcessDbGate) -> Iterator[Callable[..., Runtime[
                 clients=clients,
                 clock_factory=Clock.from_settings,
                 catalog=build_model_catalog(),
+                provider_keys=inert_keys(build_model_catalog()),
                 identity=AgentIdentity(agent_id=7, owns_loop=True),
             )
         )
