@@ -3,11 +3,8 @@ import { useTranslations } from "next-intl";
 
 import type { AgentRow } from "@/lib/contracts/types";
 import { cn } from "@/lib/format/utils";
-import type { PendingAction } from "../agents/agent-row";
+import type { PendingAction } from "./agent-row";
 
-// On-row feedback for in-flight actions (resurrect / restart / terminate /
-// compact / force-expire). Ending a takeover is a context-menu-only action
-// (agent-row.tsx's "End external takeover session" item) — no on-row button.
 export function RowActions({
   agent,
   pending,
@@ -18,7 +15,6 @@ export function RowActions({
   onResurrect: () => void;
 }) {
   const t = useTranslations("agentRow");
-  // Leave room for the ScrollArea vertical scrollbar (10px).
   const wrapperCls =
     "absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-0.5";
 
