@@ -260,6 +260,7 @@ def test_best_effort_reads_keep_their_timeout_outcomes() -> None:
         accounting.collect("o/r", "2026-10-01T00:00:00Z", "2026-10-01T01:00:00Z", host=host)
     assert owner_operations.last_head_update("42", "o/r", host=host) is None
     result = diagnose.diagnose_pr("42", "o/r", token=None, host=host, open_url=FakeUrlOpener())
+    assert "gh_error" in result
     assert result["gh_error"] == "gh pr view failed"
 
 
