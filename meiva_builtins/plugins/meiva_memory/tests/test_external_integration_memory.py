@@ -191,6 +191,8 @@ def test_external_memory_rechecks_lease_before_filesystem_effects(
             (lease["id"],),
         )
         db_conn.commit()
+        workspaces = unit_home / "workspaces"
+        before = sorted(workspaces.rglob("*"))
         with pytest.raises(leases.ImpersonationError, match="expired"):
             if operation == "personal_path":
                 _ = sdk.PERSONAL_PATH
@@ -205,7 +207,7 @@ def test_external_memory_rechecks_lease_before_filesystem_effects(
                     ),
                 )
                 notes.per_agent_memory_note(context)
-        assert list((unit_home / "workspaces").glob("*")) == []
+        assert sorted(workspaces.rglob("*")) == before
     finally:
         with pytest.raises(leases.ImpersonationError, match="expired"):
             attachment.close()
