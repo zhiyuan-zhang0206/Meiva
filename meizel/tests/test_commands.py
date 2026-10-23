@@ -38,6 +38,36 @@ def test_check_passes_a_conforming_repository(
     assert "meizel: ok" in capsys.readouterr().out
 
 
+@pytest.mark.parametrize(
+    ("source", "status"),
+    [
+        (
+            "from collections.abc import Callable\n\n"
+            "def run(effect: Callable[[], None]) -> int:\n    effect()\n    return 1\n",
+            0,
+        ),
+        ("def read() -> str:\n    return open('x').read()\n", 1),
+    ],
+    ids=["unresolved-callback", "recognized-io"],
+)
+def test_check_explains_the_limits_of_its_result(
+    make_repo: RepoFactory, capsys: pytest.CaptureFixture[str], source: str, status: int
+) -> None:
+    root = make_repo(
+        {"pkg/__init__.py": "", "pkg/a.py": source, "pkg/meizel.toml": 'purity = "strict"\n'}
+    )
+    assert run(root, "check") == status
+    out = capsys.readouterr().out
+    if status == 0:
+        assert "meizel: ok" in out
+        assert "implemented checks passed for the reported scope" in out
+        assert "not a semantic purity proof or test-resource assessment" in out
+    else:
+        assert "[impure-call]" in out
+        assert "injected callables can still perform effects" in out
+        assert "meizel: ok" not in out
+
+
 def test_check_fails_with_file_line_edge_directory_and_fix(
     make_repo: RepoFactory, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -59,6 +89,7 @@ def test_check_with_paths_reports_only_diagnostics_under_them(
     assert "app/run.py" in out
     assert "pkg/a.py:1" not in out
     assert run(root, "check", "pkg/b.py") == 0
+    assert "implemented checks passed for the reported scope" in capsys.readouterr().out
 
 
 def test_check_rejects_an_unknown_path(

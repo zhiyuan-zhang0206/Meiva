@@ -30,6 +30,9 @@ def test_summary_counts_by_code_top_level_directory_and_mode(
     root = make_repo(TREE)
     assert run(root, "debt", "--json") == 0
     report = json.loads(capsys.readouterr().out)
+    assert report["basis"] == (
+        "recorded manifest debt only; no source, semantic purity, or test-resource analysis"
+    )
     assert report["total"] == 18
     assert report["by_code"] == {
         "cycle-edge": 3,
@@ -53,8 +56,9 @@ def test_summary_text_names_the_modes_and_the_counts(
     assert run(make_repo(TREE), "debt") == 0
     out = capsys.readouterr().out
     assert "18 recorded locality debts" in out
-    assert "4 strict-to-be directories" in out
-    assert "2 strict directories" in out
+    assert "4 directories with recorded debt" in out
+    assert "2 directories without recorded debt" in out
+    assert "recorded manifest debt only; no source" in out
     assert "private-name" in out
     assert "base" in out
 
@@ -65,14 +69,17 @@ def test_summary_reads_manifests_only_and_runs_no_analysis(make_repo: RepoFactor
     assert run(root, "debt") == 0
 
 
-def test_a_repository_without_debt_is_all_strict(
+def test_no_debt_does_not_imply_a_strict_purity_mode(
     make_repo: RepoFactory, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    root = make_repo({"pkg/__init__.py": "", "pkg/a.py": ""})
+    root = make_repo(
+        {"pkg/__init__.py": "", "pkg/a.py": "", "pkg/meizel.toml": 'purity = "none"\n'}
+    )
     assert run(root, "debt", "--json") == 0
     report = json.loads(capsys.readouterr().out)
     assert report["total"] == 0
     assert report["directories"] == {"strict_to_be": 0, "strict": 2}
+    assert "no source, semantic purity, or test-resource analysis" in report["basis"]
 
 
 def test_a_malformed_baseline_stops_the_summary(

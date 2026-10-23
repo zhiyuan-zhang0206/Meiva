@@ -110,11 +110,14 @@ _CALL_ALIASES = {
 }
 
 _IMPURE_IMPORT_HINT = "move effectful imports to an adapter outside the strict core"
-_IMPURE_CALL_HINT = "inject clock, environment, randomness, or I/O results as explicit parameters"
-_ASYNC_HINT = (
-    "keep strict modules synchronous and pure; move async orchestration to a service or adapter"
+_IMPURE_CALL_HINT = (
+    "pass observed clock, environment, randomness, or I/O values from their effect owner; "
+    "injected callables can still perform effects"
 )
-_UNFROZEN_HINT = "use `@dataclass(frozen=True)` so value objects in strict modules are immutable"
+_ASYNC_HINT = (
+    "async syntax is rejected by this rule; keep orchestration at its service or adapter owner"
+)
+_UNFROZEN_HINT = "use `@dataclass(frozen=True)` to prevent ordinary field rebinding; it does not freeze nested values"
 _UNTYPED_HINT = "annotate public parameters and return types with concrete types or typed dataclasses instead of `Any` or bare `dict`"
 
 
