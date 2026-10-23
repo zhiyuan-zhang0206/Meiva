@@ -23,7 +23,7 @@ import argparse
 import json
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 # `render_report` is a sibling in this skill's own scripts/ dir, not an
 # importable package (PYTHONSAFEPATH=1 keeps a script's own directory off
@@ -92,7 +92,7 @@ def compute_score_dimensions(
 ) -> list[dict[str, Any]]:
     """Convert two {completion, efficiency, overall} dicts into the dimension list
     the report template expects."""
-    dims = []
+    dims: list[dict[str, Any]] = []
     for key in ("completion", "efficiency", "overall"):
         b = before.get(key)
         a = after.get(key)
@@ -124,7 +124,7 @@ def measured_mean(state: dict[str, Any]) -> dict[str, Any] | None:
         return None
     if isinstance(n, int) and n <= 0:
         return None
-    return mean
+    return cast(dict[str, Any], mean)
 
 
 def main(argv: list[str] | None = None) -> None:

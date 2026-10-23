@@ -11,7 +11,7 @@ from __future__ import annotations
 import asyncio
 import re
 import time
-from typing import Any
+from typing import Any, cast
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from loguru import logger
@@ -70,11 +70,13 @@ def extract_text(content: Any) -> str:
     if isinstance(content, str):
         return content
     if isinstance(content, list):
-        return "".join(
-            b["text"]
-            for b in content
-            if isinstance(b, dict) and b.get("type") == "text" and isinstance(b.get("text"), str)
-        )
+        parts: list[str] = []
+        for b in cast(list[object], content):
+            if isinstance(b, dict):
+                bd = cast(dict[str, Any], b)
+                if bd.get("type") == "text" and isinstance(bd.get("text"), str):
+                    parts.append(bd["text"])
+        return "".join(parts)
     return ""
 
 

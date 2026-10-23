@@ -21,7 +21,7 @@ import subprocess
 import sys
 from collections.abc import Iterator
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import yaml
 
@@ -55,7 +55,7 @@ def _misread_frontmatter_keys(fm_raw: str) -> list[str]:
             parsed = yaml.safe_load(line)
         except yaml.YAMLError:
             continue
-        value = parsed.get(key) if isinstance(parsed, dict) else None
+        value = cast(dict[str, Any], parsed).get(key) if isinstance(parsed, dict) else None
         if isinstance(value, str) and value != raw:
             bad.append(key)
     return bad
@@ -80,10 +80,11 @@ def _check_tags(fm: dict[str, Any], errors: list[str]) -> None:
     if not isinstance(tags, list):
         errors.append("Field 'tags' must be a list")
         return
-    for i, tag in enumerate(tags):
+    tags_list = cast(list[object], tags)
+    for i, tag in enumerate(tags_list):
         if not isinstance(tag, str):
             errors.append(f"Tag at index {i} must be a string")
-    type_tags = [t for t in tags if isinstance(t, str) and t.startswith("type/")]
+    type_tags = [t for t in tags_list if isinstance(t, str) and t.startswith("type/")]
     if not type_tags:
         errors.append(
             "Missing type tag — add exactly one of "
@@ -116,11 +117,12 @@ def _check_generated(fm: dict[str, Any], errors: list[str]) -> None:
     if not isinstance(generated, dict):
         errors.append("Field 'generated' must be a mapping")
         return
-    generated_by = generated.get("by")
+    generated_dict = cast(dict[str, Any], generated)
+    generated_by = generated_dict.get("by")
     if not isinstance(generated_by, str) or not generated_by.strip():
         errors.append("Field 'generated.by' must be a non-empty string")
-    if "at" in generated:
-        generated_at = generated["at"]
+    if "at" in generated_dict:
+        generated_at = generated_dict["at"]
         if not (isinstance(generated_at, str) and _OFFSET_DATETIME_RE.fullmatch(generated_at)):
             errors.append(f"Field 'generated.at' does not look like ISO 8601: {generated_at!r}")
 
@@ -138,7 +140,7 @@ def _frontmatter_problem(content: str) -> tuple[dict[str, Any] | None, str | Non
         return None, None, f"Invalid YAML: {e}"
     if not isinstance(fm, dict):
         return None, None, "Frontmatter must be a YAML mapping"
-    return fm, parts[1], None
+    return cast(dict[str, Any], fm), parts[1], None
 
 
 def validate_file(file_path: Path) -> list[str]:
@@ -198,7 +200,7 @@ def _single_note_tag_errors(fname: str, fm: dict[str, Any]) -> list[str]:
     if "tags" not in fm:
         found = _type_tag_errors(fname, [])
     else:
-        tags = fm["tags"] if isinstance(fm["tags"], list) else []
+        tags: list[object] = cast(list[object], fm["tags"]) if isinstance(fm["tags"], list) else []
         found = [
             e
             for e in _type_tag_errors(fname, [str(t) for t in tags])
@@ -307,10 +309,12 @@ def validate_type_tag(bundle: Path) -> list[str]:
     type/<x> tag, and no free-form junk tags (project/role/status/repo/archived)."""
     errors: list[str] = []
     for fp, fm in _notes_with_frontmatter(bundle):
-        tags = fm.get("tags") or []
-        if isinstance(tags, str):
-            tags = [tags]
-        if not isinstance(tags, list):
+        raw_tags = fm.get("tags")
+        if isinstance(raw_tags, str):
+            tags: list[object] = [raw_tags]
+        elif isinstance(raw_tags, list):
+            tags = cast(list[object], raw_tags)
+        else:
             tags = []
         errors.extend(_type_tag_errors(str(fp.relative_to(bundle)), [str(t) for t in tags]))
     return errors
@@ -321,10 +325,12 @@ _CROSS_PROJECT_WORDS = {"meiva", "meiva-internal", "shared-tech", "open-source"}
 
 def _misplaced_project_note(rel: str, fm: dict[str, Any], project_words: list[str]) -> str | None:
     """The error for a note tagged with exactly one project word but living outside its tree."""
-    tags = fm.get("tags") or []
-    if isinstance(tags, str):
-        tags = [tags]
-    if not isinstance(tags, list):
+    raw_tags = fm.get("tags")
+    if isinstance(raw_tags, str):
+        tags: list[object] = [raw_tags]
+    elif isinstance(raw_tags, list):
+        tags = cast(list[object], raw_tags)
+    else:
         return None
     tags_l = [str(t).lower() for t in tags]
     hits = [w for w in project_words if any(w in t for t in tags_l)]
@@ -476,8 +482,10 @@ def _note_frontmatter_title(fp: Path) -> str | None:
         fm = yaml.safe_load(parts[1])
     except yaml.YAMLError:
         return None
-    if isinstance(fm, dict) and fm.get("title"):
-        return str(fm["title"]).strip()
+    if isinstance(fm, dict):
+        fm_dict = cast(dict[str, Any], fm)
+        if fm_dict.get("title"):
+            return str(fm_dict["title"]).strip()
     return None
 
 
@@ -538,7 +546,7 @@ def _pointer_coverage_errors(bundle: Path, seen: dict[str, int]) -> list[str]:
             errors.append(f"orphan note (no pointer in MEMORY.md): {rel}")
 
     # Directories holding notes need a pointer line to them (or their index.md).
-    dirs_with_notes = set()
+    dirs_with_notes: set[str] = set()
     for fp in bundle.rglob("*.md"):
         if fp.name in _RESERVED or fp.parent == bundle:
             continue

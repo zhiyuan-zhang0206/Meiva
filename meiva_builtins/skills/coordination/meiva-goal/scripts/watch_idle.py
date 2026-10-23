@@ -28,6 +28,8 @@ Runtime notes:
 
 import json
 import time
+from collections.abc import Iterator
+from typing import Protocol, Self, cast
 
 import redis
 
@@ -43,7 +45,22 @@ TARGET_AGENT_ID = 0
 IDLE_STATUS = "idling"
 
 
-def _is_target_idle(event: dict, target_id: int) -> bool:
+class _PubSub(Protocol):
+    def subscribe(self, channel: str) -> None: ...
+
+    def listen(self) -> Iterator[dict[str, object]]: ...
+
+
+class _RedisClient(Protocol):
+    @classmethod
+    def from_url(
+        cls, url: str, *, decode_responses: bool, socket_timeout: float | None
+    ) -> Self: ...
+
+    def pubsub(self) -> _PubSub: ...
+
+
+def _is_target_idle(event: dict[str, object], target_id: int) -> bool:
     """A matching lifecycle hint requests a fresh authoritative status read."""
     if event.get("role") != "agent_updated" or event["agent_id"] != target_id:
         return False
@@ -100,7 +117,7 @@ def watch(target_id: int) -> None:
     happens before the subscription is established is missed (the poll fallback
     covers the already-idle case).
     """
-    client = redis.Redis.from_url(
+    client = cast(type[_RedisClient], redis.Redis).from_url(
         settings.data_plane.redis_url,
         decode_responses=True,
         # redis-py 8 defaults to 5s, which kills a quiet pubsub.listen() read.

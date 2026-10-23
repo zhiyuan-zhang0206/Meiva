@@ -16,6 +16,7 @@ import shutil
 import subprocess
 import sys
 from collections.abc import Callable
+from typing import Any
 
 from loguru import logger
 
@@ -251,7 +252,7 @@ def log_ruff_give_up(step: str, code: str, exc: BaseException) -> None:
         return
 
 
-def _f821_names(diagnostics: list[dict]) -> set[str]:
+def _f821_names(diagnostics: list[dict[str, Any]]) -> set[str]:
     """Extract the undefined names from a ruff F821 diagnostic list."""
     names: set[str] = set()
     for diag in diagnostics:
