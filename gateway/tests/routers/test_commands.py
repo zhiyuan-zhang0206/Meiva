@@ -42,19 +42,15 @@ def _runner_failed() -> cluster_rpc.ClusterOpFailed:
     return cluster_rpc.ClusterOpFailed({"error": "unknown op"})
 
 
-def test_endpoint_returns_command_metadata(monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setattr(
-        CommandCatalog,
-        "discover",
-        _one_command("recap", "d", "h", "b"),
-    )
+def test_endpoint_returns_command_metadata():
     with gateway_test_client() as client:
+        client.app.state.command_catalog_discoverer = _one_command("recap", "d", "h", "b")
         resp = client.get("/api/commands")
     assert resp.status_code == 200, resp.text
     assert resp.json() == [{"name": "recap", "description": "d", "instruction_hint": "h"}]
 
 
-def test_endpoint_agent_view_dispatches_to_agents_machine(monkeypatch: pytest.MonkeyPatch):
+def test_endpoint_agent_view_dispatches_to_agents_machine():
     seen: dict[str, object] = {}
 
     async def _dispatch(
@@ -69,9 +65,9 @@ def test_endpoint_agent_view_dispatches_to_agents_machine(monkeypatch: pytest.Mo
             "mcp_names": ["runner-only-groundwork"],
         }
 
-    monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", _dispatch)
-    with gateway_test_client() as client, monkeypatch.context() as patch:
-        patch.setattr(client.app.state, "db_pool", _agent_pool("runner-a"))
+    with gateway_test_client() as client:
+        client.app.state.command_rpc_dispatcher = _dispatch
+        client.app.state.db_pool = _agent_pool("runner-a")
         resp = client.get("/api/commands?agent_id=42")
     assert resp.status_code == 200, resp.text
     assert resp.json() == [{"name": "project", "description": "d", "instruction_hint": "h"}]
@@ -87,34 +83,24 @@ def test_endpoint_agent_view_dispatches_to_agents_machine(monkeypatch: pytest.Mo
     "failure", [_runner_unreachable, _runner_failed], ids=["unreachable", "failed"]
 )
 def test_endpoint_agent_view_unavailable_falls_back_locally(
-    monkeypatch: pytest.MonkeyPatch,
     failure: Callable[[], Exception],
 ):
-    monkeypatch.setattr(
-        CommandCatalog,
-        "discover",
-        _one_command("local", "d", "h", "b"),
-    )
-
     async def _unavailable(*_args: object, **_kwargs: object) -> NoReturn:
         raise failure()
 
-    monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", _unavailable)
-    with gateway_test_client() as client, monkeypatch.context() as patch:
-        patch.setattr(client.app.state, "db_pool", _agent_pool("runner-a"))
+    with gateway_test_client() as client:
+        client.app.state.command_catalog_discoverer = _one_command("local", "d", "h", "b")
+        client.app.state.command_rpc_dispatcher = _unavailable
+        client.app.state.db_pool = _agent_pool("runner-a")
         resp = client.get("/api/commands?agent_id=42")
     assert resp.status_code == 200, resp.text
     assert resp.json() == [{"name": "local", "description": "d", "instruction_hint": "h"}]
 
 
-def test_endpoint_agent_view_missing_agent_falls_back_locally(monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setattr(
-        CommandCatalog,
-        "discover",
-        _one_command("local", "d", "h", "b"),
-    )
-    with gateway_test_client() as client, monkeypatch.context() as patch:
-        patch.setattr(client.app.state, "db_pool", _agent_pool(None))
+def test_endpoint_agent_view_missing_agent_falls_back_locally():
+    with gateway_test_client() as client:
+        client.app.state.command_catalog_discoverer = _one_command("local", "d", "h", "b")
+        client.app.state.db_pool = _agent_pool(None)
         resp = client.get("/api/commands?agent_id=999")
     assert resp.status_code == 200, resp.text
     assert resp.json() == [{"name": "local", "description": "d", "instruction_hint": "h"}]

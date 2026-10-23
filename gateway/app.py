@@ -206,7 +206,10 @@ def _build_request_resources(
         clock=getattr(app.state, "login_limiter_clock", None),
     )
 
-    insights_client: Any = insights_router.build_client(process.home)
+    insights_client_factory = getattr(
+        app.state, "insights_client_factory", insights_router.build_client
+    )
+    insights_client: Any = insights_client_factory(process.home)
     app.state.insights_client = insights_client
     releases.push_async_callback(_closer(insights_client, "aclose"))
 
@@ -269,9 +272,10 @@ async def lifespan(
             app.state.grafana_client = grafana_client
             releases.push_async_callback(_closer(grafana_client, "aclose"))
 
+            cron_registrar = getattr(app.state, "os_cron_registrar", register_os_cron)
             try:
                 await asyncio.to_thread(
-                    register_os_cron,
+                    cron_registrar,
                     enabled_reader=lambda: config.view.general.os_jobs_enabled,
                     host=process.host,
                 )
@@ -307,11 +311,11 @@ async def _background_lifetime(
         app.state.mcp_manager = mcp_manager
 
     try:
+        latency_flusher_fn = getattr(app.state, "latency_flusher", latency.latency_flusher)
+        auth401_flusher_fn = getattr(app.state, "auth401_flusher", rejection_log.auth401_flusher)
         async with asyncio.TaskGroup() as background:
-            latency_flusher = background.create_task(latency.latency_flusher())
-            auth401_flusher = background.create_task(
-                rejection_log.auth401_flusher(app.state.auth401_log)
-            )
+            latency_flusher = background.create_task(latency_flusher_fn())
+            auth401_flusher = background.create_task(auth401_flusher_fn(app.state.auth401_log))
             outbox = background.create_task(
                 notification_outbox.run(
                     app.state.db_pool,

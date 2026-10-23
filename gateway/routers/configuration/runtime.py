@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from typing import Any, Literal, cast
 
 from fastapi import APIRouter, HTTPException, Query, Request
@@ -64,15 +65,20 @@ def _assert_machine_known(target: str, pool: ConnectionPool, *, local_machine_na
 
 
 def _target_capabilities(
-    target: str, db: Database, *, local_machine: MachineIdentity
+    target: str,
+    db: Database,
+    *,
+    local_machine: MachineIdentity,
+    role_lookup: Callable[[Database, str], list[str]] | None = None,
 ) -> list[MachineRole]:
 
     if target == local_machine.name():
         return cast("list[MachineRole]", sorted(local_machine.role()))
     from base.cluster.machines import MachineNotRegistered, lookup_role
 
+    read_role = lookup_role if role_lookup is None else role_lookup
     try:
-        return cast("list[MachineRole]", lookup_role(db, target))
+        return cast("list[MachineRole]", read_role(db, target))
     except MachineNotRegistered:
         return []
 
@@ -84,17 +90,21 @@ async def _dispatch_config_read(
     authority: ConfigAuthority,
     local_machine: MachineIdentity,
     host: Host,
+    role_lookup: Callable[[Database, str], list[str]] | None = None,
+    rpc_dispatcher: Callable[..., Any] | None = None,
 ) -> ConfigReadResult:
 
     from base.cluster.machines import MachineNotRegistered, lookup_role
 
+    read_role = lookup_role if role_lookup is None else role_lookup
+    dispatch_fn = cluster_rpc.dispatch_to_machine if rpc_dispatcher is None else rpc_dispatcher
     try:
-        role = await asyncio.to_thread(lookup_role, db, target)
+        role = await asyncio.to_thread(read_role, db, target)
     except MachineNotRegistered:
         role = []
     if "agent-runner" in role:
         try:
-            wire = await cluster_rpc.dispatch_to_machine(
+            wire = await dispatch_fn(
                 db,
                 target_machine=target,
                 kind="config_read",
@@ -128,18 +138,26 @@ async def _dispatch_config_read(
 
 
 async def _dispatch_config_audit_read(
-    target: str, last: int, *, db: Database, local_machine: MachineIdentity
+    target: str,
+    last: int,
+    *,
+    db: Database,
+    local_machine: MachineIdentity,
+    role_lookup: Callable[[Database, str], list[str]] | None = None,
+    rpc_dispatcher: Callable[..., Any] | None = None,
 ) -> ConfigAuditReadResult:
 
     from base.cluster.machines import MachineNotRegistered, lookup_role
 
+    read_role = lookup_role if role_lookup is None else role_lookup
+    dispatch_fn = cluster_rpc.dispatch_to_machine if rpc_dispatcher is None else rpc_dispatcher
     try:
-        role = await asyncio.to_thread(lookup_role, db, target)
+        role = await asyncio.to_thread(read_role, db, target)
     except MachineNotRegistered:
         role = []
     if "agent-runner" in role:
         try:
-            wire = await cluster_rpc.dispatch_to_machine(
+            wire = await dispatch_fn(
                 db,
                 target_machine=target,
                 kind="config_audit_read",
@@ -182,17 +200,21 @@ async def _dispatch_config_write(
     trace_id: str | None = None,
     local_machine: MachineIdentity,
     host: Host,
+    role_lookup: Callable[[Database, str], list[str]] | None = None,
+    rpc_dispatcher: Callable[..., Any] | None = None,
 ) -> ConfigWriteOpResult:
 
     from base.cluster.machines import MachineNotRegistered, lookup_role
 
+    read_role = lookup_role if role_lookup is None else role_lookup
+    dispatch_fn = cluster_rpc.dispatch_to_machine if rpc_dispatcher is None else rpc_dispatcher
     try:
-        role = await asyncio.to_thread(lookup_role, db, target)
+        role = await asyncio.to_thread(read_role, db, target)
     except MachineNotRegistered:
         role = []
     if "agent-runner" in role:
         try:
-            wire = await cluster_rpc.dispatch_to_machine(
+            wire = await dispatch_fn(
                 db,
                 target_machine=target,
                 kind="config_write",
@@ -262,12 +284,16 @@ async def get_config(request: Request, machine: str | None = None) -> ConfigView
         request.app.state.db_pool,
         local_machine_name=request.app.state.machine.name(),
     )
+    role_lookup = getattr(request.app.state, "config_role_lookup", None)
+    rpc_dispatcher = getattr(request.app.state, "config_rpc_dispatcher", None)
     read = await _dispatch_config_read(
         target,
         db=request.app.state.db,
         authority=request.app.state.config_authority,
         local_machine=request.app.state.machine,
         host=request.app.state.host,
+        role_lookup=role_lookup,
+        rpc_dispatcher=rpc_dispatcher,
     )
     host_fields = read.host_fields
 
@@ -334,7 +360,10 @@ async def get_config(request: Request, machine: str | None = None) -> ConfigView
         fields=fields,
         raw_overrides=raw_overrides,
         machine_capabilities=_target_capabilities(
-            target, request.app.state.db, local_machine=request.app.state.machine
+            target,
+            request.app.state.db,
+            local_machine=request.app.state.machine,
+            role_lookup=role_lookup,
         ),
     )
 
@@ -451,8 +480,15 @@ def _reject_invalid_plan(plan: ConfigPatchPlan) -> None:
 
 
 def _validate_cluster_candidate(
-    plan: ConfigPatchPlan, metas: dict[str, Any], *, local: bool
+    plan: ConfigPatchPlan,
+    metas: dict[str, Any],
+    *,
+    local: bool,
+    candidate_validator: Callable[..., Any] | None = None,
 ) -> None:
+    validate_candidate = (
+        validate_env_patch_for_write if candidate_validator is None else candidate_validator
+    )
     candidate_writes = dict(plan.cluster_writes)
     candidate_removals = set(plan.cluster_removals)
 
@@ -465,7 +501,7 @@ def _validate_cluster_candidate(
         candidate_removals.update(
             name for name in host_removals if field_domain(name) in cluster_domains
         )
-    candidate = validate_env_patch_for_write(candidate_writes, candidate_removals)
+    candidate = validate_candidate(candidate_writes, candidate_removals)
     if candidate.errors:
         raise HTTPException(
             status_code=400,
@@ -485,6 +521,10 @@ async def _put_local(
     trace_id: str | None,
     local_machine: MachineIdentity,
     host: Host,
+    role_lookup: Callable[[Database, str], list[str]] | None = None,
+    rpc_dispatcher: Callable[..., Any] | None = None,
+    candidate_validator: Callable[..., Any] | None = None,
+    cluster_field_writer: Callable[..., Any] | None = None,
 ) -> tuple[ConfigWriteOpResult, list[str]]:
 
     host_result = await _dispatch_config_write(
@@ -497,10 +537,18 @@ async def _put_local(
         trace_id=trace_id,
         local_machine=local_machine,
         host=host,
+        role_lookup=role_lookup,
+        rpc_dispatcher=rpc_dispatcher,
     )
     cluster_changed: set[str] = set()
     if host_result.applied and has_cluster_patch:
-        await _write_cluster_fields(plan, actor=actor, trace_id=trace_id)
+        await _write_cluster_fields(
+            plan,
+            actor=actor,
+            trace_id=trace_id,
+            candidate_validator=candidate_validator,
+            cluster_field_writer=cluster_field_writer,
+        )
         cluster_changed = set(plan.cluster_writes) | plan.cluster_removals
     cluster_restart = {
         metas[k].restart_required for k in cluster_changed if metas[k].restart_required
@@ -509,10 +557,20 @@ async def _put_local(
 
 
 async def _write_cluster_fields(
-    plan: ConfigPatchPlan, *, actor: str | None, trace_id: str | None
+    plan: ConfigPatchPlan,
+    *,
+    actor: str | None,
+    trace_id: str | None,
+    candidate_validator: Callable[..., Any] | None = None,
+    cluster_field_writer: Callable[..., Any] | None = None,
 ) -> None:
-
-    candidate = validate_env_patch_for_write(plan.cluster_writes, plan.cluster_removals)
+    validate_candidate = (
+        validate_env_patch_for_write if candidate_validator is None else candidate_validator
+    )
+    write_fields_fn = (
+        runtime_config.write_fields if cluster_field_writer is None else cluster_field_writer
+    )
+    candidate = validate_candidate(plan.cluster_writes, plan.cluster_removals)
     if candidate.errors:
         raise HTTPException(
             status_code=400,
@@ -520,7 +578,7 @@ async def _write_cluster_fields(
         )
     try:
         await asyncio.to_thread(
-            runtime_config.write_fields,
+            write_fields_fn,
             plan.cluster_writes,
             plan.cluster_removals,
             expected_digest=candidate.expected_digest,
@@ -584,9 +642,18 @@ async def put_config(
         raise HTTPException(status_code=400, detail=str(exc)) from None
     if owner is not None and machine is None:
         return await _put_plugin(owner, plan, metas)
+    role_lookup = getattr(request.app.state, "config_role_lookup", None)
+    rpc_dispatcher = getattr(request.app.state, "config_rpc_dispatcher", None)
+    candidate_validator = getattr(request.app.state, "config_candidate_validator", None)
+    cluster_field_writer = getattr(request.app.state, "config_cluster_field_writer", None)
     has_cluster_patch = bool(plan.cluster_writes or plan.cluster_removals)
     if has_cluster_patch:
-        _validate_cluster_candidate(plan, metas, local=machine is None)
+        _validate_cluster_candidate(
+            plan,
+            metas,
+            local=machine is None,
+            candidate_validator=candidate_validator,
+        )
 
     if machine is None:
         host_result, restart_required = await _put_local(
@@ -600,6 +667,10 @@ async def put_config(
             trace_id=trace_id,
             local_machine=request.app.state.machine,
             host=request.app.state.host,
+            role_lookup=role_lookup,
+            rpc_dispatcher=rpc_dispatcher,
+            candidate_validator=candidate_validator,
+            cluster_field_writer=cluster_field_writer,
         )
     else:
         host_result = await _dispatch_config_write(
@@ -611,6 +682,8 @@ async def put_config(
             trace_id=trace_id,
             local_machine=request.app.state.machine,
             host=request.app.state.host,
+            role_lookup=role_lookup,
+            rpc_dispatcher=rpc_dispatcher,
         )
         restart_required = host_result.restart_required
 

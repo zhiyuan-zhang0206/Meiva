@@ -2,6 +2,7 @@ import uuid
 from collections.abc import Callable, Generator, Mapping
 from contextlib import contextmanager, nullcontext
 from dataclasses import replace
+from pathlib import Path
 from typing import Any, Literal, Self
 
 import httpx
@@ -63,6 +64,7 @@ def _resolve_boot(
 @contextmanager
 def gateway_test_process(
     *,
+    home: Path | None = None,
     machine: MachineIdentity | None = None,
     config: ConfigBoot | None = None,
     fields: Mapping[str, Any] | None = None,
@@ -73,7 +75,7 @@ def gateway_test_process(
         resolved_config = _resolve_boot(config, fields)
         resolved_machine = machine_from_boot(resolved_config) if machine is None else machine
         process = GatewayProcess(
-            home=paths.meiva_home(),
+            home=paths.meiva_home() if home is None else home,
             config=resolved_config,
             image=LOADED_IMAGE,
             machine=resolved_machine,
@@ -86,6 +88,7 @@ def gateway_test_process(
 
 def gateway_test_app(
     *,
+    home: Path | None = None,
     process: GatewayProcess | None = None,
     config: GatewayConfig | None = None,
     boot: ConfigBoot | None = None,
@@ -101,7 +104,7 @@ def gateway_test_app(
         resolved_boot = _resolve_boot(boot, fields)
         resolved_machine = machine_from_boot(resolved_boot) if machine is None else machine
         process = GatewayProcess(
-            home=paths.meiva_home(),
+            home=paths.meiva_home() if home is None else home,
             config=resolved_boot,
             image=LOADED_IMAGE,
             machine=resolved_machine,
@@ -148,6 +151,7 @@ class GatewayTestClient(TestClient):
 def gateway_test_client(
     application: FastAPI | None = None,
     *,
+    home: Path | None = None,
     machine: MachineIdentity | None = None,
     config: GatewayConfig | None = None,
     boot: ConfigBoot | None = None,
@@ -163,6 +167,7 @@ def gateway_test_client(
         if any(
             arg is not None
             for arg in (
+                home,
                 machine,
                 config,
                 boot,
@@ -182,7 +187,7 @@ def gateway_test_client(
             yield client
         return
     with gateway_test_process(
-        machine=machine, config=boot, fields=fields, process=process
+        home=home, machine=machine, config=boot, fields=fields, process=process
     ) as active_process:
         assembled = gateway_test_app(
             process=active_process,

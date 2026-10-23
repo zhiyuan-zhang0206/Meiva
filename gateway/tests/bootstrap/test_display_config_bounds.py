@@ -3,7 +3,7 @@ from pathlib import Path
 import psycopg
 import pytest
 
-from base.config import runtime_config, settings
+from base.config import runtime_config
 from base.config.domains.display import DisplaySettings
 from base.config.domains.tests.test_display_config import DISPLAY_RANGES
 from base.host.env import dotenv_file
@@ -13,11 +13,10 @@ from gateway.tests.events.test_notices_endpoint import seed_agent
 
 @pytest.mark.parametrize(("name", "minimum", "maximum"), DISPLAY_RANGES)
 def test_config_write_rejects_invalid_default_without_changing_file(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, name: str, minimum: int, maximum: int
+    unit_home: Path, name: str, minimum: int, maximum: int
 ) -> None:
-    monkeypatch.setattr(dotenv_file, "unit_home", lambda: tmp_path)
     runtime_config.write_fields({"notices_open_default_limit": 200}, set())
-    env_path = tmp_path / ".env"
+    env_path = unit_home / ".env"
     before = env_path.read_bytes()
 
     with gateway_test_client() as client:
@@ -29,9 +28,9 @@ def test_config_write_rejects_invalid_default_without_changing_file(
 
 @pytest.mark.parametrize(("name", "minimum", "maximum"), DISPLAY_RANGES)
 def test_config_write_accepts_boundary_defaults_without_clamping(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, name: str, minimum: int, maximum: int
+    unit_home: Path, name: str, minimum: int, maximum: int
 ) -> None:
-    monkeypatch.setattr(dotenv_file, "unit_home", lambda: tmp_path)
+    del unit_home
     alias = DisplaySettings.model_fields[name].alias
     assert isinstance(alias, str)
     with gateway_test_client() as client:
@@ -43,7 +42,6 @@ def test_config_write_accepts_boundary_defaults_without_clamping(
 
 @pytest.mark.parametrize(("open_limit", "resolved_limit"), ((1, 1), (500, 100)))
 def test_implicit_notice_reads_use_validated_boundary_defaults(
-    monkeypatch: pytest.MonkeyPatch,
     db_conn: psycopg.Connection,
     open_limit: int,
     resolved_limit: int,
@@ -51,7 +49,6 @@ def test_implicit_notice_reads_use_validated_boundary_defaults(
     configured = DisplaySettings.model_validate(
         {"notices_open_default_limit": open_limit, "notices_resolved_default_page": resolved_limit}
     )
-    monkeypatch.setattr(settings, "display", configured)
     agent_id = seed_agent(db_conn)
     with db_conn.cursor() as cur:
         cur.execute(
@@ -72,6 +69,8 @@ def test_implicit_notice_reads_use_validated_boundary_defaults(
     db_conn.commit()
 
     with gateway_test_client() as client:
+        client.app.state.notices_open_default_limit = configured.notices_open_default_limit
+        client.app.state.notices_resolved_default_page = configured.notices_resolved_default_page
         for path, expected in (
             ("/api/notices/open", open_limit),
             ("/api/notices/live", open_limit),

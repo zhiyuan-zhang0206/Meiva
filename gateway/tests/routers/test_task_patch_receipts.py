@@ -11,7 +11,6 @@ from gateway.routers import tasks
 from gateway.schemas.tasks import TaskUpdateRequest
 from gateway.tests.auth.gateway_config import gateway_test_client
 from gateway.tests.routers.test_tasks_router import make_agent, make_task
-from ops import lifecycle
 
 
 def _count(db: psycopg.Connection, table: str) -> int:
@@ -44,7 +43,7 @@ def test_concurrent_duplicates_commit_one_assignment(db_conn: psycopg.Connection
 
 
 def test_lost_response_replay_preserves_new_owner_and_reminder_window(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    db_conn: psycopg.Connection,
 ) -> None:
     old, middle, current = (make_agent(db_conn) for _ in range(3))
     tid = make_task(db_conn, owner=old)
@@ -55,7 +54,7 @@ def test_lost_response_replay_preserves_new_owner_and_reminder_window(
         raise RuntimeError("post-commit response lost")
 
     with gateway_test_client(raise_server_exceptions=False) as client:
-        monkeypatch.setattr(tasks, "publish_inbound_wake", fail_wake)
+        client.app.state.task_wake_publisher = fail_wake
         assert (
             client.patch(f"/api/tasks/{tid}", json={"owner": middle}, headers=headers).status_code
             == 500
@@ -63,7 +62,7 @@ def test_lost_response_replay_preserves_new_owner_and_reminder_window(
         recorded = db_conn.execute("SELECT result FROM task_patch_receipts").fetchone()
         assert recorded is not None
         original = recorded[0]
-        monkeypatch.setattr(tasks, "publish_inbound_wake", real_wake)
+        client.app.state.task_wake_publisher = real_wake
         assert (
             client.patch(
                 f"/api/tasks/{tid}",
@@ -84,8 +83,8 @@ def test_lost_response_replay_preserves_new_owner_and_reminder_window(
         inbounds = db_conn.execute(
             "SELECT id, status, payload FROM inbound_messages ORDER BY id"
         ).fetchall()
-        monkeypatch.setattr(tasks, "publish_inbound_wake", fail_wake)
-        monkeypatch.setattr(lifecycle, "resurrect_if_terminated", fail_wake)
+        client.app.state.task_wake_publisher = fail_wake
+        client.app.state.task_resurrector = fail_wake
         replay = client.patch(f"/api/tasks/{tid}", json={"owner": middle}, headers=headers)
     assert replay.status_code == 200
     assert replay.json() == original
@@ -129,7 +128,7 @@ def test_changed_body_conflict_and_omitted_null_distinction(db_conn: psycopg.Con
 
 @pytest.mark.parametrize("failure", ["notification", "receipt"])
 def test_producer_failure_rolls_back_effect_and_receipt(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch, failure: str
+    db_conn: psycopg.Connection, failure: str
 ) -> None:
     old, new = make_agent(db_conn), make_agent(db_conn)
     tid = make_task(db_conn, owner=old)
@@ -141,7 +140,10 @@ def test_producer_failure_rolls_back_effect_and_receipt(
         raise RuntimeError("producer failed after durable insert")
 
     with gateway_test_client(raise_server_exceptions=False) as client:
-        monkeypatch.setattr(tasks, target, fail_after_insert)
+        if failure == "notification":
+            client.app.state.task_notifications_enqueuer = fail_after_insert
+        else:
+            client.app.state.task_receipt_saver = fail_after_insert
         assert (
             client.patch(
                 f"/api/tasks/{tid}", json={"owner": new}, headers=keyed_headers("rollback")
