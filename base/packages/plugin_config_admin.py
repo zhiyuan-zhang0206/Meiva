@@ -193,7 +193,12 @@ class PluginUpdateResult(BaseModel):
     entries: list[PluginUpdateEntry]
 
 
-def update_all_disk_images() -> PluginUpdateResult:
+def update_all_disk_images(
+    *,
+    repo_dir: Path | None = None,
+    user_dir: Path | None = None,
+    home: Path | None = None,
+) -> PluginUpdateResult:
     """Scan all plugins, auto-merge disk-image schema diff, return structured result.
 
     Driven by the `meiva plugins update` CLI (`cli/commands/extensions/plugins.py`); the
@@ -210,20 +215,34 @@ def update_all_disk_images() -> PluginUpdateResult:
     Takes each plugin's class from the `contribute()` of its `default_config.py` config face
     (`base.packages.plugins.config_face`); `plugin.py` is never imported.
     """
+    discovered = (
+        discover_plugins()
+        if repo_dir is None and user_dir is None
+        else discover_plugins(repo_dir=repo_dir, user_dir=user_dir)
+    )
     entries = [
-        _update_one_disk_image(name, plugin_dir)
-        for name, plugin_dir in sorted(discover_plugins().items())
+        _update_one_disk_image(name, plugin_dir, home=home)
+        for name, plugin_dir in sorted(discovered.items())
     ]
     return PluginUpdateResult(entries=entries)
 
 
-def _update_one_disk_image(name: str, plugin_dir: Path) -> PluginUpdateEntry:
+def _update_one_disk_image(
+    name: str,
+    plugin_dir: Path,
+    *,
+    home: Path | None = None,
+) -> PluginUpdateEntry:
     """Merge the config class one plugin declares into its disk image; never raises."""
     try:
         cls = declared_config_class(name, plugin_dir)
         if cls is None:
             return PluginUpdateEntry(name=name, status="skipped", detail="no default_config.py")
-        added, removed = merge_disk_image_schema(name, cls)
+        added, removed = (
+            merge_disk_image_schema(name, cls)
+            if home is None
+            else merge_disk_image_schema(name, cls, home=home)
+        )
     except Exception as e:
         return PluginUpdateEntry(name=name, status="error", detail=str(e))
 

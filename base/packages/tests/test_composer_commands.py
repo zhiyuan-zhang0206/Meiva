@@ -1,4 +1,4 @@
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
 from pathlib import Path
 
 import pytest
@@ -6,15 +6,6 @@ import pytest
 from base.packages import composer_commands
 from base.packages.composer_commands import CommandCatalog
 from base.packages.skills.tree import Skill
-
-
-def _dirs(
-    *dirs: tuple[Path, tuple[str, ...]],
-) -> Callable[[Sequence[Skill]], list[tuple[Path, tuple[str, ...]]]]:
-    def command_dirs(_skills: Sequence[Skill]) -> list[tuple[Path, tuple[str, ...]]]:
-        return list(dirs)
-
-    return command_dirs
 
 
 def _write(d: Path, name: str, text: str) -> None:
@@ -69,20 +60,24 @@ def test_scan_dir_namespace_prefixes_name(tmp_path: Path):
     assert out["vercel:deploy"]["name"] == "vercel:deploy"
 
 
-def test_discover_dedups_later_source_wins(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+def test_discover_dedups_later_source_wins(tmp_path: Path):
     early, late = tmp_path / "early", tmp_path / "late"
     _write(early, "dup.md", "early body")
     _write(late, "dup.md", "late body")
-    monkeypatch.setattr(composer_commands, "command_dirs", _dirs((early, ()), (late, ())))
-    out = {c["name"]: c for c in composer_commands.discover_commands([])}
+    out = {
+        c["name"]: c
+        for c in composer_commands.discover_commands([], dirs=((early, ()), (late, ())))
+    }
     assert out["dup"]["body"] == "late body"
 
 
-def test_discover_sorted_by_name(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+def test_discover_sorted_by_name(tmp_path: Path):
     _write(tmp_path, "zebra.md", "z")
     _write(tmp_path, "alpha.md", "a")
-    monkeypatch.setattr(composer_commands, "command_dirs", _dirs((tmp_path, ())))
-    assert [c["name"] for c in composer_commands.discover_commands([])] == ["alpha", "zebra"]
+    assert [c["name"] for c in composer_commands.discover_commands([], dirs=((tmp_path, ()),))] == [
+        "alpha",
+        "zebra",
+    ]
 
 
 def test_builtin_commands_discoverable():
@@ -98,18 +93,19 @@ def test_removed_builtin_plan_passes_through():
     )
 
 
-def test_builtin_source_ignores_legacy_root_and_keeps_user_override(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
+def test_builtin_source_ignores_legacy_root_and_keeps_user_override(tmp_path: Path):
     repo, home = tmp_path / "repo", tmp_path / "home"
     _write(repo / "meiva_builtins" / "commands", "recap.md", "Builtin recap.")
     _write(repo / "commands", "plan.md", "Old bundled plan.")
     _write(home / "commands", "recap.md", "User recap.")
-    monkeypatch.setattr(composer_commands, "repo_root", lambda: repo)
-    monkeypatch.setattr(composer_commands, "meiva_home", lambda: home)
-    monkeypatch.setattr(composer_commands, "repo_plugins_dir", lambda: repo / "plugins")
-    monkeypatch.setattr(composer_commands, "external_plugin_read_root", lambda: home / "plugins")
-    catalog = composer_commands.discover_commands([])
+    dirs = composer_commands.command_dirs(
+        [],
+        root=repo,
+        home=home,
+        repo_plugins=repo / "plugins",
+        external_plugins=home / "plugins",
+    )
+    catalog = composer_commands.discover_commands([], dirs=dirs)
     commands = {c["name"]: c for c in catalog}
     assert set(commands) == {"recap"}
     assert commands["recap"]["body"] == "User recap."
@@ -125,14 +121,9 @@ def test_scan_dir_renders_canonical_namespace_spelling(tmp_path: Path):
     assert out["meiva-fleet:deploy"]["name"] == "meiva-fleet:deploy"
 
 
-def test_underscore_command_spelling_still_expands(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+def test_underscore_command_spelling_still_expands(tmp_path: Path):
     _write(tmp_path, "ship.md", "write the release note")
-    monkeypatch.setattr(
-        composer_commands,
-        "command_dirs",
-        _dirs((tmp_path, ("meiva_fleet",))),
-    )
-    catalog = CommandCatalog(skills=list)
+    catalog = CommandCatalog(skills=list, dirs=((tmp_path, ("meiva_fleet",)),))
     dash = catalog.expand("/meiva-fleet:ship fix the tests")
     legacy = catalog.expand("/meiva_fleet.ship fix the tests")
     assert "write the release note" in dash
@@ -209,12 +200,12 @@ def test_skill_as_command_hyphen_maps_to_underscore_target():
     assert "meiva.help(meiva.skills.demo.test_driven_development)" in out
 
 
-def test_explicit_command_overrides_skill_as_command(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
+def test_explicit_command_overrides_skill_as_command(tmp_path: Path):
     _write(tmp_path, "foo.md", "explicit prompt body")
-    monkeypatch.setattr(composer_commands, "command_dirs", _dirs((tmp_path, ())))
-    out = {c["name"]: c for c in composer_commands.discover_commands([_fake_skill("foo")])}
+    out = {
+        c["name"]: c
+        for c in composer_commands.discover_commands([_fake_skill("foo")], dirs=((tmp_path, ()),))
+    }
     assert out["foo"]["skill_target"] is None
     assert out["foo"]["body"] == "explicit prompt body"
 
@@ -227,21 +218,22 @@ def test_skill_carried_commands_walk_the_skills_it_is_given():
     ]
 
 
-def test_discover_empty_when_disabled(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+def test_discover_empty_when_disabled(tmp_path: Path):
     _write(tmp_path, "recap.md", "Recap it.")
-    monkeypatch.setattr(composer_commands, "command_dirs", _dirs((tmp_path, ())))
-    monkeypatch.setattr(composer_commands.settings.agent, "commands_enabled", False)
-    assert composer_commands.discover_commands([_fake_skill("goal")]) == []
+    assert (
+        composer_commands.discover_commands(
+            [_fake_skill("goal")], dirs=((tmp_path, ()),), enabled=False
+        )
+        == []
+    )
 
 
 @pytest.mark.parametrize("operation", ["discover", "expand"])
-def test_expand_passthrough_when_disabled(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, operation: str
-):
+def test_expand_passthrough_when_disabled(tmp_path: Path, operation: str):
     _write(tmp_path, "recap.md", "Recap it.")
-    monkeypatch.setattr(composer_commands, "command_dirs", _dirs((tmp_path, ())))
     reads: list[None] = []
     refuse_reads = False
+    enabled = True
 
     def skills() -> Sequence[Skill]:
         reads.append(None)
@@ -249,10 +241,10 @@ def test_expand_passthrough_when_disabled(
             raise OSError("Skill registry is unavailable")
         return []
 
-    catalog = CommandCatalog(skills=skills)
+    catalog = CommandCatalog(skills=skills, dirs=((tmp_path, ()),), enabled=lambda: enabled)
     assert catalog.expand("/recap just the PRs").startswith("Command /recap:")
     assert reads == [None]
-    monkeypatch.setattr(composer_commands.settings.agent, "commands_enabled", False)
+    enabled = False
     refuse_reads = True
     reads.clear()
     if operation == "discover":

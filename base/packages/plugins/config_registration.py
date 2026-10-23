@@ -141,11 +141,16 @@ def _reconcile_config_image[C: BaseModel](
 
 
 # meiva:link base/packages/plugins/docs/plugin-config/plugin-config.meiva.okf.md
-def merge_disk_image_schema(plugin: str, cls: type[BaseModel]) -> tuple[set[str], set[str]]:
-    config_path = disk_image_path(plugin)
+def merge_disk_image_schema(
+    plugin: str, cls: type[BaseModel], *, home: Path | None = None
+) -> tuple[set[str], set[str]]:
+    config_path = disk_image_path(plugin) if home is None else disk_image_path(plugin, home=home)
 
     if not config_path.exists():
-        write_default_disk_image(plugin, cls)
+        if home is None:
+            write_default_disk_image(plugin, cls)
+        else:
+            write_default_disk_image(plugin, cls, home=home)
         return set(cls.model_fields.keys()), set()
 
     captured = config_path.read_text()

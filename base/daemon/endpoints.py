@@ -44,9 +44,16 @@ class ServiceEndpoints:
     by_name: Mapping[str, ServiceEndpoint]
 
     @classmethod
-    def from_settings(cls) -> ServiceEndpoints:
+    def from_settings(
+        cls,
+        *,
+        read_field: Callable[[str], int | None] | None = None,
+        home: Path | None = None,
+    ) -> ServiceEndpoints:
         """The table as the live settings and `MEIVA_HOME` describe it now."""
-        return cls._from_fields(get_field, runtime=run_dir(meiva_home()))
+        reader = get_field if read_field is None else read_field
+        resolved_home = meiva_home() if home is None else home
+        return cls._from_fields(reader, runtime=run_dir(resolved_home))
 
     @classmethod
     def from_boot(cls, config: ConfigBoot, *, runtime: Path) -> ServiceEndpoints:

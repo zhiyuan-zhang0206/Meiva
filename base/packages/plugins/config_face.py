@@ -118,9 +118,11 @@ def read_config_image[C: BaseModel](cls: type[C], config_path: Path) -> C:
     return config_from_image(cls, content, config_path)
 
 
-def write_default_disk_image(plugin: str, cls: type[BaseModel]) -> Path:
+def write_default_disk_image(
+    plugin: str, cls: type[BaseModel], *, home: Path | None = None
+) -> Path:
     instance = cls()
-    config_path = disk_image_path(plugin)
+    config_path = disk_image_path(plugin) if home is None else disk_image_path(plugin, home=home)
     config_path.parent.mkdir(parents=True, exist_ok=True)
     from base.packages.plugin_config_images import (
         PluginConfigOwner,

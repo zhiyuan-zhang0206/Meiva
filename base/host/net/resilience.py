@@ -100,7 +100,14 @@ def agent_phase(span: float) -> float:
 
 # meiva:note
 # Jitter exists to spread retries, not to keep a secret, so the non-cryptographic generator is the intended one.
-def jittered(delay: float, span: float = 1.0, mode: str = "agent") -> float:
+def jittered(
+    delay: float,
+    span: float = 1.0,
+    mode: str = "agent",
+    *,
+    phase_fn: Callable[[float], float] = agent_phase,
+    uniform_fn: Callable[[float, float], float] = random.uniform,
+) -> float:
     """``delay`` plus jitter, never negative.
 
     ``mode``:
@@ -122,12 +129,12 @@ def jittered(delay: float, span: float = 1.0, mode: str = "agent") -> float:
     if mode == "none":
         return delay
     if mode == "phase":
-        return max(0.0, delay + agent_phase(span))
+        return max(0.0, delay + phase_fn(span))
     if mode == "relative":
-        return max(0.0, delay * (1 + random.uniform(-span, span)))  # noqa: S311
+        return max(0.0, delay * (1 + uniform_fn(-span, span)))
     if mode == "random":
-        return max(0.0, delay + random.uniform(-span, span))  # noqa: S311 — spread, not secrecy
-    return max(0.0, delay + agent_phase(span) + random.uniform(-span, span))  # noqa: S311
+        return max(0.0, delay + uniform_fn(-span, span))
+    return max(0.0, delay + phase_fn(span) + uniform_fn(-span, span))
 
 
 def extract_retry_after(exc: Exception) -> float | None:
@@ -265,7 +272,11 @@ class Policy:
 
 # meiva:link base/host/docs/host.meiva.okf.md
 def retry(
-    policy: Policy, *, sleep: Callable[[float], None] | None = None
+    policy: Policy,
+    *,
+    sleep: Callable[[float], None] | None = None,
+    phase_fn: Callable[[float], float] = agent_phase,
+    uniform_fn: Callable[[float, float], float] = random.uniform,
 ) -> Callable[[Callable[[], T]], T]:
     """Wrap a sync ``fn`` in the one retry loop."""
 
@@ -281,7 +292,13 @@ def retry(
                         retry_after = extract_retry_after(exc)
                         if retry_after is not None:
                             delay = max(delay, retry_after)
-                    seconds = jittered(delay, policy.jitter_span, policy.jitter)
+                    seconds = jittered(
+                        delay,
+                        policy.jitter_span,
+                        policy.jitter,
+                        phase_fn=phase_fn,
+                        uniform_fn=uniform_fn,
+                    )
                     if sleep is None:
                         retry_sleep(seconds)
                     else:
@@ -295,7 +312,11 @@ def retry(
     return _run
 
 
-def aretry(policy: Policy) -> Callable[[Callable[[], Awaitable[T]]], Awaitable[T]]:
+def aretry(
+    policy: Policy,
+    *,
+    asleep: Callable[[float], Awaitable[None]] | None = None,
+) -> Callable[[Callable[[], Awaitable[T]]], Awaitable[T]]:
     """Wrap an async ``fn`` in the one retry loop (async twin of ``retry``)."""
 
     def _run(fn: Callable[[], Awaitable[T]]) -> Awaitable[T]:
@@ -311,7 +332,11 @@ def aretry(policy: Policy) -> Callable[[Callable[[], Awaitable[T]]], Awaitable[T
                             retry_after = extract_retry_after(exc)
                             if retry_after is not None:
                                 delay = max(delay, retry_after)
-                        await retry_asleep(jittered(delay, policy.jitter_span, policy.jitter))
+                        seconds = jittered(delay, policy.jitter_span, policy.jitter)
+                        if asleep is None:
+                            await retry_asleep(seconds)
+                        else:
+                            await asleep(seconds)
                         continue
                     if policy.on_final_failure is not None:
                         policy.on_final_failure(exc)

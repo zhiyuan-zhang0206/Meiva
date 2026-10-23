@@ -19,27 +19,27 @@ def test_every_health_daemon_has_an_endpoint_from_its_setting_and_the_run_dir() 
         assert endpoint.pidfile == run_dir(meiva_home()) / f"{endpoint.name}.pid"
 
 
-def test_a_port_override_reaches_the_row_and_only_that_row(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_port_override_reaches_the_row_and_only_that_row() -> None:
     before = ServiceEndpoints.from_settings()
-    monkeypatch.setattr(settings.services, "labeler_health_port", 18765)
-    after = ServiceEndpoints.from_settings()
+    after = ServiceEndpoints.from_settings(
+        read_field=lambda k: 18765 if k == "labeler_health_port" else get_field(k)
+    )
     assert after.of("labeler").health_port == 18765
     assert after.of("im_bridge") == before.of("im_bridge")
 
 
-def test_the_table_does_not_follow_later_changes(monkeypatch: pytest.MonkeyPatch) -> None:
-    table = ServiceEndpoints.from_settings()
+def test_the_table_does_not_follow_later_changes() -> None:
+    overrides: dict[str, int | None] = {}
+    table = ServiceEndpoints.from_settings(read_field=lambda k: overrides.get(k, get_field(k)))
     port = table.of("labeler").health_port
-    monkeypatch.setattr(settings.services, "labeler_health_port", port + 1)
+    overrides["labeler_health_port"] = port + 1
     assert table.of("labeler").health_port == port
 
 
-def test_the_pidfile_lives_under_the_homes_run_directory(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    monkeypatch.setenv("MEIVA_HOME", str(tmp_path))
+def test_the_pidfile_lives_under_the_homes_run_directory(tmp_path: Path) -> None:
     assert (
-        ServiceEndpoints.from_settings().of("labeler").pidfile == tmp_path / "run" / "labeler.pid"
+        ServiceEndpoints.from_settings(home=tmp_path).of("labeler").pidfile
+        == tmp_path / "run" / "labeler.pid"
     )
 
 
@@ -55,14 +55,14 @@ def test_an_unregistered_daemon_is_a_key_error() -> None:
 
 
 def test_boot_tables_use_only_their_owner_and_follow_live_fields_on_rebuild(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    tmp_path: Path,
 ) -> None:
     first, second = ConfigBoot(), ConfigBoot()
     first.read_process_environment()
     second.read_process_environment()
     first.view.services.labeler_health_port = 18761
     second.view.services.labeler_health_port = 18762
-    monkeypatch.setattr(settings.services, "labeler_health_port", 18763)
+    assert settings.services.labeler_health_port not in {18761, 18762}
     before = ServiceEndpoints.from_boot(first, runtime=tmp_path / "first")
     other = ServiceEndpoints.from_boot(second, runtime=tmp_path / "second")
     assert before.of("labeler").health_port == 18761

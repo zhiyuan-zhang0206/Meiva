@@ -45,12 +45,23 @@ class Command(TypedDict):
 
 
 # meiva:link base/packages/docs/composer-commands.meiva.okf.md
-def command_dirs(skills: Sequence[Skill]) -> list[tuple[Path, tuple[str, ...]]]:
+def command_dirs(
+    skills: Sequence[Skill],
+    *,
+    root: Path | None = None,
+    home: Path | None = None,
+    repo_plugins: Path | None = None,
+    external_plugins: Path | None = None,
+) -> list[tuple[Path, tuple[str, ...]]]:
+    resolved_root = repo_root() if root is None else root
+    resolved_home = meiva_home() if home is None else home
     dirs: list[tuple[Path, tuple[str, ...]]] = [
-        (repo_root() / "meiva_builtins" / "commands", ()),
-        (meiva_home() / "commands", ()),
+        (resolved_root / "meiva_builtins" / "commands", ()),
+        (resolved_home / "commands", ()),
     ]
-    for base in (repo_plugins_dir(), external_plugin_read_root()):
+    r_plugins = repo_plugins_dir() if repo_plugins is None else repo_plugins
+    e_plugins = external_plugin_read_root() if external_plugins is None else external_plugins
+    for base in (r_plugins, e_plugins):
         if base.is_dir():
             dirs.extend(
                 (p / "commands", (p.name,))
@@ -105,11 +116,17 @@ def skill_commands(skills: Sequence[Skill]) -> dict[str, Command]:
 
 
 # meiva:link base/packages/docs/composer-commands.meiva.okf.md
-def discover_commands(skills: Sequence[Skill]) -> list[Command]:
-    if not _commands_enabled():
+def discover_commands(
+    skills: Sequence[Skill],
+    *,
+    dirs: Sequence[tuple[Path, tuple[str, ...]]] | None = None,
+    enabled: bool | None = None,
+) -> list[Command]:
+    if not (_commands_enabled() if enabled is None else enabled):
         return []
     out: dict[str, Command] = skill_commands(skills)
-    for d, base_ns in command_dirs(skills):
+    resolved_dirs = command_dirs(skills) if dirs is None else dirs
+    for d, base_ns in resolved_dirs:
         out.update(scan_dir(d, base_ns))
     return [out[name] for name in sorted(out)]
 
@@ -170,11 +187,20 @@ def expand_command(content: str, commands: Sequence[Command]) -> str:
 @dataclass(frozen=True)
 class CommandCatalog:
     skills: Callable[[], Sequence[Skill]]
+    dirs: Sequence[tuple[Path, tuple[str, ...]]] | None = None
+    enabled: bool | Callable[[], bool] | None = None
+
+    def _is_enabled(self) -> bool:
+        if self.enabled is None:
+            return _commands_enabled()
+        return self.enabled() if callable(self.enabled) else self.enabled
 
     def discover(self) -> list[Command]:
-        if not _commands_enabled():
+        if not self._is_enabled():
             return []
-        return discover_commands(self.skills())
+        if self.dirs is None and self.enabled is None:
+            return discover_commands(self.skills())
+        return discover_commands(self.skills(), dirs=self.dirs, enabled=True)
 
     def expand(self, content: str) -> str:
         if not content.startswith("/"):

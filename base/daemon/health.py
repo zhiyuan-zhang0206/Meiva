@@ -72,7 +72,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import cast
+from typing import Protocol, Self, cast
 
 from base.daemon import health_schema
 from base.daemon.http_transport import RouteHandler as RouteHandler
@@ -349,7 +349,22 @@ def recorded_pid(pidfile: Path) -> int | None:
         return None
 
 
-def _health_payload(url: str, timeout_s: float) -> dict[str, object] | DaemonProbe:
+class _HttpResponse(Protocol):
+    status: int
+
+    def read(self, n: int = -1, /) -> bytes: ...
+    def __enter__(self) -> Self: ...
+    def __exit__(self, *args: object) -> object: ...
+
+
+# meiva:note
+# Loopback healthz probes use stdlib urlopen or an injected opener and cap response size.
+def _health_payload(
+    url: str,
+    timeout_s: float,
+    *,
+    urlopen_fn: Callable[..., _HttpResponse] | None = None,
+) -> dict[str, object] | DaemonProbe:
     """The JSON object a health endpoint answered with, or the not-alive verdict
     that trying to read one produced.
 
@@ -367,7 +382,12 @@ def _health_payload(url: str, timeout_s: float) -> dict[str, object] | DaemonPro
     bound port).
     """
     try:
-        with urllib.request.urlopen(url, timeout=timeout_s) as resp:  # noqa: S310 — loopback URL from settings
+        cm = (
+            urllib.request.urlopen(url, timeout=timeout_s)  # noqa: S310 — loopback URL from settings
+            if urlopen_fn is None
+            else urlopen_fn(url, timeout=timeout_s)
+        )
+        with cm as resp:
             if not (200 <= resp.status < 300):
                 return DaemonProbe.down(f"healthz returned HTTP {resp.status}")
             body = resp.read(MAX_BODY_BYTES)
@@ -401,7 +421,14 @@ def _health_payload(url: str, timeout_s: float) -> dict[str, object] | DaemonPro
     return cast("dict[str, object]", parsed)
 
 
-def probe_home(url: str, *, timeout_s: float = PROBE_TIMEOUT_S) -> DaemonProbe:
+def probe_home(
+    url: str,
+    *,
+    timeout_s: float = PROBE_TIMEOUT_S,
+    home: Path | None = None,
+    urlopen_fn: Callable[..., _HttpResponse] | None = None,
+    probe_fn: Callable[..., DaemonProbe] | None = None,
+) -> DaemonProbe:
     """Probe a health endpoint that carries ``home`` but no ``name``/``pid``,
     ALWAYS returning a verdict.
 
@@ -411,13 +438,23 @@ def probe_home(url: str, *, timeout_s: float = PROBE_TIMEOUT_S) -> DaemonProbe:
     polls, with ``--auto-rollback --threshold 3`` armed against it.
     """
     try:
-        return probe_unit_home(url, timeout_s=timeout_s)
+        if probe_fn is not None:
+            return probe_fn(url, timeout_s=timeout_s)
+        if home is None and urlopen_fn is None:
+            return probe_unit_home(url, timeout_s=timeout_s)
+        return probe_unit_home(url, timeout_s=timeout_s, home=home, urlopen_fn=urlopen_fn)
     except Exception as exc:
         _log.exception("[probe_home] %s probe raised unexpectedly; treating as down", url)
         return DaemonProbe.down(f"probe raised {type(exc).__name__}: {exc}")
 
 
-def probe_unit_home(url: str, *, timeout_s: float = PROBE_TIMEOUT_S) -> DaemonProbe:
+def probe_unit_home(
+    url: str,
+    *,
+    timeout_s: float = PROBE_TIMEOUT_S,
+    home: Path | None = None,
+    urlopen_fn: Callable[..., _HttpResponse] | None = None,
+) -> DaemonProbe:
     """2xx from ``url`` AND a ``home`` matching this unit's ``$MEIVA_HOME``.
 
     The same failure mode ``probe_daemon`` exists for — a 200 only proves
@@ -446,10 +483,14 @@ def probe_unit_home(url: str, *, timeout_s: float = PROBE_TIMEOUT_S) -> DaemonPr
     ``probe_daemon_identity``: the occupant lives in another unit's session, so no
     respawn this unit performs can free the port.
     """
-    payload = _health_payload(url, timeout_s)
+    payload = (
+        _health_payload(url, timeout_s)
+        if urlopen_fn is None
+        else _health_payload(url, timeout_s, urlopen_fn=urlopen_fn)
+    )
     if isinstance(payload, DaemonProbe):
         return payload
-    got_home, expected_home = payload.get("home"), str(meiva_home())
+    got_home, expected_home = payload.get("home"), str(meiva_home() if home is None else home)
     if got_home != expected_home:
         return DaemonProbe.port_taken(
             f"identity mismatch on {url}: home={got_home!r} != {expected_home!r} — "
@@ -459,7 +500,14 @@ def probe_unit_home(url: str, *, timeout_s: float = PROBE_TIMEOUT_S) -> DaemonPr
 
 
 def probe_daemon(
-    name: str, url: str, *, pidfile: Path, timeout_s: float = PROBE_TIMEOUT_S
+    name: str,
+    url: str,
+    *,
+    pidfile: Path,
+    timeout_s: float = PROBE_TIMEOUT_S,
+    home: Path | None = None,
+    urlopen_fn: Callable[..., _HttpResponse] | None = None,
+    probe_fn: Callable[..., DaemonProbe] | None = None,
 ) -> DaemonProbe:
     """Probe a daemon's ``/healthz`` and verify the answering process is ours,
     ALWAYS returning a verdict.
@@ -479,7 +527,18 @@ def probe_daemon(
     miss is caught here, logged with a traceback, and reported as down.
     """
     try:
-        return probe_daemon_identity(name, url, pidfile=pidfile, timeout_s=timeout_s)
+        if probe_fn is not None:
+            return probe_fn(name, url, pidfile=pidfile, timeout_s=timeout_s)
+        if home is None and urlopen_fn is None:
+            return probe_daemon_identity(name, url, pidfile=pidfile, timeout_s=timeout_s)
+        return probe_daemon_identity(
+            name,
+            url,
+            pidfile=pidfile,
+            timeout_s=timeout_s,
+            home=home,
+            urlopen_fn=urlopen_fn,
+        )
     except Exception as exc:
         # Down, not "unknown": a verdict the watchdog can act on beats silence.
         # An unforeseen probe failure is not evidence of a healthy daemon.
@@ -488,7 +547,13 @@ def probe_daemon(
 
 
 def probe_daemon_identity(
-    name: str, url: str, *, pidfile: Path, timeout_s: float = PROBE_TIMEOUT_S
+    name: str,
+    url: str,
+    *,
+    pidfile: Path,
+    timeout_s: float = PROBE_TIMEOUT_S,
+    home: Path | None = None,
+    urlopen_fn: Callable[..., _HttpResponse] | None = None,
 ) -> DaemonProbe:
     """Probe a daemon's ``/healthz`` AND verify the answering process is ours.
 
@@ -539,7 +604,11 @@ def probe_daemon_identity(
     frame does not wrap. ``probe_daemon`` is the wrapper that guarantees a
     verdict regardless.
     """
-    payload = _health_payload(url, timeout_s)
+    payload = (
+        _health_payload(url, timeout_s)
+        if urlopen_fn is None
+        else _health_payload(url, timeout_s, urlopen_fn=urlopen_fn)
+    )
     if isinstance(payload, DaemonProbe):
         return payload
 
@@ -549,7 +618,7 @@ def probe_daemon_identity(
             f"identity mismatch on {url}: name={got_name!r} != {name!r} — "
             "a different daemon kind holds this port"
         )
-    expected_home = str(meiva_home())
+    expected_home = str(meiva_home() if home is None else home)
     if got_home != expected_home:
         return DaemonProbe.port_taken(
             f"identity mismatch on {url}: home={got_home!r} != {expected_home!r} — "

@@ -18,6 +18,7 @@ later becomes available; a new process entry owns a new capture.
 from __future__ import annotations
 
 import subprocess
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -55,6 +56,11 @@ class LoadedCommit:
     sha: str | None
 
     @classmethod
-    def capture(cls, source_root: Path = _SOURCE_ROOT) -> LoadedCommit:
+    def capture(
+        cls,
+        source_root: Path = _SOURCE_ROOT,
+        *,
+        capture_fn: Callable[[Path], str | None] = capture_commit,
+    ) -> LoadedCommit:
         """Capture at process startup; subsequent use never reads HEAD again."""
-        return cls(source_root=source_root, sha=capture_commit(source_root))
+        return cls(source_root=source_root, sha=capture_fn(source_root))

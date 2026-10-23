@@ -45,12 +45,9 @@ async def test_liveness_flips_stale_then_fresh_on_beat() -> None:
     assert lv.is_alive()
 
 
-def test_loop_progress_flips_stale_then_fresh_on_completed_unit(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_loop_progress_flips_stale_then_fresh_on_completed_unit() -> None:
     now = 100.0
-    monkeypatch.setattr(health.time, "monotonic", lambda: now)
-    progress = health.LoopProgress("dispatch", timeout_s=5.0)
+    progress = health.LoopProgress("dispatch", timeout_s=5.0, clock=lambda: now)
 
     assert progress.name == "dispatch"
     assert progress.timeout_s == 5.0
@@ -87,12 +84,9 @@ def test_loop_progress_snapshot_records_success_error_and_permanent_wedge() -> N
     assert progress.snapshot()["wedged"] is True
 
 
-def test_liveness_group_reports_the_worst_loop(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_liveness_group_reports_the_worst_loop() -> None:
     now = 10.0
-    monkeypatch.setattr(health.time, "monotonic", lambda: now)
-    group = health.LivenessGroup()
+    group = health.LivenessGroup(clock=lambda: now)
     dispatch = group.register("dispatch", timeout_s=5.0)
 
     now = 13.0
