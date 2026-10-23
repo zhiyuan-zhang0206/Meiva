@@ -618,7 +618,7 @@ async def run(
             policy=host_policy(config),
             clients=clients,
             extensions=installation.registry,
-            commands=CommandCatalog(skills=meiva_skills.names),
+            commands=CommandCatalog.system(skills=meiva_skills.names),
             plugin_configs=installation.configs,
         )
         # The clock reader is injected, not imported by the scheduler: it owns no

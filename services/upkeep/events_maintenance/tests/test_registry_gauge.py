@@ -20,6 +20,7 @@ from typing import cast
 import pytest
 from psycopg_pool import ConnectionPool
 
+from base.clock import SYSTEM_TIMERS
 from base.daemon.loop_health import LoopProgress
 from base.telemetry.tests.capture.event_capture import EmittedEvents
 from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
@@ -128,7 +129,9 @@ async def test_the_loop_samples_at_once_then_paces(
 
     monkeypatch.setattr(registry_gauge, "read_max_agent_id_blocking", read)
     task = asyncio.create_task(
-        registry_gauge.registry_gauge_loop(cast(ConnectionPool, object()), LoopProgress("g", 180.0))
+        registry_gauge.registry_gauge_loop(
+            cast(ConnectionPool, object()), LoopProgress("g", 180.0, timers=SYSTEM_TIMERS)
+        )
     )
     try:
         for _ in range(200):
@@ -152,5 +155,5 @@ async def test_a_failing_sample_ends_the_loop(monkeypatch: pytest.MonkeyPatch) -
 
     with pytest.raises(RuntimeError, match="bad registry"):
         await registry_gauge.registry_gauge_loop(
-            cast(ConnectionPool, object()), LoopProgress("g", 180.0)
+            cast(ConnectionPool, object()), LoopProgress("g", 180.0, timers=SYSTEM_TIMERS)
         )

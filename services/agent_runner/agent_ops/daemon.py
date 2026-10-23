@@ -5,6 +5,8 @@ from __future__ import annotations
 import argparse
 import sys
 
+from base.clock import SYSTEM_TIMERS
+
 if __name__ == "__main__":
     argparse.ArgumentParser(description=__doc__).parse_args()
     from base.log import prepare_process_logging
@@ -542,7 +544,7 @@ async def serve_ops_daemon(
 
     pool = open_db_pool(database=database, authority=authority)
     executor = boot.op_thread_pool(authority=authority)
-    liveness = LivenessGroup()
+    liveness = LivenessGroup(timers=SYSTEM_TIMERS)
 
     try:
         acceptance = ops_acceptance()

@@ -91,7 +91,7 @@ async def _claimed_text(
         item,
         read_security_enabled=lambda: settings.agent.security_scan_enabled,
         envelope_inputs=_ENVELOPE_INPUTS,
-        expand_command=CommandCatalog(skills=list).expand,
+        expand_command=CommandCatalog.system(skills=list).expand,
     )
     content = message.model_dump()["content"]
     assert isinstance(content, str)

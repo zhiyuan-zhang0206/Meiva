@@ -26,9 +26,11 @@ from base.host.net.resilience import (
     aretry,
     extract_retry_after,
     http_classifier,
+    jitter_delay,
     jittered,
     retry,
 )
+from base.host.net.tests.resilience_process import report
 
 
 class _Flaky:
@@ -66,6 +68,13 @@ pytestmark = pytest.mark.usefixtures("retry_waits")
 
 # Captured at import, before any fixture replaces them.
 _DEFAULT_WAIT_HOOKS = (resilience.retry_sleep, resilience.retry_asleep)
+
+# meiva:note
+# Collection builds these closures before retry_waits replaces the existing public hooks.
+_PREBUILT_RETRY = retry(Policy(max_attempts=3, backoff=ExponentialBackoff(1, 2, 8), jitter="none"))
+_PREBUILT_ARETRY = aretry(
+    Policy(max_attempts=3, backoff=ExponentialBackoff(1, 2, 8), jitter="none")
+)
 
 
 class TestRetry:
@@ -218,37 +227,20 @@ class TestWaitHooks:
         assert {"retry_sleep", "retry_asleep"} <= set(resilience.__all__)
         assert (time.sleep, asyncio.sleep) == _DEFAULT_WAIT_HOOKS
 
-    def test_retry_reads_the_hook_at_each_wait(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """A hook replaced after the retry was built still takes effect."""
-        run = retry(
-            Policy(max_attempts=3, backoff=ExponentialBackoff(1.0, 2.0, 8.0), jitter="none")
-        )
-        seen: list[float] = []
-        monkeypatch.setattr(resilience, "retry_sleep", seen.append)
+    def test_retry_reads_the_hook_at_each_wait(self, retry_waits: list[float]) -> None:
         with pytest.raises(urllib.error.HTTPError):
-            run(_Flaky(_http_error(503), 100))
-        assert seen == [1.0, 2.0]
+            _PREBUILT_RETRY(_Flaky(_http_error(503), 100))
+        assert retry_waits == [1.0, 2.0]
 
-    async def test_aretry_reads_the_hook_at_each_wait(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        f = _Flaky(_http_error(503), 100)
+    async def test_aretry_reads_the_hook_at_each_wait(self, retry_waits: list[float]) -> None:
+        flaky = _Flaky(_http_error(503), 100)
 
-        async def _call() -> object:
-            return f()
+        async def call() -> object:
+            return flaky()
 
-        run = aretry(
-            Policy(max_attempts=3, backoff=ExponentialBackoff(1.0, 2.0, 8.0), jitter="none")
-        )
-        seen: list[float] = []
-
-        async def _record(seconds: float) -> None:
-            seen.append(seconds)
-
-        monkeypatch.setattr(resilience, "retry_asleep", _record)
         with pytest.raises(urllib.error.HTTPError):
-            await run(_call)
-        assert seen == [1.0, 2.0]
+            await _PREBUILT_ARETRY(call)
+        assert retry_waits == [1.0, 2.0]
 
     def test_retry_uses_the_callers_own_wait(self, retry_waits: list[float]) -> None:
         # meiva:link base/host/docs/host.meiva.okf.md
@@ -367,23 +359,12 @@ class TestHttpClassifier:
 
 
 class TestJitter:
-    @staticmethod
-    def _fixed_phase(_span: float) -> float:
-        return 1.25
-
     def test_none_mode_returns_delay(self) -> None:
         assert jittered(2.0, mode="none") == 2.0
 
     @pytest.mark.parametrize("random_value", [-100.0, 100.0])
-    def test_phase_mode_adds_deterministic_phase_only(
-        self, monkeypatch: pytest.MonkeyPatch, random_value: float
-    ) -> None:
-        def _uniform(_low: float, _high: float) -> float:
-            return random_value
-
-        monkeypatch.setattr(resilience, "agent_phase", self._fixed_phase)
-        monkeypatch.setattr(resilience.random, "uniform", _uniform)
-        assert jittered(2.0, span=5.0, mode="phase") == 3.25
+    def test_phase_mode_adds_deterministic_phase_only(self, random_value: float) -> None:
+        assert jitter_delay(2.0, "phase", phase=1.25, noise=random_value) == 3.25
 
     def test_phase_mode_bounds(self) -> None:
         for _ in range(100):
@@ -391,57 +372,33 @@ class TestJitter:
             assert 2.0 <= j < 7.0
 
     @pytest.mark.parametrize("random_value, expected", [(-0.5, 2.0), (0.0, 4.0), (0.5, 6.0)])
-    def test_relative_mode_scales_delay(
-        self, monkeypatch: pytest.MonkeyPatch, random_value: float, expected: float
-    ) -> None:
-        def _uniform(low: float, high: float) -> float:
-            assert (low, high) == (-0.5, 0.5)
-            return random_value
-
-        monkeypatch.setattr(resilience.random, "uniform", _uniform)
-        assert jittered(4.0, span=0.5, mode="relative") == expected
+    def test_relative_mode_scales_delay(self, random_value: float, expected: float) -> None:
+        assert jitter_delay(4.0, "relative", phase=100.0, noise=random_value) == expected
 
     def test_relative_mode_bounds(self) -> None:
         for _ in range(100):
             j = jittered(4.0, span=0.5, mode="relative")
             assert 2.0 <= j <= 6.0
 
-    def test_relative_mode_never_negative(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        def _uniform(_low: float, _high: float) -> float:
-            return -2.0
-
-        monkeypatch.setattr(resilience.random, "uniform", _uniform)
-        assert jittered(0.5, span=2.0, mode="relative") == 0.0
+    def test_relative_mode_never_negative(self) -> None:
+        assert jitter_delay(0.5, "relative", phase=100.0, noise=-2.0) == 0.0
 
     def test_relative_zero_span_returns_delay(self) -> None:
         assert jittered(4.0, span=0.0, mode="relative") == 4.0
 
-    def test_retry_passes_phase_jitter_to_sleep(
-        self, monkeypatch: pytest.MonkeyPatch, retry_waits: list[float]
-    ) -> None:
-        def _uniform(_low: float, _high: float) -> float:
-            return 100.0
+    def test_retry_passes_phase_jitter_to_sleep(self) -> None:
+        observed = report("phase")
+        phase = observed["phase"]
+        assert isinstance(phase, (int, float))
+        assert observed["result"] == "ok"
+        assert observed["waits"] == [1.0 + phase]
 
-        monkeypatch.setattr(resilience, "agent_phase", self._fixed_phase)
-        monkeypatch.setattr(resilience.random, "uniform", _uniform)
-        f = _Flaky(urllib.error.URLError("boom"), 1)
-        assert retry(Policy(max_attempts=2, jitter="phase", jitter_span=5.0))(f) == "ok"
-        assert retry_waits == [2.25]
-
-    def test_retry_passes_relative_jitter_to_sleep(
-        self, monkeypatch: pytest.MonkeyPatch, retry_waits: list[float]
-    ) -> None:
-        def _unexpected_phase(_span: float) -> float:
-            pytest.fail("unexpected phase")
-
-        def _uniform(_low: float, _high: float) -> float:
-            return 0.5
-
-        monkeypatch.setattr(resilience, "agent_phase", _unexpected_phase)
-        monkeypatch.setattr(resilience.random, "uniform", _uniform)
-        f = _Flaky(urllib.error.URLError("boom"), 1)
-        assert retry(Policy(max_attempts=2, jitter="relative", jitter_span=0.5))(f) == "ok"
-        assert retry_waits == [1.5]
+    def test_retry_passes_relative_jitter_to_sleep(self) -> None:
+        observed = report("relative")
+        noise = observed["noise"]
+        assert isinstance(noise, (int, float))
+        assert observed["result"] == "ok"
+        assert observed["waits"] == [1.0 * (1.0 + noise)]
 
     def test_agent_mode_bounds(self) -> None:
         # delay + phase in [0, span) + uniform(-span, span)
@@ -494,10 +451,14 @@ class TestExtractRetryAfter:
         assert extract_retry_after(_http_error(429)) is None  # hdrs=None
 
 
-def test_transport_phase_uses_process_not_env_identity(monkeypatch: pytest.MonkeyPatch) -> None:
-    import os
-
-    expected = 10.0 * (os.getpid() % 1000) / 1000.0
+def test_transport_phase_uses_process_not_env_identity() -> None:
     for agent_id in (7, 42):
-        monkeypatch.setenv("MEIVA_AGENT_ID", str(agent_id))
-        assert jittered(0.0, span=10.0, mode="phase") == expected
+        observed = report("identity", agent_id=agent_id)
+        pid = observed["pid"]
+        assert isinstance(pid, int)
+        assert observed["phase"] == 10.0 * (pid % 1000) / 1000.0
+
+
+def test_aretry_schedules_backoff_on_the_active_event_loop() -> None:
+    observed = report("async-waits")
+    assert observed == {"attempts": 3, "waits": [1.0, 2.0], "closed": True, "same_error": True}

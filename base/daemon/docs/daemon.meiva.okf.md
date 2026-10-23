@@ -32,3 +32,21 @@ drain returns and its other owned cleanup has completed.
 
 - [[base/daemon/docs/http-transport.meiva.okf.md]] — Settings-free daemon HTTP transport.
 - [[base/daemon/schedules/docs/completion-notices.meiva.okf.md]] — Completion Notice Vocabulary.
+
+## Loop liveness ownership
+
+`LoopProgress` and `LivenessGroup` require the caller's existing `Timers` port.
+A group shares its timer with every loop it registers. Service composition roots
+supply `SYSTEM_TIMERS`; deterministic tests supply `ManualTimers` and advance it
+between completed units. No default argument captures a monotonic function at
+import time. A completed unit refreshes progress, while a permanent wedge stays
+failed even after another beat. Wall-clock success/error timestamps retain their
+existing owner and are separate from monotonic staleness.
+
+Endpoint tests use real `ConfigBoot` values and a clean child environment for
+legacy settings roots. Health-probe tests serve real loopback HTTP, malformed
+status lines and actual pidfile errors, so the public fail-closed wrapper and
+its narrow inner parser are exercised together. A temporary Git repository
+advances after the loaded image is captured to prove health responses retain the
+process image, including an explicit unknown image; probes report that evidence
+without treating checkout changes as an unhealthy daemon.

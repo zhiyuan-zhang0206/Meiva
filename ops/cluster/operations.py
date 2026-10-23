@@ -211,7 +211,9 @@ def agent_skill_view_op(agent_id: int, pool: Any) -> AgentSkillViewResult:
 
     cwd, wanted = agent_skill_view_inputs(pool, agent_id)
     loaded = load_skill_names(_project_skill_roots(cwd))
-    commands = _narrow_commands(CommandCatalog(skills=lambda: loaded).discover(), wanted, loaded)
+    commands = _narrow_commands(
+        CommandCatalog.system(skills=lambda: loaded).discover(), wanted, loaded
+    )
     merged_mcp = load_mcp_config(include_disabled=True)
     mcp_overlay = read_enabled()
     return AgentSkillViewResult(

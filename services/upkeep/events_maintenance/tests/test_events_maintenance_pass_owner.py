@@ -10,6 +10,7 @@ from typing import Any
 import psycopg
 import pytest
 
+from base.clock import SYSTEM_TIMERS
 from base.config import ConfigBoot
 from base.daemon.health import LivenessGroup, LoopProgress
 from base.db import Database
@@ -23,7 +24,7 @@ from services.upkeep.events_maintenance.tests.slices import events_maintenance_c
     "failure", [RuntimeError("unknown failure"), psycopg.ProgrammingError("drift")]
 )
 async def test_completed_failure_preserves_the_original_exception(failure: Exception) -> None:
-    progress = LoopProgress("dispatch", timeout_s=1.0)
+    progress = LoopProgress("dispatch", timeout_s=1.0, timers=SYSTEM_TIMERS)
 
     def fail(_pool: object) -> None:
         raise failure
@@ -41,7 +42,7 @@ _FAKE_POOL: Any = object()
 async def test_late_failure_is_reported_without_reviving_the_loop(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    progress = LoopProgress("dispatch", timeout_s=0.01)
+    progress = LoopProgress("dispatch", timeout_s=0.01, timers=SYSTEM_TIMERS)
     release = threading.Event()
     failure = RuntimeError("late worker failure")
 
