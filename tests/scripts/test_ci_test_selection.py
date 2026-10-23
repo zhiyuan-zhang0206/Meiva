@@ -271,6 +271,7 @@ def test_aggregator_requires_whichever_pytest_path_ran() -> None:
         "backend-serial",
         "backend-pgvector-smoke",
         "helper-signing-smoke",
+        "host-marks",
     ]
     assert aggregator["if"] == (
         "${{ !cancelled() && (needs.classify.result == 'failure' || "
