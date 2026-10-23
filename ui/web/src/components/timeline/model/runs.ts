@@ -23,7 +23,7 @@ import { orderSdkCalls, type SdkCall } from "@/lib/format/item-summary";
 import type { BackendTimelineItem } from "@/lib/contracts/types";
 import enMessages from "../../../../messages/en";
 
-import { classifyMarker } from "../markers";
+import { classifyMarker } from "./marker-classify";
 import { isLiveCode, isLiveExecution, isLiveReasoning } from "./reasoning-clock";
 
 // The turn-label formatters are pure functions (unit-tested directly, no
