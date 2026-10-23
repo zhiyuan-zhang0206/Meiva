@@ -6,10 +6,12 @@ from typing import Any
 import psycopg
 import pytest
 
+from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
-from base.db import Database, create_agent
+from base.db import Database, DbConfig, create_agent
 from base.db.code_version_gate import ProcessDbGate
+from base.db.connections import DirectUrlResolver
 from base.events.live.bus import EventBus
 from base.native_process.ownership import OwnedProcess
 from base.sessions.pty import closure
@@ -63,8 +65,14 @@ def _claims(db_conn: psycopg.Connection) -> list[str]:
 
 
 class _SpyDatabase(Database):
-    def __init__(self, source: Database, *, gate: ProcessDbGate) -> None:
-        super().__init__(source._config, gate=gate, direct_url=source._direct_url)
+    def __init__(
+        self,
+        config: DbConfig,
+        *,
+        gate: ProcessDbGate,
+        direct_url: DirectUrlResolver | None = None,
+    ) -> None:
+        super().__init__(config, gate=gate, direct_url=direct_url)
         self.dialed: list[tuple[bool, psycopg.Connection]] = []
 
     def connect(
@@ -172,7 +180,7 @@ def test_an_unknown_agent_gets_no_inbound(
 
 def test_a_hundred_session_batch_writes_every_claim_and_inbound(
     db_conn: psycopg.Connection,
-    database: Database,
+    db_url: str,
     event_bus: EventBus,
     *,
     database_gate: ProcessDbGate,
@@ -196,7 +204,10 @@ def test_a_hundred_session_batch_writes_every_claim_and_inbound(
             for n in range(5)
         ]
     )
-    spied = _SpyDatabase(database, gate=database_gate)
+    spied = _SpyDatabase.from_settings(
+        gate=database_gate, direct_url=ClusterDirectUrl(lambda: "127.0.0.1")
+    )
+    assert isinstance(spied, _SpyDatabase)
 
     assert notices.write_notices(spied, event_bus, batch, direct=True) == []
 
@@ -258,46 +269,66 @@ def test_a_batch_skips_a_key_an_earlier_write_claimed(
 
 
 def test_an_unreachable_database_returns_every_notice_with_the_error(
-    monkeypatch: pytest.MonkeyPatch,
-    database: Database,
+    db_url: str,
     event_bus: EventBus,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     error = psycopg.OperationalError("connection refused")
+    entered: list[tuple[bool, bool, bool]] = []
 
-    def refuse(**_kwargs: object) -> psycopg.Connection:
-        raise error
+    class RefusingDatabase(Database):
+        def connect(
+            self, *, autocommit: bool = False, direct: bool = False, unbounded: bool = False
+        ) -> psycopg.Connection:
+            entered.append((autocommit, direct, unbounded))
+            raise error
 
-    monkeypatch.setattr(database, "connect", refuse)
+    database = RefusingDatabase.from_settings(
+        gate=database_gate, direct_url=ClusterDirectUrl(lambda: "127.0.0.1")
+    )
     batch = [_notice(), _notice(session_id=12)]
 
     failed = notices.write_notices(database, event_bus, batch, direct=False)
 
+    assert entered == [(False, False, False)]
     assert [n for n, _exc in failed] == batch
     assert all(exc is error for _n, exc in failed)
 
 
 def test_no_notice_means_no_connection(
-    monkeypatch: pytest.MonkeyPatch, database: Database, event_bus: EventBus
+    db_url: str, event_bus: EventBus, *, database_gate: ProcessDbGate
 ) -> None:
-    def never(**_kwargs: object) -> psycopg.Connection:
-        raise AssertionError("an empty write dialed the database")
+    entered: list[bool] = []
 
-    monkeypatch.setattr(database, "connect", never)
+    class ForbiddenDatabase(Database):
+        def connect(
+            self, *, autocommit: bool = False, direct: bool = False, unbounded: bool = False
+        ) -> psycopg.Connection:
+            entered.append(direct)
+            raise AssertionError("an empty write dialed the database")
 
+    database = ForbiddenDatabase.from_settings(
+        gate=database_gate, direct_url=ClusterDirectUrl(lambda: "127.0.0.1")
+    )
     assert notices.write_notices(database, event_bus, [], direct=True) == []
+    assert entered == []
 
 
 @pytest.mark.parametrize("direct", [True, False])
 def test_the_connection_is_the_one_asked_for_and_is_closed(
     direct: bool,
     db_conn: psycopg.Connection,
-    database: Database,
+    db_url: str,
     event_bus: EventBus,
     *,
     database_gate: ProcessDbGate,
 ) -> None:
     aid = _agent(db_conn, "running")
-    spied = _SpyDatabase(database, gate=database_gate)
+    spied = _SpyDatabase.from_settings(
+        gate=database_gate, direct_url=ClusterDirectUrl(lambda: "127.0.0.1")
+    )
+    assert isinstance(spied, _SpyDatabase)
 
     assert notices.write_notices(spied, event_bus, [_notice(agent_id=aid)], direct=direct) == []
 

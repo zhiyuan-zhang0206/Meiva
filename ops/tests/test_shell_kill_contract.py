@@ -4,7 +4,7 @@ from pydantic import ValidationError
 from base.api_contracts.agent_contract import ShellKillMode
 from ops import cluster_status
 from ops.cluster import operations as cluster
-from ops.rpc_schemas import ShellKillResult
+from ops.rpc_schemas import ShellInfo, ShellKillResult
 
 
 @pytest.mark.parametrize("mode", list(ShellKillMode))
@@ -34,12 +34,15 @@ def test_rpc_rejects_transport_and_unknown_modes(raw: object) -> None:
         ShellKillResult.model_validate({"mode": raw})
 
 
-def test_host_producer_returns_the_canonical_absent_member(monkeypatch: pytest.MonkeyPatch) -> None:
-    def no_shells(_agent: int) -> list[object]:
+def test_host_producer_returns_the_canonical_absent_member() -> None:
+    enumerated: list[int] = []
+
+    def no_shells(agent: int) -> list[ShellInfo]:
+        enumerated.append(agent)
         return []
 
-    monkeypatch.setattr(cluster_status, "agent_shell_sessions", no_shells)
-    mode, interrupted, name = cluster_status.kill_shell(7, 3)
+    mode, interrupted, name = cluster_status.kill_shell(7, 3, shell_sessions_fn=no_shells)
+    assert enumerated == [7]
     assert mode is ShellKillMode.ABSENT
     assert interrupted is False
     assert name is None

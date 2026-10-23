@@ -53,3 +53,9 @@ tags: []
   config read boundary (`GET /api/config`).
 
 Parent: [[base/docs/base.meiva.okf.md|base library]].
+
+The audit tests share the canonical bare home with actual writers and readers.
+The argument-redaction proof uses a bounded child whose real psutil argv contains
+a known dummy marker before recording; its local history must retain actual pid,
+process and executable-only metadata, never the marker. The child does not start
+a telemetry pipeline, so this proves local history rather than event delivery.

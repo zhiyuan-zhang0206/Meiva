@@ -9,8 +9,9 @@ from typing import Any
 import pytest
 
 import base.config as base_config
-from base.clock import SYSTEM_TIMERS
+from base.clock import SYSTEM_TIMERS, Timers
 from base.deploy.release import collector_artifact as artifact
+from base.host.net.ports import UrlOpener
 from base.host.net.tests.fake_url_opener import Answer, FakeUrlOpener
 from cli.commands.observability import otel_collector as oc
 from cli.commands.observability.tests.test_converge_otel_collector import (
@@ -555,7 +556,20 @@ def test_config_file_is_owner_only(
     (tmp_path / "otel-collector/version").write_text(
         artifact.OTELCOL_CONTRIB_VERSION, encoding="utf-8"
     )
-    monkeypatch.setattr(artifact, "download_and_verify", lambda _tag, _dir, **_ports: None)  # pyright: ignore[reportUnknownArgumentType]
+    downloads: list[tuple[str, Path]] = []
+
+    def forbidden_download(
+        tag: str,
+        dest_dir: Path,
+        *,
+        open_url: UrlOpener,
+        timers: Timers,
+        limits: artifact.DownloadLimits,
+    ) -> None:
+        downloads.append((tag, dest_dir))
+        raise AssertionError("an installed collector entered download")
+
+    monkeypatch.setattr(artifact, "download_and_verify", forbidden_download)
     monkeypatch.setattr(
         base_config.settings.observability, "gateway_otlp_endpoint", "http://10.0.0.10:4318"
     )
@@ -570,6 +584,7 @@ def test_config_file_is_owner_only(
         database_factory=operator_database,
         machine=command_runtime.machine,
     )
+    assert downloads == []
     config = tmp_path / "otel-collector/config.yaml"
     assert config.stat().st_mode & 0o777 == 0o600
     assert f"Bearer {oc.telemetry_bearer()}" in config.read_text(encoding="utf-8")

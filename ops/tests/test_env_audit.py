@@ -17,6 +17,7 @@ from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import runtime_config as runtime_config
 from base.host.env import dotenv_file
+from base.host.proc import run_bounded
 from base.log.tests.log_records import LogRecords
 from base.log.tests.log_records import loguru_records as loguru_records
 from base.telemetry.tests.capture.event_capture import EmittedEvents
@@ -31,10 +32,10 @@ from ops.env_audit import (
 
 
 @pytest.fixture
-def audit_home(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
-    """Redirect the audited unit `.env` to a scratch home."""
-    monkeypatch.setattr(dotenv_file, "unit_home", lambda: tmp_path)
-    return tmp_path
+def audit_home(unit_home: Path) -> Path:
+    """Use the bare canonical home for audited files and their readers."""
+    assert dotenv_file.env_file_path() == unit_home / ".env"
+    return unit_home
 
 
 def test_record_env_write_records_metadata_without_config_values(audit_home: Path) -> None:
@@ -60,23 +61,28 @@ def test_record_env_write_records_metadata_without_config_values(audit_home: Pat
     assert last_env_write_record() == record
 
 
-def test_record_env_write_redacts_command_arguments(
-    audit_home: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_record_env_write_redacts_command_arguments(audit_home: Path) -> None:
     """A process argument must not let a configuration value enter the audit."""
-
-    class Process:
-        def name(self) -> str:
-            return "python"
-
-        def cmdline(self) -> list[str]:
-            return ["python", "-c", "cluster-secret-value"]
-
-    monkeypatch.setattr(audit.psutil, "Process", Process)
-    (audit_home / ".env").write_text("MEIVA_MODEL=test-model\n")
-
-    record_env_write(audit_home / ".env", {"MEIVA_MODEL"}, set(), site="test")
-
+    env = {key: value for key, value in os.environ.items() if not key.startswith("MEIVA_")}
+    env.update(
+        MEIVA_HOME=str(audit_home),
+        MEIVA_CONFIG_FETCH="skip",
+        MEIVA_PROCESS_PROFILE="runner",
+        MEIVA_TIMEZONE="UTC",
+    )
+    child = run_bounded(
+        [
+            sys.executable,
+            "-I",
+            str(Path(__file__).with_name("_env_audit_arguments_child.py")),
+            "cluster-secret-value",
+        ],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=20,
+    )
+    assert child.returncode == 0, child.stderr
     assert "cluster-secret-value" not in (audit_home / ".env.audit.jsonl").read_text()
 
 

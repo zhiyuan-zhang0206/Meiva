@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 
+from base.host.proc import run_bounded
 from cli.parsers import build_parser, command_options, parse_args
 
 
@@ -42,10 +43,9 @@ def test_help_and_errors_keep_argparse_output(
     assert capsys.readouterr() == expected
 
 
-def test_omitted_arguments_read_the_process_argv(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(sys, "argv", ["meiva", "memory", "search", "text", "--limit", "8"])
-    args = parse_args()
-    assert args.query == "text" and args.limit == 8
+def test_omitted_arguments_read_the_process_argv(tmp_path: Path) -> None:
+    child = _public_queries(tmp_path, ["memory", "search", "text", "--limit", "8"])
+    assert child.returncode == 0, child.stderr
 
 
 def test_options_keep_command_paths_and_fresh_snapshots() -> None:
@@ -61,19 +61,19 @@ def test_options_keep_command_paths_and_fresh_snapshots() -> None:
     assert "--limit" in command_options()[timeline]
 
 
-def test_public_queries_do_not_load_settings_or_dispatch(tmp_path: Path) -> None:
+# meiva:link cli/docs/cli.meiva.okf.md
+def _public_queries(home: Path, argv: list[str]) -> subprocess.CompletedProcess[str]:
     env = {key: value for key, value in os.environ.items() if not key.startswith("MEIVA_")}
-    env["MEIVA_HOME"] = str(tmp_path)
-    child = subprocess.run(  # noqa: S603 -- fixed interpreter and repository-owned helper
-        [
-            sys.executable,
-            "-I",
-            str(Path(__file__).with_name("child_public_queries.py")),
-        ],
+    env["MEIVA_HOME"] = str(home)
+    return run_bounded(
+        [sys.executable, "-I", str(Path(__file__).with_name("child_public_queries.py")), *argv],
         env=env,
         capture_output=True,
         text=True,
         timeout=20,
-        check=False,
     )
+
+
+def test_public_queries_do_not_load_settings_or_dispatch(tmp_path: Path) -> None:
+    child = _public_queries(tmp_path, [])
     assert child.returncode == 0, child.stderr

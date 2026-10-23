@@ -62,6 +62,14 @@ uses one captured image and a nonexempt process database gate; an unknown image
 stays unknown rather than using the checkout's current HEAD. The child retains
 failed notices for the next start and clears only a successfully written batch.
 
+Notice tests construct their recording and refusal handles through the public
+Database configuration constructor with the same process gate and direct resolver
+as their admitted database fixture. The recording handle still opens real SQL
+connections and checks direct selection and closure. An empty batch must never
+enter connect: a forbidden-entry counter remains observable even when the notice
+writer's failure isolation would turn an empty failed batch into an empty list.
+These observations do not certify absence of background shell processes.
+
 The import boundary is `base < ops < {gateway, cli}`. The supported RPC
 vocabulary lives in the `ops/rpc_schemas/` door; focused agent contracts live in
 its `terminate` and `content` submodules. Gateway-only

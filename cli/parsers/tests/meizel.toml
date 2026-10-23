@@ -11,7 +11,7 @@
 "test_logs_retention.py#monkeypatch.setattr base.config.settings.observability.log_retention_days" = 1
 "test_logs_retention.py#monkeypatch.setattr cli.commands.observability.logs.os.scandir" = 1
 "test_walg_cmd.py#monkeypatch.setattr base.config.ConfigBoot.boot" = 1
-"test_walg_cmd.py#monkeypatch.setattr base.config.settings.walg.walg_config_file" = 2
+"test_walg_cmd.py#monkeypatch.setattr base.config.settings.walg.walg_config_file" = 1
 "test_walg_cmd.py#monkeypatch.setattr cli.commands.data_plane.walg.ConfigBoot" = 2
 "test_walg_cmd.py#monkeypatch.setattr cli.commands.data_plane.walg.check.run_check" = 1
 "test_walg_cmd.py#monkeypatch.setattr cli.commands.data_plane.walg.restored_instance" = 2
@@ -21,4 +21,3 @@
 
 [debt.stdlib-patch]
 "test_logs_retention.py#monkeypatch.setattr pathlib.Path.unlink" = 1
-"test_parser_contract.py#monkeypatch.setattr sys.argv" = 1

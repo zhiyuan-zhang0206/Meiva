@@ -19,6 +19,9 @@ and impersonation builders live in `cli.commands.agents`, extensions in
 `cmd_*` at dispatch; `pyproject.toml` installs `.venv/bin/meiva` via `uv sync`.
 Operator inputs are described in [[cli/database/docs/database.meiva.okf.md]].
 
+A bounded syntax child checks actual omitted process argv and cold imports;
+tests do not rewrite process argv to simulate that entry.
+
 ## Top-Level Commands
 
 ### Cluster Lifecycle

@@ -235,9 +235,8 @@ def test_a_postgres_that_kept_its_old_launch_arguments_is_flagged_at_start(
     sandbox = make_sandbox(tmp_path, monkeypatch, enabled=False)
     with archiving_postgres() as pg:
         _dial(pg, monkeypatch)
-        monkeypatch.setattr(settings.walg, "walg_config_file", sandbox.config_file)
-
-        walg_cmd.warn_archive_inactive(path_reader=lambda: settings.walg.walg_config_file)
+        assert settings.walg.walg_config_file is None
+        walg_cmd.warn_archive_inactive(path_reader=lambda: sandbox.config_file)
 
     err = capsys.readouterr().err
     assert "this Postgres is not running with the configured archive settings" in err
