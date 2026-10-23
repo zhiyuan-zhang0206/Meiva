@@ -18,11 +18,11 @@ from __future__ import annotations
 import time
 from collections.abc import Callable
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
-import pytest
-
-from base import paths, telemetry
+from base import telemetry
+from base.log.tests.log_records import LogRecords
 from base.telemetry.delivery import loss, mirror
 
 
@@ -93,7 +93,11 @@ class _Recorder:
 
 
 def _make_sink(
-    writer: Callable[[list[Any]], None], *, batch: int, interval: float, maxsize: int
+    writer: Callable[[list[Any]], None],
+    *,
+    batch: int,
+    interval: float,
+    maxsize: int,
 ) -> telemetry.EventPipeline:
     return telemetry.EventPipeline(
         writer=writer,
@@ -154,7 +158,7 @@ def test_stop_flushes_what_is_buffered() -> None:
 # --- bounded queue ---
 
 
-def test_queue_is_bounded_and_counts_what_it_sheds(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_queue_is_bounded_and_counts_what_it_sheds(loguru_records: LogRecords) -> None:
     """A producer outrunning the drain thread sheds records, not memory.
 
     The drain thread is stalled so the queue genuinely fills; before this bound
@@ -169,23 +173,15 @@ def test_queue_is_bounded_and_counts_what_it_sheds(monkeypatch: pytest.MonkeyPat
         assert release.wait(5.0)
         blocked(batch)
 
-    reports: list[dict[str, Any]] = []
-    original_report = loss.report_loss
-
-    def report(
-        event: telemetry.Event, count: int, queue_name: str, **kwargs: Any
-    ) -> telemetry.Event:
-        reports.append({"event": "event_log_drop", "n": count})
-        return original_report(event, count, queue_name, **kwargs)
-
-    monkeypatch.setattr(loss, "report_loss", report)
     sink = _make_sink(_stalled, batch=10, interval=0.05, maxsize=20)
     try:
         for i in range(500):
             sink.enqueue(_event(i))
-        assert reports, "expected an event_log_drop report after shedding records"
-        assert all(r["event"] == "event_log_drop" for r in reports)  # pyright: ignore[reportUnknownArgumentType]
-        assert reports[0]["n"] > 0
+        reports = [record for record in loguru_records if record["extra"].get("queue") == "emitter"]
+        assert reports, "expected an error diagnostic after shedding records"
+        assert all(record["level"].name == "ERROR" for record in reports)
+        assert reports[0]["extra"]["n"] > 0
+        assert sink.dropped > 0
         assert sink._queue.qsize() <= 20, "queue grew past its bound"
     finally:
         release.set()
@@ -243,7 +239,7 @@ def test_shed_records_report_one_event_log_drop() -> None:
 # ── emitter self-diagnostics (audit-round2 events-obs P2) ────────────────────
 
 
-def test_jsonl_mirror_failure_is_reported_not_silent(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_jsonl_mirror_failure_is_reported_not_silent(unit_home: Path) -> None:
     """A JSONL mirror write failure must be REPORTED (first + every 50th), not
     swallowed: the mirror is the durable local copy, and a disk-full /
     permission error would otherwise degrade it without a trace. The report
@@ -253,33 +249,41 @@ def test_jsonl_mirror_failure_is_reported_not_silent(monkeypatch: pytest.MonkeyP
     from loguru import logger
 
     captured: list[str] = []
+    mirror_dir = unit_home / "logs"
+    mirror_dir.mkdir(exist_ok=True)
+    day = datetime.now(UTC).strftime("%Y%m%d")
+    bad_file = mirror_dir / f"events-{day}.jsonl"
+    previous = bad_file.read_bytes() if bad_file.exists() else None
+    bad_file.unlink(missing_ok=True)
+    bad_file.mkdir()
 
-    def _boom() -> None:
-        raise OSError("disk full")
-
-    # The module-level counter may be non-zero from a prior test in the
-    # same process (xdist workers share the module) — reset it so the
-    # first-failure report cadence assertion is deterministic.
-    monkeypatch.setattr(mirror, "jsonl_failures", 0)
-    monkeypatch.setattr(paths, "logs_dir", _boom)
+    initial_failures = mirror.jsonl_failures
     sink_id = logger.add(
         lambda m: captured.append(m.record["message"]),
         level="WARNING",
         filter=lambda r: bool(r["extra"].get("_no_emitter")),
     )
     try:
-        telemetry.append_jsonl([_event(0)])
-        telemetry.append_jsonl([_event(1)])  # second consecutive failure — same report window
+        for index in range(50):
+            telemetry.append_jsonl([_event(index)])
     finally:
         logger.remove(sink_id)
+        bad_file.rmdir()
+        if previous is not None:
+            bad_file.write_bytes(previous)
 
-    assert len(captured) == 1, "first failure reported once, not per batch"
-    assert "JSONL mirror write failed" in captured[0]
+    expected = [
+        count
+        for count in range(initial_failures + 1, initial_failures + 51)
+        if count == 1 or count % 50 == 0
+    ]
+    assert mirror.jsonl_failures == initial_failures + 50
+    assert len(captured) == len(expected)
+    for message, count in zip(captured, expected, strict=True):
+        assert f"JSONL mirror write failed ({count} consecutive)" in message
 
 
-def test_sync_reports_timeout_when_drain_thread_wedged(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_sync_reports_timeout_when_drain_thread_wedged() -> None:
     """sync() must not fail silently when the drain thread cannot land its held
     batch in time — a caller about to TRUNCATE `events` needs to know the
     barrier did not complete (the straggler-flake class this closes)."""
