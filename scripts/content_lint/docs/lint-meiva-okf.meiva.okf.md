@@ -36,6 +36,8 @@ and `description`, a `tags` list of strings when present, and none of the
 forbidden keys — categorization belongs to `tags`, hierarchy to the
 filesystem. A missing or invalid YAML block is reported and skips the
 remaining field and body checks.
+YAML keys and values keep their parsed types until each field check. A non-string
+`type`, including a list or mapping, produces E002 instead of interrupting the scan.
 
 A node is a .meiva.okf.md file whose frontmatter declares a type of doc or memory with a non-empty title and description, tags as a list of strings when present, and none of the forbidden keys; a wrong extension fails first, and a missing or invalid YAML block is reported and skips the remaining field and body checks.
 
