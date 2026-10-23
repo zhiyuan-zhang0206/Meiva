@@ -1,13 +1,16 @@
+from pathlib import Path
+
 import pytest
 
 from base.config import settings
+from base.config.profiles import MEIVA_PROCESS_PROFILE_ENV
 from base.packages.plugins.flags import (
-    FlagDomainUnavailable,
     UndeclaredFlag,
     UnknownFlag,
     read_declared_flag,
     validate_flag_key,
 )
+from base.packages.plugins.tests.plugin_boundary import run_boundary
 
 FLAG = "daemon.notice_ttl_limit_seconds"
 
@@ -46,12 +49,7 @@ def test_declared_dependency_reads_the_constructed_process_domain() -> None:
     assert read_declared_flag(FLAG, (FLAG,)) == settings.daemon.notice_ttl_limit_seconds
 
 
-def test_unavailable_domain_is_rejected_without_default(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    def unavailable(_self: object, _domain: str) -> bool:
-        return False
-
-    monkeypatch.setattr(type(settings), "has_domain", unavailable)
-    with pytest.raises(FlagDomainUnavailable):
-        read_declared_flag(FLAG, (FLAG,))
+def test_unavailable_domain_is_rejected_without_default(tmp_path: Path) -> None:
+    run_boundary(
+        "unavailable-flag", home=tmp_path, env={MEIVA_PROCESS_PROFILE_ENV: "gateway"}, args=[]
+    )

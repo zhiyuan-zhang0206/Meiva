@@ -16,10 +16,11 @@ from typing import cast
 import pytest
 from pydantic import BaseModel, ConfigDict, Field
 
-from base.config import ConfigBoot, set_field, settings
+from base.config import ConfigBoot, settings
+from base.config.profiles import MEIVA_PROCESS_PROFILE_ENV
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
-from base.packages.plugin_config_images import PluginConfigOwner
+from base.packages.plugin_config_images import PluginConfigOwner, config_image_path
 from base.packages.plugins.config_registration import (
     apply_config_overlay,
     bind_plugin_config,
@@ -37,6 +38,7 @@ from base.packages.plugins.plugin_errors import (
     InvalidConfigOverlay,
     SchemaDriftError,
 )
+from base.packages.plugins.tests.plugin_boundary import run_boundary
 
 
 class FixtureConfig(BaseModel):
@@ -45,12 +47,9 @@ class FixtureConfig(BaseModel):
     marker: str = Field(default=".git", json_schema_extra={"per_agent": True})
 
 
-def test_authority_path_and_reader_do_not_create_a_missing_home(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_authority_path_and_reader_do_not_create_a_missing_home(tmp_path: Path) -> None:
     home = tmp_path / "uncreated-home"
-    monkeypatch.setenv("MEIVA_HOME", str(home))
-    image = disk_image_path("fixture")
+    image = config_image_path("fixture", home=home)
     assert image == home / "configs" / "fixture" / "config.json"
     assert read_config_image(FixtureConfig, image).flag is True
     assert not home.exists()
@@ -378,52 +377,24 @@ def test_validate_config_overlay_type_error_raises(
         )
 
 
-def test_validate_config_overlay_uses_declaring_model_in_gateway_profile(
-    model_catalog: ModelCatalog,
-    monkeypatch: pytest.MonkeyPatch,
-    isolated_registry: dict[str, BaseModel],
-    unit_home,
-) -> None:
-    """Framework validation must not read a domain absent from the gateway profile."""
-    import base.config as base_config
-    from base.config import Settings
-
-    monkeypatch.setattr(base_config, "settings", Settings(profile="gateway"))
-
-    validate_config_overlay(
-        {"completion_notice_policy": "hourly"},
-        configs=isolated_registry,
-        models=model_catalog.models,
+def test_validate_config_overlay_uses_declaring_model_in_gateway_profile(unit_home: Path) -> None:
+    run_boundary(
+        "gateway-overlay",
+        home=unit_home,
+        env={MEIVA_PROCESS_PROFILE_ENV: "gateway"},
+        args=["declaring-model"],
     )
-    with pytest.raises(InvalidConfigOverlay, match="completion_notice_policy"):
-        validate_config_overlay(
-            {"completion_notice_policy": "bogus"},
-            configs=isolated_registry,
-            models=model_catalog.models,
-        )
 
 
 def test_validate_config_overlay_runs_declaring_model_validators_in_gateway_profile(
-    model_catalog: ModelCatalog,
-    monkeypatch: pytest.MonkeyPatch,
-    isolated_registry: dict[str, BaseModel],
-    unit_home,
+    unit_home: Path,
 ) -> None:
-    """Declaring-model validation preserves before and field validators."""
-    import base.config as base_config
-    from base.config import Settings
-
-    monkeypatch.setattr(base_config, "settings", Settings(profile="gateway"))
-
-    validate_config_overlay(
-        {"skills_to_expand_at_start": "a,b"}, configs=isolated_registry, models=model_catalog.models
+    run_boundary(
+        "gateway-overlay",
+        home=unit_home,
+        env={MEIVA_PROCESS_PROFILE_ENV: "gateway"},
+        args=["validators"],
     )
-    with pytest.raises(InvalidConfigOverlay, match="only accepts"):
-        validate_config_overlay(
-            {"eval_network_allowlist": ["web", "shell"]},
-            configs=isolated_registry,
-            models=model_catalog.models,
-        )
 
 
 def test_validate_config_overlay_unknown_llm_model_raises(
@@ -621,19 +592,19 @@ def test_apply_config_overlay_mutates_plugin_config(
 
 
 def test_apply_config_overlay_framework_scope_only_mutates_settings(
-    isolated_registry: dict[str, BaseModel], unit_home, monkeypatch: pytest.MonkeyPatch
+    isolated_registry: dict[str, BaseModel], unit_home: Path
 ):
     """scope='framework' applies only framework Settings half; plugin half untouched."""
-    from base.config import settings
-
     _setup_overlayable_plugin(isolated_registry)
-    monkeypatch.setattr(settings.lm, "llm_model", settings.lm.llm_model)  # snapshot for teardown
+    owner, other = ConfigBoot(), ConfigBoot()
+    owner.set_field("llm_model", "before")
+    other.set_field("llm_model", "other")
     assert (
         get_plugin_config(
             "overlay_test",
             AgentSlices.resolve(
                 plugin_configs=isolated_registry,
-                default_reader=lambda domain, field: getattr(getattr(settings, domain), field),
+                default_reader=lambda _domain, field: owner.get_field(field),
             ),
             FixtureConfig,
         ).marker
@@ -645,17 +616,18 @@ def test_apply_config_overlay_framework_scope_only_mutates_settings(
             {"llm_model": "claude-opus-5", "marker": ".hg"},
             scope="framework",
             configs=isolated_registry,
-            set_framework_field=set_field,
+            set_framework_field=owner.set_field,
         )
     )
 
-    assert settings.lm.llm_model == "claude-opus-5"
+    assert owner.get_field("llm_model") == "claude-opus-5"
+    assert other.get_field("llm_model") == "other"
     assert (
         get_plugin_config(
             "overlay_test",
             AgentSlices.resolve(
                 plugin_configs=isolated_registry,
-                default_reader=lambda domain, field: getattr(getattr(settings, domain), field),
+                default_reader=lambda _domain, field: owner.get_field(field),
             ),
             FixtureConfig,
         ).marker
