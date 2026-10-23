@@ -14,7 +14,6 @@ import os
 import traceback as _traceback
 from collections.abc import Callable, Iterator
 from functools import partial
-from pathlib import Path
 from typing import Any, Literal, Protocol, cast
 
 import loguru
@@ -281,10 +280,6 @@ def init_gateway_process(
     producer: Callable[[], EventPipeline],
     machine_reader: Callable[[], str],
     image: LoadedImage,
-    stderr_sink_fn: Callable[..., object] | None = None,
-    file_sink_fn: Callable[[Path], object] | None = None,
-    event_sink_fn: Callable[..., object] | None = None,
-    info_fn: Callable[..., object] | None = None,
 ) -> None:
     """Called once at a gateway-style process startup — the gateway itself
     and every long-running service daemon (agent-host / watchdog / labeler /
@@ -314,8 +309,7 @@ def init_gateway_process(
         # a healthcheck that revives a dead service via Popen gives the revived
         # service its own boot row. `name` is the log-file name passed in (the
         # daemon's identity), pid/sha/host disambiguate restarts on the same box.
-        emit_info = logger.info if info_fn is None else info_fn
-        emit_info(
+        logger.info(
             "service started: {name} (pid={pid}, sha={sha}, host={host})",
             event="service_started",
             name=name,
@@ -324,26 +318,17 @@ def init_gateway_process(
             host=machine_reader(),
         )
 
-    sink_fn = add_event_sink if event_sink_fn is None else event_sink_fn
     start_process_logging(
         name,
         attach_events=partial(
-            sink_fn, process=name, producer=producer, machine_reader=machine_reader
+            add_event_sink, process=name, producer=producer, machine_reader=machine_reader
         ),
         announce=announce,
-        stderr_sink_fn=stderr_sink_fn,
-        file_sink_fn=file_sink_fn,
     )
 
 
 def init_cli_process(
-    *,
-    name: str,
-    producer: Callable[[], EventPipeline],
-    machine_reader: Callable[[], str],
-    stderr_sink_fn: Callable[..., object] | None = None,
-    file_sink_fn: Callable[[Path], object] | None = None,
-    event_sink_fn: Callable[..., object] | None = None,
+    *, name: str, producer: Callable[[], EventPipeline], machine_reader: Callable[[], str]
 ) -> None:
     """Called once by the CLI verbs that bring a unit up. Identical sink set to ``init_gateway_process``,
     minus its ``service_started`` row: stderr (human) + file (``<name>.log``)
@@ -363,12 +348,9 @@ def init_cli_process(
     sink lets ``/api/cluster/admin/events`` surface a stuck supervised
     CLI child's last logged step without ssh into the host.
     """
-    sink_fn = add_event_sink if event_sink_fn is None else event_sink_fn
     start_process_logging(
         name,
         attach_events=partial(
-            sink_fn, process=name, producer=producer, machine_reader=machine_reader
+            add_event_sink, process=name, producer=producer, machine_reader=machine_reader
         ),
-        stderr_sink_fn=stderr_sink_fn,
-        file_sink_fn=file_sink_fn,
     )

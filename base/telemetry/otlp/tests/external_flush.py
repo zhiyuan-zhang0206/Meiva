@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from datetime import UTC, datetime
 from threading import Event
 
 import pytest
-from opentelemetry.sdk._logs.export import InMemoryLogRecordExporter
+from opentelemetry.sdk._logs import ReadableLogRecord
+from opentelemetry.sdk._logs.export import InMemoryLogRecordExporter, LogRecordExportResult
 
 from base.telemetry.delivery.receipts import Event as TelemetryEvent
 from base.telemetry.otlp import telemetry_otlp, telemetry_otlp_exporting
@@ -26,20 +27,22 @@ def paused_otlp_record(
     from opentelemetry.sdk.metrics import MeterProvider
     from opentelemetry.sdk.metrics.export import InMemoryMetricReader
 
-    exporter = InMemoryLogRecordExporter()
-    logger_provider = LoggerProvider()
-    logger_provider.add_log_record_processor(SimpleLogRecordProcessor(exporter))
     paused = Event()
     release = Event()
 
-    def pause_after_dequeue(_event: TelemetryEvent) -> None:
-        paused.set()
-        assert release.wait(HANDSHAKE_BOUND_S), "close did not release the paused OTLP worker"
+    class PausedExporter(InMemoryLogRecordExporter):
+        def export(self, batch: Sequence[ReadableLogRecord]) -> LogRecordExportResult:
+            paused.set()
+            assert release.wait(HANDSHAKE_BOUND_S), "close did not release the paused OTLP worker"
+            return super().export(batch)
+
+    exporter = PausedExporter()
+    logger_provider = LoggerProvider()
+    logger_provider.add_log_record_processor(SimpleLogRecordProcessor(exporter))
 
     backend = telemetry_otlp.OtlpBackend(
         export_allowed=lambda: True,
         enabled=lambda: True,
-        on_emit_log=pause_after_dequeue,
         providers=(logger_provider, MeterProvider(metric_readers=[InMemoryMetricReader()])),
     )
 

@@ -7,222 +7,86 @@ Guard makes repeated calls silent skip, consistent with the init functions' docs
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+import json
+import os
+import sys
+import time
 from pathlib import Path
 from typing import Any
 
 import pytest
 
 import base.log.process as slog
-import base.telemetry.process_logging as plog
-from base.native_process.loaded_commit import LoadedCommit
-from base.paths import logs_dir
-from base.telemetry.delivery.pipeline import EventPipeline
+from base.host.proc import run_bounded
+from base.log.sinks import FILE_SINK_SIZE_LIMIT
 
 _REPO_ROOT = Path(__file__).resolve().parents[4]
+_PROCESS_LOGGING = Path(__file__).with_name("_process_logging_child.py")
 
 
-def _unused_producer() -> EventPipeline:
-    raise AssertionError("the mocked sink must not construct a pipeline")
-
-
-def gateway_inputs(**overrides: Any) -> dict[str, Any]:
-    """Explicit wiring inputs; sink mocks prevent constructing the test producer."""
-    base: dict[str, Any] = {
-        "producer": _unused_producer,
-        "machine_reader": lambda: "test-host",
-        "image": LoadedCommit(_REPO_ROOT, "test-image"),
-        "stderr_sink_fn": lambda *_a, **_kw: 1,
-        "file_sink_fn": lambda _p: 2,
-        "event_sink_fn": lambda **_kw: 3,
-        "info_fn": lambda *_a, **_kw: None,
-    }
-    base.update(overrides)
-    return base
-
-
-@pytest.fixture(autouse=True)
-def reset_init_flag() -> Iterator[None]:
-    """Reset module-level guard between tests to avoid cross-contamination.
-
-    In production process init happens only once; test fixture-level reset is for test isolation.
-    """
-    slog.reset_init_done()
-    yield
-    slog.reset_init_done()
-
-
-def test_init_gateway_process_idempotent() -> None:
-    """Repeated calls to init_gateway_process trigger only one logger.add chain."""
-    stderr_calls: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
-    file_calls: list[Path] = []
-    event_calls: list[dict[str, Any]] = []
-    inputs = gateway_inputs(
-        stderr_sink_fn=lambda *a, **kw: stderr_calls.append((a, kw)) or 1,
-        file_sink_fn=lambda p: file_calls.append(p) or 2,
-        event_sink_fn=lambda **kw: event_calls.append(kw) or 3,
+@pytest.mark.parametrize(
+    ("role", "filename", "service_started"),
+    [
+        ("subprocess", "agent-17.log", False),
+        ("cli", "cli-watchdog-update.log", False),
+        ("gateway", "restarter.log", True),
+        ("default-gateway", "gateway.log", True),
+        ("cross-role", "restarter.log", True),
+    ],
+)
+def test_process_logging_opens_each_sink_once(
+    tmp_path: Path, role: str, filename: str, service_started: bool
+) -> None:
+    child = run_bounded(
+        [sys.executable, "-I", str(_PROCESS_LOGGING), role],
+        env={**os.environ, "MEIVA_HOME": str(tmp_path), "MEIVA_CONFIG_FETCH": "skip"},
+        capture_output=True,
+        text=True,
+        timeout=30,
     )
-    plog.init_gateway_process(**inputs)
-    plog.init_gateway_process(**inputs)
-    plog.init_gateway_process(**inputs)
-
-    # three adds should only happen once: stderr / file / postgres group
-    assert len(stderr_calls) == 1, "stderr sink should be added only once"
-    assert len(file_calls) == 1, "file sink should be added only once"
-    assert len(event_calls) == 1, "event sink should be added only once"
-
-
-def test_init_subprocess_logger_idempotent() -> None:
-    """Repeated calls to init_subprocess_logger trigger only one sink chain."""
-    configure_calls: list[dict[str, Any]] = []
-    file_calls: list[Path] = []
-    slog.init_subprocess_logger(
-        agent_id=1,
-        configure_fn=lambda **kw: configure_calls.append(kw),
-        file_sink_fn=lambda p: file_calls.append(p) or 1,
-    )
-    slog.init_subprocess_logger(
-        agent_id=1,
-        configure_fn=lambda **kw: configure_calls.append(kw),
-        file_sink_fn=lambda p: file_calls.append(p) or 1,
-    )
-
-    assert len(configure_calls) == 1
-    assert len(file_calls) == 1
+    assert child.returncode == 0, child.stderr
+    result = json.loads(child.stdout)
+    assert result["new_threads"] == [], "process sinks must not allocate enqueue workers"
+    assert set(result["files"]) == {filename}
+    records = result["files"][filename]
+    assert sum(record["message"] == "idempotency-probe" for record in records) == 1
+    assert child.stderr.count("idempotency-probe") == (0 if role == "subprocess" else 1)
+    _assert_process_events(result["events"], role, filename, service_started)
 
 
-def test_first_init_wins_subsequent_silent_skip() -> None:
-    """Call init_gateway first, then init_subprocess_logger → second silent skip doesn't mix sink types.
-
-    Single-init contract: at process startup, one role (gateway / subprocess / cli) is determined,
-    then init_done locked, init of other roles also goes silent skip. Otherwise, beyond watchdog daemon
-    (gateway init) calling healthcheck.main() (also gateway init), if healthcheck mistakenly calls different role like init_subprocess_logger, sinks would accumulate again.
-    """
-    stderr_calls: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
-    file_calls: list[Path] = []
-    plog.init_gateway_process(
-        **gateway_inputs(
-            stderr_sink_fn=lambda *a, **kw: stderr_calls.append((a, kw)) or 1,
-            file_sink_fn=lambda p: file_calls.append(p) or 2,
-        )
-    )
-    # second time switching roles — still skip
-    slog.init_subprocess_logger(
-        agent_id=1,
-        configure_fn=lambda **_kw: None,
-        file_sink_fn=lambda p: file_calls.append(p) or 2,
-    )
-
-    assert len(stderr_calls) == 1, "second cross-role init still must silent skip"
-    assert len(file_calls) == 1, "the subprocess role must not add its agent log file"
-
-
-def test_init_gateway_process_per_daemon_log_file() -> None:
-    """init_gateway_process(name=X) writes X.log, not shared gateway.log — each daemon's log (including uncaught exception traceback) lands in per-daemon file, postmortem can be found (shared gateway.log mixing all daemons by pid makes traceability hard)."""
-    file_calls: list[Path] = []
-    plog.init_gateway_process(
-        name="restarter",
-        **gateway_inputs(file_sink_fn=lambda p: file_calls.append(p) or 2),
-    )
-
-    assert file_calls == [logs_dir() / "restarter.log"]
-
-
-def test_init_gateway_process_default_name_is_gateway() -> None:
-    """Default name remains gateway.log (gateway process backward compat)."""
-    file_calls: list[Path] = []
-    plog.init_gateway_process(**gateway_inputs(file_sink_fn=lambda p: file_calls.append(p) or 2))
-
-    assert file_calls == [logs_dir() / "gateway.log"]
-
-
-def test_init_cli_process_idempotent() -> None:
-    """Repeated calls to init_cli_process trigger only one sink chain."""
-    stderr_calls: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
-    file_calls: list[Path] = []
-    event_calls: list[dict[str, Any]] = []
-    kwargs: dict[str, Any] = {
-        "name": "cli-spawn-update-1",
-        "producer": _unused_producer,
-        "machine_reader": lambda: "test-host",
-        "stderr_sink_fn": lambda *a, **kw: stderr_calls.append((a, kw)) or 1,
-        "file_sink_fn": lambda p: file_calls.append(p) or 2,
-        "event_sink_fn": lambda **kw: event_calls.append(kw) or 3,
-    }
-    plog.init_cli_process(**kwargs)
-    plog.init_cli_process(**kwargs)
-    plog.init_cli_process(**kwargs)
-
-    assert len(stderr_calls) == 1
-    assert len(file_calls) == 1
-    assert len(event_calls) == 1
-
-
-def test_init_cli_process_per_invocation_log_file() -> None:
-    """init_cli_process(name=X) writes X.log — each detached CLI invocation
-    isolated to its own file (matches init_gateway_process per-daemon
-    naming convention)."""
-    file_calls: list[Path] = []
-    plog.init_cli_process(
-        name="cli-watchdog-update",
-        producer=_unused_producer,
-        machine_reader=lambda: "test-host",
-        stderr_sink_fn=lambda *_a, **_kw: 1,
-        file_sink_fn=lambda p: file_calls.append(p) or 2,
-        event_sink_fn=lambda **_kw: 3,
-    )
-
-    assert file_calls == [logs_dir() / "cli-watchdog-update.log"]
+def _assert_process_events(
+    events: list[dict[str, Any]], role: str, filename: str, service_started: bool
+) -> None:
+    starts = [event for event in events if event["name"] == "service_started"]
+    assert len(starts) == int(service_started)
+    if service_started:
+        attributes = starts[0]["attributes"]
+        assert attributes["name"] == filename.removesuffix(".log")
+        assert attributes["sha"] == "test-image"
+        assert attributes["host"] == "test-host"
+        assert attributes["pid"] > 0
+    probes = [event for event in events if event["attributes"].get("msg") == "idempotency-probe"]
+    assert len(probes) == (0 if role == "subprocess" else 1)
 
 
 def test_file_sink_rotates_and_expires(tmp_path: Path) -> None:
-    """file sink must carry rotation + retention.
-
-    Without them files only monotonically grow, and nothing reclaims: actual measurement gateway.log ~900 MB, agent-N.log ~190 MB. This is not optional tuning for the sink, it's a prerequisite for its usability.
-    """
-    captured: list[dict[str, Any]] = []
-    slog.add_file_sink(
-        tmp_path / "x.log",
-        add_sink_fn=lambda _sink, **kw: captured.append(kw) or 1,
-    )
-
-    kwargs = captured[0]
-    assert kwargs["rotation"], "file sink must rotate"
-    assert kwargs["retention"], "old rotated files must expire and be reclaimed"
-
-
-def test_file_sink_never_enqueues(tmp_path: Path) -> None:
-    """enqueue must remain False — this locks a previously exploded pitfall, don't "optimize" back.
-
-    `agent-{N}.log` is shared by the agent's exec subprocesses; loguru's official answer for this shared sink is enqueue=True. But that queue allocates POSIX semaphore, and force-killed processes (agent routinely SIGKILL) permanently leak it; when leak accumulates hits kern.posix.sem.max, every new agent startup dies with errno 28.
-    Prefer accepting rare interleaving on rotation than switching to enqueue.
-    """
-    captured: list[dict[str, Any]] = []
-    slog.add_file_sink(
-        tmp_path / "x.log",
-        add_sink_fn=lambda _sink, **kw: captured.append(kw) or 1,
-    )
-
-    assert captured[0].get("enqueue", False) is False
-
-
-def test_init_gateway_process_emits_service_started() -> None:
-    """Every gateway-style process boot logs one structured `service_started`
-    event — the ops panel restart-count source. One process = one row (the
-    init guard makes repeat calls silent skips), and the payload carries the
-    daemon identity + pid + loaded commit + host so restarts are attributable.
-    """
-    infos: list[dict[str, Any]] = []
-    inputs = gateway_inputs(info_fn=lambda _msg, **kw: infos.append(kw))
-    plog.init_gateway_process(name="restarter", **inputs)
-    plog.init_gateway_process(name="restarter", **inputs)  # idempotent — still one row
-
-    assert len(infos) == 1
-    kw = infos[0]
-    assert kw["event"] == "service_started"
-    assert kw["name"] == "restarter"
-    assert isinstance(kw["pid"], int) and kw["pid"] > 0
-    assert kw["host"]  # machine_name() resolves on the test host
+    path = tmp_path / "x.log"
+    with path.open("wb") as log:
+        log.truncate(FILE_SINK_SIZE_LIMIT + 1)
+    expired = tmp_path / "x.2000-01-01_00-00-00_000001.log"
+    expired.write_text("expired record")
+    old = time.time() - 9 * 24 * 60 * 60
+    os.utime(expired, (old, old))
+    sink_id = slog.add_file_sink(path)
+    try:
+        slog.logger.warning("rotation-probe")
+        assert json.loads(path.read_text())["record"]["message"] == "rotation-probe"
+        assert not expired.exists()
+        assert any(
+            rotated.stat().st_size > FILE_SINK_SIZE_LIMIT for rotated in tmp_path.glob("x.*.log")
+        )
+    finally:
+        slog.logger.remove(sink_id)
 
 
 # ─── records written while an init builds Settings ─────────────────────────

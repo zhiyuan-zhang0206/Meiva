@@ -1,2 +1,2 @@
 [uses]
-"test_log_init_idempotent.py" = ["_log_init_child.py"]
+"test_log_init_idempotent.py" = ["_log_init_child.py", "_process_logging_child.py"]

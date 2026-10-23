@@ -273,7 +273,7 @@ def rotate_by_size_or_day(
     return message.record["time"].astimezone(datetime.UTC).date() > created
 
 
-def add_file_sink(path: Path, *, add_sink_fn: Callable[..., int] = add_sink) -> int:
+def add_file_sink(path: Path) -> int:
     """Add a JSONL file sink (`serialize=True` makes loguru serialize
     the entire record into a single JSON line — for jq / programmatic
     consumption), rotating at 100 MB or once per day and keeping 7 days.
@@ -307,7 +307,7 @@ def add_file_sink(path: Path, *, add_sink_fn: Callable[..., int] = add_sink) -> 
     path.parent.mkdir(parents=True, exist_ok=True)
     with contextlib.suppress(OSError):
         path.parent.chmod(0o700)
-    sink_id = add_sink_fn(
+    sink_id = add_sink(
         path,
         serialize=True,
         level="DEBUG",

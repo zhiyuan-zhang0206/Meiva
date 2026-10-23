@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any
 
 from base import telemetry
+from base.log.tests.log_records import LogRecords
 from base.telemetry.delivery import loss, mirror
 
 
@@ -97,14 +98,12 @@ def _make_sink(
     batch: int,
     interval: float,
     maxsize: int,
-    report_loss_fn: Callable[..., telemetry.Event] | None = None,
 ) -> telemetry.EventPipeline:
     return telemetry.EventPipeline(
         writer=writer,
         batch_size=batch,
         flush_interval_s=interval,
         queue_maxsize=maxsize,
-        report_loss_fn=report_loss_fn,
     )
 
 
@@ -159,7 +158,7 @@ def test_stop_flushes_what_is_buffered() -> None:
 # --- bounded queue ---
 
 
-def test_queue_is_bounded_and_counts_what_it_sheds() -> None:
+def test_queue_is_bounded_and_counts_what_it_sheds(loguru_records: LogRecords) -> None:
     """A producer outrunning the drain thread sheds records, not memory.
 
     The drain thread is stalled so the queue genuinely fills; before this bound
@@ -174,22 +173,15 @@ def test_queue_is_bounded_and_counts_what_it_sheds() -> None:
         assert release.wait(5.0)
         blocked(batch)
 
-    reports: list[dict[str, Any]] = []
-    original_report = loss.report_loss
-
-    def report(
-        event: telemetry.Event, count: int, queue_name: str, **kwargs: Any
-    ) -> telemetry.Event:
-        reports.append({"event": "event_log_drop", "n": count})
-        return original_report(event, count, queue_name, **kwargs)
-
-    sink = _make_sink(_stalled, batch=10, interval=0.05, maxsize=20, report_loss_fn=report)
+    sink = _make_sink(_stalled, batch=10, interval=0.05, maxsize=20)
     try:
         for i in range(500):
             sink.enqueue(_event(i))
-        assert reports, "expected an event_log_drop report after shedding records"
-        assert all(r["event"] == "event_log_drop" for r in reports)  # pyright: ignore[reportUnknownArgumentType]
-        assert reports[0]["n"] > 0
+        reports = [record for record in loguru_records if record["extra"].get("queue") == "emitter"]
+        assert reports, "expected an error diagnostic after shedding records"
+        assert all(record["level"].name == "ERROR" for record in reports)
+        assert reports[0]["extra"]["n"] > 0
+        assert sink.dropped > 0
         assert sink._queue.qsize() <= 20, "queue grew past its bound"
     finally:
         release.set()
@@ -260,25 +252,27 @@ def test_jsonl_mirror_failure_is_reported_not_silent(tmp_path: Path) -> None:
     bad_dir = tmp_path / "not-a-dir"
     bad_dir.write_text("file")
 
-    # The module-level counter may be non-zero from a prior test in the
-    # same process (xdist workers share the module) — reset it so the
-    # first-failure report cadence assertion is deterministic.
-    mirror.reset_jsonl_failures()
+    initial_failures = mirror.jsonl_failures
     sink_id = logger.add(
         lambda m: captured.append(m.record["message"]),
         level="WARNING",
         filter=lambda r: bool(r["extra"].get("_no_emitter")),
     )
     try:
-        telemetry.append_jsonl([_event(0)], mirror_dir=bad_dir)
-        telemetry.append_jsonl(
-            [_event(1)], mirror_dir=bad_dir
-        )  # second consecutive failure — same report window
+        for index in range(50):
+            telemetry.append_jsonl([_event(index)], mirror_dir=bad_dir)
     finally:
         logger.remove(sink_id)
 
-    assert len(captured) == 1, "first failure reported once, not per batch"
-    assert "JSONL mirror write failed" in captured[0]
+    expected = [
+        count
+        for count in range(initial_failures + 1, initial_failures + 51)
+        if count == 1 or count % 50 == 0
+    ]
+    assert mirror.jsonl_failures == initial_failures + 50
+    assert len(captured) == len(expected)
+    for message, count in zip(captured, expected, strict=True):
+        assert f"JSONL mirror write failed ({count} consecutive)" in message
 
 
 def test_sync_reports_timeout_when_drain_thread_wedged() -> None:

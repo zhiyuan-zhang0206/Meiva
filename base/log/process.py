@@ -9,12 +9,11 @@ from __future__ import annotations
 
 import sys
 from collections.abc import Callable
-from pathlib import Path
 
 from base.log import logger
 from base.log.sinks import HUMAN_FORMAT, add_file_sink, add_sink, install_stdlib_intercept
 
-__all__ = ["init_subprocess_logger", "reset_init_done", "start_process_logging"]
+__all__ = ["init_subprocess_logger", "start_process_logging"]
 
 
 # meiva:note
@@ -26,24 +25,12 @@ __all__ = ["init_subprocess_logger", "reset_init_done", "start_process_logging"]
 # minute, hourly accumulation ~1000 fd then crash.
 #
 # Make init functions idempotent (process-level singleton) — later
-# repeated calls silent-skips, matching their docstring "called once
+# repeated calls silent-skip, matching their docstring "called once
 # at startup" contract.
 init_done = False
 
 
-def reset_init_done() -> None:
-    # meiva:note
-    # Reset the process-level startup guard for isolated tests.
-    global init_done  # noqa: PLW0603
-    init_done = False
-
-
-def init_subprocess_logger(
-    *,
-    agent_id: int,
-    configure_fn: Callable[..., object] | None = None,
-    file_sink_fn: Callable[[Path], object] | None = None,
-) -> None:
+def init_subprocess_logger(*, agent_id: int) -> None:
     """Called once at exec subprocess startup. **Only** adds the file
     sink, no stderr — the subprocess's stderr is captured by parent
     and injected into exec_output fed to the LLM; framework logs to
@@ -60,10 +47,8 @@ def init_subprocess_logger(
         return
     from base.paths import logs_dir
 
-    configure = logger.configure if configure_fn is None else configure_fn
-    add_file = add_file_sink if file_sink_fn is None else file_sink_fn
-    configure(extra={"agent_id": str(agent_id), "process_role": "subprocess"})
-    add_file(logs_dir() / f"agent-{agent_id}.log")
+    logger.configure(extra={"agent_id": str(agent_id), "process_role": "subprocess"})
+    add_file_sink(logs_dir() / f"agent-{agent_id}.log")
     install_stdlib_intercept()
     init_done = True
 
@@ -84,9 +69,6 @@ def start_process_logging(
     *,
     attach_events: Callable[[], object],
     announce: Callable[[], None] | None = None,
-    stderr_sink_fn: Callable[..., object] | None = None,
-    file_sink_fn: Callable[[Path], object] | None = None,
-    configure_fn: Callable[..., object] | None = None,
 ) -> None:
     """Open a long-running process's sinks once: stderr (human) + file (``<name>.log``)
     + the event sink ``attach_events`` registers + the stdlib intercept.
@@ -98,16 +80,11 @@ def start_process_logging(
     global init_done  # noqa: PLW0603
     if init_done:
         return
-    configure = logger.configure if configure_fn is None else configure_fn
-    add_file = add_file_sink if file_sink_fn is None else file_sink_fn
-    configure(extra={"agent_id": "-"})
-    if stderr_sink_fn is None:
-        _add_stderr_sink_before_settings()
-    else:
-        stderr_sink_fn(sys.stderr, format=HUMAN_FORMAT, level="INFO", colorize=True)
+    logger.configure(extra={"agent_id": "-"})
+    _add_stderr_sink_before_settings()
     from base.paths import logs_dir
 
-    add_file(logs_dir() / f"{name}.log")
+    add_file_sink(logs_dir() / f"{name}.log")
     attach_events()
     install_stdlib_intercept()
     if announce is not None:
