@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import re
+from pathlib import Path
+
 from base.lm import pricing
 from base.lm.catalog import ModelCatalog
 from base.lm.compat import stop
@@ -205,3 +208,22 @@ def test_kimi_k3_1_pro_family_and_display_successor(*, model_catalog: ModelCatal
     assert highspeed.tuning == pro.tuning
     assert model_catalog.models["kimi-k3"].superseded_by == "kimi-k3.1-pro"
     assert model_catalog.models["kimi-k3"].spawnable
+
+
+def test_docs_state_the_actual_plugin_catalog_size(*, model_catalog: ModelCatalog) -> None:
+    # meiva:note
+    # The two docs that state the roster size have no other consumer, so they are the check.
+    repo_root = Path(__file__).resolve().parents[4]
+    plugin_prices = len(model_catalog.prices.plugin)
+    mappings = len(model_catalog.models) + len(model_catalog.decision_models)
+    assert plugin_prices == mappings
+    documented = (
+        ("base/lm/pricing/docs/pricing.meiva.okf.md", r"all (\d+) repository plugin prices"),
+        ("base/lm/docs/model-providers-as-plugins.md", r"all (\d+) model/vendor mappings"),
+    )
+    for relative, pattern in documented:
+        match = re.search(pattern, (repo_root / relative).read_text())
+        assert match is not None, f"{relative}: no sentence matching {pattern!r}"
+        assert int(match.group(1)) == plugin_prices, (
+            f"{relative} says all {match.group(1)} where the registry holds {plugin_prices}"
+        )
