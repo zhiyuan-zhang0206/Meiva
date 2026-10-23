@@ -27,6 +27,7 @@ from base.agents.tests.units import spawn_agent
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
+from base.config.tests.configuration import snapshot_process_config
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
@@ -105,7 +106,10 @@ async def test_fork_end_to_end_keeps_source_notes_and_grafts_own(
     ]
 
     with closing(
-        process_clients(database=lambda: Database.from_settings(gate=database_gate))
+        process_clients(
+            config=snapshot_process_config(),
+            database=lambda: Database.from_settings(gate=database_gate),
+        )
     ) as clients:
         runtime = make_runtime(
             ops_pool=aops_pool,
@@ -166,7 +170,10 @@ async def test_fork_keeps_the_whole_inherited_prefix(
         HumanMessage(content="conversation tail"),
     ]
     with closing(
-        process_clients(database=lambda: Database.from_settings(gate=database_gate))
+        process_clients(
+            config=snapshot_process_config(),
+            database=lambda: Database.from_settings(gate=database_gate),
+        )
     ) as clients:
         runtime = make_runtime(
             ops_pool=aops_pool,

@@ -47,7 +47,10 @@ def search(
     # call is made.
     from meiva.web import runner, wiring
 
-    return runner.run_search(plan, wiring.search_deps(), SearchResult)
+    return [
+        [SearchResult(title=h.title, url=h.url, snippet=h.snippet, kind=h.kind) for h in hits]
+        for hits in runner.run_search(plan, wiring.search_deps())
+    ]
 
 
 def fetch(

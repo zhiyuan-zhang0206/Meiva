@@ -1,179 +1,45 @@
+# meiva:note
+# The DeepSeek Search and Fetch tools: build each request, send it paced by the batch's rate
+# limiter, scan what comes back for injection patterns, and return the hits or the page.
 # meiva:link meiva/web/docs/providers.meiva.okf.md
 
 from __future__ import annotations
 
-import json
-import logging
-import threading
-import time
-import urllib.error
-import urllib.request
-from collections.abc import Callable
-from typing import Any, cast
+from meiva import security
+from meiva.web import deepseek_wire, transport, wire
+from meiva.web.deps import FetchDeps, SearchDeps
+from meiva.web.errors import FetchError, SearchError
 
-from base.host.net.ports import UrlOpener
-from base.host.net.resilience import retry
-from meiva.web.deps import (
-    DeepSeekFetchConfig,
-    DeepSeekSearchConfig,
-    FetchDeps,
-    RequestPacer,
-    SearchDeps,
-)
-from meiva.web.errors import FetchError, SearchError, WebError
-from meiva.web.policy import WEB_READ_POLICY
-
-__all__ = ["RateLimiter", "read_page", "search_one"]
-
-_log = logging.getLogger(__name__)
-
-_DETAIL_MAX = 200
+__all__ = ["read_page", "search_one"]
 
 
-# meiva:note
-# The clock and the sleep are parameters, not reads of the module: the reservation arithmetic
-# (slot k at `start + k*interval`) is the contract this class promises, and a test can only
-# assert it on a clock it controls. Production passes the real ones by default.
-class RateLimiter:
-    def __init__(
-        self,
-        qps: float,
-        *,
-        monotonic: Callable[[], float] = time.monotonic,
-        sleep: Callable[[float], None] = time.sleep,
-    ) -> None:
-        self._interval = 1.0 / qps if qps > 0 else 0.0
-        self._lock = threading.Lock()
-        self._next_at = 0.0
-        self._monotonic = monotonic
-        self._sleep = sleep
-
-    def acquire(self) -> None:
-        if not self._interval:
-            return
-        with self._lock:
-            now = self._monotonic()
-            wait = self._next_at - now
-            self._next_at = max(now, self._next_at) + self._interval
-        if wait > 0:
-            self._sleep(wait)
-
-
-def _provider_message(detail: str) -> str:
-    try:
-        parsed = json.loads(detail)
-    except json.JSONDecodeError:
-        return detail[:_DETAIL_MAX]
-    error: object = cast(dict[str, Any], parsed).get("error") if isinstance(parsed, dict) else None
-    if isinstance(error, dict):
-        message: object = cast(dict[str, Any], error).get("message")
-        if isinstance(message, str):
-            return message
-    return detail[:_DETAIL_MAX]
-
-
-def _post(
-    endpoint: str,
-    body: dict[str, Any],
-    *,
-    api_key: str,
-    timeout_s: float,
-    open_url: UrlOpener,
-    pacer: RequestPacer,
-    error_type: type[WebError],
-    label: str,
-) -> dict[str, Any]:
-    payload = json.dumps(body).encode()
-
-    def _send() -> bytes:
-        pacer.acquire()
-        # meiva:link meiva/web/docs/providers.meiva.okf.md
-        request = urllib.request.Request(  # noqa: S310
-            endpoint,
-            data=payload,
-            headers={
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json",
-                "Accept": "application/json",
-            },
-            method="POST",
-        )
-        with open_url(request, timeout_s) as response:
-            return response.read()
-
-    try:
-        data: dict[str, Any] = json.loads(retry(WEB_READ_POLICY)(_send))
-    except urllib.error.HTTPError as e:
-        detail = e.read().decode(errors="replace")
-        _log.warning(
-            "%s HTTP %s after %d attempts: %s",
-            label,
-            e.code,
-            WEB_READ_POLICY.max_attempts,
-            detail[:_DETAIL_MAX],
-        )
-        raise error_type(f"{label} HTTP {e.code}: {_provider_message(detail)}") from e
-    except urllib.error.URLError as e:
-        _log.warning(
-            "%s connection failed after %d attempts: %s",
-            label,
-            WEB_READ_POLICY.max_attempts,
-            e.reason,
-        )
-        raise error_type(f"{label} connection failed: {e.reason}") from e
-    except json.JSONDecodeError as e:
-        raise error_type(f"{label} returned non-JSON: {e}") from e
-    return data
-
-
-def _api_key(config: DeepSeekSearchConfig | DeepSeekFetchConfig, error_type: type[WebError]) -> str:
-    if config.api_key is None:
-        raise error_type(
-            "DEEPSEEK_API_KEY is not set — DeepSeek Search & Fetch uses the same key as the "
-            "deepseek-* models; export it or write it into .env"
-        )
-    return config.api_key.get_secret_value()
-
-
-def search_one[Result](
-    query: str, count: int, deps: SearchDeps, make_result: Callable[..., Result]
-) -> list[Result]:
+def search_one(
+    query: str, count: int, deps: SearchDeps, pacer: transport.RateLimiter
+) -> list[wire.Hit]:
     config = deps.deepseek
-    data = _post(
-        config.endpoint,
-        {"query": query, "count": max(1, min(count, config.max_count))},
-        api_key=_api_key(config, SearchError),
+    data = transport.send_json(
+        deepseek_wire.deepseek_search_request(config, query, count),
         timeout_s=config.timeout_s,
-        open_url=deps.open_url,
-        pacer=config.pacer,
-        error_type=SearchError,
         label="DeepSeek Search",
+        error_type=SearchError,
+        provider_json=True,
+        pacer=pacer,
     )
-    results: list[dict[str, Any]] = data.get("results") or []
-    return [
-        make_result(
-            title=deps.scan(str(item.get("title") or ""), "web.search"),
-            url=str(item.get("url") or ""),
-            snippet=deps.scan(str(item.get("snippet") or item.get("summary") or ""), "web.search"),
-            kind="web",
-        )
-        for item in results
-    ]
+    hits = deepseek_wire.deepseek_search_hits(data)
+    for hit in hits:
+        security.scan_to(deps.delivery, hit.title, "web.search")
+        security.scan_to(deps.delivery, hit.snippet, "web.search")
+    return hits
 
 
-def read_page(url: str, max_chars: int, deps: FetchDeps) -> tuple[str, str, str, bool]:
+def read_page(url: str, max_chars: int, deps: FetchDeps, pacer: transport.RateLimiter) -> wire.Page:
     config = deps.deepseek
-    data = _post(
-        config.endpoint,
-        {"url": url},
-        api_key=_api_key(config, FetchError),
+    data = transport.send_json(
+        deepseek_wire.deepseek_fetch_request(config, url),
         timeout_s=config.timeout_s,
-        open_url=deps.open_url,
-        pacer=config.pacer,
-        error_type=FetchError,
         label="DeepSeek Fetch",
+        error_type=FetchError,
+        provider_json=True,
+        pacer=pacer,
     )
-    content = data.get("content") or ""
-    if not content:
-        raise FetchError(f"DeepSeek Fetch returned no page content for {url}")
-    return data.get("title") or "", url, content[:max_chars], len(content) > max_chars
+    return deepseek_wire.deepseek_page(data, url, max_chars)

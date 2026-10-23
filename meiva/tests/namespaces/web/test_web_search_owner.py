@@ -89,16 +89,13 @@ def non_model_installation(
     )
     sampling = SamplingPolicyOwner(reader=SamplingPolicy)
     previous = getattr(meiva, "context", None)
-    process_context.bind_context(
-        replace(
-            previous or MeivaContext(), clients=ClientSet(pipeline_factory=emitted_events.producer)
-        )
-    )
+    clients = ClientSet(pipeline_factory=emitted_events.producer)
+    process_context.bind_context(replace(previous or MeivaContext(), clients=clients))
     install.install(
         EMPTY,
         authority=authority,
         sampling=sampling,
-        producer=emitted_events.producer,
+        clients=clients,
         config_images=DiskPluginConfigImages(resolve_meiva_home()),
     )
     try:

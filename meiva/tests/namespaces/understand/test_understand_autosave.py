@@ -1,92 +1,73 @@
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
-import pytest
-
-from meiva.tests.fixtures.pin_agent import pin_no_identity
-from meiva.tests.namespaces.understand.provider_support import ProviderCapture
-from meiva.tests.namespaces.understand.provider_support import mock_deepseek as mock_deepseek
-from meiva.tests.namespaces.understand.provider_support import understand_deps as understand_deps
-from meiva.understand.answer import UnderstandDeps
-
-pytestmark = pytest.mark.usefixtures("sdk_model_owner")
+from meiva.tests.namespaces.understand.provider_support import UnderstandHarness
+from meiva.tests.namespaces.understand.provider_support import (
+    understand_harness as understand_harness,
+)
 
 
-def test_single_result_saved_to_exec_output(mock_deepseek: ProviderCapture, tmp_path: Path) -> None:
+def test_single_result_saved_to_exec_output(
+    understand_harness: UnderstandHarness, tmp_path: Path
+) -> None:
+    exec_dir = tmp_path / "fake_ws" / ".exec_output"
+    understand_harness.save_to(exec_dir)
 
-    ws = tmp_path / "fake_ws"
-    mock_deepseek.configure(output_dir=lambda: ws / ".exec_output")
+    understand_harness.understand([{"prompt": "summarize please", "text": "hello world"}])
 
-    mock_deepseek.understand([{"prompt": "summarize please", "text": "hello world"}])
-
-    exec_dir = ws / ".exec_output"
-    assert exec_dir.is_dir()
-    files = list(exec_dir.glob("understand_*.txt"))
-    assert len(files) == 1
-    content = files[0].read_text()
+    [saved] = exec_dir.glob("understand_*.txt")
+    content = saved.read_text()
     assert "fake answer" in content
     assert "summarize please" in content
 
 
-def test_batch_results_saved_to_exec_output(mock_deepseek: ProviderCapture, tmp_path: Path) -> None:
+def test_batch_results_saved_to_exec_output_in_submission_order(
+    understand_harness: UnderstandHarness, tmp_path: Path
+) -> None:
+    exec_dir = tmp_path / "batch_ws" / ".exec_output"
+    understand_harness.save_to(exec_dir)
 
-    ws = tmp_path / "batch_ws"
-    mock_deepseek.configure(output_dir=lambda: ws / ".exec_output")
+    understand_harness.understand(
+        [
+            {"prompt": "question one", "text": "material one"},
+            {"prompt": "question two", "text": "material two"},
+        ]
+    )
 
-    targets = [
-        {"prompt": "question one", "text": "material one"},
-        {"prompt": "question two", "text": "material two"},
-    ]
-    mock_deepseek.understand(targets)
-
-    exec_dir = ws / ".exec_output"
-    files = sorted(exec_dir.glob("understand_*.txt"))
-    assert len(files) == 2
-    assert "question one" in files[0].read_text()
-    assert "question two" in files[1].read_text()
+    first, second = sorted(exec_dir.glob("understand_*.txt"))
+    assert "question one" in first.read_text()
+    assert "question two" in second.read_text()
 
 
-def test_auto_save_prunes_old_files(mock_deepseek: ProviderCapture, tmp_path: Path) -> None:
-
-    ws = tmp_path / "prune_ws"
-    mock_deepseek.configure(output_dir=lambda: ws / ".exec_output")
-
-    exec_dir = ws / ".exec_output"
+def test_auto_save_prunes_old_files(understand_harness: UnderstandHarness, tmp_path: Path) -> None:
+    exec_dir = tmp_path / "prune_ws" / ".exec_output"
     exec_dir.mkdir(parents=True)
     for i in range(30):
-        f = exec_dir / f"understand_20240101_000000_{i:06d}_old{i}.txt"
-        f.write_text(f"old result {i}")
-    for f in exec_dir.iterdir():
-        os.utime(f, (1_700_000_000, 1_700_000_000))
+        (exec_dir / f"understand_20240101_000000_{i:06d}_old{i}.txt").write_text(f"old result {i}")
+    understand_harness.save_to(exec_dir)
 
-    mock_deepseek.understand([{"prompt": "new question", "text": "new material"}])
+    understand_harness.understand([{"prompt": "new question", "text": "new material"}])
 
-    files = sorted(exec_dir.glob("understand_*.txt"))
-    assert len(files) == 20, "the ring retains the newest 20 results"
-
-    names = [f.name for f in files]
+    names = sorted(f.name for f in exec_dir.glob("understand_*.txt"))
+    assert len(names) == 20, "the ring retains the newest 20 results"
     assert [n for n in names if "_old" in n] == [
         f"understand_20240101_000000_{i:06d}_old{i}.txt" for i in range(11, 30)
     ]
     assert sum(1 for n in names if "_old" not in n) == 1, "the newly written file survives"
 
 
-def test_auto_save_noop_without_agent_id(
-    mock_deepseek: ProviderCapture, understand_deps: UnderstandDeps, monkeypatch: pytest.MonkeyPatch
+def test_nothing_is_saved_outside_an_agent_process(
+    understand_harness: UnderstandHarness, tmp_path: Path
 ) -> None:
+    assert understand_harness.deps.output is None
 
-    pin_no_identity()
-    monkeypatch.delenv("MEIVA_AGENT_ID", raising=False)
+    [result] = understand_harness.understand([{"prompt": "test", "text": "some text"}])
 
-    assert understand_deps.output_dir() is None
-    mock_deepseek.configure(output_dir=understand_deps.output_dir)
-
-    [result] = mock_deepseek.understand([{"prompt": "test", "text": "some text"}])
     assert result == "fake answer"
+    assert list(tmp_path.glob("**/understand_*.txt")) == []
 
 
-def test_one_question_is_a_one_element_batch(mock_deepseek: ProviderCapture) -> None:
-    [result] = mock_deepseek.understand([{"prompt": "hello", "text": "world"}])
+def test_one_question_is_a_one_element_batch(understand_harness: UnderstandHarness) -> None:
+    [result] = understand_harness.understand([{"prompt": "hello", "text": "world"}])
     assert result == "fake answer"

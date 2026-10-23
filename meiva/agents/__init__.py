@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, Literal
+from typing import Any, Literal
 from uuid import UUID
 
 import meiva.sdk_surface.agent_identity
@@ -31,13 +31,10 @@ from base.api_contracts.agent_contract import (
 )
 from base.api_contracts.agent_contract import ForkError as ForkError
 from base.api_contracts.agent_contract import ForkHarnessMismatch as ForkHarnessMismatch
-from base.api_contracts.agent_contract import HarnessStatus as HarnessStatus
-
-if TYPE_CHECKING:
-    from base.agents.birth.harness import HarnessProbe
 from base.api_contracts.agent_contract import ForkSourceEmpty as ForkSourceEmpty
 from base.api_contracts.agent_contract import GatewayUnavailable as GatewayUnavailable
 from base.api_contracts.agent_contract import HarnessNotLaunchable as HarnessNotLaunchable
+from base.api_contracts.agent_contract import HarnessStatus as HarnessStatus
 from base.api_contracts.agent_contract import InvalidModelConfig as InvalidModelConfig
 from base.api_contracts.agent_contract import MachineNotRegistered as MachineNotRegistered
 from base.api_contracts.agent_contract import ResurrectError as ResurrectError
@@ -397,17 +394,16 @@ def harness_availability() -> list[HarnessAvailability]:
     """
     from base.agents.birth.harness import probe_local_harnesses
 
-    return [_availability_from_probe(row) for row in probe_local_harnesses()]
-
-
-def _availability_from_probe(row: HarnessProbe) -> HarnessAvailability:
-    return HarnessAvailability(
-        harness=row.harness,
-        status=row.status,
-        reason=row.reason,
-        binary=row.binary,
-        on_path=row.on_path,
-    )
+    return [
+        HarnessAvailability(
+            harness=row.harness,
+            status=row.status,
+            reason=row.reason,
+            binary=row.binary,
+            on_path=row.on_path,
+        )
+        for row in probe_local_harnesses()
+    ]
 
 
 def _row_from_dict(data: dict[str, Any]) -> AgentRow:
@@ -746,9 +742,11 @@ def get_last_message(agent_id: int) -> str | None:
 
     agent_id = coerce_typed(agent_id, "agent_id", int)
     caller = meiva.sdk_surface.agent_identity.require_actor()
-    return peers.scanned_last_message(
-        gateway_client.get_last_message(agent_id, caller), agent_id, scan=scan_content
-    )
+    message = gateway_client.get_last_message(agent_id, caller)
+    scan = peers.last_message_scan(message, agent_id)
+    if scan is not None:
+        scan_content(scan.text, source=scan.source)
+    return message
 
 
 def get_status(agent_id: int) -> AgentStatus:

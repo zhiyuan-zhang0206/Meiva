@@ -1,5 +1,4 @@
 import sys as _sys
-from collections.abc import Callable
 from pathlib import Path as _Path
 from types import ModuleType as _ModuleType
 from types import SimpleNamespace
@@ -27,24 +26,11 @@ if "_LOADED_IMAGE" not in globals():
 # external API while removing the "must mutate settings before import"
 # invariant.
 from base.agents.context import MeivaContext
-from base.clock import Clock
 from base.cluster.machine import MachineIdentity as _MachineIdentity
 from base.config import ConfigBoot
 from base.packages.plugins.loading import StateGate
 
 from .sdk_surface import process_context
-
-# ── SDK entry machinery — implementations in `meiva/sdk_surface/` ─────────────
-#
-# `meiva/sdk_surface/` keeps this file a readable coordinator: `const` (the
-# `meiva.const()` factory — imported here, before the submodule imports, so
-# top-level const assignments like `meiva.self.AGENT_ID = meiva.const(...)` work
-# during submodule load), `sdk_disable` (MEIVA_SDK_DISABLE), `discovery`
-# (children discovery + `agent_visible_names`), `help` (the `meiva.help()`
-# renderer), and `plugins` (the plugin registration API). The plugin-author
-# entry points are re-exported here; framework controls (the render
-# contextvars, the SDK-disable entries) are imported from their own module.
-from .sdk_surface.const import const as const
 from .sdk_surface.discovery import agent_visible_names as agent_visible_names
 from .sdk_surface.help import help as help
 from .sdk_surface.plugins import FrameworkNamespaceConflictError as FrameworkNamespaceConflictError
@@ -56,6 +42,18 @@ from .sdk_surface.plugins import NamespaceConflictError as NamespaceConflictErro
 from .sdk_surface.plugins import PluginNamespaceConflictError as PluginNamespaceConflictError
 from .sdk_surface.plugins import RegisterNamespaceError as RegisterNamespaceError
 from .sdk_surface.plugins import UnknownNamespaceError as UnknownNamespaceError
+
+# ── SDK entry machinery — implementations in `meiva/sdk_surface/` ─────────────
+#
+# `meiva/sdk_surface/` keeps this file a readable coordinator: `const` (the
+# `meiva.const()` factory — imported here, before the submodule imports, so
+# top-level const assignments like `meiva.self.AGENT_ID = meiva.const(...)` work
+# during submodule load), `sdk_disable` (MEIVA_SDK_DISABLE), `discovery`
+# (children discovery + `agent_visible_names`), `help` (the `meiva.help()`
+# renderer), and `plugins` (the plugin registration API). The plugin-author
+# entry points are re-exported here; framework controls (the render
+# contextvars, the SDK-disable entries) are imported from their own module.
+from .sdk_surface.pure.const import const as const
 
 # ── The SDK entry's slots ───────────────────────────────────────────────────
 #
@@ -158,62 +156,53 @@ _sys.modules[__name__].__class__ = _SdkModule
 _init_complete = False
 
 
+# meiva:note
+# Idempotently load plugin namespaces (`meiva.tasks` etc.) into *this* process. The entry
+# point for a process an agent launched: a watcher / schedule bootstrap calls it explicitly
+# before running agent code. A persistent-shell child completes the same composition before its
+# first parent import returns; `__getattr__` remains the backstop for a deferred plugin load.
+# `surface=True` (the default) loads the plugin *surfaces* only, the child contract (task
+# #3633). `surface=False` loads the full agent-runtime faces too (state fields / hooks /
+# prompt sections), called when a stateful child's lazy state slot resolves: the state schema
+# needs the plugins' field registrations. Each stage runs at most once per process; the load
+# state is the installation slot (`meiva.sdk_surface.install`): `installed()` answers
+# "loaded", `faces` "and the faces", `load_attempted()` "in flight, or attempted and failed
+# (no retry)"; the failed state preserves the original exception. A call that arrives while
+# the loader module is still initializing (a re-entrant import) defers instead, so a later
+# miss retries once the module is complete.
+#
+# The loader lives in the agent layer; it is reached via `importlib` (a runtime string, not a
+# static `from agent import`) so this meiva-layer module keeps NO static dependency on agent;
+# the layering contract stays intact while the launched subprocess still self-loads its plugins.
+#
+# Expected typed declaration refusals are isolated by the installer after a successful
+# rollback. Unknown inventory, configuration, programming or I/O failures propagate unchanged;
+# a later call re-raises the same failure without retrying the load. The loader's earlier
+# per-module import containment is a separate boundary in `meiva.sdk_surface.extensions`.
+#
+# A supplied context binds before loading and receives the installed catalog. A launched
+# process with no context first constructs one from the same boot owner used for its
+# installation. Startup identity inspection does not invoke the ambient context getter. An
+# explicit composition root supplies its configuration and optional machine owner; the
+# installation retains its own cold clients with those inputs until process exit and never
+# borrows an attachment's shorter-lived clients. Bound SDK calls use their own context's
+# clients instead.
 def ensure_plugins_loaded(
     *,
     surface: bool = True,
     config: ConfigBoot | None = None,
-    clock_factory: Callable[[], Clock] | None = None,
-    producer: Callable[[], Any] | None = None,
     machine: _MachineIdentity | None = None,
     context: MeivaContext | None = None,
     validate_state: StateGate | None = None,
 ) -> None:
-    """Idempotently load plugin namespaces (`meiva.tasks` etc.) into *this* process.
-
-    The entry point for a process an agent launched: a watcher / schedule
-    bootstrap calls it explicitly before running agent code. A persistent-shell
-    child completes the same composition before its first parent import returns;
-    `__getattr__` remains the backstop for a deferred plugin load.
-    `surface=True` (the default) loads the plugin *surfaces* only — the child
-    contract (task #3633). `surface=False` loads the full agent-runtime faces
-    too (state fields / hooks / prompt sections), called when a stateful
-    child's lazy state slot resolves: the state schema needs the plugins'
-    field registrations. Each stage runs at most once per process — the load state
-    is the installation slot (`meiva.sdk_surface.install`): `installed()` answers
-    "loaded", `faces` "and the faces", `load_attempted()` "in flight, or attempted
-    and failed (no retry)"; the failed state preserves the original exception. A call that arrives while the loader module is still
-    initializing (a re-entrant import) defers instead, so a later miss retries
-    once the module is complete.
-
-    The loader lives in the agent layer; it is reached via `importlib` (a runtime
-    string, not a static `from agent import`) so this meiva-layer module keeps NO
-    static dependency on agent — the layering contract stays intact while the
-    launched subprocess still self-loads its plugins.
-
-    Expected typed declaration refusals are isolated by the installer after a
-    successful rollback. Unknown inventory, configuration, programming or I/O
-    failures propagate unchanged; a later call re-raises the same failure without
-    retrying the load. The loader's earlier per-module import containment is a
-    separate boundary in `meiva.sdk_surface.extensions`.
-
-    A supplied context binds before loading and receives the installed catalog.
-    A launched process with no context first constructs one from the same boot
-    owner used for its installation. Startup identity inspection does not invoke
-    the ambient context getter. An explicit composition root supplies its
-    configuration, clock and optional machine owner. If no producer is supplied, the installation retains its own
-    cold clients with those inputs until process exit; it never borrows an
-    attachment's shorter-lived clients. Bound SDK calls use their own context's
-    producer instead.
-    """
     from . import boot
 
     boot.ensure_plugins_loaded(
         surface=surface,
         config=config,
-        clock_factory=clock_factory,
-        producer=producer,
         machine=machine,
         context=context,
+        clients=None,
         validate_state=validate_state,
     )
 

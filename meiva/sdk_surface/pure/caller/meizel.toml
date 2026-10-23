@@ -1,0 +1,7 @@
+exports = ["attachability.py", "identity_plan.py", "usage_plan.py"]
+
+[uses]
+"usage_plan.py" = ["identity_plan.py"]
+
+[purity]
+"." = "strict"

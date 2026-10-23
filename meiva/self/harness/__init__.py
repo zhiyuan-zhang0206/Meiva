@@ -11,19 +11,9 @@ __all_for_meiva__ = ["attach"]
 
 HANDLE_ENV = "MEIVA_HARNESS_HANDLE"
 
-_REGISTRATION_NAMES = frozenset(
-    {
-        "FileRegistrationStore",
-        "HarnessRegistration",
-        "RegistrationError",
-        "default_store",
-        "handle_digest",
-        "new_handle",
-    }
-)
-_ATTACHMENT_NAMES = frozenset(
-    {"HarnessAttachment", "open_attachment", "registration_digest", "resolve_registration"}
-)
+_REGISTRATION_NAMES = frozenset({"HarnessRegistration", "RegistrationError", "handle_digest"})
+_STORE_NAMES = frozenset({"FileRegistrationStore", "default_store", "new_handle"})
+_ATTACHMENT_NAMES = frozenset({"HarnessAttachment", "open_attachment", "resolve_registration"})
 
 
 def __getattr__(name: str) -> Any:
@@ -32,6 +22,10 @@ def __getattr__(name: str) -> Any:
         from . import registration
 
         return getattr(registration, name)
+    if name in _STORE_NAMES:
+        from . import store
+
+        return getattr(store, name)
     if name in _ATTACHMENT_NAMES:
         from . import attachment
 
@@ -100,12 +94,6 @@ def attach(handle: str | None = None) -> Any:
         "meiva.attach found no identity to borrow: this process already has one, or it "
         "runs the shared host"
     )
-
-
-def _open_attachment(handle: str) -> Any:
-    from meiva.self.harness.attachment import open_attachment
-
-    return open_attachment(handle)
 
 
 def _registration_error(message: str) -> BaseException:

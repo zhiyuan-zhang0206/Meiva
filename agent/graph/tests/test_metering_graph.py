@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from meiva.sdk_surface import metering
+from meiva.sdk_surface import meiva_module, metering
 
 
 def test_a_plugin_load_is_undone_by_the_autouse_teardown(request: pytest.FixtureRequest) -> None:
@@ -19,7 +19,11 @@ def test_a_plugin_load_is_undone_by_the_autouse_teardown(request: pytest.Fixture
     bare_funnel = meiva.mcps.call_funnel.call_raw
 
     load_extensions(validate_state=plugin_state_schema)
-    metered = {fq for p, a, fq in metering.instrument_targets() if is_recorder(getattr(p, a))}
+    metered = {
+        fq
+        for p, a, fq in metering.read_surface(meiva_module()).routines
+        if is_recorder(getattr(p, a))
+    }
     assert metered, "the leak this guards is gone"
     assert is_recorder(meiva.mcps.call_funnel.call_raw)
 
@@ -27,4 +31,8 @@ def test_a_plugin_load_is_undone_by_the_autouse_teardown(request: pytest.Fixture
     assert installation is not None
     metering.uninstall(installation.metered)
     assert meiva.mcps.call_funnel.call_raw is bare_funnel
-    assert not [fq for p, a, fq in metering.instrument_targets() if is_recorder(getattr(p, a))]
+    assert not [
+        fq
+        for p, a, fq in metering.read_surface(meiva_module()).routines
+        if is_recorder(getattr(p, a))
+    ]

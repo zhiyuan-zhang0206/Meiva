@@ -137,7 +137,7 @@ def test_get_meiva_overview_advertises_installed_plugin_namespace() -> None:
     )
     fake_ns.ping.__doc__ = "Return pong."
 
-    undo = plugins.install_namespace("fake-plugin", "fake_late", fake_ns, {})
+    added = plugins.install_namespace("fake-plugin", "fake_late", fake_ns, {})
     try:
         overview = get_meiva_overview()
         assert "fake_late" in overview, (
@@ -145,7 +145,7 @@ def test_get_meiva_overview_advertises_installed_plugin_namespace() -> None:
             f"without a section would disappear). overview:\n{overview[:600]}"
         )
     finally:
-        undo()
+        plugins.uninstall(added)
 
 
 # meiva:note

@@ -16,6 +16,7 @@ from uuid import uuid4
 import pytest
 
 from base import paths
+from base.agents.context.clients import ClientSet
 from base.packages.plugins.enable_config import write_local
 from base.telemetry.tests.capture.event_capture import EmittedEvents
 from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
@@ -146,14 +147,12 @@ def test_load_extensions_installs_metering():
     from meiva.sdk_surface import extensions as _loader
     from meiva.sdk_surface.installation import installed
 
-    def expected_producer() -> object:
-        return object()
-
-    _loader.load_extensions(producer=expected_producer)
+    expected_clients = ClientSet()
+    _loader.load_extensions(clients=expected_clients)
 
     installation = installed()
     assert installation is not None
-    assert installation.producer is expected_producer
+    assert installation.clients is expected_clients
     assert installation.metered, "the recorder was installed over the surface"
 
 

@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-from collections.abc import Awaitable, Callable
 from contextlib import AsyncExitStack, suppress
 from pathlib import Path
 from typing import Any
@@ -161,9 +160,6 @@ async def dial_browser_mcp(
     *,
     attempts: int = CONNECT_ATTEMPTS,
     delay_s: float = CONNECT_DELAY_S,
-    open_unix_connection: Callable[
-        ..., Awaitable[tuple[asyncio.StreamReader, asyncio.StreamWriter]]
-    ] = asyncio.open_unix_connection,
 ) -> tuple[asyncio.StreamReader, asyncio.StreamWriter]:
     policy = Policy(
         max_attempts=attempts,
@@ -177,7 +173,7 @@ async def dial_browser_mcp(
     )
 
     async def once() -> tuple[asyncio.StreamReader, asyncio.StreamWriter]:
-        return await open_unix_connection(path=sock, limit=LINE_LIMIT)
+        return await asyncio.open_unix_connection(path=sock, limit=LINE_LIMIT)
 
     last: OSError | None = None
     try:
@@ -187,23 +183,18 @@ async def dial_browser_mcp(
     raise ConnectionError(f"browser-mcp daemon not reachable at {sock}: {last}")
 
 
+# meiva:note
+# Line-protocol connection to the browser-mcp service of `home` on `cdp_port` (no subprocess). Returns (session, stack); the caller owns the stack, and closing it drops the socket, which the service reads as the connection ending. The stack closes the session's CURRENT socket: on a desync the session re-dials internally, so the original writer may no longer be the live one.
 async def connect_browser_direct(
     home: Path,
+    cdp_port: int,
     *,
     attempts: int = CONNECT_ATTEMPTS,
     delay_s: float = CONNECT_DELAY_S,
 ) -> tuple[BrowserLineSession, AsyncExitStack]:
-    """Line-protocol connection to the browser-mcp service of `home` (no subprocess).
-
-    Returns (session, stack); the caller owns the stack — closing it drops the
-    socket, which the service reads as the connection ending. The stack closes
-    the session's CURRENT socket: on a desync the session re-dials internally,
-    so the original writer may no longer be the live one.
-    """
-    from base.config import settings
     from base.paths import chrome_mcp_socket
 
-    sock = str(chrome_mcp_socket(home, settings.services.browser_cdp_port))
+    sock = str(chrome_mcp_socket(home, cdp_port))
     reader, writer = await dial_browser_mcp(sock, attempts=attempts, delay_s=delay_s)
     session = BrowserLineSession(reader, writer, sock=sock)
     stack = AsyncExitStack()

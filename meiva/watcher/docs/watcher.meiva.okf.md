@@ -28,7 +28,7 @@ assuming they may be cut off at any moment and will not be re-run for you.
 - `cron(expr, message, *, timezone=None, end_time=None, name, notify=None) → int` — Periodic wake-up via 5-field cron expression. `end_time` sets expiry; it **defaults to now + 7 days** (standing cap, task #2617) — a longer schedule passes an explicit `end_time`. Calling `cron()` again with the same expression + timezone does **not** replace or renew anything — it starts another, independent session; kill the old one yourself (`meiva.shell.sessions.kill`) if you don't want both running. Returns session ID.
 - `launch(code, timeout, *, name, notify=None) → int` — Run custom Python code as watcher. Inside the code, call `meiva.agents.send_message(meiva.self.AGENT_ID, content)` to wake you. Force-stop after `timeout` (exit code 124).
 
-Omitted `notify` marks the shell-level send as a plain platform completion (`meiva/shell/background.py:notified_line`); the gateway resolves it against the target agent's `completion_notice_policy` (`all` default, or `hourly`) at delivery time, not at spawn — `hourly` retains every completion in its digest. Explicit `notify="always"` is baked into the shell command at spawn and overrides the policy for that one run.
+Omitted `notify` marks the shell-level send as a plain platform completion (`meiva/shell/background_plan.py:notified_line`); the gateway resolves it against the target agent's `completion_notice_policy` (`all` default, or `hourly`) at delivery time, not at spawn — `hourly` retains every completion in its digest. Explicit `notify="always"` is baked into the shell command at spawn and overrides the policy for that one run.
 
 ## What happens when a watcher's session ends
 
@@ -54,7 +54,7 @@ does not want to be woken again kills its watchers
 **Orphan governance (task #1726).** A watcher whose session ended without taking it along (a pty-sessions service crash, an external SIGKILL of the shell) is reparented to init with its session gone — still alive, still firing cron/at; 49 of 85 watcher processes on the fleet host were once such multi-generation orphans. The generated bootstrap arms an **orphan guard**: a daemon thread comparing `os.getppid()` against the boot-time parent every 5s, hard-exiting with code 125 on a mismatch, so session end → child death within seconds on every such path. This is the only thing standing between a dead session and a watcher that keeps firing forever — nothing external scans for or kills orphaned watcher processes any more.
 
 ## Key Dependencies
-- [[shell.meiva.okf.md]] — a watcher's underlying session IS an `meiva.shell.sessions` session: `meiva/watcher/spawn.py:run` uses `meiva.shell.sessions.create_session` + `meiva/shell/background.py` for notification (unrelated to `services/watchdog`)
+- [[shell.meiva.okf.md]] — a watcher's underlying session IS an `meiva.shell.sessions` session: `meiva/watcher/spawn.py:run` creates it on the agent's `ShellSessions` and uses `meiva/shell/background.py` for the log and launch file
 - `base/host/env/dotenv_boot.py:watcher_runner_env` validates an agent-profile launcher's runner-class DB login (with its `MEIVA_DB_GENERATION` marker when delivered) and runner Redis URLs before session allocation and passes them only to the watcher session. A secured default-home gateway refuses a launcher without that projection before creating a watcher; other homes and pure agent-runner units retain their child config source. The data-plane owner-URL guard remains the child-side boundary.
 
 ## Notes

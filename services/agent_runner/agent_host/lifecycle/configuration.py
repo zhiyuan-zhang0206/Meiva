@@ -4,7 +4,6 @@
 
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
 
 from base import paths
 from base.agents.context.clients import ClientSet
@@ -20,6 +19,7 @@ from base.native_process.loaded_commit import LoadedCommit
 from base.native_process.stop_timing import CANCEL_UNWIND_TIMEOUT_S
 from base.paths.home import resolve_meiva_home
 from base.telemetry.process_logging import init_gateway_process
+from meiva.boot import process_disable_entries
 from meiva.sdk_surface.installation import Installation
 from services.agent_runner.agent_host.pools import PoolBounds
 from services.agent_runner.agent_host.runtime import HostCachePolicy, HostPolicy, StallTiming
@@ -99,7 +99,7 @@ def host_machine(config: ConfigBoot) -> MachineIdentity:
 def load_installation(
     config: ConfigBoot,
     *,
-    producer: Callable[[], Any],
+    clients: ClientSet,
     load_extensions: Callable[..., object],
 ) -> Installation:
     from base.config import Settings
@@ -120,8 +120,9 @@ def load_installation(
         catalog=catalog,
         provider_keys=process_provider_keys(catalog),
         authority=authority,
-        producer=producer,
-        clock_factory=lambda: Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS),
+        clients=clients,
+        clock=Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS),
+        disabled_entries=process_disable_entries(),
     )
     installation = installed()
     if installation is None:

@@ -1,26 +1,18 @@
-"""Unit tests for `meiva.files.read / write / append / edit / glob / delete`.
-
-Use pytest's `tmp_path` fixture — each test gets an independent directory, automatically cleaned.
-
-Relative path behavior: does not depend on system cwd; by default resolves to the agent workspace
-(`$MEIVA_HOME/workspaces/<agent_id>`; conftest globally binds `_agent_id = 1`).
-When identity is not bound (pre-bootstrap, `_agent_id = None`), resolves to `$HOME`.
-`~/...` goes through expanduser and always points to $HOME. Absolute paths are unchanged.
-
-workspace mock: shared `workspace` fixture (meiva/tests/fixtures/workspace.py) explicitly pins
-`_agent_id=1` and points `MEIVA_HOME` to tmp_path, returns the resolution base
-`<tmp>/workspaces/1` (workspace_dir is created on demand, not pre-built).
-
-$HOME mock premise: `Path.home()` goes through `os.path.expanduser("~")` which uses the `$HOME` env
-(CPython current behavior). Pre-identity tests use `patch.dict(os.environ, {"HOME": ...})`
-to switch $HOME, paired with `assert Path.home() == ...` to lock that the mock is effective —
-if someday stdlib behavior changes (e.g. sandbox doesn't read $HOME) this assertion will blow up,
-indicating the mock path needs to be adjusted.
-"""
+# meiva:note
+# Unit tests for `meiva.files.read / write / append / edit / glob / delete`, over real files: each
+# test gets an independent `tmp_path`. Relative paths do not depend on the system cwd; by default
+# they resolve to the agent workspace (`$MEIVA_HOME/workspaces/<agent_id>`; conftest globally
+# binds `_agent_id = 1`), and before an identity is bound to `$HOME`. `~/...` goes through
+# expanduser and always points to `$HOME`; absolute paths are unchanged. The shared `workspace`
+# fixture pins `_agent_id=1`, points `MEIVA_HOME` at `tmp_path` and returns the resolution base
+# `<tmp>/workspaces/1` (created on demand). The `default_home` fixture gives the test a fake OS
+# user whose home is a temporary directory, which is how the pre-identity tests choose `$HOME`.
+# The commit and cleanup of an atomic write are `base.host.atomic_io`'s contract and are proved
+# there; these tests cover what `meiva.files` adds: symlink write-through, permission bits and
+# refusals.
 
 import os
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 
@@ -36,11 +28,10 @@ _skip_if_root = pytest.mark.skipif(
 
 
 @pytest.fixture
-def no_identity(monkeypatch: pytest.MonkeyPatch) -> None:
+def no_identity() -> None:
     """Simulate pre-bootstrap process (conftest's global `_agent_id = 1` is removed),
     relative path falls back to `$HOME` resolution."""
     pin_no_identity()
-    monkeypatch.delenv("MEIVA_AGENT_ID", raising=False)
 
 
 # ── read / write / delete basics ───────────────────────────────────────────
@@ -259,38 +250,6 @@ def test_write_replaces_an_existing_file_in_one_step(tmp_path: Path) -> None:
     assert _leftovers(tmp_path) == ["f.txt"]
 
 
-def test_write_failing_midway_keeps_the_old_file_and_leaves_no_temporary(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    target = tmp_path / "f.txt"
-    target.write_text("old content")
-
-    def broken_replace(self: Path, _target: object) -> Path:
-        raise OSError("disk went away")
-
-    monkeypatch.setattr(Path, "replace", broken_replace)
-    with pytest.raises(OSError, match="disk went away"):
-        meiva.files.write(str(target), "new content")
-    assert target.read_text() == "old content"
-    assert _leftovers(tmp_path) == ["f.txt"]
-
-
-def test_write_failing_while_writing_leaves_no_half_file(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """A failure after the temporary file exists but before it replaces anything: a new target
-    never appears, with or without a previous version."""
-
-    def exploding_fdopen(fd: int, *_args: object, **_kwargs: object) -> object:
-        os.close(fd)
-        raise OSError("no space left")
-
-    monkeypatch.setattr(os, "fdopen", exploding_fdopen)
-    with pytest.raises(OSError, match="no space left"):
-        meiva.files.write(str(tmp_path / "new.txt"), "x" * 1000)
-    assert _leftovers(tmp_path) == []
-
-
 def test_write_keeps_the_permission_bits_of_an_existing_file(tmp_path: Path) -> None:
     target = tmp_path / "script.sh"
     target.write_text("#!/bin/sh\n")
@@ -385,23 +344,20 @@ def test_relative_delete_resolves_to_workspace(workspace: Path) -> None:
     assert not (workspace / "rm.txt").exists()
 
 
-def test_relative_resolves_to_home_before_identity(no_identity: None, tmp_path: Path) -> None:
+def test_relative_resolves_to_home_before_identity(no_identity: None, default_home: Path) -> None:
     """Identity not bound (pre-bootstrap) → relative path falls back to `$HOME` resolution."""
-    (tmp_path / "foo.txt").write_text("home content")
-    with patch.dict(os.environ, {"HOME": str(tmp_path)}):
-        assert Path.home() == tmp_path  # mock lock: Path.home() truly uses $HOME env
-        assert meiva.files.read("foo.txt") == "home content"
-        meiva.files.write("out.txt", "hi")
-    assert (tmp_path / "out.txt").read_text() == "hi"
+    (default_home / "foo.txt").write_text("home content")
+    assert meiva.files.workspace_base() == default_home
+    assert meiva.files.read("foo.txt") == "home content"
+    meiva.files.write("out.txt", "hi")
+    assert (default_home / "out.txt").read_text() == "hi"
 
 
-def test_tilde_expanduser(tmp_path: Path) -> None:
+def test_tilde_expanduser(default_home: Path) -> None:
     """`~/foo.txt` goes through expanduser → `$HOME/foo.txt` — tilde always points to home,
     unaffected by workspace resolution."""
-    (tmp_path / "tilde.txt").write_text("via tilde")
-    with patch.dict(os.environ, {"HOME": str(tmp_path)}):
-        assert Path.home() == tmp_path  # mock lock
-        assert meiva.files.read("~/tilde.txt") == "via tilde"
+    (default_home / "tilde.txt").write_text("via tilde")
+    assert meiva.files.read("~/tilde.txt") == "via tilde"
 
 
 def test_system_cwd_does_not_affect_relative_path(

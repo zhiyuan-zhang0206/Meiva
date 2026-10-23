@@ -22,6 +22,7 @@ def test_launch_returns_the_same_handle_as_run_background(_agent_row: int) -> No
         assert isinstance(handle, SessionHandle)
         assert isinstance(handle.session_id, int)
         assert handle.output_path.endswith(".log")
+        assert ".shell_logs" in handle.output_path
         assert pathlib.Path(handle.output_path).exists()
         assert _is_live_watcher(handle.session_id, "test-handle")
     finally:

@@ -1,26 +1,18 @@
-import pytest
+from pathlib import Path
 
-from base.packages.composer_commands import Command, CommandCatalog
+from meiva import agents
 
 
-def test_agents_commands_lists_name_desc_hint_no_body(monkeypatch: pytest.MonkeyPatch):
-    from meiva import agents
+def test_agents_commands_lists_name_desc_hint_no_body(unit_home: Path):
+    commands = unit_home / "commands"
+    commands.mkdir()
+    (commands / "recap.md").write_text(
+        "---\ndescription: recap it\ninstruction-hint: a focus\n---\nSECRET BODY\n",
+        encoding="utf-8",
+    )
 
-    def discover(_catalog: CommandCatalog) -> list[Command]:
-        return [
-            {
-                "name": "recap",
-                "description": "recap it",
-                "instruction_hint": "a focus",
-                "body": "SECRET BODY",
-                "skill_target": None,
-            }
-        ]
+    [info] = [command for command in agents.commands() if command.name == "recap"]
 
-    monkeypatch.setattr(CommandCatalog, "discover", discover)
-    out = agents.commands()
-    assert len(out) == 1
-    info = out[0]
     assert (info.name, info.description, info.instruction_hint) == ("recap", "recap it", "a focus")
     assert not hasattr(info, "body")
     assert str(info) == "/recap a focus  — recap it"

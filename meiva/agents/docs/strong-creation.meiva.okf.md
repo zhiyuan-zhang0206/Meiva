@@ -32,6 +32,8 @@ The transport retries connection failures and ambiguous outcomes (a lost
 read/write response, 429/502/503/504) under the same key and body; the gateway
 replays the original birth, so a retry never creates a twin. A caller may also
 retry the same intent explicitly with the same key.
+The SDK builds this request as a value
+([[meiva/gateway_client/docs/gateway-client.meiva.okf.md]]).
 
 ## Scope and result
 

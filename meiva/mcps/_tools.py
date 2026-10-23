@@ -2,10 +2,8 @@
 proxy, so a public submodule would shadow the server of the same name; only the `meiva/mcps` package
 and its tests import it (the metering wrapper reaches it through `meiva.mcps.call_funnel`)."""
 
-# `meiva/mcps/__init__.py` is the facade (the agent-visible helpers and the module `__getattr__`);
-# it builds a `ToolSource` from the bound context's daemon client and hands it to everything
-# here, so a test passes a source with a fake daemon client, a recording cache and a fixed
-# clock.
+# meiva:note
+# `meiva/mcps/__init__.py` is the facade (the agent-visible helpers and the module `__getattr__`); it reads the bound context once, builds a `ToolSource` of plain values from it and hands it to everything here, so a test passes a source over a real daemon socket (or a client of its own), a cache directory under `tmp_path` and the identity it wants.
 
 from __future__ import annotations
 
@@ -14,12 +12,12 @@ import json
 import keyword
 import time
 import types
-from collections.abc import Callable
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol, cast
 
+from base.agents.context.identity import AgentIdentity
 from meiva.mcps.config import MCPCallError, MCPConnectError, ToolInfo
 from meiva.security import scan_content
 
@@ -29,21 +27,31 @@ __all__ = [
     "ServerProxy",
     "ToolCache",
     "ToolSource",
+    "cached_tools",
     "call_raw",
     "call_text",
     "list_tools",
     "make_tool_callable",
+    "resolve_agent_id",
     "schema_to_signature",
 ]
 
 
+# meiva:note
+# The two daemon calls the tools make; `agent_id` is the calling agent the daemon forwards to gated servers (None for a process with no agent).
 class RemoteClient(Protocol):
-    """The two daemon calls the tools make."""
-
-    def list_tools(self, server: str, *, timeout_seconds: float) -> list[ToolInfo]: ...
+    def list_tools(
+        self, server: str, *, timeout_seconds: float, agent_id: int | None
+    ) -> list[ToolInfo]: ...
 
     def call_tool(
-        self, server: str, tool: str, args: dict[str, Any], *, timeout_seconds: float
+        self,
+        server: str,
+        tool: str,
+        args: dict[str, Any],
+        *,
+        timeout_seconds: float,
+        agent_id: int | None,
     ) -> dict[str, Any]: ...
 
 
@@ -55,33 +63,59 @@ class ToolCache(Protocol):
     def write(self, server: str, tools: list[ToolInfo]) -> None: ...
 
 
+# meiva:note
+# What a server proxy and its tools run against; values only. `remote` dials the daemon on its first request (the SDK never starts servers), `timeout_seconds` bounds each request, `cache` keeps tool metadata, and `identity` is the context's agent identity: its agent id rides on every request, and a borrowed lease is revalidated at each use.
 @dataclass(frozen=True)
 class ToolSource:
-    """What a server proxy and its tools run against; dependencies only.
-
-    `remote` and `timeout_seconds` are read at each call (the daemon client is built on first
-    use and the timeout is a live setting), `cache` keeps tool metadata, and
-    `validate_identity` is the external-identity check made before a tool call.
-    """
-
-    remote: Callable[[], RemoteClient]
-    timeout_seconds: Callable[[], float]
+    remote: RemoteClient
+    timeout_seconds: float
     cache: ToolCache
-    validate_identity: Callable[[], object]
+    identity: AgentIdentity | None
 
 
+# meiva:note
+# The cached tool list of `document` (the parsed cache file), or None when the entry is unusable: not an object, no usable `cached_at`, older than `ttl_s` at `now`, or a `tools` field that is not a list of objects. Missing fields of a tool fill with empty values.
+def cached_tools(document: object, *, now: float, ttl_s: float) -> list[ToolInfo] | None:
+    if not isinstance(document, dict):
+        return None
+    data = cast(dict[str, Any], document)
+    cached_at = data.get("cached_at")
+    if cached_at is None:
+        return None
+    try:
+        age = now - cached_at
+    except (TypeError, OverflowError):
+        return None
+    if age > ttl_s:
+        return None
+    tools = data.get("tools")
+    if not isinstance(tools, list):
+        return None
+    result: list[ToolInfo] = []
+    for t in cast(list[object], tools):
+        if not isinstance(t, dict):
+            return None
+        item = cast(dict[str, Any], t)
+        result.append(
+            {
+                "name": item.get("name", ""),
+                "description": item.get("description", ""),
+                "input_schema": item.get("input_schema", {}),
+            }
+        )
+    return result
+
+
+# meiva:note
+# Tool metadata cache on disk: one JSON file per server under `directory`.
 @dataclass(frozen=True)
 class DiskCache:
-    """Tool metadata cache on disk: one JSON file per server under `directory()`."""
-
-    directory: Callable[[], Path]
-    now: Callable[[], float] = time.time
+    directory: Path
     ttl_s: float = 86400.0  # 24h
 
     def _path(self, server: str) -> Path:
-        cache_dir = self.directory()
-        cache_dir.mkdir(parents=True, exist_ok=True)
-        return cache_dir / f"{server}.json"
+        self.directory.mkdir(parents=True, exist_ok=True)
+        return self.directory / f"{server}.json"
 
     def read(self, server: str) -> list[ToolInfo] | None:
         """Read disk cache for server tools. Returns None if expired or missing."""
@@ -92,47 +126,36 @@ class DiskCache:
             data = json.loads(path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
             return None
-        cached_at = data.get("cached_at")
-        if cached_at is None:
-            return None
-        try:
-            age = self.now() - cached_at
-        except (TypeError, OverflowError):
-            return None
-        if age > self.ttl_s:
-            return None
-        tools = data.get("tools")
-        if not isinstance(tools, list):
-            return None
-        result: list[ToolInfo] = []
-        for t in cast(list[object], tools):
-            if not isinstance(t, dict):
-                return None
-            item = cast(dict[str, Any], t)
-            result.append(
-                {
-                    "name": item.get("name", ""),
-                    "description": item.get("description", ""),
-                    "input_schema": item.get("input_schema", {}),
-                }
-            )
-        return result
+        return cached_tools(data, now=time.time(), ttl_s=self.ttl_s)
 
     def write(self, server: str, tools: list[ToolInfo]) -> None:
         """Write tool list to disk cache. Best-effort: errors are silently ignored."""
         path = self._path(server)
         data = {
             "tools": tools,
-            "cached_at": self.now(),
+            "cached_at": time.time(),
         }
         with suppress(OSError):
             path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
+# meiva:note
+# The agent id the process's work is attributed to: a borrowed lease is revalidated on each use and, while valid, takes precedence; an invalid lease raises instead of falling back to the identity's own id. None when the process has no identity or no agent.
+def resolve_agent_id(identity: AgentIdentity | None) -> int | None:
+    if identity is None:
+        return None
+    if identity.lease is not None:
+        return identity.lease.validate()
+    return identity.agent_id
+
+
 def list_tools(source: ToolSource, server: str) -> list[ToolInfo]:
     """Load daemon metadata, using the disk cache on connection failure."""
+    agent_id = resolve_agent_id(source.identity)
     try:
-        tools = source.remote().list_tools(server, timeout_seconds=source.timeout_seconds())
+        tools = source.remote.list_tools(
+            server, timeout_seconds=source.timeout_seconds, agent_id=agent_id
+        )
     except (MCPConnectError, OSError):
         cached = source.cache.read(server)
         if cached is None:
@@ -144,8 +167,10 @@ def list_tools(source: ToolSource, server: str) -> list[ToolInfo]:
 
 def call_raw(source: ToolSource, server: str, tool: str, **args: Any) -> dict[str, Any]:
     """Call through the daemon once; an unknown result is never replayed."""
-    source.validate_identity()
-    return source.remote().call_tool(server, tool, args, timeout_seconds=source.timeout_seconds())
+    agent_id = resolve_agent_id(source.identity)
+    return source.remote.call_tool(
+        server, tool, args, timeout_seconds=source.timeout_seconds, agent_id=agent_id
+    )
 
 
 def call_text(source: ToolSource, server: str, tool: str, **args: Any) -> str:

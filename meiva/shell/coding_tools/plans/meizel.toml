@@ -1,0 +1,13 @@
+exports = ["claude_launch.py", "claude_screen.py", "codex_screen.py", "first_run.py", "launch_request.py", "lineage.py", "pacing.py"]
+
+[uses]
+"claude_launch.py" = ["claude_screen.py", "launch_request.py", "pacing.py"]
+
+[purity]
+"claude_launch.py" = "strict"
+"claude_screen.py" = "strict"
+"codex_screen.py" = "strict"
+"first_run.py" = "strict"
+"launch_request.py" = "strict"
+"lineage.py" = "strict"
+"pacing.py" = "strict"

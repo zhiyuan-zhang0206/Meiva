@@ -1,25 +1,25 @@
-"""Shared fixtures and helpers for the meiva.mcps test files; split from meiva/mcps/tests/test_mcps.py (task #4922)."""
+# meiva:note
+# Shared fixtures and builders for the meiva.mcps test files. Tool sources run over a real stub daemon socket (`stub_daemon.py`); the wire builders below shape what that daemon answers.
+from __future__ import annotations
 
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
-from unittest.mock import MagicMock
 
 import pytest
 
-from base.config import settings
+from base.agents.context.identity import AgentIdentity
 from meiva.mcps._clients import McpClients
-from meiva.mcps._tools import RemoteClient, ToolSource
+from meiva.mcps._remote import RemoteMCPClient
+from meiva.mcps._tools import RemoteClient, ToolCache, ToolSource
 from meiva.mcps.config import ToolInfo
+from meiva.mcps.tests.stub_daemon import Respond, StubDaemon, ok_line
 
 
-def local_mcp_clients(timeout_seconds: Callable[[], float] | None = None) -> McpClients:
-    """This test's own MCP clients (a daemon client per test)."""
-    return McpClients(
-        timeout_seconds
-        if timeout_seconds is not None
-        else lambda: settings.sandbox.mcp_connect_timeout_seconds
-    )
+# meiva:note
+# This test's own MCP clients (a daemon client per test) for the daemon socket at `socket_path`.
+def local_mcp_clients(socket_path: Path, timeout_seconds: float = 15.0) -> McpClients:
+    return McpClients(socket_path, lambda: timeout_seconds)
 
 
 class NoCache:
@@ -47,98 +47,71 @@ class StoredTools:
         return None
 
 
+# meiva:note
+# A source over the given daemon client: no cache unless one is passed, no identity unless `identity` is.
 def tool_source(
-    remote: Callable[[], RemoteClient],
+    remote: RemoteClient,
     *,
-    timeout_seconds: Callable[[], float] = lambda: 5.0,
-    cache: object | None = None,
-    validate_identity: Callable[[], object] = lambda: None,
+    timeout_seconds: float = 5.0,
+    cache: ToolCache | None = None,
+    identity: AgentIdentity | None = None,
 ) -> ToolSource:
-    """A source over the given daemon client: no cache unless one is passed, no identity check
-    unless `validate_identity` is."""
     return ToolSource(
         remote=remote,
         timeout_seconds=timeout_seconds,
-        cache=cache if cache is not None else NoCache(),  # pyright: ignore[reportArgumentType]
-        validate_identity=validate_identity,
+        cache=cache if cache is not None else NoCache(),
+        identity=identity,
     )
 
 
+# meiva:note
+# The machine-level `mcp.json` of this test's own home; nothing is written to it yet.
 @pytest.fixture
-def fake_config(unit_home: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """Point meiva_home() to tmpdir, drop mcp.json in it, do not touch user's real ~/.meiva/mcp.json.
-
-    Patches builtin_mcp_paths to list so tests that expect empty-or-known
-    configs are not surprised by the repo's mcps/chrome/.mcp.json built-in.
-    """
-    import base.packages.mcp_config as _cfg
-
-    monkeypatch.setattr(_cfg, "builtin_mcp_paths", list)
+def machine_config(unit_home: Path) -> Path:
     return unit_home / "mcp.json"
 
 
-class _DaemonFixture:
-    def __init__(self, session: MagicMock) -> None:
-        self.session = session
-
-    def list_tools(self, server: str, *, timeout_seconds: float) -> list[ToolInfo]:
-        return [
-            {
-                "name": t.name,
-                "description": t.description or "",
-                "input_schema": t.input_schema or {},
-            }
-            for t in self.session.list_tools().tools
-        ]
-
-    def call_tool(
-        self, server: str, tool: str, args: dict[str, Any], *, timeout_seconds: float
-    ) -> dict[str, Any]:
-        result = self.session.call_tool(tool, args or None)
-        return {
-            "content": [c.model_dump() for c in result.content],
-            "isError": bool(result.is_error),
-            "structuredContent": result.structured_content,
-        }
+# meiva:note
+# One tool as the daemon lists it.
+def tool_wire(name: str, description: str = "", schema: dict[str, Any] | None = None) -> ToolInfo:
+    return {"name": name, "description": description, "input_schema": schema or {}}
 
 
-@pytest.fixture
-def mock_session() -> MagicMock:
-    """Simulate the daemon's wire result; never construct a local SDK session.
-
-    `session.source` is the `ToolSource` over it: a daemon client backed by the mock and no
-    cache, ready to hand to `ServerProxy` / `call_raw`.
-    """
-    session = MagicMock(name="MCPSession")
-    session.source = tool_source(lambda: _DaemonFixture(session))
-    return session
-
-
-def content_text(text: str) -> MagicMock:
-    c = MagicMock()
-    c.model_dump = MagicMock(return_value={"type": "text", "text": text})
-    return c
+# meiva:note
+# A tool result of text blocks, as the daemon sends it.
+def text_result(
+    *texts: str, is_error: bool = False, structured: dict[str, Any] | None = None
+) -> dict[str, Any]:
+    return {
+        "content": [{"type": "text", "text": text} for text in texts],
+        "isError": is_error,
+        "structuredContent": structured,
+    }
 
 
-def content_image(b64: str) -> MagicMock:
-    c = MagicMock()
-    c.model_dump = MagicMock(return_value={"type": "image", "data": b64, "mimeType": "image/png"})
-    return c
+# meiva:note
+# A tool result with an image block after any text blocks.
+def image_result(b64: str, *texts: str, structured: dict[str, Any] | None = None) -> dict[str, Any]:
+    result = text_result(*texts, structured=structured)
+    result["content"].append({"type": "image", "data": b64, "mimeType": "image/png"})
+    return result
 
 
-def call_tool_result(
-    content: list, *, is_error: bool = False, structured: dict | None = None
-) -> MagicMock:
-    r = MagicMock()
-    r.content = content
-    r.is_error = is_error
-    r.structured_content = structured
-    return r
+# meiva:note
+# A stub daemon listing `tools` and answering each `call_tool` with `results[tool]`, with the production client dialing it.
+def canned_daemon(
+    start: Callable[[Respond], StubDaemon],
+    *,
+    tools: list[ToolInfo] | None = None,
+    results: dict[str, dict[str, Any]] | None = None,
+) -> tuple[StubDaemon, RemoteMCPClient]:
+    listed = tools or []
+    answers = results or {}
 
+    def respond(request: dict[str, Any]) -> list[bytes]:
+        if request["method"] == "list_tools":
+            return [ok_line(request, listed)]
+        return [ok_line(request, answers[request["params"]["tool"]])]
 
-def make_tool(name: str, description: str = "", schema: dict | None = None) -> MagicMock:
-    t = MagicMock(spec=["name", "description", "input_schema"])
-    t.name = name
-    t.description = description
-    t.input_schema = schema or {}
-    return t
+    daemon = start(respond)
+    return daemon, RemoteMCPClient(daemon.path)

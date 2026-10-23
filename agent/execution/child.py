@@ -437,12 +437,7 @@ def run_child(
     )
     from meiva.boot import initialize_context
 
-    initialize_context(
-        meiva.context,
-        config=config,
-        clock_factory=clock_factory,
-        producer=meiva.context.clients.event_pipeline,
-    )
+    initialize_context(meiva.context, config=config, clients=meiva.context.clients)
     from meiva.sdk_surface import settings as sdk_settings
 
     apply_plugin_overlay(birth, overlay)
