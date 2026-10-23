@@ -29,12 +29,14 @@ from base.agents.sdk import call_policy
 from base.agents.sdk import telemetry as sdk_usage_telemetry
 from base.agents.sdk.tally import SdkCallTally
 from base.cluster.machine import MachineIdentity
+from base.packages.plugin_config_images import DiskPluginConfigImages
 from base.packages.plugins.extensions import (
     ExtensionRegistry,
     PluginContributions,
     SdkMember,
     SdkWrap,
 )
+from base.paths.home import resolve_meiva_home
 from base.telemetry.tests.capture.event_capture import EmittedEvents
 from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
 from meiva.sdk_surface import install, metering, process_context
@@ -508,7 +510,9 @@ async def test_plugin_wrap_preserves_awaited_single_event(
         )
     )
     try:
-        install.install(registry)  # the recorder goes on last, over the plugin's wrap
+        install.install(
+            registry, config_images=DiskPluginConfigImages(resolve_meiva_home())
+        )  # the recorder goes on last, over the plugin's wrap
         call = meiva.self.review_async_test
         assert inspect.iscoroutinefunction(call)
         calls.clear()
@@ -675,7 +679,7 @@ def test_plugin_reload_and_multi_call_wrap_have_one_final_recorder(
         )
     )
     for _ in range(2):
-        install.install(registry)
+        install.install(registry, config_images=DiskPluginConfigImages(resolve_meiva_home()))
         with _execution_tally() as tally:
             assert cast(Callable[[], int], meiva.self.multi_probe_test)() == 4
         assert tally.snapshot() == {"self.multi_probe_test": 1}

@@ -12,7 +12,9 @@ from agent.process_boot import apply_per_agent_eval_isolation
 from base.agents.context import MeivaContext
 from base.agents.context.identity import AgentIdentity
 from base.config import settings
+from base.packages.plugin_config_images import DiskPluginConfigImages
 from base.packages.plugins.extensions import ExtensionRegistry
+from base.paths.home import resolve_meiva_home
 from meiva.sdk_surface import install, process_context
 from meiva_builtins.plugins.meiva_memory import plugin
 
@@ -24,7 +26,10 @@ def _apply() -> None:
 
 
 def isolated() -> None:
-    install.install(ExtensionRegistry((("meiva_memory", plugin.contribute()),)))
+    install.install(
+        ExtensionRegistry((("meiva_memory", plugin.contribute()),)),
+        config_images=DiskPluginConfigImages(resolve_meiva_home()),
+    )
     meiva.tasks = SimpleNamespace(list=list)  # pyright: ignore[reportAttributeAccessIssue]
     meiva.__all_for_meiva__.append("tasks")
 
@@ -51,7 +56,10 @@ def isolated() -> None:
 
 
 def network_allowlist() -> None:
-    install.install(ExtensionRegistry((("meiva_memory", plugin.contribute()),)))
+    install.install(
+        ExtensionRegistry((("meiva_memory", plugin.contribute()),)),
+        config_images=DiskPluginConfigImages(resolve_meiva_home()),
+    )
     os.environ["MEIVA_AGENT_ID"] = "418"
     process_context.bind_context(MeivaContext(identity=AgentIdentity(418, True)))
     settings.agent.eval_isolation = True
@@ -64,7 +72,10 @@ def network_allowlist() -> None:
 
 
 def off() -> None:
-    install.install(ExtensionRegistry((("meiva_memory", plugin.contribute()),)))
+    install.install(
+        ExtensionRegistry((("meiva_memory", plugin.contribute()),)),
+        config_images=DiskPluginConfigImages(resolve_meiva_home()),
+    )
     original_path = meiva.memory.PATH
     settings.agent.eval_isolation = False
     _apply()

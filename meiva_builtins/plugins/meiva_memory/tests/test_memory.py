@@ -17,7 +17,9 @@ import pytest
 
 import meiva
 from base.agents.context.gateway_client.memory_search import MemorySearchResult
+from base.packages.plugin_config_images import DiskPluginConfigImages
 from base.packages.plugins.extensions import ExtensionRegistry
+from base.paths.home import resolve_meiva_home
 from meiva.gateway_client import use_client
 from meiva.sdk_surface import install
 from meiva_builtins.plugins.meiva_memory import plugin as memory_plugin
@@ -34,7 +36,10 @@ def _install_memory_sdk(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
         return call_policy.SamplingPolicy()
 
     monkeypatch.setattr(call_policy, "policy", _policy_for_test)
-    install.install(ExtensionRegistry((("meiva_memory", memory_plugin.contribute()),)))
+    install.install(
+        ExtensionRegistry((("meiva_memory", memory_plugin.contribute()),)),
+        config_images=DiskPluginConfigImages(resolve_meiva_home()),
+    )
     yield
     install.uninstall()
 

@@ -56,7 +56,7 @@ Conversation, Conduct and Capabilities groups.
 ## The SDK install
 
 `meiva` is a singleton module that agent code reaches by attribute access, so it cannot be passed around as a value; its
-surface installation is concentrated in `meiva/sdk_surface/install.py:install(registry)`. The execution bootstrap separately initializes the disposable child's `context`, `state` and `state_update` slots before agent code runs. Per plugin, in
+surface installation is concentrated in `meiva/sdk_surface/install.py:install(registry, config_images=...)`. The execution bootstrap separately initializes the disposable child's `context`, `state` and `state_update` slots before agent code runs. Per plugin, in
 registry (plugin name) order: namespaces, members, expansions, wraps (a target may be a namespace or member just added),
 skill sources, flags, config. Only explicit declaration refusals (`RegisterNamespaceError`,
 `WrapTargetError`, `PluginFlagError`, config `SchemaDriftError` / `InvalidConfigData`) isolate one plugin:

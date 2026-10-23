@@ -34,6 +34,8 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+from base.packages.plugin_config_contracts import PluginConfigImages
+from base.packages.plugin_config_images import DiskPluginConfigImages
 from base.packages.plugins import enable_config as plugins_cfg
 from base.packages.plugins import load_report
 from base.packages.plugins.config_face import CONFIG_FACE
@@ -48,6 +50,7 @@ from base.packages.plugins.loading.discovery import (
 )
 from base.packages.plugins.loading.plugin_loader import safe_load_plugin_module
 from base.packages.plugins.loading.registry import ALL_FACES, SURFACE_FACES, build_registry
+from base.paths.home import resolve_meiva_home
 
 
 def _load_face(
@@ -76,6 +79,7 @@ class LoadedExtensions:
 
     config: plugins_cfg.PluginsConfig
     registry: ExtensionRegistry
+    config_images: PluginConfigImages
 
 
 def import_faces(
@@ -98,6 +102,7 @@ def import_faces(
     ``report`` receives each contained failure instead of the canonical reporter (log + telemetry);
     `meiva plugins verify` passes a collector, so the failures come back as values.
     """
+    config_images = DiskPluginConfigImages(resolve_meiva_home().resolve())
     discovered, config = discovered_and_config(report)
 
     for name in sorted(config.plugins):
@@ -121,7 +126,7 @@ def import_faces(
     registry = build_registry(
         SURFACE_FACES if surface else ALL_FACES, report, validate_state=validate_state
     )
-    return LoadedExtensions(config, registry)
+    return LoadedExtensions(config, registry, config_images)
 
 
 def load_agent_faces() -> None:
