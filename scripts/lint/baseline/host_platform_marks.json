@@ -4,6 +4,6 @@
   "is_macos()": 2,
   "os.name": 1,
   "pytest.importorskip(...)": 1,
-  "shutil.which(...)": 36,
+  "shutil.which(...)": 35,
   "sys.platform": 41
 }
