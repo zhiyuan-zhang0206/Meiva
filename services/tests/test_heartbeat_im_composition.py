@@ -13,6 +13,7 @@ from unittest.mock import Mock, patch
 
 import pytest
 
+from base.clock import Clock
 from base.cluster.machine import MachineIdentity
 from base.config import ConfigBoot
 from base.db import Database
@@ -95,6 +96,7 @@ def test_entry_retains_one_gate_for_work_and_lazy_log_database(
         database: Callable[[], Database],
         image: LoadedCommit,
         machine: MachineIdentity,
+        clock: Clock,
     ) -> None:
         assert machine is pipeline.call_args.kwargs["machine"]
         await work(process_config=process_config, runtime=runtime, database=database, image=image)
@@ -152,6 +154,7 @@ def test_work_failure_keeps_the_original_exception_and_exit_status(
         database: Callable[[], Database],
         image: LoadedCommit,
         machine: MachineIdentity,
+        clock: Clock,
     ) -> None:
         assert machine is pipeline.call_args.kwargs["machine"]
         await work(process_config=process_config, runtime=runtime, database=database, image=image)

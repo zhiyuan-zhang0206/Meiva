@@ -1,8 +1,9 @@
 exports = ["daemon.py", "station_probe.py"]
 
 [uses]
-"daemon.py" = ["__init__.py", "completion_digest.py", "liveness.py"]
-"tests" = ["__init__.py", "completion_digest.py", "daemon.py", "liveness.py", "station_probe.py"]
+"daemon.py" = ["__init__.py", "completion_digest.py", "liveness.py", "loops.py"]
+"loops.py" = ["liveness.py"]
+"tests" = ["__init__.py", "completion_digest.py", "daemon.py", "liveness.py", "loops.py", "station_probe.py"]
 
 [purity]
 "__init__.py" = "strict"

@@ -92,3 +92,6 @@ boundaries. Business-specific configuration slices keep their existing readers.
 
 Remote station configuration, authenticated outcomes and fail-open policy are
 owned by [[services/wake/heartbeat/docs/station-probe.meiva.okf.md|Station probe]].
+
+Round ownership, pacing, backoff clocks and failure policy are described in
+[[services/wake/heartbeat/docs/dispatch-round.meiva.okf.md|Heartbeat dispatch rounds]].
