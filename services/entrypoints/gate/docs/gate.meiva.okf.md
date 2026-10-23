@@ -65,3 +65,9 @@ without replacing the transport or a module constant. The gateway URL builder
 also receives its configured port explicitly, preserving reachable-host and
 IPv6 formatting. Product tests use an actual isolated unit home, including the
 leftover retired update marker; that marker cannot change live Gate decisions.
+
+The executable receives its concrete `ConfigBoot` owner. Its wrapper only
+constructs the owner; argument validation still precedes image capture, which
+precedes that owner's boot and lazy machine binding. Other business settings
+readers retain their existing sources. Root tests pass an owned configuration
+snapshot while retaining real startup, primary-error and cleanup observations.

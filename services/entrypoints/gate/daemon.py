@@ -405,7 +405,7 @@ def _serve_http(args: argparse.Namespace, *, local_host: Callable[[], str]) -> N
             primary.add_note(f"Gate HTTP close also failed: {cleanup!r}")
 
 
-def main(argv: Sequence[str]) -> None:
+def main(argv: Sequence[str], *, process_config: ConfigBoot) -> None:
     parser = argparse.ArgumentParser(description="Fleet UI entry service")
     parser.add_argument("--port", type=int, default=None, help="bind port (default: entry port)")
     parser.add_argument("--static-dir", type=Path, default=None, help="static pages directory")
@@ -422,9 +422,8 @@ def main(argv: Sequence[str]) -> None:
     from base.telemetry.process_logging import init_gateway_process
 
     image = LoadedCommit.capture()
-    config = ConfigBoot()
-    config.boot()
-    machine = machine_from_boot(config)
+    process_config.boot()
+    machine = machine_from_boot(process_config)
     gate = ProcessDbGate(process="gate", version=CodeVersion(image).get)
     database = partial(
         Database.from_settings,
@@ -458,4 +457,4 @@ if __name__ == "__main__":
     from base.log import prepare_process_logging
 
     prepare_process_logging()
-    main(sys.argv[1:])
+    main(sys.argv[1:], process_config=ConfigBoot())
