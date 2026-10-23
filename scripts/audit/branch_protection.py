@@ -24,11 +24,12 @@ import yaml
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 TRUNK_FILE = _REPO_ROOT / ".trunk" / "trunk.yaml"
+# meiva:note
 # P2 ruling (2026-09-02): the branch-protection admission gate is the three
 # suite aggregators. Amended 2026-09-13 (task #3207): the docs-only gate
 # "doc lints (pre-commit family)" joined the admission set once the docs-only
 # classify gap was closed by #2302 and the check was promoted to a required
-# context. The queue TESTING gate lives in trunk.yaml (13 statuses) and is
+# context. The queue TESTING gate lives in trunk.yaml and is
 # audited separately by trunk_gate_findings().
 _ADMISSION_CHECKS = frozenset(
     {

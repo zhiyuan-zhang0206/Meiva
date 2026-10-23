@@ -1,5 +1,14 @@
 # A PR may not silently resurrect lines main deleted in the last 30 days
 
+## Status: retired on 2026-10-23
+
+The maintainer directed retirement of this textual history check. PR #6776
+removed its required Trunk queue status before the reporting job was deleted.
+The CI job, checker, dedicated tests and current convention have now been
+removed. No replacement history check was introduced. The record below retains
+the original incident, decision and limitations as historical evidence; current
+contributions follow [the contributor workflow](../../../contributing.md).
+
 ## Context
 
 #4245 (6ecfe14c3) deleted `MEIVA_DELIVERY_WATCHDOG_ALERT_GRACE_SECONDS` and the `delivery_watchdog_fields`
