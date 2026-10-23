@@ -3,8 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable, Collection
-from typing import Any
+from collections.abc import Collection
 
 from psycopg_pool import ConnectionPool
 
@@ -29,8 +28,6 @@ async def launch_agent_op(
     *,
     catalog: ModelCatalog,
     local_machine: str,
-    validate_model_fn: Callable[..., Any] | None = None,
-    publish_wake_fn: Callable[[Database, EventBus, int, str], object] | None = None,
 ) -> SpawnedAgent:
     """Validate a gateway-created row and wake its host without changing identity.
 
@@ -40,21 +37,17 @@ async def launch_agent_op(
     """
     # Lazy import: the package door re-exports this module, so a module-level
     # import of the door would be circular.
-    if validate_model_fn is None:
-        from base.lm.factory import validate_model_config
-
-        validate_model_fn = validate_model_config
+    from base.lm.factory import validate_model_config
 
     await asyncio.to_thread(
-        validate_model_fn,
+        validate_model_config,
         catalog=catalog,
         llm_override=settings.lm.llm_override,
         model=settings.lm.llm_model,
         config=resolve_agent_config_pins(body.config, body.birth_config),
     )
     await asyncio.to_thread(validate_launch_row, db_pool, body, local_machine=local_machine)
-    publish_wake = publish_wake_fn or publish_inbound_wake
-    publish_wake(db, bus, body.agent_id, "0")
+    publish_inbound_wake(db, bus, body.agent_id, "0")
     return SpawnedAgent(id=body.agent_id)
 
 
@@ -94,19 +87,14 @@ def spawn_prechecks_blocking(
     *,
     catalog: ModelCatalog,
     authority: ConfigAuthority,
-    validate_spawn_model_fn: Callable[..., Any] | None = None,
-    checkpoint_id_fn: Callable[..., str | None] | None = None,
 ) -> str | None:
     """Sync spawn pre-checks — via to_thread: model-config validation (may read
     provider API keys) + fork checkpoint lookup. Returns the fork checkpoint
     (None for a plain spawn)."""
-    if validate_spawn_model_fn is None:
-        from base.agents.model.model_config import validate_spawn_model_config
-
-        validate_spawn_model_fn = validate_spawn_model_config
+    from base.agents.model.model_config import validate_spawn_model_config
 
     with db_pool.connection() as conn, conn.cursor() as cur:
-        validate_spawn_model_fn(
+        validate_spawn_model_config(
             cur,
             body.config,
             body.fork_from,
@@ -116,9 +104,8 @@ def spawn_prechecks_blocking(
         )
     fork_checkpoint: str | None = None
     if body.fork_from is not None:
-        read_checkpoint = checkpoint_id_fn or latest_checkpoint_id
         with db_pool.connection() as conn, conn.cursor() as cur:
-            fork_checkpoint = read_checkpoint(cur, body.fork_from)
+            fork_checkpoint = latest_checkpoint_id(cur, body.fork_from)
         if fork_checkpoint is None:
             raise ForkSourceEmpty(
                 f"agent {body.fork_from} has no checkpoint — it may not have run any LLM/exec step yet"

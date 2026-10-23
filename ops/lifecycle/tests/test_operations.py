@@ -9,22 +9,25 @@ endpoint smoke tests live in tests/components/gateway/test_cluster_endpoints.py.
 
 from __future__ import annotations
 
+import sys
+from pathlib import Path
 from typing import cast
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock
 
 import psycopg
 import pytest
 from psycopg_pool import ConnectionPool
 from pydantic import ValidationError
+from redis.client import PubSub
 
 from base.agents.messages.inbound import InboundKind
-from base.api_contracts.agent_contract import ResurrectResult, TerminateResult
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
+from base.host.proc import run_bounded
 from base.lm.catalog import ModelCatalog
 from base.packages.plugin_providers import build_model_catalog
 from ops import lifecycle
@@ -32,7 +35,6 @@ from ops.lifecycle import launch
 from ops.rpc_schemas import (
     RestartAgentRequest,
     ResurrectAgentRequest,
-    ResurrectAgentResponse,
     SpawnAgentRequest,
     TerminateAgentRequest,
 )
@@ -73,34 +75,22 @@ class TestRestartAgentRequestConfigOverlay:
     """Restart overlays fail at both HTTP and runner schema boundaries."""
 
     @pytest.mark.parametrize("profile", ["gateway", "runner"])
-    def test_accepts_agent_domain_overlay_in_boundary_profiles(self, profile: str) -> None:
-        from base.config.profiles import PROCESS_PROFILES, ProcessProfile
-
-        assert "agent" not in PROCESS_PROFILES[cast(ProcessProfile, profile)]
-
-        body = RestartAgentRequest(config_overlay={"completion_notice_policy": "hourly"})
-
-        assert body.config_overlay == {"completion_notice_policy": "hourly"}
-
-    @pytest.mark.parametrize("profile", ["gateway", "runner"])
-    def test_rejects_invalid_agent_domain_overlay_in_boundary_profiles(self, profile: str) -> None:
-        from base.config.profiles import PROCESS_PROFILES, ProcessProfile
-
-        assert "agent" not in PROCESS_PROFILES[cast(ProcessProfile, profile)]
-
-        with pytest.raises(ValidationError):
-            RestartAgentRequest(config_overlay={"completion_notice_policy": "bogus"})
-
-    def test_validates_sandbox_overlay_in_gateway_profile(self) -> None:
-        from base.config.profiles import PROCESS_PROFILES
-
-        assert "sandbox" not in PROCESS_PROFILES["gateway"]
-
-        body = RestartAgentRequest(config_overlay={"syntax_fix_ruff_format": True})
-
-        assert body.config_overlay == {"syntax_fix_ruff_format": True}
-        with pytest.raises(ValidationError):
-            RestartAgentRequest(config_overlay={"syntax_fix_ruff_format": "not-a-bool"})
+    def test_validates_overlay_in_boundary_profile(self, profile: str, tmp_path: Path) -> None:
+        child = Path(__file__).with_name("_restart_profile_child.py")
+        result = run_bounded(
+            [sys.executable, str(child), profile],
+            timeout=20,
+            capture_output=True,
+            text=True,
+            env={
+                "MEIVA_HOME": str(tmp_path),
+                "MEIVA_CONFIG_FETCH": "skip",
+                "MEIVA_PROCESS_PROFILE": profile,
+                "MEIVA_CONFIG_BOOT": "eager",
+            },
+        )
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.strip() == profile
 
     @pytest.mark.parametrize(
         "config_overlay",
@@ -129,76 +119,58 @@ def stub_pool() -> MagicMock:
 
 
 class TestSpawnPrechecksBlocking:
-    """The gateway-side prechecks (fork checkpoint resolution) that used to run
-    inside spawn_agent_op — now called by create_and_launch_agent before the row
-    INSERT."""
-
-    @staticmethod
-    def _noop_validate_spawn(*_args: object, **_kwargs: object) -> str:
-        return "deepseek-flash"
-
-    class _FakeCursor:
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *_a):
-            return False
-
-    class _FakeConn:
-        def cursor(self):
-            return TestSpawnPrechecksBlocking._FakeCursor()
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *_a):
-            return False
-
-    class _FakePool:
-        def connection(self):
-            return TestSpawnPrechecksBlocking._FakeConn()
-
-    def test_fork_resolves_checkpoint(self, *, config_authority: ConfigAuthority) -> None:
+    def test_fork_resolves_checkpoint(
+        self,
+        db_conn: psycopg.Connection,
+        db_pool: ConnectionPool,
+        lifecycle_agent_id: int,
+        config_authority: ConfigAuthority,
+        model_catalog: ModelCatalog,
+    ) -> None:
+        db_conn.execute(
+            "INSERT INTO checkpoints (thread_id, checkpoint_id, checkpoint, metadata) "
+            "VALUES (%s, 'ckpt:v1', '{}'::jsonb, '{}'::jsonb)",
+            (str(lifecycle_agent_id),),
+        )
+        db_conn.commit()
         checkpoint = launch.spawn_prechecks_blocking(
-            SpawnAgentRequest(spawner="user", fork_from=3),
-            cast(ConnectionPool, self._FakePool()),
-            catalog=build_model_catalog(),
+            SpawnAgentRequest(spawner="user", fork_from=lifecycle_agent_id),
+            db_pool,
+            catalog=model_catalog,
             authority=config_authority,
-            validate_spawn_model_fn=self._noop_validate_spawn,
-            checkpoint_id_fn=lambda _cur, _aid: "ckpt:v1",
         )
         assert checkpoint == "ckpt:v1"
 
-    def test_fork_empty_raises(self, *, config_authority: ConfigAuthority) -> None:
+    def test_fork_empty_raises(
+        self,
+        db_pool: ConnectionPool,
+        lifecycle_agent_id: int,
+        config_authority: ConfigAuthority,
+        model_catalog: ModelCatalog,
+    ) -> None:
         from base.api_contracts.agent_contract import ForkSourceEmpty
 
         with pytest.raises(ForkSourceEmpty):
             launch.spawn_prechecks_blocking(
-                SpawnAgentRequest(spawner="user", fork_from=3),
-                cast(ConnectionPool, self._FakePool()),
-                catalog=build_model_catalog(),
+                SpawnAgentRequest(spawner="user", fork_from=lifecycle_agent_id),
+                db_pool,
+                catalog=model_catalog,
                 authority=config_authority,
-                validate_spawn_model_fn=self._noop_validate_spawn,
-                checkpoint_id_fn=lambda _cur, _aid: None,
             )
 
-    def test_plain_spawn_no_checkpoint_lookup(self, *, config_authority: ConfigAuthority) -> None:
-        looked_up: list[object] = []
-
-        def _fake_lookup(_cur: object, _aid: object) -> str:
-            looked_up.append(1)
-            return "never"
-
+    def test_plain_spawn_needs_no_checkpoint(
+        self,
+        db_pool: ConnectionPool,
+        config_authority: ConfigAuthority,
+        model_catalog: ModelCatalog,
+    ) -> None:
         checkpoint = launch.spawn_prechecks_blocking(
             SpawnAgentRequest(spawner="user"),
-            cast(ConnectionPool, self._FakePool()),
-            catalog=build_model_catalog(),
+            db_pool,
+            catalog=model_catalog,
             authority=config_authority,
-            validate_spawn_model_fn=self._noop_validate_spawn,
-            checkpoint_id_fn=_fake_lookup,
         )
         assert checkpoint is None
-        assert looked_up == []
 
 
 async def test_restart_agent_op_terminated_short_circuits(
@@ -222,8 +194,14 @@ async def test_restart_agent_op_terminated_short_circuits(
     )
     db_conn.execute("UPDATE agents_meta SET status='terminated' WHERE id=%s", (agent_id,))
     db_conn.commit()
-    wake = AsyncMock()
-    with make_test_pool() as pool:
+    with (
+        make_test_pool() as pool,
+        event_bus.sync_redis() as redis,
+        PubSub(redis.connection_pool) as received,
+    ):
+        received.subscribe(event_bus.channel)
+        subscribed = cast(dict[str, object] | None, received.get_message(timeout=2))
+        assert subscribed is not None and subscribed["type"] == "subscribe"
         resp = await lifecycle.restart_agent_op(
             database,
             event_bus,
@@ -231,10 +209,9 @@ async def test_restart_agent_op_terminated_short_circuits(
             RestartAgentRequest(source="user"),
             pool,
             catalog=build_model_catalog(),
-            inbound_arrived_fn=wake,
         )
+        assert received.get_message(timeout=0.1) is None
     assert resp.status == "already_terminated"
-    wake.assert_not_awaited()
     assert db_conn.execute(
         "SELECT count(*) FROM inbound_messages WHERE agent_id=%s AND kind='restart'", (agent_id,)
     ).fetchone() == (0,)
@@ -262,106 +239,104 @@ async def test_restart_lifecycle_op_validates_overlay_on_the_runner(
 
 @pytest.mark.asyncio
 async def test_resurrect_agent_op_alive_returns_already_alive(
+    lifecycle_agent_id: int,
     database: Database,
     event_bus: EventBus,
-    *,
-    machine_identity: MachineIdentity,
+    db_conn: psycopg.Connection,
 ) -> None:
-    from base.api_contracts.agent_contract import AgentStatus
-
     resp = await lifecycle.resurrect_agent_op(
         database,
         event_bus,
-        9,
+        lifecycle_agent_id,
         ResurrectAgentRequest(prompt="test"),
-        status_fn=lambda _db, _aid: AgentStatus.RUNNING,
     )
     assert resp.status == "already_alive"
+    assert db_conn.execute(
+        "SELECT count(*) FROM inbound_messages WHERE agent_id=%s", (lifecycle_agent_id,)
+    ).fetchone() == (0,)
 
 
 @pytest.mark.asyncio
 async def test_resurrect_agent_op_stale_trigger_returns_idempotent_noop(
+    lifecycle_agent_id: int,
     database: Database,
     event_bus: EventBus,
-    *,
-    machine_identity: MachineIdentity,
+    db_conn: psycopg.Connection,
 ) -> None:
-    from base.api_contracts.agent_contract import AgentStatus
-    from ops.agents.wake import ResurrectTriggerStaleError
-
-    def _terminated(_db: object, _agent_id: int) -> AgentStatus:
-        return AgentStatus.TERMINATED
-
-    def _stale(_db: object, _bus: object, *_args: object, **_kwargs: object) -> int:
-        raise ResurrectTriggerStaleError("trigger chat no longer qualifies")
-
+    db_conn.execute("UPDATE agents_meta SET status='terminated' WHERE id=%s", (lifecycle_agent_id,))
+    db_conn.commit()
     resp = await lifecycle.resurrect_agent_op(
         database,
         event_bus,
-        9,
+        lifecycle_agent_id,
         ResurrectAgentRequest(resurrected_by="system"),
         trigger_inbound_id=123,
         trigger_inbound_kind=InboundKind.CHAT,
-        status_fn=_terminated,
-        resurrect_fn=_stale,
     )
     assert resp.status == "already_alive"
+    assert db_conn.execute(
+        "SELECT status FROM agents_meta WHERE id=%s", (lifecycle_agent_id,)
+    ).fetchone() == ("terminated",)
 
 
 @pytest.mark.asyncio
 async def test_terminate_agent_op_terminated_short_circuits(
-    stub_pool: MagicMock, database: Database, event_bus: EventBus
+    lifecycle_agent_id: int,
+    database: Database,
+    event_bus: EventBus,
+    db_conn: psycopg.Connection,
+    db_pool: ConnectionPool,
 ) -> None:
-    from base.api_contracts.agent_contract import AgentStatus
+    db_conn.execute("UPDATE agents_meta SET status='terminated' WHERE id=%s", (lifecycle_agent_id,))
+    db_conn.commit()
 
-    def _no_kill(_aid: int, **_kwargs: object) -> list[int]:
+    def no_kill(agent_id: int, *, before_session_index: int) -> list[int]:
         raise AssertionError("a terminate without the option never kills shell sessions")
+
+    async def no_cancel(agent_id: int) -> None:
+        raise AssertionError("an already terminated agent has no turn to cancel")
 
     resp = await lifecycle.terminate_agent_op(
         database,
         event_bus,
-        9,
+        lifecycle_agent_id,
         TerminateAgentRequest(),
-        cast(ConnectionPool, stub_pool),
-        status_fn=lambda _db, _aid: AgentStatus.TERMINATED,
-        kill_shells_fn=_no_kill,
+        db_pool,
+        cancel_turn=no_cancel,
+        kill_shells=no_kill,
     )
     assert resp.status == "already_terminated"
     assert resp.shell_sessions is None
+    assert db_conn.execute(
+        "SELECT count(*) FROM inbound_messages WHERE agent_id=%s", (lifecycle_agent_id,)
+    ).fetchone() == (0,)
 
 
 @pytest.mark.asyncio
 async def test_lifecycle_op_parses_path_to_terminate(
-    stub_pool: MagicMock,
+    lifecycle_agent_id: int,
     database: Database,
     event_bus: EventBus,
-    *,
-    machine_identity: MachineIdentity,
+    db_conn: psycopg.Connection,
+    db_pool: ConnectionPool,
+    model_catalog: ModelCatalog,
 ) -> None:
-
-    captured: dict[str, object] = {}
-
-    from ops.rpc_schemas import TerminateAgentResponse
-
-    async def _fake_terminate(
-        _db: object, _bus: object, agent_id: int, body: TerminateAgentRequest, _pool: object
-    ) -> TerminateAgentResponse:
-        captured["agent_id"] = agent_id
-        captured["force"] = body.force
-        return TerminateAgentResponse(status=TerminateResult.ENQUEUED)
-
     result = await lifecycle.lifecycle_op(
         database,
         event_bus,
-        "/api/agents/42/terminate",
+        f"/api/agents/{lifecycle_agent_id}/terminate",
         {"source": "user"},
-        stub_pool,
-        catalog=build_model_catalog(),
-        terminate_op_fn=_fake_terminate,
+        db_pool,
+        catalog=model_catalog,
     )
     assert result.status == "enqueued"
-    assert captured["agent_id"] == 42
-    assert captured["force"] is False
+    assert db_conn.execute(
+        "SELECT kind, source, status FROM inbound_messages WHERE agent_id=%s",
+        (lifecycle_agent_id,),
+    ).fetchall() == [("terminate", "user", "pending")]
+    assert db_conn.execute(
+        "SELECT status FROM agents_meta WHERE id=%s", (lifecycle_agent_id,)
+    ).fetchone() == ("idling",)
 
 
 @pytest.mark.asyncio
@@ -428,45 +403,28 @@ async def test_manual_lifecycle_path_rejects_auto_resurrect_trigger(
 
 @pytest.mark.asyncio
 async def test_explicit_resurrect_dispatches_manual_op(
-    stub_pool: MagicMock,
+    lifecycle_agent_id: int,
     database: Database,
     event_bus: EventBus,
-    *,
-    machine_identity: MachineIdentity,
+    db_conn: psycopg.Connection,
+    db_pool: ConnectionPool,
+    model_catalog: ModelCatalog,
 ) -> None:
-    captured: dict[str, object] = {}
-
-    async def _fake_resurrect(
-        _db: object,
-        _bus: object,
-        agent_id: int,
-        body: ResurrectAgentRequest,
-        *,
-        trigger_inbound_id: int | None = None,
-        trigger_inbound_kind: str | None = None,
-    ) -> ResurrectAgentResponse:
-        captured.update(
-            agent_id=agent_id,
-            resurrected_by=body.resurrected_by,
-            trigger_inbound_id=trigger_inbound_id,
-            trigger_inbound_kind=trigger_inbound_kind,
-        )
-        return ResurrectAgentResponse(status=ResurrectResult.SPAWNED)
-
+    db_conn.execute("UPDATE agents_meta SET status='terminated' WHERE id=%s", (lifecycle_agent_id,))
+    db_conn.commit()
     result = await lifecycle.lifecycle_op(
         database,
         event_bus,
-        "/api/agents/42/resurrect-explicit",
+        f"/api/agents/{lifecycle_agent_id}/resurrect-explicit",
         {"resurrected_by": "user"},
-        stub_pool,
-        catalog=build_model_catalog(),
-        resurrect_op_fn=_fake_resurrect,
+        db_pool,
+        catalog=model_catalog,
     )
-
     assert result.status == "spawned"
-    assert captured == {
-        "agent_id": 42,
-        "resurrected_by": "user",
-        "trigger_inbound_id": None,
-        "trigger_inbound_kind": None,
-    }
+    assert db_conn.execute(
+        "SELECT status FROM agents_meta WHERE id=%s", (lifecycle_agent_id,)
+    ).fetchone() == ("idling",)
+    assert db_conn.execute(
+        "SELECT source FROM audit_events WHERE agent_id=%s AND event_name='resurrect'",
+        (lifecycle_agent_id,),
+    ).fetchall() == [("user",)]
