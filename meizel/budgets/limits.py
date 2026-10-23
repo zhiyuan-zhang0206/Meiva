@@ -11,6 +11,17 @@ __all__ = ["DIRECTORY_CEILING", "HARD_CEILING", "budget_files", "check"]
 
 HARD_CEILING = 800
 DIRECTORY_CEILING = 20
+_FILE_CEILING_GUIDANCE = (
+    "the file budget leaves room for cohesive logic behind a small interface; review "
+    "responsibility boundaries, separate pure decisions from I/O orchestration, and move "
+    "related implementation into a cohesive subpackage with a narrow meizel.toml exports "
+    "door; avoid mechanical _part2 or _helpers splits"
+)
+_DIRECTORY_CEILING_GUIDANCE = (
+    "the entry cap bounds the concepts at one directory, not total project size; directory "
+    "depth is unrestricted, so group related behavior into cohesive subpackages with narrow "
+    "meizel.toml exports doors"
+)
 
 
 def budget_files(
@@ -59,7 +70,7 @@ def check(
         name = path.relative_to(repo_root).as_posix()
         if count > HARD_CEILING:
             errors.append(
-                f"{name}:{count}: file is {count} lines, over the {HARD_CEILING}-line hard ceiling — split it"
+                f"{name}:{count}: file is {count} lines, over the {HARD_CEILING}-line hard ceiling — {_FILE_CEILING_GUIDANCE}"
             )
     listing = subprocess.run(  # noqa: S603 — local git query, no shell
         ["git", "-C", str(repo_root), "ls-files", "-z"], capture_output=True, text=True, check=False
@@ -72,6 +83,6 @@ def check(
         count = len(children[name])
         if count > DIRECTORY_CEILING:
             errors.append(
-                f"{name}: directory has {count} direct entries, over the {DIRECTORY_CEILING}-entry cap — split it"
+                f"{name}: directory has {count} direct entries, over the {DIRECTORY_CEILING}-entry cap — {_DIRECTORY_CEILING_GUIDANCE}"
             )
     return errors

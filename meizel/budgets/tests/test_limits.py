@@ -28,9 +28,12 @@ def test_a_file_over_the_ceiling_is_flagged(tmp_path: Path, lines: int, flagged:
     errors = limits.check([repo / "base"], [repo], repo, _STRUCTURE)
     assert bool(errors) is flagged
     if flagged:
-        assert errors == [
-            f"base/big.py:{lines}: file is {lines} lines, over the 800-line hard ceiling — split it"
-        ]
+        [error] = errors
+        assert error.startswith(
+            f"base/big.py:{lines}: file is {lines} lines, over the 800-line hard ceiling — "
+        )
+        assert "cohesive subpackage" in error
+        assert "pure decisions from I/O" in error
 
 
 @pytest.mark.parametrize(("entries", "flagged"), [(20, False), (21, True)])
@@ -39,9 +42,12 @@ def test_a_directory_over_the_cap_is_flagged(tmp_path: Path, entries: int, flagg
     errors = limits.check([repo / "base"], [repo], repo, _STRUCTURE)
     assert bool(errors) is flagged
     if flagged:
-        assert errors == [
-            f"base/pkg: directory has {entries} direct entries, over the 20-entry cap — split it"
-        ]
+        [error] = errors
+        assert error.startswith(
+            f"base/pkg: directory has {entries} direct entries, over the 20-entry cap — "
+        )
+        assert "directory depth is unrestricted" in error
+        assert "cohesive subpackages" in error
 
 
 def test_the_file_scope_skips_hidden_cache_and_migration_directories(tmp_path: Path) -> None:

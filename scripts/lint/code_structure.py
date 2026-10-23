@@ -1,90 +1,6 @@
-"""Structural lints that keep the codebase legible to agents: no `TYPE_CHECKING`
-import-folding, role-call allowlisting, and frozen structure/function budgets.
-
-Run: `.venv/bin/python scripts/lint/code_structure.py [path ...]` (defaults to the
-whole repo; an explicit path that does not exist is an error (stderr + exit 1)
-rather than a silent no-op). Also run automatically via pre-commit hook before
-commit.
-
-## Why
-
-A fully agent-generated codebase is optimized first for the agent's ability to
-reason over it directly. These structural rules protect that:
-
-### Rule 1: no `if TYPE_CHECKING:` import folding
-
-All dependencies are imported at top level. Reasons (see AGENTS.md "Python
-coding conventions"): an application's deps are always on the runtime path, so
-the startup-cost TYPE_CHECKING saves does not exist (the module is already
-cached); and LangGraph / Pydantic introspect type hints at runtime via
-`get_type_hints()` / `inspect.signature`, so a name imported only under
-`TYPE_CHECKING` raises NameError. The genuine exceptions — a real circular
-import, or an `import torch`-class heavy dependency on a path that does not use
-the type — are listed under `[type-checking.files]` in `meizel.policy.toml` with a one-line reason.
-
-### Rule 3: retired ambient machine-role reader
-
-Machine capabilities belong to an explicit MachineIdentity supplied by the
-composition root. The retired machine_role() call is rejected in every governed
-production module; there is no per-file allowance. Capability guards read the
-owner's role() and retain the single gateway routing contract (issue #216).
-
-### Rule 4: retired
-
-Reaching another package's `_`-prefixed module or name is reported by meizel
-(`private-name`, `private-module`, with the `meizel.toml` exports deciding what is a
-public door); see `meizel/docs/checker/checker.meiva.okf.md`. This script no longer measures it.
-
-### Rule 5: single decision owners (locality)
-
-`meizel/owners/decisions.py:DECISIONS` names design decisions that have exactly
-one owning module; any other module making that decision is a bypass. Today:
-`postgres-dial` — a psycopg connect (module, class, or `from psycopg import
-connect`) or a construction of a psycopg_pool pool or of this repo's own
-`*ConnectionPool` subclass belongs to `base/db/connections.py`, which owns the
-transport posture. A site that genuinely cannot go through the owner goes in that
-decision's `[single-owner.<decision>]` table in `meizel.policy.toml` with a one-line reason; an allowed module that stops
-bypassing, or no longer exists, fails as stale.
-
-Rule 5 has no baseline allowance. Every measured decision-owner bypass fails directly. Owner resolution stays in scripts/structure/locality.py and
-the decision contracts live in meizel/owners/decisions.py; see docs/conventions/python-conventions.md.
-
-### Rule 6: no path imports under meiva_builtins/ (package doors)
-
-`meizel/language/path_imports.py`: a skill or plugin module may not edit `sys.path`, call
-`site.addsitedir`, or load a module by file path (`spec_from_file_location`, `SourceFileLoader`,
-`runpy.run_path`): a path import sidesteps the package doors and the budgets. Shared code goes
-into a governed package the script imports normally. Every measured path-import site
-fails directly; no baseline can permit it. The one narrow exception (a within-skill `__file__` guard) is in `path_imports.py`.
-
-### Rule 9: ambient state (inject what is read to decide)
-
-`meizel/state/ambient_state/`: module-level state read to decide and free-floating
-background work fail, except what the closed lists in `allowlist.py` allow. Frozen as
-`path::rule:name -> site count`, exact and shrink-only like Rules 5-6; also governs `schedules/`.
-
-### Structure budgets: 800 lines per file, 20 direct entries per directory
-
-Every non-root directory has at most 20 direct Git-tracked entries. Files of every
-suffix, hidden entries, docs, tests, migrations, symlinks and gitlinks each count
-one slot. A directory counts once in its parent and is independently checked at
-any depth. Symlink targets and untracked local artifacts are not traversed.
-The repository root alone has no entry cap. File and function budgets retain the
-existing Python scope: `_SCAN_DIRS`, tests/ and scripts/. AST rules retain their
-governed-package scope.
-
-File, directory, complexity and nesting budgets have no exemptions. Every
-selected violation fails, including after a file or function rename.
-
-scripts/structure/baseline/**/*.json temporarily tracks remaining site exemptions.
-Ordinary component folders organize storage; baseline_shards is its sole reader.
-The guard compares them with the base revision and forbids added keys or raised
-counts, including when a lint rule version changes. Delete resolved entries.
-An explicit file target also checks its parent directory. The guard always runs.
-Function quality covers the budget scope: CC >=15 is hard, CC 10-14 warns,
-and control-flow nesting >5 is hard.
-
-"""
+# meiva:link docs/conventions/python-conventions.md
+# meiva:link scripts/lint/docs/lint.meiva.okf.md
+# meiva:link meizel/docs/ambient-state.meiva.okf.md
 
 from __future__ import annotations
 
@@ -346,7 +262,6 @@ def _check_ast_and_quality(
     targets: list[Path],
     baseline: dict[str, dict[str, int]],
     *,
-    full: bool,
     repo_root: Path,
     renames: dict[str, str] | None = None,
     parse_ast: Callable[..., ast.Module],
@@ -385,7 +300,6 @@ def _check_ast_and_quality(
     )
     errors.extend(decisions.missing_allowlist_errors(repo_root))
     errors.extend(ambient_state.missing_allowlist_errors(repo_root))
-    quality_budget.render_warnings(measurements["complexity"], full=full)
     return errors
 
 
@@ -395,12 +309,10 @@ def _changed_targets(only: list[str] | None, repo_root: Path) -> list[str]:
     return [] if scope is None else [str(repo_root / rel) for rel in sorted(scope)]
 
 
-def _parse_args(argv: list[str], repo_root: Path) -> tuple[list[str], bool, bool]:
-    """(explicit targets, unfold complexity warnings, nothing to judge) from the command line."""
-    full = "--complexity-warnings-full" in argv
-    argv, only = lint_common.split_only([a for a in argv if a != "--complexity-warnings-full"])
+def _parse_args(argv: list[str], repo_root: Path) -> tuple[list[str], bool]:
+    argv, only = lint_common.split_only(argv)
     targets = [*argv, *_changed_targets(only, repo_root)]
-    return targets, full, only == [] and not targets
+    return targets, only == [] and not targets
 
 
 def _budget_scopes(argv: list[str], repo_root: Path) -> tuple[list[Path], list[Path]]:
@@ -434,7 +346,7 @@ def main(
         measure_quality = partial(
             quality_budget.measure_quality, visitor_from_ast=ComplexityVisitor.from_ast
         )
-    argv, full, nothing_changed = _parse_args(argv if argv is not None else sys.argv[1:], repo_root)
+    argv, nothing_changed = _parse_args(argv if argv is not None else sys.argv[1:], repo_root)
     if nothing_changed:
         return 0
     missing = [arg for arg in argv if not os.path.lexists(arg)]
@@ -469,7 +381,6 @@ def main(
             argv,
             targets,
             baseline,
-            full=full,
             repo_root=repo_root,
             renames=renames,
             parse_ast=parse_ast,
