@@ -1,8 +1,6 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-
 import { ChatMarkdownMock, PythonCodeMock, ScrollAreaMock, cleanupTimelineTest, displayLimits, makeItem, mockSettings, resetStore, revealCollapsedCards, setToggleState, setUserSettings, toggleState, userSettingsState } from "./timeline-test-harness";
-
 vi.mock("@/lib/format/display-limits", async () => {
   const { useSyncExternalStore } = await import("react");
   return {
@@ -42,7 +40,6 @@ vi.mock("@/lib/state/use-user-settings", () => ({
   }),
 }));
 import { TimelineView } from "..";
-
 afterEach(cleanupTimelineTest);
 describe("CopyButton feedback state machine", () => {
   beforeEach(() => {
@@ -52,7 +49,6 @@ describe("CopyButton feedback state machine", () => {
       configurable: true,
     });
   });
-
   it("click copy → 'copy' flips immediately to 'copied'", async () => {
     render(
       <TimelineView items={[makeItem({ kind: "agent_chat", payload: "x" })]} />,
@@ -61,7 +57,6 @@ describe("CopyButton feedback state machine", () => {
     fireEvent.click(screen.getByLabelText("Copy message"));
     await waitFor(() => expect(screen.getByLabelText("Copied")).toBeTruthy());
   });
-
   it("after 1s reverts to 'copy' automatically (timer fires)", async () => {
     render(
       <TimelineView items={[makeItem({ kind: "agent_chat", payload: "x" })]} />,
@@ -86,7 +81,6 @@ describe("CopyButton render guard (icon-only, code/output-scoped)", () => {
     );
     expect(screen.getByRole("button", { name: /copy code/i })).toBeTruthy();
   });
-
   it("code_output item shows copy button (via EnvelopeContent showCopy)", () => {
     render(
       <TimelineView
@@ -95,7 +89,6 @@ describe("CopyButton render guard (icon-only, code/output-scoped)", () => {
     );
     expect(screen.getByRole("button", { name: /copy command output/i })).toBeTruthy();
   });
-
   it("system_marker item shows no copy button", () => {
     render(
       <TimelineView
@@ -104,7 +97,6 @@ describe("CopyButton render guard (icon-only, code/output-scoped)", () => {
     );
     expect(screen.queryByLabelText("Copy message")).toBeNull();
   });
-
   it("partial agent_chat (in progress) shows no copy button", () => {
     render(
       <TimelineView
@@ -127,7 +119,6 @@ describe("block-level copy actions (MessageCard overlay)", () => {
     );
     expect(screen.getByLabelText("Copy message")).toBeTruthy();
   });
-
   it("agent_reasoning shows the block-level copy button once expanded", () => {
     render(
       <TimelineView
@@ -136,7 +127,6 @@ describe("block-level copy actions (MessageCard overlay)", () => {
     );
     expect(screen.getByLabelText("Copy message")).toBeTruthy();
   });
-
   it("agent_code has only the icon-only body copy (card-level duplicate suppressed)", () => {
     render(
       <TimelineView
@@ -146,7 +136,6 @@ describe("block-level copy actions (MessageCard overlay)", () => {
     expect(screen.getByRole("button", { name: /copy code/i })).toBeTruthy();
     expect(screen.queryByLabelText("Copy message")).toBeNull();
   });
-
   it("code_output has only the icon-only body copy (card-level duplicate suppressed)", () => {
     render(
       <TimelineView items={[makeItem({ kind: "code_output", payload: "stdout" })]} />,
@@ -154,7 +143,6 @@ describe("block-level copy actions (MessageCard overlay)", () => {
     expect(screen.getByRole("button", { name: /copy command output/i })).toBeTruthy();
     expect(screen.queryByLabelText("Copy message")).toBeNull();
   });
-
   it("collapsed-by-default card (system_prompt) shows no copy button until the turn is expanded", () => {
     setToggleState({ detailsMode: "none" });
     render(
@@ -171,18 +159,15 @@ describe("block-level copy actions (MessageCard overlay)", () => {
     fireEvent.click(screen.getByTestId("card-toggle"));
     expect(screen.queryByLabelText("Copy message")).toBeNull();
   });
-
   it("the footer holds Copy and no other control", () => {
     render(
       <TimelineView
         items={[makeItem({ kind: "agent_chat", payload: "ok" })]}
       />,
     );
-
     const band = screen.getByLabelText("Copy message").parentElement;
     expect(band?.querySelectorAll("button")).toHaveLength(1);
   });
-
   it("copy button carries no title tooltip (aria-label only)", () => {
     render(
       <TimelineView
@@ -214,7 +199,6 @@ describe("block-level copy actions (MessageCard overlay)", () => {
     // meiva:link ui/web/src/docs/frontend-components/timeline-view/card-chrome.meiva.okf.md
     expect(band?.className).not.toContain("pointer-coarse:opacity-100");
   });
-
   it("reveals the footer when the block is touched, and only then", () => {
     // meiva:note
     // A phone has no hover, so touching the block brings the time and Copy up for
@@ -232,7 +216,6 @@ describe("block-level copy actions (MessageCard overlay)", () => {
     fireEvent.pointerDown(row as HTMLElement, { pointerType: "mouse" });
     expect(band?.className).toContain("opacity-100");
   });
-
   it("keeps the band hidden when a mouse presses the block", () => {
     render(<TimelineView items={[makeItem({ kind: "agent_chat", payload: "ok" })]} />);
     const band = screen.getByLabelText("Copy message").parentElement;
@@ -241,7 +224,6 @@ describe("block-level copy actions (MessageCard overlay)", () => {
     fireEvent.pointerDown(row as HTMLElement, { pointerType: "mouse" });
     expect(band?.className).toContain("opacity-0");
   });
-
   it("sizes the Copy glyph to the band it shares with the stamp", () => {
     // meiva:note
     // The stamp is 9px and the band 12px; at the body's size-3 the glyph read as
@@ -263,7 +245,6 @@ describe("splitEnvelope boundary", () => {
     const bodyEl = screen.getByText(/body-200-boundary/);
     expect(bodyEl.textContent).toContain(header);
   });
-
   it("idx === 199 (\\n\\n exactly at char 199) → splits into header + body normally", () => {
     const header = "h".repeat(199);
     const payload = `${header}\n\nbody-199`;
@@ -291,7 +272,6 @@ describe("UnknownMarkerChip source render", () => {
       warnSpy.mockRestore();
     }
   });
-
   it("source is a string → renders JSON.stringify (with double quotes)", () => {
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     try {
@@ -328,7 +308,6 @@ describe("formatItemTime: clock format and zone name", () => {
     );
     expect(screen.getByText("2026-05-15 Fri 12:00:00")).toBeTruthy();
   });
-
   it("renders a 12-hour clock and the zone name when the viewer turns them on", () => {
     setUserSettings({ "display.clock_format": "12h", "display.show_timezone": true });
     render(
@@ -361,7 +340,6 @@ describe("ContentToggle deps completeness (mid-mount toggle)", () => {
     expect(screen.getByText("chat")).toBeTruthy();
     expect(screen.queryByText("deep thought")).toBeNull();
   });
-
   it('rerender with detailsMode "last" → primary items always visible, detail turn collapsed without turnActive', () => {
     setToggleState({ detailsMode: "all" });
     const items = [
@@ -376,7 +354,6 @@ describe("ContentToggle deps completeness (mid-mount toggle)", () => {
     expect(screen.getByText("first")).toBeTruthy();
     expect(screen.queryByTestId("python-code")).toBeNull();
   });
-
   it('detailsMode="last" with turnActive → last detail turn auto-expanded', () => {
     setToggleState({ detailsMode: "last" });
     render(
@@ -401,7 +378,6 @@ describe("ItemView memo comparator: streaming prop flip is visible", () => {
     rerender(<TimelineView items={items} streamingCode />);
     expect(screen.getByTestId("python-code").getAttribute("data-streaming")).toBe("1");
   });
-
   it("streamingCode true → false rerender, last agent_code data-streaming should update to 0", () => {
     const items = [makeItem({ kind: "agent_code", payload: "x" })];
     const { rerender } = render(<TimelineView items={items} streamingCode />);
@@ -418,7 +394,6 @@ describe("system_marker error prefix boundary", () => {
     );
     expect(screen.getByText(/error/)).toBeTruthy();
   });
-
   it("payload contains 'error' but no colon → skips error branch, goes to UnknownMarkerChip", () => {
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     try {
@@ -433,7 +408,6 @@ describe("system_marker error prefix boundary", () => {
     }
   });
 });
-
 
 describe("splitEnvelope idx === 0 boundary", () => {
   it("payload starts with \\n\\n → body keeps leading \\n\\n (entire payload as body), no split", () => {
@@ -467,7 +441,6 @@ describe("EphemeralMarker isError path", () => {
     if (!errEl) throw new Error("no destructive el");
     expect(errEl.textContent).toMatch(/error.*failed/);
   });
-
   it("payload='exec_start' → unrecognized, renders text-destructive (red alarm)", () => {
     const { container } = render(
       <TimelineView items={[makeItem({ kind: "system_marker", payload: "exec_start" })]} />,
@@ -475,7 +448,6 @@ describe("EphemeralMarker isError path", () => {
     const errEl = container.querySelector(".text-destructive");
     expect(errEl).toBeTruthy();
   });
-
   it("payload='compact_done' → no text-destructive rendered (renders nothing)", () => {
     const { container } = render(
       <TimelineView items={[makeItem({ kind: "system_marker", payload: "compact_done" })]} />,
@@ -496,7 +468,6 @@ describe("LifecycleChip payload render", () => {
     revealCollapsedCards();
     expect(screen.getByText(payload)).toBeTruthy();
   });
-
   it("restart chip fully renders payload string", () => {
     const payload = "[ts] Restart was accepted from yourself";
     render(
@@ -507,7 +478,6 @@ describe("LifecycleChip payload render", () => {
     revealCollapsedCards();
     expect(screen.getByText(payload)).toBeTruthy();
   });
-
   it("resurrect chip fully renders payload string", () => {
     const payload = "[ts] You were resurrected by user";
     render(

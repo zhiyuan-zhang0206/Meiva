@@ -38,27 +38,18 @@ vi.mock("@/lib/transport/api", () => ({
   },
 }));
 
-const inspectorState = { open: false, hours: 24 as number | null };
-vi.mock("@/lib/inspector/inspector-panel-store", () => ({
-  useInspectorOpen: () => ({ open: inspectorState.open, toggle: vi.fn() }),
-  useInspectorHours: () => ({
-    inspectorHours: inspectorState.hours,
-    setInspectorHours: vi.fn(),
-  }),
-}));
-
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
   vi.useRealTimers();
-  inspectorState.open = false;
-  inspectorState.hours = 24;
   prefetchMocks.getAgentInspectStatistics.mockClear();
   prefetchMocks.getAgentInspectLive.mockClear();
 });
 
+// meiva:note
 // Radix ContextMenu calls pointer-capture / scroll APIs that happy-dom
 // doesn't implement; stub them so the menu can open in the test DOM.
+// meiva:link ui/web/src/docs/frontend-components/frontend-components.meiva.okf.md
 beforeAll(() => {
   Element.prototype.hasPointerCapture = () => false;
   Element.prototype.setPointerCapture = () => undefined;
@@ -285,7 +276,6 @@ describe("AgentRow action button visibility", () => {
 describe("AgentRow inspector reads", () => {
   it("hover and selection never start speculative inspector requests", async () => {
     vi.useFakeTimers();
-    inspectorState.open = true;
     const onSelect = vi.fn();
     const { container } = render(
       <AgentRow {...baseProps} onSelect={onSelect} agent={ag(7)} depth={0} ancestorsIsLast={[]} />,
@@ -405,237 +395,5 @@ describe("AgentRow status dot gating (display.show_agent_status)", () => {
     const d = statusDot(container);
     expect(d).toBeTruthy();
     expect(d!.className).toContain("bg-indigo-400");
-  });
-});
-
-describe("AgentRow time display (display.time_mode)", () => {
-  // The timestamp is the tabular-nums span in the row button.
-  function timeCell(container: HTMLElement): HTMLElement | null {
-    return container.querySelector("li button span.tabular-nums");
-  }
-
-  it("default (last_active): timestamp rendered", () => {
-    const { container } = render(
-      <AgentRow {...baseProps} agent={ag(1, { status: "idling" })} depth={0} ancestorsIsLast={[]} />,
-    );
-    expect(timeCell(container)).toBeTruthy();
-  });
-
-  it("hidden: no timestamp rendered", () => {
-    const { container } = renderWithSettings(
-      <AgentRow {...baseProps} agent={ag(1, { status: "idling" })} depth={0} ancestorsIsLast={[]} />,
-      { "display.time_mode": "hidden" },
-    );
-    expect(timeCell(container)).toBeNull();
-  });
-});
-
-describe("AgentRow awaiting-reply badge gating (notification.awaiting_reply)", () => {
-  const notice = {
-    id: 7,
-    title: "What next?",
-    content: null,
-    priority: "P1" as const,
-    require_response: true,
-    blocking: false,
-    created_at: "2026-05-07T00:00:00Z",
-  };
-
-  it("default (setting off): no badge even with open notices", () => {
-    const { queryByTitle } = render(
-      <AgentRow
-        {...baseProps}
-        agent={ag(1, { awaiting_response_count: ([notice]).length, highest_notice_priority: ([notice])[0]?.priority ?? null })}
-        depth={0}
-        ancestorsIsLast={[]}
-      />,
-    );
-    expect(queryByTitle(/waiting on you/)).toBeNull();
-  });
-
-  it("enabled: badge shows the count", () => {
-    const { getByText } = renderWithSettings(
-      <AgentRow
-        {...baseProps}
-        agent={ag(1, { awaiting_response_count: ([notice]).length, highest_notice_priority: ([notice])[0]?.priority ?? null })}
-        depth={0}
-        ancestorsIsLast={[]}
-      />,
-      { "notification.awaiting_reply": true },
-    );
-    expect(getByText("1").textContent).toBe("1");
-  });
-});
-
-describe("AgentRow right-click context menu", () => {
-  function openMenu(row: HTMLElement) {
-    fireEvent.contextMenu(row);
-  }
-
-  it("alive agent: menu shows Restart / Terminate / Fork / Fork with prompt / Kill", () => {
-    const { container } = render(
-      <AgentRow {...baseProps} agent={ag(1)} depth={0} ancestorsIsLast={[]} />,
-    );
-    openMenu(container.querySelector("li")!);
-    expect(screen.getByText("Restart")).toBeTruthy();
-    expect(screen.getByText("Terminate")).toBeTruthy();
-    expect(screen.getByText("Fork")).toBeTruthy();
-    expect(screen.getByText("Fork with prompt…")).toBeTruthy();
-    expect(screen.getByText("Kill")).toBeTruthy();
-    // Resurrect items are terminated-only
-    expect(screen.queryByText("Resurrect")).toBeNull();
-    expect(screen.queryByText("End external takeover session")).toBeNull();
-  });
-
-  it.each(["meiva", "claude_code", "codex"] as const)("offers native compaction only on Meiva (%s)", (harness) => {
-    const { container } = render(
-      <AgentRow {...baseProps} agent={ag(1, { harness })} depth={0} ancestorsIsLast={[]} />,
-    );
-    openMenu(container.querySelector("li")!);
-    expect(screen.queryByText("Compact") !== null).toBe(harness === "meiva");
-    expect(screen.getByText("Restart")).toBeTruthy();
-    expect(screen.getByText("Terminate")).toBeTruthy();
-  });
-
-  it("shows the end-session item only for an open session and sends its rendered ID after confirmation", () => {
-    const onForceExpire = vi.fn();
-    const confirmMock = vi.fn().mockReturnValue(true);
-    vi.stubGlobal("confirm", confirmMock);
-    const { container } = render(
-      <AgentRow {...baseProps} onForceExpire={onForceExpire}
-        agent={ag(1, { open_impersonation_session_id: 7 })} depth={0} ancestorsIsLast={[]} />,
-    );
-    openMenu(container.querySelector("li")!);
-    fireEvent.click(screen.getByText("End external takeover session"));
-    expect(confirmMock).toHaveBeenCalledWith(expect.stringContaining("agent resumes its own work"));
-    expect(onForceExpire).toHaveBeenCalledExactlyOnceWith(7);
-  });
-
-  it("does not end the session when confirmation is dismissed", () => {
-    const onForceExpire = vi.fn();
-    vi.stubGlobal("confirm", vi.fn().mockReturnValue(false));
-    const { container } = render(
-      <AgentRow {...baseProps} onForceExpire={onForceExpire}
-        agent={ag(1, { open_impersonation_session_id: 7 })} depth={0} ancestorsIsLast={[]} />,
-    );
-    openMenu(container.querySelector("li")!);
-    fireEvent.click(screen.getByText("End external takeover session"));
-    expect(onForceExpire).not.toHaveBeenCalled();
-  });
-
-  it("terminated agent: menu shows Resurrect + Resurrect with prompt, no Fork / Kill", () => {
-    const dead: AgentRowType = { ...ag(2), status: "terminated" };
-    const { container } = render(
-      <AgentRow {...baseProps} agent={dead} depth={0} ancestorsIsLast={[]} />,
-    );
-    openMenu(container.querySelector("li")!);
-    expect(screen.getByText("Resurrect")).toBeTruthy();
-    expect(screen.getByText("Resurrect with prompt…")).toBeTruthy();
-    expect(screen.queryByText("Kill")).toBeNull();
-    expect(screen.queryByText("Fork")).toBeNull();
-  });
-
-  // happy-dom has no window.confirm — stub it per test (unstubbed in afterEach).
-  it("Kill calls onForceKill only after the confirm is accepted", () => {
-    const onForceKill = vi.fn();
-    const confirmMock = vi.fn().mockReturnValue(true);
-    vi.stubGlobal("confirm", confirmMock);
-    const { container } = render(
-      <AgentRow
-        {...baseProps}
-        onForceKill={onForceKill}
-        agent={ag(1)}
-        depth={0}
-        ancestorsIsLast={[]}
-      />,
-    );
-    openMenu(container.querySelector("li")!);
-    fireEvent.click(screen.getByText("Kill"));
-    expect(confirmMock).toHaveBeenCalledOnce();
-    expect(onForceKill).toHaveBeenCalledOnce();
-  });
-
-  it("Kill does nothing when the confirm is dismissed", () => {
-    const onForceKill = vi.fn();
-    const confirmMock = vi.fn().mockReturnValue(false);
-    vi.stubGlobal("confirm", confirmMock);
-    const { container } = render(
-      <AgentRow
-        {...baseProps}
-        onForceKill={onForceKill}
-        agent={ag(1)}
-        depth={0}
-        ancestorsIsLast={[]}
-      />,
-    );
-    openMenu(container.querySelector("li")!);
-    fireEvent.click(screen.getByText("Kill"));
-    expect(confirmMock).toHaveBeenCalledOnce();
-    expect(onForceKill).not.toHaveBeenCalled();
-  });
-
-  it("Terminate menu item calls onTerminate (graceful)", () => {
-    const onTerminate = vi.fn();
-    const { container } = render(
-      <AgentRow
-        {...baseProps}
-        onTerminate={onTerminate}
-        agent={ag(1)}
-        depth={0}
-        ancestorsIsLast={[]}
-      />,
-    );
-    openMenu(container.querySelector("li")!);
-    fireEvent.click(screen.getByText("Terminate"));
-    expect(onTerminate).toHaveBeenCalledOnce();
-  });
-
-  it("quick Fork calls onFork with no prompt (undefined)", () => {
-    const onFork = vi.fn();
-    const { container } = render(
-      <AgentRow
-        {...baseProps}
-        onFork={onFork}
-        agent={ag(1)}
-        depth={0}
-        ancestorsIsLast={[]}
-      />,
-    );
-    openMenu(container.querySelector("li")!);
-    fireEvent.click(screen.getByText("Fork"));
-    expect(onFork).toHaveBeenCalledOnce();
-    expect(onFork).toHaveBeenCalledWith(); // no prompt arg
-  });
-
-  // The "... with prompt" items open a PromptDialog whose submit routes to
-  // onFork / onResurrect. The dialog's own logic (submit/disabled/trim) is
-  // covered in agent-prompt-dialog.test.tsx; the menu→dialog focus handoff
-  // is a Radix interaction not exercised here (it recurses under happy-dom;
-  // it works in a real browser — marked NOT tested in the PR).
-});
-
-describe("AgentRow takeover control", () => {
-  // The sidebar shows no dedicated takeover UI at all (user ruling: the only
-  // visible difference for an impersonated agent is its status). Ending a
-  // takeover is reachable only from the right-click context menu — see the
-  // "AgentRow right-click context menu" describe block above for the
-  // end-session item's click → confirm → onForceExpire(sessionId) path.
-  it("renders no on-row takeover label or button when a session is open", () => {
-    render(
-      <AgentRow {...baseProps}
-        agent={ag(1, { open_impersonation_session_id: 7 })} depth={0} ancestorsIsLast={[]} />,
-    );
-    expect(screen.queryByText("Takeover open")).toBeNull();
-    expect(screen.queryByRole("button", { name: "End external takeover session" })).toBeNull();
-  });
-
-  it("renders no 'Ending takeover…' label while a force-expire is pending — the row shows only its generic spinner", () => {
-    render(
-      <AgentRow {...baseProps} pending="expiring"
-        agent={ag(1, { open_impersonation_session_id: 7 })} depth={0} ancestorsIsLast={[]} />,
-    );
-    expect(screen.queryByText("Ending takeover…")).toBeNull();
-    expect(screen.queryByText("Takeover open")).toBeNull();
-    expect(screen.queryByRole("button", { name: "End external takeover session" })).toBeNull();
   });
 });

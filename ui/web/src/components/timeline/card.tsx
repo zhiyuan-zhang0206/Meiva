@@ -12,29 +12,18 @@ import {
   Bot,
   ChevronDown,
   ChevronRight,
-  Code2,
-  FilePen,
   FileText,
   Info,
   Paperclip,
-  Search,
   Settings,
   Sparkles,
   Terminal,
   User,
-  Wrench,
   type LucideIcon,
 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { memo, type ReactNode } from "react";
 
-import { formatTokensCompact } from "@/lib/format/format-number";
-import {
-  formatDuration,
-  summarizeCode,
-  summarizeOutput,
-  type SdkCall,
-} from "@/lib/format/item-summary";
 import { preloadPythonCodeHighlighter } from "@/components/content/python-code";
 import { DEFAULT_TIMELINE_COLORS, type TimelineColors } from "@/lib/timeline/timeline-colors";
 import type { BackendTimelineItem } from "@/lib/contracts/types";
@@ -46,6 +35,9 @@ import { inboundKind } from "./model/runs";
 import { externalAgentName } from "@/lib/format/inbound-source";
 import { isLiveCode, isLiveExecution, isLiveReasoning, useNow } from "./model/reasoning-clock";
 import { FLEX, MIN_W_0 } from "@/lib/layout/layout";
+import { agentChatTitle, CallBadge, Summary, toolCallIcon } from "./view/card-summary";
+
+export { CallBadge, toolCallIcon };
 
 // Which of the four rich header summaries a card renders in place of a static
 // title. null = a plain icon + title header.
@@ -81,89 +73,6 @@ export interface CardConfig {
   // Whether the card stamps the item's timestamp in its hover footer (right-aligned under the card, next to Copy).
   // meiva:link ui/web/src/docs/frontend-components/timeline-view/card-chrome.meiva.okf.md
   readonly showTimestamp: boolean;
-}
-
-function agentChatTitle(item: BackendTimelineItem): {
-  title: string;
-  titleKey: string;
-  titleValues: Record<string, string>;
-} {
-  const suffixKey = item.interrupted
-    ? "timeline.streamingInterruptedSuffix"
-    : item.partial
-      ? "timeline.streamingSuffix"
-      : "";
-  const suffix = item.interrupted
-    ? " (streaming interrupted)"
-    : item.partial
-      ? " (streaming…)"
-      : "";
-  return {
-    title: `Meiva ▸${suffix}`,
-    titleKey: "agentChat",
-    titleValues: { suffixKey },
-  };
-}
-
-export function toolCallIcon(source: string | null | undefined): LucideIcon {
-  if (!source || source === "execute_code") return Code2;
-  switch (source) {
-    case "command":
-    case "Bash":
-    case "run_command":
-      return Terminal;
-    case "patch":
-    case "Edit":
-    case "Write":
-    case "MultiEdit":
-    case "write_file":
-    case "edit_file":
-      return FilePen;
-    case "Read":
-    case "read_file":
-      return FileText;
-    case "Grep":
-    case "Glob":
-    case "web_search":
-    case "search_web":
-      return Search;
-    case "Task":
-    case "Agent":
-    case "invoke_subagent":
-      return Bot;
-    default:
-      return Wrench;
-  }
-}
-
-function renderToolIcon(source: string | null | undefined, className: string): ReactNode {
-  switch (source) {
-    case "command":
-    case "Bash":
-    case "run_command":
-      return <Terminal className={className} />;
-    case "patch":
-    case "Edit":
-    case "Write":
-    case "MultiEdit":
-    case "write_file":
-    case "edit_file":
-      return <FilePen className={className} />;
-    case "Read":
-    case "read_file":
-      return <FileText className={className} />;
-    case "Grep":
-    case "Glob":
-    case "web_search":
-    case "search_web":
-      return <Search className={className} />;
-    case "Task":
-    case "Agent":
-    case "invoke_subagent":
-      return <Bot className={className} />;
-    default:
-      return <Wrench className={className} />;
-  }
 }
 
 // Pure per-item visual config. null → this item is an ephemeral system marker
@@ -552,199 +461,3 @@ export const CardHeader = memo(function CardHeader({
     </button>
   );
 });
-
-function Summary({
-  item,
-  payload,
-  now,
-  live,
-}: {
-  item: BackendTimelineItem;
-  // item.payload throttled while the item streams — the code / output summaries
-  // scan it in full, so they read this instead of item.payload.
-  payload: string;
-  now: number;
-  live: boolean;
-}) {
-  switch (item.kind) {
-    case "agent_reasoning":
-      return <ThinkingSummary item={item} now={now} live={live} />;
-    case "agent_code":
-      return <CodeSummary item={item} payload={payload} now={now} />;
-    case "code_output":
-      return <OutputSummary item={item} payload={payload} now={now} />;
-    case "system_prompt":
-      return <SystemPromptSummary payload={payload} />;
-    /* v8 ignore next 3 */
-    default:
-      // Only the four summary kinds render a Summary; other kinds never reach here.
-      return null;
-  }
-}
-
-function SystemPromptSummary({ payload }: { payload: string }) {
-  const t = useTranslations("timeline");
-  // Trailing newline is a terminator, not an extra line.
-  const body = payload.endsWith("\n") ? payload.slice(0, -1) : payload;
-  const lines = body === "" ? 0 : body.split("\n").length;
-  return (
-    <span className={cn("items-center gap-1.5", FLEX, MIN_W_0)}>
-      <Settings className="size-3.5 shrink-0" />
-      <span className="truncate">
-        {t("systemPrompt")}
-        <span className="opacity-60">
-          {` · ${t("lineCount", { count: lines, unit: t(lines === 1 ? "line" : "lines") })}`}
-        </span>
-      </span>
-    </span>
-  );
-}
-
-function ThinkingSummary({
-  item,
-  now,
-  live,
-}: {
-  item: BackendTimelineItem;
-  now: number;
-  live: boolean;
-}) {
-  const t = useTranslations("timeline");
-  const tokens =
-    item.reasoning_tokens != null
-      ? t("tokens", { count: formatTokensCompact(item.reasoning_tokens) })
-      : null;
-
-  let label: string;
-  if (live && item.reasoningStartedAt != null) {
-    label = t("thinkingFor", { duration: formatDuration(now - item.reasoningStartedAt) });
-  } else if (item.reasoning_ms != null) {
-    // Authoritative backend duration (committed via snapshot).
-    label = t("thoughtFor", { duration: formatDuration(item.reasoning_ms) });
-  } else if (item.reasoningElapsedMs != null) {
-    // Frontend-frozen elapsed — shown after the clock stops but before the
-    // snapshot commits the backend reasoning_ms, so the duration never flickers
-    // back to a bare "Thinking".
-    label = t("thoughtFor", { duration: formatDuration(item.reasoningElapsedMs) });
-  } else {
-    // Historical item from before durations were persisted, or a block whose
-    // timing was not recorded — still label it as thinking.
-    label = t("thinking");
-  }
-
-  return (
-    <span className={cn("items-center gap-1.5", FLEX, MIN_W_0)}>
-      <Sparkles className={cn("size-3.5 shrink-0", live && "text-sky-500")} />
-      {/* tabular-nums: the live clock rewrites the digits ~10x/s; fixed-width
-          numerals keep the header from wobbling as digits change. */}
-      <span className="truncate tabular-nums">
-        {label}
-        {tokens ? <span className="opacity-60"> · {tokens}</span> : null}
-      </span>
-    </span>
-  );
-}
-
-function CodeSummary({
-  item,
-  payload,
-  now,
-}: {
-  item: BackendTimelineItem;
-  payload: string;
-  now: number;
-}) {
-  const isExternalTool = Boolean(item.source && item.source !== "execute_code");
-  const { calls, lines } = summarizeCode(payload, isExternalTool ? null : item.sdk_calls);
-
-  // Two states, mirroring ThinkingSummary / OutputSummary:
-  // - LIVE (codeStartedAt set, still streaming): "Writing code for Xs".
-  // - DONE: "Wrote code for Xs" from the committed backend code_elapsed_ms,
-  //   falling back to the frozen frontend codeElapsedMs. Shown whenever the
-  //   value is PRESENT — deliberately NOT gated on > 0. A single-chunk tool
-  //   call (the provider delivers the whole args payload in one delta, so the
-  //   backend's first==last code-fragment timestamp yields code_elapsed_ms 0 —
-  //   agent/graph/_callbacks.py) is still a real, completed code block;
-  //   formatDuration floors it at 0.1s, exactly as "Thought for" / "Ran in"
-  //   already do for a 0 reasoning_ms / exec_ms. The old > 0 guard silently
-  //   dropped the whole label for those blocks, so the inner code card showed
-  //   no duration at all while thinking/output showed theirs.
-  let timing: string | null = null;
-  const liveCode = isLiveCode(item);
-  const codeElapsed = item.code_elapsed_ms ?? item.codeElapsedMs;
-  if (liveCode && item.codeStartedAt != null) {
-    timing = `Writing code for ${formatDuration(now - item.codeStartedAt)}`;
-  } else if (codeElapsed != null) {
-    timing = `Wrote code for ${formatDuration(codeElapsed)}`;
-  }
-
-  if (isExternalTool) {
-    return (
-      <span className={cn("items-center gap-1.5", FLEX, MIN_W_0)}>
-        {renderToolIcon(item.source, cn("size-3.5 shrink-0", liveCode && "text-sky-500"))}
-        <span className="truncate tabular-nums">
-          {timing ? <>{timing}<span className="opacity-60">{" · "}</span></> : null}
-          <span className="text-foreground/80">{item.source}</span>
-          <span className="opacity-60">{` · ${lines} ${lines === 1 ? "line" : "lines"}`}</span>
-        </span>
-      </span>
-    );
-  }
-
-  return (
-    <span className={cn("items-center gap-1.5", FLEX, MIN_W_0)}>
-      <Code2 className={cn("size-3.5 shrink-0", liveCode && "text-sky-500")} />
-      <span className="truncate tabular-nums">
-        {timing ? <>{timing}<span className="opacity-60">{" · "}</span></> : null}
-        {calls.length > 0 ? (
-          calls.map((c, i) => (
-            <span key={c.method}>
-              {i > 0 ? <span className="opacity-40"> · </span> : null}
-              <CallBadge call={c} />
-            </span>
-          ))
-        ) : (
-          <span className="opacity-80">{`${lines} ${lines === 1 ? "line" : "lines"} of code`}</span>
-        )}
-      </span>
-    </span>
-  );
-}
-
-// Exported for TurnBlock — the aggregate turn header reuses the same
-// `method × count` chip style for its SDK-call summary line.
-export function CallBadge({ call }: { call: SdkCall }) {
-  return (
-    <span>
-      <span className="text-foreground/80">{call.method}</span>
-      <span className="opacity-60">{` × ${call.count}`}</span>
-    </span>
-  );
-}
-
-function OutputSummary({ item, payload, now }: { item: BackendTimelineItem; payload: string; now: number }) {
-  const t = useTranslations("timeline");
-  const { lines } = summarizeOutput(payload);
-  // exec_ms is the real wall-clock the code ran (backend); lead with it since
-  // "how long did it take" is the primary signal. Absent on historical rows
-  // from before durations were persisted — then just show the line count. While
-  // the execution streams (execStartedAt set, exec_ms not yet committed), show a
-  // live "Running for Xs" clock.
-  const liveExec = isLiveExecution(item);
-  const execMs = item.exec_ms ?? item.execElapsedMs;
-  let ran: string | null = null;
-  if (execMs != null) {
-    ran = t("ranIn", { duration: formatDuration(execMs) });
-  } else if (liveExec && item.execStartedAt != null) {
-    ran = t("runningFor", { duration: formatDuration(now - item.execStartedAt) });
-  }
-  return (
-    <span className={cn("items-center gap-1.5", FLEX, MIN_W_0)}>
-      <Terminal className={cn("size-3.5 shrink-0", liveExec && "text-sky-500")} />
-      <span className="truncate tabular-nums">
-        {ran ? <>{ran}<span className="opacity-60">{" · "}</span></> : null}
-        {t("lineCount", { count: lines, unit: t(lines === 1 ? "line" : "lines") })}
-      </span>
-    </span>
-  );
-}

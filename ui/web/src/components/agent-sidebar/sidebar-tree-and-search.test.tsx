@@ -1,30 +1,14 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-
 import { SIDEBAR_SORT_DEFAULT } from "@/lib/agents/sidebar";
 import type * as SidebarModule from "@/lib/agents/sidebar";
 import type { OpenNotice, PluginStat } from "@/lib/contracts/types";
 import type * as PluginStatsModule from "@/lib/plugins/plugin-stats";
-import {
-  bpMock,
-  handlers,
-  makeAgent,
-  pushSpy,
-  resetSidebarTestState,
-  sortStore,
-  state,
-  StubAgentRow,
-  StubButton,
-  StubScrollArea,
-  StubSpawnForm,
-  wrap,
-} from "./sidebar-test-harness";
-
+import { bpMock, handlers, makeAgent, pushSpy, resetSidebarTestState, sortStore, state, StubAgentRow, StubButton, StubScrollArea, StubSpawnForm, wrap } from "./sidebar-test-harness";
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: pushSpy }),
 }));
-
 vi.mock("@/lib/state/store", () => ({
   useStore: <T,>(selector: (s: unknown) => T): T => {
     const fake = {
@@ -38,7 +22,6 @@ vi.mock("@/lib/state/store", () => ({
     return selector(fake);
   },
 }));
-
 vi.mock("@/lib/agents/sidebar", async () => {
   const actual = await vi.importActual<typeof SidebarModule>("@/lib/agents/sidebar");
   const React = await import("react");
@@ -72,7 +55,6 @@ vi.mock("@/lib/agents/sidebar", async () => {
     }),
   };
 });
-
 vi.mock("@/lib/transport/api", () => ({
   api: {
     patchAgentLabel: vi.fn().mockResolvedValue(undefined),
@@ -84,7 +66,6 @@ vi.mock("@/lib/transport/api", () => ({
     ),
   },
 }));
-
 vi.mock("@/lib/plugins/plugin-stats", async () => {
   const actual = await vi.importActual<typeof PluginStatsModule>("@/lib/plugins/plugin-stats");
   return {
@@ -93,7 +74,6 @@ vi.mock("@/lib/plugins/plugin-stats", async () => {
       actual.buildPluginStatCards(state.pluginStatDeclarations, values),
   };
 });
-
 vi.mock("@/lib/state/use-user-settings", () => ({
   useUserSettings: () => ({
     settings: { "display.show_terminated": state.showTerminated, ...state.userSettings },
@@ -101,27 +81,20 @@ vi.mock("@/lib/state/use-user-settings", () => ({
     isLoading: false,
   }),
 }));
-
 vi.mock("@/components/agents/agent-row", () => ({
   AgentRow: StubAgentRow,
 }));
-
 vi.mock("@/components/agents/spawn-form", () => ({
   SpawnForm: StubSpawnForm,
 }));
-
 vi.mock("@/components/ui/scroll-area", () => ({
   ScrollArea: StubScrollArea,
 }));
-
 vi.mock("@/lib/layout/breakpoint", () => ({ useBreakpoint: () => bpMock() }));
-
 vi.mock("@/components/ui/button", () => ({
   Button: StubButton,
 }));
-
 import { AgentSidebar } from "./index";
-
 afterEach(cleanup);
 beforeEach(resetSidebarTestState);
 
@@ -145,7 +118,6 @@ describe("terminated toggle (behind the sidebar settings popover)", () => {
   const openSettings = () => fireEvent.click(screen.getByTestId("sidebar-settings"));
   const toggle = (name: "Show terminated agents" | "Hide terminated agents") =>
     screen.getByRole("button", { name });
-
   it("archive is reachable without preloading terminated agents", () => {
     state.agents = [makeAgent({ agent_id: 1, status: "idling" })];
     wrap(<AgentSidebar {...handlers} />);
@@ -154,7 +126,6 @@ describe("terminated toggle (behind the sidebar settings popover)", () => {
     expect(toggle("Show terminated agents")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Hide terminated agents" })).toBeNull();
   });
-
   it("showTerminated=false → toggle reads 'Show terminated agents', terminated rows hidden, live row stays", () => {
     state.agents = [
       makeAgent({ agent_id: 1, status: "idling" }),
@@ -169,7 +140,6 @@ describe("terminated toggle (behind the sidebar settings popover)", () => {
     expect(screen.queryByTestId("row-2")).toBeNull();
     expect(screen.queryByTestId("row-3")).toBeNull();
   });
-
   it("opening history fetches bounded archived rows separately", async () => {
     state.agents = [
       makeAgent({ agent_id: 1, status: "idling" }),
@@ -181,7 +151,6 @@ describe("terminated toggle (behind the sidebar settings popover)", () => {
     expect(toggle("Hide terminated agents")).toBeTruthy();
     await waitFor(() => expect(screen.getByTestId("row-2")).toBeTruthy());
   });
-
   it("malformed persisted setting stays opt-out", () => {
     state.agents = [
       makeAgent({ agent_id: 1, status: "idling" }),
@@ -190,11 +159,9 @@ describe("terminated toggle (behind the sidebar settings popover)", () => {
     state.userSettings["display.show_terminated"] = "true";
     wrap(<AgentSidebar {...handlers} />);
     openSettings();
-
     expect(toggle("Show terminated agents")).toBeTruthy();
     expect(screen.queryByTestId("row-2")).toBeNull();
   });
-
   it("all agents terminated + hidden → toggle still shows so they can be revealed", () => {
     state.agents = [makeAgent({ agent_id: 2, status: "terminated" })];
     state.showTerminated = false;
@@ -203,7 +170,6 @@ describe("terminated toggle (behind the sidebar settings popover)", () => {
     expect(toggle("Show terminated agents")).toBeTruthy();
     expect(screen.queryByTestId("row-2")).toBeNull();
   });
-
   it("click toggle → setSetting(display.show_terminated, !showTerminated)", () => {
     state.agents = [makeAgent({ agent_id: 2, status: "terminated" })];
     state.showTerminated = false;
@@ -212,7 +178,6 @@ describe("terminated toggle (behind the sidebar settings popover)", () => {
     fireEvent.click(toggle("Show terminated agents"));
     expect(state.setSetting).toHaveBeenCalledWith("display.show_terminated", true);
   });
-
   it("toggle button carries no title tooltip (the visible label covers a11y)", () => {
     state.agents = [makeAgent({ agent_id: 2, status: "terminated" })];
     state.showTerminated = false;
@@ -228,7 +193,6 @@ describe("agent tree: live child of a terminated parent mounts on the nearest vi
     makeAgent({ agent_id: 240, spawner: "agent:228", status: "terminated" }),
     makeAgent({ agent_id: 312, spawner: "agent:240", status: "idling" }),
   ];
-
   it("terminated hidden (default): 312 nests under 228, no orphan root, 240 row hidden", () => {
     state.showTerminated = false;
     state.agents = lineageRoster();
@@ -237,7 +201,6 @@ describe("agent tree: live child of a terminated parent mounts on the nearest vi
     expect(screen.getByTestId("row-312").getAttribute("data-depth")).toBe("1");
     expect(screen.queryByTestId("row-240")).toBeNull();
   });
-
   it("opening archive preserves the live tree and exposes the historical row separately", async () => {
     state.showTerminated = true;
     state.agents = lineageRoster();
@@ -257,7 +220,6 @@ describe("Flat view mode", () => {
     fireEvent.click(screen.getByTestId("sidebar-settings"));
     expect(screen.getByText("ID")).toBeTruthy();
   });
-
   it("sort popover: opening shows the three keys; clicking the active key flips direction", () => {
     state.sidebarViewMode = "flat";
     state.agents = [makeAgent({ agent_id: 2 }), makeAgent({ agent_id: 1 })];
@@ -273,7 +235,6 @@ describe("Flat view mode", () => {
     // meiva:link ui/web/src/docs/frontend-components/frontend-components.meiva.okf.md
     expect(screen.getByText("ID").closest("button")?.textContent).toContain("↑");
   });
-
   it("renders agents as flat list when viewMode=flat", () => {
     state.sidebarViewMode = "flat";
     state.agents = [makeAgent({ agent_id: 1 }), makeAgent({ agent_id: 2 })];
@@ -281,7 +242,6 @@ describe("Flat view mode", () => {
     expect(screen.getByTestId("row-1")).toBeTruthy();
     expect(screen.getByTestId("row-2")).toBeTruthy();
   });
-
   it("defaults to id descending; clicking the active key reverses direction", () => {
     state.sidebarViewMode = "flat";
     state.agents = [makeAgent({ agent_id: 2 }), makeAgent({ agent_id: 1 })];
@@ -312,7 +272,6 @@ describe("Header layout + search overlay (task #723)", () => {
       "Hide sidebar",
     ]);
   });
-
   it("clicking the search button opens the floating overlay", () => {
     state.agents = [makeAgent({ agent_id: 1 })];
     wrap(<AgentSidebar {...handlers} />);
@@ -320,7 +279,6 @@ describe("Header layout + search overlay (task #723)", () => {
     fireEvent.click(screen.getByLabelText("Search agents"));
     expect(screen.getByLabelText("Search agent")).toBeTruthy();
   });
-
   it("typing pushes the query to the store; picking a result selects + closes", () => {
     state.agents = [
       makeAgent({ agent_id: 1, label: "alpha" }),
@@ -337,7 +295,6 @@ describe("Header layout + search overlay (task #723)", () => {
     expect(state.setActiveId).toHaveBeenCalledWith(2);
     expect(screen.queryByLabelText("Search agent")).toBeNull();
   });
-
   it("Esc closes the overlay", () => {
     state.agents = [makeAgent({ agent_id: 1 })];
     wrap(<AgentSidebar {...handlers} />);
@@ -345,7 +302,6 @@ describe("Header layout + search overlay (task #723)", () => {
     fireEvent.keyDown(window, { key: "Escape" });
     expect(screen.queryByLabelText("Search agent")).toBeNull();
   });
-
   it("clicking the dimmed backdrop closes the overlay", () => {
     state.agents = [makeAgent({ agent_id: 1 })];
     wrap(<AgentSidebar {...handlers} />);
@@ -353,7 +309,6 @@ describe("Header layout + search overlay (task #723)", () => {
     fireEvent.click(screen.getByTestId("search-overlay-backdrop"));
     expect(screen.queryByLabelText("Search agent")).toBeNull();
   });
-
   it("mount with sidebarCollapsed=true preserves the active session choice", () => {
     state.sidebarCollapsed = true;
     state.agents = [makeAgent({ agent_id: 1 })];
@@ -373,7 +328,6 @@ describe("Search is overlay-only (task #750: sidebar list is NOT filtered)", () 
     expect(screen.getByTestId("row-1")).toBeTruthy();
     expect(screen.getByTestId("row-2")).toBeTruthy();
   });
-
   it("searchQuery matches a label → sidebar still shows every agent", () => {
     state.searchQuery = "alpha";
     state.agents = [
@@ -384,7 +338,6 @@ describe("Search is overlay-only (task #750: sidebar list is NOT filtered)", () 
     expect(screen.getByTestId("row-1")).toBeTruthy();
     expect(screen.getByTestId("row-2")).toBeTruthy();
   });
-
   it("searchQuery matches an id → sidebar still shows every agent", () => {
     state.searchQuery = "2";
     state.agents = [
@@ -395,14 +348,12 @@ describe("Search is overlay-only (task #750: sidebar list is NOT filtered)", () 
     expect(screen.getByTestId("row-1")).toBeTruthy();
     expect(screen.getByTestId("row-2")).toBeTruthy();
   });
-
   it("searchQuery matches nothing → sidebar still shows every agent", () => {
     state.searchQuery = "nonexistent";
     state.agents = [makeAgent({ agent_id: 1 })];
     wrap(<AgentSidebar {...handlers} />);
     expect(screen.getByTestId("row-1")).toBeTruthy();
   });
-
   it("overlay results are agent-id DESCENDING (task #750)", () => {
     state.agents = [
       makeAgent({ agent_id: 1, label: "alpha" }),
@@ -416,7 +367,6 @@ describe("Search is overlay-only (task #750: sidebar list is NOT filtered)", () 
       .map((el) => Number(el.getAttribute("data-testid")!.replace("overlay-result-", "")));
     expect(results).toEqual([3, 2, 1]);
   });
-
   it("overlay row shows `#id · label`, matching sidebar rows (task #750)", () => {
     state.agents = [makeAgent({ agent_id: 7, label: "worker" })];
     wrap(<AgentSidebar {...handlers} />);
@@ -427,7 +377,6 @@ describe("Search is overlay-only (task #750: sidebar list is NOT filtered)", () 
 
 describe("agent status quick toggle (display.show_agent_status)", () => {
   const openSettings = () => fireEvent.click(screen.getByTestId("sidebar-settings"));
-
   it("defaults off → the settings popover offers the 'Show agent status' toggle", () => {
     state.agents = [makeAgent({ agent_id: 1 })];
     wrap(<AgentSidebar {...handlers} />);
@@ -435,7 +384,6 @@ describe("agent status quick toggle (display.show_agent_status)", () => {
     const btn = screen.getByRole("button", { name: "Show agent status" });
     expect(btn.getAttribute("aria-pressed")).toBe("false");
   });
-
   it("click toggle (off) → setSetting('display.show_agent_status', true)", () => {
     state.agents = [makeAgent({ agent_id: 1 })];
     wrap(<AgentSidebar {...handlers} />);
@@ -443,7 +391,6 @@ describe("agent status quick toggle (display.show_agent_status)", () => {
     fireEvent.click(screen.getByRole("button", { name: "Show agent status" }));
     expect(state.setSetting).toHaveBeenCalledWith("display.show_agent_status", true);
   });
-
   it("enabled → toggle reads 'Hide agent status'; click → setSetting(false)", () => {
     state.userSettings = { "display.show_agent_status": true };
     state.agents = [makeAgent({ agent_id: 1 })];
@@ -466,7 +413,6 @@ describe("awaiting-reply indicator (notification.awaiting_reply)", () => {
     blocking: false,
     created_at: "2026-06-06T00:00:00Z",
   };
-
   it("default off → no waiting indicator even when agents have open notices", () => {
     state.agents = [
       makeAgent({
@@ -478,7 +424,6 @@ describe("awaiting-reply indicator (notification.awaiting_reply)", () => {
     wrap(<AgentSidebar {...handlers} />);
     expect(screen.queryByTitle(/waiting on you/)).toBeNull();
   });
-
   it("opted in → red-dot indicator with the cross-agent count", () => {
     state.userSettings = { "notification.awaiting_reply": true };
     state.agents = [
@@ -498,7 +443,6 @@ describe("awaiting-reply indicator (notification.awaiting_reply)", () => {
     const link = screen.getByRole("link", { name: /2/ });
     expect(link.getAttribute("href")).toBe("/fleet?agent_id=2");
   });
-
   it("opted in but nothing waiting → no indicator", () => {
     state.userSettings = { "notification.awaiting_reply": true };
     state.agents = [makeAgent({ agent_id: 1 })];
@@ -511,7 +455,6 @@ describe("stable ID ordering (RCS: no resort on status / activity change)", () =
   it("default sort is pinned to id descending", () => {
     expect(SIDEBAR_SORT_DEFAULT).toEqual({ key: "id", dir: "desc" });
   });
-
   it("status + last_active_at changes never reorder rows under the default sort", () => {
     state.sidebarViewMode = "flat";
     state.agents = [
@@ -530,7 +473,6 @@ describe("stable ID ordering (RCS: no resort on status / activity change)", () =
     const order = () =>
       screen.getAllByTestId(/^row-/).map((r) => r.getAttribute("data-testid"));
     expect(order()).toEqual(["row-3", "row-2", "row-1"]);
-
     state.agents = [
       makeAgent({ agent_id: 1, status: "running", last_active_at: "2026-05-16T00:00:00Z" }),
       makeAgent({ agent_id: 2, status: "idling", last_active_at: "2026-05-15T02:00:00Z" }),

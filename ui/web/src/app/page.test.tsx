@@ -3,23 +3,13 @@
 // top-level wiring and state flow (send asks the timeline to stay with a
 // follower, handleSend errors bubble to toast, composerMode tri-state).
 // meiva:link ui/web/src/docs/frontend-state/frontend-state.meiva.okf.md
-
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-
 import { api } from "@/lib/transport/api";
 import { FLEX, FLEX_1, FLEX_COL, MIN_H_0, MIN_W_0 } from "@/lib/layout/layout";
 import { LAYOUT_INVARIANTS, LAYOUT_VIEWPORT_TIERS } from "@/lib/layout/layout";
-import {
-  ComposerMock,
-  hooksState,
-  inspectorMockState,
-  makeAgent,
-  resetHomePageTestState,
-  wrap,
-} from "./_page_test_harness";
-
+import { ComposerMock, hooksState, inspectorMockState, makeAgent, resetHomePageTestState, wrap } from "./_page_test_harness";
 vi.mock("@/lib/agents/use-agents", () => ({
   useAgents: () => ({
     agents: hooksState.agents,
@@ -37,7 +27,6 @@ vi.mock("@/lib/agents/use-agents", () => ({
     refresh: vi.fn(),
   }),
 }));
-
 vi.mock("@/lib/timeline/use-timeline", () => ({
   useTimeline: () => ({
     items: hooksState.timelineItems,
@@ -51,34 +40,21 @@ vi.mock("@/lib/timeline/use-timeline", () => ({
     retryTimeline: hooksState.retryTimeline,
   }),
 }));
-
 vi.mock("@/lib/inspector/use-token-usage", () => ({
-  useTokenUsage: () => ({
-    contextTokens: 0,
-    maxContextTokens: 0,
-    softCompactTokens: 0,
-    hardCompactTokens: 0,
-  }),
+  useTokenUsage: () => ({ contextTokens: 0, maxContextTokens: 0, softCompactTokens: 0, hardCompactTokens: 0 }),
 }));
-
 vi.mock("@/lib/state/use-user-settings", () => ({
-  useUserSettings: () => ({
-    settings: hooksState.settings,
-    setSetting: hooksState.setSetting,
-    isLoading: false,
-  }),
+  useUserSettings: () => ({ settings: hooksState.settings, setSetting: hooksState.setSetting, isLoading: false }),
 }));
-
 vi.mock("@/lib/transport/useEventStream", () => ({
   EventStreamProvider: ({ children }: { children: React.ReactNode }) => children,
   AgentEventStreamProvider: ({ children }: { children: React.ReactNode }) => children,
   useEventStream: vi.fn(),
   useAgentEventStream: vi.fn(),
 }));
-
 vi.mock("@/lib/state/store", () => ({
-  useStore: <T,>(selector: (s: unknown) => T): T => {
-    const fakeState = {
+  useStore: <T,>(selector: (s: unknown) => T): T =>
+    selector({
       toast: hooksState.toast,
       showToast: hooksState.showToast,
       focusComposer: hooksState.focusComposer,
@@ -91,24 +67,15 @@ vi.mock("@/lib/state/store", () => ({
       agents: hooksState.agents,
       ancestors: [],
       activeAgent: hooksState.agents.find((a) => a.agent_id === hooksState.activeId),
-    };
-    return selector(fakeState);
-  },
+    }),
 }));
-
 vi.mock("@/lib/layout/breakpoint", () => ({
-  useBreakpoint: () => ({
-    tier: hooksState.isDesktop ? "xl" : "xs",
-    isNarrow: !hooksState.isDesktop,
-    isLarge: hooksState.isLarge,
-  }),
+  useBreakpoint: () => ({ tier: hooksState.isDesktop ? "xl" : "xs", isNarrow: !hooksState.isDesktop, isLarge: hooksState.isLarge }),
 }));
-
 vi.mock("@/lib/timeline/timeline-store", () => ({
   useTimelineStore: <T,>(selector: (s: unknown) => T): T =>
     selector({ requestScrollToBottom: hooksState.requestScrollToBottom }),
 }));
-
 vi.mock("@/lib/transport/api", () => ({
   API_BASE: "",
   MessageDeliveryUnknownError: class MessageDeliveryUnknownError extends Error {
@@ -125,17 +92,14 @@ vi.mock("@/lib/transport/api", () => ({
     getReplySuggestion: vi.fn(),
   },
 }));
-
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ bfcacheId: "_b_test_" }),
 }));
-
 vi.mock("@/components/agent-sidebar", () => ({
   AgentSidebar: ({ onSpawn }: { onSpawn: (opts: { machine?: string; model?: string }) => void }) => (
     <button data-testid="sidebar-spawn" onClick={() => { onSpawn({}); }}>spawn</button>
   ),
 }));
-
 vi.mock("@/components/shell/header-bar", () => ({
   HeaderBar: ({
     label,
@@ -151,7 +115,6 @@ vi.mock("@/components/shell/header-bar", () => ({
     </header>
   ),
 }));
-
 vi.mock("@/components/timeline", () => ({
   TimelineView: ({ turnActive, maxWidthCss, items }: { turnActive?: boolean; maxWidthCss?: string; items: unknown[] }) => (
     <div
@@ -162,21 +125,17 @@ vi.mock("@/components/timeline", () => ({
     />
   ),
 }));
-
 vi.mock("@/components/conversation/composer", () => ({
   Composer: ComposerMock,
 }));
-
 vi.mock("@/components/conversation/upload-button", () => ({
   UploadButton: ({ agentId }: { agentId: number | null }) => (
     <div data-testid="upload-button" data-agent-id={agentId ?? "null"} />
   ),
 }));
-
 vi.mock("@/components/content/content-toggle", () => ({
   ContentToggle: () => <div data-testid="content-toggle" />,
 }));
-
 vi.mock("@/components/inspector/inspector-panel", async () => {
   const React = await import("react");
   return {
@@ -191,9 +150,7 @@ vi.mock("@/components/inspector/inspector-panel", async () => {
     },
   };
 });
-
 import HomePage from "./page";
-
 afterEach(cleanup);
 beforeEach(resetHomePageTestState);
 
@@ -202,7 +159,6 @@ describe("HomePage reply suggestion", () => {
     { item_id: "1.0", kind: "inbound_chat", source: "user", payload: "deploy?" },
     { item_id: "2.0", kind: "agent_chat", source: null, payload: "Deploy now?" },
   ];
-
   beforeEach(() => {
     vi.useFakeTimers();
     vi.mocked(api.getReplySuggestion).mockResolvedValue({ suggestions: ["Yes, go ahead.", "Not yet."], reason: null });
@@ -211,53 +167,40 @@ describe("HomePage reply suggestion", () => {
     hooksState.timelineItems = agentSpoke;
     hooksState.settings = { "display.timeline_width_ratio": 0.4, "behavior.replySuggestions": true };
   });
-
   afterEach(() => {
     vi.useRealTimers();
   });
-
   it("hands the drafted reply to the composer after the quiet period", async () => {
     wrap(<HomePage />);
     expect(screen.getByTestId("composer").getAttribute("data-suggestion")).toBe("");
-
     await act(async () => {
       await vi.advanceTimersByTimeAsync(1000);
     });
-
     expect(api.getReplySuggestion).toHaveBeenCalledWith(5, expect.any(AbortSignal));
     expect(screen.getByTestId("composer").getAttribute("data-suggestion")).toBe("Yes, go ahead.|Not yet.");
   });
-
   it("never asks while the agent is running", async () => {
     hooksState.agents = [makeAgent({ agent_id: 5, status: "running" })];
     wrap(<HomePage />);
-
     await act(async () => {
       await vi.advanceTimersByTimeAsync(5000);
     });
-
     expect(api.getReplySuggestion).not.toHaveBeenCalled();
   });
-
   it("never asks while the turn signal is active", async () => {
     hooksState.turnActive = true;
     wrap(<HomePage />);
-
     await act(async () => {
       await vi.advanceTimersByTimeAsync(5000);
     });
-
     expect(api.getReplySuggestion).not.toHaveBeenCalled();
   });
-
   it("never asks when the user turned the setting off", async () => {
     hooksState.settings = { "display.timeline_width_ratio": 0.4, "behavior.replySuggestions": false };
     wrap(<HomePage />);
-
     await act(async () => {
       await vi.advanceTimersByTimeAsync(5000);
     });
-
     expect(api.getReplySuggestion).not.toHaveBeenCalled();
   });
 });
@@ -272,14 +215,12 @@ describe("HomePage top-level render", () => {
     expect(screen.getByRole("alert").textContent).toContain("Checkpoint history unavailable for agent 42");
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
     expect(hooksState.retryTimeline).toHaveBeenCalledOnce();
-
     hooksState.timelineError = null;
     hooksState.timelineItems = [{ item_id: "0.1", kind: "agent_chat", payload: "read restored" }];
     view.rerender(<QueryClientProvider client={new QueryClient()}><HomePage /></QueryClientProvider>);
     expect(screen.queryByRole("alert")).toBeNull();
     expect(screen.getByTestId("timeline").getAttribute("data-item-count")).toBe("1");
   });
-
   it("shows a refresh failure without replacing loaded history, and disables Retry during its read", () => {
     hooksState.activeId = 42;
     hooksState.agents = [makeAgent({ agent_id: 42 })];
@@ -294,13 +235,11 @@ describe("HomePage top-level render", () => {
     fireEvent.click(retry);
     expect(hooksState.retryTimeline).not.toHaveBeenCalled();
   });
-
   it("activeId=null → composer 'disabled' + label '…'", () => {
     wrap(<HomePage />);
     expect(screen.getByTestId("composer").getAttribute("data-mode")).toBe("disabled");
     expect(screen.getByTestId("header-bar").getAttribute("data-label")).toBe("…");
   });
-
   it("activeId not null + agent in list → label contains #N + label (status moved to the inspector, task #3904)", () => {
     hooksState.activeId = 5;
     hooksState.agents = [
@@ -317,7 +256,6 @@ describe("HomePage top-level render", () => {
     // meiva:link ui/web/src/docs/frontend-components/home-shell-chrome/home-shell-chrome.meiva.okf.md
     expect(label).not.toContain("Meiva");
   });
-
   it("keeps the agent label while Inspector mode is on", () => {
     // meiva:note
     // Inspector changes what the right column shows, not which conversation the
@@ -333,7 +271,6 @@ describe("HomePage top-level render", () => {
     expect(label).toContain("Agent #5");
     expect(label).not.toContain("Inspector");
   });
-
   it("toast is NOT rendered by the page (the renderer moved to the root ToastHost in Providers, Task #1051)", () => {
     hooksState.toast = "Save failed: 500";
     wrap(<HomePage />);
@@ -409,7 +346,6 @@ describe("HomePage top-level render", () => {
     // shared checklist cannot drift.
     expect(LAYOUT_VIEWPORT_TIERS).toEqual([320, 390, 768]);
   });
-
   it("content column maxWidth follows display.timeline_width_ratio", () => {
     hooksState.settings = { "display.timeline_width_ratio": 0.6 };
     wrap(<HomePage />);
@@ -434,7 +370,6 @@ describe("HomePage top-level render", () => {
       screen.getByTestId("timeline-surface"),
     );
   });
-
   it("desktop viewport → content column keeps the ratio cap", () => {
     hooksState.isDesktop = true;
     hooksState.settings = { "display.timeline_width_ratio": 0.6 };
@@ -456,7 +391,6 @@ describe("HomePage top-level render", () => {
     expect(hooksState.setSetting).not.toHaveBeenCalled();
     expect(hooksState.setMobileInspectorOpen).not.toHaveBeenCalled();
   });
-
   it("mobile mount with the setting open still does not open the overlay (task #793)", () => {
     hooksState.isLarge = false;
     hooksState.settings = { "display.inspector_open": true };
@@ -464,7 +398,6 @@ describe("HomePage top-level render", () => {
     expect(hooksState.setSetting).not.toHaveBeenCalled();
     expect(hooksState.setMobileInspectorOpen).not.toHaveBeenCalled();
   });
-
   it("renders an open inspector beside HomeContent in the desktop resizable group", async () => {
     hooksState.activeId = 5;
     hooksState.agents = [makeAgent({ agent_id: 5 })];
@@ -487,7 +420,6 @@ describe("HomePage top-level render", () => {
     expect(inspectorPanel?.parentElement).toBe(timelineGroup);
     expect(inspectorPanel?.previousElementSibling?.getAttribute("role")).toBe("separator");
   });
-
   it("keeps a healthy inspector mounted across an agent switch (no remount, task #3894)", async () => {
     hooksState.activeId = 5;
     hooksState.agents = [makeAgent({ agent_id: 5 }), makeAgent({ agent_id: 6 })];
@@ -498,7 +430,6 @@ describe("HomePage top-level render", () => {
     const { rerender } = wrap(<HomePage />);
     await screen.findByTestId("inspector-panel");
     expect(inspectorMockState.mounts).toBe(1);
-
     hooksState.activeId = 6;
     const qc = new QueryClient({
       defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
@@ -512,7 +443,6 @@ describe("HomePage top-level render", () => {
     // Same mounted instance — no `key=` remount on the agent switch.
     expect(inspectorMockState.mounts).toBe(1);
   });
-
   it("renders ErrorBoundary fallback when inspector panel throws a render error", async () => {
     hooksState.activeId = 5;
     hooksState.agents = [makeAgent({ agent_id: 5 })];
@@ -525,13 +455,11 @@ describe("HomePage top-level render", () => {
       /* silence error logs in test */
     });
     wrap(<HomePage />);
-
     expect(await screen.findByText("Something went wrong")).toBeTruthy();
     expect(screen.getByText("Simulated inspector render crash")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Retry" })).toBeTruthy();
     consoleSpy.mockRestore();
   });
-
   it("resets the inspector ErrorBoundary when activeId changes via resetKey", async () => {
     hooksState.activeId = 5;
     hooksState.agents = [makeAgent({ agent_id: 5 }), makeAgent({ agent_id: 6 })];
@@ -544,9 +472,7 @@ describe("HomePage top-level render", () => {
       /* silence error logs in test */
     });
     const { rerender } = wrap(<HomePage />);
-
     expect(await screen.findByText("Something went wrong")).toBeTruthy();
-
     inspectorMockState.shouldThrow = false;
     hooksState.activeId = 6;
     const qc = new QueryClient({
@@ -557,7 +483,6 @@ describe("HomePage top-level render", () => {
         <HomePage />
       </QueryClientProvider>,
     );
-
     expect(await screen.findByTestId("inspector-panel")).toBeTruthy();
     expect(screen.queryByText("Something went wrong")).toBeNull();
     // Recovery rendered a fresh panel (its first successful mount); the

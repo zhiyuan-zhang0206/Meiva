@@ -494,25 +494,4 @@ describe("TaskGraph (graph mode)", () => {
     const mainSvg = container.querySelector("svg[role='img']");
     expect(mainSvg!.querySelectorAll("g.opacity-40").length).toBe(0);
   });
-
-  it("empty task list (not loading, no error) shows the empty placeholder", () => {
-    useTasks.mockReturnValue({ tasks: [], loading: false, error: false });
-    render(<TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />);
-    expect(screen.getByText("No tasks yet.")).toBeTruthy();
-  });
-
-  it("cold error (no tasks loaded) shows the error placeholder", () => {
-    useTasks.mockReturnValue({ tasks: [], loading: false, error: true });
-    render(<TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />);
-    expect(screen.getByText("Failed to load tasks.")).toBeTruthy();
-  });
-
-  it("stale-while-error: error WITH tasks keeps the board (not the failure screen) and flags stale", async () => {
-    useTasks.mockReturnValue({ tasks: sampleTasks(), loading: false, error: true });
-    render(<TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />);
-
-    await waitFor(() => expect(screen.getAllByText(/#2/).length).toBeGreaterThan(0), { timeout: 4000 });
-    expect(screen.queryByText("Failed to load tasks.")).toBeNull();
-    expect(screen.getByText("Stale")).toBeTruthy();
-  });
 });

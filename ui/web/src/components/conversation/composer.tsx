@@ -1,13 +1,24 @@
 "use client";
 
-import { newOperationKey as newClientMessageId } from "@/lib/transport/operation-key";
-
 import { useQuery } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { ContextButton } from "@/components/inspector/context-breakdown";
-import { ContextMeterGhost } from "@/components/inspector/context-meter";
+import {
+  ComposerAttachmentStrip,
+  ComposerMetaRow,
+  draftKey,
+  handleComposerKeyDown,
+  isAttempt,
+  readSendAttempt,
+  readSession,
+  removeSession,
+  resolveSendAttempt,
+  sendAttemptKey,
+  writeSession,
+  type PendingImage,
+  type SendAttempt,
+} from "@/components/conversation/composer-helpers";
 import {
   parseSlash,
   SlashAutocomplete,
@@ -44,84 +55,6 @@ interface Props {
   agentTerminated?: boolean;
   maxWidthCss?: string;
   suggestions?: readonly string[] | null;
-}
-
-interface PendingImage {
-  key: string;
-  name: string;
-  previewUrl: string;
-  url?: string;
-  status: "uploading" | "ready" | "error";
-}
-
-const draftKey = (id: number) => `composer-draft-${id}`;
-const sendAttemptKey = (id: number) => `composer-send-attempt-${id}`;
-
-interface SendAttempt {
-  signature: string;
-  clientMessageId: string;
-  agentId: number | null;
-  content: string;
-  imageUrls: string[];
-}
-
-function isAttempt(attempt: SendAttempt | null, clientMessageId: string): boolean {
-  return attempt?.clientMessageId === clientMessageId;
-}
-
-const memorySession = new Map<string, string | null>();
-
-function readSession(key: string): string | null {
-  if (memorySession.has(key)) return memorySession.get(key) ?? null;
-  try {
-    return sessionStorage.getItem(key);
-  } catch {
-    return null;
-  }
-}
-
-function writeSession(key: string, value: string): void {
-  memorySession.set(key, value);
-  try {
-    sessionStorage.setItem(key, value);
-  } catch {
-    return;
-  }
-  memorySession.delete(key);
-}
-
-function removeSession(key: string): void {
-  memorySession.set(key, null);
-  try {
-    sessionStorage.removeItem(key);
-  } catch {
-    return;
-  }
-  memorySession.delete(key);
-}
-
-function readSendAttempt(agentId: number): SendAttempt | null {
-  try {
-    const parsed = JSON.parse(readSession(sendAttemptKey(agentId)) ?? "null") as unknown;
-    if (
-      typeof parsed !== "object" ||
-      parsed === null ||
-      !("signature" in parsed) ||
-      typeof parsed.signature !== "string" ||
-      !("clientMessageId" in parsed) ||
-      typeof parsed.clientMessageId !== "string" ||
-      !("content" in parsed) ||
-      typeof parsed.content !== "string" ||
-      !("imageUrls" in parsed) ||
-      !Array.isArray(parsed.imageUrls) ||
-      !parsed.imageUrls.every((url) => typeof url === "string")
-    ) {
-      return null;
-    }
-    return parsed as SendAttempt;
-  } catch {
-    return null;
-  }
 }
 
 export function Composer({ mode, onSend, onStop, onUploadFiles, onAttachImage, filesUploading = false, focusToken, contextTokens, contextPending = false, maxContextTokens = 0, softCompactTokens = 0, hardCompactTokens = 0, agentId = null, agentTerminated = false, showContextMeter = false, maxWidthCss, suggestions = null, children }: Props) {
@@ -312,22 +245,7 @@ export function Composer({ mode, onSend, onStop, onUploadFiles, onAttachImage, f
     const sendingAgentId = agentId;
     let activeAttempt: SendAttempt | null = null;
     try {
-      const signature = JSON.stringify([sendingAgentId, content, imageUrls]);
-      let candidate = sendAttemptRef.current;
-      if (candidate?.signature !== signature && sendingAgentId != null) {
-        const persisted = readSendAttempt(sendingAgentId);
-        candidate = persisted?.signature === signature ? persisted : null;
-      }
-      const attempt: SendAttempt =
-        candidate?.signature === signature
-          ? candidate
-          : {
-              signature,
-              clientMessageId: newClientMessageId(),
-              agentId: sendingAgentId,
-              content,
-              imageUrls: [...imageUrls],
-            };
+      const attempt = resolveSendAttempt(sendAttemptRef.current, sendingAgentId, content, imageUrls);
       activeAttempt = attempt;
       sendAttemptRef.current = attempt;
       if (sendingAgentId != null) {
@@ -455,29 +373,18 @@ export function Composer({ mode, onSend, onStop, onUploadFiles, onAttachImage, f
       )}
     >
       <div className={cn("gap-2 border-t border-border pt-2", FLEX, FLEX_COL)}>
-      {commandHint !== null || (showContextMeter && contextTokens > 0) || (showContextMeter && contextPending) ? (
-      <div className={cn("relative items-center gap-2 px-0.5 text-xs text-muted-foreground h-4 leading-4", FLEX, MIN_W_0)}>
-        <span data-testid="composer-meta" className={cn("truncate", commandHint && "italic", MIN_W_0)}>
-          {commandHint ??
-            (showContextMeter ? (
-              contextTokens > 0 ? (
-                <ContextButton
-                  agentId={agentId}
-                  open={breakdownOpen}
-                  onOpenChange={handleBreakdownOpenChange}
-                  contextTokens={contextTokens}
-                  maxContextTokens={maxContextTokens}
-                  softCompactTokens={softCompactTokens}
-                  hardCompactTokens={hardCompactTokens}
-                  showText={false}
-                />
-              ) : contextPending ? (
-                <ContextMeterGhost />
-              ) : null
-            ) : null)}
-        </span>
-      </div>
-      ) : null}
+      <ComposerMetaRow
+        commandHint={commandHint}
+        showContextMeter={showContextMeter}
+        contextTokens={contextTokens}
+        contextPending={contextPending}
+        agentId={agentId}
+        breakdownOpen={breakdownOpen}
+        onBreakdownOpenChange={handleBreakdownOpenChange}
+        maxContextTokens={maxContextTokens}
+        softCompactTokens={softCompactTokens}
+        hardCompactTokens={hardCompactTokens}
+      />
       {filesUploading ? (
         <div
           role="status"
@@ -487,45 +394,11 @@ export function Composer({ mode, onSend, onStop, onUploadFiles, onAttachImage, f
           {t("filesUploadingHint")}
         </div>
       ) : null}
-      {images.length > 0 ? (
-        <div className={cn("flex-wrap gap-2 px-0.5 pb-1", FLEX)} data-testid="composer-attachments">
-          {images.map((img) => (
-            <div key={img.key} className="relative">
-              <picture>
-                <img
-                  src={img.previewUrl}
-                  alt={img.name}
-                  className={cn(
-                    "h-14 w-14 rounded border border-border object-cover",
-                    img.status === "uploading" && "opacity-50",
-                    img.status === "error" && "ring-1 ring-destructive",
-                  )}
-                />
-              </picture>
-              {img.status !== "ready" ? (
-                <span
-                  className={cn(
-                    "absolute inset-0 items-center justify-center text-[10px]",
-                    img.status === "error" ? "text-destructive" : "text-muted-foreground",
-                    FLEX
-                  )}
-                >
-                  {img.status === "error" ? t("failed") : "…"}
-                </span>
-              ) : null}
-              <button
-                type="button"
-                aria-label={t("removeImage", { name: img.name })}
-                onClick={() => removeImage(img.key)}
-                disabled={composerLocked}
-                className={cn("absolute -right-1.5 -top-1.5 h-4 w-4 items-center justify-center rounded-full bg-foreground/80 text-background text-[10px] leading-none", FLEX)}
-              >
-                ×
-              </button>
-            </div>
-          ))}
-        </div>
-      ) : null}
+      <ComposerAttachmentStrip
+        images={images}
+        composerLocked={composerLocked}
+        onRemove={removeImage}
+      />
       <div className="relative">
         <SlashAutocomplete
           ref={acRef}
@@ -558,70 +431,28 @@ export function Composer({ mode, onSend, onStop, onUploadFiles, onAttachImage, f
           focusVisible={false}
           className={cn("font-mono text-base resize-none max-h-[50vh] overflow-y-auto min-h-9 py-1.5 leading-5", FLEX_1)}
           suppressHydrationWarning
-          onKeyDown={(e) => {
-            const composing = e.nativeEvent.isComposing || e.key === "Process";
-            const ac = acRef.current;
-            if (ac?.isOpen() && !composing) {
-              if (e.key === "ArrowDown") {
-                e.preventDefault();
-                ac.moveDown();
-                return;
-              }
-              if (e.key === "ArrowUp") {
-                e.preventDefault();
-                ac.moveUp();
-                return;
-              }
-              if (e.key === "Escape") {
-                e.preventDefault();
-                ac.close();
-                return;
-              }
-              if (e.key === "Tab" && !e.shiftKey) {
-                e.preventDefault();
-                ac.selectActive();
-                return;
-              }
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                if (ac.selectActive()) return;
-              }
-            }
-            if (
-              offeredSuggestion !== null &&
-              !composing &&
-              !composerLocked &&
-              !ac?.isOpen() &&
-              !e.shiftKey &&
-              !e.ctrlKey &&
-              !e.altKey &&
-              !e.metaKey
-            ) {
-              if (e.key === "ArrowRight") {
-                e.preventDefault();
-                acceptSuggestion(offeredSuggestion);
-                return;
-              }
-              if (
-                suggestions && suggestions.length > 1 &&
-                (e.key === "ArrowUp" || e.key === "ArrowDown")
-              ) {
-                e.preventDefault();
-                const step = e.key === "ArrowDown" ? 1 : -1;
+          onKeyDown={(e) =>
+            handleComposerKeyDown(e, {
+              ac: acRef.current,
+              offeredSuggestion,
+              composerLocked,
+              suggestions,
+              replyIndex,
+              agentId,
+              mode,
+              acceptSuggestion,
+              onCycleSuggestion: (nextIndex) => {
+                if (!suggestions) return;
                 setReplySelection({
-                  options: suggestions, agentId,
-                  index: Math.min(Math.max(replyIndex + step, 0), suggestions.length - 1),
+                  options: suggestions,
+                  agentId,
+                  index: nextIndex,
                   consumed: false,
                 });
-                return;
-              }
-            }
-            if (e.key === "Enter" && !e.shiftKey && !composing) {
-              e.preventDefault();
-              if (mode === "disabled") return;
-              submit();
-            }
-          }}
+              },
+              submit,
+            })
+          }
         />
         <SendButton
           data-testid="composer-send"

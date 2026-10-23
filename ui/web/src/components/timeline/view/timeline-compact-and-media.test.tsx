@@ -1,9 +1,7 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-
 import type { CompactTransitionBuffer } from "@/lib/layout/compact-transition";
 import { ChatMarkdownMock, PythonCodeMock, ScrollAreaMock, cleanupTimelineTest, displayLimits, historyWheel, makeItem, mockSettings, pullOlderAtTop, resetStore, toggleState, userSettingsState } from "./timeline-test-harness";
-
 vi.mock("@/lib/format/display-limits", async () => {
   const { useSyncExternalStore } = await import("react");
   return {
@@ -43,7 +41,6 @@ vi.mock("@/lib/state/use-user-settings", () => ({
   }),
 }));
 import { TimelineView } from "..";
-
 afterEach(cleanupTimelineTest);
 describe("continuous compact history", () => {
   it("preserves buffered history and masks canonical duplicates", () => {
@@ -77,7 +74,6 @@ describe("continuous compact history", () => {
     expect(container.querySelectorAll('[data-timeline-source="buffer"][data-display-rank="1"]')).not.toHaveLength(0);
     expect(container.querySelectorAll('[data-timeline-source="canonical"][data-item-id="1.0"]')).not.toHaveLength(0);
   });
-
   it("renders each segment in order without compact separators", () => {
     const items = [
       makeItem({
@@ -100,13 +96,10 @@ describe("continuous compact history", () => {
       makeItem({ item_id: "s1.newer-boundary.1.0", kind: "agent_chat", payload: "newer" }),
       makeItem({ item_id: "1.0", kind: "agent_chat", payload: "current" }),
     ];
-
     const { container } = render(<TimelineView items={items} />);
-
     expect(screen.queryByTestId("compact-history-divider")).toBeNull();
     expect(screen.queryByText("Original history before compact")).toBeNull();
     expect(screen.queryByText("Context compacted")).toBeNull();
-
     const timelineColumn = container.querySelector('[role="log"]');
     expect(timelineColumn).not.toBeNull();
     const renderedOrder = Array.from(timelineColumn?.querySelectorAll(":scope > [data-virtual-group] > *") ?? [])
@@ -129,13 +122,11 @@ describe("continuous compact history", () => {
       "1.0",
     ]);
   });
-
   it("keeps the oldest segment visible when it has no summary", () => {
     const items = [
       makeItem({ item_id: "s1.old-boundary.0.0", kind: "agent_chat", payload: "old" }),
       makeItem({ item_id: "1.0", kind: "agent_chat", payload: "current" }),
     ];
-
     const { container } = render(<TimelineView items={items} />);
     const timelineColumn = container.querySelector('[role="log"]');
     const renderedOrder = Array.from(timelineColumn?.querySelectorAll(":scope > [data-virtual-group] > *") ?? [])
@@ -149,11 +140,9 @@ describe("continuous compact history", () => {
           ? "divider"
           : node.getAttribute("data-item-id"),
       );
-
     expect(renderedOrder).toEqual(["s1.old-boundary.0.0", "1.0"]);
     expect(screen.queryByTestId("compact-history-divider")).toBeNull();
   });
-
   it("adds no compact separator and reveals the keyboard paging control only on focus", () => {
     const items = [
       makeItem({ item_id: "s1.old-boundary.0.0", kind: "agent_chat", payload: "old" }),
@@ -165,14 +154,12 @@ describe("continuous compact history", () => {
     expect(screen.queryByTestId("compact-history-divider")).toBeNull();
     expect(screen.getByTestId("load-older-keyboard").className).toContain("sr-only focus:not-sr-only");
   });
-
   it("lets a keyboard user request older messages without a wheel gesture", () => {
     const loadOlder = vi.fn();
     render(<TimelineView items={[makeItem({ item_id: "10.0", kind: "agent_chat", payload: "ten" })]} hasMoreOlder onLoadOlder={loadOlder} />);
     fireEvent.click(screen.getByRole("button", { name: "Load earlier messages" }));
     expect(loadOlder).toHaveBeenCalledOnce();
   });
-
   it("top arrival does not fetch; a separate pull requests one page only on release", () => {
     const loadOlder = vi.fn();
     const items = [makeItem({ item_id: "10.0", kind: "agent_chat", payload: "ten" })];
@@ -180,13 +167,11 @@ describe("continuous compact history", () => {
     const viewport = screen.getByTestId("scroll-viewport");
     Object.defineProperty(viewport, "scrollHeight", { value: 1200, configurable: true });
     Object.defineProperty(viewport, "clientHeight", { value: 600, configurable: true });
-
     viewport.scrollTop = 100;
     act(() => {
       viewport.dispatchEvent(new Event("scroll"));
     });
     expect(loadOlder).not.toHaveBeenCalled();
-
     viewport.scrollTop = 0;
     act(() => {
       viewport.dispatchEvent(new Event("scroll"));
@@ -200,14 +185,12 @@ describe("continuous compact history", () => {
     expect(loadOlder).not.toHaveBeenCalled();
     historyWheel(viewport, -20, true);
     expect(loadOlder).toHaveBeenCalledTimes(1);
-
     act(() => {
       viewport.dispatchEvent(new Event("scroll"));
     });
     historyWheel(viewport, -100, true);
     expect(loadOlder).toHaveBeenCalledTimes(1);
   });
-
   it("does not auto-load without older pages, and not while a load is already in flight (task #4186)", () => {
     const loadOlder = vi.fn();
     const items = [makeItem({ item_id: "10.0", kind: "agent_chat", payload: "ten" })];
@@ -218,14 +201,12 @@ describe("continuous compact history", () => {
       viewport.dispatchEvent(new Event("scroll"));
     });
     expect(loadOlder).not.toHaveBeenCalled();
-
     rerender(<TimelineView items={items} hasMoreOlder loadingOlder onLoadOlder={loadOlder} />);
     act(() => {
       viewport.dispatchEvent(new Event("scroll"));
     });
     expect(loadOlder).not.toHaveBeenCalled();
   });
-
   it("a failed load releases the anchor so the next deliberate pull can retry (QA #3031)", () => {
     const loadOlder = vi.fn();
     const items = [makeItem({ item_id: "10.0", kind: "agent_chat", payload: "ten" })];
@@ -233,7 +214,6 @@ describe("continuous compact history", () => {
     const viewport = screen.getByTestId("scroll-viewport");
     Object.defineProperty(viewport, "scrollHeight", { value: 1200, configurable: true });
     Object.defineProperty(viewport, "clientHeight", { value: 600, configurable: true });
-
     viewport.scrollTop = 100;
     viewport.dispatchEvent(new Event("scroll"));
     viewport.scrollTop = 0;
@@ -242,13 +222,10 @@ describe("continuous compact history", () => {
     });
     pullOlderAtTop(viewport);
     expect(loadOlder).toHaveBeenCalledTimes(1);
-
     rerender(<TimelineView items={items} hasMoreOlder loadingOlder onLoadOlder={loadOlder} />);
     rerender(<TimelineView items={items} hasMoreOlder onLoadOlder={loadOlder} />);
-
     viewport.scrollTop = 80;
     act(() => { viewport.dispatchEvent(new Event("scrollend")); });
-
     viewport.scrollTop = 240;
     act(() => {
       viewport.dispatchEvent(new Event("scroll"));
@@ -279,7 +256,6 @@ describe("ItemView: inbound_chat images", () => {
     const img = screen.getByAltText("attached image");
     expect(img.getAttribute("src")).toContain("/api/agents/7/uploads/shot.png");
   });
-
   it("attach item renders data-URI images raw (no API_BASE prefix)", () => {
     render(
       <TimelineView
@@ -296,7 +272,6 @@ describe("ItemView: inbound_chat images", () => {
     expect(img.getAttribute("src")).toBe("data:image/png;base64,iVBORw0KGgo=");
     expect(screen.getByText(/render.png/)).toBeTruthy();
   });
-
   it("image-only inbound hides the [image] placeholder text but shows the thumbnail", () => {
     render(
       <TimelineView
@@ -322,13 +297,11 @@ describe("ItemView: attach interleaving + lightbox (user 2026-08-27)", () => {
   const IMG1 = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB";
   const IMG2 = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAIAAAAB";
   const payload = `${NOTICE}\n${LINE1}\n${LINE2}`;
-
   const imgs = () => screen.getAllByAltText("attached image");
   const orderOf = (el: Element) => {
     const all = Array.from(document.body.querySelectorAll("*"));
     return all.indexOf(el);
   };
-
   it("interleaves label line → thumbnail → label line → thumbnail", () => {
     render(
       <TimelineView
@@ -350,7 +323,6 @@ describe("ItemView: attach interleaving + lightbox (user 2026-08-27)", () => {
     expect(orderOf(line2)).toBeLessThan(orderOf(img2));
     expect(document.body.querySelector('a[href^="data:image"]')).toBeNull();
   });
-
   it("renders a skipped (no-image) line in place without shifting alignment", () => {
     const skipped = "- [2] notes.pdf (application/pdf, 2.0 KiB) — not delivered: your model cannot receive pdf";
     render(
@@ -374,7 +346,6 @@ describe("ItemView: attach interleaving + lightbox (user 2026-08-27)", () => {
     expect(orderOf(sk)).toBeLessThan(orderOf(line2));
     expect(orderOf(line2)).toBeLessThan(orderOf(img2));
   });
-
   it("clicking a thumbnail opens the lightbox; backdrop click and Escape close it", () => {
     render(
       <TimelineView
@@ -401,7 +372,6 @@ describe("ItemView: attach interleaving + lightbox (user 2026-08-27)", () => {
     fireEvent.keyDown(window, { key: "Escape" });
     expect(screen.queryByTestId("attach-lightbox")).toBeNull();
   });
-
   it("lightbox traps focus while open and returns it to the trigger on close", () => {
     render(
       <TimelineView
@@ -429,7 +399,6 @@ describe("ItemView: attach interleaving + lightbox (user 2026-08-27)", () => {
     fireEvent.click(thumb1);
     expect(document.activeElement).toBe(screen.getByTestId("attach-lightbox"));
   });
-
   it("mounts the lightbox at document.body so the backdrop is not clipped by the contained timeline row", () => {
     render(
       <TimelineView
@@ -449,7 +418,6 @@ describe("ItemView: attach interleaving + lightbox (user 2026-08-27)", () => {
     expect(lightbox.closest("[data-item-id]")).toBeNull();
     expect(lightbox.className).toContain("fixed inset-0 z-50");
   });
-
   it("enlarged image is capped at 80% of the viewport (contain, no upscale)", () => {
     render(
       <TimelineView
@@ -495,7 +463,6 @@ describe("ItemView: attach interleaving + lightbox (user 2026-08-27)", () => {
     expect(img!.className).toContain("max-w-[16rem]");
     expect(img!.className).toContain("object-contain");
   });
-
   it("legacy attach (images without image_captions) still renders thumbnails without navigation", () => {
     render(
       <TimelineView

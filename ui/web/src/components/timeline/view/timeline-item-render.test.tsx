@@ -1,8 +1,6 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-
 import { ChatMarkdownMock, PythonCodeMock, ScrollAreaMock, cleanupTimelineTest, displayLimits, makeItem, mockSettings, resetStore, revealCollapsedCards, setToggleState, setUserSettings, toggleState, userSettingsState } from "./timeline-test-harness";
-
 vi.mock("@/lib/format/display-limits", async () => {
   const { useSyncExternalStore } = await import("react");
   return {
@@ -42,7 +40,6 @@ vi.mock("@/lib/state/use-user-settings", () => ({
   }),
 }));
 import { TimelineView } from "..";
-
 afterEach(cleanupTimelineTest);
 describe("ItemView: agent_chat", () => {
   it("partial=false → does not show 'streaming…' marker", () => {
@@ -53,7 +50,6 @@ describe("ItemView: agent_chat", () => {
     expect(screen.queryByText(/streaming interrupted/i)).toBeNull();
     expect(screen.getByTestId("chat-markdown").textContent).toBe("hello");
   });
-
   it("partial=true → shows 'streaming…' label + ellipsis prefix", () => {
     render(
       <TimelineView
@@ -62,7 +58,6 @@ describe("ItemView: agent_chat", () => {
     );
     expect(screen.getByText(/streaming/)).toBeTruthy();
   });
-
   it("interrupted=true → shows 'streaming interrupted' label + InterruptedNotice", () => {
     render(
       <TimelineView
@@ -91,7 +86,6 @@ describe("ItemView: agent_code + agent_reasoning", () => {
     expect(screen.getByTestId("python-code").textContent).toBe("print(1)");
     expect(screen.getByText(/1 line of code/)).toBeTruthy();
   });
-
   it("agent_code streamingCode=true on last item → PythonCode streaming=1", () => {
     render(
       <TimelineView
@@ -101,7 +95,6 @@ describe("ItemView: agent_code + agent_reasoning", () => {
     );
     expect(screen.getByTestId("python-code").getAttribute("data-streaming")).toBe("1");
   });
-
   it("agent_reasoning renders markdown by default below a 'Thinking' toggle chip", () => {
     render(
       <TimelineView
@@ -111,7 +104,6 @@ describe("ItemView: agent_code + agent_reasoning", () => {
     expect(screen.getByTestId("chat-markdown").textContent).toBe("thinking...");
     expect(screen.getByText("Thinking")).toBeTruthy();
   });
-
   it("agent_reasoning renders raw text when markdown rendering is disabled", () => {
     setUserSettings({ "display.render_reasoning_markdown": false });
     render(
@@ -126,7 +118,6 @@ describe("ItemView: agent_code + agent_reasoning", () => {
 
 describe("ItemView: system_prompt", () => {
   const PROMPT = "You are Meiva.\nAct via execute_code.\nThird line.";
-
   it("collapsed by default in 'none' mode: turn wraps the prompt unlabeled, body is hidden", () => {
     setToggleState({ detailsMode: "none" });
     render(
@@ -139,7 +130,6 @@ describe("ItemView: system_prompt", () => {
     expect(screen.queryByText(/Act via execute_code/)).toBeNull();
     expect(screen.queryByText("· 3 lines")).toBeNull();
   });
-
   it("clicking the turn toggle opens the prompt card collapsed; a second click expands it", () => {
     setToggleState({ detailsMode: "none" });
     render(
@@ -153,7 +143,6 @@ describe("ItemView: system_prompt", () => {
     fireEvent.click(screen.getByTestId("card-toggle"));
     expect(screen.getByText(/Act via execute_code/)).toBeTruthy();
   });
-
   it("singular 'line' for a one-line prompt", () => {
     render(
       <TimelineView
@@ -182,7 +171,6 @@ describe("toggle chip: summary on expanded items", () => {
     expect(screen.getByText(/1\.2k tokens/)).toBeTruthy();
     expect(screen.getByText("ponder")).toBeTruthy();
   });
-
   it("streaming thinking chip shows live 'Thinking for'", () => {
     render(
       <TimelineView
@@ -197,7 +185,6 @@ describe("toggle chip: summary on expanded items", () => {
     );
     expect(screen.getByText(/Thinking for/)).toBeTruthy();
   });
-
   it("frozen thinking chip (reasoningElapsedMs, no reasoning_ms yet) shows 'Thought for'", () => {
     render(
       <TimelineView
@@ -213,7 +200,6 @@ describe("toggle chip: summary on expanded items", () => {
     expect(screen.getAllByText(/Thought for 4s/)).toHaveLength(1);
     expect(screen.queryByText(/Thinking for/)).toBeNull();
   });
-
   it("interrupted streaming thinking does not tick", () => {
     render(
       <TimelineView
@@ -230,7 +216,6 @@ describe("toggle chip: summary on expanded items", () => {
     );
     expect(screen.queryByText(/Thinking for/)).toBeNull();
   });
-
   it("thinking with no timing data falls back to a plain 'Thinking' label", () => {
     render(
       <TimelineView items={[makeItem({ kind: "agent_reasoning", payload: "ponder" })]} />,
@@ -238,7 +223,6 @@ describe("toggle chip: summary on expanded items", () => {
     expect(screen.queryByText(/Thought for|Thinking for|tokens/)).toBeNull();
     expect(screen.getByText("Thinking")).toBeTruthy();
   });
-
   it("agent_code chip shows the recorded per-method SDK histogram", () => {
     render(
       <TimelineView
@@ -258,14 +242,12 @@ describe("toggle chip: summary on expanded items", () => {
     expect(screen.getAllByText("shell.run")).toHaveLength(2);
     expect(screen.getAllByText(/× 2/)).toHaveLength(2);
   });
-
   it("plain-python code chip shows no histogram", () => {
     render(
       <TimelineView items={[makeItem({ kind: "agent_code", payload: "x = 1\nprint(x)" })]} />,
     );
     expect(screen.queryByText(/×/)).toBeNull();
   });
-
   it("code_output chip shows 'ran in Xs' exactly once when exec_ms present", () => {
     render(
       <TimelineView
@@ -280,7 +262,6 @@ describe("toggle chip: summary on expanded items", () => {
     );
     expect(screen.getByText(/Ran in 1s/)).toBeTruthy();
   });
-
   it("code_output without exec_ms shows no 'ran in' meta", () => {
     render(
       <TimelineView
@@ -289,7 +270,6 @@ describe("toggle chip: summary on expanded items", () => {
     );
     expect(screen.queryByText(/Ran in/)).toBeNull();
   });
-
   it("streaming code_output chip shows live 'Running for' when execStartedAt is set", () => {
     render(
       <TimelineView
@@ -304,7 +284,6 @@ describe("toggle chip: summary on expanded items", () => {
     );
     expect(screen.getByText(/Running for/)).toBeTruthy();
   });
-
   it("code_output with execStartedAt but interrupted shows no live clock", () => {
     render(
       <TimelineView
@@ -330,7 +309,6 @@ describe("ItemView: inbound_chat source-driven color", () => {
     if (!accent) throw new Error("no card accent");
     return accent as HTMLElement;
   }
-
   it("source='agent:5' → violet border (from another agent)", () => {
     render(
       <TimelineView
@@ -345,7 +323,6 @@ describe("ItemView: inbound_chat source-driven color", () => {
     );
     expect(getBorderEl("from agent 5").className).toContain("border-violet");
   });
-
   it("source='user' → gray border (frontend user)", () => {
     render(
       <TimelineView
@@ -360,7 +337,6 @@ describe("ItemView: inbound_chat source-driven color", () => {
     );
     expect(getBorderEl("from web").className).toContain("border-gray");
   });
-
   it("source='kernel' → sky border (system-injected)", () => {
     render(
       <TimelineView
@@ -375,7 +351,6 @@ describe("ItemView: inbound_chat source-driven color", () => {
     );
     expect(getBorderEl("from kernel").className).toContain("border-sky");
   });
-
   it("source=null → sky border (default branch)", () => {
     render(
       <TimelineView
@@ -398,7 +373,6 @@ describe("ItemView: Markdown-authored inbound bodies", () => {
     revealCollapsedCards();
     expect(screen.getByTestId("chat-markdown").textContent).toBe("## Goal");
   });
-
   it("inter-agent and human inbound_chat bodies go through ChatMarkdown", () => {
     render(
       <TimelineView
@@ -414,7 +388,6 @@ describe("ItemView: Markdown-authored inbound bodies", () => {
       "render **markdown**",
     ]);
   });
-
   it("system_prompt and system_marker bodies go through ChatMarkdown", () => {
     render(
       <TimelineView
@@ -450,7 +423,6 @@ describe("ItemView: inbound_chat envelope split", () => {
     expect(screen.getByText(/User/)).toBeTruthy();
     expect(screen.getByText("hello world")).toBeTruthy();
   });
-
   it("payload without '\\n\\n' → entire payload is body, no header", () => {
     render(
       <TimelineView

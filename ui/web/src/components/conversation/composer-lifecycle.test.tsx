@@ -1,12 +1,9 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render as rtlRender, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-
 import { api, MessageDeliveryUnknownError } from "@/lib/transport/api";
 import { clearMessageSent, markMessageSent } from "@/lib/format/interaction-timing";
-
 import { Composer } from "./composer";
-
 let commandList: { name: string; description: string; instruction_hint: string }[] = [];
 vi.mock("@/lib/transport/api", () => ({
   MessageDeliveryUnknownError: class MessageDeliveryUnknownError extends Error {
@@ -29,14 +26,11 @@ vi.mock("@/lib/transport/api", () => ({
       }),
   },
 }));
-
 vi.mock("@/lib/format/interaction-timing", () => ({
   clearMessageSent: vi.fn(),
   markMessageSent: vi.fn(),
 }));
-
 const getCommandsMock = vi.mocked(api.getCommands);
-
 beforeEach(() => {
   vi.mocked(clearMessageSent).mockClear();
   vi.mocked(markMessageSent).mockClear();
@@ -44,7 +38,6 @@ beforeEach(() => {
     Promise.resolve(commandList),
   );
 });
-
 afterEach(() => {
   cleanup();
   commandList = [];
@@ -52,20 +45,17 @@ afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
-
 const baseProps = {
   contextTokens: 0,
   onSend: vi.fn(() => Promise.resolve(true)),
   onStop: vi.fn(),
 };
 
-
 function render(ui: React.ReactElement) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return rtlRender(ui, { wrapper: ({ children }) =>
     <QueryClientProvider client={qc}>{children}</QueryClientProvider> });
 }
-
 
 function storageWith(
   persistent: Storage,
@@ -82,10 +72,7 @@ function storageWith(
     setItem: overrides.setItem ?? persistent.setItem.bind(persistent),
   };
 }
-
-
 const renderComposer = render;
-
 
 describe("Composer input lifecycle", () => {
   it("send succeeds (returns true) → input cleared", async () => {
@@ -96,7 +83,6 @@ describe("Composer input lifecycle", () => {
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
     await waitFor(() => expect(ta.value).toBe(""));
   });
-
   it("send fails (returns false) → input preserved, no lost user text (H2 fix)", async () => {
     const onSend = vi.fn<(content: string) => Promise<boolean>>(() => Promise.resolve(false));
     render(<Composer {...baseProps} mode="idle" onSend={onSend} />);
@@ -106,7 +92,6 @@ describe("Composer input lifecycle", () => {
     await waitFor(() => expect(onSend).toHaveBeenCalled());
     expect(ta.value).toBe("important draft");
   });
-
   it("mode='busy' send fails (returns false) → input preserved (busy goes through the same submit path; failure branch must be covered)", async () => {
     const onSend = vi.fn<(content: string) => Promise<boolean>>(() => Promise.resolve(false));
     render(<Composer {...baseProps} mode="busy" onSend={onSend} />);
@@ -116,7 +101,6 @@ describe("Composer input lifecycle", () => {
     await waitFor(() => expect(onSend).toHaveBeenCalled());
     expect(ta.value).toBe("queued draft");
   });
-
   it("during sending the button is disabled, repeated clicks fire onSend only once (issue 6 dedup guard)", async () => {
     const deferred: { resolve: (v: boolean) => void } = {
       resolve: () => undefined,
@@ -127,22 +111,18 @@ describe("Composer input lifecycle", () => {
     render(<Composer {...baseProps} mode="idle" onSend={onSend} />);
     const ta = screen.getByTestId<HTMLTextAreaElement>("composer-input");
     fireEvent.change(ta, { target: { value: "first" } });
-
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
     await waitFor(() => {
       const btn = screen.getByRole<HTMLButtonElement>("button", { name: "Sending" });
       expect(btn.disabled).toBe(true);
     });
-
     const sendingBtn = screen.getByRole("button", { name: "Sending" });
     fireEvent.click(sendingBtn);
     fireEvent.click(sendingBtn);
     expect(onSend).toHaveBeenCalledTimes(1);
-
     deferred.resolve(true);
     await waitFor(() => expect(ta.value).toBe(""));
   });
-
   it("retrying an uncertain send reuses its client message id", async () => {
     const onSend = vi
       .fn<(content: string, imageUrls: string[], clientMessageId: string) => Promise<boolean>>()
@@ -151,20 +131,17 @@ describe("Composer input lifecycle", () => {
     render(<Composer {...baseProps} mode="idle" onSend={onSend} />);
     const ta = screen.getByTestId<HTMLTextAreaElement>("composer-input");
     fireEvent.change(ta, { target: { value: "uncertain delivery" } });
-
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
     await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(screen.getByRole("button", { name: "Send message" })).toBeTruthy());
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
     await waitFor(() => expect(onSend).toHaveBeenCalledTimes(2));
-
     const firstId = onSend.mock.calls[0][2];
     const retryId = onSend.mock.calls[1][2];
     expect(firstId).toEqual(expect.any(String));
     expect(firstId.length).toBeGreaterThan(0);
     expect(retryId).toBe(firstId);
   });
-
   it("keeps an unknown draft editable and normal Send reuses its identity", async () => {
     const onSend = vi
       .fn<(content: string, imageUrls: string[], clientMessageId: string) => Promise<boolean>>()
@@ -175,21 +152,18 @@ describe("Composer input lifecycle", () => {
     render(<Composer {...baseProps} mode="idle" agentId={7} onSend={onSend} />);
     const ta = screen.getByTestId<HTMLTextAreaElement>("composer-input");
     fireEvent.change(ta, { target: { value: "uncertain delivery" } });
-
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
     await waitFor(() => expect(screen.queryByRole("button", { name: "Sending" })).toBeNull());
     expect(clearMessageSent).not.toHaveBeenCalled();
     expect(
       screen.getByRole<HTMLButtonElement>("button", { name: "Send message" }).disabled,
     ).toBe(false);
-
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
     await waitFor(() => expect(onSend).toHaveBeenCalledTimes(2));
     expect(onSend.mock.calls[1][2]).toBe(onSend.mock.calls[0][2]);
     await waitFor(() => expect(ta.value).toBe(""));
     expect(screen.queryByText(/Delivery unconfirmed/)).toBeNull();
   });
-
   it("keeps the same identity across an ambiguous send and a failed normal retry", async () => {
     const onSend = vi
       .fn<(content: string, imageUrls: string[], clientMessageId: string) => Promise<boolean>>()
@@ -204,18 +178,15 @@ describe("Composer input lifecycle", () => {
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
     await waitFor(() => expect(screen.queryByRole("button", { name: "Sending" })).toBeNull());
     const clientMessageId = onSend.mock.calls[0][2];
-
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
     await waitFor(() => expect(onSend).toHaveBeenCalledTimes(2));
     expect(onSend.mock.calls[1][2]).toBe(clientMessageId);
     await waitFor(() => expect(screen.queryByRole("button", { name: "Sending" })).toBeNull());
-
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
     await waitFor(() => expect(onSend).toHaveBeenCalledTimes(3));
     expect(onSend.mock.calls[2][2]).toBe(clientMessageId);
     await waitFor(() => expect(screen.queryByText(/Delivery unconfirmed/)).toBeNull());
   });
-
   it("gives edited text a new identity after an ambiguous send", async () => {
     const onSend = vi
       .fn<(content: string, imageUrls: string[], clientMessageId: string) => Promise<boolean>>()
@@ -228,13 +199,11 @@ describe("Composer input lifecycle", () => {
     fireEvent.change(ta, { target: { value: "old uncertain" } });
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
     await waitFor(() => expect(screen.queryByRole("button", { name: "Sending" })).toBeNull());
-
     fireEvent.change(ta, { target: { value: "new explicit message" } });
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
     await waitFor(() => expect(onSend).toHaveBeenCalledTimes(2));
     expect(onSend.mock.calls[1][2]).not.toBe(onSend.mock.calls[0][2]);
   });
-
   it("storage failure falls back to memory without changing retry identity", async () => {
     const agentId = 7071;
     const attemptKey = `composer-send-attempt-${agentId}`;
@@ -266,7 +235,6 @@ describe("Composer input lifecycle", () => {
     const ta = screen.getByTestId<HTMLTextAreaElement>("composer-input");
     fireEvent.change(ta, { target: { value: "send despite storage" } });
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
-
     await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(screen.queryByRole("button", { name: "Sending" })).toBeNull());
     const firstId = onSend.mock.calls[0][2];
@@ -274,7 +242,6 @@ describe("Composer input lifecycle", () => {
     expect(setItem).toHaveBeenCalled();
     expect(sessionStorage.getItem(attemptKey)).toContain("stale-client-id");
     first.unmount();
-
     render(<Composer {...baseProps} mode="idle" agentId={agentId} onSend={onSend} />);
     await waitFor(() => expect(screen.queryByRole("button", { name: "Sending" })).toBeNull());
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
@@ -284,7 +251,6 @@ describe("Composer input lifecycle", () => {
     await waitFor(() => expect(restored.value).toBe(""));
     expect(screen.queryByRole("button", { name: "Sending" })).toBeNull();
   });
-
   it("successful send keeps an authoritative tombstone when storage removal fails", async () => {
     const agentId = 7072;
     const persistentStorage = sessionStorage;
@@ -310,7 +276,6 @@ describe("Composer input lifecycle", () => {
     await waitFor(() => expect(onSend).toHaveBeenCalledTimes(2));
     expect(onSend.mock.calls[1][2]).not.toBe(firstId);
   });
-
   it("an A send completing after switch to B does not clear B's draft", async () => {
     let resolveSend: (value: boolean) => void = () => undefined;
     const onSend = vi.fn(
@@ -323,16 +288,13 @@ describe("Composer input lifecycle", () => {
     fireEvent.change(ta, { target: { value: "message for A" } });
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
     await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
-
     sessionStorage.setItem("composer-draft-9", "draft for B");
     rerender(<Composer {...baseProps} mode="idle" agentId={9} onSend={onSend} />);
     await waitFor(() => expect(ta.value).toBe("draft for B"));
     resolveSend(true);
-
     await waitFor(() => expect(screen.queryByRole("button", { name: "Sending" })).toBeNull());
     expect(ta.value).toBe("draft for B");
   });
-
   it("keeps edits typed while a send is in flight and still refuses attachments", async () => {
     let resolveSend: (value: boolean) => void = () => undefined;
     const onSend = vi.fn(
@@ -364,12 +326,10 @@ describe("Composer input lifecycle", () => {
       dataTransfer: { files: [image], types: ["Files"] },
     });
     expect(onAttachImage).not.toHaveBeenCalled();
-
     resolveSend(true);
     await waitFor(() => expect(ta.value).toBe("later edit"));
     expect(screen.queryByRole("button", { name: "Sending" })).toBeNull();
   });
-
   it("editing a failed draft creates a new client message id", async () => {
     const onSend = vi
       .fn<(content: string, imageUrls: string[], clientMessageId: string) => Promise<boolean>>()
@@ -379,14 +339,11 @@ describe("Composer input lifecycle", () => {
     fireEvent.change(ta, { target: { value: "first draft" } });
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
     await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
-
     fireEvent.change(ta, { target: { value: "changed draft" } });
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
     await waitFor(() => expect(onSend).toHaveBeenCalledTimes(2));
-
     expect(onSend.mock.calls[1][2]).not.toBe(onSend.mock.calls[0][2]);
   });
-
   it("whitespace-only input → does not trigger onSend (button also disabled)", async () => {
     const onSend = vi.fn(() => Promise.resolve(true));
     render(<Composer {...baseProps} mode="idle" onSend={onSend} />);
@@ -416,12 +373,10 @@ describe("Composer context meter (opt-in)", () => {
     expect(screen.queryByTestId("context-meter-ghost")).toBeNull();
     expect(screen.queryByTestId("composer-meta")).toBeNull();
   });
-
   it("renders no meta line when the agent has no LLM call yet and no hint", () => {
     render(<Composer {...baseProps} mode="idle" contextTokens={0} showContextMeter />);
     expect(screen.queryByTestId("composer-meta")).toBeNull();
   });
-
   it("shows the loading ghost while the token snapshot is pending (cold switch)", () => {
     renderComposer(
       <Composer {...baseProps} mode="idle" contextTokens={0} contextPending showContextMeter />,
@@ -430,7 +385,6 @@ describe("Composer context meter (opt-in)", () => {
     expect(screen.queryByTestId("context-meter-button")).toBeNull();
     expect(screen.getByTestId("composer-meta").textContent).toBe("");
   });
-
   it("shows the bare gauge — never the numeric readout — when opted in", () => {
     renderComposer(
       <Composer
@@ -476,7 +430,6 @@ describe("Composer context breakdown panel", () => {
     expect(screen.queryByTestId("context-breakdown-panel")).toBeNull();
     expect(ta.value).toBe("still typing");
   });
-
   it("is mutually exclusive with the slash dropdown (single popover state)", async () => {
     commandList = [{ name: "recap", description: "recap the thread", instruction_hint: "" }];
     renderComposer(
