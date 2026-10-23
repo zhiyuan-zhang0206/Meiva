@@ -26,7 +26,7 @@ from base.host.system.hostport import Host
 from base.host.system.tests.fake_commands import fake_host
 from base.sessions.tests.refuse_helper import refuse_helper
 from base.telemetry import EventPipeline
-from cli.commands.converge.spec import ConvergeCtx
+from cli.commands.converge.spec import ConvergeCtx, UserSession
 from cli.commands.observability import lgtm_native, observatory_urls
 from cli.commands.observability.tests.lgtm_inputs import (
     darwin_host as darwin_host,
@@ -72,6 +72,7 @@ def _ctx(
         machine=machine_from_boot(machine_config_76),
         helper=refuse_helper,
         host=fake_host(),
+        session=UserSession(user_home=tmp_path / "home", login_shell="/bin/zsh", interactive=False),
         timers=ManualTimers(),
     )
 
@@ -729,6 +730,9 @@ def _station_ctx(
         machine=machine_from_boot(machine_config_710),
         helper=refuse_helper,
         host=fake_host(),
+        session=UserSession(
+            user_home=tmp_path / "station-home", login_shell="/bin/zsh", interactive=False
+        ),
         timers=ManualTimers(),
     )
 

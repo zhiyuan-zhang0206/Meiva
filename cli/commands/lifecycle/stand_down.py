@@ -29,7 +29,9 @@ _STEM = "stand-down.json"
 # One home's declared stop; `until` is None when it waits for an explicit start.
 @dataclass(frozen=True, slots=True)
 class StandDown:
-    since: datetime
+    # meiva:note
+    # None when the record does not say (an unreadable or older record).
+    since: datetime | None
     until: datetime | None
     reason: str | None
     machine: str | None
@@ -37,10 +39,10 @@ class StandDown:
     def deadline_passed(self, now: datetime) -> bool:
         return self.until is not None and self.until <= now
 
-    def describe(self, now: datetime | None = None) -> str:
+    def describe(self, now: datetime) -> str:
         if self.until is None:
             return "stopped until an explicit start"
-        left = int((self.until - (now or datetime.now(UTC))).total_seconds())
+        left = int((self.until - now).total_seconds())
         if left <= 0:
             return f"declared window ended {-left}s ago"
         return f"declared window ends in {left}s"
@@ -54,12 +56,17 @@ def path(home: Path) -> Path:
 # Persist the intent durably before any teardown starts: a host that dies
 # mid-stop must still read as stopped on the next boot.
 def record(
-    home: Path, *, until: datetime | None, reason: str | None, machine: str | None = None
+    home: Path,
+    *,
+    now: datetime,
+    until: datetime | None,
+    reason: str | None,
+    machine: str | None = None,
 ) -> StandDown:
-    stand = StandDown(since=datetime.now(UTC), until=until, reason=reason, machine=machine)
+    stand = StandDown(since=now, until=until, reason=reason, machine=machine)
     body = json.dumps(
         {
-            "since": stand.since.isoformat(),
+            "since": now.isoformat(),
             "until": stand.until.isoformat() if stand.until else None,
             "reason": stand.reason,
             "machine": stand.machine,
@@ -95,7 +102,7 @@ def read(home: Path) -> StandDown | None:
     reason = body.get("reason")
     machine = body.get("machine")
     return StandDown(
-        since=_moment(body.get("since")) or datetime.now(UTC),
+        since=_moment(body.get("since")),
         until=_moment(body.get("until")),
         reason=reason if isinstance(reason, str) else None,
         machine=machine if isinstance(machine, str) else None,
@@ -107,7 +114,7 @@ def read(home: Path) -> StandDown | None:
 # own unreadable marker the same way, and a wrong guess here starts a host an
 # operator meant to leave down.
 def _unreadable() -> StandDown:
-    return StandDown(since=datetime.now(UTC), until=None, reason=None, machine=None)
+    return StandDown(since=None, until=None, reason=None, machine=None)
 
 
 def _moment(value: object) -> datetime | None:
@@ -130,18 +137,18 @@ def clear(home: Path) -> bool:
 
 # meiva:note
 # The one question a boot job asks: is this home stopped on purpose right now?
-def blocks_boot(home: Path, *, now: datetime | None = None) -> StandDown | None:
+def blocks_boot(home: Path, *, now: datetime) -> StandDown | None:
     stand = read(home)
     if stand is None:
         return None
-    return None if stand.deadline_passed(now or datetime.now(UTC)) else stand
+    return None if stand.deadline_passed(now) else stand
 
 
 # meiva:note
 # The line a start prints for this home's stand-down, or None when there is none:
 # the OS boot job leaves a stopped home alone, and an explicit start is the one
 # thing that ends a stand-down and says so.
-def gate(home: Path, *, boot_attempt: bool, now: datetime | None = None) -> str | None:
+def gate(home: Path, *, boot_attempt: bool, now: datetime) -> str | None:
     if boot_attempt:
         held = blocks_boot(home, now=now)
         if held is None:
@@ -152,7 +159,7 @@ def gate(home: Path, *, boot_attempt: bool, now: datetime | None = None) -> str 
     return None
 
 
-def window_until(seconds: int | None, *, now: datetime | None = None) -> datetime | None:
+def window_until(seconds: int | None, *, now: datetime) -> datetime | None:
     if seconds is None:
         return None
-    return (now or datetime.now(UTC)).replace(microsecond=0) + timedelta(seconds=seconds)
+    return now.replace(microsecond=0) + timedelta(seconds=seconds)

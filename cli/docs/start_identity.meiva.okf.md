@@ -21,8 +21,9 @@ roles require, `MEIVA_SERVICE_PATH` is declared, a remote unit holds no human se
 refuses everything else naming `meiva init`, a home with no intent included. The intent is the home's record of itself: a gateway's ports and
 data-plane host live in its `record` (`base/cluster/record.py`), and no host
 file lists clusters. A new home records the fixed port table
-(`base/host/env/port_table.py`) after a bind probe finds every port free; a
-record whose slots differ from the table is refused. The intent's `checkout` is the
+(`base/host/env/port_table.py`) after the entry's bind probe finds every port free
+(`CallerHost.occupied_ports`, read once by `cli/main.py`; `prepare_identity` refuses a
+table with an occupied port); a record whose slots differ from the table is refused. The intent's `checkout` is the
 home's admitted runtime: the database-authority delivery admits only a process running
 from it (`base/host/db_authority/delivery.py`). An intent that still carries the
 `worktree` key an older start recorded is refused by name rather than read. An
@@ -70,9 +71,12 @@ before another start. An existing home without this declaration requires an
 explicit cutover edit: `meiva start` refuses it and never silently recaptures its caller PATH.
 Admitted directories must be absolute and survive literal `.env` round-trip;
 comment-sensitive names and interpolation expressions fail before intent creation.
+Which source names the directories (the declaration the inputs or `.env` carry, else the
+caller's `MEIVA_SERVICE_PATH`, else its PATH minus the virtualenvs) is a pure choice over
+the caller's facts (`cli/startup/service_path.py`); the entry reads those facts once.
 
 The native ordering is storage, owned database and checkpoints, migrations and
-runner grants, then PgBouncer. `cli/commands/lifecycle/start.py` converges host prerequisites,
+runner grants, then PgBouncer. `cli/commands/lifecycle/start/` converges host prerequisites,
 launches the selected root tree and records serving only after complete readiness.
 Every start names its service selection (`--all-services`, `--only-service` or
 `--disable-service`); bare `meiva start` is a usage error and no selection is persisted.
@@ -80,6 +84,8 @@ A live root is admitted before preparation: changed source, environment, or rost
 requires prior stop; identical live generations skip configuration, dependency,
 and schema writes. Schema drift fails read-only. This development source digest
 excludes ignored build outputs.
+
+`cli/main.py` hands each entry its home, checkout and host facts as values; the contract of the entries and of the pure modules around the start lifecycle (`cli/startup/`) is in [[cli/docs/entry.meiva.okf.md]].
 
 `cli/start_runtime.py` (`StartRuntime`) names what one start executes: the checkout
 that loaded the code, its working directory and the interpreter that loaded it.

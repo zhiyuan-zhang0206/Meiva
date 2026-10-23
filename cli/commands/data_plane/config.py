@@ -1,16 +1,11 @@
-"""What the data-plane commands read from configuration, as one immutable value.
-
-The composition roots are the process entries: the `meiva start`, `meiva stop` and `meiva status`
-steps in `cli/commands/lifecycle` and the pooler converge step. They read the process
-configuration once, through `data_plane_config_from_settings`, and everything below them receives
-the result as `config`, so a test hands a function the exact values it wants with
-`dataclasses.replace` instead of patching `settings`.
-
-Two middle functions read in place where no test controls the values: `prepare_cold_start`
-builds the value for the start step's calls, and `root_driver.tree_manifest` reads only
-`is_remote` for the launch environments (`service_extra_env` below it takes the bool). They are
-not roots; a function that needs a different value takes `config`.
-"""
+# meiva:note
+# What the data-plane commands read from configuration, as one immutable value.
+#
+# The composition roots are the process entries: the `meiva start`, `meiva stop` and `meiva status`
+# steps in `cli/commands/lifecycle` and the pooler converge step. They read the invocation's
+# configuration once (`meiva start` through `start/start_config.py`, with its other values), and
+# everything below them receives the result as `config`, so a test hands a function the exact values
+# it wants with `dataclasses.replace` instead of patching `settings`.
 
 from __future__ import annotations
 

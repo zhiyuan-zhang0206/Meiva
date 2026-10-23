@@ -1,0 +1,12 @@
+exports = ["generation.py", "launch_plan.py", "poll_plan.py", "reconcile_plan.py", "snapshot.py"]
+
+[uses]
+"poll_plan.py" = ["snapshot.py"]
+"reconcile_plan.py" = ["snapshot.py"]
+
+[purity]
+"__init__.py" = "strict"
+"launch_plan.py" = "strict"
+"poll_plan.py" = "strict"
+"reconcile_plan.py" = "strict"
+"snapshot.py" = "strict"

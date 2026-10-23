@@ -19,15 +19,36 @@ before any service launch when something is still missing. A runner-only unit
 and a remote-managed plane skip the local data-plane group; a headless gateway
 skips Node; `MEIVA_OS_JOBS_ENABLED=0` (or a non-default `$MEIVA_HOME`) skips the
 scheduler group. The
-pre-bind gate in `cli/commands/lifecycle/start.py:refuse_occupied_health_ports` refuses
+pre-bind gate in `cli/commands/lifecycle/start/__init__.py:refuse_occupied_health_ports` refuses
 ports held by another unit before launching application processes. It reads the
-selected core roster; optional port conflicts cannot block the core.
+selected core roster; optional port conflicts cannot block the core. The refusal's
+words (`start/occupied_ports.py`) are a function of the occupants it is handed.
 
 `cli/commands/lifecycle/root_driver.py` owns admission, launch and observation of the
 single application root. An idempotent start observes the live root generation;
 a cold start launches one through the platform's ordinary process owner.
 macOS places the permission helper above the root. Linux starts the root under
 the caller or systemd without a helper.
+
+The start entry (`cli/commands/lifecycle/start/`) is a shell too. Each decision it makes is a
+`strict` module of that package over values the shell has read: `stand_down_gate` (what to do
+about the home's stand-down record), `admission` (a destroyed home or a disposable prod
+checkout, capabilities that differ from the ones `meiva init` recorded, whether a pure
+runner probes its gateway), `cold_start_plan` (the ordered preparation of a start with no live
+root, the schema checks of every admitted start, and who may migrate), `readiness_plan` (what
+is reported and the exit code once readiness was waited for), `occupied_ports` and
+`gateway_hint` (the words), `login_link_plan` (whether to mint a one-time login link) and
+`start_config` (the configuration values a start reads, read once). The shell dials the root,
+executes each plan in order and stops at the first step that fails.
+
+The driver is a shell: it reads the clock, the control socket and the processes, prints,
+and executes plans. What a status snapshot means is decided by values in
+`cli/commands/lifecycle/root_control/` — the typed `snapshot`, the `reconcile_plan` (which
+units to resume, which generation to refuse, what a stop takes down), the `poll_plan` (the next
+step of every wait on the root, its keeper or a service) and the `launch_plan` (the daemon
+command line and the keeper's seed). The home and the settings a launch reads
+(`RootLaunchInputs`) are handed in by the start entry; nothing in the driver reads the
+environment or settings.
 
 The CLI's existing caller-owned child list retains a directly launched root
 through readiness, any later command work and the CLI telemetry drain, just as
@@ -36,11 +57,8 @@ does not release that handle. An embedded caller keeps the same explicit list
 for as long as it needs the native PID retained; root launch neither reaps nor
 terminates a child when a start phase returns.
 
-An eligible macOS GUI handover returns a `StartDelegation` from the locked start
-body. The lifecycle wrapper leaves its lock before
-executing that handover. The GUI child runs ordinary locked start and owns
-readiness. The observer cannot start
-services in its own non-GUI domain when delegation fails.
+`cmd_start_body` runs under the home's lifecycle lock (`exclusive_resources`) and returns an
+exit code: the same body serves `meiva start` and the start leg of `meiva restart`.
 
 After launch, `cli/commands/lifecycle/root_readiness.py` observes the roster through
 the root driver. Selected core services must be running and answer their protocol.

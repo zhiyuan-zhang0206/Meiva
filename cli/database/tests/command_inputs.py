@@ -8,6 +8,7 @@ from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot
 from base.config.tests.configuration import snapshot_process_config
 from base.host.system.tests.fake_commands import fake_host
+from base.paths import meiva_home
 from base.sessions.tests.refuse_helper import refuse_helper
 from cli.database.runtime import CommandRuntime
 
@@ -24,6 +25,7 @@ def command_runtime() -> CommandRuntime:
     config = snapshot_process_config()
     return CommandRuntime(
         config=config,
+        home=meiva_home(),
         machine=machine_from_boot(config),
         helper=refuse_helper,
         host=fake_host(),

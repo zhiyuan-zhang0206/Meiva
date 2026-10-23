@@ -14,7 +14,7 @@ tags:
 `cli/commands/data_plane/host_dependencies.py` runs one preflight as the first
 cold-start converge step. It is a table (`HOST_TOOLS`), and `render_table()`
 prints that table; this document carries its output, and a test in
-`cli/commands/lifecycle/tests/test_start_host_dependencies.py` fails when the two
+`cli/commands/lifecycle/tests/start_storage/test_start_host_dependencies.py` fails when the two
 drift apart. Three kinds of row exist:
 
 - **A provisionable group** (`data-plane`, `node`, `host-utils`, `cli-tools`): a missing

@@ -150,12 +150,12 @@ def test_render_ini_binds_loopback_never_all_interfaces(machine_identity: Machin
 
 
 def test_migrations_apply_dials_direct_only_where_it_can_apply() -> None:
-    from cli.commands.lifecycle import migrations
+    from cli.commands.lifecycle.start import migrations
 
     src = inspect.getsource(migrations.cmd_migrations_apply)
     assert "connect(unbounded=True)" in src
     assert "direct=True" not in src
-    assert "local_owner_authority(settings.data_plane.db_url, remote_plane=False)" in src
+    assert "local_owner_authority(config.db_url, remote_plane=False)" in src
 
 
 @pytest.mark.parametrize("remote", [False, True])

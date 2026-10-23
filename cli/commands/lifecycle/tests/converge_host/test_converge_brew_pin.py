@@ -1,16 +1,11 @@
 from __future__ import annotations
 
-from collections.abc import Callable
-from pathlib import Path
-from typing import Any
+from dataclasses import replace
 
 import pytest
 
 import cli.commands.converge.brew_pin as cbp
 import cli.commands.lifecycle.converge_host as cv
-from base.clock.tests.manual_timers import ManualTimers
-from base.cluster.machine.boot import machine_from_boot
-from base.config import ConfigBoot
 from base.host import brew_pin
 from base.host.system.hostport import Host
 from base.host.system.tests.fake_commands import (
@@ -22,11 +17,7 @@ from base.host.system.tests.fake_commands import (
 )
 from base.log.tests.log_records import LogRecords
 from base.log.tests.log_records import loguru_records as loguru_records
-from base.sessions.tests.refuse_helper import refuse_helper
-from base.telemetry import EventPipeline
-from cli.database.tests.cli_tests import operator_database as operator_database
-from cli.database.tests.cli_tests import operator_pipeline as operator_pipeline
-from cli.database.tests.command_inputs import command_runtime as command_runtime
+from cli.commands.converge.spec import ALL_ROLES, ConvergeCtx
 
 EXPECTED_PINNED_FORMULAE = frozenset(
     {
@@ -44,29 +35,6 @@ EXPECTED_PINNED_FORMULAE = frozenset(
         "uv",
     }
 )
-
-
-def _ctx(
-    tmp_path: Path,
-    host: Host,
-    *,
-    operator_database: Callable[[], Any],
-    producer: Callable[[], EventPipeline],
-) -> cv.ConvergeCtx:
-    machine_config = ConfigBoot()
-    return cv.ConvergeCtx(
-        repo=Path("/repo"),
-        meiva_home=tmp_path,
-        roles=cv.ALL_ROLES,
-        config=machine_config,
-        database_factory=operator_database,
-        producer=producer,
-        machine=machine_from_boot(machine_config),
-        helper=refuse_helper,
-        host=host,
-        services=frozenset(),
-        timers=ManualTimers(),
-    )
 
 
 def _brew(pinned: set[str], installed: set[str] | None = None) -> Host:
@@ -89,36 +57,28 @@ def test_step_is_registered_after_firewall_for_both_roles() -> None:
     )
     step = steps[brew_pin_index]
     assert brew_pin_index > firewall_index
-    assert step.roles == cv.ALL_ROLES
+    assert step.roles == ALL_ROLES
     assert step.requires_unit_config is False
 
 
 def test_all_formulae_pinned_is_silent(
     capsys: pytest.CaptureFixture[str],
-    tmp_path: Path,
-    operator_database: Callable[[], Any],
-    operator_pipeline: Callable[[], EventPipeline],
+    ctx: ConvergeCtx,
 ) -> None:
     host = _brew(set(EXPECTED_PINNED_FORMULAE))
 
-    cbp.ensure_brew_pin(
-        _ctx(tmp_path, host, operator_database=operator_database, producer=operator_pipeline)
-    )
+    cbp.ensure_brew_pin(replace(ctx, host=host))
 
     assert capsys.readouterr().err == ""
 
 
 def test_missing_formula_warns_with_manual_repin_command(
     capsys: pytest.CaptureFixture[str],
-    tmp_path: Path,
-    operator_database: Callable[[], Any],
-    operator_pipeline: Callable[[], EventPipeline],
+    ctx: ConvergeCtx,
 ) -> None:
     host = _brew(set(EXPECTED_PINNED_FORMULAE - {"redis@8.2"}))
 
-    cbp.ensure_brew_pin(
-        _ctx(tmp_path, host, operator_database=operator_database, producer=operator_pipeline)
-    )
+    cbp.ensure_brew_pin(replace(ctx, host=host))
 
     warning = capsys.readouterr().err
     assert warning.startswith("  ! brew-pin:")
@@ -128,32 +88,24 @@ def test_missing_formula_warns_with_manual_repin_command(
 
 def test_uninstalled_manifest_formula_is_not_flagged(
     capsys: pytest.CaptureFixture[str],
-    tmp_path: Path,
-    operator_database: Callable[[], Any],
-    operator_pipeline: Callable[[], EventPipeline],
+    ctx: ConvergeCtx,
 ) -> None:
     installed = set(EXPECTED_PINNED_FORMULAE - {"grafana"})
     host = _brew(installed, installed=installed)
 
-    cbp.ensure_brew_pin(
-        _ctx(tmp_path, host, operator_database=operator_database, producer=operator_pipeline)
-    )
+    cbp.ensure_brew_pin(replace(ctx, host=host))
 
     assert capsys.readouterr().err == ""
 
 
 def test_installed_but_unpinned_formula_still_warns(
     capsys: pytest.CaptureFixture[str],
-    tmp_path: Path,
-    operator_database: Callable[[], Any],
-    operator_pipeline: Callable[[], EventPipeline],
+    ctx: ConvergeCtx,
 ) -> None:
     pinned = set(EXPECTED_PINNED_FORMULAE - {"grafana"})
     host = _brew(pinned, installed=set(EXPECTED_PINNED_FORMULAE))
 
-    cbp.ensure_brew_pin(
-        _ctx(tmp_path, host, operator_database=operator_database, producer=operator_pipeline)
-    )
+    cbp.ensure_brew_pin(replace(ctx, host=host))
 
     warning = capsys.readouterr().err
     assert "grafana" in warning
@@ -162,35 +114,27 @@ def test_installed_but_unpinned_formula_still_warns(
 
 def test_brew_absent_says_the_check_did_not_run(
     capsys: pytest.CaptureFixture[str],
-    tmp_path: Path,
-    operator_database: Callable[[], Any],
-    operator_pipeline: Callable[[], EventPipeline],
+    ctx: ConvergeCtx,
 ) -> None:
     commands = FakeCommands()
     commands.on("brew", FileNotFoundError("brew"), repeat=True)
     host = fake_host(commands, platform=DARWIN_ARM64)
 
-    cbp.ensure_brew_pin(
-        _ctx(tmp_path, host, operator_database=operator_database, producer=operator_pipeline)
-    )
+    cbp.ensure_brew_pin(replace(ctx, host=host))
 
     assert "brew-pin: check skipped" in capsys.readouterr().err
 
 
 def test_a_failed_brew_query_does_not_read_as_all_pinned(
     capsys: pytest.CaptureFixture[str],
-    tmp_path: Path,
-    operator_database: Callable[[], Any],
-    operator_pipeline: Callable[[], EventPipeline],
+    ctx: ConvergeCtx,
     loguru_records: LogRecords,
 ) -> None:
     commands = FakeCommands()
     commands.on(["brew", "list", "--pinned"], Reply(returncode=1, stderr="boom"), repeat=True)
     host = fake_host(commands, platform=DARWIN_ARM64)
 
-    cbp.ensure_brew_pin(
-        _ctx(tmp_path, host, operator_database=operator_database, producer=operator_pipeline)
-    )
+    cbp.ensure_brew_pin(replace(ctx, host=host))
 
     assert "brew-pin: check skipped" in capsys.readouterr().err
     [event] = loguru_records.events("brew_pin")
@@ -200,16 +144,12 @@ def test_a_failed_brew_query_does_not_read_as_all_pinned(
 
 def test_non_macos_is_silent_without_calling_brew(
     capsys: pytest.CaptureFixture[str],
-    tmp_path: Path,
-    operator_database: Callable[[], Any],
-    operator_pipeline: Callable[[], EventPipeline],
+    ctx: ConvergeCtx,
 ) -> None:
-    commands = FakeCommands()
-    host = fake_host(commands, platform=LINUX_X86)
+    # meiva:note
+    # The fake host answers no command: a call to brew would fail the step.
+    host = fake_host(FakeCommands(), platform=LINUX_X86)
 
-    cbp.ensure_brew_pin(
-        _ctx(tmp_path, host, operator_database=operator_database, producer=operator_pipeline)
-    )
+    cbp.ensure_brew_pin(replace(ctx, host=host))
 
     assert capsys.readouterr().err == ""
-    assert commands.argvs == []
