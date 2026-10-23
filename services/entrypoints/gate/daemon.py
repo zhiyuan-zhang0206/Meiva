@@ -39,17 +39,28 @@ import re
 import time
 import urllib.error
 import urllib.request
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass
 from functools import partial
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from typing import Any
 from urllib.parse import urlsplit
 
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot, settings
+from base.daemon.shutdown import install_graceful_shutdown
+from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
 from base.log import logger
+from base.native_process.code_version import CodeVersion
+from base.native_process.loaded_commit import LoadedCommit
 from base.paths import meiva_home
+from base.telemetry.delivery.receipts import DrainStatus
+from base.telemetry.delivery.reporting import report_no_pipeline
+from base.telemetry.pipeline_build import build_pipeline
+from base.telemetry.process_logging import init_gateway_process
 
 _log = logging.getLogger("services.entrypoints.gate")
 
@@ -150,9 +161,11 @@ class Gate:
         app_base: str,
         static_dir: Path,
         browser_origin: str = "",
+        probe_timeout_s: float = PROBE_TIMEOUT_S,
     ) -> None:
         self.gateway_base = gateway_base.rstrip("/")
         self.app_base = app_base.rstrip("/")
+        self.probe_timeout_s = probe_timeout_s
         # Every request is answered with one whole page, so a browser never gets
         # a chance to fetch a stylesheet — the shared look and the theme
         # bootstrap have to travel inside the document. Holding them in their
@@ -189,7 +202,7 @@ class Gate:
         started = time.monotonic()
         try:
             with urllib.request.urlopen(  # noqa: S310 — operator-declared internal URL
-                req, timeout=PROBE_TIMEOUT_S
+                req, timeout=self.probe_timeout_s
             ) as resp:
                 body = json.loads(resp.read())
                 return "up" if body.get("authenticated") else "login"
@@ -240,7 +253,7 @@ class Gate:
                 length = int(handler.headers.get("Content-Length") or 0)
                 req.data = handler.rfile.read(length) if length else b""
             try:
-                with urllib.request.urlopen(req, timeout=PROBE_TIMEOUT_S) as resp:  # noqa: S310
+                with urllib.request.urlopen(req, timeout=self.probe_timeout_s) as resp:  # noqa: S310
                     status, headers, body = resp.status, resp.headers, resp.read()
             except urllib.error.HTTPError as e:  # app up, answered with an error status
                 status, headers, body = e.code, e.headers, e.read()
@@ -344,7 +357,7 @@ def _app_base() -> str:
     return f"http://127.0.0.1:{app_port()}"
 
 
-def gateway_base(*, local_host: Callable[[], str]) -> str:
+def gateway_base(*, local_host: Callable[[], str], gateway_port: int | None = None) -> str:
     """The gateway API base the gate probes and the login page posts to.
 
     The host must be one the user's browser can dial: the login page posts the
@@ -360,20 +373,43 @@ def gateway_base(*, local_host: Callable[[], str]) -> str:
     host = local_host()
     if ":" in host and not host.startswith("["):
         host = f"[{host}]"  # IPv6 literal — netloc needs brackets
-    return f"http://{host}:{settings.gateway.gateway_port}"
+    port = settings.gateway.gateway_port if gateway_port is None else gateway_port
+    return f"http://{host}:{port}"
 
 
-def _serve_http(args: argparse.Namespace, *, local_host: Callable[[], str]) -> None:
+@dataclass(frozen=True)
+class MainDeps:
+    capture_image: Callable[[], LoadedCommit] = LoadedCommit.capture
+    config_boot_cls: Callable[[], ConfigBoot] = ConfigBoot
+    code_version_cls: Callable[[LoadedCommit], CodeVersion] = CodeVersion
+    database_from_settings: Callable[..., Database] = Database.from_settings
+    build_pipeline: Callable[..., Any] = build_pipeline
+    init_gateway_process: Callable[..., None] = init_gateway_process
+    install_graceful_shutdown: Callable[[str], None] = install_graceful_shutdown
+    report_no_pipeline: Callable[..., None] = report_no_pipeline
+    gate_cls: Callable[..., Gate] = Gate
+    http_server_cls: Callable[..., Any] = ThreadingHTTPServer
+
+
+_DEFAULT_MAIN_DEPS = MainDeps()
+
+
+def _serve_http(
+    args: argparse.Namespace,
+    *,
+    local_host: Callable[[], str],
+    deps: MainDeps = _DEFAULT_MAIN_DEPS,
+) -> None:
     static_dir = args.static_dir or (Path(__file__).parent / "static")
     port = args.port or entry_port()
-    gate = Gate(
+    gate = deps.gate_cls(
         gateway_base=gateway_base(local_host=local_host),
         browser_origin=settings.gateway.browser_origin,
         app_base=_app_base(),
         static_dir=static_dir,
     )
-    server = ThreadingHTTPServer(("0.0.0.0", port), Handler)  # noqa: S104 — the entry must be reachable off-box
-    server.gate = gate  # type: ignore[attr-defined]  # handler reads it off the instance
+    server = deps.http_server_cls(("0.0.0.0", port), Handler)  # noqa: S104 — the entry must be reachable off-box
+    server.gate = gate
     primary: BaseException | None = None
     try:
         _log.info(
@@ -393,41 +429,36 @@ def _serve_http(args: argparse.Namespace, *, local_host: Callable[[], str]) -> N
             primary.add_note(f"Gate HTTP close also failed: {cleanup!r}")
 
 
-def main() -> None:
+def main(
+    argv: Sequence[str] | None = None,
+    *,
+    deps: MainDeps = _DEFAULT_MAIN_DEPS,
+) -> None:
     parser = argparse.ArgumentParser(description="Fleet UI entry service")
     parser.add_argument("--port", type=int, default=None, help="bind port (default: entry port)")
     parser.add_argument("--static-dir", type=Path, default=None, help="static pages directory")
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
-    from base.daemon.shutdown import install_graceful_shutdown
-    from base.db import Database
-    from base.db.code_version_gate import ProcessDbGate
-    from base.native_process.code_version import CodeVersion
-    from base.native_process.loaded_commit import LoadedCommit
-    from base.telemetry.delivery.receipts import DrainStatus
-    from base.telemetry.delivery.reporting import report_no_pipeline
-    from base.telemetry.pipeline_build import build_pipeline
-    from base.telemetry.process_logging import init_gateway_process
-
-    image = LoadedCommit.capture()
-    config = ConfigBoot()
+    image = deps.capture_image()
+    config = deps.config_boot_cls()
     config.boot()
     machine = machine_from_boot(config)
-    gate = ProcessDbGate(process="gate", version=CodeVersion(image).get)
+    version = deps.code_version_cls(image)
+    gate = ProcessDbGate(process="gate", version=version.get)
     database = partial(
-        Database.from_settings,
+        deps.database_from_settings,
         gate=gate,
         direct_url=ClusterDirectUrl(machine.host),
     )
-    pipeline = build_pipeline(database=database, machine=machine, home=meiva_home().resolve())
+    pipeline = deps.build_pipeline(database=database, machine=machine, home=meiva_home().resolve())
     primary: BaseException | None = None
     try:
-        init_gateway_process(
+        deps.init_gateway_process(
             "gate", producer=lambda: pipeline, machine_reader=machine.name, image=image
         )
         # Root's signal interrupts serving, then closes HTTP before the writer.
-        install_graceful_shutdown("gate")
-        _serve_http(args, local_host=machine.host)
+        deps.install_graceful_shutdown("gate")
+        _serve_http(args, local_host=machine.host, deps=deps)
     except BaseException as exc:
         primary = exc
         raise
@@ -435,7 +466,9 @@ def main() -> None:
         try:
             drain = pipeline.stop(timeout=2)
             if drain.status is DrainStatus.UNFINISHED:
-                report_no_pipeline("[gate] event pipeline stop unfinished: {drain}", drain=drain)
+                deps.report_no_pipeline(
+                    "[gate] event pipeline stop unfinished: {drain}", drain=drain
+                )
         except BaseException as cleanup:
             if primary is None:
                 raise

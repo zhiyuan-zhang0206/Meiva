@@ -20,7 +20,7 @@ def run_ops_runner_entry(body: Callable[[], Awaitable[None]]) -> None:
 
     daemon.main(
         argv=[],
-        init_process=noop_init,
+        init_gateway_process=noop_init,
         serve_daemon=ops_run,
     )
 

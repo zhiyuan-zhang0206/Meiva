@@ -35,6 +35,8 @@ import logging
 import urllib.error
 import urllib.request
 from collections.abc import Callable
+from dataclasses import dataclass
+from typing import Any
 
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.machine.boot import machine_from_boot
@@ -59,17 +61,24 @@ _log = logging.getLogger("services.wake.heartbeat.station_probe")
 _PROBE_TIMEOUT_S = 5.0
 
 
-def _configured_observability_base() -> str:
+def _configured_observability_base(*, observability_url: str | None = None) -> str:
     """The validated MEIVA_OBSERVABILITY_URL base, or "" when unset/malformed.
 
     The same validation the collector fan-out uses
     (base.telemetry.station_endpoint) — the two consumer paths can never
     disagree about where the station is.
     """
-    return validated_observability_base(settings.observability.observability_url)
+    raw = (
+        settings.observability.observability_url if observability_url is None else observability_url
+    )
+    return validated_observability_base(raw)
 
 
-def resolve_target(*, database: Callable[[], Database]) -> _StationTarget | None:
+def resolve_target(
+    *,
+    database: Callable[[], Database],
+    observability_url: str | None = None,
+) -> _StationTarget | None:
     """The station's dial target from the reachability contract.
 
     The advertised machine_units url when a station unit has registered;
@@ -78,7 +87,7 @@ def resolve_target(*, database: Callable[[], Database]) -> _StationTarget | None
     station unit has advertised itself). None when no remote observatory is
     configured at all.
     """
-    base = _configured_observability_base()
+    base = _configured_observability_base(observability_url=observability_url)
     if not base:
         return None
     try:
@@ -101,7 +110,11 @@ def resolve_target(*, database: Callable[[], Database]) -> _StationTarget | None
     return target
 
 
-def _station_answers(url: str) -> bool:
+def _station_answers(
+    url: str,
+    *,
+    urlopen: Callable[..., Any] = urllib.request.urlopen,
+) -> bool:
     """One bearer-authenticated OTLP round-trip; any 2xx = the ingress serves.
 
     The bearer is the cluster's telemetry token (the station accepts the same token from its
@@ -133,7 +146,7 @@ def _station_answers(url: str) -> bool:
         headers=headers,
     )
     try:
-        with urllib.request.urlopen(req, timeout=_PROBE_TIMEOUT_S):  # noqa: S310 — same probe
+        with urlopen(req, timeout=_PROBE_TIMEOUT_S):
             return True
     except urllib.error.HTTPError as exc:
         # Any HTTP answer proves the listener is up, but a non-2xx from the
@@ -155,29 +168,51 @@ def _station_answers(url: str) -> bool:
 station_answers = _station_answers
 
 
-def main(*, probe: Callable[[str], bool] = station_answers) -> None:
-    image = LoadedCommit.capture()
+@dataclass(frozen=True)
+class MainDeps:
+    capture_image: Callable[[], LoadedCommit] = LoadedCommit.capture
+    code_version_cls: Callable[[LoadedCommit], CodeVersion] = CodeVersion
+    database_from_settings: Callable[..., Database] = Database.from_settings
+    build_pipeline: Callable[..., Any] = build_pipeline
+    init_gateway_process: Callable[..., None] = init_gateway_process
+    resolve_target: Callable[..., _StationTarget | None] = resolve_target
+    observability_url: str | None = None
+
+
+_DEFAULT_MAIN_DEPS = MainDeps()
+
+
+def main(
+    *,
+    probe: Callable[[str], bool] = station_answers,
+    deps: MainDeps = _DEFAULT_MAIN_DEPS,
+) -> None:
+    image = deps.capture_image()
     machine_config = ConfigBoot()
     machine_config.boot()
     machine = machine_from_boot(machine_config)
     process_home = meiva_home().resolve()
-    version = CodeVersion(image)
+    version = deps.code_version_cls(image)
     gate = ProcessDbGate(version=version.get, process="station")
 
     def database() -> Database:
-        return Database.from_settings(
+        return deps.database_from_settings(
             gate=gate,
             direct_url=ClusterDirectUrl(machine.host),
         )
 
-    pipeline = build_pipeline(database=database, machine=machine, home=process_home)
-    init_gateway_process(
+    pipeline = deps.build_pipeline(database=database, machine=machine, home=process_home)
+    deps.init_gateway_process(
         name="station",
         producer=lambda: pipeline,
         machine_reader=machine.name,
         image=image,
     )
-    target = resolve_target(database=database)
+    target = (
+        deps.resolve_target(database=database)
+        if deps.observability_url is None
+        else deps.resolve_target(database=database, observability_url=deps.observability_url)
+    )
     if target is None:
         return  # no remote observatory configured — nothing to probe here
     ok = probe(target.url)

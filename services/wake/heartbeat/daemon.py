@@ -25,8 +25,10 @@ import os
 import signal
 import sys
 import time
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable, Coroutine
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import psycopg
 from psycopg_pool import ConnectionPool
@@ -156,6 +158,7 @@ def select_idle_agents_needing_heartbeat(
     jitter_span_s: float = 0.0,
     limit: int | None = None,
     backoff_until: dict[int, float] | None = None,
+    now_fn: Callable[[], float] = time.time,
 ) -> list[tuple[int, float]]:
     """Cluster-wide idle agents due for a heartbeat check-in, each as
     `(agent_id, idle_minutes)`, oldest-idle first.
@@ -203,44 +206,16 @@ def select_idle_agents_needing_heartbeat(
     # EXTRACT returns numeric (Decimal); keep the observed clock compatible
     # with the float slack used when the next dispatch reconciles this reading.
     sql = (
-        "SELECT agents_meta.id, (EXTRACT(EPOCH FROM (now() - "
-        "COALESCE(active.activated_at, active.created_at, last_active_at))) / 60.0)::double precision "
-        "AS idle_minutes "
-        "FROM agents_meta LEFT JOIN agent_impersonations active "
-        "ON active.agent_id = agents_meta.id AND active.status = 'active' "
-        "AND active.expires_at > now() "
-        "WHERE (agents_meta.status = 'idling' "
-        "OR (agents_meta.status = 'running' AND active.id IS NOT NULL)) "
-        "AND agents_meta.permanent_reject_streak = 0 "
-        "AND now() >= GREATEST("
-        "  heartbeat_paused_until, "
-        "  COALESCE(active.activated_at, active.created_at, last_active_at) "
-        "  + make_interval(secs => %s + COALESCE(mod(agents_meta.id, NULLIF(%s, 0)::int), 0)), "
-        "  last_heartbeat_at "
-        "  + make_interval(secs => LEAST(%s * power(2.0, "
-        "CASE WHEN active.id IS NOT NULL THEN 0 ELSE heartbeat_backoff_level END), 86400))"
-        ") "
-        "AND NOT EXISTS ("
-        "  SELECT 1 FROM inbound_messages im "
-        "  WHERE im.agent_id = agents_meta.id AND im.status = 'pending' "
-        "    AND im.created_at >= now() - make_interval(secs => %s) "
-        ") "
-        "AND NOT EXISTS ("
-        "  SELECT 1 FROM agent_impersonations lease "
-        "  WHERE lease.agent_id = agents_meta.id "
-        "    AND (lease.status IN ('requested','accepted') "
-        "         OR (lease.status='active' AND lease.expires_at <= now()) "
-        "         OR (lease.status <> 'active' AND (lease.delta_version > lease.applied_version "
-        "             OR lease.handoff_applied_at IS NULL))) "
-        ") "
+        "SELECT agents_meta.id, (EXTRACT(EPOCH FROM (now() - COALESCE(active.activated_at, active.created_at, last_active_at))) / 60.0)::double precision AS idle_minutes "
+        "FROM agents_meta LEFT JOIN agent_impersonations active ON active.agent_id = agents_meta.id AND active.status = 'active' AND active.expires_at > now() "
+        "WHERE (agents_meta.status = 'idling' OR (agents_meta.status = 'running' AND active.id IS NOT NULL)) AND agents_meta.permanent_reject_streak = 0 "
+        "AND now() >= GREATEST(heartbeat_paused_until, COALESCE(active.activated_at, active.created_at, last_active_at) + make_interval(secs => %s + COALESCE(mod(agents_meta.id, NULLIF(%s, 0)::int), 0)), "
+        "last_heartbeat_at + make_interval(secs => LEAST(%s * power(2.0, CASE WHEN active.id IS NOT NULL THEN 0 ELSE heartbeat_backoff_level END), 86400))) "
+        "AND NOT EXISTS (SELECT 1 FROM inbound_messages im WHERE im.agent_id = agents_meta.id AND im.status = 'pending' AND im.created_at >= now() - make_interval(secs => %s)) "
+        "AND NOT EXISTS (SELECT 1 FROM agent_impersonations lease WHERE lease.agent_id = agents_meta.id AND (lease.status IN ('requested','accepted') OR (lease.status='active' AND lease.expires_at <= now()) OR (lease.status <> 'active' AND (lease.delta_version > lease.applied_version OR lease.handoff_applied_at IS NULL)))) "
         "ORDER BY COALESCE(active.activated_at, active.created_at, last_active_at) ASC"
     )
-    params: list[object] = [
-        idle_threshold_s,
-        jitter_span_s,
-        reminder_interval_s,
-        STALE_PENDING_S,
-    ]
+    params: list[object] = [idle_threshold_s, jitter_span_s, reminder_interval_s, STALE_PENDING_S]
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute(sql, params)
         rows = cur.fetchall()
@@ -250,7 +225,7 @@ def select_idle_agents_needing_heartbeat(
     # filter is a fast no-op. The limit is applied AFTER the backoff filter so
     # backed-off agents never consume the per-step wake-rate slots.
     if backoff_until:
-        now = time.time()
+        now = now_fn()
         rows = [r for r in rows if now >= backoff_until.get(r[0], 0.0)]
     if limit is not None:
         rows = rows[:limit]
@@ -317,17 +292,10 @@ def _reconcile_agent(
 ) -> None:
     """Judge one tracked agent's last check-in: update its failure and no-op streaks."""
     cur.execute(
-        "SELECT status, "
-        "(EXTRACT(EPOCH FROM (now() - last_active_at)) / 60.0)::double precision, "
-        "heartbeat_backoff_level, "
+        "SELECT status, (EXTRACT(EPOCH FROM (now() - last_active_at)) / 60.0)::double precision, heartbeat_backoff_level, "
         "(heartbeat_paused_until IS NOT NULL AND heartbeat_paused_until > now()), "
-        "(last_heartbeat_at IS NOT NULL AND EXISTS ("
-        "  SELECT 1 FROM inbound_messages im "
-        "  WHERE im.agent_id = agents_meta.id AND im.kind <> 'heartbeat' "
-        "    AND im.created_at > agents_meta.last_heartbeat_at)) "
-        ", EXISTS (SELECT 1 FROM agent_impersonations lease "
-        "WHERE lease.agent_id=agents_meta.id AND lease.status='active') "
-        "FROM agents_meta WHERE id = %s",
+        "(last_heartbeat_at IS NOT NULL AND EXISTS (SELECT 1 FROM inbound_messages im WHERE im.agent_id = agents_meta.id AND im.kind <> 'heartbeat' AND im.created_at > agents_meta.last_heartbeat_at)), "
+        "EXISTS (SELECT 1 FROM agent_impersonations lease WHERE lease.agent_id=agents_meta.id AND lease.status='active') FROM agents_meta WHERE id = %s",
         (agent_id,),
     )
     row = cur.fetchone()
@@ -454,22 +422,15 @@ def _raise_backoff_level(
             level="info",
             agent_id=agent_id,
             source="system",
-            attributes={
-                "level": new_level,
-                "interval_seconds": stretched_s,
-            },
+            attributes={"level": new_level, "interval_seconds": stretched_s},
         )
 
 
 def sweep_backoff_resets(pool: ConnectionPool) -> None:
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute(
-            "SELECT id, heartbeat_backoff_level, "
-            "(heartbeat_paused_until IS NOT NULL AND heartbeat_paused_until > now()), "
-            "(last_heartbeat_at IS NOT NULL AND EXISTS ("
-            "  SELECT 1 FROM inbound_messages im "
-            "  WHERE im.agent_id = agents_meta.id AND im.kind <> 'heartbeat' "
-            "    AND im.created_at > agents_meta.last_heartbeat_at)) "
+            "SELECT id, heartbeat_backoff_level, (heartbeat_paused_until IS NOT NULL AND heartbeat_paused_until > now()), "
+            "(last_heartbeat_at IS NOT NULL AND EXISTS (SELECT 1 FROM inbound_messages im WHERE im.agent_id = agents_meta.id AND im.kind <> 'heartbeat' AND im.created_at > agents_meta.last_heartbeat_at)) "
             "FROM agents_meta WHERE heartbeat_backoff_level > 0"
         )
         rows = cur.fetchall()
@@ -498,6 +459,8 @@ def backoff_deadlines(
     failure_streak: dict[int, int],
     idle_threshold_s: float,
     deadline_state: dict[int, tuple[int, float]] | None = None,
+    *,
+    now_fn: Callable[[], float] = time.time,
 ) -> dict[int, float]:
     """Keep each absolute deadline until its agent's failure streak changes.
 
@@ -509,7 +472,7 @@ def backoff_deadlines(
     deadline_state = {} if deadline_state is None else deadline_state
     for agent_id in deadline_state.keys() - failure_streak.keys():
         del deadline_state[agent_id]
-    now = time.time()
+    now = now_fn()
     for agent_id, streak in failure_streak.items():
         previous = deadline_state.get(agent_id)
         if previous is None or previous[0] != streak:
@@ -552,6 +515,21 @@ async def sleep_with_liveness(liveness: LoopProgress, total_s: float) -> None:
         remaining -= step
 
 
+@dataclass(frozen=True)
+class DispatchLoopDeps:
+    sleep_fn: Callable[[LoopProgress, float], Awaitable[None]] = sleep_with_liveness
+    reconcile_fn: Callable[..., None] = reconcile_checkin_outcomes
+    select_fn: Callable[..., list[tuple[int, float]]] = select_idle_agents_needing_heartbeat
+    deadlines_fn: Callable[..., dict[int, float]] = backoff_deadlines
+    send_checkin_fn: Callable[[ConnectionPool, Database, EventBus, int, float], None] = (
+        send_heartbeat_checkin
+    )
+    now_fn: Callable[[], float] = time.time
+
+
+_DEFAULT_DISPATCH_LOOP_DEPS = DispatchLoopDeps()
+
+
 async def dispatch_loop(
     pool: ConnectionPool,
     db: Database,
@@ -559,6 +537,7 @@ async def dispatch_loop(
     liveness: LoopProgress,
     *,
     sweep_resets: Callable[[ConnectionPool], None] = sweep_backoff_resets,
+    deps: DispatchLoopDeps = _DEFAULT_DISPATCH_LOOP_DEPS,
 ) -> None:
     """Main loop: on bounded dispatch steps, send a check-in to due idle agents
     that have not paused.
@@ -599,9 +578,9 @@ async def dispatch_loop(
     failures = RoundFailureBudget("heartbeat poll")
     while True:
         try:
-            await sleep_with_liveness(liveness, step)
+            await deps.sleep_fn(liveness, step)
             sweep_resets(pool)
-            reconcile_checkin_outcomes(
+            deps.reconcile_fn(
                 pool,
                 pending_checkin=pending_checkin,
                 failure_streak=failure_streak,
@@ -609,17 +588,20 @@ async def dispatch_loop(
                 noop_streak=noop_streak,
                 heartbeat_interval_s=heartbeat_interval,
             )
-            rows = select_idle_agents_needing_heartbeat(
+            rows = deps.select_fn(
                 pool,
                 idle_threshold,
                 heartbeat_interval_s=heartbeat_interval,
                 jitter_span_s=JITTER_SPAN_S,
                 limit=_MAX_CHECKINS_PER_STEP,
-                backoff_until=backoff_deadlines(failure_streak, idle_threshold, deadline_state),
+                backoff_until=deps.deadlines_fn(
+                    failure_streak, idle_threshold, deadline_state, now_fn=deps.now_fn
+                ),
+                now_fn=deps.now_fn,
             )
             for agent_id, idle_minutes in rows:
                 try:
-                    send_heartbeat_checkin(pool, db, bus, agent_id, idle_minutes)
+                    deps.send_checkin_fn(pool, db, bus, agent_id, idle_minutes)
                     pending_checkin[agent_id] = idle_minutes
                     _log.info(
                         "[heartbeat] checked in on idle agent %s (idle %.0f min)",
@@ -643,21 +625,41 @@ async def dispatch_loop(
 
 
 async def liveness_loop(
-    db: Database, pool: ConnectionPool, bus: EventBus, liveness: LoopProgress
+    db: Database,
+    pool: ConnectionPool,
+    bus: EventBus,
+    liveness: LoopProgress,
+    *,
+    pass_fn: Callable[..., Awaitable[None]] = run_liveness_pass,
+    sleep_fn: Callable[[LoopProgress, float], Awaitable[None]] = sleep_with_liveness,
 ) -> None:
     """Run agent-liveness checks, the first at start so the roster read model is
     populated at once; a failed pass is retried on the next interval."""
     failures = RoundFailureBudget("heartbeat liveness")
     while True:
         try:
-            await run_liveness_pass(db, pool, bus)
+            await pass_fn(db, pool, bus)
             failures.succeeded()
         except asyncio.CancelledError:
             raise
         except Exception as exc:
             _log.exception("[heartbeat] liveness loop iteration failed")
             failures.failed(exc)
-        await sleep_with_liveness(liveness, PASS_INTERVAL_S)
+        await sleep_fn(liveness, PASS_INTERVAL_S)
+
+
+@dataclass(frozen=True)
+class RunDeps:
+    start_health_server: Callable[..., Awaitable[Any]] = start_health_server
+    stop_health_server: Callable[[Any], Awaitable[None]] = stop_health_server
+    dispatch_loop: Callable[..., Coroutine[Any, Any, None]] = dispatch_loop
+    liveness_loop: Callable[..., Coroutine[Any, Any, None]] = liveness_loop
+    completion_digest_loop: Callable[..., Coroutine[Any, Any, None]] = (
+        completion_digest.completion_digest_loop
+    )
+
+
+_DEFAULT_RUN_DEPS = RunDeps()
 
 
 async def run(
@@ -667,6 +669,7 @@ async def run(
     database: Callable[[], Database],
     image: LoadedCommit,
     machine: MachineIdentity,
+    deps: RunDeps = _DEFAULT_RUN_DEPS,
 ) -> None:
     """Start the daemon: healthz server -> write pidfile -> connect DB -> enter main loop."""
     if _is_running(process_config, runtime=runtime):
@@ -685,7 +688,7 @@ async def run(
     liveness_progress = liveness.register("liveness", _LIVENESS_TIMEOUT_S)
     digest_progress = liveness.register("completion_digest", _DIGEST_LIVENESS_TIMEOUT_S)
     endpoint = _endpoint(process_config, runtime=runtime)
-    health = await start_health_server(
+    health = await deps.start_health_server(
         "heartbeat", endpoint.health_port, liveness=liveness, image=image
     )
     _log.info("[heartbeat] healthz listening on :%s", endpoint.health_port)
@@ -701,16 +704,14 @@ async def run(
         # check-in; the completion digest is a third. A loop that raises cancels
         # its siblings and ends the process, and the supervisor restarts it.
         async with asyncio.TaskGroup() as loops:
-            loops.create_task(dispatch_loop(pool, db, bus, dispatch_progress))
-            loops.create_task(liveness_loop(db, pool, bus, liveness_progress))
+            loops.create_task(deps.dispatch_loop(pool, db, bus, dispatch_progress))
+            loops.create_task(deps.liveness_loop(db, pool, bus, liveness_progress))
             loops.create_task(
-                completion_digest.completion_digest_loop(
-                    pool, db, bus, digest_progress, machine=machine
-                )
+                deps.completion_digest_loop(pool, db, bus, digest_progress, machine=machine)
             )
     finally:
         pool.close()
-        await stop_health_server(health)
+        await deps.stop_health_server(health)
         _remove_pidfile(process_config, runtime=runtime)
         _log.info("[heartbeat] daemon stopped")
 

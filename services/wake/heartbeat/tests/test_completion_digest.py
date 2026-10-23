@@ -128,7 +128,6 @@ def test_flush_once_delivers_one_digest_and_marks_the_authoritative_events(
 
 def test_unknown_digest_failure_propagates_to_service(
     db_conn: psycopg.Connection,
-    monkeypatch: pytest.MonkeyPatch,
     *,
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
@@ -163,7 +162,6 @@ def test_unknown_digest_failure_propagates_to_service(
             raise RuntimeError("poison digest")
         return await real_deliver(pool, db, bus, agent_id, **kwargs)  # type: ignore[arg-type]
 
-    monkeypatch.setattr(completion_digest, "deliver_chat_inbound", fail_one)
     pool = base.db.pool(max_size=2, gate=database_gate)
     try:
         with pytest.raises(RuntimeError, match="poison digest"):
@@ -174,6 +172,7 @@ def test_unknown_digest_failure_propagates_to_service(
                     EventBus.from_settings(),
                     now=datetime(2026, 9, 22, 12, tzinfo=UTC),
                     machine=machine_identity,
+                    deliver_fn=fail_one,
                 )
             )
     finally:

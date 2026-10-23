@@ -98,19 +98,27 @@ class ProbeOutcome:
 _UNREACHED = ProbeOutcome(reached=False, host_online=None, status=None)
 
 
-async def probe_machine(name: str, probe: Callable[..., Awaitable[object]]) -> ProbeOutcome:
+async def probe_machine(
+    name: str,
+    probe: Callable[..., Awaitable[object]],
+    *,
+    timeout_s: float | None = None,
+) -> ProbeOutcome:
     """One status_probe round-trip.
 
     An unreachable host or a failed op (timeout and transport errors surface as
     unreachable) is a probe failure — the caller counts consecutive failures.
     Anything else is a bug and propagates.
     """
+    resolved_timeout = (
+        settings.gateway.status_probe_timeout_seconds if timeout_s is None else timeout_s
+    )
     try:
         result = await probe(
             target_machine=name,
             kind="status_probe",
             payload={},
-            timeout_s=settings.gateway.status_probe_timeout_seconds,
+            timeout_s=resolved_timeout,
             # No transport retry: an offline host is steady-state and the
             # pass has its own consecutive-failure gate; retrying just stalls
             # the fan-out (same reasoning as the roster probe).
@@ -322,6 +330,9 @@ async def run_liveness_pass(
     pool: ConnectionPool,
     bus: EventBus,
     probe: Callable[..., Awaitable[object]] | None = None,
+    *,
+    timeout_s: float | None = None,
+    publish_fn: Callable[[EventBus, int], None] = publish_agent_updated_sync,
 ) -> None:
     """One liveness pass: probe every roster-visible agent-runner once, record the
     outcome of the rollout targets as agent-liveness state, snapshot every probed
@@ -337,7 +348,9 @@ async def run_liveness_pass(
     machines = sorted(targets | {name for name, _url in list_roster_agent_runners(db)})
     if not machines:
         return
-    results = await asyncio.gather(*(probe_machine(name, probe) for name in machines))
+    results = await asyncio.gather(
+        *(probe_machine(name, probe, timeout_s=timeout_s) for name in machines)
+    )
     outcomes = dict(zip(machines, results, strict=True))
     for name in machines:
         outcome = outcomes[name]
@@ -356,7 +369,7 @@ async def run_liveness_pass(
     changed_agent_ids = merge_liveness(pool)
     # `merge_liveness` committed before these best-effort invalidation hints.
     for agent_id in changed_agent_ids:
-        publish_agent_updated_sync(bus, agent_id)
+        publish_fn(bus, agent_id)
     _log.info(
         "[heartbeat] liveness pass: %d machines probed (%d reachable), agents_meta merged",
         len(machines),

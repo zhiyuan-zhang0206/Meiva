@@ -1,4 +1,3 @@
-import sys
 import threading
 from collections.abc import Callable
 from pathlib import Path
@@ -20,8 +19,8 @@ from base.db.config import DbConfig
 from base.native_process.loaded_commit import LoadedCommit
 from base.paths.tests.homes import unit_home as unit_home
 from base.telemetry import EventPipeline
-from meiva.sdk_surface import process_context
 from services.wake.schedule_manager import runner
+from services.wake.schedule_manager.runner import RunnerDeps
 
 
 def _schedule(conn: psycopg.Connection) -> int:
@@ -35,7 +34,7 @@ def _schedule(conn: psycopg.Connection) -> int:
 
 
 def test_actor_binding_failure_does_not_open_history(
-    db_conn: psycopg.Connection, unit_home: Path, monkeypatch: pytest.MonkeyPatch
+    db_conn: psycopg.Connection, unit_home: Path
 ) -> None:
     sid = _schedule(db_conn)
     error = RuntimeError("actor unavailable")
@@ -46,15 +45,14 @@ def test_actor_binding_failure_does_not_open_history(
         assert (unit_home / "schedules" / str(sid) / "schedule.py").read_text() == "pass"
         raise error
 
-    monkeypatch.setattr(process_context, "bind_context", bind)
     with pytest.raises(RuntimeError) as caught:
-        runner.run(sid)
+        runner.run(sid, deps=RunnerDeps(bind_context=bind))
     assert caught.value is error
     assert db_conn.execute("SELECT count(*) FROM schedule_runs").fetchone() == (0,)
 
 
 def test_plugins_load_under_guard_after_actor_and_history(
-    db_conn: psycopg.Connection, unit_home: Path, monkeypatch: pytest.MonkeyPatch
+    db_conn: psycopg.Connection, unit_home: Path
 ) -> None:
     sid = _schedule(db_conn)
     guards: list[threading.Thread] = []
@@ -74,28 +72,24 @@ def test_plugins_load_under_guard_after_actor_and_history(
         assert len(guards) == 1 and guards[0].is_alive()
         raise RuntimeError("plugin failure")
 
-    monkeypatch.setattr(runner.meiva, "ensure_plugins_loaded", plugins)
-    assert runner.run(sid) == 1
+    assert runner.run(sid, deps=RunnerDeps(ensure_plugins_loaded=plugins)) == 1
     assert not guards[0].is_alive()
     assert db_conn.execute("SELECT ok FROM schedule_runs").fetchall() == [(False,)]
 
 
-def test_main_refuses_on_foreign_checkout(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_main_refuses_on_foreign_checkout() -> None:
     def refuse(_repo: Path) -> str:
         return "foreign checkout"
 
-    monkeypatch.setattr(sys, "argv", ["schedule_runner", "1"])
-    monkeypatch.setattr(runner, "prod_service_checkout_error", refuse)
     with pytest.raises(SystemExit) as caught:
-        runner.main()
+        runner.main(["schedule_runner", "1"], checkout_error_fn=refuse)
     assert caught.value.code == 3
 
 
 @pytest.mark.parametrize("sha", ["a" * 40, None])
-def test_process_owns_one_gate_and_closes_its_pipeline(
-    monkeypatch: pytest.MonkeyPatch, sha: str | None
-) -> None:
+def test_process_owns_one_gate_and_closes_its_pipeline(sha: str | None) -> None:
     image = LoadedCommit(Path("/loaded-schedule"), sha)
+    current_image = [image]
     images: list[LoadedCommit] = []
     gates: list[ProcessDbGate] = []
     pipelines: list[EventPipeline] = []
@@ -134,25 +128,29 @@ def test_process_owns_one_gate_and_closes_its_pipeline(
         context.clients.database()
         pipelines.append(context.clients.event_pipeline())
         assert not pipelines[0].stopped
-        monkeypatch.setattr(
-            process_context, "loaded_code_image", lambda: LoadedCommit(Path("/late"), "b")
-        )
+        current_image[0] = LoadedCommit(Path("/late"), "b")
         database()
         return 0
 
-    monkeypatch.setattr(process_context, "loaded_code_image", lambda: image)
-    monkeypatch.setattr(runner, "CodeVersion", version)
-    monkeypatch.setattr(runner, "Database", database)
-    monkeypatch.setattr(runner.engine, "run", execute)
-    assert runner.run(17, 3) == 0
+    assert (
+        runner.run(
+            17,
+            3,
+            deps=RunnerDeps(
+                loaded_code_image=lambda: current_image[0],
+                code_version_cls=version,
+                database_cls=database,
+                engine_run=execute,
+            ),
+        )
+        == 0
+    )
     assert images == [image]
     assert len(gates) == 4 and all(gate is gates[0] for gate in gates)
     assert pipelines[0].stopped
 
 
-def test_actor_failure_stays_primary_when_client_cleanup_fails(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_actor_failure_stays_primary_when_client_cleanup_fails() -> None:
     primary = RuntimeError("actor unavailable")
     secondary = OSError("client close failed")
     close = ClientSet.close
@@ -172,22 +170,26 @@ def test_actor_failure_stays_primary_when_client_cleanup_fails(
         bind_actor(schedule_id)
         raise AssertionError("binding failure was swallowed")
 
-    def fail_close(self: ClientSet, *, pipeline_timeout: float = 5) -> None:
+    def fail_close(clients: ClientSet, pipeline_timeout: float) -> None:
         assert pipeline_timeout == 2
-        close(self, pipeline_timeout=pipeline_timeout)
+        close(clients, pipeline_timeout=pipeline_timeout)
         raise secondary
 
-    monkeypatch.setattr(process_context, "bind_context", bind)
-    monkeypatch.setattr(runner.engine, "run", execute)
-    monkeypatch.setattr(ClientSet, "close", fail_close)
     with pytest.raises(RuntimeError) as caught:
-        runner.run(17)
+        runner.run(
+            17,
+            deps=RunnerDeps(
+                bind_context=bind,
+                engine_run=execute,
+                close_clients=fail_close,
+            ),
+        )
     assert caught.value is primary
     assert any("client close failed" in note for note in primary.__notes__)
 
 
 def test_runpy_script_receives_the_same_entry_builders(
-    db_conn: psycopg.Connection, unit_home: Path, monkeypatch: pytest.MonkeyPatch
+    db_conn: psycopg.Connection, unit_home: Path
 ) -> None:
     sid = _schedule(db_conn)
     marker = unit_home / "borrowed.txt"
@@ -211,6 +213,5 @@ def test_runpy_script_receives_the_same_entry_builders(
     ) -> None:
         pass
 
-    monkeypatch.setattr(runner.meiva, "ensure_plugins_loaded", plugins)
-    assert runner.run(sid) == 0
+    assert runner.run(sid, deps=RunnerDeps(ensure_plugins_loaded=plugins)) == 0
     assert marker.read_text() == "borrowed"
