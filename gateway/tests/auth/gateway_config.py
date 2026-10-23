@@ -1,5 +1,5 @@
 import uuid
-from collections.abc import Generator, Mapping
+from collections.abc import Callable, Generator, Mapping
 from contextlib import contextmanager, nullcontext
 from dataclasses import replace
 from typing import Any, Literal, Self
@@ -23,6 +23,7 @@ from gateway.http.config import GatewayConfig, gateway_config_from_boot
 __all__ = [
     "SPAWN_PATH",
     "GatewayTestClient",
+    "gateway_config_fields",
     "gateway_test_app",
     "gateway_test_client",
     "gateway_test_process",
@@ -32,6 +33,31 @@ __all__ = [
 ]
 
 SPAWN_PATH = "/api/keyed/v1/agents"
+_CONFIG_FIELD_OVERRIDES: list[dict[str, Any]] = []
+
+
+@contextmanager
+def gateway_config_fields(**fields: Any) -> Generator[dict[str, Any]]:
+    layer = dict(fields)
+    _CONFIG_FIELD_OVERRIDES.append(layer)
+    try:
+        yield layer
+    finally:
+        _CONFIG_FIELD_OVERRIDES.pop()
+
+
+def _resolve_boot(
+    boot: ConfigBoot | None = None,
+    fields: Mapping[str, Any] | None = None,
+) -> ConfigBoot:
+    resolved = snapshot_process_config() if boot is None else boot
+    for layer in _CONFIG_FIELD_OVERRIDES:
+        for name, value in layer.items():
+            resolved.set_field(name, value)
+    if fields is not None:
+        for name, value in fields.items():
+            resolved.set_field(name, value)
+    return resolved
 
 
 @contextmanager
@@ -39,11 +65,12 @@ def gateway_test_process(
     *,
     machine: MachineIdentity | None = None,
     config: ConfigBoot | None = None,
+    fields: Mapping[str, Any] | None = None,
     process: GatewayProcess | None = None,
 ) -> Generator[GatewayProcess]:
     owned = process is None
     if owned:
-        resolved_config = snapshot_process_config() if config is None else config
+        resolved_config = _resolve_boot(config, fields)
         resolved_machine = machine_from_boot(resolved_config) if machine is None else machine
         process = GatewayProcess(
             home=paths.meiva_home(),
@@ -62,13 +89,16 @@ def gateway_test_app(
     process: GatewayProcess | None = None,
     config: GatewayConfig | None = None,
     boot: ConfigBoot | None = None,
+    fields: Mapping[str, Any] | None = None,
     machine: MachineIdentity | None = None,
     process_ownership: Literal["borrowed", "owned"] | None = None,
     cluster_secret: str | None = None,
     session_cookie_secure: bool | None = None,
+    catalog: Any = None,
+    login_limiter_clock: Callable[[], float] | None = None,
 ) -> FastAPI:
     if process is None:
-        resolved_boot = snapshot_process_config() if boot is None else boot
+        resolved_boot = _resolve_boot(boot, fields)
         resolved_machine = machine_from_boot(resolved_boot) if machine is None else machine
         process = GatewayProcess(
             home=paths.meiva_home(),
@@ -94,11 +124,16 @@ def gateway_test_app(
         resolved_config = replace(resolved_config, cluster_secret=cluster_secret)
     if session_cookie_secure is not None:
         resolved_config = replace(resolved_config, session_cookie_secure=session_cookie_secure)
-    return create_app(
+    app = create_app(
         resolved_config,
         process=process,
         process_ownership=ownership,
     )
+    if catalog is not None:
+        app.state.catalog = catalog
+    if login_limiter_clock is not None:
+        app.state.login_limiter_clock = login_limiter_clock
+    return app
 
 
 class GatewayTestClient(TestClient):
@@ -116,15 +151,28 @@ def gateway_test_client(
     machine: MachineIdentity | None = None,
     config: GatewayConfig | None = None,
     boot: ConfigBoot | None = None,
+    fields: Mapping[str, Any] | None = None,
     process: GatewayProcess | None = None,
     cluster_secret: str | None = None,
     session_cookie_secure: bool | None = None,
+    catalog: Any = None,
+    login_limiter_clock: Callable[[], float] | None = None,
     **kwargs: Any,
 ) -> Generator[GatewayTestClient]:
     if application is not None:
         if any(
             arg is not None
-            for arg in (machine, config, boot, process, cluster_secret, session_cookie_secure)
+            for arg in (
+                machine,
+                config,
+                boot,
+                fields,
+                process,
+                cluster_secret,
+                session_cookie_secure,
+                catalog,
+                login_limiter_clock,
+            )
         ):
             raise ValueError(
                 "gateway_test_client(application, ...) borrows an already assembled FastAPI app; "
@@ -133,12 +181,16 @@ def gateway_test_client(
         with GatewayTestClient(application, **kwargs) as client:
             yield client
         return
-    with gateway_test_process(machine=machine, config=boot, process=process) as active_process:
+    with gateway_test_process(
+        machine=machine, config=boot, fields=fields, process=process
+    ) as active_process:
         assembled = gateway_test_app(
             process=active_process,
             config=config,
             cluster_secret=cluster_secret,
             session_cookie_secure=session_cookie_secure,
+            catalog=catalog,
+            login_limiter_clock=login_limiter_clock,
         )
         with GatewayTestClient(assembled, **kwargs) as client:
             yield client

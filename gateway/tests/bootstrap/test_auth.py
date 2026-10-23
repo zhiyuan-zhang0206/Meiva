@@ -4,6 +4,7 @@ import base64
 import hashlib
 import hmac
 import time
+from collections.abc import Iterator
 from pathlib import Path
 
 import psycopg
@@ -11,7 +12,6 @@ import pytest
 from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 
-from base import config
 from base.config.domains.gateway import GatewaySettings
 from base.host.net.auth import (
     bearer_header,
@@ -20,7 +20,7 @@ from base.host.net.auth import (
 from gateway.http.config import GatewayConfig
 from gateway.http.middleware.cors import cors_allowed_origins
 from gateway.tests.agents.gateway_auth import disable_default_gateway_credentials
-from gateway.tests.auth.gateway_config import gateway_test_client
+from gateway.tests.auth.gateway_config import gateway_config_fields, gateway_test_client
 
 SECRET = "test-cluster-secret"  # noqa: S105 — test fixture
 
@@ -76,14 +76,15 @@ def legacy_hmac_cookie() -> str:
 
 
 @pytest.fixture(autouse=True)
-def patch_secret(monkeypatch: pytest.MonkeyPatch) -> None:
+def patch_secret(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     """Run every test in this module against a known secret.
 
     This module tests authentication itself, so its clients are anonymous: they
     do not carry the suite's default bearer and present only what a test gives them.
     """
     disable_default_gateway_credentials(monkeypatch)
-    monkeypatch.setattr(config.settings.data_plane, "cluster_secret", SECRET)
+    with gateway_config_fields(cluster_secret=SECRET):
+        yield
 
 
 # ── Gateway security settings ─────────────────────────────────────────
@@ -410,12 +411,8 @@ def test_revoke_endpoint_rejects_longer_than_masked_suffix(
     assert row is not None and row[0] is None  # untouched by the 404 revoke
 
 
-def test_login_sets_cookie_flags_and_configured_ttl(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(config.settings.gateway, "session_ttl_seconds", 123)
-
-    with gateway_test_client() as client:
+def test_login_sets_cookie_flags_and_configured_ttl() -> None:
+    with gateway_test_client(fields={"session_ttl_seconds": 123}) as client:
         resp = client.post("/api/auth/login", json={"password": SECRET})
 
     set_cookie = resp.headers["Set-Cookie"]
@@ -426,25 +423,23 @@ def test_login_sets_cookie_flags_and_configured_ttl(
     assert "Max-Age=123" in set_cookie
 
 
-def test_login_cookie_secure_derives_from_gateway_url(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(config.settings.gateway, "gateway_url", "https://gateway.example:8000")
-
-    with gateway_test_client() as client:
+def test_login_cookie_secure_derives_from_gateway_url() -> None:
+    with gateway_test_client(fields={"gateway_url": "https://gateway.example:8000"}) as client:
         resp = client.post("/api/auth/login", json={"password": SECRET})
 
     assert "; Secure" in resp.headers["Set-Cookie"]
 
 
-def test_https_browser_entry_login_preserves_authenticated_cookie(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(config.settings.gateway, "browser_origin", "https://console.example")
-    monkeypatch.setattr(config.settings.gateway, "gateway_url", "http://192.0.2.2:20016")
-    monkeypatch.setattr(config.settings.gateway, "session_cookie_secure", None)
-    monkeypatch.setattr(config.settings.gateway, "cors_allowed_origins", [])
-    with gateway_test_client(base_url="https://console.example") as client:
+def test_https_browser_entry_login_preserves_authenticated_cookie() -> None:
+    with gateway_test_client(
+        base_url="https://console.example",
+        fields={
+            "browser_origin": "https://console.example",
+            "gateway_url": "http://192.0.2.2:20016",
+            "session_cookie_secure": None,
+            "cors_allowed_origins": [],
+        },
+    ) as client:
         response = client.post(
             "/api/auth/login",
             json={"password": SECRET},
@@ -455,37 +450,37 @@ def test_https_browser_entry_login_preserves_authenticated_cookie(
         assert client.get("/api/auth/check").json()["authenticated"] is True
 
 
-def test_login_cookie_not_secure_for_http_gateway(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(config.settings.gateway, "session_cookie_secure", None)
-    monkeypatch.setattr(config.settings.gateway, "gateway_url", "http://gateway.example:8000")
-
-    with gateway_test_client() as client:
+def test_login_cookie_not_secure_for_http_gateway() -> None:
+    with gateway_test_client(
+        fields={
+            "session_cookie_secure": None,
+            "gateway_url": "http://gateway.example:8000",
+        }
+    ) as client:
         resp = client.post("/api/auth/login", json={"password": SECRET})
 
     assert "; Secure" not in resp.headers["Set-Cookie"]
 
 
-def test_login_cookie_secure_when_policy_explicitly_enabled(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(config.settings.gateway, "session_cookie_secure", True)
-    monkeypatch.setattr(config.settings.gateway, "gateway_url", "http://gateway.example:8000")
-
-    with gateway_test_client() as client:
+def test_login_cookie_secure_when_policy_explicitly_enabled() -> None:
+    with gateway_test_client(
+        fields={
+            "session_cookie_secure": True,
+            "gateway_url": "http://gateway.example:8000",
+        }
+    ) as client:
         resp = client.post("/api/auth/login", json={"password": SECRET})
 
     assert "; Secure" in resp.headers["Set-Cookie"]
 
 
-def test_login_cookie_secure_for_https_gateway(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(config.settings.gateway, "session_cookie_secure", None)
-    monkeypatch.setattr(config.settings.gateway, "gateway_url", "https://gateway.example:8000")
-
-    with gateway_test_client() as client:
+def test_login_cookie_secure_for_https_gateway() -> None:
+    with gateway_test_client(
+        fields={
+            "session_cookie_secure": None,
+            "gateway_url": "https://gateway.example:8000",
+        }
+    ) as client:
         resp = client.post("/api/auth/login", json={"password": SECRET})
 
     assert "; Secure" in resp.headers["Set-Cookie"]

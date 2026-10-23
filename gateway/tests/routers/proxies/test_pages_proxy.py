@@ -29,7 +29,6 @@ import pytest
 from fastapi.testclient import TestClient
 from psycopg.types.json import Jsonb
 
-from base import config
 from base.db import create_agent
 from base.packages.docs.pages_copy import (
     PAGE_LANGUAGE_DEFAULT,
@@ -194,9 +193,7 @@ def test_proxy_serves_page_content(db_conn, page_server: int) -> None:
         assert "<h1>hello</h1>" in with_qs.text
 
 
-def test_proxy_client_ignores_ambient_proxy_env(
-    db_conn, page_server: int, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_proxy_client_ignores_ambient_proxy_env(db_conn, page_server: int) -> None:
     """The page-proxy dial target is a registry-validated cluster host — the
     client must never route it through the machine's ambient HTTP proxy
     (proxy-configured gateway hosts forwarded Clash's own 502, 2026-09-10)."""
@@ -208,8 +205,8 @@ def test_proxy_client_ignores_ambient_proxy_env(
         seen["trust_env"] = kwargs["trust_env"]
         return real_client(**kwargs)  # pyright: ignore[reportUnknownArgumentType]
 
-    monkeypatch.setattr(pages_router.httpx, "AsyncClient", _client_factory)  # pyright: ignore[reportUnknownArgumentType]
     with gateway_test_client() as client:
+        client.app.state.page_proxy_client_factory = _client_factory
         _register(client, aid, "p", page_server)
         resp = client.get(f"/pages/{aid}-p/")
     assert resp.status_code == 200
@@ -417,7 +414,7 @@ def test_proxy_502_emits_structured_log_line(db_conn) -> None:
 
 
 def test_proxy_504_timeout_friendly_copy_and_log(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    db_conn: psycopg.Connection,
 ) -> None:
     """A dial timeout surfaces as 504 with friendly copy (never the raw
     host:port) and one structured log line carrying the timeout exception —
@@ -427,9 +424,7 @@ def test_proxy_504_timeout_friendly_copy_and_log(
     import httpx
     from loguru import logger as _loguru
 
-    async def _send_times_out(
-        self: object, request: object, *args: object, **kwargs: object
-    ) -> None:
+    async def _send_times_out(_request: httpx.Request) -> httpx.Response:
         raise httpx.TimeoutException("connect timed out")
 
     records: list[_Any] = []
@@ -443,9 +438,17 @@ def test_proxy_504_timeout_friendly_copy_and_log(
     free_port = probe.getsockname()[1]
     probe.close()
     sink_id = _loguru.add(_capture, level="WARNING")
-    monkeypatch.setattr(httpx.AsyncClient, "send", _send_times_out)
     try:
         with gateway_test_client() as client:
+
+            def _timeout_client(**_kwargs: object) -> httpx.AsyncClient:
+                return httpx.AsyncClient(
+                    transport=httpx.MockTransport(_send_times_out),
+                    follow_redirects=False,
+                    trust_env=False,
+                )
+
+            client.app.state.page_proxy_client_factory = _timeout_client
             _post_page(client, aid, {"name": "p", "port": free_port, "host": "127.0.0.1"})
             resp = client.get(f"/pages/{aid}-p/")
     finally:
@@ -469,7 +472,7 @@ def test_proxy_504_timeout_friendly_copy_and_log(
 
 
 def test_proxy_502_language_lookup_failure_falls_back_to_default(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    db_conn: psycopg.Connection,
 ) -> None:
     """A DB failure while reading the copy language must not turn the 502
     into a 500 — the default-language copy is served instead (QA nit A)."""
@@ -477,13 +480,13 @@ def test_proxy_502_language_lookup_failure_falls_back_to_default(
     def _boom(_conn: object) -> str:
         raise RuntimeError("pg down")
 
-    monkeypatch.setattr(pages_router, "display_language", _boom)
     aid = create_agent(db_conn)
     probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     probe.bind(("127.0.0.1", 0))
     free_port = probe.getsockname()[1]
     probe.close()
     with gateway_test_client() as client:
+        client.app.state.page_language_reader = _boom
         _post_page(client, aid, {"name": "p", "port": free_port, "host": "127.0.0.1"})
         resp = client.get(f"/pages/{aid}-p/")
     assert resp.status_code == 502
@@ -531,13 +534,12 @@ def test_proxy_streams_sse_chunked_content(db_conn) -> None:
         sse_server.server_close()
 
 
-def test_proxy_requires_auth(monkeypatch: pytest.MonkeyPatch, db_conn) -> None:
+def test_proxy_requires_auth(db_conn) -> None:
     """The reverse proxy is auth-gated like every other API route: no
     credentials -> 401; a valid bearer passes the middleware (404 here
     because the page was never registered, proving it reached the route)."""
-    monkeypatch.setattr(config.settings.data_plane, "cluster_secret", _SECRET)
     aid = create_agent(db_conn)  # pyright: ignore[reportUnknownArgumentType]
-    with gateway_test_client() as client:
+    with gateway_test_client(cluster_secret=_SECRET) as client:
         no_auth = without_credentials(client).get(f"/pages/{aid}-p/")
         assert no_auth.status_code == 401
 

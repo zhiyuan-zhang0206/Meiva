@@ -11,6 +11,7 @@ not evaluate the credential at all.
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from functools import partial
 
 import pytest
@@ -25,7 +26,11 @@ from base.cluster.rate_limit import LoginRateLimitConfig
 from gateway.app import lifespan
 from gateway.http.auth.router import router
 from gateway.http.config import gateway_config_from_boot
-from gateway.tests.auth.gateway_config import gateway_test_client, gateway_test_process
+from gateway.tests.auth.gateway_config import (
+    gateway_config_fields,
+    gateway_test_client,
+    gateway_test_process,
+)
 
 _SECRET = "test-cluster-secret"  # noqa: S105 — test fixture
 
@@ -41,9 +46,10 @@ class _FakeClock:
 
 
 @pytest.fixture(autouse=True)
-def patch_secret(monkeypatch: pytest.MonkeyPatch) -> None:
+def patch_secret() -> Iterator[None]:
     """Enable auth with a known secret, mirroring test_auth.py."""
-    monkeypatch.setattr(config.settings.data_plane, "cluster_secret", _SECRET)
+    with gateway_config_fields(cluster_secret=_SECRET):
+        yield
 
 
 def _wrong_login(
@@ -98,12 +104,9 @@ def test_successful_login_resets_failure_counter(*, machine_identity: MachineIde
     assert resp.status_code == 429
 
 
-def test_lockout_expires_and_recovers(
-    monkeypatch: pytest.MonkeyPatch, *, machine_identity: MachineIdentity
-) -> None:
+def test_lockout_expires_and_recovers(*, machine_identity: MachineIdentity) -> None:
     fake = _FakeClock()
-    monkeypatch.setattr(rate_limit, "time", fake)
-    with gateway_test_client(machine=machine_identity) as client:
+    with gateway_test_client(machine=machine_identity, login_limiter_clock=fake.time) as client:
         for _ in range(config.settings.gateway.login_max_failures):
             _wrong_login(client)
         assert (
@@ -164,17 +167,19 @@ def test_login_lockout_is_isolated_between_application_lifespans(
             )
 
 
-def test_lockout_threshold_and_window_follow_config(
-    monkeypatch: pytest.MonkeyPatch, *, machine_identity: MachineIdentity
-) -> None:
+def test_lockout_threshold_and_window_follow_config(*, machine_identity: MachineIdentity) -> None:
     """The lockout numbers resolve from config at call time — a cluster can
     tighten the policy without a new release (task #3696: every user-facing
     limit carries a config home)."""
     fake = _FakeClock()
-    monkeypatch.setattr(rate_limit, "time", fake)
-    monkeypatch.setattr(config.settings.gateway, "login_max_failures", 2)
-    monkeypatch.setattr(config.settings.gateway, "login_lockout_seconds", 123)
-    with gateway_test_client(machine=machine_identity) as client:
+    with gateway_test_client(
+        machine=machine_identity,
+        login_limiter_clock=fake.time,
+        fields={
+            "login_max_failures": 2,
+            "login_lockout_seconds": 123,
+        },
+    ) as client:
         _wrong_login(client)  # failure 1 — below the configured threshold
         _wrong_login(client)  # failure 2 — trips it
         resp = client.post("/api/auth/login", json={"password": "wrong-password"})
@@ -187,15 +192,13 @@ def test_lockout_threshold_and_window_follow_config(
 # ── Limiter unit behavior ─────────────────────────────────────────────
 
 
-def test_limiter_locks_at_threshold_and_restarts_after_expiry(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_limiter_locks_at_threshold_and_restarts_after_expiry() -> None:
     fake = _FakeClock()
-    monkeypatch.setattr(rate_limit, "time", fake)
     limiter = rate_limit.LoginRateLimiter(
         max_failures_reader=lambda: config.settings.gateway.login_max_failures,
         lockout_seconds_reader=lambda: config.settings.gateway.login_lockout_seconds,
         config=LoginRateLimitConfig(),
+        clock=fake.time,
     )
     ip = "203.0.113.9"
 
@@ -220,13 +223,13 @@ def test_limiter_locks_at_threshold_and_restarts_after_expiry(
     assert limiter.lockout_remaining(ip) == config.settings.gateway.login_lockout_seconds
 
 
-def test_limiter_success_resets_streak(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_limiter_success_resets_streak() -> None:
     fake = _FakeClock()
-    monkeypatch.setattr(rate_limit, "time", fake)
     limiter = rate_limit.LoginRateLimiter(
         max_failures_reader=lambda: config.settings.gateway.login_max_failures,
         lockout_seconds_reader=lambda: config.settings.gateway.login_lockout_seconds,
         config=LoginRateLimitConfig(),
+        clock=fake.time,
     )
     ip = "203.0.113.11"
 

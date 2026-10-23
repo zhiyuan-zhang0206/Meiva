@@ -23,7 +23,7 @@ import re as _re
 import threading
 import time
 from collections import OrderedDict
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Callable
 from contextlib import nullcontext
 from typing import Annotated
 from urllib.parse import urlparse
@@ -113,7 +113,11 @@ class PageHostCache:
         return allowed
 
 
-def _page_language(pool: ConnectionPool) -> str:
+def _page_language(
+    pool: ConnectionPool,
+    *,
+    language_reader: Callable[[Connection], str] | None = None,
+) -> str:
     """The page copy language — ``user_settings`` display.language (zh | en).
 
     Same single-language-source mechanism as the IM alert copy
@@ -121,9 +125,10 @@ def _page_language(pool: ConnectionPool) -> str:
     falls back to ``PAGE_LANGUAGE_DEFAULT``. A DB failure also falls back —
     an error page must not turn a proxy 502/504 into a 500 (QA nit A).
     """
+    read_language = display_language if language_reader is None else language_reader
     try:
         with pool.connection() as conn:
-            return display_language(conn)
+            return read_language(conn)
     except Exception:
         logger.opt(exception=True).warning(
             "page copy language lookup failed — falling back to the default",
@@ -343,12 +348,15 @@ async def _proxy_page_get_impl(agent_id: int, name: str, rest: str, request: Req
     target_row = await asyncio.to_thread(
         _page_target_blocking, request.app.state.db_pool, agent_id, name
     )
+    language_reader = getattr(request.app.state, "page_language_reader", None)
     if target_row is None:
         expired = await asyncio.to_thread(
             _page_expired_blocking, request.app.state.db_pool, agent_id, name
         )
         if expired:
-            lang = await asyncio.to_thread(_page_language, request.app.state.db_pool)
+            lang = await asyncio.to_thread(
+                _page_language, request.app.state.db_pool, language_reader=language_reader
+            )
             return Response(
                 status_code=410,
                 media_type="text/html",
@@ -367,7 +375,12 @@ async def _proxy_page_get_impl(agent_id: int, name: str, rest: str, request: Req
     query = request.url.query
     if query:
         target += f"?{query}"
-    client = httpx.AsyncClient(timeout=_PROXY_TIMEOUT, trust_env=False)
+    client_factory = getattr(request.app.state, "page_proxy_client_factory", None)
+    client = (
+        httpx.AsyncClient(timeout=_PROXY_TIMEOUT, trust_env=False)
+        if client_factory is None
+        else client_factory(timeout=_PROXY_TIMEOUT, trust_env=False)
+    )
     try:
         req = client.build_request("GET", target)
         resp = await client.send(req, stream=True)
@@ -376,7 +389,9 @@ async def _proxy_page_get_impl(agent_id: int, name: str, rest: str, request: Req
         _log_proxy_failure(request, agent_id, name, host, port, "504", exc)
         # Friendly, language-aware copy in place of the raw host:port detail —
         # the dial target stays in the log line above (task #2212, QA nit B).
-        lang = await asyncio.to_thread(_page_language, request.app.state.db_pool)
+        lang = await asyncio.to_thread(
+            _page_language, request.app.state.db_pool, language_reader=language_reader
+        )
         detail = PAGE_SERVER_TIMEOUT_BODY.get(lang, PAGE_SERVER_TIMEOUT_BODY[PAGE_LANGUAGE_DEFAULT])
         raise HTTPException(status_code=504, detail=detail) from None
     except httpx.HTTPError as exc:
@@ -384,7 +399,9 @@ async def _proxy_page_get_impl(agent_id: int, name: str, rest: str, request: Req
         _log_proxy_failure(request, agent_id, name, host, port, "502", exc)
         # Friendly, language-aware copy in place of the raw host:port detail —
         # the dial target stays in the log line above (task #2212).
-        lang = await asyncio.to_thread(_page_language, request.app.state.db_pool)
+        lang = await asyncio.to_thread(
+            _page_language, request.app.state.db_pool, language_reader=language_reader
+        )
         detail = PAGE_SERVER_DOWN_BODY.get(lang, PAGE_SERVER_DOWN_BODY[PAGE_LANGUAGE_DEFAULT])
         raise HTTPException(status_code=502, detail=detail) from None
     headers = {k: v for k, v in resp.headers.items() if k.lower() in _FORWARDED_RESPONSE_HEADERS}

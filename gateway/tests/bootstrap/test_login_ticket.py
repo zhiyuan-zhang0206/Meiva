@@ -9,6 +9,8 @@ bound to the credential that issued it.
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+
 import httpx2
 import psycopg
 import pytest
@@ -18,7 +20,7 @@ from base import config
 from base.host.net.auth import bearer_header, cookie_name
 from gateway.http.auth.session_store import LOGIN_TICKET_TTL_SECONDS
 from gateway.tests.agents.gateway_auth import disable_default_gateway_credentials
-from gateway.tests.auth.gateway_config import gateway_test_client
+from gateway.tests.auth.gateway_config import gateway_config_fields, gateway_test_client
 
 _SECRET = "test-cluster-secret"  # noqa: S105 — test fixture
 _ISSUE = "/api/auth/login-ticket"
@@ -26,10 +28,11 @@ _REDEEM = "/api/auth/login-ticket/redeem"
 
 
 @pytest.fixture(autouse=True)
-def patch_secret(monkeypatch: pytest.MonkeyPatch) -> None:
+def patch_secret(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     """A known secret and anonymous clients: each test says what credential it presents."""
     disable_default_gateway_credentials(monkeypatch)
-    monkeypatch.setattr(config.settings.data_plane, "cluster_secret", _SECRET)
+    with gateway_config_fields(cluster_secret=_SECRET):
+        yield
 
 
 def _issue(client: TestClient) -> str:
@@ -71,11 +74,8 @@ def test_a_ticket_is_short_lived_and_not_cacheable(db_conn: psycopg.Connection) 
     assert 0 < float(row[0]) <= LOGIN_TICKET_TTL_SECONDS
 
 
-def test_redeeming_sets_the_same_session_cookie_a_login_sets(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(config.settings.gateway, "session_ttl_seconds", 456)
-    with gateway_test_client() as client:
+def test_redeeming_sets_the_same_session_cookie_a_login_sets() -> None:
+    with gateway_test_client(fields={"session_ttl_seconds": 456}) as client:
         ticket = _issue(client)
         redeemed = _redeem(client, ticket)
         logged_in = client.post("/api/auth/login", json={"password": _SECRET})
@@ -188,16 +188,12 @@ def test_a_missing_ticket_field_is_a_refusal_not_a_validation_error() -> None:
     assert response.json()["code"] == "invalid_login_ticket"
 
 
-def test_a_ticket_dies_with_the_credential_that_issued_it(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_a_ticket_dies_with_the_credential_that_issued_it() -> None:
     with gateway_test_client() as client:
         ticket = _issue(client)
-    monkeypatch.setattr(config.settings.data_plane, "cluster_secret", "rotated-" + "r" * 40)
-    with gateway_test_client() as rotated_client:
+    with gateway_test_client(cluster_secret="rotated-" + "r" * 40) as rotated_client:
         response = _redeem(rotated_client, ticket)
-    monkeypatch.setattr(config.settings.data_plane, "cluster_secret", _SECRET)
-    with gateway_test_client() as restored_client:
+    with gateway_test_client(cluster_secret=_SECRET) as restored_client:
         after_restore = _redeem(restored_client, ticket)
 
     assert response.status_code == 401

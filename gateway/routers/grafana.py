@@ -31,7 +31,7 @@ dashboard embed.
 
 from __future__ import annotations
 
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Callable
 
 import httpx
 from fastapi import APIRouter, HTTPException, Request, Response
@@ -53,11 +53,15 @@ _PROXY_TIMEOUT = httpx.Timeout(connect=5.0, read=120.0, write=5.0, pool=5.0)
 _MAX_PROXY_REQUEST_BODY_BYTES = 16 * 1024 * 1024
 
 
-def build_proxy_client() -> httpx.AsyncClient:
+def build_proxy_client(
+    *,
+    client_cls: Callable[..., httpx.AsyncClient] | None = None,
+) -> httpx.AsyncClient:
     """The shared upstream client — one connection pool for every proxied
     request. Owned by the gateway lifespan (created at startup, closed at
     shutdown); handlers reach it via `request.app.state.grafana_client`."""
-    return httpx.AsyncClient(
+    resolved_cls = httpx.AsyncClient if client_cls is None else client_cls
+    return resolved_cls(
         timeout=_PROXY_TIMEOUT,
         trust_env=False,
         limits=httpx.Limits(max_connections=32, max_keepalive_connections=10),
@@ -147,10 +151,12 @@ async def _proxy(rest: str, request: Request) -> Response:
     force an unbounded gateway allocation.
     """
     _validate_proxy_rest(rest)
-    if not settings.gateway.grafana_proxy_enabled:
+    process = getattr(request.app.state, "gateway_process", None)
+    gateway_cfg = settings.gateway if process is None else process.config.view.gateway
+    if not gateway_cfg.grafana_proxy_enabled:
         raise HTTPException(status_code=404, detail="grafana proxy is disabled")
-    host = settings.gateway.grafana_host
-    port = settings.gateway.grafana_port
+    host = gateway_cfg.grafana_host
+    port = gateway_cfg.grafana_port
     # Keep the /grafana prefix on the forwarded path: Grafana runs with
     # serve_from_sub_path=true (root_url = <gateway>/grafana), so it serves
     # sub-path requests directly. Stripping the prefix (the old behaviour)

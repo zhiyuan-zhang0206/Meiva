@@ -6,8 +6,6 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
-import gateway.app as gateway_app
-from base import config
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.host.net.auth import bearer_header, cookie_name
@@ -75,27 +73,20 @@ def test_cors_preflight_on_protected_route_not_401(*, machine_identity: MachineI
     assert resp.headers["access-control-allow-origin"] == allowed_origin
 
 
-def test_cors_preflight_login_from_gateway_frontend_origin_passes(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_cors_preflight_login_from_gateway_frontend_origin_passes() -> None:
     """The Gate UI lives on the gateway host at the frontend port, so its
     login request carries Origin http://<gateway-host>:<frontend-port>.
     Regression guard for the reported 400 "Disallowed CORS origin" on
     OPTIONS /api/auth/login: the derived allowlist used to carry only the
     gateway's own port, never the frontend entry on the gateway host, so the
     preflight was rejected before the browser ever sent the login POST."""
-    monkeypatch.setattr(config.settings.gateway, "cors_allowed_origins", [])
-    monkeypatch.setattr(
-        config.settings.services,
-        "frontend_healthcheck_url",
-        "http://localhost:3000",
-    )
-    monkeypatch.setattr(
-        config.settings.gateway,
-        "gateway_url",
-        "http://10.0.0.72:8000",
-    )
-    with gateway_test_client() as client:
+    with gateway_test_client(
+        fields={
+            "cors_allowed_origins": [],
+            "frontend_healthcheck_url": "http://localhost:3000",
+            "gateway_url": "http://10.0.0.72:8000",
+        }
+    ) as client:
         resp = client.options(
             "/api/auth/login",
             headers={
@@ -109,24 +100,20 @@ def test_cors_preflight_login_from_gateway_frontend_origin_passes(
 
 
 def test_cookie_authenticated_post_allows_gateway_frontend_origin(
-    monkeypatch: pytest.MonkeyPatch, *, machine_identity: MachineIdentity
+    *, machine_identity: MachineIdentity
 ) -> None:
     """A cookie-authenticated state-changing POST from the Gate UI's origin —
     gateway host, frontend port — must pass the exact-origin check, not 403.
     Mirrors the gateway-own-origin test: the allowlist needs BOTH the frontend
     entry and the gateway's own port."""
-    monkeypatch.setattr(config.settings.gateway, "cors_allowed_origins", [])
-    monkeypatch.setattr(
-        config.settings.services,
-        "frontend_healthcheck_url",
-        "http://localhost:3000",
-    )
-    monkeypatch.setattr(
-        config.settings.gateway,
-        "gateway_url",
-        "http://10.0.0.72:8000",
-    )
-    with gateway_test_client(machine=machine_identity) as client:
+    with gateway_test_client(
+        machine=machine_identity,
+        fields={
+            "cors_allowed_origins": [],
+            "frontend_healthcheck_url": "http://localhost:3000",
+            "gateway_url": "http://10.0.0.72:8000",
+        },
+    ) as client:
         token = login(client)
         resp = client.post(
             "/api/frontend-telemetry",
@@ -228,14 +215,12 @@ def test_api_agents_rejects_invalid_cookie(*, machine_identity: MachineIdentity)
 
 
 def test_cookie_authenticated_post_rejects_disallowed_origin(
-    monkeypatch: pytest.MonkeyPatch, *, machine_identity: MachineIdentity
+    *, machine_identity: MachineIdentity
 ) -> None:
-    monkeypatch.setattr(
-        config.settings.gateway,
-        "cors_allowed_origins",
-        ["https://allowed.example"],
-    )
-    with gateway_test_client(machine=machine_identity) as client:
+    with gateway_test_client(
+        machine=machine_identity,
+        fields={"cors_allowed_origins": ["https://allowed.example"]},
+    ) as client:
         token = login(client)
         resp = client.post(
             "/api/frontend-telemetry",
@@ -252,15 +237,12 @@ def test_cookie_authenticated_post_rejects_disallowed_origin(
 
 
 def test_bearer_authenticated_post_allows_disallowed_origin(
-    monkeypatch: pytest.MonkeyPatch, *, machine_identity: MachineIdentity
+    *, machine_identity: MachineIdentity
 ) -> None:
-    monkeypatch.setattr(
-        config.settings.gateway,
-        "cors_allowed_origins",
-        ["https://allowed.example"],
-    )
-
-    with gateway_test_client(machine=machine_identity) as client:
+    with gateway_test_client(
+        machine=machine_identity,
+        fields={"cors_allowed_origins": ["https://allowed.example"]},
+    ) as client:
         resp = client.post(
             "/api/frontend-telemetry",
             content=b"{}",
@@ -274,25 +256,21 @@ def test_bearer_authenticated_post_allows_disallowed_origin(
 
 
 def test_cookie_authenticated_post_allows_gateway_own_origin(
-    monkeypatch: pytest.MonkeyPatch, *, machine_identity: MachineIdentity
+    *, machine_identity: MachineIdentity
 ) -> None:
     """The gateway's own origin — the one a browser page served from the
     gateway (Grafana proxy included) sends on same-origin POSTs — must pass
     the Origin check. Regression guard for the /grafana data POST 403: the
     allowlist previously carried the frontend port instead of the gateway
     port, so every same-origin POST was rejected."""
-    monkeypatch.setattr(config.settings.gateway, "cors_allowed_origins", [])
-    monkeypatch.setattr(
-        config.settings.services,
-        "frontend_healthcheck_url",
-        "http://localhost:3100",
-    )
-    monkeypatch.setattr(
-        config.settings.gateway,
-        "gateway_url",
-        "http://10.0.0.72:8000",
-    )
-    with gateway_test_client(machine=machine_identity) as client:
+    with gateway_test_client(
+        machine=machine_identity,
+        fields={
+            "cors_allowed_origins": [],
+            "frontend_healthcheck_url": "http://localhost:3100",
+            "gateway_url": "http://10.0.0.72:8000",
+        },
+    ) as client:
         token = login(client)
         resp = client.post(
             "/api/frontend-telemetry",
@@ -310,14 +288,12 @@ def test_cookie_authenticated_post_allows_gateway_own_origin(
 
 
 def test_cookie_authenticated_post_allows_missing_origin(
-    monkeypatch: pytest.MonkeyPatch, *, machine_identity: MachineIdentity
+    *, machine_identity: MachineIdentity
 ) -> None:
-    monkeypatch.setattr(
-        config.settings.gateway,
-        "cors_allowed_origins",
-        ["https://allowed.example"],
-    )
-    with gateway_test_client(machine=machine_identity) as client:
+    with gateway_test_client(
+        machine=machine_identity,
+        fields={"cors_allowed_origins": ["https://allowed.example"]},
+    ) as client:
         token = login(client)
         resp = client.post(
             "/api/frontend-telemetry",
@@ -428,19 +404,19 @@ def test_middleware_touches_session_at_most_once_per_minute(
         assert last_seen_row[0] == reset_touch
 
 
-def test_middleware_bounds_session_touch_bookkeeping(
-    monkeypatch: pytest.MonkeyPatch, *, machine_identity: MachineIdentity
-) -> None:
+def test_middleware_bounds_session_touch_bookkeeping(*, machine_identity: MachineIdentity) -> None:
     now = 10_000.0
-    monkeypatch.setattr(config.settings.gateway, "session_ttl_seconds", 3600)
-    app = gateway_test_app(machine=machine_identity)
+    app = gateway_test_app(
+        machine=machine_identity,
+        fields={"session_ttl_seconds": 3600},
+    )
 
     with gateway_test_client(app) as client:
         token = login(client)
         last_touch = app.state.session_touch.last_touch
         last_touch["stale"] = now - 3601
         last_touch.update({f"recent-{index}": now - index for index in range(1025)})
-        monkeypatch.setattr(gateway_app.time, "monotonic", lambda: now)
+        app.state.monotonic_clock = lambda: now
 
         response = client.get("/api/agents")
 
@@ -462,14 +438,11 @@ def test_api_agents_rejects_wrong_bearer_secret(*, machine_identity: MachineIden
 # ── A blank secret authenticates nobody ────────────────────────────────
 
 
-def test_blank_secret_rejects_every_caller(
-    monkeypatch: pytest.MonkeyPatch, *, machine_identity: MachineIdentity
-) -> None:
+def test_blank_secret_rejects_every_caller(*, machine_identity: MachineIdentity) -> None:
     """There is no open posture: a gateway whose secret is blank (the process refuses
     to start in that state, `require_cluster_secret`) still never admits a caller on
     a blank bearer, and a blank secret never verifies as one."""
-    monkeypatch.setattr(config.settings.data_plane, "cluster_secret", "")
-    with gateway_test_client(machine=machine_identity) as client:
+    with gateway_test_client(machine=machine_identity, cluster_secret="") as client:
         assert client.get("/api/agents").status_code == 401
         assert client.get("/api/agents", headers={"Authorization": "Bearer "}).status_code == 401
         assert client.get("/api/auth/check").json()["authenticated"] is False

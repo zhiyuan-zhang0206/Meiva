@@ -203,6 +203,7 @@ def _build_request_resources(
         max_failures_reader=lambda: config.view.gateway.login_max_failures,
         lockout_seconds_reader=lambda: config.view.gateway.login_lockout_seconds,
         config=LoginRateLimitConfig(),
+        clock=getattr(app.state, "login_limiter_clock", None),
     )
 
     insights_client: Any = insights_router.build_client(process.home)
@@ -232,7 +233,8 @@ async def lifespan(
             machine_reader=process.machine.name,
         )
         async with _startup_releases() as releases:
-            app.state.catalog = load_model_catalog(build_model_catalog)
+            if getattr(app.state, "catalog", None) is None:
+                app.state.catalog = load_model_catalog(build_model_catalog)
             app.state.config_authority = ConfigAuthority(
                 runtime=config.view,
                 all_domains=config.view if config.view.profile is None else Settings(profile=None),
@@ -429,7 +431,8 @@ async def cluster_auth_middleware(
         request.state.source_verified_by = session_fact
         if _foreign_origin(request, config):
             return _origin_refused()
-        now = time.monotonic()
+        clock = getattr(request.app.state, "monotonic_clock", None)
+        now = time.monotonic() if clock is None else clock()
         touch: SessionTouchThrottle = request.app.state.session_touch
         if touch.due(cookie_token, now, stale_after_s=config.session_ttl_seconds):
             await asyncio.to_thread(

@@ -70,16 +70,11 @@ def test_resolved_defaults_to_the_cluster_model() -> None:
     assert body["registered"] is True
 
 
-def test_shared_default_layer(
-    tuned_model: tuple[str, ModelCatalog], monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_shared_default_layer(tuned_model: tuple[str, ModelCatalog]) -> None:
     """A field neither pinned nor tuned reports the DEFAULT_TUNING floor and
     says so — the shared floor is never presented as the model's own choice."""
     model, catalog = tuned_model
-    import gateway.app as gateway_app
-
-    monkeypatch.setattr(gateway_app, "build_model_catalog", lambda: catalog)
-    with gateway_test_client() as client:
+    with gateway_test_client(catalog=catalog) as client:
         resp = client.get("/api/config/resolved", params={"model": model})
     fields = {f["name"]: f for f in resp.json()["fields"]}
 
@@ -91,16 +86,11 @@ def test_shared_default_layer(
     assert row["explicit_value"] is None
 
 
-def test_model_default_layer(
-    tuned_model: tuple[str, ModelCatalog], monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_model_default_layer(tuned_model: tuple[str, ModelCatalog]) -> None:
     """A model's own tuning beats the floor, and the losing floor stays visible
     next to it (the point of the view: see the layer, not just the number)."""
     model, catalog = tuned_model
-    import gateway.app as gateway_app
-
-    monkeypatch.setattr(gateway_app, "build_model_catalog", lambda: catalog)
-    with gateway_test_client() as client:
+    with gateway_test_client(catalog=catalog) as client:
         resp = client.get("/api/config/resolved", params={"model": model})
     fields = {f["name"]: f for f in resp.json()["fields"]}
 
@@ -122,16 +112,11 @@ def test_model_default_layer(
 
 def test_explicit_layer_beats_the_model(
     tuned_model: tuple[str, ModelCatalog],
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """An explicit `.env` value overrides the model's tuning for EVERY model —
     the documented cost of pinning one value cluster-wide, made visible."""
-    monkeypatch.setattr(settings.agent, "auto_compact_fraction", 0.42)
     model, catalog = tuned_model
-    import gateway.app as gateway_app
-
-    monkeypatch.setattr(gateway_app, "build_model_catalog", lambda: catalog)
-    with gateway_test_client() as client:
+    with gateway_test_client(catalog=catalog, fields={"auto_compact_fraction": 0.42}) as client:
         resp = client.get("/api/config/resolved", params={"model": model})
     row = {f["name"]: f for f in resp.json()["fields"]}["auto_compact_fraction"]
 
