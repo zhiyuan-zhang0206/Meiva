@@ -261,7 +261,7 @@ class TraceCheckpointMessagesResponse(BaseModel):
     agent_id: int
     checkpoint_id: str | None
     pruned: bool
-    messages: list[dict]
+    messages: list[dict[str, Any]]
 
 
 class TokenUsageResponse(BaseModel):

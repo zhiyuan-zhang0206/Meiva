@@ -348,7 +348,7 @@ class PluginMetricResult(BaseModel):
     panel: Literal["timeseries", "stat", "barchart", "table", "logs"]
     error: str | None = None
     value: float | None = None
-    series: list[MetricPoint] = Field(default_factory=list)
+    series: list[MetricPoint] = Field(default_factory=list[MetricPoint])
 
 
 class InspectWidgetTask(BaseModel):

@@ -81,7 +81,7 @@ def _after_exec_default_next(_state: BaseAgentState) -> NodeName:
 
 
 def build_graph(
-    checkpointer: BaseCheckpointSaver | None,
+    checkpointer: BaseCheckpointSaver[Any] | None,
     extensions: ExtensionRegistry,
 ) -> CompiledStateGraph[BaseAgentState, MeivaContext, BaseAgentState, BaseAgentState]:
     # meiva:note

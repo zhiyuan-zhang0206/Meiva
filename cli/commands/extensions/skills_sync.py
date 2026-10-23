@@ -255,13 +255,13 @@ def iter_sources(repo: Path) -> tuple[list[Source], list[str]]:
 class SkillsConvergeResult:
     """What one converge pass did, for the caller to print / assert on."""
 
-    copied: list[str] = field(default_factory=list)
-    updated: list[str] = field(default_factory=list)
-    unchanged: list[str] = field(default_factory=list)
-    removed: list[str] = field(default_factory=list)
+    copied: list[str] = field(default_factory=list[str])
+    updated: list[str] = field(default_factory=list[str])
+    unchanged: list[str] = field(default_factory=list[str])
+    removed: list[str] = field(default_factory=list[str])
     # human-readable warnings: user-modified copies kept, name conflicts,
     # untracked dirs that will not load
-    warnings: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list[str])
 
 
 def _adopt_copy(

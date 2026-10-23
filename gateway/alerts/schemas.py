@@ -69,7 +69,7 @@ class AlertWebhookPayload(BaseModel):
 
     source: str = "grafana"
     status: WebhookStatus | None = None
-    alerts: list[AlertWebhookAlert] = Field(default_factory=list)
+    alerts: list[AlertWebhookAlert] = Field(default_factory=list[AlertWebhookAlert])
 
     def flattened(self) -> list[dict[str, Any]]:
         """Each alert as the plain dict base/telemetry/alerts/__init__.py consumes, with the

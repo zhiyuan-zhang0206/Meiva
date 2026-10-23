@@ -181,7 +181,7 @@ async def event_stream(
     """
     _channel = channel if channel is not None else bus.channel
     client = bus.open_async_redis()
-    pubsub = client.pubsub()  # pyright: ignore[reportUnknownMemberType]
+    pubsub: Any = client.pubsub()  # pyright: ignore[reportUnknownMemberType]
     # Attach/detach bracket: a reconnect storm (client watchdog cycling) or a
     # subscriber that never detaches is invisible without the pair; the detach
     # line carries duration + frames so a half-open stream is distinguishable
@@ -261,7 +261,7 @@ async def event_stream(
 
 
 async def _drain_redis_messages(
-    pubsub,  # noqa: ANN001  # redis-asyncio PubSub
+    pubsub: Any,
     request: Request,
     flush_interval: float,
     *,
@@ -351,7 +351,7 @@ async def throttled_event_stream(
     """
     _channel = channel if channel is not None else bus.channel
     client = bus.open_async_redis()
-    pubsub = client.pubsub()  # pyright: ignore[reportUnknownMemberType]
+    pubsub: Any = client.pubsub()  # pyright: ignore[reportUnknownMemberType]
     opened = time.monotonic()
     data_frames = 0
     total_events = 0
@@ -456,7 +456,7 @@ def sse_batch_frame(events: list[str]) -> bytes:
 # --- For tests only ---
 
 
-def decode_frames_for_test(chunks: list[bytes]) -> list[dict]:
+def decode_frames_for_test(chunks: list[bytes]) -> list[dict[str, Any]]:
     """Test helper: slice an SSE byte stream into frames + parse the JSON
     on data lines, the way the browser does: split lines on "\n" only
     (str.splitlines() would also break on U+0085 / U+2028 / U+2029 and
