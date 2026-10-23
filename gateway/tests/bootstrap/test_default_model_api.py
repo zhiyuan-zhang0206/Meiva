@@ -83,16 +83,12 @@ class TestGet:
         assert resp.json() == {"model": "claude-sonnet-5", "source": "cluster"}
 
     def test_unset_resolves_a_withdrawn_config_model(
-        self, monkeypatch: pytest.MonkeyPatch, withdrawn_model: tuple[str, ModelCatalog]
+        self, withdrawn_model: tuple[str, ModelCatalog]
     ) -> None:
         """A config chain naming a withdrawn id reports what actually runs: the
         spawn boundary resolves it the same way (`factory.validate_model_config`)."""
-        from base.config import settings
-
         model, catalog = withdrawn_model
-        monkeypatch.setattr(settings.lm, "llm_model", model)
-        with gateway_test_client() as client:
-            client.app.state.catalog = catalog
+        with gateway_test_client(catalog=catalog, fields={"llm_model": model}) as client:
             resp = client.get("/api/config/default-model")
         assert resp.status_code == 200, resp.text
         assert resp.json() == {"model": "deepseek-flash", "source": "config"}
@@ -119,14 +115,11 @@ class TestGet:
 
 class TestPut:
     def test_picker_preflight_and_birth_use_the_cluster_default(
-        self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+        self, db_conn: psycopg.Connection
     ) -> None:
-        from base.config import settings
-
         # MiMo cannot accept max: checking the old config default would reject
         # this valid DeepSeek birth before it could be persisted.
-        monkeypatch.setattr(settings.lm, "llm_model", "mimo-v2.6-pro")
-        with gateway_test_client() as client:
+        with gateway_test_client(fields={"llm_model": "mimo-v2.6-pro"}) as client:
             saved = client.put("/api/config/default-model", json={"model": "deepseek-flash"})
             assert saved.status_code == 200, saved.text
             assert client.get("/api/models").json()["default"] == "deepseek-flash"
