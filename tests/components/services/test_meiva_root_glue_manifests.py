@@ -23,10 +23,13 @@ _REPO = Path("/checkout/repo")
 
 
 @pytest.fixture(autouse=True)
-def _declared_configuration(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def _declared_configuration(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, unit_home: Path
+) -> None:
     """Give the real roster private configuration, without a native backend install."""
     from base import paths
     from base.packages.plugin_config_admin import update_all_disk_images
+    from base.packages.plugins.enable_config import discover_plugins
     from base.telemetry.lgtm_local import BACKENDS, service_input_paths
     from services.supervision import roster
 
@@ -34,7 +37,7 @@ def _declared_configuration(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> 
     monkeypatch.setattr(paths, "meiva_home", lambda: tmp_path)
     monkeypatch.setattr(roster, "meiva_home", lambda: tmp_path)
     # A launch manifest follows converge's plugin configuration initialization.
-    update_all_disk_images()
+    update_all_disk_images(plugin_dirs=discover_plugins(), home=unit_home)
     collector = otel_collector_config(tmp_path)
     collector.parent.mkdir(parents=True)
     collector.write_text("receivers: {}")

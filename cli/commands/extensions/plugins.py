@@ -49,8 +49,10 @@ def cmd_plugins_update() -> int:
     this function only formats the structured result for printing.
     """
     from base.packages.plugin_config_admin import update_all_disk_images
+    from base.packages.plugins.enable_config import discover_plugins
+    from base.paths.home import resolve_meiva_home
 
-    result = update_all_disk_images()
+    result = update_all_disk_images(plugin_dirs=discover_plugins(), home=resolve_meiva_home())
     if not result.entries:
         print("[meiva plugins update] no plugins found")
         return 0
