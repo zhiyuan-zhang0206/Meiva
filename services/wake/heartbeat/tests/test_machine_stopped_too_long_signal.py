@@ -12,7 +12,11 @@ from base.events.contract import payload_keys
 from base.events.live.bus import EventBus
 from base.telemetry.tests.capture.event_capture import EmittedEvents
 from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
-from services.wake.heartbeat.liveness import report_stopped_too_long, run_liveness_pass
+from services.wake.heartbeat.liveness import (
+    LivenessConfig,
+    report_stopped_too_long,
+    run_liveness_pass,
+)
 from services.wake.heartbeat.tests.machine_probe_setup import (
     FakeProbe,
     pool,
@@ -169,6 +173,7 @@ class TestStoppedTooLongSignal:
                 pool,
                 EventBus.from_settings(),
                 probe=FakeProbe({"forgotten": False}),
+                config=LivenessConfig(8.0),
             )
         )
 

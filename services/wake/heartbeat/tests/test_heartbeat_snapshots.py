@@ -17,7 +17,7 @@ from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from ops.cluster.rpc import ClusterOpUnreachable
 from services.wake.heartbeat import loops as heartbeat_loops
-from services.wake.heartbeat.liveness import probe_machine, run_liveness_pass
+from services.wake.heartbeat.liveness import LivenessConfig, probe_machine, run_liveness_pass
 
 
 @pytest.fixture
@@ -96,6 +96,7 @@ def test_a_probed_machine_is_snapshotted_with_its_status(
             pool,
             EventBus.from_settings(),
             probe=_Probe({"runner-1": _status("runner-1")}),
+            config=LivenessConfig(8.0),
         )
     )
 
@@ -112,6 +113,7 @@ def test_one_failed_probe_keeps_the_last_status_and_counts_the_failure(
             pool,
             EventBus.from_settings(),
             probe=_Probe({"runner-1": _status("runner-1")}),
+            config=LivenessConfig(8.0),
         )
     )
 
@@ -121,6 +123,7 @@ def test_one_failed_probe_keeps_the_last_status_and_counts_the_failure(
             pool,
             EventBus.from_settings(),
             probe=_Probe({"runner-1": None}),
+            config=LivenessConfig(8.0),
         )
     )
     assert _snapshot(db_conn, "runner-1") == (False, 1, "sha-1", True)
@@ -131,6 +134,7 @@ def test_one_failed_probe_keeps_the_last_status_and_counts_the_failure(
             pool,
             EventBus.from_settings(),
             probe=_Probe({"runner-1": None}),
+            config=LivenessConfig(8.0),
         )
     )
     assert _snapshot(db_conn, "runner-1") == (False, 2, "sha-1", True)
@@ -141,6 +145,7 @@ def test_one_failed_probe_keeps_the_last_status_and_counts_the_failure(
             pool,
             EventBus.from_settings(),
             probe=_Probe({"runner-1": _status("runner-1")}),
+            config=LivenessConfig(8.0),
         )
     )
     assert _snapshot(db_conn, "runner-1") == (True, 0, "sha-1", True)
@@ -156,6 +161,7 @@ def test_a_reachable_answer_that_is_not_a_cluster_status_clears_the_status(
             pool,
             EventBus.from_settings(),
             probe=_Probe({"runner-1": _status("runner-1")}),
+            config=LivenessConfig(8.0),
         )
     )
 
@@ -165,6 +171,7 @@ def test_a_reachable_answer_that_is_not_a_cluster_status_clears_the_status(
             pool,
             EventBus.from_settings(),
             probe=_Probe({"runner-1": {"result": "?"}}),
+            config=LivenessConfig(8.0),
         )
     )
 
@@ -181,7 +188,11 @@ def test_staging_and_stopped_hosts_are_snapshotted_but_not_judged(
 
     asyncio.run(
         run_liveness_pass(
-            Database.from_settings(gate=database_gate), pool, EventBus.from_settings(), probe=probe
+            Database.from_settings(gate=database_gate),
+            pool,
+            EventBus.from_settings(),
+            probe=probe,
+            config=LivenessConfig(8.0),
         )
     )
 
@@ -202,7 +213,11 @@ def test_paused_and_non_runner_machines_are_not_probed(
 
     asyncio.run(
         run_liveness_pass(
-            Database.from_settings(gate=database_gate), pool, EventBus.from_settings(), probe=probe
+            Database.from_settings(gate=database_gate),
+            pool,
+            EventBus.from_settings(),
+            probe=probe,
+            config=LivenessConfig(8.0),
         )
     )
 
@@ -269,4 +284,4 @@ def test_an_unexpected_probe_error_is_not_counted_as_an_unreachable_host() -> No
         raise RuntimeError("bug in the probe")
 
     with pytest.raises(RuntimeError, match="bug in the probe"):
-        asyncio.run(probe_machine("runner-1", probe))
+        asyncio.run(probe_machine("runner-1", probe, config=LivenessConfig(8.0)))

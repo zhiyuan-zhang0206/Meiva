@@ -26,6 +26,7 @@ import signal
 import sys
 from collections.abc import Callable
 from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
 
 import psycopg
@@ -53,9 +54,10 @@ from base.native_process.loaded_commit import LoadedCommit
 from base.paths import meiva_home
 from base.telemetry.pipeline_build import build_pipeline
 from base.telemetry.process_logging import init_gateway_process
+from ops.cluster import rpc as cluster_rpc
 from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
 from services.wake.heartbeat import JITTER_SPAN_S, STALE_PENDING_S, completion_digest
-from services.wake.heartbeat.liveness import run_liveness_pass
+from services.wake.heartbeat.liveness import LivenessConfig, run_liveness_pass
 from services.wake.heartbeat.loops import dispatch_loop, liveness_loop
 
 _log = logging.getLogger("services.wake.heartbeat.daemon")
@@ -632,7 +634,13 @@ class AgentLivenessRound:
         self._bus = bus
 
     async def run_round(self) -> None:
-        await run_liveness_pass(self._db, self._pool, self._bus)
+        await run_liveness_pass(
+            self._db,
+            self._pool,
+            self._bus,
+            probe=partial(cluster_rpc.dispatch_to_machine, self._db),
+            config=LivenessConfig(settings.gateway.status_probe_timeout_seconds),
+        )
 
 
 async def run(

@@ -95,3 +95,6 @@ owned by [[services/wake/heartbeat/docs/station-probe.meiva.okf.md|Station probe
 
 Round ownership, pacing, backoff clocks and failure policy are described in
 [[services/wake/heartbeat/docs/dispatch-round.meiva.okf.md|Heartbeat dispatch rounds]].
+
+Live probe configuration and committed edge announcements are owned by
+[[services/wake/heartbeat/docs/liveness-inputs.meiva.okf.md|Liveness probe inputs]].

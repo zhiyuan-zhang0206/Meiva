@@ -8,8 +8,6 @@
 
 [debt.first-party-patch]
 "test_completion_digest.py#monkeypatch.setattr services.wake.heartbeat.completion_digest.deliver_chat_inbound" = 1
-"test_heartbeat_liveness.py#monkeypatch.setattr base.config.settings.gateway.status_probe_timeout_seconds" = 1
-"test_heartbeat_liveness.py#monkeypatch.setattr services.wake.heartbeat.liveness.publish_agent_updated_sync" = 1
 "test_heartbeat_loops.py#monkeypatch.setattr services.wake.heartbeat.completion_digest.flush_once" = 2
 "test_heartbeat_loops.py#monkeypatch.setattr services.wake.heartbeat.daemon.completion_digest.completion_digest_loop" = 1
 "test_heartbeat_loops.py#monkeypatch.setattr services.wake.heartbeat.daemon.dispatch_loop" = 1
