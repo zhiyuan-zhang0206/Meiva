@@ -693,7 +693,10 @@ async def run(
             )
             loops.create_task(
                 completion_digest.completion_digest_loop(
-                    pool, db, bus, digest_progress, machine=machine
+                    completion_digest.CompletionDigestRound(
+                        pool, db, bus, machine, clock, completion_digest.DigestConfig()
+                    ),
+                    digest_progress,
                 )
             )
     finally:

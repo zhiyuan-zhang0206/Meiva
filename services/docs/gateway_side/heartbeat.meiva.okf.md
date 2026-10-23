@@ -95,3 +95,6 @@ owned by [[services/wake/heartbeat/docs/station-probe.meiva.okf.md|Station probe
 
 Round ownership, pacing, backoff clocks and failure policy are described in
 [[services/wake/heartbeat/docs/dispatch-round.meiva.okf.md|Heartbeat dispatch rounds]].
+
+Hourly receipt windows, required clock inputs and the digest failure boundary are
+owned by [[services/wake/heartbeat/docs/completion-digest.meiva.okf.md|Completion digest rounds]].
