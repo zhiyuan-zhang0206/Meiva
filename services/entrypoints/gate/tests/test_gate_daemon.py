@@ -10,6 +10,7 @@ import pytest
 
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.machine import MachineIdentity
+from base.config import ConfigBoot
 from base.config.tests.configuration import snapshot_process_config
 from base.daemon import shutdown
 from base.db import Database
@@ -26,6 +27,7 @@ from services.entrypoints.gate import daemon
 @dataclass
 class _Entry:
     image: LoadedCommit
+    process_config: ConfigBoot
     machine: MachineIdentity | None = None
     calls: list[str] = field(default_factory=list[str])
     database: Callable[[], Any] | None = None
@@ -44,10 +46,9 @@ class _Entry:
 
 @pytest.fixture
 def entry(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> _Entry:
-    setup = _Entry(LoadedCommit(tmp_path, "captured-image"))
+    setup = _Entry(LoadedCommit(tmp_path, "captured-image"), snapshot_process_config())
     setup.capture.return_value = setup.image
     monkeypatch.setattr(LoadedCommit, "capture", setup.capture)
-    monkeypatch.setattr(daemon, "ConfigBoot", snapshot_process_config)
 
     def build_pipeline(*, database: Callable[[], Any], machine: MachineIdentity, home: Path) -> Any:
         setup.database = database
@@ -103,7 +104,7 @@ def test_entry_keeps_one_image_gate_factory_and_producer(
         return object()
 
     monkeypatch.setattr(Database, "from_settings", database)
-    daemon.main(entry.argv)
+    daemon.main(entry.argv, process_config=entry.process_config)
     entry.capture.assert_called_once_with()
     assert opened == []
     assert entry.database is not None
@@ -137,7 +138,7 @@ def test_startup_and_serve_failures_stop_the_writer_without_replacing_error(
     primary = RuntimeError(stage)
     entry.failures[stage] = primary
     with pytest.raises(RuntimeError) as caught:
-        daemon.main(entry.argv)
+        daemon.main(entry.argv, process_config=entry.process_config)
     assert caught.value is primary
     entry.pipeline.stop.assert_called_once_with(timeout=2)
     assert entry.calls[-1] == "pipeline-stop"
@@ -154,7 +155,7 @@ def test_http_and_pipeline_cleanup_faults_remain_notes_on_serve_failure(entry: _
         }
     )
     with pytest.raises(SystemExit) as caught:
-        daemon.main(entry.argv)
+        daemon.main(entry.argv, process_config=entry.process_config)
     assert caught.value is primary
     assert any("close failed" in note for note in primary.__notes__)
     assert any("writer failed" in note for note in primary.__notes__)
@@ -166,14 +167,14 @@ def test_cleanup_fault_without_primary_is_raised(entry: _Entry, stage: str) -> N
     failure = RuntimeError(stage)
     entry.failures[stage] = failure
     with pytest.raises(RuntimeError) as caught:
-        daemon.main(entry.argv)
+        daemon.main(entry.argv, process_config=entry.process_config)
     assert caught.value is failure
     entry.pipeline.stop.assert_called_once_with(timeout=2)
 
 
 def test_interrupt_closes_http_before_stopping_writer(entry: _Entry) -> None:
     entry.failures["serve"] = KeyboardInterrupt()
-    daemon.main(entry.argv)
+    daemon.main(entry.argv, process_config=entry.process_config)
     assert entry.calls[-2:] == ["http-close", "pipeline-stop"]
 
 
@@ -185,7 +186,7 @@ def test_unfinished_stop_is_reported_without_reentering_pipeline(
     entry.pipeline.stop.return_value = drain
     report = Mock()
     monkeypatch.setattr(reporting, "report_no_pipeline", report)
-    daemon.main(entry.argv)
+    daemon.main(entry.argv, process_config=entry.process_config)
     entry.pipeline.stop.assert_called_once_with(timeout=2)
     assert "unfinished" in report.call_args.args[0]
     assert report.call_args.kwargs["drain"] is drain
@@ -204,7 +205,7 @@ def test_real_owned_pipeline_is_joined_on_http_exit(
 
     monkeypatch.setattr(pipeline_build, "build_pipeline", build_pipeline)
     try:
-        daemon.main(entry.argv)
+        daemon.main(entry.argv, process_config=entry.process_config)
         assert entry.logging.call_args.kwargs["producer"]() is pipeline
         assert pipeline.stopped
     finally:
@@ -214,7 +215,7 @@ def test_real_owned_pipeline_is_joined_on_http_exit(
 def test_invalid_arguments_do_not_capture_or_construct_resources(entry: _Entry) -> None:
     entry.argv.append("--unknown-option")
     with pytest.raises(SystemExit) as caught:
-        daemon.main(entry.argv)
+        daemon.main(entry.argv, process_config=entry.process_config)
     assert caught.value.code == 2
     entry.capture.assert_not_called()
     assert entry.calls == []
