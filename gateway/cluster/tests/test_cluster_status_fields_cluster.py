@@ -10,7 +10,6 @@ import gateway.cluster.status as status_mod
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.db import Database
-from base.deploy.lifecycle import start_serving
 from gateway.cluster import roster_probe
 from gateway.cluster.process_boot import LOADED_IMAGE
 
@@ -21,7 +20,6 @@ def identity_log() -> roster_probe.IdentityMismatchLog:
 
 
 def test_gather_cluster_status_local_agent_runner_probed(
-    monkeypatch: pytest.MonkeyPatch,
     database: Database,
     identity_log: roster_probe.IdentityMismatchLog,
     *,
@@ -58,8 +56,6 @@ def test_gather_cluster_status_local_agent_runner_probed(
             "supervisor_online": False,
         }
 
-    monkeypatch.setattr(status_mod.cluster_rpc, "dispatch_to_url", _fake_dispatch)  # pyright: ignore[reportUnknownArgumentType]
-
     rows: list[tuple[str, str | None, list[str], datetime, str | None, datetime | None, bool]] = [
         (
             "m1",
@@ -78,6 +74,7 @@ def test_gather_cluster_status_local_agent_runner_probed(
             "m1",
             identity_log=identity_log,
             image=LOADED_IMAGE,
+            dispatch_fn=_fake_dispatch,
         )
     )
 
@@ -93,7 +90,6 @@ def test_gather_cluster_status_local_agent_runner_probed(
 
 
 def test_probe_flags_identity_mismatch_when_responder_name_differs(
-    monkeypatch: pytest.MonkeyPatch,
     database: Database,
     identity_log: roster_probe.IdentityMismatchLog,
     *,
@@ -126,8 +122,6 @@ def test_probe_flags_identity_mismatch_when_responder_name_differs(
             "head_sha": "abc123",
         }
 
-    monkeypatch.setattr(status_mod.cluster_rpc, "dispatch_to_url", _fake_dispatch)  # pyright: ignore[reportUnknownArgumentType]
-
     rows: list[tuple[str, str | None, list[str], datetime, str | None, datetime | None, bool]] = [
         ("air", "http://localhost:8106", ["agent-runner"], datetime.now(UTC), None, None, False)
     ]
@@ -138,6 +132,7 @@ def test_probe_flags_identity_mismatch_when_responder_name_differs(
             "gateway-host",
             identity_log=identity_log,
             image=LOADED_IMAGE,
+            dispatch_fn=_fake_dispatch,
         )
     )
 
@@ -151,7 +146,6 @@ def test_probe_flags_identity_mismatch_when_responder_name_differs(
 
 
 def test_identity_mismatch_logs_once_per_episode(
-    monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
     database: Database,
     identity_log: roster_probe.IdentityMismatchLog,
@@ -181,7 +175,6 @@ def test_identity_mismatch_logs_once_per_episode(
             "head_sha": "abc123",
         }
 
-    monkeypatch.setattr(status_mod.cluster_rpc, "dispatch_to_url", _fake_dispatch)  # pyright: ignore[reportUnknownArgumentType]
     rows: list[tuple[str, str | None, list[str], datetime, str | None, datetime | None, bool]] = [
         ("air", "http://localhost:8106", ["agent-runner"], datetime.now(UTC), None, None, False)
     ]
@@ -194,6 +187,7 @@ def test_identity_mismatch_logs_once_per_episode(
             "gateway-host",
             identity_log=identity_log,
             image=LOADED_IMAGE,
+            dispatch_fn=_fake_dispatch,
         )
     )
     assert machines[0].identity_mismatch is True
@@ -209,6 +203,7 @@ def test_identity_mismatch_logs_once_per_episode(
             "gateway-host",
             identity_log=identity_log,
             image=LOADED_IMAGE,
+            dispatch_fn=_fake_dispatch,
         )
     )
     assert [r for r in caplog.records if r.name == "gateway.cluster.roster_probe"] == []
@@ -223,6 +218,7 @@ def test_identity_mismatch_logs_once_per_episode(
             "gateway-host",
             identity_log=identity_log,
             image=LOADED_IMAGE,
+            dispatch_fn=_fake_dispatch,
         )
     )
     assert machines[0].online is True
@@ -236,6 +232,7 @@ def test_identity_mismatch_logs_once_per_episode(
             "gateway-host",
             identity_log=identity_log,
             image=LOADED_IMAGE,
+            dispatch_fn=_fake_dispatch,
         )
     )
     again = [
@@ -247,7 +244,6 @@ def test_identity_mismatch_logs_once_per_episode(
 
 
 def test_identity_mismatch_on_stopped_machine_is_info_once(
-    monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
     database: Database,
     identity_log: roster_probe.IdentityMismatchLog,
@@ -276,7 +272,6 @@ def test_identity_mismatch_on_stopped_machine_is_info_once(
             "head_sha": "abc123",
         }
 
-    monkeypatch.setattr(status_mod.cluster_rpc, "dispatch_to_url", _fake_dispatch)  # pyright: ignore[reportUnknownArgumentType]
     stopped = datetime.now(UTC)
     rows: list[tuple[str, str | None, list[str], datetime, str | None, datetime | None, bool]] = [
         ("air", "http://localhost:8106", ["agent-runner"], stopped, None, stopped, False)
@@ -290,6 +285,7 @@ def test_identity_mismatch_on_stopped_machine_is_info_once(
             "gateway-host",
             identity_log=identity_log,
             image=LOADED_IMAGE,
+            dispatch_fn=_fake_dispatch,
         )
     )
     asyncio.run(
@@ -299,6 +295,7 @@ def test_identity_mismatch_on_stopped_machine_is_info_once(
             "gateway-host",
             identity_log=identity_log,
             image=LOADED_IMAGE,
+            dispatch_fn=_fake_dispatch,
         )
     )
 
@@ -309,7 +306,6 @@ def test_identity_mismatch_on_stopped_machine_is_info_once(
 
 
 def test_gather_cluster_status_local_pure_gateway_lightweight(
-    monkeypatch: pytest.MonkeyPatch,
     database: Database,
     identity_log: roster_probe.IdentityMismatchLog,
     *,
@@ -324,11 +320,6 @@ def test_gather_cluster_status_local_pure_gateway_lightweight(
         dispatched.append(kwargs["kind"])  # pyright: ignore[reportUnknownArgumentType]
         return {}
 
-    monkeypatch.setattr(status_mod.cluster_rpc, "dispatch_to_url", _fake_dispatch)  # pyright: ignore[reportUnknownArgumentType]
-
-    monkeypatch.setattr(start_serving, "is_serving", lambda: False)
-    monkeypatch.setattr(status_mod, "prod_source_head_sha", lambda: "abc123")
-
     rows: list[tuple[str, str | None, list[str], datetime, str | None, datetime | None, bool]] = [
         ("m1", "http://m1", ["gateway"], datetime.now(UTC), None, None, False)
     ]
@@ -339,6 +330,9 @@ def test_gather_cluster_status_local_pure_gateway_lightweight(
             "m1",
             identity_log=identity_log,
             image=LOADED_IMAGE,
+            dispatch_fn=_fake_dispatch,
+            gate_reason_fn=lambda: "startup",
+            head_sha_fn=lambda: "abc123",
         )
     )
 
@@ -355,7 +349,6 @@ def test_gather_cluster_status_local_pure_gateway_lightweight(
 
 
 def test_gather_returns_rows_sorted_by_name(
-    monkeypatch: pytest.MonkeyPatch,
     database: Database,
     identity_log: roster_probe.IdentityMismatchLog,
     *,
@@ -365,8 +358,6 @@ def test_gather_returns_rows_sorted_by_name(
     address-less row is reported offline without a dial; the roster comes back
     ordered by machine name whatever order the table gave."""
 
-    monkeypatch.setattr(start_serving, "is_serving", lambda: True)
-    monkeypatch.setattr(status_mod, "prod_source_head_sha", lambda: "abc123")
     now = datetime.now(UTC)
     rows: list[tuple[str, str | None, list[str], datetime, str | None, datetime | None, bool]] = [
         ("m2", None, ["agent-runner"], now, None, None, False),
@@ -380,6 +371,8 @@ def test_gather_returns_rows_sorted_by_name(
             "m1",
             identity_log=identity_log,
             image=LOADED_IMAGE,
+            gate_reason_fn=lambda: None,
+            head_sha_fn=lambda: "abc123",
         )
     )
 
@@ -387,7 +380,6 @@ def test_gather_returns_rows_sorted_by_name(
 
 
 def test_gather_cluster_status_carries_probe_paused_reason(
-    monkeypatch: pytest.MonkeyPatch,
     database: Database,
     identity_log: roster_probe.IdentityMismatchLog,
     *,
@@ -418,8 +410,6 @@ def test_gather_cluster_status_carries_probe_paused_reason(
             "head_sha": "abc123",
         }
 
-    monkeypatch.setattr(status_mod.cluster_rpc, "dispatch_to_url", _fake_dispatch)  # pyright: ignore[reportUnknownArgumentType]
-
     rows: list[tuple[str, str | None, list[str], datetime, str | None, datetime | None, bool]] = [
         ("m1", "http://localhost:9", ["agent-runner"], datetime.now(UTC), None, None, False)
     ]
@@ -430,6 +420,7 @@ def test_gather_cluster_status_carries_probe_paused_reason(
             "m1",
             identity_log=identity_log,
             image=LOADED_IMAGE,
+            dispatch_fn=_fake_dispatch,
         )
     )
 

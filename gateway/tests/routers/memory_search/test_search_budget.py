@@ -12,14 +12,16 @@ from fastapi import Request
 from base.config import settings
 from gateway.routers import memory as memory_router
 from gateway.schemas import MemorySearchRequest
-from gateway.tests.auth.gateway_config import gateway_test_client
 from gateway.tests.routers.test_memory_search import (
     Judge,
     StubProvider,
     asgi_client,
+    gateway_test_client,
     memory_config,
     memory_search_app,
+    patch_backend,
     patch_provider,
+    set_memory_inputs,
 )
 from gateway.tests.routers.test_memory_search import (
     judge as judge,
@@ -39,9 +41,7 @@ def _name(index: int) -> str:
 
 
 class _Pool:
-    def __init__(self, monkeypatch: pytest.MonkeyPatch, root: Path) -> None:
-        from services.derived.memory_indexer.backends import factory
-
+    def __init__(self, root: Path) -> None:
         self.root = root
         (root / "notes").mkdir()
         for index in range(_POOL_SIZE):
@@ -63,17 +63,17 @@ class _Pool:
                 asked.append(k)
                 return hits[:k]
 
-        monkeypatch.setattr(factory, "get_backend", _Backend)
-        patch_provider(monkeypatch, StubProvider)
-        monkeypatch.setattr(settings.services, "memory_rerank_candidates", _CANDIDATES)
+        patch_backend(_Backend)
+        patch_provider(StubProvider)
+        set_memory_inputs(rerank_candidates=lambda: _CANDIDATES)
         app = memory_search_app()
         app.state.gateway_config = replace(app.state.gateway_config, memory_root=root)
         app.state.memory_search_gate = asyncio.Semaphore(2)
 
 
 @pytest.fixture
-def pool(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> _Pool:
-    return _Pool(monkeypatch, tmp_path)
+def pool(tmp_path: Path) -> _Pool:
+    return _Pool(tmp_path)
 
 
 def _search(**fields: Any) -> dict[str, Any]:
@@ -134,9 +134,9 @@ def test_a_large_k_does_not_raise_the_decision_request_count(
 
 
 def test_dedup_ranks_its_own_smaller_candidate_count_whatever_k_is(
-    pool: _Pool, judge: Judge, monkeypatch: pytest.MonkeyPatch
+    pool: _Pool, judge: Judge
 ) -> None:
-    monkeypatch.setattr(settings.services, "memory_dedup_candidates", 7)
+    set_memory_inputs(dedup_candidates=lambda: 7)
 
     with gateway_test_client(config=memory_config(pool.root)) as client:
         resp = client.post("/api/memory/search", json=_search(purpose="dedup", k=50))
@@ -249,7 +249,7 @@ async def test_the_caller_deadline_bounds_the_search_below_the_gateway_deadline(
     del pool
     blocked = _Blocked()
     monkeypatch.setattr(rerank, "ask_relevance", blocked)
-    monkeypatch.setattr(settings.services, "memory_search_deadline_seconds", 30.0)
+    set_memory_inputs(deadline=lambda: 30.0)
 
     started = time.monotonic()
     async with asgi_client() as client:
@@ -271,7 +271,7 @@ async def test_a_caller_deadline_above_the_gateway_deadline_does_not_extend_it(
 ) -> None:
     del pool
     monkeypatch.setattr(rerank, "ask_relevance", _Blocked())
-    monkeypatch.setattr(settings.services, "memory_search_deadline_seconds", 0.3)
+    set_memory_inputs(deadline=lambda: 0.3)
 
     async with asgi_client() as client:
         resp = await asyncio.wait_for(

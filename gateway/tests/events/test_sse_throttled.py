@@ -269,7 +269,6 @@ def test_throttled_wire_format_is_json_array(
 
 def test_throttled_agent_filter_endpoint_query(
     db_conn: psycopg.Connection,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The query is parsed once and forwarded; malformed ids fail with 422."""
     tid = create_agent(db_conn)
@@ -279,11 +278,8 @@ def test_throttled_agent_filter_endpoint_query(
         captured_kwargs.update(kwargs)
         yield b": stream open\n\n"
 
-    from gateway.events import system as system_router
-
-    monkeypatch.setattr(system_router, "throttled_event_stream", fake_stream)
-
     with gateway_test_client() as client:
+        client.app.state.throttled_system_event_stream = fake_stream
         with client.stream("GET", f"/api/system/all?agents={tid}") as resp:
             assert resp.status_code == 200
         assert captured_kwargs["agent_filter"] == {tid}

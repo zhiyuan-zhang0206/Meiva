@@ -189,14 +189,15 @@ def _count(
     telemetry_categories: list[str],
 ) -> int:
     """Exact filtered row count across the tables the request reads."""
+    telemetry_counter = (
+        getattr(request.app.state, "telemetry_events_counter", None) or telemetry_rows.count_events
+    )
     total = 0
     with _read_connection(request) as conn:
         if use_audit:
             total += audit_rows.count_events(conn, **asdict(filters))
         if use_telemetry:
-            total += telemetry_rows.count_events(
-                conn, categories=telemetry_categories, **asdict(filters)
-            )
+            total += telemetry_counter(conn, categories=telemetry_categories, **asdict(filters))
     return total
 
 
@@ -215,6 +216,9 @@ def _read_page(
     rows, which are merged and then sliced: a global page never needs a row
     beyond that depth from either side.
     """
+    telemetry_reader = (
+        getattr(request.app.state, "telemetry_events_reader", None) or telemetry_rows.query_events
+    )
     both = use_audit and use_telemetry
     depth, page_offset = (limit + offset, 0) if both else (limit, offset)
     rows: list[dict[str, Any]] = []
@@ -227,7 +231,7 @@ def _read_page(
             rows += page
             has_more = has_more or more
         if use_telemetry:
-            page, more = telemetry_rows.query_events(
+            page, more = telemetry_reader(
                 conn,
                 categories=telemetry_categories,
                 limit=depth,
@@ -313,7 +317,10 @@ def get_events(
     level = _validate(category=category, level=level, from_=from_, to=to, hours=hours)
     attribute_filters = _impersonation_filters(impersonation_session)
     tiers = _parse_tiers(tier)
-    effective_limit = limit if limit is not None else settings.display.events_default_limit
+    default_limit = getattr(
+        request.app.state, "events_default_limit", settings.display.events_default_limit
+    )
+    effective_limit = limit if limit is not None else default_limit
 
     now = datetime.now(UTC)
     window_from = from_

@@ -51,6 +51,8 @@ class MemorySearchInputs:
     rerank_model: Callable[[], str]
     rerank_candidates: Callable[[], int]
     dedup_candidates: Callable[[], int]
+    provider_builder: Callable[..., Any] | None = None
+    backend_builder: Callable[..., Any] | None = None
 
 
 def build_search_gate(max_concurrency: int) -> asyncio.Semaphore:
@@ -83,7 +85,8 @@ async def _backend_topk(
     # meiva:link gateway/routers/docs/memory.meiva.okf.md
     from services.derived.memory_indexer.backends import factory
 
-    return await factory.get_backend(
+    backend_fn = factory.get_backend if inputs.backend_builder is None else inputs.backend_builder
+    return await backend_fn(
         database, dim=dim, fingerprint=fingerprint, name=inputs.backend(), uri_reader=inputs.uri
     ).search_topk_async(query_vector, k, timeout=deadline)
 
@@ -129,7 +132,12 @@ async def post_memory_search(request: Request, body: MemorySearchRequest) -> Mem
     from services.derived.memory_indexer.embeddings import factory as _embedding_factory
 
     inputs: MemorySearchInputs = request.app.state.memory_search_inputs
-    provider = _embedding_factory.get_provider(
+    provider_fn = (
+        _embedding_factory.get_provider
+        if inputs.provider_builder is None
+        else inputs.provider_builder
+    )
+    provider = provider_fn(
         inputs.embedding_backend(),
         catalog=require_model_catalog(request),
         timeout_reader=inputs.embedding_timeout,

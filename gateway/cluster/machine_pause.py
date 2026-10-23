@@ -183,6 +183,10 @@ async def pause_cluster_machine(
 
     agent_rows = await asyncio.to_thread(_list_agent_rows_for_pause_blocking, pool, name)
 
+    enqueuer = (
+        getattr(request.app.state, "machine_pause_lifecycle_enqueuer", None)
+        or forward.enqueue_lifecycle
+    )
     terminated = force_marked = 0
     for agent_id, was_live in agent_rows:
         # The same lifecycle path the frontend/SDK terminate uses — the target
@@ -190,7 +194,7 @@ async def pause_cluster_machine(
         # that is already unreachable raises; the agent's process is on the
         # departing host anyway, so force-mark its row terminated in the DB.
         try:
-            await forward.enqueue_lifecycle(  # pyright: ignore[reportUnknownMemberType]
+            await enqueuer(  # pyright: ignore[reportUnknownMemberType]
                 request.app.state.db,
                 name,
                 f"/api/agents/{agent_id}/terminate",

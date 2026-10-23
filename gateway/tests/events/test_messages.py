@@ -1,7 +1,7 @@
 from pathlib import Path
+from typing import Any
 
 import psycopg
-import pytest
 
 from base.api_contracts.idempotency import keyed_headers
 from base.cluster.machine import MachineIdentity
@@ -286,6 +286,24 @@ def _payload_row(conn: psycopg.Connection, agent_id: int) -> tuple[str, dict | N
         return row[0], row[1]
 
 
+def _configure_upload_root(client: Any, root: Path) -> None:
+    def _upload_dir(agent_id: int, *, create: bool = True) -> Path:
+        directory = root / "Downloads" / f"MeivaAgent-{agent_id}"
+        if create:
+            directory.mkdir(parents=True, exist_ok=True)
+        return directory
+
+    def _resolve_path(agent_id: int, name: str) -> Path:
+        base = _upload_dir(agent_id).resolve()
+        target = (base / name).resolve()
+        if target == base or not target.is_relative_to(base):
+            raise ValueError(f"upload name {name!r} escapes agent {agent_id} upload dir")
+        return target
+
+    client.app.state.agent_upload_dir_resolver = _upload_dir
+    client.app.state.upload_path_resolver = _resolve_path
+
+
 class TestMultimodalMessage:
     def test_image_to_non_vision_model_422(
         self, db_conn: psycopg.Connection, *, machine_identity: MachineIdentity
@@ -313,15 +331,12 @@ class TestMultimodalMessage:
         self,
         db_conn: psycopg.Connection,
         tmp_path: Path,
-        monkeypatch: pytest.MonkeyPatch,
         *,
         machine_identity: MachineIdentity,
     ) -> None:
-        from pathlib import Path
-
-        monkeypatch.setattr(Path, "home", lambda: tmp_path)
         tid = _seed_vision_agent(db_conn, local_machine=machine_identity)
         with gateway_test_client(machine=machine_identity) as client:
+            _configure_upload_root(client, tmp_path)
             up = client.post(
                 f"/api/agents/{tid}/uploads",
                 headers=UPLOAD_HEADERS,
@@ -355,14 +370,12 @@ class TestMultimodalMessage:
         self,
         db_conn: psycopg.Connection,
         tmp_path: Path,
-        monkeypatch: pytest.MonkeyPatch,
         add_models: AddModels,
         model_catalog: ModelCatalog,
         *,
         machine_identity: MachineIdentity,
     ) -> None:
         from dataclasses import replace
-        from pathlib import Path
 
         from base.packages.plugin_providers import build_model_catalog
 
@@ -379,9 +392,9 @@ class TestMultimodalMessage:
                 )
             },
         )
-        monkeypatch.setattr(Path, "home", lambda: tmp_path)
         tid = _seed_vision_agent(db_conn, model=model, local_machine=machine_identity)
         with gateway_test_client(machine=machine_identity) as client:
+            _configure_upload_root(client, tmp_path)
             client.app.state.catalog = catalog
             up = client.post(
                 f"/api/agents/{tid}/uploads",
@@ -409,15 +422,12 @@ class TestMultimodalMessage:
         self,
         db_conn: psycopg.Connection,
         tmp_path: Path,
-        monkeypatch: pytest.MonkeyPatch,
         *,
         machine_identity: MachineIdentity,
     ) -> None:
-        from pathlib import Path
-
-        monkeypatch.setattr(Path, "home", lambda: tmp_path)
         tid = _seed_vision_agent(db_conn, local_machine=machine_identity)
         with gateway_test_client(machine=machine_identity) as client:
+            _configure_upload_root(client, tmp_path)
             resp = client.post(
                 f"/api/agents/{tid}/messages",
                 json={
@@ -438,15 +448,12 @@ class TestMultimodalMessage:
         self,
         db_conn: psycopg.Connection,
         tmp_path: Path,
-        monkeypatch: pytest.MonkeyPatch,
         *,
         machine_identity: MachineIdentity,
     ) -> None:
-        from pathlib import Path
-
-        monkeypatch.setattr(Path, "home", lambda: tmp_path)
         tid = _seed_vision_agent(db_conn, local_machine=machine_identity)
         with gateway_test_client(machine=machine_identity) as client:
+            _configure_upload_root(client, tmp_path)
             resp = client.post(
                 f"/api/agents/{tid}/messages",
                 json={

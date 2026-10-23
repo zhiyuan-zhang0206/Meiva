@@ -33,8 +33,9 @@ async def get_system_broadcast(request: Request) -> StreamingResponse:
     The per-turn streaming roles are NOT here — clients subscribe to
     /api/agents/{id}/system for the agent they are observing.
     """
+    stream_fn = getattr(request.app.state, "system_event_stream", None) or event_stream
     return StreamingResponse(
-        event_stream(
+        stream_fn(
             request.app.state.bus,
             0,  # agent_id is ignored in broadcast mode
             request,
@@ -57,8 +58,9 @@ async def get_system_events(agent_id: int, request: Request) -> StreamingRespons
     cancelled etc. "system state" events — clients that need to track the
     kernel runtime state subscribe to this channel.
     """
+    stream_fn = getattr(request.app.state, "system_event_stream", None) or event_stream
     return StreamingResponse(
-        event_stream(
+        stream_fn(
             request.app.state.bus,
             agent_id,
             request,
@@ -94,8 +96,11 @@ async def get_all_events(request: Request, agents: str | None = None) -> Streami
             status_code=422, detail="agents must be comma-separated integers"
         ) from exc
 
+    stream_fn = (
+        getattr(request.app.state, "throttled_system_event_stream", None) or throttled_event_stream
+    )
     return StreamingResponse(
-        throttled_event_stream(
+        stream_fn(
             request.app.state.bus,
             request,
             throttle_rate=settings.gateway.sse_throttle_rate,

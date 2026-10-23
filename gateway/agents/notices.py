@@ -131,7 +131,13 @@ async def get_open_notices(
 ) -> list[NoticeItem]:
     # meiva:link gateway/routers/docs/frontend-ui-data.meiva.okf.md
     if limit is None:
-        limit = settings.display.notices_open_default_limit
+        limit = int(
+            getattr(
+                request.app.state,
+                "notices_open_default_limit",
+                settings.display.notices_open_default_limit,
+            )
+        )
     rows = await asyncio.to_thread(
         _open_notices_blocking,
         request.app.state.db_pool,
@@ -161,7 +167,13 @@ async def get_notices_live(
 ) -> list[NoticeItem]:
     # meiva:link gateway/routers/docs/frontend-ui-data.meiva.okf.md
     if limit is None:
-        limit = settings.display.notices_open_default_limit
+        limit = int(
+            getattr(
+                request.app.state,
+                "notices_open_default_limit",
+                settings.display.notices_open_default_limit,
+            )
+        )
     rows = await asyncio.to_thread(_notices_after_blocking, request.app.state.db_pool, after, limit)
     return [_row_to_item(r) for r in rows]
 
@@ -181,9 +193,21 @@ async def get_notices_feed(
         )
     pool = request.app.state.db_pool
     if limit is None:
-        limit = settings.display.notices_open_default_limit
+        limit = int(
+            getattr(
+                request.app.state,
+                "notices_open_default_limit",
+                settings.display.notices_open_default_limit,
+            )
+        )
     if resolved_limit is None:
-        resolved_limit = settings.display.notices_resolved_default_page
+        resolved_limit = int(
+            getattr(
+                request.app.state,
+                "notices_resolved_default_page",
+                settings.display.notices_resolved_default_page,
+            )
+        )
     resolved_where = "WHERE n.require_response AND n.resolved_at IS NOT NULL "
     resolved_params: list[object] = []
     if before_at is not None:
@@ -335,7 +359,11 @@ async def post_notice_resolve(
         )
     else:
         status = await asyncio.to_thread(get_agent_status, request.app.state.db, agent_id)
-    await _ops.publish_notice_resolved(request.app.state.bus, agent_id, notice_id, facts=resolution)
+    resolved_publisher = (
+        getattr(request.app.state, "notice_resolved_publisher", None)
+        or _ops.publish_notice_resolved
+    )
+    await resolved_publisher(request.app.state.bus, agent_id, notice_id, facts=resolution)
     return AgentMessageEnqueued(status=status, inbound_id=inbound_id)
 
 

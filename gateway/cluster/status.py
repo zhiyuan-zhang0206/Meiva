@@ -188,12 +188,15 @@ def _plugin_stat_rows(pool: ConnectionPool[Any]) -> list[PluginStat]:
     ]
 
 
-def get_services_status() -> ServicesStatus:
+def get_services_status(
+    *, pidfile_checker: Callable[[str], tuple[bool, int | None]] | None = None
+) -> ServicesStatus:
     """Gateway-only daemon health (pidfile + signal).
 
     Per-host daemons (agent-host, watchdog) are not here — they ride each
     machine's ClusterStatus probe and render in the roster. This block is the
     daemons that only run on the gateway."""
+    checker = check_pidfile if pidfile_checker is None else pidfile_checker
     items: list[ServiceItem] = []
     for name, label, pidfile in (
         ("labeler", "Labeler Daemon", ServiceEndpoints.from_settings().of("labeler").pidfile),
@@ -203,7 +206,7 @@ def get_services_status() -> ServicesStatus:
             ServiceEndpoints.from_settings().of("memory_indexer").pidfile,
         ),
     ):
-        alive, pid = check_pidfile(str(pidfile))
+        alive, pid = checker(str(pidfile))
         items.append(
             ServiceItem(
                 name=name,
@@ -376,6 +379,8 @@ async def probe_agent_runner(
     stopped_at: datetime | None,
     *,
     is_staging: bool = False,
+    probe_timeout_s: float | None = None,
+    dispatch_fn: Any = None,
 ) -> MachineStatus:
     row_spec = _roster_rows.RosterRowSpec(
         name=name,
@@ -391,7 +396,9 @@ async def probe_agent_runner(
         # cluster_rpc synchronously re-read Postgres outside the async timeout.
         return _roster_rows.offline_status(row_spec)
     try:
-        result = await roster_probe.dispatch_status_probe(name, gateway_url)
+        result = await roster_probe.dispatch_status_probe(
+            name, gateway_url, timeout_s=probe_timeout_s, dispatch_fn=dispatch_fn
+        )
     except cluster_rpc.ClusterOpUnreachable:
         # Expected when a host is genuinely offline / mid-restart — quiet.
         return _roster_rows.offline_status(row_spec)
@@ -459,8 +466,12 @@ def _local_machine_status_blocking(
     *,
     is_staging: bool = False,
     image: LoadedCommit,
+    gate_reason_fn: Callable[[], Any] | None = None,
+    head_sha_fn: Callable[[], str | None] | None = None,
 ) -> MachineStatus:
-    paused_reason = serving_gate_reason()
+    reason_reader = serving_gate_reason if gate_reason_fn is None else gate_reason_fn
+    sha_reader = prod_source_head_sha if head_sha_fn is None else head_sha_fn
+    paused_reason = reason_reader()
     return MachineStatus(
         name=name,
         serve_gateway="gateway" in role,
@@ -474,7 +485,7 @@ def _local_machine_status_blocking(
         description=description,
         stopped_at=stopped_at,
         is_staging=is_staging,
-        head_sha=prod_source_head_sha(),
+        head_sha=sha_reader(),
         running_sha=image.sha,
         schema_mismatch=schema_mismatch_status(db, local_machine=name),
         resource=_local_resource_sample(),
@@ -489,6 +500,10 @@ async def gather_cluster_status(
     identity_log: roster_probe.IdentityMismatchLog,
     image: LoadedCommit,
     snapshots: Mapping[str, Snapshot] | None = None,
+    probe_timeout_s: float | None = None,
+    dispatch_fn: Any = None,
+    gate_reason_fn: Callable[[], Any] | None = None,
+    head_sha_fn: Callable[[], str | None] | None = None,
 ) -> list[MachineStatus]:
     """The roster of the given machines.
 
@@ -532,6 +547,8 @@ async def gather_cluster_status(
                     stopped_at,
                     is_staging=is_staging,
                     image=image,
+                    gate_reason_fn=gate_reason_fn,
+                    head_sha_fn=head_sha_fn,
                 )
             )
         else:
@@ -561,6 +578,8 @@ async def gather_cluster_status(
                     description,
                     stopped_at,
                     is_staging=is_staging,
+                    probe_timeout_s=probe_timeout_s,
+                    dispatch_fn=dispatch_fn,
                 )
             )
 
