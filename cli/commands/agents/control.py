@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Any
 from uuid import uuid4
 
@@ -11,6 +13,25 @@ from base.api_contracts.agent_contract import ShellSessionKillTiming
 from base.api_contracts.idempotency import keyed_headers
 
 _TIMEOUT_S = 15.0
+
+
+@dataclass(frozen=True)
+class AgentsTransport:
+    gateway_base: Callable[[], str]
+    headers: Callable[[], dict[str, str]]
+    get: Callable[..., Any] | None = None
+    post: Callable[..., Any] | None = None
+
+
+def _default_transport() -> AgentsTransport:
+    from base.cluster.machine import gateway_api_base, gateway_auth_headers
+    from base.cluster.machine.ambient import gateway_access_from_settings
+
+    access = gateway_access_from_settings()  # ambient: C
+    return AgentsTransport(
+        gateway_base=lambda: gateway_api_base(access.gateway_url),
+        headers=lambda: gateway_auth_headers(access),
+    )
 
 
 class ProvenanceError(ValueError):
@@ -56,19 +77,23 @@ class _AgentListItem(BaseModel):
 
 
 def cmd_agents_ls(
-    *, scope: str = "live", query: str = "", before_id: int | None = None, limit: int = 100
+    *,
+    scope: str = "live",
+    query: str = "",
+    before_id: int | None = None,
+    limit: int = 100,
+    transport: AgentsTransport | None = None,
 ) -> int:
     """Render one agent directory page and its continuation cursor."""
-    from base.cluster.machine import gateway_api_base, gateway_auth_headers
-    from base.cluster.machine.ambient import gateway_access_from_settings
     from base.host.net.http_dial import get as dial_get
 
-    access = gateway_access_from_settings()  # ambient: C
-    url = f"{gateway_api_base(access.gateway_url)}/api/agents"
+    active_transport = transport or _default_transport()
+    active_get = active_transport.get or dial_get
+    url = f"{active_transport.gateway_base()}/api/agents"
     params: dict[str, str | int] = {"scope": scope, "query": query, "limit": limit}
     if before_id is not None:
         params["before_id"] = before_id
-    resp = dial_get(url, params=params, timeout=_TIMEOUT_S, headers=gateway_auth_headers(access))
+    resp = active_get(url, params=params, timeout=_TIMEOUT_S, headers=active_transport.headers())
     resp.raise_for_status()
     page = resp.json()
     rows = [_AgentListItem.model_validate(r) for r in page["agents"]]
@@ -131,6 +156,7 @@ def cmd_agents_send(
     tail_file: str | None = None,
     *,
     completion: bool = False,
+    transport: AgentsTransport | None = None,
 ) -> int:
     """Send chat with explicit provenance, optional output tail and finite retries.
 
@@ -146,6 +172,7 @@ def cmd_agents_send(
         source=source,
         tail_file=tail_file,
         completion=completion,
+        transport=transport,
     )
     print(f"  ✓ agent {agent_id} send: {status}")
     return 0
@@ -179,29 +206,29 @@ def send_agent_message(
     source: str,
     tail_file: str | None = None,
     completion: bool = False,
+    transport: AgentsTransport | None = None,
 ) -> str:
     """Deliver with bounded same-key retries and expose the final failure."""
     import sys
     import time
 
     from base.agents.messages.delivery.retry import network_errors, retryable_response
-    from base.cluster.machine import gateway_api_base, gateway_auth_headers
-    from base.cluster.machine.ambient import gateway_access_from_settings
     from base.host.net.http_dial import post as dial_post
 
     if tail_file is not None:
         content = _with_tail(content, tail_file)
-    access = gateway_access_from_settings()  # ambient: C
-    headers = {**gateway_auth_headers(access), **keyed_headers(str(uuid4()))}
+    active_transport = transport or _default_transport()
+    active_post = active_transport.post or dial_post
+    headers = {**active_transport.headers(), **keyed_headers(str(uuid4()))}
     body = {
         "content": content,
         "source": source,
         **({"completion_notice": True} if completion else {}),
     }
-    url = f"{gateway_api_base(access.gateway_url)}/api/agents/{agent_id}/messages"
+    url = f"{active_transport.gateway_base()}/api/agents/{agent_id}/messages"
     for attempt in range(3):
         try:
-            response = dial_post(url, json=body, timeout=_TIMEOUT_S, headers=headers)
+            response = active_post(url, json=body, timeout=_TIMEOUT_S, headers=headers)
         except network_errors():
             if attempt == 2:
                 raise
@@ -220,15 +247,18 @@ def send_agent_message(
 #
 #     Cancels the agent's running turn; the agent stays alive and idles. The
 #     status line says `cancelled` or `not_running` (there was no turn to cancel).
-def cmd_agents_cancel(agent_id: int) -> int:
-    from base.cluster.machine import gateway_api_base, gateway_auth_headers
-    from base.cluster.machine.ambient import gateway_access_from_settings
+def cmd_agents_cancel(
+    agent_id: int,
+    *,
+    transport: AgentsTransport | None = None,
+) -> int:
     from base.host.net.http_dial import post as dial_post
     from ops.rpc_schemas import CancelAgentResponse
 
-    access = gateway_access_from_settings()  # ambient: C
-    url = f"{gateway_api_base(access.gateway_url)}/api/agents/{agent_id}/cancel"
-    resp = dial_post(url, timeout=_TIMEOUT_S, headers=gateway_auth_headers(access))
+    active_transport = transport or _default_transport()
+    active_post = active_transport.post or dial_post
+    url = f"{active_transport.gateway_base()}/api/agents/{agent_id}/cancel"
+    resp = active_post(url, timeout=_TIMEOUT_S, headers=active_transport.headers())
     resp.raise_for_status()
     answer = CancelAgentResponse.model_validate(resp.json())
     print(f"  ✓ agent {agent_id} cancel: {answer.status.value}")
@@ -240,6 +270,7 @@ def cmd_agents_restart(
     config_json: str | None = None,
     *,
     source: str | None = None,
+    transport: AgentsTransport | None = None,
 ) -> int:
     """`meiva agents restart <id> [--config JSON]` — POST /api/agents/{id}/restart.
 
@@ -250,19 +281,18 @@ def cmd_agents_restart(
     import json
     import sys
 
-    from base.cluster.machine import gateway_api_base, gateway_auth_headers
-    from base.cluster.machine.ambient import gateway_access_from_settings
     from base.host.net.http_dial import post as dial_post
 
-    access = gateway_access_from_settings()  # ambient: C
-    url = f"{gateway_api_base(access.gateway_url)}/api/agents/{agent_id}/restart"
+    active_transport = transport or _default_transport()
+    active_post = active_transport.post or dial_post
+    url = f"{active_transport.gateway_base()}/api/agents/{agent_id}/restart"
     caller = _explicit_caller(source)
     if config_json is None:
-        resp = dial_post(
+        resp = active_post(
             url,
             **({"json": caller} if caller else {}),
             timeout=_TIMEOUT_S,
-            headers=gateway_auth_headers(access),
+            headers=active_transport.headers(),
         )
     else:
         try:
@@ -273,35 +303,39 @@ def cmd_agents_restart(
         if not isinstance(config_overlay, dict):
             print("config must be a JSON object", file=sys.stderr)
             return 1
-        resp = dial_post(
+        resp = active_post(
             url,
             json={"config_overlay": config_overlay, **caller},
             timeout=_TIMEOUT_S,
-            headers=gateway_auth_headers(access),
+            headers=active_transport.headers(),
         )
     resp.raise_for_status()
     print(f"  ✓ agent {agent_id} restart: {resp.json().get('status')}")
     return 0
 
 
-def cmd_agents_resurrect(agent_id: int, *, source: str | None = None) -> int:
+def cmd_agents_resurrect(
+    agent_id: int,
+    *,
+    source: str | None = None,
+    transport: AgentsTransport | None = None,
+) -> int:
     """`meiva agents resurrect <id>` — POST /api/agents/{id}/resurrect.
 
     Brings a terminated agent back: a fresh process is respawned attached to the
     same agent_id (history preserved). An already-running agent returns
     `already_alive`."""
-    from base.cluster.machine import gateway_api_base, gateway_auth_headers
-    from base.cluster.machine.ambient import gateway_access_from_settings
     from base.host.net.http_dial import post as dial_post
 
-    access = gateway_access_from_settings()  # ambient: C
-    url = f"{gateway_api_base(access.gateway_url)}/api/agents/{agent_id}/resurrect"
+    active_transport = transport or _default_transport()
+    active_post = active_transport.post or dial_post
+    url = f"{active_transport.gateway_base()}/api/agents/{agent_id}/resurrect"
     caller = _explicit_caller(source, field="resurrected_by")
-    resp = dial_post(
+    resp = active_post(
         url,
         **({"json": caller} if caller else {}),
         timeout=_TIMEOUT_S,
-        headers=gateway_auth_headers(access),
+        headers=active_transport.headers(),
     )
     resp.raise_for_status()
     print(f"  ✓ agent {agent_id} resurrect: {resp.json().get('status')}")
@@ -314,6 +348,7 @@ def _terminate(
     force: bool,
     source: str | None = None,
     kill_all_shell_sessions: bool = False,
+    transport: AgentsTransport | None = None,
 ) -> int:
     """Shared POST for `terminate` (graceful) and `kill` (force) — both hit
     POST /api/agents/{id}/terminate, differing only in the `force` flag. An
@@ -322,19 +357,18 @@ def _terminate(
     leaves the server default in place.
     `kill_all_shell_sessions` is sent only when set; the output reports what
     the kill did, so it is verifiable from the output alone."""
-    from base.cluster.machine import gateway_api_base, gateway_auth_headers
-    from base.cluster.machine.ambient import gateway_access_from_settings
     from base.host.net.http_dial import post as dial_post
 
     verb = "kill" if force else "terminate"
-    access = gateway_access_from_settings()  # ambient: C
-    url = f"{gateway_api_base(access.gateway_url)}/api/agents/{agent_id}/terminate"
+    active_transport = transport or _default_transport()
+    active_post = active_transport.post or dial_post
+    url = f"{active_transport.gateway_base()}/api/agents/{agent_id}/terminate"
     kill_flag = {"kill_all_shell_sessions": True} if kill_all_shell_sessions else {}
-    resp = dial_post(
+    resp = active_post(
         url,
         json={"force": force, **kill_flag, **_explicit_caller(source)},
         timeout=_TIMEOUT_S,
-        headers=gateway_auth_headers(access),
+        headers=active_transport.headers(),
     )
     resp.raise_for_status()
     data = resp.json()
@@ -360,7 +394,11 @@ def _shell_sessions_suffix(shell: dict[str, Any] | None, *, requested: bool) -> 
 
 
 def cmd_agents_terminate(
-    agent_id: int, *, source: str | None = None, kill_all_shell_sessions: bool = False
+    agent_id: int,
+    *,
+    source: str | None = None,
+    kill_all_shell_sessions: bool = False,
+    transport: AgentsTransport | None = None,
 ) -> int:
     """`meiva agents terminate <id>` — graceful stop: the agent exits after
     processing its current turn. For an agent wedged mid-turn (a hung step) that
@@ -370,12 +408,20 @@ def cmd_agents_terminate(
     is killed too, silently: right before the termination applies (after the
     agent's last step), or right away when it is already terminated."""
     return _terminate(
-        agent_id, force=False, source=source, kill_all_shell_sessions=kill_all_shell_sessions
+        agent_id,
+        force=False,
+        source=source,
+        kill_all_shell_sessions=kill_all_shell_sessions,
+        transport=transport,
     )
 
 
 def cmd_agents_kill(
-    agent_id: int, *, source: str | None = None, kill_all_shell_sessions: bool = False
+    agent_id: int,
+    *,
+    source: str | None = None,
+    kill_all_shell_sessions: bool = False,
+    transport: AgentsTransport | None = None,
 ) -> int:
     """`meiva agents kill <id>` — request forceful interruption. Hosted work may
     return enqueued while it drains; this is acceptance, not observed exit.
@@ -384,7 +430,11 @@ def cmd_agents_kill(
     its home machine, right away (see `terminate`). A kill supersedes an earlier
     graceful terminate's request, so pass the option here too if still wanted."""
     return _terminate(
-        agent_id, force=True, source=source, kill_all_shell_sessions=kill_all_shell_sessions
+        agent_id,
+        force=True,
+        source=source,
+        kill_all_shell_sessions=kill_all_shell_sessions,
+        transport=transport,
     )
 
 
@@ -392,15 +442,18 @@ def cmd_agents_kill(
 # `meiva agents compact <id>` — POST /api/agents/{id}/compact.
 #
 #     Queues a compact request; the agent summarizes its history at its next turn.
-def cmd_agents_compact(agent_id: int) -> int:
-    from base.cluster.machine import gateway_api_base, gateway_auth_headers
-    from base.cluster.machine.ambient import gateway_access_from_settings
+def cmd_agents_compact(
+    agent_id: int,
+    *,
+    transport: AgentsTransport | None = None,
+) -> int:
     from base.host.net.http_dial import post as dial_post
     from ops.rpc_schemas import CompactAgentResponse
 
-    access = gateway_access_from_settings()  # ambient: C
-    url = f"{gateway_api_base(access.gateway_url)}/api/agents/{agent_id}/compact"
-    resp = dial_post(url, timeout=_TIMEOUT_S, headers=gateway_auth_headers(access))
+    active_transport = transport or _default_transport()
+    active_post = active_transport.post or dial_post
+    url = f"{active_transport.gateway_base()}/api/agents/{agent_id}/compact"
+    resp = active_post(url, timeout=_TIMEOUT_S, headers=active_transport.headers())
     resp.raise_for_status()
     queued = CompactAgentResponse.model_validate(resp.json())
     print(f"  ✓ agent {agent_id} compact requested: inbound {queued.inbound_id}")

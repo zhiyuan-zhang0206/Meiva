@@ -99,7 +99,6 @@ def test_start_converge_accepts_installed_pg17_where_no_artifact_exists(
 
 def test_remote_managed_gateway_does_not_require_local_server_or_extension(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
     *,
@@ -111,7 +110,6 @@ def test_remote_managed_gateway_does_not_require_local_server_or_extension(
     config = command_runtime.config
     config.set_field("db_url", "postgresql://test:test@192.0.2.10:5433/meiva")
     config.set_field("redis_url", "redis://127.0.0.1:6380/0")
-    monkeypatch.setattr(pg_runtime, "ensure_pg_runtime", forbidden)
     ensure_pg_binaries_step(
         ConvergeCtx(
             tmp_path,
@@ -125,47 +123,52 @@ def test_remote_managed_gateway_does_not_require_local_server_or_extension(
             host=fake_host(),
             services=frozenset(),
             timers=ManualTimers(),
-        )
+        ),
+        ensure_runtime_fn=forbidden,
     )
 
 
 def test_pg_admission_uses_each_owners_live_remote_verdict(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
     operator_database: DatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
     calls: list[str] = []
-    monkeypatch.setattr(pg_runtime, "ensure_pg_runtime", lambda: calls.append("local"))
-    monkeypatch.setattr(
-        config_facade.settings.data_plane, "db_url", "postgresql://ambient@192.0.2.20/other"
-    )
-    local, remote = ConfigBoot(), ConfigBoot()
-    contexts: list[ConvergeCtx] = []
-    for config, host in ((local, "127.0.0.1"), (remote, "192.0.2.10")):
-        config.set_field("db_url", f"postgresql://test:test@{host}:5433/meiva")
-        config.set_field("redis_url", "redis://127.0.0.1:6380/0")
-        contexts.append(
-            ConvergeCtx(
-                tmp_path,
-                tmp_path,
-                frozenset({"gateway"}),
-                config=config,
-                database_factory=operator_database,
-                producer=operator_pipeline,
-                machine=machine_from_boot(config),
-                helper=refuse_helper,
-                host=fake_host(),
-                services=frozenset(),
-                timers=ManualTimers(),
-            )
-        )
-    ensure_pg_binaries_step(contexts[0])
-    ensure_pg_binaries_step(contexts[1])
-    assert calls == ["local"]
 
-    local.set_field("db_url", "postgresql://test:test@192.0.2.10:5433/meiva")
-    remote.set_field("db_url", "postgresql://test:test@127.0.0.1:5433/meiva")
-    ensure_pg_binaries_step(contexts[0])
-    ensure_pg_binaries_step(contexts[1])
-    assert calls == ["local", "local"]
+    def record_local() -> None:
+        calls.append("local")
+
+    saved_db_url = config_facade.get_field("db_url")
+    config_facade.set_field("db_url", "postgresql://ambient@192.0.2.20/other")
+    try:
+        local, remote = ConfigBoot(), ConfigBoot()
+        contexts: list[ConvergeCtx] = []
+        for config, host in ((local, "127.0.0.1"), (remote, "192.0.2.10")):
+            config.set_field("db_url", f"postgresql://test:test@{host}:5433/meiva")
+            config.set_field("redis_url", "redis://127.0.0.1:6380/0")
+            contexts.append(
+                ConvergeCtx(
+                    tmp_path,
+                    tmp_path,
+                    frozenset({"gateway"}),
+                    config=config,
+                    database_factory=operator_database,
+                    producer=operator_pipeline,
+                    machine=machine_from_boot(config),
+                    helper=refuse_helper,
+                    host=fake_host(),
+                    services=frozenset(),
+                    timers=ManualTimers(),
+                )
+            )
+        ensure_pg_binaries_step(contexts[0], ensure_runtime_fn=record_local)
+        ensure_pg_binaries_step(contexts[1], ensure_runtime_fn=record_local)
+        assert calls == ["local"]
+
+        local.set_field("db_url", "postgresql://test:test@192.0.2.10:5433/meiva")
+        remote.set_field("db_url", "postgresql://test:test@127.0.0.1:5433/meiva")
+        ensure_pg_binaries_step(contexts[0], ensure_runtime_fn=record_local)
+        ensure_pg_binaries_step(contexts[1], ensure_runtime_fn=record_local)
+        assert calls == ["local", "local"]
+    finally:
+        config_facade.set_field("db_url", saved_db_url)

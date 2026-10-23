@@ -68,9 +68,9 @@ def _free_port() -> int:
 
 
 @pytest.fixture
-def _upstream(monkeypatch: pytest.MonkeyPatch) -> dict[str, list[str]]:
+def _upstream() -> dict[str, Any]:
     """Probe seams pointing at a healthy plane, recording calls."""
-    calls: dict[str, list[str]] = {"pg": [], "redis": []}
+    calls: dict[str, Any] = {"pg": [], "redis": []}
 
     def _pg(url: str) -> str | None:
         calls["pg"].append(url)
@@ -80,8 +80,8 @@ def _upstream(monkeypatch: pytest.MonkeyPatch) -> dict[str, list[str]]:
         calls["redis"].append(url)
         return None
 
-    monkeypatch.setattr(_hp, "probe_postgres", _pg)
-    monkeypatch.setattr(_hp, "probe_redis", _redis)
+    calls["pg_fn"] = _pg
+    calls["redis_fn"] = _redis
     return calls
 
 
@@ -89,14 +89,13 @@ def _upstream(monkeypatch: pytest.MonkeyPatch) -> dict[str, list[str]]:
 
 
 def test_health_preflight_warns_and_logs(
-    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
-    capsys,
+    capsys: pytest.CaptureFixture[str],
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
     *,
     command_runtime: CommandRuntime,
-):
+) -> None:
     """A data-plane / checkout finding → the start CONTINUES (rc-free step) but
     prints the warning and appends it to $MEIVA_HOME/logs/health_preflight.log."""
     ctx = _preflight_ctx(
@@ -105,15 +104,12 @@ def test_health_preflight_warns_and_logs(
         producer=operator_pipeline,
         command_runtime=command_runtime,
     )
-    monkeypatch.setattr(
-        _hp,
-        "collect_health_warnings",
-        lambda _ctx: ["postgres …: Connection refused"],  # pyright: ignore[reportUnknownArgumentType]
+    _hp.ensure_health_preflight(
+        ctx,
+        collect_warnings_fn=lambda _ctx: ["postgres …: Connection refused"],
     )
 
-    _hp.ensure_health_preflight(ctx)  # must not raise — a preflight never fails a start
-
-    err = capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
+    err = capsys.readouterr().err
     assert "HEALTH PREFLIGHT" in err and "Connection refused" in err
     log = tmp_path / "home" / "logs" / "health_preflight.log"
     assert log.exists()
@@ -122,14 +118,13 @@ def test_health_preflight_warns_and_logs(
 
 
 def test_health_preflight_silent_when_clean(
-    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
-    capsys,
+    capsys: pytest.CaptureFixture[str],
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
     *,
     command_runtime: CommandRuntime,
-):
+) -> None:
     """No findings → no output, no log file."""
     ctx = _preflight_ctx(
         tmp_path,
@@ -137,23 +132,20 @@ def test_health_preflight_silent_when_clean(
         producer=operator_pipeline,
         command_runtime=command_runtime,
     )
-    monkeypatch.setattr(_hp, "collect_health_warnings", lambda _ctx: [])  # pyright: ignore[reportUnknownArgumentType]
+    _hp.ensure_health_preflight(ctx, collect_warnings_fn=lambda _ctx: [])
 
-    _hp.ensure_health_preflight(ctx)
-
-    assert capsys.readouterr().err == ""  # pyright: ignore[reportUnknownMemberType]
+    assert capsys.readouterr().err == ""
     assert not (tmp_path / "home" / "logs" / "health_preflight.log").exists()
 
 
 def test_health_preflight_never_fails_start_on_scan_error(
-    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
-    capsys,
+    capsys: pytest.CaptureFixture[str],
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
     *,
     command_runtime: CommandRuntime,
-):
+) -> None:
     """A scan exception prints a notice and returns — the step must not turn a
     warning pass into a failed start."""
     ctx = _preflight_ctx(
@@ -162,29 +154,26 @@ def test_health_preflight_never_fails_start_on_scan_error(
         producer=operator_pipeline,
         command_runtime=command_runtime,
     )
-    monkeypatch.setattr(
-        _hp,
-        "collect_health_warnings",
-        lambda _ctx: (_ for _ in ()).throw(RuntimeError("boom")),  # pyright: ignore[reportUnknownArgumentType]
-    )
 
-    _hp.ensure_health_preflight(ctx)
+    def _boom(_ctx: ConvergeCtx) -> list[str]:
+        raise RuntimeError("boom")
 
-    assert "health preflight skipped: boom" in capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
+    _hp.ensure_health_preflight(ctx, collect_warnings_fn=_boom)
+
+    assert "health preflight skipped: boom" in capsys.readouterr().err
 
 
 # ─── data plane: role-aware probing ────────────────────────────────────────
 
 
 def test_data_plane_gateway_cold_start_skipped(
-    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
-    _upstream,
+    _upstream: dict[str, Any],
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
     *,
     command_runtime: CommandRuntime,
-):
+) -> None:
     """Gateway with neither pg nor redis bound → nothing probed, no warnings: the
     start sequence brings the instance up right after converge, so probing now
     would warn on every boot."""
@@ -194,25 +183,28 @@ def test_data_plane_gateway_cold_start_skipped(
         producer=operator_pipeline,
         command_runtime=command_runtime,
     )
-    monkeypatch.setattr(
-        _hp,
-        "get_record",
-        lambda _home: SimpleNamespace(ports={"postgres": _free_port(), "redis": _free_port()}),  # pyright: ignore[reportUnknownArgumentType]
+    assert (
+        _hp.data_plane_warnings(
+            ctx,
+            get_record_fn=lambda _home: SimpleNamespace(
+                ports={"postgres": _free_port(), "redis": _free_port()}
+            ),
+            probe_postgres_fn=_upstream["pg_fn"],
+            probe_redis_fn=_upstream["redis_fn"],
+        )
+        == []
     )
-
-    assert _hp.data_plane_warnings(ctx) == []
     assert _upstream["pg"] == [] and _upstream["redis"] == []
 
 
 def test_data_plane_gateway_partial_up_probes(
-    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
-    _upstream,
+    _upstream: dict[str, Any],
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
     *,
     command_runtime: CommandRuntime,
-):
+) -> None:
     """Gateway with one of the two bound → probes, and a failed probe warns."""
     import socket
 
@@ -227,16 +219,14 @@ def test_data_plane_gateway_partial_up_probes(
     sock.listen(1)
     held = sock.getsockname()[1]
     try:
-        monkeypatch.setattr(
-            _hp,
-            "get_record",
-            lambda _home: SimpleNamespace(ports={"postgres": held, "redis": _free_port()}),  # pyright: ignore[reportUnknownArgumentType]
+        warnings = _hp.data_plane_warnings(
+            ctx,
+            get_record_fn=lambda _home: SimpleNamespace(
+                ports={"postgres": held, "redis": _free_port()}
+            ),
+            probe_postgres_fn=lambda _url: "Connection refused",
+            probe_redis_fn=_upstream["redis_fn"],
         )
-        # The pg probe is replaced to fail; the redis probe stays the recorder,
-        # proving both were dialed on a partially-up plane.
-        monkeypatch.setattr(_hp, "probe_postgres", lambda _url: "Connection refused")  # pyright: ignore[reportUnknownArgumentType]
-
-        warnings = _hp.data_plane_warnings(ctx)
         assert any(w.startswith("postgres") and "Connection refused" in w for w in warnings)
         assert _upstream["redis"] == [_REDIS_URL]
     finally:
@@ -244,14 +234,13 @@ def test_data_plane_gateway_partial_up_probes(
 
 
 def test_data_plane_runner_probes_unconditionally(
-    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
-    _upstream,
+    _upstream: dict[str, Any],
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
     *,
     command_runtime: CommandRuntime,
-):
+) -> None:
     """A runner's plane is remote — an unreachable one is the real signal, so even
     a fully cold host probes (the runner has no local bring-up to fix it)."""
     ctx = _preflight_ctx(
@@ -262,20 +251,26 @@ def test_data_plane_runner_probes_unconditionally(
         command_runtime=command_runtime,
     )
 
-    assert _hp.data_plane_warnings(ctx) == []  # probes pass → silent
+    assert (
+        _hp.data_plane_warnings(
+            ctx,
+            probe_postgres_fn=_upstream["pg_fn"],
+            probe_redis_fn=_upstream["redis_fn"],
+        )
+        == []
+    )  # probes pass → silent
     assert _upstream["pg"] == [_PG_URL]
     assert _upstream["redis"] == [_REDIS_URL]
 
 
 def test_data_plane_unconfigured_skipped(
-    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
-    _upstream,
+    _upstream: dict[str, Any],
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
     *,
     command_runtime: CommandRuntime,
-):
+) -> None:
     """roles=None (unit not configured yet) → nothing probed."""
     ctx = _preflight_ctx(
         tmp_path,
@@ -286,14 +281,21 @@ def test_data_plane_unconfigured_skipped(
     )
 
     was_prepared = ctx.config.prepared
-    assert _hp.data_plane_warnings(ctx) == []
+    assert (
+        _hp.data_plane_warnings(
+            ctx,
+            probe_postgres_fn=_upstream["pg_fn"],
+            probe_redis_fn=_upstream["redis_fn"],
+        )
+        == []
+    )
     assert _upstream["pg"] == [] and _upstream["redis"] == []
     assert ctx.config.prepared == was_prepared
 
 
 def test_preflight_keeps_reading_its_owners_live_urls(
     tmp_path: Path,
-    _upstream: dict[str, list[str]],
+    _upstream: dict[str, Any],
     operator_database: DatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     command_runtime: CommandRuntime,
@@ -305,12 +307,26 @@ def test_preflight_keeps_reading_its_owners_live_urls(
         producer=operator_pipeline,
         command_runtime=command_runtime,
     )
-    assert _hp.data_plane_warnings(ctx) == []
+    assert (
+        _hp.data_plane_warnings(
+            ctx,
+            probe_postgres_fn=_upstream["pg_fn"],
+            probe_redis_fn=_upstream["redis_fn"],
+        )
+        == []
+    )
     changed_pg = "postgresql://meiva:changed@127.0.0.1:5434/other"
     changed_redis = "redis://:changed@127.0.0.1:6381/1"
     ctx.config.set_field("db_url", changed_pg)
     ctx.config.set_field("redis_url", changed_redis)
-    assert _hp.data_plane_warnings(ctx) == []
+    assert (
+        _hp.data_plane_warnings(
+            ctx,
+            probe_postgres_fn=_upstream["pg_fn"],
+            probe_redis_fn=_upstream["redis_fn"],
+        )
+        == []
+    )
     assert _upstream["pg"] == [_PG_URL, changed_pg]
     assert _upstream["redis"] == [_REDIS_URL, changed_redis]
 

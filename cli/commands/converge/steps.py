@@ -6,6 +6,7 @@ import os
 import re
 import subprocess
 import sys
+from collections.abc import Callable
 from pathlib import Path
 
 from base.host.private_storage import converge_private_tree, ensure_private_file
@@ -68,13 +69,18 @@ def ensure_meiva_home_dirs(ctx: ConvergeCtx) -> None:
     ensure_private_file(marker)
 
 
-def ensure_pg_binaries_step(ctx: ConvergeCtx) -> None:
+def ensure_pg_binaries_step(
+    ctx: ConvergeCtx,
+    *,
+    ensure_runtime_fn: Callable[[], None] | None = None,
+) -> None:
     """Prepare the selected PostgreSQL 17 runtime and its pgvector extension."""
     if ctx.read_config().view.data_plane.is_remote:
         return
     from base.cluster.dataplane.pg_runtime import ensure_pg_runtime
 
-    ensure_pg_runtime()
+    active_ensure = ensure_runtime_fn or ensure_pg_runtime
+    active_ensure()
 
 
 # meiva:note

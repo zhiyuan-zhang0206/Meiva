@@ -4,10 +4,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-import pytest
-
 from base.clock.tests.manual_timers import ManualTimers
-from base.host.system import packages_job as job
 from base.host.system.hostport import Host
 from base.host.system.tests.fake_commands import fake_host
 from base.sessions.tests.refuse_helper import refuse_helper
@@ -20,7 +17,6 @@ from cli.database.tests.command_inputs import command_runtime as command_runtime
 
 
 def test_converge_registers_the_refresh_job(
-    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
@@ -36,8 +32,6 @@ def test_converge_registers_the_refresh_job(
     ) -> None:
         calls.append("register")
 
-    monkeypatch.setattr(job, "register_packages_job", register)
-
     ctx = ConvergeCtx(
         repo=tmp_path,
         meiva_home=tmp_path,
@@ -51,5 +45,5 @@ def test_converge_registers_the_refresh_job(
         services=frozenset(),
         timers=ManualTimers(),
     )
-    ensure_packages_refresh_job(ctx)
+    ensure_packages_refresh_job(ctx, register_fn=register)
     assert calls == ["register"]

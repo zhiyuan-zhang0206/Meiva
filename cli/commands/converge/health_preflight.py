@@ -33,8 +33,10 @@ from __future__ import annotations
 
 import subprocess
 import sys
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
 from base.cluster import get_record, port_free
@@ -133,7 +135,13 @@ def _git_ro(repo: Path, *args: str) -> str | None:
     return result.stdout.strip() or None
 
 
-def data_plane_warnings(ctx: ConvergeCtx) -> list[str]:
+def data_plane_warnings(
+    ctx: ConvergeCtx,
+    *,
+    get_record_fn: Callable[[Path], Any] | None = None,
+    probe_postgres_fn: Callable[[str], str | None] | None = None,
+    probe_redis_fn: Callable[[str], str | None] | None = None,
+) -> list[str]:
     """Warning lines for the data plane, or [] when it is reachable / there is
     nothing to probe. See the module docstring for the role-aware skip."""
     if ctx.roles is None:
@@ -144,8 +152,12 @@ def data_plane_warnings(ctx: ConvergeCtx) -> list[str]:
     if not pg_url or not redis_url:
         return []
 
+    active_get_record = get_record_fn or get_record
+    active_probe_pg = probe_postgres_fn or probe_postgres
+    active_probe_redis = probe_redis_fn or probe_redis
+
     if "gateway" in ctx.roles:
-        rec = get_record(ctx.meiva_home)
+        rec = active_get_record(ctx.meiva_home)
         if rec is None:
             raise RuntimeError(f"gateway home {ctx.meiva_home} has no recorded ports")
         plane_up_at_all = not port_free(rec.ports["postgres"]) or not port_free(rec.ports["redis"])
@@ -157,10 +169,10 @@ def data_plane_warnings(ctx: ConvergeCtx) -> list[str]:
 
     out: list[str] = []
     if pg_url != PLACEHOLDER_DB_URL:
-        err = probe_postgres(pg_url)
+        err = active_probe_pg(pg_url)
         if err is not None:
             out.append(f"postgres {redact(pg_url)}: {err}")
-    err = probe_redis(redis_url)
+    err = active_probe_redis(redis_url)
     if err is not None:
         out.append(f"redis {redact(redis_url)}: {err}")
     return out
@@ -188,12 +200,17 @@ def collect_health_warnings(ctx: ConvergeCtx) -> list[str]:
     return data_plane_warnings(ctx) + checkout_warnings(ctx)
 
 
-def ensure_health_preflight(ctx: ConvergeCtx) -> None:
+def ensure_health_preflight(
+    ctx: ConvergeCtx,
+    *,
+    collect_warnings_fn: Callable[[ConvergeCtx], list[str]] | None = None,
+) -> None:
     """Converge step: warn (never block) on data-plane unreachability + a dirty
     checkout. Best-effort by contract: a preflight must not fail a start, so any
     exception in the scan prints a notice and the start proceeds."""
+    active_collect = collect_warnings_fn or collect_health_warnings
     try:
-        warnings = collect_health_warnings(ctx)
+        warnings = active_collect(ctx)
     except Exception as exc:  # a preflight must never fail a start
         print(f"  · health preflight skipped: {exc}", file=sys.stderr)
         return

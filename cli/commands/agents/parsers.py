@@ -39,14 +39,23 @@ def _h_agents_ls(args: argparse.Namespace) -> int:
     from cli.commands.agents.control import cmd_agents_ls
 
     return cmd_agents_ls(
-        scope=args.scope, query=args.query, before_id=args.before_id, limit=args.limit
+        scope=args.scope,
+        query=args.query,
+        before_id=args.before_id,
+        limit=args.limit,
+        transport=getattr(args, "transport", None),
     )
 
 
 def _h_agents_timeline(args: argparse.Namespace) -> int:
     from cli.commands.agents.timeline import cmd_agents_timeline
 
-    return cmd_agents_timeline(args.agent_id, args.limit, args.before)
+    return cmd_agents_timeline(
+        args.agent_id,
+        args.limit,
+        args.before,
+        transport=getattr(args, "transport", None),
+    )
 
 
 def h_agents_send(args: argparse.Namespace) -> int:
@@ -59,6 +68,7 @@ def h_agents_send(args: argparse.Namespace) -> int:
             args.source,
             args.tail_file,
             completion=args.completion,
+            transport=getattr(args, "transport", None),
         )
     except ProvenanceError as exc:
         print(f"meiva: {exc}", file=sys.stderr)
@@ -68,20 +78,25 @@ def h_agents_send(args: argparse.Namespace) -> int:
 def _h_agents_cancel(args: argparse.Namespace) -> int:
     from cli.commands.agents.control import cmd_agents_cancel
 
-    return cmd_agents_cancel(args.agent_id)
+    return cmd_agents_cancel(args.agent_id, transport=getattr(args, "transport", None))
 
 
 def _h_agents_compact(args: argparse.Namespace) -> int:
     from cli.commands.agents.control import cmd_agents_compact
 
-    return cmd_agents_compact(args.agent_id)
+    return cmd_agents_compact(args.agent_id, transport=getattr(args, "transport", None))
 
 
 def _h_agents_restart(args: argparse.Namespace) -> int:
     from cli.commands.agents.control import ProvenanceError, cmd_agents_restart
 
     try:
-        return cmd_agents_restart(args.agent_id, args.config, source=args.source)
+        return cmd_agents_restart(
+            args.agent_id,
+            args.config,
+            source=args.source,
+            transport=getattr(args, "transport", None),
+        )
     except ProvenanceError as exc:
         print(f"meiva: {exc}", file=sys.stderr)
         return 2
@@ -91,7 +106,11 @@ def _h_agents_resurrect(args: argparse.Namespace) -> int:
     from cli.commands.agents.control import ProvenanceError, cmd_agents_resurrect
 
     try:
-        return cmd_agents_resurrect(args.agent_id, source=args.source)
+        return cmd_agents_resurrect(
+            args.agent_id,
+            source=args.source,
+            transport=getattr(args, "transport", None),
+        )
     except ProvenanceError as exc:
         print(f"meiva: {exc}", file=sys.stderr)
         return 2
@@ -105,6 +124,7 @@ def _h_agents_terminate(args: argparse.Namespace) -> int:
             args.agent_id,
             source=args.source,
             kill_all_shell_sessions=args.kill_all_shell_sessions,
+            transport=getattr(args, "transport", None),
         )
     except ProvenanceError as exc:
         print(f"meiva: {exc}", file=sys.stderr)
@@ -119,6 +139,7 @@ def h_agents_kill(args: argparse.Namespace) -> int:
             args.agent_id,
             source=args.source,
             kill_all_shell_sessions=args.kill_all_shell_sessions,
+            transport=getattr(args, "transport", None),
         )
     except ProvenanceError as exc:
         print(f"meiva: {exc}", file=sys.stderr)

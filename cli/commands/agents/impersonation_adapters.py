@@ -66,15 +66,27 @@ def resolve_adapter(
     *,
     codex_remote: str | None = None,
     discover: Callable[[], object] = discover_antigravity_server,
+    default_endpoint_fn: Callable[[], str | None] | None = None,
+    live_submit_fn: Callable[..., str | None] | None = None,
 ) -> RelayAdapter:
     if provider == "codex":
         if thread_id is None:
             raise ValueError("codex relay requires --thread-id for an existing session")
         target = UUID(thread_id)
-        endpoint = require_control_endpoint(codex_remote)
+        resolved_remote = codex_remote
+        if resolved_remote is None and default_endpoint_fn is not None:
+            resolved_remote = default_endpoint_fn()
+            if resolved_remote is None:
+                raise RuntimeError(
+                    "Codex Steer delivery requires the existing session's app server; "
+                    "pass --codex-remote with the same endpoint used by codex --remote. "
+                    "Pending delivery via codex queue is not supported."
+                )
+        endpoint = require_control_endpoint(resolved_remote)
+        active_live_submit = live_submit_fn or live_submit
 
         def send(message: str) -> None:
-            reason = live_submit(str(target), message, endpoint=endpoint)
+            reason = active_live_submit(str(target), message, endpoint=endpoint)
             if reason is not None:
                 raise RuntimeError(f"Codex Steer delivery failed: {reason}")
 

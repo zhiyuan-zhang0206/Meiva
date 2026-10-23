@@ -8,11 +8,8 @@ from uuid import UUID
 
 import pytest
 
-import base.agents.impersonation as agents_impersonation
 from base.agents.context.clients import DatabaseFactory
 from base.agents.impersonation.status import ImpersonationStatus
-from base.events.live import redis_listener
-from cli.commands.agents import impersonation_adapters as adapters
 from cli.commands.agents import impersonation_relay as relay
 from cli.database.runtime import CommandRuntime
 from cli.database.tests.cli_tests import operator_database as operator_database
@@ -145,8 +142,11 @@ class Listener:
         return ()
 
 
-def _serve_inbox(monkeypatch: pytest.MonkeyPatch, inbox: Inbox) -> None:
-
+def _make_relay_backend(
+    inbox: Inbox,
+    listener: Listener,
+    deliver: Callable[..., str | None],
+) -> relay.RelayBackend:
     def lease(_db: object, _bus: object, *_args: object, local_machine: str) -> dict[str, Any]:
         return {
             "session_id": 0,
@@ -173,21 +173,34 @@ def _serve_inbox(monkeypatch: pytest.MonkeyPatch, inbox: Inbox) -> None:
             for i in sorted(inbox.messages)[: inbox.page_size]
         ]
 
-    monkeypatch.setattr(agents_impersonation, "relay_get", lease)
-    monkeypatch.setattr(agents_impersonation, "relay_inbox", rows)
-
     def beat(_db: object, *_args: object, local_machine: str) -> None:
         return None
 
-    monkeypatch.setattr(agents_impersonation, "relay_heartbeat", beat)
+    def reserve(
+        _db: object, _bus: object, _lease: str, _token: str, ids: list[int], *, local_machine: str
+    ) -> frozenset[int]:
+        for i in ids:
+            inbox.messages[i] = replace(inbox.messages[i], delivery_attempts=1, delivery_due=False)
+        return frozenset(ids)
+
+    def make_listener(*_args: object) -> Listener:
+        return listener
+
+    return relay.RelayBackend(
+        relay_get_fn=lease,
+        relay_inbox_fn=rows,
+        relay_heartbeat_fn=beat,
+        reserve_delivery_fn=reserve,
+        listener_factory=make_listener,
+        token_from_env_fn=lambda: "test-credential",
+        live_submit_fn=deliver,
+    )
 
 
 def test_command_passes_remote_to_steer(
-    monkeypatch: pytest.MonkeyPatch,
     operator_database: DatabaseFactory,
     command_runtime: CommandRuntime,
 ) -> None:
-    from cli.commands.agents import impersonation
     from cli.parsers import build_parser
 
     remote = "unix:///private/tmp/meiva-codex.sock"
@@ -211,29 +224,15 @@ def test_command_passes_remote_to_steer(
     inbox = Inbox()
     listener = Listener(inbox)
     delivered: list[tuple[UUID, str | None]] = []
-    monkeypatch.setattr(impersonation, "relay_token_from_env", lambda: "test-credential")
     inbox.start_message = ""
-    _serve_inbox(monkeypatch, inbox)
 
-    def make_listener(*_args: object) -> Listener:
-        return listener
-
-    def reserve(
-        _db: object, _bus: object, _lease: str, _token: str, ids: list[int], *, local_machine: str
-    ) -> frozenset[int]:
-        for i in ids:
-            inbox.messages[i] = replace(inbox.messages[i], delivery_attempts=1, delivery_due=False)
-        return frozenset(ids)
-
-    monkeypatch.setattr(relay, "reserve_delivery", reserve)
-    monkeypatch.setattr(redis_listener, "RedisInboundListener", make_listener)
-
-    def deliver(thread_id: str, _message: str, *, endpoint: str) -> None:
+    def deliver(thread_id: str, _message: str, *, endpoint: str) -> str | None:
         delivered.append((UUID(thread_id), endpoint))
+        return None
 
-    monkeypatch.setattr(adapters, "live_submit", deliver)
     args.runtime = command_runtime
     args.database_factory = operator_database
+    args.relay_backend = _make_relay_backend(inbox, listener, deliver)
     assert args.func(args) == 0
     assert delivered == [(THREAD_ID, remote)]
     assert listener.closed
@@ -241,12 +240,10 @@ def test_command_passes_remote_to_steer(
 
 @pytest.mark.parametrize("refuse", [False, True])
 def test_codex_relay_caps_content_and_preserves_inbox_on_steer_failure(
-    monkeypatch: pytest.MonkeyPatch,
     refuse: bool,
     operator_database: DatabaseFactory,
     command_runtime: CommandRuntime,
 ) -> None:
-    from cli.commands.agents import impersonation
     from cli.parsers import build_parser
 
     args = build_parser().parse_args(
@@ -268,21 +265,6 @@ def test_codex_relay_caps_content_and_preserves_inbox_on_steer_failure(
     inbox.messages[5] = msg(5, content="x" * 5000)
     listener = Listener(inbox)
     delivered: list[str] = []
-    monkeypatch.setattr(impersonation, "relay_token_from_env", lambda: "test-credential")
-    _serve_inbox(monkeypatch, inbox)
-
-    def make_listener(*_args: object) -> Listener:
-        return listener
-
-    def reserve(
-        _db: object, _bus: object, _lease: str, _token: str, ids: list[int], *, local_machine: str
-    ) -> frozenset[int]:
-        for i in ids:
-            inbox.messages[i] = replace(inbox.messages[i], delivery_attempts=1, delivery_due=False)
-        return frozenset(ids)
-
-    monkeypatch.setattr(relay, "reserve_delivery", reserve)
-    monkeypatch.setattr(redis_listener, "RedisInboundListener", make_listener)
 
     def deliver(_thread_id: str, message: str, *, endpoint: str) -> str | None:
         delivered.append(message)
@@ -290,10 +272,10 @@ def test_codex_relay_caps_content_and_preserves_inbox_on_steer_failure(
             return "ActiveTurnNotSteerable"
         return None
 
-    monkeypatch.setattr(adapters, "live_submit", deliver)
     args.codex_remote = "unix:///tmp/meiva-codex.sock"
     args.runtime = command_runtime
     args.database_factory = operator_database
+    args.relay_backend = _make_relay_backend(inbox, listener, deliver)
     assert args.func(args) == (1 if refuse else 0)
     if refuse:
         assert 5 in inbox.messages

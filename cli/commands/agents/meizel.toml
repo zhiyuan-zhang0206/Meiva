@@ -5,6 +5,7 @@ exports = ["computer.py", "control.py", "impersonation.py", "impersonation_adapt
 "impersonation_parsers.py" = ["impersonation.py", "impersonation_relay.py"]
 "impersonation_relay.py" = ["impersonation.py", "impersonation_adapters.py"]
 "parsers.py" = ["control.py", "notices.py", "notices_audit.py", "timeline.py"]
+"timeline.py" = ["control.py"]
 "tests" = ["control.py", "impersonation.py", "impersonation_adapters.py", "impersonation_relay.py", "notices.py", "notices_audit.py", "timeline.py"]
 
 [external]

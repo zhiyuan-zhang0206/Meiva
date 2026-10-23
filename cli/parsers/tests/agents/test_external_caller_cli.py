@@ -5,12 +5,6 @@ from unittest.mock import Mock
 
 import pytest
 
-from base.cluster import machine
-from base.cluster.machine.tests.gateway_stubs import (
-    gateway_api_base_stub,
-    gateway_auth_headers_stub,
-)
-from base.host.net import http_dial
 from cli.commands.agents import control as agents_control
 
 
@@ -27,17 +21,17 @@ def _send_args(**overrides: object) -> argparse.Namespace:
 
 
 @pytest.fixture
-def post(monkeypatch: pytest.MonkeyPatch) -> Mock:
-    """A profiled environment on purpose: every path below must ignore it."""
+def post() -> tuple[Mock, agents_control.AgentsTransport]:
     response = Mock()
     response.status_code = 200
     response.json.return_value = {"status": "enqueued"}
     call = Mock(return_value=response)
-    monkeypatch.setattr(http_dial, "post", call)
-    monkeypatch.setattr(machine, "gateway_api_base", gateway_api_base_stub("http://localhost"))
-    monkeypatch.setattr(machine, "gateway_auth_headers", gateway_auth_headers_stub({}))
-    monkeypatch.setenv("MEIVA_CALLER_IDENTITY", '{"kind":"external_agent","subject":"codex"}')
-    return call
+    transport = agents_control.AgentsTransport(
+        gateway_base=lambda: "http://localhost",
+        headers=dict,
+        post=call,
+    )
+    return call, transport
 
 
 # -- send: the explicit --source is the only provenance --
@@ -47,45 +41,55 @@ def post(monkeypatch: pytest.MonkeyPatch) -> Mock:
     "source", ["user", "external_agent:claude_code", "external_agent:codex:run-42"]
 )
 def test_send_carries_explicit_source(
-    post: Mock, monkeypatch: pytest.MonkeyPatch, source: str
+    post: tuple[Mock, agents_control.AgentsTransport], source: str
 ) -> None:
-    monkeypatch.delenv("MEIVA_CALLER_IDENTITY")
-    agents_control.cmd_agents_send(42, "hello", source)
-    assert post.call_args.kwargs["json"]["source"] == source
+    call, transport = post
+    agents_control.cmd_agents_send(42, "hello", source, transport=transport)
+    assert call.call_args.kwargs["json"]["source"] == source
 
 
-def test_send_honours_explicit_source_under_profile(post: Mock) -> None:
-    agents_control.cmd_agents_send(42, "hello", "user")
-    assert post.call_args.kwargs["json"]["source"] == "user"
+def test_send_honours_explicit_source_under_profile(
+    post: tuple[Mock, agents_control.AgentsTransport],
+) -> None:
+    call, transport = post
+    agents_control.cmd_agents_send(42, "hello", "user", transport=transport)
+    assert call.call_args.kwargs["json"]["source"] == "user"
 
 
-def test_missing_send_source_is_not_compensated(post: Mock) -> None:
+def test_missing_send_source_is_not_compensated(
+    post: tuple[Mock, agents_control.AgentsTransport],
+) -> None:
+    call, transport = post
     with pytest.raises(ValueError, match="requires --source"):
-        agents_control.cmd_agents_send(42, "hello", None)
-    post.assert_not_called()
+        agents_control.cmd_agents_send(42, "hello", None, transport=transport)
+    call.assert_not_called()
 
 
 # -- lifecycle verbs: explicit source only; omitted means no provenance claimed --
 
 
-def test_lifecycle_takes_explicit_source(post: Mock, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("MEIVA_CALLER_IDENTITY")
-    agents_control.cmd_agents_restart(42, source="user")
-    assert post.call_args.kwargs["json"] == {"source": "user"}
-    agents_control.cmd_agents_resurrect(42, source="user")
-    assert post.call_args.kwargs["json"] == {"resurrected_by": "user"}
-    agents_control.cmd_agents_kill(42, source="shell:7")
-    assert post.call_args.kwargs["json"] == {"force": True, "source": "shell:7"}
+def test_lifecycle_takes_explicit_source(
+    post: tuple[Mock, agents_control.AgentsTransport],
+) -> None:
+    call, transport = post
+    agents_control.cmd_agents_restart(42, source="user", transport=transport)
+    assert call.call_args.kwargs["json"] == {"source": "user"}
+    agents_control.cmd_agents_resurrect(42, source="user", transport=transport)
+    assert call.call_args.kwargs["json"] == {"resurrected_by": "user"}
+    agents_control.cmd_agents_kill(42, source="shell:7", transport=transport)
+    assert call.call_args.kwargs["json"] == {"force": True, "source": "shell:7"}
 
 
-def test_lifecycle_never_reads_profile(post: Mock) -> None:
-    # The profile stays set (fixture): an omitted --source claims nothing.
-    agents_control.cmd_agents_restart(42)
-    assert "json" not in post.call_args.kwargs
-    agents_control.cmd_agents_resurrect(42)
-    assert "json" not in post.call_args.kwargs
-    agents_control.cmd_agents_kill(42)
-    assert post.call_args.kwargs["json"] == {"force": True}
+def test_lifecycle_never_reads_profile(
+    post: tuple[Mock, agents_control.AgentsTransport],
+) -> None:
+    call, transport = post
+    agents_control.cmd_agents_restart(42, transport=transport)
+    assert "json" not in call.call_args.kwargs
+    agents_control.cmd_agents_resurrect(42, transport=transport)
+    assert "json" not in call.call_args.kwargs
+    agents_control.cmd_agents_kill(42, transport=transport)
+    assert call.call_args.kwargs["json"] == {"force": True}
 
 
 # -- the parse layer enforces requirements before any command code runs --
@@ -154,35 +158,45 @@ def test_restart_rejects_non_object_config_at_parse_time(
 
 
 def test_send_without_provenance_exits_cleanly(
-    post: Mock, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    post: tuple[Mock, agents_control.AgentsTransport],
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     from cli.commands.agents.parsers import h_agents_send
 
-    monkeypatch.delenv("MEIVA_CALLER_IDENTITY")
-    assert h_agents_send(_send_args()) == 2
+    call, transport = post
+    args = _send_args(transport=transport)
+    assert h_agents_send(args) == 2
     err = capsys.readouterr().err
     assert "requires --source" in err
     assert "--source user" in err
-    post.assert_not_called()
+    call.assert_not_called()
 
 
 def test_send_invalid_source_exits_cleanly(
-    post: Mock, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    post: tuple[Mock, agents_control.AgentsTransport],
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     from cli.commands.agents.parsers import h_agents_send
 
-    monkeypatch.delenv("MEIVA_CALLER_IDENTITY")
-    assert h_agents_send(_send_args(source="bogus")) == 2
+    call, transport = post
+    assert h_agents_send(_send_args(source="bogus", transport=transport)) == 2
     assert "Unrecognized inbound source" in capsys.readouterr().err
-    post.assert_not_called()
+    call.assert_not_called()
 
 
 def test_lifecycle_invalid_source_exits_cleanly(
-    post: Mock, capsys: pytest.CaptureFixture[str]
+    post: tuple[Mock, agents_control.AgentsTransport],
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     from cli.commands.agents.parsers import h_agents_kill
 
-    args = argparse.Namespace(agent_id=42, source="bogus", kill_all_shell_sessions=False)
+    call, transport = post
+    args = argparse.Namespace(
+        agent_id=42,
+        source="bogus",
+        kill_all_shell_sessions=False,
+        transport=transport,
+    )
     assert h_agents_kill(args) == 2
     assert "Unrecognized inbound source" in capsys.readouterr().err
-    post.assert_not_called()
+    call.assert_not_called()

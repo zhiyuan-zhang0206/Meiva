@@ -4,12 +4,9 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-import pytest
-
 from base.clock.tests.manual_timers import ManualTimers
 from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot
-from base.host.system import logs_job as job
 from base.host.system.hostport import Host
 from base.host.system.tests.fake_commands import fake_host
 from base.sessions.tests.refuse_helper import refuse_helper
@@ -21,7 +18,6 @@ from cli.database.tests.command_inputs import command_runtime as command_runtime
 
 
 def test_converge_registers_logs_maintenance(
-    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
@@ -32,8 +28,6 @@ def test_converge_registers_logs_maintenance(
 
     def register(*, enabled_reader: object, host: Host) -> None:
         calls.append("register")
-
-    monkeypatch.setattr(job, "register_logs_job", register)
 
     machine_config = ConfigBoot()
     ctx = ConvergeCtx(
@@ -49,5 +43,5 @@ def test_converge_registers_logs_maintenance(
         services=frozenset(),
         timers=ManualTimers(),
     )
-    ensure_logs_maintenance(ctx)
+    ensure_logs_maintenance(ctx, register_fn=register)
     assert calls == ["register"]

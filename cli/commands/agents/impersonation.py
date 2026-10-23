@@ -16,6 +16,8 @@ import math
 import os
 import sys
 import time
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -25,6 +27,21 @@ from base.agents.context.clients import DatabaseFactory
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.log import logger
+
+
+@dataclass(frozen=True)
+class ImpersonationBackend:
+    request_fn: Callable[..., dict[str, Any]] | None = None
+    private_id_fn: Callable[..., str] | None = None
+    get_fn: Callable[..., dict[str, Any]] | None = None
+    renew_fn: Callable[..., dict[str, Any]] | None = None
+    release_fn: Callable[..., dict[str, Any]] | None = None
+    ack_fn: Callable[..., None] | None = None
+    require_active_fn: Callable[..., dict[str, Any]] | None = None
+    public_session_fn: Callable[[dict[str, Any]], dict[str, Any]] | None = None
+    send_message_fn: Callable[..., str] | None = None
+    default_control_endpoint_fn: Callable[[], str | None] | None = None
+    dsh_stub_env: Mapping[str, str] | None = None
 
 
 def relay_token_from_env() -> str:
@@ -108,7 +125,7 @@ def _print_claude_relay_instructions() -> None:
     )
 
 
-def _dsh_relay_stub() -> Path:
+def _dsh_relay_stub(*, env: Mapping[str, str] | None = None) -> Path:
     """The stub path the dsh session's meiva-relay plugin exports to its shell commands.
 
     Checked before the request creates a lease: without the plugin nothing
@@ -117,7 +134,8 @@ def _dsh_relay_stub() -> Path:
     per-session stub instead of the printed response.
     """
     # env-ok: per-session relay stub handoff from the dsh plugin, not cluster configuration
-    stub = os.environ.get("DSH_MEIVA_RELAY_STUB")
+    active_env = os.environ if env is None else env
+    stub = active_env.get("DSH_MEIVA_RELAY_STUB")
     if not stub:
         raise ValueError(
             "the dsh relay needs the Meiva relay plugin (meiva-relay.mjs) loaded into this "
@@ -186,25 +204,39 @@ def _run_local(args: argparse.Namespace) -> int:
     return 0
 
 
-def _send(args: argparse.Namespace, *, database_factory: DatabaseFactory) -> int:
+def _send(
+    args: argparse.Namespace,
+    *,
+    database_factory: DatabaseFactory,
+    backend: ImpersonationBackend | None = None,
+) -> int:
     """`impersonate send` — one message to another agent as the leased identity."""
     from base.agents import impersonation as control
     from base.agents.impersonation import sessions
     from cli.commands.agents.control import send_agent_message
 
+    active_backend = backend or ImpersonationBackend()
+    active_private_id = active_backend.private_id_fn or sessions.private_id
+    active_require = active_backend.require_active_fn or control.require_active
+    active_send = active_backend.send_message_fn or send_agent_message
     content = sys.stdin.read() if args.content == "-" else args.content
     db = database_factory()
-    lease_id = sessions.private_id(
+    lease_id = active_private_id(
         db, args.agent_id, args.session_id, local_machine=args.runtime.machine.name()
     )
-    lease = control.require_active(db, lease_id, local_machine=args.runtime.machine.name())
+    lease = active_require(db, lease_id, local_machine=args.runtime.machine.name())
     source = f"agent:{lease['agent_id']}"
-    status = send_agent_message(args.target_agent_id, content, source=source)
+    status = active_send(args.target_agent_id, content, source=source)
     _emit({"status": status, "to": args.target_agent_id, "source": source})
     return 0
 
 
-def _request(args: argparse.Namespace, *, database_factory: DatabaseFactory) -> int:
+def _request(
+    args: argparse.Namespace,
+    *,
+    database_factory: DatabaseFactory,
+    backend: ImpersonationBackend | None = None,
+) -> int:
     """`impersonate request` — create the lease, then hand its relay the credential."""
     from base.agents.impersonation import sessions
     from base.agents.impersonation.host_transport import (
@@ -217,10 +249,22 @@ def _request(args: argparse.Namespace, *, database_factory: DatabaseFactory) -> 
     from base.native_process.ownership import process_metadata
     from base.paths import meiva_home
 
-    dsh_stub = _dsh_relay_stub() if args.relay_provider == "dsh" else None
+    active_backend = backend or ImpersonationBackend()
+    active_request = active_backend.request_fn or sessions.request
+    dsh_stub = (
+        _dsh_relay_stub(env=active_backend.dsh_stub_env) if args.relay_provider == "dsh" else None
+    )
     endpoint = args.relay_codex_remote
     thread_id = args.relay_thread_id
     if args.relay_provider == "codex":
+        if endpoint is None and active_backend.default_control_endpoint_fn is not None:
+            endpoint = active_backend.default_control_endpoint_fn()
+            if endpoint is None:
+                raise RuntimeError(
+                    "Codex Steer delivery requires the existing session's app server; "
+                    "pass --codex-remote with the same endpoint used by codex --remote. "
+                    "Pending delivery via codex queue is not supported."
+                )
         endpoint = require_control_endpoint(endpoint)
     elif args.relay_provider == "antigravity":
         # env-ok: Antigravity conversation ID injected by the host into run_command subprocesses
@@ -240,7 +284,7 @@ def _request(args: argparse.Namespace, *, database_factory: DatabaseFactory) -> 
         # reaches argv, the environment, the database or a log line.
         # meiva:link docs/conventions/agents/agent-impersonation-hosts.md
         write_antigravity_endpoint(resolve_antigravity_endpoint(thread_id), thread_id=thread_id)
-    response = sessions.request(
+    response = active_request(
         database_factory(),
         EventBus.from_settings(),
         args.agent_id,
@@ -301,34 +345,44 @@ def _request(args: argparse.Namespace, *, database_factory: DatabaseFactory) -> 
     return 0
 
 
-def _dispatch(args: argparse.Namespace, *, database_factory: DatabaseFactory) -> int:
+def _dispatch(
+    args: argparse.Namespace,
+    *,
+    database_factory: DatabaseFactory,
+    backend: ImpersonationBackend | None = None,
+) -> int:
     from base.agents import impersonation as control
     from base.agents.impersonation import sessions
     from base.agents.impersonation.history import public_session, say
 
+    active_backend = backend or getattr(args, "backend", None) or ImpersonationBackend()
     command = args.impersonation_cmd
     db = database_factory()
     bus = EventBus.from_settings()
     if command == "request":
-        return _request(args, database_factory=database_factory)
+        return _request(args, database_factory=database_factory, backend=active_backend)
     if command == "list":
         _emit(sessions.list_sessions(db, args.agent_id, before=args.before, limit=args.limit))
         return 0
     if command == "send":
-        return _send(args, database_factory=database_factory)
-    args.lease_id = sessions.private_id(
+        return _send(args, database_factory=database_factory, backend=active_backend)
+    active_private_id = active_backend.private_id_fn or sessions.private_id
+    active_public = active_backend.public_session_fn or public_session
+    args.lease_id = active_private_id(
         db, args.agent_id, args.session_id, local_machine=args.runtime.machine.name()
     )
     if command == "status":
+        active_get = active_backend.get_fn or control.get
         _emit(
-            public_session(
-                control.get(db, bus, args.lease_id, local_machine=args.runtime.machine.name())
+            active_public(
+                active_get(db, bus, args.lease_id, local_machine=args.runtime.machine.name())
             )
         )
     elif command == "renew":
+        active_renew = active_backend.renew_fn or control.renew
         _emit(
-            public_session(
-                control.renew(
+            active_public(
+                active_renew(
                     db,
                     bus,
                     args.lease_id,
@@ -338,10 +392,11 @@ def _dispatch(args: argparse.Namespace, *, database_factory: DatabaseFactory) ->
             )
         )
     elif command == "release":
+        active_release = active_backend.release_fn or control.release
         summary = sys.stdin.read() if args.summary == "-" else args.summary
         _emit(
-            public_session(
-                control.release(
+            active_public(
+                active_release(
                     db,
                     bus,
                     args.lease_id,
@@ -363,7 +418,8 @@ def _dispatch(args: argparse.Namespace, *, database_factory: DatabaseFactory) ->
             )
         )
     elif command == "ack":
-        control.ack(
+        active_ack = active_backend.ack_fn or control.ack
+        active_ack(
             db,
             bus,
             args.lease_id,
@@ -393,10 +449,15 @@ def _dispatch(args: argparse.Namespace, *, database_factory: DatabaseFactory) ->
     return 0
 
 
-def cmd_impersonate(args: argparse.Namespace, *, database_factory: DatabaseFactory) -> int:
+def cmd_impersonate(
+    args: argparse.Namespace,
+    *,
+    database_factory: DatabaseFactory,
+    backend: ImpersonationBackend | None = None,
+) -> int:
     """Run one command, with operational errors confined to stderr."""
     try:
-        return _dispatch(args, database_factory=database_factory)
+        return _dispatch(args, database_factory=database_factory, backend=backend)
     except (RuntimeError, ValueError, OSError) as exc:
         print(f"impersonation: {exc}", file=sys.stderr)
         return 1

@@ -111,6 +111,17 @@ class WakeListener(Protocol):
     async def stop(self) -> tuple[str, ...]: ...
 
 
+@dataclass(frozen=True)
+class RelayBackend:
+    relay_get_fn: Callable[..., dict[str, Any]] | None = None
+    relay_inbox_fn: Callable[..., list[dict[str, Any]]] | None = None
+    relay_heartbeat_fn: Callable[..., None] | None = None
+    reserve_delivery_fn: Callable[..., frozenset[int]] | None = None
+    listener_factory: Callable[[str, int], WakeListener] | None = None
+    token_from_env_fn: Callable[[], str] | None = None
+    live_submit_fn: Callable[..., str | None] | None = None
+
+
 def ack_command(lease_id: int | UUID, ids: Sequence[int], agent_id: int | None = None) -> str:
     """The exact ACK command for one pushed batch, as a bare `meiva`: the host's
     `~/.local/bin/meiva`, linked to the production CLI."""
@@ -230,11 +241,15 @@ def read_relay_inbox(
     token: str,
     *,
     local_machine: str,
+    relay_get_fn: Callable[..., dict[str, Any]] | None = None,
+    relay_inbox_fn: Callable[..., list[dict[str, Any]]] | None = None,
 ) -> InboxSnapshot:
     from base.agents import impersonation
 
+    active_get = relay_get_fn or impersonation.relay_get
+    active_inbox = relay_inbox_fn or impersonation.relay_inbox
     lease = Lease.model_validate(
-        impersonation.relay_get(db, bus, str(lease_id), token, local_machine=local_machine)
+        active_get(db, bus, str(lease_id), token, local_machine=local_machine)
     )
     if lease.agent_id != agent_id or lease.id != lease_id:
         raise ValueError("The impersonation lease does not belong to the requested agent")
@@ -249,10 +264,10 @@ def read_relay_inbox(
         )
     try:
         # relay_inbox validates same-machine active authority in its own transaction.
-        rows = impersonation.relay_inbox(db, str(lease_id), token, local_machine=local_machine)
+        rows = active_inbox(db, str(lease_id), token, local_machine=local_machine)
     except impersonation.ImpersonationError:
         latest = Lease.model_validate(
-            impersonation.relay_get(db, bus, str(lease_id), token, local_machine=local_machine)
+            active_get(db, bus, str(lease_id), token, local_machine=local_machine)
         )
         if latest.status in _TERMINAL:
             return InboxSnapshot(
@@ -530,13 +545,21 @@ async def relay_inbox(
     ).run()
 
 
-def write_heartbeat(db: Database, lease_id: UUID, token: str, *, local_machine: str) -> bool:
+def write_heartbeat(
+    db: Database,
+    lease_id: UUID,
+    token: str,
+    *,
+    local_machine: str,
+    relay_heartbeat_fn: Callable[..., None] | None = None,
+) -> bool:
     """One durable liveness beat; False means the lease ended or the relay
     credential was revoked — the heartbeat loop stops silently."""
     from base.agents import impersonation
 
+    active_heartbeat = relay_heartbeat_fn or impersonation.relay_heartbeat
     try:
-        impersonation.relay_heartbeat(db, str(lease_id), token, local_machine=local_machine)
+        active_heartbeat(db, str(lease_id), token, local_machine=local_machine)
     except impersonation.ImpersonationError:
         return False
     return True
@@ -549,21 +572,38 @@ async def heartbeat_loop(
     *,
     interval: float = RELAY_HEARTBEAT_SECONDS,
     local_machine: str,
+    relay_heartbeat_fn: Callable[..., None] | None = None,
 ) -> None:
     while True:
         await asyncio.sleep(interval)
         if not await asyncio.to_thread(
-            write_heartbeat, db, lease_id, token, local_machine=local_machine
+            write_heartbeat,
+            db,
+            lease_id,
+            token,
+            local_machine=local_machine,
+            relay_heartbeat_fn=relay_heartbeat_fn,
         ):
             return
 
 
 async def _heartbeat_completion(
-    db: Database, lease_id: UUID, token: str, *, local_machine: str
+    db: Database,
+    lease_id: UUID,
+    token: str,
+    *,
+    local_machine: str,
+    relay_heartbeat_fn: Callable[..., None] | None = None,
 ) -> Exception | None:
     """Retain the original heartbeat failure until the relay stops and joins it."""
     try:
-        await heartbeat_loop(db, lease_id, token, local_machine=local_machine)
+        await heartbeat_loop(
+            db,
+            lease_id,
+            token,
+            local_machine=local_machine,
+            relay_heartbeat_fn=relay_heartbeat_fn,
+        )
     except Exception as error:
         return error
     return None
@@ -613,25 +653,37 @@ def cmd_relay(
     database_factory: DatabaseFactory,
     machine: MachineIdentity,
     adapter_factory: Callable[..., RelayAdapter] | None = None,
+    backend: RelayBackend | None = None,
 ) -> int:
     from . import impersonation
 
+    active_backend = backend or getattr(args, "relay_backend", None) or RelayBackend()
     try:
         from base.agents.impersonation import relay_get
         from base.agents.impersonation.history import resolve
 
-        adapter = (adapter_factory or resolve_adapter)(
-            args.provider,
-            args.thread_id,
-            codex_remote=args.codex_remote,
-            discover=antigravity_destination(args),
+        adapter = (
+            adapter_factory(
+                args.provider,
+                args.thread_id,
+                codex_remote=args.codex_remote,
+                discover=antigravity_destination(args),
+            )
+            if adapter_factory is not None
+            else resolve_adapter(
+                args.provider,
+                args.thread_id,
+                codex_remote=args.codex_remote,
+                discover=antigravity_destination(args),
+                live_submit_fn=active_backend.live_submit_fn,
+            )
         )
         adapter.ready()
 
         db = database_factory()
         bus = EventBus.from_settings()
-        if args.lease_id is None:
-            lease_id = UUID(
+        lease_id = (
+            UUID(
                 str(
                     resolve(
                         db,
@@ -641,15 +693,17 @@ def cmd_relay(
                     )["id"]
                 )
             )
-        else:
-            lease_id = UUID(args.lease_id)
-        if args.token_stdin:
-            token = impersonation.relay_token_from_stdin()
-        else:
-            token = impersonation.relay_token_from_env()
-        session_id = relay_get(db, bus, str(lease_id), token, local_machine=machine.name())[
-            "session_id"
-        ]
+            if args.lease_id is None
+            else UUID(args.lease_id)
+        )
+        token = (
+            impersonation.relay_token_from_stdin()
+            if args.token_stdin
+            else (active_backend.token_from_env_fn or impersonation.relay_token_from_env)()
+        )
+        session_id = (active_backend.relay_get_fn or relay_get)(
+            db, bus, str(lease_id), token, local_machine=machine.name()
+        )["session_id"]
         max_chars = PUSH_MAX_CHARS
 
         async def run() -> None:
@@ -662,11 +716,13 @@ def cmd_relay(
                     lease_id,
                     token,
                     local_machine=machine.name(),
+                    relay_get_fn=active_backend.relay_get_fn,
+                    relay_inbox_fn=active_backend.relay_inbox_fn,
                 )
 
             async def reserve(ids: list[int]) -> frozenset[int]:
                 return await asyncio.to_thread(
-                    reserve_delivery,
+                    active_backend.reserve_delivery_fn or reserve_delivery,
                     db,
                     bus,
                     str(lease_id),
@@ -676,7 +732,12 @@ def cmd_relay(
                 )
 
             if not await asyncio.to_thread(
-                write_heartbeat, db, lease_id, token, local_machine=machine.name()
+                write_heartbeat,
+                db,
+                lease_id,
+                token,
+                local_machine=machine.name(),
+                relay_heartbeat_fn=active_backend.relay_heartbeat_fn,
             ):
                 # Termination can win between startup's lease read and beat.
                 # Terminal metadata is readable; ordinary inbox authority stays closed.
@@ -686,13 +747,20 @@ def cmd_relay(
             heartbeat_tasks = asyncio.TaskGroup()
             await heartbeat_tasks.__aenter__()
             heartbeat = heartbeat_tasks.create_task(
-                _heartbeat_completion(db, lease_id, token, local_machine=machine.name()),
+                _heartbeat_completion(
+                    db,
+                    lease_id,
+                    token,
+                    local_machine=machine.name(),
+                    relay_heartbeat_fn=active_backend.relay_heartbeat_fn,
+                ),
                 name="impersonation-relay-heartbeat",
             )
             try:
-                listener = base.events.live.redis_listener.RedisInboundListener(
-                    settings.data_plane.redis_url, args.agent_id
-                )
+                listener = (
+                    active_backend.listener_factory
+                    or base.events.live.redis_listener.RedisInboundListener
+                )(settings.data_plane.redis_url, args.agent_id)
                 await relay_inbox(
                     args.agent_id,
                     session_id,

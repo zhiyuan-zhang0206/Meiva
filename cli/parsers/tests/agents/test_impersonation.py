@@ -11,16 +11,12 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+from unittest.mock import Mock
 
 import pytest
 
-import base.agents.impersonation.host_transport as impersonation_host_transport
 import cli.commands.agents.control as agents_control
-import cli.commands.agents.timeline as agents_timeline
-from base.agents import impersonation as control
 from base.agents.context.clients import DatabaseFactory
-from base.agents.impersonation import history
-from base.agents.impersonation import sessions as sessions
 from cli.commands.agents import impersonation as cli
 from cli.database.runtime import CommandRuntime
 from cli.database.tests.cli_tests import operator_database as operator_database
@@ -43,25 +39,38 @@ def _args(*args: str, command_runtime: CommandRuntime) -> Namespace:
     return parsed
 
 
-def test_timeline_command_dispatches_to_the_timeline_reader(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    calls: list[tuple[int, int, str | None]] = []
+def test_timeline_command_dispatches_to_the_timeline_reader() -> None:
+    calls: list[tuple[str, dict[str, Any]]] = []
 
-    def timeline(agent_id: int, limit: int, before: str | None) -> int:
-        calls.append((agent_id, limit, before))
-        return 0
+    class _Resp:
+        def raise_for_status(self) -> None:
+            return None
 
-    monkeypatch.setattr(agents_timeline, "cmd_agents_timeline", timeline)
+        def json(self) -> dict[str, object]:
+            return {"items": []}
+
+    def fake_get(url: str, **kwargs: Any) -> _Resp:
+        calls.append((url, kwargs))
+        return _Resp()
+
     args = build_parser().parse_args(
         ["agents", "timeline", "405", "--limit", "100", "--before", "12.0"]
     )
+    args.transport = agents_control.AgentsTransport(
+        gateway_base=lambda: "http://gw:8000",
+        headers=dict,
+        get=fake_get,
+    )
     assert args.func(args) == 0
-    assert calls == [(405, 100, "12.0")]
+    assert calls == [
+        (
+            "http://gw:8000/api/agents/405/timeline",
+            {"params": {"limit": 100, "before": "12.0"}, "headers": {}, "timeout": 30.0},
+        )
+    ]
 
 
 def test_request_uses_external_identity_without_delivering_a_credential(
-    monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     operator_database: Callable[[], Any],
     *,
@@ -76,12 +85,10 @@ def test_request_uses_external_identity_without_delivering_a_credential(
             "expires_at": datetime(2026, 9, 5, tzinfo=UTC),
         }
 
-    monkeypatch.setattr(
-        impersonation_host_transport,
-        "default_control_endpoint",
-        lambda: "unix:///tmp/codex.sock",
+    backend = cli.ImpersonationBackend(
+        request_fn=request,
+        default_control_endpoint_fn=lambda: "unix:///tmp/codex.sock",
     )
-    monkeypatch.setattr(sessions, "request", request)
     assert (
         cli.cmd_impersonate(
             _args(
@@ -103,6 +110,7 @@ def test_request_uses_external_identity_without_delivering_a_credential(
                 command_runtime=command_runtime,
             ),
             database_factory=operator_database,
+            backend=backend,
         )
         == 0
     )
@@ -121,19 +129,16 @@ def test_request_uses_external_identity_without_delivering_a_credential(
 
 
 def test_request_without_steer_endpoint_does_not_acquire_a_lease(
-    monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     operator_database: Callable[[], Any],
     *,
     command_runtime: CommandRuntime,
 ) -> None:
-    from unittest.mock import Mock
-
-    from base.agents.impersonation import host_transport
-
     request = Mock(return_value={})
-    monkeypatch.setattr(sessions, "request", request)
-    monkeypatch.setattr(host_transport, "default_control_endpoint", lambda: None)
+    backend = cli.ImpersonationBackend(
+        request_fn=request,
+        default_control_endpoint_fn=lambda: None,
+    )
     args = _args(
         "request",
         "--name",
@@ -152,13 +157,12 @@ def test_request_without_steer_endpoint_does_not_acquire_a_lease(
         "0",
         command_runtime=command_runtime,
     )
-    assert cli.cmd_impersonate(args, database_factory=operator_database) == 1
+    assert cli.cmd_impersonate(args, database_factory=operator_database, backend=backend) == 1
     request.assert_not_called()
     assert "Steer" in capsys.readouterr().err
 
 
 def test_request_records_the_shared_app_server_endpoint(
-    monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     operator_database: Callable[[], Any],
     *,
@@ -170,7 +174,7 @@ def test_request_records_the_shared_app_server_endpoint(
         seen.update({"agent_id": agent_id, **kwargs})
         return {"id": "lease", "expires_at": datetime(2026, 9, 5, tzinfo=UTC)}
 
-    monkeypatch.setattr(sessions, "request", request)
+    backend = cli.ImpersonationBackend(request_fn=request)
     endpoint = "unix:///home/u/.meiva-lc/run/codex-app-server.0123456789ab-01234567.sock"
     assert (
         cli.cmd_impersonate(
@@ -195,6 +199,7 @@ def test_request_records_the_shared_app_server_endpoint(
                 command_runtime=command_runtime,
             ),
             database_factory=operator_database,
+            backend=backend,
         )
         == 0
     )
@@ -204,7 +209,6 @@ def test_request_records_the_shared_app_server_endpoint(
 
 
 def test_claude_request_reports_the_relay_handoff(
-    monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     operator_database: Callable[[], Any],
     *,
@@ -214,7 +218,7 @@ def test_claude_request_reports_the_relay_handoff(
     def request(_db: object, _bus: object, agent_id: int, **kwargs: Any) -> dict[str, Any]:
         return {"id": "lease", "relay_token": "relay-token"}
 
-    monkeypatch.setattr(sessions, "request", request)
+    backend = cli.ImpersonationBackend(request_fn=request)
     assert (
         cli.cmd_impersonate(
             _args(
@@ -234,6 +238,7 @@ def test_claude_request_reports_the_relay_handoff(
                 command_runtime=command_runtime,
             ),
             database_factory=operator_database,
+            backend=backend,
         )
         == 0
     )
@@ -244,7 +249,6 @@ def test_claude_request_reports_the_relay_handoff(
 
 
 def test_ack_uses_explicit_processed_ids_only(
-    monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     operator_database: Callable[[], Any],
     *,
@@ -263,16 +267,12 @@ def test_ack_uses_explicit_processed_ids_only(
         assert local_machine == command_runtime.machine.name()
         seen.append((lease, ids))
 
-    monkeypatch.setattr(
-        sessions,
-        "private_id",
-        _private_id,
-    )
-    monkeypatch.setattr(control, "ack", ack)
+    backend = cli.ImpersonationBackend(private_id_fn=_private_id, ack_fn=ack)
     assert (
         cli.cmd_impersonate(
             _args("ack", "0", "11", "13", "--agent", "405", command_runtime=command_runtime),
             database_factory=operator_database,
+            backend=backend,
         )
         == 0
     )
@@ -282,7 +282,6 @@ def test_ack_uses_explicit_processed_ids_only(
 
 
 def test_classified_attestation_refusal_fails_without_leaking_state(
-    monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     operator_database: Callable[[], Any],
     *,
@@ -293,12 +292,12 @@ def test_classified_attestation_refusal_fails_without_leaking_state(
     def deny(_db: object, _bus: object, _lease: str, *, local_machine: str) -> dict[str, Any]:
         raise ImpersonationError("Controller caller check failed (chain-mismatch): see docs")
 
-    monkeypatch.setattr(sessions, "private_id", _private_id)
-    monkeypatch.setattr(control, "get", deny)
+    backend = cli.ImpersonationBackend(private_id_fn=_private_id, get_fn=deny)
     assert (
         cli.cmd_impersonate(
             _args("status", "0", "--agent", "405", command_runtime=command_runtime),
             database_factory=operator_database,
+            backend=backend,
         )
         == 1
     )
@@ -308,7 +307,6 @@ def test_classified_attestation_refusal_fails_without_leaking_state(
 
 
 def test_release_preserves_summary(
-    monkeypatch: pytest.MonkeyPatch,
     operator_database: Callable[[], Any],
     *,
     command_runtime: CommandRuntime,
@@ -322,13 +320,11 @@ def test_release_preserves_summary(
         seen.append(summary)
         return {"status": "released"}
 
-    monkeypatch.setattr(
-        sessions,
-        "private_id",
-        _private_id,
+    backend = cli.ImpersonationBackend(
+        private_id_fn=_private_id,
+        release_fn=release,
+        public_session_fn=_public_session,
     )
-    monkeypatch.setattr(control, "release", release)
-    monkeypatch.setattr(history, "public_session", _public_session)
     assert (
         cli.cmd_impersonate(
             _args(
@@ -341,6 +337,7 @@ def test_release_preserves_summary(
                 command_runtime=command_runtime,
             ),
             database_factory=operator_database,
+            backend=backend,
         )
         == 0
     )
@@ -348,13 +345,11 @@ def test_release_preserves_summary(
 
 
 def test_request_relay_spec_is_checked_at_the_cli_boundary(
-    monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     *,
     command_runtime: CommandRuntime,
 ) -> None:
     """`_relay_spec_problem` mirrors the shared validator before dispatch."""
-    monkeypatch.delenv("ANTIGRAVITY_CONVERSATION_ID", raising=False)
     base = [
         "request",
         "--name",
@@ -373,6 +368,7 @@ def test_request_relay_spec_is_checked_at_the_cli_boundary(
     assert "needs --thread-id" in capsys.readouterr().err
 
     ag_without_thread = _args(*base, "--provider", "antigravity", command_runtime=command_runtime)
+    ag_without_thread.env = {}
     assert ag_without_thread.func(ag_without_thread) == 2
     assert "ANTIGRAVITY_CONVERSATION_ID" in capsys.readouterr().err
 
@@ -440,7 +436,6 @@ def test_relay_spec_is_checked_at_the_cli_boundary(
 
 
 def test_send_delivers_as_the_borrowed_agent(
-    monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     operator_database: DatabaseFactory,
     *,
@@ -456,9 +451,6 @@ def test_send_delivers_as_the_borrowed_agent(
         assert lease == "lease"
         return {"agent_id": 405}
 
-    monkeypatch.setattr(sessions, "private_id", _private_id)
-    monkeypatch.setattr(control, "require_active", require_active)
-    monkeypatch.setattr(agents_control, "send_agent_message", deliver)
     args = _args(
         "send",
         "0",
@@ -471,6 +463,11 @@ def test_send_delivers_as_the_borrowed_agent(
         command_runtime=command_runtime,
     )
     args.database_factory = operator_database
+    args.backend = cli.ImpersonationBackend(
+        private_id_fn=_private_id,
+        require_active_fn=require_active,
+        send_message_fn=deliver,
+    )
     assert args.func(args) == 0
     assert seen == [(42, "hi", "agent:405")]
     assert json.loads(capsys.readouterr().out) == {
@@ -618,33 +615,34 @@ def test_numeric_options_accept_runtime_boundaries(
 
 
 def test_dsh_request_writes_the_plugin_stub_and_never_prints_the_credential(
-    monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     tmp_path: Path,
     operator_database: Callable[[], Any],
     *,
     command_runtime: CommandRuntime,
 ) -> None:
-    from unittest.mock import Mock
-
     request = Mock(return_value={"id": "lease", "session_id": 9, "relay_token": "tok-9"})
-    monkeypatch.setattr(sessions, "request", request)
-    monkeypatch.delenv("DSH_MEIVA_RELAY_STUB", raising=False)
     argv = ("request", "--name", "Fix", "--agent", "405", "--as", "dsh", "--ttl", "600")
     args = (*argv, "--provider", "dsh", "--batch-window", "0")
     assert (
         cli.cmd_impersonate(
-            _args(*args, command_runtime=command_runtime), database_factory=operator_database
+            _args(*args, command_runtime=command_runtime),
+            database_factory=operator_database,
+            backend=cli.ImpersonationBackend(request_fn=request, dsh_stub_env={}),
         )
         == 1
     )  # no plugin: refused before any lease
     request.assert_not_called()
     assert "DSH_MEIVA_RELAY_STUB is unset" in capsys.readouterr().err
     stub = tmp_path / "session-1.env"
-    monkeypatch.setenv("DSH_MEIVA_RELAY_STUB", str(stub))
     assert (
         cli.cmd_impersonate(
-            _args(*args, command_runtime=command_runtime), database_factory=operator_database
+            _args(*args, command_runtime=command_runtime),
+            database_factory=operator_database,
+            backend=cli.ImpersonationBackend(
+                request_fn=request,
+                dsh_stub_env={"DSH_MEIVA_RELAY_STUB": str(stub)},
+            ),
         )
         == 0
     )

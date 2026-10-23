@@ -1,22 +1,16 @@
 """`meiva agents` thin-client commands — each forwards to the right gateway route
-and renders the response, verified without a live gateway (httpx patched).
-
-The cmd_* functions import `httpx` and `base.cluster.machine.gateway_api_base` inside
-their bodies, so patching the module attributes here takes effect at call time.
+and renders the response, verified without a live gateway.
 """
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 import httpx
 import pytest
 
-import base.cluster.machine as cluster_machine
-from base.cluster.machine.tests.gateway_stubs import (
-    gateway_api_base_stub,
-    gateway_auth_headers_stub,
-)
 from cli.commands.agents import control as _agents
 
 
@@ -48,20 +42,20 @@ def _agent_row(agent_id: int, status: str, machine: str, label: str | None) -> d
     }
 
 
-@pytest.fixture(autouse=True)
-def _gateway_base(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(
-        cluster_machine, "gateway_api_base", gateway_api_base_stub("http://gw:8000")
-    )
-    monkeypatch.setattr(
-        cluster_machine,
-        "gateway_auth_headers",
-        gateway_auth_headers_stub({"Authorization": "Bearer secret"}),
+def _transport(
+    *,
+    get_fn: Callable[..., Any] | None = None,
+    post_fn: Callable[..., Any] | None = None,
+) -> _agents.AgentsTransport:
+    return _agents.AgentsTransport(
+        gateway_base=lambda: "http://gw:8000",
+        headers=lambda: {"Authorization": "Bearer secret"},
+        get=get_fn,
+        post=post_fn,
     )
 
 
-def _patch_post(monkeypatch: pytest.MonkeyPatch, payload: object) -> dict[str, object]:
-    """Patch httpx.post to record url/json and return `payload`; return the record."""
+def _post_transport(payload: object) -> tuple[_agents.AgentsTransport, dict[str, object]]:
     seen: dict[str, object] = {}
 
     def fake_post(url: str, **kwargs: object) -> _FakeResp:
@@ -70,13 +64,10 @@ def _patch_post(monkeypatch: pytest.MonkeyPatch, payload: object) -> dict[str, o
         seen["headers"] = kwargs.get("headers")
         return _FakeResp(payload)
 
-    monkeypatch.setattr(httpx, "post", fake_post)
-    return seen
+    return _transport(post_fn=fake_post), seen
 
 
-def test_agents_ls_renders_rows(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_agents_ls_renders_rows(capsys: pytest.CaptureFixture[str]) -> None:
     seen: dict[str, object] = {}
 
     def fake_get(url: str, **kwargs: object) -> _FakeResp:
@@ -96,8 +87,7 @@ def test_agents_ls_renders_rows(
             }
         )
 
-    monkeypatch.setattr(httpx, "get", fake_get)
-    assert _agents.cmd_agents_ls() == 0
+    assert _agents.cmd_agents_ls(transport=_transport(get_fn=fake_get)) == 0
     assert seen == {
         "url": "http://gw:8000/api/agents",
         "params": {"scope": "live", "query": "", "limit": 100},
@@ -112,19 +102,16 @@ def test_agents_ls_renders_rows(
     assert "/runner/local/workspaces" not in out
 
 
-def test_agents_ls_empty(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_agents_ls_empty(capsys: pytest.CaptureFixture[str]) -> None:
     def fake_get(*_args: object, **_kwargs: object) -> _FakeResp:
         return _FakeResp({"agents": [], "next_cursor": None})
 
-    monkeypatch.setattr(httpx, "get", fake_get)
-    assert _agents.cmd_agents_ls() == 0
+    assert _agents.cmd_agents_ls(transport=_transport(get_fn=fake_get)) == 0
     assert "(no agents)" in capsys.readouterr().out
 
 
 def test_agents_ls_passes_page_arguments_and_prints_cursor(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     calls: list[dict[str, object]] = []
 
@@ -137,8 +124,16 @@ def test_agents_ls_passes_page_arguments_and_prints_cursor(
             }
         )
 
-    monkeypatch.setattr(httpx, "get", fake_get)
-    assert _agents.cmd_agents_ls(scope="terminated", query="research", before_id=99, limit=1) == 0
+    assert (
+        _agents.cmd_agents_ls(
+            scope="terminated",
+            query="research",
+            before_id=99,
+            limit=1,
+            transport=_transport(get_fn=fake_get),
+        )
+        == 0
+    )
     assert len(calls) == 1
     assert calls[0]["params"] == {
         "scope": "terminated",
@@ -149,7 +144,7 @@ def test_agents_ls_passes_page_arguments_and_prints_cursor(
     assert "repeat with --before-id 42" in capsys.readouterr().out
 
 
-def test_agents_ls_parser_passes_page_arguments(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_agents_ls_parser_passes_page_arguments() -> None:
     import argparse
 
     from cli.commands.agents.parsers import add_agents_parser
@@ -172,126 +167,117 @@ def test_agents_ls_parser_passes_page_arguments(monkeypatch: pytest.MonkeyPatch)
     )
     seen: dict[str, object] = {}
 
-    def fake_command(**kwargs: object) -> int:
+    def fake_get(_url: str, **kwargs: object) -> _FakeResp:
         seen.update(kwargs)
-        return 0
+        return _FakeResp({"agents": [], "next_cursor": None})
 
-    monkeypatch.setattr(_agents, "cmd_agents_ls", fake_command)
+    args.transport = _transport(get_fn=fake_get)
     assert args.func(args) == 0
-    assert seen == {"scope": "terminated", "query": "research", "before_id": 42, "limit": 5}
+    assert seen["params"] == {
+        "scope": "terminated",
+        "query": "research",
+        "before_id": 42,
+        "limit": 5,
+    }
 
 
-def test_agents_ls_preserves_http_error_behavior(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_agents_ls_preserves_http_error_behavior() -> None:
     def unauthorized(_url: str, **_kwargs: object) -> _FakeResp:
         return _FakeResp({"detail": "Unauthorized"}, status_code=401)
 
-    monkeypatch.setattr(httpx, "get", unauthorized)
-
     with pytest.raises(httpx.HTTPStatusError):
-        _agents.cmd_agents_ls()
+        _agents.cmd_agents_ls(transport=_transport(get_fn=unauthorized))
 
 
-def test_agents_cancel_posts_to_cancel_route(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    seen = _patch_post(monkeypatch, {"status": "cancelled"})
-    assert _agents.cmd_agents_cancel(5) == 0
+def test_agents_cancel_posts_to_cancel_route(capsys: pytest.CaptureFixture[str]) -> None:
+    transport, seen = _post_transport({"status": "cancelled"})
+    assert _agents.cmd_agents_cancel(5, transport=transport) == 0
     assert seen["url"] == "http://gw:8000/api/agents/5/cancel"
     assert "agent 5 cancel: cancelled" in capsys.readouterr().out
 
 
-def test_agents_restart_posts(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    seen = _patch_post(monkeypatch, {"status": "enqueued"})
-    assert _agents.cmd_agents_restart(9) == 0
+def test_agents_restart_posts(capsys: pytest.CaptureFixture[str]) -> None:
+    transport, seen = _post_transport({"status": "enqueued"})
+    assert _agents.cmd_agents_restart(9, transport=transport) == 0
     assert seen["url"] == "http://gw:8000/api/agents/9/restart"
     assert seen["json"] is None
     assert "enqueued" in capsys.readouterr().out
 
 
-def test_agents_restart_posts_config_overlay(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    seen = _patch_post(monkeypatch, {"status": "enqueued"})
-    assert _agents.cmd_agents_restart(9, '{"llm_model":"gpt-5.6-sol"}') == 0
+def test_agents_restart_posts_config_overlay(capsys: pytest.CaptureFixture[str]) -> None:
+    transport, seen = _post_transport({"status": "enqueued"})
+    assert _agents.cmd_agents_restart(9, '{"llm_model":"gpt-5.6-sol"}', transport=transport) == 0
     assert seen["url"] == "http://gw:8000/api/agents/9/restart"
     assert seen["json"] == {"config_overlay": {"llm_model": "gpt-5.6-sol"}}
     assert "enqueued" in capsys.readouterr().out
 
 
-def test_agents_restart_rejects_non_object_config_json(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    seen = _patch_post(monkeypatch, {"status": "enqueued"})
-    assert _agents.cmd_agents_restart(9, '["not", "an", "object"]') == 1
+def test_agents_restart_rejects_non_object_config_json(capsys: pytest.CaptureFixture[str]) -> None:
+    transport, seen = _post_transport({"status": "enqueued"})
+    assert _agents.cmd_agents_restart(9, '["not", "an", "object"]', transport=transport) == 1
     assert "url" not in seen
     assert "config must be a JSON object" in capsys.readouterr().err
 
 
-def test_agents_terminate_is_graceful(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    seen = _patch_post(monkeypatch, {"status": "enqueued"})
-    assert _agents.cmd_agents_terminate(7) == 0
+def test_agents_terminate_is_graceful(capsys: pytest.CaptureFixture[str]) -> None:
+    transport, seen = _post_transport({"status": "enqueued"})
+    assert _agents.cmd_agents_terminate(7, transport=transport) == 0
     assert seen["url"] == "http://gw:8000/api/agents/7/terminate"
     assert seen["json"] == {"force": False}
     assert "terminate" in capsys.readouterr().out
 
 
 def test_agents_terminate_kill_all_shell_sessions_sends_the_option(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
-    seen = _patch_post(
-        monkeypatch,
+    transport, seen = _post_transport(
         {"status": "enqueued", "shell_sessions": {"when": "at_exit", "killed": []}},
     )
-    assert _agents.cmd_agents_terminate(7, kill_all_shell_sessions=True) == 0
+    assert _agents.cmd_agents_terminate(7, kill_all_shell_sessions=True, transport=transport) == 0
     assert seen["url"] == "http://gw:8000/api/agents/7/terminate"
     assert seen["json"] == {"force": False, "kill_all_shell_sessions": True}
     assert "shell sessions are killed when it exits" in capsys.readouterr().out
 
 
 def test_agents_kill_kill_all_shell_sessions_sends_the_option(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
-    seen = _patch_post(
-        monkeypatch,
+    transport, seen = _post_transport(
         {"status": "enqueued", "shell_sessions": {"when": "now", "killed": [0, 3]}},
     )
-    assert _agents.cmd_agents_kill(7, kill_all_shell_sessions=True) == 0
+    assert _agents.cmd_agents_kill(7, kill_all_shell_sessions=True, transport=transport) == 0
     assert seen["url"] == "http://gw:8000/api/agents/7/terminate"
     assert seen["json"] == {"force": True, "kill_all_shell_sessions": True}
     assert "killed 2 shell session(s): 0, 3" in capsys.readouterr().out
 
 
-def test_agents_parser_wires_kill_all_shell_sessions(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_agents_parser_wires_kill_all_shell_sessions() -> None:
     from cli.parsers import build_parser
 
-    seen: dict[str, object] = {}
+    seen: dict[str, bool] = {}
 
-    def _record(agent_id: int, *, source: str | None, kill_all_shell_sessions: bool) -> int:
-        seen[str(agent_id)] = kill_all_shell_sessions
-        return 0
+    def fake_post(url: str, **kwargs: Any) -> _FakeResp:
+        agent_id = url.split("/")[-2]
+        body = kwargs["json"]
+        seen[agent_id] = bool(body.get("kill_all_shell_sessions"))
+        return _FakeResp({"status": "enqueued", "shell_sessions": None})
 
-    monkeypatch.setattr(_agents, "cmd_agents_terminate", _record)
-    monkeypatch.setattr(_agents, "cmd_agents_kill", _record)
+    transport = _transport(post_fn=fake_post)
     for argv in (
         ["agents", "terminate", "7", "--kill-all-shell-sessions"],
         ["agents", "kill", "8", "--kill-all-shell-sessions"],
         ["agents", "terminate", "9"],
     ):
         args = build_parser().parse_args(argv)
+        args.transport = transport
         assert args.func(args) == 0
     assert seen == {"7": True, "8": True, "9": False}
 
 
-def test_agents_kill_forces(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_agents_kill_forces(capsys: pytest.CaptureFixture[str]) -> None:
     # Acceptance is asynchronous even when force interruption was requested.
-    seen = _patch_post(monkeypatch, {"status": "enqueued"})
-    assert _agents.cmd_agents_kill(7) == 0
+    transport, seen = _post_transport({"status": "enqueued"})
+    assert _agents.cmd_agents_kill(7, transport=transport) == 0
     assert seen["url"] == "http://gw:8000/api/agents/7/terminate"
     assert seen["json"] == {"force": True}
     out = capsys.readouterr().out
@@ -299,77 +285,72 @@ def test_agents_kill_forces(
     assert "force_killed" not in out
 
 
-def test_agents_send_posts_content_and_source(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    seen = _patch_post(monkeypatch, {"status": "delivered"})
-    assert _agents.cmd_agents_send(5, "build done", "shell:3") == 0
+def test_agents_send_posts_content_and_source(capsys: pytest.CaptureFixture[str]) -> None:
+    transport, seen = _post_transport({"status": "delivered"})
+    assert _agents.cmd_agents_send(5, "build done", "shell:3", transport=transport) == 0
     assert seen["url"] == "http://gw:8000/api/agents/5/messages"
     assert seen["json"] == {"content": "build done", "source": "shell:3"}
     assert "delivered" in capsys.readouterr().out
 
 
-def test_agents_send_appends_tail_file(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_agents_send_appends_tail_file(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     # --tail-file appends the end of the file (bounded), so the notice carries
     # the command's last output without a follow-up read.
     log = tmp_path / "out.log"
     log.write_text("early stuff\nmiddle\n" + "x" * 5000 + "\nline a\nline b\nFAILED: test_foo\n")
-    seen = _patch_post(monkeypatch, {"status": "delivered"})
-    assert _agents.cmd_agents_send(5, "finished", "shell:3", str(log)) == 0
+    transport, seen = _post_transport({"status": "delivered"})
+    assert _agents.cmd_agents_send(5, "finished", "shell:3", str(log), transport=transport) == 0
     body = seen["json"]
     assert isinstance(body, dict)
     content = body["content"]
-    assert content.startswith("finished")  # pyright: ignore[reportUnknownMemberType]
+    assert isinstance(content, str)
+    assert content.startswith("finished")
     assert "Last output" in content
     assert "FAILED: test_foo" in content
     assert "early stuff" not in content  # only the last 3 lines ride along
     assert "line a" in content and "x" * 100 not in content
-    assert (
-        len(content) < 3000  # pyright: ignore[reportUnknownArgumentType]
-    )  # bounded by the tail cap  # pyright: ignore[reportUnknownArgumentType]
+    assert len(content) < 3000  # bounded by the tail cap
 
 
 def test_agents_send_missing_tail_file_still_delivers(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     # The notice is the primary contract: an unreadable --tail-file must not
     # abort the POST — the failure rides inside the delivered message instead.
-    seen = _patch_post(monkeypatch, {"status": "delivered"})
+    transport, seen = _post_transport({"status": "delivered"})
     missing = tmp_path / "gone.log"
-    assert _agents.cmd_agents_send(5, "finished", "shell:3", str(missing)) == 0
+    assert _agents.cmd_agents_send(5, "finished", "shell:3", str(missing), transport=transport) == 0
     body = seen["json"]
     assert isinstance(body, dict)
     content = body["content"]
-    assert content.startswith("finished")  # pyright: ignore[reportUnknownMemberType]
+    assert isinstance(content, str)
+    assert content.startswith("finished")
     assert "[tail unavailable:" in content
 
 
-def test_agents_send_skips_empty_tail(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_agents_send_skips_empty_tail(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     log = tmp_path / "empty.log"
     log.write_text("   \n")
-    seen = _patch_post(monkeypatch, {"status": "delivered"})
-    assert _agents.cmd_agents_send(5, "msg", "shell:3", str(log)) == 0
+    transport, seen = _post_transport({"status": "delivered"})
+    assert _agents.cmd_agents_send(5, "msg", "shell:3", str(log), transport=transport) == 0
     body = seen["json"]
     assert isinstance(body, dict)
     assert body["content"] == "msg"  # whitespace-only tail adds nothing
 
 
-def test_agents_send_surfaces_error_body(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_agents_send_surfaces_error_body(capsys: pytest.CaptureFixture[str]) -> None:
     # A server-side protocol fence must print its actionable response before
     # raising. Malformed source syntax is now rejected locally before dialing.
-    monkeypatch.setattr(
-        httpx,
-        "post",
-        lambda *_a, **_k: _FakeResp({"detail": "Unrecognized inbound source"}, status_code=422),  # pyright: ignore[reportUnknownArgumentType]
-    )
+    def reject_post(*_a: object, **_k: object) -> _FakeResp:
+        return _FakeResp({"detail": "Unrecognized inbound source"}, status_code=422)
+
     with pytest.raises(httpx.HTTPStatusError):
-        _agents.cmd_agents_send(5, "msg", "external_agent:codex")
+        _agents.cmd_agents_send(
+            5,
+            "msg",
+            "external_agent:codex",
+            transport=_transport(post_fn=reject_post),
+        )
     assert "Unrecognized inbound source" in capsys.readouterr().err
 
 
@@ -377,31 +358,30 @@ def test_agents_send_surfaces_error_body(
 
 
 def test_agents_terminate_renders_the_shell_session_kill(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     """The kill report is rendered; a requested kill with no report (a runner
     that predates the option) is called out; no request stays silent."""
-    _patch_post(
-        monkeypatch,
+    transport1, _ = _post_transport(
         {"status": "already_terminated", "shell_sessions": {"when": "now", "killed": []}},
     )
-    assert _agents.cmd_agents_terminate(7, kill_all_shell_sessions=True) == 0
+    assert _agents.cmd_agents_terminate(7, kill_all_shell_sessions=True, transport=transport1) == 0
     assert "no shell sessions to kill" in capsys.readouterr().out
 
-    _patch_post(monkeypatch, {"status": "enqueued"})
-    assert _agents.cmd_agents_terminate(7, kill_all_shell_sessions=True) == 0
+    transport2, _ = _post_transport({"status": "enqueued"})
+    assert _agents.cmd_agents_terminate(7, kill_all_shell_sessions=True, transport=transport2) == 0
     assert "shell sessions NOT killed" in capsys.readouterr().out
 
-    _patch_post(monkeypatch, {"status": "enqueued", "shell_sessions": None})
-    assert _agents.cmd_agents_terminate(7) == 0
+    transport3, _ = _post_transport({"status": "enqueued", "shell_sessions": None})
+    assert _agents.cmd_agents_terminate(7, transport=transport3) == 0
     assert "shell" not in capsys.readouterr().out
 
 
 def test_agents_compact_posts_to_the_compact_route(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
-    seen = _patch_post(monkeypatch, {"inbound_id": 31})
-    assert _agents.cmd_agents_compact(7) == 0
+    transport, seen = _post_transport({"inbound_id": 31})
+    assert _agents.cmd_agents_compact(7, transport=transport) == 0
     assert seen["url"] == "http://gw:8000/api/agents/7/compact"
     assert "compact requested: inbound 31" in capsys.readouterr().out
 

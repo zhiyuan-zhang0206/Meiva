@@ -20,6 +20,8 @@ rather than leaving the cluster silently unsupervised.
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 from cli.commands.converge.spec import ConvergeCtx
 
 
@@ -38,16 +40,25 @@ def ensure_health_probe_cron(ctx: ConvergeCtx) -> None:
     # On failure the exception propagates so converge fails fast.
 
 
-def ensure_logs_maintenance(ctx: ConvergeCtx) -> None:
+def ensure_logs_maintenance(
+    ctx: ConvergeCtx,
+    *,
+    register_fn: Callable[..., None] | None = None,
+) -> None:
     """Register daily rotation followed by retention."""
     from base.host.system.logs_job import register_logs_job
 
-    register_logs_job(
+    active_register = register_fn or register_logs_job
+    active_register(
         enabled_reader=lambda: ctx.read_config().view.general.os_jobs_enabled, host=ctx.host
     )
 
 
-def ensure_packages_refresh_job(ctx: ConvergeCtx) -> None:
+def ensure_packages_refresh_job(
+    ctx: ConvergeCtx,
+    *,
+    register_fn: Callable[..., None] | None = None,
+) -> None:
     """Register the recurring content-refresh pass (design §5.6; task #3267).
 
     Every serving unit runs it: skills are per-machine state, so each home owns
@@ -57,7 +68,8 @@ def ensure_packages_refresh_job(ctx: ConvergeCtx) -> None:
     re-checks both at run time. Idempotent."""
     from base.host.system.packages_job import register_packages_job
 
-    register_packages_job(
+    active_register = register_fn or register_packages_job
+    active_register(
         enabled_reader=lambda: ctx.read_config().view.general.os_jobs_enabled,
         refresh_enabled_reader=lambda: ctx.read_config().view.packages.refresh_enabled,
         tick_reader=lambda: ctx.read_config().view.packages.refresh_tick_seconds,

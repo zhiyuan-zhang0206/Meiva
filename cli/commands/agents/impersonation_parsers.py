@@ -6,6 +6,7 @@ import argparse
 import math
 import os
 import sys
+from collections.abc import Mapping
 from functools import partial
 
 
@@ -48,6 +49,7 @@ def _relay_spec_problem(
     codex_remote: str | None,
     *,
     allow_env_thread_id: bool = False,
+    env: Mapping[str, str] | None = None,
 ) -> str | None:
     """CLI-boundary mirror of `base.agents.impersonation._store.validate_relay_spec`.
 
@@ -65,8 +67,9 @@ def _relay_spec_problem(
     elif provider == "antigravity":
         if codex_remote is not None:
             return "the antigravity relay does not use --codex-remote"
+        active_env = os.environ if env is None else env
         env_thread = (
-            (os.environ.get("ANTIGRAVITY_CONVERSATION_ID") or "").strip()
+            (active_env.get("ANTIGRAVITY_CONVERSATION_ID") or "").strip()
             if allow_env_thread_id
             else ""
         )
@@ -90,11 +93,16 @@ def _h_impersonate(args: argparse.Namespace) -> int:
             args.relay_thread_id,
             args.relay_codex_remote,
             allow_env_thread_id=True,
+            env=getattr(args, "env", None),
         )
     if problem is not None:
         print(f"meiva: {problem}", file=sys.stderr)
         return 2
-    return cmd_impersonate(args, database_factory=args.database_factory)
+    return cmd_impersonate(
+        args,
+        database_factory=args.database_factory,
+        backend=getattr(args, "backend", None),
+    )
 
 
 def _h_impersonate_relay(args: argparse.Namespace) -> int:
@@ -104,7 +112,12 @@ def _h_impersonate_relay(args: argparse.Namespace) -> int:
     if problem is not None:
         print(f"meiva: {problem}", file=sys.stderr)
         return 2
-    return cmd_relay(args, database_factory=args.database_factory, machine=args.runtime.machine)
+    return cmd_relay(
+        args,
+        database_factory=args.database_factory,
+        machine=args.runtime.machine,
+        backend=getattr(args, "relay_backend", None),
+    )
 
 
 def _add_send_parser(commands: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
