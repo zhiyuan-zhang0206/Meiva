@@ -164,6 +164,7 @@ def test_first_bound_plugin_load_does_not_lend_attachment_writer_to_bare_calls(
     from base.config import ConfigBoot
     from base.config.service_read import ConfigAuthority
     from base.lm.catalog import ModelCatalog
+    from base.lm.catalog.provider_keys import ProviderKeys
     from meiva.sdk_surface import extensions, install
 
     prior = install.uninstall()
@@ -195,6 +196,7 @@ def test_first_bound_plugin_load_does_not_lend_attachment_writer_to_bare_calls(
         *,
         surface: bool,
         catalog: ModelCatalog,
+        provider_keys: ProviderKeys,
         authority: ConfigAuthority,
         producer: object,
         clock_factory: object,
@@ -232,6 +234,7 @@ def test_first_bound_plugin_load_does_not_lend_attachment_writer_to_bare_calls(
             install.install(
                 prior.registry,
                 catalog=prior.catalog,
+                provider_keys=prior.provider_keys,
                 authority=prior.authority,
                 sampling=prior.sampling,
                 clock_factory=prior.clock_factory,
