@@ -13,6 +13,7 @@ import argparse
 import hashlib
 import re
 import sys
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
 
@@ -31,7 +32,12 @@ def require_agent_host_stopped(home: Path) -> None:
         raise RuntimeError("script repair requires the agent host to be stopped")
 
 
-def load_installed_runtime(home: Path, source: Path) -> None:
+def load_installed_runtime(
+    home: Path,
+    source: Path,
+    *,
+    env: Mapping[str, str] | None = None,
+) -> None:
     """Select the explicit installed source and let its owner check admission."""
     if Path(sys.prefix).resolve() != (source / ".venv").resolve():
         raise RuntimeError("run this tool with the source checkout's own .venv interpreter")
@@ -40,9 +46,17 @@ def load_installed_runtime(home: Path, source: Path) -> None:
     from base.host.env.dotenv_boot import launcher_context, skip_config_fetch
     from base.paths.home import resolve_meiva_home
 
-    if resolve_meiva_home().expanduser().resolve() != home:
+    resolved_home = (
+        Path(env["MEIVA_HOME"]) if env is not None and "MEIVA_HOME" in env else resolve_meiva_home()
+    )
+    if resolved_home.expanduser().resolve() != home:
         raise RuntimeError("--home must match this operator's MEIVA_HOME")
-    if launcher_context() is not None:
+    ctx = (
+        (env.get("MEIVA_PROCESS_PROFILE") or env.get("MEIVA_LAUNCHER_PROFILE"))
+        if env is not None
+        else launcher_context()
+    )
+    if ctx is not None:
         raise RuntimeError("run as a local operator without a launcher credential delivery")
     skip_config_fetch()
     from base.host.db_authority.delivery import require_admitted_runtime
@@ -84,9 +98,20 @@ def replace_script(pool: Any, schedule_id: int, script: str, expected_sha256: st
 # meiva:note
 # Run one script-only edit while no agent host serves `home`.
 def repair_script(
-    *, home: Path, source: Path, schedule_id: int, script: str, expected_sha256: str
+    *,
+    home: Path,
+    source: Path,
+    schedule_id: int,
+    script: str,
+    expected_sha256: str,
+    load_runtime_fn: Callable[[Path, Path], None] = load_installed_runtime,
+    lock_fn: Callable[..., Any] | None = None,
+    capture_fn: Callable[..., Any] | None = None,
+    version_fn: Callable[[Any], Callable[[], int]] | None = None,
+    db_from_settings_fn: Callable[..., Any] | None = None,
+    replace_fn: Callable[..., str] = replace_script,
 ) -> str:
-    load_installed_runtime(home, source)
+    load_runtime_fn(home, source)
     from base.db import Database
     from base.db.code_version_gate import ProcessDbGate
     from base.deploy.lifecycle.home_lifecycle_locks import resource_lock
@@ -96,14 +121,14 @@ def repair_script(
 
     # The installed source supplied by the operator owns this image. A copied
     # adapter's __file__ must not lend its checkout identity to the installed writer.
-    image = LoadedCommit.capture(source_root=source)
-    version = CodeVersion(image)
-    gate = ProcessDbGate(version=version.get, process=process_name())
+    image = (capture_fn or LoadedCommit.capture)(source_root=source)
+    get_version = version_fn(image) if version_fn is not None else CodeVersion(image).get
+    gate = ProcessDbGate(version=get_version, process=process_name())
 
-    with resource_lock(purpose="operator.update_schedule_script"):
+    with (lock_fn or resource_lock)(purpose="operator.update_schedule_script"):
         require_agent_host_stopped(home)
-        with Database.from_settings(gate=gate).pool() as pool:
-            result = replace_script(pool, schedule_id, script, expected_sha256)
+        with (db_from_settings_fn or Database.from_settings)(gate=gate).pool() as pool:
+            result = replace_fn(pool, schedule_id, script, expected_sha256)
     return result
 
 
@@ -120,7 +145,11 @@ def positive_id(value: str) -> int:
     return result
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(
+    argv: list[str] | None = None,
+    *,
+    repair_fn: Callable[..., str] = repair_script,
+) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("schedule_id", type=positive_id)
     parser.add_argument("--home", required=True, type=Path)
@@ -133,7 +162,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     script = raw.decode("utf-8")
     compile(script, "<schedule>", "exec")
-    result = repair_script(
+    result = repair_fn(
         home=args.home.expanduser().resolve(),
         source=args.source.expanduser().resolve(),
         schedule_id=args.schedule_id,

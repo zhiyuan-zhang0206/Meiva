@@ -23,6 +23,7 @@ from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 import redis
 from dotenv import dotenv_values
@@ -66,12 +67,12 @@ class RotationState:
     started_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
     phase: str = "minted"
 
-    def path(self) -> Path:
+    def path(self, *, home: Path | None = None) -> Path:
         stamp = self.started_at.replace(":", "").replace("+00:00", "Z")
-        return meiva_home() / "backups" / "secret-rotation" / f"data-plane-{stamp}.json"
+        return (home or meiva_home()) / "backups" / "secret-rotation" / f"data-plane-{stamp}.json"
 
-    def save(self) -> Path:
-        path = self.path()
+    def save(self, *, home: Path | None = None) -> Path:
+        path = self.path(home=home)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.parent.chmod(0o700)
         path.write_text(json.dumps(asdict(self), indent=2) + "\n")
@@ -111,19 +112,26 @@ def mint_secret() -> str:
     return secrets.token_urlsafe(_TOKEN_BYTES)
 
 
-def _require_gateway_context() -> None:
-    if settings.profile == "agent":
+def _require_gateway_context(*, cfg: Any = settings) -> None:
+    if cfg.profile == "agent":
         raise RuntimeError(_GATEWAY_CONTEXT_ERROR)
 
 
-def build_state(scope: str = "both") -> RotationState:
+def build_state(
+    scope: str = "both",
+    *,
+    cfg: Any = settings,
+    home_fn: Callable[[], Path] = meiva_home,
+    record_fn: Callable[[Path], Any] = get_record,
+) -> RotationState:
     if scope not in _SCOPES:
         raise ValueError(f"unsupported scope {scope!r}")
-    _require_gateway_context()
-    record = get_record(meiva_home())
+    _require_gateway_context(cfg=cfg)
+    home = home_fn()
+    record = record_fn(home)
     if record is None:
         raise RuntimeError("no cluster record — cannot resolve data-plane ports")
-    values = dotenv_values(meiva_home() / ".env")
+    values = dotenv_values(home / ".env")
     old_admin = (values.get("MEIVA_REDIS_ADMIN_PASSWORD") or "").strip()
     old_runtime = (values.get(REDIS_PASSWORD_ENV) or "").strip()
     if not (old_admin and old_runtime):
@@ -138,8 +146,8 @@ def build_state(scope: str = "both") -> RotationState:
         old_redis_password=old_runtime,
         new_redis_password=mint_secret() if scope in {"runner", "both"} else old_runtime,
         redis_port=record.ports["redis"],
-        redis_host=url_host(settings.data_plane.redis_url),
-        redis_user=redis_identity(settings.data_plane.redis_url),
+        redis_host=url_host(cfg.data_plane.redis_url),
+        redis_user=redis_identity(cfg.data_plane.redis_url),
     )
 
 
@@ -158,44 +166,59 @@ def redis_probe(host: str, port: int, password: str, *, username: str) -> bool:
         return False
 
 
-def _checks(state: RotationState, admin: str, runtime: str) -> list[tuple[str, bool]]:
+def _checks(
+    state: RotationState,
+    admin: str,
+    runtime: str,
+    *,
+    probe_fn: Callable[..., bool] = redis_probe,
+) -> list[tuple[str, bool]]:
     checks = [
         (
             "Redis default",
-            redis_probe(state.redis_host, state.redis_port, admin, username="default"),
+            probe_fn(state.redis_host, state.redis_port, admin, username="default"),
         )
     ]
     if state.rotates_runner:
         checks.append(
             (
                 "Redis ACL user",
-                redis_probe(state.redis_host, state.redis_port, runtime, username=state.redis_user),
+                probe_fn(state.redis_host, state.redis_port, runtime, username=state.redis_user),
             )
         )
     return checks
 
 
-def preflight(state: RotationState) -> bool:
+def preflight(state: RotationState, *, probe_fn: Callable[..., bool] = redis_probe) -> bool:
     """Refuse to rotate over pre-existing credential drift."""
-    checks = _checks(state, state.old_redis_admin_password, state.old_redis_password)
+    checks = _checks(
+        state, state.old_redis_admin_password, state.old_redis_password, probe_fn=probe_fn
+    )
     for label, ok in checks:
         print(f"  {'✓' if ok else '✗'} {label}")
     return all(ok for _label, ok in checks)
 
 
-def working_redis_admin_password(state: RotationState) -> str:
+def working_redis_admin_password(
+    state: RotationState, *, probe_fn: Callable[..., bool] = redis_probe
+) -> str:
     for password in (state.new_redis_admin_password, state.old_redis_admin_password):
-        if redis_probe(state.redis_host, state.redis_port, password, username="default"):
+        if probe_fn(state.redis_host, state.redis_port, password, username="default"):
             return password
     raise RuntimeError("Redis default user rejects both recorded admin passwords")
 
 
-def apply_admin(state: RotationState) -> None:
+def apply_admin(
+    state: RotationState,
+    *,
+    admin_pw_fn: Callable[[RotationState], str] = working_redis_admin_password,
+    redis_cls: Any = redis.Redis,
+) -> None:
     """Rotate the Redis default user, keeping the runtime ACL user live."""
     if not state.rotates_admin:
         return
-    current = working_redis_admin_password(state)
-    with redis.Redis(
+    current = admin_pw_fn(state)
+    with redis_cls(
         host=state.redis_host,
         port=state.redis_port,
         username="default",
@@ -206,37 +229,52 @@ def apply_admin(state: RotationState) -> None:
         client.execute_command("CONFIG", "SET", "requirepass", state.new_redis_admin_password)
 
 
-def apply_runner(state: RotationState) -> None:
+def apply_runner(
+    state: RotationState,
+    *,
+    cfg: Any = settings,
+    admin_pw_fn: Callable[[RotationState], str] = working_redis_admin_password,
+    ensure_acl_fn: Callable[..., None] = ensure_cluster_redis_acl,
+) -> None:
     """Rotate the Redis runtime ACL password."""
     if not state.rotates_runner:
         return
-    admin_password = working_redis_admin_password(state)
-    ensure_cluster_redis_acl(
+    admin_password = admin_pw_fn(state)
+    ensure_acl_fn(
         state.redis_user,
         redis_admin_url=(f"redis://default:{admin_password}@{state.redis_host}:{state.redis_port}"),
         runtime_password=state.new_redis_password,
-        channel_prefix=settings.data_plane.events_channel.removesuffix(":events"),
+        channel_prefix=cfg.data_plane.events_channel.removesuffix(":events"),
     )
 
 
-def verify(state: RotationState) -> None:
+def verify(state: RotationState, *, probe_fn: Callable[..., bool] = redis_probe) -> None:
     failed = [
         label
-        for label, ok in _checks(state, state.redis_admin_password, state.redis_password)
+        for label, ok in _checks(
+            state, state.redis_admin_password, state.redis_password, probe_fn=probe_fn
+        )
         if not ok
     ]
     if failed:
         raise RuntimeError(f"rotation verification failed: {', '.join(failed)}")
 
 
-def write_env(state: RotationState) -> None:
-    values = dotenv_values(meiva_home() / ".env")
+def write_env(
+    state: RotationState,
+    *,
+    cfg: Any = settings,
+    home_fn: Callable[[], Path] = meiva_home,
+    upsert_fn: Callable[..., None] = upsert_env,
+) -> None:
+    home = home_fn()
+    values = dotenv_values(home / ".env")
     redis_url = url_with_password(
-        (values.get("MEIVA_REDIS_URL") or settings.data_plane.redis_url).strip(),
+        (values.get("MEIVA_REDIS_URL") or cfg.data_plane.redis_url).strip(),
         state.redis_password,
     )
-    upsert_env(
-        meiva_home() / ".env",
+    upsert_fn(
+        home / ".env",
         {
             "MEIVA_REDIS_ADMIN_PASSWORD": state.redis_admin_password,
             REDIS_PASSWORD_ENV: state.redis_password,
@@ -266,8 +304,15 @@ def print_plan(state: RotationState, *, dry_run: bool) -> None:
         )
 
 
-def main(argv: list[str] | None = None) -> int:
-    if settings.data_plane.is_remote:
+def main(
+    argv: list[str] | None = None,
+    *,
+    cfg: Any = settings,
+    build_state_fn: Callable[..., RotationState] = build_state,
+    preflight_fn: Callable[[RotationState], bool] = preflight,
+    apply_admin_fn: Callable[[RotationState], None] = apply_admin,
+) -> int:
+    if cfg.data_plane.is_remote:
         print(
             "✗ this cluster's data plane is remote-managed — rotation is a "
             "local-instance operation (requirepass / ACL). A remote/SaaS plane "
@@ -282,17 +327,21 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--resume", metavar="STATE_FILE", help="resume a saved rotation")
     args = parser.parse_args(argv)
     try:
-        _require_gateway_context()
+        _require_gateway_context(cfg=cfg)
     except RuntimeError:
         print(_GATEWAY_CONTEXT_ERROR, file=sys.stderr)
         return 1
-    state = RotationState.load(Path(args.resume)) if args.resume else build_state(args.scope)
+    state = (
+        RotationState.load(Path(args.resume))
+        if args.resume
+        else build_state_fn(args.scope, cfg=cfg)
+    )
     print_plan(state, dry_run=not args.execute)
     if not args.execute:
-        preflight(state)
+        preflight_fn(state)
         print("\n[dry-run] no changes made.")
         return 0
-    if not args.resume and not preflight(state):
+    if not args.resume and not preflight_fn(state):
         print("\n✗ refusing to rotate over pre-existing credential drift.", file=sys.stderr)
         return 1
     if not args.yes:
@@ -302,7 +351,7 @@ def main(argv: list[str] | None = None) -> int:
             return 1
 
     try:
-        _run_phase(state, "admin", apply_admin)
+        _run_phase(state, "admin", apply_admin_fn)
         _run_phase(state, "runner", apply_runner)
         _run_phase(state, "verified", verify)
         _run_phase(state, "env_written", write_env)

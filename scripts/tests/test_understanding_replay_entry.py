@@ -4,27 +4,35 @@ from unittest.mock import Mock
 import pytest
 
 from base.db.code_version_gate import ProcessDbGate
-from base.native_process import code_version
 from base.native_process.loaded_commit import LoadedCommit
 from scripts.verify import understanding_replay as replay
 
 
-def test_report_uses_one_captured_gated_database(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    capture = Mock(return_value=LoadedCommit(tmp_path, "captured-before-move"))
+def test_report_uses_one_captured_gated_database(tmp_path: Path) -> None:
+    loaded = LoadedCommit(tmp_path, "captured-before-move")
+    capture = Mock(return_value=loaded)
     count = Mock(return_value=7)
     database = Mock()
     create = Mock(return_value=database)
     report = Mock()
-    monkeypatch.setattr(replay, "require_preview", Mock())
-    monkeypatch.setattr(replay, "ConfigBoot", Mock(return_value=Mock()))
-    monkeypatch.setattr(LoadedCommit, "capture", capture)
-    monkeypatch.setattr(code_version, "first_parent_count", count)
-    monkeypatch.setattr(replay, "process_name", lambda: "preview")
-    monkeypatch.setattr(replay.Database, "from_settings", create)
-    monkeypatch.setattr(replay, "print_replay_report", report)
-    replay.main(["report", "42"])
+
+    class _Version:
+        def __init__(self, image: LoadedCommit) -> None:
+            assert image is loaded
+
+        def get(self) -> int:
+            return int(count(loaded.source_root, loaded.sha))
+
+    replay.main(
+        ["report", "42"],
+        require_preview_fn=Mock(),
+        config_cls=Mock(return_value=Mock()),
+        capture_fn=capture,
+        version_cls=_Version,
+        process_name_fn=lambda: "preview",
+        db_from_settings_fn=create,
+        report_fn=report,
+    )
     capture.assert_called_once_with()
     create.assert_called_once()
     report.assert_called_once_with(database, 42)
@@ -37,15 +45,15 @@ def test_report_uses_one_captured_gated_database(
     assert not gate.min_read_due()
 
 
-def test_preview_refusal_precedes_capture_and_database(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_preview_refusal_precedes_capture_and_database(tmp_path: Path) -> None:
     capture = Mock()
     create = Mock()
-    monkeypatch.setattr(replay, "DOCKERENV", tmp_path / "missing")
-    monkeypatch.setattr(LoadedCommit, "capture", capture)
-    monkeypatch.setattr(replay.Database, "from_settings", create)
     with pytest.raises(SystemExit, match="preview container only"):
-        replay.main(["report", "42"])
+        replay.main(
+            ["report", "42"],
+            dockerenv=tmp_path / "missing",
+            capture_fn=capture,
+            db_from_settings_fn=create,
+        )
     capture.assert_not_called()
     create.assert_not_called()

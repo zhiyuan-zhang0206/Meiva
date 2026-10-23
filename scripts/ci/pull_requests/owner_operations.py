@@ -7,7 +7,9 @@ import json
 import os
 import subprocess
 import sys
+from collections.abc import Callable, Mapping
 from math import ceil
+from typing import Any
 
 from base.clock import Clock, Timers
 from base.host.net.ports import UrlOpener
@@ -25,9 +27,9 @@ _QUEUE_NAMES = frozenset(_QUEUE_CHOICES)
 _TRUNK_PRIORITIES = {"urgent": 0, "high": 10, "medium": 100, "low": 200}
 
 
-def resolve_queue(queue: str | None) -> str:
+def resolve_queue(queue: str | None, *, env: Mapping[str, str] = os.environ) -> str:
     """Return the CLI-selected queue, then CI_QUEUE, then the Trunk default."""
-    resolved = queue or os.environ.get("CI_QUEUE") or "trunk"
+    resolved = queue or env.get("CI_QUEUE") or "trunk"
     if resolved not in _QUEUE_NAMES:
         raise ValueError(f"unknown CI queue: {resolved}")
     return resolved
@@ -65,8 +67,15 @@ def last_head_update(pr: str, repo: str, *, host: Host) -> float | None:
     return max(timestamps, default=None)
 
 
-def queue_cooldown_seconds(pr: str, repo: str, *, host: Host, clock: Clock) -> int:
-    last = last_head_update(pr, repo, host=host)
+def queue_cooldown_seconds(
+    pr: str,
+    repo: str,
+    *,
+    host: Host,
+    clock: Clock,
+    last_update_fn: Callable[..., float | None] = last_head_update,
+) -> int:
+    last = last_update_fn(pr, repo, host=host)
     return (
         0
         if last is None
@@ -180,6 +189,7 @@ def _trunk_operator_command(
     parser: argparse.ArgumentParser,
     *,
     open_url: UrlOpener,
+    env: Mapping[str, str] = os.environ,
 ) -> int | None:
     """Dispatch --queue-status / --evict when set; None when neither is.
     Both touch the live Trunk queue and need TRUNK_API_TOKEN (exit 3 when unset). Usage errors go
@@ -195,7 +205,7 @@ def _trunk_operator_command(
         parser.error("--json is not supported with --evict")
     if args.evict and args.pr is None:
         parser.error("PR number is required with --evict")
-    trunk_token = os.environ.get("TRUNK_API_TOKEN")
+    trunk_token = env.get("TRUNK_API_TOKEN")
     if not trunk_token:
         print(
             "TRUNK_API_TOKEN is required for Trunk queue operations",
@@ -213,6 +223,8 @@ def _rerun_command(
     parser: argparse.ArgumentParser,
     *,
     host: Host,
+    list_fn: Callable[..., list[dict[str, Any]]] = list_failed_jobs,
+    rerun_fn: Callable[..., Any] = rerun_failed_jobs,
 ) -> int | None:
     """Dispatch --rerun-failed-jobs when set; None when not set."""
     if not args.rerun_failed_jobs:
@@ -221,7 +233,7 @@ def _rerun_command(
         parser.error("--rerun-failed-jobs is exclusive with --wait/--merge/--json")
     try:
         if args.dry_run:
-            jobs = list_failed_jobs(args.pr, args.repo, host=host)
+            jobs = list_fn(args.pr, args.repo, host=host)
             if not jobs:
                 print("No failed jobs to re-run")
                 return 0
@@ -231,7 +243,7 @@ def _rerun_command(
                     f"{j['conclusion']}) [run {j['run_status']}]"
                 )
             return 0
-        reran, waiting, errors = rerun_failed_jobs(args.pr, args.repo, host=host)
+        reran, waiting, errors = rerun_fn(args.pr, args.repo, host=host)
     except CiJobRerunError as error:
         # A failed GitHub query must not read as "no failed jobs" (issue #1945).
         print(f"Failed to list failed jobs: {error}", file=sys.stderr, flush=True)
@@ -319,10 +331,13 @@ def trunk_merge_flow(
     host: Host,
     clock: Clock,
     open_url: UrlOpener,
+    check_ci_fn: Callable[..., status.CIResult] = status.check_ci,
+    cooldown_fn: Callable[..., int] = queue_cooldown_seconds,
+    submit_fn: Callable[..., int] = submit_trunk,
 ) -> int:
     """Apply the standard cooldown/green recheck, then submit and watch Trunk."""
     deadline = clock.monotonic() + timeout if timeout else None
-    while (remaining := queue_cooldown_seconds(pr, repo, host=host, clock=clock)) > 0:
+    while (remaining := cooldown_fn(pr, repo, host=host, clock=clock)) > 0:
         if deadline_hit(deadline, pr, timeout, "queue cooldown not finished", timers=clock):
             return 1
         print(
@@ -332,7 +347,7 @@ def trunk_merge_flow(
         )
         clock.sleep(min(remaining, every))
 
-    result = status.check_ci(pr, repo=repo, host=host, clock=clock)
+    result = check_ci_fn(pr, repo=repo, host=host, clock=clock)
     if result.verdict is CIStatus.ERROR:
         print(
             f"PR #{pr} CI error before queueing: {result.error_detail}",
@@ -369,7 +384,7 @@ def trunk_merge_flow(
             flush=True,
         )
 
-    rc = submit_trunk(pr, repo, priority, token=token, timers=clock, open_url=open_url)
+    rc = submit_fn(pr, repo, priority, token=token, timers=clock, open_url=open_url)
     if rc != 0:
         return rc
     return watch_trunk_enqueue(
@@ -391,19 +406,31 @@ def dispatch(
     host: Host,
     clock: Clock,
     open_url: UrlOpener,
+    env: Mapping[str, str] = os.environ,
+    check_ci_fn: Callable[..., status.CIResult] = status.check_ci,
+    cooldown_fn: Callable[..., int] = queue_cooldown_seconds,
+    submit_fn: Callable[..., int] = submit_trunk,
+    list_failed_jobs_fn: Callable[..., list[dict[str, Any]]] = list_failed_jobs,
+    rerun_failed_jobs_fn: Callable[..., Any] = rerun_failed_jobs,
 ) -> int:
     """Run an explicitly selected owner command, validating credentials before waiting."""
     try:
-        resolve_queue(args.queue)
+        resolve_queue(args.queue, env=env)
     except ValueError as error:
         parser.error(str(error))
-    operator_rc = _trunk_operator_command(args, parser, open_url=open_url)
+    operator_rc = _trunk_operator_command(args, parser, open_url=open_url, env=env)
     if operator_rc is not None:
         return operator_rc
     if args.pr is None:
         parser.error("PR number is required")
     if args.rerun_failed_jobs:
-        rerun_rc = _rerun_command(args, parser, host=host)
+        rerun_rc = _rerun_command(
+            args,
+            parser,
+            host=host,
+            list_fn=list_failed_jobs_fn,
+            rerun_fn=rerun_failed_jobs_fn,
+        )
         if rerun_rc is None:
             raise AssertionError("selected re-run command returned no result")
         return rerun_rc
@@ -411,7 +438,7 @@ def dispatch(
         args.wait = True
         if args.timeout == 0:
             args.timeout = 1800
-        token = os.environ.get("TRUNK_API_TOKEN")
+        token = env.get("TRUNK_API_TOKEN")
         if not token:
             print(
                 "TRUNK_API_TOKEN is required for --queue trunk --merge", file=sys.stderr, flush=True
@@ -419,7 +446,15 @@ def dispatch(
             return 3
         from scripts.ci.pull_requests.monitor import wait_for_verdict
 
-        rc = wait_for_verdict(args.pr, args.repo, args.every, args.timeout, host=host, clock=clock)
+        rc = wait_for_verdict(
+            args.pr,
+            args.repo,
+            args.every,
+            args.timeout,
+            host=host,
+            clock=clock,
+            check_ci_fn=check_ci_fn,
+        )
         if rc != 0:
             return rc
         return trunk_merge_flow(
@@ -433,5 +468,8 @@ def dispatch(
             host=host,
             clock=clock,
             open_url=open_url,
+            check_ci_fn=check_ci_fn,
+            cooldown_fn=cooldown_fn,
+            submit_fn=submit_fn,
         )
     raise AssertionError("owner dispatch requires an explicit operation")

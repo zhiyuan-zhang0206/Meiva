@@ -7,8 +7,9 @@ from __future__ import annotations
 import argparse
 import asyncio
 import sys
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
+from typing import Any
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(_REPO_ROOT))
@@ -110,8 +111,8 @@ grows level by level as it would for a live agent.
 DOCKERENV = Path("/.dockerenv")
 
 
-def require_preview() -> None:
-    if not DOCKERENV.exists():
+def require_preview(*, dockerenv: Path = DOCKERENV) -> None:
+    if not dockerenv.exists():
         sys.exit(
             "refusing: this tool runs inside the preview container only (docker exec meiva-preview ...)"
         )
@@ -337,7 +338,18 @@ def print_replay_report(db: Database, agent_id: int) -> None:
         )
 
 
-def main(argv: Sequence[str] | None = None) -> None:
+def main(
+    argv: Sequence[str] | None = None,
+    *,
+    dockerenv: Path = DOCKERENV,
+    require_preview_fn: Callable[..., None] = require_preview,
+    config_cls: Any = ConfigBoot,
+    capture_fn: Callable[[], LoadedCommit] = LoadedCommit.capture,
+    version_cls: Any = CodeVersion,
+    process_name_fn: Callable[[], str] = process_name,
+    db_from_settings_fn: Callable[..., Any] = Database.from_settings,
+    report_fn: Callable[[Any, int], None] = print_replay_report,
+) -> None:
     parser = argparse.ArgumentParser(
         description=CLI_DESCRIPTION, formatter_class=argparse.RawDescriptionHelpFormatter
     )
@@ -352,14 +364,14 @@ def main(argv: Sequence[str] | None = None) -> None:
         help="explicit chunk threshold in tokens (overrides --ratio)",
     )
     args = parser.parse_args(argv)
-    require_preview()
-    config = ConfigBoot()
+    require_preview_fn(dockerenv=dockerenv)
+    config = config_cls()
     config.boot()
-    version = CodeVersion(LoadedCommit.capture())
-    gate = ProcessDbGate(version=version.get, process=process_name())
-    db = Database.from_settings(gate=gate)
+    version = version_cls(capture_fn())
+    gate = ProcessDbGate(version=version.get, process=process_name_fn())
+    db = db_from_settings_fn(gate=gate)
     if args.command == "report":
-        print_replay_report(db, args.agent_id)
+        report_fn(db, args.agent_id)
         return
     catalog = build_model_catalog()
     if args.command == "consume":

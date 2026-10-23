@@ -73,7 +73,7 @@ class RunFailedError(RuntimeError):
 # --------------------------------------------------------------------- the boundary
 
 
-def refuse_host_state(source: Path) -> None:
+def refuse_host_state(source: Path, *, home: Path | None = None) -> None:
     """Nothing of the host's cluster, credentials, keychain or VM store may enter.
 
     Refuses the home directory, anything that contains it (a parent such as `/Users`
@@ -81,13 +81,14 @@ def refuse_host_state(source: Path) -> None:
     (`.tart`) directories inside it, and any socket (the container runtime's is one,
     and its path varies by runtime).
     """
-    home = Path.home().resolve()
+    resolved_home = (home or Path.home()).resolve()
     resolved = source.resolve()
     sealed = [
-        home / name for name in (".meiva", ".ssh", ".gnupg", ".aws", ".docker", ".tart", "Library")
+        resolved_home / name
+        for name in (".meiva", ".ssh", ".gnupg", ".aws", ".docker", ".tart", "Library")
     ]
     if (
-        home.is_relative_to(resolved)
+        resolved_home.is_relative_to(resolved)
         or any(resolved.is_relative_to(path) for path in sealed)
         or resolved.name == "docker.sock"
         or resolved.is_socket()
