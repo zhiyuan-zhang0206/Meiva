@@ -38,6 +38,27 @@ from base.native_process.child_env import daemon_process_env
 _MMAP_ARGS = "-c shared_memory_type=mmap -c dynamic_shared_memory_type=mmap"
 
 
+# meiva:note
+# The probe a module-level `skipif` is allowed to call. `pg_tool` raises when the box has no
+# installation; evaluated at import, that raise turned "no PostgreSQL here" into a collection
+# error that stopped the whole tree on a macOS runner (task #5531's darwin lane). The pair
+# below pins both halves: a lookup that raises answers False, and one that finds the binary
+# answers True - so a skip predicate written with this probe still runs the test where the tool
+# exists. The locator is a parameter, so neither case patches first-party code.
+def test_has_pg_tool_answers_false_instead_of_raising() -> None:
+    def _missing(name: str) -> Path:
+        raise RuntimeError(f"Cannot locate pg tool {name!r}")
+
+    assert pg_tools.has_pg_tool("pg_dump", locate=_missing) is False
+
+
+def test_has_pg_tool_answers_true_for_a_tool_it_can_find(tmp_path: Path) -> None:
+    found = tmp_path / "pg_dump"
+    found.write_text("")
+
+    assert pg_tools.has_pg_tool("pg_dump", locate=lambda _name: found) is True
+
+
 def test_pg_shm_args_linux_branch(monkeypatch: pytest.MonkeyPatch) -> None:
     """Linux — the incident platform: the pin is unconditional there."""
     monkeypatch.setattr(pg_tools, "is_macos", lambda: False)
