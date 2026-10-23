@@ -7,7 +7,6 @@
 "test_telemetry_otlp_exit_delivery_agent.py" = ["child_external_cli.py"]
 
 [debt.env-patch]
-"test_context_binding.py#patch.dict os.environ" = 3
 "test_exec_child.py#monkeypatch.delenv os.environ.MEIVA_CONFIG_BOOT" = 1
 "test_exec_child.py#monkeypatch.delenv os.environ.MEIVA_CONFIG_FETCH" = 2
 "test_exec_child.py#monkeypatch.setenv os.environ.MEIVA_AGENT_BIRTH_CONFIG" = 1
@@ -38,6 +37,3 @@
 "test_exec_child_signals.py#monkeypatch.setattr agent.execution.protocol.read_request" = 1
 "test_exec_child_signals.py#monkeypatch.setattr agent.execution.protocol.write_result" = 1
 "test_exec_child_signals.py#monkeypatch.setattr meiva.ensure_plugins_loaded" = 1
-
-[debt.unresolved-patch]
-"test_delta_read_compat_agent.py#monkeypatch.setattr saver.aget_delta_channel_history" = 1
