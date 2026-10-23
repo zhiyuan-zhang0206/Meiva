@@ -110,6 +110,16 @@ lane must run it on the named host (a skip with no lane is how a broken test
 disappears). The marker is for that case only: "this test is about the host",
 never "this test is hard to port".
 
+Every skip in the tree is counted, whatever asks for it — `@pytest.mark.skipif`,
+`@pytest.mark.skip`, `pytest.skip(...)`, `pytest.importorskip(...)`.
+`scripts/structure/skip_sites.py` holds the number (`TEST_SKIP_SITES_ALLOWED`) and the
+sites it counts; a run that adds one fails there and prints the new file, line and
+predicate. The number only shrinks: it is a budget, not a whitelist, so a skip
+whose predicate the tree has never used still fails, and the report names it
+instead of asking a reader to diff the tree. Regenerate both blocks with
+`.venv/bin/python -m scripts.structure.skip_sites --print-baseline` after
+removing a skip.
+
 ## Frontend
 
 From `ui/web`, run the affected tests and eslint, then check generated Next.js
