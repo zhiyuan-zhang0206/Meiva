@@ -139,8 +139,18 @@ def register_macos(*, services: frozenset[str], host: Host) -> int:
     plist_path.write_text(content)
     label = _LABEL
     logger.info("Wrote autostart plist to {}", plist_path)
+    # meiva:note
+    # A job that is ALREADY loaded keeps its old definition until it is booted out:
+    # `bootstrap` alone then fails on it, and the running session keeps starting the
+    # previous service selection. Measured 2026-10-23 on macmini -- the plist named nine
+    # `--only-service` flags while the loaded job still ran `meiva start --boot` with
+    # none, so every attempt exited in argparse and `start-serving.json` never reached
+    # `serving`. Printing only the first-load form is what hid it.
     print(  # noqa: T201
-        f"  . '{label}' loads on next login/reboot; enable now with: "
+        f"  . '{label}' loads on next login/reboot.\n"
+        f"    enable now (not loaded yet): launchctl bootstrap gui/{host.uid} {plist_path}\n"
+        f"    already loaded (keeps its OLD definition until reloaded): "
+        f"launchctl bootout gui/{host.uid}/{label} && "
         f"launchctl bootstrap gui/{host.uid} {plist_path}"
     )
     return 0
