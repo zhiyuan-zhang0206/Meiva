@@ -40,6 +40,7 @@ class _PidfileOperations:
         self.config = config
         self.runtime = runtime
         self.events = events
+        self.calls: list[str] = []
 
     def assert_owner(self, config: ConfigBoot, runtime: Path) -> None:
         assert config is self.config
@@ -47,13 +48,16 @@ class _PidfileOperations:
 
     def is_running(self, config: ConfigBoot, *, runtime: Path) -> bool:
         self.assert_owner(config, runtime)
+        self.calls.append("probe")
         return False
 
     def write_pidfile(self, config: ConfigBoot, *, runtime: Path) -> None:
         self.assert_owner(config, runtime)
+        self.calls.append("write")
 
     def remove_pidfile(self, config: ConfigBoot, *, runtime: Path) -> None:
         self.assert_owner(config, runtime)
+        self.calls.append("remove")
         self.events.append("pidfile")
 
 
@@ -68,6 +72,7 @@ async def test_server_failure_releases_owned_resources(
 
     config = snapshot_process_config()
     events: list[str] = []
+    startup: list[str] = []
 
     class _Pool:
         def close(self) -> None:
@@ -81,13 +86,20 @@ async def test_server_failure_releases_owned_resources(
             return None
 
         async def serve_forever(self) -> None:
+            startup.append("serve")
             raise RuntimeError("ops server crashed")
 
     async def start_health(name: str, port: int, **kw: object) -> _Server:
+        assert name == "ops"
+        assert (
+            port
+            == ServiceEndpoints.from_boot(config, runtime=unit_home / "run").of("ops").health_port
+        )
         assert kw["image"] is ops_image
         _assert_live_saturation(kw, config)
         assert isinstance(kw["liveness"], LivenessGroup)
         assert kw["liveness"].snapshot() == {}
+        startup.append("health")
         return _Server()
 
     async def stop_health(_server: object) -> None:
@@ -99,9 +111,11 @@ async def test_server_failure_releases_owned_resources(
         return None
 
     def open_pool(*, database: Callable[[], Database], authority: ConfigAuthority) -> _Pool:
+        assert pidfiles.calls == ["probe", "write"]
         assert database is ops_database
         assert authority.runtime is config.ensure_eager()
         assert authority.env_path == unit_home / ".env"
+        startup.append("pool")
         return _Pool()
 
     def bind_host(*, machine: object) -> str:
@@ -123,6 +137,7 @@ async def test_server_failure_releases_owned_resources(
             == ServiceEndpoints.from_boot(config, runtime=unit_home / "run").of("ops").health_port
         )
         assert home == unit_home
+        startup.append("register")
 
     assert ServiceEndpoints.from_boot(config, runtime=unit_home / "run").of("ops").health_port
 
@@ -146,3 +161,5 @@ async def test_server_failure_releases_owned_resources(
         )
 
     assert sorted(events) == ["health", "pidfile", "pool"]
+    assert pidfiles.calls == ["probe", "write", "remove"]
+    assert startup == ["pool", "health", "register", "serve"]

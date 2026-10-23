@@ -131,8 +131,9 @@ def test_entry_shares_image_gate_factory_and_closes_writer(  # noqa: PLR0915 -- 
     def hard_exit(code: int) -> None:
         raise _ExitError(code)
 
-    def install_shutdown(_name: str) -> None:
-        return None
+    def install_shutdown(name: str) -> None:
+        assert name == "ops"
+        events.append("shutdown")
 
     previous_sigterm = signal.getsignal(signal.SIGTERM)
     try:
@@ -152,9 +153,9 @@ def test_entry_shares_image_gate_factory_and_closes_writer(  # noqa: PLR0915 -- 
         assert exited.value.code == (1 if isinstance(failure, Exception) else 0)
         assert captures == [image]
         assert events == (
-            ["logging", "run", "cleanup-start", "cleanup-end", ("stop", 2)]
+            ["logging", "shutdown", "run", "cleanup-start", "cleanup-end", ("stop", 2)]
             if isinstance(failure, KeyboardInterrupt)
-            else ["logging", "run", ("stop", 2)]
+            else ["logging", "shutdown", "run", ("stop", 2)]
         )
         if isinstance(failure, KeyboardInterrupt):
             # The stop path ignores a retried SIGTERM, so its drain always reaches

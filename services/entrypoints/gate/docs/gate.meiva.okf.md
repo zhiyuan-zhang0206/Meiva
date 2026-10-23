@@ -19,6 +19,8 @@ application downtime includes the entry listener.
 The module entry passes arguments after the program name explicitly to `main`.
 Argument rejection happens before image capture or resource construction; each
 composition test owns its argument list without changing process-global argv.
+Its signal substitute checks the service name and requires shutdown registration
+after logging and before listener construction, while isolating real signal handlers.
 
 After argument parsing, the daemon captures its loaded image once and owns a
 non-exempt `ProcessDbGate` for `gate`. Its lazy database factory retains that
