@@ -4,7 +4,7 @@ import json
 import re
 import subprocess
 import sys
-from typing import Any
+from typing import NotRequired, TypedDict, cast
 
 from base.host.net.ports import UrlOpener
 from base.host.system.hostport import Host
@@ -15,6 +15,27 @@ _GH_TIMEOUT_S = 30.0
 _DIAGNOSE_LOG_TAIL = 4000
 _DIAGNOSE_MAX_JOB_LOGS = 8
 _DIAGNOSE_MAX_SYNTHETIC_PRS = 3
+
+
+class Diagnosis(TypedDict):
+    pr: str
+    repo: str
+    issues: list[dict[str, object]]
+    checks: list[dict[str, object]]
+    trunk: dict[str, object] | None
+    synthetic_test_prs: list[dict[str, object]]
+    gh_error: NotRequired[str]
+    state: NotRequired[object]
+    mergeable: NotRequired[object]
+
+
+def _object_rows(raw: object) -> list[dict[str, object]]:
+    if not isinstance(raw, list):
+        return []
+    return [
+        cast("dict[str, object]", row) for row in cast("list[object]", raw) if isinstance(row, dict)
+    ]
+
 
 # meiva:note
 # _FAILURE_SIGNATURES is ordered and first match wins: each entry is (regex over the failing log, classification, suggested action) matched case-insensitively; with no match, a check whose name contains "lint" classifies as a deterministic lint failure and anything else as unclassified. The classification and action strings are the operator-facing diagnosis text.
@@ -59,10 +80,10 @@ def _pr_view(pr: str, repo: str, fields: str, *, host: Host) -> dict[str, object
     if result.returncode != 0:
         return None
     try:
-        data = json.loads(result.stdout)
+        data: object = json.loads(result.stdout)
     except json.JSONDecodeError:
         return None
-    return data if isinstance(data, dict) else None
+    return cast("dict[str, object]", data) if isinstance(data, dict) else None
 
 
 def _job_log_tail(job_id: int, repo: str, *, host: Host) -> str:
@@ -93,7 +114,7 @@ def _pull_head_ref(pull: dict[str, object]) -> str:
     head = pull.get("head")
     if not isinstance(head, dict):
         return ""
-    return str(head.get("ref") or "")
+    return str(cast("dict[object, object]", head).get("ref") or "")
 
 
 def _synthetic_test_prs(pr: str, repo: str, *, host: Host) -> list[dict[str, object]]:
@@ -123,13 +144,13 @@ def _synthetic_test_prs(pr: str, repo: str, *, host: Host) -> list[dict[str, obj
     if result.returncode != 0:
         return []
     try:
-        pulls = json.loads(result.stdout)
+        pulls: object = json.loads(result.stdout)
     except json.JSONDecodeError:
         return []
     prefix = f"trunk-merge/pr-{pr}/"
-    return [
-        pull for pull in pulls if isinstance(pull, dict) and _pull_head_ref(pull).startswith(prefix)
-    ][:_DIAGNOSE_MAX_SYNTHETIC_PRS]
+    return [pull for pull in _object_rows(pulls) if _pull_head_ref(pull).startswith(prefix)][
+        :_DIAGNOSE_MAX_SYNTHETIC_PRS
+    ]
 
 
 # meiva:note
@@ -179,14 +200,16 @@ def _failing_check_entries(
     except CiJobRerunError:
         failed_jobs = []
     raw_rollup = view.get("statusCheckRollup", [])
-    rollup_rows = raw_rollup if isinstance(raw_rollup, list) else []
-    rollup = [c for c in rollup_rows if isinstance(c, dict)]
-    failing_checks = [c for c in rollup if c.get("conclusion") in FAILING][:_DIAGNOSE_MAX_JOB_LOGS]
+    failing_checks = [
+        c
+        for c in _object_rows(raw_rollup)
+        if isinstance(c.get("conclusion"), str) and c.get("conclusion") in FAILING
+    ][:_DIAGNOSE_MAX_JOB_LOGS]
     entries: list[dict[str, object]] = []
     for check in failing_checks:
         check_name = str(check.get("name") or "unnamed check")
         job = next((j for j in failed_jobs if j.get("name") == check_name), None)
-        log = _job_log_tail(int(job["job_id"]), repo, host=host) if job else ""
+        log = _job_log_tail(job["job_id"], repo, host=host) if job else ""
         classification, action = classify_check(check_name, log)
         entry: dict[str, object] = {
             "check": check_name,
@@ -222,8 +245,8 @@ def diagnose_pr(
     token: str | None,
     host: Host,
     open_url: UrlOpener,
-) -> dict[str, Any]:
-    diag: dict[str, Any] = {
+) -> Diagnosis:
+    diag: Diagnosis = {
         "pr": pr,
         "repo": repo,
         "issues": [],
@@ -252,9 +275,10 @@ def diagnose_pr(
     return diag
 
 
-def print_diagnosis(diag: dict[str, Any]) -> None:
-    if diag.get("gh_error"):
-        print(f"PR #{diag['pr']} diagnosis failed: {diag['gh_error']}", file=sys.stderr)
+def print_diagnosis(diag: Diagnosis) -> None:
+    error = diag.get("gh_error")
+    if error:
+        print(f"PR #{diag['pr']} diagnosis failed: {error}", file=sys.stderr)
         return
     print(
         f"PR #{diag['pr']} diagnosis (state={diag.get('state')}, mergeable={diag.get('mergeable')})"
