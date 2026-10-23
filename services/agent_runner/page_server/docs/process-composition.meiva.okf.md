@@ -26,6 +26,8 @@ separate progress trackers: a crashing loop cancels its sibling. Cleanup keeps
 its original order: stop health, close the pool, remove the pidfile. Signal
 handling, bounded cancellation drain and hard exit keep their existing entry
 behavior; this composition does not change page leases or child resources.
+The entry test records logging, named shutdown registration and running in order.
+Its signal substitute isolates real process handlers; OS delivery is a separate boundary.
 
 Endpoint and pidfile operations are defined by `page_server.resources`. They
 borrow the entry's prepared config and resolved runtime path; each lookup uses

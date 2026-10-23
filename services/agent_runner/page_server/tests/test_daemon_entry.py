@@ -131,8 +131,9 @@ def test_entry_shares_the_captured_gate_with_logging_health_and_work(sha: str | 
     def check_schema(_url: str) -> None:
         stages.append("schema")
 
-    def no_signals(_name: str) -> None:
-        pass
+    def no_signals(name: str) -> None:
+        assert name == "page_server"
+        stages.append("shutdown")
 
     def exit_process(code: int) -> None:
         stages.append(f"exit:{code}")
@@ -150,7 +151,7 @@ def test_entry_shares_the_captured_gate_with_logging_health_and_work(sha: str | 
         run_fn=work,
     )
     _run_main(deps=deps, exit_process=exit_process)
-    assert stages == ["capture", "schema", "producer", "logging", "run", "exit:0"]
+    assert stages == ["capture", "schema", "producer", "logging", "shutdown", "run", "exit:0"]
     _assert_gate_matches_image(gates, reads, image, readers, factories[0][1])
 
 

@@ -26,6 +26,8 @@ captured image. On exit the constructed writer stops within two seconds; a cold
 close does not construct it. A close failure cannot replace an active startup or
 service failure. The original async cancellation/drain and hard exit remain:
 `Runner.close` must not join a wedged default executor before process exit.
+The entry test records logging, named shutdown registration and serving in order;
+its signal substitute isolates process handlers rather than exercising OS delivery.
 
 `services/agent_runner/agent_ops/boot.py` is the definition owner for registration,
 bind/auth posture, pidfile/endpoint resources and invocation executor/pool operations.
@@ -49,8 +51,10 @@ live in `boot.py`, with no forwarding aliases left on the daemon.
 
 `serve_ops_daemon` passes its factory and image through each request and worker binding.
 Pool construction, schema admission, pidfile and health timing remain in the
-existing order. The health payload uses the entry image. The synchronous status
-arm passes it through `ops.cluster.operations.cluster_status_op` into
+existing order. The runtime test requires pidfile probe/write calls before pool construction,
+then health, registration and serving with the same configured endpoint.
+The health payload uses the entry image. The synchronous status arm passes it
+through `ops.cluster.operations.cluster_status_op` into
 `ops.cluster_status.status_snapshot`. `running_sha` is that image's SHA, including
 an honest `None`; `head_sha` remains the separate live checkout probe. A moved
 checkout or rewritten start bookmark cannot change the process's loaded image.

@@ -80,6 +80,7 @@ def entry(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> _Entry:
 
     def install_shutdown(name: str) -> None:
         assert name == "gate"
+        setup.step("shutdown")
 
     setup.pipeline.stop.side_effect = stop
     monkeypatch.setattr(pipeline_build, "build_pipeline", build_pipeline)
@@ -123,6 +124,7 @@ def test_entry_keeps_one_image_gate_factory_and_producer(
     assert entry.calls == [
         "build",
         "logging",
+        "shutdown",
         "gate",
         "server",
         "serve",
