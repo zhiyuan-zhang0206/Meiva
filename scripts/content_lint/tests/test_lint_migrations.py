@@ -6,22 +6,37 @@ no test touches the real repo tree.
 
 from __future__ import annotations
 
-from scripts.content_lint import lint_migrations as lint
+from pathlib import Path
+from typing import Protocol
 
-# Untyped fixtures and helper calls throughout: the call-site rules stay at warning for this file.
-# pyright: reportUnknownMemberType = warning
-# pyright: reportUnknownArgumentType = warning
+import pytest
+
+from scripts.content_lint import lint_migrations as lint
 
 _TS = "20260719T143000"
 _TS2 = "20260719T143001"
 _BASELINE_INSERT = "INSERT INTO schema_migrations (name) VALUES ('00000000T000000_baseline');"
 
 
-def _lint(monkeypatch, tmp_path, *, schema_body: str = _BASELINE_INSERT, stub_base: bool = True):
+class MigrationLint(Protocol):
+    def main(self, base_ref: str | None = None) -> int: ...
+
+
+def _lint(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    *,
+    schema_body: str = _BASELINE_INSERT,
+    stub_base: bool = True,
+) -> tuple[MigrationLint, Path]:
     """Point the lint module at a tmp migrations/ + db/schema.sql; return
     (lint_module, migrations_dir)."""
     if stub_base:
-        monkeypatch.setattr(lint, "immutability_base", lambda _ref: None)
+
+        def no_base(_ref: str | None) -> None:
+            return None
+
+        monkeypatch.setattr(lint, "immutability_base", no_base)
     migrations_dir = tmp_path / "migrations"
     migrations_dir.mkdir()
     monkeypatch.setattr(lint, "MIGRATIONS_DIR", migrations_dir)
@@ -31,33 +46,33 @@ def _lint(monkeypatch, tmp_path, *, schema_body: str = _BASELINE_INSERT, stub_ba
     return lint, migrations_dir
 
 
-def test_empty_migrations_passes(monkeypatch, tmp_path):
+def test_empty_migrations_passes(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """An empty migrations/ (no delta over the baseline) is valid."""
     lint, _ = _lint(monkeypatch, tmp_path)
     assert lint.main() == 0
 
 
-def test_valid_migration_passes(monkeypatch, tmp_path):
+def test_valid_migration_passes(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     lint, d = _lint(monkeypatch, tmp_path)
     (d / f"{_TS}_add-foo.sql").write_text("SELECT 1;")
     assert lint.main() == 0
 
 
-def test_legacy_integer_name_fails(monkeypatch, tmp_path):
+def test_legacy_integer_name_fails(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """A leftover sequential-integer name is rejected by the format check."""
     lint, d = _lint(monkeypatch, tmp_path)
     (d / "0049_event_log.sql").write_text("SELECT 1;")
     assert lint.main() == 1
 
 
-def test_invalid_timestamp_fails(monkeypatch, tmp_path):
+def test_invalid_timestamp_fails(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """A well-shaped but impossible datetime (month 13) is rejected."""
     lint, d = _lint(monkeypatch, tmp_path)
     (d / "20261301T143000_x.sql").write_text("SELECT 1;")
     assert lint.main() == 1
 
 
-def test_duplicate_timestamp_prefix_fails(monkeypatch, tmp_path):
+def test_duplicate_timestamp_prefix_fails(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Two migrations sharing one second-precision timestamp prefix are
     ambiguous — rejected (2026-08-07 ruling: names stay second-precision, so
     the lint guards the prefix)."""
@@ -67,7 +82,7 @@ def test_duplicate_timestamp_prefix_fails(monkeypatch, tmp_path):
     assert lint.main() == 1
 
 
-def test_distinct_prefixes_pass(monkeypatch, tmp_path):
+def test_distinct_prefixes_pass(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Sibling migrations in the same second still pass when their prefixes
     differ — the guard is about the prefix, not the second itself."""
     lint, d = _lint(monkeypatch, tmp_path)
@@ -76,13 +91,15 @@ def test_distinct_prefixes_pass(monkeypatch, tmp_path):
     assert lint.main() == 0
 
 
-def test_readme_is_ignored(monkeypatch, tmp_path):
+def test_readme_is_ignored(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     lint, d = _lint(monkeypatch, tmp_path)
     (d / "README.md").write_text("docs")
     assert lint.main() == 0
 
 
-def test_backfill_snapshot_requires_later_drop_plan(monkeypatch, tmp_path):
+def test_backfill_snapshot_requires_later_drop_plan(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     """A backfill snapshot stays only until a later migration drops it."""
     lint, d = _lint(monkeypatch, tmp_path)
     snapshot = "agent_state_backfill_snapshot"
@@ -94,7 +111,9 @@ def test_backfill_snapshot_requires_later_drop_plan(monkeypatch, tmp_path):
     assert lint.main() == 0
 
 
-def test_backfill_snapshot_drop_plan_accepts_publicly_qualified_drop(monkeypatch, tmp_path):
+def test_backfill_snapshot_drop_plan_accepts_publicly_qualified_drop(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     """A retirement migration may pin its drop target to the public schema."""
     lint, d = _lint(monkeypatch, tmp_path)
     snapshot = "agent_state_backfill_snapshot"
@@ -104,7 +123,9 @@ def test_backfill_snapshot_drop_plan_accepts_publicly_qualified_drop(monkeypatch
     assert lint.main() == 0
 
 
-def test_backfill_snapshot_drop_plan_ignores_comments_and_literals(monkeypatch, tmp_path):
+def test_backfill_snapshot_drop_plan_ignores_comments_and_literals(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     """Only executable static SQL can retire a backfill snapshot."""
     lint, d = _lint(monkeypatch, tmp_path)
     snapshot = "agent_state_backfill_snapshot"
@@ -120,7 +141,9 @@ def test_backfill_snapshot_drop_plan_ignores_comments_and_literals(monkeypatch, 
     assert lint.main() == 0
 
 
-def test_backfill_snapshot_check_ignores_comments_and_literals(monkeypatch, tmp_path):
+def test_backfill_snapshot_check_ignores_comments_and_literals(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     """Commented or quoted CREATE TABLE text must not require a drop plan."""
     lint, d = _lint(monkeypatch, tmp_path)
     (d / f"{_TS}_commented.sql").write_text(
@@ -131,7 +154,9 @@ def test_backfill_snapshot_check_ignores_comments_and_literals(monkeypatch, tmp_
     assert lint.main() == 0
 
 
-def test_backfill_snapshot_check_ignores_non_do_dollar_quoted_literal(monkeypatch, tmp_path):
+def test_backfill_snapshot_check_ignores_non_do_dollar_quoted_literal(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     """A dollar-quoted value is not a migration DDL statement."""
     lint, d = _lint(monkeypatch, tmp_path)
     (d / f"{_TS}_dollar-quoted.sql").write_text(
@@ -141,7 +166,7 @@ def test_backfill_snapshot_check_ignores_non_do_dollar_quoted_literal(monkeypatc
     assert lint.main() == 0
 
 
-def test_schema_generate_series_seed_fails(monkeypatch, tmp_path):
+def test_schema_generate_series_seed_fails(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """A schema.sql still carrying the pre-cutover generate_series seed is rejected."""
     lint, _ = _lint(
         monkeypatch,
@@ -151,7 +176,9 @@ def test_schema_generate_series_seed_fails(monkeypatch, tmp_path):
     assert lint.main() == 1
 
 
-def test_schema_missing_baseline_seed_fails(monkeypatch, tmp_path):
+def test_schema_missing_baseline_seed_fails(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     """A schema.sql that does not stamp the baseline sentinel is rejected."""
     lint, _ = _lint(monkeypatch, tmp_path, schema_body="-- no baseline seed here")
     assert lint.main() == 1
@@ -180,11 +207,13 @@ CREATE TRIGGER gadgets_trg AFTER UPDATE ON gadgets
 )
 
 
-def _write_migration(d, stem: str, body: str) -> None:
+def _write_migration(d: Path, stem: str, body: str) -> None:
     (d / f"{stem}.sql").write_text(body)
 
 
-def test_folded_strict_add_column_without_seed_fails(monkeypatch, tmp_path):
+def test_folded_strict_add_column_without_seed_fails(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     """A strict ADD COLUMN whose column already sits in db/schema.sql must be
     stamped in the baseline seed — a fresh DB replays the unseeded migration and
     dies on `column ... already exists`."""
@@ -193,7 +222,9 @@ def test_folded_strict_add_column_without_seed_fails(monkeypatch, tmp_path):
     assert lint.main() == 1
 
 
-def test_folded_strict_add_column_with_seed_passes(monkeypatch, tmp_path):
+def test_folded_strict_add_column_with_seed_passes(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     stem = f"{_TS}_add-folded-col"
     lint, d = _lint(
         monkeypatch,
@@ -204,7 +235,9 @@ def test_folded_strict_add_column_with_seed_passes(monkeypatch, tmp_path):
     assert lint.main() == 0
 
 
-def test_idempotent_add_column_needs_no_seed(monkeypatch, tmp_path):
+def test_idempotent_add_column_needs_no_seed(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     """`ADD COLUMN IF NOT EXISTS` is replay-safe on a fresh DB — no seed needed."""
     lint, d = _lint(monkeypatch, tmp_path, schema_body=_FOLDED_SCHEMA)
     _write_migration(
@@ -213,7 +246,9 @@ def test_idempotent_add_column_needs_no_seed(monkeypatch, tmp_path):
     assert lint.main() == 0
 
 
-def test_do_block_guarded_add_column_needs_no_seed(monkeypatch, tmp_path):
+def test_do_block_guarded_add_column_needs_no_seed(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     """A statement inside a DO block owns its guard — exempt from the seed rule."""
     lint, d = _lint(monkeypatch, tmp_path, schema_body=_FOLDED_SCHEMA)
     _write_migration(
@@ -225,7 +260,7 @@ def test_do_block_guarded_add_column_needs_no_seed(monkeypatch, tmp_path):
     assert lint.main() == 0
 
 
-def test_rebuilt_constraint_needs_no_seed(monkeypatch, tmp_path):
+def test_rebuilt_constraint_needs_no_seed(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """DROP + ADD of the same object in one migration is a replay-safe rebuild."""
     lint, d = _lint(monkeypatch, tmp_path, schema_body=_FOLDED_SCHEMA)
     _write_migration(
@@ -237,7 +272,9 @@ def test_rebuilt_constraint_needs_no_seed(monkeypatch, tmp_path):
     assert lint.main() == 0
 
 
-def test_unfolded_strict_add_column_needs_no_seed(monkeypatch, tmp_path):
+def test_unfolded_strict_add_column_needs_no_seed(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     """A column absent from db/schema.sql cannot hit already-exists on replay;
     whether the baseline is missing the change at all is the smoke convergence
     gate's question, not this check's."""
@@ -246,7 +283,9 @@ def test_unfolded_strict_add_column_needs_no_seed(monkeypatch, tmp_path):
     assert lint.main() == 0
 
 
-def test_same_named_object_on_another_table_needs_no_seed(monkeypatch, tmp_path):
+def test_same_named_object_on_another_table_needs_no_seed(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     """Table-qualified matching: `folded_col` / `widgets_ck` exist on `widgets`,
     not on `fuzz` — adding them to `fuzz` is not a folded delta."""
     lint, d = _lint(monkeypatch, tmp_path, schema_body=_FOLDED_SCHEMA)
@@ -259,19 +298,23 @@ def test_same_named_object_on_another_table_needs_no_seed(monkeypatch, tmp_path)
     assert lint.main() == 0
 
 
-def test_folded_strict_create_table_without_seed_fails(monkeypatch, tmp_path):
+def test_folded_strict_create_table_without_seed_fails(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     lint, d = _lint(monkeypatch, tmp_path, schema_body=_FOLDED_SCHEMA)
     _write_migration(d, f"{_TS}_create-gadgets", "CREATE TABLE gadgets (id BIGINT PRIMARY KEY);")
     assert lint.main() == 1
 
 
-def test_folded_strict_create_index_without_seed_fails(monkeypatch, tmp_path):
+def test_folded_strict_create_index_without_seed_fails(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     lint, d = _lint(monkeypatch, tmp_path, schema_body=_FOLDED_SCHEMA)
     _write_migration(d, f"{_TS}_create-gadgets-idx", "CREATE INDEX gadgets_idx ON gadgets (id);")
     assert lint.main() == 1
 
 
-def test_rebuilt_index_needs_no_seed(monkeypatch, tmp_path):
+def test_rebuilt_index_needs_no_seed(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     lint, d = _lint(monkeypatch, tmp_path, schema_body=_FOLDED_SCHEMA)
     _write_migration(
         d,
@@ -281,7 +324,9 @@ def test_rebuilt_index_needs_no_seed(monkeypatch, tmp_path):
     assert lint.main() == 0
 
 
-def test_folded_strict_create_trigger_without_seed_fails(monkeypatch, tmp_path):
+def test_folded_strict_create_trigger_without_seed_fails(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     lint, d = _lint(monkeypatch, tmp_path, schema_body=_FOLDED_SCHEMA)
     _write_migration(
         d,
@@ -292,7 +337,7 @@ def test_folded_strict_create_trigger_without_seed_fails(monkeypatch, tmp_path):
     assert lint.main() == 1
 
 
-def test_rebuilt_trigger_needs_no_seed(monkeypatch, tmp_path):
+def test_rebuilt_trigger_needs_no_seed(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     lint, d = _lint(monkeypatch, tmp_path, schema_body=_FOLDED_SCHEMA)
     _write_migration(
         d,
@@ -304,7 +349,9 @@ def test_rebuilt_trigger_needs_no_seed(monkeypatch, tmp_path):
     assert lint.main() == 0
 
 
-def test_folded_strict_add_constraint_without_seed_fails(monkeypatch, tmp_path):
+def test_folded_strict_add_constraint_without_seed_fails(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     lint, d = _lint(monkeypatch, tmp_path, schema_body=_FOLDED_SCHEMA)
     _write_migration(
         d,
@@ -314,7 +361,9 @@ def test_folded_strict_add_constraint_without_seed_fails(monkeypatch, tmp_path):
     assert lint.main() == 1
 
 
-def test_cross_migration_replay_chain_needs_no_seed(monkeypatch, tmp_path):
+def test_cross_migration_replay_chain_needs_no_seed(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     """An earlier unseeded migration dropping the object makes a later add of it
     replay-safe (the replay drops, then re-adds) — no seed required on either."""
     lint, d = _lint(monkeypatch, tmp_path, schema_body=_FOLDED_SCHEMA)
@@ -325,7 +374,9 @@ def test_cross_migration_replay_chain_needs_no_seed(monkeypatch, tmp_path):
     assert lint.main() == 0
 
 
-def test_role_switch_in_migration_fails(monkeypatch, tmp_path, capsys):
+def test_role_switch_in_migration_fails(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
     """Schema SQL runs as the admin acting as the owner: no role switching."""
     lint, d = _lint(monkeypatch, tmp_path)
     (d / f"{_TS}_escalate.sql").write_text("SET ROLE NONE;\nCREATE TABLE t (id int);")
@@ -333,7 +384,9 @@ def test_role_switch_in_migration_fails(monkeypatch, tmp_path, capsys):
     assert f"{_TS}_escalate.sql:1: SET ROLE" in capsys.readouterr().err
 
 
-def test_session_authorization_in_baseline_fails(monkeypatch, tmp_path):
+def test_session_authorization_in_baseline_fails(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     lint, _ = _lint(
         monkeypatch,
         tmp_path,
@@ -342,7 +395,9 @@ def test_session_authorization_in_baseline_fails(monkeypatch, tmp_path):
     assert lint.main() == 1
 
 
-def test_role_words_in_comments_and_literals_pass(monkeypatch, tmp_path):
+def test_role_words_in_comments_and_literals_pass(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     lint, d = _lint(monkeypatch, tmp_path)
     (d / f"{_TS}_note.sql").write_text(
         "-- never SET ROLE here\nCOMMENT ON TABLE t IS 'RESET ROLE is forbidden';"
@@ -350,7 +405,7 @@ def test_role_words_in_comments_and_literals_pass(monkeypatch, tmp_path):
     assert lint.main() == 0
 
 
-def test_down_file_is_rejected(monkeypatch, tmp_path):
+def test_down_file_is_rejected(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     lint, d = _lint(monkeypatch, tmp_path)
     (d / f"{_TS}_add-foo.sql").write_text("SELECT 1;")
     (d / f"{_TS}_add-foo.down.sql").write_text("SELECT 1;")
@@ -360,7 +415,7 @@ def test_down_file_is_rejected(monkeypatch, tmp_path):
 # ── merged migrations are immutable ──────────────────────────────────────────
 
 
-def _merged_repo(monkeypatch, tmp_path):
+def _merged_repo(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> tuple[MigrationLint, Path]:
     """A real git repo whose HEAD commit stands for main; the lint compares the
     working tree against it. Returns (lint_module, migrations_dir)."""
     import subprocess
@@ -379,25 +434,27 @@ def _merged_repo(monkeypatch, tmp_path):
     return lint, d
 
 
-def test_merged_migration_edit_fails(monkeypatch, tmp_path):
+def test_merged_migration_edit_fails(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     lint, d = _merged_repo(monkeypatch, tmp_path)
     (d / f"{_TS}_add-foo.sql").write_text("SELECT 2;")
     assert lint.main("HEAD") == 1
 
 
-def test_merged_migration_delete_fails(monkeypatch, tmp_path):
+def test_merged_migration_delete_fails(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     lint, d = _merged_repo(monkeypatch, tmp_path)
     (d / f"{_TS}_add-foo.sql").unlink()
     assert lint.main("HEAD") == 1
 
 
-def test_merged_migration_rename_fails(monkeypatch, tmp_path):
+def test_merged_migration_rename_fails(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     lint, d = _merged_repo(monkeypatch, tmp_path)
     (d / f"{_TS}_add-foo.sql").rename(d / f"{_TS}_add-bar.sql")
     assert lint.main("HEAD") == 1
 
 
-def test_merged_migration_can_move_without_changing_name_or_sql(monkeypatch, tmp_path):
+def test_merged_migration_can_move_without_changing_name_or_sql(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     lint, d = _merged_repo(monkeypatch, tmp_path)
     group = d / "2026/07/19"
     group.mkdir(parents=True)
@@ -405,7 +462,9 @@ def test_merged_migration_can_move_without_changing_name_or_sql(monkeypatch, tmp
     assert lint.main("HEAD") == 0
 
 
-def test_relocated_merged_migration_cannot_change_sql(monkeypatch, tmp_path):
+def test_relocated_merged_migration_cannot_change_sql(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     lint, d = _merged_repo(monkeypatch, tmp_path)
     group = d / "2026/07/19"
     group.mkdir(parents=True)
@@ -415,7 +474,9 @@ def test_relocated_merged_migration_cannot_change_sql(monkeypatch, tmp_path):
     assert lint.main("HEAD") == 1
 
 
-def test_duplicate_name_across_directories_fails(monkeypatch, tmp_path):
+def test_duplicate_name_across_directories_fails(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     lint, d = _lint(monkeypatch, tmp_path)
     for group in ("one", "two"):
         folder = d / group
@@ -424,15 +485,17 @@ def test_duplicate_name_across_directories_fails(monkeypatch, tmp_path):
     assert lint.main() == 1
 
 
-def test_new_migration_beside_a_merged_one_passes(monkeypatch, tmp_path):
+def test_new_migration_beside_a_merged_one_passes(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     lint, d = _merged_repo(monkeypatch, tmp_path)
     (d / f"{_TS2}_add-bar.sql").write_text("SELECT 1;")
     assert lint.main("HEAD") == 0
 
 
-def test_unresolvable_base_in_ci_fails_loudly(monkeypatch, tmp_path):
-    import pytest
-
+def test_unresolvable_base_in_ci_fails_loudly(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     lint, _ = _merged_repo(monkeypatch, tmp_path)
     with pytest.raises(ValueError, match="cannot resolve"):
         lint.main("no-such-revision")

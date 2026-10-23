@@ -13,12 +13,9 @@ from collections.abc import Sequence
 
 import pytest
 
+from base.host.system.hostport import Host
 from base.host.system.tests.fake_commands import fake_host
 from scripts.content_lint import check_cross_branch_migrations as mod
-
-# Untyped fixtures and helper calls throughout: the call-site rules stay at warning for this file.
-# pyright: reportUnknownMemberType = warning
-# pyright: reportUnknownArgumentType = warning
 
 
 @pytest.mark.parametrize(
@@ -50,16 +47,28 @@ def test_ordinary_branches_are_not_breaches(branch: str) -> None:
     assert mod.breaches([branch]) == []
 
 
-def test_passes_on_single_branch_model(monkeypatch: pytest.MonkeyPatch, capsys) -> None:
+def test_passes_on_single_branch_model(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     """The premise holding is reported, not silently assumed."""
-    monkeypatch.setattr(mod, "remote_branches", lambda **_kw: ["main", "meiva-1-x"])
+
+    def branches(*, host: Host) -> list[str]:
+        return ["main", "meiva-1-x"]
+
+    monkeypatch.setattr(mod, "remote_branches", branches)
     assert mod.main(host=fake_host()) == 0
     assert "single-branch premise holds" in capsys.readouterr().out
 
 
-def test_fails_when_premise_breaks(monkeypatch: pytest.MonkeyPatch, capsys) -> None:
+def test_fails_when_premise_breaks(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     """A long-lived second branch fails the step and names the remedy."""
-    monkeypatch.setattr(mod, "remote_branches", lambda **_kw: ["main", "develop"])
+
+    def branches(*, host: Host) -> list[str]:
+        return ["main", "develop"]
+
+    monkeypatch.setattr(mod, "remote_branches", branches)
     assert mod.main(host=fake_host()) == 1
     err = capsys.readouterr().err
     assert "premise BROKEN" in err
@@ -68,7 +77,7 @@ def test_fails_when_premise_breaks(monkeypatch: pytest.MonkeyPatch, capsys) -> N
 
 
 def test_unqueryable_remote_fails_rather_than_passing(
-    monkeypatch: pytest.MonkeyPatch, capsys
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """An unverifiable premise must not report success.
 
@@ -76,7 +85,7 @@ def test_unqueryable_remote_fails_rather_than_passing(
     a gate that cannot answer has to say so, not say 'fine'.
     """
 
-    def _boom(**_kw: object) -> list[str]:
+    def _boom(*, host: Host) -> list[str]:
         raise RuntimeError("git ls-remote failed (rc=128): no such remote")
 
     monkeypatch.setattr(mod, "remote_branches", _boom)
@@ -86,29 +95,35 @@ def test_unqueryable_remote_fails_rather_than_passing(
 
 def test_remote_branches_parses_ls_remote_output() -> None:
     r"""Tab-separated `<sha>\trefs/heads/<name>` lines; non-head refs ignored."""
-    host = fake_host(
-        lambda argv, **_kw: subprocess.CompletedProcess(
+
+    def run(
+        argv: Sequence[str], *, timeout: float, **options: object
+    ) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(
             list(argv),
             0,
             stdout="abc123\trefs/heads/main\ndef456\trefs/heads/release/1.2\n999\trefs/tags/v1\n",
             stderr="",
         )
-    )
-    assert mod.remote_branches(host=host) == ["main", "release/1.2"]
+
+    assert mod.remote_branches(host=fake_host(run)) == ["main", "release/1.2"]
 
 
 def test_remote_branches_raises_on_git_failure() -> None:
     """A non-zero git exit propagates as RuntimeError, never an empty list."""
-    host = fake_host(
-        lambda argv, **_kw: subprocess.CompletedProcess(
+
+    def run(
+        argv: Sequence[str], *, timeout: float, **options: object
+    ) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(
             list(argv),
             128,
             stdout="",
             stderr="fatal: 'origin' does not appear to be a git repository",
         )
-    )
+
     with pytest.raises(RuntimeError, match="ls-remote failed"):
-        mod.remote_branches(host=host)
+        mod.remote_branches(host=fake_host(run))
 
 
 def test_remote_timeout_cannot_report_a_verified_premise(
