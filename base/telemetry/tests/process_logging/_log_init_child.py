@@ -9,17 +9,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, sys.argv[1])
-import httpx
-
-from base.host.env import bootstrap
-
-
-def unreachable(*_args: object, **_kwargs: object) -> None:
-    raise httpx.ConnectError("connection refused")
-
-
-bootstrap.fetch_bootstrap_config = unreachable  # type: ignore[assignment]
-import base.telemetry.process_logging  # noqa: E402
+import base.telemetry.process_logging
 
 assert "base.config" not in sys.modules
 pipelines: list[object] = []

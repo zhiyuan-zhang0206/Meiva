@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from datetime import UTC, datetime
 from threading import Event
 
 import pytest
-from opentelemetry.sdk._logs.export import InMemoryLogRecordExporter
+from opentelemetry.sdk._logs import ReadableLogRecord
+from opentelemetry.sdk._logs.export import InMemoryLogRecordExporter, LogRecordExportResult
 
 from base.telemetry.delivery.receipts import Event as TelemetryEvent
 from base.telemetry.otlp import telemetry_otlp, telemetry_otlp_exporting
@@ -26,30 +27,29 @@ def paused_otlp_record(
     from opentelemetry.sdk.metrics import MeterProvider
     from opentelemetry.sdk.metrics.export import InMemoryMetricReader
 
-    exporter = InMemoryLogRecordExporter()
+    paused = Event()
+    release = Event()
+
+    class PausedExporter(InMemoryLogRecordExporter):
+        def export(self, batch: Sequence[ReadableLogRecord]) -> LogRecordExportResult:
+            paused.set()
+            assert release.wait(HANDSHAKE_BOUND_S), "close did not release the paused OTLP worker"
+            return super().export(batch)
+
+    exporter = PausedExporter()
     logger_provider = LoggerProvider()
     logger_provider.add_log_record_processor(SimpleLogRecordProcessor(exporter))
+
     backend = telemetry_otlp.OtlpBackend(
         export_allowed=lambda: True,
+        enabled=lambda: True,
         providers=(logger_provider, MeterProvider(metric_readers=[InMemoryMetricReader()])),
     )
-    monkeypatch.setattr(backend, "_enabled", lambda: True)
 
     def build_backend(**_inputs: object) -> telemetry_otlp.OtlpBackend:
         return backend
 
     monkeypatch.setattr(telemetry_otlp_exporting, "OtlpBackend", build_backend)
-
-    paused = Event()
-    release = Event()
-    original_emit = backend._emit_log
-
-    def pause_after_dequeue(event: TelemetryEvent) -> None:
-        paused.set()
-        assert release.wait(HANDSHAKE_BOUND_S), "close did not release the paused OTLP worker"
-        original_emit(event)
-
-    monkeypatch.setattr(backend, "_emit_log", pause_after_dequeue)
     backend.export_batch(
         [
             TelemetryEvent(
