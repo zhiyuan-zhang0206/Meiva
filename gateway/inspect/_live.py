@@ -124,6 +124,7 @@ def project_heartbeat(
     agent_id: int,
     pending_inbound: bool,
     last_pause: HeartbeatLastPause | None,
+    jitter_span_s: int = JITTER_SPAN_S,
 ) -> HeartbeatInfo:
     """Idle-heartbeat state for one agent — the projected next check-in (or the
     active pause / already-queued wake) plus the most recent pause from history.
@@ -186,7 +187,7 @@ def project_heartbeat(
             # JITTER_SPAN_S is int-typed (whole seconds) so this matches the
             # daemon's `NULLIF(span, 0)::int` cast exactly; the `0` guard mirrors
             # the daemon's disabled-jitter collapse (mod never divides by zero).
-            jitter_s = agent_id % JITTER_SPAN_S if JITTER_SPAN_S else 0
+            jitter_s = agent_id % jitter_span_s if jitter_span_s else 0
             idle_due_at = last_active_at + timedelta(seconds=idle_threshold_s + jitter_s)
             reminder_due_at = (
                 last_heartbeat_at + timedelta(seconds=interval_s)

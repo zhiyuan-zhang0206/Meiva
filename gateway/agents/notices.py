@@ -306,8 +306,9 @@ async def post_notice_resolve(
     if inbound_id is not None:
         if not isinstance(inbound_id, int):
             raise TypeError("notice inbound receipt must be an integer")
+        wake_publisher = getattr(request.app.state, "notice_wake_publisher", publish_inbound_wake)
         await asyncio.to_thread(
-            publish_inbound_wake,
+            wake_publisher,
             request.app.state.db,
             request.app.state.bus,
             agent_id,
@@ -394,7 +395,10 @@ async def post_notice_create(
                     cast(int | None, previous.get("notification_id")),
                 )
             validate_creation(body)
-            validate_creation_state(conn, body)
+            state_validator = getattr(
+                request.app.state, "notice_creation_state_validator", validate_creation_state
+            )
+            state_validator(conn, body)
             # Serialize all creations for an agent, including different keys:
             # no-open-notice races must not allocate the same local id.
             cur.execute("SELECT id FROM agents WHERE id = %s FOR UPDATE", (agent_id,))

@@ -92,12 +92,12 @@ def _metric(
     }
 
 
-def _patch_loader(monkeypatch: pytest.MonkeyPatch, *metrics: dict[str, Any]) -> None:
+def _patch_loader(app: FastAPI, *metrics: dict[str, Any]) -> None:
     """Seed the in-process loader with the given registry rows — the
     task #180 PR D equivalent of the old snapshot file (the loader itself is
     covered separately by `test_in_process_loader_imports_shipped_metrics`)."""
     specs = [MetricSpec.model_validate(m) for m in metrics]
-    monkeypatch.setattr(_plugin_metrics, "load_plugin_metrics", lambda: specs)
+    app.state.inspect_metric_loader = lambda: specs
 
 
 def _insert_agent(db: psycopg.Connection, label: str = "t") -> int:
@@ -119,11 +119,9 @@ def _insert_agent(db: psycopg.Connection, label: str = "t") -> int:
 # ── file absent / agent unknown ───────────────────────────────────────────────
 
 
-def test_metrics_empty_registry_returns_empty(
-    app: FastAPI, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_metrics_empty_registry_returns_empty(app: FastAPI, db_conn: psycopg.Connection) -> None:
     """No registered metrics -> 200 []."""
-    _patch_loader(monkeypatch)
+    _patch_loader(app)
     aid = _insert_agent(db_conn)
     db_conn.commit()
     with TestClient(app) as client:
@@ -132,11 +130,9 @@ def test_metrics_empty_registry_returns_empty(
     assert resp.json() == []
 
 
-def test_metrics_unknown_agent_404(
-    app: FastAPI, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_metrics_unknown_agent_404(app: FastAPI, db_conn: psycopg.Connection) -> None:
     """No agents_meta row -> 404 (same contract as /inspect)."""
-    _patch_loader(monkeypatch, _metric())
+    _patch_loader(app, _metric())
     db_conn.commit()
     with TestClient(app) as client:
         resp = client.get("/api/agents/999999/inspect/metrics")
@@ -146,14 +142,12 @@ def test_metrics_unknown_agent_404(
 # ── filtering + rendering + execution ─────────────────────────────────────────
 
 
-def test_metrics_filters_inspector_output(
-    app: FastAPI, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_metrics_filters_inspector_output(app: FastAPI, db_conn: psycopg.Connection) -> None:
     """Only metrics whose output includes 'inspector' are returned; a
     grafana-only metric (even one sharing the same table shape) is skipped."""
     aid = _insert_agent(db_conn)
     _patch_loader(
-        monkeypatch,
+        app,
         _metric(name="insp_metric"),
         _metric(
             name="grafana_only",
@@ -169,15 +163,13 @@ def test_metrics_filters_inspector_output(
     assert [m["name"] for m in body] == ["insp_metric"]
 
 
-def test_metrics_stat_scalar(
-    app: FastAPI, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_metrics_stat_scalar(app: FastAPI, db_conn: psycopg.Connection) -> None:
     """A stat metric returns the single aggregate as `value`. The SQL
     inspector surface is static now (task #180 PR C — no macro windows), so
     the query counts exactly what its own predicates select."""
     aid = _insert_agent(db_conn)
     _insert_agent(db_conn)
-    _patch_loader(monkeypatch, _metric(name="stat_count", panel="stat", query=_STAT_QUERY))
+    _patch_loader(app, _metric(name="stat_count", panel="stat", query=_STAT_QUERY))
     db_conn.commit()
     with TestClient(app) as client:
         resp = client.get(f"/api/agents/{aid}/inspect/metrics")
@@ -230,13 +222,13 @@ def test_metrics_macro_translation_unit() -> None:
     ],
 )
 def test_metrics_tampered_query_500(
-    app: FastAPI, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch, tampered: str
+    app: FastAPI, db_conn: psycopg.Connection, tampered: str
 ) -> None:
     """A registry file edited after generation fails the second validation ->
     500 with the reason (never executed)."""
     aid = _insert_agent(db_conn)
     _patch_loader(
-        monkeypatch,
+        app,
         _metric(name="tampered", query=tampered),
         _metric(name="still_fine"),
     )
@@ -270,15 +262,13 @@ def test_metrics_render_static_sql_passes_through() -> None:
 # ── execution-time failure is per-metric, not fatal ───────────────────────────
 
 
-def test_metrics_runtime_query_error_per_metric(
-    app: FastAPI, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_metrics_runtime_query_error_per_metric(app: FastAPI, db_conn: psycopg.Connection) -> None:
     """A query that passes the whitelist but fails at runtime (a bad cast on
     the row values) lands in that metric's `error`; the sibling metric still
     renders and the request stays 200."""
     aid = _insert_agent(db_conn)
     _patch_loader(
-        monkeypatch,
+        app,
         _metric(
             name="broken",
             query=("SELECT status::bigint AS n FROM agents_meta WHERE id = %(agent_id)s"),
@@ -295,9 +285,7 @@ def test_metrics_runtime_query_error_per_metric(
     assert by_name["healthy"]["value"] == 1.0  # the seeded agents_meta row
 
 
-def test_metrics_read_only_is_transaction_scoped(
-    app: FastAPI, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_metrics_read_only_is_transaction_scoped(app: FastAPI, db_conn: psycopg.Connection) -> None:
     """The read-only enforcement must NOT leak onto pooled connections.
 
     The endpoint opens its transaction with `SET TRANSACTION READ ONLY`
@@ -307,7 +295,7 @@ def test_metrics_read_only_is_transaction_scoped(
     read-only session and its writes would fail. After a metrics request,
     the gateway's own pool must still accept writes."""
     aid = _insert_agent(db_conn)
-    _patch_loader(monkeypatch, _metric(name="stat_count", panel="stat", query=_STAT_QUERY))
+    _patch_loader(app, _metric(name="stat_count", panel="stat", query=_STAT_QUERY))
     db_conn.commit()
     with TestClient(app) as client:
         resp = client.get(f"/api/agents/{aid}/inspect/metrics")
@@ -362,14 +350,14 @@ def _usage(db: psycopg.Connection, agent_id: int, cost: float, *, minutes_ago: f
 
 
 def test_metrics_logql_timeseries_is_answered_from_telemetry_events(
-    app: FastAPI, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    app: FastAPI, db_conn: psycopg.Connection
 ) -> None:
     """A logql inspector metric is evaluated on Postgres over the fixed 24h window in 1h
     steps (the range-vector window ends at each step), and folds into the same
     PluginMetricResult shape. Another agent's rows stay out."""
     aid = _insert_agent(db_conn)
     other = _insert_agent(db_conn, "other")
-    _patch_loader(monkeypatch, _logql_metric())
+    _patch_loader(app, _logql_metric())
     _usage(db_conn, aid, 0.25, minutes_ago=30)
     _usage(db_conn, aid, 0.5, minutes_ago=90)
     _usage(db_conn, other, 9.0, minutes_ago=30)
@@ -386,12 +374,12 @@ def test_metrics_logql_timeseries_is_answered_from_telemetry_events(
 
 
 def test_metrics_logql_stat_is_the_last_step_over_the_whole_range(
-    app: FastAPI, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    app: FastAPI, db_conn: psycopg.Connection
 ) -> None:
     """A stat-shaped logql metric returns the last step as `value`; `$__range` is 24h."""
     aid = _insert_agent(db_conn)
     _patch_loader(
-        monkeypatch,
+        app,
         _logql_metric(
             name="stat_cost",
             panel="stat",
@@ -416,13 +404,13 @@ def test_metrics_logql_stat_is_the_last_step_over_the_whole_range(
 
 
 def test_metrics_logql_outside_the_evaluator_vocabulary_is_per_metric(
-    app: FastAPI, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    app: FastAPI, db_conn: psycopg.Connection
 ) -> None:
     """A template the evaluator does not understand lands in the metric's `error` field;
     sibling metrics still render."""
     aid = _insert_agent(db_conn)
     _patch_loader(
-        monkeypatch,
+        app,
         _logql_metric(
             name="rate_query",
             query=(
@@ -441,14 +429,12 @@ def test_metrics_logql_outside_the_evaluator_vocabulary_is_per_metric(
     assert body["still_fine"]["error"] is None
 
 
-def test_metrics_logql_tampered_query_500(
-    app: FastAPI, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_metrics_logql_tampered_query_500(app: FastAPI, db_conn: psycopg.Connection) -> None:
     """A tampered logql registry row (lost selector / json pipeline) fails
     the rendered-form re-validation -> 500, never executed."""
     aid = _insert_agent(db_conn)
     _patch_loader(
-        monkeypatch,
+        app,
         _logql_metric(
             name="tampered_logql",
             query='sum(count_over_time({other="x"} | json | event_name={event_name} [1h]))',
@@ -497,7 +483,7 @@ def test_in_process_loader_imports_shipped_metrics() -> None:
     assert _plugin_metrics.load_plugin_metrics() == specs
 
 
-def test_a_disabled_plugins_metrics_are_not_loaded(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_disabled_plugins_metrics_are_not_loaded() -> None:
     """Metrics follow the enable rule the widgets already follow: a disabled shipped plugin
     contributes none (the per-agent inspector panel), read per request."""
     shipped = _plugin_metrics.PLUGINS_DIR / "meiva_fleet" / "metrics.py"
@@ -509,10 +495,10 @@ def test_a_disabled_plugins_metrics_are_not_loaded(monkeypatch: pytest.MonkeyPat
         entries = {**config.plugins, "meiva_fleet": enable_config.PluginEntry(enabled=False)}
         return enable_config.PluginsConfig(plugins=entries)
 
-    monkeypatch.setattr(enable_config, "load_for_runtime", _fleet_disabled)
-
-    assert shipped not in _plugin_metrics.plugin_metric_modules()
-    assert "meiva_fleet" not in {s.plugin for s in _plugin_metrics.load_plugin_metrics()}
+    assert shipped not in _plugin_metrics.plugin_metric_modules(runtime_loader=_fleet_disabled)
+    assert "meiva_fleet" not in {
+        s.plugin for s in _plugin_metrics.load_plugin_metrics(runtime_loader=_fleet_disabled)
+    }
 
 
 def _fixture_plugin(
@@ -554,25 +540,27 @@ def _fixture_metrics_source(metric: str, query: str, *, raises: bool = False) ->
     return ("raise RuntimeError('metrics boom')\n" if raises else "") + source
 
 
-@pytest.fixture
-def fixture_plugins_dir(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest
-) -> Path:
-    """Point the loader at `tmp_path` as the shipped-plugins directory (the
-    fixture plugins are the only ones it sees besides the core metrics)."""
-    monkeypatch.setattr(_plugin_metrics, "PLUGINS_DIR", tmp_path)
+def _load_fixture_metrics(plugins_dir: Path) -> list[MetricSpec]:
     real_load = enable_config.load_for_runtime
 
     def _with_fixture_plugins(known: set[str]) -> enable_config.PluginsConfig:
         config = real_load(known)
-        fixtures = {p.name: enable_config.PluginEntry(enabled=True) for p in tmp_path.iterdir()}
+        fixtures = {p.name: enable_config.PluginEntry(enabled=True) for p in plugins_dir.iterdir()}
         return enable_config.PluginsConfig(plugins={**config.plugins, **fixtures})
 
-    monkeypatch.setattr(enable_config, "load_for_runtime", _with_fixture_plugins)
-    shipped_path = shipped_plugins.__path__
-    monkeypatch.setattr(shipped_plugins, "__path__", [*shipped_path, str(tmp_path)])
+    return _plugin_metrics.load_plugin_metrics(
+        plugins_dir=plugins_dir, runtime_loader=_with_fixture_plugins
+    )
+
+
+@pytest.fixture
+def fixture_plugins_dir(tmp_path: Path, request: pytest.FixtureRequest) -> Path:
+    """Point the loader at `tmp_path` as the shipped-plugins directory (the
+    fixture plugins are the only ones it sees besides the core metrics)."""
+    shipped_plugins.__path__.append(str(tmp_path))
 
     def _forget_fixture_modules() -> None:
+        shipped_plugins.__path__.remove(str(tmp_path))
         for module_name in [m for m in sys.modules if m.startswith("meiva_builtins.plugins.fx_")]:
             del sys.modules[module_name]
 
@@ -589,8 +577,8 @@ def test_in_process_loader_skips_a_failing_module_and_recovers(
     user ruling 2026-09-11)."""
     metrics_py = _fixture_plugin(fixture_plugins_dir, "fx_drop_partial", raises=True)
 
-    _plugin_metrics.load_plugin_metrics()  # must not raise
-    specs = _plugin_metrics.load_plugin_metrics()
+    _load_fixture_metrics(fixture_plugins_dir)  # must not raise
+    specs = _load_fixture_metrics(fixture_plugins_dir)
     assert [s for s in specs if s.plugin == "fx_drop_partial"] == []
     assert {s.plugin for s in specs if s.plugin != "core"} == set()
     assert any(
@@ -601,7 +589,7 @@ def test_in_process_loader_skips_a_failing_module_and_recovers(
     metrics_py.write_text(
         _fixture_metrics_source("fx_drop_partial_one", _STAT_QUERY), encoding="utf-8"
     )
-    specs = _plugin_metrics.load_plugin_metrics()
+    specs = _load_fixture_metrics(fixture_plugins_dir)
     assert [(s.plugin, s.name) for s in specs if s.plugin == "fx_drop_partial"] == [
         ("fx_drop_partial", "fx_drop_partial_one")
     ]
@@ -617,6 +605,6 @@ def test_in_process_loader_refuses_a_plugin_claiming_a_taken_metric_name(
     # Plugins load in sorted order, so `fx_first` is the first claimant.
     _fixture_plugin(fixture_plugins_dir, "fx_thief", metric="fx_shared_name")
 
-    specs = _plugin_metrics.load_plugin_metrics()
+    specs = _load_fixture_metrics(fixture_plugins_dir)
     assert [s.plugin for s in specs if s.name == "fx_shared_name"] == ["fx_first"]
     assert [s for s in specs if s.plugin == "fx_thief"] == []

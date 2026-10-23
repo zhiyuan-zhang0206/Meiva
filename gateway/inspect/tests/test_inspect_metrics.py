@@ -289,10 +289,8 @@ def test_state_intervals_exclude_terminated_gaps(db_conn: psycopg.Connection) ->
 
 
 def test_statistics_http_does_not_read_logs_or_current_state(
-    app: FastAPI, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    app: FastAPI, db_conn: psycopg.Connection
 ) -> None:
-    from gateway.inspect import router as inspect_router
-
     now = datetime.now(UTC)
     aid = _agent(db_conn, now)
     db_conn.commit()
@@ -300,7 +298,7 @@ def test_statistics_http_does_not_read_logs_or_current_state(
     def forbidden(*_args: object, **_kwargs: object) -> None:
         raise AssertionError("Statistics must use the persisted SQL read model")
 
-    monkeypatch.setattr(inspect_router, "db_rows_blocking", forbidden)
+    app.state.inspect_db_rows = forbidden
     with TestClient(app) as client:
         response = client.get(f"/api/agents/{aid}/inspect/statistics")
     assert response.status_code == 200, response.text
@@ -308,7 +306,7 @@ def test_statistics_http_does_not_read_logs_or_current_state(
 
 
 def test_statistics_read_invokes_the_coverage_note(
-    app: FastAPI, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    app: FastAPI, db_conn: psycopg.Connection
 ) -> None:
     """The coverage note is wired into the statistics read (#3869 review): a
     change that drops the call must fail here, not just in review."""
@@ -322,7 +320,7 @@ def test_statistics_read_invokes_the_coverage_note(
         assert spawned_at is not None
         seen.append(agent_id)
 
-    monkeypatch.setattr(_metrics, "note_inspect_metrics_coverage", _record)
+    app.state.inspect_note_coverage = _record
     with TestClient(app) as client:
         response = client.get(f"/api/agents/{aid}/inspect/statistics")
     assert response.status_code == 200, response.text

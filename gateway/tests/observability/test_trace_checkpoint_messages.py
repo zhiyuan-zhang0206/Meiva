@@ -17,7 +17,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from base.db import create_agent
-from gateway.tests.auth.gateway_config import gateway_test_client
+from gateway.tests.auth.gateway_config import GatewayTestClient, gateway_test_client
 
 
 @pytest.fixture
@@ -101,17 +101,16 @@ def test_returns_full_messages_for_trace(
 
 
 def test_503_on_checkpoint_read_failure(
-    db_conn: psycopg.Connection, test_client: TestClient, monkeypatch: pytest.MonkeyPatch
+    db_conn: psycopg.Connection, test_client: GatewayTestClient
 ) -> None:
     """A store read failure is not disguised as pruned — 503, caller retries."""
     from base.agents.history import checkpoint as checkpoint_mod
-    from gateway.agents import state as agents_mod
 
     tid = create_agent(db_conn)
 
-    def _boom(*_a, **_kw):
+    def _boom(*_a: object, **_kw: object) -> tuple[str | None, list[object]]:
         raise checkpoint_mod.CheckpointReadError("boom")
 
-    monkeypatch.setattr(agents_mod, "load_checkpoint_messages_by_trace", _boom)  # pyright: ignore[reportUnknownArgumentType]
+    test_client.app.state.trace_checkpoint_messages_loader = _boom
     resp = test_client.get(f"/api/agents/{tid}/traces/{'c' * 32}/messages")
     assert resp.status_code == 503

@@ -11,7 +11,7 @@ from pydantic import SecretStr
 from base.config import settings
 from base.telemetry.alerts.native import load_native_group, stamp_native_sent
 from gateway.alerts import router as alerts_router
-from gateway.tests.auth.gateway_config import gateway_test_client
+from gateway.tests.auth.gateway_config import GatewayTestClient, gateway_test_client
 
 
 def native_sender(callback: Callable[[str], bool]) -> Callable[[int], bool]:
@@ -122,12 +122,12 @@ def seed_alert_rows(db: psycopg.Connection, rows: list[dict[str, Any]]) -> None:
     db.commit()
 
 
-def capture_im(monkeypatch: pytest.MonkeyPatch, *, ok: bool = True) -> list[str]:
+def capture_im(client: GatewayTestClient, *, ok: bool = True) -> list[str]:
     sent: list[str] = []
 
     def _capture(text: str) -> bool:
         sent.append(text)
         return ok
 
-    monkeypatch.setattr(alerts_router, "notify_alert_group", native_sender(_capture))
+    client.app.state.alert_group_notifier = native_sender(_capture)
     return sent

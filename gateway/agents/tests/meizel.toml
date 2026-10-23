@@ -1,8 +1,0 @@
-[debt.first-party-patch]
-"test_catalog_admission.py#monkeypatch.setattr base.db.transaction.write_transaction" = 1
-"test_catalog_admission.py#monkeypatch.setattr base.packages.plugins.config_registration.overlay_config_classes" = 1
-"test_catalog_admission.py#monkeypatch.setattr gateway.agents.lifecycle.forward_to_home_machine" = 2
-"test_terminate_hints.py#monkeypatch.setattr gateway.agents.lifecycle.forward_to_home_machine" = 1
-
-[debt.unresolved-patch]
-"test_terminate_hints.py#monkeypatch.setattr pool.connection" = 1

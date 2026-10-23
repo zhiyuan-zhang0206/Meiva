@@ -195,7 +195,6 @@ def test_the_agents_own_compact_thresholds_are_reported(
 def test_checkpoint_read_failure_returns_zero(
     db_conn: psycopg.Connection,
     test_client: GatewayTestClient,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A checkpoint store read failure is tolerated to 0/0 — the SSE token_usage
     push refreshes the counter later (contrast the /messages data endpoint's
@@ -204,7 +203,7 @@ def test_checkpoint_read_failure_returns_zero(
     config_overlay before the checkpoint access)."""
     from typing import NoReturn
 
-    import base.agents.history.checkpoint_postgres_walks as ckpt_mod
+    from base.agents.history.checkpoint import CheckpointReadError
     from base.config import settings
 
     # Through resolve_context_budget, not by re-deriving fraction * window here:
@@ -224,11 +223,11 @@ def test_checkpoint_read_failure_returns_zero(
     tid = create_agent(db_conn)
     attempts: list[object] = []
 
-    def fail_read(_saver: object, config: object) -> NoReturn:
-        attempts.append(config)
-        raise OSError("simulated DB connection lost")
+    def fail_read(_db: object, agent_id: object) -> NoReturn:
+        attempts.append(agent_id)
+        raise CheckpointReadError("simulated DB connection lost")
 
-    monkeypatch.setattr(ckpt_mod.HistoryPostgresSaver, "get_tuple", fail_read)
+    test_client.app.state.checkpoint_messages_loader = fail_read
     resp = test_client.get(f"/api/agents/{tid}/token-usage")
     assert resp.status_code == 200
     assert resp.json() == {

@@ -1,14 +1,11 @@
 from datetime import UTC, datetime, timedelta
 
-import pytest
-
 from base.api_contracts.agent_contract import AgentStatus
 from base.config import settings
 from gateway.inspect import _live
 
 
-def test_zero_jitter_span_disables_jitter(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(_live, "JITTER_SPAN_S", 0)
+def test_zero_jitter_span_disables_jitter() -> None:
     last_active_at = datetime(2026, 1, 1, tzinfo=UTC)
     heartbeat = _live.project_heartbeat(
         AgentStatus.IDLING,
@@ -18,6 +15,7 @@ def test_zero_jitter_span_disables_jitter(monkeypatch: pytest.MonkeyPatch) -> No
         agent_id=17,
         pending_inbound=False,
         last_pause=None,
+        jitter_span_s=0,
     )
     assert heartbeat.paused_until is None
     assert heartbeat.heartbeat_pending is False

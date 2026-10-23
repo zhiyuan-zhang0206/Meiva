@@ -11,7 +11,7 @@ from ops.rpc_schemas import TerminateAgentRequest
 
 @pytest.mark.asyncio
 async def test_hint_read_failure_never_changes_accepted_termination(
-    database: Database, monkeypatch: pytest.MonkeyPatch
+    database: Database,
 ) -> None:
     forwarded: list[int] = []
 
@@ -27,11 +27,14 @@ async def test_hint_read_failure_never_changes_accepted_termination(
     def fail_connection(*_args: object, **_kwargs: object) -> NoReturn:
         raise psycopg.OperationalError("hint read failed")
 
-    monkeypatch.setattr(lifecycle, "forward_to_home_machine", accept)
     with database.pool(max_size=2) as pool:
-        monkeypatch.setattr(pool, "connection", fail_connection)
         response = await lifecycle.terminate_agent_with_open_tasks(
-            17, TerminateAgentRequest(), pool, db=database
+            17,
+            TerminateAgentRequest(),
+            pool,
+            db=database,
+            forward_op=accept,
+            read_open_tasks=fail_connection,
         )
     assert forwarded == [17]
     assert response.model_dump() == {

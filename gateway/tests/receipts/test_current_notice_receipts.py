@@ -9,10 +9,9 @@ import pytest
 from fastapi.testclient import TestClient
 
 from base.api_contracts.idempotency import keyed_headers
-from base.config import settings
 from gateway.agents.notice_operations import current as current_notice_receipts
 from gateway.agents.notice_operations import router as guarded_notices
-from gateway.tests.auth.gateway_config import gateway_test_client
+from gateway.tests.auth.gateway_config import GatewayTestClient, gateway_test_client
 from gateway.tests.events.test_notices_endpoint import insert_notice, seed_agent
 
 SECRET = "guarded-notice-test-secret"  # noqa: S105 -- isolated credential
@@ -20,10 +19,11 @@ HEADERS = {"Idempotency-Key": "intent", "Idempotency-Scope": "principal-v1"}
 
 
 @pytest.fixture
-def client(monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClient]:
-    monkeypatch.setattr(settings.data_plane, "cluster_secret", SECRET)
+def client() -> Iterator[GatewayTestClient]:
     with gateway_test_client(
-        headers={"Authorization": f"Bearer {SECRET}"}, raise_server_exceptions=False
+        cluster_secret=SECRET,
+        headers={"Authorization": f"Bearer {SECRET}"},
+        raise_server_exceptions=False,
     ) as value:
         yield value
 
@@ -118,7 +118,7 @@ def test_concurrent_duplicate_has_one_acceptance(
 
 @pytest.mark.parametrize("dismiss", [False, True])
 def test_receipt_failure_rolls_back_mutation(
-    client: TestClient, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch, dismiss: bool
+    client: GatewayTestClient, db_conn: psycopg.Connection, dismiss: bool
 ) -> None:
     agent = seed_agent(db_conn)
     notice = insert_notice(db_conn, agent, "A")
@@ -127,19 +127,19 @@ def test_receipt_failure_rolls_back_mutation(
     def fail(*args: object) -> None:
         raise RuntimeError("before receipt commit")
 
-    monkeypatch.setattr(current_notice_receipts, "save_receipt", fail)
+    client.app.state.notice_receipt_writer = fail
     assert _send(client, agent, notice, dismiss).status_code == 500
     assert db_conn.execute(
         "SELECT title,resolved_at FROM agent_notices WHERE id=%s", (notice,)
     ).fetchone() == ("A", None)
     assert db_conn.execute("SELECT count(*) FROM notice_operation_receipts").fetchone() == (0,)
-    monkeypatch.setattr(current_notice_receipts, "save_receipt", original)
+    client.app.state.notice_receipt_writer = original
     assert _send(client, agent, notice, dismiss).status_code == 200
 
 
 @pytest.mark.parametrize("dismiss", [False, True])
 def test_lost_post_commit_response_replays_without_old_hint(
-    client: TestClient, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch, dismiss: bool
+    client: GatewayTestClient, db_conn: psycopg.Connection, dismiss: bool
 ) -> None:
     agent = seed_agent(db_conn)
     notice = insert_notice(db_conn, agent, "A")
@@ -149,12 +149,13 @@ def test_lost_post_commit_response_replays_without_old_hint(
         calls.append(args)
         raise RuntimeError("response lost after durable commit")
 
-    name = "publish_notice_resolved" if dismiss else "publish_notice_posted"
-    monkeypatch.setattr(guarded_notices.lifecycle, name, fail)
+    attr = "notice_publish_resolved" if dismiss else "notice_publish_posted"
+    setattr(client.app.state, attr, fail)
     assert _send(client, agent, notice, dismiss).status_code == 500
     replay = _send(client, agent, notice, dismiss)
     assert replay.status_code == 200
     assert len(calls) == 1
+    _ = guarded_notices
 
 
 @pytest.mark.parametrize(
@@ -257,7 +258,7 @@ def test_reply_concurrent_with_guarded_edit_has_no_lock_cycle(
 
 
 def test_creation_waits_for_guarded_owner_lock(
-    client: TestClient, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    client: GatewayTestClient, db_conn: psycopg.Connection
 ) -> None:
     from threading import Event
 
@@ -278,7 +279,7 @@ def test_creation_waits_for_guarded_owner_lock(
         locked.set()
         assert release.wait(5)
 
-    monkeypatch.setattr(current_notice_receipts, "save_receipt", held)
+    client.app.state.notice_receipt_writer = held
     with ThreadPoolExecutor(max_workers=2) as executor:
         edit = executor.submit(_send, client, agent, notice, False)
         assert locked.wait(5)

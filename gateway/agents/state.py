@@ -402,8 +402,13 @@ def get_trace_checkpoint_messages(
     with request.app.state.db_pool.connection() as conn:
         if not agent_exists(conn, agent_id):
             raise HTTPException(status_code=404, detail=f"agent {agent_id} not found")
+    trace_loader = getattr(
+        request.app.state,
+        "trace_checkpoint_messages_loader",
+        load_checkpoint_messages_by_trace,
+    )
     try:
-        checkpoint_id, messages = load_checkpoint_messages_by_trace(db, agent_id, trace_id)
+        checkpoint_id, messages = trace_loader(db, agent_id, trace_id)
     except CheckpointReadError as exc:
         _log.warning(
             "trace messages endpoint: checkpoint read failed for agent %s trace %s: %r",
@@ -471,8 +476,11 @@ def get_pending_messages(agent_id: int, request: Request) -> list[PendingInbound
 )
 def get_token_usage(agent_id: int, request: Request) -> TokenUsageResponse:
 
+    messages_loader = getattr(
+        request.app.state, "checkpoint_messages_loader", load_checkpoint_messages
+    )
     try:
-        messages = load_checkpoint_messages(request.app.state.db, agent_id)
+        messages = messages_loader(request.app.state.db, agent_id)
     except CheckpointReadError as exc:
         _log.warning(
             "token-usage: checkpoint read failed for agent %s, returning 0/0/0: %r",

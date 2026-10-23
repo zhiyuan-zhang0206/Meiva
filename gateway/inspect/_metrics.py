@@ -9,6 +9,7 @@ turns. Source loss remains explicit and is never repaired by a synchronous log s
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal
@@ -214,6 +215,7 @@ def inspect_snapshot(
     hours: StatsWindowHours | None,
     *,
     spawned_at: datetime,
+    note_coverage: Callable[..., None] = note_inspect_metrics_coverage,
 ) -> MetricsSnapshot:
     """Read one consistent DB snapshot; no HTTP/Loki request belongs on this path.
 
@@ -233,7 +235,7 @@ def inspect_snapshot(
     # Outside the read transaction: the coverage note is a diagnostic side
     # channel (background log + event; task #3869) and never joins
     # the snapshot itself.
-    note_inspect_metrics_coverage(agent_id, snapshot.metadata, spawned_at=spawned_at)
+    note_coverage(agent_id, snapshot.metadata, spawned_at=spawned_at)
     return snapshot
 
 

@@ -14,7 +14,6 @@ from pathlib import Path
 
 import pytest
 
-from base import config
 from base.host.net.auth import bearer_header
 from gateway.tests.agents.gateway_auth import without_credentials
 from gateway.tests.auth.gateway_config import gateway_test_client
@@ -33,17 +32,15 @@ def test_okf_graph_returns_html_with_injected_data() -> None:
     assert '"name": "Meiva OKF"' in body or '"name":"Meiva OKF"' in body
 
 
-def test_okf_graph_rejects_no_auth(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_okf_graph_rejects_no_auth() -> None:
     """Auth is the normal middleware — this route is not in the bypass list."""
-    monkeypatch.setattr(config.settings.data_plane, "cluster_secret", _SECRET)
-    with gateway_test_client() as client:
+    with gateway_test_client(cluster_secret=_SECRET) as client:
         resp = without_credentials(client).get("/api/okf/graph")
     assert resp.status_code == 401
 
 
-def test_okf_graph_accepts_bearer(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(config.settings.data_plane, "cluster_secret", _SECRET)
-    with gateway_test_client() as client:
+def test_okf_graph_accepts_bearer() -> None:
+    with gateway_test_client(cluster_secret=_SECRET) as client:
         resp = client.get("/api/okf/graph", headers=bearer_header(_SECRET))
     assert resp.status_code == 200
 

@@ -88,9 +88,10 @@ def get_alert_classes(
             classes = read_alert_classes(conn, start=now - window_delta(hours), end=now)
     except psycopg.errors.QueryCanceled as exc:
         raise HTTPException(status_code=503, detail="alert classes read timed out; retry") from exc
+    classes_limit = getattr(request.app.state, "alert_classes_limit", ALERT_CLASSES_LIMIT)
     return AlertClassesResponse(
         window_hours=hours,
-        classes=classes[:ALERT_CLASSES_LIMIT],
+        classes=classes[:classes_limit],
         total_classes=len(classes),
         total_events=sum(row.count for row in classes),
         as_of=datetime.now(UTC),
@@ -112,6 +113,7 @@ def get_alert_class_samples(
     predicate lets the partial index on warning/error/critical rows serve the newest-first scan.
     """
     now = datetime.now(UTC)
+    samples_limit = getattr(request.app.state, "alert_samples_limit", SAMPLES_LIMIT)
     try:
         with (
             request.app.state.db_pool.connection() as conn,
@@ -137,7 +139,7 @@ def get_alert_class_samples(
                     cluster_label(),
                     now - window_delta(hours),
                     now,
-                    SAMPLES_LIMIT,
+                    samples_limit,
                 ),
             )
             rows = cur.fetchall()

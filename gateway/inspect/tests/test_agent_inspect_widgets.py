@@ -64,14 +64,14 @@ def _widget(**over: Any) -> InspectWidgetSpec:
     return next(iter(registry.inspect_widgets()))
 
 
-def _patch_loader(monkeypatch: pytest.MonkeyPatch, *specs: InspectWidgetSpec) -> None:
+def _patch_loader(app: FastAPI, *specs: InspectWidgetSpec) -> None:
     """Seed the in-process loader with the given registry rows — the loader
     itself is covered by the tests at the bottom of this file."""
 
     def _loaded() -> list[InspectWidgetSpec]:
         return list(specs)
 
-    monkeypatch.setattr(_plugin_widgets, "load_inspect_widgets", _loaded)
+    app.state.inspect_widget_loader = _loaded
 
 
 def _insert_agent(db: psycopg.Connection, label: str = "t") -> int:
@@ -144,10 +144,8 @@ def _get(app: FastAPI, aid: int) -> Any:
 # ── empty registry / unknown agent ────────────────────────────────────────────
 
 
-def test_empty_registry_returns_empty(
-    app: FastAPI, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    _patch_loader(monkeypatch)
+def test_empty_registry_returns_empty(app: FastAPI, db_conn: psycopg.Connection) -> None:
+    _patch_loader(app)
     aid = _insert_agent(db_conn)
     db_conn.commit()
     resp = _get(app, aid)
@@ -155,11 +153,9 @@ def test_empty_registry_returns_empty(
     assert resp.json() == []
 
 
-def test_unknown_agent_404(
-    app: FastAPI, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_unknown_agent_404(app: FastAPI, db_conn: psycopg.Connection) -> None:
     """No agents_meta row -> 404 (same contract as /inspect)."""
-    _patch_loader(monkeypatch, _widget())
+    _patch_loader(app, _widget())
     db_conn.commit()
     assert _get(app, 999999).status_code == 404
 
@@ -167,9 +163,7 @@ def test_unknown_agent_404(
 # ── taskList resolution ───────────────────────────────────────────────────────
 
 
-def test_lists_only_the_agents_active_tasks(
-    app: FastAPI, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_lists_only_the_agents_active_tasks(app: FastAPI, db_conn: psycopg.Connection) -> None:
     aid = _insert_agent(db_conn)
     other = _insert_agent(db_conn, label="other")
     root = _root_task_id(db_conn)
@@ -190,7 +184,7 @@ def test_lists_only_the_agents_active_tasks(
         ("theirs", "in_progress", other),
     ):
         _insert_task(db_conn, owner=owner, parent_id=root, title=title, status=status)
-    _patch_loader(monkeypatch, _widget())
+    _patch_loader(app, _widget())
     db_conn.commit()
 
     body = _get(app, aid).json()
@@ -207,9 +201,7 @@ def test_lists_only_the_agents_active_tasks(
     assert widget["tasks"][0] == {"id": older, "title": "older", "priority": "P2"}
 
 
-def test_task_list_shows_every_active_task(
-    app: FastAPI, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_task_list_shows_every_active_task(app: FastAPI, db_conn: psycopg.Connection) -> None:
     aid = _insert_agent(db_conn)
     root = _root_task_id(db_conn)
     # Regression (user ruling 2026-09-17): the Inspector shows EVERY active
@@ -218,7 +210,7 @@ def test_task_list_shows_every_active_task(
         _insert_task(db_conn, owner=aid, parent_id=root, title=f"t{i}", updated_seconds_ago=i)
         for i in range(11)
     ]
-    _patch_loader(monkeypatch, _widget())
+    _patch_loader(app, _widget())
     db_conn.commit()
 
     tasks = _get(app, aid).json()[0]["tasks"]
@@ -227,9 +219,7 @@ def test_task_list_shows_every_active_task(
     assert [t["id"] for t in tasks] == ids
 
 
-def test_task_rows_carry_their_own_priority(
-    app: FastAPI, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_task_rows_carry_their_own_priority(app: FastAPI, db_conn: psycopg.Connection) -> None:
     """Each taskList row carries its own P0..P3 rung (task #3819) and the rows
     come rung-first, not newest-first (task #3866, user request 2026-09-17:
     the panel's order must be legible) — a mixed-priority queue sorts by rung,
@@ -248,7 +238,7 @@ def test_task_rows_carry_their_own_priority(
     p0 = _insert_task(
         db_conn, owner=aid, parent_id=root, title="urgent", priority="P0", updated_seconds_ago=120
     )
-    _patch_loader(monkeypatch, _widget())
+    _patch_loader(app, _widget())
     db_conn.commit()
 
     tasks = _get(app, aid).json()[0]["tasks"]
@@ -263,23 +253,19 @@ def test_task_rows_carry_their_own_priority(
     ]
 
 
-def test_widget_without_tasks_is_dropped(
-    app: FastAPI, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_widget_without_tasks_is_dropped(app: FastAPI, db_conn: psycopg.Connection) -> None:
     aid = _insert_agent(db_conn)
-    _patch_loader(monkeypatch, _widget())
+    _patch_loader(app, _widget())
     db_conn.commit()
     assert _get(app, aid).json() == []
 
 
-def test_widgets_keep_registration_order(
-    app: FastAPI, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_widgets_keep_registration_order(app: FastAPI, db_conn: psycopg.Connection) -> None:
     aid = _insert_agent(db_conn)
     root = _root_task_id(db_conn)
     _insert_task(db_conn, owner=aid, parent_id=root, title="work")
     _patch_loader(
-        monkeypatch,
+        app,
         _widget(id="second", order=750),
         _widget(id="first", order=10),
     )
@@ -303,15 +289,13 @@ def _widget_source(widget_id: str) -> str:
 
 
 @pytest.fixture(autouse=True)
-def _fixture_plugins_importable(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest
-) -> None:
+def _fixture_plugins_importable(tmp_path: Path, request: pytest.FixtureRequest) -> None:
     """Let the loader (which imports by dotted name) find fixture plugins written under `tmp_path`,
     and forget their modules afterwards."""
-    shipped_path = shipped_plugins.__path__
-    monkeypatch.setattr(shipped_plugins, "__path__", [*shipped_path, str(tmp_path)])
+    shipped_plugins.__path__.append(str(tmp_path))
 
     def _forget() -> None:
+        shipped_plugins.__path__.remove(str(tmp_path))
         for name in [m for m in sys.modules if m.startswith("meiva_builtins.plugins.fx_")]:
             del sys.modules[name]
 
@@ -350,41 +334,32 @@ def _shipped_fleet_module() -> Any:
     return path
 
 
-def test_loader_imports_shipped_fleet_widget(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_loader_imports_shipped_fleet_widget() -> None:
     module = _shipped_fleet_module()
-    monkeypatch.setattr(_plugin_widgets, "enabled_inspector_modules", lambda: [module])
 
-    specs = _plugin_widgets.load_inspect_widgets()
+    specs = _plugin_widgets.load_inspect_widgets([module])
     assert [(s.plugin, s.id, s.kind, s.order) for s in specs] == [
         ("meiva_fleet", "today-tasks", "taskList", 250)
     ]
     assert specs[0].title is None
 
 
-def test_loader_filters_widgets_of_disabled_plugins(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_loader_filters_widgets_of_disabled_plugins() -> None:
     """A plugin disabled after its module was imported (and served) must not
     serve widgets: the registry is rebuilt from the enabled set on every call."""
     module = _shipped_fleet_module()
-    monkeypatch.setattr(_plugin_widgets, "enabled_inspector_modules", lambda: [module])
-    assert [s.id for s in _plugin_widgets.load_inspect_widgets()] == ["today-tasks"]
-
-    def _no_modules() -> list[Any]:
-        return []
-
-    monkeypatch.setattr(_plugin_widgets, "enabled_inspector_modules", _no_modules)
-    assert _plugin_widgets.load_inspect_widgets() == []
+    assert [s.id for s in _plugin_widgets.load_inspect_widgets([module])] == ["today-tasks"]
+    assert _plugin_widgets.load_inspect_widgets([]) == []
 
 
-def test_enabled_modules_skips_a_disabled_plugin(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_enabled_modules_skips_a_disabled_plugin() -> None:
     """`enabled_inspector_modules` reads the enable bit per request."""
     from base.packages.plugins import enable_config
 
     module = _shipped_fleet_module()
-    monkeypatch.setattr(
-        enable_config,
-        "installed_plugin_dirs",
-        lambda: {"meiva_fleet": module.parent},
-    )
+
+    def _installed() -> dict[str, Path]:
+        return {"meiva_fleet": module.parent}
 
     def _loader(config: enable_config.PluginsConfig) -> Any:
         def _load(_known: set[str]) -> enable_config.PluginsConfig:
@@ -395,19 +370,23 @@ def test_enabled_modules_skips_a_disabled_plugin(monkeypatch: pytest.MonkeyPatch
     enabled = enable_config.PluginsConfig(
         plugins={"meiva_fleet": enable_config.PluginEntry(enabled=True)}
     )
-    monkeypatch.setattr(enable_config, "load_for_runtime", _loader(enabled))
-    assert _plugin_widgets.enabled_inspector_modules() == [module]
+    assert _plugin_widgets.enabled_inspector_modules(
+        installed_dirs=_installed, runtime_loader=_loader(enabled)
+    ) == [module]
 
     disabled = enable_config.PluginsConfig(
         plugins={"meiva_fleet": enable_config.PluginEntry(enabled=False)}
     )
-    monkeypatch.setattr(enable_config, "load_for_runtime", _loader(disabled))
-    assert _plugin_widgets.enabled_inspector_modules() == []
+    assert (
+        _plugin_widgets.enabled_inspector_modules(
+            installed_dirs=_installed, runtime_loader=_loader(disabled)
+        )
+        == []
+    )
 
 
 def test_loader_skips_a_plugin_whose_inspector_fails_to_import(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
     loguru_records: list[dict[str, Any]],
     emitted_events: EmittedEvents,
 ) -> None:
@@ -425,11 +404,10 @@ def test_loader_skips_a_plugin_whose_inspector_fails_to_import(
         "import _missing_for_the_test\n" + _widget_source("w"),
         widget_id="w",
     )
-    monkeypatch.setattr(_plugin_widgets, "enabled_inspector_modules", lambda: [bad, good])
 
     # A failed import must not leave the module behind (importlib's own cleanup).
     leftover = "meiva_builtins.plugins.fx_broken_plugin.inspector"
-    specs = _plugin_widgets.load_inspect_widgets()  # must not raise
+    specs = _plugin_widgets.load_inspect_widgets([bad, good])  # must not raise
     assert leftover not in sys.modules
 
     # the healthy plugin still serves; the broken one contributes nothing
@@ -444,12 +422,11 @@ def test_loader_skips_a_plugin_whose_inspector_fails_to_import(
     assert "ModuleNotFoundError" in str(attrs[0]["error"])
 
     # every plugin broken -> still no raise, an empty registry
-    monkeypatch.setattr(_plugin_widgets, "enabled_inspector_modules", lambda: [bad])
-    assert _plugin_widgets.load_inspect_widgets() == []
+    assert _plugin_widgets.load_inspect_widgets([bad]) == []
 
 
 def test_loader_skips_a_failing_inspector_and_recovers(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, loguru_records: list[dict[str, Any]]
+    tmp_path: Path, loguru_records: list[dict[str, Any]]
 ) -> None:
     """An inspector.py that raises contributes nothing: a declaration is
     admitted whole or not at all, so a fixed file recovers on the next request
@@ -473,7 +450,7 @@ def test_loader_skips_a_failing_inspector_and_recovers(
 
 
 def test_loader_refuses_a_plugin_declaring_a_widget_id_twice(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, loguru_records: list[dict[str, Any]]
+    tmp_path: Path, loguru_records: list[dict[str, Any]]
 ) -> None:
     """A widget id repeated within one plugin refuses that plugin whole (none
     of its widgets serve); another plugin's widgets are untouched."""

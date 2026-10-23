@@ -8,9 +8,7 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
-from base.config import settings
-from gateway.alerts import router as alerts_router
-from gateway.tests.auth.gateway_config import gateway_test_client
+from gateway.tests.auth.gateway_config import GatewayTestClient, gateway_test_client
 from gateway.tests.routers.alerts_api.alerts_support import (
     alert,
     capture_im,
@@ -128,7 +126,7 @@ def test_live_alerts_never_age_out_and_history_uses_recovery_time(
 
 
 def test_list_default_limit_comes_from_display_config(
-    db_conn: psycopg.Connection, client: TestClient, monkeypatch: pytest.MonkeyPatch
+    db_conn: psycopg.Connection, client: GatewayTestClient
 ) -> None:
     now = datetime.now(UTC)
     seed_alert_rows(
@@ -145,7 +143,7 @@ def test_list_default_limit_comes_from_display_config(
             for i in range(3)
         ],
     )
-    monkeypatch.setattr(settings.display, "alerts_default_limit", 2)
+    client.app.state.alerts_default_limit = 2
     resp = client.get("/api/alerts")
     assert resp.status_code == 200
     assert len(resp.json()["alerts"]) == 2
@@ -231,7 +229,7 @@ def test_list_returns_source(db_conn: psycopg.Connection, client: TestClient) ->
     assert body["alerts"][0]["source"] == "grafana"
 
 
-def test_stream_endpoint_is_sse(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_stream_endpoint_is_sse() -> None:
 
     seen: dict[str, Any] = {}
 
@@ -240,27 +238,27 @@ def test_stream_endpoint_is_sse(monkeypatch: pytest.MonkeyPatch) -> None:
         seen["kwargs"] = kwargs
         yield b": stream open\n\n"
 
-    monkeypatch.setattr(alerts_router, "event_stream", fake_stream)
-
-    with gateway_test_client() as client, client.stream("GET", "/api/alerts/stream") as resp:
-        assert resp.status_code == 200
-        assert resp.headers["content-type"].startswith("text/event-stream")
-        assert resp.headers["cache-control"] == "no-cache"
-        assert resp.headers["x-accel-buffering"] == "no"
+    with gateway_test_client() as client:
+        client.app.state.alerts_event_stream = fake_stream
+        with client.stream("GET", "/api/alerts/stream") as resp:
+            assert resp.status_code == 200
+            assert resp.headers["content-type"].startswith("text/event-stream")
+            assert resp.headers["cache-control"] == "no-cache"
+            assert resp.headers["x-accel-buffering"] == "no"
     kwargs = seen["kwargs"]
     assert kwargs["channel"] == "meiva:alerts"
     assert kwargs["broadcast"] is True
 
 
 def test_a_group_of_instances_is_one_im_and_one_row_each(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    db_conn: psycopg.Connection,
 ) -> None:
-    sent = capture_im(monkeypatch)
     alerts = [
         alert(alertname="machine offline", fingerprint=f"g{n}", summary=f"machine m{n} down")
         for n in range(4)
     ]
     with gateway_test_client() as client:
+        sent = capture_im(client)
         resp = ingest(client, webhook(alerts=alerts))
     assert resp.json() == {"processed": 4, "inserted": 4, "updated": 0, "notified": 4}
     assert len(sent) == 1
@@ -271,16 +269,14 @@ def test_a_group_of_instances_is_one_im_and_one_row_each(
         assert cur.fetchone() == (4, 4)
 
 
-def test_instances_of_different_rules_in_one_post_are_separate_messages(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    sent = capture_im(monkeypatch)
+def test_instances_of_different_rules_in_one_post_are_separate_messages() -> None:
     alerts = [
         alert(alertname="rule-a", fingerprint="a1"),
         alert(alertname="rule-a", fingerprint="a2"),
         alert(alertname="rule-b", fingerprint="b1"),
     ]
     with gateway_test_client() as client:
+        sent = capture_im(client)
         resp = ingest(client, webhook(alerts=alerts))
     assert resp.json()["notified"] == 3
     assert len(sent) == 2
@@ -288,11 +284,11 @@ def test_instances_of_different_rules_in_one_post_are_separate_messages(
 
 
 def test_a_failed_group_send_leaves_every_instance_unnotified_for_the_next_resend(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    db_conn: psycopg.Connection,
 ) -> None:
-    sent = capture_im(monkeypatch, ok=False)
     alerts = [alert(fingerprint=f"r{n}") for n in range(2)]
     with gateway_test_client() as client:
+        sent = capture_im(client, ok=False)
         assert ingest(client, webhook(alerts=alerts)).json()["notified"] == 0
         sent.clear()
 
@@ -300,19 +296,19 @@ def test_a_failed_group_send_leaves_every_instance_unnotified_for_the_next_resen
             sent.append(text)
             return True
 
-        monkeypatch.setattr(alerts_router, "notify_alert_group", native_sender(_ok))
+        client.app.state.alert_group_notifier = native_sender(_ok)
         assert ingest(client, webhook(alerts=alerts)).json()["notified"] == 2
     assert len(sent) == 1
 
 
-def test_a_resolved_group_is_one_recovery_message(monkeypatch: pytest.MonkeyPatch) -> None:
-    sent = capture_im(monkeypatch)
+def test_a_resolved_group_is_one_recovery_message() -> None:
     firing = [alert(fingerprint=f"x{n}") for n in range(3)]
     resolved = [
         alert(status="resolved", fingerprint=f"x{n}", ends_at="2026-08-04T11:00:00Z")
         for n in range(3)
     ]
     with gateway_test_client() as client:
+        sent = capture_im(client)
         ingest(client, webhook(alerts=firing))
         sent.clear()
         assert ingest(client, webhook(status="resolved", alerts=resolved)).json()["notified"] == 3
