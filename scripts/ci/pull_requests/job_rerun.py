@@ -32,7 +32,7 @@ from __future__ import annotations
 
 import json
 import subprocess
-from typing import Any
+from typing import TypedDict, cast
 
 from base.host.system.hostport import Host
 
@@ -56,7 +56,46 @@ class CiJobRerunError(RuntimeError):
     """A GitHub query needed to list failed jobs could not be answered."""
 
 
-def _gh_api_json(args: list[str], what: str, *, host: Host) -> Any:
+class WorkflowRun(TypedDict):
+    run_id: int
+    status: str
+
+
+class WorkflowJob(TypedDict):
+    name: str
+    job_id: int
+    run_id: int
+    conclusion: str | None
+    run_status: str
+
+
+def _response_rows(data: object, field: str) -> list[dict[str, object]]:
+    if not isinstance(data, dict):
+        raise CiJobRerunError(f"gh api {field} response must be an object")
+    raw_rows = cast("dict[str, object]", data).get(field)
+    if not isinstance(raw_rows, list):
+        raise CiJobRerunError(f"gh api {field} must be a list")
+    rows: list[dict[str, object]] = []
+    for index, row in enumerate(cast("list[object]", raw_rows)):
+        if not isinstance(row, dict):
+            raise CiJobRerunError(f"gh api {field}[{index}] must be an object")
+        rows.append(cast("dict[str, object]", row))
+    return rows
+
+
+def _identifier(value: object, field: str) -> int:
+    if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
+        raise CiJobRerunError(f"gh api {field} must be a positive integer")
+    return value
+
+
+def _text(value: object, field: str) -> str:
+    if not isinstance(value, str):
+        raise CiJobRerunError(f"gh api {field} must be a string")
+    return value
+
+
+def _gh_api_json(args: list[str], what: str, *, host: Host) -> object:
     """One `gh api` call parsed as JSON.
 
     A non-zero gh exit or unparseable stdout raises `CiJobRerunError`: the
@@ -112,7 +151,7 @@ def _head_sha_of(pr: str | int, repo: str, *, host: Host) -> str:
     return sha
 
 
-def _current_runs(head_sha: str, repo: str, *, host: Host) -> list[dict]:
+def _current_runs(head_sha: str, repo: str, *, host: Host) -> list[WorkflowRun]:
     """The newest run per workflow name for the PR head, with its REST status.
 
     One head commit hosts several workflow runs (CI, QA reviews, re-runs). A
@@ -128,28 +167,21 @@ def _current_runs(head_sha: str, repo: str, *, host: Host) -> list[dict]:
         host=host,
     )
     newest: dict[str, tuple[str, int, str]] = {}
-    for run in data.get("workflow_runs") or []:
-        if not isinstance(run, dict):
-            continue
-        run_id = run.get("id")
-        name = run.get("name")
-        created_at = run.get("created_at")
-        status = run.get("status")
-        if (
-            run_id is None
-            or not isinstance(name, str)
-            or created_at is None
-            or not isinstance(status, str)
-        ):
-            continue
+    for run in _response_rows(data, "workflow_runs"):
+        run_id = _identifier(run.get("id"), "workflow run id")
+        name = _text(run.get("name"), "workflow run name")
+        created_at = _text(run.get("created_at"), "workflow run created_at")
+        status = _text(run.get("status"), "workflow run status")
         if name not in newest or created_at > newest[name][0]:
             newest[name] = (created_at, run_id, status)
-    runs = [{"run_id": run_id, "status": status} for _, run_id, status in newest.values()]
+    runs: list[WorkflowRun] = [
+        {"run_id": run_id, "status": status} for _, run_id, status in newest.values()
+    ]
     runs.sort(key=lambda run: run["run_id"])
     return runs
 
 
-def _all_jobs(head_sha: str, repo: str, *, host: Host) -> list[dict]:
+def _all_jobs(head_sha: str, repo: str, *, host: Host) -> list[WorkflowJob]:
     """Every completed-or-pending job of the head's current workflow runs.
 
     The projection keeps the REST job id (`.id`, the numeric identifier used by
@@ -157,29 +189,30 @@ def _all_jobs(head_sha: str, repo: str, *, host: Host) -> list[dict]:
     objects do not carry (issue #1945) — and the containing run's `status` and
     `run_id`, on which re-run eligibility turns (task #3764).
     """
-    jobs: list[dict] = []
+    jobs: list[WorkflowJob] = []
     for run in _current_runs(head_sha, repo, host=host):
         data = _gh_api_json(
             [f"repos/{repo}/actions/runs/{run['run_id']}/jobs?per_page=100"],
             f"run {run['run_id']} jobs",
             host=host,
         )
-        for job in data.get("jobs") or []:
-            if not isinstance(job, dict):
-                continue
+        for job in _response_rows(data, "jobs"):
+            conclusion = job.get("conclusion")
+            if conclusion is not None and not isinstance(conclusion, str):
+                raise CiJobRerunError("gh api job conclusion must be a string or null")
             jobs.append(
                 {
-                    "name": job.get("name"),
-                    "job_id": job.get("id"),
-                    "run_id": job.get("run_id", run["run_id"]),
-                    "conclusion": job.get("conclusion"),
+                    "name": _text(job.get("name"), "job name"),
+                    "job_id": _identifier(job.get("id"), "job id"),
+                    "run_id": _identifier(job.get("run_id", run["run_id"]), "job run_id"),
+                    "conclusion": conclusion,
                     "run_status": run["status"],
                 }
             )
     return jobs
 
 
-def list_failed_jobs(pr: str | int, repo: str, *, host: Host) -> list[dict[str, Any]]:
+def list_failed_jobs(pr: str | int, repo: str, *, host: Host) -> list[WorkflowJob]:
     """Completed-failed jobs across every current workflow run of the PR's head.
 
     Each entry carries the job's REST id and conclusion plus the containing
@@ -192,13 +225,13 @@ def list_failed_jobs(pr: str | int, repo: str, *, host: Host) -> list[dict[str, 
     return [
         j
         for j in _all_jobs(sha, repo, host=host)
-        if isinstance(j.get("conclusion"), str) and j["conclusion"].upper() in FAILING
+        if j["conclusion"] is not None and j["conclusion"].upper() in FAILING
     ]
 
 
 def rerun_failed_jobs(
     pr: str | int, repo: str, *, host: Host
-) -> tuple[list[dict], list[dict], list[str]]:
+) -> tuple[list[WorkflowJob], list[WorkflowJob], list[str]]:
     """Re-run the failed jobs of the PR head's current runs.
 
     Returns `(reran, waiting, errors)`: jobs whose re-run was accepted; jobs
@@ -210,10 +243,10 @@ def rerun_failed_jobs(
     `rerun-failed-jobs` call, because a second job-level rerun of the same run
     is refused while the first's new attempt runs.
     """
-    reran: list[dict] = []
-    waiting: list[dict] = []
+    reran: list[WorkflowJob] = []
+    waiting: list[WorkflowJob] = []
     errors: list[str] = []
-    by_run: dict[int, list[dict]] = {}
+    by_run: dict[int, list[WorkflowJob]] = {}
     for job in list_failed_jobs(pr, repo, host=host):
         by_run.setdefault(job["run_id"], []).append(job)
     for run_id, jobs in by_run.items():
