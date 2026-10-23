@@ -1,5 +1,3 @@
-"""Command line: check, explain, sync --prune, bootstrap, debt and roles."""
-
 from __future__ import annotations
 
 import argparse
@@ -17,8 +15,14 @@ from meizel.contracts.policy import load_policy, policy_at
 from meizel.contracts.sync import sync_manifests
 from meizel.graph.model import Diagnostic, MeizelError
 from meizel.graph.universe import load_universe, toplevel
+from meizel.source_evidence import load_report
 
 __all__ = ["main"]
+
+# meiva:note
+# This text is consumed by argparse as native CLI help, not discarded source prose.
+# meiva:link meizel/docs/checker/checker.meiva.okf.md
+_DESCRIPTION = "Command line: check, explain, sync --prune, bootstrap, debt and roles."
 
 
 # meiva:note
@@ -80,7 +84,7 @@ def _run_check(
 
 
 def _build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="python -m meizel", description=__doc__)
+    parser = argparse.ArgumentParser(prog="python -m meizel", description=_DESCRIPTION)
     parser.add_argument(
         "--repo", type=Path, help="repository root (default: the cwd's git toplevel)"
     )
@@ -97,6 +101,9 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     show = commands.add_parser("explain", help="show a node's view of the graph")
     show.add_argument("path")
+    show.add_argument(
+        "--typescript-index", type=Path, help="explicit source-evidence index; never starts Node"
+    )
     sync = commands.add_parser("sync", help="maintain manifests")
     sync.add_argument("--prune", action="store_true", help="remove stale declared edges")
     sync.add_argument(
@@ -240,7 +247,10 @@ def main(argv: list[str] | None = None) -> int:
                 print(line)
             return 0
         if args.command == "explain":
-            print(explain(analyze(root, jobs=args.jobs), _relative_target(root, base, args.path)))
+            analysis = analyze(root, jobs=args.jobs)
+            node = _relative_target(root, base, args.path)
+            report = load_report(root, set(analysis.universe.files), node, args.typescript_index)
+            print(explain(analysis, node, report))
             return 0
         if args.command == "roles":
             return enumerations.run_roles(root, args.mode, tuple(getattr(args, "role_names", ())))

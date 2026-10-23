@@ -100,4 +100,7 @@ max-params = 6
 max-attr-hops = 3
 ```
 
+Explicit TS holder receipts and their non-gating limits:
+[[meizel/docs/checker/typescript-evidence.meiva.okf.md]].
+
 Parent: [[meizel/docs/checker/checker.meiva.okf.md|the checker]].

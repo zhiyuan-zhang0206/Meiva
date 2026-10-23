@@ -9,6 +9,7 @@ from meizel.graph.model import Fact, MeizelError
 from meizel.graph.universe import MANIFEST, parent_of
 from meizel.language.fixtures import FixtureFunction, FixtureIndex, FixtureRequest
 from meizel.language.scan import FileScan
+from meizel.source_evidence import TsReport, render_ts_report
 
 __all__ = ["explain"]
 
@@ -75,7 +76,7 @@ def _directory_lines(analysis: Analysis, node: str) -> list[str]:
     return lines
 
 
-def explain(analysis: Analysis, node: str) -> str:
+def explain(analysis: Analysis, node: str, ts_report: TsReport) -> str:
     universe = analysis.universe
     if node not in universe.files and node not in universe.dirs:
         raise MeizelError(f"{node or '.'}: not a tracked file or directory")
@@ -93,6 +94,7 @@ def explain(analysis: Analysis, node: str) -> str:
     lines.append(f"used by ({len(used_by)} fact edges):")
     lines.extend(_group(used_by, outgoing=False))
     lines.extend(_python_evidence(analysis, node))
+    lines.extend(render_ts_report(ts_report))
     return "\n".join(lines)
 
 

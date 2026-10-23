@@ -48,3 +48,6 @@ proves absence of implicit requests or runtime effects.
 Explicit [[tests/fixtures/docs/static-environment.meiva.okf.md|static ownership and refusal canaries]]
 continue to own static-test admission. Explain neither admits a test to that lane
 nor measures its setup cost or authorizes removal of native services.
+
+Explicit [[meizel/docs/checker/typescript-evidence.meiva.okf.md|TypeScript holder receipts]]
+add independent non-gating source evidence only when an index is supplied.

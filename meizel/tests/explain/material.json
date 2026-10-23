@@ -1,0 +1,8 @@
+{
+  "direct-map": "export const cache = new Map<string, number>();\n",
+  "nested-map": "export const state = { cache: new Map<string, number>() };\n",
+  "frozen-set": "export const seen = Object.freeze(new Set<string>());\n",
+  "fresh-local": "export function count(values: readonly string[]): number {\n  const cache = new Map<string, number>();\n  for (const value of values) cache.set(value, 1);\n  return cache.size;\n}\n",
+  "rebound-map": "class Map<K, V> { readonly label = 'local class'; }\nexport const cache = new Map<string, number>();\n",
+  "unknown-factory": "declare function makeCache(): unknown;\nexport const state = { cache: makeCache() };\n"
+}
