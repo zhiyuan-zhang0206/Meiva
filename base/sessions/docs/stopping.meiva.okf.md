@@ -14,7 +14,7 @@ tags:
 ## What it is
 
 The primitives for ending a process Meiva started. Normal `stop`
-uses `cli/commands/lifecycle/service_stop.py`: deliver a verified graceful signal and
+uses `cli/commands/lifecycle/stop/shell_sessions.py`: deliver a verified graceful signal and
 wait for actual process exit without implicit escalation. Its shared deadline
 reports an incomplete stop if resources remain. Persistent shell sessions are the
 exception: a stop closes known shell sessions with bounded known-group
@@ -42,7 +42,7 @@ without joining stuck executor threads. See [[session-backend.meiva.okf.md|sessi
 
 ### Stop convergence when a service leader is gone
 
-`cli/commands/lifecycle/service_stop.py` treats a confirmed-dead leader as one step,
+`cli/commands/lifecycle/stop/shell_sessions.py` treats a confirmed-dead leader as one step,
 not the end of the stop. A live leader still runs its own graceful cleanup
 first; once the leader is confirmed dead, its captured, birth-validated
 descendants are signalled — at most once each, SIGTERM on POSIX — so a

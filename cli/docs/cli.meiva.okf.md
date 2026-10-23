@@ -57,7 +57,7 @@ either only with `--keep-shell-sessions`. See [operator procedure](../../docs/co
 `cli/start_identity.py` durably records the home, capabilities, credentials, and the
 port table under the home lifecycle lock; init stops there. `cli/start_intent.py`
 admits an initialized home for `meiva start` (Settings-free, no side effects), holds
-the lock through readiness, and a repeated start preserves identity; the service
+the lock through readiness (`admitted_start`), and a repeated start preserves identity; the service
 selection is named again on every start and never stored. A home never initialized, one whose init was
 interrupted, unknown existing resources, and a destroyed home refuse a start; an
 initialized home refuses an init. The contract is in
@@ -87,7 +87,7 @@ Per-cluster pg/redis bring-up, host convergence, the host lifecycle and the
 - **Ops-layer only**: not exposed to agents (they use the `meiva.*` SDK).
 - **Settings-independent**: `meiva init` and `meiva start`'s admission are specially routed in `main()` before settings-gated imports — no `base.config` (stdlib + `base.host.env.dotenv_boot`). `meiva config` uses only registry metadata and direct local files until a full Settings consumer needs the singleton, so a broken `.env` remains repairable. `meiva pty` is settings-lite and data-plane-independent.
 - **Cold stop**: a normal stop of a running root loads the cluster configuration. Explicit force stop, or a stop of a home whose meiva-root is not running, can skip gateway configuration fetch; the latter reads the root's instance lock before Settings bootstrap.
-- **Migrations are not a command**: `cli/commands/lifecycle/migrations.py:cmd_migrations_apply` runs internally from `meiva start`.
+- **Migrations are not a command**: `cli/commands/lifecycle/start/migrations.py:cmd_migrations_apply` runs internally from `meiva start`.
 
 ## Entry Points
 

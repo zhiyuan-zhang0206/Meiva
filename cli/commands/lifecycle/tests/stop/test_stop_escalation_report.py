@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from base.deploy.lifecycle import status_journal
-from cli.commands.lifecycle import _temporary_stop as command
+from cli.commands.lifecycle.stop.report import finish_stop
 from cli.commands.lifecycle.tests.stop.stop_support import home as home
 
 NOTE = "postgres fast shutdown did not complete within 277s; killed leftover processes: 4242"
@@ -17,7 +17,7 @@ def test_an_escalated_shutdown_is_in_the_report_and_the_journal(
 ) -> None:
     assert status_journal.begin("stop")
 
-    assert command.finish_stop(owns_journal=True, notes=[NOTE]) == 0
+    assert finish_stop(owns_journal=True, notes=[NOTE], clients=[]) == 0
 
     assert f"Stop completed with an escalation: {NOTE}" in capsys.readouterr().err
     journal = json.loads((home / "run/lifecycle-op.json").read_text())
@@ -30,7 +30,7 @@ def test_a_stop_without_an_escalation_says_nothing_extra(
 ) -> None:
     assert status_journal.begin("stop")
 
-    assert command.finish_stop(owns_journal=True, notes=[]) == 0
+    assert finish_stop(owns_journal=True, notes=[], clients=[]) == 0
 
     assert capsys.readouterr().err == ""
     journal = json.loads((home / "run/lifecycle-op.json").read_text())
@@ -41,7 +41,7 @@ def test_pooler_clients_at_the_stop_land_in_the_journal(home: Path) -> None:
     line = "1 client(s) still connected when the pooler stops: 10.1.2.7:5432 db=meiva"
     assert status_journal.begin("stop")
 
-    assert command.finish_stop(owns_journal=True, notes=[], clients=[line]) == 0
+    assert finish_stop(owns_journal=True, notes=[], clients=[line]) == 0
 
     journal = json.loads((home / "run/lifecycle-op.json").read_text())
     assert journal["result"]["pooler_clients"] == [line]

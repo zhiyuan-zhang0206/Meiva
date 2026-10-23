@@ -156,10 +156,6 @@ def _skip_host_integration(_ctx: converge_host.ConvergeCtx) -> None:
     return
 
 
-def _is_not_default_home(_home: Path) -> bool:
-    return False
-
-
 @contextmanager
 def _stub_host_integrations() -> Generator[None]:
     """Stub only production steps that reach host services.
@@ -244,13 +240,11 @@ def test_converge_ignores_a_dirty_wrong_branch_memory_pool(
     monkeypatch.setattr(proc, "run_bounded", _record_run_bounded)
     monkeypatch.setattr(memory_repo, "run_bounded", _record_run_bounded)
     monkeypatch.setattr(subprocess, "run", _record_subprocess_run)
-    monkeypatch.setattr(converge_host, "is_default_home", _is_not_default_home)
 
     with _stub_host_integrations():
         converge_host.converge_host(
             tmp_path / "repo",
             frozenset({"agent-runner"}),
-            meiva_home=paths.meiva_home(),
             steps=converge_host.CONVERGE_STEPS,
             services=frozenset(),
             database_factory=operator_database,

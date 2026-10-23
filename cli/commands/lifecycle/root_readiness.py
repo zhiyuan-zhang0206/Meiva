@@ -2,33 +2,31 @@
 
 from __future__ import annotations
 
-from typing import Any
+import time
+from pathlib import Path
 
-from base.clock import Timers
 from base.deploy import start_trace
 from base.log import logger
+from base.native_process.root_control.client import RootClient
 from cli.commands.lifecycle import root_driver
+from cli.commands.lifecycle.root_control.poll_plan import (
+    Expired,
+    Retry,
+    observe_readiness,
+    unmet_step,
+)
+from cli.commands.lifecycle.root_control.snapshot import RootSnapshot, UnitRow, root_units
 from cli.commands.probe import ReadinessWait
 from services.supervision.roster.service_spec import ServiceSpec
 
 
-def wait_for_service_tree(
-    roster: tuple[ServiceSpec, ...],
-    *,
-    timeout_s: float,
-    timers: Timers,
-) -> ReadinessWait:
-    """Verify the same root-owned roster after launch."""
-    return wait_for_root_services_ready(roster, timeout_s=timeout_s, timers=timers)
-
-
 def health_verdicts(
-    specs: tuple[ServiceSpec, ...], status: dict[str, Any] | None
+    specs: tuple[ServiceSpec, ...], snapshot: RootSnapshot | None
 ) -> dict[str, str]:
     """Probe now instead of trusting a cached health result.
 
     A probe that raises is logged and reads as "unavailable"."""
-    if status is None:
+    if snapshot is None:
         return {}
     verdicts: dict[str, str] = {}
     for spec in specs:
@@ -44,71 +42,50 @@ def health_verdicts(
     return verdicts
 
 
-def unit_ready(unit: dict[str, Any] | None, verdict: str | None) -> bool:
-    """Require a running unit and a positive protocol response."""
-    if unit is None:
-        return False
-    if unit.get("state") != "running":
-        return False
-    return verdict == "alive"
+# meiva:note
+# Observe the service table and ask the current protocol probes.
+def _fresh_round(
+    client: RootClient, specs: tuple[ServiceSpec, ...]
+) -> tuple[dict[str, UnitRow], dict[str, str]]:
+    snapshot = root_driver.root_status(client)
+    units = root_units(snapshot) if snapshot is not None else {}
+    return units, health_verdicts(specs, snapshot)
 
 
-def _unit_gone(unit: dict[str, Any] | None) -> bool:
-    """A stopped unit cannot become ready without explicit reconciliation."""
-    return unit is not None and unit.get("state") == "stopped"
-
-
-def _fresh_readiness_round(
-    client: Any, specs: tuple[ServiceSpec, ...]
-) -> tuple[dict[str, dict[str, Any]], dict[str, str]]:
-    """Observe the service table and ask the current protocol probes."""
-    status = root_driver.root_status(client)
-    units = root_driver.root_units(status) if status is not None else {}
-    verdicts = health_verdicts(specs, status)
-    return units, verdicts
-
-
-def _unready_services(
-    specs: tuple[ServiceSpec, ...],
-    units: dict[str, dict[str, Any]],
-    verdicts: dict[str, str],
-) -> tuple[ServiceSpec, ...]:
-    return tuple(
-        spec
-        for spec in specs
-        if not unit_ready(units.get(spec.session), verdicts.get(spec.session))
-    )
-
-
-def wait_for_root_services_ready(
-    specs: tuple[ServiceSpec, ...], timeout_s: float, *, timers: Timers
+# meiva:note
+# Wait for the core services of the same root-owned roster after launch.
+#
+# Optional availability is a diagnostic snapshot, never a reason to keep waiting.
+def wait_for_service_tree(
+    roster: tuple[ServiceSpec, ...],
+    *,
+    timeout_s: float,
+    home: Path,
+    poll_interval_s: float = root_driver.READY_POLL_INTERVAL_S,
 ) -> ReadinessWait:
-    """Wait for core services; optional availability is a diagnostic snapshot."""
-    from base.deploy.progress_timeout import CRITICAL_SERVICE_SESSIONS
-
-    client = root_driver.root_client()
-    started_at = timers.monotonic()
-    deadline = started_at + timeout_s
-    critical = tuple(s for s in specs if s.session in CRITICAL_SERVICE_SESSIONS)
-    non_critical = tuple(s for s in specs if s.session not in CRITICAL_SERVICE_SESSIONS)
+    client = root_driver.root_client(home)
+    by_session = {spec.session: spec for spec in roster}
+    started_at = time.monotonic()
     recorded: set[str] = set()
     while True:
-        units, verdicts = _fresh_readiness_round(client, specs)
-        unready = _unready_services(critical, units, verdicts)
-        non_critical_unready = _unready_services(non_critical, units, verdicts)
-        now = timers.monotonic()
-        for spec in specs:
-            if spec.session not in recorded and unit_ready(
-                units.get(spec.session), verdicts.get(spec.session)
-            ):
-                recorded.add(spec.session)
-                start_trace.record_service_ready(spec.session, now - started_at)
-        gone_all = bool(unready) and all(_unit_gone(units.get(s.session)) for s in unready)
-        if not unready or gone_all or now >= deadline:
-            return ReadinessWait(
-                unready,
-                now - started_at,
-                sessions_gone=gone_all,
-                non_critical_unready=non_critical_unready,
-            )
-        timers.sleep(root_driver.READY_POLL_INTERVAL_S)
+        units, verdicts = _fresh_round(client, roster)
+        observed = observe_readiness(list(by_session), units, verdicts, frozenset(recorded))
+        elapsed_s = time.monotonic() - started_at
+        for session in observed.newly_ready:
+            recorded.add(session)
+            start_trace.record_service_ready(session, elapsed_s)
+        result = ReadinessWait(
+            tuple(by_session[session] for session in observed.unready),
+            elapsed_s,
+            sessions_gone=observed.sessions_gone,
+            non_critical_unready=tuple(
+                by_session[session] for session in observed.non_critical_unready
+            ),
+        )
+        if observed.settled:
+            return result
+        match unmet_step(elapsed_s=elapsed_s, timeout_s=timeout_s, interval_s=poll_interval_s):
+            case Retry(after_s):
+                time.sleep(after_s)
+            case Expired():
+                return result

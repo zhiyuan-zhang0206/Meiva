@@ -18,7 +18,6 @@ exports = ["health_port_guard.py", "test_single_box.py"]
 "test_commands_register.py#monkeypatch.setattr base.cluster.machines.register_self" = 5
 "test_commands_register.py#monkeypatch.setattr base.deploy.schema.migrations.assert_schema_current" = 1
 "test_external_skills.py#monkeypatch.setattr cli.commands.extensions.external_skills.Path.home" = 1
-"test_external_skills.py#monkeypatch.setattr cli.commands.lifecycle.converge_host.is_default_home" = 1
 "test_frontend_deps.py#monkeypatch.setattr base.sessions.env_forwarding.os.environ" = 1
 "test_frontend_deps.py#monkeypatch.setattr cli.commands._repo.subprocess.run" = 2
 "test_gateway_preflight_budget.py#monkeypatch.setattr cli.commands._repo.probe_gateway_once" = 1

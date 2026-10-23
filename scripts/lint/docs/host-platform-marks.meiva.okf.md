@@ -18,7 +18,7 @@ test does the opposite — the verdict becomes a property of the machine that ru
 it, so the test is green in CI and red on a developer's macOS, or the reverse,
 which is worse because CI is the one that reports.
 
-`cli/commands/lifecycle/tests/test_start_host_dependencies.py` carries the note
+`cli/commands/lifecycle/tests/start_storage/test_start_host_dependencies.py` carries the note
 this rule generalises: a macOS host takes the launchctl rows even while the test
 process runs on Linux, because the platform comes from `Host`, never from
 `sys.platform`.

@@ -11,7 +11,6 @@ from base.host.db_authority import delivery, unit
 from base.host.env import bootstrap
 from base.host.env.tests.env_files import constant
 from cli.commands.data_plane import bringup
-from cli.commands.lifecycle.start_generation import write_generation
 
 
 def test_a_pure_runners_launcher_delivers_the_installed_capability(
@@ -25,8 +24,6 @@ def test_a_pure_runners_launcher_delivers_the_installed_capability(
     }
     with pytest.raises(RuntimeError, match="cannot launch a gateway-class"):
         bringup.db_delivery("gateway", remote_data_plane=False)
-    assert write_generation(runner_home) == runner_boot.reference
     unit.unit_capability_path(runner_home).unlink()
-    assert write_generation(runner_home) is None
     with pytest.raises(unit.UnitCapabilityError, match="holds no database capability"):
         bringup.db_delivery("runner", remote_data_plane=False)

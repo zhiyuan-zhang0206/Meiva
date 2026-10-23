@@ -1,0 +1,25 @@
+exports = ["__init__.py", "browser.py", "choices.py", "closure_plan.py", "evidence.py", "execute.py", "extras.py", "extras_plan.py", "plan.py", "report.py", "restart.py", "restart_plan.py", "shell_sessions.py", "steps.py", "render.py", "admission.py"]
+
+[uses]
+"__init__.py" = ["admission.py", "choices.py", "evidence.py", "execute.py", "plan.py", "render.py", "report.py", "steps.py"]
+"announce.py" = ["choices.py"]
+"evidence.py" = ["shell_sessions.py"]
+"execute.py" = ["announce.py", "browser.py", "extras.py", "render.py", "shell_sessions.py", "steps.py"]
+"extras.py" = ["extras_plan.py"]
+"plan.py" = ["choices.py", "steps.py"]
+"render.py" = ["steps.py"]
+"report.py" = ["render.py"]
+"restart.py" = ["__init__.py", "execute.py", "restart_plan.py"]
+"restart_plan.py" = ["choices.py"]
+"shell_sessions.py" = ["closure_plan.py"]
+"steps.py" = ["choices.py"]
+
+[purity]
+"admission.py" = "strict"
+"choices.py" = "strict"
+"closure_plan.py" = "strict"
+"extras_plan.py" = "strict"
+"plan.py" = "strict"
+"render.py" = "strict"
+"restart_plan.py" = "strict"
+"steps.py" = "strict"
