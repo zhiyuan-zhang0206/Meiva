@@ -396,9 +396,12 @@ async def probe_agent_runner(
         # cluster_rpc synchronously re-read Postgres outside the async timeout.
         return _roster_rows.offline_status(row_spec)
     try:
-        result = await roster_probe.dispatch_status_probe(
-            name, gateway_url, timeout_s=probe_timeout_s, dispatch_fn=dispatch_fn
-        )
+        probe_kwargs: dict[str, Any] = {}
+        if probe_timeout_s is not None:
+            probe_kwargs["timeout_s"] = probe_timeout_s
+        if dispatch_fn is not None:
+            probe_kwargs["dispatch_fn"] = dispatch_fn
+        result = await roster_probe.dispatch_status_probe(name, gateway_url, **probe_kwargs)
     except cluster_rpc.ClusterOpUnreachable:
         # Expected when a host is genuinely offline / mid-restart — quiet.
         return _roster_rows.offline_status(row_spec)
