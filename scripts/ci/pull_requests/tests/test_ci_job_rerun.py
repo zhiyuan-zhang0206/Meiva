@@ -24,10 +24,6 @@ from base.host.system.hostport import Host
 from base.host.system.tests.fake_commands import fake_host
 from scripts.ci.pull_requests import job_rerun as rerun
 
-# Untyped fixtures and helper calls throughout: the call-site rules stay at warning for this file.
-# pyright: reportUnknownArgumentType = warning
-# pyright: reportUnknownMemberType = warning
-
 
 class _R:
     def __init__(self, stdout: str = "", returncode: int = 0, stderr: str = "") -> None:
@@ -53,16 +49,16 @@ def _sha_response() -> _R:
     return _R(stdout="abc123")
 
 
-def _runs_response(*runs: dict) -> _R:
+def _runs_response(*runs: dict[str, object]) -> _R:
     """Real-shaped REST runs payload: `{"workflow_runs": [...]}`."""
     return _R(stdout=json.dumps({"total_count": len(runs), "workflow_runs": list(runs)}))
 
 
-def _run(run_id: int, name: str, created_at: str, status: str = "completed") -> dict:
+def _run(run_id: int, name: str, created_at: str, status: str = "completed") -> dict[str, object]:
     return {"id": run_id, "name": name, "created_at": created_at, "status": status}
 
 
-def _jobs_response(*jobs: dict) -> _R:
+def _jobs_response(*jobs: dict[str, object]) -> _R:
     """Real-shaped REST jobs payload: `{"jobs": [...]}`."""
     return _R(stdout=json.dumps({"total_count": len(jobs), "jobs": list(jobs)}))
 
@@ -72,7 +68,7 @@ def _job(
     job_id: int,
     run_id: int,
     conclusion: str | None,
-) -> dict:
+) -> dict[str, object]:
     """Real-shaped REST job object: numeric `.id`, lowercase conclusion."""
     return {
         "id": job_id,
@@ -318,3 +314,107 @@ def test_rerun_failed_jobs_reports_rejected_run_level_call() -> None:
     reran, waiting, errors = rerun.rerun_failed_jobs(42, "owner/repo", host=host)
     assert reran == [] and waiting == []
     assert any("run 11" in e and "2 failed jobs" in e and "rate limited" in e for e in errors)
+
+
+@pytest.mark.parametrize("probe", ["workflow_runs", "jobs"])
+@pytest.mark.parametrize("payload", [None, [], True, "invalid", {}, {"wrong": []}])
+def test_malformed_response_never_means_no_failed_jobs(probe: str, payload: object) -> None:
+    responses = [_sha_response()]
+    if probe == "jobs":
+        responses.append(_runs_response(_CI_RUN))
+    responses.append(_R(stdout=json.dumps(payload)))
+    host, calls = _fake_gh(responses)
+    with pytest.raises(rerun.CiJobRerunError, match="must be"):
+        rerun.rerun_failed_jobs(42, "owner/repo", host=host)
+    assert not any("POST" in call for call in calls)
+
+
+@pytest.mark.parametrize("probe", ["workflow_runs", "jobs"])
+@pytest.mark.parametrize("rows", [None, {}, 7, [None], [7], ["row"]])
+def test_malformed_rows_never_reach_a_rerun(probe: str, rows: object) -> None:
+    responses = [_sha_response()]
+    if probe == "jobs":
+        responses.append(_runs_response(_CI_RUN))
+    responses.append(_R(stdout=json.dumps({probe: rows})))
+    host, calls = _fake_gh(responses)
+    with pytest.raises(rerun.CiJobRerunError, match="must be"):
+        rerun.rerun_failed_jobs(42, "owner/repo", host=host)
+    assert not any("POST" in call for call in calls)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("id", True),
+        ("id", 0),
+        ("id", -1),
+        ("id", "11"),
+        ("id", 1.5),
+        ("name", None),
+        ("created_at", 7),
+        ("created_at", []),
+        ("status", None),
+    ],
+)
+def test_invalid_run_fields_are_query_errors(field: str, value: object) -> None:
+    malformed = {**_CI_RUN, field: value}
+    host, calls = _fake_gh([_sha_response(), _runs_response(malformed)])
+    with pytest.raises(rerun.CiJobRerunError, match="must be"):
+        rerun.rerun_failed_jobs(42, "owner/repo", host=host)
+    assert not any("POST" in call for call in calls)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("id", True),
+        ("id", 0),
+        ("id", -1),
+        ("id", "102"),
+        ("id", {}),
+        ("name", None),
+        ("run_id", None),
+        ("run_id", "11"),
+        ("conclusion", []),
+        ("conclusion", {}),
+        ("conclusion", True),
+    ],
+)
+def test_invalid_job_fields_abort_before_any_post(field: str, value: object) -> None:
+    valid = _job("backend", 101, 11, "failure")
+    malformed = {**_job("lint", 102, 11, "failure"), field: value}
+    host, calls = _fake_gh(
+        [_sha_response(), _runs_response(_CI_RUN), _jobs_response(valid, malformed)]
+    )
+    with pytest.raises(rerun.CiJobRerunError, match="must be"):
+        rerun.rerun_failed_jobs(42, "owner/repo", host=host)
+    assert not any("POST" in call for call in calls)
+
+
+def test_missing_job_run_id_retains_the_containing_run() -> None:
+    job = _job("backend", 101, 11, "failure")
+    del job["run_id"]
+    host, _ = _fake_gh([_sha_response(), _runs_response(_CI_RUN), _jobs_response(job)])
+    assert rerun.list_failed_jobs(42, "owner/repo", host=host)[0]["run_id"] == 11
+
+
+def test_missing_conclusion_aborts_before_any_post() -> None:
+    valid = _job("backend", 101, 11, "failure")
+    malformed = _job("lint", 102, 11, "failure")
+    del malformed["conclusion"]
+    host, calls = _fake_gh(
+        [_sha_response(), _runs_response(_CI_RUN), _jobs_response(valid, malformed)]
+    )
+    with pytest.raises(rerun.CiJobRerunError, match="conclusion is required"):
+        rerun.rerun_failed_jobs(42, "owner/repo", host=host)
+    assert not any("POST" in call for call in calls)
+
+
+@pytest.mark.parametrize("probe", ["runs", "jobs"])
+def test_successful_empty_lists_have_no_rerun(probe: str) -> None:
+    responses = [_sha_response(), _runs_response(*([_CI_RUN] if probe == "jobs" else []))]
+    if probe == "jobs":
+        responses.append(_jobs_response())
+    host, calls = _fake_gh(responses)
+    assert rerun.rerun_failed_jobs(42, "owner/repo", host=host) == ([], [], [])
+    assert not any("POST" in call for call in calls)
