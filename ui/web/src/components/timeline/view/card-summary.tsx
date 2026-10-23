@@ -244,6 +244,26 @@ function CodeSummary({
   );
 }
 
+// meiva:note
+// Shared by the TurnBlock aggregate header so a collapsed turn reads as the same
+// clickable summary row as a card header.
+export const HEADER_CLS =
+  "w-full flex items-center gap-1.5 px-2 sm:px-3 py-1.5 text-[11px] font-mono text-left " +
+  "text-muted-foreground/80 hover:text-foreground hover:bg-accent/30 " +
+  "transition-colors select-none rounded-tr-sm";
+
+// meiva:note
+// Sticky header contract shared by the expandable surfaces: CardHeader
+// (top-level message cards) and the work-block header in run-block.tsx. When
+// expanded, the header pins below the floating HeaderBar — top-11 must match
+// BAR_HEIGHT_PX / BAR_HEIGHT_CLASS in @/lib/layout (h-11 = 44px), the same
+// line findClosestStuckHeaderId measures against. A work block's child card
+// pins one level deeper instead (STICKY_CHILD_HEADER_CLS in card.tsx). While
+// `isStuck`, the header switches to the elevated frosted-glass surface over the
+// body scrolling beneath it; the resting header remains transparent.
+// meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.meiva.okf.md
+export const STICKY_HEADER_CLS = "sticky top-11 z-10";
+
 export function CallBadge({ call }: { call: SdkCall }) {
   return (
     <span>
