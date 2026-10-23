@@ -1,16 +1,32 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { cleanup, fireEvent, render as rtlRender, screen } from "@testing-library/react";
+import type { ReactElement } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { harnessRows, type HarnessAvailability } from "@/lib/harness/harness";
-
-let rows: HarnessAvailability[] = [];
-vi.mock("@/lib/harness/use-harness-availability", () => ({
-  useHarnessAvailability: () => ({ data: rows }),
-}));
-
+import { api } from "@/lib/transport/api";
 import { HarnessPicker } from "./harness-picker";
 
-afterEach(cleanup);
+const clients = new Set<QueryClient>();
+let rows: HarnessAvailability[] = [];
+
+vi.mock("@/lib/transport/api", () => ({
+  api: { getHarnessAvailability: vi.fn(() => new Promise(() => undefined)) },
+}));
+
+function render(ui: ReactElement) {
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  clients.add(qc);
+  qc.setQueryData(["harness-availability", "local"], rows);
+  return rtlRender(<QueryClientProvider client={qc}>{ui}</QueryClientProvider>);
+}
+
+afterEach(() => {
+  cleanup();
+  for (const client of clients) client.clear();
+  clients.clear();
+  vi.clearAllMocks();
+});
 
 function row(
   harness: HarnessAvailability["harness"],
@@ -73,6 +89,7 @@ describe("HarnessPicker", () => {
     const codex = (await screen.findByText("Codex")).closest("button");
     expect(codex?.disabled).toBe(true);
     expect(codex?.textContent).toBe("Codexunavailable");
+    expect(api.getHarnessAvailability).not.toHaveBeenCalled();
   });
 
   it("selects a harness this machine can start", async () => {
@@ -84,5 +101,6 @@ describe("HarnessPicker", () => {
     fireEvent.click(await screen.findByText("Claude Code"));
 
     expect(onChange).toHaveBeenCalledWith("claude_code");
+    expect(api.getHarnessAvailability).not.toHaveBeenCalled();
   });
 });
