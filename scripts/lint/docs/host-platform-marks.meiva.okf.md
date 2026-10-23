@@ -25,8 +25,24 @@ process runs on Linux, because the platform comes from `Host`, never from
 
 ## Rule 1 — the process platform
 
-`sys.platform`, `Host.system()` and `Platform.current()` read the platform of the
-process that happens to run the test. A test that needs one platform's behavior
+`sys.platform`, `os.name`, `Host.system()`, `Platform.current()`, the tree's own
+`is_macos()` / `is_linux()` predicates, and the six host calls of the standard
+`platform` module — `platform.system()`, `platform.platform()`, `platform.uname()`,
+`platform.release()`, `platform.mac_ver()`, `platform.win32_ver()` — read the
+platform of the process that happens to run the test. The predicates are covered
+because they reach the same read underneath: exempting them by name would leave
+the fact one call deeper.
+
+`platform` is a bounded module, so this list is finite rather than a snapshot.
+`platform.python_version()` and `platform.python_implementation()` are **not**
+covered: the interpreter version is not a host fact. `platform.machine()` is
+**not** covered either: it answers the architecture, and no marker carries that
+dimension, so counting it would only produce noise.
+
+**The boundary:** a dynamically named read — `getattr(platform, "system")`,
+`importlib.import_module("platform")`, an aliased `import platform as p` — is
+outside this rule. Static analysis cannot see the name, and a boundary written
+down is not the same thing as a gap discovered later. A test that needs one platform's behavior
 injects a `Host` with that platform. When the subject itself only exists there —
 launchd, TCC, codesign, swiftc — the test carries
 `@pytest.mark.requires_host("darwin")`, which `tests/fixtures/host_platform.py`
@@ -34,10 +50,12 @@ turns into a skip on every other host, and a CI lane must run it on the named
 host. The marker is a declaration the reader can see: "this test is about the
 host", never "this test is hard to port".
 
-## Rule 2 — the ambient PATH
+## Rule 2 — the ambient environment
 
 `shutil.which(name)` resolves through `os.environ["PATH"]` when it is called
-without `path=`. Its remedy is not the marker: the test builds a `Host` whose
+without `path=`, and `pytest.importorskip(name)` skips the test when the module
+is missing from the machine that runs it — in both cases the lane, not the test,
+decides the verdict. Its remedy is not the marker: the test builds a `Host` whose
 `which` returns the program, so it states what the machine has instead of asking
 it. When the program belongs to a lane that provisions it (`uv`, `node`, a
 database binary), the test states that with `# host-ok: <lane>`.
@@ -55,10 +73,18 @@ asking the current host *is* their subject.
 
 ## Baseline
 
-`scripts/lint/baseline/host_platform_marks.json` freezes the sites the rule
-already finds as `path -> count`. A file may shrink below its count but never
-grow past it, and an entry for a file that no longer exists is an error:
-`--write-baseline` regenerates the file after a deliberate repair. The baseline
+`scripts/lint/baseline/host_platform_marks.json` freezes what the rule already
+finds as `read -> count` (`sys.platform`, `is_macos()`, `shutil.which(...)`, …).
+The count follows the read, not the file: renaming or moving a test changes no
+count, while every new read of a counted kind raises one and fails. A kind may
+shrink below its count (a note says so) but never grow past it; `--write-baseline`
+regenerates the file after a deliberate repair. A `--only` run still compares
+against the whole tree — otherwise a new read in the file under review would
+pass locally and fail in CI. It then lists every site of the kind that grew, one
+line each, and marks the ones outside the change with `[outside your change]`:
+the count is the whole tree's, so the report can name a file the author never
+opened, and saying which sites are theirs is the difference between a gate and a
+mystery. The baseline
 only shrinks; when the last entry goes, the file and this section go with it.
 
 ## Scope
