@@ -10,6 +10,7 @@ from psycopg.types.json import Jsonb
 from pydantic import SecretStr
 
 import base.db
+from base.clock import SYSTEM_TIMERS
 from base.config import ConfigBoot
 from base.daemon.loop_health import LoopProgress
 from base.db.code_version_gate import ProcessDbGate
@@ -245,7 +246,7 @@ async def test_a_grafana_that_cannot_give_a_snapshot_leaves_every_row_and_the_ro
     database_gate: ProcessDbGate,
 ) -> None:
     alert_id = _seed_stale_alert(db_conn)
-    progress = LoopProgress("alert-reconciliation", 180.0)
+    progress = LoopProgress("alert-reconciliation", 180.0, timers=SYSTEM_TIMERS)
     published: list[dict[str, Any]] = []
     db_pool = base.db.pool(gate=database_gate)
     try:
@@ -287,7 +288,7 @@ async def test_an_unexpected_error_in_a_round_is_not_swallowed(
                     db_pool,
                     client,
                     publish,
-                    LoopProgress("alert-reconciliation", 180.0),
+                    LoopProgress("alert-reconciliation", 180.0, timers=SYSTEM_TIMERS),
                     _config(process_config),
                 )
     finally:

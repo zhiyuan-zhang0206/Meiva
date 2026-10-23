@@ -21,6 +21,7 @@ import pytest
 import redis
 from psycopg_pool import ConnectionPool
 
+from base.clock import SYSTEM_TIMERS
 from base.cluster import inbound_channel
 from base.config import settings
 from base.daemon.loop_health import LoopProgress
@@ -384,7 +385,9 @@ async def test_expired_notice_publishes_observation_facts(
     db_conn.commit()
 
     bus = _RecordingBus()
-    await sweep.sweep_round(reaper_pool, database, bus, LoopProgress("test", 60.0))
+    await sweep.sweep_round(
+        reaper_pool, database, bus, LoopProgress("test", 60.0, timers=SYSTEM_TIMERS)
+    )
 
     resolved = [event for event in bus.payloads if event.get("role") == "notice_resolved"]
     assert len(resolved) == 1
@@ -406,7 +409,9 @@ async def test_expired_notice_wakes_an_idle_owner(
     _expired_notice(db_conn, aid, local_id=4, title="Ship the release?")
 
     with _wake_channel(aid) as wake:
-        await sweep.sweep_round(reaper_pool, database, event_bus, LoopProgress("test", 60.0))
+        await sweep.sweep_round(
+            reaper_pool, database, event_bus, LoopProgress("test", 60.0, timers=SYSTEM_TIMERS)
+        )
         queued = _notice_expiry_inbounds(db_conn, aid)
         assert len(queued) == 1
         assert _next_wake(wake) == str(queued[0][0])
@@ -422,7 +427,9 @@ async def test_expired_notice_is_queued_for_a_terminated_owner_without_waking_it
     _expired_notice(db_conn, aid, local_id=5, title="Still want the audit?")
 
     with _wake_channel(aid) as wake:
-        await sweep.sweep_round(reaper_pool, database, event_bus, LoopProgress("test", 60.0))
+        await sweep.sweep_round(
+            reaper_pool, database, event_bus, LoopProgress("test", 60.0, timers=SYSTEM_TIMERS)
+        )
         assert _next_wake(wake, timeout=1.0) is None
 
     assert len(_notice_expiry_inbounds(db_conn, aid)) == 1
@@ -438,7 +445,9 @@ async def test_expired_notice_text_names_the_notice_and_never_reads_as_a_reply(
     aid = _agent(db_conn, "idling")
     _expired_notice(db_conn, aid, local_id=7, title="Deploy window?")
 
-    await sweep.sweep_round(reaper_pool, database, event_bus, LoopProgress("test", 60.0))
+    await sweep.sweep_round(
+        reaper_pool, database, event_bus, LoopProgress("test", 60.0, timers=SYSTEM_TIMERS)
+    )
 
     content = _notice_expiry_inbounds(db_conn, aid)[0][1]
     assert "#7" in content
@@ -459,7 +468,9 @@ async def test_expired_notice_stays_silent_for_the_user(
     _expired_notice(db_conn, aid, local_id=8, title="Quiet, please")
 
     bus = _RecordingBus()
-    await sweep.sweep_round(reaper_pool, database, bus, LoopProgress("test", 60.0))
+    await sweep.sweep_round(
+        reaper_pool, database, bus, LoopProgress("test", 60.0, timers=SYSTEM_TIMERS)
+    )
 
     roles = [event.get("role") for event in bus.payloads]
     assert "notice_posted" not in roles

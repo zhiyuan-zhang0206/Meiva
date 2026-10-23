@@ -8,6 +8,7 @@ import psycopg
 import pytest
 from psycopg_pool import ConnectionPool
 
+from base.clock import SYSTEM_TIMERS
 from base.daemon.loop_health import LoopProgress
 from base.daemon.round_loop import CONSECUTIVE_ROUND_FAILURE_LIMIT, RoundFailureLimitError
 from base.db import Database
@@ -20,7 +21,7 @@ def _drive(loop: str, gate: ProcessDbGate) -> Awaitable[None]:
     pool = cast(ConnectionPool, object())
     database = Database.from_settings(gate=gate)
     bus = EventBus.from_settings()
-    progress = LoopProgress(loop, 60.0)
+    progress = LoopProgress(loop, 60.0, timers=SYSTEM_TIMERS)
     if loop == "poll":
         return heartbeat_daemon.dispatch_loop(
             pool, database, bus, progress, sweep_resets=lambda _pool: None

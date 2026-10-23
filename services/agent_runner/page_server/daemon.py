@@ -27,6 +27,7 @@ import psutil
 import psycopg
 from psycopg_pool import ConnectionPool
 
+from base.clock import SYSTEM_TIMERS
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.boot import machine_from_boot
@@ -585,7 +586,7 @@ async def run(
         )
         sys.exit(1)
     resources.write_pidfile(process_config, runtime=runtime)
-    liveness = LivenessGroup()
+    liveness = LivenessGroup(timers=SYSTEM_TIMERS)
     reconcile_progress = liveness.register("reconcile", _LIVENESS_TIMEOUT_S)
     dead_pages_progress = liveness.register("dead_show_pages", _DEAD_PAGES_LIVENESS_TIMEOUT_S)
     health = await start_health_server(

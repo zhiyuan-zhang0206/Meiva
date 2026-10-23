@@ -10,6 +10,7 @@ from psycopg_pool import ConnectionPool
 
 import base.db
 import gateway.app
+from base.clock import SYSTEM_TIMERS
 from base.config import ConfigBoot
 from base.daemon.loop_health import LivenessGroup
 from base.db import Database
@@ -47,7 +48,7 @@ async def test_both_loops_run_their_rounds(
 
     monkeypatch.setattr(daemon.ScheduleManager, "reconcile", reconcile)
     monkeypatch.setattr(daemon.requests, "consume_requests", consume)
-    liveness = LivenessGroup()
+    liveness = LivenessGroup(timers=SYSTEM_TIMERS)
 
     task = asyncio.create_task(daemon.run_loops(pool, liveness))
     try:
@@ -83,7 +84,7 @@ async def test_a_crashing_loop_cancels_its_sibling_and_ends_the_service(
     monkeypatch.setattr(daemon.round_loop, "run_rounds", run_rounds)
 
     with pytest.raises(ExceptionGroup) as raised:
-        await daemon.run_loops(pool, LivenessGroup())
+        await daemon.run_loops(pool, LivenessGroup(timers=SYSTEM_TIMERS))
 
     assert [str(exc) for exc in raised.value.exceptions] == [f"{crashing} loop crashed"]
     assert cancelled == [({"reconcile", "requests"} - {crashing}).pop()]

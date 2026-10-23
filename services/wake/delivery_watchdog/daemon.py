@@ -12,6 +12,7 @@ from psycopg_pool import ConnectionPool
 
 from base import telemetry
 from base.agents.incarnation.lifecycle_commands import SYSTEM_NOTICE_SOURCE
+from base.clock import SYSTEM_TIMERS
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot, settings
@@ -279,7 +280,7 @@ async def run(
     _write_pidfile(process_config, runtime=runtime)
     _log.info("[delivery] pidfile written: %s", _pidfile(process_config, runtime=runtime))
 
-    liveness = LivenessGroup()
+    liveness = LivenessGroup(timers=SYSTEM_TIMERS)
     endpoint = _endpoint(process_config, runtime=runtime)
     health = await start_health_server(
         "delivery_watchdog", endpoint.health_port, liveness=liveness, image=image

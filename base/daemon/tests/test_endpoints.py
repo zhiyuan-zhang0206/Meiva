@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from base.config import ConfigBoot, get_field, settings
+from base.config import ConfigBoot, get_field
 from base.daemon.endpoints import ServiceEndpoint, ServiceEndpoints
 from base.host.env.health_ports import health_port
 from base.host.env.registry import health_port_env_aliases
@@ -19,27 +19,33 @@ def test_every_health_daemon_has_an_endpoint_from_its_setting_and_the_run_dir() 
         assert endpoint.pidfile == run_dir(meiva_home()) / f"{endpoint.name}.pid"
 
 
-def test_a_port_override_reaches_the_row_and_only_that_row(monkeypatch: pytest.MonkeyPatch) -> None:
-    before = ServiceEndpoints.from_settings()
-    monkeypatch.setattr(settings.services, "labeler_health_port", 18765)
-    after = ServiceEndpoints.from_settings()
+def test_a_port_override_reaches_the_row_and_only_that_row(tmp_path: Path) -> None:
+    config = ConfigBoot()
+    config.read_process_environment()
+    before = ServiceEndpoints.from_boot(config, runtime=tmp_path)
+    config.view.services.labeler_health_port = 18765
+    after = ServiceEndpoints.from_boot(config, runtime=tmp_path)
     assert after.of("labeler").health_port == 18765
     assert after.of("im_bridge") == before.of("im_bridge")
 
 
-def test_the_table_does_not_follow_later_changes(monkeypatch: pytest.MonkeyPatch) -> None:
-    table = ServiceEndpoints.from_settings()
+def test_the_table_does_not_follow_later_changes(tmp_path: Path) -> None:
+    config = ConfigBoot()
+    config.read_process_environment()
+    table = ServiceEndpoints.from_boot(config, runtime=tmp_path)
     port = table.of("labeler").health_port
-    monkeypatch.setattr(settings.services, "labeler_health_port", port + 1)
+    config.view.services.labeler_health_port = port + 1
     assert table.of("labeler").health_port == port
 
 
 def test_the_pidfile_lives_under_the_homes_run_directory(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    tmp_path: Path,
 ) -> None:
-    monkeypatch.setenv("MEIVA_HOME", str(tmp_path))
+    config = ConfigBoot()
+    config.read_process_environment()
     assert (
-        ServiceEndpoints.from_settings().of("labeler").pidfile == tmp_path / "run" / "labeler.pid"
+        ServiceEndpoints.from_boot(config, runtime=tmp_path / "run").of("labeler").pidfile
+        == tmp_path / "run" / "labeler.pid"
     )
 
 
@@ -55,23 +61,25 @@ def test_an_unregistered_daemon_is_a_key_error() -> None:
 
 
 def test_boot_tables_use_only_their_owner_and_follow_live_fields_on_rebuild(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    tmp_path: Path,
 ) -> None:
     first, second = ConfigBoot(), ConfigBoot()
     first.read_process_environment()
     second.read_process_environment()
-    first.view.services.labeler_health_port = 18761
-    second.view.services.labeler_health_port = 18762
-    monkeypatch.setattr(settings.services, "labeler_health_port", 18763)
+    ambient_port = ServiceEndpoints.from_settings().of("labeler").health_port
+    first_port = 18761 if ambient_port != 18761 else 18765
+    second_port = 18762 if ambient_port != 18762 else 18766
+    first.view.services.labeler_health_port = first_port
+    second.view.services.labeler_health_port = second_port
     before = ServiceEndpoints.from_boot(first, runtime=tmp_path / "first")
     other = ServiceEndpoints.from_boot(second, runtime=tmp_path / "second")
-    assert before.of("labeler").health_port == 18761
-    assert other.of("labeler").health_port == 18762
+    assert before.of("labeler").health_port == first_port
+    assert other.of("labeler").health_port == second_port
     assert before.of("labeler").pidfile == tmp_path / "first" / "labeler.pid"
     assert other.of("labeler").pidfile == tmp_path / "second" / "labeler.pid"
     first.view.services.labeler_health_port = 18764
     after = ServiceEndpoints.from_boot(first, runtime=tmp_path / "first")
-    assert before.of("labeler").health_port == 18761
+    assert before.of("labeler").health_port == first_port
     assert after.of("labeler").health_port == 18764
     assert ServiceEndpoints.from_boot(second, runtime=tmp_path / "second") == other
     with pytest.raises(KeyError):

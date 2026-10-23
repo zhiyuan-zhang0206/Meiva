@@ -10,6 +10,7 @@ import pytest
 from psycopg_pool import ConnectionPool
 
 import base.db
+from base.clock import SYSTEM_TIMERS
 from base.config import ConfigBoot, settings
 from base.daemon.loop_health import LivenessGroup, LoopProgress
 from base.db import Database, create_agent
@@ -29,7 +30,7 @@ def pool(db_url: str, *, database_gate: ProcessDbGate) -> Iterator[ConnectionPoo
 
 
 def _progress() -> LoopProgress:
-    return LoopProgress("test", 60.0)
+    return LoopProgress("test", 60.0, timers=SYSTEM_TIMERS)
 
 
 def _backdate(db: psycopg.Connection, kind: str, seconds: float) -> None:
@@ -78,7 +79,7 @@ async def test_a_crashing_loop_cancels_its_sibling_and_ends_the_service(
             pool,
             Database.from_settings(gate=database_gate),
             EventBus.from_settings(),
-            LivenessGroup(),
+            LivenessGroup(timers=SYSTEM_TIMERS),
             sweep_loop_fn=sweep_loop_fn,
             remote_loop_fn=remote_loop_fn,
         )
@@ -90,7 +91,7 @@ async def test_a_crashing_loop_cancels_its_sibling_and_ends_the_service(
 async def test_each_loop_reports_its_own_progress(
     pool: ConnectionPool, *, database_gate: ProcessDbGate
 ) -> None:
-    liveness = LivenessGroup()
+    liveness = LivenessGroup(timers=SYSTEM_TIMERS)
     sweep_loop_fn, remote_loop_fn = _park_or_crash(crashing="sweep", cancelled=[])
 
     with pytest.raises(ExceptionGroup):

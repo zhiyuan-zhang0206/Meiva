@@ -66,6 +66,7 @@ from typing import cast
 import psycopg
 from psycopg_pool import ConnectionPool
 
+from base.clock import SYSTEM_TIMERS
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot
@@ -472,7 +473,7 @@ async def run(
     )
 
     config = events_maintenance_config(process_config)
-    liveness = LivenessGroup()
+    liveness = LivenessGroup(timers=SYSTEM_TIMERS)
     dispatch_progress = liveness.register("dispatch", config.events_maintenance_pass_deadline_s)
     resolution_progress = liveness.register(
         "resolution", config.events_maintenance_resolution_deadline_s

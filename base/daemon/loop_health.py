@@ -2,24 +2,26 @@
 
 from __future__ import annotations
 
-import time
 from datetime import UTC, datetime
+
+from base.clock import Timers
 
 
 class LoopProgress:
     """Progress for one loop, closing shared-heartbeat masking by moving only
     for completed work and making ``fail()`` irreversible until respawn."""
 
-    def __init__(self, name: str, timeout_s: float) -> None:
+    def __init__(self, name: str, timeout_s: float, *, timers: Timers) -> None:
+        self._timers = timers
         self.name = name
         self.timeout_s = timeout_s
-        self._last = time.monotonic()
+        self._last = self._timers.monotonic()
         self._last_success_at: str | None = None
         self._last_error: dict[str, str] | None = None
         self._wedged = False
 
     def beat(self) -> None:
-        self._last = time.monotonic()
+        self._last = self._timers.monotonic()
 
     def mark_success(self) -> None:
         self._last_success_at = datetime.now(UTC).isoformat()
@@ -32,7 +34,7 @@ class LoopProgress:
         self.mark_error(message)
 
     def stale_for(self) -> float:
-        return time.monotonic() - self._last
+        return self._timers.monotonic() - self._last
 
     def is_alive(self) -> bool:
         return not self._wedged and self.stale_for() <= self.timeout_s
@@ -51,11 +53,12 @@ class LivenessGroup:
     """Worst-case liveness across loops, closing the failure where a scheduling
     sibling keeps one shared stamp fresh while another loop is dead."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, timers: Timers) -> None:
+        self._timers = timers
         self._loops: dict[str, LoopProgress] = {}
 
     def register(self, name: str, timeout_s: float) -> LoopProgress:
-        self._loops[name] = LoopProgress(name, timeout_s)
+        self._loops[name] = LoopProgress(name, timeout_s, timers=self._timers)
         return self._loops[name]
 
     def stale_for(self) -> float:
