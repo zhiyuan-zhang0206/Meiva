@@ -4,6 +4,8 @@ import asyncio
 import json
 import logging
 from collections.abc import Callable, Sequence
+from functools import partial
+from pathlib import Path
 from typing import Any, cast
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
@@ -73,7 +75,9 @@ def _validate_image_ref(
         raise HTTPException(422, f"image_url {url!r} references a different agent's upload")
     if image_mime_for(name) is None:
         raise HTTPException(422, f"image_url {url!r} is not a recognized image type")
-    resolver = resolve_upload_path if path_resolver is None else path_resolver
+    resolver = (
+        partial(resolve_upload_path, home=Path.home()) if path_resolver is None else path_resolver
+    )
     try:
         path = resolver(agent_id, name)
     except ValueError as e:

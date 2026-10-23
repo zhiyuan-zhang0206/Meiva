@@ -17,6 +17,7 @@ import psutil
 import pytest
 
 from base.native_process.ownership import OwnedProcess
+from base.native_process.tests.fake_process_control import FakeProcessControl, Signalled
 from base.sessions.pty import process_groups
 
 
@@ -38,11 +39,10 @@ def test_a_refusal_that_would_kill_a_living_group_stays_loud(
 ) -> None:
     identity = _identity(leader)
 
-    def refused(_group: int, _signum: int) -> None:
-        raise PermissionError(1, "Operation not permitted")
-
+    control = FakeProcessControl(groups={identity.pid: identity.pid})
+    control.refuse(identity.pid, PermissionError(1, "Operation not permitted"))
     with pytest.raises(PermissionError, match="denied for group"):
-        process_groups.signal((identity,), signal.SIGKILL, kill_group=refused)
+        process_groups.signal((identity,), signal.SIGKILL, process_control=control)
 
 
 def test_a_refusal_on_a_birth_that_disappears_is_a_disappearance(
@@ -50,10 +50,11 @@ def test_a_refusal_on_a_birth_that_disappears_is_a_disappearance(
 ) -> None:
     identity = _identity(leader)
 
-    def refused_and_gone(_group: int, _signum: int) -> None:
+    def refused_and_gone(_sent: Signalled) -> None:
         os.kill(leader.pid, signal.SIGKILL)
         leader.wait(timeout=10)
-        raise PermissionError(1, "Operation not permitted")
 
-    process_groups.signal((identity,), signal.SIGKILL, kill_group=refused_and_gone)
+    control = FakeProcessControl(groups={identity.pid: identity.pid}, on_signal=refused_and_gone)
+    control.refuse(identity.pid, PermissionError(1, "Operation not permitted"))
+    process_groups.signal((identity,), signal.SIGKILL, process_control=control)
     assert not identity.live()

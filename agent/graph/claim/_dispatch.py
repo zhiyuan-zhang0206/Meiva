@@ -109,6 +109,7 @@ async def _handle_chat(
                 ctx.require_clock, lambda: ctx.require_agent().read("general", "message_timestamps")
             ),
             expand_command=ctx.require_commands().expand,
+            gateway=lambda: ctx.gateway,
         )
     )
     st.committed_chat_ids.append(item.id)

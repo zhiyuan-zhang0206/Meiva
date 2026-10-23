@@ -21,6 +21,7 @@ from collections.abc import Callable
 from base.agents.context.clients import DatabaseFactory
 from base.cluster.machine import MachineIdentity
 from base.events.live.bus import EventBus
+from base.native_process.process_control import SYSTEM_PROCESS_CONTROL
 from base.sessions.pty import client, closure
 from base.sessions.pty.paths import ledger_path
 from base.telemetry import EventPipeline
@@ -82,7 +83,9 @@ def _close_shell_sessions_now(grace_s: float, kill_s: float) -> tuple[closure.Ou
     try:
         return close_via_service(grace_s, kill_s), pty_close_notices.STOP_REASON
     except client.ServiceDownError:
-        return ledger.sweep(ledger_path()), pty_close_notices.CRASH_REASON
+        return ledger.sweep(
+            ledger_path(), process_control=SYSTEM_PROCESS_CONTROL
+        ), pty_close_notices.CRASH_REASON
 
 
 # meiva:note

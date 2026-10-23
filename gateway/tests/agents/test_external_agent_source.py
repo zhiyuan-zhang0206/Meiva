@@ -12,6 +12,7 @@ import contextlib
 from collections.abc import Generator
 from uuid import uuid4
 
+import httpx
 import psycopg
 import pytest
 from fastapi.testclient import TestClient
@@ -81,6 +82,10 @@ def _send_message(client: TestClient, agent_id: int, content: str, source: str) 
     assert resp.status_code == 201, resp.text
 
 
+def _forbidden_gateway() -> httpx.Client:
+    raise AssertionError("plain source declarations must not construct an upload client")
+
+
 async def _claimed_text(
     pool: AsyncConnectionPool, incarnation: RuntimeIncarnation
 ) -> tuple[str, str, dict[str, object] | None]:
@@ -92,6 +97,7 @@ async def _claimed_text(
         read_security_enabled=lambda: settings.agent.security_scan_enabled,
         envelope_inputs=_ENVELOPE_INPUTS,
         expand_command=CommandCatalog(skills=list).expand,
+        gateway=_forbidden_gateway,
     )
     content = message.model_dump()["content"]
     assert isinstance(content, str)

@@ -16,6 +16,7 @@ from typing import Any
 import psutil
 
 from base.native_process.ownership import OwnedProcess
+from base.native_process.process_control import ProcessControl
 from base.sessions.pty import process_groups
 
 
@@ -134,7 +135,9 @@ def _named(identities: Iterable[OwnedProcess]) -> tuple[tuple[int, str], ...]:
     return tuple(names)
 
 
-def close_sessions(targets: Iterable[Target], *, grace_s: float, kill_s: float) -> Outcome:
+def close_sessions(
+    targets: Iterable[Target], *, grace_s: float, kill_s: float, process_control: ProcessControl
+) -> Outcome:
     """Attempt closure of known groups within shared grace and kill budgets.
 
     A gone/recycled identity is skipped. Concrete signaling/identity errors
@@ -142,14 +145,17 @@ def close_sessions(targets: Iterable[Target], *, grace_s: float, kill_s: float) 
     """
     entries = list(targets)
     known = tuple(dict.fromkeys(identity for target in entries for identity in _known(target)))
-    process_groups.signal((target.shell for target in entries), signal.SIGHUP)
+    process_groups.signal(
+        (target.shell for target in entries), signal.SIGHUP, process_control=process_control
+    )
     process_groups.signal(
         (member for target in entries for member in target.members if member != target.shell),
         signal.SIGTERM,
+        process_control=process_control,
     )
     remaining = process_groups.wait(known, grace_s)
     if remaining:
-        process_groups.signal(remaining, signal.SIGKILL)
+        process_groups.signal(remaining, signal.SIGKILL, process_control=process_control)
         process_groups.wait(remaining, kill_s)
     survivors: list[Survivor] = []
     closed: list[ClosedSession] = []

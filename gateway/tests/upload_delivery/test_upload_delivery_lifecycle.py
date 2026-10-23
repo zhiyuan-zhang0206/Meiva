@@ -50,7 +50,7 @@ def test_hard_death_native_temp_not_double_charged_or_cleaned(
     row = db_conn.execute("SELECT manifest FROM upload_delivery_batches").fetchone()
     assert row is not None
     manifest = source.Manifest.model_validate(row[0])
-    directory = source.agent_upload_dir(agent, create=False).resolve()
+    directory = source.agent_upload_dir(agent, create=False, home=Path.home()).resolve()
     final = storage.object_path(directory, manifest, manifest.objects[0])
     result = subprocess.run(  # noqa: S603 -- fixed interpreter/script and isolated fixture arguments
         [

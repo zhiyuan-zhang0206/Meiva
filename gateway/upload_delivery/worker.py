@@ -9,6 +9,7 @@ import logging
 from collections.abc import Callable
 from contextlib import suppress
 from functools import partial
+from pathlib import Path
 from typing import Any
 
 from psycopg_pool import ConnectionPool
@@ -184,7 +185,9 @@ class UploadRecovery:
 
     async def copy_proof(self, request: ReceiveRequest) -> CopyProof:
         if request.source == request.target:
-            directory = agent_upload_dir(request.manifest.agent_id, create=False).resolve()
+            directory = agent_upload_dir(
+                request.manifest.agent_id, create=False, home=Path.home()
+            ).resolve()
             await self.native(storage.verify_all, directory, request.manifest)
             return CopyProof(
                 version=1,

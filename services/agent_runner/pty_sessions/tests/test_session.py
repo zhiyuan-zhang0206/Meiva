@@ -8,8 +8,10 @@ simulated refusal, which only works inside the test process).
 from __future__ import annotations
 
 import os
+import subprocess
 import threading
-from collections.abc import Callable, Iterable, Iterator
+from collections.abc import Callable, Iterator
+from dataclasses import replace
 from pathlib import Path
 
 import psutil
@@ -18,6 +20,9 @@ import pytest
 from base.log.tests.log_records import LogRecords
 from base.log.tests.log_records import loguru_records as loguru_records
 from base.native_process.ownership import OwnedProcess
+from base.native_process.process_control import SYSTEM_PROCESS_CONTROL
+from base.native_process.tests.fake_process_control import FakeProcessControl
+from base.paths import meiva_home
 from base.sessions.pty import client
 from base.sessions.pty.tests.pty_reaper import pty_reaper as pty_reaper
 from base.sessions.record import SessionRecord
@@ -112,37 +117,49 @@ def _live(_identity: OwnedProcess) -> bool:
     return True
 
 
-def _no_signal(_identities: Iterable[OwnedProcess], _signum: int) -> None:
-    pass
+@pytest.fixture
+def live_session(make_session: MakeSession) -> Iterator[MakeSession]:
+    children: list[subprocess.Popen[bytes]] = []
+
+    def make(name: str, log_cap: int) -> PtySession:
+        child = subprocess.Popen(["sleep", "300"], start_new_session=True)
+        children.append(child)
+        identity = OwnedProcess.capture(psutil.Process(child.pid))
+        session = make_session(name, log_cap)
+        session.pid = identity.pid
+        session.record = replace(
+            session.record,
+            pid=identity.pid,
+            create_time=identity.birth,
+            starttime=identity.starttime,
+        )
+        return session
+
+    try:
+        yield make
+    finally:
+        for child in children:
+            child.kill()
+            child.wait(timeout=10)
 
 
-def _still_waiting(identities: Iterable[OwnedProcess], _timeout: float) -> tuple[OwnedProcess, ...]:
-    return tuple(identities)
-
-
-def test_a_concrete_group_signal_error_is_not_a_success(
-    make_session: MakeSession, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    session = make_session("meiva-test-denied", 1024)
-    monkeypatch.setattr(session_module.process_groups, "live", _live)
-
-    def denied(*_args: object) -> None:
-        raise PermissionError("known group signal denied")
-
-    monkeypatch.setattr(session_module.process_groups, "signal", denied)
+def test_a_concrete_group_signal_error_is_not_a_success(live_session: MakeSession) -> None:
+    session = live_session("meiva-test-denied", 1024)
+    control = FakeProcessControl(groups={session.pid: session.pid})
+    control.refuse(session.pid, PermissionError("known group signal denied"))
     with pytest.raises(PermissionError, match="known group signal denied"):
-        session_module.kill_session(session, graceful=False, interrupted=True)
+        session_module.kill_session(
+            session, graceful=False, interrupted=True, process_control=control
+        )
 
 
-def test_a_live_shell_cannot_be_reported_closed(
-    make_session: MakeSession, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    session = make_session("meiva-test-live", 1024)
-    monkeypatch.setattr(session_module.process_groups, "live", _live)
-    monkeypatch.setattr(session_module.process_groups, "signal", _no_signal)
-    monkeypatch.setattr(session_module.process_groups, "wait", _still_waiting)
+def test_a_live_shell_cannot_be_reported_closed(live_session: MakeSession) -> None:
+    session = live_session("meiva-test-live", 1024)
+    control = FakeProcessControl(groups={session.pid: session.pid})
     with pytest.raises(RuntimeError, match="shell survived"):
-        session_module.kill_session(session, graceful=False, interrupted=False)
+        session_module.kill_session(
+            session, graceful=False, interrupted=False, process_control=control
+        )
 
 
 def test_unknown_foreground_is_interrupted_without_discovering_processes(
@@ -241,7 +258,7 @@ def test_closure_preparation_error_releases_the_allocation_fence(
     make_session: MakeSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     session = make_session("meiva-test-preparation-error", 1024)
-    service = PtyService()
+    service = PtyService(home=meiva_home(), process_control=SYSTEM_PROCESS_CONTROL)
     service._sessions[session.name] = session
 
     def failed_capture() -> bool:

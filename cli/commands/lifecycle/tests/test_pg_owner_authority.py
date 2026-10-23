@@ -37,6 +37,7 @@ from base.cluster import (
     provision_database,
 )
 from base.cluster.authority import ensure_groups
+from base.cluster.checkpoint_schema import PostgresCheckpointSchema
 from base.cluster.dataplane import pg_admin
 from base.cluster.dataplane.pg_admin import OwnerAuthority, local_owner_authority, owner_conninfo
 from base.cluster.dataplane.pg_tools import pg_tool
@@ -315,11 +316,13 @@ def _prepare_by_authority(
 ) -> None:
     admin = ci.pg_admin_url(pg_port)
     ensure_pgvector_extension(identity, base_admin_url=admin, expected_data_dir=_data_dir())
+
     ensure_checkpoint_schema(
         identity,
         base_admin_url=admin,
         database_created=database_created,
         expected_data_dir=_data_dir(),
+        schema=PostgresCheckpointSchema(),
     )
     cmd_migrations_apply(
         database_factory=operator_database, machine_name=command_runtime.machine.name

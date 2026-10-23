@@ -415,7 +415,7 @@ class ScheduleManager:
 
         live: set[int] = set()
         backend = self._backend
-        generation = current_generation()
+        generation = current_generation(home=meiva_home())
         prefix = session_name("schedule-")  # meiva-schedule-
         names = backend.list_sessions(prefix=prefix)
         home = meiva_home()
@@ -581,7 +581,7 @@ class ScheduleManager:
 
         if name not in backend.list_sessions():
             return True
-        if backend.session_generation(name) == current_generation():
+        if backend.session_generation(name) == current_generation(home=meiva_home()):
             observed = revisions.launched_revision(schedule_id)
             if observed == wanted.revision:
                 self._mark_running(schedule_id, wanted.revision, self._host_generation)
