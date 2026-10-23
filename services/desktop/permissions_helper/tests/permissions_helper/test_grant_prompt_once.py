@@ -61,7 +61,12 @@ var screenPromptCalls = 0
 var axTrusted = false
 var screenGranted = false
 
-let kAXTrustedCheckOptionPrompt = Unmanaged.passUnretained(
+// Retained, not unretained: `passUnretained` hands out a pointer to a bridged temporary whose
+// lifetime nothing owns, and the gate reads it back with `takeUnretainedValue()` before building
+// the options dictionary. That survived on a dev Mac and aborted the process with SIGSEGV on the
+// hosted runner, on exactly the two scenarios that build the dictionary (#5531 darwin lane,
+// 2026-10-24). The framework's own constant is a global; this stub has to be one too.
+let kAXTrustedCheckOptionPrompt = Unmanaged.passRetained(
     "AXTrustedCheckOptionPrompt" as CFString
 )
 
