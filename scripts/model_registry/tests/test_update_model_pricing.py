@@ -324,6 +324,27 @@ def test_plugin_sync_leaves_full_matching_provider_byte_identical(
     assert provider_path.read_bytes() == before
 
 
+@pytest.mark.parametrize("field", ["effective_from", "effective_until"])
+@pytest.mark.parametrize("invalid", [1, [], {}])
+def test_plugin_sync_rejects_non_string_period_boundaries_without_writing(
+    tmp_path: Path, field: str, invalid: object
+) -> None:
+    repo_root, archive_path, provider_path = _sync_fixture(
+        tmp_path, current_rates=("2.0", "0.2", "6.0")
+    )
+    archive = json.loads(archive_path.read_text())
+    archive["models"]["fixture-model"]["periods"][0][field] = invalid
+    archive_path.write_text(json.dumps(archive))
+    before = provider_path.read_bytes()
+
+    with pytest.raises(RuntimeError, match=f"{field} must be an ISO-8601 string or null"):
+        plugin_price_sync.sync_plugin_rates(
+            archive_path, repo_root, now=datetime(2026, 9, 5, tzinfo=UTC)
+        )
+
+    assert provider_path.read_bytes() == before
+
+
 def test_plugin_sync_check_exit_status_tracks_drift(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
