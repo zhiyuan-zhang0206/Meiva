@@ -12,9 +12,8 @@ from langchain_core.language_models.fake_chat_models import FakeListChatModel
 from langchain_core.messages import AIMessage
 
 from base import paths
-from base.host.env import dotenv_file
 from base.host.env.agent_slices import ModelOverrides
-from base.lm import factory, pricing, provider_api
+from base.lm import pricing, provider_api
 from base.lm.catalog import CatalogBuilder, ModelCatalog
 from base.lm.compat import stop
 from base.lm.factory import (
@@ -23,14 +22,18 @@ from base.lm.factory import (
     provider_key_of_model,
     validate_model_config,
 )
-from base.lm.provider_api import PriceRates, ProviderBinding, ProviderContribution
+from base.lm.provider_api import (
+    PriceRates,
+    ProviderBinding,
+    ProviderContribution,
+)
 from base.lm.registry import ModelSpec, ModelTuning
 from base.packages.plugin_providers import build_model_catalog
 from base.packages.plugins import enable_config
 from base.packages.tests.lm.providers.provider_plugin_support import (
     provider_plugin as provider_plugin,
 )
-from base.packages.tests.model_catalog import AddBindings
+from base.packages.tests.model_catalog import AddBindings, AddModels
 
 _REPO_PROVIDER_PLUGINS = {
     "lm_alibaba",
@@ -109,16 +112,11 @@ def test_repo_provider_plugins_are_the_exact_default_enabled_set() -> None:
     } == _REPO_PROVIDER_PLUGINS
 
 
-def test_zero_provider_plugins_fail_loud_and_remain_retryable(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    with monkeypatch.context() as isolated:
-        isolated.setattr(enable_config, "discover_plugins", dict)
-
-        with pytest.raises(RuntimeError, match="no provider plugins enabled"):
-            build_model_catalog()
-        with pytest.raises(RuntimeError, match="no provider plugins enabled"):
-            build_model_catalog()
+def test_zero_provider_plugins_fail_loud_and_remain_retryable() -> None:
+    with pytest.raises(RuntimeError, match="no provider plugins enabled"):
+        build_model_catalog(discovered={})
+    with pytest.raises(RuntimeError, match="no provider plugins enabled"):
+        build_model_catalog(discovered={})
 
 
 def test_repo_model_vendor_vocabulary_is_complete(model_catalog: ModelCatalog) -> None:
@@ -405,7 +403,7 @@ def test_plugin_price_vendor_reaches_pricing_lookup(
 
 
 def test_bound_build_preserves_fallback_identity_and_effort(
-    model_catalog: ModelCatalog, add_bindings: AddBindings, monkeypatch: pytest.MonkeyPatch
+    model_catalog: ModelCatalog, add_bindings: AddBindings, add_models: AddModels
 ) -> None:
     contexts: list[provider_api.BuildContext] = []
 
@@ -421,16 +419,19 @@ def test_bound_build_preserves_fallback_identity_and_effort(
         effort_levels=("low", "high"),
     )
     catalog = add_bindings(model_catalog, {binding.prefix: binding})
+    catalog = add_models(
+        catalog,
+        {
+            "unavailable-other-provider": ModelSpec(
+                provider="other",
+                spawnable=False,
+                unavailable_fallback="testctx-model",
+            )
+        },
+    )
 
     from base.lm.factory import build_chat_model_bound
 
-    requested: list[str] = []
-
-    def resolve(model: str, *, models: object) -> str:
-        requested.append(model)
-        return "testctx-model"
-
-    monkeypatch.setattr(factory, "resolve_available_model", resolve)
     client, selected = build_chat_model_bound(
         "unavailable-other-provider",
         media_resolution="high",
@@ -442,7 +443,6 @@ def test_bound_build_preserves_fallback_identity_and_effort(
     )
     assert isinstance(client, FakeListChatModel)
     assert selected is binding
-    assert requested == ["unavailable-other-provider"]
     assert contexts[0].model == "testctx-model"
     assert len(contexts) == 1
     assert contexts[0].effort_levels == ("low", "high")
@@ -452,21 +452,30 @@ def test_bound_build_preserves_fallback_identity_and_effort(
 
 
 def test_plugin_model_validation_and_key_check(
-    provider_plugin: Callable[..., None], monkeypatch: pytest.MonkeyPatch
+    provider_plugin: Callable[..., None],
 ) -> None:
     provider_plugin()
     catalog = build_model_catalog()
 
-    monkeypatch.setattr(dotenv_file, "read_env_aliases", dict)
     with pytest.raises(ValueError, match="TESTP_API_KEY"):
-        validate_model_config(model="testp-1", catalog=catalog, llm_override="")
+        validate_model_config(
+            model="testp-1",
+            catalog=catalog,
+            llm_override="",
+            env_aliases={},
+            key_present_fn=lambda _k: False,
+        )
 
-    monkeypatch.setattr(
-        dotenv_file,
-        "read_env_aliases",
-        lambda: {"TESTP_API_KEY": "sk-test"},
+    assert (
+        validate_model_config(
+            model="testp-1",
+            catalog=catalog,
+            llm_override="",
+            env_aliases={"TESTP_API_KEY": "sk-test"},
+            key_present_fn=lambda _k: False,
+        )
+        == "testp-1"
     )
-    assert validate_model_config(model="testp-1", catalog=catalog, llm_override="") == "testp-1"
 
 
 def test_vision_flag_drives_image_gate(provider_plugin: Callable[..., None]) -> None:

@@ -42,10 +42,12 @@ class EventPipeline:
         batch_size: int = 100,
         flush_interval_s: float = 0.5,
         queue_maxsize: int = 10_000,
+        report_loss_fn: Callable[..., Event] | None = None,
     ) -> None:
         self._writer = writer
         self._batch_size = batch_size
         self._flush_interval_s = flush_interval_s
+        self._report_loss_fn = report_loss_fn
         self._queue: queue.Queue[Event | SyncReceipt] = queue.Queue(maxsize=queue_maxsize)
         self._drop_reported_at = 0.0
         self._drop_example: Event | None = None
@@ -95,7 +97,9 @@ class EventPipeline:
         if due:
             from base.telemetry.delivery.loss import report_loss
 
-            report_loss(event, 1, "emitter", record_metric=self.record_export_loss)
+            custom = getattr(self, "_report_loss_fn", None)
+            fn = report_loss if custom is None else custom
+            fn(event, 1, "emitter", record_metric=self.record_export_loss)
 
     def flush(self) -> DrainResult:
         """Acknowledge queued and held records through the sole drain writer."""

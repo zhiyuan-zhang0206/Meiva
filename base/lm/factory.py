@@ -71,6 +71,7 @@ entering state guards that metadata is not empty.
 from __future__ import annotations
 
 import importlib
+from collections.abc import Callable, Mapping
 from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
@@ -170,6 +171,8 @@ def validate_model_config(
     check_provider_key: bool = True,
     catalog: ModelCatalog,
     llm_override: str,
+    env_aliases: Mapping[str, str] | None = None,
+    key_present_fn: Callable[[str], bool] = provider_api.provider_key_present,
 ) -> str:
     """Validate the selected model, its explicit effort and launch credentials.
 
@@ -228,7 +231,12 @@ def validate_model_config(
     if not check_provider_key or llm_override:
         return effective_model
 
-    _ensure_provider_key(effective_model, catalog=catalog)
+    _ensure_provider_key(
+        effective_model,
+        catalog=catalog,
+        env_aliases=env_aliases,
+        key_present_fn=key_present_fn,
+    )
     return effective_model
 
 
@@ -255,7 +263,13 @@ def _validate_model_effort(
     validate_effort(effort, spec.effort_levels or (), target=model)
 
 
-def _ensure_provider_key(effective_model: str, *, catalog: ModelCatalog) -> None:
+def _ensure_provider_key(
+    effective_model: str,
+    *,
+    catalog: ModelCatalog,
+    env_aliases: Mapping[str, str] | None = None,
+    key_present_fn: Callable[[str], bool] = provider_api.provider_key_present,
+) -> None:
     """Fail fast when the effective model's provider API key is not configured.
 
     Drives the lookup from `provider_key_map()`. The key has no Settings field, so it
@@ -271,9 +285,14 @@ def _ensure_provider_key(effective_model: str, *, catalog: ModelCatalog) -> None
         # loads its own .env into the process env at boot. The file
         # fallback covers the gateway profile that pops provider keys
         # from os.environ (Task #856 / regression #1562).
-        from base.host.env.dotenv_file import read_env_aliases
+        if env_aliases is None:
+            from base.host.env.dotenv_file import read_env_aliases
 
-        if provider_api.provider_key_present(env_var) or env_var in read_env_aliases():
+            aliases: Mapping[str, str] = read_env_aliases()
+        else:
+            aliases = env_aliases
+
+        if key_present_fn(env_var) or env_var in aliases:
             return
         raise ValueError(
             f"{effective_model} requires {env_var} which is not "

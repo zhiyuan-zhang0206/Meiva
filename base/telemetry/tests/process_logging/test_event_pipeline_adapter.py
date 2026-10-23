@@ -151,8 +151,8 @@ def test_event_pipeline_filter_samples_info_log_one_in_ten() -> None:
     """Bare INFO `log` records are level-graded-sampled: exactly one in ten
     passes; the counter is per-process and resettable for tests."""
     f = slog.event_pipeline_filter
-    slog.log_info_sample_counter = itertools.count()
-    kept = [f(_rec_level({"event": "log"})) for _ in range(10)]
+    counter = itertools.count()
+    kept = [f(_rec_level({"event": "log"}), sample_counter=counter) for _ in range(10)]
     assert kept.count(True) == 1
     assert kept[0] is True  # the first record of each block is the survivor
 
@@ -161,16 +161,18 @@ def test_event_pipeline_filter_keeps_warning_and_named_events() -> None:
     """WARNING+ bare logs and every named event pass unchanged — the alerts /
     unresolved surfaces depend on them; only bare INFO logs are sampled."""
     f = slog.event_pipeline_filter
-    slog.log_info_sample_counter = itertools.count()
-    assert f(_rec_level({"event": "log"}, "WARNING"))
-    assert f(_rec_level({"event": "log"}, "ERROR"))
-    assert f(_rec_level({"event": "log"}, "CRITICAL"))
+    counter = itertools.count()
+    assert f(_rec_level({"event": "log"}, "WARNING"), sample_counter=counter)
+    assert f(_rec_level({"event": "log"}, "ERROR"), sample_counter=counter)
+    assert f(_rec_level({"event": "log"}, "CRITICAL"), sample_counter=counter)
     # named events (node_exit, llm_usage) are not bare logs
-    assert f(_rec_level({"event": "node_exit"}))
-    assert f(_rec_level({"event": "llm_usage"}))
+    assert f(_rec_level({"event": "node_exit"}), sample_counter=counter)
+    assert f(_rec_level({"event": "llm_usage"}), sample_counter=counter)
     # A label is payload metadata and follows the ordinary bare-log sample rate.
-    slog.log_info_sample_counter = itertools.count()
-    assert sum(f(_rec_level({"label": "exec"})) for _ in range(10)) == 1
+    label_counter = itertools.count()
+    assert (
+        sum(f(_rec_level({"label": "exec"}), sample_counter=label_counter) for _ in range(10)) == 1
+    )
     # a record without a level passes unsampled (test-records / tolerant path)
     assert f(_rec({}))
 

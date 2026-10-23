@@ -18,11 +18,10 @@ from __future__ import annotations
 import time
 from collections.abc import Callable
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
-import pytest
-
-from base import paths, telemetry
+from base import telemetry
 from base.telemetry.delivery import loss, mirror
 
 
@@ -93,13 +92,19 @@ class _Recorder:
 
 
 def _make_sink(
-    writer: Callable[[list[Any]], None], *, batch: int, interval: float, maxsize: int
+    writer: Callable[[list[Any]], None],
+    *,
+    batch: int,
+    interval: float,
+    maxsize: int,
+    report_loss_fn: Callable[..., telemetry.Event] | None = None,
 ) -> telemetry.EventPipeline:
     return telemetry.EventPipeline(
         writer=writer,
         batch_size=batch,
         flush_interval_s=interval,
         queue_maxsize=maxsize,
+        report_loss_fn=report_loss_fn,
     )
 
 
@@ -154,7 +159,7 @@ def test_stop_flushes_what_is_buffered() -> None:
 # --- bounded queue ---
 
 
-def test_queue_is_bounded_and_counts_what_it_sheds(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_queue_is_bounded_and_counts_what_it_sheds() -> None:
     """A producer outrunning the drain thread sheds records, not memory.
 
     The drain thread is stalled so the queue genuinely fills; before this bound
@@ -178,8 +183,7 @@ def test_queue_is_bounded_and_counts_what_it_sheds(monkeypatch: pytest.MonkeyPat
         reports.append({"event": "event_log_drop", "n": count})
         return original_report(event, count, queue_name, **kwargs)
 
-    monkeypatch.setattr(loss, "report_loss", report)
-    sink = _make_sink(_stalled, batch=10, interval=0.05, maxsize=20)
+    sink = _make_sink(_stalled, batch=10, interval=0.05, maxsize=20, report_loss_fn=report)
     try:
         for i in range(500):
             sink.enqueue(_event(i))
@@ -243,7 +247,7 @@ def test_shed_records_report_one_event_log_drop() -> None:
 # ── emitter self-diagnostics (audit-round2 events-obs P2) ────────────────────
 
 
-def test_jsonl_mirror_failure_is_reported_not_silent(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_jsonl_mirror_failure_is_reported_not_silent(tmp_path: Path) -> None:
     """A JSONL mirror write failure must be REPORTED (first + every 50th), not
     swallowed: the mirror is the durable local copy, and a disk-full /
     permission error would otherwise degrade it without a trace. The report
@@ -253,23 +257,23 @@ def test_jsonl_mirror_failure_is_reported_not_silent(monkeypatch: pytest.MonkeyP
     from loguru import logger
 
     captured: list[str] = []
-
-    def _boom() -> None:
-        raise OSError("disk full")
+    bad_dir = tmp_path / "not-a-dir"
+    bad_dir.write_text("file")
 
     # The module-level counter may be non-zero from a prior test in the
     # same process (xdist workers share the module) — reset it so the
     # first-failure report cadence assertion is deterministic.
-    monkeypatch.setattr(mirror, "jsonl_failures", 0)
-    monkeypatch.setattr(paths, "logs_dir", _boom)
+    mirror.reset_jsonl_failures()
     sink_id = logger.add(
         lambda m: captured.append(m.record["message"]),
         level="WARNING",
         filter=lambda r: bool(r["extra"].get("_no_emitter")),
     )
     try:
-        telemetry.append_jsonl([_event(0)])
-        telemetry.append_jsonl([_event(1)])  # second consecutive failure — same report window
+        telemetry.append_jsonl([_event(0)], mirror_dir=bad_dir)
+        telemetry.append_jsonl(
+            [_event(1)], mirror_dir=bad_dir
+        )  # second consecutive failure — same report window
     finally:
         logger.remove(sink_id)
 
@@ -277,9 +281,7 @@ def test_jsonl_mirror_failure_is_reported_not_silent(monkeypatch: pytest.MonkeyP
     assert "JSONL mirror write failed" in captured[0]
 
 
-def test_sync_reports_timeout_when_drain_thread_wedged(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_sync_reports_timeout_when_drain_thread_wedged() -> None:
     """sync() must not fail silently when the drain thread cannot land its held
     batch in time — a caller about to TRUNCATE `events` needs to know the
     barrier did not complete (the straggler-flake class this closes)."""

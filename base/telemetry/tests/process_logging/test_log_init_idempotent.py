@@ -10,7 +10,6 @@ from __future__ import annotations
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
-from unittest.mock import patch
 
 import pytest
 
@@ -27,13 +26,19 @@ def _unused_producer() -> EventPipeline:
     raise AssertionError("the mocked sink must not construct a pipeline")
 
 
-def gateway_inputs() -> dict[str, Any]:
+def gateway_inputs(**overrides: Any) -> dict[str, Any]:
     """Explicit wiring inputs; sink mocks prevent constructing the test producer."""
-    return {
+    base: dict[str, Any] = {
         "producer": _unused_producer,
         "machine_reader": lambda: "test-host",
         "image": LoadedCommit(_REPO_ROOT, "test-image"),
+        "stderr_sink_fn": lambda *_a, **_kw: 1,
+        "file_sink_fn": lambda _p: 2,
+        "event_sink_fn": lambda **_kw: 3,
+        "info_fn": lambda *_a, **_kw: None,
     }
+    base.update(overrides)
+    return base
 
 
 @pytest.fixture(autouse=True)
@@ -42,45 +47,48 @@ def reset_init_flag() -> Iterator[None]:
 
     In production process init happens only once; test fixture-level reset is for test isolation.
     """
-    slog.init_done = False
-    # init_gateway_process now logs one `service_started` line per boot (the
-    # ops monitor panel's restart-count collection point). Silence it in the
-    # idempotency tests — they assert sink wiring, not the log line; the
-    # dedicated test_init_gateway_process_emits_service_started below locks
-    # the emission contract.
-    with patch.object(slog.logger, "info"):
-        yield
-    slog.init_done = False
+    slog.reset_init_done()
+    yield
+    slog.reset_init_done()
 
 
 def test_init_gateway_process_idempotent() -> None:
     """Repeated calls to init_gateway_process trigger only one logger.add chain."""
-    with (
-        patch.object(slog.logger, "add") as mock_add,
-        patch.object(slog, "add_file_sink") as mock_file_sink,
-        patch.object(plog, "add_event_sink") as mock_pg,
-    ):
-        plog.init_gateway_process(**gateway_inputs())
-        plog.init_gateway_process(**gateway_inputs())
-        plog.init_gateway_process(**gateway_inputs())
+    stderr_calls: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
+    file_calls: list[Path] = []
+    event_calls: list[dict[str, Any]] = []
+    inputs = gateway_inputs(
+        stderr_sink_fn=lambda *a, **kw: stderr_calls.append((a, kw)) or 1,
+        file_sink_fn=lambda p: file_calls.append(p) or 2,
+        event_sink_fn=lambda **kw: event_calls.append(kw) or 3,
+    )
+    plog.init_gateway_process(**inputs)
+    plog.init_gateway_process(**inputs)
+    plog.init_gateway_process(**inputs)
 
     # three adds should only happen once: stderr / file / postgres group
-    assert mock_add.call_count == 1, "stderr sink should be added only once"
-    assert mock_file_sink.call_count == 1, "file sink should be added only once"
-    assert mock_pg.call_count == 1, "event sink should be added only once"
+    assert len(stderr_calls) == 1, "stderr sink should be added only once"
+    assert len(file_calls) == 1, "file sink should be added only once"
+    assert len(event_calls) == 1, "event sink should be added only once"
 
 
 def test_init_subprocess_logger_idempotent() -> None:
     """Repeated calls to init_subprocess_logger trigger only one sink chain."""
-    with (
-        patch.object(slog.logger, "configure") as mock_configure,
-        patch.object(slog, "add_file_sink") as mock_file_sink,
-    ):
-        slog.init_subprocess_logger(agent_id=1)
-        slog.init_subprocess_logger(agent_id=1)
+    configure_calls: list[dict[str, Any]] = []
+    file_calls: list[Path] = []
+    slog.init_subprocess_logger(
+        agent_id=1,
+        configure_fn=lambda **kw: configure_calls.append(kw),
+        file_sink_fn=lambda p: file_calls.append(p) or 1,
+    )
+    slog.init_subprocess_logger(
+        agent_id=1,
+        configure_fn=lambda **kw: configure_calls.append(kw),
+        file_sink_fn=lambda p: file_calls.append(p) or 1,
+    )
 
-    assert mock_configure.call_count == 1
-    assert mock_file_sink.call_count == 1
+    assert len(configure_calls) == 1
+    assert len(file_calls) == 1
 
 
 def test_first_init_wins_subsequent_silent_skip() -> None:
@@ -90,82 +98,81 @@ def test_first_init_wins_subsequent_silent_skip() -> None:
     then init_done locked, init of other roles also goes silent skip. Otherwise, beyond watchdog daemon
     (gateway init) calling healthcheck.main() (also gateway init), if healthcheck mistakenly calls different role like init_subprocess_logger, sinks would accumulate again.
     """
-    with (
-        patch.object(slog.logger, "add") as mock_add,
-        patch.object(slog.logger, "configure"),
-        patch.object(slog, "add_file_sink") as mock_file_sink,
-        patch.object(plog, "add_event_sink"),
-    ):
-        plog.init_gateway_process(**gateway_inputs())
-        # second time switching roles — still skip
-        slog.init_subprocess_logger(agent_id=1)
+    stderr_calls: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
+    file_calls: list[Path] = []
+    plog.init_gateway_process(
+        **gateway_inputs(
+            stderr_sink_fn=lambda *a, **kw: stderr_calls.append((a, kw)) or 1,
+            file_sink_fn=lambda p: file_calls.append(p) or 2,
+        )
+    )
+    # second time switching roles — still skip
+    slog.init_subprocess_logger(
+        agent_id=1,
+        configure_fn=lambda **_kw: None,
+        file_sink_fn=lambda p: file_calls.append(p) or 2,
+    )
 
-    assert mock_add.call_count == 1, "second cross-role init still must silent skip"
-    assert mock_file_sink.call_count == 1, "the subprocess role must not add its agent log file"
+    assert len(stderr_calls) == 1, "second cross-role init still must silent skip"
+    assert len(file_calls) == 1, "the subprocess role must not add its agent log file"
 
 
 def test_init_gateway_process_per_daemon_log_file() -> None:
     """init_gateway_process(name=X) writes X.log, not shared gateway.log — each daemon's log (including uncaught exception traceback) lands in per-daemon file, postmortem can be found (shared gateway.log mixing all daemons by pid makes traceability hard)."""
-    with (
-        patch.object(slog.logger, "add"),
-        patch.object(slog, "add_file_sink") as mock_file_sink,
-        patch.object(plog, "add_event_sink"),
-    ):
-        plog.init_gateway_process(name="restarter", **gateway_inputs())
+    file_calls: list[Path] = []
+    plog.init_gateway_process(
+        name="restarter",
+        **gateway_inputs(file_sink_fn=lambda p: file_calls.append(p) or 2),
+    )
 
-    mock_file_sink.assert_called_once_with(logs_dir() / "restarter.log")
+    assert file_calls == [logs_dir() / "restarter.log"]
 
 
 def test_init_gateway_process_default_name_is_gateway() -> None:
     """Default name remains gateway.log (gateway process backward compat)."""
-    with (
-        patch.object(slog.logger, "add"),
-        patch.object(slog, "add_file_sink") as mock_file_sink,
-        patch.object(plog, "add_event_sink"),
-    ):
-        plog.init_gateway_process(**gateway_inputs())
+    file_calls: list[Path] = []
+    plog.init_gateway_process(**gateway_inputs(file_sink_fn=lambda p: file_calls.append(p) or 2))
 
-    mock_file_sink.assert_called_once_with(logs_dir() / "gateway.log")
+    assert file_calls == [logs_dir() / "gateway.log"]
 
 
 def test_init_cli_process_idempotent() -> None:
     """Repeated calls to init_cli_process trigger only one sink chain."""
-    with (
-        patch.object(slog.logger, "add") as mock_add,
-        patch.object(slog, "add_file_sink") as mock_file_sink,
-        patch.object(plog, "add_event_sink") as mock_pg,
-    ):
-        plog.init_cli_process(
-            name="cli-spawn-update-1", producer=_unused_producer, machine_reader=lambda: "test-host"
-        )
-        plog.init_cli_process(
-            name="cli-spawn-update-1", producer=_unused_producer, machine_reader=lambda: "test-host"
-        )
-        plog.init_cli_process(
-            name="cli-spawn-update-1", producer=_unused_producer, machine_reader=lambda: "test-host"
-        )
+    stderr_calls: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
+    file_calls: list[Path] = []
+    event_calls: list[dict[str, Any]] = []
+    kwargs: dict[str, Any] = {
+        "name": "cli-spawn-update-1",
+        "producer": _unused_producer,
+        "machine_reader": lambda: "test-host",
+        "stderr_sink_fn": lambda *a, **kw: stderr_calls.append((a, kw)) or 1,
+        "file_sink_fn": lambda p: file_calls.append(p) or 2,
+        "event_sink_fn": lambda **kw: event_calls.append(kw) or 3,
+    }
+    plog.init_cli_process(**kwargs)
+    plog.init_cli_process(**kwargs)
+    plog.init_cli_process(**kwargs)
 
-    assert mock_add.call_count == 1
-    assert mock_file_sink.call_count == 1
-    assert mock_pg.call_count == 1
+    assert len(stderr_calls) == 1
+    assert len(file_calls) == 1
+    assert len(event_calls) == 1
 
 
 def test_init_cli_process_per_invocation_log_file() -> None:
     """init_cli_process(name=X) writes X.log — each detached CLI invocation
     isolated to its own file (matches init_gateway_process per-daemon
     naming convention)."""
-    with (
-        patch.object(slog.logger, "add"),
-        patch.object(slog, "add_file_sink") as mock_file_sink,
-        patch.object(plog, "add_event_sink"),
-    ):
-        plog.init_cli_process(
-            name="cli-watchdog-update",
-            producer=_unused_producer,
-            machine_reader=lambda: "test-host",
-        )
+    file_calls: list[Path] = []
+    plog.init_cli_process(
+        name="cli-watchdog-update",
+        producer=_unused_producer,
+        machine_reader=lambda: "test-host",
+        stderr_sink_fn=lambda *_a, **_kw: 1,
+        file_sink_fn=lambda p: file_calls.append(p) or 2,
+        event_sink_fn=lambda **_kw: 3,
+    )
 
-    mock_file_sink.assert_called_once_with(logs_dir() / "cli-watchdog-update.log")
+    assert file_calls == [logs_dir() / "cli-watchdog-update.log"]
 
 
 def test_file_sink_rotates_and_expires(tmp_path: Path) -> None:
@@ -173,10 +180,13 @@ def test_file_sink_rotates_and_expires(tmp_path: Path) -> None:
 
     Without them files only monotonically grow, and nothing reclaims: actual measurement gateway.log ~900 MB, agent-N.log ~190 MB. This is not optional tuning for the sink, it's a prerequisite for its usability.
     """
-    with patch.object(slog.logger, "add") as mock_add:
-        slog.add_file_sink(tmp_path / "x.log")
+    captured: list[dict[str, Any]] = []
+    slog.add_file_sink(
+        tmp_path / "x.log",
+        add_sink_fn=lambda _sink, **kw: captured.append(kw) or 1,
+    )
 
-    kwargs = mock_add.call_args.kwargs
+    kwargs = captured[0]
     assert kwargs["rotation"], "file sink must rotate"
     assert kwargs["retention"], "old rotated files must expire and be reclaimed"
 
@@ -187,10 +197,13 @@ def test_file_sink_never_enqueues(tmp_path: Path) -> None:
     `agent-{N}.log` is shared by the agent's exec subprocesses; loguru's official answer for this shared sink is enqueue=True. But that queue allocates POSIX semaphore, and force-killed processes (agent routinely SIGKILL) permanently leak it; when leak accumulates hits kern.posix.sem.max, every new agent startup dies with errno 28.
     Prefer accepting rare interleaving on rotation than switching to enqueue.
     """
-    with patch.object(slog.logger, "add") as mock_add:
-        slog.add_file_sink(tmp_path / "x.log")
+    captured: list[dict[str, Any]] = []
+    slog.add_file_sink(
+        tmp_path / "x.log",
+        add_sink_fn=lambda _sink, **kw: captured.append(kw) or 1,
+    )
 
-    assert mock_add.call_args.kwargs.get("enqueue", False) is False
+    assert captured[0].get("enqueue", False) is False
 
 
 def test_init_gateway_process_emits_service_started() -> None:
@@ -199,19 +212,12 @@ def test_init_gateway_process_emits_service_started() -> None:
     init guard makes repeat calls silent skips), and the payload carries the
     daemon identity + pid + loaded commit + host so restarts are attributable.
     """
-    infos: list[dict] = []
-    with (
-        patch.object(slog.logger, "add"),
-        patch.object(slog, "add_file_sink"),
-        patch.object(plog, "add_event_sink"),
-        patch.object(slog.logger, "info", side_effect=lambda _msg, **kw: infos.append(kw)),  # pyright: ignore[reportUnknownMemberType]
-    ):
-        plog.init_gateway_process(name="restarter", **gateway_inputs())
-        plog.init_gateway_process(
-            name="restarter", **gateway_inputs()
-        )  # idempotent — still one row
+    infos: list[dict[str, Any]] = []
+    inputs = gateway_inputs(info_fn=lambda _msg, **kw: infos.append(kw))
+    plog.init_gateway_process(name="restarter", **inputs)
+    plog.init_gateway_process(name="restarter", **inputs)  # idempotent — still one row
 
-    assert len(infos) == 1  # pyright: ignore[reportUnknownArgumentType]
+    assert len(infos) == 1
     kw = infos[0]
     assert kw["event"] == "service_started"
     assert kw["name"] == "restarter"
@@ -245,7 +251,7 @@ def test_a_warning_written_while_the_init_builds_settings_reaches_stderr(
 
     home = tmp_path / "home"
     (home / "run").mkdir(parents=True)
-    gateway = "http://gateway.invalid:8000"
+    gateway = "http://127.0.0.1:1"
     # A configured pure runner: its `.env` carries the role, the gateway URL and the
     # name the gateway init gives its host.
     (home / ".env").write_text(

@@ -106,3 +106,10 @@ def append_jsonl(events: list[Event], *, mirror_dir: Path | None = None) -> None
 # after it are reported. (The PG write — the other former failure source — was
 # retired with the LGTM cutover, task #1197.)
 jsonl_failures = 0
+
+
+def reset_jsonl_failures() -> None:
+    # meiva:note
+    # Reset the consecutive mirror-failure counter for isolated test windows.
+    global jsonl_failures  # noqa: PLW0603
+    jsonl_failures = 0
