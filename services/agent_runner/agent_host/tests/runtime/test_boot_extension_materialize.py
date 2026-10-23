@@ -12,6 +12,7 @@ from base.cluster.machine import MachineIdentity
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.packages.extensions import registry as reg
+from base.telemetry.otlp.trace_config import TraceConfig
 
 _SKILL_MD = """---
 name: {name}
@@ -76,9 +77,7 @@ def test_the_hosted_daemon_lands_them_once_per_process() -> None:
     from services.agent_runner.agent_host.daemon import run
 
     src = inspect.getsource(run)
-    assert src.index("init_process_scope(machine=machine, home=home)") < src.index(
-        "land_cluster_extensions(db)"
-    )
+    assert src.index("init_process_scope(") < src.index("land_cluster_extensions(db)")
     assert "load_process_extensions" not in src, "the plugin load is `load_extensions` alone"
     assert src.count("land_cluster_extensions(db)") == 1, (
         "once per process — a second call would re-hash every skill tree for no gain"
@@ -99,11 +98,19 @@ def test_process_scope_passes_its_machine_and_home_without_reading_identity(
         host=lambda: "localhost",
         description=lambda: None,
     )
-    calls: list[tuple[MachineIdentity, Path]] = []
+    trace = TraceConfig(
+        enabled=True,
+        strip_content=True,
+        endpoint="http://127.0.0.1:4318",
+        retention_days=14,
+        max_dir_mb=2048,
+        disk_watermark=0.9,
+    )
+    calls: list[tuple[MachineIdentity, Path, TraceConfig]] = []
 
-    def initialize(*, machine: MachineIdentity, home: Path) -> None:
-        calls.append((machine, home))
+    def initialize(*, machine: MachineIdentity, home: Path, config: TraceConfig) -> None:
+        calls.append((machine, home, config))
 
     monkeypatch.setattr(tracing, "initialize_tracing", initialize)
-    init_process_scope(machine=machine, home=unit_home)
-    assert calls == [(machine, unit_home)]
+    init_process_scope(machine=machine, home=unit_home, trace=trace)
+    assert calls == [(machine, unit_home, trace)]

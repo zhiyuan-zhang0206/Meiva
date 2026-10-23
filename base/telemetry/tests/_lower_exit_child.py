@@ -43,6 +43,7 @@ def loaded() -> None:
     atexit.register(observe)
     from base.telemetry import tracing
     from base.telemetry.tests.otlp.identity_inputs import machine_identity
+    from base.telemetry.tests.test_tracing import trace_config
 
     entered = threading.Event()
 
@@ -51,7 +52,9 @@ def loaded() -> None:
         stop_requested.wait()
 
     tracing.arm_tracing = arm  # type: ignore[assignment]
-    tracing.start_arm_thread("http://local-test-collector", machine_identity(), Path(".meiva"))
+    tracing.start_arm_thread(
+        trace_config(endpoint="http://local-test-collector"), machine_identity(), Path(".meiva")
+    )
     assert entered.wait(5)
     owners.append(tracing.state["arm_owner"])
 

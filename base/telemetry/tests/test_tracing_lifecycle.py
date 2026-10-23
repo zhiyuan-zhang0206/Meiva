@@ -11,6 +11,7 @@ import pytest
 from base.telemetry import tracing
 from base.telemetry.otlp import trace_workers as lifecycle
 from base.telemetry.tests.otlp.identity_inputs import machine_identity
+from base.telemetry.tests.test_tracing import trace_config
 
 
 @pytest.fixture
@@ -53,7 +54,9 @@ def test_first_use_timeout_still_allows_late_arm_success(
 
     monkeypatch.setattr(tracing, "arm_tracing", initialize)
     monkeypatch.setattr(tracing, "INIT_RESOLVED_TIMEOUT_S", 0.01)
-    tracing.start_arm_thread("http://collector", machine_identity(), Path(".meiva"))
+    tracing.start_arm_thread(
+        trace_config(endpoint="http://collector"), machine_identity(), Path(".meiva")
+    )
     owner = fresh_state["arm_owner"]
     try:
         assert entered.wait(5)
@@ -64,7 +67,9 @@ def test_first_use_timeout_still_allows_late_arm_success(
         assert owner.finished.wait(5)
         assert fresh_state["initialized"]
         assert tracing.shutdown() == ()
-        tracing.start_arm_thread("http://replacement", machine_identity(), Path(".meiva"))
+        tracing.start_arm_thread(
+            trace_config(endpoint="http://replacement"), machine_identity(), Path(".meiva")
+        )
         assert fresh_state["arm_owner"] is owner
     finally:
         release.set()
@@ -80,7 +85,9 @@ def test_real_sdk_arm_block_does_not_hold_stop_lock(
         assert release.wait(5)
 
     monkeypatch.setattr("traceloop.sdk.Traceloop.init", initialize)
-    tracing.start_arm_thread("http://collector", machine_identity(), Path(".meiva"))
+    tracing.start_arm_thread(
+        trace_config(endpoint="http://collector"), machine_identity(), Path(".meiva")
+    )
     owner = fresh_state["arm_owner"]
     try:
         assert entered.wait(5)
@@ -114,7 +121,9 @@ def test_unknown_late_arm_error_is_visible_then_original_stop_raises(
 
     monkeypatch.setattr(tracing, "arm_tracing", initialize)
     monkeypatch.setattr(lifecycle, "report_no_pipeline", report)
-    tracing.start_arm_thread("http://collector", machine_identity(), Path(".meiva"))
+    tracing.start_arm_thread(
+        trace_config(endpoint="http://collector"), machine_identity(), Path(".meiva")
+    )
     owner = fresh_state["arm_owner"]
     try:
         assert entered.wait(5)
@@ -190,6 +199,6 @@ def test_trace_identity_defect_fails_before_sdk_arm(
 
     monkeypatch.setattr(machine, "name", invalid)
     with pytest.raises(RuntimeError, match="invalid machine reader"):
-        tracing.start_arm_thread("http://collector", machine, Path(".meiva"))
+        tracing.start_arm_thread(trace_config(endpoint="http://collector"), machine, Path(".meiva"))
     assert fresh_state.get("arm_owner") is None
     assert not fresh_state["arm_failed"]

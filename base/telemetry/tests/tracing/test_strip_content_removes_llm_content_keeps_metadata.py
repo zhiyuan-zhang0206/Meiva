@@ -20,6 +20,7 @@ from base.telemetry.tests.test_tracing import collector_up as collector_up
 from base.telemetry.tests.test_tracing import (
     fixed_disk_usage,
     otlp_with_attrs,
+    trace_config,
     under_watermark,
     wait_init_resolved,
     warned_fields,
@@ -141,7 +142,6 @@ def test_exporter_posts_stripped_line(monkeypatch: pytest.MonkeyPatch, tmp_path:
     from opentelemetry.sdk.trace import TracerProvider
     from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 
-    monkeypatch.setattr(config.settings.observability, "trace_strip_content", True)
     posts: list[bytes] = []
 
     class _Resp:
@@ -155,7 +155,7 @@ def test_exporter_posts_stripped_line(monkeypatch: pytest.MonkeyPatch, tmp_path:
 
     provider = TracerProvider()
     provider.add_span_processor(
-        SimpleSpanProcessor(OtlpJsonHttpSpanExporter(endpoint="http://127.0.0.1:4318"))
+        SimpleSpanProcessor(OtlpJsonHttpSpanExporter("http://127.0.0.1:4318", strip_content=True))
     )
     tracer = provider.get_tracer("meiva.session")
     with tracer.start_as_current_span("meiva-agent-7") as root:
@@ -186,7 +186,6 @@ def test_exporter_strip_opt_out_keeps_content(monkeypatch: pytest.MonkeyPatch, t
     from opentelemetry.sdk.trace import TracerProvider
     from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 
-    monkeypatch.setattr(config.settings.observability, "trace_strip_content", False)
     posts: list[bytes] = []
 
     class _Resp:
@@ -200,7 +199,7 @@ def test_exporter_strip_opt_out_keeps_content(monkeypatch: pytest.MonkeyPatch, t
 
     provider = TracerProvider()
     provider.add_span_processor(
-        SimpleSpanProcessor(OtlpJsonHttpSpanExporter(endpoint="http://127.0.0.1:4318"))
+        SimpleSpanProcessor(OtlpJsonHttpSpanExporter("http://127.0.0.1:4318", strip_content=False))
     )
     tracer = provider.get_tracer("meiva.session")
     with tracer.start_as_current_span("root"):
@@ -281,10 +280,6 @@ def test_initialize_relief_pass_runs_when_disk_over_watermark(
     itself is skipped (auto-degrade, watermark guard)."""
     from base.telemetry.tracing import initialize_tracing
 
-    monkeypatch.setattr(config.settings.observability, "trace_enabled", True)
-    monkeypatch.setattr(config.settings.observability, "trace_strip_content", True)
-    monkeypatch.setattr(config.settings.observability, "trace_retention_days", 14)
-    monkeypatch.setattr(config.settings.observability, "trace_max_dir_mb", 2048)
     # Disk OVER the watermark: recording must be skipped...
     monkeypatch.setattr(tracing_mod, "disk_usage", fixed_disk_usage(0.99, 10 * 1024**3))
     mirror = traces_dir(tmp_path)
@@ -313,7 +308,11 @@ def test_initialize_relief_pass_runs_when_disk_over_watermark(
         lambda **kw: init_calls.append(kw),  # pyright: ignore[reportUnknownArgumentType]
     )
 
-    initialize_tracing(machine=machine_identity(), home=tmp_path)
+    initialize_tracing(
+        machine=machine_identity(),
+        home=tmp_path,
+        config=trace_config(enabled=True, strip_content=True, retention_days=14, max_dir_mb=2048),
+    )
 
     # ...but the relief pass still ran: the stale segment is pruned, the gzip
     # and cap legs were invoked, and recording itself was skipped.
@@ -326,13 +325,15 @@ def test_initialize_relief_pass_runs_when_disk_over_watermark(
 def test_initialize_sets_trace_content_false(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     """initialize_tracing forces TRACELOOP_TRACE_CONTENT=false before
     Traceloop.init when strip_content is on."""
-    monkeypatch.setattr(config.settings.observability, "trace_enabled", True)
-    monkeypatch.setattr(config.settings.observability, "trace_strip_content", True)
     under_watermark(monkeypatch)
     calls: list[dict] = []
     monkeypatch.setattr("traceloop.sdk.Traceloop.init", lambda **kw: calls.append(kw))  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
 
-    initialize_tracing(machine=machine_identity(), home=tmp_path)
+    initialize_tracing(
+        machine=machine_identity(),
+        home=tmp_path,
+        config=trace_config(enabled=True, strip_content=True),
+    )
     wait_init_resolved()
 
     assert os.environ["TRACELOOP_TRACE_CONTENT"] == "false"
@@ -345,7 +346,6 @@ def test_initialize_skips_when_collector_unreachable(
     """Local collector not answering at init -> recording stays off, no
     Traceloop.init, and a warning event carries the endpoint (the same
     init-time tradeoff the events exporter makes)."""
-    monkeypatch.setattr(config.settings.observability, "trace_enabled", True)
     monkeypatch.setattr(
         tracing_mod,
         "endpoint_reachable",
@@ -363,7 +363,7 @@ def test_initialize_skips_when_collector_unreachable(
     monkeypatch.setattr(tracing_mod, "start_collector_retry", ignore_arguments)
     calls: list[dict] = []
     monkeypatch.setattr("traceloop.sdk.Traceloop.init", lambda **kw: calls.append(kw))  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
-    initialize_tracing(machine=machine_identity(), home=tmp_path)
+    initialize_tracing(machine=machine_identity(), home=tmp_path, config=trace_config(enabled=True))
 
     assert calls == []
     assert tracing_mod.state["initialized"] is False
@@ -378,11 +378,10 @@ def test_initialize_skips_when_disk_over_watermark(
 ):
     """Disk over watermark: recording stays off, no Traceloop.init, and a
     warning telemetry event is emitted carrying the measured numbers."""
-    monkeypatch.setattr(config.settings.observability, "trace_enabled", True)
     monkeypatch.setattr(tracing_mod, "disk_usage", fixed_disk_usage(0.951, 2 * 1024**3))
     calls: list[dict] = []
     monkeypatch.setattr("traceloop.sdk.Traceloop.init", lambda **kw: calls.append(kw))  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
-    initialize_tracing(machine=machine_identity(), home=tmp_path)
+    initialize_tracing(machine=machine_identity(), home=tmp_path, config=trace_config(enabled=True))
 
     assert calls == []
     assert tracing_mod.state["initialized"] is False

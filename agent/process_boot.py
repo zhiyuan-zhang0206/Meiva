@@ -10,6 +10,7 @@ from base.db import Database
 from base.host.env.agent_slices import ModelOverrides, agent_setting
 from base.log import logger
 from base.paths import exec_run_dir, workspace_dir
+from base.telemetry.otlp.trace_config import TraceConfig
 from meiva.sdk_surface import sdk_disable
 
 
@@ -62,10 +63,10 @@ def clear_exec_run_dir(home: Path) -> None:
             entry.unlink()
 
 
-def init_process_scope(*, machine: MachineIdentity, home: Path) -> None:
+def init_process_scope(*, machine: MachineIdentity, home: Path, trace: TraceConfig) -> None:
     from base.telemetry.tracing import initialize_tracing
 
-    initialize_tracing(machine=machine, home=home)
+    initialize_tracing(machine=machine, home=home, config=trace)
 
 
 def land_cluster_extensions(db: Database) -> None:
