@@ -30,7 +30,7 @@ class ExecStatus(StrEnum):
 
 
 # meiva:note
-# NoteTag is a closed cross-stack set: a new member needs its frontend dispatch branch (markers.tsx) and its gateway timestamp classification, or the UI renders the loud unrecognized marker instead of a generic note. The value set itself is a wire contract, locked by value-set tests against silent renames.
+# NoteTag is a closed cross-stack set: a new member needs its frontend dispatch branch (model/marker-classify.ts) and its gateway timestamp classification, or the UI renders the loud unrecognized marker instead of a generic note. The value set itself is a wire contract, locked by value-set tests against silent renames.
 # meiva:link base/agents/messages/docs/metadata-contracts.meiva.okf.md
 class NoteTag(StrEnum):
     IMPERSONATION = "impersonation"

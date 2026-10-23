@@ -31,7 +31,8 @@ import { useThrottledStreaming } from "@/lib/timeline/use-throttled-streaming";
 import { useUserSettings } from "@/lib/state/use-user-settings";
 import { cn } from "@/lib/format/utils";
 
-import { EphemeralSystemMarker, MarkerBody, classifyMarker } from "./markers";
+import { EphemeralSystemMarker, MarkerBody } from "./markers";
+import { classifyMarker } from "./model/marker-classify";
 import { isLiveReasoning } from "./model/reasoning-clock";
 import { FLEX } from "@/lib/layout/layout";
 

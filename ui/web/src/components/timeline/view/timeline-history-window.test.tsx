@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { BackendTimelineItem } from "@/lib/contracts/types";
 import type { CompactTransitionBuffer } from "@/lib/layout/compact-transition";
-import { ChatMarkdownMock, ScrollAreaMock, cleanupTimelineTest, displayLimits, makeItem, pullOlderAtTop, render, setToggleState } from "./timeline-test-harness";
+import { ChatMarkdownMock, ScrollAreaMock, cleanupTimelineTest, displayLimits, makeItem, pullOlderAtTop, render, setToggleState } from "./timeline-test-mock";
 
 vi.mock("@/components/content/markdown", () => ({ ChatMarkdown: ChatMarkdownMock }));
 vi.mock("@/components/ui/scroll-area", () => ({ ScrollArea: ScrollAreaMock }));

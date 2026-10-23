@@ -10,7 +10,9 @@ import pytest
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _MESSAGE_KWARGS = _REPO_ROOT / "base" / "agents" / "messages" / "kwargs.py"
-_MARKERS_TS = _REPO_ROOT / "ui" / "web" / "src" / "components" / "timeline" / "markers.tsx"
+_MARKER_CLASSIFY_TS = (
+    _REPO_ROOT / "ui" / "web" / "src" / "components" / "timeline" / "model" / "marker-classify.ts"
+)
 _SYSTEM_NOTE_WRITER_DIRS = ("agent", "meiva_builtins", "demos")
 
 
@@ -35,11 +37,11 @@ def _note_tag_members() -> set[str]:
 
 
 def _frontend_dispatch_members() -> set[str]:
-    text = _MARKERS_TS.read_text()
+    text = _MARKER_CLASSIFY_TS.read_text()
     members: set[str] = set()
     for name in ("LIFECYCLE_TAGS", "MEMORY_SOURCES", "NOTE_SOURCES"):
         m = re.search(rf"export const {name} = (?:new Set\()?\[(.*?)\]", text, re.S)
-        assert m, f"exported const {name} not found in markers.tsx"
+        assert m, f"exported const {name} not found in model/marker-classify.ts"
         members.update(re.findall(r'"([^"]+)"', m.group(1)))
     return members
 
@@ -48,17 +50,17 @@ def test_note_tag_and_frontend_dispatch_sets_agree() -> None:
     backend = _note_tag_members()
     frontend = _frontend_dispatch_members()
     assert backend, "NoteTag enum is empty — did the enum move or get renamed?"
-    assert frontend, "frontend dispatch sets are empty — did markers.tsx change shape?"
+    assert frontend, "frontend dispatch sets are empty — did model/marker-classify.ts change shape?"
     missing = sorted(backend - frontend)
     assert not missing, (
-        "NoteTag member(s) with no frontend branch in markers.tsx — the UI will "
+        "NoteTag member(s) with no frontend branch in model/marker-classify.ts — the UI will "
         f"render the red 'unrecognized system_marker' alarm for them (#1017 class): {missing}. "
-        "Add a branch in markers.tsx (LIFECYCLE_TAGS / MEMORY_SOURCES / NOTE_SOURCES)."
+        "Add a branch in model/marker-classify.ts (LIFECYCLE_TAGS / MEMORY_SOURCES / NOTE_SOURCES)."
     )
     stale = sorted(frontend - backend)
     assert not stale, (
         "Stale frontend dispatch member(s) not present in NoteTag — remove or rename them in "
-        f"markers.tsx: {stale}."
+        f"model/marker-classify.ts: {stale}."
     )
 
 

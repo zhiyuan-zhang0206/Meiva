@@ -35,7 +35,8 @@ import { memo, type ReactNode, useLayoutEffect, useRef } from "react";
 import { formatDuration, type SdkCall } from "@/lib/format/item-summary";
 import { cn } from "@/lib/format/utils";
 
-import { CallBadge, HEADER_CLS, STICKY_HEADER_CLS, STUCK_HEADER_CLS, UNSTUCK_HEADER_CLS } from "./card";
+import { STUCK_HEADER_CLS, UNSTUCK_HEADER_CLS } from "./card";
+import { CallBadge, HEADER_CLS, STICKY_HEADER_CLS } from "./view/card-summary";
 import { useNow } from "./model/reasoning-clock";
 import { formatTurnSummary, turnSummaryEqual, type TurnSummary } from "./model/runs";
 import { BAR_HEIGHT_PX, FLEX, FLEX_1, FLEX_COL, MIN_H_0, MIN_W_0, OVERFLOW_CLIP } from "@/lib/layout/layout";

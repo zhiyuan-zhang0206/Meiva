@@ -99,7 +99,7 @@ to omit timestamps according to their timeline item metadata.
 id = "sticky-header-pin"
 kind = "invariant"
 statement = "An expanded work block's header, and its nested detail-card headers, stay pinned below HeaderBar for the whole gesture: no scroll speed, direction or settle timer releases them, so a pinned header's only state change is stuck versus resting presentation."
-code = ["ui/web/src/components/timeline/card.tsx:STICKY_HEADER_CLS", "ui/web/src/components/timeline/card.tsx:STICKY_CHILD_HEADER_CLS"]
+code = ["ui/web/src/components/timeline/view/card-summary.tsx:STICKY_HEADER_CLS", "ui/web/src/components/timeline/card.tsx:STICKY_CHILD_HEADER_CLS"]
 tests = ["ui/web/src/components/timeline/timeline.test.tsx::TimelineView sticky work block (task #2601)::keeps an expanded work block pinned through a rapid scroll burst", "ui/web/src/components/timeline/pinned-titles-autofollow.test.tsx::TimelineView pinned titles during auto-follow::keeps the pin when the reader leaves the bottom at speed"]
 ```
 
