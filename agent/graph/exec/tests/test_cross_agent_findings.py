@@ -24,10 +24,10 @@ from langgraph.runtime import Runtime
 from langgraph.types import Command
 from psycopg_pool import AsyncConnectionPool
 
-import agent.graph.exec.node as agent_graph_exec_node
 from agent.graph.claim.node import claim_node
 from agent.graph.exec._result import ExecDone
 from agent.graph.exec.node import exec_node
+from agent.graph.exec.tests.process_inputs import ScriptedExecProcess
 from agent.messages import NoteTag
 from agent.state import AgentState
 from base.agents.context import MeivaContext
@@ -55,17 +55,9 @@ _BENIGN = "what is the weather like today?"
 
 
 @pytest.fixture(autouse=True)
-def _scan_on_with_exec_child_stubbed(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Scanning on; the exec child stubbed to a clean run (its result envelope
-    carries no findings), so every note in a delta comes from the host."""
+def _scan_on(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Scanning stays real; each turn supplies its explicit clean child process."""
     monkeypatch.setattr(settings.agent, "security_scan_enabled", True)
-
-    async def _child_that_prints_ok(
-        *_args: object, **_kwargs: object
-    ) -> tuple[ExecDone, dict[str, Any], int, None, None]:
-        return ExecDone(output="ok"), {}, 5, None, None
-
-    monkeypatch.setattr(agent_graph_exec_node, "run_agent_code", _child_that_prints_ok)
 
 
 class _Turn:
@@ -80,6 +72,7 @@ class _Turn:
         database_gate: ProcessDbGate,
     ) -> None:
         self.agent_id = agent_id
+        self.process = ScriptedExecProcess([(ExecDone(output="ok"), None)])
         self.runtime = Runtime(
             context=MeivaContext(
                 hosted_resources=hosted_resources,
@@ -117,7 +110,9 @@ class _Turn:
                 AIMessage(content="", tool_calls=[call]),
             ]
         )
-        self.executed = _delta(await exec_node(state, self.runtime, self._config()))
+        self.executed = _delta(
+            await exec_node(state, self.runtime, self._config(), process=self.process)
+        )
 
     def security_note_sources(self) -> list[str]:
         """The inbound source each SECURITY note in this agent's two deltas names."""

@@ -13,6 +13,7 @@ from langgraph.runtime import Runtime
 from agent.graph.exec._result import ExecDone
 from agent.graph.exec._stream import ExecOutputChunkPublisher
 from agent.graph.exec.node import exec_node, run_agent_code
+from agent.graph.exec.process import SubprocessExecProcess
 from agent.state import AgentState
 from base.agents.context import MeivaContext
 from base.agents.context.identity import AgentIdentity
@@ -99,6 +100,7 @@ async def test_concurrent_turn_configs_reach_real_children_without_cross_talk(
             agent_id,
             code,
             ExecOutputChunkPublisher(MagicMock(), agent_id, str(agent_id)),
+            process=SubprocessExecProcess(),
         )
         assert isinstance(result, ExecDone), result
         line = next(line for line in result.output.splitlines() if line.startswith("CONFIG="))
@@ -172,7 +174,10 @@ async def _execution_message(context: MeivaContext, code: str) -> ToolMessage:
         ]
     )
     command = await exec_node(
-        state, Runtime(context=context), {"configurable": {"thread_id": str(agent_id)}}
+        state,
+        Runtime(context=context),
+        {"configurable": {"thread_id": str(agent_id)}},
+        process=SubprocessExecProcess(),
     )
     update = cast(dict[str, Any], command.update)
     assert update["halted"] is False

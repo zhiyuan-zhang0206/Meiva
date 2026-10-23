@@ -6,28 +6,5 @@ in `agent.graph.tests.cancel_fixture`; its consumers bind it locally.
 
 from __future__ import annotations
 
-import os
-from typing import Any
-
-import psycopg
-import pytest
-
 from agent.graph.claim.tests.cursor_fixture import fresh_snapshot_cursor as fresh_snapshot_cursor
-from base.cluster.authority.tests.runner_logins import grant_runner_login
-from base.config import settings
-from base.db.test_db_guard import assert_test_db_url
-
-
-@pytest.fixture
-def runner_exec_env(db_conn: psycopg.Connection[Any], monkeypatch: pytest.MonkeyPatch) -> None:
-    """Give real exec children the launcher's runner projection, preserving setup authority."""
-    url = settings.data_plane.db_url
-    assert_test_db_url(url, context="real agent exec fixture")
-    password = "impersonation-test-runner-password"  # noqa: S105 — private test DB only
-    runner_url = grant_runner_login(
-        url, owner="meiva_citest", login="meiva_g0_runner", password=password
-    )
-    # The real exec child builds its environment from the live os.environ (agent/graph/exec/_subprocess.py),
-    # not from the Settings singleton, so the raw-env seam (not monkeypatch.setenv) is the one that reaches it.
-    monkeypatch.setitem(os.environ, "MEIVA_DB_URL", runner_url)
-    assert db_conn.info.user != "meiva_g0_runner"
+from agent.graph.exec.tests.real_child.runner_exec_env import runner_exec_env as runner_exec_env
