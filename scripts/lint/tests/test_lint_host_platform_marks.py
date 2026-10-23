@@ -163,6 +163,25 @@ def test_a_baseline_entry_allows_exactly_its_count(tmp_path: Path) -> None:
     assert _lint.main([], repo_root=root) == 1
 
 
+def test_a_recorded_count_that_shrank_fails_until_it_is_lowered(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # meiva:note
+    # The record and the tree are one fact: the change that removes a read lowers the number in
+    # the same diff. Left as a note, the reduction outlives its reads and the next branch
+    # carrying this record inherits the work (2026-10-24: two merged PRs left their reductions
+    # behind, and a third PR's merge-tree run failed instead).
+    root = _repo(tmp_path)
+    (root / "tests" / "test_x.py").write_text(
+        "import sys\n\n\ndef test_x():\n    assert sys.platform\n", encoding="utf-8"
+    )
+    baseline = root / _lint.BASELINE
+    baseline.parent.mkdir(parents=True)
+    baseline.write_text(json.dumps({"sys.platform": 2}), encoding="utf-8")
+    assert _lint.main([], repo_root=root) == 1
+    assert "below the recorded 2" in capsys.readouterr().err
+
+
 def test_renaming_a_file_that_carries_a_recorded_read_is_not_a_finding(
     tmp_path: Path,
 ) -> None:

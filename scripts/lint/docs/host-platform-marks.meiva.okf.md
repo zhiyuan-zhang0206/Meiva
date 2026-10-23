@@ -98,8 +98,10 @@ The marker is read through the tokenizer, so a fixture that writes
 `scripts/lint/baseline/host_platform_marks.json` freezes what the rule already
 finds as `read -> count` (`sys.platform`, `is_macos()`, `shutil.which(...)`, …).
 The count follows the read, not the file: renaming or moving a test changes no
-count, while every new read of a counted kind raises one and fails. A kind may
-shrink below its count (a note says so) but never grow past it; `--write-baseline`
+count, while every new read of a counted kind raises one and fails. A kind that
+shrinks below its count fails too: the change that removes a read lowers the
+record in the same diff, so a count never outlives the reads it was frozen from
+(and no later branch inherits the debt of re-recording it). `--write-baseline`
 regenerates the file after a deliberate repair. A `--only` run still compares
 against the whole tree — otherwise a new read in the file under review would
 pass locally and fail in CI. It then lists every site of the kind that grew, one
