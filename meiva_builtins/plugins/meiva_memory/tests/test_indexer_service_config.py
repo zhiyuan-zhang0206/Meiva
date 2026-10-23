@@ -90,7 +90,7 @@ def test_first_converge_materializes_and_seals_the_declared_input(
     before = roster_plugins.plugin_services()[0]
     assert before.gate is not None and before.gate() is None
     assert not disk_image_path("meiva_memory").exists()
-    update = update_all_disk_images()
+    update = update_all_disk_images(plugin_dirs=enable_config.discover_plugins(), home=unit_home)
     memory = next(entry for entry in update.entries if entry.name == "meiva_memory")
     assert memory.status == "updated"
     image = disk_image_path("meiva_memory")

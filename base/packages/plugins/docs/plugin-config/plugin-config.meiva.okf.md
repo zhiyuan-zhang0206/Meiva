@@ -91,3 +91,11 @@ The complete per-agent overlay surface with a value universe is range-checked: m
 A launched service validates its birth snapshot: a present packet must name this plugin and contain its complete declared image; malformed packets never fall back to disk or defaults, and an absent carrier is distinct from an invalid one.
 
 View contracts: [[config-view.meiva.okf.md]]
+
+The batch image updater receives a required discovered plugin-directory map and
+selected home. CLI roots supply actual discovery and their unit home; it does
+not discover a second set of plugins or infer a storage home during iteration.
+Each entry constructs the shared schema-owned image and calls the same required
+merge operation. Tests supply actual temporary directories and images, retaining
+schema shrink, exact values and per-plugin error isolation without changing
+process-wide paths.

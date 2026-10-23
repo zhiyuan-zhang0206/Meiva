@@ -86,10 +86,11 @@ __all__ = [
 # --- unit-state steps (need a configured unit) ----------------------------
 
 
-def _ensure_plugin_config_images(ctx: ConvergeCtx) -> None:  # noqa: ARG001
+def _ensure_plugin_config_images(ctx: ConvergeCtx) -> None:
     from base.packages.plugin_config_admin import update_all_disk_images
+    from base.packages.plugins.enable_config import discover_plugins
 
-    update_all_disk_images()
+    update_all_disk_images(plugin_dirs=discover_plugins(), home=ctx.meiva_home)
 
 
 def _converge_skills_step(ctx: ConvergeCtx) -> None:
