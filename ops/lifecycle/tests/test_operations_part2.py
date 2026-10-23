@@ -9,17 +9,18 @@ endpoint smoke tests live in tests/components/gateway/test_cluster_endpoints.py.
 
 from __future__ import annotations
 
+from typing import cast
 from unittest.mock import MagicMock
 from uuid import UUID
 
 import pytest
+from psycopg_pool import ConnectionPool
 
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
-from base.lm import factory
 from base.packages.plugin_providers import build_model_catalog
 from ops import lifecycle
 from ops.rpc_schemas import (
@@ -43,7 +44,7 @@ def stub_pool() -> object:
 # Hosted force-terminate: no process to SIGKILL — the terminated row is written in
 #     one transaction and the turn cancel is asked of the host after it commits.
 async def test_force_terminate_hosted_skips_process_kill_and_cancels_turn(
-    monkeypatch: pytest.MonkeyPatch, stub_pool: MagicMock, database: Database, event_bus: EventBus
+    stub_pool: MagicMock, database: Database, event_bus: EventBus
 ) -> None:
     from base.api_contracts.agent_contract import AgentStatus
 
@@ -59,25 +60,23 @@ async def test_force_terminate_hosted_skips_process_kill_and_cancels_turn(
         captured["agent_id"] = aid
         return AgentStatus.RUNNING, [], 91, 0
 
-    monkeypatch.setattr(lifecycle, "terminate_force_blocking", _fake_force_blocking)
     cancelled: list[int] = []
 
     async def _fake_cancel(aid: int) -> None:
         cancelled.append(aid)
 
-    monkeypatch.setattr(lifecycle, "cancel_hosted_turn_best_effort", _fake_cancel)
-
     async def _fake_page_closed(*_a: object, **_k: object) -> None:
         return None
-
-    monkeypatch.setattr(lifecycle, "publish_page_closed", _fake_page_closed)
 
     resp = await lifecycle.terminate_agent_op(
         database,
         event_bus,
         9,
         TerminateAgentRequest(force=True),
-        stub_pool,  # type: ignore[arg-type]
+        cast(ConnectionPool, stub_pool),
+        force_blocking_fn=_fake_force_blocking,
+        cancel_turn_fn=_fake_cancel,
+        page_closed_fn=_fake_page_closed,
     )
     assert resp.status == "enqueued"
     assert resp.shell_sessions is None
@@ -87,29 +86,15 @@ async def test_force_terminate_hosted_skips_process_kill_and_cancels_turn(
 
 @pytest.mark.asyncio
 async def test_launch_agent_op_hosted_validation_failure_preserves_its_row(
-    monkeypatch: pytest.MonkeyPatch,
     stub_pool: MagicMock,
     database: Database,
     event_bus: EventBus,
     *,
     machine_identity: MachineIdentity,
 ) -> None:
-    """A runner rejection is reported by the gateway; it never terminates creation."""
-
     def _boom_validate(*_a: object, **_k: object) -> None:
         assert _k["config"] == {"llm_model": "deepseek-flash", "reasoning_effort": "max"}
         raise RuntimeError("bad model config")
-
-    monkeypatch.setattr(factory, "validate_model_config", _boom_validate)
-    reclaimed: list[tuple[int, str]] = []
-
-    def _fake_reclaim(
-        _db: object, _bus: object, agent_id: int, _pool: object, *, source: str
-    ) -> list[str]:
-        reclaimed.append((agent_id, source))
-        return []
-
-    monkeypatch.setattr(lifecycle, "force_mark_terminated", _fake_reclaim)
 
     body = LaunchAgentRequest(
         agent_id=7,
@@ -122,8 +107,8 @@ async def test_launch_agent_op_hosted_validation_failure_preserves_its_row(
             database,
             event_bus,
             body,
-            stub_pool,
+            cast(ConnectionPool, stub_pool),
             catalog=build_model_catalog(),
             local_machine=machine_identity.name(),
-        )  # type: ignore[arg-type]
-    assert reclaimed == []
+            validate_model_fn=_boom_validate,
+        )

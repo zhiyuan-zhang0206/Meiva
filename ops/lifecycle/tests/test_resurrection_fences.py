@@ -16,7 +16,7 @@ from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 from ops.agents import resurrect_agent
 from ops.agents.wake import ResurrectTriggerStaleError
-from ops.lifecycle import force_mark_terminated, termination
+from ops.lifecycle import force_mark_terminated
 from ops.lifecycle.tests.resurrection_setup import (
     agents_row,
     hosted_agent,
@@ -30,7 +30,6 @@ class TestResurrectAgent:
     async def test_repeat_force_fence_preserves_page_reopen_epoch(
         self,
         db_conn: psycopg.Connection,
-        monkeypatch: pytest.MonkeyPatch,
         database: Database,
         event_bus: EventBus,
         *,
@@ -48,7 +47,6 @@ class TestResurrectAgent:
             database_gate=database_gate,
             local_machine=machine_identity,
         )
-        monkeypatch.setattr(termination, "publish_inbound_wake", noop)
         with db_conn.cursor() as cur:
             cur.execute(
                 "INSERT INTO agent_pages (agent_id, name, port) VALUES (%s, 'work', 8765)",
@@ -57,7 +55,7 @@ class TestResurrectAgent:
         db_conn.commit()
 
         with make_test_pool() as pool:
-            force_mark_terminated(database, event_bus, agent_id, pool)
+            force_mark_terminated(database, event_bus, agent_id, pool, publish_wake_fn=noop)
             with db_conn.cursor() as cur:
                 cur.execute(
                     "SELECT status_changed_at, (SELECT max(id) FROM inbound_messages "
@@ -74,7 +72,7 @@ class TestResurrectAgent:
             assert first_agent_row is not None and first_page_row is not None
             assert first_page_row[0] == first_agent_row[0]
 
-            force_mark_terminated(database, event_bus, agent_id, pool)
+            force_mark_terminated(database, event_bus, agent_id, pool, publish_wake_fn=noop)
 
         with db_conn.cursor() as cur:
             cur.execute(
@@ -112,7 +110,6 @@ class TestResurrectAgent:
     async def test_guarded_resurrect_rejects_chat_below_latest_force_fence(
         self,
         db_conn: psycopg.Connection,
-        monkeypatch: pytest.MonkeyPatch,
         database: Database,
         event_bus: EventBus,
         *,
@@ -130,7 +127,6 @@ class TestResurrectAgent:
             database_gate=database_gate,
             local_machine=machine_identity,
         )
-        monkeypatch.setattr(termination, "publish_inbound_wake", noop)
         with db_conn.cursor() as cur:
             cur.execute("UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (agent_id,))
         db_conn.commit()
@@ -143,7 +139,7 @@ class TestResurrectAgent:
             database=database,
         )
         with make_test_pool() as pool:
-            force_mark_terminated(database, event_bus, agent_id, pool)
+            force_mark_terminated(database, event_bus, agent_id, pool, publish_wake_fn=noop)
 
         with pytest.raises(ResurrectTriggerStaleError, match="trigger work no longer qualifies"):
             resurrect_agent(
@@ -431,7 +427,6 @@ class TestResurrectAgent:
     async def test_guarded_compact_below_force_fence_is_stale(
         self,
         db_conn: psycopg.Connection,
-        monkeypatch: pytest.MonkeyPatch,
         database: Database,
         event_bus: EventBus,
         *,
@@ -449,7 +444,6 @@ class TestResurrectAgent:
             database_gate=database_gate,
             local_machine=machine_identity,
         )
-        monkeypatch.setattr(termination, "publish_inbound_wake", noop)
         with db_conn.cursor() as cur:
             cur.execute("UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (agent_id,))
         db_conn.commit()
@@ -463,7 +457,7 @@ class TestResurrectAgent:
             database=database,
         )
         with make_test_pool() as pool:
-            force_mark_terminated(database, event_bus, agent_id, pool)
+            force_mark_terminated(database, event_bus, agent_id, pool, publish_wake_fn=noop)
 
         with pytest.raises(ResurrectTriggerStaleError):
             resurrect_agent(

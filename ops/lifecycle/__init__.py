@@ -121,15 +121,25 @@ async def terminate_agent_op(
     agent_id: int,
     body: TerminateAgentRequest,
     db_pool: ConnectionPool,
+    *,
+    force_blocking_fn: Callable[..., tuple[AgentStatus, list[str], int, int]] | None = None,
+    cancel_turn_fn: Callable[[int], Awaitable[None]] | None = None,
+    page_closed_fn: Callable[[EventBus, int, str], Awaitable[None]] | None = None,
+    status_fn: Callable[[Database, int], AgentStatus] | None = None,
+    kill_shells_fn: Callable[..., list[int]] | None = None,
 ) -> TerminateAgentResponse:
+    get_status = status_fn or get_agent_status
+    page_closed = page_closed_fn or publish_page_closed
     if body.force:
+        blocking = force_blocking_fn or terminate_force_blocking
+        cancel_turn = cancel_turn_fn or cancel_hosted_turn_best_effort
         _old_status, killed_page_names, _command_id, cutoff = await asyncio.to_thread(
-            terminate_force_blocking, db, bus, agent_id, body, db_pool
+            blocking, db, bus, agent_id, body, db_pool
         )
-        await cancel_hosted_turn_best_effort(agent_id)
+        await cancel_turn(agent_id)
         await release_browser_pages(agent_id)
         for page_name in killed_page_names:
-            await publish_page_closed(bus, agent_id, page_name)
+            await page_closed(bus, agent_id, page_name)
         _log.info(
             "[gateway] agent %s force requested by %s",
             agent_id,
@@ -140,13 +150,15 @@ async def terminate_agent_op(
         return TerminateAgentResponse(
             status=TerminateResult.ENQUEUED,
             shell_sessions=await _kill_shell_sessions_now(
-                agent_id, cutoff=cutoff if body.kill_all_shell_sessions else None
+                agent_id,
+                cutoff=cutoff if body.kill_all_shell_sessions else None,
+                kill_shells_fn=kill_shells_fn,
             ),
         )
 
     if (
         not body.kill_all_shell_sessions
-        and (await asyncio.to_thread(get_agent_status, db, agent_id)) is AgentStatus.TERMINATED
+        and (await asyncio.to_thread(get_status, db, agent_id)) is AgentStatus.TERMINATED
     ):
         return TerminateAgentResponse(
             status=TerminateResult.ALREADY_TERMINATED,
@@ -159,7 +171,9 @@ async def terminate_agent_op(
         # The kill-requesting enqueue found the row terminated under its lock.
         return TerminateAgentResponse(
             status=TerminateResult.ALREADY_TERMINATED,
-            shell_sessions=await _kill_shell_sessions_now(agent_id, cutoff=cutoff),
+            shell_sessions=await _kill_shell_sessions_now(
+                agent_id, cutoff=cutoff, kill_shells_fn=kill_shells_fn
+            ),
         )
     await publish_inbound_arrived(bus, agent_id, iid, "terminate", body.source, "")
     return TerminateAgentResponse(
@@ -171,7 +185,10 @@ async def terminate_agent_op(
 
 
 async def _kill_shell_sessions_now(
-    agent_id: int, *, cutoff: int | None
+    agent_id: int,
+    *,
+    cutoff: int | None,
+    kill_shells_fn: Callable[..., list[int]] | None = None,
 ) -> ShellSessionsKill | None:
     """Attempt this host's older shells when a cutoff was captured; report them.
 
@@ -180,7 +197,8 @@ async def _kill_shell_sessions_now(
     """
     if cutoff is None:
         return None
-    killed = await asyncio.to_thread(kill_agent_shells, agent_id, before_session_index=cutoff)
+    kill_shells = kill_shells_fn or kill_agent_shells
+    killed = await asyncio.to_thread(kill_shells, agent_id, before_session_index=cutoff)
     _log.info(
         "[gateway] agent %s terminate killed %d shell session(s): %s",
         agent_id,
@@ -293,20 +311,24 @@ async def resurrect_agent_op(
     *,
     trigger_inbound_id: int | None = None,
     trigger_inbound_kind: WakeTriggerKind | None = None,
+    status_fn: Callable[[Database, int], AgentStatus] | None = None,
+    resurrect_fn: Callable[..., int] | None = None,
 ) -> ResurrectAgentResponse:
     """Commit hosted resurrection intent, then publish a wake to the home host.
 
     `trigger_inbound_id` carries the internal auto-resurrect CAS to the home
     runner; manual resurrects omit it and may reopen a closed hosted agent.
     """
-    s = await asyncio.to_thread(get_agent_status, db, agent_id)
+    get_status = status_fn or get_agent_status
+    do_resurrect = resurrect_fn or resurrect_agent
+    s = await asyncio.to_thread(get_status, db, agent_id)
     if s is not AgentStatus.TERMINATED:
         return ResurrectAgentResponse(status=ResurrectResult.ALREADY_ALIVE)
     try:
         # Keep the synchronous row-lock transaction and wake publication off
         # the gateway event loop. The agent host admits the successor later.
         await asyncio.to_thread(
-            resurrect_agent,
+            do_resurrect,
             db,
             bus,
             agent_id,
@@ -525,6 +547,8 @@ async def restart_agent_op(
     db_pool: ConnectionPool,
     *,
     catalog: ModelCatalog,
+    inbound_arrived_fn: Callable[[EventBus, int, int, str, str, str], Awaitable[None]]
+    | None = None,
 ) -> RestartAgentResponse:
     """Local-target restart — INSERT one kind='restart' inbound."""
     iid = await asyncio.to_thread(
@@ -532,7 +556,8 @@ async def restart_agent_op(
     )
     if iid is None:
         return RestartAgentResponse(status=RestartResult.ALREADY_TERMINATED)
-    await publish_inbound_arrived(bus, agent_id, iid, "restart", body.source, "")
+    inbound_arrived = inbound_arrived_fn or publish_inbound_arrived
+    await inbound_arrived(bus, agent_id, iid, "restart", body.source, "")
     return RestartAgentResponse(status=RestartResult.ENQUEUED)
 
 
@@ -558,6 +583,8 @@ async def lifecycle_op(
     catalog: ModelCatalog,
     trigger_inbound_id: int | None = None,
     trigger_inbound_kind: WakeTriggerKind | None = None,
+    terminate_op_fn: Callable[..., Awaitable[TerminateAgentResponse]] | None = None,
+    resurrect_op_fn: Callable[..., Awaitable[ResurrectAgentResponse]] | None = None,
 ) -> TerminateAgentResponse | ResurrectAgentResponse | RestartAgentResponse | CancelAgentResponse:
     m = _LIFECYCLE_PATH.match(path)
     if m is None:
@@ -570,14 +597,16 @@ async def lifecycle_op(
         raise ValueError(
             f"trigger inbound is only valid for resurrect-if-pending-work, not {action!r}"
         )
+    do_terminate = terminate_op_fn or terminate_agent_op
+    do_resurrect = resurrect_op_fn or resurrect_agent_op
     if action == "cancel":
         return await cancel_agent_op(db, agent_id, cancel=cancel_hosted_turn)
     if action == "terminate":
-        return await terminate_agent_op(
+        return await do_terminate(
             db, bus, agent_id, TerminateAgentRequest.model_validate(body), db_pool
         )
     if action == "resurrect-explicit":
-        return await resurrect_agent_op(
+        return await do_resurrect(
             db,
             bus,
             agent_id,
@@ -585,7 +614,7 @@ async def lifecycle_op(
         )
     if action == "resurrect-if-pending-work":
         request = _pending_work_resurrection_request(body, trigger_inbound_id)
-        return await resurrect_agent_op(
+        return await do_resurrect(
             db,
             bus,
             agent_id,

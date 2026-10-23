@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
-from typing import cast
+from typing import NoReturn, cast
 
 import psycopg
 import pytest
@@ -28,11 +28,6 @@ _MARKED = Jsonb({"hosted_turn_recovery": True})
 
 def _publish_nothing(_db: object, _bus: object, *_args: object) -> None:
     return None
-
-
-@pytest.fixture(autouse=True)
-def _no_wake_publish(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(wake, "publish_inbound_wake", _publish_nothing)
 
 
 @pytest.fixture
@@ -116,6 +111,7 @@ def test_a_chat_queued_before_the_fence_cannot_resurrect(
             resurrected_by="system",
             trigger_inbound_id=row[0],
             trigger_inbound_kind=InboundKind.CHAT,
+            publish_wake_fn=_publish_nothing,
         )
 
 
@@ -153,15 +149,17 @@ def test_a_force_terminate_whose_audit_fact_cannot_be_recorded_does_not_terminat
     db_conn: psycopg.Connection,
     db_pool: ConnectionPool,
     agent_id: int,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    def refuse(_conn: psycopg.Connection, _event: object) -> None:
+    def refuse(_conn: psycopg.Connection, _event: object) -> NoReturn:
         raise RuntimeError("audit write failed")
 
-    monkeypatch.setattr(termination, "record_audit", refuse)
-
     with pytest.raises(RuntimeError, match="audit write failed"):
-        termination.force_terminate_transaction(agent_id, db_pool, source="system")
+        termination.force_terminate_transaction(
+            agent_id,
+            db_pool,
+            source="system",
+            record_audit_fn=refuse,
+        )
 
     row = db_conn.execute("SELECT status FROM agents_meta WHERE id=%s", (agent_id,)).fetchone()
     db_conn.commit()
@@ -195,6 +193,7 @@ def test_a_resurrection_records_its_audit_fact(
         resurrected_by="system",
         trigger_inbound_id=wake_id,
         trigger_inbound_kind=InboundKind.CHAT,
+        publish_wake_fn=_publish_nothing,
     )
 
     assert [source for source, _ in _audit_rows(db_conn, agent_id, "resurrect")] == ["system"]
