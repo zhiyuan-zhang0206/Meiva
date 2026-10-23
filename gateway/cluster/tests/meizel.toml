@@ -7,6 +7,5 @@
 "test_bootstrap_admission.py#monkeypatch.setattr base.config.settings.daemon.host_control_pool_max_size" = 1
 "test_bootstrap_admission.py#monkeypatch.setattr base.config.settings.daemon.host_db_pool_max_size" = 1
 "test_bootstrap_admission.py#monkeypatch.setattr base.config.settings.daemon.host_max_concurrent_turns" = 1
-"test_bootstrap_admission.py#monkeypatch.setattr base.config.settings.data_plane.cluster_secret" = 1
 "test_bootstrap_admission.py#monkeypatch.setattr base.host.env.bootstrap.dial_get" = 2
 "test_bootstrap_admission.py#monkeypatch.setattr base.host.env.bootstrap.os" = 2
