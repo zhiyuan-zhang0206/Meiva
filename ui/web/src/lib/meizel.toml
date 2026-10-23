@@ -26,19 +26,16 @@ exports = ["agents", "auth", "composer", "context", "context-colors.ts", "contra
 "transport/api.ts -> agents/message-delivery.ts" = 2
 
 [debt.undeclared-edge]
-"transport/api-drafts.test.ts -> telemetry/telemetry.ts" = 1
-"transport/api.test.ts -> telemetry/telemetry.ts" = 2
+"transport/api.test.ts -> telemetry/telemetry.ts" = 1
 "transport/api.ts -> agents/message-delivery.ts" = 2
 "transport/api.ts -> telemetry/telemetry.ts" = 1
-"transport/notice-resolution.test.ts -> telemetry/telemetry.ts" = 1
-"transport/sse-share.test.ts -> telemetry/telemetry.ts" = 2
+"transport/sse-share.test.ts -> telemetry/telemetry.ts" = 1
 "transport/sse-share.ts -> auth/auth-context.tsx" = 1
 "transport/sse-share.ts -> telemetry/telemetry.ts" = 1
 "transport/use-detail-reconnect.test.ts -> agents/use-pending-messages.ts" = 1
 "transport/use-detail-reconnect.test.ts -> inspector/use-token-usage.ts" = 1
 "transport/useEventStream.test.ts -> auth/auth-context.tsx" = 1
 "transport/useEventStream.test.ts -> state/store.ts" = 1
-"transport/useEventStream.test.ts -> telemetry/telemetry.ts" = 1
 "transport/useEventStream.tsx -> auth/auth-context.tsx" = 1
 "transport/useEventStream.tsx -> layout/use-document-visible.ts" = 1
 "transport/useEventStream.tsx -> state/sse-merge.ts" = 1

@@ -2,8 +2,6 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { api } from "./api";
 
-vi.mock("../telemetry/telemetry", () => ({ track: vi.fn() }));
-
 type Fetch = (url: string, init: RequestInit) => Promise<Response>;
 
 afterEach(() => vi.unstubAllGlobals());

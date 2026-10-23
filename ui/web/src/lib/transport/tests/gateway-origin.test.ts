@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { gatewayOriginForRequest } from "./gateway-origin";
+import { gatewayOriginForRequest } from "../gateway-origin";
 
 const options = { browserOrigin: "https://console.example", gatewayPort: "20016" };
 

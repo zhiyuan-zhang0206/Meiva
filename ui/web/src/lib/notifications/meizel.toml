@@ -4,6 +4,7 @@ exports = ["notices.ts", "task-notify.ts", "use-alerts.tsx", "use-cluster-health
 "task-notify.test.ts" = ["task-notify.ts"]
 "use-alerts.test.tsx" = ["use-alerts.tsx"]
 "use-cluster-health.test.tsx" = ["use-cluster-health.ts"]
+"use-notices.test.ts" = ["use-notices.ts"]
 "use-tasks.test.ts" = ["use-tasks.ts"]
 
 [purity]
@@ -38,9 +39,6 @@ exports = ["notices.ts", "task-notify.ts", "use-alerts.tsx", "use-cluster-health
 "use-notices.ts#withoutDroppedRows#Date.now" = 1
 "use-tasks.ts#useTasks#useQuery" = 1
 
-[debt.private-name]
-"use-notices.test.ts -> use-notices.ts#__dropTombstonesResetForTest" = 1
-
 [debt.stdlib-patch]
 "use-alerts.test.tsx#vi.spyOn queryClient.invalidateQueries" = 2
 "use-alerts.test.tsx#vi.stubGlobal EventSource" = 2
@@ -48,9 +46,6 @@ exports = ["notices.ts", "task-notify.ts", "use-alerts.tsx", "use-cluster-health
 "use-notices.test.ts#vi.spyOn Date.now" = 1
 "use-notices.test.ts#vi.spyOn queryClient.invalidateQueries" = 2
 "use-notices.test.ts#vi.stubGlobal EventSource" = 1
-
-[debt.undeclared-edge]
-"use-notices.test.ts -> use-notices.ts" = 1
 
 [debt.unfrozen-value]
 "use-notices.ts#dropTombstones" = 1

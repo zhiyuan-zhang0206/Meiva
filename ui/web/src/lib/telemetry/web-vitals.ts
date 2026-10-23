@@ -125,8 +125,7 @@ export function initWebVitals(): void {
   document.addEventListener("visibilitychange", reportWhenHidden);
 }
 
-/** Reset module state — tests only. */
-export function __webVitalsResetForTest(): void {
+export function webVitalsResetForTest(): void {
   stopObservers();
   detachFinalizers();
   initialized = false;

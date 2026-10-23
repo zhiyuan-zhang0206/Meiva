@@ -1,14 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { API_BASE } from "../transport/api";
+import { API_BASE } from "../transport/api-base";
 import {
-  __telemetryBufferSize,
-  __telemetryFlushForTest,
-  __telemetryResetForTest,
-  __telemetrySessionId,
-  __telemetrySetEnabledForTest,
   normalizePage,
   setTelemetryPage,
+  telemetryTestControl,
   track,
 } from "./telemetry";
 
@@ -53,11 +49,11 @@ beforeEach(() => {
     configurable: true,
     value: "visible",
   });
-  __telemetryResetForTest();
+  telemetryTestControl.reset();
 });
 
 afterEach(() => {
-  __telemetryResetForTest();
+  telemetryTestControl.reset();
   vi.restoreAllMocks();
 });
 
@@ -82,8 +78,8 @@ describe("track + flush", () => {
   it("buffers then flushes one batch with the session id", async () => {
     const sendBeacon = stubBeacon();
     track("spawn");
-    expect(__telemetryBufferSize()).toBe(1);
-    expect(__telemetryFlushForTest()).toBe(1);
+    expect(telemetryTestControl.bufferSize()).toBe(1);
+    expect(telemetryTestControl.flush()).toBe(1);
     expect(sendBeacon).toHaveBeenCalledTimes(1);
     const [url, blob] = sendBeacon.mock.calls[0] as [string, Blob];
     expect(url).toBe(`${API_BASE}/api/frontend-telemetry`);
@@ -99,7 +95,7 @@ describe("track + flush", () => {
     const sendBeacon = stubBeacon();
     setTelemetryPage("fleet");
     track("spawn");
-    expect(__telemetryFlushForTest()).toBe(1);
+    expect(telemetryTestControl.flush()).toBe(1);
     const body = await beaconBody(sendBeacon);
     expect(body.events[0].page).toBe("fleet");
   });
@@ -111,7 +107,7 @@ describe("track + flush", () => {
     );
     vi.stubGlobal("fetch", fetchMock);
     track("page-view");
-    __telemetryFlushForTest();
+    telemetryTestControl.flush();
     await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
     const [url, init] = fetchMock.mock.calls[0];
     expect(url).toBe(`${API_BASE}/api/frontend-telemetry`);
@@ -123,7 +119,7 @@ describe("track + flush", () => {
 
   it("drops nothing when flush finds an empty buffer", () => {
     const sendBeacon = stubBeacon();
-    expect(__telemetryFlushForTest()).toBe(0);
+    expect(telemetryTestControl.flush()).toBe(0);
     expect(sendBeacon).not.toHaveBeenCalled();
   });
 
@@ -148,7 +144,7 @@ describe("dedupe", () => {
     track("setting-change", { key: "display.show_timestamp_weekday", value: false });
     track("setting-change", { key: "display.show_timestamp_weekday", value: true });
     track("setting-change", { key: "display.show_timestamp_weekday", value: false });
-    expect(__telemetryBufferSize()).toBe(1);
+    expect(telemetryTestControl.bufferSize()).toBe(1);
   });
 
   it("does not dedupe different keys or elements", () => {
@@ -157,7 +153,7 @@ describe("dedupe", () => {
     track("setting-change", { key: "display.show_timestamp_weekday", value: false });
     track("setting-change", { key: "display.language", value: "zh" });
     track("spawn");
-    expect(__telemetryBufferSize()).toBe(3);
+    expect(telemetryTestControl.bufferSize()).toBe(3);
   });
 
   it("tracks again after the dedupe window", () => {
@@ -167,7 +163,7 @@ describe("dedupe", () => {
       track("spawn");
       vi.advanceTimersByTime(2500);
       track("spawn");
-      expect(__telemetryBufferSize()).toBe(2);
+      expect(telemetryTestControl.bufferSize()).toBe(2);
     } finally {
       vi.useRealTimers();
     }
@@ -177,7 +173,7 @@ describe("dedupe", () => {
     stubBeacon();
     track("web-vitals", { key: "lcp", value: 900, dedupe: false });
     track("web-vitals", { key: "lcp", value: 950, dedupe: false });
-    expect(__telemetryBufferSize()).toBe(2);
+    expect(telemetryTestControl.bufferSize()).toBe(2);
   });
 });
 
@@ -185,7 +181,7 @@ describe("rate limit", () => {
   it("caps pending + sent at 100 events per minute", () => {
     stubBeacon();
     for (let i = 0; i < 105; i++) track("page-view", { page: `p${i}` });
-    expect(__telemetryBufferSize()).toBe(100);
+    expect(telemetryTestControl.bufferSize()).toBe(100);
   });
 
   it("resets the budget after the window elapses", () => {
@@ -194,12 +190,12 @@ describe("rate limit", () => {
       stubBeacon();
       for (let i = 0; i < 100; i++) track("page-view", { page: `p${i}` });
       // flush sends them — budget spent
-      __telemetryFlushForTest();
+      telemetryTestControl.flush();
       track("page-view", { page: "after" });
-      expect(__telemetryBufferSize()).toBe(0);
+      expect(telemetryTestControl.bufferSize()).toBe(0);
       vi.advanceTimersByTime(61_000);
       track("page-view", { page: "later" });
-      expect(__telemetryBufferSize()).toBe(1);
+      expect(telemetryTestControl.bufferSize()).toBe(1);
     } finally {
       vi.useRealTimers();
     }
@@ -210,7 +206,7 @@ describe("rate limit", () => {
     for (let i = 0; i < 105; i++) {
       track("web-vitals", { key: "lcp", value: i, dedupe: false });
     }
-    expect(__telemetryBufferSize()).toBe(100);
+    expect(telemetryTestControl.bufferSize()).toBe(100);
   });
 });
 
@@ -221,7 +217,7 @@ describe("instrumentation vocabulary", () => {
     track("composer-latency", { key: "send-to-turn-start", value: 120 });
     track("web-vitals", { key: "fcp", value: 450, dedupe: false });
 
-    expect(__telemetryFlushForTest()).toBe(3);
+    expect(telemetryTestControl.flush()).toBe(3);
     const body = await beaconBody(sendBeacon);
     expect(body.events.map((event) => event.element)).toEqual([
       "api-timing",
@@ -237,7 +233,7 @@ describe("value sanitization", () => {
     setTelemetryPage("control/config");
     track("setting-change", { key: "display.show_timestamp_weekday", value: false });
     track("setting-change", { key: "display.timeline_width_ratio", value: 0.4 });
-    expect(__telemetryFlushForTest()).toBe(2);
+    expect(telemetryTestControl.flush()).toBe(2);
     const body = await beaconBody(sendBeacon);
     const byKey = Object.fromEntries(
       body.events
@@ -252,7 +248,7 @@ describe("value sanitization", () => {
     const sendBeacon = stubBeacon();
     setTelemetryPage("control/config");
     track("setting-change", { key: "display.custom", value: "x".repeat(200) });
-    expect(__telemetryFlushForTest()).toBe(1);
+    expect(telemetryTestControl.flush()).toBe(1);
     const body = await beaconBody(sendBeacon);
     expect(body.events[0].value).toBe("x".repeat(64));
   });
@@ -261,7 +257,7 @@ describe("value sanitization", () => {
     const sendBeacon = stubBeacon();
     setTelemetryPage("control/config");
     track("setting-change", { key: "display.sidebar_sort", value: { key: "id" } });
-    expect(__telemetryFlushForTest()).toBe(1);
+    expect(telemetryTestControl.flush()).toBe(1);
     const body = await beaconBody(sendBeacon);
     expect("value" in body.events[0]).toBe(false);
   });
@@ -270,16 +266,16 @@ describe("value sanitization", () => {
 describe("disabled / SSR", () => {
   it("is a no-op when disabled (SSR-safe path)", () => {
     const sendBeacon = stubBeacon();
-    __telemetrySetEnabledForTest(false);
+    telemetryTestControl.setEnabled(false);
     track("spawn");
-    expect(__telemetryBufferSize()).toBe(0);
-    expect(__telemetryFlushForTest()).toBe(0);
+    expect(telemetryTestControl.bufferSize()).toBe(0);
+    expect(telemetryTestControl.flush()).toBe(0);
     expect(sendBeacon).not.toHaveBeenCalled();
   });
 
   it("mints a stable session id per tab", () => {
-    const a = __telemetrySessionId();
-    const b = __telemetrySessionId();
+    const a = telemetryTestControl.sessionId();
+    const b = telemetryTestControl.sessionId();
     expect(a).toBe(b);
     expect(a).toMatch(/^[0-9a-f-]{8,64}$/);
   });

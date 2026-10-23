@@ -2,8 +2,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { api } from "./api";
 
-vi.mock("../telemetry/telemetry", () => ({ track: vi.fn() }));
-
 const drafts = [
   { name: "Guide", path: "/api/keyed/v1/guide/draft", body: { nl: "operate the cluster" },
     submit: (key?: string) => api.draftGuide("operate the cluster", key) },

@@ -1,30 +1,32 @@
 import { cleanup, render } from "@testing-library/react";
-import { afterEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
-import { initWebVitals } from "./web-vitals";
+import { telemetryTestControl } from "./telemetry";
+import { TelemetryPageView } from "./telemetry-page-view";
 
 let pathname = "/";
 
 vi.mock("next/navigation", () => ({ usePathname: () => pathname }));
-vi.mock("./telemetry", () => ({
-  normalizePage: (path: string) => (path === "/" ? "home" : path.replace(/^\//, "")),
-  setTelemetryPage: vi.fn(),
-  track: vi.fn(),
-}));
-vi.mock("./web-vitals", () => ({ initWebVitals: vi.fn() }));
 
-import { TelemetryPageView } from "./telemetry-page-view";
+beforeEach(() => {
+  telemetryTestControl.intercept({
+    onTrack: () => undefined,
+    onSetPage: () => undefined,
+  });
+});
 
 afterEach(() => {
   cleanup();
   pathname = "/";
+  telemetryTestControl.reset();
   vi.clearAllMocks();
 });
 
 it("initializes Web Vitals once across authenticated route changes", () => {
-  const view = render(<TelemetryPageView />);
+  const initSpy = vi.fn();
+  const view = render(<TelemetryPageView onInitWebVitals={initSpy} />);
   pathname = "/fleet";
-  view.rerender(<TelemetryPageView />);
+  view.rerender(<TelemetryPageView onInitWebVitals={initSpy} />);
 
-  expect(initWebVitals).toHaveBeenCalledTimes(1);
+  expect(initSpy).toHaveBeenCalledTimes(1);
 });
