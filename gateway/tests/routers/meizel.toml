@@ -38,9 +38,6 @@ exports = ["alerts_api", "cluster_endpoints", "test_tasks_router.py"]
 "test_task_patch_receipts.py#monkeypatch.setattr ops.lifecycle.resurrect_if_terminated" = 1
 "test_tasks_router.py#monkeypatch.setattr ops.lifecycle.resurrect_if_terminated" = 1
 
-[debt.private-name]
-"memory_search/test_event_loop_isolation.py -> test_memory_search.py#_search" = 1
-
 [debt.third-party-patch]
 "test_memory_search.py#monkeypatch.setattr httpx.AsyncClient" = 1
 "test_page_receipts.py#monkeypatch.setattr psycopg.Connection.execute" = 2

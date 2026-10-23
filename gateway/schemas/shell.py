@@ -11,6 +11,10 @@ from pydantic import (
     ConfigDict,
 )
 
+from gateway.schemas.commands import CommandItem
+
+__all__ = ["CommandItem", "ShellCaptureResponse"]
+
 
 class ShellCaptureResponse(BaseModel):
     """GET /api/agents/{id}/shell/{sid} response — a recent tail of one

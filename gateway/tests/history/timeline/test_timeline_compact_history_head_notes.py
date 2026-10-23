@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import replace
+
 import psycopg
 import pytest
 from langchain_core.messages import BaseMessage, HumanMessage
@@ -46,11 +48,8 @@ class TestTimelineCompactHistoryHeadNotes(CompactHistoryCases):
         self,
         db_conn: psycopg.Connection,
         test_client: GatewayTestClient,
-        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         from langchain_core.messages import AIMessage
-
-        import gateway.agents.history.timeline as timeline_router
 
         tid = create_agent(db_conn)
         self._put_checkpoint(
@@ -67,8 +66,11 @@ class TestTimelineCompactHistoryHeadNotes(CompactHistoryCases):
         def missing_segment(_db: object, _agent_id: int, _checkpoint_id: str) -> list[BaseMessage]:
             return []
 
-        monkeypatch.setattr(timeline_router, "list_compact_boundary_checkpoint_ids", boundary_ids)
-        monkeypatch.setattr(timeline_router, "load_checkpoint_messages_segment", missing_segment)
+        test_client.app.state.timeline_policy = replace(
+            test_client.app.state.timeline_policy,
+            list_boundary_ids=boundary_ids,
+            load_segment=missing_segment,
+        )
 
         page = test_client.get(
             f"/api/agents/{tid}/timeline",
@@ -123,12 +125,10 @@ class TestTimelineCompactHistoryHeadNotes(CompactHistoryCases):
         self,
         db_conn: psycopg.Connection,
         test_client: GatewayTestClient,
-        monkeypatch: pytest.MonkeyPatch,
         damage: str,
     ) -> None:
         from langchain_core.messages import AIMessage
 
-        import gateway.agents.history.timeline as timeline_router
         from base.agents.history.checkpoint import CheckpointReadError
 
         tid = create_agent(db_conn)
@@ -144,41 +144,26 @@ class TestTimelineCompactHistoryHeadNotes(CompactHistoryCases):
             del limit
             return [checkpoint_id]
 
-        monkeypatch.setattr(timeline_router, "list_compact_boundary_checkpoint_ids", boundary_ids)
-        if damage == "missing":
-
-            def missing_segment(*_args: object) -> list[BaseMessage]:
+        def load_segment(*_args: object) -> list[BaseMessage]:
+            if damage == "missing":
                 return []
-
-            monkeypatch.setattr(
-                timeline_router,
-                "load_checkpoint_messages_segment",
-                missing_segment,
-            )
-        elif damage == "read_error":
-
-            def fail_read(_db: object, _agent_id: int, _checkpoint_id: str) -> list[BaseMessage]:
+            if damage == "read_error":
                 raise CheckpointReadError("damaged boundary")
+            return [
+                HumanMessage(
+                    content="damaged inbound",
+                    additional_kwargs={
+                        "meiva_msg_type": "inbound",
+                        "meiva_inbound_id": "not-an-integer",
+                    },
+                )
+            ]
 
-            monkeypatch.setattr(timeline_router, "load_checkpoint_messages_segment", fail_read)
-        else:
-
-            def malformed_segment(*_args: object) -> list[BaseMessage]:
-                return [
-                    HumanMessage(
-                        content="damaged inbound",
-                        additional_kwargs={
-                            "meiva_msg_type": "inbound",
-                            "meiva_inbound_id": "not-an-integer",
-                        },
-                    )
-                ]
-
-            monkeypatch.setattr(
-                timeline_router,
-                "load_checkpoint_messages_segment",
-                malformed_segment,
-            )
+        test_client.app.state.timeline_policy = replace(
+            test_client.app.state.timeline_policy,
+            list_boundary_ids=boundary_ids,
+            load_segment=load_segment,
+        )
 
         url = f"/api/agents/{tid}/timeline"
         params = {"before": f"s1.{checkpoint_id}.1.0", "limit": 50}

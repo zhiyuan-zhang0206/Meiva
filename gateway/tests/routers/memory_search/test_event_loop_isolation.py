@@ -12,12 +12,12 @@ import pytest
 from gateway.tests.auth.gateway_config import gateway_test_client
 from gateway.tests.routers.test_memory_search import (
     SEARCH_PERMITS,
-    _search,
     asgi_client,
     assert_semaphore_locked,
     memory_config,
     never_returns,
     patch_provider,
+    post_memory_search,
     stub_search_backend,
 )
 from gateway.tests.routers.test_memory_search import (
@@ -118,7 +118,7 @@ class TestWedgedBackendReleasesPermits:
         stub_search_backend(monkeypatch, tmp_path, search=never_returns)
 
         async with asgi_client() as client:
-            resp = await asyncio.wait_for(_search(client), timeout=10)
+            resp = await asyncio.wait_for(post_memory_search(client), timeout=10)
 
         assert resp.status_code == 503
         assert resp.json()["reason"] == "indexer_unavailable"
@@ -132,7 +132,7 @@ class TestWedgedBackendReleasesPermits:
 
         async with asgi_client() as client:
             responses = await asyncio.wait_for(
-                asyncio.gather(*(_search(client) for _ in range(SEARCH_PERMITS + 1))),
+                asyncio.gather(*(post_memory_search(client) for _ in range(SEARCH_PERMITS + 1))),
                 timeout=10,
             )
 
@@ -158,7 +158,7 @@ class TestWedgedBackendReleasesPermits:
 
         async with asgi_client() as client:
             responses = await asyncio.wait_for(
-                asyncio.gather(*(_search(client) for _ in range(SEARCH_PERMITS + 1))),
+                asyncio.gather(*(post_memory_search(client) for _ in range(SEARCH_PERMITS + 1))),
                 timeout=10,
             )
 
@@ -185,7 +185,9 @@ class TestWedgedBackendReleasesPermits:
         sem = stub_search_backend(monkeypatch, tmp_path, search=never_returns)
 
         async with asgi_client() as client:
-            holders = [asyncio.create_task(_search(client)) for _ in range(SEARCH_PERMITS)]
+            holders = [
+                asyncio.create_task(post_memory_search(client)) for _ in range(SEARCH_PERMITS)
+            ]
             # Without this the test could pass vacuously, cancelling requests
             # that had not yet taken a permit.
             await assert_semaphore_locked(sem)
@@ -205,7 +207,7 @@ class TestWedgedBackendReleasesPermits:
                     return [ChunkHit(str(tmp_path / "a.md"), "body", 0, 0.5)]
 
             monkeypatch.setattr(_factory, "get_backend", _Healthy)
-            recovered = await asyncio.wait_for(_search(client), timeout=10)
+            recovered = await asyncio.wait_for(post_memory_search(client), timeout=10)
 
         # A 503 here would mean the permits never came back and this request
         # sat in acquire until its own deadline.
@@ -221,7 +223,7 @@ class TestWedgedBackendReleasesPermits:
 
         async with asgi_client() as client:
             await asyncio.wait_for(
-                asyncio.gather(*(_search(client) for _ in range(SEARCH_PERMITS + 1))),
+                asyncio.gather(*(post_memory_search(client) for _ in range(SEARCH_PERMITS + 1))),
                 timeout=10,
             )
 
@@ -235,7 +237,7 @@ class TestWedgedBackendReleasesPermits:
                     return [ChunkHit(str(tmp_path / "a.md"), "body", 0, 0.5)]
 
             monkeypatch.setattr(_factory, "get_backend", _Healthy)
-            recovered = await asyncio.wait_for(_search(client), timeout=10)
+            recovered = await asyncio.wait_for(post_memory_search(client), timeout=10)
 
         assert recovered.status_code == 200
         assert [item["path"] for item in recovered.json()["results"]] == ["a.md"]
@@ -266,10 +268,10 @@ class TestAcquireFastFail:
         monkeypatch.setattr(settings.services, "memory_search_deadline_seconds", 5.0)
 
         async with asgi_client() as client:
-            holder = asyncio.create_task(_search(client))
+            holder = asyncio.create_task(post_memory_search(client))
             await assert_semaphore_locked(sem)
             start = time.monotonic()
-            overflow = await asyncio.wait_for(_search(client), timeout=3.0)
+            overflow = await asyncio.wait_for(post_memory_search(client), timeout=3.0)
             elapsed = time.monotonic() - start
             holder.cancel()
             with contextlib.suppress(asyncio.CancelledError):

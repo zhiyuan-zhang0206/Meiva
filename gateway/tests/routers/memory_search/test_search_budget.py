@@ -11,7 +11,7 @@ from fastapi import Request
 
 from base.config import settings
 from gateway.routers import memory as memory_router
-from gateway.schemas.memory import MemorySearchRequest
+from gateway.schemas import MemorySearchRequest
 from gateway.tests.auth.gateway_config import gateway_test_client
 from gateway.tests.routers.test_memory_search import (
     Judge,

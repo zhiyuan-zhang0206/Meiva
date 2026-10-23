@@ -8,24 +8,24 @@ while the row contract lives in one place."""
 
 from __future__ import annotations
 
-import logging
+from dataclasses import dataclass
 from datetime import datetime
 
 from base.api_contracts.status import MachineStatus
 
-_log = logging.getLogger("gateway.cluster._roster_rows")
+
+@dataclass(frozen=True)
+class RosterRowSpec:
+    name: str
+    role: list[str]
+    gateway_url: str | None
+    up_since_at: datetime
+    description: str | None
+    stopped_at: datetime | None
+    is_staging: bool = False
 
 
-def reachable_unknown_status(
-    name: str,
-    role: list[str],
-    gateway_url: str | None,
-    up_since_at: datetime,
-    description: str | None,
-    stopped_at: datetime | None,
-    *,
-    is_staging: bool = False,
-) -> MachineStatus:
+def reachable_unknown_status(row: RosterRowSpec) -> MachineStatus:
     """The MachineStatus row for a reachable host whose status is unknown.
 
     The documented online=True + paused=None abnormal state (see MachineStatus):
@@ -35,58 +35,40 @@ def reachable_unknown_status(
     reached the host at all).
     """
     return MachineStatus(
-        name=name,
-        serve_gateway="gateway" in role,
-        serve_agent_runner="agent-runner" in role,
-        serve_observability_station="observability-station" in role,
-        gateway_url=gateway_url or "",
-        up_since_at=up_since_at,
+        name=row.name,
+        serve_gateway="gateway" in row.role,
+        serve_agent_runner="agent-runner" in row.role,
+        serve_observability_station="observability-station" in row.role,
+        gateway_url=row.gateway_url or "",
+        up_since_at=row.up_since_at,
         online=True,
         paused=None,
-        description=description,
-        stopped_at=stopped_at,
-        is_staging=is_staging,
+        description=row.description,
+        stopped_at=row.stopped_at,
+        is_staging=row.is_staging,
         head_sha=None,
     )
 
 
-def offline_status(
-    name: str,
-    role: list[str],
-    gateway_url: str | None,
-    up_since_at: datetime,
-    description: str | None,
-    stopped_at: datetime | None,
-    *,
-    is_staging: bool = False,
-) -> MachineStatus:
+def offline_status(row: RosterRowSpec) -> MachineStatus:
     """The MachineStatus row for a host we could not get a usable probe from."""
     return MachineStatus(
-        name=name,
-        serve_gateway="gateway" in role,
-        serve_agent_runner="agent-runner" in role,
-        serve_observability_station="observability-station" in role,
-        gateway_url=gateway_url or "",
-        up_since_at=up_since_at,
+        name=row.name,
+        serve_gateway="gateway" in row.role,
+        serve_agent_runner="agent-runner" in row.role,
+        serve_observability_station="observability-station" in row.role,
+        gateway_url=row.gateway_url or "",
+        up_since_at=row.up_since_at,
         online=False,
         paused=None,
-        description=description,
-        stopped_at=stopped_at,
-        is_staging=is_staging,
+        description=row.description,
+        stopped_at=row.stopped_at,
+        is_staging=row.is_staging,
         head_sha=None,
     )
 
 
-def identity_mismatch_status(
-    name: str,
-    role: list[str],
-    gateway_url: str | None,
-    up_since_at: datetime,
-    description: str | None,
-    stopped_at: datetime | None,
-    *,
-    is_staging: bool = False,
-) -> MachineStatus:
+def identity_mismatch_status(row: RosterRowSpec) -> MachineStatus:
     """The MachineStatus row for a host whose ops server answered under a DIFFERENT
     machine_name than the row we targeted.
 
@@ -96,17 +78,17 @@ def identity_mismatch_status(
     online. Structurally impossible to render as a false green.
     """
     return MachineStatus(
-        name=name,
-        serve_gateway="gateway" in role,
-        serve_agent_runner="agent-runner" in role,
-        serve_observability_station="observability-station" in role,
-        gateway_url=gateway_url or "",
-        up_since_at=up_since_at,
+        name=row.name,
+        serve_gateway="gateway" in row.role,
+        serve_agent_runner="agent-runner" in row.role,
+        serve_observability_station="observability-station" in row.role,
+        gateway_url=row.gateway_url or "",
+        up_since_at=row.up_since_at,
         online=False,
         paused=None,
-        description=description,
-        stopped_at=stopped_at,
-        is_staging=is_staging,
+        description=row.description,
+        stopped_at=row.stopped_at,
+        is_staging=row.is_staging,
         head_sha=None,
         identity_mismatch=True,
     )

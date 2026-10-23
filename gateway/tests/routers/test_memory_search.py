@@ -571,7 +571,7 @@ def asgi_client() -> httpx.AsyncClient:
     )
 
 
-async def _search(client: httpx.AsyncClient) -> httpx.Response:
+async def post_memory_search(client: httpx.AsyncClient) -> httpx.Response:
     return await client.post("/api/memory/search", json={"query": "x", "k": 1, "purpose": "search"})
 
 
@@ -593,7 +593,7 @@ async def test_query_usage_failure_propagates_without_network_replay(
     from pydantic import SecretStr
 
     from gateway.routers import memory
-    from gateway.schemas.memory import MemorySearchRequest
+    from gateway.schemas import MemorySearchRequest
     from services.derived.memory_indexer.embeddings.gemini import DIM
     from services.derived.memory_indexer.embeddings.tests.test_embeddings import AsyncClient
 

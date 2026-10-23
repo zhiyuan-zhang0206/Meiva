@@ -15,8 +15,8 @@ from base.db import Database, create_agent
 from base.events.live.bus import EventBus
 from gateway.agents.history.timeline import window_before
 from gateway.tests.auth.gateway_config import GatewayTestClient
-from gateway.tests.history.test_timeline import _items
 from gateway.tests.history.test_timeline import test_client as test_client
+from gateway.tests.history.test_timeline import timeline_items
 
 _TIMELINE_INPUTS = TimelineReadInputs(
     Clock.from_settings, lambda: settings.general.message_timestamps
@@ -112,27 +112,29 @@ class TestTimelineWindowing:
     (no DB)."""
 
     def test_tail_window_shorter_than_limit_returns_all_no_more(self) -> None:
-        window, has_more = tail_window(_items("1.0", "2.0"), 5)
+        window, has_more = tail_window(timeline_items("1.0", "2.0"), 5)
         assert [i.item_id for i in window] == ["1.0", "2.0"]
         assert has_more is False
 
     def test_tail_window_trims_to_newest_and_flags_more(self) -> None:
-        window, has_more = tail_window(_items("1.0", "2.0", "3.0", "4.0"), 2)
+        window, has_more = tail_window(timeline_items("1.0", "2.0", "3.0", "4.0"), 2)
         assert [i.item_id for i in window] == ["3.0", "4.0"]
         assert has_more is True
 
     def test_window_before_returns_items_immediately_older(self) -> None:
-        window, has_more = window_before(_items("1.0", "2.0", "3.0", "4.0", "5.0"), "4.0", 2)
+        window, has_more = window_before(
+            timeline_items("1.0", "2.0", "3.0", "4.0", "5.0"), "4.0", 2
+        )
         assert [i.item_id for i in window] == ["2.0", "3.0"]
         assert has_more is True  # 1.0 still older than the window
 
     def test_window_before_reaching_start_has_no_more(self) -> None:
-        window, has_more = window_before(_items("1.0", "2.0", "3.0"), "3.0", 5)
+        window, has_more = window_before(timeline_items("1.0", "2.0", "3.0"), "3.0", 5)
         assert [i.item_id for i in window] == ["1.0", "2.0"]
         assert has_more is False
 
     def test_window_before_unknown_cursor_returns_empty(self) -> None:
-        window, has_more = window_before(_items("1.0", "2.0"), "9.9", 5)
+        window, has_more = window_before(timeline_items("1.0", "2.0"), "9.9", 5)
         assert window == []
         assert has_more is False
 

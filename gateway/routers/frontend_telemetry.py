@@ -35,7 +35,7 @@ from fastapi import APIRouter, Request, Response
 
 from base import telemetry
 from gateway.http.middleware.error_envelope import error_response
-from gateway.schemas.frontend_telemetry import FrontendInteractionIn, FrontendTelemetryBatch
+from gateway.schemas import FrontendInteractionIn, FrontendTelemetryBatch
 
 router = APIRouter()
 

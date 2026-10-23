@@ -9,14 +9,8 @@ from psycopg import errors as pg_errors
 from base.api_contracts.agent_contract import AgentStatus, LivenessState
 from base.events.live.tests.fakes import patch_sync_redis
 from base.telemetry.tests.capture.event_capture import capturing_events
-from gateway.schemas.fleet_graph import FleetGraphNode, FleetGraphResponse
-from gateway.tests.auth.gateway_config import gateway_test_client
-from gateway.tests.routers.fleet_graph.staleness_support import use_heartbeat_age
-
-
-def _fresh_heartbeat_age(pool: object, *, now: datetime) -> float:
-    del pool, now
-    return 30.0
+from gateway.schemas import FleetGraphNode, FleetGraphResponse
+from gateway.tests.routers.fleet_graph.staleness_support import fleet_graph_client
 
 
 class _FakeRedis:
@@ -50,12 +44,6 @@ class _RedisFactory:
         return self._redis
 
 
-@pytest.fixture(autouse=True)
-def _fresh_telemetry_heartbeat(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Existing resilience cases isolate their named failure."""
-    use_heartbeat_age(monkeypatch, _fresh_heartbeat_age)
-
-
 def _seed_agent(db_conn: psycopg.Connection) -> int:
     with db_conn.cursor() as cur:
         cur.execute("INSERT INTO agents DEFAULT VALUES RETURNING id")
@@ -80,7 +68,7 @@ def test_success_writes_only_the_short_poll_cache(
     import gateway.routers.fleet_graph as fg
 
     patch_sync_redis(monkeypatch, _RedisFactory(redis))
-    with gateway_test_client() as client:
+    with fleet_graph_client() as client:
         resp = client.get("/api/fleet/graph")
 
     assert resp.status_code == 200
@@ -102,10 +90,11 @@ def test_stale_heartbeat_marks_telemetry_and_keeps_fresh_graph_cached(
     def missing_heartbeat(pool: object, *, now: datetime) -> None:
         del pool, now
 
-    use_heartbeat_age(monkeypatch, missing_heartbeat)
-
     # The capture is bound inside the app's lifespan: the gateway binds its own pipeline on start.
-    with gateway_test_client() as client, capturing_events() as emitted_events:
+    with (
+        fleet_graph_client(read_heartbeat_age=missing_heartbeat) as client,
+        capturing_events() as emitted_events,
+    ):
         resp = client.get("/api/fleet/graph")
         stale = emitted_events.attributes("telemetry_read_stale")
 
@@ -153,7 +142,7 @@ def test_pg_cancellation_is_a_500_and_ignores_leftover_last_good_entries(
         def close(self) -> None:
             pass
 
-    with gateway_test_client(raise_server_exceptions=False) as client:
+    with fleet_graph_client(raise_server_exceptions=False) as client:
         client.app.state.db_pool = _CanceledPool()
         resp = client.get("/api/fleet/graph")
 

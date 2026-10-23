@@ -2,6 +2,7 @@
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from typing import Any
 
 from base.agents.history.timeline_inputs import TimelineReadInputs
 
@@ -15,6 +16,11 @@ class TimelineReadPolicy:
     rendering: TimelineReadInputs
     default_limit: Callable[[], int]
     compact_history: Callable[[], int]
+    list_boundary_ids: Callable[..., list[str]] | None = None
+    load_segment: Callable[..., list[Any]] | None = None
+    load_messages: Callable[..., list[Any]] | None = None
+    load_message_count: Callable[..., int] | None = None
+    render_items: Callable[..., tuple[list[Any], int]] | None = None
 
 
 @dataclass(frozen=True)

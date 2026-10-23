@@ -11,9 +11,10 @@ from base.lm.catalog import ModelCatalog
 from base.lm.decision.call import decide
 from base.lm.effort import ReasoningEffort
 from base.lm.factory import build_chat_model
-from gateway.agents.history.timeline import load_current_messages
+from gateway.agents.history.timeline import load_current_timeline_items
 from gateway.agents.reply_suggestion.service import (
     DRAFT_TIMEOUT_S,
+    DraftRuntime,
     ReplySuggestionPolicy,
     ReplySuggestionService,
 )
@@ -60,9 +61,8 @@ def reply_suggestion_service(
     return ReplySuggestionService(
         policy=policy,
         catalog_reader=catalog_reader,
-        rendering=rendering,
-        load_messages=lambda agent_id: load_current_messages(db, agent_id),
+        load_timeline=lambda agent_id: load_current_timeline_items(db, agent_id, inputs=rendering),
         agent_status=lambda agent_id: get_agent_status(db, agent_id),
         decide=decide,
-        draft_model=draft_model,
+        draft=DraftRuntime(draft_model=draft_model),
     )

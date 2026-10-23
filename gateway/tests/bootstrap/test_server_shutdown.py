@@ -37,30 +37,30 @@ import socket
 import subprocess
 import sys
 import time
-from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable
-from contextlib import asynccontextmanager, suppress
+from collections.abc import AsyncGenerator, Awaitable, Callable
+from contextlib import suppress
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import IO, Any, cast
 
 import pytest
-import uvicorn
-from fastapi import FastAPI, Request
-from starlette.responses import PlainTextResponse, StreamingResponse
+from fastapi import Request
 
-from base.config import ConfigBoot
 from base.events.live.bus import EventBus
 from base.events.live.tests.fakes import patch_open_async_redis
-from gateway.cluster import server as _server
 from gateway.events import sse
 from gateway.http.middleware import stopping
+from gateway.tests.bootstrap.child_gateway_scenarios import (
+    MARKERS_ENV as _MARKERS_ENV,
+)
+from gateway.tests.bootstrap.child_gateway_scenarios import (
+    PORT_ENV as _PORT_ENV,
+)
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 
 # The production knob under test; the child resolves it through its settings.
 _DRAIN_ENV = "MEIVA_GATEWAY_GRACEFUL_SHUTDOWN_TIMEOUT_SECONDS"
-_MARKERS_ENV = "GATEWAY_SHUTDOWN_TEST_MARKERS"
-_PORT_ENV = "GATEWAY_SHUTDOWN_TEST_PORT"
 
 # Bounds asserted by the parent. The drain budget is consumed only while a
 # connection is unfinished, so measured exit after SIGTERM is
@@ -70,80 +70,6 @@ _PORT_ENV = "GATEWAY_SHUTDOWN_TEST_PORT"
 # assertion carrying the child's log, not as a bare pytest hang.
 _EXIT_SLACK_S = 12.0
 _KILL_SLACK_S = 15.0
-
-
-def _mark(name: str) -> None:
-    """Append one marker line — the child-to-parent protocol."""
-    with Path(os.environ[_MARKERS_ENV]).open("a", encoding="utf-8") as fh:
-        fh.write(f"{name}\n")
-
-
-@asynccontextmanager
-async def _lifespan(_app: FastAPI) -> AsyncGenerator[None]:
-    _mark("lifespan-startup")
-    try:
-        yield
-    finally:
-        _mark("lifespan-shutdown")
-
-
-app = FastAPI(lifespan=_lifespan, docs_url=None, redoc_url=None, openapi_url=None)
-
-
-@app.get("/stream")
-async def _stream() -> StreamingResponse:
-    """Endless SSE-shaped stream: an unfinished response, like the sse.py routes."""
-
-    async def _frames() -> AsyncIterator[bytes]:
-        _mark("stream-open")
-        try:
-            while True:
-                yield b"data: tick\n\n"
-                await asyncio.sleep(0.1)
-        except (asyncio.CancelledError, GeneratorExit) as exc:
-            # The cleanup path under test: uvicorn cancelled the request task
-            # (CancelledError thrown while the task awaits inside the stream),
-            # or the generator was closed afterwards (GeneratorExit). Record
-            # HOW the unwind reached the generator, so the assertion proves the
-            # cancellation path ran cleanup — not merely that a marker exists.
-            _mark(f"stream-closed:{type(exc).__name__}")
-            raise
-
-    return StreamingResponse(_frames(), media_type="text/event-stream")
-
-
-@app.get("/cooperative-stream")
-async def _cooperative_stream() -> StreamingResponse:
-    """Endless SSE-shaped stream that ends itself once the server marks its shutdown."""
-
-    async def _frames() -> AsyncIterator[bytes]:
-        _mark("cooperative-stream-open")
-        while not stopping.is_stopping():
-            yield b"data: tick\n\n"
-            await asyncio.sleep(0.1)
-        _mark("cooperative-stream-ended-itself")
-
-    return StreamingResponse(_frames(), media_type="text/event-stream")
-
-
-@app.get("/slow")
-async def _slow(seconds: float = 1.0) -> PlainTextResponse:
-    _mark("slow-started")
-    await asyncio.sleep(seconds)
-    _mark("slow-finished")
-    return PlainTextResponse("slow-done")
-
-
-def run_child() -> None:
-    """Child entry: a real uvicorn server from the production launch assembly."""
-    kwargs = _server.serve_kwargs(
-        host="127.0.0.1",
-        app=f"{__name__}:app",
-        factory=False,
-        config=ConfigBoot(),
-    )
-    kwargs["port"] = int(os.environ[_PORT_ENV])
-    _server.GatewayServer(uvicorn.Config(**kwargs)).run()
 
 
 @dataclass

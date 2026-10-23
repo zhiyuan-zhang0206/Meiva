@@ -16,7 +16,7 @@ from base.packages.docs.notes import parse_note
 from gateway.agents.eval_guard import deny_isolated_result_read
 from gateway.http.disconnect import run_until_disconnect
 from gateway.http.model_catalog import require_model_catalog
-from gateway.schemas.memory import (
+from gateway.schemas import (
     MemoryNoteResponse,
     MemoryRefreshResponse,
     MemorySearchRequest,

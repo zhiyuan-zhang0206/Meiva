@@ -257,13 +257,15 @@ def _machine_status_from_cluster_status(
             name, gateway_url, status.machine_name, stopped=stopped_at is not None
         )
         return _roster_rows.identity_mismatch_status(
-            name,
-            role,
-            gateway_url,
-            up_since_at,
-            description,
-            stopped_at,
-            is_staging=is_staging,
+            _roster_rows.RosterRowSpec(
+                name=name,
+                role=role,
+                gateway_url=gateway_url,
+                up_since_at=up_since_at,
+                description=description,
+                stopped_at=stopped_at,
+                is_staging=is_staging,
+            )
         )
     identity_log.note_match(name)
     return MachineStatus(
@@ -312,13 +314,21 @@ def _status_from_snapshot(
     age says so. A reachable answer that is not a ClusterStatus is the documented
     online + paused=None abnormal state.
     """
-    row_args = (name, role, gateway_url, up_since_at, description, stopped_at)
+    row_spec = _roster_rows.RosterRowSpec(
+        name=name,
+        role=role,
+        gateway_url=gateway_url,
+        up_since_at=up_since_at,
+        description=description,
+        stopped_at=stopped_at,
+        is_staging=is_staging,
+    )
     if not snapshot.reachable and (
         snapshot.status is None or snapshot.consecutive_failures >= MACHINE_OFFLINE_AFTER_FAILURES
     ):
-        return _roster_rows.offline_status(*row_args, is_staging=is_staging)
+        return _roster_rows.offline_status(row_spec)
     if snapshot.status is None:
-        return _roster_rows.reachable_unknown_status(*row_args, is_staging=is_staging)
+        return _roster_rows.reachable_unknown_status(row_spec)
     try:
         status = ClusterStatus.model_validate(snapshot.status)
     except ValidationError:
@@ -328,11 +338,16 @@ def _status_from_snapshot(
             name,
             exc_info=True,
         )
-        return _roster_rows.reachable_unknown_status(*row_args, is_staging=is_staging)
+        return _roster_rows.reachable_unknown_status(row_spec)
     return _machine_status_from_cluster_status(
         identity_log,
         status,
-        *row_args,
+        name,
+        role,
+        gateway_url,
+        up_since_at,
+        description,
+        stopped_at,
         is_staging=is_staging,
         observed_at=snapshot.status_at or snapshot.observed_at,
     )
@@ -362,22 +377,30 @@ async def probe_agent_runner(
     *,
     is_staging: bool = False,
 ) -> MachineStatus:
-    row_args = (name, role, gateway_url, up_since_at, description, stopped_at)
+    row_spec = _roster_rows.RosterRowSpec(
+        name=name,
+        role=role,
+        gateway_url=gateway_url,
+        up_since_at=up_since_at,
+        description=description,
+        stopped_at=stopped_at,
+        is_staging=is_staging,
+    )
     if gateway_url is None:
         # The roster row is the address authority for this fan-out. Do not let
         # cluster_rpc synchronously re-read Postgres outside the async timeout.
-        return _roster_rows.offline_status(*row_args, is_staging=is_staging)
+        return _roster_rows.offline_status(row_spec)
     try:
         result = await roster_probe.dispatch_status_probe(name, gateway_url)
     except cluster_rpc.ClusterOpUnreachable:
         # Expected when a host is genuinely offline / mid-restart — quiet.
-        return _roster_rows.offline_status(*row_args, is_staging=is_staging)
+        return _roster_rows.offline_status(row_spec)
     except cluster_rpc.ClusterOpFailed as exc:
         # Reached the ops server, but its status_probe op itself raised (DB error,
         # schema drift inside the op). That is NOT "offline" — surface it so the
         # real error is not invisible behind a misleading offline marker.
         _log.warning("status_probe op failed on reachable host %s: %s", name, exc.result)
-        return _roster_rows.reachable_unknown_status(*row_args, is_staging=is_staging)
+        return _roster_rows.reachable_unknown_status(row_spec)
     # The ops server responded 200; validate its body as the status_probe result
     # contract (ClusterStatus) — same posture as cluster.py:get_cluster_status.
     # A body that does not validate (a version-skewed / wrong server) must NOT be
@@ -392,9 +415,18 @@ async def probe_agent_runner(
             name,
             exc_info=True,
         )
-        return _roster_rows.reachable_unknown_status(*row_args, is_staging=is_staging)
+        return _roster_rows.reachable_unknown_status(row_spec)
     return _machine_status_from_cluster_status(
-        identity_log, status, *row_args, is_staging=is_staging, observed_at=None
+        identity_log,
+        status,
+        name,
+        role,
+        gateway_url,
+        up_since_at,
+        description,
+        stopped_at,
+        is_staging=is_staging,
+        observed_at=None,
     )
 
 

@@ -6,14 +6,13 @@ from base.api_contracts.idempotency import keyed_headers
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.db.code_version_gate import ProcessDbGate
-from gateway.schedules import receipts, router, session_control
+from gateway.schedules import router
 from gateway.tests.auth.gateway_config import gateway_test_client
 
 
 def test_failed_receipt_commit_rolls_back_restart_revision_and_queue(
     gateway_data_plane: None,
     db_conn: psycopg.Connection,
-    monkeypatch: pytest.MonkeyPatch,
     *,
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
@@ -26,12 +25,11 @@ def test_failed_receipt_commit_rolls_back_restart_revision_and_queue(
     def fail(*args: object) -> None:
         raise RuntimeError("receipt write failed")
 
-    monkeypatch.setattr(receipts, "finish", fail)
     with (
         base.db.pool(gate=database_gate) as pool,
         pytest.raises(RuntimeError, match="receipt write failed"),
     ):
-        router.control_blocking(pool, sid, "restart", "restart")
+        router.control_blocking(pool, sid, "restart", "restart", finish_receipt=fail)
     assert db_conn.execute(
         "SELECT desired_revision FROM schedules WHERE id = %s", (sid,)
     ).fetchone() == (0,)
@@ -56,7 +54,6 @@ def test_receipt_replays_after_schedule_deletion(
 def test_delete_cleanup_enqueue_failure_preserves_schedule(
     gateway_data_plane: None,
     db_conn: psycopg.Connection,
-    monkeypatch: pytest.MonkeyPatch,
     *,
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
@@ -69,10 +66,9 @@ def test_delete_cleanup_enqueue_failure_preserves_schedule(
     def fail(*args: object) -> None:
         raise RuntimeError("cleanup unavailable")
 
-    monkeypatch.setattr(session_control, "enqueue_in_transaction", fail)
     with (
         base.db.pool(gate=database_gate) as pool,
         pytest.raises(RuntimeError, match="cleanup unavailable"),
     ):
-        router.delete_blocking(pool, sid)
+        router.delete_blocking(pool, sid, enqueue_sync=fail)
     assert db_conn.execute("SELECT id FROM schedules WHERE id = %s", (sid,)).fetchone() == (sid,)

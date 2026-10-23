@@ -10,7 +10,7 @@ from fastapi import APIRouter, Request
 from psycopg.types.json import Jsonb
 
 from base.db.transaction import write_transaction
-from gateway.schemas.user_settings import (
+from gateway.schemas import (
     UserSettingListResponse,
     UserSettingRow,
     UserSettingUpdateRequest,

@@ -8,7 +8,7 @@ import base.db
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.db.code_version_gate import ProcessDbGate
-from gateway.schedules import router, session_control
+from gateway.schedules import router
 from gateway.tests.auth.gateway_config import gateway_test_client
 
 
@@ -78,7 +78,6 @@ def test_concurrent_identical_edits_append_one_version(
 def test_enqueue_failure_rolls_back_config_and_version(
     gateway_data_plane: None,
     db_conn: psycopg.Connection,
-    monkeypatch: pytest.MonkeyPatch,
     *,
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
@@ -89,12 +88,11 @@ def test_enqueue_failure_rolls_back_config_and_version(
     def fail(conn: object, schedule_id: int) -> None:
         raise RuntimeError("queue unavailable")
 
-    monkeypatch.setattr(session_control, "enqueue_in_transaction", fail)
     with (
         base.db.pool(gate=database_gate) as pool,
         pytest.raises(RuntimeError, match="queue unavailable"),
     ):
-        router.update_blocking(pool, sid, {"script": "print(2)\n"})
+        router.update_blocking(pool, sid, {"script": "print(2)\n"}, enqueue_sync=fail)
     assert db_conn.execute("SELECT script FROM schedules WHERE id = %s", (sid,)).fetchone() == (
         "print(1)\n",
     )
@@ -106,18 +104,18 @@ def test_enqueue_failure_rolls_back_config_and_version(
 def test_response_failure_leaves_committed_convergence_work(
     gateway_data_plane: None,
     db_conn: psycopg.Connection,
-    monkeypatch: pytest.MonkeyPatch,
     *,
     machine_identity: MachineIdentity,
 ) -> None:
     async def fail(pool: object, schedule_id: int) -> None:
         raise RuntimeError("response lost")
 
-    monkeypatch.setattr(session_control, "wait_consumed", fail)
     with gateway_test_client(machine=machine_identity) as client:
         sid = _create(client)
+        client.app.dependency_overrides[router.wait_schedule_consumed] = lambda: fail
         with pytest.raises(RuntimeError, match="response lost"):
             client.put(f"/api/schedules/{sid}", json={"script": "print(2)\n"})
+        client.app.dependency_overrides.pop(router.wait_schedule_consumed, None)
         assert client.put(f"/api/schedules/{sid}", json={"script": "print(2)\n"}).status_code == 200
     assert db_conn.execute("SELECT schedule_id FROM schedule_sync_requests").fetchall() == [(sid,)]
     assert db_conn.execute(

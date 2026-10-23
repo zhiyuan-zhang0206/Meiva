@@ -1,30 +1,27 @@
 from __future__ import annotations
 
-import os
 import secrets
-from unittest.mock import patch
+from dataclasses import replace
+from typing import NoReturn
 
 import psycopg
 import pytest
 from langchain_core.messages import AIMessage, BaseMessage
 
 from base.agents.history.checkpoint import CheckpointReadError
-from base.config import settings
 from base.db import create_agent
 from base.host.net.auth import bearer_header
-from gateway.agents.history import timeline
 from gateway.tests.agents.gateway_auth import without_credentials
 from gateway.tests.auth.gateway_config import GatewayTestClient, gateway_test_client
 from gateway.tests.history.test_timeline import test_client as test_client
 
 
 def test_retained_read_requires_auth_and_serializes_for_authenticated_caller(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    db_conn: psycopg.Connection,
 ) -> None:
     secret = secrets.token_urlsafe(24)
-    monkeypatch.setattr(settings.data_plane, "cluster_secret", secret)
     tid = create_agent(db_conn)
-    with patch.dict(os.environ), gateway_test_client() as client:
+    with gateway_test_client(cluster_secret=secret) as client:
         rejected = without_credentials(client).get(f"/api/agents/{tid}/timeline/retained")
         assert rejected.status_code == 401
         accepted = client.get(f"/api/agents/{tid}/timeline/retained", headers=bearer_header(secret))
@@ -33,7 +30,7 @@ def test_retained_read_requires_auth_and_serializes_for_authenticated_caller(
 
 
 def test_retained_history_can_start_and_page_without_reading_broken_live_head(
-    db_conn: psycopg.Connection, test_client: GatewayTestClient, monkeypatch: pytest.MonkeyPatch
+    db_conn: psycopg.Connection, test_client: GatewayTestClient
 ) -> None:
     tid = create_agent(db_conn)
     test_client.app.state.config_authority.runtime.gateway.timeline_compact_history = -1
@@ -47,13 +44,16 @@ def test_retained_history_can_start_and_page_without_reading_broken_live_head(
         reads.append(checkpoint_id)
         return [AIMessage(content=f"retained {i}", id=f"r{i}") for i in range(3)]
 
-    def broken_live(*_args: object) -> list[BaseMessage]:
+    def broken_live(*_args: object) -> NoReturn:
         raise CheckpointReadError("live parent is missing")
 
-    monkeypatch.setattr(timeline, "list_compact_boundary_checkpoint_ids", index)
-    monkeypatch.setattr(timeline, "load_checkpoint_messages_segment", segment)
-    monkeypatch.setattr(timeline, "load_checkpoint_messages", broken_live)
-    monkeypatch.setattr(timeline, "load_checkpoint_message_count", broken_live)
+    test_client.app.state.timeline_policy = replace(
+        test_client.app.state.timeline_policy,
+        list_boundary_ids=index,
+        load_segment=segment,
+        load_messages=broken_live,
+        load_message_count=broken_live,
+    )
     live = test_client.get(f"/api/agents/{tid}/timeline")
     assert live.status_code == 503
     first = test_client.get(f"/api/agents/{tid}/timeline/retained", params={"limit": 1})

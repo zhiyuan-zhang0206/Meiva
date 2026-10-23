@@ -6,11 +6,16 @@ from typing import Any
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 
+from base.agents.history.timeline import TimelineItem, build_timeline_items
 from base.agents.history.timeline_inputs import TimelineReadInputs
 from base.api_contracts.agent_contract import AgentStatus
 from base.lm.catalog import ModelCatalog
 from base.lm.catalog.decide.types import Decision, Question
-from gateway.agents.reply_suggestion.service import ReplySuggestionPolicy, ReplySuggestionService
+from gateway.agents.reply_suggestion.service import (
+    DraftRuntime,
+    ReplySuggestionPolicy,
+    ReplySuggestionService,
+)
 
 
 def inbound(text: str, source: str = "user") -> HumanMessage:
@@ -125,15 +130,14 @@ class Harness:
         self.messages: list[BaseMessage] = conversation()
         self.loads: list[int] = []
         self.usage_rows: list[dict[str, Any]] = []
+        self._rendering = TimelineReadInputs(_no_clock, lambda: False)
         self.service = ReplySuggestionService(
             policy=self.settings.policy(),
             catalog_reader=self._read_catalog,
-            rendering=TimelineReadInputs(_no_clock, lambda: False),
-            load_messages=self._load,
+            load_timeline=self._load_timeline,
             agent_status=lambda _agent_id: self.status,
             decide=self.decide,
-            draft_model=self.chat.factory,
-            log_usage=self._record_usage,
+            draft=DraftRuntime(draft_model=self.chat.factory, log_usage=self._record_usage),
         )
 
     def _record_usage(self, message: AIMessage, model: str, **kwargs: Any) -> None:
@@ -145,9 +149,10 @@ class Harness:
             raise self.catalog_error
         return self.catalog
 
-    def _load(self, agent_id: int) -> list[BaseMessage]:
+    def _load_timeline(self, agent_id: int) -> list[TimelineItem]:
         self.loads.append(agent_id)
-        return self.messages
+        items, _ = build_timeline_items(self.messages, inputs=self._rendering)
+        return items
 
 
 def _no_clock() -> Any:

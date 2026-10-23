@@ -34,6 +34,7 @@ from base.agents.history.timeline import (
     tail_window,
     timeline_default_limit,
 )
+from base.agents.history.timeline_inputs import TimelineReadInputs
 from base.agents.history.timeline_item import hydrate
 from base.db import Database, agent_exists
 from gateway.agents.eval_guard import deny_isolated_result_read
@@ -291,22 +292,35 @@ def _load_history_segment(
     """Load and render one persisted segment; read/render failures stay visible."""
     if limit is None:
         limit = timeline_default_limit(limit_reader=policy.default_limit)
+    read_segment = policy.load_segment or load_checkpoint_messages_segment
+    render = policy.render_items or build_timeline_items
     try:
-        messages = load_checkpoint_messages_segment(db, agent_id, checkpoint_id)
+        messages = read_segment(db, agent_id, checkpoint_id)
     except CheckpointReadError as exc:
         raise _read_unavailable(agent_id, exc) from exc
     if not messages:
         return None
     prefix = f"s{rank}.{checkpoint_id}"
-    items, _ = build_timeline_items(messages, inputs=policy.rendering, segment_prefix=prefix)
+    items, _ = render(messages, inputs=policy.rendering, segment_prefix=prefix)
     return hydrate(db, items, agent_id, limit=limit, before=before)
 
 
-def _load_boundary_ids(db: Database, agent_id: int, depth: int) -> list[str]:
+def _load_boundary_ids(
+    db: Database,
+    agent_id: int,
+    depth: int,
+    *,
+    policy: TimelineReadPolicy | None = None,
+) -> list[str]:
     if depth == 0:
         return []
+    read_boundaries = (
+        policy.list_boundary_ids
+        if policy is not None and policy.list_boundary_ids is not None
+        else list_compact_boundary_checkpoint_ids
+    )
     try:
-        return list_compact_boundary_checkpoint_ids(
+        return read_boundaries(
             db,
             agent_id,
             limit=depth + 1 if depth > 0 else None,
@@ -315,9 +329,19 @@ def _load_boundary_ids(db: Database, agent_id: int, depth: int) -> list[str]:
         raise _read_unavailable(agent_id, exc) from exc
 
 
-def _load_current_message_count(db: Database, agent_id: int) -> int:
+def _load_current_message_count(
+    db: Database,
+    agent_id: int,
+    *,
+    policy: TimelineReadPolicy | None = None,
+) -> int:
+    read_count = (
+        policy.load_message_count
+        if policy is not None and policy.load_message_count is not None
+        else load_checkpoint_message_count
+    )
     try:
-        return load_checkpoint_message_count(db, agent_id)
+        return read_count(db, agent_id)
     except CheckpointReadError as exc:
         raise _read_unavailable(agent_id, exc) from exc
 
@@ -435,16 +459,34 @@ def _initial_window(
     return window, has_more or historical_segments_available
 
 
-def load_current_messages(db: Database, agent_id: int) -> list[BaseMessage]:
+def load_current_messages(
+    db: Database,
+    agent_id: int,
+    *,
+    policy: TimelineReadPolicy | None = None,
+) -> list[BaseMessage]:
     """Load live messages once for timeline and composed snapshot reads.
 
     Failed storage or reconstruction reads remain unavailable rather than
     masquerading as a successfully empty conversation.
     """
+    read_messages = (
+        policy.load_messages
+        if policy is not None and policy.load_messages is not None
+        else load_checkpoint_messages
+    )
     try:
-        return load_checkpoint_messages(db, agent_id)
+        return read_messages(db, agent_id)
     except CheckpointReadError as exc:
         raise _read_unavailable(agent_id, exc) from exc
+
+
+def load_current_timeline_items(
+    db: Database, agent_id: int, *, inputs: TimelineReadInputs
+) -> list[TimelineItem]:
+    messages = load_current_messages(db, agent_id)
+    items, _ = build_timeline_items(messages, inputs=inputs)
+    return items
 
 
 def _require_agent(request: Request, agent_id: int) -> None:
@@ -464,7 +506,8 @@ def _current_items(
     """The current segment's rendered, hydrated items in item-id order + msg_count."""
     db: Database = request.app.state.db
     policy: TimelineReadPolicy = request.app.state.timeline_policy
-    items, msg_count = build_timeline_items(messages, inputs=policy.rendering)
+    render = policy.render_items or build_timeline_items
+    items, msg_count = render(messages, inputs=policy.rendering)
     items = hydrate(db, items, agent_id, limit=limit, before=before)
     items.sort(key=lambda it: item_sort_key(it.item_id))
     return items, msg_count
@@ -498,7 +541,7 @@ def head_timeline(
     _require_agent(request, agent_id)
     policy: TimelineReadPolicy = request.app.state.timeline_policy
     depth = policy.compact_history()
-    boundary_ids = _load_boundary_ids(request.app.state.db, agent_id, depth)
+    boundary_ids = _load_boundary_ids(request.app.state.db, agent_id, depth, policy=policy)
     return _head_response(
         request,
         agent_id,
@@ -557,7 +600,7 @@ def _historical_response(
     if before is not None and cursor is None:
         return TimelineResponse(
             items=[],
-            msg_count=_load_current_message_count(db, agent_id),
+            msg_count=_load_current_message_count(db, agent_id, policy=policy),
             has_more=False,
         )
     if cursor is not None and cursor.checkpoint_id is not None:
@@ -566,7 +609,7 @@ def _historical_response(
         )
         return TimelineResponse(
             items=window,
-            msg_count=_load_current_message_count(db, agent_id),
+            msg_count=_load_current_message_count(db, agent_id, policy=policy),
             has_more=has_more,
         )
     return None
@@ -602,7 +645,7 @@ def get_timeline(
     _require_agent(request, agent_id)
     depth = policy.compact_history()
     db: Database = request.app.state.db
-    boundary_ids = _load_boundary_ids(db, agent_id, depth)
+    boundary_ids = _load_boundary_ids(db, agent_id, depth, policy=policy)
 
     early = _historical_response(
         db, agent_id, before, cursor, limit, boundary_ids, depth, policy=policy
@@ -610,7 +653,7 @@ def get_timeline(
     if early is not None:
         return early
 
-    messages = load_current_messages(db, agent_id)
+    messages = load_current_messages(db, agent_id, policy=policy)
     if before is None:
         return _head_response(request, agent_id, messages, limit, boundary_ids)
     items, msg_count = _current_items(request, agent_id, messages, limit, before)
@@ -657,7 +700,7 @@ def get_retained_timeline(
     db: Database = request.app.state.db
     policy: TimelineReadPolicy = request.app.state.timeline_policy
     depth = policy.compact_history()
-    boundary_ids = _load_boundary_ids(db, agent_id, depth)
+    boundary_ids = _load_boundary_ids(db, agent_id, depth, policy=policy)
     cursor = _retained_cursor(before, checkpoint_id)
     selected = cursor.checkpoint_id if cursor is not None else checkpoint_id
     if selected is None and not boundary_ids:

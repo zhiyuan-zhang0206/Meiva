@@ -9,6 +9,7 @@ exports = ["configuration.py", "router.py"]
 [purity]
 "." = "strict-to-be"
 "__init__.py" = "strict"
+"excerpt.py" = "strict"
 "schemas.py" = "strict"
 
 [debt.impure-call]
@@ -18,7 +19,6 @@ exports = ["configuration.py", "router.py"]
 "service.py#async def _gate_and_draft" = 1
 "service.py#async def _useful_reply_probability" = 1
 "service.py#async def suggest" = 1
-"service.py#time.monotonic" = 2
 
 [debt.impure-edge]
 "configuration.py#base/config/__init__.py" = 1
@@ -28,14 +28,9 @@ exports = ["configuration.py", "router.py"]
 "configuration.py#base/lm/factory.py" = 1
 "configuration.py#gateway/agents/history/timeline.py" = 1
 "configuration.py#ops/agents/__init__.py" = 1
-"excerpt.py#base/agents/history/timeline.py" = 1
 "router.py#gateway/agents/eval_guard.py" = 1
 "router.py#gateway/http/disconnect.py" = 1
 "router.py#gateway/http/middleware/error_envelope.py" = 1
-"service.py#base/agents/history/timeline.py" = 1
 "service.py#base/lm/call.py" = 1
 "service.py#base/lm/errors.py" = 1
 "service.py#base/log/__init__.py" = 1
-
-[debt.wide-params]
-"service.py#def __init__" = 1

@@ -17,7 +17,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from psycopg_pool import ConnectionPool
 
 from base.config import settings
-from gateway.schemas.shell import ShellCaptureResponse
+from gateway.schemas import ShellCaptureResponse
 from ops.cluster import rpc as cluster_rpc
 
 router = APIRouter()

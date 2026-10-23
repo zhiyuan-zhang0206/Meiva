@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import shutil
+from collections.abc import Awaitable, Callable
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
 
 import psycopg
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -144,7 +145,14 @@ def _edit_assignments(changed: dict[str, Any], *, code_changed: bool) -> list[sq
 
 # meiva:link gateway/schedules/docs/router-contracts.meiva.okf.md
 def update_blocking(
-    pool: ConnectionPool[Any], schedule_id: int, fields: dict[str, Any], key: str | None = None
+    pool: ConnectionPool[Any],
+    schedule_id: int,
+    fields: dict[str, Any],
+    key: str | None = None,
+    *,
+    enqueue_sync: Callable[[psycopg.Connection[Any], int], None] = (
+        session_control.enqueue_in_transaction
+    ),
 ) -> tuple[tuple[Any, ...], bool]:
 
     if "script" in fields:
@@ -184,7 +192,7 @@ def update_blocking(
                 )
             needs_sync = (code_changed and row[4]) or "enabled" in changed
             if needs_sync:
-                session_control.enqueue_in_transaction(conn, schedule_id)
+                enqueue_sync(conn, schedule_id)
             receipts.finish(conn, key, row)
     except psycopg.errors.UniqueViolation as exc:
         raise HTTPException(
@@ -279,11 +287,23 @@ async def get_schedule(request: Request, schedule_id: int) -> ScheduleView:
     return _view(row)
 
 
+def wait_schedule_consumed() -> Callable[[ConnectionPool[Any], int], Awaitable[None]]:
+    return session_control.wait_consumed
+
+
 @router.put(
     "/api/schedules/{schedule_id}",
     description="Partial-update a schedule — only the fields present in the body change. A\nscript/command change is snapshotted into schedule_versions and, if the\nschedule is enabled, applied immediately (the session is relaunched on the new\nscript). An enabled-flag value change also converges immediately, so disable\nreaps the session and enable creates it; a same-value update leaves the\nsession intact. 400 on a script syntax error, 404 if missing, 409 on a name\nclash.",
 )
-async def update_schedule(request: Request, schedule_id: int, body: ScheduleUpdate) -> ScheduleView:
+async def update_schedule(
+    request: Request,
+    schedule_id: int,
+    body: ScheduleUpdate,
+    wait_consumed: Annotated[
+        Callable[[ConnectionPool[Any], int], Awaitable[None]],
+        Depends(wait_schedule_consumed),
+    ],
+) -> ScheduleView:
 
     fields = body.model_dump(exclude_unset=True)
     if not fields:
@@ -297,17 +317,24 @@ async def update_schedule(request: Request, schedule_id: int, body: ScheduleUpda
         receipts.operation_key(request),
     )
     if needs_sync:
-        await session_control.wait_consumed(request.app.state.db_pool, schedule_id)
+        await wait_consumed(request.app.state.db_pool, schedule_id)
     return _view(row)
 
 
-def delete_blocking(pool: ConnectionPool[Any], schedule_id: int) -> None:
+def delete_blocking(
+    pool: ConnectionPool[Any],
+    schedule_id: int,
+    *,
+    enqueue_sync: Callable[[psycopg.Connection[Any], int], None] = (
+        session_control.enqueue_in_transaction
+    ),
+) -> None:
 
     with write_transaction(pool) as conn, conn.cursor() as cur:
         cur.execute("DELETE FROM schedules WHERE id = %s RETURNING id", (schedule_id,))
         if cur.fetchone() is None:
             raise HTTPException(status_code=404, detail=f"schedule {schedule_id} not found")
-        session_control.enqueue_in_transaction(conn, schedule_id)
+        enqueue_sync(conn, schedule_id)
 
 
 def _remove_schedule_dir(home: Path, schedule_id: int) -> None:
@@ -483,7 +510,14 @@ def fetch_full_blocking(pool: ConnectionPool[Any], schedule_id: int) -> tuple[An
 
 # meiva:link gateway/schedules/docs/router-contracts.meiva.okf.md
 def control_blocking(
-    pool: ConnectionPool[Any], schedule_id: int, action: str, key: str | None
+    pool: ConnectionPool[Any],
+    schedule_id: int,
+    action: str,
+    key: str | None,
+    *,
+    finish_receipt: Callable[[psycopg.Connection[Any], str | None, tuple[Any, ...]], None] = (
+        receipts.finish
+    ),
 ) -> tuple[tuple[Any, ...], bool]:
     with write_transaction(pool) as conn, conn.cursor() as cur:
         replay = receipts.begin(conn, key, {"schedule_id": schedule_id, "action": action})
@@ -512,7 +546,7 @@ def control_blocking(
             row = cur.fetchone()
             assert row is not None  # noqa: S101
             session_control.enqueue_in_transaction(conn, schedule_id)
-        receipts.finish(conn, key, row)
+        finish_receipt(conn, key, row)
     return row, needs_sync
 
 
