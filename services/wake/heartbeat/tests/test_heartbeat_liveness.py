@@ -9,15 +9,15 @@ from psycopg_pool import ConnectionPool
 from base.agents.tests.units import spawn_agent
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
-from base.config import settings
 from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
-from base.events.live.bus import EventBus
+from base.events.live.bus import EventBus, EventBusConfig, event_bus_config_from_settings
+from base.events.live.projection import AgentUpdated
 from base.lm.catalog import ModelCatalog
-from services.wake.heartbeat import liveness
 from services.wake.heartbeat.liveness import (
     OFFLINE_AFTER_FAILURES,
+    LivenessConfig,
     merge_liveness,
     run_liveness_pass,
 )
@@ -90,6 +90,32 @@ def _state(db: psycopg.Connection, agent_id: int) -> tuple[str, object]:
         return (row[0], row[1])
 
 
+class _RecordingBus(EventBus):
+    def __init__(self, config: EventBusConfig, connection: psycopg.Connection) -> None:
+        super().__init__(config)
+        self.connection = connection
+        self.announced: list[int] = []
+        self.committed_states: list[str] = []
+
+    def publish_best_effort_sync(
+        self,
+        payload: str,
+        *,
+        channel: str | None = None,
+        decode_responses: bool = True,
+        context: str = "",
+    ) -> int | None:
+        assert context == "agent_updated"
+        event = AgentUpdated.model_validate_json(payload)
+        self.announced.append(event.agent_id)
+        row = self.connection.execute(
+            "SELECT liveness_state FROM agents_meta WHERE id=%s", (event.agent_id,)
+        ).fetchone()
+        assert row is not None
+        self.committed_states.append(row[0])
+        return 0
+
+
 class TestLivenessPass:
     @pytest.mark.usefixtures(pool.__name__)
     def test_host_verdict_is_retained_and_cleared_on_probe_failure(
@@ -112,6 +138,7 @@ class TestLivenessPass:
                 pool,
                 EventBus.from_settings(),
                 probe=host_down,
+                config=LivenessConfig(8.0),
             )
         )
         row = db_conn.execute(
@@ -125,6 +152,7 @@ class TestLivenessPass:
                 pool,
                 EventBus.from_settings(),
                 probe=FakeProbe({MACHINE: False}),
+                config=LivenessConfig(8.0),
             )
         )
         row = db_conn.execute(
@@ -189,19 +217,17 @@ class TestLivenessPass:
         assert _state(db_conn, aid)[1] == observed
 
     @pytest.mark.usefixtures(pool.__name__)
-    def test_probe_timeout_comes_from_settings(
+    def test_probe_timeout_comes_from_config(
         self,
         redis_url: str,
         pool: ConnectionPool,
         db_conn: psycopg.Connection,
-        monkeypatch: pytest.MonkeyPatch,
         *,
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
         machine_identity: MachineIdentity,
     ) -> None:
-        monkeypatch.setattr(settings.gateway, "status_probe_timeout_seconds", 12.0)
         register_machine(db_conn)
         aid = _make_agent(
             db_conn,
@@ -226,6 +252,7 @@ class TestLivenessPass:
                 pool,
                 EventBus.from_settings(),
                 probe=RecordingProbe({MACHINE: True}),
+                config=LivenessConfig(12.0),
             )
         )
         assert seen["timeout_s"] == 12.0
@@ -259,6 +286,7 @@ class TestLivenessPass:
                 pool,
                 EventBus.from_settings(),
                 probe=FakeProbe({MACHINE: True}),
+                config=LivenessConfig(8.0),
             )
         )
         assert _state(db_conn, aid)[0] == "online"
@@ -351,6 +379,7 @@ class TestLivenessPass:
                 pool,
                 EventBus.from_settings(),
                 probe=fail,
+                config=LivenessConfig(8.0),
             )
         )
         assert _state(db_conn, aid)[0] == "online"
@@ -360,6 +389,7 @@ class TestLivenessPass:
                 pool,
                 EventBus.from_settings(),
                 probe=fail,
+                config=LivenessConfig(8.0),
             )
         )
         assert _state(db_conn, aid)[0] == "offline"
@@ -369,6 +399,7 @@ class TestLivenessPass:
                 pool,
                 EventBus.from_settings(),
                 probe=FakeProbe({MACHINE: True}),
+                config=LivenessConfig(8.0),
             )
         )
         assert _state(db_conn, aid)[0] == "online"
@@ -387,6 +418,7 @@ class TestLivenessPass:
                     pool,
                     EventBus.from_settings(),
                     probe=fail,
+                    config=LivenessConfig(8.0),
                 )
             )
             assert _consecutive_failures(db_conn, MACHINE) == expected
@@ -397,6 +429,7 @@ class TestLivenessPass:
                 pool,
                 EventBus.from_settings(),
                 probe=FakeProbe({MACHINE: True}),
+                config=LivenessConfig(8.0),
             )
         )
         assert _consecutive_failures(db_conn, MACHINE) == 0
@@ -407,7 +440,6 @@ class TestLivenessPass:
         redis_url: str,
         pool: ConnectionPool,
         db_conn: psycopg.Connection,
-        monkeypatch: pytest.MonkeyPatch,
         *,
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
@@ -423,23 +455,16 @@ class TestLivenessPass:
             database_gate=database_gate,
             local_machine=machine_identity,
         )
-        announced: list[int] = []
-
-        def capture_announcement(_bus: object, agent_id: int) -> None:
-            announced.append(agent_id)
-
-        monkeypatch.setattr(
-            liveness,
-            "publish_agent_updated_sync",
-            capture_announcement,
-        )
+        bus = _RecordingBus(event_bus_config_from_settings(), db_conn)
+        announced = bus.announced
 
         asyncio.run(
             run_liveness_pass(
                 Database.from_settings(gate=database_gate),
                 pool,
-                EventBus.from_settings(),
+                bus,
                 probe=FakeProbe({MACHINE: True}),
+                config=LivenessConfig(8.0),
             )
         )
         assert announced == []
@@ -449,8 +474,9 @@ class TestLivenessPass:
             run_liveness_pass(
                 Database.from_settings(gate=database_gate),
                 pool,
-                EventBus.from_settings(),
+                bus,
                 probe=FakeProbe({MACHINE: True}),
+                config=LivenessConfig(8.0),
             )
         )
         assert announced == []
@@ -460,27 +486,31 @@ class TestLivenessPass:
             run_liveness_pass(
                 Database.from_settings(gate=database_gate),
                 pool,
-                EventBus.from_settings(),
+                bus,
                 probe=fail,
+                config=LivenessConfig(8.0),
             )
         )
         asyncio.run(
             run_liveness_pass(
                 Database.from_settings(gate=database_gate),
                 pool,
-                EventBus.from_settings(),
+                bus,
                 probe=fail,
+                config=LivenessConfig(8.0),
             )
         )
         assert announced == [aid]
+        assert bus.committed_states == ["offline"]
 
         announced.clear()
         asyncio.run(
             run_liveness_pass(
                 Database.from_settings(gate=database_gate),
                 pool,
-                EventBus.from_settings(),
+                bus,
                 probe=fail,
+                config=LivenessConfig(8.0),
             )
         )
         assert announced == []
@@ -490,11 +520,13 @@ class TestLivenessPass:
             run_liveness_pass(
                 Database.from_settings(gate=database_gate),
                 pool,
-                EventBus.from_settings(),
+                bus,
                 probe=FakeProbe({MACHINE: True}),
+                config=LivenessConfig(8.0),
             )
         )
         assert announced == [aid]
+        assert bus.committed_states == ["offline", "online"]
 
     @pytest.mark.usefixtures(pool.__name__)
     def test_never_admitted_idling_follows_the_machine_probe(
@@ -524,6 +556,7 @@ class TestLivenessPass:
                 pool,
                 EventBus.from_settings(),
                 probe=FakeProbe({MACHINE: True}),
+                config=LivenessConfig(8.0),
             )
         )
         assert _state(db_conn, aid)[0] == "online"
@@ -562,6 +595,7 @@ class TestLivenessPass:
                 pool,
                 EventBus.from_settings(),
                 probe=FakeProbe({MACHINE: True}),
+                config=LivenessConfig(8.0),
             )
         )
         assert _state(db_conn, aid)[0] == "unknown"
@@ -594,6 +628,7 @@ class TestLivenessPass:
                 pool,
                 EventBus.from_settings(),
                 probe=FakeProbe({}),
+                config=LivenessConfig(8.0),
             )
         )
         assert _state(db_conn, aid)[0] == "unknown"
@@ -627,6 +662,7 @@ class TestLivenessPass:
                 pool,
                 EventBus.from_settings(),
                 probe=fail,
+                config=LivenessConfig(8.0),
             )
         )
         asyncio.run(
@@ -635,6 +671,7 @@ class TestLivenessPass:
                 pool,
                 EventBus.from_settings(),
                 probe=fail,
+                config=LivenessConfig(8.0),
             )
         )
         assert _state(db_conn, aid)[0] == "offline"
@@ -644,6 +681,7 @@ class TestLivenessPass:
                 pool,
                 EventBus.from_settings(),
                 probe=FakeProbe({MACHINE: True}),
+                config=LivenessConfig(8.0),
             )
         )
         assert _state(db_conn, aid)[0] == "online"

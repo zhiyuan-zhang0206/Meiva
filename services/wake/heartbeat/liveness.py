@@ -41,7 +41,6 @@
 # DB merge without dialing real ops servers.
 
 import asyncio
-import functools
 import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
@@ -57,7 +56,6 @@ from base.agents.observation.evidence import (
     MACHINE_STOPPED_TOO_LONG_S,
 )
 from base.cluster.machines import list_agent_runners, list_roster_agent_runners
-from base.config import settings
 from base.db import Database
 from base.db.transaction import write_transaction
 from base.events.live.announce import publish_agent_updated_sync
@@ -98,7 +96,14 @@ class ProbeOutcome:
 _UNREACHED = ProbeOutcome(reached=False, host_online=None, status=None)
 
 
-async def probe_machine(name: str, probe: Callable[..., Awaitable[object]]) -> ProbeOutcome:
+@dataclass(frozen=True)
+class LivenessConfig:
+    probe_timeout_s: float
+
+
+async def probe_machine(
+    name: str, probe: Callable[..., Awaitable[object]], *, config: LivenessConfig
+) -> ProbeOutcome:
     """One status_probe round-trip.
 
     An unreachable host or a failed op (timeout and transport errors surface as
@@ -110,7 +115,7 @@ async def probe_machine(name: str, probe: Callable[..., Awaitable[object]]) -> P
             target_machine=name,
             kind="status_probe",
             payload={},
-            timeout_s=settings.gateway.status_probe_timeout_seconds,
+            timeout_s=config.probe_timeout_s,
             # No transport retry: an offline host is steady-state and the
             # pass has its own consecutive-failure gate; retrying just stalls
             # the fan-out (same reasoning as the roster probe).
@@ -317,27 +322,22 @@ def report_stopped_too_long(db: Database) -> list[str]:
     return reported
 
 
+# meiva:link services/wake/heartbeat/docs/liveness-inputs.meiva.okf.md
 async def run_liveness_pass(
     db: Database,
     pool: ConnectionPool,
     bus: EventBus,
-    probe: Callable[..., Awaitable[object]] | None = None,
+    *,
+    probe: Callable[..., Awaitable[object]],
+    config: LivenessConfig,
 ) -> None:
-    """One liveness pass: probe every roster-visible agent-runner once, record the
-    outcome of the rollout targets as agent-liveness state, snapshot every probed
-    machine for the roster read, then merge.
-
-    `probe` is injectable for tests (default: the real cluster RPC resolving addresses through
-    `db`). Probe
-    failures are per-machine and quiet — a down host is steady-state; the
-    pass keeps running for the hosts that are up.
-    """
-    probe = probe if probe is not None else functools.partial(cluster_rpc.dispatch_to_machine, db)
     targets = {name for name, _url in list_agent_runners(db)}
     machines = sorted(targets | {name for name, _url in list_roster_agent_runners(db)})
     if not machines:
         return
-    results = await asyncio.gather(*(probe_machine(name, probe) for name in machines))
+    results = await asyncio.gather(
+        *(probe_machine(name, probe, config=config) for name in machines)
+    )
     outcomes = dict(zip(machines, results, strict=True))
     for name in machines:
         outcome = outcomes[name]

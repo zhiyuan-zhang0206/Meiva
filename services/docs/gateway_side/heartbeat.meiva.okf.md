@@ -90,11 +90,12 @@ handle creation and retains the entry's gate and lazy machine host reader.
 Schema checks, health-before-pool ordering and shutdown stay at their original
 boundaries. Business-specific configuration slices keep their existing readers.
 
-Remote station configuration, authenticated outcomes and fail-open policy are
-owned by [[services/wake/heartbeat/docs/station-probe.meiva.okf.md|Station probe]].
+Station config, authenticated outcomes and fail-open policy: [[services/wake/heartbeat/docs/station-probe.meiva.okf.md|Station probe]].
 
-Round ownership, pacing, backoff clocks and failure policy are described in
+Round owners, pacing, backoff clocks and failure policy:
 [[services/wake/heartbeat/docs/dispatch-round.meiva.okf.md|Heartbeat dispatch rounds]].
 
-Hourly receipt windows, required clock inputs and the digest failure boundary are
-owned by [[services/wake/heartbeat/docs/completion-digest.meiva.okf.md|Completion digest rounds]].
+Hourly receipt windows, required clock inputs and digest failures: [[services/wake/heartbeat/docs/completion-digest.meiva.okf.md|Completion digest rounds]].
+
+Live probe configuration and committed edge announcements:
+[[services/wake/heartbeat/docs/liveness-inputs.meiva.okf.md|Liveness probe inputs]].
