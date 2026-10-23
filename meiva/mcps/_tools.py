@@ -18,7 +18,7 @@ from collections.abc import Callable
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Protocol, cast
 
 from meiva.mcps.config import MCPCallError, MCPConnectError, ToolInfo
 from meiva.security import scan_content
@@ -105,14 +105,15 @@ class DiskCache:
         if not isinstance(tools, list):
             return None
         result: list[ToolInfo] = []
-        for t in tools:
+        for t in cast(list[object], tools):
             if not isinstance(t, dict):
                 return None
+            item = cast(dict[str, Any], t)
             result.append(
                 {
-                    "name": t.get("name", ""),
-                    "description": t.get("description", ""),
-                    "input_schema": t.get("input_schema", {}),
+                    "name": item.get("name", ""),
+                    "description": item.get("description", ""),
+                    "input_schema": item.get("input_schema", {}),
                 }
             )
         return result
@@ -301,16 +302,21 @@ def schema_to_signature(schema: dict[str, Any]) -> inspect.Signature | None:
     props = schema.get("properties")
     if not isinstance(props, dict) or not props:
         return None
+    props_dict = cast(dict[str, Any], props)
     # An MCP tool parameter name can be a non-identifier (hyphen, leading digit)
     # or a Python keyword (`from`, `class`); inspect.Parameter rejects or
     # mis-renders those. Fall back to (**kwargs) — the JSON schema in the
     # docstring still lists every parameter.
-    if not all(isinstance(n, str) and n.isidentifier() and not keyword.iskeyword(n) for n in props):
+    if not all(
+        isinstance(n, str) and n.isidentifier() and not keyword.iskeyword(n) for n in props_dict
+    ):
         return None
     required = set(schema.get("required") or [])
     params: list[inspect.Parameter] = []
-    for name, pschema in props.items():
-        ptype = pschema.get("type") if isinstance(pschema, dict) else None
+    for name, pschema in props_dict.items():
+        ptype: object = (
+            cast(dict[str, Any], pschema).get("type") if isinstance(pschema, dict) else None
+        )
         ann = JSON_PRIMITIVE.get(ptype, Any) if isinstance(ptype, str) else Any
         default = inspect.Parameter.empty if name in required else None
         params.append(

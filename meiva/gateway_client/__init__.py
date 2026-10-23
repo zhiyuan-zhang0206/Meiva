@@ -96,7 +96,7 @@ def spawn(
     from base.api_contracts.idempotency import validate_idempotency_key
 
     idempotency_key = validate_idempotency_key(idempotency_key)
-    body: dict = {"spawner": spawner}
+    body: dict[str, Any] = {"spawner": spawner}
     if prompt is not None:
         # prompt_source is schema-required only when prompt is given (the source concept only exists when non-empty)
         body["prompt"] = prompt
@@ -214,7 +214,7 @@ def get_last_message(agent_id: int, caller: str) -> str | None:
     return resp.json()["text"]
 
 
-def get_neighbors(agent_id: int, *, depth: int, limit: int) -> list[dict]:
+def get_neighbors(agent_id: int, *, depth: int, limit: int) -> list[dict[str, Any]]:
     """GET /api/agents/{id}/neighbors → list of neighbor dicts.
 
     Each dict has id / label / status / depth / score, strongest first
@@ -229,7 +229,7 @@ def get_neighbors(agent_id: int, *, depth: int, limit: int) -> list[dict]:
     return resp.json()["neighbors"]
 
 
-def get_ancestors(agent_id: int) -> list[dict]:
+def get_ancestors(agent_id: int) -> list[dict[str, Any]]:
     """GET /api/agents/{id}/neighbors → the `ancestors` rows: the spawn/fork
     chain above `agent_id`, nearest ancestor first (the gateway walks to the
     top, so the neighbors `depth`/`limit` params do not apply). Same dict
@@ -249,7 +249,7 @@ def get_ancestors(agent_id: int) -> list[dict]:
 _BORN_CHAIN_TIMEOUT_S = 5.0
 
 
-def get_born_chain(agent_id: int, *, context: MeivaContext | None = None) -> list[dict]:
+def get_born_chain(agent_id: int, *, context: MeivaContext | None = None) -> list[dict[str, Any]]:
     """GET /api/agents/{id}/born-chain → the `ancestors` rows: the immutable
     birth chain above `agent_id`, nearest ancestor first (1 = direct birth
     parent). Each dict carries agent_id / label / status / machine / depth.
@@ -313,7 +313,7 @@ def terminate(
     message: str | None = None,
     force: bool = False,
     kill_all_shell_sessions: bool = False,
-) -> dict:
+) -> dict[str, Any]:
     """POST /api/agents/{id}/terminate → response dict.
 
     `status` is "enqueued" / "already_terminated"; `open_tasks` carries what
@@ -332,7 +332,7 @@ def terminate(
     kill_all_shell_sessions=True also kills every shell session the agent owns
     on its home machine. Sent only when set.
     """
-    body: dict = {}
+    body: dict[str, Any] = {}
     if source is not None:
         body["source"] = source
     else:
@@ -354,7 +354,7 @@ def restart(agent_id: int, *, source: str | None = None) -> str:
     An omitted source requires the established actor identity. Callers without
     an agent or system identity must supply an explicit source.
     """
-    body: dict = {}
+    body: dict[str, Any] = {}
     if source is not None:
         body["source"] = source
     else:
@@ -389,7 +389,7 @@ def resurrect(agent_id: int, *, prompt: str, resurrected_by: str | None = None) 
     prompt is required -- a resurrected agent needs to know why it
     was woken up and what to do.
     """
-    body: dict = {"prompt": prompt}
+    body: dict[str, Any] = {"prompt": prompt}
     if resurrected_by is not None:
         body["resurrected_by"] = resurrected_by
     else:
@@ -408,7 +408,7 @@ def register_page(
     title: str | None,
     serve_dir: str | None = None,
     ttl_seconds: int | None = None,
-) -> dict:
+) -> dict[str, Any]:
     """POST /api/keyed/v1/agents/{id}/pages → PageRow dict (id/name/port/title/...).
 
     One key per call: transport-level retries share it, so the gateway
@@ -418,7 +418,7 @@ def register_page(
     can re-serve a dead page server after resurrect/restart. Only
     serve() sets it; show() leaves it None.
     """
-    body: dict = {"name": name, "port": port, "host": host}
+    body: dict[str, Any] = {"name": name, "port": port, "host": host}
     if title is not None:
         body["title"] = title
     if serve_dir is not None:
@@ -456,14 +456,14 @@ def close_page(agent_id: int, name: str) -> bool:
     return True
 
 
-def list_open_pages(agent_id: int) -> list[dict]:
+def list_open_pages(agent_id: int) -> list[dict[str, Any]]:
     """GET /api/agents/{id}/pages → the agent's open PageRow dicts."""
     resp = _transport.get(f"/api/agents/{agent_id}/pages", context=_ctx(None))
     _transport.raise_from_response(resp)
     return list(resp.json())
 
 
-def list_machines() -> list[dict]:
+def list_machines() -> list[dict[str, Any]]:
     """GET /api/cluster/machines → list of {name, description, live} dicts."""
     resp = _transport.get("/api/cluster/machines", context=_ctx(None))
     _transport.raise_from_response(resp)

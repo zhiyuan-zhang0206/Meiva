@@ -15,6 +15,7 @@ import urllib.request as _urlopen
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any, cast
 
 from base.log import logger
 from meiva import boot, gateway_client
@@ -52,7 +53,7 @@ class Page:
     url: str
 
 
-def _row_to_page(row: dict) -> Page:
+def _row_to_page(row: dict[str, Any]) -> Page:
     return Page(
         id=int(row["id"]),
         name=row["name"],
@@ -302,7 +303,7 @@ def _error_detail(exc: Exception) -> str | None:
         return None
     if not isinstance(parsed, dict):
         return None
-    detail = parsed.get("detail")
+    detail: object = cast(dict[str, Any], parsed).get("detail")
     return detail if isinstance(detail, str) else None
 
 

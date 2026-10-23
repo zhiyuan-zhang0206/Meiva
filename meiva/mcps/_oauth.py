@@ -28,7 +28,7 @@ import json
 import os
 import webbrowser
 from contextlib import suppress
-from typing import Any
+from typing import Any, cast
 
 from loguru import logger
 from pydantic import AnyUrl
@@ -63,7 +63,7 @@ class FileTokenStorage:
             return {}
         try:
             data = json.loads(self._path.read_text(encoding="utf-8"))
-            return data if isinstance(data, dict) else {}
+            return cast(dict[str, Any], data) if isinstance(data, dict) else {}
         except (json.JSONDecodeError, OSError):
             return {}
 
