@@ -24,6 +24,11 @@ Full-screen supervision plane: judge 10-20 agents without opening any conversati
 
 ## Layout timing on a large graph
 
+Label sizing/wrapping and its direct contracts use `fleet/presentation/labels.ts`;
+`force-graph-geometry.ts` retains focus/hover hooks and graph model declarations.
+Task canvas/chrome/contracts share the records and legend in `presentation/task-palette.ts`.
+`layoutOptions` remains owned by the actual ForceGraph renderer.
+
 A graph of 200 nodes or more (`layoutOptions` in `force-graph.tsx`) settles in
 manual, time-budgeted slices instead of the live d3 timer: the simulation steps
 under a per-frame budget and commits positions explicitly, twice early and then

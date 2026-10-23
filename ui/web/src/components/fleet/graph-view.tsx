@@ -32,11 +32,8 @@ import {
   FORCE_DEFAULTS,
   useForceParams,
 } from "./force-controls";
-import {
-  ForceGraph,
-  type ForceGraphEdge,
-  type ForceGraphNode,
-} from "./force-graph";
+import { ForceGraph } from "./force-graph";
+import type { ForceGraphEdge, ForceGraphNode } from "./force-graph-geometry";
 import { FLEX, OVERFLOW_HIDDEN } from "@/lib/layout/layout";
 import { cn } from "@/lib/format/utils";
 

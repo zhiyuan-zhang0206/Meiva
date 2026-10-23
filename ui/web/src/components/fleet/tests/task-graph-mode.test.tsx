@@ -10,7 +10,8 @@ import { mockSetSettingCalls, resetMockSettings } from "@/test-support/user-sett
 
 import { FORCE_DEFAULTS, FORCE_GROUPS, TASK_FORCE_GROUPS, type ForceGroup } from "../force-controls";
 import { STATUS_TO_LANE } from "../task-kanban";
-import { STATUS_FILL, TASK_FORCE_KEY, TASK_LEGEND_ENTRIES } from "../task-graph";
+import { STATUS_FILL, TASK_LEGEND_ENTRIES } from "../presentation/task-palette";
+import { TASK_FORCE_KEY } from "../task-graph-chrome";
 import { TaskGraph } from "../task-graph";
 
 // meiva:note

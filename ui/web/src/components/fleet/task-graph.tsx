@@ -33,24 +33,16 @@ import {
   TASK_FORCE_GROUPS,
   useForceParams,
 } from "./force-controls";
-import {
-  ForceGraph,
-  type ForceGraphEdge,
-  type ForceGraphNode,
-} from "./force-graph";
+import { ForceGraph } from "./force-graph";
+import type { ForceGraphEdge, ForceGraphNode } from "./force-graph-geometry";
 import {
   FilterCluster,
-  NODE_FILL,
-  ROOT_NODE_STATUS,
-  STATUS_FILL,
   StaleBadge,
   TASK_FORCE_KEY,
-  TASK_LEGEND_ENTRIES,
   TaskHoverCard,
 } from "./task-graph-chrome";
 import { TaskKanban } from "./task-kanban";
-
-export { STATUS_FILL, TASK_FORCE_KEY, TASK_LEGEND_ENTRIES } from "./task-graph-chrome";
+import { NODE_FILL, ROOT_NODE_STATUS, STATUS_FILL, TASK_LEGEND_ENTRIES } from "./presentation/task-palette";
 
 export function TaskGraph({
   selectedTaskId,

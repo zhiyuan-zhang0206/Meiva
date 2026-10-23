@@ -28,32 +28,15 @@ import { cn } from "@/lib/format/utils";
 
 import { ForceControls, FORCE_GROUPS, type ForceGroup, type ForceParams } from "./force-controls";
 import {
-  GLYPH_WIDTH_FULL,
-  GLYPH_WIDTH_LATIN,
-  LABEL_LINE_HEIGHT,
-  LABEL_MIN_ZOOM,
   buildConnectedNodeIds,
-  radiusOf,
   useGraphFocus,
   useHoverCardState,
-  wrapLabel,
   type ForceGraphEdge,
   type ForceGraphNode,
   type HoverCard,
 } from "./force-graph-geometry";
+import { LABEL_LINE_HEIGHT, LABEL_MIN_ZOOM, radiusOf, wrapLabel } from "./presentation/labels";
 import { FLEX, OVERFLOW_HIDDEN } from "@/lib/layout/layout";
-
-export {
-  GLYPH_WIDTH_FULL,
-  GLYPH_WIDTH_LATIN,
-  LABEL_LINE_HEIGHT,
-  LABEL_MIN_ZOOM,
-  radiusOf,
-  wrapLabel,
-  type ForceGraphEdge,
-  type ForceGraphNode,
-  type HoverCard,
-};
 
 // meiva:note
 // A graph this size settles in manual, time-budgeted slices instead of one React
