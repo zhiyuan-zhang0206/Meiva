@@ -52,7 +52,6 @@ async def test_ops_route_wraps_dispatch_in_envelope(
         assert kind == "status_probe"
         return "completed", {"paused": False}
 
-    monkeypatch.setattr(daemon, "_dispatch", _fake_dispatch)
     status, body, ctype = await daemon.ops_route(
         json.dumps({"kind": "status_probe"}).encode(),
         active_ops={},
@@ -67,6 +66,7 @@ async def test_ops_route_wraps_dispatch_in_envelope(
         image=ops_image,
         local_machine=machine_identity,
         host=fake_host(),
+        dispatch_op=_fake_dispatch,
     )
     assert status == 200
     assert ctype == "application/json"

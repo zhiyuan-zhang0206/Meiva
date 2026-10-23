@@ -118,12 +118,10 @@ async def test_null_still_waits_for_owner_instead_of_becoming_a_result(
     machine_identity: MachineIdentity,
 ) -> None:
     _record(db_conn, None)
-    monkeypatch.setattr(daemon, "DEDUP_WAIT_ATTEMPTS", 1)
 
     async def sleep(_duration: float) -> None:
         return None
 
-    monkeypatch.setattr(daemon, "_sleep", sleep)
     status, result = await daemon.dispatch_idempotent_pass(
         "status_probe",
         {},
@@ -138,6 +136,8 @@ async def test_null_still_waits_for_owner_instead_of_becoming_a_result(
         image=ops_image,
         local_machine=machine_identity,
         host=fake_host(),
+        sleep=sleep,
+        dedup_wait_attempts=1,
     )
     assert status is OpStatus.FAILED
     assert "never completed" in str(result["error"])

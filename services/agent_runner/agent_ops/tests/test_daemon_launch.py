@@ -46,7 +46,7 @@ async def test_launch_dispatch(
         return SpawnedAgent(id=body.agent_id)
 
     monkeypatch.setattr(daemon.lifecycle, "launch_agent_op", _launch)
-    status, result = await daemon._dispatch(
+    status, result = await daemon.dispatch(
         "spawn-launch",
         {"launch_attempt_id": "00000000-0000-0000-0000-000000000001", "agent_id": 777},
         active_ops={},

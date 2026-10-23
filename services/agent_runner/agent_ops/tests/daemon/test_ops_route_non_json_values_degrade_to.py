@@ -80,7 +80,6 @@ async def test_ops_route_non_json_values_degrade_to_str(
         del local_machine
         return "completed", {"at": datetime(2026, 6, 11, 8, 30, 0, tzinfo=UTC)}
 
-    monkeypatch.setattr(daemon, "_dispatch", _fake_dispatch)
     status, body, ctype = await daemon.ops_route(
         json.dumps({"kind": "status_probe"}).encode(),
         active_ops={},
@@ -95,6 +94,7 @@ async def test_ops_route_non_json_values_degrade_to_str(
         image=ops_image,
         local_machine=machine_identity,
         host=fake_host(),
+        dispatch_op=_fake_dispatch,
     )
     assert status == 200
     assert ctype == "application/json"
@@ -137,7 +137,6 @@ async def test_ops_route_failed_status_is_still_http_200(
         del local_machine
         return "failed", {"error": "boom"}
 
-    monkeypatch.setattr(daemon, "_dispatch", _fake_dispatch)
     status, body, _ = await daemon.ops_route(
         json.dumps(
             {
@@ -160,6 +159,7 @@ async def test_ops_route_failed_status_is_still_http_200(
         image=ops_image,
         local_machine=machine_identity,
         host=fake_host(),
+        dispatch_op=_fake_dispatch,
     )
     assert status == 200
     assert json.loads(body) == {"status": "failed", "result": {"error": "boom"}}
@@ -248,7 +248,6 @@ async def test_ops_route_crash_becomes_failed_result(
         del local_machine
         raise RuntimeError("kaboom")
 
-    monkeypatch.setattr(daemon, "_dispatch", _boom)
     status, body, _ = await daemon.ops_route(
         json.dumps(
             {
@@ -271,6 +270,7 @@ async def test_ops_route_crash_becomes_failed_result(
         image=ops_image,
         local_machine=machine_identity,
         host=fake_host(),
+        dispatch_op=_boom,
     )
     assert status == 200
     parsed = json.loads(body)
@@ -334,7 +334,6 @@ async def test_ops_route_semaphore_caps_concurrency(
                 in_flight -= 1
         return "completed", {}
 
-    monkeypatch.setattr(daemon, "_dispatch", _fake_dispatch)
     bodies = [
         json.dumps(
             {
@@ -363,6 +362,7 @@ async def test_ops_route_semaphore_caps_concurrency(
                 image=ops_image,
                 local_machine=machine_identity,
                 host=fake_host(),
+                dispatch_op=_fake_dispatch,
             )
             for b in bodies
         ]
@@ -702,10 +702,8 @@ async def test_a_blocking_op_does_not_freeze_the_event_loop(
         release.wait(timeout=30)
         return "completed", {}
 
-    monkeypatch.setattr(daemon, "bind_dispatch_sync", _wedged)
-
     task = asyncio.ensure_future(
-        daemon._dispatch(
+        daemon.dispatch(
             "config_read",
             {},
             active_ops={},
@@ -718,6 +716,7 @@ async def test_a_blocking_op_does_not_freeze_the_event_loop(
             image=ops_image,
             local_machine=machine_identity,
             host=fake_host(),
+            dispatch_arm=_wedged,
         )
     )
     await asyncio.to_thread(started.wait, 10)

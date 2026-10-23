@@ -61,7 +61,6 @@ async def test_same_kind_requests_remain_counted_until_they_finish(
         return "completed", {}
 
     dispatch_sem = asyncio.Semaphore(3)
-    monkeypatch.setattr(daemon, "_dispatch", dispatch)
     tasks = [
         asyncio.create_task(
             daemon.ops_route(
@@ -78,6 +77,7 @@ async def test_same_kind_requests_remain_counted_until_they_finish(
                 image=ops_image,
                 local_machine=machine_identity,
                 host=fake_host(),
+                dispatch_op=dispatch,
             )
         )
         for _ in range(2)
@@ -130,7 +130,6 @@ async def test_cancelled_same_kind_await_does_not_hide_running_executor(
         return "completed", {}
 
     with ThreadPoolExecutor(max_workers=2) as executor:
-        monkeypatch.setattr(daemon, "bind_dispatch_sync", arm)
         tasks = [
             asyncio.create_task(
                 daemon.run_arm(
@@ -145,6 +144,7 @@ async def test_cancelled_same_kind_await_does_not_hide_running_executor(
                     image=ops_image,
                     local_machine=machine_identity,
                     host=fake_host(),
+                    dispatch_arm=arm,
                 )
             )
             for index in range(2)
@@ -243,7 +243,6 @@ async def test_active_ops_share_health_and_cleanup_within_one_daemon(
         return "completed", {}
 
     with ThreadPoolExecutor(max_workers=2) as executor:
-        monkeypatch.setattr(daemon, "bind_dispatch_sync", arm)
         tasks = [
             asyncio.create_task(
                 daemon.run_arm(
@@ -258,6 +257,7 @@ async def test_active_ops_share_health_and_cleanup_within_one_daemon(
                     image=ops_image,
                     local_machine=machine_identity,
                     host=fake_host(),
+                    dispatch_arm=arm,
                 )
             )
             for index, kind in enumerate(("config_read", "inventory_read"))
@@ -327,7 +327,6 @@ async def test_op_invocations_dispatch_on_their_own_executor(
         assert pool is dispatch_pool
         return "completed", {"thread": threading.current_thread().name}
 
-    monkeypatch.setattr(daemon, "bind_dispatch_sync", arm)
     with (
         ThreadPoolExecutor(max_workers=1, thread_name_prefix="first-owner") as first,
         ThreadPoolExecutor(max_workers=1, thread_name_prefix="second-owner") as second,
@@ -344,6 +343,7 @@ async def test_op_invocations_dispatch_on_their_own_executor(
             image=ops_image,
             local_machine=machine_identity,
             host=fake_host(),
+            dispatch_arm=arm,
         )
         boot.shutdown_op_pool(first)
         second_result = await daemon.run_arm(
@@ -358,6 +358,7 @@ async def test_op_invocations_dispatch_on_their_own_executor(
             image=ops_image,
             local_machine=machine_identity,
             host=fake_host(),
+            dispatch_arm=arm,
         )
     first_thread = first_result[1]["thread"]
     second_thread = second_result[1]["thread"]

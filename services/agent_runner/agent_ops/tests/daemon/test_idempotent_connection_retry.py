@@ -55,8 +55,6 @@ async def test_dispatch_idempotent_retries_operational_error_then_succeeds(
             raise psycopg.OperationalError("the connection is closed")
         return "completed", {"ok": True}
 
-    monkeypatch.setattr(daemon, "dispatch_idempotent_pass", _flaky_pass)
-    monkeypatch.setattr(daemon, "_sleep", noop_sleep)
     status, result = await daemon.dispatch_idempotent(
         "spawn-launch",
         {"launch_attempt_id": "00000000-0000-0000-0000-000000000001", "agent_id": 1},
@@ -71,6 +69,8 @@ async def test_dispatch_idempotent_retries_operational_error_then_succeeds(
         image=ops_image,
         local_machine=machine_identity,
         host=fake_host(),
+        sleep=noop_sleep,
+        run_pass=_flaky_pass,
     )
     assert status == "completed"
     assert result == {"ok": True}
@@ -110,8 +110,6 @@ async def test_dispatch_idempotent_gives_up_after_attempts(
         calls.append(1)
         raise psycopg.OperationalError("the connection is closed")
 
-    monkeypatch.setattr(daemon, "dispatch_idempotent_pass", _always_dead)
-    monkeypatch.setattr(daemon, "_sleep", noop_sleep)
     with pytest.raises(psycopg.OperationalError):
         await daemon.dispatch_idempotent(
             "spawn-launch",
@@ -127,6 +125,8 @@ async def test_dispatch_idempotent_gives_up_after_attempts(
             image=ops_image,
             local_machine=machine_identity,
             host=fake_host(),
+            sleep=noop_sleep,
+            run_pass=_always_dead,
         )
     assert len(calls) == daemon.DISPATCH_RETRY_ATTEMPTS
 
@@ -164,8 +164,6 @@ async def test_dispatch_idempotent_propagates_non_operational_error(
         calls.append(1)
         raise ValueError("not a connection problem")
 
-    monkeypatch.setattr(daemon, "dispatch_idempotent_pass", _boom)
-    monkeypatch.setattr(daemon, "_sleep", noop_sleep)
     with pytest.raises(ValueError):
         await daemon.dispatch_idempotent(
             "spawn-launch",
@@ -181,5 +179,7 @@ async def test_dispatch_idempotent_propagates_non_operational_error(
             image=ops_image,
             local_machine=machine_identity,
             host=fake_host(),
+            sleep=noop_sleep,
+            run_pass=_boom,
         )
     assert len(calls) == 1

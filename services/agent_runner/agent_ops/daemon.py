@@ -44,7 +44,7 @@ from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.db.config import db_config_from_boot
 from base.db.transaction import write_transaction
-from base.host.exit_codes import hard_exit as _hard_exit
+from base.host.exit_codes import hard_exit
 from base.host.system.hostport import Host
 from base.lm.catalog import ModelCatalog
 from base.native_process.code_version import CodeVersion
@@ -70,7 +70,6 @@ DEDUP_WAIT_ATTEMPTS = 30
 
 DISPATCH_RETRY_ATTEMPTS = 3
 _DISPATCH_RETRY_BACKOFF_S = 0.5
-_sleep = asyncio.sleep
 
 
 ActiveOps = dict[str, tuple[str, float]]
@@ -89,8 +88,10 @@ async def run_arm(
     image: LoadedCommit,
     local_machine: MachineIdentity,
     host: Host,
+    dispatch_arm: Callable[..., Any] | None = None,
 ) -> tuple[OpStatus, dict[str, object]]:
 
+    arm_fn = bind_dispatch_sync if dispatch_arm is None else dispatch_arm
     loop = asyncio.get_running_loop()
     active = (kind, time.monotonic())
     active_ops[kind] = active
@@ -98,7 +99,7 @@ async def run_arm(
         future = loop.run_in_executor(
             executor,
             functools.partial(
-                bind_dispatch_sync,
+                arm_fn,
                 kind,
                 payload,
                 pool=pool,
@@ -140,7 +141,7 @@ def bind_dispatch_sync(
     )
 
 
-async def _dispatch(
+async def dispatch(
     kind: str,
     payload: dict[str, Any],
     *,
@@ -154,6 +155,7 @@ async def _dispatch(
     image: LoadedCommit,
     local_machine: MachineIdentity,
     host: Host,
+    dispatch_arm: Callable[..., Any] | None = None,
 ) -> tuple[OpStatus, dict[str, object]]:
 
     if not is_op_kind(kind):
@@ -212,6 +214,7 @@ async def _dispatch(
                     image=image,
                     local_machine=local_machine,
                     host=host,
+                    dispatch_arm=dispatch_arm,
                 )
     except MeivaAgentError as exc:
         return OpStatus.FAILED, {
@@ -223,6 +226,9 @@ async def _dispatch(
         return OpStatus.FAILED, {"error": f"{type(exc).__name__}: {exc}"}
     except ShellNotFoundError as exc:
         return OpStatus.FAILED, {"error": f"{type(exc).__name__}: {exc}"}
+
+
+_dispatch = dispatch
 
 
 async def dispatch_idempotent(
@@ -240,12 +246,33 @@ async def dispatch_idempotent(
     image: LoadedCommit,
     local_machine: MachineIdentity,
     host: Host,
+    dispatch_op: Callable[..., Any] = dispatch,
+    sleep: Callable[[float], Any] = asyncio.sleep,
+    dedup_wait_attempts: int = DEDUP_WAIT_ATTEMPTS,
+    dedup_wait_step_s: float = DEDUP_WAIT_STEP_S,
+    run_pass: Callable[..., Any] | None = None,
 ) -> tuple[OpStatus, dict[str, object]]:
 
     if not is_op_kind(kind):
         return OpStatus.FAILED, {"error": f"unknown kind: {kind!r}"}
     for attempt in range(DISPATCH_RETRY_ATTEMPTS):
         try:
+            if run_pass is not None:
+                return await run_pass(
+                    kind,
+                    payload,
+                    key,
+                    pool,
+                    active_ops=active_ops,
+                    workers=workers,
+                    executor=executor,
+                    catalog=catalog,
+                    authority=authority,
+                    database=database,
+                    image=image,
+                    local_machine=local_machine,
+                    host=host,
+                )
             return await dispatch_idempotent_pass(
                 kind,
                 payload,
@@ -260,6 +287,10 @@ async def dispatch_idempotent(
                 image=image,
                 local_machine=local_machine,
                 host=host,
+                dispatch_op=dispatch_op,
+                sleep=sleep,
+                dedup_wait_attempts=dedup_wait_attempts,
+                dedup_wait_step_s=dedup_wait_step_s,
             )
         except psycopg.OperationalError:
             if attempt + 1 >= DISPATCH_RETRY_ATTEMPTS:
@@ -269,7 +300,7 @@ async def dispatch_idempotent(
                 attempt + 1,
                 DISPATCH_RETRY_ATTEMPTS,
             )
-            await _sleep(_DISPATCH_RETRY_BACKOFF_S)
+            await sleep(_DISPATCH_RETRY_BACKOFF_S)
     raise AssertionError("unreachable")
 
 
@@ -288,6 +319,10 @@ async def dispatch_idempotent_pass(
     image: LoadedCommit,
     local_machine: MachineIdentity,
     host: Host,
+    dispatch_op: Callable[..., Any] = dispatch,
+    sleep: Callable[[float], Any] = asyncio.sleep,
+    dedup_wait_attempts: int = DEDUP_WAIT_ATTEMPTS,
+    dedup_wait_step_s: float = DEDUP_WAIT_STEP_S,
 ) -> tuple[OpStatus, dict[str, object]]:
 
     request_hash = hashlib.sha256(
@@ -302,7 +337,7 @@ async def dispatch_idempotent_pass(
         )
         owned = cur.fetchone() is not None
     if owned:
-        status, result = await _dispatch(
+        status, result = await dispatch_op(
             kind,
             payload,
             active_ops=active_ops,
@@ -325,7 +360,7 @@ async def dispatch_idempotent_pass(
             )
         return status, result
 
-    for _ in range(DEDUP_WAIT_ATTEMPTS):
+    for _ in range(dedup_wait_attempts):
         with pool.connection() as conn, conn.cursor() as cur:
             cur.execute(
                 "SELECT method, path, request_hash, op_status, response_body FROM api_idempotency "
@@ -342,7 +377,7 @@ async def dispatch_idempotent_pass(
             if row[3] is not None:
                 result: dict[str, object] = row[4] or {}
                 return OpStatus(row[3]), result
-        await _sleep(DEDUP_WAIT_STEP_S)
+        await sleep(dedup_wait_step_s)
     return OpStatus.FAILED, {
         "error": f"idempotency key {key!r} is owned by another dispatch that never "
         "completed; outcome uncertain, inspect the stored operation before recovery"
@@ -364,6 +399,7 @@ async def ops_route(
     image: LoadedCommit,
     local_machine: MachineIdentity,
     host: Host,
+    dispatch_op: Callable[..., Any] = dispatch,
 ) -> tuple[int, bytes, str]:
 
     try:
@@ -409,9 +445,10 @@ async def ops_route(
                         image=image,
                         local_machine=local_machine,
                         host=host,
+                        dispatch_op=dispatch_op,
                     )
                 else:
-                    status, result = await _dispatch(
+                    status, result = await dispatch_op(
                         envelope.kind,
                         envelope.payload,
                         active_ops=active_ops,
@@ -562,7 +599,7 @@ async def serve_ops_daemon(
         boot.shutdown_op_pool(executor)
 
 
-def main(*, argv: list[str] | None = None) -> None:
+def main(*, argv: list[str] | None = None, exit_process: Callable[[int], None] = hard_exit) -> None:
     argparse.ArgumentParser(description=__doc__).parse_args(argv)
     image = LoadedCommit.capture()
     config = ConfigBoot()
@@ -627,7 +664,7 @@ def main(*, argv: list[str] | None = None) -> None:
                 failure.add_note(f"ops event pipeline shutdown failed: {exc!r}")
             _log.exception("[ops] event pipeline shutdown failed")
             code = 1
-    _hard_exit(code)
+    exit_process(code)
 
 
 if __name__ == "__main__":

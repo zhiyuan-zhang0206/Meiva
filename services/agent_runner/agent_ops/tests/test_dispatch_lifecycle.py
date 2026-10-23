@@ -54,7 +54,7 @@ async def test_dispatch_lifecycle_calls_lifecycle_op(
         return TerminateAgentResponse(status=TerminateResult.ENQUEUED)
 
     monkeypatch.setattr(daemon.lifecycle, "lifecycle_op", _fake_lifecycle)
-    status, result = await daemon._dispatch(
+    status, result = await daemon.dispatch(
         "lifecycle",
         {
             "path": "/api/agents/42/resurrect-if-pending-work",
@@ -98,7 +98,7 @@ async def test_dispatch_lifecycle_missing_path_fails(
         raise AssertionError("lifecycle_op should not be invoked on missing path")
 
     monkeypatch.setattr(daemon.lifecycle, "lifecycle_op", _should_not_be_called)
-    status, result = await daemon._dispatch(
+    status, result = await daemon.dispatch(
         "lifecycle",
         {},
         active_ops={},
@@ -143,7 +143,7 @@ async def test_dispatch_unparseable_lifecycle_path(
         raise ValueError(f"lifecycle path not recognized: {path!r}")
 
     monkeypatch.setattr(daemon.lifecycle, "lifecycle_op", _raises)
-    status, result = await daemon._dispatch(
+    status, result = await daemon.dispatch(
         "lifecycle",
         {"path": "/garbage", "body": {}},
         active_ops={},
@@ -190,7 +190,7 @@ async def test_dispatch_wire_error_carries_reason(
         raise AgentNotFound("agent 999 does not exist")
 
     monkeypatch.setattr(daemon.lifecycle, "lifecycle_op", _raises)
-    status, result = await daemon._dispatch(
+    status, result = await daemon.dispatch(
         "lifecycle",
         {"path": "/api/agents/999/terminate", "body": {}},
         active_ops={},

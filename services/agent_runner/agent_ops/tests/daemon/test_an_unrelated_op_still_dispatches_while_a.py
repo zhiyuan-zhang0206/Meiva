@@ -65,7 +65,7 @@ async def test_an_unrelated_op_still_dispatches_while_a_read_is_stuck(
     monkeypatch.setattr(cluster_ops, "cluster_status_op", _status)
 
     stuck = asyncio.ensure_future(
-        daemon._dispatch(
+        daemon.dispatch(
             "inventory_read",
             {},
             active_ops={},
@@ -82,7 +82,7 @@ async def test_an_unrelated_op_still_dispatches_while_a_read_is_stuck(
     )
     await asyncio.to_thread(started.wait, 10)
 
-    status, result = await daemon._dispatch(
+    status, result = await daemon.dispatch(
         "status_probe",
         {},
         active_ops={},
@@ -135,7 +135,7 @@ async def test_two_config_writes_cannot_interleave(
     monkeypatch.setattr(inventory, "inventory_write_op", _slow_write)
 
     await asyncio.gather(
-        daemon._dispatch(
+        daemon.dispatch(
             "config_write",
             {"overrides": {}},
             active_ops={},
@@ -149,7 +149,7 @@ async def test_two_config_writes_cannot_interleave(
             local_machine=machine_identity,
             host=fake_host(),
         ),
-        daemon._dispatch(
+        daemon.dispatch(
             "config_write",
             {"overrides": {}},
             active_ops={},
@@ -163,7 +163,7 @@ async def test_two_config_writes_cannot_interleave(
             local_machine=machine_identity,
             host=fake_host(),
         ),
-        daemon._dispatch(
+        daemon.dispatch(
             "inventory_write",
             {"plugins": {}, "mcp_servers": {}},
             active_ops={},
@@ -207,7 +207,7 @@ async def test_config_write_op_receives_actor_and_trace(
     dispatch_pool: ConnectionPool = stub_pool()
     host = fake_host()
     monkeypatch.setattr(host_config, "config_write_op", _capture)
-    status, _ = await daemon._dispatch(
+    status, _ = await daemon.dispatch(
         "config_write",
         {"overrides": {}, "actor": "user_session:administrator", "trace_id": "trace-9"},
         active_ops={},
@@ -254,7 +254,7 @@ async def test_config_audit_read_op_receives_last(
 
     dispatch_pool: ConnectionPool = stub_pool()
     monkeypatch.setattr(host_config, "config_audit_read_op", _capture)
-    status, _ = await daemon._dispatch(
+    status, _ = await daemon.dispatch(
         "config_audit_read",
         {"last": 7},
         active_ops={},
@@ -283,7 +283,7 @@ async def test_config_audit_read_rejects_out_of_range_last(
     machine_identity: MachineIdentity,
 ) -> None:
     dispatch_pool: ConnectionPool = stub_pool()
-    status, result = await daemon._dispatch(
+    status, result = await daemon.dispatch(
         "config_audit_read",
         {"last": 201},
         active_ops={},
@@ -327,7 +327,7 @@ async def test_op_arms_do_not_run_on_the_default_executor(
 
     monkeypatch.setattr(host_config, "config_read_op", _note_thread)
 
-    await daemon._dispatch(
+    await daemon.dispatch(
         "config_read",
         {},
         active_ops={},
