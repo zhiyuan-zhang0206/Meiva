@@ -67,7 +67,6 @@ def test_termination_inbounds_are_atomic_and_fall_back_to_pending_message(
     db_conn: psycopg.Connection,
     db_pool: ConnectionPool,
     running_agent_id: int,
-    monkeypatch: pytest.MonkeyPatch,
     database: Database,
     event_bus: EventBus,
 ) -> None:
@@ -95,7 +94,6 @@ def test_termination_inbounds_are_atomic_and_fall_back_to_pending_message(
             raise RuntimeError("injected pair failure")
         return result
 
-    monkeypatch.setattr(termination, "insert_termination_pair", _fail_after_pair)
     terminate_id, _cutoff = termination.enqueue_termination_inbounds(
         database,
         event_bus,
@@ -103,6 +101,7 @@ def test_termination_inbounds_are_atomic_and_fall_back_to_pending_message(
         db_pool,
         source="user",
         message="final note",
+        insert_pair_fn=_fail_after_pair,
     )
 
     rows = db_conn.execute(
@@ -120,7 +119,6 @@ def test_termination_survives_failed_message_retry(
     db_conn: psycopg.Connection,
     db_pool: ConnectionPool,
     running_agent_id: int,
-    monkeypatch: pytest.MonkeyPatch,
     database: Database,
     event_bus: EventBus,
 ) -> None:
@@ -147,8 +145,6 @@ def test_termination_survives_failed_message_retry(
     def _fail_retry(*_args: object, **_kwargs: object) -> int:
         raise RuntimeError("injected retry failure")
 
-    monkeypatch.setattr(termination, "insert_termination_pair", _fail_pair)
-    monkeypatch.setattr(termination, "insert_pending_termination_message", _fail_retry)
     terminate_id, _cutoff = termination.enqueue_termination_inbounds(
         database,
         event_bus,
@@ -156,6 +152,8 @@ def test_termination_survives_failed_message_retry(
         db_pool,
         source="user",
         message="final note",
+        insert_pair_fn=_fail_pair,
+        insert_retry_fn=_fail_retry,
     )
 
     assert db_conn.execute(
@@ -168,7 +166,6 @@ def test_force_termination_retries_command_before_message(
     db_conn: psycopg.Connection,
     db_pool: ConnectionPool,
     running_agent_id: int,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     real_insert = termination.insert_termination_pair
     failed_pair = False
@@ -194,12 +191,12 @@ def test_force_termination_retries_command_before_message(
             raise RuntimeError("injected force pair failure")
         return result
 
-    monkeypatch.setattr(termination, "insert_termination_pair", _fail_after_pair)
     old_status, _, terminate_id, _cutoff = termination.force_terminate_transaction(
         running_agent_id,
         db_pool,
         source="user",
         message="final force note",
+        insert_pair_fn=_fail_after_pair,
     )
 
     rows = db_conn.execute(
@@ -245,21 +242,20 @@ async def _until_blocked_or_done(task: asyncio.Task[object], holder_pid: int) ->
 
 class TestKillAllShellSessions:
     @pytest.fixture
-    def kills(self, monkeypatch: pytest.MonkeyPatch) -> list[int]:
-        from ops import lifecycle
+    def kills(self) -> list[int]:
+        return []
 
-        calls: list[int] = []
-
+    @staticmethod
+    def _make_kill_fn(calls: list[int]):
         def _kill(agent_id: int, *, before_session_index: int) -> list[int]:
             calls.append(agent_id)
             return [0, 3]
 
-        async def _noop_cancel(_aid: int) -> None:
-            return None
+        return _kill
 
-        monkeypatch.setattr(lifecycle, "kill_agent_shells", _kill)
-        monkeypatch.setattr(lifecycle, "cancel_hosted_turn_best_effort", _noop_cancel)
-        return calls
+    @staticmethod
+    async def _noop_cancel(_aid: int) -> None:
+        return None
 
     @pytest.mark.asyncio
     async def test_graceful_live_agent_defers_the_kill_to_exit(
@@ -268,7 +264,6 @@ class TestKillAllShellSessions:
         db_pool: ConnectionPool,
         running_agent_id: int,
         kills: list[int],
-        monkeypatch: pytest.MonkeyPatch,
         database: Database,
         event_bus: EventBus,
         emitted_events: EmittedEvents,
@@ -282,6 +277,8 @@ class TestKillAllShellSessions:
             running_agent_id,
             TerminateAgentRequest(kill_all_shell_sessions=True),
             db_pool,
+            kill_shells_fn=self._make_kill_fn(kills),
+            cancel_turn_fn=self._noop_cancel,
         )
 
         assert resp.status == "enqueued"
@@ -308,10 +305,22 @@ class TestKillAllShellSessions:
         from ops import lifecycle
 
         graceful = await lifecycle.terminate_agent_op(
-            database, event_bus, running_agent_id, TerminateAgentRequest(), db_pool
+            database,
+            event_bus,
+            running_agent_id,
+            TerminateAgentRequest(),
+            db_pool,
+            kill_shells_fn=self._make_kill_fn(kills),
+            cancel_turn_fn=self._noop_cancel,
         )
         forced = await lifecycle.terminate_agent_op(
-            database, event_bus, running_agent_id, TerminateAgentRequest(force=True), db_pool
+            database,
+            event_bus,
+            running_agent_id,
+            TerminateAgentRequest(force=True),
+            db_pool,
+            kill_shells_fn=self._make_kill_fn(kills),
+            cancel_turn_fn=self._noop_cancel,
         )
 
         assert (graceful.status, graceful.shell_sessions) == ("enqueued", None)
@@ -343,6 +352,8 @@ class TestKillAllShellSessions:
             running_agent_id,
             TerminateAgentRequest(force=True, kill_all_shell_sessions=True),
             db_pool,
+            kill_shells_fn=self._make_kill_fn(kills),
+            cancel_turn_fn=self._noop_cancel,
         )
 
         assert resp.status == "enqueued"
@@ -370,9 +381,17 @@ class TestKillAllShellSessions:
             running_agent_id,
             TerminateAgentRequest(kill_all_shell_sessions=True),
             db_pool,
+            kill_shells_fn=self._make_kill_fn(kills),
+            cancel_turn_fn=self._noop_cancel,
         )
         resp = await lifecycle.terminate_agent_op(
-            database, event_bus, running_agent_id, TerminateAgentRequest(force=True), db_pool
+            database,
+            event_bus,
+            running_agent_id,
+            TerminateAgentRequest(force=True),
+            db_pool,
+            kill_shells_fn=self._make_kill_fn(kills),
+            cancel_turn_fn=self._noop_cancel,
         )
 
         assert resp.shell_sessions is None
@@ -404,6 +423,8 @@ class TestKillAllShellSessions:
             agent_id,
             TerminateAgentRequest(kill_all_shell_sessions=True),
             db_pool,
+            kill_shells_fn=self._make_kill_fn(kills),
+            cancel_turn_fn=self._noop_cancel,
         )
 
         assert resp.status == "already_terminated"
@@ -420,7 +441,6 @@ class TestKillAllShellSessions:
         db_pool: ConnectionPool,
         running_agent_id: int,
         kills: list[int],
-        monkeypatch: pytest.MonkeyPatch,
         database: Database,
         event_bus: EventBus,
     ) -> None:
@@ -430,7 +450,6 @@ class TestKillAllShellSessions:
         def _stale_read(_db: object, _aid: int) -> AgentStatus:
             return AgentStatus.RUNNING
 
-        monkeypatch.setattr(lifecycle, "get_agent_status", _stale_read)
         db_conn.execute(
             "UPDATE agents_meta SET status='terminated', termination_source='exit' WHERE id=%s",
             (running_agent_id,),
@@ -443,6 +462,9 @@ class TestKillAllShellSessions:
             running_agent_id,
             TerminateAgentRequest(kill_all_shell_sessions=True),
             db_pool,
+            status_fn=_stale_read,
+            kill_shells_fn=self._make_kill_fn(kills),
+            cancel_turn_fn=self._noop_cancel,
         )
 
         assert resp.status == "already_terminated"
@@ -474,6 +496,8 @@ class TestKillAllShellSessions:
                     running_agent_id,
                     TerminateAgentRequest(kill_all_shell_sessions=True),
                     db_pool,
+                    kill_shells_fn=self._make_kill_fn(kills),
+                    cancel_turn_fn=self._noop_cancel,
                 )
             )
             await _until_blocked_or_done(op, apply_conn.info.backend_pid)
@@ -497,7 +521,6 @@ class TestKillAllShellSessions:
         db_conn: psycopg.Connection,
         db_pool: ConnectionPool,
         running_agent_id: int,
-        monkeypatch: pytest.MonkeyPatch,
         database: Database,
         event_bus: EventBus,
     ) -> None:
@@ -506,12 +529,6 @@ class TestKillAllShellSessions:
         def _fail(_aid: int, *, before_session_index: int) -> list[int]:
             raise RuntimeError("failed to kill shell session(s) [2]")
 
-        async def _noop_cancel(_aid: int) -> None:
-            return None
-
-        monkeypatch.setattr(lifecycle, "kill_agent_shells", _fail)
-        monkeypatch.setattr(lifecycle, "cancel_hosted_turn_best_effort", _noop_cancel)
-
         with pytest.raises(RuntimeError, match="failed to kill"):
             await lifecycle.terminate_agent_op(
                 database,
@@ -519,25 +536,12 @@ class TestKillAllShellSessions:
                 running_agent_id,
                 TerminateAgentRequest(force=True, kill_all_shell_sessions=True),
                 db_pool,
+                kill_shells_fn=_fail,
+                cancel_turn_fn=self._noop_cancel,
             )
         assert db_conn.execute(
             "SELECT status FROM agents_meta WHERE id=%s", (running_agent_id,)
         ).fetchone() == ("terminated",)
-
-
-_NOTICE_ON_EXIT_JOB = """\
-import pathlib, signal, sys, time
-marker = pathlib.Path(sys.argv[1])
-def notify(*_):
-    marker.write_text("notice")
-    sys.exit(0)
-signal.signal(signal.SIGTERM, notify)
-signal.signal(signal.SIGHUP, notify)
-try:
-    time.sleep(300)
-finally:
-    marker.write_text("notice")
-"""
 
 
 @pytest.mark.usefixtures("pty_service")
@@ -546,8 +550,7 @@ async def test_kill_terminates_only_the_owners_real_shell_sessions(
     db_conn: psycopg.Connection,
     db_pool: ConnectionPool,
     running_agent_id: int,
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
+    unit_home: Path,
     pty_reaper: PtyReaper,
     database: Database,
     event_bus: EventBus,
@@ -560,12 +563,7 @@ async def test_kill_terminates_only_the_owners_real_shell_sessions(
     from ops import lifecycle
     from ops.rpc_schemas.terminate import ShellSessionsKill
 
-    monkeypatch.setenv("MEIVA_HOME", str(tmp_path))
-    monkeypatch.setenv("HOME", str(tmp_path))
-
-    job = tmp_path / "notice_on_exit.py"
-    job.write_text(_NOTICE_ON_EXIT_JOB, encoding="utf-8")
-    marker = tmp_path / "notice.marker"
+    marker = unit_home / "notice.marker"
     other_agent_id = create_agent(db_conn)
     shell = session_name(f"agent-{running_agent_id}-shell-0")
     watcher = session_name(f"agent-{running_agent_id}-shell-1-watcher")
@@ -582,14 +580,20 @@ async def test_kill_terminates_only_the_owners_real_shell_sessions(
         ).fetchone()
         db_conn.commit()
         assert row == (3,)
-        assert backend.new_session(replacement, "", tmp_path, env={"MEIVA_HOME": str(tmp_path)})
+        assert backend.new_session(replacement, "", unit_home, env={"MEIVA_HOME": str(unit_home)})
         shells[replacement] = pty_reaper.track_session(replacement).pid
 
-    monkeypatch.setattr(lifecycle, "cancel_hosted_turn_best_effort", _allocate_after_acceptance)
-    watcher_cmd = shlex.join([sys.executable, "-u", str(job), str(marker)])
+    watcher_cmd = shlex.join(
+        [
+            sys.executable,
+            "-u",
+            str(Path(__file__).with_name("_notice_on_exit_child.py")),
+            str(marker),
+        ]
+    )
     shells: dict[str, int] = {}
     for name, cmd in ((shell, ""), (watcher, watcher_cmd), (page, "sleep 300"), (foreign, "")):
-        assert backend.new_session(name, cmd, tmp_path, env={"MEIVA_HOME": str(tmp_path)})
+        assert backend.new_session(name, cmd, unit_home, env={"MEIVA_HOME": str(unit_home)})
         shells[name] = pty_reaper.track_session(name).pid
     job_pid = _wait_child(shells[watcher])
     pty_reaper.track(psutil.Process(job_pid))
@@ -602,6 +606,7 @@ async def test_kill_terminates_only_the_owners_real_shell_sessions(
         running_agent_id,
         TerminateAgentRequest(force=True, kill_all_shell_sessions=True),
         db_pool,
+        cancel_turn_fn=_allocate_after_acceptance,
     )
 
     assert resp.shell_sessions == ShellSessionsKill(when=ShellSessionKillTiming.NOW, killed=[0, 1])
