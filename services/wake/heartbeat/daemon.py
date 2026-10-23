@@ -24,8 +24,8 @@ import math
 import os
 import signal
 import sys
-import time
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 
 import psycopg
@@ -33,14 +33,14 @@ from psycopg_pool import ConnectionPool
 
 from base import telemetry
 from base.agents.impersonation.wake import publish_inbound_wake
+from base.clock import Clock
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot, settings
 from base.daemon.endpoints import ServiceEndpoint, ServiceEndpoints
 from base.daemon.health import start_health_server, stop_health_server
-from base.daemon.loop_health import LivenessGroup, LoopProgress
-from base.daemon.round_loop import RoundFailureBudget
+from base.daemon.loop_health import LivenessGroup
 from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
@@ -55,7 +55,8 @@ from base.telemetry.pipeline_build import build_pipeline
 from base.telemetry.process_logging import init_gateway_process
 from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
 from services.wake.heartbeat import JITTER_SPAN_S, STALE_PENDING_S, completion_digest
-from services.wake.heartbeat.liveness import PASS_INTERVAL_S, run_liveness_pass
+from services.wake.heartbeat.liveness import run_liveness_pass
+from services.wake.heartbeat.loops import dispatch_loop, liveness_loop
 
 _log = logging.getLogger("services.wake.heartbeat.daemon")
 
@@ -75,7 +76,6 @@ def _pidfile(config: ConfigBoot, *, runtime: Path) -> Path:
 # genuinely wedged loop (a beat step that never returns) still trips /healthz 503
 # -> watchdog respawn.
 _LIVENESS_TIMEOUT_S = 60.0
-_LIVENESS_BEAT_STEP_S = 30.0
 # One digest round is a bounded read plus one delivery per completed agent-hour; the
 # loop also beats during its 60 s waits.
 _DIGEST_LIVENESS_TIMEOUT_S = 300.0
@@ -152,6 +152,7 @@ def select_idle_agents_needing_heartbeat(
     pool: ConnectionPool,
     idle_threshold_s: float,
     *,
+    clock: Clock,
     heartbeat_interval_s: float | None = None,
     jitter_span_s: float = 0.0,
     limit: int | None = None,
@@ -250,7 +251,7 @@ def select_idle_agents_needing_heartbeat(
     # filter is a fast no-op. The limit is applied AFTER the backoff filter so
     # backed-off agents never consume the per-step wake-rate slots.
     if backoff_until:
-        now = time.time()
+        now = clock.now().timestamp()
         rows = [r for r in rows if now >= backoff_until.get(r[0], 0.0)]
     if limit is not None:
         rows = rows[:limit]
@@ -498,6 +499,8 @@ def backoff_deadlines(
     failure_streak: dict[int, int],
     idle_threshold_s: float,
     deadline_state: dict[int, tuple[int, float]] | None = None,
+    *,
+    clock: Clock,
 ) -> dict[int, float]:
     """Keep each absolute deadline until its agent's failure streak changes.
 
@@ -509,7 +512,7 @@ def backoff_deadlines(
     deadline_state = {} if deadline_state is None else deadline_state
     for agent_id in deadline_state.keys() - failure_streak.keys():
         del deadline_state[agent_id]
-    now = time.time()
+    now = clock.now().timestamp()
     for agent_id, streak in failure_streak.items():
         previous = deadline_state.get(agent_id)
         if previous is None or previous[0] != streak:
@@ -541,123 +544,95 @@ def _is_running(config: ConfigBoot, *, runtime: Path) -> bool:
     return pidfile_holds_daemon(_pidfile(config, runtime=runtime), "services.wake.heartbeat.daemon")
 
 
-async def sleep_with_liveness(liveness: LoopProgress, total_s: float) -> None:
-    """Sleep `total_s`, beating liveness every `_LIVENESS_BEAT_STEP_S` so a long
-    inter-poll wait keeps /healthz fresh instead of reading as a wedged loop."""
-    remaining = total_s
-    while remaining > 0:
-        liveness.beat()
-        step = min(_LIVENESS_BEAT_STEP_S, remaining)
-        await asyncio.sleep(step)
-        remaining -= step
+@dataclass(frozen=True)
+class DispatchConfig:
+    idle_threshold_s: float
+    heartbeat_interval_s: float
 
 
-async def dispatch_loop(
-    pool: ConnectionPool,
-    db: Database,
-    bus: EventBus,
-    liveness: LoopProgress,
-    *,
-    sweep_resets: Callable[[ConnectionPool], None] = sweep_backoff_resets,
-) -> None:
-    """Main loop: on bounded dispatch steps, send a check-in to due idle agents
-    that have not paused.
+# meiva:link services/wake/heartbeat/docs/dispatch-round.meiva.okf.md
+class HeartbeatDispatch:
+    def __init__(
+        self,
+        pool: ConnectionPool,
+        db: Database,
+        bus: EventBus,
+        *,
+        config: DispatchConfig,
+        clock: Clock,
+    ) -> None:
+        self._pool = pool
+        self._db = db
+        self._bus = bus
+        self._config = config
+        self._clock = clock
+        self._pending_checkin: dict[int, float] = {}
+        self._failure_streak: dict[int, int] = {}
+        self._deadline_state: dict[int, tuple[int, float]] = {}
+        self._noop_streak: dict[int, int] = {}
+        _log.info(
+            "[heartbeat] daemon started, pid=%s, step=%.0fs, idle_threshold=%.0fs, "
+            "jitter_span=%.0fs, max_checkins_per_step=%d (wake-rate ceiling ~%.2f/s)",
+            os.getpid(),
+            self.interval_s,
+            config.idle_threshold_s,
+            JITTER_SPAN_S,
+            _MAX_CHECKINS_PER_STEP,
+            _MAX_CHECKINS_PER_STEP / self.interval_s,
+        )
 
-    Idle agents that ignore the check-in keep getting one each cycle — it is the
-    safety net; an agent that is truly waiting opts out with
-    `meiva.self.pause_heartbeat()`, and one that is truly done terminates.
+    @property
+    def interval_s(self) -> float:
+        return min(self._config.heartbeat_interval_s, _DISPATCH_STEP_S)
 
-    Dispatch runs on a fine `step` cadence (min of the configured
-    `heartbeat_interval_seconds` and `_DISPATCH_STEP_S`) so due agents drain in
-    small time-slices; each step checks in on at most `_MAX_CHECKINS_PER_STEP` of
-    them, and the due-time carries a per-agent jitter (`JITTER_SPAN_S`).
-    Together these keep the fleet-wide wake rate bounded and de-synchronized —
-    see the module-level "Wakeup-storm flattening" note.
-    """
-    idle_threshold = settings.daemon.heartbeat_idle_threshold_seconds
-    heartbeat_interval = settings.daemon.heartbeat_interval_seconds
-    step = min(settings.daemon.heartbeat_interval_seconds, _DISPATCH_STEP_S)
-    _log.info(
-        "[heartbeat] daemon started, pid=%s, step=%.0fs, idle_threshold=%.0fs, "
-        "jitter_span=%.0fs, max_checkins_per_step=%d (wake-rate ceiling ~%.2f/s)",
-        os.getpid(),
-        step,
-        idle_threshold,
-        JITTER_SPAN_S,
-        _MAX_CHECKINS_PER_STEP,
-        _MAX_CHECKINS_PER_STEP / step,
-    )
-    # Consecutive-failure backoff state (Task #1928): per-agent failure streaks
-    # and the idle_minutes observed at each sent check-in. In-process only — a
-    # daemon restart re-probes everyone at the normal cadence.
-    pending_checkin: dict[int, float] = {}
-    failure_streak: dict[int, int] = {}
-    deadline_state: dict[int, tuple[int, float]] = {}
-    # B7 no-op-nudge counter: in-process only; the raised level itself persists
-    # in agents_meta.heartbeat_backoff_level.
-    noop_streak: dict[int, int] = {}
-    failures = RoundFailureBudget("heartbeat poll")
-    while True:
-        try:
-            await sleep_with_liveness(liveness, step)
-            sweep_resets(pool)
-            reconcile_checkin_outcomes(
-                pool,
-                pending_checkin=pending_checkin,
-                failure_streak=failure_streak,
-                idle_threshold_s=idle_threshold,
-                noop_streak=noop_streak,
-                heartbeat_interval_s=heartbeat_interval,
-            )
-            rows = select_idle_agents_needing_heartbeat(
-                pool,
-                idle_threshold,
-                heartbeat_interval_s=heartbeat_interval,
-                jitter_span_s=JITTER_SPAN_S,
-                limit=_MAX_CHECKINS_PER_STEP,
-                backoff_until=backoff_deadlines(failure_streak, idle_threshold, deadline_state),
-            )
-            for agent_id, idle_minutes in rows:
-                try:
-                    send_heartbeat_checkin(pool, db, bus, agent_id, idle_minutes)
-                    pending_checkin[agent_id] = idle_minutes
-                    _log.info(
-                        "[heartbeat] checked in on idle agent %s (idle %.0f min)",
-                        agent_id,
-                        idle_minutes,
-                    )
-                except Exception as exc:
-                    _log.error("[heartbeat] check-in for agent %s failed: %r", agent_id, exc)
-            failures.succeeded()
-        except asyncio.CancelledError:
-            raise
-        except psycopg.ProgrammingError:
-            _log.critical(
-                "[heartbeat] schema / syntax error — code<->DB drift; retry will not self-heal, daemon exiting, restart after fix",
-                exc_info=True,
-            )
-            raise
-        except Exception as exc:
-            _log.exception("[heartbeat] poll iteration failed")
-            failures.failed(exc)
+    def send_checkin(self, agent_id: int, idle_minutes: float) -> None:
+        send_heartbeat_checkin(self._pool, self._db, self._bus, agent_id, idle_minutes)
+
+    def run_round(self) -> None:
+        sweep_backoff_resets(self._pool)
+        reconcile_checkin_outcomes(
+            self._pool,
+            pending_checkin=self._pending_checkin,
+            failure_streak=self._failure_streak,
+            idle_threshold_s=self._config.idle_threshold_s,
+            noop_streak=self._noop_streak,
+            heartbeat_interval_s=self._config.heartbeat_interval_s,
+        )
+        rows = select_idle_agents_needing_heartbeat(
+            self._pool,
+            self._config.idle_threshold_s,
+            clock=self._clock,
+            heartbeat_interval_s=self._config.heartbeat_interval_s,
+            jitter_span_s=JITTER_SPAN_S,
+            limit=_MAX_CHECKINS_PER_STEP,
+            backoff_until=backoff_deadlines(
+                self._failure_streak,
+                self._config.idle_threshold_s,
+                self._deadline_state,
+                clock=self._clock,
+            ),
+        )
+        for agent_id, idle_minutes in rows:
+            try:
+                self.send_checkin(agent_id, idle_minutes)
+                self._pending_checkin[agent_id] = idle_minutes
+                _log.info(
+                    "[heartbeat] checked in on idle agent %s (idle %.0f min)",
+                    agent_id,
+                    idle_minutes,
+                )
+            except Exception as exc:
+                _log.error("[heartbeat] check-in for agent %s failed: %r", agent_id, exc)
 
 
-async def liveness_loop(
-    db: Database, pool: ConnectionPool, bus: EventBus, liveness: LoopProgress
-) -> None:
-    """Run agent-liveness checks, the first at start so the roster read model is
-    populated at once; a failed pass is retried on the next interval."""
-    failures = RoundFailureBudget("heartbeat liveness")
-    while True:
-        try:
-            await run_liveness_pass(db, pool, bus)
-            failures.succeeded()
-        except asyncio.CancelledError:
-            raise
-        except Exception as exc:
-            _log.exception("[heartbeat] liveness loop iteration failed")
-            failures.failed(exc)
-        await sleep_with_liveness(liveness, PASS_INTERVAL_S)
+class AgentLivenessRound:
+    def __init__(self, db: Database, pool: ConnectionPool, bus: EventBus) -> None:
+        self._db = db
+        self._pool = pool
+        self._bus = bus
+
+    async def run_round(self) -> None:
+        await run_liveness_pass(self._db, self._pool, self._bus)
 
 
 async def run(
@@ -667,6 +642,7 @@ async def run(
     database: Callable[[], Database],
     image: LoadedCommit,
     machine: MachineIdentity,
+    clock: Clock,
 ) -> None:
     """Start the daemon: healthz server -> write pidfile -> connect DB -> enter main loop."""
     if _is_running(process_config, runtime=runtime):
@@ -701,8 +677,20 @@ async def run(
         # check-in; the completion digest is a third. A loop that raises cancels
         # its siblings and ends the process, and the supervisor restarts it.
         async with asyncio.TaskGroup() as loops:
-            loops.create_task(dispatch_loop(pool, db, bus, dispatch_progress))
-            loops.create_task(liveness_loop(db, pool, bus, liveness_progress))
+            dispatcher = HeartbeatDispatch(
+                pool,
+                db,
+                bus,
+                config=DispatchConfig(
+                    settings.daemon.heartbeat_idle_threshold_seconds,
+                    settings.daemon.heartbeat_interval_seconds,
+                ),
+                clock=clock,
+            )
+            loops.create_task(dispatch_loop(dispatcher, dispatch_progress, clock=clock))
+            loops.create_task(
+                liveness_loop(AgentLivenessRound(db, pool, bus), liveness_progress, clock=clock)
+            )
             loops.create_task(
                 completion_digest.completion_digest_loop(
                     pool, db, bus, digest_progress, machine=machine
@@ -765,6 +753,7 @@ def main() -> None:
                 database=database,
                 image=image,
                 machine=machine,
+                clock=Clock.from_settings(),
             )
         )
     except KeyboardInterrupt:

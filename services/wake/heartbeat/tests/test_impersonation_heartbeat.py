@@ -5,6 +5,7 @@ import pytest
 from psycopg_pool import ConnectionPool
 
 from base.agents import impersonation as leases
+from base.clock import Clock
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import settings
@@ -50,7 +51,11 @@ def active_lease(
 
 
 def selected(pool: ConnectionPool) -> dict[int, float]:
-    return dict(select_idle_agents_needing_heartbeat(pool, 300, heartbeat_interval_s=300))
+    return dict(
+        select_idle_agents_needing_heartbeat(
+            pool, 300, heartbeat_interval_s=300, clock=Clock.from_settings()
+        )
+    )
 
 
 @pytest.mark.parametrize("status", ["idling", "running"])
