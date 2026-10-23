@@ -22,6 +22,7 @@ from agent.state import AgentState, CompactState, ContextReset
 from agent.tests.test_compact import (
     COMPACT_SECTIONS,
     LONG_SUMMARY,
+    compact_slices,
     compact_tail,
     compaction_ainvoke,
     fake_config,
@@ -29,7 +30,6 @@ from agent.tests.test_compact import (
     make_config,
     make_fake_llm,
     make_runtime,
-    patch_compact_config,
     reminder_state,
     runtime_with_llm,
 )
@@ -52,16 +52,15 @@ from base.packages.plugins.extensions import EMPTY
 
 async def test_compact_reminder_fires_in_band(
     meiva_compact_loaded: tuple[type[AgentState], Hook],
-    monkeypatch: pytest.MonkeyPatch,
     database_gate: ProcessDbGate,
 ):
     from agent.graph.hooks import compact as _p
 
     state_cls, wrap_fn = meiva_compact_loaded
-    patch_compact_config(monkeypatch, compact_reminder_tokens=1, auto_compact_tokens=1_000_000)
+    slices = compact_slices(compact_reminder_tokens=1, auto_compact_tokens=1_000_000)
     result = await wrap_fn(
         reminder_state(state_cls),
-        runtime_with_llm(make_fake_llm(), database_gate=database_gate),
+        runtime_with_llm(make_fake_llm(), database_gate=database_gate, slices=slices),
         fake_config(),
     )
 
@@ -79,16 +78,13 @@ async def test_compact_reminder_fires_in_band(
 
 async def test_compact_reminder_silent_below_threshold(
     meiva_compact_loaded: tuple[type[AgentState], Hook],
-    monkeypatch: pytest.MonkeyPatch,
     database_gate: ProcessDbGate,
 ):
     state_cls, wrap_fn = meiva_compact_loaded
-    patch_compact_config(
-        monkeypatch, compact_reminder_tokens=1_000_000, auto_compact_tokens=2_000_000
-    )
+    slices = compact_slices(compact_reminder_tokens=400_000, auto_compact_tokens=800_000)
     result = await wrap_fn(
         reminder_state(state_cls),
-        runtime_with_llm(make_fake_llm(), database_gate=database_gate),
+        runtime_with_llm(make_fake_llm(), database_gate=database_gate, slices=slices),
         fake_config(),
     )
     assert result is None
@@ -96,14 +92,13 @@ async def test_compact_reminder_silent_below_threshold(
 
 async def test_compact_reminder_yields_to_force_above_ceiling(
     meiva_compact_loaded: tuple[type[AgentState], Hook],
-    monkeypatch: pytest.MonkeyPatch,
     database_gate: ProcessDbGate,
 ):
     state_cls, wrap_fn = meiva_compact_loaded
-    patch_compact_config(monkeypatch, compact_reminder_tokens=0, auto_compact_tokens=1)
+    slices = compact_slices(compact_reminder_tokens=0, auto_compact_tokens=1)
     result = await wrap_fn(
         reminder_state(state_cls),
-        runtime_with_llm(make_fake_llm(LONG_SUMMARY), database_gate=database_gate),
+        runtime_with_llm(make_fake_llm(LONG_SUMMARY), database_gate=database_gate, slices=slices),
         fake_config(),
     )
 
@@ -112,28 +107,30 @@ async def test_compact_reminder_yields_to_force_above_ceiling(
 
 async def test_compact_reminder_once_per_window(
     meiva_compact_loaded: tuple[type[AgentState], Hook],
-    monkeypatch: pytest.MonkeyPatch,
     database_gate: ProcessDbGate,
 ):
     state_cls, wrap_fn = meiva_compact_loaded
-    patch_compact_config(monkeypatch, compact_reminder_tokens=1, auto_compact_tokens=1_000_000)
+    slices = compact_slices(compact_reminder_tokens=1, auto_compact_tokens=1_000_000)
     state = reminder_state(state_cls, version=0, shown=True, seen=0)
     result = await wrap_fn(
-        state, runtime_with_llm(make_fake_llm(), database_gate=database_gate), fake_config()
+        state,
+        runtime_with_llm(make_fake_llm(), database_gate=database_gate, slices=slices),
+        fake_config(),
     )
     assert result is None
 
 
 async def test_compact_reminder_rearms_after_compaction(
     meiva_compact_loaded: tuple[type[AgentState], Hook],
-    monkeypatch: pytest.MonkeyPatch,
     database_gate: ProcessDbGate,
 ):
     state_cls, wrap_fn = meiva_compact_loaded
-    patch_compact_config(monkeypatch, compact_reminder_tokens=1, auto_compact_tokens=1_000_000)
+    slices = compact_slices(compact_reminder_tokens=1, auto_compact_tokens=1_000_000)
     state = reminder_state(state_cls, version=1, shown=True, seen=0)
     result = await wrap_fn(
-        state, runtime_with_llm(make_fake_llm(), database_gate=database_gate), fake_config()
+        state,
+        runtime_with_llm(make_fake_llm(), database_gate=database_gate, slices=slices),
+        fake_config(),
     )
 
     assert result is not None
@@ -145,11 +142,10 @@ async def test_compact_reminder_rearms_after_compaction(
 
 async def test_compact_reminder_is_not_starved_by_agent_inbounds(
     meiva_compact_loaded: tuple[type[AgentState], Hook],
-    monkeypatch: pytest.MonkeyPatch,
     database_gate: ProcessDbGate,
 ):
     state_cls, wrap_fn = meiva_compact_loaded
-    patch_compact_config(monkeypatch, compact_reminder_tokens=1, auto_compact_tokens=1_000_000)
+    slices = compact_slices(compact_reminder_tokens=1, auto_compact_tokens=1_000_000)
     msgs = [
         SystemMessage(content="<sys>"),
         *(HumanMessage(content="x" * 1000) for _ in range(5)),
@@ -157,7 +153,9 @@ async def test_compact_reminder_is_not_starved_by_agent_inbounds(
     ]
     state = reminder_state(state_cls, messages=msgs)
     result = await wrap_fn(
-        state, runtime_with_llm(make_fake_llm(), database_gate=database_gate), fake_config()
+        state,
+        runtime_with_llm(make_fake_llm(), database_gate=database_gate, slices=slices),
+        fake_config(),
     )
     assert result is not None
     note = result["messages"][0]
@@ -167,14 +165,15 @@ async def test_compact_reminder_is_not_starved_by_agent_inbounds(
 
 async def test_compact_reminder_silent_when_no_conversation(
     meiva_compact_loaded: tuple[type[AgentState], Hook],
-    monkeypatch: pytest.MonkeyPatch,
     database_gate: ProcessDbGate,
 ):
     state_cls, wrap_fn = meiva_compact_loaded
-    patch_compact_config(monkeypatch, compact_reminder_tokens=1, auto_compact_tokens=1_000_000)
+    slices = compact_slices(compact_reminder_tokens=1, auto_compact_tokens=1_000_000)
     state = reminder_state(state_cls, messages=[SystemMessage(content="x" * 100_000)])
     result = await wrap_fn(
-        state, runtime_with_llm(make_fake_llm(), database_gate=database_gate), fake_config()
+        state,
+        runtime_with_llm(make_fake_llm(), database_gate=database_gate, slices=slices),
+        fake_config(),
     )
     assert result is None
 

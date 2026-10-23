@@ -33,9 +33,7 @@ from base.config.tests.configuration import defaults
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
-from base.host.env.agent_slices import AgentSlices, ModelOverrides
-from base.lm.catalog import ModelCatalog
-from base.lm.context_budget import ContextBudget
+from base.host.env.agent_slices import AgentSlices
 from base.packages.plugin_providers import build_model_catalog
 from base.packages.plugins.extensions import EMPTY
 
@@ -56,24 +54,21 @@ def compact_tail(update: Any) -> list[AnyMessage]:
     return update["context_reset"].tail
 
 
-def patch_compact_config(
-    monkeypatch: pytest.MonkeyPatch,
+def compact_slices(
     *,
     auto_compact_tokens: int = 800_000,
     compact_reminder_tokens: int = 600_000,
-) -> None:
-    budget = ContextBudget(
-        max_context_tokens=1_000_000,
-        soft_compact_tokens=compact_reminder_tokens,
-        hard_compact_tokens=auto_compact_tokens,
+) -> AgentSlices:
+    model = pinned_slices().brain.llm_model
+    window = build_model_catalog().models[model].context_window
+    assert window is not None
+    return pinned_slices(
+        {
+            "auto_compact_fraction": auto_compact_tokens / window,
+            "compact_reminder_fraction": compact_reminder_tokens / window,
+            "auto_compact_ceiling_tokens": 0,
+        }
     )
-
-    def fixed_budget(
-        _model: str, _overrides: ModelOverrides, *, catalog: ModelCatalog
-    ) -> ContextBudget:
-        return budget
-
-    monkeypatch.setattr("agent.graph.hooks.compact.resolve_context_budget", fixed_budget)
 
 
 def make_fake_llm(summary_text: str = "fake summary", *, response: AIMessage | None = None) -> Any:
@@ -99,12 +94,14 @@ def _fake_llm_seq(*summaries: str) -> Any:
     return llm
 
 
-def runtime_with_llm(llm: Any, database_gate: ProcessDbGate) -> Runtime[MeivaContext]:
+def runtime_with_llm(
+    llm: Any, database_gate: ProcessDbGate, *, slices: AgentSlices
+) -> Runtime[MeivaContext]:
     ctx = MeivaContext(
         ops_pool=None,
         llm=llm,
         event_publisher=MagicMock(),
-        agent=pinned_slices(),
+        agent=slices,
         db=Database.from_settings(gate=database_gate),
         bus=EventBus.from_settings(),
         catalog=build_model_catalog(),
@@ -127,10 +124,8 @@ def _over_threshold_state() -> AgentState:
     )
 
 
-async def test_auto_compact_triggers_on_real_input_tokens_not_chars(
-    monkeypatch: pytest.MonkeyPatch, database_gate: ProcessDbGate
-):
-    patch_compact_config(monkeypatch, auto_compact_tokens=200_000)
+async def test_auto_compact_triggers_on_real_input_tokens_not_chars(database_gate: ProcessDbGate):
+    slices = compact_slices(auto_compact_tokens=200_000)
     state = AgentState(
         messages=[
             SystemMessage(content="<sys>"),
@@ -149,16 +144,16 @@ async def test_auto_compact_triggers_on_real_input_tokens_not_chars(
     )
     result = await auto_compact_for_llm(
         state,
-        runtime_with_llm(make_fake_llm(LONG_SUMMARY), database_gate=database_gate),
+        runtime_with_llm(make_fake_llm(LONG_SUMMARY), database_gate=database_gate, slices=slices),
         fake_config(),
     )
     assert result is not None
 
 
 async def test_auto_compact_skips_when_input_tokens_below_ceiling_despite_chars(
-    monkeypatch: pytest.MonkeyPatch, database_gate: ProcessDbGate
+    database_gate: ProcessDbGate,
 ):
-    patch_compact_config(monkeypatch, auto_compact_tokens=200_000)
+    slices = compact_slices(auto_compact_tokens=200_000)
     state = AgentState(
         messages=[
             SystemMessage(content="<sys>"),
@@ -171,15 +166,15 @@ async def test_auto_compact_skips_when_input_tokens_below_ceiling_despite_chars(
         halted=False,
     )
     result = await auto_compact_for_llm(
-        state, runtime_with_llm(make_fake_llm(), database_gate=database_gate), fake_config()
+        state,
+        runtime_with_llm(make_fake_llm(), database_gate=database_gate, slices=slices),
+        fake_config(),
     )
     assert result is None
 
 
-async def test_auto_compact_falls_back_to_chars_before_first_call(
-    monkeypatch: pytest.MonkeyPatch, database_gate: ProcessDbGate
-):
-    patch_compact_config(monkeypatch, auto_compact_tokens=100)
+async def test_auto_compact_falls_back_to_chars_before_first_call(database_gate: ProcessDbGate):
+    slices = compact_slices(auto_compact_tokens=100)
     state = AgentState(
         messages=[
             SystemMessage(content="<sys>"),
@@ -189,34 +184,33 @@ async def test_auto_compact_falls_back_to_chars_before_first_call(
     )
     result = await auto_compact_for_llm(
         state,
-        runtime_with_llm(make_fake_llm(LONG_SUMMARY), database_gate=database_gate),
+        runtime_with_llm(make_fake_llm(LONG_SUMMARY), database_gate=database_gate, slices=slices),
         fake_config(),
     )
     assert result is not None
 
 
-async def test_auto_compact_hook_returns_none_when_under_threshold(
-    monkeypatch: pytest.MonkeyPatch, database_gate: ProcessDbGate
-):
-    patch_compact_config(monkeypatch, auto_compact_tokens=1_000_000)
+async def test_auto_compact_hook_returns_none_when_under_threshold(database_gate: ProcessDbGate):
+    slices = compact_slices(auto_compact_tokens=1_000_000)
     state = AgentState(messages=[HumanMessage(content="hi" * 100)], halted=False)
     result = await auto_compact_for_llm(
-        state, runtime_with_llm(make_fake_llm(), database_gate=database_gate), fake_config()
+        state,
+        runtime_with_llm(make_fake_llm(), database_gate=database_gate, slices=slices),
+        fake_config(),
     )
     assert result is None
 
 
 async def test_auto_compact_hook_clears_history_and_parks_summary(
-    monkeypatch: pytest.MonkeyPatch,
     loguru_records: list[dict[str, Any]],
     database_gate: ProcessDbGate,
 ):
-    patch_compact_config(monkeypatch, auto_compact_tokens=1)
+    slices = compact_slices(auto_compact_tokens=1)
     state = _over_threshold_state()
 
     fake_llm = make_fake_llm(LONG_SUMMARY)
     result = await auto_compact_for_llm(
-        state, runtime_with_llm(fake_llm, database_gate=database_gate), fake_config()
+        state, runtime_with_llm(fake_llm, database_gate=database_gate, slices=slices), fake_config()
     )
 
     assert result is not None
@@ -249,38 +243,36 @@ async def test_auto_compact_hook_clears_history_and_parks_summary(
     }
 
 
-async def test_auto_compact_hook_skips_when_no_conversation(
-    monkeypatch: pytest.MonkeyPatch, database_gate: ProcessDbGate
-):
-    patch_compact_config(monkeypatch, auto_compact_tokens=1)
+async def test_auto_compact_hook_skips_when_no_conversation(database_gate: ProcessDbGate):
+    slices = compact_slices(auto_compact_tokens=1)
     state = AgentState(messages=[SystemMessage(content="x" * 100)], halted=False)
 
     llm = make_fake_llm()
     result = await auto_compact_for_llm(
-        state, runtime_with_llm(llm, database_gate=database_gate), fake_config()
+        state, runtime_with_llm(llm, database_gate=database_gate, slices=slices), fake_config()
     )
     assert result is None
     compaction_ainvoke(llm).assert_not_called()
 
 
 async def test_auto_compact_hook_raises_when_summary_empty_every_attempt(
-    monkeypatch: pytest.MonkeyPatch, database_gate: ProcessDbGate
+    database_gate: ProcessDbGate,
 ):
-    patch_compact_config(monkeypatch, auto_compact_tokens=1)
+    slices = compact_slices(auto_compact_tokens=1)
     llm = make_fake_llm(summary_text="")
     state = _over_threshold_state()
 
     with pytest.raises(CompactionFailedError, match="no usable summary across"):
         await auto_compact_for_llm(
-            state, runtime_with_llm(llm, database_gate=database_gate), fake_config()
+            state, runtime_with_llm(llm, database_gate=database_gate, slices=slices), fake_config()
         )
     assert compaction_ainvoke(llm).call_count == COMPACT_MAX_ATTEMPTS
 
 
 async def test_auto_compact_hook_raises_when_summary_short_every_attempt(
-    monkeypatch: pytest.MonkeyPatch, database_gate: ProcessDbGate
+    database_gate: ProcessDbGate,
 ):
-    patch_compact_config(monkeypatch, auto_compact_tokens=1)
+    slices = compact_slices(auto_compact_tokens=1)
     llm = make_fake_llm("too short")
     state = _over_threshold_state()
     publisher = MagicMock()
@@ -288,7 +280,7 @@ async def test_auto_compact_hook_raises_when_summary_short_every_attempt(
         ops_pool=None,
         llm=llm,
         event_publisher=publisher,
-        agent=pinned_slices(),
+        agent=slices,
         db=Database.from_settings(gate=database_gate),
         bus=EventBus.from_settings(),
         catalog=build_model_catalog(),
@@ -305,15 +297,13 @@ async def test_auto_compact_hook_raises_when_summary_short_every_attempt(
     assert events[0]["compact_id"] == events[1]["compact_id"]
 
 
-async def test_auto_compact_hook_retries_short_then_accepts_long(
-    monkeypatch: pytest.MonkeyPatch, database_gate: ProcessDbGate
-):
-    patch_compact_config(monkeypatch, auto_compact_tokens=1)
+async def test_auto_compact_hook_retries_short_then_accepts_long(database_gate: ProcessDbGate):
+    slices = compact_slices(auto_compact_tokens=1)
     llm = _fake_llm_seq("too short", LONG_SUMMARY)
     state = _over_threshold_state()
 
     result = await auto_compact_for_llm(
-        state, runtime_with_llm(llm, database_gate=database_gate), fake_config()
+        state, runtime_with_llm(llm, database_gate=database_gate, slices=slices), fake_config()
     )
 
     assert result is not None
@@ -321,17 +311,15 @@ async def test_auto_compact_hook_retries_short_then_accepts_long(
     assert result["context_reset"].tail[0].content == compose_summary_message(LONG_SUMMARY)
 
 
-async def test_auto_compact_hook_emits_compact_done_on_success(
-    monkeypatch: pytest.MonkeyPatch, database_gate: ProcessDbGate
-):
-    patch_compact_config(monkeypatch, auto_compact_tokens=1)
+async def test_auto_compact_hook_emits_compact_done_on_success(database_gate: ProcessDbGate):
+    slices = compact_slices(auto_compact_tokens=1)
     publisher = MagicMock()
     llm = make_fake_llm(LONG_SUMMARY)
     ctx = MeivaContext(
         ops_pool=None,
         llm=llm,
         event_publisher=publisher,
-        agent=pinned_slices(),
+        agent=slices,
         db=Database.from_settings(gate=database_gate),
         bus=EventBus.from_settings(),
         catalog=build_model_catalog(),
@@ -367,19 +355,20 @@ def meiva_compact_loaded() -> tuple[type[AgentState], Hook]:
 
 async def test_compact_reminder_passthrough_none(
     meiva_compact_loaded: tuple[type[AgentState], Hook],
-    monkeypatch: pytest.MonkeyPatch,
     database_gate: ProcessDbGate,
 ):
     state_cls, wrap_fn = meiva_compact_loaded
 
-    patch_compact_config(monkeypatch, auto_compact_tokens=1_000_000)
+    slices = compact_slices(auto_compact_tokens=1_000_000)
     state = state_cls(
         messages=[HumanMessage(content="hi")],
         halted=False,
         compact=CompactState(version=0),
     )
     result = await wrap_fn(
-        state, runtime_with_llm(make_fake_llm(), database_gate=database_gate), fake_config()
+        state,
+        runtime_with_llm(make_fake_llm(), database_gate=database_gate, slices=slices),
+        fake_config(),
     )
     assert result is None
 
@@ -393,19 +382,18 @@ def _over_threshold_messages() -> list[AnyMessage]:
 
 async def test_compact_reminder_zero_to_one(
     meiva_compact_loaded: tuple[type[AgentState], object],
-    monkeypatch: pytest.MonkeyPatch,
     database_gate: ProcessDbGate,
 ):
     state_cls, _ = meiva_compact_loaded
     wrap_fn = auto_compact_for_llm
 
-    patch_compact_config(monkeypatch, auto_compact_tokens=1)
+    slices = compact_slices(auto_compact_tokens=1)
     state = state_cls(
         messages=_over_threshold_messages(), halted=False, compact=CompactState(version=0)
     )
     result = await wrap_fn(
         state,
-        runtime_with_llm(make_fake_llm(LONG_SUMMARY), database_gate=database_gate),
+        runtime_with_llm(make_fake_llm(LONG_SUMMARY), database_gate=database_gate, slices=slices),
         fake_config(),
     )
     assert result is not None
@@ -415,19 +403,18 @@ async def test_compact_reminder_zero_to_one(
 
 async def test_compact_reminder_increments_from_existing(
     meiva_compact_loaded: tuple[type[AgentState], object],
-    monkeypatch: pytest.MonkeyPatch,
     database_gate: ProcessDbGate,
 ):
     state_cls, _ = meiva_compact_loaded
     wrap_fn = auto_compact_for_llm
 
-    patch_compact_config(monkeypatch, auto_compact_tokens=1)
+    slices = compact_slices(auto_compact_tokens=1)
     state = state_cls(
         messages=_over_threshold_messages(), halted=False, compact=CompactState(version=5)
     )
     result = await wrap_fn(
         state,
-        runtime_with_llm(make_fake_llm(LONG_SUMMARY), database_gate=database_gate),
+        runtime_with_llm(make_fake_llm(LONG_SUMMARY), database_gate=database_gate, slices=slices),
         fake_config(),
     )
     assert result is not None

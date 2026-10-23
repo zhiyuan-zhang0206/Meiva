@@ -56,6 +56,8 @@ Existing fixture visibility and migration constraints: [[tests/docs/test-fixture
   protects the test runner itself from process replacement.
 - Plugin installation restoration and early host-environment cleanup: [[plugin-isolation.meiva.okf.md]].
 
+History-dump boot isolation: [[history-dump-isolation.meiva.okf.md]].
+
 Static execution ownership and CI artifacts: [[tests/fixtures/docs/static-environment.meiva.okf.md]].
 
 Large test modules keep shared fixtures and test doubles in their existing owner.
