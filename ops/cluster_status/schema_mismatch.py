@@ -3,71 +3,66 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from collections.abc import Callable
 
 import psycopg
 
-from base.api_contracts.status import SchemaMismatchKind, SchemaMismatchStatus
+from base.api_contracts.status import SchemaMismatchStatus
 from base.db import Database
 from base.deploy.schema.migration_errors import MigrationLayoutError
 from base.deploy.schema.migration_layout import required_migration_set
 from base.deploy.schema.migrations import applied_migration_names
+from ops.cluster_status.model import Mismatch as Mismatch
+from ops.cluster_status.model import classify as classify
 
 _log = logging.getLogger(__name__)
 
 
-@dataclass(frozen=True)
-class Mismatch:
-    kind: SchemaMismatchKind
-    detail: str
-
-
-def classify(applied: set[str], required: set[str]) -> Mismatch | None:
-    """Compare the current database with this running image, without a Git pin."""
-    extra = applied - required
-    missing = required - applied
-    if extra and missing:
-        return Mismatch(
-            "divergent",
-            f"DB has {len(extra)} migration(s) this image lacks and lacks "
-            f"{len(missing)} required by this image",
-        )
-    if extra:
-        return Mismatch(
-            "schema-ahead-of-code", f"DB has {len(extra)} migration(s) this image lacks"
-        )
-    if missing:
-        return Mismatch(
-            "schema-behind-code", f"DB lacks {len(missing)} migration(s) required by this image"
-        )
-    return None
-
-
-def detect(db: Database, *, conn: psycopg.Connection | None = None) -> Mismatch | None:
+def detect(
+    db: Database,
+    *,
+    conn: psycopg.Connection | None = None,
+    applied_reader: Callable[[psycopg.Connection], set[str]] | None = None,
+    required_reader: Callable[[], set[str]] | None = None,
+) -> Mismatch | None:
     """Read applied names once; required names come from the running image's SQL."""
+    read_applied = applied_reader or applied_migration_names
+    read_required = required_reader or required_migration_set
     try:
         if conn is None:
             with db.connect(autocommit=True) as borrowed:
-                applied = applied_migration_names(borrowed)
+                applied = read_applied(borrowed)
         else:
-            applied = applied_migration_names(conn)
+            applied = read_applied(conn)
     except MigrationLayoutError as exc:
         return Mismatch("invalid-migration-layout", f"DB migration catalog is invalid: {exc}")
     except psycopg.Error as exc:
         _log.warning("[schema-mismatch] DB facts unavailable: %r", exc)
         return Mismatch("unavailable", f"applied migration set unavailable ({type(exc).__name__})")
     try:
-        required = required_migration_set()
+        required = read_required()
     except MigrationLayoutError as exc:
         return Mismatch("invalid-migration-layout", f"image migration layout is invalid: {exc}")
     return classify(applied, required)
 
 
 def status(
-    db: Database, *, conn: psycopg.Connection | None = None, local_machine: str
+    db: Database,
+    *,
+    conn: psycopg.Connection | None = None,
+    local_machine: str,
+    applied_reader: Callable[[psycopg.Connection], set[str]] | None = None,
+    required_reader: Callable[[], set[str]] | None = None,
 ) -> SchemaMismatchStatus | None:
     """Current diagnosis; return None only after both migration sets were read and match."""
-    mismatch = detect(db) if conn is None else detect(db, conn=conn)
+    if applied_reader is None and required_reader is None:
+        mismatch = detect(db) if conn is None else detect(db, conn=conn)
+    elif conn is None:
+        mismatch = detect(db, applied_reader=applied_reader, required_reader=required_reader)
+    else:
+        mismatch = detect(
+            db, conn=conn, applied_reader=applied_reader, required_reader=required_reader
+        )
     if mismatch is None:
         return None
     return SchemaMismatchStatus(kind=mismatch.kind, machine=local_machine, detail=mismatch.detail)

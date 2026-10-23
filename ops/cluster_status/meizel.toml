@@ -1,5 +1,9 @@
 exports = ["schema_mismatch.py"]
 
 [uses]
-"__init__.py" = ["schema_mismatch.py"]
+"__init__.py" = ["model.py", "schema_mismatch.py"]
+"schema_mismatch.py" = ["model.py"]
 "tests" = ["__init__.py", "schema_mismatch.py"]
+
+[purity]
+"model.py" = "strict"

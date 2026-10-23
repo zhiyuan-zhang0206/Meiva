@@ -36,7 +36,6 @@ from base.agents.impersonation.wake import publish_inbound_wake
 from base.agents.observation.snapshot import select_one
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
-from base.config import settings
 from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
@@ -77,10 +76,12 @@ def spawn_agent(
     model_catalog: ModelCatalog,
     database_gate: ProcessDbGate,
     local_machine: MachineIdentity,
+    bus: EventBus | None = None,
 ) -> int:
+    active_bus = bus if bus is not None else EventBus.from_settings()
     agent_id, _birth_config, _prompt_id, _attempt_id = create_agent_row(
         Database.from_settings(gate=database_gate),
-        EventBus.from_settings(),
+        active_bus,
         spawner=spawner,
         fork_from=fork_from,
         fork_checkpoint=fork_checkpoint,
@@ -93,9 +94,7 @@ def spawn_agent(
         catalog=model_catalog,
         authority=config_authority,
     )
-    publish_inbound_wake(
-        Database.from_settings(gate=database_gate), EventBus.from_settings(), agent_id, "0"
-    )
+    publish_inbound_wake(Database.from_settings(gate=database_gate), active_bus, agent_id, "0")
     return agent_id
 
 
@@ -227,7 +226,6 @@ class TestSpawnAgent:
         self,
         redis_url: str,
         db_conn: psycopg.Connection,
-        monkeypatch: pytest.MonkeyPatch,
         add_models: AddModels,
         *,
         config_authority: ConfigAuthority,
@@ -249,7 +247,6 @@ class TestSpawnAgent:
                 )
             },
         )
-        monkeypatch.setattr(settings.lm, "llm_model", "claude-sonnet-5")
         default_model_agent = spawn_agent(
             config_authority=config_authority,
             model_catalog=model_catalog,
@@ -279,19 +276,19 @@ class TestSpawnAgent:
             db_conn,
             default_model_agent,
             catalog=model_catalog,
-            default_model_reader=lambda: settings.lm.llm_model,
+            default_model_reader=lambda: "claude-sonnet-5",
         )
         text_only_snapshot = select_one(
             db_conn,
             text_only_agent,
             catalog=model_catalog,
-            default_model_reader=lambda: settings.lm.llm_model,
+            default_model_reader=lambda: "claude-sonnet-5",
         )
         withdrawn_snapshot = select_one(
             db_conn,
             withdrawn_vision_agent,
             catalog=model_catalog,
-            default_model_reader=lambda: settings.lm.llm_model,
+            default_model_reader=lambda: "claude-sonnet-5",
         )
 
         assert default_snapshot is not None
@@ -305,7 +302,6 @@ class TestSpawnAgent:
         self,
         redis_url: str,
         db_conn: psycopg.Connection,
-        monkeypatch: pytest.MonkeyPatch,
         *,
         config_authority: ConfigAuthority,
         model_catalog: ModelCatalog,
@@ -330,19 +326,18 @@ class TestSpawnAgent:
                 (f'{{"llm_model": "{stamped}"}}', agent_id),
             )
         db_conn.commit()
-        monkeypatch.setattr(settings.lm, "llm_model", "glm-5.3")
 
         vision = select_one(
             db_conn,
             born_vision,
             catalog=model_catalog,
-            default_model_reader=lambda: settings.lm.llm_model,
+            default_model_reader=lambda: "glm-5.3",
         )
         text = select_one(
             db_conn,
             born_text,
             catalog=model_catalog,
-            default_model_reader=lambda: settings.lm.llm_model,
+            default_model_reader=lambda: "glm-5.3",
         )
 
         assert vision is not None and vision.supports_vision is True
