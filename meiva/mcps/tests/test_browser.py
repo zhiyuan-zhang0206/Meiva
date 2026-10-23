@@ -281,13 +281,11 @@ async def test_connect_browser_direct_dials_socket(browser_home: Path) -> None:
 
 
 async def test_connect_browser_direct_retries_until_socket_appears(
-    monkeypatch: pytest.MonkeyPatch, browser_home: Path
+    browser_home: Path,
 ) -> None:
     """A cold-start race (service socket not yet bound) retries instead of
     failing immediately — mirrors the wrapper's connect retry."""
     sock_path = service_socket(browser_home)
-    monkeypatch.setattr(browser_mod, "_CONNECT_ATTEMPTS", 20)
-    monkeypatch.setattr(browser_mod, "_CONNECT_DELAY_S", 0.02)
 
     server_future: asyncio.Future[asyncio.AbstractServer] = asyncio.Future()
 
@@ -303,7 +301,9 @@ async def test_connect_browser_direct_retries_until_socket_appears(
 
     task = asyncio.create_task(_late_server())
     try:
-        session, stack = await browser_mod.connect_browser_direct(browser_home)
+        session, stack = await browser_mod.connect_browser_direct(
+            browser_home, attempts=20, delay_s=0.02
+        )
         assert isinstance(session, browser_mod.BrowserLineSession)
         await stack.aclose()
     finally:
@@ -316,33 +316,29 @@ async def test_connect_browser_direct_retries_until_socket_appears(
 
 @pytest.mark.parametrize("failure", [FileNotFoundError, ConnectionRefusedError])
 async def test_dial_browser_exhaustion_has_no_trailing_sleep(
-    monkeypatch: pytest.MonkeyPatch, retry_waits: list[float], failure: type[OSError]
+    retry_waits: list[float], failure: type[OSError]
 ) -> None:
     calls = 0
 
-    async def fail(*, path: str, limit: int) -> None:
+    async def fail(*, path: str, limit: int) -> tuple[asyncio.StreamReader, asyncio.StreamWriter]:
         nonlocal calls
         calls += 1
         assert (path, limit) == ("test.sock", browser_mod.LINE_LIMIT)
         raise failure("offline")
 
-    monkeypatch.setattr(browser_mod.asyncio, "open_unix_connection", fail)
     with pytest.raises(ConnectionError) as error:
-        await browser_mod._dial_browser_mcp("test.sock")
+        await browser_mod.dial_browser_mcp("test.sock", open_unix_connection=fail)
     assert str(error.value) == "browser-mcp daemon not reachable at test.sock: offline"
     assert error.value.__context__ is None
     assert calls == 10
     assert retry_waits == [0.5] * 9
 
 
-async def test_dial_browser_non_retryable_error_passes_through(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+async def test_dial_browser_non_retryable_error_passes_through() -> None:
     failure = PermissionError("forbidden")
     call = AsyncMock(side_effect=failure)
-    monkeypatch.setattr(browser_mod.asyncio, "open_unix_connection", call)
     with pytest.raises(PermissionError) as error:
-        await browser_mod._dial_browser_mcp("test.sock")
+        await browser_mod.dial_browser_mcp("test.sock", open_unix_connection=call)
     assert error.value is failure
     assert call.await_count == 1
 

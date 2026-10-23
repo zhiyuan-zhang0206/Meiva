@@ -12,7 +12,7 @@ from psycopg_pool import AsyncConnectionPool
 
 import base.agents.impersonation as agents_impersonation
 from agent import impersonation
-from agent.tests.impersonation.test_impersonation import _notes
+from agent.tests.impersonation.test_impersonation import make_notes
 from base.agents.context import MeivaContext
 from base.agents.impersonation.tests.impersonation_support import recorded_tree
 from base.agents.observation.relay_supervision import RelaySupervision
@@ -182,7 +182,7 @@ async def test_activation_is_skipped_when_not_requested(
         relays,
         activate_accepted=False,
         incarnation=incarnation,
-        notes=_notes(),
+        notes=make_notes(),
         read_local_machine=read_local_machine,
     )
     activate.assert_not_called()

@@ -264,15 +264,14 @@ def write_pidfile() -> None:
         sys.exit(1)
 
 
-def _remove_pidfile() -> None:
+def remove_daemon_pidfile() -> None:
     remove_pidfile(_pidfile())
 
 
-def _is_running(*, pidfile: Path | None = None) -> bool:
-    """Whether a daemon is already running (via its pidfile).
-
-    Pid-reuse-safe: a live pid whose argv does not name this daemon's module
-    is a recycled pid, not a running instance (audit round 2, P1)."""
+# meiva:note
+# Whether a daemon is already running via its pidfile; pid-reuse-safe by verifying the live pid's
+# argv names this daemon's module.
+def is_running(*, pidfile: Path | None = None) -> bool:
     return pidfile_holds_daemon(
         pidfile or _pidfile(),
         "meiva_builtins.plugins.meiva_fleet.task_maintenance.daemon",
@@ -330,9 +329,14 @@ async def dispatch_loop(
 
 
 async def run(
-    config: FleetConfig, *, database: Callable[[], Database], image: LoadedCommit
+    config: FleetConfig,
+    *,
+    database: Callable[[], Database],
+    image: LoadedCommit,
+    check_running: Callable[[], bool] = is_running,
+    cleanup_pidfile: Callable[[], None] = remove_daemon_pidfile,
 ) -> None:
-    if _is_running():
+    if check_running():
         _log.info(
             "[task-maintenance] daemon already running (pidfile=%s), exiting",
             _pidfile(),
@@ -357,11 +361,11 @@ async def run(
     finally:
         pool.close()
         await stop_health_server(health)
-        _remove_pidfile()
+        cleanup_pidfile()
         _log.info("[task-maintenance] daemon stopped")
 
 
-def main() -> None:
+def main(*, cleanup_pidfile: Callable[[], None] = remove_daemon_pidfile) -> None:
     from base.deploy.schema.migrations import assert_schema_current
 
     image = LoadedCommit.capture()
@@ -398,7 +402,7 @@ def main() -> None:
         _log.exception("[task-maintenance] daemon crashed — uncaught exception escaped run()")
         raise
     finally:
-        _remove_pidfile()
+        cleanup_pidfile()
 
 
 if __name__ == "__main__":

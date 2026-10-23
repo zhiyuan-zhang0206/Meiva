@@ -137,9 +137,8 @@ def test_entry_shares_the_image_gate_and_fleet_config(
     monkeypatch.setattr(daemon, "install_graceful_shutdown", _ignore_signals)
     _patch_fleet_config(monkeypatch, config, sha is not None)
     monkeypatch.setattr(daemon, "run", work)
-    monkeypatch.setattr(daemon, "_remove_pidfile", lambda: stages.append("pidfile"))
     with patch.dict("os.environ"):
-        daemon.main()
+        daemon.main(cleanup_pidfile=lambda: stages.append("pidfile"))
     assert stages == ["capture", "schema", "producer", "logging", "run", "pidfile"]
     _assert_gate_matches_image(gates, reads, image)
 
@@ -193,9 +192,7 @@ async def test_run_keeps_health_before_pool_and_closes_after_dispatch(
             raise failure
 
     captured, fleet = image, config
-    monkeypatch.setattr(daemon, "_is_running", lambda: False)
     monkeypatch.setattr(daemon, "write_pidfile", lambda: stages.append("pidfile"))
-    monkeypatch.setattr(daemon, "_remove_pidfile", lambda: stages.append("pidfile-close"))
     monkeypatch.setattr(
         daemon,
         "task_maintenance_endpoint",
@@ -206,10 +203,22 @@ async def test_run_keeps_health_before_pool_and_closes_after_dispatch(
     monkeypatch.setattr(daemon.EventBus, "from_settings", lambda: bus)
     monkeypatch.setattr(daemon, "dispatch_loop", dispatch)
     if failure is None:
-        await daemon.run(config, database=database, image=image)
+        await daemon.run(
+            config,
+            database=database,
+            image=image,
+            check_running=lambda: False,
+            cleanup_pidfile=lambda: stages.append("pidfile-close"),
+        )
     else:
         with pytest.raises(TypeError, match="invalid dispatch") as raised:
-            await daemon.run(config, database=database, image=image)
+            await daemon.run(
+                config,
+                database=database,
+                image=image,
+                check_running=lambda: False,
+                cleanup_pidfile=lambda: stages.append("pidfile-close"),
+            )
         assert raised.value is failure
     assert stages == [
         "pidfile",

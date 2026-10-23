@@ -23,10 +23,10 @@ from agent.graph.claim.tests.cursor_fixture import fresh_snapshot_cursor as fres
 from agent.graph.hooks.compact import compose_summary_message
 from agent.state import AgentState, CompactState
 from agent.tests.claim.claim_status_support import (
-    _set_agent_status,
     await_status,
     compact_tail,
     pair_compact_cycles,
+    set_agent_status,
 )
 from agent.tests.claim.claim_status_support import running_agent as running_agent
 from base.agents.inbox.insert import insert_inbound_message
@@ -677,7 +677,7 @@ async def test_claim_compact_request_batched_with_restart_is_dropped(
     does **not** run the backend Compaction LLM (if it raised, the already consumed restart row
     would be lost before the restart is applied), restart exits normally. Re-trigger /compact afterwards."""
     tid = running_agent()
-    _set_agent_status(db_conn, tid, "running")
+    set_agent_status(db_conn, tid, "running")
     insert_inbound_kind(db_conn, tid, "", "compact_request", source="user")
     restart_id = insert_inbound_kind(db_conn, tid, "", "restart", source="user")
     await await_inbound_visible(aops_pool, restart_id)

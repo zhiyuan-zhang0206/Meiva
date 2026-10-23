@@ -21,7 +21,7 @@ from agent.graph.claim.tests.claim_support import (
 )
 from agent.graph.claim.tests.cursor_fixture import fresh_snapshot_cursor as fresh_snapshot_cursor
 from agent.state import AgentState
-from agent.tests.claim.claim_status_support import _set_agent_status, await_status
+from agent.tests.claim.claim_status_support import await_status, set_agent_status
 from agent.tests.claim.claim_status_support import running_agent as running_agent
 from base.agents.inbox.insert import insert_inbound_message
 from base.agents.tests.units import spawn_agent
@@ -643,7 +643,7 @@ async def test_claim_restart_before_terminate_preserves_serial_order(
 ):
     """The active restart is not discarded by a later termination request."""
     tid = running_agent()
-    _set_agent_status(db_conn, tid, "running")
+    set_agent_status(db_conn, tid, "running")
     # Later termination remains pending for the admitted successor.
     insert_inbound_kind(db_conn, tid, "", "restart", source="user")
     terminate_id = insert_inbound_kind(db_conn, tid, "", "terminate", source="user")
@@ -676,7 +676,7 @@ async def test_claim_cancel_batched_with_restart_idle_restart_silent(
     exits normally via restart; the Cancelled event for cancel is still emitted (frontend clears
     turn-active), the pause intent is absorbed into 'silent idle after restart' (halted=True preserved)."""
     tid = running_agent()
-    _set_agent_status(db_conn, tid, "running")
+    set_agent_status(db_conn, tid, "running")
     insert_inbound_kind(db_conn, tid, "", "cancel", source="user")
     restart_id = insert_inbound_kind(db_conn, tid, "", "restart", source="user")
     await await_inbound_visible(aops_pool, restart_id)
@@ -717,7 +717,7 @@ async def test_claim_terminate_then_restart_preserves_serial_order(
     it must not silently discard the accepted termination.
     """
     tid = running_agent()
-    _set_agent_status(db_conn, tid, "running")
+    set_agent_status(db_conn, tid, "running")
     # A later restart cannot replace the active command pointer.
     insert_inbound_kind(db_conn, tid, "", "terminate", source="user")
     restart_id = insert_inbound_kind(db_conn, tid, "", "restart", source="user")

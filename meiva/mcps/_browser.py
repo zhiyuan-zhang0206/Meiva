@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from collections.abc import Awaitable, Callable
 from contextlib import AsyncExitStack, suppress
 from pathlib import Path
 from typing import Any
@@ -33,8 +34,8 @@ LINE_LIMIT = 64 * 1024 * 1024
 # The browser-mcp service is a supervised daemon that should already be up; a
 # fresh agent may still race it on a cold cluster start, so retry the connect
 # briefly before failing (mirrors the wrapper's own connect retry).
-_CONNECT_ATTEMPTS = 10
-_CONNECT_DELAY_S = 0.5
+CONNECT_ATTEMPTS = 10
+CONNECT_DELAY_S = 0.5
 
 
 class BrowserLineSession:
@@ -85,7 +86,7 @@ class BrowserLineSession:
         await self.close()
         if self._sock is None:
             return  # constructed without a re-dial path (unit tests)
-        reader, writer = await _dial_browser_mcp(self._sock)
+        reader, writer = await dial_browser_mcp(self._sock)
         self._reader = reader
         self._writer = writer
         self._id = 0
@@ -152,18 +153,21 @@ async def _close_writer(writer: asyncio.StreamWriter) -> None:
         await writer.wait_closed()
 
 
-async def _dial_browser_mcp(
+# meiva:note
+# Dial the browser-mcp service's unix socket, retrying briefly while the socket is not yet bound
+# on a cold cluster start.
+async def dial_browser_mcp(
     sock: str,
+    *,
+    attempts: int = CONNECT_ATTEMPTS,
+    delay_s: float = CONNECT_DELAY_S,
+    open_unix_connection: Callable[
+        ..., Awaitable[tuple[asyncio.StreamReader, asyncio.StreamWriter]]
+    ] = asyncio.open_unix_connection,
 ) -> tuple[asyncio.StreamReader, asyncio.StreamWriter]:
-    """Dial the browser-mcp service's unix socket.
-
-    Retries briefly while the socket is not yet bound (the service is a
-    supervised daemon that should already be up; a fresh agent may still race
-    it on a cold cluster start — mirrors the wrapper's connect retry).
-    """
     policy = Policy(
-        max_attempts=_CONNECT_ATTEMPTS,
-        backoff=lambda attempt: _CONNECT_DELAY_S,  # noqa: ARG005 — Backoff keyword name
+        max_attempts=attempts,
+        backoff=lambda attempt: delay_s,  # noqa: ARG005
         jitter="none",
         jitter_span=1.0,
         classify=lambda exc: isinstance(exc, (FileNotFoundError, ConnectionRefusedError)),
@@ -173,7 +177,7 @@ async def _dial_browser_mcp(
     )
 
     async def once() -> tuple[asyncio.StreamReader, asyncio.StreamWriter]:
-        return await asyncio.open_unix_connection(path=sock, limit=LINE_LIMIT)
+        return await open_unix_connection(path=sock, limit=LINE_LIMIT)
 
     last: OSError | None = None
     try:
@@ -183,7 +187,12 @@ async def _dial_browser_mcp(
     raise ConnectionError(f"browser-mcp daemon not reachable at {sock}: {last}")
 
 
-async def connect_browser_direct(home: Path) -> tuple[BrowserLineSession, AsyncExitStack]:
+async def connect_browser_direct(
+    home: Path,
+    *,
+    attempts: int = CONNECT_ATTEMPTS,
+    delay_s: float = CONNECT_DELAY_S,
+) -> tuple[BrowserLineSession, AsyncExitStack]:
     """Line-protocol connection to the browser-mcp service of `home` (no subprocess).
 
     Returns (session, stack); the caller owns the stack — closing it drops the
@@ -195,7 +204,7 @@ async def connect_browser_direct(home: Path) -> tuple[BrowserLineSession, AsyncE
     from base.paths import chrome_mcp_socket
 
     sock = str(chrome_mcp_socket(home, settings.services.browser_cdp_port))
-    reader, writer = await _dial_browser_mcp(sock)
+    reader, writer = await dial_browser_mcp(sock, attempts=attempts, delay_s=delay_s)
     session = BrowserLineSession(reader, writer, sock=sock)
     stack = AsyncExitStack()
     stack.push_async_callback(session.close)

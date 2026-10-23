@@ -22,11 +22,11 @@ from agent.state import AgentState, CompactState, ContextReset
 from agent.tests.test_compact import (
     COMPACT_SECTIONS,
     LONG_SUMMARY,
-    _config,
     compact_tail,
     compaction_ainvoke,
     fake_config,
     insert_compact_summary,
+    make_config,
     make_fake_llm,
     make_runtime,
     patch_compact_config,
@@ -250,7 +250,7 @@ async def test_compact_summary_preserves_agent_continuity(
     state = AgentState(messages=initial_msgs)
 
     cmd = await claim_node(
-        state, make_runtime(aops_pool, database_gate=database_gate), _config(tid)
+        state, make_runtime(aops_pool, database_gate=database_gate), make_config(tid)
     )
     assert cmd.goto == "init_context"
     assert cmd.update is not None
@@ -287,7 +287,7 @@ async def test_compact_summary_replaces_whole_history_no_tail(
 
     insert_compact_summary(db_conn, tid, "the whole memory")
     cmd = await claim_node(
-        state, make_runtime(aops_pool, database_gate=database_gate), _config(tid)
+        state, make_runtime(aops_pool, database_gate=database_gate), make_config(tid)
     )
 
     tail = compact_tail(cmd.update)
@@ -335,7 +335,7 @@ async def test_compact_summary_emits_compact_done(
     )
     runtime = Runtime(context=ctx)
 
-    await claim_node(state, runtime, _config(tid))
+    await claim_node(state, runtime, make_config(tid))
 
     emitted = [call.args[0] for call in publisher.emit.call_args_list]
     assert any('"compact_done"' in e for e in emitted), f"no CompactDone emitted; saw {emitted}"
@@ -385,7 +385,7 @@ async def test_consecutive_compacts_both_processed(
     state = AgentState(messages=initial_msgs)
 
     cmd1 = await claim_node(
-        state, make_runtime(aops_pool, database_gate=database_gate), _config(tid)
+        state, make_runtime(aops_pool, database_gate=database_gate), make_config(tid)
     )
     tail1 = compact_tail(cmd1.update)
     assert tail1[0].content == compose_summary_message("first compact summary")
@@ -393,7 +393,7 @@ async def test_consecutive_compacts_both_processed(
     compacted_state = AgentState(messages=[sys_msg, HumanMessage(content="first compact summary")])
     insert_compact_summary(db_conn, tid, "second compact summary")
     cmd2 = await claim_node(
-        compacted_state, make_runtime(aops_pool, database_gate=database_gate), _config(tid)
+        compacted_state, make_runtime(aops_pool, database_gate=database_gate), make_config(tid)
     )
     tail2 = compact_tail(cmd2.update)
     assert [m.content for m in tail2] == [compose_summary_message("second compact summary")]
@@ -424,7 +424,7 @@ async def test_compact_with_empty_state_injects_system_message_and_summary(
     state = AgentState()
 
     cmd = await claim_node(
-        state, make_runtime(aops_pool, database_gate=database_gate), _config(tid)
+        state, make_runtime(aops_pool, database_gate=database_gate), make_config(tid)
     )
 
     tail = compact_tail(cmd.update)
@@ -459,7 +459,7 @@ async def test_compact_with_super_long_summary_in_claim(
 
     insert_compact_summary(db_conn, tid, long_summary)
     cmd = await claim_node(
-        state, make_runtime(aops_pool, database_gate=database_gate), _config(tid)
+        state, make_runtime(aops_pool, database_gate=database_gate), make_config(tid)
     )
 
     tail = compact_tail(cmd.update)
@@ -503,7 +503,7 @@ async def test_terminate_preserves_pending_summary_without_wiping_history(
                 hosted_resources=None,
             )
         ),
-        _config(tid),
+        make_config(tid),
     )
     await apply_hosted_lifecycle(
         aops_pool,
@@ -558,7 +558,7 @@ async def test_compact_in_same_batch_as_restart(
                 hosted_resources=None,
             )
         ),
-        _config(tid),
+        make_config(tid),
     )
     await apply_hosted_lifecycle(
         aops_pool,
@@ -591,7 +591,7 @@ async def test_compact_in_same_batch_as_restart(
                 hosted_resources=None,
             )
         ),
-        _config(tid),
+        make_config(tid),
     )
     tail = compact_tail(resumed.update)
     assert tail[0].content == compose_summary_message(summary_text)

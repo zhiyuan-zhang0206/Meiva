@@ -69,9 +69,6 @@ exports = ["external_attachment.py"]
 "test_impersonation_transport_integration.py#monkeypatch.setattr agent.impersonation_handoff.publish_inbound_wake" = 2
 "test_impersonation_transport_integration.py#monkeypatch.setattr base.agents.impersonation.history.workspace_dir" = 4
 
-[debt.private-name]
-"test_impersonation_part2.py -> test_impersonation.py#_notes" = 1
-
 [debt.restricted-python]
 "test_impersonation_transport.py#python -c" = 2
 

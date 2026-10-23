@@ -3,3 +3,6 @@ exports = ["peers.py"]
 [uses]
 "__init__.py" = ["peers.py"]
 "tests" = ["__init__.py"]
+
+[purity]
+"peers.py" = "strict"

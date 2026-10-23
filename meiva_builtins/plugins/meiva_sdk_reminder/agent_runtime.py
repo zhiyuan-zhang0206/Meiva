@@ -30,12 +30,23 @@ from base.log import logger
 from base.packages.plugins.extensions import PluginContributions
 
 from ._state import (
-    AGENT_REPLY_CATEGORY,
+    AGENT_REPLY_CATEGORY as AGENT_REPLY_CATEGORY,
+)
+from ._state import (
     AGENT_REPLY_HINT,
     MeivaSdkReminderState,
-    detect_categories,
-    hint_for,
-    mentions_watcher,
+)
+from ._state import (
+    CATEGORIES as CATEGORIES,
+)
+from ._state import (
+    detect_categories as detect_categories,
+)
+from ._state import (
+    hint_for as hint_for,
+)
+from ._state import (
+    mentions_watcher as mentions_watcher,
 )
 
 # Channel keys for this plugin's state fields (prefixed by the framework from the

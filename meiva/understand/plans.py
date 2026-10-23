@@ -17,14 +17,12 @@ __all__ = ["Plan", "normalize"]
 class Plan:
     """What one `meiva.understand` call answers: its targets, reasoning effort and concurrency."""
 
-    targets: list[dict[str, Any]]
+    targets: list[dict[str, str | list[str]]]
     effort: str | ReasoningEffort
     max_concurrent: int | None
 
 
-def normalize(
-    targets: list[dict[str, Any]], effort: str | ReasoningEffort, max_concurrent: int | None
-) -> Plan:
+def normalize(targets: object, effort: str | ReasoningEffort, max_concurrent: int | None) -> Plan:
     """Check the targets and coerce the effort; raise on the first invalid input."""
     if not isinstance(targets, list):
         raise TypeError(
@@ -73,4 +71,8 @@ def normalize(
     normalized = coerce_effort(effort, example="meiva.understand(targets, effort='low')")
     assert normalized is not None  # noqa: S101 — understand's default is MAX, never None
     validate_max_concurrent(max_concurrent, example="meiva.understand(targets, max_concurrent=4)")
-    return Plan(targets=targets, effort=normalized, max_concurrent=max_concurrent)
+    return Plan(
+        targets=cast("list[dict[str, str | list[str]]]", targets),
+        effort=normalized,
+        max_concurrent=max_concurrent,
+    )

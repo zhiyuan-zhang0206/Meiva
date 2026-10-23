@@ -8,6 +8,3 @@ exports = ["goto.py", "node.py", "tests"]
 [purity]
 "__init__.py" = "strict"
 "goto.py" = "strict"
-
-[debt.private-name]
-"tests/test_llm_turn_end.py -> node.py#_llm_node_impl" = 2

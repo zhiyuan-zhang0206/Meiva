@@ -10,3 +10,4 @@ exports = ["deps.py", "plans.py", "runner.py", "wiring.py"]
 
 [purity]
 "errors.py" = "strict"
+"plans.py" = "strict"

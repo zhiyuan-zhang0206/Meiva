@@ -44,7 +44,7 @@ from base.db import Database
 from base.paths import meiva_home
 from meiva.tests.fixtures.pin_agent import exec_context
 
-_ENVELOPE_CRASH_CHILD = Path(__file__).parent / "resources" / "_envelope_crash_child.py"
+_ENVELOPE_CRASH_CHILD = Path(__file__).parent / "resources" / "envelope_crash_child.py"
 
 
 @patch.dict(os.environ)

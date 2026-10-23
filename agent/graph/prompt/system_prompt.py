@@ -17,7 +17,13 @@ from base.packages.plugins import activation
 from base.packages.plugins.extensions import ExtensionRegistry
 from base.paths import workspace_dir
 
-from ._codeact import codeact_section
+from ._base_prompt import (
+    capture_meiva_overview as capture_meiva_overview,
+)
+from ._base_prompt import (
+    get_meiva_overview as get_meiva_overview,
+)
+from ._codeact import codeact_section as codeact_section
 from .capabilities import (
     CAPABILITY_SURFACES,
     capabilities_section,

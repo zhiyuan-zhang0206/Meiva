@@ -1,0 +1,3 @@
+[purity]
+"audit.py" = "strict"
+"label.py" = "strict"

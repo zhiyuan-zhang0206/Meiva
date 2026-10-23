@@ -40,7 +40,7 @@ The agent's sole tool—`execute_code(code: str)`—executes Python code in a di
 ## Key Dependencies
 
 - [[sdk-surface.meiva.okf.md]] — The agent calls all `meiva.*` tools through `execute_code`
-- [[agent/graph/docs/graph.meiva.okf.md]] — `_exec_node_impl` is the second node of the execution graph
+- [[agent/graph/docs/graph.meiva.okf.md]] — `exec_node_impl` is the second node of the execution graph
 - [[system-prompt.meiva.okf.md]] — The system prompt specifies output format (text + optional execute_code)
 
 ## Entry Points

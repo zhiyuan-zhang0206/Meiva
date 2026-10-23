@@ -10,7 +10,7 @@ from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Durability
 
-from agent.hooks._registry import merge_result
+from agent.hooks import merge_result
 from agent.messages.guard import guarded_add_messages, guarded_delta_reducer
 from agent.state import BaseAgentState
 from base.agents.history.timeline import build_timeline_items

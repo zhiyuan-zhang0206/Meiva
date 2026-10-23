@@ -8,11 +8,6 @@ exports = ["config.py"]
 "_tools.py" = ["config.py"]
 "tests" = ["__init__.py", "_browser.py", "_clients.py", "_computer.py", "_daemon.py", "_oauth.py", "_remote.py", "_tools.py", "config.py"]
 
-[debt.private-name]
-"tests/test_browser.py -> _browser.py#_CONNECT_ATTEMPTS" = 1
-"tests/test_browser.py -> _browser.py#_CONNECT_DELAY_S" = 1
-"tests/test_browser.py -> _browser.py#_dial_browser_mcp" = 2
-
 [debt.third-party-patch]
 "_oauth.py#assignment mcp.client.auth.oauth2.OAuthContext.prepare_token_auth" = 1
 "_oauth.py#assignment mcp.client.auth.oauth2.validate_metadata_issuer" = 1
