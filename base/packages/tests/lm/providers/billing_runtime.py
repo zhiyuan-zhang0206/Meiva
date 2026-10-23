@@ -73,6 +73,7 @@ def armed_billing() -> Generator[BillingRuntime]:
                 f"http://127.0.0.1:{collector.server_port}",
                 production=False,
                 home=meiva_home(),
+                strip_content=False,
             )
             assert tracing.is_initialized(), "the real tracing arm must succeed"
             active_provider = trace.get_tracer_provider()
