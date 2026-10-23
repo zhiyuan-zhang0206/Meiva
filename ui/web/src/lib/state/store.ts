@@ -24,6 +24,7 @@
 import { create } from "zustand";
 
 import type { OpenTasksHint } from "@/lib/contracts/types";
+import { registerSseRuntime } from "../transport/sse-lifecycle";
 
 // Single dismiss timer for the toast slot (see showToast).
 let toastTimer: ReturnType<typeof setTimeout> | null = null;
@@ -151,3 +152,5 @@ export const useStore = create<Store>()((set) => ({
   connState: "open",
   setConnState: (s) => set({ connState: s }),
 }));
+
+registerSseRuntime({ useStore });

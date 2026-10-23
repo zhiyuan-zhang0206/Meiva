@@ -15,8 +15,8 @@ import { useEffect, useState } from "react";
 
 import { useMediaQuery } from "./use-media-query";
 
-export const BREAKPOINT_XS_PX = 320;
-export const BREAKPOINT_SM_PX = 390;
+const BREAKPOINT_XS_PX = 320;
+const BREAKPOINT_SM_PX = 390;
 export const BREAKPOINT_MD_PX = 768;
 export const BREAKPOINT_LG_PX = 1024;
 // Tailwind xl; the wide split threshold. The "xl" tier already starts at 1024px.

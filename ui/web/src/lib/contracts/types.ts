@@ -71,7 +71,6 @@ export {
   type TaskListResponse,
   type TaskPriority,
   type TaskRow,
-  type TaskStatus,
   type TaskSummaryRow,
   type TimeMode,
   type ToUserDocument,
@@ -83,6 +82,7 @@ export {
 
 type Schemas = components["schemas"];
 
+export type TaskStatus = Schemas["TaskStatus"];
 export type CancelAgentResponse = Schemas["CancelAgentResponse"];
 export type CompactAgentResponse = Schemas["CompactAgentResponse"];
 export type RetryLaunchAccepted = Schemas["RetryLaunchAccepted"];

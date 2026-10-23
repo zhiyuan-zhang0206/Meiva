@@ -3,6 +3,7 @@
 import { useEffect } from "react";
 
 import { useUserSettings } from "../state/use-user-settings";
+import { registerSseRuntime } from "../transport/sse-lifecycle";
 import type { SseChannel } from "../transport/sse-share";
 
 // meiva:note
@@ -45,3 +46,5 @@ export function useMergedSseChannels(): readonly SseChannel[] {
   }, [halfState]);
   return mergedChannelsFor(on, MERGED_SSE_CHANNELS);
 }
+
+registerSseRuntime({ useMergedChannels: useMergedSseChannels });

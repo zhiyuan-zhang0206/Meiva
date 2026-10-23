@@ -28,5 +28,4 @@ exports = ["auth-context.tsx", "content-security-policy.ts", "nonce-context.tsx"
 "auth-context.test.tsx#vi.stubGlobal fetch" = 1
 
 [debt.unfrozen-value]
-"auth-context.tsx#sessionInvalidHandler" = 1
 "login-ticket.ts#inFlight" = 1

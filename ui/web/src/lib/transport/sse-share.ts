@@ -5,8 +5,8 @@
 // BroadcastChannel. The fallback lives in the existing Providers.
 
 import { API_BASE, api } from "./api";
-import { notifySessionInvalid } from "../auth/auth-context";
-import { track } from "../telemetry/telemetry";
+import { trackTransport } from "./api-base";
+import { notifySessionInvalid } from "./sse-lifecycle";
 
 export type SseChannel = "system" | "alerts" | "systemAll";
 export type SseSlot = SseChannel | "merged";
@@ -90,7 +90,7 @@ export function reportSseTransportMode(): void {
   const hasBC = typeof BroadcastChannel !== "undefined";
   const context: unknown = typeof window === "undefined" ? false : Reflect.get(window, "isSecureContext");
   const secure = context === true;
-  track("sse-transport", {
+  trackTransport("sse-transport", {
     key: sharedSseSupported() ? "shared" : "fallback",
     value: `secure=${Number(secure)},locks=${Number(hasLocks)},bc=${Number(hasBC)}`,
   });

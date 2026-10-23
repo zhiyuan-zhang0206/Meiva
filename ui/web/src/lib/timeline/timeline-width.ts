@@ -18,7 +18,7 @@
 export const TIMELINE_WIDTH_RATIO_DEFAULT = 0.4;
 export const TIMELINE_WIDTH_RATIO_MIN = 0.2;
 export const TIMELINE_WIDTH_RATIO_MAX = 0.8;
-export const TIMELINE_MAX_CAP_PX = 1280;
+const TIMELINE_MAX_CAP_PX = 1280;
 
 // Viewport width below which the timeline goes full-width and the ratio
 // setting is ignored. Matches Tailwind's `md` breakpoint (768px), the same

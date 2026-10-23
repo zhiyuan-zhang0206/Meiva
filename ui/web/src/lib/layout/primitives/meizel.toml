@@ -1,0 +1,4 @@
+exports = ["bars.ts", "flex.ts"]
+
+[purity]
+"." = "strict"

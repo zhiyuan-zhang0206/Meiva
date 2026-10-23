@@ -1,8 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { readScrollMemory, saveScrollMemory } from "./scroll-memory";
+import { readScrollMemory, saveScrollMemory } from "../scroll-memory";
 
-// The store is a module-level map, so each test uses its own entry key.
 describe("scroll memory (per history entry)", () => {
   it("returns null for an unknown entry", () => {
     expect(readScrollMemory("_b_unknown_")).toBeNull();

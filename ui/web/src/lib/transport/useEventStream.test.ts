@@ -15,14 +15,20 @@ vi.mock("@/lib/transport/api", () => ({ API_BASE: "", api: { checkAuth: mocks.ch
 
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { createElement } from "react";
+import { createContext, createElement, useContext, useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { create } from "zustand";
 
-import { useStore } from "../state/store";
-import { AuthProvider, useAuth } from "../auth/auth-context";
 import { AGENTS_QUERY_KEY, RECONNECT_QUERY_KEYS } from "../fold";
 import { useFoldOwner } from "../fold/owner";
+import { api } from "./api";
+import {
+  registerSseRuntime,
+  setSessionInvalidHandler,
+  type SseAuthStatus,
+  type SseStoreSlice,
+} from "./sse-lifecycle";
 import { registerAgentEventStreamTests } from "./tests/use-event-stream-agent";
 import type { EventStreamTestContext } from "./tests/use-event-stream-context";
 import { registerEventStreamProviderTests } from "./tests/use-event-stream-provider";
@@ -32,6 +38,56 @@ import {
   EventStreamProvider,
   useEventStream,
 } from "./useEventStream";
+
+const useStore = create<SseStoreSlice>()((set) => ({
+  reconnectNonce: 0,
+  bumpReconnect: () => set((s) => ({ reconnectNonce: s.reconnectNonce + 1 })),
+  activeId: null,
+}));
+
+const AuthContext = createContext<{ status: SseAuthStatus } | null>(null);
+
+function AuthProvider({ children }: { children: ReactNode }) {
+  const [status, setStatus] = useState<SseAuthStatus>("loading");
+  useEffect(() => {
+    setSessionInvalidHandler(() => setStatus("unauthenticated"));
+    return () => setSessionInvalidHandler(null);
+  }, []);
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .checkAuth()
+      .then((res) => {
+        if (!cancelled) setStatus(res.authenticated ? "authenticated" : "unauthenticated");
+      })
+      .catch(() => {
+        if (!cancelled) setStatus("unauthenticated");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  return createElement(AuthContext.Provider, { value: { status } }, children);
+}
+
+function useAuth(): { status: SseAuthStatus } {
+  const ctx = useContext(AuthContext);
+  if (!ctx) throw new Error("useAuth must be used inside <AuthProvider>");
+  return ctx;
+}
+
+function useDocumentVisible(): boolean {
+  const [isVisible, setIsVisible] = useState(
+    () => typeof document === "undefined" || document.visibilityState === "visible",
+  );
+  useEffect(() => {
+    const sync = () => setIsVisible(document.visibilityState === "visible");
+    document.addEventListener("visibilitychange", sync);
+    sync();
+    return () => document.removeEventListener("visibilitychange", sync);
+  }, []);
+  return isVisible;
+}
 
 // -- mock global EventSource ----------------------------------------
 
@@ -96,7 +152,11 @@ beforeEach(() => {
     value: "visible",
   });
   useStore.setState({ reconnectNonce: 0, activeId: null });
-
+  registerSseRuntime({
+    useAuthStatus: () => useAuth().status,
+    useStore,
+    useDocumentVisible,
+  });
 });
 
 afterEach(() => {
@@ -319,8 +379,8 @@ describe("EventStreamProvider half-dead watchdog", () => {
     }));
     vi.stubGlobal("BroadcastChannel", class {
       onmessage: ((event: MessageEvent<unknown>) => void) | null = null;
-      postMessage(_message: unknown): void { /* one-tab test */ }
-      close(): void { /* one-tab test */ }
+      postMessage(_message: unknown): void { return; }
+      close(): void { return; }
     });
 
     renderHook(() => useEventStream(vi.fn(), vi.fn()), { wrapper: withProvider() });

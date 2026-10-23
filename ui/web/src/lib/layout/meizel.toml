@@ -4,18 +4,21 @@ exports = ["breakpoint.ts", "compact-transition.ts", "content-toggle-store.ts", 
 "breakpoint.test.ts" = ["breakpoint.ts", "use-media-query.ts"]
 "breakpoint.ts" = ["use-media-query.ts"]
 "content-toggle-store.test.ts" = ["content-toggle-store.ts"]
-"layout.test.ts" = ["layout.ts"]
+"layout.ts" = ["primitives"]
 "panel-layout-storage.test.ts" = ["panel-layout-storage.ts"]
-"scroll-memory.test.ts" = ["scroll-memory.ts"]
 "sticky-switch-race.test.ts" = ["sticky.ts"]
 "sticky.test.ts" = ["sticky.ts"]
+"tests" = ["layout.ts", "scroll-memory.ts"]
 "use-client-ready.test.tsx" = ["use-client-ready.ts"]
 "use-media-query.test.tsx" = ["use-media-query.ts"]
 
 [purity]
 "." = "strict-to-be"
+"compact-transition.ts" = "strict"
 "content-toggle-store.ts" = "strict"
+"layout.ts" = "strict"
 "panel-layout-storage.ts" = "strict"
+"scroll-memory.ts" = "strict"
 "sticky.ts" = "strict"
 "switch-budget.ts" = "strict"
 
@@ -49,14 +52,5 @@ exports = ["breakpoint.ts", "compact-transition.ts", "content-toggle-store.ts", 
 "use-client-ready.test.tsx#vi.stubGlobal requestIdleCallback" = 1
 "use-media-query.test.tsx#vi.stubGlobal matchMedia" = 1
 
-[debt.unfrozen-value]
-"compact-transition.ts#beforeDisplayChange" = 1
-"scroll-memory.ts#memory" = 1
-"use-client-ready.ts#pumpScheduled" = 1
-
 [debt.wide-exports]
 "meizel.toml#exports" = 1
-
-[debt.wide-public-surface]
-"breakpoint.ts#__all__" = 1
-"layout.ts#__all__" = 1
