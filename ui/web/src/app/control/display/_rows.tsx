@@ -194,8 +194,9 @@ function ColorRow({
 
 // ── Section wrapper ──
 
+// meiva:note
 // `id` is the group's URL anchor — must match the Display sub-entries in
-// _sections.ts so the nav's sub-links land here.
+// sections.ts so the nav's sub-links land here.
 export function SettingsSection({
   id,
   title,

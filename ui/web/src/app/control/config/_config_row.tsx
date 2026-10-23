@@ -14,13 +14,15 @@ import {
   CONFIG_DISPLAY_GROUPS,
   CONFIG_FILTERS,
   HIDDEN_ENV_VARS,
+} from "../config-group-defs";
+import {
   displayGroupId,
   displayOrder,
   fieldFilterTags,
   fieldLabel,
   formatConfigValue,
   isPerAgent,
-} from "../_config_groups";
+} from "../config-groups";
 
 export type MachineSelection = string | null;
 

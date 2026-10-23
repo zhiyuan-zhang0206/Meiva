@@ -1,5 +1,6 @@
 "use client";
 
+// meiva:note
 // Section visibility — the primitive behind the Control page's "structure
 // always in the DOM, data fetched from first paint" rule.
 //
@@ -20,17 +21,20 @@
 
 import { createContext, type ReactNode, useCallback, useContext, useRef, useState } from "react";
 
+// meiva:note
 // Default true: a section rendered outside a provider (a direct
 // `/control/<sub>` route, or a unit test that doesn't scroll) fetches
 // immediately, preserving the pre-vertical-page behavior.
 const SectionVisibilityContext = createContext<boolean>(true);
 
-/** Whether the enclosing Control section is on (or near) screen. Feed into a
- *  query's `enabled` so off-screen sections stop fetching/polling. */
+// meiva:note
+// Whether the enclosing Control section is on (or near) screen. Feed into a
+// query's `enabled` so off-screen sections stop fetching/polling.
 export function useSectionVisible(): boolean {
   return useContext(SectionVisibilityContext);
 }
 
+// meiva:note
 // Margin added to the root's bounding box before computing intersections —
 // a section keeps polling a little after it scrolls past the viewport edge,
 // so the common small-scroll case never shows a loading flash right at the
@@ -39,18 +43,17 @@ export function useSectionVisible(): boolean {
 const PREFETCH_PX = 300;
 const ROOT_MARGIN = `${PREFETCH_PX}px 0px ${PREFETCH_PX}px 0px`;
 
-/**
- * Observe an element's viewport intersection. Returns a ref callback to attach
- * and the live in-view boolean. Root is the viewport (`null`) — the Control
- * scroll container fills it, so viewport intersection tracks on-screen-ness
- * without threading the container ref down.
- *
- * Starts `true` unconditionally (not seeded from the element's on-mount
- * position) so every section fires its first fetch immediately regardless of
- * where it sits on the page — the whole page is "expanded" from first paint.
- * The IntersectionObserver then takes over for ongoing on-screen tracking,
- * pausing a section's polling once it has actually scrolled out of view.
- */
+// meiva:note
+// Observe an element's viewport intersection. Returns a ref callback to attach
+// and the live in-view boolean. Root is the viewport (`null`) — the Control
+// scroll container fills it, so viewport intersection tracks on-screen-ness
+// without threading the container ref down.
+//
+// Starts `true` unconditionally (not seeded from the element's on-mount
+// position) so every section fires its first fetch immediately regardless of
+// where it sits on the page — the whole page is "expanded" from first paint.
+// The IntersectionObserver then takes over for ongoing on-screen tracking,
+// pausing a section's polling once it has actually scrolled out of view.
 export function useInView(): [(node: Element | null) => void, boolean] {
   const [inView, setInView] = useState(true);
   const observerRef = useRef<IntersectionObserver | null>(null);
@@ -111,7 +114,8 @@ export function useEverNearViewport(): [(node: Element | null) => void, boolean]
   return [setRef, near];
 }
 
-/** Provide a fixed visibility to children (used by the section wrapper). */
+// meiva:note
+// Provide a fixed visibility to children (used by the section wrapper).
 export function SectionVisibilityProvider({
   visible,
   children,

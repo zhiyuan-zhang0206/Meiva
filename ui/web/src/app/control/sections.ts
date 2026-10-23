@@ -1,3 +1,4 @@
+// meiva:note
 // The section model shared by the two vertical anchor-nav pages — Control
 // (the write/manage surface) and Insights (the read-only observability
 // surface). Each list is the single ordered source for both a page's left
@@ -8,6 +9,7 @@
 // remaining sections only in Control — see CONTROL_SECTIONS / INSIGHTS_SECTIONS
 // below.
 
+// meiva:note
 // Element ids of each page's scroll container — the scroll-spy attaches its
 // listener here and measures anchor positions relative to it. Distinct ids so
 // the (identical) nav component targets the right container per page.
@@ -17,19 +19,22 @@ export const INSIGHTS_SCROLL_ID = "insights-scroll";
 export interface ControlSubSection {
   id: string;
   label: string;
-  /** i18n key under the "control.sections" namespace — the nav/page render
-   *  the translated label when present, falling back to `label` (English). */
+  // meiva:note
+  // i18n key under the "control.sections" namespace — the nav/page render
+  // the translated label when present, falling back to `label` (English).
   labelKey?: string;
 }
 
 export interface ControlSectionDef {
   id: string;
   label: string;
-  /** i18n key under the "control.sections" namespace (same fallback rule). */
+  // meiva:note
+  // i18n key under the "control.sections" namespace (same fallback rule).
   labelKey?: string;
   subs?: ControlSubSection[];
 }
 
+// meiva:note
 // Render + nav order for Control (the write/manage surface). Guide leads —
 // "ask Meiva to run the cluster" — then the config/policy surfaces, then the
 // per-host extension inventories (Plugins / MCP / Skills) and Schedules.
@@ -47,7 +52,8 @@ export const CONTROL_SECTIONS: ControlSectionDef[] = [
     label: "Config",
     labelKey: "config",
     subs: [
-      // Neither of these is a field bucket (see _config_groups.ts): the default
+      // meiva:note
+      // Neither of these is a field bucket (see config-groups.ts): the default
       // model edits a DB row rather than a `.env` field, and the per-model view is
       // read-only. Both render their own element above the editable groups.
       { id: "config-default-model", label: "Default model", labelKey: "config-default-model" },
@@ -93,6 +99,7 @@ export const CONTROL_SECTIONS: ControlSectionDef[] = [
   { id: "okf-graph", label: "OKF graph", labelKey: "okf-graph" },
 ];
 
+// meiva:note
 // Render + nav order for Insights (the read-only observability surface). Status
 // leads — "how is the cluster right now" is the most common reason to open it —
 // followed by Ops (the Grafana dashboard link).
