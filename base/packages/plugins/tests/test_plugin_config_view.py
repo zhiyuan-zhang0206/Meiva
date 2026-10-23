@@ -19,6 +19,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from base.config.tests.configuration import defaults
 from base.host.env.agent_slices import AgentSlices
+from base.packages.plugin_config_images import PluginConfigOwner
 from base.packages.plugins.config_registration import (
     all_plugin_configs,
     bind_plugin_config,
@@ -44,8 +45,8 @@ class _BetaConfig(BaseModel):
 def two_plugins(unit_home) -> dict[str, BaseModel]:
     """One root's resolved bindings, with no ambient state."""
     configs: dict[str, BaseModel] = {}
-    bind_plugin_config("alpha", _AlphaConfig, configs)
-    bind_plugin_config("beta", _BetaConfig, configs)
+    bind_plugin_config(PluginConfigOwner("alpha", _AlphaConfig, disk_image_path("alpha")), configs)
+    bind_plugin_config(PluginConfigOwner("beta", _BetaConfig, disk_image_path("beta")), configs)
     return configs
 
 
@@ -160,7 +161,7 @@ def test_independent_roots_bind_the_same_plugin_without_sharing_values(
 ) -> None:
     second: dict[str, BaseModel] = {}
     disk_image_path("alpha").write_text(_AlphaConfig(marker="second-root").model_dump_json())
-    bind_plugin_config("alpha", _AlphaConfig, second)
+    bind_plugin_config(PluginConfigOwner("alpha", _AlphaConfig, disk_image_path("alpha")), second)
 
     first_agent = _slices(two_plugins)
     second_agent = _slices(second)

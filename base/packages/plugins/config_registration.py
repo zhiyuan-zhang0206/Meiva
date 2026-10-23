@@ -8,6 +8,7 @@ from typing import Any, Literal, cast
 from pydantic import BaseModel, ValidationError
 from pydantic.fields import FieldInfo
 
+from base.packages.plugin_config_contracts import ConfigImage, PluginConfigChangedError
 from base.packages.plugins import (
     all_plugin_configs,
     config_from_image,
@@ -62,9 +63,8 @@ __all__ = [
 ]
 
 
-def bind_plugin_config(
-    plugin: str, cls: type[BaseModel], configs: dict[str, BaseModel]
-) -> Callable[[], None]:
+def bind_plugin_config(owner: ConfigImage, configs: dict[str, BaseModel]) -> Callable[[], None]:
+    plugin, cls = owner.name, owner.cls
     if not (isinstance(cls, type) and issubclass(cls, BaseModel)):
         raise TypeError(
             f"plugin {plugin!r} declared config {cls!r}, which is not a BaseModel subclass — "
@@ -74,7 +74,7 @@ def bind_plugin_config(
         raise DuplicateRegistration(
             f"plugin {plugin!r} already has a bound config ({type(configs[plugin]).__name__})"
         )
-    instance = _instantiate_from_disk(plugin, cls)
+    instance = _instantiate_from_disk(owner)
     configs[plugin] = instance
 
     def undo() -> None:
@@ -83,15 +83,20 @@ def bind_plugin_config(
     return undo
 
 
-def _instantiate_from_disk(plugin: str, cls: type[BaseModel]) -> BaseModel:
-    from base.packages.plugin_config_images import PluginConfigChangedError
-
-    config_path = disk_image_path(plugin)
-    read_plugin_config(plugin, cls, config_path)
-    if not config_path.exists():
+def _instantiate_from_disk(owner: ConfigImage) -> BaseModel:
+    try:
+        content = owner.read()
+    except FileNotFoundError:
+        initial = owner.cls()
+        missing = True
+    else:
+        initial = config_from_image(owner.cls, content, owner.path)
+        missing = False
+    with_cluster_policy(owner.name, initial)
+    if missing:
         with suppress(PluginConfigChangedError):
-            write_default_disk_image(plugin, cls)
-    return with_cluster_policy(plugin, config_from_image(cls, config_path.read_text(), config_path))
+            owner.create_default()
+    return with_cluster_policy(owner.name, config_from_image(owner.cls, owner.read(), owner.path))
 
 
 def _reconcile_config_image[C: BaseModel](
@@ -120,26 +125,25 @@ def _reconcile_config_image[C: BaseModel](
 
 
 # meiva:link base/packages/plugins/docs/plugin-config/plugin-config.meiva.okf.md
-def merge_disk_image_schema(plugin: str, cls: type[BaseModel]) -> tuple[set[str], set[str]]:
-    config_path = disk_image_path(plugin)
+def merge_disk_image_schema(owner: ConfigImage) -> tuple[set[str], set[str]]:
+    cls, config_path = owner.cls, owner.path
 
-    if not config_path.exists():
-        write_default_disk_image(plugin, cls)
+    try:
+        captured = owner.read()
+    except FileNotFoundError:
+        owner.create_default()
         return set(cls.model_fields.keys()), set()
-
-    captured = config_path.read_text()
     candidate, added, removed = _reconcile_config_image(cls, captured, config_path)
     if not added and not removed:
         return set(), set()
 
     from base.packages.plugin_config_images import (
-        PluginConfigOwner,
         image_revision,
         write_config_image,
     )
 
     write_config_image(
-        PluginConfigOwner(plugin, cls, config_path),
+        owner,
         candidate,
         expected_digest=image_revision(captured.encode()),
     )

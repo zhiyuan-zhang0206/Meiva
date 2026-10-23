@@ -5,7 +5,9 @@ from contextlib import redirect_stdout
 import pytest
 
 import meiva
+from base.packages.plugin_config_images import DiskPluginConfigImages
 from base.packages.plugins.extensions import ExtensionRegistry
+from base.paths.home import resolve_meiva_home
 from meiva.sdk_surface import install
 from meiva.sdk_surface.installation import Installation
 
@@ -33,6 +35,7 @@ def load_meiva_code_plugin(
         ExtensionRegistry((("meiva_code", plugin.contribute()),)),
         catalog=model_installation.require_catalog(),
         authority=model_installation.authority,
+        config_images=DiskPluginConfigImages(resolve_meiva_home()),
     )
 
     yield
@@ -56,6 +59,7 @@ def _load_meiva_fleet_plugin(
         ExtensionRegistry((("meiva_fleet", plugin.contribute()),)),
         catalog=model_installation.require_catalog(),
         authority=model_installation.authority,
+        config_images=DiskPluginConfigImages(resolve_meiva_home()),
     )
 
     yield

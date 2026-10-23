@@ -19,6 +19,7 @@ from base.config import ConfigBoot
 from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.lm.catalog import ModelCatalog
+from base.packages.plugin_config_contracts import UnboundPluginConfigImages
 from base.packages.plugins.extensions import EMPTY
 from meiva import impersonation
 from meiva.impersonation import attachment as attachment_module
@@ -86,6 +87,7 @@ def attached_runtime(
     sampling = call_policy.SamplingPolicyOwner()
     installation = Installation(
         registry=EMPTY,
+        config_images=UnboundPluginConfigImages(),
         expansions=(),
         wrap_layers={},
         skill_providers=(),

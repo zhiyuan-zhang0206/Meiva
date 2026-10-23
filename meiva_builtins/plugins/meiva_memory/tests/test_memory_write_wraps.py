@@ -20,7 +20,9 @@ import pytest
 import meiva
 from agent.state import build_agent_state
 from base.log.tests.log_records import LogRecords
+from base.packages.plugin_config_images import DiskPluginConfigImages
 from base.packages.plugins.extensions import ExtensionRegistry
+from base.paths.home import resolve_meiva_home
 from meiva import gateway_client
 from meiva.sdk_surface import install, process_context
 from meiva.tests.fixtures.pin_agent import pin_agent
@@ -65,7 +67,7 @@ def exec_turn(unit_home: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path
 
     pin_agent(17)
     registry = _registry()
-    install.install(registry)
+    install.install(registry, config_images=DiskPluginConfigImages(resolve_meiva_home()))
     process_context.set_state(build_agent_state(registry)(messages=[], halted=False))
     process_context.set_state_update({})
     with (
