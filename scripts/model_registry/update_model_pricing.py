@@ -419,9 +419,15 @@ def sync_plugin_rates(
     repo_root: Path,
     *,
     write: bool = True,
+    now: datetime | None = None,
 ) -> PluginSyncResult:
     """Synchronize built-in providers to the archive's complete price semantics."""
-    return _sync_plugin_rates(archive_path, repo_root, now=now_utc(), write=write)
+    return _sync_plugin_rates(
+        archive_path,
+        repo_root,
+        now=now_utc() if now is None else now,
+        write=write,
+    )
 
 
 def _fetch_deepseek_html() -> str:
@@ -434,7 +440,7 @@ def _fetch_deepseek_html() -> str:
     return response.content.decode("utf-8")
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: list[str] | None = None, *, now: datetime | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Compare Meiva's reviewed catalog with official provider pricing."
     )
@@ -481,7 +487,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.sync_plugins:
         if args.source_file is not None or args.detected_at is not None:
             parser.error("--source-file/--detected-at cannot be used with --sync-plugins")
-        result = sync_plugin_rates(catalog_path, repo_root, write=args.write)
+        result = sync_plugin_rates(catalog_path, repo_root, write=args.write, now=now)
         if result.drifted_models and not args.write:
             print(f"Plugin pricing drift detected for: {', '.join(result.drifted_models)}")
             return 1

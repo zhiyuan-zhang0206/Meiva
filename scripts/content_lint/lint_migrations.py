@@ -272,10 +272,13 @@ _ROLE_SWITCH_RE = re.compile(
 )
 
 
-def _check_no_role_switch() -> list[str]:
+def _check_no_role_switch(
+    schema_sql: Path = SCHEMA_SQL,
+    migrations_dir: Path = MIGRATIONS_DIR,
+) -> list[str]:
     """Baseline and migrations must keep the owner role they are applied as."""
     errors: list[str] = []
-    for path in [SCHEMA_SQL, *sorted(MIGRATIONS_DIR.rglob("*.sql"))]:
+    for path in [schema_sql, *sorted(migrations_dir.rglob("*.sql"))]:
         masked, _ = _mask_nonstatic_sql(path.read_text(encoding="utf-8"))
         for match in _ROLE_SWITCH_RE.finditer(masked):
             lineno = masked.count("\n", 0, match.start()) + 1
@@ -297,16 +300,16 @@ def _timestamp_valid(stem: str) -> bool:
     return True
 
 
-def _collect_migrations() -> tuple[set[str], list[str]]:
+def _collect_migrations(migrations_dir: Path = MIGRATIONS_DIR) -> tuple[set[str], list[str]]:
     """Scan migrations/; return (migration stems, error list)."""
     errors: list[str] = []
     ups: set[str] = set()
     prefixes: set[str] = set()
-    if not MIGRATIONS_DIR.is_dir():
-        errors.append(f"migrations/ directory does not exist: {MIGRATIONS_DIR}")
+    if not migrations_dir.is_dir():
+        errors.append(f"migrations/ directory does not exist: {migrations_dir}")
         return ups, errors
 
-    for entry in sorted(MIGRATIONS_DIR.rglob("*")):
+    for entry in sorted(migrations_dir.rglob("*")):
         if entry.is_dir():
             continue
         if entry.name.startswith(".") or entry.name == "README.md":
@@ -346,16 +349,16 @@ def _collect_migrations() -> tuple[set[str], list[str]]:
     return ups, errors
 
 
-def _check_schema_seed() -> list[str]:
+def _check_schema_seed(schema_sql: Path = SCHEMA_SQL) -> list[str]:
     """db/schema.sql must stamp the baseline sentinel and must not carry the
     pre-cutover generate_series seed.
 
     Seed *completeness* — stamp every migration whose non-idempotent change is
     folded in — is enforced by check 8 for its mechanically detectable subset;
     this function guards only the sentinel and the retired cutover seed."""
-    if not SCHEMA_SQL.is_file():
-        return [f"db/schema.sql does not exist: {SCHEMA_SQL}"]
-    text = SCHEMA_SQL.read_text(encoding="utf-8")
+    if not schema_sql.is_file():
+        return [f"db/schema.sql does not exist: {schema_sql}"]
+    text = schema_sql.read_text(encoding="utf-8")
     errors: list[str] = []
     if "generate_series" in text:
         errors.append(
@@ -371,7 +374,7 @@ def _check_schema_seed() -> list[str]:
     return errors
 
 
-def _check_backfill_snapshot_drop_plans() -> list[str]:
+def _check_backfill_snapshot_drop_plans(migrations_dir: Path = MIGRATIONS_DIR) -> list[str]:
     """Require every temporary `*_backfill_*` table to have a later drop migration.
 
     This is a naming convention, not a SQL parser; migration table names are unquoted
@@ -380,7 +383,7 @@ def _check_backfill_snapshot_drop_plans() -> list[str]:
     creations: list[tuple[str, str]] = []
     drops: dict[str, list[str]] = {}
 
-    for entry in sorted(MIGRATIONS_DIR.rglob("*")):
+    for entry in sorted(migrations_dir.rglob("*")):
         if not entry.name.endswith(".sql"):
             continue
         text, _ = _mask_nonstatic_sql(entry.read_text(encoding="utf-8"))
@@ -527,38 +530,18 @@ def _ddl_usage(masked_text: str) -> tuple[list[_DdlCandidate], _DropKeys]:
     key sets (a table or index drop keys by name alone: it needs no binder).
     """
     adds: list[_DdlCandidate] = []
-    drops: _DropKeys = {
-        "column": set(),
-        "table": set(),
-        "index": set(),
-        "constraint": set(),
-        "trigger": set(),
-    }
+    drops: _DropKeys = {k: set() for k in ("column", "table", "index", "constraint", "trigger")}
 
     for match in _ALTER_TABLE_STMT_RE.finditer(masked_text):
         table = match.group("table").lower()
         body = match.group("body")
         body_start = match.start("body")
         for add in _ADD_COLUMN_RE.finditer(body):
-            adds.append(
-                (
-                    "column",
-                    table,
-                    add.group("column").lower(),
-                    bool(add.group("guard")),
-                    body_start + add.start(),
-                )
-            )
+            col = add.group("column").lower()
+            adds.append(("column", table, col, bool(add.group("guard")), body_start + add.start()))
         for add in _ADD_CONSTRAINT_RE.finditer(body):
-            adds.append(
-                (
-                    "constraint",
-                    table,
-                    add.group("constraint").lower(),
-                    False,
-                    body_start + add.start(),
-                )
-            )
+            ck = add.group("constraint").lower()
+            adds.append(("constraint", table, ck, False, body_start + add.start()))
         for drop in _DROP_COLUMN_RE.finditer(body):
             drops["column"].add((table, drop.group("column").lower()))
         for drop in _DROP_CONSTRAINT_RE.finditer(body):
@@ -571,26 +554,14 @@ def _ddl_usage(masked_text: str) -> tuple[list[_DdlCandidate], _DropKeys]:
     for match in _DROP_TABLE_RE.finditer(masked_text):
         drops["table"].add((None, match.group("table").lower()))
     for match in _CREATE_INDEX_STMT_RE.finditer(masked_text):
-        adds.append(
-            (
-                "index",
-                match.group("table").lower(),
-                match.group("index").lower(),
-                bool(match.group("guard")),
-                match.start(),
-            )
-        )
+        tbl, idx = match.group("table").lower(), match.group("index").lower()
+        adds.append(("index", tbl, idx, bool(match.group("guard")), match.start()))
     for match in _DROP_INDEX_RE.finditer(masked_text):
         drops["index"].add((None, match.group("index").lower()))
     for match in _CREATE_TRIGGER_STMT_RE.finditer(masked_text):
+        tbl, trg = match.group("table").lower(), match.group("trigger").lower()
         adds.append(
-            (
-                "trigger",
-                match.group("table").lower(),
-                match.group("trigger").lower(),
-                "or replace" in match.group("create").lower(),
-                match.start(),
-            )
+            ("trigger", tbl, trg, "or replace" in match.group("create").lower(), match.start())
         )
     for match in _DROP_TRIGGER_RE.finditer(masked_text):
         drops["trigger"].add((match.group("table").lower(), match.group("trigger").lower()))
@@ -624,6 +595,7 @@ def _dropped_for_replay(drops: _DropKeys, kind: str, table: str | None, name: st
 
 def _unseeded_ddl(
     seeded: set[str],
+    migrations_dir: Path = MIGRATIONS_DIR,
 ) -> tuple[list[tuple[str, list[_DdlCandidate], list[tuple[int, int]]]], _DropKeys]:
     """Each unseeded migration's DDL statements, plus the drops of all of them.
 
@@ -631,7 +603,7 @@ def _unseeded_ddl(
     """
     facts: list[tuple[str, list[_DdlCandidate], list[tuple[int, int]]]] = []
     all_drops: _DropKeys = {k: set() for k in ("column", "table", "index", "constraint", "trigger")}
-    for entry in sorted(MIGRATIONS_DIR.rglob("*")):
+    for entry in sorted(migrations_dir.rglob("*")):
         match = FILENAME_RE.match(entry.name) if entry.name.endswith(".sql") else None
         if not match or match.group(1) in seeded:
             continue
@@ -643,7 +615,10 @@ def _unseeded_ddl(
     return facts, all_drops
 
 
-def _check_folded_strict_without_seed() -> list[str]:
+def _check_folded_strict_without_seed(
+    schema_sql: Path = SCHEMA_SQL,
+    migrations_dir: Path = MIGRATIONS_DIR,
+) -> list[str]:
     """An unseeded migration must not carry a strict (non-idempotent) DDL
     statement whose object already exists in db/schema.sql.
 
@@ -659,14 +634,14 @@ def _check_folded_strict_without_seed() -> list[str]:
     db/schema.sql (a replay cannot hit already-exists), and rare strict kinds
     like CREATE TYPE (the smoke covers those).
     """
-    if not SCHEMA_SQL.is_file():
-        return [f"db/schema.sql does not exist: {SCHEMA_SQL}"]
-    raw_schema = SCHEMA_SQL.read_text(encoding="utf-8")
+    if not schema_sql.is_file():
+        return [f"db/schema.sql does not exist: {schema_sql}"]
+    raw_schema = schema_sql.read_text(encoding="utf-8")
     seeded = _migration_seed_names(raw_schema)
     masked_schema, _ = _mask_nonstatic_sql(raw_schema)
     catalog = _schema_catalog(masked_schema)
 
-    facts, all_drops = _unseeded_ddl(seeded)
+    facts, all_drops = _unseeded_ddl(seeded, migrations_dir)
 
     errors: list[str] = []
     for stem, adds, do_spans in facts:
@@ -707,13 +682,13 @@ def _replay_failure(stem: str, kind: str, table: str | None, name: str) -> str:
     )
 
 
-def _git(*args: str) -> subprocess.CompletedProcess[str]:
+def _git(*args: str, repo_root: Path = REPO_ROOT) -> subprocess.CompletedProcess[str]:
     return subprocess.run(  # noqa: S603 — local git query, no shell
-        ["git", "-C", str(REPO_ROOT), *args], capture_output=True, text=True, check=False
+        ["git", "-C", str(repo_root), *args], capture_output=True, text=True, check=False
     )
 
 
-def immutability_base(ref: str | None) -> str | None:
+def immutability_base(ref: str | None, *, repo_root: Path = REPO_ROOT) -> str | None:
     """The revision merged migrations are compared against, or None when unknown.
 
     `ref` (CI passes the pull request's base revision with `--base`) must resolve;
@@ -725,18 +700,23 @@ def immutability_base(ref: str | None) -> str | None:
             ("merge-base", "--", "HEAD", ref),
             ("rev-parse", "--verify", "--end-of-options", f"{ref}^{{commit}}"),
         ):
-            result = _git(*args)
+            result = _git(*args, repo_root=repo_root)
             if result.returncode == 0:
                 return result.stdout.strip()
         raise ValueError(f"--base {ref!r} cannot resolve to a commit")
-    if _git("rev-parse", "--verify", "origin/main^{commit}").returncode == 0:
-        result = _git("merge-base", "HEAD", "origin/main")
+    if _git("rev-parse", "--verify", "origin/main^{commit}", repo_root=repo_root).returncode == 0:
+        result = _git("merge-base", "HEAD", "origin/main", repo_root=repo_root)
         if result.returncode == 0:
             return result.stdout.strip()
     return None
 
 
-def _check_merged_migrations_immutable(base: str | None) -> list[str]:
+def _check_merged_migrations_immutable(
+    base: str | None,
+    *,
+    repo_root: Path = REPO_ROOT,
+    migrations_dir: Path = MIGRATIONS_DIR,
+) -> list[str]:
     """Merged SQL bytes and migration names are immutable; directories may change."""
     if base is None:
         print(
@@ -744,10 +724,10 @@ def _check_merged_migrations_immutable(base: str | None) -> list[str]:
             file=sys.stderr,
         )
         return []
-    result = _git("ls-tree", "-r", "-z", base, "--", "migrations")
+    result = _git("ls-tree", "-r", "-z", base, "--", "migrations", repo_root=repo_root)
     if result.returncode != 0:
         return [f"cannot read migrations/ at {base}: {result.stderr.strip()}"]
-    current = {entry.name: entry for entry in MIGRATIONS_DIR.rglob("*.sql")}
+    current = {entry.name: entry for entry in migrations_dir.rglob("*.sql")}
     errors: list[str] = []
     for record in result.stdout.split("\0"):
         metadata, separator, old_path = record.partition("\t")
@@ -758,11 +738,11 @@ def _check_merged_migrations_immutable(base: str | None) -> list[str]:
         if path is None:
             verb = "deleted or renamed"
         else:
-            digest = _git("hash-object", str(path))
+            digest = _git("hash-object", str(path), repo_root=repo_root)
             if digest.returncode != 0:
                 errors.append(f"cannot hash migration {path}: {digest.stderr.strip()}")
                 continue
-            old = _git("cat-file", "-p", metadata.split()[2]).stdout
+            old = _git("cat-file", "-p", metadata.split()[2], repo_root=repo_root).stdout
             for a, b in (("a" + "va", "meiva"), ("A" + "va", "Meiva"), ("A" + "VA", "MEIVA")):
                 old = old.replace(a, b)
             if digest.stdout.strip() == metadata.split()[2] or old == path.read_text("utf-8"):
@@ -774,13 +754,23 @@ def _check_merged_migrations_immutable(base: str | None) -> list[str]:
     return errors
 
 
-def main(base_ref: str | None = None) -> int:
-    ups, errors = _collect_migrations()
-    errors.extend(_check_merged_migrations_immutable(immutability_base(base_ref)))
-    errors.extend(_check_schema_seed())
-    errors.extend(_check_backfill_snapshot_drop_plans())
-    errors.extend(_check_folded_strict_without_seed())
-    errors.extend(_check_no_role_switch())
+def main(
+    base_ref: str | None = None,
+    *,
+    repo_root: Path = REPO_ROOT,
+    migrations_dir: Path = MIGRATIONS_DIR,
+    schema_sql: Path = SCHEMA_SQL,
+    check_immutable: bool = True,
+) -> int:
+    ups, errors = _collect_migrations(migrations_dir)
+    base = immutability_base(base_ref, repo_root=repo_root) if check_immutable else None
+    errors.extend(
+        _check_merged_migrations_immutable(base, repo_root=repo_root, migrations_dir=migrations_dir)
+    )
+    errors.extend(_check_schema_seed(schema_sql))
+    errors.extend(_check_backfill_snapshot_drop_plans(migrations_dir))
+    errors.extend(_check_folded_strict_without_seed(schema_sql, migrations_dir))
+    errors.extend(_check_no_role_switch(schema_sql, migrations_dir))
 
     if errors:
         print("migration lint failed:", file=sys.stderr)

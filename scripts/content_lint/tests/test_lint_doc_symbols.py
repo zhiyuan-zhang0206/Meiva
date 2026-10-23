@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from collections.abc import Set as AbstractSet
+from pathlib import Path
+
 import pytest
 
 from scripts.content_lint import lint_doc_symbols as mod
@@ -8,8 +11,22 @@ from scripts.content_lint import lint_doc_symbols as mod
 # pyright: reportUnknownMemberType = warning
 
 
+class _BoundLint:
+    def __init__(self, docs: Path, skills: Path) -> None:
+        self._docs = docs
+        self._skills = skills
+
+    def check(self, *, exempt: AbstractSet[str] | None = None) -> int:
+        if exempt is None:
+            return mod.check(docs_conventions=self._docs, dev_skills=self._skills)
+        return mod.check(docs_conventions=self._docs, dev_skills=self._skills, exempt=exempt)
+
+    def valid_meiva_names(self) -> set[str]:
+        return mod.valid_meiva_names()
+
+
 @pytest.fixture
-def lint(monkeypatch, tmp_path):
+def lint(tmp_path: Path):
     """Point BOTH scan roots at throwaway dirs; valid_meiva_names() still reads the
     real live meiva namespace (that's the source of truth under test).
 
@@ -20,21 +37,18 @@ def lint(monkeypatch, tmp_path):
     docs.mkdir(parents=True)
     skills = tmp_path / ".meiva" / "skills"
     skills.mkdir(parents=True)
-    monkeypatch.setattr(mod, "DOCS_CONVENTIONS", docs)
-    monkeypatch.setattr(mod, "DEV_SKILLS", skills)
-    return mod, docs
+    return _BoundLint(docs, skills), docs
 
 
 @pytest.fixture
-def dev_skills(monkeypatch, tmp_path):
+def dev_skills(tmp_path: Path):
     """The `.agents/skills/` scan root, isolated; conventions pointed at an empty dir."""
     docs = tmp_path / "docs" / "conventions"
     docs.mkdir(parents=True)
-    skills = tmp_path / ".meiva" / "skills" / "example-project-skill"
+    skills_root = tmp_path / ".meiva" / "skills"
+    skills = skills_root / "example-project-skill"
     skills.mkdir(parents=True)
-    monkeypatch.setattr(mod, "DOCS_CONVENTIONS", docs)
-    monkeypatch.setattr(mod, "DEV_SKILLS", tmp_path / ".meiva" / "skills")
-    return mod, skills
+    return _BoundLint(docs, skills_root), skills
 
 
 def test_dev_skill_fake_ref_is_flagged(dev_skills):
@@ -109,12 +123,11 @@ def test_plugin_namespace_is_valid(lint):
     assert mod.check() == 0
 
 
-def test_exemption_path(lint, monkeypatch):
-    mod, docs = lint
+def test_exemption_path(lint):
+    bound, docs = lint
     (docs / "a.md").write_text("A special `meiva.legacyshim` reference.\n")
-    assert mod.check() == 1  # not a member -> flagged
-    monkeypatch.setattr(mod, "_EXEMPT", {"legacyshim"})
-    assert mod.check() == 0  # exempted -> clean
+    assert bound.check() == 1  # not a member -> flagged
+    assert bound.check(exempt={"legacyshim"}) == 0  # exempted -> clean
 
 
 def test_referenced_symbols_helper():

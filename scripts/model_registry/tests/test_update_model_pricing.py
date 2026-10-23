@@ -253,8 +253,9 @@ def test_deepseek_parser_rejects_an_unknown_pricing_meter(band: str) -> None:
 
 
 def test_plugin_sync_rewrites_drift_and_is_idempotent(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
 ) -> None:
+    now = datetime(2026, 9, 5, tzinfo=UTC)
     repo_root, archive_path, provider_path = _sync_fixture(
         tmp_path,
         current_rates=("2.0", "0.2", "6.0"),
@@ -268,13 +269,8 @@ def test_plugin_sync_rewrites_drift_and_is_idempotent(
             }
         ],
     )
-    monkeypatch.setattr(
-        pricing_updater,
-        "now_utc",
-        lambda: datetime(2026, 9, 5, tzinfo=UTC),
-    )
 
-    first = pricing_updater.sync_plugin_rates(archive_path, repo_root)
+    first = pricing_updater.sync_plugin_rates(archive_path, repo_root, now=now)
     rewritten = provider_path.read_text(encoding="utf-8")
     ast.parse(rewritten, str(provider_path))
 
@@ -290,34 +286,28 @@ def test_plugin_sync_rewrites_drift_and_is_idempotent(
 
     manifest = plugin_price_source.provider_manifest(rewritten, provider_path)
     archive_entry = json.loads(archive_path.read_text())["models"]["fixture-model"]
-    target, _upcoming = plugin_price_sync.archive_price(
-        "fixture-model", archive_entry, datetime(2026, 9, 5, tzinfo=UTC)
-    )
+    target, _upcoming = plugin_price_sync.archive_price("fixture-model", archive_entry, now)
     assert manifest.prices["fixture-model"] == target
 
-    second = pricing_updater.sync_plugin_rates(archive_path, repo_root)
+    second = pricing_updater.sync_plugin_rates(archive_path, repo_root, now=now)
     assert second.drifted_models == ()
     assert second.changed_files == ()
     assert provider_path.read_text(encoding="utf-8") == rewritten
 
 
 def test_plugin_sync_leaves_full_matching_provider_byte_identical(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
 ) -> None:
+    now = datetime(2026, 9, 5, tzinfo=UTC)
     repo_root, archive_path, provider_path = _sync_fixture(
         tmp_path,
         current_rates=("1.0", "0.1", "3.0"),
         plugin_checked_at="2026-09-05",
     )
-    monkeypatch.setattr(
-        pricing_updater,
-        "now_utc",
-        lambda: datetime(2026, 9, 5, tzinfo=UTC),
-    )
-    pricing_updater.sync_plugin_rates(archive_path, repo_root)
+    pricing_updater.sync_plugin_rates(archive_path, repo_root, now=now)
     before = provider_path.read_bytes()
 
-    result = pricing_updater.sync_plugin_rates(archive_path, repo_root)
+    result = pricing_updater.sync_plugin_rates(archive_path, repo_root, now=now)
 
     assert result.drifted_models == ()
     assert result.changed_files == ()
@@ -325,16 +315,12 @@ def test_plugin_sync_leaves_full_matching_provider_byte_identical(
 
 
 def test_plugin_sync_check_exit_status_tracks_drift(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
 ) -> None:
+    now = datetime(2026, 9, 5, tzinfo=UTC)
     repo_root, archive_path, provider_path = _sync_fixture(
         tmp_path,
         current_rates=("2.0", "0.2", "6.0"),
-    )
-    monkeypatch.setattr(
-        pricing_updater,
-        "now_utc",
-        lambda: datetime(2026, 9, 5, tzinfo=UTC),
     )
     args = [
         "--sync-plugins",
@@ -345,29 +331,25 @@ def test_plugin_sync_check_exit_status_tracks_drift(
         str(repo_root),
     ]
 
-    assert pricing_updater.main(args) == 1
+    assert pricing_updater.main(args, now=now) == 1
     assert provider_path.read_text(encoding="utf-8") == _PLUGIN_SOURCE
 
-    pricing_updater.sync_plugin_rates(archive_path, repo_root)
-    assert pricing_updater.main(args) == 0
+    pricing_updater.sync_plugin_rates(archive_path, repo_root, now=now)
+    assert pricing_updater.main(args, now=now) == 0
 
 
 def test_plugin_sync_reports_future_effective_window(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
+    now = datetime(2026, 9, 5, tzinfo=UTC)
     repo_root, archive_path, _provider_path = _sync_fixture(
         tmp_path,
         current_rates=("1.0", "0.1", "3.0"),
         future_rates=("2.0", "0.2", "6.0"),
         plugin_checked_at="2026-09-05",
     )
-    monkeypatch.setattr(
-        pricing_updater,
-        "now_utc",
-        lambda: datetime(2026, 9, 5, tzinfo=UTC),
-    )
 
-    pricing_updater.sync_plugin_rates(archive_path, repo_root, write=False)
+    pricing_updater.sync_plugin_rates(archive_path, repo_root, write=False, now=now)
 
     assert capsys.readouterr().err == (
         "- Plugin pricing drift: fixture-model: period 0 [None, "
@@ -381,9 +363,9 @@ def test_plugin_sync_reports_future_effective_window(
 
 def test_plugin_sync_check_reports_a_wrong_window_period(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
+    now = datetime(2026, 9, 5, tzinfo=UTC)
     repo_root, archive_path, provider_path = _sync_fixture(
         tmp_path,
         current_rates=("2.0", "0.2", "6.0"),
@@ -395,12 +377,7 @@ def test_plugin_sync_check_reports_a_wrong_window_period(
             }
         ],
     )
-    monkeypatch.setattr(
-        pricing_updater,
-        "now_utc",
-        lambda: datetime(2026, 9, 5, tzinfo=UTC),
-    )
-    pricing_updater.sync_plugin_rates(archive_path, repo_root)
+    pricing_updater.sync_plugin_rates(archive_path, repo_root, now=now)
     source = provider_path.read_text(encoding="utf-8")
     provider_path.write_text(
         source.replace('cache_miss="4.0"', 'cache_miss="4.1"', 1),
@@ -415,7 +392,8 @@ def test_plugin_sync_check_reports_a_wrong_window_period(
             str(archive_path),
             "--repo-root",
             str(repo_root),
-        ]
+        ],
+        now=now,
     )
     captured = capsys.readouterr()
 

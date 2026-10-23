@@ -54,9 +54,6 @@ frontend = ["ui"]
 "services/agent_runner/agent_host/tests/circuit_breaker/helpers.py -> agent/turn/runloop.py#_handle_fatal_llm_error" = 1
 "services/agent_runner/agent_host/tests/test_circuit_breaker.py -> agent/turn/runloop.py#_handle_fatal_llm_error" = 1
 "services/agent_runner/agent_host/tests/test_circuit_breaker_audit.py -> agent/turn/runloop.py#_handle_fatal_llm_error" = 1
-"tests/ci/test_tests_dir_scope.py -> scripts/lint/async_no_sync_blocking.py#_ROOT" = 2
-"tests/ci/test_tests_dir_scope.py -> scripts/lint/fixture_scope.py#_REPO_ROOT" = 3
-"tests/ci/test_tests_dir_scope.py -> scripts/lint/meiva_root_scope.py#_REPO_ROOT" = 1
 "tests/components/services/agent_host/test_event_owner_shutdown.py -> services/agent_runner/agent_host/daemon.py#_is_running" = 1
 "tests/integration/child_schedule_runner.py -> services/wake/schedule_manager/engine.py#_run" = 1
 

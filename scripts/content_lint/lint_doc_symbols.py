@@ -66,6 +66,7 @@ import ast
 import re
 import sys
 from collections.abc import Iterator
+from collections.abc import Set as AbstractSet
 from pathlib import Path
 
 from base.host.env.dotenv_boot import enter_scratch_home
@@ -143,7 +144,7 @@ def _plugin_namespace_names() -> set[str]:
     return names
 
 
-def valid_meiva_names() -> set[str]:
+def valid_meiva_names(*, exempt: AbstractSet[str] = _EXEMPT) -> set[str]:
     """The live set of valid first-segments after `meiva.`.
 
     Union of: `agent_visible_names(meiva)` (the agent surface), real `meiva/<x>.py` /
@@ -163,7 +164,7 @@ def valid_meiva_names() -> set[str]:
 
     names.update(n for n in dir(meiva) if not n.startswith("__"))
     names.update(_plugin_namespace_names())
-    names.update(_EXEMPT)
+    names.update(exempt)
     return names
 
 
@@ -255,13 +256,16 @@ def _dangling_refs(root: Path, valid: set[str]) -> list[str]:
     return violations
 
 
-def check() -> int:
+def check(
+    *,
+    docs_conventions: Path = DOCS_CONVENTIONS,
+    dev_skills: Path = DEV_SKILLS,
+    exempt: AbstractSet[str] = _EXEMPT,
+) -> int:
     """Validate every procedural-doc `meiva.<name>` ref; return 0 (clean) or 1 (violations)."""
-    valid = valid_meiva_names()
+    valid = valid_meiva_names(exempt=exempt)
     violations: list[str] = []
-    # Read the roots through the module globals so a test can monkeypatch either
-    # one at a throwaway tree.
-    for root in (DOCS_CONVENTIONS, DEV_SKILLS):
+    for root in (docs_conventions, dev_skills):
         if root.is_dir():
             violations.extend(_dangling_refs(root, valid))
     if violations:

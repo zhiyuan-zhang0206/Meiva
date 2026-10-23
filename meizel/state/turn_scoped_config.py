@@ -28,13 +28,13 @@ _LAYERED_READ = re.compile(r"\b(?:resolve_setting|get_field)\(\s*[\"']([a-z_]+)[
 _PLUGIN_CONFIGS_READ = re.compile(r"\b_PLUGIN_CONFIGS\[")
 
 
-def _iter_files(paths: list[str]) -> list[Path]:
+def _iter_files(paths: list[str], root: Path = _REPO_ROOT) -> list[Path]:
     if paths:
         return [Path(p) for p in paths if p.endswith(".py")]
     files: list[Path] = []
     for d in _SCAN_DIRS:
-        files.extend((_REPO_ROOT / d).rglob("*.py"))
-    files.extend(_REPO_ROOT / f for f in _EXTRA_FILES)
+        files.extend((root / d).rglob("*.py"))
+    files.extend(root / f for f in _EXTRA_FILES)
     return files
 
 
@@ -65,11 +65,13 @@ def _scan(
     errors: list[str],
     layered_errors: list[str],
     plugin_errors: list[str],
+    *,
+    root: Path = _REPO_ROOT,
 ) -> None:
     """Collect one file's bare, layered and process-global plugin config reads."""
     resolved = path.resolve()
     try:
-        rel = resolved.relative_to(_REPO_ROOT).as_posix()
+        rel = resolved.relative_to(root.resolve()).as_posix()
     except ValueError:
         rel = resolved.as_posix()
     if rel in _ALLOWED_FILES or "/tests/" in rel or rel.startswith("tests/"):
@@ -91,20 +93,26 @@ def _scan(
             plugin_errors.append(f"{rel}:{lineno}: {line.strip()}")
 
 
-def main(argv: list[str], *, per_agent_field_names: Callable[[], Iterable[str]]) -> int:
+def main(
+    argv: list[str],
+    *,
+    per_agent_field_names: Callable[[], Iterable[str]],
+    repo_root: Path | None = None,
+) -> int:
     """Run the lint; `per_agent_field_names` returns the config fields that are per-agent."""
+    root = _REPO_ROOT if repo_root is None else repo_root
     argv, only = lint_common.split_only(argv)
     missing = [a for a in argv if not Path(a).exists()]
     if missing:
         print(f"error: target path(s) not found: {', '.join(missing)}", file=sys.stderr)
         return 1
-    scope = lint_common.changed_scope(only, _REPO_ROOT, inputs=_RULE_INPUTS)
+    scope = lint_common.changed_scope(only, root, inputs=_RULE_INPUTS)
     per_agent = set(per_agent_field_names())
     errors: list[str] = []
     layered_errors: list[str] = []
     plugin_errors: list[str] = []
-    for path in lint_common.restrict(_iter_files(argv), scope, _REPO_ROOT):
-        _scan(path, per_agent, errors, layered_errors, plugin_errors)
+    for path in lint_common.restrict(_iter_files(argv, root), scope, root):
+        _scan(path, per_agent, errors, layered_errors, plugin_errors, root=root)
     _report(
         "plugin config read straight out of the process-global _PLUGIN_CONFIGS in turn-scoped "
         "code — use `get_plugin_config(<plugin>, slices)` (or `process_plugin_config` in the "

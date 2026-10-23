@@ -72,8 +72,7 @@ def _git(root: pathlib.Path, *args: str) -> None:
 
 
 @pytest.fixture
-def _repo(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> pathlib.Path:
-    monkeypatch.setenv("LINT_STRUCTURE_BASELINE_BASE", "HEAD")
+def _repo(tmp_path: pathlib.Path) -> pathlib.Path:
     _baseline(tmp_path)
     _git(tmp_path, "init", "--quiet")
     _git(tmp_path, "add", baseline_shards.SHARD_DIR)
@@ -99,7 +98,7 @@ def test_a_new_ambient_site_fails_with_its_rule_and_the_way_out(
 ) -> None:
     _write(_repo, "base/state.py", "_REGISTRY = {}\n")
 
-    assert lcs.main([], repo_root=_repo, parse_ast=ast.parse) == 1
+    assert lcs.main([], repo_root=_repo, baseline_base="HEAD", parse_ast=ast.parse) == 1
     output = capsys.readouterr().out
     assert "base/state.py:1:" in output
     assert "`ambient-container` `_REGISTRY`" in output
@@ -115,7 +114,7 @@ def test_free_floating_background_work_names_the_service_loop_alternative(
         "import asyncio\n\nasync def kick(job):\n    asyncio.create_task(job())\n",
     )
 
-    assert lcs.main([], repo_root=_repo, parse_ast=ast.parse) == 1
+    assert lcs.main([], repo_root=_repo, baseline_base="HEAD", parse_ast=ast.parse) == 1
     output = capsys.readouterr().out
     assert "gateway/work.py:4:" in output
     assert "`asyncio-task` `kick`" in output
@@ -128,7 +127,7 @@ def test_a_frozen_site_passes(_repo: pathlib.Path, capsys: pytest.CaptureFixture
     _baseline(_repo, {"base/state.py::ambient-container:_REGISTRY": 1})
     _commit_base(_repo, with_lint=True)
 
-    assert lcs.main([], repo_root=_repo, parse_ast=ast.parse) == 0
+    assert lcs.main([], repo_root=_repo, baseline_base="HEAD", parse_ast=ast.parse) == 0
     assert capsys.readouterr().out == ""
 
 
@@ -141,12 +140,12 @@ def test_schedules_are_governed_by_this_rule_only(
         "schedules/daily.py",
         "from typing import TYPE_CHECKING\n\nif TYPE_CHECKING:\n    import x\n\n_STATE = {}\n",
     )
-    assert lcs.main([], repo_root=_repo, parse_ast=ast.parse) == 1
+    assert lcs.main([], repo_root=_repo, baseline_base="HEAD", parse_ast=ast.parse) == 1
     assert "schedules/daily.py:6:" in capsys.readouterr().out
 
     _baseline(_repo, {"schedules/daily.py::ambient-container:_STATE": 1})
     _commit_base(_repo, with_lint=True)
-    assert lcs.main([], repo_root=_repo, parse_ast=ast.parse) == 0
+    assert lcs.main([], repo_root=_repo, baseline_base="HEAD", parse_ast=ast.parse) == 0
     assert capsys.readouterr().out == ""
 
 
@@ -158,7 +157,7 @@ def test_tests_skill_scripts_and_main_blocks_are_not_scanned(
     _write(_repo, "base/__main__.py", "_REGISTRY = {}\n")
     _write(_repo, "base/cli.py", 'if __name__ == "__main__":\n    run()\n')
 
-    assert lcs.main([], repo_root=_repo, parse_ast=ast.parse) == 0
+    assert lcs.main([], repo_root=_repo, baseline_base="HEAD", parse_ast=ast.parse) == 0
     assert capsys.readouterr().out == ""
 
 
@@ -171,7 +170,7 @@ def test_a_site_beyond_the_frozen_count_fails(
     _write(_repo, "base/boot.py", "import atexit\n\natexit.register(a)\natexit.register(b)\n")
     _baseline(_repo, {"base/boot.py::import-time-call:atexit.register": 1})
 
-    assert lcs.main([], repo_root=_repo, parse_ast=ast.parse) == 1
+    assert lcs.main([], repo_root=_repo, baseline_base="HEAD", parse_ast=ast.parse) == 1
     output = capsys.readouterr().out
     assert "base/boot.py:3:" in output
     assert "base/boot.py:4:" in output
@@ -184,13 +183,13 @@ def test_a_fixed_site_left_in_the_baseline_fails_as_stale_until_it_is_lowered(
     _write(_repo, "base/boot.py", "import atexit\n\natexit.register(a)\n")
     _baseline(_repo, {"base/boot.py::import-time-call:atexit.register": 2})
 
-    assert lcs.main([], repo_root=_repo, parse_ast=ast.parse) == 1
+    assert lcs.main([], repo_root=_repo, baseline_base="HEAD", parse_ast=ast.parse) == 1
     output = capsys.readouterr().out
     assert "stale ambient_state entry base/boot.py::import-time-call:atexit.register" in output
     assert "frozen at 2 but the code has 1 — lower it to 1" in output
 
     _write(_repo, "base/boot.py", "VALUE = 1\n")
-    assert lcs.main([], repo_root=_repo, parse_ast=ast.parse) == 1
+    assert lcs.main([], repo_root=_repo, baseline_base="HEAD", parse_ast=ast.parse) == 1
     assert "the code has 0 — remove it" in capsys.readouterr().out
 
 
@@ -207,7 +206,7 @@ def test_a_baseline_key_with_an_unknown_rule_or_outside_the_scope_is_invalid(
 ) -> None:
     _baseline(_repo, {key: 1})
 
-    assert lcs.main([], repo_root=_repo, parse_ast=ast.parse) == 1
+    assert lcs.main([], repo_root=_repo, baseline_base="HEAD", parse_ast=ast.parse) == 1
     assert "invalid ambient_state entry" in capsys.readouterr().err
 
 
@@ -222,7 +221,7 @@ def test_the_baseline_cannot_gain_a_key_against_the_base_revision(
     _write(_repo, "base/state.py", "_REGISTRY = {}\n")
     _baseline(_repo, {"base/state.py::ambient-container:_REGISTRY": 1})
 
-    assert lcs.main([], repo_root=_repo, parse_ast=ast.parse) == 1
+    assert lcs.main([], repo_root=_repo, baseline_base="HEAD", parse_ast=ast.parse) == 1
     output = capsys.readouterr().out
     assert "added ambient_state entry base/state.py::ambient-container:_REGISTRY" in output
     assert "baseline is shrink-only" in output
@@ -238,7 +237,7 @@ def test_the_baseline_cannot_raise_a_count_against_the_base_revision(
     _write(_repo, "base/boot.py", "import atexit\n\natexit.register(a)\natexit.register(b)\n")
     _baseline(_repo, {"base/boot.py::import-time-call:atexit.register": 2})
 
-    assert lcs.main([], repo_root=_repo, parse_ast=ast.parse) == 1
+    assert lcs.main([], repo_root=_repo, baseline_base="HEAD", parse_ast=ast.parse) == 1
     output = capsys.readouterr().out
     assert "raised ambient_state entry base/boot.py::import-time-call:atexit.register" in output
     assert "from 1 to 2" in output
@@ -254,7 +253,7 @@ def test_lowering_a_count_against_the_base_revision_passes(
     _write(_repo, "base/boot.py", "import atexit\n\natexit.register(a)\n")
     _baseline(_repo, {"base/boot.py::import-time-call:atexit.register": 1})
 
-    assert lcs.main([], repo_root=_repo, parse_ast=ast.parse) == 0
+    assert lcs.main([], repo_root=_repo, baseline_base="HEAD", parse_ast=ast.parse) == 0
     assert capsys.readouterr().out == ""
 
 
@@ -270,7 +269,7 @@ def test_a_renamed_site_in_the_same_file_cannot_carry_its_frozen_entry(
     _write(_repo, "base/state.py", "_NEW = {}\n")
     _baseline(_repo, {"base/state.py::ambient-container:_NEW": 1})
 
-    assert lcs.main([], repo_root=_repo, parse_ast=ast.parse) == 1
+    assert lcs.main([], repo_root=_repo, baseline_base="HEAD", parse_ast=ast.parse) == 1
     assert "added ambient_state entry base/state.py::ambient-container:_NEW" in (
         capsys.readouterr().out
     )
@@ -286,7 +285,7 @@ def test_introducing_a_lint_cannot_freeze_new_exemptions(
     _baseline(_repo, {"base/state.py::ambient-container:_REGISTRY": 1})
     _write(_repo, LINT_STUB, "# the lint arrives in this change\n")
 
-    assert lcs.main([], repo_root=_repo, parse_ast=ast.parse) == 1
+    assert lcs.main([], repo_root=_repo, baseline_base="HEAD", parse_ast=ast.parse) == 1
     assert "added ambient_state entry base/state.py::ambient-container:_REGISTRY" in (
         capsys.readouterr().out
     )
@@ -299,7 +298,7 @@ def test_introducing_a_lint_with_no_exemptions_passes(
     _commit_base(_repo, with_lint=False)
     _write(_repo, LINT_STUB, "# the lint arrives in this change\n")
 
-    assert lcs.main([], repo_root=_repo, parse_ast=ast.parse) == 0
+    assert lcs.main([], repo_root=_repo, baseline_base="HEAD", parse_ast=ast.parse) == 0
     assert capsys.readouterr().out == ""
 
 
@@ -311,11 +310,11 @@ def test_a_moved_file_carries_its_frozen_key_once_the_key_is_migrated(
     _commit_base(_repo, with_lint=True)
 
     _git(_repo, "mv", "base/state.py", "base/registry.py")
-    assert lcs.main([], repo_root=_repo, parse_ast=ast.parse) == 1
+    assert lcs.main([], repo_root=_repo, baseline_base="HEAD", parse_ast=ast.parse) == 1
     assert "was not migrated after its file moved to base/registry.py" in capsys.readouterr().out
 
     _baseline(_repo, {"base/registry.py::ambient-container:_REGISTRY": 1})
-    assert lcs.main([], repo_root=_repo, parse_ast=ast.parse) == 0
+    assert lcs.main([], repo_root=_repo, baseline_base="HEAD", parse_ast=ast.parse) == 0
     assert capsys.readouterr().out == ""
 
 
@@ -323,30 +322,26 @@ def test_a_moved_file_carries_its_frozen_key_once_the_key_is_migrated(
 
 
 def test_a_list_entry_whose_site_is_gone_fails_the_gate(
-    _repo: pathlib.Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    _repo: pathlib.Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    monkeypatch.setattr(
-        ambient_state.allow, "ALLOWED", {"base/state.py::hidden-singleton:table": "static"}
-    )
+    ambient_state.allow.ALLOWED["base/state.py::hidden-singleton:table"] = "static"
     _write(_repo, "base/state.py", "from functools import cache\n\n@cache\ndef table(): ...\n")
-    assert lcs.main([], repo_root=_repo, parse_ast=ast.parse) == 0
+    assert lcs.main([], repo_root=_repo, baseline_base="HEAD", parse_ast=ast.parse) == 0
     assert capsys.readouterr().out == ""
 
     _write(_repo, "base/state.py", "VALUE = 1\n")
-    assert lcs.main([], repo_root=_repo, parse_ast=ast.parse) == 1
+    assert lcs.main([], repo_root=_repo, baseline_base="HEAD", parse_ast=ast.parse) == 1
     assert "stale ambient_state list entry base/state.py::hidden-singleton:table" in (
         capsys.readouterr().out
     )
 
 
 def test_a_list_entry_for_a_deleted_file_fails_the_gate(
-    _repo: pathlib.Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    _repo: pathlib.Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    monkeypatch.setattr(
-        ambient_state.allow, "SINK_FACADES", {"base/log/sink.py": "the log sink's buffer"}
-    )
+    ambient_state.allow.SINK_FACADES["base/log/sink.py"] = "the log sink's buffer"
 
-    assert lcs.main([], repo_root=_repo, parse_ast=ast.parse) == 1
+    assert lcs.main([], repo_root=_repo, baseline_base="HEAD", parse_ast=ast.parse) == 1
     assert "base/log/sink.py:1: stale ambient_state list entry — the file no longer exists" in (
         capsys.readouterr().out
     )

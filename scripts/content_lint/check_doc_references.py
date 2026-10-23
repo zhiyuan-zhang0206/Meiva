@@ -110,6 +110,7 @@ import functools
 import re
 import subprocess
 import sys
+from collections.abc import Sequence
 from pathlib import Path
 
 REPO = Path(
@@ -384,7 +385,13 @@ def okf_nodes() -> frozenset[str]:
     return frozenset(out)
 
 
-def check_wikilinks(doc: Path, line: str, *, allow_planned: bool = False) -> list[str]:
+def check_wikilinks(
+    doc: Path,
+    line: str,
+    *,
+    allow_planned: bool = False,
+    nodes: frozenset[str] | None = None,
+) -> list[str]:
     """`[[target]]` / `[[target|label]]` targets on this line that name no OKF node.
 
     The label is display text; only the target half resolves, through the same
@@ -395,6 +402,7 @@ def check_wikilinks(doc: Path, line: str, *, allow_planned: bool = False) -> lis
     # `enter_scratch_home()` below.
     from base.packages.docs.okf_graph import WIKILINK_RE, resolve_wikilink
 
+    all_nodes = okf_nodes() if nodes is None else nodes
     missing: list[str] = []
     try:
         cur = doc.relative_to(REPO).as_posix()
@@ -404,7 +412,7 @@ def check_wikilinks(doc: Path, line: str, *, allow_planned: bool = False) -> lis
         target = match.group(1).strip()
         if _in_code_span(line, match.start()):
             continue
-        if resolve_wikilink(cur, target, set(okf_nodes())) is not None:
+        if resolve_wikilink(cur, target, set(all_nodes)) is not None:
             continue
         if allow_planned and _PLANNED.match(line, match.end()):
             continue
@@ -412,12 +420,18 @@ def check_wikilinks(doc: Path, line: str, *, allow_planned: bool = False) -> lis
     return missing
 
 
-def _prose_problems(doc: Path, line: str, *, allow_planned: bool) -> list[str]:
+def _prose_problems(
+    doc: Path,
+    line: str,
+    *,
+    allow_planned: bool,
+    nodes: frozenset[str] | None = None,
+) -> list[str]:
     """The messages for the links this prose line (not code) holds that do not resolve."""
     out = [f"`{t}` — no such file" for t in check_links(doc, line, allow_planned=allow_planned)]
     out += [
         f"`[[{t}]]` — no such OKF node"
-        for t in check_wikilinks(doc, line, allow_planned=allow_planned)
+        for t in check_wikilinks(doc, line, allow_planned=allow_planned, nodes=nodes)
     ]
     # Only skills carry the backtick references/ convention — a plain
     # doc's `` `references/x.md` `` stays deliberately unchecked (it may
@@ -436,6 +450,7 @@ def check_doc(
     *,
     skip_flags: bool = False,
     allow_planned: bool = False,
+    nodes: frozenset[str] | None = None,
 ) -> list[tuple[int, str]]:
     """Every dangling reference in one doc, as `(line number, message)`.
 
@@ -470,7 +485,7 @@ def check_doc(
         if not (fenced or indented):
             problems.extend(
                 (lineno, message)
-                for message in _prose_problems(doc, line, allow_planned=allow_planned)
+                for message in _prose_problems(doc, line, allow_planned=allow_planned, nodes=nodes)
             )
         # Bare `skills/<name>/...` refs are checked in fenced code too — the
         # dead `.venv/bin/python skills/...` invocations live inside code
@@ -489,15 +504,20 @@ def check_doc(
     return problems
 
 
-def main() -> int:
-    commands = meiva_flags()
-    for script in (REPO / "scripts").glob("*.sh"):
-        commands[(script.name,)] = shell_flags(script)
+def main(
+    *,
+    repo: Path = REPO,
+    commands: dict[tuple[str, ...], set[str]] | None = None,
+    docs: Sequence[Path] | None = None,
+) -> int:
+    cmds = dict(meiva_flags() if commands is None else commands)
+    for script in (repo / "scripts").glob("*.sh"):
+        cmds[(script.name,)] = shell_flags(script)
 
-    docs = tracked_docs()
+    doc_list = tracked_docs() if docs is None else list(docs)
     problems: list[str] = []
-    for doc in docs:
-        rel = doc.relative_to(REPO)
+    for doc in doc_list:
+        rel = doc.relative_to(repo)
         # docs/decisions/ and docs/postmortems/ — point-in-time records and never
         # rewritten, so citing the flag or file that existed THEN is the record
         # working as intended (2026-07-22-telegram-out-of-core.md names the files
@@ -510,13 +530,13 @@ def main() -> int:
         # but a link it names must resolve UNLESS marked `(planned)`
         # (allow_planned) — see the module docstring / issue #1045.
         future = rel.parts[0] == "future"
-        for lineno, message in check_doc(doc, commands, skip_flags=future, allow_planned=future):
+        for lineno, message in check_doc(doc, cmds, skip_flags=future, allow_planned=future):
             problems.append(f"{rel}:{lineno}: {message}")
 
     unique = sorted(set(problems))
     for problem in unique:
         print(problem)
-    print(f"\n{len(unique)} dangling reference(s) across {len(docs)} docs", file=sys.stderr)
+    print(f"\n{len(unique)} dangling reference(s) across {len(doc_list)} docs", file=sys.stderr)
     return 1 if unique else 0
 
 

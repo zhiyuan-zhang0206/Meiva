@@ -9,6 +9,7 @@ enters a scratch home before that registry is imported.
 from __future__ import annotations
 
 import sys
+from collections.abc import Callable
 from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -28,8 +29,13 @@ def settings_managed_aliases() -> frozenset[str]:
     return frozenset(field.alias for field in FIELD_INFOS.values() if field.alias)
 
 
-def main(argv: list[str] | None = None, *, repo_root: Path | None = None) -> int:
-    return rule.main(argv, managed_aliases=settings_managed_aliases, repo_root=repo_root)
+def main(
+    argv: list[str] | None = None,
+    *,
+    repo_root: Path | None = None,
+    managed_aliases: Callable[[], frozenset[str]] = settings_managed_aliases,
+) -> int:
+    return rule.main(argv, managed_aliases=managed_aliases, repo_root=repo_root)
 
 
 if __name__ == "__main__":

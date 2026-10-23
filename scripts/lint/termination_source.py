@@ -290,7 +290,12 @@ def _iter_py_files(roots: list[Path]) -> list[Path]:
     return files
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(
+    argv: list[str] | None = None,
+    *,
+    repo_root: Path = _REPO_ROOT,
+    legal_sources: frozenset[str] | None = None,
+) -> int:
     argv = argv if argv is not None else sys.argv[1:]
     argv, only = lint_common.split_only(argv)
     if argv:
@@ -302,20 +307,21 @@ def main(argv: list[str] | None = None) -> int:
     # (the commit hook) under the same scope. The enum that defines the legal values is
     # an input: changing it re-judges every file.
     targets = (
-        [Path(a).resolve() for a in argv] if argv else lint_common.scan_roots(_REPO_ROOT, SCAN_DIRS)
+        [Path(a).resolve() for a in argv] if argv else lint_common.scan_roots(repo_root, SCAN_DIRS)
     )
-    scope = lint_common.changed_scope(only, _REPO_ROOT, inputs=_RULE_INPUTS)
-    legal_sources = _termination_source_values()
+    scope = lint_common.changed_scope(only, repo_root, inputs=_RULE_INPUTS)
+    sources = _termination_source_values() if legal_sources is None else legal_sources
 
     total = 0
-    for path in sorted(lint_common.restrict(_iter_py_files(targets), scope, _REPO_ROOT)):
-        try:
-            rel = path.relative_to(_REPO_ROOT).as_posix()
-        except ValueError:
-            rel = path.as_posix()
+    for path in sorted(lint_common.restrict(_iter_py_files(targets), scope, repo_root)):
+        rel = (
+            path.relative_to(repo_root).as_posix()
+            if path.is_relative_to(repo_root)
+            else path.as_posix()
+        )
         if _is_test_file(rel):
             continue
-        for lineno, reason in _scan_file(path, legal_sources):
+        for lineno, reason in _scan_file(path, sources):
             total += 1
             print(f"{rel}:{lineno}: {reason}.")
 
