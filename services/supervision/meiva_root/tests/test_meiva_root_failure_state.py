@@ -153,6 +153,28 @@ async def test_exhausted_attempts_are_reported_every_round_then_clear_on_alive(
     assert len(recorder.events("root_unit_failure_state")) == 2
 
 
+# meiva:note
+# #5525 family A: three automatic restarts recount one anonymous blocker unless the detail
+# names the process answering the port. The probe carries it; the per-round failure-state
+# signal must hand it to an operator unchanged, or the event is still "not this unit's daemon".
+async def test_the_failure_state_signal_carries_the_named_port_holder(
+    clock: _Clock, recorder: _Recorder
+) -> None:
+    holder = "listening: pid 4242 node (/usr/local/bin/node)"
+    probe = _Cell(
+        DaemonProbe.down(
+            "http://127.0.0.1:6031/healthz answers but no pidfile at /run/x.pid — "
+            f"not this unit's daemon; {holder}"
+        )
+    )
+    monitor = _monitor(_Supervisor(), probe)
+    for _ in range(4):
+        await monitor.run_round()
+    state = recorder.events("root_unit_failure_state")[-1]
+    assert state["kind"] == "breaker_open"
+    assert holder in str(state["detail"])
+
+
 async def test_recorded_restart_failure_is_a_state_signal(
     clock: _Clock, recorder: _Recorder
 ) -> None:

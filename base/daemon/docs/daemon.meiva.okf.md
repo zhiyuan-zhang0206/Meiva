@@ -18,6 +18,14 @@ failures for both this factory and the remaining legacy `from_settings` roots.
 The factory does not create a boot or infer a home. Process roots own runtime
 directory creation at their existing pidfile/health resource decision.
 
+When a daemon health response matches the requested name and home but its
+pidfile is missing, the existing DOWN verdict includes the local port's
+listener PIDs, process names and executable paths. Listener discovery uses
+`base.cluster.port_preflight.strict_listeners_on`; unavailable discovery leaves
+the diagnostic as `listening: unknown`. This enrichment does not establish
+ownership or change restart eligibility. Other probe outcomes do not perform
+the listener lookup, and the root failure-state signal retains the detail.
+
 `cancel_and_drain(runner, interrupted_by=...)` cancels one snapshot of loop tasks
 and joins one retained gather. A caller may identify the exact `KeyboardInterrupt`
 it already caught: a TaskGroup replay of that same object resumes the existing
