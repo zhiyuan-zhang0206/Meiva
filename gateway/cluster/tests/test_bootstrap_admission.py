@@ -21,6 +21,7 @@ from base.host.env import bootstrap
 from base.host.net.auth import bearer_header
 from base.lm.catalog import ModelCatalog
 from gateway.cluster.bootstrap import router
+from gateway.http.config import GatewayConfig
 
 _SECRET = "bootstrap-admission-test"  # noqa: S105 — isolated test credential
 _TURN_LIMIT = "MEIVA_HOST_MAX_CONCURRENT_TURNS"
@@ -42,7 +43,6 @@ def gateway_snapshot(
     monkeypatch.setattr(config.settings.daemon, "host_max_concurrent_turns", 0)
     monkeypatch.setattr(config.settings.daemon, "host_db_pool_max_size", 64)
     monkeypatch.setattr(config.settings.daemon, "host_control_pool_max_size", 8)
-    monkeypatch.setattr(config.settings.data_plane, "cluster_secret", _SECRET)
     return aliases
 
 
@@ -78,6 +78,16 @@ def gateway_client(
     app.state.config_authority = config_authority
     app.state.catalog = model_catalog
     app.state.gateway_process = SimpleNamespace(home=gateway_home)
+    app.state.gateway_config = GatewayConfig(
+        cluster_secret=_SECRET,
+        session_ttl_seconds=3600,
+        mcp_endpoint_enabled=False,
+        allowed_origins=(),
+        browser_origin="",
+        session_cookie_secure=False,
+        memory_root=gateway_home / "memory",
+        human_auth="required",
+    )
     app.include_router(router)
     with TestClient(app) as client:
         yield client
@@ -106,6 +116,7 @@ def test_bootstrap_admission_preserves_auth(
     gateway_snapshot: dict[str, str], gateway_client: TestClient, secret: str | None
 ) -> None:
     headers = bearer_header(secret) if secret else {}
+    gateway_client.headers.pop("Authorization", None)
     response = gateway_client.get("/api/bootstrap", headers=headers)
     assert response.status_code == 401
 
