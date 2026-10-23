@@ -43,6 +43,7 @@ from pydantic import BaseModel, Field
 
 import meiva
 from agent.graph.exec.node import exec_node_impl
+from agent.graph.exec.process import SubprocessExecProcess
 from agent.messages.guard import MessagesMutationError
 from agent.state import (
     BaseAgentState,
@@ -302,7 +303,7 @@ async def test_exec_node_merges_plugin_messages_with_framework_toolmessage(
     state = state_cls(messages=[ai_message_with_code(code)], halted=False, **plugin_fields)
     runtime, config = make_runtime_and_config(AsyncMock(), database_gate=database_gate)
 
-    cmd = await exec_node_impl(state, runtime, config)
+    cmd = await exec_node_impl(state, runtime, config, process=SubprocessExecProcess())
 
     update = cast(dict[str, Any], cmd.update)
     msgs = update["messages"]
@@ -501,7 +502,9 @@ async def test_exec_node_merges_plugin_state_update_into_command(
     )
     runtime, config = make_runtime_and_config(AsyncMock(), database_gate=database_gate)
 
-    cmd = await exec_node_impl(cast(BaseAgentState, state), runtime, config)
+    cmd = await exec_node_impl(
+        cast(BaseAgentState, state), runtime, config, process=SubprocessExecProcess()
+    )
 
     update = cast(dict, cmd.update)
     assert update.get("plugin__counter") == 7  # pyright: ignore[reportUnknownMemberType]
@@ -522,7 +525,7 @@ async def test_exec_node_commits_the_skill_reads_the_sdk_writes(
     )
     runtime, config = make_runtime_and_config(AsyncMock(), database_gate=database_gate)
 
-    cmd = await exec_node_impl(state, runtime, config)
+    cmd = await exec_node_impl(state, runtime, config, process=SubprocessExecProcess())
 
     assert cast(dict, cmd.update)["skill_reads"] == ["alpha"]
 
@@ -535,7 +538,7 @@ async def test_exec_node_never_binds_the_slot_in_the_parent(
     state = BaseAgentState(messages=[ai_message_with_code("pass")], halted=False)
     runtime, config = make_runtime_and_config(AsyncMock(), database_gate=database_gate)
 
-    await exec_node_impl(state, runtime, config)
+    await exec_node_impl(state, runtime, config, process=SubprocessExecProcess())
     assert not process_context.in_exec_turn()
 
 
@@ -550,7 +553,7 @@ async def test_exec_node_leaves_parent_unbound_even_on_crash(
     )
     runtime, config = make_runtime_and_config(AsyncMock(), database_gate=database_gate)
 
-    cmd = await exec_node_impl(state, runtime, config)
+    cmd = await exec_node_impl(state, runtime, config, process=SubprocessExecProcess())
     assert cmd is not None
     assert not process_context.in_exec_turn()
 
@@ -581,7 +584,9 @@ async def test_plugin_cannot_overwrite_base_field_via_meiva_state(
     )
     runtime, config = make_runtime_and_config(AsyncMock(), database_gate=database_gate)
 
-    cmd = await exec_node_impl(cast(BaseAgentState, state), runtime, config)
+    cmd = await exec_node_impl(
+        cast(BaseAgentState, state), runtime, config, process=SubprocessExecProcess()
+    )
 
     # real state unchanged
     assert state.halted is False
@@ -615,7 +620,7 @@ async def test_state_update_base_field_key_raises(
     runtime, config = make_runtime_and_config(AsyncMock(), database_gate=database_gate)
 
     with pytest.raises(ValueError, match=f"base field.*{base_field}"):
-        await exec_node_impl(state, runtime, config)
+        await exec_node_impl(state, runtime, config, process=SubprocessExecProcess())
 
 
 async def test_state_update_unknown_key_raises(fake_cancel_event, database_gate: ProcessDbGate):
@@ -633,7 +638,9 @@ async def test_state_update_unknown_key_raises(fake_cancel_event, database_gate:
     runtime, config = make_runtime_and_config(AsyncMock(), database_gate=database_gate)
 
     with pytest.raises(ValueError, match=r"unregistered key.*plugin__typo"):
-        await exec_node_impl(cast(BaseAgentState, state), runtime, config)
+        await exec_node_impl(
+            cast(BaseAgentState, state), runtime, config, process=SubprocessExecProcess()
+        )
 
 
 async def test_state_update_multiple_plugins_no_conflict(
@@ -649,7 +656,9 @@ async def test_state_update_multiple_plugins_no_conflict(
     state = _State(messages=[ai_message_with_code(code)], halted=False)
     runtime, config = make_runtime_and_config(AsyncMock(), database_gate=database_gate)
 
-    cmd = await exec_node_impl(cast(BaseAgentState, state), runtime, config)
+    cmd = await exec_node_impl(
+        cast(BaseAgentState, state), runtime, config, process=SubprocessExecProcess()
+    )
 
     update = cast(dict, cmd.update)
     assert update.get("plugin_a__x") == 10  # pyright: ignore[reportUnknownMemberType]
@@ -669,7 +678,7 @@ async def test_state_update_non_dict_raises_type_error(
     runtime, config = make_runtime_and_config(AsyncMock(), database_gate=database_gate)
 
     with pytest.raises(TypeError, match=r"plugin tampered with meiva.state_update"):
-        await exec_node_impl(state, runtime, config)
+        await exec_node_impl(state, runtime, config, process=SubprocessExecProcess())
 
 
 # ── Integration: cancel / lifecycle paths state_update still merges ──────────
@@ -707,7 +716,11 @@ async def test_exec_node_preserves_state_update_on_cancel(
     state = _State(messages=[ai_message_with_code(code)], halted=False)
     runtime, config = make_runtime_and_config(AsyncMock(), database_gate=database_gate)
 
-    node_task = asyncio.create_task(exec_node_impl(cast(BaseAgentState, state), runtime, config))
+    node_task = asyncio.create_task(
+        exec_node_impl(
+            cast(BaseAgentState, state), runtime, config, process=SubprocessExecProcess()
+        )
+    )
     deadline = time.monotonic() + 20.0
     while time.monotonic() < deadline and not marker.exists():
         await asyncio.sleep(0.05)

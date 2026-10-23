@@ -56,7 +56,8 @@ from base.packages.plugins.extensions import ExtensionRegistry
 from ._init_context import init_context_node
 from .claim.harness_turn import harness_turn_node
 from .claim.node import claim_node
-from .exec.node import exec_node
+from .exec.node import ExecGoto, exec_node
+from .exec.process import SubprocessExecProcess
 from .llm.goto import LlmGoto
 from .llm.node import llm_node
 
@@ -136,6 +137,12 @@ def build_graph(
     # What the llm node remembers per agent between tries and turns belongs to this graph: one
     # ledger per compiled graph, so two graphs in one process never share failure counts.
     ledger = LlmLedger()
+    process = SubprocessExecProcess()
+
+    async def execute(
+        state: BaseAgentState, runtime: Runtime[MeivaContext], config: RunnableConfig
+    ) -> Command[ExecGoto]:
+        return await exec_node(state, runtime, config, process=process)
 
     async def llm(
         state: BaseAgentState, runtime: Runtime[MeivaContext], config: RunnableConfig
@@ -170,7 +177,7 @@ def build_graph(
         ),
         input_schema=state_cls,
     )
-    g.add_node(EXEC, protect_native_hooks(exec_node), input_schema=state_cls)  # type: ignore[arg-type]
+    g.add_node(EXEC, protect_native_hooks(execute), input_schema=state_cls)  # type: ignore[arg-type]
     g.add_node(  # type: ignore[arg-type]
         AFTER_EXEC,
         protect_native_hooks(

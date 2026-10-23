@@ -1,6 +1,7 @@
 import json
 from collections.abc import Iterator
 from datetime import UTC, datetime
+from functools import partial
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
@@ -10,6 +11,7 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 
 from agent.graph.exec.node import _exec_node_impl
+from agent.graph.exec.process import SubprocessExecProcess
 from agent.graph.interrupt import InterruptEvent
 from agent.hooks.tests.fakes import make_fake_ops_pool
 from agent.state import AgentState
@@ -31,7 +33,9 @@ def _graph(state_cls: type[AgentState], **compile_options: Any) -> Any:
     from langgraph.graph import END, START, StateGraph
 
     builder: Any = StateGraph(state_cls, context_schema=MeivaContext)
-    builder.add_node("exec", _exec_node_impl, input_schema=state_cls)
+    builder.add_node(
+        "exec", partial(_exec_node_impl, process=SubprocessExecProcess()), input_schema=state_cls
+    )
     builder.add_node("after_exec", lambda _state: {})
     builder.add_edge(START, "exec")
     builder.add_edge("after_exec", END)

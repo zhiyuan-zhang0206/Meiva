@@ -32,24 +32,28 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.types import Command
 from psycopg_pool import AsyncConnectionPool
 
-from agent.graph.exec import node
 from agent.graph.exec.node import (
     ExecCancelled,
     ExecCrashed,
     ExecDone,
     ExecLifecycle,
+    ExecResult,
     ExecTimedOut,
     exec_node,
 )
+from agent.graph.exec.protocol import ResultPayload
 from agent.graph.exec.tests.cancel_fixture import (
     ai_with_code,
     has_cancelled_event,
     make_runtime,
 )
+from agent.graph.exec.tests.process_inputs import ScriptedExecProcess
 from agent.state import AgentState
 
-# Most tests here drive exec_node/llm_node with mocked run_in_subprocess / a
-# fake cancel_event, so they are deterministic and run in the parallel pool.
+# meiva:note
+# Scripted child outcomes isolate graph dispatch; the durable interrupt case
+# retains its real watcher and pending inbound row.
+# meiva:link agent/graph/exec/docs/exec.meiva.okf.md
 from base.db import create_agent
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.projection import EVENT_ADAPTER
@@ -66,7 +70,7 @@ _CONFIG: RunnableConfig = {"configurable": {"thread_id": "7"}}
 
 
 # ---------------------------------------------------------------------------
-# exec_node cancel_event race (mock run_in_subprocess returns sum-type variant + payload)
+# exec_node cancellation with an explicit process outcome
 # ---------------------------------------------------------------------------
 
 
@@ -85,7 +89,6 @@ async def test_exec_node_preserves_durable_interrupt_attribution(
     hosted_resources: HostedTurnResources,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
-    monkeypatch: pytest.MonkeyPatch,
     kind: str,
     source: str,
     waited_s: float,
@@ -102,29 +105,27 @@ async def test_exec_node_preserves_durable_interrupt_attribution(
     ).fetchone()
     assert command is not None
     db_conn.commit()
-    calls = 0
 
-    async def interrupted_child(
-        code: str,
-        child_agent_id: int,
-        cancel_event: asyncio.Event,
-        *args: object,
-        **kwargs: object,
-    ) -> tuple[ExecCancelled, None]:
-        nonlocal calls
-        calls += 1
-        await asyncio.wait_for(cancel_event.wait(), timeout=5)
-        return (ExecCancelled(output="external side effect already happened\n"), None)
+    class InterruptedProcess(ScriptedExecProcess):
+        async def _resolve(
+            self, outcome: tuple[ExecResult, ResultPayload | None]
+        ) -> tuple[ExecResult, ResultPayload | None]:
+            await asyncio.wait_for(self.calls[-1].cancel_event.wait(), timeout=5)
+            return outcome
 
-    monkeypatch.setattr(node, "run_in_subprocess", interrupted_child)  # pyright: ignore[reportUnknownArgumentType]
+    process = InterruptedProcess(
+        [(ExecCancelled(output="external side effect already happened\n"), None)]
+    )
+
     result = await exec_node(
         AgentState(messages=[ai_with_code("pass")], halted=False),
         make_runtime(
             hosted_resources=hosted_resources, ops_pool=aops_pool, database_gate=database_gate
         ),
         {"configurable": {"thread_id": str(agent_id)}},
+        process=process,
     )
-    assert calls == 1
+    assert len(process.calls) == 1
     assert result.goto == "after_exec"
     assert result.update["halted"] is True
     message = cast(ToolMessage, result.update["messages"][0])
@@ -141,18 +142,12 @@ async def test_exec_node_preserves_durable_interrupt_attribution(
 async def test_exec_node_cancel_event_returns_cancelled_command(
     hosted_resources: HostedTurnResources,
     fake_cancel_event: asyncio.Event,
-    monkeypatch: pytest.MonkeyPatch,
     database_gate: ProcessDbGate,
 ) -> None:
-    """cancel_event triggers → exec_node, via mock, returns cancelled result → Command
+    """cancel_event triggers → exec_node consumes a scripted cancelled result → Command
     with wrap_code_output cancelled=True + frontend Cancelled event."""
 
-    async def _fake_cancelled(
-        code, agent_id, cancel_event, timeout=60.0, chunk_publisher=None, **kwargs
-    ):
-        return (ExecCancelled(output="partial work\n"), None)
-
-    monkeypatch.setattr(node, "run_in_subprocess", _fake_cancelled)  # pyright: ignore[reportUnknownArgumentType]
+    process = ScriptedExecProcess([(ExecCancelled(output="partial work\n"), None)])
 
     pub = MagicMock()
     state = AgentState(messages=[ai_with_code('print("x")')], halted=False)
@@ -160,7 +155,7 @@ async def test_exec_node_cancel_event_returns_cancelled_command(
     runtime = make_runtime(
         hosted_resources=hosted_resources, event_publisher=pub, database_gate=database_gate
     )
-    result = await exec_node(state, runtime, _CONFIG)
+    result = await exec_node(state, runtime, _CONFIG, process=process)
 
     assert isinstance(result, Command)
     assert result.goto == "after_exec"
@@ -178,23 +173,17 @@ async def test_exec_node_cancel_event_returns_cancelled_command(
 async def test_exec_node_cancel_event_race_normal_completion(
     hosted_resources: HostedTurnResources,
     fake_cancel_event: asyncio.Event,
-    monkeypatch: pytest.MonkeyPatch,
     database_gate: ProcessDbGate,
 ) -> None:
     """cancel_event not set, the exec completes normally → exec_node returns Command with
     wrap_code_output format ('Code execution output:')."""
 
-    async def _fake_normal(
-        code, agent_id, cancel_event, timeout=60.0, chunk_publisher=None, **kwargs
-    ):
-        return (ExecDone(output="hello\n"), None)
-
-    monkeypatch.setattr(node, "run_in_subprocess", _fake_normal)  # pyright: ignore[reportUnknownArgumentType]
+    process = ScriptedExecProcess([(ExecDone(output="hello\n"), None)])
 
     state = AgentState(messages=[ai_with_code('print("hello")')], halted=False)
 
     runtime = make_runtime(hosted_resources=hosted_resources, database_gate=database_gate)
-    result = await exec_node(state, runtime, _CONFIG)
+    result = await exec_node(state, runtime, _CONFIG, process=process)
 
     assert isinstance(result, Command)
     msg = result.update["messages"][0]
@@ -219,23 +208,17 @@ async def test_exec_node_cancel_event_race_normal_completion(
 async def test_exec_node_timeout_path(
     hosted_resources: HostedTurnResources,
     fake_cancel_event: asyncio.Event,
-    monkeypatch: pytest.MonkeyPatch,
     database_gate: ProcessDbGate,
 ) -> None:
     """When timeout triggers, exec_node returns a marker but does not halt — the next
     LLM round reads the feedback and changes strategy."""
 
-    async def _fake_timed_out(
-        code, agent_id, cancel_event, timeout=60.0, chunk_publisher=None, **kwargs
-    ):
-        return (ExecTimedOut(output="partial work\n"), None)
-
-    monkeypatch.setattr(node, "run_in_subprocess", _fake_timed_out)  # pyright: ignore[reportUnknownArgumentType]
+    process = ScriptedExecProcess([(ExecTimedOut(output="partial work\n"), None)])
 
     state = AgentState(messages=[ai_with_code('print("long task")')], halted=False)
 
     runtime = make_runtime(hosted_resources=hosted_resources, database_gate=database_gate)
-    result = await exec_node(state, runtime, _CONFIG)
+    result = await exec_node(state, runtime, _CONFIG, process=process)
 
     assert isinstance(result, Command)
     assert result.goto == "after_exec"
@@ -252,22 +235,16 @@ async def test_exec_node_timeout_path(
 async def test_exec_node_timeout_empty_output(
     hosted_resources: HostedTurnResources,
     fake_cancel_event: asyncio.Event,
-    monkeypatch: pytest.MonkeyPatch,
     database_gate: ProcessDbGate,
 ) -> None:
     """timeout triggers and the thread has no output → (no output) marker still appears."""
 
-    async def _fake_empty_timeout(
-        code, agent_id, cancel_event, timeout=60.0, chunk_publisher=None, **kwargs
-    ):
-        return (ExecTimedOut(output=""), None)
-
-    monkeypatch.setattr(node, "run_in_subprocess", _fake_empty_timeout)  # pyright: ignore[reportUnknownArgumentType]
+    process = ScriptedExecProcess([(ExecTimedOut(output=""), None)])
 
     state = AgentState(messages=[ai_with_code('print("x")')], halted=False)
 
     runtime = make_runtime(hosted_resources=hosted_resources, database_gate=database_gate)
-    result = await exec_node(state, runtime, _CONFIG)
+    result = await exec_node(state, runtime, _CONFIG, process=process)
 
     msg = result.update["messages"][0]
     content = msg.content  # pyright: ignore[reportUnknownMemberType]
@@ -363,7 +340,6 @@ async def test_chunk_publisher_uses_correct_item_id() -> None:
 async def test_exec_node_dispatch_system_halt(
     hosted_resources: HostedTurnResources,
     fake_cancel_event: asyncio.Event,
-    monkeypatch: pytest.MonkeyPatch,
     database_gate: ProcessDbGate,
 ) -> None:
     """ExecLifecycle(SystemHalt) → halted=True + NO output write-back.
@@ -378,16 +354,17 @@ async def test_exec_node_dispatch_system_halt(
     clears)."""
     from base.agents.lifecycle import SystemHalt
 
-    async def _fake(code, agent_id, cancel_event, timeout=60.0, chunk_publisher=None, **kwargs):
-        return (ExecLifecycle(output="user prep work\n", exc=SystemHalt()), None)
+    process = ScriptedExecProcess(
+        [(ExecLifecycle(output="user prep work\n", exc=SystemHalt()), None)]
+    )
 
     emitter = MagicMock()
-    monkeypatch.setattr(node, "run_in_subprocess", _fake)  # pyright: ignore[reportUnknownArgumentType]
+
     state = AgentState(messages=[ai_with_code('meiva.self.compact("s")')], halted=False)
     runtime = make_runtime(
         hosted_resources=hosted_resources, event_publisher=emitter, database_gate=database_gate
     )
-    result = await exec_node(state, runtime, _CONFIG)
+    result = await exec_node(state, runtime, _CONFIG, process=process)
 
     assert result.update["halted"] is True
     # No ToolMessage write-back — the compact claim wipes the history right
@@ -403,19 +380,16 @@ async def test_exec_node_dispatch_system_halt(
 async def test_exec_node_dispatch_agent_termination(
     hosted_resources: HostedTurnResources,
     fake_cancel_event: asyncio.Event,
-    monkeypatch: pytest.MonkeyPatch,
     database_gate: ProcessDbGate,
 ) -> None:
     """ExecLifecycle(AgentTermination) → halted=True + no envelope marker."""
     from meiva.self import AgentTermination
 
-    async def _fake(code, agent_id, cancel_event, timeout=60.0, chunk_publisher=None, **kwargs):
-        return (ExecLifecycle(output="", exc=AgentTermination()), None)
+    process = ScriptedExecProcess([(ExecLifecycle(output="", exc=AgentTermination()), None)])
 
-    monkeypatch.setattr(node, "run_in_subprocess", _fake)  # pyright: ignore[reportUnknownArgumentType]
     state = AgentState(messages=[ai_with_code("meiva.self.terminate()")], halted=False)
     runtime = make_runtime(hosted_resources=hosted_resources, database_gate=database_gate)
-    result = await exec_node(state, runtime, _CONFIG)
+    result = await exec_node(state, runtime, _CONFIG, process=process)
 
     assert result.update["halted"] is True
     msg = result.update["messages"][0]
@@ -427,20 +401,17 @@ async def test_exec_node_dispatch_agent_termination(
 async def test_exec_node_dispatch_agent_restart(
     hosted_resources: HostedTurnResources,
     fake_cancel_event: asyncio.Event,
-    monkeypatch: pytest.MonkeyPatch,
     database_gate: ProcessDbGate,
 ) -> None:
     """ExecLifecycle(AgentRestart) → halted=True + no envelope marker (symmetric
     with AgentTermination path)."""
     from meiva.self import AgentRestart
 
-    async def _fake(code, agent_id, cancel_event, timeout=60.0, chunk_publisher=None, **kwargs):
-        return (ExecLifecycle(output="", exc=AgentRestart()), None)
+    process = ScriptedExecProcess([(ExecLifecycle(output="", exc=AgentRestart()), None)])
 
-    monkeypatch.setattr(node, "run_in_subprocess", _fake)  # pyright: ignore[reportUnknownArgumentType]
     state = AgentState(messages=[ai_with_code("meiva.self.restart()")], halted=False)
     runtime = make_runtime(hosted_resources=hosted_resources, database_gate=database_gate)
-    result = await exec_node(state, runtime, _CONFIG)
+    result = await exec_node(state, runtime, _CONFIG, process=process)
 
     assert result.update["halted"] is True
 
@@ -448,26 +419,27 @@ async def test_exec_node_dispatch_agent_restart(
 async def test_exec_node_dispatch_ordinary_exception(
     hosted_resources: HostedTurnResources,
     fake_cancel_event: asyncio.Event,
-    monkeypatch: pytest.MonkeyPatch,
     loguru_records,
     database_gate: ProcessDbGate,
 ) -> None:
     """ExecCrashed → halted=False + event=exec_failed at INFO (agent
     trial-and-error is not an operator alert; metrics aggregate by event)."""
 
-    async def _fake(code, agent_id, cancel_event, timeout=60.0, chunk_publisher=None, **kwargs):
-        return (
-            ExecCrashed(
-                output="Traceback...\nValueError: boom\n",
-                exc=ValueError("boom"),
-            ),
-            None,
-        )
+    process = ScriptedExecProcess(
+        [
+            (
+                ExecCrashed(
+                    output="Traceback...\nValueError: boom\n",
+                    exc=ValueError("boom"),
+                ),
+                None,
+            )
+        ]
+    )
 
-    monkeypatch.setattr(node, "run_in_subprocess", _fake)  # pyright: ignore[reportUnknownArgumentType]
     state = AgentState(messages=[ai_with_code('raise ValueError("boom")')], halted=False)
     runtime = make_runtime(hosted_resources=hosted_resources, database_gate=database_gate)
-    result = await exec_node(state, runtime, _CONFIG)
+    result = await exec_node(state, runtime, _CONFIG, process=process)
 
     assert result.update["halted"] is False
     # INFO level — a failed execute_code is ordinary dev feedback, not an
@@ -481,7 +453,6 @@ async def test_exec_node_dispatch_ordinary_exception(
 async def test_exec_node_dispatch_unknown_lifecycle_subclass_raises(
     hosted_resources: HostedTurnResources,
     fake_cancel_event: asyncio.Event,
-    monkeypatch: pytest.MonkeyPatch,
     database_gate: ProcessDbGate,
 ) -> None:
     """A future new LifecycleExit subclass that is not handled in the match ladder
@@ -493,12 +464,10 @@ async def test_exec_node_dispatch_unknown_lifecycle_subclass_raises(
         def __init__(self) -> None:
             super().__init__(0)
 
-    async def _fake(code, agent_id, cancel_event, timeout=60.0, chunk_publisher=None, **kwargs):
-        return (ExecLifecycle(output="", exc=_MysteryLifecycle()), None)
+    process = ScriptedExecProcess([(ExecLifecycle(output="", exc=_MysteryLifecycle()), None)])
 
-    monkeypatch.setattr(node, "run_in_subprocess", _fake)  # pyright: ignore[reportUnknownArgumentType]
     state = AgentState(messages=[ai_with_code("...")], halted=False)
     runtime = make_runtime(hosted_resources=hosted_resources, database_gate=database_gate)
 
     with pytest.raises(TypeError, match="Unrecognized LifecycleExit subclass"):
-        await exec_node(state, runtime, _CONFIG)
+        await exec_node(state, runtime, _CONFIG, process=process)
