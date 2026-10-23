@@ -1,14 +1,11 @@
 exports = []
 
 [uses]
+"plugin_boundary.py" = ["plugin_boundary_child.py"]
+"test_flags.py" = ["plugin_boundary.py"]
+"test_load_report.py" = ["plugin_boundary.py"]
+"test_service_config_snapshot.py" = ["plugin_boundary.py", "plugin_boundary_child.py"]
 "test_config_boot_race.py" = ["config_boot_child.py"]
-
-[debt.env-patch]
-"test_service_config_snapshot.py#monkeypatch.delenv os.environ" = 1
-"test_service_config_snapshot.py#monkeypatch.setenv os.environ" = 2
 
 [debt.first-party-patch]
 "test_load_report.py#monkeypatch.setattr base.telemetry.emit" = 1
-
-[debt.unresolved-patch]
-"test_flags.py#monkeypatch.setattr type(settings).has_domain" = 1

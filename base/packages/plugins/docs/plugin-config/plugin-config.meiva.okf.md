@@ -105,3 +105,11 @@ Each entry constructs the shared schema-owned image and calls the same required
 merge operation. Tests supply actual temporary directories and images, retaining
 schema shrink, exact values and per-plugin error isolation without changing
 process-wide paths.
+
+The service carrier is delivered by the launcher before process imports. Its
+snapshot contract tests run a fresh interpreter with an explicit, minimal
+environment: the captured image remains stable after authority-file edits,
+absence returns no snapshot, and malformed or incomplete packets still raise.
+Flag admission is exercised through an actual gateway profile and a valid
+agent-domain declaration, rather than pretending a constructed daemon domain
+is unavailable. Neither path changes the process-wide configuration owner.
