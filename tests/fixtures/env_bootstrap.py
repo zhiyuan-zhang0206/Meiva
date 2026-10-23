@@ -251,6 +251,16 @@ UNPROVISIONED_REDIS_URL = "redis://127.0.0.1:1/0"
 os.environ["MEIVA_DB_URL"] = UNPROVISIONED_DB_URL
 os.environ["MEIVA_REDIS_URL"] = UNPROVISIONED_REDIS_URL
 
+# meiva:note
+# The delivered-login marker (`base.host.db_authority.delivery.GENERATION_ENV`) is a state a
+# launched database-bearing process starts in, not a value the suite reads: the suite's data
+# plane has no delivered generation, which is the state CI runs in. Left ambient on a dev
+# box, the delivery pass under test deletes it mid-test and the leak guard reds
+# `base/tests/test_delivery.py` while CI stays green — the same green-in-CI, red-on-one-box
+# shape as the credentials further down. A test that needs a delivered login sets the marker
+# itself (`base/tests/test_delivery.py` monkeypatches it, `tests/e2e/conftest.py` mints one).
+os.environ.pop("MEIVA_DB_GENERATION", None)
+
 # The cluster secret authenticates bootstrap / /ops. Data-plane credentials
 # are independent, including in the private test bootstrap. Use a URL-safe token that
 # passes the cluster_secret validator. Individual auth tests monkeypatch it (incl.

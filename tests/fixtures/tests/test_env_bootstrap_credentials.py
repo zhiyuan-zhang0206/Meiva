@@ -50,6 +50,14 @@ def test_no_ambient_credential_value_survives_the_bootstrap() -> None:
 
 
 # meiva:note
+# The delivered-login marker is not a credential and has its own reason to go (see the
+# `GENERATION_ENV` note in the bootstrap): a launcher's marker makes the delivery pass under
+# test delete a process global, which reds `base/tests/test_delivery.py` on a dev box only.
+def test_the_delivered_login_marker_does_not_survive_the_bootstrap() -> None:
+    assert "MEIVA_DB_GENERATION" not in os.environ
+
+
+# meiva:note
 # The two FALSE cases are why this is a test: a token budget (`..._TOKENS`) and a path TO a
 # credential (`..._CREDENTIALS_FILE`) must not be swept in, or a stray one on a developer's
 # box arrives as noise and the whole check gets ignored. `DEEPSEEK_API_KEY` is the provider
