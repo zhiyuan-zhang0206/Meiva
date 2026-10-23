@@ -6,21 +6,20 @@ claim's compact return, the auto-compact hook); the drift between those copies
 is what these tests pin down now that there is one owner.
 """
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock
 
 import psycopg
 import pytest
-from langchain_core.messages import AnyMessage, HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, SystemMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 from psycopg_pool import AsyncConnectionPool
 
 from agent.graph import _init_context
 from agent.graph._init_context import init_context_node
-from agent.graph.hooks import compact
 from agent.graph.llm_errors import LlmLedger
 from agent.messages import NoteTag, system_note_message
 from agent.state import AgentState, CapabilitiesState, ContextReset
@@ -60,6 +59,8 @@ def _runtime(
     harness: Harness = Harness.MEIVA,
     agent_id: int | None = None,
     database_gate: ProcessDbGate,
+    pins: Mapping[str, Any] | None = None,
+    llm: Any = None,
 ) -> Runtime[MeivaContext]:
     """`ops_pool=None` takes the container path."""
     return Runtime(
@@ -69,10 +70,11 @@ def _runtime(
             harness=harness,
             hosted_resources=resources,
             ops_pool=ops_pool,
-            llm=AsyncMock(),
+            llm=llm if llm is not None else AsyncMock(),
             event_publisher=MagicMock(),
             agent=AgentSlices.resolve(
-                default_reader=lambda domain, field: getattr(getattr(settings, domain), field)
+                pins,
+                default_reader=lambda domain, field: getattr(getattr(settings, domain), field),
             ),
             extensions=extensions,
             db=Database.from_settings(gate=database_gate),
@@ -328,12 +330,17 @@ async def test_established_head_records_what_the_capability_index_lists(
         "---\nname: alpha\ndescription: Alpha desc\n---\n\nBODY\n", encoding="utf-8"
     )
     monkeypatch.setattr(install_registry, "loadable_skill_names", lambda: {"alpha"})
-    monkeypatch.setattr(settings.agent, "skills_to_inject_into_system_prompt", ["*"])
     tid = create_agent(db_conn)
     _fake_notes(monkeypatch, "memory")
 
     cmd = await init_context_node(
-        AgentState(), _runtime(aops_pool, database_gate=database_gate), _config(tid)
+        AgentState(),
+        _runtime(
+            aops_pool,
+            database_gate=database_gate,
+            pins={"skills_to_inject_into_system_prompt": ["*"]},
+        ),
+        _config(tid),
     )
 
     prompt = str(cmd.update["messages"][0].content)  # type: ignore[index]
@@ -368,12 +375,17 @@ async def test_a_skill_installed_after_establishment_reaches_the_next_turn(
         "loadable_skill_names",
         lambda: {p.name for p in d.iterdir() if p.is_dir()},
     )
-    monkeypatch.setattr(settings.agent, "skills_to_inject_into_system_prompt", ["*"])
     tid = create_agent(db_conn)
     _fake_notes(monkeypatch, "memory")
 
     established = await init_context_node(
-        AgentState(), _runtime(aops_pool, database_gate=database_gate), _config(tid)
+        AgentState(),
+        _runtime(
+            aops_pool,
+            database_gate=database_gate,
+            pins={"skills_to_inject_into_system_prompt": ["*"]},
+        ),
+        _config(tid),
     )
     head = established.update["messages"]  # type: ignore[index]
 
@@ -387,7 +399,15 @@ async def test_a_skill_installed_after_establishment_reaches_the_next_turn(
 
     state = AgentState(messages=head, capabilities=established.update["capabilities"])  # type: ignore[index]
     drift_hook = framework_hooks()["before_llm"][-1]  # the capability-index drift check runs last
-    update = await drift_hook(state, _runtime(aops_pool, database_gate=database_gate), _config(tid))
+    update = await drift_hook(
+        state,
+        _runtime(
+            aops_pool,
+            database_gate=database_gate,
+            pins={"skills_to_inject_into_system_prompt": ["*"]},
+        ),
+        _config(tid),
+    )
 
     assert update is not None
     (note,) = update["messages"]
@@ -411,10 +431,8 @@ async def test_a_compaction_in_the_same_pass_keeps_its_summary_and_its_head(
     """
     from langgraph.graph.message import add_messages
 
-    from agent.graph.hooks import compact as compact_mod
     from agent.graph.hooks.framework import framework_hooks
     from agent.hooks import make_hook_runner
-    from base.lm.context_budget import ContextBudget
 
     d = skills_dir(meiva_home())
     (d / "alpha").mkdir(parents=True)
@@ -426,13 +444,17 @@ async def test_a_compaction_in_the_same_pass_keeps_its_summary_and_its_head(
         "loadable_skill_names",
         lambda: {p.name for p in d.iterdir() if p.is_dir()},
     )
-    monkeypatch.setattr(settings.agent, "skills_to_inject_into_system_prompt", ["*"])
     tid = create_agent(db_conn)
     _fake_notes(monkeypatch, "memory")
+    pins = {
+        "skills_to_inject_into_system_prompt": ["*"],
+        "auto_compact_fraction": 1e-6,
+        "compact_reminder_fraction": 1e-6,
+    }
 
     established = await init_context_node(
         AgentState(),
-        _runtime(aops_pool, resources=hosted_resources, database_gate=database_gate),
+        _runtime(aops_pool, resources=hosted_resources, database_gate=database_gate, pins=pins),
         _config(tid),
     )
 
@@ -442,26 +464,9 @@ async def test_a_compaction_in_the_same_pass_keeps_its_summary_and_its_head(
     (d / "beta" / "SKILL.md").write_text(
         "---\nname: beta\ndescription: Beta desc\n---\n\nBODY\n", encoding="utf-8"
     )
-    monkeypatch.setattr(
-        compact,
-        "resolve_context_budget",
-        lambda *_, **_kw: ContextBudget(  # pyright: ignore[reportUnknownArgumentType]
-            max_context_tokens=1_000_000, soft_compact_tokens=1, hard_compact_tokens=1
-        ),
-    )
     summary_text = "compacted summary " * 100
-
-    async def _fake_generate_summary(
-        messages: list[AnyMessage],
-        llm: object,
-        _model: str,
-        *,
-        binding: object = None,
-        catalog: ModelCatalog,
-    ) -> str:
-        return summary_text
-
-    monkeypatch.setattr(compact_mod, "generate_summary", _fake_generate_summary)
+    fake_llm = MagicMock()
+    fake_llm.bind_tools.return_value.ainvoke = AsyncMock(return_value=AIMessage(content=summary_text))
 
     state = AgentState(
         messages=[
@@ -474,7 +479,13 @@ async def test_a_compaction_in_the_same_pass_keeps_its_summary_and_its_head(
         "before_llm", "llm", [(None, hook) for hook in framework_hooks()["before_llm"]]
     )(
         state,
-        _runtime(aops_pool, resources=hosted_resources, database_gate=database_gate),
+        _runtime(
+            aops_pool,
+            resources=hosted_resources,
+            database_gate=database_gate,
+            pins=pins,
+            llm=fake_llm,
+        ),
         _config(tid),
     )
 
@@ -487,7 +498,13 @@ async def test_a_compaction_in_the_same_pass_keeps_its_summary_and_its_head(
 
     cmd = await llm_node(
         state,
-        _runtime(aops_pool, resources=hosted_resources, database_gate=database_gate),
+        _runtime(
+            aops_pool,
+            resources=hosted_resources,
+            database_gate=database_gate,
+            pins=pins,
+            llm=fake_llm,
+        ),
         _config(tid),
         ledger=LlmLedger(),
     )
@@ -504,7 +521,7 @@ async def test_a_compaction_in_the_same_pass_keeps_its_summary_and_its_head(
 
     reestablished = await init_context_node(
         AgentState(messages=committed, context_reset=cmd.update["context_reset"]),  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
-        _runtime(aops_pool, resources=hosted_resources, database_gate=database_gate),
+        _runtime(aops_pool, resources=hosted_resources, database_gate=database_gate, pins=pins),
         _config(tid),
     )
 
