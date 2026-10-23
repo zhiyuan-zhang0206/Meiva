@@ -2,16 +2,7 @@
 "test_config_cmd.py" = ["child_config_cmd.py"]
 "test_schedules_verify_foreign_checkout.py" = ["child_schedules_verify.py"]
 
-[debt.env-patch]
-"test_config_cmd.py#monkeypatch.delitem os.environ.MEIVA_GATEWAY_URL" = 3
-"test_config_cmd.py#monkeypatch.setenv os.environ.MEIVA_HOME" = 1
-"test_config_cmd.py#monkeypatch.setitem os.environ.MEIVA_GATEWAY_URL" = 2
-
 [debt.first-party-patch]
-"test_config_cmd.py#monkeypatch.setattr base.host.env.dotenv_file.unit_home" = 2
-"test_config_cmd.py#monkeypatch.setattr cli.commands.management.config.get_config" = 6
-"test_config_cmd.py#monkeypatch.setattr cli.commands.management.config.get_config_audit" = 1
-"test_config_cmd.py#monkeypatch.setattr cli.commands.management.config.put_config" = 5
 "test_schedules_cmd.py#monkeypatch.setattr base.cluster.machine.gateway_api_base" = 1
 "test_schedules_cmd.py#monkeypatch.setattr base.cluster.machine.gateway_auth_headers" = 1
 "test_schedules_cmd.py#monkeypatch.setattr base.host.net.http_dial" = 1
@@ -19,6 +10,5 @@
 "test_schedules_cmd.py#monkeypatch.setattr cli.commands.management.schedules_verify.report_verify" = 1
 
 [debt.stdlib-patch]
-"test_config_cmd.py#monkeypatch.setattr os.environ" = 1
 "test_schedules_cmd.py#monkeypatch.setattr builtins.input" = 1
 "test_schedules_cmd.py#monkeypatch.setattr sys.stdin" = 1

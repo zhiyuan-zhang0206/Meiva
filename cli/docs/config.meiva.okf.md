@@ -33,3 +33,17 @@ Otherwise any authenticated caller, a machine token included, could pick
 a credential that outlives its own admission. Writable secrets are outbound
 credentials (provider, search, chat and backup-store keys) only;
 `base/config/tests/test_config_editing.py` pins that classification.
+
+## Client contract evidence
+
+The config CLI tests use a local HTTP listener and isolated child environments.
+They exercise the actual GET/PUT wire models, alias lookup, type coercion,
+merge-patch delta, explicit-null unsets, remote editability, restart hints and
+audited sensitive-value withholding. A home with no gateway identity or a
+conflicting environment override must issue no HTTP request when writing.
+List values traverse the real runtime writer and settings parser. Local repair
+retains unrelated lines, masks credential paths and validates the full candidate
+before replacing its file. The invalid timeout pair is checked in a fresh child
+with no inherited timeout aliases, and its rejection preserves the original bytes.
+The lazy import and incident-repair cases keep running without a valid Settings
+image. Local audit checks retain newest-first ordering and per-alias filtering.
