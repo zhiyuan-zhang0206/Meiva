@@ -24,6 +24,7 @@ from langgraph.runtime import Runtime
 from langgraph.types import Command
 
 from agent.graph import LlmLedger, exec_node, llm_node
+from agent.graph.exec.process import SubprocessExecProcess
 from agent.hooks.tests.fakes import make_fake_ops_pool
 from agent.state import AgentState
 from base.agents.context import MeivaContext
@@ -435,6 +436,7 @@ async def test_exec_node_publishes_exec_start_and_output(
             hosted_resources=hosted_resources, event_publisher=pub, database_gate=database_gate
         ),
         config,
+        process=SubprocessExecProcess(),
     )
 
     events = [EVENT_ADAPTER.validate_json(c.args[0]) for c in pub.emit.call_args_list]
@@ -467,6 +469,7 @@ async def test_exec_node_output_uses_wrap_code_output_envelope(
         state,
         _make_runtime(hosted_resources=hosted_resources, database_gate=database_gate),
         config,
+        process=SubprocessExecProcess(),
     )
 
     assert isinstance(result, Command)
@@ -530,6 +533,7 @@ async def test_exec_node_protects_archives_referenced_by_its_current_state(
         state,
         _make_runtime(hosted_resources=hosted_resources, database_gate=database_gate),
         {"configurable": {"thread_id": "7"}},
+        process=SubprocessExecProcess(),
     )
 
     assert new_body in result.update["messages"][0].content  # pyright: ignore[reportUnknownMemberType]

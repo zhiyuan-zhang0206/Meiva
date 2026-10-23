@@ -39,3 +39,10 @@ Help tests declare machine identity in the private home's `.env`, since an
 inherited identity without that declaration is dropped. Overlay-order tests
 require framework configuration before plugin loading and plugin configuration
 afterward; the installed surface then receives the additive SDK disables.
+
+The direct-child helper's explicit launcher environment is a complete selected
+baseline, copied before child fields are added. An empty mapping stays empty;
+only a missing baseline selects a copy of the test process environment. Eager
+and lite failure cases remove their boot/fetch overrides on that private copy,
+not in the test process, and verify helper augmentation leaves the input intact.
+Their real interpreter entry, error kinds and pre-code failure assertions remain.

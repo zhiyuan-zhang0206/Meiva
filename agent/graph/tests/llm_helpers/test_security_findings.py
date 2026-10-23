@@ -8,6 +8,7 @@ real LangGraph so the channel's reducer (`operator.add`) and the `Overwrite([])`
 
 from __future__ import annotations
 
+from functools import partial
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -17,6 +18,7 @@ from langgraph.runtime import Runtime
 from langgraph.types import Overwrite
 
 from agent.graph.exec.node import exec_node_impl
+from agent.graph.exec.process import SubprocessExecProcess
 from agent.graph.hooks.framework import framework_hooks
 from agent.graph.interrupt import InterruptEvent
 from agent.hooks.security import deliver_security_findings
@@ -163,7 +165,9 @@ async def test_a_real_childs_finding_reaches_the_model_through_the_hook(
         return await deliver_security_findings(state, runtime, _CONFIG)  # type: ignore[arg-type]
 
     builder: Any = StateGraph(AgentState, context_schema=MeivaContext)
-    builder.add_node("exec", exec_node_impl, input_schema=AgentState)
+    builder.add_node(
+        "exec", partial(exec_node_impl, process=SubprocessExecProcess()), input_schema=AgentState
+    )
     builder.add_node("after_exec", after_exec)
     builder.add_edge(START, "exec")
     builder.add_edge("after_exec", END)

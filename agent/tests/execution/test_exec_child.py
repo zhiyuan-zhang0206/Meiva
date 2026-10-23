@@ -37,8 +37,7 @@ def child_env(
     birth_config: dict[str, object] | None = None,
     launcher_env: dict[str, str] | None = None,
 ) -> dict[str, str]:
-    env = os.environ.copy()
-    env.update(launcher_env or {})
+    env = (os.environ if launcher_env is None else launcher_env).copy()
     env.update(
         {
             "MEIVA_HOME": str(tmp_path / "home"),
@@ -163,11 +162,12 @@ raise ValueError('boom')
     assert payload.sdk_calls == [{"method": "files.read", "count": 1}]
 
 
-def test_boot_config_failure_writes_crashed_envelope(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.delenv("MEIVA_CONFIG_FETCH", raising=False)
-    monkeypatch.setenv("MEIVA_CONFIG_BOOT", "eager")
+def test_boot_config_failure_writes_crashed_envelope(tmp_path: Path) -> None:
+    launcher_env = os.environ.copy()
+    launcher_env.pop("MEIVA_CONFIG_FETCH", None)
+    launcher_env["MEIVA_CONFIG_BOOT"] = "eager"
+    launcher_env["MEIVA_DB_URL"] = "postgresql://meiva_runner@127.0.0.1:1/x"
+    expected_env = launcher_env.copy()
     home = tmp_path / "home"
     home.mkdir()
     (home / ".env").write_text(
@@ -182,8 +182,9 @@ def test_boot_config_failure_writes_crashed_envelope(
         tmp_path,
         "pass",
         write_request_file=False,
-        launcher_env={"MEIVA_DB_URL": "postgresql://meiva_runner@127.0.0.1:1/x"},
+        launcher_env=launcher_env,
     )
+    assert launcher_env == expected_env
 
     assert proc.returncode == 0, proc.stderr
     payload = read_result(result)
@@ -195,11 +196,11 @@ def test_boot_config_failure_writes_crashed_envelope(
     assert payload.code_reached is False
 
 
-def test_lite_boot_config_failure_writes_crashed_envelope(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.delenv("MEIVA_CONFIG_BOOT", raising=False)
-    monkeypatch.delenv("MEIVA_CONFIG_FETCH", raising=False)
+def test_lite_boot_config_failure_writes_crashed_envelope(tmp_path: Path) -> None:
+    launcher_env = os.environ.copy()
+    launcher_env.pop("MEIVA_CONFIG_BOOT", None)
+    launcher_env.pop("MEIVA_CONFIG_FETCH", None)
+    expected_env = launcher_env.copy()
     home = tmp_path / "home"
     home.mkdir()
     (home / ".env").write_text(
@@ -209,7 +210,10 @@ def test_lite_boot_config_failure_writes_crashed_envelope(
         encoding="utf-8",
     )
 
-    proc, _request, result = spawn_real_child(tmp_path, "pass", write_request_file=False)
+    proc, _request, result = spawn_real_child(
+        tmp_path, "pass", write_request_file=False, launcher_env=launcher_env
+    )
+    assert launcher_env == expected_env
 
     assert proc.returncode == 0, proc.stderr
     payload = read_result(result)
