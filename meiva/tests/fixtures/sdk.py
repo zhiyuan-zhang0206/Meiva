@@ -47,7 +47,7 @@ def sdk_environment(
             context.clients.close()
         finally:
             if previous is None:
-                del meiva.context
+                process_context.unbind_context()
             else:
                 process_context.bind_context(previous)
 

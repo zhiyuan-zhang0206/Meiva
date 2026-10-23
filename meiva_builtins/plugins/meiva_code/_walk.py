@@ -9,7 +9,21 @@ from base.packages.skills import git_root
 _CONTEXT_FILENAMES = ("AGENTS.md", "CLAUDE.md")
 
 
-def find_context_files_along_path(target: Path) -> list[Path]:
+def _collect_context_files(dirs: list[Path]) -> list[Path]:
+    collected: list[Path] = []
+    seen: set[Path] = set()
+    for d in dirs:
+        for name in _CONTEXT_FILENAMES:
+            f = d / name
+            if f.is_file():
+                real = f.resolve()
+                if real not in seen:
+                    collected.append(real)
+                    seen.add(real)
+    return collected
+
+
+def find_context_files_along_path(target: Path, *, home: Path | None = None) -> list[Path]:
     """Walk up from `target` collecting context files, ordered "farthest → nearest".
 
     Context files are AGENTS.md and CLAUDE.md (see `_CONTEXT_FILENAMES`). Both
@@ -40,7 +54,7 @@ def find_context_files_along_path(target: Path) -> list[Path]:
     if not start.exists():
         return []
 
-    home = Path.home().resolve()
+    home = (home or Path.home()).resolve()
     repo_root = git_root(start)
 
     # Ancestor candidates on the path: start itself or its ancestors
@@ -71,14 +85,4 @@ def find_context_files_along_path(target: Path) -> list[Path]:
         current = current.parent
     dirs.reverse()
 
-    collected: list[Path] = []
-    seen: set[Path] = set()
-    for d in dirs:
-        for name in _CONTEXT_FILENAMES:
-            f = d / name
-            if f.is_file():  # is_file: also excludes dir / nonexistent
-                real = f.resolve()
-                if real not in seen:
-                    collected.append(real)
-                    seen.add(real)
-    return collected
+    return _collect_context_files(dirs)

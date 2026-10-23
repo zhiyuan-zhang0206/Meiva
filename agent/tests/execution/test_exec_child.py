@@ -494,7 +494,7 @@ def test_child_applies_overlay_framework_and_pops_env(tmp_path: Path) -> None:
 
 
 def test_child_overlay_phases_framework_then_plugin(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, model_installation: Installation
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, sdk_model_owner: Installation
 ) -> None:
     from agent.execution import child as exec_child
     from agent.execution import protocol
@@ -558,7 +558,6 @@ def test_child_overlay_phases_framework_then_plugin(
     monkeypatch.setattr(exec_child, "run_code", fake_run_code)
     monkeypatch.setattr(protocol, "write_result", fake_write_result)
     monkeypatch.setattr(boot, "ensure_plugins_loaded", fake_plugins_loaded)
-    monkeypatch.setattr(meiva, "__plugin_installation__", model_installation, raising=False)
 
     def fake_apply_scope(
         birth: dict[str, object] | None,

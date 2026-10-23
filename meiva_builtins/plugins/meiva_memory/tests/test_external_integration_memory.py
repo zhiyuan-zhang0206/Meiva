@@ -33,6 +33,7 @@ from meiva import impersonation
 from meiva.boot import process_clients
 from meiva.sdk_surface import process_context
 from meiva.sdk_surface.installation import Installation
+from meiva.tests.fixtures.model_owner import bind_installation
 from meiva.tests.fixtures.pin_agent import pin_agent, pin_no_identity
 
 
@@ -64,7 +65,8 @@ def native_checkpoint(
         (("integration", PluginContributions(state=(IntegrationPlugin,))),)
     )
     installation = replace(model_installation, registry=extensions, faces=True)
-    monkeypatch.setattr(meiva, "__plugin_installation__", installation, raising=False)
+    prior_slot = bind_installation(installation)
+    request.addfinalizer(lambda: bind_installation(prior_slot))
 
     def build_registry(*, validate_state: object = None) -> ExtensionRegistry:
         return extensions
