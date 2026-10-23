@@ -16,6 +16,7 @@ def owned_tree(tmp_path: Path) -> Path:
     (tmp_path / "conftest.py").write_text(
         "from tests.fixtures import static_environment as environment\n"
         "environment.STATIC_TEST_PATHS = ('tools/tests', 'canaries/test_boundary.py')\n"
+        "environment.NATIVE_TEST_PATHS = ()\n"
         "pytest_plugins = ['tests.fixtures.env_bootstrap', "
         "'tests.fixtures.static_environment']\n",
         encoding="utf-8",
@@ -65,7 +66,7 @@ def _run(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
 def _collected(root: Path, *args: str) -> set[str]:
     result = _run(root, "--collect-only", *args)
     assert result.returncode == 0, result.stdout + result.stderr
-    return {line for line in result.stdout.splitlines() if "::test_contract" in line}
+    return {line for line in result.stdout.splitlines() if "::" in line}
 
 
 def test_static_and_native_ownership_partition_collection_and_keep_local_fixtures(
@@ -151,3 +152,48 @@ def test_actual_ci_warning_policy_rejects_background_native_driver_calls(owned_t
     assert result.returncode == pytest.ExitCode.TESTS_FAILED, result.stdout + result.stderr
     assert "PytestUnhandledThreadExceptionWarning" in result.stdout + result.stderr
     assert "Static tests cannot use Postgres or Redis" in result.stdout + result.stderr
+
+
+def test_compiler_file_routes_to_native_without_losing_static_python(owned_tree: Path) -> None:
+    root = Path(__file__).resolve().parents[3]
+    directory = owned_tree / "tools/tests/explain"
+    directory.mkdir()
+    for name in ("test_python.py", "test_typescript.py"):
+        (directory / name).write_text(
+            (root / "meizel/tests/explain" / name).read_text(), encoding="utf-8"
+        )
+    conftest = owned_tree / "conftest.py"
+    conftest.write_text(
+        conftest.read_text()
+        + "environment.NATIVE_TEST_PATHS = ('tools/tests/explain/test_typescript.py',)\n",
+        encoding="utf-8",
+    )
+    (owned_tree / "pytest.ini").write_text(
+        "[pytest]\ntestpaths =\n    tools/**/tests\n    canaries\n    native\n    tools/tests_backup\n",
+        encoding="utf-8",
+    )
+    whole = _collected(owned_tree)
+    static = _collected(owned_tree, "--test-environment=static")
+    native = _collected(owned_tree, "--omit-static-tests")
+    assert whole == static | native
+    assert static.isdisjoint(native)
+    python = {node for node in whole if "/explain/test_python.py::" in node}
+    assert python and python <= static
+    expected = {
+        "test_fixed_six_source_receipt",
+        "test_loader_refuses_invalid_identity_and_source_sets",
+        "test_cli_explicit_index_and_no_request_states",
+        "test_parse_failure_is_unavailable_instead_of_empty_safe",
+        "test_frozen_holder_keeps_collection_surface_and_literal_path_separate",
+    }
+    runtime = {node for node in native if "/explain/test_typescript.py::" in node}
+    assert {node.split("::")[-1] for node in runtime} == expected
+    assert _collected(owned_tree, "--omit-static-tests", "tools/tests") == runtime
+    refused = _run(
+        owned_tree,
+        "--collect-only",
+        "--test-environment=static",
+        "tools/tests/explain/test_typescript.py",
+    )
+    assert refused.returncode == pytest.ExitCode.USAGE_ERROR
+    assert "Static processes accept only owned static test paths" in refused.stderr
