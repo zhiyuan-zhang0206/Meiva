@@ -14,7 +14,6 @@ from meiva import files
 from meiva.sdk_surface import process_context
 from meiva.sdk_surface.installation import Installation
 from meiva.self import attach
-from meiva.tests.fixtures.model_owner import bind_installation
 
 
 def take_attachments() -> list[dict[str, object]]:
@@ -24,7 +23,7 @@ def take_attachments() -> list[dict[str, object]]:
 
 
 @pytest.fixture(autouse=True)
-def _exec_turn(sdk_model_owner: Installation) -> Iterator[None]:
+def _exec_turn() -> Iterator[None]:
     process_context.set_state(object())
     process_context.set_state_update({})
     yield
@@ -38,7 +37,10 @@ def _media_capable_model(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings.lm, "llm_model", "gpt-5.6-sol")
 
 
-def test_registers_resolved_path_and_drains_once(tmp_path: Path) -> None:
+def test_registers_resolved_path_and_drains_once(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, model_installation: Installation
+) -> None:
+    monkeypatch.setattr(meiva, "__plugin_installation__", model_installation, raising=False)
     image = tmp_path / "result.png"
     image.write_bytes(b"png")
 
@@ -48,7 +50,10 @@ def test_registers_resolved_path_and_drains_once(tmp_path: Path) -> None:
     assert take_attachments() == []
 
 
-def test_rejects_calls_outside_exec_child(tmp_path: Path) -> None:
+def test_rejects_calls_outside_exec_child(
+    tmp_path: Path, *, model_installation: Installation, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(meiva, "__plugin_installation__", model_installation, raising=False)
     process_context.unbind_exec_turn()
     image = tmp_path / "result.png"
     image.write_bytes(b"png")
@@ -57,7 +62,10 @@ def test_rejects_calls_outside_exec_child(tmp_path: Path) -> None:
         attach(image)
 
 
-def test_validates_path_suffix_size_and_label(tmp_path: Path) -> None:
+def test_validates_path_suffix_size_and_label(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, model_installation: Installation
+) -> None:
+    monkeypatch.setattr(meiva, "__plugin_installation__", model_installation, raising=False)
     directory = tmp_path / "directory"
     directory.mkdir()
     text_file = tmp_path / "notes.txt"
@@ -83,8 +91,9 @@ def test_validates_path_suffix_size_and_label(tmp_path: Path) -> None:
 
 
 def test_uses_workspace_relative_path_semantics(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, model_installation: Installation
 ) -> None:
+    monkeypatch.setattr(meiva, "__plugin_installation__", model_installation, raising=False)
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setattr(files.agent_identity, "agent_id", lambda: None)
     image = tmp_path / "relative.png"
@@ -95,7 +104,10 @@ def test_uses_workspace_relative_path_semantics(
     assert take_attachments() == [{"path": str(image.resolve()), "label": None}]
 
 
-def test_rejects_text_only_model(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_rejects_text_only_model(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, model_installation: Installation
+) -> None:
+    monkeypatch.setattr(meiva, "__plugin_installation__", model_installation, raising=False)
     from base.config import settings
 
     monkeypatch.setattr(settings.lm, "llm_model", "deepseek-v4-pro")
@@ -116,6 +128,7 @@ def test_rejects_model_withdrawn_to_its_text_only_fallback(
     *,
     model_installation: Installation,
 ) -> None:
+    monkeypatch.setattr(meiva, "__plugin_installation__", model_installation, raising=False)
     from dataclasses import replace
 
     from base.config import settings
@@ -132,7 +145,9 @@ def test_rejects_model_withdrawn_to_its_text_only_fallback(
             )
         },
     )
-    bind_installation(replace(model_installation, catalog=model_catalog))
+    monkeypatch.setattr(
+        meiva, "__plugin_installation__", replace(model_installation, catalog=model_catalog)
+    )
     monkeypatch.setattr(settings.lm, "llm_model", model)
     image = tmp_path / "result.png"
     image.write_bytes(b"png")
@@ -144,8 +159,9 @@ def test_rejects_model_withdrawn_to_its_text_only_fallback(
 
 
 def test_rejects_modality_not_supported_by_model(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, model_installation: Installation
 ) -> None:
+    monkeypatch.setattr(meiva, "__plugin_installation__", model_installation, raising=False)
     from base.config import settings
 
     monkeypatch.setattr(settings.lm, "llm_model", "gpt-5.6-sol")
@@ -159,8 +175,9 @@ def test_rejects_modality_not_supported_by_model(
 
 
 def test_attach_modality_matrix_follows_registry(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, model_installation: Installation
 ) -> None:
+    monkeypatch.setattr(meiva, "__plugin_installation__", model_installation, raising=False)
     from base.config import settings
 
     video = tmp_path / "clip.mp4"

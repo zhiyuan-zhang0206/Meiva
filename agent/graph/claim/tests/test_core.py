@@ -31,7 +31,6 @@ from base.packages.tests.model_catalog import AddModels
 from base.paths import meiva_home
 from base.telemetry.tests.capture.event_capture import EmittedEvents
 from meiva.sdk_surface.installation import Installation
-from meiva.tests.fixtures.model_owner import bind_installation
 from meiva.tests.fixtures.pin_agent import pin_agent
 
 
@@ -130,22 +129,21 @@ class TestTerminate:
 
 
 class TestRestart:
-    @pytest.fixture(autouse=True)
-    def _model_owner(self, sdk_model_owner: Installation) -> None:
-        return None
-
     def test_restart_inserts_restart_inbound_to_self(
         self,
         redis_url: str,
         db_conn: psycopg.Connection,
+        monkeypatch: pytest.MonkeyPatch,
         *,
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
+        model_installation: Installation,
         database_gate: ProcessDbGate,
         machine_identity: MachineIdentity,
     ) -> None:
         """restart self-inserts a kind='restart' source='self' into its own agent.
         The restarter daemon will handle the respawn (this test only verifies the SDK-side write is correct)."""
+        monkeypatch.setattr(meiva, "__plugin_installation__", model_installation, raising=False)
         pin_agent(
             spawn_agent(
                 catalog=model_catalog,
@@ -162,9 +160,11 @@ class TestRestart:
         self,
         redis_url: str,
         db_conn: psycopg.Connection,
+        monkeypatch: pytest.MonkeyPatch,
         *,
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
+        model_installation: Installation,
         database_gate: ProcessDbGate,
         machine_identity: MachineIdentity,
     ) -> None:
@@ -173,6 +173,7 @@ class TestRestart:
         Validation + INSERT path exercised, validate_config_overlay passes then payload serialized
         into inbound_messages.payload.
         """
+        monkeypatch.setattr(meiva, "__plugin_installation__", model_installation, raising=False)
         pin_agent(
             spawn_agent(
                 catalog=model_catalog,
@@ -204,12 +205,15 @@ class TestRestart:
         self,
         redis_url: str,
         db_conn: psycopg.Connection,
+        monkeypatch: pytest.MonkeyPatch,
         *,
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
+        model_installation: Installation,
         database_gate: ProcessDbGate,
         machine_identity: MachineIdentity,
     ) -> None:
+        monkeypatch.setattr(meiva, "__plugin_installation__", model_installation, raising=False)
         pin_agent(
             spawn_agent(
                 catalog=model_catalog,
@@ -254,13 +258,16 @@ class TestRestart:
         self,
         redis_url: str,
         db_conn: psycopg.Connection,
+        monkeypatch: pytest.MonkeyPatch,
         *,
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
+        model_installation: Installation,
         database_gate: ProcessDbGate,
         machine_identity: MachineIdentity,
     ) -> None:
         """Non-per_agent field → InvalidConfigOverlay; does **not** deliver inbound, process does not exit."""
+        monkeypatch.setattr(meiva, "__plugin_installation__", model_installation, raising=False)
         pin_agent(
             spawn_agent(
                 catalog=model_catalog,
@@ -285,13 +292,16 @@ class TestRestart:
         self,
         redis_url: str,
         db_conn: psycopg.Connection,
+        monkeypatch: pytest.MonkeyPatch,
         *,
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
+        model_installation: Installation,
         database_gate: ProcessDbGate,
         machine_identity: MachineIdentity,
     ) -> None:
         """A model typo is rejected before either persistent restart side effect."""
+        monkeypatch.setattr(meiva, "__plugin_installation__", model_installation, raising=False)
         pin_agent(
             spawn_agent(
                 catalog=model_catalog,
@@ -333,6 +343,7 @@ class TestRestart:
         redis_url: str,
         db_conn: psycopg.Connection,
         add_models: AddModels,
+        monkeypatch: pytest.MonkeyPatch,
         *,
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
@@ -356,7 +367,8 @@ class TestRestart:
                 )
             },
         )
-        bind_installation(replace(model_installation, catalog=model_catalog))
+        model_installation = replace(model_installation, catalog=model_catalog)
+        monkeypatch.setattr(meiva, "__plugin_installation__", model_installation, raising=False)
         pin_agent(
             spawn_agent(
                 catalog=model_catalog,
@@ -390,15 +402,17 @@ class TestPauseHeartbeat:
     @pytest.fixture(autouse=True)
     def policy_installation(
         self,
+        monkeypatch: pytest.MonkeyPatch,
         model_installation: Installation,
         config_authority: ConfigAuthority,
-    ) -> Iterator[None]:
+    ) -> None:
         """The actual SDK caller uses this test root's supplied live configuration."""
-        prior = bind_installation(replace(model_installation, authority=config_authority))
-        try:
-            yield
-        finally:
-            bind_installation(prior)
+        monkeypatch.setattr(
+            meiva,
+            "__plugin_installation__",
+            replace(model_installation, authority=config_authority),
+            raising=False,
+        )
 
     @pytest.mark.usefixtures("event_pipeline")
     def test_pause_heartbeat_sets_window_records_trail_and_emits_event(
