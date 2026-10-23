@@ -17,6 +17,33 @@ Behavior owner: [[base/lm/docs/provider-errors.meiva.okf.md]].
 
 Billing classification is independent of retry class. A specific billing code can coexist with a generic error type; reporting preserves the original type. A Google prepayment rejection remains distinguishable from ordinary rate limiting with the same HTTP status.
 
+## Completed-call billing spans and fail-fast waiting
+
+Behavior owners: [[base/lm/usage/docs/usage.meiva.okf.md]] and
+[[base/lm/docs/provider-errors.meiva.okf.md]].
+
+Billing span scenarios run in fresh interpreters with closed child environments
+and private homes. They require the real tracing arm to initialize against an
+owned loopback collector, then use the SDK's `SimpleSpanProcessor` and
+`InMemorySpanExporter` to observe finished spans. The v1 fields, original start
+and actual end, cache-write TTL pricing, unpriced marker, missing usage and
+absent-versus-zero cache metering retain their assertions. These checks do not
+establish a live provider receipt or remote telemetry persistence.
+
+The disabled case loads its actual flag from the private environment file.
+A scoped profile observes the real `get_tracer` entry without replacing it;
+a positive acquisition control precedes the assertion that billing acquires
+nothing. A real SDK processor records the billing span start and throws the
+same observed exception; billing still returns normally and reports that
+exception. Each child flushes and shuts down its SDK provider and collector.
+
+Unknown runnable failures retain the original exception object and one attempt,
+even with a typed provider cause. A scoped profile observes the real `time.sleep`
+C-call, with a `sleep(0)` positive control, before requiring no retry wait with
+two configured retries and the unchanged nonzero delay. Both error classes and
+both cause states remain parameterized. The profile and its observations belong
+only to that child process; no runtime function or SDK lookup is replaced.
+
 ## Reasoning visibility
 
 Behavior owner: [[base/lm/docs/lm/lm.meiva.okf.md]].
