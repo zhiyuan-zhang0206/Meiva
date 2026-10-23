@@ -6,21 +6,17 @@ from pathlib import Path
 from subprocess import CompletedProcess
 
 import pytest
-from pytest import MonkeyPatch
 
 from base.host.brew_pin import UV_VERSION
 from scripts.ci import dependency_audit as audit
 
 
 @pytest.mark.parametrize("exit_code", [0, 1])
-def test_audit_accepts_complete_findings(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, exit_code: int
-) -> None:
+def test_audit_accepts_complete_findings(tmp_path: Path, exit_code: int) -> None:
     def run(*args: object, **kwargs: object) -> CompletedProcess[str]:
         return CompletedProcess(["npm", "audit"], exit_code, '{"vulnerabilities": {}}', "")
 
-    monkeypatch.setattr(audit.subprocess, "run", run)
-    assert audit.run_json(["npm", "audit"], tmp_path) == {"vulnerabilities": {}}
+    assert audit.run_json(["npm", "audit"], tmp_path, run=run) == {"vulnerabilities": {}}
 
 
 @pytest.mark.parametrize(
@@ -28,14 +24,13 @@ def test_audit_accepts_complete_findings(
     [(1, '{"error": {"code": "ENOAUDIT"}}'), (2, '{"vulnerabilities": {}}')],
 )
 def test_audit_rejects_registry_and_tool_errors(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, exit_code: int, stdout: str
+    tmp_path: Path, exit_code: int, stdout: str
 ) -> None:
     def run(*args: object, **kwargs: object) -> CompletedProcess[str]:
         return CompletedProcess(["npm", "audit"], exit_code, stdout, "private registry details")
 
-    monkeypatch.setattr(audit.subprocess, "run", run)
     with pytest.raises(RuntimeError, match="npm reported an audit error") as error:
-        audit.run_json(["npm", "audit"], tmp_path)
+        audit.run_json(["npm", "audit"], tmp_path, run=run)
     assert "private registry details" not in str(error.value)
 
 
@@ -173,7 +168,7 @@ def test_every_pinned_binary_constant_is_found_in_the_tree() -> None:
         assert audit.pinned_version(path, pattern), name
 
 
-def test_report_runs_the_canonical_uv_pin(monkeypatch: MonkeyPatch, tmp_path: Path) -> None:
+def test_report_runs_the_canonical_uv_pin(tmp_path: Path) -> None:
     commands: list[list[str]] = []
 
     def run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
@@ -183,11 +178,9 @@ def test_report_runs_the_canonical_uv_pin(monkeypatch: MonkeyPatch, tmp_path: Pa
     def no_binaries(*_args: object) -> list[audit.Binary]:
         return []
 
-    monkeypatch.setattr(audit.subprocess, "run", run)
-    monkeypatch.setattr(audit, "latest_binaries", no_binaries)
     output = tmp_path / "report.md"
 
-    assert audit.main(["--out", str(output)]) == 0
+    assert audit.main(["--out", str(output)], run=run, binaries_fn=no_binaries) == 0
     assert commands[0] == [
         "uvx",
         "--from",

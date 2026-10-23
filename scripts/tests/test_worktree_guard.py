@@ -69,9 +69,7 @@ def test_true_anchor_still_refuses_from_inside_invocation(tmp_path: Path) -> Non
     process genuinely anchored in the target still refuses."""
     target = tmp_path / "worktrees" / "wt-under-test"
     target.mkdir(parents=True)
-    sleeper = subprocess.Popen(
-        [sys.executable, "-c", "import time; time.sleep(30)"], cwd=target, start_new_session=True
-    )
+    sleeper = subprocess.Popen(["/bin/sleep", "30"], cwd=target, start_new_session=True)
     try:
         time.sleep(0.5)  # let psutil observe the sleeper's cwd
         result = _run_guard(target)
@@ -108,73 +106,7 @@ def test_a_python_without_psutil_gets_its_own_exit_code_and_says_what_to_run(
     assert ".venv/bin/python scripts/host_ops/check_worktree_remove.py" in result.stderr
 
 
-# Runs the real script with every outbound channel replaced by a recorder that
-# raises, and reports what was touched. Everything the scan could reach a cluster
-# through: sockets, HTTP clients, urllib, the database drivers, redis. A connect to a
-# unix-socket path is this machine's own pty-sessions service, the one thing the scan
-# is meant to ask, so it passes through; any other address is a dial.
-_NO_DIAL_DRIVER = r"""
-import json, runpy, socket, sys, urllib.request
-
-dialed = []
-
-
-def refuse(name):
-    def _refused(*args, **kwargs):
-        dialed.append(name)
-        raise RuntimeError(name + " was called")
-
-    return _refused
-
-
-def local_only(dotted, original):
-    def _guarded(self, address, *args, **kwargs):
-        if isinstance(address, str):
-            return original(self, address, *args, **kwargs)
-        dialed.append(dotted)
-        raise RuntimeError(dotted + " was called")
-
-    return _guarded
-
-
-def patch(dotted):
-    path, attr = dotted.rsplit(".", 1)
-    try:
-        obj = __import__(path.split(".")[0])
-        for part in path.split(".")[1:]:
-            obj = getattr(obj, part)
-    except (ImportError, AttributeError):
-        return
-    if dotted in ("socket.socket.connect", "socket.socket.connect_ex"):
-        setattr(obj, attr, local_only(dotted, getattr(obj, attr)))
-    else:
-        setattr(obj, attr, refuse(dotted))
-
-
-for dotted in (
-    "socket.socket.connect",
-    "socket.socket.connect_ex",
-    "socket.create_connection",
-    "urllib.request.urlopen",
-    "httpx.Client.send",
-    "httpx.AsyncClient.send",
-    "requests.Session.send",
-    "psycopg.connect",
-    "psycopg.Connection.connect",
-    "psycopg_pool.ConnectionPool.__init__",
-    "redis.connection.Connection.connect",
-):
-    patch(dotted)
-
-script, target = sys.argv[1:3]
-sys.argv = [script, target]
-code = 0
-try:
-    runpy.run_path(script, run_name="__main__")
-except SystemExit as exit_:
-    code = exit_.code
-print("RESULT:" + json.dumps({"code": code, "dialed": dialed}))
-"""
+_NO_DIAL_CHILD = Path(__file__).with_name("child_worktree_guard_no_dial.py")
 
 
 def _tree_state(home: Path) -> list[tuple[str, int, int, int]]:
@@ -200,9 +132,6 @@ def test_the_guard_reads_the_real_home_and_dials_and_writes_nothing(tmp_path: Pa
     home. The home here is deliberately not owner-only and holds an unreadable `.env`
     naming a database; any attempt to open the home as the owner's (`ensure_private_dir`)
     or to boot the cluster config from it changes or breaks something."""
-    script = (
-        Path(__file__).resolve().parents[2] / "scripts" / "host_ops" / "check_worktree_remove.py"
-    )
     home = tmp_path / "meiva-home"
     (home / "run").mkdir(parents=True)
     target = tmp_path / "worktrees" / "wt-under-test"
@@ -233,7 +162,7 @@ def test_the_guard_reads_the_real_home_and_dials_and_writes_nothing(tmp_path: Pa
     env.update(MEIVA_HOME=str(home), HOME=str(tmp_path / "user"))
     try:
         result = subprocess.run(  # noqa: S603 - test-owned interpreter and fixture paths
-            [sys.executable, "-c", _NO_DIAL_DRIVER, str(script), str(target)],
+            [sys.executable, str(_NO_DIAL_CHILD), str(target)],
             capture_output=True,
             text=True,
             env=env,

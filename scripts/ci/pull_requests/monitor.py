@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import sys
+from collections.abc import Callable
 
 from base.clock import Clock, Timers
 from base.host.system.hostport import Host
@@ -17,11 +18,19 @@ from scripts.ci.pull_requests.status import (
 )
 
 
-def query_once(pr: str, repo: str, *, as_json: bool, host: Host, clock: Clock) -> int:
+def query_once(
+    pr: str,
+    repo: str,
+    *,
+    as_json: bool,
+    host: Host,
+    clock: Clock,
+    check_ci_fn: Callable[..., CIResult] = status.check_ci,
+) -> int:
     """One-shot probe: print the current verdict and exit (legacy contract —
     PENDING / NO_CHECKS / ERROR exit 0; FAILED / MERGE_CONFLICT /
     NO_WORKFLOW_RUNS / draft-gated NOT_READY exit 1)."""
-    result = status.check_ci(pr, repo=repo, host=host, clock=clock)
+    result = check_ci_fn(pr, repo=repo, host=host, clock=clock)
 
     if as_json:
         print(
@@ -138,6 +147,7 @@ def wait_for_verdict(
     *,
     host: Host,
     clock: Clock,
+    check_ci_fn: Callable[..., CIResult] = status.check_ci,
 ) -> int:
     """Poll check_ci until the verdict settles, then report and exit.
     Never loops silently: a persistent gh/network failure exits 3 after MAX_CONSECUTIVE_ERRORS
@@ -154,7 +164,7 @@ def wait_for_verdict(
     limbo_reported: tuple[int, ...] | None = None
 
     while True:
-        result = status.check_ci(pr, repo=repo, host=host, clock=clock)
+        result = check_ci_fn(pr, repo=repo, host=host, clock=clock)
         verdict = result.verdict
 
         if verdict is CIStatus.PENDING:

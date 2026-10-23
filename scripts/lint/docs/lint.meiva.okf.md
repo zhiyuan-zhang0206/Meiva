@@ -15,7 +15,7 @@ guards are a separate group: [[scripts/content_lint/docs/content_lint.meiva.okf.
 
 ## The linters
 
-- `code_structure.py` — `main(argv, *, repo_root, baseline_base)` returns the gate exit code; Python file/CC/nesting budgets; ≤20 tracked entries in every non-root directory, including docs, tests, hidden files and links; locality (doors, owners, no path imports; `python-conventions.md`); [[meizel/docs/ambient-state.meiva.okf.md|ambient state]]. Ambient-state maps are shrink-only; budgets and locality have no exemptions. CC 10-14 warns; `--complexity-warnings-full` unfolds counts.
+- `code_structure.py` — `main(argv, *, repo_root, baseline_base)` returns the gate exit code; file (≤800 lines for Python and governed `ui/` TypeScript), function (CC <15, nesting ≤5), and directory (≤20 tracked entries in every non-root directory, including docs, tests, hidden files and links) hard ceilings; locality (doors, owners, no path imports; `python-conventions.md`); [[meizel/docs/ambient-state.meiva.okf.md|ambient state]]. Ambient-state maps are shrink-only; budgets and locality have no exemptions.
 - `../../lint_pool_keepalives.py` — a psycopg pool in `scripts/` or in a module the `postgres-dial` decision allows must carry `PG_KEEPALIVE_KWARGS` (AST-based, sees through `AsyncConnectionPool[T](...)` subscripts and `LoggingConnectionPool` subclasses); elsewhere Rule 5 already routes every pool through `base.db.pool()` / `async_pool()`. Stays at `scripts/` root, not this directory, pending the Postgres-dial locality work.
 - `no_emoji.py`, `no_os_environ.py` — Python conventions. Sibling-import guard: `meizel/language/`.
 - Ruff S110 checks lone-pass handlers in production code, including typed exceptions.

@@ -341,7 +341,7 @@ def _wide_fanout_diagnostics(manifests: dict[str, Manifest], policy: Policy) -> 
                     Code.WIDE_EXPORTS,
                     f"exports: {_where(directory)} exports {len(manifest.exports)} children (max {max_exports} in {manifest.purity_default} mode)",
                     (
-                        "keep the package door narrow by re-exporting through `__init__.py` or splitting subpackages",
+                        "a subpackage is a deep container whose `meizel.toml` `exports` door must stay narrow (<= 4 children) so callers see one cohesive concept while tree depth absorbs growth; expose a single `__init__.py` / `index.ts` facade or group internal siblings into deeper subpackages",
                     ),
                     _purity_debt(directory, manifest.path, "exports", manifest.purity_default),
                 )
@@ -357,7 +357,7 @@ def _wide_fanout_diagnostics(manifests: dict[str, Manifest], policy: Policy) -> 
                         Code.WIDE_FANOUT,
                         f"[uses] {child!r} depends on {len(targets)} sibling targets (max {max_uses} in {mode} mode)",
                         (
-                            "split the module's responsibilities or group lower-level collaborators behind a cohesive subpackage door",
+                            "high sibling fan-out means this module is acting as a wide hub; separate pure domain logic from I/O orchestration, or group related lower-level collaborators behind a cohesive subpackage with a narrow `exports` door",
                         ),
                         _purity_debt(directory, child_path, "uses", mode),
                     )

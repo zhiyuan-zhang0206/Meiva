@@ -168,9 +168,9 @@ def gh() -> Any:
 
 
 @pytest.fixture
-def has_workflows(monkeypatch: pytest.MonkeyPatch):
+def has_workflows():
     def _set(value: bool) -> None:
-        monkeypatch.setattr(status, "repo_has_workflows", lambda: value)
+        assert value is True
 
     return _set
 
@@ -188,11 +188,13 @@ def test_app_check_alone_is_not_green(gh: Any, has_workflows: Any) -> None:
     assert "DID NOT RUN" in r.summary()
 
 
-def test_app_check_alone_is_green_when_repo_has_no_workflows(gh: Any, has_workflows: Any) -> None:
+def test_app_check_alone_is_green_when_repo_has_no_workflows(gh: Any) -> None:
     """A repo with no workflow files is legitimately green on app checks alone."""
     host = gh([APP_CHECK])
-    has_workflows(False)
-    assert status.check_ci("1", host=host, clock=TEST_CLOCK).verdict is CIStatus.ALL_PASSED
+    assert (
+        status.check_ci("1", host=host, clock=TEST_CLOCK, has_workflows=lambda: False).verdict
+        is CIStatus.ALL_PASSED
+    )
 
 
 def test_one_workflow_check_is_enough_to_be_green(gh: Any, has_workflows: Any) -> None:
@@ -339,14 +341,13 @@ def test_empty_rollup_with_a_queued_run_is_pending_not_no_checks(gh: Any) -> Non
 
 
 def test_empty_rollup_with_an_unanswerable_probe_is_error(
-    gh: Any, monkeypatch: pytest.MonkeyPatch
+    gh: Any,
 ) -> None:
     """The runs probe failing must not read as a settled NO_CHECKS — the exact
     verdict this probe exists to rule out when checks may still be attaching."""
     host = gh([])
-    monkeypatch.setattr(status, "runs_not_yet_reporting", lambda *_a, **_k: None)
 
-    r = status.check_ci("2249", host=host, clock=TEST_CLOCK)
+    r = status.check_ci("2249", host=host, clock=TEST_CLOCK, runs_probe=lambda *_a, **_k: None)
     assert r.verdict is CIStatus.ERROR
     assert "probe" in r.error_detail
 
@@ -422,7 +423,7 @@ def test_partial_suite_green_with_a_run_still_queued_is_pending(
 
 
 def test_partial_suite_green_with_an_unanswerable_probe_is_error(
-    gh: Any, has_workflows: Any, monkeypatch: pytest.MonkeyPatch
+    gh: Any, has_workflows: Any
 ) -> None:
     """Closed asymmetry (QA review, 2026-09-11): every attached check passed but
     the probe cannot confirm nothing is still queued. None must not read as
@@ -435,9 +436,8 @@ def test_partial_suite_green_with_an_unanswerable_probe_is_error(
         ]
     )
     has_workflows(True)
-    monkeypatch.setattr(status, "runs_not_yet_reporting", lambda *_a, **_k: None)
 
-    r = status.check_ci("776", host=host, clock=TEST_CLOCK)
+    r = status.check_ci("776", host=host, clock=TEST_CLOCK, runs_probe=lambda *_a, **_k: None)
     assert r.verdict is CIStatus.ERROR
     assert "probe" in r.error_detail
 
@@ -462,15 +462,12 @@ def test_early_green_window_without_the_main_run_is_not_green(gh: Any, has_workf
     assert status.check_ci("3137", host=host, clock=TEST_CLOCK).verdict is CIStatus.ALL_PASSED
 
 
-def test_main_workflow_probe_failure_is_error(
-    gh: Any, has_workflows: Any, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_main_workflow_probe_failure_is_error(gh: Any, has_workflows: Any) -> None:
     """An unanswerable main-workflow probe is unknown, never a green verdict."""
     host = gh([status_check_rollup_entry("backend", "SUCCESS")], scheduled=[], main_completed=True)
     has_workflows(True)
-    monkeypatch.setattr(status, "main_workflow_run_completed", lambda *_a, **_k: None)
 
-    r = status.check_ci("3137", host=host, clock=TEST_CLOCK)
+    r = status.check_ci("3137", host=host, clock=TEST_CLOCK, main_probe=lambda *_a, **_k: None)
     assert r.verdict is CIStatus.ERROR
     assert "probe" in r.error_detail
 
@@ -578,9 +575,7 @@ def test_main_workflow_probe_returns_none_when_unanswerable() -> None:
     assert status.main_workflow_run_completed("abc123", None, host=host) is None
 
 
-def test_runs_api_failure_keeps_the_conservative_verdict(
-    gh: Any, has_workflows: Any, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_runs_api_failure_keeps_the_conservative_verdict(gh: Any, has_workflows: Any) -> None:
     """A probe that cannot answer must not invent a reason to wait — an
     unreachable API is not evidence that CI is coming. Without any attached
     workflow check the not-green NO_WORKFLOW_RUNS verdict is kept, exactly as
@@ -588,9 +583,13 @@ def test_runs_api_failure_keeps_the_conservative_verdict(
     None from []."""
     host = gh([APP_CHECK])
     has_workflows(True)
-    monkeypatch.setattr(status, "runs_not_yet_reporting", lambda *_a, **_k: None)
 
-    assert status.check_ci("886", host=host, clock=TEST_CLOCK).verdict == CIStatus.NO_WORKFLOW_RUNS
+    assert (
+        status.check_ci(
+            "886", host=host, clock=TEST_CLOCK, runs_probe=lambda *_a, **_k: None
+        ).verdict
+        == CIStatus.NO_WORKFLOW_RUNS
+    )
 
 
 def completed_process_stub(stdout: str = "", returncode: int = 0) -> Any:
@@ -603,11 +602,11 @@ def no_sleep() -> Clock:
 
 
 @pytest.fixture
-def poll(monkeypatch: pytest.MonkeyPatch):
+def poll():
     """Stub check_ci with a queue of verdicts; main() consumes them in order,
     the last one repeating forever (a settled verdict ends the loop)."""
 
-    def _install(*verdicts: CIStatus) -> None:
+    def _install(*verdicts: CIStatus) -> Any:
         calls = {"n": 0}
 
         def fake_check(
@@ -633,7 +632,7 @@ def poll(monkeypatch: pytest.MonkeyPatch):
                 return status.CIResult(verdict=v, core_skipped=["backend shard (1/16)"])
             return status.CIResult(verdict=v)
 
-        monkeypatch.setattr(status, "check_ci", fake_check)
+        return fake_check
 
     return _install
 
@@ -776,19 +775,12 @@ def limbo_result(
     )
 
 
-def install_results_poller(monkeypatch: pytest.MonkeyPatch, *results: Any) -> None:
+def install_results_poller(*results: Any) -> Any:
     calls = {"n": 0}
 
-    def fake_check(
-        pr: str | int,
-        *,
-        repo: str | None = None,
-        host: object = None,
-        clock: object = None,
-    ) -> Any:
-        del pr, repo, host, clock
+    def fake_check(*_a: object, **_k: object) -> Any:
         i = min(calls["n"], len(results) - 1)
         calls["n"] += 1
         return results[i]
 
-    monkeypatch.setattr(status, "check_ci", fake_check)
+    return fake_check

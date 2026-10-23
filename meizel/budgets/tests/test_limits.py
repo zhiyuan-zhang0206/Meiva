@@ -28,9 +28,12 @@ def test_a_file_over_the_ceiling_is_flagged(tmp_path: Path, lines: int, flagged:
     errors = limits.check([repo / "base"], [repo], repo, _STRUCTURE)
     assert bool(errors) is flagged
     if flagged:
-        assert errors == [
-            f"base/big.py:{lines}: file is {lines} lines, over the 800-line hard ceiling — split it"
-        ]
+        [error] = errors
+        assert error.startswith(
+            f"base/big.py:{lines}: file is {lines} lines, over the 800-line hard ceiling — "
+        )
+        assert "Deep Module" in error
+        assert "cohesive subpackage" in error
 
 
 @pytest.mark.parametrize(("entries", "flagged"), [(20, False), (21, True)])
@@ -39,17 +42,33 @@ def test_a_directory_over_the_cap_is_flagged(tmp_path: Path, entries: int, flagg
     errors = limits.check([repo / "base"], [repo], repo, _STRUCTURE)
     assert bool(errors) is flagged
     if flagged:
-        assert errors == [
-            f"base/pkg: directory has {entries} direct entries, over the 20-entry cap — split it"
-        ]
+        [error] = errors
+        assert error.startswith(
+            f"base/pkg: directory has {entries} direct entries, over the 20-entry cap — "
+        )
+        assert "tree depth is unbounded" in error
+        assert "cohesive subpackages" in error
 
 
 def test_the_file_scope_skips_hidden_cache_and_migration_directories(tmp_path: Path) -> None:
     repo = _repo(
         tmp_path,
-        {"base/ok.py": 1, "base/.hidden/big.py": 900, "base/migrations/big.py": 900},
+        {
+            "base/ok.py": 1,
+            "base/.hidden/big.py": 900,
+            "base/migrations/big.py": 900,
+            "ui/web/src/lib/ok.ts": 1,
+            "ui/web/src/components/view.tsx": 1,
+            "ui/web/src/lib/contracts/types-generated.ts": 900,
+            "ui/web/src/i18n/app-config.d.ts": 900,
+            "ui/web/node_modules/pkg/index.ts": 900,
+        },
     )
-    assert limits.budget_files([repo / "base"], repo, _STRUCTURE) == {repo / "base" / "ok.py"}
+    assert limits.budget_files([repo / "base", repo / "ui"], repo, _STRUCTURE) == {
+        repo / "base" / "ok.py",
+        repo / "ui/web/src/lib/ok.ts",
+        repo / "ui/web/src/components/view.tsx",
+    }
 
 
 def test_tracked_children_rejects_a_listing_without_a_terminator() -> None:

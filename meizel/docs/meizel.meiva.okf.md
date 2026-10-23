@@ -46,9 +46,7 @@ three or more, so a new package is declared in one place or the check says where
   framework directory list, test-path detection, scan-root resolution and the
   `--only` changed-files mode. Changed-files runs widen to a full scan when
   `meizel/` itself changes, because that changes the verdict of untouched files.
-- `budgets/` — the 800-line file ceiling and the 20-entry directory cap
-  (`limits.py`) and what counts as a direct entry of a directory
-  (`directory_budget.py`). `scripts/lint/code_structure.py` drives them.
+- `budgets/` — the 800-line file ceiling (Python and governed `ui/` TypeScript, so leaf files can be true Ousterhout Deep Modules behind narrow interfaces before graduating into cohesive subpackages) and the 20-entry directory cap (`limits.py`, bounding flat branching factor at each single node while directory tree depth is unbounded so total codebase size has no cap and local reasoning stays $O(1)$) and what counts as a direct entry of a directory (`directory_budget.py`). `scripts/lint/code_structure.py` drives them.
 - `owners/` — one owner per external capability: `decisions.py` holds Rule 5
   (`DECISIONS`: each design decision has exactly one owning module, every other
   site is a bypass, and a listed exemption that goes stale fails; the exemptions

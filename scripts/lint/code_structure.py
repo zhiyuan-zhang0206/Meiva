@@ -338,12 +338,19 @@ def _governed(path: Path, rel: str, ast_files: set[Path]) -> tuple[bool, bool]:
     return in_ast and _in_scan_scope(rel), in_ast and ambient_state.in_scope(rel)
 
 
+def _py_budget_files(targets: list[Path], repo_root: Path) -> set[Path]:
+    return {
+        path
+        for path in limits.budget_files(targets, repo_root, _STRUCTURE_DIRS)
+        if path.suffix == ".py"
+    }
+
+
 def _check_ast_and_quality(
     argv: list[str],
     targets: list[Path],
     baseline: dict[str, dict[str, int]],
     *,
-    full: bool,
     repo_root: Path,
     renames: dict[str, str] | None = None,
     parse_ast: Callable[..., ast.Module],
@@ -351,7 +358,7 @@ def _check_ast_and_quality(
         [ast.AST, str], dict[str, dict[str, int]]
     ] = quality_budget.measure_quality,
 ) -> list[str]:
-    files = limits.budget_files(targets, repo_root, _STRUCTURE_DIRS)
+    files = _py_budget_files(targets, repo_root)
     ast_files = _ast_rule_files(argv, repo_root)
     measurements: dict[str, dict[str, int]] = {kind: {} for kind in quality_budget.QUALITY_SECTIONS}
     sites: dict[str, locality.Sites] = {kind: {} for kind in _MEASURED_SECTIONS}
@@ -384,7 +391,6 @@ def _check_ast_and_quality(
     )
     errors.extend(decisions.missing_allowlist_errors(repo_root))
     errors.extend(ambient_state.missing_allowlist_errors(repo_root))
-    quality_budget.render_warnings(measurements["complexity"], full=full)
     return errors
 
 
@@ -394,12 +400,11 @@ def _changed_targets(only: list[str] | None, repo_root: Path) -> list[str]:
     return [] if scope is None else [str(repo_root / rel) for rel in sorted(scope)]
 
 
-def _parse_args(argv: list[str], repo_root: Path) -> tuple[list[str], bool, bool]:
+def _parse_args(argv: list[str], repo_root: Path) -> tuple[list[str], bool]:
     """(explicit targets, unfold complexity warnings, nothing to judge) from the command line."""
-    full = "--complexity-warnings-full" in argv
-    argv, only = lint_common.split_only([a for a in argv if a != "--complexity-warnings-full"])
+    argv, only = lint_common.split_only(argv)
     targets = [*argv, *_changed_targets(only, repo_root)]
-    return targets, full, only == [] and not targets
+    return targets, only == [] and not targets
 
 
 def _budget_scopes(argv: list[str], repo_root: Path) -> tuple[list[Path], list[Path]]:
@@ -431,7 +436,7 @@ def main(
     Diagnostics use stdout/stderr and the return value is the CLI exit status.
     """
     repo_root = repo_root.resolve() if repo_root is not None else _REPO_ROOT
-    argv, full, nothing_changed = _parse_args(argv if argv is not None else sys.argv[1:], repo_root)
+    argv, nothing_changed = _parse_args(argv if argv is not None else sys.argv[1:], repo_root)
     if nothing_changed:
         return 0
     missing = [arg for arg in argv if not os.path.lexists(arg)]
@@ -466,7 +471,6 @@ def main(
             argv,
             targets,
             baseline,
-            full=full,
             repo_root=repo_root,
             renames=renames,
             parse_ast=parse_ast,

@@ -6,6 +6,9 @@ from collections.abc import Iterable, Mapping
 from pathlib import Path, PurePosixPath
 
 _MANIFEST = "meizel.toml"
+_EXCLUDED_DIRS = frozenset(
+    {"__pycache__", "migrations", "node_modules", "dist", "build", "coverage", "target"}
+)
 
 
 def tracked_children(listing: str) -> dict[str, set[str]]:
@@ -58,8 +61,8 @@ def entries(directory: Path) -> list[Path]:
         for entry in directory.iterdir()
         if not entry.is_symlink()
         and not entry.name.startswith(".")
+        and not (entry.name in _EXCLUDED_DIRS and entry.is_dir())
         and entry.name != "__pycache__"
-        and not (entry.name == "migrations" and entry.is_dir())
     ]
 
 
@@ -72,8 +75,8 @@ def selected_under(target: Path, scope: Path, repo_root: Path) -> Path | None:
     else:
         return None
     relative = selected.relative_to(repo_root)
-    if any(
-        part.startswith(".") or part in {"__pycache__", "migrations"} for part in relative.parts
-    ) or any(path.is_symlink() for path in (selected, *selected.parents)):
+    if any(part.startswith(".") or part in _EXCLUDED_DIRS for part in relative.parts) or any(
+        path.is_symlink() for path in (selected, *selected.parents)
+    ):
         return None
     return selected

@@ -501,7 +501,7 @@ def _scan_functions(
                     Code.WIDE_PARAMS,
                     name,
                     f"`{name}` takes {len(params)} parameters (max {config.max_params})",
-                    "group related parameters into a cohesive options/value interface",
+                    "long parameter lists couple callers to pass-through plumbing; bundle cohesive domain inputs or dependencies into a readonly options/value interface",
                 )
             )
         open_brace = _find_body_brace(code_only, close_paren)
@@ -613,7 +613,7 @@ def _scan_purity(
                     Code.WIDE_PUBLIC_SURFACE,
                     "__all__",
                     f"{path} exports {len(runtime_exports)} runtime symbols (max {config.max_public_symbols})",
-                    "split cohesive responsibilities into focused modules or narrow the exported surface",
+                    "a leaf module should be a Deep Module (rich internal logic behind <= 6 exported runtime symbols); keep internal helpers unexported, or graduate distinct responsibilities into a cohesive subpackage behind a narrow `index.ts` door",
                 )
             )
     items.extend(_scan_impure_calls(code_only, config, spans))

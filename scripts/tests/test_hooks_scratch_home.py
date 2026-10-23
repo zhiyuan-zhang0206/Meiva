@@ -184,16 +184,23 @@ def test_a_hook_script_exempt_from_the_scratch_home_runs_without_a_third_party_p
     module body must run with the standard library alone, so it cannot reach the config
     boot that the scratch home exists to keep away from a real home."""
     assert rel in _hook_scripts()
+    commands = {
+        "scripts/lint/locks/python_lock.py": [
+            sys.executable,
+            "-S",
+            "scripts/lint/locks/python_lock.py",
+        ],
+        "scripts/provision/check_git_hooks.py": [
+            sys.executable,
+            "-S",
+            "scripts/provision/check_git_hooks.py",
+        ],
+    }
+    assert set(commands) == set(_BOOTS_NOTHING)
     env = {k: v for k, v in os.environ.items() if not k.startswith("MEIVA_")}
     env["HOME"] = str(tmp_path)
     result = subprocess.run(  # noqa: S603 — fixed argv, repository script, no shell
-        [
-            sys.executable,
-            "-S",
-            "-c",
-            "import runpy, sys; runpy.run_path(sys.argv[1], run_name='bare_import_check')",
-            rel,
-        ],
+        commands[rel],
         cwd=_REPO,
         env=env,
         capture_output=True,

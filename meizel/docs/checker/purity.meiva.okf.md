@@ -18,6 +18,19 @@ are gamed by splitting functions into private helpers within the same file; only
 container budgets and deterministic AST/graph rules force genuine decomposition into pure
 value transformations and thin imperative shells.
 
+Together with the 800-line file ceiling and 20-entry directory ceiling (`meizel/budgets/`),
+these rules enforce **Ousterhout Deep Modules** and **Fractal $O(1)$ Locality**:
+
+1. **800 lines encourages Deep Modules**: 800 lines is deliberately generous so a single leaf
+   file can hide rich internal logic behind a narrow public surface ($\le 6$ behavioral
+   symbols) without premature fragmentation. When a file exceeds 800 lines, it has outgrown a
+   single leaf module and graduates into a cohesive subpackage directory behind a narrow
+   `meizel.toml` `exports` door ($\le 4$ exports).
+2. **Zero cap on total codebase size**: directory tree depth is unbounded. The budgets bound
+   only the branching factor and interface width at each single node ($\le 800$ lines, $\le 20$
+   entries, $\le 4$ exports, $\le 8$ sibling uses), forcing growth downward into deeper
+   subtrees behind narrow doors so local reasoning stays $O(1)$ at any codebase scale.
+
 ## Three purity modes
 
 A manifest declares purity either for the whole directory (`purity = "strict"`) or per direct

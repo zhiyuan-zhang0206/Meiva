@@ -20,17 +20,13 @@ from scripts.ci.pull_requests import export_process, runs_export
 
 
 @pytest.mark.parametrize("sha", ["a" * 40, None])
-def test_writer_uses_one_captured_gate_and_is_joined(
-    monkeypatch: pytest.MonkeyPatch, sha: str | None, tmp_path: Path
-) -> None:
+def test_writer_uses_one_captured_gate_and_is_joined(sha: str | None, tmp_path: Path) -> None:
     image = LoadedCommit(Path("/loaded-exporter"), sha)
     gates: list[ProcessDbGate] = []
     hosts: list[Callable[[], str]] = []
     counts: list[tuple[Path, str]] = []
     config = ConfigBoot()
     config.set_field("machine_name", "export-owner")
-    monkeypatch.setattr(export_process, "ConfigBoot", lambda: config)
-    monkeypatch.setattr(export_process, "meiva_home", lambda: tmp_path)
 
     def count(repo: Path, rev: str = "HEAD") -> int:
         counts.append((repo, rev))
@@ -53,10 +49,15 @@ def test_writer_uses_one_captured_gate_and_is_joined(
         assert hosts == [machine.host, machine.host]
         return EventPipeline(writer=lambda _events: None)
 
-    monkeypatch.setattr(Database, "from_settings", handle)
-    monkeypatch.setattr(code_version, "first_parent_count", count)
-    monkeypatch.setattr(export_process, "build_pipeline", build)
-    with export_process.owned_event_pipeline("exporter", image=image) as pipeline:
+    with export_process.owned_event_pipeline(
+        "exporter",
+        image=image,
+        boot_cls=lambda: config,
+        home_fn=lambda: tmp_path,
+        db_from_settings=handle,
+        pipeline_builder=build,
+        count_fn=count,
+    ) as pipeline:
         assert not pipeline.stopped
         assert len(gates) == 2 and gates[0] is gates[1]
         if sha is None:
@@ -71,9 +72,7 @@ def test_writer_uses_one_captured_gate_and_is_joined(
     assert pipeline.stopped
 
 
-def test_body_error_preserves_the_original_writer_error_during_close(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_body_error_preserves_the_original_writer_error_during_close() -> None:
     primary = ValueError("export failed")
     worker_error = OSError("writer failed")
 
@@ -88,7 +87,6 @@ def test_body_error_preserves_the_original_writer_error_during_close(
         assert callable(database)
         return pipeline
 
-    monkeypatch.setattr(export_process, "build_pipeline", build)
     event = Event(
         ts=datetime.now(UTC),
         trace_id=None,
@@ -106,7 +104,7 @@ def test_body_error_preserves_the_original_writer_error_during_close(
     with (
         pytest.raises(ValueError) as caught,
         export_process.owned_event_pipeline(
-            "exporter", image=LoadedCommit(Path("/loaded"), None)
+            "exporter", image=LoadedCommit(Path("/loaded"), None), pipeline_builder=build
         ) as owned,
     ):
         owned.enqueue(event)
@@ -120,7 +118,7 @@ def test_body_error_preserves_the_original_writer_error_during_close(
 
 @pytest.mark.parametrize("borrowed", [False, True])
 def test_export_entry_captures_before_fetch_or_borrows_the_supplied_writer(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, borrowed: bool
+    tmp_path: Path, borrowed: bool
 ) -> None:
     calls: list[str] = []
     image = LoadedCommit(Path("/loaded-exporter"), None)
@@ -158,16 +156,16 @@ def test_export_entry_captures_before_fetch_or_borrows_the_supplied_writer(
         calls.append("emit")
         assert not pipeline.stopped
 
-    monkeypatch.setattr(LoadedCommit, "capture", capture)
-    monkeypatch.setattr(runs_export, "collect_repo", collect)
-    monkeypatch.setattr(runs_export, "save_json", Mock())
-    monkeypatch.setattr(runs_export, "emit_snapshot", emit)
-    monkeypatch.setattr(export_process, "build_pipeline", build)
     try:
         assert (
             runs_export.main(
                 ["--repo", "owner/repo", "--state-dir", str(tmp_path)],
                 producer=(lambda: pipeline) if borrowed else None,
+                capture_fn=capture,
+                collect_fn=collect,
+                save_fn=Mock(),
+                emit_fn=emit,
+                pipeline_builder=build,
             )
             == 0
         )

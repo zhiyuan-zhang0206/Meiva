@@ -377,6 +377,7 @@ def test_wide_fanout_flags_excess_sibling_uses_in_strict_and_records_in_strict_t
     assert found.debt is not None
     assert found.debt.key == "hub.py#uses"
     assert "depends on 3 sibling targets (max 2" in found.message
+    assert any("cohesive subpackage" in hint for hint in found.hints)
 
 
 def test_wide_exports_flags_excess_subpackage_doors(make_repo: RepoFactory) -> None:
@@ -394,6 +395,7 @@ def test_wide_exports_flags_excess_subpackage_doors(make_repo: RepoFactory) -> N
     [found] = diagnostics(root, "wide-exports")
     assert found.debt is not None
     assert (found.debt.owner, found.debt.key) == ("pkg/sub", "meizel.toml#exports")
+    assert any("tree depth absorbs growth" in hint for hint in found.hints)
 
 
 def test_wide_public_surface_counts_behavioral_symbols_not_frozen_data_classes(
@@ -420,6 +422,7 @@ def test_wide_public_surface_counts_behavioral_symbols_not_frozen_data_classes(
     assert found.debt is not None
     assert found.debt.key == "a.py#public-surface"
     assert "3 public behavioral symbols (max 2" in found.message
+    assert any("Deep Module" in hint for hint in found.hints)
 
 
 def test_wide_params_excludes_self_and_flags_excess_parameters(make_repo: RepoFactory) -> None:
@@ -441,6 +444,7 @@ def test_wide_params_excludes_self_and_flags_excess_parameters(make_repo: RepoFa
     [found] = diagnostics(root, "wide-params")
     assert found.debt is not None
     assert found.debt.key == "a.py#def too_many"
+    assert any("@dataclass(frozen=True)" in hint for hint in found.hints)
 
 
 def test_deep_attr_chain_flags_train_wrecks_and_ignores_module_or_method_chains(

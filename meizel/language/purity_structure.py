@@ -24,9 +24,14 @@ _NESTED_PATCH_HINT = (
     "inject the collaborator directly instead of patching through an attribute chain"
 )
 _WIDE_PUBLIC_SURFACE_HINT = (
-    "split the module into smaller cohesive modules or mark internal helpers private with `_`"
+    "a leaf module should be a Deep Module (up to 800 lines of rich internal logic behind <= 6 "
+    "public behavioral symbols); mark internal helpers private with `_`, or if the file spans "
+    "multiple responsibilities, graduate it into a cohesive subpackage behind a narrow `exports` door"
 )
-_WIDE_PARAMS_HINT = "group cohesive parameters into a `@dataclass(frozen=True)` value object"
+_WIDE_PARAMS_HINT = (
+    "long parameter lists couple callers to positional details and pass-through plumbing; bundle "
+    "cohesive domain inputs or collaborator ports into a `@dataclass(frozen=True)` value object"
+)
 _DEEP_ATTR_CHAIN_HINT = (
     "ask the immediate collaborator for the value via a method or pass only the needed slice"
 )

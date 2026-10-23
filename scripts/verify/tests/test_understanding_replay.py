@@ -1,9 +1,9 @@
 from __future__ import annotations
 
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
 from typing import Any, cast
-from unittest.mock import MagicMock
 
-import pytest
 from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, SystemMessage
 
 from agent.hooks import understanding_chunks as uc
@@ -17,8 +17,34 @@ from base.lm.catalog import ModelCatalog
 _THRESHOLD = 1000
 
 
-def _read_agent(field: str):
+def _read_agent(field: str) -> Any:
+    if field == "understanding_enabled":
+        return True
+    if field == "understanding_chunk_ratio":
+        return 1.0
     return getattr(settings.agent, field)
+
+
+class _RecordingPool:
+    def __init__(self, enqueued: list[tuple[int, int, str | None]]) -> None:
+        self._enqueued = enqueued
+
+    @asynccontextmanager
+    async def connection(self, *, timeout: float | None = None) -> AsyncGenerator[Any, None]:
+        del timeout
+        yield self
+
+    @asynccontextmanager
+    async def transaction(self) -> AsyncGenerator[None, None]:
+        yield
+
+    @asynccontextmanager
+    async def cursor(self) -> AsyncGenerator[Any, None]:
+        yield self
+
+    async def execute(self, _sql: str, params: tuple[Any, ...] | None = None) -> None:
+        if params is not None:
+            self._enqueued.append((int(params[2]), int(params[3]), params[4]))
 
 
 def _segment() -> list[AnyMessage]:
@@ -43,26 +69,17 @@ def _segment() -> list[AnyMessage]:
     return msgs
 
 
-async def test_live_chunks_match_the_hook_turn_by_turn(
-    monkeypatch: pytest.MonkeyPatch, *, model_catalog: ModelCatalog
-) -> None:
-    monkeypatch.setattr(settings.agent, "understanding_enabled", True)
-
-    def _threshold(
-        _model: str, _overrides: ModelOverrides, _ratio: float, *, catalog: ModelCatalog
-    ) -> int:
-        assert catalog is model_catalog
-        return _THRESHOLD
-
-    monkeypatch.setattr(uc, "chunk_threshold", _threshold)
+async def test_live_chunks_match_the_hook_turn_by_turn(*, model_catalog: ModelCatalog) -> None:
     enqueued: list[tuple[int, int, str | None]] = []
-
-    async def fake_enqueue(pool: Any, agent_id: int, **kwargs: Any) -> bool:
-        chunk = kwargs["chunk"]
-        enqueued.append((chunk.start_index, chunk.end_index, kwargs["end_msg_id"]))
-        return True
-
-    monkeypatch.setattr(uc, "enqueue_chunk", fake_enqueue)
+    pool = cast("Any", _RecordingPool(enqueued))
+    model = next(iter(model_catalog.models))
+    overrides = ModelOverrides.from_pins(
+        {
+            "compact_reminder_fraction": 0.1,
+            "auto_compact_fraction": 0.2,
+            "auto_compact_ceiling_tokens": 2000,
+        }
+    )
     msgs = _segment()
     compact = CompactState()
     for i, msg in enumerate(msgs):
@@ -71,10 +88,10 @@ async def test_live_chunks_match_the_hook_turn_by_turn(
                 compact,
                 msgs[:i],
                 msg,
-                pool=MagicMock(),
+                pool=pool,
                 agent_id=1,
-                model="m",
-                overrides=ModelOverrides.from_pins({}),
+                model=model,
+                overrides=overrides,
                 catalog=model_catalog,
                 read_agent=_read_agent,
             )

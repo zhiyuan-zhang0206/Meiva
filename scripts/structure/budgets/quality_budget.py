@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import ast
-import sys
 from collections import Counter
 from collections.abc import Callable
 from typing import Any
@@ -12,9 +11,20 @@ from radon.complexity import ComplexityVisitor
 from radon.visitors import Class, Function
 
 COMPLEXITY_HARD = 15
-COMPLEXITY_WARN = 10
 NESTING_CEILING = 5
 QUALITY_SECTIONS = ("complexity", "nesting")
+_QUALITY_GUIDANCE = {
+    "complexity": (
+        "separate pure decision/branching logic from I/O orchestration, replace flag/mode "
+        "cascades with data-driven dispatch or composable helper functions, and keep each "
+        "function a single focused step"
+    ),
+    "nesting": (
+        "flatten deep control flow with guard clauses / early returns, extract inner loops "
+        "or branch bodies into named domain helpers, and separate pure transformation from "
+        "resource/error handling"
+    ),
+}
 CONTROL = (ast.If, ast.For, ast.AsyncFor, ast.While, ast.Try, ast.With, ast.AsyncWith, ast.Match)
 FUNCTIONS = (ast.FunctionDef, ast.AsyncFunctionDef)
 
@@ -129,33 +139,8 @@ def measure_quality(
 def quality_errors(measurements: dict[str, dict[str, int]]) -> list[str]:
     """Every hard violation fails; no rename or frozen value grants an allowance."""
     return [
-        f"{key}: {kind} {value}: over the {ceiling} ceiling — refactor it"
+        f"{key}: {kind} {value}: over the {ceiling} ceiling — {_QUALITY_GUIDANCE[kind]}"
         for kind, ceiling in (("complexity", COMPLEXITY_HARD - 1), ("nesting", NESTING_CEILING))
         for key, value in measurements[kind].items()
         if value > ceiling
     ]
-
-
-def render_warnings(complexity: dict[str, int], *, full: bool = False) -> None:
-    counts = Counter(
-        key.partition("::")[0]
-        for key, value in complexity.items()
-        if COMPLEXITY_WARN <= value < COMPLEXITY_HARD
-    )
-    if not counts:
-        return
-    print(
-        f"complexity warnings (cc 10-14, non-blocking): {sum(counts.values())} "
-        f"functions in {len(counts)} files",
-        file=sys.stderr,
-    )
-    ordered = sorted(counts.items(), key=lambda item: (-item[1], item[0]))
-    visible = ordered if full else ordered[:30]
-    for path, count in visible:
-        print(f"{path}: {count}", file=sys.stderr)
-    remaining = ordered[len(visible) :]
-    if remaining:
-        print(
-            f"rest: {len(remaining)} files / {sum(count for _, count in remaining)} functions",
-            file=sys.stderr,
-        )

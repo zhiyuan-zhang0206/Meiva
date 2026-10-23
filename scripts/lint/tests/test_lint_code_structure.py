@@ -117,7 +117,7 @@ def test_line_budget_boundary(
     output = capsys.readouterr().out
     if lines > 800:
         assert f"{scope}/example.py:801:" in output
-        assert "split it" in output
+        assert "Deep Module" in output
         assert "hard ceiling" in output
     else:
         assert output == ""
@@ -140,7 +140,7 @@ def test_directory_cap_counts_py_pyi_and_subdirectories(
     assert lcs.main([], repo_root=tmp_path, baseline_base="HEAD", parse_ast=ast.parse) == 1
     output = capsys.readouterr().out
     assert "tests/package: directory has 21 direct entries" in output
-    assert "split it" in output
+    assert "tree depth is unbounded" in output
 
 
 def test_directory_budgets_are_recursive_and_independent(
@@ -537,9 +537,7 @@ def test_quality_boundaries(
     assert lcs.main([], repo_root=tmp_path, baseline_base="HEAD", parse_ast=ast.parse) == rc
     captured = capsys.readouterr()
     assert (f"tests/q.py::f: {kind} {value}" in captured.out) == bool(rc)
-    assert (
-        "complexity warnings (cc 10-14, non-blocking): 1 functions in 1 files" in captured.err
-    ) == (kind == "complexity" and value == 14)
+    assert "complexity warnings" not in captured.err
 
 
 def test_function_qualnames_duplicates_and_lambda_exclusion() -> None:
@@ -605,52 +603,19 @@ def test_nesting_semantics(body: str, depth: int) -> None:
     assert quality.max_depth(ast.parse(body).body) == depth
 
 
-@pytest.mark.parametrize("count", [0, 1, 30, 32])
-@pytest.mark.parametrize("full", [False, True])
-def test_complexity_warning_summary_order_and_folding(
-    capsys: pytest.CaptureFixture[str], count: int, full: bool
-) -> None:
-    scores = {f"tests/{i:02}.py::f": 10 for i in reversed(range(count))}
-    if count:
-        scores["tests/00.py::g"] = 14
-    scores.update({"tests/silent.py::low": 9, "tests/silent.py::high": 15})
-    quality.render_warnings(scores, full=full)
-    lines = capsys.readouterr().err.splitlines()
-    if not count:
-        assert lines == []
-        return
-    assert (
-        lines[0]
-        == f"complexity warnings (cc 10-14, non-blocking): {count + 1} functions in {count} files"
-    )
-    visible = count if full else min(count, 30)
-    assert lines[1 : visible + 1] == [
-        f"tests/{i:02}.py: {2 if i == 0 else 1}" for i in range(visible)
-    ]
-    assert lines[visible + 1 :] == (
-        [f"rest: {count - 30} files / {count - 30} functions"] if count > 30 and not full else []
-    )
-
-
 @pytest.mark.parametrize("directory", [False, True])
-@pytest.mark.parametrize("flag_first", [False, True])
 def test_explicit_quality_targets_and_full_flag(
-    tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str], directory: bool, flag_first: bool
+    tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str], directory: bool
 ) -> None:
-    selected = _source(tmp_path, _branches(10), "tests/chosen/a.py")
+    selected = _source(tmp_path, _branches(14), "tests/chosen/a.py")
     _source(tmp_path, _branches(15), "tests/other/hard.py")
-    _source(tmp_path, _branches(14), "tests/other/warn.py")
     args = [str(selected.parent if directory else selected)]
-    args.insert(0 if flag_first else len(args), "--complexity-warnings-full")
     assert lcs.main(args, repo_root=tmp_path, baseline_base="HEAD", parse_ast=ast.parse) == 0
     captured = capsys.readouterr()
     assert captured.out == ""
-    assert "1 functions in 1 files\ntests/chosen/a.py: 1\n" in captured.err
-    assert "tests/other" not in captured.err
     assert lcs.main([], repo_root=tmp_path, baseline_base="HEAD", parse_ast=ast.parse) == 1
     captured = capsys.readouterr()
     assert "tests/other/hard.py::f" in captured.out
-    assert "2 functions in 2 files" in captured.err
 
 
 def _write_ambient_callbacks(root: pathlib.Path, path: str, count: int) -> None:

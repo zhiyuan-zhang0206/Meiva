@@ -11,7 +11,9 @@ from __future__ import annotations
 import importlib.abc
 import json
 import os
+import subprocess
 import sys
+from collections.abc import Sequence
 
 _OWNER_ONLY = frozenset(
     {"scripts.ci.pull_requests.owner_operations", "scripts.ci.pull_requests.trunk_api"}
@@ -34,14 +36,38 @@ from base.clock.tests.manual_timers import ManualTimers  # noqa: E402
 from base.host.net.tests.fake_url_opener import FakeUrlOpener  # noqa: E402
 from base.host.system.tests.fake_commands import fake_host  # noqa: E402
 from scripts.ci import cli as ci_utils  # noqa: E402
-from scripts.ci.pull_requests import status  # noqa: E402
 
 
-def _all_passed(*_args: object, **_kwargs: object) -> status.CIResult:
-    return status.CIResult(status.CIStatus.ALL_PASSED)
+def _all_passed_gh(
+    argv: Sequence[str], *_args: object, **_kwargs: object
+) -> subprocess.CompletedProcess[str]:
+    cmd = list(argv)
+    url = cmd[2] if len(cmd) > 2 else ""
+    if "api" not in cmd:
+        stdout = json.dumps(
+            {
+                "mergeable": "MERGEABLE",
+                "statusCheckRollup": [
+                    {
+                        "__typename": "CheckRun",
+                        "name": "backend",
+                        "status": "COMPLETED",
+                        "conclusion": "SUCCESS",
+                        "workflowName": "CI",
+                        "completedAt": None,
+                    }
+                ],
+                "headRefOid": "deadbeef",
+                "isDraft": False,
+            }
+        )
+    elif "status=completed" in url:
+        stdout = "1"
+    else:
+        stdout = "[]"
+    return subprocess.CompletedProcess(cmd, 0, stdout, "")
 
 
-status.check_ci = _all_passed
 timers = ManualTimers()
 clock = Clock(
     ClockConfig(timezone="UTC", authoritative_timezone="UTC", message_timestamp_weekday=False),
@@ -49,5 +75,10 @@ clock = Clock(
     now=timers.now,
 )
 raise SystemExit(
-    ci_utils.main(json.loads(sys.argv[2]), host=fake_host(), clock=clock, open_url=FakeUrlOpener())
+    ci_utils.main(
+        json.loads(sys.argv[2]),
+        host=fake_host(_all_passed_gh),
+        clock=clock,
+        open_url=FakeUrlOpener(),
+    )
 )

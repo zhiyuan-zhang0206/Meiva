@@ -1,2 +1,4 @@
+exports = ["python_lock.py"]
+
 [uses]
 "tests" = ["package_lock.py", "python_lock.py"]

@@ -171,8 +171,13 @@ def npm_vulnerabilities(
 # meiva:note
 # An audit tool exiting 1 with complete JSON findings is accepted; non-JSON output, an error payload or any other exit code raises as an incomplete audit.
 # meiva:link scripts/ci/docs/dependency-audit.meiva.okf.md
-def run_json(argv: list[str], cwd: Path) -> dict[str, Any]:
-    result = subprocess.run(argv, capture_output=True, text=True, cwd=cwd, timeout=600, check=False)
+def run_json(
+    argv: list[str],
+    cwd: Path,
+    *,
+    run: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
+) -> dict[str, Any]:
+    result = run(argv, capture_output=True, text=True, cwd=cwd, timeout=600, check=False)
     try:
         parsed: Any = json.loads(result.stdout)
     except json.JSONDecodeError as exc:
@@ -400,7 +405,12 @@ def sync_issue(
 # meiva:note
 # A run renders the marker-prefixed three-section report from the audit tools and the canonical pins, and runs `uv audit` with the uv version pinned in base/host/brew_pin.py.
 # meiva:link scripts/ci/docs/dependency-audit.meiva.okf.md
-def main(argv: list[str]) -> int:
+def main(
+    argv: list[str],
+    *,
+    run: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
+    binaries_fn: Callable[..., list[Binary]] = latest_binaries,
+) -> int:
     parser = argparse.ArgumentParser(description="Weekly dependency audit report")
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument(
@@ -420,10 +430,12 @@ def main(argv: list[str]) -> int:
             "json",
         ],
         _REPO_ROOT,
+        run=run,
     )
     npm_json = run_json(
         ["npm", "audit", "--json", "--registry=https://registry.npmjs.org"],
         _REPO_ROOT / "ui/web",
+        run=run,
     )
     lockfile = cast(
         "dict[str, Any]",
@@ -434,7 +446,7 @@ def main(argv: list[str]) -> int:
         *python_vulnerabilities(uv_json, _fetch_json),
         *npm_vulnerabilities(npm_json, packages),
     ]
-    binaries = latest_binaries(_gh_api, _fetch_text)
+    binaries = binaries_fn(_gh_api, _fetch_text)
 
     report = render(vulnerabilities, binaries)
     args.out.write_text(report, encoding="utf-8")
