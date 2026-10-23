@@ -232,6 +232,7 @@ def _extract_pg(jar_bytes: bytes, target: Path) -> None:
 # Homebrew bottles carry per-major dirs).
 PGVECTOR_VERSION = "0.8.7"
 PGVECTOR_SQL = f"vector--{PGVECTOR_VERSION}.sql"
+_PGVECTOR_SQL = PGVECTOR_SQL
 
 # platform key -> (download URL, pinned sha256 of the whole artifact).
 # The deb is a plain HTTPS file; the bottle is a content-addressed ghcr.io

@@ -89,6 +89,9 @@ def boot_id() -> str:
     return boot
 
 
+_boot = boot_id
+
+
 def write(data: Path, receipt: Receipt) -> None:
     path = receipt_path(data)
     ensure_private_dir(path.parent)
@@ -105,6 +108,9 @@ def read_receipt(data: Path) -> Receipt | None:
     if receipt.data != str(data) or receipt.platform != sys.platform:
         raise RuntimeError("PostgreSQL custody names another data directory or platform")
     return receipt
+
+
+_read = read_receipt
 
 
 def _directory_matches(process: psutil.Process, data: Path, receipt: Receipt | None) -> bool:
