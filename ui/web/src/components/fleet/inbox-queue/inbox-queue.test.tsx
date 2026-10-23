@@ -6,8 +6,6 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AgentRow, NoticeItem, OpenNotice, PageRow, TaskSummaryRow } from "@/lib/contracts/types";
 import type { NoticesFeed } from "@/lib/notifications/use-notices";
 
-vi.mock("@/lib/agents/sidebar", () => ({ formatRelativeTime: (ts: string) => `rel:${ts}` }));
-
 const resolveNotice = vi.fn<
   (agentId: number, noticeId: number, body: { action: string; reply?: string }) => Promise<{ status: string }>
 >();

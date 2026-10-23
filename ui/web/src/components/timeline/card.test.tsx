@@ -10,22 +10,23 @@
  * afterEach(cleanup), which unmounts and clears those intervals per test.
  * De-quarantined 2026-08-24.
  */
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
-// The header's expand toggle calls this on pointer-enter/focus to warm the
-// syntax-highlighter chunk ahead of an expand that might reveal a code block
-// (see python-code.tsx) — mocked here so the "intent prefetch wiring" test
-// below can assert it's actually invoked, without depending on the real
-// dynamic import.
-const preloadPythonCodeHighlighter = vi.hoisted(() => vi.fn());
-vi.mock("@/components/content/python-code", () => ({ preloadPythonCodeHighlighter }));
-
+import {
+  __resetHighlighterCacheForTests,
+  __setHighlighterImportForTests,
+} from "@/components/content/python-code";
 import { CardHeader, MessageCard, messageCardConfig, type CardConfig } from "./card";
 import { resolveTimelineColors } from "@/lib/timeline/timeline-colors";
 import { formatItemTime } from "./timestamp";
 import type { BackendTimelineItem } from "@/lib/contracts/types";
+
+afterEach(() => {
+  __resetHighlighterCacheForTests();
+  __setHighlighterImportForTests(null);
+});
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -331,7 +332,9 @@ describe("CardHeader", () => {
     // Regression coverage for the P2 adversarial-review finding on Meiva #3463:
     // this wiring had no assertion that pointer-enter/focus actually invokes
     // the prefetch, only that a mocked no-op didn't blow up.
-    preloadPythonCodeHighlighter.mockClear();
+    const preloadPythonCodeHighlighter = vi.fn(() => new Promise<never>(() => undefined));
+    __resetHighlighterCacheForTests();
+    __setHighlighterImportForTests(preloadPythonCodeHighlighter);
     const cfg = messageCardConfig(baseItem)!;
     const { getByTestId } = renderWithQuery(
       <CardHeader item={baseItem} config={cfg} expanded={false} onToggle={noop} />,
@@ -341,6 +344,7 @@ describe("CardHeader", () => {
     fireEvent.pointerEnter(btn);
     expect(preloadPythonCodeHighlighter).toHaveBeenCalledTimes(1);
 
+    __resetHighlighterCacheForTests();
     fireEvent.focus(btn);
     expect(preloadPythonCodeHighlighter).toHaveBeenCalledTimes(2);
   });

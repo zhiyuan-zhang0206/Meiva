@@ -1,4 +1,4 @@
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClientProvider } from "@tanstack/react-query";
 import {
   fireEvent,
   render as rtlRender,
@@ -8,7 +8,6 @@ import {
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type * as TimeFormat from "@/lib/format/time";
 import type {
   AgentInspectLive,
   AgentInspectStatistics,
@@ -17,23 +16,22 @@ import type {
 } from "@/lib/contracts/types";
 import {
   cleanupInspectorTest,
+  createInspectorQueryClient,
   fixture,
   getAgent,
   getAgentInspectLive,
   getAgentInspectStatistics,
   getAgentInspectWidgets,
   getAgentRoster,
-  isLargeMock,
+  getSettings,
   listPages,
   liveFixture,
-  panelState,
+  putSetting,
   render,
   renderWithGlobalRetries,
   resolveNotice,
-  setInspectorHours,
   setupInspectorTest,
   streamHandlers,
-  toggle,
 } from "./inspector-test-harness";
 
 vi.mock("@/lib/transport/api", () => ({
@@ -45,14 +43,10 @@ vi.mock("@/lib/transport/api", () => ({
     getAgent,
     listPages,
     resolveNotice,
-    getSettings: vi.fn(() => Promise.resolve({ settings: [] })),
+    putSetting,
+    getSettings,
   },
 }));
-
-vi.mock("@/lib/format/time", async (importOriginal) => {
-  const actual = await importOriginal<typeof TimeFormat>();
-  return { ...actual, formatUpcoming: vi.fn(actual.formatUpcoming) };
-});
 
 vi.mock("@/lib/transport/useEventStream", () => ({
   EventStreamProvider: ({ children }: { children: React.ReactNode }) => children,
@@ -63,31 +57,6 @@ vi.mock("@/lib/transport/useEventStream", () => ({
     streamHandlers.system = onSystemEvent;
     streamHandlers.connection = onConnectionEvent;
   },
-}));
-
-vi.mock("@/lib/inspector/inspector-panel-store", async () => {
-  const React = await import("react");
-  return {
-    useInspectorOpen: () => ({ open: panelState.open, toggle }),
-    useInspectorHours: () => {
-      const [hours, setHours] = React.useState(panelState.hours);
-      return {
-        inspectorHours: hours,
-        setInspectorHours: (next: number | null) => {
-          setInspectorHours(next);
-          setHours(next);
-        },
-      };
-    },
-  };
-});
-
-vi.mock("@/lib/layout/breakpoint", () => ({
-  useBreakpoint: () => ({
-    tier: isLargeMock() ? "xl" : "xs",
-    isNarrow: !isLargeMock(),
-    isLarge: isLargeMock(),
-  }),
 }));
 
 import { InspectorPanel } from "./inspector-panel";
@@ -153,7 +122,7 @@ describe("InspectorPanel", () => {
         resolveAgentB = resolve;
       });
     });
-    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const qc = createInspectorQueryClient();
     const view = rtlRender(
       <QueryClientProvider client={qc}>
         <InspectorPanel agentId={1} />

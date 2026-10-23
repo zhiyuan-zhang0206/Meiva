@@ -2,7 +2,8 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render as rtlRender, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { api } from "@/lib/transport/api";
-import { clearMessageSent, markMessageSent } from "@/lib/format/interaction-timing";
+import { interactionTimingResetForTest, noteTurnStart } from "@/lib/format/interaction-timing";
+import { telemetryTestControl } from "@/lib/telemetry/telemetry";
 import { Composer } from "./composer";
 let commandList: { name: string; description: string; instruction_hint: string }[] = [];
 vi.mock("@/lib/transport/api", () => ({
@@ -26,14 +27,10 @@ vi.mock("@/lib/transport/api", () => ({
       }),
   },
 }));
-vi.mock("@/lib/format/interaction-timing", () => ({
-  clearMessageSent: vi.fn(),
-  markMessageSent: vi.fn(),
-}));
 const getCommandsMock = vi.mocked(api.getCommands);
 beforeEach(() => {
-  vi.mocked(clearMessageSent).mockClear();
-  vi.mocked(markMessageSent).mockClear();
+  interactionTimingResetForTest();
+  telemetryTestControl.reset();
   getCommandsMock.mockImplementation((_agentId?: number | null) =>
     Promise.resolve(commandList),
   );
@@ -307,14 +304,21 @@ describe("Composer button mode dispatch", () => {
     expect(onStop).not.toHaveBeenCalled();
   });
   it("marks send latency at submit time before message delivery starts", () => {
-    const onSend = vi.fn(() => new Promise<boolean>(() => undefined));
+    let now = 100;
+    vi.spyOn(performance, "now").mockImplementation(() => now);
+    let latencyRecordedBeforeSendResolves = 0;
+    const onSend = vi.fn(() => {
+      telemetryTestControl.reset();
+      now = 150;
+      noteTurnStart(42);
+      latencyRecordedBeforeSendResolves = telemetryTestControl.bufferSize();
+      return new Promise<boolean>(() => undefined);
+    });
     render(<Composer {...baseProps} agentId={42} mode="idle" onSend={onSend} />);
     fireEvent.change(screen.getByTestId("composer-input"), { target: { value: "hello" } });
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
-    expect(markMessageSent).toHaveBeenCalledWith(42);
-    expect(vi.mocked(markMessageSent).mock.invocationCallOrder[0]).toBeLessThan(
-      onSend.mock.invocationCallOrder[0],
-    );
+    expect(onSend).toHaveBeenCalledOnce();
+    expect(latencyRecordedBeforeSendResolves).toBe(1);
   });
   it("mode='busy' + non-empty input → click triggers onSend (goes through inbound queue, doesn't stop turn)", async () => {
     const onSend = vi.fn(() => Promise.resolve(true));

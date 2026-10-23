@@ -1,9 +1,6 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const { useMediaQuery } = vi.hoisted(() => ({ useMediaQuery: vi.fn(() => true) }));
-vi.mock("@/lib/layout/use-media-query", () => ({ useMediaQuery }));
-
 import {
   RUN_TIMELINE_SPLIT_LAYOUT_ID,
   RunTimelineWorkspace,
@@ -13,11 +10,12 @@ import {
 
 beforeEach(() => {
   localStorage.clear();
-  useMediaQuery.mockReturnValue(true);
+  window.innerWidth = 1440;
 });
 
 afterEach(() => {
   cleanup();
+  window.innerWidth = 1024;
   vi.restoreAllMocks();
 });
 
@@ -39,7 +37,7 @@ describe("RunTimelineWorkspace", () => {
   });
 
   it("stacks the details under the timeline on a narrow viewport, with no separator", async () => {
-    useMediaQuery.mockReturnValue(false);
+    window.innerWidth = 800;
     render(<RunTimelineWorkspace main={<p>main</p>} side={<p>side</p>} />);
 
     expect(await screen.findByTestId("run-timeline-reader")).toBeTruthy();

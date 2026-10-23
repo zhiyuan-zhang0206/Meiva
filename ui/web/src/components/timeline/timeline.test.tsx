@@ -2,50 +2,14 @@
 // timeline.tsx component test — ItemView per-kind render + envelope split + system_marker dispatch + LifecycleChip + UnknownMarkerChip + InterruptedNotice + CopyButton. jsdom does not actually render scroll, so scroll behavior is not tested (the sticky state machine was extracted to lib/sticky.ts and is covered by sticky.test.ts). ChatMarkdown / PythonCode / ScrollArea are mocked as stubs to reduce noise and avoid the runtime complexity of react-markdown / Prism / base-ui.
 // meiva:link ui/web/src/docs/frontend-components/timeline-view/timeline-view.meiva.okf.md
 
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useTimelineStore } from "@/lib/timeline/timeline-store";
-import { ChatMarkdownMock, PythonCodeMock, ScrollAreaMock, cleanupTimelineTest, displayLimits, historyWheel, makeItem, mockSettings, pullOlderAtTop, resetStore, toggleState, userSettingsState } from "./view/timeline-test-harness";
+import { ChatMarkdownMock, ScrollAreaMock, cleanupTimelineTest, historyWheel, makeItem, pullOlderAtTop, render, toggleState } from "./view/timeline-test-harness";
 
-vi.mock("@/lib/format/display-limits", async () => {
-  const { useSyncExternalStore } = await import("react");
-  return {
-    useDisplayLimit: (envVar: string, fallback: number) => {
-      useSyncExternalStore(mockSettings.subscribe, mockSettings.version);
-      return displayLimits.get(envVar) ?? fallback;
-    },
-  };
-});
 vi.mock("@/components/content/markdown", () => ({ ChatMarkdown: ChatMarkdownMock }));
-vi.mock("@/components/content/python-code", () => ({
-  PythonCode: PythonCodeMock,
-  preloadPythonCodeHighlighter: () => Promise.resolve(),
-}));
 vi.mock("@/components/ui/scroll-area", () => ({ ScrollArea: ScrollAreaMock }));
-vi.mock("@/lib/layout/content-toggle-store", async () => {
-  const { useSyncExternalStore } = await import("react");
-  return {
-    useContentToggle: () => {
-      useSyncExternalStore(mockSettings.subscribe, mockSettings.version);
-      toggleState.reads += 1;
-      return {
-        detailsMode: toggleState.detailsMode,
-        setDetailsMode: vi.fn(),
-        isLoading: toggleState.isLoading,
-      };
-    },
-    useContentToggleReset: (selector?: (s: typeof resetStore) => unknown) =>
-      selector ? selector(resetStore) : resetStore,
-  };
-});
-vi.mock("@/lib/state/use-user-settings", () => ({
-  useUserSettings: () => ({
-    settings: userSettingsState,
-    setSetting: vi.fn(),
-    isLoading: false,
-  }),
-}));
 import { TimelineView } from ".";
 
 afterEach(cleanupTimelineTest);

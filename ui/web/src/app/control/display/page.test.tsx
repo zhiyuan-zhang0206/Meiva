@@ -18,20 +18,8 @@ vi.mock("@/lib/transport/api", () => ({
   },
 }));
 
-// Viewport breakpoint for the timeline-width slider (task #805): desktop by
-// default; the narrow-viewport test flips it. R4 layer 4: the page consumes
-// useBreakpoint — the single breakpoint source.
-let isDesktop = true;
-vi.mock("@/lib/layout/breakpoint", () => ({
-  useBreakpoint: () => ({
-    tier: isDesktop ? "xl" : "xs",
-    isNarrow: !isDesktop,
-    isLarge: isDesktop,
-  }),
-}));
-
 beforeEach(() => {
-  isDesktop = true;
+  window.innerWidth = 1024;
 });
 
 function renderPage() {
@@ -352,7 +340,7 @@ describe("DisplaySettingsPage", () => {
   // the ratio setting is inert — the slider is disabled (greyed out) rather
   // than offering an effect it won't have.
   it("narrow viewport → timeline max-width slider is disabled", async () => {
-    isDesktop = false;
+    window.innerWidth = 375;
     renderPage();
 
     await waitFor(() => {

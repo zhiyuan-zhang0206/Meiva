@@ -1,4 +1,4 @@
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClientProvider } from "@tanstack/react-query";
 import {
   act,
   fireEvent,
@@ -9,28 +9,27 @@ import {
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type * as TimeFormat from "@/lib/format/time";
 import { formatAbsolute, formatRelative } from "@/lib/format/time";
 import { foldNotices } from "@/lib/fold/notices";
 import type { PageRow, SystemEvent } from "@/lib/contracts/types";
 import {
   cleanupInspectorTest,
+  createInspectorQueryClient,
   fixture,
   getAgent,
   getAgentInspectLive,
   getAgentInspectStatistics,
   getAgentInspectWidgets,
   getAgentRoster,
-  isLargeMock,
+  getSettings,
   listPages,
   liveFixture,
   panelState,
+  putSetting,
   render,
   resolveNotice,
-  setInspectorHours,
   setupInspectorTest,
   streamHandlers,
-  toggle,
   widgetFixture,
   widgetNotice,
 } from "./inspector-test-harness";
@@ -44,14 +43,10 @@ vi.mock("@/lib/transport/api", () => ({
     getAgent,
     listPages,
     resolveNotice,
-    getSettings: vi.fn(() => Promise.resolve({ settings: [] })),
+    putSetting,
+    getSettings,
   },
 }));
-
-vi.mock("@/lib/format/time", async (importOriginal) => {
-  const actual = await importOriginal<typeof TimeFormat>();
-  return { ...actual, formatUpcoming: vi.fn(actual.formatUpcoming) };
-});
 
 vi.mock("@/lib/transport/useEventStream", () => ({
   EventStreamProvider: ({ children }: { children: React.ReactNode }) => children,
@@ -62,31 +57,6 @@ vi.mock("@/lib/transport/useEventStream", () => ({
     streamHandlers.system = onSystemEvent;
     streamHandlers.connection = onConnectionEvent;
   },
-}));
-
-vi.mock("@/lib/inspector/inspector-panel-store", async () => {
-  const React = await import("react");
-  return {
-    useInspectorOpen: () => ({ open: panelState.open, toggle }),
-    useInspectorHours: () => {
-      const [hours, setHours] = React.useState(panelState.hours);
-      return {
-        inspectorHours: hours,
-        setInspectorHours: (next: number | null) => {
-          setInspectorHours(next);
-          setHours(next);
-        },
-      };
-    },
-  };
-});
-
-vi.mock("@/lib/layout/breakpoint", () => ({
-  useBreakpoint: () => ({
-    tier: isLargeMock() ? "xl" : "xs",
-    isNarrow: !isLargeMock(),
-    isLarge: isLargeMock(),
-  }),
 }));
 
 import { InspectorPanel } from "./inspector-panel";
@@ -160,9 +130,7 @@ describe("InspectorPanel", () => {
   });
 
   it("updates the notice without rereading statistics when notice SSE arrives", async () => {
-    const queryClient = new QueryClient({
-      defaultOptions: { queries: { retry: false } },
-    });
+    const queryClient = createInspectorQueryClient();
     const invalidate = vi.spyOn(queryClient, "invalidateQueries");
     rtlRender(
       <QueryClientProvider client={queryClient}>
@@ -364,7 +332,7 @@ describe("InspectorPanel", () => {
   });
 
   it("stale refresh: a failed background poll keeps the sections and shows the stale dot (no cold-error swap)", async () => {
-    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const qc = createInspectorQueryClient();
     getAgentInspectStatistics.mockResolvedValueOnce(fixture());
     rtlRender(
       <QueryClientProvider client={qc}>

@@ -1,11 +1,10 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import type { ToUserDocument } from "@/lib/contracts/types";
+import { api } from "@/lib/transport/api";
 
-const { linkedQuery } = vi.hoisted(() => ({ linkedQuery: vi.fn() }));
 vi.mock("next-intl", () => ({ useTranslations: () => (key: string) => key }));
-vi.mock("@/lib/context/use-to-user", () => ({ useToUser: linkedQuery }));
-vi.mock("@/components/content/python-code", () => ({ PythonCode: () => null }));
 import { preloadChatMarkdown } from "@/components/content/markdown";
 import { BAR_DIVIDER_CLASS, BAR_MIN_HEIGHT_CLASS } from "@/lib/layout/layout";
 import { ToUserDocumentView } from "./to-user-document";
@@ -23,27 +22,32 @@ function document(content: string, modifiedAt: string | null = null): ToUserDocu
     "file:///tmp/file.pdf": { id: "c".repeat(64), name: "file.pdf", markdown: false, version: null },
   } };
 }
-function idleQuery(data?: ToUserDocument) {
-  return { data, isFetching: false, isError: false, refetch: vi.fn() };
-}
 function show(
   value: ToUserDocument,
   { mobile = false, linked, onInspect, onCollapse, onNavigate, inspecting = false }: { mobile?: boolean; linked?: ToUserDocument; onInspect?: () => void; onCollapse?: () => void; onNavigate?: () => void; inspecting?: boolean } = {},
 ) {
-  linkedQuery.mockReturnValue(idleQuery(linked));
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
+  if (linked !== undefined) {
+    qc.setQueryData(["to-user", 7, linkId], linked);
+    vi.spyOn(api, "getToUser").mockResolvedValue(linked);
+  } else {
+    vi.spyOn(api, "getToUser").mockImplementation(() => new Promise(() => undefined));
+  }
   return render(
-    <ToUserDocumentView
-      agentId={7}
-      document={value}
-      failed={false}
-      pending={false}
-      refresh={vi.fn()}
-      mobile={mobile}
-      inspecting={inspecting}
-      onInspect={onInspect}
-      onCollapse={onCollapse}
-      onNavigate={onNavigate}
-    />,
+    <QueryClientProvider client={qc}>
+      <ToUserDocumentView
+        agentId={7}
+        document={value}
+        failed={false}
+        pending={false}
+        refresh={vi.fn()}
+        mobile={mobile}
+        inspecting={inspecting}
+        onInspect={onInspect}
+        onCollapse={onCollapse}
+        onNavigate={onNavigate}
+      />
+    </QueryClientProvider>,
   );
 }
 function url() {
@@ -90,7 +94,8 @@ describe("To user Markdown", () => {
     const link = screen.getByRole("link", { name: "Details" });
     link.addEventListener("click", (event) => event.preventDefault());
     fireEvent.click(link, { ctrlKey: true });
-    expect(linkedQuery).toHaveBeenLastCalledWith(null, []);
+    expect(chain()).toEqual([]);
+    expect(api.getToUser).not.toHaveBeenCalled();
   });
   it("draws the panel title rule on the shared column title bar", () => {
     show(document("body"));

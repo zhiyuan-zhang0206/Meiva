@@ -6,10 +6,9 @@
 // while the count is non-zero.
 // meiva:link ui/web/src/docs/frontend-components/agent-sidebar.meiva.okf.md
 
-import { cleanup, render, screen } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { cleanup, render as rtlRender, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-
-import type * as SidebarHooks from "@/lib/agents/sidebar";
 
 import { SidebarFooter } from "./footer";
 
@@ -17,22 +16,21 @@ vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn() }),
 }));
 
-vi.mock("@/lib/agents/sidebar", async (importOriginal) => {
-  const actual = await importOriginal<typeof SidebarHooks>();
-  return {
-    ...actual,
-    useStatsDashboard: () => ({ stats: undefined, error: null, isFetching: false, refetch: vi.fn() }),
-    useStatsWindow: () => ({ windowHours: 24, setWindowHours: vi.fn() }),
-  };
-});
+vi.mock("@/lib/transport/api", () => ({
+  api: {
+    getStatsDashboard: () => new Promise(() => undefined),
+    getUiContributions: () => Promise.resolve({ themes: [], nav: [], stats: [] }),
+  },
+}));
 
 vi.mock("@/lib/notifications/use-alerts", () => ({
   useAlerts: () => ({ data: { alerts: [], meta: { window: "24h", total: 0, unresolved_count: 3 } } }),
 }));
 
-vi.mock("@/components/plugins/plugin-nav", () => ({ PluginNavIcons: () => null }));
-
-vi.mock("@/lib/plugins/plugin-stats", () => ({ usePluginStatCards: () => [] }));
+function render(ui: React.ReactElement) {
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return rtlRender(<QueryClientProvider client={qc}>{ui}</QueryClientProvider>);
+}
 
 afterEach(cleanup);
 

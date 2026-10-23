@@ -1,40 +1,47 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { useEffect } from "react";
+import { notifyManager, QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { act, cleanup, fireEvent, render as rtlRender, type RenderOptions, screen } from "@testing-library/react";
+import type { ReactElement, ReactNode } from "react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
-const snapshot = vi.hoisted(() => ({ inspectorOpen: false }));
+import { USER_SETTING_DEFAULTS, type NoticeItem } from "@/lib/contracts/types";
+import type { useToUser } from "@/lib/context/use-to-user";
+import { api } from "@/lib/transport/api";
+
+notifyManager.setScheduler((cb) => {
+  cb();
+});
 
 vi.mock("next-intl", () => ({ useTranslations: () => (key: string) => key }));
-vi.mock("@tanstack/react-query", () => ({
-  useQueryClient: () => ({ invalidateQueries: vi.fn() }),
-}));
-vi.mock("@/lib/inspector/inspector-panel-store", () => ({
-  useInspectorOpen: () => ({ open: snapshot.inspectorOpen, toggle: vi.fn() }),
-}));
-vi.mock("./to-user-document", () => ({
-  ToUserDocumentView: function Document({ bodyHidden, onInspect, onNavigate }: { bodyHidden?: boolean; onInspect?: () => void; onNavigate: () => void }) {
-    useEffect(onNavigate, [onNavigate]);
-    return (
-    <section aria-label="sharedContext">
-      <div data-testid="document-bar">sharedContext</div>
-      {onInspect && <button onClick={onInspect}>Inspect</button>}
-      <button onClick={onNavigate}>Navigate</button>
-      {bodyHidden ? null : <div data-testid="document-view" />}
-    </section>
-    );
-  },
-}));
 vi.mock("@/components/inspector/inspector-panel", () => ({
   InspectorPanel: () => <div data-testid="inspector-view" />,
 }));
-vi.mock("@/components/notifications/open-notice-detail", () => ({
-  OpenNoticeDetail: () => <div data-testid="notice-detail"><input aria-label="Answer draft" /></div>,
-}));
-vi.mock("@/lib/notifications/use-notices", () => ({ dropOpenNotices: vi.fn() }));
 
-import type { NoticeItem } from "@/lib/contracts/types";
-import type { useToUser } from "@/lib/context/use-to-user";
 import { SharedContextPanel } from "./shared-context-panel";
+
+let qc: QueryClient;
+
+function PanelWrapper({ children }: { children: ReactNode }) {
+  return <QueryClientProvider client={qc}>{children}</QueryClientProvider>;
+}
+
+function render(ui: ReactElement, options?: RenderOptions) {
+  return rtlRender(ui, { wrapper: PanelWrapper, ...options });
+}
+
+const snapshot = {
+  get inspectorOpen() {
+    const data = qc.getQueryData<Record<string, unknown>>(["user-settings"]);
+    return data?.["display.inspector_open"] === true;
+  },
+  set inspectorOpen(open: boolean) {
+    act(() => {
+      qc.setQueryData<Record<string, unknown>>(["user-settings"], (old) => ({
+        ...(old ?? USER_SETTING_DEFAULTS),
+        "display.inspector_open": open,
+      }));
+    });
+  },
+};
 
 type DocumentQuery = ReturnType<typeof useToUser>;
 
@@ -80,14 +87,22 @@ function renderPanel({ mobile = false, notices = [], onClose = vi.fn() }: {
 }
 
 beforeEach(() => {
-  snapshot.inspectorOpen = false;
+  window.history.replaceState(null, "", "/?agent_id=7");
+  qc = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
+  qc.setQueryData(["user-settings"], { ...USER_SETTING_DEFAULTS, "display.inspector_open": false });
+  vi.spyOn(api, "getSettings").mockImplementation(() => new Promise(() => undefined));
+  vi.spyOn(api, "putSetting").mockImplementation(() => new Promise(() => undefined));
+  vi.spyOn(api, "getToUser").mockImplementation(() => new Promise(() => undefined));
 });
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+});
 
 it("shows the document as the panel's body without a view switcher", () => {
   renderPanel();
-  expect(screen.getByTestId("document-view")).toBeTruthy();
+  expect(screen.getByText("empty")).toBeTruthy();
   expect(screen.queryByTestId("inspector-view")).toBeNull();
   expect(screen.queryByRole("tablist")).toBeNull();
 });
@@ -103,14 +118,14 @@ it("swaps the body under a bar that stays, instead of laying a sheet over it", a
   expect(await screen.findByTestId("inspector-view")).toBeTruthy();
   expect(screen.getByTestId("document-bar")).toBeTruthy();
   expect(screen.getByTestId("shared-inspector")).toBeTruthy();
-  expect(screen.queryByTestId("document-view")).toBeNull();
+  expect(screen.queryByText("empty")).toBeNull();
   expect(screen.queryByTestId("notice-bar")).toBeNull();
 });
 
 it("keeps the notice and document inside the shared reading area", () => {
   renderPanel({ notices: [notice()] });
   const body = screen.getByTestId("shared-document").querySelector<HTMLDivElement>('[data-slot="scroll-area-viewport"]')!;
-  expect(body.contains(screen.getByTestId("notice-detail"))).toBe(true);
+  expect(body.contains(screen.getByRole("region", { name: "notification" }))).toBe(true);
   expect(screen.queryByText("needsReply")).toBeNull();
 });
 
@@ -118,22 +133,21 @@ it("hides the mounted question in Inspector mode and restores its reading positi
   const props = { agentId: 7, document: documentQuery(), notices: [notice()], noticesFailed: false, mobile: false, onClose: vi.fn() };
   const { rerender } = render(<SharedContextPanel {...props} />);
   const body = screen.getByTestId("shared-document").querySelector<HTMLDivElement>('[data-slot="scroll-area-viewport"]')!;
-  const detail = screen.getByTestId("notice-detail");
-  const draft = screen.getByRole<HTMLInputElement>("textbox", { name: "Answer draft" });
+  const draft = screen.getByRole<HTMLTextAreaElement>("textbox", { name: "replyTo" });
   fireEvent.change(draft, { target: { value: "Keep this answer" } });
   body.scrollTop = 420;
-  fireEvent.click(screen.getByRole("button", { name: "Inspect" }));
+  fireEvent.click(screen.getByRole("button", { name: "openInspector" }));
   snapshot.inspectorOpen = true;
   rerender(<SharedContextPanel {...props} />);
   expect(await screen.findByTestId("inspector-view")).toBeTruthy();
   expect(screen.queryByRole("region", { name: "notification" })).toBeNull();
-  expect(screen.getByTestId("notice-detail")).toBe(detail);
+  expect(screen.getByRole("textbox", { name: "replyTo", hidden: true })).toBe(draft);
   body.scrollTop = 0;
   snapshot.inspectorOpen = false;
   rerender(<SharedContextPanel {...props} />);
   expect(screen.getByRole("region", { name: "notification" })).toBeTruthy();
   expect(body.scrollTop).toBe(420);
-  expect(screen.getByRole("textbox", { name: "Answer draft" })).toBe(draft);
+  expect(screen.getByRole("textbox", { name: "replyTo" })).toBe(draft);
   expect(draft.value).toBe("Keep this answer");
 });
 
@@ -142,7 +156,10 @@ it("starts a new agent or referenced document at the top of the shared reading a
   const { rerender } = render(<SharedContextPanel {...props} />);
   const body = screen.getByTestId("shared-document").querySelector<HTMLDivElement>('[data-slot="scroll-area-viewport"]')!;
   body.scrollTop = 420;
-  fireEvent.click(screen.getByRole("button", { name: "Navigate" }));
+  act(() => {
+    window.history.replaceState(null, "", `/?agent_id=7&reference=${"a".repeat(64)}`);
+    window.dispatchEvent(new PopStateEvent("popstate"));
+  });
   expect(body.scrollTop).toBe(0);
   body.scrollTop = 500;
   rerender(<SharedContextPanel {...props} agentId={8} />);
@@ -153,8 +170,8 @@ it("starts a new agent or referenced document at the top of the shared reading a
 it.each([false, true])("keeps the question before and outside the document section, even without content (mobile=%s)", (mobile) => {
   renderPanel({ notices: [notice()], mobile });
   const bar = screen.getByTestId("document-bar");
-  const question = screen.getByTestId("notice-detail");
-  const document = screen.getByTestId("document-view");
+  const question = screen.getByRole("region", { name: "notification" });
+  const document = screen.getByText("empty");
   expect(question.compareDocumentPosition(bar) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   expect(screen.getByRole("region", { name: "sharedContext" }).contains(question)).toBe(false);
   expect(screen.getAllByText("sharedContext")).toHaveLength(1);

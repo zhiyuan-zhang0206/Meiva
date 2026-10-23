@@ -2,23 +2,43 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { ModelsResponse, SystemStatus } from "@/lib/contracts/types";
+import { USER_SETTING_DEFAULTS, type ModelsResponse, type SystemStatus } from "@/lib/contracts/types";
 import { useWarmHarnessAvailability } from "@/lib/harness/use-harness-availability";
+import { SETTINGS_QUERY_KEY } from "@/lib/state/use-user-settings";
 
 import { SpawnForm } from "./spawn-form";
+
+let storedSettings: Record<string, unknown> = {};
+
+function resetMockSettings(initial?: Record<string, unknown>) {
+  storedSettings = initial ? { ...initial } : {};
+}
+
+function setMockSetting(key: string, value: unknown) {
+  storedSettings = { ...storedSettings, [key]: value };
+}
 
 vi.mock("@/lib/transport/api", () => ({
   api: {
     getSystemStatus: vi.fn(),
     getModels: vi.fn(),
     getHarnessAvailability: vi.fn().mockResolvedValue([]),
+    getSettings: () =>
+      Promise.resolve({
+        settings: Object.entries(storedSettings).map(([key, value]) => ({
+          key,
+          value,
+          updated_at: "2026-05-19T00:00:00Z",
+        })),
+      }),
+    putSetting: (key: string, value: unknown) => {
+      storedSettings = { ...storedSettings, [key]: value };
+      return Promise.resolve({ key, value, updated_at: "2026-05-19T00:00:00Z" });
+    },
   },
 }));
 
-vi.mock("@/lib/state/use-user-settings", () => import("@/test-support/user-settings-mock"));
-
 import { api } from "@/lib/transport/api";
-import { resetMockSettings, setMockSetting } from "@/test-support/user-settings-mock";
 
 function wrap(layout?: "table" | "stack") {
   const onSpawn = vi.fn();
@@ -26,6 +46,7 @@ function wrap(layout?: "table" | "stack") {
   const qc = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
+  qc.setQueryData(SETTINGS_QUERY_KEY, { ...USER_SETTING_DEFAULTS, ...storedSettings });
   render(
     <QueryClientProvider client={qc}>
       <SpawnForm onSpawn={onSpawn} onDone={onDone} layout={layout} />

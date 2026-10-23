@@ -13,20 +13,47 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { SpawnForm } from "./spawn-form";
-import type { ModelsResponse, SystemStatus } from "@/lib/contracts/types";
+import { USER_SETTING_DEFAULTS, type ModelsResponse, type SystemStatus } from "@/lib/contracts/types";
+import { SETTINGS_QUERY_KEY } from "@/lib/state/use-user-settings";
+
+let storedSettings: Record<string, unknown> = {};
+let setSettingCalls: { key: string; value: unknown }[] = [];
+
+function resetMockSettings(initial?: Record<string, unknown>) {
+  storedSettings = initial ? { ...initial } : {};
+  setSettingCalls = [];
+}
+
+function setMockSetting(key: string, value: unknown) {
+  storedSettings = { ...storedSettings, [key]: value };
+}
+
+function mockSetSettingCalls(): { key: string; value: unknown }[] {
+  return setSettingCalls;
+}
 
 vi.mock("@/lib/transport/api", () => ({
   api: {
     getSystemStatus: vi.fn(),
     getModels: vi.fn(),
     getHarnessAvailability: vi.fn().mockResolvedValue([]),
+    getSettings: () =>
+      Promise.resolve({
+        settings: Object.entries(storedSettings).map(([key, value]) => ({
+          key,
+          value,
+          updated_at: "2026-05-19T00:00:00Z",
+        })),
+      }),
+    putSetting: (key: string, value: unknown) => {
+      storedSettings = { ...storedSettings, [key]: value };
+      setSettingCalls.push({ key, value });
+      return Promise.resolve({ key, value, updated_at: "2026-05-19T00:00:00Z" });
+    },
   },
 }));
 
-vi.mock("@/lib/state/use-user-settings", () => import("@/test-support/user-settings-mock"));
-
 import { api } from "@/lib/transport/api";
-import { mockSetSettingCalls, resetMockSettings, setMockSetting } from "@/test-support/user-settings-mock";
 
 function wrap(layout?: "table" | "stack") {
   const onSpawn = vi.fn();
@@ -34,6 +61,7 @@ function wrap(layout?: "table" | "stack") {
   const qc = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
+  qc.setQueryData(SETTINGS_QUERY_KEY, { ...USER_SETTING_DEFAULTS, ...storedSettings });
   render(
     <QueryClientProvider client={qc}>
       <SpawnForm onSpawn={onSpawn} onDone={onDone} layout={layout} />
@@ -295,10 +323,12 @@ describe("spawn table", () => {
     // No stored model or effort means the cascade filled them in; the spawn
     // writes what it actually sent, so the next open marks the same rows.
     // meiva:link ui/web/src/docs/frontend-components/creation-availability.meiva.okf.md
-    expect(mockSetSettingCalls()).toEqual([
-      { key: "behavior.spawn_model", value: "deepseek-v4-pro" },
-      { key: "behavior.spawn_reasoning_effort", value: "high" },
-    ]);
+    await waitFor(() =>
+      expect(mockSetSettingCalls()).toEqual([
+        { key: "behavior.spawn_model", value: "deepseek-v4-pro" },
+        { key: "behavior.spawn_reasoning_effort", value: "high" },
+      ]),
+    );
   });
 
   it("changing the harness keeps only the models that harness runs", async () => {

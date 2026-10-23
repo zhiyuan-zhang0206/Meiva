@@ -5,22 +5,20 @@
 // meiva:link ui/web/src/docs/frontend-components/frontend-components.meiva.okf.md
 
 import { cleanup, render, screen } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-let storeConnState = "open" as string;
-
-vi.mock("@/lib/state/store", () => ({
-  useStore: (selector: (s: { connState: string }) => unknown) =>
-    selector({ connState: storeConnState }),
-}));
+import { useStore } from "@/lib/state/store";
 
 import { ConnectionNotice } from "./connection-notice";
 
 beforeEach(() => {
-  storeConnState = "open";
+  useStore.setState({ connState: "open" });
 });
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  useStore.setState({ connState: "open" });
+});
 
 describe("ConnectionNotice", () => {
   it("renders nothing when connState='open'", () => {
@@ -29,7 +27,7 @@ describe("ConnectionNotice", () => {
   });
 
   it("shows amber 'reconnecting' when connState='reconnecting'", () => {
-    storeConnState = "reconnecting";
+    useStore.setState({ connState: "reconnecting" });
     render(<ConnectionNotice />);
     const banner = screen.getByRole("status");
     expect(banner.textContent).toContain("Live updates reconnecting");
@@ -37,7 +35,7 @@ describe("ConnectionNotice", () => {
   });
 
   it("shows destructive 'connection lost' when connState='closed'", () => {
-    storeConnState = "closed";
+    useStore.setState({ connState: "closed" });
     render(<ConnectionNotice />);
     const banner = screen.getByRole("status");
     expect(banner.textContent).toContain("Live updates disconnected");
@@ -46,14 +44,14 @@ describe("ConnectionNotice", () => {
   });
 
   it("floats over the conversation instead of taking a row of it", () => {
-    storeConnState = "closed";
+    useStore.setState({ connState: "closed" });
     const { container } = render(<ConnectionNotice />);
     const overlay = container.firstElementChild as HTMLElement;
     expect(overlay.className).toContain("absolute");
   });
 
   it("has aria-live='polite' for screen reader notification", () => {
-    storeConnState = "closed";
+    useStore.setState({ connState: "closed" });
     render(<ConnectionNotice />);
     expect(screen.getByRole("status").getAttribute("aria-live")).toBe("polite");
   });

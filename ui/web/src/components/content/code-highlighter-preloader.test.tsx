@@ -1,12 +1,23 @@
 import { render } from "@testing-library/react";
-import { afterEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
-const preload = vi.hoisted(() => vi.fn());
-vi.mock("@/components/content/python-code", () => ({ preloadPythonCodeHighlighter: preload }));
-
+import {
+  __resetHighlighterCacheForTests,
+  __setHighlighterImportForTests,
+} from "@/components/content/python-code";
 import { CodeHighlighterPreloader } from "./code-highlighter-preloader";
 
+const preload = vi.fn(() => new Promise<never>(() => undefined));
+
+beforeEach(() => {
+  preload.mockClear();
+  __resetHighlighterCacheForTests();
+  __setHighlighterImportForTests(preload);
+});
+
 afterEach(() => {
+  __resetHighlighterCacheForTests();
+  __setHighlighterImportForTests(null);
   vi.unstubAllGlobals();
   vi.useRealTimers();
 });

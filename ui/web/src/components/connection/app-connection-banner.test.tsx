@@ -7,16 +7,15 @@
 import { act, cleanup, render } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import type { ConnectionState } from "@/lib/contracts/types";
+import { useStore } from "@/lib/state/store";
+
 const states: string[] = [];
 let emit: ((ev: { type: string }) => void) | null = null;
+const origSetConnState = useStore.getState().setConnState;
 
 vi.mock("@/lib/auth/auth-context", () => ({
   useAuth: () => ({ status: "authenticated" }),
-}));
-
-vi.mock("@/lib/state/store", () => ({
-  useStore: (selector: (s: { setConnState: (v: string) => void }) => unknown) =>
-    selector({ setConnState: (v: string) => states.push(v) }),
 }));
 
 vi.mock("@/lib/notifications/use-cluster-health", () => ({
@@ -35,11 +34,19 @@ import { NOTICE_DELAY_MS } from "@/components/notifications/connection-notice";
 beforeEach(() => {
   states.length = 0;
   emit = null;
+  useStore.setState({
+    connState: "open",
+    setConnState: (v: ConnectionState) => {
+      states.push(v);
+      origSetConnState(v);
+    },
+  });
   vi.useFakeTimers();
 });
 
 afterEach(() => {
   cleanup();
+  useStore.setState({ connState: "open", setConnState: origSetConnState });
   vi.useRealTimers();
 });
 

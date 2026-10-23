@@ -2,9 +2,6 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
-const preloadPythonCodeHighlighter = vi.hoisted(() => vi.fn());
-vi.mock("@/components/content/python-code", () => ({ preloadPythonCodeHighlighter }));
-
 import type { BackendTimelineItem } from "@/lib/contracts/types";
 
 import { CardHeader, messageCardConfig } from "../card";

@@ -3,11 +3,14 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import type { ReactElement, ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { AgentRow , NoticeItem } from "@/lib/contracts/types";
+import { USER_SETTING_DEFAULTS, type AgentRow, type NoticeItem } from "@/lib/contracts/types";
+import { SETTINGS_QUERY_KEY } from "@/lib/state/use-user-settings";
 
+// meiva:note
 // next/link needs no router in this isolated render — a plain anchor suffices.
 // next/navigation: TaskGraph calls useRouter at its top level now (the graph
 // mode's double-click → owner timeline path), so the layout tests need a stub.
+// meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn() }),
 }));
@@ -19,27 +22,19 @@ vi.mock("next/link", () => ({
   ),
 }));
 
+// meiva:note
 // GraphView is exercised on its own in graph-view.test.tsx; stub it here so the
 // FleetView layout/tab tests stay deterministic (no d3-force simulation, no
 // /api/fleet/graph fetch).
+// meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
 vi.mock("@/components/fleet/graph-view", () => ({
   GraphView: () => <div data-testid="graph-view">graph</div>,
 }));
 
-// Breakpoint — tests default to desktop (isLarge = true). Individual tests
-// override via isLargeMock.mockReturnValue(false). R4 layer 4: FleetView
-// consumes useBreakpoint — the single breakpoint source.
-const isLargeMock = vi.fn<() => boolean>(() => true);
-vi.mock("@/lib/layout/breakpoint", () => ({
-  useBreakpoint: () => ({
-    tier: isLargeMock() ? "xl" : "xs",
-    isNarrow: !isLargeMock(),
-    isLarge: isLargeMock(),
-  }),
-}));
-
+// meiva:note
 // vitest+happy-dom has no localStorage by default — the view persists its mobile
 // tab there, so provide a simple in-memory mock.
+// meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
 const localStorageMock = (() => {
   const store = new Map<string, string>();
   return {
@@ -59,11 +54,28 @@ Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
 const agentsMock = vi.fn<() => AgentRow[]>();
 vi.mock("@/lib/agents/use-fleet-agents", () => ({ useFleetAgents: () => agentsMock() }));
 
+let storedSettings: Record<string, unknown> = {};
+const putSettingMock = vi.fn((key: string, value: unknown) => {
+  storedSettings = { ...storedSettings, [key]: value };
+  return Promise.resolve({ key, value, updated_at: "2026-06-06T00:00:00Z" });
+});
+
+// meiva:note
 // The embedded Inbox queue fetches notice history on mount; empty here.
+// meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
 vi.mock("@/lib/transport/api", () => ({
   api: {
     getNotices: () =>
       Promise.resolve({ open: [], awaiting: [], resolved_page: [], next_cursor: null }),
+    getSettings: () =>
+      Promise.resolve({
+        settings: Object.entries(storedSettings).map(([key, value]) => ({
+          key,
+          value,
+          updated_at: "2026-06-06T00:00:00Z",
+        })),
+      }),
+    putSetting: (key: string, value: unknown) => putSettingMock(key, value),
   },
 }));
 
@@ -94,8 +106,10 @@ const useNoticesMock = vi.fn<() => TestNoticesFeed>(() => ({
 }));
 vi.mock("@/lib/notifications/use-notices", () => ({ useNotices: () => useNoticesMock() }));
 
+// meiva:note
 // useTasks (the queue's grouping join + the Task Graph) also needs
 // EventStreamProvider; an empty registry keeps every queue entry flat.
+// meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
 vi.mock("@/lib/notifications/use-tasks", () => ({
   useTasks: () => ({ tasks: [], loading: false, error: false }),
 }));
@@ -104,26 +118,24 @@ vi.mock("@/lib/notifications/use-tasks", () => ({
 // stub it to no open pages for these layout tests.
 vi.mock("@/lib/agents/use-all-pages", () => ({ useAllPages: () => [] }));
 
-// Queue-collapse / left-view are DB-backed user settings; the reactive mock
-// keeps them deterministic + re-renders on setSetting (no React Query network).
-vi.mock("@/lib/state/use-user-settings", () => import("@/test-support/user-settings-mock"));
-
-import { mockSetSettingCalls, resetMockSettings } from "@/test-support/user-settings-mock";
-
 import { BAR_HEIGHT_CLASS } from "@/lib/layout/layout";
 import { FleetView } from "./fleet-view";
 
-beforeEach(() => resetMockSettings());
+beforeEach(() => {
+  storedSettings = {};
+  window.innerWidth = 1024;
+});
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
   localStorage.clear();
   window.history.replaceState(null, "", "/fleet");
-  isLargeMock.mockReturnValue(true); // reset to desktop default
+  window.innerWidth = 1024;
 });
 
 function wrap(ui: ReactElement) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  qc.setQueryData(SETTINGS_QUERY_KEY, { ...USER_SETTING_DEFAULTS, ...storedSettings });
   return render(<QueryClientProvider client={qc}>{ui}</QueryClientProvider>);
 }
 
@@ -264,7 +276,7 @@ describe("FleetView (desktop)", () => {
     await waitFor(() => expect(row?.getAttribute("data-anchor-highlighted")).toBe("true"));
   });
 
-  it("collapses the queue panel to a static handle and persists the choice", () => {
+  it("collapses the queue panel to a static handle and persists the choice", async () => {
     agentsMock.mockReturnValue([
       makeAgent({
         agent_id: 1,
@@ -276,23 +288,23 @@ describe("FleetView (desktop)", () => {
 
     // Queue gone; only the static handle remains — and it carries NO dynamic
     // signal (no badge/count), even though a P0 notice is pending.
-    expect(screen.queryByText("Inbox")).toBeNull();
+    await waitFor(() => expect(screen.queryByText("Inbox")).toBeNull());
     const handle = screen.getByLabelText("Expand queue");
     expect(handle.textContent).toBe("Queue");
-    expect(mockSetSettingCalls()).toContainEqual({ key: "display.fleet_queue_collapsed", value: true });
+    expect(putSettingMock).toHaveBeenCalledWith("display.fleet_queue_collapsed", true);
   });
 
-  it("expanding the collapsed queue restores the Inbox and persists", () => {
+  it("expanding the collapsed queue restores the Inbox and persists", async () => {
     agentsMock.mockReturnValue([makeAgent({ agent_id: 1 })]);
     wrap(<FleetView />);
     fireEvent.click(screen.getByLabelText("Collapse queue"));
-    fireEvent.click(screen.getByLabelText("Expand queue"));
-    expect(screen.getByText("Inbox")).toBeTruthy();
-    expect(mockSetSettingCalls().at(-1)).toEqual({ key: "display.fleet_queue_collapsed", value: false });
+    fireEvent.click(await screen.findByLabelText("Expand queue"));
+    await waitFor(() => expect(screen.getByText("Inbox")).toBeTruthy());
+    expect(putSettingMock).toHaveBeenLastCalledWith("display.fleet_queue_collapsed", false);
   });
 
   it("restores the collapsed state from the DB setting on mount", () => {
-    resetMockSettings({ "display.fleet_queue_collapsed": true });
+    storedSettings = { "display.fleet_queue_collapsed": true };
     agentsMock.mockReturnValue([makeAgent({ agent_id: 1 })]);
     wrap(<FleetView />);
     expect(screen.queryByText("Inbox")).toBeNull();
@@ -302,7 +314,7 @@ describe("FleetView (desktop)", () => {
 
 describe("FleetView (mobile)", () => {
   beforeEach(() => {
-    isLargeMock.mockReturnValue(false);
+    window.innerWidth = 375;
   });
 
   it("renders the Agents / Tasks / Inbox mobile tabs; Agents shows the graph", () => {

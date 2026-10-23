@@ -6,7 +6,7 @@
 // useParams (mocked below) — the hook resolves them on the first render, so a
 // warm cache paints the capture in the first commit.
 
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { notifyManager, QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
   cleanup,
   fireEvent,
@@ -17,18 +17,37 @@ import {
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import ShellMonitorPage from "@/app/shell/[agentId]/[sessionId]/page";
-import type { ShellCapture } from "@/lib/contracts/types";
+import { USER_SETTING_DEFAULTS, type ShellCapture } from "@/lib/contracts/types";
+import { SETTINGS_QUERY_KEY } from "@/lib/state/use-user-settings";
+import { resetMockSettings } from "@/test-support/user-settings-mock";
 
-// vi.hoisted so the mock fn is initialised before the hoisted vi.mock factory runs.
+notifyManager.setScheduler((cb) => {
+  cb();
+});
+
+let storedSettings: Record<string, unknown> = {};
+
 const { getAgentShell } = vi.hoisted(() => ({
   getAgentShell: vi.fn<(agentId: number, sessionId: number, lines?: number) => Promise<ShellCapture>>(),
 }));
 vi.mock("@/lib/transport/api", () => ({
-  api: { getAgentShell },
+  api: {
+    getAgentShell,
+    getSettings: () =>
+      Promise.resolve({
+        settings: Object.entries(storedSettings).map(([key, value]) => ({
+          key,
+          value,
+          updated_at: "2026-06-14T12:00:00Z",
+        })),
+      }),
+    putSetting: (key: string, value: unknown) => {
+      storedSettings = { ...storedSettings, [key]: value };
+      return Promise.resolve({ key, value, updated_at: "2026-06-14T12:00:00Z" });
+    },
+  },
 }));
 
-// Route params + the history-entry key the scroll memory is keyed by; a test
-// can swap the params to exercise the invalid-params branch.
 const nav = vi.hoisted(() => ({
   params: { agentId: "5", sessionId: "12" },
   bfcacheId: "_b_test_",
@@ -38,22 +57,19 @@ vi.mock("next/navigation", () => ({
   useRouter: () => ({ bfcacheId: nav.bfcacheId }),
 }));
 
-// Terminal theme is a DB-backed user setting; the reactive mock cycles it +
-// re-renders on setSetting (no React Query network for settings).
-vi.mock("@/lib/state/use-user-settings", () => import("@/test-support/user-settings-mock"));
-import { resetMockSettings } from "@/test-support/user-settings-mock";
-
 afterEach(() => {
   vi.useRealTimers();
   cleanup();
   getAgentShell.mockReset();
   resetMockSettings();
+  storedSettings = {};
 });
 
 function render() {
   const qc = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
+  qc.setQueryData(SETTINGS_QUERY_KEY, { ...USER_SETTING_DEFAULTS, ...storedSettings });
   return rtlRender(
     <QueryClientProvider client={qc}>
       <ShellMonitorPage />
@@ -330,15 +346,15 @@ describe("ShellMonitorPage terminal theme", () => {
 
     // system → light
     fireEvent.click(btn);
-    expect(screen.getByLabelText("Terminal theme: light")).toBeTruthy();
+    expect(await screen.findByLabelText("Terminal theme: light")).toBeTruthy();
 
     // light → dark
-    fireEvent.click(btn);
-    expect(screen.getByLabelText("Terminal theme: dark")).toBeTruthy();
+    fireEvent.click(screen.getByLabelText("Terminal theme: light"));
+    expect(await screen.findByLabelText("Terminal theme: dark")).toBeTruthy();
 
     // dark → system
-    fireEvent.click(btn);
-    expect(screen.getByLabelText("Terminal theme: system")).toBeTruthy();
+    fireEvent.click(screen.getByLabelText("Terminal theme: dark"));
+    expect(await screen.findByLabelText("Terminal theme: system")).toBeTruthy();
   });
 
   it("shows invalid-params message when agentId or sessionId is NaN", () => {

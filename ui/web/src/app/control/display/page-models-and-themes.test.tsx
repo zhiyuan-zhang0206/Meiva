@@ -15,14 +15,6 @@ vi.mock("@/lib/transport/api", () => ({
   },
 }));
 
-vi.mock("@/lib/layout/breakpoint", () => ({
-  useBreakpoint: () => ({
-    tier: "xl",
-    isNarrow: false,
-    isLarge: true,
-  }),
-}));
-
 function renderPage() {
   const qc = new QueryClient({
     defaultOptions: { queries: { retry: false } },

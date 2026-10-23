@@ -4,18 +4,49 @@
 // they fail if the wiring stops applying (or stops cleaning up) rather than
 // re-stating what the component was written to do.
 
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, render, waitFor } from "@testing-library/react";
+import { notifyManager, QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { act, cleanup, render, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ThemePackTokens } from "@/components/plugins/theme-pack-tokens";
+import { USER_SETTING_DEFAULTS } from "@/lib/contracts/types";
+import { SETTINGS_QUERY_KEY } from "@/lib/state/use-user-settings";
 import { api } from "@/lib/transport/api";
-import { resetMockSettings, setMockSetting } from "@/test-support/user-settings-mock";
+
+notifyManager.setScheduler((cb) => {
+  cb();
+});
+
+let storedSettings: Record<string, unknown> = {};
+let activeQueryClient: QueryClient | null = null;
+
+function resetMockSettings(initial?: Record<string, unknown>) {
+  storedSettings = initial ? { ...initial } : {};
+}
+
+function setMockSetting(key: string, value: unknown) {
+  storedSettings = { ...storedSettings, [key]: value };
+  act(() => {
+    activeQueryClient?.setQueryData(SETTINGS_QUERY_KEY, {
+      ...USER_SETTING_DEFAULTS,
+      ...storedSettings,
+    });
+  });
+}
 
 vi.mock("@/lib/transport/api", () => ({
-  api: { getUiContributions: vi.fn() },
+  api: {
+    getUiContributions: vi.fn(),
+    getSettings: () =>
+      Promise.resolve({
+        settings: Object.entries(storedSettings).map(([key, value]) => ({
+          key,
+          value,
+          updated_at: "2026-06-14T00:00:00Z",
+        })),
+      }),
+  },
 }));
-vi.mock("@/lib/state/use-user-settings", () => import("@/test-support/user-settings-mock"));
 
 // next-themes resolves "system" to a concrete mode; the component keys the
 // half it applies on that, so the tests drive it directly.
@@ -52,6 +83,8 @@ const ASYM = {
 
 function renderApplier() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  qc.setQueryData(SETTINGS_QUERY_KEY, { ...USER_SETTING_DEFAULTS, ...storedSettings });
+  activeQueryClient = qc;
   // A builder, not a stored element: re-rendering the identical element
   // reference lets React bail out of the subtree, so a test that flips the
   // resolved mode would observe nothing. Each call makes a fresh element.

@@ -1,4 +1,4 @@
-import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
+import { QueryClientProvider, useQuery } from "@tanstack/react-query";
 import {
   act,
   fireEvent,
@@ -10,28 +10,26 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useTimelineStore } from "@/lib/timeline/timeline-store";
-import type * as TimeFormat from "@/lib/format/time";
 import { formatAbsolute, formatRelative, formatUpcoming } from "@/lib/format/time";
 import { AGENTS_QUERY_KEY, AGENT_DETAIL_QUERY_KEY } from "@/lib/fold/agents";
 import {
   cleanupInspectorTest,
+  createInspectorQueryClient,
   fixture,
   getAgent,
   getAgentInspectLive,
   getAgentInspectStatistics,
   getAgentInspectWidgets,
   getAgentRoster,
-  isLargeMock,
+  getSettings,
   listPages,
   liveFixture,
-  panelState,
+  putSetting,
   render,
   resolveNotice,
   rosterFixture,
-  setInspectorHours,
   setupInspectorTest,
   streamHandlers,
-  toggle,
   useFrozenClock,
 } from "./inspector-test-harness";
 
@@ -44,14 +42,10 @@ vi.mock("@/lib/transport/api", () => ({
     getAgent,
     listPages,
     resolveNotice,
-    getSettings: vi.fn(() => Promise.resolve({ settings: [] })),
+    putSetting,
+    getSettings,
   },
 }));
-
-vi.mock("@/lib/format/time", async (importOriginal) => {
-  const actual = await importOriginal<typeof TimeFormat>();
-  return { ...actual, formatUpcoming: vi.fn(actual.formatUpcoming) };
-});
 
 vi.mock("@/lib/transport/useEventStream", () => ({
   EventStreamProvider: ({ children }: { children: React.ReactNode }) => children,
@@ -62,31 +56,6 @@ vi.mock("@/lib/transport/useEventStream", () => ({
     streamHandlers.system = onSystemEvent;
     streamHandlers.connection = onConnectionEvent;
   },
-}));
-
-vi.mock("@/lib/inspector/inspector-panel-store", async () => {
-  const React = await import("react");
-  return {
-    useInspectorOpen: () => ({ open: panelState.open, toggle }),
-    useInspectorHours: () => {
-      const [hours, setHours] = React.useState(panelState.hours);
-      return {
-        inspectorHours: hours,
-        setInspectorHours: (next: number | null) => {
-          setInspectorHours(next);
-          setHours(next);
-        },
-      };
-    },
-  };
-});
-
-vi.mock("@/lib/layout/breakpoint", () => ({
-  useBreakpoint: () => ({
-    tier: isLargeMock() ? "xl" : "xs",
-    isNarrow: !isLargeMock(),
-    isLarge: isLargeMock(),
-  }),
 }));
 
 import { InspectorPanel } from "./inspector-panel";
@@ -158,11 +127,9 @@ describe("InspectorPanel heartbeat cells (merged into Liveness, Task #1195)", ()
     render(<InspectorPanel agentId={1} />);
     await waitFor(() => expect(screen.getByText("Liveness")).toBeTruthy());
     expect(screen.getByText("Tomorrow 15:21")).toBeTruthy();
-    expect(vi.mocked(formatUpcoming)).toHaveBeenCalledWith(
-      nextAt,
-      expect.any(Date),
-      expect.objectContaining({ clockFormat: "24h" }),
-    );
+    expect(
+      formatUpcoming(nextAt, new Date("2026-10-17T16:26:00Z"), { clockFormat: "24h" }),
+    ).toBe("Tomorrow 15:21");
   });
 
   it("shows the active pause window when paused", async () => {
@@ -250,7 +217,7 @@ describe("InspectorPanel takeover status", () => {
   });
 
   it("reacts to activation and release without retaining the takeover status", async () => {
-    const qc = new QueryClient();
+    const qc = createInspectorQueryClient();
     qc.setQueryData(AGENTS_QUERY_KEY, rosterFixture({ open_impersonation_status: "requested" }));
     getAgentInspectLive.mockResolvedValue(liveFixture({ status: "idling" }));
     render(<InspectorPanel agentId={1} />, qc);
@@ -273,7 +240,7 @@ describe("InspectorPanel takeover status", () => {
   it.each(["requested", "accepted", null] as const)(
     "keeps the lifecycle status for a %s lease",
     async (phase) => {
-      const qc = new QueryClient();
+      const qc = createInspectorQueryClient();
       getAgentRoster.mockResolvedValue(rosterFixture({ open_impersonation_status: phase }));
       getAgentInspectLive.mockResolvedValue(liveFixture({ status: "idling" }));
       render(<InspectorPanel agentId={1} />, qc);
@@ -285,7 +252,7 @@ describe("InspectorPanel takeover status", () => {
   );
 
   it("keeps a terminated Inspector status even if an active roster card is still cached", async () => {
-    const qc = new QueryClient();
+    const qc = createInspectorQueryClient();
     qc.setQueryData(AGENTS_QUERY_KEY, rosterFixture());
     getAgentInspectLive.mockResolvedValue(liveFixture({ status: "terminated" }));
     render(<InspectorPanel agentId={1} />, qc);
@@ -295,7 +262,7 @@ describe("InspectorPanel takeover status", () => {
   });
 
   it("keeps takeover status scoped to the selected agent across switches and roster removal", async () => {
-    const qc = new QueryClient();
+    const qc = createInspectorQueryClient();
     qc.setQueryData(AGENTS_QUERY_KEY, rosterFixture());
     getAgentInspectLive.mockImplementation((id) => Promise.resolve(liveFixture({ agent_id: id, status: "idling" })));
     getAgentInspectStatistics.mockImplementation((id) => Promise.resolve(fixture({ agent_id: id })));
@@ -427,7 +394,7 @@ describe("InspectorPanel Context section", () => {
 
   it("uses selected detail for a Meiva agent outside the roster without another read", async () => {
     getAgentRoster.mockResolvedValue({ agents: [], ancestors: [] });
-    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const qc = createInspectorQueryClient();
     qc.setQueryData([...AGENT_DETAIL_QUERY_KEY, 1], rosterFixture({ harness: "meiva" }).agents[0]);
     act(() => {
       useTimelineStore.getState().applyTokenUsage(109_600, 0, 1_000_000, 374_000, 512_000);
@@ -439,7 +406,7 @@ describe("InspectorPanel Context section", () => {
   it("keeps the active detail owner's refresh query usable after subscribing", async () => {
     getAgentRoster.mockResolvedValue({ agents: [], ancestors: [] });
     getAgent.mockResolvedValue(rosterFixture({ harness: "meiva" }).agents[0]);
-    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const qc = createInspectorQueryClient();
     const key = [...AGENT_DETAIL_QUERY_KEY, 1];
     function DetailOwner() {
       useQuery({ queryKey: key, queryFn: ({ signal }) => getAgent(1, signal) });

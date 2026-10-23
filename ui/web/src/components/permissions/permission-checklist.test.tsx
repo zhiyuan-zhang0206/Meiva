@@ -48,11 +48,12 @@ const payload = (over: Partial<HostPermissionsPayload> = {}): HostPermissionsPay
   ...over,
 });
 
+import { useStore } from "@/lib/state/store";
+
 const getHostPermissions = vi.fn<() => Promise<HostPermissionsPayload>>();
 const recheckHostPermissions = vi.fn<() => Promise<HostPermissionsPayload>>();
 const requestHostPermissions = vi.fn<() => Promise<HostPermissionsPayload>>();
 const deferHostPermissions = vi.fn<() => Promise<HostPermissionsPayload>>();
-const showToast = vi.fn();
 
 vi.mock("@/lib/transport/api", () => ({
   api: {
@@ -62,10 +63,6 @@ vi.mock("@/lib/transport/api", () => ({
     deferHostPermissions: () => deferHostPermissions(),
     getSettings: () => Promise.resolve({ settings: [] }),
   },
-}));
-vi.mock("@/lib/state/store", () => ({
-  useStore: (selector: (state: { showToast: typeof showToast }) => unknown) =>
-    selector({ showToast }),
 }));
 
 const { PermissionChecklist } = await import("./permission-checklist");
@@ -77,6 +74,7 @@ function wrap(ui: ReactElement) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  useStore.setState({ toast: null });
   getHostPermissions.mockResolvedValue(payload());
   recheckHostPermissions.mockResolvedValue(
     payload({
@@ -138,7 +136,7 @@ describe("PermissionChecklist", () => {
     fireEvent.click(screen.getByRole("button", { name: /do it later/i }));
     await waitFor(() => expect(deferHostPermissions).toHaveBeenCalledTimes(1));
     await waitFor(() =>
-      expect(showToast).toHaveBeenCalledWith(
+      expect(useStore.getState().toast).toBe(
         "Recorded. Nothing was granted; the next start asks again.",
       ),
     );

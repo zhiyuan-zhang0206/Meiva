@@ -1,35 +1,9 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ChatMarkdownMock, PythonCodeMock, ScrollAreaMock, cleanupTimelineTest, displayLimits, makeItem, mockSettings, resetStore, setToggleState, toggleState, userSettingsState } from "./timeline-test-harness";
-vi.mock("@/lib/format/display-limits", async () => {
-  const { useSyncExternalStore } = await import("react");
-  return {
-    useDisplayLimit: (envVar: string, fallback: number) => {
-      useSyncExternalStore(mockSettings.subscribe, mockSettings.version);
-      return displayLimits.get(envVar) ?? fallback;
-    },
-  };
-});
+import { useContentToggleReset } from "@/lib/layout/content-toggle-store";
+import { ChatMarkdownMock, ScrollAreaMock, cleanupTimelineTest, makeItem, render, setToggleState } from "./timeline-test-harness";
 vi.mock("@/components/content/markdown", () => ({ ChatMarkdown: ChatMarkdownMock }));
-vi.mock("@/components/content/python-code", () => ({
-  PythonCode: PythonCodeMock,
-  preloadPythonCodeHighlighter: () => Promise.resolve(),
-}));
 vi.mock("@/components/ui/scroll-area", () => ({ ScrollArea: ScrollAreaMock }));
-vi.mock("@/lib/layout/content-toggle-store", async () => {
-  const { useSyncExternalStore } = await import("react");
-  return {
-    useContentToggle: () => {
-      useSyncExternalStore(mockSettings.subscribe, mockSettings.version);
-      toggleState.reads += 1;
-      return { detailsMode: toggleState.detailsMode, setDetailsMode: vi.fn(), isLoading: toggleState.isLoading };
-    },
-    useContentToggleReset: (selector?: (s: typeof resetStore) => unknown) => (selector ? selector(resetStore) : resetStore),
-  };
-});
-vi.mock("@/lib/state/use-user-settings", () => ({
-  useUserSettings: () => ({ settings: userSettingsState, setSetting: vi.fn(), isLoading: false }),
-}));
 import { TimelineView } from "..";
 import { formatItemTime } from "../timestamp";
 afterEach(cleanupTimelineTest);
@@ -235,13 +209,12 @@ describe("Details mode re-pick made while the timeline was unmounted", () => {
     fireEvent.click(screen.getAllByTestId("card-toggle")[0]);
     expect(screen.getByText("hidden thought")).toBeTruthy();
     first.unmount();
-    resetStore.bumpReset();
-    expect(resetStore.resetPending).toBe(true);
+    useContentToggleReset.getState().bumpReset();
+    expect(useContentToggleReset.getState().resetPending).toBe(true);
     render(<TimelineView {...props} />);
     expect(screen.getByTestId("turn-toggle").getAttribute("aria-expanded")).toBe("false");
     expect(screen.queryByTestId("card-toggle")).toBeNull();
-    expect(resetStore.consumeReset).toHaveBeenCalled();
-    expect(resetStore.resetPending).toBe(false);
+    expect(useContentToggleReset.getState().resetPending).toBe(false);
   });
 });
 

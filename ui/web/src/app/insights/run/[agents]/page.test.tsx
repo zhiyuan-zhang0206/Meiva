@@ -20,7 +20,6 @@ const {
   getAgentRoster,
   getSettings,
   getContextBreakdown,
-  useMediaQuery,
 } =
   vi.hoisted(() => ({
     getRunTimeline:
@@ -34,15 +33,12 @@ const {
           range: { start: number; end: number; limit?: number; full?: boolean },
         ) => Promise<RunTimelineMessages>
       >(),
-    useMediaQuery: vi.fn(() => false),
     getSettings: vi.fn<() => Promise<UserSettingListResponse>>(),
     getContextBreakdown: vi.fn<(agentId: number) => Promise<ContextBreakdownResponse>>(),
     getRunTimelineContext: vi.fn<(agentId: number, at: number) => Promise<RunTimelineContext>>(),
     getRunTimelineLinks: vi.fn<(agents: readonly number[], window: { from: string; to: string }) => Promise<RunTimelineLinks>>(),
     getAgentRoster: vi.fn(),
   }));
-
-vi.mock("@/lib/layout/use-media-query", () => ({ useMediaQuery }));
 
 vi.mock("@/lib/transport/api", async (importOriginal) => ({
   ...(await importOriginal<typeof ApiModule>()),
@@ -57,6 +53,7 @@ import {
   mockCanvas,
   paintFrame,
 } from "@/components/run-timeline/canvas/run-timeline-test-canvas";
+import { useMediaQuery } from "@/lib/layout/use-media-query";
 import RunTimelinePage from "./page";
 
 
@@ -103,8 +100,8 @@ const lookOf = async (item: Item) => {
 const ringOf = async (item: Item) => (await lookOf(item)).ring;
 
 beforeEach(() => {
+  expect(typeof useMediaQuery).toBe("function");
   mockCanvas();
-  useMediaQuery.mockReturnValue(false);
   getRunTimeline.mockReset();
   getRunTimelineLinks.mockReset();
   getRunTimelineLinks.mockResolvedValue({ links: [] });

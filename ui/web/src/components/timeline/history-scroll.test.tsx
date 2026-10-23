@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { StrictMode, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { BackendTimelineItem, TimelineResponse } from "@/lib/contracts/types";
+import { USER_SETTING_DEFAULTS, type BackendTimelineItem, type TimelineResponse } from "@/lib/contracts/types";
 import { readScrollMemory, saveScrollMemory } from "@/lib/layout/scroll-memory";
 import { useTimeline } from "@/lib/timeline/use-timeline";
 import { useTimelineStore } from "@/lib/timeline/timeline-store";
@@ -11,14 +11,6 @@ vi.mock("@/lib/transport/api", () => ({ api: {
   getTimeline: vi.fn(), getConfig: vi.fn().mockResolvedValue({ fields: [] }),
 } }));
 vi.mock("@/lib/transport/useEventStream", () => ({ useAgentEventStream: vi.fn() }));
-vi.mock("@/lib/state/use-user-settings", () => ({
-  useUserSettings: () => ({ settings: {}, setSetting: vi.fn(), isLoading: false }),
-}));
-vi.mock("@/lib/layout/content-toggle-store", () => ({
-  useContentToggle: () => ({ detailsMode: "all", isLoading: false }),
-  useContentToggleReset: (selector: (state: { resetPending: boolean; consumeReset: () => void }) => unknown) =>
-    selector({ resetPending: false, consumeReset: vi.fn() }),
-}));
 vi.mock("../content/markdown", () => ({ ChatMarkdown: ({ content }: { content: string }) => <div>{content}</div> }));
 vi.mock("../ui/scroll-area", () => ({
   ScrollArea: ({ children }: { children: ReactNode }) => (
@@ -54,6 +46,7 @@ beforeEach(() => {
   client.setQueryData(["timeline", 42], response);
   client.setQueryData(["timeline", 43], response);
   client.setQueryData(["config", null], { fields: [] });
+  client.setQueryData(["user-settings"], { ...USER_SETTING_DEFAULTS, "display.expand_runs_mode": "all" });
   useTimelineStore.getState().switchThread(null, null, false);
   top = 0;
   height = 5000;
