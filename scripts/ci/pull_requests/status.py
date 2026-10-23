@@ -149,12 +149,12 @@ class CIResult:
         return f"Error: {self.error_detail}"
 
 
-def repo_has_workflows() -> bool:
+def repo_has_workflows(repo_root: Path) -> bool:
     """True when this checkout defines GitHub Actions workflows.
     Bounds the NO_WORKFLOW_RUNS guard to repos where workflow checks are actually expected — a
     repo with no workflows at all is legitimately green on app checks alone.
     """
-    wf_dir = Path(__file__).resolve().parents[3] / ".github" / "workflows"
+    wf_dir = repo_root / ".github" / "workflows"
     return any(wf_dir.glob("*.yml")) or any(wf_dir.glob("*.yaml"))
 
 
@@ -526,7 +526,7 @@ def _merge_conflict_result(data: dict, result: CIResult) -> CIResult:
 
 
 def _attached_checks_verdict(
-    result: CIResult, head_sha: str, repo: str | None, *, host: Host, clock: Clock
+    result: CIResult, head_sha: str, repo: str | None, *, host: Host, clock: Clock, workflows: bool
 ) -> None:
     """Resolve the verdict once every attached check has passed and none is still pending."""
     # Every check attached so far has passed. Attached, though, is not the same as finished: a
@@ -541,7 +541,7 @@ def _attached_checks_verdict(
         result.pending.extend(scheduled)
         result.verdict = CIStatus.PENDING
         result.limbo = limbo_runs(head_sha, repo, host=host, clock=clock) or []
-    elif not result.workflow_checks and repo_has_workflows():
+    elif not result.workflow_checks and workflows:
         # Nothing from a workflow is attached — and nothing is confirmed scheduled (an
         # unanswerable probe, None, reads the same here) — while this checkout does define
         # workflows: the suite did not run. Reporting ALL_PASSED here is how a broken `runs-on`
@@ -570,6 +570,7 @@ def _attached_checks_verdict(
             "runs API probe failed: cannot confirm no workflow run is still queued for this head"
         )
     else:
+        # meiva:note
         # Nothing is still running — but that only rules out runs that HAVE registered.
         # Registration lags a head change, and in that window a rollup of second-scale checks
         # (GitHub Apps, small proof workflows) all passing is indistinguishable from a finished
@@ -579,15 +580,13 @@ def _attached_checks_verdict(
         # therefore also confirms the main CI workflow has been SEEN for this head — a
         # completed, non-skipped run of MAIN_CI_WORKFLOW_NAME — and a check-set far smaller
         # than the repo's suite is the tell to corroborate by hand. Scoped by
-        # repo_has_workflows(): a checkout with no workflows is legitimately green on app
+        # workflows: a checkout with no workflows is legitimately green on app
         # checks alone.
         #
         # Not seen -> PENDING with the run name in `pending`: --wait keeps
         # polling (bounded by --timeout), and the one-shot keeps its legacy
         # contract — it prints this pending summary, never "all green".
-        main_run = (
-            main_workflow_run_completed(head_sha, repo, host=host) if repo_has_workflows() else True
-        )
+        main_run = main_workflow_run_completed(head_sha, repo, host=host) if workflows else True
         if main_run is None:
             # Same asymmetry as every probe here: unanswerable is unknown,
             # never green (--wait exits 3 if it persists).
@@ -611,6 +610,7 @@ def check_ci(
     repo: str | None = None,
     host: Host,
     clock: Clock,
+    workflows: bool,
 ) -> CIResult:
     """Poll one PR's CI status and mergeability via `gh pr view --json`.
     Returns a CIResult with a clear verdict — no ambiguous exit codes that agents misinterpret.
@@ -703,6 +703,8 @@ def check_ci(
     elif result.pending:
         result.verdict = CIStatus.PENDING
     else:
-        _attached_checks_verdict(result, data.get("headRefOid", ""), repo, host=host, clock=clock)
+        _attached_checks_verdict(
+            result, data.get("headRefOid", ""), repo, host=host, clock=clock, workflows=workflows
+        )
 
     return result

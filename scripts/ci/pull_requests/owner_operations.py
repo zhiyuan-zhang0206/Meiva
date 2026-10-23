@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import subprocess
 import sys
+from collections.abc import Mapping
 from math import ceil
 
 from base.clock import Clock, Timers
@@ -25,9 +25,9 @@ _QUEUE_NAMES = frozenset(_QUEUE_CHOICES)
 _TRUNK_PRIORITIES = {"urgent": 0, "high": 10, "medium": 100, "low": 200}
 
 
-def resolve_queue(queue: str | None) -> str:
+def resolve_queue(queue: str | None, *, env: Mapping[str, str]) -> str:
     """Return the CLI-selected queue, then CI_QUEUE, then the Trunk default."""
-    resolved = queue or os.environ.get("CI_QUEUE") or "trunk"
+    resolved = queue or env.get("CI_QUEUE") or "trunk"
     if resolved not in _QUEUE_NAMES:
         raise ValueError(f"unknown CI queue: {resolved}")
     return resolved
@@ -180,6 +180,7 @@ def _trunk_operator_command(
     parser: argparse.ArgumentParser,
     *,
     open_url: UrlOpener,
+    env: Mapping[str, str],
 ) -> int | None:
     """Dispatch --queue-status / --evict when set; None when neither is.
     Both touch the live Trunk queue and need TRUNK_API_TOKEN (exit 3 when unset). Usage errors go
@@ -195,7 +196,7 @@ def _trunk_operator_command(
         parser.error("--json is not supported with --evict")
     if args.evict and args.pr is None:
         parser.error("PR number is required with --evict")
-    trunk_token = os.environ.get("TRUNK_API_TOKEN")
+    trunk_token = env.get("TRUNK_API_TOKEN")
     if not trunk_token:
         print(
             "TRUNK_API_TOKEN is required for Trunk queue operations",
@@ -319,6 +320,7 @@ def trunk_merge_flow(
     host: Host,
     clock: Clock,
     open_url: UrlOpener,
+    workflows: bool,
 ) -> int:
     """Apply the standard cooldown/green recheck, then submit and watch Trunk."""
     deadline = clock.monotonic() + timeout if timeout else None
@@ -332,7 +334,7 @@ def trunk_merge_flow(
         )
         clock.sleep(min(remaining, every))
 
-    result = status.check_ci(pr, repo=repo, host=host, clock=clock)
+    result = status.check_ci(pr, repo=repo, host=host, clock=clock, workflows=workflows)
     if result.verdict is CIStatus.ERROR:
         print(
             f"PR #{pr} CI error before queueing: {result.error_detail}",
@@ -391,13 +393,15 @@ def dispatch(
     host: Host,
     clock: Clock,
     open_url: UrlOpener,
+    workflows: bool,
+    env: Mapping[str, str],
 ) -> int:
     """Run an explicitly selected owner command, validating credentials before waiting."""
     try:
-        resolve_queue(args.queue)
+        resolve_queue(args.queue, env=env)
     except ValueError as error:
         parser.error(str(error))
-    operator_rc = _trunk_operator_command(args, parser, open_url=open_url)
+    operator_rc = _trunk_operator_command(args, parser, open_url=open_url, env=env)
     if operator_rc is not None:
         return operator_rc
     if args.pr is None:
@@ -411,7 +415,7 @@ def dispatch(
         args.wait = True
         if args.timeout == 0:
             args.timeout = 1800
-        token = os.environ.get("TRUNK_API_TOKEN")
+        token = env.get("TRUNK_API_TOKEN")
         if not token:
             print(
                 "TRUNK_API_TOKEN is required for --queue trunk --merge", file=sys.stderr, flush=True
@@ -419,7 +423,15 @@ def dispatch(
             return 3
         from scripts.ci.pull_requests.monitor import wait_for_verdict
 
-        rc = wait_for_verdict(args.pr, args.repo, args.every, args.timeout, host=host, clock=clock)
+        rc = wait_for_verdict(
+            args.pr,
+            args.repo,
+            args.every,
+            args.timeout,
+            host=host,
+            clock=clock,
+            workflows=workflows,
+        )
         if rc != 0:
             return rc
         return trunk_merge_flow(
@@ -433,5 +445,6 @@ def dispatch(
             host=host,
             clock=clock,
             open_url=open_url,
+            workflows=workflows,
         )
     raise AssertionError("owner dispatch requires an explicit operation")

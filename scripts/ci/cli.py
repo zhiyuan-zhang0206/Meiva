@@ -25,10 +25,18 @@ from scripts.ci.pull_requests.commands import main as main
 from scripts.ci.pull_requests.status import CIResult as CIResult
 from scripts.ci.pull_requests.status import CIStatus as CIStatus
 from scripts.ci.pull_requests.status import check_ci as check_ci
+from scripts.ci.pull_requests.status import repo_has_workflows
 
 if __name__ == "__main__":
     clock = Clock(
         ClockConfig(timezone="UTC", authoritative_timezone="UTC", message_timestamp_weekday=False),
         timers=SYSTEM_TIMERS,
     )
-    sys.exit(main(host=Host.system(), clock=clock, open_url=SYSTEM_URL_OPENER))
+    sys.exit(
+        main(
+            host=Host.system(),
+            clock=clock,
+            open_url=SYSTEM_URL_OPENER,
+            workflows=repo_has_workflows(Path(__file__).resolve().parents[2]),
+        )
+    )

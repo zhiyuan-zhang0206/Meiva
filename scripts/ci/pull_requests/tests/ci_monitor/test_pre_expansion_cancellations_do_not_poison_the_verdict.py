@@ -11,12 +11,9 @@ from scripts.ci.pull_requests.tests.test_ci_monitor import (
 from scripts.ci.pull_requests.tests.test_ci_monitor import (
     gh as gh,
 )
-from scripts.ci.pull_requests.tests.test_ci_monitor import (
-    has_workflows as has_workflows,
-)
 
 
-def test_pre_expansion_cancelled_run_does_not_poison_the_head(gh: Any, has_workflows: Any) -> None:
+def test_pre_expansion_cancelled_run_does_not_poison_the_head(gh: Any) -> None:
     cancelled_at = "2026-10-12T15:45:03Z"
     succeeded_at = "2026-10-12T15:58:00Z"
     host = gh(
@@ -37,8 +34,7 @@ def test_pre_expansion_cancelled_run_does_not_poison_the_head(gh: Any, has_workf
             status_check_rollup_entry("e2e shard (1/4)", "SUCCESS", completed_at=succeeded_at),
         ]
     )
-    has_workflows(True)
-    r = status.check_ci("5262", host=host, clock=TEST_CLOCK)
+    r = status.check_ci("5262", host=host, clock=TEST_CLOCK, workflows=True)
     assert r.verdict is CIStatus.ALL_PASSED
     assert r.failed == []
     assert r.completed == [
@@ -48,14 +44,13 @@ def test_pre_expansion_cancelled_run_does_not_poison_the_head(gh: Any, has_workf
     ]
 
 
-def test_named_cancellation_without_a_successor_stays_red(gh: Any, has_workflows: Any) -> None:
+def test_named_cancellation_without_a_successor_stays_red(gh: Any) -> None:
     host = gh(
         [
             status_check_rollup_entry("backend shard (3/16)", "CANCELLED"),
             status_check_rollup_entry("backend shard (1/16)", "SUCCESS"),
         ]
     )
-    has_workflows(True)
-    r = status.check_ci("1", host=host, clock=TEST_CLOCK)
+    r = status.check_ci("1", host=host, clock=TEST_CLOCK, workflows=True)
     assert r.verdict is CIStatus.FAILED
     assert r.failed == [{"name": "backend shard (3/16)", "conclusion": "CANCELLED"}]
