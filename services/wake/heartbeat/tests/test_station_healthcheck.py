@@ -17,7 +17,7 @@ from unittest.mock import Mock
 import pytest
 
 import base.db
-from base.config import settings
+from base.config.tests.configuration import snapshot_process_config
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.host.db_authority.api import (
@@ -74,11 +74,12 @@ def _insert_station_unit(
 
 @pytest.mark.usefixtures("_log_boundary")
 def test_main_is_noop_without_remote_observatory(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(settings.observability, "observability_url", "")
+    process_config = snapshot_process_config()
+    process_config.set_field("observability_url", "")
     create = Mock(side_effect=AssertionError("a no-op probe must not open its work database"))
     monkeypatch.setattr(hc.Database, "from_settings", create)
     opener = FakeUrlOpener()
-    hc.main(open_url=opener)
+    hc.main(process_config=process_config, open_url=opener)
     assert opener.calls == []
     create.assert_not_called()
 
@@ -193,7 +194,6 @@ def test_station_answers_without_a_published_token_warns_and_skips(
 
 @pytest.mark.usefixtures("_log_boundary")
 def test_main_probes_advertised_station_and_does_not_raise(
-    monkeypatch: pytest.MonkeyPatch,
     probe_token: str,
     loguru_records: list[dict[str, Any]],
     *,
@@ -201,12 +201,13 @@ def test_main_probes_advertised_station_and_does_not_raise(
 ) -> None:
     """End-to-end: with a registered station, main() runs clean on a healthy
     probe and fails open on a failing one."""
-    monkeypatch.setattr(settings.observability, "observability_url", "http://10.0.0.9")
+    process_config = snapshot_process_config()
+    process_config.set_field("observability_url", "http://10.0.0.9")
     _insert_station_unit(database_gate=database_gate)
     opener = FakeUrlOpener()
     opener.on("http://10.0.0.9:4318", Answer(), Answer(status=503))
-    hc.main(open_url=opener)
-    hc.main(open_url=opener)  # must not raise
+    hc.main(process_config=process_config, open_url=opener)
+    hc.main(process_config=process_config, open_url=opener)  # must not raise
     assert opener.urls == ["http://10.0.0.9:4318/v1/traces"] * 2
     assert all(call.headers["Authorization"] == f"Bearer {probe_token}" for call in opener.calls)
 
@@ -215,7 +216,7 @@ def test_main_probes_advertised_station_and_does_not_raise(
     )
     assert failed_observations == 1
     telemetry_token_path(meiva_home()).unlink()
-    hc.main(open_url=opener)
+    hc.main(process_config=process_config, open_url=opener)
     assert len(opener.calls) == 2
     assert any("no published telemetry token" in record["message"] for record in loguru_records)
     assert (
@@ -227,6 +228,9 @@ def test_main_probes_advertised_station_and_does_not_raise(
 def test_main_shares_one_captured_gate_with_the_probe_and_log_factory(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, probe_token: str
 ) -> None:
+    process_config = snapshot_process_config()
+    process_config.set_field("observability_url", "http://station.invalid")
+    process_config.set_field("observability_otlp_port", 44318)
     image = LoadedCommit(tmp_path, "captured-before-checkout-moved")
     capture = Mock(return_value=image)
     count = Mock(return_value=7)
@@ -237,6 +241,7 @@ def test_main_shares_one_captured_gate_with_the_probe_and_log_factory(
     def resolve(
         *, database: Callable[[], Database], config: StationEndpointConfig
     ) -> StationTarget:
+        assert config == StationEndpointConfig("http://station.invalid", 44318)
         received.append(database)
         database()
         return target
@@ -251,7 +256,7 @@ def test_main_shares_one_captured_gate_with_the_probe_and_log_factory(
     monkeypatch.setattr(hc, "init_gateway_process", logging)
     opener = FakeUrlOpener()
     opener.on(target.url, Answer())
-    hc.main(open_url=opener)
+    hc.main(process_config=process_config, open_url=opener)
     assert len(opener.calls) == 1
     assert opener.calls[0].headers["Authorization"] == f"Bearer {probe_token}"
 
