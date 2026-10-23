@@ -21,7 +21,6 @@ import psutil
 import pytest
 
 from base.native_process import pid_starttime_ticks
-from base.native_process.os_platform import is_linux
 from base.sessions import posixproc
 from base.sessions.record import SessionRecord
 from base.sessions.tests.poll_until import poll_until
@@ -307,7 +306,7 @@ def test_list_sessions_reaps_dead_record(unit_home) -> None:
     assert not posixproc.record_path(name).exists()
 
 
-@pytest.mark.skipif(not is_linux(), reason="Linux /proc start-time identity")
+@pytest.mark.requires_host("linux")
 def test_starttime_identity_survives_wall_clock_drift(unit_home: Path) -> None:
     """A stable kernel start tick keeps a live record despite a bad epoch time."""
     name = "meiva-test-agent-starttime-drift"
@@ -341,9 +340,7 @@ def test_starttime_identity_survives_wall_clock_drift(unit_home: Path) -> None:
             posixproc.record_path(name).unlink(missing_ok=True)
 
 
-@pytest.mark.skipif(
-    sys.platform != "darwin", reason="psutil's macOS wall-clock correction is macOS-only"
-)
+@pytest.mark.requires_host("darwin")
 def test_session_record_spans_import_epochs(
     unit_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -368,7 +365,7 @@ def test_session_record_spans_import_epochs(
         posixproc.kill_session(name, graceful=False)
 
 
-@pytest.mark.skipif(not is_linux(), reason="Linux /proc start-time identity")
+@pytest.mark.requires_host("linux")
 def test_list_sessions_reaps_starttime_pid_reuse(unit_home: Path) -> None:
     """A live pid with different start ticks is a recycled pid and is reaped."""
     name = "meiva-test-agent-starttime-reuse"

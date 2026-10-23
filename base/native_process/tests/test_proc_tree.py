@@ -44,7 +44,7 @@ def test_birth_matches_exposes_the_same_rule() -> None:
     assert not changed.birth_matches(process)
 
 
-@pytest.mark.skipif(not is_linux(), reason="Linux /proc start-time identity")
+@pytest.mark.requires_host("linux")
 def test_live_converges_when_the_proc_entry_vanishes_mid_check(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -69,7 +69,7 @@ def test_live_converges_when_the_proc_entry_vanishes_mid_check(
             child.wait()
 
 
-@pytest.mark.skipif(not is_linux(), reason="Linux /proc start-time identity")
+@pytest.mark.requires_host("linux")
 def test_live_keeps_the_error_when_a_present_process_cannot_be_read(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -85,9 +85,7 @@ def test_live_keeps_the_error_when_a_present_process_cannot_be_read(
         identity.live()
 
 
-@pytest.mark.skipif(
-    sys.platform != "darwin", reason="psutil's macOS wall-clock correction is macOS-only"
-)
+@pytest.mark.requires_host("darwin")
 @pytest.mark.parametrize("seconds", (60.0, 3600.0))
 def test_stable_create_time_ignores_a_simulated_clock_step(
     monkeypatch: pytest.MonkeyPatch, seconds: float
@@ -103,9 +101,7 @@ def test_stable_create_time_ignores_a_simulated_clock_step(
     assert abs(public_moved - key_before) > 2.0
 
 
-@pytest.mark.skipif(
-    sys.platform != "darwin", reason="psutil's macOS wall-clock correction is macOS-only"
-)
+@pytest.mark.requires_host("darwin")
 @pytest.mark.parametrize("seconds", (60.0, 3600.0))
 def test_capture_and_verify_span_clock_epochs(
     monkeypatch: pytest.MonkeyPatch, seconds: float

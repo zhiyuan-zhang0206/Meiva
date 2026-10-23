@@ -149,7 +149,7 @@ def test_missing_libc_pidfd_support_refuses(monkeypatch: pytest.MonkeyPatch) -> 
         pidfd.pidfd_libc.__wrapped__()
 
 
-@pytest.mark.skipif(sys.platform != "linux", reason="actual libc pidfd custody")
+@pytest.mark.requires_host("linux")
 def test_native_descriptor_retains_exited_task_without_inheritance(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

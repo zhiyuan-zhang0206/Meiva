@@ -4,9 +4,7 @@ import os
 
 import pytest
 
-import base.native_process.os_platform as plat
-
-pytestmark = pytest.mark.skipif(not plat.is_macos(), reason="macOS-only postmaster locale check")
+pytestmark = pytest.mark.requires_host("darwin")
 
 
 def test_pytest_env_carries_lc_all_on_macos() -> None:

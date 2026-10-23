@@ -7,7 +7,6 @@
 from __future__ import annotations
 
 import shutil
-import sys
 from pathlib import Path
 
 import pytest
@@ -144,22 +143,22 @@ def _run(binary: Path, scenario: str) -> tuple[int, str]:
     return int(prompts), flags
 
 
-@pytest.mark.skipif(sys.platform != "darwin", reason="the helper only builds on macOS")
+@pytest.mark.requires_host("darwin")
 def test_an_untrusted_helper_asks_exactly_once_per_process(gate_binary: Path) -> None:
     assert _run(gate_binary, "ax-untrusted") == (1, "00000")
 
 
-@pytest.mark.skipif(sys.platform != "darwin", reason="the helper only builds on macOS")
+@pytest.mark.requires_host("darwin")
 def test_a_granted_helper_never_asks(gate_binary: Path) -> None:
     assert _run(gate_binary, "ax-trusted") == (0, "11111")
 
 
-@pytest.mark.skipif(sys.platform != "darwin", reason="the helper only builds on macOS")
+@pytest.mark.requires_host("darwin")
 def test_a_consumed_prompt_is_not_reissued_after_the_grant_arrives(gate_binary: Path) -> None:
     assert _run(gate_binary, "ax-then-granted") == (1, "00011")
 
 
-@pytest.mark.skipif(sys.platform != "darwin", reason="the helper only builds on macOS")
+@pytest.mark.requires_host("darwin")
 def test_screen_recording_follows_the_same_rule(gate_binary: Path) -> None:
     assert _run(gate_binary, "screen-untrusted") == (1, "0")
     assert _run(gate_binary, "screen-granted") == (0, "1")
