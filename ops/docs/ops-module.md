@@ -117,3 +117,53 @@ environment before importing the application and calls the normal operations
 with the existing `Host` port. It verifies browser capability hints and rejection
 of enabling a display-dependent MCP server on a headless host, while allowing
 that server to be disabled.
+
+## Cluster RPC client
+
+`cluster/rpc.py` keeps machine lookup and its error translation in the
+`dispatch_to_machine` composition root. A missing registered machine raises
+`ClusterOpTargetAbsent`, a definitive absence that terminal-state consumers can
+handle separately. It remains a `ClusterOpUnreachable` subtype for existing
+transport handlers. A registered machine without an ops URL is unreachable;
+neither condition starts HTTP or reads credentials. Unknown operation kinds
+fail before lookup, credential access or idempotency-key construction.
+`dispatch_to_url` accepts an already resolved address and needs no database;
+fleet-update compensation and machine probes can use it during a database
+outage.
+
+`RpcClient` owns one dispatch's timeout and retry policy with required HTTP,
+credential, timer and jitter ports. The system constructor supplies the existing
+httpx client, `SYSTEM_TIMERS` and current settings. Its credential factory reads
+current gateway access on every attempt, including retries; authentication
+therefore retains its existing refresh lifetime. Each HTTP attempt ignores
+system proxy configuration (`trust_env=False`) because cluster peers are
+private-network addresses. Its connect timeout is `min(10, timeout_s)`, so a
+three-second probe cannot spend ten seconds connecting.
+
+Transient HTTP transport errors and 5xx responses retry with bounded exponential
+backoff: `min(0.5 * 2**attempt, 4)` seconds, jittered by 0.5–1.5. The configured
+retry count denotes extra attempts; a negative count still makes one attempt.
+Business failures, 4xx responses and invalid response envelopes are terminal.
+Only `completed` and `failed` wire statuses are accepted. Completed responses
+return the result; failed responses raise `ClusterOpFailed` with the original
+failure result for consumers to translate. The internal retry signal never
+escapes: exhaustion raises `ClusterOpUnreachable` with the last transport cause.
+Probe exhaustion logs at DEBUG; other operation failures remain WARNING.
+`worst_case_dispatch_seconds` derives attempt and maximum backoff time from the
+same configuration for callers that own an overall deadline.
+
+Spawn-launch and lifecycle operations retain one idempotency key across every
+attempt. A spawn-launch business id produces a key scoped to its target and
+canonical complete payload, so repeated launch dispatches can replay the same
+outcome. Lifecycle calls and payloads without a business id get a fresh key per
+dispatch unless the caller supplies one; repeating reconciliation must not
+replay a previous failed result. Operations without transport dedupe omit the
+key from the wire envelope. The agent-ops server owns deduplication and outcome
+replay; the client does not reimplement it.
+
+The focused RPC tests drive the actual retry/error classifier through httpx's
+transport port and `ManualTimers`. Root coverage reads real machine rows and
+reaches a scoped local HTTP server; credential rotation verifies the order of
+credential reads and HTTP attempts while preserving the key. A child process
+uses the real gateway configuration profile and temporary unit `.env` to verify
+system timeout/retry defaults without replacing settings attributes.
