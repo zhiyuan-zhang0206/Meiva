@@ -9,7 +9,6 @@ from __future__ import annotations
 
 from typing import cast
 
-import pytest
 from langgraph.checkpoint.postgres import PostgresSaver
 
 from base.agents.incarnation.tests.test_runner_role import grant_runner, runner_url
@@ -18,7 +17,7 @@ from base.db.code_version_gate import ProcessDbGate
 
 
 def test_checkpoint_reads_need_crud_not_schema_ddl(
-    runner_db: str, monkeypatch: pytest.MonkeyPatch, database_gate: ProcessDbGate
+    runner_db: str, database_gate: ProcessDbGate
 ) -> None:
     """Both checkpoint readers work as ``meiva_runner`` without schema CREATE.
 
@@ -28,6 +27,8 @@ def test_checkpoint_reads_need_crud_not_schema_ddl(
     when every table already exists.  Production then loses timeline / inspect
     history despite the role holding all CRUD privileges the read itself needs.
     """
+    from dataclasses import replace
+
     from langchain_core.messages import HumanMessage
     from langgraph.checkpoint.base import CheckpointMetadata, empty_checkpoint
 
@@ -35,8 +36,8 @@ def test_checkpoint_reads_need_crud_not_schema_ddl(
         load_checkpoint_messages,
         load_checkpoint_messages_by_trace,
     )
-    from base.config import settings
     from base.db import Database
+    from base.db.config import db_config_from_settings
 
     grant_runner(runner_db)
 
@@ -55,11 +56,12 @@ def test_checkpoint_reads_need_crud_not_schema_ddl(
             new_versions={"messages": "1"},
         )
 
-    monkeypatch.setattr(settings.data_plane, "db_url", runner_url(runner_db))
-    current = load_checkpoint_messages(Database.from_settings(gate=database_gate), 73)
-    checkpoint_id, traced = load_checkpoint_messages_by_trace(
-        Database.from_settings(gate=database_gate), 73, trace_id
+    runner_database = Database(
+        replace(db_config_from_settings(), db_url=runner_url(runner_db)),
+        gate=database_gate,
     )
+    current = load_checkpoint_messages(runner_database, 73)
+    checkpoint_id, traced = load_checkpoint_messages_by_trace(runner_database, 73, trace_id)
 
     # This legacy checkpoint bypasses Pregel's ID assignment. Reading it
     # records provenance without requiring DDL or rewriting stored data.

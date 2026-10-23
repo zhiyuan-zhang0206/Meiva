@@ -76,7 +76,10 @@ def _config(thread_id: str, checkpoint_id: str | None = None) -> RunnableConfig:
     return {"configurable": configurable}
 
 
-def _synthetic_recovery_saver() -> tuple[AsyncPostgresSaver, list[tuple[str, str, str]], list[Any]]:
+def _synthetic_recovery_saver(
+    *,
+    history_override: dict[str, Any] | None = None,
+) -> tuple[AsyncPostgresSaver, list[tuple[str, str, str]], list[Any]]:
     """A saver whose exact tuple and history reads are independently observable."""
     saver = AsyncPostgresSaver(cast(Any, object()))
     walks: list[tuple[str, str, str]] = []
@@ -100,6 +103,8 @@ def _synthetic_recovery_saver() -> tuple[AsyncPostgresSaver, list[tuple[str, str
         )
 
     async def history(*, config: RunnableConfig, channels: Sequence[str]) -> dict[str, Any]:
+        if history_override is not None:
+            return history_override
         assert channels == ["messages"]
         values = config["configurable"]  # pyright: ignore[reportTypedDictNotRequiredAccess]
         key = (values["thread_id"], values["checkpoint_id"], values["checkpoint_ns"])
@@ -392,15 +397,8 @@ async def test_ordinary_empty_checkpoint_is_not_delta() -> None:
 
 
 @pytest.mark.parametrize("history", [{}, {"messages": {"writes": []}}])
-async def test_missing_delta_history_propagates(
-    monkeypatch: pytest.MonkeyPatch, history: dict[str, Any]
-) -> None:
-    saver, _walks, _pending = _synthetic_recovery_saver()
-
-    async def missing(**_kwargs: Any) -> dict[str, Any]:
-        return history
-
-    monkeypatch.setattr(saver, "aget_delta_channel_history", missing)
+async def test_missing_delta_history_propagates(history: dict[str, Any]) -> None:
+    saver, _walks, _pending = _synthetic_recovery_saver(history_override=history)
     with pytest.raises(RuntimeError, match="messages history is missing"):
         await saver.aget_tuple(_config("thread-a", "checkpoint-a"))
 
