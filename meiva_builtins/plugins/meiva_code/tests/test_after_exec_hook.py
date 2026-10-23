@@ -13,14 +13,16 @@ import pytest
 
 import meiva
 from agent.state import BaseAgentState, CompactState, build_agent_state
+from base.packages.plugin_config_images import DiskPluginConfigImages
 from base.packages.plugins.extensions import ExtensionRegistry
+from base.paths.home import resolve_meiva_home
 from meiva.sdk_surface import install, process_context
 from meiva_builtins.plugins.meiva_code.tests.surface_support import code_registry
 
 
 @pytest.fixture(autouse=True)
 def _installed_surface():
-    install.install(code_registry())
+    install.install(code_registry(), config_images=DiskPluginConfigImages(resolve_meiva_home()))
     yield
     install.uninstall()
     process_context.unbind_exec_turn()

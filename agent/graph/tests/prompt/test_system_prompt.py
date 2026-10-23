@@ -27,7 +27,9 @@ from base.config import FIELD_INFOS, AgentSettings, settings
 from base.config.service_read import ConfigAuthority
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
+from base.packages.plugin_config_images import DiskPluginConfigImages
 from base.packages.plugins.extensions import ExtensionRegistry, PluginContributions
+from base.paths.home import resolve_meiva_home
 from base.telemetry import audit_events
 from meiva.sdk_surface import install, sdk_disable
 from meiva.sdk_surface.installation import installed
@@ -62,6 +64,7 @@ def _no_plugin_expansions() -> Iterator[None]:
             prior.registry,
             catalog=prior.catalog,
             authority=prior.authority,
+            config_images=DiskPluginConfigImages(resolve_meiva_home()),
         )
 
 
@@ -332,6 +335,7 @@ def test_plugin_expansions_lead_the_wildcard(
         ExtensionRegistry((("p", PluginContributions(sdk_expansions=("cwd",))),)),
         catalog=model_catalog,
         authority=config_authority,
+        config_images=DiskPluginConfigImages(resolve_meiva_home()),
     )
     monkeypatch.setattr(settings.agent, "sdk_expand_in_system_prompt", ["*"])
     result = effective_sdk_expand(
@@ -383,6 +387,7 @@ def test_plugin_expansions_merge_with_p95_without_duplicates(
         ExtensionRegistry((("p", PluginContributions(sdk_expansions=("cwd", "tasks"))),)),
         catalog=model_catalog,
         authority=config_authority,
+        config_images=DiskPluginConfigImages(resolve_meiva_home()),
     )
 
     assert effective_sdk_expand(

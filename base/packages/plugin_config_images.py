@@ -10,6 +10,15 @@ from pydantic import BaseModel
 from base.host.atomic_io import write_bytes_atomic
 from base.host.env.dotenv_file import ENV_LOCK_TIMEOUT_S
 from base.native_process.os_platform import file_lock
+from base.packages.plugin_config_contracts import ConfigImage
+from base.packages.plugin_config_contracts import (
+    PluginConfigChangedError as PluginConfigChangedError,
+)
+
+
+def config_image_path(plugin: str, *, home: Path) -> Path:
+    """Locate one complete plugin authority image within its supplied home."""
+    return home.resolve() / "configs" / plugin / "config.json"
 
 
 @dataclass(frozen=True)
@@ -20,9 +29,21 @@ class PluginConfigOwner:
     cls: type[BaseModel]
     path: Path
 
+    def read(self) -> str:
+        return self.path.read_text()
 
-class PluginConfigChangedError(RuntimeError):
-    """The captured authority image changed before the owned write."""
+    def create_default(self) -> None:
+        write_config_image(self, self.cls(), expected_digest=image_revision(None))
+
+
+@dataclass(frozen=True)
+class DiskPluginConfigImages:
+    """Construct image owners within one already-selected machine home."""
+
+    home: Path
+
+    def owner(self, name: str, cls: type[BaseModel]) -> PluginConfigOwner:
+        return PluginConfigOwner(name, cls, config_image_path(name, home=self.home))
 
 
 def image_digest(path: Path) -> str:
@@ -40,7 +61,7 @@ def image_revision(payload: bytes | None) -> str:
 
 
 def write_config_image(
-    owner: PluginConfigOwner,
+    owner: ConfigImage,
     config: BaseModel,
     *,
     expected_digest: str,

@@ -12,6 +12,8 @@ from base.agents.sdk import call_policy
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot
+from base.packages.plugin_config_images import DiskPluginConfigImages
+from base.paths.home import resolve_meiva_home
 from base.telemetry import emit
 from base.telemetry.delivery.pipeline import EventPipeline
 from base.telemetry.delivery.receipts import DrainStatus, Event
@@ -236,4 +238,5 @@ def test_first_bound_plugin_load_does_not_lend_attachment_writer_to_bare_calls(
                 sampling=prior.sampling,
                 clock_factory=prior.clock_factory,
                 producer=prior.producer,
+                config_images=DiskPluginConfigImages(resolve_meiva_home()),
             )

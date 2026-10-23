@@ -16,6 +16,15 @@ use declared defaults; binding creates that initial image. Existing malformed
 data and schema drift raise their explicit errors, without repair or fallback.
 `meiva plugins update` owns schema reconciliation.
 
+The plugin loader selects one home and supplies a required `PluginConfigImages`
+owner with its load result. The SDK installer receives that owner; it neither
+discovers paths nor constructs a disk adapter. Image owners are created lazily
+for each declaration, so a plugin keeps its own validation and rollback boundary.
+The disk implementation uses the existing locked whole-image CAS. Only the first
+missing read may use defaults; after creation or a competing writer, the final
+read is strict. A disappearing or invalid winner aborts binding without publishing
+a config. Unknown read and create errors propagate unchanged.
+
 The SDK installer binds instances into its local build and publishes them on
 `Installation.configs`. The declared class is the instance's type; there is no
 second registry to synchronize. Rollback removes local bindings and a failed
@@ -49,6 +58,13 @@ from discovered declarations and fresh authority disk images. It includes only
 declared `cluster-pinned` and `cluster-default` fields, rejects sensitive fields,
 and retains strict schema admission. The framework config reader receives that
 packet explicitly and does not discover plugins or own their authority images.
+
+`PluginEnableStore` owns the selected enable-file path. Canonical process
+functions construct it for the normal home; isolated consumers supply their own
+path. Directory scanning receives its builtin and external roots explicitly,
+while the process entry resolves the normal roots once. Missing enable files
+retain defaults, malformed data raises, and local updates retain deterministic
+ordering and scope to the plugins present on that machine.
 
 ## Schema reconciliation
 

@@ -24,7 +24,7 @@ import pytest
 import meiva
 from base.agents.context.clients import ClientSet
 from base.agents.sdk import call_policy
-from base.packages.plugin_config_images import PluginConfigChangedError
+from base.packages.plugin_config_images import DiskPluginConfigImages, PluginConfigChangedError
 from base.packages.plugins import flags, load_report
 from base.packages.plugins.extensions import (
     ExtensionRegistry,
@@ -34,6 +34,7 @@ from base.packages.plugins.extensions import (
     SdkWrap,
 )
 from base.packages.plugins.plugin_errors import DuplicateRegistration
+from base.paths.home import resolve_meiva_home
 from base.telemetry.tests.capture.event_capture import EmittedEvents
 from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
 from meiva.sdk_surface import install, metering, process_context, sdk_disable, skill_sources, wraps
@@ -97,7 +98,10 @@ def test_plugin_overlay_publishes_a_new_owned_image(unit_home: Path) -> None:
         model_config = ConfigDict(frozen=True)
         marker: str = Field(default="disk", json_schema_extra={"per_agent": True})
 
-    install.install(_registry(("owned", PluginContributions(config=Config))))
+    install.install(
+        _registry(("owned", PluginContributions(config=Config))),
+        config_images=DiskPluginConfigImages(resolve_meiva_home()),
+    )
     before = installed()
     assert before is not None
     assert sdk_settings.plugins.owned is before.configs["owned"]
@@ -219,7 +223,7 @@ def test_a_one_plugin_install_is_fully_removed_by_uninstall(
         )
     )
 
-    admitted = install.install(registry)
+    admitted = install.install(registry, config_images=DiskPluginConfigImages(resolve_meiva_home()))
 
     assert admitted == registry
     installation = installed()
@@ -248,17 +252,20 @@ def test_installing_twice_raises_until_uninstall() -> None:
     registry = _registry(
         ("demo", PluginContributions(sdk_namespaces=(SdkNamespace("install_ns", _namespace()),)))
     )
-    install.install(registry)
+    install.install(registry, config_images=DiskPluginConfigImages(resolve_meiva_home()))
 
     with pytest.raises(RuntimeError, match="already installed"):
-        install.install(_registry())
+        install.install(_registry(), config_images=DiskPluginConfigImages(resolve_meiva_home()))
 
     installation = installed()
     assert installation is not None and installation.registry == registry
     assert hasattr(meiva, "install_ns")
 
     install.uninstall()
-    assert install.install(_registry()) == _registry()
+    assert (
+        install.install(_registry(), config_images=DiskPluginConfigImages(resolve_meiva_home()))
+        == _registry()
+    )
 
 
 # ── a plugin the install refuses ───────────────────────────────────────────────
@@ -274,7 +281,10 @@ def test_a_second_plugin_declaring_a_taken_namespace_is_refused_and_the_first_st
         sdk_members=(SdkMember("self", "second_member", _extra),),
     )
 
-    admitted = install.install(_registry(("first", first), ("second", second)))
+    admitted = install.install(
+        _registry(("first", first), ("second", second)),
+        config_images=DiskPluginConfigImages(resolve_meiva_home()),
+    )
 
     assert [name for name, _c in admitted.plugins] == ["first"]
     [(name, exc)] = load_failures
@@ -327,7 +337,10 @@ def test_a_plugin_whose_later_piece_fails_is_rolled_back_whole(
     )
     before = _surface_snapshot()
 
-    admitted = install.install(_registry(("bad", _declaring(failing)), ("good", good)))
+    admitted = install.install(
+        _registry(("bad", _declaring(failing)), ("good", good)),
+        config_images=DiskPluginConfigImages(resolve_meiva_home()),
+    )
 
     [(name, exc)] = load_failures
     assert name == "bad"
@@ -363,7 +376,8 @@ def test_a_namespace_disabled_by_the_sdk_disable_sentinel_refuses_the_plugin(
                         sdk_namespaces=(SdkNamespace("disabled_ns", _namespace(ping=_ping)),)
                     ),
                 )
-            )
+            ),
+            config_images=DiskPluginConfigImages(resolve_meiva_home()),
         )
 
         [(name, exc)] = load_failures
@@ -396,7 +410,7 @@ def test_the_recorder_is_outermost_over_plugin_wraps_and_gone_after_uninstall(
         )
     )
 
-    install.install(registry)
+    install.install(registry, config_images=DiskPluginConfigImages(resolve_meiva_home()))
 
     ping = meiva.install_ns.ping  # type: ignore[attr-defined]
     assert metering.is_recorder(ping)  # the recorder is the outermost layer
@@ -436,7 +450,7 @@ def test_wrap_layers_stack_in_plugin_order_later_outermost() -> None:
         ),
     )
 
-    install.install(registry)
+    install.install(registry, config_images=DiskPluginConfigImages(resolve_meiva_home()))
 
     assert meiva.install_ns.ping() == "c(b(a(pong)))"  # type: ignore[attr-defined]
     # The curated `meiva.extend` views report the same chain, innermost first.
@@ -473,7 +487,8 @@ def test_expansions_reflect_namespaces_marked_expand_and_declared_paths_in_regis
                     sdk_expansions=("files",),
                 ),
             ),
-        )
+        ),
+        config_images=DiskPluginConfigImages(resolve_meiva_home()),
     )
 
     # Per plugin: its expanded namespaces, then its explicit paths; a namespace not marked
@@ -488,7 +503,10 @@ def test_expansions_reflect_namespaces_marked_expand_and_declared_paths_in_regis
 def test_install_keeps_core_dependencies_in_the_admitted_declaration() -> None:
     contribution = PluginContributions(flags=("general.message_timestamps",))
 
-    admitted = install.install(_registry(("declared", contribution)))
+    admitted = install.install(
+        _registry(("declared", contribution)),
+        config_images=DiskPluginConfigImages(resolve_meiva_home()),
+    )
 
     assert admitted.plugins == (("declared", contribution),)
     installation = installed()
@@ -507,7 +525,10 @@ def test_invalid_core_dependency_rolls_back_the_plugin(
     )
     good = PluginContributions(sdk_namespaces=(SdkNamespace("good_ns", _namespace()),))
 
-    admitted = install.install(_registry(("bad", bad), ("good", good)))
+    admitted = install.install(
+        _registry(("bad", bad), ("good", good)),
+        config_images=DiskPluginConfigImages(resolve_meiva_home()),
+    )
 
     assert admitted.plugins == (("good", good),)
     [(name, error)] = load_failures
@@ -556,7 +577,10 @@ def test_unknown_binding_failure_rolls_back_every_plugin_and_propagates_identity
     later = PluginContributions(sdk_namespaces=(SdkNamespace("later_ns", _namespace()),))
 
     with pytest.raises(type(error)) as caught:
-        install.install(_registry(("prior", prior), ("failed", failing), ("later", later)))
+        install.install(
+            _registry(("prior", prior), ("failed", failing), ("later", later)),
+            config_images=DiskPluginConfigImages(resolve_meiva_home()),
+        )
 
     assert caught.value is error
     assert installed() is None
@@ -624,7 +648,10 @@ def test_rollback_attempts_all_undos_and_cleanup_failure_is_never_success(
     expected = cleanup if refused else primary
 
     with pytest.raises(type(expected)) as caught:
-        install.install(_registry(("prior", prior), ("failed", failing), ("later", later)))
+        install.install(
+            _registry(("prior", prior), ("failed", failing), ("later", later)),
+            config_images=DiskPluginConfigImages(resolve_meiva_home()),
+        )
 
     assert caught.value is expected
     assert calls == ["member", "failed", "prior"]

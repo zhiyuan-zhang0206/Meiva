@@ -199,7 +199,7 @@ def update_all_disk_images() -> PluginUpdateResult:
     Driven by the `meiva plugins update` CLI (`cli/commands/extensions/plugins.py`); the
     `meiva start` converge step runs the same path. There is no gateway endpoint
     for it. Each plugin goes through
-    `base.packages.plugins.config_registration.merge_disk_image_schema(name, Cls)`:
+    `base.packages.plugins.config_registration.merge_disk_image_schema(owner)`:
       - disk image missing -> write default
       - new field -> fill into disk image with cls default
       - removed field -> dropped from the disk image (so the image converges to
@@ -223,7 +223,12 @@ def _update_one_disk_image(name: str, plugin_dir: Path) -> PluginUpdateEntry:
         cls = declared_config_class(name, plugin_dir)
         if cls is None:
             return PluginUpdateEntry(name=name, status="skipped", detail="no default_config.py")
-        added, removed = merge_disk_image_schema(name, cls)
+        from base.packages.plugin_config_images import PluginConfigOwner
+        from base.packages.plugins.config_face import disk_image_path
+
+        added, removed = merge_disk_image_schema(
+            PluginConfigOwner(name, cls, disk_image_path(name))
+        )
     except Exception as e:
         return PluginUpdateEntry(name=name, status="error", detail=str(e))
 

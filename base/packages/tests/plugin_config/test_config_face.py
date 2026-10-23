@@ -13,7 +13,7 @@ from base.packages.plugins.config_registration import (
     resolve_overlay_targets,
     validate_config_overlay,
 )
-from base.packages.plugins.enable_config import write_local
+from base.packages.plugins.enable_config import discover_plugins, write_local
 from base.packages.plugins.plugin_errors import InvalidConfigOverlay
 
 _FACE = (
@@ -28,16 +28,13 @@ _FACE = (
 
 
 @pytest.fixture(autouse=True)
-def _isolate_paths(
-    model_catalog: ModelCatalog, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    repo = tmp_path / "repo_plugins"
-    user = tmp_path / "user_plugins"
-    repo.mkdir()
-    user.mkdir()
-    monkeypatch.setattr(paths, "repo_plugins_dir", lambda: repo)
-    monkeypatch.setattr(paths, "plugins_dir", lambda: user)
-    monkeypatch.setattr(paths, "meiva_home", lambda: tmp_path)
+def _isolate_paths(model_catalog: ModelCatalog, unit_home: Path) -> None:
+    paths.plugins_dir().mkdir(parents=True, exist_ok=True)
+
+
+def _write_enabled(raw: dict[str, dict[str, dict[str, bool]]]) -> None:
+    states = {name: {"enabled": False} for name in discover_plugins()}
+    write_local({"plugins": {**states, **raw["plugins"]}})
 
 
 def _plugin(name: str, face: str | None) -> Path:
@@ -77,7 +74,7 @@ def test_overlay_validation_recognizes_the_enabled_plugins_config(
     model_catalog: ModelCatalog,
 ) -> None:
     _plugin("probe", _FACE)
-    write_local({"plugins": {"probe": {"enabled": True}}})
+    _write_enabled({"plugins": {"probe": {"enabled": True}}})
 
     assert overlay_config_classes()["probe"].__name__ == "Config"
     assert resolve_overlay_targets({"marker": "x"}) == {"marker": ("probe", "marker")}
@@ -90,7 +87,7 @@ def test_overlay_validation_recognizes_the_enabled_plugins_config(
 
 def test_overlay_validation_ignores_a_disabled_plugin() -> None:
     _plugin("probe", _FACE)
-    write_local({"plugins": {"probe": {"enabled": False}}})
+    _write_enabled({"plugins": {"probe": {"enabled": False}}})
 
     assert "probe" not in overlay_config_classes()
     with pytest.raises(InvalidConfigOverlay, match="not in framework Settings"):
@@ -100,7 +97,7 @@ def test_overlay_validation_ignores_a_disabled_plugin() -> None:
 def test_a_broken_face_is_left_out_not_raised() -> None:
     _plugin("probe", _FACE)
     _plugin("broken", "raise RuntimeError('boom')\n")
-    write_local({"plugins": {"probe": {"enabled": True}, "broken": {"enabled": True}}})
+    _write_enabled({"plugins": {"probe": {"enabled": True}, "broken": {"enabled": True}}})
 
     assert sorted(overlay_config_classes()) == ["probe"]
 
@@ -131,8 +128,12 @@ def test_pure_admission_rejects_sensitive_and_unknown_core_dependencies(key: str
 
 
 @pytest.fixture
-def bootstrap_authority_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("MEIVA_HOME", str(tmp_path))
+def bootstrap_authority_home(unit_home: Path) -> dict[str, object]:
+    import json
+
+    baseline: dict[str, object] = json.loads(plugin_bootstrap_config())
+    assert "probe" not in baseline
+    return baseline
 
 
 def _cluster_face(*, sensitive: bool = False) -> str:
@@ -143,7 +144,7 @@ def _cluster_face(*, sensitive: bool = False) -> str:
 
 
 def test_bootstrap_packet_reads_fresh_authority_and_only_declared_cluster_fields(
-    bootstrap_authority_home: None,
+    bootstrap_authority_home: dict[str, object],
 ) -> None:
     import json
 
@@ -151,17 +152,26 @@ def test_bootstrap_packet_reads_fresh_authority_and_only_declared_cluster_fields
 
     _plugin("probe", _cluster_face())
     image = disk_image_path("probe")
-    assert json.loads(plugin_bootstrap_config()) == {"probe": {"marker": ".git"}}
+    assert json.loads(plugin_bootstrap_config()) == {
+        **bootstrap_authority_home,
+        "probe": {"marker": ".git"},
+    }
     assert not image.exists()
     image.parent.mkdir(parents=True)
     image.write_text('{"marker":"first","fixed":2}')
-    assert json.loads(plugin_bootstrap_config()) == {"probe": {"marker": "first"}}
+    assert json.loads(plugin_bootstrap_config()) == {
+        **bootstrap_authority_home,
+        "probe": {"marker": "first"},
+    }
     image.write_text('{"marker":"second","fixed":3}')
-    assert json.loads(plugin_bootstrap_config()) == {"probe": {"marker": "second"}}
+    assert json.loads(plugin_bootstrap_config()) == {
+        **bootstrap_authority_home,
+        "probe": {"marker": "second"},
+    }
 
 
 def test_bootstrap_packet_rejects_sensitive_cluster_declarations(
-    bootstrap_authority_home: None,
+    bootstrap_authority_home: dict[str, object],
 ) -> None:
     _plugin("probe", _cluster_face(sensitive=True))
     with pytest.raises(ValueError, match=r"probe\.marker may not carry secrets"):
@@ -170,7 +180,7 @@ def test_bootstrap_packet_rejects_sensitive_cluster_declarations(
 
 @pytest.mark.parametrize("content", ['{"marker":"only"}', '{"marker":1,"fixed":2}', "bad json"])
 def test_bootstrap_packet_preserves_authority_schema_admission(
-    bootstrap_authority_home: None, content: str
+    bootstrap_authority_home: dict[str, object], content: str
 ) -> None:
     from base.packages.plugins.config_registration import disk_image_path
     from base.packages.plugins.plugin_errors import InvalidConfigData, SchemaDriftError

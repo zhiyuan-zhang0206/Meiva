@@ -3,7 +3,9 @@ from contextlib import contextmanager
 
 import pytest
 
+from base.packages.plugin_config_images import DiskPluginConfigImages
 from base.packages.plugins.extensions import ExtensionRegistry
+from base.paths.home import resolve_meiva_home
 
 
 def fleet_registry() -> ExtensionRegistry:
@@ -22,7 +24,10 @@ def installed_fleet_surface() -> Generator[ExtensionRegistry]:
     )
     with pytest.MonkeyPatch.context() as environment:
         _deliver_cluster_config(environment, default_config.FleetConfig())
-        admitted = install.install(ExtensionRegistry((("meiva_fleet", contributions),)))
+        admitted = install.install(
+            ExtensionRegistry((("meiva_fleet", contributions),)),
+            config_images=DiskPluginConfigImages(resolve_meiva_home()),
+        )
         try:
             yield admitted
         finally:
@@ -47,7 +52,10 @@ def set_fleet_configuration(*, reduce_context_switch: bool) -> None:
         _deliver_cluster_config(
             environment, default_config.FleetConfig(reduce_context_switch=reduce_context_switch)
         )
-        install.install(ExtensionRegistry((("meiva_fleet", contributions),)))
+        install.install(
+            ExtensionRegistry((("meiva_fleet", contributions),)),
+            config_images=DiskPluginConfigImages(resolve_meiva_home()),
+        )
 
 
 def _deliver_cluster_config(environment: pytest.MonkeyPatch, config: object) -> None:

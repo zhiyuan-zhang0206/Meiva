@@ -9,45 +9,46 @@ from pathlib import Path
 
 import pytest
 
-from base import paths
 from base.packages.plugins.enable_config import (
     DanglingPlugin,
     DuplicatePlugin,
+    PluginEnableStore,
     PluginEntry,
     PluginsConfig,
     PluginsConfigError,
     SchemaInvalid,
-    discover_plugins,
-    load,
+    discover_plugin_dirs,
     parse_description,
-    write_local,
 )
 
 
 @pytest.fixture(autouse=True)
-def _isolate_paths(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
-    """All tests use a temporary directory for plugin scanning and meiva_home —
-    avoids polluting the real repo / user plugins or ~/.meiva."""
-    repo = tmp_path / "repo_plugins"
-    user = tmp_path / "user_plugins"
-    repo.mkdir()
-    user.mkdir()
-    monkeypatch.setattr(paths, "repo_plugins_dir", lambda: repo)
-    monkeypatch.setattr(paths, "plugins_dir", lambda: user)
-    monkeypatch.setattr(paths, "meiva_home", lambda: tmp_path)
-    monkeypatch.setenv("MEIVA_HOME", str(tmp_path))
+def plugin_roots(tmp_path: Path) -> None:
+    (tmp_path / "repo_plugins").mkdir()
+    (tmp_path / "user_plugins").mkdir()
 
 
-def _make_external_plugin(name: str) -> None:
+@pytest.fixture
+def store(tmp_path: Path) -> PluginEnableStore:
+    return PluginEnableStore(tmp_path / "plugins_config.json")
+
+
+def _discover(tmp_path: Path) -> dict[str, Path]:
+    return discover_plugin_dirs(
+        repo_dir=tmp_path / "repo_plugins", user_dir=tmp_path / "user_plugins"
+    )
+
+
+def _make_external_plugin(name: str, tmp_path: Path) -> None:
     """Create a plugin in the external plugin directory."""
-    user_root = paths.plugins_dir()
+    user_root = tmp_path / "user_plugins"
     plugin_dir = user_root / name
     plugin_dir.mkdir(parents=True, exist_ok=True)
     (plugin_dir / "plugin.py").write_text(f'__description__ = "{name} plugin"\n')
 
 
 def _make_plugin_dir(name: str, tmp_path: Path) -> Path:
-    root = paths.repo_plugins_dir()
+    root = tmp_path / "repo_plugins"
     plugin_dir = root / name
     plugin_dir.mkdir(parents=True, exist_ok=True)
     (plugin_dir / "plugin.py").write_text(f'__description__ = "{name} plugin"\n')
@@ -70,77 +71,75 @@ def test_plugins_config_defaults():
 # ── load ──
 
 
-def test_load_writes_default_when_no_local_file(tmp_path: Path):
+def test_load_writes_default_when_no_local_file(tmp_path: Path, store: PluginEnableStore):
     _make_plugin_dir("compact", tmp_path)
     _make_plugin_dir("syntax_fix", tmp_path)
 
-    cfg = load({"compact", "syntax_fix"})
+    cfg = store.load({"compact", "syntax_fix"})
     assert set(cfg.plugins) == {"compact", "syntax_fix"}
     assert all(e.enabled for e in cfg.plugins.values())
 
 
-def test_load_reads_local_file(tmp_path: Path):
+def test_load_reads_local_file(tmp_path: Path, store: PluginEnableStore):
     """End-to-end: load() honors the per-machine file via _read_raw."""
-    from base.packages.plugins.enable_config import local_config_path
 
     _make_plugin_dir("compact", tmp_path)
-    local_config_path().write_text(json.dumps({"plugins": {"compact": {"enabled": False}}}))
-    cfg = load({"compact"})
+    store.path.write_text(json.dumps({"plugins": {"compact": {"enabled": False}}}))
+    cfg = store.load({"compact"})
     assert cfg.plugins["compact"].enabled is False
 
 
-def test_load_reads_existing_config(tmp_path: Path):
+def test_load_reads_existing_config(tmp_path: Path, store: PluginEnableStore):
     _make_plugin_dir("compact", tmp_path)
-    write_local({"plugins": {"compact": {"enabled": False}}})
+    store.write({"plugins": {"compact": {"enabled": False}}})
 
-    cfg = load({"compact"})
+    cfg = store.load({"compact"})
     assert cfg.plugins["compact"].enabled is False
 
 
-def test_load_auto_merges_new_plugins(tmp_path: Path):
+def test_load_auto_merges_new_plugins(tmp_path: Path, store: PluginEnableStore):
     _make_plugin_dir("compact", tmp_path)
     _make_plugin_dir("syntax_fix", tmp_path)
-    write_local({"plugins": {"compact": {"enabled": False}}})
+    store.write({"plugins": {"compact": {"enabled": False}}})
 
-    cfg = load({"compact", "syntax_fix"})
+    cfg = store.load({"compact", "syntax_fix"})
     assert cfg.plugins["compact"].enabled is False
     assert cfg.plugins["syntax_fix"].enabled is True
 
 
-def test_load_auto_merge_new_plugins_deterministic_order(tmp_path: Path):
+def test_load_auto_merge_new_plugins_deterministic_order(tmp_path: Path, store: PluginEnableStore):
     """New in-memory entries preserve the sorted plugin-load invariant."""
     for name in ("zeta", "alpha", "mid"):
         _make_plugin_dir(name, tmp_path)
-    write_local({"plugins": {"alpha": {"enabled": False}}})
+    store.write({"plugins": {"alpha": {"enabled": False}}})
 
-    cfg = load({"zeta", "alpha", "mid"})
+    cfg = store.load({"zeta", "alpha", "mid"})
 
     assert list(cfg.plugins) == ["alpha", "mid", "zeta"]
 
 
-def test_load_raises_on_dangling(tmp_path: Path):
+def test_load_raises_on_dangling(tmp_path: Path, store: PluginEnableStore):
     _make_plugin_dir("compact", tmp_path)
-    write_local({"plugins": {"ghost": {"enabled": True}}})
+    store.write({"plugins": {"ghost": {"enabled": True}}})
 
     with pytest.raises(DanglingPlugin, match="ghost"):
-        load({"compact"})
+        store.load({"compact"})
 
 
 # ── set_local_enabled ──
 
 
-def test_set_local_enabled_writes_sorted_order(tmp_path: Path):
+def test_set_local_enabled_writes_sorted_order(tmp_path: Path, store: PluginEnableStore):
     """The written plugins.json key order is sorted, not set-hash-dependent —
     the on-disk iteration order drives hook registration order, so it must be
     deterministic. Created out of alphabetical order on purpose."""
-    from base.packages.plugins.enable_config import local_config_path, set_local_enabled
 
     for name in ("zeta", "alpha", "mid"):
         _make_plugin_dir(name, tmp_path)
 
-    set_local_enabled("mid", enabled=False)
+    store.set_enabled("mid", enabled=False, known=set(_discover(tmp_path)))
 
-    written = json.loads(local_config_path().read_text())
+    written = json.loads(store.path.read_text())
     assert list(written["plugins"].keys()) == ["alpha", "mid", "zeta"]
     assert written["plugins"]["mid"]["enabled"] is False
     assert written["plugins"]["alpha"]["enabled"] is True
@@ -172,15 +171,15 @@ def test_parse_description_empty_when_nothing(tmp_path: Path):
 
 def test_discover_finds_repo_plugins(tmp_path: Path):
     _make_plugin_dir("myplugin", tmp_path)
-    discovered = discover_plugins()
+    discovered = _discover(tmp_path)
     assert "myplugin" in discovered
 
 
 def test_discover_duplicate_raises(tmp_path: Path):
     _make_plugin_dir("dup", tmp_path)
-    _make_external_plugin("dup")
+    _make_external_plugin("dup", tmp_path)
     with pytest.raises(DuplicatePlugin, match="dup"):
-        discover_plugins()
+        _discover(tmp_path)
 
 
 # ── error hierarchy ──
@@ -201,74 +200,65 @@ def test_duplicate_is_config_error():
 # ── per-machine local enable/disable ──
 
 
-def test_set_local_enabled_writes_local_file(tmp_path: Path):
+def test_set_local_enabled_writes_local_file(tmp_path: Path, store: PluginEnableStore):
     """Toggling writes the per-machine local file; the flag flips."""
-    from base.packages.plugins.enable_config import (
-        local_config_path,
-        set_local_enabled,
-    )
 
     _make_plugin_dir("compact", tmp_path)
-    write_local({"plugins": {"compact": {"enabled": True}}})
+    store.write({"plugins": {"compact": {"enabled": True}}})
 
-    cfg = set_local_enabled("compact", enabled=False)
+    cfg = store.set_enabled("compact", enabled=False, known=set(_discover(tmp_path)))
     assert cfg.plugins["compact"].enabled is False
 
-    on_disk = json.loads(local_config_path().read_text())
+    on_disk = json.loads(store.path.read_text())
     assert on_disk["plugins"]["compact"]["enabled"] is False
 
 
-def test_set_local_enabled_scopes_to_local_plugins(tmp_path: Path):
+def test_set_local_enabled_scopes_to_local_plugins(tmp_path: Path, store: PluginEnableStore):
     """The written local file references only plugins present on THIS machine,
     so a later load() never raises DanglingPlugin."""
-    from base.packages.plugins.enable_config import set_local_enabled
 
     _make_plugin_dir("compact", tmp_path)
     # A stale local file references a plugin that is NOT on this machine.
-    write_local({"plugins": {"compact": {"enabled": True}, "ghost": {"enabled": True}}})
+    store.write({"plugins": {"compact": {"enabled": True}, "ghost": {"enabled": True}}})
 
-    set_local_enabled("compact", enabled=False)
-    cfg = load({"compact"})  # would raise DanglingPlugin if 'ghost' survived
+    store.set_enabled("compact", enabled=False, known=set(_discover(tmp_path)))
+    cfg = store.load({"compact"})  # would raise DanglingPlugin if 'ghost' survived
     assert "ghost" not in cfg.plugins
     assert cfg.plugins["compact"].enabled is False
 
 
-def test_set_local_enabled_rejects_unknown(tmp_path: Path):
+def test_set_local_enabled_rejects_unknown(tmp_path: Path, store: PluginEnableStore):
     """A name not present on this machine is refused (no file written)."""
-    from base.packages.plugins.enable_config import DanglingPlugin, set_local_enabled
 
     with pytest.raises(DanglingPlugin):
-        set_local_enabled("nonexistent", enabled=True)
+        store.set_enabled("nonexistent", enabled=True, known=set(_discover(tmp_path)))
 
 
 # ── corrupt-file philosophy (audit #9) ──
 
 
-def test_load_raises_on_malformed_json(tmp_path: Path):
+def test_load_raises_on_malformed_json(tmp_path: Path, store: PluginEnableStore):
     """A corrupt local file fails fast instead of silently degrading to the
     all-enabled default — the same rule install_registry applies to
     installed.json (audit #9)."""
-    from base.packages.plugins.enable_config import local_config_path
 
     _make_plugin_dir("compact", tmp_path)
-    local_config_path().write_text("{ not json")
+    store.path.write_text("{ not json")
     with pytest.raises(json.JSONDecodeError):
-        load({"compact"})
+        store.load({"compact"})
 
 
-def test_load_raises_on_non_object_json(tmp_path: Path):
-    from base.packages.plugins.enable_config import local_config_path
+def test_load_raises_on_non_object_json(tmp_path: Path, store: PluginEnableStore):
 
     _make_plugin_dir("compact", tmp_path)
-    local_config_path().write_text("[1, 2]")
+    store.path.write_text("[1, 2]")
     with pytest.raises(PluginsConfigError):
-        load({"compact"})
+        store.load({"compact"})
 
 
-def test_load_empty_file_is_default_all_enabled(tmp_path: Path):
-    from base.packages.plugins.enable_config import local_config_path
+def test_load_empty_file_is_default_all_enabled(tmp_path: Path, store: PluginEnableStore):
 
     _make_plugin_dir("compact", tmp_path)
-    local_config_path().write_text("   \n")
-    cfg = load({"compact"})
+    store.path.write_text("   \n")
+    cfg = store.load({"compact"})
     assert cfg.plugins["compact"].enabled is True

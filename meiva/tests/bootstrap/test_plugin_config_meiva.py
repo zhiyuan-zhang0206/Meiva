@@ -3,6 +3,8 @@
 import pytest
 from pydantic import BaseModel, ConfigDict, Field
 
+from base.packages.plugin_config_images import PluginConfigOwner
+from base.packages.plugins.config_face import disk_image_path
 from base.packages.plugins.config_registration import (
     bind_plugin_config,
 )
@@ -41,7 +43,10 @@ def test_meiva_settings_plugins_attribute_access(
     isolated_registry: dict[str, BaseModel], unit_home
 ):
     """`meiva.sdk_surface.settings.plugins.<n>` returns instance; unregistered plugin name raise + lists known plugins."""
-    bind_plugin_config("test_plugin", _FixtureConfig, isolated_registry)
+    bind_plugin_config(
+        PluginConfigOwner("test_plugin", _FixtureConfig, disk_image_path("test_plugin")),
+        isolated_registry,
+    )
 
     import meiva.sdk_surface.settings as _meiva_settings
 

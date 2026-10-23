@@ -11,11 +11,13 @@ from base.config.tests.config_authority import config_authority as config_author
 from base.config.tests.configuration import defaults
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
+from base.packages.plugin_config_images import DiskPluginConfigImages
 from base.packages.plugins.extensions import ExtensionRegistry
 from base.packages.tests.model_catalog import add_bindings as add_bindings
 from base.packages.tests.model_catalog import add_models as add_models
 from base.packages.tests.model_catalog import model_catalog as model_catalog
 from base.packages.tests.model_catalog import set_prices as set_prices
+from base.paths.home import resolve_meiva_home
 from meiva.sdk_surface import install
 from meiva.sdk_surface.installation import installed
 
@@ -31,6 +33,7 @@ def _no_plugin_expansions() -> Iterator[None]:
             prior.registry,
             catalog=prior.catalog,
             authority=prior.authority,
+            config_images=DiskPluginConfigImages(resolve_meiva_home()),
         )
 
 
@@ -53,6 +56,7 @@ def test_p95_contracts_leave_rare_namespaces_on_demand(
         ExtensionRegistry((("meiva_fleet", fleet.contribute()),)),
         catalog=model_catalog,
         authority=config_authority,
+        config_images=DiskPluginConfigImages(resolve_meiva_home()),
     )
 
     text = sdk_expand_section(

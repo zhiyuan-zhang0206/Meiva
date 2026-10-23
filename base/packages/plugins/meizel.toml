@@ -26,11 +26,10 @@ exports = ["activation.py", "config_face.py", "config_registration.py", "config_
 
 [debt.impure-call]
 "config_registration.py#Path.exists" = 2
-"config_registration.py#Path.read_text" = 2
 
 [debt.impure-edge]
 "config_registration.py#base/config/__init__.py" = 2
 "config_registration.py#base/config/service_read.py" = 1
-"config_registration.py#base/packages/plugin_config_images.py" = 2
+"config_registration.py#base/packages/plugin_config_images.py" = 1
 "config_registration.py#base/packages/plugins/config_face.py" = 1
 "config_registration.py#base/packages/plugins/config_view.py" = 1

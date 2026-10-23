@@ -14,9 +14,8 @@ from base.deploy.lifecycle import status_journal as journal
 
 
 @pytest.fixture
-def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    monkeypatch.setenv("MEIVA_HOME", str(tmp_path))
-    return tmp_path
+def home(unit_home: Path) -> Path:
+    return unit_home
 
 
 def test_begin_phase_finish_round_trip(home: Path) -> None:
@@ -117,7 +116,7 @@ def test_phase_without_begin_still_journals(home: Path) -> None:
 
 
 def _reaped_pid() -> int:
-    child = subprocess.Popen([sys.executable, "-c", "pass"])
+    child = subprocess.Popen([sys.executable, "-m", "base.deploy.lifecycle.tests.reaped_child"])
     assert child.wait(timeout=30) == 0
     return child.pid
 
@@ -149,7 +148,7 @@ def test_writer_alive_tracks_pid_state(home: Path) -> None:
     assert journal.writer_alive(_op_with_pid(os.getpid())) is True
     assert journal.writer_alive(_op_with_pid(_reaped_pid())) is False
 
-    zombie = subprocess.Popen([sys.executable, "-c", "pass"])
+    zombie = subprocess.Popen([sys.executable, "-m", "base.deploy.lifecycle.tests.reaped_child"])
     try:
         deadline = time.monotonic() + 30
         while time.monotonic() < deadline:
@@ -164,12 +163,10 @@ def test_writer_alive_tracks_pid_state(home: Path) -> None:
 
 def test_journal_write_failure_never_breaks_the_operation(
     home: Path,
-    monkeypatch: pytest.MonkeyPatch,
     loguru_records: list[dict[str, object]],
 ) -> None:
-    blocked = home / "blocked"
-    blocked.write_text("not a directory")
-    monkeypatch.setattr(journal, "journal_path", lambda: blocked / "lifecycle-op.json")
+    blocked = journal.journal_path()
+    blocked.mkdir(parents=True)
 
     journal.begin("stop")
     with journal.phase("drain"):
