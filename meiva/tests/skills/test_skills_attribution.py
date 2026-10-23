@@ -44,9 +44,12 @@ def test_all_for_meiva_is_the_live_top_level_index(fake_skills_dir: Path) -> Non
 def test_help_on_skills_module_is_index_only(
     fake_skills_dir: Path,
     capsys: pytest.CaptureFixture[str],
-    sdk_model_owner: Installation,
+    model_installation: Installation,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     import meiva
+
+    monkeypatch.setattr(meiva, "__plugin_installation__", model_installation, raising=False)
 
     write_skill(
         fake_skills_dir,
@@ -63,9 +66,11 @@ def test_help_on_skills_module_is_index_only(
 def test_resolution_is_not_consumption(
     fake_skills_dir: Path,
     monkeypatch: pytest.MonkeyPatch,
-    sdk_model_owner: Installation,
+    model_installation: Installation,
 ) -> None:
     import meiva
+
+    monkeypatch.setattr(meiva, "__plugin_installation__", model_installation, raising=False)
 
     write_skill(fake_skills_dir, "alpha", "name: alpha\ndescription: a", body="# A\n")
     d = fake_skills_dir / "grp"
@@ -108,9 +113,11 @@ def test_resolution_is_not_consumption(
 def test_index_render_records_no_loaded_attribution(
     fake_skills_dir: Path,
     monkeypatch: pytest.MonkeyPatch,
-    sdk_model_owner: Installation,
+    model_installation: Installation,
 ) -> None:
     import meiva
+
+    monkeypatch.setattr(meiva, "__plugin_installation__", model_installation, raising=False)
 
     write_skill(fake_skills_dir, "alpha", "name: alpha\ndescription: a", body="# A\n")
     d = fake_skills_dir / "grp"
@@ -172,9 +179,11 @@ def test_files_read_skill_md_records_consumption(
 def test_files_read_other_files_do_not_record(
     fake_skills_dir: Path,
     monkeypatch: pytest.MonkeyPatch,
-    sdk_model_owner: Installation,
+    model_installation: Installation,
 ) -> None:
     import meiva
+
+    monkeypatch.setattr(meiva, "__plugin_installation__", model_installation, raising=False)
 
     write_skill(fake_skills_dir, "alpha", "name: alpha\ndescription: a", body="# A\n")
     skill_dir = fake_skills_dir / "alpha"
@@ -204,9 +213,11 @@ def test_files_read_other_files_do_not_record(
 def test_every_consumption_records_one_event_and_nothing_is_remembered(
     fake_skills_dir: Path,
     monkeypatch: pytest.MonkeyPatch,
-    sdk_model_owner: Installation,
+    model_installation: Installation,
 ) -> None:
     import meiva
+
+    monkeypatch.setattr(meiva, "__plugin_installation__", model_installation, raising=False)
 
     write_skill(fake_skills_dir, "alpha", "name: alpha\ndescription: a", body="# A\n")
     monkeypatch.setattr(agent_identity, "require_agent_id", _one_agent)

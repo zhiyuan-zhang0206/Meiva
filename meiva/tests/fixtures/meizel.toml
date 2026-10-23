@@ -3,3 +3,6 @@ exports = ["meiva_tests.py", "model_owner.py", "pin_agent.py", "sdk.py", "worksp
 [uses]
 "meiva_tests.py" = ["pin_agent.py"]
 "workspace.py" = ["pin_agent.py"]
+
+[debt.first-party-patch]
+"model_owner.py#monkeypatch.setattr meiva.__plugin_installation__" = 1

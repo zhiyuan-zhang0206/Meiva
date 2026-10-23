@@ -43,6 +43,7 @@
 "test_metering.py#monkeypatch.setattr base.agents.sdk.call_policy.policy" = 4
 "test_metering.py#monkeypatch.setattr base.agents.sdk.telemetry.emit" = 1
 "test_metering.py#monkeypatch.setattr base.agents.sdk.telemetry.time.monotonic" = 1
+"test_metering.py#monkeypatch.setattr meiva.__plugin_installation__" = 1
 "test_metering.py#monkeypatch.setattr meiva.mcps.__dir__" = 1
 "test_metering.py#monkeypatch.setattr meiva.sdk_surface.metering.instrument_targets" = 2
 "test_metering.py#monkeypatch.setattr meiva.skills.__dir__" = 1
