@@ -20,7 +20,7 @@ from services.agent_runner.agent_ops import daemon
 
 def test_dispatch_requires_daemon_pool() -> None:
     with pytest.raises(TypeError, match="pool"):
-        inspect.signature(daemon._dispatch).bind("status_probe", {}, active_ops={}, workers=set())
+        inspect.signature(daemon.dispatch).bind("status_probe", {}, active_ops={}, workers=set())
 
 
 def test_dispatch_idempotent_requires_daemon_pool() -> None:
@@ -63,7 +63,7 @@ async def test_dispatch_status_probe_passes_the_daemon_pool(
 
     monkeypatch.setattr(cluster_ops, "cluster_status_op", _status)
 
-    status, result = await daemon._dispatch(
+    status, result = await daemon.dispatch(
         "status_probe",
         {},
         active_ops={},
@@ -85,7 +85,7 @@ async def test_dispatch_status_probe_passes_the_daemon_pool(
 
 def test_dispatch_requires_invocation_executor() -> None:
     with pytest.raises(TypeError, match="executor"):
-        inspect.signature(daemon._dispatch).bind(
+        inspect.signature(daemon.dispatch).bind(
             "status_probe", {}, active_ops={}, workers=set(), pool=ConnectionPool(open=False)
         )
 
@@ -111,4 +111,4 @@ def test_dispatch_requires_its_database_factory_and_image(
     }
     resources.pop(missing)
     with pytest.raises(TypeError, match=missing):
-        inspect.signature(daemon._dispatch).bind("status_probe", {}, **resources)
+        inspect.signature(daemon.dispatch).bind("status_probe", {}, **resources)

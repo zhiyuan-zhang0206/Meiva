@@ -52,7 +52,7 @@ async def test_reconcile_dispatch_uses_its_own_repeatable_handler(
 
     monkeypatch.setattr(launch_reconcile, "reconcile_launch_op", reconcile)
     monkeypatch.setattr(daemon.lifecycle, "launch_agent_op", forbidden)
-    status, result = await daemon._dispatch(
+    status, result = await daemon.dispatch(
         "launch-reconcile",
         {"launch_attempt_id": str(attempt)},
         active_ops={},

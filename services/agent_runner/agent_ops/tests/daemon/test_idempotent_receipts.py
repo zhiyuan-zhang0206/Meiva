@@ -133,8 +133,6 @@ async def test_idempotent_dispatch_same_key_waits_for_slow_running_owner(
     *,
     machine_identity: MachineIdentity,
 ) -> None:
-    monkeypatch.setattr(daemon, "DEDUP_WAIT_STEP_S", 0.01)
-    monkeypatch.setattr(daemon, "DEDUP_WAIT_ATTEMPTS", 60)
     calls: dict[str, int] = {}
     started = asyncio.Event()
 
@@ -159,7 +157,6 @@ async def test_idempotent_dispatch_same_key_waits_for_slow_running_owner(
         await asyncio.sleep(0.3)
         return "completed", {"action": "resume", "agent_id": 777}
 
-    monkeypatch.setattr(daemon, "_dispatch", _slow_dispatch)
     owner = asyncio.create_task(
         daemon.dispatch_idempotent(
             "lifecycle",
@@ -175,6 +172,9 @@ async def test_idempotent_dispatch_same_key_waits_for_slow_running_owner(
             image=ops_image,
             local_machine=machine_identity,
             host=fake_host(),
+            dispatch_op=_slow_dispatch,
+            dedup_wait_step_s=0.01,
+            dedup_wait_attempts=60,
         )
     )
     await started.wait()
@@ -192,6 +192,9 @@ async def test_idempotent_dispatch_same_key_waits_for_slow_running_owner(
         image=ops_image,
         local_machine=machine_identity,
         host=fake_host(),
+        dispatch_op=_slow_dispatch,
+        dedup_wait_step_s=0.01,
+        dedup_wait_attempts=60,
     )
     first = await owner
 
@@ -211,8 +214,6 @@ async def test_idempotent_dispatch_waiter_fails_after_bounded_wait(
     *,
     machine_identity: MachineIdentity,
 ) -> None:
-    monkeypatch.setattr(daemon, "DEDUP_WAIT_STEP_S", 0.01)
-    monkeypatch.setattr(daemon, "DEDUP_WAIT_ATTEMPTS", 2)
     calls: dict[str, int] = {}
     started = asyncio.Event()
 
@@ -237,7 +238,6 @@ async def test_idempotent_dispatch_waiter_fails_after_bounded_wait(
         await asyncio.sleep(0.3)
         return "completed", {"action": "resume", "agent_id": 777}
 
-    monkeypatch.setattr(daemon, "_dispatch", _slow_dispatch)
     owner = asyncio.create_task(
         daemon.dispatch_idempotent(
             "lifecycle",
@@ -253,6 +253,9 @@ async def test_idempotent_dispatch_waiter_fails_after_bounded_wait(
             image=ops_image,
             local_machine=machine_identity,
             host=fake_host(),
+            dispatch_op=_slow_dispatch,
+            dedup_wait_step_s=0.01,
+            dedup_wait_attempts=2,
         )
     )
     await started.wait()
@@ -270,6 +273,9 @@ async def test_idempotent_dispatch_waiter_fails_after_bounded_wait(
         image=ops_image,
         local_machine=machine_identity,
         host=fake_host(),
+        dispatch_op=_slow_dispatch,
+        dedup_wait_step_s=0.01,
+        dedup_wait_attempts=2,
     )
     await owner
 

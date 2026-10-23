@@ -107,7 +107,7 @@ async def test_dispatch_spawn_launch_calls_launch_agent_op(
         return SpawnedAgent(id=777)
 
     monkeypatch.setattr(daemon.lifecycle, "launch_agent_op", _fake_launch)
-    status, result = await daemon._dispatch(
+    status, result = await daemon.dispatch(
         "spawn-launch",
         {"launch_attempt_id": "00000000-0000-0000-0000-000000000001", "agent_id": 777},
         active_ops={},
@@ -148,7 +148,7 @@ async def test_dispatch_shell_probe_calls_shell_probe_op(
         return ShellProbeResult(shells=[ShellInfo(id=5, name="build", uptime_seconds=42)])
 
     monkeypatch.setattr(cluster_ops, "shell_probe_op", _fake_probe)
-    status, result = await daemon._dispatch(
+    status, result = await daemon.dispatch(
         "shell_probe",
         {"agent_id": 42},
         active_ops={},
@@ -199,7 +199,7 @@ async def test_dispatch_shell_probe_bad_payload_fails(
         "shell_probe_op",
         forbidden,
     )
-    status, result = await daemon._dispatch(
+    status, result = await daemon.dispatch(
         "shell_probe",
         {},
         active_ops={},
@@ -239,7 +239,7 @@ async def test_dispatch_shell_kill_calls_shell_kill_op(
         return ShellKillResult(mode=ShellKillMode.KILLED)
 
     monkeypatch.setattr(cluster_ops, "shell_kill_op", _fake_kill)
-    status, result = await daemon._dispatch(
+    status, result = await daemon.dispatch(
         "shell_kill",
         {"agent_id": 42, "session_id": 5},
         active_ops={},
@@ -282,7 +282,7 @@ async def test_dispatch_shell_kill_reports_absent(
         "shell_kill_op",
         absent,
     )
-    status, result = await daemon._dispatch(
+    status, result = await daemon.dispatch(
         "shell_kill",
         {"agent_id": 42, "session_id": 999},
         active_ops={},
@@ -326,7 +326,7 @@ async def test_dispatch_agent_skill_view_calls_machine_op(
         )
 
     monkeypatch.setattr(cluster_ops, "agent_skill_view_op", _fake_view)
-    status, result = await daemon._dispatch(
+    status, result = await daemon.dispatch(
         "agent_skill_view",
         {"agent_id": 42},
         active_ops={},
@@ -370,7 +370,7 @@ async def test_dispatch_agent_skill_view_bad_payload_fails(
         "agent_skill_view_op",
         forbidden,
     )
-    status, result = await daemon._dispatch(
+    status, result = await daemon.dispatch(
         "agent_skill_view",
         {},
         active_ops={},
@@ -412,7 +412,7 @@ async def test_dispatch_shell_capture_calls_shell_capture_op(
         return ShellCaptureResult(session_name="meiva-agent-42-shell-3-build", lines=["a", "b"])
 
     monkeypatch.setattr(cluster_ops, "shell_capture_op", _fake_capture)
-    status, result = await daemon._dispatch(
+    status, result = await daemon.dispatch(
         "shell_capture",
         {"agent_id": 42, "session_id": 3, "lines": 500},
         active_ops={},
@@ -458,7 +458,7 @@ async def test_dispatch_shell_capture_defaults_lines(
         return ShellCaptureResult(session_name="n", lines=[])
 
     monkeypatch.setattr(cluster_ops, "shell_capture_op", _fake_capture)
-    status, _ = await daemon._dispatch(
+    status, _ = await daemon.dispatch(
         "shell_capture",
         {"agent_id": 1, "session_id": 2},
         active_ops={},
@@ -489,7 +489,7 @@ async def test_dispatch_unknown_kind(
 ) -> None:
     """Unknown kind returns failed; routing table is exhaustive."""
     dispatch_pool: ConnectionPool = stub_pool()
-    status, result = await daemon._dispatch(
+    status, result = await daemon.dispatch(
         "bogus_kind",
         {},
         active_ops={},
@@ -528,7 +528,7 @@ async def test_dispatch_shell_capture_shell_not_found_fails(
         raise ShellNotFoundError(f"agent {agent_id} has no live shell {session_id} on this host")
 
     monkeypatch.setattr(cluster_ops, "shell_capture_op", _raises)
-    status, result = await daemon._dispatch(
+    status, result = await daemon.dispatch(
         "shell_capture",
         {"agent_id": 42, "session_id": 9},
         active_ops={},

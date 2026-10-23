@@ -143,11 +143,10 @@ def test_entry_shares_image_gate_factory_and_closes_writer(  # noqa: PLR0915 -- 
     monkeypatch.setattr(daemon, "install_graceful_shutdown", install_shutdown)
     monkeypatch.setattr(daemon.asyncio, "Runner", lambda: runner)
     monkeypatch.setattr(daemon, "serve_ops_daemon", run)
-    monkeypatch.setattr(daemon, "_hard_exit", hard_exit)
     previous_sigterm = signal.getsignal(signal.SIGTERM)
     try:
         with pytest.raises(_ExitError) as exited:
-            daemon.main(argv=[])
+            daemon.main(argv=[], exit_process=hard_exit)
         assert exited.value.code == (1 if isinstance(failure, Exception) else 0)
         assert captures == [image]
         assert events == (

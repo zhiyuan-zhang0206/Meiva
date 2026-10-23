@@ -37,7 +37,7 @@ def _wedged_arm(home: pathlib.Path, ready: pathlib.Path) -> None:
     while not ready.exists():
         time.sleep(0.01)
     boot.shutdown_op_pool(pool)
-    daemon._hard_exit(0)
+    daemon.hard_exit(0)
 
 
 if __name__ == "__main__":
@@ -46,6 +46,6 @@ if __name__ == "__main__":
     elif sys.argv[1] == "wedged_arm":
         _wedged_arm(pathlib.Path(sys.argv[2]), pathlib.Path(sys.argv[3]))
     elif sys.argv[1] == "hard_exit":
-        daemon._hard_exit(int(sys.argv[2]))
+        daemon.hard_exit(int(sys.argv[2]))
     else:
         raise SystemExit(f"unknown scenario {sys.argv[1]!r}")
