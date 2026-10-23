@@ -38,8 +38,8 @@ def pool(*, database_gate: ProcessDbGate) -> Generator[ConnectionPool]:
 
 @pytest.fixture
 def backend(serving_root: start_serving.RootBirth, unit_home: Path) -> Backend:
-    generation = start_serving.begin_start()
-    assert start_serving.mark_serving(generation, runtime=serving_root.runtime)
+    generation = start_serving.begin_start(unit_home)
+    assert start_serving.mark_serving(unit_home, generation, runtime=serving_root.runtime)
     return Backend()
 
 
