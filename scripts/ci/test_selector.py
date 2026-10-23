@@ -81,6 +81,7 @@ _TREE_SCAN_ONLY_PREFIXES = (
     ".trunk/",
     "demos/",
     "tests/e2e/",  # CI runs the whole e2e package for every diff that is not docs-only
+    "typings/",
 )
 # Hidden tool directories that tests read by path rather than import. A change
 # there also selects every collectable test whose source text names the directory

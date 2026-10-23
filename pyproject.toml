@@ -147,7 +147,7 @@ package = true
 dev = [
     "radon==6.0.1",
     "pre-commit>=4.5.1",
-    "pyright>=1.1.411",
+    "basedpyright>=1.40.2",
     "pytest>=9.0.3",
     "pytest-asyncio>=1.0",
     "pytest-playwright>=0.7.0",
@@ -549,6 +549,7 @@ pythonVersion = "3.12"
 # report every third-party import as unresolved.
 venvPath = "."
 venv = ".venv"
+stubPath = "typings"
 include = [
     # meizel:roles BEGIN names application tooling tests
     "agent",
@@ -602,6 +603,13 @@ reportMissingTypeArgument = "warning"
 # flags every such guard as "unnecessary" — all 18 current findings are false positives of exactly
 # this kind, so the rule is off rather than left as ignored warnings.
 reportUnnecessaryIsInstance = "none"
+# basedpyright-specific rules kept non-blocking during initial migration:
+reportAny = "none"
+reportExplicitAny = "none"
+reportUnsafeMultipleInheritance = "none"
+reportUnusedCallResult = "none"
+reportUnreachable = "none"
+reportIgnoreCommentWithoutRule = "none"
 
 # A package's own tests (`<pkg>/**/tests/`) are held to the tests rung below wherever they sit:
 # reportUnknownMemberType and reportUnknownArgumentType at "error", the other five at "warning".

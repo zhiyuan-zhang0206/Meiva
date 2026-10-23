@@ -16,7 +16,7 @@ skip() {
 command -v python3 >/dev/null || skip "python3 is not installed (load/lock probe unavailable)"
 case "$tool" in
     pyright)
-        [[ -x .venv/bin/pyright ]] || skip "missing .venv/bin/pyright; run env -u VIRTUAL_ENV uv sync"
+        [[ -x .venv/bin/basedpyright ]] || skip "missing .venv/bin/basedpyright; run env -u VIRTUAL_ENV uv sync"
         ;;
     tsc|eslint|vitest)
         [[ -d ui/web/node_modules ]] || skip "missing ui/web/node_modules; run (cd ui/web && npm ci)"

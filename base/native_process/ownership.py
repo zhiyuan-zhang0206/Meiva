@@ -153,7 +153,7 @@ class OwnedProcess:
             process = psutil.Process(self.pid)
             if not self.same_birth(OwnedProcess.capture(process)):
                 raise RuntimeError(f"native identity changed before signal: {self.pid}")
-            if sys.platform == "linux":
+            if descriptor is not None:
                 pidfd.send_signal(descriptor, signum)
             else:
                 process.send_signal(signum)

@@ -38,7 +38,7 @@ sys.path.insert(0, str(_REPO_ROOT))
 from meizel import lint_common  # noqa: E402 - standalone script
 
 _PYPROJECT_PATH = _REPO_ROOT / "pyproject.toml"
-_PYRIGHT_PATH = _REPO_ROOT / ".venv/bin/pyright"
+_PYRIGHT_PATH = _REPO_ROOT / ".venv/bin/basedpyright"
 
 _FAMILY_RULES = frozenset(
     {
@@ -58,6 +58,7 @@ _FAMILY_RULES = frozenset(
 _ALL_PYRIGHT_RULES = frozenset(
     {
         "reportAbstractUsage",
+        "reportAny",
         "reportArgumentType",
         "reportAssertAlwaysTrue",
         "reportAssertTypeFailure",
@@ -68,17 +69,25 @@ _ALL_PYRIGHT_RULES = frozenset(
         "reportConstantRedefinition",
         "reportDeprecated",
         "reportDuplicateImport",
+        "reportEmptyAbstractUsage",
+        "reportExplicitAny",
         "reportFunctionMemberAccess",
         "reportGeneralTypeIssues",
+        "reportIgnoreCommentWithoutRule",
+        "reportImplicitAbstractClass",
         "reportImplicitOverride",
+        "reportImplicitRelativeImport",
         "reportImplicitStringConcatenation",
         "reportImportCycles",
         "reportIncompatibleMethodOverride",
+        "reportIncompatibleUnannotatedOverride",
         "reportIncompatibleVariableOverride",
         "reportIncompleteStub",
         "reportInconsistentConstructor",
         "reportInconsistentOverload",
         "reportIndexIssue",
+        "reportInvalidAbstractMethod",
+        "reportInvalidCast",
         "reportInvalidStringEscapeSequence",
         "reportInvalidStubStatement",
         "reportInvalidTypeArguments",
@@ -102,13 +111,16 @@ _ALL_PYRIGHT_RULES = frozenset(
         "reportOverlappingOverload",
         "reportPossiblyUnboundVariable",
         "reportPrivateImportUsage",
+        "reportPrivateLocalImportUsage",
         "reportPrivateUsage",
         "reportPropertyTypeMismatch",
         "reportRedeclaration",
         "reportReturnType",
+        "reportSelfClsDefault",
         "reportSelfClsParameterName",
         "reportTypeCommentUsage",
         "reportTypedDictNotRequiredAccess",
+        "reportUnannotatedClassAttribute",
         "reportUnboundVariable",
         "reportUndefinedVariable",
         "reportUnhashable",
@@ -124,6 +136,7 @@ _ALL_PYRIGHT_RULES = frozenset(
         "reportUnnecessaryIsInstance",
         "reportUnnecessaryTypeIgnoreComment",
         "reportUnreachable",
+        "reportUnsafeMultipleInheritance",
         "reportUnsupportedDunderAll",
         "reportUntypedBaseClass",
         "reportUntypedClassDecorator",

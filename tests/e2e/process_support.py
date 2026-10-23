@@ -367,8 +367,8 @@ def _split_cmdline_env(rest: str) -> tuple[str, str]:
 def _ps_rows_with_env() -> list[tuple[int, str, str]]:
     """(pid, cmdline, env) for every process — `ps eww ax` on macOS (env
     inline), /proc on Linux."""
+    rows: list[tuple[int, str, str]] = []
     if sys.platform != "darwin":
-        rows: list[tuple[int, str, str]] = []
         for entry in Path("/proc").iterdir():
             if not entry.name.isdigit():
                 continue
@@ -396,7 +396,6 @@ def _ps_rows_with_env() -> list[tuple[int, str, str]]:
         ).stdout
     except (OSError, subprocess.TimeoutExpired):
         return []
-    rows: list[tuple[int, str, str]] = []
     for line in out.splitlines():
         observation = ProcessObservation.from_ps_row(line)
         if observation is not None:

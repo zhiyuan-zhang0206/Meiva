@@ -617,7 +617,7 @@ def test_prepush_migration_keeps_direct_ci_owners(tmp_path: Path) -> None:
     backend = WORKFLOW["jobs"]["backend-static"]["steps"]
     frontend = WORKFLOW["jobs"]["frontend"]["steps"]
     command = next(step["run"] for step in backend if step.get("name") == "Run pyright")
-    assert command == "time uv run pyright --threads 2"
+    assert command == "time uv run basedpyright --threads 2"
     uv = tmp_path / "uv"
     uv.write_text("#!/bin/sh\nexit 19\n")
     uv.chmod(0o755)
