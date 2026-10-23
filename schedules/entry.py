@@ -5,6 +5,7 @@
 from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.agents.context import MeivaContext
@@ -34,6 +35,24 @@ class ScheduleEntryHooks:
     process_name_fn: Callable[[], str] = field(default_factory=lambda: process_name)
     database_cls: Callable[..., Database] = field(default_factory=lambda: Database)
     pipeline_builder: Callable[..., Any] = field(default_factory=lambda: build_pipeline)
+    commit_counter: Callable[[Path, str], int] | None = None
+
+
+def _version_reader(
+    image: LoadedCommit, counter: Callable[[Path, str], int] | None
+) -> Callable[[], int]:
+    if counter is None:
+        return CodeVersion(image).get
+    cached: int | None = None
+
+    def read() -> int:
+        nonlocal cached
+        if cached is None:
+            assert image.sha is not None
+            cached = counter(image.source_root, image.sha)
+        return cached
+
+    return read
 
 
 @contextmanager
@@ -49,8 +68,10 @@ def fresh_schedule_entry(
     config.boot()
     machine = machine_from_boot(config)
     home = resolve_meiva_home()
-    version = CodeVersion(image)
-    gate = ProcessDbGate(process=active.process_name_fn(), version=version.get)
+    gate = ProcessDbGate(
+        process=active.process_name_fn(),
+        version=_version_reader(image, active.commit_counter),
+    )
 
     def database() -> Database:
         return active.database_cls(

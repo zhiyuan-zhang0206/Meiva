@@ -144,19 +144,28 @@ def _fire_tracker(_slot: datetime, _trigger: None) -> None:
     run_tracker()
 
 
-def _main_loop(*, inputs: ScheduleInputs) -> None:
+def _main_loop(
+    *,
+    inputs: ScheduleInputs,
+    next_fire_fn: Callable[..., datetime] | None = None,
+    claim_fn: Callable[..., bool] | None = None,
+) -> None:
+    compute_next_fire = next_fire_fn or next_fire
+    claim_slot = claim_fn or fire_slot_once
     db = inputs.database()
     last_run_at = datetime.now(UTC)
     while True:
         now = datetime.now(UTC)
-        next_run = next_fire(CRON, after=now - timedelta(minutes=2), timezone=cluster_timezone())
+        next_run = compute_next_fire(
+            CRON, after=now - timedelta(minutes=2), timezone=cluster_timezone()
+        )
         if next_run <= last_run_at:
-            next_run = next_fire(CRON, after=last_run_at, timezone=cluster_timezone())
+            next_run = compute_next_fire(CRON, after=last_run_at, timezone=cluster_timezone())
         wait_seconds = (next_run - now).total_seconds()
         if wait_seconds > 0:
             time.sleep(min(wait_seconds, 3600))
             continue
-        fire_slot_once(db, next_run, None, fire=_fire_tracker)
+        claim_slot(db, next_run, None, fire=_fire_tracker)
         last_run_at = datetime.now(UTC)
         time.sleep(120)
 

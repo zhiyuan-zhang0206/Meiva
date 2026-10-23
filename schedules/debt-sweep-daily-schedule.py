@@ -7,7 +7,7 @@ import json
 import os
 import subprocess
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from collections.abc import Callable, Mapping
 from contextlib import AbstractContextManager
@@ -31,8 +31,8 @@ from base.daemon.schedules.watcher import next_fire
 
 
 CRON = "30 6 * * *"
+LEDGER_PATH = "future/tech-debt/ledger.md"
 _REPO_ROOT = Path(base.__file__).resolve().parents[1]
-_LEDGER_PATH = "future/tech-debt/ledger.md"
 _PROCESS_NAME = "schedule-debt-sweep-daily"
 _WORKER_LABEL_ENV = "MEIVA_DEBT_SWEEP_AGENT_LABEL"
 _DEFAULT_WORKER_LABEL = "debt-sweep-daily"
@@ -53,6 +53,40 @@ class ScanReport:
 class WorkerDispatch:
     agent_id: int
     action: Literal["spawned", "resurrected", "messaged"]
+
+
+def _scan_summary(*, succeeded: bool, report: str) -> str:
+    lines = [line for line in report.splitlines() if line.strip()]
+    outcome = "completed" if succeeded else "failed"
+    final_line = lines[-1] if lines else "no output"
+    return f"mechanical scan {outcome} ({len(lines)} lines; final: {final_line[:240]})"
+
+
+def worker_prompt(day: str, scan: ScanReport) -> str:
+    return f"""You are today's debt-clearing pass for the Meiva repository ({day}).
+
+Start a fresh worktree from origin/main and follow the normal PR workflow; never push main.
+Use the `meiva.skills.sweeper` engine with `docs/conventions/engineering/tech-debt.md` as project input.
+Reconcile the single ledger at `{LEDGER_PATH}`.
+
+The mechanical scan artifact is `{scan.artifact_path}`.
+Scan summary: {scan.summary}
+Use the artifact as evidence, re-check findings as needed, and keep the full mechanical lists in
+the PR body rather than the ledger. Record only strong, fingerprinted findings; respect wontfix
+entries and remove resolved entries.
+
+Deliver at most ONE `chore(sweeper): debt reconcile {day}` PR. If reconciliation changes nothing,
+open no PR and report the no-op. When done, report your result and end your own process.
+"""
+
+
+def event_payload(*, day: str, scan: ScanReport, dispatch: WorkerDispatch) -> dict[str, str | int]:
+    return {
+        "day": day,
+        "scan_status": "ok" if scan.succeeded else "failed",
+        "action": dispatch.action,
+        "worker_agent_id": dispatch.agent_id,
+    }
 
 
 def _worker_label() -> str:
@@ -92,7 +126,14 @@ def _report_agent(
         before_id = page.next_cursor
 
 
-def _report_failure(detail: str) -> None:
+def _report_failure(
+    detail: str,
+    *,
+    report_agent_fn: Callable[[], int] | None = None,
+    send_message_fn: Callable[[int, str], Any] | None = None,
+) -> None:
+    resolve_agent = report_agent_fn or _report_agent
+    send = send_message_fn or meiva.agents.send_message
     message = (
         "Daily debt sweep failed:\n"
         f"{detail[-1000:]}\n"
@@ -100,29 +141,41 @@ def _report_failure(detail: str) -> None:
         "debt-clearing pass manually with the sweeper skills."
     )
     try:
-        meiva.agents.send_message(_report_agent(), message)
+        send(resolve_agent(), message)
     except Exception as exc:
         print(f"debt-sweep-daily could not notify the P0 lead: {exc}")
         raise
 
 
-def ensure_worker(label: str, prompt: str) -> WorkerDispatch:
+@dataclass(frozen=True)
+class EnsureWorkerHooks:
+    list_agents_fn: Callable[..., Any] = field(default_factory=lambda: meiva.agents.list_agents)
+    resurrect_fn: Callable[..., Any] = field(default_factory=lambda: meiva.agents.resurrect)
+    send_message_fn: Callable[..., Any] = field(default_factory=lambda: meiva.agents.send_message)
+    spawn_fn: Callable[..., int] = field(default_factory=lambda: meiva.agents.spawn)
+    uuid_fn: Callable[[], Any] = field(default_factory=lambda: uuid4)
+
+
+def ensure_worker(
+    label: str, prompt: str, *, hooks: EnsureWorkerHooks | None = None
+) -> WorkerDispatch:
+    active = hooks or EnsureWorkerHooks()
     before_id = None
     while True:
-        page = meiva.agents.list_agents(scope="all", query=label, before_id=before_id)
+        page = active.list_agents_fn(scope="all", query=label, before_id=before_id)
         for agent in page.agents:
             if agent.label != label:
                 continue
             if agent.status == S.TERMINATED:
-                meiva.agents.resurrect(agent.agent_id, prompt)
+                active.resurrect_fn(agent.agent_id, prompt)
                 return WorkerDispatch(agent_id=agent.agent_id, action="resurrected")
-            meiva.agents.send_message(agent.agent_id, prompt)
+            active.send_message_fn(agent.agent_id, prompt)
             return WorkerDispatch(agent_id=agent.agent_id, action="messaged")
         if page.next_cursor is None:
             break
         before_id = page.next_cursor
     return WorkerDispatch(
-        agent_id=meiva.agents.spawn(prompt=prompt, label=label, idempotency_key=str(uuid4())),
+        agent_id=active.spawn_fn(prompt=prompt, label=label, idempotency_key=str(active.uuid_fn())),
         action="spawned",
     )
 
@@ -133,17 +186,16 @@ def _scan_artifact_path(day: str, slot: datetime, *, ensure_home: bool) -> Path:
     return root / "debt-sweeps" / day / f"mechanical-scan-{slot_stamp}.txt"
 
 
-def _scan_summary(*, succeeded: bool, report: str) -> str:
-    lines = [line for line in report.splitlines() if line.strip()]
-    outcome = "completed" if succeeded else "failed"
-    final_line = lines[-1] if lines else "no output"
-    return f"mechanical scan {outcome} ({len(lines)} lines; final: {final_line[:240]})"
-
-
-def _run_mechanical_scan(repo: Path, artifact_path: Path | None) -> ScanReport:
+def _run_mechanical_scan(
+    repo: Path,
+    artifact_path: Path | None,
+    *,
+    run_fn: Callable[..., subprocess.CompletedProcess[str]] | None = None,
+) -> ScanReport:
+    runner = run_fn or subprocess.run
     script = repo / "scripts" / "audit" / "tech_debt_candidates.sh"
     try:
-        completed = subprocess.run(
+        completed = runner(
             ["bash", str(script), "--repo", str(repo)],
             check=False,
             capture_output=True,
@@ -170,35 +222,25 @@ def _run_mechanical_scan(repo: Path, artifact_path: Path | None) -> ScanReport:
     )
 
 
-def worker_prompt(day: str, scan: ScanReport) -> str:
-    return f"""You are today's debt-clearing pass for the Meiva repository ({day}).
-
-Start a fresh worktree from origin/main and follow the normal PR workflow; never push main.
-Use the `meiva.skills.sweeper` engine with `docs/conventions/engineering/tech-debt.md` as project input.
-Reconcile the single ledger at `{_LEDGER_PATH}`.
-
-The mechanical scan artifact is `{scan.artifact_path}`.
-Scan summary: {scan.summary}
-Use the artifact as evidence, re-check findings as needed, and keep the full mechanical lists in
-the PR body rather than the ledger. Record only strong, fingerprinted findings; respect wontfix
-entries and remove resolved entries.
-
-Deliver at most ONE `chore(sweeper): debt reconcile {day}` PR. If reconciliation changes nothing,
-open no PR and report the no-op. When done, report your result and end your own process.
-"""
-
-
-def event_payload(*, day: str, scan: ScanReport, dispatch: WorkerDispatch) -> dict[str, str | int]:
-    return {
-        "day": day,
-        "scan_status": "ok" if scan.succeeded else "failed",
-        "action": dispatch.action,
-        "worker_agent_id": dispatch.agent_id,
-    }
-
-
-def _slot_day(slot: datetime) -> str:
+def _slot_day(
+    slot: datetime,
+    *,
+    cluster_timezone: Callable[[], str] = cluster_timezone,
+) -> str:
     return slot.astimezone(ZoneInfo(cluster_timezone())).strftime("%Y-%m-%d")
+
+
+@dataclass(frozen=True)
+class DebtSweepFireHooks:
+    tz_fn: Callable[[], str] = field(default_factory=lambda: cluster_timezone)
+    scan_runner: Callable[[Path, Path | None], ScanReport] = field(
+        default_factory=lambda: _run_mechanical_scan
+    )
+    worker_dispatcher: Callable[[str, str], WorkerDispatch] = field(
+        default_factory=lambda: ensure_worker
+    )
+    gateway_init: Callable[..., None] = field(default_factory=lambda: init_gateway_process)
+    failure_reporter: Callable[[str], None] = field(default_factory=lambda: _report_failure)
 
 
 def _fire(
@@ -208,15 +250,17 @@ def _fire(
     producer: Callable[[], Any],
     image: LoadedCommit,
     machine_reader: Callable[[], str],
+    hooks: DebtSweepFireHooks | None = None,
 ) -> None:
+    active = hooks or DebtSweepFireHooks()
     try:
-        day = _slot_day(slot)
-        scan = _run_mechanical_scan(
+        day = _slot_day(slot, cluster_timezone=active.tz_fn)
+        scan = active.scan_runner(
             _REPO_ROOT,
             _scan_artifact_path(day, slot, ensure_home=True),
         )
-        dispatch = ensure_worker(_worker_label(), worker_prompt(day, scan))
-        init_gateway_process(
+        dispatch = active.worker_dispatcher(_worker_label(), worker_prompt(day, scan))
+        active.gateway_init(
             name=_PROCESS_NAME, producer=producer, machine_reader=machine_reader, image=image
         )
         from base import telemetry
@@ -234,14 +278,19 @@ def _fire(
     except Exception as exc:
         detail = f"{type(exc).__name__}: {exc}"
         print(f"debt-sweep-daily failed: {detail}")
-        _report_failure(detail)
+        active.failure_reporter(detail)
 
 
-def _dry_run(repo: Path) -> None:
+def _dry_run(
+    repo: Path,
+    *,
+    scan_runner: Callable[[Path, Path | None], ScanReport] | None = None,
+) -> None:
+    run_scan = scan_runner or _run_mechanical_scan
     slot = datetime.now(UTC)
     day = _slot_day(slot)
     artifact_path = _scan_artifact_path(day, slot, ensure_home=False)
-    scan = _run_mechanical_scan(repo, None)
+    scan = run_scan(repo, None)
     scan = ScanReport(
         succeeded=scan.succeeded,
         artifact_path=artifact_path,
@@ -263,7 +312,14 @@ def _dry_run(repo: Path) -> None:
     print("dry-run: no claims, agent operations, telemetry, or database access were performed.")
 
 
-def _main_loop(*, inputs: ScheduleInputs) -> None:
+def _main_loop(
+    *,
+    inputs: ScheduleInputs,
+    next_fire_fn: Callable[..., datetime] | None = None,
+    claim_fn: Callable[..., bool] | None = None,
+) -> None:
+    compute_next_fire = next_fire_fn or next_fire
+    claim_slot = claim_fn or fire_slot_once
     db = inputs.database()
     fire = partial(
         _fire, producer=inputs.producer, image=inputs.image, machine_reader=inputs.machine.name
@@ -271,14 +327,16 @@ def _main_loop(*, inputs: ScheduleInputs) -> None:
     last_run_at = datetime.now(UTC)
     while True:
         now = datetime.now(UTC)
-        next_run = next_fire(CRON, after=now - timedelta(minutes=2), timezone=cluster_timezone())
+        next_run = compute_next_fire(
+            CRON, after=now - timedelta(minutes=2), timezone=cluster_timezone()
+        )
         if next_run <= last_run_at:
-            next_run = next_fire(CRON, after=last_run_at, timezone=cluster_timezone())
+            next_run = compute_next_fire(CRON, after=last_run_at, timezone=cluster_timezone())
         wait_seconds = (next_run - now).total_seconds()
         if wait_seconds > 0:
             time.sleep(min(wait_seconds, 3600))
             continue
-        fire_slot_once(db, next_run, None, fire=fire)
+        claim_slot(db, next_run, None, fire=fire)
         last_run_at = datetime.now(UTC)
         time.sleep(120)
 
@@ -296,6 +354,9 @@ def main(
     *,
     inputs: ScheduleInputs | None = None,
     entry_factory: Callable[[], AbstractContextManager[ScheduleInputs]] | None = None,
+    scan_runner: Callable[[Path, Path | None], ScanReport] | None = None,
+    next_fire_fn: Callable[..., datetime] | None = None,
+    claim_fn: Callable[..., bool] | None = None,
 ) -> None:
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -304,7 +365,7 @@ def main(
     if args.once:
         if not args.dry_run:
             parser.error("--once requires --dry-run")
-        _dry_run((args.repo or _REPO_ROOT).resolve())
+        _dry_run((args.repo or _REPO_ROOT).resolve(), scan_runner=scan_runner)
         return
     if inputs is not None:
         entry = schedule_entry(inputs)
@@ -315,7 +376,7 @@ def main(
             "schedule execution requires explicit inputs or a fresh executable entry"
         )
     with entry as entry_inputs:
-        _main_loop(inputs=entry_inputs)
+        _main_loop(inputs=entry_inputs, next_fire_fn=next_fire_fn, claim_fn=claim_fn)
 
 
 if __name__ == "__main__":

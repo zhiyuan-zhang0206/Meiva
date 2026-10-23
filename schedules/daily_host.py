@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import time
 from collections.abc import Callable, Mapping
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -11,6 +12,14 @@ from meiva.agents import AgentStatus as S
 from schedules.catchup import fire_slot_once
 from base.daemon.schedules.watcher import next_fire
 from base.db import Database
+
+
+@dataclass(frozen=True)
+class DailyLoopHooks:
+    now_fn: Callable[[], datetime] = field(default_factory=lambda: lambda: datetime.now(UTC))
+    next_fire_fn: Callable[..., datetime] = field(default_factory=lambda: next_fire)
+    claim_fn: Callable[..., bool] = field(default_factory=lambda: fire_slot_once)
+    sleep_fn: Callable[[float], None] = field(default_factory=lambda: time.sleep)
 
 
 def report_agent(
@@ -44,18 +53,24 @@ def report_agent(
 
 
 def run_daily_loop(
-    db: Database, cron: str, tz: str, fire: Callable[[datetime, None], None]
+    db: Database,
+    cron: str,
+    tz: str,
+    fire: Callable[[datetime, None], None],
+    *,
+    hooks: DailyLoopHooks | None = None,
 ) -> None:
-    last_run_at = datetime.now(UTC)
+    active = hooks or DailyLoopHooks()
+    last_run_at = active.now_fn()
     while True:
-        now = datetime.now(UTC)
-        next_run = next_fire(cron, after=now - timedelta(minutes=2), timezone=tz)
+        now = active.now_fn()
+        next_run = active.next_fire_fn(cron, after=now - timedelta(minutes=2), timezone=tz)
         if next_run <= last_run_at:
-            next_run = next_fire(cron, after=last_run_at, timezone=tz)
+            next_run = active.next_fire_fn(cron, after=last_run_at, timezone=tz)
         wait_seconds = (next_run - now).total_seconds()
         if wait_seconds > 0:
-            time.sleep(min(wait_seconds, 3600))
+            active.sleep_fn(min(wait_seconds, 3600))
             continue
-        fire_slot_once(db, next_run, None, fire=fire)
-        last_run_at = datetime.now(UTC)
-        time.sleep(120)
+        active.claim_fn(db, next_run, None, fire=fire)
+        last_run_at = active.now_fn()
+        active.sleep_fn(120)

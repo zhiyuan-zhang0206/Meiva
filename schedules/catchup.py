@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
 from typing import TypeVar
 
@@ -18,12 +18,14 @@ _Payload = TypeVar("_Payload")
 # host-locally lands the run on the wrong calendar day, not merely at the wrong hour. A
 # schedule reads it when it runs, so a changed value waits for its next restart.
 # meiva:link schedules/README.md
-def cluster_timezone() -> str:
-    return Clock.from_settings().timezone
+def cluster_timezone(*, clock_factory: Callable[[], Clock] | None = None) -> str:
+    clock = clock_factory() if clock_factory is not None else Clock.from_settings()
+    return clock.timezone
 
 
-def _schedule_id(explicit: int | None) -> int:
-    schedule_id = int(os.environ["MEIVA_SCHEDULE_ID"]) if explicit is None else explicit
+def _schedule_id(explicit: int | None, env: Mapping[str, str] | None = None) -> int:
+    source_env = os.environ if env is None else env
+    schedule_id = int(source_env["MEIVA_SCHEDULE_ID"]) if explicit is None else explicit
     if schedule_id <= 0:
         raise ValueError(f"schedule_id must be positive, got {schedule_id}")
     return schedule_id
@@ -47,8 +49,9 @@ def fire_slot_once(
     *,
     fire: Callable[[datetime, _Payload], None],
     schedule_id: int | None = None,
+    env: Mapping[str, str] | None = None,
 ) -> bool:
-    resolved_id = _schedule_id(schedule_id)
+    resolved_id = _schedule_id(schedule_id, env)
     slot = _as_utc(slot_fire_at, field="slot_fire_at")
     with db.write_transaction() as conn, conn.cursor() as cur:
         cur.execute(

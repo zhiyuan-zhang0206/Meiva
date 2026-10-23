@@ -586,13 +586,20 @@ def _fire_weekly_batch(_slot: datetime, _trigger: None) -> None:
         print(f"adversarial-eval batch failed: {exc}")
 
 
-def main(*, inputs: ScheduleInputs) -> None:
+def main(
+    *,
+    inputs: ScheduleInputs,
+    next_fire_fn: Callable[..., datetime] | None = None,
+    claim_fn: Callable[..., bool] | None = None,
+) -> None:
+    compute_next_fire = next_fire_fn or next_fire
+    claim_slot = claim_fn or fire_slot_once
     db = inputs.database()
     while True:
-        nxt = next_fire(CRON, after=datetime.now(UTC), timezone=cluster_timezone())
+        nxt = compute_next_fire(CRON, after=datetime.now(UTC), timezone=cluster_timezone())
         while datetime.now(UTC) < nxt:
             time.sleep(60)
-        fire_slot_once(db, nxt, None, fire=_fire_weekly_batch)
+        claim_slot(db, nxt, None, fire=_fire_weekly_batch)
 
 
 if __name__ == "__main__":
