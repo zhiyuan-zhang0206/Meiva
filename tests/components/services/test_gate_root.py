@@ -18,6 +18,7 @@ from base.native_process.ownership import OwnedProcess
 from base.native_process.root_control.client import RootClient, native_identity
 from base.paths import root_run_dir
 from services.entrypoints.gate.tests.test_gate import FakeApp, FakeGateway, Servers, gate_request
+from services.entrypoints.gate.tests.test_gate import probe_timeout_s as probe_timeout_s
 from services.entrypoints.gate.tests.test_gate import servers as servers
 from services.supervision.healthchecks import gate
 from services.supervision.meiva_root.manifest import RestartPolicy, UnitManifest, UnitRegistry
