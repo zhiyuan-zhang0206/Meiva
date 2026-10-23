@@ -18,7 +18,9 @@ from base.agents.context.clients import ClientSet
 from base.agents.sdk.call_policy import SamplingPolicy, SamplingPolicyOwner
 from base.config import ConfigBoot
 from base.config.service_read import ConfigAuthority
+from base.packages.plugin_config_images import DiskPluginConfigImages
 from base.packages.plugins.extensions import EMPTY
+from base.paths.home import resolve_meiva_home
 from base.telemetry.tests.capture.event_capture import EmittedEvents
 from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
 from meiva.sdk_surface import install, process_context
@@ -92,7 +94,13 @@ def non_model_installation(
             previous or MeivaContext(), clients=ClientSet(pipeline_factory=emitted_events.producer)
         )
     )
-    install.install(EMPTY, authority=authority, sampling=sampling, producer=emitted_events.producer)
+    install.install(
+        EMPTY,
+        authority=authority,
+        sampling=sampling,
+        producer=emitted_events.producer,
+        config_images=DiskPluginConfigImages(resolve_meiva_home()),
+    )
     try:
         yield authority
     finally:

@@ -236,4 +236,5 @@ def test_first_bound_plugin_load_does_not_lend_attachment_writer_to_bare_calls(
                 sampling=prior.sampling,
                 clock_factory=prior.clock_factory,
                 producer=prior.producer,
+                config_images=prior.config_images,
             )

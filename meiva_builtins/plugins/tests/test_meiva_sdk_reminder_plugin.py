@@ -21,7 +21,9 @@ from agent.messages import inbound_message, tail_has_agent_inbound
 from agent.state import CompactState, build_agent_state
 from base.agents.context import MeivaContext
 from base.db.code_version_gate import ProcessDbGate
+from base.packages.plugin_config_images import DiskPluginConfigImages
 from base.packages.plugins.extensions import ExtensionRegistry
+from base.paths.home import resolve_meiva_home
 from meiva.sdk_surface import install
 from meiva_builtins.plugins.meiva_sdk_reminder.agent_runtime import (
     AGENT_REPLY_CATEGORY,
@@ -191,7 +193,10 @@ def load_meiva_code_plugin() -> Iterator[None]:
     included) so nothing leaks into the next test."""
     from meiva_builtins.plugins.meiva_code import plugin
 
-    install.install(ExtensionRegistry((("meiva_code", plugin.contribute()),)))
+    install.install(
+        ExtensionRegistry((("meiva_code", plugin.contribute()),)),
+        config_images=DiskPluginConfigImages(resolve_meiva_home()),
+    )
 
     yield
 

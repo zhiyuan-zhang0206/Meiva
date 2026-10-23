@@ -50,6 +50,7 @@ from base.agents.sdk.call_policy import SamplingPolicyOwner
 from base.clock import Clock
 from base.config.service_read import ConfigAuthority
 from base.lm.catalog import ModelCatalog
+from base.packages.plugin_config_contracts import PluginConfigImages, UnboundPluginConfigImages
 from base.packages.plugins import load_report
 from base.packages.plugins.extensions import ExtensionRegistry, PluginContributions
 
@@ -107,6 +108,7 @@ def _provider_remover(
 def _provider_mount(provider: SkillProvider) -> Installation:
     return Installation(
         registry=ExtensionRegistry(),
+        config_images=UnboundPluginConfigImages(),
         expansions=(),
         wrap_layers=MappingProxyType({}),
         skill_providers=(provider,),
@@ -158,6 +160,7 @@ def _apply(
     contributions: PluginContributions,
     build: _Build,
     namespaces: dict[str, str],
+    config_images: PluginConfigImages,
 ) -> list[str]:
     """Apply one plugin's SDK declaration into `build`; each applied piece appends its undo.
     Returns the plugin's expansion paths. Raises on the first piece that cannot be applied."""
@@ -184,7 +187,10 @@ def _apply(
         flags.validate_flag_key(key)
     if contributions.config is not None:
         build.undo.append(
-            config_registration.bind_plugin_config(plugin, contributions.config, build.configs)
+            config_registration.bind_plugin_config(
+                config_images.owner(plugin, contributions.config),
+                build.configs,
+            )
         )
     return promoted
 
@@ -221,6 +227,7 @@ def install(
     registry: ExtensionRegistry,
     report: load_report.Reporter | None = None,
     *,
+    config_images: PluginConfigImages,
     catalog: ModelCatalog | None = None,
     authority: ConfigAuthority | None = None,
     sampling: SamplingPolicyOwner | None = None,
@@ -257,7 +264,7 @@ def install(
             mark = len(build.undo)
             claimed = dict(build.namespaces)
             try:
-                paths = _apply(plugin, contributions, build, claimed)
+                paths = _apply(plugin, contributions, build, claimed, config_images)
             except (
                 _plugins.RegisterNamespaceError,
                 wraps.WrapTargetError,
@@ -280,6 +287,7 @@ def install(
         raise
     installation = Installation(
         registry=ExtensionRegistry(tuple(admitted)),
+        config_images=config_images,
         expansions=tuple(build.expansions),
         wrap_layers=MappingProxyType(
             {target: tuple(layers) for target, layers in build.layers.items()}

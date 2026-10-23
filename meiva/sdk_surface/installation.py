@@ -23,6 +23,7 @@ from base.agents.sdk.call_policy import SamplingPolicyOwner
 from base.clock import Clock
 from base.config.service_read import ConfigAuthority
 from base.lm.catalog import ModelCatalog
+from base.packages.plugin_config_contracts import PluginConfigImages
 from base.packages.plugins.extensions import ExtensionRegistry
 
 from . import meiva_module
@@ -58,6 +59,7 @@ class Installation:
     them (they are only ever run once, on the way out)."""
 
     registry: ExtensionRegistry
+    config_images: PluginConfigImages
     expansions: tuple[str, ...]
     wrap_layers: Mapping[str, tuple[WrapLayer, ...]]
     skill_providers: tuple[SkillProvider, ...]

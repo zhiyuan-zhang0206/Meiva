@@ -5,6 +5,7 @@ import pytest
 from pydantic import BaseModel
 
 from base.lm.catalog import ModelCatalog
+from base.packages.plugin_config_images import DiskPluginConfigImages, PluginConfigOwner
 from base.packages.plugins import load_report
 from base.packages.plugins.config_registration import (
     bind_plugin_config,
@@ -20,6 +21,7 @@ from base.packages.tests.plugin_config.test_plugin_config import (
 from base.packages.tests.plugin_config.test_plugin_config import (
     isolated_registry as isolated_registry,
 )
+from base.paths.home import resolve_meiva_home
 
 
 def test_syntax_fix_ruff_format_overlay_is_accepted(model_catalog: ModelCatalog) -> None:
@@ -29,13 +31,19 @@ def test_syntax_fix_ruff_format_overlay_is_accepted(model_catalog: ModelCatalog)
 
 
 def test_bind_undo_drops_the_binding(isolated_registry: dict[str, BaseModel], unit_home):
-    undo = bind_plugin_config("test_plugin", FixtureConfig, configs=isolated_registry)
+    undo = bind_plugin_config(
+        PluginConfigOwner("test_plugin", FixtureConfig, disk_image_path("test_plugin")),
+        configs=isolated_registry,
+    )
     assert is_per_agent_field("test_plugin", "marker", configs=isolated_registry) is True
     undo()
 
     assert "test_plugin" not in isolated_registry
     assert is_per_agent_field("test_plugin", "marker", configs=isolated_registry) is False
-    bind_plugin_config("test_plugin", FixtureConfig, configs=isolated_registry)
+    bind_plugin_config(
+        PluginConfigOwner("test_plugin", FixtureConfig, disk_image_path("test_plugin")),
+        configs=isolated_registry,
+    )
 
 
 def test_install_refuses_a_plugin_whose_config_does_not_bind_and_installs_the_rest(
@@ -81,7 +89,7 @@ def test_install_refuses_a_plugin_whose_config_does_not_bind_and_installs_the_re
         )
     )
 
-    admitted = install.install(registry)
+    admitted = install.install(registry, config_images=DiskPluginConfigImages(resolve_meiva_home()))
     try:
         assert [name for name, _ in admitted.plugins] == ["healthy"]
         assert [name for name, _ in reported if name == "drifted"] == ["drifted"]
