@@ -437,14 +437,14 @@ def _computer_name(*, host: Host) -> str | None:
     return name or None
 
 
-def _expand_glob(pattern: str) -> tuple[Path, ...]:
+def _expand_glob(pattern: str, user_home: Path) -> tuple[Path, ...]:
     """Expand one multi-segment glob pattern to its existing paths.
 
     ``Path.glob`` only accepts a wildcard in the last component, so split at the
     first wildcard: the prefix is literal, the rest is the glob. A pattern with
     no wildcard at all resolves to itself when it exists.
     """
-    expanded = Path(pattern).expanduser()
+    expanded = _under_home(pattern, user_home)
     first_wild = next(
         (i for i, part in enumerate(expanded.parts) if any(c in part for c in "*?[")),
         None,
@@ -456,7 +456,15 @@ def _expand_glob(pattern: str) -> tuple[Path, ...]:
     return tuple(h for h in base.glob(rest) if h.exists())
 
 
-def manifest_paths(*, machine_name: str | None, host: Host) -> tuple[Path, ...]:
+# meiva:note
+# `pattern` with a leading `~` meaning `user_home`.
+def _under_home(pattern: str, user_home: Path) -> Path:
+    if pattern == "~" or pattern.startswith("~/"):
+        return user_home / pattern[2:]
+    return Path(pattern)
+
+
+def manifest_paths(*, machine_name: str | None, host: Host, user_home: Path) -> tuple[Path, ...]:
     """Every existing binary this host's manifest requires an allow rule for.
 
     Machine-filtered, glob-expanded, existence-checked, deduplicated and sorted.
@@ -469,7 +477,7 @@ def manifest_paths(*, machine_name: str | None, host: Host) -> tuple[Path, ...]:
         if entry.machine is not None and entry.machine != name:
             continue
         for pattern in entry.paths:
-            for hit in _expand_glob(pattern):
+            for hit in _expand_glob(pattern, user_home):
                 if hit.name.endswith("-config"):
                     continue  # config shims never listen; nothing to allow
                 seen[str(hit.resolve())] = hit
@@ -486,7 +494,9 @@ def _manifest_rule_state(path: Path, rules: dict[str, bool]) -> str:
     return "Missing"
 
 
-def render_manifest_status(rules: dict[str, bool], *, machine_name: str | None, host: Host) -> str:
+def render_manifest_status(
+    rules: dict[str, bool], *, machine_name: str | None, host: Host, user_home: Path
+) -> str:
     """Render every applicable manifest entry, pattern, resolved path, and state."""
     lines: list[str] = []
     resolved_states: dict[str, str] = {}
@@ -496,7 +506,7 @@ def render_manifest_status(rules: dict[str, bool], *, machine_name: str | None, 
         entry for entry in FIREWALL_MANIFEST if entry.machine is None or entry.machine == name
     )
     for entry in entries:
-        entry_lines, entry_states, entry_unmatched = _render_manifest_entry(entry, rules)
+        entry_lines, entry_states, entry_unmatched = _render_manifest_entry(entry, rules, user_home)
         lines.extend(entry_lines)
         resolved_states.update(entry_states)
         unmatched_patterns += entry_unmatched
@@ -513,14 +523,16 @@ def render_manifest_status(rules: dict[str, bool], *, machine_name: str | None, 
 
 
 def _render_manifest_entry(
-    entry: ManifestEntry, rules: dict[str, bool]
+    entry: ManifestEntry, rules: dict[str, bool], user_home: Path
 ) -> tuple[list[str], dict[str, str], int]:
     lines = [f"  {entry.id} — {entry.purpose}"]
     resolved_states: dict[str, str] = {}
     unmatched_patterns = 0
     for pattern in entry.paths:
         lines.append(f"    pattern: {pattern}")
-        hits = tuple(hit for hit in _expand_glob(pattern) if not hit.name.endswith("-config"))
+        hits = tuple(
+            hit for hit in _expand_glob(pattern, user_home) if not hit.name.endswith("-config")
+        )
         if not hits:
             unmatched_patterns += 1
             lines.append("      resolved: (no installed binary) [Missing]")
@@ -537,7 +549,7 @@ def missing_allow_rules(paths: tuple[Path, ...], rules: dict[str, bool]) -> tupl
     return tuple(p for p in paths if not _covered(p, rules))
 
 
-def stale_manifest_rules(rules: dict[str, bool]) -> tuple[Path, ...]:
+def stale_manifest_rules(rules: dict[str, bool], *, user_home: Path) -> tuple[Path, ...]:
     """ALF rules this manifest family manages whose path no longer exists.
 
     A version bump orphans the old rule: the rule still names the old path while
@@ -547,9 +559,11 @@ def stale_manifest_rules(rules: dict[str, bool]) -> tuple[Path, ...]:
     are considered, so Apple's entries and unrelated apps are never touched.
     """
     family = [
-        str(Path(pattern).expanduser()) for entry in FIREWALL_MANIFEST for pattern in entry.paths
+        str(_under_home(pattern, user_home))
+        for entry in FIREWALL_MANIFEST
+        for pattern in entry.paths
     ]
-    family.extend(str(Path(pattern).expanduser()) for pattern in FIREWALL_LEGACY_FAMILY)
+    family.extend(str(_under_home(pattern, user_home)) for pattern in FIREWALL_LEGACY_FAMILY)
     stale = (
         Path(path)
         for path in rules
@@ -671,7 +685,7 @@ def repair_allowlist(
     )
 
 
-def prune_stale_rules(rules: dict[str, bool], *, host: Host) -> FirewallRepair:
+def prune_stale_rules(rules: dict[str, bool], *, host: Host, user_home: Path) -> FirewallRepair:
     """Remove stale manifest-family rules (see ``stale_manifest_rules``).
 
     Hygiene only — an orphaned rule blocks nothing and prompts nothing — so a
@@ -683,7 +697,7 @@ def prune_stale_rules(rules: dict[str, bool], *, host: Host) -> FirewallRepair:
     version's rule persist in the same pass.
     """
     removed: list[Path] = []
-    for path in stale_manifest_rules(rules):
+    for path in stale_manifest_rules(rules, user_home=user_home):
         if _sudo_mutate(_PRUNE_VERB, str(path), host=host):
             removed.append(path)
     return FirewallRepair(removed=tuple(removed))

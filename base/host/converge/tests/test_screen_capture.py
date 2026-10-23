@@ -68,17 +68,19 @@ class TestScreenCaptureStatus:
 
 class TestStatusFile:
     def test_write_read_clear_cycle(self, unit_home: Path):
-        assert status_file_path().parent == unit_home
-        assert not status_file_path().exists()
-        assert read_status() is None
-        write_status(ScreenCaptureStatus(state=ScreenCaptureState.NO_GRANT, diagnostic="test"))
+        assert status_file_path(unit_home).parent == unit_home
+        assert not status_file_path(unit_home).exists()
+        assert read_status(unit_home) is None
+        write_status(
+            unit_home, ScreenCaptureStatus(state=ScreenCaptureState.NO_GRANT, diagnostic="test")
+        )
 
-        assert status_file_path().exists()
-        read = read_status()
+        assert status_file_path(unit_home).exists()
+        read = read_status(unit_home)
         assert read is not None
         assert read.state is ScreenCaptureState.NO_GRANT
         assert read.diagnostic == "test"
 
-        clear_status()
-        assert not status_file_path().exists()
-        assert read_status() is None
+        clear_status(unit_home)
+        assert not status_file_path(unit_home).exists()
+        assert read_status(unit_home) is None

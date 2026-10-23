@@ -52,9 +52,11 @@ def cmd_firewall_status(*, home: Path, machine: MachineIdentity, host: Host) -> 
         print(f"  unreadable: could not read the allow list from {fw.SOCKETFILTERFW}")
         return 1
     print(
-        fw.render_manifest_status(rules, machine_name=configured_machine_name(machine), host=host)
+        fw.render_manifest_status(
+            rules, machine_name=configured_machine_name(machine), host=host, user_home=Path.home()
+        )
     )
-    stale = tuple(str(path) for path in fw.stale_manifest_rules(rules))
+    stale = tuple(str(path) for path in fw.stale_manifest_rules(rules, user_home=Path.home()))
     for line in status_tail_lines(stale, sudo_grant=fw.sudo_grant_installed(host=host)):
         print(line)
     return 0
@@ -79,7 +81,9 @@ def cmd_firewall_sync(*, home: Path, machine: MachineIdentity, host: Host) -> in
             f"  ! firewall: could not read the allow list from {fw.SOCKETFILTERFW}", file=sys.stderr
         )
         return 1
-    outcome = sync_allowlist(audit, rules, machine=machine, host=host)
+    outcome = sync_allowlist(
+        audit, rules, machine=machine, host=host, user_home=Path.home()
+    )
     for line in sync_summary_lines(
         tuple(str(path) for path in outcome.pruned),
         tuple(str(path) for path in outcome.repair.allowed),

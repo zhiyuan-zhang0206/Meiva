@@ -14,7 +14,7 @@ from base.host.env.agent_slices import ModelOverrides, agent_setting
 from base.lm.catalog import ModelCatalog
 from base.lm.catalog.provider_keys import ProviderKeys
 from base.log import logger
-from base.paths import exec_run_dir, workspace_dir
+from base.paths import exec_run_dir, meiva_home, workspace_dir
 from base.telemetry.observability import endpoint_override_is_explicit
 from base.telemetry.otlp.trace_config import TraceConfig
 from meiva.sdk_surface import sdk_disable
@@ -129,7 +129,7 @@ async def boot_agent_scope(
 
     from .startup import notify_desktop_permissions_at_startup
 
-    await notify_desktop_permissions_at_startup()
+    await notify_desktop_permissions_at_startup(meiva_home())
 
     from base.lm.factory import build_chat_model_bound
 

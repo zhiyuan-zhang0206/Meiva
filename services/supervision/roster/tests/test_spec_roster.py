@@ -13,7 +13,6 @@ from base.host.system import probes
 from base.host.system.hostport import Host
 from base.host.system.tests.fake_commands import fake_host
 from services.supervision import roster
-from services.supervision.healthchecks import lgtm
 from services.supervision.roster import healthz, service_spec, spec
 
 _GATEWAY_SESSIONS = {
@@ -113,23 +112,14 @@ def test_annotated_roster_membership_per_capability(
 
 
 def test_station_roster_contains_only_lgtm_with_host_enablement_gate(
-    monkeypatch: pytest.MonkeyPatch, *, machine_identity: MachineIdentity
+    unit_home: Path, *, machine_identity: MachineIdentity
 ) -> None:
-    def disabled(*, machine: MachineIdentity) -> bool:
-        assert machine is machine_identity
-        return False
-
-    def enabled(*, machine: MachineIdentity) -> bool:
-        assert machine is machine_identity
-        return True
-
-    monkeypatch.setattr(lgtm, "is_lgtm_host", disabled)
     rows = spec.services_for_capabilities_annotated(
         frozenset({"observability-station"}), machine=machine_identity, host=fake_host()
     )
     assert {service.session for service, _reason in rows} == {"loki", "prometheus", "grafana"}
     assert all(reason is not None for _service, reason in rows)
-    monkeypatch.setattr(lgtm, "is_lgtm_host", enabled)
+    (unit_home / "lgtm-host").touch()
     assert {
         service.session
         for service in spec.services_for_capabilities(

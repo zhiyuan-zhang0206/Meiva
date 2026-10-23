@@ -120,12 +120,21 @@ class AllowlistSync:
 # base.host.system.macos_firewall). Removing the stale rule first lets the replacement
 # version's rule persist in the same pass.
 def sync_allowlist(
-    audit: FirewallAudit, rules: dict[str, bool], *, machine: MachineIdentity, host: Host
+    audit: FirewallAudit,
+    rules: dict[str, bool],
+    *,
+    machine: MachineIdentity,
+    host: Host,
+    user_home: Path,
 ) -> AllowlistSync:
     wanted = {p.resolve() for p in audit.missing}
-    wanted.update(fw.manifest_paths(machine_name=configured_machine_name(machine), host=host))
+    wanted.update(
+        fw.manifest_paths(
+            machine_name=configured_machine_name(machine), host=host, user_home=user_home
+        )
+    )
     required = tuple(sorted(wanted, key=str))
-    pruned = fw.prune_stale_rules(rules, host=host)
+    pruned = fw.prune_stale_rules(rules, host=host, user_home=user_home)
     if pruned.removed:
         refreshed = fw.allowlisted_paths(host=host)
         if refreshed is not None:
@@ -168,7 +177,9 @@ def ensure_firewall_allowlist(ctx: ConvergeCtx) -> None:
         )
         return
 
-    outcome = sync_allowlist(audit, rules, machine=ctx.machine, host=ctx.host)
+    outcome = sync_allowlist(
+        audit, rules, machine=ctx.machine, host=ctx.host, user_home=Path.home()
+    )
     for line in converge_summary_lines(
         removed=len(outcome.pruned),
         allowed=len(outcome.repair.allowed),

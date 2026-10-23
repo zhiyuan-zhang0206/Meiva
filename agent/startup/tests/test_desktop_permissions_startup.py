@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
+from pathlib import Path
 
 import pytest
 
@@ -33,7 +34,11 @@ from base.host.converge.screen_capture import (
 )
 from meiva.sdk_surface import plugins
 
-pytestmark = pytest.mark.usefixtures("unit_home")
+
+@pytest.fixture
+def home(unit_home: Path) -> Path:
+    return unit_home
+
 
 _SCREEN_FAULT = ScreenCaptureStatus(
     state=ScreenCaptureState.NO_GRANT,
@@ -78,16 +83,18 @@ def failing_ui() -> Iterator[None]:
 
 class TestNotifyDesktopPermissionsAtStartup:
     @pytest.mark.asyncio
-    async def test_noop_when_no_status_file(self, fake_ui: _FakeUI):
-        await notify_desktop_permissions_at_startup()
+    async def test_noop_when_no_status_file(self, fake_ui: _FakeUI, home: Path):
+        await notify_desktop_permissions_at_startup(home)
 
         assert fake_ui.calls == []
 
     @pytest.mark.asyncio
-    async def test_screen_only_fault_keeps_the_existing_notice_shape(self, fake_ui: _FakeUI):
-        write_screen_capture_status(_SCREEN_FAULT)
+    async def test_screen_only_fault_keeps_the_existing_notice_shape(
+        self, fake_ui: _FakeUI, home: Path
+    ):
+        write_screen_capture_status(home, _SCREEN_FAULT)
 
-        await notify_desktop_permissions_at_startup()
+        await notify_desktop_permissions_at_startup(home)
 
         assert fake_ui.calls == [
             {
@@ -96,14 +103,14 @@ class TestNotifyDesktopPermissionsAtStartup:
                 "priority": "P1",
             }
         ]
-        assert read_screen_capture_status() is None
-        assert read_accessibility_status() is None
+        assert read_screen_capture_status(home) is None
+        assert read_accessibility_status(home) is None
 
     @pytest.mark.asyncio
-    async def test_accessibility_only_fault_notifies_and_clears(self, fake_ui: _FakeUI):
-        write_accessibility_status(_ACCESSIBILITY_FAULT)
+    async def test_accessibility_only_fault_notifies_and_clears(self, fake_ui: _FakeUI, home: Path):
+        write_accessibility_status(home, _ACCESSIBILITY_FAULT)
 
-        await notify_desktop_permissions_at_startup()
+        await notify_desktop_permissions_at_startup(home)
 
         assert fake_ui.calls == [
             {
@@ -112,14 +119,14 @@ class TestNotifyDesktopPermissionsAtStartup:
                 "priority": "P1",
             }
         ]
-        assert read_accessibility_status() is None
+        assert read_accessibility_status(home) is None
 
     @pytest.mark.asyncio
-    async def test_both_faults_post_one_combined_notice(self, fake_ui: _FakeUI):
-        write_screen_capture_status(_SCREEN_FAULT)
-        write_accessibility_status(_ACCESSIBILITY_FAULT)
+    async def test_both_faults_post_one_combined_notice(self, fake_ui: _FakeUI, home: Path):
+        write_screen_capture_status(home, _SCREEN_FAULT)
+        write_accessibility_status(home, _ACCESSIBILITY_FAULT)
 
-        await notify_desktop_permissions_at_startup()
+        await notify_desktop_permissions_at_startup(home)
 
         assert fake_ui.calls == [
             {
@@ -131,30 +138,32 @@ class TestNotifyDesktopPermissionsAtStartup:
                 "priority": "P1",
             }
         ]
-        assert read_screen_capture_status() is None
-        assert read_accessibility_status() is None
+        assert read_screen_capture_status(home) is None
+        assert read_accessibility_status(home) is None
 
     @pytest.mark.asyncio
-    async def test_notify_failure_restores_both_claims(self, failing_ui: None):
-        write_screen_capture_status(_SCREEN_FAULT)
-        write_accessibility_status(_ACCESSIBILITY_FAULT)
+    async def test_notify_failure_restores_both_claims(self, failing_ui: None, home: Path):
+        write_screen_capture_status(home, _SCREEN_FAULT)
+        write_accessibility_status(home, _ACCESSIBILITY_FAULT)
 
-        await notify_desktop_permissions_at_startup()
+        await notify_desktop_permissions_at_startup(home)
 
-        assert read_screen_capture_status() == _SCREEN_FAULT
-        assert read_accessibility_status() == _ACCESSIBILITY_FAULT
-        assert not screen_capture_status_file_path().with_suffix(".processing").exists()
-        assert not accessibility_status_file_path().with_suffix(".processing").exists()
+        assert read_screen_capture_status(home) == _SCREEN_FAULT
+        assert read_accessibility_status(home) == _ACCESSIBILITY_FAULT
+        assert not screen_capture_status_file_path(home).with_suffix(".processing").exists()
+        assert not accessibility_status_file_path(home).with_suffix(".processing").exists()
 
     @pytest.mark.asyncio
-    async def test_concurrent_claim_loser_skips_only_that_status_file(self, fake_ui: _FakeUI):
-        write_screen_capture_status(_SCREEN_FAULT)
-        write_accessibility_status(_ACCESSIBILITY_FAULT)
-        screen_capture_status_file_path().rename(
-            screen_capture_status_file_path().with_suffix(".processing")
+    async def test_concurrent_claim_loser_skips_only_that_status_file(
+        self, fake_ui: _FakeUI, home: Path
+    ):
+        write_screen_capture_status(home, _SCREEN_FAULT)
+        write_accessibility_status(home, _ACCESSIBILITY_FAULT)
+        screen_capture_status_file_path(home).rename(
+            screen_capture_status_file_path(home).with_suffix(".processing")
         )
 
-        await notify_desktop_permissions_at_startup()
+        await notify_desktop_permissions_at_startup(home)
 
         assert fake_ui.calls == [
             {
@@ -163,16 +172,18 @@ class TestNotifyDesktopPermissionsAtStartup:
                 "priority": "P1",
             }
         ]
-        assert screen_capture_status_file_path().with_suffix(".processing").exists()
-        assert read_accessibility_status() is None
+        assert screen_capture_status_file_path(home).with_suffix(".processing").exists()
+        assert read_accessibility_status(home) is None
 
     @pytest.mark.asyncio
-    async def test_available_statuses_are_cleaned_without_notifying(self, fake_ui: _FakeUI):
-        write_screen_capture_status(ScreenCaptureStatus(state=ScreenCaptureState.AVAILABLE))
-        write_accessibility_status(AccessibilityStatus(state=AccessibilityState.GRANTED))
+    async def test_available_statuses_are_cleaned_without_notifying(
+        self, fake_ui: _FakeUI, home: Path
+    ):
+        write_screen_capture_status(home, ScreenCaptureStatus(state=ScreenCaptureState.AVAILABLE))
+        write_accessibility_status(home, AccessibilityStatus(state=AccessibilityState.GRANTED))
 
-        await notify_desktop_permissions_at_startup()
+        await notify_desktop_permissions_at_startup(home)
 
         assert fake_ui.calls == []
-        assert read_screen_capture_status() is None
-        assert read_accessibility_status() is None
+        assert read_screen_capture_status(home) is None
+        assert read_accessibility_status(home) is None
