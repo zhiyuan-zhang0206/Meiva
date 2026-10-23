@@ -1,8 +1,5 @@
 exports = ["test_plugin_config.py"]
 
-[debt.env-patch]
-"test_plugin_config.py#monkeypatch.setenv os.environ.MEIVA_HOME" = 1
-
-[debt.first-party-patch]
-"test_plugin_config.py#monkeypatch.setattr base.config.settings" = 2
-"test_plugin_config.py#monkeypatch.setattr base.config.settings.lm.llm_model" = 1
+[uses]
+"gateway_profile.py" = ["gateway_profile_child.py"]
+"test_plugin_config.py" = ["gateway_profile.py"]
