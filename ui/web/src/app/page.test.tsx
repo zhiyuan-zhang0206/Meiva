@@ -9,7 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { api } from "@/lib/transport/api";
 import { FLEX, FLEX_1, FLEX_COL, MIN_H_0, MIN_W_0 } from "@/lib/layout/layout";
 import { LAYOUT_INVARIANTS, LAYOUT_VIEWPORT_TIERS } from "@/lib/layout/layout";
-import { ComposerMock, hooksState, inspectorMockState, makeAgent, resetHomePageTestState, wrap } from "./_page_test_harness";
+import { ComposerMock, hooksState, inspectorMockState, makeAgent, resetHomePageTestState, wrap } from "./page-test-mock";
 vi.mock("@/lib/agents/use-agents", () => ({
   useAgents: () => ({
     agents: hooksState.agents,

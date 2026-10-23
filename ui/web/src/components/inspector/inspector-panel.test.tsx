@@ -32,7 +32,7 @@ import {
   resolveNotice,
   setupInspectorTest,
   streamHandlers,
-} from "./inspector-test-harness";
+} from "./inspector-test-mock";
 
 vi.mock("@/lib/transport/api", () => ({
   api: {
