@@ -311,6 +311,8 @@ def _verdict(
     root: Path, judged: dict[str, list[tuple[int, str, str]]], only: list[str] | None
 ) -> int:
     scope = lint_common.changed_scope(only, root, inputs=("pyproject.toml",))
+    if scope is not None and not scope:
+        return 0
     shown = (
         judged if scope is None else {rel: items for rel, items in judged.items() if rel in scope}
     )
