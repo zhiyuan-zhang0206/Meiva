@@ -25,6 +25,7 @@ from collections import Counter
 from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
+from typing import cast
 
 from meizel.contracts.analysis import Analysis, analyze
 from meizel.contracts.debt import total
@@ -190,7 +191,8 @@ def _strict_to_be_targets(text: str) -> set[str]:
     if purity == "strict-to-be":
         return {"."}
     if isinstance(purity, dict):
-        return {k for k, v in purity.items() if v == "strict-to-be"}
+        table = cast("dict[str, object]", purity)
+        return {k for k, v in table.items() if v == "strict-to-be"}
     return set()
 
 
