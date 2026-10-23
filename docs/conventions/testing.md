@@ -91,9 +91,13 @@ A test must not read the process's own platform (`sys.platform`,
 `Host.system()`, `Platform.current()`) or the ambient PATH (`shutil.which(name)`
 with no `path=`) to decide what to assert: that verdict flips between a CI
 runner and a developer's macOS, which is a false positive nobody can debug from
-the failing side. `lint-host-platform-marks` reports such a read, and its
-baseline (`scripts/lint/baseline/host_platform_marks.json`) freezes the sites
-that predate the rule; `--write-baseline` lowers it after a repair.
+the failing side. `lint-host-platform-marks` reports such a read — `sys.platform`,
+`os.name`, `Host.system()`, `Platform.current()`, the tree's `is_macos()` /
+`is_linux()`, and the ambient half (`shutil.which(...)` without `path=`,
+`pytest.importorskip(...)`) — and its baseline
+(`scripts/lint/baseline/host_platform_marks.json`) freezes how many of each read
+predate the rule. The count follows the read rather than the file, so moving or
+renaming a test changes nothing; `--write-baseline` lowers it after a repair.
 
 When the subject itself exists on one host only — launchd, TCC, codesign,
 swiftc — the test declares it:
