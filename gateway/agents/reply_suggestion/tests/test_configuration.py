@@ -1,19 +1,16 @@
 from __future__ import annotations
 
-from types import SimpleNamespace
-from typing import Any
-
 import pytest
 from pydantic import ValidationError
 
 from base.config.domains.lm import LmSettings
-from base.lm.catalog import ModelCatalog
-from base.lm.catalog.provider_keys import ProviderKeys
+from base.config.tests.configuration import snapshot_process_config
 from base.lm.effort import ReasoningEffort
-from base.packages.tests.model_catalog import inert_keys
-from gateway.agents.reply_suggestion.configuration import reply_suggestion_service
-from gateway.agents.reply_suggestion.service import validate_models
-from gateway.agents.reply_suggestion.tests.support import Settings
+from gateway.agents.reply_suggestion.configuration import (
+    draft_model_options,
+    reply_suggestion_policy,
+)
+from gateway.agents.reply_suggestion.service import DRAFT_TIMEOUT_S
 
 
 def test_defaults() -> None:
@@ -38,78 +35,23 @@ def test_the_input_budget_must_be_positive() -> None:
         LmSettings.model_validate({"MEIVA_REPLY_SUGGESTION_MAX_INPUT_TOKENS": 0})
 
 
-def test_the_default_models_belong_to_their_catalogs(model_catalog: ModelCatalog) -> None:
-    lm = LmSettings()
-    settings = Settings()
-    settings.model = lm.reply_suggestion_model
-    settings.gate_model = lm.reply_suggestion_gate_model
+def test_the_policy_is_read_from_the_config_owner_each_time() -> None:
+    config = snapshot_process_config()
+    config.set_field("reply_suggestion_gate_threshold", 0.7)
+    config.set_field("reply_suggestion_max_candidates", 2)
 
-    validate_models(settings.policy(), model_catalog)
+    first = reply_suggestion_policy(config)
+    config.set_field("reply_suggestion_enabled", False)
+    second = reply_suggestion_policy(config)
 
-
-def test_a_chat_model_cannot_be_the_gate(model_catalog: ModelCatalog) -> None:
-    settings = Settings()
-    settings.model = "deepseek-flash"
-    settings.gate_model = "deepseek-flash"
-
-    with pytest.raises(
-        ValueError, match=r"reply_suggestion_gate_model.*not a registered decision model"
-    ):
-        validate_models(settings.policy(), model_catalog)
+    assert (first.gate_threshold, first.max_candidates, first.enabled) == (0.7, 2, True)
+    assert second.enabled is False
 
 
-def test_a_decision_model_cannot_draft(model_catalog: ModelCatalog) -> None:
-    settings = Settings()
-    settings.model = "jev-1.13.0"
-    settings.gate_model = "jev-1.13.0"
+def test_the_draft_model_is_built_with_reasoning_off_and_a_bounded_wait() -> None:
+    options = draft_model_options("override-model")
 
-    with pytest.raises(ValueError, match=r"reply_suggestion_model.*not a registered chat model"):
-        validate_models(settings.policy(), model_catalog)
-
-
-def test_an_unknown_gate_model_is_refused(model_catalog: ModelCatalog) -> None:
-    settings = Settings()
-    settings.model = "deepseek-flash"
-    settings.gate_model = "jev-0.0.0"
-
-    with pytest.raises(ValueError, match=r"jev-0\.0\.0"):
-        validate_models(settings.policy(), model_catalog)
-
-
-def test_a_disabled_feature_does_not_check_its_models(model_catalog: ModelCatalog) -> None:
-    settings = Settings()
-    settings.enabled = False
-    settings.model = "nope"
-    settings.gate_model = "nope"
-
-    validate_models(settings.policy(), model_catalog)
-
-
-def test_the_draft_model_is_built_with_reasoning_off(
-    model_catalog: ModelCatalog,
-) -> None:
-    built: list[tuple[str, dict[str, Any]]] = []
-
-    def fake_build(model: str, **kwargs: Any) -> object:
-        built.append((model, kwargs))
-        return object()
-
-    lm = LmSettings()
-    config = SimpleNamespace(view=SimpleNamespace(lm=lm))
-
-    service = reply_suggestion_service(
-        config,  # pyright: ignore[reportArgumentType]
-        db=object(),  # pyright: ignore[reportArgumentType]
-        catalog_reader=lambda: model_catalog,
-        keys_reader=inert_keys,
-        rendering=object(),  # pyright: ignore[reportArgumentType]
-        model_builder=fake_build,
-    )
-    keys = ProviderKeys({"DEEPSEEK_API_KEY": "sk-test"})
-    service._draft_model("deepseek-flash", model_catalog, keys)
-
-    ((model, kwargs),) = built
-    assert model == "deepseek-flash"
-    assert kwargs["reasoning_effort"] is ReasoningEffort.NONE
-    assert kwargs["catalog"] is model_catalog
-    assert kwargs["keys"] is keys
+    assert options["reasoning_effort"] is ReasoningEffort.NONE
+    assert options["timeout"] == DRAFT_TIMEOUT_S
+    assert options["meter"] is False
+    assert options["llm_override"] == "override-model"

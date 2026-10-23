@@ -1,10 +1,9 @@
 """The actual SDK keeps guarded identity across response loss and router downgrade."""
 
-from collections.abc import Iterator
+from collections.abc import Generator
 from dataclasses import replace
 from functools import partial
 from typing import Any
-from unittest.mock import MagicMock
 
 import httpx
 import psycopg
@@ -21,18 +20,18 @@ from gateway.agents import router as agent_router
 from gateway.app import lifespan
 from gateway.tests.agents.gateway_auth import without_credentials
 from gateway.tests.auth.gateway_config import GatewayTestClient, gateway_test_client
-from gateway.tests.auth.gateway_tests import local_spawn_in_process as local_spawn_in_process
+from gateway.tests.auth.sdk_transport import AppTransport, wired_sdk
 from gateway.tests.lifecycle.creation.test_guarded_creation import PATH, SECRET
 from gateway.tests.lifecycle.creation.test_guarded_creation import client as client
-from meiva.gateway_client import spawn, use_client
-from meiva.sdk_surface import agent_identity
+from gateway.tests.lifecycle.creation.test_guarded_creation import runner as runner
+from meiva.gateway_client import spawn
 
 
 @pytest.fixture
-def sdk_http() -> Iterator[MagicMock]:
-    http = MagicMock()
-    with use_client(http):
-        yield http
+def wire(client: GatewayTestClient) -> Generator[AppTransport]:
+    """The SDK's gateway client, wired into the guarded-creation app through a recording transport."""
+    with wired_sdk(client) as transport:
+        yield transport
 
 
 def sdk(**kwargs: Any) -> int:
@@ -47,29 +46,18 @@ def sdk(**kwargs: Any) -> int:
     return spawn(**(args | kwargs))
 
 
-def httpx_response_of(response: Any) -> httpx.Response:
-    # Starlette's TestClient uses httpx2; preserve the real ASGI result while
-    # giving the SDK its production httpx response/error boundary.
-    return httpx.Response(
-        response.status_code,
-        headers=dict(response.headers),
-        content=response.content,
-        request=httpx.Request(response.request.method, str(response.request.url)),
-    )
-
-
 def _older(current: FastAPI) -> FastAPI:
     older = FastAPI(
         lifespan=partial(
             lifespan,
             process=current.state.gateway_process,
             process_ownership="borrowed",
-            services=current.state.lifespan_services,
         ),
         middleware=current.user_middleware,
     )
     older.state.gateway_config = current.state.gateway_config
     older.state.gateway_process = current.state.gateway_process
+    older.state.catalog = current.state.catalog
     older.exception_handlers = current.exception_handlers.copy()
     routes = APIRouter()
     routes.routes = [
@@ -81,96 +69,74 @@ def _older(current: FastAPI) -> FastAPI:
 
 @pytest.mark.usefixtures("retry_waits")
 def test_sdk_lost_response_downgrade_and_restore_one_birth(
-    client: TestClient,
-    db_conn: psycopg.Connection,
-    sdk_http: MagicMock,
+    client: GatewayTestClient, db_conn: psycopg.Connection, wire: AppTransport
 ) -> None:
-    target = client
-    lose = True
-    calls: list[tuple[str, dict[str, Any]]] = []
-
-    def submit(path: str, **kwargs: Any) -> httpx.Response:
-        nonlocal lose
-        calls.append((path, kwargs))
-        response = target.post(path, **kwargs)
-        if lose:
-            assert response.status_code in (200, 201), response.text
-            raise httpx.ReadTimeout("committed response lost")
-        return httpx_response_of(response)
-
-    http = sdk_http
-    http.post.side_effect = submit
+    wire.losing_responses = True
     with pytest.raises(GatewayUnavailable):
         sdk()
-    lost_attempts = len(calls)
+    lost_attempts = len(wire.requests)
     assert lost_attempts > 1
-    lose = False
+    wire.losing_responses = False
     row = db_conn.execute("SELECT id FROM agents").fetchone()
     assert row is not None
     original = row[0]
     assert isinstance(client.app, FastAPI)
     with gateway_test_client(
-        _older(client.app),
-        headers={"Authorization": f"Bearer {SECRET}"},
+        _older(client.app), headers={"Authorization": f"Bearer {SECRET}"}
     ) as old:
-        target = old
+        wire.target = old
         with pytest.raises(httpx.HTTPStatusError) as error:
             sdk()
         assert error.value.response.status_code in (404, 405)
-    target = client
+    wire.target = client
     assert sdk() == original
-    assert len(calls) == lost_attempts + 2
-    assert all(call == calls[0] for call in calls)
-    assert db_conn.execute("SELECT count(*) FROM agents").fetchone() == (1,)
-    assert db_conn.execute(
-        "SELECT count(*) FROM audit_events WHERE event_name='spawn'"
-    ).fetchone() == (1,)
-    assert db_conn.execute("SELECT count(*) FROM inbound_messages").fetchone() == (1,)
-    with pytest.raises(httpx.HTTPStatusError) as conflict:
-        sdk(spawner="agent:999")
-    assert conflict.value.response.status_code == 409
-    with pytest.raises(httpx.HTTPStatusError) as changed:
-        sdk(prompt="changed")
-    assert changed.value.response.status_code == 409
-    assert db_conn.execute("SELECT count(*) FROM agents").fetchone() == (1,)
-    http.get.assert_not_called()
+    assert len(wire.requests) == lost_attempts + 2
+    assert len(wire.distinct()) == 1
+    assert _birth_counts(db_conn) == (1, 1, 1)
+    assert _refused_status(spawner="agent:999") == 409
+    assert _refused_status(prompt="changed") == 409
+    assert _birth_counts(db_conn)[0] == 1
+    assert {request.method for request in wire.requests} == {"POST"}
+
+
+def _refused_status(**options: Any) -> int:
+    with pytest.raises(httpx.HTTPStatusError) as refused:
+        sdk(**options)
+    return refused.value.response.status_code
+
+
+# meiva:note
+# Agents, spawn audit events and inbound messages: one birth leaves one of each.
+def _birth_counts(db_conn: psycopg.Connection) -> tuple[int, int, int]:
+    counts: list[int] = []
+    for query in (
+        "SELECT count(*) FROM agents",
+        "SELECT count(*) FROM audit_events WHERE event_name='spawn'",
+        "SELECT count(*) FROM inbound_messages",
+    ):
+        row = db_conn.execute(query).fetchone()
+        assert row is not None
+        counts.append(row[0])
+    return counts[0], counts[1], counts[2]
 
 
 def test_old_router_never_accepts_or_falls_back(
-    client: TestClient,
-    db_conn: psycopg.Connection,
-    sdk_http: MagicMock,
+    client: GatewayTestClient, db_conn: psycopg.Connection, wire: AppTransport
 ) -> None:
     assert isinstance(client.app, FastAPI)
     with gateway_test_client(
-        _older(client.app),
-        headers={"Authorization": f"Bearer {SECRET}"},
+        _older(client.app), headers={"Authorization": f"Bearer {SECRET}"}
     ) as old:
-        http = sdk_http
-
-        def submit(path: str, **kwargs: Any) -> httpx.Response:
-            return httpx_response_of(old.post(path, **kwargs))
-
-        http.post.side_effect = submit
+        wire.target = old
         with pytest.raises(httpx.HTTPStatusError):
             sdk()
-        assert http.post.call_count == 1
-        assert http.post.call_args.args == (PATH,)
+    assert [request.url.path for request in wire.requests] == [PATH]
     assert db_conn.execute("SELECT count(*) FROM agents").fetchone() == (0,)
 
 
 def test_bearer_and_cookie_share_principal_but_revocation_blocks_replay(
-    client: GatewayTestClient,
-    db_conn: psycopg.Connection,
-    sdk_http: MagicMock,
+    client: GatewayTestClient, db_conn: psycopg.Connection, wire: AppTransport
 ) -> None:
-    http = sdk_http
-    active = client
-
-    def submit(path: str, **kwargs: Any) -> httpx.Response:
-        return httpx_response_of(active.post(path, **kwargs))
-
-    http.post.side_effect = submit
     original = sdk()
     login = client.post("/api/auth/login", json={"password": SECRET})
     assert login.status_code == 200
@@ -185,26 +151,17 @@ def test_bearer_and_cookie_share_principal_but_revocation_blocks_replay(
         cookies=dict(client.cookies),
     ) as rotated:
         without_credentials(rotated)
-        active = rotated
+        wire.target = rotated
         with pytest.raises(httpx.HTTPStatusError) as revoked:
             sdk()
     assert revoked.value.response.status_code == 401
     assert db_conn.execute("SELECT count(*) FROM agents").fetchone() == (1,)
 
 
+@pytest.mark.usefixtures("sdk_environment")
 def test_changed_sdk_context_same_principal_key_conflicts(
-    client: TestClient,
-    db_conn: psycopg.Connection,
-    monkeypatch: pytest.MonkeyPatch,
-    sdk_http: MagicMock,
+    client: TestClient, db_conn: psycopg.Connection, wire: AppTransport
 ) -> None:
-    http = sdk_http
-
-    def submit(path: str, **kwargs: Any) -> httpx.Response:
-        return httpx_response_of(client.post(path, **kwargs))
-
-    http.post.side_effect = submit
-    monkeypatch.setattr(agent_identity, "require_actor", lambda: "user")
     meiva.context.require_machine().set(name="local-test")
     original = meiva.agents.spawn(prompt="same raw inputs", idempotency_key="context")
     meiva.context.require_machine().set(name="another-machine")
@@ -212,4 +169,4 @@ def test_changed_sdk_context_same_principal_key_conflicts(
         meiva.agents.spawn(prompt="same raw inputs", idempotency_key="context")
     assert changed.value.response.status_code == 409
     assert db_conn.execute("SELECT id FROM agents").fetchall() == [(original,)]
-    assert {call.args[0] for call in http.post.call_args_list} == {PATH}
+    assert {request.url.path for request in wire.requests} == {PATH}

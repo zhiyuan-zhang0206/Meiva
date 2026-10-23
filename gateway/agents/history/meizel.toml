@@ -1,11 +1,14 @@
-exports = ["configuration.py", "conversation.py", "read_inputs.py", "timeline.py", "understanding.py"]
+exports = ["configuration.py", "conversation.py", "paging.py", "timeline.py", "understanding.py"]
 
 [uses]
 "configuration.py" = ["read_inputs.py"]
 "conversation.py" = ["timeline.py"]
-"timeline.py" = ["read_inputs.py"]
-"understanding.py" = ["read_inputs.py"]
+"timeline.py" = ["configuration.py", "cursor.py", "paging.py", "read_inputs.py"]
+"tests" = ["cursor.py", "paging.py", "read_inputs.py"]
+"understanding.py" = ["configuration.py", "read_inputs.py"]
 
 [purity]
 "__init__.py" = "strict"
+"cursor.py" = "strict"
+"paging.py" = "strict"
 "read_inputs.py" = "strict"

@@ -2,7 +2,7 @@ exports = ["collection_guard.py", "env_bootstrap.py", "gateway_config.py", "guar
 
 [uses]
 "guards.py" = ["env_bootstrap.py"]
-"provisioning.py" = ["env_bootstrap.py", "guards.py", "static_environment.py"]
+"provisioning.py" = ["env_bootstrap.py", "static_environment.py"]
 "static_environment.py" = ["guards.py"]
 "tests" = ["env_bootstrap.py", "guards.py", "plugin_registrations.py", "provisioning.py", "static_environment.py"]
 "unit" = ["gateway_config.py"]
@@ -17,8 +17,6 @@ exports = ["collection_guard.py", "env_bootstrap.py", "gateway_config.py", "guar
 [debt.first-party-patch]
 "guards.py#monkeypatch.setattr base.cluster.new_home_ports" = 1
 "guards.py#monkeypatch.setattr base.host.proc.hosting_exec_domain" = 1
-"guards.py#monkeypatch.setattr gateway.schedules.session_control.capture" = 1
-"guards.py#monkeypatch.setattr gateway.schedules.session_control.wait_consumed" = 1
 "guards.py#monkeypatch.setattr services.desktop.permissions_helper.launchd_job.run_bounded" = 1
 "guards.py#monkeypatch.setattr services.desktop.permissions_helper.lifecycle.run_bounded" = 1
 "provisioning.py#monkeypatch.setattr base.config.settings.data_plane.db_url" = 1

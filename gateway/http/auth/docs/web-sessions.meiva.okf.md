@@ -16,7 +16,10 @@ Parent node: [[gateway.meiva.okf.md|Gateway]].
 
 The gateway lifespan owns authentication rejection counters and client/path warning
 throttles. Middleware and its aggregate telemetry flusher share that instance; a
-new application lifespan starts with fresh counters and warning budgets.
+new application lifespan starts with fresh counters and warning budgets. Which rejections are
+expected noise (stale SSE reconnects, console tabs after a rollout) and when a repeat earns a
+warning again are `gateway/http/auth/rejection_policy.py`, a strict module over values; the log
+takes the monotonic `now` of each rejection from the middleware.
 
 The lifespan also owns one login failure limiter shared by all of its requests.
 Per-IP lockout, Retry-After, expiry, successful-login reset, and bounded eviction

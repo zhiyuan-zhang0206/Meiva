@@ -531,15 +531,11 @@ class TestTimelineDispatch:
         assert resp.status_code == 200
         assert [it["item_id"] for it in resp.json()["items"]] == ["0.0", "1.0"]
 
-
-def test_item_sort_key_is_numeric_not_lexical() -> None:
-    """item_id ordering is numeric (msg_idx, block_idx), so "10.0" follows "2.0"
-    and "3.10" follows "3.2" — a lexical sort would get both backwards."""
-    from gateway.agents.history.timeline import item_sort_key
-
-    assert item_sort_key("2.0") < item_sort_key("10.0")
-    assert item_sort_key("3.2") < item_sort_key("3.10")
-
+    # meiva:note
+    # End-to-end: an attach HumanMessage in the checkpoint must come back
+    # as a single kind=attach item with caption-only payload + image data
+    # URIs — not the old red system_marker with the base64 str()-d into the
+    # payload (Task #1668).
     def test_attach_message_renders_through_full_dispatch(
         self,
         db_conn: psycopg.Connection,
@@ -548,10 +544,6 @@ def test_item_sort_key_is_numeric_not_lexical() -> None:
         *,
         model_catalog: ModelCatalog,
     ) -> None:
-        """End-to-end: an attach HumanMessage in the checkpoint must come back
-        as a single kind=attach item with caption-only payload + image data
-        URIs — not the old red system_marker with the base64 str()-d into the
-        payload (Task #1668)."""
         from PIL import Image
 
         from agent.messages import attach_message
@@ -569,6 +561,8 @@ def test_item_sort_key_is_numeric_not_lexical() -> None:
 
         attach = attach_message(blocks=pack.blocks, text=pack.text, created_at=datetime.now(UTC))
         tid = create_agent(db_conn)
+        # meiva:note
+        # The redis-py client and its pubsub are untyped.
         self._put_checkpoint(tid, [attach])  # pyright: ignore[reportUnknownMemberType]
 
         resp = test_client.get(f"/api/agents/{tid}/timeline")

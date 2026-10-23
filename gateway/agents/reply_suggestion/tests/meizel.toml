@@ -1,4 +1,8 @@
+exports = ["support.py"]
+
 [uses]
-"test_configuration.py" = ["support.py"]
-"test_router.py" = ["support.py"]
+"test_cache.py" = []
+"test_configuration.py" = []
+"test_disconnect.py" = ["support.py"]
+"test_plan.py" = ["support.py"]
 "test_service.py" = ["support.py"]

@@ -7,9 +7,10 @@ tags: [gateway, agents, lm]
 
 # Reply suggestion verification
 
-Unit tests inject fake decision and chat models. They verify gating, validation, candidate
-transport, caching and keyboard behaviour, including preserving model-returned counts
-above three. They do not evaluate the usefulness judgement or generated reply quality;
+The judgments (`plan.py`) are asserted on values, and the cache on its own. The service tests run
+against a real agent, status and checkpoint in the test Postgres, with fake decision and chat
+models as its only doubles. They verify gating, validation, candidate transport, caching and
+keyboard behaviour, including preserving model-returned counts above three. They do not evaluate the usefulness judgement or generated reply quality;
 those require a benchmark with representative conversations and actual model outputs.
 
 Factory tests exercise the real LangChain and vendor SDKs with injected mock HTTP

@@ -5,7 +5,7 @@ Cross-machine dialing in a split cluster has exactly two facts to get right:
 call. This document is the single written contract for both. Code that
 advertises an endpoint, dials a remote endpoint, or verifies a credential
 references this file (see `base/cluster/machines.py`, `cli/commands/observability/otel_collector.py`,
-`gateway/routers/pages.py`, `services/wake/heartbeat/station_probe.py`).
+`gateway/routers/page_serving/pages.py`, `services/wake/heartbeat/station_probe.py`).
 
 ## Endpoint advertisement
 
@@ -57,7 +57,7 @@ Three rules:
 
 ## SSRF guard
 
-The page reverse proxy (`gateway/routers/pages.py`) dials only loopback or
+The page reverse proxy (`gateway/routers/page_serving/pages.py`) dials only loopback or
 the registering agent's home machine — its `agents_meta.machine` name plus
 the hostnames its `machine_units` rows advertise. The unit advertisement is
 therefore also the proxy's allowlist: a page server on a machine registers

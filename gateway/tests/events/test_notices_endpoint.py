@@ -1,4 +1,3 @@
-import json
 from concurrent.futures import ThreadPoolExecutor
 from uuid import uuid4
 
@@ -7,9 +6,10 @@ import psycopg
 from base.agents.observation.snapshot import select_one
 from base.api_contracts.idempotency import keyed_headers
 from base.config import settings
-from base.events.live.bus import EventBus, event_bus_config_from_settings
+from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 from gateway.tests.auth.gateway_config import gateway_test_client
+from gateway.tests.events.sse_support import published_events
 
 
 def seed_agent(db_conn: psycopg.Connection, status: str = "idling") -> int:
@@ -604,33 +604,19 @@ def test_dismiss_on_fyi_is_409(db_conn: psycopg.Connection) -> None:
     assert pending_rows(db_conn, a) == []
 
 
-class _RecordingBus(EventBus):
-    def __init__(self) -> None:
-        super().__init__(event_bus_config_from_settings())
-        self.payloads: list[dict[str, object]] = []
-
-    async def publish_best_effort(
-        self, payload: str, *, channel: str | None = None, context: str = ""
-    ) -> int | None:
-        self.payloads.append(json.loads(payload))
-        return 1
-
-
 def test_answer_event_carries_resolution_fields(
     db_conn: psycopg.Connection, event_bus: EventBus
 ) -> None:
     a = seed_agent(db_conn)
     nid = insert_notice(db_conn, a, "ship it?", require_response=True)
-    bus = _RecordingBus()
-    with gateway_test_client() as client:
-        client.app.state.bus = bus
+    with published_events(event_bus) as payloads, gateway_test_client() as client:
         resp = client.post(
             f"/api/keyed/v1/agents/{a}/notices/{nid}/resolve",
             json={"action": "answer", "reply": "yes"},
             headers={"Idempotency-Key": str(uuid4()), "Idempotency-Scope": "principal-v1"},
         )
     assert resp.status_code == 201
-    resolved = [e for e in bus.payloads if e.get("role") == "notice_resolved"]
+    resolved = [e for e in payloads if e.get("role") == "notice_resolved"]
     assert len(resolved) == 1
     event = resolved[0]
     assert event["notice_id"] == nid
@@ -644,9 +630,7 @@ def test_a_second_notice_is_refused_while_one_is_open(
     db_conn: psycopg.Connection, event_bus: EventBus
 ) -> None:
     a = seed_agent(db_conn)
-    bus = _RecordingBus()
-    with gateway_test_client() as client:
-        client.app.state.bus = bus
+    with published_events(event_bus) as payloads, gateway_test_client() as client:
         first = client.post(
             f"/api/agents/{a}/notices",
             json={"title": "first", "require_response": True},
@@ -672,8 +656,8 @@ def test_a_second_notice_is_refused_while_one_is_open(
         )
         rows = cur.fetchall()
     assert rows == [("first", None)]
-    assert [e for e in bus.payloads if e.get("role") == "notice_resolved"] == []
-    assert len([e for e in bus.payloads if e.get("role") == "notice_posted"]) == 1
+    assert [e for e in payloads if e.get("role") == "notice_resolved"] == []
+    assert len([e for e in payloads if e.get("role") == "notice_posted"]) == 1
 
 
 def test_concurrent_creations_leave_exactly_one_open_notice(

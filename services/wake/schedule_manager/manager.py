@@ -19,24 +19,41 @@ edit, delete) authorizes another attempt.
 from __future__ import annotations
 
 import logging
-import shlex
+import math
 import threading
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
 from psycopg_pool import ConnectionPool
 
 from base import telemetry
-from base.clock import Clock, Timers
 from base.cluster import session_name
-from base.config import settings
 from base.db.transaction import write_transaction
 from base.deploy.schedule_timing import SCHEDULE_STALL_ALERT_AFTER_S
-from base.paths import meiva_home
-from base.sessions.env_forwarding import forward_env_dict
 from base.sessions.protocol import SessionBackend
 from services.wake.schedule_manager import host_restart, revisions
-from services.wake.schedule_manager.recovery_gate import RecoveryGate
+from services.wake.schedule_manager.blocked_streak import (
+    ReapLog,
+    Streak,
+    give_up_message,
+    host_unknown_due,
+    note_blocked,
+    reap_log_step,
+)
+from services.wake.schedule_manager.convergence import (
+    Desired,
+    Prepare,
+    Reclaim,
+    SyncAction,
+    launch_command,
+    plan_sync,
+    prepare_verdict,
+    reclaim_verdict,
+)
+from services.wake.schedule_manager.launch_events import emit_gate_held, emit_launch_refused
+from services.wake.schedule_manager.manager_policy import ManagerPolicy
+from services.wake.schedule_manager.recovery_gate import GateState, observe_gate, refuse
 
 _log = logging.getLogger(__name__)
 
@@ -45,68 +62,56 @@ _log = logging.getLogger(__name__)
 # lag on a crash is fine and keeps the polling cheap.
 POLL_INTERVAL_S = 5.0
 
-PTY_FAILURE_LOG_INTERVAL_S = 60.0
 STALL_ALERT_AFTER_S = SCHEDULE_STALL_ALERT_AFTER_S
-
-# meiva:note
-# One streak of failed convergence attempts for a schedule ends in a give-up after
-# this long. Two failures further apart than the gap (a stopped or paused service
-# sits between them) are not one streak.
-BLOCKED_GIVE_UP_AFTER_S = 600.0
-BLOCKED_STREAK_GAP_S = 60.0
 
 # meiva:link services/wake/schedule_manager/docs/host-replacement.meiva.okf.md
 INTERRUPTED_HOST_REPLACED = "interrupted (session host replaced)"
-HOST_GENERATION_UNKNOWN_LOG_INTERVAL_S = 300.0
-
-
-# meiva:link services/wake/schedule_manager/docs/host-replacement.meiva.okf.md
-def auto_restart_max_per_window() -> int:
-    return settings.gateway.schedule_auto_restart_max_per_window
-
-
-# meiva:link services/wake/schedule_manager/docs/host-replacement.meiva.okf.md
-def auto_restart_window_seconds() -> float:
-    return settings.gateway.schedule_auto_restart_window_seconds
-
 
 # Repo root (services/wake/schedule_manager/../../.. == <repo>/) — the cwd the runner launches from, so its
 # relative `.venv/bin/python` resolves into this checkout's venv.
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
+# meiva:note
+# The reconcile logic for the ``schedules`` table. One per cluster, owned by
+# the ``schedule-manager`` service, whose loops call `reconcile` and
+# `sync_one`. Launch admission and the stall-alert clock are columns of the
+# schedule row; schedule sessions are never touched when the service stops
+# (they survive it).
+#
+# The clock is a value: each tick the loop passes ``now`` (a monotonic reading), and the
+# streak, log-cooldown and gate decisions are the pure functions of ``blocked_streak``,
+# ``recovery_gate`` and ``convergence``. ``policy``, ``home`` and ``launch_env`` are read once
+# by the composition root; the manager never reads settings or the environment.
 class ScheduleManager:
-    """The reconcile logic for the ``schedules`` table. One per cluster, owned by
-    the ``schedule-manager`` service, whose loops call `reconcile` and
-    `sync_one`. Launch admission and the stall-alert clock are columns of the
-    schedule row; schedule sessions are never touched when the service stops
-    (they survive it)."""
-
     def __init__(
         self,
         db_pool: ConnectionPool[Any],
         *,
         backend: SessionBackend,
-        timers: Timers,
         repo_root: Path,
+        home: Path,
+        policy: ManagerPolicy,
+        launch_env: Mapping[str, str],
     ) -> None:
         self._pool = db_pool
         self._backend = backend
-        self._timers = timers
         self._repo_root = repo_root
+        self._home = home
+        self._policy = policy
+        self._launch_env = launch_env
         # Enabled sessions whose stale same-name survivor resisted a reap. A
         # live session normally means adopt, but these need another official
         # reap before their replacement may launch. In memory: a restarted
         # service meets the same survivor again (a session of another generation
         # is reaped by `_live_ids` itself).
         self._reap_retries: set[int] = set()
-        # schedule id -> (last error-log monotonic time, suppressed failures).
         # A D-state survivor can resist each five-second reconcile forever; log
         # the first failure and periodic summaries rather than flooding ERROR.
-        self._reap_failure_logs: dict[int, tuple[float, int]] = {}
-        # schedule id -> (first, latest) monotonic time of the current streak of
-        # failed convergence attempts.
-        self._blocked: dict[int, tuple[float, float]] = {}
+        self._reap_failure_logs: dict[int, ReapLog] = {}
+        # meiva:note
+        # The current streak of failed convergence attempts of each schedule.
+        self._blocked: dict[int, Streak] = {}
         # schedule id -> desired revision at the moment the manager gave up. The
         # process is left alone until the desired revision changes (an explicit
         # start, stop, restart, edit or delete); in memory, so a restarted service
@@ -115,14 +120,10 @@ class ScheduleManager:
         # Serializes the reconcile tick against the sync requests, which run on
         # separate threads and both touch the backend and launch-admission columns.
         self._lock = threading.Lock()
-        self._recovery = RecoveryGate(
-            alert_after_s=settings.gateway.schedule_recovery_gate_alert_seconds,
-            emit_held=self._emit_gate_held,
-            emit_refusal=self._emit_launch_refused,
-        )
+        self._gate = GateState()
         self._host_generation: str | None = None
         self._host_restarts = host_restart.AutoRestartLedger()
-        self._host_generation_unknown_logged = 0.0
+        self._host_generation_unknown_logged = -math.inf
 
     # ── control (the sync-request consumer calls this) ──────────────────────
 
@@ -133,108 +134,102 @@ class ScheduleManager:
     # session, missing safe session provenance); the durable request stays
     # queued for the next try. A blocked streak is bounded: once the manager
     # gives up it returns True, so the request is consumed and not retried.
-    def sync_one(self, schedule_id: int) -> bool:
+    def sync_one(self, schedule_id: int, *, now: float) -> bool:
         with self._lock:
             self._host_generation = self._read_host_generation()
-            converged = self._sync_revision(schedule_id)
+            converged = self._sync_revision(schedule_id, now)
             if converged:
                 self._blocked.pop(schedule_id, None)
             return converged or schedule_id in self._abandoned
 
-    def _sync_revision(self, schedule_id: int) -> bool:
+    def _sync_revision(self, schedule_id: int, now: float) -> bool:
         if self._is_abandoned(schedule_id):
             return False
         with revisions.claim_convergence(self._pool, schedule_id) as owned:
             if not owned:
                 return False
-            return self._sync_owned_revision(schedule_id)
+            return self._sync_owned_revision(schedule_id, now)
 
-    def _sync_owned_revision(self, schedule_id: int) -> bool:
+    def _sync_owned_revision(self, schedule_id: int, now: float) -> bool:
         wanted = revisions.desired(self._pool, schedule_id)
-        if wanted is None or not wanted.enabled:
-            if not self._reap(schedule_id, owned=True):
+        live = (
+            wanted is not None
+            and wanted.enabled
+            and schedule_id in self._live_ids(now, owned_id=schedule_id)
+        )
+        observed = revisions.launched_revision(schedule_id) if live else None
+        action = plan_sync(wanted, live=live, observed=observed)
+        if action is SyncAction.REAP_UNWANTED:
+            return self._reap_unwanted(schedule_id, wanted, now)
+        # meiva:note
+        # every other action is for an enabled schedule.
+        assert wanted is not None  # noqa: S101
+        return self._apply_enabled(action, schedule_id, wanted, now)
+
+    def _reap_unwanted(self, schedule_id: int, wanted: Desired | None, now: float) -> bool:
+        if not self._reap(schedule_id, now, owned=True):
+            return False
+        if wanted is not None:
+            revisions.mark_applied(self._pool, schedule_id, wanted.revision)
+        return True
+
+    def _apply_enabled(
+        self, action: SyncAction, schedule_id: int, wanted: Desired, now: float
+    ) -> bool:
+        match action:
+            case SyncAction.ADOPT_LEGACY | SyncAction.SETTLED:
+                return True
+            case SyncAction.HOLD_UNREADABLE:
+                self._note_blocked(
+                    schedule_id, "launch provenance of the live session is unreadable", now
+                )
                 return False
-            if wanted is not None:
-                revisions.mark_applied(self._pool, schedule_id, wanted.revision)
-            return True
-        if schedule_id in self._live_ids(owned_id=schedule_id):
-            observed = revisions.launched_revision(schedule_id)
-            if observed is None:
-                # Existing legacy sessions at revision zero are adopted. For a
-                # pending versioned command missing provenance means uncertain,
-                # not permission to kill a possibly already-applied execution.
-                legacy = wanted.revision == wanted.applied == 0
-                if not legacy:
-                    self._note_blocked(
-                        schedule_id, "launch provenance of the live session is unreadable"
-                    )
-                return legacy
-            if observed == wanted.revision:
+            case SyncAction.ADOPT_CURRENT:
                 self._mark_running(schedule_id, wanted.revision, self._host_generation)
                 return True
-            if not self._reap(schedule_id, owned=True):
-                self._reap_retries.add(schedule_id)
-                return False
-        elif wanted.revision == wanted.applied and wanted.status in (
-            "running",
-            "completed",
-            "error",
-        ):
-            if wanted.status != "running":
-                return True
-            if not self._reclaim_after_host_replacement(schedule_id, wanted):
-                self._mark_lost(schedule_id, wanted.revision)
-                return True
-        return self._launch_revision(schedule_id)
+            case SyncAction.REPLACE_STALE:
+                if not self._reap(schedule_id, now, owned=True):
+                    self._reap_retries.add(schedule_id)
+                    return False
+            case SyncAction.RECLAIM_RUNNING:
+                if not self._reclaim_after_host_replacement(schedule_id, wanted, now):
+                    self._mark_lost(schedule_id, wanted.revision)
+                    return True
+            case _:
+                pass
+        return self._launch_revision(schedule_id, now)
 
-    def _launch_revision(self, schedule_id: int) -> bool:
+    def _launch_revision(self, schedule_id: int, now: float) -> bool:
         from base.deploy.lifecycle import start_serving
 
         with start_serving.recovery_permitted() as permitted:
             if not permitted:
-                self._recovery.refusal(
+                self._refuse_launch(
                     schedule_id, "the serving receipt does not name this root; run meiva start"
                 )
                 return False
-            self._launch(schedule_id)
+            self._launch(schedule_id, now)
         latest = revisions.desired(self._pool, schedule_id)
         if latest is None or latest.revision != latest.applied:
-            self._recovery.refusal(schedule_id, "the launch did not record the desired revision")
+            self._refuse_launch(schedule_id, "the launch did not record the desired revision")
             return False
         return True
 
-    def _emit_gate_held(self, held_for_s: float) -> None:
-        _log.warning(
-            "recovery gate closed for %.0fs — schedule relaunches are refused until a start "
-            "publishes this root's serving receipt",
-            held_for_s,
-        )
-        telemetry.emit(
-            "telemetry",
-            event_name="schedule_recovery_gated",
-            level="warning",
-            attributes={"held_for_s": round(held_for_s, 1)},
-        )
-
-    def _emit_launch_refused(self, schedule_id: int, reason: str) -> None:
-        _log.warning("schedule %s: launch refused (%s)", schedule_id, reason)
-        telemetry.emit(
-            "telemetry",
-            event_name="schedule_launch_refused",
-            level="warning",
-            attributes={"schedule_id": schedule_id, "reason": reason},
-        )
+    def _refuse_launch(self, schedule_id: int, reason: str) -> None:
+        self._gate, first = refuse(self._gate, schedule_id)
+        if first:
+            emit_launch_refused(schedule_id, reason)
 
     # ── reconcile (blocking: session backend + DB, run via asyncio.to_thread) ──
 
-    def reconcile(self) -> None:
+    def reconcile(self, *, now: float) -> None:
         with self._lock:
-            self._reconcile_locked()
+            self._reconcile_locked(now)
 
-    def _reconcile_locked(self) -> None:
+    def _reconcile_locked(self, now: float) -> None:
         self._host_generation = self._read_host_generation()
         if self._host_generation is None:
-            self._note_host_generation_unknown()
+            self._note_host_generation_unknown(now)
             return
         # A given-up schedule is not retried: only a new revision lifts that.
         self._reap_retries.difference_update(self._abandoned)
@@ -242,7 +237,7 @@ class ScheduleManager:
         # Read liveness before status: on a clean exit the runner commits
         # status='completed' before its process exits (and the session dies), so a
         # session seen dead here is guaranteed to already carry its terminal status.
-        live = self._live_ids()  # {id}
+        live = self._live_ids(now)  # {id}
         enabled_rows = self._load_enabled()
         enabled = set(enabled_rows)
         known = live | enabled
@@ -253,25 +248,38 @@ class ScheduleManager:
         # reconcile retry rather than adopting the stale survivor forever.
         retrying.intersection_update(live)
         for sid in retrying:
-            if self._retry_reap(sid):
+            if self._retry_reap(sid, now):
                 live.remove(sid)
 
         # Kill sessions we no longer want (disabled / deleted).
         orphans = live - enabled
         for sid in orphans:
             if sid not in retrying:
-                self._sync_revision(sid)
+                self._sync_revision(sid, now)
 
         for sid in sorted(enabled):
             wanted = revisions.desired(self._pool, sid)
             if wanted is not None and (
                 wanted.revision != wanted.applied or (sid in live and wanted.status == "error")
             ):
-                self._sync_revision(sid)
-        live = self._live_ids()
+                self._sync_revision(sid, now)
+        live = self._live_ids(now)
         enabled_rows = self._load_enabled()
-        self._launch_missing(enabled_rows, sorted(set(enabled_rows) - live))
-        self._recovery.observe()
+        self._launch_missing(enabled_rows, sorted(set(enabled_rows) - live), now)
+        self._observe_recovery_gate(now)
+
+    def _observe_recovery_gate(self, now: float) -> None:
+        from base.deploy.lifecycle import start_serving
+
+        step = observe_gate(
+            self._gate,
+            permitted=start_serving.is_serving(),
+            now=now,
+            alert_after_s=self._policy.recovery_gate_alert_seconds,
+        )
+        self._gate = step.state
+        if step.held_for_s is not None:
+            emit_gate_held(step.held_for_s)
 
     def _forget_unknown(self, known: set[int]) -> None:
         """Drop per-schedule retry state of schedules that are neither live nor enabled."""
@@ -283,11 +291,11 @@ class ScheduleManager:
         self._abandoned = {sid: rev for sid, rev in self._abandoned.items() if sid in known}
         self._host_restarts.prune(known)
 
-    def _launch_missing(self, enabled_rows: dict[int, str], missing: list[int]) -> None:
+    def _launch_missing(self, enabled_rows: dict[int, str], missing: list[int], now: float) -> None:
         """Apply explicit revisions; an admitted missing execution is never relaunched."""
         for sid in missing:
             if enabled_rows[sid] not in ("completed", "error"):
-                self._sync_revision(sid)
+                self._sync_revision(sid, now)
 
     def _mark_lost(self, schedule_id: int, revision: int) -> None:
         with write_transaction(self._pool) as conn:
@@ -312,9 +320,8 @@ class ScheduleManager:
     # meiva:note
     # While the session host does not answer, one reconcile pass takes no action: no session is declared lost, no schedule changes status, and no launch is attempted.
     # meiva:link services/wake/schedule_manager/docs/host-replacement.meiva.okf.md
-    def _note_host_generation_unknown(self) -> None:
-        now = self._timers.monotonic()
-        if now - self._host_generation_unknown_logged < HOST_GENERATION_UNKNOWN_LOG_INTERVAL_S:
+    def _note_host_generation_unknown(self, now: float) -> None:
+        if not host_unknown_due(self._host_generation_unknown_logged, now):
             return
         self._host_generation_unknown_logged = now
         _log.warning(
@@ -323,21 +330,30 @@ class ScheduleManager:
         )
 
     # meiva:link services/wake/schedule_manager/docs/host-replacement.meiva.okf.md
-    def _reclaim_after_host_replacement(self, schedule_id: int, wanted: revisions.Desired) -> bool:
+    def _reclaim_after_host_replacement(
+        self, schedule_id: int, wanted: Desired, now: float
+    ) -> bool:
         generation = self._host_generation
-        if (
-            generation is None
-            or wanted.launch_generation is None
-            or wanted.launch_generation == generation
-        ):
+        launched_in = wanted.launch_generation
+        window = self._policy.auto_restart_window_seconds
+        intent = None if generation is None or launched_in is None else (launched_in, generation)
+        replay = intent is not None and self._host_restarts.in_flight(schedule_id) == intent
+        attempts = self._host_restarts.recent(schedule_id, window, now)
+        verdict = reclaim_verdict(
+            generation=generation,
+            launched_in=launched_in,
+            replay=replay,
+            attempts=len(attempts),
+            limit=self._policy.auto_restart_max_per_window,
+        )
+        if verdict is Reclaim.NOT_REPLACED:
             return False
-        intent = (wanted.launch_generation, generation)
-        window = auto_restart_window_seconds()
-        replay = self._host_restarts.in_flight(schedule_id) == intent
-        attempts = self._host_restarts.recent(schedule_id, window)
-        if not replay and len(attempts) >= auto_restart_max_per_window():
+        # meiva:note
+        # The assert narrows a value the logic above guarantees.
+        assert generation is not None and launched_in is not None and intent is not None  # noqa: S101
+        if verdict is Reclaim.SUPPRESSED:
             host_restart.emit_auto_restart_suppressed(
-                schedule_id, wanted.launch_generation, generation, len(attempts), window
+                schedule_id, launched_in, generation, len(attempts), window
             )
             return False
         with write_transaction(self._pool) as conn:
@@ -345,18 +361,18 @@ class ScheduleManager:
                 "UPDATE schedules SET launch_count = 0 WHERE id = %s AND enabled "
                 "AND status = 'running' AND desired_revision = %s AND applied_revision = %s "
                 "AND launch_generation = %s",
-                (schedule_id, wanted.revision, wanted.applied, wanted.launch_generation),
+                (schedule_id, wanted.revision, wanted.applied, launched_in),
             ).rowcount
         if not authorized:
             return False
         self._close_null_runs(schedule_id, note=INTERRUPTED_HOST_REPLACED)
         if replay:
             return True
-        self._host_restarts.record(schedule_id, intent, window)
+        self._host_restarts.record(schedule_id, intent, window, now)
         _log.warning(
             "schedule %s: session host %s was replaced by %s; relaunching once in the new generation",
             schedule_id,
-            wanted.launch_generation,
+            launched_in,
             generation,
         )
         return True
@@ -410,20 +426,19 @@ class ScheduleManager:
                 },
             )
 
-    def _live_ids(self, *, owned_id: int | None = None) -> set[int]:
+    def _live_ids(self, now: float, *, owned_id: int | None = None) -> set[int]:
         from base.sessions.pty.allocation_freeze import current_generation
 
         live: set[int] = set()
         backend = self._backend
-        generation = current_generation(home=meiva_home())
+        generation = current_generation(home=self._home)
         prefix = session_name("schedule-")  # meiva-schedule-
         names = backend.list_sessions(prefix=prefix)
-        home = meiva_home()
         _log.debug(
             "schedule session scan backend=%s settings_home=%s record_dir=%s names=%s",
             type(backend).__name__,
-            home,
-            home / "run" / "pty",
+            self._home,
+            self._home / "run" / "pty",
             names,
         )
         for name in names:
@@ -451,6 +466,7 @@ class ScheduleManager:
                 )
                 if not self._reap(
                     schedule_id,
+                    now,
                     owned=owned_id == schedule_id,
                     expected_generation=observed_generation,
                 ):
@@ -476,7 +492,7 @@ class ScheduleManager:
                 (note, schedule_id),
             )
 
-    def _launch(self, schedule_id: int) -> None:
+    def _launch(self, schedule_id: int, now: float) -> None:
         wanted = revisions.desired(self._pool, schedule_id)
         if wanted is None or not wanted.enabled:
             return
@@ -491,7 +507,7 @@ class ScheduleManager:
         # ever reached for a schedule the manager does not consider live (the
         # reconcile loop adopts live sessions without relaunching), so a
         # same-name survivor is by definition stale.
-        if not self._prepare_launch(schedule_id, name, backend, wanted):
+        if not self._prepare_launch(schedule_id, name, backend, wanted, now):
             return
         if not self._claim_launch(schedule_id, wanted.revision, self._host_generation):
             return
@@ -506,11 +522,12 @@ class ScheduleManager:
         # backend sends in the request body of the pty-sessions service's 0600
         # socket (never argv — issue #974). The service submits the command once
         # the login shell is ready.
-        env = forward_env_dict()
+        env = dict(self._launch_env)
         env["MEIVA_SCHEDULE_ID"] = str(schedule_id)
         # The runner's cron math is timezone-DEFINED: it must fire on the
         # CLUSTER's clock, not on whatever ambient env the session happens to
-        # carry. forward_env_dict deliberately excludes cluster-scope keys (a
+        # meiva:note
+        # carry. The launch env deliberately excludes cluster-scope keys (a
         # child is expected to re-source .env at boot), but a unit .env that
         # misses MEIVA_TIMEZONE silently left the runner on the field default
         # America/Los_Angeles — 2026-08-21: schedule #3 fired at PT midnight
@@ -518,17 +535,8 @@ class ScheduleManager:
         # gateway's own resolved timezone into the spawn env so the fire time is
         # deterministic; dotenv_boot's authority pass still lets a declared .env
         # value override it (and never drops it — base/dotenv_boot._force_also).
-        env["MEIVA_TIMEZONE"] = Clock.from_settings().timezone
-        # `cd` first: the login shell's own profile can move the cwd the
-        # daemon forked with (macOS path_helper rebuilds PATH; a profile `cd`
-        # would strand the relative runner path). The `; exit $?` tail makes
-        # the shell end with the runner, so a dead runner never leaves a live
-        # session behind for the reconcile's session-existence liveness to
-        # misread (the Task #1115 bug-B class).
-        cmd = (
-            f"cd {shlex.quote(str(self._repo_root))} && "
-            f".venv/bin/python -m services.wake.schedule_manager.runner {schedule_id} {wanted.revision}; exit $?"
-        )
+        env["MEIVA_TIMEZONE"] = self._policy.timezone
+        cmd = launch_command(str(self._repo_root), schedule_id, wanted.revision)
         # No shell-TTL row is written here (deliberate exemption, task
         # #2614): agent_shell_ttls rows key on an agent id, and schedule
         # sessions have none (meiva-schedule-<id> is allocated outside the
@@ -560,7 +568,11 @@ class ScheduleManager:
                 schedule_id,
                 intent[0],
                 intent[1],
-                len(self._host_restarts.recent(schedule_id, auto_restart_window_seconds())),
+                len(
+                    self._host_restarts.recent(
+                        schedule_id, self._policy.auto_restart_window_seconds, now
+                    )
+                ),
             )
 
     def _mark_running(self, schedule_id: int, revision: int, epoch: str | None) -> None:
@@ -575,27 +587,31 @@ class ScheduleManager:
             )
 
     def _prepare_launch(
-        self, schedule_id: int, name: str, backend: SessionBackend, wanted: revisions.Desired
+        self, schedule_id: int, name: str, backend: SessionBackend, wanted: Desired, now: float
     ) -> bool:
         from base.sessions.pty.allocation_freeze import current_generation
 
-        if name not in backend.list_sessions():
-            return True
-        if backend.session_generation(name) == current_generation(home=meiva_home()):
-            observed = revisions.launched_revision(schedule_id)
-            if observed == wanted.revision:
+        present = name in backend.list_sessions()
+        current = present and backend.session_generation(name) == current_generation(
+            home=self._home
+        )
+        observed = revisions.launched_revision(schedule_id) if current else None
+        match prepare_verdict(
+            wanted, present=present, current_generation=current, observed=observed
+        ):
+            case Prepare.CLEAR:
+                return True
+            case Prepare.ADOPT:
                 self._mark_running(schedule_id, wanted.revision, self._host_generation)
                 return False
-            if observed is None:
-                if wanted.revision > 0:
-                    return False  # uncertain allocation: no authority to replace
-                if wanted.applied == 0 and wanted.status == "running":
-                    return False  # legacy healthy execution observed after a stale scan
-        _log.warning("schedule %s: reaping stale session %s", schedule_id, name)
-        if not self._reap(schedule_id, owned=True):
-            self._reap_retries.add(schedule_id)
-            return False
-        return True
+            case Prepare.HOLD:
+                return False
+            case Prepare.REAP:
+                _log.warning("schedule %s: reaping stale session %s", schedule_id, name)
+                if not self._reap(schedule_id, now, owned=True):
+                    self._reap_retries.add(schedule_id)
+                    return False
+                return True
 
     def _is_abandoned(self, schedule_id: int) -> bool:
         """Whether the manager gave up on this schedule at its current revision.
@@ -611,15 +627,12 @@ class ScheduleManager:
             return False
         return True
 
-    def _note_blocked(self, schedule_id: int, why: str) -> None:
+    def _note_blocked(self, schedule_id: int, why: str, now: float) -> None:
         """Count one failed convergence attempt; give up when the streak is old enough."""
-        now = self._timers.monotonic()
-        first, latest = self._blocked.get(schedule_id, (now, now))
-        if now - latest > BLOCKED_STREAK_GAP_S:
-            first = now
-        self._blocked[schedule_id] = (first, now)
-        if now - first >= BLOCKED_GIVE_UP_AFTER_S:
-            self._give_up(schedule_id, why, now - first)
+        streak, blocked_s = note_blocked(self._blocked.get(schedule_id), now)
+        self._blocked[schedule_id] = streak
+        if blocked_s is not None:
+            self._give_up(schedule_id, why, blocked_s)
 
     def _give_up(self, schedule_id: int, why: str, blocked_s: float) -> None:
         """Stop retrying: record the schedule as an error, alert, leave the process alone."""
@@ -627,10 +640,7 @@ class ScheduleManager:
         self._abandoned[schedule_id] = None if wanted is None else wanted.revision
         self._reap_retries.discard(schedule_id)
         self._blocked.pop(schedule_id, None)
-        message = (
-            f"Convergence gave up after {blocked_s:.0f}s: {why}; inspect the process, "
-            "stop it by hand if needed, then explicitly restart"
-        )
+        message = give_up_message(why, blocked_s)
         with write_transaction(self._pool) as conn:
             conn.execute(
                 "UPDATE schedules SET status = 'error', last_error = %s, updated_at = now() "
@@ -650,20 +660,20 @@ class ScheduleManager:
         )
 
     def _log_reap_failure(
-        self, schedule_id: int, name: str, failure: str, *, exc: BaseException | None = None
+        self,
+        schedule_id: int,
+        name: str,
+        failure: str,
+        now: float,
+        *,
+        exc: BaseException | None = None,
     ) -> None:
         """Log an unresolved reap at most once per schedule per cooldown."""
-        now = self._timers.monotonic()
-        prior = self._reap_failure_logs.get(schedule_id)
-        if prior is not None:
-            last_logged, suppressed = prior
-            if now - last_logged < PTY_FAILURE_LOG_INTERVAL_S:
-                self._reap_failure_logs[schedule_id] = (last_logged, suppressed + 1)
-                return
-        else:
-            suppressed = 0
-        self._reap_failure_logs[schedule_id] = (now, 0)
-        summary = "" if suppressed == 0 else f" (suppressed {suppressed} repeats)"
+        state, held_back = reap_log_step(self._reap_failure_logs.get(schedule_id), now)
+        self._reap_failure_logs[schedule_id] = state
+        if held_back is None:
+            return
+        summary = "" if held_back == 0 else f" (suppressed {held_back} repeats)"
         _log.error(
             "schedule %s: PTY reap %s for session %s%s",
             schedule_id,
@@ -673,7 +683,7 @@ class ScheduleManager:
             exc_info=exc,
         )
 
-    def _retry_reap(self, schedule_id: int) -> bool:
+    def _retry_reap(self, schedule_id: int, now: float) -> bool:
         with revisions.claim_convergence(self._pool, schedule_id) as owned:
             if not owned:
                 return False
@@ -682,19 +692,26 @@ class ScheduleManager:
             if wanted is not None and observed == wanted.revision == wanted.applied:
                 self._reap_retries.discard(schedule_id)
                 return False  # a different owner already installed this revision
-            return self._reap(schedule_id, owned=True)
+            return self._reap(schedule_id, now, owned=True)
 
     def _reap(
-        self, schedule_id: int, *, owned: bool = False, expected_generation: str | None = None
+        self,
+        schedule_id: int,
+        now: float,
+        *,
+        owned: bool = False,
+        expected_generation: str | None = None,
     ) -> bool:
         if owned:
-            return self._reap_owned(schedule_id, expected_generation)
+            return self._reap_owned(schedule_id, now, expected_generation)
         with revisions.claim_convergence(self._pool, schedule_id) as claimed:
             if not claimed:
                 return False
-            return self._reap_owned(schedule_id, expected_generation)
+            return self._reap_owned(schedule_id, now, expected_generation)
 
-    def _reap_owned(self, schedule_id: int, expected_generation: str | None = None) -> bool:
+    def _reap_owned(
+        self, schedule_id: int, now: float, expected_generation: str | None = None
+    ) -> bool:
         """Reap one schedule PTY through its identity-checked backend.
 
         The backend's success result means the session is confirmed gone. Do
@@ -713,16 +730,16 @@ class ScheduleManager:
         try:
             reaped, mode = self._backend.kill_session(name)
         except Exception as exc:
-            self._log_reap_failure(schedule_id, name, "raised", exc=exc)
-            self._note_blocked(schedule_id, f"the session {name} could not be reaped")
+            self._log_reap_failure(schedule_id, name, "raised", now, exc=exc)
+            self._note_blocked(schedule_id, f"the session {name} could not be reaped", now)
             return False
         if not reaped:
             # SessionBackend's false verdict means the session survived its
             # own identity-aware kill. Keep metadata truthful until the next
             # bounded retry of the same official path.
             self._set_status(schedule_id, "running")
-            self._log_reap_failure(schedule_id, name, "survived")
-            self._note_blocked(schedule_id, f"the session {name} survived its reap")
+            self._log_reap_failure(schedule_id, name, "survived", now)
+            self._note_blocked(schedule_id, f"the session {name} survived its reap", now)
             return False
         self._reap_retries.discard(schedule_id)
         self._reap_failure_logs.pop(schedule_id, None)

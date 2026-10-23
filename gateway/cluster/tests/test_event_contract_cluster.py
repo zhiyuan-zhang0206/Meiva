@@ -6,6 +6,6 @@ from base.events.contract import OPS_BUCKET_S, OPS_GRID_ORIGIN
 def test_grid_constants_are_single_definitions() -> None:
     assert OPS_BUCKET_S == 60
     assert OPS_GRID_ORIGIN.isoformat() == "2000-01-01T00:00:00+00:00"
-    from gateway.cluster.ops_series import GRID_ORIGIN as _LG_GRID
+    from gateway.cluster.monitor.ops_series import GRID_ORIGIN as _LG_GRID
 
     assert _LG_GRID == OPS_GRID_ORIGIN

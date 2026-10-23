@@ -1,28 +1,34 @@
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
+import asyncio
 from datetime import UTC, datetime, timedelta
-from typing import Any
 
 import psycopg
 import pytest
 from fastapi.testclient import TestClient
+from pydantic import TypeAdapter
 
+from base.events.live.bus import EventBus
+from gateway.events.sse import event_stream
+from gateway.events.sse_frames import SseCadence
 from gateway.tests.auth.gateway_config import GatewayTestClient, gateway_test_client
+from gateway.tests.events.sse_support import FakeRequest, refused_redis_url
 from gateway.tests.routers.alerts_api.alerts_support import (
     alert,
+    alerts_client,
     capture_im,
     ingest,
-    native_sender,
+    install_im,
     seed_alert_rows,
     webhook,
 )
 from gateway.tests.routers.alerts_api.alerts_support import (
-    alerts_auth_and_im as alerts_auth_and_im,
+    alerts_im as alerts_im,
 )
 from gateway.tests.routers.alerts_api.alerts_support import (
     client as client,
 )
+from ops.alerts import ALERTS_CHANNEL, AlertRow
 
 
 def test_list_unresolved_first_and_filters(db_conn: psycopg.Connection, client: TestClient) -> None:
@@ -125,9 +131,7 @@ def test_live_alerts_never_age_out_and_history_uses_recovery_time(
     assert resolved["meta"]["unresolved_count"] == 0
 
 
-def test_list_default_limit_comes_from_display_config(
-    db_conn: psycopg.Connection, client: GatewayTestClient
-) -> None:
+def test_list_default_limit_comes_from_display_config(db_conn: psycopg.Connection) -> None:
     now = datetime.now(UTC)
     seed_alert_rows(
         db_conn,
@@ -143,8 +147,8 @@ def test_list_default_limit_comes_from_display_config(
             for i in range(3)
         ],
     )
-    client.app.state.alerts_default_limit = 2
-    resp = client.get("/api/alerts")
+    with gateway_test_client(fields={"alerts_default_limit": 2}) as limited_client:
+        resp = limited_client.get("/api/alerts")
     assert resp.status_code == 200
     assert len(resp.json()["alerts"]) == 2
 
@@ -180,7 +184,7 @@ def test_list_unresolved_before_resolved(db_conn: psycopg.Connection, client: Te
 
 
 def test_ingest_rows_are_grafana_sourced(db_conn: psycopg.Connection) -> None:
-    with gateway_test_client() as client:
+    with alerts_client() as client:
         ingest(client, webhook(alerts=[alert(fingerprint="s1")]))
         ingest(client, webhook(alerts=[alert(fingerprint="s1")]))
     with db_conn.cursor() as cur:
@@ -189,7 +193,7 @@ def test_ingest_rows_are_grafana_sourced(db_conn: psycopg.Connection) -> None:
 
 
 def test_ingest_resolved_notifies_recovery(db_conn: psycopg.Connection) -> None:
-    with gateway_test_client() as client:
+    with alerts_client() as client:
         r1 = ingest(client, webhook(alerts=[alert(fingerprint="hp2")]))
         r2 = ingest(
             client,
@@ -229,36 +233,61 @@ def test_list_returns_source(db_conn: psycopg.Connection, client: TestClient) ->
     assert body["alerts"][0]["source"] == "grafana"
 
 
-def test_stream_endpoint_is_sse() -> None:
+# meiva:note
+# The route answers 200 with the SSE headers; a Redis that refuses the connection ends the
+# stream with an error frame (the stream's own behavior is covered in `gateway/tests/events`).
+def test_stream_endpoint_is_sse(db_conn: psycopg.Connection) -> None:
+    with gateway_test_client(
+        fields={"redis_url": refused_redis_url()}, raise_server_exceptions=False
+    ) as client:
+        resp = client.get("/api/alerts/stream")
+    assert resp.status_code == 200
+    assert resp.headers["content-type"].startswith("text/event-stream")
+    assert resp.headers["cache-control"] == "no-cache"
+    assert resp.headers["x-accel-buffering"] == "no"
+    assert b"event stream interrupted: ConnectionError" in resp.content
 
-    seen: dict[str, Any] = {}
 
-    async def fake_stream(*args: object, **kwargs: object) -> AsyncIterator[bytes]:
-        seen["args"] = args
-        seen["kwargs"] = kwargs
-        yield b": stream open\n\n"
+# meiva:note
+# The stream the route serves is the alerts channel, broadcast, validated as an alert row.
+def test_an_ingested_alert_reaches_a_subscriber_of_the_alerts_channel(
+    db_conn: psycopg.Connection, event_bus: EventBus
+) -> None:
 
-    with gateway_test_client() as client:
-        client.app.state.alerts_event_stream = fake_stream
-        with client.stream("GET", "/api/alerts/stream") as resp:
-            assert resp.status_code == 200
-            assert resp.headers["content-type"].startswith("text/event-stream")
-            assert resp.headers["cache-control"] == "no-cache"
-            assert resp.headers["x-accel-buffering"] == "no"
-    kwargs = seen["kwargs"]
-    assert kwargs["channel"] == "meiva:alerts"
-    assert kwargs["broadcast"] is True
+    async def scenario(client: GatewayTestClient) -> list[bytes]:
+        gen = event_stream(
+            event_bus,
+            0,
+            # meiva:note
+            # FakeRequest stands in for the ASGI request: the stream only asks it whether the client left.
+            FakeRequest(),  # pyright: ignore[reportArgumentType]
+            channel=ALERTS_CHANNEL,
+            broadcast=True,
+            validator=TypeAdapter(AlertRow),
+            poll_s=0.25,
+            cadence=SseCadence(),
+        )
+        frames = [await anext(gen)]
+        await asyncio.to_thread(ingest, client, webhook(alerts=[alert(fingerprint="live")]))
+        while not frames[-1].startswith(b"data: "):
+            frames.append(await asyncio.wait_for(anext(gen), timeout=10.0))
+        await gen.aclose()
+        return frames
+
+    with alerts_client() as client:
+        frame = asyncio.run(scenario(client))[-1]
+    assert b'"alertname":"test-rule"' in frame and b'"fingerprint":"live"' in frame
 
 
 def test_a_group_of_instances_is_one_im_and_one_row_each(
-    db_conn: psycopg.Connection,
+    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     alerts = [
         alert(alertname="machine offline", fingerprint=f"g{n}", summary=f"machine m{n} down")
         for n in range(4)
     ]
-    with gateway_test_client() as client:
-        sent = capture_im(client)
+    with alerts_client() as client:
+        sent = capture_im(monkeypatch)
         resp = ingest(client, webhook(alerts=alerts))
     assert resp.json() == {"processed": 4, "inserted": 4, "updated": 0, "notified": 4}
     assert len(sent) == 1
@@ -269,14 +298,16 @@ def test_a_group_of_instances_is_one_im_and_one_row_each(
         assert cur.fetchone() == (4, 4)
 
 
-def test_instances_of_different_rules_in_one_post_are_separate_messages() -> None:
+def test_instances_of_different_rules_in_one_post_are_separate_messages(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     alerts = [
         alert(alertname="rule-a", fingerprint="a1"),
         alert(alertname="rule-a", fingerprint="a2"),
         alert(alertname="rule-b", fingerprint="b1"),
     ]
-    with gateway_test_client() as client:
-        sent = capture_im(client)
+    with alerts_client() as client:
+        sent = capture_im(monkeypatch)
         resp = ingest(client, webhook(alerts=alerts))
     assert resp.json()["notified"] == 3
     assert len(sent) == 2
@@ -284,11 +315,11 @@ def test_instances_of_different_rules_in_one_post_are_separate_messages() -> Non
 
 
 def test_a_failed_group_send_leaves_every_instance_unnotified_for_the_next_resend(
-    db_conn: psycopg.Connection,
+    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     alerts = [alert(fingerprint=f"r{n}") for n in range(2)]
-    with gateway_test_client() as client:
-        sent = capture_im(client, ok=False)
+    with alerts_client() as client:
+        sent = capture_im(monkeypatch, ok=False)
         assert ingest(client, webhook(alerts=alerts)).json()["notified"] == 0
         sent.clear()
 
@@ -296,19 +327,19 @@ def test_a_failed_group_send_leaves_every_instance_unnotified_for_the_next_resen
             sent.append(text)
             return True
 
-        client.app.state.alert_group_notifier = native_sender(_ok)
+        install_im(monkeypatch, _ok)
         assert ingest(client, webhook(alerts=alerts)).json()["notified"] == 2
     assert len(sent) == 1
 
 
-def test_a_resolved_group_is_one_recovery_message() -> None:
+def test_a_resolved_group_is_one_recovery_message(monkeypatch: pytest.MonkeyPatch) -> None:
     firing = [alert(fingerprint=f"x{n}") for n in range(3)]
     resolved = [
         alert(status="resolved", fingerprint=f"x{n}", ends_at="2026-08-04T11:00:00Z")
         for n in range(3)
     ]
-    with gateway_test_client() as client:
-        sent = capture_im(client)
+    with alerts_client() as client:
+        sent = capture_im(monkeypatch)
         ingest(client, webhook(alerts=firing))
         sent.clear()
         assert ingest(client, webhook(status="resolved", alerts=resolved)).json()["notified"] == 3

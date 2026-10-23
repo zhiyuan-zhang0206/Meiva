@@ -24,7 +24,7 @@ _AGENT_SKILL_VIEW_TIMEOUT_S = 3.0
 
 def _local_commands(request: Request) -> list[CommandItem]:
     """The gateway-local catalog: the unscoped view and the availability fallback."""
-    discovered = request.app.state.command_catalog_discoverer()
+    discovered = request.app.state.command_catalog.discover()
     return [
         CommandItem(
             name=c["name"],
@@ -58,9 +58,8 @@ async def get_commands(request: Request, agent_id: int | None = None) -> list[Co
     if machine is None:
         _log.warning("commands: agent %s has no agents_meta row; using local fallback", agent_id)
         return _local_commands(request)
-    dispatch_fn = request.app.state.command_rpc_dispatcher
     try:
-        result = await dispatch_fn(
+        result = await cluster_rpc.dispatch_to_machine(
             request.app.state.db,
             machine,
             "agent_skill_view",

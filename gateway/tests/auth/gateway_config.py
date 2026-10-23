@@ -1,5 +1,5 @@
 import uuid
-from collections.abc import Callable, Generator, Mapping
+from collections.abc import Generator, Mapping
 from contextlib import contextmanager, nullcontext
 from dataclasses import replace
 from pathlib import Path
@@ -17,9 +17,11 @@ from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot
 from base.config.tests.configuration import snapshot_process_config
 from base.host.system.tests.fake_commands import fake_host
+from base.packages.plugin_providers import build_model_catalog
 from gateway.app import create_app
 from gateway.cluster.process_boot import LOADED_IMAGE, GatewayProcess
 from gateway.http.config import GatewayConfig, gateway_config_from_boot
+from gateway.http.model_catalog import load_model_catalog
 
 __all__ = [
     "SPAWN_PATH",
@@ -27,6 +29,7 @@ __all__ = [
     "gateway_config_fields",
     "gateway_test_app",
     "gateway_test_client",
+    "gateway_test_config",
     "gateway_test_process",
     "post_spawn",
     "spawn_headers",
@@ -45,6 +48,16 @@ def gateway_config_fields(**fields: Any) -> Generator[dict[str, Any]]:
         yield layer
     finally:
         _CONFIG_FIELD_OVERRIDES.pop()
+
+
+# meiva:note
+# The app config a test client gets by default (human auth required), with `changes`
+# applied: a tuning value a test shrinks or a limit it lowers, passed as a `GatewayConfig`
+# field to `gateway_test_client(config=...)`.
+def gateway_test_config(**changes: Any) -> GatewayConfig:
+    return replace(
+        gateway_config_from_boot(snapshot_process_config()), human_auth="required", **changes
+    )
 
 
 def _resolve_boot(
@@ -98,7 +111,6 @@ def gateway_test_app(
     cluster_secret: str | None = None,
     session_cookie_secure: bool | None = None,
     catalog: Any = None,
-    login_limiter_clock: Callable[[], float] | None = None,
 ) -> FastAPI:
     if process is None:
         resolved_boot = _resolve_boot(boot, fields)
@@ -127,16 +139,12 @@ def gateway_test_app(
         resolved_config = replace(resolved_config, cluster_secret=cluster_secret)
     if session_cookie_secure is not None:
         resolved_config = replace(resolved_config, session_cookie_secure=session_cookie_secure)
-    app = create_app(
+    return create_app(
         resolved_config,
         process=process,
         process_ownership=ownership,
+        catalog=load_model_catalog(build_model_catalog) if catalog is None else catalog,
     )
-    if catalog is not None:
-        app.state.catalog = catalog
-    if login_limiter_clock is not None:
-        app.state.login_limiter_clock = login_limiter_clock
-    return app
 
 
 class GatewayTestClient(TestClient):
@@ -160,7 +168,6 @@ def gateway_test_client(
     cluster_secret: str | None = None,
     session_cookie_secure: bool | None = None,
     catalog: Any = None,
-    login_limiter_clock: Callable[[], float] | None = None,
     **kwargs: Any,
 ) -> Generator[GatewayTestClient]:
     if application is not None:
@@ -176,7 +183,6 @@ def gateway_test_client(
                 cluster_secret,
                 session_cookie_secure,
                 catalog,
-                login_limiter_clock,
             )
         ):
             raise ValueError(
@@ -195,7 +201,6 @@ def gateway_test_client(
             cluster_secret=cluster_secret,
             session_cookie_secure=session_cookie_secure,
             catalog=catalog,
-            login_limiter_clock=login_limiter_clock,
         )
         with GatewayTestClient(assembled, **kwargs) as client:
             yield client

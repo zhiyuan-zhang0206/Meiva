@@ -1,7 +1,10 @@
 exports = ["batches.py", "router.py"]
 
 [uses]
+"batches.py" = ["upload_plan.py"]
 "router.py" = ["batches.py"]
+"tests" = ["upload_plan.py"]
 
 [purity]
 "__init__.py" = "strict"
+"upload_plan.py" = "strict"

@@ -16,6 +16,8 @@ The live inspector reports an active pause, recent pending inbound, or the
 native idle estimate from activity/idle threshold/jitter and last-heartbeat
 cadence. This projection does not reproduce every scheduler backoff or
 impersonation gate; see [[services/docs/gateway_side/heartbeat.meiva.okf.md]].
+The projection itself is the strict `gateway/inspect/_heartbeat.py` (`plan_heartbeat`): the daemon's cadence
+(`HeartbeatCadence`, read from `daemon.heartbeat_*` by the route) and the agent's rows come in as values.
 Its idle fixtures backdate both `status_changed_at` and `last_active_at`:
 updating a timestamp alone does not invoke the status-change trigger.
 
@@ -31,7 +33,8 @@ older ledger-only histograms retain their declared integer-second precision.
 The panel renders the observed metrics only: coverage verdicts (availability,
 duration precision, retained sources, last-observed) go to the background log
 instead, with unexpected gaps emitted as the `inspect_metrics_coverage_gap` event
-(task #3869, user ruling 2026-09-17).
+(task #3869, user ruling 2026-09-17). Which limits a read shows, and which is unexpected, is the strict
+`gateway/inspect/_coverage.py` (`coverage_notes`); `_metrics_health.py` only logs them.
 Missing evidence is null/partial with window and observation timestamps, not a
 zero or a claim of complete collection. No synchronous log scan or completed
 result TTL is part of the statistics path. The statistics path serves only the
@@ -62,6 +65,8 @@ Builds the metric registry in process — ENABLED shipped plugins' `metrics.py` 
 (`contribute()`, admitted into a data registry) + core definitions — renders `output`-inspector templates per agent, re-validates
 the rendered query, evaluates LogQL templates on `telemetry_events` / `audit_events` (`gateway/inspect/_event_metrics.py`) and SQL read-only over Postgres —
 see `base/telemetry/metrics/plugin_metrics.py` + the `deploy/lgtm` dashboards README.
+Which plugins are enabled is read once per request (`_plugin_faces.enabled_plugin_names`, from the machine's plugin config) and
+handed to the loader as a set of names; the loader and the per-agent execution (`metrics_for_agent(pool, agent_id, registry=...)`) take values.
 
 ## Plugin inspector-widget surface (`/inspect/widgets`, task #2909)
 

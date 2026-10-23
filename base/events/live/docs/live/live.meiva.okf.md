@@ -113,7 +113,7 @@ failure propagation are owned by
 ## Key Dependencies
 
 - [[agents-contract.meiva.okf.md]] — the sibling agent ↔ gateway contract; lifecycle hints carry only `agent_id` and `role`, while authoritative state comes from roster/directory/detail reads.
-- [[gateway/events/docs/sse.meiva.okf.md]] — the gateway leg that fans this channel out to browsers over SSE
+- [[gateway/events/docs/sse/sse.meiva.okf.md]] — the gateway leg that fans this channel out to browsers over SSE
 
 ## Compaction vocabulary
 

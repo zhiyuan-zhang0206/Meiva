@@ -1,10 +1,9 @@
+import json
 from typing import Any
-from unittest.mock import MagicMock
 
 import httpx
 import psycopg
 import pytest
-from fastapi.testclient import TestClient
 
 from base.agents.context.identity import ExternalLease
 from base.api_contracts.agent_contract import GatewayUnavailable
@@ -12,23 +11,16 @@ from base.api_contracts.idempotency import keyed_headers
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.host.net.tests.retry_waits import retry_waits as retry_waits
-from gateway.tests.auth.gateway_config import gateway_test_client
+from gateway.agents.task_assignment import router as assignments
+from gateway.tests.auth.gateway_config import GatewayTestClient, gateway_test_client
+from gateway.tests.auth.sdk_transport import wired_sdk
 from gateway.tests.lifecycle.test_task_assignments import HEADERS, PATH, SECRET
 from gateway.tests.lifecycle.test_task_assignments import body as body
 from gateway.tests.lifecycle.test_task_assignments import client as client
-from meiva.gateway_client import use_client
+from gateway.tests.lifecycle.test_task_assignments import runner as runner
 from meiva.tests.fixtures.pin_agent import pin_agent
 from meiva_builtins.plugins.meiva_fleet import task_registry
 from meiva_builtins.plugins.meiva_fleet.task_registry import TaskAssignment
-
-
-def _response(response: Any) -> httpx.Response:
-    return httpx.Response(
-        response.status_code,
-        content=response.content,
-        headers=dict(response.headers),
-        request=httpx.Request(response.request.method, str(response.request.url)),
-    )
 
 
 def _sdk(body: dict[str, Any], **overrides: Any) -> TaskAssignment:
@@ -45,84 +37,69 @@ def _sdk(body: dict[str, Any], **overrides: Any) -> TaskAssignment:
 
 @pytest.mark.usefixtures("retry_waits")
 def test_real_sdk_response_loss_keeps_exact_body_path_key_and_pair(
-    client: TestClient, db_conn: psycopg.Connection, body: dict[str, Any]
+    client: GatewayTestClient, db_conn: psycopg.Connection, body: dict[str, Any]
 ) -> None:
-    http = MagicMock()
-    captured: list[tuple[str, dict[str, Any], dict[str, str]]] = []
-    original: dict[str, Any] | None = None
-    lose = True
-
-    def submit(path: str, **kwargs: Any) -> httpx.Response:
-        nonlocal original
-        captured.append((path, kwargs["json"], kwargs["headers"]))
-        response = client.post(path, json=kwargs["json"], headers=kwargs["headers"])
-        assert response.status_code == 201, response.text
-        original = original or response.json()
-        if lose:
-            raise httpx.ReadTimeout("committed response lost", request=httpx.Request("POST", path))
-        return _response(response)
-
-    http.post.side_effect = submit
-    with use_client(http):
+    with wired_sdk(client) as wire:
+        wire.losing_responses = True
         with pytest.raises(GatewayUnavailable):
             _sdk(body)
-        lost_attempts = len(captured)
+        lost_attempts = len(wire.requests)
         assert lost_attempts > 1
-        lose = False
+        wire.losing_responses = False
         assignment = _sdk(body)
+    original = db_conn.execute("SELECT result FROM task_assignment_receipts").fetchone()
     assert original is not None
     assert isinstance(assignment, TaskAssignment)
     task, agent_id = assignment
     assert assignment.task is task and assignment.agent_id == agent_id
-    assert task.id == original["task"]["id"] and agent_id == original["agent_id"]
-    assert len(captured) == lost_attempts + 1
-    assert all(call == captured[0] for call in captured)
-    assert captured[0][0] == PATH
-    assert captured[0][2] == {**HEADERS, **keyed_headers("sdk-compound")}
+    assert task.id == original[0]["task"]["id"] and agent_id == original[0]["agent_id"]
+    assert len(wire.requests) == lost_attempts + 1
+    assert len(wire.distinct()) == 1
+    first = wire.requests[0]
+    assert first.url.path == PATH
+    assert {name: first.headers[name] for name in (*HEADERS, *keyed_headers("sdk-compound"))} == {
+        **HEADERS,
+        **keyed_headers("sdk-compound"),
+    }
     assert db_conn.execute("SELECT count(*) FROM task_assignment_receipts").fetchone() == (1,)
 
 
 def test_unavailable_atomic_route_refuses_without_separate_spawn(
     body: dict[str, Any], *, machine_identity: MachineIdentity
 ) -> None:
-    http = MagicMock()
     with gateway_test_client(
-        headers={"Authorization": f"Bearer {SECRET}"}, machine=machine_identity
+        cluster_secret=SECRET,
+        headers={"Authorization": f"Bearer {SECRET}"},
+        machine=machine_identity,
     ) as endpoint:
         endpoint.app.router.routes[:] = [
-            route for route in endpoint.app.router.routes if getattr(route, "path", None) != PATH
+            route
+            for route in endpoint.app.router.routes
+            if getattr(route, "original_router", None) is not assignments.router
         ]
-
-        def submit(path: str, **kwargs: Any) -> httpx.Response:
-            return _response(endpoint.post(path, json=kwargs["json"], headers=kwargs["headers"]))
-
-        http.post.side_effect = submit
-        with use_client(http), pytest.raises(httpx.HTTPStatusError):
+        with wired_sdk(endpoint) as wire, pytest.raises(httpx.HTTPStatusError):
             _sdk(body)
-    assert http.post.call_count == 1
-    assert http.post.call_args.args == (PATH,)
+    assert [request.url.path for request in wire.requests] == [PATH]
 
 
-@pytest.mark.parametrize("active", [False, True])
 def test_borrowed_lease_is_rejected_before_http_or_validation(
-    body: dict[str, Any], active: bool
+    client: GatewayTestClient, body: dict[str, Any]
 ) -> None:
-    validated = MagicMock(return_value=body["actor_agent_id"])
-    if not active:
-        validated.side_effect = RuntimeError("lease expired")
+    def never_validated() -> int:
+        raise AssertionError("a borrowed lease is rejected before it is validated")
+
     pin_agent(
-        body["actor_agent_id"], lease=ExternalLease(body["actor_agent_id"], validated, lambda: None)
+        body["actor_agent_id"],
+        lease=ExternalLease(body["actor_agent_id"], never_validated, lambda: None),
     )
-    http = MagicMock()
-    with use_client(http), pytest.raises(ValueError, match="borrowed lease"):
+    with wired_sdk(client) as wire, pytest.raises(ValueError, match="borrowed lease"):
         task_registry.create_and_assign(
             "X",
             "Y",
             parent=body["task"]["parent"],
             operation_key="sdk-compound",
         )
-    http.post.assert_not_called()
-    validated.assert_not_called()
+    assert wire.requests == []
 
 
 @pytest.mark.parametrize(
@@ -139,25 +116,21 @@ def test_borrowed_lease_is_rejected_before_http_or_validation(
     ],
 )
 def test_missing_invalid_key_and_retired_flag_fail_before_http(
-    body: dict[str, Any], kwargs: dict[str, Any], error: type[Exception]
+    client: GatewayTestClient,
+    body: dict[str, Any],
+    kwargs: dict[str, Any],
+    error: type[Exception],
 ) -> None:
     pin_agent(body["actor_agent_id"])
-    http = MagicMock()
-    with use_client(http), pytest.raises(error):
+    with wired_sdk(client) as wire, pytest.raises(error):
         task_registry.create_and_assign("X", "Y", parent=body["task"]["parent"], **kwargs)
-    http.post.assert_not_called()
+    assert wire.requests == []
 
 
 def test_same_principal_key_actor_drift_conflicts(
-    client: TestClient, body: dict[str, Any], db_conn: psycopg.Connection
+    client: GatewayTestClient, body: dict[str, Any], db_conn: psycopg.Connection
 ) -> None:
-    http = MagicMock()
-
-    def submit(path: str, **kwargs: Any) -> httpx.Response:
-        return _response(client.post(path, json=kwargs["json"], headers=kwargs["headers"]))
-
-    http.post.side_effect = submit
-    with use_client(http):
+    with wired_sdk(client):
         original = _sdk(body)
         another = db_conn.execute("INSERT INTO agents DEFAULT VALUES RETURNING id").fetchone()
         assert another is not None
@@ -170,22 +143,12 @@ def test_same_principal_key_actor_drift_conflicts(
 
 
 def test_assignment_sends_only_explicit_config(
-    client: TestClient, body: dict[str, Any], db_conn: psycopg.Connection
+    client: GatewayTestClient, body: dict[str, Any], db_conn: psycopg.Connection
 ) -> None:
-    http = MagicMock()
-    submitted: list[dict[str, Any]] = []
-
-    def submit(path: str, **kwargs: Any) -> httpx.Response:
-        submitted.append(kwargs["json"])
-        response = client.post(path, json=kwargs["json"], headers=kwargs["headers"])
-        assert response.status_code == 201, response.text
-        return _response(response)
-
-    http.post.side_effect = submit
-    with use_client(http):
+    with wired_sdk(client) as wire:
         task, agent_id = _sdk(body, config_overlay={"reasoning_effort": "high"})
     assert task.owner == agent_id
-    assert submitted[0]["agent"]["config"] == {"reasoning_effort": "high"}
+    assert json.loads(wire.requests[0].content)["agent"]["config"] == {"reasoning_effort": "high"}
     assert db_conn.execute(
         "SELECT config_overlay FROM agents_meta WHERE id=%s", (agent_id,)
     ).fetchone() == ({"reasoning_effort": "high"},)

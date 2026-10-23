@@ -18,9 +18,6 @@ from base.native_process.loaded_commit import LoadedCommit
 from base.native_process.root_control import client as root_client
 from gateway.app import openapi_schema
 from gateway.tests.routers.cluster_endpoints.cluster_support import (
-    fake_admin_events as fake_admin_events,
-)
-from gateway.tests.routers.cluster_endpoints.cluster_support import (
     pinned_session_names as pinned_session_names,
 )
 from gateway.tests.routers.cluster_endpoints.cluster_support import (

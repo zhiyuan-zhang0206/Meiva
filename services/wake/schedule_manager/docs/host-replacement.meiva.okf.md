@@ -38,4 +38,4 @@ sessions ended with it — and that answer would otherwise mark every resident
 schedule lost on the first tick of a service restart. The manager therefore asks
 for the generation first: `None` means unknown, and unknown takes no irreversible
 action. The skip is logged at most once per
-`HOST_GENERATION_UNKNOWN_LOG_INTERVAL_S`.
+`blocked_streak.HOST_UNKNOWN_LOG_INTERVAL_S` (`host_unknown_due`).

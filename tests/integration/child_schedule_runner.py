@@ -1,175 +1,132 @@
-"""Child process for the schedule-runner cleanup tests: a real runner with a stalled or finished script.
+# meiva:note
+# Child process for the schedule-runner cleanup tests: a real runner with a stalled or finished script.
+#
+# Usage:
+# - `child_schedule_runner.py run <root> <schedule id> <mode>` runs the production runner entry; the
+#   parent names its stall budget in `MEIVA_SCHEDULE_STALL_TIMEOUT_SECONDS`.
+# - `child_schedule_runner.py stall_exit <root> <schedule id> <run id>` runs the stall action alone
+#   against the database the parent points it at.
+# - `child_schedule_runner.py completion_during_stall <root> <schedule id>` runs the engine on a
+#   script that blocks, stalls, and then returns while the stall action is still writing.
+#
+# Failures are made by the parent in the database (a held row lock), never by replacing code here.
+# Imports live inside the scenarios because some modes alter the interpreter before the runner
+# module loads.
 
-Usage: `child_schedule_runner.py run <root> <schedule id> <mode>` runs the production runner entry;
-`child_schedule_runner.py stall_exit <root> <blocked write>` and `... completion_during_stall <root>`
-drive the stall action directly. Imports live inside the scenarios because some modes alter the
-interpreter before the runner module loads.
-"""
-
-import contextlib
 import sys
-import threading
 import time
-from collections.abc import Callable
-from functools import partial
 from pathlib import Path
-from typing import Any
+
+# meiva:note
+# The stall budget of the scenarios that build their own engine root, and the bound the
+# stall action puts on its failure writes.
+_BUDGET_S = 0.15
+_RECORD_DEADLINE_S = 1.0
 
 
-def _schedule_inputs() -> tuple[Callable[[], Any], Any]:
-    from base.agents.context.clients import ClientSet
-    from base.cluster.machine.boot import machine_from_boot
+# meiva:note
+# Install the plugin namespaces before the stall budget starts counting.
+#
+# Loading them takes longer than the budget these scenarios run under, and the runner's own
+# load is then the no-op of an already loaded process.
+def _preload_plugins() -> None:
+    import meiva
     from base.config import ConfigBoot
-    from base.daemon.schedules.inputs import ScheduleInputs
-    from base.db import Database
-    from base.db.code_version_gate import ProcessDbGate
-    from base.native_process.code_version import CodeVersion
-    from base.native_process.loaded_commit import LoadedCommit
-    from base.paths import meiva_home
-    from base.telemetry.pipeline_build import build_pipeline
 
     config = ConfigBoot()
     config.read_process_environment()
-    machine = machine_from_boot(config)
-    image = LoadedCommit.capture()
-    gate = ProcessDbGate(process="schedule-cleanup-test", version=CodeVersion(image).get)
-    database = partial(Database.from_settings, gate=gate)
-    clients = ClientSet(
-        database=database,
-        pipeline_factory=partial(
-            build_pipeline, database=database, machine=machine, home=meiva_home()
-        ),
-    )
-    inputs = ScheduleInputs(database, clients.event_pipeline, image, machine=machine)
-    return database, inputs
+    meiva.ensure_plugins_loaded(config=config)
 
 
-def _delay_record_error(root: Path) -> None:
-    import os
-
-    import psutil
-
-    from services.wake.schedule_manager import engine as r
-
-    record_error = r.record_error
-
-    def delayed_record(*args: Any) -> None:
-        (root / "record-started").touch()
-        deadline = time.monotonic() + 5
-        with contextlib.suppress(psutil.NoSuchProcess):
-            grandchild = psutil.Process(int((root / "grandchild.pid").read_text()))
-            while os.getpid() in [p.pid for p in grandchild.parents()]:
-                assert time.monotonic() < deadline
-                time.sleep(0.01)
-        record_error(*args)
-
-    r.record_error = delayed_record
-
-
-def _delay_completion() -> None:
-    from services.wake.schedule_manager import engine as r
-
-    finish = r.finish_completed
-
-    def delayed_completion(*args: Any) -> None:
-        assert not any(t.name.endswith("-stall-guard") for t in threading.enumerate())
-        time.sleep(0.4)
-        finish(*args)
-
-    r.finish_completed = delayed_completion
-
-
-def run_runner(root: Path, schedule_id: int, mode: str) -> None:
+def run_runner(schedule_id: int, mode: str) -> None:
     if mode == "missing-module-files":
         import selectors
         import subprocess
 
         del subprocess.__file__
         del selectors.__file__
-    elif mode == "delayed-record":
-        _delay_record_error(root)
-    elif mode == "delayed-completion":
-        _delay_completion()
-    import meiva
-    from base.config import settings
-    from services.wake.schedule_manager import (
-        engine,  # noqa: F401  # pyright: ignore[reportUnusedImport]
-    )
+    _preload_plugins()
     from services.wake.schedule_manager.runner import run
 
-    meiva.ensure_plugins_loaded = lambda **_inputs: None
-    settings.gateway.schedule_stall_timeout_seconds = 0.15
     raise SystemExit(run(schedule_id))
 
 
-def stall_exit(root: Path, blocked_write: str) -> None:
-    database, _inputs = _schedule_inputs()
-    from services.wake.schedule_manager import engine as r
+def _database():
+    from base.db import Database
+    from base.db.code_version_gate import ProcessDbGate
+    from base.native_process.code_version import CodeVersion
+    from base.native_process.loaded_commit import LoadedCommit
 
-    r.FAILURE_RECORD_DEADLINE_S = 1.0
-
-    def record_error(*_args: Any) -> None:
-        (root / "started").write_text(str(time.monotonic()))
-        time.sleep(60 if blocked_write == "error" else 0.7)
-
-    def record_run_end(*_args: Any, **_kwargs: Any) -> None:
-        (root / "second-write").touch()
-        threading.Event().wait()
-
-    r.record_error = record_error
-    r.record_run_end = record_run_end
-    r.stall_action(database(), 1, "test stall", 1)
+    image = LoadedCommit.capture()
+    gate = ProcessDbGate(process="schedule-cleanup-test", version=CodeVersion(image).get)
+    return Database.from_settings(gate=gate), image
 
 
-def _ignore(*_args: Any) -> None:
-    return None
+def stall_exit(root: Path, schedule_id: int, run_id: int) -> None:
+    from services.wake.schedule_manager import engine
+    from services.wake.schedule_manager.stall_policy import StallPolicy
 
-
-def completion_during_stall(root: Path) -> None:
-    """The script returns while a real stall recorder is blocked; hard exit still wins."""
-
-    database, inputs = _schedule_inputs()
-    import meiva
-    from services.wake.schedule_manager import engine as r
-
-    r.settings.gateway.schedule_stall_timeout_seconds = 0.04
-    r.FAILURE_RECORD_DEADLINE_S = 1.0
-    r.schedule_dir = lambda _id: root
-    r.load = lambda *_args: ("pass", "python script.py")
-    r.record_run_start = lambda *_args: 1
-    r.base.host.proc.kill_process_tree = lambda *_args, **_kwargs: None  # pyright: ignore[reportAttributeAccessIssue]
-    r.StallGuard._sample = lambda _self: ("script.py", 1, "blocked")  # pyright: ignore[reportAttributeAccessIssue]
-    meiva.ensure_plugins_loaded = lambda: None
-
-    def record_error(*_args: Any) -> None:
-        (root / "started").write_text(str(time.monotonic()))
-        time.sleep(60)
-
-    def script(*_args: Any, **_kwargs: Any) -> None:
-        while not (root / "started").exists():
-            time.sleep(0.005)
-        (root / "script-returned").touch()
-
-    r.record_error = record_error
-    r.runpy.run_path = script  # pyright: ignore[reportAttributeAccessIssue]
-    r.finish_completed = lambda *_args: (root / "completed").touch()
-    raise SystemExit(
-        r._run(
-            database(),
-            1,
-            bind_actor=_ignore,
-            load_plugins=meiva.ensure_plugins_loaded,
-            inputs=inputs,
-        )
+    database, _image = _database()
+    (root / "started").write_text(str(time.monotonic()))
+    engine.stall_action(
+        database,
+        schedule_id,
+        "test stall",
+        run_id,
+        policy=StallPolicy(timeout_s=_BUDGET_S, record_deadline_s=_RECORD_DEADLINE_S),
     )
+
+
+# meiva:note
+# The script blocks until the parent releases it, so the guard really stalls; the script then
+# returns while the stall action is blocked on its first write, and the hard exit still wins.
+def completion_during_stall(schedule_id: int) -> None:
+    from functools import partial
+
+    from base.agents.context.clients import ClientSet
+    from base.clock import SYSTEM_TIMERS, Clock
+    from base.clock.configuration import clock_config_from_boot
+    from base.cluster.machine.boot import machine_from_boot
+    from base.config import ConfigBoot
+    from base.daemon.schedules.inputs import ScheduleInputs
+    from base.paths import meiva_home
+    from base.telemetry.pipeline_build import build_pipeline
+    from services.wake.schedule_manager import engine
+    from services.wake.schedule_manager.stall_policy import StallPolicy
+
+    _preload_plugins()
+    config = ConfigBoot()
+    config.read_process_environment()
+    machine = machine_from_boot(config)
+    database, image = _database()
+    clients = ClientSet(
+        database=lambda: database,
+        pipeline_factory=partial(
+            build_pipeline, database=lambda: database, machine=machine, home=meiva_home()
+        ),
+    )
+
+    def clock_factory() -> Clock:
+        return Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS)
+
+    root = engine.RunnerRoot(
+        database=database,
+        inputs=ScheduleInputs(lambda: database, clients.event_pipeline, image, machine=machine),
+        plugins=engine.PluginInputs(
+            config=config, clock_factory=clock_factory, producer=clients.event_pipeline
+        ),
+        policy=StallPolicy(timeout_s=_BUDGET_S, record_deadline_s=_RECORD_DEADLINE_S),
+        home=meiva_home(),
+    )
+    raise SystemExit(engine.run(schedule_id, None, root))
 
 
 scenario, *arguments = sys.argv[1:]
 if scenario == "run":
-    run_runner(Path(arguments[0]), int(arguments[1]), arguments[2])
+    run_runner(int(arguments[1]), arguments[2])
 elif scenario == "stall_exit":
-    stall_exit(Path(arguments[0]), arguments[1])
+    stall_exit(Path(arguments[0]), int(arguments[1]), int(arguments[2]))
 elif scenario == "completion_during_stall":
-    completion_during_stall(Path(arguments[0]))
+    completion_during_stall(int(arguments[1]))
 else:
     raise ValueError(f"unknown scenario {scenario!r}")

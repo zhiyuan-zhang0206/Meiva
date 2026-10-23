@@ -15,8 +15,10 @@ import asyncio
 import logging
 import threading
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Annotated, Any, cast
 
 import psycopg
@@ -25,21 +27,31 @@ from psycopg import Cursor
 from psycopg_pool import ConnectionPool
 from pydantic import ValidationError
 
-from base.agents.observation.evidence import MACHINE_OFFLINE_AFTER_FAILURES
 from base.api_contracts.status import MachineStatus
 from base.cluster.machine import (
     MachineIdentity,
 )
 from base.daemon.endpoints import ServiceEndpoints
 from base.db import Database
-from base.deploy.git.cluster_drift import prod_source_head_sha
+from base.deploy.git.cluster_drift import checkout_head_sha
 from base.host.resource_sample import ResourceSample
 from base.native_process.loaded_commit import LoadedCommit
 from base.packages.plugins.surface import stats
 from base.telemetry.observability import cluster_label
-from gateway.cluster import _roster_rows, _stats_events, roster_probe
 from gateway.cluster._health import get_health
-from gateway.cluster.alert_classes import read_alert_classes
+from gateway.cluster.monitor import stats_events
+from gateway.cluster.monitor.alert_classes import read_alert_classes
+from gateway.cluster.roster import roster_probe, roster_rows
+from gateway.cluster.roster.liveness_snapshot import Snapshot
+from gateway.cluster.roster.roster_plan import (
+    RosterStep,
+    SnapshotVerdict,
+    StepKind,
+    plan_roster,
+    snapshot_verdict,
+)
+from gateway.cluster.roster.roster_rows import LocalFacts, RosterRowSpec
+from gateway.cluster.roster.snapshots import read_all, readroster_rows
 from gateway.cluster.schemas import (
     ClusterPanel,
     PluginStat,
@@ -50,7 +62,7 @@ from gateway.cluster.schemas import (
     StatsTokens,
     SystemStatus,
 )
-from gateway.cluster.snapshots import Snapshot, read_all
+from gateway.http.config import GatewayConfig, runtime_view
 from gateway.schemas.stats import StatsWindowHours, window_delta
 from ops.cluster import rpc as cluster_rpc
 from ops.cluster_status import ClusterStatus, check_pidfile, serving_gate_reason
@@ -69,69 +81,54 @@ class StatusCache:
     on the lock and then read what it stored.
     """
 
-    def __init__(
-        self,
-        *,
-        ttl_s: float = _STATUS_CACHE_TTL_S,
-        monotonic: Callable[[], float] = time.monotonic,
-    ) -> None:
+    def __init__(self, *, ttl_s: float = _STATUS_CACHE_TTL_S) -> None:
         self._ttl_s = ttl_s
-        self._monotonic = monotonic
         self._cached: tuple[float, SystemStatus] | None = None
         self._lock = threading.Lock()
 
     def get(self, compute: Callable[[], SystemStatus]) -> SystemStatus:
         """The cached response while it is fresh, else the result of `compute()`."""
         cached = self._cached
-        if cached is not None and self._monotonic() - cached[0] < self._ttl_s:
+        if cached is not None and time.monotonic() - cached[0] < self._ttl_s:
             return cached[1]
         with self._lock:
             cached = self._cached
-            if cached is not None and self._monotonic() - cached[0] < self._ttl_s:
+            if cached is not None and time.monotonic() - cached[0] < self._ttl_s:
                 return cached[1]
             response = compute()
-            self._cached = (self._monotonic(), response)
+            self._cached = (time.monotonic(), response)
             return response
 
 
 router.add_api_route("/api/health", get_health, methods=["GET"], response_model=None)
 
 
-@router.get("/api/stats/dashboard")
+@router.get(
+    "/api/stats/dashboard",
+    description="Pull all data for the sidebar-top stats card in one shot.\n\nData sources:\n- `live_count`: agents_meta table — all non-terminated agents (running/idling)\n- `tokens` / `cost_usd` / average turn duration: the window's `llm_usage` and\n  `turn_end` rows in `telemetry_events` (cost is each row's usage-time snapshot)\n- warning/error event totals and class counts: the SELECTED window's warning, error and\n  critical `telemetry_events` rows grouped by class; a class is dismissed when an active\n  `event_dismissals` row cancels it (`gateway.cluster.monitor.alert_classes`)\n\n`?hours=` selects the aggregation window (0 = last 5m; 1/6/24/72/168 =\nhours), whitelisted by `StatsWindowHours` (anything else 422s); the served horizon is\n`applied_window_hours`, which is the requested window. Zero-data scenario: tokens all 0,\ncost_usd 0.0, avg_turn_seconds None (frontend shows \"—\"). The window is computed on\nevery request, in one connection, with an 8-second statement timeout.",
+)
 def get_stats_dashboard(
     request: Request,
     hours: Annotated[StatsWindowHours, Query()] = StatsWindowHours.H24,
 ) -> StatsDashboard:
-    """Pull all data for the sidebar-top stats card in one shot.
-
-    Data sources:
-    - `live_count`: agents_meta table — all non-terminated agents (running/idling)
-    - `tokens` / `cost_usd` / average turn duration: the window's `llm_usage` and
-      `turn_end` rows in `telemetry_events` (cost is each row's usage-time snapshot)
-    - warning/error event totals and class counts: the SELECTED window's warning, error and
-      critical `telemetry_events` rows grouped by class; a class is dismissed when an active
-      `event_dismissals` row cancels it (`gateway.cluster.alert_classes`)
-
-    `?hours=` selects the aggregation window (0 = last 5m; 1/6/24/72/168 =
-    hours), whitelisted by `StatsWindowHours` (anything else 422s); the served horizon is
-    `applied_window_hours`, which is the requested window. Zero-data scenario: tokens all 0,
-    cost_usd 0.0, avg_turn_seconds None (frontend shows "—"). The window is computed on
-    every request, in one connection, with an 8-second statement timeout.
-    """
     try:
-        return _compute_stats_dashboard(request.app.state.db_pool, hours)
+        return _compute_stats_dashboard(
+            request.app.state.db_pool, hours, request.app.state.gateway_config
+        )
     except psycopg.errors.QueryCanceled as exc:
         raise HTTPException(status_code=503, detail="stats read timed out; retry") from exc
 
 
-def _compute_stats_dashboard(pool: ConnectionPool[Any], hours: StatsWindowHours) -> StatsDashboard:
+def _compute_stats_dashboard(
+    pool: ConnectionPool[Any], hours: StatsWindowHours, config: GatewayConfig
+) -> StatsDashboard:
     """Assemble the payload from one pooled connection."""
     cluster = cluster_label()
     now = datetime.now(UTC)
     window_start = now - window_delta(hours)
     with pool.connection() as conn:
-        conn.execute("SET LOCAL statement_timeout = '8s'")
-        totals = _stats_events.window_totals(conn, cluster=cluster, start=window_start, end=now)
+        stats_events.set_statement_timeout(conn, config.stats_statement_timeout_ms)
+        totals = stats_events.window_totals(conn, cluster=cluster, start=window_start, end=now)
         alert_classes = read_alert_classes(conn, start=window_start, end=now)
         live_count = int(
             conn.execute(
@@ -188,172 +185,98 @@ def _plugin_stat_rows(pool: ConnectionPool[Any]) -> list[PluginStat]:
     ]
 
 
-def get_services_status(
-    *, pidfile_checker: Callable[[str], tuple[bool, int | None]] | None = None
-) -> ServicesStatus:
+def get_services_status(endpoints: ServiceEndpoints) -> ServicesStatus:
     """Gateway-only daemon health (pidfile + signal).
 
     Per-host daemons (agent-host, watchdog) are not here — they ride each
     machine's ClusterStatus probe and render in the roster. This block is the
     daemons that only run on the gateway."""
-    checker = check_pidfile if pidfile_checker is None else pidfile_checker
     items: list[ServiceItem] = []
-    for name, label, pidfile in (
-        ("labeler", "Labeler Daemon", ServiceEndpoints.from_settings().of("labeler").pidfile),
-        (
-            "memory_indexer",
-            "Memory Indexer",
-            ServiceEndpoints.from_settings().of("memory_indexer").pidfile,
-        ),
-    ):
-        alive, pid = checker(str(pidfile))
-        items.append(
-            ServiceItem(
-                name=name,
-                label=label,
-                online=alive,
-                pid=pid,
-                detail=None
-                if alive
-                else ("pidfile exists but process is dead" if pid else "pidfile not found"),
-            )
-        )
+    for name, label in (("labeler", "Labeler Daemon"), ("memory_indexer", "Memory Indexer")):
+        alive, pid = check_pidfile(str(endpoints.of(name).pidfile))
+        items.append(roster_rows.service_item(name, label, alive=alive, pid=pid))
     return ServicesStatus(items=items)
 
 
-# Per-machine status_probe timeout — `settings.gateway.status_probe_timeout_seconds`
-# (default 8s). Raised from a 3.0s hardcode (task #1200): a slow-but-healthy
-# runner's status_snapshot measured 3.07-3.27s on 2026-08-12, and a budget
-# shorter than the handler's own wall time flipped it offline while /healthz
-# answered in ~15ms. The budget of a dial the gateway makes itself (a fresh read,
-# or a machine the snapshot does not cover). The default read dials nothing: it
-# renders the heartbeat liveness pass's snapshot (`gateway/cluster/snapshots.py`),
-# which reads this same setting (services/wake/heartbeat/liveness.py), so the pass's
-# probes stay aligned with a fresh read's.
+# meiva:note
+# What one roster read needs from the gateway process, read once by the handler.
+#
+# `probe_timeout_s` is the budget of a dial the gateway makes itself (a fresh read, or a
+# machine the heartbeat snapshot does not cover): `gateway.status_probe_timeout_seconds`,
+# default 8s. Raised from a 3.0s hardcode (task #1200): a slow-but-healthy runner's
+# status_snapshot measured 3.07-3.27s on 2026-08-12, and a budget shorter than the handler's
+# own wall time flipped it offline while /healthz answered in ~15ms. The default read dials
+# nothing: it renders the heartbeat liveness pass's snapshot, which reads this same setting
+# (services/wake/heartbeat/liveness.py), so the pass's probes stay aligned with a fresh
+# read's.
+@dataclass(frozen=True)
+class RosterEnv:
+    db: Database
+    identity_log: roster_probe.IdentityMismatchLog
+    image: LoadedCommit
+    home: Path
+    machine: MachineIdentity
+    probe_timeout_s: float
 
 
-def _machine_status_from_cluster_status(
-    identity_log: roster_probe.IdentityMismatchLog,
-    status: ClusterStatus,
-    name: str,
-    role: list[str],
-    gateway_url: str | None,
-    up_since_at: datetime,
-    description: str | None,
-    stopped_at: datetime | None,
+def roster_env(request: Request) -> RosterEnv:
+    return RosterEnv(
+        db=request.app.state.db,
+        identity_log=request.app.state.identity_mismatch_log,
+        image=request.app.state.process_image,
+        home=request.app.state.gateway_process.home,
+        machine=request.app.state.machine,
+        probe_timeout_s=runtime_view(request).gateway.status_probe_timeout_seconds,
+    )
+
+
+# meiva:note
+# Validate a host's `status_probe` answer as the ClusterStatus contract and render it.
+#
+# A body that does not validate (a version-skewed / wrong server) must NOT be coerced into
+# a determinate paused verdict: it lands in the documented online=True + paused=None
+# abnormal state instead of a false green. An answer from another host is an identity
+# mismatch; its log line is episode-deduped and degrades to INFO for a stopped row (a stale
+# URL answering for someone else is that row's expected face — task #4143).
+def _render_answer(
+    env: RosterEnv,
+    row: RosterRowSpec,
+    answer: Mapping[str, object],
     *,
-    is_staging: bool,
     observed_at: datetime | None,
 ) -> MachineStatus:
-    """Render one machine's validated ClusterStatus as a roster row.
-
-    Identity echo check: the ops server self-reports its machine_name in every
-    status_probe response. If the responder is NOT the host we targeted, the
-    gateway_url pointed at the wrong box (a loopback/misregistered row makes the
-    gateway dial itself and answer under its own name). Refuse to render that as
-    the target online — a loud identity-mismatch row instead. The log line
-    itself is episode-deduped and degrades to INFO for a stopped row (a stale
-    URL answering for someone else is that row's expected face — task #4143).
-    """
-    if status.machine_name != name:
-        identity_log.log_mismatch(
-            name, gateway_url, status.machine_name, stopped=stopped_at is not None
-        )
-        return _roster_rows.identity_mismatch_status(
-            _roster_rows.RosterRowSpec(
-                name=name,
-                role=role,
-                gateway_url=gateway_url,
-                up_since_at=up_since_at,
-                description=description,
-                stopped_at=stopped_at,
-                is_staging=is_staging,
-            )
-        )
-    identity_log.note_match(name)
-    return MachineStatus(
-        name=name,
-        serve_gateway="gateway" in role,
-        serve_agent_runner="agent-runner" in role,
-        serve_observability_station="observability-station" in role,
-        gateway_url=gateway_url or "",
-        up_since_at=up_since_at,
-        online=True,
-        paused=status.paused,
-        paused_reason=status.paused_reason,
-        description=description,
-        stopped_at=stopped_at,
-        is_staging=is_staging,
-        head_sha=status.head_sha,
-        running_sha=status.running_sha,
-        schema_mismatch=status.schema_mismatch,
-        shell_count=status.shell_count,
-        agent_host_online=status.agent_host_online,
-        supervisor_online=status.supervisor_online,
-        agent_count=status.agent_count,
-        session_count=status.session_count,
-        agent_groups=status.agent_groups,
-        resource=status.resource,
-        observed_at=observed_at,
-    )
-
-
-def _status_from_snapshot(
-    identity_log: roster_probe.IdentityMismatchLog,
-    snapshot: Snapshot,
-    name: str,
-    role: list[str],
-    gateway_url: str | None,
-    up_since_at: datetime,
-    description: str | None,
-    stopped_at: datetime | None,
-    *,
-    is_staging: bool,
-) -> MachineStatus:
-    """Render a roster row from the heartbeat pass's last probe of the machine.
-
-    Two consecutive failed passes (or a failed pass with no earlier answer to
-    show) read offline; one dropped probe keeps the last status on screen, and its
-    age says so. A reachable answer that is not a ClusterStatus is the documented
-    online + paused=None abnormal state.
-    """
-    row_spec = _roster_rows.RosterRowSpec(
-        name=name,
-        role=role,
-        gateway_url=gateway_url,
-        up_since_at=up_since_at,
-        description=description,
-        stopped_at=stopped_at,
-        is_staging=is_staging,
-    )
-    if not snapshot.reachable and (
-        snapshot.status is None or snapshot.consecutive_failures >= MACHINE_OFFLINE_AFTER_FAILURES
-    ):
-        return _roster_rows.offline_status(row_spec)
-    if snapshot.status is None:
-        return _roster_rows.reachable_unknown_status(row_spec)
     try:
-        status = ClusterStatus.model_validate(snapshot.status)
+        status = ClusterStatus.model_validate(answer)
     except ValidationError:
         _log.warning(
-            "machine_status_snapshot for %r holds a body that does not match ClusterStatus; "
-            "reporting online+unknown",
-            name,
+            "status_probe answer for %r does not match ClusterStatus; reporting online+unknown",
+            row.name,
             exc_info=True,
         )
-        return _roster_rows.reachable_unknown_status(row_spec)
-    return _machine_status_from_cluster_status(
-        identity_log,
-        status,
-        name,
-        role,
-        gateway_url,
-        up_since_at,
-        description,
-        stopped_at,
-        is_staging=is_staging,
-        observed_at=snapshot.status_at or snapshot.observed_at,
-    )
+        return roster_rows.reachable_unknown_status(row)
+    if status.machine_name != row.name:
+        env.identity_log.log_mismatch(
+            row.name, row.gateway_url, status.machine_name, stopped=row.stopped_at is not None
+        )
+    else:
+        env.identity_log.note_match(row.name)
+    return roster_rows.reported_status(row, status, observed_at=observed_at)
+
+
+# meiva:note
+# Render a roster row from the heartbeat pass's last probe of the machine.
+def _snapshot_row(env: RosterEnv, row: RosterRowSpec, snapshot: Snapshot) -> MachineStatus:
+    match snapshot_verdict(snapshot):
+        case SnapshotVerdict.OFFLINE:
+            return roster_rows.offline_status(row)
+        case SnapshotVerdict.UNKNOWN:
+            return roster_rows.reachable_unknown_status(row)
+        case SnapshotVerdict.REPORTED:
+            if snapshot.status is None:
+                raise RuntimeError("a reported snapshot carries a status")
+            return _render_answer(
+                env, row, snapshot.status, observed_at=snapshot.status_at or snapshot.observed_at
+            )
 
 
 # meiva:note
@@ -369,75 +292,25 @@ def _status_from_snapshot(
 # host's own `status_probe` snapshot. Nothing is remembered: a down host
 # costs this dial its full budget every time, which is why the default read does
 # not come here.
-async def probe_agent_runner(
-    identity_log: roster_probe.IdentityMismatchLog,
-    name: str,
-    role: list[str],
-    gateway_url: str | None,
-    up_since_at: datetime,
-    description: str | None,
-    stopped_at: datetime | None,
-    *,
-    is_staging: bool = False,
-    probe_timeout_s: float | None = None,
-    dispatch_fn: Any = None,
-) -> MachineStatus:
-    row_spec = _roster_rows.RosterRowSpec(
-        name=name,
-        role=role,
-        gateway_url=gateway_url,
-        up_since_at=up_since_at,
-        description=description,
-        stopped_at=stopped_at,
-        is_staging=is_staging,
-    )
-    if gateway_url is None:
+async def probe_agent_runner(env: RosterEnv, row: RosterRowSpec) -> MachineStatus:
+    if row.gateway_url is None:
         # The roster row is the address authority for this fan-out. Do not let
         # cluster_rpc synchronously re-read Postgres outside the async timeout.
-        return _roster_rows.offline_status(row_spec)
+        return roster_rows.offline_status(row)
     try:
-        probe_kwargs: dict[str, Any] = {}
-        if probe_timeout_s is not None:
-            probe_kwargs["timeout_s"] = probe_timeout_s
-        if dispatch_fn is not None:
-            probe_kwargs["dispatch_fn"] = dispatch_fn
-        result = await roster_probe.dispatch_status_probe(name, gateway_url, **probe_kwargs)
+        result = await roster_probe.dispatch_status_probe(
+            row.name, row.gateway_url, timeout_s=env.probe_timeout_s
+        )
     except cluster_rpc.ClusterOpUnreachable:
         # Expected when a host is genuinely offline / mid-restart — quiet.
-        return _roster_rows.offline_status(row_spec)
+        return roster_rows.offline_status(row)
     except cluster_rpc.ClusterOpFailed as exc:
         # Reached the ops server, but its status_probe op itself raised (DB error,
         # schema drift inside the op). That is NOT "offline" — surface it so the
         # real error is not invisible behind a misleading offline marker.
-        _log.warning("status_probe op failed on reachable host %s: %s", name, exc.result)
-        return _roster_rows.reachable_unknown_status(row_spec)
-    # The ops server responded 200; validate its body as the status_probe result
-    # contract (ClusterStatus) — same posture as cluster.py:get_cluster_status.
-    # A body that does not validate (a version-skewed / wrong server) must NOT be
-    # coerced into a determinate paused verdict: it lands in the documented
-    # online=True + paused=None abnormal state instead of a false green.
-    try:
-        status = ClusterStatus.model_validate(result)
-    except ValidationError:
-        _log.warning(
-            "status_probe on reachable host %r returned a body that does not match "
-            "ClusterStatus; reporting online+unknown",
-            name,
-            exc_info=True,
-        )
-        return _roster_rows.reachable_unknown_status(row_spec)
-    return _machine_status_from_cluster_status(
-        identity_log,
-        status,
-        name,
-        role,
-        gateway_url,
-        up_since_at,
-        description,
-        stopped_at,
-        is_staging=is_staging,
-        observed_at=None,
-    )
+        _log.warning("status_probe op failed on reachable host %s: %s", row.name, exc.result)
+        return roster_rows.reachable_unknown_status(row)
+    return _render_answer(env, row, result, observed_at=None)
 
 
 def _local_resource_sample() -> ResourceSample | None:
@@ -454,196 +327,87 @@ def _local_resource_sample() -> ResourceSample | None:
 
 
 # meiva:note
-# Sync lightweight row for a local machine without the agent-runner
-# capability (pure gateway) — via to_thread: the serving gate (file read),
-# prod-source HEAD (git rev-parse subprocess), the frozen process commit and
+# What the gateway's own machine reports about itself — via to_thread: the serving gate
+# (file read), the checkout HEAD (git rev-parse subprocess), the frozen process commit and
 # the psutil resource snapshot must not run on the event loop.
-def _local_machine_status_blocking(
-    db: Database,
-    name: str,
-    url: str | None,
-    role: list[str],
-    up_since: datetime,
-    description: str | None,
-    stopped_at: datetime | None,
-    *,
-    is_staging: bool = False,
-    image: LoadedCommit,
-    gate_reason_fn: Callable[[], Any] | None = None,
-    head_sha_fn: Callable[[], str | None] | None = None,
-) -> MachineStatus:
-    reason_reader = serving_gate_reason if gate_reason_fn is None else gate_reason_fn
-    sha_reader = prod_source_head_sha if head_sha_fn is None else head_sha_fn
-    paused_reason = reason_reader()
-    return MachineStatus(
-        name=name,
-        serve_gateway="gateway" in role,
-        serve_agent_runner="agent-runner" in role,
-        serve_observability_station="observability-station" in role,
-        gateway_url=url or "",
-        up_since_at=up_since,
-        online=True,
-        paused=paused_reason is not None,
-        paused_reason=paused_reason,
-        description=description,
-        stopped_at=stopped_at,
-        is_staging=is_staging,
-        head_sha=sha_reader(),
-        running_sha=image.sha,
-        schema_mismatch=schema_mismatch_status(db, local_machine=name),
-        resource=_local_resource_sample(),
+def read_local_facts(env: RosterEnv, *, with_resource: bool) -> LocalFacts:
+    return LocalFacts(
+        paused_reason=serving_gate_reason(),
+        head_sha=checkout_head_sha(env.home / "source"),
+        # meiva:note
+        # This gateway process's own frozen commit — not a disk bookmark, so a
+        # gateway that outlived a checkout advance reports the old commit and the
+        # roster shows the drift.
+        running_sha=env.image.sha,
+        schema_mismatch=schema_mismatch_status(env.db, local_machine=env.machine.name()),
+        resource=_local_resource_sample() if with_resource else None,
     )
 
 
+async def _execute(env: RosterEnv, step: RosterStep) -> MachineStatus:
+    match step.kind:
+        case StepKind.LOCAL:
+            facts = await asyncio.to_thread(read_local_facts, env, with_resource=True)
+            return roster_rows.local_status(step.row, facts)
+        case StepKind.SNAPSHOT:
+            if step.snapshot is None:
+                raise RuntimeError("a snapshot step carries its snapshot")
+            return _snapshot_row(env, step.row, step.snapshot)
+        case StepKind.DIAL:
+            return await probe_agent_runner(env, step.row)
+
+
+# meiva:note
+# The roster of the given machines, as `plan_roster` lays it out.
+#
+# With `snapshots` (the default read) each machine renders from the heartbeat
+# liveness pass's last probe (`gateway/cluster/roster/snapshots.py`) and nothing is dialed,
+# so no down host can drag the read (task #3507); a machine with no fresh snapshot
+# is dialed here, as a degraded fallback for a heartbeat service that is down. With
+# `snapshots=None` (an explicit fresh read) every machine is probed in parallel via
+# a status_probe op to its ops server (the local machine included — its ops server
+# is dialed at its registered localhost URL); total wall ≈
+# `gateway.status_probe_timeout_seconds`.
+#
+# The one exception is a local machine without the agent-runner capability
+# (a pure gateway in a split deployment): it runs no ops server, so its row
+# is a lightweight local read with no session/pidfile probes (shell/daemon
+# liveness is agent-runner data a pure gateway does not have).
+#
+# Public because `gateway/cluster/router.py:get_cluster_machines` reuses the same fan-out to
+# back meiva.agents.list_machines(). The rows come back sorted by machine name.
 async def gather_cluster_status(
-    db: Database,
-    rows: list[tuple[str, str | None, list[str], datetime, str | None, datetime | None, bool]],
-    local_name: str,
-    *,
-    identity_log: roster_probe.IdentityMismatchLog,
-    image: LoadedCommit,
-    snapshots: Mapping[str, Snapshot] | None = None,
-    probe_timeout_s: float | None = None,
-    dispatch_fn: Any = None,
-    gate_reason_fn: Callable[[], Any] | None = None,
-    head_sha_fn: Callable[[], str | None] | None = None,
+    env: RosterEnv, rows: Sequence[RosterRowSpec], snapshots: Mapping[str, Snapshot] | None
 ) -> list[MachineStatus]:
-    """The roster of the given machines.
-
-    With `snapshots` (the default read) each machine renders from the heartbeat
-    liveness pass's last probe (`gateway/cluster/snapshots.py`) and nothing is dialed,
-    so no down host can drag the read (task #3507); a machine with no fresh snapshot
-    is dialed here, as a degraded fallback for a heartbeat service that is down. With
-    `snapshots=None` (an explicit fresh read) every machine is probed in parallel via
-    a status_probe op to its ops server (the local machine included — its ops server
-    is dialed at its registered localhost URL); total wall ≈
-    `settings.gateway.status_probe_timeout_seconds`.
-
-    The one exception is a local machine without the agent-runner capability
-    (a pure gateway in a split deployment): it runs no ops server, so its row
-    is a lightweight local read — paused flag + prod-source HEAD — with no
-    session/pidfile probes (shell/daemon liveness is agent-runner data a pure
-    gateway does not have).
-
-    Rows are the machines-table tuple (name, gateway_url, role, up_since_at,
-    description, stopped_at, is_staging); description + stopped_at + is_staging
-    are threaded through unmodified onto each MachineStatus. Public because
-    `gateway/cluster/router.py:get_cluster_machines` reuses the same fan-out to back
-    meiva.agents.list_machines().
-
-    The rows come back sorted by machine name.
-    """
-    machines: list[MachineStatus] = []
-    probe_coros: list[Any] = []
-
-    for name, url, role, up_since, description, stopped_at, is_staging in rows:
-        if name == local_name and "agent-runner" not in role:
-            machines.append(
-                await asyncio.to_thread(
-                    _local_machine_status_blocking,
-                    db,
-                    name,
-                    url,
-                    role,
-                    up_since,
-                    description,
-                    stopped_at,
-                    is_staging=is_staging,
-                    image=image,
-                    gate_reason_fn=gate_reason_fn,
-                    head_sha_fn=head_sha_fn,
-                )
-            )
-        else:
-            snapshot = None if snapshots is None else snapshots.get(name)
-            if snapshot is not None and snapshot.fresh():
-                machines.append(
-                    _status_from_snapshot(
-                        identity_log,
-                        snapshot,
-                        name,
-                        role,
-                        url,
-                        up_since,
-                        description,
-                        stopped_at,
-                        is_staging=is_staging,
-                    )
-                )
-                continue
-            probe_coros.append(
-                probe_agent_runner(
-                    identity_log,
-                    name,
-                    role,
-                    url,
-                    up_since,
-                    description,
-                    stopped_at,
-                    is_staging=is_staging,
-                    probe_timeout_s=probe_timeout_s,
-                    dispatch_fn=dispatch_fn,
-                )
-            )
-
-    if probe_coros:
-        machines.extend(await asyncio.gather(*probe_coros))
-
+    steps = plan_roster(rows, env.machine.name(), snapshots, now=datetime.now(UTC))
+    machines = await asyncio.gather(*(_execute(env, step) for step in steps))
     return sorted(machines, key=lambda m: m.name)
 
 
-def get_cluster_status(
-    db: Database,
-    cur: Cursor,
-    identity_log: roster_probe.IdentityMismatchLog,
-    *,
-    image: LoadedCommit,
-    local_machine: MachineIdentity,
-) -> ClusterPanel:
-    """Assemble the cluster sub-section: SELECT the machines table (paused rows
-    excluded — the cluster panel shows only active members; `meiva cluster resume`
-    brings a row back) and render each machine from the heartbeat liveness
-    pass's last `status_probe` (`gateway/cluster/snapshots.py`), so the panel
-    dials no runner (task #3507).
-
-    Wrapped sync via asyncio.run because `/api/status` is a sync FastAPI
-    handler (runs in threadpool); creating a fresh event loop here is safe.
-    asyncio.run() fully closes the loop (and its selector fds) before returning,
-    so concurrent panel polls each get a short-lived loop with no accumulation —
-    the per-call loop construction is the only cost, negligible at panel cadence.
-    Migrate the handler to `async def` only if that cadence rises enough to make
-    loop setup measurable.
-    """
-    cur.execute(
-        "SELECT name, gateway_url, role, up_since_at, description, stopped_at, is_staging "
-        "FROM machines WHERE paused_at IS NULL ORDER BY name"
-    )
-    rows: list[tuple[str, str | None, list[str], datetime, str | None, datetime | None, bool]] = (
-        cur.fetchall()
-    )
-
-    local_name = local_machine.name()
+# meiva:note
+# Assemble the cluster sub-section: SELECT the machines table (paused rows
+# excluded — the cluster panel shows only active members; `meiva cluster resume`
+# brings a row back) and render each machine from the heartbeat liveness
+# pass's last `status_probe` (`gateway/cluster/roster/snapshots.py`), so the panel
+# dials no runner (task #3507).
+#
+# Wrapped sync via asyncio.run because `/api/status` is a sync FastAPI
+# handler (runs in threadpool); creating a fresh event loop here is safe.
+# asyncio.run() fully closes the loop (and its selector fds) before returning,
+# so concurrent panel polls each get a short-lived loop with no accumulation —
+# the per-call loop construction is the only cost, negligible at panel cadence.
+# Migrate the handler to `async def` only if that cadence rises enough to make
+# loop setup measurable.
+def get_cluster_status(env: RosterEnv, cur: Cursor) -> ClusterPanel:
+    rows = readroster_rows(cur)
     snapshots = read_all(cur)
-    machines = (
-        asyncio.run(
-            gather_cluster_status(
-                db,
-                rows,
-                local_name,
-                identity_log=identity_log,
-                snapshots=snapshots,
-                image=image,
-            )
-        )
-        if rows
-        else []
-    )
-
+    machines = asyncio.run(gather_cluster_status(env, rows, snapshots)) if rows else []
+    role = env.machine.role()
     return ClusterPanel(
-        current_machine=local_name,
-        current_serve_gateway=("gateway" in local_machine.role()),
-        current_serve_agent_runner=("agent-runner" in local_machine.role()),
-        current_serve_observability_station=("observability-station" in local_machine.role()),
+        current_machine=env.machine.name(),
+        current_serve_gateway=("gateway" in role),
+        current_serve_agent_runner=("agent-runner" in role),
+        current_serve_observability_station=("observability-station" in role),
         current_paused=serving_gate_reason() is not None,
         machines=machines,
     )
@@ -668,7 +432,7 @@ def _compute_system_status(request: Request) -> SystemStatus:
     """One uncached build of the status panel."""
     # Services
     try:
-        services = get_services_status()
+        services = get_services_status(request.app.state.service_endpoints)
     except Exception:
         _log.exception("GET /api/status: services check failed")
         services = ServicesStatus(items=[])
@@ -676,13 +440,7 @@ def _compute_system_status(request: Request) -> SystemStatus:
     # Cluster
     try:
         with request.app.state.db_pool.connection() as conn, conn.cursor() as cur:
-            cluster = get_cluster_status(
-                request.app.state.db,
-                cur,
-                request.app.state.identity_mismatch_log,
-                image=request.app.state.process_image,
-                local_machine=request.app.state.machine,
-            )
+            cluster = get_cluster_status(roster_env(request), cur)
     except Exception:
         _log.exception("GET /api/status: cluster query failed")
         # Fallback: at least surface this host's name/role so the frontend

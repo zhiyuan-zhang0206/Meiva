@@ -117,8 +117,7 @@ def test_decay_lambda_comes_from_display_config(
         age_hours=360,
     )
 
-    with gateway_test_client() as client:
-        client.app.state.config_authority.runtime.display.fleet_graph_decay_lambda = 0.0
+    with gateway_test_client(fields={"fleet_graph_decay_lambda": 0.0}) as client:
         resp = client.get("/api/fleet/graph")
 
     assert resp.status_code == 200, resp.text

@@ -11,11 +11,10 @@ from gateway.agents.notice_operations.current import (
     mutate,
     operation_key,
 )
-from gateway.agents.notices import (
+from gateway.agents.notice_operations.notices import (
     announce_notice_delivery,
     post_notice_resolve,
     publish_response_required_hint,
-    save_receipt,
 )
 from gateway.agents.schemas import AgentMessageEnqueued, NoticeItem, ResolveNoticeIn
 from ops import lifecycle
@@ -49,24 +48,14 @@ async def edit_current(
     key: Annotated[str, Depends(operation_key)],
 ) -> NoticeItem:
     """Return the immutable acceptance of an observed global notice edit."""
-    receipt_writer = getattr(request.app.state, "notice_receipt_writer", save_receipt)
-    publish_posted = getattr(
-        request.app.state, "notice_publish_posted", lifecycle.publish_notice_posted
-    )
     acceptance = await asyncio.to_thread(
-        mutate,
-        request.app.state.db_pool,
-        request.url.path,
-        key,
-        agent_id,
-        body,
-        receipt_writer=receipt_writer,
+        mutate, request.app.state.db_pool, request.url.path, key, agent_id, body
     )
     record = acceptance.record
     if not acceptance.replayed:
         if record.require_response:
             await asyncio.to_thread(publish_response_required_hint, request.app.state.bus, agent_id)
-        await publish_posted(
+        await lifecycle.publish_notice_posted(
             request.app.state.bus,
             agent_id,
             record.id,
@@ -86,24 +75,14 @@ async def dismiss_current(
     key: Annotated[str, Depends(operation_key)],
 ) -> NoticeItem:
     """Withdraw only the observed global row and replay its original acceptance."""
-    receipt_writer = getattr(request.app.state, "notice_receipt_writer", save_receipt)
-    publish_resolved = getattr(
-        request.app.state, "notice_publish_resolved", lifecycle.publish_notice_resolved
-    )
     acceptance = await asyncio.to_thread(
-        mutate,
-        request.app.state.db_pool,
-        request.url.path,
-        key,
-        agent_id,
-        body,
-        receipt_writer=receipt_writer,
+        mutate, request.app.state.db_pool, request.url.path, key, agent_id, body
     )
     record = acceptance.record
     if not acceptance.replayed and not acceptance.already_closed:
         if record.require_response:
             await asyncio.to_thread(publish_response_required_hint, request.app.state.bus, agent_id)
-        await publish_resolved(
+        await lifecycle.publish_notice_resolved(
             request.app.state.bus,
             agent_id,
             record.id,

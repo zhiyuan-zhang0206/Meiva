@@ -35,6 +35,6 @@ before, on means the browser holds one socket per tab instead of three.
   and alert data repair themselves through the open reconcile, as they did when
   they had their own sockets.
 
-Gateway owner: [[gateway/events/docs/sse.meiva.okf.md]].
+Gateway owner: [[gateway/events/docs/sse/sse.meiva.okf.md]].
 
 Parent: [[ui/web/src/docs/frontend-data-flow/frontend-data-flow.meiva.okf.md|Frontend Data Flow]].

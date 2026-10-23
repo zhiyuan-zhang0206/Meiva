@@ -8,9 +8,11 @@ import pytest
 from base.agents.observation.snapshot import select_one
 from base.api_contracts.idempotency import keyed_headers
 from base.config import settings
+from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 from gateway.tests.auth.gateway_config import gateway_test_client
 from gateway.tests.events.test_notices_endpoint import insert_notice, pending_rows, seed_agent
+from gateway.tests.support.live_events.recorder import recording_live_events
 
 
 @pytest.mark.parametrize("reply", [None, "Acknowledged"])
@@ -121,8 +123,7 @@ def test_open_default_limit_comes_from_display_config(
     insert_notice(db_conn, a, "newer", require_response=True)
     insert_notice(db_conn, a, "newest", require_response=True)
 
-    with gateway_test_client() as client:
-        client.app.state.notices_open_default_limit = 2
+    with gateway_test_client(fields={"notices_open_default_limit": 2}) as client:
         data = client.get("/api/notices/open").json()
     assert [r["title"] for r in data] == ["older", "newer"]
 
@@ -152,9 +153,9 @@ def test_feed_defaults_come_from_display_config(
         reply="x",
     )
 
-    with gateway_test_client() as client:
-        client.app.state.notices_open_default_limit = 1
-        client.app.state.notices_resolved_default_page = 1
+    with gateway_test_client(
+        fields={"notices_open_default_limit": 1, "notices_resolved_default_page": 1}
+    ) as client:
         feed = client.get("/api/notices").json()
     assert [r["title"] for r in feed["awaiting"]] == ["open older"]
     assert [r["title"] for r in feed["resolved_page"]] == ["resolved r1"]
@@ -286,7 +287,7 @@ def test_live_empty_after_cursor(db_conn: psycopg.Connection) -> None:
 # leaves the resolved row in the open list until a refresh.
 # meiva:link gateway/agents/docs/notice-receipts.meiva.okf.md
 def test_resolution_publishes_global_notice_id(
-    db_conn: psycopg.Connection,
+    db_conn: psycopg.Connection, event_bus: EventBus
 ) -> None:
     agent_id = seed_agent(db_conn)
     with db_conn.cursor() as cur:
@@ -299,18 +300,13 @@ def test_resolution_publishes_global_notice_id(
         cur.execute("UPDATE agent_notices SET local_id = %s WHERE id = %s", (local_skew, open_id))
     db_conn.commit()
 
-    published: list[int] = []
-
-    async def _capture(_bus: object, _agent_id: int, notice_id: int, **_: object) -> None:
-        published.append(notice_id)
-
-    with gateway_test_client() as client:
-        client.app.state.notice_resolved_publisher = _capture
+    with recording_live_events(event_bus) as live, gateway_test_client() as client:
         resp = client.post(
             f"/api/keyed/v1/agents/{agent_id}/notices/{open_id}/resolve",
             json={"action": "dismiss"},
             headers={"Idempotency-Key": str(uuid4()), "Idempotency-Scope": "principal-v1"},
         )
+        published = [event.payload["notice_id"] for event in live.settle("notice_resolved", 1)]
     assert resp.status_code == 201, resp.text
     assert published == [open_id], f"expected global id {open_id}, got {published}"
 

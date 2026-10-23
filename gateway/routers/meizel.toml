@@ -1,9 +1,11 @@
-exports = ["commands.py", "configuration", "fleet_graph.py", "fleet_tokens.py", "frontend_telemetry.py", "grafana.py", "guide.py", "insights.py", "memory.py", "notifications.py", "page_acceptance.py", "pages.py", "receipts", "settings.py", "shell.py", "tasks.py", "upload", "host_permissions.py"]
+exports = ["commands.py", "configuration", "fleet", "frontend_telemetry.py", "guide.py", "host_permissions.py", "memory_api", "notifications.py", "page_serving", "proxies", "receipts", "settings.py", "shell.py", "tasks.py", "upload"]
 
 [uses]
-"fleet_graph.py" = ["fleet_tokens.py"]
-"pages.py" = ["page_acceptance.py"]
+"configuration" = ["refusal.py"]
+"page_serving" = ["refusal.py"]
 "tasks.py" = ["receipts"]
+"tests" = ["memory_api", "page_serving", "refusal.py"]
 
 [purity]
 "__init__.py" = "strict"
+"refusal.py" = "strict"

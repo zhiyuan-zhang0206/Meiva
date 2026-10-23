@@ -16,7 +16,7 @@ from typing import Annotated
 from fastapi import APIRouter, HTTPException, Query, Request
 from psycopg_pool import ConnectionPool
 
-from base.config import settings
+from gateway.http.config import runtime_view
 from gateway.schemas import ShellCaptureResponse
 from ops.cluster import rpc as cluster_rpc
 
@@ -64,7 +64,7 @@ async def get_agent_shell(
     reach it right now.
     """
     if lines is None:
-        lines = settings.display.shell_capture_default_lines
+        lines = runtime_view(request).display.shell_capture_default_lines
     machine = await asyncio.to_thread(_agent_machine_blocking, request.app.state.db_pool, agent_id)
 
     try:

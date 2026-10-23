@@ -3,4 +3,6 @@ exports = ["cluster_support.py"]
 
 [uses]
 "test_admin_events.py" = ["cluster_support.py"]
+"test_probe_agent_runner.py" = ["cluster_support.py"]
+"test_roster_snapshots.py" = ["cluster_support.py"]
 "test_admin_machine_delete.py" = ["cluster_support.py"]

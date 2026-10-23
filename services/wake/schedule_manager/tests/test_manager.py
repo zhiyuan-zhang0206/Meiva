@@ -10,13 +10,17 @@ import pytest
 from psycopg_pool import ConnectionPool
 
 import services.wake.schedule_manager.manager as sm
-from base.clock.tests.manual_timers import ManualTimers
 from base.cluster import session_name
 from base.config import settings
 from base.deploy.lifecycle import start_serving
 from base.sessions.protocol import SessionBackend
 from base.telemetry.tests.capture.event_capture import EmittedEvents
 from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
+from services.wake.schedule_manager.blocked_streak import (
+    BLOCKED_GIVE_UP_AFTER_S,
+    CLEANUP_FAILURE_LOG_INTERVAL_S,
+)
+from services.wake.schedule_manager.tests.manager_support import NOW, POLICY, schedule_manager
 
 
 class _FakeBackend(SessionBackend):
@@ -152,9 +156,7 @@ def test_reconcile_does_not_sweep_orphan_null_rows(
     sid = _insert(db_conn, "orphan-a", enabled=False)
     rid = _insert_null_run(db_conn, sid)
 
-    sm.ScheduleManager(
-        pool, backend=backend, timers=ManualTimers(), repo_root=sm.REPO_ROOT
-    ).reconcile()
+    schedule_manager(pool, backend).reconcile(now=NOW)
 
     assert launched == []
     assert _run_row(db_conn, rid) == (None, None)
@@ -168,9 +170,7 @@ def test_reconcile_keeps_null_row_for_live_session(
     rid = _insert_null_run(db_conn, sid)
     backend.live.append(session_name(f"schedule-{sid}"))
 
-    sm.ScheduleManager(
-        pool, backend=backend, timers=ManualTimers(), repo_root=sm.REPO_ROOT
-    ).reconcile()
+    schedule_manager(pool, backend).reconcile(now=NOW)
 
     assert launched == []
     assert _run_row(db_conn, rid) == (None, None)
@@ -183,9 +183,7 @@ def test_launch_closes_null_rows_of_dead_predecessor(
     sid = _insert(db_conn, "orphan-c")
     rid = _insert_null_run(db_conn, sid)
 
-    sm.ScheduleManager(
-        pool, backend=backend, timers=ManualTimers(), repo_root=sm.REPO_ROOT
-    ).reconcile()
+    schedule_manager(pool, backend).reconcile(now=NOW)
 
     assert launched == [sid]
     assert _run_row(db_conn, rid) == (False, "interrupted")
@@ -202,9 +200,7 @@ def test_sync_stop_closes_orphan_rows_immediately(
         cur.execute("UPDATE schedules SET enabled = false WHERE id = %s", (sid,))
     db_conn.commit()
 
-    sm.ScheduleManager(
-        pool, backend=backend, timers=ManualTimers(), repo_root=sm.REPO_ROOT
-    ).sync_one(sid)
+    schedule_manager(pool, backend).sync_one(sid, now=NOW)
 
     assert session_name(f"schedule-{sid}") in backend.killed
     assert launched == []
@@ -221,9 +217,7 @@ def test_launches_enabled_missing_session(
     _set_allocation_generation(unit_home, "current-generation")
     sid = _insert(db_conn, "job-a")
 
-    sm.ScheduleManager(
-        pool, backend=backend, timers=ManualTimers(), repo_root=sm.REPO_ROOT
-    ).reconcile()
+    schedule_manager(pool, backend).reconcile(now=NOW)
 
     assert launched == [sid]
     assert _status(db_conn, sid) == "running"
@@ -238,18 +232,16 @@ def test_reconcile_defers_enabled_launch_until_the_host_is_serving(
     backend, launched = fake_session
     start_serving.clear_serving()
     sid = _insert(db_conn, "await-serving")
-    manager = sm.ScheduleManager(
-        pool, backend=backend, timers=ManualTimers(), repo_root=sm.REPO_ROOT
-    )
+    manager = schedule_manager(pool, backend)
 
-    manager.reconcile()
+    manager.reconcile(now=NOW)
 
     assert launched == []
     assert _status(db_conn, sid) == "stopped"
 
     generation = start_serving.begin_start()
     assert start_serving.mark_serving(generation, runtime=serving_root.runtime) is True
-    manager.reconcile()
+    manager.reconcile(now=NOW)
 
     assert launched == [sid]
     assert _status(db_conn, sid) == "running"
@@ -266,12 +258,7 @@ def test_live_superseded_generation_is_reaped_before_schedule_reconcile(
     backend.generations[name] = "previous-generation"
     _set_allocation_generation(unit_home, "current-generation")
 
-    assert (
-        sm.ScheduleManager(
-            pool, backend=backend, timers=ManualTimers(), repo_root=sm.REPO_ROOT
-        )._live_ids()
-        == set()
-    )
+    assert schedule_manager(pool, backend)._live_ids(NOW) == set()
     assert backend.killed == [name]
 
 
@@ -288,16 +275,14 @@ def test_superseded_generation_reap_retries_before_rebuilding_enabled_schedule(
     backend.generations[name] = "previous-generation"
     backend.kill_results = [False, True]
     _set_allocation_generation(unit_home, "current-generation")
-    manager = sm.ScheduleManager(
-        pool, backend=backend, timers=ManualTimers(), repo_root=sm.REPO_ROOT
-    )
+    manager = schedule_manager(pool, backend)
 
-    manager.reconcile()
+    manager.reconcile(now=NOW)
     assert backend.killed == [name]
     assert launched == []
     assert name in backend.live
 
-    manager.reconcile()
+    manager.reconcile(now=NOW)
     assert backend.killed == [name, name]
     assert launched == [sid]
     assert _status(db_conn, sid) == "running"
@@ -309,13 +294,11 @@ def test_launch_env_carries_cluster_timezone(
     backend, launched = fake_session
     sid = _insert(db_conn, "job-tz")
 
-    sm.ScheduleManager(
-        pool, backend=backend, timers=ManualTimers(), repo_root=sm.REPO_ROOT
-    )._launch(sid)
+    schedule_manager(pool, backend)._launch(sid, NOW)
 
     assert launched == [sid]
     env = backend.launch_envs[0]
-    assert env["MEIVA_TIMEZONE"] == settings.general.timezone
+    assert env["MEIVA_TIMEZONE"] == POLICY.timezone
     assert env["MEIVA_SCHEDULE_ID"] == str(sid)
 
 
@@ -326,9 +309,7 @@ def test_adopts_live_session_without_relaunch(
     sid = _insert(db_conn, "job-b")
     backend.live.append(session_name(f"schedule-{sid}"))
 
-    sm.ScheduleManager(
-        pool, backend=backend, timers=ManualTimers(), repo_root=sm.REPO_ROOT
-    ).reconcile()
+    schedule_manager(pool, backend).reconcile(now=NOW)
 
     assert launched == []
 
@@ -341,9 +322,7 @@ def test_reaps_stale_session_before_launch(
     stale = session_name(f"schedule-{sid}")
     backend.live.append(stale)
 
-    sm.ScheduleManager(
-        pool, backend=backend, timers=ManualTimers(), repo_root=sm.REPO_ROOT
-    )._launch(sid)
+    schedule_manager(pool, backend)._launch(sid, NOW)
 
     assert stale in backend.killed
     assert launched == [sid]
@@ -358,16 +337,14 @@ def test_retries_enabled_stale_session_reap_before_launch(
     stale = session_name(f"schedule-{sid}")
     backend.live.append(stale)
     backend.kill_results = [False, True]
-    manager = sm.ScheduleManager(
-        pool, backend=backend, timers=ManualTimers(), repo_root=sm.REPO_ROOT
-    )
+    manager = schedule_manager(pool, backend)
 
-    manager._launch(sid)
+    manager._launch(sid, NOW)
     assert backend.killed == [stale]
     assert launched == []
     assert stale in backend.live
 
-    manager.reconcile()
+    manager.reconcile(now=NOW)
     assert backend.killed == [stale, stale]
     assert launched == [sid]
     assert stale in backend.live
@@ -382,9 +359,7 @@ def test_kills_orphan_session(
     orphan = session_name(f"schedule-{sid}")
     backend.live.append(orphan)
 
-    sm.ScheduleManager(
-        pool, backend=backend, timers=ManualTimers(), repo_root=sm.REPO_ROOT
-    ).reconcile()
+    schedule_manager(pool, backend).reconcile(now=NOW)
 
     assert orphan in backend.killed
     assert _status(db_conn, sid) == "stopped"
@@ -403,9 +378,7 @@ def test_completed_schedule_not_relaunched(
     sid = _insert(db_conn, "done-a")
     _set_status(db_conn, sid, "completed")
 
-    sm.ScheduleManager(
-        pool, backend=backend, timers=ManualTimers(), repo_root=sm.REPO_ROOT
-    ).reconcile()
+    schedule_manager(pool, backend).reconcile(now=NOW)
 
     assert launched == []
     assert _status(db_conn, sid) == "completed"
@@ -422,9 +395,7 @@ def test_sync_recovers_errored_schedule(
     )
     db_conn.commit()
 
-    sm.ScheduleManager(
-        pool, backend=backend, timers=ManualTimers(), repo_root=sm.REPO_ROOT
-    ).sync_one(sid)
+    schedule_manager(pool, backend).sync_one(sid, now=NOW)
 
     assert launched == [sid]
     assert session_name(f"schedule-{sid}") in backend.live
@@ -436,16 +407,16 @@ def test_sync_launches_enabled_and_kills_disabled(
 ) -> None:
     backend, launched = fake_session
     sid = _insert(db_conn, "sync-a", enabled=True)
-    mgr = sm.ScheduleManager(pool, backend=backend, timers=ManualTimers(), repo_root=sm.REPO_ROOT)
+    mgr = schedule_manager(pool, backend)
 
-    mgr.sync_one(sid)
+    mgr.sync_one(sid, now=NOW)
     assert launched == [sid]
     assert session_name(f"schedule-{sid}") in backend.live
 
     with db_conn.cursor() as cur:
         cur.execute("UPDATE schedules SET enabled = false WHERE id = %s", (sid,))
     db_conn.commit()
-    mgr.sync_one(sid)
+    mgr.sync_one(sid, now=NOW)
     assert session_name(f"schedule-{sid}") in backend.killed
     assert launched == [sid]
 
@@ -456,11 +427,9 @@ def test_stop_reaps_then_start_rebuilds_without_reviving_after_gateway_restart(
     backend, launched = fake_session
     sid = _insert(db_conn, "stop-start")
     name = session_name(f"schedule-{sid}")
-    manager = sm.ScheduleManager(
-        pool, backend=backend, timers=ManualTimers(), repo_root=sm.REPO_ROOT
-    )
+    manager = schedule_manager(pool, backend)
 
-    manager.sync_one(sid)
+    manager.sync_one(sid, now=NOW)
     assert launched == [sid]
     assert name in backend.live
     assert _status(db_conn, sid) == "running"
@@ -468,14 +437,12 @@ def test_stop_reaps_then_start_rebuilds_without_reviving_after_gateway_restart(
     with db_conn.cursor() as cur:
         cur.execute("UPDATE schedules SET enabled = false WHERE id = %s", (sid,))
     db_conn.commit()
-    manager.sync_one(sid)
+    manager.sync_one(sid, now=NOW)
     assert name in backend.killed
     assert name not in backend.live
     assert _status(db_conn, sid) == "stopped"
 
-    sm.ScheduleManager(
-        pool, backend=backend, timers=ManualTimers(), repo_root=sm.REPO_ROOT
-    ).reconcile()
+    schedule_manager(pool, backend).reconcile(now=NOW)
     assert launched == [sid]
     assert name not in backend.live
 
@@ -485,7 +452,7 @@ def test_stop_reaps_then_start_rebuilds_without_reviving_after_gateway_restart(
             (sid,),
         )
     db_conn.commit()
-    manager.sync_one(sid)
+    manager.sync_one(sid, now=NOW)
     assert launched == [sid, sid]
     assert name in backend.live
     assert _status(db_conn, sid) == "running"
@@ -497,10 +464,8 @@ def test_failed_reap_keeps_runtime_status_and_retries_on_reconcile(
     backend, launched = fake_session
     sid = _insert(db_conn, "retry-reap")
     name = session_name(f"schedule-{sid}")
-    manager = sm.ScheduleManager(
-        pool, backend=backend, timers=ManualTimers(), repo_root=sm.REPO_ROOT
-    )
-    manager.sync_one(sid)
+    manager = schedule_manager(pool, backend)
+    manager.sync_one(sid, now=NOW)
     run_id = _insert_null_run(db_conn, sid)
 
     with db_conn.cursor() as cur:
@@ -508,13 +473,13 @@ def test_failed_reap_keeps_runtime_status_and_retries_on_reconcile(
     db_conn.commit()
     backend.kill_results = [False, True]
 
-    manager.sync_one(sid)
+    manager.sync_one(sid, now=NOW)
     assert name in backend.live
     assert _status(db_conn, sid) == "running"
     assert _run_row(db_conn, run_id) == (None, None)
     assert launched == [sid]
 
-    manager.reconcile()
+    manager.reconcile(now=NOW)
     assert name not in backend.live
     assert _status(db_conn, sid) == "stopped"
     assert _run_row(db_conn, run_id) == (False, "interrupted")
@@ -528,17 +493,15 @@ def test_reap_failure_error_logs_are_rate_limited(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     backend, _launched = fake_session
-    sid = _insert(db_conn, "rate-limit-reap")
+    sid = _insert(db_conn, "rate-limit-reap", enabled=False)
+    backend.live.append(session_name(f"schedule-{sid}"))
     backend.kill_results = [False, False, False]
-    clock = ManualTimers(start=1000.0)
-    manager = sm.ScheduleManager(pool, backend=backend, timers=clock, repo_root=sm.REPO_ROOT)
+    manager = schedule_manager(pool, backend)
 
     with caplog.at_level(logging.ERROR, logger=sm.__name__):
-        assert not manager._reap(sid)
-        clock.advance(sm.PTY_FAILURE_LOG_INTERVAL_S - 1)
-        assert not manager._reap(sid)
-        clock.advance(1)
-        assert not manager._reap(sid)
+        assert not manager.sync_one(sid, now=NOW)
+        assert not manager.sync_one(sid, now=NOW + CLEANUP_FAILURE_LOG_INTERVAL_S - 1)
+        assert not manager.sync_one(sid, now=NOW + CLEANUP_FAILURE_LOG_INTERVAL_S)
 
     errors = [
         record.getMessage()
@@ -574,9 +537,8 @@ def test_successful_launch_clears_stale_last_error(
     db_conn.commit()
     _set_status(db_conn, sid, "stopped")
 
-    clock = ManualTimers()
-    mgr = sm.ScheduleManager(pool, backend=backend, timers=clock, repo_root=sm.REPO_ROOT)
-    mgr.reconcile()
+    mgr = schedule_manager(pool, backend)
+    mgr.reconcile(now=NOW)
     assert launched == [sid]
     with db_conn.cursor() as cur:
         cur.execute("SELECT status, last_error FROM schedules WHERE id = %s", (sid,))
@@ -587,11 +549,14 @@ def test_successful_launch_clears_stale_last_error(
     assert last_error is None, "stale breaker text must be cleared on successful launch"
 
 
-def _tick(manager: sm.ScheduleManager, clock: ManualTimers, seconds: float) -> None:
-    end = clock.monotonic() + seconds
-    while clock.monotonic() < end:
-        manager.reconcile()
-        clock.advance(30)
+# meiva:note
+# Reconcile every 30 seconds for `seconds`; the reading of the next tick is returned.
+def _tick(manager: sm.ScheduleManager, start: float, seconds: float) -> float:
+    now = start
+    while now < start + seconds:
+        manager.reconcile(now=now)
+        now += 30
+    return now
 
 
 def _last_error(conn: psycopg.Connection, sid: int) -> str | None:
@@ -607,21 +572,20 @@ def test_a_reap_that_keeps_failing_is_given_up_once_the_window_ends(
     emitted_events: EmittedEvents,
 ) -> None:
     backend, launched = fake_session
-    clock = ManualTimers(start=1000.0)
     sid = _insert(db_conn, "survivor", enabled=False)
     name = session_name(f"schedule-{sid}")
     backend.live.append(name)
     backend.kill_results = [False] * 10_000
-    manager = sm.ScheduleManager(pool, backend=backend, timers=clock, repo_root=sm.REPO_ROOT)
+    manager = schedule_manager(pool, backend)
 
-    _tick(manager, clock, sm.BLOCKED_GIVE_UP_AFTER_S - 30)
+    now = _tick(manager, NOW, BLOCKED_GIVE_UP_AFTER_S - 30)
     retried = len(backend.killed)
-    assert retried == sm.BLOCKED_GIVE_UP_AFTER_S // 30 - 1
+    assert retried == BLOCKED_GIVE_UP_AFTER_S // 30 - 1
     assert len(emitted_events) == 0
     assert _status(db_conn, sid) == "running"
 
-    clock.advance(30)
-    manager.reconcile()
+    now += 30
+    manager.reconcile(now=now)
     assert len(backend.killed) == retried + 1
     assert _status(db_conn, sid) == "error"
     assert "gave up" in (_last_error(db_conn, sid) or "")
@@ -630,9 +594,9 @@ def test_a_reap_that_keeps_failing_is_given_up_once_the_window_ends(
     ]
 
     for _ in range(3):
-        clock.advance(30)
-        manager.reconcile()
-        assert manager.sync_one(sid) is True
+        now += 30
+        manager.reconcile(now=now)
+        assert manager.sync_one(sid, now=now) is True
     assert len(backend.killed) == retried + 1
     assert len(emitted_events) == 1
     assert name in backend.live
@@ -646,12 +610,11 @@ def test_an_explicit_new_revision_lifts_the_give_up(
     fake_session: tuple[_FakeBackend, list[int]],
 ) -> None:
     backend, _launched = fake_session
-    clock = ManualTimers(start=1000.0)
     sid = _insert(db_conn, "survivor-lifted", enabled=False)
     backend.live.append(session_name(f"schedule-{sid}"))
     backend.kill_results = [False] * 10_000
-    manager = sm.ScheduleManager(pool, backend=backend, timers=clock, repo_root=sm.REPO_ROOT)
-    _tick(manager, clock, sm.BLOCKED_GIVE_UP_AFTER_S + 30)
+    manager = schedule_manager(pool, backend)
+    now = _tick(manager, NOW, BLOCKED_GIVE_UP_AFTER_S + 30)
     assert _status(db_conn, sid) == "error"
     attempts = len(backend.killed)
 
@@ -660,27 +623,8 @@ def test_an_explicit_new_revision_lifts_the_give_up(
         "UPDATE schedules SET desired_revision = desired_revision + 1 WHERE id = %s", (sid,)
     )
     db_conn.commit()
-    assert manager.sync_one(sid) is True
+    assert manager.sync_one(sid, now=now) is True
 
     assert len(backend.killed) == attempts + 1
     assert _status(db_conn, sid) == "stopped"
-    assert sid not in manager._abandoned
-
-
-def test_a_failure_streak_is_broken_by_a_gap(
-    db_conn: psycopg.Connection,
-    pool: ConnectionPool,
-    fake_session: tuple[_FakeBackend, list[int]],
-    emitted_events: EmittedEvents,
-) -> None:
-    backend, _launched = fake_session
-    clock = ManualTimers(start=1000.0)
-    sid = _insert(db_conn, "gappy")
-    manager = sm.ScheduleManager(pool, backend=backend, timers=clock, repo_root=sm.REPO_ROOT)
-
-    for _ in range(4):
-        manager._note_blocked(sid, "x")
-        clock.advance(sm.BLOCKED_STREAK_GAP_S + 1)
-
-    assert len(emitted_events) == 0
     assert sid not in manager._abandoned

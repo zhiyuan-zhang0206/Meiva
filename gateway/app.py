@@ -1,9 +1,8 @@
 import asyncio
 import logging
 import time
-from collections.abc import AsyncGenerator, Awaitable, Callable, Coroutine
+from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import AsyncExitStack, asynccontextmanager, nullcontext
-from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
 from typing import Any, Literal
@@ -15,47 +14,44 @@ from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from base import paths, telemetry
-from base.agents.impersonation.wake import publish_inbound_wake
-from base.agents.tasks.delivery import enqueue_task_notifications
 from base.api_contracts.agent_contract import MeivaAgentError
-from base.cluster import machines
 from base.cluster.machine.boot import machine_from_boot
 from base.cluster.rate_limit import LoginRateLimitConfig, LoginRateLimiter
-from base.config import ConfigBoot, Settings, runtime_config, settings
-from base.config.admin.candidate import validate_env_patch_for_write
+from base.config import ConfigBoot, Settings
 from base.config.service_read import ConfigAuthority
+from base.daemon.endpoints import ServiceEndpoints
 from base.events.live.bus import EventBus, event_bus_config_from_config
 from base.host.db_authority.api import AcceptanceCache
 from base.host.net.auth import cookie_name
 from base.host.system.cron import register_os_cron
 from base.host.system.hostport import Host
-from base.lm.factory import build_chat_model, process_provider_keys
+from base.lm.catalog import ModelCatalog
 from base.packages.composer_commands import CommandCatalog, load_skill_names
 from base.packages.plugin_providers import build_model_catalog
+from base.sessions.backend import get_shell_backend
 from gateway.agents import launch_retry as agents_launch_retry_router
 from gateway.agents import lifecycle as agents_lifecycle_router
-from gateway.agents import notices as notices_router
 from gateway.agents import router as agents_router
 from gateway.agents import state as agents_state_router
 from gateway.agents.history import conversation as conversation_router
 from gateway.agents.history import timeline as timeline_router
 from gateway.agents.history import understanding as agents_understanding_router
-from gateway.agents.history.configuration import timeline_policy, understanding_policy
+from gateway.agents.notice_operations import notices as notices_router
 from gateway.agents.notice_operations import router as guarded_notices_router
 from gateway.agents.reply_suggestion import router as reply_suggestion_router
 from gateway.agents.reply_suggestion.configuration import reply_suggestion_service
 from gateway.agents.task_assignment import router as task_assignments_router
 from gateway.agents.to_user import document as to_user_router
 from gateway.alerts import router as alerts_router
-from gateway.cluster import alert_classes as alert_classes_router
 from gateway.cluster import bootstrap as bootstrap_router
 from gateway.cluster import machine_pause as machine_pause_router
-from gateway.cluster import ops_monitor as ops_monitor_router
 from gateway.cluster import router as cluster_router
 from gateway.cluster import status as status_router
 from gateway.cluster.harness_probe import HarnessProbeCache
+from gateway.cluster.monitor import alert_classes as alert_classes_router
+from gateway.cluster.monitor import ops_monitor as ops_monitor_router
 from gateway.cluster.process_boot import LOADED_IMAGE, GatewayProcess
-from gateway.cluster.roster_probe import IdentityMismatchLog
+from gateway.cluster.roster.roster_probe import IdentityMismatchLog
 from gateway.cluster.server import main as _run_gateway
 from gateway.cluster.status import StatusCache
 from gateway.events import agent_events as agent_events_router
@@ -88,9 +84,9 @@ from gateway.http.middleware.error_handlers import (
     unhandled_exception_handler,
 )
 from gateway.http.model_catalog import (
+    CatalogLoadFailure,
     ModelCatalogUnavailableError,
     load_model_catalog,
-    require_catalog,
 )
 from gateway.inspect import okf_graph as okf_graph_router
 from gateway.inspect import router as inspect_router
@@ -99,29 +95,15 @@ from gateway.mcp_server import endpoint as mcp_server_endpoint
 from gateway.routers import (
     commands as commands_router,
 )
-from gateway.routers import fleet_graph as fleet_graph_router
 from gateway.routers import (
     frontend_telemetry as frontend_telemetry_router,
-)
-from gateway.routers import (
-    grafana as grafana_router,
 )
 from gateway.routers import (
     guide as guide_router,
 )
 from gateway.routers import host_permissions as host_permissions_router
 from gateway.routers import (
-    insights as insights_router,
-)
-from gateway.routers import (
-    memory as memory_router,
-)
-from gateway.routers import (
     notifications as notifications_router,
-)
-from gateway.routers import page_acceptance
-from gateway.routers import (
-    pages as pages_router,
 )
 from gateway.routers import (
     settings as settings_router,
@@ -134,53 +116,28 @@ from gateway.routers import (
 )
 from gateway.routers.configuration import default_model as default_model_router
 from gateway.routers.configuration import runtime as config_router
-from gateway.routers.receipts import creation as creation_receipts
-from gateway.routers.receipts.task import save_task_receipt
+from gateway.routers.fleet import fleet_graph as fleet_graph_router
+from gateway.routers.memory_api import memory as memory_router
+from gateway.routers.page_serving import page_target
+from gateway.routers.page_serving import pages as pages_router
+from gateway.routers.proxies import grafana as grafana_router
+from gateway.routers.proxies import insights as insights_router
 from gateway.routers.upload import router as uploads_router
 from gateway.schedules import router as schedules_router
 from gateway.upload_delivery import router as upload_delivery_router
 from gateway.upload_delivery.worker import UploadRecovery
-from ops import lifecycle
-from ops.cluster import rpc as cluster_rpc
-from ops.pages import assert_port_free
 
 _log = logging.getLogger(__name__)
 
 
-@dataclass(frozen=True)
-class LifespanServices:
-    insights_client: Callable[[Path], Any]
-    register_cron: Callable[..., None]
-    flush_latency: Callable[[], Coroutine[Any, Any, None]]
-    flush_auth: Callable[[rejection_log.AuthRejectionLog], Coroutine[Any, Any, None]]
-
-
-def _request_operations(app: FastAPI) -> None:
-    app.state.command_catalog_discoverer = CommandCatalog.system(skills=load_skill_names).discover
-    app.state.command_rpc_dispatcher = cluster_rpc.dispatch_to_machine
-    app.state.config_role_lookup = machines.lookup_role
-    app.state.config_rpc_dispatcher = cluster_rpc.dispatch_to_machine
-    app.state.config_candidate_validator = validate_env_patch_for_write
-    app.state.config_cluster_field_writer = runtime_config.write_fields
-    app.state.page_port_free_checker = assert_port_free
-    app.state.page_receipt_finisher = page_acceptance.finish_receipt
-    app.state.task_notifications_enqueuer = enqueue_task_notifications
-    app.state.task_receipt_saver = save_task_receipt
-    app.state.task_wake_publisher = publish_inbound_wake
-    app.state.task_resurrector = lifecycle.resurrect_if_terminated
-    app.state.schedule_receipt_finisher = creation_receipts.finish
-
-
-def _closer(resource: Any, method: str) -> Callable[[], Any]:
-    def close() -> Any:
-        return getattr(resource, method)()
-
-    return close
-
-
+# meiva:note
+# Release what start-up acquired, last acquired first, on success and on failure.
+#
+# A release that fails does not skip the ones before it. When the body raised, that error
+# is the one that propagates and a failing release is added to it as a note; when the body
+# finished, the failing release's error propagates.
 @asynccontextmanager
-async def _startup_releases() -> AsyncGenerator[AsyncExitStack]:
-
+async def startup_releases() -> AsyncGenerator[AsyncExitStack]:
     releases = AsyncExitStack()
     try:
         yield releases
@@ -194,7 +151,7 @@ async def _startup_releases() -> AsyncGenerator[AsyncExitStack]:
 
 
 def _build_request_resources(
-    app: FastAPI, process: GatewayProcess, releases: AsyncExitStack, services: LifespanServices
+    app: FastAPI, process: GatewayProcess, releases: AsyncExitStack
 ) -> None:
 
     config = process.config
@@ -202,52 +159,30 @@ def _build_request_resources(
     app.state.machine_token_acceptance = machine_token_acceptance
     app.state.telemetry_staleness = TelemetryStaleness()
     app.state.status_cache = StatusCache()
+    app.state.shell_backend = get_shell_backend()
     app.state.harness_cache = HarnessProbeCache()
     app.state.identity_mismatch_log = IdentityMismatchLog()
-    inspect_queries: Any = inspect_router.build_query_cache()
-    app.state.inspect_query_cache = inspect_queries
-    releases.push_async_callback(_closer(inspect_queries, "aclose"))
-    app.state.timeline_policy = timeline_policy(config)
-    app.state.understanding_policy = understanding_policy(config, app.state.config_authority)
-    app.state.reply_suggestions = reply_suggestion_service(
-        config,
-        db=app.state.db,
-        catalog_reader=partial(require_catalog, app.state.catalog),
-        keys_reader=process_provider_keys,
-        rendering=app.state.timeline_policy.rendering,
-        model_builder=build_chat_model,
+    app.state.service_endpoints = ServiceEndpoints.from_boot(
+        config, runtime=paths.run_dir(process.home)
     )
+    inspect_queries = inspect_router.build_query_cache()
+    app.state.inspect_query_cache = inspect_queries
+    releases.push_async_callback(inspect_queries.aclose)
+    app.state.reply_suggestions = reply_suggestion_service(config)
     app.state.memory_search_gate = memory_router.build_search_gate(
         config.view.services.memory_search_max_concurrency
     )
 
-    def memory_api_key() -> str | None:
-        secret = config.view.lm.gemini_api_key
-        return None if secret is None else secret.get_secret_value()
-
-    app.state.memory_search_inputs = memory_router.MemorySearchInputs(
-        embedding_backend=lambda: config.view.services.embedding_backend,
-        backend=lambda: config.view.services.memory_search_backend,
-        uri=lambda: config.view.services.memory_search_uri,
-        embedding_timeout=lambda: config.view.services.memory_embed_timeout_seconds,
-        api_key=memory_api_key,
-        acquire_timeout=lambda: config.view.services.memory_search_acquire_timeout_seconds,
-        deadline=lambda: config.view.services.memory_search_deadline_seconds,
-        rerank_model=lambda: config.view.services.memory_rerank_model,
-        rerank_candidates=lambda: config.view.services.memory_rerank_candidates,
-        dedup_candidates=lambda: config.view.services.memory_dedup_candidates,
-    )
     app.state.auth401_log = rejection_log.AuthRejectionLog()
     app.state.login_limiter = LoginRateLimiter(
         max_failures_reader=lambda: config.view.gateway.login_max_failures,
         lockout_seconds_reader=lambda: config.view.gateway.login_lockout_seconds,
         config=LoginRateLimitConfig(),
-        clock=getattr(app.state, "login_limiter_clock", None),
     )
 
-    insights_client: Any = services.insights_client(process.home)
+    insights_client = insights_router.build_client(process.home)
     app.state.insights_client = insights_client
-    releases.push_async_callback(_closer(insights_client, "aclose"))
+    releases.push_async_callback(insights_client.aclose)
 
 
 @asynccontextmanager
@@ -256,7 +191,6 @@ async def lifespan(
     *,
     process: GatewayProcess,
     process_ownership: Literal["borrowed", "owned"],
-    services: LifespanServices,
 ) -> AsyncGenerator[None]:
 
     if process_ownership not in {"borrowed", "owned"}:
@@ -272,9 +206,7 @@ async def lifespan(
             pipeline=process.event_pipeline(),
             machine_reader=process.machine.name,
         )
-        async with _startup_releases() as releases:
-            if getattr(app.state, "catalog", None) is None:
-                app.state.catalog = load_model_catalog(build_model_catalog)
+        async with startup_releases() as releases:
             app.state.config_authority = ConfigAuthority(
                 runtime=config.view,
                 all_domains=config.view if config.view.profile is None else Settings(profile=None),
@@ -290,75 +222,84 @@ async def lifespan(
                 )
             app.state.db = process.database()
             app.state.bus = EventBus(event_bus_config_from_config(process.config))
-            db_pool: Any = app.state.db.pool(max_size=8)
+            db_pool = app.state.db.pool(max_size=app.state.gateway_config.db_pool_max_size)
             app.state.db_pool = db_pool
-            releases.callback(_closer(db_pool, "close"))
+            releases.callback(db_pool.close)
             app.state.sessions = SessionStore(db_pool)
             app.state.session_keys = SessionKeys()
             app.state.session_touch = SessionTouchThrottle()
-            app.state.page_host_cache = pages_router.PageHostCache()
+            app.state.page_host_cache = page_target.PageHostCache()
             app.state.telemetry_rate_limiter = frontend_telemetry_router.SessionRateLimiter()
 
-            control_db_pool: Any = app.state.db.pool(min_size=1, max_size=2, timeout=2.0)
+            control_db_pool = app.state.db.pool(min_size=1, max_size=2, timeout=2.0)
             app.state.control_db_pool = control_db_pool
-            releases.callback(_closer(control_db_pool, "close"))
+            releases.callback(control_db_pool.close)
 
-            _build_request_resources(app, process, releases, services)
+            _build_request_resources(app, process, releases)
 
-            grafana_client: Any = grafana_router.build_proxy_client()
+            grafana_client = grafana_router.build_proxy_client()
             app.state.grafana_client = grafana_client
-            releases.push_async_callback(_closer(grafana_client, "aclose"))
+            releases.push_async_callback(grafana_client.aclose)
 
             try:
                 await asyncio.to_thread(
-                    services.register_cron,
+                    register_os_cron,
                     enabled_reader=lambda: config.view.general.os_jobs_enabled,
                     host=process.host,
                 )
             except Exception:
                 _log.warning("OS health-probe cron registration failed", exc_info=True)
 
-            monitor: Any = runtime_metrics.start_runtime_monitor()
+            monitor = runtime_metrics.start_runtime_monitor()
             app.state.runtime_metrics = monitor
-            releases.callback(_closer(monitor, "stop"))
+            releases.callback(monitor.stop)
 
             upload_recovery = UploadRecovery(
                 app.state.db_pool,
                 app.state.db,
                 app.state.bus,
                 machine=process.machine,
-                claim_seconds=settings.gateway.upload_recovery_claim_seconds,
+                home=app.state.gateway_config.upload_home,
+                claim_seconds=config.view.gateway.upload_recovery_claim_seconds,
             )
             app.state.upload_recovery = upload_recovery
 
-            async with _background_lifetime(app, upload_recovery, services):
+            async with _background_lifetime(app, upload_recovery):
                 yield
 
 
 @asynccontextmanager
 async def _background_lifetime(
-    app: FastAPI, upload_recovery: UploadRecovery, services: LifespanServices
+    app: FastAPI, upload_recovery: UploadRecovery
 ) -> AsyncGenerator[None]:
 
     mcp_manager = None
     config: GatewayConfig = app.state.gateway_config
+    view = app.state.gateway_process.config.view
     if config.mcp_endpoint_enabled:
         mcp_manager = mcp_server_endpoint.build_manager(app)
         app.state.mcp_manager = mcp_manager
 
     try:
         async with asyncio.TaskGroup() as background:
-            latency_flusher = background.create_task(services.flush_latency())
-            auth401_flusher = background.create_task(services.flush_auth(app.state.auth401_log))
+            latency_flusher = background.create_task(
+                latency.latency_flusher(), name="gateway-latency-flusher"
+            )
+            auth401_flusher = background.create_task(
+                rejection_log.auth401_flusher(app.state.auth401_log),
+                name="gateway-auth-flusher",
+            )
             outbox = background.create_task(
                 notification_outbox.run(
                     app.state.db_pool,
                     app.state.bus,
-                    interval_seconds=settings.gateway.notification_outbox_interval_seconds,
-                    batch=settings.gateway.notification_outbox_batch,
-                )
+                    interval_seconds=view.gateway.notification_outbox_interval_seconds,
+                    batch=view.gateway.notification_outbox_batch,
+                ),
+                name="gateway-notification-outbox",
             )
-            upload_recovery.start(background)
+            if config.upload_recovery_enabled:
+                upload_recovery.start(background)
             try:
                 if mcp_manager is not None:
                     async with mcp_manager.run():
@@ -469,10 +410,8 @@ async def cluster_auth_middleware(
         request.state.source_verified_by = session_fact
         if _foreign_origin(request, config):
             return _origin_refused()
-        clock = getattr(request.app.state, "monotonic_clock", None)
-        now = time.monotonic() if clock is None else clock()
         touch: SessionTouchThrottle = request.app.state.session_touch
-        if touch.due(cookie_token, now, stale_after_s=config.session_ttl_seconds):
+        if touch.due(cookie_token, time.monotonic(), stale_after_s=config.session_ttl_seconds):
             await asyncio.to_thread(
                 touch_session,
                 request.app.state.db_pool,
@@ -500,7 +439,7 @@ async def cluster_auth_middleware(
         request.state.source_verified_by = TRUSTED_NETWORK_FACT
         return await call_next(request)
 
-    request.app.state.auth401_log.log(request)
+    request.app.state.auth401_log.log(request, time.monotonic())
     return error_response(
         request,
         code="authentication_required",
@@ -516,28 +455,21 @@ def create_app(
     *,
     process: GatewayProcess,
     process_ownership: Literal["borrowed", "owned"],
+    catalog: ModelCatalog | CatalogLoadFailure,
 ) -> FastAPI:
 
     if process_ownership not in {"borrowed", "owned"}:
         raise ValueError("gateway process ownership must be borrowed or owned")
-    services = LifespanServices(
-        insights_client=insights_router.build_client,
-        register_cron=register_os_cron,
-        flush_latency=latency.latency_flusher,
-        flush_auth=rejection_log.auth401_flusher,
-    )
     app = FastAPI(
         title="Meiva",
-        lifespan=partial(
-            lifespan, process=process, process_ownership=process_ownership, services=services
-        ),
+        lifespan=partial(lifespan, process=process, process_ownership=process_ownership),
         docs_url=None,
         redoc_url=None,
         openapi_url=None,
     )
     app.state.gateway_config = config
-    app.state.lifespan_services = services
-    _request_operations(app)
+    app.state.catalog = catalog
+    app.state.command_catalog = CommandCatalog.system(skills=load_skill_names)
     app.state.memory_unreadable_reports = memory_router.unreadable_reports()
     app.state.gateway_process = process
     machine_token_acceptance: AcceptanceCache = {}
@@ -636,15 +568,23 @@ def create_app_from_environment() -> FastAPI:
         host=Host.system(),
     )
     return create_app(
-        gateway_config_from_boot(process.config), process=process, process_ownership="owned"
+        gateway_config_from_boot(process.config),
+        process=process,
+        process_ownership="owned",
+        catalog=load_model_catalog(build_model_catalog),
     )
 
 
 def openapi_schema() -> dict[str, Any]:
 
-    config = ConfigBoot()
+    return openapi_schema_of(ConfigBoot(), home=paths.resolve_meiva_home())
+
+
+# meiva:note
+# The OpenAPI document of an app built cold: no configuration field is read.
+def openapi_schema_of(config: ConfigBoot, *, home: Path) -> dict[str, Any]:
     process = GatewayProcess(
-        home=paths.resolve_meiva_home(),
+        home=home,
         config=config,
         image=LOADED_IMAGE,
         machine=machine_from_boot(config),
@@ -659,18 +599,30 @@ def openapi_schema() -> dict[str, Any]:
         session_cookie_secure=False,
         human_auth="required",
         memory_root=Path("/nonexistent/memory"),
+        upload_home=Path("/nonexistent/home"),
     )
     with process.lifetime():
-        app = create_app(schema_config, process=process, process_ownership="borrowed")
+        app = create_app(
+            schema_config,
+            process=process,
+            process_ownership="borrowed",
+            catalog=CatalogLoadFailure(RuntimeError("the schema app serves no model operation")),
+        )
         return app.openapi()
 
 
 def _borrowed_app(process: GatewayProcess) -> FastAPI:
     return create_app(
-        gateway_config_from_boot(process.config), process=process, process_ownership="borrowed"
+        gateway_config_from_boot(process.config),
+        process=process,
+        process_ownership="borrowed",
+        catalog=load_model_catalog(build_model_catalog),
     )
 
 
 def main() -> None:
 
-    _run_gateway(build_app=_borrowed_app)
+    config = ConfigBoot()
+    config.boot()
+    config.ensure_eager()
+    _run_gateway(config=config, build_app=_borrowed_app)

@@ -1,11 +1,16 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 
+from base.lm.catalog import ModelCatalog
+from base.lm.factory import process_provider_keys
 from gateway.agents.eval_guard import deny_isolated_result_read
+from gateway.agents.history.configuration import timeline_rendering
+from gateway.agents.reply_suggestion.configuration import reply_suggestion_policy
 from gateway.agents.reply_suggestion.schemas import ReplySuggestionResponse
 from gateway.agents.reply_suggestion.service import (
     ReplySuggestionConfigurationError,
@@ -29,8 +34,25 @@ async def post_reply_suggestion(
 ) -> ReplySuggestionResponse | JSONResponse:
 
     service: ReplySuggestionService = request.app.state.reply_suggestions
+    config = request.app.state.gateway_process.config
+    catalog = request.app.state.catalog
+    keys = (
+        await asyncio.to_thread(process_provider_keys, catalog)
+        if isinstance(catalog, ModelCatalog)
+        else None
+    )
     try:
-        result = await run_until_disconnect(service.suggest(agent_id), request.is_disconnected)
+        result = await run_until_disconnect(
+            service.suggest(
+                agent_id,
+                db=request.app.state.db,
+                policy=reply_suggestion_policy(config),
+                rendering=timeline_rendering(config),
+                catalog=catalog,
+                keys=keys,
+            ),
+            request.is_disconnected,
+        )
     except ReplySuggestionConfigurationError:
         _log.exception("Reply suggestion model configuration is invalid")
         return error_response(

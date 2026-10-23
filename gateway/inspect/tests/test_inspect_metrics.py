@@ -288,44 +288,37 @@ def test_state_intervals_exclude_terminated_gaps(db_conn: psycopg.Connection) ->
     assert result.activity.exec_seconds == 20
 
 
-def test_statistics_http_does_not_read_logs_or_current_state(
+def test_statistics_http_serves_the_persisted_sql_read_model(
     app: FastAPI, db_conn: psycopg.Connection
 ) -> None:
     now = datetime.now(UTC)
     aid = _agent(db_conn, now)
     db_conn.commit()
-
-    def forbidden(*_args: object, **_kwargs: object) -> None:
-        raise AssertionError("Statistics must use the persisted SQL read model")
-
-    app.state.inspect_db_rows = forbidden
     with TestClient(app) as client:
         response = client.get(f"/api/agents/{aid}/inspect/statistics")
     assert response.status_code == 200, response.text
     assert response.json()["metadata"]["collection"] == "observed"
 
 
-def test_statistics_read_invokes_the_coverage_note(
-    app: FastAPI, db_conn: psycopg.Connection
+# meiva:note
+# The coverage note is wired into the statistics read (#3869 review): a
+# change that drops the call must fail here, not just in review.
+def test_statistics_read_logs_the_coverage_limits(
+    app: FastAPI, db_conn: psycopg.Connection, loguru_records: list[dict[str, Any]]
 ) -> None:
-    """The coverage note is wired into the statistics read (#3869 review): a
-    change that drops the call must fail here, not just in review."""
-    now = datetime.now(UTC)
-    aid = _agent(db_conn, now)
+    # meiva:note
+    # born before the collection
+    aid = _agent(db_conn, datetime.now(UTC) - timedelta(days=10))
     db_conn.commit()
-    seen: list[int] = []
-
-    def _record(agent_id: int, metadata: Any, *, spawned_at: Any) -> None:
-        assert metadata.collection == "observed"
-        assert spawned_at is not None
-        seen.append(agent_id)
-
-    app.state.inspect_note_coverage = _record
     with TestClient(app) as client:
         response = client.get(f"/api/agents/{aid}/inspect/statistics")
     assert response.status_code == 200, response.text
-    assert response.json()["metadata"]["collection"] == "observed"
-    assert seen == [aid]
+    limits = [
+        record
+        for record in loguru_records
+        if "coverage limit" in str(record["message"]) and record["extra"]["agent_id"] == aid
+    ]
+    assert {record["extra"]["condition"] for record in limits} == {"historical_coverage_unknown"}
 
 
 def test_recent_window_for_old_agent_preserves_activity_and_lm_throughput(

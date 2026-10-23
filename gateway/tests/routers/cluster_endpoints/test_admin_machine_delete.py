@@ -15,9 +15,6 @@ from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 from gateway.tests.auth.gateway_config import gateway_test_client
 from gateway.tests.routers.cluster_endpoints.cluster_support import (
-    fake_admin_events as fake_admin_events,
-)
-from gateway.tests.routers.cluster_endpoints.cluster_support import (
     pinned_session_names as pinned_session_names,
 )
 from gateway.tests.routers.cluster_endpoints.cluster_support import (
@@ -26,6 +23,7 @@ from gateway.tests.routers.cluster_endpoints.cluster_support import (
     seed_drain_owner,
     seed_in_progress_task,
 )
+from gateway.tests.support.runner_ops.ops_stub import RunnerOps, completed, runner_ops
 
 
 def _existing_row(cur: psycopg.Cursor) -> TupleRow:
@@ -83,44 +81,29 @@ class TestAgentMachineList:
         db_conn: psycopg.Connection,
         set_machine_identity: MachineIdentitySetter,
     ) -> None:  # type: ignore[no-untyped-def]
-        # Seed one LOCAL agent-runner row. The local machine is probed through
-        # its own ops server like any other (status_probe), so stub the op
-        # dispatch; the row survives the agent-view filter (only agent-runner
-        # machines run agents).
+        # meiva:note
+        # One agent-runner row, probed through its own ops server like any other machine
+        # (status_probe); the row survives the agent-view filter (only agent-runner machines
+        # run agents). The ops server echoes its own machine_name, which the gateway
+        # verifies matches the probed row.
         machine: MachineIdentity = set_machine_identity(role="agent-runner", name="runner-test")
-
-        async def _fake_dispatch(
-            *,
-            target_machine,
-            kind,
-            payload,
-            timeout_s=None,
-            ops_url=None,
-            retries=None,
-            idempotency_key=None,
-        ):  # type: ignore[no-untyped-def]
-            assert kind == "status_probe"
-            assert ops_url == "http://runner-test:18121"
-            # The ops server echoes its own machine_name; the gateway verifies it
-            # matches the probed row, so the stub must self-report the same name.
-            return {
+        db_conn.execute("TRUNCATE machines")
+        db_conn.commit()
+        answer = completed(
+            {
                 "machine_name": "runner-test",
                 "serve_gateway": False,
                 "serve_agent_runner": True,
                 "paused": False,
             }
-
-        with db_conn.cursor() as cur:  # pyright: ignore[reportUnknownMemberType]
-            cur.execute("TRUNCATE machines")  # pyright: ignore[reportUnknownMemberType]
-            cur.execute(  # pyright: ignore[reportUnknownMemberType]
-                "INSERT INTO machines (name, role, gateway_url, description) "
-                "VALUES ('runner-test', ARRAY['agent-runner'], "
-                "'http://runner-test:18121', 'voice IO + browser')"
+        )
+        with runner_ops(db_conn, "runner-test", {"status_probe": answer}):
+            db_conn.execute(
+                "UPDATE machines SET description = 'voice IO + browser' WHERE name = 'runner-test'"
             )
-        db_conn.commit()  # pyright: ignore[reportUnknownMemberType]
-        with gateway_test_client(machine=machine) as client:
-            client.app.state.status_probe_dispatcher = _fake_dispatch
-            r = client.get("/api/cluster/machines")
+            db_conn.commit()
+            with gateway_test_client(machine=machine) as client:
+                r = client.get("/api/cluster/machines")
         assert r.status_code == 200
         body = r.json()
         assert body == [
@@ -139,35 +122,16 @@ class TestAgentMachineList:
     ) -> None:  # type: ignore[no-untyped-def]
         """The agent/config projection must not target a runner whose ops
         server answered but could not provide a determinate status."""
-        from datetime import UTC, datetime
-
-        from base.api_contracts.status import MachineStatus
-
         machine: MachineIdentity = set_machine_identity(role="gateway", name="cloud-test")
-        with db_conn.cursor() as cur:  # pyright: ignore[reportUnknownMemberType]
-            cur.execute("TRUNCATE machines")  # pyright: ignore[reportUnknownMemberType]
-            cur.execute(  # pyright: ignore[reportUnknownMemberType]
-                "INSERT INTO machines (name, role, gateway_url) "
-                "VALUES ('runner-test', ARRAY['agent-runner'], 'http://runner-test:18121')"
-            )
-        db_conn.commit()  # pyright: ignore[reportUnknownMemberType]
-        now = datetime.now(UTC)
+        db_conn.execute("TRUNCATE machines")
+        db_conn.commit()
 
-        async def _fake_gather(_db: object, rows, local_name, **_kw):  # type: ignore[no-untyped-def]
-            return [
-                MachineStatus(
-                    name="runner-test",
-                    serve_gateway=False,
-                    serve_agent_runner=True,
-                    gateway_url="http://runner-test:18121",
-                    up_since_at=now,
-                    online=True,
-                    paused=None,
-                )
-            ]
-
-        with gateway_test_client(machine=machine) as client:
-            client.app.state.cluster_status_gatherer = _fake_gather
+        # meiva:note
+        # An answer that is not a ClusterStatus: reachable, status unknown.
+        with (
+            runner_ops(db_conn, "runner-test", {"status_probe": completed({})}),
+            gateway_test_client(machine=machine) as client,
+        ):
             response = client.get("/api/cluster/machines")
 
         assert response.status_code == 200
@@ -180,61 +144,37 @@ class TestAgentMachineList:
             }
         ]
 
+    # meiva:note
+    # The agent view (`/api/cluster/machines`) lists only machines that run
+    # agent processes — the gateway (which runs none) is filtered out.
     def test_get_cluster_machines_excludes_gateway(
         self,
         db_conn: psycopg.Connection,
+        set_machine_identity: MachineIdentitySetter,
     ) -> None:  # type: ignore[no-untyped-def]
-        """The agent view (`/api/cluster/machines`) lists only machines that run
-        agent processes — the gateway (which runs none) is filtered out.
+        machine: MachineIdentity = set_machine_identity(role="gateway", name="control-test")
+        db_conn.execute("TRUNCATE machines")
+        db_conn.execute(
+            "INSERT INTO machines (name, role, gateway_url) "
+            "VALUES ('control-test', ARRAY['gateway'], 'https://example.com')"
+        )
+        db_conn.commit()
+        answer = completed(
+            {
+                "machine_name": "runner-test",
+                "serve_gateway": False,
+                "serve_agent_runner": True,
+                "paused": False,
+            }
+        )
 
-        gather_cluster_status is stubbed so the filter is exercised in isolation,
-        without a real status_probe round-trip (no live runner in tests). One DB
-        row is seeded so the handler does not short-circuit on an empty roster
-        before reaching the stub."""
-        from datetime import UTC, datetime
-
-        from base.api_contracts.status import MachineStatus
-
-        with db_conn.cursor() as cur:  # pyright: ignore[reportUnknownMemberType]
-            cur.execute("TRUNCATE machines")  # pyright: ignore[reportUnknownMemberType]
-            cur.execute(  # pyright: ignore[reportUnknownMemberType]
-                "INSERT INTO machines (name, role, gateway_url) "
-                "VALUES ('control-test', ARRAY['gateway'], 'https://example.com'), "
-                "('runner-test', ARRAY['agent-runner'], NULL)"
+        with runner_ops(db_conn, "runner-test", {"status_probe": answer}):
+            db_conn.execute(
+                "UPDATE machines SET description = 'voice IO + browser' WHERE name = 'runner-test'"
             )
-        db_conn.commit()  # pyright: ignore[reportUnknownMemberType]
-
-        now = datetime.now(UTC)
-
-        async def _fake_gather(_db: object, rows, local_name, **_kw):  # type: ignore[no-untyped-def]
-            return [
-                MachineStatus(
-                    name="control-test",
-                    serve_gateway=True,
-                    serve_agent_runner=False,
-                    gateway_url="https://example.com",
-                    up_since_at=now,
-                    online=True,
-                    paused=False,
-                    description="ops gateway",
-                    stopped_at=None,
-                ),
-                MachineStatus(
-                    name="runner-test",
-                    serve_gateway=False,
-                    serve_agent_runner=True,
-                    gateway_url="",
-                    up_since_at=now,
-                    online=True,
-                    paused=False,
-                    description="voice IO + browser",
-                    stopped_at=None,
-                ),
-            ]
-
-        with gateway_test_client() as client:
-            client.app.state.cluster_status_gatherer = _fake_gather
-            r = client.get("/api/cluster/machines")
+            db_conn.commit()
+            with gateway_test_client(machine=machine) as client:
+                r = client.get("/api/cluster/machines")
         assert r.status_code == 200
         body = r.json()
         assert body == [
@@ -315,6 +255,7 @@ class TestMachinePauseResume:
         db_conn: psycopg.Connection,
         set_machine_identity: MachineIdentitySetter,
         *,
+        gateway_local_runner: RunnerOps,
         config_authority: ConfigAuthority,
         model_catalog: ModelCatalog,
         database_gate: ProcessDbGate,
@@ -346,6 +287,12 @@ class TestMachinePauseResume:
             machine_identity=machine_identity,
         )  # pyright: ignore[reportUnknownArgumentType]
         seed_in_progress_task(db_conn, aid, "task-on-away")  # pyright: ignore[reportUnknownArgumentType]
+        # meiva:note
+        # The away machine's ops server is the runner that executes lifecycle ops in this process.
+        db_conn.execute(
+            "UPDATE machines SET gateway_url = %s WHERE name = 'away'", (gateway_local_runner.url,)
+        )
+        db_conn.commit()
 
         with gateway_test_client(machine=machine) as client:
             r = client.post(
@@ -379,7 +326,9 @@ class TestMachinePauseResume:
         assert n_live == 0
         assert owner == 405
         assert "machine pause" in results or "paused" in results
-        assert gateway_url is None and role == ["agent-runner"]  # registration kept
+        assert gateway_url == gateway_local_runner.url and role == [
+            "agent-runner"
+        ]  # registration kept
 
         # roster + agent machine list hide the paused machine — the cluster
         # shows only its active members (the gateway host itself)
@@ -435,11 +384,10 @@ class TestMachinePauseResume:
             db_conn, aid, "queued before pause", source="user", bus=event_bus, database=database
         )
 
-        async def _unreachable(_db: object, target: str, path: str, json_body: dict) -> dict:
-            raise RuntimeError("ops server unreachable")
-
+        # meiva:note
+        # The away machine registers no ops URL (`seed_away_machine`), so the graceful terminate
+        # cannot be dispatched: the machine is already unreachable.
         with gateway_test_client(machine=machine) as client:
-            client.app.state.machine_pause_lifecycle_enqueuer = _unreachable
             r = client.post("/api/cluster/machines/away/pause", json={})
         assert r.status_code == 200
         body = r.json()

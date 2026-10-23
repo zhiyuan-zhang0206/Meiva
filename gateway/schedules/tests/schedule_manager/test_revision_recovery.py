@@ -1,98 +1,54 @@
+# meiva:note
+# Convergence of a schedule's session to its durable desired revision.
+#
+# The session backend is a fake of `SessionBackend`; the launch provenance the manager reads back
+# (the command a session was started with) comes from a pty-sessions service answering on the
+# home's real socket (`FakePtyService`), so the manager reads provenance the way it does in
+# production. A test that needs provenance to be unreadable simply leaves that service down.
+
+from collections.abc import Generator
 from pathlib import Path
+from typing import Any
 
 import psycopg
 import pytest
 
 import base.db
-from base.clock.tests.manual_timers import ManualTimers
 from base.cluster import session_name
 from base.db.code_version_gate import ProcessDbGate
 from base.deploy.lifecycle import start_serving
 from base.paths.tests.homes import unit_home as unit_home
-from base.sessions.protocol import SessionBackend
-from base.sessions.pty.client import SessionInfo
+from base.sessions.pty.paths import service_socket_path
+from base.sessions.pty.tests.pty_service import FakePtyService
 from base.telemetry.tests.capture.event_capture import EmittedEvents
 from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
 from gateway.schedules import session_control
-from services.wake.schedule_manager import manager, requests, revisions
+from services.wake.schedule_manager import requests
+from services.wake.schedule_manager.blocked_streak import BLOCKED_GIVE_UP_AFTER_S
+from services.wake.schedule_manager.tests.manager_support import NOW, schedule_manager
+from services.wake.schedule_manager.tests.session_fakes import Backend
 
 
-class Backend(SessionBackend):
-    def __init__(self) -> None:
-        self.commands: dict[str, str] = {}
-        self.killed: list[str] = []
-        self.launches = 0
-        self.fail_launch = False
-        self.fail_reap = False
-
-    def list_sessions(self, prefix: str = "") -> list[str]:
-        return [name for name in self.commands if name.startswith(prefix)]
-
-    def has_session(self, name: str) -> bool:
-        return name in self.commands
-
-    def session_generation(self, name: str) -> str | None:
-        return None
-
-    def host_generation(self) -> str | None:
-        return "host-a"
-
-    def kill_session(
-        self, name: str, *, graceful: bool = False, timeout: float = 15.0, expected: bool = False
-    ) -> tuple[bool, str]:
-        self.killed.append(name)
-        if self.fail_reap:
-            return False, "survived"
-        self.commands.pop(name, None)
-        return True, "forced"
-
-    def new_session(
-        self,
-        name: str,
-        cmd: str,
-        cwd: Path,
-        *,
-        env: dict[str, str],
-        login_shell: bool = True,
-        exec_cmd: bool = True,
-    ) -> bool:
-        self.launches += 1
-        if not self.fail_launch:
-            self.commands[name] = cmd
-        return not self.fail_launch
+@pytest.fixture
+def provenance(unit_home: Path) -> Generator[list[dict[str, Any]]]:
+    """The pty-sessions service of the home, answering with the sessions the test's backend holds."""
+    sessions: list[dict[str, Any]] = []
+    socket_path = service_socket_path()
+    socket_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    service = FakePtyService(socket_path, sessions)
+    try:
+        yield sessions
+    finally:
+        service.close()
 
 
 @pytest.fixture
 def backend(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-    serving_root: start_serving.RootBirth,
-    unit_home: Path,
+    provenance: list[dict[str, Any]], serving_root: start_serving.RootBirth, unit_home: Path
 ) -> Backend:
-    backend = Backend()
-    monkeypatch.setattr(start_serving, "state_path", lambda: tmp_path / "start-serving.json")
     generation = start_serving.begin_start()
     assert start_serving.mark_serving(generation, runtime=serving_root.runtime)
-
-    def infos(prefix: str = "", *, include_initial_command: bool = False) -> list[SessionInfo]:
-        return [
-            SessionInfo(
-                name,
-                1,
-                1.0,
-                None,
-                "bash",
-                str(tmp_path),
-                1.0,
-                None,
-                cmd if include_initial_command else None,
-            )
-            for name, cmd in backend.commands.items()
-            if name.startswith(prefix)
-        ]
-
-    monkeypatch.setattr(revisions.client, "list_sessions", infos)
-    return backend
+    return Backend(provenance)
 
 
 def _insert(conn: psycopg.Connection) -> int:
@@ -104,24 +60,18 @@ def _insert(conn: psycopg.Connection) -> int:
     return row[0]
 
 
+def _runner_command(sid: int, revision: int) -> str:
+    return f".venv/bin/python -m services.wake.schedule_manager.runner {sid} {revision}; exit $?"
+
+
 def test_acknowledgement_loss_adopts_session_across_manager_restart(
     db_conn: psycopg.Connection, backend: Backend, *, database_gate: ProcessDbGate
 ) -> None:
     sid = _insert(db_conn)
     with base.db.pool(gate=database_gate) as pool:
         session_control.enqueue_blocking(pool, sid)
-        assert manager.ScheduleManager(
-            pool, backend=backend, timers=ManualTimers(), repo_root=manager.REPO_ROOT
-        ).sync_one(sid)
-        assert (
-            requests.consume_requests(
-                pool,
-                manager.ScheduleManager(
-                    pool, backend=backend, timers=ManualTimers(), repo_root=manager.REPO_ROOT
-                ),
-            )
-            == 1
-        )
+        assert schedule_manager(pool, backend).sync_one(sid, now=NOW)
+        assert requests.consume_requests(pool, schedule_manager(pool, backend), now=NOW) == 1
     assert backend.launches == 1
     assert backend.killed == []
     assert db_conn.execute(
@@ -133,13 +83,9 @@ def test_crash_after_session_birth_before_applied_write_adopts_provenance(
     db_conn: psycopg.Connection, backend: Backend, *, database_gate: ProcessDbGate
 ) -> None:
     sid = _insert(db_conn)
-    backend.commands[session_name(f"schedule-{sid}")] = (
-        f".venv/bin/python -m services.wake.schedule_manager.runner {sid} 1; exit $?"
-    )
+    backend.hold(session_name(f"schedule-{sid}"), _runner_command(sid, 1))
     with base.db.pool(gate=database_gate) as pool:
-        assert manager.ScheduleManager(
-            pool, backend=backend, timers=ManualTimers(), repo_root=manager.REPO_ROOT
-        ).sync_one(sid)
+        assert schedule_manager(pool, backend).sync_one(sid, now=NOW)
     assert backend.launches == 0
     assert backend.killed == []
     assert db_conn.execute(
@@ -152,11 +98,9 @@ def test_a_session_launched_under_the_retired_entrypoint_is_replaced_not_adopted
 ) -> None:
     sid = _insert(db_conn)
     name = session_name(f"schedule-{sid}")
-    backend.commands[name] = f".venv/bin/python -m gateway.schedules.runner {sid} 1; exit $?"
+    backend.hold(name, f".venv/bin/python -m gateway.schedules.runner {sid} 1; exit $?")
     with base.db.pool(gate=database_gate) as pool:
-        assert manager.ScheduleManager(
-            pool, backend=backend, timers=ManualTimers(), repo_root=manager.REPO_ROOT
-        ).sync_one(sid)
+        assert schedule_manager(pool, backend).sync_one(sid, now=NOW)
     assert backend.killed == [name]
     assert backend.launches == 1
     assert db_conn.execute(
@@ -174,15 +118,7 @@ def test_completed_applied_revision_is_not_rerun_by_unacknowledged_queue(
     db_conn.commit()
     with base.db.pool(gate=database_gate) as pool:
         session_control.enqueue_blocking(pool, sid)
-        assert (
-            requests.consume_requests(
-                pool,
-                manager.ScheduleManager(
-                    pool, backend=backend, timers=ManualTimers(), repo_root=manager.REPO_ROOT
-                ),
-            )
-            == 1
-        )
+        assert requests.consume_requests(pool, schedule_manager(pool, backend), now=NOW) == 1
     assert backend.launches == 0
     assert backend.killed == []
 
@@ -195,13 +131,9 @@ def test_live_adoption_preserves_completion_before_process_exit(
         "UPDATE schedules SET applied_revision = 1, status = 'completed' WHERE id = %s", (sid,)
     )
     db_conn.commit()
-    backend.commands[session_name(f"schedule-{sid}")] = (
-        f".venv/bin/python -m services.wake.schedule_manager.runner {sid} 1; exit $?"
-    )
+    backend.hold(session_name(f"schedule-{sid}"), _runner_command(sid, 1))
     with base.db.pool(gate=database_gate) as pool:
-        assert manager.ScheduleManager(
-            pool, backend=backend, timers=ManualTimers(), repo_root=manager.REPO_ROOT
-        ).sync_one(sid)
+        assert schedule_manager(pool, backend).sync_one(sid, now=NOW)
     assert backend.launches == 0
     assert backend.killed == []
     assert db_conn.execute("SELECT status FROM schedules WHERE id = %s", (sid,)).fetchone() == (
@@ -213,21 +145,11 @@ def test_reap_failure_keeps_convergence_pending(
     db_conn: psycopg.Connection, backend: Backend, *, database_gate: ProcessDbGate
 ) -> None:
     sid = _insert(db_conn)
-    backend.commands[session_name(f"schedule-{sid}")] = (
-        f".venv/bin/python -m services.wake.schedule_manager.runner {sid} 0; exit $?"
-    )
+    backend.hold(session_name(f"schedule-{sid}"), _runner_command(sid, 0))
     backend.fail_reap = True
     with base.db.pool(gate=database_gate) as pool:
         session_control.enqueue_blocking(pool, sid)
-        assert (
-            requests.consume_requests(
-                pool,
-                manager.ScheduleManager(
-                    pool, backend=backend, timers=ManualTimers(), repo_root=manager.REPO_ROOT
-                ),
-            )
-            == 0
-        )
+        assert requests.consume_requests(pool, schedule_manager(pool, backend), now=NOW) == 0
     assert backend.launches == 0
     assert db_conn.execute("SELECT schedule_id FROM schedule_sync_requests").fetchall() == [(sid,)]
 
@@ -238,12 +160,8 @@ def test_failed_revision_is_not_retried_after_unknown_launch(
     sid = _insert(db_conn)
     backend.fail_launch = True
     with base.db.pool(gate=database_gate) as pool:
-        assert manager.ScheduleManager(
-            pool, backend=backend, timers=ManualTimers(), repo_root=manager.REPO_ROOT
-        ).sync_one(sid)
-        assert manager.ScheduleManager(
-            pool, backend=backend, timers=ManualTimers(), repo_root=manager.REPO_ROOT
-        ).sync_one(sid)
+        assert schedule_manager(pool, backend).sync_one(sid, now=NOW)
+        assert schedule_manager(pool, backend).sync_one(sid, now=NOW)
     assert backend.launches == 1
     assert db_conn.execute(
         "SELECT launch_count, applied_revision FROM schedules WHERE id = %s", (sid,)
@@ -253,30 +171,18 @@ def test_failed_revision_is_not_retried_after_unknown_launch(
 def test_an_uncertain_live_revision_is_never_blindly_replaced(
     db_conn: psycopg.Connection,
     backend: Backend,
-    monkeypatch: pytest.MonkeyPatch,
+    provenance: list[dict[str, Any]],
     *,
     database_gate: ProcessDbGate,
 ) -> None:
     sid = _insert(db_conn)
-    backend.commands[session_name(f"schedule-{sid}")] = (
-        f".venv/bin/python -m services.wake.schedule_manager.runner {sid} 1; exit $?"
-    )
-
-    def unavailable(_prefix: str = "", **_kw: object) -> list[SessionInfo]:
-        return []
-
-    monkeypatch.setattr(revisions.client, "list_sessions", unavailable)
+    backend.hold(session_name(f"schedule-{sid}"), _runner_command(sid, 1))
+    # meiva:note
+    # the service no longer names the session: its provenance is unreadable
+    provenance.clear()
     with base.db.pool(gate=database_gate) as pool:
         session_control.enqueue_blocking(pool, sid)
-        assert (
-            requests.consume_requests(
-                pool,
-                manager.ScheduleManager(
-                    pool, backend=backend, timers=ManualTimers(), repo_root=manager.REPO_ROOT
-                ),
-            )
-            == 0
-        )
+        assert requests.consume_requests(pool, schedule_manager(pool, backend), now=NOW) == 0
     assert backend.launches == 0
     assert backend.killed == []
     assert db_conn.execute("SELECT schedule_id FROM schedule_sync_requests").fetchall() == [(sid,)]
@@ -286,7 +192,7 @@ def test_an_uncertain_live_revision_is_never_blindly_replaced(
 def test_a_blocked_request_is_retried_for_a_bounded_window_then_consumed_with_an_alert(
     db_conn: psycopg.Connection,
     backend: Backend,
-    monkeypatch: pytest.MonkeyPatch,
+    provenance: list[dict[str, Any]],
     blocked_by: str,
     emitted_events: EmittedEvents,
     *,
@@ -294,33 +200,25 @@ def test_a_blocked_request_is_retried_for_a_bounded_window_then_consumed_with_an
 ) -> None:
     sid = _insert(db_conn)
     name = session_name(f"schedule-{sid}")
-    backend.commands[name] = (
-        f".venv/bin/python -m services.wake.schedule_manager.runner {sid} 0; exit $?"
-    )
+    backend.hold(name, _runner_command(sid, 0))
     if blocked_by == "surviving-session":
         backend.fail_reap = True
     else:
-
-        def unavailable(_prefix: str = "", **_kw: object) -> list[SessionInfo]:
-            return []
-
-        monkeypatch.setattr(revisions.client, "list_sessions", unavailable)
-    clock = ManualTimers(start=1000.0)
+        provenance.clear()
     emitted_events.clear()
     with base.db.pool(gate=database_gate) as pool:
-        mgr = manager.ScheduleManager(
-            pool, backend=backend, timers=clock, repo_root=manager.REPO_ROOT
-        )
+        mgr = schedule_manager(pool, backend)
         session_control.enqueue_blocking(pool, sid)
-        while clock.monotonic() < 1000.0 + manager.BLOCKED_GIVE_UP_AFTER_S:
-            assert requests.consume_requests(pool, mgr) == 0
-            clock.advance(30)
+        now = NOW
+        while now < NOW + BLOCKED_GIVE_UP_AFTER_S:
+            assert requests.consume_requests(pool, mgr, now=now) == 0
+            now += 30
         assert emitted_events.names() == []
-        assert requests.consume_requests(pool, mgr) == 1
+        assert requests.consume_requests(pool, mgr, now=now) == 1
         killed = list(backend.killed)
         for _ in range(3):
-            clock.advance(1)
-            assert requests.consume_requests(pool, mgr) == 0
+            now += 1
+            assert requests.consume_requests(pool, mgr, now=now) == 0
     assert db_conn.execute("SELECT schedule_id FROM schedule_sync_requests").fetchall() == []
     assert db_conn.execute("SELECT status FROM schedules WHERE id = %s", (sid,)).fetchone() == (
         "error",
@@ -335,7 +233,7 @@ def test_a_failed_schedule_does_not_block_other_queued_revisions(
     db_conn: psycopg.Connection, backend: Backend, *, database_gate: ProcessDbGate
 ) -> None:
     sid = _insert(db_conn)
-    backend.commands[session_name(f"schedule-{sid}")] = "legacy"
+    backend.hold(session_name(f"schedule-{sid}"), "legacy")
     backend.fail_reap = True
     row = db_conn.execute(
         "INSERT INTO schedules (name, script, command, desired_revision) VALUES ('other', 'pass', 'python schedule.py', 1) RETURNING id"
@@ -346,25 +244,13 @@ def test_a_failed_schedule_does_not_block_other_queued_revisions(
     with base.db.pool(gate=database_gate) as pool:
         session_control.enqueue_blocking(pool, sid)
         session_control.enqueue_blocking(pool, other)
-        assert (
-            requests.consume_requests(
-                pool,
-                manager.ScheduleManager(
-                    pool, backend=backend, timers=ManualTimers(), repo_root=manager.REPO_ROOT
-                ),
-            )
-            == 1
-        )
+        assert requests.consume_requests(pool, schedule_manager(pool, backend), now=NOW) == 1
     assert db_conn.execute("SELECT schedule_id FROM schedule_sync_requests").fetchall() == [(sid,)]
     assert backend.launches == 1
 
 
 def test_independent_managers_cannot_own_one_schedule_concurrently(
-    db_conn: psycopg.Connection,
-    backend: Backend,
-    monkeypatch: pytest.MonkeyPatch,
-    *,
-    database_gate: ProcessDbGate,
+    db_conn: psycopg.Connection, backend: Backend, *, database_gate: ProcessDbGate
 ) -> None:
     from concurrent.futures import ThreadPoolExecutor
     from threading import Event
@@ -372,33 +258,20 @@ def test_independent_managers_cannot_own_one_schedule_concurrently(
     sid = _insert(db_conn)
     started = Event()
     release = Event()
-    allocate = backend.new_session
 
-    def blocked(name: str, cmd: str, cwd: Path, *, env: dict[str, str]) -> bool:
-        result = allocate(name, cmd, cwd, env=env)
+    def hold_the_launch() -> None:
         started.set()
         assert release.wait(5)
-        return result
 
-    monkeypatch.setattr(backend, "new_session", blocked)
+    backend.during_launch = hold_the_launch
     with (
         base.db.pool(max_size=4, gate=database_gate) as pool,
         ThreadPoolExecutor(max_workers=2) as workers,
     ):
-        first = workers.submit(
-            manager.ScheduleManager(
-                pool, backend=backend, timers=ManualTimers(), repo_root=manager.REPO_ROOT
-            ).sync_one,
-            sid,
-        )
+        first = workers.submit(schedule_manager(pool, backend).sync_one, sid, now=NOW)
         try:
             assert started.wait(5)
-            second = workers.submit(
-                manager.ScheduleManager(
-                    pool, backend=backend, timers=ManualTimers(), repo_root=manager.REPO_ROOT
-                ).sync_one,
-                sid,
-            )
+            second = workers.submit(schedule_manager(pool, backend).sync_one, sid, now=NOW)
             assert second.result(timeout=3) is False
         finally:
             release.set()
@@ -408,34 +281,23 @@ def test_independent_managers_cannot_own_one_schedule_concurrently(
 
 
 def test_newer_edit_during_launch_is_not_acknowledged_as_applied(
-    db_conn: psycopg.Connection,
-    backend: Backend,
-    monkeypatch: pytest.MonkeyPatch,
-    *,
-    database_gate: ProcessDbGate,
+    db_conn: psycopg.Connection, backend: Backend, *, database_gate: ProcessDbGate
 ) -> None:
     from gateway.schedules import router
 
     sid = _insert(db_conn)
-    allocate = backend.new_session
     with base.db.pool(max_size=4, gate=database_gate) as pool:
 
-        def edit_during_launch(name: str, cmd: str, cwd: Path, *, env: dict[str, str]) -> bool:
-            result = allocate(name, cmd, cwd, env=env)
+        def edit_during_launch() -> None:
             router.update_blocking(pool, sid, {"script": "print(2)"})
-            return result
 
-        monkeypatch.setattr(backend, "new_session", edit_during_launch)
-        assert not manager.ScheduleManager(
-            pool, backend=backend, timers=ManualTimers(), repo_root=manager.REPO_ROOT
-        ).sync_one(sid)
+        backend.during_launch = edit_during_launch
+        assert not schedule_manager(pool, backend).sync_one(sid, now=NOW)
         assert db_conn.execute(
             "SELECT desired_revision, applied_revision FROM schedules WHERE id = %s", (sid,)
         ).fetchone() == (2, 1)
-        monkeypatch.setattr(backend, "new_session", allocate)
-        assert manager.ScheduleManager(
-            pool, backend=backend, timers=ManualTimers(), repo_root=manager.REPO_ROOT
-        ).sync_one(sid)
+        backend.during_launch = None
+        assert schedule_manager(pool, backend).sync_one(sid, now=NOW)
     assert db_conn.execute(
         "SELECT desired_revision, applied_revision FROM schedules WHERE id = %s", (sid,)
     ).fetchone() == (2, 2)
@@ -448,11 +310,9 @@ def test_old_reap_retry_cannot_kill_a_matching_applied_replacement(
 ) -> None:
     sid = _insert(db_conn)
     with base.db.pool(gate=database_gate) as pool:
-        mgr = manager.ScheduleManager(
-            pool, backend=backend, timers=ManualTimers(), repo_root=manager.REPO_ROOT
-        )
-        assert mgr.sync_one(sid)
+        mgr = schedule_manager(pool, backend)
+        assert mgr.sync_one(sid, now=NOW)
         mgr._reap_retries.add(sid)
-        mgr.reconcile()
+        mgr.reconcile(now=NOW)
     assert backend.launches == 1
     assert backend.killed == []

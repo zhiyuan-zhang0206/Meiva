@@ -15,17 +15,12 @@ that wants to fetch an upload by its reference url).
 from __future__ import annotations
 
 import asyncio
-from functools import partial
-from pathlib import Path
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, Header, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse
 
 from base.agents.upload_delivery.paths import (
-    MAX_AGENT_UPLOAD_BYTES,
-    MAX_AGENT_UPLOAD_FILES,
-    MAX_UPLOAD_BYTES,
     agent_upload_dir,
     render_safe_headers,
     resolve_upload_path,
@@ -39,6 +34,7 @@ from gateway.http.auth.request_principal import (
     AuthPrincipal,
     principal_key,
 )
+from gateway.http.config import GatewayConfig
 from gateway.routers.upload.batches import save_keyed_batch
 from gateway.schemas.uploads import UploadedBatch
 
@@ -59,21 +55,23 @@ def operation_key(
     return principal_key(principal, request.method, request.url.path, idempotency_key)
 
 
-def _per_file_quota_error(safe_name: str) -> HTTPException:
+def _per_file_quota_error(safe_name: str, max_file_bytes: int) -> HTTPException:
     return HTTPException(
         status_code=413,
-        detail=f"upload {safe_name!r} exceeds the {MAX_UPLOAD_BYTES:,}-byte per-file limit",
+        detail=f"upload {safe_name!r} exceeds the {max_file_bytes:,}-byte per-file limit",
     )
 
 
-async def read_upload_batch(files: list[UploadFile]) -> list[_UploadBatchItem]:
+async def read_upload_batch(
+    files: list[UploadFile], *, max_file_bytes: int
+) -> list[_UploadBatchItem]:
     """Read and size-check every file before the batch can write a final name."""
     batch: list[_UploadBatchItem] = []
     for file in files:
         safe_name = sanitize_upload_name(file.filename or "untitled")
-        contents = await file.read(MAX_UPLOAD_BYTES + 1)
-        if len(contents) > MAX_UPLOAD_BYTES:
-            raise _per_file_quota_error(safe_name)
+        contents = await file.read(max_file_bytes + 1)
+        if len(contents) > max_file_bytes:
+            raise _per_file_quota_error(safe_name, max_file_bytes)
         batch.append((safe_name, contents, file.content_type or "application/octet-stream"))
     return batch
 
@@ -100,20 +98,18 @@ async def upload_files(
             422,
             "this route saves silently; deliver a batch with POST /api/keyed/v1/agents/{id}/uploads",
         )
-    batch = await read_upload_batch(files)
-    upload_dir_fn = getattr(request.app.state, "agent_upload_dir_resolver", None) or partial(
-        agent_upload_dir, home=Path.home()
-    )
+    config: GatewayConfig = request.app.state.gateway_config
+    batch = await read_upload_batch(files, max_file_bytes=config.max_upload_bytes)
     return await asyncio.to_thread(
         save_keyed_batch,
         request.app.state.db_pool,
         key,
         agent_id,
-        upload_dir_fn(agent_id, create=False),
+        agent_upload_dir(agent_id, create=False, home=config.upload_home),
         batch,
         [file.filename or "untitled" for file in files],
-        max_bytes=MAX_AGENT_UPLOAD_BYTES,
-        max_files=MAX_AGENT_UPLOAD_FILES,
+        max_bytes=config.max_agent_upload_bytes,
+        max_files=config.max_agent_upload_files,
         local_machine=request.app.state.machine.name(),
     )
 
@@ -128,11 +124,10 @@ def serve_upload(agent_id: int, filename: str, request: Request) -> FileResponse
     with request.app.state.db_pool.connection() as conn:
         if not agent_exists(conn, agent_id):
             raise AgentNotFound(agent_id)
-    path_resolver = getattr(request.app.state, "upload_path_resolver", None) or partial(
-        resolve_upload_path, home=Path.home()
-    )
     try:
-        path = path_resolver(agent_id, filename)
+        path = resolve_upload_path(
+            agent_id, filename, home=request.app.state.gateway_config.upload_home
+        )
     except ValueError as e:
         # A traversal attempt is a bad request, not a server error.
         raise HTTPException(status_code=400, detail=str(e)) from e

@@ -1,4 +1,9 @@
 exports = ["router.py", "worker.py"]
 
+[uses]
+"tests" = ["failure_plan.py"]
+"worker.py" = ["failure_plan.py"]
+
 [purity]
 "__init__.py" = "strict"
+"failure_plan.py" = "strict"

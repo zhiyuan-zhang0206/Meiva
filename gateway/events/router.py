@@ -33,217 +33,89 @@ Two hard contract rules keep every query bounded and unambiguous:
 
 from __future__ import annotations
 
-import re
 from collections.abc import Generator
 from contextlib import contextmanager
-from dataclasses import asdict, dataclass
-from datetime import UTC, datetime, timedelta
+from dataclasses import asdict
+from datetime import UTC, datetime
 from typing import Annotated, Any
 
 import psycopg
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
-from base.config import settings
-from base.events.contract import EVENTS, EventTier, tier_for
+from base.events.contract import tier_for
 from base.events.reads import audit_rows
 from gateway.agents.eval_guard import deny_isolated_result_read
 from gateway.events import telemetry_rows
+from gateway.events.events_plan import (
+    EventsPlan,
+    EventsRequest,
+    InvalidEventsQueryError,
+    page_depth,
+    plan_events,
+)
 from gateway.events.schemas import EventRow, EventsMeta, EventsResponse
+from gateway.http.config import GatewayConfig, runtime_view
 
 router = APIRouter()
-
-# These are stored lowercase (design doc §1); unknown values are
-# rejected with 422 rather than silently matching nothing (fail fast).
-_CATEGORIES = frozenset({"audit", "telemetry", "log"})
-_LEVELS = frozenset({"debug", "info", "warning", "error", "critical"})
-_TIERS = ("business", "anomaly", "observation", "noise")
-_IMPERSONATION_SESSION = re.compile(r"^[0-9]+:[0-9]+$")
 
 # Longest window a request may name; a protective constant, evaluated at import for the `hours` Query
 # bound — not configuration (task #3696 exception inventory: KEEP).
 _MAX_HOURS = 24 * 365
 
-# Default window when the request names no lower bound (`from`/`hours`);
-# it bounds the count/list fetch.
-_DEFAULT_WINDOW_HOURS = 24
-
-# Bound on one read, below the route's client timeouts.
-_READ_STATEMENT_TIMEOUT_MS = 10_000
-
-
-def _validate(
-    *,
-    category: str | None,
-    level: str | None,
-    from_: datetime | None,
-    to: datetime | None,
-    hours: float | None,
-) -> str | None:
-    """Validate enum-ish filters; return the normalized `level` (lowercase)
-    or raise 422. `from` + `hours` together is a contradiction — reject it
-    instead of silently picking one. Naive timestamps are rejected too: a
-    tz-less `from`/`to` would be interpreted in the server's local timezone,
-    silently shifting the window — fail fast instead of guessing."""
-    if category is not None and category not in _CATEGORIES:
-        raise HTTPException(
-            status_code=422,
-            detail=f"category must be one of {sorted(_CATEGORIES)}, got {category!r}",
-        )
-    if level is not None:
-        level = level.lower()
-        if level not in _LEVELS:
-            raise HTTPException(
-                status_code=422,
-                detail=f"level must be one of {sorted(_LEVELS)}, got {level!r}",
-            )
-    for name, value in (("from", from_), ("to", to)):
-        if value is not None and value.tzinfo is None:
-            raise HTTPException(
-                status_code=422,
-                detail=(
-                    f"{name} must include a timezone offset "
-                    f"(e.g. 2026-08-04T00:00:00Z) — naive timestamps are "
-                    f"interpreted in the server's local timezone"
-                ),
-            )
-    if from_ is not None and hours is not None:
-        raise HTTPException(
-            status_code=422,
-            detail="from and hours are mutually exclusive — pass one time window",
-        )
-    return level
-
-
-def _parse_tiers(tier: str | None) -> list[EventTier] | None:
-    """Normalize a comma-separated tier filter or fail fast with 422."""
-    if tier is None:
-        return None
-    tiers: list[EventTier] = []
-    for raw in tier.split(","):
-        value = raw.strip().lower()
-        if value not in _TIERS:
-            raise HTTPException(
-                status_code=422,
-                detail=f"tier must be a comma-separated list of {_TIERS}, got {tier!r}",
-            )
-        if value not in tiers:
-            tiers.append(value)
-    return tiers
-
-
-@dataclass(frozen=True)
-class _Filters:
-    """The filters every store applies, already validated and normalized."""
-
-    agent_id: int | None
-    event_names: list[str] | None
-    tiers: list[EventTier] | None
-    trace_id: str | None
-    machine: str | None
-    level: str | None
-    attribute_filters: dict[str, str] | None
-    from_: datetime | None
-    to: datetime | None
-
 
 @contextmanager
 def _read_connection(request: Request) -> Generator[psycopg.Connection]:
     """One pooled connection for an events read, bounded by a statement timeout."""
+    config: GatewayConfig = request.app.state.gateway_config
     with request.app.state.db_pool.connection() as conn:
-        conn.execute(f"SET LOCAL statement_timeout = {_READ_STATEMENT_TIMEOUT_MS}")
+        conn.execute(f"SET LOCAL statement_timeout = {config.events_read_timeout_ms}")
         yield conn
 
 
-def _sources(category: str | None, event_name: str | None) -> tuple[bool, bool]:
-    """Which tables a request reads: `(audit_events, telemetry_events)`.
-
-    An explicit category picks one table. Without one, a registered event name
-    picks the table(s) its declared categories live in; anything else reads both.
-    """
-    if category is not None:
-        return category == "audit", category != "audit"
-    spec = EVENTS.get(event_name) if event_name is not None else None
-    if spec is None:
-        return True, True
-    categories = {spec.category, *spec.extra_categories}
-    return "audit" in categories, bool(categories - {"audit"})
-
-
-def _impersonation_filters(session: str | None) -> dict[str, str] | None:
-    """Validate the private replay correlation value and build its Loki filter."""
-    if session is None:
-        return None
-    if not _IMPERSONATION_SESSION.fullmatch(session):
-        raise HTTPException(
-            status_code=422,
-            detail="impersonation_session must be an agent_id:session_id pair",
-        )
-    return {"impersonation_session": session}
-
-
-def _count(
-    request: Request,
-    filters: _Filters,
-    use_audit: bool,  # noqa: FBT001 — internal helper flags, always positional
-    use_telemetry: bool,  # noqa: FBT001
-    telemetry_categories: list[str],
-) -> int:
+def _count(request: Request, plan: EventsPlan) -> int:
     """Exact filtered row count across the tables the request reads."""
-    telemetry_counter = (
-        getattr(request.app.state, "telemetry_events_counter", None) or telemetry_rows.count_events
-    )
     total = 0
     with _read_connection(request) as conn:
-        if use_audit:
-            total += audit_rows.count_events(conn, **asdict(filters))
-        if use_telemetry:
-            total += telemetry_counter(conn, categories=telemetry_categories, **asdict(filters))
+        if plan.use_audit:
+            total += audit_rows.count_events(conn, **asdict(plan.filters))
+        if plan.use_telemetry:
+            total += telemetry_rows.count_events(
+                conn, categories=plan.telemetry_categories, **asdict(plan.filters)
+            )
     return total
 
 
-def _read_page(
-    request: Request,
-    filters: _Filters,
-    use_audit: bool,  # noqa: FBT001 — internal helper flags, always positional
-    use_telemetry: bool,  # noqa: FBT001
-    telemetry_categories: list[str],
-    limit: int,
-    offset: int,
-) -> tuple[list[dict[str, Any]], bool]:
-    """One newest-first page, and whether another exists.
-
-    One table pages directly. Two tables each give their newest `offset + limit`
-    rows, which are merged and then sliced: a global page never needs a row
-    beyond that depth from either side.
-    """
-    telemetry_reader = (
-        getattr(request.app.state, "telemetry_events_reader", None) or telemetry_rows.query_events
-    )
-    both = use_audit and use_telemetry
-    depth, page_offset = (limit + offset, 0) if both else (limit, offset)
+# meiva:note
+# One newest-first page, and whether another exists.
+#
+# One table pages directly. Two tables each give their newest `offset + limit`
+# rows (`page_depth`), which are merged and then sliced.
+def _read_page(request: Request, plan: EventsPlan) -> tuple[list[dict[str, Any]], bool]:
+    both = plan.use_audit and plan.use_telemetry
+    depth, page_offset = page_depth(plan)
     rows: list[dict[str, Any]] = []
     has_more = False
     with _read_connection(request) as conn:
-        if use_audit:
+        if plan.use_audit:
             page, more = audit_rows.query_events(
-                conn, limit=depth, offset=page_offset, **asdict(filters)
+                conn, limit=depth, offset=page_offset, **asdict(plan.filters)
             )
             rows += page
             has_more = has_more or more
-        if use_telemetry:
-            page, more = telemetry_reader(
+        if plan.use_telemetry:
+            page, more = telemetry_rows.query_events(
                 conn,
-                categories=telemetry_categories,
+                categories=plan.telemetry_categories,
                 limit=depth,
                 offset=page_offset,
-                **asdict(filters),
+                **asdict(plan.filters),
             )
             rows += page
             has_more = has_more or more
     if both:
         rows.sort(key=lambda row: (row["ts"], row["id"]), reverse=True)
-        has_more = has_more or len(rows) > limit + offset
-        rows = rows[offset : offset + limit]
+        has_more = has_more or len(rows) > plan.limit + plan.offset
+        rows = rows[plan.offset : plan.offset + plan.limit]
     return rows, has_more
 
 
@@ -314,52 +186,34 @@ def get_events(
     `window_from` is always set — the default 24h lower bound when the
     request named none. An empty window returns `items: []`.
     """
-    level = _validate(category=category, level=level, from_=from_, to=to, hours=hours)
-    attribute_filters = _impersonation_filters(impersonation_session)
-    tiers = _parse_tiers(tier)
-    default_limit = getattr(
-        request.app.state, "events_default_limit", settings.display.events_default_limit
-    )
-    effective_limit = limit if limit is not None else default_limit
-
     now = datetime.now(UTC)
-    window_from = from_
-    if hours is not None:
-        window_from = now - timedelta(hours=hours)
-    if window_from is None:
-        # No explicit lower bound — default to the last 24h (the same
-        # lower-bound contract as the old PG API; A31).
-        window_from = now - timedelta(hours=_DEFAULT_WINDOW_HOURS)
-
-    filters = _Filters(
-        agent_id=agent_id,
-        event_names=[event_name] if event_name is not None else None,
-        tiers=tiers,
-        trace_id=trace_id.lower() if trace_id is not None else None,
-        machine=machine,
-        level=level,
-        attribute_filters=attribute_filters,
-        from_=window_from,
-        to=to,
-    )
-    use_audit, use_telemetry = _sources(category, event_name)
-    telemetry_categories = [category] if category is not None else ["telemetry", "log"]
+    try:
+        plan = plan_events(
+            EventsRequest(
+                category=category,
+                event_name=event_name,
+                agent_id=agent_id,
+                trace_id=trace_id,
+                impersonation_session=impersonation_session,
+                machine=machine,
+                level=level,
+                tier=tier,
+                from_=from_,
+                to=to,
+                hours=hours,
+                limit=limit,
+                offset=offset,
+                with_total=with_total,
+            ),
+            now=now,
+            default_limit=runtime_view(request).display.events_default_limit,
+        )
+    except InvalidEventsQueryError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     try:
-        total = (
-            _count(request, filters, use_audit, use_telemetry, telemetry_categories)
-            if with_total
-            else None
-        )
-        rows, has_more = _read_page(
-            request,
-            filters,
-            use_audit,
-            use_telemetry,
-            telemetry_categories,
-            effective_limit,
-            offset,
-        )
+        total = _count(request, plan) if plan.with_total else None
+        rows, has_more = _read_page(request, plan)
     except psycopg.errors.QueryCanceled as exc:
         raise HTTPException(status_code=503, detail="events read timed out") from exc
 
@@ -385,10 +239,10 @@ def get_events(
     ]
     meta = EventsMeta(
         total=total,
-        window_from=window_from,
-        window_to=to,
-        limit=effective_limit,
-        offset=offset,
+        window_from=plan.filters.from_,
+        window_to=plan.filters.to,
+        limit=plan.limit,
+        offset=plan.offset,
         has_more=has_more,
         generated_at=now.isoformat(),
     )

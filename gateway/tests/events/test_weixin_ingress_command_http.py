@@ -7,7 +7,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from base.config.tests.api_keys import mock_api_keys as mock_api_keys
-from gateway.tests.auth.gateway_tests import local_spawn_in_process as local_spawn_in_process
+from gateway.tests.auth.gateway_tests import gateway_local_runner as gateway_local_runner
 from gateway.tests.events.test_notices_endpoint import insert_notice
 from services.entrypoints.im_bridge.ingress.types import IngressStatus
 from services.entrypoints.im_bridge.tests.adapters.weixin_native import (

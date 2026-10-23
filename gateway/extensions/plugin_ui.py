@@ -1,32 +1,32 @@
-"""Plugin-served pages — GET /api/plugin-ui/{plugin}/{path}.
-
-The universal escape hatch of `future/frontend-plugin-contributions.md`: what a
-plugin cannot express as a declaration, it ships as a page it serves itself,
-and the console embeds that page in a sandboxed iframe. The declaration
-vocabulary therefore never has to grow a widget type for every unforeseen need
-(a task board, a balance panel, a pet).
-
-This is the sibling mount of `gateway/routers/pages.py`, with the same path-
-segment validation, the same auth (the cluster middleware, like every other
-`/api` route), and the same 404-when-not-available semantics. What differs is
-the backend: an `meiva.ui` page is a live page server owned by an agent, while a
-plugin page is **static files inside the plugin package** — `<plugin>/ui/`,
-which converge already materializes along with the rest of the plugin image.
-Static is the preferred backend precisely because it needs no process: nothing
-to supervise, nothing to restart, nothing to leak.
-
-Availability is the enable-state plus the directory: an ENABLED plugin that
-ships a `ui/` directory has a mount, and nothing else does. There is no
-manifest key to declare — a plugin that ships no pages ships no directory, and
-the declarations under `contributions.ui` say where the console LINKS to a
-page, not whether one is served.
-
-The iframe the console wraps this in is breakage containment, not a security
-boundary: plugin Python already runs in agent processes with shell and DB
-access, so the trust decision was made at install time (the scan gate + trust
-tier). What the boundary buys is that a broken or slow plugin page cannot take
-down the console, and that no third-party code enters the console's bundle.
-"""
+# meiva:note
+# Plugin-served pages — GET /api/plugin-ui/{plugin}/{path}.
+#
+# The universal escape hatch of `future/frontend-plugin-contributions.md`: what a
+# plugin cannot express as a declaration, it ships as a page it serves itself,
+# and the console embeds that page in a sandboxed iframe. The declaration
+# vocabulary therefore never has to grow a widget type for every unforeseen need
+# (a task board, a balance panel, a pet).
+#
+# This is the sibling mount of `gateway/routers/page_serving/pages.py`, with the same path-
+# segment validation, the same auth (the cluster middleware, like every other
+# `/api` route), and the same 404-when-not-available semantics. What differs is
+# the backend: an `meiva.ui` page is a live page server owned by an agent, while a
+# plugin page is **static files inside the plugin package** — `<plugin>/ui/`,
+# which converge already materializes along with the rest of the plugin image.
+# Static is the preferred backend precisely because it needs no process: nothing
+# to supervise, nothing to restart, nothing to leak.
+#
+# Availability is the enable-state plus the directory: an ENABLED plugin that
+# ships a `ui/` directory has a mount, and nothing else does. There is no
+# manifest key to declare — a plugin that ships no pages ships no directory, and
+# the declarations under `contributions.ui` say where the console LINKS to a
+# page, not whether one is served.
+#
+# The iframe the console wraps this in is breakage containment, not a security
+# boundary: plugin Python already runs in agent processes with shell and DB
+# access, so the trust decision was made at install time (the scan gate + trust
+# tier). What the boundary buys is that a broken or slow plugin page cannot take
+# down the console, and that no third-party code enters the console's bundle.
 
 from __future__ import annotations
 

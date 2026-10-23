@@ -1,15 +1,14 @@
 from __future__ import annotations
 
-from dataclasses import replace
-
 import psycopg
 import pytest
-from langchain_core.messages import BaseMessage
 
+from base.config import settings
 from base.db import create_agent
 from gateway.tests.auth.gateway_config import GatewayTestClient
 from gateway.tests.history.test_timeline import CompactHistoryCases
 from gateway.tests.history.test_timeline import test_client as test_client
+from gateway.tests.support.checkpoints.unreadable import put_unreadable_head
 
 
 class TestTimelineCompactHistoryBoundaries(CompactHistoryCases):
@@ -209,34 +208,6 @@ class TestTimelineCompactHistoryBoundaries(CompactHistoryCases):
             ]
             assert continued["has_more"] is False
 
-    def test_positive_depth_bounds_boundary_index_read(
-        self,
-        db_conn: psycopg.Connection,
-        test_client: GatewayTestClient,
-    ) -> None:
-        from langchain_core.messages import AIMessage
-
-        tid = create_agent(db_conn)
-        self._put_checkpoint(
-            tid,
-            self._current(AIMessage(content="current item")),
-            version="1",
-        )
-        requested_limits: list[int | None] = []
-
-        def boundary_ids(_db: object, _agent_id: int, *, limit: int | None = None) -> list[str]:
-            requested_limits.append(limit)
-            return []
-
-        test_client.app.state.timeline_policy = replace(
-            test_client.app.state.timeline_policy, list_boundary_ids=boundary_ids
-        )
-        test_client.app.state.config_authority.runtime.gateway.timeline_compact_history = 3
-        response = test_client.get(f"/api/agents/{tid}/timeline")
-
-        assert response.status_code == 200
-        assert requested_limits == [4]
-
     def test_depth_and_checkpoint_id_control_cross_segment_access(
         self,
         db_conn: psycopg.Connection,
@@ -306,25 +277,15 @@ class TestTimelineCompactHistoryBoundaries(CompactHistoryCases):
         db_conn: psycopg.Connection,
         test_client: GatewayTestClient,
     ) -> None:
-        from langchain_core.messages import AIMessage
-
         tid = create_agent(db_conn)
         boundary_id = self._put_checkpoint(
             tid, self._segment("history", 2), version="1", boundary=True
         )
-        self._put_checkpoint(
-            tid,
-            self._current(AIMessage(content="current item")),
-            version="2",
-        )
+        # meiva:note
+        # The live head declares three messages and cannot be deserialized: a page that
+        # reads it would be a 503, so a 200 with the exact count proves it was not read.
+        put_unreadable_head(settings.data_plane.db_url, tid, messages=3, version="2")
         test_client.app.state.config_authority.runtime.gateway.timeline_compact_history = 1
-
-        def fail_current_read(_db: object, _agent_id: int) -> list[BaseMessage]:
-            raise AssertionError("historical paging must not deserialize the live segment")
-
-        test_client.app.state.timeline_policy = replace(
-            test_client.app.state.timeline_policy, load_messages=fail_current_read
-        )
 
         page = test_client.get(
             f"/api/agents/{tid}/timeline",

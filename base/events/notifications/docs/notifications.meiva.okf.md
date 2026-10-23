@@ -63,7 +63,7 @@ silent and returns no row.
 ## Producers
 
 A notice that needs an answer stages `core.needs_input` inside the transaction
-that writes it — `gateway/agents/notices.py` and
+that writes it — `gateway/agents/notice_operations/notices.py` and
 `gateway/agents/notice_operations/current.py` on the gateway path — keyed by the
 notice id plus a fingerprint of its question, so a retried post stays silent
 while editing a container to add a question delivers again: a new question is

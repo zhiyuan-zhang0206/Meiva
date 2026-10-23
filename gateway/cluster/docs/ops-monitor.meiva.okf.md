@@ -12,7 +12,7 @@ tags:
 
 `GET /api/ops/monitor?window=1h|6h|24h|7d` — one round trip backs the whole
 Insights Ops section (task #672, user-chartered 2026-08-03). Query core is
-`gateway/cluster/ops_series.py` (one grouped statement per metric group over the window's
+`gateway/cluster/monitor/ops_series.py` (one grouped statement per metric group over the window's
 `telemetry_events` rows, in one pooled connection with an 8-second statement timeout);
 schemas are `gateway/cluster/schemas.py`.
 

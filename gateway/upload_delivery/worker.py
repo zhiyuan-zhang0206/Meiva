@@ -31,24 +31,11 @@ from base.cluster.machine import MachineIdentity
 from base.db import Database
 from base.events.live.bus import EventBus
 from gateway.http.middleware.stopping import is_stopping
+from gateway.upload_delivery.failure_plan import CopyFailure, receiver_failure, terminal_failure
 from ops.cluster.rpc import ClusterOpFailed, ClusterOpTargetAbsent, dispatch_to_machine
 from ops.lifecycle import resurrect_if_terminated
 
 _log = logging.getLogger(__name__)
-
-
-def _cluster_failure(exc: ClusterOpFailed) -> tuple[str, bool]:
-    """The safe reason of a failed receiver call and whether it can never succeed."""
-    if str(exc.result.get("error", "")).startswith("unknown kind:"):
-        return "unsupported-receiver", True
-    reason = exc.result.get("reason")
-    if reason in {
-        "upload-copy-conflict-v1",
-        "upload-copy-quota-v1",
-        "upload-source-unavailable-v1",
-    }:
-        return str(reason), True
-    return "receiver-unavailable", False
 
 
 class UploadRecovery:
@@ -61,10 +48,12 @@ class UploadRecovery:
         bus: EventBus,
         *,
         machine: MachineIdentity,
+        home: Path,
         claim_seconds: float,
     ) -> None:
         self.pool, self.db, self.bus = pool, db, bus
         self.machine = machine
+        self.home = home
         self.claim_seconds = claim_seconds
         self.stopped = asyncio.Event()
         self.calls: set[asyncio.Future[Any]] = set()
@@ -165,28 +154,26 @@ class UploadRecovery:
                 return
             inbound_id = await self.native(source.complete, self.pool, request, proof)
         except ClusterOpFailed as exc:
-            reason, hold = _cluster_failure(exc)
-            await self.failure(request, reason, hold=hold)
+            await self.failure(request, receiver_failure(exc.result))
         except (
             UploadDeliveryConflictError,
             AgentNotFound,
             ValidationError,
             ClusterOpTargetAbsent,
         ) as exc:
+            conflict = isinstance(exc, UploadDeliveryConflictError)
             await self.failure(
-                request,
-                str(exc) if isinstance(exc, UploadDeliveryConflictError) else type(exc).__name__,
-                hold=True,
+                request, terminal_failure(type(exc).__name__, str(exc), conflict=conflict)
             )
         except Exception as exc:
-            await self.failure(request, type(exc).__name__, hold=False)
+            await self.failure(request, CopyFailure(type(exc).__name__, hold=False))
         else:
             await self.wake(request.manifest.agent_id, inbound_id)
 
     async def copy_proof(self, request: ReceiveRequest) -> CopyProof:
         if request.source == request.target:
             directory = agent_upload_dir(
-                request.manifest.agent_id, create=False, home=Path.home()
+                request.manifest.agent_id, create=False, home=self.home
             ).resolve()
             await self.native(storage.verify_all, directory, request.manifest)
             return CopyProof(
@@ -205,9 +192,11 @@ class UploadRecovery:
         )
         return CopyProof.model_validate(result)
 
-    async def failure(self, request: ReceiveRequest, reason: str, *, hold: bool) -> None:
+    async def failure(self, request: ReceiveRequest, failure: CopyFailure) -> None:
         state = await self.native(
-            lambda: source.record_failure(self.pool, request.manifest.batch_id, reason, hold=hold)
+            lambda: source.record_failure(
+                self.pool, request.manifest.batch_id, failure.reason, hold=failure.hold
+            )
         )
         if state == "hold":
             telemetry.emit(
@@ -216,6 +205,6 @@ class UploadRecovery:
                 attributes={
                     "agent_id": request.manifest.agent_id,
                     "batch_id": request.manifest.batch_id,
-                    "reason": reason,
+                    "reason": failure.reason,
                 },
             )

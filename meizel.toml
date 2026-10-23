@@ -48,14 +48,12 @@ frontend = ["ui"]
 "cli/commands/lifecycle/tests/test_root_driver.py -> base/host/env/registry.py#_PASSTHROUGH_ROWS" = 1
 "cli/commands/lifecycle/tests/test_root_driver.py -> base/host/env/registry.py#_TEMP_DIR_KEYS" = 2
 "cli/commands/tests/test_unit_capability_commands.py -> base/cluster/authority/tests/unit_capability_support.py#_open" = 1
-"gateway/tests/upload_delivery/test_upload_delivery_faults.py -> services/agent_runner/agent_ops/daemon.py#_dispatch" = 1
 "meiva_builtins/plugins/meiva_syntax_fix/tests/test_multiple_tool_calls_meiva_syntax_fix.py -> agent/graph/exec/node.py#_exec_node_impl" = 1
 "services/agent_runner/agent_host/recovery/tests/test_recovery_outcome_tracebacks.py -> agent/turn/runloop.py#_handle_fatal_llm_error" = 1
 "services/agent_runner/agent_host/tests/circuit_breaker/helpers.py -> agent/turn/runloop.py#_handle_fatal_llm_error" = 1
 "services/agent_runner/agent_host/tests/test_circuit_breaker.py -> agent/turn/runloop.py#_handle_fatal_llm_error" = 1
 "services/agent_runner/agent_host/tests/test_circuit_breaker_audit.py -> agent/turn/runloop.py#_handle_fatal_llm_error" = 1
 "tests/components/services/agent_host/test_event_owner_shutdown.py -> services/agent_runner/agent_host/daemon.py#_is_running" = 1
-"tests/integration/child_schedule_runner.py -> services/wake/schedule_manager/engine.py#_run" = 1
 
 [debt.undeclared-edge]
 "base/config/tests/test_config_authority.py -> cli/main.py" = 1

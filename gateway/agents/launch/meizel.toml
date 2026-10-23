@@ -1,0 +1,10 @@
+exports = ["fork_plan.py", "forward.py", "launch_plan.py", "launch_state.py", "lifecycle_plan.py"]
+
+[uses]
+"forward.py" = ["launch_plan.py", "lifecycle_plan.py"]
+
+[purity]
+"fork_plan.py" = "strict"
+"launch_plan.py" = "strict"
+"launch_state.py" = "strict"
+"lifecycle_plan.py" = "strict"

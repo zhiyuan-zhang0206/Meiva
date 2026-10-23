@@ -21,16 +21,22 @@ model registry validates writes; existing agents retain their frozen model.
 configuration endpoints obtain their database and pool from the serving
 `Request.app.state` and pass them explicitly to the machine lookup, capability
 projection and read/audit/write RPC helpers. The audit fanout uses that same
-app database and the same app-owned role lookup and RPC dispatcher as GET/PUT.
-The app factory supplies these operations plus candidate validation and cluster
-persistence; worker helpers require them explicitly. Helpers never import the
-global gateway app; `ConfigAuthority`
-continues to own configuration reads only. Local identity/role reads and fresh
-configuration reads retain their existing timing. Router-only HTTP tests cover
-two app instances with distinct resources, alongside the full gateway lifespan
-integration coverage. Runtime config
-tests remain in `gateway/tests/routers/config_api/` and default-model API tests
-in `gateway/tests/bootstrap/test_default_model_api.py`.
+app database. Role lookups and ops dispatch go to the registry and
+`ops.cluster.rpc` directly: a runner is a row in `machines` and a listener, so a
+test registers one (`gateway/tests/support/runner_ops`). Tunables (the audit default
+count, the model the resolved view explains) come from the gateway process's own
+configuration view, `gateway.http.config.runtime_view`, never from the global
+`settings`.
+
+What a PUT may write is decided by pure functions in `write_plan.py` (strict):
+the refusal a parsed plan earns, the candidate `.env` patch a validation judges,
+the retryable conflict for a stale `.env`, the restart targets and the
+frontend-facing result. `runtime.py` performs the candidate validation, the host
+op and the cluster write around them. `ConfigAuthority` continues to own
+configuration reads only. Helpers never import the global gateway app. Runtime
+config tests remain in `gateway/tests/routers/config_api/` and default-model API
+tests in `gateway/tests/bootstrap/test_default_model_api.py`; the plan's tests
+are in `gateway/routers/configuration/tests/`.
 
 
 The ordinary configuration surface remains available when model catalog building

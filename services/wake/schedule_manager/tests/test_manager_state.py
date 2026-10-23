@@ -10,13 +10,13 @@ import pytest
 from psycopg_pool import ConnectionPool
 
 import services.wake.schedule_manager.manager as sm
-from base.clock.tests.manual_timers import ManualTimers
 from base.cluster import session_name
 from base.config import settings
 from base.deploy.lifecycle import start_serving
 from base.sessions.protocol import SessionBackend
 from base.telemetry.tests.capture.event_capture import EmittedEvents
 from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
+from services.wake.schedule_manager.tests.manager_support import NOW, POLICY, schedule_manager
 
 
 class _FakeBackend(SessionBackend):
@@ -150,9 +150,7 @@ def test_error_schedule_not_relaunched_after_restart(
     sid = _insert(db_conn, "err-a")
     _set_status(db_conn, sid, "error")
 
-    sm.ScheduleManager(
-        pool, backend=backend, timers=ManualTimers(), repo_root=sm.REPO_ROOT
-    ).reconcile()
+    schedule_manager(pool, backend).reconcile(now=NOW)
 
     assert launched == []
     assert _status(db_conn, sid) == "error"
@@ -168,26 +166,24 @@ def test_missing_error_schedule_alerts_after_two_hours_and_rearms_after_recovery
     backend, _launched = fake_session
     sid = _insert(db_conn, "stalled-error")
     _set_status(db_conn, sid, "error")
-    manager = sm.ScheduleManager(
-        pool, backend=backend, timers=ManualTimers(), repo_root=sm.REPO_ROOT
-    )
+    manager = schedule_manager(pool, backend)
 
     with caplog.at_level(logging.WARNING, logger=sm.__name__):
-        manager.reconcile()
+        manager.reconcile(now=NOW)
         _age_not_live(db_conn, sid, sm.STALL_ALERT_AFTER_S - 5)
-        manager.reconcile()
+        manager.reconcile(now=NOW)
         assert len(emitted_events) == 0
         _age_not_live(db_conn, sid, sm.STALL_ALERT_AFTER_S + 0.1)
-        manager.reconcile()
-        manager.reconcile()
+        manager.reconcile(now=NOW)
+        manager.reconcile(now=NOW)
 
         name = session_name(f"schedule-{sid}")
         backend.live.append(name)
-        manager.reconcile()
+        manager.reconcile(now=NOW)
         backend.live.remove(name)
-        manager.reconcile()
+        manager.reconcile(now=NOW)
         _age_not_live(db_conn, sid, sm.STALL_ALERT_AFTER_S + 0.1)
-        manager.reconcile()
+        manager.reconcile(now=NOW)
 
     emitted = [(event.event_name, event.attributes) for event in emitted_events]
     assert [(name, attrs["schedule_id"], attrs["status"]) for name, attrs in emitted] == [
@@ -208,17 +204,11 @@ def test_the_stall_alert_clock_and_flag_survive_a_restart(
     sid = _insert(db_conn, "stall-restart")
     _set_status(db_conn, sid, "error")
 
-    sm.ScheduleManager(
-        pool, backend=backend, timers=ManualTimers(), repo_root=sm.REPO_ROOT
-    ).reconcile()
+    schedule_manager(pool, backend).reconcile(now=NOW)
     _age_not_live(db_conn, sid, sm.STALL_ALERT_AFTER_S + 1)
-    sm.ScheduleManager(
-        pool, backend=backend, timers=ManualTimers(), repo_root=sm.REPO_ROOT
-    ).reconcile()
+    schedule_manager(pool, backend).reconcile(now=NOW)
     assert emitted_events.names() == ["schedule_stalled"]
-    sm.ScheduleManager(
-        pool, backend=backend, timers=ManualTimers(), repo_root=sm.REPO_ROOT
-    ).reconcile()
+    schedule_manager(pool, backend).reconcile(now=NOW)
     assert emitted_events.names() == ["schedule_stalled"]
 
 
@@ -235,9 +225,7 @@ def test_completed_and_disabled_schedules_do_not_stall_alert(
     for sid in (completed, disabled):
         _age_not_live(db_conn, sid, sm.STALL_ALERT_AFTER_S + 1)
 
-    sm.ScheduleManager(
-        pool, backend=backend, timers=ManualTimers(), repo_root=sm.REPO_ROOT
-    ).reconcile()
+    schedule_manager(pool, backend).reconcile(now=NOW)
 
     assert len(emitted_events) == 0
     cleared = db_conn.execute(
@@ -253,18 +241,13 @@ def test_a_launch_is_claimed_once(
 ) -> None:
     backend, _launched = fake_session
     sid = _insert(db_conn, "claim-once")
-    mgr = sm.ScheduleManager(pool, backend=backend, timers=ManualTimers(), repo_root=sm.REPO_ROOT)
+    mgr = schedule_manager(pool, backend)
 
     assert mgr._claim_launch(sid, 0, "host-a") is True
     assert mgr._claim_launch(sid, 0, "host-a") is False
     _end_backoff(db_conn, sid)
     assert mgr._claim_launch(sid, 0, "host-a") is False
-    assert (
-        sm.ScheduleManager(
-            pool, backend=backend, timers=ManualTimers(), repo_root=sm.REPO_ROOT
-        )._claim_launch(sid, 0, "host-a")
-        is False
-    )
+    assert schedule_manager(pool, backend)._claim_launch(sid, 0, "host-a") is False
     assert _backoff_state(db_conn, sid) == (1, False)
 
 
@@ -304,9 +287,7 @@ def test_a_replaced_session_host_relaunches_the_schedule_once(
     sid = _insert_running(db_conn, "host-wave", generation="host-a")
     backend.epoch = "host-b"
 
-    sm.ScheduleManager(
-        pool, backend=backend, timers=ManualTimers(), repo_root=sm.REPO_ROOT
-    ).reconcile()
+    schedule_manager(pool, backend).reconcile(now=NOW)
 
     assert _state(db_conn, sid) == ("running", "host-b", 1)
     assert backend.created == [session_name(f"schedule-{sid}")]
@@ -326,15 +307,13 @@ def test_a_second_silent_death_in_the_same_generation_is_terminal(
 ) -> None:
     backend, _launched = fake_session
     sid = _insert_running(db_conn, "host-wave-then-dies", generation="host-a")
-    manager = sm.ScheduleManager(
-        pool, backend=backend, timers=ManualTimers(), repo_root=sm.REPO_ROOT
-    )
+    manager = schedule_manager(pool, backend)
     backend.epoch = "host-b"
-    manager.reconcile()
+    manager.reconcile(now=NOW)
     assert _state(db_conn, sid)[0] == "running"
 
     backend.live.clear()
-    manager.reconcile()
+    manager.reconcile(now=NOW)
 
     assert _state(db_conn, sid)[:2] == ("error", "host-b")
     assert len(backend.created) == 1
@@ -347,9 +326,7 @@ def test_an_unreachable_session_host_marks_nothing_lost(
     sid = _insert_running(db_conn, "host-absent", generation="host-a")
     backend.epoch = None
 
-    sm.ScheduleManager(
-        pool, backend=backend, timers=ManualTimers(), repo_root=sm.REPO_ROOT
-    ).reconcile()
+    schedule_manager(pool, backend).reconcile(now=NOW)
 
     assert _state(db_conn, sid) == ("running", "host-a", 1)
     assert backend.created == []
@@ -366,9 +343,7 @@ def test_an_attempt_from_before_the_column_is_not_relaunched(
     sid = _insert_running(db_conn, "host-unknown-attempt", generation=None)
     backend.epoch = "host-b"
 
-    sm.ScheduleManager(
-        pool, backend=backend, timers=ManualTimers(), repo_root=sm.REPO_ROOT
-    ).reconcile()
+    schedule_manager(pool, backend).reconcile(now=NOW)
 
     assert _state(db_conn, sid)[0] == "error"
     assert backend.created == []
@@ -382,29 +357,27 @@ def test_the_window_cap_stops_relaunching_a_host_that_keeps_restarting(
 ) -> None:
     backend, _launched = fake_session
     sid = _insert_running(db_conn, "host-storm", generation="gen-0")
-    manager = sm.ScheduleManager(
-        pool, backend=backend, timers=ManualTimers(), repo_root=sm.REPO_ROOT
-    )
+    manager = schedule_manager(pool, backend)
 
-    for index in range(sm.auto_restart_max_per_window()):
+    for index in range(POLICY.auto_restart_max_per_window):
         backend.epoch = f"gen-{index + 1}"
-        manager.reconcile()
+        manager.reconcile(now=NOW)
         assert _state(db_conn, sid)[0] == "running"
         backend.live.clear()
 
     backend.epoch = "gen-final"
-    manager.reconcile()
+    manager.reconcile(now=NOW)
 
     assert _state(db_conn, sid)[0] == "error"
-    assert len(backend.created) == sm.auto_restart_max_per_window()
+    assert len(backend.created) == POLICY.auto_restart_max_per_window
     assert emitted_events.names() == [
-        *(["schedule_auto_restart"] * sm.auto_restart_max_per_window()),
+        *(["schedule_auto_restart"] * POLICY.auto_restart_max_per_window),
         "schedule_auto_restart_suppressed",
     ]
     suppressed = _attributes(emitted_events)[-1]
-    assert suppressed["previous_generation"] == f"gen-{sm.auto_restart_max_per_window()}"
+    assert suppressed["previous_generation"] == f"gen-{POLICY.auto_restart_max_per_window}"
     assert suppressed["current_generation"] == "gen-final"
-    assert suppressed["restarts_in_window"] == sm.auto_restart_max_per_window()
+    assert suppressed["restarts_in_window"] == POLICY.auto_restart_max_per_window
 
 
 def test_a_refused_launch_does_not_consume_the_auto_restart_budget(
@@ -416,13 +389,11 @@ def test_a_refused_launch_does_not_consume_the_auto_restart_budget(
     backend, _launched = fake_session
     sid = _insert_running(db_conn, "host-gated", generation="host-a")
     backend.epoch = "host-b"
-    manager = sm.ScheduleManager(
-        pool, backend=backend, timers=ManualTimers(), repo_root=sm.REPO_ROOT
-    )
+    manager = schedule_manager(pool, backend)
     start_serving.begin_start()
 
-    for _ in range(sm.auto_restart_max_per_window() + 2):
-        manager.reconcile()
+    for _ in range(POLICY.auto_restart_max_per_window + 2):
+        manager.reconcile(now=NOW)
 
     assert _state(db_conn, sid)[0] == "running"
     assert backend.created == []

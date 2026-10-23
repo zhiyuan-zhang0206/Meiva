@@ -187,22 +187,18 @@ def test_limit_caps_result_count(db_conn: psycopg.Connection) -> None:
     assert len(rows) == 2  # pyright: ignore[reportUnknownArgumentType]
 
 
-def test_defaults_come_from_display_config(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Omitted depth/limit resolve from settings.display.neighbors_default_*
-    (``MEIVA_NEIGHBORS_DEFAULT_DEPTH`` / ``MEIVA_NEIGHBORS_DEFAULT_LIMIT``); the
-    literals 1/20 are only the fields' defaults, not hard-coded query
-    parameters."""
-    from base.config import settings
-
+# meiva:note
+# Omitted depth/limit resolve from the display.neighbors_default_* fields
+# (``MEIVA_NEIGHBORS_DEFAULT_DEPTH`` / ``MEIVA_NEIGHBORS_DEFAULT_LIMIT``); the
+# literals 1/20 are only the fields' defaults, not hard-coded query
+# parameters.
+def test_defaults_come_from_display_config(db_conn: psycopg.Connection) -> None:
     a = _seed_agent(db_conn)
     for _ in range(3):
         peer = _seed_agent(db_conn)
         _event(db_conn, event_type="send_message", agent_id=peer, target=a)
 
-    monkeypatch.setattr(settings.display, "neighbors_default_limit", 2)
-    with gateway_test_client() as client:
+    with gateway_test_client(fields={"neighbors_default_limit": 2}) as client:
         rows = _neighbors(client, a)
 
     assert len(rows) == 2  # pyright: ignore[reportUnknownArgumentType]

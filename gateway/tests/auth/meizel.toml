@@ -1,17 +1,10 @@
-exports = ["gateway_auth.py", "gateway_config.py", "gateway_tests.py", "integration_tests.py", "unit_gateway.py"]
+exports = ["gateway_auth.py", "gateway_config.py", "gateway_tests.py", "integration_tests.py", "sdk_transport.py", "unit_gateway.py"]
 
 [uses]
 "conftest.py" = ["unit_gateway.py"]
-"integration_tests.py" = ["gateway_config.py", "gateway_tests.py"]
+"integration_tests.py" = ["gateway_config.py"]
 "test_trusted_network.py" = ["gateway_auth.py", "gateway_config.py"]
 "unit_gateway.py" = ["gateway_config.py"]
-
-[debt.first-party-patch]
-"gateway_tests.py#monkeypatch.setattr base.cluster.machines.is_paused" = 1
-"gateway_tests.py#monkeypatch.setattr base.cluster.machines.lookup_role" = 1
-"gateway_tests.py#monkeypatch.setattr gateway.agents.creation.forward_spawn_to_remote" = 1
-"gateway_tests.py#monkeypatch.setattr gateway.agents.forward.enqueue_lifecycle" = 1
-"gateway_tests.py#monkeypatch.setattr ops.cluster.rpc.dispatch_to_machine" = 1
 
 [debt.third-party-patch]
 "gateway_auth.py#monkeypatch.setattr starlette.testclient.TestClient.__init__" = 2

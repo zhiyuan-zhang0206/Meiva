@@ -7,7 +7,7 @@ import subprocess
 from pathlib import Path
 
 from gateway.tests.auth.gateway_config import gateway_test_client
-from gateway.tests.routers.test_memory_search import memory_config
+from gateway.tests.routers.memory_search.search_support import memory_config
 
 
 def _init_repo(root: Path) -> str:

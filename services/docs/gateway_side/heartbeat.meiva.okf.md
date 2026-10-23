@@ -55,9 +55,9 @@ Gateway's idle agent check scheduler — every `MEIVA_HEARTBEAT_INTERVAL_SECONDS
 
 The liveness pass derives each agent's state from machine reachability.
 It runs once at start, then every `LIVENESS_PASS_INTERVAL_S`, and it also records
-one `machine_status_snapshot` row for every unpaused agent-runner (rollout targets
-and staging/stopped hosts alike); judging and the failure signal stay with the rollout targets.
-The gateway's roster read renders from those rows (`gateway/cluster/snapshots.py`)
+one `machine_status_snapshot` row for every unpaused agent-runner (targets, staging
+and stopped hosts alike); judging and the failure signal stay with the rollout targets.
+The gateway's roster read renders from those rows (`gateway/cluster/roster/snapshots.py`)
 and dials inline only a missing or stale one (`?fresh=true` dials everything).
 
 

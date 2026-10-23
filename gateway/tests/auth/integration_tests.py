@@ -10,14 +10,15 @@ from fastapi.testclient import TestClient
 
 from base.cluster.machine import MachineIdentity
 from base.config.tests.api_keys import mock_api_keys as mock_api_keys
+from base.db import Database
+from base.events.live.bus import EventBus
 from base.packages.tests.model_catalog import model_catalog as model_catalog
 from gateway.tests.auth.gateway_config import gateway_test_client
-from gateway.tests.auth.gateway_tests import local_spawn_in_process as local_spawn_in_process
 from meiva.gateway_client import use_client
 
 __all__ = [
     "gateway_client",
-    "local_spawn_in_process",
+    "integration_data_plane",
     "mock_api_keys",
     "model_catalog",
 ]
@@ -48,6 +49,12 @@ class _TestClientTransport(httpx.BaseTransport):
             content=r.content,
             request=request,
         )
+
+
+@pytest.fixture(autouse=True)
+def integration_data_plane(database: Database, event_bus: EventBus) -> None:
+    """Every test of the integration tree runs against the throwaway Postgres and Redis."""
+    del database, event_bus
 
 
 @pytest.fixture

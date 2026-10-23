@@ -1,1 +1,8 @@
 exports = ["default_model.py", "runtime.py"]
+
+[uses]
+"runtime.py" = ["write_plan.py"]
+"tests" = ["write_plan.py"]
+
+[purity]
+"write_plan.py" = "strict"

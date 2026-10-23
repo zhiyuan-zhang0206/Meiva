@@ -1,35 +1,48 @@
-"""Cross-machine terminate forward (`gateway/agents/lifecycle.py:post_agent_terminate`) unit tests —
-
-Both graceful and force requests route to the home runner. It owns the hosted
-turn and local execution resources; gateway placement must not choose a local
-shortcut for a remote agent.
-
-`TestTerminateOpenTasksHint` covers the advisory `open_tasks` hint the gateway
-attaches to the response once the forward returns.
-"""
+# meiva:note
+# Cross-machine terminate forward (`gateway/agents/lifecycle.py:post_agent_terminate`) tests —
+#
+# Both graceful and force requests route to the home runner. It owns the hosted
+# turn and local execution resources; gateway placement must not choose a local
+# shortcut for a remote agent. A remote home is a runner served on a real listener
+# (`gateway/tests/support/runner_ops`) and registered in `machines`; the gateway's own machine
+# is the in-process runner `gateway_local_runner` registers.
+#
+# `TestTerminateOpenTasksHint` covers the advisory `open_tasks` hint the gateway
+# attaches to the response once the forward returns.
 
 from __future__ import annotations
 
+import json
+import os
+import subprocess
+import sys
 from datetime import datetime
-from typing import Any
+from pathlib import Path
 
 import psycopg
 import pytest
-from psycopg_pool import ConnectionPool
 
-from base.api_contracts.agent_contract import CrossMachineGatewayUnavailable, MachineNotRegistered
 from base.cluster.machine import MachineIdentity
-from base.db import Database
-from gateway.agents import forward as forward_module
-from gateway.agents import lifecycle as lifecycle_module
+from base.cluster.machine.tests.identity import MachineIdentitySetter
 from gateway.tests.auth.gateway_config import gateway_test_client, spawn_via_http
+from gateway.tests.support.runner_ops.ops_stub import (
+    RunnerOps,
+    completed,
+    failed,
+    refused,
+    runner_ops,
+)
+
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+_OVERLAY_PROBE = Path(__file__).with_name("child_restart_overlay.py")
 
 
 @pytest.fixture
-def _force_local_machine(set_machine_identity) -> MachineIdentity:
-    """Sets this unit's identity at the source via set_machine_identity so every
-    machine_name() / machine_role() call site sees role=agent-runner, name='local-test'."""
-    return set_machine_identity(role="agent-runner", name="local-test")
+def local_machine(
+    set_machine_identity: MachineIdentitySetter, gateway_local_runner: RunnerOps
+) -> MachineIdentity:
+    """The gateway's own machine, serving as an agent-runner through its in-process ops route."""
+    return set_machine_identity(role="agent-runner")
 
 
 def _set_agent_machine(db_conn: psycopg.Connection, agent_id: int, machine: str) -> None:
@@ -41,34 +54,44 @@ def _set_agent_machine(db_conn: psycopg.Connection, agent_id: int, machine: str)
     db_conn.commit()
 
 
+def _terminate_inbound_count(db_conn: psycopg.Connection, agent_id: int) -> int:
+    row = db_conn.execute(
+        "SELECT count(*) FROM inbound_messages WHERE agent_id = %s AND kind = 'terminate'",
+        (agent_id,),
+    ).fetchone()
+    assert row is not None
+    return row[0]
+
+
 class TestTerminateRouting:
+    # meiva:note
+    # machine == local + force=false → the home runner is the gateway's own machine and
+    # executes the termination: it INSERTs the terminate inbound.
     def test_local_graceful_takes_local_path(
-        self, _force_local_machine: MachineIdentity, db_conn: psycopg.Connection
+        self,
+        local_machine: MachineIdentity,
+        gateway_local_runner: RunnerOps,
+        db_conn: psycopg.Connection,
     ) -> None:
-        """machine == local + force=false → takes local graceful path, INSERT terminate inbound."""
-        with gateway_test_client(machine=_force_local_machine) as client:
+        with gateway_test_client(machine=local_machine) as client:
             agent_id = spawn_via_http(client, {}).json()["id"]
-            _set_agent_machine(db_conn, agent_id, "local-test")
+            _set_agent_machine(db_conn, agent_id, gateway_local_runner.name)
             resp = client.post(f"/api/agents/{agent_id}/terminate")
         assert resp.status_code == 200
         assert resp.json()["status"] == "enqueued"
-        with db_conn.cursor() as cur:
-            cur.execute(
-                "SELECT kind FROM inbound_messages WHERE agent_id = %s AND kind = 'terminate'",
-                (agent_id,),
-            )
-            assert cur.fetchone() is not None
+        assert _terminate_inbound_count(db_conn, agent_id) == 1
+        assert [c.kind for c in gateway_local_runner.calls] == ["spawn-launch", "lifecycle"]
 
     def test_local_force_takes_local_path(
         self,
-        _force_local_machine: MachineIdentity,
+        local_machine: MachineIdentity,
+        gateway_local_runner: RunnerOps,
         db_conn: psycopg.Connection,
-        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """A local force request is accepted by the same home-runner path."""
-        with gateway_test_client(machine=_force_local_machine) as client:
+        with gateway_test_client(machine=local_machine) as client:
             agent_id = spawn_via_http(client, {}).json()["id"]
-            _set_agent_machine(db_conn, agent_id, "local-test")
+            _set_agent_machine(db_conn, agent_id, gateway_local_runner.name)
             resp = client.post(
                 f"/api/agents/{agent_id}/terminate",
                 json={"force": True, "source": "user"},
@@ -77,186 +100,187 @@ class TestTerminateRouting:
         assert resp.json()["status"] == "enqueued"
 
     def test_remote_graceful_forwards(
-        self,
-        _force_local_machine: MachineIdentity,
-        db_conn: psycopg.Connection,
-        monkeypatch: pytest.MonkeyPatch,
+        self, local_machine: MachineIdentity, db_conn: psycopg.Connection
     ) -> None:
         """machine != local + force=false → forward, local does not INSERT inbound."""
-        captured: dict[str, Any] = {}
-
-        with gateway_test_client(machine=_force_local_machine) as client:
-
-            async def _capture_forward(
-                agent_id: int, path: str, json_body: dict, *, db: Database, pool: ConnectionPool
-            ) -> dict:
-                assert db is client.app.state.db
-                assert pool is client.app.state.db_pool
-                captured["agent_id"] = agent_id
-                captured["path"] = path
-                captured["json_body"] = json_body
-                return {"status": "enqueued"}
-
+        with (
+            runner_ops(db_conn, "remote-mac", {"lifecycle": completed({"status": "enqueued"})}) as (
+                runner
+            ),
+            gateway_test_client(machine=local_machine) as client,
+        ):
             agent_id = spawn_via_http(client, {}).json()["id"]
             _set_agent_machine(db_conn, agent_id, "remote-mac")
-            monkeypatch.setattr(lifecycle_module, "forward_to_home_machine", _capture_forward)  # pyright: ignore[reportUnknownArgumentType]
             resp = client.post(
                 f"/api/agents/{agent_id}/terminate",
                 json={"message": "retain this note"},
             )
         assert resp.status_code == 200
         assert resp.json() == {"status": "enqueued", "open_tasks": None, "shell_sessions": None}
-        assert captured["agent_id"] == agent_id
-        assert captured["path"] == f"/api/agents/{agent_id}/terminate"
-        assert captured["json_body"]["message"] == "retain this note"
+        (call,) = runner.calls_of("lifecycle")
+        assert call.payload["path"] == f"/api/agents/{agent_id}/terminate"
+        assert call.payload["body"]["message"] == "retain this note"
+        # meiva:note
+        # The envelope carries the dedup key the ops server replays a retried request by.
+        assert call.idempotency_key is not None
+        assert call.idempotency_key.startswith("lifecycle:")
+        assert _terminate_inbound_count(db_conn, agent_id) == 0
 
     def test_remote_force_forwards(
-        self,
-        _force_local_machine: MachineIdentity,
-        db_conn: psycopg.Connection,
-        monkeypatch: pytest.MonkeyPatch,
+        self, local_machine: MachineIdentity, db_conn: psycopg.Connection
     ) -> None:
         """machine != local + force=true → forward, local does not touch sessions / pid."""
-        captured: dict[str, Any] = {}
-
-        with gateway_test_client(machine=_force_local_machine) as client:
-
-            async def _capture_forward(
-                agent_id: int, path: str, json_body: dict, *, db: Database, pool: ConnectionPool
-            ) -> dict:
-                assert db is client.app.state.db
-                assert pool is client.app.state.db_pool
-                captured["json_body"] = json_body
-                return {"status": "enqueued"}
-
+        with (
+            runner_ops(db_conn, "remote-mac", {"lifecycle": completed({"status": "enqueued"})}) as (
+                runner
+            ),
+            gateway_test_client(machine=local_machine) as client,
+        ):
             agent_id = spawn_via_http(client, {}).json()["id"]
             _set_agent_machine(db_conn, agent_id, "remote-mac")
-            monkeypatch.setattr(lifecycle_module, "forward_to_home_machine", _capture_forward)  # pyright: ignore[reportUnknownArgumentType]
             resp = client.post(
                 f"/api/agents/{agent_id}/terminate",
                 json={"force": True, "source": "user"},
             )
         assert resp.status_code == 200
         assert resp.json() == {"status": "enqueued", "open_tasks": None, "shell_sessions": None}
-        assert captured["json_body"]["force"] is True
-        assert captured["json_body"]["source"] == "user"
+        (body,) = [payload["body"] for payload in runner.payloads("lifecycle")]
+        assert body["force"] is True
+        assert body["source"] == "user"
 
-    def test_machine_not_registered_propagates_404(
-        self,
-        _force_local_machine: MachineIdentity,
-        db_conn: psycopg.Connection,
-        monkeypatch: pytest.MonkeyPatch,
+    # meiva:note
+    # A failed op that names a wire reason is re-raised as that error on the gateway.
+    def test_a_runners_wire_error_keeps_its_status_and_reason(
+        self, local_machine: MachineIdentity, db_conn: psycopg.Connection
     ) -> None:
-        async def _forward_raises(*args: Any, **kw: Any) -> None:
-            raise MachineNotRegistered("machine 'remote-mac' not in machines table")
-
-        with gateway_test_client(machine=_force_local_machine) as client:
+        refusal = failed(
+            {
+                "error": "MachineNotRegistered: remote-mac",
+                "detail": "machine 'remote-mac' not in machines table",
+                "reason": "machine_not_registered",
+            }
+        )
+        with (
+            runner_ops(db_conn, "remote-mac", {"lifecycle": refusal}),
+            gateway_test_client(machine=local_machine) as client,
+        ):
             agent_id = spawn_via_http(client, {}).json()["id"]
             _set_agent_machine(db_conn, agent_id, "remote-mac")
-            monkeypatch.setattr(lifecycle_module, "forward_to_home_machine", _forward_raises)
             resp = client.post(f"/api/agents/{agent_id}/terminate")
         assert resp.status_code == 404
         assert resp.json()["reason"] == "machine_not_registered"
 
-    def test_cross_machine_gateway_unavailable_propagates_502(
-        self,
-        _force_local_machine: MachineIdentity,
-        db_conn: psycopg.Connection,
-        monkeypatch: pytest.MonkeyPatch,
+    # meiva:note
+    # A home machine the registry has never seen cannot be dialed: 502, named.
+    def test_an_unregistered_home_machine_is_a_gateway_error(
+        self, local_machine: MachineIdentity, db_conn: psycopg.Connection
     ) -> None:
-        async def _forward_raises(*args: Any, **kw: Any) -> None:
-            raise CrossMachineGatewayUnavailable("target unreachable after 3 retries")
+        with gateway_test_client(machine=local_machine) as client:
+            agent_id = spawn_via_http(client, {}).json()["id"]
+            _set_agent_machine(db_conn, agent_id, "ghost-mac")
+            resp = client.post(f"/api/agents/{agent_id}/terminate")
+        assert resp.status_code == 502
+        assert resp.json()["reason"] == "cross_machine_gateway_unavailable"
+        assert "ghost-mac" in resp.json()["detail"]
 
-        with gateway_test_client(machine=_force_local_machine) as client:
+    def test_cross_machine_gateway_unavailable_propagates_502(
+        self, local_machine: MachineIdentity, db_conn: psycopg.Connection
+    ) -> None:
+        with (
+            runner_ops(db_conn, "remote-mac", {"lifecycle": refused(404, "no ops server here")}),
+            gateway_test_client(machine=local_machine) as client,
+        ):
             agent_id = spawn_via_http(client, {}).json()["id"]
             _set_agent_machine(db_conn, agent_id, "remote-mac")
-            monkeypatch.setattr(lifecycle_module, "forward_to_home_machine", _forward_raises)
             resp = client.post(f"/api/agents/{agent_id}/terminate")
         assert resp.status_code == 502
         assert resp.json()["reason"] == "cross_machine_gateway_unavailable"
 
-    def test_nonexistent_agent_404(self, _force_local_machine: MachineIdentity) -> None:
+    def test_nonexistent_agent_404(self, local_machine: MachineIdentity) -> None:
         """Nonexistent → helper itself raises AgentNotFound (404)."""
-        with gateway_test_client(machine=_force_local_machine) as client:
+        with gateway_test_client(machine=local_machine) as client:
             resp = client.post("/api/agents/9999/terminate")
         assert resp.status_code == 404
 
 
 def test_remote_home_machine_is_forwarded(
-    _force_local_machine: MachineIdentity,
-    db_conn: psycopg.Connection,
-    monkeypatch: pytest.MonkeyPatch,
+    local_machine: MachineIdentity, db_conn: psycopg.Connection
 ) -> None:
     """A remote agents_meta.machine row is always forwarded to that host's ops
     server — there is no deployment gate on the lifecycle path. Single box is
     just the special case where the ops server lives at localhost."""
-    captured: dict[str, Any] = {}
-
-    async def _capture_enqueue(_db: object, target: str, path: str, json_body: dict) -> dict:
-        captured["target"] = target
-        return {"status": "enqueued"}
-
-    with gateway_test_client(machine=_force_local_machine) as client:
+    with (
+        runner_ops(db_conn, "stale-runner", {"lifecycle": completed({"status": "enqueued"})}) as (
+            runner
+        ),
+        gateway_test_client(machine=local_machine) as client,
+    ):
         agent_id = spawn_via_http(client, {}).json()["id"]
         _set_agent_machine(db_conn, agent_id, "stale-runner")
-        monkeypatch.setattr(forward_module, "enqueue_lifecycle", _capture_enqueue)  # pyright: ignore[reportUnknownArgumentType]
         resp = client.post(f"/api/agents/{agent_id}/terminate")
     assert resp.status_code == 200
     assert resp.json() == {"status": "enqueued", "open_tasks": None, "shell_sessions": None}
-    assert captured["target"] == "stale-runner"
+    assert [call.kind for call in runner.calls] == ["lifecycle"]
 
 
-def test_restart_overlay_is_validated_without_gateway_agent_domain(
-    _force_local_machine: MachineIdentity,
-    db_conn: psycopg.Connection,
-    monkeypatch: pytest.MonkeyPatch,
+# meiva:note
+# A restart's overlay is validated at the gateway: a valid one rides to the home runner
+# unchanged, an invalid one is a 422 and never leaves the gateway.
+def test_restart_overlay_is_validated_before_it_is_forwarded(
+    local_machine: MachineIdentity, db_conn: psycopg.Connection
 ) -> None:
-    """Restart validates its forwarded overlay without constructing agent settings."""
-    import base.config as base_config
-    from base.config import Settings
-
-    captured: dict[str, Any] = {}
-
-    with gateway_test_client(machine=_force_local_machine) as client:
-
-        async def _capture_forward(
-            agent_id: int,
-            path: str,
-            json_body: dict[str, object],
-            *,
-            db: Database,
-            pool: ConnectionPool,
-        ) -> dict[str, str]:
-            assert db is client.app.state.db
-            assert pool is client.app.state.db_pool
-            captured["agent_id"] = agent_id
-            captured["path"] = path
-            captured["json_body"] = json_body
-            return {"status": "enqueued"}
-
-        monkeypatch.setattr(lifecycle_module, "forward_to_home_machine", _capture_forward)  # pyright: ignore[reportUnknownArgumentType]
+    with (
+        runner_ops(db_conn, "remote-runner", {"lifecycle": completed({"status": "enqueued"})}) as (
+            runner
+        ),
+        gateway_test_client(machine=local_machine) as client,
+    ):
         agent_id = spawn_via_http(client, {}).json()["id"]
         _set_agent_machine(db_conn, agent_id, "remote-runner")
-        with monkeypatch.context() as profile_patch:
-            profile_patch.setattr(base_config, "settings", Settings(profile="gateway"))
-            valid = client.post(
-                f"/api/agents/{agent_id}/restart",
-                json={"config_overlay": {"completion_notice_policy": "hourly"}},
-            )
-            invalid = client.post(
-                f"/api/agents/{agent_id}/restart",
-                json={"config_overlay": {"completion_notice_policy": "bogus"}},
-            )
+        valid = client.post(
+            f"/api/agents/{agent_id}/restart",
+            json={"config_overlay": {"completion_notice_policy": "hourly"}},
+        )
+        invalid = client.post(
+            f"/api/agents/{agent_id}/restart",
+            json={"config_overlay": {"completion_notice_policy": "bogus"}},
+        )
 
     assert valid.status_code == 200
     assert valid.json() == {"status": "enqueued"}
-    assert captured["agent_id"] == agent_id
-    assert captured["path"] == f"/api/agents/{agent_id}/restart"
-    assert captured["json_body"] == {
-        "source": "user",
-        "config_overlay": {"completion_notice_policy": "hourly"},
-    }
     assert invalid.status_code == 422
+    assert runner.payloads("lifecycle") == [
+        {
+            "path": f"/api/agents/{agent_id}/restart",
+            "body": {"source": "user", "config_overlay": {"completion_notice_policy": "hourly"}},
+        }
+    ]
+
+
+# meiva:note
+# The gateway process builds only its own config domains; the restart overlay check must
+# not construct the agent domain. Run it in a process with the gateway's profile.
+def test_overlay_validation_needs_no_agent_domain_in_a_gateway_process(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    env = {key: value for key, value in os.environ.items() if not key.startswith("MEIVA_")}
+    env.update(MEIVA_HOME=str(home), MEIVA_CONFIG_FETCH="skip", MEIVA_PROCESS_PROFILE="gateway")
+    # meiva:note
+    # fixed argv, sys.executable is trusted.
+    proc = subprocess.run(  # noqa: S603
+        [sys.executable, "-X", "utf8", str(_OVERLAY_PROBE)],
+        cwd=_REPO_ROOT,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=180,
+        check=False,
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert json.loads(proc.stdout.strip().splitlines()[-1]) == {
+        "valid": "accepted",
+        "invalid": "rejected",
+    }
 
 
 def _insert_open_task(
@@ -284,22 +308,28 @@ class TestTerminateOpenTasksHint:
     tasks, read at the gateway after the home runner accepts the termination."""
 
     def test_no_open_tasks_reports_null(
-        self, _force_local_machine: MachineIdentity, db_conn: psycopg.Connection
+        self,
+        local_machine: MachineIdentity,
+        gateway_local_runner: RunnerOps,
+        db_conn: psycopg.Connection,
     ) -> None:
-        with gateway_test_client(machine=_force_local_machine) as client:
+        with gateway_test_client(machine=local_machine) as client:
             agent_id = spawn_via_http(client, {}).json()["id"]
-            _set_agent_machine(db_conn, agent_id, "local-test")
+            _set_agent_machine(db_conn, agent_id, gateway_local_runner.name)
             resp = client.post(f"/api/agents/{agent_id}/terminate")
         assert resp.status_code == 200
         assert resp.json() == {"status": "enqueued", "open_tasks": None, "shell_sessions": None}
 
     def test_open_tasks_reported_newest_first(
-        self, _force_local_machine: MachineIdentity, db_conn: psycopg.Connection
+        self,
+        local_machine: MachineIdentity,
+        gateway_local_runner: RunnerOps,
+        db_conn: psycopg.Connection,
     ) -> None:
         """Only in_progress counts; rows come newest first."""
-        with gateway_test_client(machine=_force_local_machine) as client:
+        with gateway_test_client(machine=local_machine) as client:
             agent_id = spawn_via_http(client, {}).json()["id"]
-            _set_agent_machine(db_conn, agent_id, "local-test")
+            _set_agent_machine(db_conn, agent_id, gateway_local_runner.name)
             _insert_open_task(
                 db_conn, owner=agent_id, title="done task", status="done", age_minutes=1
             )
@@ -325,11 +355,14 @@ class TestTerminateOpenTasksHint:
         assert datetime.fromisoformat(hint["tasks"][0]["updated_at"])
 
     def test_more_than_five_truncates_to_the_five_newest(
-        self, _force_local_machine: MachineIdentity, db_conn: psycopg.Connection
+        self,
+        local_machine: MachineIdentity,
+        gateway_local_runner: RunnerOps,
+        db_conn: psycopg.Connection,
     ) -> None:
-        with gateway_test_client(machine=_force_local_machine) as client:
+        with gateway_test_client(machine=local_machine) as client:
             agent_id = spawn_via_http(client, {}).json()["id"]
-            _set_agent_machine(db_conn, agent_id, "local-test")
+            _set_agent_machine(db_conn, agent_id, gateway_local_runner.name)
             seeded = [
                 _insert_open_task(
                     db_conn, owner=agent_id, title=f"open task {i}", age_minutes=10 - i
@@ -369,56 +402,42 @@ class TestTerminateShellSessions:
     the sessions it reports killed (the runner holds no DELETE on them)."""
 
     def test_forwards_the_option_and_drops_killed_sessions_ttl_rows(
-        self,
-        _force_local_machine: MachineIdentity,
-        db_conn: psycopg.Connection,
-        monkeypatch: pytest.MonkeyPatch,
+        self, local_machine: MachineIdentity, db_conn: psycopg.Connection
     ) -> None:
-        captured: dict[str, Any] = {}
-
-        with gateway_test_client(machine=_force_local_machine) as client:
-
-            async def _capture_forward(
-                agent_id: int, path: str, json_body: dict, *, db: Database, pool: ConnectionPool
-            ) -> dict:
-                assert db is client.app.state.db
-                assert pool is client.app.state.db_pool
-                captured["json_body"] = json_body
-                return {"status": "enqueued", "shell_sessions": {"when": "now", "killed": [0, 1]}}
-
+        report = completed(
+            {"status": "enqueued", "shell_sessions": {"when": "now", "killed": [0, 1]}}
+        )
+        with (
+            runner_ops(db_conn, "remote-mac", {"lifecycle": report}) as runner,
+            gateway_test_client(machine=local_machine) as client,
+        ):
             agent_id = spawn_via_http(client, {}).json()["id"]
             _set_agent_machine(db_conn, agent_id, "remote-mac")
             _seed_shell_ttls(db_conn, agent_id, [0, 1, 2])
-            monkeypatch.setattr(lifecycle_module, "forward_to_home_machine", _capture_forward)  # pyright: ignore[reportUnknownArgumentType]
             resp = client.post(
                 f"/api/agents/{agent_id}/terminate",
                 json={"force": True, "kill_all_shell_sessions": True},
             )
         assert resp.status_code == 200
         assert resp.json()["shell_sessions"] == {"when": "now", "killed": [0, 1]}
-        assert captured["json_body"]["kill_all_shell_sessions"] is True
+        (call,) = runner.calls_of("lifecycle")
+        assert call.payload["body"]["kill_all_shell_sessions"] is True
         # Session 2 is gone too, but not by this kill: the TTL reaper retires it.
         assert _shell_ttl_ids(db_conn, agent_id) == [2]
 
     def test_at_exit_kill_leaves_ttl_rows_to_the_reaper(
-        self,
-        _force_local_machine: MachineIdentity,
-        db_conn: psycopg.Connection,
-        monkeypatch: pytest.MonkeyPatch,
+        self, local_machine: MachineIdentity, db_conn: psycopg.Connection
     ) -> None:
-        with gateway_test_client(machine=_force_local_machine) as client:
-
-            async def _capture_forward(
-                agent_id: int, path: str, json_body: dict, *, db: Database, pool: ConnectionPool
-            ) -> dict:
-                assert db is client.app.state.db
-                assert pool is client.app.state.db_pool
-                return {"status": "enqueued", "shell_sessions": {"when": "at_exit", "killed": []}}
-
+        report = completed(
+            {"status": "enqueued", "shell_sessions": {"when": "at_exit", "killed": []}}
+        )
+        with (
+            runner_ops(db_conn, "remote-mac", {"lifecycle": report}),
+            gateway_test_client(machine=local_machine) as client,
+        ):
             agent_id = spawn_via_http(client, {}).json()["id"]
             _set_agent_machine(db_conn, agent_id, "remote-mac")
             _seed_shell_ttls(db_conn, agent_id, [0])
-            monkeypatch.setattr(lifecycle_module, "forward_to_home_machine", _capture_forward)  # pyright: ignore[reportUnknownArgumentType]
             resp = client.post(
                 f"/api/agents/{agent_id}/terminate", json={"kill_all_shell_sessions": True}
             )

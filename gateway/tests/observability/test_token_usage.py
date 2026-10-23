@@ -19,6 +19,7 @@ import pytest
 from base.db import create_agent
 from base.host.env.agent_slices import ModelOverrides
 from gateway.tests.auth.gateway_config import GatewayTestClient, gateway_test_client
+from gateway.tests.observability.checkpoint_faults import checkpoint_store_unreadable
 
 
 @pytest.fixture
@@ -192,18 +193,17 @@ def test_the_agents_own_compact_thresholds_are_reported(
     assert body["soft_compact_tokens"] == 50_000  # the birth config's 0.25
 
 
+# meiva:note
+# A checkpoint store read failure is tolerated to 0/0 — the SSE token_usage
+# push refreshes the counter later (contrast the /messages data endpoint's
+# 503). The checkpoint table is taken away, so the saver's tuple read fails like a store outage.
+# max_input_tokens still reflects the cluster default model (read from
+# config_overlay before the checkpoint access).
 def test_checkpoint_read_failure_returns_zero(
     db_conn: psycopg.Connection,
+    db_url: str,
     test_client: GatewayTestClient,
 ) -> None:
-    """A checkpoint store read failure is tolerated to 0/0 — the SSE token_usage
-    push refreshes the counter later (contrast the /messages data endpoint's
-    503). Make Meiva's explicitly constructed saver adapter fail at its tuple read.
-    max_input_tokens still reflects the cluster default model (read from
-    config_overlay before the checkpoint access)."""
-    from typing import NoReturn
-
-    from base.agents.history.checkpoint import CheckpointReadError
     from base.config import settings
 
     # Through resolve_context_budget, not by re-deriving fraction * window here:
@@ -221,14 +221,8 @@ def test_checkpoint_read_failure_returns_zero(
     expected_hard = _budget.hard_compact_tokens
 
     tid = create_agent(db_conn)
-    attempts: list[object] = []
-
-    def fail_read(_db: object, agent_id: object) -> NoReturn:
-        attempts.append(agent_id)
-        raise CheckpointReadError("simulated DB connection lost")
-
-    test_client.app.state.checkpoint_messages_loader = fail_read
-    resp = test_client.get(f"/api/agents/{tid}/token-usage")
+    with checkpoint_store_unreadable(db_url):
+        resp = test_client.get(f"/api/agents/{tid}/token-usage")
     assert resp.status_code == 200
     assert resp.json() == {
         "input_tokens": 0,
@@ -238,4 +232,3 @@ def test_checkpoint_read_failure_returns_zero(
         "soft_compact_tokens": expected_soft,
         "hard_compact_tokens": expected_hard,
     }
-    assert len(attempts) == 1

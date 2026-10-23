@@ -10,40 +10,33 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import UTC, datetime, timedelta
-from typing import Annotated, Any
+from datetime import UTC, datetime
+from typing import Annotated
 
 from fastapi import APIRouter, HTTPException, Query, Request
-from loguru import logger
 from psycopg_pool import ConnectionPool
 from pydantic import BaseModel
 
+from base.agents.birth.harness import LAUNCHABLE_HARNESSES
 from base.api_contracts.status import MachineStatus
 from base.cluster import machines
-from base.cluster.machine import (
-    MachineIdentity,
-)
-from base.config import settings
-from base.db import Database
 from base.db.transaction import write_transaction
-from base.deploy.git.cluster_drift import prod_source_head_sha
-from base.native_process.loaded_commit import LoadedCommit
-from gateway.cluster import snapshots
-from gateway.cluster.harness_probe import (
-    HarnessProbeCache,
-    availability_rows,
-    probe_harnesses,
+from gateway.cluster.admin_events_plan import (
+    AdminEventsError,
+    AdminEventsFilters,
+    plan_admin_events,
 )
-from gateway.cluster.roster_probe import IdentityMismatchLog
+from gateway.cluster.harness_probe import HarnessProbeCache, probe_harnesses
+from gateway.cluster.harness_rows import availability_rows
+from gateway.cluster.ops_dispatch import dispatch_op
+from gateway.cluster.roster import snapshots
 from gateway.cluster.schemas import AgentMachineRow, HarnessAvailability, MachineDeleteResponse
-from gateway.cluster.status import gather_cluster_status
+from gateway.cluster.status import RosterEnv, gather_cluster_status, read_local_facts, roster_env
 from gateway.events import telemetry_rows
 from gateway.events.schemas import AgentEventRow, AgentEventsResponse
+from gateway.http.config import runtime_view
 from ops.cluster import operations as _ops
-from ops.cluster import rpc as cluster_rpc
-from ops.cluster_status import ClusterStatus, serving_gate_reason
-from ops.cluster_status.schema_mismatch import status as schema_mismatch_status
-from ops.rpc_schemas import OpKind
+from ops.cluster_status import ClusterStatus
 
 router = APIRouter()
 _log = logging.getLogger(__name__)
@@ -51,104 +44,34 @@ _log = logging.getLogger(__name__)
 
 # meiva:note
 # Sync local snapshot for a pure gateway (no ops server) — via to_thread:
-# the serving gate (file), orchestration liveness (session probe) and the
-# prod-source HEAD (git rev-parse) are all child-process / disk reads that
-# must not run on the event loop.
-def _local_snapshot_blocking(
-    db: Database, *, image: LoadedCommit, local_machine: MachineIdentity
-) -> ClusterStatus:
-    paused_reason = serving_gate_reason()
+# the serving gate (file), the prod-source HEAD (git rev-parse) and the schema
+# comparison are child-process / disk / database reads that must not run on the event loop.
+def _local_snapshot_blocking(env: RosterEnv) -> ClusterStatus:
+    facts = read_local_facts(env, with_resource=False)
+    role = env.machine.role()
     return ClusterStatus(
-        machine_name=local_machine.name(),
-        serve_gateway=("gateway" in local_machine.role()),
-        serve_agent_runner=("agent-runner" in local_machine.role()),
-        serve_observability_station=("observability-station" in local_machine.role()),
-        paused=paused_reason is not None,
-        paused_reason=paused_reason,
-        head_sha=prod_source_head_sha(),
-        # This gateway process's own frozen commit — not a disk bookmark, so a
-        # gateway that outlived a checkout advance reports the old commit and the
-        # roster shows the drift.
-        running_sha=image.sha,
-        schema_mismatch=schema_mismatch_status(db, local_machine=local_machine.name()),
+        machine_name=env.machine.name(),
+        serve_gateway=("gateway" in role),
+        serve_agent_runner=("agent-runner" in role),
+        serve_observability_station=("observability-station" in role),
+        paused=facts.paused_reason is not None,
+        paused_reason=facts.paused_reason,
+        head_sha=facts.head_sha,
+        running_sha=facts.running_sha,
+        schema_mismatch=facts.schema_mismatch,
     )
-
-
-def _machines_rows_blocking(pool: ConnectionPool) -> list[tuple[Any, ...]]:
-    """Sync machines-table read — via to_thread (used by roster + machines)."""
-    with pool.connection() as conn, conn.cursor() as cur:
-        cur.execute(
-            "SELECT name, gateway_url, role, up_since_at, description, stopped_at, is_staging "
-            "FROM machines WHERE paused_at IS NULL ORDER BY name"
-        )
-        return cur.fetchall()
 
 
 async def _roster_statuses(
-    pool: ConnectionPool,
-    db: Database,
-    identity_log: IdentityMismatchLog,
-    *,
-    fresh: bool,
-    image: LoadedCommit,
-    local_machine: MachineIdentity,
-    gather_fn: Any = None,
-    dispatch_fn: Any = None,
+    env: RosterEnv, pool: ConnectionPool, *, fresh: bool
 ) -> list[MachineStatus]:
     """The roster of every unpaused machine: from the heartbeat liveness pass's
     snapshot, or — when `fresh` — by dialing every runner now."""
-    rows = await asyncio.to_thread(_machines_rows_blocking, pool)
+    rows = await asyncio.to_thread(snapshots.readroster_rows_blocking, pool)
     if not rows:
         return []
     found = None if fresh else await asyncio.to_thread(snapshots.read_all_blocking, pool)
-    if gather_fn is not None:
-        return await gather_fn(
-            db,
-            rows,
-            local_machine.name(),
-            identity_log=identity_log,
-            snapshots=found,
-            image=image,
-        )
-    return await gather_cluster_status(
-        db,
-        rows,
-        local_machine.name(),
-        identity_log=identity_log,
-        snapshots=found,
-        image=image,
-        dispatch_fn=dispatch_fn,
-    )
-
-
-async def _dispatch_op(
-    db: Database, target: str, kind: OpKind, payload: dict[str, Any]
-) -> dict[str, Any]:
-    """POST one op to `target`'s ops server, mapping transport outcomes to HTTP.
-
-    The single path every per-host cluster op takes — the local machine
-    included (its ops server is dialed at its registered localhost URL); the
-    gateway never runs session/pidfile operations itself.
-
-    Raises:
-        HTTPException 503: the target's ops server was unreachable.
-        HTTPException 502: the op ran on the target but reported failure
-            (e.g. an update already in flight there).
-    """
-    try:
-        return await cluster_rpc.dispatch_to_machine(
-            db, target_machine=target, kind=kind, payload=payload
-        )
-    except cluster_rpc.ClusterOpUnreachable as exc:
-        raise HTTPException(
-            status_code=503,
-            detail=f"machine {target!r} ops server unreachable for {kind}: {exc!s}",
-        ) from exc
-    except cluster_rpc.ClusterOpFailed as exc:
-        raise HTTPException(
-            status_code=502,
-            detail=f"machine {target!r} {kind} failed: {exc.result!r}",
-        ) from exc
+    return await gather_cluster_status(env, rows, found)
 
 
 @router.post("/api/cluster/stopping", status_code=200)
@@ -197,22 +120,14 @@ async def get_cluster_status(request: Request) -> ClusterStatus:
     roster use `/api/cluster/roster`. Bypasses 503 mode so status stays visible
     during pause — observability is always online.
     """
-    return await cluster_status_snapshot(
-        request.app.state.db,
-        image=request.app.state.process_image,
-        local_machine=request.app.state.machine,
-    )
+    return await cluster_status_snapshot(roster_env(request))
 
 
-async def cluster_status_snapshot(
-    db: Database, *, image: LoadedCommit, local_machine: MachineIdentity
-) -> ClusterStatus:
-    if "agent-runner" in local_machine.role():
-        result = await _dispatch_op(db, local_machine.name(), "status_probe", {})
+async def cluster_status_snapshot(env: RosterEnv) -> ClusterStatus:
+    if "agent-runner" in env.machine.role():
+        result = await dispatch_op(env.db, env.machine.name(), "status_probe", {})
         return ClusterStatus.model_validate(result)
-    return await asyncio.to_thread(
-        _local_snapshot_blocking, db, image=image, local_machine=local_machine
-    )
+    return await asyncio.to_thread(_local_snapshot_blocking, env)
 
 
 @router.get("/api/cluster/roster", response_model=list[MachineStatus])
@@ -235,14 +150,7 @@ async def get_cluster_roster(
     503 mode so the roster stays visible during pause.
     """
     return await _roster_statuses(
-        request.app.state.control_db_pool,
-        request.app.state.db,
-        request.app.state.identity_mismatch_log,
-        fresh=fresh,
-        image=request.app.state.process_image,
-        local_machine=request.app.state.machine,
-        gather_fn=getattr(request.app.state, "cluster_status_gatherer", None),
-        dispatch_fn=getattr(request.app.state, "status_probe_dispatcher", None),
+        roster_env(request), request.app.state.control_db_pool, fresh=fresh
     )
 
 
@@ -254,22 +162,6 @@ async def get_cluster_roster(
 #     renamed: a one-shot DELETE endpoint.
 # Both endpoints bypass the paused-host 503 (so they keep working during an `meiva
 # update` window). The gateway is unauthenticated (the private network is the boundary).
-
-
-# Protective ceiling for the admin-events limit (the handler's range check);
-# the default *window* is display.cluster_events_default_limit
-# (task #3696 exception inventory: KEEP).
-_EVENTS_MAX_LIMIT = 1000
-
-
-def _normalize_level_min(level: str | None) -> str | None:
-    if not level:
-        return None
-    level_upper = level.upper()
-    order = ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
-    if level_upper not in order:
-        raise HTTPException(status_code=400, detail=f"unknown level: {level!r}")
-    return order[order.index(level_upper) :][0].lower()
 
 
 @router.get("/api/cluster/admin/events", response_model=AgentEventsResponse)
@@ -302,45 +194,33 @@ def get_cluster_admin_events(
     Returns newest-first; the client paginates by passing
     `since=<oldest_ts_seen>` on the next call.
     """
-    if limit is None:
-        limit = int(
-            getattr(
-                request.app.state,
-                "cluster_events_default_limit",
-                settings.display.cluster_events_default_limit,
-            )
+    try:
+        query = plan_admin_events(
+            AdminEventsFilters(
+                agent_id=agent_id,
+                service_only=service_only,
+                level=level,
+                since=since,
+                event=event,
+                grep=grep,
+                limit=limit,
+            ),
+            default_limit=runtime_view(request).display.cluster_events_default_limit,
+            now=datetime.now(UTC),
         )
-    if limit < 1 or limit > _EVENTS_MAX_LIMIT:
-        raise HTTPException(
-            status_code=400,
-            detail=f"limit must be in [1, {_EVENTS_MAX_LIMIT}], got {limit}",
-        )
-
-    if agent_id is not None and service_only:
-        raise HTTPException(
-            status_code=400,
-            detail="pass either `agent_id` or `service_only=true`, not both",
-        )
-
-    level_min = _normalize_level_min(level)
-
-    since_dt = _parse_since(since) if since else None
-    events = [e.strip() for e in event.split(",") if e.strip()] if event else None
-
-    # A lower bound is always in effect; the default is the last 24 hours.
-    window_from = since_dt or datetime.now(UTC) - timedelta(hours=24)
-    events_reader = getattr(request.app.state, "cluster_events_reader", telemetry_rows.query_events)
+    except AdminEventsError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     with request.app.state.db_pool.connection() as conn:
-        rows, _ = events_reader(
+        rows, _ = telemetry_rows.query_events(
             conn,
-            agent_id=agent_id,
-            service_only=service_only,
-            categories=["telemetry", "log"],
-            event_names=events,
-            level_min=level_min,
-            grep=grep,
-            from_=window_from,
-            limit=limit,
+            agent_id=query.agent_id,
+            service_only=query.service_only,
+            categories=list(query.categories),
+            event_names=None if query.event_names is None else list(query.event_names),
+            level_min=query.level_min,
+            grep=query.grep,
+            from_=query.from_,
+            limit=query.limit,
         )
     return AgentEventsResponse(
         items=[
@@ -356,38 +236,6 @@ def get_cluster_admin_events(
             for row in rows
         ]
     )
-
-
-def _parse_since(s: str) -> datetime:
-    """Accept either `<int><s|m|h|d>` (relative) or an ISO-8601 timestamp.
-
-    Relative form is treated as "this much time ago"; the float is the
-    quantity, the suffix the unit. Absolute form falls back to
-    `datetime.fromisoformat` which handles both `Z` suffix and offset
-    forms in 3.12.
-    """
-    s = s.strip()
-    if not s:
-        raise HTTPException(status_code=400, detail="since= empty")
-    unit = s[-1]
-    if unit in ("s", "m", "h", "d"):
-        try:
-            n = float(s[:-1])
-        except ValueError:
-            logger.debug(
-                "Parsing 'since' window as relative duration failed for '{}', falling back to ISO-8601 parse",
-                s,
-            )
-        else:
-            multiplier = {"s": 1, "m": 60, "h": 3600, "d": 86400}[unit]
-            return datetime.now(UTC) - timedelta(seconds=n * multiplier)
-    try:
-        return datetime.fromisoformat(s.replace("Z", "+00:00"))
-    except ValueError as exc:
-        raise HTTPException(
-            status_code=400,
-            detail=f"since={s!r} not a relative window (e.g. '2h') or ISO-8601 timestamp",
-        ) from exc
 
 
 @router.get("/api/cluster/machines", response_model=list[AgentMachineRow])
@@ -407,14 +255,7 @@ async def get_cluster_machines(
     over the free-text description, not ops topology.
     """
     statuses = await _roster_statuses(
-        request.app.state.control_db_pool,
-        request.app.state.db,
-        request.app.state.identity_mismatch_log,
-        fresh=fresh,
-        image=request.app.state.process_image,
-        local_machine=request.app.state.machine,
-        gather_fn=getattr(request.app.state, "cluster_status_gatherer", None),
-        dispatch_fn=getattr(request.app.state, "status_probe_dispatcher", None),
+        roster_env(request), request.app.state.control_db_pool, fresh=fresh
     )
     # This is the AGENT view: it lists only machines that can run agent processes
     # (carry the agent-runner capability). A gateway-only node is intentionally
@@ -454,12 +295,9 @@ async def get_machine_harnesses(name: str, request: Request) -> list[HarnessAvai
     if cached is not None:
         return cached
     probed = await probe_harnesses(
-        name,
-        db=request.app.state.db,
-        local_machine=request.app.state.machine,
-        dispatch=_dispatch_op,
+        name, db=request.app.state.db, local_machine=request.app.state.machine
     )
-    rows = availability_rows(probed)
+    rows = availability_rows(probed, LAUNCHABLE_HARNESSES)
     cache.store(name, rows)
     return rows
 

@@ -3,26 +3,32 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from typing import Any, cast
-from unittest.mock import AsyncMock
 
+import psycopg
 import pytest
 
-from base.cluster import machines
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
-from base.config import runtime_config, settings
+from base.config import runtime_config
 from base.host.env.tests.env_files import unit_env_path
 from gateway.tests.auth.gateway_config import gateway_test_client
-from gateway.tests.routers.test_config_api import REMOTE, seed_machine
+from gateway.tests.routers.test_config_api import REMOTE
 from gateway.tests.routers.test_config_api import (
     clean_overrides as clean_overrides,
 )
 from gateway.tests.routers.test_config_api import (
     stub_browser_capability as stub_browser_capability,
 )
+from gateway.tests.support.runner_ops.ops_stub import (
+    OpsCall,
+    OpsReply,
+    completed,
+    failed,
+    refused,
+    register_machine,
+    runner_ops,
+)
 from ops import env_audit as audit
-from ops.cluster import rpc as cluster_rpc
-from ops.rpc_schemas import ConfigAuditReadResult
 
 
 def test_get_explicit_self_is_host_view_not_cluster(
@@ -36,26 +42,30 @@ def test_get_explicit_self_is_host_view_not_cluster(
     assert "cross_machine_transfer_backend" not in host
 
 
-def test_put_remote_rejects_cluster_key(clean_overrides: Path) -> None:
-    seed_machine(REMOTE)
+def test_put_remote_rejects_cluster_key(clean_overrides: Path, db_conn: psycopg.Connection) -> None:
+    register_machine(db_conn, REMOTE, url="http://remote.invalid:8000")
     with gateway_test_client() as client:
         resp = client.put(f"/api/config?machine={REMOTE}", json={"llm_model": "x"})
     assert resp.status_code == 400, resp.text
     assert "machine-independent" in resp.json()["detail"]
 
 
-def test_put_remote_host_field_dispatches_config_write(clean_overrides: Path) -> None:
-    seed_machine(REMOTE)
-    stub_result = {
-        "machine": REMOTE,
-        "results": {"ops_concurrency": {"ok": True, "reason": None}},
-        "applied": True,
-        "restart_required": ["ops"],
-    }
-    enqueue = AsyncMock(return_value=stub_result)
+def test_put_remote_host_field_dispatches_config_write(
+    clean_overrides: Path, db_conn: psycopg.Connection
+) -> None:
+    result = completed(
+        {
+            "machine": REMOTE,
+            "results": {"ops_concurrency": {"ok": True, "reason": None}},
+            "applied": True,
+            "restart_required": ["ops"],
+        }
+    )
 
-    with gateway_test_client() as client:
-        client.app.state.config_rpc_dispatcher = enqueue
+    with (
+        runner_ops(db_conn, REMOTE, {"config_write": result}) as runner,
+        gateway_test_client() as client,
+    ):
         resp = client.put(f"/api/config?machine={REMOTE}", json={"ops_concurrency": 12})
     assert resp.status_code == 200, resp.text
     body = resp.json()
@@ -63,36 +73,29 @@ def test_put_remote_host_field_dispatches_config_write(clean_overrides: Path) ->
     assert body["results"]["ops_concurrency"]["ok"] is True
     assert body["restart_required"] == ["ops"]
 
-    assert enqueue.await_count == 1
-    assert enqueue.await_args is not None
-    kwargs = enqueue.await_args.kwargs
-    assert kwargs["target_machine"] == REMOTE
-    assert kwargs["kind"] == "config_write"
-    payload = kwargs["payload"]
+    (payload,) = runner.payloads("config_write")
     assert payload["overrides"] == {"ops_concurrency": 12}
     assert payload["local"] is False
     assert payload["actor"] == "cluster_bearer:administrator"
     assert isinstance(payload["trace_id"], str) and payload["trace_id"]
 
 
-def test_put_remote_rejects_writable_non_remote_host_field(clean_overrides: Path) -> None:
-    seed_machine(REMOTE)
-    dispatched = AsyncMock()
-    with gateway_test_client() as client:
-        client.app.state.config_rpc_dispatcher = dispatched
+def test_put_remote_rejects_writable_non_remote_host_field(
+    clean_overrides: Path, db_conn: psycopg.Connection
+) -> None:
+    with runner_ops(db_conn, REMOTE) as runner, gateway_test_client() as client:
         resp = client.put(
             f"/api/config?machine={REMOTE}", json={"cross_machine_transfer_backend": "none"}
         )
     assert resp.status_code == 400, resp.text
     assert "unknown or read-only" in resp.json()["detail"]
-    dispatched.assert_not_awaited()
+    assert runner.calls == []
 
 
-def test_put_remote_rejects_oss_credential_fields(clean_overrides: Path) -> None:
-    seed_machine(REMOTE)
-    dispatched = AsyncMock()
-    with gateway_test_client() as client:
-        client.app.state.config_rpc_dispatcher = dispatched
+def test_put_remote_rejects_oss_credential_fields(
+    clean_overrides: Path, db_conn: psycopg.Connection
+) -> None:
+    with runner_ops(db_conn, REMOTE) as runner, gateway_test_client() as client:
         resp = client.put(
             f"/api/config?machine={REMOTE}",
             json={
@@ -103,26 +106,19 @@ def test_put_remote_rejects_oss_credential_fields(clean_overrides: Path) -> None
         )
         assert resp.status_code == 400, resp.text
         assert "unknown or read-only" in resp.json()["detail"]
-    dispatched.assert_not_awaited()
+    assert runner.calls == []
 
 
-def test_put_remote_offline_503(clean_overrides: Path) -> None:
-    seed_machine(REMOTE)
-    enqueue = AsyncMock(side_effect=cluster_rpc.ClusterOpUnreachable("no ack"))
-
-    with gateway_test_client() as client:
-        client.app.state.config_rpc_dispatcher = enqueue
-        resp = client.put(f"/api/config?machine={REMOTE}", json={"ops_concurrency": 12})
-    assert resp.status_code == 503, resp.text
-    assert REMOTE in resp.json()["detail"]
-
-
-def test_put_remote_failed_503(clean_overrides: Path) -> None:
-    seed_machine(REMOTE)
-    enqueue = AsyncMock(side_effect=cluster_rpc.ClusterOpFailed({"error": "boom"}))
-
-    with gateway_test_client() as client:
-        client.app.state.config_rpc_dispatcher = enqueue
+@pytest.mark.parametrize(
+    "answer", [refused(404, "no ack"), failed({"error": "boom"})], ids=["offline", "failed"]
+)
+def test_put_remote_unavailable_503(
+    clean_overrides: Path, db_conn: psycopg.Connection, answer: OpsReply
+) -> None:
+    with (
+        runner_ops(db_conn, REMOTE, {"config_write": answer}),
+        gateway_test_client() as client,
+    ):
         resp = client.put(f"/api/config?machine={REMOTE}", json={"ops_concurrency": 12})
     assert resp.status_code == 503, resp.text
     assert REMOTE in resp.json()["detail"]
@@ -188,14 +184,7 @@ def test_get_config_audit_last_is_bounded() -> None:
         assert client.get("/api/config/audit?last=201").status_code == 422
 
 
-def test_get_config_audit_default_last_comes_from_display_config(
-    clean_overrides: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    from base.api_contracts.agent_contract import MachineNotRegistered
-
-    def _unregistered(_db: object, _name: str) -> list[str]:
-        raise MachineNotRegistered(_name)
-
+def _record_two_writes() -> None:
     env_path = unit_env_path()
     env_path.write_text("MEIVA_MODEL=audit-one\n")
     audit.record_env_write(
@@ -213,9 +202,11 @@ def test_get_config_audit_default_last_comes_from_display_config(
         changes=[{"alias": "MEIVA_MODEL", "old": "audit-one", "new": "audit-two"}],
     )
 
-    monkeypatch.setattr(settings.display, "config_audit_default_last", 1)
-    with gateway_test_client() as client:
-        client.app.state.config_role_lookup = _unregistered
+
+def test_get_config_audit_default_last_comes_from_display_config(clean_overrides: Path) -> None:
+    _record_two_writes()
+
+    with gateway_test_client(fields={"config_audit_default_last": 1}) as client:
         resp = client.get("/api/config/audit")
     assert resp.status_code == 200, resp.text
     assert len(resp.json()["records"]) == 1
@@ -224,11 +215,6 @@ def test_get_config_audit_default_last_comes_from_display_config(
 def test_get_config_audit_reads_own_records(
     clean_overrides: Path, *, machine_identity: MachineIdentity
 ) -> None:
-    from base.api_contracts.agent_contract import MachineNotRegistered
-
-    def _unregistered(_db: object, _name: str) -> list[str]:
-        raise MachineNotRegistered(_name)
-
     env_path = unit_env_path()
     env_path.write_text("MEIVA_MODEL=audit-self\n")
     audit.record_env_write(
@@ -240,7 +226,6 @@ def test_get_config_audit_reads_own_records(
     )
 
     with gateway_test_client(machine=machine_identity) as client:
-        client.app.state.config_role_lookup = _unregistered
         resp = client.get("/api/config/audit")
 
     assert resp.status_code == 200, resp.text
@@ -252,43 +237,44 @@ def test_get_config_audit_reads_own_records(
     assert changed[0]["new"] == "audit-self"
 
 
-@pytest.mark.asyncio
-async def test_get_config_audit_all_merges_runners_newest_first(
-    monkeypatch: pytest.MonkeyPatch, *, machine_identity: MachineIdentity
+def test_get_config_audit_all_merges_runners_newest_first(
+    db_conn: psycopg.Connection, *, machine_identity: MachineIdentity
 ) -> None:
-    stamp = {"m1": "01", "m2": "02", machine_identity.name(): "00"}
-    called: list[str] = []
+    def audit_read(call: OpsCall, *, machine: str, stamp: str) -> OpsReply:
+        assert call.payload == {"last": 2}
+        return completed(
+            {
+                "machine": machine,
+                "records": [{"ts": f"2026-09-16T00:{stamp}:00+00:00", "site": f"s-{machine}"}],
+            }
+        )
 
-    async def _fake_dispatch(
-        db: object, *, target_machine: str, kind: str, payload: dict[str, object]
-    ) -> dict[str, object]:
-        assert kind == "config_audit_read"
-        assert payload == {"last": 2}
-        called.append(target_machine)
-        return ConfigAuditReadResult(
-            machine=target_machine,
-            records=[
-                {
-                    "ts": f"2026-09-16T00:0{stamp[target_machine]}:00+00:00",
-                    "site": f"s-{target_machine}",
-                }
-            ],
-        ).model_dump()
-
-    def _roles(_db: object, _target: str) -> list[str]:
-        return ["agent-runner"]
-
-    def _runners(_db: object) -> list[tuple[str, str | None]]:
-        return [("m1", None), ("m2", None)]
-
-    monkeypatch.setattr(machines, "list_agent_runners", _runners)
-
-    with gateway_test_client(machine=machine_identity) as client:
-        client.app.state.config_role_lookup = _roles
-        client.app.state.config_rpc_dispatcher = _fake_dispatch
+    with (
+        runner_ops(
+            db_conn,
+            "m1",
+            {"config_audit_read": lambda call: audit_read(call, machine="m1", stamp="01")},
+        ) as m1,
+        runner_ops(
+            db_conn,
+            "m2",
+            {"config_audit_read": lambda call: audit_read(call, machine="m2", stamp="02")},
+        ) as m2,
+        runner_ops(
+            db_conn,
+            machine_identity.name(),
+            {
+                "config_audit_read": lambda call: audit_read(
+                    call, machine=machine_identity.name(), stamp="00"
+                )
+            },
+            roles=("gateway", "agent-runner"),
+        ) as local,
+        gateway_test_client(machine=machine_identity) as client,
+    ):
         resp = client.get("/api/config/audit?machine=all&last=2")
 
     assert resp.status_code == 200, resp.text
     records = resp.json()["records"]
     assert [record["machine"] for record in records] == ["m2", "m1"]
-    assert machine_identity.name() in called
+    assert [len(runner.calls_of("config_audit_read")) for runner in (m1, m2, local)] == [1, 1, 1]
