@@ -10,7 +10,6 @@ from typing import Any
 
 from langchain_core.messages import AIMessage
 
-from base.config import settings
 from base.lm.catalog import ModelCatalog
 from base.lm.content import message_addl_kwargs
 from base.lm.pricing import CostQuote, quote, tally_tokens
@@ -362,9 +361,6 @@ def emit_billing_event(
     # Billing must never affect the call it observes, including while tracing is initializing or an
     # exporter is unavailable.
     try:
-        if not settings.observability.trace_enabled:
-            return
-
         from base.telemetry import tracing
 
         tracing.ensure_init_resolved()

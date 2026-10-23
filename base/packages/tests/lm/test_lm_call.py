@@ -16,7 +16,6 @@ import openai
 import pytest
 from langchain_core.messages import AIMessage
 
-from base import config
 from base.config.tests.configuration import model_overrides
 from base.host.env.agent_slices import ModelOverrides
 from base.lm import call
@@ -109,7 +108,6 @@ def test_invoke_text_emits_chat_billing_span_from_llm_model_name(
             return span
 
     tracer = _Tracer()
-    monkeypatch.setattr(config.settings.observability, "trace_enabled", True)
     monkeypatch.setattr(tracing_mod, "is_initialized", lambda: True)
     monkeypatch.setattr(otel_trace, "get_tracer", lambda _name: tracer)  # pyright: ignore[reportUnknownArgumentType]
     llm = _FakeLLM(
