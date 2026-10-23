@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { GLYPH_WIDTH_FULL, LABEL_LINE_HEIGHT, wrapLabel } from "./force-graph";
+import { GLYPH_WIDTH_FULL, LABEL_LINE_HEIGHT, wrapLabel } from "./labels";
 
 describe("wrapLabel", () => {
   it("returns one label-only line for a short label", () => {
@@ -46,28 +46,39 @@ describe("wrapLabel", () => {
   it("wraps CJK labels at the full glyph width so they stay inside the node", () => {
     const radius = 20;
     const maxLineWidth = 2 * radius - 8;
-    const label = "\u4e2d\u6587\u6807\u7b7e\u6ea2\u51fa".repeat(2); // 12 full-width chars
+    // meiva:note
+    // The repeated label has 12 full-width chars.
+    // meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
+    const label = "\u4e2d\u6587\u6807\u7b7e\u6ea2\u51fa".repeat(2);
     const lines = wrapLabel(label, radius);
 
+    // meiva:note
     // No chars lost (the 12-char label fits the vertical budget at 5/line).
+    // meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
     expect(lines.join("")).toBe(label);
+    // meiva:note
     // Every line fits the node's horizontal budget measured at the real CJK
     // advance (6px) — the old 3.6px/char estimate packed 8 chars into a line
     // that only holds 5 (QA #651: Chinese titles bled ~20px past the node).
+    // meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
     expect(lines.every((line) => line.length * GLYPH_WIDTH_FULL <= maxLineWidth)).toBe(true);
     expect(Math.max(...lines.map((l) => l.length))).toBe(Math.floor(maxLineWidth / GLYPH_WIDTH_FULL));
   });
 
   it("mixes narrow and full-width glyphs on one line by measured width", () => {
+    // meiva:note
     // "abc" = 3 × 3.6 = 10.8px + "\u4e2d\u6587" = 2 × 6 = 12px = 22.8px fits the
     // 24px budget (r=16); one more Latin char would overflow it.
+    // meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
     expect(wrapLabel("abc\u4e2d\u6587def", 16)).toEqual(["abc\u4e2d\u6587", "def"]);
   });
 
   it("breaks before an embedded Latin word instead of splitting it (QA #651 follow-up)", () => {
+    // meiva:note
     // "\u8d44\u6e90\u76d1\u63a7\uff08" = 5 × 6 = 30px leaves only 6px on the 36px line (r=22) —
     // just "C" of "Cluster" would fit, so the word must move to its own line
     // whole instead of rendering "\u8d44\u6e90\u76d1\u63a7\uff08C" / "luster Ops".
+    // meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
     expect(wrapLabel("\u8d44\u6e90\u76d1\u63a7\uff08Cluster Ops \u57df\uff09", 22)).toEqual([
       "\u8d44\u6e90\u76d1\u63a7\uff08",
       "Cluster",
@@ -81,9 +92,11 @@ describe("wrapLabel", () => {
   });
 
   it("still splits a Latin word when it is wider than the line", () => {
+    // meiva:note
     // QA rule: char-break only when the word itself exceeds the line width.
     // An over-wide word after a CJK prefix moves to its own line whole, then
     // is hard-cut by the budget; a pure-Latin label keeps the same behavior.
+    // meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
     expect(wrapLabel("\u8d44\u6e90\u76d1\u63a7\uff08Supercalifragilistic \u57df\uff09", 22)).toEqual([
       "\u8d44\u6e90\u76d1\u63a7\uff08",
       "Supercalif",

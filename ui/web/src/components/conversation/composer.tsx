@@ -7,8 +7,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ComposerAttachmentStrip,
   ComposerMetaRow,
-  draftKey,
   handleComposerKeyDown,
+  type PendingImage,
+} from "@/components/conversation/composer-helpers";
+import {
+  draftKey,
   isAttempt,
   readSendAttempt,
   readSession,
@@ -16,9 +19,8 @@ import {
   resolveSendAttempt,
   sendAttemptKey,
   writeSession,
-  type PendingImage,
   type SendAttempt,
-} from "@/components/conversation/composer-helpers";
+} from "@/components/conversation/composer-session";
 import {
   parseSlash,
   SlashAutocomplete,
