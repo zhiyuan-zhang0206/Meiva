@@ -68,7 +68,7 @@ def _tracked(
         return []
     if result.returncode != 0:
         return []
-    out = []
+    out: list[Path] = []
     for rel in result.stdout.split("\0"):
         if not rel:
             continue

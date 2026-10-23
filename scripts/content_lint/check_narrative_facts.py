@@ -54,7 +54,7 @@ def _skill_group_names(doc: str) -> list[str]:
 def check_skill_catalog() -> list[str]:
     doc_path = ROOT / "docs/skills/skills.meiva.okf.md"
     doc = doc_path.read_text(errors="replace")
-    problems = []
+    problems: list[str] = []
     for name in _skill_group_names(doc):
         if name in ("comms", "ops_lifecycle", "orchestration", "self_improvement", "web_media"):
             continue  # group nodes, not skills
@@ -93,7 +93,7 @@ def check_im_channels() -> list[str]:
         errors="replace"
     )
     lower = doc.lower()
-    problems = []
+    problems: list[str] = []
     if not adapters_dir.is_dir():
         return problems
     for f in sorted(adapters_dir.iterdir()):

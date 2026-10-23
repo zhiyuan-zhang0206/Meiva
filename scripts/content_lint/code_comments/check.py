@@ -90,7 +90,7 @@ class Repository:
     def _plugin_modules(self) -> set[Path]:
         if self.plugin_modules is None:
             try:
-                declared = discover_plugin_namespace_modules(self.root)
+                declared: set[Path] = discover_plugin_namespace_modules(self.root)
             except (OSError, ValueError, SyntaxError):
                 declared = set()
             self.plugin_modules = declared | {
