@@ -9,6 +9,7 @@ import pytest
 from psycopg_pool import ConnectionPool
 
 import base.db
+from base.clock import SYSTEM_TIMERS
 from base.daemon.loop_health import LoopProgress
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
@@ -229,7 +230,7 @@ def test_the_first_liveness_pass_runs_at_start_not_after_an_interval(
                 Database.from_settings(gate=database_gate),
                 cast(ConnectionPool, object()),
                 EventBus.from_settings(),
-                LoopProgress("liveness", 60.0),
+                LoopProgress("liveness", 60.0, timers=SYSTEM_TIMERS),
             )
         )
 
@@ -259,7 +260,7 @@ def test_a_failing_pass_waits_out_the_interval_before_retrying(
                 Database.from_settings(gate=database_gate),
                 cast(ConnectionPool, object()),
                 EventBus.from_settings(),
-                LoopProgress("liveness", 60.0),
+                LoopProgress("liveness", 60.0, timers=SYSTEM_TIMERS),
             )
         )
 

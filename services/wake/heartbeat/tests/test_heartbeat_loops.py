@@ -9,6 +9,7 @@ from typing import Any, cast
 import pytest
 from psycopg_pool import ConnectionPool
 
+from base.clock import SYSTEM_TIMERS
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import ConfigBoot
@@ -186,7 +187,7 @@ async def test_the_digest_loop_flushes_at_once_then_paces(
             pool,
             Database.from_settings(gate=database_gate),
             EventBus.from_settings(),
-            LoopProgress("digest", 300.0),
+            LoopProgress("digest", 300.0, timers=SYSTEM_TIMERS),
             machine=machine_identity,
         )
     )
@@ -226,6 +227,6 @@ async def test_a_failing_flush_ends_the_digest_loop(
             cast(ConnectionPool, object()),
             Database.from_settings(gate=database_gate),
             EventBus.from_settings(),
-            LoopProgress("digest", 300.0),
+            LoopProgress("digest", 300.0, timers=SYSTEM_TIMERS),
             machine=machine_identity,
         )

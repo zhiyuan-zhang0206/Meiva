@@ -7,6 +7,7 @@ import pytest
 from psycopg_pool import ConnectionPool
 
 from base.agents.tests.units import spawn_agent
+from base.clock import SYSTEM_TIMERS
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import settings
@@ -83,7 +84,7 @@ async def test_failed_checkin_is_retried_after_backoff_across_ticks(
             pool,
             database,
             event_bus,
-            LoopProgress("dispatch", 60.0),
+            LoopProgress("dispatch", 60.0, timers=SYSTEM_TIMERS),
             sweep_resets=skip_sweep,
         )
 

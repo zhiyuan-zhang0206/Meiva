@@ -33,6 +33,7 @@ from psycopg_pool import ConnectionPool
 
 from base import telemetry
 from base.agents.impersonation.wake import publish_inbound_wake
+from base.clock import SYSTEM_TIMERS
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.boot import machine_from_boot
@@ -680,7 +681,7 @@ async def run(
     write_pidfile(process_config, runtime=runtime)
     _log.info("[heartbeat] pidfile written: %s", _pidfile(process_config, runtime=runtime))
 
-    liveness = LivenessGroup()
+    liveness = LivenessGroup(timers=SYSTEM_TIMERS)
     dispatch_progress = liveness.register("dispatch", _LIVENESS_TIMEOUT_S)
     liveness_progress = liveness.register("liveness", _LIVENESS_TIMEOUT_S)
     digest_progress = liveness.register("completion_digest", _DIGEST_LIVENESS_TIMEOUT_S)
