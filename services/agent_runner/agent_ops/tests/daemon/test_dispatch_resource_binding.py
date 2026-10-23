@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import functools
 import inspect
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
@@ -14,7 +15,6 @@ from base.db import Database
 from base.host.system.tests.fake_commands import fake_host
 from base.lm.catalog import ModelCatalog
 from base.native_process.loaded_commit import LoadedCommit
-from ops.cluster import operations as cluster_ops
 from services.agent_runner.agent_ops import daemon
 
 
@@ -61,8 +61,6 @@ async def test_dispatch_status_probe_passes_the_daemon_pool(
             paused=False,
         )
 
-    monkeypatch.setattr(cluster_ops, "cluster_status_op", _status)
-
     status, result = await daemon.dispatch(
         "status_probe",
         {},
@@ -76,6 +74,7 @@ async def test_dispatch_status_probe_passes_the_daemon_pool(
         image=ops_image,
         local_machine=machine_identity,
         host=fake_host(),
+        dispatch_arm=functools.partial(daemon.bind_dispatch_sync, cluster_status_op=_status),
     )
 
     assert status == "completed"

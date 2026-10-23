@@ -53,7 +53,6 @@ async def test_dispatch_lifecycle_calls_lifecycle_op(
         captured["trigger_inbound_kind"] = trigger_inbound_kind
         return TerminateAgentResponse(status=TerminateResult.ENQUEUED)
 
-    monkeypatch.setattr(daemon.lifecycle, "lifecycle_op", _fake_lifecycle)
     status, result = await daemon.dispatch(
         "lifecycle",
         {
@@ -72,6 +71,7 @@ async def test_dispatch_lifecycle_calls_lifecycle_op(
         image=ops_image,
         local_machine=machine_identity,
         host=fake_host(),
+        run_lifecycle=_fake_lifecycle,
     )
     assert status == "completed"
     assert result == {"status": "enqueued", "open_tasks": None, "shell_sessions": None}
@@ -97,7 +97,6 @@ async def test_dispatch_lifecycle_missing_path_fails(
     async def _should_not_be_called(_db: object, _bus: object, *_a: object, **_kw: object):
         raise AssertionError("lifecycle_op should not be invoked on missing path")
 
-    monkeypatch.setattr(daemon.lifecycle, "lifecycle_op", _should_not_be_called)
     status, result = await daemon.dispatch(
         "lifecycle",
         {},
@@ -111,6 +110,7 @@ async def test_dispatch_lifecycle_missing_path_fails(
         image=ops_image,
         local_machine=machine_identity,
         host=fake_host(),
+        run_lifecycle=_should_not_be_called,
     )
     assert status == "failed"
     assert "path" in str(result["error"])
@@ -142,7 +142,6 @@ async def test_dispatch_unparseable_lifecycle_path(
     ):
         raise ValueError(f"lifecycle path not recognized: {path!r}")
 
-    monkeypatch.setattr(daemon.lifecycle, "lifecycle_op", _raises)
     status, result = await daemon.dispatch(
         "lifecycle",
         {"path": "/garbage", "body": {}},
@@ -156,6 +155,7 @@ async def test_dispatch_unparseable_lifecycle_path(
         image=ops_image,
         local_machine=machine_identity,
         host=fake_host(),
+        run_lifecycle=_raises,
     )
     assert status == "failed"
     assert "not recognized" in str(result["error"])
@@ -189,7 +189,6 @@ async def test_dispatch_wire_error_carries_reason(
     ):
         raise AgentNotFound("agent 999 does not exist")
 
-    monkeypatch.setattr(daemon.lifecycle, "lifecycle_op", _raises)
     status, result = await daemon.dispatch(
         "lifecycle",
         {"path": "/api/agents/999/terminate", "body": {}},
@@ -203,6 +202,7 @@ async def test_dispatch_wire_error_carries_reason(
         image=ops_image,
         local_machine=machine_identity,
         host=fake_host(),
+        run_lifecycle=_raises,
     )
     assert status == "failed"
     assert "AgentNotFound" in str(result["error"])

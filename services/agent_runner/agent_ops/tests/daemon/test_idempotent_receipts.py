@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import functools
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
@@ -39,7 +40,6 @@ async def test_idempotent_dispatch_first_run_executes_and_stores(
     machine_identity: MachineIdentity,
 ) -> None:
     calls: dict[str, int] = {}
-    monkeypatch.setattr(daemon.lifecycle, "launch_agent_op", fake_spawn_factory(calls))
 
     status, result = await daemon.dispatch_idempotent(
         "spawn-launch",
@@ -55,6 +55,7 @@ async def test_idempotent_dispatch_first_run_executes_and_stores(
         image=ops_image,
         local_machine=machine_identity,
         host=fake_host(),
+        dispatch_op=functools.partial(daemon.dispatch, launch_agent=fake_spawn_factory(calls)),
     )
 
     assert status == "completed"
@@ -83,7 +84,7 @@ async def test_idempotent_dispatch_replays_without_reexecuting(
     machine_identity: MachineIdentity,
 ) -> None:
     calls: dict[str, int] = {}
-    monkeypatch.setattr(daemon.lifecycle, "launch_agent_op", fake_spawn_factory(calls))
+    dispatch_op = functools.partial(daemon.dispatch, launch_agent=fake_spawn_factory(calls))
 
     first = await daemon.dispatch_idempotent(
         "spawn-launch",
@@ -99,6 +100,7 @@ async def test_idempotent_dispatch_replays_without_reexecuting(
         image=ops_image,
         local_machine=machine_identity,
         host=fake_host(),
+        dispatch_op=dispatch_op,
     )
     second = await daemon.dispatch_idempotent(
         "spawn-launch",
@@ -114,6 +116,7 @@ async def test_idempotent_dispatch_replays_without_reexecuting(
         image=ops_image,
         local_machine=machine_identity,
         host=fake_host(),
+        dispatch_op=dispatch_op,
     )
 
     assert first == ("completed", {"id": 777})
@@ -298,7 +301,7 @@ async def test_idempotent_dispatch_distinct_keys_execute_twice(
     machine_identity: MachineIdentity,
 ) -> None:
     calls: dict[str, int] = {}
-    monkeypatch.setattr(daemon.lifecycle, "launch_agent_op", fake_spawn_factory(calls))
+    dispatch_op = functools.partial(daemon.dispatch, launch_agent=fake_spawn_factory(calls))
 
     await daemon.dispatch_idempotent(
         "spawn-launch",
@@ -314,6 +317,7 @@ async def test_idempotent_dispatch_distinct_keys_execute_twice(
         image=ops_image,
         local_machine=machine_identity,
         host=fake_host(),
+        dispatch_op=dispatch_op,
     )
     await daemon.dispatch_idempotent(
         "spawn-launch",
@@ -329,6 +333,7 @@ async def test_idempotent_dispatch_distinct_keys_execute_twice(
         image=ops_image,
         local_machine=machine_identity,
         host=fake_host(),
+        dispatch_op=dispatch_op,
     )
 
     assert calls["n"] == 2
@@ -360,7 +365,7 @@ async def test_idempotent_dispatch_failed_outcome_is_stored_and_replayed(
     ):
         raise ValueError("unparseable lifecycle path")
 
-    monkeypatch.setattr(daemon.lifecycle, "lifecycle_op", _fake_lifecycle)
+    dispatch_op = functools.partial(daemon.dispatch, run_lifecycle=_fake_lifecycle)
 
     first = await daemon.dispatch_idempotent(
         "lifecycle",
@@ -376,6 +381,7 @@ async def test_idempotent_dispatch_failed_outcome_is_stored_and_replayed(
         image=ops_image,
         local_machine=machine_identity,
         host=fake_host(),
+        dispatch_op=dispatch_op,
     )
     second = await daemon.dispatch_idempotent(
         "lifecycle",
@@ -391,6 +397,7 @@ async def test_idempotent_dispatch_failed_outcome_is_stored_and_replayed(
         image=ops_image,
         local_machine=machine_identity,
         host=fake_host(),
+        dispatch_op=dispatch_op,
     )
 
     assert first[0] == "failed"

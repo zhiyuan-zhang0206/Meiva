@@ -16,11 +16,12 @@ def _crash() -> None:
     def _silent(*_args: object, **_kwargs: object) -> None:
         return None
 
-    daemon.init_gateway_process = _silent
-    daemon.install_graceful_shutdown = _silent
-    daemon.serve_ops_daemon = _boom
-    sys.argv[1:] = []
-    daemon.main()
+    daemon.main(
+        argv=[],
+        init_process=_silent,
+        install_shutdown=_silent,
+        serve_daemon=_boom,
+    )
 
 
 def _wedged_arm(home: pathlib.Path, ready: pathlib.Path) -> None:

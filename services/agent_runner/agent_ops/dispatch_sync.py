@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import threading
+from collections.abc import Callable
 from typing import Any
 
 from psycopg_pool import ConnectionPool
@@ -40,6 +41,16 @@ def dispatch_sync(
     image: LoadedCommit,
     local_machine: MachineIdentity,
     host: Host,
+    cluster_status_op: Callable[..., Any] = cluster.cluster_status_op,
+    config_read_op: Callable[..., Any] = host_config.config_read_op,
+    config_audit_read_op: Callable[..., Any] = host_config.config_audit_read_op,
+    config_write_op: Callable[..., Any] = host_config.config_write_op,
+    inventory_read_op: Callable[..., Any] = inventory.inventory_read_op,
+    inventory_write_op: Callable[..., Any] = inventory.inventory_write_op,
+    shell_probe_op: Callable[..., Any] = cluster.shell_probe_op,
+    shell_kill_op: Callable[..., Any] = cluster.shell_kill_op,
+    shell_capture_op: Callable[..., Any] = cluster.shell_capture_op,
+    agent_skill_view_op: Callable[..., Any] = cluster.agent_skill_view_op,
 ) -> tuple[OpStatus, dict[str, object]]:
 
     match kind:
@@ -56,22 +67,22 @@ def dispatch_sync(
         case "upload-receive-v1":
             return _upload_arm(payload, pool, local_machine=local_machine.name())
         case "status_probe":
-            return OpStatus.COMPLETED, cluster.cluster_status_op(
+            return OpStatus.COMPLETED, cluster_status_op(
                 db, pool, image=image, local_machine=local_machine
             ).model_dump(mode="json")
         case "config_read":
-            return OpStatus.COMPLETED, host_config.config_read_op(
+            return OpStatus.COMPLETED, config_read_op(
                 authority=authority, local_machine=local_machine.name(), host=host
             ).model_dump(mode="json")
         case "config_audit_read":
             ca = ConfigAuditReadPayload.model_validate(payload)
-            return OpStatus.COMPLETED, host_config.config_audit_read_op(
+            return OpStatus.COMPLETED, config_audit_read_op(
                 ca.last, local_machine=local_machine.name()
             ).model_dump(mode="json")
         case "config_write":
             cw = ConfigWritePayload.model_validate(payload)
             with _state_write_lock:
-                return OpStatus.COMPLETED, host_config.config_write_op(
+                return OpStatus.COMPLETED, config_write_op(
                     cw.overrides,
                     authority=authority,
                     local=cw.local,
@@ -81,13 +92,13 @@ def dispatch_sync(
                     host=host,
                 ).model_dump(mode="json")
         case "inventory_read":
-            return OpStatus.COMPLETED, inventory.inventory_read_op(
+            return OpStatus.COMPLETED, inventory_read_op(
                 local_machine=local_machine, host=host
             ).model_dump(mode="json")
         case "inventory_write":
             iw = InventoryWritePayload.model_validate(payload)
             with _state_write_lock:
-                return OpStatus.COMPLETED, inventory.inventory_write_op(
+                return OpStatus.COMPLETED, inventory_write_op(
                     iw.plugins, iw.mcp_servers, local_machine=local_machine, host=host
                 ).model_dump(mode="json")
         case "harness_probe":
@@ -95,30 +106,43 @@ def dispatch_sync(
                 mode="json"
             )
         case "shell_probe" | "shell_kill" | "shell_capture" | "agent_skill_view":
-            return OpStatus.COMPLETED, _agent_arm(kind, payload, pool)
+            return OpStatus.COMPLETED, _agent_arm(
+                kind,
+                payload,
+                pool,
+                shell_probe_op=shell_probe_op,
+                shell_kill_op=shell_kill_op,
+                shell_capture_op=shell_capture_op,
+                agent_skill_view_op=agent_skill_view_op,
+            )
         case _:
             return OpStatus.FAILED, {"error": f"unknown kind: {kind!r}"}
 
 
 def _agent_arm(
-    kind: str, payload: dict[str, Any], pool: ConnectionPool | None
+    kind: str,
+    payload: dict[str, Any],
+    pool: ConnectionPool | None,
+    *,
+    shell_probe_op: Callable[..., Any] = cluster.shell_probe_op,
+    shell_kill_op: Callable[..., Any] = cluster.shell_kill_op,
+    shell_capture_op: Callable[..., Any] = cluster.shell_capture_op,
+    agent_skill_view_op: Callable[..., Any] = cluster.agent_skill_view_op,
 ) -> dict[str, object]:
 
     match kind:
         case "shell_probe":
             sp = ShellProbePayload.model_validate(payload)
-            return cluster.shell_probe_op(sp.agent_id).model_dump(mode="json")
+            return shell_probe_op(sp.agent_id).model_dump(mode="json")
         case "shell_kill":
             sk = ShellKillPayload.model_validate(payload)
-            return cluster.shell_kill_op(sk.agent_id, sk.session_id).model_dump(mode="json")
+            return shell_kill_op(sk.agent_id, sk.session_id).model_dump(mode="json")
         case "agent_skill_view":
             asv = AgentSkillViewPayload.model_validate(payload)
-            return cluster.agent_skill_view_op(asv.agent_id, pool).model_dump(mode="json")
+            return agent_skill_view_op(asv.agent_id, pool).model_dump(mode="json")
         case "shell_capture":
             sc = ShellCapturePayload.model_validate(payload)
-            return cluster.shell_capture_op(sc.agent_id, sc.session_id, sc.lines).model_dump(
-                mode="json"
-            )
+            return shell_capture_op(sc.agent_id, sc.session_id, sc.lines).model_dump(mode="json")
         case _:
             raise ValueError(f"not an agent arm: {kind!r}")
 

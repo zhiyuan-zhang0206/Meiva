@@ -16,7 +16,7 @@ from base.daemon.loop_health import LivenessGroup
 from base.db import Database
 from base.host.system.tests.fake_commands import fake_host
 from base.native_process.loaded_commit import LoadedCommit
-from services.agent_runner.agent_ops import boot, daemon
+from services.agent_runner.agent_ops import daemon
 
 
 def _assert_live_saturation(inputs: dict[str, object], config: ConfigBoot) -> None:
@@ -65,7 +65,6 @@ async def test_server_failure_releases_owned_resources(
     *,
     machine_identity: MachineIdentity,
 ) -> None:
-    from base.deploy.schema import migrations
 
     config = snapshot_process_config()
     events: list[str] = []
@@ -95,14 +94,9 @@ async def test_server_failure_releases_owned_resources(
         events.append("health")
 
     pidfiles = _PidfileOperations(config, unit_home / "run", events)
-    monkeypatch.setattr(boot, "is_running", pidfiles.is_running)
-    monkeypatch.setattr(boot, "write_pidfile", pidfiles.write_pidfile)
-    monkeypatch.setattr(boot, "remove_pidfile", pidfiles.remove_pidfile)
 
     def schema_current(_url: str) -> None:
         return None
-
-    monkeypatch.setattr(migrations, "assert_schema_current", schema_current)
 
     def open_pool(*, database: Callable[[], Database], authority: ConfigAuthority) -> _Pool:
         assert database is ops_database
@@ -110,16 +104,9 @@ async def test_server_failure_releases_owned_resources(
         assert authority.env_path == unit_home / ".env"
         return _Pool()
 
-    monkeypatch.setattr(boot, "open_db_pool", open_pool)
-    monkeypatch.setattr(boot, "ops_acceptance", lambda: frozenset({"test-digest"}))
-
     def bind_host(*, machine: object) -> str:
         assert machine is machine_identity
         return "127.0.0.1"
-
-    monkeypatch.setattr(boot, "ops_bind_host", bind_host)
-    monkeypatch.setattr(daemon, "start_health_server", start_health)
-    monkeypatch.setattr(daemon, "stop_health_server", stop_health)
 
     def register_boot(
         *,
@@ -137,7 +124,6 @@ async def test_server_failure_releases_owned_resources(
         )
         assert home == unit_home
 
-    monkeypatch.setattr(boot, "register_boot", register_boot)
     assert ServiceEndpoints.from_boot(config, runtime=unit_home / "run").of("ops").health_port
 
     with pytest.RaisesGroup(pytest.RaisesExc(RuntimeError, match="ops server crashed")):
@@ -147,6 +133,16 @@ async def test_server_failure_releases_owned_resources(
             local_machine=machine_identity,
             config=config,
             host=fake_host(),
+            is_running=pidfiles.is_running,
+            write_pidfile=pidfiles.write_pidfile,
+            remove_pidfile=pidfiles.remove_pidfile,
+            check_schema_current=schema_current,
+            open_db_pool=open_pool,
+            ops_acceptance=lambda: frozenset({"test-digest"}),
+            ops_bind_host=bind_host,
+            register_boot=register_boot,
+            start_health=start_health,
+            stop_health=stop_health,
         )
 
     assert sorted(events) == ["health", "pidfile", "pool"]

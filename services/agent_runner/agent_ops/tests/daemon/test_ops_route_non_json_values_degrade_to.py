@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import functools
 import inspect
 import json
 import subprocess
@@ -18,7 +19,6 @@ import psycopg
 import pytest
 from psycopg_pool import ConnectionPool
 
-import base.cluster.machines as cluster_machines
 from base.cluster.machine import MachineIdentity, MachineRoles
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
@@ -443,13 +443,13 @@ def test_register_boot_announces_this_unit_up(
         assert home == "~/.meiva"
         calls.append(url)
 
-    monkeypatch.setattr(cluster_machines, "register_self", register)
     boot.register_boot(
         database=ops_database,
         config=snapshot_process_config(),
         machine=machine_identity,
         ops_port=8600,
         home=home,
+        register_self_fn=register,
     )
     assert calls == ["http://10.0.0.2:8600"]
 
@@ -481,7 +481,6 @@ def test_register_boot_failure_does_not_stop_the_daemon(
         assert roles == frozenset({"agent-runner"})
         raise RuntimeError("central postgres unreachable")
 
-    monkeypatch.setattr(cluster_machines, "register_self", unreachable)
     machine_identity.set(name="runner-a", role="agent-runner", host="10.0.0.2")
     boot.register_boot(
         database=ops_database,
@@ -489,6 +488,7 @@ def test_register_boot_failure_does_not_stop_the_daemon(
         machine=machine_identity,
         ops_port=8600,
         home=Path("~/.meiva"),
+        register_self_fn=unreachable,
     )
     assert "boot registration failed" in caplog.text
     assert "central postgres unreachable" in caplog.text
@@ -559,7 +559,7 @@ async def test_ops_route_dedupes_by_envelope_key(
     dispatch_pool: ConnectionPool = ops_pool
     dispatch_sem = asyncio.Semaphore(4)
     calls: dict[str, int] = {}
-    monkeypatch.setattr(daemon.lifecycle, "launch_agent_op", fake_spawn_factory(calls))
+    dispatch_op = functools.partial(daemon.dispatch, launch_agent=fake_spawn_factory(calls))
 
     body = json.dumps(
         {
@@ -583,6 +583,7 @@ async def test_ops_route_dedupes_by_envelope_key(
         image=ops_image,
         local_machine=machine_identity,
         host=fake_host(),
+        dispatch_op=dispatch_op,
     )
     code2, payload2, _ = await daemon.ops_route(
         body,
@@ -598,6 +599,7 @@ async def test_ops_route_dedupes_by_envelope_key(
         image=ops_image,
         local_machine=machine_identity,
         host=fake_host(),
+        dispatch_op=dispatch_op,
     )
 
     assert code1 == 200 and code2 == 200
@@ -623,7 +625,7 @@ async def test_ops_route_without_key_does_not_dedupe(
     dispatch_pool: ConnectionPool = ops_pool
     dispatch_sem = asyncio.Semaphore(4)
     calls: dict[str, int] = {}
-    monkeypatch.setattr(daemon.lifecycle, "launch_agent_op", fake_spawn_factory(calls))
+    dispatch_op = functools.partial(daemon.dispatch, launch_agent=fake_spawn_factory(calls))
 
     body = json.dumps(
         {
@@ -645,6 +647,7 @@ async def test_ops_route_without_key_does_not_dedupe(
         image=ops_image,
         local_machine=machine_identity,
         host=fake_host(),
+        dispatch_op=dispatch_op,
     )
     await daemon.ops_route(
         body,
@@ -660,6 +663,7 @@ async def test_ops_route_without_key_does_not_dedupe(
         image=ops_image,
         local_machine=machine_identity,
         host=fake_host(),
+        dispatch_op=dispatch_op,
     )
 
     assert calls["n"] == 2  # no key → no dedup → both execute

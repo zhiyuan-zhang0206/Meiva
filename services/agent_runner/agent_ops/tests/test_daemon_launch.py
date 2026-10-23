@@ -45,7 +45,6 @@ async def test_launch_dispatch(
         seen.append((body.agent_id, received_pool))
         return SpawnedAgent(id=body.agent_id)
 
-    monkeypatch.setattr(daemon.lifecycle, "launch_agent_op", _launch)
     status, result = await daemon.dispatch(
         "spawn-launch",
         {"launch_attempt_id": "00000000-0000-0000-0000-000000000001", "agent_id": 777},
@@ -59,6 +58,7 @@ async def test_launch_dispatch(
         image=ops_image,
         local_machine=machine_identity,
         host=fake_host(),
+        launch_agent=_launch,
     )
     assert (status, result) == ("completed", {"id": 777})
     assert seen == [(777, pool)]

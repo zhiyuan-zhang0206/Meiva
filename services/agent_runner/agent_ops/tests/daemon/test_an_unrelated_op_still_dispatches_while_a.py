@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+import functools
 import threading
 import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
+from typing import cast
 
 import pytest
 from psycopg_pool import ConnectionPool
@@ -17,8 +19,6 @@ from base.host.system.hostport import Host
 from base.host.system.tests.fake_commands import fake_host
 from base.lm.catalog import ModelCatalog
 from base.native_process.loaded_commit import LoadedCommit
-from ops import host_config, inventory
-from ops.cluster import operations as cluster_ops
 from services.agent_runner.agent_ops import boot, daemon
 from services.agent_runner.agent_ops.tests.test_daemon import (
     ops_pool as ops_pool,
@@ -29,7 +29,6 @@ from services.agent_runner.agent_ops.tests.test_daemon import stub_pool
 @pytest.mark.asyncio
 async def test_an_unrelated_op_still_dispatches_while_a_read_is_stuck(
     op_executor: ThreadPoolExecutor,
-    monkeypatch: pytest.MonkeyPatch,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     ops_database: Callable[[], Database],
@@ -49,8 +48,6 @@ async def test_an_unrelated_op_still_dispatches_while_a_read_is_stuck(
 
         return InventoryReadResult(machine="runner", plugins={}, mcp_servers={})
 
-    monkeypatch.setattr(inventory, "inventory_read_op", _wedged)
-
     class _Status:
         def model_dump(self: object, *, mode: str) -> dict[str, bool]:
             del mode
@@ -62,7 +59,11 @@ async def test_an_unrelated_op_still_dispatches_while_a_read_is_stuck(
         del local_machine
         return _Status()
 
-    monkeypatch.setattr(cluster_ops, "cluster_status_op", _status)
+    dispatch_arm = functools.partial(
+        daemon.bind_dispatch_sync,
+        inventory_read_op=_wedged,
+        cluster_status_op=_status,
+    )
 
     stuck = asyncio.ensure_future(
         daemon.dispatch(
@@ -78,6 +79,7 @@ async def test_an_unrelated_op_still_dispatches_while_a_read_is_stuck(
             image=ops_image,
             local_machine=machine_identity,
             host=fake_host(),
+            dispatch_arm=dispatch_arm,
         )
     )
     await asyncio.to_thread(started.wait, 10)
@@ -95,6 +97,7 @@ async def test_an_unrelated_op_still_dispatches_while_a_read_is_stuck(
         image=ops_image,
         local_machine=machine_identity,
         host=fake_host(),
+        dispatch_arm=dispatch_arm,
     )
     assert (status, result) == ("completed", {"ready": True})
 
@@ -105,7 +108,6 @@ async def test_an_unrelated_op_still_dispatches_while_a_read_is_stuck(
 @pytest.mark.asyncio
 async def test_two_config_writes_cannot_interleave(
     op_executor: ThreadPoolExecutor,
-    monkeypatch: pytest.MonkeyPatch,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     ops_database: Callable[[], Database],
@@ -131,8 +133,11 @@ async def test_two_config_writes_cannot_interleave(
         inside -= 1
         return _Result()
 
-    monkeypatch.setattr(host_config, "config_write_op", _slow_write)
-    monkeypatch.setattr(inventory, "inventory_write_op", _slow_write)
+    dispatch_arm = functools.partial(
+        daemon.bind_dispatch_sync,
+        config_write_op=_slow_write,
+        inventory_write_op=_slow_write,
+    )
 
     await asyncio.gather(
         daemon.dispatch(
@@ -148,6 +153,7 @@ async def test_two_config_writes_cannot_interleave(
             image=ops_image,
             local_machine=machine_identity,
             host=fake_host(),
+            dispatch_arm=dispatch_arm,
         ),
         daemon.dispatch(
             "config_write",
@@ -162,6 +168,7 @@ async def test_two_config_writes_cannot_interleave(
             image=ops_image,
             local_machine=machine_identity,
             host=fake_host(),
+            dispatch_arm=dispatch_arm,
         ),
         daemon.dispatch(
             "inventory_write",
@@ -176,6 +183,7 @@ async def test_two_config_writes_cannot_interleave(
             image=ops_image,
             local_machine=machine_identity,
             host=fake_host(),
+            dispatch_arm=dispatch_arm,
         ),
     )
 
@@ -185,7 +193,6 @@ async def test_two_config_writes_cannot_interleave(
 @pytest.mark.asyncio
 async def test_config_write_op_receives_actor_and_trace(
     op_executor: ThreadPoolExecutor,
-    monkeypatch: pytest.MonkeyPatch,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     ops_database: Callable[[], Database],
@@ -206,7 +213,6 @@ async def test_config_write_op_receives_actor_and_trace(
 
     dispatch_pool: ConnectionPool = stub_pool()
     host = fake_host()
-    monkeypatch.setattr(host_config, "config_write_op", _capture)
     status, _ = await daemon.dispatch(
         "config_write",
         {"overrides": {}, "actor": "user_session:administrator", "trace_id": "trace-9"},
@@ -220,6 +226,7 @@ async def test_config_write_op_receives_actor_and_trace(
         image=ops_image,
         local_machine=machine_identity,
         host=host,
+        dispatch_arm=functools.partial(daemon.bind_dispatch_sync, config_write_op=_capture),
     )
     assert status == "completed"
     assert captured == {
@@ -233,7 +240,6 @@ async def test_config_write_op_receives_actor_and_trace(
 
 async def test_config_audit_read_op_receives_last(
     op_executor: ThreadPoolExecutor,
-    monkeypatch: pytest.MonkeyPatch,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     ops_database: Callable[[], Database],
@@ -253,7 +259,6 @@ async def test_config_audit_read_op_receives_last(
         return _Result()
 
     dispatch_pool: ConnectionPool = stub_pool()
-    monkeypatch.setattr(host_config, "config_audit_read_op", _capture)
     status, _ = await daemon.dispatch(
         "config_audit_read",
         {"last": 7},
@@ -267,6 +272,7 @@ async def test_config_audit_read_op_receives_last(
         image=ops_image,
         local_machine=machine_identity,
         host=fake_host(),
+        dispatch_arm=functools.partial(daemon.bind_dispatch_sync, config_audit_read_op=_capture),
     )
     assert status == "completed"
     assert captured == {"last": 7}
@@ -274,7 +280,6 @@ async def test_config_audit_read_op_receives_last(
 
 async def test_config_audit_read_rejects_out_of_range_last(
     op_executor: ThreadPoolExecutor,
-    monkeypatch: pytest.MonkeyPatch,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     ops_database: Callable[[], Database],
@@ -304,7 +309,6 @@ async def test_config_audit_read_rejects_out_of_range_last(
 @pytest.mark.asyncio
 async def test_op_arms_do_not_run_on_the_default_executor(
     op_executor: ThreadPoolExecutor,
-    monkeypatch: pytest.MonkeyPatch,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     ops_database: Callable[[], Database],
@@ -325,8 +329,6 @@ async def test_op_arms_do_not_run_on_the_default_executor(
 
         return _R()
 
-    monkeypatch.setattr(host_config, "config_read_op", _note_thread)
-
     await daemon.dispatch(
         "config_read",
         {},
@@ -340,19 +342,18 @@ async def test_op_arms_do_not_run_on_the_default_executor(
         image=ops_image,
         local_machine=machine_identity,
         host=fake_host(),
+        dispatch_arm=functools.partial(daemon.bind_dispatch_sync, config_read_op=_note_thread),
     )
 
     assert seen and seen[0].startswith("meiva-ops-arm"), f"arm ran on {seen!r}"
 
 
-def test_shutting_the_pool_down_does_not_wait_for_it(
-    monkeypatch: pytest.MonkeyPatch, op_executor: ThreadPoolExecutor
-) -> None:
+def test_shutting_the_pool_down_does_not_wait_for_it() -> None:
     calls: list[bool] = []
 
-    def shutdown(wait: bool = True) -> None:
-        calls.append(wait)
+    class _FakeExecutor:
+        def shutdown(self, wait: bool = True) -> None:
+            calls.append(wait)
 
-    monkeypatch.setattr(op_executor, "shutdown", shutdown)
-    boot.shutdown_op_pool(op_executor)
+    boot.shutdown_op_pool(cast(ThreadPoolExecutor, _FakeExecutor()))
     assert calls == [False]
