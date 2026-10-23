@@ -18,15 +18,12 @@ def _free_port() -> int:
     return port
 
 
-def test_probe_numpy_unreachable_is_actionable(
-    monkeypatch: pytest.MonkeyPatch, *, database_gate: ProcessDbGate
-) -> None:
-
-    monkeypatch.setattr(settings.services, "memory_search_uri", f"http://127.0.0.1:{_free_port()}")
+def test_probe_numpy_unreachable_is_actionable(*, database_gate: ProcessDbGate) -> None:
+    uri = f"http://127.0.0.1:{_free_port()}"
     result = probe.probe_backend(
         "numpy",
         Database.from_settings(gate=database_gate),
-        uri_reader=lambda: settings.services.memory_search_uri,
+        uri_reader=lambda: uri,
     )
     assert not result.fatal
     assert "memory_search service is not reachable" in (result.message or "")

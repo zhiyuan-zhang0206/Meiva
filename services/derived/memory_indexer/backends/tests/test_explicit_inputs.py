@@ -2,14 +2,11 @@ from __future__ import annotations
 
 import httpx
 import numpy as np
-import pytest
 
 from services.derived.memory_indexer.backends.numpy import NumPyBackend
 
 
-async def test_uri_readers_are_lazy_separate_and_live_per_async_search(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+async def test_uri_readers_are_lazy_separate_and_live_per_async_search() -> None:
     uris = {"one": "http://one", "two": "http://two"}
     reads: list[str] = []
     requests: list[str] = []
@@ -26,9 +23,8 @@ async def test_uri_readers_are_lazy_separate_and_live_per_async_search(
     def transport_client(*, base_url: str, timeout: float) -> httpx.AsyncClient:
         return client(base_url=base_url, timeout=timeout, transport=httpx.MockTransport(respond))
 
-    monkeypatch.setattr(httpx, "AsyncClient", transport_client)
-    one = NumPyBackend(uri_reader=lambda: reader("one"))
-    two = NumPyBackend(uri_reader=lambda: reader("two"))
+    one = NumPyBackend(uri_reader=lambda: reader("one"), async_client_factory=transport_client)
+    two = NumPyBackend(uri_reader=lambda: reader("two"), async_client_factory=transport_client)
     assert reads == []
     vector = np.zeros(3, dtype=np.float32)
     await one.search_topk_async(vector, 1, timeout=1)

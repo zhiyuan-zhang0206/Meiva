@@ -5,6 +5,7 @@ import logging
 import signal
 import sys
 from collections.abc import Callable
+from typing import Any
 
 import uvicorn
 
@@ -47,21 +48,28 @@ def _is_running(config: MemorySearchConfig) -> bool:
     )
 
 
-async def run(config: MemorySearchConfig, *, embedding_name_reader: Callable[[], str]) -> None:
+async def run(
+    config: MemorySearchConfig,
+    *,
+    embedding_name_reader: Callable[[], str],
+    descriptor_fn: Callable[[str], Any] = get_descriptor,
+    store_cls: Callable[..., MemoryStore] = MemoryStore,
+    server_cls: Callable[[uvicorn.Config], Any] = uvicorn.Server,
+) -> None:
     """Load the store, then serve until the graceful-shutdown signal fires.
 
     The provider config (`MEIVA_EMBEDDING_BACKEND`) is read at boot: the
     store's matrix width and wire bound must match the provider that
     produced the vectors, and an unknown provider value fails fast instead
     of serving a half-mismatched search surface."""
-    descriptor = get_descriptor(embedding_name_reader())
-    store = MemoryStore(
+    descriptor = descriptor_fn(embedding_name_reader())
+    store = store_cls(
         config.memory_search_data_dir / "vectors.npz",
         dim=descriptor.dim,
         fingerprint=descriptor.fingerprint,
     )
     await asyncio.to_thread(store.load)
-    server = uvicorn.Server(
+    server = server_cls(
         uvicorn.Config(
             build_app(store, config.memory_search_max_batch_rows, embedding_dim=descriptor.dim),
             host="127.0.0.1",

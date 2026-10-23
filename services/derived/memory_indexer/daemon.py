@@ -439,6 +439,8 @@ async def connect_backend_with_retry(
     name: str,
     uri_reader: Callable[[], str],
     probe_message: str | None = None,
+    backend_factory: Callable[..., MemorySearchBackend] = get_backend,
+    sleep_fn: Callable[[float], Awaitable[None]] = asyncio.sleep,
 ) -> MemorySearchBackend:
     """Connect to the configured backend at daemon startup — `meiva start`
     spawns the storage service (the memory-search session) and the
@@ -454,7 +456,7 @@ async def connect_backend_with_retry(
     and exits, the healthcheck spawns a fresh process that goes through
     this retry).
     """
-    backend = get_backend(
+    backend = backend_factory(
         database,
         dim=provider.dim,
         fingerprint=provider.fingerprint,
@@ -475,7 +477,7 @@ async def connect_backend_with_retry(
                 type(exc).__name__,
                 exc,
             )
-            await asyncio.sleep(2.0)
+            await sleep_fn(2.0)
     suffix = f" — {probe_message}" if probe_message else ""
     raise RuntimeError(
         f"{backend.name} backend unreachable after {deadline_s}s: {last_exc}{suffix}"

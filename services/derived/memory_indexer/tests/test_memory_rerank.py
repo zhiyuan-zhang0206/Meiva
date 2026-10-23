@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Mapping
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -89,8 +90,13 @@ class _FakeJudge:
             self.in_flight -= 1
 
 
+_active_judge: list[Any] = []
+
+
 def _install(monkeypatch: pytest.MonkeyPatch, judge: _FakeJudge) -> None:
-    monkeypatch.setattr(rerank, "ask_relevance", judge)
+    del monkeypatch
+    _active_judge.clear()
+    _active_judge.append(judge)
 
 
 async def _rank(
@@ -103,7 +109,10 @@ async def _rank(
     k: int = 5,
     limit: int = 30,
     exclude: frozenset[str] = frozenset(),
+    ask_fn: Any = None,
+    decide_fn: Any = rerank.decide,
 ) -> list[rerank.RankedChunk]:
+    effective_ask = ask_fn if ask_fn is not None else (_active_judge[0] if _active_judge else None)
     return await rerank.rerank(
         query,
         hits,
@@ -115,6 +124,8 @@ async def _rank(
         exclude=exclude,
         memory_root=tmp_path,
         reports=rerank.UnreadableReports(),
+        ask_fn=effective_ask,
+        decide_fn=decide_fn,
     )
 
 
@@ -433,7 +444,7 @@ async def test_exclusion_matches_the_pool_relative_path_of_an_index_path(
 
 
 async def test_cancelling_a_search_cancels_the_requests_still_running(
-    tmp_path: Path, catalog: ModelCatalog, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, catalog: ModelCatalog
 ) -> None:
     hits = _numbered_notes(tmp_path, 8)
     started = asyncio.Event()
@@ -448,8 +459,7 @@ async def test_cancelling_a_search_cancels_the_requests_still_running(
             raise
         raise AssertionError("unreachable")
 
-    monkeypatch.setattr(rerank, "ask_relevance", never_answers)
-    search = asyncio.create_task(_rank(tmp_path, catalog, hits))
+    search = asyncio.create_task(_rank(tmp_path, catalog, hits, ask_fn=never_answers))
     await asyncio.wait_for(started.wait(), timeout=5)
     await asyncio.sleep(0)
 
@@ -521,7 +531,7 @@ def test_default_candidates_all_go_out_together() -> None:
 
 
 async def test_a_failed_request_fails_the_search_with_the_cause(
-    tmp_path: Path, catalog: ModelCatalog, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, catalog: ModelCatalog
 ) -> None:
     for name in ("a", "b", "c"):
         _write(tmp_path, f"{name}.md", f"---\ntype: Memory\n---\n\nbody {name}")
@@ -529,13 +539,18 @@ async def test_a_failed_request_fails_the_search_with_the_cause(
     async def failing(*_args: object, **_kwargs: object) -> object:
         raise DecisionRequestError("jev returned 503")
 
-    monkeypatch.setattr(rerank, "decide", failing)
+    _active_judge.clear()
     with pytest.raises(IndexerUnavailable, match=r"memory rerank failed \(m\).*jev returned 503"):
-        await _rank(tmp_path, catalog, [_hit(tmp_path, f"{n}.md") for n in "abc"])
+        await _rank(
+            tmp_path,
+            catalog,
+            [_hit(tmp_path, f"{n}.md") for n in "abc"],
+            decide_fn=failing,
+        )
 
 
 async def test_ask_relevance_reads_the_true_probability_and_clamps(
-    catalog: ModelCatalog, monkeypatch: pytest.MonkeyPatch
+    catalog: ModelCatalog,
 ) -> None:
     seen: dict[str, object] = {}
     answers = iter(
@@ -551,15 +566,28 @@ async def test_ask_relevance_reads_the_true_probability_and_clamps(
         seen.update(model=model, state=state, usage_kind=kwargs["usage_kind"], ids=set(questions))
         return {next(iter(questions)): next(answers)}
 
-    monkeypatch.setattr(rerank, "decide", fake_decide)
     question = YesNo("q?", "yes", "no")
     kind = "memory_write_dedup"
     assert (
-        await rerank.ask_relevance("m", "the state", question, catalog=catalog, usage_kind=kind)
+        await rerank.ask_relevance(
+            "m",
+            "the state",
+            question,
+            catalog=catalog,
+            usage_kind=kind,
+            decide_fn=fake_decide,
+        )
         == 1.0
     )
     assert (
-        await rerank.ask_relevance("m", "the state", question, catalog=catalog, usage_kind=kind)
+        await rerank.ask_relevance(
+            "m",
+            "the state",
+            question,
+            catalog=catalog,
+            usage_kind=kind,
+            decide_fn=fake_decide,
+        )
         == 0.3
     )
     assert seen["model"] == "m"

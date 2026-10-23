@@ -94,8 +94,10 @@ def test_inputs_observe_updates_without_crossing_owners() -> None:
 
 
 async def test_retry_constructs_selected_backend_with_required_uri_reader(
-    monkeypatch: pytest.MonkeyPatch, *, database_gate: ProcessDbGate
+    *, database_gate: ProcessDbGate
 ) -> None:
+    from services.derived.memory_indexer.backends.numpy import NumPyBackend
+
     requests: list[str] = []
     client_class = httpx.Client
 
@@ -108,12 +110,27 @@ async def test_retry_constructs_selected_backend_with_required_uri_reader(
             base_url=base_url, timeout=timeout, transport=httpx.MockTransport(response)
         )
 
-    monkeypatch.setattr(httpx, "Client", client)
+    def backend_with_transport(
+        database: Database,
+        dim: int,
+        fingerprint: str,
+        *,
+        name: str,
+        uri_reader: Any,
+    ) -> daemon.MemorySearchBackend:
+        constructed = daemon.get_backend(
+            database, dim=dim, fingerprint=fingerprint, name=name, uri_reader=uri_reader
+        )
+        assert isinstance(constructed, NumPyBackend)
+        constructed.client_factory = client
+        return constructed
+
     backend = await daemon.connect_backend_with_retry(
         Database.from_settings(gate=database_gate),
         FakeProvider(),
         name="numpy",
         uri_reader=lambda: "http://selected-memory",
+        backend_factory=backend_with_transport,
     )
     try:
         assert backend.name == "numpy"
@@ -126,15 +143,14 @@ async def test_retry_constructs_selected_backend_with_required_uri_reader(
     "error", [httpx.ConnectError("not ready"), ValueError("bad configuration")]
 )
 async def test_backend_startup_retries_only_connection_failures(
-    monkeypatch: pytest.MonkeyPatch, error: Exception, *, database_gate: ProcessDbGate
+    error: Exception, *, database_gate: ProcessDbGate
 ) -> None:
     from unittest.mock import AsyncMock, MagicMock
 
     backend = MagicMock(name="backend")
     backend.connect.side_effect = [error, None]
-    monkeypatch.setattr(daemon, "get_backend", MagicMock(return_value=backend))
+    backend_factory = MagicMock(return_value=backend)
     sleep = AsyncMock()
-    monkeypatch.setattr(daemon.asyncio, "sleep", sleep)
     if isinstance(error, httpx.ConnectError):
         assert (
             await daemon.connect_backend_with_retry(
@@ -142,6 +158,8 @@ async def test_backend_startup_retries_only_connection_failures(
                 FakeProvider(),
                 name="numpy",
                 uri_reader=lambda: "http://test",
+                backend_factory=backend_factory,
+                sleep_fn=sleep,
             )
             is backend
         )
@@ -154,6 +172,8 @@ async def test_backend_startup_retries_only_connection_failures(
                 FakeProvider(),
                 name="numpy",
                 uri_reader=lambda: "http://test",
+                backend_factory=backend_factory,
+                sleep_fn=sleep,
             )
         assert backend.connect.call_count == 1
         sleep.assert_not_awaited()

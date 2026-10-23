@@ -40,10 +40,19 @@ class NumPyBackend:
 
     name = "numpy"
 
-    def __init__(self, *, uri_reader: Callable[[], str], readonly: bool = False) -> None:
+    def __init__(
+        self,
+        *,
+        uri_reader: Callable[[], str],
+        readonly: bool = False,
+        client_factory: Callable[..., httpx.Client] = httpx.Client,
+        async_client_factory: Callable[..., httpx.AsyncClient] = httpx.AsyncClient,
+    ) -> None:
         self._uri_reader = uri_reader
         self._client: httpx.Client | None = None
         self._readonly = readonly
+        self.client_factory = client_factory
+        self.async_client_factory = async_client_factory
 
     @property
     def _uri(self) -> str:
@@ -53,7 +62,7 @@ class NumPyBackend:
         """Open the sync client + prove the service answers (a real GET
         /meta, not a TCP connect — a foreign process on the port fails here
         and the daemon's retry loop keeps waiting)."""
-        client = httpx.Client(base_url=self._uri, timeout=5.0)
+        client = self.client_factory(base_url=self._uri, timeout=5.0)
         try:
             client.get("/meta").raise_for_status()
         except Exception:
@@ -172,7 +181,7 @@ class NumPyBackend:
     ) -> list[ChunkHit]:
         """Async twin of `search_topk` — a per-call async client bounded by
         the caller's deadline, closed in `finally`."""
-        async with httpx.AsyncClient(base_url=self._uri, timeout=timeout) as client:
+        async with self.async_client_factory(base_url=self._uri, timeout=timeout) as client:
             resp = await client.post(
                 "/search",
                 json={"vector": query_vector.astype(np.float32).tolist(), "k": k},

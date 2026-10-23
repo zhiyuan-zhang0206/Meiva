@@ -25,10 +25,10 @@ order, because a silent downgrade would hide a broken ranking behind plausible-l
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Collection, Sequence
+from collections.abc import Awaitable, Callable, Collection, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import NamedTuple
+from typing import Any, NamedTuple
 
 from loguru import logger
 
@@ -139,11 +139,17 @@ class Candidate:
 
 
 async def ask_relevance(
-    model: str, state: str, question: YesNo, *, catalog: ModelCatalog, usage_kind: str
+    model: str,
+    state: str,
+    question: YesNo,
+    *,
+    catalog: ModelCatalog,
+    usage_kind: str,
+    decide_fn: Callable[..., Awaitable[Any]] = decide,
 ) -> float:
     """Probability of "yes" to `question` about `state`, from one decision call."""
     try:
-        decisions = await decide(
+        decisions = await decide_fn(
             model,
             state,
             {"relevant": question},
@@ -270,6 +276,9 @@ async def _score_all(
     question: YesNo,
     catalog: ModelCatalog,
     usage_kind: str,
+    *,
+    ask_fn: Callable[..., Awaitable[float]] | None = None,
+    decide_fn: Callable[..., Awaitable[Any]] = decide,
 ) -> list[float]:
     """One request per state, at most `MAX_CONCURRENT_DECISIONS` at once; the first failure
     cancels the rest and is raised as itself."""
@@ -277,8 +286,17 @@ async def _score_all(
 
     async def score(state: str) -> float:
         async with permits:
+            if ask_fn is not None:
+                return await ask_fn(
+                    model, state, question, catalog=catalog, usage_kind=usage_kind
+                )
             return await ask_relevance(
-                model, state, question, catalog=catalog, usage_kind=usage_kind
+                model,
+                state,
+                question,
+                catalog=catalog,
+                usage_kind=usage_kind,
+                decide_fn=decide_fn,
             )
 
     try:
@@ -301,6 +319,8 @@ async def rerank(
     exclude: Collection[str],
     memory_root: Path,
     reports: UnreadableReports,
+    ask_fn: Callable[..., Awaitable[float]] | None = None,
+    decide_fn: Callable[..., Awaitable[Any]] = decide,
 ) -> list[RankedChunk]:
     """Up to `k` of the `limit` candidates most worth reading for `query`, best first.
 
@@ -316,7 +336,15 @@ async def rerank(
     if not candidates:
         return []
     states = [pair_state(query, candidate, purpose) for candidate in candidates]
-    scores = await _score_all(model, states, _QUESTIONS[purpose], catalog, USAGE_KINDS[purpose])
+    scores = await _score_all(
+        model,
+        states,
+        _QUESTIONS[purpose],
+        catalog,
+        USAGE_KINDS[purpose],
+        ask_fn=ask_fn,
+        decide_fn=decide_fn,
+    )
     ranked = sorted(range(len(candidates)), key=lambda i: scores[i], reverse=True)[:k]
     return [
         RankedChunk(

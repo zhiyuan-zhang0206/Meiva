@@ -264,7 +264,7 @@ def owned_config_environment() -> Iterator[None]:
 @pytest.mark.asyncio
 @pytest.mark.usefixtures("owned_config_environment")
 async def test_daemon_binds_live_rendering_to_its_configuration_owner(
-    monkeypatch: pytest.MonkeyPatch, short_dir: Path, *, model_catalog: ModelCatalog
+    short_dir: Path, *, model_catalog: ModelCatalog
 ) -> None:
     boot = ConfigBoot()
     boot.set_field("timezone", "Asia/Tokyo")
@@ -291,9 +291,13 @@ async def test_daemon_binds_live_rendering_to_its_configuration_owner(
             for sock in sockets:
                 sock.close()
 
-    monkeypatch.setattr(daemon, "build_model_catalog", lambda: model_catalog)
-    monkeypatch.setattr(daemon.uvicorn, "Server", Server)
-    await daemon.run(home=short_dir, config=boot, database=lambda: cast(Database, db))
+    await daemon.run(
+        home=short_dir,
+        config=boot,
+        database=lambda: cast(Database, db),
+        catalog_factory=lambda: model_catalog,
+        server_cls=Server,
+    )
 
     assert len(apps) == 1
     assert short_dir != Path(os.environ["MEIVA_HOME"])
@@ -338,23 +342,23 @@ def _assert_gate_matches_image(
 
 
 def _run_main(
-    monkeypatch: pytest.MonkeyPatch, *, exit_process: Callable[[int], None] | None = None
+    deps: daemon.MainDeps, *, exit_process: Callable[[int], None] | None = None
 ) -> None:
     runner = asyncio.Runner()
-    monkeypatch.setattr(daemon.asyncio, "Runner", lambda: runner)
+    from dataclasses import replace
+
+    full_deps = replace(deps, runner_factory=lambda: runner)
     try:
-        daemon.main() if exit_process is None else daemon.main(exit_process=exit_process)
+        daemon.main(deps=full_deps) if exit_process is None else daemon.main(
+            exit_process=exit_process, deps=full_deps
+        )
     finally:
         runner.close()
 
 
 @pytest.mark.parametrize("sha", ["captured-insights", None])
 @pytest.mark.usefixtures("owned_config_environment")
-def test_entry_shares_the_captured_gate_with_logging_and_work(
-    monkeypatch: pytest.MonkeyPatch, sha: str | None
-) -> None:
-    from base.deploy.schema import migrations
-
+def test_entry_shares_the_captured_gate_with_logging_and_work(sha: str | None) -> None:
     boot = ConfigBoot()
     boot.set_field("machine_name", "insights-entry")
     image = LoadedCommit(Path("/entry-insights"), sha)
@@ -379,6 +383,14 @@ def test_entry_shares_the_captured_gate_with_logging_and_work(
     def count(root: Path, commit: str) -> int:
         reads.append((root, commit))
         return 42
+
+    class _FakeCodeVersion(code_version.CodeVersion):
+        def get(self) -> int:
+            if self._version is None:
+                if self.loaded.sha is None:
+                    return super().get()
+                self._version = count(self.loaded.source_root, self.loaded.sha)
+            return self._version
 
     def build(*, database: Callable[[], Database], machine: MachineIdentity, home: Path) -> object:
         stages.append("producer")
@@ -408,16 +420,18 @@ def test_entry_shares_the_captured_gate_with_logging_and_work(
     def exit_process(code: int) -> None:
         stages.append(f"exit:{code}")
 
-    monkeypatch.setattr(daemon, "ConfigBoot", lambda: boot)
-    monkeypatch.setattr(daemon.LoadedCommit, "capture", capture)
-    monkeypatch.setattr(code_version, "first_parent_count", count)
-    monkeypatch.setattr(daemon, "Database", Store)
-    monkeypatch.setattr(daemon, "build_pipeline", build)
-    monkeypatch.setattr(daemon, "init_gateway_process", initialize)
-    monkeypatch.setattr(migrations, "assert_schema_current", checked_schema)
-    monkeypatch.setattr(daemon, "install_graceful_shutdown", no_signal_handlers)
-    monkeypatch.setattr(daemon, "run", work)
-    _run_main(monkeypatch, exit_process=exit_process)
+    deps = daemon.MainDeps(
+        capture_image=capture,
+        config_boot_cls=lambda: boot,
+        check_schema=checked_schema,
+        code_version_cls=_FakeCodeVersion,
+        database_cls=cast(Callable[..., Database], Store),
+        build_pipeline=build,
+        init_gateway_process=initialize,
+        install_graceful_shutdown=no_signal_handlers,
+        run_fn=work,
+    )
+    _run_main(deps, exit_process=exit_process)
     assert stages == ["capture", "schema", "producer", "logging", "run", "exit:0"]
     assert len(slices) == 2 and slices[1].db_pool_max_size == 37
     _assert_gate_matches_image(gates, reads, image)

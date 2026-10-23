@@ -10,8 +10,10 @@ import os
 import signal
 import socket
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Coroutine
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import uvicorn
 
@@ -26,6 +28,7 @@ from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.db.config import db_config_from_boot
 from base.host.exit_codes import hard_exit as _hard_exit
+from base.lm.catalog import ModelCatalog
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
 from base.packages.plugin_providers import build_model_catalog
@@ -65,7 +68,14 @@ def bind_socket(path: Path) -> socket.socket:
     return sock
 
 
-async def run(*, home: Path, config: ConfigBoot, database: Callable[[], Database]) -> None:
+async def run(
+    *,
+    home: Path,
+    config: ConfigBoot,
+    database: Callable[[], Database],
+    catalog_factory: Callable[[], ModelCatalog] = build_model_catalog,
+    server_cls: Callable[[uvicorn.Config], Any] = uvicorn.Server,
+) -> None:
     pidfile = insights_pidfile(home)
     if pidfile_holds_daemon(pidfile, _MODULE) or not acquire_pidfile(pidfile, _MODULE):
         _log.info("[insights] daemon already running (pidfile=%s), exiting", pidfile)
@@ -74,14 +84,14 @@ async def run(*, home: Path, config: ConfigBoot, database: Callable[[], Database
     db = database()
     pool = db.pool(max_size=_POOL_MAX_SIZE)
     try:
-        server = uvicorn.Server(
+        server = server_cls(
             uvicorn.Config(
                 build_app(
                     db,
                     pool,
                     insights_config(config=config),
                     home=home,
-                    catalog=build_model_catalog(),
+                    catalog=catalog_factory(),
                     default_model_reader=lambda: config.view.lm.llm_model,
                     timeline_inputs=TimelineReadInputs(
                         clock_factory=lambda: Clock(
@@ -105,39 +115,59 @@ async def run(*, home: Path, config: ConfigBoot, database: Callable[[], Database
         _log.info("[insights] daemon stopped")
 
 
-def main(*, exit_process: Callable[[int], None] = _hard_exit) -> None:
+@dataclass(frozen=True)
+class MainDeps:
+    capture_image: Callable[[], LoadedCommit] = LoadedCommit.capture
+    config_boot_cls: Callable[[], ConfigBoot] = ConfigBoot
+    check_schema: Callable[[str], None] | None = None
+    code_version_cls: Callable[[LoadedCommit], CodeVersion] = CodeVersion
+    database_cls: Callable[..., Database] = Database
+    build_pipeline: Callable[..., Any] = build_pipeline
+    init_gateway_process: Callable[..., None] = init_gateway_process
+    install_graceful_shutdown: Callable[[str], None] = install_graceful_shutdown
+    runner_factory: Callable[[], asyncio.Runner] = asyncio.Runner
+    run_fn: Callable[..., Coroutine[Any, Any, None]] | None = None
+
+
+def main(
+    *,
+    exit_process: Callable[[int], None] = _hard_exit,
+    deps: MainDeps = MainDeps(),
+) -> None:
     from base.deploy.schema.migrations import assert_schema_current
 
-    image = LoadedCommit.capture()
+    image = deps.capture_image()
 
-    config = ConfigBoot()
+    config = deps.config_boot_cls()
     config.boot()
     machine = machine_from_boot(config)
     process_home = meiva_home().resolve()
-    assert_schema_current(config.view.data_plane.db_url)
-    version = CodeVersion(image)
+    active_check_schema = assert_schema_current if deps.check_schema is None else deps.check_schema
+    active_check_schema(config.view.data_plane.db_url)
+    version = deps.code_version_cls(image)
     gate = ProcessDbGate(version=version.get, process="insights")
 
     def database() -> Database:
-        return Database(
+        return deps.database_cls(
             db_config_from_boot(config),
             gate=gate,
             direct_url=ClusterDirectUrl(machine.host),
         )
 
-    pipeline = build_pipeline(database=database, machine=machine, home=process_home)
-    init_gateway_process(
+    pipeline = deps.build_pipeline(database=database, machine=machine, home=process_home)
+    deps.init_gateway_process(
         name="insights",
         producer=lambda: pipeline,
         machine_reader=machine.name,
         image=image,
     )
-    install_graceful_shutdown("insights")
+    deps.install_graceful_shutdown("insights")
     code = 0
 
-    runner = asyncio.Runner()
+    active_run = run if deps.run_fn is None else deps.run_fn
+    runner = deps.runner_factory()
     try:
-        runner.run(run(home=meiva_home(), config=config, database=database))
+        runner.run(active_run(home=meiva_home(), config=config, database=database))
     except KeyboardInterrupt:
         signal.signal(signal.SIGTERM, signal.SIG_IGN)
         _log.info("[insights] interrupted, shutting down")

@@ -42,54 +42,44 @@ def test_factory_default_is_numpy(*, database_gate: ProcessDbGate) -> None:
     )
 
 
-def test_factory_numpy_dispatch(
-    monkeypatch: pytest.MonkeyPatch, *, database_gate: ProcessDbGate
-) -> None:
+def test_factory_numpy_dispatch(*, database_gate: ProcessDbGate) -> None:
     from services.derived.memory_indexer.backends.numpy import NumPyBackend
 
-    monkeypatch.setattr(settings.services, "memory_search_backend", "numpy")
     assert isinstance(
         factory.get_backend(
             Database.from_settings(gate=database_gate),
             dim=_DIM,
             fingerprint=_FP,
             uri_reader=lambda: settings.services.memory_search_uri,
-            name=settings.services.memory_search_backend,
+            name="numpy",
         ),
         NumPyBackend,
     )
 
 
-def test_factory_pgvector_dispatch(
-    monkeypatch: pytest.MonkeyPatch, *, database_gate: ProcessDbGate
-) -> None:
+def test_factory_pgvector_dispatch(*, database_gate: ProcessDbGate) -> None:
     from services.derived.memory_indexer.backends.pgvector import PGVectorBackend
 
-    monkeypatch.setattr(settings.services, "memory_search_backend", "pgvector")
     assert isinstance(
         factory.get_backend(
             Database.from_settings(gate=database_gate),
             dim=_DIM,
             fingerprint=_FP,
             uri_reader=lambda: settings.services.memory_search_uri,
-            name=settings.services.memory_search_backend,
+            name="pgvector",
         ),
         PGVectorBackend,
     )
 
 
-def test_factory_unknown_backend_fails_fast(
-    monkeypatch: pytest.MonkeyPatch, *, database_gate: ProcessDbGate
-) -> None:
-
-    monkeypatch.setattr(settings.services, "memory_search_backend", "qdrant")
+def test_factory_unknown_backend_fails_fast(*, database_gate: ProcessDbGate) -> None:
     with pytest.raises(ValueError, match="unknown memory search backend"):
         factory.get_backend(
             Database.from_settings(gate=database_gate),
             dim=_DIM,
             fingerprint=_FP,
             uri_reader=lambda: settings.services.memory_search_uri,
-            name=settings.services.memory_search_backend,
+            name="qdrant",
         )
 
 

@@ -21,6 +21,9 @@ from __future__ import annotations
 import argparse
 import builtins
 import sys
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass
+from typing import Any
 
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.machine import MachineIdentity, MachineRoles
@@ -53,15 +56,20 @@ def sample_queries(limit: int, *, roles: MachineRoles) -> list[str]:
     return queries
 
 
-def _confirm_writable_connect() -> bool:
+def _confirm_writable_connect(
+    *,
+    stdin: Any = None,
+    input_fn: Callable[[str], str] = builtins.input,
+) -> bool:
     """Require an interactive, exact confirmation before enabling writes."""
-    if not sys.stdin.isatty():
+    active_stdin = sys.stdin if stdin is None else stdin
+    if not active_stdin.isatty():
         print(
             "--allow-write requires an interactive terminal; no backend connected", file=sys.stderr
         )
         return False
     try:
-        answer = builtins.input("This may rebuild backend storage. Type exact 'yes' to continue: ")
+        answer = input_fn("This may rebuild backend storage. Type exact 'yes' to continue: ")
     except EOFError:
         print(
             "--allow-write confirmation was unavailable (EOF); no backend connected",
@@ -97,19 +105,37 @@ def _connect_backends(
     return True
 
 
-def _reconcile_database(boot: ConfigBoot, *, machine: MachineIdentity) -> Database:
+@dataclass(frozen=True)
+class ReconcileDeps:
+    stdin: Any = None
+    input_fn: Callable[[str], str] = builtins.input
+    sample_queries_fn: Callable[..., list[str]] = sample_queries
+    get_provider_fn: Callable[..., Any] = get_provider
+    get_backend_named_fn: Callable[..., MemorySearchBackend] = get_backend_named
+    capture_image: Callable[[], LoadedCommit] = LoadedCommit.capture
+    code_version_cls: Callable[[LoadedCommit], CodeVersion] = CodeVersion
+    database_cls: Callable[..., Database] = Database
+    process_name_fn: Callable[[], str] = process_name
+
+
+def _reconcile_database(
+    boot: ConfigBoot,
+    *,
+    machine: MachineIdentity,
+    deps: ReconcileDeps = ReconcileDeps(),
+) -> Database:
     """Capture this standalone entry's gated database at its original dial boundary."""
-    image = LoadedCommit.capture()
-    version = CodeVersion(image)
-    gate = ProcessDbGate(version=version.get, process=process_name())
-    return Database(
+    image = deps.capture_image()
+    version = deps.code_version_cls(image)
+    gate = ProcessDbGate(version=version.get, process=deps.process_name_fn())
+    return deps.database_cls(
         db_config_from_boot(boot),
         gate=gate,
         direct_url=ClusterDirectUrl(machine.host),
     )
 
 
-def _arguments() -> argparse.Namespace:
+def _arguments(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--a", required=True, help="first backend name (e.g. numpy)")
     parser.add_argument("--b", required=True, help="second backend name (e.g. pgvector)")
@@ -120,19 +146,25 @@ def _arguments() -> argparse.Namespace:
         action="store_true",
         help="allow writable backend connects after typing exact 'yes' interactively",
     )
-    return parser.parse_args()
+    return parser.parse_args(argv)
 
 
-def main() -> int:
-    args = _arguments()
+def main(
+    argv: Sequence[str] | None = None,
+    *,
+    deps: ReconcileDeps = ReconcileDeps(),
+) -> int:
+    args = _arguments(argv)
     readonly = not args.allow_write
-    if args.allow_write and not _confirm_writable_connect():
+    if args.allow_write and not _confirm_writable_connect(
+        stdin=deps.stdin, input_fn=deps.input_fn
+    ):
         return 1
 
     boot = ConfigBoot()
     boot.read_process_environment()
     machine = machine_from_boot(boot)
-    queries = sample_queries(args.limit, roles=machine.role())
+    queries = deps.sample_queries_fn(args.limit, roles=machine.role())
     if not queries:
         print("no query texts found in the memory pool", file=sys.stderr)
         return 1
@@ -144,14 +176,14 @@ def main() -> int:
         value = boot.view.lm.gemini_api_key
         return None if value is None else value.get_secret_value()
 
-    provider = get_provider(
+    provider = deps.get_provider_fn(
         boot.view.services.embedding_backend,
         catalog=build_model_catalog(),
         timeout_reader=lambda: boot.view.services.memory_embed_timeout_seconds,
         api_key_reader=api_key,
     )
-    database = _reconcile_database(boot, machine=machine)
-    backend_a = get_backend_named(
+    database = _reconcile_database(boot, machine=machine, deps=deps)
+    backend_a = deps.get_backend_named_fn(
         args.a,
         database=database,
         dim=provider.dim,
@@ -159,7 +191,7 @@ def main() -> int:
         readonly=readonly,
         uri_reader=lambda: boot.view.services.memory_search_uri,
     )
-    backend_b = get_backend_named(
+    backend_b = deps.get_backend_named_fn(
         args.b,
         database=database,
         dim=provider.dim,

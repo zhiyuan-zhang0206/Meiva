@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import logging
 import time
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from zipfile import BadZipFile
 
@@ -46,10 +46,20 @@ _NPZ_KEYS = frozenset(
 
 
 class MemoryStore:
-    def __init__(self, data_file: Path, dim: int, fingerprint: str) -> None:
+    def __init__(
+        self,
+        data_file: Path,
+        dim: int,
+        fingerprint: str,
+        *,
+        clock: Callable[[], float] = time.perf_counter,
+        concat_fn: Callable[..., np.ndarray] = np.concatenate,
+    ) -> None:
         self._data_file = data_file
         self._dim = dim
         self._fingerprint = fingerprint
+        self._clock = clock
+        self._concat_fn = concat_fn
         self._pk_index: dict[str, int] = {}
         self._pks: list[str] = []
         self._paths: list[str] = []
@@ -142,7 +152,7 @@ class MemoryStore:
         raising) leaves the previous duration untouched, because the
         number operators read is "what did the last completed persistence
         cost", not "what did the last attempt cost"."""
-        start = time.perf_counter()
+        start = self._clock()
         self._data_file.parent.mkdir(parents=True, exist_ok=True)
         # np.savez appends ".npz" to any name not already ending in it, so the
         # tmp name must end in ".npz" for the replace below to find the file.
@@ -159,7 +169,7 @@ class MemoryStore:
             vectors=self._matrix,
         )
         tmp.replace(self._data_file)
-        self._last_save_seconds = time.perf_counter() - start
+        self._last_save_seconds = self._clock() - start
 
     # ── mutations ────────────────────────────────────────────────────────
 
@@ -221,7 +231,7 @@ class MemoryStore:
                 new_vectors[idx - initial_row_count] = vector
 
         if new_vectors:
-            self._matrix = np.concatenate((self._matrix, new_vectors))
+            self._matrix = self._concat_fn((self._matrix, new_vectors))
 
     def delete(self, path: str) -> None:
         """Delete every chunk row of `path`; no-op when the path is absent."""
