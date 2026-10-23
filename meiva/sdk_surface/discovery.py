@@ -14,13 +14,18 @@ from dataclasses import dataclass
 from types import ModuleType, SimpleNamespace
 from typing import Any, ForwardRef, cast
 
-from .const import is_documented_const
-
-# ── Kind predicates ────────────────────────────────────────────────────────
-
-
-def is_container(obj: object) -> bool:
-    return inspect.ismodule(obj) or inspect.isclass(obj) or isinstance(obj, SimpleNamespace)
+from .const import (
+    is_container as is_container,
+)
+from .const import (
+    is_documented_const,
+)
+from .const import (
+    is_namespace as is_namespace,
+)
+from .const import (
+    is_skill_object as is_skill_object,
+)
 
 
 @dataclass(frozen=True)
@@ -34,16 +39,6 @@ class Constant:
 
     type_str: str
     doc: str
-
-
-def is_skill_object(obj: object) -> bool:
-    """True if `obj` is a skill proxy or namespace (has `_meiva_skill_kind`)."""
-    return hasattr(obj, "_meiva_skill_kind")
-
-
-def is_namespace(obj: object) -> bool:
-    """True when `obj` is a module or a SimpleNamespace plugin namespace."""
-    return obj is not None and (inspect.ismodule(obj) or isinstance(obj, SimpleNamespace))
 
 
 # ── Children discovery ─────────────────────────────────────────────────────

@@ -12,7 +12,6 @@ imports help).
 import dataclasses as _dataclasses
 import enum as _enum
 import inspect
-import re as _re
 from collections.abc import Callable
 from pathlib import Path
 from types import SimpleNamespace
@@ -20,7 +19,13 @@ from typing import Any, cast
 
 from meiva.sdk_surface import meiva_module, process_context
 
-from .const import is_documented_const
+from .attachment_transport import format_signature as format_signature
+from .const import (
+    format_docstring as format_docstring,
+)
+from .const import (
+    is_documented_const,
+)
 from .discovery import (
     Constant,
     agent_visible_names,
@@ -565,39 +570,3 @@ def _resolve_const_name(const: Any) -> str:
     """Best-effort name for a standalone documented-const target."""
     name = getattr(const, "__qualname__", None) or getattr(const, "__name__", None)
     return name if isinstance(name, str) else "value"
-
-
-def format_docstring(doc: str, *, indent: str) -> str:
-    # Render `doc` as a triple-quoted Python literal at `indent`. Single-line
-    # docstring → one-line form. Multi-line → first line on opening triple,
-    # dedented body indented under, closing triple on its own line.
-    # Defensive: if docstring contains `"""` it would break the quote pair;
-    # switch to single-quote triple. Currently no such case in the meiva SDK,
-    # but plugin authors might hit it.
-    triple = '"""' if '"""' not in doc else "'''"
-    lines = doc.split("\n")
-    if len(lines) == 1:
-        return f"{indent}{triple}{lines[0]}{triple}"
-    indented_body = "\n".join(f"{indent}{line}" if line else "" for line in lines[1:])
-    return f"{indent}{triple}{lines[0]}\n{indented_body}\n{indent}{triple}"
-
-
-def format_signature(target: object) -> str:
-    """Stringified signature, cleaned up:
-    - `from __future__ import annotations` quote noise on annotations:
-      `: 'str | None'` → `: str | None`, `-> 'int'` → `-> int`. The closing
-      quote must be followed by a parameter terminator (`,`, `)`, ` =`,
-      space, or end-of-string) — that distinguishes an annotation's outer
-      quotes from a nested colon-space-quote inside a string default like
-      `pattern: str = "a: 'b'"`.
-    - `typing.X` prefix stripped for cleaner reading (`typing.Any` → `Any`).
-    - enum default reprs rewritten to source form: `<AgentStatus.RUNNING:
-      'running'>` → `AgentStatus.RUNNING` (the repr is not valid Python in an
-      otherwise source-shaped stub)."""
-    try:
-        sig = str(inspect.signature(cast(Callable[..., Any], target)))
-    except (ValueError, TypeError):
-        return "(...)"
-    sig = _re.sub(r"(: |-> )'([^']*)'(?=[,)= ]|$)", r"\1\2", sig)
-    sig = _re.sub(r"<(\w+(?:\.\w+)+): [^<>]*>", r"\1", sig)
-    return sig.replace("typing.", "")

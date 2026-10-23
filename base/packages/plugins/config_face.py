@@ -24,8 +24,9 @@ from pathlib import Path
 
 from pydantic import BaseModel
 
-from base.packages.plugins import load_report
+from base.packages.plugins import config_from_image, load_report
 from base.packages.plugins.extensions import PluginContributions
+from base.paths.home import resolve_meiva_home
 
 CONFIG_FACE = "default_config"
 
@@ -101,3 +102,34 @@ def enabled_config_classes(plugin_dirs: dict[str, Path]) -> dict[str, type[BaseM
         if cls is not None:
             classes[name] = cls
     return classes
+
+
+def disk_image_path(plugin: str) -> Path:
+    return resolve_meiva_home().resolve() / "configs" / plugin / "config.json"
+
+
+def read_config_image[C: BaseModel](cls: type[C], config_path: Path) -> C:
+    try:
+        content = config_path.read_text()
+    except FileNotFoundError:
+        return cls()
+
+    return config_from_image(cls, content, config_path)
+
+
+def write_default_disk_image(plugin: str, cls: type[BaseModel]) -> Path:
+    instance = cls()
+    config_path = disk_image_path(plugin)
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    from base.packages.plugin_config_images import (
+        PluginConfigOwner,
+        image_revision,
+        write_config_image,
+    )
+
+    write_config_image(
+        PluginConfigOwner(plugin, cls, config_path),
+        instance,
+        expected_digest=image_revision(None),
+    )
+    return config_path

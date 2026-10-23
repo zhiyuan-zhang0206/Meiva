@@ -3,19 +3,63 @@ import math
 from collections.abc import Callable, Mapping
 from contextlib import suppress
 from pathlib import Path
-from typing import Any, Literal, cast, overload
+from typing import Any, Literal, cast
 
 from pydantic import BaseModel, ValidationError
 from pydantic.fields import FieldInfo
 
-from base.host.env.agent_slices import AgentSlices
+from base.packages.plugins import (
+    all_plugin_configs,
+    config_from_image,
+    get_plugin_config,
+    is_per_agent_field,
+    process_plugin_config,
+    service_config_packet,
+)
+from base.packages.plugins.config_face import (
+    disk_image_path,
+    read_config_image,
+    write_default_disk_image,
+)
+from base.packages.plugins.config_view import (
+    overlay_config_classes,
+    plugin_bootstrap_config,
+    read_plugin_config,
+    read_service_config,
+    with_cluster_policy,
+)
 from base.packages.plugins.plugin_errors import (
     DuplicateRegistration,
     InvalidConfigData,
     InvalidConfigOverlay,
     SchemaDriftError,
 )
-from base.paths.home import resolve_meiva_home
+
+__all__ = [
+    "DuplicateRegistration",
+    "InvalidConfigData",
+    "InvalidConfigOverlay",
+    "SchemaDriftError",
+    "all_plugin_configs",
+    "apply_config_overlay",
+    "bind_plugin_config",
+    "config_from_image",
+    "disk_image_path",
+    "get_plugin_config",
+    "is_per_agent_field",
+    "merge_disk_image_schema",
+    "overlay_config_classes",
+    "plugin_bootstrap_config",
+    "process_plugin_config",
+    "read_config_image",
+    "read_plugin_config",
+    "read_service_config",
+    "resolve_overlay_targets",
+    "service_config_packet",
+    "validate_config_overlay",
+    "validate_config_overlay_shape",
+    "write_default_disk_image",
+]
 
 
 def bind_plugin_config(
@@ -41,7 +85,6 @@ def bind_plugin_config(
 
 def _instantiate_from_disk(plugin: str, cls: type[BaseModel]) -> BaseModel:
     from base.packages.plugin_config_images import PluginConfigChangedError
-    from base.packages.plugins.config_view import with_cluster_policy
 
     config_path = disk_image_path(plugin)
     read_plugin_config(plugin, cls, config_path)
@@ -51,72 +94,7 @@ def _instantiate_from_disk(plugin: str, cls: type[BaseModel]) -> BaseModel:
     return with_cluster_policy(plugin, config_from_image(cls, config_path.read_text(), config_path))
 
 
-def read_config_image[C: BaseModel](cls: type[C], config_path: Path) -> C:
-    try:
-        content = config_path.read_text()
-    except FileNotFoundError:
-        return cls()
-
-    return config_from_image(cls, content, config_path)
-
-
-def config_from_image[C: BaseModel](cls: type[C], content: str, config_path: Path) -> C:
-    try:
-        disk_data = json.loads(content)
-    except json.JSONDecodeError as e:
-        raise InvalidConfigData(
-            f"plugin config disk image JSON parse failed ({config_path}): {e}"
-        ) from e
-
-    if not isinstance(disk_data, dict):
-        raise InvalidConfigData(
-            "plugin config disk image top-level must be a JSON object, got "
-            f"{type(disk_data).__name__} ({config_path})"
-        )
-    disk_data = cast("dict[str, Any]", disk_data)
-
-    disk_keys = set(disk_data.keys())
-    cls_keys = set(cls.model_fields.keys())
-    if disk_keys != cls_keys:
-        added = cls_keys - disk_keys
-        removed = disk_keys - cls_keys
-        raise SchemaDriftError(
-            f"plugin config disk image schema drift ({config_path}): "
-            f"added={sorted(added)} removed={sorted(removed)}. "
-            f"Run `meiva plugins update` to auto-merge."
-        )
-
-    try:
-        return cls(**disk_data)
-    except ValidationError as e:
-        raise InvalidConfigData(
-            f"plugin config disk image Pydantic validation failed ({config_path}): {e}"
-        ) from e
-
-
-def disk_image_path(plugin: str) -> Path:
-    return resolve_meiva_home().resolve() / "configs" / plugin / "config.json"
-
-
-def write_default_disk_image(plugin: str, cls: type[BaseModel]) -> Path:
-    instance = cls()
-    config_path = disk_image_path(plugin)
-    config_path.parent.mkdir(parents=True, exist_ok=True)
-    from base.packages.plugin_config_images import (
-        PluginConfigOwner,
-        image_revision,
-        write_config_image,
-    )
-
-    write_config_image(
-        PluginConfigOwner(plugin, cls, config_path),
-        instance,
-        expected_digest=image_revision(None),
-    )
-    return config_path
-
-
-def reconcile_config_image[C: BaseModel](
+def _reconcile_config_image[C: BaseModel](
     cls: type[C], content: str | None, config_path: Path
 ) -> tuple[C, set[str], set[str]]:
     if content is None:
@@ -150,7 +128,7 @@ def merge_disk_image_schema(plugin: str, cls: type[BaseModel]) -> tuple[set[str]
         return set(cls.model_fields.keys()), set()
 
     captured = config_path.read_text()
-    candidate, added, removed = reconcile_config_image(cls, captured, config_path)
+    candidate, added, removed = _reconcile_config_image(cls, captured, config_path)
     if not added and not removed:
         return set(), set()
 
@@ -168,27 +146,6 @@ def merge_disk_image_schema(plugin: str, cls: type[BaseModel]) -> tuple[set[str]
     return added, removed
 
 
-@overload
-def get_plugin_config(plugin: str, slices: AgentSlices) -> BaseModel: ...
-@overload
-def get_plugin_config[T: BaseModel](plugin: str, slices: AgentSlices, cls: type[T]) -> T: ...
-
-
-def get_plugin_config(
-    plugin: str, slices: AgentSlices, cls: type[BaseModel] | None = None
-) -> BaseModel:
-    _ = cls
-    return slices.plugin_config(plugin)
-
-
-def all_plugin_configs(slices: AgentSlices) -> dict[str, BaseModel]:
-    return slices.plugin_configs()
-
-
-def process_plugin_config(plugin: str, configs: Mapping[str, BaseModel]) -> BaseModel:
-    return configs[plugin]
-
-
 def _schema_extra(info: FieldInfo) -> dict[str, Any]:
     extra = info.json_schema_extra
     return cast("dict[str, Any]", extra) if isinstance(extra, dict) else {}
@@ -200,25 +157,6 @@ def _per_agent_fields_for(cls: type[BaseModel]) -> set[str]:
         if _schema_extra(info).get("per_agent") is True:
             out.add(name)
     return out
-
-
-def overlay_config_classes(
-    configs: Mapping[str, BaseModel] | None = None,
-) -> dict[str, type[BaseModel]]:
-    from base.packages.plugins import enable_config
-    from base.packages.plugins.config_face import enabled_config_classes
-
-    installed = enable_config.installed_plugin_dirs()
-    config = enable_config.load_for_runtime(set(installed))
-    enabled = {
-        name: plugin_dir
-        for name, plugin_dir in installed.items()
-        if name in config.plugins and config.plugins[name].enabled
-    }
-    return {
-        **enabled_config_classes(enabled),
-        **{plugin: type(instance) for plugin, instance in (configs or {}).items()},
-    }
 
 
 # meiva:link base/packages/plugins/docs/plugin-config/plugin-config.meiva.okf.md
@@ -455,101 +393,3 @@ def apply_config_overlay(
                 f"overlay field type validation failed ({owner}): {e}"
             ) from e
     return resolved
-
-
-def _field_is_sensitive(extra: object) -> bool:
-    if not isinstance(extra, dict):
-        return False
-    extras = cast(dict[str, Any], extra)
-    return extras.get("sensitive") is True
-
-
-def is_per_agent_field(plugin: str, field: str, configs: Mapping[str, BaseModel]) -> bool:
-    instance = configs.get(plugin)
-    if instance is None:
-        return False
-    info = type(instance).model_fields.get(field)
-    if info is None:
-        return False
-    return bool(_schema_extra(info).get("per_agent", False))
-
-
-def service_config_packet(plugin: str, config: BaseModel) -> str:
-    for name, field in type(config).model_fields.items():
-        if _field_is_sensitive(field.json_schema_extra):
-            raise InvalidConfigData(f"service config {plugin}.{name} is sensitive")
-    return json.dumps(
-        {"plugin": plugin, "config": config.model_dump(mode="json")},
-        sort_keys=True,
-        separators=(",", ":"),
-        allow_nan=False,
-    )
-
-
-# meiva:link base/packages/plugins/docs/plugin-config/plugin-config.meiva.okf.md
-def read_service_config[C: BaseModel](plugin: str, cls: type[C]) -> C | None:
-    from base.host.env.bootstrap import service_plugin_config_packet
-
-    packet = service_plugin_config_packet()
-    if packet is None:
-        return None
-    try:
-        data: object = json.loads(packet)
-    except json.JSONDecodeError as exc:
-        raise InvalidConfigData(f"invalid service plugin config JSON: {exc}") from exc
-    if not isinstance(data, dict):
-        raise InvalidConfigData("service plugin config requires a JSON object")
-    data = cast("dict[str, object]", data)
-    if set(data) != {"plugin", "config"}:
-        raise InvalidConfigData("service plugin config requires exactly plugin and config")
-    if data["plugin"] != plugin:
-        raise InvalidConfigData(
-            f"service plugin config names {data['plugin']!r}, expected {plugin!r}"
-        )
-    values = data["config"]
-    if not isinstance(values, dict) or set(cast("dict[str, object]", values)) != set(
-        cls.model_fields
-    ):
-        raise SchemaDriftError(
-            f"service plugin config {plugin!r} field set differs from declaration"
-        )
-    try:
-        return cls.model_validate(values)
-    except ValidationError as exc:
-        raise InvalidConfigData(f"invalid service plugin config {plugin!r}: {exc}") from exc
-
-
-def read_plugin_config[C: BaseModel](plugin: str, cls: type[C], config_path: Path) -> C:
-    from base.packages.plugins.config_view import with_cluster_policy
-
-    return with_cluster_policy(plugin, read_config_image(cls, config_path))
-
-
-def plugin_bootstrap_config() -> str:
-    import json
-
-    from base.config import schema_extra
-    from base.packages.plugins.config_face import declared_config_class
-    from base.packages.plugins.enable_config import discover_plugins
-
-    payload: dict[str, dict[str, object]] = {}
-    for plugin, plugin_dir in sorted(discover_plugins().items()):
-        cls = declared_config_class(plugin, plugin_dir)
-        if cls is None:
-            continue
-        fields: list[str] = []
-        for name, info in cls.model_fields.items():
-            extra = schema_extra(info)
-            if extra.get("scope") not in {
-                "cluster-pinned",
-                "cluster-default",
-            }:
-                continue
-            if extra.get("sensitive"):
-                raise ValueError(f"plugin cluster config {plugin}.{name} may not carry secrets")
-            fields.append(name)
-        if fields:
-            config = read_config_image(cls, disk_image_path(plugin))
-            values = config.model_dump(mode="json")
-            payload[plugin] = {name: values[name] for name in fields}
-    return json.dumps(payload, sort_keys=True, separators=(",", ":"), allow_nan=False)

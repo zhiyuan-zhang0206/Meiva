@@ -13,11 +13,20 @@ invalid capability tokens retain their explicit errors. Gateway URL and bearer
 helpers validate the existing client credential policy independently of identity.
 """
 
-import enum
-from collections.abc import Callable, Iterable
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Literal
 
+from base.cluster.machine.identity import (
+    MachineIdentity,
+    MachineNameMissing,
+    MachineRole,
+    MachineRoleInvalid,
+    MachineRoleMissing,
+    MachineRoles,
+    format_capabilities,
+    roles_from_flags,
+    validate_machine_name,
+)
 from base.host.env.dotenv_boot import launcher_context
 from base.host.net.auth import bearer_header, delivered_token, require_cluster_secret
 
@@ -41,36 +50,6 @@ __all__ = [
     "validate_machine_name",
 ]
 
-# A machine carries a SET of capabilities, not a single role. `gateway` owns
-# Postgres/Redis + the HTTP gateway; `agent-runner` runs agent processes;
-# `observability-station` owns the native LGTM observability backends. A
-# single-box deployment carries gateway+agent-runner. Each capability is
-# declared independently by its own boolean flag (`MEIVA_MACHINE_SERVE_*`, unset =
-# off); `roles_from_flags` collapses the booleans into the frozenset.
-# The DB still encodes the set as a TEXT[] of capability tokens. `MachineRole`
-# is one capability; `MachineRoles` is the set MachineIdentity.role() returns.
-MachineRole = Literal["gateway", "agent-runner", "observability-station"]
-# The set type is frozenset[str] (not frozenset[MachineRole]): values flow in
-# from the DB (TEXT[]) and a comma-separated env string, and frozenset is
-# invariant, so a literal `frozenset({"gateway"})` would not be assignable to a
-# frozenset[Literal]. Membership is validated at runtime by _parse_roles.
-MachineRoles = frozenset[str]
-_VALID_CAPABILITIES: frozenset[str] = frozenset(
-    ("gateway", "agent-runner", "observability-station")
-)
-
-
-class MachineNameMissing(RuntimeError):  # noqa: N818 — "state description" naming, same as AgentNotFound / IndexerUnavailable
-    """`MEIVA_MACHINE_NAME` is not set — multi-machine setup is incomplete."""
-
-
-class MachineRoleMissing(RuntimeError):  # noqa: N818
-    """This host serves no capability (every MEIVA_MACHINE_SERVE_* flag off or unset) — multi-machine setup is incomplete."""
-
-
-class MachineRoleInvalid(ValueError):  # noqa: N818
-    """role contains a token that is not 'gateway' / 'agent-runner' / 'observability-station', or is empty — typo or wrong input."""
-
 
 class GatewayApiBaseMissing(RuntimeError):  # noqa: N818 — state description, same style as MachineNameMissing
     """gateway_url unset — cannot resolve where to reach the gateway."""
@@ -78,152 +57,6 @@ class GatewayApiBaseMissing(RuntimeError):  # noqa: N818 — state description, 
 
 class GatewayApiTokenMissing(RuntimeError):  # noqa: N818 — state description, same style as GatewayApiBaseMissing
     """An agent- or runner-profile process has no machine API token although the cluster API is authenticated."""
-
-
-class _Unset(enum.Enum):
-    TOKEN = enum.auto()
-
-
-_UNSET = _Unset.TOKEN
-
-
-class MachineIdentity:
-    """An explicitly owned machine identity cache. Each field resolves lazily and
-    independently (a caller needing only role never triggers name resolution),
-    sharing one reset() for test isolation and one set() for explicit injection.
-    Replaces a per-function lru_cache so callers inject a value instead of
-    monkeypatching settings + busting caches.
-    """
-
-    def __init__(
-        self,
-        *,
-        name: Callable[[], str],
-        role: Callable[[], MachineRoles],
-        host: Callable[[], str],
-        description: Callable[[], str | None],
-    ) -> None:
-        self._read_name = name
-        self._read_role = role
-        self._read_host = host
-        self._read_description = description
-        self._name: str | None = None
-        self._role: MachineRoles | None = None
-        self._description: str | None = None
-        self._description_resolved: bool = False
-        self._host: str | None = None
-
-    def name(self) -> str:
-        if self._name is None:
-            self._name = validate_machine_name(self._read_name())
-        return self._name
-
-    def role(self) -> MachineRoles:
-        if self._role is None:
-            self._role = _coerce_roles(self._read_role())
-        return self._role
-
-    def host(self) -> str:
-        if self._host is None:
-            self._host = self._read_host().strip() or "localhost"
-        return self._host
-
-    def description(self) -> str | None:
-        if not self._description_resolved:
-            description = self._read_description()
-            self._description = description.strip() or None if description else None
-            self._description_resolved = True
-        return self._description
-
-    def set(
-        self,
-        *,
-        name: str | _Unset = _UNSET,
-        role: str | Iterable[str] | _Unset = _UNSET,
-        description: str | _Unset | None = _UNSET,
-        host: str | _Unset = _UNSET,
-    ) -> None:
-        if name is not _UNSET:
-            self._name = name
-        if role is not _UNSET:
-            self._role = _coerce_roles(role)
-        if description is not _UNSET:
-            self._description = description
-            self._description_resolved = True
-        if host is not _UNSET:
-            self._host = host
-
-    def reset(self) -> None:
-        self._name = None
-        self._role = None
-        self._description = None
-        self._description_resolved = False
-        self._host = None
-
-
-def format_capabilities(
-    serve_gateway: bool,  # noqa: FBT001 — capability flags, mirror is_gateway/is_agent_runner
-    serve_agent_runner: bool,  # noqa: FBT001
-    serve_observability_station: bool = False,  # noqa: FBT001, FBT002 — default keeps old callers' label
-) -> str:
-    """Render the capability flags as one human label.
-
-    "gateway + agent-runner" on a single-box host, "gateway" or "agent-runner"
-    for a split node, "observability-station" for a pure station, "none" when
-    a host serves none. Single source for the `meiva status` serves: line and
-    the `meiva cluster status` role column, which both display the capability
-    set (there is no single categorical role field on the wire — see
-    MachineStatus / ClusterStatus). The third flag defaults False so a caller
-    that only knows the two original flags keeps the pre-station label.
-    """
-    caps = [
-        name
-        for name, on in (
-            ("gateway", serve_gateway),
-            ("agent-runner", serve_agent_runner),
-            ("observability-station", serve_observability_station),
-        )
-        if on
-    ]
-    return " + ".join(caps) or "none"
-
-
-def validate_machine_name(value: str) -> str:
-    """Normalize a configured name and reject an uninitialized machine."""
-    env = value.strip()
-    if env:
-        return env
-    raise MachineNameMissing(
-        "machine name not set — `meiva init --machine-name <name>` records it for a new "
-        "home; for an initialized one set MEIVA_MACHINE_NAME in its `.env` (e.g. host-a / host-b)."
-    )
-
-
-def roles_from_flags(
-    *,
-    serve_gateway: bool,
-    serve_agent_runner: bool,
-    serve_observability_station: bool,
-) -> MachineRoles:
-    """Resolve the declared capability set without reading process settings."""
-    caps = {
-        cap
-        for cap, on in (
-            ("gateway", serve_gateway),
-            ("agent-runner", serve_agent_runner),
-            ("observability-station", serve_observability_station),
-        )
-        if on
-    }
-    if not caps:
-        raise MachineRoleMissing(
-            "this host serves neither gateway, agent-runner, nor observability-station — set "
-            "MEIVA_MACHINE_SERVE_GATEWAY and/or MEIVA_MACHINE_SERVE_AGENT_RUNNER and/or "
-            "MEIVA_MACHINE_SERVE_OBSERVABILITY_STATION (or run `meiva init --serve-gateway` / "
-            "`--serve-agent-runner` / `--serve-observability-station` on a new home; a single "
-            "box serves both gateway and agent-runner)."
-        )
-    return frozenset(caps)
 
 
 def _normalize_gateway_url(value: str) -> str | None:
@@ -389,32 +222,3 @@ def gateway_auth_headers(access: GatewayAccess) -> dict[str, str]:
         GatewayApiTokenMissing: see `gateway_bearer`.
     """
     return bearer_header(gateway_bearer(access))
-
-
-def _parse_roles(value: str) -> MachineRoles:
-    """Parse a comma-separated capability string into a validated frozenset.
-
-    `gateway,agent-runner` -> frozenset({'gateway', 'agent-runner'}). Each token
-    must be a known capability; an empty set (no valid tokens) is rejected so a
-    blank / all-comma value fails loud rather than resolving to "no capability".
-    """
-    tokens = frozenset(t.strip() for t in value.split(",") if t.strip())
-    unknown = tokens - _VALID_CAPABILITIES
-    if unknown or not tokens:
-        raise MachineRoleInvalid(
-            f"machine_role={value!r} invalid; comma-separated tokens, each "
-            f"'gateway', 'agent-runner', or 'observability-station' (got unknown {sorted(unknown)!r})."
-            if unknown
-            else f"machine_role={value!r} invalid; needs at least one of "
-            "'gateway' / 'agent-runner' / 'observability-station'."
-        )
-    return tokens
-
-
-def _coerce_roles(role: str | Iterable[str]) -> MachineRoles:
-    """Normalize an injected role into a validated frozenset. A string is parsed
-    as comma-separated (`set_identity(role="gateway,agent-runner")`); any other
-    iterable of capability tokens is validated the same way."""
-    if isinstance(role, str):
-        return _parse_roles(role)
-    return _parse_roles(",".join(role))

@@ -1,7 +1,7 @@
 exports = ["agent_identity.py", "attachment_transport.py", "batch.py", "const.py", "discovery.py", "extensions.py", "help.py", "injection_check.py", "install.py", "installation.py", "metering.py", "plugins.py", "process_context.py", "sdk_disable.py", "settings.py", "skill_sources.py", "tests", "validation.py", "wraps.py"]
 
 [uses]
-"agent_identity.py" = ["install.py", "process_context.py"]
+"agent_identity.py" = ["install.py", "process_context.py", "validation.py"]
 "attachment_transport.py" = ["process_context.py", "settings.py", "validation.py"]
 "discovery.py" = ["const.py"]
 "extensions.py" = ["install.py"]
@@ -11,12 +11,13 @@ exports = ["agent_identity.py", "attachment_transport.py", "batch.py", "const.py
 "installation.py" = ["__init__.py"]
 "metering.py" = ["__init__.py", "discovery.py", "process_context.py"]
 "plugins.py" = ["__init__.py", "sdk_disable.py"]
-"process_context.py" = ["__init__.py"]
+"process_context.py" = ["__init__.py", "plugins.py", "validation.py"]
 "sdk_disable.py" = ["__init__.py", "installation.py"]
 "settings.py" = ["installation.py", "process_context.py"]
 "skill_sources.py" = ["install.py", "installation.py"]
 "tests" = ["batch.py", "process_context.py", "validation.py"]
-"wraps.py" = ["installation.py", "metering.py", "settings.py"]
+"validation.py" = ["__init__.py"]
+"wraps.py" = ["__init__.py", "installation.py", "metering.py", "settings.py"]
 
 [purity]
 "." = "strict-to-be"
@@ -60,7 +61,6 @@ exports = ["agent_identity.py", "attachment_transport.py", "batch.py", "const.py
 "process_context.py#base/native_process/loaded_commit.py" = 1
 "settings.py#base/agents/context/clients.py" = 1
 "settings.py#base/config/__init__.py" = 1
-"settings.py#base/config/service_read.py" = 1
 "settings.py#base/events/live/bus.py" = 1
 "settings.py#base/host/env/agent_slices.py" = 2
 "wraps.py#base/log/__init__.py" = 1
@@ -72,11 +72,3 @@ exports = ["agent_identity.py", "attachment_transport.py", "batch.py", "const.py
 [debt.wide-params]
 "extensions.py#def load_extensions" = 1
 "install.py#def install" = 1
-
-[debt.wide-public-surface]
-"agent_identity.py#public-surface" = 1
-"discovery.py#public-surface" = 1
-"help.py#public-surface" = 1
-"install.py#public-surface" = 1
-"process_context.py#public-surface" = 1
-"settings.py#public-surface" = 1

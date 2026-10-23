@@ -1,10 +1,12 @@
 exports = ["guard.py"]
 
 [uses]
+"__init__.py" = ["tail.py"]
 "tests" = ["__init__.py", "guard.py"]
 
 [purity]
 "." = "strict-to-be"
+"tail.py" = "strict"
 
 [debt.impure-call]
 "__init__.py#datetime.now" = 1
@@ -15,6 +17,3 @@ exports = ["guard.py"]
 [debt.wide-params]
 "__init__.py#def exec_output_message" = 1
 "__init__.py#def inbound_message" = 1
-
-[debt.wide-public-surface]
-"__init__.py#public-surface" = 1

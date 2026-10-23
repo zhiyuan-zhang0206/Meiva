@@ -115,3 +115,22 @@ def record_disabled(disabled: frozenset[str]) -> None:
     if current is None:
         raise RuntimeError("no SDK installation to record disable entries on")
     setattr(meiva_module(), SLOT, replace(current, disabled=disabled))
+
+
+def model_catalog() -> ModelCatalog:
+    installation = installed()
+    if installation is None or installation.catalog is None:
+        raise RuntimeError("the SDK installation carries no ModelCatalog")
+    return installation.catalog
+
+
+def config_authority() -> ConfigAuthority:
+    installation = installed()
+    if installation is None or installation.authority is None:
+        raise RuntimeError("the SDK installation carries no ConfigAuthority")
+    return installation.authority
+
+
+def expansions() -> tuple[str, ...]:
+    current = installed()
+    return () if current is None else current.expansions

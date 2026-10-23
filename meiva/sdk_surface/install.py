@@ -65,22 +65,19 @@ from .installation import (
     installed,
     slot,
 )
-
-
-def load_attempted() -> bool:
-    """Whether a load is in flight or was attempted and failed in this process (no retry)."""
-    return isinstance(slot(), Loading)
-
-
-def mark_load_attempt() -> None:
-    """Guard a load or faces upgrade without discarding the already-installed surface."""
-    if not load_attempted():
-        setattr(meiva_module(), SLOT, Loading(installed()))
-
-
-def mark_load_failed(exc: BaseException) -> None:
-    """Keep the original failed load in the same slot; later accesses must not retry it."""
-    setattr(meiva_module(), SLOT, Loading(installed(), exc))
+from .installation import (
+    expansions as expansions,
+)
+from .sdk_disable import mark_load_failed as mark_load_failed
+from .wraps import (
+    clear_load_attempt as clear_load_attempt,
+)
+from .wraps import (
+    load_attempted as load_attempted,
+)
+from .wraps import (
+    mark_load_attempt as mark_load_attempt,
+)
 
 
 def raise_load_failure() -> None:
@@ -90,26 +87,12 @@ def raise_load_failure() -> None:
         raise value.failure
 
 
-def clear_load_attempt() -> None:
-    """Release the slot after a deferred load (the loader module was still importing)."""
-    value = slot()
-    if isinstance(value, Loading):
-        setattr(meiva_module(), SLOT, value.installation)
-
-
 def mark_faces_loaded() -> None:
     """Record that the registry's agent-runtime faces loaded: build a new value, swap the holder."""
     current = installed()
     if current is None or current.faces:
         return
     setattr(meiva_module(), SLOT, replace(current, faces=True))
-
-
-def expansions() -> tuple[str, ...]:
-    """Dotted `meiva` paths the installed plugins promote into the system prompt's expanded SDK
-    reference, in registry order (rendered ahead of the configured framework list)."""
-    current = installed()
-    return () if current is None else current.expansions
 
 
 def _provider_remover(
@@ -122,11 +105,6 @@ def _provider_remover(
 
 
 def _provider_mount(provider: SkillProvider) -> Installation:
-    """The minimal installation a scoped skill root carries when nothing is installed.
-
-    The ops runner scopes a project skill root around one request without running a
-    plugin load (its process has no installation of its own); the value still needs a
-    home because there is one holder for the process's SDK configuration."""
     return Installation(
         registry=ExtensionRegistry(),
         expansions=(),
@@ -139,14 +117,19 @@ def _provider_mount(provider: SkillProvider) -> Installation:
     )
 
 
-def mount_skill_provider(provider: SkillProvider) -> Callable[[], None]:
-    """Extend this process's skill-root providers by one; returns the undo.
+def _is_bare_provider_mount(installation: Installation) -> bool:
+    return (
+        not installation.registry.plugins
+        and not installation.expansions
+        and not installation.wrap_layers
+        and not installation.metered
+        and not installation.disabled
+        and not installation.faces
+        and not installation.undo
+    )
 
-    For a framework caller that needs a request-scoped skill root (the ops runner's
-    per-agent command view): build a new installation value with the provider appended
-    and swap the holder; the undo removes exactly that provider and puts the holder
-    back. With no installation at all, a minimal provider-only value is mounted.
-    """
+
+def mount_skill_provider(provider: SkillProvider) -> Callable[[], None]:
     prior = slot()
     mounted = (
         replace(prior, skill_providers=(*prior.skill_providers, provider))
@@ -160,8 +143,6 @@ def mount_skill_provider(provider: SkillProvider) -> Callable[[], None]:
         if current is mounted:
             setattr(meiva_module(), SLOT, prior)
             return
-        # An interleaved mount/unmount changed the value under us: remove exactly this
-        # provider from whatever is current, and clear the holder if nothing is left.
         if isinstance(current, Installation):
             remaining = tuple(p for p in current.skill_providers if p is not provider)
             if not remaining and _is_bare_provider_mount(current):
@@ -170,19 +151,6 @@ def mount_skill_provider(provider: SkillProvider) -> Callable[[], None]:
                 setattr(meiva_module(), SLOT, replace(current, skill_providers=remaining))
 
     return undo
-
-
-def _is_bare_provider_mount(installation: Installation) -> bool:
-    """Whether the value carries nothing but skill providers (a scoped mount's shell)."""
-    return (
-        not installation.registry.plugins
-        and not installation.expansions
-        and not installation.wrap_layers
-        and not installation.metered
-        and not installation.disabled
-        and not installation.faces
-        and not installation.undo
-    )
 
 
 def _apply(

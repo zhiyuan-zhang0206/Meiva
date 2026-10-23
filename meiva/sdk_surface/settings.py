@@ -14,28 +14,18 @@ from typing import Any, Literal, Protocol, cast, overload
 from base.agents.context.clients import DatabaseHandle
 from base.clock import Clock
 from base.config import settings
-from base.config.service_read import ConfigAuthority
 from base.host.env.agent_slices import ModelOverrides
-from base.lm.catalog import ModelCatalog
 from meiva.sdk_surface import process_context
 
-from .installation import installed
-
-
-def model_catalog() -> ModelCatalog:
-    """Provider facts explicitly retained by this process's SDK installation."""
-    installation = installed()
-    if installation is None or installation.catalog is None:
-        raise RuntimeError("the SDK installation carries no ModelCatalog")
-    return installation.catalog
-
-
-def config_authority() -> ConfigAuthority:
-    """Fresh configuration authority retained by this process's SDK installation."""
-    installation = installed()
-    if installation is None or installation.authority is None:
-        raise RuntimeError("the SDK installation carries no ConfigAuthority")
-    return installation.authority
+from .installation import (
+    config_authority as config_authority,
+)
+from .installation import (
+    installed,
+)
+from .installation import (
+    model_catalog as model_catalog,
+)
 
 
 def clock() -> Clock:

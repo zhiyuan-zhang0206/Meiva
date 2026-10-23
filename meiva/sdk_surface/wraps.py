@@ -68,7 +68,23 @@ from collections.abc import Awaitable, Callable, Generator, Mapping
 from contextlib import contextmanager
 from typing import Any, cast
 
-from .installation import WrapLayer, installed
+from . import meiva_module
+from .installation import SLOT, Loading, WrapLayer, installed, slot
+
+
+def load_attempted() -> bool:
+    return isinstance(slot(), Loading)
+
+
+def mark_load_attempt() -> None:
+    if not load_attempted():
+        setattr(meiva_module(), SLOT, Loading(installed()))
+
+
+def clear_load_attempt() -> None:
+    value = slot()
+    if isinstance(value, Loading):
+        setattr(meiva_module(), SLOT, value.installation)
 
 
 class WrapError(Exception):
