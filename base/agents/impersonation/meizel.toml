@@ -18,3 +18,4 @@ exports = ["delivery.py", "event_signals.py", "history.py", "host_transport.py",
 
 [purity]
 "notes.py" = "strict"
+"status.py" = "strict"
