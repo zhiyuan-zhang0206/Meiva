@@ -69,7 +69,10 @@ def test_concurrent_creation_commits_one_resource_and_receipt(
 
         def create(_worker: int) -> tuple[Any, ...]:
             return schedules.create_blocking(
-                pool, schedules.ScheduleCreate(name="concurrent", script="pass"), "create"
+                pool,
+                schedules.ScheduleCreate(name="concurrent", script="pass"),
+                "create",
+                finish_receipt=creation_receipts.finish,
             )
 
         results = list(workers.map(create, range(4)))
@@ -138,10 +141,16 @@ def test_creation_identity_is_bound_to_verified_principal(
 
     with base.db.pool(gate=database_gate) as pool:
         first = schedules.create_blocking(
-            pool, schedules.ScheduleCreate(name="one", script="pass"), scoped_key("one")
+            pool,
+            schedules.ScheduleCreate(name="one", script="pass"),
+            scoped_key("one"),
+            finish_receipt=creation_receipts.finish,
         )
         second = schedules.create_blocking(
-            pool, schedules.ScheduleCreate(name="two", script="pass"), scoped_key("two")
+            pool,
+            schedules.ScheduleCreate(name="two", script="pass"),
+            scoped_key("two"),
+            finish_receipt=creation_receipts.finish,
         )
     assert first[0] != second[0]
     assert db_conn.execute("SELECT count(*) FROM resource_creation_receipts").fetchone() == (2,)

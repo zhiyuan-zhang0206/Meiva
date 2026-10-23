@@ -21,7 +21,10 @@ model registry validates writes; existing agents retain their frozen model.
 configuration endpoints obtain their database and pool from the serving
 `Request.app.state` and pass them explicitly to the machine lookup, capability
 projection and read/audit/write RPC helpers. The audit fanout uses that same
-app database. Helpers never import the global gateway app; `ConfigAuthority`
+app database and the same app-owned role lookup and RPC dispatcher as GET/PUT.
+The app factory supplies these operations plus candidate validation and cluster
+persistence; worker helpers require them explicitly. Helpers never import the
+global gateway app; `ConfigAuthority`
 continues to own configuration reads only. Local identity/role reads and fresh
 configuration reads retain their existing timing. Router-only HTTP tests cover
 two app instances with distinct resources, alongside the full gateway lifespan

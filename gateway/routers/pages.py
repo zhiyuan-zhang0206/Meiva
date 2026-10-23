@@ -35,7 +35,6 @@ from psycopg import Connection
 from psycopg_pool import ConnectionPool
 from starlette.background import BackgroundTask
 
-from base.config import settings
 from base.db import agent_exists
 from base.events.live.bus import EventBus
 from base.events.live.projection import PageClosed, PageOpened
@@ -187,12 +186,7 @@ def _absolute_url(request: Request, path: str) -> str:
     unprovisioned checkout) — a gateway that serves pages is expected to be
     configured, so this is a dev-only convenience, not a supported mode.
     """
-    gateway_process = getattr(request.app.state, "gateway_process", None)
-    raw_url = (
-        gateway_process.config.view.gateway.gateway_url
-        if gateway_process is not None
-        else settings.gateway.gateway_url
-    )
+    raw_url = request.app.state.gateway_process.config.view.gateway.gateway_url
     base = raw_url.strip().rstrip("/")
     if not base:
         base = str(request.base_url).rstrip("/")
@@ -257,8 +251,8 @@ async def post_guarded_page_register(
             body.port,
             connection=connection,
         ),
-        port_free_checker=getattr(request.app.state, "page_port_free_checker", None),
-        finish_receipt=getattr(request.app.state, "page_receipt_finisher", None),
+        port_free_checker=request.app.state.page_port_free_checker,
+        save_receipt=request.app.state.page_receipt_finisher,
     )
     if not result.replayed:
         for name in result.closed_names:

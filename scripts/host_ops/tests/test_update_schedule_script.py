@@ -21,6 +21,7 @@ from base.native_process.root_control.instance_lock import (
 )
 from base.paths import run_dir
 from gateway.schedules import router, session_control
+from gateway.tests.auth.gateway_config import gateway_test_app
 from scripts.host_ops import update_schedule_script as repair
 
 
@@ -187,6 +188,7 @@ def test_versioned_edit_preserves_fields_and_defers_session_work(
                 command="python custom.py",
                 enabled=enabled,
             ),
+            finish_receipt=gateway_test_app().state.schedule_receipt_finisher,
         )
         sid = row[0]
 
@@ -225,7 +227,11 @@ def test_stale_hash_and_syntax_errors_do_not_write(
     db_conn: psycopg.Connection, database: Database
 ) -> None:
     with database.pool() as pool:
-        row = router.create_blocking(pool, router.ScheduleCreate(name="stale", script="pass\n"))
+        row = router.create_blocking(
+            pool,
+            router.ScheduleCreate(name="stale", script="pass\n"),
+            finish_receipt=gateway_test_app().state.schedule_receipt_finisher,
+        )
         with pytest.raises(RuntimeError, match="expected old script"):
             repair.replace_script(pool, row[0], "print(2)\n", "0" * 64)
         with pytest.raises(Exception, match="syntax error"):
@@ -280,7 +286,9 @@ def test_external_file_uses_installed_runtime_and_real_writer(
     )
     with database.pool() as pool:
         row = router.create_blocking(
-            pool, router.ScheduleCreate(name="external", script="pass\n", enabled=True)
+            pool,
+            router.ScheduleCreate(name="external", script="pass\n", enabled=True),
+            finish_receipt=gateway_test_app().state.schedule_receipt_finisher,
         )
     external = tmp_path / "operator-tool.py"
     external.write_bytes(Path(repair.__file__).read_bytes())

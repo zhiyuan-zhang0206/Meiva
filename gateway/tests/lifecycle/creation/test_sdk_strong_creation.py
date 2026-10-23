@@ -61,7 +61,10 @@ def httpx_response_of(response: Any) -> httpx.Response:
 def _older(current: FastAPI) -> FastAPI:
     older = FastAPI(
         lifespan=partial(
-            lifespan, process=current.state.gateway_process, process_ownership="borrowed"
+            lifespan,
+            process=current.state.gateway_process,
+            process_ownership="borrowed",
+            services=current.state.lifespan_services,
         ),
         middleware=current.user_middleware,
     )

@@ -25,6 +25,7 @@ import pytest
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import runtime_config, settings
+from base.config.admin.candidate import validate_env_patch_for_write
 from base.config.service_read import ConfigAuthority
 from base.host import config_validators
 from base.host.env import dotenv_file
@@ -640,6 +641,7 @@ async def test_put_self_host_field_skips_empty_cluster_audit(
                     config_authority=config_authority,
                     config_role_lookup=roles,
                     config_rpc_dispatcher=dispatch,
+                    config_candidate_validator=validate_env_patch_for_write,
                     config_cluster_field_writer=_write_fields,
                     db=object(),
                     db_pool=object(),

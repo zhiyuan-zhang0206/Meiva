@@ -7,9 +7,8 @@ from pathlib import Path
 import pytest
 
 from base.config import runtime_config
-from base.config.admin.candidate import EnvPatchValidation
+from base.config.admin.candidate import EnvPatchValidation, validate_env_patch_for_write
 from base.host.env import dotenv_file
-from gateway.routers.configuration import runtime as config_router
 from gateway.tests.auth.gateway_config import gateway_test_client
 
 
@@ -105,7 +104,7 @@ def test_put_returns_conflict_when_cluster_candidate_goes_stale(
     configured_home: Path,
 ) -> None:
     """A write between validation and persistence is reported as a retryable 409."""
-    original_validate = config_router.validate_env_patch_for_write
+    original_validate = validate_env_patch_for_write
     validation_calls = 0
 
     def validate_then_change_file(

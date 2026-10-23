@@ -224,6 +224,7 @@ def test_failure_before_receipt_rolls_back_replacement(
     def fail(*_args: object) -> None:
         raise HTTPException(status_code=503, detail="fault before page receipt commit")
 
+    original_finish = client.app.state.page_receipt_finisher
     client.app.state.page_receipt_finisher = fail
     assert (
         client.post(_path(agent), json={**BODY, "port": 8802}, headers=_key("pending")).status_code
@@ -234,7 +235,7 @@ def test_failure_before_receipt_rolls_back_replacement(
     ]
     assert db_conn.execute("SELECT count(*) FROM page_operation_receipts").fetchone() == (1,)
     db_conn.commit()
-    client.app.state.page_receipt_finisher = None
+    client.app.state.page_receipt_finisher = original_finish
     recovered = client.post(_path(agent), json={**BODY, "port": 8802}, headers=_key("pending"))
     assert recovered.status_code == 201
 

@@ -1,13 +1,17 @@
 from concurrent.futures import ThreadPoolExecutor
 from threading import Barrier
+from typing import Any
 from uuid import uuid4
 
 import psycopg
 import pytest
 
+from base.agents.impersonation.wake import publish_inbound_wake
+from base.agents.tasks.delivery import enqueue_task_notifications
 from base.agents.tasks.priority import Priority
 from base.api_contracts.idempotency import keyed_headers
 from gateway.routers import tasks
+from gateway.routers.receipts.task import save_task_receipt
 from gateway.schemas.tasks import TaskUpdateRequest
 from gateway.tests.auth.gateway_config import gateway_test_client
 from gateway.tests.routers.test_tasks_router import make_agent, make_task
@@ -30,7 +34,12 @@ def test_concurrent_duplicates_commit_one_assignment(db_conn: psycopg.Connection
         def patch(_index: int) -> tuple[object, int]:
             barrier.wait()
             task, notes = tasks.patch_task_blocking(
-                client.app.state.db_pool, tid, TaskUpdateRequest(owner=new), "same-operation"
+                client.app.state.db_pool,
+                tid,
+                TaskUpdateRequest(owner=new),
+                "same-operation",
+                enqueue_notifications_fn=enqueue_task_notifications,
+                save_receipt_fn=save_task_receipt,
             )
             return task, len(notes)
 
@@ -48,7 +57,7 @@ def test_lost_response_replay_preserves_new_owner_and_reminder_window(
     old, middle, current = (make_agent(db_conn) for _ in range(3))
     tid = make_task(db_conn, owner=old)
     headers = keyed_headers("lost-response")
-    real_wake = tasks.publish_inbound_wake
+    real_wake = publish_inbound_wake
 
     def fail_wake(*_args: object) -> None:
         raise RuntimeError("post-commit response lost")
@@ -132,10 +141,9 @@ def test_producer_failure_rolls_back_effect_and_receipt(
 ) -> None:
     old, new = make_agent(db_conn), make_agent(db_conn)
     tid = make_task(db_conn, owner=old)
-    target = "enqueue_task_notifications" if failure == "notification" else "save_task_receipt"
-    real = getattr(tasks, target)
+    real = enqueue_task_notifications if failure == "notification" else save_task_receipt
 
-    def fail_after_insert(*args: object) -> None:
+    def fail_after_insert(*args: Any) -> None:
         real(*args)
         raise RuntimeError("producer failed after durable insert")
 
@@ -195,7 +203,12 @@ def test_distinct_task_paths_and_principals_are_independent(db_conn: psycopg.Con
                 AuthPrincipal("cluster", subject), "PATCH", f"/api/tasks/{first}", "raw"
             )
             tasks.patch_task_blocking(
-                client.app.state.db_pool, first, TaskUpdateRequest(priority=Priority.P2), key
+                client.app.state.db_pool,
+                first,
+                TaskUpdateRequest(priority=Priority.P2),
+                key,
+                enqueue_notifications_fn=enqueue_task_notifications,
+                save_receipt_fn=save_task_receipt,
             )
     assert _count(db_conn, "task_patch_receipts") == 4
 
