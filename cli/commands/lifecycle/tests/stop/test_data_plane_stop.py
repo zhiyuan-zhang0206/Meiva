@@ -93,7 +93,7 @@ def test_linux_ticks_win_over_changed_epoch_birth(
         identity.live()
 
 
-@pytest.mark.skipif(sys.platform != "linux", reason="Linux /proc start-time identity")
+@pytest.mark.requires_host("linux")
 def test_wait_for_exit_converges_when_a_tracked_entry_vanishes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

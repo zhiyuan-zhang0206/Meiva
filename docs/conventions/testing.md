@@ -112,7 +112,14 @@ def test_the_helper_is_signed() -> None:
 `tests/fixtures/host_platform.py` turns the marker into a skip on every other
 host with one consistent reason; `--collect-only` still lists the test, and a CI
 lane must run it on the named host (a skip with no lane is how a broken test
-disappears). The marker is for that case only: "this test is about the host",
+disappears). `scripts/structure/platform_lane_coverage.py` holds that promise:
+`scripts/structure/platform_lanes.toml` declares each lane by the `host` it runs
+on, the `ci_job` that runs it, and whether it selects the whole suite or
+`-m requires_host`, and a declaration no lane covers fails with its own name. A
+lane whose job is missing, lands on another host, or carries
+`continue-on-error` (it runs the tests and judges none of them) covers nothing;
+the gaps that predate the lanes are listed in `UNRUN_ALLOWED` in that module and
+the tuple only shrinks. The marker is for that case only: "this test is about the host",
 never "this test is hard to port".
 
 Every skip in the tree is counted, whatever asks for it — `@pytest.mark.skipif`,
@@ -122,7 +129,7 @@ sites it counts; a run that adds one fails there and prints the new file, line a
 predicate. The number only shrinks: it is a budget, not a whitelist, so a skip
 whose predicate the tree has never used still fails, and the report names it
 instead of asking a reader to diff the tree. Regenerate both blocks with
-`.venv/bin/python -m scripts.structure.skip_sites --print-baseline` after
+`.venv/bin/python -m scripts.structure.skip_sites --write-baseline` after
 removing a skip.
 
 ## Frontend

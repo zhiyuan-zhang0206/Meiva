@@ -1,0 +1,18 @@
+# The CI lanes that run tests on a host, and what each one selects.
+#
+# A lane is a promise about CI, not about a developer's machine: `ci_job` names a job in
+# `.github/workflows/ci.yml`, `host` names the system that job's runner is, and `selects`
+# says which tests it runs there:
+#
+#   suite  - the job runs the whole test tree on that host, so every declaration on that
+#            host is covered;
+#   marked - the job runs `-m requires_host` only, so it covers declarations made with the
+#            marker and nothing else.
+#
+# `scripts/structure/platform_lane_coverage.py` judges the tree against this table: a
+# declaration whose host has no such lane is a test that skips everywhere.
+
+[lanes.backend-shard]
+host = "linux"
+ci_job = "backend-shard"
+selects = "suite"
