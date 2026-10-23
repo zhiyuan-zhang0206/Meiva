@@ -182,6 +182,26 @@ def test_renaming_a_file_that_carries_a_recorded_read_is_not_a_finding(
     assert _lint.main([], repo_root=root) == 0
 
 
+def test_a_site_outside_the_change_is_marked_as_nobodys(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # meiva:note
+    # The count is the whole tree's, so a `--only` run can name a file the author never
+    # opened. Saying which sites are theirs is the difference between a gate and a mystery.
+    root = _repo(tmp_path)
+    (root / "tests" / "test_mine.py").write_text("x = 1\n", encoding="utf-8")
+    (root / "tests" / "test_theirs.py").write_text(
+        "import sys\n\n\ndef test_x():\n    assert sys.platform\n", encoding="utf-8"
+    )
+    baseline = root / _lint.BASELINE
+    baseline.parent.mkdir(parents=True)
+    baseline.write_text(json.dumps({"sys.platform": 0}), encoding="utf-8")
+    assert _lint.main(["--only", "tests/test_mine.py"], repo_root=root) == 1
+    err = capsys.readouterr().err
+    assert "tests/test_theirs.py:5" in err
+    assert "[outside your change]" in err
+
+
 def test_a_scoped_run_judges_the_whole_tree_but_prints_its_files(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
