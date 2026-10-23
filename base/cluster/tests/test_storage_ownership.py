@@ -52,7 +52,7 @@ def _pg_receipt(data: Path, *, state: str = "captured") -> pg.Receipt:
         "directory": [info.st_dev, info.st_ino],
         "port": 15433,
         "platform": sys.platform,
-        "boot_id": pg._boot(),
+        "boot_id": pg.boot_id(),
         "state": state,
         "owner": None
         if state in {"pending", "not-started"}
@@ -108,7 +108,7 @@ def test_postgres_rejects_changed_file_binding(
     receipt = _pg_receipt(pg_data)
     record = pg_data / "postmaster.pid"
     record.write_text(f"123\n{pg_data}\n100\n15433\n")
-    inode, header = pg._pidfile(pg_data, receipt)
+    inode, header = pg.read_pidfile(pg_data, receipt)
     ready = receipt.model_copy(update={"state": "ready", "pidfile": inode, "header": header})
     if change == "pidfile":
         record.rename(pg_data / "original.pid")
@@ -120,7 +120,7 @@ def test_postgres_rejects_changed_file_binding(
     else:
         record.write_text(f"123\n{pg_data}\n100\n15434\n")
     with pytest.raises(RuntimeError, match="pidfile"):
-        pg._pidfile(pg_data, ready)
+        pg.read_pidfile(pg_data, ready)
 
 
 def test_prior_boot_never_donates_reused_pid_authority(
@@ -188,7 +188,7 @@ def test_failed_pg_exec_is_not_started_but_ambiguous_spawn_stays_pending(
             {},
             retained_children=retained_children,
         )
-    receipt = pg._read(pg_data)
+    receipt = pg.read_receipt(pg_data)
     assert receipt is not None and receipt.state == "not-started"
 
     def interrupted(*_args: object, **_kwargs: object) -> None:
@@ -197,7 +197,7 @@ def test_failed_pg_exec_is_not_started_but_ambiguous_spawn_stays_pending(
     monkeypatch.setattr(pg.subprocess, "Popen", interrupted)
     with pytest.raises(KeyboardInterrupt):
         pg.spawn_postgres(pg_data, pending, ["postgres"], {}, retained_children=retained_children)
-    receipt = pg._read(pg_data)
+    receipt = pg.read_receipt(pg_data)
     assert receipt is not None and receipt.state == "pending"
 
 
@@ -225,7 +225,7 @@ def test_real_cancellation_after_pg_spawn_retains_native_receipt(
                 {},
                 retained_children=retained_children,
             )
-        receipt = pg._read(pg_data)
+        receipt = pg.read_receipt(pg_data)
         assert receipt is not None and receipt.state == "captured"
         assert receipt.process().pid == children[0].pid and receipt.process().live()
         assert retained_children == children
@@ -267,6 +267,7 @@ def test_stop_reaps_only_the_matching_home_child_after_native_closure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     receipt = _pg_receipt(pg_data)
+    pg.write(pg_data, receipt)
     owner = receipt.process()
     order: list[str] = []
     first = Mock(pid=owner.pid)
@@ -274,7 +275,6 @@ def test_stop_reaps_only_the_matching_home_child_after_native_closure(
     children = cast("list[subprocess.Popen[bytes]]", [first, other])
     first.wait.side_effect = lambda *, timeout: order.append(f"reap:{timeout}")
     monkeypatch.setattr(pg, "observe", Mock(return_value=owner))
-    monkeypatch.setattr(pg, "_read", Mock(return_value=receipt))
     monkeypatch.setattr(pg, "capture_tree", Mock(return_value=[]))
     monkeypatch.setattr(pg.OwnedProcess, "send_signal", Mock(return_value=True))
 
@@ -294,8 +294,8 @@ def test_stop_reaps_only_the_matching_home_child_after_native_closure(
             "owner": pg.ExpectedProcess(pid=other.pid, create_time=100.0, starttime=456),
         }
     )
+    pg.write(sibling, sibling_receipt)
     monkeypatch.setattr(pg, "observe", Mock(return_value=sibling_receipt.process()))
-    monkeypatch.setattr(pg, "_read", Mock(return_value=sibling_receipt))
     pg.stop(sibling, retained_children=children)
     other.wait.assert_called_once_with(timeout=1)
     assert children == []
@@ -321,7 +321,7 @@ def test_failed_birth_capture_keeps_the_callers_spawned_handle(
             )
         [child] = children
         assert child.poll() is None
-        receipt = pg._read(pg_data)
+        receipt = pg.read_receipt(pg_data)
         assert receipt is not None and receipt.state == "pending"
     finally:
         for child in children:

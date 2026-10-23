@@ -9,6 +9,3 @@ exports = ["direct_url.py", "pg_admin.py", "pg_foreground.py", "pg_runtime.py", 
 
 [purity]
 "__init__.py" = "strict"
-
-[debt.private-name]
-"tests/test_vendored_binaries.py -> runtime_binaries.py#_PGVECTOR_SQL" = 5

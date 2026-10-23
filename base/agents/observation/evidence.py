@@ -1,6 +1,6 @@
 """Observation evidence, independent of lifecycle or execution progress."""
 
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 from enum import StrEnum
 from typing import Literal
 
@@ -106,32 +106,31 @@ def availability(
     host_online: bool | None,
     probe_at: datetime | None,
     admission_at: datetime | None,
-    launch_failure_reason: str | None = None,
-    launch_failure_at: datetime | None = None,
-    now: datetime | None = None,
+    now: datetime,
+    launch_failure: tuple[str | None, datetime | None] = (None, None),
 ) -> AgentAvailability:
-    at = now or datetime.now(UTC)
+    launch_failure_reason, launch_failure_at = launch_failure
     _validate_launch_failure_pair(launch_failure_reason, launch_failure_at)
     if status != "terminated" and launch_failure_reason is not None:
         assert launch_failure_at is not None  # noqa: S101 — paired above
-        return _launch_failure_availability(launch_failure_reason, at, launch_failure_at)
+        return _launch_failure_availability(launch_failure_reason, now, launch_failure_at)
     latest_at = _latest_evidence_at(probe_at, admission_at)
-    if status == "terminated" or host_online is None or not _fresh(probe_at, at, PROBE_FRESH_FOR):
+    if status == "terminated" or host_online is None or not _fresh(probe_at, now, PROBE_FRESH_FOR):
         return AgentAvailability(
-            reason=AvailabilityReason.UNKNOWN, observed_at=at, evidence_at=latest_at
+            reason=AvailabilityReason.UNKNOWN, observed_at=now, evidence_at=latest_at
         )
     if not host_online:
         return AgentAvailability(
-            reason=AvailabilityReason.HOST_UNAVAILABLE, observed_at=at, evidence_at=probe_at
+            reason=AvailabilityReason.HOST_UNAVAILABLE, observed_at=now, evidence_at=probe_at
         )
     if admission_at is None:
         return AgentAvailability(
-            reason=AvailabilityReason.AWAITING_ADMISSION, observed_at=at, evidence_at=probe_at
+            reason=AvailabilityReason.AWAITING_ADMISSION, observed_at=now, evidence_at=probe_at
         )
-    if not _fresh(admission_at, at, ADMISSION_FRESH_FOR):
+    if not _fresh(admission_at, now, ADMISSION_FRESH_FOR):
         return AgentAvailability(
-            reason=AvailabilityReason.UNKNOWN, observed_at=at, evidence_at=latest_at
+            reason=AvailabilityReason.UNKNOWN, observed_at=now, evidence_at=latest_at
         )
     return AgentAvailability(
-        reason=AvailabilityReason.ADMITTED, observed_at=at, evidence_at=admission_at
+        reason=AvailabilityReason.ADMITTED, observed_at=now, evidence_at=admission_at
     )

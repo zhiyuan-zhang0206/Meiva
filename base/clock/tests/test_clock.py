@@ -44,14 +44,20 @@ def test_now_is_the_injected_source() -> None:
     assert clock.now_timestamp() == "[2026-05-06 14:32:05]"
 
 
-def test_from_settings_reads_the_live_settings(monkeypatch: pytest.MonkeyPatch) -> None:
-    from base.config import settings
+def test_from_settings_reads_the_live_settings() -> None:
+    from base.config import get_field, set_field
 
-    monkeypatch.setattr(settings.general, "timezone", "Europe/Paris")
-    monkeypatch.setattr(settings.general, "message_timestamp_weekday", True)
-    clock = Clock.from_settings()
-    assert clock.timezone == "Europe/Paris"
-    assert clock.explicit_zone() == ZoneInfo("Europe/Paris")
+    original_tz = get_field("timezone")
+    original_weekday = get_field("message_timestamp_weekday")
+    try:
+        set_field("timezone", "Europe/Paris")
+        set_field("message_timestamp_weekday", True)
+        clock = Clock.from_settings()
+        assert clock.timezone == "Europe/Paris"
+        assert clock.explicit_zone() == ZoneInfo("Europe/Paris")
+    finally:
+        set_field("timezone", original_tz)
+        set_field("message_timestamp_weekday", original_weekday)
 
 
 def test_boot_clock_reads_keep_two_owners_and_previous_handles_separate(

@@ -5,17 +5,13 @@ import os
 import sys
 from typing import Any
 
-import base.config._lite as lite
-from base.config import _full
-from base.config.config_registry import DOMAIN_MODELS
+from base.config import ConfigBoot
+from base.config.service_read import domain_model_classes
 from base.host.env.config_lite_table import FIELD_DOMAINS
 
-MODELS = {
-    attr: getattr(_full, model_name)
-    for attr, _label, model_name, _cap in DOMAIN_MODELS
-    if isinstance(model_name, str)
-}
+MODELS = domain_model_classes()
 
+lite = ConfigBoot()
 lite.prepare()
 
 results: list[dict[str, Any]] = []

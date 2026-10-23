@@ -247,7 +247,7 @@ def _synthetic_deb() -> bytes:
     payloads = {
         f"./usr/lib/postgresql/{major}/lib/vector.so": b"SO",
         f"./usr/share/postgresql/{major}/extension/vector.control": b"CTRL",
-        f"./usr/share/postgresql/{major}/extension/{rb._PGVECTOR_SQL}": b"SQL",
+        f"./usr/share/postgresql/{major}/extension/{rb.PGVECTOR_SQL}": b"SQL",
     }
     data_tar = io.BytesIO()
     with tarfile.open(fileobj=data_tar, mode="w") as tar:
@@ -270,7 +270,7 @@ def _synthetic_bottle() -> bytes:
     payloads = {
         f"{prefix}lib/postgresql@{major}/vector.dylib": b"DYLIB",
         f"{prefix}share/postgresql@{major}/extension/vector.control": b"CTRL",
-        f"{prefix}share/postgresql@{major}/extension/{rb._PGVECTOR_SQL}": b"SQL",
+        f"{prefix}share/postgresql@{major}/extension/{rb.PGVECTOR_SQL}": b"SQL",
     }
     blob = io.BytesIO()
     with tarfile.open(fileobj=blob, mode="w:gz") as tar:
@@ -285,7 +285,7 @@ def test_pgvector_deb_extraction_layout() -> None:
     assert rb.pgvector_extension_files(_synthetic_deb(), "linux-x86_64") == {
         "lib/postgresql/vector.so": b"SO",
         "share/postgresql/extension/vector.control": b"CTRL",
-        f"share/postgresql/extension/{rb._PGVECTOR_SQL}": b"SQL",
+        f"share/postgresql/extension/{rb.PGVECTOR_SQL}": b"SQL",
     }
 
 
@@ -293,7 +293,7 @@ def test_pgvector_bottle_extraction_layout() -> None:
     assert rb.pgvector_extension_files(_synthetic_bottle(), "darwin-arm64") == {
         "lib/postgresql/vector.dylib": b"DYLIB",
         "share/postgresql/extension/vector.control": b"CTRL",
-        f"share/postgresql/extension/{rb._PGVECTOR_SQL}": b"SQL",
+        f"share/postgresql/extension/{rb.PGVECTOR_SQL}": b"SQL",
     }
 
 
@@ -342,7 +342,7 @@ def test_ensure_pgvector_injects_and_is_idempotent(
     pg_dir = rb.vendored_pg_dir()
     assert (pg_dir / "lib/postgresql/vector.so").read_bytes() == b"SO"
     assert (pg_dir / "share/postgresql/extension/vector.control").read_bytes() == b"CTRL"
-    assert (pg_dir / "share/postgresql/extension" / rb._PGVECTOR_SQL).read_bytes() == b"SQL"
+    assert (pg_dir / "share/postgresql/extension" / rb.PGVECTOR_SQL).read_bytes() == b"SQL"
     assert calls == [fake_url]
     rb.ensure_pgvector()  # idempotent: detection files exist -> no second download
     assert len(calls) == 1

@@ -11,7 +11,7 @@ from base.sessions import log_prefix
 def test_header_format(pid: int | None) -> None:
     name = "session-\N{LATIN SMALL LETTER E WITH ACUTE}"
     before = datetime.now(UTC)
-    header = log_prefix.session_log_header(name, pid=pid)
+    header = log_prefix.session_log_header(name, pid=pid, now=before)
     after = datetime.now(UTC)
     prefix = f"--- meiva session {name} start="
     suffix = f" pid={pid} ---\n" if pid is not None else " ---\n"

@@ -21,7 +21,3 @@ exports = ["agents", "api_contracts", "clock", "cluster", "config", "daemon", "d
 
 [purity]
 "__init__.py" = "strict"
-
-[debt.private-module]
-"tests/config/bootstrap/_lite_parity_child.py -> config/_full.py" = 1
-"tests/config/bootstrap/_lite_parity_child.py -> config/_lite.py" = 3

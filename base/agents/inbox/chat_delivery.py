@@ -138,6 +138,7 @@ def insert_chat_inbound_once(
     client_message_id: str | None,
     provenance: InboundProvenance | None = None,
     publish_wake: Callable[[int, str], bool],
+    emit_event: Callable[[telemetry.Event], None] = telemetry.emit_prepared,
 ) -> ChatInboundReceipt:
     """Insert one logical chat, or return its existing same-key inbound id.
 
@@ -156,7 +157,7 @@ def insert_chat_inbound_once(
     db.commit()
     try:
         if prepared_event is not None:
-            telemetry.emit_prepared(prepared_event)
+            emit_event(prepared_event)
         if receipt.inserted:
             publish_wake(agent_id, str(receipt.inbound_id))
     except Exception as exc:

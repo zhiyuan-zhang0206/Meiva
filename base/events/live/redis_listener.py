@@ -26,6 +26,7 @@ from __future__ import annotations
 import asyncio
 import math
 import time
+from collections.abc import Callable
 from enum import StrEnum
 from typing import Any, cast
 
@@ -103,9 +104,22 @@ class RedisInboundListener:
     degrades to the caller's SELECT recheck, recovering if the ACL is later fixed.
     """
 
-    def __init__(self, redis_url: str, agent_id: int) -> None:
+    def __init__(
+        self,
+        redis_url: str,
+        agent_id: int,
+        *,
+        consume_abandon_grace: float = _CONSUME_ABANDON_GRACE,
+        redis_factory: Callable[..., Any] | None = None,
+    ) -> None:
         self._redis_url = redis_url
         self._agent_id = agent_id
+        self._consume_abandon_grace = consume_abandon_grace
+        # meiva:note
+        # `redis_factory` lets unit tests inject an in-memory Redis double without
+        # patching `redis.asyncio.Redis.from_url`; `redis-py` types `from_url` as
+        # partially unknown under strict pyright.
+        self._redis_factory: Callable[..., Any] = redis_factory or aredis.Redis.from_url  # pyright: ignore[reportUnknownMemberType]
         self._channel = inbound_channel(agent_id, settings.data_plane.events_channel)  # ambient: B2
         self._redis: aredis.Redis | None = None
         self._pubsub: _RedisPubSub | None = None
@@ -277,26 +291,29 @@ class RedisInboundListener:
         succeeds; on failure the local objects are closed before raising.
         """
         generation = self._generation
-        redis = aredis.Redis.from_url(  # pyright: ignore[reportUnknownMemberType] — redis-py types from_url's **kwargs as Unknown; the call is fully typed.
-            self._redis_url,
-            decode_responses=True,
-            socket_connect_timeout=SOCKET_CONNECT_TIMEOUT_S,
-            # Explicit None: redis-py >= 5 defaults socket_timeout to 5s, which
-            # would cut the listener's long blocking pubsub read every idle
-            # interval (same pin as base/redis_client.RESILIENCE_KWARGS).
-            socket_timeout=None,
-            health_check_interval=HEALTH_CHECK_INTERVAL_S,
-            socket_keepalive=True,
-            socket_keepalive_options=keepalive_options(),
-            # Dead-transport detection: see `TransportAwareAsyncConnection`.
-            # Without it, a pubsub connection whose asyncio transport already
-            # fired connection_lost (network outage) still reports
-            # `is_connected=True`; the next `parse_response` health-check PING
-            # then writes the dead transport and raises
-            # `TypeError: 'NoneType' object is not callable`, which escaped
-            # redis-py's except chain and killed an agent's claim node
-            # (agent 2613, 2026-08-04).
-            connection_class=TransportAwareAsyncConnection,
+        redis = cast(
+            "aredis.Redis",
+            self._redis_factory(
+                self._redis_url,
+                decode_responses=True,
+                socket_connect_timeout=SOCKET_CONNECT_TIMEOUT_S,
+                # Explicit None: redis-py >= 5 defaults socket_timeout to 5s, which
+                # would cut the listener's long blocking pubsub read every idle
+                # interval (same pin as base/redis_client.RESILIENCE_KWARGS).
+                socket_timeout=None,
+                health_check_interval=HEALTH_CHECK_INTERVAL_S,
+                socket_keepalive=True,
+                socket_keepalive_options=keepalive_options(),
+                # Dead-transport detection: see `TransportAwareAsyncConnection`.
+                # Without it, a pubsub connection whose asyncio transport already
+                # fired connection_lost (network outage) still reports
+                # `is_connected=True`; the next `parse_response` health-check PING
+                # then writes the dead transport and raises
+                # `TypeError: 'NoneType' object is not callable`, which escaped
+                # redis-py's except chain and killed an agent's claim node
+                # (agent 2613, 2026-08-04).
+                connection_class=TransportAwareAsyncConnection,
+            ),
         )
         pubsub: _RedisPubSub | None = None
         try:
@@ -499,7 +516,7 @@ class RedisInboundListener:
                 consume_task = asyncio.create_task(self._consume_one(pubsub, remaining))
                 self._own_operation(consume_task, _Phase.CONSUME)
                 if not await self._wait_for_operation(
-                    consume_task, remaining + _CONSUME_ABANDON_GRACE
+                    consume_task, remaining + self._consume_abandon_grace
                 ):
                     await self._abandon_consume(remaining, pubsub, redis, generation)
                     return
@@ -575,7 +592,7 @@ class RedisInboundListener:
             "abandoning attempt",
             a=self._agent_id,
             r=remaining,
-            g=_CONSUME_ABANDON_GRACE,
+            g=self._consume_abandon_grace,
         )
         self._generation += 1
         self._pubsub = None

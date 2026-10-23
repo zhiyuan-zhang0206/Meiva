@@ -7,6 +7,7 @@ Split out of `base/db/tests/test_connect_helpers.py`: the runner login comes fro
 from __future__ import annotations
 
 from collections.abc import Iterator
+from dataclasses import replace
 
 import psycopg
 import pytest
@@ -15,6 +16,7 @@ from base import db
 from base.cluster.authority.tests.runner_logins import runner_projection
 from base.config import settings
 from base.db import code_version_gate as gate
+from base.db.config import db_config_from_settings
 
 _VERSION = 500
 
@@ -33,7 +35,7 @@ def stored_minimum(db_conn: None) -> Iterator[int]:
 
 
 def test_a_runner_login_reads_the_minimum_and_cannot_write_it(
-    monkeypatch: pytest.MonkeyPatch, stored_minimum: int
+    stored_minimum: int,
 ) -> None:
     """The gate needs no new grant: the runner group's blanket `SELECT` covers the
     column, and its inability to `UPDATE` the row (only the gateway raises the
@@ -42,9 +44,9 @@ def test_a_runner_login_reads_the_minimum_and_cannot_write_it(
     with psycopg.connect(settings.data_plane.db_url, autocommit=True) as admin:
         admin.execute("UPDATE deployment_state SET min_code_version = %s", (_VERSION,))
     runner_url = runner_projection()
-    monkeypatch.setattr(settings.data_plane, "db_url", runner_url)
+    runner_config = replace(db_config_from_settings(), db_url=runner_url)
 
-    with db.connect(gate=process_gate) as conn:
+    with db.connect(config=runner_config, gate=process_gate) as conn:
         assert process_gate.min_read_due() is False  # this dial read the minimum
         with pytest.raises(psycopg.errors.InsufficientPrivilege):
             conn.execute("UPDATE deployment_state SET min_code_version = 0")

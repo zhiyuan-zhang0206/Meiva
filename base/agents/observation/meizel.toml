@@ -7,10 +7,4 @@ exports = ["evidence.py", "relay_supervision.py", "roster.py", "snapshot.py", "t
 
 [purity]
 "__init__.py" = "strict"
-"evidence.py" = "strict-to-be"
-
-[debt.impure-call]
-"evidence.py#datetime.now" = 1
-
-[debt.wide-params]
-"evidence.py#def availability" = 1
+"evidence.py" = "strict"

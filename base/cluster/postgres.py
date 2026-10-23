@@ -80,7 +80,7 @@ def _inode(path: Path) -> tuple[int, int]:
     return info.st_dev, info.st_ino
 
 
-def _boot() -> str:
+def boot_id() -> str:
     if sys.platform not in {"linux", "darwin"}:
         raise RuntimeError("owned PostgreSQL requires a supported POSIX platform")
     boot = native_boot_id()
@@ -95,7 +95,7 @@ def write(data: Path, receipt: Receipt) -> None:
     write_text_atomic(path, receipt.model_dump_json() + "\n", sync_parent=True)
 
 
-def _read(data: Path) -> Receipt | None:
+def read_receipt(data: Path) -> Receipt | None:
     path = receipt_path(data)
     try:
         raw = regular_bytes(path, max_bytes=16 * 1024)
@@ -121,7 +121,7 @@ def require_closed(data: Path, receipt: Receipt | None) -> None:
     """A dead postmaster alone cannot prove that its old workers have closed."""
     session = (
         receipt.owner.pid
-        if receipt is not None and receipt.owner is not None and receipt.boot_id == _boot()
+        if receipt is not None and receipt.owner is not None and receipt.boot_id == boot_id()
         else None
     )
     for process in psutil.process_iter(["pid"]):
@@ -142,7 +142,7 @@ def require_closed(data: Path, receipt: Receipt | None) -> None:
             continue
 
 
-def _pidfile(data: Path, receipt: Receipt) -> tuple[tuple[int, int], tuple[str, ...]]:
+def read_pidfile(data: Path, receipt: Receipt) -> tuple[tuple[int, int], tuple[str, ...]]:
     path = data / "postmaster.pid"
     before = _inode(path)
     lines = regular_bytes(path, max_bytes=8192).decode().splitlines()
@@ -155,6 +155,7 @@ def _pidfile(data: Path, receipt: Receipt) -> tuple[tuple[int, int], tuple[str, 
         or before != _inode(path)
     ):
         raise RuntimeError("PostgreSQL pidfile does not describe the captured native child")
+    # meiva:note
     # The wall timestamp is bound as file data, never compared to native birth.
     header = tuple(lines[:4])
     if receipt.pidfile is not None and (receipt.pidfile, receipt.header) != (before, header):
@@ -183,7 +184,7 @@ def _require_process(data: Path, receipt: Receipt) -> OwnedProcess:
 def observe(data: Path) -> OwnedProcess | None:
     """Read exact launch evidence. Missing, interrupted or unreadable is not adoption."""
     data = _data_path(data)
-    receipt = _read(data)
+    receipt = read_receipt(data)
     if receipt is None:
         if (data / "postmaster.pid").exists():
             raise RuntimeError("PostgreSQL pidfile has no native launch receipt; reconcile custody")
@@ -191,11 +192,11 @@ def observe(data: Path) -> OwnedProcess | None:
         return None
     if receipt.state == "pending":
         raise RuntimeError("PostgreSQL launch custody is unresolved; reconcile pending receipt")
-    if receipt.boot_id != _boot() or receipt.owner is None or not receipt.process().live():
+    if receipt.boot_id != boot_id() or receipt.owner is None or not receipt.process().live():
         require_closed(data, receipt)
         return None
     owner = _require_process(data, receipt)
-    _pidfile(data, receipt)
+    read_pidfile(data, receipt)
     if not owner.live():
         raise RuntimeError("PostgreSQL exited during custody observation")
     return owner
@@ -279,7 +280,7 @@ def _complete_start(
             raise RuntimeError("PostgreSQL did not become ready; captured custody is retained")
         if protocol_ready:
             _require_process(data, receipt)
-            inode, header = _pidfile(data, receipt)
+            inode, header = read_pidfile(data, receipt)
             require_listener(owner, receipt.port)
             admitted = receipt.model_copy(
                 update={"state": "ready", "pidfile": inode, "header": header}
@@ -296,7 +297,7 @@ def _retained_start(data: Path, port: int, expected: OwnedProcess) -> Receipt:
     owner = observe(data)
     if owner is None or not owner.same_birth(expected):
         raise RuntimeError("PostgreSQL identity changed before retained startup")
-    receipt = _read(data)
+    receipt = read_receipt(data)
     if receipt is None or receipt.port != port:
         raise RuntimeError("PostgreSQL retained receipt does not match the startup port")
     if not owner.send_signal(signal.SIGHUP):
@@ -341,7 +342,7 @@ def start(
                 directory=_inode(data),
                 port=port,
                 platform=cast("Literal['linux', 'darwin']", sys.platform),
-                boot_id=_boot(),
+                boot_id=boot_id(),
                 state="pending",
             ),
             argv,
@@ -432,7 +433,7 @@ def stop(
     ensure_private_dir(path.parent)
     with file_lock(path.with_suffix(".lock"), timeout_s=timeout):
         owner = observe(data)
-        receipt = _read(data)
+        receipt = read_receipt(data)
         if owner is None:
             if receipt is not None:
                 require_listener(None, receipt.port, required=False)

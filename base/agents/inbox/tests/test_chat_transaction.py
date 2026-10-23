@@ -142,7 +142,7 @@ def test_writer_refuses_an_idle_connection_before_any_effect(
 
 
 def test_compatibility_wrapper_dispatches_after_commit_and_wakes_only_first_insert(
-    db_conn: psycopg.Connection, database: Database, monkeypatch: pytest.MonkeyPatch
+    db_conn: psycopg.Connection, database: Database
 ) -> None:
     agent_id, sender = create_agent(db_conn), create_agent(db_conn)
     observed: list[str] = []
@@ -156,7 +156,6 @@ def test_compatibility_wrapper_dispatches_after_commit_and_wakes_only_first_inse
         observed.append("wake")
         return True
 
-    monkeypatch.setattr(telemetry, "emit_prepared", emit)
     with database.pool(min_size=1, max_size=1) as pool, pool.connection() as conn:
         for _attempt in range(2):
             insert_chat_inbound_once(
@@ -167,13 +166,14 @@ def test_compatibility_wrapper_dispatches_after_commit_and_wakes_only_first_inse
                 payload=None,
                 client_message_id="caller-owned-chat",
                 publish_wake=wake,
+                emit_event=emit,
             )
     assert observed == ["audit", "wake"]
 
 
 @pytest.mark.parametrize("step", ["audit", "wake"])
 def test_postcommit_failure_carries_receipt_without_repeating_audit(
-    db_conn: psycopg.Connection, database: Database, monkeypatch: pytest.MonkeyPatch, step: str
+    db_conn: psycopg.Connection, database: Database, step: str
 ) -> None:
     from base.agents.inbox.chat_delivery import ChatInboundCommittedError
 
@@ -189,7 +189,6 @@ def test_postcommit_failure_carries_receipt_without_repeating_audit(
             raise bug
         return True
 
-    monkeypatch.setattr(telemetry, "emit_prepared", emit)
     with database.pool(min_size=1, max_size=1) as pool, pool.connection() as conn:
         with pytest.raises(ChatInboundCommittedError) as failed:
             insert_chat_inbound_once(
@@ -200,6 +199,7 @@ def test_postcommit_failure_carries_receipt_without_repeating_audit(
                 payload=None,
                 client_message_id="caller-owned-chat",
                 publish_wake=wake,
+                emit_event=emit,
             )
         assert failed.value.__cause__ is bug
         assert failed.value.client_message_id == "caller-owned-chat"
@@ -213,6 +213,7 @@ def test_postcommit_failure_carries_receipt_without_repeating_audit(
             payload=None,
             client_message_id="caller-owned-chat",
             publish_wake=wake,
+            emit_event=emit,
         )
     assert recovered.inbound_id == failed.value.receipt.inbound_id
     assert not recovered.inserted

@@ -588,7 +588,7 @@ Event = Annotated[
 # adding a role means adding the class + one entry here (and the static `Event`
 # union below — a bidirectional test in base/events/live/tests/test_events_wire_format.py
 # pins union == registry).
-_ROLE_CLASSES: tuple[tuple[type[Event], bool], ...] = (
+ROLE_CLASSES: tuple[tuple[type[Event], bool], ...] = (
     (ChatStart, False),
     (ChatDelta, False),
     (CompactRequest, False),
@@ -630,7 +630,7 @@ _ROLE_CLASSES: tuple[tuple[type[Event], bool], ...] = (
 # validated on the wire without a second hand-written list.
 EVENT_ADAPTER: TypeAdapter[Event] = TypeAdapter(
     Annotated[
-        Union[tuple(cls for cls, _ in _ROLE_CLASSES)],  # noqa: UP007 — runtime union construction, not an annotation
+        Union[tuple(cls for cls, _ in ROLE_CLASSES)],  # noqa: UP007 — runtime union construction, not an annotation
         Field(discriminator="role"),
     ]
 )
@@ -639,7 +639,7 @@ EVENT_ADAPTER: TypeAdapter[Event] = TypeAdapter(
 # the UI subscribes to that one channel to receive every role. Derived from the
 # registry — each class's `role` literal is the single declaration.
 SYSTEM_ROLES: frozenset[str] = frozenset(
-    cls.model_fields["role"].default for cls, _ in _ROLE_CLASSES
+    cls.model_fields["role"].default for cls, _ in ROLE_CLASSES
 )
 
 # Cross-agent, low-frequency subset forwarded on the global /api/system
@@ -655,5 +655,5 @@ SYSTEM_ROLES: frozenset[str] = frozenset(
 # SYSTEM_ROLES; the per-agent endpoint still forwards the full SYSTEM_ROLES
 # (filtered by agent_id). The `True` flags in _ROLE_CLASSES are the derivation.
 GLOBAL_ROLES: frozenset[str] = frozenset(
-    cls.model_fields["role"].default for cls, g in _ROLE_CLASSES if g
+    cls.model_fields["role"].default for cls, g in ROLE_CLASSES if g
 )

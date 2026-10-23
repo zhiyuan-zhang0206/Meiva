@@ -12,8 +12,5 @@ exports = ["backend.py", "coding_session_owner.py", "coding_session_owner_record
 
 [purity]
 "__init__.py" = "strict"
-"log_prefix.py" = "strict-to-be"
+"log_prefix.py" = "strict"
 "provenance.py" = "strict"
-
-[debt.impure-call]
-"log_prefix.py#datetime.now" = 1

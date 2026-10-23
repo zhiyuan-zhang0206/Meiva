@@ -4,7 +4,7 @@ exports = ["contract.py", "declarations", "live", "reads", "scan_kinds.py", "tes
 "__init__.py" = "strict"
 "contract.py" = "strict"
 "loader.py" = "strict"
-"vocabulary.py" = "strict-to-be"
+"vocabulary.py" = "strict"
 
 [uses]
 "__init__.py" = ["contract.py"]
@@ -17,6 +17,3 @@ exports = ["contract.py", "declarations", "live", "reads", "scan_kinds.py", "tes
 
 [loads]
 "loader.py" = ["base/events/declarations"]
-
-[debt.wide-params]
-"vocabulary.py#def telemetry_event" = 1

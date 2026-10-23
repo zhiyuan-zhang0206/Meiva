@@ -3,8 +3,8 @@ equality with the group, denials, and crash-safe exact-retry minting."""
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from dataclasses import replace
+from functools import partial
 from pathlib import Path
 from typing import Any
 
@@ -16,8 +16,13 @@ from base.cluster.authority import check_invariant, ensure_groups, mint_generati
 from base.cluster.authority import groups as groups_module
 from base.cluster.authority import roles as roles_module
 from base.deploy.tests.db_authority_tests import OWNER, AuthorityCluster
-from base.host.db_authority import ledger as ledger_module
-from base.host.db_authority.ledger import activate, create_ledger, require_ledger
+from base.host.db_authority.ledger import (
+    activate,
+    begin_mint,
+    create_ledger,
+    read_secret,
+    require_ledger,
+)
 from base.host.db_authority.model import CatalogRefusedError, LedgerRefusedError
 
 _LOGIN_ATTRIBUTES = (
@@ -184,45 +189,22 @@ def test_login_is_denied_ddl_and_identity_changes(
         assert row == (True,)
 
 
-class _CrashError(Exception):
-    pass
-
-
-def _crash_after(target: Callable[..., Any]) -> Callable[..., Any]:
-    def wrapped(*args: Any, **kwargs: Any) -> Any:
-        target(*args, **kwargs)
-        raise _CrashError
-
-    return wrapped
-
-
-def _crash_before(*_args: Any, **_kwargs: Any) -> Any:
-    raise _CrashError
-
-
 _BOUNDARIES = ["secret-published", "pending-recorded", "roles-created", "verified"]
 
 
-def _inject(monkeypatch: pytest.MonkeyPatch, boundary: str) -> None:
+def _advance_to_boundary(conn: psycopg.Connection[Any], home: Path, boundary: str) -> None:
+    ledger_path = home / "db-authority" / "ledger.json"
+    initial_ledger = ledger_path.read_bytes()
+    pending = begin_mint(home, encrypt=partial(roles_module.scram_verifier, conn))
     if boundary == "secret-published":
-        original = ledger_module.write_private_bytes
-
-        def fail_pending(path: Path, data: bytes) -> None:
-            if b'"pending": {' in data:
-                raise _CrashError
-            original(path, data)
-
-        monkeypatch.setattr(ledger_module, "write_private_bytes", fail_pending)
-    elif boundary == "pending-recorded":
-        monkeypatch.setattr(roles_module, "create_missing", _crash_before)
-    elif boundary == "roles-created":
-        monkeypatch.setattr(
-            roles_module, "create_missing", _crash_after(roles_module.create_missing)
-        )
-    else:
-        monkeypatch.setattr(
-            roles_module, "verify_generation", _crash_after(roles_module.verify_generation)
-        )
+        ledger_path.write_bytes(initial_ledger)
+        return
+    if boundary == "pending-recorded":
+        return
+    roles_module.create_missing(conn, require_ledger(home), read_secret(home, pending))
+    if boundary == "roles-created":
+        return
+    roles_module.verify_generation(conn, home)
 
 
 def _begin_birth(cluster: AuthorityCluster) -> None:
@@ -234,14 +216,12 @@ def _begin_birth(cluster: AuthorityCluster) -> None:
 
 @pytest.mark.parametrize("boundary", _BOUNDARIES)
 def test_mint_retry_after_crash_reconciles_the_same_generation(
-    authority_unborn: AuthorityCluster, monkeypatch: pytest.MonkeyPatch, boundary: str
+    authority_unborn: AuthorityCluster, boundary: str
 ) -> None:
     cluster = authority_unborn
     _begin_birth(cluster)
-    with monkeypatch.context() as patched:
-        _inject(patched, boundary)
-        with cluster.admin() as conn, pytest.raises(_CrashError):
-            mint_generation(conn, cluster.home)
+    with cluster.admin() as conn:
+        _advance_to_boundary(conn, cluster.home, boundary)
     ledger = require_ledger(cluster.home)
     assert (ledger.pending is None) == (boundary == "secret-published")
     with cluster.admin() as conn:
@@ -262,14 +242,12 @@ def test_mint_retry_after_crash_reconciles_the_same_generation(
 
 
 def test_retry_holds_when_the_stored_verifier_differs(
-    authority_unborn: AuthorityCluster, monkeypatch: pytest.MonkeyPatch
+    authority_unborn: AuthorityCluster,
 ) -> None:
     cluster = authority_unborn
     _begin_birth(cluster)
-    with monkeypatch.context() as patched:
-        _inject(patched, "roles-created")
-        with cluster.admin() as conn, pytest.raises(_CrashError):
-            mint_generation(conn, cluster.home)
+    with cluster.admin() as conn:
+        _advance_to_boundary(conn, cluster.home, "roles-created")
     with cluster.admin() as conn:
         conn.execute("ALTER ROLE meiva_g0_gateway PASSWORD 'foreign-credential-value'")
         with pytest.raises(CatalogRefusedError, match="stored verifier differs"):
@@ -304,15 +282,12 @@ def test_mint_holds_while_another_login_holds_group_membership(
 
 
 def test_activation_names_the_exact_pending_generation(
-    authority_unborn: AuthorityCluster, monkeypatch: pytest.MonkeyPatch
+    authority_unborn: AuthorityCluster,
 ) -> None:
     cluster = authority_unborn
     _begin_birth(cluster)
-    with monkeypatch.context() as patched:
-        _inject(patched, "verified")
-        with cluster.admin() as conn, pytest.raises(_CrashError):
-            mint_generation(conn, cluster.home)
     with cluster.admin() as conn:
+        _advance_to_boundary(conn, cluster.home, "verified")
         verified = mint_generation(conn, cluster.home)
     with pytest.raises(LedgerRefusedError, match="exact pending generation"):
         activate(cluster.home, replace(verified, credential_digest="0" * 64))

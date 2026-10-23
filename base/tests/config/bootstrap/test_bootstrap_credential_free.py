@@ -3,7 +3,6 @@ from __future__ import annotations
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
-from unittest.mock import Mock
 from urllib.parse import urlsplit
 
 import pytest
@@ -63,12 +62,9 @@ def test_home_without_a_ledger_serves_the_endpoint_too(
     assert urlsplit(_served(tmp_path)["MEIVA_DB_URL"]).password is None
 
 
-def test_remote_plane_strips_the_provider_password(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_remote_plane_strips_the_provider_password(tmp_path: Path) -> None:
     provider_url = _pg_url("provider-pw", host="db.provider.example:5432")
     _write_gateway_env(tmp_path, runner_pw=_RUNNER_PW, db_url=provider_url)
-    monkeypatch.setattr(config.settings.data_plane, "db_url", provider_url)
     vals = _served(tmp_path)
     parts = urlsplit(vals["MEIVA_DB_URL"])
     assert (parts.username, parts.password, parts.hostname) == (
@@ -82,27 +78,21 @@ def test_remote_plane_strips_the_provider_password(
 
 @pytest.mark.parametrize("missing_url", [None, ""])
 def test_missing_url_refuses_before_boot_time_fallback(
-    monkeypatch: pytest.MonkeyPatch,
     missing_url: str | None,
     tmp_path: Path,
     loguru_records: LogRecords,
 ) -> None:
-    snapshot = {"MEIVA_RUNNER_DB_PASSWORD": "new-private-password"}
+    lines = ["MEIVA_RUNNER_DB_PASSWORD=new-private-password"]
     if missing_url is not None:
-        snapshot["MEIVA_DB_URL"] = missing_url
-    read = Mock(return_value=snapshot)
-
-    def read_snapshot(_owner: ConfigAuthority) -> dict[str, str]:
-        return read()
-
-    monkeypatch.setattr(ConfigAuthority, "read_env_aliases", read_snapshot)
+        lines.append(f"MEIVA_DB_URL={missing_url}")
+    env_path = tmp_path / ".env"
+    env_path.write_text("\n".join(lines) + "\n")
     with pytest.raises(ValueError, match="MEIVA_DB_URL is missing") as caught:
         config.bootstrap_config_values(
-            ConfigAuthority(config.settings, config.settings, tmp_path / ".env"),
+            ConfigAuthority(config.settings, config.settings, env_path),
             provider_key_envs=(),
             plugin_cluster_config="",
         )
-    read.assert_called_once_with()
     assert loguru_records.messages("WARNING") == []
     assert "new-private-password" not in str(caught.value)
 
