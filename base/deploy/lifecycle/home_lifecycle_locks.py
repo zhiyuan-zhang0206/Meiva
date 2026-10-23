@@ -32,8 +32,9 @@ _log = logging.getLogger("base.deploy.lifecycle.home_lifecycle_locks")
 
 # meiva:note
 # Stable mutex for long local resource transitions.
-def lifecycle_lock_path() -> Path:
-    return base.paths.meiva_home() / "deploy-state.lifecycle.lock"
+def lifecycle_lock_path(home: Path | None = None) -> Path:
+    resolved_home = base.paths.meiva_home() if home is None else home
+    return resolved_home / "deploy-state.lifecycle.lock"
 
 
 def holder_path(path: Path) -> Path:
@@ -110,7 +111,13 @@ def _diagnostic_lock(path: Path, *, purpose: str, timeout_s: float) -> Generator
 
 
 @contextlib.contextmanager
-def resource_lock(*, purpose: str, timeout_s: float = _RESOURCE_LOCK_TIMEOUT_S) -> Generator[None]:
+def resource_lock(
+    *,
+    purpose: str,
+    timeout_s: float = _RESOURCE_LOCK_TIMEOUT_S,
+    home: Path | None = None,
+) -> Generator[None]:
     """Serialize long local start/stop operations with bounded waiting."""
-    with _diagnostic_lock(lifecycle_lock_path(), purpose=purpose, timeout_s=timeout_s):
+    path = lifecycle_lock_path() if home is None else lifecycle_lock_path(home)
+    with _diagnostic_lock(path, purpose=purpose, timeout_s=timeout_s):
         yield

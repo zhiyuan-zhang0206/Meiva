@@ -63,7 +63,13 @@ __all__ = [
 
 
 def bind_plugin_config(
-    plugin: str, cls: type[BaseModel], configs: dict[str, BaseModel]
+    plugin: str,
+    cls: type[BaseModel],
+    configs: dict[str, BaseModel],
+    *,
+    read_plugin_config_fn: Callable[[str, type[BaseModel], Path], BaseModel] = read_plugin_config,
+    write_default_fn: Callable[[str, type[BaseModel]], Path] = write_default_disk_image,
+    config_from_image_fn: Callable[[type[BaseModel], str, Path], BaseModel] = config_from_image,
 ) -> Callable[[], None]:
     if not (isinstance(cls, type) and issubclass(cls, BaseModel)):
         raise TypeError(
@@ -74,7 +80,13 @@ def bind_plugin_config(
         raise DuplicateRegistration(
             f"plugin {plugin!r} already has a bound config ({type(configs[plugin]).__name__})"
         )
-    instance = _instantiate_from_disk(plugin, cls)
+    instance = _instantiate_from_disk(
+        plugin,
+        cls,
+        read_plugin_config_fn=read_plugin_config_fn,
+        write_default_fn=write_default_fn,
+        config_from_image_fn=config_from_image_fn,
+    )
     configs[plugin] = instance
 
     def undo() -> None:
@@ -83,15 +95,24 @@ def bind_plugin_config(
     return undo
 
 
-def _instantiate_from_disk(plugin: str, cls: type[BaseModel]) -> BaseModel:
+def _instantiate_from_disk(
+    plugin: str,
+    cls: type[BaseModel],
+    *,
+    read_plugin_config_fn: Callable[[str, type[BaseModel], Path], BaseModel] = read_plugin_config,
+    write_default_fn: Callable[[str, type[BaseModel]], Path] = write_default_disk_image,
+    config_from_image_fn: Callable[[type[BaseModel], str, Path], BaseModel] = config_from_image,
+) -> BaseModel:
     from base.packages.plugin_config_images import PluginConfigChangedError
 
     config_path = disk_image_path(plugin)
-    read_plugin_config(plugin, cls, config_path)
+    read_plugin_config_fn(plugin, cls, config_path)
     if not config_path.exists():
         with suppress(PluginConfigChangedError):
-            write_default_disk_image(plugin, cls)
-    return with_cluster_policy(plugin, config_from_image(cls, config_path.read_text(), config_path))
+            write_default_fn(plugin, cls)
+    return with_cluster_policy(
+        plugin, config_from_image_fn(cls, config_path.read_text(), config_path)
+    )
 
 
 def _reconcile_config_image[C: BaseModel](
@@ -161,14 +182,18 @@ def _per_agent_fields_for(cls: type[BaseModel]) -> set[str]:
 
 # meiva:link base/packages/plugins/docs/plugin-config/plugin-config.meiva.okf.md
 def resolve_overlay_targets(
-    overlay: dict[str, object], configs: Mapping[str, BaseModel] | None = None
+    overlay: dict[str, object],
+    configs: Mapping[str, BaseModel] | None = None,
+    *,
+    plugin_dirs: dict[str, Path] | None = None,
+    home: Path | None = None,
 ) -> dict[str, tuple[str | None, str]]:
     from base.config import field_names, per_agent_field_names
 
     framework_per_agent = per_agent_field_names()
     framework_all = field_names()
 
-    plugin_classes = overlay_config_classes(configs)
+    plugin_classes = overlay_config_classes(configs, plugin_dirs=plugin_dirs, home=home)
     out: dict[str, tuple[str | None, str]] = {}
     for key in overlay:
         matches: list[tuple[str | None, str]] = []
@@ -294,12 +319,16 @@ def _validate_framework_overlay_ranges(updates: dict[str, object]) -> None:
 
 # meiva:link base/packages/plugins/docs/plugin-config/plugin-config.meiva.okf.md
 def validate_config_overlay_shape(
-    overlay: dict[str, object], configs: Mapping[str, BaseModel] | None = None
+    overlay: dict[str, object],
+    configs: Mapping[str, BaseModel] | None = None,
+    *,
+    plugin_dirs: dict[str, Path] | None = None,
+    home: Path | None = None,
 ) -> None:
     from base.config import field_domain
     from base.config.service_read import domain_model_classes
 
-    targets = resolve_overlay_targets(overlay, configs)
+    targets = resolve_overlay_targets(overlay, configs, plugin_dirs=plugin_dirs, home=home)
     grouped: dict[str | None, dict[str, object]] = {}
     for key, (plugin, field) in targets.items():
         grouped.setdefault(plugin, {})[field] = overlay[key]
@@ -315,7 +344,7 @@ def validate_config_overlay_shape(
                     sub = cls()
                     cls.model_validate({**sub.model_dump(), **upd})
             else:
-                cls = overlay_config_classes(configs)[plugin]
+                cls = overlay_config_classes(configs, plugin_dirs=plugin_dirs, home=home)[plugin]
                 held = None if configs is None else configs.get(plugin)
                 current = (held if held is not None else cls()).model_dump()
                 cls(**{**current, **updates})
@@ -338,8 +367,10 @@ def validate_config_overlay(
     *,
     models: Mapping[str, object],
     decision_models: Mapping[str, object] | None = None,
+    plugin_dirs: dict[str, Path] | None = None,
+    home: Path | None = None,
 ) -> None:
-    validate_config_overlay_shape(overlay, configs)
+    validate_config_overlay_shape(overlay, configs, plugin_dirs=plugin_dirs, home=home)
     if "llm_model" in overlay:
         error = _validate_model_membership(overlay["llm_model"], models)
         if error is not None:

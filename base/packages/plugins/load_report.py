@@ -24,7 +24,12 @@ def reporter(report: Reporter | None) -> Reporter:
     return report if report is not None else report_plugin_load_failure
 
 
-def report_plugin_load_failure(name: str, exc: BaseException) -> None:
+def report_plugin_load_failure(
+    name: str,
+    exc: BaseException,
+    *,
+    emit_fn: Callable[..., None] | None = None,
+) -> None:
     """Report one plugin that could not be loaded and was skipped.
 
     Never raises by itself — the failure already happened, and containment is
@@ -38,8 +43,9 @@ def report_plugin_load_failure(name: str, exc: BaseException) -> None:
         "the remaining plugins still load",
         name,
     )
+    emitter = emit if emit_fn is None else emit_fn
     try:
-        emit(
+        emitter(
             "telemetry",
             "plugin_load_failed",
             level="error",

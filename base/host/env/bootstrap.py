@@ -126,7 +126,7 @@ _FETCH_ATTEMPTS = 2
 _FETCH_TIMEOUT_S = 10.0
 
 
-def service_plugin_config_packet() -> str | None:
+def service_plugin_config_packet(*, env: Mapping[str, str] | None = None) -> str | None:
     """The launcher's fixed plugin config snapshot for this service generation.
 
     Separate from cluster bootstrap: a later bootstrap fetch must not replace
@@ -134,7 +134,8 @@ def service_plugin_config_packet() -> str | None:
     """
     from base.host.env.registry import SERVICE_PLUGIN_CONFIG_ENV
 
-    return os.environ.get(SERVICE_PLUGIN_CONFIG_ENV)
+    source = os.environ if env is None else env
+    return source.get(SERVICE_PLUGIN_CONFIG_ENV)
 
 
 def cluster_plugin_config_values(plugin: str) -> dict[str, object] | None:

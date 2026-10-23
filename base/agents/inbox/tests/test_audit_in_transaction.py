@@ -5,7 +5,6 @@ from typing import Any
 import psycopg
 import pytest
 
-from base.agents.inbox import insert
 from base.agents.inbox.compact import insert_compact_request_inbound
 from base.agents.inbox.insert import insert_inbound_message, insert_spawn_prompt_in_transaction
 from base.db import Database, create_agent
@@ -43,16 +42,21 @@ def test_an_inbound_and_its_audit_fact_commit_together(
 
 def test_an_inbound_whose_audit_fact_cannot_be_recorded_is_not_written(
     db_conn: psycopg.Connection,
-    monkeypatch: pytest.MonkeyPatch,
     database: Database,
     event_bus: EventBus,
 ) -> None:
     agent_id = create_agent(db_conn)
-    monkeypatch.setattr(insert, "record_audit", _refuse)
 
     with pytest.raises(RuntimeError, match="audit write failed"):
         insert_inbound_message(
-            db_conn, agent_id, "", source="user", kind="restart", bus=event_bus, database=database
+            db_conn,
+            agent_id,
+            "",
+            source="user",
+            kind="restart",
+            bus=event_bus,
+            database=database,
+            record_audit=_refuse,
         )
     db_conn.rollback()
 

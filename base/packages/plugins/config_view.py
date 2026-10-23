@@ -74,9 +74,12 @@ def with_cluster_policy[C: BaseModel](plugin: str, config: C) -> C:
 
 def overlay_config_classes(
     configs: Mapping[str, BaseModel] | None = None,
+    *,
+    plugin_dirs: dict[str, Path] | None = None,
+    home: Path | None = None,
 ) -> dict[str, type[BaseModel]]:
-    installed = enable_config.installed_plugin_dirs()
-    config = enable_config.load_for_runtime(set(installed))
+    installed = enable_config.installed_plugin_dirs() if plugin_dirs is None else plugin_dirs
+    config = enable_config.load_for_runtime(set(installed), home=home)
     enabled = {
         name: plugin_dir
         for name, plugin_dir in installed.items()
@@ -89,10 +92,15 @@ def overlay_config_classes(
 
 
 # meiva:link base/packages/plugins/docs/plugin-config/plugin-config.meiva.okf.md
-def read_service_config[C: BaseModel](plugin: str, cls: type[C]) -> C | None:
+def read_service_config[C: BaseModel](
+    plugin: str,
+    cls: type[C],
+    *,
+    env: Mapping[str, str] | None = None,
+) -> C | None:
     from base.host.env.bootstrap import service_plugin_config_packet
 
-    packet = service_plugin_config_packet()
+    packet = service_plugin_config_packet(env=env)
     if packet is None:
         return None
     try:
@@ -125,11 +133,16 @@ def read_plugin_config[C: BaseModel](plugin: str, cls: type[C], config_path: Pat
     return with_cluster_policy(plugin, read_config_image(cls, config_path))
 
 
-def plugin_bootstrap_config() -> str:
+def plugin_bootstrap_config(
+    *,
+    plugin_dirs: dict[str, Path] | None = None,
+    home: Path | None = None,
+) -> str:
     from base.config import schema_extra
 
     payload: dict[str, dict[str, object]] = {}
-    for plugin, plugin_dir in sorted(enable_config.discover_plugins().items()):
+    discovered = enable_config.discover_plugins() if plugin_dirs is None else plugin_dirs
+    for plugin, plugin_dir in sorted(discovered.items()):
         cls = declared_config_class(plugin, plugin_dir)
         if cls is None:
             continue
@@ -145,7 +158,7 @@ def plugin_bootstrap_config() -> str:
                 raise ValueError(f"plugin cluster config {plugin}.{name} may not carry secrets")
             fields.append(name)
         if fields:
-            config = read_config_image(cls, disk_image_path(plugin))
+            config = read_config_image(cls, disk_image_path(plugin, home=home))
             values = config.model_dump(mode="json")
             payload[plugin] = {name: values[name] for name in fields}
     return json.dumps(payload, sort_keys=True, separators=(",", ":"), allow_nan=False)

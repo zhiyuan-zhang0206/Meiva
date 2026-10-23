@@ -104,8 +104,9 @@ def enabled_config_classes(plugin_dirs: dict[str, Path]) -> dict[str, type[BaseM
     return classes
 
 
-def disk_image_path(plugin: str) -> Path:
-    return resolve_meiva_home().resolve() / "configs" / plugin / "config.json"
+def disk_image_path(plugin: str, *, home: Path | None = None) -> Path:
+    resolved_home = resolve_meiva_home() if home is None else home
+    return resolved_home.resolve() / "configs" / plugin / "config.json"
 
 
 def read_config_image[C: BaseModel](cls: type[C], config_path: Path) -> C:

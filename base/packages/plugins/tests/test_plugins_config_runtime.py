@@ -2,8 +2,6 @@ from pathlib import Path
 
 import pytest
 
-from base import paths
-from base.packages.plugins import load_report
 from base.packages.plugins.enable_config import (
     DanglingPlugin,
     load,
@@ -12,18 +10,7 @@ from base.packages.plugins.enable_config import (
 )
 
 
-@pytest.fixture(autouse=True)
-def _isolate(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    user = tmp_path / "plugins"
-    user.mkdir()
-    monkeypatch.setattr(paths, "plugins_dir", lambda: user)
-    monkeypatch.setenv("MEIVA_HOME", str(tmp_path / "meiva"))
-    monkeypatch.setattr(paths, "meiva_home", lambda: tmp_path)
-
-
-def test_load_for_runtime_drops_dangling_and_reports_each_name(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_load_for_runtime_drops_dangling_and_reports_each_name(tmp_path: Path) -> None:
     write_local(
         {
             "plugins": {
@@ -31,16 +18,15 @@ def test_load_for_runtime_drops_dangling_and_reports_each_name(
                 "zulu": {"enabled": False},
                 "alpha": {"enabled": True},
             }
-        }
+        },
+        home=tmp_path,
     )
     reported: list[tuple[str, BaseException]] = []
 
     def _capture(name: str, exc: BaseException) -> None:
         reported.append((name, exc))
 
-    monkeypatch.setattr(load_report, "report_plugin_load_failure", _capture)
-
-    config = load_for_runtime({"real"})
+    config = load_for_runtime({"real"}, report=_capture, home=tmp_path)
 
     assert set(config.plugins) == {"real"}
     assert config.plugins["real"].enabled
@@ -48,33 +34,32 @@ def test_load_for_runtime_drops_dangling_and_reports_each_name(
     assert isinstance(reported[0][1], DanglingPlugin)
 
 
-def test_load_for_runtime_reports_each_failed_load(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    write_local({"plugins": {"real": {"enabled": True}, "vanished": {"enabled": False}}})
+def test_load_for_runtime_reports_each_failed_load(tmp_path: Path) -> None:
+    write_local(
+        {"plugins": {"real": {"enabled": True}, "vanished": {"enabled": False}}},
+        home=tmp_path,
+    )
     reported: list[str] = []
 
     def _capture(name: str, exc: BaseException) -> None:
         reported.append(name)
 
-    monkeypatch.setattr(load_report, "report_plugin_load_failure", _capture)
-
-    load_for_runtime({"real"})
-    load_for_runtime({"real"})
+    load_for_runtime({"real"}, report=_capture, home=tmp_path)
+    load_for_runtime({"real"}, report=_capture, home=tmp_path)
 
     assert reported == ["vanished", "vanished"]
 
 
-def test_load_for_runtime_keeps_enabled_flags() -> None:
-    write_local({"plugins": {"real": {"enabled": False}}})
+def test_load_for_runtime_keeps_enabled_flags(tmp_path: Path) -> None:
+    write_local({"plugins": {"real": {"enabled": False}}}, home=tmp_path)
 
-    config = load_for_runtime({"real"})
+    config = load_for_runtime({"real"}, home=tmp_path)
 
     assert config.plugins["real"].enabled is False
 
 
-def test_strict_load_still_raises_on_dangling() -> None:
-    write_local({"plugins": {"vanished": {"enabled": True}}})
+def test_strict_load_still_raises_on_dangling(tmp_path: Path) -> None:
+    write_local({"plugins": {"vanished": {"enabled": True}}}, home=tmp_path)
 
     with pytest.raises(DanglingPlugin):
-        load({"real"})
+        load({"real"}, home=tmp_path)

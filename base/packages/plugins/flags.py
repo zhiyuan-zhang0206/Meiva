@@ -64,7 +64,7 @@ def validate_flag_key(key: str) -> str:
     return key
 
 
-def read_declared_flag(key: str, flags: tuple[str, ...]) -> Any:
+def read_declared_flag(key: str, flags: tuple[str, ...], *, settings_view: Any = None) -> Any:
     """Read a service's explicit pure-face Core dependency without an SDK registry.
 
     Secrets remain resources. Unavailable profile domains fail rather than
@@ -77,6 +77,7 @@ def read_declared_flag(key: str, flags: tuple[str, ...]) -> Any:
     domain, field = key.split(".")
     from base.config import settings
 
-    if not settings.has_domain(domain):
+    active_settings = settings if settings_view is None else settings_view
+    if not active_settings.has_domain(domain):
         raise FlagDomainUnavailable(f"declared core flag {key!r} is unavailable in this profile")
-    return getattr(getattr(settings, domain), field)
+    return getattr(getattr(active_settings, domain), field)

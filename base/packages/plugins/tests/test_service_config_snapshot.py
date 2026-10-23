@@ -20,20 +20,18 @@ class Config(BaseModel):
 
 def test_service_birth_snapshot_survives_authority_image_changes(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     image = tmp_path / "config.json"
     image.write_text('{"enabled":true,"interval":42}')
     captured = read_config_image(Config, image)
-    monkeypatch.setenv(SERVICE_PLUGIN_CONFIG_ENV, service_config_packet("fleet", captured))
+    env = {SERVICE_PLUGIN_CONFIG_ENV: service_config_packet("fleet", captured)}
     image.write_text('{"enabled":false,"interval":900}')
-    assert read_service_config("fleet", Config) == captured
+    assert read_service_config("fleet", Config, env=env) == captured
     assert read_config_image(Config, image).enabled is False
 
 
-def test_absent_service_carrier_is_distinct_from_invalid(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv(SERVICE_PLUGIN_CONFIG_ENV, raising=False)
-    assert read_service_config("fleet", Config) is None
+def test_absent_service_carrier_is_distinct_from_invalid() -> None:
+    assert read_service_config("fleet", Config, env={}) is None
 
 
 @pytest.mark.parametrize(
@@ -49,11 +47,10 @@ def test_absent_service_carrier_is_distinct_from_invalid(monkeypatch: pytest.Mon
 def test_present_service_packet_never_falls_back(
     packet: str,
     error: type[Exception],
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv(SERVICE_PLUGIN_CONFIG_ENV, packet)
+    env = {SERVICE_PLUGIN_CONFIG_ENV: packet}
     with pytest.raises(error):
-        read_service_config("fleet", Config)
+        read_service_config("fleet", Config, env=env)
 
 
 def test_canonical_packet_rejects_sensitive_fields_and_nonfinite_values() -> None:

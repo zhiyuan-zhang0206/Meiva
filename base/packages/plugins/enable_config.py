@@ -68,7 +68,9 @@ class DuplicatePlugin(PluginsConfigError):  # noqa: N818
     """Same plugin name exists in both builtin and external directories."""
 
 
-def discover_plugins() -> dict[str, Path]:
+def discover_plugins(
+    *, repo_dir: Path | None = None, user_dir: Path | None = None
+) -> dict[str, Path]:
     """Scan builtin + external plugin directories; return {name: plugin_dir}.
 
     Builtin is scanned first; external plugin matching a builtin name
@@ -82,20 +84,23 @@ def discover_plugins() -> dict[str, Path]:
     discovered: dict[str, Path] = {}
 
     # Builtin plugin: <repo>/meiva_builtins/plugins/<name>/plugin.py
-    repo_dir = paths.repo_plugins_dir()
-    if repo_dir.exists():
-        for p in sorted(repo_dir.iterdir()):
+    resolved_repo_dir = paths.repo_plugins_dir() if repo_dir is None else repo_dir
+    if resolved_repo_dir.exists():
+        for p in sorted(resolved_repo_dir.iterdir()):
             if p.name.startswith("."):
                 continue
             if p.is_dir() and (p / "plugin.py").exists():
                 discovered[p.name] = p
 
     # External plugin: ~/.meiva/plugins/<name>/plugin.py
-    from base.host.runtime_interpreter import external_plugin_read_root
+    if user_dir is None:
+        from base.host.runtime_interpreter import external_plugin_read_root
 
-    user_dir = external_plugin_read_root()
-    if user_dir.exists():
-        for p in sorted(user_dir.iterdir()):
+        resolved_user_dir = external_plugin_read_root()
+    else:
+        resolved_user_dir = user_dir
+    if resolved_user_dir.exists():
+        for p in sorted(resolved_user_dir.iterdir()):
             if p.name.startswith("."):
                 continue
             if p.is_dir() and (p / "plugin.py").exists():
@@ -167,12 +172,13 @@ def _default_config(known_plugins: set[str]) -> PluginsConfig:
     )
 
 
-def local_config_path() -> Path:
+def local_config_path(home: Path | None = None) -> Path:
     """Per-machine plugin-config file path: `~/.meiva/plugins_config.json`."""
-    return paths.meiva_home() / "plugins_config.json"
+    resolved_home = paths.meiva_home() if home is None else home
+    return resolved_home / "plugins_config.json"
 
 
-def _read_local() -> dict[str, Any] | None:
+def _read_local(home: Path | None = None) -> dict[str, Any] | None:
     """Read the per-machine plugin-config file. None = absent; a present file
     that is unreadable, not valid JSON, or not an object raises (fail-fast).
 
@@ -180,7 +186,7 @@ def _read_local() -> dict[str, Any] | None:
     local config must not silently degrade to the all-enabled default and get
     rewritten from nothing — the corruption is a state-loss signal, not a
     no-op."""
-    p = local_config_path()
+    p = local_config_path(home)
     if not p.exists():
         return None
     raw = p.read_text()  # OSError propagates
@@ -190,18 +196,23 @@ def _read_local() -> dict[str, Any] | None:
     return cast("dict[str, Any]", data)
 
 
-def write_local(raw: dict[str, Any]) -> None:
+def write_local(raw: dict[str, Any], *, home: Path | None = None) -> None:
     """Full-replace the per-machine plugin-config file. The write path for
     `set_local_enabled` (and `meiva plugins enable/disable`)."""
-    local_config_path().write_text(json.dumps(raw, indent=2))
+    local_config_path(home).write_text(json.dumps(raw, indent=2))
 
 
-def _read_raw() -> dict[str, Any]:
+def _read_raw(home: Path | None = None) -> dict[str, Any]:
     """Read the per-machine local file; absent -> {} (a malformed file raises)."""
-    return _read_local() or {}
+    return _read_local(home) or {}
 
 
-def load(known_plugins: set[str], *, allow_dangling: bool = False) -> PluginsConfig:
+def load(
+    known_plugins: set[str],
+    *,
+    allow_dangling: bool = False,
+    home: Path | None = None,
+) -> PluginsConfig:
     """Read per-machine plugin config; auto-merge new plugins in memory, return config.
 
     Pure-read — no write-back. The only writer is `set_local_enabled`.
@@ -225,7 +236,7 @@ def load(known_plugins: set[str], *, allow_dangling: bool = False) -> PluginsCon
         allow_dangling: drop config entries whose plugin is not on disk
             instead of raising DanglingPlugin.
     """
-    raw = _read_raw()
+    raw = _read_raw(home)
 
     if not raw or not raw.get("plugins"):
         return _default_config(known_plugins)
@@ -279,7 +290,12 @@ def report_dangling(exc: DanglingPlugin, report: load_report.Reporter | None = N
         load_report.reporter(report)(name, exc)
 
 
-def load_for_runtime(known_plugins: set[str]) -> PluginsConfig:
+def load_for_runtime(
+    known_plugins: set[str],
+    *,
+    report: load_report.Reporter | None = None,
+    home: Path | None = None,
+) -> PluginsConfig:
     """Runtime-load wrapper around `load()`: dangling config entries are dropped
     (treated as disabled) and reported through the canonical reporter instead
     of raising DanglingPlugin.
@@ -293,13 +309,15 @@ def load_for_runtime(known_plugins: set[str]) -> PluginsConfig:
     `load()` and its DanglingPlugin error. Each dangling name is reported on each failed load through `report_dangling`.
     """
     try:
-        return load(known_plugins)
+        return load(known_plugins, home=home)
     except DanglingPlugin as exc:
-        report_dangling(exc)
-        return load(known_plugins, allow_dangling=True)
+        report_dangling(exc, report)
+        return load(known_plugins, allow_dangling=True, home=home)
 
 
-def installed_plugin_dirs() -> dict[str, Path]:
+def installed_plugin_dirs(
+    *, repo_dir: Path | None = None, user_dir: Path | None = None
+) -> dict[str, Path]:
     """{name: plugin_dir} for every plugin PRESENT on this machine (builtin +
     external), regardless of enable-state.
 
@@ -311,10 +329,17 @@ def installed_plugin_dirs() -> dict[str, Path]:
     own service via an explicit settings field in `ServiceSpec.gate` (e.g.
     task-maintenance's Fleet `task_maintenance_enabled`).
     """
-    return discover_plugins()
+    return discover_plugins(repo_dir=repo_dir, user_dir=user_dir)
 
 
-def set_local_enabled(name: str, *, enabled: bool) -> PluginsConfig:
+def set_local_enabled(
+    name: str,
+    *,
+    enabled: bool,
+    home: Path | None = None,
+    repo_dir: Path | None = None,
+    user_dir: Path | None = None,
+) -> PluginsConfig:
     """Flip one plugin's enabled flag in the per-machine local config file.
 
     Reads the current local config, writes a config scoped to the plugins
@@ -324,14 +349,14 @@ def set_local_enabled(name: str, *, enabled: bool) -> PluginsConfig:
     Raises:
         DanglingPlugin: `name` is not a plugin installed on this machine.
     """
-    known = set(discover_plugins())
+    known = set(discover_plugins(repo_dir=repo_dir, user_dir=user_dir))
     resolved = skill_naming.find(name, known)
     if resolved is None:
         raise DanglingPlugin(
             f"plugin {name!r} is not present on this machine (known: {sorted(known) or '<none>'})"
         )
     name = resolved
-    raw = _read_raw()
+    raw = _read_raw(home)
     existing = _validate_schema(raw).plugins if raw.get("plugins") else {}
     # Sorted so the written plugins.json key order (and thus the on-disk
     # iteration order that drives hook registration order) is deterministic
@@ -339,5 +364,5 @@ def set_local_enabled(name: str, *, enabled: bool) -> PluginsConfig:
     plugins = {n: existing.get(n, PluginEntry(enabled=True)) for n in sorted(known)}
     plugins[name] = PluginEntry(enabled=enabled)
     cfg = PluginsConfig(plugins=plugins)
-    write_local(cfg.model_dump())
+    write_local(cfg.model_dump(), home=home)
     return cfg

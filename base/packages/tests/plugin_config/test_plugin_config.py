@@ -44,11 +44,10 @@ class FixtureConfig(BaseModel):
 
 
 def test_authority_path_and_reader_do_not_create_a_missing_home(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
 ) -> None:
     home = tmp_path / "uncreated-home"
-    monkeypatch.setenv("MEIVA_HOME", str(home))
-    image = disk_image_path("fixture")
+    image = disk_image_path("fixture", home=home)
     assert image == home / "configs" / "fixture" / "config.json"
     assert read_config_image(FixtureConfig, image).flag is True
     assert not home.exists()
@@ -337,15 +336,13 @@ def test_validate_config_overlay_type_error_raises(
 
 def test_validate_config_overlay_uses_declaring_model_in_gateway_profile(
     model_catalog: ModelCatalog,
-    monkeypatch: pytest.MonkeyPatch,
     isolated_registry: dict[str, BaseModel],
     unit_home,
 ) -> None:
     """Framework validation must not read a domain absent from the gateway profile."""
-    import base.config as base_config
     from base.config import Settings
 
-    monkeypatch.setattr(base_config, "settings", Settings(profile="gateway"))
+    assert not Settings(profile="gateway").has_domain("agent")
 
     validate_config_overlay(
         {"completion_notice_policy": "hourly"},
@@ -362,15 +359,13 @@ def test_validate_config_overlay_uses_declaring_model_in_gateway_profile(
 
 def test_validate_config_overlay_runs_declaring_model_validators_in_gateway_profile(
     model_catalog: ModelCatalog,
-    monkeypatch: pytest.MonkeyPatch,
     isolated_registry: dict[str, BaseModel],
     unit_home,
 ) -> None:
     """Declaring-model validation preserves before and field validators."""
-    import base.config as base_config
     from base.config import Settings
 
-    monkeypatch.setattr(base_config, "settings", Settings(profile="gateway"))
+    assert not Settings(profile="gateway").has_domain("agent")
 
     validate_config_overlay(
         {"skills_to_expand_at_start": "a,b"}, configs=isolated_registry, models=model_catalog.models
@@ -578,46 +573,49 @@ def test_apply_config_overlay_mutates_plugin_config(
 
 
 def test_apply_config_overlay_framework_scope_only_mutates_settings(
-    isolated_registry: dict[str, BaseModel], unit_home, monkeypatch: pytest.MonkeyPatch
+    isolated_registry: dict[str, BaseModel], unit_home
 ):
     """scope='framework' applies only framework Settings half; plugin half untouched."""
     from base.config import settings
 
     _setup_overlayable_plugin(isolated_registry)
-    monkeypatch.setattr(settings.lm, "llm_model", settings.lm.llm_model)  # snapshot for teardown
-    assert (
-        get_plugin_config(
-            "overlay_test",
-            AgentSlices.resolve(
-                plugin_configs=isolated_registry,
-                default_reader=lambda domain, field: getattr(getattr(settings, domain), field),
-            ),
-            FixtureConfig,
-        ).marker
-        == ".git"
-    )
-
-    isolated_registry.update(
-        apply_config_overlay(
-            {"llm_model": "claude-opus-5", "marker": ".hg"},
-            scope="framework",
-            configs=isolated_registry,
-            set_framework_field=set_field,
+    original_model = settings.lm.llm_model
+    try:
+        assert (
+            get_plugin_config(
+                "overlay_test",
+                AgentSlices.resolve(
+                    plugin_configs=isolated_registry,
+                    default_reader=lambda domain, field: getattr(getattr(settings, domain), field),
+                ),
+                FixtureConfig,
+            ).marker
+            == ".git"
         )
-    )
 
-    assert settings.lm.llm_model == "claude-opus-5"
-    assert (
-        get_plugin_config(
-            "overlay_test",
-            AgentSlices.resolve(
-                plugin_configs=isolated_registry,
-                default_reader=lambda domain, field: getattr(getattr(settings, domain), field),
-            ),
-            FixtureConfig,
-        ).marker
-        == ".git"
-    )  # plugin untouched
+        isolated_registry.update(
+            apply_config_overlay(
+                {"llm_model": "claude-opus-5", "marker": ".hg"},
+                scope="framework",
+                configs=isolated_registry,
+                set_framework_field=set_field,
+            )
+        )
+
+        assert settings.lm.llm_model == "claude-opus-5"
+        assert (
+            get_plugin_config(
+                "overlay_test",
+                AgentSlices.resolve(
+                    plugin_configs=isolated_registry,
+                    default_reader=lambda domain, field: getattr(getattr(settings, domain), field),
+                ),
+                FixtureConfig,
+            ).marker
+            == ".git"
+        )  # plugin untouched
+    finally:
+        set_field("llm_model", original_model)
 
 
 def test_apply_config_overlay_plugin_scope_only_mutates_plugin_configs(

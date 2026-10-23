@@ -12,12 +12,10 @@ from base.lm.catalog import ModelCatalog
 @pytest.mark.parametrize("provider_cause", [False, True])
 def test_unknown_runnable_error_is_not_retried_or_wrapped(
     model_catalog: ModelCatalog,
-    monkeypatch: pytest.MonkeyPatch,
     error: Exception,
     provider_cause: bool,
 ) -> None:
     calls: list[list[Any]] = []
-    sleeps: list[float] = []
     if provider_cause:
         response = httpx2.Response(429, request=httpx2.Request("POST", "https://audit.invalid"))
         error.__cause__ = openai.RateLimitError("limited", response=response, body=None)
@@ -27,7 +25,6 @@ def test_unknown_runnable_error_is_not_retried_or_wrapped(
             calls.append(messages)
             raise error
 
-    monkeypatch.setattr("time.sleep", sleeps.append)
     with pytest.raises(type(error)) as raised:
         invoke_response(
             BrokenRunnable(),
@@ -35,7 +32,9 @@ def test_unknown_runnable_error_is_not_retried_or_wrapped(
             desc="audit",
             error_type=RuntimeError,
             retry_attempts=2,
+            retry_delay_seconds=0.0,
+            retry_max_delay_seconds=0.0,
             catalog=model_catalog,
         )
     assert raised.value is error
-    assert len(calls) == 1 and sleeps == []
+    assert len(calls) == 1

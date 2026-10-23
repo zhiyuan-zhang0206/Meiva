@@ -2,6 +2,7 @@
 
 import contextlib
 import json
+from collections.abc import Callable
 
 import psycopg
 
@@ -108,10 +109,18 @@ def insert_inbound_message(
     *,
     database: Database,
     bus: EventBus,
+    record_audit: Callable[[psycopg.Connection, Event], Event] = record_audit,
 ) -> int:
     with db.cursor() as cur:
         new_id, prepared_event = insert_inbound_message_in_transaction(
-            cur, agent_id, content, source, kind=kind, payload=payload, provenance=provenance
+            cur,
+            agent_id,
+            content,
+            source,
+            kind=kind,
+            payload=payload,
+            provenance=provenance,
+            record_audit=record_audit,
         )
     db.commit()
     emit_prepared_event(prepared_event)
@@ -131,6 +140,8 @@ def insert_inbound_message_in_transaction(
     kind: str = "chat",
     payload: dict[str, object] | None = None,
     provenance: InboundProvenance | None = None,
+    *,
+    record_audit: Callable[[psycopg.Connection, Event], Event] = record_audit,
 ) -> tuple[int, Event | None]:
     """INSERT one inbound in the caller's transaction; no commit, no wake.
 
