@@ -194,6 +194,19 @@ def test_type_must_be_doc_or_memory(tmp_path: Path) -> None:
     assert _schema_codes(tmp_path, _NODE.replace("type: doc", "type: page")) == ["E002"]
 
 
+@pytest.mark.parametrize("value", ["[doc]", "{name: doc}", "true", "7", "null"])
+def test_non_string_type_is_reported_as_a_schema_error(tmp_path: Path, value: str) -> None:
+    assert _schema_codes(tmp_path, _NODE.replace("type: doc", f"type: {value}")) == ["E002"]
+
+
+def test_frontmatter_retains_yaml_key_and_value_types_for_field_checks() -> None:
+    text = "---\ntype: doc\n7: [one, 2]\n---\n\n# Body\n"
+    frontmatter, body, end_line = gate.parse_frontmatter(text)
+    assert frontmatter == {"type": "doc", 7: ["one", 2]}
+    assert body == "# Body\n"
+    assert end_line == 4
+
+
 def test_title_and_description_are_required(tmp_path: Path) -> None:
     assert _schema_codes(tmp_path, "---\ntype: doc\ndescription: D\n---\n\n# T\n") == ["E003"]
     assert _schema_codes(tmp_path, "---\ntype: doc\ntitle: T\n---\n\n# T\n") == ["E004"]
