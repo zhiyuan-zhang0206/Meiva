@@ -14,16 +14,17 @@ from __future__ import annotations
 
 import ast
 import re
+import sys
 import tomllib
 from collections.abc import Iterable
 from pathlib import Path
 from typing import cast
 
 from meizel import roles as role_api
-from meizel.contracts.generated import regions
+from meizel.contracts.generated import regions, stale, write
 from meizel.graph.universe import load_universe
 
-__all__ = ["violations"]
+__all__ = ["regions", "run_roles", "stale", "violations", "write"]
 
 _MIN_ROLE_SIZE = 3
 _FIRST = re.compile(r"[/.*\\]")
@@ -135,3 +136,22 @@ def violations(root: Path) -> list[str]:
         scan = _python if path.endswith(".py") else _toml
         found.extend(scan(path, text, declared, spans.get(path, [])))
     return sorted(found)
+
+
+def run_roles(root: Path, mode: str, role_names: tuple[str, ...] = ()) -> int:
+    if mode == "list":
+        for name in role_api.packages(*role_names, root=root):
+            print(name)
+        return 0
+    if mode == "write":
+        for path in write(root):
+            print(f"meizel: regenerated {path}")
+        return 0
+    problems = [*stale(root), *violations(root)]
+    for problem in problems:
+        print(problem)
+    if problems:
+        print(f"meizel: {len(problems)} role problems", file=sys.stderr)
+        return 1
+    print("meizel: roles ok")
+    return 0

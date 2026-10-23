@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from meizel.language.bindings import is_imported_binding, module_bindings
+from meizel.language.scan import is_imported_binding, module_bindings
 from meizel.tests.synthetic import RepoFactory, analysis_of, diagnostics, git, run
 
 

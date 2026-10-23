@@ -4,22 +4,33 @@ import asyncio
 import threading
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, override
 
 import psycopg
 import pytest
 from psycopg_pool import AsyncConnectionPool
 
 from agent.db import claim_inbound_batch
-from agent.ownership import hosted_cleanup
 from agent.ownership.hosted import apply_hosted_lifecycle
 from agent.ownership.tests.ownership_support import admit_owner, agent_row
 from base.db.code_version_gate import ProcessDbGate
-from base.events.live.bus import EventBus
+from base.events.live.bus import EventBus, EventBusConfig
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from services.agent_runner.agent_host.tests.lifecycle.test_hosted_lifecycle import (
     terminate_command,
 )
+
+
+class _FailingBus(EventBus):
+    def __init__(self, failure: BaseException) -> None:
+        super().__init__(EventBusConfig(redis_url="redis://127.0.0.1:1/0", events_channel="test"))
+        self._failure = failure
+
+    @override
+    async def publish_best_effort(
+        self, payload: str, *, channel: str | None = None, context: str = ""
+    ) -> int | None:
+        raise self._failure
 
 
 async def _prepare(
@@ -120,8 +131,6 @@ async def test_unknown_cleanup_error_keeps_original_exception_and_committed_rece
 async def test_publication_failure_still_attempts_cleanup_and_keeps_primary_error(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
-    event_bus: EventBus,
-    monkeypatch: pytest.MonkeyPatch,
     loguru_records: list[dict[str, Any]],
     *,
     database_gate: ProcessDbGate,
@@ -131,17 +140,12 @@ async def test_publication_failure_still_attempts_cleanup_and_keeps_primary_erro
     secondary = RuntimeError("unknown cleanup defect")
     calls: list[tuple[int, int]] = []
 
-    async def failed_publish(bus: EventBus, agent_id: int) -> None:
-        assert bus is event_bus and agent_id == owner.agent_id
-        raise original
-
     def failed_kill(agent_id: int, cutoff: int) -> None:
         calls.append((agent_id, cutoff))
         raise secondary
 
-    monkeypatch.setattr(hosted_cleanup, "publish_agent_updated", failed_publish)
     with pytest.raises(RuntimeError) as caught:
-        await _settle(aops_pool, owner, event_bus, failed_kill)
+        await _settle(aops_pool, owner, _FailingBus(original), failed_kill)
     assert caught.value is original
     assert calls == [(owner.agent_id, 7)]
     assert any("Post-commit shell cleanup also failed" in note for note in original.__notes__)
@@ -149,16 +153,3 @@ async def test_publication_failure_still_attempts_cleanup_and_keeps_primary_erro
         record["exception"].value is secondary for record in loguru_records if record["exception"]
     )
     _assert_committed_and_allocate(db_conn.info.dsn, owner.agent_id, command)
-
-
-async def test_graceful_termination_releases_browser_pages(
-    event_bus: EventBus,
-) -> None:
-    released: list[int] = []
-
-    async def fake_release(agent_id: int) -> bool:
-        released.append(agent_id)
-        return True
-
-    await hosted_cleanup.finish_termination(event_bus, 42, None, None, page_releaser=fake_release)
-    assert released == [42]

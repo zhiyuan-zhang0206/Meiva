@@ -22,7 +22,7 @@ from base.cluster.machines import mark_stopping
 from base.config.agent_pins import resolve_agent_config_pins
 from base.db import Database
 from base.native_process.loaded_commit import LoadedCommit
-from base.packages.skills.project_roots import project_skill_roots
+from base.packages.skills import project_skill_roots
 from ops.cluster_status import (
     ClusterStatus,
     agent_shell_sessions,

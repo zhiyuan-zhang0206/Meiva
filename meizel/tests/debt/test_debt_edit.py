@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from meizel.contracts.debt import set_debt
+from meizel.contracts.analysis import set_debt
 from meizel.graph.model import Code
 from meizel.tests.synthetic import RepoFactory, analysis_of, failures, git, run, write
 

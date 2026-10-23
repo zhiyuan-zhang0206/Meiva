@@ -7,12 +7,24 @@ raises a total, and records nothing that was not already recorded.
 
 from __future__ import annotations
 
+import argparse
 import subprocess
+import sys
 from pathlib import Path
 
 from meizel.contracts.debt import PATCH_CODES, DebtTable, file_key, total
-from meizel.contracts.debt_edit import write_baseline
-from meizel.contracts.debt_report import read_baselines
+from meizel.contracts.debt_edit import prune as prune_debt
+from meizel.contracts.debt_edit import record, write_baseline
+from meizel.contracts.debt_report import (
+    by_target,
+    changed_under,
+    diff,
+    read_baselines,
+    summarize,
+    totals_at,
+)
+from meizel.contracts.debt_rules import purity_changed, rule_diff
+from meizel.contracts.debt_sites import format_sites, sites
 from meizel.contracts.debt_symbol import (
     SymbolMove,
     defines,
@@ -24,7 +36,7 @@ from meizel.contracts.rule import project
 from meizel.graph.model import Code, Fact, FactKind, MeizelError
 from meizel.graph.universe import MANIFEST, Universe, load_universe, parent_of
 
-__all__ = ["carry", "renames_since"]
+__all__ = ["carry", "renames_since", "run_debt"]
 
 _SEPARATOR = " -> "
 _EDGE_CODES = frozenset(
@@ -263,3 +275,77 @@ def carry(
         if tables[owner] != baselines.get(owner, {}):
             write_baseline(root, owner, {c: r for c, r in tables[owner].items() if r})
     return lines
+
+
+def _run_diff(root: Path, ref: str, on_growth: str, args: argparse.Namespace) -> int:
+    rules_changed = (
+        bool(args.waive_if_changed) and bool(changed_under(root, ref, args.waive_if_changed))
+    ) or purity_changed(root, ref)
+    if rules_changed:
+        result = rule_diff(root, ref, totals_at(root, ref), args.jobs)
+        print("\n".join(result.lines()))
+        print("\n".join(result.explanation()))
+        grew = result.content_grew
+    else:
+        lines, grew = diff(root, ref)
+        print("\n".join(lines))
+    if args.by_target:
+        print()
+        print("\n".join(by_target(root, ref, args.target_prefix, args.depth)))
+        print()
+    if not grew:
+        if not rules_changed:
+            print(f"meizel: no growth against {ref}")
+        return 0
+    warning = "" if on_growth == "fail" else " warning:"
+    print(f"meizel:{warning} recorded debt grew against {ref}", file=sys.stderr)
+    return 1 if on_growth == "fail" else 0
+
+
+def _run_record(root: Path, targets: list[str], jobs: int | None) -> int:
+    written, created, unrecordable = record(root, targets, jobs)
+    for path in written:
+        print(f"meizel: wrote {path}")
+    if created:
+        print(
+            f"meizel: {len(created)} manifests created; stage them with git add, "
+            "because check reads tracked files only"
+        )
+    for diagnostic in unrecordable:
+        print(diagnostic.render())
+    if unrecordable:
+        codes = ", ".join(sorted({d.code.value for d in unrecordable}))
+        print(
+            f"meizel: {len(unrecordable)} violations cannot be recorded [{codes}]", file=sys.stderr
+        )
+        return 1
+    return 0
+
+
+def run_debt(root: Path, targets: list[str], args: argparse.Namespace, jobs: int | None) -> int:
+    mode = args.debt_mode
+    if mode is None:
+        print(summarize(root, as_json=args.json))
+        return 0
+    if args.json:
+        raise MeizelError("--json belongs to the summary: `meizel debt --json`")
+    if mode == "prune":
+        for line in prune_debt(root, jobs):
+            print(line)
+        return 0
+    if mode == "sites":
+        found = sites(load_universe(root), args.code, args.target_prefix, targets, jobs)
+        print(format_sites(found, as_json=args.as_json))
+        return 0
+    if mode == "diff":
+        return _run_diff(root, args.against, args.on_growth, args)
+    if mode == "carry":
+        lines = carry(root, args.base, args.rename_target, args.move_symbol)
+        for line in lines:
+            print(f"meizel: carried {line}")
+        if not lines:
+            print(
+                "meizel: nothing to carry: no renamed file, target or moved symbol has recorded debt"
+            )
+        return 0
+    return _run_record(root, targets, jobs)

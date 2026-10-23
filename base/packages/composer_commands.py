@@ -10,9 +10,9 @@ from base.config import settings
 from base.host.runtime_interpreter import external_plugin_read_root
 from base.log import logger
 from base.packages.docs.frontmatter import FrontmatterError, parse_frontmatter
+from base.packages.skills import scan_tree
 from base.packages.skills.names import display_name, match_key
 from base.packages.skills.tree import Skill, flatten, identifier, target
-from base.packages.skills.tree_builder import scan_tree
 from base.paths import meiva_home, repo_plugins_dir, repo_root, skills_dir
 
 

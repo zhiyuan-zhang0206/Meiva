@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, cast
 
 from meizel import allowances
+from meizel.graph.imports import Scope, collect_scope, dotted_chain, parameter_names
 from meizel.graph.model import (
     Code,
     EnumSubsetUse,
@@ -21,14 +22,22 @@ from meizel.graph.model import (
     PurityItem,
     Restricted,
 )
-from meizel.graph.scopes import Scope, collect_scope, dotted_chain, parameter_names
 from meizel.graph.universe import Universe
 from meizel.language import fixtures, purity
 from meizel.language.bindings import is_imported_binding, module_bindings, provides
+from meizel.language.mounts import mount_facts
 from meizel.language.python_commands import PythonCommands
 from meizel.language.restricted import EXTERNAL_FORMS, const_str
 
-__all__ = ["EXTERNAL_FORMS", "FileScan", "scan_file", "scan_source"]
+__all__ = [
+    "EXTERNAL_FORMS",
+    "FileScan",
+    "is_imported_binding",
+    "module_bindings",
+    "mount_facts",
+    "scan_file",
+    "scan_source",
+]
 
 _PATCH_CALLS = {
     "unittest.mock.patch": "patch",

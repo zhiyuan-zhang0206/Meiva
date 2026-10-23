@@ -12,8 +12,7 @@ from meizel.contracts.policy import Policy
 from meizel.graph.graphs import reachable
 from meizel.graph.model import Code, DebtKey, Diagnostic, Fact, FactKind
 from meizel.graph.universe import is_private_module
-from meizel.language.fixtures import is_test_file
-from meizel.language.purity import DEFAULT_IMPURE_FIXTURES
+from meizel.language.fixtures import DEFAULT_IMPURE_FIXTURES, is_test_file
 from meizel.language.scan import FileScan
 
 __all__ = [

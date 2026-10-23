@@ -1,4 +1,4 @@
-exports = ["bindings.py", "fixtures.py", "mounts.py", "no_script_sibling_imports.py", "path_imports.py", "purity.py", "scan.py", "type_checking.py"]
+exports = ["fixtures.py", "no_script_sibling_imports.py", "path_imports.py", "scan.py"]
 
 [purity]
 "." = "strict-to-be"
@@ -10,9 +10,10 @@ exports = ["bindings.py", "fixtures.py", "mounts.py", "no_script_sibling_imports
 "type_checking.py" = "strict"
 
 [uses]
+"path_imports.py" = ["type_checking.py"]
 "purity.py" = ["purity_structure.py"]
 "python_commands.py" = ["restricted.py"]
-"scan.py" = ["bindings.py", "fixtures.py", "purity.py", "python_commands.py", "restricted.py"]
+"scan.py" = ["bindings.py", "fixtures.py", "mounts.py", "purity.py", "python_commands.py", "restricted.py"]
 "tests" = ["no_script_sibling_imports.py", "path_imports.py"]
 
 [debt.impure-call]
@@ -26,6 +27,3 @@ exports = ["bindings.py", "fixtures.py", "mounts.py", "no_script_sibling_imports
 "purity.py#Path.is_file" = 1
 "purity.py#Path.read_text" = 1
 "scan.py#Path.read_bytes" = 1
-
-[debt.wide-exports]
-"meizel.toml#exports" = 1

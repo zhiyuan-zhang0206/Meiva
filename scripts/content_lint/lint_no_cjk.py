@@ -136,7 +136,7 @@ def main(argv: list[str] | None = None, *, repo_root: Path = _REPO_ROOT) -> int:
             continue
         for lineno, ch, content in _scan_file(rel, repo_root):
             total += 1
-            print(lint_common.format_violation(rel, lineno, f"U+{ord(ch):04X} {ch!r}", content))
+            print(f"{rel}:{lineno}: U+{ord(ch):04X} {ch!r} | {content}")
 
     if total:
         print(

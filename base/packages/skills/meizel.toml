@@ -1,6 +1,7 @@
-exports = ["index.py", "names.py", "project_roots.py", "scan.py", "tree.py", "tree_builder.py"]
+exports = ["index.py", "names.py", "scan.py", "tree.py"]
 
 [uses]
+"__init__.py" = ["project_roots.py", "tree_builder.py"]
 "index.py" = ["names.py", "scan.py"]
 "tests" = ["index.py", "names.py", "project_roots.py", "scan.py"]
 "tree.py" = ["names.py"]
@@ -28,6 +29,3 @@ exports = ["index.py", "names.py", "project_roots.py", "scan.py", "tree.py", "tr
 
 [debt.impure-edge]
 "tree_builder.py#base/log/__init__.py" = 1
-
-[debt.wide-exports]
-"meizel.toml#exports" = 1

@@ -9,7 +9,7 @@ exports = ["allowances.py", "budgets", "contracts", "graph", "language", "lint_c
 "__main__.py" = ["contracts"]
 "contracts" = ["allowances.py", "graph", "language", "roles.py"]
 "language" = ["allowances.py", "graph", "lint_common.py"]
-"lint_common.py" = ["roles.py"]
+"lint_common.py" = ["__init__.py", "roles.py"]
 "owners" = ["allowances.py", "lint_common.py", "roles.py"]
 "roles.py" = ["graph"]
 "state" = ["allowances.py", "lint_common.py", "roles.py"]
@@ -24,6 +24,3 @@ exports = ["allowances.py", "budgets", "contracts", "graph", "language", "lint_c
 "lint_common.py#Path.read_bytes" = 1
 "lint_common.py#import subprocess" = 1
 "roles.py#Path.read_text" = 1
-
-[debt.wide-public-surface]
-"lint_common.py#public-surface" = 1

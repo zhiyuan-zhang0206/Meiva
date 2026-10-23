@@ -95,3 +95,17 @@ async def test_ordinary_browser_failure_remains_best_effort_and_attempts_shell()
         RecordingBus(effects, None), 42, 7, kill_shells, page_releaser=failed_browser
     )
     assert effects == ["publish", "browser", "shell"]
+
+
+async def test_graceful_termination_releases_browser_pages() -> None:
+    effects: list[str] = []
+    released: list[int] = []
+
+    async def fake_release(agent_id: int) -> bool:
+        released.append(agent_id)
+        return True
+
+    await finish_termination(
+        RecordingBus(effects, None), 42, None, None, page_releaser=fake_release
+    )
+    assert released == [42]
