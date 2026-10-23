@@ -53,8 +53,23 @@ function mix(color: string, share: number, into: string): string {
   return `color-mix(in srgb, ${color} ${Math.round(share * 100)}%, ${into})`;
 }
 
-function fillBox(p: PaintCtx, x0: number, x1: number, y0: number, y1: number, css: string, radius = 0) {
+interface PaintRect {
+  x0: number;
+  x1: number;
+  y0: number;
+  y1: number;
+}
+
+interface OutlineStyle {
+  css: string;
+  lineWidth: number;
+  radius: number;
+  dash?: number[];
+}
+
+function fillBox(p: PaintCtx, rect: PaintRect, css: string, radius = 0) {
   const { ctx, dpr } = p;
+  const { x0, x1, y0, y1 } = rect;
   const left = snap(x0, dpr);
   const width = Math.max(snap(x1, dpr) - left, 1 / dpr);
   ctx.fillStyle = p.resolve(css);
@@ -65,8 +80,10 @@ function fillBox(p: PaintCtx, x0: number, x1: number, y0: number, y1: number, cs
   } else ctx.fillRect(left, y0, width, y1 - y0);
 }
 
-function outline(p: PaintCtx, x0: number, x1: number, y0: number, y1: number, css: string, lineWidth: number, radius: number, dash: number[] = []) {
+function outline(p: PaintCtx, rect: PaintRect, style: OutlineStyle) {
   const { ctx, dpr } = p;
+  const { x0, x1, y0, y1 } = rect;
+  const { css, lineWidth, radius, dash = [] } = style;
   const left = snap(x0, dpr) + lineWidth / 2;
   const right = snap(x1, dpr) - lineWidth / 2;
   ctx.strokeStyle = p.resolve(css);
@@ -128,14 +145,22 @@ export interface RowDeco {
 
 /** The frames around a row's selection (a thick accent one for the primary, a thin dashed one for what is linked) and the hairline. */
 function paintDeco(p: PaintCtx, deco: RowDeco, top: number, bottom: number, topOf?: (keys: ReadonlySet<string>) => number) {
-  if (deco.lineX !== null) fillBox(p, deco.lineX - 0.5, deco.lineX + 0.5, 0, p.height, mix(FOREGROUND, 0.18, p.trackBg));
+  if (deco.lineX !== null) fillBox(p, { x0: deco.lineX - 0.5, x1: deco.lineX + 0.5, y0: 0, y1: p.height }, mix(FOREGROUND, 0.18, p.trackBg));
   if (deco.linked !== null) {
     const y0 = topOf === undefined ? top : topOf(deco.linkedKeys);
-    outline(p, deco.linked.left - FRAME_ROOM_PX, deco.linked.left + deco.linked.width + FRAME_ROOM_PX, y0 - FRAME_ROOM_PX, bottom + FRAME_ROOM_PX, mix(ACCENT, 0.6, "var(--card)"), 1, BLOCK_RADIUS, [3, 2]);
+    outline(
+      p,
+      { x0: deco.linked.left - FRAME_ROOM_PX, x1: deco.linked.left + deco.linked.width + FRAME_ROOM_PX, y0: y0 - FRAME_ROOM_PX, y1: bottom + FRAME_ROOM_PX },
+      { css: mix(ACCENT, 0.6, "var(--card)"), lineWidth: 1, radius: BLOCK_RADIUS, dash: [3, 2] },
+    );
   }
   if (deco.primary !== null) {
     const y0 = topOf === undefined || deco.primaryKey === null ? top : topOf(new Set([deco.primaryKey]));
-    outline(p, deco.primary.left - FRAME_ROOM_PX, deco.primary.left + deco.primary.width + FRAME_ROOM_PX, y0 - FRAME_ROOM_PX, bottom + FRAME_ROOM_PX, ACCENT, FRAME_PX, BLOCK_RADIUS);
+    outline(
+      p,
+      { x0: deco.primary.left - FRAME_ROOM_PX, x1: deco.primary.left + deco.primary.width + FRAME_ROOM_PX, y0: y0 - FRAME_ROOM_PX, y1: bottom + FRAME_ROOM_PX },
+      { css: ACCENT, lineWidth: FRAME_PX, radius: BLOCK_RADIUS },
+    );
   }
 }
 
@@ -170,14 +195,15 @@ export function paintNodes(p: PaintCtx, layout: RowLayout, state: PaintState, de
   for (const place of layout.wide) {
     const s = stateOf(place.key);
     const node = layout.items.get(place.key)?.node;
-    fillBox(p, place.x0, place.x1, top, bottom, tone(p, s, base), BLOCK_RADIUS);
-    outline(p, place.x0, place.x1, top, bottom, tone(p, s, "var(--border)"), 1, BLOCK_RADIUS);
-    if (s.hoverLight) outline(p, place.x0, place.x1, top, bottom, mix(ACCENT, 0.35, "var(--card)"), 1, BLOCK_RADIUS);
+    const rect = { x0: place.x0, x1: place.x1, y0: top, y1: bottom };
+    fillBox(p, rect, tone(p, s, base), BLOCK_RADIUS);
+    outline(p, rect, { css: tone(p, s, "var(--border)"), lineWidth: 1, radius: BLOCK_RADIUS });
+    if (s.hoverLight) outline(p, rect, { css: mix(ACCENT, 0.35, "var(--card)"), lineWidth: 1, radius: BLOCK_RADIUS });
     if (node !== undefined) drawLabel(p, place, p.height / 2, firstLine(node.summary, NODE_LABEL_CHARS), tone(p, s, FOREGROUND));
   }
   for (const cell of layout.cells) {
     const s = stateOf(cell.key);
-    fillBox(p, cell.x0, cell.x1, top, bottom, tone(p, s, mix(ACCENT, s.hoverLight ? 0.6 : 0.4, "var(--card)")));
+    fillBox(p, { x0: cell.x0, x1: cell.x1, y0: top, y1: bottom }, tone(p, s, mix(ACCENT, s.hoverLight ? 0.6 : 0.4, "var(--card)")));
   }
   paintDeco(p, deco, top, bottom);
 }
@@ -208,14 +234,15 @@ export function paintUnits(p: PaintCtx, layout: RowLayout, state: PaintState, de
     const s = stateOf(place.key);
     if (s === null) continue;
     const y0 = y1 - heightOf(place.key);
-    fillBox(p, place.x0, place.x1, y0, y1, tone(p, s, unitColor(s.unit)), UNIT_RADIUS);
-    if (s.hoverLight) outline(p, place.x0, place.x1, y0, y1, mix(ACCENT, 0.35, "var(--card)"), 1, UNIT_RADIUS);
+    const rect = { x0: place.x0, x1: place.x1, y0, y1 };
+    fillBox(p, rect, tone(p, s, unitColor(s.unit)), UNIT_RADIUS);
+    if (s.hoverLight) outline(p, rect, { css: mix(ACCENT, 0.35, "var(--card)"), lineWidth: 1, radius: UNIT_RADIUS });
   }
   for (const cell of layout.cells) {
     const s = stateOf(cell.key);
     if (s === null) continue;
     // A hairline lit by a hover is lifted toward the foreground a little.
-    fillBox(p, cell.x0, cell.x1, y1 - heightOf(cell.key), y1, tone(p, s, s.hoverLight ? mix(FOREGROUND, 0.3, unitColor(s.unit)) : unitColor(s.unit)));
+    fillBox(p, { x0: cell.x0, x1: cell.x1, y0: y1 - heightOf(cell.key), y1 }, tone(p, s, s.hoverLight ? mix(FOREGROUND, 0.3, unitColor(s.unit)) : unitColor(s.unit)));
   }
   // A frame reaches the top of the tallest block it surrounds, and no higher.
   const topOf = (keys: ReadonlySet<string>) => y1 - Math.max(UNIT_FLOOR_PX, ...[...keys].map(heightOf));
@@ -246,8 +273,9 @@ export function paintBars(p: PaintCtx, layout: RowLayout, top: number, state: Pa
   const draw = (x0: number, x1: number, key: string, ring: boolean) => {
     const s = stateOf(key);
     if (s === null) return;
-    fillBox(p, x0, x1, bottom - s.height, bottom, colorOf(s));
-    if (ring && s.hovered && !s.lifted) outline(p, x0, x1, bottom - s.height, bottom, mix(ACCENT, 0.35, "var(--card)"), 1, 0);
+    const rect = { x0, x1, y0: bottom - s.height, y1: bottom };
+    fillBox(p, rect, colorOf(s));
+    if (ring && s.hovered && !s.lifted) outline(p, rect, { css: mix(ACCENT, 0.35, "var(--card)"), lineWidth: 1, radius: 0 });
   };
   for (const place of layout.wide) draw(place.x0, place.x1, place.key, true);
   for (const cell of layout.cells as readonly Cell[]) draw(cell.x0, cell.x1, cell.key, false);

@@ -47,7 +47,7 @@ import { useTimeFormat } from "@/lib/format/use-time-format";
 import type { AgentRow, PublicAgentStatus } from "@/lib/contracts/types";
 import { cn } from "@/lib/format/utils";
 import { FLEX, FLEX_1, FLEX_COL, MIN_W_0 } from "@/lib/layout/layout";
-import { RowActions } from "../agent-sidebar/row-actions";
+import { RowActions } from "./row-actions";
 
 // Radix Dialog is needed only after an advanced prompt-taking menu action;
 // closed rows keep no modal payload in the initial graph.

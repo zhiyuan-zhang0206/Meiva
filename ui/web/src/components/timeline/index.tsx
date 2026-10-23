@@ -4,8 +4,7 @@ import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useStat
 import { useTranslations } from "next-intl";
 
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { useContentToggle, useContentToggleReset } from "@/lib/layout/content-toggle-store";
-import { isReattachedTimelineContext, parseItemIdParts, standingHeadNoteIds } from "@/lib/timeline/timeline";
+import { parseItemIdParts } from "@/lib/timeline/timeline";
 import {
   type StickyController,
   createStickyController,
@@ -14,28 +13,24 @@ import {
 import type { BackendTimelineItem } from "@/lib/contracts/types";
 import { readScrollMemory, type SavedScroll } from "@/lib/layout/scroll-memory";
 import { useTimelineStore } from "@/lib/timeline/timeline-store";
-import { canonicalBufferCoordinate, type CompactTransitionBuffer } from "@/lib/layout/compact-transition";
-import { BAR_HEIGHT_PX, BAR_CLEAR_TOP_PADDING_CLASS, FLEX_1, MIN_H_0, OVERFLOW_HIDDEN } from "@/lib/layout/layout";
+import type { CompactTransitionBuffer } from "@/lib/layout/compact-transition";
+import { BAR_CLEAR_TOP_PADDING_CLASS, FLEX_1, MIN_H_0, OVERFLOW_HIDDEN } from "@/lib/layout/layout";
 import { cn } from "@/lib/format/utils";
-import { useTimelineColors } from "@/lib/timeline/use-timeline-colors";
 
 import { ConnectionNotice } from "@/components/notifications/connection-notice";
+import { TimelineGroupList, useTimelineGroupWindow } from "./view/group-list";
 import { CompactingBlock } from "./model/compacting-block";
-import { LiveClockGate } from "./model/reasoning-clock";
-import { findClosestStuckHeaderId, TurnBlock } from "./run-block";
 import { applyBookmarkRestore, settleRestoredPosition as settleRestoredPositionImpl, type BookmarkState } from "./model/bookmark-restore";
-import { rememberTimelinePosition, readTimelineExpansion, rememberTimelineExpansion, watchReadingNavigation } from "./model/reading-position";
-import { materializeBeforeAnchor } from "./model/materialize-prefix";
-import { classifyItem } from "./model/runs";
-import { groupTimelineSegments } from "./model/segments";
+import { rememberTimelinePosition } from "./model/reading-position";
 import { useCompactTransitionAnchor } from "./model/use-compact-transition-anchor";
 import { useOlderHistoryPull } from "./model/use-older-history-pull";
 import { usePinRequests } from "./model/use-pin-requests";
+import { usePrependAnchor } from "./view/use-prepend-anchor";
+import { useTimelineExpansion } from "./view/use-timeline-expansion";
+import { useTimelineViewport } from "./view/use-timeline-viewport";
 import { useReanchorOnWidthChange } from "./model/width-change-anchor";
 import { useStickyThresholds } from "./model/sticky-thresholds";
-import { useTimelineWindow, useTimelineWindowLimits } from "./model/use-timeline-window";
 import { LoadOlderSpinner, LoadOlderKeyboardButton, ColdLoadSpinner, ScrollToBottomButton } from "./overlays";
-import { TimelineRow, cardConfigFor } from "./row";
 
 interface Props {
   items: BackendTimelineItem[];
@@ -73,7 +68,6 @@ export const TimelineView = memo(function TimelineView({
   maxWidthCss,
 }: Props) {
   const t = useTranslations("timeline");
-  const { activationRows, turnRows, measureRows } = useTimelineWindowLimits();
   const bufferedItems = useMemo(
     () => compactBuffer?.rows.map((row) => row.item) ?? [],
     [compactBuffer],
@@ -130,26 +124,25 @@ export const TimelineView = memo(function TimelineView({
         : null;
   });
 
-  const pendingAnchorRef = useRef<{ id: string; rank: number; frontId: string | null; docTop: number } | null>(null);
-
-  const prevLoadingOlderRef = useRef(loadingOlder);
-
   const [atBottom, setAtBottom] = useState(true);
-  const stuckRafRef = useRef<number | null>(null);
 
-  const [activeStuckHeaderId, setActiveStuckHeaderId] = useState<string | null>(null);
-  const [activeStuckChildId, setActiveStuckChildId] = useState<string | null>(null);
-
-  const updateStuckHeader = useCallback(() => {
-    const viewport =
-      viewportRef.current ??
-      wrapperRef.current?.querySelector<HTMLElement>('[data-slot="scroll-area-viewport"]') ??
-      null;
-    if (!viewport) return;
-    const { topId, childId } = findClosestStuckHeaderId(viewport, BAR_HEIGHT_PX);
-    setActiveStuckHeaderId((prev) => (prev === topId ? prev : topId));
-    setActiveStuckChildId((prev) => (prev === childId ? prev : childId));
-  }, []);
+  const {
+    stuckRafRef,
+    activeStuckHeaderId,
+    activeStuckChildId,
+    updateStuckHeader,
+    effectiveDetailsMode,
+    turnOverrides,
+    toggleTurn,
+    overrides,
+    toggleExpanded,
+  } = useTimelineExpansion({
+    scrollMemoryKey,
+    threadKey,
+    items,
+    wrapperRef,
+    viewportRef,
+  });
 
   const stickyThresholds = useStickyThresholds();
 
@@ -183,12 +176,6 @@ export const TimelineView = memo(function TimelineView({
     retainedItemsMaxRef.current = retainedItemsMax;
     trimFollowing();
   }, [canonicalItems, retainedItemsMax, trimFollowing]);
-  const compactPin = useCompactTransitionAnchor({
-    controller,
-    viewportRef,
-    prependAnchorRef: pendingAnchorRef,
-    compactBuffer,
-  });
 
   const [announcedTurnActive, setAnnouncedTurnActive] = useState(turnActive);
   const [turnAnnouncement, setTurnAnnouncement] = useState<string | null>(null);
@@ -231,61 +218,30 @@ export const TimelineView = memo(function TimelineView({
     [controller],
   );
 
+  const coldFillRef = useRef({ pages: 0, open: true, inFlight: false, sawLoading: false });
+  const prependEchoRef = useRef(false);
+
   const scrollByDelta = useCallback((viewport: HTMLElement, delta: number) => {
     viewport.scrollTop += delta;
     prependEchoRef.current = true;
   }, []);
 
-  const captureAnchor = useCallback(() => {
-    const viewport = viewportRef.current;
-    if (!viewport) return;
-    const currentItems = itemsRef.current;
-    const headNoteIds = standingHeadNoteIds(currentItems);
-    const contextIds = new Set(
-      currentItems
-        .filter((it) => isReattachedTimelineContext(it) || headNoteIds.has(it.item_id))
-        .map((it) => it.item_id),
-    );
-    const vpRect = viewport.getBoundingClientRect();
-    let anchorNode: HTMLElement | null = null;
-    let contextNode: HTMLElement | null = null;
-    for (const n of viewport.querySelectorAll<HTMLElement>(
-      ".timeline-item, [data-turn-expanded='false'][data-item-id]",
-    )) {
-      const id = n.dataset.itemId;
-      if (!id || id.startsWith("_")) continue;
-      if (contextIds.has(id)) {
-        contextNode ??= n;
-        continue;
-      }
-      const r = n.getBoundingClientRect();
-      if (r.bottom >= vpRect.top && r.top <= vpRect.bottom) {
-        anchorNode = n;
-        break;
-      }
-    }
-    anchorNode ??= contextNode;
-    const anchorId = anchorNode?.dataset.itemId;
-    if (anchorNode && anchorId) {
-      const frontRealId =
-        currentItems.find(
-          (it) =>
-            !isReattachedTimelineContext(it) &&
-            !headNoteIds.has(it.item_id) &&
-            !it.item_id.startsWith("_"),
-        )?.item_id ?? null;
-      pendingAnchorRef.current = {
-        id: anchorId,
-        rank: Number(anchorNode.dataset.displayRank ?? 0),
-        frontId: frontRealId,
-        docTop: anchorNode.getBoundingClientRect().top + viewport.scrollTop,
-      };
-    }
-  }, []);
+  const { pendingAnchorRef, captureAnchor } = usePrependAnchor({
+    viewportRef,
+    wrapperRef,
+    itemsRef,
+    items,
+    loadingOlder,
+    scrollByDelta,
+  });
 
-  const coldFillRef = useRef({ pages: 0, open: true, inFlight: false, sawLoading: false });
+  const compactPin = useCompactTransitionAnchor({
+    controller,
+    viewportRef,
+    prependAnchorRef: pendingAnchorRef,
+    compactBuffer,
+  });
 
-  const prependEchoRef = useRef(false);
   useLayoutEffect(() => {
     coldFillRef.current = { pages: 0, open: true, inFlight: false, sawLoading: false };
     prependEchoRef.current = false;
@@ -306,11 +262,11 @@ export const TimelineView = memo(function TimelineView({
     captureAnchor();
     loadOlderRef.current();
     return true;
-  }, [captureAnchor]);
+  }, [captureAnchor, pendingAnchorRef]);
 
   const canPullOlder = useCallback(() =>
     hasMoreOlderRef.current && !loadingOlderRef.current && !!loadOlderRef.current && pendingAnchorRef.current === null,
-  []);
+  [pendingAnchorRef]);
   const closeColdFill = useCallback(() => { coldFillRef.current.open = false; }, []);
   const {
     prepare: prepareHistoryPull, contentHeight: historyContentHeight, offset: olderPullOffset, progress: olderPullProgress, returning: olderPullReturning,
@@ -333,13 +289,6 @@ export const TimelineView = memo(function TimelineView({
       fill.pages += 1;
     }
   }, [loadOneOlderPage, historyContentHeight]);
-
-  useLayoutEffect(() => {
-    if (loadingOlder && !prevLoadingOlderRef.current && pendingAnchorRef.current === null) {
-      captureAnchor();
-    }
-    prevLoadingOlderRef.current = loadingOlder;
-  }, [loadingOlder, captureAnchor]);
 
   const bookmarkState = useRef<BookmarkState>({
     pending: pendingRestoreRef,
@@ -372,105 +321,37 @@ export const TimelineView = memo(function TimelineView({
     [bookmarkState, compactBuffer, threadKey],
   );
 
-  useEffect(() => {
-    const viewport = wrapperRef.current?.querySelector<HTMLElement>('[data-slot="scroll-area-viewport"]') ?? null;
-    if (!viewport) return;
-    viewportRef.current = viewport;
-    const snapshot = () => ({
-      scrollTop: viewport.scrollTop,
-      scrollHeight: viewport.scrollHeight,
-      clientHeight: viewport.clientHeight,
-    });
-
-    const onScroll = () => {
-      const boundaryCorrection = pullScroll(viewport);
-      if (historyPullActive()) { updateStuckHeader(); return; }
-      const direction = holdRestoredPositionRef.current && !pendingRestoreRef.current ? "none" : controller.handleScroll(snapshot());
-      if (direction === "up") coldFillRef.current.open = false;
-
-      const isPrependEcho = prependEchoRef.current || boundaryCorrection;
-      prependEchoRef.current = false;
-
-      // meiva:note
-      // The reader moved: that movement is the position from here on, so the bookmark and the hold that protected it are both spent. Keeping the hold alive here silenced the controller (holding reads every scroll as "none"), which is how a restored reader who then scrolled to the bottom stopped following for good.
-      // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.meiva.okf.md
-      if (direction !== "none" && !isPrependEcho) {
-        pendingRestoreRef.current = null;
-        holdRestoredPositionRef.current = false;
-      }
-      measureAtBottom();
-      trimFollowing();
-      const mem = scrollMemoryRef.current;
-      if (mem && !restoreInFlight()) {
-        rememberTimelinePosition(viewport, mem.entryKey, mem.contentKey, controller);
-      }
-      stuckRafRef.current ??= requestAnimationFrame(() => {
-        stuckRafRef.current = null;
-        updateStuckHeader();
-      });
-    };
-    viewport.addEventListener("scroll", onScroll, { passive: true });
-    const onScrollEnd = (event: Event) => { if (event.target === viewport) pullScrollEnd(); };
-    viewport.addEventListener("scrollend", onScrollEnd);
-    const stopWatchingReadingInput = watchReadingNavigation(viewport, wrapperRef.current, () => { holdRestoredPositionRef.current = false; });
-
-    const onWheel = (e: WheelEvent) => {
-      if (!e.ctrlKey && e.deltaY !== 0 && Math.abs(e.deltaY) >= Math.abs(e.deltaX)) holdRestoredPositionRef.current = false;
-      if (!e.ctrlKey && Math.abs(e.deltaY) >= Math.abs(e.deltaX)) controller.handleWheel(e.deltaY, snapshot());
-      if (e.deltaY !== 0 && !controller.isSticky() && !isAtBottom(snapshot(), stickyThresholds)) pendingRestoreRef.current = null;
-      pullWheel(e, viewport);
-    };
-    viewport.addEventListener("wheel", onWheel, { passive: false });
-
-    const onTouchStart = (e: TouchEvent) => {
-      holdRestoredPositionRef.current = false;
-      controller.handleTouchStart();
-      pullTouchStart(e, viewport);
-    };
-    const onTouchMove = (e: TouchEvent) => { pullTouchMove(e, viewport); };
-
-    const onTouchEnd = () => {
-      controller.handleTouchEnd(snapshot());
-      pullTouchEnd();
-    };
-    const onTouchCancel = () => {
-      controller.handleTouchEnd(snapshot());
-      cancelPullTouch();
-    };
-
-    viewport.addEventListener("touchstart", onTouchStart, { passive: true });
-    viewport.addEventListener("touchmove", onTouchMove, { passive: false });
-    viewport.addEventListener("touchend", onTouchEnd, { passive: true });
-    viewport.addEventListener("touchcancel", onTouchCancel, { passive: true });
-
-    const ro = new ResizeObserver(() => {
-      const probe = restoreProbeRef.current;
-      if (probe.height === viewport.scrollHeight) probe.passes += 1;
-      else { probe.height = viewport.scrollHeight; probe.passes = 1; }
-
-      prepareHistoryPull(viewport);
-      applyPendingRestore(viewport);
-      settleRestoredPosition(viewport, true);
-      if (!historyPullActive() && !holdRestoredPositionRef.current && controller.handleLayoutChange(snapshot())) pinToBottom(viewport);
-      measureAtBottom();
-      maybeColdFill();
-      trimFollowing();
-    });
-    ro.observe(viewport);
-    if (contentRef.current) ro.observe(contentRef.current);
-
-    return () => {
-      viewport.removeEventListener("scroll", onScroll);
-      viewport.removeEventListener("scrollend", onScrollEnd);
-      stopWatchingReadingInput();
-      viewport.removeEventListener("wheel", onWheel);
-      viewport.removeEventListener("touchstart", onTouchStart);
-      viewport.removeEventListener("touchmove", onTouchMove);
-      viewport.removeEventListener("touchend", onTouchEnd);
-      viewport.removeEventListener("touchcancel", onTouchCancel);
-      ro.disconnect();
-    };
-  }, [applyPendingRestore, settleRestoredPosition, restoreInFlight, controller, stickyThresholds, measureAtBottom, maybeColdFill, pinToBottom, trimFollowing, updateStuckHeader, prepareHistoryPull, historyPullActive, pullScroll, pullScrollEnd, pullWheel, pullTouchStart, pullTouchMove, pullTouchEnd, cancelPullTouch]);
+  useTimelineViewport({
+    wrapperRef,
+    viewportRef,
+    contentRef,
+    controller,
+    stickyThresholds,
+    holdRestoredPositionRef,
+    pendingRestoreRef,
+    restoreProbeRef,
+    prependEchoRef,
+    coldFillRef,
+    scrollMemoryRef,
+    stuckRafRef,
+    restoreInFlight,
+    measureAtBottom,
+    maybeColdFill,
+    pinToBottom,
+    trimFollowing,
+    updateStuckHeader,
+    prepareHistoryPull,
+    historyPullActive,
+    pullScroll,
+    pullScrollEnd,
+    pullWheel,
+    pullTouchStart,
+    pullTouchMove,
+    pullTouchEnd,
+    cancelPullTouch,
+    applyPendingRestore,
+    settleRestoredPosition,
+  });
 
   usePinRequests({
     threadKey,
@@ -495,62 +376,6 @@ export const TimelineView = memo(function TimelineView({
     settleRestoredPosition(viewport, false);
   });
 
-  useLayoutEffect(() => {
-    const anchor = pendingAnchorRef.current;
-    if (!anchor) return;
-    const viewport =
-      viewportRef.current ??
-      wrapperRef.current?.querySelector<HTMLElement>('[data-slot="scroll-area-viewport"]') ??
-      null;
-    if (!viewport) return;
-    const escapedId = CSS.escape(anchor.id);
-    const findNode = () =>
-      viewport.querySelector<HTMLElement>(`.timeline-item[data-item-id="${escapedId}"][data-display-rank="${anchor.rank}"]`) ??
-      viewport.querySelector<HTMLElement>(`[data-turn-expanded="false"][data-item-id="${escapedId}"][data-display-rank="${anchor.rank}"]`) ??
-      viewport.querySelector<HTMLElement>(`[data-turn-member-ids~="${escapedId}"][data-display-rank="${anchor.rank}"]`);
-
-    const headNoteIds = standingHeadNoteIds(items);
-    const frontRealId = items.find(
-      (it) =>
-        !isReattachedTimelineContext(it) &&
-        !headNoteIds.has(it.item_id) &&
-        !it.item_id.startsWith("_"),
-    )?.item_id ?? null;
-    if (frontRealId === anchor.frontId) {
-
-      const node = findNode();
-      if (!node) {
-        pendingAnchorRef.current = null;
-        return;
-      }
-      anchor.docTop = node.getBoundingClientRect().top + viewport.scrollTop;
-      return;
-    }
-
-    const anchorNode = findNode();
-    if (!anchorNode) {
-      pendingAnchorRef.current = null;
-      return;
-    }
-    const cvSaved = materializeBeforeAnchor(viewport, anchorNode);
-    void viewport.getBoundingClientRect();
-    const node = findNode();
-    if (!node) {
-      for (const { el, cv } of cvSaved) el.style.contentVisibility = cv;
-      pendingAnchorRef.current = null;
-      return;
-    }
-    const delta = node.getBoundingClientRect().top + viewport.scrollTop - anchor.docTop;
-
-    if (delta <= 0) {
-      for (const { el, cv } of cvSaved) el.style.contentVisibility = cv;
-      pendingAnchorRef.current = null;
-      return;
-    }
-    scrollByDelta(viewport, delta);
-    pendingAnchorRef.current = null;
-  }, [items, scrollByDelta]);
-
   const prevLoadingOlderReleaseRef = useRef(loadingOlder);
   useLayoutEffect(() => {
     if (prevLoadingOlderReleaseRef.current && !loadingOlder) {
@@ -563,210 +388,26 @@ export const TimelineView = memo(function TimelineView({
       });
     }
     prevLoadingOlderReleaseRef.current = loadingOlder;
-  }, [loadingOlder, finishHistoryPull, historyPullActive, controller]);
+  }, [loadingOlder, finishHistoryPull, historyPullActive, controller, pendingAnchorRef]);
 
-  const { detailsMode, isLoading: detailsModeLoading } = useContentToggle();
-  const effectiveDetailsMode = detailsModeLoading ? "none" : detailsMode;
-
-  const timelineColors = useTimelineColors();
-
-  const [turnOverrides, setTurnOverrides] = useState<ReadonlyMap<string, boolean>>(
-    () => readTimelineExpansion(scrollMemoryKey, effectiveDetailsMode)?.turns ?? new Map(),
-  );
-  const toggleTurn = useCallback((id: string, currentlyExpanded: boolean) => {
-    setTurnOverrides((prev) => {
-      const next = new Map(prev);
-      next.set(id, !currentlyExpanded);
-      return next;
-    });
-  }, []);
-
-  const [overrides, setOverrides] = useState<ReadonlySet<string>>(
-    () => readTimelineExpansion(scrollMemoryKey, effectiveDetailsMode)?.items ?? new Set(),
-  );
-  const toggleExpanded = useCallback(
-    (id: string, _kind: BackendTimelineItem["kind"]) => {
-      setOverrides((prev) => {
-        const next = new Set(prev);
-        if (next.has(id)) next.delete(id);
-        else next.add(id);
-        return next;
-      });
-    },
-    [],
-  );
-
-  const [prevDetailsMode, setPrevDetailsMode] = useState(effectiveDetailsMode);
-  if (prevDetailsMode !== effectiveDetailsMode) {
-    setPrevDetailsMode(effectiveDetailsMode);
-    setOverrides(readTimelineExpansion(scrollMemoryKey, effectiveDetailsMode)?.items ?? new Set());
-    setTurnOverrides(readTimelineExpansion(scrollMemoryKey, effectiveDetailsMode)?.turns ?? new Map());
-    setActiveStuckHeaderId(null);
-    setActiveStuckChildId(null);
-  }
-
-  const [prevThreadKey, setPrevThreadKey] = useState(threadKey);
-  if (prevThreadKey !== threadKey) {
-    setPrevThreadKey(threadKey);
-    setOverrides(new Set());
-    setTurnOverrides(new Map());
-    setActiveStuckHeaderId(null);
-    setActiveStuckChildId(null);
-  }
-
-  const resetPending = useContentToggleReset((s) => s.resetPending);
-  const consumeReset = useContentToggleReset((s) => s.consumeReset);
-  useLayoutEffect(() => {
-    if (!resetPending) return;
-    consumeReset();
-    setOverrides(new Set());
-    setTurnOverrides(new Map());
-    setActiveStuckHeaderId(null);
-    setActiveStuckChildId(null);
-  }, [resetPending, consumeReset]);
-
-  useLayoutEffect(() => {
-    updateStuckHeader();
-  }, [updateStuckHeader, turnOverrides, overrides, effectiveDetailsMode, items]);
-
-  useEffect(() => () => {
-    if (stuckRafRef.current !== null) cancelAnimationFrame(stuckRafRef.current);
-    stuckRafRef.current = null;
-  }, []);
-
-  useLayoutEffect(() => {
-    if (!detailsModeLoading) rememberTimelineExpansion(scrollMemoryKey, { mode: effectiveDetailsMode, items: overrides, turns: turnOverrides });
-  }, [scrollMemoryKey, effectiveDetailsMode, detailsModeLoading, overrides, turnOverrides]);
-
-  const renderRow = (
-    item: BackendTimelineItem,
-    index: number,
-    source: "buffer" | "canonical",
-    rank: number,
-
-    forceExpand?: boolean,
-  ) => {
-    const renderKey = source === "buffer"
-      ? `buffer:${compactBuffer?.epoch}:${rank}:${item.item_id}`
-      : `canonical:${item.item_id}`;
-    const config = cardConfigFor(item, timelineColors);
-    const streaming =
-      streamingCode && index === items.length - 1 && item.kind === "agent_code";
-
-    if (config === null) {
-      return (
-        <TimelineRow
-          key={renderKey}
-          timelineSource={source} displayRank={rank}
-          item={item}
-          config={null}
-          streaming={streaming}
-          expanded={false}
-          copyable={false}
-          isStuck={false}
-          onToggle={toggleExpanded}
-        />
-      );
-    }
-
-    const isPrimary = classifyItem(item) === "primary";
-    const isLastItem = index === items.length - 1;
-    const defaultExpanded = isPrimary || forceExpand ? true
-      : effectiveDetailsMode === "all" ? true
-      : effectiveDetailsMode === "last" ? isLastItem
-      : config.fixedDefault;
-    const expanded = overrides.has(item.item_id) ? !defaultExpanded : defaultExpanded;
-
-    const copyable = expanded && !item.partial;
-
-    return (
-      <TimelineRow
-        key={renderKey}
-        timelineSource={source} displayRank={rank}
-        item={item}
-        config={config}
-        streaming={streaming}
-        expanded={expanded}
-        copyable={copyable}
-
-        stickyHeader={isPrimary ? false : "nested"}
-        isStuck={!isPrimary && activeStuckChildId === item.item_id}
-        onToggle={toggleExpanded}
-      />
-    );
-  };
-
-  const groups = useMemo(() => {
-    if (!compactBuffer) {
-      return groupTimelineSegments(canonicalItems).map((entry) => ({ ...entry, source: "canonical" as const }));
-    }
-    const buffered = groupTimelineSegments(
-      bufferedItems,
-      (_item, index) => compactBuffer.rows[index].rank,
-    ).map((entry) => ({ ...entry, source: "buffer" as const }));
-    const current = groupTimelineSegments(currentItems)
-      .map((entry) => ({
-        ...entry,
-        indexOffset: entry.indexOffset + bufferedItems.length,
-        source: "canonical" as const,
-      }));
-    return [...buffered, ...current];
-  }, [canonicalItems, compactBuffer, bufferedItems, currentItems]);
-
-  const groupEntries = useMemo(() => groups.map((entry) => {
-    const group = entry.group;
-    const groupKey = group.kind === "single" ? group.item.item_id : group.items[0].item_id;
-    const virtualKey = `${threadKey ?? ""}:${entry.source}:${entry.source === "buffer" ? compactBuffer?.epoch : ""}:${entry.rank}:${groupKey}`;
-    const isLastTurn = entry === groups[groups.length - 1];
-    const runExpanded = group.kind === "turn" && (turnOverrides.has(groupKey)
-      ? (turnOverrides.get(groupKey) ?? false)
-      : effectiveDetailsMode === "all"
-        ? true
-        : effectiveDetailsMode === "last"
-          ? isLastTurn && turnActive
-          : false);
-    const virtualRows = group.kind === "turn" && runExpanded
-      ? group.items.map((item) => `${virtualKey}:${item.item_id}`)
-      : null;
-    return { entry, groupKey, virtualKey, runExpanded, virtualRows };
-  }), [groups, compactBuffer?.epoch, turnOverrides, effectiveDetailsMode, turnActive, threadKey]);
-  const renderedRows = groupEntries.reduce((total, entry) => total + (entry.virtualRows?.length ?? 1), 0);
-  const virtualEnabled = renderedRows > activationRows;
-  const virtualGroups = useMemo(() => groupEntries.map(({ entry, virtualKey, virtualRows }) => ({
-      key: virtualKey,
-      rank: entry.rank,
-      itemIds: entry.group.kind === "single"
-        ? [entry.group.item.item_id]
-        : entry.group.items.map((item) => item.item_id),
-      estimatedHeight: (entry.group.kind === "turn" && virtualRows
-        ? 60 + virtualRows.length * 92
-        : entry.group.kind === "turn" ? 56 : 80),
-      expandedRows: virtualRows,
-    })), [groupEntries]);
-  const compactPinnedId = compactPin && (() => {
-    const bufferedCoordinates = new Map((compactBuffer?.rows ?? []).map((row) => [
-      `${row.rank}:${row.item.item_id}`, canonicalBufferCoordinate(row),
-    ]));
-    for (const { entry } of groupEntries) {
-      for (const item of entry.group.kind === "single" ? [entry.group.item] : entry.group.items) {
-        const coordinate = entry.source === "buffer"
-          ? bufferedCoordinates.get(`${entry.rank}:${item.item_id}`)
-          : parseItemIdParts(item.item_id);
-        if (entry.rank === compactPin.rank && coordinate?.msg === compactPin.msg && coordinate.block === compactPin.block) return { id: item.item_id, rank: entry.rank };
-      }
-    }
-    return null;
-  })();
-  const { range: virtualRange, rowRange } = useTimelineWindow({
-    groups: virtualGroups,
-    enabled: virtualEnabled,
-    turnRows, measureRows, viewportRef, contentRef,
+  const { groups, groupEntries, virtualEnabled, virtualRange, rowRange } = useTimelineGroupWindow({
+    canonicalItems,
+    compactBuffer,
+    bufferedItems,
+    currentItems,
+    threadKey,
+    turnOverrides,
+    effectiveDetailsMode,
+    turnActive,
+    viewportRef,
+    contentRef,
     isFollowing,
-    identity: threadKey ?? null,
-    pendingAnchor: pendingAnchorRef.current ?? compactPinnedId ??
-      (!pendingRestoreRef.current?.followBottom && pendingRestoreRef.current?.anchor
+    pendingAnchor: pendingAnchorRef.current,
+    compactPin,
+    restoreAnchor:
+      !pendingRestoreRef.current?.followBottom && pendingRestoreRef.current?.anchor
         ? { id: pendingRestoreRef.current.anchor.itemId, rank: pendingRestoreRef.current.anchor.rank }
-        : null),
+        : null,
     restoreTop: pendingRestoreRef.current?.scrollTop ?? null,
   });
 
@@ -782,7 +423,7 @@ export const TimelineView = memo(function TimelineView({
     controller.requestStick();
     setAtBottom(true);
     viewport.scrollTo({ top: viewport.scrollHeight, behavior: "smooth" });
-  }, [controller]);
+  }, [controller, pendingAnchorRef]);
 
   return (
     <div ref={wrapperRef} className={cn("relative", FLEX_1, MIN_H_0, OVERFLOW_HIDDEN)}>
@@ -809,62 +450,23 @@ export const TimelineView = memo(function TimelineView({
               {turnAnnouncement}
             </span>
           ) : null}
-          {virtualEnabled && virtualRange.before > 0 ? (
-            <div data-timeline-spacer="before" style={{ height: virtualRange.before }} aria-hidden="true" />
-          ) : null}
-          <LiveClockGate value={turnActive}>
-            {groupEntries.slice(virtualRange.start, virtualRange.end).map(({ entry, virtualKey, runExpanded, virtualRows }, offset) => {
-              const group = entry.group;
-              const groupIndex = virtualRange.start + offset;
-              const renderedGroup = (() => {
-                if (group.kind === "single") {
-                  return renderRow(group.item, entry.indexOffset + group.index, entry.source, entry.rank);
-                }
-
-                const turnId = group.items[0].item_id;
-                const isLastTurn = entry === groups[groups.length - 1];
-                const childRange = rowRange(groupIndex);
-                return (
-                  <TurnBlock
-                    id={turnId}
-                    memberIds={group.items.map((it) => it.item_id)}
-                    summary={group.summary}
-                    expanded={runExpanded}
-                    onToggle={toggleTurn}
-                    turnActive={turnActive && isLastTurn}
-                    isStuck={activeStuckHeaderId === turnId}
-                    timelineSource={entry.source} displayRank={entry.rank}
-                  >
-                    {runExpanded ? (
-                      virtualRows ? (
-                        <>
-                          {virtualEnabled && childRange.before > 0 ? <div data-timeline-spacer="turn-before" style={{ height: childRange.before }} aria-hidden="true" /> : null}
-                          {group.items.slice(childRange.start, childRange.end).map((it, offset) => {
-                            const index = childRange.start + offset;
-
-                            return (
-                              <div key={virtualRows[index]} data-virtual-row={virtualRows[index]}>
-                                {renderRow(it, entry.indexOffset + group.startIndex + index, entry.source, entry.rank, effectiveDetailsMode !== "none")}
-                              </div>
-                            );
-                          })}
-                          {virtualEnabled && childRange.after > 0 ? <div data-timeline-spacer="turn-after" style={{ height: childRange.after }} aria-hidden="true" /> : null}
-                        </>
-                      ) : null
-                    ) : null}
-                  </TurnBlock>
-                );
-              })();
-              return (
-                <div key={virtualKey} data-virtual-group={virtualKey}>
-                  {renderedGroup}
-                </div>
-              );
-            })}
-          </LiveClockGate>
-          {virtualEnabled && virtualRange.after > 0 ? (
-            <div data-timeline-spacer="after" style={{ height: virtualRange.after }} aria-hidden="true" />
-          ) : null}
+          <TimelineGroupList
+            items={items}
+            compactBuffer={compactBuffer}
+            streamingCode={streamingCode}
+            turnActive={turnActive}
+            effectiveDetailsMode={effectiveDetailsMode}
+            overrides={overrides}
+            activeStuckHeaderId={activeStuckHeaderId}
+            activeStuckChildId={activeStuckChildId}
+            toggleExpanded={toggleExpanded}
+            toggleTurn={toggleTurn}
+            groups={groups}
+            groupEntries={groupEntries}
+            virtualEnabled={virtualEnabled}
+            virtualRange={virtualRange}
+            rowRange={rowRange}
+          />
           <CompactingBlock />
           <div ref={endRef} />
         </div>

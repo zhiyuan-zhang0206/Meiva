@@ -15,20 +15,45 @@
 "use client";
 
 import { useTranslations } from "next-intl";
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { memo, useMemo, type ReactNode } from "react";
 
 import {
   useForceLayout,
   type ForceLayoutOptions,
-  type Pos,
   type SimLink,
   type SimNode,
 } from "@/lib/fleet/use-force-layout";
-import { useSvgZoomPan, type SvgViewport } from "@/lib/fleet/use-svg-zoom-pan";
+import { useSvgZoomPan } from "@/lib/fleet/use-svg-zoom-pan";
 import { cn } from "@/lib/format/utils";
 
 import { ForceControls, FORCE_GROUPS, type ForceGroup, type ForceParams } from "./force-controls";
+import {
+  GLYPH_WIDTH_FULL,
+  GLYPH_WIDTH_LATIN,
+  LABEL_LINE_HEIGHT,
+  LABEL_MIN_ZOOM,
+  buildConnectedNodeIds,
+  radiusOf,
+  useGraphFocus,
+  useHoverCardState,
+  wrapLabel,
+  type ForceGraphEdge,
+  type ForceGraphNode,
+  type HoverCard,
+} from "./force-graph-geometry";
 import { FLEX, OVERFLOW_HIDDEN } from "@/lib/layout/layout";
+
+export {
+  GLYPH_WIDTH_FULL,
+  GLYPH_WIDTH_LATIN,
+  LABEL_LINE_HEIGHT,
+  LABEL_MIN_ZOOM,
+  radiusOf,
+  wrapLabel,
+  type ForceGraphEdge,
+  type ForceGraphNode,
+  type HoverCard,
+};
 
 // meiva:note
 // A graph this size settles in manual, time-budgeted slices instead of one React
@@ -43,155 +68,6 @@ const PREWARM_TICKS = 240;
 
 export function layoutOptions(nodeCount: number): ForceLayoutOptions {
   return nodeCount >= PREWARM_NODE_THRESHOLD ? { prewarmTicks: PREWARM_TICKS } : {};
-}
-
-// ── Shared node / edge model ──
-// Each view adapts its own data (FleetGraphNode / TaskRow) into this shape.
-// `score` is the node-size driver, normalized against the graph's max so the
-// band always spreads across the panel (agents: recent-work score; tasks:
-// uniform — every task node passes score 0 per user ruling 2026-08-09 #1070,
-// so the band collapses to the minimum radius). `ghost` marks structurally
-// required hidden parents (tasks only) — rendered dimmed with a dashed
-// outline. All graph edges are solid.
-
-export interface ForceGraphNode {
-  readonly id: number;
-  /** Second text line inside the node (agent label / task title). */
-  readonly label: string | null;
-  /** Status key → the `statusText` color class passed by the view. */
-  readonly status: string;
-  /** Node-size driver; normalized against the graph max (0 → min size). */
-  readonly score: number;
-  readonly pulse?: boolean;
-  /** Structural ghost node: a hidden parent kept on the canvas to connect
-      the tree (e.g. a done parent whose child is still visible). Rendered
-      dimmed with a dashed outline. */
-  readonly ghost?: boolean;
-  /** Native SVG hover title — full detail without cluttering the node. */
-  readonly nodeTitle?: string | null;
-}
-
-/**
- * Optional per-view hover detail card, rendered the instant the cursor enters
- * a node (no delay). Replaces the native SVG <title>, whose appearance the
- * browser defers (typically ~0.5–1s) — the perceived "hover lag" of the old
- * tooltip. The card must return content for every node it is offered (null
- * leaves the node with no hover surface); it is anchored statically to the
- * hovered node's on-screen box (no cursor following) and flips to stay inside
- * the canvas. Views without a card keep the native title as their fallback.
- */
-export type HoverCard = (node: ForceGraphNode) => ReactNode | null;
-
-export interface ForceGraphEdge {
-  readonly from: number;
-  readonly to: number;
-  /** "lineage" = spawn/fork/resurrect (agents) / parent-child (tasks). */
-  readonly kind: "lineage" | "message";
-  readonly weight: number;
-}
-
-// Node size: radius = minR + (maxR - minR) * sqrt(score / maxScore). sqrt
-// spreads the mid-range evenly; a node with score 0 sits at minR.
-export function radiusOf(score: number, maxScore: number, minR: number, maxR: number): number {
-  const ratio = maxScore > 0 ? score / maxScore : 0;
-  return minR + (maxR - minR) * Math.sqrt(ratio);
-}
-
-export const LABEL_MIN_ZOOM = 0.45;
-
-// Label wrapping: the 6px mono font advances ~0.6em per Latin glyph but a full
-// em (~6px) per CJK / full-width glyph, so wrapping budgets by measured width,
-// not char count — a char-count budget lets CJK labels run past the node edge
-// (QA #651: Chinese task titles bled ~20px beyond the circle). Horizontal and
-// vertical padding keep every rendered line inside the node; the id occupies
-// line one.
-export const LABEL_LINE_HEIGHT = 7;
-
-// Per-glyph advance of the 6px mono font: ~0.6em for Latin/digit glyphs, 1em
-// for CJK and other full-width glyphs (incl. CJK punctuation and emoji).
-export const GLYPH_WIDTH_LATIN = 3.6;
-export const GLYPH_WIDTH_FULL = 6;
-// Full-width ranges: CJK radicals/kana/hangul/ideographs, CJK punctuation,
-// fullwidth forms, emoji/symbol blocks, and the ellipsis we append ourselves.
-const FULL_WIDTH_RE =
-  /[\u2E80-\u303F\u3040-\u30FF\u3400-\u4DBF\u4E00-\u9FFF\uAC00-\uD7AF\uF900-\uFAFF\uFF00-\uFFEF\u2600-\u27BF\u{1F000}-\u{1FAFF}\u2026]/u;
-
-function glyphWidth(ch: string): number {
-  return FULL_WIDTH_RE.test(ch) ? GLYPH_WIDTH_FULL : GLYPH_WIDTH_LATIN;
-}
-
-/** Number of leading chars of `text` that fit within `maxWidth` px. */
-function charsThatFit(text: string, maxWidth: number): number {
-  let width = 0;
-  let i = 0;
-  for (const ch of text) {
-    const w = glyphWidth(ch);
-    // 1e-9 tolerance: summing 3.6px advances in doubles drifts (~1e-14/char),
-    // so an exact-budget line (e.g. 10 × 3.6 = 36) must not be cut one glyph
-    // short by accumulated float error.
-    if (width + w > maxWidth + 1e-9) break;
-    width += w;
-    i += ch.length;
-  }
-  return i;
-}
-
-export function wrapLabel(label: string, r: number): string[] {
-  const maxLineWidth = 2 * r - 8;
-  const maxLabelLines = Math.max(Math.floor((2 * r - 4) / LABEL_LINE_HEIGHT) - 1, 0);
-  if (maxLineWidth < GLYPH_WIDTH_LATIN || maxLabelLines === 0 || label.length === 0) return [];
-
-  const lines: string[] = [];
-  let remaining = label.trim();
-  while (charsThatFit(remaining, maxLineWidth) < remaining.length) {
-    const cut = charsThatFit(remaining, maxLineWidth);
-    if (cut <= 0) break; // one glyph is wider than the line — can't make progress
-
-    if (remaining[cut] === " ") {
-      lines.push(remaining.slice(0, cut));
-      remaining = remaining.slice(cut + 1).trimStart();
-      continue;
-    }
-
-    const candidate = remaining.slice(0, cut);
-    const spaceIndex = candidate.lastIndexOf(" ");
-    const hyphenIndex = candidate.lastIndexOf("-");
-    const breakIndex = Math.max(spaceIndex, hyphenIndex);
-    if (breakIndex > 0) {
-      const includeBreak = candidate[breakIndex] === "-";
-      lines.push(candidate.slice(0, breakIndex + (includeBreak ? 1 : 0)).trimEnd());
-      remaining = remaining.slice(breakIndex + 1).trimStart();
-      continue;
-    }
-
-    // No space/hyphen on this line: `cut` falls inside a narrow (Latin/digit)
-    // run. When that run started after a full-width prefix, break at the run's
-    // start instead of splitting the word — a mixed label like
-    // "\u8d44\u6e90\u76d1\u63a7\uff08Cluster Ops \u57df\uff09" must not render "\u8d44\u6e90\u76d1\u63a7\uff08C" / "luster Ops"
-    // (QA #651 deploy verification). Only split a run when it starts the line,
-    // i.e. the word itself is wider than the line budget.
-    if (cut > 0 && !FULL_WIDTH_RE.test(remaining[cut - 1])) {
-      let runStart = cut - 1;
-      while (runStart > 0 && !FULL_WIDTH_RE.test(remaining[runStart - 1])) runStart--;
-      if (runStart > 0) {
-        lines.push(remaining.slice(0, runStart).trimEnd());
-        remaining = remaining.slice(runStart).trimStart();
-        continue;
-      }
-    }
-
-    lines.push(remaining.slice(0, cut));
-    remaining = remaining.slice(cut);
-  }
-  if (remaining.length > 0) lines.push(remaining);
-  if (lines.length <= maxLabelLines) return lines;
-
-  // Ellipsize: the last visible line makes room for the ellipsis glyph.
-  const visibleLines = lines.slice(0, maxLabelLines);
-  const last = visibleLines.length - 1;
-  const keep = charsThatFit(visibleLines[last], maxLineWidth - glyphWidth("…"));
-  visibleLines[last] = `${visibleLines[last].slice(0, keep)}…`;
-  return visibleLines;
 }
 
 export const ForceGraph = memo(function ForceGraph({
@@ -264,161 +140,16 @@ export const ForceGraph = memo(function ForceGraph({
   );
   const { positions, layout } = useForceLayout(simNodes, simLinks, params, layoutOptions(simNodes.length));
 
-  // Hover anchor: the node id plus the node's on-screen box captured at
-  // mouseenter. The card is pinned there for the whole hover — it never
-  // follows the cursor (user ruling 2026-08-29) — and clears on mouseleave.
-  // x/y anchor the card beside the node's top-right corner; flipX is the
-  // node's LEFT edge — the flip baseline (flipping off the right edge would
-  // park the card on top of the hovered node, QA #990); h is the node box
-  // height (the vertical fallback's below-placement anchor).
-  const [hovered, setHovered] = useState<{ id: number; x: number; y: number; flipX: number; h: number } | null>(null);
-
-  // Cap-state interactivity: when the card's height is capped it becomes
-  // scrollable, and for the scroll to be reachable the card must accept the
-  // pointer (pointer-events-auto) and survive the pointer crossing the gap
-  // between node and card. `cardScrollable` mirrors the style the placement
-  // effect writes; `hideTimerRef` is the grace period that covers the gap
-  // crossing (QA #990 delta2: the capped content had no user path).
-  const [cardScrollable, setCardScrollable] = useState(false);
-  const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  // The instant hover card. Content is computed only for the hovered node
-  // (never per node per layout tick); when the view supplies no card the
-  // native <title> fallback stays in place per node.
-  const hoveredCard = useMemo(() => {
-    if (!hovered || !hoverCard) return null;
-    const node = nodeById.get(hovered.id);
-    return node ? hoverCard(node) : null;
-  }, [hovered, hoverCard, nodeById]);
-
-  // Card placement, tried in order until one fits WITHOUT clamping (the card
-  // must never cover the hovered node — QA #990): beside the node (right
-  // preferred, then left, anchored at the node's box with a 14px gap), then
-  // above / below the node centered on its horizontal center (narrow
-  // canvases, mobile). When the card is taller than BOTH vertical sides (a
-  // long card on a short canvas), it pins to the roomier side and its height
-  // is capped so it still clears the node — the content scrolls. Done in a
-  // layout effect with direct style writes — before paint, and never re-run
-  // while the cursor moves (the anchor is static).
-  const containerRef = useRef<HTMLDivElement | null>(null);
-  const hoverCardRef = useRef<HTMLDivElement | null>(null);
-  const legendRef = useRef<HTMLDivElement | null>(null);
-  // Cancel a pending grace hide if the whole graph unmounts mid-hover.
-  useEffect(() => () => {
-    if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
-  }, []);
-
-  useLayoutEffect(() => {
-    if (!hovered) {
-      // No hover — cancel any pending grace hide and clear the scroll flag
-      // so a fresh hover starts from the non-scrollable state.
-      if (hideTimerRef.current) {
-        clearTimeout(hideTimerRef.current);
-        hideTimerRef.current = null;
-      }
-      setCardScrollable(false);
-      return;
-    }
-
-    // meiva:note
-    // The card's content arrives after the hover (the full task is fetched on
-    // demand), so its box grows from a placeholder to the real height. A
-    // one-shot placement measured the placeholder and left the grown card
-    // hanging off the canvas (user report 2026-10-20); the observer below
-    // re-places it on every size change. Measuring the natural height while a
-    // cap is applied keeps that loop stable: a cap we wrote never reads back
-    // as a smaller card.
-    // meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
-    const place = () => {
-      const card = hoverCardRef.current;
-      const container = containerRef.current;
-      if (!card || !container) return;
-      const rect = container.getBoundingClientRect();
-      const cardW = card.offsetWidth;
-      const cardH = card.style.maxHeight ? card.scrollHeight : card.offsetHeight;
-      const gap = 14;
-      const pad = 4;
-      const maxX = rect.width - pad;
-      const maxY = rect.height - pad;
-      const x = hovered.x - rect.left;
-      const y = hovered.y - rect.top;
-      const nodeLeft = hovered.flipX - rect.left;
-      const nodeBottom = y + hovered.h;
-
-      // meiva:note
-      // Horizontal placement, tried in order: beside the node (right preferred,
-      // then a flip that ends the card on the node's other side), else centered
-      // above/below it when neither side has room.
-      // meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
-      const fitsRight = x + gap + cardW <= maxX;
-      const fitsLeft = nodeLeft - gap - cardW >= pad;
-      const beside = fitsRight || fitsLeft;
-      const left = beside
-        ? fitsRight
-          ? x + gap
-          : nodeLeft - gap - cardW
-        : Math.max(pad, Math.min((nodeLeft + x) / 2 - cardW / 2, maxX - cardW));
-
-      // meiva:note
-      // The view's legend sits in the canvas's bottom-right corner and is the one
-      // overlay the card must not bury: it is the only hint of what the node
-      // colours mean. When the card's column overlaps the legend, its floor is
-      // the legend's top edge.
-      // meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
-      let bottomLimit = maxY;
-      const legendBox = legendRef.current?.getBoundingClientRect();
-      if (legendBox) {
-        const legendLeft = legendBox.left - rect.left;
-        const legendRight = legendBox.right - rect.left;
-        if (left < legendRight && left + cardW > legendLeft) {
-          bottomLimit = Math.min(bottomLimit, legendBox.top - rect.top - gap);
-        }
-      }
-
-      // meiva:note
-      // One vertical rule for both horizontal placements: beside the node the
-      // card hangs below it by default; centered on a narrow canvas it sits above
-      // the node, which keeps it off the message below (QA #990). When neither
-      // side holds it, pin to the roomier side and cap the height so the body
-      // scrolls instead of running off the canvas.
-      // meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
-      const belowTop = beside ? y + gap : nodeBottom + gap;
-      const aboveTop = y - gap - cardH;
-      const fitsBelow = belowTop + cardH <= bottomLimit;
-      const fitsAbove = aboveTop >= pad;
-      const preferAbove = !beside;
-      let top: number;
-      let cap = "";
-      if (preferAbove ? fitsAbove : fitsBelow) {
-        top = preferAbove ? aboveTop : belowTop;
-      } else if (preferAbove ? fitsBelow : fitsAbove) {
-        top = preferAbove ? belowTop : aboveTop;
-      } else {
-        const belowSpace = bottomLimit - belowTop;
-        const aboveSpace = y - gap - pad;
-        if (belowSpace >= aboveSpace) {
-          top = belowTop;
-          cap = `${Math.max(0, belowSpace)}px`;
-        } else {
-          top = pad;
-          cap = `${Math.max(0, aboveSpace)}px`;
-        }
-      }
-
-      card.style.left = `${Math.max(pad, left)}px`;
-      card.style.top = `${Math.max(pad, top)}px`;
-      if (card.style.maxHeight !== cap) card.style.maxHeight = cap;
-      const scrollable = cap !== "";
-      card.style.overflowY = scrollable ? "auto" : "";
-      setCardScrollable((current) => (current === scrollable ? current : scrollable));
-    };
-
-    place();
-    if (typeof ResizeObserver === "undefined") return;
-    const observer = new ResizeObserver(() => place());
-    if (hoverCardRef.current) observer.observe(hoverCardRef.current);
-    return () => observer.disconnect();
-  }, [hovered]);
+  const {
+    hovered,
+    setHovered,
+    cardScrollable,
+    hideTimerRef,
+    hoveredCard,
+    containerRef,
+    hoverCardRef,
+    legendRef,
+  } = useHoverCardState(nodeById, hoverCard);
 
   // User zoom/pan as an SVG transform on the content <g> (translate + scale),
   // separate from the fit-to-content viewBox base frame. d3-zoom owns wheel /
@@ -429,110 +160,19 @@ export const ForceGraph = memo(function ForceGraph({
     [120, 120],
   ]);
 
-  // Direct ref mirrors kept current via useLayoutEffect so focusNode never
-  // reads a stale Map / box (the layout effect can lag by one microtask).
-  const positionsRef = useRef(positions);
-  useLayoutEffect(() => {
-    positionsRef.current = positions;
-  });
-  const layoutRef = useRef<{ positions: Map<number | string, Pos>; viewport: SvgViewport }>({
+  const focusNode = useGraphFocus({
+    edges,
     positions,
-    viewport: { minX: -100, minY: -100, w: 200, h: 200 },
+    layout,
+    selectedId,
+    params,
+    setExtent,
+    focusBounds,
   });
-  useLayoutEffect(() => {
-    if (!layout) return;
-    layoutRef.current = {
-      positions,
-      viewport: layout,
-    };
-    setExtent(layout);
-  }, [layout, positions, setExtent]);
-
-  // Precomputed neighbor sets (node id → neighbor ids) for the zoom bounding
-  // box when focusing a node.
-  const neighborMap = useMemo(() => {
-    const map = new Map<number, number[]>();
-    for (const e of edges) {
-      let a = map.get(e.from);
-      if (!a) {
-        a = [];
-        map.set(e.from, a);
-      }
-      a.push(e.to);
-      let b = map.get(e.to);
-      if (!b) {
-        b = [];
-        map.set(e.to, b);
-      }
-      b.push(e.from);
-    }
-    return map;
-  }, [edges]);
-
-  // Center + zoom the given node to the middle of the viewBox (CSS-animated,
-  // since a programmatic transform has no sourceEvent). No-op until the node
-  // settles.
-  const focusNode = useCallback(
-    (id: number) => {
-      const { positions: pos } = layoutRef.current;
-      // Prefer the direct positionsRef (kept current via useLayoutEffect) for
-      // the node coordinate; fall back to the layoutRef copy.
-      const p = positionsRef.current.get(id) ?? pos.get(id);
-      if (!p) return;
-
-      // Collect directly connected neighbor ids for bounding-box zoom.
-      const neighbors = neighborMap.get(id) ?? [];
-
-      // Bounding box of selected node + directly connected nodes.
-      let minX = p.x, minY = p.y, maxX = p.x, maxY = p.y;
-      for (const nid of neighbors) {
-        const np = pos.get(nid);
-        if (np) {
-          if (np.x < minX) minX = np.x;
-          if (np.y < minY) minY = np.y;
-          if (np.x > maxX) maxX = np.x;
-          if (np.y > maxY) maxY = np.y;
-        }
-      }
-
-      // Padding so nodes aren't clipped at the viewport edges.
-      focusBounds(
-        { minX, minY, maxX, maxY },
-        layoutRef.current.viewport,
-        params.nodeSizeMax + params.zoomPadding,
-        params.zoomFitRatio,
-      );
-    },
-    [neighborMap, params.nodeSizeMax, params.zoomPadding, params.zoomFitRatio, focusBounds],
-  );
-
-  // Auto-focus the selected node whenever it changes (e.g. from the
-  // Decisions/Reviews panel or the other graph). Fire once per selection change
-  // (not every layout tick, so it never fights a user pan), retried via the
-  // positions dep until that node has a settled position.
-  const focusedRef = useRef<number | null>(null);
-  useEffect(() => {
-    if (selectedId == null) {
-      focusedRef.current = null;
-      return;
-    }
-    if (focusedRef.current === selectedId) return;
-    if (!positions.has(selectedId)) return;
-    focusedRef.current = selectedId;
-    focusNode(selectedId);
-  }, [selectedId, positions, focusNode]);
 
   // Nodes directly connected to the selection (via any edge) — these stay lit
   // while the rest dims.
-  const connectedNodeIds = useMemo(() => {
-    if (selectedId == null) return null;
-    const ids = new Set<number>();
-    for (const e of edges) {
-      if (e.from === selectedId) ids.add(e.to);
-      if (e.to === selectedId) ids.add(e.from);
-    }
-    return ids;
-  }, [edges, selectedId]);
+  const connectedNodeIds = useMemo(() => buildConnectedNodeIds(edges, selectedId), [edges, selectedId]);
 
   // The views show their own empty / loading placeholders; the shell (stats
   // bar + controls) still renders so an empty canvas keeps its chrome.
@@ -555,7 +195,6 @@ export const ForceGraph = memo(function ForceGraph({
         role="img"
         aria-label={graphAriaLabel}
         onClick={(ev) => {
-          // Clicking the SVG background (not a node) deselects.
           if (ev.target === ev.currentTarget) onSelect(null);
         }}
       >
@@ -566,9 +205,6 @@ export const ForceGraph = memo(function ForceGraph({
           transform={transform.toString()}
           style={{ transition: animateZoom ? "transform 0.4s ease" : "none" }}
           onTransitionEnd={(ev) => {
-            // After the focus/reset zoom animation finishes, disable the CSS
-            // transition so that subsequent simulation-tick re-renders (which
-            // don't change the transform) never trigger a stray transition.
             endZoomTransition(ev.propertyName);
           }}
         >
@@ -579,8 +215,6 @@ export const ForceGraph = memo(function ForceGraph({
               const b = positions.get(e.to);
               if (!a || !b) return null;
               const isMessage = e.kind === "message";
-              // Selection highlight: incident edges get full opacity + thicker
-              // stroke; non-incident edges get heavily dimmed.
               const isIncident =
                 connectedNodeIds != null &&
                 (e.from === selectedId || e.to === selectedId);
@@ -593,17 +227,10 @@ export const ForceGraph = memo(function ForceGraph({
                   : isMessage
                     ? 0.24 + 0.61 * normalizedWeight
                     : 0.72;
-              // Stroke width scales with weight (log-compressed so high-weight
-              // edges don't overwhelm). Base width depends on edge type, then
-              // weight adds on top.
               const weightSw = Math.sqrt(e.weight) * 1.2;
               const sw = isIncident
                 ? (isMessage ? 2.0 : 2.8) + weightSw
                 : (isMessage ? 0.6 : 1.2) + weightSw;
-              // Index suffix keeps the key unique even if a view ever passes two
-              // edges with the same (from, to, kind) — duplicate keys make
-              // reconciliation orphan DOM <line> nodes on every layout tick
-              // (stale edges accumulate in space).
               return (
                 <line
                   key={`${e.from}-${e.to}-${e.kind}-${i}`}
@@ -611,9 +238,6 @@ export const ForceGraph = memo(function ForceGraph({
                   y1={a.y}
                   x2={b.x}
                   y2={b.y}
-                  // One gray for every edge kind (user ruling 2026-08-05: no
-                  // blue message edges — lineage and message ties both render
-                  // muted gray; kind is still legible via opacity/width).
                   className="text-muted-foreground"
                   stroke="currentColor"
                   strokeOpacity={opacity}
@@ -641,21 +265,12 @@ export const ForceGraph = memo(function ForceGraph({
                 <g
                   key={n.id}
                   transform={`translate(${p.x},${p.y})`}
-                  // Ghost nodes (structurally required hidden parents) render
-                  // dimmed until hovered, so the tree stays readable while the
-                  // real nodes keep full contrast.
                   className={cn("cursor-pointer", isGhost && !isHovered && "opacity-40")}
                   onPointerDown={(ev) => {
-                    // Prevent d3-zoom from capturing the pointer; a flicker
-                    // occurs when d3-zoom starts a drag gesture on a node
-                    // even though no zoom/pan actually happens (mousedown
-                    // without movement). The pointer event never reaches the
-                    // SVG, so d3-zoom stays dormant for node interactions.
                     ev.stopPropagation();
                   }}
                   onClick={(ev) => {
                     ev.stopPropagation();
-                    // Clicking an already-selected node is a no-op.
                     if (selectedId === n.id) return;
                     onSelect(n.id);
                     focusNode(n.id);
@@ -665,27 +280,15 @@ export const ForceGraph = memo(function ForceGraph({
                     onOpen(n.id);
                   }}
                   onMouseEnter={(ev) => {
-                    // A fresh hover cancels a pending grace hide from the
-                    // previous node.
                     if (hideTimerRef.current) {
                       clearTimeout(hideTimerRef.current);
                       hideTimerRef.current = null;
                     }
-                    // Static anchor: the card is pinned to the node's own
-                    // on-screen box and stays put until mouseleave — no
-                    // cursor chasing. x/y = the top-right corner (normal
-                    // side); flipX = the left edge (flip baseline).
                     const box = ev.currentTarget.getBoundingClientRect();
                     setHovered({ id: n.id, x: box.right, y: box.top, flipX: box.left, h: box.height });
                   }}
                   onMouseLeave={(ev) => {
                     const card = hoverCardRef.current;
-                    // Cap state: the card is interactive (scrollable). If
-                    // the pointer landed inside it, the hover stays;
-                    // otherwise a short grace period covers the pointer
-                    // crossing the gap between node and card (QA #990
-                    // delta2: mouseleave unmounted the card before the
-                    // scrollable content could be reached).
                     if (cardScrollable && card && ev.relatedTarget instanceof Node && card.contains(ev.relatedTarget)) {
                       return;
                     }
@@ -813,16 +416,12 @@ export const ForceGraph = memo(function ForceGraph({
           className={cn("absolute z-20", cardScrollable ? "pointer-events-auto" : "pointer-events-none")}
           style={{ left: 0, top: 0 }}
           onMouseEnter={() => {
-            // The pointer reached the card across the gap — cancel the
-            // pending grace hide so the card stays while it is scrolled.
             if (hideTimerRef.current) {
               clearTimeout(hideTimerRef.current);
               hideTimerRef.current = null;
             }
           }}
           onMouseLeave={() => {
-            // Leaving the card hides it (re-entering the node re-anchors on
-            // the node's own mouseenter).
             if (hideTimerRef.current) {
               clearTimeout(hideTimerRef.current);
               hideTimerRef.current = null;
