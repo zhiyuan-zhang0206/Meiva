@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, cast
+from typing import cast
 
 from base.lm.effort import ReasoningEffort, coerce_effort
 from meiva.sdk_surface.batch import validate_max_concurrent
@@ -29,12 +29,13 @@ def normalize(targets: object, effort: str | ReasoningEffort, max_concurrent: in
             f"understand() takes a list of target dicts, got {type(targets).__name__}. "
             "Example: meiva.understand([{'prompt': 'summarize this', 'paths': ['notes.md']}])"
         )
-    for i, t in enumerate(targets):
-        if not isinstance(t, dict):
+    for i, raw_t in enumerate(cast(list[object], targets)):
+        if not isinstance(raw_t, dict):
             raise TypeError(
-                f"targets[{i}] must be a dict, got {type(t).__name__}. "
+                f"targets[{i}] must be a dict, got {type(raw_t).__name__}. "
                 "Example: {'prompt': 'what is in this image', 'paths': ['shot.png']}"
             )
+        t = cast(dict[str, object], raw_t)
         if "prompt" not in t:
             raise ValueError(
                 f"targets[{i}] missing required key 'prompt'. "
@@ -47,21 +48,22 @@ def normalize(targets: object, effort: str | ReasoningEffort, max_concurrent: in
                 "Example: {'prompt': 'summarize this', 'paths': ['notes.md']}"
             )
         if "paths" in t:
-            paths = t["paths"]
-            if not isinstance(paths, list):
+            raw_paths = t["paths"]
+            if not isinstance(raw_paths, list):
                 raise TypeError(
                     f"targets[{i}]['paths'] must be a list of file paths, "
-                    f"got {type(paths).__name__}. "
+                    f"got {type(raw_paths).__name__}. "
                     "Example: {'prompt': 'compare these', "
                     "'paths': ['design.png', 'shot.png']}"
                 )
+            paths = cast(list[object], raw_paths)
             if not paths:
                 raise ValueError(
                     f"targets[{i}]['paths'] must not be empty — pass at least one file. "
                     "Example: {'prompt': 'compare these', "
                     "'paths': ['design.png', 'shot.png']}"
                 )
-            for j, p in enumerate(cast(list[Any], paths)):
+            for j, p in enumerate(paths):
                 if not isinstance(p, (str, Path)):
                     raise TypeError(
                         f"targets[{i}]['paths'][{j}] must be a path string or Path, "

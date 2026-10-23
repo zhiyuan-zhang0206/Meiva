@@ -33,7 +33,7 @@ _RESULT_KIND: dict[type[BaseException], Literal["cancelled", "timed_out"]] = {
 
 class _Sdk(Protocol):
     state: Any
-    state_update: dict[str, Any] | None
+    state_update: dict[str, Any]
 
     def ensure_plugins_loaded(
         self,

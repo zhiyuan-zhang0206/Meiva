@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import io
 import tokenize
+from collections.abc import Callable, Iterable
 
 # ---------------------------------------------------------------------------
 # 1. Chinese punctuation -> ASCII
@@ -110,34 +111,39 @@ line of valid Python comes close, and skipping a fixer leaves the code
 unchanged (downstream compile() / LLM repair still run)."""
 
 
-def tokenize_fix_safe(code: str) -> list[tokenize.TokenInfo] | None:
-    """Tokenize code for the syntax fixers, or return None when it cannot be
-    tokenized safely. Shared by the punctuation and escape fixers: both degrade
-    to a no-op on None (broken syntax -- leave it for compile()).
-
-    The C tokenizer behind generate_tokens (CPython 3.12+) can crash instead
-    of raising a tokenize error: an f-string replacement field that mixes '='
-    (debug), ':'/'!' delimiters and invalid expressions makes it compute a
-    negative string length and raise SystemError("Negative size passed to
-    PyUnicode_New") (gh-149183; upstream fix gh-149445 targets 3.15+ only;
-    on 3.13+ the same input surfaces as MemoryError instead). Fixing is a
-    best-effort convenience, so anything that is not a normal tokenizer error
-    degrades to a no-op rather than abort the agent host run.
-
-    MemoryError is caught alongside the rest: the line-length ceiling above
-    already refuses the inputs whose tokenization could genuinely exhaust
-    memory, so a MemoryError from generate_tokens on this path is the
-    pathological-input manifestation, not a real allocation failure -- and
-    if memory is truly gone, the unfixed code proceeds to compile() where the
-    same condition surfaces anyway.
-    """
+# meiva:note
+# Tokenize code for the syntax fixers, or return None when it cannot be tokenized safely.
+# Shared by the punctuation and escape fixers: both degrade to a no-op on None (broken syntax —
+# leave it for compile()).
+#
+# The C tokenizer behind generate_tokens (CPython 3.12+) can crash instead of raising a tokenize
+# error: an f-string replacement field that mixes '=' (debug), ':'/'!' delimiters and invalid
+# expressions makes it compute a negative string length and raise
+# SystemError("Negative size passed to PyUnicode_New") (gh-149183; upstream fix gh-149445 targets
+# 3.15+ only; on 3.13+ the same input surfaces as MemoryError instead). Fixing is a best-effort
+# convenience, so anything that is not a normal tokenizer error degrades to a no-op rather than
+# abort the agent host run.
+#
+# MemoryError is caught alongside the rest: the line-length ceiling above already refuses the
+# inputs whose tokenization could genuinely exhaust memory, so a MemoryError from generate_tokens
+# on this path is the pathological-input manifestation, not a real allocation failure — and if
+# memory is truly gone, the unfixed code proceeds to compile() where the same condition surfaces
+# anyway.
+#
+# utf-8 encode rejects lone surrogates before the C tokenizer sees them; paired surrogates
+# (e.g. emoji) round-trip unchanged.
+def tokenize_fix_safe(
+    code: str,
+    *,
+    tokenize_lines: Callable[
+        [Callable[[], str]], Iterable[tokenize.TokenInfo]
+    ] = tokenize.generate_tokens,
+) -> list[tokenize.TokenInfo] | None:
     if any(len(line) > MAX_TOKENIZE_LINE_LENGTH for line in code.split("\n")):
         return None
     try:
-        # utf-8 encode rejects lone surrogates before the C tokenizer sees
-        # them; paired surrogates (e.g. emoji) round-trip unchanged.
         code.encode("utf-8")
-        return list(tokenize.generate_tokens(io.StringIO(code).readline))
+        return list(tokenize_lines(io.StringIO(code).readline))
     except (
         tokenize.TokenError,
         IndentationError,
@@ -149,12 +155,19 @@ def tokenize_fix_safe(code: str) -> list[tokenize.TokenInfo] | None:
         return None
 
 
-def translate_outside_strings(code: str, charmap: dict[int, int | str]) -> tuple[str, int]:
-    """Translate characters via charmap everywhere except inside string /
-    f-string literals and comments. Returns (new_code, num_changes), or
-    (code, 0) when tokenization fails (broken syntax -- leave it for compile()).
-    """
-    tokens = tokenize_fix_safe(code)
+# meiva:note
+# Translate characters via charmap everywhere except inside string / f-string literals and
+# comments. Returns (new_code, num_changes), or (code, 0) when tokenization fails (broken syntax —
+# leave it for compile()).
+def translate_outside_strings(
+    code: str,
+    charmap: dict[int, int | str],
+    *,
+    tokenize_lines: Callable[
+        [Callable[[], str]], Iterable[tokenize.TokenInfo]
+    ] = tokenize.generate_tokens,
+) -> tuple[str, int]:
+    tokens = tokenize_fix_safe(code, tokenize_lines=tokenize_lines)
     if tokens is None:
         return code, 0
 

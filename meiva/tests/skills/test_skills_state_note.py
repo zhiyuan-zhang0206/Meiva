@@ -50,9 +50,9 @@ def _exec_turn(
     monkeypatch.setattr(agent_identity, "require_agent_id", _one_agent)
     monkeypatch.setattr(audit_events, "record_audit_reported", _discard_audit)
     process_context.unbind_exec_turn()
-    meiva.state = object()
+    process_context.set_state(object())
     update: dict[str, Any] = {}
-    meiva.state_update = update
+    process_context.set_state_update(update)
     yield update
     process_context.unbind_exec_turn()
 
@@ -132,7 +132,7 @@ def test_agent_code_that_replaced_the_update_does_not_break_the_read(
     """The exec child reports a replaced `meiva.state_update` at exit; the read itself is not
     the place to fail."""
     _skills(fake_skills_dir)
-    meiva.state_update = "not a dict"  # pyright: ignore[reportAttributeAccessIssue]
+    process_context.set_state_update("not a dict")
 
     assert "# A" in (meiva.skills.alpha.__doc__ or "")
 

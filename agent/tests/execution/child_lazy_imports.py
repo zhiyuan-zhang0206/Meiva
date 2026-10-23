@@ -229,7 +229,7 @@ def child_cwd_set_first_touch(req: str, arg: str) -> dict[str, Any]:
         out["set"] = "ok"
     except Exception as e:  # the report carries the failure (type + message)
         out["set"] = f"{type(e).__name__}: {e}"
-    out["state_update_keys"] = None if meiva.state_update is None else sorted(meiva.state_update)
+    out["state_update_keys"] = sorted(meiva.state_update)
     out["cwd_after"] = str(meiva.cwd.get())
     return out
 

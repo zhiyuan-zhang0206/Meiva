@@ -38,10 +38,10 @@ def test_read_wrap_corrupted_state_field_raises(tmp_path: Path):
     (repo / "AGENTS.md").write_text("X")
     (repo / "foo.py").write_text("")
 
-    meiva.state = make_state_with_cwd(str(repo))
+    process_context.set_state(make_state_with_cwd(str(repo)))
     # pyright type=ignore: deliberately mutate field to wrong type, simulating sibling plugin / framework bug.
     meiva.state.meiva_code__injected_paths = 42  # type: ignore[assignment]
-    meiva.state_update = {}
+    process_context.set_state_update({})
     try:
         with patch.dict(os.environ, {"HOME": str(tmp_path / "fake-home")}):
             (tmp_path / "fake-home").mkdir()
@@ -58,8 +58,8 @@ def test_set_cwd_relative_resolves_against_current_cwd(tmp_path: Path):
     sub = repo / "src"
     sub.mkdir()
 
-    meiva.state = make_state_with_cwd(str(repo))
-    meiva.state_update = {}
+    process_context.set_state(make_state_with_cwd(str(repo)))
+    process_context.set_state_update({})
     try:
         meiva.cwd.set("src")  # relative path
         assert meiva.state_update["meiva_code__cwd"] == str(sub.resolve())
@@ -75,8 +75,8 @@ def test_set_cwd_expanduser_supported(tmp_path: Path):
     sub.mkdir()
 
     with patch.dict(os.environ, {"HOME": str(fake_home)}):
-        meiva.state = make_state_with_cwd(str(tmp_path))
-        meiva.state_update = {}
+        process_context.set_state(make_state_with_cwd(str(tmp_path)))
+        process_context.set_state_update({})
         try:
             meiva.cwd.set("~/project")
             assert meiva.state_update["meiva_code__cwd"] == str(sub.resolve())
@@ -195,8 +195,8 @@ def test_shell_run_wrap_passes_logical_cwd_without_changing_process_cwd(tmp_path
         captured.update(cmd=cmd, cwd=cwd, timeout=timeout)
         return "ok"
 
-    meiva.state = make_state_with_cwd(str(logical_cwd))
-    meiva.state_update = {}
+    process_context.set_state(make_state_with_cwd(str(logical_cwd)))
+    process_context.set_state_update({})
     try:
         assert wrapped_shell_run(fake_inner, "pwd", timeout=7.0) == "ok"
         assert captured == {"cmd": "pwd", "cwd": str(logical_cwd), "timeout": 7.0}
@@ -221,8 +221,8 @@ def test_serve_wrap_resolves_relative_dir_against_cwd(tmp_path: Path):
         captured.update(dir=dir, name=name, port=port, title=title, ttl=ttl)
         return "served"
 
-    meiva.state = make_state_with_cwd(str(tmp_path))
-    meiva.state_update = {}
+    process_context.set_state(make_state_with_cwd(str(tmp_path)))
+    process_context.set_state_update({})
     try:
         assert wrapped_serve(fake_inner, "site", "preview", port=8123, title="Preview") == "served"
         assert captured == {
@@ -255,8 +255,8 @@ def test_serve_wrap_passes_absolute_dir_through(tmp_path: Path):
     logical_cwd = tmp_path / "cwd"
     logical_cwd.mkdir()
     absolute_dir = tmp_path / "site"
-    meiva.state = make_state_with_cwd(str(logical_cwd))
-    meiva.state_update = {}
+    process_context.set_state(make_state_with_cwd(str(logical_cwd)))
+    process_context.set_state_update({})
     try:
         assert wrapped_serve(fake_inner, str(absolute_dir), "preview") == "served"
         assert captured["dir"] == str(absolute_dir.resolve())
@@ -283,8 +283,8 @@ def test_set_cwd_surfaces_and_stores_cwd_note(tmp_path: Path):
     )
     subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
 
-    meiva.state = make_state_with_cwd(str(tmp_path))
-    meiva.state_update = {}
+    process_context.set_state(make_state_with_cwd(str(tmp_path)))
+    process_context.set_state_update({})
     try:
         meiva.cwd.set(repo)
         # No print output — cwd_note is set in state for the after-exec hook
@@ -298,8 +298,8 @@ def test_set_cwd_surfaces_and_stores_cwd_note(tmp_path: Path):
 def test_set_cwd_non_git_stores_cwd_note(tmp_path: Path):
     """A cwd not under a git repo sets cwd_note with just the path
     (no project-skills listing)."""
-    meiva.state = make_state_with_cwd(str(tmp_path))
-    meiva.state_update = {}
+    process_context.set_state(make_state_with_cwd(str(tmp_path)))
+    process_context.set_state_update({})
     try:
         meiva.cwd.set(tmp_path)
         # No print output — cwd_note is set in state
@@ -353,8 +353,8 @@ def test_understand_wrap_resolves_paths_against_cwd(tmp_path: Path, monkeypatch)
     """In-turn relative paths= resolved against tracked cwd — same string same file as files.read."""
     captured = stub_understand_text_path(monkeypatch)  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
     (tmp_path / "rel.txt").write_text("cwd material", encoding="utf-8")
-    meiva.state = make_state_with_cwd(str(tmp_path))
-    meiva.state_update = {}
+    process_context.set_state(make_state_with_cwd(str(tmp_path)))
+    process_context.set_state_update({})
     try:
         [out] = meiva.understand([{"prompt": "p", "paths": ["rel.txt"]}])
         assert out == "ok"
@@ -369,8 +369,8 @@ def test_understand_wrap_missing_paths_raises_with_cwd_location(tmp_path: Path):
     (same semantics as files.read, won't silently treat as text)."""
     repo = tmp_path / "repo"
     repo.mkdir()
-    meiva.state = make_state_with_cwd(str(repo))
-    meiva.state_update = {}
+    process_context.set_state(make_state_with_cwd(str(repo)))
+    process_context.set_state_update({})
     try:
         with pytest.raises(FileNotFoundError, match=r"nope\.txt"):
             meiva.understand([{"prompt": "p", "paths": ["nope.txt"]}])
@@ -402,8 +402,8 @@ def test_understand_wrap_passes_invalid_combo_to_core(tmp_path: Path):
     """A malformed target reaches the core untouched so its canonical ValueError
     fires — the wrap does not preempt validation, in either direction (a target
     carrying both `paths` and `text`, or neither)."""
-    meiva.state = make_state_with_cwd(str(tmp_path))
-    meiva.state_update = {}
+    process_context.set_state(make_state_with_cwd(str(tmp_path)))
+    process_context.set_state_update({})
     try:
         with pytest.raises(ValueError, match="exactly one"):
             meiva.understand([{"prompt": "p"}])
@@ -460,8 +460,8 @@ def test_understand_wrap_resolves_every_target_in_a_batch(tmp_path: Path, monkey
     captured["llm"].invoke.side_effect = _record  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
     (tmp_path / "a.txt").write_text("material A", encoding="utf-8")
     (tmp_path / "b.txt").write_text("material B", encoding="utf-8")
-    meiva.state = make_state_with_cwd(str(tmp_path))
-    meiva.state_update = {}
+    process_context.set_state(make_state_with_cwd(str(tmp_path)))
+    process_context.set_state_update({})
     try:
         out = meiva.understand(
             [
@@ -485,8 +485,8 @@ def test_understand_wrap_resolves_every_entry_in_a_paths_list(
     (tmp_path / "a.txt").write_text("material A", encoding="utf-8")
     (tmp_path / "sub").mkdir()
     (tmp_path / "sub" / "b.txt").write_text("material B", encoding="utf-8")
-    meiva.state = make_state_with_cwd(str(tmp_path))
-    meiva.state_update = {}
+    process_context.set_state(make_state_with_cwd(str(tmp_path)))
+    process_context.set_state_update({})
     try:
         [out] = meiva.understand([{"prompt": "p", "paths": ["a.txt", "sub/b.txt"]}])
         assert out == "ok"
@@ -504,8 +504,8 @@ def test_understand_wrap_forwards_max_concurrent(tmp_path: Path, monkeypatch):
     (regression: the wrap used to drop the keyword and raise TypeError)."""
     stub_understand_text_path(monkeypatch)  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
     (tmp_path / "rel.txt").write_text("cwd material", encoding="utf-8")
-    meiva.state = make_state_with_cwd(str(tmp_path))
-    meiva.state_update = {}
+    process_context.set_state(make_state_with_cwd(str(tmp_path)))
+    process_context.set_state_update({})
     try:
         [out] = meiva.understand([{"prompt": "p", "paths": ["rel.txt"]}], max_concurrent=2)
         assert out == "ok"
@@ -535,8 +535,8 @@ def test_read_wrap_dedup_by_content_hash_across_paths(tmp_path: Path):
     (wt / "src").mkdir()
     (wt / "src" / "foo.py").write_text("# code")
 
-    meiva.state = make_state_with_cwd(str(wt / "src"))
-    meiva.state_update = {}
+    process_context.set_state(make_state_with_cwd(str(wt / "src")))
+    process_context.set_state_update({})
     try:
         with patch.dict(os.environ, {"HOME": str(tmp_path / "fake-home")}):
             (tmp_path / "fake-home").mkdir()
@@ -572,8 +572,8 @@ def test_set_cwd_with_skills_stores_project_skills_note(tmp_path: Path):
 
     subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
 
-    meiva.state = make_state_with_cwd(str(tmp_path))
-    meiva.state_update = {}
+    process_context.set_state(make_state_with_cwd(str(tmp_path)))
+    process_context.set_state_update({})
     try:
         meiva.cwd.set(repo)
         note = meiva.state.meiva_code__project_skills_note  # type: ignore[union-attr]
@@ -600,8 +600,8 @@ def test_read_wrap_hash_dedup_respects_different_content(tmp_path: Path):
     (wt / "src").mkdir()
     (wt / "src" / "foo.py").write_text("# code")
 
-    meiva.state = make_state_with_cwd(str(wt / "src"))
-    meiva.state_update = {}
+    process_context.set_state(make_state_with_cwd(str(wt / "src")))
+    process_context.set_state_update({})
     try:
         with patch.dict(os.environ, {"HOME": str(tmp_path / "fake-home")}):
             (tmp_path / "fake-home").mkdir()

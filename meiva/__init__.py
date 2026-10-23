@@ -66,7 +66,7 @@ from .sdk_surface.plugins import UnknownNamespaceError as UnknownNamespaceError
 # through the property setters below; `del meiva.context` releases the binding.
 
 state: Any
-state_update: dict[str, Any] | None
+state_update: dict[str, Any]
 
 context: MeivaContext
 """Your execution identity and supplied service connections.

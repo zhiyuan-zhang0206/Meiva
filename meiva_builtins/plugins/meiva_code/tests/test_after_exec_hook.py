@@ -72,8 +72,8 @@ async def test_after_exec_hook_injects_cwd_and_project_skills_notes(tmp_path: Pa
 
     hook = agent_runtime.contribute().after_exec[0]
     repo = _repo_with_project_skill(tmp_path)
-    meiva.state = _make_state_with_cwd(str(tmp_path))
-    meiva.state_update = {}
+    process_context.set_state(_make_state_with_cwd(str(tmp_path)))
+    process_context.set_state_update({})
     try:
         meiva.cwd.set(repo)
         committed = meiva.state  # the working copy is exactly what the exec commits to graph state
