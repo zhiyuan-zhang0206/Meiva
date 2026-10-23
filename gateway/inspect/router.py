@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time as time_mod
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any
 
@@ -145,12 +146,19 @@ async def _inspect_rows_cached_async(
     hours: StatsWindowHours | None,
     *,
     spawned_at: datetime,
+    note_coverage: Callable[..., None] = _metrics.note_inspect_metrics_coverage,
 ) -> _metrics.MetricsSnapshot:
     key = (agent_id, None if hours is None else int(hours))
     try:
         return await cache.get_or_load_async(
             key,
-            lambda: _metrics.inspect_snapshot(pool, agent_id, hours, spawned_at=spawned_at),
+            lambda: _metrics.inspect_snapshot(
+                pool,
+                agent_id,
+                hours,
+                spawned_at=spawned_at,
+                note_coverage=note_coverage,
+            ),
             ttl_s=0,
             now=time_mod.monotonic,
         )
@@ -168,7 +176,8 @@ async def get_agent_inspect_live(agent_id: int, request: Request) -> AgentInspec
     shells_available=False. No part of this response is cached.
     """
     pool = request.app.state.db_pool
-    db = await asyncio.to_thread(db_rows_blocking, pool, agent_id)
+    rows_reader = getattr(request.app.state, "inspect_db_rows", db_rows_blocking)
+    db = await asyncio.to_thread(rows_reader, pool, agent_id)
     notice, shells, last_pause = await asyncio.gather(
         asyncio.to_thread(notice_blocking, pool, agent_id),
         _probe_agent_shells(request.app.state.db, agent_id, db.machine, pool),
@@ -213,6 +222,9 @@ async def get_agent_inspect_statistics(
     """
     pool = request.app.state.db_pool
     applied_window_hours = None if hours is None else int(hours)
+    note_coverage = getattr(
+        request.app.state, "inspect_note_coverage", _metrics.note_inspect_metrics_coverage
+    )
     try:
         spawned_at = await asyncio.to_thread(_statistics_spawned_at, pool, agent_id)
         aggregates = await asyncio.wait_for(
@@ -222,6 +234,7 @@ async def get_agent_inspect_statistics(
                 agent_id,
                 hours,
                 spawned_at=spawned_at,
+                note_coverage=note_coverage,
             ),
             timeout=_INSPECT_RESPONSE_TIMEOUT_S,
         )
@@ -366,8 +379,11 @@ async def get_agent_plugin_metrics(agent_id: int, request: Request) -> list[Plug
     every 5s like the parent /inspect. Implementation in
     ``gateway/inspect/_plugin_metrics.py``.
     """
+    loader = getattr(
+        request.app.state, "inspect_metric_loader", _plugin_metrics.load_plugin_metrics
+    )
     return await asyncio.to_thread(
-        _plugin_metrics.metrics_for_agent, request.app.state.db_pool, agent_id
+        _plugin_metrics.metrics_for_agent, request.app.state.db_pool, agent_id, loader=loader
     )
 
 
@@ -386,6 +402,9 @@ async def get_agent_inspect_widgets(agent_id: int, request: Request) -> list[Ins
     rest of the /inspect family. Implementation in
     ``gateway/inspect/_plugin_widgets.py``.
     """
+    loader = getattr(
+        request.app.state, "inspect_widget_loader", _plugin_widgets.load_inspect_widgets
+    )
     return await asyncio.to_thread(
-        _plugin_widgets.widgets_for_agent, request.app.state.db_pool, agent_id
+        _plugin_widgets.widgets_for_agent, request.app.state.db_pool, agent_id, loader=loader
     )

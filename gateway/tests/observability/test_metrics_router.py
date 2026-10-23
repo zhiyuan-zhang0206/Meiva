@@ -1,14 +1,14 @@
 from __future__ import annotations
 
-import functools
+from collections.abc import Generator
+from contextlib import contextmanager
 from typing import Any
 
 import psycopg
 import pytest
 
 from base.telemetry.metrics.tests.telemetry_stream import TelemetryStream
-from gateway.events import metrics as metrics_router
-from gateway.tests.auth.gateway_config import gateway_test_client
+from gateway.tests.auth.gateway_config import GatewayTestClient, gateway_test_client
 
 _UNITS = {
     "syntax_fix",
@@ -20,12 +20,19 @@ _UNITS = {
 
 
 @pytest.fixture
-def stream(db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch) -> TelemetryStream:
-    stream = TelemetryStream(db_conn)
-    for name in ("fetch_aggregate", "fetch_agent_rollups"):
-        original = getattr(metrics_router, name)
-        monkeypatch.setattr(metrics_router, name, functools.partial(original, now=stream.now))
-    return stream
+def stream(db_conn: psycopg.Connection) -> TelemetryStream:
+    return TelemetryStream(db_conn)
+
+
+@contextmanager
+def _metrics_client(
+    stream: TelemetryStream, *, default_window_days: int | None = None
+) -> Generator[GatewayTestClient]:
+    with gateway_test_client() as client:
+        client.app.state.metrics_now = stream.now
+        if default_window_days is not None:
+            client.app.state.metrics_default_window_days = default_window_days
+        yield client
 
 
 def _insert_agent(db: psycopg.Connection, *, spawner: str = "user") -> int:
@@ -56,7 +63,7 @@ def test_metrics_empty_db_returns_envelope_with_all_units(
     db_conn: psycopg.Connection, stream: TelemetryStream
 ) -> None:
     db_conn.commit()
-    with gateway_test_client() as client:
+    with _metrics_client(stream) as client:
         resp = client.get("/api/metrics")
     assert resp.status_code == 200
     body = resp.json()
@@ -84,7 +91,7 @@ def test_metrics_wires_payload_field_names(
     _insert_event(stream, event="halt", agent_id=aid, payload={"body": "no tool_call (idle)"})
     _insert_event(stream, event="halt", agent_id=aid, payload={"body": "system_halt (compact)"})
     db_conn.commit()
-    with gateway_test_client() as client:
+    with _metrics_client(stream) as client:
         body = client.get("/api/metrics").json()
     m = body["metrics"]
     assert m["syntax_fix"]["trigger_counts"] == {"ruff": 1, "ruff_format": 1}
@@ -107,7 +114,7 @@ def test_metrics_agent_filter_scopes_to_one(
     _insert_event(stream, event="code", agent_id=a1, payload={"body": "x"})
     _insert_event(stream, event="code", agent_id=a2, payload={"body": "y"})
     db_conn.commit()
-    with gateway_test_client() as client:
+    with _metrics_client(stream) as client:
         body = client.get(f"/api/metrics?agent={a1}").json()
     assert body["meta"]["agent_filter"] == a1
     assert body["meta"]["distinct_agents"] == 1
@@ -121,7 +128,7 @@ def test_metrics_null_agent_events_not_counted(
     _insert_event(stream, event="code", agent_id=aid, payload={"body": "x"})
     _insert_event(stream, event="log", agent_id=None, payload={})
     db_conn.commit()
-    with gateway_test_client() as client:
+    with _metrics_client(stream) as client:
         body = client.get("/api/metrics").json()
     assert body["meta"]["total_events"] == 2
     assert body["meta"]["distinct_agents"] == 1
@@ -134,7 +141,7 @@ def test_metrics_window_filters_old_rows(
     _insert_event(stream, event="code", agent_id=aid, payload={"body": "old"}, ts_offset_days=3)
     _insert_event(stream, event="code", agent_id=aid, payload={"body": "new"}, ts_offset_days=0)
     db_conn.commit()
-    with gateway_test_client() as client:
+    with _metrics_client(stream) as client:
         one_day = client.get("/api/metrics?days=1").json()
         seven_day = client.get("/api/metrics?days=7").json()
     assert one_day["meta"]["total_events"] == 1
@@ -149,13 +156,10 @@ def test_metrics_days_out_of_range_rejected(db_conn: psycopg.Connection) -> None
 
 
 def test_metrics_default_window_comes_from_display_config(
-    db_conn: psycopg.Connection, stream: TelemetryStream, monkeypatch: pytest.MonkeyPatch
+    db_conn: psycopg.Connection, stream: TelemetryStream
 ) -> None:
-    from base.config import settings
-
     db_conn.commit()
-    monkeypatch.setattr(settings.display, "metrics_default_window_days", 3)
-    with gateway_test_client() as client:
+    with _metrics_client(stream, default_window_days=3) as client:
         resp = client.get("/api/metrics")
         agents_resp = client.get("/api/metrics/agents")
     assert resp.status_code == 200
@@ -188,7 +192,7 @@ def test_metrics_since_compact_param(db_conn: psycopg.Connection, stream: Teleme
         ts_offset_days=0.1,
     )
     db_conn.commit()
-    with gateway_test_client() as client:
+    with _metrics_client(stream) as client:
         full = client.get("/api/metrics").json()
         since = client.get("/api/metrics?since_compact=true").json()
     assert full["meta"]["since_compact"] is False
@@ -202,7 +206,7 @@ def test_metrics_since_compact_param(db_conn: psycopg.Connection, stream: Teleme
 
 def test_metrics_agents_empty(db_conn: psycopg.Connection, stream: TelemetryStream) -> None:
     db_conn.commit()
-    with gateway_test_client() as client:
+    with _metrics_client(stream) as client:
         body = client.get("/api/metrics/agents?days=1").json()
     assert body["agents"] == []
     assert body["meta"]["total_events"] == 0
@@ -264,7 +268,7 @@ def test_metrics_agents_multi_agent(db_conn: psycopg.Connection, stream: Telemet
     _insert_event(stream, event="exec", agent_id=a2, payload={"body": "ok"})
     _insert_event(stream, event="log", agent_id=None, payload={})
     db_conn.commit()
-    with gateway_test_client() as client:
+    with _metrics_client(stream) as client:
         body = client.get("/api/metrics/agents?days=1").json()
     assert body["meta"]["total_events"] == 6
     assert body["meta"]["distinct_agents"] == 2
@@ -306,7 +310,7 @@ def test_metrics_agents_since_compact(db_conn: psycopg.Connection, stream: Telem
         ts_offset_days=0.5,
     )
     db_conn.commit()
-    with gateway_test_client() as client:
+    with _metrics_client(stream) as client:
         full = client.get("/api/metrics/agents?days=1").json()
         since = client.get("/api/metrics/agents?days=1&since_compact=true").json()
     by_id = {a["agent_id"]: a for a in full["agents"]}

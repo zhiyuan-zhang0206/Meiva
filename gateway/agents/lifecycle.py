@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Literal
+from collections.abc import Callable
+from typing import Any, Literal
 
 import psycopg
 from fastapi import APIRouter, Body, HTTPException, Request
@@ -93,17 +94,24 @@ async def post_agent_terminate(
 
 
 async def terminate_agent_with_open_tasks(
-    agent_id: int, body: TerminateAgentRequest, pool: ConnectionPool, *, db: Database
+    agent_id: int,
+    body: TerminateAgentRequest,
+    pool: ConnectionPool,
+    *,
+    db: Database,
+    forward_op: Callable[..., Any] = forward_to_home_machine,
+    read_open_tasks: Callable[[ConnectionPool, int], OpenTasksHint | None] | None = None,
 ) -> TerminateAgentResponse:
 
-    forwarded = await forward_to_home_machine(
+    forwarded = await forward_op(
         agent_id, f"/api/agents/{agent_id}/terminate", body.model_dump(), db=db, pool=pool
     )
     response = TerminateAgentResponse.model_validate(forwarded)
     if response.shell_sessions is not None and response.shell_sessions.killed:
         await _drop_killed_shell_ttls(pool, agent_id, response.shell_sessions.killed)
+    tasks_reader = _open_tasks_hint_blocking if read_open_tasks is None else read_open_tasks
     try:
-        hint = await asyncio.to_thread(_open_tasks_hint_blocking, pool, agent_id)
+        hint = await asyncio.to_thread(tasks_reader, pool, agent_id)
     except (psycopg.Error, PoolTimeout) as exc:
         _log.error(
             "[lifecycle] open-tasks hint for terminate of agent %s failed: %r",
@@ -192,15 +200,18 @@ async def post_agent_restart(
         from base.packages.plugins.plugin_errors import InvalidConfigOverlay
 
         catalog = require_model_catalog(request)
+        overlay_configs = getattr(request.app.state, "overlay_configs", None)
         try:
             validate_config_overlay(
                 body.config_overlay,
+                configs=overlay_configs,
                 models=catalog.models,
                 decision_models=catalog.decision_models,
             )
         except InvalidConfigOverlay as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
-    forwarded = await forward_to_home_machine(
+    forward_op = getattr(request.app.state, "lifecycle_forward_op", forward_to_home_machine)
+    forwarded = await forward_op(
         agent_id,
         f"/api/agents/{agent_id}/restart",
         body.model_dump(),

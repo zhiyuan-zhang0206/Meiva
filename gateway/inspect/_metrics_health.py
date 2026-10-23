@@ -23,6 +23,7 @@ may fail the read.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import datetime
 
 from base.log import logger
@@ -67,12 +68,13 @@ def note_inspect_metrics_coverage(
     metadata: InspectMetricsMetadata,
     *,
     spawned_at: datetime,
+    is_historical: Callable[..., bool] = window_is_historical,
 ) -> None:
     """Log every coverage limit of one read; the unexpected ones as the
     ``inspect_metrics_coverage_gap`` WARNING event. Never raises — see the
     module docstring."""
     try:
-        historical = window_is_historical(metadata, spawned_at=spawned_at)
+        historical = is_historical(metadata, spawned_at=spawned_at)
         for family, condition, availability in conditions(metadata):
             if _unexpected(condition, historical=historical):
                 logger.warning(

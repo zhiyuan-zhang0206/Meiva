@@ -133,8 +133,9 @@ def ingest_alerts(body: AlertWebhookPayload, request: Request) -> AlertIngestRes
 
     publish_alert_rows(request.app.state.bus, rows)
 
+    notifier = getattr(request.app.state, "alert_group_notifier", None) or notify_alert_group
     for group_id in sorted(shadow.native_ids):
-        notify_alert_group(group_id)
+        notifier(group_id)
     with request.app.state.db_pool.connection() as conn:
         notified = native_sent_count(conn, shadow.native_ids)
 
@@ -157,8 +158,9 @@ async def get_alerts_stream(request: Request) -> StreamingResponse:
     ingested before the subscription opened.
     """
 
+    stream_fn = getattr(request.app.state, "alerts_event_stream", event_stream)
     return StreamingResponse(
-        event_stream(
+        stream_fn(
             request.app.state.bus,
             0,
             request,
@@ -198,7 +200,10 @@ def list_alerts(
     the full match count.
     """
 
-    effective_limit = limit if limit is not None else settings.display.alerts_default_limit
+    default_limit = getattr(
+        request.app.state, "alerts_default_limit", settings.display.alerts_default_limit
+    )
+    effective_limit = limit if limit is not None else default_limit
     since = datetime.now(UTC) - _WINDOWS[window]
     params: list[Any] = [since]
     # Live problems never age out. The window limits recovery history, including

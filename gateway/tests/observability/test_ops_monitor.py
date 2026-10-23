@@ -201,14 +201,13 @@ def test_ops_monitor_grid_alignment(db_conn: psycopg.Connection) -> None:
     assert start.minute % 30 == 0 and start.second == 0
 
 
-def test_ops_monitor_read_that_exceeds_its_statement_timeout_is_a_retriable_503(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_ops_monitor_read_that_exceeds_its_statement_timeout_is_a_retriable_503() -> None:
     def cancelled(*_args: object, **_kwargs: object) -> dict[str, Any]:
         raise psycopg.errors.QueryCanceled("statement timeout")
 
-    monkeypatch.setattr(ops_monitor, "fetch_ops_series", cancelled)
     with gateway_test_client() as client:
+        client.app.state.ops_series_reader = cancelled
         response = client.get("/api/ops/monitor")
     assert response.status_code == 503
     assert "retry" in response.json()["detail"]
+    _ = ops_monitor

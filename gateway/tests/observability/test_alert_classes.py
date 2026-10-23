@@ -10,8 +10,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from base.telemetry.observability import cluster_label
-from gateway.cluster import alert_classes
-from gateway.tests.auth.gateway_config import gateway_test_client
+from gateway.tests.auth.gateway_config import GatewayTestClient, gateway_test_client
 
 
 @pytest.fixture
@@ -168,9 +167,9 @@ def test_dismissing_through_the_api_moves_the_class_out_of_the_active_count(
 
 
 def test_the_class_list_is_capped_but_reports_its_full_size(
-    db_conn: psycopg.Connection, client: TestClient, monkeypatch: pytest.MonkeyPatch
+    db_conn: psycopg.Connection, client: GatewayTestClient
 ) -> None:
-    monkeypatch.setattr(alert_classes, "ALERT_CLASSES_LIMIT", 2)
+    client.app.state.alert_classes_limit = 2
     for name, repeats in (("a", 3), ("b", 2), ("c", 1)):
         for _ in range(repeats):
             _event(db_conn, name)
@@ -183,9 +182,9 @@ def test_the_class_list_is_capped_but_reports_its_full_size(
 
 
 def test_samples_are_the_newest_events_of_exactly_one_class(
-    db_conn: psycopg.Connection, client: TestClient, monkeypatch: pytest.MonkeyPatch
+    db_conn: psycopg.Connection, client: GatewayTestClient
 ) -> None:
-    monkeypatch.setattr(alert_classes, "SAMPLES_LIMIT", 2)
+    client.app.state.alert_samples_limit = 2
     _event(db_conn, "boom", minutes_ago=30, attributes={"msg": "oldest"})
     _event(db_conn, "boom", minutes_ago=20, attributes={"msg": "middle", "detail": 7})
     _event(db_conn, "boom", minutes_ago=10, attributes={"msg": "newest"})

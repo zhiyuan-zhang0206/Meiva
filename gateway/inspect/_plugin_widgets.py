@@ -29,7 +29,7 @@ family.
 from __future__ import annotations
 
 import importlib
-from collections.abc import Sequence
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -38,7 +38,7 @@ from psycopg import Cursor
 from psycopg_pool import ConnectionPool
 
 from base.agents.tasks.priority import Priority
-from base.packages.plugins import data_registry
+from base.packages.plugins import data_registry, enable_config
 from base.packages.plugins.surface.inspector import InspectWidgetSpec
 from gateway.inspect._plugin_faces import enabled_face_files
 from gateway.inspect.schemas import InspectWidgetResult, InspectWidgetTask
@@ -49,10 +49,22 @@ from gateway.inspect.schemas import InspectWidgetResult, InspectWidgetTask
 PLUGINS_DIR = Path(__file__).resolve().parents[2] / "meiva_builtins" / "plugins"
 
 
-def enabled_inspector_modules() -> list[Path]:
+def enabled_inspector_modules(
+    plugins_dir: Path = PLUGINS_DIR,
+    *,
+    installed_dirs: Callable[[], Mapping[str, Path]] = enable_config.installed_plugin_dirs,
+    runtime_loader: Callable[[set[str]], enable_config.PluginsConfig] = (
+        enable_config.load_for_runtime
+    ),
+) -> list[Path]:
     """``inspector.py`` of every ENABLED builtin plugin, sorted — the import
     set of one registry build."""
-    return enabled_face_files(PLUGINS_DIR, "inspector.py")
+    return enabled_face_files(
+        plugins_dir,
+        "inspector.py",
+        installed_dirs=installed_dirs,
+        runtime_loader=runtime_loader,
+    )
 
 
 def load_inspect_widgets(modules: Sequence[Path] | None = None) -> list[InspectWidgetSpec]:
@@ -100,9 +112,14 @@ def _resolve_tasks(cur: Cursor[Any], agent_id: int) -> list[InspectWidgetTask]:
     ]
 
 
-def widgets_for_agent(pool: ConnectionPool[Any], agent_id: int) -> list[InspectWidgetResult]:
+def widgets_for_agent(
+    pool: ConnectionPool[Any],
+    agent_id: int,
+    *,
+    loader: Callable[[], list[InspectWidgetSpec]] = load_inspect_widgets,
+) -> list[InspectWidgetResult]:
     """Sync twin of the widgets endpoint — runs via asyncio.to_thread."""
-    specs = load_inspect_widgets()
+    specs = loader()
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute("SELECT 1 FROM agents_meta WHERE id = %s", (agent_id,))
         if cur.fetchone() is None:

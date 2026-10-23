@@ -9,18 +9,27 @@ surface: it renders panels for every shipped plugin so a disabled plugin's histo
 
 from __future__ import annotations
 
+from collections.abc import Callable, Mapping
 from pathlib import Path
 
 from base.packages.plugins import enable_config
 
 
-def enabled_face_files(plugins_dir: Path, filename: str) -> list[Path]:
+def enabled_face_files(
+    plugins_dir: Path,
+    filename: str,
+    *,
+    installed_dirs: Callable[[], Mapping[str, Path]] = enable_config.installed_plugin_dirs,
+    runtime_loader: Callable[[set[str]], enable_config.PluginsConfig] = (
+        enable_config.load_for_runtime
+    ),
+) -> list[Path]:
     """`filename` of every ENABLED plugin directory under `plugins_dir` that ships it, sorted by
     plugin name."""
     if not plugins_dir.is_dir():
         return []
-    installed = enable_config.installed_plugin_dirs()
-    config = enable_config.load_for_runtime(set(installed))
+    installed = installed_dirs()
+    config = runtime_loader(set(installed))
     files: list[Path] = []
     for plugin_dir in sorted(plugins_dir.iterdir()):
         face = plugin_dir / filename

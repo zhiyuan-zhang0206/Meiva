@@ -128,11 +128,10 @@ def test_a_clean_read_emits_nothing(loguru_records: list[dict[str, Any]]) -> Non
 
 
 def test_note_never_raises_into_the_read_path(
-    monkeypatch: pytest.MonkeyPatch, loguru_records: list[dict[str, Any]]
+    loguru_records: list[dict[str, Any]],
 ) -> None:
     def boom(*_a: object, **_k: object) -> bool:
         raise RuntimeError("boom")
 
-    monkeypatch.setattr(imh, "window_is_historical", boom)
-    imh.note_inspect_metrics_coverage(42, _md(), spawned_at=T0)
+    imh.note_inspect_metrics_coverage(42, _md(), spawned_at=T0, is_historical=boom)
     assert any("note failed" in str(r["message"]) for r in loguru_records)

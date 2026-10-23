@@ -121,7 +121,6 @@ def test_creation_key_requires_the_principal_scope(db_conn: psycopg.Connection) 
 
 def test_resolution_recovers_after_committed_wake_failure(
     db_conn: psycopg.Connection,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from gateway.agents import notices
 
@@ -134,14 +133,14 @@ def test_resolution_recovers_after_committed_wake_failure(
         raise RuntimeError("process lost after commit")
 
     with gateway_test_client(raise_server_exceptions=False) as client:
-        monkeypatch.setattr(notices, "publish_inbound_wake", unavailable)
+        client.app.state.notice_wake_publisher = unavailable
         first = client.post(
             path,
             json={"action": "answer", "reply": "yes"},
             headers={"Idempotency-Key": "lost-tail", "Idempotency-Scope": "principal-v1"},
         )
         assert first.status_code == 500
-        monkeypatch.setattr(notices, "publish_inbound_wake", original)
+        client.app.state.notice_wake_publisher = original
         second = client.post(
             path,
             json={"action": "answer", "reply": "yes"},
@@ -154,7 +153,7 @@ def test_resolution_recovers_after_committed_wake_failure(
 
 
 def test_create_receipt_survives_expiration(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    db_conn: psycopg.Connection,
 ) -> None:
     agent = seed_agent(db_conn)
     path = f"/api/agents/{agent}/notices"
@@ -166,10 +165,11 @@ def test_create_receipt_survives_expiration(
         def reject_fresh(*args: object) -> None:
             raise RuntimeError("fresh operation validation should not run")
 
-        monkeypatch.setattr(agents_notices, "validate_creation_state", reject_fresh)
+        client.app.state.notice_creation_state_validator = reject_fresh
         replay = client.post(path, json=body, headers=keyed_headers("expires"))
     assert first.status_code == replay.status_code == 201
     assert first.json() == replay.json()
+    _ = agents_notices
 
 
 @pytest.mark.parametrize("resolve", [False, True])

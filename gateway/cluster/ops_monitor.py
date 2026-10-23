@@ -33,10 +33,11 @@ def get_ops_monitor(
     derived from the window (1h→60s, 6h→300s, 24h→1800s, 7d→3600s); every
     bucket in the window is present (zero-filled when empty), aligned to
     `meta.bucket_starts`."""
+    series_reader = getattr(request.app.state, "ops_series_reader", fetch_ops_series)
     try:
         with request.app.state.db_pool.connection() as conn:
             conn.execute("SET LOCAL statement_timeout = '8s'")
-            data = fetch_ops_series(conn, window)
+            data = series_reader(conn, window)
     except psycopg.errors.QueryCanceled as exc:
         raise HTTPException(status_code=503, detail="ops monitor read timed out; retry") from exc
     return OpsMonitorReport(**data)
