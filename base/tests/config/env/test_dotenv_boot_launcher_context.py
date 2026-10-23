@@ -14,97 +14,80 @@
 
 from __future__ import annotations
 
-import os
-from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
 
 from base.host.env import dotenv_boot
-from base.host.env.tests.env_files import use_env_files
-from base.paths.home import resolve_meiva_home
-from base.tests.config.env.test_dotenv_boot import (
-    point_env_at_without_db_url,
-    restore_authority_env,
-)
+from base.tests.config.env.test_dotenv_boot import home_without_db_url
 
-_ = restore_authority_env
-
-_NO_DATA_PLANE_IDENTITY_LINES = (
-    f"MEIVA_CLUSTER_SECRET={os.environ['MEIVA_CLUSTER_SECRET']}",
-    f"MEIVA_GATEWAY_URL={os.environ['MEIVA_GATEWAY_URL']}",
-)
+_RECORDED = dotenv_boot.LAUNCHER_PROFILE_ENV_KEY
 
 
-@pytest.fixture(autouse=True)
-def _restore_environ() -> Iterator[None]:
-    """`enforce_cluster_env_authority` and the CLI entry mutate os.environ directly,
-    not through monkeypatch: put the whole environment back after each test."""
-    snapshot = dict(os.environ)
-    yield
-    os.environ.clear()
-    os.environ.update(snapshot)
-
-
-def _point_env_at_without_data_plane_urls(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def _home_without_data_plane_urls(tmp_path: Path) -> Path:
     # meiva:note
-    # An env file that declares neither data-plane URL — the pure agent-runner
+    # A home whose `.env` declares neither data-plane URL — the pure agent-runner
     # shape for MEIVA_DB_URL and MEIVA_REDIS_URL together (#4334).
-    env_file = tmp_path / "no-data-plane.env"
-    env_file.write_text(
-        "MEIVA_AGENT_HOST_HEALTH_PORT=18035\n" + "\n".join(_NO_DATA_PLANE_IDENTITY_LINES) + "\n"
-    )
-    use_env_files(monkeypatch, env_file)
+    home = tmp_path / "home"
+    home.mkdir(exist_ok=True)
+    (home / ".env").write_text("MEIVA_AGENT_HOST_HEALTH_PORT=18035\n")
+    return home
 
 
-def test_recorded_launcher_profile_drops_undeclared_owner_url(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_recorded_launcher_profile_drops_undeclared_owner_url(tmp_path: Path) -> None:
     # meiva:note
     # The recorded context keeps the live one's runner-shape gate: an
     # inherited OWNER url on an undeclared unit still drops — recording the
     # profile must not widen the exemption.
-    monkeypatch.delitem(os.environ, "MEIVA_PROCESS_PROFILE", raising=False)
-    monkeypatch.setitem(os.environ, dotenv_boot.LAUNCHER_PROFILE_ENV_KEY, "agent")
-    point_env_at_without_db_url(monkeypatch, tmp_path)
-    monkeypatch.setitem(
-        os.environ, "MEIVA_DB_URL", "postgresql://meiva_main:owner-password@127.0.0.1:5433/meiva"
-    )
+    env = {
+        _RECORDED: "agent",
+        "MEIVA_DB_URL": "postgresql://meiva_main:owner-password@127.0.0.1:5433/meiva",
+    }
 
-    dotenv_boot.enforce_cluster_env_authority(resolve_meiva_home())
+    dotenv_boot.enforce_cluster_env_authority(env, home_without_db_url(tmp_path))
 
-    assert "MEIVA_DB_URL" not in os.environ
+    assert "MEIVA_DB_URL" not in env
 
 
-def test_recorded_launcher_profile_drops_malformed_db_url(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_recorded_launcher_profile_keeps_undeclared_runner_url(tmp_path: Path) -> None:
+    # meiva:note
+    # The recorded context opens the same exemption the live marker does: the CLI entry
+    # popped MEIVA_PROCESS_PROFILE, and the runner projection must still survive.
+    runner_url = "postgresql://meiva_runner:runner-password@127.0.0.1:5433/meiva"
+    env = {_RECORDED: "agent", "MEIVA_DB_URL": runner_url}
+
+    dotenv_boot.enforce_cluster_env_authority(env, home_without_db_url(tmp_path))
+
+    assert env["MEIVA_DB_URL"] == runner_url
+
+
+def test_recorded_launcher_profile_keeps_a_hosted_redis_url(tmp_path: Path) -> None:
+    env = {_RECORDED: "agent", "MEIVA_REDIS_URL": "redis://runner:pw@127.0.0.1:6380/0"}
+
+    dotenv_boot.enforce_cluster_env_authority(env, _home_without_data_plane_urls(tmp_path))
+
+    assert env["MEIVA_REDIS_URL"] == "redis://runner:pw@127.0.0.1:6380/0"
+
+
+def test_recorded_launcher_profile_drops_malformed_db_url(tmp_path: Path) -> None:
     # meiva:note
     # The parse gate holds for the recorded context too: `urlsplit` itself
     # rejects the value (invalid IPv6), so it drops instead of raising.
-    monkeypatch.delitem(os.environ, "MEIVA_PROCESS_PROFILE", raising=False)
-    monkeypatch.setitem(os.environ, dotenv_boot.LAUNCHER_PROFILE_ENV_KEY, "agent")
-    point_env_at_without_db_url(monkeypatch, tmp_path)
-    monkeypatch.setitem(os.environ, "MEIVA_DB_URL", "postgresql://[::1")
+    env = {_RECORDED: "agent", "MEIVA_DB_URL": "postgresql://[::1"}
 
-    dotenv_boot.enforce_cluster_env_authority(resolve_meiva_home())
+    dotenv_boot.enforce_cluster_env_authority(env, home_without_db_url(tmp_path))
 
-    assert "MEIVA_DB_URL" not in os.environ
+    assert "MEIVA_DB_URL" not in env
 
 
 @pytest.mark.parametrize("value", ["redis://[::1", "redis://"])
-def test_recorded_launcher_profile_drops_unparseable_redis_url(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, value: str
-) -> None:
+def test_recorded_launcher_profile_drops_unparseable_redis_url(tmp_path: Path, value: str) -> None:
     # meiva:note
     # The redis exemption's parse gate: a `urlsplit` failure (invalid IPv6)
     # and a parse with no host both drop — never raise, never keep a value that
     # cannot dial.
-    monkeypatch.delitem(os.environ, "MEIVA_PROCESS_PROFILE", raising=False)
-    monkeypatch.setitem(os.environ, dotenv_boot.LAUNCHER_PROFILE_ENV_KEY, "agent")
-    _point_env_at_without_data_plane_urls(monkeypatch, tmp_path)
-    monkeypatch.setitem(os.environ, "MEIVA_REDIS_URL", value)
+    env = {_RECORDED: "agent", "MEIVA_REDIS_URL": value}
 
-    dotenv_boot.enforce_cluster_env_authority(resolve_meiva_home())
+    dotenv_boot.enforce_cluster_env_authority(env, _home_without_data_plane_urls(tmp_path))
 
-    assert "MEIVA_REDIS_URL" not in os.environ
+    assert "MEIVA_REDIS_URL" not in env

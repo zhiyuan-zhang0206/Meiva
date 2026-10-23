@@ -11,7 +11,9 @@ from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.domains.storage.data_plane import self_machine_host
 from base.host.env import bootstrap
+from base.host.env.boot_policy import BootstrapFetch
 from base.host.net.predicates import is_loopback_host
+from base.host.net.tests.local_http import serve_asgi
 from base.host.net.url_secret import url_with_host
 from gateway.tests.auth.gateway_config import gateway_test_client
 
@@ -26,17 +28,14 @@ def test_fetch_bootstrap_config_against_live_endpoint(
     # An authenticated gateway: the runner presents its delivered machine API
     # token (the active generation's runner token), never the human secret.
     monkeypatch.setattr(config.settings.data_plane, "cluster_secret", "live-secret")
-    monkeypatch.setitem(os.environ, "MEIVA_API_TOKEN", served_gateway_home.api.runner)
     monkeypatch.delitem(os.environ, "MEIVA_CLUSTER_SECRET")
 
-    # Route base.host.env.bootstrap's dial_get (base.host.net.http_dial.get) through the
-    # in-process ASGI app.
-    def fake_get(url, **kw):
-        with gateway_test_client(machine=machine_identity) as c:
-            return c.get(url.replace("http://cp", ""), **kw)  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
-
-    monkeypatch.setattr(bootstrap, "dial_get", fake_get)  # pyright: ignore[reportUnknownArgumentType]
-    values = bootstrap.fetch_bootstrap_config("http://cp")
+    # meiva:note
+    # The runner dials the assembled gateway app through a real loopback listener.
+    with gateway_test_client(machine=machine_identity) as client, serve_asgi(client.app) as url:
+        values = bootstrap.fetch_bootstrap_config(
+            url, bearer=served_gateway_home.api.runner, tuning=BootstrapFetch()
+        )
     # Bootstrap serves the credential-free endpoint even though this gateway
     # keeps an active write generation: its runner login never travels here. A
     # multi-host gateway also rewrites its loopback host to the reachable

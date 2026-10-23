@@ -6,7 +6,7 @@ import pytest
 from base.config import runtime_config
 from base.config.domains.display import DisplaySettings
 from base.config.domains.tests.test_display_config import DISPLAY_RANGES
-from base.host.env import dotenv_file
+from base.host.env.tests.env_files import unit_env_aliases
 from gateway.tests.auth.gateway_config import gateway_test_client
 from gateway.tests.events.test_notices_endpoint import seed_agent
 
@@ -37,7 +37,7 @@ def test_config_write_accepts_boundary_defaults_without_clamping(
         for value in (minimum, maximum):
             response = client.put("/api/config", json={name: value})
             assert response.status_code == 200, response.text
-            assert dotenv_file.read_env_aliases()[alias] == str(value)
+            assert unit_env_aliases()[alias] == str(value)
 
 
 @pytest.mark.parametrize(("open_limit", "resolved_limit"), ((1, 1), (500, 100)))

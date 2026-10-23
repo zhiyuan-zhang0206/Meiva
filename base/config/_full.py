@@ -269,8 +269,9 @@ def refresh_data_plane_settings(settings: Any) -> None:
     full singleton swap would surprise subsystems that cache a sub-model.
     """
     from base.host.env.dotenv_boot import load_meiva_env
+    from base.paths.home import resolve_meiva_home
 
-    result = load_meiva_env()
+    result = load_meiva_env(os.environ, home=resolve_meiva_home())
     data_plane = DataPlaneSettings()  # pyright: ignore[reportCallIssue]
     settings.data_plane = data_plane
     settings.env_boot = result

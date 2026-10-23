@@ -25,7 +25,14 @@ from cli.tests.wire.public_gateway import PublicGateway
 from cli.tests.wire.public_gateway import wire as wire
 
 _CLUSTER_AUTH = "verify-test-value"
-_ACCESS = GatewayAccess(gateway_url="http://gw", cluster_secret=_CLUSTER_AUTH, remote_plane=False)
+_ACCESS = GatewayAccess(
+    gateway_url="http://gw",
+    cluster_secret=_CLUSTER_AUTH,
+    remote_plane=False,
+    machine_token=None,
+    launcher_profile=None,
+    gateway_home=False,
+)
 
 
 def _no_gateway() -> GatewayAccess:

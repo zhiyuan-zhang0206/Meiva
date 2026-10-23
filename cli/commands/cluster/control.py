@@ -361,11 +361,15 @@ def _gateway_authority_home(verb: str) -> Path | None:
     The verb needs a gateway home with a local data plane (a remote-managed
     plane has no write generation).
     """
+    import os
+
     from base.config import settings
     from base.host.env.bootstrap import config_source_is_local
+    from base.host.env.dotenv_file import env_file_path, read_env_aliases
     from base.paths import meiva_home
 
-    if not config_source_is_local() or settings.data_plane.is_remote:
+    env_file = read_env_aliases(env_file_path(meiva_home()))
+    if not config_source_is_local(os.environ, env_file=env_file) or settings.data_plane.is_remote:
         print(
             f"✗ meiva cluster db-authority {verb}: runs on a gateway home with a local data "
             "plane; a remote-managed plane has no write generation to issue",

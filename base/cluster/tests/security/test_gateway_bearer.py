@@ -1,73 +1,64 @@
+# meiva:note
+# The credential a process presents to the gateway API is a pure function of its `GatewayAccess`.
+
+
 from __future__ import annotations
 
 import pytest
 
 from base.cluster import machine
 from base.cluster.machine import GatewayAccess, gateway_auth_headers
-from base.host.net.auth import API_TOKEN_ENV, bearer_header
+from base.host.net.auth import bearer_header
 
 SECRET = "human-" + "h" * 40
 TOKEN = "delivered-" + "t" * 32
-LAUNCHER_PROFILE_ENV = "MEIVA_LAUNCHER_PROFILE"
 
 
-def _access(secret: str, *, remote_plane: bool = False) -> GatewayAccess:
-    return GatewayAccess(
-        gateway_url="http://gateway.test:8000", cluster_secret=secret, remote_plane=remote_plane
-    )
-
-
-def _process(
+def _access(
+    secret: str,
     *,
-    profile: str | None,
-    token: str | None,
-    recorded_profile: str | None = None,
-    serves_gateway: bool | None = None,
-) -> dict[str, str]:
-    env: dict[str, str] = {}
-    for name, value in (
-        ("MEIVA_PROCESS_PROFILE", profile),
-        (LAUNCHER_PROFILE_ENV, recorded_profile),
-        (API_TOKEN_ENV, token),
-    ):
-        if value is not None:
-            env[name] = value
-    if serves_gateway is not None:
-        env["MEIVA_MACHINE_SERVE_GATEWAY"] = "true" if serves_gateway else "false"
-    return env
+    profile: str | None = None,
+    token: str | None = None,
+    remote_plane: bool = False,
+    gateway_home: bool = False,
+) -> GatewayAccess:
+    return GatewayAccess(
+        gateway_url="http://gateway.test:8000",
+        cluster_secret=secret,
+        remote_plane=remote_plane,
+        machine_token=token,
+        launcher_profile=profile,
+        gateway_home=gateway_home,
+    )
 
 
 @pytest.mark.parametrize("profile", [None, "gateway", "agent", "runner"])
 def test_a_delivered_token_is_presented_before_the_secret(profile: str | None) -> None:
-    env = _process(profile=profile, token=TOKEN)
-    assert gateway_auth_headers(_access(SECRET), env=env) == bearer_header(TOKEN)
+    access = _access(SECRET, profile=profile, token=TOKEN)
+    assert gateway_auth_headers(access) == bearer_header(TOKEN)
 
 
 @pytest.mark.parametrize("profile", [None, "gateway", "agent", "runner"])
 def test_a_process_with_no_credential_fails_instead_of_presenting_nothing(
     profile: str | None,
 ) -> None:
-    env = _process(profile=profile, token=None)
     with pytest.raises(machine.GatewayApiTokenMissing, match="MEIVA_API_TOKEN"):
-        gateway_auth_headers(_access(""), env=env)
+        gateway_auth_headers(_access("", profile=profile))
 
 
 @pytest.mark.parametrize("profile", [None, "gateway"])
 def test_operator_and_gateway_processes_without_a_token_present_the_secret(
     profile: str | None,
 ) -> None:
-    env = _process(profile=profile, token=None)
-    assert gateway_auth_headers(_access(SECRET), env=env) == bearer_header(SECRET)
+    assert gateway_auth_headers(_access(SECRET, profile=profile)) == bearer_header(SECRET)
 
 
 @pytest.mark.parametrize("profile", ["agent", "runner"])
 def test_agent_and_runner_processes_without_a_token_fail_instead_of_using_the_secret(
     profile: str,
 ) -> None:
-    env = _process(profile=profile, token=None)
-
     with pytest.raises(RuntimeError, match="MEIVA_API_TOKEN") as raised:
-        gateway_auth_headers(_access(SECRET), env=env)
+        gateway_auth_headers(_access(SECRET, profile=profile))
 
     message = str(raised.value)
     assert f"{profile}-profile" in message
@@ -75,70 +66,31 @@ def test_agent_and_runner_processes_without_a_token_fail_instead_of_using_the_se
 
 
 def test_the_failure_is_the_named_error() -> None:
-    env = _process(profile="agent", token=None)
     with pytest.raises(machine.GatewayApiTokenMissing):
-        machine.gateway_bearer(_access(SECRET), env=env)
-
-
-def test_a_cli_started_inside_an_agent_is_held_to_the_same_rule() -> None:
-    env = _process(profile=None, token=None, recorded_profile="agent")
-    with pytest.raises(RuntimeError, match="MEIVA_API_TOKEN"):
-        gateway_auth_headers(_access(SECRET), env=env)
+        machine.gateway_bearer(_access(SECRET, profile="agent"))
 
 
 @pytest.mark.parametrize("profile", [None, "gateway", "agent", "runner"])
 def test_a_remote_managed_gateway_home_keeps_presenting_the_secret(
     profile: str | None,
 ) -> None:
-    env = _process(profile=profile, token=None, serves_gateway=True)
-    assert gateway_auth_headers(_access(SECRET, remote_plane=True), env=env) == bearer_header(
-        SECRET
-    )
+    access = _access(SECRET, profile=profile, remote_plane=True, gateway_home=True)
+    assert gateway_auth_headers(access) == bearer_header(SECRET)
 
 
 def test_a_unit_that_does_not_serve_the_gateway_is_never_exempt() -> None:
-    env = _process(profile="runner", token=None, serves_gateway=False)
+    access = _access(SECRET, profile="runner", remote_plane=True, gateway_home=False)
     with pytest.raises(RuntimeError, match="MEIVA_API_TOKEN"):
-        gateway_auth_headers(_access(SECRET, remote_plane=True), env=env)
+        gateway_auth_headers(access)
 
 
-def test_explicit_readers_preserve_token_first_and_profile_admission_order() -> None:
-    reads: list[str] = []
-
-    def forbidden_secret() -> str:
-        raise AssertionError("a delivered token must not consult the secret")
-
-    assert (
-        machine.resolve_gateway_bearer(
-            token_reader=lambda: TOKEN,
-            secret_reader=forbidden_secret,
-            profile_reader=lambda: pytest.fail("a delivered token must not consult the profile"),
-            no_tokens_reader=lambda: pytest.fail("a delivered token must not inspect the plane"),
-        )
-        == TOKEN
-    )
-
-    def token() -> str:
-        reads.append("token")
-        return ""
-
-    def secret() -> str:
-        reads.append("secret")
-        return SECRET
-
-    def profile() -> str:
-        reads.append("profile")
-        return "agent"
-
-    def no_tokens() -> bool:
-        reads.append("plane")
-        return False
-
+def test_a_gateway_home_on_a_local_plane_is_not_exempt() -> None:
+    access = _access(SECRET, profile="agent", remote_plane=False, gateway_home=True)
     with pytest.raises(machine.GatewayApiTokenMissing):
-        machine.resolve_gateway_bearer(
-            token_reader=token,
-            secret_reader=secret,
-            profile_reader=profile,
-            no_tokens_reader=no_tokens,
-        )
-    assert reads == ["token", "secret", "profile", "plane"]
+        gateway_auth_headers(access)
+
+
+def test_the_secret_and_the_token_never_reach_a_repr() -> None:
+    shown = repr(_access(SECRET, token=TOKEN))
+    assert SECRET not in shown
+    assert TOKEN not in shown

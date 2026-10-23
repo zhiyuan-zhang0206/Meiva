@@ -14,7 +14,6 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
-import os
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -314,19 +313,14 @@ def test_the_sessions_list_shows_only_sessions_that_authenticate(
 def test_a_machine_token_cannot_choose_the_human_secret(
     gateway_data_plane: None,
     gateway: Path,
-    tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     machine_identity: MachineIdentity,
 ) -> None:
     """A runner token authenticates the administrator, but it must not turn a
     generation-bound admission into a human bearer of its choosing."""
-    from base.host.env import dotenv_file
-
-    store = tmp_path / "config-store"
-    store.mkdir()
-    monkeypatch.setattr(dotenv_file, "unit_home", lambda: store)
     monkeypatch.setattr(settings.general, "machine_name", "gateway-host")
     runner = _tokens(gateway).api.runner
+    env_before = (gateway / ".env").read_bytes()
     with gateway_test_client(machine=machine_identity) as client:
         resp = client.put(
             "/api/config",
@@ -334,7 +328,7 @@ def test_a_machine_token_cannot_choose_the_human_secret(
             headers=bearer_header(runner),
         )
     assert resp.status_code == 400, resp.text
-    assert not (store / ".env").exists()
+    assert (gateway / ".env").read_bytes() == env_before
 
 
 def _webhook_request(authorization: str | None) -> Request:
@@ -514,7 +508,7 @@ def test_launch_delivers_each_service_its_class_token(
     gateway: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     tokens = _tokens(gateway).api
-    monkeypatch.setattr(bootstrap, "config_source_is_local", lambda: True)
+    monkeypatch.setattr(bootstrap, "config_source_is_local", lambda *_args, **_kwargs: True)
     assert bringup.api_delivery("gateway", remote_data_plane=False) == {
         api.API_TOKEN_ENV: tokens.gateway
     }
@@ -526,7 +520,7 @@ def test_launch_delivers_each_service_its_class_token(
 def test_a_pure_runner_launch_delivers_its_capability_token(
     gateway: Path, runner_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(bootstrap, "config_source_is_local", lambda: False)
+    monkeypatch.setattr(bootstrap, "config_source_is_local", lambda *_args, **_kwargs: False)
     assert bringup.api_delivery("runner", remote_data_plane=False) == {
         api.API_TOKEN_ENV: _tokens(gateway).api.runner
     }
@@ -565,17 +559,23 @@ def test_api_class_follows_the_login_class_else_the_single_capability() -> None:
     )
 
 
-def test_clients_present_the_delivered_token_first(monkeypatch: pytest.MonkeyPatch) -> None:
-    holding = GatewayAccess(gateway_url="http://gw", cluster_secret=_HUMAN, remote_plane=False)
-    monkeypatch.delitem(os.environ, api.API_TOKEN_ENV, raising=False)
-    assert gateway_auth_headers(holding) == bearer_header(_HUMAN)
-    monkeypatch.setitem(os.environ, api.API_TOKEN_ENV, "delivered-" + "t" * 32)
-    assert gateway_auth_headers(holding) == bearer_header("delivered-" + "t" * 32)
-    monkeypatch.delitem(os.environ, api.API_TOKEN_ENV)
+def _access(*, secret: str, token: str | None) -> GatewayAccess:
+    return GatewayAccess(
+        gateway_url="http://gw",
+        cluster_secret=secret,
+        remote_plane=False,
+        machine_token=token,
+        launcher_profile=None,
+        gateway_home=False,
+    )
+
+
+def test_clients_present_the_delivered_token_first() -> None:
+    delivered = "delivered-" + "t" * 32
+    assert gateway_auth_headers(_access(secret=_HUMAN, token=None)) == bearer_header(_HUMAN)
+    assert gateway_auth_headers(_access(secret=_HUMAN, token=delivered)) == bearer_header(delivered)
     with pytest.raises(GatewayApiTokenMissing):
-        gateway_auth_headers(
-            GatewayAccess(gateway_url="http://gw", cluster_secret="", remote_plane=False)
-        )
+        gateway_auth_headers(_access(secret="", token=None))
 
 
 def test_the_telemetry_token_is_one_way_and_stable_per_secret() -> None:

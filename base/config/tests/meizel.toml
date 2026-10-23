@@ -33,7 +33,6 @@ exports = ["api_keys.py", "config_authority.py", "configuration.py", "served_gat
 "test_config_boot_owner.py#monkeypatch.setattr base.config._lite.BUILD_WAIT_TIMEOUT_SECONDS" = 1
 "test_config_boot_owner.py#monkeypatch.setattr base.config._lite.load_meiva_env" = 1
 "test_config_boot_owner.py#monkeypatch.setattr base.config.settings" = 1
-"test_runtime_config.py#monkeypatch.setattr base.host.env.dotenv_file.unit_home" = 1
 
 [debt.restricted-python]
 "test_config_boot_lite.py#python subprocess with arguments built with *" = 1

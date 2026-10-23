@@ -1,11 +1,5 @@
-[debt.env-patch]
-"test_bootstrap_admission.py#monkeypatch.setenv os.environ.MEIVA_HOME" = 2
-"test_bootstrap_admission.py#monkeypatch.setitem os.environ.MEIVA_API_TOKEN" = 1
-
 [debt.first-party-patch]
 "test_bootstrap_admission.py#monkeypatch.setattr base.config.service_read.ConfigAuthority.read_env_aliases" = 1
 "test_bootstrap_admission.py#monkeypatch.setattr base.config.settings.daemon.host_control_pool_max_size" = 1
 "test_bootstrap_admission.py#monkeypatch.setattr base.config.settings.daemon.host_db_pool_max_size" = 1
 "test_bootstrap_admission.py#monkeypatch.setattr base.config.settings.daemon.host_max_concurrent_turns" = 1
-"test_bootstrap_admission.py#monkeypatch.setattr base.host.env.bootstrap.dial_get" = 2
-"test_bootstrap_admission.py#monkeypatch.setattr base.host.env.bootstrap.os" = 2

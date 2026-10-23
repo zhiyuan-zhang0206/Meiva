@@ -72,7 +72,7 @@ def test_cli_entry_records_launcher_profile_and_keeps_undeclared_projections(
     assert "MEIVA_PROCESS_PROFILE" not in os.environ
     assert os.environ[dotenv_boot.LAUNCHER_PROFILE_ENV_KEY] == "agent"
 
-    dotenv_boot.enforce_cluster_env_authority(resolve_meiva_home())
+    dotenv_boot.enforce_cluster_env_authority(os.environ, resolve_meiva_home())
 
     assert (
         os.environ["MEIVA_DB_URL"]

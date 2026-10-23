@@ -6,7 +6,6 @@
 "test_delivery.py#monkeypatch.setattr base.agents.impersonation.delivery.publish_agent_updated_sync" = 1
 "test_delivery.py#monkeypatch.setattr base.agents.impersonation.delivery.publish_impersonation_changed_sync" = 1
 "test_delivery.py#monkeypatch.setattr base.agents.impersonation.delivery.publish_inbound_wake" = 1
-"test_delivery.py#monkeypatch.setattr base.host.env.dotenv_file.unit_home" = 1
 "test_delivery.py#monkeypatch.setattr cli.commands.agents.impersonation_relay.MIN_EMIT_INTERVAL_SECONDS" = 1
 "test_impersonation_adapters.py#monkeypatch.setattr base.agents.impersonation.host_transport.default_control_endpoint" = 2
 "test_impersonation_adapters.py#monkeypatch.setattr base.host.proc.run_bounded" = 1

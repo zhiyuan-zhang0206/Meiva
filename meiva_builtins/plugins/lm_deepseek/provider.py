@@ -35,9 +35,9 @@ def _require_deepseek_key() -> str:
         return require_key("DEEPSEEK_API_KEY")
     except RuntimeError:
         from base.config import field_alias
-        from base.host.env.dotenv_file import read_env_aliases
+        from base.host.env.dotenv_file import process_env_file, read_env_aliases
 
-        key = read_env_aliases().get(field_alias("deepseek_api_key"))
+        key = read_env_aliases(process_env_file()).get(field_alias("deepseek_api_key"))
         if key:
             return key
         raise

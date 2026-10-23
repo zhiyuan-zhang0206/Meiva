@@ -14,7 +14,7 @@ from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import runtime_config
 from base.config.service_read import ConfigAuthority
-from base.host.env import dotenv_file
+from base.host.env.tests.env_files import unit_env_aliases, unit_env_path
 from base.host.proc import run_bounded
 from base.host.system.tests.fake_commands import fake_host
 from base.packages.plugin_config_admin import panel_metadata, panel_overrides
@@ -294,7 +294,7 @@ def test_config_write_op_local_accepts_writable_host_field(
         host=fake_host(),
     )
     assert result.applied is True
-    assert runtime_config.env_set_field_names() == {"cross_machine_transfer_backend"}
+    assert runtime_config.env_set_field_names(unit_env_path()) == {"cross_machine_transfer_backend"}
 
 
 def test_config_write_op_remote_rejects_writable_only_host_field(
@@ -377,7 +377,7 @@ def test_config_write_op_atomic_one_bad_writes_nothing(
     )
     assert result.applied is False
     # Nothing should be written to .env
-    assert dotenv_file.read_env_aliases() == {}
+    assert unit_env_aliases() == {}
 
 
 def test_config_write_op_all_good_writes_file(
@@ -395,8 +395,11 @@ def test_config_write_op_all_good_writes_file(
         host=fake_host(),
     )
     assert result.applied is True
-    assert runtime_config.env_set_field_names() == {"ops_concurrency", "machine_description"}
-    assert dotenv_file.read_env_aliases()["MEIVA_OPS_CONCURRENCY"] == "4"
+    assert runtime_config.env_set_field_names(unit_env_path()) == {
+        "ops_concurrency",
+        "machine_description",
+    }
+    assert unit_env_aliases()["MEIVA_OPS_CONCURRENCY"] == "4"
 
 
 def test_config_write_op_none_unsets_field(
@@ -413,7 +416,10 @@ def test_config_write_op_none_unsets_field(
         local_machine=machine_identity.name(),
         host=fake_host(),
     )
-    assert runtime_config.env_set_field_names() == {"ops_concurrency", "machine_description"}
+    assert runtime_config.env_set_field_names(unit_env_path()) == {
+        "ops_concurrency",
+        "machine_description",
+    }
     # Explicit None unsets machine_description; ops_concurrency is untouched.
     result = config_write_op(
         {"machine_description": None},
@@ -422,8 +428,8 @@ def test_config_write_op_none_unsets_field(
         host=fake_host(),
     )
     assert result.applied is True
-    assert runtime_config.env_set_field_names() == {"ops_concurrency"}
-    assert dotenv_file.read_env_aliases()["MEIVA_OPS_CONCURRENCY"] == "4"
+    assert runtime_config.env_set_field_names(unit_env_path()) == {"ops_concurrency"}
+    assert unit_env_aliases()["MEIVA_OPS_CONCURRENCY"] == "4"
 
 
 def test_config_write_op_absent_key_left_untouched(
@@ -450,8 +456,11 @@ def test_config_write_op_absent_key_left_untouched(
         host=fake_host(),
     )
     assert result.applied is True
-    assert runtime_config.env_set_field_names() == {"ops_concurrency", "machine_description"}
-    assert dotenv_file.read_env_aliases()["MEIVA_OPS_CONCURRENCY"] == "5"
+    assert runtime_config.env_set_field_names(unit_env_path()) == {
+        "ops_concurrency",
+        "machine_description",
+    }
+    assert unit_env_aliases()["MEIVA_OPS_CONCURRENCY"] == "5"
 
 
 def test_config_write_op_empty_patch_is_noop(
@@ -472,7 +481,7 @@ def test_config_write_op_empty_patch_is_noop(
         {}, authority=config_authority, local_machine=machine_identity.name(), host=fake_host()
     )
     assert result.applied is True
-    assert runtime_config.env_set_field_names() == {"ops_concurrency"}
+    assert runtime_config.env_set_field_names(unit_env_path()) == {"ops_concurrency"}
 
 
 def test_config_write_op_does_not_disturb_non_managed_env(
@@ -498,8 +507,8 @@ def test_config_write_op_does_not_disturb_non_managed_env(
         local_machine=machine_identity.name(),
         host=fake_host(),
     )  # explicit unset must not touch MEIVA_DB_URL
-    assert dotenv_file.read_env_aliases()["MEIVA_DB_URL"] == "postgresql://x@127.0.0.1:1/x"
-    assert "MEIVA_OPS_CONCURRENCY" not in dotenv_file.read_env_aliases()
+    assert unit_env_aliases()["MEIVA_DB_URL"] == "postgresql://x@127.0.0.1:1/x"
+    assert "MEIVA_OPS_CONCURRENCY" not in unit_env_aliases()
 
 
 def test_config_write_op_restart_required_union(
@@ -543,7 +552,7 @@ def test_config_write_op_empty_overrides_applied_no_write(
     )
     assert result.applied is True
     assert result.restart_required == []
-    assert dotenv_file.read_env_aliases() == {}
+    assert unit_env_aliases() == {}
 
 
 def test_config_write_op_rejects_an_invalid_candidate_without_writing(

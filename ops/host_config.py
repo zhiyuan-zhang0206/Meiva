@@ -19,6 +19,7 @@ from base.config.admin.candidate import validate_env_patch_for_write
 from base.config.admin.editing import coerce_config_scalar, field_editable, split_reducer_patch
 from base.config.service_read import ConfigAuthority
 from base.host import config_validators
+from base.host.env.dotenv_file import process_env_file
 from base.host.system.hostport import Host
 from base.packages.plugin_config_admin import (
     panel_metadata,
@@ -56,7 +57,7 @@ def config_read_op(
     """
     metas = panel_metadata(authority=authority)
     metas_by_name = {m.name: m for m in metas}
-    set_fields = set(runtime_config.env_set_field_names())
+    set_fields = set(runtime_config.env_set_field_names(process_env_file()))
     set_fields.update(panel_overrides(authority=authority))
     overrides = panel_overrides(authority=authority)
     host_fields: dict[str, HostConfigField] = {}

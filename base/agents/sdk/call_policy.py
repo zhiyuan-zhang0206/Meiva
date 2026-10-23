@@ -25,17 +25,28 @@ class SamplingPolicy(BaseModel):
 
 def read_policy() -> SamplingPolicy:
     from base.config import settings
+    from base.host.env.boot_policy import BootstrapFetch
     from base.host.env.bootstrap import (
         config_source_is_local,
         fetch_bootstrap_config,
+        process_environment,
         should_fetch_from_gateway,
     )
-    from base.host.env.dotenv_file import read_env_aliases
+    from base.host.env.dotenv_file import process_env_file, read_env_aliases
+    from base.host.net.auth import delivered_token
 
-    if config_source_is_local() or not should_fetch_from_gateway():
-        aliases = read_env_aliases()
+    env = process_environment()
+    env_file = read_env_aliases(process_env_file())
+    if config_source_is_local(env, env_file=env_file) or not should_fetch_from_gateway(
+        env, env_file=env_file
+    ):
+        aliases = env_file
     else:
-        aliases = fetch_bootstrap_config(settings.gateway.gateway_url, timeout=2.0, attempts=1)
+        aliases = fetch_bootstrap_config(
+            settings.gateway.gateway_url,
+            bearer=delivered_token(env),
+            tuning=BootstrapFetch(timeout_s=2.0, attempts=1),
+        )
     defaults = SamplingPolicy()
     return SamplingPolicy.model_validate(
         {

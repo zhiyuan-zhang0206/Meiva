@@ -19,7 +19,7 @@ from base.api_contracts.config import (
 )
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
-from base.host.env import dotenv_file
+from base.host.env.tests.env_files import unit_env_aliases
 from base.paths.tests.homes import unit_home as unit_home
 from cli.commands.management import config as cfg
 from cli.commands.management.tests.config_gateway import ConfigGateway, run_config
@@ -114,7 +114,7 @@ def test_set_list_field_writes_bare_env_and_round_trips(captured_put: ConfigGate
     assert (captured_put.home / ".env").read_text() == (
         f"MEIVA_GATEWAY_URL={captured_put.url}\nMEIVA_IM_DISABLED_ADAPTERS=weixin,feishu\n"
     )
-    written = dotenv_file.read_env_aliases()["MEIVA_IM_DISABLED_ADAPTERS"]
+    written = unit_env_aliases()["MEIVA_IM_DISABLED_ADAPTERS"]
     parsed = ServiceSettings.model_validate({"MEIVA_IM_DISABLED_ADAPTERS": written})
     assert parsed.im_disabled_adapters == ["weixin", "feishu"]
 
@@ -439,7 +439,7 @@ def test_local_set_applies_valid_patch(
     rc = cfg.cmd_config_set(["ops_concurrency=7"], machine=None, local=True)
 
     assert rc == 0
-    assert dotenv_file.read_env_aliases()["MEIVA_OPS_CONCURRENCY"] == "7"
+    assert unit_env_aliases()["MEIVA_OPS_CONCURRENCY"] == "7"
     assert "restart to apply" in capsys.readouterr().out
 
 
@@ -455,12 +455,12 @@ def test_the_offsite_keys_are_official_local_config(local_env_home: Path) -> Non
     rc = cfg.cmd_config_set([f"{key}={value}" for key, value in keys.items()], None, local=True)
 
     assert rc == 0
-    aliases = dotenv_file.read_env_aliases()
+    aliases = unit_env_aliases()
     assert {key: aliases[key] for key in keys} == keys
     assert "OTHER" in aliases
 
     assert cfg.cmd_config_unset(list(keys), None, local=True) == 0
-    assert not set(keys) & set(dotenv_file.read_env_aliases())
+    assert not set(keys) & set(unit_env_aliases())
 
 
 def test_the_walg_key_is_official_local_config(local_env_home: Path) -> None:
@@ -468,12 +468,12 @@ def test_the_walg_key_is_official_local_config(local_env_home: Path) -> None:
     config_file = local_env_home / "walg.json"
 
     assert cfg.cmd_config_set([f"MEIVA_WALG_CONFIG_FILE={config_file}"], None, local=True) == 0
-    aliases = dotenv_file.read_env_aliases()
+    aliases = unit_env_aliases()
     assert aliases["MEIVA_WALG_CONFIG_FILE"] == str(config_file)
     assert "OTHER" in aliases
 
     assert cfg.cmd_config_unset(["MEIVA_WALG_CONFIG_FILE"], None, local=True) == 0
-    assert "MEIVA_WALG_CONFIG_FILE" not in dotenv_file.read_env_aliases()
+    assert "MEIVA_WALG_CONFIG_FILE" not in unit_env_aliases()
 
 
 def test_local_set_can_pin_the_hosted_runner_health_port(
@@ -484,7 +484,7 @@ def test_local_set_can_pin_the_hosted_runner_health_port(
     rc = cfg.cmd_config_set(["MEIVA_AGENT_HOST_HEALTH_PORT=18133"], machine=None, local=True)
 
     assert rc == 0
-    aliases = dotenv_file.read_env_aliases()
+    aliases = unit_env_aliases()
     assert aliases["MEIVA_AGENT_HOST_HEALTH_PORT"] == "18133"
     assert "OTHER" in aliases
 
@@ -495,7 +495,7 @@ def test_local_unset_removes_key(local_env_home: Path) -> None:
     rc = cfg.cmd_config_unset(["MEIVA_OPS_CONCURRENCY"], machine=None, local=True)
 
     assert rc == 0
-    assert "MEIVA_OPS_CONCURRENCY" not in dotenv_file.read_env_aliases()
+    assert "MEIVA_OPS_CONCURRENCY" not in unit_env_aliases()
 
 
 def test_local_set_repairs_incident_env(local_env_home: Path) -> None:
@@ -517,9 +517,9 @@ def test_local_set_repairs_incident_env(local_env_home: Path) -> None:
 
     assert result.returncode == 0, result.stderr
 
-    assert dotenv_file.read_env_aliases()["MEIVA_EXEC_NODE_TIMEOUT_SECONDS"] == "2000.0"
+    assert unit_env_aliases()["MEIVA_EXEC_NODE_TIMEOUT_SECONDS"] == "2000.0"
 
-    assert dotenv_file.read_env_aliases()["MEIVA_OPS_CONCURRENCY"] == "7"
+    assert unit_env_aliases()["MEIVA_OPS_CONCURRENCY"] == "7"
     assert (local_env_home / ".env").read_bytes() != before
 
 

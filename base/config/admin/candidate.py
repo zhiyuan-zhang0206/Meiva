@@ -72,7 +72,7 @@ def validate_env_patch_for_write(
     neither crash nor reject this candidate. Fields absent from the fresh file
     retain their boot-time environment value or Pydantic default.
     """
-    env_path = dotenv_file.env_file_path() if path is None else path
+    env_path = dotenv_file.process_env_file() if path is None else path
     if not updates and not removals:
         return EnvPatchValidation([], {}, _env_digest(capture_env_bytes(env_path)))
 

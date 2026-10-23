@@ -8,7 +8,7 @@ import pytest
 
 from base.config import runtime_config
 from base.config.admin.candidate import EnvPatchValidation, validate_env_patch_for_write
-from base.host.env import dotenv_file
+from base.host.env.tests.env_files import unit_env_aliases
 from gateway.tests.auth.gateway_config import gateway_test_client
 
 
@@ -63,7 +63,7 @@ def test_put_sets_the_offsite_backup_destination_beside_retired_keys(
     body = response.json()
     assert body["applied"] is True
     assert "gateway" in body["restart_required"]
-    aliases = dotenv_file.read_env_aliases()
+    aliases = unit_env_aliases()
     assert aliases["MEIVA_BACKUP_OFFSITE_ENDPOINT"] == "https://oss-cn-shanghai.aliyuncs.com"
     assert aliases["MEIVA_BACKUP_OFFSITE_BUCKET"] == "backups"
     assert aliases["MEIVA_BACKUP_OFFSITE_CREDENTIALS_FILE"] == str(credentials)
@@ -80,7 +80,7 @@ def test_put_unsets_the_offsite_backup_destination(configured_home: Path) -> Non
         response = client.put("/api/config", json={"backup_offsite_endpoint": None})
 
     assert response.status_code == 200, response.text
-    assert "MEIVA_BACKUP_OFFSITE_ENDPOINT" not in dotenv_file.read_env_aliases()
+    assert "MEIVA_BACKUP_OFFSITE_ENDPOINT" not in unit_env_aliases()
 
 
 def test_host_only_put_skips_cluster_candidate_validation(
@@ -97,7 +97,7 @@ def test_host_only_put_skips_cluster_candidate_validation(
 
     assert response.status_code == 200, response.text
     assert response.json()["applied"] is True
-    assert dotenv_file.read_env_aliases()["MEIVA_OPS_CONCURRENCY"] == "4"
+    assert unit_env_aliases()["MEIVA_OPS_CONCURRENCY"] == "4"
 
 
 def test_put_returns_conflict_when_cluster_candidate_goes_stale(

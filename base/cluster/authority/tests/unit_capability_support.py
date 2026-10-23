@@ -70,16 +70,29 @@ def install(home: Path, issued: unit.IssuedBundle, **kwargs: Any) -> unit.UnitCa
     return unit.install_bundle(home, open_issued(issued), machine=MACHINE, **kwargs)
 
 
+# meiva:note
+# A pure agent-runner home (no database URL in `.env`) with an installed capability.
+def _install_runner(runner_home: Path, gateway: Path) -> unit.UnitCapability:
+    (runner_home / ".env").write_text("MEIVA_MACHINE_SERVE_AGENT_RUNNER=true\n")
+    return install(runner_home, issue(gateway, runner_home))
+
+
+@pytest.fixture
+def runner_capability(runner_home: Path, gateway: Path) -> unit.UnitCapability:
+    """`_install_runner` and nothing else: a test passes `runner_home` and its own environment
+    dict, so no process state is touched."""
+    return _install_runner(runner_home, gateway)
+
+
 @pytest.fixture
 def runner_boot(
     monkeypatch: pytest.MonkeyPatch, runner_home: Path, gateway: Path
 ) -> Iterator[unit.UnitCapability]:
-    """A pure agent-runner home (no database URL in `.env`) with an installed
-    capability, as this process's home. The whole environment is restored
-    afterwards."""
+    """`_install_runner` with the runner home as this process's home, for a consumer that
+    resolves the home from the process environment (the CLI). The whole environment is
+    restored afterwards."""
     saved = dict(os.environ)
-    env_file = runner_home / ".env"
-    env_file.write_text("MEIVA_MACHINE_SERVE_AGENT_RUNNER=true\n")
+    capability = _install_runner(runner_home, gateway)
     monkeypatch.setenv("MEIVA_HOME", str(runner_home))
     for key in (
         "MEIVA_PROCESS_PROFILE",
@@ -89,7 +102,6 @@ def runner_boot(
         API_TOKEN_ENV,
     ):
         os.environ.pop(key, None)
-    capability = install(runner_home, issue(gateway, runner_home))
     try:
         yield capability
     finally:

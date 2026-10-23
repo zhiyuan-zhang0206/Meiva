@@ -1,14 +1,15 @@
-"""Autouse guards: keep every test hermetic and off the host.
+# meiva:note
+# Autouse guards: keep every test hermetic and off the host.
+#
+# Lightweight autouse fixtures forbid real host effects at their execution
+# boundaries (helper converge and os.exec*) or restore
+# process-global state (metering, existing telemetry and stdlib logger state).
+# CLI and Gateway owners request their heavier readiness, native helper and
+# schedule-control guards through ordinary fixture dependencies.
+# A leaked environment key,
+# `MEIVA_HOME` included, is the root leak guard's: `tests/fixtures/leak_guard.py`. Opt-outs are per-test
+# markers documented on the fixture that honours them.
 
-Lightweight autouse fixtures forbid real host effects at their execution
-boundaries (helper converge, os.exec* and bootstrap fetch) or restore
-process-global state (metering, existing telemetry and stdlib logger state).
-CLI and Gateway owners request their heavier readiness, native helper and
-schedule-control guards through ordinary fixture dependencies.
-A leaked environment key,
-`MEIVA_HOME` included, is the root leak guard's: `tests/fixtures/leak_guard.py`. Opt-outs are per-test
-markers documented on the fixture that honours them.
-"""
 
 import os
 import sys
@@ -291,7 +292,12 @@ def homes_get_their_own_ports(
 # `cli/tests/test_main_dispatch.py` stubbed it, and the exec guard here is the
 # backstop that turns a forgotten stub into a plain test failure instead of a
 # vanished run. (The refresh is gone; `meiva start`'s Settings build fetches in-
-# process, which is what `_guard_bootstrap_fetch` below blocks.)
+# meiva:note
+# process, and no test reaches a live gateway: the suite pins `MEIVA_CONFIG_FETCH=skip`
+# meiva:note
+# and an unresolvable gateway URL, and the fetch functions take their environment as a
+# meiva:note
+# value, so a test dials only the server it starts itself.)
 #
 # Sibling shape to watch for: the guard is what makes the next one a plain test
 # failure instead of a vanished run.
@@ -329,48 +335,6 @@ def _guard_process_exec(monkeypatch: pytest.MonkeyPatch) -> None:
 
     for _name in ("execv", "execve", "execvp", "execvpe"):
         monkeypatch.setattr(os, _name, _refuse(_name))
-
-
-@pytest.fixture(autouse=True)
-def _guard_bootstrap_fetch(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Autouse safety net: no test performs a real `GET /api/bootstrap` against a
-    live gateway.
-
-    The guard above stops an exec, but the fetch happens first: a pure
-    agent-runner's Settings build calls `inject_config_from_gateway()` at
-    import, and on an enrolled dev box that is a live GET /api/bootstrap
-    against the real cluster gateway. This guard sits at the cause. A runner's
-    first start also funnels through `base.host.env.bootstrap.fetch_bootstrap_config`
-    (the only caller of this module's `dial_get`); nothing is written until that
-    fetch returns, so refusing the dial blocks the whole chain: no request to
-    the gateway, no joined state.
-
-    That chain is not theoretical. On an enrolled runner — serve_gateway unset,
-    gateway URL in the real `~/.meiva/.env`, which is every dev box joined to a
-    cluster — a test that constructs Settings without the suite's
-    MEIVA_CONFIG_FETCH=skip pin would fetch from that cluster's live gateway.
-    The suite redirects `MEIVA_HOME` to tmpfs and pins the fetch skip in the
-    env block above; this guard is the second net for any test that drives a
-    Settings build directly.
-
-    Narrow by construction: `base.host.env.bootstrap` binds `dial_get` at module level,
-    so only the bootstrap egress is touched — the ~30 other `base.host.net.http_dial`
-    call sites are untouched. Every test that legitimately drives the fetch
-    already substitutes its own transport at exactly this seam
-    (`base/host/env/tests/test_bootstrap_fetch.py` routes it through an in-process
-    TestClient; the retry tests hand it a fake), and those patches win by LIFO.
-    """
-    import base.host.env.bootstrap
-
-    def _boom(url: object = "", *_args: object, **_kwargs: object) -> object:
-        raise AssertionError(
-            f"a real GET {url} would leave the test process — this is the call that "
-            "reaches a live gateway and, on an enrolled runner, rewrites the operator's "
-            "~/.meiva/.env. Stub the caller, or patch base.host.env.bootstrap.dial_get in the test "
-            "body with a fake transport (see base/host/env/tests/test_bootstrap_fetch.py)."
-        )
-
-    monkeypatch.setattr(base.host.env.bootstrap, "dial_get", _boom)
 
 
 @pytest.fixture(autouse=True)
