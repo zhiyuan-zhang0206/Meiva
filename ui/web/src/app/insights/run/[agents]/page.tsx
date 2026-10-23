@@ -12,24 +12,17 @@ import type { AgentSelection } from "@/components/run-timeline/agent-view/agent-
 import { NodeDetail, UnitDetail } from "@/components/run-timeline/run-timeline-detail";
 import { LinkDetail } from "@/components/run-timeline/run-timeline-link-detail";
 import { LinkGroupDetail } from "@/components/run-timeline/run-timeline-link-group-detail";
-import { LINK_KINDS, MAX_ARROWS, resolveLinks, type LinkKind } from "@/components/run-timeline/model/timeline-links";
+import { LINK_KINDS, resolveLinks, type LinkKind } from "@/components/run-timeline/model/links/resolve";
+import { MAX_ARROWS } from "@/components/run-timeline/model/links/cluster";
 import { RunTimelineRows, type AgentEntry } from "@/components/run-timeline/run-timeline-rows";
 import { RunTimelineWorkspace } from "@/components/run-timeline/run-timeline-workspace";
 import { PageHeader } from "@/components/shell/page-header";
-import {
-  categoryClass,
-  classCategory,
-  clampViewport,
-  MIN_VIEW_MS,
-  levelsTopFirst,
-  nodeAncestors,
-  nodeChildren,
-  viewportOf,
-  type Highlight,
-  type Viewport,
-} from "@/components/run-timeline/model/timeline-model";
+import { categoryClass, classCategory } from "@/components/run-timeline/model/timeline-model-classes";
+import { clampViewport, MIN_VIEW_MS, viewportOf, type Viewport } from "@/components/run-timeline/model/timeline-model-viewport";
+import { levelsTopFirst } from "@/components/run-timeline/model/timeline-model-selection";
+import { nodeAncestors, nodeChildren, type Highlight } from "@/components/run-timeline/model/timeline-model-tree";
 import type { UnitHeights } from "@/components/run-timeline/canvas/run-timeline-paint";
-import type { RowOptions } from "@/components/run-timeline/model/timeline-nav";
+import type { RowOptions } from "@/components/run-timeline/model/timeline-nav-rows";
 import { api } from "@/lib/transport/api";
 import { FLEX, FLEX_1, FLEX_COL, MIN_H_0 } from "@/lib/layout/layout";
 import { useTimeFormat } from "@/lib/format/use-time-format";

@@ -12,7 +12,8 @@ import { cn } from "@/lib/format/utils";
 
 import { TimelineMarkdown } from "./run-timeline-markdown";
 import { TimelineMessages, type MessageTokens } from "./run-timeline-messages";
-import { blockClass, firstLine } from "./model/timeline-model";
+import { blockClass } from "./model/timeline-model-classes";
+import { firstLine } from "./model/timeline-model-selection";
 
 const CHIP_SUMMARY_CHARS = 36;
 

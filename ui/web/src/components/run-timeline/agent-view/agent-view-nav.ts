@@ -4,16 +4,12 @@
 
 import type { RunTimelineResponse } from "@/lib/contracts/types";
 
-import { type AxisMap, type Selection, type Viewport } from "../model/timeline-model";
-import {
-  firstInView,
-  locate,
-  navigate,
-  navItems,
-  verticalTarget,
-  type NavItem,
-  type NavKey,
-} from "../model/timeline-nav";
+import { type AxisMap } from "../model/timeline-model-axis";
+import { type Selection } from "../model/timeline-model-selection";
+import { type Viewport } from "../model/timeline-model-viewport";
+import { firstInView, locate, navItems, verticalTarget } from "../model/timeline-nav-items";
+import { navigate } from "../model/timeline-nav";
+import { type NavItem, type NavKey } from "../model/timeline-nav-rows";
 
 /** One loaded agent of the view, in the order it is drawn: its data and the rows it draws. */
 export interface ViewAgent {

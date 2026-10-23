@@ -13,8 +13,9 @@ import { buttonVariants } from "@/components/ui/button";
 import { FLEX } from "@/lib/layout/layout";
 import { cn } from "@/lib/format/utils";
 
-import { endIn, LINK_COLORS, type ResolvedLink } from "../model/timeline-links";
-import { projectBox, type AxisMap, type Viewport } from "../model/timeline-model";
+import { endIn, LINK_COLORS, type ResolvedLink } from "../model/links/resolve";
+import { projectBox, type AxisMap } from "../model/timeline-model-axis";
+import { type Viewport } from "../model/timeline-model-viewport";
 import { RowShell } from "../run-timeline-row-shell";
 import { useLinkEndLabel, useLinkKindLabels } from "./agent-view-link-labels";
 

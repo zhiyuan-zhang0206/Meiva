@@ -1,3 +1,4 @@
+// meiva:note
 // Test helpers for the canvas rows: a recording 2D context (what each canvas drew in its last frame)
 // and pointer events at an item's position. Test code only; never imported by the app.
 
@@ -8,9 +9,11 @@ import { vi } from "vitest";
 import type { RunTimelineResponse } from "@/lib/contracts/types";
 
 import { layoutsFor } from "../model/timeline-canvas-model";
-import { timeAxis, viewportOf, type Viewport } from "../model/timeline-model";
+import { timeAxis } from "../model/timeline-model";
+import { viewportOf, type Viewport } from "../model/timeline-model-viewport";
 
-/** One thing a canvas drew: a fill, a stroke or a text, with the color and geometry it used. */
+// meiva:note
+// One thing a canvas drew: a fill, a stroke or a text, with the color and geometry it used.
 export interface Drawn {
   op: "fill" | "stroke" | "text";
   x: number;
@@ -22,7 +25,8 @@ export interface Drawn {
   radius: number;
   text: string;
   align: string;
-  /** The dash pattern of a stroke: empty for a solid line. */
+  // meiva:note
+  // The dash pattern of a stroke: empty for a solid line.
   dash: number[];
 }
 
@@ -40,6 +44,7 @@ class RecordingContext {
   frame: Drawn[] = [];
   private path: { x: number; y: number; w: number; h: number; radius: number } | null = null;
 
+  // meiva:note
   // The state calls a test has no use for: kept as no-ops so painting runs unchanged.
   setLineDash(dash: number[]) {
     this.dash = dash;
@@ -54,6 +59,7 @@ class RecordingContext {
   clearRect() {
     this.frame = [];
   }
+  // meiva:note
   // A curve is recorded as its box: from (x, y) to (x + w, y + h), so a test can read both ends.
   private from = { x: 0, y: 0 };
   moveTo(x: number, y: number) {
@@ -93,7 +99,8 @@ class RecordingContext {
 
 const contexts = new WeakMap<HTMLCanvasElement, RecordingContext>();
 
-/** Makes every canvas hand out a recording context; call in `beforeEach`, and `vi.restoreAllMocks()` after. */
+// meiva:note
+// Makes every canvas hand out a recording context; call in `beforeEach`, and `vi.restoreAllMocks()` after.
 export function mockCanvas() {
   vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockImplementation(function (this: HTMLCanvasElement) {
     let ctx = contexts.get(this);
@@ -105,31 +112,36 @@ export function mockCanvas() {
   } as never);
 }
 
-/** Lets the animation frame of the latest render run. */
+// meiva:note
+// Lets the animation frame of the latest render run.
 export async function paintFrame() {
   await act(async () => {
     await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
   });
 }
 
-/** What the arrows canvas drew in its last frame. */
+// meiva:note
+// What the arrows canvas drew in its last frame.
 export function drawnLinks(): Drawn[] {
   const el = screen.getByTestId<HTMLCanvasElement>("run-timeline-links-canvas");
   return contexts.get(el)?.frame ?? [];
 }
 
-/** What the canvas of `row` drew in its last frame. */
+// meiva:note
+// What the canvas of `row` drew in its last frame.
 export function drawn(row: string): Drawn[] {
   const el = screen.getByTestId<HTMLCanvasElement>(`run-timeline-canvas-${row}`);
   return contexts.get(el)?.frame ?? [];
 }
 
-/** Fills and strokes of a frame at about pixel `x` (the blocks, not the text). */
+// meiva:note
+// Fills and strokes of a frame at about pixel `x` (the blocks, not the text).
 export function shapesAt(row: string, x: number): Drawn[] {
   return drawn(row).filter((d) => d.op !== "text" && d.x - 1 <= x && x <= d.x + d.w + 1);
 }
 
-/** The pixel at the middle of an item of a row, on the plain time axis over `base` (default: the response's window) and a 1000 px track. */
+// meiva:note
+// The pixel at the middle of an item of a row, on the plain time axis over `base` (default: the response's window) and a 1000 px track.
 export function itemX(
   data: RunTimelineResponse,
   row: string,
@@ -158,7 +170,8 @@ export function clickAt(row: string, x: number) {
   fireEvent.click(screen.getByTestId(`run-timeline-canvas-${row}`), { clientX: x });
 }
 
-/** How an item of a row looks at pixel `x`: primary (inside the strong frame), linked (inside the light dashed frame), hovered, and whether a highlight faded it. */
+// meiva:note
+// How an item of a row looks at pixel `x`: primary (inside the strong frame), linked (inside the light dashed frame), hovered, and whether a highlight faded it.
 export function look(row: string, x: number): { ring: "primary" | "linked" | "hover" | "none"; faded: boolean } {
   const shapes = shapesAt(row, x);
   const strength = (d: Drawn) => {
@@ -168,6 +181,7 @@ export function look(row: string, x: number): { ring: "primary" | "linked" | "ho
       if (d.color.includes("var(--primary) 35%")) return 1;
       return 0;
     }
+    // meiva:note
     // A hairline too narrow for an outline shows a hover in its fill.
     return d.op === "fill" && d.color.includes("var(--foreground) 30%") ? 1 : 0;
   };

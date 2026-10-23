@@ -4,17 +4,14 @@ import { useEffect, useRef } from "react";
 
 import { navigateAcross, type AgentSelection, type ViewAgent } from "./agent-view/agent-view-nav";
 import type { LinkHit, LinkHitResult } from "./canvas/run-timeline-links-canvas";
-import {
-  endIn,
-  nearestLink,
-  nearestUnit,
-  selectionMs,
-  stepLink,
-  type LinkRow,
-  type ResolvedLink,
-} from "./model/timeline-links";
-import { panView, zoomView, type AxisMap, type Viewport } from "./model/timeline-model";
-import { revealView, UNITS_ROW, type NavKey } from "./model/timeline-nav";
+import { endIn, type LinkRow, type ResolvedLink } from "./model/links/resolve";
+import { nearestLink, stepLink } from "./model/links/geometry";
+import { nearestUnit, selectionMs } from "./model/links/selection";
+import { panView, zoomView } from "./model/timeline-model";
+import { type AxisMap } from "./model/timeline-model-axis";
+import { type Viewport } from "./model/timeline-model-viewport";
+import { revealView } from "./model/timeline-nav";
+import { UNITS_ROW, type NavKey } from "./model/timeline-nav-rows";
 
 const DRAG_THRESHOLD_PX = 4;
 const WHEEL_ZOOM_RATE = 0.0015;

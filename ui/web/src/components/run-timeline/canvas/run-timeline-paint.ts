@@ -2,9 +2,11 @@
 // item, every color opaque (a translucent look is mixed into the color, never layered), every edge on
 // the device pixel grid, so the look is the same at any zoom. No React.
 
-import { firstLine, unitColor, unitKey, type Highlight, matchesHighlight } from "../model/timeline-model";
-import { snap, type Cell, type Place, type RowLayout } from "../model/timeline-canvas-model";
-import { type Hover, type Selection } from "../model/timeline-model";
+import { firstLine, unitKey } from "../model/timeline-model-selection";
+import { unitColor } from "../model/timeline-model-classes";
+import { type Highlight, matchesHighlight } from "../model/timeline-model-tree";
+import { snap, type Cell, type Place, type RowLayout } from "../model/timeline-canvas-hit";
+import { type Hover, type Selection } from "../model/timeline-model-selection";
 
 /** Resolves a CSS color (a variable, a `color-mix`) to an opaque canvas color. */
 export type Resolve = (css: string) => string;

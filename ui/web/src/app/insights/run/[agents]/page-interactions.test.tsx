@@ -17,10 +17,10 @@ vi.mock("@/lib/transport/api", async (importOriginal) => ({
   ...(await importOriginal<typeof ApiModule>()),
   api: { getRunTimeline, getRunTimelineMessages, getRunTimelineContext, getRunTimelineLinks, getAgentRoster, getSettings, getContextBreakdown },
 }));
-import { clickAt, drawn, itemX, leave, look, mockCanvas, paintFrame, pointAt } from "@/components/run-timeline/canvas/run-timeline-test-canvas";
+import { clickAt, drawn, itemX, leave, look, mockCanvas, paintFrame, pointAt } from "@/components/run-timeline/canvas/run-timeline-test-canvas-mock";
 import RunTimelinePage from "./page";
 import Loading from "./loading";
-import { cbdFixture, lifetimeResponse, messagesResponse } from "./_run_timeline_test_fixtures";
+import { cbdFixture, lifetimeResponse, messagesResponse } from "./run-timeline-test-fixtures-mock";
 function render({ contextSize = true }: { contextSize?: boolean } = {}) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const view = rtlRender(

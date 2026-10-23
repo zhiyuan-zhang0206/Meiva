@@ -12,7 +12,7 @@ import { cn } from "@/lib/format/utils";
 import { FLEX } from "@/lib/layout/layout";
 
 import { useLinkEndLabel, useLinkKindLabels } from "./agent-view/agent-view-link-labels";
-import type { ResolvedLink } from "./model/timeline-links";
+import type { ResolvedLink } from "./model/links/resolve";
 
 export function LinkGroupDetail({ links, onSelect }: { links: readonly ResolvedLink[]; onSelect: (key: string) => void }) {
   const t = useTranslations("runTimeline");

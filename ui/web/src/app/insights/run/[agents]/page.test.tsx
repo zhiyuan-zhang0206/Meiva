@@ -52,7 +52,7 @@ import {
   look,
   mockCanvas,
   paintFrame,
-} from "@/components/run-timeline/canvas/run-timeline-test-canvas";
+} from "@/components/run-timeline/canvas/run-timeline-test-canvas-mock";
 import { useMediaQuery } from "@/lib/layout/use-media-query";
 import RunTimelinePage from "./page";
 
@@ -62,7 +62,7 @@ import {
   LIFETIME,
   lifetimeResponse,
   messagesResponse,
-} from "./_run_timeline_test_fixtures";
+} from "./run-timeline-test-fixtures-mock";
 function render({ contextSize = true }: { contextSize?: boolean } = {}) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const view = rtlRender(

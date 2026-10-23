@@ -4,7 +4,7 @@ import type { RunTimelineNode, RunTimelineResponse, RunTimelineUnit } from "@/li
 
 import { navigateAcross, type ViewAgent } from "./agent-view-nav";
 import { timeAxis } from "../model/timeline-model";
-import { INPUT_ROW, UNITS_ROW, levelRowId, navRowIds } from "../model/timeline-nav";
+import { INPUT_ROW, UNITS_ROW, levelRowId, navRowIds } from "../model/timeline-nav-rows";
 
 const T0 = Date.parse("2026-10-04T12:00:00.000Z");
 const at = (ms: number) => new Date(T0 + ms).toISOString();

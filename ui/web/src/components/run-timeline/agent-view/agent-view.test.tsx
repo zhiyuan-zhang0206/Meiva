@@ -23,8 +23,8 @@ vi.mock("@/lib/transport/api", async (importOriginal) => ({
 }));
 
 import AgentViewPage from "@/app/insights/run/[agents]/page";
-import { drawn, itemX, mockCanvas, paintFrame, clickAt } from "../canvas/run-timeline-test-canvas";
-import { viewportOf } from "../model/timeline-model";
+import { drawn, itemX, mockCanvas, paintFrame, clickAt } from "../canvas/run-timeline-test-canvas-mock";
+import { viewportOf } from "../model/timeline-model-viewport";
 
 const T0 = Date.parse("2026-10-04T12:00:00.000Z");
 const at = (minutes: number) => new Date(T0 + minutes * 60_000).toISOString();

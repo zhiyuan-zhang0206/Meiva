@@ -1,8 +1,16 @@
 import { describe, expect, it } from "vitest";
 import { categoryColor } from "@/lib/context-colors";
 import type { RunTimelineMessagePart, RunTimelineNode, RunTimelineUnit } from "@/lib/contracts/types";
-import { axisBox, axisTicks, timeAxis, chainIds, layoutSpans, contextUnits, maxBlockTokens, maxContextTotal, MIN_ITEM_PX, panView, projectBox, zoomView, clampViewport, MIN_VIEW_MS, panViewport, zoomViewport, firstLine, isSelected, levelsTopFirst, BLOCK_CLASSES, classColor, partsForUnit, spanBox, unitColor, categoryClass, classCategory, hoverLit, inboundSources, matchesHighlight, nodeAncestors, nodeChildren } from "./timeline-model";
-import { navigate, revealView, navItems, navRowIds, selectionRoles, INPUT_ROW, UNITS_ROW } from "./timeline-nav";
+import { axisBox, timeAxis, panView, zoomView } from "./timeline-model";
+import { axisTicks, clampViewport, MIN_VIEW_MS, panViewport, zoomViewport } from "./timeline-model-viewport";
+import { chainIds, firstLine, isSelected, levelsTopFirst, partsForUnit } from "./timeline-model-selection";
+import { layoutSpans, MIN_ITEM_PX, projectBox, spanBox } from "./timeline-model-axis";
+import { contextUnits, maxBlockTokens, maxContextTotal } from "./timeline-model-context";
+import { BLOCK_CLASSES, classColor, unitColor, categoryClass, classCategory } from "./timeline-model-classes";
+import { hoverLit, inboundSources, matchesHighlight, nodeAncestors, nodeChildren } from "./timeline-model-tree";
+import { navigate, revealView, selectionRoles } from "./timeline-nav";
+import { navItems } from "./timeline-nav-items";
+import { navRowIds, INPUT_ROW, UNITS_ROW } from "./timeline-nav-rows";
 const WINDOW = { from: "2026-10-04T12:00:00Z", to: "2026-10-04T14:00:00Z" };
 
 function node(level: number, id = "1"): RunTimelineNode {

@@ -21,7 +21,7 @@ keyboard-resizable separator, ratio in localStorage `meiva.run-timeline.split` t
 guarded `panelLayoutStorage`); below that the panel stacks under the chart. The
 `ContextBreakdownCard` follows the chart.
 
-**Source layout.** `components/run-timeline/model/` owns the pure axis, selection, row layout and accessible selection readout models with their tests. `canvas/` owns rendering, painting, the axis and the shared canvas test helper. `agent-view/` owns agent headings, shared controls and navigation across agents with their tests. Page composition, rows and the details panel stay at the component root; consumers import their owning modules directly.
+**Source layout.** `components/run-timeline/model/` owns the axis, selection, row layout and accessible selection readout models with their tests. Axis geometry, viewport bounds, selection ancestry, block classes and context values have distinct owners. `timeline-model.ts` composes the time axis; `timeline-nav.ts` owns navigation and selection relationships, using the row definitions and row item projections. Consumers import these owners directly; the composition modules do not reexport their dependencies. `canvas/` owns rendering, painting, the axis and the shared canvas test helper. `agent-view/` owns agent headings, shared controls and navigation across agents with their tests. Page composition, rows and the details panel stay at the component root; consumers import their owning modules directly.
 
 **Window reads.** Initial preparation, bounded ranges, snapshot ownership and recovery are in [[ui/web/src/docs/frontend-components/run-timeline/window-reads.meiva.okf.md]].
 
