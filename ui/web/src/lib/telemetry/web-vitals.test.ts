@@ -1,9 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { flushTelemetry, track } from "./telemetry";
-import { __webVitalsResetForTest, initWebVitals } from "./web-vitals";
+import { telemetryTestControl, type TelemetryElement, type TrackOptions } from "./telemetry";
+import { initWebVitals, webVitalsResetForTest } from "./web-vitals";
 
-vi.mock("./telemetry", () => ({ flushTelemetry: vi.fn(), track: vi.fn() }));
+const track = vi.fn<(element: TelemetryElement, opts?: TrackOptions) => void>();
+const flushTelemetry = vi.fn<() => void>();
 
 interface MockObserver {
   callback: PerformanceObserverCallback;
@@ -72,8 +73,9 @@ function entry(
 
 beforeEach(() => {
   observers = [];
-  vi.mocked(track).mockReset();
-  vi.mocked(flushTelemetry).mockReset();
+  track.mockReset();
+  flushTelemetry.mockReset();
+  telemetryTestControl.intercept({ onTrack: track, onFlush: flushTelemetry });
   Object.defineProperty(document, "visibilityState", {
     configurable: true,
     value: "visible",
@@ -84,11 +86,12 @@ beforeEach(() => {
     "layout-shift",
     "event",
   ]);
-  __webVitalsResetForTest();
+  webVitalsResetForTest();
 });
 
 afterEach(() => {
-  __webVitalsResetForTest();
+  webVitalsResetForTest();
+  telemetryTestControl.reset();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
@@ -249,7 +252,7 @@ describe("initWebVitals", () => {
   });
 
   it("is a no-op during SSR", () => {
-    __webVitalsResetForTest();
+    webVitalsResetForTest();
     vi.stubGlobal("window", undefined);
 
     initWebVitals();

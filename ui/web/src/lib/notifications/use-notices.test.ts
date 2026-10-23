@@ -20,7 +20,7 @@ import type { NoticesFeed } from "../contracts/types";
 import {
   NOTICES_QUERY_KEY,
   NOTICES_RESOLVED_QUERY_KEY,
-  __dropTombstonesResetForTest,
+  dropTombstonesResetForTest,
   dropOpenNotices,
   useNotices,
   type NoticesFeedWire,
@@ -102,7 +102,7 @@ function feed(over: Partial<NoticesFeed> = {}): NoticesFeed {
 let queryClient: QueryClient;
 beforeEach(() => {
   vi.clearAllMocks();
-  __dropTombstonesResetForTest();
+  dropTombstonesResetForTest();
   lastEventSource = null;
   vi.mocked(api.getNotices).mockResolvedValue(feed());
   vi.mocked(api.checkAuth).mockResolvedValue({ authenticated: true });

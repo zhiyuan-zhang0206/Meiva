@@ -12,12 +12,9 @@ let pathname = "/";
 vi.mock("next/navigation", () => ({ usePathname: () => pathname }));
 
 const tracked: { element: string; key?: string; value?: unknown; page?: string }[] = [];
-vi.mock("./telemetry", () => ({
-  track: (element: string, opts: { key?: string; value?: unknown; page?: string }) =>
-    tracked.push({ element, key: opts.key, value: opts.value, page: opts.page }),
-}));
 
 import { formatNavTiming, markNavIntent, setNavFallbackMs, useNavTimingReport } from "./nav-timing";
+import { telemetryTestControl } from "./telemetry";
 
 function Reporter() {
   useNavTimingReport();
@@ -35,6 +32,10 @@ describe("nav timing", () => {
     tracked.length = 0;
     frames.length = 0;
     pathname = "/";
+    telemetryTestControl.intercept({
+      onTrack: (element, opts = {}) =>
+        tracked.push({ element, key: opts.key, value: opts.value, page: opts.page }),
+    });
     vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => {
       frames.push(cb);
       return frames.length;
@@ -42,6 +43,7 @@ describe("nav timing", () => {
     vi.stubGlobal("cancelAnimationFrame", () => undefined);
   });
   afterEach(() => {
+    telemetryTestControl.reset();
     vi.unstubAllGlobals();
   });
 

@@ -5,29 +5,26 @@ exports = ["api-base.ts", "api.ts", "gateway-origin.ts", "operation-key.ts", "ss
 "api-drafts.test.ts" = ["api.ts"]
 "api-guarded-lifecycle.test.ts" = ["api.ts"]
 "api.test.ts" = ["api.ts", "operation-key.ts"]
-"api.ts" = ["api-base.ts", "operation-key.ts", "upload-delivery.ts"]
-"gateway-origin.test.ts" = ["gateway-origin.ts"]
+"api-control.ts" = ["operation-key.ts"]
+"api.ts" = ["api-base.ts", "api-control.ts", "operation-key.ts", "upload-delivery.ts"]
 "notice-resolution.test.ts" = ["api.ts"]
 "sse-share.test.ts" = ["sse-share.ts"]
 "sse-share.ts" = ["api.ts"]
+"tests" = ["gateway-origin.ts", "useEventStream.tsx"]
 "upload-delivery.test.ts" = ["upload-delivery.ts"]
 "upload-delivery.ts" = ["api-base.ts", "operation-key.ts"]
 "use-detail-reconnect.test.ts" = ["api.ts", "useEventStream.tsx"]
-"useEventStream.test.ts" = ["api.ts", "useEventStream.tsx"]
+"useEventStream.test.ts" = ["api.ts", "tests", "useEventStream.tsx"]
 "useEventStream.tsx" = ["api.ts", "sse-lifecycle.ts", "sse-share.ts"]
 
 [purity]
 "." = "strict-to-be"
+"api-control.ts" = "strict"
 "gateway-origin.ts" = "strict"
 
 [debt.first-party-patch]
-"api-drafts.test.ts#vi.mock ui/web/src/lib/telemetry/telemetry.ts" = 1
-"api.test.ts#vi.mock ui/web/src/lib/telemetry/telemetry.ts" = 1
-"notice-resolution.test.ts#vi.mock ui/web/src/lib/telemetry/telemetry.ts" = 1
-"sse-share.test.ts#vi.mock ui/web/src/lib/telemetry/telemetry.ts" = 1
 "use-detail-reconnect.test.ts#vi.mock ui/web/src/lib/transport/api.ts" = 1
 "use-detail-reconnect.test.ts#vi.mock ui/web/src/lib/transport/useEventStream.tsx" = 1
-"useEventStream.test.ts#vi.mock ui/web/src/lib/telemetry/telemetry.ts" = 1
 "useEventStream.test.ts#vi.mock ui/web/src/lib/transport/api.ts" = 1
 
 [debt.impure-call]
@@ -35,7 +32,6 @@ exports = ["api-base.ts", "api.ts", "gateway-origin.ts", "operation-key.ts", "ss
 "api-base.ts#<module>#window" = 1
 "api.ts#<module>#XMLHttpRequest" = 1
 "api.ts#<module>#new XMLHttpRequest" = 1
-"api.ts#<module>#window" = 1
 "api.ts#f#fetch" = 1
 "api.ts#f#performance.now" = 1
 "api.ts#jsonWithTimeout#clearTimeout" = 1
@@ -97,7 +93,7 @@ exports = ["api-base.ts", "api.ts", "gateway-origin.ts", "operation-key.ts", "ss
 "sse-share.test.ts#vi.stubGlobal EventSource" = 1
 "upload-delivery.test.ts#vi.stubGlobal XMLHttpRequest" = 1
 "use-detail-reconnect.test.ts#vi.spyOn document.visibilityState" = 2
-"useEventStream.test.ts#vi.spyOn console.error" = 3
+"useEventStream.test.ts#vi.spyOn console.error" = 2
 "useEventStream.test.ts#vi.spyOn qc.invalidateQueries" = 1
 "useEventStream.test.ts#vi.stubGlobal BroadcastChannel" = 2
 "useEventStream.test.ts#vi.stubGlobal EventSource" = 1

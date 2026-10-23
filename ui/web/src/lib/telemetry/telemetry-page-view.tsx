@@ -13,13 +13,17 @@ import { useEffect, useRef } from "react";
 import { normalizePage, setTelemetryPage, track } from "./telemetry";
 import { initWebVitals } from "./web-vitals";
 
-export function TelemetryPageView() {
+export function TelemetryPageView({
+  onInitWebVitals = initWebVitals,
+}: {
+  onInitWebVitals?: () => void;
+} = {}) {
   const pathname = usePathname();
   const lastPage = useRef<string | null>(null);
 
   useEffect(() => {
-    initWebVitals();
-  }, []);
+    onInitWebVitals();
+  }, [onInitWebVitals]);
 
   useEffect(() => {
     const page = normalizePage(pathname);
