@@ -7,13 +7,8 @@ import pytest
 
 from base.host.converge import browser_deps
 from base.host.system import probes
-from base.host.system.hostport import Host
 from base.host.system.tests.fake_commands import DARWIN_ARM64, LINUX_X86, fake_host
 from base.native_process.os_platform import Platform
-
-
-def _install_node_here(*, host: Host) -> str:
-    return "install-node-here"
 
 
 @pytest.mark.parametrize(
@@ -37,34 +32,25 @@ def test_node_install_command_explains_the_macos_keg_only_fallback() -> None:
     )
 
 
-def test_browser_deps_warning_names_the_npx_reason_and_platform_fix(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(browser_deps, "node_install_command", _install_node_here)
+def test_browser_deps_warning_names_the_npx_reason_and_platform_fix() -> None:
     warning = browser_deps.browser_deps_warning(probes.NPX_INCAPABILITY_REASON, host=fake_host())
     assert probes.NPX_INCAPABILITY_REASON in warning
-    assert "install-node-here" in warning
+    assert "apt-get" in warning
     assert "meiva-browser will not run on this host until this is fixed" in warning
 
 
-def test_browser_deps_warning_explains_that_a_missing_display_needs_no_install(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(browser_deps, "node_install_command", _install_node_here)
+def test_browser_deps_warning_explains_that_a_missing_display_needs_no_install() -> None:
     warning = browser_deps.browser_deps_warning("no display (headless server)", host=fake_host())
-    assert "install-node-here" not in warning
+    assert "apt-get" not in warning
     assert "nothing to" in warning
     assert "install for meiva-browser" in warning
 
 
-def test_browser_deps_warning_explains_how_to_repair_missing_chrome(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(browser_deps, "node_install_command", _install_node_here)
+def test_browser_deps_warning_explains_how_to_repair_missing_chrome() -> None:
     warning = browser_deps.browser_deps_warning(
         "no Chrome (install it or set MEIVA_CHROME_BINARY)", host=fake_host()
     )
-    assert "install-node-here" not in warning
+    assert "apt-get" not in warning
     assert "Install Google Chrome" in warning
     assert "MEIVA_CHROME_BINARY" in warning
 

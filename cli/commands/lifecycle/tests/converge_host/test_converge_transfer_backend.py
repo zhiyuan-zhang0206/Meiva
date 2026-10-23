@@ -8,7 +8,8 @@ import cli.commands.lifecycle.converge_host as cv
 from base.clock.tests.manual_timers import ManualTimers
 from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot
-from base.host.system.tests.fake_commands import fake_host
+from base.host.system.tests.fake_commands import DARWIN_ARM64, fake_host
+from base.paths.tests.homes import default_home as default_home
 from base.sessions.tests.refuse_helper import refuse_helper
 from base.telemetry import EventPipeline
 from cli.database.tests.cli_tests import operator_database as operator_database
@@ -29,43 +30,42 @@ def _ctx(
         producer=producer,
         machine=machine_from_boot(machine_config),
         helper=refuse_helper,
-        host=fake_host(),
+        host=fake_host(platform=DARWIN_ARM64),
         services=frozenset(),
         timers=ManualTimers(),
     )
 
 
 def test_passes_when_writable_drive_found(
-    monkeypatch: pytest.MonkeyPatch,
+    default_home: Path,
+    capsys: pytest.CaptureFixture[str],
     tmp_path: Path,
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
-    import base.host.converge.google_drive as gd
-
-    monkeypatch.setattr(gd, "find_writable_google_drive", lambda: tmp_path / "My Drive")
+    drive = default_home / "Google Drive"
+    drive.mkdir()
     cv.ensure_cross_machine_transfer(
         _ctx(tmp_path, operator_database=operator_database, producer=operator_pipeline)
     )
+    assert capsys.readouterr().err == ""
+    assert list(drive.iterdir()) == []
 
 
 def test_warns_but_continues_when_drive_missing(
-    monkeypatch: pytest.MonkeyPatch,
+    default_home: Path,
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
-    import base.host.converge.google_drive as gd
-
-    monkeypatch.setattr(gd, "find_writable_google_drive", lambda: None)
-    monkeypatch.setattr(gd, "candidate_drive_dirs", lambda: [Path("/some/My Drive")])
     cv.ensure_cross_machine_transfer(
         _ctx(tmp_path, operator_database=operator_database, producer=operator_pipeline)
     )
     err = capsys.readouterr().err
     assert "no writable Google Drive synced folder" in err
     assert "will not work" in err
+    assert "(no candidate paths)" in err
 
 
 def test_skips_on_single_box(
@@ -77,7 +77,7 @@ def test_skips_on_single_box(
 ) -> None:
     import base.host.converge.google_drive as gd
 
-    def _must_not_probe() -> Path:
+    def _must_not_probe(_candidates: object) -> Path:
         raise AssertionError("drive probe ran on a single box")
 
     monkeypatch.setattr(gd, "find_writable_google_drive", _must_not_probe)
@@ -91,7 +91,7 @@ def test_skips_on_single_box(
         producer=operator_pipeline,
         machine=machine_from_boot(machine_config),
         helper=refuse_helper,
-        host=fake_host(),
+        host=fake_host(platform=DARWIN_ARM64),
         services=frozenset(),
         timers=ManualTimers(),
     )
@@ -108,7 +108,7 @@ def test_skips_when_backend_none(
 ) -> None:
     import base.host.converge.google_drive as gd
 
-    def _must_not_probe() -> Path:
+    def _must_not_probe(_candidates: object) -> Path:
         raise AssertionError("drive probe ran with backend=none")
 
     monkeypatch.setattr(gd, "find_writable_google_drive", _must_not_probe)

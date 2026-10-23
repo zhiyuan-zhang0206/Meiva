@@ -174,8 +174,9 @@ def ensure_cross_machine_transfer(ctx: ConvergeCtx) -> None:
         return
     from base.host.converge.google_drive import candidate_drive_dirs, find_writable_google_drive
 
-    if find_writable_google_drive() is None:
-        looked = ", ".join(str(p) for p in candidate_drive_dirs()) or "(no candidate paths)"
+    candidates = candidate_drive_dirs(home=Path.home(), host=ctx.host)
+    if find_writable_google_drive(candidates) is None:
+        looked = ", ".join(str(p) for p in candidates) or "(no candidate paths)"
         print(
             "  ! cross-machine transfer backend 'drive' is unavailable on this"
             " agent-runner: no writable Google Drive synced folder, so file transfer"

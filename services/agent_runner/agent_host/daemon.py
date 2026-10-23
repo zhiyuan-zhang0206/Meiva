@@ -81,7 +81,7 @@ from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.db.config import db_config_from_boot
 from base.deploy.progress_timeout import AGENT_HOST_BEAT_INTERVAL_S
-from base.deploy.timing import assert_clock_lattice
+from base.deploy.timing import assert_clock_lattice, clock_values
 from base.events.live.bus import EventBus, EventBusConfig
 from base.host.exit_codes import HELPER_CHAIN_BROKEN_EXIT_CODE
 from base.host.exit_codes import hard_exit as _hard_exit
@@ -569,7 +569,7 @@ async def run(
     on_clients_owned: Callable[[], None] | None = None,
 ) -> None:
     """Boot the host and serve wakes in the order documented by this module."""
-    assert_clock_lattice()
+    assert_clock_lattice(clock_values())
     instance_lock = take_instance_lock(home)
     _claim_pidfile()
 
