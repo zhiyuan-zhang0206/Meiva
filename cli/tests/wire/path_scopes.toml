@@ -1,0 +1,18 @@
+# Fixture modules governing the migrated public parser and client contracts.
+"cli.database.tests.cli_tests" = [
+    "test_schedules_parser.py",
+    "test_agents_cmd.py",
+    "test_external_caller_cli.py",
+    "test_rpc_result_domains.py",
+]
+"meiva.tests.fixtures.sdk" = [
+    "test_schedules_parser.py",
+    "test_agents_cmd.py",
+    "test_external_caller_cli.py",
+    "test_rpc_result_domains.py",
+]
+"base.config.tests.config_authority" = [
+    "test_agents_cmd.py",
+    "test_external_caller_cli.py",
+    "test_rpc_result_domains.py",
+]

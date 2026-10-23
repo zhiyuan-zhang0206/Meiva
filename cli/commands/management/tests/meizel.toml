@@ -2,14 +2,3 @@
 "config_gateway.py" = ["child_config_cmd.py"]
 "test_config_cmd.py" = ["child_config_cmd.py", "config_gateway.py"]
 "test_schedules_verify_foreign_checkout.py" = ["child_schedules_verify.py"]
-
-[debt.first-party-patch]
-"test_schedules_cmd.py#monkeypatch.setattr base.cluster.machine.gateway_api_base" = 1
-"test_schedules_cmd.py#monkeypatch.setattr base.cluster.machine.gateway_auth_headers" = 1
-"test_schedules_cmd.py#monkeypatch.setattr base.host.net.http_dial" = 1
-"test_schedules_cmd.py#monkeypatch.setattr base.host.net.http_dial.get" = 1
-"test_schedules_cmd.py#monkeypatch.setattr cli.commands.management.schedules_verify.report_verify" = 1
-
-[debt.stdlib-patch]
-"test_schedules_cmd.py#monkeypatch.setattr builtins.input" = 1
-"test_schedules_cmd.py#monkeypatch.setattr sys.stdin" = 1

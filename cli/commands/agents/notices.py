@@ -1,4 +1,4 @@
-# meiva:link cli/docs/operator-surfaces.meiva.okf.md
+# meiva:link cli/docs/operator-surfaces/operator-surfaces.meiva.okf.md
 
 from __future__ import annotations
 
@@ -157,7 +157,7 @@ def cmd_notices_resolve(*, notice_id: int, agent_id: int, action: str, reply: st
 
 
 def _resolve_all(notices: list[dict[str, Any]], base: str, headers: Any, dial_post: Any) -> int:
-    # meiva:link cli/docs/operator-surfaces.meiva.okf.md
+    # meiva:link cli/docs/operator-surfaces/operator-surfaces.meiva.okf.md
     cleared = 0
     for n in notices:
         action = "dismiss"
@@ -173,7 +173,7 @@ def _resolve_all(notices: list[dict[str, Any]], base: str, headers: Any, dial_po
 
 
 def cmd_notices_clear(*, agent_id: int | None, force: bool, stale: bool = False) -> int:
-    # meiva:link cli/docs/operator-surfaces.meiva.okf.md
+    # meiva:link cli/docs/operator-surfaces/operator-surfaces.meiva.okf.md
     if stale and agent_id is not None:
         print("--stale and --agent are mutually exclusive")
         return 2

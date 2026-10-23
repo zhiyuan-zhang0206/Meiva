@@ -7,7 +7,6 @@
     "test_logs_rotate.py",
     "test_main_dispatch.py",
     "test_main_log_init.py",
-    "test_schedules_parser.py",
     "test_plugin_scaffold.py",
     "test_pty_commands.py",
     "test_stop_parser.py",
@@ -36,7 +35,6 @@
     "test_main_telemetry_exit.py",
     "test_plugin_scaffold.py",
     "test_pty_commands.py",
-    "test_schedules_parser.py",
     "test_start_gate.py",
     "test_stop_parser.py",
     "test_unit_capability_cli.py"
