@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 from datetime import UTC, datetime
+from functools import partial
+from pathlib import Path
 from typing import NoReturn, cast
 
 import psycopg
@@ -13,6 +15,7 @@ from base.api_contracts.status import MachineStatus, SchemaMismatchKind, SchemaM
 from base.cluster.machine import MachineIdentity
 from base.db import Database
 from base.deploy.schema.migration_errors import MigrationLayoutError
+from base.deploy.schema.migration_layout import required_migration_set
 from base.deploy.schema.migrations import applied_migration_names
 from cli.commands.cluster.control import schema_mismatch_banner
 from ops.cluster_status import ClusterStatus, schema_mismatch
@@ -83,13 +86,11 @@ def test_status_and_cli_expose_current_diagnosis_only(
 
 def test_malformed_real_catalog_is_invalid_in_status_and_cli(
     db_conn: psycopg.Connection,
-    monkeypatch: pytest.MonkeyPatch,
     database: Database,
     *,
     machine_identity: MachineIdentity,
 ) -> None:
     original = applied_migration_names(db_conn)
-    monkeypatch.setattr(schema_mismatch, "required_migration_set", lambda: original)
     assert (
         schema_mismatch.status(database, conn=db_conn, local_machine=machine_identity.name())
         is None
@@ -139,22 +140,22 @@ def test_query_failure_is_explicitly_unavailable(
 
 
 def test_invalid_image_layout_is_not_a_set_divergence(
-    monkeypatch: pytest.MonkeyPatch, database: Database, *, machine_identity: MachineIdentity
+    tmp_path: Path,
+    db_conn: psycopg.Connection,
+    database: Database,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
-    def applied(_conn: object) -> set[str]:
-        return {"base"}
-
-    def invalid() -> set[str]:
-        raise MigrationLayoutError("required migration file is absent")
-
-    monkeypatch.setattr(schema_mismatch, "applied_migration_names", applied)
-    monkeypatch.setattr(schema_mismatch, "required_migration_set", invalid)
     status = schema_mismatch.status(
-        database, conn=cast(psycopg.Connection, object()), local_machine=machine_identity.name()
+        database,
+        conn=db_conn,
+        local_machine=machine_identity.name(),
+        required_reader=partial(required_migration_set, migrations_dir=tmp_path / "absent"),
     )
     assert status is not None
     assert status.kind == "invalid-migration-layout"
     assert "image migration layout is invalid" in status.detail
+    assert "migrations dir does not exist" in status.detail
     _assert_status_is_visible(status)
 
 
