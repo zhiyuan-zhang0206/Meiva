@@ -207,6 +207,11 @@ os.environ.pop("MEIVA_CF_API_TOKEN", None)
 os.environ.pop("MEIVA_FEISHU_APP_SECRET", None)
 os.environ.pop("MEIVA_IMPERSONATION_RELAY_TOKEN", None)
 os.environ.pop("MEIVA_ALERTS_WEBHOOK_TOKEN", None)
+# meiva:note
+# The runner database password is the one credential the suite's own home declares below: the
+# environment side says the same thing, so a `derive_env` refresh reproduces the sentinel
+# instead of the password the launching process carried.
+os.environ["MEIVA_RUNNER_DB_PASSWORD"] = "test-runner-db-password"  # noqa: S105
 
 # ── Boot mode: the suite exercises the eager config chain ──
 #
@@ -462,7 +467,7 @@ for _provider_key_env in _TEST_PROVIDER_KEY_ENVS:
             f"MEIVA_REDIS_URL={os.environ['MEIVA_REDIS_URL']}",
             f"MEIVA_EVENTS_CHANNEL={_TEST_EVENTS_CHANNEL}",
             f"MEIVA_CLUSTER_SECRET={os.environ['MEIVA_CLUSTER_SECRET']}",
-            "MEIVA_RUNNER_DB_PASSWORD=test-runner-db-password",
+            f"MEIVA_RUNNER_DB_PASSWORD={os.environ['MEIVA_RUNNER_DB_PASSWORD']}",
             f"MEIVA_TRANSPORT_ENCRYPTION={os.environ['MEIVA_TRANSPORT_ENCRYPTION']}",
             f"MEIVA_GATEWAY_URL={os.environ['MEIVA_GATEWAY_URL']}",
             f"MEIVA_TELEGRAM_BOT_TOKEN={os.environ['MEIVA_TELEGRAM_BOT_TOKEN']}",

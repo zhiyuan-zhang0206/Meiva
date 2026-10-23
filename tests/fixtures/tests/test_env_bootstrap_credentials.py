@@ -41,11 +41,16 @@ _INVENTED_NAMES = (
 # half that runs everywhere.
 def test_no_ambient_credential_value_survives_the_bootstrap() -> None:
     survived = env_bootstrap.survived_credential_names()
+    # meiva:note
+    # The length, not the value: it is the one number that tells a reader whether the launcher's
+    # secret survived or the suite's own sentinel did, and it leaks nothing.
+    described = ", ".join(f"{name} (len {len(os.environ.get(name, ''))})" for name in survived)
     assert not survived, (
-        "these credentials still hold the value the launching process gave this run: "
-        f"{survived}. Decide each one in tests/fixtures/env_bootstrap.py: pop it (absent is "
-        "the state CI runs in) or replace it with the sentinel the suite needs, then add a "
-        "line to that block's comment saying which and why."
+        f"these credentials still hold the value the launching process gave this run: {described}. "
+        "Decide each one in tests/fixtures/env_bootstrap.py: pop it (absent is the state CI runs "
+        "in), replace it with the sentinel the suite needs, or - when a lane hands it to the whole "
+        "job on purpose - replace it in the environment as well, so a settings refresh reproduces "
+        "the sentinel rather than the job's secret."
     )
 
 
