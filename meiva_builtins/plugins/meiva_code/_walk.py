@@ -1,4 +1,4 @@
-"""Walk up the path collecting context files. See `find_context_files_along_path` docstring."""
+# meiva:link meiva_builtins/plugins/meiva_code/docs/runtime-notes.meiva.okf.md
 
 from pathlib import Path
 
@@ -23,38 +23,13 @@ def _collect_context_files(dirs: list[Path]) -> list[Path]:
     return collected
 
 
-def find_context_files_along_path(target: Path, *, home: Path | None = None) -> list[Path]:
-    """Walk up from `target` collecting context files, ordered "farthest → nearest".
-
-    Context files are AGENTS.md and CLAUDE.md (see `_CONTEXT_FILENAMES`). Both
-    are collected at every directory level; within a level AGENTS.md comes
-    before CLAUDE.md.
-
-    Boundary = the ancestor on the path **farthest** from target (fewest parts
-    = shallowest depth) among {git_root, $HOME}. Neither on the path → return
-    [] (no walk, no-op).
-
-    Example: target=/Users/me/proj/sub/foo.py, git_root=/Users/me/proj, HOME=/Users/me
-        Both {/Users/me/proj, /Users/me} are ancestors on the path;
-        $HOME is shallower (fewer parts) → boundary = $HOME
-        walk: me → proj → sub, collecting context files at each level
-        returns the AGENTS.md/CLAUDE.md present in /Users/me, then
-        /Users/me/proj, then /Users/me/proj/sub — so the agent sees global →
-        local conventions.
-
-    Args:
-        target: Starting point (file or dir). For a file, walk starts at parent dir.
-
-    Returns:
-        Resolved context-file path list, farthest first, nearest last. Levels
-        where a context file is a directory or does not exist are skipped.
-    """
+def find_context_files_along_path(target: Path, *, home: Path) -> list[Path]:
     target = target.resolve()
     start = target if target.is_dir() else target.parent
     if not start.exists():
         return []
 
-    home = (home or Path.home()).resolve()
+    home = home.resolve()
     repo_root = git_root(start)
 
     # Ancestor candidates on the path: start itself or its ancestors
