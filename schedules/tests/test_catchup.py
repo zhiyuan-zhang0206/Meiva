@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 import multiprocessing
 import os
+import subprocess
 import sys
 from datetime import UTC, datetime, timedelta, timezone
 from functools import partial
@@ -359,7 +360,9 @@ def test_daily_loop_claims_one_due_slot_then_waits_without_retrying(
         assert callable(fire.keywords["producer"])
         assert fire.keywords["image"] is process_context.loaded_code_image()
     else:
-        assert fire is module._fire
+        assert isinstance(fire, partial)
+        assert fire.func is module._fire
+        assert fire.keywords == {"run_process": subprocess.run, "timers": SYSTEM_TIMERS}
     sleep.assert_called_once_with(120)
 
 

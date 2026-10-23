@@ -68,12 +68,11 @@ import contextlib
 import json
 import subprocess
 import sys
-from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from datetime import time as dtime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from zoneinfo import ZoneInfo
 
 # Script-mode path guard (PYTHONSAFEPATH=1 removed the implicit script-dir
@@ -84,6 +83,9 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 from base.host.net.ports import SYSTEM_URL_OPENER, UrlOpener  # noqa: E402 — script path guard
+
+if TYPE_CHECKING:
+    from scripts.ci.pull_requests.export_process import GhProcess
 
 DEFAULT_REPO = "zhiyuan-zhang0206/Meiva"
 DEFAULT_WINDOW_DAYS = 30
@@ -181,16 +183,14 @@ def window_days(now: datetime, days: int, tz: ZoneInfo) -> list[date]:
     return [last_complete - timedelta(days=offset) for offset in range(days - 1, -1, -1)]
 
 
-def run_gh(args: list[str], *, timeout: float = _GH_TIMEOUT_S) -> str:
+def run_gh(args: list[str], *, run_process: GhProcess, timeout: float = _GH_TIMEOUT_S) -> str:
     """Run one gh command and return stdout; raise on any failure.
 
     Direct `gh` (not the API wrapper) because the job runs where the gh
     session lives; the callers project fields with --jq so no payload class
     is parsed whole.
     """
-    result = subprocess.run(  # noqa: S603 - fixed gh argv, no shell
-        ["gh", *args], capture_output=True, text=True, check=False, timeout=timeout
-    )
+    result = run_process(["gh", *args], capture_output=True, text=True, timeout=timeout)
     if result.returncode != 0:
         detail = (result.stderr or result.stdout or "").strip().splitlines()
         raise PrFlowError(
@@ -199,7 +199,9 @@ def run_gh(args: list[str], *, timeout: float = _GH_TIMEOUT_S) -> str:
     return result.stdout
 
 
-def fetch_closed_prs(repo: str, since: datetime, stats: RunStats) -> list[dict[str, Any]]:
+def fetch_closed_prs(
+    repo: str, since: datetime, stats: RunStats, *, run_process: GhProcess, max_pages: int
+) -> list[dict[str, Any]]:
     """Closed PRs updated since `since`, newest-updated first (paginated).
 
     Sorted by ``updated`` desc, so the walk can stop at the first page whose
@@ -208,7 +210,7 @@ def fetch_closed_prs(repo: str, since: datetime, stats: RunStats) -> list[dict[s
     """
     jq = "[.[] | {number, created_at, updated_at, merged_at}] | @json"
     prs: list[dict[str, Any]] = []
-    for page in range(1, MAX_LIST_PAGES + 1):
+    for page in range(1, max_pages + 1):
         out = run_gh(
             [
                 "api",
@@ -216,7 +218,8 @@ def fetch_closed_prs(repo: str, since: datetime, stats: RunStats) -> list[dict[s
                 f"&per_page={_PAGE_SIZE}&page={page}",
                 "--jq",
                 jq,
-            ]
+            ],
+            run_process=run_process,
         )
         stats.gh_api_calls += 1
         batch = json.loads(out)
@@ -232,11 +235,13 @@ def fetch_closed_prs(repo: str, since: datetime, stats: RunStats) -> list[dict[s
         except ValueError:
             continue  # unparsable stamp: keep walking rather than stop early
     raise PrFlowError(
-        f"pulls walk exceeded {MAX_LIST_PAGES} pages — run budget exhausted, window truncated"
+        f"pulls walk exceeded {max_pages} pages — run budget exhausted, window truncated"
     )
 
 
-def fetch_timeline(repo: str, number: int, stats: RunStats) -> list[dict[str, Any]]:
+def fetch_timeline(
+    repo: str, number: int, stats: RunStats, *, run_process: GhProcess, max_pages: int
+) -> list[dict[str, Any]]:
     """One PR's issue timeline, projected to the events the aggregates read.
 
     Bounded at ``MAX_TIMELINE_PAGES`` pages; a busier timeline is truncated
@@ -244,14 +249,15 @@ def fetch_timeline(repo: str, number: int, stats: RunStats) -> list[dict[str, An
     """
     jq = "[.[] | {event, created_at}] | @json"
     events: list[dict[str, Any]] = []
-    for page in range(1, MAX_TIMELINE_PAGES + 1):
+    for page in range(1, max_pages + 1):
         out = run_gh(
             [
                 "api",
                 f"repos/{repo}/issues/{number}/timeline?per_page={_PAGE_SIZE}&page={page}",
                 "--jq",
                 jq,
-            ]
+            ],
+            run_process=run_process,
         )
         stats.gh_api_calls += 1
         batch = json.loads(out)
@@ -262,7 +268,7 @@ def fetch_timeline(repo: str, number: int, stats: RunStats) -> list[dict[str, An
             break
     else:
         print(
-            f"pr-flow: PR #{number} timeline truncated at {MAX_TIMELINE_PAGES} pages",
+            f"pr-flow: PR #{number} timeline truncated at {max_pages} pages",
             file=sys.stderr,
         )
     return events
@@ -495,7 +501,7 @@ def collect_records(
     cache: dict[str, dict[str, Any]],
     stats: RunStats,
     *,
-    fetch_timeline_fn: Callable[[str, int, RunStats], list[dict[str, Any]]] | None = None,
+    run_process: GhProcess,
 ) -> list[PrRecord]:
     """Merged-in-window PR records, refreshed only where `updated_at` moved.
 
@@ -505,7 +511,6 @@ def collect_records(
     partial record otherwise — either way the failure is counted, never
     silently absorbed.
     """
-    fetch = fetch_timeline_fn or fetch_timeline
     wanted = set(window)
     records: list[PrRecord] = []
     for meta in prs:
@@ -520,7 +525,7 @@ def collect_records(
             records.append(cached)
             continue
         stats.timeline_fetches += 1
-        records.append(_refresh_record(meta, merged_raw, cached, repo, stats, fetch))
+        records.append(_refresh_record(meta, merged_raw, cached, repo, stats, run_process))
     return records
 
 
@@ -550,11 +555,13 @@ def _refresh_record(
     cached: PrRecord | None,
     repo: str,
     stats: RunStats,
-    fetch: Callable[[str, int, RunStats], list[dict[str, Any]]],
+    run_process: GhProcess,
 ) -> PrRecord:
     number = int(meta["number"])
     try:
-        events = fetch(repo, number, stats)
+        events = fetch_timeline(
+            repo, number, stats, run_process=run_process, max_pages=MAX_TIMELINE_PAGES
+        )
     except (PrFlowError, subprocess.TimeoutExpired, json.JSONDecodeError) as exc:
         stats.timeline_failures += 1
         print(f"pr-flow: timeline fetch failed for PR #{number}: {exc}", file=sys.stderr)
@@ -626,7 +633,7 @@ def emit_events(snapshot: dict[str, Any], *, pipeline: Any) -> None:
     telemetry.sync()
 
 
-def main(argv: list[str] | None = None, *, open_url: UrlOpener) -> int:
+def main(argv: list[str] | None = None, *, run_process: GhProcess, open_url: UrlOpener) -> int:
     parser = argparse.ArgumentParser(description=(__doc__ or "").splitlines()[0])
     parser.add_argument("--repo", default=DEFAULT_REPO, help="owner/name to sample")
     parser.add_argument(
@@ -666,7 +673,9 @@ def main(argv: list[str] | None = None, *, open_url: UrlOpener) -> int:
     since = datetime.combine(days[0], dtime(0, 0), tzinfo=tz).astimezone(UTC)
     stats = RunStats()
 
-    prs = fetch_closed_prs(args.repo, since, stats)
+    prs = fetch_closed_prs(
+        args.repo, since, stats, run_process=run_process, max_pages=MAX_LIST_PAGES
+    )
 
     if args.state_dir is not None:
         state_dir = args.state_dir
@@ -676,7 +685,7 @@ def main(argv: list[str] | None = None, *, open_url: UrlOpener) -> int:
         state_dir = meiva_home() / _STATE_DIR_RELATIVE
     cache = load_cache(state_dir / "cache.json")
 
-    records = collect_records(prs, days, tz, args.repo, cache, stats)
+    records = collect_records(prs, days, tz, args.repo, cache, stats, run_process=run_process)
 
     token = load_trunk_token()
     queue_depth: int | None = None
@@ -730,4 +739,4 @@ def main(argv: list[str] | None = None, *, open_url: UrlOpener) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main(open_url=SYSTEM_URL_OPENER))
+    sys.exit(main(run_process=subprocess.run, open_url=SYSTEM_URL_OPENER))

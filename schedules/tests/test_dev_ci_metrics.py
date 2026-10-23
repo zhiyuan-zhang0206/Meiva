@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import importlib.util
 import sys
-from collections.abc import Callable
+import subprocess
+from collections.abc import Callable, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
@@ -11,8 +12,25 @@ from unittest.mock import Mock
 
 import pytest
 
+from base.clock.tests.manual_timers import ManualTimers
+
 _ROOT = Path(__file__).resolve().parents[2]
 _SCHEDULE = _ROOT / "schedules" / "dev-ci-metrics-schedule.py"
+
+
+class WorkflowReplies:
+    def __init__(self, payload: str) -> None:
+        self.payload = payload
+        self.commands: list[list[str]] = []
+
+    def __call__(
+        self, argv: Sequence[str], *, timeout: float, capture_output: bool, text: bool
+    ) -> subprocess.CompletedProcess[str]:
+        assert timeout == 60 and capture_output and text
+        assert list(argv[:4]) == ["gh", "api", "--method", "GET"]
+        assert "/actions/workflows/" in argv[4]
+        self.commands.append(list(argv))
+        return subprocess.CompletedProcess(argv, 0, self.payload, "")
 
 
 def _load() -> ModuleType:
@@ -32,8 +50,14 @@ def test_fire_runs_default_repo_and_logs_previous_complete_day(
 ) -> None:
     module = _load()
     calls: list[list[str]] = []
+    gh = WorkflowReplies('{"workflow_runs": [{"conclusion": "success"}]}')
+    supplied_timers = ManualTimers()
 
-    def run_exporter(args: list[str], *, producer: Callable[[], Any]) -> int:
+    def run_exporter(
+        args: list[str], *, producer: Callable[[], Any], run_process: object, timers: object
+    ) -> int:
+        assert run_process is gh
+        assert timers is supplied_timers
         assert producer == module.meiva.context.clients.event_pipeline
         calls.append(args)
         return 0
@@ -49,6 +73,8 @@ def test_fire_runs_default_repo_and_logs_previous_complete_day(
     module._fire(
         datetime(2026, 9, 3, 22, 20, tzinfo=UTC),
         None,
+        run_process=gh,
+        timers=supplied_timers,
         cluster_timezone=lambda: "Asia/Shanghai",
         exporter_loader=lambda: exporter,
         snapshot_loader=snapshot,
@@ -58,12 +84,16 @@ def test_fire_runs_default_repo_and_logs_previous_complete_day(
     assert calls == [["--repo", "owner/repo"]]
     assert "2026-09-03 — 7 runs, 2 failed" in capsys.readouterr().out
     assert failures == []
+    assert len(gh.commands) == len(module._SCHEDULED_WORKFLOWS)
+    assert supplied_timers.sleeps == []
 
 
 def test_fire_reports_failed_collector() -> None:
     module = _load()
 
-    def failed_exporter(args: list[str], *, producer: Callable[[], Any]) -> int:
+    def failed_exporter(
+        args: list[str], *, producer: Callable[[], Any], run_process: object, timers: object
+    ) -> int:
         assert producer == module.meiva.context.clients.event_pipeline
         return 1
 
@@ -72,6 +102,8 @@ def test_fire_reports_failed_collector() -> None:
     module._fire(
         datetime(2026, 9, 3, 22, 20, tzinfo=UTC),
         None,
+        run_process=WorkflowReplies('{"workflow_runs": []}'),
+        timers=ManualTimers(),
         exporter_loader=lambda: SimpleNamespace(DEFAULT_REPO="owner/repo", main=failed_exporter),
         failure_reporter=failures.append,
     )
@@ -162,15 +194,17 @@ def test_every_timed_pipeline_that_updates_shared_state_is_watched() -> None:
 
 def test_each_watched_workflow_names_what_its_failure_costs() -> None:
     module = _load()
-    exporter = SimpleNamespace(
-        FetchStats=Mock,
-        _run_gh=Mock(
-            return_value='{"workflow_runs": [{"conclusion": "failure"}, {"conclusion": "failure"}]}'
-        ),
+    gh = WorkflowReplies(
+        '{"workflow_runs": [{"conclusion": "failure"}, {"conclusion": "failure"}]}'
     )
     sent: list[str] = []
 
-    module._alert_broken_scheduled_workflows(exporter, "owner/repo", notify=sent.append)
+    module._alert_broken_scheduled_workflows(
+        "owner/repo",
+        run_process=gh,
+        timers=ManualTimers(),
+        notify=sent.append,
+    )
 
     assert len(sent) == len(module._SCHEDULED_WORKFLOWS)
     assert "test-duration model" in next(m for m in sent if "refresh-test-durations.yml" in m)
@@ -179,18 +213,16 @@ def test_each_watched_workflow_names_what_its_failure_costs() -> None:
 
 def test_a_broken_timed_workflow_messages_the_p0_lead() -> None:
     module = _load()
-    exporter = SimpleNamespace(
-        FetchStats=Mock,
-        _run_gh=Mock(
-            return_value=(
-                '{"workflow_runs": [{"conclusion": "failure", "html_url": "u2",'
-                ' "created_at": "t2"}, {"conclusion": "failure", "html_url": "u1",'
-                ' "created_at": "t1"}]}'
-            )
-        ),
+    gh = WorkflowReplies(
+        '{"workflow_runs": [{"conclusion": "failure", "html_url": "u2", "created_at": "t2"}, {"conclusion": "failure", "html_url": "u1", "created_at": "t1"}]}'
     )
     sent: list[str] = []
-    module._alert_broken_scheduled_workflows(exporter, "owner/repo", notify=sent.append)
+    module._alert_broken_scheduled_workflows(
+        "owner/repo",
+        run_process=gh,
+        timers=ManualTimers(),
+        notify=sent.append,
+    )
     assert len(sent) == len(module._SCHEDULED_WORKFLOWS)
     assert "failed 2 runs in a row" in sent[0]
     assert "u2" in sent[0]
@@ -198,14 +230,37 @@ def test_a_broken_timed_workflow_messages_the_p0_lead() -> None:
 
 def test_a_single_failure_does_not_message() -> None:
     module = _load()
-    exporter = SimpleNamespace(
-        FetchStats=Mock,
-        _run_gh=Mock(
-            return_value=(
-                '{"workflow_runs": [{"conclusion": "failure"}, {"conclusion": "success"}]}'
-            )
-        ),
+    gh = WorkflowReplies(
+        '{"workflow_runs": [{"conclusion": "failure"}, {"conclusion": "success"}]}'
     )
     sent: list[str] = []
-    module._alert_broken_scheduled_workflows(exporter, "owner/repo", notify=sent.append)
+    module._alert_broken_scheduled_workflows(
+        "owner/repo",
+        run_process=gh,
+        timers=ManualTimers(),
+        notify=sent.append,
+    )
     assert sent == []
+
+
+def test_workflow_query_runs_real_exporter_transport() -> None:
+    module = _load()
+    calls: list[list[str]] = []
+    timers = ManualTimers()
+
+    def run_process(
+        argv: Sequence[str], *, timeout: float, capture_output: bool, text: bool
+    ) -> subprocess.CompletedProcess[str]:
+        assert timeout == 60 and capture_output and text
+        assert list(argv[:4]) == ["gh", "api", "--method", "GET"]
+        calls.append(list(argv))
+        return subprocess.CompletedProcess(
+            argv, 0, '{"workflow_runs": [{"conclusion": "failure"}]}', ""
+        )
+
+    runs = module._workflow_runs(
+        "owner/repo", "refresh-test-durations.yml", run_process=run_process, timers=timers
+    )
+    assert runs == [{"conclusion": "failure"}]
+    assert len(calls) == 1 and calls[0][4].endswith("refresh-test-durations.yml/runs?per_page=10")
+    assert timers.sleeps == []
