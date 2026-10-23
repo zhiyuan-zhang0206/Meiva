@@ -10,19 +10,19 @@ from __future__ import annotations
 import asyncio
 from unittest.mock import MagicMock
 
-import pytest
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 
-from agent.graph.exec import node
-from agent.graph.exec.node import exec_node_impl
+from agent.graph.exec.node import ExecDone, ExecResult, exec_node_impl
+from agent.graph.exec.protocol import ResultPayload
+from agent.graph.exec.tests.process_inputs import ScriptedExecProcess
 from agent.hooks.tests.fakes import make_fake_ops_pool
 from agent.state import AgentState
-from base import config
 from base.agents.context import MeivaContext
 from base.clock import Clock
-from base.config.tests.configuration import defaults
+from base.config import ConfigBoot
+from base.config.tests.configuration import snapshot_process_config
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
@@ -45,7 +45,7 @@ _TOOL_CALL_AIMESSAGE = AIMessage(
 
 
 def _make_runtime(
-    hosted_resources: HostedTurnResources, database_gate: ProcessDbGate
+    hosted_resources: HostedTurnResources, database_gate: ProcessDbGate, owner: ConfigBoot
 ) -> Runtime[MeivaContext]:
     """Minimal runtime with fake ops_pool + event_publisher."""
     ctx = MeivaContext(
@@ -53,7 +53,9 @@ def _make_runtime(
         ops_pool=make_fake_ops_pool(),
         llm=None,
         event_publisher=MagicMock(),
-        agent=AgentSlices.resolve(default_reader=defaults()),
+        agent=AgentSlices.resolve(
+            default_reader=lambda domain, field: getattr(getattr(owner.view, domain), field)
+        ),
         db=Database.from_settings(gate=database_gate),
         bus=EventBus.from_settings(),
         catalog=build_model_catalog(),
@@ -64,37 +66,29 @@ def _make_runtime(
 
 async def test_exec_node_timeout_fires_asyncio_wait_for(
     hosted_resources: HostedTurnResources,
-    monkeypatch: pytest.MonkeyPatch,
     database_gate: ProcessDbGate,
 ) -> None:
-    """When run_in_subprocess hangs longer than exec_node_timeout_seconds,
-    the outer asyncio.wait_for inside _exec_node_impl fires.
+    owner = snapshot_process_config()
+    owner.set_field("exec_node_timeout_seconds", 0.05)
 
-    We monkeypatch run_in_subprocess to wait forever on a cancellable Future,
-    simulating a framework wait that the inner code-exec timeout missed.
-    """
-    # Graph-level timeout very short, inner timeout irrelevant (patched out)
-    monkeypatch.setattr(config.settings.sandbox, "exec_node_timeout_seconds", 0.05)
+    class HangingProcess(ScriptedExecProcess):
+        async def _resolve(
+            self, outcome: tuple[ExecResult, ResultPayload | None]
+        ) -> tuple[ExecResult, ResultPayload | None]:
+            await asyncio.Future[None]()
+            raise AssertionError("unreachable")
 
-    async def _hang_forever(*args, **kwargs):
-        await asyncio.Future()  # never completes
-
-    monkeypatch.setattr(
-        node,
-        "run_in_subprocess",
-        _hang_forever,  # pyright: ignore[reportUnknownArgumentType]
-    )
+    process = HangingProcess([(ExecDone(output=""), None)])
 
     state = AgentState(messages=[HumanMessage(content="hi"), _TOOL_CALL_AIMESSAGE], halted=False)
 
-    # _exec_node_impl will call our _hang_forever → asyncio.wait_for(0.05s) fires
-    # → TimeoutError caught → returns _ExecTimedOut via Command
     from langgraph.types import Command
 
     result = await exec_node_impl(
         state,
-        _make_runtime(hosted_resources=hosted_resources, database_gate=database_gate),
+        _make_runtime(hosted_resources=hosted_resources, database_gate=database_gate, owner=owner),
         _CONFIG,
+        process=process,
     )
 
     # The result is a Command (returned by _exec_node_impl's match dispatch).
@@ -116,25 +110,16 @@ async def test_exec_node_timeout_fires_asyncio_wait_for(
 
 async def test_exec_node_timeout_does_not_fire_when_fast(
     hosted_resources: HostedTurnResources,
-    monkeypatch: pytest.MonkeyPatch,
     database_gate: ProcessDbGate,
 ) -> None:
     """When run_in_subprocess completes quickly, exec_node_timeout_seconds
     does NOT fire — the normal path returns ExecDone."""
-    monkeypatch.setattr(config.settings.sandbox, "exec_node_timeout_seconds", 10.0)
-    monkeypatch.setattr(config.settings.sandbox, "exec_timeout_seconds", 30.0)
 
-    from agent.graph.exec.node import ExecDone, ExecResult
-    from agent.graph.exec.protocol import ResultPayload
+    owner = snapshot_process_config()
+    owner.set_field("exec_node_timeout_seconds", 10.0)
+    owner.set_field("exec_timeout_seconds", 30.0)
 
-    async def _fast_return(*args, **kwargs) -> tuple[ExecResult, ResultPayload | None]:
-        return (ExecDone(output="hello"), None)
-
-    monkeypatch.setattr(
-        node,
-        "run_in_subprocess",
-        _fast_return,  # pyright: ignore[reportUnknownArgumentType]
-    )
+    process = ScriptedExecProcess([(ExecDone(output="hello"), None)])
 
     state = AgentState(messages=[HumanMessage(content="hi"), _TOOL_CALL_AIMESSAGE], halted=False)
 
@@ -142,8 +127,9 @@ async def test_exec_node_timeout_does_not_fire_when_fast(
 
     result = await exec_node_impl(
         state,
-        _make_runtime(hosted_resources=hosted_resources, database_gate=database_gate),
+        _make_runtime(hosted_resources=hosted_resources, database_gate=database_gate, owner=owner),
         _CONFIG,
+        process=process,
     )
 
     assert isinstance(result, Command)

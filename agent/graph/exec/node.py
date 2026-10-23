@@ -104,8 +104,8 @@ from ._stream import (
 from ._stream import (
     StreamingTextIO as StreamingTextIO,
 )
-from ._subprocess import run_in_subprocess as run_in_subprocess
 from .output import ExecEnvelope, crashed_no_output_body, wrap_code_output
+from .process import ExecProcess
 from .protocol import ResultPayload
 
 # Each exec step commits one call; remaining calls return to EXEC before AFTER_EXEC.
@@ -128,6 +128,8 @@ async def exec_node(
     state: _state.AgentState,
     runtime: Runtime[MeivaContext],
     config: RunnableConfig,
+    *,
+    process: ExecProcess,
 ) -> Command[ExecGoto]:
     """Run agent-written code in one disposable child process. See module docstring."""
     event_publisher = runtime.context.event_publisher
@@ -149,7 +151,7 @@ async def exec_node(
             "display", "timeline_default_limit"
         ),
     ):
-        return await exec_node_impl(state, runtime, config)
+        return await exec_node_impl(state, runtime, config, process=process)
 
 
 # meiva:note
@@ -197,6 +199,8 @@ async def run_agent_code(
     agent_id: int,
     code: str,
     chunk_publisher: ExecOutputChunkPublisher,
+    *,
+    process: ExecProcess,
 ) -> tuple[
     ExecResult,
     dict[str, Any],
@@ -221,15 +225,11 @@ async def run_agent_code(
         resources=ctx.hosted_resources,
     ) as cancel_event:
         outcome = await _exec_with_node_shield(
-            run_in_subprocess(
+            process.run(
                 code,
                 ctx,
                 cancel_event,
-                ctx.require_agent().read("sandbox", "exec_timeout_seconds"),
                 chunk_publisher,
-                accumulation_max_chars=ctx.require_agent().read(
-                    "sandbox", "exec_output_accumulation_max_chars"
-                ),
                 state=state.model_dump(),
                 config_overlay=config_overlay,
             ),
@@ -448,6 +448,8 @@ async def _exec_single_call(
     agent_id: int,
     call: ToolCall,
     exec_msg_idx: int,
+    *,
+    process: ExecProcess,
 ) -> tuple[dict[str, Any], bool]:
     """Execute one invocation; return its state delta and whether it compacted."""
     assert ctx.event_publisher is not None, (  # noqa: S101
@@ -498,6 +500,7 @@ async def _exec_single_call(
         agent_id,
         code_from_args(call["args"], source=f"tool_call {call['id']!r}"),
         chunk_publisher,
+        process=process,
     )
     clock = ctx.require_clock()
     timestamp = (
@@ -632,6 +635,8 @@ async def exec_node_impl(
     state: _state.AgentState,
     runtime: Runtime[MeivaContext],
     config: RunnableConfig,
+    *,
+    process: ExecProcess,
 ) -> Command[ExecGoto]:
     replacements, calls = _remaining_exec_calls(state.messages)
     if not calls:
@@ -641,7 +646,7 @@ async def exec_node_impl(
         )
     agent_id = agent_id_from_config(config)
     delta, compacted = await _exec_single_call(
-        state, runtime.context, agent_id, calls[0], len(state.messages)
+        state, runtime.context, agent_id, calls[0], len(state.messages), process=process
     )
     if compacted:
         delta["pending_exec_notes"] = []
