@@ -45,7 +45,7 @@ The agent's sole tool—`execute_code(code: str)`—executes Python code in a di
 
 ## Entry Points
 
-- `agent/graph/exec/node.py:exec_node()` — Code execution main logic + sum type dispatch
+- `node.py:exec_node()` — [[process.meiva.okf.md|child process boundary]] and sum dispatch
 - `agent/graph/exec/_stream.py` — `StreamingTextIO` + `ExecOutputChunkPublisher` (streaming output incremental push)
 - `agent/graph/tool_calls.py` — Per-call normalization preserving every invocation and result
 - `agent/graph/exec/output.py` — Output envelope formatting

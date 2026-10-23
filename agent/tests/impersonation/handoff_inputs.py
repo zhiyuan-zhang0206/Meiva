@@ -1,6 +1,7 @@
 import json
 from collections.abc import Callable, Iterator
 from dataclasses import replace
+from functools import partial
 from pathlib import Path
 from typing import Annotated, Any
 from unittest.mock import MagicMock
@@ -18,6 +19,7 @@ from agent import impersonation
 from agent import state as states
 from agent.graph.claim.node import claim_node
 from agent.graph.exec.node import exec_node
+from agent.graph.exec.process import SubprocessExecProcess
 from agent.impersonation import protect_native_hooks, settle_checkpoint
 from agent.impersonation_handoff import flush_checkpoint
 from agent.ownership.hosted import admit_hosted_runtime
@@ -168,7 +170,9 @@ async def prepare_graph(
         "before_llm", protect_native_hooks(before_llm), destinations=("llm", "__end__")
     )
     builder.add_node("llm", model, destinations=("exec", "claim"))
-    builder.add_node("exec", exec_node, destinations=("after_exec",))
+    builder.add_node(
+        "exec", partial(exec_node, process=SubprocessExecProcess()), destinations=("after_exec",)
+    )
 
     def after_exec(_state: Any) -> Command[str]:
         return Command(goto="claim")
