@@ -68,3 +68,13 @@ values otherwise live only in step outputs.
 
 The workflow needs only `actions: read` and the default token, no secret, no
 repository setting and no approval step.
+
+## Tool input boundary
+
+The script entry composes the canonical duration path and standard-library process
+transport. Seed, measurement, merge and atomic write functions require that path;
+`run_suite` always builds the real pytest command before calling its required
+process transport. The transport inherits environment and standard streams and
+retains the existing absence of a child deadline; workflow job timeouts remain
+separate. Tests record artifacts at this command boundary rather than replacing
+`run_suite`, preserving retries, reseeding and complete-shard validation.

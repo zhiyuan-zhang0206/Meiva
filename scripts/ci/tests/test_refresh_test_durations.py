@@ -14,7 +14,9 @@ import json
 import os
 import subprocess
 import sys
+from collections.abc import Sequence
 from pathlib import Path
+from typing import Literal
 from xml.etree import ElementTree
 
 import pytest
@@ -67,11 +69,8 @@ def test_load_durations_keeps_integer_float_and_zero_values(tmp_path: Path) -> N
     }
 
 
-def test_write_durations_committed_format_preserves_fast_measurements(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_write_durations_committed_format_preserves_fast_measurements(tmp_path: Path) -> None:
     target = tmp_path / ".test_durations"
-    monkeypatch.setattr(refresh, "DURATIONS_PATH", target)
 
     kept = refresh.write_durations(
         {
@@ -80,7 +79,8 @@ def test_write_durations_committed_format_preserves_fast_measurements(
             "tests/a/test_x.py::test_boundary": 0.2004,
             "tests/a/test_x.py::test_decimal": 1.23456,
             "tests/a/test_x.py::test_zero": 0.0004,
-        }
+        },
+        target_path=target,
     )
 
     content = target.read_text()
@@ -102,55 +102,66 @@ def test_write_durations_committed_format_preserves_fast_measurements(
     assert list(data) == sorted(data)
 
 
-def test_write_durations_is_atomic_when_replace_fails(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_write_durations_is_atomic_when_replace_fails(tmp_path: Path) -> None:
     target = tmp_path / ".test_durations"
     target.mkdir()
-    monkeypatch.setattr(refresh, "DURATIONS_PATH", target)
     with pytest.raises(IsADirectoryError):
-        refresh.write_durations({"tests/a::test_y": 2.5})
+        refresh.write_durations({"tests/a::test_y": 2.5}, target_path=target)
 
     # The existing target is untouched and no temp file is left behind.
     assert target.is_dir()
     assert list(tmp_path.iterdir()) == [target]
 
 
-def _fake_runner_factory(backend_data: dict[str, float], e2e_data: dict[str, float]):
-    """Build a run_suite fake that records durations into the given paths."""
+def _suite_arguments(
+    argv: Sequence[str], cwd: Path, check: Literal[False]
+) -> tuple[list[str], Path, bool]:
+    assert list(argv[:3]) == [sys.executable, "-m", "pytest"]
+    assert cwd == Path(__file__).resolve().parents[3]
+    assert check is False
+    assert list(argv[-3:-1]) == ["--store-durations", "--clean-durations"]
+    assert argv[-1].startswith("--durations-path=")
+    args = list(argv[3:-3])
+    coverage = any(arg.startswith("--cov=") for arg in args)
+    if coverage:
+        assert args[-len(refresh.BACKEND_COVERAGE_ARGS) :] == refresh.BACKEND_COVERAGE_ARGS
+        args = args[: -len(refresh.BACKEND_COVERAGE_ARGS)]
+    return args, Path(argv[-1].removeprefix("--durations-path=")), coverage
 
-    def _fake_run_suite(
-        pytest_args: list[str],
-        durations_path: Path,
-        *,
-        coverage: bool,
-    ) -> int:
+
+def _forbid_process(
+    argv: Sequence[str], *, cwd: Path, check: Literal[False]
+) -> subprocess.CompletedProcess[bytes]:
+    raise AssertionError(f"unexpected suite command: {argv}, {cwd}, {check}")
+
+
+def _duration_process(backend_data: dict[str, float], e2e_data: dict[str, float]):
+    def _run_process(
+        argv: Sequence[str], *, cwd: Path, check: Literal[False]
+    ) -> subprocess.CompletedProcess[bytes]:
+        pytest_args, durations_path, _coverage = _suite_arguments(argv, cwd, check)
         data = e2e_data if any(arg.startswith("tests/e2e") for arg in pytest_args) else backend_data
         durations_path.write_text(json.dumps(data))
-        return 0
+        return subprocess.CompletedProcess(argv, 0)
 
-    return _fake_run_suite
+    return _run_process
 
 
-def test_main_aborts_on_backend_failure_and_leaves_file_alone(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_main_aborts_on_backend_failure_and_leaves_file_alone(tmp_path: Path) -> None:
     target = tmp_path / ".test_durations"
     target.write_text('{"tests/a::test_x": 1.5}\n')
-    monkeypatch.setattr(refresh, "DURATIONS_PATH", target)
 
-    def _fail(*_args: object, **_kwargs: object) -> int:
-        return 1
+    def _fail(
+        argv: Sequence[str], *, cwd: Path, check: Literal[False]
+    ) -> subprocess.CompletedProcess[bytes]:
+        _suite_arguments(argv, cwd, check)
+        return subprocess.CompletedProcess(argv, 1)
 
-    monkeypatch.setattr(refresh, "run_suite", _fail)
-
-    assert refresh.main() == 1
+    assert refresh.main(target_path=target, run_process=_fail) == 1
     assert target.read_text() == '{"tests/a::test_x": 1.5}\n'
 
 
-def test_main_keeps_previous_e2e_entries_when_e2e_records_nothing(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_main_keeps_previous_e2e_entries_when_e2e_records_nothing(tmp_path: Path) -> None:
     target = tmp_path / ".test_durations"
     target.write_text(
         json.dumps(
@@ -160,14 +171,12 @@ def test_main_keeps_previous_e2e_entries_when_e2e_records_nothing(
             }
         )
     )
-    monkeypatch.setattr(refresh, "DURATIONS_PATH", target)
-    fake = _fake_runner_factory(
+    fake = _duration_process(
         backend_data={"tests/components/agent/test_a.py::test_one": 1.1},
         e2e_data={},
     )
-    monkeypatch.setattr(refresh, "run_suite", fake)
 
-    assert refresh.main() == 0
+    assert refresh.main(target_path=target, run_process=fake) == 0
     data = json.loads(target.read_text())
     assert data == {
         "tests/components/agent/test_a.py::test_one": 1.1,
@@ -175,17 +184,15 @@ def test_main_keeps_previous_e2e_entries_when_e2e_records_nothing(
     }
 
 
-def test_main_merges_both_suite_durations(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_main_merges_both_suite_durations(tmp_path: Path) -> None:
     target = tmp_path / ".test_durations"
     target.write_text("{}")
-    monkeypatch.setattr(refresh, "DURATIONS_PATH", target)
-    fake = _fake_runner_factory(
+    fake = _duration_process(
         backend_data={"tests/components/agent/test_a.py::test_one": 1.1},
         e2e_data={"tests/e2e/test_b.py::test_two": 0.5},
     )
-    monkeypatch.setattr(refresh, "run_suite", fake)
 
-    assert refresh.main() == 0
+    assert refresh.main(target_path=target, run_process=fake) == 0
     data = json.loads(target.read_text())
     assert data == {
         "tests/components/agent/test_a.py::test_one": 1.1,
@@ -193,22 +200,17 @@ def test_main_merges_both_suite_durations(tmp_path: Path, monkeypatch: pytest.Mo
     }
 
 
-def test_measure_backend_retries_and_reseeds_the_ci_durations(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_measure_backend_retries_and_reseeds_the_ci_durations(tmp_path: Path) -> None:
     """A failed shard retry must retain CI's input timing model, not its partial output."""
     source = tmp_path / ".test_durations"
     source.write_text('{"tests/components/agent/test_existing.py::test_one": 1.5}\n')
     output = tmp_path / "backend-3.json"
-    monkeypatch.setattr(refresh, "DURATIONS_PATH", source)
     attempts = 0
 
     def _fail_once_then_record(
-        pytest_args: list[str],
-        durations_path: Path,
-        *,
-        coverage: bool,
-    ) -> int:
+        argv: Sequence[str], *, cwd: Path, check: Literal[False]
+    ) -> subprocess.CompletedProcess[bytes]:
+        pytest_args, durations_path, coverage = _suite_arguments(argv, cwd, check)
         nonlocal attempts
         attempts += 1
         assert pytest_args == [
@@ -230,34 +232,34 @@ def test_measure_backend_retries_and_reseeds_the_ci_durations(
         assert json.loads(durations_path.read_text()) == json.loads(source.read_text())
         if attempts == 1:
             durations_path.write_text('{"tests/components/agent/test_partial.py::test_one": 9.0}\n')
-            return 1
+            return subprocess.CompletedProcess(argv, 1)
         durations_path.write_text('{"tests/components/agent/test_recorded.py::test_one": 1.0}\n')
-        return 0
+        return subprocess.CompletedProcess(argv, 0)
 
-    monkeypatch.setattr(refresh, "run_suite", _fail_once_then_record)
-
-    assert refresh.main(["measure", "backend", "--group", "3", "--output", str(output)]) == 0
+    assert (
+        refresh.main(
+            ["measure", "backend", "--group", "3", "--output", str(output)],
+            target_path=source,
+            run_process=_fail_once_then_record,
+        )
+        == 0
+    )
     assert attempts == 2
     assert json.loads(output.read_text()) == {
         "tests/components/agent/test_recorded.py::test_one": 1.0
     }
 
 
-def test_measure_e2e_uses_the_ci_pytest_arguments(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_measure_e2e_uses_the_ci_pytest_arguments(tmp_path: Path) -> None:
     """An e2e measurement must include CI's verbosity, worker, and split flags."""
     source = tmp_path / ".test_durations"
     source.write_text('{"tests/e2e/test_existing.py::test_one": 1.5}\n')
     output = tmp_path / "e2e-2.json"
-    monkeypatch.setattr(refresh, "DURATIONS_PATH", source)
 
     def _record_e2e_arguments(
-        pytest_args: list[str],
-        durations_path: Path,
-        *,
-        coverage: bool,
-    ) -> int:
+        argv: Sequence[str], *, cwd: Path, check: Literal[False]
+    ) -> subprocess.CompletedProcess[bytes]:
+        pytest_args, durations_path, coverage = _suite_arguments(argv, cwd, check)
         assert pytest_args == [
             "tests/e2e/",
             "-v",
@@ -272,11 +274,16 @@ def test_measure_e2e_uses_the_ci_pytest_arguments(
         ]
         assert coverage is False
         durations_path.write_text('{"tests/e2e/test_recorded.py::test_one": 1.0}\n')
-        return 0
+        return subprocess.CompletedProcess(argv, 0)
 
-    monkeypatch.setattr(refresh, "run_suite", _record_e2e_arguments)
-
-    assert refresh.main(["measure", "e2e", "--group", "2", "--output", str(output)]) == 0
+    assert (
+        refresh.main(
+            ["measure", "e2e", "--group", "2", "--output", str(output)],
+            target_path=source,
+            run_process=_record_e2e_arguments,
+        )
+        == 0
+    )
 
 
 def _write_complete_measurements(durations_dir: Path) -> None:
@@ -291,72 +298,88 @@ def _write_complete_measurements(durations_dir: Path) -> None:
         )
 
 
-def test_merge_refuses_incomplete_shard_measurements_without_overwriting(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_merge_refuses_incomplete_shard_measurements_without_overwriting(tmp_path: Path) -> None:
     """A missing successful shard must not publish an incomplete timing model."""
     target = tmp_path / ".test_durations"
     target.write_text('{"tests/components/agent/test_old.py::test_one": 1.5}\n')
     durations_dir = tmp_path / "durations"
     durations_dir.mkdir()
-    monkeypatch.setattr(refresh, "DURATIONS_PATH", target)
 
     _write_complete_measurements(durations_dir)
     (durations_dir / "e2e-4.json").unlink()
 
-    assert refresh.main(["merge", "--durations-dir", str(durations_dir)]) == 1
+    assert (
+        refresh.main(
+            ["merge", "--durations-dir", str(durations_dir)],
+            target_path=target,
+            run_process=_forbid_process,
+        )
+        == 1
+    )
     assert target.read_text() == '{"tests/components/agent/test_old.py::test_one": 1.5}\n'
 
 
-def test_merge_refuses_empty_shard_measurement_without_overwriting(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_merge_refuses_empty_shard_measurement_without_overwriting(tmp_path: Path) -> None:
     """An empty artifact cannot erase the already-committed timing model."""
     target = tmp_path / ".test_durations"
     target.write_text('{"tests/components/agent/test_old.py::test_one": 1.5}\n')
     durations_dir = tmp_path / "durations"
     durations_dir.mkdir()
-    monkeypatch.setattr(refresh, "DURATIONS_PATH", target)
     _write_complete_measurements(durations_dir)
     (durations_dir / "backend-1.json").write_text("{}")
 
-    assert refresh.main(["merge", "--durations-dir", str(durations_dir)]) == 1
+    assert (
+        refresh.main(
+            ["merge", "--durations-dir", str(durations_dir)],
+            target_path=target,
+            run_process=_forbid_process,
+        )
+        == 1
+    )
     assert target.read_text() == '{"tests/components/agent/test_old.py::test_one": 1.5}\n'
 
 
-def test_merge_refuses_duplicate_shard_measurement_without_overwriting(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_merge_refuses_duplicate_shard_measurement_without_overwriting(tmp_path: Path) -> None:
     """Duplicated node ids cannot publish a nondeterministic timing model."""
     target = tmp_path / ".test_durations"
     target.write_text('{"tests/components/agent/test_old.py::test_one": 1.5}\n')
     durations_dir = tmp_path / "durations"
     durations_dir.mkdir()
-    monkeypatch.setattr(refresh, "DURATIONS_PATH", target)
     _write_complete_measurements(durations_dir)
     (durations_dir / "backend-2.json").write_text(
         '{"tests/components/agent/test_1.py::test_one": 1.0}'
     )
 
-    assert refresh.main(["merge", "--durations-dir", str(durations_dir)]) == 1
+    assert (
+        refresh.main(
+            ["merge", "--durations-dir", str(durations_dir)],
+            target_path=target,
+            run_process=_forbid_process,
+        )
+        == 1
+    )
     assert target.read_text() == '{"tests/components/agent/test_old.py::test_one": 1.5}\n'
 
 
-def test_merge_all_ci_shards_writes_the_compact_combined_durations(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_merge_all_ci_shards_writes_the_compact_combined_durations(tmp_path: Path) -> None:
     """Every successful CI-shaped shard contributes its recorded test duration."""
     target = tmp_path / ".test_durations"
     durations_dir = tmp_path / "durations"
     durations_dir.mkdir()
-    monkeypatch.setattr(refresh, "DURATIONS_PATH", target)
 
     _write_complete_measurements(durations_dir)
     (durations_dir / "backend-1.json").write_text(
         json.dumps({"tests/components/agent/test_1.py::test_one": 0.019})
     )
 
-    assert refresh.main(["merge", "--durations-dir", str(durations_dir)]) == 0
+    assert (
+        refresh.main(
+            ["merge", "--durations-dir", str(durations_dir)],
+            target_path=target,
+            run_process=_forbid_process,
+        )
+        == 0
+    )
     combined = json.loads(target.read_text())
     assert len(combined) == 12
     assert combined["tests/components/agent/test_1.py::test_one"] == 0.019

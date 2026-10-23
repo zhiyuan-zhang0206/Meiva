@@ -8,10 +8,15 @@ import re
 import subprocess
 import sys
 import urllib.request
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
+from contextlib import AbstractContextManager
 from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, Literal, Protocol, cast
+
+if TYPE_CHECKING:
+    from base.host.net.ports import UrlOpener
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 MARKER = "<!-- weekly-dependency-audit -->"
@@ -21,6 +26,19 @@ _SEVERITY_RANK = {"critical": 4, "high": 3, "moderate": 2, "low": 1, "unknown": 
 _ACTIONABLE_SEVERITIES = frozenset({"critical", "high", "unknown"})
 
 Fetch = Callable[[str], Any]
+
+
+class AuditProcess(Protocol):
+    def __call__(
+        self,
+        argv: Sequence[str],
+        /,
+        *,
+        timeout: float,
+        capture_output: Literal[True],
+        text: Literal[True],
+        cwd: Path | None = None,
+    ) -> subprocess.CompletedProcess[str]: ...
 
 
 @dataclass(frozen=True)
@@ -51,32 +69,25 @@ def _version_key(version: str) -> tuple[int, ...]:
     return tuple(int(part) for part in re.findall(r"\d+", version.lstrip("v")))
 
 
-def _fetch_json(url: str) -> Any:
+def _fetch_json(url: str, *, open_url: UrlOpener) -> Any:
     request = urllib.request.Request(url, headers={"Accept": "application/json"})
-    with urllib.request.urlopen(request, timeout=30) as response:
+    with open_url(request, 30) as response:
         return json.load(response)
 
 
-def _fetch_text(url: str) -> str:
-    with urllib.request.urlopen(url, timeout=30) as response:
+def _fetch_text(url: str, *, open_url: UrlOpener) -> str:
+    with open_url(url, 30) as response:
         return response.read().decode()
 
 
-def _gh_api(path: str) -> Any:
-    result = subprocess.run(
-        ["gh", "api", path],
-        capture_output=True,
-        text=True,
-        check=True,
-        timeout=60,
-    )
-    return json.loads(result.stdout)
+def _gh_api(path: str, *, run: AuditProcess) -> Any:
+    return json.loads(_gh(["api", path], run=run))
 
 
 # meiva:note
 # uv audit JSON carries no severity; each advisory id is graded through OSV's reviewed severity, and an advisory OSV cannot grade is unknown and counts as actionable.
 # meiva:link scripts/ci/docs/dependency-audit.meiva.okf.md
-def osv_severity(advisory_ids: list[str], fetch: Fetch = _fetch_json) -> str:
+def osv_severity(advisory_ids: list[str], fetch: Fetch) -> str:
     for advisory_id in advisory_ids:
         try:
             record = fetch(f"https://api.osv.dev/v1/vulns/{advisory_id}")
@@ -171,8 +182,8 @@ def npm_vulnerabilities(
 # meiva:note
 # An audit tool exiting 1 with complete JSON findings is accepted; non-JSON output, an error payload or any other exit code raises as an incomplete audit.
 # meiva:link scripts/ci/docs/dependency-audit.meiva.okf.md
-def run_json(argv: list[str], cwd: Path) -> dict[str, Any]:
-    result = subprocess.run(argv, capture_output=True, text=True, cwd=cwd, timeout=600, check=False)
+def run_json(argv: list[str], cwd: Path, *, run: AuditProcess) -> dict[str, Any]:
+    result = run(argv, capture_output=True, text=True, cwd=cwd, timeout=600)
     try:
         parsed: Any = json.loads(result.stdout)
     except json.JSONDecodeError as exc:
@@ -323,22 +334,22 @@ def _cell(text: str) -> str:
     return text.replace("|", "\\|").replace("\n", " ")[:200]
 
 
-def _gh(argv: list[str]) -> str:
-    return subprocess.run(
-        ["gh", *argv],
-        capture_output=True,
-        text=True,
-        check=True,
-        timeout=60,
-    ).stdout
+def _gh(argv: list[str], *, run: AuditProcess) -> str:
+    result = run(["gh", *argv], capture_output=True, text=True, timeout=60)
+    result.check_returncode()
+    return result.stdout
+
+
+def _system_open(
+    target: str | urllib.request.Request, timeout: float
+) -> AbstractContextManager[Any]:
+    return urllib.request.urlopen(target, timeout=timeout)
 
 
 # meiva:note
 # The one tracked issue is located by its marker among non-pull-request issues, updated while the run is actionable, opened when missing, and closed with a comment when clean.
 # meiva:link scripts/ci/docs/dependency-audit.meiva.okf.md
-def sync_issue(
-    repo: str, body: str, *, actionable: bool, gh: Callable[[list[str]], str] = _gh
-) -> str:
+def sync_issue(repo: str, body: str, *, actionable: bool, gh: Callable[[list[str]], str]) -> str:
     marked = f'select((.body // "") | contains("{MARKER}"))'
     listing = gh(
         [
@@ -400,7 +411,7 @@ def sync_issue(
 # meiva:note
 # A run renders the marker-prefixed three-section report from the audit tools and the canonical pins, and runs `uv audit` with the uv version pinned in base/host/brew_pin.py.
 # meiva:link scripts/ci/docs/dependency-audit.meiva.okf.md
-def main(argv: list[str]) -> int:
+def main(argv: list[str], *, run: AuditProcess, open_url: UrlOpener) -> int:
     parser = argparse.ArgumentParser(description="Weekly dependency audit report")
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument(
@@ -420,10 +431,12 @@ def main(argv: list[str]) -> int:
             "json",
         ],
         _REPO_ROOT,
+        run=run,
     )
     npm_json = run_json(
         ["npm", "audit", "--json", "--registry=https://registry.npmjs.org"],
         _REPO_ROOT / "ui/web",
+        run=run,
     )
     lockfile = cast(
         "dict[str, Any]",
@@ -431,10 +444,10 @@ def main(argv: list[str]) -> int:
     )
     packages = cast("dict[str, Any]", lockfile.get("packages") or {})
     vulnerabilities = [
-        *python_vulnerabilities(uv_json, _fetch_json),
+        *python_vulnerabilities(uv_json, partial(_fetch_json, open_url=open_url)),
         *npm_vulnerabilities(npm_json, packages),
     ]
-    binaries = latest_binaries(_gh_api, _fetch_text)
+    binaries = latest_binaries(partial(_gh_api, run=run), partial(_fetch_text, open_url=open_url))
 
     report = render(vulnerabilities, binaries)
     args.out.write_text(report, encoding="utf-8")
@@ -443,9 +456,9 @@ def main(argv: list[str]) -> int:
         f"actionable={actionable} vulnerabilities={len(vulnerabilities)} behind={sum(b.behind for b in binaries)}"
     )
     if args.sync_issue:
-        print(sync_issue(args.sync_issue, report, actionable=actionable))
+        print(sync_issue(args.sync_issue, report, actionable=actionable, gh=partial(_gh, run=run)))
     return 0
 
 
 if __name__ == "__main__":
-    sys.exit(main(sys.argv[1:]))
+    sys.exit(main(sys.argv[1:], run=subprocess.run, open_url=_system_open))

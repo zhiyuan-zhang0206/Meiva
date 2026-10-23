@@ -9,17 +9,14 @@ reports, so no real coverage data is involved.
 from __future__ import annotations
 
 import json
+import os
+import sys
 from pathlib import Path
 
 import pytest
 
+from base.host.proc import run_bounded
 from scripts.ci import coverage_gates as gates
-
-
-@pytest.fixture(autouse=True)
-def _no_floors(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Isolate each test from the script's calibrated floor table."""
-    monkeypatch.setattr(gates, "FLOORS", {})
 
 
 def _files(classes: dict[str, tuple[int, int]]) -> dict[str, object]:
@@ -37,14 +34,12 @@ def _core_classes(covered: int = 9, valid: int = 10) -> dict[str, tuple[int, int
     return dict.fromkeys(_CORE, (covered, valid))
 
 
-def test_core_gate_passes_and_prints_table(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    monkeypatch.setattr(gates, "FLOORS", {"ops": 0.0, "services": 0.0, "meiva_builtins": 0.0})
+def test_core_gate_passes_and_prints_table(capsys: pytest.CaptureFixture[str]) -> None:
+    floors = {"ops": 0.0, "services": 0.0, "meiva_builtins": 0.0}
     files = _files(
         {**_core_classes(), "ops": (4, 10), "services": (3, 10), "meiva_builtins": (2, 10)}
     )
-    assert gates.check(files, threshold=85.0) == 0
+    assert gates.check(files, threshold=85.0, floors=floors) == 0
     out = capsys.readouterr().out
     assert "core domains agent+meiva+cli+gateway+base+ui: 90.0%" in out
     assert "ops" in out and "services" in out and "meiva_builtins" in out
@@ -52,28 +47,24 @@ def test_core_gate_passes_and_prints_table(
 
 def test_core_gate_fails_below_threshold(capsys: pytest.CaptureFixture[str]) -> None:
     files = _files(_core_classes(covered=8, valid=10))
-    assert gates.check(files, threshold=85.0) == 1
+    assert gates.check(files, threshold=85.0, floors={}) == 1
     out = capsys.readouterr().out
     assert "coverage gates FAILED" in out
     assert "80.0% below 85.0%" in out
 
 
-def test_domain_floor_fails_below_minimum(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    monkeypatch.setattr(gates, "FLOORS", {"ops": 50.0})
+def test_domain_floor_fails_below_minimum(capsys: pytest.CaptureFixture[str]) -> None:
+    floors = {"ops": 50.0}
     files = _files({"ops/deploy_spawn.py": (4, 10)})
-    assert gates.check(files, threshold=85.0) == 1
+    assert gates.check(files, threshold=85.0, floors=floors) == 1
     out = capsys.readouterr().out
     assert "ops coverage 40.0% below floor 50.0%" in out
 
 
-def test_subdomain_floor_aggregates_over_prefix(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_subdomain_floor_aggregates_over_prefix(capsys: pytest.CaptureFixture[str]) -> None:
     """A floor on "services/backup" covers every file under that prefix,
     independent of other services subdomains."""
-    monkeypatch.setattr(gates, "FLOORS", {"services/backup": 50.0})
+    floors = {"services/backup": 50.0}
     files = _files(
         {
             **_core_classes(),
@@ -82,57 +73,52 @@ def test_subdomain_floor_aggregates_over_prefix(
             "services/wake/heartbeat/daemon.py": (9, 10),
         }
     )
-    assert gates.check(files, threshold=85.0) == 0
+    assert gates.check(files, threshold=85.0, floors=floors) == 0
     out = capsys.readouterr().out
     assert "services/backup" in out and "60.0%" in out
 
 
-def test_zero_line_floored_domain_fails(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_zero_line_floored_domain_fails(capsys: pytest.CaptureFixture[str]) -> None:
     """A floored domain absent from the report must fail loudly (renamed
     package / broken source glob), never pass vacuously."""
-    monkeypatch.setattr(gates, "FLOORS", {"ops": 10.0})
+    floors = {"ops": 10.0}
     files = _files({"agent": (9, 10)})
-    assert gates.check(files, threshold=85.0) == 1
+    assert gates.check(files, threshold=85.0, floors=floors) == 1
     out = capsys.readouterr().out
     assert "ops has no measured lines" in out
 
 
-def test_zero_floor_still_fails_missing_domain(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_zero_floor_still_fails_missing_domain(capsys: pytest.CaptureFixture[str]) -> None:
     """The existence check is independent of the floor value: even at
     floor 0.0 a vanished domain must fail — the calibration-state table
     cannot mask a broken source glob."""
-    monkeypatch.setattr(gates, "FLOORS", {"ops": 0.0})
+    floors = {"ops": 0.0}
     files = _files(_core_classes())
-    assert gates.check(files, threshold=85.0) == 1
+    assert gates.check(files, threshold=85.0, floors=floors) == 1
     out = capsys.readouterr().out
     assert "ops has no measured lines" in out
 
 
-def test_zero_floor_passes_present_domain(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_zero_floor_passes_present_domain(capsys: pytest.CaptureFixture[str]) -> None:
     """The floor boundary is inclusive: a present domain at exactly its
     floor passes (rate >= floor, 0.0 >= 0.0)."""
-    monkeypatch.setattr(gates, "FLOORS", {"ops": 0.0})
+    floors = {"ops": 0.0}
     files = _files({**_core_classes(), "ops/deploy_spawn.py": (0, 10)})
-    assert gates.check(files, threshold=85.0) == 0
+    assert gates.check(files, threshold=85.0, floors=floors) == 0
     out = capsys.readouterr().out
     assert "coverage gates passed" in out
     assert "floor 0.0% ok" in out
 
 
-def test_env_threshold_override(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_env_threshold_override(tmp_path: Path) -> None:
     """BACKEND_COVERAGE_THRESHOLD keeps its ci.yml wiring: the script reads
     the same env the old inline gate read."""
     report = tmp_path / "coverage.json"
     report.write_text(json.dumps({"files": _files(_core_classes(covered=8, valid=10))}))
-    assert gates.main([str(report)]) == 1  # 80% below the 85% default
-    monkeypatch.setenv("BACKEND_COVERAGE_THRESHOLD", "80")
-    assert gates.main([str(report)]) == 0
+    env: dict[str, str] = {}
+    assert gates.main([str(report)], floors={}, env=env) == 1  # 80% below the 85% default
+    env = {"BACKEND_COVERAGE_THRESHOLD": "80"}
+    assert gates.main([str(report)], floors={}, env=env) == 0
 
 
 @pytest.mark.parametrize(
@@ -155,7 +141,7 @@ def test_main_rejects_malformed_report(
     report = tmp_path / "coverage.json"
     report.write_text(json.dumps(payload))
     with pytest.raises(TypeError, match=message):
-        gates.main([str(report)])
+        gates.main([str(report)], floors={}, env={})
     assert "coverage gates passed" not in capsys.readouterr().out
 
 
@@ -166,11 +152,39 @@ def test_line_counts_reject_non_integer_values(
 ) -> None:
     summary: dict[str, object] = {"covered_lines": 9, "num_statements": 10, field: value}
     with pytest.raises(TypeError, match=r"agent/x\.py: coverage line counts must be integers"):
-        gates.check({"agent/x.py": {"summary": summary}}, threshold=0)
+        gates.check({"agent/x.py": {"summary": summary}}, threshold=0, floors={})
     assert "coverage gates passed" not in capsys.readouterr().out
 
 
 @pytest.mark.parametrize("covered, total", [(-1, 10), (0, -1), (11, 10)])
 def test_line_counts_reject_impossible_totals(covered: int, total: int) -> None:
     with pytest.raises(ValueError, match="0 <= covered <= total"):
-        gates.check(_files({"agent/x.py": (covered, total)}), threshold=0)
+        gates.check(_files({"agent/x.py": (covered, total)}), threshold=0, floors={})
+
+
+@pytest.mark.parametrize(("ops_covered", "expected"), [(10, 0), (0, 1)])
+def test_bare_cli_composes_real_workflow_threshold_and_canonical_floors(
+    tmp_path: Path, ops_covered: int, expected: int
+) -> None:
+    report = tmp_path / "coverage.json"
+    classes = {
+        **_core_classes(covered=8),
+        "ops": (ops_covered, 10),
+        "services": (10, 10),
+        "meiva_builtins": (10, 10),
+    }
+    report.write_text(json.dumps({"files": _files(classes)}))
+    env = {key: value for key, value in os.environ.items() if key != "PYTHONPATH"} | {
+        "BACKEND_COVERAGE_THRESHOLD": "80"
+    }
+    result = run_bounded(
+        [sys.executable, "-S", str(Path(gates.__file__).resolve()), str(report)],
+        timeout=10,
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == expected, result.stderr
+    assert "threshold 80.0%" in result.stdout
+    assert ("ops coverage 0.0% below floor 90.0%" in result.stdout) is bool(expected)

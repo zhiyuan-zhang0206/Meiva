@@ -53,8 +53,9 @@ import json
 import subprocess
 import sys
 import tempfile
+from collections.abc import Sequence
 from pathlib import Path
-from typing import cast
+from typing import Literal, Protocol, cast
 
 from base.host.atomic_io import write_text_atomic
 
@@ -79,6 +80,12 @@ BACKEND_COVERAGE_ARGS = [
 ]
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 DURATIONS_PATH = _REPO_ROOT / ".test_durations"
+
+
+class SuiteProcess(Protocol):
+    def __call__(
+        self, argv: Sequence[str], /, *, cwd: Path, check: Literal[False]
+    ) -> subprocess.CompletedProcess[bytes]: ...
 
 
 def load_durations(path: Path) -> dict[str, float]:
@@ -108,6 +115,7 @@ def run_suite(
     durations_path: Path,
     *,
     coverage: bool,
+    run_process: SuiteProcess,
 ) -> int:
     """Run one suite with duration recording; return the pytest exit code.
 
@@ -134,17 +142,19 @@ def run_suite(
         ]
     )
     print(f"  running: {' '.join(cmd)}")
-    return subprocess.run(cmd, cwd=_REPO_ROOT, check=False).returncode  # noqa: S603 - fixed argv built from constants, no untrusted input
+    return run_process(cmd, cwd=_REPO_ROOT, check=False).returncode
 
 
-def _seed_shard_durations(path: Path) -> None:
+def _seed_shard_durations(path: Path, *, target_path: Path) -> None:
     """Give each shard CI's current timing model without sharing a writable file."""
-    source = load_durations(DURATIONS_PATH)
+    source = load_durations(target_path)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(source, sort_keys=True, separators=(",", ":")) + "\n")
 
 
-def _measure_shard(suite: str, group: int, output_path: Path) -> int:
+def _measure_shard(
+    suite: str, group: int, output_path: Path, *, target_path: Path, run_process: SuiteProcess
+) -> int:
     """Record one CI-equivalent shard, retrying only that isolated measurement."""
     if suite == "backend":
         groups = BACKEND_SHARDS
@@ -183,13 +193,13 @@ def _measure_shard(suite: str, group: int, output_path: Path) -> int:
     if not 1 <= group <= groups:
         print(f"{suite} group must be between 1 and {groups}, got {group}", file=sys.stderr)
         return 1
-    if output_path.resolve() == DURATIONS_PATH.resolve():
+    if output_path.resolve() == target_path.resolve():
         print("shard output must not overwrite .test_durations", file=sys.stderr)
         return 1
 
     for attempt in range(1, _MEASUREMENT_ATTEMPTS + 1):
-        _seed_shard_durations(output_path)
-        result = run_suite(pytest_args, output_path, coverage=coverage)
+        _seed_shard_durations(output_path, target_path=target_path)
+        result = run_suite(pytest_args, output_path, coverage=coverage, run_process=run_process)
         if result == 0:
             return 0
         print(
@@ -213,7 +223,7 @@ def _expected_measurement_paths(durations_dir: Path) -> list[Path] | None:
     return paths
 
 
-def _merge_shard_measurements(durations_dir: Path) -> int:
+def _merge_shard_measurements(durations_dir: Path, *, target_path: Path) -> int:
     """Merge complete shard artifacts into the committed timings file atomically."""
     paths = _expected_measurement_paths(durations_dir)
     if paths is None:
@@ -234,23 +244,23 @@ def _merge_shard_measurements(durations_dir: Path) -> int:
             return 1
         merged.update(measured)
 
-    refreshed = write_durations(merged)
+    refreshed = write_durations(merged, target_path=target_path)
     print(f"merged {len(paths)} shard measurements into {len(refreshed)} duration entries")
     return 0
 
 
-def write_durations(durations: dict[str, float]) -> dict[str, float]:
+def write_durations(durations: dict[str, float], *, target_path: Path) -> dict[str, float]:
     """Atomically write the canonical compact JSON format + trailing newline."""
     # pytest-split assigns unrecorded tests the known average. Dropping fast
     # measurements would therefore price them as unknown, often slow tests.
     rounded = {nodeid: round(value, 3) for nodeid, value in durations.items()}
     content = json.dumps(rounded, sort_keys=True, separators=(",", ":")) + "\n"
-    write_text_atomic(DURATIONS_PATH, content, encoding="utf-8", prefix=".test_durations.")
+    write_text_atomic(target_path, content, encoding="utf-8", prefix=".test_durations.")
     return rounded
 
 
-def _refresh_all() -> int:
-    previous = load_durations(DURATIONS_PATH)
+def _refresh_all(*, target_path: Path, run_process: SuiteProcess) -> int:
+    previous = load_durations(target_path)
     print(f"refreshing .test_durations (previous: {len(previous)} entries)")
 
     with tempfile.TemporaryDirectory(prefix="durations-") as tmp:
@@ -269,6 +279,7 @@ def _refresh_all() -> int:
             ],
             backend_path,
             coverage=True,
+            run_process=run_process,
         )
         if backend_rc != 0:
             print(
@@ -282,6 +293,7 @@ def _refresh_all() -> int:
             ["tests/e2e/", "-v", "-n", str(_E2E_WORKERS)],
             e2e_path,
             coverage=False,
+            run_process=run_process,
         )
         if e2e_rc != 0:
             print(
@@ -302,11 +314,11 @@ def _refresh_all() -> int:
                 }
             )
 
-        refreshed = write_durations(merged)
+        refreshed = write_durations(merged, target_path=target_path)
 
     e2e_count = sum(1 for nodeid in refreshed if nodeid.startswith("tests/e2e/"))
     print(
-        f"wrote {len(refreshed)} entries to {DURATIONS_PATH.name} "
+        f"wrote {len(refreshed)} entries to {target_path.name} "
         f"({len(refreshed) - e2e_count} backend, {e2e_count} e2e; "
         f"estimated total serial: {sum(refreshed.values()):.0f}s; "
         f"previous: {len(previous)} entries)"
@@ -329,17 +341,19 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: list[str] | None = None, *, target_path: Path, run_process: SuiteProcess) -> int:
     """Dispatch the legacy local refresh or the nightly isolation commands."""
     args = _parse_args([] if argv is None else argv)
     if args.command in (None, "refresh"):
-        return _refresh_all()
+        return _refresh_all(target_path=target_path, run_process=run_process)
     if args.command == "measure":
-        return _measure_shard(args.suite, args.group, args.output)
+        return _measure_shard(
+            args.suite, args.group, args.output, target_path=target_path, run_process=run_process
+        )
     if args.command == "merge":
-        return _merge_shard_measurements(args.durations_dir)
+        return _merge_shard_measurements(args.durations_dir, target_path=target_path)
     raise AssertionError(f"unhandled command: {args.command}")
 
 
 if __name__ == "__main__":
-    raise SystemExit(main(sys.argv[1:]))
+    raise SystemExit(main(sys.argv[1:], target_path=DURATIONS_PATH, run_process=subprocess.run))
