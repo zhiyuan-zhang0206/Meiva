@@ -231,7 +231,7 @@ def _extract_pg(jar_bytes: bytes, target: Path) -> None:
 # (pgvector builds are per-major: PGDG ships postgresql-<major>-pgvector,
 # Homebrew bottles carry per-major dirs).
 PGVECTOR_VERSION = "0.8.7"
-_PGVECTOR_SQL = f"vector--{PGVECTOR_VERSION}.sql"
+PGVECTOR_SQL = f"vector--{PGVECTOR_VERSION}.sql"
 
 # platform key -> (download URL, pinned sha256 of the whole artifact).
 # The deb is a plain HTTPS file; the bottle is a content-addressed ghcr.io
@@ -290,7 +290,7 @@ def ensure_pgvector() -> None:
     module_rel = (
         "lib/postgresql/vector.dylib" if key.startswith("darwin") else "lib/postgresql/vector.so"
     )
-    if (pg_dir / "share/postgresql/extension" / _PGVECTOR_SQL).exists() and (
+    if (pg_dir / "share/postgresql/extension" / PGVECTOR_SQL).exists() and (
         pg_dir / module_rel
     ).exists():
         return
@@ -363,8 +363,8 @@ def _pgvector_files_from_bottle(blob: bytes, major: str) -> dict[str, bytes]:
             "share/postgresql/extension/vector.control": _tar_member_bytes(
                 tar, f"{prefix}share/postgresql@{major}/extension/vector.control"
             ),
-            f"share/postgresql/extension/{_PGVECTOR_SQL}": _tar_member_bytes(
-                tar, f"{prefix}share/postgresql@{major}/extension/{_PGVECTOR_SQL}"
+            f"share/postgresql/extension/{PGVECTOR_SQL}": _tar_member_bytes(
+                tar, f"{prefix}share/postgresql@{major}/extension/{PGVECTOR_SQL}"
             ),
         }
 
@@ -388,8 +388,8 @@ def _pgvector_files_from_deb(blob: bytes, major: str) -> dict[str, bytes]:
             "share/postgresql/extension/vector.control": _tar_member_bytes(
                 tar, f"usr/share/postgresql/{major}/extension/vector.control"
             ),
-            f"share/postgresql/extension/{_PGVECTOR_SQL}": _tar_member_bytes(
-                tar, f"usr/share/postgresql/{major}/extension/{_PGVECTOR_SQL}"
+            f"share/postgresql/extension/{PGVECTOR_SQL}": _tar_member_bytes(
+                tar, f"usr/share/postgresql/{major}/extension/{PGVECTOR_SQL}"
             ),
         }
 

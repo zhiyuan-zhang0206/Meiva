@@ -97,8 +97,7 @@ async def test_invalid_inputs_are_rejected(state: str, questions: Any, match: st
     assert binding.calls == []
 
 
-async def test_missing_api_key_fails_through_require_key(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("FAKE_API_KEY", raising=False)
+async def test_missing_api_key_fails_through_require_key() -> None:
     binding = FakeBinding(_good())
 
     def build(_ctx: object) -> FakeBinding:
@@ -113,15 +112,11 @@ async def test_missing_api_key_fails_through_require_key(monkeypatch: pytest.Mon
     assert binding.calls == []
 
 
-async def test_a_build_failure_with_the_key_present_propagates_unchanged(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv("FAKE_API_KEY", "present")
-
+async def test_a_build_failure_with_the_key_present_propagates_unchanged() -> None:
     def build(_ctx: object) -> FakeBinding:
         raise RuntimeError("real bug in build")
 
-    catalog = catalog_with(FakeBinding(_good()), build=build)
+    catalog = catalog_with(FakeBinding(_good()), build=build, key_env="PATH")
     with pytest.raises(RuntimeError, match="real bug in build") as excinfo:
         await decide(MODEL, "hello", _QUESTIONS, catalog=catalog, usage_kind="test")
     assert not isinstance(excinfo.value, DecisionKeyMissingError)

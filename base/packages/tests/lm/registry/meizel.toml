@@ -1,3 +1,0 @@
-[debt.first-party-patch]
-"test_settings.py#monkeypatch.setattr base.config.get_field" = 1
-"test_settings.py#monkeypatch.setattr base.config.settings.agent.compact_reminder_fraction" = 1

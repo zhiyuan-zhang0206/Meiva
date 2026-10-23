@@ -133,8 +133,7 @@ def test_launch_failure_remains_visible_without_a_fresh_host_probe() -> None:
         host_online=None,
         probe_at=None,
         admission_at=None,
-        launch_failure_reason="launch_unreachable",
-        launch_failure_at=failed_at,
+        launch_failure=("launch_unreachable", failed_at),
         now=NOW,
     )
     assert observed.reason == AvailabilityReason.LAUNCH_UNREACHABLE

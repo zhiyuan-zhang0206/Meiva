@@ -23,7 +23,6 @@
 "test_storage_ownership.py#monkeypatch.setattr base.cluster.postgres.OwnedProcess.capture" = 3
 "test_storage_ownership.py#monkeypatch.setattr base.cluster.postgres.OwnedProcess.live" = 4
 "test_storage_ownership.py#monkeypatch.setattr base.cluster.postgres.OwnedProcess.send_signal" = 2
-"test_storage_ownership.py#monkeypatch.setattr base.cluster.postgres._read" = 2
 "test_storage_ownership.py#monkeypatch.setattr base.cluster.postgres.capture_tree" = 1
 "test_storage_ownership.py#monkeypatch.setattr base.cluster.postgres.observe" = 3
 "test_storage_ownership.py#monkeypatch.setattr base.cluster.postgres.os.getsid" = 2

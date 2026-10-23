@@ -183,22 +183,22 @@ def test_role_and_wire_shape_frozen(cls: type, expected_role: str, extra: dict[s
 def test_role_registry_matches_event_union() -> None:
     from typing import get_args
 
-    from base.events.live.projection import _ROLE_CLASSES, Event
+    from base.events.live.projection import ROLE_CLASSES, Event
 
     union = get_args(Event)[0]
     union_classes = set(get_args(union))
-    registry_classes = {cls for cls, _ in _ROLE_CLASSES}
+    registry_classes = {cls for cls, _ in ROLE_CLASSES}
     assert union_classes == registry_classes, (
-        f"Event union ({len(union_classes)} classes) and _ROLE_CLASSES "
+        f"Event union ({len(union_classes)} classes) and ROLE_CLASSES "
         f"({len(registry_classes)} entries) drifted apart"
     )
 
 
 def test_derived_role_sets_match_registry_flags() -> None:
-    from base.events.live.projection import _ROLE_CLASSES, GLOBAL_ROLES, SYSTEM_ROLES
+    from base.events.live.projection import GLOBAL_ROLES, ROLE_CLASSES, SYSTEM_ROLES
 
-    assert frozenset(cls.model_fields["role"].default for cls, _ in _ROLE_CLASSES) == SYSTEM_ROLES
+    assert frozenset(cls.model_fields["role"].default for cls, _ in ROLE_CLASSES) == SYSTEM_ROLES
     assert (
-        frozenset(cls.model_fields["role"].default for cls, g in _ROLE_CLASSES if g) == GLOBAL_ROLES
+        frozenset(cls.model_fields["role"].default for cls, g in ROLE_CLASSES if g) == GLOBAL_ROLES
     )
     assert GLOBAL_ROLES <= SYSTEM_ROLES

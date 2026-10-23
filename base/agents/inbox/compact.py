@@ -1,5 +1,7 @@
 """The native compact request inbound, written for graph and history producers."""
 
+from collections.abc import Callable
+
 import psycopg
 
 from base.agents.impersonation.wake import publish_inbound_wake
@@ -7,10 +9,16 @@ from base.agents.inbox.control_delivery import insert_compact_in_transaction
 from base.agents.inbox.insert import emit_prepared_event
 from base.db import Database
 from base.events.live.bus import EventBus
+from base.telemetry import Event
 
 
 def insert_compact_request_inbound(
-    db: psycopg.Connection, agent_id: int, *, database: Database, bus: EventBus
+    db: psycopg.Connection,
+    agent_id: int,
+    *,
+    database: Database,
+    bus: EventBus,
+    emit_event: Callable[[Event | None], None] = emit_prepared_event,
 ) -> int:
     """Insert the native compact envelope used by graph/history producers.
 
@@ -21,7 +29,7 @@ def insert_compact_request_inbound(
     with db.cursor() as cur:
         inbound_id, compact_event = insert_compact_in_transaction(cur, agent_id)
     db.commit()
-    emit_prepared_event(compact_event)
+    emit_event(compact_event)
     # Publish to Redis for agent wake-up (see insert_inbound_message + the
     # publish_inbound_wake docstring).
     publish_inbound_wake(database, bus, agent_id, str(inbound_id))

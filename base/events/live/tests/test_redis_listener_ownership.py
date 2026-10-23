@@ -1,4 +1,5 @@
 import asyncio
+from collections.abc import Callable
 from typing import Any
 
 import pytest
@@ -76,13 +77,13 @@ class Redis:
         self.closed = True
 
 
-def client(monkeypatch: pytest.MonkeyPatch, *clients: Redis) -> None:
+def client_factory(*clients: Redis) -> Callable[..., Redis]:
     remaining = iter(clients)
 
     def from_url(_url: str, **_kwargs: object) -> Redis:
         return next(remaining)
 
-    monkeypatch.setattr(redis_listener.aredis.Redis, "from_url", from_url)
+    return from_url
 
 
 async def finished(task: asyncio.Task[Any]) -> None:
@@ -102,15 +103,14 @@ async def reports() -> Any:
         loop.set_exception_handler(old)
 
 
-async def test_open_deadline_and_stop_do_not_wait_for_rollback(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+async def test_open_deadline_and_stop_do_not_wait_for_rollback() -> None:
     pubsub = PubSub()
     pubsub.hold_subscribe = True
     redis = Redis(pubsub)
     redis.close_release.clear()
-    client(monkeypatch, redis)
-    listener = redis_listener.RedisInboundListener("redis://unused", 7003)
+    listener = redis_listener.RedisInboundListener(
+        "redis://unused", 7003, redis_factory=client_factory(redis)
+    )
     waiter = asyncio.create_task(listener.wait_one(0.02))
     try:
         await pubsub.subscribed.wait()
@@ -134,14 +134,14 @@ async def test_open_deadline_and_stop_do_not_wait_for_rollback(
 
 
 async def test_late_consume_bug_is_visible_after_stop_and_raised_on_next_join(
-    monkeypatch: pytest.MonkeyPatch,
     reports: list[dict[str, Any]],
 ) -> None:
     pubsub = PubSub()
     pubsub.error = None
     redis = Redis(pubsub)
-    client(monkeypatch, redis)
-    listener = redis_listener.RedisInboundListener("redis://unused", 7004)
+    listener = redis_listener.RedisInboundListener(
+        "redis://unused", 7004, redis_factory=client_factory(redis)
+    )
     waiter = asyncio.create_task(listener.wait_one(30))
     try:
         await pubsub.reading.wait()
@@ -168,7 +168,6 @@ async def test_late_consume_bug_is_visible_after_stop_and_raised_on_next_join(
 
 
 async def test_same_tick_unknown_result_and_caller_cancel_is_not_lost(
-    monkeypatch: pytest.MonkeyPatch,
     reports: list[dict[str, Any]],
 ) -> None:
     pubsub = PubSub()
@@ -176,8 +175,9 @@ async def test_same_tick_unknown_result_and_caller_cancel_is_not_lost(
     error = LateError("subscribe invariant")
     pubsub.error = error
     redis = Redis(pubsub)
-    client(monkeypatch, redis)
-    listener = redis_listener.RedisInboundListener("redis://unused", 7005)
+    listener = redis_listener.RedisInboundListener(
+        "redis://unused", 7005, redis_factory=client_factory(redis)
+    )
     waiter = asyncio.create_task(listener.wait_one(30))
     pubsub.parent = waiter
     try:
@@ -197,14 +197,14 @@ async def test_same_tick_unknown_result_and_caller_cancel_is_not_lost(
 
 
 async def test_active_unknown_error_reaches_caller_once(
-    monkeypatch: pytest.MonkeyPatch,
     reports: list[dict[str, Any]],
 ) -> None:
     pubsub = PubSub()
     error = LateError("active subscribe")
     pubsub.error = error
-    client(monkeypatch, Redis(pubsub))
-    listener = redis_listener.RedisInboundListener("redis://unused", 7006)
+    listener = redis_listener.RedisInboundListener(
+        "redis://unused", 7006, redis_factory=client_factory(Redis(pubsub))
+    )
     with pytest.raises(LateError) as captured:
         await listener.wait_one(1)
     assert captured.value is error
@@ -212,15 +212,14 @@ async def test_active_unknown_error_reaches_caller_once(
     assert await listener.stop(timeout=1) == ()
 
 
-async def test_abandoned_open_cannot_attach_to_replacement_generation(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+async def test_abandoned_open_cannot_attach_to_replacement_generation() -> None:
     old = PubSub()
     old.hold_subscribe = old.suppress_subscribe_cancel = True
     new = PubSub()
     first, second = Redis(old), Redis(new)
-    client(monkeypatch, first, second)
-    listener = redis_listener.RedisInboundListener("redis://unused", 7007)
+    listener = redis_listener.RedisInboundListener(
+        "redis://unused", 7007, redis_factory=client_factory(first, second)
+    )
     waiter = asyncio.create_task(listener.wait_one(0.02))
     try:
         await old.subscribed.wait()
@@ -240,15 +239,16 @@ async def test_abandoned_open_cannot_attach_to_replacement_generation(
     assert new.closed and second.closed
 
 
-async def test_consume_grace_returns_while_handle_close_is_unfinished(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+async def test_consume_grace_returns_while_handle_close_is_unfinished() -> None:
     pubsub = PubSub()
     redis = Redis(pubsub)
     redis.close_release.clear()
-    client(monkeypatch, redis)
-    monkeypatch.setattr(redis_listener, "_CONSUME_ABANDON_GRACE", 0.02)
-    listener = redis_listener.RedisInboundListener("redis://unused", 7008)
+    listener = redis_listener.RedisInboundListener(
+        "redis://unused",
+        7008,
+        consume_abandon_grace=0.02,
+        redis_factory=client_factory(redis),
+    )
     waiter = asyncio.create_task(listener.wait_one(0.02))
     try:
         await pubsub.reading.wait()
@@ -270,13 +270,13 @@ async def test_consume_grace_returns_while_handle_close_is_unfinished(
 
 
 async def test_expected_late_network_error_does_not_fail_stop(
-    monkeypatch: pytest.MonkeyPatch,
     reports: list[dict[str, Any]],
 ) -> None:
     pubsub = PubSub()
     redis = Redis(pubsub)
-    client(monkeypatch, redis)
-    listener = redis_listener.RedisInboundListener("redis://unused", 7009)
+    listener = redis_listener.RedisInboundListener(
+        "redis://unused", 7009, redis_factory=client_factory(redis)
+    )
     waiter = asyncio.create_task(listener.wait_one(30))
     try:
         await pubsub.reading.wait()
@@ -296,7 +296,6 @@ async def test_expected_late_network_error_does_not_fail_stop(
 
 
 async def test_completed_active_open_stays_owned_until_caller_claims_error(
-    monkeypatch: pytest.MonkeyPatch,
     reports: list[dict[str, Any]],
 ) -> None:
     retained: list[bool] = []
@@ -315,8 +314,9 @@ async def test_completed_active_open_stays_owned_until_caller_claims_error(
 
     pubsub = ReceiptPubSub()
     pubsub.error = error
-    client(monkeypatch, Redis(pubsub))
-    listener = redis_listener.RedisInboundListener("redis://unused", 7013)
+    listener = redis_listener.RedisInboundListener(
+        "redis://unused", 7013, redis_factory=client_factory(Redis(pubsub))
+    )
     with pytest.raises(LateError) as captured:
         await listener.wait_one(1)
     assert captured.value is error
@@ -327,7 +327,6 @@ async def test_completed_active_open_stays_owned_until_caller_claims_error(
 
 
 async def test_unknown_cleanup_typeerror_is_not_the_redis_transport_quirk(
-    monkeypatch: pytest.MonkeyPatch,
     reports: list[dict[str, Any]],
 ) -> None:
     error = TypeError("cleanup invariant")
@@ -338,8 +337,9 @@ async def test_unknown_cleanup_typeerror_is_not_the_redis_transport_quirk(
 
     pubsub = FailingClosePubSub()
     redis = Redis(pubsub)
-    client(monkeypatch, redis)
-    listener = redis_listener.RedisInboundListener("redis://unused", 7014)
+    listener = redis_listener.RedisInboundListener(
+        "redis://unused", 7014, redis_factory=client_factory(redis)
+    )
     await listener.ensure_listening()
     with pytest.raises(TypeError) as captured:
         await listener.stop(timeout=1)
@@ -350,7 +350,6 @@ async def test_unknown_cleanup_typeerror_is_not_the_redis_transport_quirk(
 
 
 async def test_unknown_probe_error_reaches_active_caller(
-    monkeypatch: pytest.MonkeyPatch,
     reports: list[dict[str, Any]],
 ) -> None:
     error = LateError("probe invariant")
@@ -363,8 +362,9 @@ async def test_unknown_probe_error_reaches_active_caller(
     pubsub.message = {"type": "message"}
     pubsub.release.set()
     redis = Redis(pubsub)
-    client(monkeypatch, redis)
-    listener = redis_listener.RedisInboundListener("redis://unused", 7015)
+    listener = redis_listener.RedisInboundListener(
+        "redis://unused", 7015, redis_factory=client_factory(redis)
+    )
     try:
         await listener.ensure_listening()
         with pytest.raises(LateError) as captured:
@@ -378,14 +378,16 @@ async def test_unknown_probe_error_reaches_active_caller(
 
 @pytest.mark.parametrize("boundary", ["consume_timeout", "consume_transport"])
 async def test_old_phase_cleanup_preserves_replacement_subscription(
-    monkeypatch: pytest.MonkeyPatch,
     boundary: str,
 ) -> None:
     old, new = PubSub(), PubSub()
     first, second = Redis(old), Redis(new)
-    client(monkeypatch, first, second)
-    monkeypatch.setattr(redis_listener, "_CONSUME_ABANDON_GRACE", 0.02)
-    listener = redis_listener.RedisInboundListener("redis://unused", 7016)
+    listener = redis_listener.RedisInboundListener(
+        "redis://unused",
+        7016,
+        consume_abandon_grace=0.02,
+        redis_factory=client_factory(first, second),
+    )
     waiter = asyncio.create_task(listener.wait_one(0.3))
     try:
         await asyncio.wait_for(old.reading.wait(), timeout=1)

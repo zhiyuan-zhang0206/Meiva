@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Literal
+from typing import Literal, TypedDict, Unpack
 
 Category = Literal["audit", "telemetry", "log"]
 EventTier = Literal["business", "anomaly", "observation", "noise"]
@@ -114,25 +114,28 @@ def telemetry_audit_event(
     )
 
 
+class TelemetryEventOptions(TypedDict, total=False):
+    payload: type[object] | None
+    family: str | None
+    destination: Literal["events", "file"]
+    tier: EventTier
+    site: str
+    persist: bool
+
+
 def telemetry_event(
     name: str,
     doc: str,
-    *,
-    payload: type[object] | None = None,
-    family: str | None = None,
-    destination: Literal["events", "file"] = "events",
-    tier: EventTier = "observation",
-    site: str = "",
-    persist: bool = False,
+    **options: Unpack[TelemetryEventOptions],
 ) -> EventSpec:
     return EventSpec(
         name=name,
         category="telemetry",
-        tier=tier,
-        payload=payload,
-        family=family,
-        destination=destination,
+        tier=options.get("tier", "observation"),
+        payload=options.get("payload"),
+        family=options.get("family"),
+        destination=options.get("destination", "events"),
         doc=doc,
-        site=site,
-        persist=persist,
+        site=options.get("site", ""),
+        persist=options.get("persist", False),
     )

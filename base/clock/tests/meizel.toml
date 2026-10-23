@@ -7,5 +7,3 @@ exports = ["fakes.py", "manual_timers.py"]
 [debt.first-party-patch]
 "fakes.py#monkeypatch.setattr base.clock.Clock.now_timestamp" = 1
 "fakes.py#monkeypatch.setattr base.clock.Clock.zone" = 1
-"test_clock.py#monkeypatch.setattr base.config.settings.general.message_timestamp_weekday" = 1
-"test_clock.py#monkeypatch.setattr base.config.settings.general.timezone" = 1

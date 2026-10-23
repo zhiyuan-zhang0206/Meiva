@@ -47,6 +47,7 @@ def provider(
     binding: DecisionBinding,
     *,
     prefix: str = "fake-",
+    key_env: str = "FAKE_API_KEY",
     models: Mapping[str, DecisionModelSpec] | None = None,
     build: Callable[[DecisionBuildContext], DecisionBinding] | None = None,
 ) -> DecisionProviderContribution:
@@ -54,7 +55,7 @@ def provider(
     return DecisionProviderContribution(
         prefix=prefix,
         display_name="Fake",
-        key_env="FAKE_API_KEY",
+        key_env=key_env,
         build=build or (lambda _ctx: binding),
         models=rows,
         pricing={model_id: price() for model_id in rows},

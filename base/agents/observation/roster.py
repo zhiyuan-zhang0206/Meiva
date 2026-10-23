@@ -8,7 +8,7 @@ History uses descending-ID keyset pages; no implicit list-all operation exists.
 from __future__ import annotations
 
 from collections.abc import Callable
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any, Literal
 
 import psycopg
@@ -169,8 +169,11 @@ def _card(
         host_online=host_online,
         probe_at=probe_at,
         admission_at=datetime.fromisoformat(admission_at) if admission_at else None,
-        launch_failure_reason=launch_failure_reason,
-        launch_failure_at=datetime.fromisoformat(launch_failure_at) if launch_failure_at else None,
+        now=datetime.now(UTC),
+        launch_failure=(
+            launch_failure_reason,
+            datetime.fromisoformat(launch_failure_at) if launch_failure_at else None,
+        ),
     )
     return AgentCard.model_validate(data)
 

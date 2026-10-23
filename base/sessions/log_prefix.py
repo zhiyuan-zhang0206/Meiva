@@ -5,15 +5,13 @@ content. Only newly created files receive a header; existing logs stay intact.
 """
 
 import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 
-def session_log_header(name: str, *, pid: int | None = None, now: datetime | None = None) -> bytes:
+def session_log_header(name: str, *, pid: int | None = None, now: datetime) -> bytes:
     """Return a UTF-8 session identity line with a UTC start timestamp."""
-    start = datetime.now(timezone.utc).isoformat()  # noqa: UP017 - task specifies timezone.utc
-    if now is not None:
-        start = now.isoformat()
+    start = now.isoformat()
     process = f" pid={pid}" if pid is not None else ""
     return f"--- meiva session {name} start={start}{process} ---\n".encode()
 
@@ -26,7 +24,8 @@ def open_session_log(path: Path, name: str, *, pid: int | None = None) -> tuple[
     except FileExistsError:
         return os.open(path, flags | os.O_APPEND), False
     try:
-        header = session_log_header(name, pid=pid)
+        created_at = datetime.fromtimestamp(os.fstat(fd).st_mtime, tz=UTC)
+        header = session_log_header(name, pid=pid, now=created_at)
         while header:
             written = os.write(fd, header)
             if written == 0:

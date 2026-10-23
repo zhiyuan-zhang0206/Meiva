@@ -7,7 +7,7 @@ Directory cards and the live tree have their own bounded read contract in
 from __future__ import annotations
 
 from collections.abc import Callable
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
@@ -247,8 +247,8 @@ def _row_to_snapshot(
                 host_online=row[17],
                 probe_at=row[16],
                 admission_at=row[18],
-                launch_failure_reason=row[19],
-                launch_failure_at=row[20],
+                now=datetime.now(UTC),
+                launch_failure=(row[19], row[20]),
             ),
         }
     )

@@ -57,14 +57,17 @@ def issue(
     )
 
 
-def _open(issued: unit.IssuedBundle) -> unit.Bundle:
+def open_issued(issued: unit.IssuedBundle) -> unit.Bundle:
     return unit.open_bundle(issued.envelope, issued.transport_key)
+
+
+_open = open_issued
 
 
 def install(home: Path, issued: unit.IssuedBundle, **kwargs: Any) -> unit.UnitCapability:
     kwargs.setdefault("served_endpoint", ENDPOINT)
     kwargs.setdefault("probe", no_probe)
-    return unit.install_bundle(home, _open(issued), machine=MACHINE, **kwargs)
+    return unit.install_bundle(home, open_issued(issued), machine=MACHINE, **kwargs)
 
 
 @pytest.fixture

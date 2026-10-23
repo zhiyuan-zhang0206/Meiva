@@ -6,9 +6,3 @@ exports = ["runner_logins.py", "unit_capability_support.py"]
 
 [debt.env-patch]
 "unit_capability_support.py#monkeypatch.setenv os.environ.MEIVA_HOME" = 1
-
-[debt.first-party-patch]
-"test_runner_min_code_version.py#monkeypatch.setattr base.config.settings.data_plane.db_url" = 1
-
-[debt.private-name]
-"test_unit_capability.py -> unit_capability_support.py#_open" = 1

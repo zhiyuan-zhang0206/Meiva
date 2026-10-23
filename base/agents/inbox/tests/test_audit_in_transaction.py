@@ -5,7 +5,7 @@ from typing import Any
 import psycopg
 import pytest
 
-from base.agents.inbox import compact, insert
+from base.agents.inbox import insert
 from base.agents.inbox.compact import insert_compact_request_inbound
 from base.agents.inbox.insert import insert_inbound_message, insert_spawn_prompt_in_transaction
 from base.db import Database, create_agent
@@ -65,7 +65,6 @@ def test_an_inbound_whose_audit_fact_cannot_be_recorded_is_not_written(
 
 def test_a_compact_request_is_recorded_before_it_is_emitted(
     db_conn: psycopg.Connection,
-    monkeypatch: pytest.MonkeyPatch,
     database: Database,
     event_bus: EventBus,
 ) -> None:
@@ -75,9 +74,9 @@ def test_a_compact_request_is_recorded_before_it_is_emitted(
     def emit(_event: Event | None) -> None:
         seen_at_emit.append(len(_audit(db_conn, agent_id, "compact")))
 
-    monkeypatch.setattr(compact, "emit_prepared_event", emit)
-
-    insert_compact_request_inbound(db_conn, agent_id, bus=event_bus, database=database)
+    insert_compact_request_inbound(
+        db_conn, agent_id, bus=event_bus, database=database, emit_event=emit
+    )
 
     assert seen_at_emit == [1]
     assert _audit(db_conn, agent_id, "compact") == [("user", None, {"compact_kind": "request"})]

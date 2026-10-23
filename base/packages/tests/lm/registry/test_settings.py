@@ -4,7 +4,7 @@ from dataclasses import fields as dataclass_fields
 
 import pytest
 
-from base.config import get_field, per_agent_field_names, settings
+from base.config import get_field, per_agent_field_names
 from base.lm.catalog import ModelCatalog
 from base.lm.registry import (
     ModelSpec,
@@ -268,16 +268,14 @@ def test_explain_setting_names_the_winning_layer(
     assert resolved.explicit_value == explicit
 
 
-def test_explain_setting_agrees_with_resolve_setting(
-    monkeypatch: pytest.MonkeyPatch, *, model_catalog: ModelCatalog
-) -> None:
-    monkeypatch.setattr(settings.agent, "compact_reminder_fraction", 0.33)
+def test_explain_setting_agrees_with_resolve_setting(*, model_catalog: ModelCatalog) -> None:
     for setting in tuning_field_names():
+        explicit = 0.33 if setting == "compact_reminder_fraction" else get_field(setting)
         runtime = resolve_setting(
-            setting, model="claude-opus-5", models=model_catalog.models, explicit=get_field(setting)
+            setting, model="claude-opus-5", models=model_catalog.models, explicit=explicit
         )
         explained = explain_setting(
-            setting, model="claude-opus-5", explicit=get_field(setting), models=model_catalog.models
+            setting, model="claude-opus-5", explicit=explicit, models=model_catalog.models
         )
         assert explained.value == runtime, setting
 
@@ -297,17 +295,9 @@ def test_compact_fractions_are_per_agent_overridable() -> None:
 
 
 def test_resolve_setting_degrades_when_owning_domain_not_in_profile(
-    monkeypatch: pytest.MonkeyPatch, *, model_catalog: ModelCatalog
+    *, model_catalog: ModelCatalog
 ) -> None:
     # meiva:link base/packages/tests/lm/docs/contracts.meiva.okf.md
-    import base.config
-
-    def _boom(name: str) -> object:
-        raise AttributeError(
-            "'gateway' process profile does not construct the 'agent' config domain"
-        )
-
-    monkeypatch.setattr(base.config, "get_field", _boom)
     value = resolve_setting(
         "auto_compact_fraction",
         model="deepseek-flash",

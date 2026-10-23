@@ -19,11 +19,8 @@ def test_delivery_policy_defaults() -> None:
 @pytest.mark.parametrize(
     "name", ["impersonation_ack_window_seconds", "impersonation_max_delivery_attempts"]
 )
-def test_delivery_policy_is_configurable_and_bootstrapped(
-    name: str, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_delivery_policy_is_configurable_and_bootstrapped(name: str, tmp_path: Path) -> None:
     from base import config
-    from base.host.env import dotenv_file
 
     alias = f"MEIVA_{name.upper()}"
     info = cast(FieldInfo, FIELD_INFOS[name])
@@ -33,9 +30,7 @@ def test_delivery_policy_is_configurable_and_bootstrapped(
     assert extra["scope"] == "cluster-pinned"
     assert extra["writable"] is True
     assert not extra["restart_required"]
-    monkeypatch.setenv(alias, "17")
-    assert getattr(AgentRuntimeSettings(), name) == 17
-    monkeypatch.setattr(dotenv_file, "unit_home", lambda: tmp_path)
+    assert getattr(AgentRuntimeSettings.from_environment({alias: "17"}), name) == 17
     (tmp_path / ".env").write_text(
         f"{alias}=17\nMEIVA_DB_URL=postgresql://meiva@localhost:5433/meiva\n"
         "MEIVA_RUNNER_DB_PASSWORD=test-only\n"

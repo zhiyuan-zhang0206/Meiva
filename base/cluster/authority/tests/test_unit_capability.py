@@ -12,10 +12,10 @@ import pytest
 from base.cluster.authority.tests.unit_capability_support import (
     ENDPOINT,
     MACHINE,
-    _open,
     install,
     issue,
     no_probe,
+    open_issued,
 )
 from base.cluster.authority.tests.unit_capability_support import gateway as gateway
 from base.cluster.authority.tests.unit_capability_support import runner_home as runner_home
@@ -41,7 +41,7 @@ _MUTATIONS: dict[str, Callable[[dict[str, Any]], None]] = {
 @pytest.mark.parametrize("mutation", sorted(_MUTATIONS))
 def test_a_tampered_bundle_is_refused(gateway: Path, runner_home: Path, mutation: str) -> None:
     issued = issue(gateway, runner_home)
-    assert _open(issued).capability.unit.home == str(runner_home)
+    assert open_issued(issued).capability.unit.home == str(runner_home)
     data = json.loads(issued.envelope)
     _MUTATIONS[mutation](data)
     with pytest.raises(unit.UnitCapabilityError, match="does not authenticate"):
@@ -58,7 +58,7 @@ def test_a_bundle_opens_only_with_its_own_transport_key(gateway: Path, runner_ho
         unit.open_bundle(issued.envelope, "AAAA")
     with pytest.raises(unit.UnitCapabilityError, match="not a database capability bundle"):
         unit.open_bundle(b"{}", issued.transport_key)
-    bundle = _open(issued)
+    bundle = open_issued(issued)
     assert bundle.capability.api is not None
     for secret in (bundle.capability.password, bundle.capability.api.token):
         assert secret.encode() not in issued.envelope
@@ -67,7 +67,7 @@ def test_a_bundle_opens_only_with_its_own_transport_key(gateway: Path, runner_ho
 def test_an_expired_bundle_is_refused(gateway: Path, runner_home: Path) -> None:
     issued = issue(gateway, runner_home, ttl_s=60, now=time.time() - 120)
     with pytest.raises(unit.UnitCapabilityError, match="expired"):
-        _open(issued)
+        open_issued(issued)
 
 
 @pytest.mark.parametrize(
@@ -103,7 +103,7 @@ def test_install_binds_the_unit_and_the_served_endpoint(
     gateway: Path, runner_home: Path, tmp_path: Path
 ) -> None:
     issued = issue(gateway, runner_home)
-    bundle = _open(issued)
+    bundle = open_issued(issued)
     with pytest.raises(unit.UnitCapabilityError, match="issued for"):
         unit.install_bundle(
             runner_home, bundle, machine="other", served_endpoint=ENDPOINT, probe=no_probe

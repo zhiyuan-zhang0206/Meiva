@@ -15,8 +15,3 @@ exports = ["authority", "dataplane", "derive.py", "frontend_build.py", "machine"
 
 [purity]
 "transport_encryption.py" = "strict"
-
-[debt.private-name]
-"tests/test_storage_ownership.py -> postgres.py#_boot" = 1
-"tests/test_storage_ownership.py -> postgres.py#_pidfile" = 2
-"tests/test_storage_ownership.py -> postgres.py#_read" = 6
