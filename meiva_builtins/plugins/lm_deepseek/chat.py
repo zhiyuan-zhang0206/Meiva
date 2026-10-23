@@ -7,7 +7,7 @@ Anthropic transport; this selects a wire API for the same model, never a model.
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Any, Literal, Protocol, cast
 
 from langchain_core.language_models import LanguageModelInput
 from langchain_core.runnables import Runnable
@@ -17,6 +17,17 @@ from base.lm.compat.anthropic_thinking import ThinkingTokensChatAnthropic
 
 DEEPSEEK_API_BASE = "https://api.deepseek.com"
 DEEPSEEK_ANTHROPIC_API_BASE = f"{DEEPSEEK_API_BASE}/anthropic"
+
+
+class _StructuredOutputFactory(Protocol):
+    def __call__(
+        self,
+        schema: dict[str, Any] | type[Any],
+        *,
+        include_raw: bool = False,
+        method: Literal["function_calling", "json_schema"] = "function_calling",
+        **kwargs: Any,
+    ) -> Runnable[LanguageModelInput, dict[str, Any] | BaseModel]: ...
 
 
 class DeepSeekChatModel(ThinkingTokensChatAnthropic):
@@ -36,9 +47,8 @@ class DeepSeekChatModel(ThinkingTokensChatAnthropic):
         if method != "json_schema":
             if http_client is not None or http_async_client is not None:
                 raise ValueError("Custom HTTP clients require method='json_schema'")
-            return super().with_structured_output(
-                schema, include_raw=include_raw, method=method, **kwargs
-            )
+            build = cast(_StructuredOutputFactory, super().with_structured_output)
+            return build(schema, include_raw=include_raw, method=method, **kwargs)
 
         from langchain_openai import ChatOpenAI
 
@@ -59,6 +69,5 @@ class DeepSeekChatModel(ThinkingTokensChatAnthropic):
             http_async_client=http_async_client,
         )
         kwargs.setdefault("strict", True)
-        return model.with_structured_output(
-            schema, method="json_schema", include_raw=include_raw, **kwargs
-        )
+        build = cast(_StructuredOutputFactory, model.with_structured_output)
+        return build(schema, method="json_schema", include_raw=include_raw, **kwargs)

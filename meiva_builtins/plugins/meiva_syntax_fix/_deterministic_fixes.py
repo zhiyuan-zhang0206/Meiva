@@ -201,7 +201,7 @@ def fix_indentation(code: str) -> tuple[str, int]:
         return code, 0
 
     lines = code.split("\n")
-    fixed_lines = []
+    fixed_lines: list[str] = []
     changes = 0
     for line in lines:
         if "\t" in line:
@@ -234,7 +234,7 @@ def fix_backslash_trailing(code: str) -> tuple[str, int]:
     applied; kept as a fallback.
     """
     lines = code.split("\n")
-    fixed_lines = []
+    fixed_lines: list[str] = []
     changes = 0
     for line in lines:
         stripped = line.rstrip()

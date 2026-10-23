@@ -12,6 +12,7 @@ Contrast with codebase_sweep_orchestrator.py (7 waves, ~28 agents).
 import json
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 from uuid import uuid4
 
 import meiva
@@ -41,13 +42,13 @@ def spawn(prompt: str) -> int:
     return meiva.agents.spawn(prompt=prompt, idempotency_key=str(uuid4()))
 
 
-def read_state() -> dict:
+def read_state() -> dict[str, Any]:
     if SF.exists():
         return json.loads(meiva.files.read(str(SF)))
     return {"wave": 1}
 
 
-def write_state(state: dict) -> None:
+def write_state(state: dict[str, Any]) -> None:
     with open(SF, "w") as f:
         json.dump(state, f, ensure_ascii=False, indent=2)
 
@@ -145,7 +146,7 @@ def wave2():
     log("WAVE 2/5: Verify — cross-check findings")
 
     # Collect findings
-    all_findings = []
+    all_findings: list[dict[str, Any]] = []
     for role, _, _ in W1_TARGETS:
         fpath = hf(1, role)
         if fpath.exists():
@@ -160,11 +161,11 @@ def wave2():
         return
 
     # Group by type
-    by_type: dict[str, list] = {}
+    by_type: dict[str, list[dict[str, Any]]] = {}
     for f in all_findings:
         by_type.setdefault(f["type"], []).append(f)
 
-    W2_FILES = []
+    W2_FILES: list[str] = []
     for ftype, findings in by_type.items():
         half = max(1, len(findings) // 2)
         for suffix, subset in [("a", findings[:half]), ("b", findings[half:])]:
@@ -248,7 +249,7 @@ def wave4():
         draft = json.loads(meiva.files.read(str(draft_path)))
         draft_text = draft.get("report", json.dumps(draft, ensure_ascii=False))
 
-    W4_FILES = []
+    W4_FILES: list[str] = []
     for role, focus in [
         (
             "adversarial-fp",

@@ -49,12 +49,12 @@ def _render_score_skills(data: dict[str, Any]) -> str:
     if not skills:
         return """<div class="empty">No score comparison data for this round.</div>"""
 
-    cards = []
+    cards: list[str] = []
     for s in skills:
         if s.get("unavailable"):
             cards.append(_na_card(s["skill"], f"no scorable runs ({s.get('n', 0)} replayed)"))
             continue
-        dims_html = []
+        dims_html: list[str] = []
         for d in s.get("dimensions", []):
             dims_html.append(
                 f"""<div class="score-row">
@@ -89,7 +89,7 @@ def _render_changes_table(data: dict[str, Any]) -> str:
     if not changes:
         return """<div class="empty">No changes recorded this round.</div>"""
 
-    rows = []
+    rows: list[str] = []
     for c in changes:
         pr_cell = (
             f'<a href="{c["pr_url"]}" style="color:#58a6ff">#{c["pr"]}</a>'
@@ -117,10 +117,10 @@ def _render_failure_clusters(data: dict[str, Any]) -> str:
     if not clusters:
         return """<div class="empty">No failures this week — all runs completed cleanly.</div>"""
 
-    parts = []
+    parts: list[str] = []
     for cl in clusters:
         # Badges
-        badges = []
+        badges: list[str] = []
         if cl.get("failed", 0) > 0:
             badges.append(f'<span class="cluster-badge badge-failed">{cl["failed"]} failed</span>')
         if cl.get("fumbled", 0) > 0:
@@ -138,7 +138,7 @@ def _render_failure_clusters(data: dict[str, Any]) -> str:
         runs_html = ""
         if cl.get("runs"):
             shown = cl["runs"][:8]
-            run_items = []
+            run_items: list[str] = []
             for r in shown:
                 label_cls = "label-failed" if r.get("label") == "failed" else "label-fumbled"
                 run_items.append(
@@ -214,7 +214,7 @@ def _render_eval_results(data: dict[str, Any]) -> str:
     per_skill = er.get("per_skill")
     per_skill_html = ""
     if per_skill:
-        rows = []
+        rows: list[str] = []
         for es in per_skill:
             v = es.get("verdict", "")
             rows.append(
@@ -244,7 +244,7 @@ def render_report(data: dict[str, Any]) -> str:
     template = _load_template()
 
     # Substitute simple {{ var }} placeholders
-    def _sub(m: re.Match) -> str:
+    def _sub(m: re.Match[str]) -> str:
         key = m.group(1).strip()
         val = data.get(key)
         if val is None:
