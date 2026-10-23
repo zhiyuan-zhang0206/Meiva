@@ -35,6 +35,7 @@ from typing import Any
 
 from psycopg_pool import ConnectionPool
 
+from base.clock import SYSTEM_TIMERS
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot, settings
@@ -50,6 +51,7 @@ from base.host.exit_codes import hard_exit as _hard_exit
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
 from base.paths import meiva_home, prod_service_checkout_error
+from base.sessions.backend import get_shell_backend
 from base.telemetry.pipeline_build import build_pipeline
 from base.telemetry.process_logging import init_gateway_process
 from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
@@ -113,7 +115,9 @@ async def provision_builtins(pool: ConnectionPool[Any]) -> None:
 
 async def run_loops(pool: ConnectionPool, liveness: LivenessGroup) -> None:
     """Own the two resident loops; one that raises ends the process."""
-    manager = ScheduleManager(pool)
+    manager = ScheduleManager(
+        pool, backend=get_shell_backend(), timers=SYSTEM_TIMERS, repo_root=REPO_ROOT
+    )
     reconcile_progress = liveness.register("reconcile", _LIVENESS_TIMEOUT_S)
     requests_progress = liveness.register("requests", _LIVENESS_TIMEOUT_S)
 

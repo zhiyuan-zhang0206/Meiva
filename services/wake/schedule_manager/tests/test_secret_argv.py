@@ -3,9 +3,10 @@ from __future__ import annotations
 from pathlib import Path
 
 import psycopg
-import pytest
 from psycopg_pool import ConnectionPool
 
+from base.clock import SYSTEM_TIMERS
+from base.sessions.backend import get_shell_backend
 from base.sessions.pty.tests.pty_service import PtyServiceProcess
 from base.sessions.pty.tests.pty_service import pty_service as pty_service
 from base.sessions.pty.tests.pty_shells import wait_for
@@ -24,9 +25,7 @@ def test_schedule_launch(
     secrets_in_creator_env: None,
     db_conn: psycopg.Connection,
     unit_home: Path,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from services.wake.schedule_manager import manager as sm
     from services.wake.schedule_manager.manager import ScheduleManager
 
     stub = unit_home / ".venv" / "bin" / "python"
@@ -34,7 +33,6 @@ def test_schedule_launch(
     dump = unit_home / "runner-env.txt"
     stub.write_text(f"#!/bin/sh\nenv > {dump}.tmp && mv {dump}.tmp {dump}\nexec sleep 300\n")
     stub.chmod(0o755)
-    monkeypatch.setattr(sm, "REPO_ROOT", unit_home)
 
     row = db_conn.execute(
         "INSERT INTO schedules (name, script, command, enabled, desired_revision) "
@@ -47,7 +45,9 @@ def test_schedule_launch(
         db_conn.info.dsn, min_size=1, max_size=2, open=True
     )
     try:
-        ScheduleManager(pool)._launch(schedule_id)
+        ScheduleManager(
+            pool, backend=get_shell_backend(), timers=SYSTEM_TIMERS, repo_root=unit_home
+        )._launch(schedule_id)
     finally:
         pool.close()
 
