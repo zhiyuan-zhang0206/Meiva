@@ -16,3 +16,8 @@ host-generation cooldown reads the supplied timers. Recovery tests advance
 a surviving predecessor and unreadable launch provenance; neither case can keep
 a request queued beyond the documented bounded convergence window. PTY consumers
 pass their own launch checkout instead of changing a module constant.
+
+The runpy input-sharing test uses the actual SDK bootstrap with the runner's
+configuration owner and isolated unit home. It retains the script's assertions that
+the entry supplies the same producer, loaded image and machine. The separate
+loader-failure case still observes actor/history/guard ordering and cleanup.
