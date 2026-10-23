@@ -27,7 +27,6 @@
 "test_injection_check.py#monkeypatch.setattr meiva.sdk_surface.agent_identity.agent_id" = 1
 "test_injection_check.py#monkeypatch.setattr meiva.sdk_surface.settings.model_catalog" = 2
 "test_install.py#monkeypatch.setattr base.agents.sdk.call_policy.policy" = 1
-"test_install.py#monkeypatch.setattr base.packages.plugins.config_registration.bind_plugin_config" = 2
 "test_install.py#monkeypatch.setattr base.packages.plugins.load_report.report_plugin_load_failure" = 1
 "test_install.py#monkeypatch.setattr meiva.sdk_surface.plugins.install_member" = 1
 "test_install.py#monkeypatch.setattr meiva.sdk_surface.plugins.install_namespace" = 1

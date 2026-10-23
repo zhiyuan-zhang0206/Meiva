@@ -7,7 +7,9 @@ from loguru import logger
 from agent.execution import child
 from agent.execution.protocol import ResultPayload
 from base.agents.sdk import call_policy
+from base.packages.plugin_config_images import DiskPluginConfigImages
 from base.packages.plugins.extensions import ExtensionRegistry, PluginContributions, SdkNamespace
+from base.paths.home import resolve_meiva_home
 from meiva.sdk_surface import install
 from meiva.tests.fixtures.pin_agent import pin_agent
 
@@ -73,6 +75,7 @@ def test_run_code_collects_sampling_at_its_result_boundary(
             )
         ),
         sampling=sampling,
+        config_images=DiskPluginConfigImages(resolve_meiva_home()),
     )
     pin_agent(37)
     payload = ResultPayload(kind="done")

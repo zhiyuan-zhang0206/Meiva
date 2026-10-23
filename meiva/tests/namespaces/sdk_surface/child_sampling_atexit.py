@@ -2,11 +2,13 @@
 
 import meiva  # noqa: F401  # pyright: ignore[reportUnusedImport] (importing the SDK is under test)
 from base.agents.sdk import call_policy
+from base.packages.plugin_config_images import DiskPluginConfigImages
 from base.packages.plugins.extensions import ExtensionRegistry
+from base.paths.home import resolve_meiva_home
 from meiva.sdk_surface import install
 from meiva.sdk_surface.installation import installed
 
-install.install(ExtensionRegistry(()))
+install.install(ExtensionRegistry(()), config_images=DiskPluginConfigImages(resolve_meiva_home()))
 original = ValueError("ordinary SDK refresh defect")
 
 

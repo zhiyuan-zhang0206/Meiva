@@ -1,24 +1,7 @@
-"""Plugin enable config — per-machine local file `~/.meiva/plugins_config.json`.
-
-Different concept from `base/config.py` (env-driven Settings): this
-controls "which plugins are imported and registered at process
-startup"; editable via `meiva plugins enable/disable`.
-
-Unified plugin concept:
-- Only "plugins"; no "builtin hook" / "external plugin" distinction
-- Builtin plugins in `<repo>/meiva_builtins/plugins/`, external plugins in
-  `~/.meiva/plugins/`
-- Config stores one flat `plugins` dict: {name: {enabled: bool}}
-- Builtin/external distinction lives on the filesystem layer, not
-  in config
-
-Decentralized-install: enable config lives entirely in the per-machine
-`plugins_config.json`; `set_local_enabled` is the only writer.
-`load()` reads the local file via `_read_raw()`; it is pure-read
-(no write-back). `write_local` is the underlying file writer.
-"""
+# meiva:link base/packages/plugins/docs/plugin-config/enable-state.meiva.okf.md
 
 import json
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
 
@@ -79,10 +62,16 @@ def discover_plugins() -> dict[str, Path]:
     meiva_ledger defense line) are skipped: they are transient by name and must
     never surface as ghost plugins.
     """
-    discovered: dict[str, Path] = {}
+    from base.host.runtime_interpreter import external_plugin_read_root
 
-    # Builtin plugin: <repo>/meiva_builtins/plugins/<name>/plugin.py
-    repo_dir = paths.repo_plugins_dir()
+    return discover_plugin_dirs(
+        repo_dir=paths.repo_plugins_dir(), user_dir=external_plugin_read_root()
+    )
+
+
+def discover_plugin_dirs(*, repo_dir: Path, user_dir: Path) -> dict[str, Path]:
+    # meiva:link base/packages/plugins/docs/plugin-config/enable-state.meiva.okf.md
+    discovered: dict[str, Path] = {}
     if repo_dir.exists():
         for p in sorted(repo_dir.iterdir()):
             if p.name.startswith("."):
@@ -90,10 +79,6 @@ def discover_plugins() -> dict[str, Path]:
             if p.is_dir() and (p / "plugin.py").exists():
                 discovered[p.name] = p
 
-    # External plugin: ~/.meiva/plugins/<name>/plugin.py
-    from base.host.runtime_interpreter import external_plugin_read_root
-
-    user_dir = external_plugin_read_root()
     if user_dir.exists():
         for p in sorted(user_dir.iterdir()):
             if p.name.startswith("."):
@@ -167,98 +152,109 @@ def _default_config(known_plugins: set[str]) -> PluginsConfig:
     )
 
 
+@dataclass(frozen=True)
+class PluginEnableStore:
+    # meiva:link base/packages/plugins/docs/plugin-config/enable-state.meiva.okf.md
+
+    path: Path
+
+    def read(self) -> dict[str, Any] | None:
+        # meiva:link base/packages/plugins/docs/plugin-config/enable-state.meiva.okf.md
+        p = self.path
+        if not p.exists():
+            return None
+        raw = p.read_text()
+        data = json.loads(raw if raw.strip() else "{}")
+        if not isinstance(data, dict):
+            raise PluginsConfigError(f"{p}: expected a JSON object, got {type(data).__name__}")
+        return cast("dict[str, Any]", data)
+
+    def write(self, raw: dict[str, Any]) -> None:
+        # meiva:link base/packages/plugins/docs/plugin-config/enable-state.meiva.okf.md
+        self.path.write_text(json.dumps(raw, indent=2))
+
+    def load(self, known_plugins: set[str], *, allow_dangling: bool = False) -> PluginsConfig:
+        # meiva:link base/packages/plugins/docs/plugin-config/enable-state.meiva.okf.md
+        raw = self.read() or {}
+
+        if not raw or not raw.get("plugins"):
+            return _default_config(known_plugins)
+
+        cfg = _validate_schema(raw)
+
+        # meiva:note
+        # Fold each config key onto the plugin's real directory spelling. A plugin
+        # directory has to stay a Python package (`meiva_builtins.plugins.<name>` is
+        # imported by path), so underscore is the on-disk identity while dash is the
+        # name everywhere a human writes it — a hand-edited `plugins_config.json`
+        # saying `meiva-code` addresses the `meiva_code` plugin.
+        cfg.plugins = {
+            (skill_naming.find(name, known_plugins) or name): entry
+            for name, entry in cfg.plugins.items()
+        }
+
+        dangling = set(cfg.plugins) - known_plugins
+        if dangling:
+            if not allow_dangling:
+                raise DanglingPlugin(
+                    f"plugins config references non-existent plugins: {sorted(dangling)} "
+                    f"(known: {sorted(known_plugins) or '<none>'})",
+                    names=dangling,
+                )
+            cfg.plugins = {
+                name: entry for name, entry in cfg.plugins.items() if name not in dangling
+            }
+
+        new_plugins = known_plugins - set(cfg.plugins)
+        for name in sorted(new_plugins):
+            cfg.plugins[name] = PluginEntry(enabled=True)
+
+        return cfg
+
+    def set_enabled(self, name: str, *, enabled: bool, known: set[str]) -> PluginsConfig:
+        # meiva:link base/packages/plugins/docs/plugin-config/enable-state.meiva.okf.md
+        resolved = skill_naming.find(name, known)
+        if resolved is None:
+            raise DanglingPlugin(
+                f"plugin {name!r} is not present on this machine (known: {sorted(known) or '<none>'})"
+            )
+        name = resolved
+        raw = self.read() or {}
+        existing = _validate_schema(raw).plugins if raw.get("plugins") else {}
+        # meiva:note
+        # Sorted so the written plugins.json key order (and thus the on-disk
+        # iteration order that drives hook registration order) is deterministic
+        # rather than set-hash-dependent.
+        plugins = {n: existing.get(n, PluginEntry(enabled=True)) for n in sorted(known)}
+        plugins[name] = PluginEntry(enabled=enabled)
+        cfg = PluginsConfig(plugins=plugins)
+        self.write(cfg.model_dump())
+        return cfg
+
+    def load_for_runtime(
+        self, known_plugins: set[str], *, report: load_report.Reporter
+    ) -> PluginsConfig:
+        # meiva:link base/packages/plugins/docs/plugin-config/enable-state.meiva.okf.md
+        try:
+            return self.load(known_plugins)
+        except DanglingPlugin as exc:
+            report_dangling(exc, report)
+            return self.load(known_plugins, allow_dangling=True)
+
+
 def local_config_path() -> Path:
     """Per-machine plugin-config file path: `~/.meiva/plugins_config.json`."""
     return paths.meiva_home() / "plugins_config.json"
 
 
-def _read_local() -> dict[str, Any] | None:
-    """Read the per-machine plugin-config file. None = absent; a present file
-    that is unreadable, not valid JSON, or not an object raises (fail-fast).
-
-    The same rule `install_registry.load` applies to installed.json: a corrupt
-    local config must not silently degrade to the all-enabled default and get
-    rewritten from nothing — the corruption is a state-loss signal, not a
-    no-op."""
-    p = local_config_path()
-    if not p.exists():
-        return None
-    raw = p.read_text()  # OSError propagates
-    data = json.loads(raw if raw.strip() else "{}")  # JSONDecodeError propagates
-    if not isinstance(data, dict):
-        raise PluginsConfigError(f"{p}: expected a JSON object, got {type(data).__name__}")
-    return cast("dict[str, Any]", data)
-
-
 def write_local(raw: dict[str, Any]) -> None:
-    """Full-replace the per-machine plugin-config file. The write path for
-    `set_local_enabled` (and `meiva plugins enable/disable`)."""
-    local_config_path().write_text(json.dumps(raw, indent=2))
-
-
-def _read_raw() -> dict[str, Any]:
-    """Read the per-machine local file; absent -> {} (a malformed file raises)."""
-    return _read_local() or {}
+    # meiva:link base/packages/plugins/docs/plugin-config/enable-state.meiva.okf.md
+    PluginEnableStore(local_config_path()).write(raw)
 
 
 def load(known_plugins: set[str], *, allow_dangling: bool = False) -> PluginsConfig:
-    """Read per-machine plugin config; auto-merge new plugins in memory, return config.
-
-    Pure-read — no write-back. The only writer is `set_local_enabled`.
-
-    Flow:
-    1. Local file absent / empty -> default all known plugins enabled=true
-    2. Malformed JSON / non-object file -> fail-fast (JSONDecodeError /
-       PluginsConfigError), like `install_registry.load` — never a silent
-       all-enabled fallback
-    3. Pydantic validation failure -> fail-fast (SchemaInvalid)
-    4. Validation: plugins referenced by config must exist on local
-       filesystem (DanglingPlugin) — unless `allow_dangling=True`, which
-       drops the dangling entries instead (treated as disabled; the caller
-       is the runtime loader, whose fail-soft contract forbids a config
-       mismatch from blocking `import meiva`)
-    5. Auto-merge: known plugins not in config -> add enabled=true
-       in memory (not persisted)
-
-    Args:
-        known_plugins: set of plugin names existing on the filesystem.
-        allow_dangling: drop config entries whose plugin is not on disk
-            instead of raising DanglingPlugin.
-    """
-    raw = _read_raw()
-
-    if not raw or not raw.get("plugins"):
-        return _default_config(known_plugins)
-
-    cfg = _validate_schema(raw)
-
-    # Fold each config key onto the plugin's real directory spelling. A plugin
-    # directory has to stay a Python package (`meiva_builtins.plugins.<name>` is
-    # imported by path), so underscore is the on-disk identity while dash is the
-    # name everywhere a human writes it — a hand-edited `plugins_config.json`
-    # saying `meiva-code` addresses the `meiva_code` plugin.
-    cfg.plugins = {
-        (skill_naming.find(name, known_plugins) or name): entry
-        for name, entry in cfg.plugins.items()
-    }
-
-    # Validate dangling
-    dangling = set(cfg.plugins) - known_plugins
-    if dangling:
-        if not allow_dangling:
-            raise DanglingPlugin(
-                f"plugins config references non-existent plugins: {sorted(dangling)} "
-                f"(known: {sorted(known_plugins) or '<none>'})",
-                names=dangling,
-            )
-        cfg.plugins = {name: entry for name, entry in cfg.plugins.items() if name not in dangling}
-
-    # Auto-merge new plugins (in memory only)
-    new_plugins = known_plugins - set(cfg.plugins)
-    for name in sorted(new_plugins):
-        cfg.plugins[name] = PluginEntry(enabled=True)
-
-    return cfg
+    # meiva:link base/packages/plugins/docs/plugin-config/enable-state.meiva.okf.md
+    return PluginEnableStore(local_config_path()).load(known_plugins, allow_dangling=allow_dangling)
 
 
 def report_dangling(exc: DanglingPlugin, report: load_report.Reporter | None = None) -> None:
@@ -280,23 +276,10 @@ def report_dangling(exc: DanglingPlugin, report: load_report.Reporter | None = N
 
 
 def load_for_runtime(known_plugins: set[str]) -> PluginsConfig:
-    """Runtime-load wrapper around `load()`: dangling config entries are dropped
-    (treated as disabled) and reported through the canonical reporter instead
-    of raising DanglingPlugin.
-
-    For long-lived / start-critical consumers — converge (`meiva start`), the
-    model-provider factory, gateway request paths, ops inventory — a config
-    entry whose plugin directory is gone (interrupted upgrade, manual rm)
-    must not block a service from starting or answering. This is the same
-    fail-soft contract `load_extensions` follows (2026-08-28 meiva_ledger
-    incident); interactive CLI paths (`set_local_enabled`) keep the strict
-    `load()` and its DanglingPlugin error. Each dangling name is reported on each failed load through `report_dangling`.
-    """
-    try:
-        return load(known_plugins)
-    except DanglingPlugin as exc:
-        report_dangling(exc)
-        return load(known_plugins, allow_dangling=True)
+    # meiva:link base/packages/plugins/docs/plugin-config/enable-state.meiva.okf.md
+    return PluginEnableStore(local_config_path()).load_for_runtime(
+        known_plugins, report=load_report.reporter(None)
+    )
 
 
 def installed_plugin_dirs() -> dict[str, Path]:
@@ -315,29 +298,7 @@ def installed_plugin_dirs() -> dict[str, Path]:
 
 
 def set_local_enabled(name: str, *, enabled: bool) -> PluginsConfig:
-    """Flip one plugin's enabled flag in the per-machine local config file.
-
-    Reads the current local config, writes a config scoped to the plugins
-    present on THIS machine to `plugins_config.json`. Scoping to local
-    plugins is what keeps a later load() from raising DanglingPlugin.
-
-    Raises:
-        DanglingPlugin: `name` is not a plugin installed on this machine.
-    """
-    known = set(discover_plugins())
-    resolved = skill_naming.find(name, known)
-    if resolved is None:
-        raise DanglingPlugin(
-            f"plugin {name!r} is not present on this machine (known: {sorted(known) or '<none>'})"
-        )
-    name = resolved
-    raw = _read_raw()
-    existing = _validate_schema(raw).plugins if raw.get("plugins") else {}
-    # Sorted so the written plugins.json key order (and thus the on-disk
-    # iteration order that drives hook registration order) is deterministic
-    # rather than set-hash-dependent.
-    plugins = {n: existing.get(n, PluginEntry(enabled=True)) for n in sorted(known)}
-    plugins[name] = PluginEntry(enabled=enabled)
-    cfg = PluginsConfig(plugins=plugins)
-    write_local(cfg.model_dump())
-    return cfg
+    # meiva:link base/packages/plugins/docs/plugin-config/enable-state.meiva.okf.md
+    return PluginEnableStore(local_config_path()).set_enabled(
+        name, enabled=enabled, known=set(discover_plugins())
+    )

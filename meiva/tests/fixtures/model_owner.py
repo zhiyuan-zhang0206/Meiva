@@ -4,6 +4,7 @@ import pytest
 
 from base.config.service_read import ConfigAuthority
 from base.lm.catalog import ModelCatalog
+from base.packages.plugin_config_contracts import UnboundPluginConfigImages
 from base.packages.plugins.extensions import EMPTY
 from meiva.sdk_surface.installation import Installation
 
@@ -17,6 +18,7 @@ def model_installation(
     """Return an explicit SDK owner; the caller chooses when to install it."""
     return Installation(
         registry=EMPTY,
+        config_images=UnboundPluginConfigImages(),
         expansions=(),
         wrap_layers={},
         skill_providers=(),

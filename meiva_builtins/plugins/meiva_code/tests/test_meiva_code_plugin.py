@@ -15,9 +15,11 @@ from agent.state import BaseAgentState, CompactState, build_agent_state
 from base.config.service_read import ConfigAuthority
 from base.lm import factory
 from base.lm.catalog import ModelCatalog
+from base.packages.plugin_config_images import DiskPluginConfigImages
 from base.packages.plugins.extensions import (
     ExtensionRegistry,
 )
+from base.paths.home import resolve_meiva_home
 from meiva.sdk_surface import install, process_context
 from meiva.tests.fixtures.pin_agent import pin_agent, pin_no_identity
 from meiva_builtins.plugins.meiva_code.tests.surface_support import code_registry
@@ -35,7 +37,12 @@ def load_meiva_code_plugin(
         return call_policy.SamplingPolicy()
 
     monkeypatch.setattr(call_policy, "policy", _policy_for_test)
-    install.install(code_registry(), catalog=model_catalog, authority=config_authority)
+    install.install(
+        code_registry(),
+        catalog=model_catalog,
+        authority=config_authority,
+        config_images=DiskPluginConfigImages(resolve_meiva_home()),
+    )
 
     yield
 
