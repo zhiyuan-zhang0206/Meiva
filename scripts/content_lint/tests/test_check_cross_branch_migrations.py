@@ -50,37 +50,39 @@ def test_ordinary_branches_are_not_breaches(branch: str) -> None:
     assert mod.breaches([branch]) == []
 
 
-def test_passes_on_single_branch_model(monkeypatch: pytest.MonkeyPatch, capsys) -> None:
+def _ls_remote_host(stdout: str, returncode: int = 0, stderr: str = ""):
+    return fake_host(
+        lambda argv, **_kw: subprocess.CompletedProcess(
+            list(argv), returncode, stdout=stdout, stderr=stderr
+        )
+    )
+
+
+def test_passes_on_single_branch_model(capsys) -> None:
     """The premise holding is reported, not silently assumed."""
-    monkeypatch.setattr(mod, "remote_branches", lambda **_kw: ["main", "meiva-1-x"])
-    assert mod.main(host=fake_host()) == 0
+    host = _ls_remote_host("abc\trefs/heads/main\ndef\trefs/heads/meiva-1-x\n")
+    assert mod.main(host=host) == 0
     assert "single-branch premise holds" in capsys.readouterr().out
 
 
-def test_fails_when_premise_breaks(monkeypatch: pytest.MonkeyPatch, capsys) -> None:
+def test_fails_when_premise_breaks(capsys) -> None:
     """A long-lived second branch fails the step and names the remedy."""
-    monkeypatch.setattr(mod, "remote_branches", lambda **_kw: ["main", "develop"])
-    assert mod.main(host=fake_host()) == 1
+    host = _ls_remote_host("abc\trefs/heads/main\ndef\trefs/heads/develop\n")
+    assert mod.main(host=host) == 1
     err = capsys.readouterr().err
     assert "premise BROKEN" in err
     assert "develop" in err
     assert "Reinstate" in err
 
 
-def test_unqueryable_remote_fails_rather_than_passing(
-    monkeypatch: pytest.MonkeyPatch, capsys
-) -> None:
+def test_unqueryable_remote_fails_rather_than_passing(capsys) -> None:
     """An unverifiable premise must not report success.
 
     Returning 0 here would rebuild the silent pass-through this script replaced:
     a gate that cannot answer has to say so, not say 'fine'.
     """
-
-    def _boom(**_kw: object) -> list[str]:
-        raise RuntimeError("git ls-remote failed (rc=128): no such remote")
-
-    monkeypatch.setattr(mod, "remote_branches", _boom)
-    assert mod.main(host=fake_host()) == 1
+    host = _ls_remote_host("", returncode=128, stderr="no such remote")
+    assert mod.main(host=host) == 1
     assert "cannot verify the single-branch premise" in capsys.readouterr().err
 
 

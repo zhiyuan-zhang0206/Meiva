@@ -29,13 +29,6 @@ from scripts.content_lint import lint_meiva_okf as _lint
 # pyright: reportUnknownArgumentType = warning
 
 
-@pytest.fixture(autouse=True)
-def _layout_is_not_under_test(monkeypatch):
-    """These tests exercise other rules on constructed trees whose layout is not the
-    subject; rule 14 (docs layer) has its own tests in scripts/content_lint/tests/test_lint_meiva_okf.py."""
-    monkeypatch.setattr(_lint, "layer_error", lambda *_args: None)
-
-
 def _node(tmp_path: Path, rel: str, body: str = "") -> Path:
     """Write a minimal valid OKF node at `rel` (no other rule may fire on it)."""
     path = tmp_path / rel
@@ -57,7 +50,7 @@ def _lint_tmp(tmp_path, monkeypatch, capsys) -> tuple[int, str]:
     monkeypatch.chdir(tmp_path)
     code = 0
     try:
-        _lint.main([])
+        _lint.main([], check_layer=False)
     except SystemExit as exc:
         code = int(exc.code or 0)
     return code, capsys.readouterr().out

@@ -54,9 +54,8 @@ def _git(root: pathlib.Path, *args: str) -> None:
 
 
 @pytest.fixture
-def _repo(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> pathlib.Path:
+def _repo(tmp_path: pathlib.Path) -> pathlib.Path:
     """An explicit repo root, with an all-empty baseline already in place."""
-    monkeypatch.setenv("LINT_STRUCTURE_BASELINE_BASE", "HEAD")
     _baseline(tmp_path)
     _commit_baseline(tmp_path, "Empty baseline")
     return tmp_path
@@ -72,7 +71,7 @@ def test_a_new_dial_in_a_governed_module_fails_directly(
     _repo: pathlib.Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     _write(_repo, "gateway/db.py", "import psycopg\ndef dial():\n    psycopg.connect('dsn')\n")
-    assert lcs.main([], repo_root=_repo, parse_ast=ast.parse) == 1
+    assert lcs.main([], repo_root=_repo, baseline_base="HEAD", parse_ast=ast.parse) == 1
     assert (
         "gateway/db.py:3: bypasses the single owner of `postgres-dial`" in capsys.readouterr().out
     )
@@ -83,9 +82,9 @@ def test_a_docs_twin_does_not_change_a_clean_module_owner(
 ) -> None:
     _write(_repo, "base/db.py", "def _restore(): ...\n")
     _write(_repo, "base/user.py", "from base.db import _restore\n")
-    assert lcs.main([], repo_root=_repo, parse_ast=ast.parse) == 0
+    assert lcs.main([], repo_root=_repo, baseline_base="HEAD", parse_ast=ast.parse) == 0
     _write(_repo, "base/db/db.meiva.okf.md", "# docs\n")
-    assert lcs.main([], repo_root=_repo, parse_ast=ast.parse) == 0
+    assert lcs.main([], repo_root=_repo, baseline_base="HEAD", parse_ast=ast.parse) == 0
     assert capsys.readouterr().out == ""
 
 
@@ -95,7 +94,7 @@ def test_current_retired_fields_cannot_permit_sites(
     _repo: pathlib.Path, capsys: pytest.CaptureFixture[str], kind: str, entries: dict[str, int]
 ) -> None:
     _baseline(_repo, {kind: entries})
-    assert lcs.main([], repo_root=_repo, parse_ast=ast.parse) == 1
+    assert lcs.main([], repo_root=_repo, baseline_base="HEAD", parse_ast=ast.parse) == 1
     assert f"unknown section '{kind}'" in capsys.readouterr().err
 
 
@@ -108,7 +107,7 @@ def test_renaming_an_owner_bypass_still_fails_directly(
     _git(_repo, "add", "-A")
     _git(_repo, "commit", "--quiet", "-m", "Original bypass")
     _git(_repo, "mv", "gateway/importer.py", "gateway/importer_moved.py")
-    assert lcs.main([], repo_root=_repo, parse_ast=ast.parse) == 1
+    assert lcs.main([], repo_root=_repo, baseline_base="HEAD", parse_ast=ast.parse) == 1
     output = capsys.readouterr().out
     assert "gateway/importer_moved.py:3: bypasses the single owner of `postgres-dial`" in output
     assert "migrate the baseline" not in output

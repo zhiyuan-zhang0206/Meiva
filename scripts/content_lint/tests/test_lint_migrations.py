@@ -6,7 +6,9 @@ no test touches the real repo tree.
 
 from __future__ import annotations
 
-from scripts.content_lint import lint_migrations as lint
+from pathlib import Path
+
+from scripts.content_lint import lint_migrations as _lint_mod
 
 # Untyped fixtures and helper calls throughout: the call-site rules stay at warning for this file.
 # pyright: reportUnknownMemberType = warning
@@ -17,18 +19,47 @@ _TS2 = "20260719T143001"
 _BASELINE_INSERT = "INSERT INTO schema_migrations (name) VALUES ('00000000T000000_baseline');"
 
 
-def _lint(monkeypatch, tmp_path, *, schema_body: str = _BASELINE_INSERT, stub_base: bool = True):
+class _BoundMigrationsLint:
+    def __init__(
+        self,
+        *,
+        repo_root: Path,
+        migrations_dir: Path,
+        schema_sql: Path,
+        check_immutable: bool,
+    ) -> None:
+        self._repo_root = repo_root
+        self._migrations_dir = migrations_dir
+        self._schema_sql = schema_sql
+        self._check_immutable = check_immutable
+
+    def main(self, base_ref: str | None = None) -> int:
+        return _lint_mod.main(
+            base_ref,
+            repo_root=self._repo_root,
+            migrations_dir=self._migrations_dir,
+            schema_sql=self._schema_sql,
+            check_immutable=self._check_immutable,
+        )
+
+
+def _lint(_monkeypatch, tmp_path, *, schema_body: str = _BASELINE_INSERT, stub_base: bool = True):
     """Point the lint module at a tmp migrations/ + db/schema.sql; return
     (lint_module, migrations_dir)."""
-    if stub_base:
-        monkeypatch.setattr(lint, "immutability_base", lambda _ref: None)
     migrations_dir = tmp_path / "migrations"
     migrations_dir.mkdir()
-    monkeypatch.setattr(lint, "MIGRATIONS_DIR", migrations_dir)
     (tmp_path / "db").mkdir()
-    (tmp_path / "db" / "schema.sql").write_text(schema_body)
-    monkeypatch.setattr(lint, "SCHEMA_SQL", tmp_path / "db" / "schema.sql")
-    return lint, migrations_dir
+    schema_sql = tmp_path / "db" / "schema.sql"
+    schema_sql.write_text(schema_body)
+    return (
+        _BoundMigrationsLint(
+            repo_root=tmp_path,
+            migrations_dir=migrations_dir,
+            schema_sql=schema_sql,
+            check_immutable=not stub_base,
+        ),
+        migrations_dir,
+    )
 
 
 def test_empty_migrations_passes(monkeypatch, tmp_path):
@@ -366,7 +397,6 @@ def _merged_repo(monkeypatch, tmp_path):
     import subprocess
 
     lint, d = _lint(monkeypatch, tmp_path, stub_base=False)
-    monkeypatch.setattr(lint, "REPO_ROOT", tmp_path)
     (d / f"{_TS}_add-foo.sql").write_text("SELECT 1;")
     for args in (
         ["init", "--initial-branch=main"],

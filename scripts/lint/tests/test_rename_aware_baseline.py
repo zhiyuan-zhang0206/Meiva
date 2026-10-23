@@ -69,11 +69,6 @@ def _freeze(tmp_path: pathlib.Path, path: str, *, cc: int = 16) -> None:
     _git(tmp_path, "commit", "--quiet", "-m", "Commit a measured module")
 
 
-@pytest.fixture(autouse=True)
-def _isolated_repo(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("LINT_STRUCTURE_BASELINE_BASE", "HEAD")
-
-
 def _ambient_source() -> str:
     return "import atexit\natexit.register(lambda: None)\n" + "".join(
         f"VALUE_{index} = {index}\n" for index in range(60)
@@ -108,13 +103,13 @@ def test_detected_moves_carry_existing_baseline_keys_and_rewrites_do_not(
     tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     _freeze_ambient(tmp_path)
-    assert lcs.main([], repo_root=tmp_path, parse_ast=ast.parse) == 0
+    assert lcs.main([], repo_root=tmp_path, baseline_base="HEAD", parse_ast=ast.parse) == 0
     _move_ambient(tmp_path)
-    assert lcs.main([], repo_root=tmp_path, parse_ast=ast.parse) == 0
+    assert lcs.main([], repo_root=tmp_path, baseline_base="HEAD", parse_ast=ast.parse) == 0
     assert capsys.readouterr().out == ""
     moved = tmp_path / "base/q_moved.py"
     moved.write_text("import atexit\natexit.register(lambda: None)\n", encoding="utf-8")
-    assert lcs.main([], repo_root=tmp_path, parse_ast=ast.parse) == 1
+    assert lcs.main([], repo_root=tmp_path, baseline_base="HEAD", parse_ast=ast.parse) == 1
     assert "added ambient_state entry base/q_moved.py" in capsys.readouterr().out
 
 
@@ -124,7 +119,7 @@ def test_package_moves_carry_keys_past_the_git_rename_limit(
     _freeze_ambient(tmp_path, ("q", "r"))
     _git(tmp_path, "config", "diff.renameLimit", "1")
     _move_ambient(tmp_path, ("q", "r"))
-    assert lcs.main([], repo_root=tmp_path, parse_ast=ast.parse) == 0
+    assert lcs.main([], repo_root=tmp_path, baseline_base="HEAD", parse_ast=ast.parse) == 0
     assert capsys.readouterr().out == ""
 
 
@@ -135,7 +130,7 @@ def test_a_move_whose_old_path_is_rewritten_still_carries(
     _move_ambient(tmp_path)
     (tmp_path / "base/q.py").write_text('"""A shell."""\n', encoding="utf-8")
     _git(tmp_path, "add", "base/q.py")
-    assert lcs.main([], repo_root=tmp_path, parse_ast=ast.parse) == 0
+    assert lcs.main([], repo_root=tmp_path, baseline_base="HEAD", parse_ast=ast.parse) == 0
     assert capsys.readouterr().out == ""
 
 
@@ -149,7 +144,7 @@ def test_detected_move_cannot_raise_the_carried_site_count(
     _write_baseline(
         tmp_path, {"ambient_state": {"base/q_moved.py::import-time-call:atexit.register": 2}}
     )
-    assert lcs.main([], repo_root=tmp_path, parse_ast=ast.parse) == 1
+    assert lcs.main([], repo_root=tmp_path, baseline_base="HEAD", parse_ast=ast.parse) == 1
     assert "raised ambient_state entry base/q_moved.py" in capsys.readouterr().out
 
 
@@ -161,5 +156,5 @@ def test_file_and_function_renames_do_not_grant_budget_allowances(
     _git(tmp_path, "mv", "tests/q.py", "tests/q_moved.py")
     moved = tmp_path / "tests/q_moved.py"
     moved.write_text(_branches(cc).replace("def f(", "def renamed("), encoding="utf-8")
-    assert lcs.main([], repo_root=tmp_path, parse_ast=ast.parse) == rc
+    assert lcs.main([], repo_root=tmp_path, baseline_base="HEAD", parse_ast=ast.parse) == rc
     assert (f"tests/q_moved.py::renamed: complexity {cc}" in capsys.readouterr().out) == bool(rc)

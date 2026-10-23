@@ -36,13 +36,6 @@ description: A node built to an exact character count.
 """
 
 
-@pytest.fixture(autouse=True)
-def _layout_is_not_under_test(monkeypatch):
-    """These tests exercise other rules on constructed trees whose layout is not the
-    subject; rule 14 (docs layer) has its own tests in scripts/content_lint/tests/test_lint_meiva_okf.py."""
-    monkeypatch.setattr(_lint, "layer_error", lambda *_args: None)
-
-
 def _node_of_size(tmp_path, char_count: int) -> None:
     """Write an otherwise-valid OKF node whose decoded length is exactly
     `char_count`, padded with prose-shaped filler so no other rule can fire."""
@@ -61,7 +54,7 @@ def _lint_tmp(tmp_path, monkeypatch, capsys) -> tuple[int, str]:
     monkeypatch.chdir(tmp_path)
     code = 0
     try:
-        _lint.main([])
+        _lint.main([], check_layer=False)
     except SystemExit as exc:
         code = int(exc.code or 0)
     return code, capsys.readouterr().out

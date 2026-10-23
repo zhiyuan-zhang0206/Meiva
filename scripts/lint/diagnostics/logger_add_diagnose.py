@@ -156,7 +156,8 @@ def _iter_py_files(roots: list[Path]) -> list[Path]:
     return files
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: list[str] | None = None, *, repo_root: Path | None = None) -> int:
+    root = _REPO_ROOT if repo_root is None else repo_root
     argv = argv if argv is not None else sys.argv[1:]
     argv, only = lint_common.split_only(argv)
     if argv:
@@ -166,15 +167,13 @@ def main(argv: list[str] | None = None) -> int:
             return 1
     # argv non-empty = explicit paths; empty = full scan, or the `--only` changed files
     # (the commit hook) under the same scope.
-    targets = (
-        [Path(a).resolve() for a in argv] if argv else lint_common.scan_roots(_REPO_ROOT, SCAN_DIRS)
-    )
-    scope = lint_common.changed_scope(only, _REPO_ROOT)
+    targets = [Path(a).resolve() for a in argv] if argv else lint_common.scan_roots(root, SCAN_DIRS)
+    scope = lint_common.changed_scope(only, root)
 
     total = 0
-    for path in sorted(lint_common.restrict(_iter_py_files(targets), scope, _REPO_ROOT)):
+    for path in sorted(lint_common.restrict(_iter_py_files(targets), scope, root)):
         try:
-            rel = path.relative_to(_REPO_ROOT).as_posix()
+            rel = path.relative_to(root).as_posix()
         except ValueError:
             rel = path.as_posix()
         for lineno, message in _scan_file(path, rel):
