@@ -10,7 +10,13 @@ from dataclasses import dataclass
 from functools import cache
 from pathlib import Path
 
-__all__ = ["Bindings", "is_imported_binding", "module_bindings", "provides"]
+__all__ = [
+    "Bindings",
+    "is_imported_binding",
+    "module_bindings",
+    "provides",
+    "unambiguous_function_lines",
+]
 
 # Names every module object has, and the builtins its code resolves when it binds no such name.
 _ALWAYS = frozenset(dir(types.ModuleType("m"))) | frozenset(dir(builtins))
@@ -79,6 +85,22 @@ def _read(path: str, mtime_ns: int, size: int) -> Bindings:
         imported=frozenset(imported),
         all_names=frozenset(all_names),
     )
+
+
+def unambiguous_function_lines(tree: ast.Module) -> frozenset[int]:
+    counts: dict[str, int] = {}
+    functions: dict[str, int] = {}
+    for node in _in_module_scope(tree):
+        if _serves_names(node):
+            return frozenset()
+        names = _names_bound(node)
+        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Del):
+            names = [node.id]
+        for name in names:
+            counts[name] = counts.get(name, 0) + 1
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+            functions[node.name] = node.lineno
+    return frozenset(line for name, line in functions.items() if counts[name] == 1)
 
 
 def _all_entries(node: ast.AST) -> list[str]:
