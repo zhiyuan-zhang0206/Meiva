@@ -11,6 +11,7 @@ from agent import process_boot
 from base.agents.context.clients import ClientSet
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
+from base.config import ConfigBoot
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
@@ -18,6 +19,7 @@ from base.lm.catalog import ModelCatalog
 from base.packages.composer_commands import CommandCatalog
 from base.telemetry.delivery.pipeline import EventPipeline
 from base.telemetry.delivery.receipts import Event
+from base.telemetry.otlp.trace_config import TraceConfig
 from services.agent_runner.agent_host import daemon
 from services.agent_runner.agent_host.host import AgentHost
 from services.agent_runner.agent_host.tests.host_policy import configured_policy
@@ -137,8 +139,6 @@ async def test_boot_primary_survives_a_failed_constructed_writer_cleanup(
     database: Database,
     unit_home: Path,
 ) -> None:
-    from base.cluster.machine import MachineIdentity
-    from base.config import ConfigBoot
     from meiva.sdk_surface.installation import Installation
 
     boot_error = ValueError("original plugin bootstrap defect")
@@ -174,7 +174,9 @@ async def test_boot_primary_survives_a_failed_constructed_writer_cleanup(
     def no_op(*_args: object) -> None:
         pass
 
-    def initialize_process_scope(*, machine: MachineIdentity, home: Path) -> None:
+    def initialize_process_scope(
+        *, machine: MachineIdentity, home: Path, trace: TraceConfig
+    ) -> None:
         assert home == unit_home
 
     def acquire(*_args: object) -> bool:
@@ -200,10 +202,12 @@ async def test_boot_primary_survives_a_failed_constructed_writer_cleanup(
         host=lambda: "localhost",
         description=lambda: "test host",
     )
+    config = ConfigBoot()
+    config.read_process_environment()
     try:
         with pytest.raises(ValueError) as observed:
             await daemon.run(
-                config=ConfigBoot(),
+                config=config,
                 database=lambda: database,
                 machine=machine,
                 home=unit_home,

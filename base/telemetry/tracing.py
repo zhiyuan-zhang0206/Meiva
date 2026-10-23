@@ -74,7 +74,6 @@ from opentelemetry.sdk.trace import Span as SdkSpan
 from opentelemetry.sdk.trace.export import SpanExporter, SpanExportResult
 
 from base.cluster.machine import MachineIdentity
-from base.config import settings
 from base.log import logger
 from base.paths import traces_dir
 from base.telemetry.delivery.reporting import report_no_pipeline
@@ -84,6 +83,7 @@ from base.telemetry.otlp.telemetry_otlp import (
     endpoint_reachable,
     observability_export_allowed,
 )
+from base.telemetry.otlp.trace_config import TraceConfig
 from base.telemetry.otlp.trace_workers import CollectorRetry, TraceArm
 from base.telemetry.trace_mirror import (
     disk_usage,
@@ -271,9 +271,9 @@ class OtlpJsonHttpSpanExporter(SpanExporter):
     stripping (defensive layer 2) and the bounded POST itself.
     """
 
-    def __init__(self, endpoint: str | None = None) -> None:
-        base = (endpoint or settings.observability.telemetry_otlp_endpoint).rstrip("/")
-        self._endpoint = f"{base}/v1/traces"
+    def __init__(self, endpoint: str, *, strip_content: bool) -> None:
+        self._endpoint = f"{endpoint.rstrip('/')}/v1/traces"
+        self._strip_content = strip_content
         self._consecutive_failures = 0
         self._circuit_open_until = 0.0
         self._probe_in_flight = False
@@ -318,7 +318,7 @@ class OtlpJsonHttpSpanExporter(SpanExporter):
             )
 
             otlp = MessageToDict(encode_spans(spans))
-            if settings.observability.trace_strip_content:
+            if self._strip_content:
                 strip_content_attributes(otlp)
             req = Parse(
                 json.dumps(otlp, separators=(",", ":"), ensure_ascii=False),
@@ -377,12 +377,12 @@ class OtlpJsonHttpSpanExporter(SpanExporter):
         return None
 
 
-def start_collector_retry(machine: MachineIdentity, home: Path) -> None:
+def start_collector_retry(machine: MachineIdentity, home: Path, config: TraceConfig) -> None:
     with _lifecycle_lock:
         if state.get("closed") or state.get("retry_owner") is not None:
             return
         owner = CollectorRetry(
-            initialize=lambda: initialize_tracing(machine=machine, home=home),
+            initialize=lambda: initialize_tracing(machine=machine, home=home, config=config),
             resolved=lambda: bool(state["initialized"] or state["arm_failed"]),
             interval=lambda: COLLECTOR_RETRY_INTERVAL_S,
         )
@@ -401,6 +401,7 @@ def arm_tracing(
     *,
     production: bool,
     home: Path,
+    strip_content: bool,
 ) -> None:
     if stop_requested is not None and stop_requested.is_set():
         return
@@ -410,7 +411,7 @@ def arm_tracing(
         # LLM content out of span attributes. Unconditional when
         # strip_content is on — an operator-set true would re-open the
         # 31 GB/h hole. Layer 2 (the exporter) stays armed regardless.
-        if settings.observability.trace_strip_content:
+        if strip_content:
             os.environ["TRACELOOP_TRACE_CONTENT"] = "false"
 
         from traceloop.sdk import Traceloop
@@ -446,7 +447,7 @@ def arm_tracing(
             try:
                 Traceloop.init(  # pyright: ignore[reportUnknownMemberType]
                     app_name="meiva",
-                    exporter=OtlpJsonHttpSpanExporter(endpoint=endpoint),
+                    exporter=OtlpJsonHttpSpanExporter(endpoint, strip_content=strip_content),
                     instruments=instruments,
                     disable_batch=False,
                     telemetry_enabled=False,
@@ -488,7 +489,7 @@ def arm_tracing(
         state["init_resolved"].set()
 
 
-def start_arm_thread(endpoint: str, machine: MachineIdentity, home: Path) -> None:
+def start_arm_thread(config: TraceConfig, machine: MachineIdentity, home: Path) -> None:
     """Admit one arm; stop never acquires the slow SDK init lock."""
     with _lifecycle_lock:
         if state.get("closed") or state.get("arm_owner") is not None:
@@ -497,8 +498,14 @@ def start_arm_thread(endpoint: str, machine: MachineIdentity, home: Path) -> Non
 
         production = production_identity(machine, home=home)
         owner = TraceArm(
-            endpoint,
-            lambda endpoint, stop: arm_tracing(endpoint, stop, production=production, home=home),
+            config.endpoint,
+            lambda endpoint, stop: arm_tracing(
+                endpoint,
+                stop,
+                production=production,
+                home=home,
+                strip_content=config.strip_content,
+            ),
         )
         state["arm_owner"] = owner
         state["arm_thread"] = owner._thread
@@ -582,45 +589,45 @@ def _serialized_initialize[**P](function: Callable[P, None]) -> Callable[P, None
     return serialized
 
 
+# meiva:note
+# Initialize OTel span recording to the local collector. Idempotent.
+#
+# No-op when `config.enabled` is False. When on, this call
+# runs only the cheap decisions — disk guards + collector preflight — and
+# hands the heavy part (traceloop import + Traceloop.init, ~2.5-3 s) to one
+# daemon thread (_arm_tracing), one attempt per process. The boot path is
+# therefore sub-second; the ordering contract "instrumentors installed
+# before the first turn" is enforced by ensure_init_resolved() inside
+# turn_span (the callback-manager wrap and the SDK instrumentors are
+# call-time, so a model built during boot still produces spans). Spans:
+# OtlpJsonHttpSpanExporter pointed at the LOCAL sidecar, traceloop
+# instrumenting Anthropic + OpenAI + LangChain + Google GenAI (LangGraph
+# via the LangChain callback handler).
+#
+# Recording is one OTLP/HTTP hop to the LOCAL sidecar; the sidecar writes the
+# JSONL mirror and either fans out locally or relays to the gateway. If the
+# sidecar itself is not answering at init, recording stays off temporarily:
+# the episode is logged once and one daemon loop re-checks every five
+# minutes until init succeeds or the single arm attempt fails
+# permanently (one arm attempt per process).
+#
+# Guards (each independently configurable):
+# - compression (`gzip_old_mirror`): rotated (non-active) mirror segments
+#   gzipped first, so retention and the cap see the compressed footprint.
+# - retention (`trace_retention_days`): day-stamped mirror files older than
+#   N days pruned first (the collector's rotation also bounds them).
+# - directory cap (`trace_max_dir_mb`): oldest mirror files deleted until
+#   the directory fits under the cap. These three run BEFORE the watermark
+#   guard, so an over-watermark disk still gets its relief pass.
+# - disk watermark (`trace_disk_watermark`): data disk over the fraction ->
+#   recording skipped, warning event emitted (auto-degrade).
+# - content stripping (`trace_strip_content`): TRACELOOP_TRACE_CONTENT=false
+#   + exporter-side re-strip, so the mirror holds metadata only.
 @_serialized_initialize
-def initialize_tracing(*, machine: MachineIdentity, home: Path) -> None:
-    """Initialize OTel span recording to the local collector. Idempotent.
-
-    No-op when settings.observability.trace_enabled=False. When on, this call
-    runs only the cheap decisions — disk guards + collector preflight — and
-    hands the heavy part (traceloop import + Traceloop.init, ~2.5-3 s) to one
-    daemon thread (_arm_tracing), one attempt per process. The boot path is
-    therefore sub-second; the ordering contract "instrumentors installed
-    before the first turn" is enforced by ensure_init_resolved() inside
-    turn_span (the callback-manager wrap and the SDK instrumentors are
-    call-time, so a model built during boot still produces spans). Spans:
-    OtlpJsonHttpSpanExporter pointed at the LOCAL sidecar, traceloop
-    instrumenting Anthropic + OpenAI + LangChain + Google GenAI (LangGraph
-    via the LangChain callback handler).
-
-    Recording is one OTLP/HTTP hop to the LOCAL sidecar; the sidecar writes the
-    JSONL mirror and either fans out locally or relays to the gateway. If the
-    sidecar itself is not answering at init, recording stays off temporarily:
-    the episode is logged once and one daemon loop re-checks every five
-    minutes until init succeeds or the single arm attempt fails
-    permanently (one arm attempt per process).
-
-    Guards (each independently configurable):
-    - compression (`gzip_old_mirror`): rotated (non-active) mirror segments
-      gzipped first, so retention and the cap see the compressed footprint.
-    - retention (`trace_retention_days`): day-stamped mirror files older than
-      N days pruned first (the collector's rotation also bounds them).
-    - directory cap (`trace_max_dir_mb`): oldest mirror files deleted until
-      the directory fits under the cap. These three run BEFORE the watermark
-      guard, so an over-watermark disk still gets its relief pass.
-    - disk watermark (`trace_disk_watermark`): data disk over the fraction ->
-      recording skipped, warning event emitted (auto-degrade).
-    - content stripping (`trace_strip_content`): TRACELOOP_TRACE_CONTENT=false
-      + exporter-side re-strip, so the mirror holds metadata only.
-    """
+def initialize_tracing(*, machine: MachineIdentity, home: Path, config: TraceConfig) -> None:
     if state.get("closed") or state["initialized"] or state["arm_failed"]:
         return
-    if not settings.observability.trace_enabled:
+    if not config.enabled:
         return
     if not observability_export_allowed(machine, home=home):
         return
@@ -634,15 +641,15 @@ def initialize_tracing(*, machine: MachineIdentity, home: Path) -> None:
     mirror_dir = traces_dir(home)
     mirror_dir.mkdir(parents=True, exist_ok=True)
     gzip_old_mirror(traces_dir=mirror_dir)
-    prune_old_mirror(settings.observability.trace_retention_days, traces_dir=mirror_dir)
-    enforce_dir_cap(settings.observability.trace_max_dir_mb, traces_dir=mirror_dir)
+    prune_old_mirror(config.retention_days, traces_dir=mirror_dir)
+    enforce_dir_cap(config.max_dir_mb, traces_dir=mirror_dir)
 
     # Disk-watermark guard: if the data disk is over its watermark, skip
     # recording entirely (auto-degrade) instead of letting the mirror grow
     # the disk toward full. Logged as a warning event so the degradation is
     # visible; a later agent start re-checks.
     usage = disk_usage(traces_dir=mirror_dir)
-    if usage is not None and usage[0] > settings.observability.trace_disk_watermark:
+    if usage is not None and usage[0] > config.disk_watermark:
         # Auto-degrade: skip recording so the mirror can never fill the disk.
         # The loguru events sink lands this in the unified event stream
         # (event_name='trace', action='recording_disabled_disk_watermark') —
@@ -652,7 +659,7 @@ def initialize_tracing(*, machine: MachineIdentity, home: Path) -> None:
             "trace recording disabled — data disk over watermark",
             event="trace",
             action="recording_disabled_disk_watermark",
-            watermark=settings.observability.trace_disk_watermark,
+            watermark=config.disk_watermark,
             usage_fraction=round(usage[0], 3),
             free_gb=round(usage[1] / (1024**3), 1),
         )
@@ -663,7 +670,7 @@ def initialize_tracing(*, machine: MachineIdentity, home: Path) -> None:
     # collector). Skip with a warning event instead of arming an exporter that
     # fails every batch. One daemon retry loop re-checks at the exporter retry
     # cadence, while repeated callers in the same episode stay quiet.
-    endpoint = settings.observability.telemetry_otlp_endpoint
+    endpoint = config.endpoint
     if not endpoint_reachable(endpoint):
         if not state["collector_offline_reported"]:
             logger.warning(
@@ -673,10 +680,10 @@ def initialize_tracing(*, machine: MachineIdentity, home: Path) -> None:
                 endpoint=endpoint,
             )
             state["collector_offline_reported"] = True
-        start_collector_retry(machine, home)
+        start_collector_retry(machine, home, config)
         return
 
-    start_arm_thread(endpoint, machine, home)
+    start_arm_thread(config, machine, home)
 
 
 @contextlib.contextmanager
@@ -715,9 +722,6 @@ def turn_span(*, name: str, session_id: str, turn: int) -> Generator[None, None,
     pending background init is awaited first (ensure_init_resolved) so the
     root span never opens against the unset proxy tracer.
     """
-    if not settings.observability.trace_enabled:
-        yield
-        return
     ensure_init_resolved()
     if not state["initialized"]:
         yield
@@ -769,9 +773,6 @@ def claim_idle_wait_span() -> Generator[None, None, None]:
     own span; with the instrumentor absent the wait simply stays inside
     whatever span is current (the pre-fix behavior).
     """
-    if not settings.observability.trace_enabled:
-        yield
-        return
     ensure_init_resolved()
     if not state["initialized"]:
         yield

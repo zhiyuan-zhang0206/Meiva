@@ -10,7 +10,6 @@ exports = ["__init__.py", "metering.py"]
 "metering.py#time.monotonic" = 2
 
 [debt.impure-edge]
-"__init__.py#base/config/__init__.py" = 1
 "__init__.py#base/lm/provider_api.py" = 1
 "__init__.py#base/lm/reasoning.py" = 1
 "__init__.py#base/log/__init__.py" = 1

@@ -1,7 +1,7 @@
 exports = ["capture"]
 
 [uses]
-"_lower_exit_child.py" = ["otlp"]
+"_lower_exit_child.py" = ["otlp", "test_tracing.py"]
 "otlp" = ["capture"]
 "test_audit_events_record.py" = ["capture"]
 "test_emitter_lifecycle.py" = ["_emitter_lifecycle_child.py"]
@@ -11,7 +11,7 @@ exports = ["capture"]
 "test_telemetry.py" = ["otlp"]
 "test_telemetry_otlp_gate.py" = ["otlp"]
 "test_tracing.py" = ["otlp"]
-"test_tracing_lifecycle.py" = ["otlp"]
+"test_tracing_lifecycle.py" = ["otlp", "test_tracing.py"]
 "tracing" = ["otlp", "test_tracing.py"]
 
 [debt.env-patch]
@@ -45,7 +45,6 @@ exports = ["capture"]
 "test_telemetry_otlp_gate.py#monkeypatch.setattr base.config.settings.observability.telemetry_otlp_enabled" = 3
 "test_tracing.py#monkeypatch.setattr base.cluster.derive.production_identity" = 2
 "test_tracing.py#monkeypatch.setattr base.config.settings.observability.telemetry_otlp_endpoint" = 1
-"test_tracing.py#monkeypatch.setattr base.config.settings.observability.trace_enabled" = 13
 "test_tracing.py#monkeypatch.setattr base.telemetry.otlp.telemetry_otlp.production_identity" = 3
 "test_tracing.py#monkeypatch.setattr base.telemetry.tracing.COLLECTOR_RETRY_INTERVAL_S" = 1
 "test_tracing.py#monkeypatch.setattr base.telemetry.tracing.INIT_RESOLVED_TIMEOUT_S" = 1
