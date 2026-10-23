@@ -176,6 +176,9 @@ def cache_read(
 
 def main(scenario: str, path: Literal["message", "durable"], cached: int | None) -> None:
     catalog = build_model_catalog()
+    if scenario == "disabled":
+        disabled()
+        return
     with armed_billing() as tracer:
         match scenario:
             case "schema":
@@ -188,8 +191,6 @@ def main(scenario: str, path: Literal["message", "durable"], cached: int | None)
                 missing_usage(tracer, catalog)
             case "cache_read":
                 cache_read(tracer, catalog, path, cached)
-            case "disabled":
-                disabled(tracer)
             case "failure":
                 failing(tracer)
             case _:

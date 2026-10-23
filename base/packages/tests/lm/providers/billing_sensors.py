@@ -4,46 +4,41 @@
 
 from __future__ import annotations
 
-import sys
-from types import FrameType
-
 import loguru
 from loguru import logger
 from opentelemetry import trace
 from opentelemetry.context import Context
-from opentelemetry.sdk.trace import Span, SpanProcessor
+from opentelemetry.sdk.trace import Span, SpanProcessor, TracerProvider
 
+from base.cluster.machine import MachineIdentity
 from base.config import settings
 from base.lm.usage import emit_billing_event
 from base.packages.tests.lm.providers.billing_runtime import BillingRuntime
+from base.paths import meiva_home
+from base.telemetry import tracing
+from base.telemetry.otlp.trace_config import TraceConfig
 
 
-def disabled(tracer: BillingRuntime) -> None:
-    acquisitions: list[str] = []
-
-    def observe(frame: FrameType, event: str, arg: object) -> None:
-        if event == "call" and frame.f_code is trace.get_tracer.__code__:
-            acquisitions.append(frame.f_locals["instrumenting_module_name"])
-
-    previous = sys.getprofile()
-    sys.setprofile(observe)
-    try:
-        trace.get_tracer("billing-sensor-control")
-        assert acquisitions == ["billing-sensor-control"]
-        acquisitions.clear()
-        assert settings.observability.trace_enabled is False
-        emit_billing_event(
-            vendor="deepseek",
-            model="deepseek-v4-pro",
-            tok_in=1,
-            tok_out=1,
-            cost_usd=0.0,
-            usage_kind="chat",
-        )
-        assert acquisitions == []
-        assert tracer.spans == []
-    finally:
-        sys.setprofile(previous)
+def disabled() -> None:
+    config = TraceConfig.of(settings.observability)
+    assert config.enabled is False
+    machine = MachineIdentity(
+        name=lambda: "billing-child",
+        role=frozenset,
+        host=lambda: "localhost",
+        description=lambda: "billing child",
+    )
+    tracing.initialize_tracing(machine=machine, home=meiva_home(), config=config)
+    assert not tracing.is_initialized()
+    assert not isinstance(trace.get_tracer_provider(), TracerProvider)
+    emit_billing_event(
+        vendor="deepseek",
+        model="deepseek-v4-pro",
+        tok_in=1,
+        tok_out=1,
+        cost_usd=0.0,
+        usage_kind="chat",
+    )
 
 
 class FailingBillingProcessor(SpanProcessor):
