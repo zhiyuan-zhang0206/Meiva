@@ -1,18 +1,13 @@
 exports = ["pool_support.py"]
 
 [uses]
+"_rpc_defaults_child.py" = ["rpc_support.py"]
+"test_cluster_rpc.py" = ["_rpc_defaults_child.py", "rpc_support.py"]
 "test_env_audit.py" = ["_env_audit_projection_child.py"]
 "test_inventory_ops.py" = ["_host_capability_child.py"]
 "test_operations_config.py" = ["_host_capability_child.py"]
 
 [debt.first-party-patch]
-"test_cluster_rpc.py#monkeypatch.setattr base.config.settings.gateway.cluster_rpc_max_retries" = 1
-"test_cluster_rpc.py#monkeypatch.setattr base.config.settings.gateway.cluster_rpc_timeout_seconds" = 1
-"test_cluster_rpc.py#monkeypatch.setattr ops.cluster.rpc.default_idempotency_key" = 1
-"test_cluster_rpc.py#monkeypatch.setattr ops.cluster.rpc.httpx.AsyncClient" = 4
-"test_cluster_rpc.py#monkeypatch.setattr ops.cluster.rpc.lookup_machine_url" = 5
-"test_cluster_rpc.py#monkeypatch.setattr ops.cluster.rpc.random.uniform" = 2
-"test_cluster_rpc.py#monkeypatch.setattr ops.cluster.rpc.rpc_sleep" = 1
 "test_cluster_status_op.py#monkeypatch.setattr ops.cluster.operations.status_snapshot" = 1
 "test_env_audit.py#monkeypatch.setattr base.config.admin.metadata.get_config_metadata" = 1
 "test_env_audit.py#monkeypatch.setattr base.config.config_registry.fields" = 3
