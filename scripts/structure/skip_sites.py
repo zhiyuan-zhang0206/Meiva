@@ -263,30 +263,11 @@ def write_baseline(found: dict[str, list[tuple[int, str]]], root: Path = _REPO_R
     return total
 
 
-# meiva:note
-# The record the current tree generates, for a reader to paste.
-def block(found: dict[str, list[tuple[int, str]]]) -> str:
-    rows = "".join(
-        f"    {json.dumps(path)}: (\n"
-        + "".join(
-            f"        {json.dumps(what, ensure_ascii=False)},\n"
-            for what in sorted(what for _, what in sites)
-        )
-        + "    ),\n"
-        for path, sites in sorted(found.items())
-    )
-    total = sum(len(sites) for sites in found.values())
-    return f"TEST_SKIP_SITES_ALLOWED = {total}\n\n_SITES = {{\n{rows}}}"
-
-
 def main(argv: list[str] | None = None) -> int:
     arguments = list(sys.argv[1:] if argv is None else argv)
     found = sites_by_file(tracked_test_modules())
     if "--write-baseline" in arguments:
         write_baseline(found)
-        return 0
-    if "--print-baseline" in arguments:
-        sys.stdout.write(block(found) + "\n")
         return 0
     report = judge(found, allowed=TEST_SKIP_SITES_ALLOWED, baseline=load())
     if report is None:
