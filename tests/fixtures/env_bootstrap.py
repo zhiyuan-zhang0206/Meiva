@@ -67,6 +67,21 @@ def is_credential_name(name: str) -> bool:
 
 
 # meiva:note
+# The values this file installs for the credentials it decides about, one entry per name it
+# writes rather than pops. Two readers share the map: the env block below assigns from it, and
+# the snapshot underneath it leaves its own sentinels out. That second reader is what makes the
+# check true under `xdist`: a worker is a child of a controller whose import of this file
+# already cleaned the environment, so what the worker inherits is this suite's sentinel - the
+# state the run is meant to have, not a launcher's secret. Reading it as one reddened the
+# sharded CI run of #5532 while the same test passed serially.
+SENTINELS: Mapping[str, str] = {
+    "MEIVA_CLUSTER_SECRET": "test-cluster-secret",
+    "MEIVA_RUNNER_DB_PASSWORD": "test-runner-db-password",
+    "MEIVA_TELEGRAM_BOT_TOKEN": "",
+}
+
+
+# meiva:note
 # Sixteen hex characters tell two real tokens apart and recover neither. `sha256` of the
 # empty string is what an absent or emptied name hashes to, so "replaced with nothing" and
 # "replaced with a sentinel" both read as replaced.
@@ -75,7 +90,9 @@ def _digest(value: str) -> str:
 
 
 AMBIENT_CREDENTIAL_DIGESTS: Mapping[str, str] = {
-    name: _digest(value) for name, value in os.environ.items() if value and is_credential_name(name)
+    name: _digest(value)
+    for name, value in os.environ.items()
+    if value and is_credential_name(name) and value != SENTINELS.get(name)
 }
 
 
@@ -211,7 +228,7 @@ os.environ.pop("MEIVA_ALERTS_WEBHOOK_TOKEN", None)
 # The runner database password is the one credential the suite's own home declares below: the
 # environment side says the same thing, so a `derive_env` refresh reproduces the sentinel
 # instead of the password the launching process carried.
-os.environ["MEIVA_RUNNER_DB_PASSWORD"] = "test-runner-db-password"  # noqa: S105
+os.environ["MEIVA_RUNNER_DB_PASSWORD"] = SENTINELS["MEIVA_RUNNER_DB_PASSWORD"]
 
 # ── Boot mode: the suite exercises the eager config chain ──
 #
@@ -270,7 +287,7 @@ os.environ.pop("MEIVA_DB_GENERATION", None)
 # are independent, including in the private test bootstrap. Use a URL-safe token that
 # passes the cluster_secret validator. Individual auth tests monkeypatch it (incl.
 # to "" for the unset-fail-closed paths).
-os.environ["MEIVA_CLUSTER_SECRET"] = "test-cluster-secret"  # noqa: S105 — test fixture
+os.environ["MEIVA_CLUSTER_SECRET"] = SENTINELS["MEIVA_CLUSTER_SECRET"]
 # The suite's secret-bearing servers include the e2e ops daemon, which binds
 # non-loopback. The deployment precondition requires a declared mode; overlay
 # records the suite's private-network posture.
@@ -392,7 +409,7 @@ os.environ["MEIVA_GATEWAY_URL"] = "http://test-gateway.invalid:8000"
 # telegram skill, IM adapters, any future direct caller). Pinned empty like
 # the db/redis sentinels: a test that needs a token monkeypatches
 # `settings.telegram` explicitly (cli/commands/cluster/tests/test_cluster_health.py does).
-os.environ["MEIVA_TELEGRAM_BOT_TOKEN"] = ""
+os.environ["MEIVA_TELEGRAM_BOT_TOKEN"] = SENTINELS["MEIVA_TELEGRAM_BOT_TOKEN"]
 os.environ["MEIVA_TELEGRAM_OWNER_ID"] = "0"
 # meiva:note
 # Shell-session and execution transport tests have no inherited desktop-helper route.
