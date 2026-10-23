@@ -1,5 +1,6 @@
 "use client";
 
+// meiva:note
 // useSettledAnchorScroll: the mount-time hash scroll plus the settle
 // re-scroll. happy-dom has no ResizeObserver and no real layout, so the
 // re-scroll path is exercised through a fake ResizeObserver whose trigger()
@@ -9,7 +10,7 @@
 import { cleanup, render } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { useSettledAnchorScroll } from "./_anchor-scroll";
+import { useSettledAnchorScroll } from "./anchor-scroll";
 
 class FakeResizeObserver {
   static instances: FakeResizeObserver[] = [];
@@ -25,6 +26,7 @@ class FakeResizeObserver {
     this.observed = target;
   }
   unobserve() {
+    // meiva:note
     // noop — the hook only calls observe/disconnect.
   }
   disconnect() {
@@ -84,6 +86,7 @@ describe("useSettledAnchorScroll", () => {
       const observer = instances[0];
       expect(observer.observed).toBe(container.querySelector("[data-testid=content]"));
 
+      // meiva:note
       // The async content above the target grows — the observer fires and the
       // hook re-applies the scroll.
       Object.defineProperty(scrollContainer, "scrollHeight", {
@@ -93,6 +96,7 @@ describe("useSettledAnchorScroll", () => {
       observer.trigger();
       expect(scrollIntoView).toHaveBeenCalledTimes(2);
 
+      // meiva:note
       // A further height change within the settle window re-scrolls again.
       Object.defineProperty(scrollContainer, "scrollHeight", {
         configurable: true,
@@ -101,6 +105,7 @@ describe("useSettledAnchorScroll", () => {
       observer.trigger();
       expect(scrollIntoView).toHaveBeenCalledTimes(3);
 
+      // meiva:note
       // Once the height stays stable for the grace period the observer
       // detaches — the settle re-scroll is over.
       vi.advanceTimersByTime(600);
@@ -116,6 +121,7 @@ describe("useSettledAnchorScroll", () => {
     const scrollContainer = container.querySelector("#scroll")!;
     const observer = instances[0];
 
+    // meiva:note
     // User scrolls during the settle window (the hook's lastScrollTop was 0).
     Object.defineProperty(scrollContainer, "scrollTop", {
       configurable: true,
@@ -128,6 +134,7 @@ describe("useSettledAnchorScroll", () => {
     observer.trigger();
 
     expect(observer.disconnected).toBe(true);
+    // meiva:note
     // The user-takeover re-scroll is suppressed: only the mount scroll ran.
     expect(scrollIntoView).toHaveBeenCalledTimes(1);
   });

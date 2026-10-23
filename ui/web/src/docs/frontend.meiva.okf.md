@@ -33,7 +33,7 @@ Meiva's web user interface — Next.js 16 (App Router) + React 19 + Tailwind CSS
 /control                      Control vertical long page — write/admin surface (observation surface split to /insights)
                               First-level section anchors: guide/config/display/plugins/mcp/skills/schedules/okf-graph (8th section, added 2026-07-24: button opens /api/okf/graph — D3 force-directed .meiva.okf.md doc graph, rebuilt from the current doc tree per request)
                               Top header: chat link + title; left two-level anchor nav (ControlNav) + right single scroll container (replaces TabBar)
-                              Structure + data queries all ready on first screen (not expanded on scroll); IntersectionObserver only pauses polling after leaving viewport (enabled:visible,_visibility.tsx, saves connection budget)
+                              Structure + data queries all ready on first screen (not expanded on scroll); IntersectionObserver only pauses polling after leaving viewport (enabled:visible,visibility.tsx, saves connection budget)
                               Anchor jump instant (scrollIntoView behavior:auto)
                               Section components are also bare routes: control/{guide,config,display,schedules,inventory,skills}/page.tsx
                               inventory/page.tsx exports PluginsInventory/McpInventory (shared /api/inventory query) as Plugins+MCP sections

@@ -2,6 +2,7 @@
 
 import { writeConfigOwners } from "./_owner_writes";
 
+// meiva:note
 // /control#config — runtime config management, per-machine.
 //
 // Selector: a machine dropdown sits above the group sections. Default is
@@ -20,7 +21,7 @@ import { writeConfigOwners } from "./_owner_writes";
 // restart_required).
 //
 // Layout: a sticky tag-filter bar, then the 17 semantic display groups from
-// _config_groups.ts (a FRONTEND regrouping of the backend's domain groups —
+// config-groups.ts (a FRONTEND regrouping of the backend's domain groups —
 // each group element id is a nav sub-anchor). Every row shows a sentence-case
 // label derived from the env var (the env var itself rides in the title
 // attribute) plus small tag badges: Runtime / CLI-only (effective
@@ -63,9 +64,9 @@ import { SYSTEM_STATUS_QUERY_KEY } from "@/lib/notifications/use-cluster-health"
 import {
   DEFAULT_MODEL_GROUP_ID,
   PER_MODEL_GROUP_ID,
-  displayGroupId,
-} from "../_config_groups";
-import { useSectionVisible } from "../_visibility";
+} from "../config-group-defs";
+import { displayGroupId } from "../config-groups";
+import { useSectionVisible } from "../visibility";
 import {
   ConfigFilterBar,
   ConfigRow,

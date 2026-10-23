@@ -11,7 +11,7 @@ import {
   setupConfigTest,
   VIEW,
   wrap,
-} from "./_config_test_fixtures";
+} from "./config-test-fixtures-mock";
 import ConfigPage from "./page";
 
 afterEach(cleanup);

@@ -19,13 +19,13 @@ import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { useState } from "react";
 
-import { useSettledAnchorScroll } from "@/app/control/_anchor-scroll";
-import { ControlNav } from "@/app/control/_nav";
+import { useSettledAnchorScroll } from "@/app/control/anchor-scroll";
+import { ControlNav } from "@/app/control/nav";
 import {
   INSIGHTS_SCROLL_ID,
   INSIGHTS_SECTIONS,
-} from "@/app/control/_sections";
-import { ControlSection } from "@/app/control/_section";
+} from "@/app/control/sections";
+import { ControlSection } from "@/app/control/section";
 import OpsPage from "@/app/insights/ops/page";
 import AlertsSection from "@/components/ops/alerts-section";
 import StatusPage from "@/app/insights/status/page";
