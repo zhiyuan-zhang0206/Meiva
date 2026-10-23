@@ -550,14 +550,14 @@ def write_crashed_result(
         return
     except BaseException:
         try:
-            _write_crashed_result_stdlib(result_path, envelope)
+            write_stdlib_envelope(result_path, envelope)
         finally:
             logger.opt(exception=True).warning(
                 "exec child: the result envelope writer failed; fell back to the stdlib writer"
             )
 
 
-def _write_crashed_result_stdlib(result_path: str, envelope: dict[str, object]) -> None:
+def write_stdlib_envelope(result_path: str, envelope: dict[str, object]) -> None:
     path = Path(result_path)
     fd: int | None = None
     try:

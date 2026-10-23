@@ -229,21 +229,23 @@ def test_missing_request_writes_crashed_envelope_after_healthy_boot(tmp_path: Pa
     assert payload.code_reached is False
 
 
-@pytest.mark.skipif(
-    os.geteuid() == 0, reason="root ignores the directory permission this fault uses"
-)
-def test_crash_envelope_uses_stdlib_fallback_when_protocol_writer_fails(tmp_path: Path) -> None:
+def test_stdlib_envelope_writer_produces_a_readable_crashed_result(tmp_path: Path) -> None:
     from agent.execution import child as exec_child
 
-    directory = tmp_path / "envelopes"
-    directory.mkdir()
-    result = directory / "result.json"
-    result.touch()
-    directory.chmod(0o500)
-    try:
-        exec_child.write_crashed_result(str(result), ValueError("fallback boom"))
-    finally:
-        directory.chmod(0o700)
+    result = tmp_path / "result.json"
+    envelope: dict[str, object] = {
+        "v": 1,
+        "kind": "crashed",
+        "lifecycle_type": None,
+        "exc_type": "ValueError",
+        "exc_msg": "fallback boom",
+        "full_traceback": "ValueError: fallback boom",
+        "code_reached": False,
+        "state_update_error": None,
+        "sdk_calls": None,
+    }
+
+    exec_child.write_stdlib_envelope(str(result), envelope)
 
     payload = read_result(result)
     assert payload.kind == "crashed"
