@@ -22,13 +22,3 @@ exports = ["host_policy.py", "lifecycle", "runtime"]
 "test_boot_sdk_posture.py#monkeypatch.setattr meiva.sdk_surface.process_context.bind_host_process" = 1
 "test_circuit_breaker.py#monkeypatch.setattr base.config.settings.lm.llm_model" = 1
 "test_circuit_breaker_audit.py#monkeypatch.setattr base.telemetry.audit_events.record_audit_standalone_async" = 1
-
-[debt.not-exported]
-"runtime/shutdown/test_agent_host_shutdown.py -> agent_host/child_runtime_scenarios.py" = 1
-"runtime/test_agent_host_log_rotate.py -> agent_host/child_runtime_scenarios.py" = 3
-"runtime/test_resource_join.py -> agent_host/child_runtime_scenarios.py" = 1
-
-[debt.undeclared-edge]
-"runtime/shutdown/test_agent_host_shutdown.py -> agent_host/child_runtime_scenarios.py" = 1
-"runtime/test_agent_host_log_rotate.py -> agent_host/child_runtime_scenarios.py" = 3
-"runtime/test_resource_join.py -> agent_host/child_runtime_scenarios.py" = 1

@@ -15,7 +15,6 @@ from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.machine import MachineIdentity
 from base.config import ConfigBoot, Settings, get_field, settings
 from base.config.domains.lm import LmSettings
-from base.daemon.endpoints import ServiceEndpoint
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.db.config import DbConfig
@@ -60,6 +59,7 @@ def _assert_run_lifecycle(
         return _Health()
 
     async def fake_stop(_server: object) -> None:
+        assert (tmp_path / "run" / "labeler.pid").exists()
         cleanup.append("health")
 
     class _Pool:
@@ -86,20 +86,12 @@ def _assert_run_lifecycle(
         if error is not None:
             raise error
 
-    def is_running_for_entry(config: ConfigBoot, *, runtime: Path) -> bool:
-        return False
-
-    monkeypatch.setattr(daemon, "_is_running", is_running_for_entry)
-
     def write_pidfile_for_entry(config: ConfigBoot, *, runtime: Path) -> None:
-        return startup.append("pidfile")
+        runtime.mkdir(parents=True, exist_ok=True)
+        (runtime / "labeler.pid").write_text("1\n")
+        startup.append("pidfile")
 
     monkeypatch.setattr(daemon, "write_pidfile", write_pidfile_for_entry)
-
-    def remove_pidfile_for_entry(config: ConfigBoot, *, runtime: Path) -> None:
-        return cleanup.append("pidfile")
-
-    monkeypatch.setattr(daemon, "_remove_pidfile", remove_pidfile_for_entry)
     monkeypatch.setattr(daemon, "start_health_server", fake_start)
     monkeypatch.setattr(daemon, "stop_health_server", fake_stop)
     monkeypatch.setattr(daemon, "build_model_catalog", lambda: model_catalog)
@@ -112,10 +104,6 @@ def _assert_run_lifecycle(
         startup.append("database")
         return Database.from_settings(gate=database_gate)
 
-    def endpoint_for_entry(config: ConfigBoot, *, runtime: Path) -> ServiceEndpoint:
-        return ServiceEndpoint("labeler", 1, Path("/nonexistent/labeler.pid"))
-
-    monkeypatch.setattr(daemon, "labeler_endpoint", endpoint_for_entry)
     monkeypatch.setattr(daemon.Database, "pool", fake_pool)
     monkeypatch.setattr(daemon, "dispatch_loop", fake_dispatch)
 
@@ -140,7 +128,8 @@ def _assert_run_lifecycle(
             )
         assert caught.value is error
     assert received == [daemon.labeler_config()]
-    assert cleanup == ["pool", "health", "pidfile"]
+    assert cleanup == ["pool", "health"]
+    assert not (tmp_path / "run" / "labeler.pid").exists()
     assert startup == ["pidfile", "health", "database", "pool"]
 
 
@@ -157,15 +146,21 @@ def _assert_gate_matches_image(
         assert reads == [(image.source_root, image.sha)]
 
 
-def _run_main(monkeypatch: pytest.MonkeyPatch, *, machine_name: str) -> None:
+def _run_main(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    machine_name: str,
+    tmp_path: Path,
+    exit_process: Callable[[int], None],
+) -> None:
     boot = ConfigBoot()
     boot.set_field("machine_name", machine_name)
     monkeypatch.setattr(daemon, "ConfigBoot", lambda: boot)
     runner = asyncio.Runner()
     monkeypatch.setattr(daemon.asyncio, "Runner", lambda: runner)
     try:
-        with patch.dict(os.environ):
-            daemon.main()
+        with patch.dict(os.environ, {"MEIVA_HOME": str(tmp_path)}):
+            daemon.main(exit_process=exit_process)
     finally:
         runner.close()
         tzset = getattr(time, "tzset", None)
@@ -173,13 +168,9 @@ def _run_main(monkeypatch: pytest.MonkeyPatch, *, machine_name: str) -> None:
             tzset()
 
 
-def _ignore_entry_resource(config: ConfigBoot, *, runtime: Path) -> None:
-    pass
-
-
 @pytest.mark.parametrize("sha", ["captured-labeler", None])
 def test_entry_shares_the_captured_gate_with_logging_and_work(
-    monkeypatch: pytest.MonkeyPatch, sha: str | None
+    monkeypatch: pytest.MonkeyPatch, sha: str | None, tmp_path: Path
 ) -> None:
     from base.deploy.schema import migrations
 
@@ -252,9 +243,9 @@ def test_entry_shares_the_captured_gate_with_logging_and_work(
     monkeypatch.setattr(daemon, "install_graceful_shutdown", no_signal_handlers)
     monkeypatch.setattr(daemon, "run", work)
 
-    monkeypatch.setattr(daemon, "_remove_pidfile", _ignore_entry_resource)
-    monkeypatch.setattr(daemon, "_hard_exit", exit_process)
-    _run_main(monkeypatch, machine_name="labeler-entry")
+    _run_main(
+        monkeypatch, machine_name="labeler-entry", tmp_path=tmp_path, exit_process=exit_process
+    )
     assert stages == ["capture", "schema", "producer", "logging", "run", "exit:0"]
     _assert_gate_matches_image(gates, reads, image)
 
@@ -296,12 +287,14 @@ def test_run_cleans_up_after_dispatch_failure(
 
 
 def test_main_reports_uncaught_failure_and_exits_nonzero(
-    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture, tmp_path: Path
 ) -> None:
     from base.deploy.schema import migrations
 
     error = TypeError("invalid labeler dispatch")
-    removed: list[bool] = []
+    pidfile = tmp_path / "run" / "labeler.pid"
+    pidfile.parent.mkdir(parents=True, exist_ok=True)
+    pidfile.write_text("1\n")
 
     class _Exit(BaseException):
         def __init__(self, code: int) -> None:
@@ -327,23 +320,18 @@ def test_main_reports_uncaught_failure_and_exits_nonzero(
     monkeypatch.setattr(daemon, "install_graceful_shutdown", no_signal_handlers)
     monkeypatch.setattr(daemon, "run", fail_run)
 
-    def remove_pidfile_for_entry(config: ConfigBoot, *, runtime: Path) -> None:
-        return removed.append(True)
-
-    monkeypatch.setattr(daemon, "_remove_pidfile", remove_pidfile_for_entry)
-    monkeypatch.setattr(daemon, "_hard_exit", exit_process)
     runner = asyncio.Runner()
     monkeypatch.setattr(daemon.asyncio, "Runner", lambda: runner)
     try:
-        with pytest.raises(_Exit) as caught, patch.dict(os.environ):
-            daemon.main()
+        with pytest.raises(_Exit) as caught, patch.dict(os.environ, {"MEIVA_HOME": str(tmp_path)}):
+            daemon.main(exit_process=exit_process)
         assert caught.value.code == 1
     finally:
         runner.close()
         tzset = getattr(time, "tzset", None)
         if tzset is not None:
             tzset()
-    assert removed == [True]
+    assert not pidfile.exists()
     [record] = [item for item in caplog.records if "daemon crashed" in item.message]
     assert record.exc_info is not None
     assert record.exc_info[1] is error

@@ -1,5 +1,4 @@
 [uses]
-"shutdown_daemon.py" = ["test_scheduler_shutdown.py"]
 "shutdown_worker.py" = ["test_scheduler_shutdown.py"]
 "test_daemon_import_boundary.py" = ["child_import_probe.py"]
 "test_daemon_shutdown.py" = ["child_shutdown.py"]
@@ -36,8 +35,6 @@
 "test_scheduler_shutdown.py#patch.object services.backup.dump.pg_tool" = 1
 "test_scheduler_shutdown.py#patch.object services.backup.dump.run_with_progress" = 1
 "test_scheduler_shutdown.py#patch.object services.backup.restore_drill.run_drill" = 1
-"test_scheduler_shutdown.py#patch.object services.backup.scheduler.daemon._is_running" = 1
-"test_scheduler_shutdown.py#patch.object services.backup.scheduler.daemon._remove_pidfile" = 1
 "test_scheduler_shutdown.py#patch.object services.backup.scheduler.daemon.backup_loop" = 1
 "test_scheduler_shutdown.py#patch.object services.backup.scheduler.daemon.is_due" = 1
 "test_scheduler_shutdown.py#patch.object services.backup.scheduler.daemon.load_local_dump_restore_success" = 1
@@ -45,13 +42,9 @@
 "test_scheduler_shutdown.py#patch.object services.backup.scheduler.daemon.record_local_dump_restore_success" = 1
 "test_scheduler_shutdown.py#patch.object services.backup.scheduler.daemon.start_health_server" = 1
 "test_scheduler_shutdown.py#patch.object services.backup.scheduler.daemon.stop_health_server" = 1
-"test_scheduler_shutdown.py#patch.object services.backup.scheduler.daemon.write_pidfile" = 1
 "test_scheduler_shutdown.py#patch.object services.backup.scheduler.worker.meiva_home" = 1
 "test_scheduler_shutdown.py#patch.object services.backup.scheduler.worker.run_operation" = 1
 
 [debt.restricted-python]
 "operation_support.py#python subprocess that runs something other than a literal repository file" = 1
 "test_worker_bootstrap.py#python subprocess that runs something other than a literal repository file" = 1
-
-[debt.undeclared-edge]
-"test_scheduler_shutdown.py -> shutdown_daemon.py" = 1

@@ -102,20 +102,6 @@ def _mock_service(
 
     config = events_maintenance_config(process_config, events_maintenance_pass_deadline_s=0.02)
 
-    def is_running_for_entry(config: ConfigBoot, *, runtime: Path) -> bool:
-        return False
-
-    monkeypatch.setattr(daemon, "_is_running", is_running_for_entry)
-
-    def write_pidfile_for_entry(config: ConfigBoot, *, runtime: Path) -> None:
-        pass
-
-    monkeypatch.setattr(daemon, "write_pidfile", write_pidfile_for_entry)
-
-    def remove_pidfile_for_entry(config: ConfigBoot, *, runtime: Path) -> None:
-        return closed.append("pidfile")
-
-    monkeypatch.setattr(daemon, "_remove_pidfile", remove_pidfile_for_entry)
     monkeypatch.setattr(daemon, "start_health_server", health)
     monkeypatch.setattr(daemon, "stop_health_server", stop_health)
     monkeypatch.setattr(daemon, "run_maintenance", work)
@@ -180,7 +166,8 @@ async def test_service_stop_cancels_expired_proxy_before_worker_returns(
                 "the stopped service left an unowned pass proxy alive"
             )
             assert not finished.is_set()
-            assert sorted(closed) == ["health", "pidfile", "pool"]
+            assert sorted(closed) == ["health", "pool"]
+            assert not (tmp_path / "run" / "events_maintenance.pid").exists()
             assert trackers[0].snapshot()["dispatch"]["wedged"]
         finally:
             release.set()

@@ -1,5 +1,8 @@
 exports = ["derive.py", "jobs.py", "reader.py", "source.py"]
 
+[purity]
+"model.py" = "strict"
+
 [uses]
 "backfill.py" = ["jobs.py"]
 "derive.py" = ["model.py"]
@@ -38,7 +41,3 @@ exports = ["derive.py", "jobs.py", "reader.py", "source.py"]
 "nodes.py#base/db/__init__.py" = 1
 "reader.py#base/agents/history/checkpoint.py" = 1
 "reader.py#base/db/__init__.py" = 1
-
-[debt.wide-params]
-"nodes.py#def window_nodes" = 1
-"reader.py#def __init__" = 1

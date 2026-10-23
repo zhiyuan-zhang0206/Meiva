@@ -72,6 +72,8 @@ from base.packages.plugins.extensions import EMPTY, ExtensionRegistry
 from base.paths import harness_registrations_dir, harness_sessions_dir
 from base.telemetry.tracing import turn_span
 from services.agent_runner.agent_host.invocation import (
+    HandoffSettlement,
+    InvocationHooks,
     PendingWorkResult,
     finish_completed_invocation,
     finish_pending_failure,
@@ -633,13 +635,14 @@ class AgentHost:
                         agent_id,
                         ctx,
                         PendingWorkResult(prepared),
-                        self.drop_agent,
-                        kill_terminating_agent_shells,
-                        self._wake_resumed,
-                        db=self._db,
-                        bus=self._bus,
-                        relays=self.relays,
-                        notes=self._policy.handoff_notes,
+                        InvocationHooks(
+                            HandoffSettlement(
+                                self._db, self._bus, self.relays, self._policy.handoff_notes
+                            ),
+                            self.drop_agent,
+                            kill_terminating_agent_shells,
+                            self._wake_resumed,
+                        ),
                     )
                     if outcome is not None:
                         return outcome
@@ -674,10 +677,9 @@ class AgentHost:
             ctx,
             agent_id,
             fresh_input=fresh_input,
-            db=self._db,
-            bus=self._bus,
-            relays=self.relays,
-            notes=self._policy.handoff_notes,
+            settlement=HandoffSettlement(
+                self._db, self._bus, self.relays, self._policy.handoff_notes
+            ),
         )
         return await self._invoke_native_graph(
             agent_id,

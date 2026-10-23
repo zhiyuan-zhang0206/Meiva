@@ -74,12 +74,11 @@ def window_nodes(
     db: Database,
     conn: Connection,
     agent_id: int,
-    sessions: int,
-    count: int,
-    tail: list[Fact],
+    cut: tuple[int, int, list[Fact]],
     start: datetime,
     end: datetime,
 ) -> list[RunTimelineNode]:
+    sessions, count, tail = cut
     bounds = _bounds(conn, agent_id, sessions, tail, start, end)
     if bounds is None:
         return []

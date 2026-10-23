@@ -99,6 +99,9 @@ def _config(**overrides: Any) -> TelegramCredentialsConfig:
     )
 
 
+make_config = _config
+
+
 async def _wait_until(predicate: Callable[[], bool], timeout: float = 2.0) -> None:
     async def _poll() -> None:
         while not predicate():

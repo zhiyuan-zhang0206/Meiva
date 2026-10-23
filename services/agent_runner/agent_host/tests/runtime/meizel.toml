@@ -23,7 +23,6 @@ exports = ["host_support.py", "hosted_resources.py", "shutdown", "test_resource_
 "host_support.py#monkeypatch.setattr services.agent_runner.agent_host.settlement.consume_claimed_inbounds" = 1
 "host_support.py#monkeypatch.setattr services.agent_runner.agent_host.settlement.settle_and_stamp_turn" = 1
 "test_agent_host_abort_reconcile.py#monkeypatch.setattr services.agent_runner.agent_host.settlement.consume_claimed_inbounds" = 1
-"test_agent_host_log_rotate.py#monkeypatch.setattr services.agent_runner.agent_host.stdout_log.paths.logs_dir" = 1
 "test_agent_host_plugins.py#monkeypatch.setattr base.host.runtime_interpreter.external_plugin_read_root" = 3
 "test_agent_host_plugins.py#monkeypatch.setattr services.agent_runner.agent_host.daemon.PLUGINS_POLL_INTERVAL_S" = 1
 "test_agent_host_plugins.py#monkeypatch.setattr services.agent_runner.agent_host.daemon.signal.raise_signal" = 1

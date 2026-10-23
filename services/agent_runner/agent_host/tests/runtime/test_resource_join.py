@@ -25,10 +25,9 @@ from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 from base.packages.composer_commands import CommandCatalog
 from meiva.sdk_surface.installation import Installation
+from services.agent_runner.agent_host import daemon
+from services.agent_runner.agent_host.host import AgentHost
 from services.agent_runner.agent_host.tests.host_policy import configured_machine, configured_policy
-
-from ... import daemon
-from ...host import AgentHost
 
 
 async def test_sampling_failure_is_collected_before_pools_and_pidfile_cleanup(
@@ -184,8 +183,7 @@ def test_unfinished_actual_task_reaches_existing_hard_exit(tmp_path: Path) -> No
     result = subprocess.run(  # noqa: S603 -- fixed interpreter and repository-owned helper
         [
             sys.executable,
-            str(Path(__file__).resolve().parents[1] / "agent_host" / "child_runtime_scenarios.py"),
-            "resource_join",
+            __file__,
         ],
         env=env,
         capture_output=True,
@@ -200,3 +198,7 @@ def test_unfinished_actual_task_reaches_existing_hard_exit(tmp_path: Path) -> No
     assert not marker.with_suffix(".clients").exists()
     assert "uncooperative-resource" in result.stderr
     assert "keeping pools open until hard exit" in result.stderr
+
+
+if __name__ == "__main__":
+    exercise_unfinished_main()

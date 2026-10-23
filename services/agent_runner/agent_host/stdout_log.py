@@ -17,6 +17,7 @@ import asyncio
 import contextlib
 import logging
 import os
+from collections.abc import Callable
 from pathlib import Path
 
 from base import paths
@@ -31,7 +32,7 @@ _STDOUT_LOG_ROTATE_POLL_S = 60.0  # cadence of the size check
 _STDOUT_LOG_NAME = "meiva-agent-host"  # names $MEIVA_HOME/logs/<name>.out.log
 
 
-def stdout_log_path() -> Path:
+def stdout_log_path(*, logs_dir: Path | None = None) -> Path:
     """The daemon's raw stdout/stderr transcript.
 
     The launcher opens this file and redirects fd 1/2 onto it before the
@@ -39,7 +40,8 @@ def stdout_log_path() -> Path:
     convention); nothing in the logging stack owns it, which is exactly why it
     needs the size rotation below.
     """
-    return paths.logs_dir() / f"{_STDOUT_LOG_NAME}.out.log"
+    base_dir = logs_dir if logs_dir is not None else paths.logs_dir()
+    return base_dir / f"{_STDOUT_LOG_NAME}.out.log"
 
 
 def rotate_stdout_log_files(log_path: Path) -> None:
@@ -60,7 +62,12 @@ def rotate_stdout_log_files(log_path: Path) -> None:
     log_path.replace(one)
 
 
-def rotate_stdout_log_if_needed() -> int | None:
+def rotate_stdout_log_if_needed(
+    *,
+    log_path: Path | None = None,
+    rotate_bytes: int = STDOUT_LOG_ROTATE_BYTES,
+    open_fd: Callable[[Path, int, int], int] = os.open,
+) -> int | None:
     """Rotate the raw transcript once fd 1's file crosses the ceiling.
 
     Returns the size the file had reached when it was rotated, or None when no
@@ -75,14 +82,14 @@ def rotate_stdout_log_if_needed() -> int | None:
         size = os.fstat(1).st_size
     except OSError:
         return None
-    if size < STDOUT_LOG_ROTATE_BYTES:
+    if size < rotate_bytes:
         return None
-    log_path = stdout_log_path()
+    target_path = log_path if log_path is not None else stdout_log_path()
     rotated = False
     try:
-        rotate_stdout_log_files(log_path)
+        rotate_stdout_log_files(target_path)
         rotated = True
-        fd = os.open(log_path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o644)
+        fd = open_fd(target_path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o644)
     except OSError:
         if rotated:
             # fd 1/2 still name the moved chunk; put it back under the
@@ -90,8 +97,8 @@ def rotate_stdout_log_if_needed() -> int | None:
             # failed open (disk full / EMFILE) strands the transcript under
             # `.1` forever, growing past every bound and never self-healing.
             with contextlib.suppress(OSError):
-                one = log_path.with_name(log_path.name + ".1")
-                one.replace(log_path)
+                one = target_path.with_name(target_path.name + ".1")
+                one.replace(target_path)
         _log.exception(
             "[agent-host] stdout log rotation failed — fd 1 still points at the old file"
         )

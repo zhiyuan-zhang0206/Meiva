@@ -172,11 +172,17 @@ def live_lease_probe(database: Callable[[], Database], machine: str) -> LeasePro
 class StationProbe:
     """Gateway-only remote protocol observation."""
 
-    def __init__(self, *, database: Callable[[], Database]) -> None:
+    def __init__(
+        self,
+        *,
+        database: Callable[[], Database],
+        answers: Callable[[str], bool] | None = None,
+    ) -> None:
         from services.wake.heartbeat import station_probe
 
         self._module = station_probe
         self._database = database
+        self._answers = station_probe.station_answers if answers is None else answers
 
     def probe(self) -> DaemonProbe:
         if not settings.data_plane.cluster_secret:
@@ -184,7 +190,7 @@ class StationProbe:
         target = self._module.resolve_target(database=self._database)
         if target is None:
             return DaemonProbe.unavailable("configured station target could not be resolved")
-        if self._module._station_answers(target.url):
+        if self._answers(target.url):
             return DaemonProbe.up("remote station authenticated OTLP request accepted")
         return DaemonProbe.down("remote station OTLP ingress failed")
 

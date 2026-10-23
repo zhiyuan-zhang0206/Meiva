@@ -1,5 +1,12 @@
 exports = ["identity.py", "runtime.py", "store.py", "types.py"]
-purity = "strict-to-be"
+
+[purity]
+"__init__.py" = "strict"
+"commands.py" = "strict-to-be"
+"identity.py" = "strict-to-be"
+"runtime.py" = "strict-to-be"
+"store.py" = "strict-to-be"
+"types.py" = "strict"
 
 [uses]
 "commands.py" = ["identity.py", "types.py"]

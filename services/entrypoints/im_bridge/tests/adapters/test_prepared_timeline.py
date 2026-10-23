@@ -8,7 +8,10 @@ import pytest
 
 from services.entrypoints.im_bridge.adapters.telegram import TelegramAdapter
 from services.entrypoints.im_bridge.adapters.weixin import WeixinAdapter
-from services.entrypoints.im_bridge.tests.adapters.test_telegram_adapter import FakeCore, _config
+from services.entrypoints.im_bridge.tests.adapters.test_telegram_adapter import (
+    FakeCore,
+    make_config,
+)
 from services.entrypoints.im_bridge.types import SendNotStartedError
 
 
@@ -24,7 +27,7 @@ async def test_telegram_getme_is_cached_and_frozen_html_uses_plain_rejection_fal
         return httpx.Response(200, json={"ok": True, "result": {"message_id": 7}})
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-        adapter = TelegramAdapter(FakeCore(), _config(), client=client)
+        adapter = TelegramAdapter(FakeCore(), make_config(), client=client)
         prepared = await adapter.prepare_timeline("**hello** <user>")
         assert await adapter.outbound_account_id() == "123"
         assert prepared.chunks[0].text == "<b>hello</b> &lt;user&gt;"
@@ -47,7 +50,7 @@ async def test_telegram_second_chunk_connect_failure_is_uncertain_not_unstarted(
         return httpx.Response(200, json={"ok": True, "result": {"message_id": chunks}})
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-        adapter = TelegramAdapter(FakeCore(), _config(), client=client)
+        adapter = TelegramAdapter(FakeCore(), make_config(), client=client)
         prepared = await adapter.prepare_timeline("x" * 4097)
         with pytest.raises(RuntimeError, match="acknowledged") as error:
             await adapter.send_prepared_outbound("42", prepared)
@@ -61,7 +64,7 @@ async def test_getme_failure_has_no_send_and_no_token_in_error() -> None:
         raise httpx.ReadError("https://api.telegram.org/bot123:TEST-TOKEN/getMe", request=request)
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-        adapter = TelegramAdapter(FakeCore(), _config(), client=client)
+        adapter = TelegramAdapter(FakeCore(), make_config(), client=client)
         with pytest.raises(RuntimeError) as error:
             await adapter.prepare_timeline("hello")
         assert "TEST-TOKEN" not in str(error.value)
@@ -74,7 +77,7 @@ async def test_callback_invocation_uses_click_identity_not_shared_bot_message() 
         return httpx.Response(200, json={"ok": True})
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-        adapter = TelegramAdapter(core, _config(), client=client)
+        adapter = TelegramAdapter(core, make_config(), client=client)
         for click in ("first", "second"):
             await adapter._handle_callback(
                 {
@@ -129,7 +132,7 @@ async def test_notice_freezes_owner_plain_rendering_and_buttons_before_send() ->
         return httpx.Response(200, json={"ok": True, "result": {"message_id": 7}})
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-        adapter = TelegramAdapter(FakeCore(), _config(), client=client)
+        adapter = TelegramAdapter(FakeCore(), make_config(), client=client)
         buttons = (("Reply", "notice:reply:7:42"), ("Queue", "notice:list"))
         recipient, prepared = await adapter.prepare_notice_owner("**plain** <notice>", buttons)
         adapter._config = replace(adapter._config, telegram_owner_id=999)
@@ -181,7 +184,7 @@ async def test_legacy_manifest_json_without_new_fields_still_dispatches() -> Non
     )
     intent = OutboundIntent.model_validate_json(legacy)
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-        adapter = TelegramAdapter(FakeCore(), _config(), client=client)
+        adapter = TelegramAdapter(FakeCore(), make_config(), client=client)
         await adapter.send_prepared_outbound(intent.chat_id, intent.prepared)
     assert bodies == [{"chat_id": "42", "text": "frozen"}]
 
@@ -192,7 +195,7 @@ async def test_native_telegram_owner_freezes_plain_alert_without_buttons() -> No
         return httpx.Response(200, json={"ok": True, "result": {"id": 123}})
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as client:
-        adapter = TelegramAdapter(FakeCore(), _config(), client=client)
+        adapter = TelegramAdapter(FakeCore(), make_config(), client=client)
         target, prepared = await adapter.prepare_alert_owner("**alert** <user>")
         assert target == "42" and prepared.account_id == "123"
         assert prepared.chunks[0].text == "**alert** &lt;user&gt;"

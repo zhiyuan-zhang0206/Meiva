@@ -27,7 +27,3 @@ exports = ["checkpoints.py", "driver.py"]
 "checkpoints.py#base/agents/history/delta_read_compat.py" = 1
 "driver.py#base/agents/context/__init__.py" = 1
 "driver.py#services/agent_runner/agent_host/runtime.py" = 1
-
-[debt.wide-params]
-"__init__.py#def finish_completed_invocation" = 1
-"__init__.py#def settle_handoff_before_invocation" = 1

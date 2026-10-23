@@ -82,8 +82,7 @@ def test_main_is_noop_without_remote_observatory(monkeypatch: pytest.MonkeyPatch
 
     create = Mock(side_effect=AssertionError("a no-op probe must not open its work database"))
     monkeypatch.setattr(hc.Database, "from_settings", create)
-    monkeypatch.setattr(hc, "_station_answers", _fail_if_called)
-    hc.main()
+    hc.main(probe=_fail_if_called)
     assert calls == []
     create.assert_not_called()
 
@@ -159,7 +158,7 @@ def test_station_answers_bearer_otlp_roundtrip(monkeypatch: pytest.MonkeyPatch) 
         return _Resp()
 
     monkeypatch.setattr(urllib.request, "urlopen", _open)
-    assert hc._station_answers("http://10.0.0.9:4318") is True
+    assert hc.station_answers("http://10.0.0.9:4318") is True
     assert seen["url"] == "http://10.0.0.9:4318/v1/traces"
     # The cluster's telemetry token from the file the start published, never the secret.
     assert seen["auth"] == f"Bearer {telemetry_token('cluster-token')}"
@@ -173,7 +172,7 @@ def test_station_answers_http_error_is_not_alive(monkeypatch: pytest.MonkeyPatch
         raise urllib.error.HTTPError("http://x/v1/traces", 401, "unauthorized", {}, None)  # pyright: ignore[reportArgumentType]
 
     monkeypatch.setattr(urllib.request, "urlopen", _raise)
-    assert hc._station_answers("http://10.0.0.9:4318") is False
+    assert hc.station_answers("http://10.0.0.9:4318") is False
 
 
 def test_station_answers_connection_failure_is_not_alive(
@@ -183,7 +182,7 @@ def test_station_answers_connection_failure_is_not_alive(
         raise OSError("connection refused")
 
     monkeypatch.setattr(urllib.request, "urlopen", _raise)
-    assert hc._station_answers("http://10.0.0.9:4318") is False
+    assert hc.station_answers("http://10.0.0.9:4318") is False
     record = next(r for r in loguru_records if "unreachable" in r["message"])
     assert record["exception"] is not None
     assert record["exception"].type is OSError
@@ -201,7 +200,7 @@ def test_station_answers_without_a_published_token_warns_and_fails_open(
         pytest.fail("must not dial without a token")
 
     monkeypatch.setattr(urllib.request, "urlopen", _fail_if_called)
-    assert hc._station_answers("http://10.0.0.9:4318") is True
+    assert hc.station_answers("http://10.0.0.9:4318") is True
 
 
 def test_main_probes_advertised_station_and_does_not_raise(
@@ -216,9 +215,8 @@ def test_main_probes_advertised_station_and_does_not_raise(
     def probe(_url: str) -> bool:
         return answers.pop(0)
 
-    monkeypatch.setattr(hc, "_station_answers", probe)
-    hc.main()
-    hc.main()  # must not raise
+    hc.main(probe=probe)
+    hc.main(probe=probe)  # must not raise
     assert answers == []
 
 
@@ -245,8 +243,7 @@ def test_main_shares_one_captured_gate_with_the_probe_and_log_factory(
     monkeypatch.setattr(hc, "resolve_target", resolve)
     monkeypatch.setattr(hc, "build_pipeline", pipeline)
     monkeypatch.setattr(hc, "init_gateway_process", logging)
-    monkeypatch.setattr(hc, "_station_answers", Mock(return_value=True))
-    hc.main()
+    hc.main(probe=Mock(return_value=True))
 
     capture.assert_called_once_with()
     count.assert_not_called()

@@ -272,7 +272,7 @@ async def run(
         _log.info("[labeler] daemon stopped")
 
 
-def main() -> None:
+def main(*, exit_process: Callable[[int], None] | None = None) -> None:
     """Entry point: init logger + run asyncio loop.
 
     SIGTERM (the graceful stop the fleet update sends) and Ctrl-C converge on
@@ -338,7 +338,7 @@ def main() -> None:
         code = 1
     finally:
         _remove_pidfile(machine_config, runtime=process_home / "run")
-    _hard_exit(code)
+    (exit_process or _hard_exit)(code)
 
 
 if __name__ == "__main__":

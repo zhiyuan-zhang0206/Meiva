@@ -11,6 +11,7 @@ and the no-op safety of that rotation.
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -20,15 +21,46 @@ import pytest
 from services.agent_runner.agent_host import stdout_log
 
 _REPO_ROOT = Path(__file__).resolve().parents[5]
-_HELPER = Path(__file__).resolve().parents[1] / "agent_host" / "child_runtime_scenarios.py"
 
 
-def test_stdout_log_path_points_into_logs_dir(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def _rotate_and_continue(log: Path) -> None:
+    os.write(1, b"x" * (1 << 20))
+    rotated = stdout_log.rotate_stdout_log_if_needed(log_path=log, rotate_bytes=1 << 20)
+    assert rotated == (1 << 20), f"expected rotation at ceiling, got {rotated}"
+    os.write(1, b"after-rotation")
+    sys.stdout.write("via-stdout")
+    sys.stdout.flush()
+    sys.stderr.write("via-stderr")
+    sys.stderr.flush()
+
+
+def _noop_below_ceiling(log: Path) -> None:
+    rotated = stdout_log.rotate_stdout_log_if_needed(log_path=log, rotate_bytes=1 << 30)
+    assert rotated is None, f"expected no rotation, got {rotated}"
+    os.write(1, b"tail")
+
+
+def _open_failure_then_self_heal(log: Path) -> None:
+    os.write(1, b"x" * (1 << 20))
+
+    def boom(_path: Path, _flags: int, _mode: int = 0o777) -> int:
+        raise OSError(28, "No space left on device")
+
+    rotated = stdout_log.rotate_stdout_log_if_needed(
+        log_path=log, rotate_bytes=1 << 20, open_fd=boom
+    )
+    assert rotated is None, f"expected failure, got {rotated}"
+    assert log.exists(), "transcript must be restored under its original name"
+    assert not Path(str(log) + ".1").exists(), "no chunk may be stranded"
+    os.write(1, b"after-open-failure")
+    rotated = stdout_log.rotate_stdout_log_if_needed(log_path=log, rotate_bytes=1 << 20)
+    assert rotated == (1 << 20) + len(b"after-open-failure"), f"self-heal failed: {rotated}"
+    os.write(1, b"after-self-heal")
+
+
+def test_stdout_log_path_points_into_logs_dir(tmp_path: Path) -> None:
     """The transcript path derives from logs_dir() and the session name."""
-    monkeypatch.setattr(stdout_log.paths, "logs_dir", lambda: tmp_path)
-    assert stdout_log.stdout_log_path() == tmp_path / "meiva-agent-host.out.log"
+    assert stdout_log.stdout_log_path(logs_dir=tmp_path) == tmp_path / "meiva-agent-host.out.log"
 
 
 def test_rotate_files_keeps_one_generation(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -68,7 +100,7 @@ def test_subprocess_rotates_and_continues_writing(tmp_path: Path) -> None:
     log = tmp_path / "meiva-agent-host.out.log"
     with log.open("wb") as transcript:
         proc = subprocess.run(  # noqa: S603 -- fixed argv: sys.executable + our own script
-            [sys.executable, str(_HELPER), "rotate", str(log)],
+            [sys.executable, __file__, "rotate", str(log)],
             stdout=transcript,
             stderr=subprocess.PIPE,
             cwd=_REPO_ROOT,
@@ -90,7 +122,7 @@ def test_rotation_noop_below_ceiling(tmp_path: Path) -> None:
     log.write_bytes(b"small")
     with log.open("ab") as transcript:
         proc = subprocess.run(  # noqa: S603 -- fixed argv: sys.executable + our own script
-            [sys.executable, str(_HELPER), "noop", str(log)],
+            [sys.executable, __file__, "noop", str(log)],
             stdout=transcript,
             stderr=subprocess.PIPE,
             cwd=_REPO_ROOT,
@@ -108,7 +140,7 @@ def test_subprocess_open_failure_restores_and_self_heals(tmp_path: Path) -> None
     log = tmp_path / "meiva-agent-host.out.log"
     with log.open("wb") as transcript:
         proc = subprocess.run(  # noqa: S603 -- fixed argv: sys.executable + our own script
-            [sys.executable, str(_HELPER), "open_failure", str(log)],
+            [sys.executable, __file__, "open_failure", str(log)],
             stdout=transcript,
             stderr=subprocess.PIPE,
             cwd=_REPO_ROOT,
@@ -120,3 +152,15 @@ def test_subprocess_open_failure_restores_and_self_heals(tmp_path: Path) -> None
     assert one.exists() and one.stat().st_size == (1 << 20) + len(b"after-open-failure")
     assert not (tmp_path / "meiva-agent-host.out.log.2").exists()
     assert log.read_bytes() == b"after-self-heal"
+
+
+if __name__ == "__main__":
+    scenario = sys.argv[1]
+    if scenario == "rotate":
+        _rotate_and_continue(Path(sys.argv[2]))
+    elif scenario == "noop":
+        _noop_below_ceiling(Path(sys.argv[2]))
+    elif scenario == "open_failure":
+        _open_failure_then_self_heal(Path(sys.argv[2]))
+    else:
+        raise SystemExit(f"unknown scenario {scenario!r}")

@@ -120,7 +120,7 @@ def test_sigterm_exits_while_feishu_sdk_worker_remains_blocked(
     proc = subprocess.Popen(  # noqa: S603 -- fixed interpreter and repository-owned helper
         [
             sys.executable,
-            str(Path(__file__).resolve().parent / "feishu_adapter/child_blocked_ws.py"),
+            __file__,
         ],
         cwd=Path(__file__).resolve().parents[5],
         env=env,
@@ -141,3 +141,10 @@ def test_sigterm_exits_while_feishu_sdk_worker_remains_blocked(
         assert "worker-exited" not in child.markers()
     finally:
         child.close()
+
+
+if __name__ == "__main__":
+    run_blocked_ws_child(
+        Path(os.environ["DAEMON_SHUTDOWN_TEST_MARKERS"]),
+        responsive=bool(int(os.environ["FEISHU_TEST_RESPONSIVE_LOOP"])),
+    )

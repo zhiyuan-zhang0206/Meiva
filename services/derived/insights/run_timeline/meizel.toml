@@ -33,7 +33,3 @@ exports = ["projection", "router.py", "schemas.py", "tests"]
 "schemas.py#base/agents/history/context_response.py" = 1
 "tokens.py#base/agents/history/hierarchy/units.py" = 1
 "tokens.py#base/agents/history/message_tokens.py" = 1
-
-[debt.wide-params]
-"messages.py#def get_run_timeline_messages" = 1
-"router.py#def get_run_timeline" = 1

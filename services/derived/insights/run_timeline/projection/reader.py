@@ -69,12 +69,11 @@ class TimelineReader:
         inputs: TimelineReadInputs,
         jobs: IndexJobs,
         read_segment: Callable[[Database, int, str], FullHistory],
-        read_source: Callable[[Connection[Any], int], Source] = capture_source,
         timer: Callable[[], float] = time.monotonic,
     ) -> None:
         self.db, self.pool, self.inputs, self.jobs = db, pool, inputs, jobs
         self.read_segment, self.timer = read_segment, timer
-        self.read_source = read_source
+        self.read_source: Callable[[Connection[Any], int], Source] = capture_source
         self._lock = threading.Lock()
 
         self._building = [threading.Lock() for _ in range(MAX_ENTRIES)]
@@ -175,9 +174,7 @@ class TimelineReader:
                 self.db,
                 conn,
                 snapshot.agent_id,
-                snapshot.sealed,
-                snapshot.count,
-                tail.facts if tail else [],
+                (snapshot.sealed, snapshot.count, tail.facts if tail else []),
                 start,
                 end,
             )

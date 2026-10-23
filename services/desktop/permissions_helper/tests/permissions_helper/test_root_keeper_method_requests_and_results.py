@@ -70,7 +70,7 @@ def test_root_keeper_method_requests_and_results(fake_helper) -> None:
 
     path = fake_helper(handler)
     config: client.RootSeedConfig = {
-        "argv": ["/opt/meiva/.venv/bin/python", "-m", "services.supervision.meiva_root"],
+        "argv": ["python3", "-m", "services.supervision.meiva_root"],
         "cwd": "/opt/meiva",
         "run_dir": "/opt/meiva/run",
         "stdout": "/opt/meiva/logs/root.out.log",

@@ -148,7 +148,7 @@ def read(
             run_timeline_reader=SimpleNamespace(get=snapshot, window=reader.window)
         )
         request = cast(Request, SimpleNamespace(app=SimpleNamespace(state=state)))
-        return router.get_run_timeline(request, 405, from_, to, recent_hours, max_units)
+        return router.get_run_timeline(request, 405, from_, to, recent_hours, (max_units, None))
     finally:
         jobs.close()
         pool.close()
