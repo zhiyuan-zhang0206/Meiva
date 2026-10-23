@@ -22,7 +22,6 @@ from unittest.mock import AsyncMock
 import psycopg
 import pytest
 
-from base.cluster import machines
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import runtime_config, settings
@@ -59,13 +58,14 @@ def test_get_config_serializes_required_fields():
         assert isinstance(by_name[name]["current_value"], str)
 
 
-def test_redis_url_masked_does_not_leak_cluster_secret(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_redis_url_masked_does_not_leak_cluster_secret() -> None:
     """redis_url carries the runtime ACL password as userinfo, so GET /api/config
     must mask it like db_url — the credential must never appear in the response."""
     from ops.host_config import SENSITIVE_MASK
 
-    monkeypatch.setattr(settings.data_plane, "redis_url", "redis://:supersecret@10.0.0.1:6379/0")
-    with gateway_test_client() as client:
+    with gateway_test_client(
+        fields={"redis_url": "redis://:supersecret@10.0.0.1:6379/0"}
+    ) as client:
         resp = client.get("/api/config")
     fields = {f["name"]: f for f in resp.json()["fields"]}
     assert fields["redis_url"]["sensitive"] is True
@@ -205,7 +205,7 @@ REMOTE = "remote-host"
 
 
 def test_get_remote_machine_composes_host_from_dispatch(
-    monkeypatch: pytest.MonkeyPatch, *, config_authority: ConfigAuthority
+    *, config_authority: ConfigAuthority
 ) -> None:
     """GET ?machine=<remote>: host fields reflect the remote config_read result,
     cluster fields reflect local metadata, raw_overrides == the remote host
@@ -239,9 +239,9 @@ def test_get_remote_machine_composes_host_from_dispatch(
     }
 
     enqueue = AsyncMock(return_value=canned)
-    monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", enqueue)
 
     with gateway_test_client() as client:
+        client.app.state.config_rpc_dispatcher = enqueue
         resp = client.get(f"/api/config?machine={REMOTE}")
     assert resp.status_code == 200, resp.text
     body = resp.json()
@@ -298,41 +298,39 @@ def test_get_unknown_machine_404() -> None:
     assert "unknown machine" in resp.json()["detail"]
 
 
-def test_get_offline_machine_503(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_get_offline_machine_503() -> None:
     """GET ?machine=<known-but-offline>: ops server unreachable -> 503."""
     seed_machine(REMOTE)
     enqueue = AsyncMock(side_effect=cluster_rpc.ClusterOpUnreachable("no ack"))
-    monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", enqueue)
 
     with gateway_test_client() as client:
+        client.app.state.config_rpc_dispatcher = enqueue
         resp = client.get(f"/api/config?machine={REMOTE}")
     assert resp.status_code == 503, resp.text
     assert REMOTE in resp.json()["detail"]
 
 
-def test_get_remote_failed_503(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_get_remote_failed_503() -> None:
     """GET ?machine=<known>: the remote op fails (row marked failed) -> 503."""
     seed_machine(REMOTE)
     enqueue = AsyncMock(side_effect=cluster_rpc.ClusterOpFailed({"error": "boom"}))
-    monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", enqueue)
 
     with gateway_test_client() as client:
+        client.app.state.config_rpc_dispatcher = enqueue
         resp = client.get(f"/api/config?machine={REMOTE}")
     assert resp.status_code == 503, resp.text
     assert REMOTE in resp.json()["detail"]
 
 
-def test_get_local_unreachable_503_no_in_process_fallback(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_get_local_unreachable_503_no_in_process_fallback() -> None:
     """The LOCAL machine's ops server unreachable -> 503 like any other machine.
     The router has NO in-process fallback — a silent local read would mask the
     outage (the old behavior). This overrides the conftest's in-process stand-in
     for the local ops daemon."""
     enqueue = AsyncMock(side_effect=cluster_rpc.ClusterOpUnreachable("no ack"))
-    monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", enqueue)
 
     with gateway_test_client() as client:
+        client.app.state.config_rpc_dispatcher = enqueue
         resp = client.get("/api/config")  # machine absent -> the local machine
     assert resp.status_code == 503, resp.text
     assert "unreachable" in resp.json()["detail"]
@@ -342,13 +340,12 @@ def test_get_local_unreachable_503_no_in_process_fallback(
 
 
 @pytest.fixture
-def clean_overrides(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
+def clean_overrides(unit_home: Path) -> Path:
     """Redirect this gateway's .env (the single config store) to a fresh tmp file,
     so a PUT in these tests writes there instead of the real unit .env. The PUT no
     longer mutates the in-memory Settings (strict persist-and-signal), so there is
     nothing to save/restore."""
-    monkeypatch.setattr(dotenv_file, "unit_home", lambda: tmp_path)
-    return tmp_path
+    return unit_home
 
 
 def test_put_self_returns_write_result_and_routes_scopes(clean_overrides: Path) -> None:
@@ -612,7 +609,6 @@ def test_put_self_edits_writable_host_capability_field(
 
 @pytest.mark.asyncio
 async def test_put_self_host_field_skips_empty_cluster_audit(
-    monkeypatch: pytest.MonkeyPatch,
     config_authority: ConfigAuthority,
     *,
     machine_identity: MachineIdentity,
@@ -635,10 +631,6 @@ async def test_put_self_host_field_skips_empty_cluster_audit(
     def roles(_db: object, _target: str) -> list[str]:
         return ["agent-runner"]
 
-    monkeypatch.setattr(machines, "lookup_role", roles)
-    monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", dispatch)
-    monkeypatch.setattr(config_router.runtime_config, "write_fields", _write_fields)
-
     anon = cast(
         "Any",
         SimpleNamespace(
@@ -646,6 +638,9 @@ async def test_put_self_host_field_skips_empty_cluster_audit(
             app=SimpleNamespace(
                 state=SimpleNamespace(
                     config_authority=config_authority,
+                    config_role_lookup=roles,
+                    config_rpc_dispatcher=dispatch,
+                    config_cluster_field_writer=_write_fields,
                     db=object(),
                     db_pool=object(),
                     machine=machine_identity,

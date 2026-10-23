@@ -14,13 +14,12 @@ from gateway.tests.auth.gateway_config import gateway_test_client
 
 
 @pytest.fixture
-def configured_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+def configured_home(unit_home: Path) -> Path:
     """A gateway home whose `.env` carries a valid sandbox timeout pair."""
-    monkeypatch.setattr(dotenv_file, "unit_home", lambda: tmp_path)
     runtime_config.write_fields(
         {"exec_timeout_seconds": 300, "exec_node_timeout_seconds": 1200}, set()
     )
-    return tmp_path
+    return unit_home
 
 
 def test_put_rejects_invalid_candidate_without_writing(configured_home: Path) -> None:
@@ -86,18 +85,15 @@ def test_put_unsets_the_offsite_backup_destination(configured_home: Path) -> Non
 
 
 def test_host_only_put_skips_cluster_candidate_validation(
-    configured_home: Path, monkeypatch: pytest.MonkeyPatch
+    configured_home: Path,
 ) -> None:
     """A host-only edit cannot fail because an empty cluster patch went stale."""
 
     def unexpected_cluster_validation(*_args: object, **_kwargs: object) -> None:
         raise AssertionError("host-only PUT must not validate a cluster candidate")
 
-    monkeypatch.setattr(
-        config_router, "validate_env_patch_for_write", unexpected_cluster_validation
-    )
-
     with gateway_test_client() as client:
+        client.app.state.config_candidate_validator = unexpected_cluster_validation
         response = client.put("/api/config", json={"ops_concurrency": 4})
 
     assert response.status_code == 200, response.text
@@ -106,7 +102,7 @@ def test_host_only_put_skips_cluster_candidate_validation(
 
 
 def test_put_returns_conflict_when_cluster_candidate_goes_stale(
-    configured_home: Path, monkeypatch: pytest.MonkeyPatch
+    configured_home: Path,
 ) -> None:
     """A write between validation and persistence is reported as a retryable 409."""
     original_validate = config_router.validate_env_patch_for_write
@@ -122,9 +118,8 @@ def test_put_returns_conflict_when_cluster_candidate_goes_stale(
             runtime_config.write_fields({"llm_model": "concurrent-update"}, set())
         return candidate
 
-    monkeypatch.setattr(config_router, "validate_env_patch_for_write", validate_then_change_file)
-
     with gateway_test_client() as client:
+        client.app.state.config_candidate_validator = validate_then_change_file
         response = client.put("/api/config", json={"llm_model": "requested-update"})
 
     assert validation_calls == 2

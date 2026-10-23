@@ -7,39 +7,83 @@ import psycopg
 import pytest
 from fastapi import FastAPI
 
+from base.cluster.machine import MachineIdentity
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
+from base.config.tests.configuration import snapshot_process_config
 from base.host.system.hostport import Host
+from base.host.system.tests.fake_commands import fake_host
+from base.paths import meiva_home
 from gateway import app as gateway_app
+from gateway.cluster.process_boot import LOADED_IMAGE, GatewayProcess
 from gateway.http.config import gateway_config_from_boot
 from gateway.tests.auth.gateway_config import gateway_test_process
 
 
+class _CheckedPool:
+    def __init__(self, pool: Any, on_close: Callable[[], None]) -> None:
+        self._pool = pool
+        self._on_close = on_close
+
+    def close(self) -> None:
+        self._on_close()
+        self._pool.close()
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._pool, name)
+
+
+class _CheckedDatabase:
+    def __init__(self, database: Any, on_close: Callable[[], None]) -> None:
+        self._database = database
+        self._on_close = on_close
+
+    def pool(self, **kwargs: Any) -> Any:
+        return _CheckedPool(self._database.pool(**kwargs), self._on_close)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._database, name)
+
+
+class _CheckedPoolsProcess(GatewayProcess):
+    def __init__(self, *, machine: MachineIdentity, on_close: Callable[[], None]) -> None:
+        self._on_close = on_close
+        super().__init__(
+            home=meiva_home(),
+            config=snapshot_process_config(),
+            image=LOADED_IMAGE,
+            machine=machine,
+            host=fake_host(),
+        )
+
+    def database(self) -> Any:
+        return _CheckedDatabase(super().database(), self._on_close)
+
+
 async def test_lifespan_waits_for_cancelled_request_sql_before_pool_close(
-    db_conn: psycopg.Connection[Any], monkeypatch: pytest.MonkeyPatch
+    db_conn: psycopg.Connection[Any],
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
     del db_conn
 
     def fake_register_os_cron(*, host: Host, enabled_reader: Callable[[], bool]) -> None:
-        return None
+        del host, enabled_reader
 
-    monkeypatch.setattr(gateway_app, "register_os_cron", fake_register_os_cron)
     app = FastAPI()
     ready = asyncio.Event()
     started, release, finished = threading.Event(), threading.Event(), threading.Event()
     pool_closed_after_sql: list[bool] = []
+    process = _CheckedPoolsProcess(
+        machine=machine_identity,
+        on_close=lambda: pool_closed_after_sql.append(finished.is_set()),
+    )
 
-    with gateway_test_process() as process:
+    with process.lifetime():
         app.state.gateway_config = gateway_config_from_boot(process.config)
+        app.state.os_cron_registrar = fake_register_os_cron
 
         async def service() -> None:
             async with gateway_app.lifespan(app, process=process, process_ownership="borrowed"):
-                for pool in (app.state.db_pool, app.state.control_db_pool):
-                    original = pool.close
-
-                    def checked_close(close: Callable[[], None] = original) -> None:
-                        pool_closed_after_sql.append(finished.is_set())
-                        close()
-
-                    monkeypatch.setattr(pool, "close", checked_close)
                 ready.set()
                 await asyncio.Event().wait()
 
@@ -84,14 +128,13 @@ async def test_lifespan_waits_for_cancelled_request_sql_before_pool_close(
 
 
 async def test_native_sql_error_does_not_cancel_gateway_service(
-    db_conn: psycopg.Connection[Any], monkeypatch: pytest.MonkeyPatch
+    db_conn: psycopg.Connection[Any],
 ) -> None:
     del db_conn
 
     def fake_register_os_cron(*, host: Host, enabled_reader: Callable[[], bool]) -> None:
-        return None
+        del host, enabled_reader
 
-    monkeypatch.setattr(gateway_app, "register_os_cron", fake_register_os_cron)
     app = FastAPI()
     ready, stop = asyncio.Event(), asyncio.Event()
     loop = asyncio.get_running_loop()
@@ -101,6 +144,7 @@ async def test_native_sql_error_does_not_cancel_gateway_service(
 
     with gateway_test_process() as process:
         app.state.gateway_config = gateway_config_from_boot(process.config)
+        app.state.os_cron_registrar = fake_register_os_cron
 
         async def service() -> None:
             async with gateway_app.lifespan(app, process=process, process_ownership="borrowed"):

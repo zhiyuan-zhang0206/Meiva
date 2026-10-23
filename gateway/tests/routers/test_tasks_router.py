@@ -32,7 +32,6 @@ from base.api_contracts.agent_contract import AgentStatus
 from base.api_contracts.idempotency import keyed_headers
 from gateway.routers.tasks import get_tasks
 from gateway.tests.auth.gateway_config import gateway_test_client
-from ops import lifecycle as ops_lifecycle
 
 
 def make_agent(db: psycopg.Connection) -> int:
@@ -235,7 +234,7 @@ class TestOwner:
         assert _task_notes(db_conn, owner) == []
 
     def test_reassign_to_terminated_owner_requests_resurrection(
-        self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+        self, db_conn: psycopg.Connection
     ) -> None:
         owner = make_agent(db_conn)
         new_owner = make_agent(db_conn)
@@ -252,8 +251,8 @@ class TestOwner:
             resurrection_calls.append((agent_id, kw["trigger_inbound_kind"]))
             return cast("AgentStatus", "idling")
 
-        monkeypatch.setattr(ops_lifecycle, "resurrect_if_terminated", _record_resurrection)
         with gateway_test_client() as client:
+            client.app.state.task_resurrector = _record_resurrection
             resp = client.patch(
                 f"/api/tasks/{tid}",
                 json={"owner": new_owner},

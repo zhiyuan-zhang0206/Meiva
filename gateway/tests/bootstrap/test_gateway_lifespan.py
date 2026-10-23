@@ -2,6 +2,7 @@ import asyncio
 import threading
 from collections.abc import Callable
 from contextlib import AsyncExitStack
+from pathlib import Path
 from typing import Any
 
 import psycopg
@@ -17,32 +18,36 @@ from base.paths import meiva_home
 from gateway import app as gateway_app
 from gateway.cluster.process_boot import LOADED_IMAGE, GatewayProcess
 from gateway.http.config import gateway_config_from_boot
+from gateway.routers import insights as insights_router
 from gateway.tests.auth.gateway_config import gateway_test_process
 
 
 @pytest.fixture
-def flusher_tasks(
-    monkeypatch: pytest.MonkeyPatch,
-) -> asyncio.Queue[asyncio.Task[Any]]:
-    started: asyncio.Queue[asyncio.Task[Any]] = asyncio.Queue()
+def flusher_tasks() -> asyncio.Queue[asyncio.Task[Any]]:
+    return asyncio.Queue()
 
+
+def _configure_lifespan_app(
+    app: FastAPI,
+    process: GatewayProcess,
+    flusher_tasks: asyncio.Queue[asyncio.Task[Any]],
+) -> None:
     async def flush(*_args: object) -> None:
         task = asyncio.current_task()
         assert task is not None
-        started.put_nowait(task)
+        flusher_tasks.put_nowait(task)
         try:
             await asyncio.Event().wait()
         finally:
             await asyncio.sleep(0)
 
-    monkeypatch.setattr(gateway_app.latency, "latency_flusher", flush)
-    monkeypatch.setattr(gateway_app.rejection_log, "auth401_flusher", flush)
-
     def register_cron(*, enabled_reader: Callable[[], bool], host: Host) -> None:
-        return None
+        del enabled_reader, host
 
-    monkeypatch.setattr(gateway_app, "register_os_cron", register_cron)
-    return started
+    app.state.gateway_config = gateway_config_from_boot(process.config)
+    app.state.latency_flusher = flush
+    app.state.auth401_flusher = flush
+    app.state.os_cron_registrar = register_cron
 
 
 async def test_overlapping_lifespans_join_their_original_flushers(
@@ -54,7 +59,7 @@ async def test_overlapping_lifespans_join_their_original_flushers(
     del db_conn
     app = FastAPI()
     with gateway_test_process(machine=machine_identity) as process:
-        app.state.gateway_config = gateway_config_from_boot(process.config)
+        _configure_lifespan_app(app, process, flusher_tasks)
         async with asyncio.timeout(5), AsyncExitStack() as cleanup:
             async with gateway_app.lifespan(app, process=process, process_ownership="borrowed"):
                 pipeline = process.event_pipeline()
@@ -83,44 +88,45 @@ async def test_overlapping_lifespans_join_their_original_flushers(
 async def test_client_close_failure_still_joins_flushers_before_pool_close(
     db_conn: psycopg.Connection[Any],
     flusher_tasks: asyncio.Queue[asyncio.Task[Any]],
-    monkeypatch: pytest.MonkeyPatch,
     *,
     machine_identity: MachineIdentity,
 ) -> None:
     del db_conn
     app = FastAPI()
     failure = RuntimeError("proxy client close failed")
-    close_checks: list[bool] = []
+    events: list[tuple[str, bool]] = []
     tasks: list[asyncio.Task[Any]] = []
-    pools: list[Any] = []
+    process = _RecordingPoolsProcess(
+        machine=machine_identity,
+        events=events,
+        ready=lambda: all(task.done() for task in tasks),
+    )
 
-    with gateway_test_process(machine=machine_identity) as process:
-        app.state.gateway_config = gateway_config_from_boot(process.config)
+    class _FailingInsightsClient:
+        def __init__(self, inner: Any) -> None:
+            self._inner = inner
+
+        async def aclose(self) -> None:
+            await self._inner.aclose()
+            raise failure
+
+    def build_failing_insights_client(home: Path) -> _FailingInsightsClient:
+        return _FailingInsightsClient(insights_router.build_client(home))
+
+    _configure_lifespan_app(app, process, flusher_tasks)
+    app.state.insights_client_factory = build_failing_insights_client
+
+    with process.lifetime():
         async with asyncio.timeout(5):
             with pytest.raises(RuntimeError) as raised:
                 async with gateway_app.lifespan(app, process=process, process_ownership="borrowed"):
                     tasks.extend([await flusher_tasks.get(), await flusher_tasks.get()])
-                    pools.extend([app.state.db_pool, app.state.control_db_pool])
-                    original_close: Callable[[], Any] = app.state.insights_client.aclose
-
-                    async def failed_close() -> None:
-                        await original_close()
-                        raise failure
-
-                    monkeypatch.setattr(app.state.insights_client, "aclose", failed_close)
-                    for pool in pools:
-                        original_pool_close = pool.close
-
-                        def checked_close(close: Callable[[], None] = original_pool_close) -> None:
-                            close_checks.append(all(task.done() for task in tasks))
-                            close()
-
-                        monkeypatch.setattr(pool, "close", checked_close)
 
     assert raised.value is failure
-    assert close_checks == [True, True]
+    assert events == [("control", True), ("data", True)]
     assert all(task.done() for task in tasks)
-    assert all(pool.closed for pool in pools)
+    assert process.data_pool.closed
+    assert process.control_pool.closed
     assert app.state.grafana_client.is_closed
 
 
@@ -133,7 +139,7 @@ async def test_process_ownership_borrowed_vs_owned_controls_client_close_count(
     del db_conn
     with gateway_test_process(machine=machine_identity) as borrowed_process:
         borrowed_app = FastAPI()
-        borrowed_app.state.gateway_config = gateway_config_from_boot(borrowed_process.config)
+        _configure_lifespan_app(borrowed_app, borrowed_process, flusher_tasks)
         async with (
             asyncio.timeout(5),
             gateway_app.lifespan(
@@ -153,7 +159,7 @@ async def test_process_ownership_borrowed_vs_owned_controls_client_close_count(
         host=fake_host(),
     )
     owned_app = FastAPI()
-    owned_app.state.gateway_config = gateway_config_from_boot(owned_process.config)
+    _configure_lifespan_app(owned_app, owned_process, flusher_tasks)
     async with (
         asyncio.timeout(5),
         gateway_app.lifespan(owned_app, process=owned_process, process_ownership="owned"),
@@ -308,14 +314,14 @@ async def test_control_pool_construction_failure_closes_the_data_pool_once(
     *,
     machine_identity: MachineIdentity,
 ) -> None:
-    del db_conn, flusher_tasks
+    del db_conn
     events: list[tuple[str, bool]] = []
     failure = RuntimeError("control pool construction failed")
     process = _RecordingPoolsProcess(
         machine=machine_identity, events=events, ready=lambda: False, control_failure=failure
     )
     app = FastAPI()
-    app.state.gateway_config = gateway_config_from_boot(process.config)
+    _configure_lifespan_app(app, process, flusher_tasks)
 
     with process.lifetime():
         async with asyncio.timeout(5):
@@ -363,11 +369,11 @@ async def test_failure_after_monitor_closes_started_resources(
     *,
     machine_identity: MachineIdentity,
 ) -> None:
-    del db_conn, flusher_tasks
+    del db_conn
     failure = RuntimeError("upload recovery construction failed")
     process = _LateMachineFailureProcess(machine=machine_identity, failure=failure, fail_at_read=5)
     app = FastAPI()
-    app.state.gateway_config = gateway_config_from_boot(process.config)
+    _configure_lifespan_app(app, process, flusher_tasks)
 
     with process.lifetime():
         async with asyncio.timeout(5):
@@ -400,7 +406,7 @@ async def test_failing_pool_release_still_closes_the_remaining_resources(
         data_close_failure=failure,
     )
     app = FastAPI()
-    app.state.gateway_config = gateway_config_from_boot(process.config)
+    _configure_lifespan_app(app, process, flusher_tasks)
 
     with process.lifetime():
         async with asyncio.timeout(5):
@@ -430,7 +436,7 @@ async def test_cancelled_lifespan_joins_flushers_before_pool_close(
         ready=lambda: all(task.done() for task in tasks),
     )
     app = FastAPI()
-    app.state.gateway_config = gateway_config_from_boot(process.config)
+    _configure_lifespan_app(app, process, flusher_tasks)
     entered = asyncio.Event()
 
     async def serve() -> None:
