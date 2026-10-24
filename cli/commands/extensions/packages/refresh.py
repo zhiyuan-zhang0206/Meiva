@@ -39,10 +39,15 @@ from base import paths
 from base.config import ConfigBoot
 from base.config.domains.packages import PackagesSettings
 from base.host.git.gitenv import git_env
-from base.host.system.hostport import Host
+from base.host.proc import run_bounded
 from base.native_process.os_platform import LockTimeoutError, file_lock
 from base.packages.extensions import install_registry
 from base.packages.skills.names import match_key
+from cli.commands.extensions.packages.refresh_git_plan import (
+    core_fetch,
+    core_listing,
+    package_listing,
+)
 from cli.commands.extensions.packages.refresh_rules import (
     core_fetch_needed,
     core_head_from_ls_remote,
@@ -107,7 +112,6 @@ class Pass:
         from_job: bool,
         now: datetime,
         repo: Path,
-        host: Host,
     ) -> None:
         self.config = config
         self.check_only = check_only
@@ -115,7 +119,6 @@ class Pass:
         self.from_job = from_job
         self.now = now
         self.repo = repo
-        self.host = host
         self.skills_dir = paths.skills_dir(paths.meiva_home())
         self.registry: install_registry.Registry | None = None
         self.deltas: dict[str, _Delta] = {}
@@ -273,7 +276,7 @@ class Pass:
     # -- core channel --------------------------------------------------------
 
     def _checkout_remote(self) -> str | None:
-        result = self.host.run(
+        result = run_bounded(
             ["git", "-C", str(self.repo), "config", "--get", "remote.origin.url"],
             capture_output=True,
             text=True,
@@ -287,13 +290,21 @@ class Pass:
 
     def _ls_remote(self, remote: str, ref: str) -> tuple[str | None, str | None]:
         """(`head sha`, `error`) for the core channel's ref on `remote`."""
+        command = core_listing(
+            self.repo,
+            remote,
+            ref,
+            env=git_env(),
+            timeout=self.config.view.packages.refresh_network_timeout_seconds,
+        )
         try:
-            result = self.host.run(
-                ["git", "-C", str(self.repo), "ls-remote", remote, ref],
+            result = run_bounded(
+                command.argv,
+                cwd=command.cwd,
+                env=command.env,
+                timeout=command.timeout,
                 capture_output=True,
                 text=True,
-                env=git_env(),
-                timeout=self.config.view.packages.refresh_network_timeout_seconds,
             )
         except (OSError, subprocess.SubprocessError) as exc:
             return None, f"ls-remote failed: {exc}"
@@ -306,13 +317,21 @@ class Pass:
 
     def _fetch_core(self, remote: str, ref: str) -> str | None:
         """Objects-only fetch (never the working tree); `error` or None."""
+        command = core_fetch(
+            self.repo,
+            remote,
+            ref,
+            env=git_env(),
+            timeout=self.config.view.packages.refresh_network_timeout_seconds,
+        )
         try:
-            result = self.host.run(
-                ["git", "-C", str(self.repo), "fetch", "--no-tags", remote, ref],
+            result = run_bounded(
+                command.argv,
+                cwd=command.cwd,
+                env=command.env,
+                timeout=command.timeout,
                 capture_output=True,
                 text=True,
-                env=git_env(),
-                timeout=self.config.view.packages.refresh_network_timeout_seconds,
             )
         except (OSError, subprocess.SubprocessError) as exc:
             return f"fetch failed: {exc}"
@@ -472,7 +491,7 @@ class Pass:
         self._record(pkg, result)
 
     def _git_local(self, *args: str) -> tuple[int, str]:
-        result = self.host.run(
+        result = run_bounded(
             ["git", "-C", str(self.repo), *args],
             capture_output=True,
             text=True,
@@ -497,7 +516,7 @@ class Pass:
         ) as tmp_str:
             tmp = Path(tmp_str)
             tarpath = tmp / "pkg.tar"
-            result = self.host.run(
+            result = run_bounded(
                 ["git", "-C", str(self.repo), "archive", "-o", str(tarpath), head, "--", src_rel],
                 capture_output=True,
                 text=True,
@@ -556,14 +575,20 @@ class Pass:
 
     def _ls_remote_git(self, source: str, ref: str | None) -> tuple[str | None, bool, str | None]:
         """(`sha`, `pinned`, `error`) for one git-channel package."""
-        args = ["git", "ls-remote", source, ref] if ref else ["git", "ls-remote", source, "HEAD"]
+        command = package_listing(
+            source,
+            ref,
+            env=git_env(),
+            timeout=self.config.view.packages.refresh_network_timeout_seconds,
+        )
         try:
-            result = self.host.run(
-                args,
+            result = run_bounded(
+                command.argv,
+                cwd=command.cwd,
+                env=command.env,
+                timeout=command.timeout,
                 capture_output=True,
                 text=True,
-                env=git_env(),
-                timeout=self.config.view.packages.refresh_network_timeout_seconds,
             )
         except (OSError, subprocess.SubprocessError) as exc:
             return None, False, f"ls-remote failed: {exc}"
@@ -697,7 +722,6 @@ def _skip(reason: str) -> RefreshReport:
 def run_refresh(
     *,
     config: ConfigBoot,
-    host: Host,
     repo: Path,
     now: datetime,
     check_only: bool = False,
@@ -729,7 +753,6 @@ def run_refresh(
                 from_job=from_job,
                 now=now,
                 repo=repo,
-                host=host,
             )
             return pass_.run()
     except LockTimeoutError:

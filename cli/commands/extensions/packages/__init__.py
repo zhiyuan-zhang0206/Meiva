@@ -19,7 +19,6 @@ from pathlib import Path
 from typing import Any, cast
 
 from base.config import ConfigBoot
-from base.host.system.hostport import Host
 from base.packages.extensions import install_registry
 from base.packages.extensions.install_registry import InstalledPackage, UpdateMode
 
@@ -285,7 +284,6 @@ def cmd_packages_status(*, config: ConfigBoot, json_output: bool = False) -> int
 def cmd_packages_refresh(
     *,
     config: ConfigBoot,
-    host: Host,
     repo: Path,
     now: datetime,
     check_only: bool = False,
@@ -305,7 +303,6 @@ def cmd_packages_refresh(
 
     report = run_refresh(
         config=config,
-        host=host,
         repo=repo,
         now=now,
         check_only=check_only,

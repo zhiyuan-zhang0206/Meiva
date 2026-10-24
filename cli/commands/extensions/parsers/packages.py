@@ -31,7 +31,6 @@ def _h_packages_refresh(args: argparse.Namespace) -> int:
 
     return cmd_packages_refresh(
         config=config,
-        host=args.runtime.host,
         repo=args.runtime.checkout,
         now=datetime.now(UTC),
         check_only=args.check,

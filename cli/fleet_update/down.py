@@ -94,7 +94,10 @@ def _preflight(
     for alias in hosts:
         facts, was_serving = probe_host(s, alias)
         heads[alias] = facts.get("head", "")
-        reasons += host_refusals(alias, facts)
+        try:
+            reasons += host_refusals(alias, facts)
+        except ValueError as exc:
+            raise RefusedError(f"invalid host probe: {exc}") from exc
         if was_serving:
             serving.append(alias)
     old = _old_target(s, args, heads, new)
@@ -111,11 +114,13 @@ def _preflight(
         s.run(alias, fetch_command(new))
     probes = {alias: probe_helper(s, alias, new) for alias in hosts}
     rebuild = bool(getattr(args, "rebuild_extras", False))
-    return (
-        list(refusals(probes, baselines(s.repo), rebuild=rebuild)),
-        frozenset(serving),
-        rebuilding_hosts(probes, rebuild=rebuild),
-    )
+    table = baselines(s.repo)
+    try:
+        helper_reasons = refusals(probes, table, rebuild=rebuild)
+        rebuilding = rebuilding_hosts(probes, rebuild=rebuild)
+    except ValueError as exc:
+        raise RefusedError(f"invalid helper probe: {exc}") from exc
+    return list(helper_reasons), frozenset(serving), rebuilding
 
 
 # meiva:link cli/docs/fleet-update-window/fleet-update-window.meiva.okf.md
@@ -167,11 +172,17 @@ def _recover_after_failed_stop(
     for alias in start_order(args.gateway, tuple(args.runner)):
         if alias not in serving:
             continue
+        try:
+            evidence = host_evidence(s, alias)
+        except FailedError as exc:
+            down.append(alias)
+            s.say(f"recovery: could not read {alias}'s evidence: {exc}")
+            continue
         action = recovery_action(
             alias=alias,
             stopped=frozenset(stopped),
             failed=failed,
-            evidence=host_evidence(s, alias),
+            evidence=evidence,
         )
         if action is Recovery.RUNNING:
             continue

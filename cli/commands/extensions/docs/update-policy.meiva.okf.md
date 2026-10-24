@@ -65,7 +65,11 @@ process delivery and passes it explicitly through the refresh command and pass.
 The executor does not boot or capture configuration. Its job switches, time
 budget, per-iteration apply quota and network timeouts read that same owner at
 their existing operation points, including changes made to the owner during a
-pass. Manual runs still bypass the job-only enable switches.
+pass. Manual runs still bypass the job-only enable switches. Network Git commands
+are pure `refresh_git_plan` values containing argv, cwd, environment and the
+current timeout. The shell executes them through `run_bounded`; refresh has no
+injected command runner or Host dependency. The 6/7-second plan checks and the
+real local Git repository tests cover these separate contracts.
 
 Package policy resolution also receives a required defaults reader from this
 owner. A channel-less row never reads defaults; an explicit mode or interval

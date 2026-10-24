@@ -8,6 +8,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 
 from .journal import parse_journal, stop_completed
+from .probe_values import ProbeFlag, probe_flag
 
 
 # meiva:note
@@ -27,11 +28,13 @@ def host_refusals(alias: str, facts: Mapping[str, str]) -> tuple[str, ...]:
     reasons = [f"{alias}: the probe did not report {key}" for key in _REQUIRED if key not in facts]
     if reasons:
         return tuple(reasons)
+    hook = probe_flag(f"{alias}.hook", facts["hook"])
+    active = probe_flag(f"{alias}.active", facts["active"])
     if facts["dirty"] != "0":
         reasons.append(f"{alias}: $HOME/.meiva/source has uncommitted changes")
-    if facts["hook"] == "yes":
+    if hook is ProbeFlag.YES:
         reasons.append(f"{alias}: a post-checkout hook (the guard recurses); move it aside")
-    if facts["active"] == "yes":
+    if active is ProbeFlag.YES:
         reasons.append(
             f"{alias}: $HOME/.meiva/updates/active names an unfinished release operation"
         )

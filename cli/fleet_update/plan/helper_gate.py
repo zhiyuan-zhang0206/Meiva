@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 
+from .probe_values import HelperPresence, helper_presence, probe_flag
+
 # meiva:note
 # The facts every host must answer for the gate to judge it. A missing, empty or `-` value is how
 # a probe that could not run reads, so it refuses instead of passing for "nothing to do".
@@ -30,10 +32,21 @@ def _probe_error(error: str) -> str:
     return f"probe failed ({error})"
 
 
+def _validate_domains(facts: Mapping[str, str]) -> None:
+    presence = facts.get("h_helper", "")
+    if presence not in ("", "-"):
+        helper_presence(presence)
+    for name in ("valid", "loaded", "stale"):
+        value = facts.get(f"h_{name}", "")
+        if value not in ("", "-"):
+            probe_flag(name, value)
+
+
 # meiva:note
 # The fields a host owes and did not answer, led by why the probe itself failed when it did.
 def unreadable_facts(facts: Mapping[str, str]) -> tuple[str, ...]:
-    owed = _ABSENT_OWES if facts.get("h_helper") == "absent" else REQUIRED_FACTS
+    _validate_domains(facts)
+    owed = _ABSENT_OWES if facts.get("h_helper") == HelperPresence.ABSENT else REQUIRED_FACTS
     bad = [name for name in owed if facts.get(f"h_{name}", "") in ("", "-")]
     if error := facts.get("h_error", ""):
         bad.insert(0, _probe_error(error))
@@ -46,6 +59,7 @@ def unreadable_facts(facts: Mapping[str, str]) -> tuple[str, ...]:
 # Only a helper that is there can be rebuilt: `absent` is not a staleness the wave can act on, and
 # counting it would retire a host's extras for nothing.
 def needs_rebuild(facts: Mapping[str, str]) -> bool:
+    _validate_domains(facts)
     if facts.get("h_helper") != "present":
         return False
     return facts.get("h_stale") != "no" or facts.get("h_valid") != "yes"
@@ -104,7 +118,12 @@ def _stale_refusals(probes: Probes, table: Mapping[str, str], *, rebuild: bool) 
 # meiva:note
 # Every reason the helper state refuses this window.
 def refusals(probes: Probes, table: Mapping[str, str], *, rebuild: bool) -> tuple[str, ...]:
-    short = {alias: unreadable_facts(facts) for alias, facts in probes.items()}
+    short: dict[str, tuple[str, ...]] = {}
+    for alias, facts in probes.items():
+        try:
+            short[alias] = unreadable_facts(facts)
+        except ValueError as exc:
+            raise ValueError(f"{alias}: {exc}") from exc
     short = {alias: names for alias, names in short.items() if names}
     reasons: list[str] = []
     if short:
