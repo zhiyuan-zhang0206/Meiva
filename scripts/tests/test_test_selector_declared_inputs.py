@@ -49,6 +49,53 @@ def test_an_unanchored_read_blocks_only_a_change_that_includes_a_data_file(
     assert python_only.diagnostics == ()
 
 
+@pytest.mark.parametrize(
+    "path",
+    [
+        "scripts/structure/skip_sites.json",
+        "scripts/lint/baseline/host_platform_marks.json",
+        "scripts/structure/baseline/base/config.json",
+        "cli/tests/path_scopes.toml",
+        "cli/ambient_roots.toml",
+        "base/meizel.toml",
+        ".pre-commit-config.yaml",
+        ".github/workflows/ci.yml",
+        "ui/web/package.json",
+    ],
+)
+def test_declarations_baselines_and_self_naming_classes_do_not_block(
+    tmp_path: Path, path: str
+) -> None:
+    root = _repo(tmp_path)
+    _write(
+        root,
+        "pyproject.toml",
+        "[tool.pytest.ini_options]\n"
+        'testpaths = ["tests", "base/**/tests", "cli/**/tests", "scripts/**/tests"]\n',
+    )
+    _write(root, "cli/tests/test_own.py", "def test_own(): pass\n")
+    _write(root, "scripts/tests/test_own.py", "def test_own(): pass\n")
+    _write(root, "tests/support/helper.py", "def load(path):\n    return path.read_text()\n")
+    _write(root, path)
+    _write(
+        root,
+        "tests/consumer/test_known_reader.py",
+        "from pathlib import Path\n"
+        "ROOT = Path(__file__).resolve().parents[2]\n"
+        f"def test_read():\n    assert (ROOT / {path!r}).read_text()\n",
+    )
+
+    result = _select(root, path)
+    mixed = _select(root, path, "base/data.json")
+
+    assert result.decision == "SELECTED", result.as_json()
+    assert result.diagnostics == ()
+    assert "tests/consumer/test_known_reader.py" in result.tests
+    assert "tests/consumer/test_helper.py" not in result.tests
+    assert "tests/consumer/test_helper.py" in mixed.tests
+    assert any("tests/support/helper.py" in item for item in mixed.diagnostics)
+
+
 def test_a_load_that_cannot_be_resolved_always_blocks(tmp_path: Path) -> None:
     root = _repo(tmp_path)
     _write(root, "tests/support/helper.py", "import importlib\nimportlib.import_module(name)\n")
