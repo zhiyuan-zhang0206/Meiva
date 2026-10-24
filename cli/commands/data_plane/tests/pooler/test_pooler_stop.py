@@ -54,6 +54,14 @@ def pooler_plane(config: DataPlaneConfig) -> DataPlaneConfig:
     )
 
 
+# meiva:note
+# The stop's budget starts before its process scans, so it must outlast them on a busy host or
+# the stop expires before it reaches the pooler ("maintenance kept its hold") and never waits on
+# the transaction this test holds open. The wait on the pooler then ends the budget, which is the
+# failure `custody retained` names.
+_STOP_BUDGET_S = 2.0
+
+
 @pytest.mark.parametrize(
     ("preexisting_drain", "compensation_retry"), [(False, False), (False, True), (True, False)]
 )
@@ -84,7 +92,7 @@ def test_repeated_normal_stop_preserves_waiting_transaction(
                 else:
                     maintenance_stop.stop(
                         pooler_plane(data_plane_config),
-                        0.5,
+                        _STOP_BUDGET_S,
                         home=unit_home,
                         producer=operator_pipeline,
                     )
