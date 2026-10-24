@@ -730,6 +730,12 @@ async def run(
         finally:
             watchdog.stop()
             server.close()
+            try:
+                await asyncio.wait_for(asyncio.to_thread(watchdog.join, 1.0), timeout=1.0)
+            except TimeoutError:
+                dump_and_exit("loop watchdog did not stop within 1.0s")
+            if watchdog.is_alive():
+                dump_and_exit("loop watchdog did not stop within 1.0s")
             await bounded_cleanup(
                 server, daemon._clients, drain_s=config.computer_use_shutdown_drain_s
             )
