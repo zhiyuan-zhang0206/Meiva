@@ -26,6 +26,7 @@ from base.events.live.bus import EventBus
 from gateway.tests.agents.gateway_auth import without_credentials
 from gateway.tests.auth.gateway_config import gateway_test_client
 from gateway.tests.routers.alerts_api.alerts_support import (
+    ImBridge,
     alert,
     alert_frames,
     alerts_client,
@@ -185,8 +186,8 @@ def test_ingest_severity_parsing(db_conn: psycopg.Connection) -> None:
 # meiva:note
 # User design 2026-08-12: ALL three severities push to IM — there is no
 # severity gate anymore.
-def test_ingest_every_severity_notifies(monkeypatch: pytest.MonkeyPatch) -> None:
-    notified = capture_im(monkeypatch)
+def test_ingest_every_severity_notifies(alerts_im: ImBridge) -> None:
+    notified = capture_im(alerts_im)
     with alerts_client() as client:
         ingest(client, webhook(alerts=[alert(severity="critical", fingerprint="c1")]))
         ingest(client, webhook(alerts=[alert(severity="warning", fingerprint="w1")]))
@@ -217,9 +218,9 @@ def test_ingest_every_severity_notifies(monkeypatch: pytest.MonkeyPatch) -> None
 # notify_im="false" keeps the alert in the store and SSE stream while
 # suppressing only its IM fan-out.
 def test_ingest_notify_im_false_stores_and_publishes_without_im(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch, event_bus: EventBus
+    db_conn: psycopg.Connection, alerts_im: ImBridge, event_bus: EventBus
 ) -> None:
-    notified = capture_im(monkeypatch)
+    notified = capture_im(alerts_im)
 
     with alert_frames(event_bus) as published, alerts_client() as client:
         resp = ingest(client, webhook(notify_im="false"))
@@ -238,9 +239,9 @@ def test_ingest_notify_im_false_stores_and_publishes_without_im(
 # meiva:note
 # A gated firing and its resolution both update the row without IM.
 def test_ingest_notify_im_false_firing_and_resolution_stay_silent(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    db_conn: psycopg.Connection, alerts_im: ImBridge
 ) -> None:
-    notified = capture_im(monkeypatch)
+    notified = capture_im(alerts_im)
 
     with alerts_client() as client:
         firing = ingest(client, webhook(notify_im="false"))
@@ -266,9 +267,9 @@ def test_ingest_notify_im_false_firing_and_resolution_stay_silent(
 # meiva:note
 # Only the exact string "false" gates IM; "true" keeps the default.
 def test_ingest_notify_im_non_gating_value_still_notifies(
-    monkeypatch: pytest.MonkeyPatch,
+    alerts_im: ImBridge,
 ) -> None:
-    notified = capture_im(monkeypatch)
+    notified = capture_im(alerts_im)
 
     with alerts_client() as client:
         resp = ingest(client, webhook(notify_im="true"))
@@ -279,9 +280,9 @@ def test_ingest_notify_im_non_gating_value_still_notifies(
 # meiva:note
 # Gated still-firing re-sends and a new firing episode never retry IM.
 def test_ingest_notify_im_false_resends_and_refire_stay_silent(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    db_conn: psycopg.Connection, alerts_im: ImBridge
 ) -> None:
-    notified = capture_im(monkeypatch)
+    notified = capture_im(alerts_im)
 
     with alerts_client() as client:
         firing = ingest(client, webhook(notify_im="false"))
@@ -323,7 +324,7 @@ def test_ingest_notify_im_false_resends_and_refire_stay_silent(
 # row selects the English template set through the full ingest path (the
 # default zh path is covered by test_ingest_every_severity_notifies).
 def test_ingest_uses_display_language_setting(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    db_conn: psycopg.Connection, alerts_im: ImBridge
 ) -> None:
     with db_conn.cursor() as cur:
         cur.execute(
@@ -332,7 +333,7 @@ def test_ingest_uses_display_language_setting(
         )
     db_conn.commit()
 
-    notified = capture_im(monkeypatch)
+    notified = capture_im(alerts_im)
     with alerts_client() as client:
         ingest(client, webhook())
     assert len(notified) == 1
@@ -361,9 +362,9 @@ def test_ingest_zero_ends_at_stored_null(db_conn: psycopg.Connection) -> None:
 # im_bridge down -> the ingest still stores the row (notified_at stays
 # NULL) and answers 200.
 def test_ingest_im_failure_does_not_fail_ingest(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    db_conn: psycopg.Connection, alerts_im: ImBridge
 ) -> None:
-    capture_im(monkeypatch, ok=False)
+    capture_im(alerts_im, ok=False)
     with alerts_client() as client:
         resp = ingest(client, webhook())
         assert resp.status_code == 200
@@ -380,12 +381,12 @@ def test_ingest_im_failure_does_not_fail_ingest(
 # notified_at NULL keeps the firing gate open — the next re-send retries
 # the IM.
 def test_ingest_firing_retries_notify_after_failed_attempt(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    db_conn: psycopg.Connection, alerts_im: ImBridge
 ) -> None:
-    capture_im(monkeypatch, ok=False)
+    capture_im(alerts_im, ok=False)
     with alerts_client() as client:
         ingest(client, webhook())
-    capture_im(monkeypatch, ok=True)
+    capture_im(alerts_im, ok=True)
     with alerts_client() as client:
         resp = ingest(client, webhook())
         assert resp.json()["notified"] == 1
@@ -597,9 +598,9 @@ def test_ingest_loopback_is_not_enough_when_a_token_is_set() -> None:
 # meiva:note
 # Native retries recover their original group rather than re-rendering expanded POSTs.
 def test_native_groups_recover_original_group_and_new_members_without_sent_fact(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    db_conn: psycopg.Connection, alerts_im: ImBridge
 ) -> None:
-    sent = capture_im(monkeypatch, ok=False)
+    sent = capture_im(alerts_im, ok=False)
     a, b, c = [alert(fingerprint=fp, summary=fp) for fp in ("a", "b", "c")]
     with alerts_client() as client:
         first = ingest(client, webhook(alerts=[a, b]))
@@ -625,9 +626,9 @@ def test_native_groups_recover_original_group_and_new_members_without_sent_fact(
 # meiva:note
 # A later entry still finds the same instance inserted earlier in this POST.
 def test_shadow_keeps_input_order_missing_start_resolution(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    db_conn: psycopg.Connection, alerts_im: ImBridge
 ) -> None:
-    sent = capture_im(monkeypatch, ok=False)
+    sent = capture_im(alerts_im, ok=False)
     first = alert(fingerprint="same")
     later = alert(fingerprint="same", starts_at="", summary="later")
     with alerts_client() as client:

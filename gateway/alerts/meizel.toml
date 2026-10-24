@@ -1,7 +1,7 @@
 exports = ["router.py"]
 
 [uses]
-"router.py" = ["schemas.py"]
+"router.py" = ["im_notify.py", "schemas.py"]
 
 [purity]
 "__init__.py" = "strict"

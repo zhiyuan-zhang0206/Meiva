@@ -18,6 +18,7 @@ from base.clock import ClockConfig
 from base.clock.configuration import clock_config_from_boot
 from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot
+from base.host.env.health_ports import health_port
 from base.paths import gateway_memory_dir
 from gateway.http.middleware.cors import cors_allowed_origins, trusted_request_hosts
 
@@ -75,11 +76,13 @@ class SseTuning:
 
 
 # meiva:note
-# Alert intake: whether an alert also notifies the IM bridge, and the scoped webhook token an
-# alert sender presents (empty when no scoped token is configured).
+# Alert intake: whether an alert also notifies the IM bridge, where the bridge answers
+# (`im_bridge_url`, the base of its `/send/...` routes) and the scoped webhook token an alert
+# sender presents (empty when no scoped token is configured).
 @dataclass(frozen=True)
 class AlertSettings:
     im_notify_enabled: bool
+    im_bridge_url: str
     webhook_token: str = field(repr=False)
 
 
@@ -310,6 +313,8 @@ def gateway_config_from_boot(config: ConfigBoot) -> GatewayConfig:
         ),
         alerts=AlertSettings(
             im_notify_enabled=view.alerts.im_notify_enabled,
+            im_bridge_url=(services.im_bridge_health_url or "").rstrip("/")
+            or f"http://127.0.0.1:{health_port('im_bridge', read_field=config.get_field)}",
             webhook_token="" if alerts_token is None else alerts_token.get_secret_value(),
         ),
         to_user=ToUserLimits(
