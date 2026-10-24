@@ -62,7 +62,7 @@ which brought nine units up in 12 seconds.
 
 ## Where it is written
 
-`announce_stopping` in `_temporary_stop.py` writes the record beside its
+`announce_stopping` in `stop/announce.py` writes the record beside its
 best-effort `POST /api/cluster/stopping`: the database columns are the cluster's
 view, and this file is the host's own — written even when the gateway is
 unreachable, because the stop is happening either way.

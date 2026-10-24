@@ -12,14 +12,14 @@ tags:
 ## What it is
 
 `cli/commands/lifecycle/` holds the local host lifecycle verbs and the machinery
-they share. The verbs are `start.py` (`meiva start`), `stop.py` (`meiva stop`,
-`meiva restart`) and `status.py` (`meiva status`). Every one of them reaches the single application
+they share. The verbs are `start/` (`meiva start`), `stop/` (`meiva stop`,
+`meiva restart`) and `status/` (`meiva status`). Every one of them reaches the single application
 root through `root_driver.py`, and every stopping verb goes through the same
-native stop boundary (`_temporary_stop`, `service_stop`) — which is why they
+native stop boundary (`stop/`) — which is why they
 form one package rather than one per verb.
 
-`root_driver.py`, `service_stop.py`, `start_generation.py`, `maintenance.py` and
-`migrations.py` are public: `data_plane/maintenance_stop` and the cutover
+`root_driver.py`, `stop/shell_sessions.py`, `root_control/generation.py`, `maintenance.py` and
+`start/migrations.py` are public: `data_plane/maintenance_stop` and the cutover
 scripts reach them. The `_`-prefixed modules are steps only this package calls.
 
 ## Stand-down
@@ -30,74 +30,13 @@ who writes it and how the boot job reads it (task #5493).
 
 ## Stop and restart
 
-`stop.py` exposes `stop` through `_temporary_stop`. Every keep-or-stop choice
-(shell sessions, browser, extras, data plane, other services), the mode and the
-budget are explicit keyword-only arguments with no default; the host's
-capabilities only refuse a data-plane choice that does not apply
-(`_temporary_stop.require_infra_choice`), and `--keep-service` cannot name the
-shell-session or browser services, which have their own choices. Restart over the
-service tree calls the same stop kernel with the data plane kept and the
-operator's other choices, once `_start_readiness_preflight` has not refused it
-for a start that would fail ([[start-readiness-preflight.meiva.okf.md]]); its
-start leg launches the operator's explicit service selection.
-`meiva restart --only agent-host` (`stop.restart_agent_host`) stops agent-host
-through the root and brings it back, touching nothing else.
-The stop does not drain agents itself: root stops agent-host first and waits for it,
-and its own SIGTERM exit settles the running turns
-([[services/agent_runner/agent_host/lifecycle/docs/graceful-exit.meiva.okf.md]]).
-`service_stop` and `data_plane/maintenance_stop` verify
-resource exits (`data_plane/maintenance_stop_report` names survivors).
-`data_plane/_pooler_stop.OwnedPooler` owns ordinary pooler stop
-admission for maintenance and startup recovery: exact native birth and listener
-proof precede a durable stop intent and the first SIGINT (`WAIT_FOR_SERVERS`).
-Retries and already-closed listeners only wait; PgBouncer would interpret
-another shutdown signal as immediate termination. A birth that finishes its
-drain and exits while its listeners are being scanned is stopped, not a foreign
-listener. An explicit force request alone permits a kill, with a separate
-bounded settle wait when the graceful deadline is spent. The data-plane stop
-requests [owned PostgreSQL](../../../../base/cluster/docs/postgres.meiva.okf.md) fast
-shutdown (SIGINT), so neither waits on idle client connections a drained state
-cannot protect (issue #2307). When the data-plane phase fails after the
-services phase stopped, `_temporary_stop` reports the failure and exits non-zero;
-it does not restart anything, and the operator decides whether to retry the stop
-or run `meiva start`.
-
-`_stop_extras` uses the same exact-home helper retirement as destroy: native
-job, executable, socket and direct root-child ownership are checked before native
-helper exit and removal of its definition. Start recreates that definition.
-Root owns Gate and native LGTM application services. `_exclusive_resources`
-serializes whole local start and stop operations under the home lifecycle lock; a
-start that delegates to a child process (`StartDelegation`) runs the child after the
-lock is released.
-
-A stop keeps no state that gates anything: `stop` clears the home's serving gate
-(`base/deploy/lifecycle/start_serving.py`) before it stops anything, `start` marks it
-serving after readiness, and `run/lifecycle-op.json` records how a stop or restart
-ended for the fleet update and the operator.
-See [the coordinated operator procedure](../../../../docs/conventions/operations/graceful-maintenance.md).
-
-The native stop tests create fresh PTY sessions and wait for their requested
-job's bare readiness output before treating a shell session as busy. A login-profile
-child can exist before the initial command runs; child presence alone is not
-job readiness. `cli/commands/lifecycle/tests/stop/stop_support.py:busy_session` keeps cleanup custody of the
-shell before waiting, then records the running job. Regular jobs print
-`job-ready`; stubborn jobs print `stubborn-ready` after installing their signal
-handlers. Fresh-session creation refuses reuse; the public capture wait requires
-bare output rather than shell echo. Native closure, notice count and
-stop-before-data-plane assertions remain intact.
-
-The stop tests' private non-PTY sessions also use literal parent and child
-entries. The launcher accepts only SIGTERM behavior (`default`, `exit`, or
-`ignore`), an optional ignored SIGHUP, and an optional child armed-marker path.
-These values travel as argv data; callers cannot supply executable source.
-The ready marker follows signal setup, the child arms after its own handler,
-and the fixture records native session identity before returning. Its context
-retains each original process and closes that exact private group and pipes
-when the test exits, including an assertion failure.
+`stop/` plans a stop from the operator's choices and the host's facts, then a shell
+executes the plan. [[stop-and-restart|Stop and restart]]
+owns the plan, the shell, the restart legs and the failure report.
 
 ## Start
 
-`cli/commands/lifecycle/migrations.py:cmd_migrations_apply` is deliberately
+`cli/commands/lifecycle/start/migrations.py:cmd_migrations_apply` is deliberately
 not a user-facing verb — it runs as a step of `meiva start`, so any restart
 crossing a schema change catches the DB up on its own.
 
@@ -115,17 +54,47 @@ provider's direct (session-mode) endpoint, or run migrations from a host that ca
 prove directness. The checkpoint schema check that follows both branches is a
 read-only verification, so it dials the ordinary access URL as well.
 
-`start_generation.record_running_sha` records the running source
+`start/__init__.py` is a shell around plans: the stand-down gate, the refusals, the cold
+preparation and its order (`start/cold_start_plan.py`), the schema checks, the gateway probe and
+the readiness verdict are `strict` modules over values the shell read, and the shell executes
+them in order. Their tests assert the returned plans; the tests of the shell run `cmd_start_body`
+against a real home, a scripted root-control socket and the suite's Postgres
+(`tests/startup/start_harness.py`), and do not run a cold preparation, whose steps have their own
+tests.
+
+`root_control/generation.record_running_sha` records the running source
 after a successful start. What start treats as already-up, what it waits for,
 and when an unready service becomes exit code 4:
 [[start-readiness.meiva.okf.md]].
 
 After a ready gateway, start prints the gateway hint and, through
-`cli/commands/lifecycle/login_link.py:print_login_link`, a one-time UI login link
+`cli/commands/lifecycle/start/login_link.py:print_login_link`, a one-time UI login link
 (`<ui>/#ticket=<ticket>`). The ticket is minted with the home's human secret and
 only when output is a terminal and a UI service was launched; a failed mint is
 reported on stderr and never fails the start. Gateway side:
 [[gateway/http/auth/docs/web-sessions.meiva.okf.md]].
+
+## Status
+
+`status/` is `meiva status`: the local view of services, data plane, host reading and
+release, plus the gateway's own `GET /api/cluster/status` snapshot. The local probes
+are the bootstrap-exemption supplement (they work with the gateway down, mid-restart)
+and the gateway can only see itself, so both always print, and a gateway that cannot be
+reached or addressed prints inline instead of failing the verb.
+
+The command is a shell around a plan. `cmd_status` takes the `CommandRuntime` (its
+home, machine, config and host are values, never read from the environment), collects
+the facts that decide the layout (`StatusFacts`: repo, capability set, roster with gate
+reasons, the last start's launched set, the designated observability host) and executes
+the steps `plan.plan_status` returns: static lines, or a named probe whose output the
+owning renderer words. `roster` decides the note each service row carries and the table
+layout (a gate reason wins over the launch record; before any start nothing counts as
+launched), `render` the banner, host reading, source-drift and release lines, and
+`gateway` the gateway view. The slow or fallible sections (data plane, gateway) are
+steps, not facts, so the operator sees the earlier sections while they run. The planning
+and rendering modules are `strict`, so their tests assert the returned lines; the
+tests of the shell run it against a scripted root-control socket, a real manifest and
+git checkout, and the suite's throwaway Redis.
 
 ## Key Dependencies
 

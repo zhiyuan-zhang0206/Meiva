@@ -50,10 +50,10 @@ subpackages hold the domains, each an independent package door:
 readiness reports, with an explicit `__all__` contract. Its declaration predicate
 stays local; tiering and source drift stay with their `base.deploy` owners.
 
-`stop.py` exposes `stop` through `_temporary_stop`; restart calls the same stop
+`stop/` plans a stop (`plan.plan_stop`) and executes the plan; restart calls the same stop
 kernel with the data plane and browser kept; shell sessions are closed like in any
 stop. The agent host settles running turns itself on SIGTERM, ahead of the other
-services in root's order; `service_stop` and
+services in root's order; `stop/shell_sessions` and
 `data_plane/maintenance_stop` verify resource exits.
 `data_plane/_pooler_stop.OwnedPooler` owns
 ordinary pooler stop admission for maintenance and startup recovery: exact native
@@ -66,9 +66,9 @@ force request alone permits a kill, with a separate bounded settle wait when
 the graceful deadline is spent. The data-plane stop requests [owned PostgreSQL](../../../base/cluster/docs/postgres.meiva.okf.md) fast shutdown (SIGINT), so neither waits on idle client connections a drained state
 cannot protect (issue #2307); one still running at its budget's end is ended by an
 immediate shutdown and reported. When the data-plane phase fails after the
-services phase stopped, `_temporary_stop` reports the failure and exits non-zero;
+services phase stopped, `stop` reports the failure and exits non-zero;
 it does not restart anything, and the operator decides whether to retry the stop
-or run `meiva start`. `_stop_extras` uses the same exact-home helper retirement as destroy:
+or run `meiva start`. `stop/extras` uses the same exact-home helper retirement as destroy:
 native job, executable, socket and stopped-root custody are checked before
 native helper exit and removal of its definition. Start recreates that definition.
 Root owns Gate and native LGTM application services. `_exclusive_resources`

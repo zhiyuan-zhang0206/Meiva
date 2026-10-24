@@ -34,12 +34,13 @@ from base.cluster.dataplane import pooler as base_pooler
 from base.config import settings
 from base.host.db_authority import delivery, ledger, model
 from base.host.db_authority.api import API_TOKEN_ENV
+from base.host.env.registry import process_environment
 from base.host.net.url_secret import url_with_userinfo
 from cli.commands.data_plane import bringup
 from cli.commands.data_plane import cluster_instance as ci
 from cli.commands.data_plane import pgbouncer as pooler
 from cli.commands.data_plane.config import DataPlaneConfig, data_plane_config_from_settings
-from cli.commands.lifecycle.migrations import cmd_migrations_apply
+from cli.commands.lifecycle.start.migrations import cmd_migrations_apply
 from cli.database import OperatorDatabaseFactory
 from cli.database.runtime import CommandRuntime
 from cli.database.tests.cli_tests import operator_database as operator_database
@@ -233,7 +234,10 @@ def _birth(
     )
     bringup.prepare_gateway_schema(born.plane)
     cmd_migrations_apply(
-        database_factory=operator_database, machine_name=command_runtime.machine.name
+        database_factory=operator_database,
+        machine=command_runtime.machine,
+        config=born.plane,
+        home=born.home,
     )
     bringup.complete_gateway_data_plane(
         born.plane, database_factory=operator_database, machine=command_runtime.machine
@@ -515,7 +519,8 @@ def test_interrupted_birth_retries_to_the_same_generation(
 def test_launched_services_receive_their_class_login_only(
     born: Born, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from cli.commands.lifecycle.root_driver import root_child_env, service_extra_env
+    from base.sessions.env_forwarding import managed_service_env
+    from cli.commands.lifecycle.root_driver import service_extra_env
     from services.supervision.roster.service_spec import ServiceSpec
 
     # The launcher's settings-free serve-gateway read (a born single box).
@@ -542,7 +547,7 @@ def test_launched_services_receive_their_class_login_only(
     assert service_extra_env(gateway, remote_data_plane=False)[API_TOKEN_ENV] == tokens.gateway
     assert service_extra_env(runner, remote_data_plane=False)[API_TOKEN_ENV] == tokens.runner
     assert service_extra_env(frontend, remote_data_plane=False)[API_TOKEN_ENV] == tokens.gateway
-    root = root_child_env()
+    root = managed_service_env(settings.general.service_path, environ=process_environment())
     assert "MEIVA_DB_URL" not in root and delivery.GENERATION_ENV not in root
     assert API_TOKEN_ENV not in root
 

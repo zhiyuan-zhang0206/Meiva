@@ -2,48 +2,49 @@
 
 from __future__ import annotations
 
-import os
-from collections.abc import Iterator
+from dataclasses import replace
 from pathlib import Path
-from unittest.mock import patch
+from typing import Protocol
 
 import pytest
 from dotenv import dotenv_values
 
 from base import cluster
-from cli import init_intent, start_identity, start_intent
+from cli import init_intent, start_identity
 from cli.parsers import build_parser
-
-
-def _every_port_free(_port: int) -> bool:
-    return True
-
-
-def _power_loss(*_args: object, **_kwargs: object) -> None:
-    raise OSError("power loss")
-
-
-@pytest.fixture(autouse=True)
-def _isolate_environment() -> Iterator[None]:
-    """`init` pins `SSL_CERT_FILE` into the process for a joining runner; that ends with the test."""
-    with patch.dict(os.environ):
-        yield
+from cli.start_runtime import HomeSite
+from cli.tests.bootstrap.init_identity import (
+    break_env_publication,
+    caller_host,
+    repair_env_publication,
+    site_in,
+)
 
 
 @pytest.fixture
-def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    home = tmp_path / "home"
-    checkout = tmp_path / "checkout"
-    checkout.mkdir()
-    monkeypatch.setattr(start_intent, "checkout", lambda: checkout)
-    monkeypatch.setattr(cluster, "port_free", _every_port_free)
-    monkeypatch.setenv("MEIVA_HOME", str(home))
-    os.environ["MEIVA_SERVICE_PATH"] = str(tmp_path / "tools")  # restored by the autouse fixture
-    return home
+def site(tmp_path: Path) -> HomeSite:
+    return site_in(tmp_path)
 
 
-def _init(*flags: str) -> int:
-    return init_intent.run_init(build_parser().parse_args(["init", *flags]))
+@pytest.fixture
+def home(site: HomeSite) -> Path:
+    return site.home
+
+
+class _Init(Protocol):
+    def __call__(self, *flags: str, occupied_ports: frozenset[int] = ...) -> int: ...
+
+
+@pytest.fixture
+def init(site: HomeSite, tmp_path: Path) -> _Init:
+    """`meiva init` as the entry hands it its site: a caller declaring its tool directories."""
+    caller = caller_host(service_path=str(tmp_path / "tools"))
+
+    def run(*flags: str, occupied_ports: frozenset[int] = frozenset()) -> int:
+        args = build_parser().parse_args(["init", *flags])
+        return init_intent.run_init(args, site, replace(caller, occupied_ports=occupied_ports))
+
+    return run
 
 
 _SINGLE_BOX = ("--serve-gateway", "--serve-agent-runner", "--machine-name", "probe")
@@ -55,9 +56,9 @@ def _state(home: Path) -> list[tuple[bytes, int]]:
 
 
 def test_init_publishes_the_identity_starts_nothing_and_names_the_next_step(
-    home: Path, capsys: pytest.CaptureFixture[str]
+    home: Path, init: _Init, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    assert _init(*_SINGLE_BOX) == 0
+    assert init(*_SINGLE_BOX) == 0
 
     intent = start_identity.read_intent(home)
     assert intent is not None and intent["phase"] == "configured"
@@ -72,14 +73,14 @@ def test_init_publishes_the_identity_starts_nothing_and_names_the_next_step(
 
 @pytest.mark.parametrize("phase", ["configured", "provisioned", "ready"])
 def test_init_refuses_an_initialized_home_and_changes_nothing(
-    home: Path, capsys: pytest.CaptureFixture[str], phase: str
+    home: Path, init: _Init, capsys: pytest.CaptureFixture[str], phase: str
 ) -> None:
-    assert _init(*_SINGLE_BOX) == 0
+    assert init(*_SINGLE_BOX) == 0
     start_identity.mark_phase(home, phase)
     before = _state(home)
     capsys.readouterr()
 
-    assert _init(*_SINGLE_BOX) == 1
+    assert init(*_SINGLE_BOX) == 1
 
     err = capsys.readouterr().err
     assert f"already initialized (phase {phase})" in err
@@ -88,18 +89,16 @@ def test_init_refuses_an_initialized_home_and_changes_nothing(
 
 
 def test_an_interrupted_claim_resumes_from_its_recorded_payload_without_flags(
-    home: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    home: Path, init: _Init, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    write = start_identity.upsert_env
-
-    monkeypatch.setattr(start_identity, "upsert_env", _power_loss)
-    assert _init(*_SINGLE_BOX) == 1
+    break_env_publication(home)
+    assert init(*_SINGLE_BOX) == 1
     pending = start_identity.read_intent(home)
     assert pending is not None and pending["phase"] == "claiming"
     assert not (home / ".env").exists()
 
-    monkeypatch.setattr(start_identity, "upsert_env", write)
-    assert _init() == 0
+    repair_env_publication(home)
+    assert init() == 0
     assert cluster.get_record(home) == cluster.ClusterRecord(**pending["record"])
     assert dict(dotenv_values(home / ".env")) == pending["env"]
     done = start_identity.read_intent(home)
@@ -108,13 +107,13 @@ def test_an_interrupted_claim_resumes_from_its_recorded_payload_without_flags(
 
 
 def test_an_interrupted_claim_takes_no_flags(
-    home: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    home: Path, init: _Init, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    monkeypatch.setattr(start_identity, "upsert_env", _power_loss)
-    assert _init(*_SINGLE_BOX) == 1
+    break_env_publication(home)
+    assert init(*_SINGLE_BOX) == 1
     capsys.readouterr()
 
-    assert _init("--machine-name", "other", "--serve-gateway") == 1
+    assert init("--machine-name", "other", "--serve-gateway") == 1
 
     err = capsys.readouterr().err
     assert "without flags" in err and "--machine-name" in err and "--serve-gateway" in err
@@ -123,36 +122,38 @@ def test_an_interrupted_claim_takes_no_flags(
     assert not (home / ".env").exists()
 
 
-def test_init_refuses_a_detached_home(home: Path, capsys: pytest.CaptureFixture[str]) -> None:
+def test_init_refuses_a_detached_home(
+    home: Path, init: _Init, capsys: pytest.CaptureFixture[str]
+) -> None:
     home.mkdir(mode=0o700)
     (home / "destroy-intent.json").write_text('{"version":1,"state":"detached"}\n')
 
-    assert _init(*_SINGLE_BOX) == 1
+    assert init(*_SINGLE_BOX) == 1
 
     assert "destroyed or detached" in capsys.readouterr().err
     assert not (home / start_identity.INTENT_NAME).exists()
 
 
 def test_init_refuses_configuration_without_an_intent(
-    home: Path, capsys: pytest.CaptureFixture[str]
+    home: Path, init: _Init, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """A home that has an identity in its `.env` but no intent has no initialization
     authority: init does not adopt it, and `meiva start` refuses it the same way."""
     home.mkdir(mode=0o700)
     (home / ".env").write_text("MEIVA_GATEWAY_URL=http://10.0.0.7:8000\n")
 
-    assert _init("--serve-agent-runner", "--no-serve-gateway", "--machine-name", "r") == 1
+    assert init("--serve-agent-runner", "--no-serve-gateway", "--machine-name", "r") == 1
 
     assert "no recorded identity" in capsys.readouterr().err
     assert not (home / start_identity.INTENT_NAME).exists()
 
 
 def test_init_without_inputs_names_this_checkouts_cli(
-    home: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    home: Path, init: _Init, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """The host's `meiva` is linked only by a first start, so the examples name the
     checkout's own `.venv/bin/meiva`."""
-    assert _init() == 1
+    assert init() == 1
 
     err = capsys.readouterr().err
     assert "no capability declared" in err
@@ -160,11 +161,25 @@ def test_init_without_inputs_names_this_checkouts_cli(
     assert not home.exists() or not (home / start_identity.INTENT_NAME).exists()
 
 
-def test_init_requires_a_machine_name(home: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    assert _init("--serve-gateway", "--serve-agent-runner") == 1
+def test_init_requires_a_machine_name(
+    home: Path, init: _Init, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert init("--serve-gateway", "--serve-agent-runner") == 1
 
     assert "init requires --machine-name" in capsys.readouterr().err
     assert not (home / start_identity.INTENT_NAME).exists()
+
+
+def test_init_refuses_a_gateway_whose_ports_something_already_holds(
+    home: Path, init: _Init, capsys: pytest.CaptureFixture[str]
+) -> None:
+    held = cluster.new_home_ports()["gateway"]
+
+    assert init(*_SINGLE_BOX, occupied_ports=frozenset({held})) == 1
+
+    assert "already occupied" in capsys.readouterr().err
+    assert not (home / start_identity.INTENT_NAME).exists()
+    assert not (home / ".env").exists()
 
 
 _INIT_ONLY_FLAGS = [

@@ -43,11 +43,7 @@
     "skipif(shutil.which('uv') is None)",
     "skipif(shutil.which('uv') is None)"
   ],
-  "cli/commands/lifecycle/tests/converge_host/test_converge.py": [
-    "skipif(os.name == 'nt')"
-  ],
   "cli/commands/lifecycle/tests/stop/test_data_plane_stop.py": [
-    "skip('native pgbouncer is not installed')",
     "skip('native pgbouncer is not installed')",
     "skip('native pgbouncer is not installed')",
     "skip('this host has no non-loopback address for the reachable bind')"
