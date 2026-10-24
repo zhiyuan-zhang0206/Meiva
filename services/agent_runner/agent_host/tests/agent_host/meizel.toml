@@ -3,6 +3,7 @@
 
 [uses]
 "test_sdk_host_posture.py" = ["child_sdk_host_posture.py"]
+"test_stored_config.py" = ["stored_config_import_child.py"]
 
 [debt.first-party-patch]
 "child_sdk_host_posture.py#assignment base.config.ConfigBoot.ensure_eager" = 1
