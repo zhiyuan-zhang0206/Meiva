@@ -67,8 +67,8 @@ seconds **and** no known stop-button is visible — if the stop selector has
 drifted, text-stability alone still converges. The only parts that must be
 right are the composer selector (to type into) and the answer read (a selector
 list, or a per-site `answer_js` override where the rendered DOM is not a
-faithful text source — Claude reads its screen-reader mirror); both live in
-`SITES` in `webchat.py`, easy to fix.
+faithful text source — Claude reads the rendered markdown through a script); both
+live in `SITES` in `scripts/_sites.py`, easy to fix.
 
 ## When a site's UI drifts
 

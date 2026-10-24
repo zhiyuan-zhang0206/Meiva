@@ -11,7 +11,7 @@ Which specific feeds to subscribe to are **user preferences** and are not writte
 
 **A self-contained CLI script** (`scripts/feed.py`): agent starts bash, calls with command-line arguments, reads stdout JSON.
 Parsing uses `feedparser` (handles all RSS 0.9x/1.0/2.0 + Atom dialects + date normalization + `content:encoded`);
-feed bytes are fetched with `curl` + browser UA (can bypass host 403 for bare clients). When using `--full` to fetch full text, it imports `extract_article` from the same repo's `generic`.
+feed bytes are fetched with `curl` + browser UA (can bypass host 403 for bare clients). When using `--full` to fetch full text, it imports `fetch_article` from the same repo's `generic`.
 
 ## Usage (agent invokes via bash)
 

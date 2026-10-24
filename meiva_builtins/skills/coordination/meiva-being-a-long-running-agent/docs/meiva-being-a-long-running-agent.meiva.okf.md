@@ -42,3 +42,5 @@ Usage budget reminders compare recorded USD cost with `--usd-limit`. Select
 explicit agent IDs, a window or lifetime, and immutable spawn/fork lineage.
 Token counts are usage observations, never budget thresholds. Reminders notify
 named peers once and leave graceful disposition to the receiving agents.
+`scripts/usage_budget.py` decides over values (the reminder a report earns and what a
+polling round does next); `scripts/agent_usage.py` reads the database and sends it.

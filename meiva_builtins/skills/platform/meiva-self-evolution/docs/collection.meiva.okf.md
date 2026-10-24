@@ -17,8 +17,14 @@ inside the collection window — most runs wake from a resurrect, a heartbeat,
 or a long-lived brief written days before the window opened.
 
 `collect.py --days N` reads a whole window; `collect_one` builds the same
-record for one agent over the last 7 days, which is how a freshly spawned
-evaluation agent is scored. Both share the scoping below.
+record for one agent over the 7 days before the `now` it is given, which is how a
+freshly spawned evaluation agent is scored. Both share the scoping below. The
+events come from the gateway named by the `GatewayAccess` value the caller
+supplies, paged by `events_window.py` (every request offset 0, an overflowing
+slice bisected in time, rows deduplicated by id); an unset gateway URL or a
+process without its machine token fails before any request. A checkpoint that
+cannot be read leaves that agent's transcript empty and prints a warning naming
+the agent.
 
 Parent: [[meiva_builtins/skills/platform/meiva-self-evolution/docs/meiva-self-evolution.meiva.okf.md]].
 

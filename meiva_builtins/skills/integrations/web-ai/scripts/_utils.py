@@ -1,99 +1,30 @@
-"""
-Small leaf helpers for the web-ai driver: idle-detector state, chat-id
-URL mapping, and the artifact landing dir.
-
-Split out of webchat.py (2026-08-07, Task #1011) so the driver entry stays
-under the 800-line hard ceiling.
-"""
-
+# meiva:note
+# The effects around where a web-ai child run lands its files: reading the Meiva home and the Downloads folder once (the child's entry script is the composition root that calls `system_places`), creating a capability's landing directory, and reading the clock for the run stamp. The naming itself is `_landing`.
 from __future__ import annotations
 
 import datetime as _dt
-import re
 from pathlib import Path
-from typing import Any
 
-from _sites import site  # module-only sibling; reached only through webchat.py's own guard
+from _landing import Places, capability_dir, format_stamp
 
 from base.paths.home import resolve_meiva_home
 
 
-def _new_idle_state() -> dict[str, Any]:
-    """Fresh per-tab tracking for the idle detector (one streamed answer).
-
-    `_idle_step` folds each poll into this; `done` flips on once the answer
-    settles, carrying the final `answer` / `complete`. `last` is the newest text
-    seen so far (the best partial to return on a timeout).
-    """
-    return {
-        "last": "",  # newest answer text seen
-        "stable_start": None,  # monotonic time the text went stable, or None
-        "saw_stream": False,  # a stop/streaming control was seen at least once
-        "growth_steps": 0,  # times the answer grew; >=2 means a real stream
-        "answer": "",  # settled answer (set when done)
-        "complete": False,  # whether it settled (vs still pending)
-        "done": False,  # whether this tab is finished
-    }
+# meiva:note
+# The home and Downloads folder of this process: `$MEIVA_HOME` through the one resolver every Meiva process uses (still without touching `Settings`, so no database is reached), and `~/Downloads`.
+def system_places() -> Places:
+    return Places(home=resolve_meiva_home(), downloads=Path("~/Downloads").expanduser())
 
 
-# --------------------------------------------------------------------------- #
-# Chat ID: extract a stable conversation identifier so follow-up questions
-# continue the SAME conversation instead of opening a new one.
-# --------------------------------------------------------------------------- #
-
-
-def chat_id_from_url(name: str, url: str) -> str | None:
-    """Extract a stable chat identifier from the conversation ``url``.
-
-    Returns the first capture group of the first matching
-    ``chat_id_patterns`` regex, or None if no pattern matches.
-    """
-    prof = site(name)
-    for pat in prof.get("chat_id_patterns", []):
-        m = re.search(pat, url)
-        if m:
-            return m.group(1)
-    return None
-
-
-def chat_url(name: str, chat_id: str) -> str:
-    """Build the full conversation URL from a ``chat_id``.
-
-    Uses the site's ``chat_url_template``; falls back to the raw ``chat_id``
-    if no template is configured (it might already be a full URL).
-    """
-    prof = site(name)
-    tmpl = prof.get("chat_url_template")
-    if tmpl:
-        return tmpl.format(chat_id=chat_id)
-    return chat_id
-
-
-# --------------------------------------------------------------------------- #
-# Output landing: ~/Downloads/meiva_<cluster>_web-ai/<capability>/<id>/ + stdout
-# --------------------------------------------------------------------------- #
-
-_GROUP = "web-ai"
-
-
-def _cluster() -> str:
-    """This unit's display label — its home's basename with leading dots
-    stripped (path-only identity; `~/.meiva` -> 'meiva', `~/.meiva-t1' -> 'meiva-t1'),
-    resolved without importing settings (no DB touch).
-
-    Resolves `$MEIVA_HOME` via `base.paths.home.resolve_meiva_home` — the same
-    resolution every other Meiva process uses, still without touching `Settings`."""
-    return resolve_meiva_home().name.lstrip(".") or "meiva"
-
-
-def downloads_root(capability: str) -> Path:
-    """`~/Downloads/meiva_<home-label>_web-ai/<capability>/` — the landing dir for a
-    capability's artifacts, created on demand."""
-    root = Path("~/Downloads").expanduser() / f"meiva_{_cluster()}_{_GROUP}" / capability
+# meiva:note
+# `~/Downloads/meiva_<home-label>_web-ai/<capability>/`, created on demand.
+def downloads_root(capability: str, *, places: Places) -> Path:
+    root = capability_dir(places, capability)
     root.mkdir(parents=True, exist_ok=True)
     return root
 
 
+# meiva:note
+# The local-time `YYYYmmdd-HHMMSS` stamp for naming a run's output directory, read from the clock now.
 def now_stamp() -> str:
-    """Local-time `YYYYmmdd-HHMMSS` stamp for naming a run's output dir."""
-    return _dt.datetime.now().astimezone().strftime("%Y%m%d-%H%M%S")
+    return format_stamp(_dt.datetime.now().astimezone())

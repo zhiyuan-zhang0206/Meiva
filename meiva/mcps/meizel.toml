@@ -1,4 +1,4 @@
-exports = ["config.py"]
+exports = ["config.py", "tests"]
 
 [uses]
 "__init__.py" = ["_browser.py", "_clients.py", "_tools.py", "config.py"]

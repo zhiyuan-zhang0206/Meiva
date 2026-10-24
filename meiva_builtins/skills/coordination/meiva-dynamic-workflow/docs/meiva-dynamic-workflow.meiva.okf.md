@@ -24,9 +24,12 @@ stores intent and peer receipts, preserves validated task/input-matching results
 and stops on ambiguous dispatch instead of automatically repeating remote work.
 Local file writes and remote spawn are not atomic: arbitrary-crash exactly-once
 execution is not claimed. Known assignments require deliberate reconciliation or
-retry, not a missing-file loop. A dispatch failure stops before waiting.
+retry, not a missing-file loop. A dispatch failure stops before waiting. What a batch needs (validated results, known peers, tasks still to
+dispatch, or a refusal) is `plan_dispatch` over the receipts and the result files' texts;
+`run` reads, executes that plan, and writes each receipt.
 
-`references/gather_files.py` wakes at file-existence checkpoints. Readiness must
+`references/gather_files.py` wakes at file-existence checkpoints; its placeholders are read once into a
+`Checkpoint` value that `landed`, `threshold` and `wake_message` take. Readiness must
 be followed by identity, version, schema, and domain-evidence validation. Results
 are written atomically, completed artifacts retained, and watcher IDs recorded
 for re-entry. Blockers, budget decisions, and handoffs still reach the responsible

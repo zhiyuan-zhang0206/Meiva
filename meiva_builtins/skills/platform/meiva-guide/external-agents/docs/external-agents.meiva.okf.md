@@ -51,6 +51,19 @@ with `--remote`, and `codex_app_server=<endpoint>` printed so a takeover request
 can record it (`--codex-remote`) and the relay delivers into the same server. Notifications
 use non-resurrecting system notes.
 
+## Supervision verdicts
+
+`scripts/watch_work.py` is one self-contained file (an agent copies it into a watcher, so it
+imports no sibling), and its decisions are plain functions over values: `generic_verdict`
+(a wake-only watcher: baseline, deleted file, hard limit, new or unchanged actionable status,
+stall, heartbeat) and `canonical_verdict` (a generation-owning supervisor: the terminal reason,
+a current `NEED_INPUT`, a stall), both over a `Beat` (what the poll saw and how long ago) and a
+`Cadence` (the poll, stall, heartbeat and hard-limit seconds, defaulting to the constants an
+agent raises for a slow model). The shell reads the work file, the owner record, the gateway
+and the PTY, executes the verdict, and reads each clock once per beat. A gateway that is
+unreachable or answers 5xx cannot prove the owner dead, so the owner counts as alive and the
+outage is reported once and its end once; any other refusal ends the supervisor loudly.
+
 ## Published copies
 
 `meiva start` publishes this sub-skill's parent guide and `impersonator-guide`

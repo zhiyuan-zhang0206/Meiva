@@ -32,7 +32,7 @@ Bare IDs are resolved offline; handles / URLs cost one yt-dlp call to resolve.
 ```python
 import os
 import sys
-sys.path.insert(0, os.path.join(os.environ["MEIVA_HOME"], "skills", "web-sources", "youtube", "reference"))
+sys.path.insert(0, os.path.join(os.environ["MEIVA_HOME"], "skills", "web-sources", "youtube", "scripts"))
 import feed
 
 # Follow a channel: incremental pull of new items, each fetched to raw mirror + projected S1.
@@ -153,5 +153,5 @@ Treat yt-dlp occasional breakage as a **known maintenance tax**, not a one-time 
   will truncate to `initial_limit`; to fill the middle part, increase `max_scan` or use
   `backfill=True` to backfill the whole segment.
 - **transcript is empty but video has captions**: just published a few minutes ago, auto captions
-  not yet generated; or captions language is not en — pass `prefer_lang` to `_fetch_transcript`
+  not yet generated; or captions language is not en — pass `prefer_lang` to `feed.fetch`
   to try the source language.

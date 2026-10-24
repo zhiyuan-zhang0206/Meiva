@@ -1,2 +1,4 @@
+exports = ["feed.py"]
+
 [purity]
 "feed.py" = "strict"
