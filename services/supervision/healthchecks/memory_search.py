@@ -9,10 +9,11 @@ from base.daemon.health import DaemonProbe
 _TIMEOUT_S = 3.0
 
 
-def post_search(uri: str, *, embedding_name: str) -> dict[str, object] | DaemonProbe:
-    """One POST /search with a zero vector — the body dict when it
-    answered, or the not-alive verdict that trying produced (fail
-    closed: any failure means "not alive", per the module docstring)."""
+# meiva:note
+# One POST /search with a zero vector returns the raw decoded JSON, or the down
+# verdict from an HTTP/decoding failure. The verdict owner validates the body
+# shape; provider configuration errors fail before the request.
+def post_search(uri: str, *, embedding_name: str) -> object:
     import httpx
 
     from services.derived.memory_indexer.embeddings.factory import get_descriptor
@@ -31,11 +32,13 @@ def post_search(uri: str, *, embedding_name: str) -> dict[str, object] | DaemonP
 
 
 # meiva:note
-# The verdict on one search answer: alive only for a body that carries a `hits` payload, since a
-# foreign process answering 200 on the port is not the search service.
-def search_verdict(answer: dict[str, object] | DaemonProbe) -> DaemonProbe:
+# The verdict on one search answer: only a JSON object can carry the service's
+# `hits` member. Membership in a string or array is not protocol evidence.
+def search_verdict(answer: object) -> DaemonProbe:
     if isinstance(answer, DaemonProbe):
         return answer
+    if not isinstance(answer, dict):
+        return DaemonProbe.down("POST /search answered without an object payload")
     if "hits" in answer:
         return DaemonProbe.up("POST /search answered with a hits payload")
     return DaemonProbe.down("POST /search answered without a hits payload")

@@ -17,8 +17,10 @@ def test_probe_up_when_search_answers_with_hits() -> None:
 
 
 def test_probe_down_when_search_fails() -> None:
-    result = hc.search_verdict(DaemonProbe.down("connection refused"))
+    observed = DaemonProbe.down("connection refused")
+    result = hc.search_verdict(observed)
 
+    assert result is observed
     assert result.alive is False
     assert "connection refused" in result.detail
 
@@ -64,8 +66,8 @@ def test_unknown_provider_fails_before_search_request() -> None:
         (200, b'{"nope": 1}', False, "without a hits payload"),
         (500, b"", False, "POST /search failed (HTTPStatusError:"),
         (200, b"not-json", False, "POST /search failed (JSONDecodeError:"),
-        (200, b"null", False, "protocol probe failed:"),
-        (200, b"42", False, "protocol probe failed:"),
+        (200, b"null", False, "without an object payload"),
+        (200, b"42", False, "without an object payload"),
     ],
 )
 def test_bound_probe_preserves_protocol_verdicts(
@@ -85,3 +87,21 @@ def test_bound_probe_rejects_unknown_provider_before_network_io() -> None:
             hc.memory_search_probe(uri=service.url, embedding_name="unknown-provider")
 
         assert service.requests == []
+
+
+@pytest.mark.parametrize("payload", ["hits", ["hits"], None, 42])
+def test_search_probe_rejects_non_object_json_even_when_it_contains_hits(payload: object) -> None:
+    with HttpStub(body=json.dumps(payload).encode()) as service:
+        result = hc.memory_search_probe(uri=service.url, embedding_name="gemini")
+
+    assert result.alive is False
+    assert result.terminal is False
+    assert result.detail == "POST /search answered without an object payload"
+
+
+@pytest.mark.parametrize("hits", [[], None, "unchanged-payload"])
+def test_object_hits_keeps_the_existing_presence_contract(hits: object) -> None:
+    with HttpStub(body=json.dumps({"hits": hits}).encode()) as service:
+        result = hc.memory_search_probe(uri=service.url, embedding_name="gemini")
+
+    assert result.alive is True
