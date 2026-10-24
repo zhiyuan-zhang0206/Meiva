@@ -115,6 +115,7 @@ TREE_SCAN_TESTS = frozenset(
         "tests/contracts/test_db_check_enum_sync.py",
         "tests/harness/test_pool_keepalives.py",
         "tests/harness/test_env_guard_canary.py",
+        "scripts/ci/tests/test_harness_imports.py",
     }
 )
 

@@ -29,7 +29,9 @@ The selector is [scripts/ci/test_selector.py](../../../scripts/ci/test_selector.
 stdlib-only and consumes the shared runtime dependency facts in
 `scripts.structure.imports.facts`. It follows imports transitively through application
 modules, test helpers and imported tests, and adds the actual pytest fixture bindings:
-root/local conftests, literal `pytest_plugins`, and the shared `path_scopes.toml` reader.
+nested conftests, literal `pytest_plugins` of any conftest below the root, and the shared
+`path_scopes.toml` reader. The root `conftest.py`, its `pytest_plugins` modules and
+`tests/fixtures/` are global paths and add no per-test edge (see the harness below).
 Each path-scoped binding retains its TOML source as an input, including removed base
 declarations; a missing first-party fixture module reports incomplete impact at that source.
 Relative imports, finite dynamic imports, literal Python subprocess modules/code and
@@ -43,7 +45,7 @@ can reset a joined path, and parent traversal can enter the checkout. Placement
 subject policies do not prune this runtime impact graph. The selector never imports
 application code or executes test code.
 
-Global fixture dependencies can therefore reach most tests. This is conservative
+Fixture dependencies below the root can still reach many tests. This is conservative
 runtime coupling: the selector keeps those edges rather than removing them to produce a
 smaller subset, and the subset that results, possibly most of the suite, still runs as
 SELECTED. Two kinds of gap keep a test in every candidate subset (its location and reason
@@ -197,6 +199,19 @@ population was red on tests/contracts/test_lint_event_kinds.py). Name a new scan
 `test_lint_*.py` to join automatically, or extend `TREE_SCAN_TESTS`;
 tests/scripts/test_test_selector_contract.py guards completeness and staleness.
 
+The harness is the Python every pytest process loads before any test: the root `conftest.py`,
+the modules it lists in `pytest_plugins` (with their package initializers) and the
+`tests/` modules they import in turn. A change to the harness is global (FULL), and the selector
+does not also charge its production imports to each test: counting them made 327 inputs
+(`base.log`, `base.config`, the telemetry and supervision modules the fixtures import lazily)
+reach all of the suite, so any change to one of them selected everything. What the
+selector gives up is the signal that a production change broke the harness's own imports, so
+`scripts/ci/tests/test_harness_imports.py` restores it directly: `harness_imports.py` imports
+every first-party module and name the harness imports, at any depth (static imports, so a broken
+one fails collection), and the test asserts that list equals what the harness really imports. It
+is a tree-scan pin, and it also runs in the static lane on every backend change. Behavior of the
+harness's production dependencies is covered by the merge queue's full run, as for every subset.
+
 The documentation predicate reuses base.deploy.git.repo_change.is_doc_path, the same
 owner as CI's frontend/backend classifier. It recognizes the existing project doc
 axes and top-level Markdown, plus `.meiva.okf.md` files in a component's `docs/`
@@ -243,7 +258,7 @@ external modules have no repository input to select. Unresolved dynamic inputs r
 explicit unknown evidence. Fixtures registered through `path_scopes.toml` create real
 edges, but an opaque call elsewhere in a plugin remains unknown unless its finite input
 domain is proved; its consumers then join every subset. When an opaque input sits in a
-module that most tests reach, the subset is most of the suite on the current repository; it is not
+module that many tests reach, the subset is large on the current repository; it is not
 evidence that the runtime dependency closure is small or complete.
 
 The graph is rebuilt for every run and no coverage-derived map is committed. Package
@@ -401,3 +416,8 @@ list travels as an artifact instead of an environment string. And two global-pat
 mistook known-confined changes for unknown ones were narrowed (Markdown under a global prefix,
 and `pyproject.toml` tables that only configure a checker); the rest of the global paths are
 unchanged.
+
+Also 2026-10-24: the selector stopped counting the root conftest's import closure against each
+test (it already treated the root conftest, its plugins and `tests/fixtures/` as global), and
+the harness import contract above took over the signal that a production change broke the
+harness's imports.

@@ -14,8 +14,9 @@ import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 from enum import StrEnum
+from typing import Final
 
-from services.supervision.meiva_root.intent_store import RestartFailure
+from services.supervision.meiva_root.intent_store import CallerFacts, IntentSource, RestartFailure
 
 _log = logging.getLogger(__name__)
 
@@ -47,6 +48,73 @@ class UnitFailureFacts:
     intent_running: bool
     restart_failed: RestartFailure | None
     last_error: str | None = None
+    # meiva:note
+    # The intent's provenance and age: which verb set it (`operator` makes a stop an
+    # owned decision) and when. An unattended operator stop is reported from these.
+    intent_source: IntentSource = IntentSource.SELECTION
+    intent_since: float | None = None
+    intent_caller: CallerFacts | None = None
+
+
+# meiva:note
+# How long an operator stop may sit unattended before its silence is the finding (#5611).
+DEFAULT_OPERATOR_STOP_ALARM_S: Final[float] = 6 * 60 * 60.0
+
+
+# meiva:note
+# An explicit operator stop is policy, not failure: it never counts toward the
+# restart budget and never pages while the operator still means it. What it may
+# not do is stay silent forever. On 2026-10-23 an im-bridge stop sat at DEBUG for
+# 14h14m while every alert behind it silently went nowhere, and the caller that
+# asked for it was already unrecoverable (#5611). So: one report per stop record,
+# once the record is older than the alarm age, carrying the caller. Nothing here
+# restarts anything — the finding is that no owner came back.
+def note_operator_stop(
+    unit_id: str,
+    facts: UnitFailureFacts,
+    now: float,
+    alarm_s: float,
+    verdict: str,
+    detail: str,
+    already_reported: float | None,
+) -> float | None:
+    from base.log import logger
+
+    if facts.intent_running or facts.intent_source is not IntentSource.OPERATOR:
+        _log.debug(
+            "[health] unit %s: %s (%s) — expected (operator stop); no action",
+            unit_id,
+            verdict,
+            detail,
+        )
+        return already_reported
+    since = now if facts.intent_since is None else facts.intent_since
+    held_s = max(0.0, now - since)
+    if held_s < alarm_s:
+        _log.debug(
+            "[health] unit %s: %s (%s) — expected (operator stop); no action",
+            unit_id,
+            verdict,
+            detail,
+        )
+        return already_reported
+    if already_reported == since:
+        _log.debug(
+            "[health] unit %s: still held by an operator stop after %.1fh (already reported)",
+            unit_id,
+            held_s / 3600.0,
+        )
+        return already_reported
+    logger.warning(
+        "[health] unit {unit}: held by an operator stop for {held_h:.1f}h and nobody has "
+        "restarted it since — the stop is policy, but no owner came back for it ({caller})",
+        event="root_unit_operator_stop_unattended",
+        unit=unit_id,
+        held_h=held_s / 3600.0,
+        caller="unknown" if facts.intent_caller is None else facts.intent_caller.summary(),
+        stopped_at=since,
+    )
+    return since
 
 
 # meiva:note
