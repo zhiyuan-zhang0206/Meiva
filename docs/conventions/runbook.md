@@ -876,7 +876,7 @@ On development clones, prefer installing from the **main clone**, using its
 stable `.venv`:
 
 ```bash
-.venv/bin/pre-commit install --hook-type pre-commit --hook-type pre-push
+.venv/bin/pre-commit install --hook-type pre-commit --hook-type pre-push --hook-type commit-msg
 ```
 
 When the main clone uses a protected runtime venv without pre-commit, use a
@@ -884,7 +884,7 @@ stable user-level runner instead; run the install command from the main clone:
 
 ```bash
 env -u VIRTUAL_ENV uv tool install pre-commit
-~/.local/bin/pre-commit install --hook-type pre-commit --hook-type pre-push
+~/.local/bin/pre-commit install --hook-type pre-commit --hook-type pre-push --hook-type commit-msg
 ```
 
 `git rebase --continue` never runs the commit hook, so a conflict resolved with the
@@ -901,7 +901,10 @@ Push with `scripts/hooks/push.sh` when the hook output can be large. OpenSSH set
 never blocks, and the wrapper redirects there and retries once. Bypassing with
 `--no-verify` is not a repair.
 
-The configuration also makes plain `pre-commit install` install both stages.
+The configuration also makes plain `pre-commit install` install all three stages. The
+`commit-msg` stage runs the [diff hints](../../scripts/lint/docs/diff-hints/diff-hints.meiva.okf.md)
+against the message being written; the pre-push stage runs them again over the branch, so a
+clone without the `commit-msg` hook still cannot push an unanswered hint.
 Never install from an ephemeral worktree: all worktrees of a clone share
 `git rev-parse --git-common-dir`'s `hooks/` directory, and pre-commit writes the
 installing interpreter's absolute path into `INSTALL_PYTHON`. Deleting that

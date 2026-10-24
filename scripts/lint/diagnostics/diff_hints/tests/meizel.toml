@@ -1,0 +1,2 @@
+[uses]
+"test_detectors.py" = ["support.py"]
