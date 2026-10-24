@@ -18,12 +18,13 @@ failure with an environment template instead of a raw traceback.
 
 from __future__ import annotations
 
+import argparse
 import os
 import subprocess
 import sys
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from pydantic import ValidationError
 
@@ -37,9 +38,10 @@ from base.native_process.os_platform import (
 # Only the settings-free parser composition entry is imported here. Domain
 # adapters lazy-import runtime commands when their bound handler is dispatched.
 from cli import parsers
-from cli.startup_support import init_cli_logging, print_settings_load_failure
+from cli.startup.log_sinks import cli_log_name
+from cli.startup.settings_failure import settings_failure_text
 
-__all__ = ["entry", "main", "run_command"]
+__all__ = ["bind_init_inputs", "entry", "main", "print_settings_load_failure", "run_command"]
 
 # Settings-lite verbs — they must construct Settings while the gateway is down
 # (stop and status must remain available for recovery inspection), so
@@ -69,6 +71,13 @@ _LITE_VERBS = frozenset(
         "permissions",
     }
 )
+
+
+# meiva:note
+# Print the env template an unconfigured home's Settings failure needs; the exit status.
+def print_settings_load_failure(e: ValidationError) -> int:
+    print(settings_failure_text(e), file=sys.stderr)
+    return 1
 
 
 def normalize_process_profile() -> None:
@@ -108,6 +117,28 @@ def _opt_into_lite_config(args_in: list[str]) -> None:
     ):
         os.environ.setdefault("MEIVA_CONFIG_FETCH", "skip")
         _deliver_lite_api_token()
+
+
+# meiva:note
+# Hand `meiva init` the host facts of its caller, the process facts beyond its site.
+#
+# Init reads none of them itself: the caller's tool directories and which ports of the
+# fixed table something already holds. A `--ssl-cert-file` is pinned into the process
+# before dispatch because the gateway join that follows dials with it.
+def bind_init_inputs(args: argparse.Namespace) -> None:
+    from base import cluster
+    from cli.startup.service_path import CallerHost
+
+    table = cast("dict[str, int]", cluster.new_home_ports())
+    args.caller_host = CallerHost(
+        service_path=os.environ.get("MEIVA_SERVICE_PATH"),
+        path=os.environ.get("PATH", ""),
+        virtual_env=os.environ.get("VIRTUAL_ENV"),
+        prefix_venv=sys.prefix if sys.prefix != sys.base_prefix else None,
+        occupied_ports=frozenset(port for port in table.values() if not cluster.port_free(port)),
+    )
+    if args.ssl_cert_file is not None:
+        os.environ["SSL_CERT_FILE"] = args.ssl_cert_file
 
 
 def _deliver_lite_api_token() -> None:
@@ -183,21 +214,29 @@ def run_command(
     # the home (`cli.preflight.require_own_checkout`).
     from cli.preflight import require_own_checkout
 
-    rc = require_own_checkout(args_in, Path(__file__).resolve().parents[1])
+    checkout = Path(__file__).resolve().parents[1]
+    rc = require_own_checkout(args_in, checkout)
     if rc is not None:
         return rc
     _opt_into_lite_config(args_in)
 
     children = [] if retained_children is None else retained_children
     args = parsers.parse_args(argv, retained_children=children)
+    if args_in[:1] in (["init"], ["start"]):
+        # meiva:note
+        # The home and checkout init and start act on are read here, once, behind the gate above.
+        from base.paths.home import resolve_meiva_home
+        from cli.start_runtime import HomeSite
+
+        args.site = HomeSite(resolve_meiva_home().resolve(), checkout)
     if args_in[:1] == ["init"]:
+        bind_init_inputs(args)
         return args.func(args)
     if args_in[:1] == ["start"]:
-        from base.paths.home import resolve_meiva_home
         from cli.start_identity import require_initialized
 
         try:
-            require_initialized(resolve_meiva_home().resolve())
+            require_initialized(args.site.home)
         except (ValueError, TypeError, RuntimeError, OSError) as exc:
             print(f"meiva start: {exc}", file=sys.stderr)
             return 1
@@ -217,7 +256,9 @@ def run_command(
     args.producer = producer
     try:
         if args_in[:1] not in (["init"], ["start"]):  # these two open their own, after admission
-            init_cli_logging(args_in, initialize=producer.initialize_logging)
+            sink = cli_log_name(args_in)
+            if sink is not None:
+                producer.initialize_logging(sink)
         return args.func(args)
     except LockTimeoutError as exc:
         print(

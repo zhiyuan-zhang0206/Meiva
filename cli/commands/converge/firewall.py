@@ -28,13 +28,15 @@ from __future__ import annotations
 
 import contextlib
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 from base.cluster.machine import MachineIdentity, MachineNameMissing
 from base.host.system import macos_firewall as fw
 from base.host.system.hostport import Host
-from base.host.system.macos_firewall import FirewallAudit, FirewallVerdict, audit_allowlist
-from base.paths import meiva_home
+from base.host.system.macos_firewall import FirewallAudit, FirewallRepair, FirewallVerdict
+from base.paths import otel_collector_binary
+from cli.commands.converge.plans.firewall_report import converge_summary_lines
 from cli.commands.converge.spec import ConvergeCtx
 
 
@@ -67,7 +69,6 @@ def serving_binaries(roles: frozenset[str], *, home: Path) -> tuple[Path, ...]:
     real one.
     """
     from base.cluster.dataplane.pg_tools import pg_tool
-    from base.paths import otel_collector_binary
 
     candidates = [Path(sys.executable)]
     if "gateway" in roles:
@@ -82,7 +83,7 @@ def serving_binaries(roles: frozenset[str], *, home: Path) -> tuple[Path, ...]:
 
 
 def audit_this_host(
-    roles: frozenset[str], *, machine: MachineIdentity, host: Host
+    roles: frozenset[str], *, home: Path, machine: MachineIdentity, host: Host
 ) -> FirewallAudit:
     """Audit this host's own serving binaries. The one entry point every caller shares.
 
@@ -90,13 +91,47 @@ def audit_this_host(
     it on demand. Same detector, so they can never disagree about whether the
     firewall is the cause.
     """
-
-    required = serving_binaries(roles, home=meiva_home())
+    required = serving_binaries(roles, home=home)
     if not required:
         return FirewallAudit(
             FirewallVerdict.ALLOWED, "no serving binary resolved on this host to audit"
         )
-    return audit_allowlist(required, machine_host=machine.host(), host=host)
+    return fw.audit_allowlist(required, machine_host=machine.host(), host=host)
+
+
+# meiva:note
+# What one pass over the allowlist did: the stale rules pruned, the repair, the target size.
+@dataclass(frozen=True)
+class AllowlistSync:
+    pruned: tuple[Path, ...]
+    repair: FirewallRepair
+    total: int
+
+
+# meiva:note
+# Prune stale manifest-family rules, then allow every missing binary, verifying each.
+#
+# The audit's own missing set plus the full manifest: the audit resolves the running
+# interpreter through the launch helpers (catching a venv the globs do not name), the
+# manifest carries the whole declarative whitelist.
+#
+# Prune before adding: a stale rule still holds its bundle identifier, and macOS 15's ALF
+# daemon silently ignores an --add whose identifier already has a rule (see
+# base.host.system.macos_firewall). Removing the stale rule first lets the replacement
+# version's rule persist in the same pass.
+def sync_allowlist(
+    audit: FirewallAudit, rules: dict[str, bool], *, machine: MachineIdentity, host: Host
+) -> AllowlistSync:
+    wanted = {p.resolve() for p in audit.missing}
+    wanted.update(fw.manifest_paths(machine_name=configured_machine_name(machine), host=host))
+    required = tuple(sorted(wanted, key=str))
+    pruned = fw.prune_stale_rules(rules, host=host)
+    if pruned.removed:
+        refreshed = fw.allowlisted_paths(host=host)
+        if refreshed is not None:
+            rules = refreshed
+    repair = fw.repair_allowlist(required, rules=rules, host=host)
+    return AllowlistSync(pruned.removed, repair, len(required))
 
 
 def ensure_firewall_allowlist(ctx: ConvergeCtx) -> None:
@@ -114,7 +149,9 @@ def ensure_firewall_allowlist(ctx: ConvergeCtx) -> None:
     install, unit not yet configured) is treated as no capabilities and audits
     the interpreter alone.
     """
-    audit = audit_this_host(frozenset(ctx.roles or ()), machine=ctx.machine, host=ctx.host)
+    audit = audit_this_host(
+        frozenset(ctx.roles or ()), home=ctx.meiva_home, machine=ctx.machine, host=ctx.host
+    )
     if audit.verdict is FirewallVerdict.UNREADABLE:
         # Not the defect, and not provably not-the-defect either. Say so once
         # rather than claiming a clean bill of health this step did not establish.
@@ -131,77 +168,12 @@ def ensure_firewall_allowlist(ctx: ConvergeCtx) -> None:
         )
         return
 
-    # The audit's own missing set plus the full manifest: the audit resolves the
-    # running interpreter through the launch helpers (catching a venv the globs
-    # do not name), the manifest carries the whole declarative whitelist.
-    required = {p.resolve() for p in audit.missing}
-    required.update(
-        fw.manifest_paths(machine_name=configured_machine_name(ctx.machine), host=ctx.host)
-    )
-    required = tuple(sorted(required, key=str))
-
-    # Prune before adding: a stale rule still holds its bundle identifier, and
-    # macOS 15's ALF daemon silently ignores an --add whose identifier already
-    # has a rule (see base.host.system.macos_firewall). Removing the stale rule first lets
-    # the replacement version's rule persist in the same pass.
-    pruned = fw.prune_stale_rules(rules, host=ctx.host)
-    if pruned.removed:
-        refreshed = fw.allowlisted_paths(host=ctx.host)
-        if refreshed is not None:
-            rules = refreshed
-        print(
-            f"  · firewall: removed {len(pruned.removed)} stale allow rules",
-            file=sys.stderr,
-        )
-
-    repair = fw.repair_allowlist(required, rules=rules, host=ctx.host)
-
-    if repair.allowed:
-        print(
-            f"  · firewall: allowed {len(repair.allowed)} binaries (no popup on their next bind)",
-            file=sys.stderr,
-        )
-    if repair.failed:
-        report_missing(repair.failed, len(required))
-
-
-def report_missing(missing: tuple[Path, ...], total: int) -> None:
-    """The historical fallback: name the binaries and print the exact commands.
-
-    Reached when direct mutation and the older-macOS `sudo -n` fallback both
-    failed.
-    """
-    print(
-        f"  ! firewall: {len(missing)} of {total} managed binaries have no ALF "
-        "allow rule, so off-box connections to them are dropped while loopback "
-        "still works",
-        file=sys.stderr,
-    )
-    for path in missing:
-        print(f"    - no allow rule: {path}", file=sys.stderr)
-    print(
-        "    left unfixed, off-box peers cannot reach these services (the gateway "
-        "serves loopback, no runner can reach it)",
-        file=sys.stderr,
-    )
-    print(
-        "    fix (this host rejected both direct mutation and the older macOS "
-        "`sudo -n` fallback; paste the commands below):",
-        file=sys.stderr,
-    )
-    print(
-        "    note: if the binary shares its bundle identifier with an already "
-        "allow-listed app (every uv interpreter is identifier `-`, adb is `adb`), "
-        "macOS 15's daemon accepts `sudo socketfilterfw --add` and persists "
-        "nothing — allow the popup on the app's first bind instead, or remove "
-        "the older rule for the same identifier first.",
-        file=sys.stderr,
-    )
-    for path in missing:
-        for verb in ("--add", "--unblockapp"):
-            print(f'      sudo "{fw.SOCKETFILTERFW}" {verb} "{path}"', file=sys.stderr)
-    print(
-        "    then restart the affected service so it re-binds under the new rule "
-        "(an already-bound socket keeps the policy it was accepted under)",
-        file=sys.stderr,
-    )
+    outcome = sync_allowlist(audit, rules, machine=ctx.machine, host=ctx.host)
+    for line in converge_summary_lines(
+        removed=len(outcome.pruned),
+        allowed=len(outcome.repair.allowed),
+        failed=tuple(str(path) for path in outcome.repair.failed),
+        total=outcome.total,
+        tool=fw.SOCKETFILTERFW,
+    ):
+        print(line, file=sys.stderr)

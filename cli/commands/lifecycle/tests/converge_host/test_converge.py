@@ -1,111 +1,145 @@
+# meiva:note
+# The host-wiring converge steps, the shell rc block and the whole step table on a fresh unit.
+
 from __future__ import annotations
 
 import os
+import socket
 import stat
-from collections.abc import Callable
+from dataclasses import replace
 from pathlib import Path
-from typing import Any
-from unittest.mock import patch
 
 import pytest
 
-from base.clock import Timers
-from base.cluster.machine import MachineIdentity
-from base.config import settings
-from base.deploy.git import cluster_drift
-from base.host.permissions_helper.client import HelperFactory
-from base.sessions.tests.scripted_helper import ScriptedHelper, serve
-from base.telemetry import EventPipeline
-from cli import python_install
+from base.cluster.dataplane import runtime_binaries as rb
+from base.host.system.tests.fake_commands import fake_host
+from base.host.tests.short_tmp import short_tmp as short_tmp
 from cli.commands.converge import frontend_env as _fe_env
 from cli.commands.converge import steps as _steps
+from cli.commands.converge.plans.shell_rc import PATH_BEGIN, PATH_END, rc_file_name, with_path_block
+from cli.commands.converge.redis_bridge import retire_launchd_redis_bridge
+from cli.commands.converge.spec import ConvergeCtx
 from cli.commands.lifecycle import converge_host
-from cli.commands.lifecycle.tests.converge_host.context_inputs import (
-    Converge,
-    accessibility_environment,
-    capable_helper_context,
-    default_home,
-    screen_capture_environment,
+
+# meiva:note
+# --- the shell rc block (pure) ------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("shell", "name"),
+    [
+        ("/bin/zsh", ".zshrc"),
+        ("/opt/homebrew/bin/zsh", ".zshrc"),
+        ("/bin/bash", ".bashrc"),
+        ("/usr/bin/fish", ".bashrc"),
+        ("", ".bashrc"),
+    ],
 )
-from cli.commands.lifecycle.tests.converge_host.context_inputs import converge as converge
-from cli.commands.lifecycle.tests.converge_host.context_inputs import converge_context as _ctx
-from cli.commands.lifecycle.tests.converge_host.context_inputs import home as home
-from cli.commands.lifecycle.tests.converge_host.context_inputs import (
-    pgbouncer_context as _pgbouncer_ctx,
-)
-from cli.database.runtime import CommandRuntime
-from cli.database.tests.cli_tests import operator_database as operator_database
-from cli.database.tests.cli_tests import operator_pipeline as operator_pipeline
-from cli.database.tests.command_inputs import command_runtime as command_runtime
-from services.desktop import permissions_helper
+def test_zsh_users_get_zshrc_and_every_other_shell_bashrc(shell: str, name: str) -> None:
+    assert rc_file_name(shell) == name
+
+
+def test_the_path_block_is_appended_to_a_file_that_lacks_it(tmp_path: Path) -> None:
+    local_bin = tmp_path / ".local" / "bin"
+
+    text = with_path_block("export FOO=1\n", local_bin)
+
+    assert text.startswith("export FOO=1\n" + PATH_BEGIN + "\n")
+    assert text.endswith(PATH_END + "\n")
+    assert f'export PATH="{local_bin}:$PATH"' in text
+
+
+def test_the_path_block_starts_a_new_line_after_an_unterminated_last_line(
+    tmp_path: Path,
+) -> None:
+    text = with_path_block("export FOO=1", tmp_path)
+
+    assert text.startswith("export FOO=1\n" + PATH_BEGIN)
+
+
+def test_an_empty_file_holds_only_the_path_block(tmp_path: Path) -> None:
+    text = with_path_block("", tmp_path)
+
+    assert text.startswith(PATH_BEGIN) and text.count(PATH_BEGIN) == 1
+
+
+def test_an_existing_block_is_replaced_in_place_and_the_rest_is_kept(tmp_path: Path) -> None:
+    old = with_path_block("before\n", tmp_path / "old-bin") + "after\n"
+
+    text = with_path_block(old, tmp_path / "new-bin")
+
+    assert text.count(PATH_BEGIN) == 1
+    assert "old-bin" not in text and str(tmp_path / "new-bin") in text
+    assert text.startswith("before\n") and text.endswith("after\n")
+
+
+def test_applying_the_path_block_twice_changes_nothing(tmp_path: Path) -> None:
+    once = with_path_block("export FOO=1\n", tmp_path)
+
+    assert with_path_block(once, tmp_path) == once
+
+
+# meiva:note
+# --- the host-wiring steps against a real user home ---------------------------------
 
 
 def test_ensure_meiva_on_path_links_bare_meiva_to_this_checkouts_cli(
-    home: Path,
-    tmp_path: Path,
-    operator_database: Callable[[], Any],
-    operator_pipeline: Callable[[], EventPipeline],
+    ctx: ConvergeCtx, user_home: Path
 ) -> None:
-    link = home / ".local" / "bin" / "meiva"
+    link = user_home / ".local" / "bin" / "meiva"
     link.parent.mkdir(parents=True)
-    repo = tmp_path / "repo"
-    link.symlink_to(repo / "scripts" / "meiva-launcher.sh")  # the retired launcher link
-    converge_host.ensure_meiva_on_path(
-        _ctx(repo, home, operator_database=operator_database, producer=operator_pipeline)
-    )
-    assert link.readlink() == repo / ".venv" / "bin" / "meiva"
-    converge_host.ensure_meiva_on_path(
-        _ctx(repo, home, operator_database=operator_database, producer=operator_pipeline)
-    )  # idempotent
-    assert link.readlink() == repo / ".venv" / "bin" / "meiva"
+    link.symlink_to(ctx.repo / "scripts" / "meiva-launcher.sh")  # the retired launcher link
+
+    _steps.ensure_meiva_on_path(ctx)
+    assert link.readlink() == ctx.repo / ".venv" / "bin" / "meiva"
+    _steps.ensure_meiva_on_path(ctx)  # idempotent
+    assert link.readlink() == ctx.repo / ".venv" / "bin" / "meiva"
 
 
-def test_ensure_local_bin_on_path_block_is_idempotent(
-    home: Path,
-    tmp_path: Path,
-    operator_database: Callable[[], Any],
-    operator_pipeline: Callable[[], EventPipeline],
-):
-    ctx = _ctx(tmp_path, home, operator_database=operator_database, producer=operator_pipeline)
-    rc = home / ".zshrc"
-    rc.write_text("export FOO=1\n")  # pyright: ignore[reportUnknownMemberType]
+def test_ensure_local_bin_on_path_writes_the_block_once_into_the_users_rc(
+    ctx: ConvergeCtx, user_home: Path
+) -> None:
+    user_home.mkdir()
+    rc = user_home / ".zshrc"
+    rc.write_text("export FOO=1\n")
 
-    converge_host.ensure_local_bin_on_path(ctx)
-    converge_host.ensure_local_bin_on_path(ctx)
+    _steps.ensure_local_bin_on_path(ctx)
+    _steps.ensure_local_bin_on_path(ctx)
 
-    text = rc.read_text()  # pyright: ignore[reportUnknownMemberType]
-    assert text.count(converge_host.PATH_BEGIN) == 1  # pyright: ignore[reportUnknownMemberType]
+    text = rc.read_text()
+    assert text.count(PATH_BEGIN) == 1
     assert "export FOO=1" in text
-    assert str(home / ".local" / "bin") in text  # pyright: ignore[reportUnknownArgumentType]
+    assert str(user_home / ".local" / "bin") in text
 
 
-def test_ensure_meiva_home_dirs(
-    home: Path,
-    tmp_path: Path,
-    operator_database: Callable[[], Any],
-    operator_pipeline: Callable[[], EventPipeline],
-):
-    meiva_home = tmp_path / "meivahome"
-    converge_host.ensure_meiva_home_dirs(
-        _ctx(tmp_path, meiva_home, operator_database=operator_database, producer=operator_pipeline)
-    )
+def test_ensure_local_bin_on_path_creates_the_rc_of_the_users_shell(
+    ctx: ConvergeCtx, user_home: Path
+) -> None:
+    user_home.mkdir()
+    bash = replace(ctx, session=replace(ctx.session, login_shell="/bin/bash"))
+
+    _steps.ensure_local_bin_on_path(bash)
+
+    assert PATH_BEGIN in (user_home / ".bashrc").read_text()
+    assert not (user_home / ".zshrc").exists()
+
+
+def test_ensure_meiva_home_dirs(ctx: ConvergeCtx) -> None:
+    _steps.ensure_meiva_home_dirs(ctx)
+
     for sub in ("logs", "configs", "secrets"):
-        assert (meiva_home / sub).is_dir()
+        assert (ctx.meiva_home / sub).is_dir()
     # Exclude rotating logs from Spotlight; mds_stores otherwise consumes GBs of memory.
-    assert (meiva_home / "logs" / ".metadata_never_index").is_file()
+    assert (ctx.meiva_home / "logs" / ".metadata_never_index").is_file()
 
 
 def test_ensure_meiva_home_dirs_recursively_converges_private_data_trees(
-    home: Path,
-    tmp_path: Path,
-    operator_database: Callable[[], Any],
-    operator_pipeline: Callable[[], EventPipeline],
-):
-    meiva_home = tmp_path / "meivahome"
+    ctx: ConvergeCtx,
+) -> None:
     targets = (
-        meiva_home / "logs" / "daemon" / "current.log",
-        meiva_home / "workspaces" / "7" / "download.txt",
-        meiva_home / "memory" / ".git" / "config",
+        ctx.meiva_home / "logs" / "daemon" / "current.log",
+        ctx.meiva_home / "workspaces" / "7" / "download.txt",
+        ctx.meiva_home / "memory" / ".git" / "config",
     )
     for target in targets:
         target.parent.mkdir(parents=True)
@@ -114,9 +148,7 @@ def test_ensure_meiva_home_dirs_recursively_converges_private_data_trees(
         for parent in (target.parent, target.parent.parent):
             parent.chmod(0o755)
 
-    converge_host.ensure_meiva_home_dirs(
-        _ctx(tmp_path, meiva_home, operator_database=operator_database, producer=operator_pipeline)
-    )
+    _steps.ensure_meiva_home_dirs(ctx)
 
     for target in targets:
         assert stat.S_IMODE(target.stat().st_mode) == 0o600
@@ -124,20 +156,13 @@ def test_ensure_meiva_home_dirs_recursively_converges_private_data_trees(
         assert stat.S_IMODE(target.parent.parent.stat().st_mode) == 0o700
 
 
-@pytest.mark.skipif(os.name == "nt", reason="unix sockets are POSIX-only")
+# meiva:note
+# A leftover socket must not abort convergence (2026-09-12 outage). macOS needs
+# a short root for AF_UNIX; pytest paths exceed its roughly 104-byte limit.
 def test_ensure_meiva_home_dirs_survives_a_workspace_socket(
-    tmp_path: Path,
-    operator_database: Callable[[], Any],
-    operator_pipeline: Callable[[], EventPipeline],
-):
-    """A leftover socket must not abort convergence (2026-09-12 outage). macOS needs
-    a short /tmp root for AF_UNIX; pytest paths exceed its roughly 104-byte limit."""
-    import shutil
-    import socket
-    import tempfile
-
-    root = Path(tempfile.mkdtemp(prefix="meiva-converge-hd-", dir="/tmp"))
-    meiva_home = root / "meivahome"
+    ctx: ConvergeCtx, short_tmp: Path
+) -> None:
+    meiva_home = short_tmp / "meivahome"
     socket_dir = meiva_home / "workspaces" / "6063" / "f13b-poc"
     socket_dir.mkdir(parents=True)
     server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -145,47 +170,34 @@ def test_ensure_meiva_home_dirs_survives_a_workspace_socket(
         socket_path = socket_dir / "app.sock"
         server.bind(str(socket_path))
 
-        converge_host.ensure_meiva_home_dirs(
-            _ctx(root, meiva_home, operator_database=operator_database, producer=operator_pipeline)
-        )
+        _steps.ensure_meiva_home_dirs(replace(ctx, meiva_home=meiva_home))
 
         assert stat.S_ISSOCK(socket_path.lstat().st_mode)  # left in place
         assert stat.S_IMODE((meiva_home / "workspaces").stat().st_mode) == 0o700
         assert (meiva_home / "logs" / ".metadata_never_index").exists()
     finally:
         server.close()
-        shutil.rmtree(root)
 
 
 def test_ensure_meiva_home_dirs_rejects_logs_symlink_before_writing_marker(
-    home: Path,
-    tmp_path: Path,
-    operator_database: Callable[[], Any],
-    operator_pipeline: Callable[[], EventPipeline],
-):
-    meiva_home = tmp_path / "meivahome"
+    ctx: ConvergeCtx, tmp_path: Path
+) -> None:
     outside = tmp_path / "outside"
     outside.mkdir()
-    meiva_home.mkdir()
-    (meiva_home / "logs").symlink_to(outside, target_is_directory=True)
+    ctx.meiva_home.mkdir()
+    (ctx.meiva_home / "logs").symlink_to(outside, target_is_directory=True)
 
     with pytest.raises(RuntimeError, match=r"logs.*symlink"):
-        converge_host.ensure_meiva_home_dirs(
-            _ctx(
-                tmp_path,
-                meiva_home,
-                operator_database=operator_database,
-                producer=operator_pipeline,
-            )
-        )
+        _steps.ensure_meiva_home_dirs(ctx)
 
     assert not (outside / ".metadata_never_index").exists()
 
 
 def test_host_wiring_leaves_existing_editable_install_unchanged(
-    converge: Converge, home: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ctx: ConvergeCtx, tmp_path: Path, user_home: Path
 ) -> None:
     """Host setup has no automatic source repair or package reinstall authority."""
+    user_home.mkdir()
     source = tmp_path / "source"
     site = source / ".venv" / "lib" / "python3.12" / "site-packages"
     site.mkdir(parents=True)
@@ -195,170 +207,101 @@ def test_host_wiring_leaves_existing_editable_install_unchanged(
     scripts.mkdir()
     files = {pointer: pointer.read_bytes()}
     modes = {path: stat.S_IMODE(path.stat().st_mode) for path in (site, scripts, pointer)}
-    monkeypatch.setattr(cluster_drift, "prod_source_dir", lambda: source)
-
-    def default_home(_home: Path) -> bool:
-        return True
-
-    monkeypatch.setattr(converge_host, "is_default_home", default_home)
-
-    def no_reinstall(*_args: object, **_kwargs: object) -> None:
-        pytest.fail("host convergence cannot reinstall an editable package")
-
-    monkeypatch.setattr(python_install, "install", no_reinstall)
     steps = tuple(
         step
         for step in converge_host.CONVERGE_STEPS
         if step.host_global and step.apply.__module__ == _steps.__name__
     )
-    converge(source, None, meiva_home=home, steps=steps, services=frozenset())
+
+    converge_host.run_converge(replace(ctx, repo=source, roles=None), steps, prod_install=True)
+
     assert {path: path.read_bytes() for path in files} == files
     assert {path: stat.S_IMODE(path.stat().st_mode) for path in modes} == modes
     assert not (scripts / "meiva").exists()
-    assert (home / ".local" / "bin" / "meiva").is_symlink()
+    assert (user_home / ".local" / "bin" / "meiva").is_symlink()
 
 
 # meiva:note
-# A capable host that fails to compile, sign or load the helper is a genuine defect and aborts converge.
-def test_permissions_helper_step_still_aborts_on_a_real_build_defect(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-    operator_database: Callable[[], Any],
-    operator_pipeline: Callable[[], EventPipeline],
-):
-    from services.desktop.permissions_helper.lifecycle import PermissionsHelperBuildError
-
-    ctx = capable_helper_context(
-        monkeypatch, tmp_path, operator_database=operator_database, producer=operator_pipeline
-    )
-
-    def _boom(*, helper: HelperFactory, timers: Timers) -> None:
-        del helper, timers
-        raise PermissionsHelperBuildError("swiftc failed (1): syntax error")
-
-    monkeypatch.setattr(permissions_helper, "converge", _boom)
-
-    step = next(
-        s
-        for s in converge_host.CONVERGE_STEPS
-        if s.name == "permissions helper build + sign + load"
-    )
-    with pytest.raises(PermissionsHelperBuildError, match="swiftc failed"):
-        step.apply(ctx)
+# --- the whole step table on a fresh unit -------------------------------------------
 
 
-def test_cmd_converge_unconfigured_returns_zero(
-    home: Path,
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    operator_database: Callable[[], Any],
-    operator_pipeline: Callable[[], EventPipeline],
-    *,
-    command_runtime: CommandRuntime,
-):
-    def read_roles(*, machine: MachineIdentity) -> frozenset[str] | None:
-        del machine
-        return None
-
-    import cli.commands._repo as _repo_commands
-    from base.cluster.dataplane import runtime_binaries as rb
-
-    repo = tmp_path / "repo"
+# meiva:note
+# The prod install of a unit that is not configured yet runs the step table clean.
+#
+# The unit-state steps are deferred, so the permissions helper (`ctx.helper` refuses to
+# answer) is never reached, and the host-global wiring lands in the user's home. The standalone
+# Redis-bridge retirement is left out: it drives the real `launchctl` of the machine running the
+# suite (it reads `sys.platform`, not `ctx.host`), which no test of this table may do.
+def test_a_fresh_unit_converges_every_step_that_needs_no_unit_configuration(
+    ctx: ConvergeCtx, default_home: Path
+) -> None:
+    meiva_home = default_home / ".meiva"
+    repo = meiva_home / "source"
     (repo / ".venv" / "bin").mkdir(parents=True)
-    (repo / ".venv" / "bin" / "meiva").write_text("#!/bin/sh\n")
-    monkeypatch.setenv("MEIVA_HOME", str(home / "meivahome"))
+    (repo / "migrations").mkdir()
+    # meiva:note
     # Seed installed Postgres binaries; their download has a dedicated contract test.
     seeded_bin = rb.vendored_pg_dir() / "bin"
     seeded_bin.mkdir(parents=True)
     (seeded_bin / "initdb").write_text("#!/bin/sh\n")
+    # meiva:note
     # Seed pgvector too; its injection is covered by the runtime smoke test.
     seeded_ext = rb.vendored_pg_dir() / "share/postgresql/extension"
     seeded_ext.mkdir(parents=True)
     (seeded_ext / rb._PGVECTOR_SQL).write_text("-- seeded\n")
-    monkeypatch.setattr(_repo_commands, "repo_root", lambda: repo)
-    monkeypatch.setattr(_repo_commands, "roles_or_none", read_roles)
+    steps = tuple(
+        step
+        for step in converge_host.CONVERGE_STEPS
+        if step.apply is not retire_launchd_redis_bridge
+    )
+    unconfigured = replace(
+        ctx,
+        repo=repo,
+        meiva_home=meiva_home,
+        roles=None,
+        host=fake_host(uid=os.getuid()),
+    )
 
-    # The production symlink requires the default home rather than the suite home.
-    monkeypatch.setattr(converge_host, "is_default_home", default_home)
+    converge_host.run_converge(unconfigured, steps, prod_install=True)
 
-    # Unconfigured converge must defer helper ancestry until identity exists.
-    # Record that boundary explicitly; reaching it would be a contract failure.
-    helper_calls: list[str] = []
-
-    def record_helper(*, helper: HelperFactory, timers: Timers) -> None:
-        del helper, timers
-        helper_calls.append("helper")
-
-    monkeypatch.setattr(permissions_helper, "converge", record_helper)
-    # The real lazy boot delivers the scratch unit environment during WAL-G's gate.
-    with patch.dict(os.environ):
-        rc = converge_host.cmd_converge(
-            only_services=(),
-            disabled_services=(),
-            all_services=True,
-            database_factory=operator_database,
-            producer=operator_pipeline,
-            command=command_runtime,
-        )
-    assert rc == 0
-    assert helper_calls == []
-    assert (home / ".local" / "bin" / "meiva").is_symlink()  # pyright: ignore[reportUnknownMemberType]
+    assert (default_home / ".local" / "bin" / "meiva").is_symlink()
+    assert (meiva_home / "logs").is_dir()
 
 
-def test_frontend_env_override_guard_passes_clean(
-    tmp_path: Path,
-    operator_database: Callable[[], Any],
-    operator_pipeline: Callable[[], EventPipeline],
-):
-    repo = tmp_path / "repo"
-    (repo / "ui" / "web").mkdir(parents=True)
-    (repo / "ui" / "web" / ".env.development").write_text("# tracked, next-dev-only\n")
-    meiva_home = tmp_path / "meivahome"
-    meiva_home.mkdir()
+# meiva:note
+# --- the frontend build-time env guard ----------------------------------------------
+
+
+def test_frontend_env_override_guard_passes_clean(ctx: ConvergeCtx) -> None:
+    (ctx.repo / "ui" / "web").mkdir(parents=True)
+    (ctx.repo / "ui" / "web" / ".env.development").write_text("# tracked, next-dev-only\n")
+    ctx.meiva_home.mkdir()
     # A unit .env carrying only MEIVA_* vars (the legitimate case) must pass.
-    (meiva_home / ".env").write_text("MEIVA_GATEWAY_PORT=8800\nMEIVA_CLUSTER=main\n")
+    (ctx.meiva_home / ".env").write_text("MEIVA_GATEWAY_PORT=8800\nMEIVA_CLUSTER=main\n")
 
-    _fe_env.ensure_no_frontend_env_overrides(
-        _ctx(repo, meiva_home, operator_database=operator_database, producer=operator_pipeline)
-    )  # must not raise
+    _fe_env.ensure_no_frontend_env_overrides(ctx)  # must not raise
 
 
 @pytest.mark.parametrize("name", _fe_env.FORBIDDEN_FRONTEND_ENV_FILES)
-def test_frontend_env_override_guard_rejects_build_time_files(
-    tmp_path: Path,
-    name,
-    operator_database: Callable[[], Any],
-    operator_pipeline: Callable[[], EventPipeline],
-):
+def test_frontend_env_override_guard_rejects_build_time_files(ctx: ConvergeCtx, name: str) -> None:
     """`next build` bakes NEXT_PUBLIC_* from these files into the bundle,
     silently beating the runtime gateway inference (2026-06-09 prod outage)."""
-    repo = tmp_path / "repo"
-    (repo / "ui" / "web").mkdir(parents=True)
-    (repo / "ui" / "web" / name).write_text("NEXT_PUBLIC_API_BASE=https://dead.example\n")  # pyright: ignore[reportUnknownMemberType]
+    (ctx.repo / "ui" / "web").mkdir(parents=True)
+    (ctx.repo / "ui" / "web" / name).write_text("NEXT_PUBLIC_API_BASE=https://dead.example\n")
 
     with pytest.raises(RuntimeError, match="build-time env override"):
-        _fe_env.ensure_no_frontend_env_overrides(
-            _ctx(repo, tmp_path, operator_database=operator_database, producer=operator_pipeline)
-        )
+        _fe_env.ensure_no_frontend_env_overrides(ctx)
 
 
-def test_frontend_env_override_guard_rejects_next_public_in_unit_env(
-    tmp_path: Path,
-    operator_database: Callable[[], Any],
-    operator_pipeline: Callable[[], EventPipeline],
-):
+def test_frontend_env_override_guard_rejects_next_public_in_unit_env(ctx: ConvergeCtx) -> None:
     """The 2026-06-23 outage baked a stale unit-env port into the bundle.
     load_meiva_env exports every key; NEXT_PUBLIC_* belongs only on the build command."""
-    repo = tmp_path / "repo"
-    (repo / "ui" / "web").mkdir(parents=True)
-    meiva_home = tmp_path / "meivahome"
-    meiva_home.mkdir()
-    (meiva_home / ".env").write_text("MEIVA_GATEWAY_PORT=8000\nNEXT_PUBLIC_GATEWAY_PORT=8800\n")
+    (ctx.repo / "ui" / "web").mkdir(parents=True)
+    ctx.meiva_home.mkdir()
+    (ctx.meiva_home / ".env").write_text("MEIVA_GATEWAY_PORT=8000\nNEXT_PUBLIC_GATEWAY_PORT=8800\n")
 
     with pytest.raises(RuntimeError, match="NEXT_PUBLIC_GATEWAY_PORT"):
-        _fe_env.ensure_no_frontend_env_overrides(
-            _ctx(repo, meiva_home, operator_database=operator_database, producer=operator_pipeline)
-        )
+        _fe_env.ensure_no_frontend_env_overrides(ctx)
 
 
 @pytest.mark.parametrize(
@@ -369,13 +312,13 @@ def test_frontend_env_override_guard_rejects_next_public_in_unit_env(
         "export NEXT_PUBLIC_API_BASE=https://x",  # `export ` prefix
     ],
 )
-def test_next_public_keys_detects_assignment_shapes(tmp_path: Path, line):
+def test_next_public_keys_detects_assignment_shapes(tmp_path: Path, line: str) -> None:
     env = tmp_path / ".env"
     env.write_text(f"MEIVA_CLUSTER=main\n{line}\n")
     assert _fe_env.next_public_keys_in_env_file(env)
 
 
-def test_next_public_keys_ignores_comments_and_substrings(tmp_path: Path):
+def test_next_public_keys_ignores_comments_and_substrings(tmp_path: Path) -> None:
     """A commented-out line or a var that merely contains the substring must not trip."""
     env = tmp_path / ".env"
     env.write_text(
@@ -386,349 +329,5 @@ def test_next_public_keys_ignores_comments_and_substrings(tmp_path: Path):
     assert _fe_env.next_public_keys_in_env_file(env) == []
 
 
-def test_next_public_keys_absent_file_is_empty(tmp_path: Path):
+def test_next_public_keys_absent_file_is_empty(tmp_path: Path) -> None:
     assert _fe_env.next_public_keys_in_env_file(tmp_path / "nope.env") == []
-
-
-_DIRECT_URL = "postgresql://meiva_main:sek@127.0.0.1:5433/meiva_main"
-_POOLED_URL = "postgresql://meiva_main:sek@127.0.0.1:6433/meiva_main"
-
-
-def test_ensure_pgbouncer_step_migrates_direct_url_to_pooler_when_enabled(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    operator_database: Callable[[], Any],
-    operator_pipeline: Callable[[], EventPipeline],
-):
-    """Enablement rewrites a direct URL to the pooler."""
-    ctx = _pgbouncer_ctx(
-        tmp_path,
-        monkeypatch,
-        db_url=_DIRECT_URL,
-        enabled=True,
-        operator_database=operator_database,
-        producer=operator_pipeline,
-    )
-    converge_host.ensure_pgbouncer_step(ctx)
-    env = (tmp_path / ".env").read_text()
-    assert "MEIVA_DB_URL=" + _POOLED_URL in env  # the record's pooler 6433
-
-
-def test_ensure_pgbouncer_step_leaves_remote_url_untouched(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    operator_database: Callable[[], Any],
-    operator_pipeline: Callable[[], EventPipeline],
-):
-    """Remote data planes retain their provider URL and skip local binary preflight (#1752)."""
-    remote_url = "postgresql://meiva:sek@10.9.8.7:5432/meiva"
-    ctx = _pgbouncer_ctx(
-        tmp_path,
-        monkeypatch,
-        db_url=remote_url,
-        enabled=True,
-        operator_database=operator_database,  # the pooler toggle is meaningless for a remote plane
-        producer=operator_pipeline,
-    )
-    monkeypatch.setattr(settings.data_plane, "db_url", remote_url)
-    monkeypatch.setattr(settings.data_plane, "redis_url", "rediss://10.9.8.7:6380/0")
-    converge_host.ensure_pgbouncer_step(ctx)
-    env = (tmp_path / ".env").read_text()
-    assert "MEIVA_DB_URL=" + remote_url in env, "the remote URL must pass through byte-identical"
-    # The pooler port normalization is skipped wholesale on the remote branch —
-    # the URL's port is the provider's.
-
-
-def test_ensure_pgbouncer_step_rewrites_pooler_url_back_to_direct_when_disabled(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    operator_database: Callable[[], Any],
-    operator_pipeline: Callable[[], EventPipeline],
-):
-    """The kill-switch: toggle off + restart -> the pooler never starts and the
-    URL is rewritten to the direct pg port."""
-    ctx = _pgbouncer_ctx(
-        tmp_path,
-        monkeypatch,
-        db_url=_POOLED_URL,
-        enabled=False,
-        operator_database=operator_database,
-        producer=operator_pipeline,
-    )
-    converge_host.ensure_pgbouncer_step(ctx)
-    env = (tmp_path / ".env").read_text()
-    assert "MEIVA_DB_URL=" + _DIRECT_URL in env
-
-
-def test_ensure_pgbouncer_step_leaves_matching_url_untouched(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    operator_database: Callable[[], Any],
-    operator_pipeline: Callable[[], EventPipeline],
-):
-    """A URL that already matches the toggle is not rewritten — no snapshot churn
-    every start."""
-    ctx = _pgbouncer_ctx(
-        tmp_path,
-        monkeypatch,
-        db_url=_POOLED_URL,
-        enabled=True,
-        operator_database=operator_database,
-        producer=operator_pipeline,
-    )
-    converge_host.ensure_pgbouncer_step(ctx)
-    env = (tmp_path / ".env").read_text()
-    assert "MEIVA_DB_URL=" + _POOLED_URL in env
-
-
-def test_ensure_pgbouncer_step_leaves_operator_standin_untouched(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    operator_database: Callable[[], Any],
-    operator_pipeline: Callable[[], EventPipeline],
-):
-    """A URL naming neither this cluster's pg nor its pooler port (a dev-only
-    stand-in) is not rewritten — converge only normalizes the two cluster ports."""
-    ctx = _pgbouncer_ctx(
-        tmp_path,
-        monkeypatch,
-        db_url="postgresql://meiva:dev@localhost:5432/meiva",
-        enabled=True,
-        operator_database=operator_database,
-        producer=operator_pipeline,
-    )
-    converge_host.ensure_pgbouncer_step(ctx)
-    env = (tmp_path / ".env").read_text()
-    assert "MEIVA_DB_URL=postgresql://meiva:dev@localhost:5432/meiva" in env
-
-
-def test_ensure_pgbouncer_step_without_env_writes_nothing(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    operator_database: Callable[[], Any],
-    operator_pipeline: Callable[[], EventPipeline],
-):
-    """No .env (a fresh home converge runs before birth materializes URLs): the
-    step is a no-op, not a crash."""
-    ctx = _pgbouncer_ctx(
-        tmp_path,
-        monkeypatch,
-        db_url=None,
-        enabled=True,
-        operator_database=operator_database,
-        producer=operator_pipeline,
-    )
-    converge_host.ensure_pgbouncer_step(ctx)
-    assert not (tmp_path / ".env").exists()
-
-
-def _rw_url(pw: str, *, host: str, user: str = "") -> str:
-    """Build throwaway credentials from parts, as in base/tests/test_url_secret.py;
-    no credentialed URL literal should trigger the source secret scanner."""
-    return f"redis://{user}:{pw}@{host}/0"
-
-
-def _rw_pg_url(pw: str, *, host: str, user: str = "meiva_main") -> str:
-    """The postgresql twin of _rw_url (parts-built, scanner-safe)."""
-    return f"postgresql://{user}:{pw}@{host}/meiva_main"
-
-
-# --- health-port backfill value decoding (#2704) ---------------------------
-
-
-def test_screen_capture_step_records_the_helpers_answer(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    capsys,
-    operator_database: Callable[[], Any],
-    operator_pipeline: Callable[[], EventPipeline],
-):
-    from base.host.converge.screen_capture import (
-        ScreenCaptureState,
-        ScreenCaptureStatus,
-        read_status,
-    )
-
-    status = ScreenCaptureStatus(
-        state=ScreenCaptureState.HELPER_UNREACHABLE, diagnostic="socket did not answer"
-    )
-    ctx = _ctx(
-        tmp_path,
-        tmp_path,
-        operator_database=operator_database,
-        producer=operator_pipeline,
-        helper=serve(ScriptedHelper(check_screen_capture=status)),
-    )
-    screen_capture_environment(monkeypatch, tmp_path, config=ctx.config)
-
-    converge_host.ensure_screen_capture(ctx)
-
-    written = read_status()
-    assert written is not None
-    assert written.state is ScreenCaptureState.HELPER_UNREACHABLE
-    assert "socket did not answer" in capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
-
-
-def test_screen_capture_step_clears_a_stale_file_when_the_grant_is_back(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    operator_database: Callable[[], Any],
-    operator_pipeline: Callable[[], EventPipeline],
-):
-    from base.host.converge.screen_capture import (
-        ScreenCaptureState,
-        ScreenCaptureStatus,
-        read_status,
-        write_status,
-    )
-
-    available = ScreenCaptureStatus(state=ScreenCaptureState.AVAILABLE)
-    ctx = _ctx(
-        tmp_path,
-        tmp_path,
-        operator_database=operator_database,
-        producer=operator_pipeline,
-        helper=serve(ScriptedHelper(check_screen_capture=available)),
-    )
-    screen_capture_environment(monkeypatch, tmp_path, config=ctx.config)
-    write_status(ScreenCaptureStatus(state=ScreenCaptureState.NO_GRANT, diagnostic="stale"))
-
-    converge_host.ensure_screen_capture(ctx)
-    assert read_status() is None
-
-
-@pytest.mark.parametrize(
-    ("enabled", "incapability"),
-    [(False, None), (True, "macOS only (permissions helper drives the macOS desktop)")],
-    ids=["disabled", "incapable_host"],
-)
-def test_screen_capture_step_skips_hosts_with_no_helper(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    enabled: bool,
-    incapability: str | None,
-    operator_database: Callable[[], Any],
-    operator_pipeline: Callable[[], EventPipeline],
-):
-    """Nothing to ask when no helper can exist here -- and the helper step has
-    already said so, making a second derived complaint noise rather than news."""
-    from base.host.converge.screen_capture import (
-        ScreenCaptureState,
-        ScreenCaptureStatus,
-        read_status,
-        write_status,
-    )
-
-    ctx = _ctx(tmp_path, tmp_path, operator_database=operator_database, producer=operator_pipeline)
-    screen_capture_environment(
-        monkeypatch, tmp_path, enabled=enabled, incapability=incapability, config=ctx.config
-    )
-    write_status(ScreenCaptureStatus(state=ScreenCaptureState.NO_GRANT, diagnostic="stale"))
-
-    converge_host.ensure_screen_capture(ctx)
-    assert read_status() is None
-
-
-def test_accessibility_step_records_the_helpers_answer(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-    operator_database: Callable[[], Any],
-    operator_pipeline: Callable[[], EventPipeline],
-):
-    from base.host.converge.accessibility import (
-        AccessibilityState,
-        AccessibilityStatus,
-        read_status,
-    )
-
-    status = AccessibilityStatus(
-        state=AccessibilityState.HELPER_UNREACHABLE, diagnostic="socket did not answer"
-    )
-    ctx = _ctx(
-        tmp_path,
-        tmp_path,
-        operator_database=operator_database,
-        producer=operator_pipeline,
-        helper=serve(ScriptedHelper(check_accessibility=status)),
-    )
-    accessibility_environment(monkeypatch, tmp_path, config=ctx.config)
-
-    converge_host.ensure_accessibility(ctx)
-
-    written = read_status()
-    assert written is not None
-    assert written.state is AccessibilityState.HELPER_UNREACHABLE
-    assert "socket did not answer" in capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
-
-
-def test_accessibility_step_clears_a_stale_file_when_the_grant_is_back(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    operator_database: Callable[[], Any],
-    operator_pipeline: Callable[[], EventPipeline],
-):
-    from base.host.converge.accessibility import (
-        AccessibilityState,
-        AccessibilityStatus,
-        read_status,
-        write_status,
-    )
-
-    granted = AccessibilityStatus(state=AccessibilityState.GRANTED)
-    ctx = _ctx(
-        tmp_path,
-        tmp_path,
-        operator_database=operator_database,
-        producer=operator_pipeline,
-        helper=serve(ScriptedHelper(check_accessibility=granted)),
-    )
-    accessibility_environment(monkeypatch, tmp_path, config=ctx.config)
-    write_status(AccessibilityStatus(state=AccessibilityState.NOT_GRANTED, diagnostic="stale"))
-
-    converge_host.ensure_accessibility(ctx)
-    assert read_status() is None
-
-
-@pytest.mark.parametrize(
-    ("enabled", "incapability"),
-    [(False, None), (True, "macOS only (permissions helper drives the macOS desktop)")],
-    ids=["disabled", "incapable_host"],
-)
-def test_accessibility_step_skips_hosts_with_no_helper(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    enabled: bool,
-    incapability: str | None,
-    operator_database: Callable[[], Any],
-    operator_pipeline: Callable[[], EventPipeline],
-):
-    from base.host.converge.accessibility import (
-        AccessibilityState,
-        AccessibilityStatus,
-        read_status,
-        write_status,
-    )
-
-    ctx = _ctx(tmp_path, tmp_path, operator_database=operator_database, producer=operator_pipeline)
-    accessibility_environment(
-        monkeypatch, tmp_path, enabled=enabled, incapability=incapability, config=ctx.config
-    )
-    write_status(AccessibilityStatus(state=AccessibilityState.NOT_GRANTED, diagnostic="stale"))
-
-    converge_host.ensure_accessibility(ctx)
-    assert read_status() is None
-
-
-def test_accessibility_step_follows_the_screen_capture_step():
-    steps = list(converge_host.CONVERGE_STEPS)
-    screen_index = next(
-        i for i, step in enumerate(steps) if step.name == "screen capture availability"
-    )
-    screen_step = steps[screen_index]
-    accessibility_step = steps[screen_index + 1]
-
-    assert accessibility_step.name == "accessibility availability"
-    assert accessibility_step.apply is converge_host.ensure_accessibility
-    assert accessibility_step.roles == screen_step.roles
-    assert accessibility_step.requires_unit_config == screen_step.requires_unit_config

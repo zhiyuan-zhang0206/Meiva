@@ -9,6 +9,7 @@
     "test_main_log_init.py",
     "test_plugin_scaffold.py",
     "test_pty_commands.py",
+    "test_start_gate.py",
     "test_stop_parser.py",
 ]
 "base.host.db_authority.tests.generation" = ["."]

@@ -44,6 +44,7 @@ from cli.commands.data_plane import cluster_instance as instance
 from cli.commands.data_plane import pgbouncer as pooler
 from cli.commands.data_plane._pooler_stop import OwnedPooler
 from cli.commands.data_plane.config import DataPlaneConfig
+from cli.commands.data_plane.stop_budget import postgres_fast_budget_s
 from cli.commands.data_plane.stop_waits import (
     PROCESS_CLEANUP_WAIT_S,
     PROCESS_KILL_WAIT_S,
@@ -145,9 +146,8 @@ async def _redis_command(client: Redis, deadline: float, *args: str) -> object:
 # gives the fast shutdown all of it; the escalation legs then overrun the deadline by
 # their own bounded waits, like the shell-session closure's SIGKILL leg.
 def postgres_fast_budget(deadline: float) -> float:
-    left = remaining(deadline)
     reserve = PROCESS_CLEANUP_WAIT_S + PROCESS_KILL_WAIT_S + PROCESS_CLEANUP_WAIT_S
-    return left - reserve if left > reserve else left
+    return postgres_fast_budget_s(remaining(deadline), reserve)
 
 
 async def request_stop(

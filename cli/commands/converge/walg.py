@@ -10,6 +10,14 @@ from __future__ import annotations
 
 from base.cluster.dataplane.walg_binary import ensure_walg_binary
 from base.paths.private_dir import ensure_private_dir
+from cli.commands.converge.plans.walg_plan import (
+    InstallWalgBinary,
+    LoadWalgConfig,
+    PrepareWalgStateDir,
+    RefuseWalg,
+    WalgStep,
+    plan_walg_converge,
+)
 from cli.commands.converge.spec import ConvergeCtx
 from services.backup.walg import config as walg_config
 
@@ -22,13 +30,25 @@ def converge_walg(ctx: ConvergeCtx) -> None:
             wal-g, the download failed its checksum, or the configuration is unusable
             (`WalgConfigError` names the file and the setting, never a value).
     """
-    if not walg_config.enabled(path_reader=lambda: ctx.read_config().view.walg.walg_config_file):
-        return
-    if ctx.read_config().view.data_plane.is_remote:
-        raise RuntimeError(
-            "MEIVA_WALG_CONFIG_FILE is set but this cluster's Postgres is remote-managed: "
-            "WAL archiving needs the locally launched Postgres (unset the key)"
-        )
-    ensure_walg_binary()
-    walg_config.load_walg_config(path_reader=lambda: ctx.read_config().view.walg.walg_config_file)
-    ensure_private_dir(ctx.meiva_home / "backups" / "walg")
+    configured = walg_config.enabled(
+        path_reader=lambda: ctx.read_config().view.walg.walg_config_file
+    )
+    remote_plane = configured and ctx.read_config().view.data_plane.is_remote
+    execute_walg_plan(plan_walg_converge(configured=configured, remote_plane=remote_plane), ctx)
+
+
+# meiva:note
+# Run `plan` in order; the first failing step raises.
+def execute_walg_plan(plan: tuple[WalgStep, ...], ctx: ConvergeCtx) -> None:
+    for step in plan:
+        match step:
+            case RefuseWalg(message=message):
+                raise RuntimeError(message)
+            case InstallWalgBinary():
+                ensure_walg_binary()
+            case LoadWalgConfig():
+                walg_config.load_walg_config(
+                    path_reader=lambda: ctx.read_config().view.walg.walg_config_file
+                )
+            case PrepareWalgStateDir():
+                ensure_private_dir(ctx.meiva_home / "backups" / "walg")

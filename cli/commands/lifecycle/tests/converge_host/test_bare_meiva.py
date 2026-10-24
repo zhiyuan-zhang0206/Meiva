@@ -1,37 +1,34 @@
+# meiva:note
+# The bare `meiva` on PATH belongs to the host's prod install, wired through `converge_host`.
+
 from __future__ import annotations
 
-from collections.abc import Callable
+from dataclasses import replace
 from pathlib import Path
-from typing import Any
 
 import pytest
 
-from base.telemetry import EventPipeline
+from cli.commands.converge.spec import ConvergeCtx
 from cli.commands.lifecycle import converge_host
 from cli.database.runtime import CommandRuntime
-from cli.database.tests.cli_tests import operator_database as operator_database
-from cli.database.tests.cli_tests import operator_pipeline as operator_pipeline
-from cli.database.tests.command_inputs import command_runtime as command_runtime
 
 _CLI_LINK_STEPS = tuple(
     step for step in converge_host.CONVERGE_STEPS if step.name == "meiva on PATH"
 )
 
 
+# meiva:note
+# Converge the `meiva on PATH` step of a unit whose checkout is `<home>/source` by default.
 def _first_start_converge(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    *,
-    prod: bool,
-    existing_target: Path | None = None,
-    operator_database: Callable[[], Any],
-    producer: Callable[[], EventPipeline],
+    ctx: ConvergeCtx,
     command_runtime: CommandRuntime,
-) -> tuple[Path, Path, Path]:
-    user_home = tmp_path / "home"
-    monkeypatch.setenv("HOME", str(user_home))
-    meiva_home = user_home / ".meiva" if prod else user_home / ".meiva-preview"
-    checkout = meiva_home / "source"
+    user_home: Path,
+    *,
+    meiva_home: Path,
+    existing_target: Path | None = None,
+    checkout: Path | None = None,
+) -> tuple[Path, Path]:
+    checkout = meiva_home / "source" if checkout is None else checkout
     checkout.mkdir(parents=True)
     bare_link = user_home / ".local" / "bin" / "meiva"
     if existing_target is not None:
@@ -40,31 +37,22 @@ def _first_start_converge(
     converge_host.converge_host(
         checkout,
         frozenset({"gateway", "agent-runner"}),
-        meiva_home=meiva_home,
         steps=_CLI_LINK_STEPS,
         services=frozenset(),
-        database_factory=operator_database,
-        producer=producer,
-        command=command_runtime,
+        database_factory=ctx.database_factory,
+        producer=ctx.producer,
+        command=replace(command_runtime, home=meiva_home),
     )
-    return checkout, meiva_home, bare_link
+    return checkout, bare_link
 
 
 def test_prod_first_start_links_bare_meiva_to_the_checkout_cli(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    operator_database: Callable[[], Any],
-    operator_pipeline: Callable[[], EventPipeline],
-    *,
-    command_runtime: CommandRuntime,
+    ctx: ConvergeCtx, command_runtime: CommandRuntime, default_home: Path
 ) -> None:
-    checkout, meiva_home, bare_link = _first_start_converge(
-        tmp_path,
-        monkeypatch,
-        prod=True,
-        operator_database=operator_database,
-        producer=operator_pipeline,
-        command_runtime=command_runtime,
+    meiva_home = default_home / ".meiva"
+
+    checkout, bare_link = _first_start_converge(
+        ctx, command_runtime, default_home, meiva_home=meiva_home
     )
 
     assert bare_link.readlink() == checkout / ".venv" / "bin" / "meiva"
@@ -72,44 +60,26 @@ def test_prod_first_start_links_bare_meiva_to_the_checkout_cli(
 
 
 def test_prod_start_repoints_the_retired_launcher_link(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    operator_database: Callable[[], Any],
-    operator_pipeline: Callable[[], EventPipeline],
-    *,
-    command_runtime: CommandRuntime,
+    ctx: ConvergeCtx, command_runtime: CommandRuntime, default_home: Path
 ) -> None:
-    retired = tmp_path / "home" / ".meiva" / "source" / "scripts" / "meiva-launcher.sh"
-    checkout, _, bare_link = _first_start_converge(
-        tmp_path,
-        monkeypatch,
-        prod=True,
-        existing_target=retired,
-        operator_database=operator_database,
-        producer=operator_pipeline,
-        command_runtime=command_runtime,
+    meiva_home = default_home / ".meiva"
+    retired = meiva_home / "source" / "scripts" / "meiva-launcher.sh"
+
+    checkout, bare_link = _first_start_converge(
+        ctx, command_runtime, default_home, meiva_home=meiva_home, existing_target=retired
     )
 
     assert bare_link.readlink() == checkout / ".venv" / "bin" / "meiva"
 
 
 def test_non_prod_first_start_leaves_the_host_link_alone(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    operator_database: Callable[[], Any],
-    operator_pipeline: Callable[[], EventPipeline],
-    *,
-    command_runtime: CommandRuntime,
+    ctx: ConvergeCtx, command_runtime: CommandRuntime, default_home: Path
 ) -> None:
-    prod_cli = tmp_path / "prod" / "source" / ".venv" / "bin" / "meiva"
-    _, meiva_home, bare_link = _first_start_converge(
-        tmp_path,
-        monkeypatch,
-        prod=False,
-        existing_target=prod_cli,
-        operator_database=operator_database,
-        producer=operator_pipeline,
-        command_runtime=command_runtime,
+    prod_cli = default_home / "prod" / "source" / ".venv" / "bin" / "meiva"
+    meiva_home = default_home / ".meiva-preview"
+
+    _, bare_link = _first_start_converge(
+        ctx, command_runtime, default_home, meiva_home=meiva_home, existing_target=prod_cli
     )
 
     assert bare_link.readlink() == prod_cli
@@ -117,20 +87,27 @@ def test_non_prod_first_start_leaves_the_host_link_alone(
 
 
 def test_non_prod_first_start_creates_no_bare_link_when_none_existed(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    operator_database: Callable[[], Any],
-    operator_pipeline: Callable[[], EventPipeline],
-    *,
-    command_runtime: CommandRuntime,
+    ctx: ConvergeCtx, command_runtime: CommandRuntime, default_home: Path
 ) -> None:
-    _, _, bare_link = _first_start_converge(
-        tmp_path,
-        monkeypatch,
-        prod=False,
-        operator_database=operator_database,
-        producer=operator_pipeline,
-        command_runtime=command_runtime,
+    _, bare_link = _first_start_converge(
+        ctx, command_runtime, default_home, meiva_home=default_home / ".meiva-preview"
+    )
+
+    assert not bare_link.exists()
+    assert not bare_link.is_symlink()
+
+
+# meiva:note
+# An uninstalled worktree may resolve to ~/.meiva; its repository still makes it a dev
+# cluster and it must never repoint the production symlink.
+@pytest.mark.parametrize("parent", [".claude/worktrees", ".worktrees"])
+def test_a_dev_worktree_never_links_the_host_even_when_its_home_is_the_default(
+    parent: str, ctx: ConvergeCtx, command_runtime: CommandRuntime, default_home: Path
+) -> None:
+    worktree = default_home / "Meiva" / parent / "feature"
+
+    _, bare_link = _first_start_converge(
+        ctx, command_runtime, default_home, meiva_home=default_home / ".meiva", checkout=worktree
     )
 
     assert not bare_link.exists()
