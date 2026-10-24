@@ -6,6 +6,7 @@ from base.packages.tests.model_catalog import model_catalog as model_catalog
 from base.packages.tests.model_catalog import set_prices as set_prices
 from base.paths.tests.homes import default_home as default_home
 from base.paths.tests.homes import unit_home as unit_home
+from meiva.tests.fixtures.scripted_chat_model import scripted_models as scripted_models
 from meiva.tests.fixtures.sdk import sdk_environment as sdk_environment
 from meiva.tests.fixtures.sdk import sdk_identity as sdk_identity
 from meiva.tests.fixtures.sdk import sdk_metering as sdk_metering

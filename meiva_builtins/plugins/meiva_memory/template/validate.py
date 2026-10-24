@@ -655,24 +655,30 @@ def validate_indexes(bundle: Path) -> list[str]:
     return errors
 
 
-def main() -> int:
+# meiva:note
+# Every finding for the pool at `bundle`, and how many `.md` files were checked.
+def validate_bundle(bundle: Path) -> tuple[list[str], int]:
     errors: list[str] = []
-    errors.extend(validate_structure(_BUNDLE))
-    errors.extend(validate_project_home(_BUNDLE))
-    errors.extend(validate_type_tag(_BUNDLE))
-    errors.extend(validate_indexes(_BUNDLE))
-    errors.extend(validate_factchecks(_BUNDLE))
-    errors.extend(validate_pointers(_BUNDLE))
-    md_files = sorted(_BUNDLE.rglob("*.md"))
-
-    if not md_files:
-        print("No .md files found.", file=sys.stderr)
-        return 1
+    errors.extend(validate_structure(bundle))
+    errors.extend(validate_project_home(bundle))
+    errors.extend(validate_type_tag(bundle))
+    errors.extend(validate_indexes(bundle))
+    errors.extend(validate_factchecks(bundle))
+    errors.extend(validate_pointers(bundle))
+    md_files = sorted(bundle.rglob("*.md"))
 
     for fp in md_files:
         file_errors = validate_file(fp)
         for e in file_errors:
             errors.append(f"{fp.name}: {e}")
+    return errors, len(md_files)
+
+
+def main() -> int:
+    errors, checked = validate_bundle(_BUNDLE)
+    if checked == 0:
+        print("No .md files found.", file=sys.stderr)
+        return 1
 
     if errors:
         print(f"OKF validation failed ({len(errors)} errors):", file=sys.stderr)
@@ -680,7 +686,7 @@ def main() -> int:
             print(f"  {e}", file=sys.stderr)
         return 1
 
-    print(f"OKF validation passed ({len(md_files)} files)")
+    print(f"OKF validation passed ({checked} files)")
     return 0
 
 

@@ -1,12 +1,8 @@
-"""Tests for plugins/meiva_syntax_fix/plugin.py.
-
-Coverage:
-- _fix_chinese_punctuation: convert Chinese punctuation to ASCII
-- _detect_missing_imports: detect missing imports
-- _insert_imports: insert import statements at the correct position
-- _ruff_fix: ruff check --fix (mock subprocess)
-- syntax_fix_before_exec: full pipeline (Chinese punctuation → import → ruff → compile)
-"""
+# meiva:note
+# Tests for plugins/meiva_syntax_fix/plugin.py. Coverage: converting Chinese punctuation to ASCII,
+# detecting missing imports, inserting import statements at the correct position, `ruff check
+# --fix`, and the full `syntax_fix_before_exec` pipeline (Chinese punctuation, imports, ruff,
+# compile).
 
 from typing import Any
 

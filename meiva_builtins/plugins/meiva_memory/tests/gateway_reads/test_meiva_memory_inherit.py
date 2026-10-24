@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import socket
 from pathlib import Path
 from typing import Any
 
@@ -16,6 +17,7 @@ from base.config.tests.configuration import defaults
 from base.host.env.agent_slices import AgentSlices
 from base.packages.plugins.extensions import ExtensionRegistry
 from base.paths import meiva_home
+from meiva.tests.fixtures.gateway_wire import GatewayStub, GatewayWire
 from meiva_builtins.plugins.meiva_memory import inherit
 from meiva_builtins.plugins.meiva_memory.inherited_blocks import (
     INHERITABLE_CLOSE,
@@ -27,7 +29,6 @@ from meiva_builtins.plugins.meiva_memory.inherited_blocks import (
     render_inherited,
     split_ancestors,
 )
-from meiva_builtins.plugins.meiva_memory.tests.gateway_reads.gateway_stub import GatewayStub
 
 OPEN = INHERITABLE_OPEN
 CLOSE = INHERITABLE_CLOSE
@@ -80,8 +81,8 @@ def _row(agent_id: int, machine: str, label: str | None = None, depth: int = 1) 
     }
 
 
-def _chain(gateway: GatewayStub, agent_id: int, *rows: dict[str, Any]) -> None:
-    gateway.reply("GET", f"/api/agents/{agent_id}/born-chain", {"ancestors": list(rows)})
+def _chain(wire: GatewayWire, agent_id: int, *rows: dict[str, Any]) -> None:
+    wire.stub.reply("GET", f"/api/agents/{agent_id}/born-chain", {"ancestors": list(rows)})
 
 
 def _entries(*texts: str, agent_id: int = 7, label: str | None = None) -> list[EntryBlocks]:
@@ -239,10 +240,10 @@ def test_guardrails_can_be_disabled() -> None:
 
 
 def test_a_layer_that_is_off_reads_nothing(
-    gateway: GatewayStub, machine_identity: MachineIdentity
+    wire: GatewayWire, machine_identity: MachineIdentity
 ) -> None:
-    _chain(gateway, 1, _row(600301, machine_identity.name()))
-    clients = gateway.clients()
+    _chain(wire, 1, _row(600301, machine_identity.name()))
+    clients = wire.context.clients
 
     off = _context(clients, machine_identity, memory_inherit_depth=0)
     assert inherit.inherited_memory_note(off) is None
@@ -250,28 +251,28 @@ def test_a_layer_that_is_off_reads_nothing(
     isolated = _context(clients, machine_identity, memory_inherit_depth=1, eval_isolation=True)
     assert inherit.inherited_memory_note(isolated) is None
 
-    assert gateway.received == []
+    assert wire.stub.received == []
 
 
 def test_an_empty_chain_and_a_local_ancestor_without_a_store_yield_no_note(
-    gateway: GatewayStub, machine_identity: MachineIdentity
+    wire: GatewayWire, machine_identity: MachineIdentity
 ) -> None:
-    ctx = _context(gateway.clients(), machine_identity)
+    ctx = _context(wire.context.clients, machine_identity)
 
-    _chain(gateway, 1)
+    _chain(wire, 1)
     assert inherit.inherited_memory_note(ctx) is None
 
-    _chain(gateway, 1, _row(600301, machine_identity.name()))
+    _chain(wire, 1, _row(600301, machine_identity.name()))
     assert inherit.inherited_memory_note(ctx) is None
 
 
 def test_direct_parent_blocks_are_injected(
-    gateway: GatewayStub, machine_identity: MachineIdentity
+    wire: GatewayWire, machine_identity: MachineIdentity
 ) -> None:
     _write_entry(600311, "family-rules", f"private\n\n{_wrap('Report in Chinese.')}\n")
-    _chain(gateway, 1, _row(600311, machine_identity.name(), label="Parent"))
+    _chain(wire, 1, _row(600311, machine_identity.name(), label="Parent"))
 
-    note = inherit.inherited_memory_note(_context(gateway.clients(), machine_identity))
+    note = inherit.inherited_memory_note(_context(wire.context.clients, machine_identity))
 
     assert note is not None
     assert _note_tag(note) == "inherited_memory"
@@ -284,16 +285,16 @@ def test_direct_parent_blocks_are_injected(
 
 
 def test_blocks_render_nearest_first_with_sorted_entries(
-    gateway: GatewayStub, machine_identity: MachineIdentity
+    wire: GatewayWire, machine_identity: MachineIdentity
 ) -> None:
     here = machine_identity.name()
     _write_entry(600321, "b-entry", _wrap("b block"))
     _write_entry(600321, "a-entry", _wrap("a block one", "a block two"))
     _write_entry(600322, "grandparent", _wrap("grandparent block"))
-    _chain(gateway, 1, _row(600321, here, label="Parent"), _row(600322, here, depth=2))
+    _chain(wire, 1, _row(600321, here, label="Parent"), _row(600322, here, depth=2))
 
     note = inherit.inherited_memory_note(
-        _context(gateway.clients(), machine_identity, memory_inherit_depth=2)
+        _context(wire.context.clients, machine_identity, memory_inherit_depth=2)
     )
 
     assert note is not None
@@ -305,16 +306,16 @@ def test_blocks_render_nearest_first_with_sorted_entries(
 
 
 def test_remote_ancestors_are_skipped_and_footered(
-    gateway: GatewayStub, machine_identity: MachineIdentity
+    wire: GatewayWire, machine_identity: MachineIdentity
 ) -> None:
     _write_entry(600341, "local", _wrap("local block"))
     _chain(
-        gateway,
+        wire,
         1,
         _row(600342, "test-elsewhere"),
         _row(600341, machine_identity.name(), depth=2),
     )
-    ctx = _context(gateway.clients(), machine_identity, memory_inherit_depth=2)
+    ctx = _context(wire.context.clients, machine_identity, memory_inherit_depth=2)
 
     note = inherit.inherited_memory_note(ctx)
 
@@ -325,41 +326,51 @@ def test_remote_ancestors_are_skipped_and_footered(
         "Ancestors on other machines (not readable from here): #600342 (test-elsewhere)." in content
     )
 
-    _chain(gateway, 1, _row(600343, "test-elsewhere"))
+    _chain(wire, 1, _row(600343, "test-elsewhere"))
     assert inherit.inherited_memory_note(ctx) is None
 
 
-@pytest.mark.parametrize("failure", ["unrouted", "refused"])
-def test_chain_read_failure_degrades_and_is_not_cached(
-    gateway: GatewayStub, machine_identity: MachineIdentity, failure: str
+def test_an_unrouted_chain_read_degrades_and_is_not_cached(
+    wire: GatewayWire, machine_identity: MachineIdentity
 ) -> None:
-    url = gateway.refused_url() if failure == "refused" else None
-    ctx = _context(gateway.clients(url=url), machine_identity)
+    ctx = _context(wire.context.clients, machine_identity)
 
     assert inherit.inherited_memory_note(ctx) is None
     assert inherit.inherited_memory_note(ctx) is None
 
-    if failure == "unrouted":
-        assert [r.path for r in gateway.received] == ["/api/agents/1/born-chain"] * 2
+    assert [r.path for r in wire.stub.received] == ["/api/agents/1/born-chain"] * 2
+
+
+def test_a_refused_chain_read_degrades_and_is_not_cached(
+    machine_identity: MachineIdentity,
+) -> None:
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        refused = f"http://127.0.0.1:{probe.getsockname()[1]}"
+    with GatewayWire.open(GatewayStub(url=refused)) as unreachable:
+        ctx = _context(unreachable.context.clients, machine_identity)
+
+        assert inherit.inherited_memory_note(ctx) is None
+        assert inherit.inherited_memory_note(ctx) is None
 
 
 def test_chain_is_read_at_each_establishment(
-    gateway: GatewayStub, machine_identity: MachineIdentity
+    wire: GatewayWire, machine_identity: MachineIdentity
 ) -> None:
     _write_entry(600351, "rules", _wrap("fresh block"))
-    _chain(gateway, 1, _row(600351, machine_identity.name()))
-    ctx = _context(gateway.clients(), machine_identity)
+    _chain(wire, 1, _row(600351, machine_identity.name()))
+    ctx = _context(wire.context.clients, machine_identity)
 
     assert inherit.inherited_memory_note(ctx) is not None
     assert inherit.inherited_memory_note(ctx) is not None
 
-    assert [r.path for r in gateway.received] == ["/api/agents/1/born-chain"] * 2
+    assert [r.path for r in wire.stub.received] == ["/api/agents/1/born-chain"] * 2
 
 
-def test_content_is_deterministic(gateway: GatewayStub, machine_identity: MachineIdentity) -> None:
+def test_content_is_deterministic(wire: GatewayWire, machine_identity: MachineIdentity) -> None:
     _write_entry(600361, "rules", _wrap("stable block"))
-    _chain(gateway, 1, _row(600361, machine_identity.name()))
-    ctx = _context(gateway.clients(), machine_identity)
+    _chain(wire, 1, _row(600361, machine_identity.name()))
+    ctx = _context(wire.context.clients, machine_identity)
 
     first = inherit.inherited_memory_note(ctx)
     second = inherit.inherited_memory_note(ctx)
@@ -369,13 +380,13 @@ def test_content_is_deterministic(gateway: GatewayStub, machine_identity: Machin
 
 
 def test_the_size_caps_come_from_the_agents_slices(
-    gateway: GatewayStub, machine_identity: MachineIdentity
+    wire: GatewayWire, machine_identity: MachineIdentity
 ) -> None:
     entry = _write_entry(600371, "big", _wrap("x" * 200))
-    _chain(gateway, 1, _row(600371, machine_identity.name()))
+    _chain(wire, 1, _row(600371, machine_identity.name()))
 
     note = inherit.inherited_memory_note(
-        _context(gateway.clients(), machine_identity, memory_inherit_max_block_chars=50)
+        _context(wire.context.clients, machine_identity, memory_inherit_max_block_chars=50)
     )
 
     assert note is not None
@@ -383,17 +394,17 @@ def test_the_size_caps_come_from_the_agents_slices(
 
 
 def test_the_fork_graft_builds_the_new_agents_own_chain(
-    gateway: GatewayStub, machine_identity: MachineIdentity
+    wire: GatewayWire, machine_identity: MachineIdentity
 ) -> None:
     from meiva_builtins.plugins.meiva_memory import agent_runtime
 
     _write_entry(600401, "rules", _wrap("fork chain block"))
-    _chain(gateway, 5, _row(600401, machine_identity.name(), label="Fork parent"))
+    _chain(wire, 5, _row(600401, machine_identity.name(), label="Fork parent"))
     registry = ExtensionRegistry((("meiva_memory", agent_runtime.contribute()),))
     declared = [note for _plugin, note in registry.context_notes()]
     inherited = next(note for note in declared if note.build is inherit.inherited_memory_note)
 
-    built = inherited.build(_context(gateway.clients(), machine_identity, agent_id=5))
+    built = inherited.build(_context(wire.context.clients, machine_identity, agent_id=5))
 
     assert inherited.on_fork
     assert isinstance(built, HumanMessage)

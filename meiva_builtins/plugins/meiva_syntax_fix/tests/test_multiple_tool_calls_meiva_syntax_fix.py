@@ -3,7 +3,6 @@ from collections.abc import Callable, Iterator
 from datetime import UTC, datetime
 from functools import partial
 from typing import Any
-from unittest.mock import MagicMock
 
 import pytest
 from langchain_core.messages import AIMessage, ToolMessage
@@ -13,7 +12,6 @@ from langgraph.runtime import Runtime
 from agent.graph.exec.node import _exec_node_impl
 from agent.graph.exec.process import SubprocessExecProcess, read_parent_facts
 from agent.graph.interrupt import InterruptEvent
-from agent.hooks.tests.fakes import make_fake_ops_pool
 from agent.state import AgentState
 from base.agents.context import MeivaContext
 from base.agents.context.identity import AgentIdentity
@@ -22,6 +20,7 @@ from base.clock import Clock
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
+from base.events.live.tests.live_capture import idle_publisher
 from base.packages.plugin_providers import build_model_catalog
 from base.packages.tests.model_catalog import inert_keys
 from meiva.tests.fixtures.pin_agent import snapshot_clients
@@ -61,8 +60,7 @@ def runtime_for(database_gate: ProcessDbGate) -> Iterator[Callable[..., Runtime[
     def build(*, llm_override: str | None = None, **pins: Any) -> Runtime[MeivaContext]:
         return Runtime(
             context=MeivaContext(
-                ops_pool=make_fake_ops_pool(),
-                event_publisher=MagicMock(),
+                event_publisher=idle_publisher(),
                 agent=agent_slices(llm_override=llm_override, **pins),
                 db=Database.from_settings(gate=database_gate),
                 bus=EventBus.from_settings(),

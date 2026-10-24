@@ -27,11 +27,11 @@ from base.telemetry.tests.capture.event_capture import EmittedEvents
 from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
 from meiva_builtins.plugins.meiva_fleet.task_maintenance import daemon
 from meiva_builtins.plugins.meiva_fleet.task_maintenance.daemon import run_reminders
-from meiva_builtins.plugins.meiva_fleet.tests.task_registry.notes import TaskNotes, record_notes
-from meiva_builtins.plugins.meiva_fleet.tests.task_registry.seeds import (
+from meiva_builtins.plugins.meiva_fleet.task_maintenance.tests.failing_writes import (
     inserts_failing,
     reminder_counter_failing,
 )
+from meiva_builtins.plugins.meiva_fleet.tests.task_registry.notes import TaskNotes, record_notes
 
 _DAY_S = 86400.0
 

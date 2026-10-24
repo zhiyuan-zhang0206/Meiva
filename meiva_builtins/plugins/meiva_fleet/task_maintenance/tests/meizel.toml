@@ -1,6 +1,6 @@
+exports = ["failing_writes.py"]
+
 [uses]
 "test_daemon_entry.py" = ["pidfile_holder.py"]
-"test_escalation_concurrency.py" = ["test_task_maintenance_escalation.py"]
-
-[debt.first-party-patch]
-"test_task_maintenance_escalation.py#monkeypatch.setattr meiva_builtins.plugins.meiva_fleet.task_maintenance.escalation.insert_inbound_message_in_transaction" = 2
+"test_escalation_concurrency.py" = ["failing_writes.py", "test_task_maintenance_escalation.py"]
+"test_task_maintenance_escalation.py" = ["failing_writes.py"]

@@ -25,8 +25,8 @@ from base.config import settings
 from base.db import Database
 from base.events.live.bus import EventBus, event_bus_config_from_settings
 from base.events.notifications.outbox import republish_pending
-from meiva_builtins.plugins.meiva_fleet.task_maintenance import escalation
 from meiva_builtins.plugins.meiva_fleet.task_maintenance.daemon import run_escalate
+from meiva_builtins.plugins.meiva_fleet.task_maintenance.tests.failing_writes import inserts_failing
 
 _TASK_TITLE = count(1)
 
@@ -196,24 +196,19 @@ def test_delegator_escalation_at_most_once_per_overdue_window(
 def test_delegator_escalation_retries_after_delivery_failure(
     pool: ConnectionPool,
     db_conn: psycopg.Connection,
-    monkeypatch: pytest.MonkeyPatch,
     database: Database,
     event_bus: EventBus,
 ) -> None:
     """A failed digest leaves no marker (no message landed), so the next sweep
     retries; once it lands, later sweeps stay quiet."""
     parent_owner, _owner, tid = stalled_subtask(db_conn)
-    real = escalation.insert_inbound_message_in_transaction
-
-    def unavailable(*args: object, **kwargs: object) -> None:
-        raise psycopg.OperationalError("queue unavailable")
-
-    monkeypatch.setattr(escalation, "insert_inbound_message_in_transaction", unavailable)
-    with pytest.raises(psycopg.OperationalError):
+    with (
+        inserts_failing(db_conn, "inbound_messages"),
+        pytest.raises(psycopg.errors.RaiseException, match="inbound_messages inserts refused"),
+    ):
         run_escalate(pool, database, event_bus, 3)
     assert inbound_messages(db_conn, parent_owner) == []
     assert escalated_at(db_conn, tid) is None
-    monkeypatch.setattr(escalation, "insert_inbound_message_in_transaction", real)
     assert run_escalate(pool, database, event_bus, 3) == 1  # retried and delivered
     assert len(inbound_messages(db_conn, parent_owner)) == 1
     assert run_escalate(pool, database, event_bus, 3) == 0  # marker holds: no third send

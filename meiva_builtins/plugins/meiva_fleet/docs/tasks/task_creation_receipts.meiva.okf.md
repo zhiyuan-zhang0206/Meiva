@@ -40,6 +40,14 @@ The task writer and shared snapshot model are native
 [[base/agents/tasks/docs/creation-transactions.meiva.okf.md|creation transaction primitives]];
 the SDK remains the receipt admission and post-commit owner.
 
+`task_registry.commit_creation` is the transaction half and returns a `CreationCommit`: the
+snapshot, the actor, the events the transaction recorded, and `replayed` when the key matched an
+earlier acceptance. It emits nothing, so a caller that stops after it leaves the state of a
+crash between commit and emission: a committed task whose events were never emitted.
+`publish_creation` is the emission half (the recorded events in order, then the task-board
+refresh; a replay publishes nothing), and `create_in_context` runs the two in sequence. The
+request is built by `_task_requests.py`, a `strict` module, from the caller's own arguments.
+
 A receipt stores the complete originally returned `Task` dataclass snapshot,
 including its rendered timestamp strings. Replay validates all fields and the
 canonical status/priority values without filling missing defaults. It returns a

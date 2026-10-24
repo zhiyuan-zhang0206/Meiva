@@ -7,3 +7,4 @@ from base.packages.tests.model_catalog import set_prices as set_prices
 from meiva.tests.fixtures.sdk import sdk_environment as sdk_environment
 from meiva.tests.fixtures.sdk import sdk_identity as sdk_identity
 from meiva.tests.fixtures.sdk import sdk_metering as sdk_metering
+from meiva_builtins.plugins.lm_google.tests.gemini_server import gemini_server as gemini_server

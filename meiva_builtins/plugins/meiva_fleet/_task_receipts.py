@@ -9,22 +9,11 @@ from base.agents.context import MeivaContext
 from base.api_contracts.idempotency import validate_idempotency_key
 from meiva.sdk_surface import agent_identity
 
-from ._task_update import UNSET_FIELD
-
 
 def update_identity(key: str, *, context: MeivaContext) -> tuple[int, str]:
     """Validate the required key and established actor before mutation admission."""
     validated = validate_idempotency_key(key)
     return agent_identity.require_agent_id(context), validated
-
-
-def update_request(values: dict[str, object]) -> dict[str, object]:
-    """Capture effective inputs before notes acquire a timestamp or parents resolve."""
-    return {
-        name: value
-        for name, value in values.items()
-        if value is not UNSET_FIELD and (value is not None or name == "parent_id")
-    }
 
 
 def replay_update(

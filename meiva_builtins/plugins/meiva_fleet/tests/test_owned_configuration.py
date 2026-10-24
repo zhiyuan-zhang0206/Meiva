@@ -3,24 +3,46 @@ import os
 import sys
 from collections.abc import Generator
 from pathlib import Path
+from typing import Any
 
 import pytest
 
-from base.host.env import bootstrap
 from base.host.env.registry import PLUGIN_CLUSTER_CONFIG_ENV, SERVICE_PLUGIN_CONFIG_ENV
-from base.host.env.tests.env_files import constant, unit_env_path
+from base.host.env.tests.env_files import unit_env_path
 from base.host.proc import run_bounded
 from base.packages.plugins.config_registration import (
     disk_image_path,
     plugin_bootstrap_config,
-    read_plugin_config,
-    read_service_config,
     service_config_packet,
 )
 from base.packages.plugins.flags import UndeclaredFlag, read_declared_flag
-from base.packages.plugins.plugin_errors import InvalidConfigData, SchemaDriftError
 from meiva_builtins.plugins.meiva_fleet.default_config import FleetConfig, contribute
 from meiva_builtins.plugins.meiva_fleet.services import services
+
+_CHILD = Path(__file__).with_name("child_plugin_config.py")
+_REPO_ROOT = Path(__file__).resolve().parents[4]
+_GATEWAY = "http://gateway.invalid:8000"
+_ROLE_AND_PACKET_KEYS = (
+    PLUGIN_CLUSTER_CONFIG_ENV,
+    SERVICE_PLUGIN_CONFIG_ENV,
+    "MEIVA_MACHINE_SERVE_GATEWAY",
+    "MEIVA_MACHINE_SERVE_AGENT_RUNNER",
+    "MEIVA_GATEWAY_URL",
+)
+# meiva:note
+# A unit that serves the gateway owns its own configuration image and never fetches.
+_GATEWAY_UNIT = {
+    "MEIVA_MACHINE_SERVE_GATEWAY": "true",
+    "MEIVA_MACHINE_SERVE_AGENT_RUNNER": "true",
+    "MEIVA_GATEWAY_URL": _GATEWAY,
+}
+# meiva:note
+# A configured pure agent-runner takes the cluster fields from the packet its launcher delivers.
+_PURE_RUNNER = {
+    "MEIVA_CONFIG_FETCH": "skip",
+    "MEIVA_MACHINE_SERVE_AGENT_RUNNER": "true",
+    "MEIVA_GATEWAY_URL": _GATEWAY,
+}
 
 
 @pytest.fixture(autouse=True)
@@ -43,95 +65,85 @@ def write_image(config: FleetConfig) -> Path:
     return path
 
 
-def test_remote_cluster_projection_never_overrides_local_host_gate(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    image = write_image(FleetConfig(task_maintenance_enabled=False, task_escalate_n=99))
-    gateway = FleetConfig(task_escalate_n=7, reduce_context_switch=False).model_dump(mode="json")
-    gateway.pop("task_maintenance_enabled")
-    monkeypatch.setattr(bootstrap, "config_source_is_local", constant(False))
-    monkeypatch.setattr(bootstrap, "should_fetch_from_gateway", constant(True))
-    monkeypatch.setenv(PLUGIN_CLUSTER_CONFIG_ENV, json.dumps({"meiva_fleet": gateway}))
-    actual = read_plugin_config("meiva_fleet", FleetConfig, image)
-    assert actual.task_maintenance_enabled is False
-    assert actual.task_escalate_n == 7
-    assert actual.reduce_context_switch is False
-    monkeypatch.delenv(PLUGIN_CLUSTER_CONFIG_ENV)
-    with pytest.raises(InvalidConfigData, match="lacks cluster"):
-        read_plugin_config("meiva_fleet", FleetConfig, image)
-
-
-_CHILD = Path(__file__).with_name("child_gateway_unit_compose.py")
-_REPO_ROOT = Path(__file__).resolve().parents[4]
-
-
-def test_gateway_unit_without_a_packet_composes_from_its_local_image() -> None:
-    write_image(FleetConfig(task_escalate_n=7, reduce_context_switch=False))
-    env = {key: value for key, value in os.environ.items() if key != PLUGIN_CLUSTER_CONFIG_ENV}
-    env.update(
-        {
-            "MEIVA_MACHINE_SERVE_GATEWAY": "true",
-            "MEIVA_MACHINE_SERVE_AGENT_RUNNER": "true",
-            "MEIVA_GATEWAY_URL": "http://gateway.invalid:8000",
-        }
-    )
+# meiva:note
+# The outcome of composing the fleet configuration in a fresh process whose environment is this
+# test process's, minus the role flags and packets, plus `env`.
+def compose_in_child(mode: str, env: dict[str, str]) -> dict[str, Any]:
+    child_env = {
+        key: value for key, value in os.environ.items() if key not in _ROLE_AND_PACKET_KEYS
+    } | env
     proc = run_bounded(
-        [sys.executable, "-I", str(_CHILD)],
+        [sys.executable, "-I", str(_CHILD), mode],
         cwd=_REPO_ROOT,
-        env=env,
+        env=child_env,
         capture_output=True,
         text=True,
         timeout=60,
     )
     assert proc.returncode == 0, proc.stderr
-    assert "gateway-unit-compose-ok" in proc.stdout
+    return json.loads(proc.stdout.strip().splitlines()[-1])
+
+
+def test_remote_cluster_projection_never_overrides_local_host_gate() -> None:
+    write_image(FleetConfig(task_maintenance_enabled=False, task_escalate_n=99))
+    gateway = FleetConfig(task_escalate_n=7, reduce_context_switch=False).model_dump(mode="json")
+    gateway.pop("task_maintenance_enabled")
+    composed = compose_in_child(
+        "image", _PURE_RUNNER | {PLUGIN_CLUSTER_CONFIG_ENV: json.dumps({"meiva_fleet": gateway})}
+    )["config"]
+    assert composed["task_maintenance_enabled"] is False
+    assert composed["task_escalate_n"] == 7
+    assert composed["reduce_context_switch"] is False
+    refused = compose_in_child("image", _PURE_RUNNER)
+    assert refused["refused"] == "InvalidConfigData"
+    assert "lacks cluster" in refused["message"]
+
+
+def test_gateway_unit_without_a_packet_composes_from_its_local_image() -> None:
+    write_image(FleetConfig(task_escalate_n=7, reduce_context_switch=False))
+    composed = compose_in_child("image", _GATEWAY_UNIT)["config"]
+    assert composed["task_escalate_n"] == 7
+    assert composed["reduce_context_switch"] is False
 
 
 @pytest.mark.parametrize("packet", ['{"meiva_fleet":null}', '{"meiva_fleet":[]}', "[]"])
-def test_invalid_present_projection_is_rejected_even_on_gateway(
-    packet: str, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setattr(bootstrap, "config_source_is_local", constant(True))
-    monkeypatch.setenv(PLUGIN_CLUSTER_CONFIG_ENV, packet)
-    with pytest.raises(TypeError):
-        read_plugin_config("meiva_fleet", FleetConfig, write_image(FleetConfig()))
+def test_invalid_present_projection_is_rejected_even_on_gateway(packet: str) -> None:
+    write_image(FleetConfig())
+    refused = compose_in_child("image", _GATEWAY_UNIT | {PLUGIN_CLUSTER_CONFIG_ENV: packet})
+    assert refused["refused"] == "TypeError"
 
 
-def test_gateway_truth_is_authoritative_and_projection_has_exact_scope(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    image = write_image(FleetConfig(task_escalate_n=7, task_maintenance_enabled=False))
+def test_gateway_truth_is_authoritative_and_projection_has_exact_scope() -> None:
+    write_image(FleetConfig(task_escalate_n=7, task_maintenance_enabled=False))
     packet = json.loads(plugin_bootstrap_config())["meiva_fleet"]
     assert set(packet) == set(FleetConfig.model_fields) - {"task_maintenance_enabled"}
     assert packet["task_escalate_n"] == 7
-    packet["task_escalate_n"] = 99
-    monkeypatch.setenv(PLUGIN_CLUSTER_CONFIG_ENV, json.dumps({"meiva_fleet": packet}))
-    monkeypatch.setattr(bootstrap, "config_source_is_local", constant(True))
-    assert read_plugin_config("meiva_fleet", FleetConfig, image).task_escalate_n == 7
-    packet["task_escalate_n"] = "invalid"
-    monkeypatch.setenv(PLUGIN_CLUSTER_CONFIG_ENV, json.dumps({"meiva_fleet": packet}))
-    with pytest.raises(InvalidConfigData):
-        read_plugin_config("meiva_fleet", FleetConfig, image)
-    packet.pop("task_escalate_n")
-    monkeypatch.setenv(PLUGIN_CLUSTER_CONFIG_ENV, json.dumps({"meiva_fleet": packet}))
-    with pytest.raises(SchemaDriftError):
-        read_plugin_config("meiva_fleet", FleetConfig, image)
+
+    def deliver(delivered: dict[str, object]) -> dict[str, Any]:
+        return compose_in_child(
+            "image",
+            _GATEWAY_UNIT | {PLUGIN_CLUSTER_CONFIG_ENV: json.dumps({"meiva_fleet": delivered})},
+        )
+
+    assert deliver(packet | {"task_escalate_n": 99})["config"]["task_escalate_n"] == 7
+    assert deliver(packet | {"task_escalate_n": "invalid"})["refused"] == "InvalidConfigData"
+    without_field = {name: value for name, value in packet.items() if name != "task_escalate_n"}
+    assert deliver(without_field)["refused"] == "SchemaDriftError"
 
 
-def test_gate_and_daemon_birth_share_one_captured_image(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_gate_and_daemon_birth_share_one_captured_image() -> None:
     image = write_image(FleetConfig(task_maintenance_enabled=False, task_escalate_n=7))
     service = services()[0]
     assert service.config_inputs == (image,)
     assert service.gate is not None and "disabled" in str(service.gate())
     assert service.plugin_config is not None
     name, captured = service.plugin_config
-    monkeypatch.setenv(SERVICE_PLUGIN_CONFIG_ENV, service_config_packet(name, captured))
     write_image(FleetConfig(task_maintenance_enabled=True, task_escalate_n=99))
-    actual = read_service_config("meiva_fleet", FleetConfig)
-    assert actual is not None and actual.task_escalate_n == 7
-    assert actual.task_maintenance_enabled is False
+    actual = compose_in_child(
+        "service", {SERVICE_PLUGIN_CONFIG_ENV: service_config_packet(name, captured)}
+    )["config"]
+    assert actual["task_escalate_n"] == 7
+    assert actual["task_maintenance_enabled"] is False
     assert "disabled" in str(service.gate())
 
 
