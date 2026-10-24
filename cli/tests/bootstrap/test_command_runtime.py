@@ -1,10 +1,8 @@
 import sys
 from pathlib import Path
 
-import pytest
-
 from base.cluster.machine import MachineIdentity
-from base.config import ConfigBoot
+from base.host.proc import run_bounded
 from base.paths import repo_root
 from base.sessions.helperproc import helper_for
 from cli.database.runtime import CommandRuntime
@@ -12,18 +10,41 @@ from cli.database.tests.command_inputs import command_machine as command_machine
 from cli.database.tests.command_inputs import command_runtime as command_runtime
 
 
-def test_root_construction_does_not_prepare_configuration(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    def unexpected_prepare(_config: ConfigBoot) -> None:
-        pytest.fail("constructing an invocation delivered configuration")
+# meiva:note
+# The child's local-source home cannot prepare configuration: construction must still be lazy.
+def test_root_construction_does_not_prepare_configuration(tmp_path: Path) -> None:
+    user_home = tmp_path / "user"
+    user_home.mkdir()
+    home = tmp_path / "home"
+    home.mkdir(mode=0o700)
+    env_file = home / ".env"
+    env_file.write_text("MEIVA_MACHINE_SERVE_GATEWAY=true\n")
+    before = env_file.read_bytes()
 
-    monkeypatch.setattr(ConfigBoot, "prepare", unexpected_prepare)
-    first = CommandRuntime.create(tmp_path)
-    second = CommandRuntime.create(tmp_path)
-    assert first.config is not second.config
-    assert first.machine is not second.machine
-    assert not first.config.prepared and not second.config.prepared
+    child = run_bounded(
+        [
+            sys.executable,
+            "-I",
+            "-B",
+            "-m",
+            "cli.tests.guards.command_runtime_child",
+            str(home),
+        ],
+        cwd=user_home,
+        env={
+            "HOME": str(user_home),
+            "MEIVA_HOME": str(home),
+            "MEIVA_CONFIG_FETCH": "skip",
+            "PATH": "/usr/bin:/bin",
+        },
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+
+    assert child.returncode == 0, child.stderr
+    assert env_file.read_bytes() == before
+    assert sorted(path.name for path in home.iterdir()) == [".env"]
 
 
 def test_reset_reloads_only_this_invocations_identity(
