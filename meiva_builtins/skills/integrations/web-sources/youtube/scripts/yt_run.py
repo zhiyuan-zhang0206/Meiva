@@ -121,9 +121,9 @@ class SyncOptions:
 @dataclass(frozen=True)
 class SyncResult:
     source: Source
-    new_items: list[S1Item]
-    enumerated: list[FeedItem]
-    skipped_ids: list[str]
+    new_items: tuple[S1Item, ...]
+    enumerated: tuple[FeedItem, ...]
+    skipped_ids: tuple[str, ...]
 
 
 def _now_iso() -> str:
@@ -282,7 +282,7 @@ def sync(config: YoutubeConfig, spec: str, options: SyncOptions) -> SyncResult:
         entries, mirrored, backfill=options.backfill, initial_limit=options.initial_limit
     )
     if not options.do_fetch:
-        return SyncResult(source, [], list(plan.enumerated), [])
+        return SyncResult(source, (), plan.enumerated, ())
 
     fetch_options = FetchOptions(with_video=options.with_video)
     new_items: list[S1Item] = []
@@ -297,4 +297,4 @@ def sync(config: YoutubeConfig, spec: str, options: SyncOptions) -> SyncResult:
                     raw_path=raw_path_of(config, item.video_id),
                 )
             )
-    return SyncResult(source, new_items, list(plan.enumerated), list(plan.skipped_ids))
+    return SyncResult(source, tuple(new_items), plan.enumerated, plan.skipped_ids)

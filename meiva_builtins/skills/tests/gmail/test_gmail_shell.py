@@ -355,7 +355,12 @@ def _run_cli(tmp_path: Path, *args: str) -> subprocess.CompletedProcess[str]:
         text=True,
         timeout=30,
         check=False,
-        env={"HOME": str(home), "GMAIL_ACCOUNT": "env@example.com", "PATH": str(tmp_path / "bin")},
+        env={
+            "HOME": str(home),
+            "MEIVA_HOME": str(tmp_path / "cluster-home"),
+            "GMAIL_ACCOUNT": "env@example.com",
+            "PATH": str(tmp_path / "bin"),
+        },
     )
 
 
@@ -390,6 +395,19 @@ def test_cli_reply_dry_run_reports_the_missing_credential_not_a_traceback_from_t
     )
     assert result.returncode != 0
     assert "GmailError: no Gmail app password" in result.stderr
+
+
+# meiva:note
+# The CLI entry looks for the secrets file under the HOME it runs with, like the Keychain
+# entry it substitutes for, and never under the cluster home (MEIVA_HOME): the missing-file
+# error names the path that was tried.
+def test_cli_looks_for_the_password_file_under_home_not_the_cluster_home(tmp_path: Path) -> None:
+    result = _run_cli(
+        tmp_path, "reply", "--message-id", "<test@host>", "--body", "Thanks", "--dry-run"
+    )
+    tried = tmp_path / "home" / ".meiva" / "secrets" / "gmail-app-password"
+    assert f"file {tried} unreadable/missing" in result.stderr
+    assert str(tmp_path / "cluster-home") not in result.stderr
 
 
 # meiva:note

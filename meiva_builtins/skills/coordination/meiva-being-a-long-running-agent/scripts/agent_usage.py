@@ -89,7 +89,7 @@ def facts_of(report: dict[str, Any]) -> BudgetFacts:
     return BudgetFacts(
         recorded_cost_usd=totals["recorded_cost_usd"],
         unpriced_calls=totals["unpriced_calls"],
-        agent_ids=[agent["agent_id"] for agent in report["agents"]],
+        agent_ids=tuple(agent["agent_id"] for agent in report["agents"]),
         lineage=report["lineage"],
         start=report["start"],
         end=report["end"],

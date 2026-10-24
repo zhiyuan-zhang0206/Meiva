@@ -56,7 +56,7 @@ post = feed.fetch("dRsjO-88nBs", with_video=True)   # additionally download vide
 ```
 
 `sync` full process: resolve → enumerate until hitting already mirrored → fetch unmirrored items one by one →
-return `SyncResult` (`new_items` is a list of S1 dicts, `skipped_ids` are the IDs already in mirror that were skipped).
+return `SyncResult` (`new_items` is a tuple of S1 dicts, `skipped_ids` are the IDs already in mirror that were skipped).
 
 ## Output schema
 

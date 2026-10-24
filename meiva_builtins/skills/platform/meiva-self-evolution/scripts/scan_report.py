@@ -30,7 +30,7 @@ BAD_LIST_MAX_CHARS = 1400
 class ScanView:
     path: Path
     days: int
-    counts: dict[str, int] | None
+    counts: Mapping[str, int] | None
     now: datetime
     coverage_floor: float
 
@@ -87,7 +87,7 @@ def _compact_bad_line(rec: dict[str, Any]) -> str:
 
 # meiva:note
 # True when the window is empty only because the TEST- filter removed every run the source produced: a quiet day, not an outage.
-def _is_test_only_window(records: list[dict[str, Any]], counts: dict[str, int] | None) -> bool:
+def _is_test_only_window(records: list[dict[str, Any]], counts: Mapping[str, int] | None) -> bool:
     if records:
         return False
     return bool(counts and counts["seen"] > 0 and counts["excluded_test"] == counts["seen"])
@@ -99,14 +99,14 @@ class Alert(NamedTuple):
 
 
 def alert_verdict(
-    records: Sequence[Mapping[str, object]], counts: dict[str, int] | None, coverage_floor: float
+    records: Sequence[Mapping[str, object]], counts: Mapping[str, int] | None, coverage_floor: float
 ) -> Alert:
     rows = [cast(dict[str, Any], r) for r in records]
     return _verdict(rows, counts, coverage_floor)
 
 
 def _verdict(
-    records: list[dict[str, Any]], counts: dict[str, int] | None, coverage_floor: float
+    records: list[dict[str, Any]], counts: Mapping[str, int] | None, coverage_floor: float
 ) -> Alert:
     if not records:
         if _is_test_only_window(records, counts):
@@ -238,7 +238,7 @@ def _header_lines(records: list[dict[str, Any]], view: ScanView, totals: _Totals
     ]
 
 
-def _no_runs_line(records: list[dict[str, Any]], counts: dict[str, int] | None) -> str:
+def _no_runs_line(records: list[dict[str, Any]], counts: Mapping[str, int] | None) -> str:
     if counts is not None and _is_test_only_window(records, counts):
         return (
             "0 production runs — all "

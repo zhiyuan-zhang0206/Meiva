@@ -3,9 +3,7 @@
 import argparse
 import sys
 from collections.abc import Sequence
-from contextlib import AbstractContextManager
 from dataclasses import dataclass
-from typing import Protocol
 
 from langchain_core.messages import BaseMessage, SystemMessage
 
@@ -31,17 +29,6 @@ def instruction_text(messages: Sequence[BaseMessage]) -> str:
     return "\n\n".join(parts)
 
 
-# meiva:note
-# The part of an attachment this script reads: its native checkpoint snapshot, whose
-# messages carry the inherited instructions.
-class NativeSnapshot(Protocol):
-    messages: Sequence[BaseMessage]
-
-
-class Attached(Protocol):
-    def native_snapshot(self) -> NativeSnapshot: ...
-
-
 @dataclass(frozen=True)
 class Target:
     session_id: int
@@ -49,14 +36,15 @@ class Target:
 
 
 # meiva:note
-# Read native guidance under the existing attachment's authority checks. The attachment
-# is opened by the caller and closed here; closing revalidates the lease, so text is
-# returned only after the lease held through detach. meiva.state also includes external
-# journal replay, so the native snapshot is read separately: a controller's staged
-# messages cannot replace the inherited instructions.
-def read_instructions(attachment: AbstractContextManager[Attached]) -> str:
-    with attachment as attached:
-        return instruction_text(attached.native_snapshot().messages)
+# Read native guidance under the attachment's authority checks. The attachment is opened and
+# closed here, and closing revalidates the lease, so the text is selected and returned only
+# after the lease held through detach. meiva.state also includes external journal replay, so
+# the native snapshot is read separately: a controller's staged messages cannot replace the
+# inherited instructions.
+def read_instructions(target: Target) -> str:
+    with impersonation.attach(target.session_id, agent_id=target.agent_id) as attached:
+        messages: Sequence[BaseMessage] = attached.native_snapshot().messages
+    return instruction_text(messages)
 
 
 # meiva:note
@@ -71,7 +59,7 @@ def parse_target(argv: Sequence[str]) -> Target:
 
 def main(argv: Sequence[str]) -> None:
     target = parse_target(argv)
-    print(read_instructions(impersonation.attach(target.session_id, agent_id=target.agent_id)))
+    print(read_instructions(target))
 
 
 if __name__ == "__main__":

@@ -229,7 +229,7 @@ def _task_source(source: str, spawner: str) -> str:
 
 
 # meiva:link meiva_builtins/skills/platform/meiva-self-evolution/docs/collection.meiva.okf.md
-def _first_human_message(transcript: list[dict[str, str]]) -> str:
+def _first_human_message(transcript: Sequence[dict[str, str]]) -> str:
     for message in transcript:
         content = message.get("content") or ""
         if message.get("type") != "human" or not content.strip():
@@ -242,7 +242,7 @@ def _first_human_message(transcript: list[dict[str, str]]) -> str:
 
 # meiva:link meiva_builtins/skills/platform/meiva-self-evolution/docs/collection.meiva.okf.md
 def _task_prompt(
-    spawner: str, messages: Sequence[Inbound], transcript: list[dict[str, str]]
+    spawner: str, messages: Sequence[Inbound], transcript: Sequence[dict[str, str]]
 ) -> tuple[str, str]:
     for wanted in ("human", "spawner", "schedule"):
         for message in messages:
@@ -341,7 +341,7 @@ def _leak_fields(code_bodies: list[str], agent_id: int, leak_paths: LeakPaths) -
 
 
 def _prompt_fields(
-    spawner: str, inbounds: Sequence[Inbound], transcript: list[dict[str, str]]
+    spawner: str, inbounds: Sequence[Inbound], transcript: Sequence[dict[str, str]]
 ) -> dict[str, Any]:
     per_agent = [message for message in inbounds if not message["is_broadcast"]]
     human_messages = [
@@ -417,11 +417,11 @@ class AgentMeta(NamedTuple):
 class RunInputs:
     agent_id: int
     week: str
-    events: list[Event]
-    log_events: list[Event]
-    inbounds: list[Inbound]
+    events: tuple[Event, ...]
+    log_events: tuple[Event, ...]
+    inbounds: tuple[Inbound, ...]
     meta: AgentMeta
-    transcript: list[dict[str, str]]
+    transcript: tuple[dict[str, str], ...]
     skills_touched: list[str]
     leak_paths: LeakPaths | None = None
     task_receipts: dict[str, int] | None = None
@@ -443,7 +443,7 @@ def build_record(run: RunInputs) -> dict[str, object]:
         "spawner": spawner,
         "model": _mode(stats.models),
         **prompts,
-        "transcript": run.transcript,
+        "transcript": list(run.transcript),
         "final_output": last_message_text or "",
         "turns": stats.turns,
         "tokens_in": stats.tokens_in,

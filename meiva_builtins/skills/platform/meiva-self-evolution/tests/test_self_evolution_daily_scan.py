@@ -444,11 +444,13 @@ def test_scan_passes_include_test_flag_through(
     ]
 
 
-def test_scan_names_the_dataset_after_the_day_it_ran(
+def test_scan_names_the_dataset_after_the_week_it_is_given(
     daily_scan: Any, tmp_path: Path, database: Database
 ) -> None:
     with world.serve_events([]) as server:
-        result = daily_scan.scan(1, env=_env(daily_scan, server, tmp_path, database).collection)
+        result = daily_scan.scan(
+            1, "2026-08-13", env=_env(daily_scan, server, tmp_path, database).collection
+        )
 
     assert result.path == tmp_path / "self_evolution" / "daily" / "2026-08-13.jsonl"
     assert result.records == []

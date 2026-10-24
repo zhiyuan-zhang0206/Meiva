@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
@@ -153,18 +154,30 @@ here = Path(__file__).parent
 with (here / "transcribe.log").open("a") as log:
     log.write(json.dumps(sys.argv[1:]) + "\\n")
 fixture = json.loads((here / "transcribe.json").read_text())
-if "exit" in fixture:
+if fixture["exit_code"] is not None:
     sys.stderr.write(fixture["stderr"])
-    sys.exit(fixture["exit"])
+    sys.exit(fixture["exit_code"])
 print(json.dumps({{"text": fixture["text"]}}))
 """
+
+
+# meiva:note
+# What the stand-in transcription CLI does when it runs: print `text` as JSON, or, when an
+# `exit_code` is given, write `stderr` and exit with that code.
+@dataclass(frozen=True)
+class Transcription:
+    text: str = "whispered text"
+    exit_code: int | None = None
+    stderr: str = ""
+
+
+_WHISPERED = Transcription()
 
 
 class FakeYtdlp:
     def __init__(self, directory: Path) -> None:
         self.directory = directory
         self.fixtures: dict[str, Any] = {"version": "2099.01.01", "json": {}, "subs": {}}
-        self.transcription: dict[str, Any] = {"text": "whispered text"}
 
     def video(self, video_id: str, **subs: str | None) -> FakeYtdlp:
         self.fixtures["json"][_watch(video_id)] = _VIDEO_META
@@ -180,9 +193,9 @@ class FakeYtdlp:
         self.fixtures["json"][url] = meta
         return self
 
-    def config(self, root: Path) -> Any:
+    def config(self, root: Path, transcription: Transcription = _WHISPERED) -> Any:
         (self.directory / "fixtures.json").write_text(json.dumps(self.fixtures))
-        (self.directory / "transcribe.json").write_text(json.dumps(self.transcription))
+        (self.directory / "transcribe.json").write_text(json.dumps(asdict(transcription)))
         ytdlp = self.directory / "yt-dlp"
         ytdlp.write_text(_STAND_IN_YTDLP.format(python=sys.executable))
         ytdlp.chmod(0o755)
@@ -499,7 +512,7 @@ def test_sync_incremental_fetches_all_new(ytdlp: FakeYtdlp, tmp_path: Path) -> N
     _mirror(root, _D)
     r = run.sync(ytdlp.config(root), _CHANNEL, run.SyncOptions())
     assert [i["source_id"] for i in r.new_items] == ["newest12345", "older123456"]
-    assert r.skipped_ids == []
+    assert r.skipped_ids == ()
     assert r.source.enum_playlist == _UPLOADS
     assert (root / "newest12345" / "post.json").exists()
 
@@ -520,7 +533,7 @@ def test_sync_backfill_skips_mirrored_no_cap(ytdlp: FakeYtdlp, tmp_path: Path) -
     _mirror(root, "b1234567890")
     r = run.sync(ytdlp.config(root), _PLAYLIST, run.SyncOptions(backfill=True, initial_limit=1))
     assert [i["source_id"] for i in r.new_items] == ["a1234567890", "c1234567890"]
-    assert r.skipped_ids == ["b1234567890"]
+    assert r.skipped_ids == ("b1234567890",)
 
 
 def test_sync_preview_no_fetch(ytdlp: FakeYtdlp, tmp_path: Path) -> None:
@@ -528,7 +541,7 @@ def test_sync_preview_no_fetch(ytdlp: FakeYtdlp, tmp_path: Path) -> None:
     root = tmp_path / "mirror"
     r = run.sync(ytdlp.config(root), _CHANNEL, run.SyncOptions(do_fetch=False, max_scan=2))
     assert [i.video_id for i in r.enumerated] == [_A, _B]
-    assert r.new_items == [] and not root.exists()
+    assert r.new_items == () and not root.exists()
     listing = next(c for c in ytdlp.calls() if "--flat-playlist" in c)
     assert listing[listing.index("-I") + 1] == "1:2"
     assert all("--version" not in call for call in ytdlp.calls())
@@ -549,7 +562,7 @@ def test_sync_with_nothing_new_does_not_ask_for_the_version(
     root = tmp_path / "mirror"
     _mirror(root, _A)
     r = run.sync(ytdlp.config(root), _CHANNEL, run.SyncOptions())
-    assert r.new_items == []
+    assert r.new_items == ()
     assert ["--version"] not in ytdlp.calls()
 
 
@@ -607,6 +620,7 @@ def test_fetch_without_captions_is_not_an_error(ytdlp: FakeYtdlp, tmp_path: Path
     root = tmp_path / "m"
     post = run.fetch(ytdlp.config(root), _VIDEO, run.FetchOptions())
     assert post["transcript"] is None and post["transcript_kind"] is None
+    assert ytdlp.transcriptions() == []
     assert not (root / _VIDEO / "transcript.txt").exists()
     assert "- **transcript**: none" in (root / _VIDEO / "post.md").read_text()
 
@@ -658,17 +672,17 @@ def test_fetch_does_not_transcribe_without_a_gap_or_the_opt_in(
 
 def test_fetch_whisper_empty_output_leaves_the_gap(ytdlp: FakeYtdlp, tmp_path: Path) -> None:
     ytdlp.video(_VIDEO)
-    ytdlp.transcription = {"text": ""}
-    post = run.fetch(ytdlp.config(tmp_path / "m"), _VIDEO, run.FetchOptions(whisper_fallback=True))
+    config = ytdlp.config(tmp_path / "m", Transcription(text=""))
+    post = run.fetch(config, _VIDEO, run.FetchOptions(whisper_fallback=True))
     assert post["transcript"] is None and post["transcript_kind"] is None
 
 
 def test_fetch_whisper_failure_propagates(ytdlp: FakeYtdlp, tmp_path: Path) -> None:
     ytdlp.video(_VIDEO)
-    ytdlp.transcription = {"exit": 3, "stderr": "OPENAI_API_KEY is not set"}
     root = tmp_path / "m"
+    config = ytdlp.config(root, Transcription(exit_code=3, stderr="OPENAI_API_KEY is not set"))
     with pytest.raises(subprocess.CalledProcessError) as caught:
-        run.fetch(ytdlp.config(root), _VIDEO, run.FetchOptions(whisper_fallback=True))
+        run.fetch(config, _VIDEO, run.FetchOptions(whisper_fallback=True))
     assert "OPENAI_API_KEY" in caught.value.stderr
     assert not root.exists()
 

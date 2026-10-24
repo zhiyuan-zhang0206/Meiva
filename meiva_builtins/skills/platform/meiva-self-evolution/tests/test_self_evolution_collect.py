@@ -48,11 +48,11 @@ def _record(**fields: Any) -> dict[str, Any]:
     values: dict[str, Any] = {
         "agent_id": 1,
         "week": "2026-W99",
-        "events": [],
-        "log_events": [],
-        "inbounds": [],
+        "events": (),
+        "log_events": (),
+        "inbounds": (),
         "meta": record_mod.AgentMeta("user", "completed", "done"),
-        "transcript": [],
+        "transcript": (),
         "skills_touched": [],
     }
     values.update(fields)
@@ -96,7 +96,7 @@ def test_fresh_worker_uses_in_window_spawner_prompt(
     rec = _record(
         agent_id=9,
         week="2026-08-30",
-        inbounds=inbounds[9],
+        inbounds=tuple(inbounds[9]),
         meta=record_mod.AgentMeta("agent:1", "completed", "delivered"),
     )
 
@@ -624,7 +624,7 @@ def test_build_record_surfaces_plugins_activated_skipped() -> None:
         ),
     ]
 
-    rec = _record(events=events)
+    rec = _record(events=tuple(events))
 
     assert rec["plugins_activated_skipped"] == 1
     assert rec["plugins_activated"] == {"meiva_code/hooks/before_exec": 1}
@@ -640,7 +640,7 @@ def test_build_record_well_formed_rows_report_zero_skipped() -> None:
         ),
     ]
 
-    rec = _record(events=events)
+    rec = _record(events=tuple(events))
 
     assert rec["plugins_activated_skipped"] == 0
     assert rec["plugins_activated"] == {"meiva_code/hooks/before_exec": 1}
