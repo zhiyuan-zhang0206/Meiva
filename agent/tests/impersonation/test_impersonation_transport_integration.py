@@ -20,6 +20,7 @@ from agent.tests.impersonation.handoff_inputs import (
     end_external_session,
     handoff_notes,
     inbound_wakes,
+    local_exec_process,
     prepare_graph,
     resume_native,
     stop_takeover_with_exhausted_ack,
@@ -56,6 +57,7 @@ async def test_transport_fault_keeps_native_parked_until_actual_lease_end(
     graph, saver, ctx, config, reset, owner, requested, model_calls = await prepare_graph(
         db_conn,
         aops_pool,
+        exec_process=local_exec_process(),
         config_authority=config_authority,
         clients=handoff_clients,
         database_gate=database_gate,
@@ -129,6 +131,7 @@ async def test_successor_ends_the_takeover_and_resumes_preserved_pending_input(
     graph, saver, ctx, config, reset, owner, requested, model_calls = await prepare_graph(
         db_conn,
         aops_pool,
+        exec_process=local_exec_process(),
         config_authority=config_authority,
         clients=handoff_clients,
         database_gate=database_gate,
@@ -220,6 +223,7 @@ async def test_late_ack_after_delivery_budget_exhaustion_keeps_native_parked(
     graph, saver, ctx, config, reset, owner, requested, model_calls = await prepare_graph(
         db_conn,
         aops_pool,
+        exec_process=local_exec_process(),
         config_authority=config_authority,
         clients=handoff_clients,
         database_gate=database_gate,
@@ -331,6 +335,7 @@ async def test_end_note_resumes_an_empty_queue(
     graph, saver, ctx, config, reset, owner, requested, model_calls = await prepare_graph(
         db_conn,
         aops_pool,
+        exec_process=local_exec_process(),
         config_authority=config_authority,
         clients=handoff_clients,
         database_gate=database_gate,
@@ -411,6 +416,7 @@ async def test_acknowledged_but_unfinished_input_reaches_the_resumed_native(
     graph, saver, ctx, config, reset, owner, requested, model_calls = await prepare_graph(
         db_conn,
         aops_pool,
+        exec_process=local_exec_process(),
         config_authority=config_authority,
         clients=handoff_clients,
         database_gate=database_gate,

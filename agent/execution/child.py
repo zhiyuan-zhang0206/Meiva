@@ -17,8 +17,12 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Literal, Protocol, cast
 
-from agent.execution.delivery_plan import delivers_telemetry, rewrites_result_after_delivery_failure
-from agent.execution.protocol import RequestPayload
+from agent.execution.delivery_plan import (
+    delivers_telemetry,
+    plan_finalize,
+    rewrites_result_after_delivery_failure,
+)
+from agent.execution.protocol import RequestPayload, ResultPayload
 from base.log import logger
 
 WATCHDOG_MARGIN_S = 5.0
@@ -37,6 +41,25 @@ _RESULT_KIND: dict[type[BaseException], Literal["cancelled", "timed_out"]] = {
 # heavy import the exec child defers until its boot, so the child names the capability instead.
 class _FieldSetter(Protocol):
     def set_field(self, name: str, value: object) -> None: ...
+
+
+# meiva:note
+# What the exec child asks of its process clients: the export posture of the event pipeline, a
+# bounded drain of it and the exporter finalization, then the close at exit. `ClientSet` lives
+# behind imports the child defers until its boot, so the child names the capabilities it calls.
+class _DrainReceipt(Protocol):
+    @property
+    def status(self) -> object: ...
+
+
+class _ChildClients(Protocol):
+    def exports_deferred(self) -> bool | None: ...
+
+    def sync_events(self, timeout: float = 5.0) -> _DrainReceipt: ...
+
+    def finalize_events(self) -> None: ...
+
+    def close(self) -> None: ...
 
 
 class _Sdk(Protocol):
@@ -177,7 +200,7 @@ def init_logger(
     producer().defer_exports()
 
 
-def emit_child_boot_timing(child: ChildContext, *, clients: Any, now: float) -> None:
+def emit_child_boot_timing(child: ChildContext, *, clients: _ChildClients, now: float) -> None:
     duration_ms = (now - child.boot_started_at) * 1000
     extra: dict[str, object] = {}
     deferred = clients.exports_deferred()
@@ -230,7 +253,9 @@ def build_state_slot(child: ChildContext, payload: RequestPayload) -> None:
     child.meiva.state_update = {}
 
 
-def _take_result_state_update(child: ChildContext, payload: Any, *, state_injected: bool) -> None:
+def _take_result_state_update(
+    child: ChildContext, payload: ResultPayload, *, state_injected: bool
+) -> None:
     if not state_injected:
         return
     update = child.meiva.state_update
@@ -272,7 +297,7 @@ def apply_oom_preference(env: Mapping[str, str], path: Path) -> int | None:
     return None
 
 
-def run_code(code: str, payload: Any) -> None:
+def run_code(code: str, payload: ResultPayload) -> None:
     from agent.execution.agent_traceback import (
         format_agent_traceback,
         format_full_traceback,
@@ -328,32 +353,35 @@ def run_code(code: str, payload: Any) -> None:
         process_context.bind_context(execution_context)
 
 
-def finalize_telemetry(*, clients: Any = None) -> None:
+def finalize_telemetry(*, clients: _ChildClients | None) -> None:
     if "base.telemetry" not in sys.modules:
         return
     from base import telemetry
 
-    sdk = sys.modules.get("meiva")
-    context = None if sdk is None else getattr(sdk, "context", None)
-    owned = clients if clients is not None else (None if context is None else context.clients)
-    if owned is not None:
-        owned_result = owned.sync_events()
-        if owned_result.status is telemetry.DrainStatus.UNFINISHED:
-            logger.warning(
-                "exec child: owned telemetry delivery is unfinished; "
-                "queued records may be lost or land later"
-            )
-    result = telemetry.sync()
-    if result.status is telemetry.DrainStatus.UNFINISHED:
+    owned_unfinished = (
+        None
+        if clients is None
+        else clients.sync_events().status is telemetry.DrainStatus.UNFINISHED
+    )
+    plan = plan_finalize(
+        owned_unfinished=owned_unfinished,
+        ordinary_unfinished=telemetry.sync().status is telemetry.DrainStatus.UNFINISHED,
+    )
+    if plan.warn_owned_unfinished:
+        logger.warning(
+            "exec child: owned telemetry delivery is unfinished; "
+            "queued records may be lost or land later"
+        )
+    if plan.warn_ordinary_unfinished:
         logger.warning(
             "exec child: ordinary telemetry delivery is unfinished; "
             "queued records may be lost or land later"
         )
-    if owned is not None:
-        owned.finalize_events()
+    if plan.finalize_owned and clients is not None:
+        clients.finalize_events()
 
 
-def deliver_envelope_telemetry(*, clients: Any = None) -> None:
+def deliver_envelope_telemetry(*, clients: _ChildClients | None) -> None:
     try:
         finalize_telemetry(clients=clients)
     except BaseException:
@@ -363,11 +391,13 @@ def deliver_envelope_telemetry(*, clients: Any = None) -> None:
         )
 
 
-def deliver_run_telemetry(result_path: str, payload: Any) -> None:
+def deliver_run_telemetry(
+    result_path: str, payload: ResultPayload, *, clients: _ChildClients
+) -> None:
     if not delivers_telemetry(payload.kind):
         return
     try:
-        finalize_telemetry()
+        finalize_telemetry(clients=clients)
     except BaseException as exc:
         logger.opt(exception=True).warning(
             "exec child: post-run telemetry delivery failed (run outcome: {}); "
@@ -379,36 +409,21 @@ def deliver_run_telemetry(result_path: str, payload: Any) -> None:
             write_crashed_result(result_path, exc, code_reached=payload.code_reached)
 
 
-def _bind_identity(
-    request: RequestPayload, *, context: Any, clock_factory: Callable[[], Any]
-) -> None:
-    from base.agents.context import MeivaContext
-    from meiva.sdk_surface import process_context
-
-    process_context.bind_context(
-        replace(
-            MeivaContext.from_description(
-                request.context,
-                original_incarnation=request.incarnation,
-                clients=context.clients,
-                machine=context.require_machine(),
-            ),
-            clock_factory=clock_factory,
-        )
-    )
-
-
 def run_child(
     request_path: str,
     result_path: str,
     boot_started_at: float,
     *,
-    config: Any,
-    context: Any,
+    config: object,
+    context: object,
 ) -> None:
     child = import_runtime(boot_started_at)
-    from agent.execution.protocol import ResultPayload, read_request, write_result
+    from agent.execution.protocol import read_request, write_result
+    from base.agents.context import MeivaContext
+    from base.config import ConfigBoot
 
+    if not isinstance(config, ConfigBoot) or not isinstance(context, MeivaContext):
+        raise TypeError("run_child needs the child's booted ConfigBoot and MeivaContext")
     raw_agent_id = os.environ.get("MEIVA_AGENT_ID")
     init_logger(
         None if raw_agent_id is None else int(raw_agent_id),
@@ -425,7 +440,19 @@ def run_child(
     def clock_factory() -> Clock:
         return Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS)
 
-    _bind_identity(request, context=context, clock_factory=clock_factory)
+    from meiva.sdk_surface import process_context
+
+    process_context.bind_context(
+        replace(
+            MeivaContext.from_description(
+                request.context,
+                original_incarnation=request.incarnation,
+                clients=context.clients,
+                machine=context.require_machine(),
+            ),
+            clock_factory=clock_factory,
+        )
+    )
 
     framework_overlay_applied = apply_framework_overlay(birth, overlay, config=config)
     import meiva
@@ -462,13 +489,13 @@ def run_child(
         emit_child_boot_timing(child, clients=context.clients, now=time.perf_counter())
     except BaseException as exc:
         write_crashed_result(result_path, exc, code_reached=False)
-        deliver_envelope_telemetry()
+        deliver_envelope_telemetry(clients=context.clients)
         return
     try:
         run_code(request.code, payload)
     except BaseException as exc:
         write_crashed_result(result_path, exc, code_reached=payload.code_reached)
-        deliver_envelope_telemetry()
+        deliver_envelope_telemetry(clients=context.clients)
         return
     finally:
         _take_result_state_update(child, payload, state_injected=request.state_raw is not None)
@@ -478,7 +505,7 @@ def run_child(
     except BaseException as write_exc:
         write_crashed_result(result_path, write_exc, code_reached=payload.code_reached)
 
-    deliver_run_telemetry(result_path, payload)
+    deliver_run_telemetry(result_path, payload, clients=context.clients)
 
 
 def main() -> None:
@@ -491,7 +518,7 @@ def main() -> None:
             "in the environment — spawn it via agent.graph.exec._subprocess\n"
         )
         raise SystemExit(2)
-    clients: Any = None
+    clients: _ChildClients | None = None
     apply_oom_preference(os.environ, OOM_SCORE_ADJ_PATH)
     try:
         line_buffered_output()

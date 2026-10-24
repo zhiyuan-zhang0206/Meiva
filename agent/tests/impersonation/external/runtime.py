@@ -22,6 +22,7 @@ from langgraph.checkpoint.postgres import PostgresSaver
 import meiva
 from agent.state import build_agent_state, plugin_state_schema
 from agent.tests.impersonation.external.sample_plugin import (
+    PLUGIN,
     forget_sample_plugin,
     write_sample_plugin,
 )
@@ -39,6 +40,7 @@ from base.config.tests.configuration import snapshot_process_config
 from base.lm.catalog import ModelCatalog
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.packages.plugin_config_contracts import UnboundPluginConfigImages
+from base.packages.plugins.extensions import ExtensionRegistry
 from base.packages.plugins.loading import registry as plugin_registry
 from meiva import impersonation
 from meiva.boot import ExternalBoot, own_external_process, process_clients
@@ -86,8 +88,17 @@ _DROP_CHECKPOINT = (
 )
 
 
+# meiva:note
+# Plugin discovery admits every plugin whose face module this process has already imported, so a
+# test that ran earlier in the same worker would add its plugins to the registry. These tests
+# install the one plugin they wrote.
+def sample_registry() -> ExtensionRegistry:
+    discovered = plugin_registry.build_registry(validate_state=plugin_state_schema)
+    return ExtensionRegistry(tuple(item for item in discovered.plugins if item[0] == PLUGIN))
+
+
 def native_state_class() -> type[Any]:
-    return build_agent_state(plugin_registry.build_registry(validate_state=plugin_state_schema))
+    return build_agent_state(sample_registry())
 
 
 # meiva:note
@@ -184,7 +195,7 @@ def sample_surface(
     request.addfinalizer(forget_sample_plugin)
     sampling = SamplingPolicyOwner(reader=SamplingPolicy)
     install.install(
-        plugin_registry.build_registry(validate_state=plugin_state_schema),
+        sample_registry(),
         config_images=UnboundPluginConfigImages(),
         catalog=model_catalog,
         authority=config_authority,

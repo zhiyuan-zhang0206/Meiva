@@ -8,6 +8,7 @@ import subprocess
 import sys
 import threading
 import time
+from collections.abc import Generator
 from pathlib import Path
 from typing import Any, cast
 
@@ -19,8 +20,8 @@ from agent.execution.protocol import (
     read_result,
     write_request,
 )
+from base.agents.context.clients import ClientSet
 from base.native_process.tests.host_pipe import live_host_control
-from meiva.sdk_surface import process_context
 from meiva.tests.fixtures.pin_agent import exec_context
 
 _AGENT_ID = 424242
@@ -221,29 +222,21 @@ def test_boot_crash_child_delivers_the_crash_envelope_record(
     assert ("exec_envelope", "result", "write") in keys, f"receiver saw: {sorted(keys)}"
 
 
-def test_owned_writer_failure_rewrites_success_before_child_exit(tmp_path: Path) -> None:
-    from dataclasses import replace
+# meiva:note
+# The child's owned clients, whose event pipeline has a writer that fails on the first record.
+# The terminal worker failure is raised again by every later drain of that pipeline, which is
+# what a delivery failure looks like to the child.
+@contextlib.contextmanager
+def _owned_writer_that_fails(original: ValueError) -> Generator[ClientSet]:
     from datetime import UTC, datetime
 
-    import meiva
-    from agent.execution import child
-    from agent.execution.protocol import ResultPayload, read_result, write_result
-    from base.agents.context import MeivaContext
-    from base.agents.context.clients import ClientSet
     from base.telemetry import Event, EventPipeline
-
-    original = ValueError("owned writer failed after the SDK body completed")
 
     def writer(batch: list[Event]) -> None:
         raise original
 
     pipe = EventPipeline(writer=writer, batch_size=1)
     clients = ClientSet(pipeline_factory=lambda: pipe)
-    prior = getattr(meiva, "context", None)
-    process_context.bind_context(replace(prior or MeivaContext(), clients=clients))
-    result_path = tmp_path / "result.json"
-    payload = ResultPayload(kind="done", code_reached=True)
-    write_result(result_path, payload)
     try:
         clients.event_pipeline().enqueue(
             Event(
@@ -261,17 +254,49 @@ def test_owned_writer_failure_rewrites_success_before_child_exit(tmp_path: Path)
                 target_agent_id=None,
             )
         )
-        child.deliver_run_telemetry(str(result_path), payload)
-        result = read_result(result_path)
-        assert result.kind == "crashed" and result.code_reached is True
-        assert result.exc_type == "ValueError" and result.exc_msg == str(original)
+        yield clients
         with pytest.raises(ValueError) as observed:
             clients.close(pipeline_timeout=1)
         assert observed.value is original
     finally:
-        if prior is None:
-            process_context.unbind_context()
-        else:
-            process_context.bind_context(prior)
         with pytest.raises(ValueError):
             pipe.stop(timeout=1)
+
+
+def test_owned_writer_failure_rewrites_success_before_child_exit(tmp_path: Path) -> None:
+    from agent.execution import child
+    from agent.execution.protocol import ResultPayload, read_result, write_result
+
+    original = ValueError("owned writer failed after the SDK body completed")
+    result_path = tmp_path / "result.json"
+    payload = ResultPayload(kind="done", code_reached=True)
+    write_result(result_path, payload)
+    with _owned_writer_that_fails(original) as clients:
+        child.deliver_run_telemetry(str(result_path), payload, clients=clients)
+        result = read_result(result_path)
+        assert result.kind == "crashed" and result.code_reached is True
+        assert result.exc_type == "ValueError" and result.exc_msg == str(original)
+
+
+def test_owned_writer_failure_never_replaces_the_crash_the_child_reported(tmp_path: Path) -> None:
+    from agent.execution import child
+    from agent.execution.protocol import ResultPayload, write_result
+
+    result_path = tmp_path / "result.json"
+    payload = ResultPayload(
+        kind="crashed", code_reached=True, exc_type="OriginalError", exc_msg="primary"
+    )
+    write_result(result_path, payload)
+    before = result_path.read_bytes()
+    with _owned_writer_that_fails(ValueError("owned writer failed after the crash")) as clients:
+        child.deliver_run_telemetry(str(result_path), payload, clients=clients)
+        assert result_path.read_bytes() == before
+
+
+def test_a_failed_delivery_after_a_crash_envelope_never_reaches_the_caller() -> None:
+    from agent.execution import child
+
+    with _owned_writer_that_fails(
+        ValueError("owned writer failed behind the crash envelope")
+    ) as clients:
+        child.deliver_envelope_telemetry(clients=clients)

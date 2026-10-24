@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal, cast
 
+from agent.execution.result_kind import RESULT_KINDS, ResultKind
 from base.host.atomic_io import write_bytes_atomic
 from base.log import logger
 from base.native_process.runtime_incarnation import RuntimeIncarnation
@@ -20,8 +21,6 @@ from base.native_process.runtime_incarnation import RuntimeIncarnation
 REQUEST_VERSION = 1
 RESULT_VERSION = 1
 
-ResultKind = Literal["done", "cancelled", "timed_out", "lifecycle", "crashed"]
-RESULT_KINDS: frozenset[str] = frozenset({"done", "cancelled", "timed_out", "lifecycle", "crashed"})
 
 MAX_ENVELOPE_BYTES = 64 * 1024 * 1024
 STALE_FILE_AGE_S = 3600.0

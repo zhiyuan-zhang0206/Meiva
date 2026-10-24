@@ -121,10 +121,6 @@ class RedisStreamHandler:
         # follows all narration/reasoning (it terminates the turn), so by the
         # time a tool_call_chunk arrives this set is final.
         self._content_block_indices: set[int] = set()
-        # meiva:note
-        # Monotonic arrival time of the chunk being fanned out. finish() flushes the code
-        # remainder of what already arrived, so it stamps with the last chunk's time.
-        self._arrived_at = 0.0
         # tool_call grouping key -> resolved code block_idx. The key groups the
         # fragments of one tool call: anthropic streams args across many chunks
         # sharing an `index`; gemini sends one chunk per call with `index=None`
@@ -197,9 +193,8 @@ class RedisStreamHandler:
         # budget — no node completes, no LLM step finishes — would read as
         # "no progress" and be aborted by the hosted stall guard mid-stream.
         self._turn_progress.mark(self._agent_id)
-        self._arrived_at = now
-        self._process_content(chunk.content)  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
-        self._process_additional_reasoning(chunk.additional_kwargs)  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
+        self._process_content(chunk.content, now)  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
+        self._process_additional_reasoning(chunk.additional_kwargs, now)  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
         # tool_call_chunks is list[ToolCallChunk] TypedDict (not list[dict]),
         # list type covariance makes the helper-receive type mismatch — inline
         # handle to avoid a type cast
@@ -209,9 +204,9 @@ class RedisStreamHandler:
             if not args_frag:
                 continue
             self._args_bufs[block_idx] = self._args_bufs.get(block_idx, "") + args_frag
-            self._publish_code_increment(block_idx)
+            self._publish_code_increment(block_idx, now)
 
-    def _process_additional_reasoning(self, additional_kwargs: dict[str, Any]) -> None:
+    def _process_additional_reasoning(self, additional_kwargs: dict[str, Any], now: float) -> None:
         """Extract reasoning from `additional_kwargs["reasoning_content"]`.
 
         The community ChatMoonshot package carries reasoning in
@@ -226,7 +221,7 @@ class RedisStreamHandler:
         if not reasoning or not isinstance(reasoning, str):
             return
         self._content_block_indices.add(0)
-        self._publish_reasoning_delta(0, reasoning)
+        self._publish_reasoning_delta(0, reasoning, now)
 
     def _tool_block_idx_for(self, tcc: ToolCallChunk) -> int:
         """Resolve the code block_idx for one tool_call_chunk, grouping the
@@ -244,7 +239,10 @@ class RedisStreamHandler:
             self._tool_block_idx[key] = len(self._content_block_indices) + len(self._tool_block_idx)
         return self._tool_block_idx[key]
 
-    def finish(self) -> None:
+    # meiva:note
+    # `now` is the monotonic time the stream shell flushes at. The code remainder finish() publishes
+    # is stamped with it, as that code reaches the frontend at the flush and not at the last chunk.
+    def finish(self, now: float) -> None:
         """Flush remaining code increment + publish LLMDone (frontend reload trigger).
 
         Rare case where partial JSON is only valid at the last fragment of the
@@ -253,7 +251,7 @@ class RedisStreamHandler:
         state.messages' committed version, overwriting any items marked partial.
         """
         for block_idx in list(self._args_bufs.keys()):
-            self._publish_code_increment(block_idx)
+            self._publish_code_increment(block_idx, now)
         self._coalescer.flush()
         self._publisher.emit(LLMDone(agent_id=self._agent_id).model_dump_json())
 
@@ -312,7 +310,7 @@ class RedisStreamHandler:
                 ).model_dump_json()
             )
 
-    def _process_content(self, content: str | list[Any]) -> None:
+    def _process_content(self, content: str | list[Any], now: float) -> None:
         """Process chunk.content: string (legacy / test mock, block_idx=0) or
         list-of-blocks (production). Records each text/thinking block's index in
         `_content_block_indices` so the tool-call code offset matches the
@@ -348,7 +346,7 @@ class RedisStreamHandler:
                 self._content_block_indices.add(block_idx)
                 thinking = d.get("thinking") or ""
                 if thinking:
-                    self._publish_reasoning_delta(block_idx, thinking)
+                    self._publish_reasoning_delta(block_idx, thinking, now)
 
     def _publish_chat_delta(self, block_idx: int, frag: str) -> None:
         item_id = self._block_id(block_idx)
@@ -403,8 +401,7 @@ class RedisStreamHandler:
         """
         return self._total_reasoning_chars
 
-    def _publish_reasoning_delta(self, block_idx: int, frag: str) -> None:
-        now = self._arrived_at
+    def _publish_reasoning_delta(self, block_idx: int, frag: str, now: float) -> None:
         if block_idx not in self._reasoning_first_ts:
             self._reasoning_first_ts[block_idx] = now
         self._reasoning_last_ts[block_idx] = now
@@ -417,7 +414,7 @@ class RedisStreamHandler:
             self._reasoning_started.add(block_idx)
         self._coalescer.append(f"reasoning|{item_id}", frag)
 
-    def _publish_code_increment(self, block_idx: int) -> None:
+    def _publish_code_increment(self, block_idx: int, now: float) -> None:
         """Extract the current value of the "code" field from the specified
         block's accumulated args buf, publish the delta since the last publish.
 
@@ -441,7 +438,6 @@ class RedisStreamHandler:
         delta = code_so_far[published:]
         if not delta:
             return
-        now = self._arrived_at
         if block_idx not in self._code_first_ts:
             self._code_first_ts[block_idx] = now
         self._code_last_ts[block_idx] = now

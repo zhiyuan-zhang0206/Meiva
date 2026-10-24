@@ -36,9 +36,12 @@ A gateway-owned daemon — every Fleet `task_maintenance_interval_seconds` (defa
   `ServiceEndpoint` (health port and pidfile) once, so `run` takes them as
   values and holds no default dependency. Unknown image stays unknown. The
   original Fleet service packet/disk admission, schema check, pidfile,
-  health-before-pool startup and pool/health/pidfile cleanup remain. The tests
-  run `run` against a pidfile and port of their own, the throwaway Postgres and
-  Redis, and a separate process that holds the pidfile.
+  health-before-pool startup and pool/health/pidfile cleanup remain; `run`
+  alone removes the pidfile, and only after it claimed it, so a refused start
+  never deletes the running daemon's pidfile. The tests run `run` against a
+  pidfile and port of their own, the throwaway Postgres and Redis, and a
+  separate process that holds the pidfile; `main()` runs as a child process
+  against the same resources.
 - Fleet owns the host gate (default on) and cluster-pinned interval/backoff/escalation policy in `default_config.py`. Roster composition captures one typed image for the gate and daemon launch; its canonical non-secret packet is included in `unit.env` and the existing generation digest. Later image edits do not change that running generation. Core retains health port/pidfile and notification TTL responsibilities.
 - The plugin ServiceSpec selects task-maintenance into the gateway root manifest. Root health probes that exact unit and owns verified recovery; the plugin probe has no independent launch authority.
 - Difference from [[services/docs/gateway_side/heartbeat.meiva.okf.md]]: heartbeat wakes idle agents to work, task-maintenance reminds overdue tasks; both only INSERT inbound, both are one per cluster on gateway.
