@@ -59,17 +59,21 @@ listener. It does not prove macOS helper ancestry or a complete cluster rollout.
 
 Optional private HTTPS/HTTP2 entry and browser acceptance are in [Gate entry operations](operations.md).
 
-The Gate receives the existing required `UrlOpener` HTTP port and a frozen
-`GateConfig` containing the probe/proxy timeout. Its default retains the existing
-three-second budget. The serving root supplies the system opener and config;
-loopback tests construct their timeout configuration per scenario
-without replacing the transport or a module constant. The gateway URL builder
-also receives its configured port explicitly, preserving reachable-host and
-IPv6 formatting. Product tests use an actual isolated unit home, including the
-leftover retired update marker; that marker cannot change live Gate decisions.
+The Gate holds a frozen `GateConfig` containing the probe/proxy timeout; its default
+retains the existing three-second budget. It dials the gateway and the app with
+`urllib` directly: loopback tests serve a real gateway and app on port 0 and construct
+the timeout per scenario, so no transport is replaced. What the process serves is decided
+once by `launch_plan.plan_launch` (a strict module): the root reads the command line and
+the settings into `GateFacts`, and the plan answers the bind port, the static directory,
+the app origin and the gateway origin, with the configured host's IPv6 formatting.
+Product tests use an actual isolated unit home, including the leftover retired update
+marker; that marker cannot change live Gate decisions.
 
 The executable receives its concrete `ConfigBoot` owner. Its wrapper only
 constructs the owner; argument validation still precedes image capture, which
 precedes that owner's boot and lazy machine binding. Other business settings
-readers retain their existing sources. Root tests pass an owned configuration
-snapshot while retaining real startup, primary-error and cleanup observations.
+readers retain their existing sources. The entry tests start the real module as a child process against a throwaway home:
+an invalid argument exits before any resource exists, a stop signal ends serving and the
+event writer cleanly, and a taken port fails with the bind error. The close-failure and
+writer-stop rules (`serve`, `stop_pipeline`) run in process against real servers and a real
+event pipeline whose writer fails or blocks.

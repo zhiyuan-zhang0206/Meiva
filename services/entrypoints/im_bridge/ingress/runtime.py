@@ -3,7 +3,6 @@
 import asyncio
 import json
 from dataclasses import asdict
-from functools import partial
 from typing import Any
 
 from base.log import logger
@@ -22,6 +21,7 @@ from services.entrypoints.im_bridge.ingress.types import (
     PollBinding,
     ProviderSource,
 )
+from services.entrypoints.im_bridge.outbound.claim_fence import ClaimFence
 from services.entrypoints.im_bridge.timeline_acceptance import SelectionAdmission
 from services.entrypoints.im_bridge.types import ChatState, IMAdapter, parse_command
 
@@ -162,7 +162,13 @@ class WeixinIngress:
         return SelectionAdmission(
             adapter,
             account,
-            partial(self.store.guard_claim_in_transaction, binding=binding, receipt=receipt),
+            ClaimFence(
+                namespace=binding.namespace,
+                account_id=binding.account_id,
+                epoch=binding.epoch,
+                receipt_id=receipt.id,
+                attempt_id=receipt.attempt_id,
+            ),
         )
 
     async def recover_subscriptions(self, binding: PollBinding) -> None:

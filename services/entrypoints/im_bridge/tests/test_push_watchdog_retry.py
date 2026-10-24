@@ -41,16 +41,8 @@ class _Core:
     config = im_bridge_config(im_push_retry_backoff_seconds=0.0, im_push_retry_jitter_seconds=0.0)
 
 
-@pytest.fixture
-def _no_sleep(monkeypatch: pytest.MonkeyPatch) -> None:
-    async def _sleep(_seconds: float) -> None:
-        return None
-
-    monkeypatch.setattr(push_watchdog, "push_watchdog_sleep", _sleep)
-
-
 async def test_first_failure_logs_warning_and_a_healed_retry_stays_clean(
-    _no_sleep: None, caplog: pytest.LogCaptureFixture
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     caplog.set_level(logging.WARNING, logger=_LOGGER)
     adapter = _Adapter(fail_attempts=1)
@@ -64,7 +56,7 @@ async def test_first_failure_logs_warning_and_a_healed_retry_stays_clean(
 
 
 async def test_failed_retry_keeps_error_with_traceback(
-    _no_sleep: None, caplog: pytest.LogCaptureFixture
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     caplog.set_level(logging.WARNING, logger=_LOGGER)
     adapter = _Adapter(fail_attempts=2)
@@ -77,7 +69,7 @@ async def test_failed_retry_keeps_error_with_traceback(
 
 
 async def test_ambiguous_or_partial_send_is_not_repeated(
-    _no_sleep: None, caplog: pytest.LogCaptureFixture
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     class PartialAdapter(_Adapter):
         async def send(
@@ -99,9 +91,7 @@ async def test_ambiguous_or_partial_send_is_not_repeated(
 
 
 @pytest.mark.parametrize("error", [RuntimeError("unexpected send fault"), KeyError("bad config")])
-async def test_unknown_send_fault_reaches_owner_without_retry(
-    _no_sleep: None, error: Exception
-) -> None:
+async def test_unknown_send_fault_reaches_owner_without_retry(error: Exception) -> None:
     class FaultingAdapter(_Adapter):
         async def send(
             self,

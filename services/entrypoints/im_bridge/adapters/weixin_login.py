@@ -10,11 +10,13 @@ import argparse
 import asyncio
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 import httpx
 
 from base.log import logger
+from base.paths import meiva_home
 from services.entrypoints.im_bridge.adapters.weixin import (
     EP_GET_BOT_QR,
     EP_GET_QR_STATUS,
@@ -24,6 +26,7 @@ from services.entrypoints.im_bridge.adapters.weixin import (
     get_str,
     save_account,
 )
+from services.entrypoints.im_bridge.config import state_dir_of
 
 
 async def _qr_get(
@@ -74,7 +77,7 @@ async def _refresh_qr(
     return qrcode_value, qrcode_url
 
 
-def _confirmed_credentials(status: dict[str, Any]) -> dict[str, Any] | None:
+def _confirmed_credentials(status: dict[str, Any], state_dir: Path) -> dict[str, Any] | None:
     """Validate a "confirmed" status payload; persist and return credentials."""
     account_id = get_str(status, "ilink_bot_id")
     bot_token = get_str(status, "bot_token")
@@ -84,6 +87,7 @@ def _confirmed_credentials(status: dict[str, Any]) -> dict[str, Any] | None:
         logger.error("weixin: QR confirmed but credential payload incomplete")
         return None
     save_account(
+        state_dir,
         account_id=account_id,
         bot_token=bot_token,
         user_id=user_id,
@@ -133,6 +137,7 @@ async def _on_qr_state(
 
 async def qr_login(
     *,
+    state_dir: Path,
     timeout_seconds: int = 480,
     client: httpx.AsyncClient | None = None,
 ) -> dict[str, Any] | None:
@@ -164,7 +169,7 @@ async def qr_login(
                     return None
                 last_state = state
             if state == "confirmed":
-                return _confirmed_credentials(status)
+                return _confirmed_credentials(status, state_dir)
             await asyncio.sleep(1)
         logger.warning("WeChat login timed out.")
         return None
@@ -186,7 +191,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
     if args.login:
-        creds = asyncio.run(qr_login())
+        creds = asyncio.run(qr_login(state_dir=state_dir_of(meiva_home())))
         return 0 if creds else 1
     parser.print_help()
     return 1

@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 import httpx
+import psycopg
 import pytest
 from psycopg import Connection
 from psycopg_pool import ConnectionPool
@@ -17,12 +18,11 @@ from base.config.service_read import ConfigAuthority
 from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
 from services.entrypoints.im_bridge.core import IMBridgeCore
-from services.entrypoints.im_bridge.outbound.store import IMOutboxStore
 from services.entrypoints.im_bridge.outbound.types import NoticePollImportReason
 from services.entrypoints.im_bridge.tests.slices import im_bridge_config
+from services.entrypoints.im_bridge.tests.support import failing_insert
 from services.entrypoints.im_bridge.tests.test_im_bridge_core import FakeGateway
 from services.entrypoints.im_bridge.tests.test_timeline_outbox import RecordingAdapter
-from services.entrypoints.im_bridge.tests.test_timeline_outbox import pool as pool
 from services.entrypoints.im_bridge.types import (
     OutboundAdapterKind,
     OutboundChunk,
@@ -54,12 +54,15 @@ class NoticeAdapter(RecordingAdapter):
         await super().send_prepared_outbound(chat_id, prepared)
 
 
-def make_core(pool: ConnectionPool, **config: Any) -> tuple[IMBridgeCore, NoticeAdapter]:
+def make_core(
+    pool: ConnectionPool, state_dir: Path, **config: Any
+) -> tuple[IMBridgeCore, NoticeAdapter]:
     core = IMBridgeCore(
         im_bridge_config(**config),
         FakeGateway(),  # type: ignore[arg-type]
         db_pool=pool,
         tasks=asyncio.TaskGroup(),
+        state_dir=state_dir,
     )
     adapter = NoticeAdapter()
     core.register(adapter)
@@ -98,8 +101,9 @@ async def test_new_install_accepts_atomically_and_worker_sends_frozen_target_but
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
+    state_dir: Path,
 ) -> None:
-    core, adapter = make_core(pool)
+    core, adapter = make_core(pool, state_dir)
     core.notice_bridge.initialize_poll()  # The daemon initializes before readiness, not a user command.
     with pool.connection() as conn:
         notice = insert_notice(
@@ -137,8 +141,9 @@ async def test_two_connections_reverse_commit_do_not_skip_late_lower_id(
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
+    state_dir: Path,
 ) -> None:
-    core, adapter = make_core(pool)
+    core, adapter = make_core(pool, state_dir)
     core.notice_bridge.poll_store.initialize_notice_poll()
     agent = spawn_agent(
         catalog=model_catalog,
@@ -178,6 +183,7 @@ async def test_first_initialization_retains_existing_history_only(
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
+    state_dir: Path,
 ) -> None:
     with pool.connection() as conn:
         old = insert_notice(
@@ -195,7 +201,7 @@ async def test_first_initialization_retains_existing_history_only(
     path = tmp_path / "state" / "im_bridge" / "notice_cursor.json"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("0")
-    core, adapter = make_core(pool)
+    core, adapter = make_core(pool, state_dir)
     await core.notice_bridge.poll_once()
     assert not receipts(pool) and not adapter.deliveries
     assert cutover(pool) == (old, NoticePollImportReason.LEGACY_HISTORY_UNKNOWN.value)
@@ -221,8 +227,10 @@ async def test_first_initialization_retains_existing_history_only(
     assert any(n["id"] == old for n in core.notice_bridge._open_notices())
 
 
-async def test_empty_history_initializes_at_floor_zero(pool: ConnectionPool) -> None:
-    core, _ = make_core(pool)
+async def test_empty_history_initializes_at_floor_zero(
+    pool: ConnectionPool, state_dir: Path
+) -> None:
+    core, _ = make_core(pool, state_dir)
     core.notice_bridge.initialize_poll()
     assert cutover(pool) == (0, NoticePollImportReason.NO_HISTORY.value)
 
@@ -235,8 +243,9 @@ async def test_filtered_decision_commits_without_owner_and_does_not_later_replay
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
+    state_dir: Path,
 ) -> None:
-    core, adapter = make_core(pool)
+    core, adapter = make_core(pool, state_dir)
     core.notice_bridge.poll_store.initialize_notice_poll()
     with pool.connection() as conn:
         notice = insert_notice(
@@ -270,8 +279,9 @@ async def test_no_owner_holds_without_fake_receipt_then_accepts_when_available(
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
+    state_dir: Path,
 ) -> None:
-    core, adapter = make_core(pool)
+    core, adapter = make_core(pool, state_dir)
     core.notice_bridge.poll_store.initialize_notice_poll()
     with pool.connection() as conn:
         insert_notice(
@@ -297,14 +307,15 @@ async def test_no_owner_holds_without_fake_receipt_then_accepts_when_available(
 async def test_acceptance_rollback_then_lost_response_converge_without_inline_send(
     redis_url: str,
     pool: ConnectionPool,
-    monkeypatch: pytest.MonkeyPatch,
+    db_conn: psycopg.Connection,
+    state_dir: Path,
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
 ) -> None:
-    core, adapter = make_core(pool)
+    core, adapter = make_core(pool, state_dir)
     core.notice_bridge.poll_store.initialize_notice_poll()
     with pool.connection() as conn:
         insert_notice(
@@ -317,14 +328,14 @@ async def test_acceptance_rollback_then_lost_response_converge_without_inline_se
             ),
             0,
         )
-    insert = IMOutboxStore.insert_intent
-
-    def rollback(conn: Connection, intent: Any) -> int:
-        insert(conn, intent)
-        raise RuntimeError("crash after insert before receipt commit")
-
-    monkeypatch.setattr(IMOutboxStore, "insert_intent", staticmethod(rollback))
-    with pytest.raises(RuntimeError, match="crash after insert"):
+    with (
+        failing_insert(
+            db_conn,
+            "im_bridge_notice_acceptances",
+            message="crash after insert before receipt commit",
+        ),
+        pytest.raises(psycopg.errors.RaiseException, match="crash after insert"),
+    ):
         await core.notice_bridge.poll_once()
     assert not receipts(pool)
     with pool.connection() as conn:
@@ -332,18 +343,10 @@ async def test_acceptance_rollback_then_lost_response_converge_without_inline_se
         assert conn.execute(
             "SELECT accepted_notice_id FROM im_bridge_notice_poll_state"
         ).fetchone() == (0,)
-    monkeypatch.setattr(IMOutboxStore, "insert_intent", staticmethod(insert))
-    accept = core.notice_bridge.poll_store.accept_notice
-
-    def lost(*args: Any, **kwargs: Any) -> Any:
-        accept(*args, **kwargs)
-        raise RuntimeError("response lost after durable acceptance")
-
-    monkeypatch.setattr(core.notice_bridge.poll_store, "accept_notice", lost)
-    with pytest.raises(RuntimeError, match="response lost"):
-        await core.notice_bridge.poll_once()
+    snapshot = core.notice_bridge._unaccepted_notices()[0]
+    for _ in range(2):
+        assert await core.notice_bridge._accept_normal_notice(snapshot, switches={})
     assert len(receipts(pool)) == 1
-    monkeypatch.setattr(core.notice_bridge.poll_store, "accept_notice", accept)
     await core.notice_bridge.poll_once()
     await core.outbound_worker.run_once()
     assert len(adapter.deliveries) == 1
@@ -357,8 +360,9 @@ async def test_concurrent_normal_acceptances_freeze_first_target_without_duplica
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
+    state_dir: Path,
 ) -> None:
-    core, adapter = make_core(pool)
+    core, adapter = make_core(pool, state_dir)
     core.notice_bridge.poll_store.initialize_notice_poll()
     with pool.connection() as conn:
         notice = insert_notice(
@@ -405,8 +409,9 @@ async def test_historical_fyi_is_filtered_while_a_question_reaches_the_chat(
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
+    state_dir: Path,
 ) -> None:
-    core, adapter = make_core(pool)
+    core, adapter = make_core(pool, state_dir)
     core.notice_bridge.initialize_poll()
     agent = spawn_agent(
         catalog=model_catalog,
@@ -443,8 +448,9 @@ async def test_a_switched_off_category_does_not_reclassify_an_fyi(
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
+    state_dir: Path,
 ) -> None:
-    core, adapter = make_core(pool)
+    core, adapter = make_core(pool, state_dir)
     core.notice_bridge.initialize_poll()
     agent = spawn_agent(
         catalog=model_catalog,
@@ -481,8 +487,9 @@ async def test_a_switched_off_needs_input_category_silences_decisions(
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
+    state_dir: Path,
 ) -> None:
-    core, adapter = make_core(pool)
+    core, adapter = make_core(pool, state_dir)
     core.notice_bridge.initialize_poll()
     agent = spawn_agent(
         catalog=model_catalog,

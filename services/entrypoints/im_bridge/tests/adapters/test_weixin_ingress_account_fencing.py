@@ -1,17 +1,21 @@
 """Account handover fences native effects and derived background subscriptions."""
 
 import asyncio
-from typing import Any
 
 import psycopg
 import pytest
 
 from services.entrypoints.im_bridge.adapters.weixin import WeixinAdapter, save_account
-from services.entrypoints.im_bridge.ingress.types import StalePollBindingError
+from services.entrypoints.im_bridge.outbound.claim_fence import StalePollBindingError
 from services.entrypoints.im_bridge.tests.adapters.test_weixin_ingress_recovery import (
     replace_account,
 )
-from services.entrypoints.im_bridge.tests.adapters.weixin_native import NativeWeixin, message
+from services.entrypoints.im_bridge.tests.adapters.weixin_native import (
+    NativeWeixin,
+    QuietCore,
+    message,
+)
+from services.entrypoints.im_bridge.tests.support import held_table_lock
 
 
 async def test_registration_before_new_poll_rejects_old_runtime_without_effects(
@@ -20,12 +24,13 @@ async def test_registration_before_new_poll_rejects_old_runtime_without_effects(
     old = native_weixin.adapter
     await old._ensure_ingress()
     save_account(
+        native_weixin.state_dir,
         account_id="replacement",
         bot_token="isolated-test-token",  # noqa: S106
         user_id="owner",
         base_url="https://provider.example",
     )
-    new = WeixinAdapter(native_weixin.core, client=old._http)
+    new = WeixinAdapter(native_weixin.core, state_dir=native_weixin.state_dir, client=old._http)
     native_weixin.core.register(new)
     assert new.selection_requires_account_proof is True
     for text, source in (("ordinary", "701"), (f"/switch {native_weixin.agent_id}", "702")):
@@ -38,24 +43,17 @@ async def test_registration_before_new_poll_rejects_old_runtime_without_effects(
 
 
 async def test_replacement_after_claim_before_owner_transaction_rejects_epoch(
-    native_weixin: NativeWeixin, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    native_weixin: NativeWeixin, db_conn: psycopg.Connection, db_url: str
 ) -> None:
     core = native_weixin.core
-    owner = core._handle_command
-    entered, release = asyncio.Event(), asyncio.Event()
-
-    async def held(*args: Any, **kwargs: Any) -> object:
-        entered.set()
-        await release.wait()
-        return await owner(*args, **kwargs)
-
-    monkeypatch.setattr(core, "_handle_command", held)
-    first = asyncio.create_task(
-        native_weixin.adapter._handle_message(message(f"/switch {native_weixin.agent_id}", "703"))
-    )
-    await entered.wait()
-    new = await replace_account(native_weixin, "replacement")
-    release.set()
+    with held_table_lock(db_url, "im_bridge_outbound_replays") as held:
+        first = asyncio.create_task(
+            native_weixin.adapter._handle_message(
+                message(f"/switch {native_weixin.agent_id}", "703")
+            )
+        )
+        await asyncio.to_thread(held.wait_for_waiters, 1)
+        new = await replace_account(native_weixin, "replacement")
     with pytest.raises(StalePollBindingError):
         await first
     account = await new.outbound_account_id()
@@ -117,51 +115,35 @@ async def test_sync_selection_cannot_bootstrap_unbound_legacy_agent(
 
 
 async def test_native_selection_restores_fresh_core_derived_subscription(
-    native_weixin: NativeWeixin, monkeypatch: pytest.MonkeyPatch
+    native_weixin: NativeWeixin,
 ) -> None:
     core = native_weixin.core
+    assert isinstance(core, QuietCore)
     core.chats.clear()
-    restored: list[int | None] = []
-
-    def subscribe(state: Any, **_kwargs: Any) -> None:
-        restored.append(state.current_agent_id)
-
-    monkeypatch.setattr(core, "_ensure_subscription", subscribe)
+    core.ensured = []
     runtime, binding = await native_weixin.adapter._ensure_ingress()
     await runtime.recover_subscriptions(binding)
-    assert restored == [native_weixin.agent_id]
+    assert core.ensured == [native_weixin.agent_id]
     assert core.chats[("weixin", "peer-1")].current_agent_id == native_weixin.agent_id
 
 
 async def test_epoch_replacement_between_preflight_and_effect_is_rejected_in_sql(
-    native_weixin: NativeWeixin, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    native_weixin: NativeWeixin, db_conn: psycopg.Connection, db_url: str
 ) -> None:
-    import threading
-
     from services.entrypoints.im_bridge.ingress.store import WeixinIngressStore
 
-    runtime, _binding = await native_weixin.adapter._ensure_ingress()
-    owner = runtime.store.guard_claim_in_transaction
-    entered, release = threading.Event(), threading.Event()
-
-    def before_guard(conn: Any, **kwargs: Any) -> None:
-        entered.set()
-        assert release.wait(10)
-        owner(conn, **kwargs)
-
-    monkeypatch.setattr(runtime.store, "guard_claim_in_transaction", before_guard)
-    task = asyncio.create_task(
-        native_weixin.adapter._handle_message(message(f"/switch {native_weixin.agent_id}", "704"))
-    )
-    assert await asyncio.to_thread(entered.wait, 10)
-    try:
+    with held_table_lock(db_url, "im_bridge_outbound_replays") as held:
+        task = asyncio.create_task(
+            native_weixin.adapter._handle_message(
+                message(f"/switch {native_weixin.agent_id}", "704")
+            )
+        )
+        await asyncio.to_thread(held.wait_for_waiters, 1)
         await asyncio.to_thread(
             WeixinIngressStore(native_weixin.pool).initialize,
             "https://provider.example",
             "replacement",
         )
-    finally:
-        release.set()
     with pytest.raises(StalePollBindingError):
         await task
     assert db_conn.execute(
@@ -171,29 +153,17 @@ async def test_epoch_replacement_between_preflight_and_effect_is_rejected_in_sql
 
 
 async def test_effect_transaction_holds_epoch_lock_until_original_account_commit(
-    native_weixin: NativeWeixin, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    native_weixin: NativeWeixin, db_conn: psycopg.Connection, db_url: str
 ) -> None:
-    import threading
-
-    runtime, _binding = await native_weixin.adapter._ensure_ingress()
-    owner = runtime.store.guard_claim_in_transaction
-    entered, release = threading.Event(), threading.Event()
-
-    def after_guard(conn: Any, **kwargs: Any) -> None:
-        owner(conn, **kwargs)
-        entered.set()
-        assert release.wait(10)
-
-    monkeypatch.setattr(runtime.store, "guard_claim_in_transaction", after_guard)
-    task = asyncio.create_task(
-        native_weixin.adapter._handle_message(message(f"/switch {native_weixin.agent_id}", "705"))
-    )
-    assert await asyncio.to_thread(entered.wait, 10)
-    try:
+    with held_table_lock(db_url, "im_bridge_cursors", mode="SHARE ROW EXCLUSIVE") as held:
+        task = asyncio.create_task(
+            native_weixin.adapter._handle_message(
+                message(f"/switch {native_weixin.agent_id}", "705")
+            )
+        )
+        await asyncio.to_thread(held.wait_for_waiters, 1)
         with pytest.raises(psycopg.errors.LockNotAvailable), db_conn.transaction():
             db_conn.execute("SELECT epoch FROM weixin_ingress_bindings FOR UPDATE NOWAIT")
-    finally:
-        release.set()
     accepted = await task
     assert accepted.status.value == "accepted"
     assert accepted.result is not None and accepted.result["agent_id"] == native_weixin.agent_id
@@ -201,15 +171,12 @@ async def test_effect_transaction_holds_epoch_lock_until_original_account_commit
 
 
 async def test_postcommit_subscription_failure_preserves_acceptance_and_loop_recovers(
-    native_weixin: NativeWeixin, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    native_weixin: NativeWeixin, db_conn: psycopg.Connection
 ) -> None:
     runtime, binding = await native_weixin.adapter._ensure_ingress()
-    owner = runtime.recover_subscriptions
-
-    async def unavailable(_binding: Any) -> None:
-        raise RuntimeError("injected derived subscription failure")
-
-    monkeypatch.setattr(runtime, "recover_subscriptions", unavailable)
+    blocked_cache_write = native_weixin.state_dir / "switch_state.json.tmp"
+    blocked_cache_write.mkdir()
+    native_weixin.core.chats.clear()
     accepted = await native_weixin.adapter._handle_message(
         message("retained despite tail failure", "706")
     )
@@ -221,7 +188,7 @@ async def test_postcommit_subscription_failure_preserves_acceptance_and_loop_rec
         await native_weixin.adapter._handle_message(message("retained despite tail failure", "706"))
         == accepted
     )
-    monkeypatch.setattr(runtime, "recover_subscriptions", owner)
+    blocked_cache_write.rmdir()
     native_weixin.core.chats.clear()
     await runtime.recover_subscriptions(binding)
     assert native_weixin.core.chats[("weixin", "peer-1")].current_agent_id == native_weixin.agent_id

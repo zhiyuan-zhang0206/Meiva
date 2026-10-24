@@ -15,7 +15,8 @@ from services.entrypoints.im_bridge.core import IMBridgeCore
 from services.entrypoints.im_bridge.gateway_client import GatewayClient
 from services.entrypoints.im_bridge.ingress.store import WeixinIngressStore
 from services.entrypoints.im_bridge.tests.slices import im_bridge_config
-from services.entrypoints.im_bridge.tests.task_scope import owned_tasks
+from services.entrypoints.im_bridge.tests.support import owned_tasks
+from services.entrypoints.im_bridge.types import ChatState
 
 
 @dataclass
@@ -27,6 +28,8 @@ class NativeWeixin:
     gateway_requests: list[httpx.Request]
     provider_requests: list[httpx.Request]
     provider_responses: list[dict[str, object]]
+    provider_send_responses: list[dict[str, object]]
+    state_dir: Path
 
 
 def message(text: str, message_id: object = "1", *, sender: str = "peer-1") -> dict[str, object]:
@@ -40,15 +43,30 @@ def message(text: str, message_id: object = "1", *, sender: str = "peer-1") -> d
     }
 
 
+# meiva:note
+# The real core with its two background starters (a gateway SSE subscription and the typing
+# loop) switched off: the native Weixin tests drive selection and delivery explicitly, and a
+# subscription would dial the fixture's gateway transport for traffic the tests never script.
+class QuietCore(IMBridgeCore):
+    ensured: list[int | None]
+
+    def _ensure_subscription(
+        self, state: ChatState, prev_agent: int | None = None, *, catch_up: bool = False
+    ) -> None:
+        if not hasattr(self, "ensured"):
+            self.ensured = []
+        self.ensured.append(state.current_agent_id)
+
+    def _start_typing(self, state: ChatState) -> None:
+        return None
+
+
 @pytest.fixture
 async def native_weixin(
-    database: Database,
-    db_conn: psycopg.Connection,
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
+    database: Database, db_conn: psycopg.Connection, state_dir: Path
 ) -> AsyncIterator[NativeWeixin]:
-    monkeypatch.setenv("MEIVA_HOME", str(tmp_path))
     save_account(
+        state_dir,
         account_id="bot-id",
         bot_token="isolated-test-token",  # noqa: S106
         user_id="owner",
@@ -60,6 +78,7 @@ async def native_weixin(
     gateway_requests: list[httpx.Request] = []
     provider_requests: list[httpx.Request] = []
     provider_responses: list[dict[str, object]] = []
+    provider_send_responses: list[dict[str, object]] = []
 
     def gateway(request: httpx.Request) -> httpx.Response:
         gateway_requests.append(request)
@@ -77,6 +96,8 @@ async def native_weixin(
             if provider_responses:
                 return httpx.Response(200, json=provider_responses.pop(0))
             return httpx.Response(200, json={"ret": 0, "msgs": [], "get_updates_buf": ""})
+        if provider_send_responses:
+            return httpx.Response(200, json=provider_send_responses.pop(0))
         return httpx.Response(200, json={"ret": 0})
 
     config = im_bridge_config(im_send_retry_delays=(0.0,))
@@ -90,15 +111,10 @@ async def native_weixin(
         ):
             client = GatewayClient(config, gateway_url="http://isolated-gateway", auth_headers={})
             client._client = gateway_http
-            core = IMBridgeCore(config, client, db_pool=pool, tasks=tasks)
-            adapter = WeixinAdapter(core, client=provider_http)
+            core = QuietCore(config, client, db_pool=pool, tasks=tasks, state_dir=state_dir)
+            adapter = WeixinAdapter(core, state_dir=state_dir, client=provider_http)
             core.register(adapter)
 
-            def no_subscription(*_args: object, **_kwargs: object) -> None:
-                pass
-
-            monkeypatch.setattr(core, "_ensure_subscription", no_subscription)
-            monkeypatch.setattr(core, "_start_typing", no_subscription)
             store = WeixinIngressStore(pool)
             binding = store.initialize("https://provider.example", "bot-id")
             store.checkpoint(binding, "", "", provider_empty=True)
@@ -113,4 +129,6 @@ async def native_weixin(
                 gateway_requests,
                 provider_requests,
                 provider_responses,
+                provider_send_responses,
+                state_dir,
             )

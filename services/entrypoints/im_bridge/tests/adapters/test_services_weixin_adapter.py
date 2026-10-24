@@ -7,6 +7,7 @@ Only a future durable outbound record can identify a retry of an old intent.
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -41,10 +42,15 @@ class _FakeHTTP:
         return httpx.Response(200, json=outcome)
 
 
-def _adapter(http: _FakeHTTP, monkeypatch: pytest.MonkeyPatch, tmp_path: Any) -> WeixinAdapter:
-    monkeypatch.setenv("MEIVA_HOME", str(tmp_path))
-    monkeypatch.setattr(weixin, "load_account", lambda: dict(_ACCOUNT))
-    a = WeixinAdapter(None)  # type: ignore[arg-type]
+def _adapter(http: _FakeHTTP, state_dir: Path) -> WeixinAdapter:
+    weixin.save_account(
+        state_dir,
+        account_id=_ACCOUNT["account_id"],
+        bot_token=_ACCOUNT["bot_token"],
+        user_id=_ACCOUNT["user_id"],
+        base_url=_ACCOUNT["base_url"],
+    )
+    a = WeixinAdapter(None, state_dir=state_dir)  # type: ignore[arg-type]
     a._client = http  # type: ignore[attr-defined]
     a._owns_client = False
     return a
@@ -56,9 +62,7 @@ def _client_ids(http: _FakeHTTP) -> list[str]:
     ]
 
 
-def test_new_message_after_unknown_outcome_gets_fresh_id(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Any
-) -> None:
+def test_new_message_after_unknown_outcome_gets_fresh_id(state_dir: Path) -> None:
     """An immediate different send cannot reuse the previous failed identity."""
     http = _FakeHTTP(
         [
@@ -66,7 +70,7 @@ def test_new_message_after_unknown_outcome_gets_fresh_id(
             {"ret": 0, "errcode": 0},  # retry: delivered
         ]
     )
-    a = _adapter(http, monkeypatch, tmp_path)
+    a = _adapter(http, state_dir)
 
     async def scenario() -> None:
         with pytest.raises(RuntimeError, match="timed out"):
@@ -79,9 +83,7 @@ def test_new_message_after_unknown_outcome_gets_fresh_id(
     assert ids[0] != ids[1], "different intents must never share a client_id"
 
 
-def test_success_clears_pending_and_new_send_gets_fresh_id(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Any
-) -> None:
+def test_success_clears_pending_and_new_send_gets_fresh_id(state_dir: Path) -> None:
     """A stale pending id must never be reused for a later, different message
     (iLink would dedup-drop it)."""
     http = _FakeHTTP(
@@ -91,7 +93,7 @@ def test_success_clears_pending_and_new_send_gets_fresh_id(
             {"ret": 0, "errcode": 0},
         ]
     )
-    a = _adapter(http, monkeypatch, tmp_path)
+    a = _adapter(http, state_dir)
 
     async def scenario() -> None:
         with pytest.raises(RuntimeError):

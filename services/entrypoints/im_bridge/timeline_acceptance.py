@@ -1,12 +1,10 @@
 """Native timeline preparation and account-frozen selection transaction admission."""
 
 import asyncio
-from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
-from psycopg import Connection
-
+from services.entrypoints.im_bridge.outbound.claim_fence import ClaimFence
 from services.entrypoints.im_bridge.outbound.types import (
     OutboundIntent,
     TimelineAcceptance,
@@ -20,7 +18,7 @@ from services.entrypoints.im_bridge.types import ChatState, IMAdapter
 class SelectionAdmission:
     adapter: IMAdapter
     account_id: str
-    guard: Callable[[Connection], None]
+    fence: ClaimFence
 
 
 async def accept_timeline(
@@ -67,7 +65,7 @@ async def accept_timeline(
         candidates,
         replay_id=replay_id,
         switch_arg=switch_arg,
-        guard=selection_admission.guard if selection_admission is not None else None,
+        fence=selection_admission.fence if selection_admission is not None else None,
     )
     if acceptance.watermark is not None and acceptance.selected_agent_id == agent_id:
         core._last_pushed[(state.channel, state.chat_id, agent_id)] = acceptance.watermark

@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import time
 from collections.abc import Iterator
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
@@ -23,7 +24,7 @@ from base.sessions.tests.poll_until import poll_until_async
 from services.entrypoints.im_bridge.adapters.feishu import FeishuAdapter
 from services.entrypoints.im_bridge.cursor_store import CursorStore
 from services.entrypoints.im_bridge.tests.slices import feishu_config
-from services.entrypoints.im_bridge.tests.task_scope import owned_tasks
+from services.entrypoints.im_bridge.tests.support import owned_tasks
 from services.entrypoints.im_bridge.types import InboundMessage, RetryableTransportError
 
 _CHAT = "oc_p2p_1"
@@ -82,25 +83,29 @@ def _listing(*newest_first: SimpleNamespace, next_page: str | None = None) -> Si
     return SimpleNamespace(raw=SimpleNamespace(status_code=200), code=0, msg="ok", data=data)
 
 
-def _adapter(rest: _Rest, store: CursorStore) -> FeishuAdapter:
-    adapter = FeishuAdapter(_Core(store), feishu_config())
+def _adapter(rest: _Rest, store: CursorStore, state_dir: Path) -> FeishuAdapter:
+    adapter = FeishuAdapter(
+        _Core(store), feishu_config(), state_dir=state_dir, proxy_configured=False
+    )
     adapter._rest_client = rest
     return adapter
 
 
-async def _restarted(store: CursorStore, *listings: SimpleNamespace) -> FeishuAdapter:
+async def _restarted(
+    store: CursorStore, state_dir: Path, *listings: SimpleNamespace
+) -> FeishuAdapter:
     """A new adapter (daemon restart) whose first round sees `listings` as pages."""
     rest = _Rest()
     rest.responses = list(listings)
-    adapter = _adapter(rest, store)
+    adapter = _adapter(rest, store, state_dir)
     await adapter._restore_cursors()
     return adapter
 
 
-async def _first_run(store: CursorStore, *newest_first: SimpleNamespace) -> None:
+async def _first_run(store: CursorStore, state_dir: Path, *newest_first: SimpleNamespace) -> None:
     rest = _Rest()
     rest.responses = [_listing(*newest_first)]
-    adapter = _adapter(rest, store)
+    adapter = _adapter(rest, store, state_dir)
     adapter._poll_chats.add(_CHAT)
     await adapter._poll_once(_CHAT)  # seed round persists the cursor
 
@@ -113,10 +118,14 @@ def _window_ms() -> int:
     return int(feishu_config().delivery_watchdog_stale_claimed_threshold_seconds * 1000)
 
 
-async def test_restart_replays_messages_that_arrived_during_downtime(store: CursorStore) -> None:
-    await _first_run(store, _item("om_1", 5 * _H))
+async def test_restart_replays_messages_that_arrived_during_downtime(
+    store: CursorStore, state_dir: Path
+) -> None:
+    await _first_run(store, state_dir, _item("om_1", 5 * _H))
     adapter = await _restarted(
-        store, _listing(_item("om_3", 1 * _H), _item("om_2", 2 * _H), _item("om_1", 5 * _H))
+        store,
+        state_dir,
+        _listing(_item("om_3", 1 * _H), _item("om_2", 2 * _H), _item("om_1", 5 * _H)),
     )
     assert _CHAT in adapter._poll_chats  # polled again without an outbound send
     assert await adapter._poll_once(_CHAT)
@@ -125,23 +134,29 @@ async def test_restart_replays_messages_that_arrived_during_downtime(store: Curs
     assert adapter._poll_cursor == {_CHAT: "om_3"}
 
 
-async def test_cursor_survives_a_second_restart(store: CursorStore) -> None:
-    await _first_run(store, _item("om_1", 5 * _H))
-    first = await _restarted(store, _listing(_item("om_2", 1 * _H), _item("om_1", 5 * _H)))
+async def test_cursor_survives_a_second_restart(store: CursorStore, state_dir: Path) -> None:
+    await _first_run(store, state_dir, _item("om_1", 5 * _H))
+    first = await _restarted(
+        store, state_dir, _listing(_item("om_2", 1 * _H), _item("om_1", 5 * _H))
+    )
     await first._poll_once(_CHAT)
-    second = await _restarted(store, _listing(_item("om_2", 1 * _H), _item("om_1", 5 * _H)))
+    second = await _restarted(
+        store, state_dir, _listing(_item("om_2", 1 * _H), _item("om_1", 5 * _H))
+    )
     await second._poll_once(_CHAT)
     assert second.core.received == []  # om_2 was handled before the first restart ended
 
 
 async def test_restart_reads_one_page_from_the_saved_cursor_and_does_not_page_back(
     store: CursorStore,
+    state_dir: Path,
 ) -> None:
     """A gap larger than one page keeps only the newest page: the read after a
     restart is a single list call, never a walk back to the saved cursor."""
-    await _first_run(store, _item("om_1", 5 * _H))
+    await _first_run(store, state_dir, _item("om_1", 5 * _H))
     adapter = await _restarted(
         store,
+        state_dir,
         _listing(_item("om_4", 1 * _H), _item("om_3", 2 * _H), next_page="t1"),
         _listing(_item("om_2", 3 * _H), _item("om_1", 5 * _H)),
     )
@@ -156,12 +171,14 @@ async def test_restart_reads_one_page_from_the_saved_cursor_and_does_not_page_ba
     assert adapter._poll_cursor == {_CHAT: "om_5"}
 
 
-async def test_a_failed_page_fails_the_round_and_keeps_the_replay(store: CursorStore) -> None:
-    await _first_run(store, _item("om_1", 5 * _H))
+async def test_a_failed_page_fails_the_round_and_keeps_the_replay(
+    store: CursorStore, state_dir: Path
+) -> None:
+    await _first_run(store, state_dir, _item("om_1", 5 * _H))
     failing = SimpleNamespace(
         raw=SimpleNamespace(status_code=503), code=99, msg="denied", data=None
     )
-    adapter = await _restarted(store, failing)
+    adapter = await _restarted(store, state_dir, failing)
     with pytest.raises(RetryableTransportError):
         await adapter._poll_once(_CHAT)
     assert adapter.core.received == []
@@ -173,10 +190,11 @@ async def test_a_failed_page_fails_the_round_and_keeps_the_replay(store: CursorS
 
 async def test_all_stale_gap_advances_cursor_so_it_is_never_replayed_later(
     store: CursorStore,
+    state_dir: Path,
 ) -> None:
-    await _first_run(store, _item("om_1", _window_ms() + 10 * _H))
+    await _first_run(store, state_dir, _item("om_1", _window_ms() + 10 * _H))
     stale = [_item("om_2", _window_ms() + 5 * _H), _item("om_1", _window_ms() + 10 * _H)]
-    adapter = await _restarted(store, _listing(*stale), _listing(*stale))
+    adapter = await _restarted(store, state_dir, _listing(*stale), _listing(*stale))
     await adapter._poll_once(_CHAT)
     assert adapter._poll_cursor == {_CHAT: "om_2"}
     await adapter._poll_once(_CHAT)
@@ -185,10 +203,12 @@ async def test_all_stale_gap_advances_cursor_so_it_is_never_replayed_later(
 
 async def test_cursor_rotated_out_of_the_page_replays_only_newer_messages(
     store: CursorStore,
+    state_dir: Path,
 ) -> None:
-    await _first_run(store, _item("om_old", 3 * _H))
+    await _first_run(store, state_dir, _item("om_old", 3 * _H))
     adapter = await _restarted(
         store,
+        state_dir,
         _listing(_item("om_b", 1 * _H), _item("om_a", 2 * _H), _item("om_before", 4 * _H)),
     )
     await adapter._poll_once(_CHAT)
@@ -198,31 +218,35 @@ async def test_cursor_rotated_out_of_the_page_replays_only_newer_messages(
 
 async def test_chat_without_a_saved_cursor_still_seeds_without_replaying_history(
     store: CursorStore,
+    state_dir: Path,
 ) -> None:
-    adapter = await _restarted(store, _listing(_item("om_2", 1 * _H), _item("om_1", 2 * _H)))
+    adapter = await _restarted(
+        store, state_dir, _listing(_item("om_2", 1 * _H), _item("om_1", 2 * _H))
+    )
     adapter._poll_chats.add(_CHAT)
     await adapter._poll_once(_CHAT)
     assert adapter.core.received == []
     assert adapter._poll_cursor == {_CHAT: "om_2"}
 
 
-async def test_empty_seed_round_saves_a_position_too(store: CursorStore) -> None:
+async def test_empty_seed_round_saves_a_position_too(store: CursorStore, state_dir: Path) -> None:
     """A first round over an empty chat leaves a time-only cursor: the message
     that lands before the next restart is replayed, not mistaken for history."""
-    await _first_run(store)
-    adapter = await _restarted(store, _listing(_item("om_1", 0)))
+    await _first_run(store, state_dir)
+    adapter = await _restarted(store, state_dir, _listing(_item("om_1", 0)))
     await adapter._poll_once(_CHAT)
     assert _texts(adapter) == ["om_1"]
 
 
 async def test_the_poll_loop_polls_the_saved_chats_without_an_outbound_send(
     store: CursorStore,
+    state_dir: Path,
 ) -> None:
     async with owned_tasks() as _owned_tasks:
-        await _first_run(store, _item("om_1", 5 * _H))
+        await _first_run(store, state_dir, _item("om_1", 5 * _H))
         rest = _Rest()
         rest.responses = [SimpleNamespace(raw=SimpleNamespace(status_code=503), code=99, data=None)]
-        adapter = _adapter(rest, store)
+        adapter = _adapter(rest, store, state_dir)
         adapter._start_poller(_owned_tasks)
         try:
             await poll_until_async(lambda: adapter._poll_chats == {_CHAT}, what="saved chat polled")
