@@ -1,8 +1,7 @@
 # meiva:note
-# The permissions-helper guards `cli/conftest.py` binds for every CLI test hold. The converge
-# door is refused by the root harness's guard, which acts on a door the run has loaded; the
-# conftest loads it by importing the helper owner's native-command guard, so this file pins
-# that both halves meet.
+# The permissions-helper guards `cli/conftest.py` binds for every CLI test hold: the converge door
+# is refused by the root harness's import-time guard, and the helper's native commands by the
+# owner's guard the conftest imports. This file pins both for a CLI test.
 
 from __future__ import annotations
 

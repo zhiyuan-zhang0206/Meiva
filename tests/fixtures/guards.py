@@ -11,9 +11,12 @@
 # markers documented on the fixture that honours them.
 
 
+import importlib.abc
+import importlib.machinery
 import os
 import sys
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Sequence
+from types import ModuleType
 from typing import Any
 
 import psycopg
@@ -165,10 +168,93 @@ def stub_everywhere(
             monkeypatch.setattr(mod, name, stub)
 
 
+# meiva:note
+# The permissions-helper door is named here and never imported: an import statement would put the
+# helper package into every test's dependency set. The refusal activates when the door is first
+# imported, whichever test or phase imports it: `_HelperDoorGuard` sits on `sys.meta_path`, wraps
+# the door's own loader, and stubs `converge` as soon as the door's body has run, before any
+# importer binds the name. `converge` rebuilds, signs and loads the host's launchd job, so a
+# forgotten mock must fail the test instead of changing the developer's machine.
+_HELPER_DOOR = "services.desktop.permissions_helper"
+
+
+def _refuse_helper_converge(*_args: object, **_kwargs: object) -> Any:
+    pytest.fail(
+        "permissions helper native effect forbidden in unit tests: mock the helper "
+        "caller or its native command boundary explicitly. Only an isolated native "
+        "proof with exact-home cleanup may use @pytest.mark.native_permissions_helper"
+    )
+
+
+# meiva:note
+# Finds the door through the other finders and hands back a spec whose loader is guarded.
+#
+# `arm` gives it the running test's `monkeypatch`, so a door imported mid-test is refused for
+# that test and restored when it ends; `disarm` leaves a later import (collection, a
+# native-proof test) unrefused, and the autouse fixture refuses the loaded door per test.
+class _HelperDoorGuard(importlib.abc.MetaPathFinder):
+    def __init__(self) -> None:
+        self._patch: pytest.MonkeyPatch | None = None
+
+    def arm(self, patch: pytest.MonkeyPatch) -> None:
+        self._patch = patch
+
+    def disarm(self) -> None:
+        self._patch = None
+
+    def find_spec(
+        self,
+        fullname: str,
+        path: Sequence[str] | None,
+        target: ModuleType | None = None,
+    ) -> importlib.machinery.ModuleSpec | None:
+        if fullname != _HELPER_DOOR:
+            return None
+        for finder in sys.meta_path:
+            if finder is self:
+                continue
+            spec = finder.find_spec(fullname, path, target)
+            if spec is not None and spec.loader is not None:
+                spec.loader = _GuardedDoorLoader(spec.loader, self)
+                return spec
+        return None
+
+    def refuse_converge_in(self, door: ModuleType) -> None:
+        if self._patch is not None:
+            stub_everywhere(self._patch, door, "converge", _refuse_helper_converge)
+
+
+# meiva:note
+# The door's own loader, followed by the refusal for the test that caused the import.
+class _GuardedDoorLoader(importlib.abc.Loader):
+    def __init__(self, loader: importlib.abc.Loader, guard: _HelperDoorGuard) -> None:
+        self._loader = loader
+        self._guard = guard
+
+    def create_module(self, spec: importlib.machinery.ModuleSpec) -> ModuleType | None:
+        return self._loader.create_module(spec)
+
+    def exec_module(self, module: ModuleType) -> None:
+        self._loader.exec_module(module)
+        self._guard.refuse_converge_in(module)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._loader, name)
+
+
+_DOOR_GUARD = _HelperDoorGuard()
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    if _DOOR_GUARD not in sys.meta_path:
+        sys.meta_path.insert(0, _DOOR_GUARD)
+        config.add_cleanup(lambda: sys.meta_path.remove(_DOOR_GUARD))
+
+
 @pytest.fixture(autouse=True)
 def _guard_permissions_helper_native_io(
     request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch
-) -> None:
+) -> Iterator[None]:
     """Helper ancestry is mandatory at runtime, never an implicit test effect.
 
     OS_JOBS_ENABLED does not gate the permission ancestor. Caller tests must
@@ -176,34 +262,27 @@ def _guard_permissions_helper_native_io(
     with their native command seam mocked. Only an intentional native proof may
     opt out, and remains responsible for its exact-home artifact/job cleanup.
 
-    The refusal binds only to a helper door the run has already loaded: this module never
-    imports it, because an import here would put the helper package into every test's
-    dependency set. `cli/conftest.py` and `tests/path_scoped/cli_tests.py` load the door
-    when they collect (they import the helper's native-command guard), and the CLI's
-    converge step is the door's only production caller, so every test that can reach a real
-    `converge` runs with it refused.
+    A door the run has already loaded is refused here; a door first imported while the test
+    runs is refused by `_HelperDoorGuard` the moment its body has executed.
     """
     if request.node.get_closest_marker("native_permissions_helper") is not None:
+        yield
         return
-    permissions_helper = sys.modules.get("services.desktop.permissions_helper")
-    if permissions_helper is None:
-        return
-
-    def forbidden(*_args: object, **_kwargs: object) -> Any:
-        pytest.fail(
-            "permissions helper native effect forbidden in unit tests: mock the helper "
-            "caller or its native command boundary explicitly. Only an isolated native "
-            "proof with exact-home cleanup may use @pytest.mark.native_permissions_helper"
-        )
-
-    stub_everywhere(monkeypatch, permissions_helper, "converge", forbidden)
+    door = sys.modules.get(_HELPER_DOOR)
+    if door is not None:
+        stub_everywhere(monkeypatch, door, "converge", _refuse_helper_converge)
+    _DOOR_GUARD.arm(monkeypatch)
+    try:
+        yield
+    finally:
+        _DOOR_GUARD.disarm()
 
 
 @pytest.fixture
 def homes_get_their_own_ports(
     monkeypatch: pytest.MonkeyPatch, session_ports: dict[str, int]
 ) -> None:
-    """Autouse: a home born inside a test records this session's own ports.
+    """A home born inside a test records this session's own ports.
 
     `base.cluster.new_home_ports` is where birth takes the fixed port table
     (`cli.start_identity._new_record`), and those are the numbers the operator's
