@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+import os
+import shutil
 import subprocess
 import sys
 from dataclasses import replace
@@ -13,8 +15,9 @@ import pytest
 import cli.commands.converge.brew_pin as cbp
 import cli.commands.converge.steps as csteps
 import cli.commands.lifecycle.converge_host as cv
+from base.host.proc import run_bounded
 from base.host.system.hostport import Host
-from base.host.system.tests.fake_commands import FakeCommands, fake_host
+from base.host.system.tests.fake_commands import LINUX_X86, FakeCommands, fake_host
 from cli.commands.converge.plans.checkout_warnings import hook_scan_argv, hook_scan_warnings
 from cli.commands.converge.spec import ALL_ROLES, ConvergeCtx
 
@@ -77,9 +80,9 @@ def _checkout_with_checker(ctx: ConvergeCtx, *, stdout: str, code: int) -> Conve
         f"sys.stdout.write({stdout!r})\n"
         f"sys.exit({code})\n"
     )
-    # meiva:note
-    # host-ok: the scan runs as a real child process; nothing here depends on the platform
-    return replace(ctx, host=Host.system())
+    return replace(
+        ctx, host=Host(run=run_bounded, which=shutil.which, platform=LINUX_X86, uid=os.getuid())
+    )
 
 
 def test_step_is_registered_after_brew_pin() -> None:
