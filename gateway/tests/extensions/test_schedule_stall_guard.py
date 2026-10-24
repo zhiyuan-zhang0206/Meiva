@@ -10,11 +10,14 @@
 
 from __future__ import annotations
 
+import selectors
+import socket
 import subprocess
 import sys
 import threading
 import time
 from collections.abc import Generator
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager, suppress
 
 import pytest
@@ -91,18 +94,110 @@ def test_a_legitimately_sleeping_main_thread_is_never_observed(
 
 
 # meiva:note
+# Locate the wait independently of the guard's verdict; spawn and argument conversion are outside it.
+def _in_child_wait(child: subprocess.Popen[bytes], thread_id: int) -> bool:
+    frame = sys._current_frames().get(thread_id)
+    if frame is None:
+        return False
+    code = frame.f_code
+    if not (
+        (
+            code.co_filename == subprocess.Popen[bytes].communicate.__code__.co_filename
+            and code.co_name == "_wait"
+        )
+        or (
+            code.co_filename == selectors.SelectSelector.select.__code__.co_filename
+            and code.co_name == "select"
+        )
+    ):
+        return False
+    while frame is not None:
+        if frame.f_code is subprocess.Popen[bytes].communicate.__code__:
+            return frame.f_locals.get("self") is child
+        frame = frame.f_back
+    return False
+
+
+# meiva:note
+# The real child cannot exit until this observer releases its socket latch, including on failure.
+def _sample_held_child_wait(
+    guard: engine.StallGuard, child: subprocess.Popen[bytes], latch: socket.socket
+) -> list[Signature | None]:
+    try:
+        deadline = time.monotonic() + 2
+        while not _in_child_wait(child, guard.main_thread_id):
+            if time.monotonic() >= deadline:
+                raise AssertionError("the main thread never entered its bounded child wait")
+            time.sleep(0.001)
+        assert child.poll() is None
+        seen: list[Signature | None] = []
+        for _ in range(5):
+            seen.append(guard.sample())
+            time.sleep(0.01)
+        assert child.poll() is None
+        return seen
+    finally:
+        with suppress(OSError):
+            latch.shutdown(socket.SHUT_WR)
+
+
+# meiva:note
+# Own child startup and every exit path outside the sampling window.
+@contextmanager
+def _held_child(capture_output: bool) -> Generator[tuple[subprocess.Popen[bytes], socket.socket]]:
+    latch, child_latch = socket.socketpair()
+    with latch, child_latch:
+        latch.settimeout(2)
+        # meiva:note
+        # Fixed interpreter/program; the only dynamic argument is this test's inherited socket fd.
+        with subprocess.Popen(  # noqa: S603
+            [
+                sys.executable,
+                "-c",
+                "import socket, sys\n"
+                "with socket.socket(fileno=int(sys.argv[1])) as latch:\n"
+                "    latch.sendall(b'R')\n"
+                "    assert latch.recv(1) == b''\n",
+                str(child_latch.fileno()),
+            ],
+            pass_fds=(child_latch.fileno(),),
+            stdout=subprocess.PIPE if capture_output else None,
+            stderr=subprocess.PIPE if capture_output else None,
+        ) as child:
+            try:
+                child_latch.close()
+                assert latch.recv(1) == b"R"
+                yield child, latch
+            finally:
+                with suppress(OSError):
+                    latch.shutdown(socket.SHUT_WR)
+                if child.poll() is None:
+                    child.kill()
+                child.wait(timeout=2)
+
+
+# meiva:note
 # A child wait may outlast the stall budget; its caller owns the timeout.
 @pytest.mark.parametrize("capture_output", [True, False], ids=["captured", "uncaptured"])
 def test_a_live_child_wait_is_never_observed(
     capture_output: bool, database_gate: ProcessDbGate
 ) -> None:
-    with _samples(database_gate) as seen:
-        subprocess.run(
-            [sys.executable, "-c", "import time; time.sleep(0.5)"],
-            capture_output=capture_output,
-            timeout=2,
-            check=True,
+    with _held_child(capture_output) as (child, latch):
+        guard = engine.StallGuard(
+            Database.from_settings(gate=database_gate), 1, None, policy=_NEVER_STALLS
         )
+        try:
+            with ThreadPoolExecutor(max_workers=1) as observer:
+                samples = observer.submit(_sample_held_child_wait, guard, child, latch)
+                try:
+                    child.communicate(timeout=2)
+                finally:
+                    with suppress(OSError):
+                        latch.shutdown(socket.SHUT_WR)
+                    seen = samples.result(timeout=2)
+        finally:
+            guard.close()
+        assert child.returncode == 0
     assert seen
     assert all(sample is None for sample in seen)
 
