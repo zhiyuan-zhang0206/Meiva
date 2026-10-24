@@ -69,6 +69,11 @@ allowlist and therefore carries no `PATH`: a bare `codex`/`claude`/`agy` would
 resolve against the OS default (`/usr/bin:/bin:/usr/sbin:/sbin`), so a real spawn
 failed while `which codex` in a shell succeeded. Two rules close that gap.
 
+The environment a session starts from is a required value: the host root builds it once
+(`child_env("runner", process_environment())`) and hands it down as
+`HostPolicy.harness_environ`; `bridge_for`, `open_session` and `session_environ` never fall
+back to the process environment.
+
 `base/host/env/harness_binaries.py::with_harness_path` rebuilds `PATH` at the
 session delivery point (`wiring.session_environ`): the host's own entries first,
 then the directories harness CLIs install into (`~/.local/bin`, `~/.npm-global/bin`,

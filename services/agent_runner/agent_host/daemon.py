@@ -82,6 +82,7 @@ from base.db.config import db_config_from_boot
 from base.deploy.progress_timeout import AGENT_HOST_BEAT_INTERVAL_S
 from base.deploy.timing import assert_clock_lattice, clock_values
 from base.events.live.bus import EventBus, EventBusConfig
+from base.host.env.registry import process_environment
 from base.host.exit_codes import HELPER_CHAIN_BROKEN_EXIT_CODE
 from base.host.exit_codes import hard_exit as _hard_exit
 from base.native_process.code_version import CodeVersion
@@ -614,7 +615,9 @@ async def run(
             bus=bus,
             db=db,
             catalog=installation.require_catalog(),
-            policy=host_policy(config, keys=installation.require_provider_keys()),
+            policy=host_policy(
+                config, keys=installation.require_provider_keys(), environ=process_environment()
+            ),
             clients=clients,
             extensions=installation.registry,
             commands=CommandCatalog.system(skills=meiva_skills.names),
