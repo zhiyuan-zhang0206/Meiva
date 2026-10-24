@@ -4,6 +4,3 @@ exports = ["db_faults.py", "pool_support.py"]
 "test_cluster_rpc.py" = ["_rpc_defaults_child.py", "rpc_support.py"]
 "test_cross_machine_dispatch.py" = ["rpc_support.py"]
 "test_operations_config.py" = ["_host_capability_child.py"]
-
-[debt.test-subclass-override]
-"test_pty_close_notices.py#subclass base.db.handle.Database.connect" = 1
