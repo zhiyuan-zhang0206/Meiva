@@ -7,7 +7,7 @@ from pathlib import Path
 import psutil
 import pytest
 
-from base.native_process import pid_starttime_ticks
+from base.native_process.kernel_identity import pid_starttime_ticks
 from base.paths import run_dir
 from base.sessions.hosting import hosting_supervised_session
 from base.sessions.record import SessionRecord

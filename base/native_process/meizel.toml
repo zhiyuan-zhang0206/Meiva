@@ -1,14 +1,15 @@
-exports = ["child_env.py", "code_version.py", "evidence.py", "exec_domain.py", "exec_kill_notice.py", "loaded_commit.py", "os_platform.py", "ownership.py", "process_control.py", "reparent.py", "root_control", "runtime_incarnation.py", "stop_timing.py", "tests", "turn_identity.py"]
+exports = ["child_env.py", "code_version.py", "evidence.py", "exec_domain.py", "exec_kill_notice.py", "kernel_identity.py", "loaded_commit.py", "os_platform.py", "ownership.py", "process_control.py", "reparent.py", "root_control", "runtime_incarnation.py", "stop_timing.py", "tests", "turn_identity.py"]
 
 [uses]
 "code_version.py" = ["loaded_commit.py"]
 "exec_domain.py" = ["process_control.py"]
-"ownership.py" = ["__init__.py", "pidfd.py"]
+"ownership.py" = ["birth_key.py", "kernel_identity.py", "pidfd.py"]
 "root_control" = ["ownership.py"]
-"tests" = ["__init__.py", "child_env.py", "code_version.py", "evidence.py", "loaded_commit.py", "os_platform.py", "ownership.py", "pidfd.py", "process_control.py", "runtime_incarnation.py", "turn_identity.py"]
+"tests" = ["birth_key.py", "child_env.py", "code_version.py", "evidence.py", "kernel_identity.py", "loaded_commit.py", "os_platform.py", "ownership.py", "pidfd.py", "process_control.py", "runtime_incarnation.py", "turn_identity.py"]
 "turn_identity.py" = ["stop_timing.py"]
 
 [purity]
+"birth_key.py" = "strict"
 "evidence.py" = "strict"
 "reparent.py" = "strict"
 "runtime_incarnation.py" = "strict"
@@ -20,8 +21,8 @@ exports = ["child_env.py", "code_version.py", "evidence.py", "exec_domain.py", "
 "ownership.py" = { kinds = ["environ"], why = "process_metadata records CODEX_HOME, the provider routing context the impersonation relay spec needs — a child-env handoff read, not persisted cluster config" }
 
 [debt.ambient-read]
-"__init__.py#platform sys.platform" = 3
 "exec_domain.py#platform sys.platform" = 1
+"kernel_identity.py#platform sys.platform" = 3
 "os_platform.py#clock time.monotonic" = 2
 "os_platform.py#home pathlib.Path.home" = 1
 "os_platform.py#pid os.getpid" = 1

@@ -40,6 +40,17 @@ Graph identity comes from `Runtime[MeivaContext]` and SDK identity from the
 execution process entry. Native ownership and resource-settlement fences remain
 distinct from ordinary log attribution.
 
+## Native birth identity
+
+`birth_key.process_birth_key` compares explicit PID, timestamp, kernel ticks and platform facts.
+Linux requires positive integer start ticks and never substitutes a wall timestamp; other
+platforms retain their existing timestamp fallback when ticks are absent.
+`kernel_identity` reads `/proc/<pid>/stat`, the Linux boot UUID and the Darwin boot-session UUID.
+These observations remain fresh per call; missing or malformed evidence is not cached or
+reinterpreted as process exit. `ownership` retains capture, double-read, liveness and signal
+authority decisions. The package initializer has no implementation or compatibility re-exports,
+so importing another native-process primitive does not import this kernel-reading owner.
+
 ## Platform facts
 
 `os_platform.is_linux()` and `os_platform.is_macos()`
