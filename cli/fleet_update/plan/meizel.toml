@@ -1,4 +1,4 @@
-exports = ["gateway_commands.py", "helper_gate.py", "host_commands.py", "host_failures.py", "host_probe.py", "journal.py", "lease_announcement.py", "old_target.py", "probe_values.py", "recovery.py", "redaction.py", "roster.py", "silence_replies.py", "stop_wave.py", "stored_schedules.py", "verify_steps.py", "wave_order.py"]
+exports = ["gateway_commands.py", "helper_gate.py", "host_commands.py", "host_failures.py", "host_probe.py", "journal.py", "lease_announcement.py", "old_target.py", "recovery.py", "redaction.py", "roster.py", "silence_replies.py", "stop_wave.py", "stored_schedules.py", "verify_steps.py", "wave_order.py"]
 
 [uses]
 "gateway_commands.py" = ["host_commands.py"]
