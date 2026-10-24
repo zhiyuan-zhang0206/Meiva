@@ -78,7 +78,6 @@ exports = ["fake_commands.py", "fake_crontab.py"]
 "test_pr_flow_job.py#monkeypatch.setattr base.host.system.pr_flow_job.logger.error" = 1
 "test_pr_flow_job.py#monkeypatch.setattr base.paths.repo_root" = 1
 "test_probes.py#monkeypatch.setattr base.host.system.probes.Path.exists" = 2
-"test_probes.py#monkeypatch.setattr base.host.system.probes.Path.home" = 3
 "test_system_backend.py#monkeypatch.setattr base.host.system.autostart.install" = 1
 "test_system_backend.py#monkeypatch.setattr base.host.system.autostart.uninstall" = 1
 "test_system_backend.py#monkeypatch.setattr base.host.system.backend.is_linux" = 1

@@ -155,9 +155,14 @@ def ensure_browser(ctx: ConvergeCtx) -> None:
             print("    (meiva-browser will not start on this host)", file=sys.stderr)
         case OfferProfileSeed(interactive=interactive):
             from services.desktop.browser.profile import Console, ensure_browser_profile
+            from services.desktop.browser.profile_paths import daily_profile_path
 
             ensure_browser_profile(
-                interactive=interactive, host=ctx.host, console=Console.of_process()
+                interactive=interactive,
+                daily_profile=daily_profile_path(
+                    system=ctx.host.platform.system, user_home=ctx.session.user_home
+                ),
+                console=Console.of_process(),
             )
         case _:
             assert_never(plan)

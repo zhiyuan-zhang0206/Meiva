@@ -35,26 +35,6 @@ def resolve_chrome_binary(configured_chrome: str | None, *, host: Host) -> str |
     return platform_chrome_binary(host=host)
 
 
-def default_chrome_user_data_dir(*, host: Host) -> Path | None:
-    """The user's *daily* Chrome user-data dir for this host, or None.
-
-    This is the top-level Chrome data dir (it holds ``Default/``, ``Profile N/``,
-    and ``Local State``), NOT a single profile — copying it whole carries every
-    signed-in profile plus the cookie jars and saved passwords. It is the source
-    used by the browser profile's explicit import of the operator's logged-in
-    Chrome state.
-
-    Returns None when the dir does not exist (Chrome never installed / never
-    launched) — the caller degrades to a fresh empty profile, which is environment detection, not
-    a swallowed error.
-    """
-    if host.platform.system == "darwin":
-        path = Path.home() / "Library" / "Application Support" / "Google" / "Chrome"
-    else:
-        path = Path.home() / ".config" / "google-chrome"
-    return path if path.is_dir() else None
-
-
 def display_available(*, host: Host) -> bool:
     """Return True if a window server a headed browser can use is reachable.
 

@@ -24,6 +24,9 @@ the operating choices below do not redefine either component.
   paths (root revival, boot autostart, a `cli.fleet_update` start) never prompt and
   always take the fresh default; a host with no daily Chrome degrades silently to
   fresh.
+  Converge selects the daily-profile candidate from its captured user session home and OS
+  system. Provisioning checks that directory only after preserving any existing destination
+  and skipping non-interactive starts; it does not resolve the user's home again.
 - **Capability and readiness:** consult the [browser gating owner](../../../docs/agent_runner_side/browser/browser/gating.meiva.okf.md).
   `meiva status` surfaces skipped capability reasons. On macOS, a waiting session
   needs the service account's active GUI login and readable login Keychain;

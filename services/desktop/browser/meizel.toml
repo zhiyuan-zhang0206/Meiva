@@ -1,4 +1,4 @@
-exports = ["mcp_daemon.py", "mcp_socket_bridge.py", "mcp_wrapper.py", "orphan.py", "probe.py", "profile.py", "protocol.py", "session_restore.py", "shutdown_budget.py"]
+exports = ["mcp_daemon.py", "mcp_socket_bridge.py", "mcp_wrapper.py", "orphan.py", "probe.py", "profile.py", "profile_paths.py", "protocol.py", "session_restore.py", "shutdown_budget.py"]
 
 [uses]
 "daemon.py" = ["macos_readiness.py", "orphan.py", "probe.py", "profile.py", "session_restore.py"]
@@ -12,10 +12,11 @@ exports = ["mcp_daemon.py", "mcp_socket_bridge.py", "mcp_wrapper.py", "orphan.py
 "probe.py" = ["macos_readiness.py", "orphan.py", "profile.py"]
 "session_restore.py" = ["session.py", "tab_groups"]
 "tab_groups" = ["session.py"]
-"tests" = ["daemon.py", "gateway_session.py", "macos_readiness.py", "mcp_daemon.py", "mcp_upstream.py", "orphan.py", "page_lifecycle.py", "probe.py", "profile.py", "session.py", "session_restore.py", "tab_groups"]
+"tests" = ["daemon.py", "gateway_session.py", "macos_readiness.py", "mcp_daemon.py", "mcp_upstream.py", "orphan.py", "page_lifecycle.py", "probe.py", "profile.py", "profile_paths.py", "session.py", "session_restore.py", "tab_groups"]
 
 [purity]
 "__init__.py" = "strict"
+"profile_paths.py" = "strict"
 "protocol.py" = "strict"
 "shutdown_budget.py" = "strict"
 
