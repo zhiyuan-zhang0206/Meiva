@@ -30,6 +30,7 @@ from base.agents.context.clients import ClientSet
 from base.agents.context.identity import ExternalLease
 from base.agents.sdk import call_policy
 from base.agents.sdk.tally import SdkCallTally
+from base.agents.sdk.tests.sampling_owners import fixed_sampling_owner
 from base.api_contracts.caller_identity import CallerIdentity
 from base.cluster.machine import MachineIdentity
 from base.packages.plugin_config_images import DiskPluginConfigImages
@@ -50,7 +51,7 @@ from meiva.tests.fixtures.pin_agent import pin_agent
 
 @pytest.fixture
 def sampling_owner() -> Iterator[call_policy.SamplingPolicyOwner]:
-    owner = call_policy.SamplingPolicyOwner(reader=call_policy.SamplingPolicy)
+    owner = fixed_sampling_owner()
     yield owner
     owner.close()
 
@@ -170,7 +171,7 @@ def test_install_is_idempotent(
 
 def test_install_rejects_a_different_owner_before_wrapping(_installed: None) -> None:
     once = meiva.files.read
-    other = call_policy.SamplingPolicyOwner(reader=call_policy.SamplingPolicy)
+    other = fixed_sampling_owner()
     try:
         with pytest.raises(ValueError, match="another sampling owner"):
             _install_recorders(other)
@@ -418,7 +419,7 @@ async def test_recorder_rejects_invalid_sampling_before_the_original_call(
     async def async_body() -> str:
         return body()
 
-    owner = call_policy.SamplingPolicyOwner(reader=invalid)
+    owner = call_policy.SamplingPolicyOwner(initial=call_policy.SamplingPolicy(), fetch=invalid)
     # meiva:note
     # the first read starts the refresh; the invalid answer lands on its worker
     owner.read()

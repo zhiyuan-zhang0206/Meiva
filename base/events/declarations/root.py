@@ -325,13 +325,12 @@ class HealthProbeRan(TypedDict):
     unhealthy_checks: int
 
 
+# meiva:note
+# `service_start_unready` payload — cli/commands/lifecycle/start/__init__.py.
+#
+# One row per non-critical service that missed its readiness window at an
+# `meiva start` (the start does not fail on it).
 class ServiceStartUnready(TypedDict):
-    """`service_start_unready` payload — cli/commands/lifecycle/start.py.
-
-    One row per non-critical service that missed its readiness window at an
-    `meiva start` (the start does not fail on it).
-    """
-
     service: str
 
 

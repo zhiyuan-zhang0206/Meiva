@@ -19,6 +19,14 @@ from services.derived.insights.run_timeline.schemas import RunTimelineContext
 router = APIRouter()
 
 
+# meiva:note
+# The cluster default model as of this request: the service's `ConfigBoot` is the live owner, and
+# the request is the unit of work that reads it once and hands the value down.
+def _request_default_model(request: Request) -> str:
+    boot = request.app.state.boot
+    return boot.view.lm.llm_model
+
+
 @dataclass(frozen=True)
 class LlmRequest:
     idx: int
@@ -62,7 +70,6 @@ def get_run_timeline_context(
     history = view.history
     body_start = history.segment_starts[0]
     config: InsightsConfig = request.app.state.insights_config
-    default_model = config.default_model
     breakdown = context_breakdown_response(
         request.app.state.db_pool,
         agent_id,
@@ -73,7 +80,7 @@ def get_run_timeline_context(
             local - body_start,
         ),
         catalog=request.app.state.catalog,
-        default_model_reader=lambda: default_model,
+        default_model=config.default_model,
     )
     return RunTimelineContext(
         **breakdown.model_dump(),

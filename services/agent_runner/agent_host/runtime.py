@@ -86,6 +86,9 @@ class HostPolicy:
     handoff_notes: TimestampPolicy
     harness_registration_ttl_seconds: float
     stall: StallTiming
+    # meiva:note
+    # The environment an external harness session starts from (`child_env("runner", ...)`).
+    harness_environ: Mapping[str, str]
 
     def resolve_slices(
         self,
@@ -400,6 +403,7 @@ async def build_runtime(
     registrations: RegistrationStore | None = None,
     registration_ttl_seconds: float,
     machine: str,
+    harness_environ: Mapping[str, str],
     contributions: Iterable[HarnessContribution] = (),
 ) -> AgentRuntime:
     """Build the retained model after the host repaired its original admission."""
@@ -422,6 +426,7 @@ async def build_runtime(
             registrations=registrations,
             registration_ttl_seconds=registration_ttl_seconds,
             machine=machine,
+            environ=harness_environ,
             skip_permissions=slices.harness_cli.harness_skip_permissions,
             contributions=contributions,
         ),
@@ -436,6 +441,7 @@ def harness_bridge_for(
     registrations: RegistrationStore | None,
     registration_ttl_seconds: float,
     machine: str,
+    environ: Mapping[str, str],
     skip_permissions: bool = True,
     contributions: Iterable[HarnessContribution] = (),
 ) -> HarnessBridge | None:
@@ -453,6 +459,7 @@ def harness_bridge_for(
         registry=registry,
         registrations=registrations,
         registration_ttl_seconds=registration_ttl_seconds,
+        environ=environ,
         skip_permissions=skip_permissions,
         contributions=contributions,
     )

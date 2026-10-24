@@ -3,7 +3,7 @@ from contextlib import contextmanager
 
 import pytest
 
-from base.agents.sdk.call_policy import SamplingPolicy, SamplingPolicyOwner
+from base.agents.sdk.tests.sampling_owners import fixed_sampling_owner
 from base.packages.plugin_config_images import DiskPluginConfigImages
 from base.packages.plugins.extensions import ExtensionRegistry
 from base.paths.home import resolve_meiva_home
@@ -28,7 +28,7 @@ def installed_fleet_surface() -> Generator[ExtensionRegistry]:
         admitted = install.install(
             ExtensionRegistry((("meiva_fleet", contributions),)),
             config_images=DiskPluginConfigImages(resolve_meiva_home()),
-            sampling=SamplingPolicyOwner(reader=SamplingPolicy),
+            sampling=fixed_sampling_owner(),
         )
         try:
             yield admitted
@@ -57,7 +57,7 @@ def set_fleet_configuration(*, reduce_context_switch: bool) -> None:
         install.install(
             ExtensionRegistry((("meiva_fleet", contributions),)),
             config_images=DiskPluginConfigImages(resolve_meiva_home()),
-            sampling=SamplingPolicyOwner(reader=SamplingPolicy),
+            sampling=fixed_sampling_owner(),
         )
 
 

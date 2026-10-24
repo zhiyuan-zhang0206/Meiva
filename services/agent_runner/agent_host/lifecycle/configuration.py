@@ -14,6 +14,7 @@ from base.clock.configuration import clock_config_from_boot
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot
+from base.host.env.registry import child_env
 from base.lm.catalog.provider_keys import ProviderKeys
 from base.native_process.loaded_commit import LoadedCommit
 from base.native_process.stop_timing import CANCEL_UNWIND_TIMEOUT_S
@@ -48,6 +49,7 @@ def host_policy(config: ConfigBoot, *, keys: ProviderKeys) -> HostPolicy:
     return HostPolicy(
         max_concurrent_turns=daemon.host_max_concurrent_turns,
         provider_keys=keys,
+        harness_environ=child_env("runner", config.process_environment()),
         cache=HostCachePolicy(
             idle_ttl_seconds=daemon.host_agent_idle_ttl_seconds, size=daemon.host_agent_cache_size
         ),

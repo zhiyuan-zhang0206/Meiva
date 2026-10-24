@@ -34,7 +34,7 @@ def test_context_response_uses_independent_live_defaults(
                 42,
                 empty,
                 catalog=catalog,
-                default_model_reader=lambda: first.view.lm.llm_model,
+                default_model=first.view.lm.llm_model,
             ).max_input_tokens
             == 1_000_000
         )
@@ -44,7 +44,7 @@ def test_context_response_uses_independent_live_defaults(
                 42,
                 empty,
                 catalog=catalog,
-                default_model_reader=lambda: second.view.lm.llm_model,
+                default_model=second.view.lm.llm_model,
             ).max_input_tokens
             == 200_000
         )
@@ -55,14 +55,12 @@ def test_context_response_uses_independent_live_defaults(
                 42,
                 empty,
                 catalog=catalog,
-                default_model_reader=lambda: first.view.lm.llm_model,
+                default_model=first.view.lm.llm_model,
             ).max_input_tokens
             == 200_000
         )
         assert (
-            resolve_agent_model(
-                pool, 42, catalog=catalog, default_model_reader=lambda: second.view.lm.llm_model
-            )
+            resolve_agent_model(pool, 42, catalog=catalog, default_model=second.view.lm.llm_model)
             == "history-small-test-model"
         )
 
@@ -90,16 +88,13 @@ def test_overlay_withdrawal_resolves_without_reading_default(
         },
     )
 
-    def forbidden() -> str:
-        raise AssertionError("An overlay must not read the cluster default")
-
     with ConnectionPool(db_conn.info.dsn, min_size=1, max_size=2) as pool:
         assert (
-            resolve_agent_model(pool, 42, catalog=catalog, default_model_reader=forbidden)
+            resolve_agent_model(pool, 42, catalog=catalog, default_model="deepseek-v4-flash")
             == "history-small-test-model"
         )
         result = context_breakdown_response(
-            pool, 42, compute_breakdown([], []), catalog=catalog, default_model_reader=forbidden
+            pool, 42, compute_breakdown([], []), catalog=catalog, default_model="deepseek-v4-flash"
         )
     assert result.max_input_tokens == 200_000
     assert result.total_input_tokens == 0

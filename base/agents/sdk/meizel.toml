@@ -1,4 +1,4 @@
-exports = ["call_policy.py", "capture.py", "tally.py", "telemetry.py"]
+exports = ["call_policy.py", "capture.py", "tally.py", "telemetry.py", "tests"]
 
 [uses]
 "telemetry.py" = ["call_policy.py", "capture.py", "tally.py"]

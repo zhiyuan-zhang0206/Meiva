@@ -10,8 +10,8 @@ import meiva
 from base.agents.context import MeivaContext
 from base.agents.context.clients import ClientSet
 from base.agents.context.gateway_client.transport import GatewayTransportInputs
-from base.agents.sdk import call_policy
 from base.agents.sdk.tally import SdkCallTally
+from base.agents.sdk.tests.sampling_owners import fixed_sampling_owner
 from base.packages.plugin_config_images import DiskPluginConfigImages
 from base.packages.plugins.extensions import ExtensionRegistry, PluginContributions, SdkMember
 from base.paths.home import resolve_meiva_home
@@ -34,7 +34,7 @@ def test_real_shell_owner_probe_counts_its_public_fanout(emitted_events: Emitted
         retry_delay_reader=lambda: 0.0,
         memory_deadline_reader=lambda: 1.0,
     )
-    sampling = call_policy.SamplingPolicyOwner(reader=call_policy.SamplingPolicy)
+    sampling = fixed_sampling_owner()
     registry = ExtensionRegistry(
         (
             (

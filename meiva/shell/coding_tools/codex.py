@@ -31,6 +31,7 @@ from pathlib import Path
 
 from base.agents.messages.external_caller import launch_caller_assignment
 from base.host.atomic_io import SYSTEM_FS, AtomicWriter
+from base.host.env.agent_env import AGENT_ID_ENV
 from base.lm.harness.codex.auth import SECRET_ENV_NAMES
 from base.sessions import coding_session_owner
 from meiva.shell.sessions import ShellSessions
@@ -192,7 +193,7 @@ def supervisor_command(owner: coding_session_owner.CodingSessionOwner, watcher: 
     """The supervisor PTY's command, with the owner's identity pinned in its environment."""
     code = supervisor_code(owner, watcher)
     return (
-        f"exec env MEIVA_AGENT_ID={owner.owner_agent_id} "
+        f"exec env {AGENT_ID_ENV}={owner.owner_agent_id} "
         f"{shlex.quote(sys.executable)} -c {shlex.quote(code)}"
     )
 

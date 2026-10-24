@@ -61,7 +61,9 @@ def test_hard_death_native_temp_not_double_charged_or_cleaned(
     row = db_conn.execute("SELECT manifest FROM upload_delivery_batches").fetchone()
     assert row is not None
     manifest = source.Manifest.model_validate(row[0])
-    directory = source.agent_upload_dir(agent, create=False, home=Path.home()).resolve()
+    directory = source.agent_upload_dir(
+        agent, create=False, home=client.app.state.gateway_config.upload_home
+    ).resolve()
     final = storage.object_path(directory, manifest, manifest.objects[0])
     result = subprocess.run(  # noqa: S603 -- fixed interpreter/script and isolated fixture arguments
         [
@@ -375,7 +377,7 @@ def test_actual_gateway_lifespan_recovers_one_chat_without_ops_process(
     from gateway.tests.upload_delivery.test_upload_delivery_recovery import SECRET
 
     # meiva:note
-    # needs base/ops: the native upload code reads `Path.home()` itself.
+    # needs ops: the native receiver reads `Path.home()` itself.
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
     unit = source.current_unit(local_machine=machine_identity.name())
     agent = seed_agent(db_conn)

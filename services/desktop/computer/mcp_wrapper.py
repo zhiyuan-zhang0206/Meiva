@@ -28,6 +28,7 @@ from mcp.server.lowlevel import Server
 from mcp.server.stdio import stdio_server
 
 from base.config import ConfigBoot
+from base.host.env.agent_env import AGENT_ID_ENV
 from base.paths import computer_mcp_socket, meiva_home
 from services.desktop.browser.mcp_socket_bridge import (
     ReconnectingLink,
@@ -40,7 +41,7 @@ def _agent_id() -> int | None:
     """This process's agent identity (None when running outside an agent)."""
     import os
 
-    raw = os.environ.get("MEIVA_AGENT_ID")
+    raw = os.environ.get(AGENT_ID_ENV)
     try:
         return int(raw) if raw else None
     except ValueError:

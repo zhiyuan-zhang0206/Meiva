@@ -7,6 +7,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
+from base.host.env.agent_env import AGENT_ID_ENV
+
 
 # meiva:note
 # What the machine contributes to a new session: the checkout whose virtualenv a session inside it may activate, and the environment a session forwards (the registry's session view with the venv activation, `VIRTUAL_ENV` included). A root reads both once.
@@ -28,7 +30,7 @@ def session_environment(
     env = dict(host.forwarded)
     if not activate_venv:
         env.pop("VIRTUAL_ENV", None)
-    env["MEIVA_AGENT_ID"] = str(agent_id)
+    env[AGENT_ID_ENV] = str(agent_id)
     if overrides:
         env.update(overrides)
     return env
