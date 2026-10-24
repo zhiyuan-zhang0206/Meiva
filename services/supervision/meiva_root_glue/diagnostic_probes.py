@@ -43,13 +43,20 @@ def brew_pins() -> DaemonProbe:
 
 
 def venv() -> DaemonProbe:
+    from base.native_process.child_env import inherited_process_env
     from services.supervision.healthchecks import prod_venv
 
-    if shutil.which("uv") is None:
+    uv = shutil.which("uv")
+    if uv is None:
         return DaemonProbe.unavailable("uv unavailable: dependency consistency was not measured")
+    # meiva:note
     # Inspect the checkout actually executing root, never a different cluster's
-    # production checkout. The helper's default remains for direct callers.
-    violations = prod_venv.venv_violations(source_root=Path(__file__).resolve().parents[3])
+    # production checkout.
+    violations = prod_venv.venv_violations(
+        source_root=Path(__file__).resolve().parents[3],
+        uv=uv,
+        environment=inherited_process_env(),
+    )
     if violations:
         return DaemonProbe.down("; ".join(violations))
     return DaemonProbe.up("root checkout dependency and import checks passed")
@@ -210,12 +217,13 @@ def lgtm_write_path() -> DaemonProbe:
     from base.telemetry.lgtm_local import backend_urls
     from services.supervision.healthchecks import lgtm, protocol_probe
 
-    port = urlsplit(backend_urls()["loki"]).port
+    loki_url = backend_urls()["loki"]
+    port = urlsplit(loki_url).port
     if port is None:
         return DaemonProbe.unavailable("native Loki endpoint has no explicit port")
 
     def protocol() -> DaemonProbe:
-        ok, reason = lgtm.write_path_probe()
+        ok, reason = lgtm.write_path_probe(loki_url)
         return DaemonProbe.up(reason) if ok else DaemonProbe.down(reason)
 
     return protocol_probe.probe_protocol(protocol)

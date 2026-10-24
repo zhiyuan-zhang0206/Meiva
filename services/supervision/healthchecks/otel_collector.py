@@ -1,69 +1,49 @@
 """Read-only health probes for otel collector; the root supervisor owns recovery."""
 
-import re
 import urllib.request
-from dataclasses import dataclass
 from http.client import HTTPException
+from pathlib import Path
 
 from base.cluster.machine import MachineIdentity, MachineRoleMissing
 from base.config import settings
 from base.daemon.health import DaemonProbe
-from base.host.env.registry import process_environment
-from base.paths import meiva_home
 from base.telemetry.observability import (
     collector_allowed_for_home,
-    endpoint_override_is_explicit,
     gateway_observability_home,
 )
-
-_QUEUE_SAMPLE = re.compile(
-    r"^otelcol_exporter_queue_(?P<kind>capacity|size)\{(?P<labels>[^}]*)\}\s+(?P<value>[0-9.eE+-]+)$"
+from services.supervision.healthchecks.plans.collector_metrics import (
+    CollectorPressure,
+    parse_pressure,
 )
-_ENQUEUE_FAILURE_SAMPLE = re.compile(
-    r"^otelcol_exporter_enqueue_failed_[^{]+\{(?P<labels>[^}]*)\}\s+(?P<value>[0-9.eE+-]+)$"
-)
-_LABEL = re.compile(r'(?:^|,)\s*(?P<key>[A-Za-z_][A-Za-z0-9_]*)="(?P<value>[^"]*)"')
 
 
-def collector_serves_this_home(*, machine: MachineIdentity) -> bool:
-    """Whether this unit owns a collector that the healthcheck should probe."""
+# meiva:note
+# Whether this unit owns a collector that the healthcheck should probe. The root hands over the
+# facts the answer needs: this unit's `home` and whether the operator explicitly set
+# `MEIVA_TELEMETRY_OTLP_ENDPOINT`.
+def collector_serves_this_home(
+    *, machine: MachineIdentity, home: Path, endpoint_explicit: bool
+) -> bool:
     try:
         roles = machine.role()
     except MachineRoleMissing:
         return False
     if "gateway" not in roles:
         return True
-    home = meiva_home()
     return collector_allowed_for_home(
         gateway_observability_home(machine, home=home),
         machine=machine,
         unit_home=home,
-        endpoint_explicit=endpoint_override_is_explicit(
-            "MEIVA_TELEMETRY_OTLP_ENDPOINT", process_environment()
-        ),
+        endpoint_explicit=endpoint_explicit,
     )
 
 
-@dataclass(frozen=True)
-class CollectorPressure:
-    saturated: tuple[str, ...]
-    enqueue_failures: dict[str, int]
-
-
-def _metrics_url() -> str:
-    """This unit's collector self-metrics endpoint, shared with converge config."""
-    return f"http://localhost:{settings.observability.otel_collector_metrics_port}/metrics"
-
-
-def _labels(text: str) -> dict[str, str]:
-    return {match.group("key"): match.group("value") for match in _LABEL.finditer(text)}
-
-
-def is_alive() -> bool:
-    """A valid OTLP/JSON request accepted by the local pipeline = alive."""
+# meiva:note
+# A valid OTLP/JSON request accepted by the local pipeline on `otlp_port` = alive.
+def is_alive(otlp_port: int) -> bool:
     try:
         req = urllib.request.Request(
-            f"http://127.0.0.1:{settings.observability.telemetry_otlp_port}/v1/traces",
+            f"http://127.0.0.1:{otlp_port}/v1/traces",
             method="POST",
             data=b'{"resourceSpans":[]}',
             headers={"Content-Type": "application/json"},
@@ -74,49 +54,30 @@ def is_alive() -> bool:
         return False
 
 
-def probe_collector() -> DaemonProbe:
-    """Observe whether the collector accepts a valid OTLP trace request."""
-    if is_alive():
+# meiva:note
+# Observe whether the collector on `otlp_port` accepts a valid OTLP trace request.
+def probe_collector_at(otlp_port: int) -> DaemonProbe:
+    if is_alive(otlp_port):
         return DaemonProbe.up("collector accepts OTLP trace requests")
     return DaemonProbe.down("collector does not accept a valid OTLP trace request")
 
 
-def queue_pressure() -> CollectorPressure | None:
-    """Current saturation plus lifetime enqueue-failure counters.
+# meiva:note
+# The registry's zero-argument probe: this unit's local OTLP port, read when the probe runs
+# (a remote or stale producer export override cannot redirect local liveness).
+def probe_collector() -> DaemonProbe:
+    return probe_collector_at(settings.observability.telemetry_otlp_port)
 
-    The counter is reported only as context while a queue is currently full;
-    it is monotone for the collector process and therefore must never, by
-    itself, create a permanent warning after recovery. Central alerting uses
-    `increase(...[5m])` on the self-scraped series instead.
-    """
+
+# meiva:note
+# The collector's queue pressure from its self-metrics on `metrics_port`, or None when
+# the endpoint cannot be read. The port is the per-unit one converge renders.
+def queue_pressure(metrics_port: int) -> CollectorPressure | None:
     try:
-        with urllib.request.urlopen(_metrics_url(), timeout=2.0) as response:  # noqa: S310 — fixed loopback probe
+        with urllib.request.urlopen(
+            f"http://localhost:{metrics_port}/metrics", timeout=2.0
+        ) as response:
             payload = response.read().decode("utf-8", errors="replace")
     except (OSError, HTTPException):
         return None
-    capacities: dict[str, float] = {}
-    sizes: dict[str, float] = {}
-    failures: dict[str, int] = {}
-    for line in payload.splitlines():
-        queue_match = _QUEUE_SAMPLE.match(line)
-        if queue_match:
-            exporter = _labels(queue_match.group("labels")).get("exporter")
-            if exporter:
-                target = capacities if queue_match.group("kind") == "capacity" else sizes
-                target[exporter] = float(queue_match.group("value"))
-            continue
-        failure_match = _ENQUEUE_FAILURE_SAMPLE.match(line)
-        if failure_match:
-            exporter = _labels(failure_match.group("labels")).get("exporter")
-            if exporter:
-                failures[exporter] = failures.get(exporter, 0) + int(
-                    float(failure_match.group("value"))
-                )
-    saturated = tuple(
-        sorted(
-            exporter
-            for exporter, capacity in capacities.items()
-            if capacity > 0 and sizes.get(exporter, 0) >= capacity
-        )
-    )
-    return CollectorPressure(saturated=saturated, enqueue_failures=failures)
+    return parse_pressure(payload)

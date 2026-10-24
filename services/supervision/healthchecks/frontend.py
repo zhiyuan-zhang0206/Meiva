@@ -1,34 +1,20 @@
 """Frontend application readiness. Service recovery belongs to meiva-root."""
 
 import subprocess
+from urllib.parse import urlsplit
 
 from base.config import settings
 from base.daemon.health import DaemonProbe
+from services.supervision.healthchecks.plans.frontend_plan import application_port
 
 
-def _app_port() -> int:
-    """The Next.js app port (MEIVA_APP_PORT, default entry+1) — NOT the entry
-    port: the entry is owned by the always-up gate, which answers 200 even
-    while the app is down. Probing the entry would make a dead app look
-    alive."""
-    from urllib.parse import urlsplit
-
-    entry = urlsplit(settings.services.frontend_healthcheck_url).port or 3000
-    return settings.services.app_port or (entry + 1)
-
-
-def _app_url() -> str:
-    """The Next.js application endpoint, behind the entry gate."""
-    return f"http://localhost:{_app_port()}"
-
-
-def _http_ok() -> bool:
+def _http_ok(port: int, *, curl_binary: str = "curl", timeout_s: float = 5.0) -> bool:
     """curl -fs probe; `-f` makes non-2xx exit non-zero, `-s` is silent."""
     try:
         result = subprocess.run(
-            ["curl", "-fs", "-o", "/dev/null", _app_url()],
+            [curl_binary, "-fs", "-o", "/dev/null", f"http://localhost:{port}"],
             capture_output=True,
-            timeout=5,
+            timeout=timeout_s,
             check=False,
         )
     except (FileNotFoundError, subprocess.TimeoutExpired):
@@ -36,9 +22,22 @@ def _http_ok() -> bool:
     return result.returncode == 0
 
 
-def probe_frontend() -> DaemonProbe:
-    """Probe the application behind the entry gate."""
-    port = _app_port()
-    if _http_ok():
+# meiva:note
+# Probe the application on `port`, behind the entry gate.
+def probe_frontend_at(
+    port: int, *, curl_binary: str = "curl", timeout_s: float = 5.0
+) -> DaemonProbe:
+    if _http_ok(port, curl_binary=curl_binary, timeout_s=timeout_s):
         return DaemonProbe.up(f"frontend application on {port} answers HTTP")
     return DaemonProbe.down(f"frontend application on {port} is not ready")
+
+
+# meiva:note
+# Probe the application behind the entry gate, on the port the settings name.
+def probe_frontend() -> DaemonProbe:
+    return probe_frontend_at(
+        application_port(
+            entry_port=urlsplit(settings.services.frontend_healthcheck_url).port,
+            app_port=settings.services.app_port,
+        )
+    )

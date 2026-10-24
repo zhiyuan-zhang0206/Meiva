@@ -2,15 +2,14 @@
 
 from __future__ import annotations
 
-import os
-import urllib.error
-import urllib.request
-from collections.abc import Callable
+import threading
+from collections.abc import Callable, Generator
+from contextlib import contextmanager
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import pytest
 
-from base.cluster import port_preflight
 from base.cluster.machine import (
     MachineIdentity,
     MachineRoleInvalid,
@@ -18,8 +17,8 @@ from base.cluster.machine import (
     MachineRoles,
 )
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
-from base.native_process.root_control import client
 from services.supervision.healthchecks import otel_collector as hc
+from services.supervision.healthchecks.plans.collector_metrics import CollectorPressure
 
 
 def _role_machine(read_role: Callable[[], MachineRoles]) -> MachineIdentity:
@@ -31,194 +30,162 @@ def _role_machine(read_role: Callable[[], MachineRoles]) -> MachineIdentity:
     )
 
 
-@pytest.mark.parametrize("ready", [True, False])
-def test_collector_health_uses_otlp_without_native_inspection(
-    monkeypatch: pytest.MonkeyPatch, ready: bool
-) -> None:
-    def forbidden(*_args: object, **_kwargs: object) -> None:
-        pytest.fail("collector protocol health must not inspect listeners")
+# meiva:note
+# A real HTTP listener on port 0 standing in for the collector: its OTLP receiver answers a
+# trace POST with `trace_status`, its self-metrics endpoint serves `metrics`; `seen` records
+# every request as `(method, path, content_type, body)`.
+class _Collector:
+    def __init__(self, *, trace_status: int = 200, metrics: bytes = b"") -> None:
+        self.seen: list[tuple[str, str, str | None, bytes]] = []
+        collector = self
 
-    monkeypatch.setattr(port_preflight, "strict_listeners_on", forbidden)
-    monkeypatch.setattr(client, "root_process", forbidden)
-    monkeypatch.setattr(hc, "is_alive", lambda: ready)
-    assert hc.probe_collector().alive is ready
+        class Handler(BaseHTTPRequestHandler):
+            def log_message(self, format: str, *args: object) -> None:
+                pass
+
+            def _reply(self, status: int, body: bytes = b"") -> None:
+                self.send_response(status)
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def do_POST(self) -> None:
+                length = int(self.headers.get("Content-Length", 0))
+                collector.seen.append(
+                    ("POST", self.path, self.headers.get("Content-Type"), self.rfile.read(length))
+                )
+                self._reply(trace_status)
+
+            def do_GET(self) -> None:
+                collector.seen.append(("GET", self.path, None, b""))
+                self._reply(200, metrics)
+
+        self._server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        self._server.daemon_threads = True
+        self.port: int = self._server.server_port
+        threading.Thread(target=self._server.serve_forever, daemon=True).start()
+
+    def close(self) -> None:
+        self._server.shutdown()
+        self._server.server_close()
 
 
-def test_collector_serves_this_home_fails_closed_without_machine_role(
-    monkeypatch: pytest.MonkeyPatch, *, machine_identity: MachineIdentity
-) -> None:
+@contextmanager
+def _collector(*, trace_status: int = 200, metrics: bytes = b"") -> Generator[_Collector]:
+    collector = _Collector(trace_status=trace_status, metrics=metrics)
+    try:
+        yield collector
+    finally:
+        collector.close()
+
+
+def _closed_port() -> int:
+    with _collector() as collector:
+        return collector.port
+
+
+def test_collector_health_is_the_otlp_answer() -> None:
+    with _collector() as collector:
+        assert hc.probe_collector_at(collector.port).alive is True
+    assert hc.probe_collector_at(_closed_port()).alive is False
+
+
+def test_collector_serves_this_home_fails_closed_without_machine_role(tmp_path: Path) -> None:
     def missing() -> MachineRoles:
         raise MachineRoleMissing
 
     def invalid() -> MachineRoles:
         raise MachineRoleInvalid("bad")
 
-    assert hc.collector_serves_this_home(machine=_role_machine(missing)) is False
+    assert (
+        hc.collector_serves_this_home(
+            machine=_role_machine(missing), home=tmp_path, endpoint_explicit=False
+        )
+        is False
+    )
     with pytest.raises(MachineRoleInvalid, match="bad"):
-        hc.collector_serves_this_home(machine=_role_machine(invalid))
+        hc.collector_serves_this_home(
+            machine=_role_machine(invalid), home=tmp_path, endpoint_explicit=False
+        )
 
 
-def test_collector_serves_this_home_keeps_runner_and_unconfigured_behavior(
-    monkeypatch: pytest.MonkeyPatch, *, machine_identity: MachineIdentity
+def test_collector_serves_this_home_keeps_runner_behavior(
+    tmp_path: Path, *, machine_identity: MachineIdentity
 ) -> None:
     machine_identity.set(role=frozenset({"agent-runner"}))
-    assert hc.collector_serves_this_home(machine=machine_identity) is True
 
-    machine_identity.set(role=frozenset({"gateway"}))
-
-    def unconfigured(machine: MachineIdentity, *, home: Path) -> None:
-        assert machine is machine_identity and home.is_dir()
-
-    monkeypatch.setattr(hc, "gateway_observability_home", unconfigured)
-    assert hc.collector_serves_this_home(machine=machine_identity) is True
+    assert (
+        hc.collector_serves_this_home(
+            machine=machine_identity, home=tmp_path, endpoint_explicit=False
+        )
+        is True
+    )
 
 
 def test_collector_serves_this_home_requires_gateway_lgtm_marker(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, machine_identity: MachineIdentity
+    tmp_path: Path, *, machine_identity: MachineIdentity
 ) -> None:
     machine_identity.set(role=frozenset({"gateway", "agent-runner"}))
 
-    def gateway_home(machine: MachineIdentity, *, home: Path) -> Path:
-        assert machine is machine_identity and home.is_dir()
-        return tmp_path
-
-    monkeypatch.setattr(hc, "gateway_observability_home", gateway_home)
-    monkeypatch.delitem(os.environ, "MEIVA_TELEMETRY_OTLP_ENDPOINT", raising=False)
-    assert hc.collector_serves_this_home(machine=machine_identity) is False
+    assert not hc.collector_serves_this_home(
+        machine=machine_identity, home=tmp_path, endpoint_explicit=False
+    )
     (tmp_path / "lgtm-host").touch()
-    assert hc.collector_serves_this_home(machine=machine_identity) is True
+    assert hc.collector_serves_this_home(
+        machine=machine_identity, home=tmp_path, endpoint_explicit=False
+    )
 
 
 def test_collector_serves_this_home_with_explicit_endpoint_skips_marker(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, machine_identity: MachineIdentity
+    tmp_path: Path, *, machine_identity: MachineIdentity
 ) -> None:
     """An explicit MEIVA_TELEMETRY_OTLP_ENDPOINT opens the healthcheck's
     collector responsibility on a non-LGTM gateway (marker OR override)."""
     machine_identity.set(role=frozenset({"gateway", "agent-runner"}))
 
-    def gateway_home(machine: MachineIdentity, *, home: Path) -> Path:
-        assert machine is machine_identity and home.is_dir()
-        return tmp_path
-
-    monkeypatch.setattr(hc, "gateway_observability_home", gateway_home)
-    monkeypatch.setitem(
-        os.environ, "MEIVA_TELEMETRY_OTLP_ENDPOINT", "http://collector.invalid:4318"
+    assert hc.collector_serves_this_home(
+        machine=machine_identity, home=tmp_path, endpoint_explicit=True
     )
-    assert hc.collector_serves_this_home(machine=machine_identity) is True
 
 
-def test_is_alive_rejecting_valid_otlp_is_not_healthy(monkeypatch: pytest.MonkeyPatch) -> None:
+# meiva:note
+# A 2xx proves the receiver parsed and accepted a valid OTLP request.
+def test_is_alive_ok_sends_a_valid_otlp_trace_request() -> None:
+    with _collector() as collector:
+        assert hc.is_alive(collector.port) is True
+
+        assert collector.seen == [
+            ("POST", "/v1/traces", "application/json", b'{"resourceSpans":[]}')
+        ]
+
+
+def test_is_alive_rejecting_valid_otlp_is_not_healthy() -> None:
     """A listener that rejects the collector's valid OTLP body is not a healthy
     ingestion pipeline; a bare socket answer is insufficient."""
-
-    def _raise(_req, **_kw):
-        raise urllib.error.HTTPError(
-            "http://127.0.0.1:4318/v1/traces",
-            415,
-            "Unsupported Media Type",
-            {},  # pyright: ignore[reportArgumentType]
-            None,
-        )
-
-    monkeypatch.setattr(urllib.request, "urlopen", _raise)  # pyright: ignore[reportUnknownArgumentType]
-    assert hc.is_alive() is False
+    with _collector(trace_status=415) as collector:
+        assert hc.is_alive(collector.port) is False
 
 
-def test_is_alive_ok(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A 2xx proves the receiver parsed and accepted a valid OTLP request."""
-
-    seen: dict[str, object] = {}
-
-    class _Resp:
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *_a: object) -> None:
-            return None
-
-    def _open(req: urllib.request.Request, **_kw: object) -> _Resp:
-        seen["url"] = req.full_url
-        seen["body"] = req.data
-        seen["content_type"] = req.headers["Content-type"]
-        return _Resp()
-
-    monkeypatch.setattr(urllib.request, "urlopen", _open)
-    assert hc.is_alive() is True
-    assert seen == {
-        "url": "http://127.0.0.1:4318/v1/traces",
-        "body": b'{"resourceSpans":[]}',
-        "content_type": "application/json",
-    }
-
-
-def test_is_alive_uses_local_port_despite_export_endpoint_override(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Remote or stale producer export overrides cannot redirect local liveness."""
-    monkeypatch.setattr(hc.settings.observability, "telemetry_otlp_port", 4319)
-    seen: list[str] = []
-
-    class _Resp:
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *_a: object) -> None:
-            return None
-
-    def _open(req: urllib.request.Request, **_kw: object) -> _Resp:
-        seen.append(req.full_url)
-        return _Resp()
-
-    monkeypatch.setattr(
-        hc.settings.observability,
-        "telemetry_otlp_endpoint",
-        "http://collector.example:4318/base",
-    )
-    monkeypatch.setattr(urllib.request, "urlopen", _open)
-    assert hc.is_alive() is True
-    assert seen == ["http://127.0.0.1:4319/v1/traces"]
-
-
-def test_is_alive_connection_refused(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_is_alive_connection_refused() -> None:
     """Connection-level failure — the sidecar is down."""
-
-    def _raise(_req, **_kw):
-        raise OSError("connection refused")
-
-    monkeypatch.setattr(urllib.request, "urlopen", _raise)  # pyright: ignore[reportUnknownArgumentType]
-    assert hc.is_alive() is False
+    assert hc.is_alive(_closed_port()) is False
 
 
-def test_queue_pressure_uses_configured_self_metrics_port(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The watchdog probes the same per-unit endpoint that converge renders."""
-    seen: list[str] = []
-
-    class _Resp:
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *_a: object) -> None:
-            return None
-
-        def read(self) -> bytes:
-            return b""
-
-    def _open(url: str, **_kw: object) -> _Resp:
-        seen.append(url)
-        return _Resp()
-
-    monkeypatch.setattr(hc.settings.observability, "otel_collector_metrics_port", 8889)
-    monkeypatch.setattr(urllib.request, "urlopen", _open)
-
-    assert hc.queue_pressure() == hc.CollectorPressure(saturated=(), enqueue_failures={})
-    assert seen == ["http://localhost:8889/metrics"]
+# meiva:note
+# The watchdog probes the same per-unit endpoint that converge renders.
+def test_queue_pressure_reads_the_self_metrics_of_the_given_port() -> None:
+    with _collector() as collector:
+        assert hc.queue_pressure(collector.port) == CollectorPressure(
+            saturated=(), enqueue_failures=()
+        )
+        assert collector.seen == [("GET", "/metrics", None, b"")]
 
 
-def test_queue_pressure_reports_full_queue_and_drop_counter(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_queue_pressure_is_unknown_when_the_endpoint_is_down() -> None:
+    assert hc.queue_pressure(_closed_port()) is None
+
+
+def test_queue_pressure_reports_full_queue_and_drop_counter() -> None:
     """Collector internal metrics make the exact queue and rejected-item count
     visible; the healthcheck does not infer pressure from process liveness."""
     payload = b"""\
@@ -228,19 +195,9 @@ otelcol_exporter_enqueue_failed_metric_points{exporter="otlphttp/prometheus"} 78
 otelcol_exporter_queue_capacity{data_type="logs",exporter="otlphttp/loki"} 5000
 otelcol_exporter_queue_size{data_type="logs",exporter="otlphttp/loki"} 12
 """
+    with _collector(metrics=payload) as collector:
+        pressure = hc.queue_pressure(collector.port)
 
-    class _Resp:
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *_a: object) -> None:
-            return None
-
-        def read(self) -> bytes:
-            return payload
-
-    monkeypatch.setattr(urllib.request, "urlopen", lambda *_a, **_kw: _Resp())  # pyright: ignore[reportUnknownArgumentType]
-    pressure = hc.queue_pressure()
     assert pressure is not None
     assert pressure.saturated == ("otlphttp/prometheus",)
-    assert pressure.enqueue_failures == {"otlphttp/prometheus": 78336}
+    assert pressure.enqueue_failures == (("otlphttp/prometheus", 78336),)

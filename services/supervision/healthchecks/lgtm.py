@@ -15,11 +15,22 @@ import urllib.parse
 import urllib.request
 from http.client import HTTPException
 from pathlib import Path
-from typing import Any
+from typing import Any, assert_never
 
 from base.cluster.machine import MachineRoles
 from base.daemon.health import DaemonProbe
 from base.paths import meiva_home
+from services.supervision.healthchecks.plans.lgtm_plan import (
+    NANOSECONDS_PER_SECOND,
+    Accepted,
+    Failed,
+    Retry,
+    marker_visible,
+    probe_payload,
+    push_step,
+    query_params,
+    readiness_failure,
+)
 
 
 def open_local(request: str | urllib.request.Request, *, timeout: float) -> Any:
@@ -29,8 +40,6 @@ def open_local(request: str | urllib.request.Request, *, timeout: float) -> Any:
     )
 
 
-_NANOSECONDS_PER_SECOND = 1_000_000_000
-_WRITE_PROBE_LOOKBACK_SECONDS = 120
 _WRITE_PROBE_END_LAG_SECONDS = 1
 # Two bounded retries for Loki admission throttling; one probe makes at most three pushes.
 _WRITE_PROBE_RETRY_BACKOFF_SECONDS = (1, 2)
@@ -66,16 +75,28 @@ def is_lgtm_host(home: Path, *, roles: MachineRoles | None) -> bool:
 def protocol_readiness(name: str) -> DaemonProbe:
     from base.telemetry.lgtm_local import HEALTH_PATHS, backend_urls
 
-    url = backend_urls()[name] + HEALTH_PATHS[name]
+    return readiness_at(name, backend_urls()[name] + HEALTH_PATHS[name])
+
+
+# meiva:note
+# Ask the readiness endpoint at `url` of backend `name` and judge the answer.
+def readiness_at(name: str, url: str) -> DaemonProbe:
     try:
         with open_local(url, timeout=2.0) as response:
-            if not 200 <= response.status < 300:
-                return DaemonProbe.down(f"{name} readiness HTTP {response.status}")
-            if name == "grafana" and json.loads(response.read())["database"] != "ok":
-                return DaemonProbe.down("Grafana database is not ready")
+            status: int = response.status
+            database = (
+                json.loads(response.read())["database"]
+                if name == "grafana" and 200 <= status < 300
+                else None
+            )
     except (OSError, ValueError, KeyError) as exc:
         return DaemonProbe.down(f"{name} readiness failed: {type(exc).__name__}")
-    return DaemonProbe.up(f"{name} readiness accepted")
+    failure = readiness_failure(name=name, status=status, grafana_database=database)
+    return (
+        DaemonProbe.down(failure)
+        if failure is not None
+        else DaemonProbe.up(f"{name} readiness accepted")
+    )
 
 
 def probe_backend(name: str) -> DaemonProbe:
@@ -91,84 +112,50 @@ def probe_backend(name: str) -> DaemonProbe:
     return probe_protocol(partial(protocol_readiness, name))
 
 
-def write_path_probe() -> tuple[bool, str]:
-    """Send one unique OTLP log and verify that Loki made it queryable."""
+# meiva:note
+# Send one unique OTLP log to the Loki at `loki_url` and verify that Loki made it queryable. A
+# throttled push is retried once per entry of `backoff_s`, pausing that many seconds first.
+def write_path_probe(
+    loki_url: str, *, backoff_s: tuple[float, ...] = _WRITE_PROBE_RETRY_BACKOFF_SECONDS
+) -> tuple[bool, str]:
     now_ns = time.time_ns()
-    marker_ns = now_ns - (_WRITE_PROBE_END_LAG_SECONDS * _NANOSECONDS_PER_SECOND)
-    marker = f"watchdog-write-probe-{marker_ns}"
-    from base.telemetry.lgtm_local import backend_urls
-
-    base_url = backend_urls()["loki"]
-    body = json.dumps(
-        {
-            "resourceLogs": [
-                {
-                    "resource": {
-                        "attributes": [
-                            {"key": "agent_id", "value": {"stringValue": "watchdog"}},
-                            {
-                                "key": "event_name",
-                                "value": {"stringValue": "watchdog-write-probe"},
-                            },
-                        ]
-                    },
-                    "scopeLogs": [
-                        {
-                            "logRecords": [
-                                {
-                                    "timeUnixNano": str(marker_ns),
-                                    "body": {"stringValue": marker},
-                                }
-                            ]
-                        }
-                    ],
-                }
-            ]
-        }
-    ).encode()
+    marker_ns = now_ns - (_WRITE_PROBE_END_LAG_SECONDS * NANOSECONDS_PER_SECOND)
+    marker, body = probe_payload(marker_ns)
     push_request = urllib.request.Request(  # noqa: S310 — configured Loki endpoint, deliberate
-        f"{base_url}/otlp/v1/logs",
+        f"{loki_url}/otlp/v1/logs",
         data=body,
         headers={"Content-Type": "application/json", "X-Scope-OrgID": "fake"},
         method="POST",
     )
-    push_failure = _push_probe(push_request)
+    push_failure = _push_probe(push_request, backoff_s)
     if push_failure is not None:
         return False, push_failure
 
     # The range end is exclusive, so it must sit strictly past the pushed
     # line's timestamp. Capture a fresh now after the push (never the
     # pre-push marker time) and anchor the window on the marker instead.
-    query_end_ns = time.time_ns()
     query = urllib.parse.urlencode(
-        {
-            "query": f'{{agent_id="watchdog", event_name="watchdog-write-probe"}} |= "{marker}"',
-            "start": str(marker_ns - (_WRITE_PROBE_LOOKBACK_SECONDS * _NANOSECONDS_PER_SECOND)),
-            "end": str(query_end_ns),
-        }
+        query_params(marker=marker, marker_ns=marker_ns, query_end_ns=time.time_ns())
     )
     query_request = urllib.request.Request(  # noqa: S310 — configured Loki endpoint, deliberate
-        f"{base_url}/loki/api/v1/query_range?{query}",
+        f"{loki_url}/loki/api/v1/query_range?{query}",
         headers={"X-Scope-OrgID": "fake"},
     )
     try:
         with open_local(query_request, timeout=2.0) as response:
             if not 200 <= response.status < 300:
                 return False, "query_error"
-            payload: dict[str, Any] = json.loads(response.read())
-            visible = any(
-                value[1] == marker
-                for stream in payload["data"]["result"]
-                for value in stream["values"]
-            )
+            visible = marker_visible(json.loads(response.read()), marker)
     except (OSError, HTTPException, ValueError, KeyError, TypeError):
         return False, "query_error"
     return (True, "ok") if visible else (False, "probe_not_visible")
 
 
-def _push_probe(request: urllib.request.Request) -> str | None:
-    """Push once, retrying only HTTP 429 with bounded backoff."""
-    for attempt in range(len(_WRITE_PROBE_RETRY_BACKOFF_SECONDS) + 1):
+# meiva:note
+# Push once, retrying only a throttle, with the bounded pauses of `backoff_s`.
+def _push_probe(request: urllib.request.Request, backoff_s: tuple[float, ...]) -> str | None:
+    attempt = 0
+    while True:
         try:
             with open_local(request, timeout=2.0) as response:
                 status = response.status
@@ -178,16 +165,14 @@ def _push_probe(request: urllib.request.Request) -> str | None:
             response_body = exc.read() if status >= 500 else b""
         except (OSError, HTTPException):
             return "push_error"
-        if 200 <= status < 300:
-            return None
-        if status == 429 and attempt < len(_WRITE_PROBE_RETRY_BACKOFF_SECONDS):
-            time.sleep(_WRITE_PROBE_RETRY_BACKOFF_SECONDS[attempt])
-            continue
-        return _push_failure_reason(status, response_body)
-    raise AssertionError("unreachable write-probe retry state")
-
-
-def _push_failure_reason(status: int, response_body: bytes) -> str:
-    if status >= 500 and b"ingester is shutting down" in response_body.lower():
-        return "ingester_shutting_down"
-    return f"push_http_{status}"
+        step = push_step(status=status, body=response_body, attempt=attempt, backoff_s=backoff_s)
+        match step:
+            case Accepted():
+                return None
+            case Retry(sleep_s=sleep_s):
+                time.sleep(sleep_s)
+                attempt += 1
+            case Failed(reason=reason):
+                return reason
+            case _:
+                assert_never(step)

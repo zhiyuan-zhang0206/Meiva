@@ -184,6 +184,17 @@ class DiagnosticMonitor:
         }
 
 
+# meiva:note
+# What the root health rounds observe besides the service monitor: the diagnostic roster and
+# the clients, machine and image a round publishes its freshness through.
+@dataclass(frozen=True)
+class RoundsInputs:
+    diagnostics: DiagnosticMonitor
+    clients: ClientSet
+    image: LoadedCommit
+    machine: MachineIdentity
+
+
 class RootHealthRounds:
     """Own one cadence for service recovery and diagnostics, plus truthful freshness."""
 
