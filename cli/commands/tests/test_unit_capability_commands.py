@@ -69,7 +69,13 @@ def test_a_bundle_whose_login_cannot_be_proven_never_installs(
     bundle = issue(born.home, runner, endpoint=endpoint)
     pooler.stop_pgbouncer(force=True)
     with pytest.raises(unit.UnitCapabilityError, match="refuses generation 0"):
-        unit.install_bundle(runner, _open(bundle), machine=MACHINE, served_endpoint=endpoint)
+        unit.install_bundle(
+            runner,
+            _open(bundle),
+            machine=MACHINE,
+            served_endpoint=endpoint,
+            probe=unit.probe_login,
+        )
     assert unit.load_unit_capability(runner) is None
     completion.ensure_pooler(
         data_plane_config,
@@ -80,7 +86,11 @@ def test_a_bundle_whose_login_cannot_be_proven_never_installs(
         machine=command_runtime.machine,
     )
     installed = unit.install_bundle(
-        runner, _open(bundle), machine=MACHINE, served_endpoint=endpoint
+        runner,
+        _open(bundle),
+        machine=MACHINE,
+        served_endpoint=endpoint,
+        probe=unit.probe_login,
     )
     assert installed.generation.number == 0
     with psycopg.connect(installed.dsn, prepare_threshold=None, connect_timeout=5) as conn:
@@ -90,5 +100,6 @@ def test_a_bundle_whose_login_cannot_be_proven_never_installs(
         _open(issue(born.home, runner, endpoint=endpoint)),
         machine=MACHINE,
         served_endpoint=endpoint,
+        probe=unit.probe_login,
     )
     assert again.generation == installed.generation

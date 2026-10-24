@@ -417,7 +417,7 @@ def install_bundle(
     *,
     machine: str,
     served_endpoint: str,
-    probe: Callable[[str], None] = probe_login,
+    probe: Callable[[str], None],
 ) -> UnitCapability:
     """Install `bundle` as this unit's capability after every binding check.
 

@@ -21,6 +21,7 @@ from base.host.db_authority.unit import (
     load_unit_capability,
     no_capability_message,
     open_bundle,
+    probe_login,
 )
 from base.host.env.boot_policy import BootstrapFetch
 from base.host.env.bootstrap import fetch_bootstrap_config
@@ -90,7 +91,11 @@ def join_gateway(
     if carry is not None:
         step = plan_install(carry.step, served, values)
         installed = install_bundle(
-            home, carry.bundle, machine=step.machine, served_endpoint=step.served_endpoint
+            home,
+            carry.bundle,
+            machine=step.machine,
+            served_endpoint=step.served_endpoint,
+            probe=probe_login,
         )
         Path(step.consume_path).unlink()
         print(installed_line(installed.generation.number, step.consume_path))
