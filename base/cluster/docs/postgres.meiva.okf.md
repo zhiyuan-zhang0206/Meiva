@@ -33,6 +33,16 @@ unresponsive process cannot pass solely because its listener still exists, and
 a changed or vanished expected birth is never replaced by warm start. The
 pidfile's wall timestamp is file data, never a native birth comparison.
 
+A captured child can still be starting before `postmaster.pid` exists. Observation
+validates its native custody without treating that missing file as closure or
+readiness; an existing pidfile must still describe the captured child. A ready
+receipt always requires its bound pidfile, including during a later observation.
+Native custody alone does not certify protocol readiness.
+Retrying an unfinished start waits for full admission before sending SIGHUP,
+because a captured exec can precede PostgreSQL's signal handlers. An already ready
+postmaster is reloaded before the readiness wait, so reloadable configuration can
+restore readiness. Neither path replaces the recorded child.
+
 `base.cluster.ownership.postgres` reads this evidence. Provisioning, admin
 connections and ordinary stop consume the same owner. Missing receipts do
 not adopt running or pidfile-recorded servers. An interrupted pending launch
