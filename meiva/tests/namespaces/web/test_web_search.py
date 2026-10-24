@@ -142,6 +142,7 @@ def test_endpoint_defaults_pin_before_literals(
     fetch = wiring.fetch_deps_for(
         config_authority,
         catalog=web_harness.catalog,
+        keys=web_harness.fetch_deps.fetch_model.keys,
         overrides=web_harness.fetch_deps.fetch_model.overrides,
         delivery=_OUTSIDE,
         agent_id=None,

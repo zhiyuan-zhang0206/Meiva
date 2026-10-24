@@ -11,6 +11,7 @@ from pathlib import Path
 from base.config.service_read import ConfigAuthority
 from base.host.env.agent_slices import ModelOverrides
 from base.lm.catalog import ModelCatalog
+from base.lm.catalog.provider_keys import ProviderKeys
 from base.paths import workspace_dir
 from meiva import files
 from meiva.sdk_surface import agent_identity
@@ -51,6 +52,7 @@ def understand_deps_for(
     authority: ConfigAuthority,
     *,
     catalog: ModelCatalog,
+    keys: ProviderKeys,
     overrides: ModelOverrides,
     base_dir: Path,
     output: OutputSite | None,
@@ -58,6 +60,7 @@ def understand_deps_for(
 ) -> UnderstandDeps:
     return UnderstandDeps(
         catalog=catalog,
+        keys=keys,
         overrides=overrides,
         text_model=authority.service_field_value("understand_text_model"),
         media_model=authority.service_field_value("understand_media_model"),

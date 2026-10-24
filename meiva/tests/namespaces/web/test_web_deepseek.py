@@ -202,6 +202,7 @@ def test_fetch_deps_reads_the_reader_setting(web_harness: WebHarness) -> None:
     deps = wiring.fetch_deps_for(
         web_harness.authority,
         catalog=web_harness.catalog,
+        keys=web_harness.fetch_deps.fetch_model.keys,
         overrides=web_harness.fetch_deps.fetch_model.overrides,
         delivery=FindingDelivery(enabled=True, in_turn=False, update=None),
         agent_id=None,

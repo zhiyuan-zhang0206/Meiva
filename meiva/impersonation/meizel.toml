@@ -20,7 +20,6 @@ exports = ["admission.py", "attachment.py"]
 "attachment.py#base/agents/impersonation/__init__.py" = 3
 "attachment.py#base/agents/impersonation/manifest.py" = 4
 "attachment.py#base/agents/impersonation/sessions.py" = 1
-"attachment.py#base/agents/impersonation/status.py" = 1
 "attachment.py#base/config/__init__.py" = 1
 "attachment.py#base/config/agent_pins.py" = 1
 "attachment.py#base/config/service_read.py" = 1

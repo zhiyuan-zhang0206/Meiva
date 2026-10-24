@@ -65,9 +65,14 @@ def test_gateway_client_sends_cluster_secret_bearer(client_config: ConfigBoot) -
     assert client.headers.get("Authorization") == "Bearer s3cr3t-token"
 
 
-def _access(secret: str) -> GatewayAccess:
+def _access(secret: str, delivered: str | None = None, profile: str | None = None) -> GatewayAccess:
     return GatewayAccess(
-        gateway_url="https://cp.example.com", cluster_secret=secret, remote_plane=False
+        gateway_url="https://cp.example.com",
+        cluster_secret=secret,
+        remote_plane=False,
+        machine_token=delivered,
+        launcher_profile=profile,
+        gateway_home=False,
     )
 
 
@@ -77,20 +82,20 @@ def test_gateway_client_without_any_credential_fails_instead_of_sending_none() -
     `Bearer `) request that would only come back 401."""
 
     with pytest.raises(GatewayApiTokenMissing):
-        gateway_bearer(_access(""), env={})
+        gateway_bearer(_access(""))
 
 
 def test_gateway_client_in_an_agent_presents_the_delivered_token() -> None:
     """An agent inherits its host's machine API token; the human secret never
     rides along when the token is there."""
 
-    env = {"MEIVA_PROCESS_PROFILE": "agent", "MEIVA_API_TOKEN": "delivered-token"}
-    assert gateway_bearer(_access("s3cr3t-token"), env=env) == "delivered-token"
+    access = _access("s3cr3t-token", "delivered-token", "agent")
+    assert gateway_bearer(access) == "delivered-token"
 
 
 def test_gateway_client_in_an_agent_without_a_token_fails_instead_of_using_the_secret() -> None:
     with pytest.raises(RuntimeError, match="MEIVA_API_TOKEN"):
-        gateway_bearer(_access("s3cr3t-token"), env={"MEIVA_PROCESS_PROFILE": "agent"})
+        gateway_bearer(_access("s3cr3t-token", None, "agent"))
 
 
 def _answering(label: str, seen: list[str]) -> Any:
