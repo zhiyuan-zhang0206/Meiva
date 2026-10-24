@@ -6,9 +6,9 @@
 
 from __future__ import annotations
 
-import contextlib
 import os
 import shutil
+import signal
 import subprocess
 import sys
 import time
@@ -357,12 +357,19 @@ def running_pooler(home: Path) -> Generator[Pooler]:
         "unix_socket_dir=\n"
     )
     subprocess.run([binary, "-d", str(ini)], check=True, capture_output=True, timeout=5)
+    identity: OwnedProcess | None = None
     try:
-        wait_port(port, timeout=5)
         pid = _wait_pidfile()
-        yield Pooler(port, pid, OwnedProcess.capture(psutil.Process(pid)), directory)
+        identity = OwnedProcess.capture(psutil.Process(pid))
+        wait_port(port, timeout=5)
+        yield Pooler(port, pid, identity, directory)
     finally:
-        _kill_test_poolers()
+        if identity is not None:
+            # meiva:note
+            # The missing-pidfile refusal test deletes the daemon's publication. Retain the
+            # captured native birth for cleanup instead of looking it up again by PID.
+            identity.send_signal(signal.SIGKILL)
+            wait_for_exit({identity}, deadline_after(5))
 
 
 def test_real_pgbouncer_normal_exit_and_identity_cleanup(
@@ -428,15 +435,25 @@ def test_missing_pooler_pidfile_does_not_mean_the_process_is_gone(
 ) -> None:
     from base.deploy.tests.containers import free_port
 
-    with running_pooler(home) as pooler:
+    identity: OwnedProcess | None = None
+    try:
+        with running_pooler(home) as pooler:
+            identity = pooler.identity
+            # meiva:note
+            # The scanner sees an exact owned pooler but its pidfile is absent. No stop signal
+            # can be justified; the pooler must stay untouched.
+            (pooler.directory / "pgbouncer.pid").unlink()
+            config = replace(local_plane, redis_url=f"redis://127.0.0.1:{free_port()}")
+            with pytest.raises(RuntimeError, match="unrecorded or replacement"):
+                stop_plane(config, 1, operator_pipeline, home)
+            assert identity.live()
+        assert not identity.live(), "fixture teardown must reap the daemon after pidfile deletion"
+    finally:
         # meiva:note
-        # The scanner sees an exact owned pooler but its pidfile is absent. No stop signal can
-        # be justified; the pooler must stay untouched.
-        (pooler.directory / "pgbouncer.pid").unlink()
-        config = replace(local_plane, redis_url=f"redis://127.0.0.1:{free_port()}")
-        with pytest.raises(RuntimeError, match="unrecorded or replacement"):
-            stop_plane(config, 1, operator_pipeline, home)
-        assert pooler.identity.live()
+        # Keep the regression experiment itself from leaking the daemon when cleanup breaks.
+        if identity is not None:
+            identity.send_signal(signal.SIGKILL)
+            wait_for_exit({identity}, deadline_after(5))
 
 
 def _wait_pidfile(timeout: float = 5.0) -> int:
@@ -462,23 +479,3 @@ def test_pidfile_wait_refuses_nonempty_corrupt_publication(home: Path) -> None:
     record.write_text("not-a-native-pid\n")
     with pytest.raises(ValueError, match="invalid literal"):
         _wait_pidfile(timeout=1)
-
-
-def _pidfile_pid() -> set[int]:
-    """The pid recorded in the (test-home) pooler pidfile, when readable."""
-    pidfile = base_pooler.pidfile_path()
-    if not pidfile.exists():
-        return set()
-    with contextlib.suppress(ValueError):
-        return {int(pidfile.read_text().strip())}
-    return set()
-
-
-def _kill_test_poolers(*pids: int | None) -> None:
-    """Kill exactly the test-owned pooler instances, half-started ones included."""
-    for target in sorted({p for p in pids if p} | _pidfile_pid()):
-        if psutil.pid_exists(target):
-            with contextlib.suppress(psutil.NoSuchProcess):
-                proc = psutil.Process(target)
-                proc.kill()
-                proc.wait(timeout=5)
