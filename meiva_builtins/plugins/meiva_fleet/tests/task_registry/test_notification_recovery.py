@@ -27,6 +27,7 @@ def test_sdk_commit_survives_producer_loss(
         parent=root_task_id,
         owner=owner,
         operation_key=str(uuid4()),
+        default_remind_interval_seconds=7200,
     )
     with db_conn.cursor() as cur:
         cur.execute("SELECT id FROM agent_tasks WHERE title='survives'")
