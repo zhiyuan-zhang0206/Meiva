@@ -5,14 +5,12 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from dataclasses import dataclass
-from datetime import datetime
 
 import psycopg
 
 from base.agents.impersonation.wake import publish_inbound_wake
 from base.agents.inbox.insert import insert_inbound_message_in_transaction
 from base.agents.messages.inbound_provenance import InboundProvenance
-from base.clock import Clock
 from base.db import Database
 from base.events.live.bus import EventBus
 
@@ -81,17 +79,3 @@ def wake_owners(db: Database, bus: EventBus, messages: Iterable[OwnerMessage]) -
     for message in messages:
         if message.live:
             publish_inbound_wake(db, bus, message.agent_id, str(message.inbound_id))
-
-
-# meiva:note
-# Local wall-clock for the message: HH:MM, or MM-DD HH:MM when the moment is not
-# on the configured zone's today (a TTL can cross midnight). A missing zone
-# falls back to the host zone (``dt.astimezone(None)``), the base/config
-# contract for "no zone configured".
-def wall_clock(dt: datetime) -> str:
-    tz = Clock.from_settings().zone()
-    local = dt.astimezone(tz)
-    stamp = local.strftime("%H:%M")
-    if local.date() != datetime.now(tz).date():
-        stamp = f"{local.strftime('%m-%d')} {stamp}"
-    return stamp

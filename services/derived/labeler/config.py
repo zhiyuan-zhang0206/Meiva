@@ -7,3 +7,4 @@ from dataclasses import dataclass
 class LabelerConfig:
     labeler_model: str
     labeler_max_chars: int
+    poll_interval_s: float

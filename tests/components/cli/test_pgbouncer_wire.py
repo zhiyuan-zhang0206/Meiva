@@ -164,7 +164,7 @@ def test_write_transaction_overrides_a_read_only_default_on_pool_borrow(
             )
         db_pool = pool(min_size=1, max_size=2, gate=database_gate)
         try:
-            delete_shell_row(db_pool, database, event_bus, agent_id, 7, interrupted=False)
+            delete_shell_row(db_pool, database, event_bus, agent_id, 7, notice=None)
         finally:
             db_pool.close()
 

@@ -9,17 +9,15 @@ loop's next round, never a page expiry.
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable, Coroutine
-from typing import Any
 
 from psycopg_pool import ConnectionPool
 
-from base.config import settings
 from base.daemon import round_loop
 from base.daemon.loop_health import LoopProgress
 from base.db import Database
 from base.events.live.bus import EventBus
 from services.upkeep.ttl_reaper import shells
+from services.upkeep.ttl_reaper.config import TtlReaperConfig
 
 _log = logging.getLogger(__name__)
 
@@ -29,27 +27,25 @@ async def remote_round(
     db: Database,
     bus: EventBus,
     progress: LoopProgress,
-    *,
-    reap_shells_fn: Callable[
-        [ConnectionPool, Database, EventBus, LoopProgress],
-        Coroutine[Any, Any, list[tuple[int, int]]],
-    ] = shells.reap_expired_shells,
+    config: TtlReaperConfig,
 ) -> None:
     """One pass: reclaim expired shells."""
-    reaped = await reap_shells_fn(pool, db, bus, progress)
+    reaped = await shells.reap_expired_shells(pool, db, bus, progress, config)
     progress.beat()
     if reaped:
         _log.info("[ttl-reaper] reclaimed %d shell(s)", len(reaped))
 
 
 async def remote_loop(
-    pool: ConnectionPool, db: Database, bus: EventBus, progress: LoopProgress
+    pool: ConnectionPool,
+    db: Database,
+    bus: EventBus,
+    progress: LoopProgress,
+    config: TtlReaperConfig,
 ) -> None:
     """The remote-call phases as a resident sequential loop."""
 
     async def one_round() -> None:
-        await remote_round(pool, db, bus, progress)
+        await remote_round(pool, db, bus, progress, config)
 
-    await round_loop.run_rounds(
-        "remote", progress, settings.daemon.ttl_reaper_poll_interval_seconds, one_round
-    )
+    await round_loop.run_rounds("remote", progress, config.poll_interval_s, one_round)
