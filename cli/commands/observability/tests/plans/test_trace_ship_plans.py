@@ -6,7 +6,6 @@ from __future__ import annotations
 
 from base64 import b64decode
 from datetime import date
-from urllib.parse import urlsplit
 
 import pytest
 
@@ -25,6 +24,7 @@ from cli.commands.observability.plans.trace_ship.target import (
     TraceShipError,
     plan_ship_target,
 )
+from cli.commands.observability.url_split import split_url
 
 # meiva:note
 # The telemetry token of the unit under test: a fixture value, not a credential.
@@ -47,7 +47,7 @@ def target(
         roles=roles,
         tempo_endpoint="http://tempo.test:14318/",
         gateway_endpoint=gateway,
-        gateway=urlsplit(gateway),
+        gateway=split_url(gateway),
         token=token,
     )
 

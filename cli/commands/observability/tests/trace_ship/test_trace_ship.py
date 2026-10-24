@@ -24,13 +24,15 @@ from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import ExportTrace
 from opentelemetry.sdk.trace import ReadableSpan, TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor, SpanExporter, SpanExportResult
 
-from base.host.db_authority import unit
 from base.host.db_authority.api import telemetry_token
-from base.host.private_storage import write_private_bytes
 from cli.commands.observability import trace
 from cli.commands.observability.plans.trace_ship.files import ship_window
 from cli.commands.observability.plans.trace_ship.target import ShipTarget, TraceShipError
-from cli.commands.observability.tests.observability_inputs import REPO_ROOT, observability
+from cli.commands.observability.tests.observability_inputs import (
+    REPO_ROOT,
+    install_unit_capability,
+    observability,
+)
 from cli.commands.observability.tests.scripted_http import Reply, Served, serve
 from cli.database.runtime import CommandRuntime
 from cli.database.tests.command_inputs import command_runtime as command_runtime
@@ -130,24 +132,6 @@ def _ship(
         config=command_runtime.config,
         home=home,
     )
-
-
-# meiva:note
-# Give `home` a real installed capability whose OTLP relay token is `telemetry`, the file a pure
-# runner holds in place of the human secret.
-def _install_capability(home: Path, *, telemetry: str) -> None:
-    resolved = home.resolve()
-    capability = unit.UnitCapability(
-        version=1,
-        unit=unit.UnitIdentity(machine="runner-1", home=str(resolved)),
-        endpoint="postgresql://meiva@10.0.0.7:6433/meiva",
-        generation=unit.GenerationRef(number=1, credential_digest="a" * 64),
-        role="meiva_runner",
-        password="p" * 40,
-        bundle="0" * 32,
-        api=unit.UnitApi(token="t" * 40, gateway="b" * 64, telemetry=telemetry),
-    )
-    write_private_bytes(unit.unit_capability_path(resolved), capability.model_dump_json().encode())
 
 
 def test_load_watermark_drops_entries_for_missing_files(traces: Path) -> None:
@@ -413,7 +397,7 @@ def test_gateway_ship_posts_to_tempo_without_a_credential(
 def test_runner_ship_presents_the_telemetry_token_of_its_capability(
     command_runtime: CommandRuntime, traces: Path, home: Path
 ) -> None:
-    _install_capability(home, telemetry="unit-telemetry-token-" + "x" * 16)
+    install_unit_capability(home, telemetry="unit-telemetry-token-" + "x" * 16)
     command_runtime.machine.set(role="agent-runner")
     (traces / "spans.jsonl").write_text(_lines("remote"), encoding="utf-8")
 

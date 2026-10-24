@@ -1,7 +1,6 @@
 import os
 from collections.abc import Callable
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Any
 from unittest.mock import patch
 
@@ -12,11 +11,15 @@ from base import config, paths
 from base.cluster.machine import MachineIdentity
 from base.config.domains.observability.settings import ObservabilitySettings
 from base.config.service_read import ConfigAuthority
-from base.host.db_authority import unit
 from base.host.db_authority.api import telemetry_token
 from base.paths.tests.homes import point_home
 from cli.commands.observability import otel_collector as collector
-from cli.commands.observability.inputs import collector_settings
+from cli.commands.observability.tests.observability_inputs import (
+    collector_settings,
+    data_plane,
+    install_unit_capability,
+    observability,
+)
 from cli.database.tests.command_inputs import command_machine as command_machine
 from gateway.tests.agents.gateway_auth import without_credentials
 from tests.fixtures.gateway_config import gateway_test_client
@@ -45,8 +48,6 @@ def test_bootstrap_routes_to_gateway_with_distinct_local_listener(
     )
     point_home(monkeypatch, tmp_path)
     monkeypatch.setattr(paths, "meiva_home", lambda: tmp_path)
-    monkeypatch.setattr(config.settings.general, "machine_host", "10.0.0.10")
-    monkeypatch.setattr(config.settings.data_plane, "cluster_secret", "relay-test-token")
     owner = config.ConfigBoot()
     with patch.dict(os.environ, {"MEIVA_HOME": str(tmp_path)}):
         owner.ensure_eager()
@@ -72,23 +73,23 @@ def test_bootstrap_routes_to_gateway_with_distinct_local_listener(
             "MEIVA_TELEMETRY_OTLP_PORT": local_port,
         }
     )
-    monkeypatch.setattr(config.settings, "observability", settings)
-    command_machine.set(name="relay-test-runner")
+    # meiva:note
+    # The runner holds an installed capability and no human secret: its relay bearer is the
+    # telemetry token the capability carries, which is the one the gateway derives from its secret.
     telemetry = telemetry_token("relay-test-token")
-    capability = SimpleNamespace(api=SimpleNamespace(telemetry=telemetry))
-
-    def installed(_home: Path) -> SimpleNamespace:
-        return capability
-
-    monkeypatch.setattr(unit, "load_unit_capability", installed)
-    monkeypatch.setattr(config.settings.data_plane, "cluster_secret", "")
+    install_unit_capability(tmp_path, telemetry=telemetry)
+    command_machine.set(name="relay-test-runner")
     rendered = yaml.safe_load(
         collector.generate_config(
             Path(__file__).resolve().parents[3],
             tmp_path,
             roles=frozenset({"agent-runner"}),
             settings=collector_settings(
-                observability=settings, data_plane=config.settings.data_plane
+                observability=observability(
+                    gateway_otlp_endpoint=settings.gateway_otlp_endpoint,
+                    telemetry_otlp_port=settings.telemetry_otlp_port,
+                ),
+                data_plane=data_plane(cluster_secret=""),
             ),
             database_factory=operator_database,
             machine=command_machine,

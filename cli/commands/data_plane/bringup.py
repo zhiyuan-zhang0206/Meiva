@@ -11,7 +11,10 @@
 # This module is the shell of `instance/storage_plan.py` (what the entry and the completion do and
 # in which order), `instance/status_lines.py` and `instance/stop_plan.py` (what status and stop
 # print and do) and `instance/launch_delivery.py` (what a launch is delivered). Every function
-# takes the home it works in; nothing here resolves it from the process.
+# takes the home it works in, except for the pooler: `stop_cluster_instance` stops it through
+# `pgbouncer.stop_pgbouncer`, which finds the pooler's ini and pidfile under the process's
+# `meiva_home()` because `base/cluster/dataplane/pooler.py` derives them from it. That path follows
+# `home` when base's `pooler.*` functions take it.
 
 from __future__ import annotations
 
@@ -20,7 +23,10 @@ import subprocess
 import sys
 from collections.abc import Callable
 from pathlib import Path
+from typing import assert_never
 from urllib.parse import urlsplit
+
+import psutil
 
 from base import cluster
 from base.agents.context.clients import DatabaseFactory
@@ -41,7 +47,7 @@ from base.host.env.dotenv_file import env_file_path, read_env_aliases
 from base.host.net.url_secret import url_host
 from base.host.proc import run_bounded
 from base.log import logger
-from base.native_process.os_platform import is_macos
+from base.native_process.ownership import OwnedProcess
 from base.telemetry import EventPipeline
 from cli.commands.data_plane import cluster_instance as instance
 from cli.commands.data_plane import pgbouncer
@@ -73,6 +79,7 @@ from cli.commands.data_plane.instance.storage_plan import (
     StartLocalStorage,
     admit_gateway_storage,
 )
+from cli.commands.data_plane.maintenance_stop_report import live_identities
 from cli.commands.data_plane.stop_waits import (
     PROCESS_CLEANUP_WAIT_S,
     PROCESS_KILL_WAIT_S,
@@ -95,6 +102,7 @@ def ensure_gateway_data_plane(
     config: DataPlaneConfig,
     *,
     home: Path,
+    macos: bool,
     retained_children: list[subprocess.Popen[bytes]] | None,
     database_factory: DatabaseFactory,
     machine: MachineIdentity,
@@ -128,7 +136,10 @@ def ensure_gateway_data_plane(
                 redis_user=cluster.redis_identity(config.redis_url),
                 retained_children=retained_children,
                 machine=machine,
+                macos=macos,
             )
+        case _:
+            assert_never(admission)
 
 
 # meiva:note
@@ -353,6 +364,8 @@ def db_delivery(cls: DbAccess, *, delivery: LaunchDelivery) -> dict[str, str]:
                 "MEIVA_DB_URL": grant.dsn(db_endpoint(delivery.home)),
                 db_delivery_files.GENERATION_ENV: str(grant.number),
             }
+        case _:
+            assert_never(kind)
 
 
 # meiva:note
@@ -376,6 +389,8 @@ def api_delivery(cls: DbAccess, *, delivery: LaunchDelivery) -> dict[str, str]:
             return {}
         case Delivery.GENERATION:
             return {API_TOKEN_ENV: api_token(home, cls)}
+        case _:
+            assert_never(kind)
 
 
 # meiva:note
@@ -454,6 +469,7 @@ def stop_cluster_instance(
     config: DataPlaneConfig,
     *,
     home: Path,
+    macos: bool,
     retained_children: list[subprocess.Popen[bytes]] | None = None,
     producer: Callable[[], EventPipeline],
 ) -> int:
@@ -485,21 +501,55 @@ def stop_cluster_instance(
                     report_postgres_stop_escalation(escalation, producer=producer)
                 print("  ✓ postgres stopped")
             case stop_plan.StopRedis(port=redis_port):
-                if not _stop_redis(config, redis_port, redis_env):
+                if not _stop_redis(config, redis_port, redis_env, home=home, macos=macos):
                     return 1
+            case _:
+                assert_never(step)
     return 0
+
+
+# meiva:note
+# This home's `redis-server` processes, as native identities.
+#
+# A `redis-server` counts as this home's when its working directory is the home's Redis data
+# directory (the daemon is launched with `--dir` there): the attribution the maintenance stop's
+# process scan makes. A process this user cannot inspect is not counted.
+def _home_redis_servers(data_dir: Path) -> tuple[OwnedProcess, ...]:
+    servers: list[OwnedProcess] = []
+    for process in psutil.process_iter(["name"]):
+        if process.info["name"] != "redis-server":
+            continue
+        try:
+            if Path(process.cwd()).resolve() == data_dir:
+                servers.append(OwnedProcess.capture(process))
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            continue
+    return tuple(servers)
 
 
 # meiva:note
 # Shut Redis down as its admin user and verify its port no longer accepts connections: the exit
 # status of `shutdown` proves nothing, and neither does an authenticated PING that fails for want
 # of the right password, so the check is the listener itself.
-def _stop_redis(config: DataPlaneConfig, port: int, env: dict[str, str] | None) -> bool:
+#
+# Who holds the port decides what the failure says, not whether it is one. The home's Redis
+# servers are identified before the shutdown; a listener that outlives it while one of them is
+# still alive is that Redis, and a listener with none of them alive is another process on the
+# cluster's Redis port. The stop fails either way.
+def _stop_redis(
+    config: DataPlaneConfig,
+    port: int,
+    env: dict[str, str] | None,
+    *,
+    home: Path,
+    macos: bool,
+) -> bool:
+    servers = _home_redis_servers(instance.redis_data_dir(home).resolve())
     returncode, detail = 0, ""
     try:
         shutdown = run_bounded(
             [
-                instance.redis_cli_bin(config.redis_bin_dir, macos=is_macos()),
+                instance.redis_cli_bin(config.redis_bin_dir, macos=macos),
                 "-p",
                 str(port),
                 "shutdown",
@@ -513,7 +563,11 @@ def _stop_redis(config: DataPlaneConfig, port: int, env: dict[str, str] | None) 
         returncode, detail = shutdown.returncode, (shutdown.stderr or "").strip()[:400]
     except subprocess.TimeoutExpired:
         returncode, detail = -1, "redis-cli shutdown timed out"
-    failure = stop_plan.redis_stop_failure(port, still_answers=local_listener(port))
+    failure = stop_plan.redis_stop_failure(
+        port,
+        listening=local_listener(port),
+        home_redis_alive=bool(live_identities(servers)),
+    )
     if failure is not None:
         print(f"  ✗ {failure} (rc={returncode}): {detail}", file=sys.stderr)
         return False

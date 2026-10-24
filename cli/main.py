@@ -24,7 +24,7 @@ import subprocess
 import sys
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any, cast
+from typing import TYPE_CHECKING, cast
 
 from pydantic import ValidationError
 
@@ -41,7 +41,25 @@ from cli import parsers
 from cli.startup.log_sinks import cli_log_name
 from cli.startup.settings_failure import settings_failure_text
 
-__all__ = ["bind_init_inputs", "entry", "main", "print_settings_load_failure", "run_command"]
+if TYPE_CHECKING:
+    from base.cluster.machine import MachineIdentity
+    from cli.database import OpenDatabase, OperatorDatabaseFactory, OperatorEventPipeline
+
+__all__ = [
+    "ProducerFactory",
+    "bind_entry_facts",
+    "bind_init_inputs",
+    "entry",
+    "main",
+    "print_settings_load_failure",
+    "run_command",
+]
+
+# meiva:note
+# Builds the command's telemetry producer from its database factory, machine identity and home.
+type ProducerFactory = Callable[
+    [OperatorDatabaseFactory, MachineIdentity, Path], OperatorEventPipeline
+]
 
 # Settings-lite verbs — they must construct Settings while the gateway is down
 # (stop and status must remain available for recovery inspection), so
@@ -71,21 +89,6 @@ _LITE_VERBS = frozenset(
         "permissions",
     }
 )
-
-
-# meiva:note
-# The one operator-readable line of a lifecycle command that refused to run, and its exit status:
-# another local operation holds the lifecycle lock, or the command's audit scope cannot be opened
-# because its caller cannot be named.
-def _report_refusal(exc: Exception) -> int:
-    if isinstance(exc, LockTimeoutError):
-        print(
-            f"meiva: another local lifecycle operation is active; retry after it finishes: {exc}",
-            file=sys.stderr,
-        )
-    else:
-        print(f"meiva: {exc}; the command was not started", file=sys.stderr)
-    return 1
 
 
 # meiva:note
@@ -138,12 +141,12 @@ def _opt_into_lite_config(args_in: list[str]) -> None:
 # Hand `meiva init` the host facts of its caller, the process facts beyond its site.
 #
 # Init reads none of them itself: the caller's tool directories, which ports of the
-# fixed table something already holds and the transport key of a database-capability bundle,
-# which leaves the environment here so no child process inherits it. A `--ssl-cert-file` is
-# pinned into the process before dispatch because the gateway join that follows dials with it.
+# fixed table something already holds and the transport key of a database-capability bundle
+# (`args.transport_key`, taken out of the environment by `_take_transport_key`). A
+# `--ssl-cert-file` is pinned into the process before dispatch because the gateway join that
+# follows dials with it.
 def bind_init_inputs(args: argparse.Namespace) -> None:
     from base import cluster
-    from base.host.db_authority.unit import CAPABILITY_KEY_ENV
     from cli.startup.service_path import CallerHost
 
     table = cast("dict[str, int]", cluster.new_home_ports())
@@ -153,10 +156,41 @@ def bind_init_inputs(args: argparse.Namespace) -> None:
         virtual_env=os.environ.get("VIRTUAL_ENV"),
         prefix_venv=sys.prefix if sys.prefix != sys.base_prefix else None,
         occupied_ports=frozenset(port for port in table.values() if not cluster.port_free(port)),
-        transport_key=os.environ.pop(CAPABILITY_KEY_ENV, ""),
+        transport_key=args.transport_key,
     )
     if args.ssl_cert_file is not None:
         os.environ["SSL_CERT_FILE"] = args.ssl_cert_file
+
+
+# meiva:note
+# Take the transport key of a database-capability bundle out of the environment, the one place
+# either verb that carries a bundle (`meiva init` and `meiva cluster db-authority install-unit`)
+# reads it.
+#
+# The key leaves the process environment before any step runs, so no child process any of those
+# steps spawns inherits it; the verb receives it as `args.transport_key`. Every other verb
+# leaves the variable alone.
+def _take_transport_key(args_in: list[str]) -> str | None:
+    if args_in[:1] != ["init"] and args_in[:3] != ["cluster", "db-authority", "install-unit"]:
+        return None
+    from base.host.db_authority.unit import CAPABILITY_KEY_ENV
+
+    return os.environ.pop(CAPABILITY_KEY_ENV, "")
+
+
+# meiva:note
+# Hand the verb what only the process entry can read: the site `init` and `start` act on (the
+# home and the checkout whose CLI runs) and the transport key of a capability bundle.
+def bind_entry_facts(
+    args: argparse.Namespace, args_in: list[str], *, home: Path, checkout: Path
+) -> None:
+    transport_key = _take_transport_key(args_in)
+    if transport_key is not None:
+        args.transport_key = transport_key
+    if args_in[:1] in (["init"], ["start"]):
+        from cli.start_runtime import HomeSite
+
+        args.site = HomeSite(home, checkout)
 
 
 def _deliver_lite_api_token() -> None:
@@ -206,30 +240,24 @@ def main(
     )
 
 
-def _operator_producer(database_factory: Any, *, machine: Any, home: Path) -> Any:
+def _operator_producer(
+    database_factory: OperatorDatabaseFactory, machine: MachineIdentity, home: Path
+) -> OperatorEventPipeline:
     from cli.database import operator_event_pipeline
 
     return operator_event_pipeline(database_factory, machine=machine, home=home)
 
 
 # meiva:note
-# The one place the operator's home is created (owner-only, a symlinked home refused): the runtime
-# built next only reads the path, and everything it hands down names the same resolved home.
-def _create_home() -> None:
-    from base.paths import meiva_home
-
-    meiva_home()
-
-
+# Run one command; `producer_factory(database_factory, machine, home)` builds its producer and
+# `open_database(config, gate, direct_url)` every database handle of the command.
 def run_command(
     argv: list[str] | None,
     *,
     retained_children: list[subprocess.Popen[bytes]] | None,
-    producer_factory: Callable[..., Any],
-    open_database: Callable[[Any, Any, Any], Any],
+    producer_factory: ProducerFactory,
+    open_database: OpenDatabase,
 ) -> int:
-    """Run one command; `producer_factory(database_factory, machine=, home=)` builds its producer
-    and `open_database(config, gate, direct_url)` every database handle of the command."""
     # Line-buffer stdout so a long command piped into `tee` (every detached rollout /
     # updater session) streams its own progress in real time instead of block-buffering
     # it to the end of the log, out of order against its children's unbuffered output.
@@ -249,13 +277,16 @@ def run_command(
 
     children = [] if retained_children is None else retained_children
     args = parsers.parse_args(argv, retained_children=children)
-    if args_in[:1] in (["init"], ["start"]):
-        # meiva:note
-        # The home and checkout init and start act on are read here, once, behind the gate above.
-        from base.paths.home import resolve_meiva_home
-        from cli.start_runtime import HomeSite
+    # meiva:note
+    # The home this command acts on is read here, once, behind the gate above. `declared` is the
+    # path as the environment spells it (a symlinked home is refused when it is created); `home`
+    # is the resolved path every later owner (the init/start site, the command runtime, the
+    # producer) is handed.
+    from base.paths.home import resolve_meiva_home
 
-        args.site = HomeSite(resolve_meiva_home().resolve(), checkout)
+    declared = resolve_meiva_home()
+    home = declared.resolve()
+    bind_entry_facts(args, args_in, home=home, checkout=checkout)
     if args_in[:1] == ["init"]:
         bind_init_inputs(args)
         return args.func(args)
@@ -267,20 +298,22 @@ def run_command(
         except (ValueError, TypeError, RuntimeError, OSError) as exc:
             print(f"meiva start: {exc}", file=sys.stderr)
             return 1
+    from base.paths.private_dir import ensure_private_dir
     from cli.database import operator_database_factory
-    from cli.database.lifecycle_audit import AuditUnavailableError
     from cli.database.runtime import CommandRuntime
 
-    _create_home()
-    command = CommandRuntime.create()
+    # meiva:note
+    # The one place the operator's home is created (owner-only, a symlinked home refused); the
+    # runtime built next only holds the path.
+    ensure_private_dir(declared)
+    command = CommandRuntime.create(home)
     args.runtime = command
     database_factory = operator_database_factory(
         local_host=command.machine.host,
         open_database=open_database,
     )
     args.database_factory = database_factory
-    args.database_for_url = database_factory.for_url
-    producer = producer_factory(database_factory, machine=command.machine, home=command.home)
+    producer = producer_factory(database_factory, command.machine, command.home)
     args.producer = producer
     try:
         if args_in[:1] not in (["init"], ["start"]):  # these two open their own, after admission
@@ -288,8 +321,12 @@ def run_command(
             if sink is not None:
                 producer.initialize_logging(sink)
         return args.func(args)
-    except (LockTimeoutError, AuditUnavailableError) as exc:
-        return _report_refusal(exc)
+    except LockTimeoutError as exc:
+        print(
+            f"meiva: another local lifecycle operation is active; retry after it finishes: {exc}",
+            file=sys.stderr,
+        )
+        return 1
     except ValidationError as exc:
         return print_settings_load_failure(exc)
     except BootstrapFetchError as exc:

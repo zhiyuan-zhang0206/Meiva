@@ -17,16 +17,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from enum import Enum
+from enum import Enum, StrEnum
+from typing import assert_never
 
 from cli.commands.data_plane.host_dependencies.scope import StartScope
 
 __all__ = [
-    "CLI_TOOLS",
-    "DATA_PLANE",
     "HOST_TOOLS",
-    "HOST_UTILS",
-    "NODE",
+    "Component",
     "HostTool",
     "Need",
     "Probe",
@@ -36,12 +34,20 @@ __all__ = [
     "required_tools",
 ]
 
-DATA_PLANE = "data-plane"
-NODE = "node"
-HOST_UTILS = "host-utils"
-CLI_TOOLS = "cli-tools"
-
 _HOST_OWNED = "the host; this repository cannot install it"
+
+
+# meiva:note
+# A group of tools one provisioning script installs together.
+#
+# The value is the group's name in the owner document
+# (`cli/commands/lifecycle/docs/start-host-dependencies.meiva.okf.md`); a tool that no script
+# installs has no component, and a refusal names its repair instead.
+class Component(StrEnum):
+    DATA_PLANE = "data-plane"
+    NODE = "node"
+    HOST_UTILS = "host-utils"
+    CLI_TOOLS = "cli-tools"
 
 
 # meiva:note
@@ -82,7 +88,7 @@ class Probe(Enum):
 class HostTool:
     name: str
     when: str
-    component: str | None
+    component: Component | None
     need: Need
     probe: Probe
     repair: str = ""
@@ -101,48 +107,52 @@ class HostTool:
 # meiva:note
 # The provisioning script a group's missing tool is installed through, relative to
 # `scripts/provision`.
-def provision_script(component: str) -> str:
+def provision_script(component: Component) -> str:
     match component:
-        case "data-plane":
+        case Component.DATA_PLANE:
             return "database.sh"
-        case "node":
+        case Component.NODE:
             return "node.sh"
-        case "host-utils":
+        case Component.HOST_UTILS:
             return "host_utils.sh"
-        case "cli-tools":
+        case Component.CLI_TOOLS:
             return "install-cli-tools.sh"
         case _:
-            raise ValueError(f"unknown provisioning group {component!r}")
+            assert_never(component)
 
 
 # meiva:note
 # What a provisioning group installs, as the install announcement words it.
-def provision_label(component: str) -> str:
+def provision_label(component: Component) -> str:
     match component:
-        case "data-plane":
+        case Component.DATA_PLANE:
             return "PostgreSQL/Redis/PgBouncer"
-        case "node":
+        case Component.NODE:
             return "Node.js"
-        case "host-utils":
+        case Component.HOST_UTILS:
             return "cron + curl"
-        case "cli-tools":
+        case Component.CLI_TOOLS:
             return "git, the GitHub CLI and the other CLI tools"
         case _:
-            raise ValueError(f"unknown provisioning group {component!r}")
+            assert_never(component)
 
 
-def _owner(component: str | None) -> str:
+# meiva:note
+# Who installs a tool of `component`: the group's script, or the host when no script does.
+def _owner(component: Component | None) -> str:
     match component:
-        case "data-plane":
+        case None:
+            return _HOST_OWNED
+        case Component.DATA_PLANE:
             return "`scripts/provision/database.sh` (apt/Homebrew)"
-        case "node":
+        case Component.NODE:
             return "`scripts/provision/node.sh` (apt/Homebrew)"
-        case "host-utils":
+        case Component.HOST_UTILS:
             return "`scripts/provision/host_utils.sh` (apt; macOS ships both)"
-        case "cli-tools":
+        case Component.CLI_TOOLS:
             return "`scripts/provision/install-cli-tools.sh` (apt/Homebrew)"
         case _:
-            return _HOST_OWNED
+            assert_never(component)
 
 
 def _needed(need: Need, scope: StartScope) -> bool:
@@ -171,6 +181,8 @@ def _needed(need: Need, scope: StartScope) -> bool:
             return scope.github_pr_consolidation
         case Need.MACOS_HELPER:
             return scope.macos_helper
+        case _:
+            assert_never(need)
 
 
 # meiva:note
@@ -181,21 +193,21 @@ HOST_TOOLS: tuple[HostTool, ...] = (
     HostTool(
         name="initdb",
         when="gateway with a local data plane: initializes the cluster's PostgreSQL 17",
-        component=DATA_PLANE,
+        component=Component.DATA_PLANE,
         need=Need.DATA_PLANE,
         probe=Probe.PG_TOOL,
     ),
     HostTool(
         name="pg_ctl",
         when="gateway with a local data plane: starts and stops that instance",
-        component=DATA_PLANE,
+        component=Component.DATA_PLANE,
         need=Need.DATA_PLANE,
         probe=Probe.PG_TOOL,
     ),
     HostTool(
         name="postgres",
         when="gateway with a local data plane: the server process itself",
-        component=DATA_PLANE,
+        component=Component.DATA_PLANE,
         need=Need.DATA_PLANE,
         probe=Probe.PG_TOOL,
     ),
@@ -203,14 +215,14 @@ HOST_TOOLS: tuple[HostTool, ...] = (
         name="pg_isready",
         when="gateway with a local data plane: the readiness probe (a host client tool; "
         "the vendored tree omits it)",
-        component=DATA_PLANE,
+        component=Component.DATA_PLANE,
         need=Need.DATA_PLANE,
         probe=Probe.PG_TOOL,
     ),
     HostTool(
         name="redis-server",
         when="gateway with a local data plane: the cluster's own Redis process",
-        component=DATA_PLANE,
+        component=Component.DATA_PLANE,
         need=Need.DATA_PLANE,
         probe=Probe.REDIS_SERVER,
         repair="fix MEIVA_REDIS_BIN_DIR: it must hold an executable redis-server and redis-cli",
@@ -218,7 +230,7 @@ HOST_TOOLS: tuple[HostTool, ...] = (
     HostTool(
         name="redis-cli",
         when="gateway with a local data plane: authenticated admin and ACL commands",
-        component=DATA_PLANE,
+        component=Component.DATA_PLANE,
         need=Need.DATA_PLANE,
         probe=Probe.REDIS_CLI,
         repair="fix MEIVA_REDIS_BIN_DIR: it must hold an executable redis-server and redis-cli",
@@ -226,21 +238,21 @@ HOST_TOOLS: tuple[HostTool, ...] = (
     HostTool(
         name="pgbouncer",
         when="gateway with a local data plane and pooling enabled: the connection pooler",
-        component=DATA_PLANE,
+        component=Component.DATA_PLANE,
         need=Need.POOLER,
         probe=Probe.POOLER,
     ),
     HostTool(
         name="node",
         when="frontend or browser service selected: builds and runs the Next.js app",
-        component=NODE,
+        component=Component.NODE,
         need=Need.NODE,
         probe=Probe.NODE_TOOL,
     ),
     HostTool(
         name="npm",
         when="frontend or browser service selected: installs and builds the frontend",
-        component=NODE,
+        component=Component.NODE,
         need=Need.NODE,
         probe=Probe.NODE_TOOL,
     ),
@@ -248,7 +260,7 @@ HOST_TOOLS: tuple[HostTool, ...] = (
         name="npx",
         when="frontend or browser service selected: runs the frontend tooling and the "
         "meiva-browser daemon",
-        component=NODE,
+        component=Component.NODE,
         need=Need.NODE,
         probe=Probe.NODE_TOOL,
     ),
@@ -256,7 +268,7 @@ HOST_TOOLS: tuple[HostTool, ...] = (
         name="crontab",
         when="Linux, OS jobs enabled, default home: registers the daily backup, log rotation, "
         "packages refresh and health probe",
-        component=HOST_UTILS,
+        component=Component.HOST_UTILS,
         need=Need.OS_JOBS_LINUX,
         probe=Probe.WHICH,
     ),
@@ -291,7 +303,7 @@ HOST_TOOLS: tuple[HostTool, ...] = (
     HostTool(
         name="curl",
         when="frontend service selected: the frontend readiness probe",
-        component=HOST_UTILS,
+        component=Component.HOST_UTILS,
         need=Need.FRONTEND,
         probe=Probe.WHICH,
     ),
@@ -338,7 +350,7 @@ HOST_TOOLS: tuple[HostTool, ...] = (
     HostTool(
         name="git",
         when="always: enumerates tracked migrations and digests the checkout on every start",
-        component=CLI_TOOLS,
+        component=Component.CLI_TOOLS,
         need=Need.ALWAYS,
         probe=Probe.WHICH,
         repair="install git with your package manager: `sudo apt-get install -y git` "
@@ -348,7 +360,7 @@ HOST_TOOLS: tuple[HostTool, ...] = (
         name="gh",
         when="split agent-runner that consolidates the memory pool through GitHub PRs "
         "(not a gateway, MEIVA_MEMORY_KEEP_LOCAL unset, MEIVA_REQUIRE_GITHUB_PR on)",
-        component=CLI_TOOLS,
+        component=Component.CLI_TOOLS,
         need=Need.GITHUB_PR,
         probe=Probe.WHICH,
         repair="install the GitHub CLI, then run `gh auth login` and grant the account write "

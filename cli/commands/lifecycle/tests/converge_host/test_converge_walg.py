@@ -127,7 +127,9 @@ def test_on_validates_pins_the_key_and_makes_the_state_directory(
 
     # meiva:note
     # The plan's installer step is left out: running it would download the pinned wal-g.
-    converge_walg_module.execute_walg_plan((LoadWalgConfig(), PrepareWalgStateDir()), on)
+    converge_walg_module.execute_walg_plan(
+        (LoadWalgConfig(), PrepareWalgStateDir()), on, walg_config_file=_config_file(on)
+    )
 
     assert walg_config.pinned_key_id() == walg_config.read_config(_config_file(on)).key_fingerprint
     state = unit_home / "backups" / "walg"
@@ -142,7 +144,9 @@ def test_a_bad_configuration_fails_converge_not_postgres(ctx: ConvergeCtx, unit_
     )
 
     with pytest.raises(walg_config.WalgConfigError, match="WALG_PREVENT_WAL_OVERWRITE"):
-        converge_walg_module.execute_walg_plan((LoadWalgConfig(),), on)
+        converge_walg_module.execute_walg_plan(
+            (LoadWalgConfig(),), on, walg_config_file=_config_file(on)
+        )
 
     assert walg_config.pinned_key_id() is None, "an unusable configuration pins nothing"
 
@@ -151,11 +155,15 @@ def test_a_different_key_than_the_pinned_one_fails_converge(
     ctx: ConvergeCtx, unit_home: Path
 ) -> None:
     on = _walg_ctx(ctx, unit_home)
-    converge_walg_module.execute_walg_plan((LoadWalgConfig(),), on)
+    converge_walg_module.execute_walg_plan(
+        (LoadWalgConfig(),), on, walg_config_file=_config_file(on)
+    )
     (unit_home / "secrets" / "walg" / "libsodium.key").write_text("cd" * 32 + "\n")
 
     with pytest.raises(walg_config.WalgConfigError, match="is not the key this home pinned"):
-        converge_walg_module.execute_walg_plan((LoadWalgConfig(),), on)
+        converge_walg_module.execute_walg_plan(
+            (LoadWalgConfig(),), on, walg_config_file=_config_file(on)
+        )
 
 
 def test_a_remote_managed_data_plane_cannot_archive(ctx: ConvergeCtx, unit_home: Path) -> None:

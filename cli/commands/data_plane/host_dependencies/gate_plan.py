@@ -12,16 +12,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import assert_never
 
 from cli.commands.data_plane.host_dependencies.diagnosis import DependencyProblem
-from cli.commands.data_plane.host_dependencies.table import (
-    CLI_TOOLS,
-    DATA_PLANE,
-    HOST_UTILS,
-    NODE,
-    HostTool,
-    provision_script,
-)
+from cli.commands.data_plane.host_dependencies.table import Component, HostTool, provision_script
 
 __all__ = [
     "GatePlan",
@@ -58,7 +52,7 @@ class Refuse:
 @dataclass(frozen=True)
 class InstallGroups:
     report: tuple[str, ...]
-    groups: tuple[str, ...]
+    groups: tuple[Component, ...]
 
 
 # meiva:note
@@ -71,8 +65,8 @@ class Ready:
 GatePlan = Satisfied | Refuse | InstallGroups
 
 
-def _groups(missing: Missing) -> tuple[str, ...]:
-    wanted: list[str] = []
+def _groups(missing: Missing) -> tuple[Component, ...]:
+    wanted: list[Component] = []
     for tool, problem in missing:
         if tool.component is None or not problem.installable:
             continue
@@ -85,20 +79,29 @@ def _report(missing: Missing) -> tuple[str, ...]:
     return ("", "→ host dependencies", *(f"  · {tool.name}: {p.detail}" for tool, p in missing))
 
 
+# meiva:note
+# The Homebrew command that installs what `component` provisions on a Mac.
+def _homebrew_install(component: Component) -> str:
+    match component:
+        case Component.DATA_PLANE:
+            return "brew install postgresql@17 redis@8.2 pgbouncer pgvector"
+        case Component.NODE:
+            return "brew install node"
+        case Component.HOST_UTILS:
+            return "brew install curl"
+        case Component.CLI_TOOLS:
+            return "brew install git gh"
+        case _:
+            assert_never(component)
+
+
 def _remediation(missing: Missing, *, repo: Path, macos: bool) -> tuple[str, ...]:
     lines: list[str] = []
     groups = _groups(missing)
     if macos:
         if groups:
             lines.append("macOS needs Homebrew first: https://brew.sh")
-        if DATA_PLANE in groups:
-            lines.append("brew install postgresql@17 redis@8.2 pgbouncer pgvector")
-        if NODE in groups:
-            lines.append("brew install node")
-        if HOST_UTILS in groups:
-            lines.append("brew install curl")
-        if CLI_TOOLS in groups:
-            lines.append("brew install git gh")
+        lines.extend(_homebrew_install(component) for component in Component if component in groups)
     else:
         for group in groups:
             script = repo / "scripts" / "provision" / provision_script(group)

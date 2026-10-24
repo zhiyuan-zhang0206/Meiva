@@ -40,6 +40,7 @@ from base.host.db_authority import delivery
 from base.host.net.url_secret import url_with_port
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
+from cli.commands.data_plane.tests.data_plane_records import data_plane_config as data_plane_config
 from cli.commands.tests.test_single_box import Born
 from cli.commands.tests.test_single_box import born as born
 from cli.commands.tests.test_single_box import configured as configured

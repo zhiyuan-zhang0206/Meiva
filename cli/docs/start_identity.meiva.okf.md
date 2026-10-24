@@ -22,29 +22,16 @@ refuses everything else naming `meiva init`, a home with no intent included. The
 data-plane host live in its `record` (`base/cluster/record.py`), and no host
 file lists clusters. A new home records the fixed port table
 (`base/host/env/port_table.py`) after the entry's bind probe finds every port free
-(`CallerHost.occupied_ports`, read once by `cli/main.py` and carried as the required
-`IdentityInput.occupied_ports`; `prepare_identity` refuses a table with an occupied port); a record whose slots differ from the table is refused. The intent's `checkout` is the
+(`CallerHost.occupied_ports`, read once by `cli/main.py` and carried as the required `IdentityInput.occupied_ports`; `prepare_identity` refuses an occupied port); a record whose slots differ from the table is refused. The intent's `checkout` is the
 home's admitted runtime: the database-authority delivery admits only a process running
 from it (`base/host/db_authority/delivery.py`). An intent that still carries the
-`worktree` key an older start recorded is refused by name rather than read. An
-interrupted claim
-resumes the same ports and credentials with `meiva init` and no flags (a flag is
-refused): the intent carries
-the `.env` payload only while claiming and drops it once `.env` is published, so
-no stale copy of a credential outlives a rotation there. An initialized home
-(`configured`, `provisioned` or `ready`) refuses a second `meiva init` and changes
-nothing; its identity changes only through `meiva cluster destroy` and a new init. A gateway claim
+`worktree` key an older start recorded is refused by name rather than read. An interrupted claim resumes the same ports and credentials with `meiva init` and no flags (a flag is refused); the intent carries the `.env` payload only while claiming, so no stale credential copy outlives a rotation. An initialized home (`configured`, `provisioned` or `ready`) refuses a second `meiva init`; its identity changes only through `meiva cluster destroy` and a new init. A gateway claim
 also pins a minted logical-backup passphrase before it publishes `.env`
 (`services/backup/artifact/passphrase.ensure_minted`; an interrupted birth
 keeps the first one). Unregistered existing resources, a terminal destroy intent, or a capability set
 that differs from the intent's refuses a start.
 
-Entering that home discards inherited derived identity, including the database
-login and its delivered-generation marker together. The command's configuration
-then re-admits database authority for this home and checkout, even when the CLI's
-earlier import already delivered a login. This also applies to a warm start's
-read-only schema and checkpoint checks; a matching endpoint does not authorize
-another home's login or a restricted launcher.
+Entering that home discards inherited derived identity, including the database login and its delivered-generation marker. The command's configuration then re-admits database authority for this home and checkout, even when the CLI's earlier import already delivered a login; this also applies to a warm start's read-only schema and checkpoint checks, and a matching endpoint authorizes no other home's login or restricted launcher.
 
 `meiva init` needs explicit capabilities (`--serve-gateway`, `--serve-agent-runner`,
 `--serve-observability-station`) and a machine name. A remote runner gives it
@@ -85,14 +72,13 @@ requires prior stop; identical live generations skip configuration, dependency,
 and schema writes. Schema drift fails read-only. This development source digest
 excludes ignored build outputs.
 
-`cli/main.py` hands each entry its home, checkout and host facts as values; the contract of the entries and of the pure modules around the start lifecycle (`cli/startup/`) is in [[cli/docs/entry.meiva.okf.md]].
+`cli/main.py` hands each entry its home, checkout and host facts as values; the entries' contract is in [[cli/docs/entry.meiva.okf.md]].
 
 `cli/start_runtime.py` (`StartRuntime`) names what one start executes: the checkout
 that loaded the code, its working directory, the interpreter that loaded it and the
-`LoadedRuntimeIdentity` verified for that checkout. `StartRuntime.admit` verifies it once,
-at the composition root; it grants no migration, writer-closure or other operation right.
-The serving root must report that same identity when the start publishes serving, so a
-source change after admission fails the start. Restart admits the runtime before
+`LoadedRuntimeIdentity` verified for that checkout. `StartRuntime.admit` verifies it at the
+composition root; it grants no migration, writer-closure or other operation right.
+The start's own converge may write into the checkout before the root launches, so serving is published against a digest read again then (`StartRuntime.identity_now`) that the root must report: a source change after the root launched fails the start. Restart admits the runtime before
 stopping services and passes it into both legs. Source convergence preserves host setup and scaffold
 steps without automatic production editable-install repair or reinstall.
 

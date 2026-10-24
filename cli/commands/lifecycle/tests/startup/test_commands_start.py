@@ -172,7 +172,7 @@ def test_a_start_refreshes_only_its_invocations_machine(start_run: StartRun) -> 
     from cli.database.runtime import CommandRuntime
 
     run = start_run
-    other = CommandRuntime.create()
+    other = CommandRuntime.create(run.home)
     other.config.set_field("machine_name", "other-invocation")
     run.command.config.set_field("machine_name", "before-setup")
     run.command.machine.reset()

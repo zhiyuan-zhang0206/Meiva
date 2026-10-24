@@ -24,19 +24,20 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
-from urllib.parse import unquote, urlsplit
+from typing import assert_never
+from urllib.parse import unquote
 
 from base.agents.context.clients import DatabaseFactory
 from base.clock import Timers
 from base.cluster.machine import MachineIdentity, MachineRoles
 from base.deploy.release import collector_artifact
-from base.host.net.ports import SYSTEM_URL_OPENER
+from base.host.net.ports import SYSTEM_URL_OPENER, UrlOpener
 from base.paths import otel_collector_config, otel_collector_dir
 from base.telemetry.observability import collector_allowed_for_home, endpoint_override_is_explicit
 from base.telemetry.station_endpoint import resolve_station_target, validated_observability_base
 from cli.commands.converge.rendered_file import write_rendered_guarded
 from cli.commands.converge.spec import ConvergeCtx
-from cli.commands.observability.inputs import CollectorSettings, collector_settings
+from cli.commands.observability.inputs import CollectorSettings, collector_settings_from_boot
 from cli.commands.observability.plans.authority import host_port
 from cli.commands.observability.plans.collector.data_plane import (
     data_plane_fragments,
@@ -53,6 +54,7 @@ from cli.commands.observability.plans.collector.exporters import (
 )
 from cli.commands.observability.plans.collector.install import (
     InstallCollector,
+    KeepCollector,
     SkipUnsupportedPlatform,
     plan_collector_install,
     plan_collector_step,
@@ -69,6 +71,7 @@ from cli.commands.observability.plans.collector.render import (
 )
 from cli.commands.observability.plans.collector.text import ottl_quote
 from cli.commands.observability.plans.observability_config import ObservabilityConfig
+from cli.commands.observability.url_split import split_url
 
 
 def _config_template(repo: Path) -> str:
@@ -123,12 +126,12 @@ def _data_plane_receivers(
         return "", ""
     from base.cluster import redis_admin_url
 
-    admin = urlsplit(redis_admin_url(plane.redis_url, plane.redis_admin_password))
+    admin = split_url(redis_admin_url(plane.redis_url, plane.redis_admin_password))
     return data_plane_fragments(
         plan,
         postgres_block=_postgres_block(meiva_home, plane.db_url) if plan.postgres else "",
         redis_block=redis_receiver_block(
-            endpoint=receiver_endpoint(urlsplit(plane.redis_url), "redis"),
+            endpoint=receiver_endpoint(split_url(plane.redis_url), "redis"),
             password=unquote(admin.password or ""),
         ),
     )
@@ -140,13 +143,13 @@ def _data_plane_receivers(
 # The hold watchdog reads this before spending its bounded completion attempt: a gateway that has
 # not published the ingress yet must not burn the attempt.
 def gateway_otlp_endpoint_problem(endpoint: str) -> str | None:
-    return ingress_endpoint_problem(urlsplit(endpoint.strip()))
+    return ingress_endpoint_problem(split_url(endpoint.strip()))
 
 
 # meiva:note
 # The authenticated gateway ingress published by bootstrap, independent of local ports.
 def gateway_otel_ingress_endpoint(endpoint: str) -> str:
-    return gateway_ingress_endpoint(endpoint, urlsplit(endpoint.strip()))
+    return gateway_ingress_endpoint(endpoint, split_url(endpoint.strip()))
 
 
 # meiva:note
@@ -207,14 +210,18 @@ def _exporters(
     database_factory: DatabaseFactory,
 ) -> str:
     obs = settings.observability
-    relay_endpoint = ""
-    authorization = ""
-    if shape is ExporterShape.RUNNER_RELAY:
-        relay_endpoint = gateway_otel_ingress_endpoint(obs.gateway_otlp_endpoint)
-        authorization = cluster_bearer(bearer)
-    elif shape is ExporterShape.STATION_RELAY:
-        relay_endpoint = station_otel_ingress_endpoint(obs, database_factory=database_factory)
-        authorization = cluster_bearer(bearer)
+    match shape:
+        case ExporterShape.RUNNER_RELAY:
+            relay_endpoint = gateway_otel_ingress_endpoint(obs.gateway_otlp_endpoint)
+            authorization = cluster_bearer(bearer)
+        case ExporterShape.STATION_RELAY:
+            relay_endpoint = station_otel_ingress_endpoint(obs, database_factory=database_factory)
+            authorization = cluster_bearer(bearer)
+        case ExporterShape.LOCAL_BACKENDS:
+            relay_endpoint = ""
+            authorization = ""
+        case _:
+            assert_never(shape)
     return render_exporters(
         shape,
         relay_endpoint=relay_endpoint,
@@ -311,6 +318,7 @@ def ensure_otel_collector(
     database_factory: DatabaseFactory,
     machine: MachineIdentity,
     timers: Timers,
+    open_url: UrlOpener,
     tag: str | None,
     platform_label: str,
 ) -> None:
@@ -328,17 +336,20 @@ def ensure_otel_collector(
         return
     dest_dir.mkdir(parents=True, exist_ok=True)
     version = collector_artifact.OTELCOL_CONTRIB_VERSION
-    if isinstance(plan, InstallCollector):
-        collector_artifact.download_and_verify(
-            plan.tag,
-            dest_dir,
-            open_url=SYSTEM_URL_OPENER,
-            timers=timers,
-            limits=settings.download,
-        )
-        print(f"  · otel-collector: installed otelcol-contrib {version} ({plan.tag})")
-    else:
-        print(f"  · otel-collector: otelcol-contrib {version} present")
+    match plan:
+        case InstallCollector(tag=install_tag):
+            collector_artifact.download_and_verify(
+                install_tag,
+                dest_dir,
+                open_url=open_url,
+                timers=timers,
+                limits=settings.download,
+            )
+            print(f"  · otel-collector: installed otelcol-contrib {version} ({install_tag})")
+        case KeepCollector():
+            print(f"  · otel-collector: otelcol-contrib {version} present")
+        case _:
+            assert_never(plan)
     write_config(
         otel_collector_config(meiva_home),
         generate_config(
@@ -378,16 +389,16 @@ def ensure_otel_collector_step(ctx: ConvergeCtx) -> None:
         for warning in skip:
             print(warning, file=sys.stderr)
         return
-    view = ctx.read_config().view
     platform = ctx.host.platform
     ensure_otel_collector(
         ctx.repo,
         ctx.meiva_home,
         ctx.roles,
-        settings=collector_settings(observability=view.observability, data_plane=view.data_plane),
+        settings=collector_settings_from_boot(ctx.read_config()),
         database_factory=ctx.database_factory,
         machine=ctx.machine,
         timers=ctx.timers,
+        open_url=SYSTEM_URL_OPENER,
         tag=collector_artifact.platform_tag(),
         platform_label=f"{platform.system} {platform.machine}",
     )

@@ -21,7 +21,7 @@ import shutil
 import socket
 import subprocess
 from collections.abc import Callable, Iterator
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from typing import Any, cast
 from unittest.mock import patch
@@ -33,8 +33,12 @@ from redis.exceptions import RedisError
 from base import cluster
 from base.cluster import authority, ownership
 from base.cluster.dataplane import pooler as base_pooler
+from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.dataplane.pg_tools import pg_tool
 from base.config import settings
+from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
+from base.db.config import DbConfig
 from base.host.db_authority import delivery, ledger, model
 from base.host.db_authority.api import API_TOKEN_ENV
 from base.host.env.registry import process_environment
@@ -43,11 +47,21 @@ from base.native_process.child_env import daemon_process_env
 from cli.commands.data_plane import bringup, completion
 from cli.commands.data_plane import cluster_instance as ci
 from cli.commands.data_plane import pgbouncer as pooler
-from cli.commands.data_plane.config import DataPlaneConfig, data_plane_config_from_settings
+from cli.commands.data_plane.config import DataPlaneConfig
 from cli.commands.data_plane.instance.launch_delivery import LaunchDelivery
+from cli.commands.data_plane.instance.storage_plan import (
+    BirthGeneration,
+    EnsurePooler,
+    InAdminSession,
+)
+from cli.commands.data_plane.tests.data_plane_records import data_plane_config as data_plane_config
 from cli.commands.data_plane.tests.native_cluster import shutdown_redis
 from cli.commands.lifecycle.start.migrations import cmd_migrations_apply
-from cli.database import OperatorDatabaseFactory
+from cli.database import (
+    OperatorDatabaseFactory,
+    open_operator_database,
+    operator_database_factory,
+)
 from cli.database.runtime import CommandRuntime
 from cli.database.tests.cli_tests import operator_database as operator_database
 from cli.database.tests.command_inputs import command_runtime as command_runtime
@@ -132,7 +146,10 @@ def _teardown(born: Born) -> None:
 
 
 def _configure(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, distinct_free_ports: Callable[[int], list[int]]
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    distinct_free_ports: Callable[[int], list[int]],
+    unit_plane: DataPlaneConfig,
 ) -> Born:
     """A configured-but-unprovisioned single-box home (minted cluster secret)."""
     from cli.start_identity import IdentityInput, gateway_values
@@ -164,13 +181,17 @@ def _configure(
     (home / ".env").write_text("".join(f"{key}={value}\n" for key, value in values.items()))
     _intent(home, record, values)
     passphrase.ensure_minted(home)  # as the birth's claim publication pins it
-    dp = settings.data_plane
-    monkeypatch.setattr(dp, "cluster_secret", values["MEIVA_CLUSTER_SECRET"])
-    monkeypatch.setattr(dp, "db_url", values["MEIVA_DB_URL"])
-    monkeypatch.setattr(dp, "redis_url", values["MEIVA_REDIS_URL"])
-    monkeypatch.setattr(dp, "redis_admin_password", values["MEIVA_REDIS_ADMIN_PASSWORD"])
-    monkeypatch.setattr(dp, "events_channel", values["MEIVA_EVENTS_CHANNEL"])
-    monkeypatch.setattr(dp, "pgbouncer_enabled", True)
+    # meiva:note
+    # The config the commands read: the unit environment's values with the minted ones.
+    plane = replace(
+        unit_plane,
+        cluster_secret=values["MEIVA_CLUSTER_SECRET"],
+        db_url=values["MEIVA_DB_URL"],
+        redis_url=values["MEIVA_REDIS_URL"],
+        redis_admin_password=values["MEIVA_REDIS_ADMIN_PASSWORD"],
+        events_channel=values["MEIVA_EVENTS_CHANNEL"],
+        pgbouncer_enabled=True,
+    )
     # The start process adopts its delivered login into os.environ; the raw-env
     # seam restores the suite's own values at teardown.
     monkeypatch.setitem(os.environ, "MEIVA_DB_URL", values["MEIVA_DB_URL"])
@@ -180,16 +201,14 @@ def _configure(
     monkeypatch.setitem(os.environ, delivery.GENERATION_ENV, "")
     monkeypatch.delitem(os.environ, delivery.GENERATION_ENV)
 
-    def _record(_home: Path) -> cluster.ClusterRecord:
-        return record
-
-    monkeypatch.setattr(cluster, "get_record", _record)
-    # The config the commands read, built by the production mapping from the settings above.
-    return Born(home=home, record=record, values=values, plane=data_plane_config_from_settings())
+    return Born(home=home, record=record, values=values, plane=plane)
 
 
 def test_configured_roster_survives_kernel_reuse_of_closed_ports(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, distinct_free_ports: Callable[[int], list[int]]
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    distinct_free_ports: Callable[[int], list[int]],
+    data_plane_config: DataPlaneConfig,
 ) -> None:
     from cli.start_identity import read_intent
 
@@ -214,7 +233,7 @@ def test_configured_roster_survives_kernel_reuse_of_closed_ports(
             held.remove(self.port)
 
     monkeypatch.setattr(socket, "socket", ReusingSocket)
-    configured = _configure(monkeypatch, tmp_path, distinct_free_ports)
+    configured = _configure(monkeypatch, tmp_path, distinct_free_ports, data_plane_config)
     intent = read_intent(configured.home)
     assert intent is not None
     assert set(configured.record.ports) == set(cluster.FIXED_PORTS)
@@ -222,7 +241,7 @@ def test_configured_roster_survives_kernel_reuse_of_closed_ports(
     assert not held
 
 
-def _birth(
+def _prepare_schema(
     born: Born, *, operator_database: OperatorDatabaseFactory, command_runtime: CommandRuntime
 ) -> None:
     assert (
@@ -232,6 +251,7 @@ def _birth(
             retained_children=born.retained_children,
             database_factory=operator_database,
             machine=command_runtime.machine,
+            macos=command_runtime.host.platform.system == "darwin",
         )
         == 0
     )
@@ -242,12 +262,19 @@ def _birth(
         config=born.plane,
         home=born.home,
     )
+
+
+def _birth(
+    born: Born, *, operator_database: OperatorDatabaseFactory, command_runtime: CommandRuntime
+) -> None:
+    _prepare_schema(born, operator_database=operator_database, command_runtime=command_runtime)
     completion.complete_gateway_data_plane(
         born.plane,
         home=born.home,
         environment=os.environ,
         database_factory=operator_database,
         machine=command_runtime.machine,
+        macos=command_runtime.host.platform.system == "darwin",
     )
 
 
@@ -258,10 +285,11 @@ def configured(
     postgres_access: None,
     redis_access: None,
     distinct_free_ports: Callable[[int], list[int]],
+    data_plane_config: DataPlaneConfig,
 ) -> Iterator[Born]:
     # These commands simulate a process entry and deliver its unit environment.
     with patch.dict(os.environ):
-        born = _configure(monkeypatch, tmp_path, distinct_free_ports)
+        born = _configure(monkeypatch, tmp_path, distinct_free_ports, data_plane_config)
         try:
             yield born
         finally:
@@ -415,6 +443,7 @@ def test_pooler_restart_revokes_a_removed_user_a_reload_would_keep(
         admin_password=admin.password,
         binary=base_pooler.pgbouncer_bin(),
         daemon_env=daemon_process_env(),
+        macos=command_runtime.host.platform.system == "darwin",
         bind_wait_s=ci.BIND_WAIT_TIMEOUT_S,
     )
     rc = pooler.ensure_pgbouncer(spec)
@@ -439,6 +468,7 @@ def test_unchanged_userlist_reloads_without_restart(
         environment=os.environ,
         database_factory=operator_database,
         machine=command_runtime.machine,
+        macos=command_runtime.host.platform.system == "darwin",
     )
     after = ownership.pooler(base_pooler.ini_path(), base_pooler.pidfile_path())
     assert before is not None and after is not None and before.pid == after.pid
@@ -461,6 +491,7 @@ def test_ordinary_start_refuses_a_stray_group_member_and_leaves_it_untouched(
             environment=os.environ,
             database_factory=operator_database,
             machine=command_runtime.machine,
+            macos=command_runtime.host.platform.system == "darwin",
         )
     with born.admin() as conn:
         assert conn.execute(
@@ -485,6 +516,7 @@ def test_ordinary_start_holds_on_an_invariant_violation(
             environment=os.environ,
             database_factory=operator_database,
             machine=command_runtime.machine,
+            macos=command_runtime.host.platform.system == "darwin",
         )
 
 
@@ -505,6 +537,7 @@ def test_ordinary_start_refuses_a_home_without_a_ledger_before_any_effect(
             retained_children=configured.retained_children,
             database_factory=operator_database,
             machine=command_runtime.machine,
+            macos=command_runtime.host.platform.system == "darwin",
         )
         == 1
     )
@@ -517,38 +550,48 @@ def test_ordinary_start_refuses_a_home_without_a_ledger_before_any_effect(
             environment=os.environ,
             database_factory=operator_database,
             machine=command_runtime.machine,
+            macos=command_runtime.host.platform.system == "darwin",
         )
 
 
+# meiva:note
+# A birth that stops after the pooler is up and before its logins are proven leaves generation 0
+# pending, and the next start settles on that same generation. The first start is the completion
+# plan cut before `ProveLogins`, run as it is by `execute_completion`.
 def test_interrupted_birth_retries_to_the_same_generation(
     configured: Born,
-    monkeypatch: pytest.MonkeyPatch,
     operator_database: OperatorDatabaseFactory,
     *,
     command_runtime: CommandRuntime,
 ) -> None:
-    calls: list[int] = []
-    real = completion.prove_generation_logins
+    macos = command_runtime.host.platform.system == "darwin"
+    _prepare_schema(
+        configured, operator_database=operator_database, command_runtime=command_runtime
+    )
 
-    def failing(home: Path, generation: model.Generation, endpoint: str) -> None:
-        calls.append(generation.number)
-        raise RuntimeError("injected crash before activation")
+    completion.execute_completion(
+        (InAdminSession((BirthGeneration(), EnsurePooler())),),
+        configured.plane,
+        home=configured.home,
+        environment=os.environ,
+        database_factory=operator_database,
+        machine=command_runtime.machine,
+        macos=macos,
+    )
 
-    monkeypatch.setattr(completion, "prove_generation_logins", failing)
-    with pytest.raises(RuntimeError, match="injected crash"):
-        _birth(configured, operator_database=operator_database, command_runtime=command_runtime)
-    current = ledger.require_ledger(configured.home)
-    assert current.active is None and current.pending is not None and current.pending.number == 0
-    monkeypatch.setattr(completion, "prove_generation_logins", real)
+    interrupted = ledger.require_ledger(configured.home)
+    assert interrupted.active is None
+    assert interrupted.pending is not None and interrupted.pending.number == 0
     completion.complete_gateway_data_plane(
         configured.plane,
         home=configured.home,
         environment=os.environ,
         database_factory=operator_database,
         machine=command_runtime.machine,
+        macos=macos,
     )
-    current = ledger.require_ledger(configured.home)
-    assert calls == [0] and current.active is not None and current.active.number == 0
+    settled = ledger.require_ledger(configured.home)
+    assert settled.active is not None and settled.active.number == 0
 
 
 def test_launched_services_receive_their_class_login_only(born: Born) -> None:
@@ -592,28 +635,25 @@ _ROLES = frozenset({"gateway", "agent-runner"})
 
 
 def _collector_postgres_receiver(
-    born: Born,
-    monkeypatch: pytest.MonkeyPatch,
-    *,
-    operator_database: OperatorDatabaseFactory,
-    command_runtime: CommandRuntime,
+    born: Born, *, operator_database: OperatorDatabaseFactory, command_runtime: CommandRuntime
 ) -> dict[str, Any]:
     """The rendered collector config's PostgreSQL receiver; the whole rendered
     text carries no credential of the data plane."""
     import yaml
 
     from cli.commands.observability import otel_collector as oc
-    from cli.commands.observability.inputs import collector_settings
+    from cli.commands.observability.inputs import collector_settings_from_boot
 
-    monkeypatch.setattr(settings.observability, "telemetry_otlp_enabled", True)
+    config = command_runtime.config
+    config.set_field("telemetry_otlp_enabled", True)
+    for name in ("db_url", "redis_url", "redis_admin_password", "cluster_secret"):
+        config.set_field(name, getattr(born.plane, name))
     command_runtime.machine.set(name="test-machine")
     rendered = oc.generate_config(
         _REPO,
         born.home,
         _ROLES,
-        settings=collector_settings(
-            observability=settings.observability, data_plane=settings.data_plane
-        ),
+        settings=collector_settings_from_boot(config),
         database_factory=operator_database,
         machine=command_runtime.machine,
     )
@@ -676,17 +716,13 @@ def _scrape_like_the_receiver(receiver: dict[str, Any]) -> None:
 
 
 def test_collector_postgres_receiver_keeps_no_credential(
-    born: Born,
-    monkeypatch: pytest.MonkeyPatch,
-    operator_database: OperatorDatabaseFactory,
-    *,
-    command_runtime: CommandRuntime,
+    born: Born, operator_database: OperatorDatabaseFactory, *, command_runtime: CommandRuntime
 ) -> None:
     """The collector's PostgreSQL receiver logs in as the stable monitoring
     role by `peer` over the owner-only socket: no password at rest in its
     config and no application data."""
     receiver = _collector_postgres_receiver(
-        born, monkeypatch, operator_database=operator_database, command_runtime=command_runtime
+        born, operator_database=operator_database, command_runtime=command_runtime
     )
     assert receiver["username"] == authority.MONITOR_ROLE
     assert receiver["transport"] == "unix"
@@ -713,7 +749,7 @@ def test_collector_postgres_receiver_keeps_no_credential(
     # The unchanged config keeps scraping.
     assert (
         _collector_postgres_receiver(
-            born, monkeypatch, operator_database=operator_database, command_runtime=command_runtime
+            born, operator_database=operator_database, command_runtime=command_runtime
         )
         == receiver
     )
@@ -721,11 +757,24 @@ def test_collector_postgres_receiver_keeps_no_credential(
 
 
 def test_direct_exemption_dials_postgres_as_the_delivered_login(
-    born: Born, operator_database: OperatorDatabaseFactory
+    born: Born, command_runtime: CommandRuntime
 ) -> None:
     """With pooling on, the admin-plane `direct=True` dial swaps only the port to
     the real Postgres (this home's own record) and keeps the delivered login."""
-    handle = operator_database()
+
+    # meiva:note
+    # The factory builds each handle's dial slice from the live process settings, which the suite
+    # runs with pooling off; the handle opener is where the factory takes its slice from outside.
+    def open_pooled(
+        config: DbConfig, gate: ProcessDbGate, direct_url: ClusterDirectUrl
+    ) -> Database:
+        return open_operator_database(replace(config, pgbouncer_enabled=True), gate, direct_url)
+
+    pooled = operator_database_factory(
+        local_host=command_runtime.machine.host, open_database=open_pooled
+    )
+    pooled.adopt_login(born.dsn("gateway"))
+    handle = pooled()
     assert handle.direct_url() == url_with_userinfo(
         born.endpoint().replace(str(born.pooler_port), str(born.pg_port)), *born.login("gateway")
     )

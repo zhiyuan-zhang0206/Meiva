@@ -40,7 +40,7 @@ from cli.commands.data_plane.host_dependencies.install_plan import (
     plan_install,
 )
 from cli.commands.data_plane.host_dependencies.scope import PlaneFacts, StartScope
-from cli.commands.data_plane.host_dependencies.table import HostTool
+from cli.commands.data_plane.host_dependencies.table import Component, HostTool
 
 GATEWAY = frozenset({"gateway"})
 RUNNER = frozenset({"agent-runner"})
@@ -87,11 +87,11 @@ def _names(scope: StartScope) -> set[str]:
 def _present(scope: StartScope, **replaced: Reading) -> dict[str, Reading]:
     readings: dict[str, Reading] = {}
     for tool in table.required_tools(scope):
-        match tool.name:
-            case "node":
-                readings[tool.name] = NodeVersion("22.14.0")
-            case _:
-                readings[tool.name] = Found(f"/usr/bin/{tool.name}", executable=True)
+        readings[tool.name] = (
+            NodeVersion("22.14.0")
+            if tool.name == "node"
+            else Found(f"/usr/bin/{tool.name}", executable=True)
+        )
     return {**readings, **replaced}
 
 
@@ -201,12 +201,15 @@ def test_optional_tools_are_never_required() -> None:
 
 def test_every_group_names_its_provisioning_script_and_label() -> None:
     groups = {tool.component for tool in table.HOST_TOOLS if tool.component is not None}
-    assert groups == {"data-plane", "node", "host-utils", "cli-tools"}
-    for group in groups:
+    assert groups == set(Component)
+    for group in Component:
         assert table.provision_script(group).endswith(".sh")
         assert table.provision_label(group)
-    with pytest.raises(ValueError, match="unknown provisioning group"):
-        table.provision_script("elsewhere")
+
+
+def test_a_group_the_table_does_not_name_is_refused_where_it_is_parsed() -> None:
+    with pytest.raises(ValueError, match="'elsewhere' is not a valid Component"):
+        Component("elsewhere")
 
 
 def test_all_present_is_no_problem() -> None:
@@ -328,7 +331,8 @@ def test_a_missing_installable_tool_installs_its_group_and_lists_it() -> None:
     scope = _scope()
     plan = plan_gate(_missing(scope, crontab=Absent()), repo=REPO, macos=False)
     assert plan == InstallGroups(
-        report=("", "→ host dependencies", "  · crontab: not on PATH"), groups=("host-utils",)
+        report=("", "→ host dependencies", "  · crontab: not on PATH"),
+        groups=(Component.HOST_UTILS,),
     )
 
 
@@ -340,7 +344,7 @@ def test_each_missing_group_installs_once_in_table_order() -> None:
         macos=False,
     )
     assert isinstance(plan, InstallGroups)
-    assert plan.groups == ("data-plane", "host-utils", "cli-tools")
+    assert plan.groups == (Component.DATA_PLANE, Component.HOST_UTILS, Component.CLI_TOOLS)
 
 
 def test_a_host_owned_tool_refuses_before_any_install() -> None:
@@ -426,7 +430,7 @@ def test_after_the_install_a_complete_host_is_ready() -> None:
 
 
 def test_an_install_runs_the_groups_script_through_bash() -> None:
-    step = plan_install("host-utils", repo=REPO, macos=False)
+    step = plan_install(Component.HOST_UTILS, repo=REPO, macos=False)
     assert step.script == REPO / "scripts/provision/host_utils.sh"
     assert step.argv == ("bash", str(step.script))
     assert step.announcement == (
@@ -435,7 +439,7 @@ def test_an_install_runs_the_groups_script_through_bash() -> None:
 
 
 def test_an_install_on_macos_names_homebrew() -> None:
-    step = plan_install("node", repo=REPO, macos=True)
+    step = plan_install(Component.NODE, repo=REPO, macos=True)
     assert (
         step.announcement == "  · installing Node.js with Homebrew (this can take several minutes)"
     )

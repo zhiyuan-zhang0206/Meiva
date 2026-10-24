@@ -28,6 +28,7 @@ from cli.commands.data_plane.instance.redis_plan import redis_conf_text
 from cli.commands.data_plane.tests.data_plane_records import with_redis_admin
 from cli.commands.data_plane.tests.native_cluster import (
     ADMIN_PASSWORD,
+    NATIVE_TEST_MACOS,
     RUNTIME_PASSWORD,
     NativeCluster,
     redis_command,
@@ -62,6 +63,7 @@ def _start(
         home=cluster.home,
         machine=machine,
         tuning=StartTuning(bind_wait_s=bind_wait_s),
+        macos=NATIVE_TEST_MACOS,
     )
 
 
@@ -190,6 +192,7 @@ def test_a_foreign_redis_keeps_its_acl_and_config(
                 home=tmp_path,
                 machine=command_machine,
                 tuning=StartTuning(bind_wait_s=0.0),
+                macos=NATIVE_TEST_MACOS,
             )
             assert rc == 1
             assert redis_command(client, "ACL", "LIST") == before

@@ -31,14 +31,14 @@ class DownloadLimits:
 
 
 # meiva:note
-# Seconds to wait before the next attempt, or None when `attempt` (1-based) was the last one.
+# Seconds to wait after the failed attempt `attempt`, counted from 0 as the shared retry policy
+# counts its backoff.
 #
 # The backoff grows by one step per attempt and never runs past the budget that remains, so a
-# spent budget waits zero seconds and the next attempt fails on its own budget check.
-def retry_wait(limits: DownloadLimits, *, attempt: int, remaining_s: float) -> float | None:
-    if attempt >= limits.attempts:
-        return None
-    return min(limits.retry_backoff_s * attempt, max(remaining_s, 0.0))
+# spent budget waits zero seconds and the next attempt fails on its own budget check. Whether
+# another attempt happens at all is the policy's attempt count, not this function's.
+def retry_wait(limits: DownloadLimits, *, attempt: int, remaining_s: float) -> float:
+    return min(limits.retry_backoff_s * (attempt + 1), max(remaining_s, 0.0))
 
 
 # meiva:note

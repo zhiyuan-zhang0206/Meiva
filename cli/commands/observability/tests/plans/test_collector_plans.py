@@ -5,8 +5,6 @@
 
 from __future__ import annotations
 
-from urllib.parse import urlsplit
-
 import pytest
 import yaml
 
@@ -45,6 +43,7 @@ from cli.commands.observability.plans.collector.render import (
     render_collector_config,
 )
 from cli.commands.observability.plans.collector.text import ottl_quote, yaml_quote
+from cli.commands.observability.url_split import split_url
 
 # meiva:note
 # The telemetry token of the unit under test: a fixture value, not a credential.
@@ -136,13 +135,13 @@ def test_the_fragments_list_blocks_and_pipeline_receivers_in_order() -> None:
 
 def test_a_receiver_endpoint_is_the_urls_host_and_port() -> None:
     assert (
-        receiver_endpoint(urlsplit("redis://meiva:pw@10.0.0.2:6380/0"), "redis") == "10.0.0.2:6380"
+        receiver_endpoint(split_url("redis://meiva:pw@10.0.0.2:6380/0"), "redis") == "10.0.0.2:6380"
     )
 
 
 def test_a_connection_url_without_a_port_cannot_be_scraped() -> None:
     with pytest.raises(RuntimeError, match="redis URL has no host:port"):
-        receiver_endpoint(urlsplit("redis://10.0.0.2/0"), "redis")
+        receiver_endpoint(split_url("redis://10.0.0.2/0"), "redis")
 
 
 @pytest.mark.parametrize(
@@ -150,7 +149,7 @@ def test_a_connection_url_without_a_port_cannot_be_scraped() -> None:
     ["http://example.test:54318", "http://10.0.0.5:4318", "http://10.0.0.5:4318/"],
 )
 def test_a_non_loopback_http_ingress_with_a_port_is_valid(endpoint: str) -> None:
-    assert ingress_endpoint_problem(urlsplit(endpoint)) is None
+    assert ingress_endpoint_problem(split_url(endpoint)) is None
 
 
 @pytest.mark.parametrize(
@@ -170,7 +169,7 @@ def test_a_non_loopback_http_ingress_with_a_port_is_valid(endpoint: str) -> None
     ],
 )
 def test_a_loopback_wildcard_secure_portless_or_decorated_ingress_is_invalid(endpoint: str) -> None:
-    problem = ingress_endpoint_problem(urlsplit(endpoint))
+    problem = ingress_endpoint_problem(split_url(endpoint))
 
     assert problem is not None
     assert "non-loopback" in problem
@@ -179,12 +178,12 @@ def test_a_loopback_wildcard_secure_portless_or_decorated_ingress_is_invalid(end
 def test_a_valid_gateway_ingress_loses_its_trailing_slash() -> None:
     raw = "http://10.0.0.5:4318/"
 
-    assert gateway_ingress_endpoint(raw, urlsplit(raw)) == "http://10.0.0.5:4318"
+    assert gateway_ingress_endpoint(raw, split_url(raw)) == "http://10.0.0.5:4318"
 
 
 def test_an_invalid_gateway_ingress_fails_closed_until_the_gateway_publishes_one() -> None:
     with pytest.raises(RuntimeError, match="gateway bootstrap"):
-        gateway_ingress_endpoint("http://127.0.0.1:4318", urlsplit("http://127.0.0.1:4318"))
+        gateway_ingress_endpoint("http://127.0.0.1:4318", split_url("http://127.0.0.1:4318"))
 
 
 def test_the_bearer_header_carries_the_token() -> None:

@@ -12,6 +12,7 @@ from __future__ import annotations
 import subprocess
 import sys
 from pathlib import Path
+from typing import assert_never
 
 from base.deploy.progress_timeout import HOST_PACKAGE_INSTALL_TIMEOUT_S
 from base.host.system.cron import owns_os_jobs
@@ -41,7 +42,12 @@ from cli.commands.data_plane.host_dependencies.install_plan import (
 )
 from cli.commands.data_plane.host_dependencies.readings import Probing, read_tools
 from cli.commands.data_plane.host_dependencies.scope import PlaneFacts, StartScope
-from cli.commands.data_plane.host_dependencies.table import HOST_TOOLS, render_table, required_tools
+from cli.commands.data_plane.host_dependencies.table import (
+    HOST_TOOLS,
+    Component,
+    render_table,
+    required_tools,
+)
 
 __all__ = [
     "HOST_TOOLS",
@@ -65,7 +71,7 @@ def _emit(lines: tuple[str, ...], *, err: bool = False) -> None:
         print(line, file=sys.stderr if err else sys.stdout)
 
 
-def _install(group: str, *, repo: Path, scope: StartScope, host: Host) -> None:
+def _install(group: Component, *, repo: Path, scope: StartScope, host: Host) -> None:
     step = plan_install(group, repo=repo, macos=scope.macos)
     if not step.script.is_file():
         print(missing_script_line(step.script), file=sys.stderr)
@@ -98,6 +104,8 @@ def ensure_host_dependencies(*, repo: Path, scope: StartScope, probing: Probing)
             _emit(report)
             for group in groups:
                 _install(group, repo=repo, scope=scope, host=probing.host)
+        case _:
+            assert_never(first)
     final = plan_recheck(
         missing_tools(scope, read_tools(scope, probing)), repo=repo, macos=scope.macos
     )
@@ -108,6 +116,8 @@ def ensure_host_dependencies(*, repo: Path, scope: StartScope, probing: Probing)
         case Ready(line):
             print(line)
             return 0
+        case _:
+            assert_never(final)
 
 
 # meiva:note

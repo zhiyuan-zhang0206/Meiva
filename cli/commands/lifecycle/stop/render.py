@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from typing import assert_never
 
 from cli.commands.lifecycle.stop.steps import DataPlane, StopScope
 
@@ -24,6 +25,8 @@ def _plane_header(plane: DataPlane) -> str:
             return "retained"
         case DataPlane.STOPPED:
             return "stopped"
+        case _:
+            assert_never(plane)
 
 
 def _plane_preview(plane: DataPlane) -> str:
@@ -36,6 +39,8 @@ def _plane_preview(plane: DataPlane) -> str:
             return (
                 "  infra (pg/redis): this cluster's own instance stopped (data preserved on disk)"
             )
+        case _:
+            assert_never(plane)
 
 
 # meiva:note

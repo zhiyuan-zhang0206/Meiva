@@ -12,7 +12,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from cli.commands.observability.plans.authority import host_port
-from cli.commands.observability.plans.url_view import UrlView
+from cli.commands.observability.plans.url_parts import UrlParts
 
 __all__ = [
     "AlertWebhook",
@@ -94,7 +94,7 @@ def alerts_webhook(
     *,
     remote_observatory: bool,
     gateway_base: str,
-    gateway: UrlView,
+    gateway: UrlParts,
     gateway_port: int,
     machine_host: str,
 ) -> AlertWebhook:

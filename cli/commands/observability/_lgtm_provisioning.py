@@ -5,7 +5,7 @@ import json
 import sys
 from collections.abc import Callable
 from pathlib import Path
-from typing import cast
+from typing import assert_never, cast
 
 import httpx
 
@@ -30,7 +30,9 @@ from cli.commands.observability.plans.lgtm.dashboard_plan import (
     InstallReference,
     KeepInstalled,
     KeepRendered,
+    RefuseDashboard,
     RenderedDashboard,
+    WriteRendered,
     ghost_hash_keys,
     hash_record_update,
     orphan_removable,
@@ -70,15 +72,20 @@ def _provision_dashboard(
     outcome: DashboardOutcome,
     producer: Callable[[], EventPipeline],
 ) -> None:
-    if isinstance(outcome, FailedDashboardRender):
-        print(
-            f"  ! lgtm native: meiva-ops dashboard render failed ({outcome.error})",
-            file=sys.stderr,
-        )
-        _install_dashboard_fallback(
-            dest, hashes_path, key, reference, error=outcome.error[:300], producer=producer
-        )
-        return
+    match outcome:
+        case FailedDashboardRender():
+            print(
+                f"  ! lgtm native: meiva-ops dashboard render failed ({outcome.error})",
+                file=sys.stderr,
+            )
+            _install_dashboard_fallback(
+                dest, hashes_path, key, reference, error=outcome.error[:300], producer=producer
+            )
+            return
+        case RenderedDashboard():
+            pass
+        case _:
+            assert_never(outcome)
     if outcome.failed_plugins:
         print(
             f"  ! lgtm native: plugin load failures (skipped, panels missing from this render): "
@@ -87,14 +94,19 @@ def _provision_dashboard(
         )
     digest = _digest(outcome.content)
     current = dest.read_text(encoding="utf-8") if dest.exists() else None
-    match plan_rendered_dashboard(current=current, rendered=outcome.content, digest=digest):
+    rendered_plan = plan_rendered_dashboard(
+        current=current, rendered=outcome.content, digest=digest
+    )
+    match rendered_plan:
         case KeepRendered():
             record_rendered_hash(hashes_path, key, digest)
-        case _:
+        case WriteRendered():
             dest.parent.mkdir(parents=True, exist_ok=True)
             write_text_atomic(dest, outcome.content, encoding="utf-8", suffix="")
             record_rendered_hash(hashes_path, key, digest)
             print(f"  lgtm native: meiva-ops dashboard re-rendered (sha256 {digest[:12]})")
+        case _:
+            assert_never(rendered_plan)
 
 
 # meiva:link cli/commands/observability/docs/lgtm/dashboard-provisioning.meiva.okf.md
@@ -130,7 +142,7 @@ def _install_dashboard_fallback(
                 f"installed the checkout reference {reference}",
                 file=sys.stderr,
             )
-        case _:
+        case RefuseDashboard():
             telemetry.emit(
                 "telemetry",
                 "lgtm_dashboard_render_failed",
@@ -144,6 +156,8 @@ def _install_dashboard_fallback(
                 f"the checkout reference {reference} is missing or unusable: refusing to converge "
                 "with no dashboards"
             )
+        case _:
+            assert_never(plan)
     telemetry.emit(
         "telemetry",
         "lgtm_dashboard_render_failed",

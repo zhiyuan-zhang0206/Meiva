@@ -1,4 +1,5 @@
 [uses]
+"test_collector_download.py" = ["collector_harness.py"]
 "test_collector_topologies.py" = ["collector_harness.py"]
 "test_converge_otel_collector.py" = ["collector_harness.py"]
 "test_otel_port_deviation.py" = ["collector_harness.py"]

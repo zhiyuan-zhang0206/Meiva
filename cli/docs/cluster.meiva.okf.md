@@ -61,12 +61,13 @@ below `cli/commands/cluster/` reads `settings` or the process environment.
   archiving, the prod checkout, the provider account) into values, `health_verdicts.judge_health`
   returns the checks in report order, and the shell prints them and emits one
   `health_probe_failing` per failed check plus the heartbeat. A round is configured by a
-  `HealthOptions` that `health_options(command)` reads from the command's configuration.
+  `HealthOptions` that `health_options(command)` reads from the command's configuration and
+  runtime; the WAL-G configuration file is read from the options' `data_plane` only.
 - `home.py` publishes the terminal intent, runs `meiva stop` from the checkout the request
   names, retires the OS jobs and (on macOS) the helper, marks the home detached and then
   drops the data directories, in the order `destroy_plan.plan_destroy` returns. The terminal
-  is three streams the caller passes, so a confirmation is answered by whatever sits behind
-  them.
+  is the three streams of the command's runtime (`CommandRuntime.terminal`), so a confirmation is
+  answered by whatever sits behind them. Its stop mode, host system and marker state are enums.
 
 ## Notes
 

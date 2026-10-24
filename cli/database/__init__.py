@@ -7,12 +7,19 @@ from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
 from threading import Lock
-from typing import Any, NoReturn
+from typing import TYPE_CHECKING, Any, NoReturn
 
 from base.cluster.machine import MachineIdentity
 from base.telemetry import DrainResult, EventPipeline
 
+if TYPE_CHECKING:
+    from base.cluster.dataplane.direct_url import ClusterDirectUrl
+    from base.db import Database
+    from base.db.code_version_gate import ProcessDbGate
+    from base.db.config import DbConfig
+
 __all__ = [
+    "OpenDatabase",
     "OperatorDatabaseFactory",
     "OperatorEventPipeline",
     "open_operator_database",
@@ -20,10 +27,10 @@ __all__ = [
     "operator_event_pipeline",
 ]
 
-# `open_database(config, gate, direct_url)`: builds one handle. The parameters are `DbConfig`,
-# `ProcessDbGate` and `ClusterDirectUrl` and the result a `Database`; none is imported here
-# because `meiva --help` must not load the configuration chain.
-OpenDatabase = Callable[[Any, Any, Any], Any]
+# meiva:note
+# `open_database(config, gate, direct_url)`: builds one handle. The types are imported for the
+# checker only, because `meiva --help` must not load the configuration chain.
+type OpenDatabase = Callable[[DbConfig, ProcessDbGate, ClusterDirectUrl], Database]
 
 
 class OperatorDatabaseFactory:

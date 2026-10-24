@@ -7,7 +7,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 __all__ = [
     "AlertWebhookInputs",
@@ -50,21 +50,24 @@ class AlertWebhookInputs:
 
 # meiva:note
 # The credentials the rendered Grafana tree carries: the admin password when one is set and the
-# Telegram bot that gets the direct contact point (an empty token or owner 0 means no bot).
+# Telegram bot that gets the direct contact point (an empty token or owner 0 means no bot). The
+# password and the token never reach a repr, so a log line or a traceback that formats the value
+# never prints them.
 @dataclass(frozen=True)
 class GrafanaCredentials:
-    admin_password: str | None
-    telegram_bot_token: str
+    admin_password: str | None = field(repr=False)
+    telegram_bot_token: str = field(repr=False)
     telegram_owner_id: int
 
 
 # meiva:note
 # The cluster data plane as the collector config reads it: the connection URLs, whether the
-# plane lives off-box and the cluster secret the telemetry bearer derives from.
+# plane lives off-box and the cluster secret the telemetry bearer derives from. The URLs carry the
+# login and the two passwords are secrets: none of them reaches a repr.
 @dataclass(frozen=True)
 class DataPlaneInputs:
-    db_url: str
-    redis_url: str
-    redis_admin_password: str
+    db_url: str = field(repr=False)
+    redis_url: str = field(repr=False)
+    redis_admin_password: str = field(repr=False)
     is_remote: bool
-    cluster_secret: str
+    cluster_secret: str = field(repr=False)

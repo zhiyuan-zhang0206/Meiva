@@ -3,26 +3,27 @@
 
 from __future__ import annotations
 
-import os
+import dataclasses
 import re
 from collections.abc import Generator
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
-from unittest.mock import patch
 
 import psycopg
 import pytest
 
-from base.config import ConfigBoot, settings
 from cli.commands.data_plane import walg as walg_cmd
+from cli.commands.data_plane.config import DataPlaneConfig
+from cli.commands.data_plane.tests.data_plane_records import data_plane_config as data_plane_config
+from cli.database import OperatorDatabaseFactory
+from cli.database.runtime import CommandRuntime
 from cli.database.tests.cli_tests import operator_database as operator_database
 from cli.database.tests.command_inputs import command_runtime as command_runtime
 from cli.parsers import build_parser
 from services.backup.walg import config as walg_config
 from services.backup.walg import probe, state
-from services.backup.walg.check import Step
 from services.backup.walg.tests.support import (
     SECRETS,
     PgInstance,
@@ -32,18 +33,10 @@ from services.backup.walg.tests.support import (
 )
 
 
-@pytest.fixture(autouse=True)
-def config_boot_environment(monkeypatch: pytest.MonkeyPatch) -> Generator[None]:
-    """Restore process delivery from each independent operation's boot."""
-
-    def build_owner() -> ConfigBoot:
-        config = ConfigBoot()
-        config.view.walg.walg_config_file = settings.walg.walg_config_file
-        return config
-
-    monkeypatch.setattr(walg_cmd, "ConfigBoot", build_owner)
-    with patch.dict(os.environ):
-        yield
+@pytest.fixture
+def plane_off(data_plane_config: DataPlaneConfig) -> DataPlaneConfig:
+    """The data-plane values of a home where WAL-G is not switched on."""
+    return dataclasses.replace(data_plane_config, walg_config_file=None)
 
 
 @pytest.fixture
@@ -57,6 +50,12 @@ def sandbox(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Sandbox:
 
     monkeypatch.setattr(probe, "admin_connection", no_postgres)
     return sandbox
+
+
+@pytest.fixture
+def plane(data_plane_config: DataPlaneConfig, sandbox: Sandbox) -> DataPlaneConfig:
+    """The data-plane values of the sandbox home: WAL-G is on and reads the sandbox's file."""
+    return dataclasses.replace(data_plane_config, walg_config_file=sandbox.config_file)
 
 
 def test_the_parser_reaches_every_verb() -> None:
@@ -88,26 +87,52 @@ def test_the_parser_reaches_every_verb() -> None:
 _STAMPED = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z \S")
 
 
-def test_run_prints_timestamped_lines_and_returns_the_ticks_exit_code(
-    sandbox: Sandbox, capsys: pytest.CaptureFixture[str], operator_database: Any
-) -> None:
-    assert walg_cmd.cmd_walg_run(database_for_url=operator_database.for_url) == 1
+# meiva:note
+# The parser's handler is the verb's door: it reads the invocation's own configuration owner (the
+# command runtime's) and hands the verb values.
+def _at_the_door(
+    argv: list[str],
+    command: CommandRuntime,
+    database_factory: OperatorDatabaseFactory,
+    *,
+    walg_config_file: Path | None,
+) -> int:
+    command.config.set_field("walg_config_file", walg_config_file)
+    args = build_parser().parse_args(argv)
+    args.runtime = command
+    args.database_factory = database_factory
+    return int(args.func(args))
 
+
+def test_run_prints_timestamped_lines_and_returns_the_ticks_exit_code(
+    sandbox: Sandbox,
+    capsys: pytest.CaptureFixture[str],
+    command_runtime: CommandRuntime,
+    operator_database: OperatorDatabaseFactory,
+) -> None:
+    code = _at_the_door(
+        ["backup", "walg", "run"],
+        command_runtime,
+        operator_database,
+        walg_config_file=sandbox.config_file,
+    )
+
+    assert code == 1
     lines = capsys.readouterr().out.splitlines()
     assert lines
     assert all(_STAMPED.match(line) for line in lines)
 
 
 def test_status_says_when_the_tick_never_ran(
-    sandbox: Sandbox, capsys: pytest.CaptureFixture[str]
+    plane: DataPlaneConfig, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    assert walg_cmd.cmd_walg_status() == 0
+    assert walg_cmd.cmd_walg_status(plane) == 0
 
     assert "daily tick: never ran" in capsys.readouterr().out
 
 
 def test_status_shows_the_last_run_and_its_failed_step(
-    sandbox: Sandbox, capsys: pytest.CaptureFixture[str]
+    plane: DataPlaneConfig, capsys: pytest.CaptureFixture[str]
 ) -> None:
     started = datetime(2026, 10, 2, 6, 25, tzinfo=UTC)
     state.write_state(
@@ -124,7 +149,7 @@ def test_status_shows_the_last_run_and_its_failed_step(
         )
     )
 
-    assert walg_cmd.cmd_walg_status() == 0
+    assert walg_cmd.cmd_walg_status(plane) == 0
 
     out = capsys.readouterr().out
     assert "daily tick: last started 2026-10-02T06:25:00+00:00" in out
@@ -133,20 +158,20 @@ def test_status_shows_the_last_run_and_its_failed_step(
 
 
 def test_status_reports_an_unreadable_state_file(
-    sandbox: Sandbox, capsys: pytest.CaptureFixture[str]
+    plane: DataPlaneConfig, capsys: pytest.CaptureFixture[str]
 ) -> None:
     state.state_path().parent.mkdir(parents=True)
     state.state_path().write_text("{broken")
 
-    assert walg_cmd.cmd_walg_status() == 0
+    assert walg_cmd.cmd_walg_status(plane) == 0
 
     assert "daily tick: state UNREADABLE" in capsys.readouterr().out
 
 
 def test_check_prints_a_mark_per_step_and_exits_zero_when_all_pass(
-    sandbox: Sandbox, capsys: pytest.CaptureFixture[str]
+    plane: DataPlaneConfig, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    assert walg_cmd.cmd_walg_check() == 0
+    assert walg_cmd.cmd_walg_check(plane) == 0
 
     out = capsys.readouterr().out
     assert [line.split(":")[0] for line in out.splitlines()] == [
@@ -160,31 +185,63 @@ def test_check_prints_a_mark_per_step_and_exits_zero_when_all_pass(
 
 
 def test_check_exits_non_zero_and_names_the_failing_step(
-    sandbox: Sandbox, capsys: pytest.CaptureFixture[str]
+    sandbox: Sandbox, plane: DataPlaneConfig, capsys: pytest.CaptureFixture[str]
 ) -> None:
     sandbox.set_mode("nodelete")
 
-    assert walg_cmd.cmd_walg_check() == 1
+    assert walg_cmd.cmd_walg_check(plane) == 1
 
     assert "  ✗ storage: cannot delete" in capsys.readouterr().out
 
 
 def test_status_when_off_says_so(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    plane_off: DataPlaneConfig, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    make_sandbox(tmp_path, monkeypatch, enabled=False)
-
-    assert walg_cmd.cmd_walg_status() == 0
+    assert walg_cmd.cmd_walg_status(plane_off) == 0
 
     assert capsys.readouterr().out == "WAL-G archiving is off (MEIVA_WALG_CONFIG_FILE is not set)\n"
 
 
-def test_status_shows_the_fingerprint_not_the_key(
-    sandbox: Sandbox, capsys: pytest.CaptureFixture[str]
+def test_status_at_the_door_reads_the_path_from_the_runtime_configuration(
+    sandbox: Sandbox,
+    capsys: pytest.CaptureFixture[str],
+    command_runtime: CommandRuntime,
+    operator_database: OperatorDatabaseFactory,
 ) -> None:
     fingerprint = walg_config.read_config(sandbox.config_file).key_fingerprint
 
-    assert walg_cmd.cmd_walg_status() == 0
+    code = _at_the_door(
+        ["backup", "walg", "status"],
+        command_runtime,
+        operator_database,
+        walg_config_file=sandbox.config_file,
+    )
+
+    assert code == 0
+    out = capsys.readouterr().out
+    assert f"config file: {sandbox.config_file}" in out
+    assert f"key fingerprint: {fingerprint} (pinned: not yet)" in out
+
+
+def test_status_at_the_door_says_so_when_the_runtime_configuration_has_no_path(
+    capsys: pytest.CaptureFixture[str],
+    command_runtime: CommandRuntime,
+    operator_database: OperatorDatabaseFactory,
+) -> None:
+    code = _at_the_door(
+        ["backup", "walg", "status"], command_runtime, operator_database, walg_config_file=None
+    )
+
+    assert code == 0
+    assert capsys.readouterr().out == "WAL-G archiving is off (MEIVA_WALG_CONFIG_FILE is not set)\n"
+
+
+def test_status_shows_the_fingerprint_not_the_key(
+    sandbox: Sandbox, plane: DataPlaneConfig, capsys: pytest.CaptureFixture[str]
+) -> None:
+    fingerprint = walg_config.read_config(sandbox.config_file).key_fingerprint
+
+    assert walg_cmd.cmd_walg_status(plane) == 0
 
     out = capsys.readouterr().out
     assert f"key fingerprint: {fingerprint} (pinned: not yet)" in out
@@ -195,11 +252,11 @@ def test_status_shows_the_fingerprint_not_the_key(
 
 
 def test_status_reports_an_unusable_configuration_instead_of_raising(
-    sandbox: Sandbox, capsys: pytest.CaptureFixture[str]
+    sandbox: Sandbox, plane: DataPlaneConfig, capsys: pytest.CaptureFixture[str]
 ) -> None:
     sandbox.config_file.write_text("{broken")
 
-    assert walg_cmd.cmd_walg_status() == 0
+    assert walg_cmd.cmd_walg_status(plane) == 0
 
     out = capsys.readouterr().out
     assert "configuration: UNUSABLE" in out
@@ -279,7 +336,7 @@ def _fake_restore(calls: list[dict[str, Any]], **kwargs: Any) -> Generator[None]
 
 
 def test_restore_passes_the_target_and_keeps_the_data_directory(
-    sandbox: Sandbox,
+    plane: DataPlaneConfig,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     tmp_path: Path,
@@ -292,6 +349,7 @@ def test_restore_passes_the_target_and_keeps_the_data_directory(
     monkeypatch.setattr(walg_cmd, "restored_instance", fake)
 
     code = walg_cmd.cmd_walg_restore(
+        plane,
         directory=str(tmp_path / "out"),
         backup="base_0001",
         time=None,
@@ -318,12 +376,15 @@ def test_restore_passes_the_target_and_keeps_the_data_directory(
 )
 def test_restore_rejects_a_bad_target_before_fetching(
     sandbox: Sandbox,
+    plane: DataPlaneConfig,
     capsys: pytest.CaptureFixture[str],
     tmp_path: Path,
     kwargs: dict[str, Any],
     message: str,
 ) -> None:
-    code = walg_cmd.cmd_walg_restore(directory=str(tmp_path / "out"), backup="LATEST", **kwargs)
+    code = walg_cmd.cmd_walg_restore(
+        plane, directory=str(tmp_path / "out"), backup="LATEST", **kwargs
+    )
 
     assert code == 1
     assert message in capsys.readouterr().err
@@ -331,7 +392,7 @@ def test_restore_rejects_a_bad_target_before_fetching(
 
 
 def test_restore_reports_a_failed_recovery_and_exits_non_zero(
-    sandbox: Sandbox, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    plane: DataPlaneConfig, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     from services.backup.walg.restore import RestoreError
 
@@ -343,7 +404,7 @@ def test_restore_reports_a_failed_recovery_and_exits_non_zero(
     monkeypatch.setattr(walg_cmd, "restored_instance", failing)
 
     code = walg_cmd.cmd_walg_restore(
-        directory="/srv/restored", backup="LATEST", time=None, lsn=None
+        plane, directory="/srv/restored", backup="LATEST", time=None, lsn=None
     )
 
     assert code == 1
@@ -353,26 +414,37 @@ def test_restore_reports_a_failed_recovery_and_exits_non_zero(
 
 
 def test_restore_while_wal_g_is_off_says_so(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    plane_off: DataPlaneConfig, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    make_sandbox(tmp_path, monkeypatch, enabled=False)
+    code = walg_cmd.cmd_walg_restore(
+        plane_off, directory="/x", backup="LATEST", time=None, lsn=None
+    )
 
-    assert walg_cmd.cmd_walg_restore(directory="/x", backup="LATEST", time=None, lsn=None) == 1
+    assert code == 1
     assert "WAL-G is off" in capsys.readouterr().out
 
 
 def test_drill_prints_timestamped_lines_and_returns_the_drills_exit_code(
-    sandbox: Sandbox, capsys: pytest.CaptureFixture[str], operator_database: Any
+    sandbox: Sandbox,
+    capsys: pytest.CaptureFixture[str],
+    command_runtime: CommandRuntime,
+    operator_database: OperatorDatabaseFactory,
 ) -> None:
-    assert walg_cmd.cmd_walg_drill(database_for_url=operator_database.for_url) == 1
+    code = _at_the_door(
+        ["backup", "walg", "drill"],
+        command_runtime,
+        operator_database,
+        walg_config_file=sandbox.config_file,
+    )
 
+    assert code == 1
     lines = capsys.readouterr().out.splitlines()
     assert lines
     assert all(_STAMPED.match(line) for line in lines)
 
 
 def test_status_shows_the_last_drill_and_the_last_success(
-    sandbox: Sandbox, capsys: pytest.CaptureFixture[str]
+    plane: DataPlaneConfig, capsys: pytest.CaptureFixture[str]
 ) -> None:
     stamp = datetime(2026, 10, 2, 6, 25, tzinfo=UTC)
     state.write_state(
@@ -390,7 +462,7 @@ def test_status_shows_the_last_drill_and_the_last_success(
         )
     )
 
-    assert walg_cmd.cmd_walg_status() == 0
+    assert walg_cmd.cmd_walg_status(plane) == 0
 
     out = capsys.readouterr().out
     assert (
@@ -398,34 +470,3 @@ def test_status_shows_the_last_drill_and_the_last_success(
         in out
     )
     assert "last successful drill: never" in out
-
-
-def test_check_hands_the_configuration_read_at_its_door_to_the_services_without_a_full_boot(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    owner = ConfigBoot()
-    first, second = tmp_path / "first.json", tmp_path / "second.json"
-    owner.view.walg.walg_config_file = first
-    owners: list[ConfigBoot] = []
-
-    def build_owner() -> ConfigBoot:
-        owners.append(owner)
-        return owner
-
-    received: list[Path | None] = []
-
-    def check_path(*, path: Path | None) -> list[Step]:
-        received.append(path)
-        owner.view.walg.walg_config_file = second
-        return []
-
-    def no_boot(_owner: ConfigBoot) -> None:
-        pytest.fail("a CLI root must not eagerly boot its reader")
-
-    monkeypatch.setattr(walg_cmd, "ConfigBoot", build_owner)
-    monkeypatch.setattr(ConfigBoot, "boot", no_boot)
-    monkeypatch.setattr(walg_cmd.check, "run_check", check_path)
-    monkeypatch.setattr(settings.walg, "walg_config_file", tmp_path / "ambient.json")
-    assert walg_cmd.cmd_walg_check() == 0
-    assert owners == [owner]
-    assert received == [first]

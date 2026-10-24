@@ -29,6 +29,7 @@ from base.host.system.tests.fake_commands import (
     Reply,
     fake_host,
 )
+from base.native_process.os_platform import Platform
 from base.sessions.tests.refuse_helper import refuse_helper
 from base.telemetry import EventPipeline
 from cli.commands.converge import redis_bridge as bridge
@@ -286,16 +287,43 @@ def test_a_relay_that_does_not_answer_reports_its_recorded_endpoint(
     assert status.endpoint == "10.64.0.7:17380"
 
 
-def test_the_door_probes_on_this_processs_platform_and_prints_one_line(
+def test_the_door_probes_on_the_hosts_platform_and_prints_one_line(
     tmp_path: Path, command_runtime: CommandRuntime, capsys: pytest.CaptureFixture[str]
 ) -> None:
     command_runtime.config.set_field("machine_host", "127.0.0.1")
     command_runtime.machine.reset()
 
     status = bridge.probe_redis_bridge(
-        tmp_path, machine=command_runtime.machine, config=command_runtime.config
+        tmp_path,
+        host=command_runtime.host,
+        machine=command_runtime.machine,
+        config=command_runtime.config,
     )
-    bridge.print_redis_bridge_status(machine=command_runtime.machine, config=command_runtime.config)
+    bridge.print_redis_bridge_status(
+        tmp_path,
+        host=command_runtime.host,
+        machine=command_runtime.machine,
+        config=command_runtime.config,
+    )
 
     assert status == not_required()
     assert capsys.readouterr().out == "  · not required (Redis has no local off-box ingress)\n"
+
+
+@pytest.mark.parametrize(("platform", "needed"), [(DARWIN_ARM64, True), (LINUX_X86, False)])
+def test_the_door_answers_for_the_platform_the_host_reports(
+    platform: Platform, needed: bool, tmp_path: Path, command_runtime: CommandRuntime
+) -> None:
+    command_runtime.config.set_field("db_url", "postgresql://meiva@127.0.0.1:6433/meiva")
+    command_runtime.config.set_field("redis_url", "redis://meiva:secret@127.0.0.1:6380/0")
+    command_runtime.config.set_field("machine_host", "10.64.0.7")
+    command_runtime.machine.reset()
+
+    status = bridge.probe_redis_bridge(
+        tmp_path,
+        host=fake_host(platform=platform),
+        machine=command_runtime.machine,
+        config=command_runtime.config,
+    )
+
+    assert status.required is needed

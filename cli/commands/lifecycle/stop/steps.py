@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
+from typing import assert_never
 
 from cli.commands.lifecycle.stop.choices import StopWindow
 
@@ -162,3 +163,5 @@ def phase_label(step: StopStep) -> str | None:
             return "data-plane"
         case ClearServing() | Announce() | ReapChrome() | SkipDataPlane():
             return None
+        case _:
+            assert_never(step)

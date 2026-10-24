@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import ipaddress
 
-from cli.commands.observability.plans.url_view import UrlView
+from cli.commands.observability.plans.url_parts import UrlParts
 
 __all__ = [
     "has_loopback_hostname",
@@ -36,7 +36,7 @@ def is_unspecified_address(host: str) -> bool:
 
 # meiva:note
 # Whether a URL's host is `localhost` or a loopback address.
-def has_loopback_hostname(url: UrlView) -> bool:
+def has_loopback_hostname(url: UrlParts) -> bool:
     hostname = url.hostname
     if hostname is None:
         return False

@@ -83,4 +83,5 @@ Remote-managed data planes skip local server and extension preparation entirely.
 - `redis_bridge.py` retires the standalone launchd job and installed relay copy an
   earlier layout left (the relay now runs as the root-supervised `redis-bridge` unit)
   and exposes the authenticated Redis PING used by `meiva status` and the alert-only
-  cluster health check. Redis itself never widens beyond loopback.
+  cluster health check (`probe_redis_bridge` takes the home and the host whose platform
+  decides whether a relay is needed). Redis itself never widens beyond loopback.

@@ -10,10 +10,9 @@ from __future__ import annotations
 
 import pytest
 
-from base.deploy.lifecycle import start_serving
 from base.telemetry.lgtm_local import BACKENDS
 from cli.commands.lifecycle import lgtm_toggle as lgtm
-from cli.commands.lifecycle.tests.scripted_root import UnitRow, scripted_root
+from cli.commands.lifecycle.tests.scripted_root import UnitRow
 from cli.commands.lifecycle.tests.startup.start_harness import StartRun, gateway_listener
 from services.supervision.healthchecks.lgtm import lgtm_host_marker
 
@@ -66,7 +65,7 @@ def test_on_declares_the_station_before_the_start_sees_the_operators_selection(
         _toggle(run, "on", only=(*STATION, "typo"))
 
     assert marker.exists()
-    assert not start_serving.is_serving(run.home)
+    assert not run.serving_published
 
 
 def test_off_retracts_the_station_and_keeps_its_data(start_run: StartRun) -> None:
@@ -79,7 +78,7 @@ def test_off_retracts_the_station_and_keeps_its_data(start_run: StartRun) -> Non
         data.write_bytes(b"durable history")
         rows, digest = _running(run, "pty-sessions")
 
-        with scripted_root(run.home, rows, launch_digest=digest):
+        with run.root(rows, launch_digest=digest):
             assert _toggle(run, "off", only=("pty-sessions",)) == 0
 
     assert not marker.exists()
@@ -118,7 +117,7 @@ def test_a_selection_that_contradicts_the_toggle_is_refused_before_any_change(
         _toggle(run, which, **selection)
 
     assert marker.exists() is (which == "off")
-    assert not start_serving.is_serving(run.home)
+    assert not run.serving_published
 
 
 # meiva:note

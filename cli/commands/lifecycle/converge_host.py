@@ -14,6 +14,7 @@ from __future__ import annotations
 import sys
 from collections.abc import Callable
 from pathlib import Path
+from typing import assert_never
 
 from base.agents.context.clients import DatabaseFactory
 from base.cluster.machine import MachineIdentity, MachineRoles
@@ -71,7 +72,7 @@ from cli.commands.converge.plans.split_host_checks import (
     probes_cross_machine_transfer,
     requires_github_pr,
 )
-from cli.commands.converge.plans.step_selection import SkipStep, StepScope, plan_steps
+from cli.commands.converge.plans.step_selection import RunStep, SkipStep, StepScope, plan_steps
 from cli.commands.converge.redis_bridge import retire_launchd_redis_bridge
 from cli.commands.converge.spec import ConvergeCtx, ConvergeStep
 from cli.commands.converge.steps import (
@@ -154,6 +155,8 @@ def ensure_browser(ctx: ConvergeCtx) -> None:
             ensure_browser_profile(
                 interactive=interactive, host=ctx.host, console=Console.of_process()
             )
+        case _:
+            assert_never(plan)
 
 
 def _helper_enabled(ctx: ConvergeCtx) -> bool:
@@ -182,6 +185,8 @@ def _ensure_permissions_helper(ctx: ConvergeCtx) -> None:
             from services.desktop.permissions_helper import converge
 
             converge(helper=ctx.require_helper())
+        case _:
+            assert_never(plan)
 
 
 def ensure_cross_machine_transfer(ctx: ConvergeCtx) -> None:
@@ -579,9 +584,14 @@ def run_converge(ctx: ConvergeCtx, steps: tuple[ConvergeStep, ...], *, prod_inst
     failed_step = ""
     try:
         for step, decision in zip(steps, decisions, strict=True):
-            if isinstance(decision, SkipStep):
-                print(f"  · {step.name}: skipped ({decision.reason})")
-                continue
+            match decision:
+                case SkipStep(reason=reason):
+                    print(f"  · {step.name}: skipped ({reason})")
+                    continue
+                case RunStep():
+                    pass
+                case _:
+                    assert_never(decision)
             try:
                 step.apply(ctx)
             except Exception as e:

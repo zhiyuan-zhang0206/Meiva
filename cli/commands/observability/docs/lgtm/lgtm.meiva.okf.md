@@ -19,9 +19,12 @@ need an archive (`plans/lgtm/install.py`), where an archive's contents go
 (`plans/lgtm/urls.py`), what the dashboard fallback does (`plans/lgtm/dashboard_plan.py`)
 and how a download waits and reports (`plans/lgtm/download_retry.py`,
 `plans/lgtm/download_report.py`). Configuration is read once, at the converge step, by
-`inputs.py` into frozen values (`LgtmSettings`, `ObservabilityConfig`); nothing below the
-step reads `settings`, the environment or the clock for a decision. The shell tests run the
-real pass against a release mirror on port 0.
+`inputs.py` from the step's `ConfigBoot` into frozen values (`LgtmSettings`,
+`ObservabilityConfig`); nothing below the step reads `settings`, the environment or the clock
+for a decision, and the secrets in those values (Grafana password, Telegram token) are read out
+of their wrapper there and never reach a repr. A URL is split once by `url_split.split_url`
+into the `UrlParts` value the plans decide on. The shell tests run the real pass against a
+release mirror on port 0.
 `base/telemetry/lgtm_local.py` owns executable arguments, local probe addresses and the
 configuration digest bound into the root generation. Configuration or roster
 changes require a normal stop before a new generation; repeated unchanged start
@@ -63,14 +66,15 @@ stretching the operation. The request opens with `min(socket_timeout, remaining)
 that bounds the one wait no check can interrupt, so the residual overshoot is one
 in-flight read, at most `min(socket_timeout_s, total_budget_s)`.
 
-The retry wait is decided by `retry_wait` (one backoff step per attempt, clamped to
-the budget that remains, `None` after the last attempt), so a backoff never runs past
-the deadline; the shell sleeps what it returns. Every failure reports used time,
+The attempts are the shared retry policy's (`base.host.net.resilience.retry` with a
+`Policy` whose `max_attempts` is the configured count); the wait between them is
+`retry_wait` as its backoff (one step per attempt, clamped to the budget that remains), so
+a backoff never runs past the deadline. Every failure reports used time,
 remaining budget and bytes received (the size of the attempt's partial file), in the
 attempt line and in the final `RuntimeError`.
 
 The numbers are the `lgtm_native_download_*` settings (observability domain,
-`MEIVA_LGTM_NATIVE_DOWNLOAD_*`) read by `inputs.lgtm_download_limits` into
+`MEIVA_LGTM_NATIVE_DOWNLOAD_*`) read by `inputs.lgtm_settings_from_boot` into
 `plans/lgtm/download_retry.DownloadLimits`; the download functions take them as data. The 900 s default
 is measured: on a 5.8-8.7 MB/s link the three archives took 8 s / 14 s / 53 s
 (2026-10-17), so 900 s covers the 461 MB Grafana tarball at >=512 KB/s.

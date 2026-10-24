@@ -18,6 +18,7 @@ from __future__ import annotations
 import sys
 import time
 from pathlib import Path
+from typing import assert_never
 
 from base.agents.context.clients import DatabaseFactory
 from base.events.live.bus import EventBus, event_bus_config_from_config
@@ -239,6 +240,8 @@ def settle_closure(
             case AwaitNoSessions():
                 until = settle_until(deadline, time.monotonic(), SHELL_SESSION_KILL_WAIT_S)
                 await_no_shell_sessions(command.home, until, "shell-sessions")
+            case _:
+                assert_never(step)
 
 
 # meiva:note
@@ -282,6 +285,8 @@ def settle_forced_closure(outcome: closure.Outcome) -> None:
                 raise RuntimeError(forced_failure_message(step))
             case WriteNotices() | AwaitNoSessions():
                 raise AssertionError("a forced closure plans no notices and no wait")
+            case _:
+                assert_never(step)
 
 
 # meiva:note

@@ -23,7 +23,7 @@ import sys
 import time
 from collections.abc import Iterable, Mapping
 from pathlib import Path
-from typing import NamedTuple, cast
+from typing import NamedTuple, assert_never, cast
 
 import psutil
 
@@ -313,9 +313,10 @@ def await_root_status(
         snapshot = root_status(client)
         if snapshot is not None:
             return snapshot
-        match unmet_step(
+        unmet = unmet_step(
             elapsed_s=time.monotonic() - started, timeout_s=timeout_s, interval_s=interval_s
-        ):
+        )
+        match unmet:
             case Retry(after_s):
                 time.sleep(after_s)
             case Expired():
@@ -323,6 +324,8 @@ def await_root_status(
                     f"meiva-root did not become ready within {timeout_s:.0f}s; "
                     f"log tail:\n{_log_tail(launch.stderr_log)}"
                 )
+            case _:
+                assert_never(unmet)
 
 
 def seed_via_helper(
@@ -344,16 +347,20 @@ def seed_via_helper(
         raise RootDriverError(f"root_seed over the helper failed: {exc}") from exc
     started = time.monotonic()
     while True:
-        match keeper_verdict(keeper, str(launch.run_dir)):
+        verdict = keeper_verdict(keeper, str(launch.run_dir))
+        match verdict:
             case KeeperRunning():
                 return
             case KeeperRefused(reason):
                 raise RootDriverError(reason)
             case KeeperPending():
                 pass
-        match unmet_step(
+            case _:
+                assert_never(verdict)
+        unmet = unmet_step(
             elapsed_s=time.monotonic() - started, timeout_s=timeout_s, interval_s=interval_s
-        ):
+        )
+        match unmet:
             case Retry(after_s):
                 time.sleep(after_s)
             case Expired():
@@ -361,6 +368,8 @@ def seed_via_helper(
                     f"the helper did not bring meiva-root up within {timeout_s:.0f}s "
                     f"(keeper state={keeper['state']})"
                 )
+            case _:
+                assert_never(unmet)
         try:
             keeper = helper().root_status()
         except Exception as exc:
@@ -421,15 +430,18 @@ def stop_root_process(
     while True:
         if not identity.live() and root_status(client) is None:
             return
-        match unmet_step(
+        unmet = unmet_step(
             elapsed_s=time.monotonic() - started, timeout_s=timeout_s, interval_s=interval_s
-        ):
+        )
+        match unmet:
             case Retry(after_s):
                 time.sleep(after_s)
             case Expired():
                 raise RootDriverError(
                     f"meiva-root at {root_run_dir(home)} did not stop within {timeout_s:.0f}s"
                 )
+            case _:
+                assert_never(unmet)
 
 
 # meiva:note
@@ -708,7 +720,8 @@ def stop_root_service_tree(
         print("  meiva-root: no live owner or retained service custody")
         return
     require_root_owner(snapshot, helper=helper, home=home)
-    match plan_tree_stop(root_units(snapshot), preserve):
+    tree_stop = plan_tree_stop(root_units(snapshot), preserve)
+    match tree_stop:
         case LeaveTree():
             print("  meiva-root: every unit is preserved — tree left running")
         case StopUnits(unit_ids, stop_root):
@@ -726,3 +739,5 @@ def stop_root_service_tree(
                     home=home,
                 )
                 print("  ✓ meiva-root stopped (tree down, root exited)")
+        case _:
+            assert_never(tree_stop)

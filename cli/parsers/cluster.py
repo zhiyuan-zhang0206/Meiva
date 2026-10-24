@@ -54,23 +54,19 @@ def _h_cluster_resume(args: argparse.Namespace) -> int:
 
 
 def _h_cluster_destroy(args: argparse.Namespace) -> int:
-    import sys
-
-    from base.paths import repo_root
-    from cli.commands.cluster.home import DestroyRequest, Terminal, cmd_cluster_destroy
+    from cli.commands.cluster.home import DestroyRequest, cmd_cluster_destroy
+    from cli.commands.cluster.plans.destroy_plan import StopMode
 
     runtime = args.runtime
     request = DestroyRequest(
         home=runtime.home,
         drop_db=args.drop_db,
-        stop_mode=args.stop_mode,
+        stop_mode=StopMode(args.stop_mode),
         stop_timeout_s=args.stop_timeout,
-        checkout=repo_root(),
+        checkout=runtime.checkout,
         helper_port=runtime.config.view.services.permissions_helper_port,
     )
-    return cmd_cluster_destroy(
-        request, host=runtime.host, terminal=Terminal(sys.stdin, sys.stdout, sys.stderr)
-    )
+    return cmd_cluster_destroy(request, host=runtime.host, terminal=runtime.terminal)
 
 
 def _h_cluster_health_probe(args: argparse.Namespace) -> int:
@@ -112,15 +108,10 @@ def _h_cluster_db_authority_issue_unit(args: argparse.Namespace) -> int:
 
 
 def _h_cluster_db_authority_install_unit(args: argparse.Namespace) -> int:
-    import os
-
-    from base.host.db_authority.unit import CAPABILITY_KEY_ENV
     from cli.commands.cluster.control import cmd_db_authority_install_unit
 
     return cmd_db_authority_install_unit(
-        bundle=args.bundle,
-        transport_key=os.environ.pop(CAPABILITY_KEY_ENV, ""),
-        home=args.runtime.home.resolve(),
+        bundle=args.bundle, transport_key=args.transport_key, home=args.runtime.home
     )
 
 

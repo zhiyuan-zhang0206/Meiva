@@ -16,6 +16,7 @@ from pathlib import Path
 
 from base.deploy import start_trace
 from base.host.db_authority import delivery
+from base.paths.home import resolve_meiva_home
 from cli.commands.converge.spec import ConvergeStep
 from cli.commands.converge.steps import ensure_meiva_home_dirs
 from cli.commands.data_plane.config import data_plane_config_from_boot
@@ -30,7 +31,7 @@ from cli.database.runtime import CommandRuntime
 
 def main() -> None:
     repo = Path(sys.argv[1])
-    command = CommandRuntime.create()
+    command = CommandRuntime.create(resolve_meiva_home().resolve())
     database_factory = operator_database_factory(
         local_host=command.machine.host, open_database=open_operator_database
     )

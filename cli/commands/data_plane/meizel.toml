@@ -1,7 +1,7 @@
 exports = ["bringup.py", "cluster_instance.py", "completion.py", "config.py", "host_dependencies", "instance", "maintenance", "maintenance_stop.py", "maintenance_stop_report.py", "pgbouncer.py", "stop_budget.py", "stop_waits.py", "tests", "walg.py"]
 
 [uses]
-"bringup.py" = ["cluster_instance.py", "config.py", "instance", "pgbouncer.py", "stop_waits.py"]
+"bringup.py" = ["cluster_instance.py", "config.py", "instance", "maintenance_stop_report.py", "pgbouncer.py", "stop_waits.py"]
 "cluster_instance.py" = ["config.py", "instance", "walg.py"]
 "completion.py" = ["bringup.py", "cluster_instance.py", "config.py", "instance", "pgbouncer.py"]
 "host_dependencies" = ["cluster_instance.py", "config.py"]
@@ -10,7 +10,8 @@ exports = ["bringup.py", "cluster_instance.py", "completion.py", "config.py", "h
 "_pooler_stop.py" = ["pooler", "stop_budget.py"]
 "pgbouncer.py" = ["_pooler_stop.py", "cluster_instance.py", "config.py", "pooler"]
 "stop_waits.py" = ["maintenance", "stop_budget.py"]
-"tests" = ["_pooler_stop.py", "bringup.py", "cluster_instance.py", "completion.py", "config.py", "host_dependencies", "instance", "maintenance", "maintenance_stop.py", "pgbouncer.py", "pooler", "stop_budget.py", "stop_waits.py"]
+"walg.py" = ["config.py"]
+"tests" = ["_pooler_stop.py", "bringup.py", "cluster_instance.py", "completion.py", "config.py", "host_dependencies", "instance", "maintenance", "maintenance_stop.py", "maintenance_stop_report.py", "pgbouncer.py", "pooler", "stop_budget.py", "stop_waits.py"]
 
 [purity]
 "__init__.py" = "strict"

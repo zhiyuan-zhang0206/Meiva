@@ -3,7 +3,7 @@ exports = ["agents", "cluster", "converge", "data_plane", "duration.py", "extens
 [uses]
 "_repo.py" = ["_setup.py"]
 "probe.py" = ["probe_report.py"]
-"cluster" = ["_repo.py", "converge", "probe.py"]
+"cluster" = ["_repo.py", "converge", "data_plane", "observability", "probe.py"]
 "converge" = ["_repo.py"]
 "data_plane" = ["converge"]
 "extensions" = ["_repo.py", "converge", "duration.py"]

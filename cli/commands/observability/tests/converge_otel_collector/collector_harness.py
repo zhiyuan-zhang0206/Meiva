@@ -11,6 +11,8 @@
 from __future__ import annotations
 
 import re
+import urllib.request
+from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, NoReturn, cast
@@ -21,6 +23,7 @@ import yaml
 from base.agents.context.clients import DatabaseFactory
 from base.cluster.machine import MachineIdentity
 from base.deploy.release import collector_artifact
+from base.host.net.ports import SYSTEM_URL_OPENER, UrlOpener
 from base.paths import otel_collector_dir
 from base.telemetry import EventPipeline
 from cli.commands.converge.spec import ConvergeCtx
@@ -41,6 +44,7 @@ __all__ = [
     "RUNNER",
     "STATION",
     "CollectorUnit",
+    "MirrorOpener",
     "collector_unit",
     "never_dialed",
 ]
@@ -72,11 +76,26 @@ def never_produced() -> EventPipeline:
     raise AssertionError("the collector step must not emit events")
 
 
+# meiva:note
+# The system opener pointed at a release mirror: whatever URL the pinned download names, the
+# request goes to the mirror's path for the same asset file name, over a real socket.
+@dataclass(frozen=True)
+class MirrorOpener:
+    mirror_url: str
+
+    def __call__(
+        self, target: str | urllib.request.Request, timeout: float
+    ) -> AbstractContextManager[Any]:
+        assert isinstance(target, str)
+        return SYSTEM_URL_OPENER(f"{self.mirror_url}/{target.rsplit('/', 1)[1]}", timeout)
+
+
 @dataclass(frozen=True)
 class CollectorUnit:
     home: Path
     machine: MachineIdentity
     runtime: CommandRuntime
+    open_url: UrlOpener
 
     # meiva:note
     # The rendered config text for a unit with `roles`, reachable at `host`.
@@ -128,8 +147,8 @@ class CollectorUnit:
         return cast("dict[str, Any]", parsed)
 
     # meiva:note
-    # Run one install pass over this home. Nothing is downloaded: tests that call it install the
-    # pinned binary first, or pass `tag=None`.
+    # Run one install pass over this home. The unit's opener fetches a missing binary: tests that
+    # do not download install the pinned binary first, or pass `tag=None`.
     def ensure(
         self,
         roles: frozenset[str] | None,
@@ -152,6 +171,7 @@ class CollectorUnit:
             database_factory=never_dialed,
             machine=self.machine,
             timers=self.runtime.timers,
+            open_url=self.open_url,
             tag=tag,
             platform_label=platform_label,
         )
@@ -195,5 +215,8 @@ def collector_unit(tmp_path: Path, command_runtime: CommandRuntime) -> Collector
     observability_inputs.write_cluster_record(tmp_path / ".meiva")
     command_runtime.machine.set(name="test-machine")
     return CollectorUnit(
-        home=tmp_path / ".meiva", machine=command_runtime.machine, runtime=command_runtime
+        home=tmp_path / ".meiva",
+        machine=command_runtime.machine,
+        runtime=command_runtime,
+        open_url=SYSTEM_URL_OPENER,
     )

@@ -5,7 +5,6 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from urllib.parse import urlsplit
 
 import pytest
 
@@ -25,6 +24,7 @@ from cli.commands.observability.plans.lgtm.urls import (
     normalize_gateway_base,
     pg_datasource,
 )
+from cli.commands.observability.url_split import split_url
 
 # meiva:note
 # S104-flagged literal reused by the warning cases: a config value under test, not a bind.
@@ -180,7 +180,7 @@ def webhook(*, gateway_url: str, port: int, remote: bool, host: str = "10.0.0.10
     return alerts_webhook(
         remote_observatory=remote,
         gateway_base=base,
-        gateway=urlsplit(base),
+        gateway=split_url(base),
         gateway_port=port,
         machine_host=host,
     )
@@ -256,7 +256,7 @@ def test_the_tempo_topology_warns_only_when_query_and_intake_disagree_about_loop
     query: str, intake: str, warns: bool
 ) -> None:
     warning = tempo_topology_warning(
-        query_url=query, query=urlsplit(query), intake_endpoint=intake, intake=urlsplit(intake)
+        query_url=query, query=split_url(query), intake_endpoint=intake, intake=split_url(intake)
     )
 
     if warns:
@@ -269,7 +269,7 @@ def test_the_tempo_topology_warns_only_when_query_and_intake_disagree_about_loop
 
 def surface(backend: str, listen: str, read_url: str) -> ReadSurface:
     env_var = f"MEIVA_TELEMETRY_{backend.upper()}_URL"
-    return ReadSurface(backend, env_var, listen, read_url, urlsplit(read_url))
+    return ReadSurface(backend, env_var, listen, read_url, split_url(read_url))
 
 
 @pytest.mark.parametrize(

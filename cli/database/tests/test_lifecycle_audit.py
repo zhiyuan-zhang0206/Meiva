@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import os
+import subprocess
+import sys
 import uuid
 from collections.abc import Callable, Sequence
 from pathlib import Path
@@ -17,7 +19,6 @@ from base.events.contract import EVENTS
 from base.native_process.root_control.ipc import CallerPayload
 from cli.database import OperatorDatabaseFactory
 from cli.database.lifecycle_audit import (
-    AuditUnavailableError,
     lifecycle_audit,
     operator_lifecycle_audit,
     operator_request_recorder,
@@ -178,35 +179,53 @@ def test_an_operator_command_audits_itself_as_the_process_that_runs_it(
     assert [sha for *_rest, sha in rows] == [None, None]
 
 
+_CHILD = Path(__file__).with_name("child_audit_without_cwd.py")
+
+
 # meiva:note
-# A command whose caller cannot be named is refused before it changes anything: it must not run
-# unattributed behind the operator's back. The working directory of this process is removed,
-# which is how a real shell loses it.
-def test_a_command_that_cannot_name_its_caller_is_refused_before_it_starts(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+# Run `child_audit_without_cwd.py` in a fresh interpreter, as a shell that lost its working
+# directory runs a command.
+def _run_without_cwd(scope: str, tmp_path: Path) -> subprocess.CompletedProcess[str]:
+    env = {key: value for key, value in os.environ.items() if not key.startswith("MEIVA_")}
+    env["MEIVA_HOME"] = str(tmp_path / "home")
+    # meiva:note
+    # The child is this repository's own fixed probe script, run with the interpreter in
+    # isolated mode.
+    return subprocess.run(  # noqa: S603
+        [sys.executable, "-I", "-B", str(_CHILD), str(tmp_path / "gone"), scope],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=False,
+    )
+
+
+# meiva:note
+# The audit is a write-only sink: a command whose caller cannot be named still runs, with one
+# warning line saying it is unaudited, and the sink is never dialed. The working directory of the
+# process is removed, which is how a real shell loses it.
+def test_a_command_that_cannot_name_its_caller_runs_unaudited_with_one_warning(
+    tmp_path: Path,
 ) -> None:
-    gone = tmp_path / "gone"
-    gone.mkdir()
-    monkeypatch.chdir(gone)
-    gone.rmdir()
+    child = _run_without_cwd("operator", tmp_path)
 
-    with (
-        pytest.raises(AuditUnavailableError, match="cannot read the caller block"),
-        operator_lifecycle_audit(database_factory=refuse_database),
-    ):
-        pytest.fail("the command body must not run")
+    assert child.returncode == 0, child.stderr
+    assert child.stdout.splitlines() == ["command ran"]
+    [warning] = child.stderr.splitlines()
+    assert warning.startswith("meiva: warning: lifecycle audit could not identify its caller")
+    assert warning.endswith("this command runs unaudited")
 
 
-def test_a_boot_start_needs_no_caller_even_when_it_cannot_be_named(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+def test_a_boot_start_needs_no_caller_and_says_nothing_when_it_cannot_be_named(
+    tmp_path: Path,
 ) -> None:
-    gone = tmp_path / "gone"
-    gone.mkdir()
-    monkeypatch.chdir(gone)
-    gone.rmdir()
+    child = _run_without_cwd("boot", tmp_path)
 
-    with operator_lifecycle_audit(database_factory=refuse_database, enabled=False) as command:
-        command.exited(0)
+    assert child.returncode == 0, child.stderr
+    assert child.stdout.splitlines() == ["command ran"]
+    assert child.stderr == ""
 
 
 def test_the_outcome_is_recorded_once() -> None:

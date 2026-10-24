@@ -12,6 +12,7 @@ from base.cluster.dataplane import walg_binary
 from base.cluster.dataplane.pg_throwaway_base import ThrowawayConfig, configured_base
 from base.config import ConfigBoot
 from base.db import Database
+from cli.commands.data_plane.config import DataPlaneConfig, data_plane_config_from_boot
 from services.backup.walg import check, probe, state, tick
 from services.backup.walg import config as walg_config
 from services.backup.walg.archive import expected_archive
@@ -19,23 +20,31 @@ from services.backup.walg.restore import RecoveryTarget, RestoreError, restored_
 
 
 # meiva:note
-# This command's configuration: one boot of the process environment, read at the command's door.
-# WAL-G's settings travel from here as values.
-def _boot() -> ConfigBoot:
-    config = ConfigBoot()
+# An owner no one prepared yet captures the delivery this process already made at startup, rather
+# than delivering it a second time (a second gateway fetch on a pure runner).
+def _delivered(config: ConfigBoot) -> ConfigBoot:
     if not config.prepared:
         config.read_process_environment()
     return config
 
 
-def _throwaway(config: ConfigBoot) -> ThrowawayConfig:
-    return ThrowawayConfig(configured_base(config.view.data_plane.pg_throwaway_base))
+# meiva:note
+# The data-plane values of one `meiva backup walg` invocation, read from its configuration owner
+# at the verb's door. The WAL-G configuration path travels in them (`walg_config_file`).
+def walg_plane(config: ConfigBoot) -> DataPlaneConfig:
+    return data_plane_config_from_boot(_delivered(config))
+
+
+# meiva:note
+# Where the drill and the daily tick may place scratch Postgres instances, read at the verb's door.
+def walg_throwaway(config: ConfigBoot) -> ThrowawayConfig:
+    return ThrowawayConfig(configured_base(_delivered(config).view.data_plane.pg_throwaway_base))
 
 
 # meiva:note
 # Run the pre-flight steps; the exit code is non-zero when any step failed.
-def cmd_walg_check() -> int:
-    steps = check.run_check(path=_boot().view.walg.walg_config_file)
+def cmd_walg_check(plane: DataPlaneConfig) -> int:
+    steps = check.run_check(path=plane.walg_config_file)
     for step in steps:
         print(f"  {'✓' if step.ok else '✗'} {step.name}: {step.detail}")
     return 0 if all(step.ok for step in steps) else 1
@@ -52,13 +61,17 @@ def _stamped(line: str) -> None:
 #
 # The OS job runs exactly this, and so can an operator: concurrent runs stand down
 # and a skipped or repeated run is harmless.
-def cmd_walg_run(*, database_for_url: Callable[[str], Database]) -> int:
-    config = _boot()
+def cmd_walg_run(
+    plane: DataPlaneConfig,
+    *,
+    throwaway: ThrowawayConfig,
+    database_for_url: Callable[[str], Database],
+) -> int:
     return tick.run_tick(
         _stamped,
-        path=config.view.walg.walg_config_file,
+        path=plane.walg_config_file,
         database_for_url=database_for_url,
-        throwaway=_throwaway(config),
+        throwaway=throwaway,
     )
 
 
@@ -67,13 +80,17 @@ def cmd_walg_run(*, database_for_url: Callable[[str], Database]) -> int:
 #
 # The tick runs the same drill once a week before its backup; a success here counts
 # as that week's drill.
-def cmd_walg_drill(*, database_for_url: Callable[[str], Database]) -> int:
-    config = _boot()
+def cmd_walg_drill(
+    plane: DataPlaneConfig,
+    *,
+    throwaway: ThrowawayConfig,
+    database_for_url: Callable[[str], Database],
+) -> int:
     return tick.run_drill_now(
         _stamped,
-        path=config.view.walg.walg_config_file,
+        path=plane.walg_config_file,
         database_for_url=database_for_url,
-        throwaway=_throwaway(config),
+        throwaway=throwaway,
     )
 
 
@@ -84,9 +101,15 @@ def cmd_walg_drill(*, database_for_url: Callable[[str], Database]) -> int:
 # not started, and it is never this home's live data directory. `user` is the restored
 # cluster's superuser (the OS user that ran initdb on the source; default: this OS user).
 def cmd_walg_restore(
-    *, directory: str, backup: str, time: str | None, lsn: str | None, user: str | None = None
+    plane: DataPlaneConfig,
+    *,
+    directory: str,
+    backup: str,
+    time: str | None,
+    lsn: str | None,
+    user: str | None = None,
 ) -> int:
-    path = _boot().view.walg.walg_config_file
+    path = plane.walg_config_file
     if path is None:
         print("WAL-G is off (MEIVA_WALG_CONFIG_FILE is not set); nothing to restore from")
         return 1
@@ -202,8 +225,8 @@ def _tick_lines() -> list[str]:
 
 # meiva:note
 # Print configuration, binary, key fingerprint, archiver, daily-tick and drill facts; exits 0.
-def cmd_walg_status() -> int:
-    path = _boot().view.walg.walg_config_file
+def cmd_walg_status(plane: DataPlaneConfig) -> int:
+    path = plane.walg_config_file
     if path is None:
         print("WAL-G archiving is off (MEIVA_WALG_CONFIG_FILE is not set)")
         return 0

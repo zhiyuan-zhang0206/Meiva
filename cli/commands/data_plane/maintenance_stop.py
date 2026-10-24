@@ -27,7 +27,7 @@ import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import cast
+from typing import assert_never, cast
 
 import psutil
 from redis.asyncio import Redis
@@ -257,11 +257,13 @@ async def request_stop(
             # success. The expected EOF is accepted only because the exact PID is then waited
             # for; a timeout or any other command failure is loud.
             with contextlib.suppress(RedisConnectionError):
-                await _redis_command(client, deadline, "SHUTDOWN", mode)
+                await _redis_command(client, deadline, "SHUTDOWN", mode.value)
         case StopPooler():
             custodian = OwnedPooler.from_config(identity, pooler_files.ini_path())
             if not custodian.stop(deadline=deadline):
                 raise TimeoutError("PgBouncer stop incomplete; custody retained")
+        case _:
+            assert_never(step)
     return None
 
 

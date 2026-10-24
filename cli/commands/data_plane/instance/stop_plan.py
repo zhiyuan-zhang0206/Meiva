@@ -80,8 +80,18 @@ def orphan_warning(*, postgres_running: bool, redis_listening: bool) -> str | No
 
 
 # meiva:note
-# The exit status of `shutdown` proves nothing; Redis stopped only when it no longer answers.
-def redis_stop_failure(port: int, *, still_answers: bool) -> str | None:
-    if not still_answers:
+# The exit status of `shutdown` proves nothing; Redis stopped only when its port no longer accepts
+# connections.
+#
+# A port that still accepts fails the stop either way. `home_redis_alive` says whose listener it
+# is: this home's Redis that did not go down, or another process that holds the cluster's Redis
+# port, which the next start would refuse for the same reason.
+def redis_stop_failure(port: int, *, listening: bool, home_redis_alive: bool) -> str | None:
+    if not listening:
         return None
-    return f"redis still answers on 127.0.0.1:{port} after shutdown"
+    if home_redis_alive:
+        return f"redis still answers on 127.0.0.1:{port} after shutdown"
+    return (
+        f"127.0.0.1:{port} still accepts connections after shutdown, "
+        "held by a process other than this home's redis"
+    )

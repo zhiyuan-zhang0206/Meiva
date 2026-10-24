@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 from enum import Enum
+from typing import assert_never
 
 from cli.commands.observability.plans.collector.exporter_blocks import (
     BACKEND_EXPORTERS,
@@ -65,13 +66,17 @@ def render_exporters(
     tempo_endpoint: str,
     bases: tuple[str, str],
 ) -> str:
-    if shape is ExporterShape.LOCAL_BACKENDS:
-        loki_base, prom_base = bases
-        return BACKEND_EXPORTERS.format(
-            tempo_endpoint=yaml_quote(tempo_endpoint.rstrip("/")),
-            loki_base=yaml_quote(loki_base),
-            prom_base=yaml_quote(prom_base),
-        )
-    return RELAY_EXPORTERS.format(
-        endpoint=yaml_quote(relay_endpoint), authorization=yaml_quote(authorization)
-    )
+    match shape:
+        case ExporterShape.LOCAL_BACKENDS:
+            loki_base, prom_base = bases
+            return BACKEND_EXPORTERS.format(
+                tempo_endpoint=yaml_quote(tempo_endpoint.rstrip("/")),
+                loki_base=yaml_quote(loki_base),
+                prom_base=yaml_quote(prom_base),
+            )
+        case ExporterShape.RUNNER_RELAY | ExporterShape.STATION_RELAY:
+            return RELAY_EXPORTERS.format(
+                endpoint=yaml_quote(relay_endpoint), authorization=yaml_quote(authorization)
+            )
+        case _:
+            assert_never(shape)

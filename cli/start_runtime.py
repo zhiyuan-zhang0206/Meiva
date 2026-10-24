@@ -2,9 +2,10 @@
 # Explicit executable identity for the single start lifecycle, and the site it acts on.
 #
 # A start runs the checkout that loaded this code, with the interpreter that loaded it.
-# The identity is verified once, where the entry admits the start, and held as a value:
-# it does not grant migration, writer closure, or any other operation right. `HomeSite`
-# is the home and checkout `meiva init` and `meiva start` are handed by the entry.
+# The identity is verified where the entry admits the start and held as a value, and the
+# source digest in it is read again when the start publishes serving: it does not grant
+# migration, writer closure, or any other operation right. `HomeSite` is the home and checkout
+# `meiva init` and `meiva start` are handed by the entry.
 
 from __future__ import annotations
 
@@ -32,10 +33,12 @@ class HomeSite:
 # The checkout, working directory and interpreter one start executes, with the loaded
 # identity verified for that checkout when the start was admitted.
 #
-# `loaded` is what the serving root must report once the start publishes serving
-# (`start_serving.mark_serving`): a source change between admission and launch makes the
-# two differ and the start fails closed. The class only holds the value; `admit` is the one
-# production constructor, and a test builds an instance around the identity it observes.
+# `loaded` is the identity at admission. The serving root reports the identity of the source
+# it was launched from, and a start's own converge can legitimately change that source (a file
+# it writes in the checkout) before the root launches, so `mark_serving` is handed
+# `identity_now()`: a source change after the root launched makes the two differ and the start
+# fails closed. `admit` is the one production constructor, and a test builds an instance around
+# a checkout of its own.
 @dataclass(frozen=True)
 class StartRuntime:
     code_root: Path
@@ -50,6 +53,16 @@ class StartRuntime:
     def admit(cls, checkout: Path) -> StartRuntime:
         loaded = runtime_interpreter.verify_loaded_source(checkout)
         return cls(checkout, checkout, Path(sys.executable).absolute(), loaded)
+
+    # meiva:note
+    # The loaded identity with the source digest of `code_root` read again now.
+    #
+    # Everything else in the identity (interpreter, prefix, working directory) is a property of
+    # this process and cannot change under a start; only the source can.
+    def identity_now(self) -> LoadedRuntimeIdentity:
+        return self.loaded.model_copy(
+            update={"source_digest": runtime_interpreter.source_digest(self.code_root)}
+        )
 
     def module_argv(self, module: str, *arguments: str) -> list[str]:
         return [str(self.interpreter), "-m", module, *arguments]

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import time
 from pathlib import Path
+from typing import assert_never
 
 from base.deploy import start_trace
 from base.log import logger
@@ -91,8 +92,11 @@ def wait_for_service_tree(
         )
         if observed.settled:
             return result
-        match unmet_step(elapsed_s=elapsed_s, timeout_s=timeout_s, interval_s=poll_interval_s):
+        unmet = unmet_step(elapsed_s=elapsed_s, timeout_s=timeout_s, interval_s=poll_interval_s)
+        match unmet:
             case Retry(after_s):
                 time.sleep(after_s)
             case Expired():
                 return result
+            case _:
+                assert_never(unmet)
