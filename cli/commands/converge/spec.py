@@ -1,13 +1,14 @@
-"""The converge step contract — the types every converge step is written against.
-
-Split out of ``host.py`` so the step implementations can live in more than
-one module without an import cycle: a step module imports this, and
-``host.py`` imports the step modules. ``host`` re-exports these names,
-so ``from cli.commands.lifecycle.converge_host import ConvergeCtx`` keeps working.
-"""
+# meiva:note
+# The converge step contract — the types every converge step is written against.
+#
+# Split out of ``converge_host.py`` so the step implementations can live in more than one
+# module without an import cycle: a step module imports this, and ``converge_host.py``
+# imports the step modules.
 
 from __future__ import annotations
 
+import os
+import sys
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -28,6 +29,35 @@ ALL_ROLES: frozenset[MachineRole] = frozenset({"gateway", "agent-runner", "obser
 CAPABILITY_ORDER: tuple[MachineRole, ...] = ("agent-runner", "gateway")
 
 
+# meiva:note
+# The invoking user's session, read once where converge is composed.
+#
+# A step that wires the user's account (the `~/.local/bin` link, the shell rc file) or
+# asks a person something reads these values, so a test hands in the session it wants.
+@dataclass(frozen=True)
+class UserSession:
+    user_home: Path
+    # meiva:note
+    # The login shell path (`$SHELL`); empty when the session names none.
+    login_shell: str
+    # meiva:note
+    # Whether a human is at the terminal: both stdin and stdout are TTYs. Watchdog respawns
+    # and rollout-driven starts have none.
+    interactive: bool
+
+    # meiva:note
+    # This process's session; the composition point calls it once per operation.
+    @classmethod
+    def current(cls) -> UserSession:
+        return cls(
+            user_home=Path.home(),
+            login_shell=os.environ.get("SHELL", ""),
+            interactive=bool(
+                sys.stdin and sys.stdout and sys.stdin.isatty() and sys.stdout.isatty()
+            ),
+        )
+
+
 @dataclass(frozen=True)
 class ConvergeCtx:
     repo: Path
@@ -42,6 +72,7 @@ class ConvergeCtx:
     # needs it calls `require_helper`.
     helper: HelperFactory | None
     host: Host
+    session: UserSession
     timers: Timers
     services: frozenset[str]
 

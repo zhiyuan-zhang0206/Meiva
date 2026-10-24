@@ -2,16 +2,15 @@ exports = ["__main__.py", "commands", "database", "fleet_update", "parsers", "st
 
 [uses]
 "__main__.py" = ["main.py"]
-"commands" = ["database", "python_install.py", "start_identity.py", "start_runtime.py"]
+"commands" = ["database", "start_identity.py", "start_runtime.py"]
 "conftest.py" = ["commands"]
 "fleet_update" = ["main.py"]
-"init_intent.py" = ["commands", "start_identity.py", "start_intent.py"]
-"main.py" = ["database", "parsers", "preflight.py", "start_identity.py", "startup_support.py"]
-"parsers" = ["commands", "database", "init_intent.py", "start_intent.py"]
+"init_intent.py" = ["commands", "start_identity.py", "start_runtime.py", "startup"]
+"main.py" = ["database", "parsers", "preflight.py", "start_identity.py", "start_runtime.py", "startup"]
+"parsers" = ["commands", "database", "init_intent.py", "start_intent.py", "start_runtime.py"]
 "python_install.py" = ["_python_index.py"]
-"start_intent.py" = ["commands", "start_identity.py", "start_runtime.py", "startup_support.py"]
-"tests" = ["_python_index.py", "commands", "database", "fleet_alert_silence.py", "fleet_update", "init_intent.py", "main.py", "parsers", "preflight.py", "python_install.py", "start_identity.py", "start_intent.py", "start_runtime.py", "startup_support.py"]
+"start_intent.py" = ["commands", "database", "start_identity.py", "start_runtime.py", "startup"]
+"tests" = ["_python_index.py", "commands", "database", "fleet_alert_silence.py", "fleet_update", "init_intent.py", "main.py", "parsers", "preflight.py", "python_install.py", "start_identity.py", "start_intent.py", "start_runtime.py", "startup"]
 
 [purity]
 "__init__.py" = "strict"
-"startup_support.py" = "strict"

@@ -34,7 +34,6 @@ from base.clock.tests.manual_timers import ManualTimers
 from base.cluster import postgres
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.machine import MachineIdentity
-from base.config import ConfigBoot
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.db.config import DbConfig
@@ -42,8 +41,10 @@ from base.host.system.tests.fake_commands import DARWIN_ARM64, fake_host
 from base.paths import meiva_home
 from base.sessions.tests.refuse_helper import refuse_helper
 from base.telemetry import EventPipeline
-from cli import parsers, preflight, start_identity, start_intent
+from cli import parsers, preflight, start_intent
+from cli.commands.converge.spec import UserSession
 from cli.commands.lifecycle import stop
+from cli.commands.lifecycle.stop.execute import StopEnvironment
 from cli.database import (
     OperatorDatabaseFactory,
     OperatorEventPipeline,
@@ -55,6 +56,8 @@ from cli.database.runtime import CommandRuntime
 from cli.database.tests.cli_tests import operator_database as operator_database
 from cli.database.tests.command_inputs import command_runtime as command_runtime
 from cli.parsers import build_parser
+from cli.start_runtime import HomeSite
+from cli.tests.bootstrap.init_identity import initialized_runner_home
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _ANSI = re.compile(r"\x1b\[[0-9;]*m")
@@ -62,11 +65,19 @@ _ANSI = re.compile(r"\x1b\[[0-9;]*m")
 _FIRST_START = Path(__file__).with_name("bootstrap") / "child_first_start.py"
 
 
-def test_meiva_start_writes_a_loguru_warning_to_stderr_and_its_log(tmp_path: Path) -> None:
+# meiva:note
+# A fresh process initializes a home, enters it as `meiva start` does and opens the
+# start's sinks; the warning the lifecycle would write only through loguru survives.
+def test_the_sinks_a_start_opens_keep_a_loguru_warning_in_stderr_and_the_log(
+    tmp_path: Path,
+) -> None:
     home = tmp_path / "home"
     env = {key: value for key, value in os.environ.items() if not key.startswith("MEIVA_")}
     env.update(MEIVA_HOME=str(home))
-    child = subprocess.run(  # noqa: S603 — this interpreter, fixed code, a private home
+    # meiva:note
+    # The child is this repository's own fixed probe script, run with the interpreter in
+    # isolated mode.
+    child = subprocess.run(  # noqa: S603
         [sys.executable, "-I", "-B", str(_FIRST_START)],
         cwd=tmp_path,
         env=env,
@@ -80,7 +91,9 @@ def test_meiva_start_writes_a_loguru_warning_to_stderr_and_its_log(tmp_path: Pat
     stderr = _ANSI.sub("", child.stderr)
     [warning] = [line for line in stderr.splitlines() if "[pgvector] pre-create skipped" in line]
     assert "WARNING" in warning and "OperationalError" not in warning
-    assert "127.0.0.1" in warning  # the connection error itself, not a `%s` placeholder
+    # meiva:note
+    # the connection error itself, not a `%s` placeholder
+    assert "127.0.0.1" in warning
     assert "service started" not in stderr
 
     records = [
@@ -157,11 +170,14 @@ def _ignoring_retention[T](callback: Callable[[], T]) -> Callable[..., T]:
     return invoke
 
 
-def test_main_reuses_only_the_explicit_caller_child_owner(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_main_hands_start_the_explicit_caller_child_owner_or_a_fresh_one(
+    monkeypatch: pytest.MonkeyPatch, unit_home: Path
+) -> None:
     owners: list[list[subprocess.Popen[bytes]]] = []
 
     def dispatched(
         _args: argparse.Namespace,
+        _site: HomeSite,
         *,
         retained_children: list[subprocess.Popen[bytes]],
         database_factory: DatabaseFactory,
@@ -172,24 +188,32 @@ def test_main_reuses_only_the_explicit_caller_child_owner(monkeypatch: pytest.Mo
         owners.append(retained_children)
         return 0
 
-    def stopped(*, retained_children: list[subprocess.Popen[bytes]], **_kwargs: object) -> int:
-        owners.append(retained_children)
-        return 0
-
     monkeypatch.setattr(start_intent, "run_start", dispatched)
-    monkeypatch.setattr(start_identity, "require_initialized", _ignoring_retention(lambda: None))
-    monkeypatch.setattr(stop, "cmd_stop", stopped)
+    initialized_runner_home(unit_home, unit_home / "checkout")
     shared: list[subprocess.Popen[bytes]] = []
     assert _main.main(["start", "--all-services"], retained_children=shared) == 0
+    assert _main.main(["start", "--all-services"]) == 0
+    assert _main.main(["start", "--all-services"]) == 0
+    assert owners[0] is shared
+    assert owners[1] is not shared and owners[2] is not owners[1]
+
+
+def test_main_hands_stop_the_explicit_caller_child_owner(monkeypatch: pytest.MonkeyPatch) -> None:
+    owners: list[list[subprocess.Popen[bytes]]] = []
+
+    def stopped(_request: object, env: StopEnvironment) -> int:
+        assert env.retained_children is not None
+        owners.append(env.retained_children)
+        return 0
+
+    monkeypatch.setattr(stop, "cmd_stop", stopped)
+    shared: list[subprocess.Popen[bytes]] = []
     full_stop = ["--yes", "--close-shell-sessions", "--stop-browser", "--stop-extras"]
     # meiva:note
     # a runner home
     full_stop += ["--keep-no-services", "--mode", "smooth", "--timeout", "60"]
     assert _main.main(["stop", *full_stop], retained_children=shared) == 0
-    assert owners[0] is shared and owners[1] is shared
-    assert _main.main(["start", "--all-services"]) == 0
-    assert _main.main(["start", "--all-services"]) == 0
-    assert owners[2] is not shared and owners[3] is not owners[2]
+    assert owners == [shared]
 
 
 def test_inspection_parser_cannot_launch_without_a_child_owner() -> None:
@@ -329,6 +353,7 @@ def _cold_report(
         services=frozenset({"prometheus"}),
         helper=refuse_helper,
         host=fake_host(platform=DARWIN_ARM64),
+        session=UserSession(user_home=path, login_shell="/bin/zsh", interactive=False),
         timers=ManualTimers(),
     )
     lgtm_native.ensure_lgtm_native_step(context)
@@ -540,5 +565,4 @@ def test_status_handler_body_forwards_the_parsed_namespace(
     assert _main.main(["status"]) == 0
     assert len(calls) == 1
     assert calls[0]["database_factory"] is operator_database
-    assert isinstance(calls[0]["machine"], MachineIdentity)
-    assert isinstance(calls[0]["config"], ConfigBoot)
+    assert isinstance(calls[0]["command"], CommandRuntime)

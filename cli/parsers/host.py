@@ -25,7 +25,7 @@ USAGE_EXIT = 2
 def h_init(args: argparse.Namespace) -> int:
     from cli.init_intent import run_init
 
-    return run_init(args)
+    return run_init(args, args.site, args.caller_host)
 
 
 def _h_start(
@@ -39,6 +39,7 @@ def _h_start(
 
     return run_start(
         args,
+        args.site,
         retained_children=retained_children,
         database_factory=args.database_factory,
         producer=args.producer,
@@ -132,6 +133,8 @@ def h_stop(
         return refuse_usage("stop", problems)
     from cli.commands.duration import parse_duration
     from cli.commands.lifecycle.stop import cmd_stop
+    from cli.commands.lifecycle.stop.choices import StopChoices, StopRequest, StopWindow
+    from cli.commands.lifecycle.stop.execute import StopEnvironment
 
     try:
         maintenance_for_seconds = (
@@ -140,24 +143,29 @@ def h_stop(
     except ValueError as error:
         return refuse_usage("stop", [str(error)])
 
-    try:
-        return cmd_stop(
+    request = StopRequest(
+        choices=StopChoices(
             keep_infra=args.keep_infra,
-            require_confirmation=not args.assume_yes,
+            preserve_sessions=frozenset(args.keep_service),
             keep_browser=args.keep_browser,
             keep_shell_sessions=args.keep_shell_sessions,
+            announce=True,
             teardown_extras=not args.keep_extras,
-            preserve_sessions=frozenset(args.keep_service),
             force=args.mode == "force",
-            timeout=args.timeout,
-            maintenance_for_seconds=maintenance_for_seconds,
-            maintenance_reason=args.reason,
-            retained_children=retained_children,
-            database_factory=args.database_factory,
-            producer=args.producer,
-            machine=args.runtime.machine,
-            helper=args.runtime.helper,
-        )
+        ),
+        window=StopWindow(for_seconds=maintenance_for_seconds, reason=args.reason),
+        require_confirmation=not args.assume_yes,
+        timeout=args.timeout,
+    )
+    environment = StopEnvironment(
+        command=args.runtime,
+        database_factory=args.database_factory,
+        producer=args.producer,
+        retained_children=retained_children,
+        stdin=sys.stdin,
+    )
+    try:
+        return cmd_stop(request, environment)
     except ValueError as error:
         return refuse_conflict("stop", error)
 
@@ -202,7 +210,7 @@ def h_restart(
     if problems := restart_problems(args):
         return refuse_usage("restart", problems)
     if args.only is not None:
-        from cli.commands.lifecycle.stop import cmd_restart_agent_host
+        from cli.commands.lifecycle.stop.restart import cmd_restart_agent_host
 
         try:
             return cmd_restart_agent_host(
@@ -216,7 +224,7 @@ def h_restart(
             return refuse_conflict("restart", error)
     if retained_children is None:
         raise ValueError("PostgreSQL launch requires its caller-owned child retention")
-    from cli.commands.lifecycle.stop import cmd_restart
+    from cli.commands.lifecycle.stop.restart import cmd_restart
 
     try:
         return cmd_restart(
@@ -241,12 +249,7 @@ def h_restart(
 def _h_status(args: argparse.Namespace) -> int:
     from cli.commands.lifecycle.status import cmd_status
 
-    return cmd_status(
-        database_factory=args.database_factory,
-        machine=args.runtime.machine,
-        config=args.runtime.config,
-        host=args.runtime.host,
-    )
+    return cmd_status(database_factory=args.database_factory, command=args.runtime)
 
 
 def _h_converge(args: argparse.Namespace) -> int:
@@ -265,13 +268,17 @@ def _h_converge(args: argparse.Namespace) -> int:
 def _h_firewall_status(args: argparse.Namespace) -> int:
     from cli.commands.converge.firewall_command import cmd_firewall_status
 
-    return cmd_firewall_status(machine=args.runtime.machine, host=args.runtime.host)
+    return cmd_firewall_status(
+        home=args.runtime.home, machine=args.runtime.machine, host=args.runtime.host
+    )
 
 
 def _h_firewall_sync(args: argparse.Namespace) -> int:
     from cli.commands.converge.firewall_command import cmd_firewall_sync
 
-    return cmd_firewall_sync(machine=args.runtime.machine, host=args.runtime.host)
+    return cmd_firewall_sync(
+        home=args.runtime.home, machine=args.runtime.machine, host=args.runtime.host
+    )
 
 
 def _h_trace_ship(args: argparse.Namespace) -> int:
@@ -626,8 +633,10 @@ def _h_lgtm(
     *,
     retained_children: list[subprocess.Popen[bytes]] | None = None,
 ) -> int:
+    from base.paths import repo_root
     from cli.commands.lifecycle.lgtm_toggle import cmd_lgtm_off, cmd_lgtm_on, selection_problem
     from cli.commands.observability.lgtm import cmd_lgtm_status
+    from cli.start_runtime import StartRuntime
 
     if args.lgtm_cmd in ("on", "off"):
         only = tuple(args.only_service or ())
@@ -640,6 +649,7 @@ def _h_lgtm(
             only_services=only,
             disabled_services=disabled,
             all_services=args.all_services,
+            runtime=StartRuntime.development(repo_root()),
             retained_children=retained_children,
             database_factory=args.database_factory,
             producer=args.producer,

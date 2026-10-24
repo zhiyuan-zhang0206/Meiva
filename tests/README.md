@@ -330,7 +330,7 @@ with `footprint -p <pid>`, never `ps -o rss`.
 | Don't | Do |
 |------|-----|
 | `time.sleep(n)` | `asyncio.sleep(0)` or mock |
-| `monkeypatch.setattr("pkg.mod.time.sleep", ...)` — edits the stdlib module process-wide | Patch a module-local seam (`root_driver._poll_sleep`); see above |
+| `monkeypatch.setattr("pkg.mod.time.sleep", ...)` — edits the stdlib module process-wide | Lift the decision into a pure plan (`root_control/poll_plan.unmet_step`) and give the waiting shell its interval as a parameter; see `python-conventions.md`, "Tests do not patch" |
 | Stub a name on the package when the caller did `from ... import name` | Patch the module that resolves it — a missed stub is silent |
 | Share state between tests | Each test independent, using fixture for initial state |
 | Wrap test body with `try-except` | Let pytest fail naturally |

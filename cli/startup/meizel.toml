@@ -1,0 +1,11 @@
+exports = ["log_sinks.py", "outcome.py", "service_path.py", "settings_failure.py"]
+
+[uses]
+"tests" = ["log_sinks.py", "outcome.py", "service_path.py", "settings_failure.py"]
+
+[purity]
+"__init__.py" = "strict"
+"log_sinks.py" = "strict"
+"outcome.py" = "strict"
+"service_path.py" = "strict"
+"settings_failure.py" = "strict"

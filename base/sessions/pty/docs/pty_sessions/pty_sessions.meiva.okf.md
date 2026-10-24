@@ -121,7 +121,7 @@ Above it: `meiva.shell.sessions`, `meiva.watcher`, the gateway ScheduleManager, 
 page-server daemon (one `list` per reconcile pass), `ops.cluster_status`
 capture/kill, the worktree-removal guard (`base/deploy/git/worktree_guard.py`,
 read-only: it never creates a home) and `meiva stop`'s shell-session closure
-(`cli/commands/lifecycle/service_stop.py`). Every creation path crosses the same
+(`cli/commands/lifecycle/stop/shell_sessions.py`). Every creation path crosses the same
 allocation lock.
 
 ## Boundaries

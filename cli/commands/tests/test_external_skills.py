@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
 import pytest
 
 from base.telemetry import EventPipeline
+from cli.commands.converge.spec import ALL_ROLES
 from cli.commands.extensions import external_skills
 from cli.commands.lifecycle import converge_host
 from cli.database.runtime import CommandRuntime
@@ -52,13 +54,9 @@ def test_bridge_step_is_prod_host_global_and_skipped_for_dev_worktrees(
     )
     assert step.host_global
     assert not step.requires_unit_config
-    assert step.roles == converge_host.ALL_ROLES
+    assert step.roles == ALL_ROLES
     (home / ".codex").mkdir()
 
-    def default_home(_path: Path) -> bool:
-        return True
-
-    monkeypatch.setattr(converge_host, "is_default_home", default_home)
     monkeypatch.setattr(external_skills.Path, "home", lambda: home)
 
     dev_repo = tmp_path / ".worktrees" / "feature"
@@ -66,12 +64,11 @@ def test_bridge_step_is_prod_host_global_and_skipped_for_dev_worktrees(
     converge_host.converge_host(
         dev_repo,
         None,
-        meiva_home=home / ".meiva",
         steps=(step,),
         services=frozenset(),
         database_factory=operator_database,
         producer=operator_pipeline,
-        command=command_runtime,
+        command=replace(command_runtime, home=home / ".meiva"),
     )
     assert not _target(home / ".codex").exists()
 
@@ -81,11 +78,10 @@ def test_bridge_step_is_prod_host_global_and_skipped_for_dev_worktrees(
     converge_host.converge_host(
         prod_repo,
         None,
-        meiva_home=home / ".meiva",
         steps=(step,),
         services=frozenset(),
         database_factory=operator_database,
         producer=operator_pipeline,
-        command=command_runtime,
+        command=replace(command_runtime, home=home / ".meiva"),
     )
     assert _target(home / ".codex").is_dir()

@@ -12,9 +12,11 @@ from base.cluster.machine import MachineIdentity, MachineRoles
 from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot
 from base.host.system.tests.fake_commands import fake_host
+from base.host.tests.short_tmp import short_tmp as short_tmp
 from base.sessions.tests.refuse_helper import refuse_helper
 from base.telemetry import EventPipeline
-from cli.commands.lifecycle import root_driver
+from cli.commands.converge.spec import UserSession
+from cli.commands.lifecycle.tests.scripted_root import UnitRow, scripted_root
 from cli.commands.observability import otel_collector as oc
 from cli.database.tests.cli_tests import operator_database as operator_database
 from cli.database.tests.cli_tests import operator_pipeline as operator_pipeline
@@ -49,6 +51,7 @@ def test_non_lgtm_gateway_converge_skips_collector_install(
         machine=machine_from_boot(machine_config_763),
         helper=refuse_helper,
         host=fake_host(),
+        session=UserSession(user_home=home, login_shell="/bin/zsh", interactive=False),
         services=frozenset(),
         timers=ManualTimers(),
     )
@@ -92,6 +95,7 @@ def test_non_lgtm_gateway_with_explicit_endpoint_installs_collector(
         machine=machine_from_boot(machine_config_798),
         helper=refuse_helper,
         host=fake_host(),
+        session=UserSession(user_home=home, login_shell="/bin/zsh", interactive=False),
         services=frozenset(),
         timers=ManualTimers(),
     )
@@ -120,7 +124,7 @@ def test_non_lgtm_gateway_with_explicit_endpoint_installs_collector(
 
 def test_collector_preparation_never_controls_a_running_service_tree(
     monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
+    short_tmp: Path,
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
@@ -128,8 +132,7 @@ def test_collector_preparation_never_controls_a_running_service_tree(
     machine_config_829.set_field("machine_serve_gateway", True)
     machine_config_829.set_field("machine_serve_agent_runner", False)
     machine_config_829.set_field("machine_serve_observability_station", False)
-    home = tmp_path / "home"
-    home.mkdir()
+    home = short_tmp
     monkeypatch.delitem(os.environ, "MEIVA_TELEMETRY_OTLP_ENDPOINT", raising=False)
     ctx = oc.ConvergeCtx(
         repo=Path(__file__).resolve().parents[4],
@@ -141,16 +144,18 @@ def test_collector_preparation_never_controls_a_running_service_tree(
         machine=machine_from_boot(machine_config_829),
         helper=refuse_helper,
         host=fake_host(),
+        session=UserSession(user_home=home, login_shell="/bin/zsh", interactive=False),
         services=frozenset(),
         timers=ManualTimers(),
     )
 
-    def no_root_control() -> None:
-        pytest.fail("Preparation cannot independently reconcile a live root")
-
     monkeypatch.setattr(oc, "ensure_otel_collector", _fail_ensure_otel_collector)
-    monkeypatch.setattr(root_driver, "root_client", no_root_control)
-    oc.ensure_otel_collector_step(ctx)
+    with scripted_root(home, [UnitRow("gateway")]) as root:
+        oc.ensure_otel_collector_step(ctx)
+
+    # meiva:note
+    # Preparation cannot independently reconcile a live root: no request reached it.
+    assert root.calls == []
 
 
 def test_non_lgtm_gateway_reports_and_preserves_residual_config(
@@ -180,6 +185,7 @@ def test_non_lgtm_gateway_reports_and_preserves_residual_config(
         machine=machine_from_boot(machine_config_859),
         helper=refuse_helper,
         host=fake_host(),
+        session=UserSession(user_home=home, login_shell="/bin/zsh", interactive=False),
         services=frozenset(),
         timers=ManualTimers(),
     )

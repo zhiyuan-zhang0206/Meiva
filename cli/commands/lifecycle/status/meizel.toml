@@ -1,0 +1,11 @@
+exports = ["gateway.py", "plan.py", "render.py", "roster.py"]
+
+[uses]
+"__init__.py" = ["gateway.py", "plan.py", "render.py", "roster.py"]
+"plan.py" = ["render.py", "roster.py"]
+
+[purity]
+"gateway.py" = "strict"
+"plan.py" = "strict"
+"render.py" = "strict"
+"roster.py" = "strict"

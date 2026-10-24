@@ -17,7 +17,7 @@ from base.config import ConfigBoot
 from base.host.system.tests.fake_commands import fake_host
 from base.sessions.tests.refuse_helper import refuse_helper
 from base.telemetry import EventPipeline
-from cli.commands.converge.spec import ConvergeCtx
+from cli.commands.converge.spec import ConvergeCtx, UserSession
 from cli.commands.converge.steps import ensure_pg_binaries_step
 from cli.database.runtime import CommandRuntime
 from cli.database.tests.cli_tests import operator_database as operator_database
@@ -90,6 +90,9 @@ def test_start_converge_accepts_installed_pg17_where_no_artifact_exists(
             machine=command_runtime.machine,
             helper=refuse_helper,
             host=fake_host(),
+            session=UserSession(
+                user_home=installed.parent, login_shell="/bin/zsh", interactive=False
+            ),
             services=frozenset(),
             timers=ManualTimers(),
         )
@@ -123,6 +126,7 @@ def test_remote_managed_gateway_does_not_require_local_server_or_extension(
             machine=command_runtime.machine,
             helper=refuse_helper,
             host=fake_host(),
+            session=UserSession(user_home=tmp_path, login_shell="/bin/zsh", interactive=False),
             services=frozenset(),
             timers=ManualTimers(),
         )
@@ -156,6 +160,7 @@ def test_pg_admission_uses_each_owners_live_remote_verdict(
                 machine=machine_from_boot(config),
                 helper=refuse_helper,
                 host=fake_host(),
+                session=UserSession(user_home=tmp_path, login_shell="/bin/zsh", interactive=False),
                 services=frozenset(),
                 timers=ManualTimers(),
             )

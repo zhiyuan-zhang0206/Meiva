@@ -10,8 +10,7 @@ import pytest
 
 from base.deploy.release.start_inputs import configuration_digest
 from base.host.runtime_interpreter import source_digest
-from base.sessions.tests.refuse_helper import refuse_helper
-from cli.commands.lifecycle.start_generation import launch_digest
+from cli.commands.lifecycle.root_control.generation import launch_digest
 
 
 def test_development_generation_includes_dirty_and_untracked_source(tmp_path: Path) -> None:
@@ -86,25 +85,6 @@ def test_generation_binds_configuration_omitted_from_transport(tmp_path: Path) -
     assert configuration_digest(tmp_path) != configured
     plugin.unlink()
     assert configuration_digest(tmp_path) == initial
-
-
-def test_live_admission_requires_positive_absence(monkeypatch: pytest.MonkeyPatch) -> None:
-    from cli.commands.lifecycle import root_driver as driver
-
-    def no_status(_client: object) -> None:
-        return None
-
-    monkeypatch.setattr(driver, "root_status", no_status)
-    monkeypatch.setattr(driver, "root_client", object)
-
-    def unknown() -> None:
-        raise RuntimeError("retained child custody")
-
-    monkeypatch.setattr(driver, "require_root_absent", unknown)
-    with pytest.raises(RuntimeError, match="retained child custody"):
-        driver.admit_live_start(
-            (), Path("/unread-source"), frozenset({"gateway"}), reconcile=True, helper=refuse_helper
-        )
 
 
 def test_loaded_source_identity_is_explicit_and_changes_with_source(

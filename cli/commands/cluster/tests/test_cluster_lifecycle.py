@@ -39,15 +39,28 @@ def roles() -> list[str]:
     return ["agent-runner"]
 
 
+# meiva:note
+# `home` as `meiva init` leaves it: its start intent records the capabilities `roles`.
+def _born(home: Path, checkout: Path, roles: list[str]) -> Path:
+    checkout.mkdir(exist_ok=True)
+    start_identity.prepare_identity(
+        start_identity.IdentityInput(
+            home,
+            checkout,
+            frozenset(roles),
+            {"MEIVA_MACHINE_NAME": "destroyed", "MEIVA_GATEWAY_URL": "http://10.0.0.7:8000"},
+        )
+    )
+    return home
+
+
 @pytest.fixture
 def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, roles: list[str]) -> Path:
     """A born home: `MEIVA_HOME` names it and its start intent records the cluster."""
     home = (tmp_path / "home").resolve()
     home.mkdir(mode=0o700)
+    _born(home, tmp_path / "checkout", roles)
     monkeypatch.setenv("MEIVA_HOME", str(home))
-
-    def read_intent(_home: Path) -> dict[str, object]:
-        return {"roles": roles}
 
     def stop(*, roles: list[str], mode: str, timeout: float) -> int:
         return 0
@@ -58,19 +71,10 @@ def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, roles: list[str]) -> P
     def helper(*_args: object, **_kwargs: object) -> None:
         return None
 
-    monkeypatch.setattr(start_identity, "read_intent", read_intent)
     monkeypatch.setattr(lifecycle, "stop_cluster", stop)
     monkeypatch.setattr(lifecycle, "unregister_scheduled_jobs", unregister_jobs)
     monkeypatch.setattr(permissions_helper_launchd_job, "unregister_helper", helper)
     return home
-
-
-def _gateway_intent(_home: Path) -> dict[str, object]:
-    return {"roles": ["gateway"]}
-
-
-def _no_intent(_home: Path) -> None:
-    return None
 
 
 def _nothing_to_stop(*, roles: list[str], mode: str, timeout: float) -> int:
@@ -220,7 +224,7 @@ def test_the_default_home_can_be_destroyed(
     """It used to be refused outright; the typed path is what guards it now."""
     prod = (default_home / ".meiva").resolve()
     prod.mkdir(mode=0o700)
-    monkeypatch.setattr(start_identity, "read_intent", _gateway_intent)
+    _born(prod, default_home / "checkout", ["gateway"])
     monkeypatch.setattr(lifecycle, "stop_cluster", _nothing_to_stop)
     monkeypatch.setattr(lifecycle, "unregister_scheduled_jobs", _no_jobs)
     monkeypatch.setattr(permissions_helper_launchd_job, "unregister_helper", _no_helper)
@@ -315,7 +319,7 @@ def test_drop_db_removes_the_data_directories_after_the_stop(
 def test_destroy_refuses_a_home_without_a_start_intent(
     home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(start_identity, "read_intent", _no_intent)
+    (home / start_identity.INTENT_NAME).unlink()
     prompt = _at_a_terminal(monkeypatch)
 
     assert (

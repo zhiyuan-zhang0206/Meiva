@@ -20,14 +20,14 @@ from base.host.env import bootstrap
 from base.packages.plugin_providers import build_model_catalog
 from base.packages.plugins.config_registration import plugin_bootstrap_config
 from base.paths.tests.homes import point_home
-from cli import start_intent
 from cli.commands.cluster import unit_join
 from cli.commands.data_plane import bringup
 from cli.commands.tests import test_single_box as _single_box
 from cli.commands.tests.test_single_box import Born
 from cli.database.tests.cli_tests import operator_database as operator_database
 from cli.database.tests.command_inputs import command_runtime as command_runtime
-from cli.tests.bootstrap.init_identity import prepare_init_identity
+from cli.start_runtime import HomeSite
+from cli.tests.bootstrap.init_identity import caller_host, prepare_init_identity
 
 configured = _single_box.configured
 born = _single_box.born
@@ -109,7 +109,6 @@ def test_issued_bundle_starts_a_runner_that_connects_as_the_generation_login(
 
     checkout = tmp_path / "checkout"
     checkout.mkdir()
-    monkeypatch.setattr(start_intent, "checkout", lambda: checkout)
 
     bearers: list[object] = []
 
@@ -123,7 +122,11 @@ def test_issued_bundle_starts_a_runner_that_connects_as_the_generation_login(
         os.environ.pop("MEIVA_CLUSTER_SECRET", None)
         os.environ["MEIVA_HOME"] = str(runner)
         os.environ[unit.CAPABILITY_KEY_ENV] = key
-        prepare_init_identity(_runner_args(bundle))
+        prepare_init_identity(
+            _runner_args(bundle),
+            HomeSite(runner, checkout),
+            caller_host(path=str(tmp_path / "tools")),
+        )
         assert unit.CAPABILITY_KEY_ENV not in os.environ
         _install_on_initialized_unit(renewal, renewal_key)
     assert not bundle.exists()

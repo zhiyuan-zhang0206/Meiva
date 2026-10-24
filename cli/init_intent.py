@@ -1,18 +1,21 @@
-"""Settings-free input boundary of ``meiva init``.
-
-Init records one home's identity and nothing else: it validates the first-start
-inputs, then publishes the private intent and `.env` (`cli/start_identity.py`).
-It imports no runtime Settings, starts no process, creates no data plane and
-dials only a joining runner's gateway. The first `meiva start` provisions and
-launches.
-"""
+# meiva:note
+# Settings-free input boundary of ``meiva init``.
+#
+# Init records one home's identity and nothing else: it validates the first-start
+# inputs, then publishes the private intent and `.env` (`cli/start_identity.py`).
+# It imports no runtime Settings, starts no process, creates no data plane and
+# dials only a joining runner's gateway. The first `meiva start` provisions and
+# launches.
+#
+# The home and checkout it acts on (`HomeSite`) and the caller's host facts
+# (`CallerHost`) arrive as values the entry read once (`cli.main`); init reads neither
+# the environment, `__file__` nor a port.
 
 from __future__ import annotations
 
 import argparse
 import hashlib
 import io
-import os
 import sys
 from pathlib import Path
 from urllib.parse import SplitResult, urlsplit
@@ -23,7 +26,6 @@ from base.host.env.registry import derived_env_keys, env_identity_keys
 from base.host.net.predicates import is_loopback_host
 from base.native_process.os_platform import file_lock
 from base.paths.private_dir import ensure_private_dir
-from cli import start_intent
 from cli.commands.cluster.unit_join import join_gateway
 from cli.start_identity import (
     CAP_ARGS,
@@ -36,6 +38,8 @@ from cli.start_identity import (
     resume_claim,
     stored_values,
 )
+from cli.start_runtime import HomeSite
+from cli.startup.service_path import CallerHost, choose_service_path
 
 # Every flag a run can carry; an interrupted claim resumes from its recorded payload
 # and takes none of them.
@@ -132,9 +136,13 @@ def _require_foreign_endpoint(endpoint: SplitResult, local: set[str]) -> None:
         raise ValueError("remote data-plane endpoint resolves to this host")
 
 
-def _first_time_examples() -> str:
+def _cli_path(checkout: Path) -> Path:
+    return checkout / ".venv" / "bin" / "meiva"
+
+
+def _first_time_examples(checkout: Path) -> str:
     """What to run, from this checkout: the host's bare `meiva` is linked by the first start."""
-    cli = start_intent.checkout() / ".venv" / "bin" / "meiva"
+    cli = _cli_path(checkout)
     return (
         "\nfirst-time examples (this checkout's CLI; a bare `meiva` is linked by the first start):\n"
         "  # single box (owns data plane + runs agents):\n"
@@ -149,18 +157,19 @@ def _first_time_examples() -> str:
     )
 
 
-def _inputs(args: argparse.Namespace, home: Path) -> IdentityInput:
+def _inputs(args: argparse.Namespace, site: HomeSite, caller: CallerHost) -> IdentityInput:
+    home = site.home
     stored = stored_values(home)
     explicit = {cap: getattr(args, flag) for cap, flag in CAP_ARGS.items()}
     try:
         roles = capability_roles(stored, explicit)
     except ValueError as exc:
-        raise ValueError(f"{exc}{_first_time_examples()}") from exc
+        raise ValueError(f"{exc}{_first_time_examples(site.checkout)}") from exc
     values: dict[str, str] = dict(stored)
     config, digest = config_values(args, home)
     values.update(config)
-    values["MEIVA_SERVICE_PATH"] = service_path(values, home)
-    _apply_identity_options(args, stored, values)
+    values["MEIVA_SERVICE_PATH"] = service_path(values, site, caller)
+    _apply_identity_options(args, stored, values, site.checkout)
     if config.get("MEIVA_DB_URL"):
         _validate_remote_inputs(values, roles)
     if "gateway" not in roles:
@@ -172,26 +181,22 @@ def _inputs(args: argparse.Namespace, home: Path) -> IdentityInput:
             "--db-capability is for agent-runner units; a gateway unit keeps its own "
             "write-generation ledger"
         )
-    return IdentityInput(home, start_intent.checkout(), roles, values, digest)
+    return IdentityInput(home, site.checkout, roles, values, digest, caller.occupied_ports)
 
 
-def service_path(values: dict[str, str], home: Path) -> str:
+# meiva:note
+# The admitted host tool directories the home declares (`choose_service_path` picks the source).
+def service_path(values: dict[str, str], site: HomeSite, caller: CallerHost) -> str:
     from base.sessions.env_forwarding import admit_service_path
 
-    if "MEIVA_SERVICE_PATH" in values:
-        return admit_service_path(values["MEIVA_SERVICE_PATH"])
-    if (home / ".env").exists():
-        raise ValueError("existing home requires an explicit MEIVA_SERVICE_PATH declaration")
-    if "MEIVA_SERVICE_PATH" in os.environ:
-        return admit_service_path(os.environ["MEIVA_SERVICE_PATH"])
-    bin_name = "bin"
-    venvs = [start_intent.checkout() / ".venv"]
-    if sys.prefix != sys.base_prefix:
-        venvs.append(Path(sys.prefix))
-    if activated := os.environ.get("VIRTUAL_ENV"):
-        venvs.append(Path(activated))
+    choice = choose_service_path(
+        values.get("MEIVA_SERVICE_PATH"),
+        home_has_env=(site.home / ".env").exists(),
+        caller=caller,
+        checkout=str(site.checkout),
+    )
     return admit_service_path(
-        os.environ.get("PATH", ""), excluded=tuple(venv / bin_name for venv in venvs)
+        choice.raw, excluded=tuple(Path(bin_dir) for bin_dir in choice.excluded)
     )
 
 
@@ -199,6 +204,7 @@ def _apply_identity_options(
     args: argparse.Namespace,
     stored: dict[str, str],
     values: dict[str, str],
+    checkout: Path,
 ) -> None:
     for field in IDENTITY_FIELDS:
         explicit = getattr(args, field)
@@ -208,24 +214,24 @@ def _apply_identity_options(
                 raise ValueError(f"init input conflicts with persisted {key}")
             values[key] = explicit
     if not values.get("MEIVA_MACHINE_NAME"):
-        raise ValueError(f"init requires --machine-name{_first_time_examples()}")
+        raise ValueError(f"init requires --machine-name{_first_time_examples(checkout)}")
     for key in ("MEIVA_MACHINE_NAME", "MEIVA_MACHINE_HOST"):
         if any(c in values.get(key, "") for c in "\r\n\x00"):
             raise ValueError(f"invalid {key}")
     if args.ssl_cert_file is not None:
         values.update(SSL_CERT_FILE=args.ssl_cert_file, REQUESTS_CA_BUNDLE=args.ssl_cert_file)
-        os.environ["SSL_CERT_FILE"] = args.ssl_cert_file
 
 
 def _given_flags(args: argparse.Namespace) -> list[str]:
     return ["--" + name.replace("_", "-") for name in _FLAGS if getattr(args, name) is not None]
 
 
-def initialize_home(args: argparse.Namespace, home: Path) -> str:
+def initialize_home(args: argparse.Namespace, site: HomeSite, caller: CallerHost) -> str:
     """Publish the home's identity; the verdict line for the operator.
 
     The caller holds the home's `start-intent.lock`.
     """
+    home = site.home
     if pending_claim(home) is not None:
         flags = _given_flags(args)
         if flags:
@@ -235,20 +241,21 @@ def initialize_home(args: argparse.Namespace, home: Path) -> str:
             )
         resume_claim(home)
     else:
-        prepare_identity(_inputs(args, home))
+        prepare_identity(_inputs(args, site, caller))
     intent = read_intent(home)
     assert intent is not None  # noqa: S101 — the claim was just published
     return f"initialized {home} (capabilities: {', '.join(intent['roles'])})"
 
 
-def run_init(args: argparse.Namespace) -> int:
+# meiva:note
+# `meiva init`: record the home's identity and name the next step.
+def run_init(args: argparse.Namespace, site: HomeSite, caller: CallerHost) -> int:
     try:
-        home = start_intent.resolve_home()
-        ensure_private_dir(home)
-        with file_lock(home / "start-intent.lock", timeout_s=30):
-            verdict = initialize_home(args, home)
+        ensure_private_dir(site.home)
+        with file_lock(site.home / "start-intent.lock", timeout_s=30):
+            verdict = initialize_home(args, site, caller)
         print(f"✓ {verdict}")
-        print(f"next: run `{start_intent.checkout() / '.venv' / 'bin' / 'meiva'} start`")
+        print(f"next: run `{_cli_path(site.checkout)} start`")
         return 0
     except (ValueError, TypeError, RuntimeError, OSError) as exc:
         print(f"meiva init: {exc}", file=sys.stderr)
