@@ -14,10 +14,10 @@ from base.agents.context.identity import AgentIdentity
 from meiva.mcps._clients import McpClients
 from meiva.mcps._tools import DiskCache, ServerProxy, cached_tools, call_raw, list_tools
 from meiva.mcps.tests._mcps_helpers import (
-    StoredTools,
     canned_daemon,
     image_result,
     local_mcp_clients,
+    stored_tools,
     text_result,
     tool_source,
     tool_wire,
@@ -103,9 +103,7 @@ def test_description_raises_for_missing_server(machine_config: Path) -> None:
 def test_module_getattr_returns_proxy(machine_config: Path, bound_agent: BindAgent) -> None:
     bound_agent(
         1,
-        clients=ClientSet(
-            factories={McpClients: lambda: McpClients(Path("unused.sock"), lambda: 1.0)}
-        ),
+        clients=ClientSet(factories={McpClients: lambda: McpClients(Path("unused.sock"), 1.0)}),
     )
     write_servers(machine_config, {"fs": {"command": "x"}})
     proxy = mcps_mod.fs  # goes through module-level __getattr__
@@ -118,9 +116,7 @@ def test_module_getattr_returns_proxy(machine_config: Path, bound_agent: BindAge
 def test_a_proxy_runs_against_the_bound_contexts_values(
     unit_home: Path, machine_config: Path, bound_agent: BindAgent
 ) -> None:
-    clients = ClientSet(
-        factories={McpClients: lambda: McpClients(Path("unused.sock"), lambda: 7.5)}
-    )
+    clients = ClientSet(factories={McpClients: lambda: McpClients(Path("unused.sock"), 7.5)})
     bound_agent(3, clients=clients)
     write_servers(machine_config, {"fs": {"command": "x"}})
     source = mcps_mod.fs._source
@@ -404,27 +400,35 @@ def test_the_clients_dial_the_given_socket_on_the_first_request(stub_daemon: Sta
 def test_list_tools_propagates_tool_error_from_remote(stub_daemon: Start) -> None:
     # A server-reported tool error must NOT silently fall back to a local re-run.
     daemon = stub_daemon(lambda request: [error_line(request, "tool blew up")])
-    client = remote_mod.RemoteMCPClient(daemon.path)
+    client = local_mcp_clients(Path(daemon.path))
     with pytest.raises(mcps_mod.MCPCallError, match="tool blew up"):
         list_tools(tool_source(client), "fs")
 
 
-def test_list_tools_falls_back_to_cache_on_transport_error(tmp_path: Path) -> None:
+def test_list_tools_falls_back_to_cache_when_no_daemon_listens(tmp_path: Path) -> None:
     # meiva:note
-    # A transport failure (no daemon behind the socket path) falls back to cache.
+    # Neither a missing socket (the connect error) nor a socket nobody listens on (a transport
+    # error) stops the listing while the cache holds the server's tools.
     cached: list[mcps_mod.ToolInfo] = [{"name": "t1", "description": "", "input_schema": {}}]
-    client = remote_mod.RemoteMCPClient(str(tmp_path / "absent.sock"))
-    assert list_tools(tool_source(client, cache=StoredTools(cached)), "fs") == cached
+    stale = tmp_path / "stale.sock"
+    stale.touch()
+    for socket_path in (tmp_path / "absent.sock", stale):
+        client = local_mcp_clients(socket_path)
+        cache = stored_tools(tmp_path / f"cache-{socket_path.name}", cached)
+        assert list_tools(tool_source(client, cache=cache), "fs") == cached
 
 
-def test_list_tools_without_a_cache_raises_the_transport_error(tmp_path: Path) -> None:
-    client = remote_mod.RemoteMCPClient(str(tmp_path / "absent.sock"))
+def test_list_tools_without_a_cache_raises_the_connect_or_transport_error(tmp_path: Path) -> None:
+    stale = tmp_path / "stale.sock"
+    stale.touch()
+    with pytest.raises(mcps_mod.MCPConnectError, match="unavailable"):
+        list_tools(tool_source(local_mcp_clients(tmp_path / "absent.sock")), "fs")
     with pytest.raises(OSError):
-        list_tools(tool_source(client), "fs")
+        list_tools(tool_source(local_mcp_clients(stale)), "fs")
 
 
 def test_call_raw_propagates_tool_error_from_remote(stub_daemon: Start) -> None:
     daemon = stub_daemon(lambda request: [error_line(request, "permission denied")])
-    client = remote_mod.RemoteMCPClient(daemon.path)
+    client = local_mcp_clients(Path(daemon.path))
     with pytest.raises(mcps_mod.MCPCallError, match="permission denied"):
         call_raw(tool_source(client), "fs", "do")

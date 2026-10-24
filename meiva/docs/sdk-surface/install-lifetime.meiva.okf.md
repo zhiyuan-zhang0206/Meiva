@@ -29,17 +29,21 @@ MeivaContext, and reload preserves those clients.
 (`Reversal` in `meiva/sdk_surface/installation.py`). Each primitive that changes the process returns the
 record of what it did; `uninstall()` and the rollback of a plugin whose declaration failed
 halfway read the ledger newest-first and reverse each record
-(`meiva/sdk_surface/install.py:_revert`). A record names the objects it touched (a wrap's parent
-and attribute, a member's parent module), so reversing one needs nothing from the code that
-applied it. A wrap puts the original back only while its parent still holds that wrap's own
-function; namespaces and members reverse through `meiva/sdk_surface/plugins.py:uninstall`.
+(`meiva/sdk_surface/install.py:Build.revert`, whose `match` names every record kind and ends in
+`assert_never`). A record names the objects it touched (a wrap's parent and attribute, a member's
+parent module), so reversing one needs nothing from the code that applied it. A wrap puts the
+original back only while its parent still holds that wrap's own function; namespaces and members
+reverse through `meiva/sdk_surface/plugins.py:uninstall`; a bound plugin config is released by the
+function `bind_plugin_config` returned, which its record keeps. An installed surface is reversed
+through the same ledger, rebuilt by `Build.of` from the installation's frozen snapshots.
 
 ## The atexit owner follows the installation
 
-`install()` registers the sampling owner's `close` with `atexit` when the caller
-supplied no sampling owner — the bare-SDK process, which has no service lifespan
-to schedule that cleanup. The registration belongs to that installation rather
-than to the process at large: `uninstall()` unregisters the same `close` before
+`install()` requires the sampling owner and registers nothing itself. The bare-SDK
+process, which has no service lifespan to schedule that cleanup, builds its owner with
+`meiva/boot.py:process_sampling_owner`, which registers the owner's `close` with `atexit`.
+The registration belongs to the installation that retains the owner rather than to the
+process at large: `uninstall()` unregisters the same `close` before
 it drops the slot, so a removed surface leaves nothing behind that could
 re-raise a refresh failure the surface no longer owns, while an installation
 left in place still reports that failure at interpreter exit. This is finite

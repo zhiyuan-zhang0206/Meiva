@@ -53,13 +53,13 @@ def _cache_dir() -> Path:
 
 
 # meiva:note
-# What this process's tools run against, read from the bound context once: its daemon client (dialed on the first request; the SDK never starts servers), the timeout in force now, the disk cache and the context's agent identity. A proxy keeps the source it was created with, so a changed timeout reaches the next proxy.
+# What this process's tools run against, read from the bound context once: its daemon client (dialed on the first request; the SDK never starts servers), the request timeout that client holds, the disk cache and the context's agent identity. A proxy keeps the source it was created with.
 def _source() -> _tools.ToolSource:
     context = process_context.current_context()
     clients = context.clients.get(McpClients)
     return _tools.ToolSource(
         remote=clients,
-        timeout_seconds=clients.timeout_seconds(),
+        timeout_seconds=clients.timeout_seconds,
         cache=_tools.DiskCache(_cache_dir()),
         identity=context.identity,
     )

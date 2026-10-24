@@ -36,7 +36,7 @@ at all, replacing the ~63MB per-agent wrapper. `"shared": true` (x) keeps one da
 
 **Context ownership**: the SDK stores one daemon socket client on the bound `MeivaContext` (`meiva/mcps/_clients.py:McpClients`). Closing the context closes that client. No portal, local MCP session or SDK-owned server subprocess is created.
 
-`meiva.boot.process_clients` supplies `McpClients` with a narrow timeout reader through `ClientSet`'s factory configuration. `McpClients` is built on first use without reading that configuration or starting a transport; closing the set clears its clients, and a later use rebuilds them with the same reader.
+`meiva.boot.process_clients` supplies `McpClients` with its request timeout through `ClientSet`'s factory configuration. `McpClients` is built on first use: that is when the timeout is read from the configuration, once, and no transport starts. A timeout changed afterwards reaches only clients built after it: closing the set clears its clients, and a later use rebuilds them and reads the setting again.
 
 **Structure**: the facade/implementation split of the SDK side and the values-and-shells split of the daemon are in [[meiva/mcps/docs/structure.meiva.okf.md|MCP Facade and Daemon Structure]].
 

@@ -3,11 +3,12 @@
 # test's configuration authority and catalog, with the text and media models scripted behind the
 # real provider factory (the deps name the `llm_override` seam). Relative paths resolve against
 # `tmp_path`, nothing is saved unless a test gives an output site, and findings are dropped
-# unless a test gives an exec turn.
+# unless a test binds an exec turn (`use_exec_turn`; the fixture unbinds it).
 
 from __future__ import annotations
 
 import dataclasses
+from collections.abc import Iterator
 from datetime import UTC
 from pathlib import Path
 from typing import Any
@@ -20,8 +21,9 @@ from base.config.tests.configuration import model_overrides
 from base.lm.catalog import ModelCatalog
 from base.lm.effort import ReasoningEffort
 from base.packages.tests.model_catalog import inert_keys
+from meiva.sdk_surface import process_context
 from meiva.sdk_surface.batch import DEFAULT_BATCH_MAX_CONCURRENT
-from meiva.security import FindingDelivery
+from meiva.sdk_surface.pure.media.finding_plan import FindingDelivery
 from meiva.tests.fixtures.scripted_chat_model import OVERRIDE, Script, ScriptedModels
 from meiva.understand import answer, plans, wiring
 from meiva.understand.answer import OutputSite, UnderstandDeps
@@ -44,7 +46,8 @@ def run_understand(
     effort: str | ReasoningEffort = ReasoningEffort.MAX,
     max_concurrent: int | None = DEFAULT_BATCH_MAX_CONCURRENT,
 ) -> list[str]:
-    return answer.run(plans.normalize(targets, effort, max_concurrent), deps)
+    delivery = FindingDelivery(enabled=True, in_turn=process_context.in_exec_turn())
+    return answer.run(plans.normalize(targets, effort, max_concurrent), deps, delivery)
 
 
 # meiva:note
@@ -63,8 +66,14 @@ class UnderstandHarness:
         self.scripted_models.bind(self.deps.text_model, self.text)
         self.scripted_models.bind(self.deps.media_model, self.media)
 
-    def use_exec_turn(self, update: dict[str, Any]) -> None:
-        self.configure(delivery=FindingDelivery(enabled=True, in_turn=True, update=update))
+    # meiva:note
+    # Bind an exec turn in this process and return its state update, where the findings land.
+    @staticmethod
+    def use_exec_turn() -> dict[str, Any]:
+        update: dict[str, Any] = {}
+        process_context.set_state(object())
+        process_context.set_state_update(update)
+        return update
 
     def save_to(self, directory: Path) -> None:
         self.configure(output=OutputSite(directory, UTC))
@@ -118,7 +127,7 @@ def understand_harness(
     config_authority: ConfigAuthority,
     model_catalog: ModelCatalog,
     tmp_path: Path,
-) -> UnderstandHarness:
+) -> Iterator[UnderstandHarness]:
     deps = wiring.understand_deps_for(
         config_authority,
         catalog=model_catalog,
@@ -126,6 +135,6 @@ def understand_harness(
         overrides=model_overrides(),
         base_dir=tmp_path,
         output=None,
-        delivery=FindingDelivery(enabled=True, in_turn=False, update=None),
     )
-    return UnderstandHarness(dataclasses.replace(deps, llm_override=OVERRIDE), scripted_models)
+    yield UnderstandHarness(dataclasses.replace(deps, llm_override=OVERRIDE), scripted_models)
+    process_context.unbind_exec_turn()

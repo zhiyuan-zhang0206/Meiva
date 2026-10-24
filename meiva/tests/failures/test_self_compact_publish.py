@@ -3,18 +3,22 @@ from __future__ import annotations
 import psycopg
 import pytest
 import redis
+from psycopg import sql
 
 import meiva
 from base.agents.context.clients import ClientSet
 from base.agents.lifecycle import SystemHalt
 from base.agents.tests.units import spawn_agent
+from base.cluster import inbound_channel
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
+from base.config import settings
 from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
-from base.telemetry import audit_events
+from base.log.tests.log_records import LogRecords
+from base.log.tests.log_records import loguru_records as loguru_records
 from meiva.tests.fixtures.pin_agent import pin_agent
 
 
@@ -29,6 +33,7 @@ def test_compact_survives_publish_failure(
     redis_url: str,
     db_conn: psycopg.Connection,
     database_gate: ProcessDbGate,
+    loguru_records: LogRecords,
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
@@ -57,6 +62,9 @@ def test_compact_survives_publish_failure(
         )
         row = cur.fetchone()
     assert row is not None and row[0] == "compact_summary"
+    channel = inbound_channel(agent_id, settings.data_plane.events_channel)
+    [attempt] = [m for m in loguru_records.messages("WARNING") if "self inbound wake" in m]
+    assert repr(channel) in attempt
 
 
 def test_compact_records_its_audit_fact_with_the_summary_inbound(
@@ -88,13 +96,13 @@ def test_compact_records_its_audit_fact_with_the_summary_inbound(
 
 
 # meiva:note
-# A compact whose audit fact cannot be recorded commits no summary. The audit write is refused
-# by replacing the store's record function: a real constraint violation would need DDL on the
-# audit table, which blocks on the locks the live fixtures hold. Retained patch.
+# A compact whose audit fact cannot be recorded commits no summary. The fault is a real trigger on
+# the audit table that rejects the `compact` row of this test's agent, so the audit write the
+# compact makes inside its transaction fails the way a violated constraint does; the trigger and its
+# function are dropped afterwards.
 def test_compact_whose_audit_fact_cannot_be_recorded_commits_no_summary(
     redis_url: str,
     db_conn: psycopg.Connection,
-    monkeypatch: pytest.MonkeyPatch,
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
@@ -108,14 +116,26 @@ def test_compact_whose_audit_fact_cannot_be_recorded_commits_no_summary(
         machine=machine_identity,
     )
     pin_agent(agent_id)
-
-    def refuse(_conn: object, _event: object) -> None:
-        raise RuntimeError("audit write failed")
-
-    monkeypatch.setattr(audit_events, "record_audit", refuse)
-
-    with pytest.raises(RuntimeError, match="audit write failed"):
-        meiva.self.compact("Requests: (none)\nProgress: done\n")
+    db_conn.execute(
+        "CREATE FUNCTION reject_compact_audit() RETURNS trigger LANGUAGE plpgsql AS $$ "
+        "BEGIN RAISE EXCEPTION 'audit write failed' USING ERRCODE = '23514'; END $$"
+    )
+    db_conn.execute(
+        sql.SQL(
+            "CREATE TRIGGER reject_compact_audit BEFORE INSERT ON audit_events "
+            "FOR EACH ROW WHEN (NEW.event_name = 'compact' AND NEW.agent_id = {}) "
+            "EXECUTE FUNCTION reject_compact_audit()"
+        ).format(sql.Literal(agent_id))
+    )
+    db_conn.commit()
+    try:
+        with pytest.raises(psycopg.errors.CheckViolation, match="audit write failed"):
+            meiva.self.compact("Requests: (none)\nProgress: done\n")
+    finally:
+        db_conn.rollback()
+        db_conn.execute("DROP TRIGGER reject_compact_audit ON audit_events")
+        db_conn.execute("DROP FUNCTION reject_compact_audit()")
+        db_conn.commit()
 
     count = db_conn.execute(
         "SELECT count(*) FROM inbound_messages WHERE agent_id = %s AND kind = 'compact_summary'",

@@ -7,3 +7,4 @@
 "test_mcps.py" = ["_mcps_helpers.py", "stub_daemon.py"]
 "test_mcps_remote.py" = ["_mcps_helpers.py", "stub_daemon.py"]
 "test_remote_timeout.py" = ["_mcps_helpers.py", "stub_daemon.py"]
+"test_retry_classify.py" = ["transport_error_probe.py"]

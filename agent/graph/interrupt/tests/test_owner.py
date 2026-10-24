@@ -41,7 +41,7 @@ async def test_primary_and_watcher_cleanup_unknown_both_survive() -> None:
     pool = ParkedPool(release=_released(), after_cancel=secondary)
 
     with pytest.raises(RuntimeError) as observed:
-        async with subscribe_interrupt(pool, 1, resources=scope, poll_s=_POLL_S):
+        async with subscribe_interrupt(pool.as_pool(), 1, resources=scope, poll_s=_POLL_S):
             await pool.parked.wait()
             raise primary
     assert observed.value is primary
@@ -67,7 +67,7 @@ async def test_late_unknown_is_visible_before_service_join_without_sibling_cance
         sibling_alive.set()
 
     async with subscribe_interrupt(
-        pool, 1, resources=scope, poll_s=_POLL_S, exit_timeout_s=0.02
+        pool.as_pool(), 1, resources=scope, poll_s=_POLL_S, exit_timeout_s=0.02
     ) as event:
         await pool.parked.wait()
     assert not event.is_set()
@@ -92,7 +92,7 @@ async def test_repeated_cancel_during_bounded_exit_still_hands_off_actual_task()
 
     async def invoke() -> None:
         async with subscribe_interrupt(
-            pool, 1, resources=scope, poll_s=_POLL_S, exit_timeout_s=0.03
+            pool.as_pool(), 1, resources=scope, poll_s=_POLL_S, exit_timeout_s=0.03
         ):
             await pool.parked.wait()
 
@@ -117,7 +117,7 @@ async def test_exit_abandons_a_wedged_watcher_within_the_bound_and_names_where_i
 
     started = asyncio.get_running_loop().time()
     async with subscribe_interrupt(
-        pool, 1, resources=hosted_resources, poll_s=_POLL_S, exit_timeout_s=0.2
+        pool.as_pool(), 1, resources=hosted_resources, poll_s=_POLL_S, exit_timeout_s=0.2
     ):
         await pool.parked.wait()
     elapsed = asyncio.get_running_loop().time() - started
@@ -154,7 +154,7 @@ async def test_a_watcher_that_swallowed_its_cancel_ends_at_its_poll_without_firi
     pool = ParkedPool(release=_released(), real=aops_pool)
 
     async with subscribe_interrupt(
-        pool, agent_id, resources=hosted_resources, poll_s=_POLL_S, exit_timeout_s=1.0
+        pool.as_pool(), agent_id, resources=hosted_resources, poll_s=_POLL_S, exit_timeout_s=1.0
     ) as event:
         await pool.parked.wait()
 

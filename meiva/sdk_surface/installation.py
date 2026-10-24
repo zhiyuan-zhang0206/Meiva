@@ -49,8 +49,10 @@ SkillProvider = Callable[[], list[Path]]
 # meiva:note
 # What one applied piece of an SDK installation did to the process, as data: the installer's
 # ledger of reversals. Uninstalling, or rolling back a plugin whose declaration failed halfway,
-# reads the ledger newest-first and reverses each record (`install.revert`); the records name
-# the objects they touched, so reversing one needs nothing from the code that applied it.
+# reads the ledger newest-first and reverses each record (`install.Build.revert`); the records name
+# the objects they touched, so reversing one needs nothing from the code that applied it. A
+# bound plugin config keeps the release `bind_plugin_config` returned, the one owner of what
+# undoing that binding means.
 @dataclass(frozen=True)
 class NamespaceAdded:
     name: str
@@ -82,6 +84,7 @@ class ProviderAdded:
 @dataclass(frozen=True)
 class ConfigBound:
     plugin: str
+    release: Callable[[], None]
 
 
 type Reversal = NamespaceAdded | MemberAdded | WrapAdded | ProviderAdded | ConfigBound
@@ -113,7 +116,7 @@ class Installation:
     disabled: frozenset[str]
     faces: bool
     undo: tuple[Reversal, ...]
-    sampling: SamplingPolicyOwner = field(default_factory=SamplingPolicyOwner)
+    sampling: SamplingPolicyOwner
     configs: Mapping[str, BaseModel] = field(default_factory=dict[str, BaseModel])
     catalog: ModelCatalog | None = None
     provider_keys: ProviderKeys | None = None
@@ -127,11 +130,10 @@ class Installation:
     def bare(
         cls,
         *,
+        sampling: SamplingPolicyOwner,
         catalog: ModelCatalog | None = None,
         provider_keys: ProviderKeys | None = None,
         authority: ConfigAuthority | None = None,
-        clock: Clock | None = None,
-        clients: EventPipelines | None = None,
         configs: Mapping[str, BaseModel] | None = None,
     ) -> Installation:
         return cls(
@@ -144,12 +146,11 @@ class Installation:
             disabled=frozenset(),
             faces=False,
             undo=(),
+            sampling=sampling,
             configs=MappingProxyType({}) if configs is None else configs,
             catalog=catalog,
             provider_keys=provider_keys,
             authority=authority,
-            clock=clock,
-            clients=clients,
         )
 
     def require_catalog(self) -> ModelCatalog:

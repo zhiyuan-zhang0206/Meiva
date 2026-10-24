@@ -10,9 +10,9 @@ import dataclasses
 import socket
 import threading
 from collections.abc import Callable, Iterator
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from pydantic import SecretStr
@@ -21,9 +21,9 @@ from base.config.service_read import ConfigAuthority
 from base.lm.catalog import ModelCatalog
 from base.lm.effort import ReasoningEffort
 from base.packages.tests.model_catalog import inert_keys
+from meiva.sdk_surface import process_context
 from meiva.sdk_surface.batch import DEFAULT_BATCH_MAX_CONCURRENT
-from meiva.sdk_surface.injection_check import injection_check_inputs
-from meiva.security import FindingDelivery
+from meiva.sdk_surface.pure.media.finding_plan import FindingDelivery
 from meiva.tests.fixtures.scripted_chat_model import OVERRIDE, ScriptedModels
 from meiva.web import plans, runner, wiring
 from meiva.web.deps import FetchDeps, ReaderProvider, SearchDeps, SearchProvider
@@ -121,7 +121,8 @@ def loopback() -> Iterator[Loopback]:
 #
 # `set_brave` / `set_jina` / `set_model` change the config values of the deps, `script` scripts
 # the answer model the fetch deps name, and `search` / `fetch` run the SDK calls against them.
-# Findings the calls raise land in `update`, the state update of a simulated exec turn.
+# Findings the calls raise land in the state update of the exec turn `use_exec_turn` binds, and
+# `findings` reads them back from there.
 @dataclass
 class WebHarness:
     loopback: Loopback
@@ -130,7 +131,6 @@ class WebHarness:
     catalog: ModelCatalog
     search_deps: SearchDeps
     fetch_deps: FetchDeps
-    update: dict[str, Any] = field(default_factory=dict[str, Any])
 
     def set_brave(self, **changes: Any) -> None:
         self.search_deps = dataclasses.replace(
@@ -167,19 +167,32 @@ class WebHarness:
         )
 
     # meiva:note
-    # Make a finding deliverable: the calls run inside an exec turn whose update is `update`,
-    # and the injection check reads its settings from `authority` and its decision model from
-    # `catalog`.
+    # Make a finding deliverable: the calls run inside an exec turn bound in this process (the
+    # fixture unbinds it), and the injection check reads its settings from `authority` and its
+    # decision model from `catalog`.
     def use_exec_turn(self, authority: ConfigAuthority, catalog: ModelCatalog) -> None:
-        delivery = FindingDelivery(enabled=True, in_turn=True, update=self.update)
-        self.search_deps = dataclasses.replace(self.search_deps, delivery=delivery)
+        process_context.set_state(object())
+        process_context.set_state_update({})
         self.fetch_deps = dataclasses.replace(
             self.fetch_deps,
-            delivery=delivery,
-            injection=injection_check_inputs(
+            injection=wiring.injection_inputs(
                 authority, catalog, keys=inert_keys(catalog), agent_id=None, delivery_active=True
             ),
         )
+
+    # meiva:note
+    # The findings delivered to the bound exec turn so far; none outside one.
+    @property
+    def findings(self) -> list[Any]:
+        if not process_context.in_exec_turn():
+            return []
+        update = cast("dict[str, Any]", process_context.get_state_update())
+        return list(update.get("security_findings", []))
+
+    # meiva:note
+    # What the facade reads before a call: scanning is enabled, and a turn is running or not.
+    def delivery(self) -> FindingDelivery:
+        return FindingDelivery(enabled=True, in_turn=process_context.in_exec_turn())
 
     # meiva:note
     # Script the answer model the fetch deps name.
@@ -193,7 +206,7 @@ class WebHarness:
         max_concurrent: int | None = DEFAULT_BATCH_MAX_CONCURRENT,
     ) -> list[list[Hit]]:
         return runner.run_search(
-            plans.plan_search(queries, count, max_concurrent), self.search_deps
+            plans.plan_search(queries, count, max_concurrent), self.search_deps, self.delivery()
         )
 
     def fetch(
@@ -204,7 +217,9 @@ class WebHarness:
         max_concurrent: int | None = DEFAULT_BATCH_MAX_CONCURRENT,
     ) -> list[str]:
         return runner.run_fetch(
-            plans.plan_fetch(targets, max_chars, effort, max_concurrent), self.fetch_deps
+            plans.plan_fetch(targets, max_chars, effort, max_concurrent),
+            self.fetch_deps,
+            self.delivery(),
         )
 
 
@@ -219,17 +234,16 @@ def web_harness(
     scripted_models: ScriptedModels,
     config_authority: ConfigAuthority,
     model_catalog: ModelCatalog,
-) -> WebHarness:
+) -> Iterator[WebHarness]:
     from base.config.tests.configuration import model_overrides
 
-    outside = FindingDelivery(enabled=True, in_turn=False, update=None)
-    search = wiring.search_deps_for(config_authority, delivery=outside)
+    search = wiring.search_deps_for(config_authority)
     fetch = wiring.fetch_deps_for(
         config_authority,
         catalog=model_catalog,
         keys=inert_keys(model_catalog),
         overrides=model_overrides(),
-        delivery=outside,
+        delivery_active=False,
         agent_id=None,
     )
     search = dataclasses.replace(
@@ -245,7 +259,7 @@ def web_harness(
         deepseek=dataclasses.replace(fetch.deepseek, endpoint=f"{loopback.url}/deepseek/fetch"),
         fetch_model=dataclasses.replace(fetch.fetch_model, llm_override=OVERRIDE),
     )
-    return WebHarness(
+    harness = WebHarness(
         loopback=loopback,
         scripted_models=scripted_models,
         authority=config_authority,
@@ -253,6 +267,8 @@ def web_harness(
         search_deps=search,
         fetch_deps=fetch,
     )
+    yield harness
+    process_context.unbind_exec_turn()
 
 
 __all__ = ["Loopback", "Received", "Reply", "WebHarness", "loopback", "web_harness"]

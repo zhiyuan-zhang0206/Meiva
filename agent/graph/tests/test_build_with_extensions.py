@@ -20,6 +20,7 @@ from base.agents.context.clients import ClientSet
 from base.packages.plugins.enable_config import write_local
 from base.telemetry.tests.capture.event_capture import EmittedEvents
 from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
+from meiva.sdk_surface.tests.installation_holder import inert_sampling
 
 # Every dotted name `load_extensions` can register a plugin module under.
 _PLUGIN_MODULE_PREFIXES = ("meiva_builtins.plugins.", "plugins.")
@@ -110,7 +111,7 @@ def test_only_enabled_plugins_are_imported():
 
     from meiva.sdk_surface import extensions as _loader
 
-    _loader.load_extensions()
+    _loader.load_extensions(sampling=inert_sampling())
 
     imported = _imported_plugins()
     assert "meiva_builtins.plugins.compact.plugin" in imported
@@ -134,7 +135,7 @@ def test_external_plugin_also_loaded():
 
     from meiva.sdk_surface import extensions as _loader
 
-    _loader.load_extensions()
+    _loader.load_extensions(sampling=inert_sampling())
 
     imported = _imported_plugins()
     assert "plugins.audit.plugin" in imported
@@ -148,7 +149,7 @@ def test_load_extensions_installs_metering():
     from meiva.sdk_surface.installation import installed
 
     expected_clients = ClientSet()
-    _loader.load_extensions(clients=expected_clients)
+    _loader.load_extensions(clients=expected_clients, sampling=inert_sampling())
 
     installation = installed()
     assert installation is not None
@@ -183,12 +184,12 @@ def test_a_repeat_load_reuses_the_module_object_so_a_patch_still_lands():
 
     from meiva.sdk_surface import extensions as _loader
 
-    _loader.load_extensions()
+    _loader.load_extensions(sampling=inert_sampling())
     dotted = "meiva_builtins.plugins.demo.plugin"
     first = sys.modules[dotted]
     stale_probe = first.probe  # the reference an earlier importer would be holding
 
-    _loader.load_extensions()
+    _loader.load_extensions(sampling=inert_sampling())
 
     assert sys.modules[dotted] is first
     # The consequence that actually bites: a callable captured before the reload
@@ -213,7 +214,7 @@ def test_a_different_file_under_the_same_name_gets_a_fresh_module(
 
     from meiva.sdk_surface import extensions as _loader
 
-    _loader.load_extensions()
+    _loader.load_extensions(sampling=inert_sampling())
     dotted = "meiva_builtins.plugins.demo.plugin"
     first = sys.modules[dotted]
     assert first.GHOST == "first file"
@@ -223,7 +224,7 @@ def test_a_different_file_under_the_same_name_gets_a_fresh_module(
     monkeypatch.setattr(paths, "repo_plugins_dir", lambda: other_repo)
     _make_plugin("demo", "__description__ = 'demo'\n")
 
-    _loader.load_extensions()
+    _loader.load_extensions(sampling=inert_sampling())
 
     assert sys.modules[dotted] is not first
     assert not hasattr(sys.modules[dotted], "GHOST")
@@ -279,7 +280,7 @@ def test_build_registry_holds_what_each_enabled_plugin_declares():
     from base.packages.plugins.loading.registry import build_registry
     from meiva.sdk_surface import extensions as _loader
 
-    _loader.load_extensions()
+    _loader.load_extensions(sampling=inert_sampling())
     registry = build_registry()
 
     assert [(p, fn.__name__) for p, fn in registry.system_prompt_sections()] == [
@@ -312,7 +313,7 @@ def test_a_face_whose_contribute_misbehaves_is_skipped_not_fatal(contribute_body
     from base.packages.plugins.loading.registry import build_registry
     from meiva.sdk_surface import extensions as _loader
 
-    _loader.load_extensions()
+    _loader.load_extensions(sampling=inert_sampling())
 
     assert [p for p, _fn in build_registry().system_prompt_sections()] == ["good"]
 
@@ -345,7 +346,7 @@ def test_broken_external_plugin_skipped_and_others_load(
 
     from meiva.sdk_surface import extensions as _loader
 
-    _loader.load_extensions()  # must not raise
+    _loader.load_extensions(sampling=inert_sampling())  # must not raise
 
     # the healthy plugin loaded
     assert "plugins.audit.plugin" in sys.modules
@@ -373,7 +374,7 @@ def test_broken_builtin_plugin_skipped_and_others_load(
 
     from meiva.sdk_surface import extensions as _loader
 
-    _loader.load_extensions()  # must not raise
+    _loader.load_extensions(sampling=inert_sampling())  # must not raise
 
     assert "meiva_builtins.plugins.compact.plugin" in sys.modules
     assert "meiva_builtins.plugins.syntax_fix.plugin" not in sys.modules
@@ -411,7 +412,7 @@ def test_external_plugin_relative_import_resolves_when_plugins_prefix_is_shadowe
 
     from meiva.sdk_surface import extensions as _loader
 
-    _loader.load_extensions()  # must not raise
+    _loader.load_extensions(sampling=inert_sampling())  # must not raise
 
     assert sys.modules["plugins.meiva_ledger.plugin"].MARK == 7
     assert sys.modules["plugins.meiva_ledger"].__path__ == [str(pdir)]
@@ -430,7 +431,7 @@ def test_dangling_config_entry_reported_and_skipped(emitted_events: EmittedEvent
 
     from meiva.sdk_surface import extensions as _loader
 
-    loaded = _loader.load_extensions()  # must not raise
+    loaded = _loader.load_extensions(sampling=inert_sampling())  # must not raise
 
     assert "plugins.audit.plugin" in sys.modules
     assert missing not in loaded.config.plugins
@@ -439,7 +440,7 @@ def test_dangling_config_entry_reported_and_skipped(emitted_events: EmittedEvent
     assert all(str(a["error"]).startswith("DanglingPlugin: ") for a in attrs)
     assert all(missing in str(a["error"]) for a in attrs)
 
-    reloaded = _loader.load_extensions()
+    reloaded = _loader.load_extensions(sampling=inert_sampling())
     assert missing not in reloaded.config.plugins
     repeated = emitted_events.attributes("plugin_load_failed")
     assert [a["plugin"] for a in repeated] == [missing] * 4

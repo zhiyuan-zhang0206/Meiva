@@ -13,9 +13,9 @@ import meiva.mcps as mcps_mod
 import meiva.mcps._remote as remote_mod
 from meiva.mcps._tools import ServerProxy, call_raw, schema_to_signature
 from meiva.mcps.tests._mcps_helpers import (
-    StoredTools,
     canned_daemon,
     local_mcp_clients,
+    stored_tools,
     tool_source,
     tool_wire,
 )
@@ -256,19 +256,22 @@ def test_proxy_all_prefers_disk_cache(tmp_path: Path) -> None:
     ]
     # meiva:note
     # No daemon listens here: asking it would fail instead of answering from the cache.
-    unreachable = remote_mod.RemoteMCPClient(str(tmp_path / "absent.sock"))
-    proxy = ServerProxy("fs", tool_source(unreachable, cache=StoredTools(cached)))
+    unreachable = local_mcp_clients(tmp_path / "absent.sock")
+    proxy = ServerProxy(
+        "fs", tool_source(unreachable, cache=stored_tools(tmp_path / "cache", cached))
+    )
     assert proxy.__all_for_meiva__ == ["alpha", "beta"]
 
 
 def test_proxy_load_tool_names_uses_in_memory_cache_on_second_call(tmp_path: Path) -> None:
     """Second call to _load_tool_names -> reads the proxy's own tool table without the cache again."""
-    cache = StoredTools([{"name": "t1", "description": "", "input_schema": {}}])
-    unreachable = remote_mod.RemoteMCPClient(str(tmp_path / "absent.sock"))
-    proxy = ServerProxy("fs", tool_source(unreachable, cache=cache))
-    proxy._load_tool_names()  # first: the cache fills the proxy's table
-    proxy._load_tool_names()  # second: uses the in-memory table
-    assert cache.reads == 1  # cache read only once
+    cache_dir = tmp_path / "cache"
+    stored = stored_tools(cache_dir, [{"name": "t1", "description": "", "input_schema": {}}])
+    unreachable = local_mcp_clients(tmp_path / "absent.sock")
+    proxy = ServerProxy("fs", tool_source(unreachable, cache=stored))
+    assert proxy._load_tool_names() == ["t1"]
+    (cache_dir / "fs.json").unlink()
+    assert proxy._load_tool_names() == ["t1"]
 
 
 def test_schema_to_signature_renders_required_and_optional() -> None:

@@ -1,28 +1,28 @@
-"""Child process for the sampling-owner atexit test: a refresh defect surfaces at shutdown."""
+# meiva:note
+# Child process for the sampling-owner atexit test: the process-lifetime owner is closed at exit.
+import atexit
 
 import meiva  # noqa: F401  # pyright: ignore[reportUnusedImport] (importing the SDK is under test)
-from base.agents.sdk import call_policy
+from base.agents.sdk.call_policy import SamplingPolicyOwner
 from base.packages.plugin_config_images import DiskPluginConfigImages
 from base.packages.plugins.extensions import ExtensionRegistry
 from base.paths.home import resolve_meiva_home
+from meiva.boot import process_sampling_owner
 from meiva.sdk_surface import install
-from meiva.sdk_surface.installation import installed
 
-install.install(ExtensionRegistry(()), config_images=DiskPluginConfigImages(resolve_meiva_home()))
-original = ValueError("ordinary SDK refresh defect")
+owners: list[SamplingPolicyOwner] = []
 
 
-def read() -> object:
-    raise original
+# meiva:note
+# Registered before the owner exists, so interpreter exit runs it after the owner's own close.
+def report_owner() -> None:
+    print("closed" if owners[0].stopped else "open")
 
 
-call_policy.read_policy = read  # pyright: ignore[reportAttributeAccessIssue]
-installation = installed()
-assert installation is not None
-owner = installation.sampling
-try:
-    owner.read()
-except ValueError as observed:
-    assert observed is original
-assert owner.worker is not None and owner.worker.completed.wait(2)
-assert owner.error is not None and owner.error[0] is original
+atexit.register(report_owner)
+owners.append(process_sampling_owner())
+install.install(
+    ExtensionRegistry(()),
+    config_images=DiskPluginConfigImages(resolve_meiva_home()),
+    sampling=owners[0],
+)

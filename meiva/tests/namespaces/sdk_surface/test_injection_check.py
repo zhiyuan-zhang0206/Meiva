@@ -12,13 +12,10 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Callable, Mapping
 from dataclasses import replace
-from pathlib import Path
 from typing import Any
 
 import pytest
 
-from base.config.service_read import ConfigAuthority
-from base.config.tests.configuration import snapshot_process_config
 from base.lm.catalog import ModelCatalog
 from base.lm.catalog.decide.types import (
     Decision,
@@ -38,7 +35,6 @@ from meiva.sdk_surface.injection_check import (
     QUESTION,
     InjectionCheckInputs,
     begin_check,
-    injection_check_inputs,
     page_probability,
 )
 from meiva.sdk_surface.pure.media.injection_plan import (
@@ -344,43 +340,3 @@ def test_the_gates_are_checked_in_order(
         )
         is step
     )
-
-
-# meiva:note
-# --- the inputs the facade reads ---
-
-
-def test_the_shipped_defaults_name_a_catalog_decision_model(
-    config_authority: ConfigAuthority, model_catalog: ModelCatalog
-) -> None:
-    inputs = injection_check_inputs(
-        config_authority,
-        model_catalog,
-        keys=inert_keys(model_catalog),
-        agent_id=7,
-        delivery_active=True,
-    )
-
-    assert inputs.enabled is True
-    assert inputs.model in model_catalog.decision_models
-    assert inputs.threshold == 0.4
-    assert (inputs.agent_id, inputs.delivery_active) == (7, True)
-
-
-def test_the_inputs_follow_the_configured_fields(
-    unit_home: Path, model_catalog: ModelCatalog
-) -> None:
-    owner = snapshot_process_config()
-    owner.set_field("web_fetch_injection_check_enabled", False)
-    owner.set_field("web_fetch_injection_threshold", 0.9)
-    authority = ConfigAuthority(owner.view, owner.view, unit_home / ".env")
-
-    inputs = injection_check_inputs(
-        authority,
-        model_catalog,
-        keys=inert_keys(model_catalog),
-        agent_id=None,
-        delivery_active=False,
-    )
-
-    assert (inputs.enabled, inputs.threshold, inputs.delivery_active) == (False, 0.9, False)

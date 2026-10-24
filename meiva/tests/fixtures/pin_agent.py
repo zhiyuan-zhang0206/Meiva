@@ -8,7 +8,7 @@ import pytest
 
 import meiva
 from base.agents.context import MeivaContext
-from base.agents.context.clients import ClientSet
+from base.agents.context.clients import ClientSet, DatabaseFactory
 from base.agents.context.identity import AgentIdentity, ExternalLease
 from base.clock import SYSTEM_TIMERS, Clock
 from base.clock.configuration import clock_config_from_boot
@@ -17,7 +17,7 @@ from base.cluster.machine.boot import machine_from_boot
 from base.config.tests.configuration import snapshot_process_config
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.native_process.turn_identity import HostedServiceResources, HostedTurnResources
-from meiva.boot import process_clients
+from meiva.boot import clients_over, derived_clients
 from meiva.sdk_surface import process_context
 
 
@@ -29,6 +29,20 @@ async def hosted_resources() -> AsyncGenerator[HostedTurnResources]:
         yield await service.turn()
     finally:
         await service.aclose()
+
+
+# meiva:note
+# Clients over a snapshot of the process configuration, for a pinned agent whose test supplied none.
+def snapshot_clients() -> ClientSet:
+    config = snapshot_process_config()
+    return derived_clients(config, machine_from_boot(config))
+
+
+# meiva:note
+# Clients over a snapshot of the process configuration whose database is the factory the test holds.
+def snapshot_clients_over(database: DatabaseFactory) -> ClientSet:
+    config = snapshot_process_config()
+    return clients_over(config, machine_from_boot(config), database)
 
 
 def pin_agent(
@@ -52,7 +66,7 @@ def pin_agent(
             machine=machine if machine is not None else (None if bound is None else bound.machine),
             clients=clients
             if clients is not None
-            else (bound.clients if bound else process_clients(config=snapshot_process_config())),
+            else (bound.clients if bound else snapshot_clients()),
             clock_factory=(
                 clock_factory
                 if clock_factory is not None
@@ -80,6 +94,6 @@ def exec_context(
         original_incarnation=incarnation,
         machine=machine,
         hosted_resources=resources,
-        clients=process_clients(config=config, machine=machine),
+        clients=derived_clients(config, machine),
         clock_factory=lambda: Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS),
     )

@@ -1,17 +1,13 @@
-"""Where a watcher's generated script, bootstrap and launcher live, and how stale ones go.
-
-Everything here is a function of explicit arguments (the cluster home, the temp root, the agent
-id, the live session ids), so a test passes a `tmp_path` and a set of ids.
-"""
+# meiva:note
+# Where a watcher's generated script, bootstrap and launcher live, and the two disk steps of cleaning stale ones: list a directory, remove names. Which names are stale is decided by `launch_plan.stale_names`. Everything here is a function of explicit arguments (the cluster home, the temp root, the agent id, a directory, names), so a test passes a `tmp_path`.
 
 from __future__ import annotations
 
 import hashlib
-import re
-from collections.abc import Collection
+from collections.abc import Iterable
 from pathlib import Path
 
-__all__ = ["prune_stale", "watchers_dir"]
+__all__ = ["remove", "scan", "watchers_dir"]
 
 
 def watchers_dir(home: Path, tmp_root: Path, agent_id: int) -> Path:
@@ -42,28 +38,12 @@ def watchers_dir(home: Path, tmp_root: Path, agent_id: int) -> Path:
     return p
 
 
-_SCRIPT_FILE_RE = re.compile(r"^watcher_(\d+)\.py$")
-_BOOT_FILE_RE = re.compile(r"^watcher_(\d+)_boot\.py$")
-_LAUNCH_FILE_RE = re.compile(r"^watcher_(\d+)_launch\.sh$")
-
-
 # meiva:note
-# Delete generated watcher files in `directory` whose watcher SESSION no longer exists.
-#
-# A watcher reads its script + bootstrap exactly once, at launch - but launch is asynchronous:
-# `spawn.run` sends the command into a fresh session whose shell takes a moment to come up, so
-# the files must stay on disk until the child has actually started. Deleting every old pair at
-# every launch (the previous behavior) could delete a sibling's not-yet-read files when watchers
-# are created back-to-back, making that sibling's python start fail with "can't open file ...
-# _boot.py" (observed 2026-08-08/09: watcher_0_boot.py / watcher_3_boot.py - Bug A, task #1116).
-# So prune only what is provably dead: a pair whose session id is not in the live session list.
-# A running watcher's pair stays on disk (a few KB) and is pruned once its session closes; a
-# hard-killed watcher's pair is pruned once its session is gone too. Files that do not match the
-# generated-name patterns are left alone.
-def prune_stale(directory: Path, alive: Collection[int]) -> None:
-    for pat in (_SCRIPT_FILE_RE, _BOOT_FILE_RE, _LAUNCH_FILE_RE):
-        for f in directory.iterdir():
-            m = pat.match(f.name)
-            if m is None or int(m.group(1)) in alive:
-                continue
-            f.unlink(missing_ok=True)
+# The names in `directory` right now. The order of the reads around it carries a safety argument (see `launch_plan.stale_names`): list the directory first, the live sessions second.
+def scan(directory: Path) -> tuple[str, ...]:
+    return tuple(entry.name for entry in directory.iterdir())
+
+
+def remove(directory: Path, names: Iterable[str]) -> None:
+    for name in names:
+        (directory / name).unlink(missing_ok=True)

@@ -8,11 +8,13 @@
 
 from __future__ import annotations
 
+import re
 import shlex
+from collections.abc import Collection, Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
-from meiva.shell.background_plan import Notice, notified_line
+from meiva.shell.background_plan import Notice, NotifyPolicy, notified_line
 
 __all__ = [
     "SESSION_ID_ENV",
@@ -21,6 +23,7 @@ __all__ = [
     "build_boot",
     "launch_line",
     "plan_files",
+    "stale_names",
 ]
 
 # meiva:note
@@ -44,7 +47,7 @@ class SpawnRequest:
     watchdog_secs: float | None
     name: str
     ttl_seconds: float
-    notify: str | None = None
+    notify: NotifyPolicy | None = None
 
 
 # meiva:note
@@ -84,6 +87,36 @@ def plan_files(
     )
 
 
+_GENERATED_NAME = re.compile(r"^watcher_(\d+)(?:_boot\.py|_launch\.sh|\.py)$")
+
+
+# meiva:note
+# The generated watcher files among `names` whose watcher SESSION is not in `alive`.
+#
+# A watcher reads its script + bootstrap exactly once, at launch - but launch is asynchronous:
+# `spawn.run` sends the command into a fresh session whose shell takes a moment to come up, so
+# the files must stay on disk until the child has actually started. Deleting every old pair at
+# every launch (the previous behavior) could delete a sibling's not-yet-read files when watchers
+# are created back-to-back, making that sibling's python start fail with "can't open file ...
+# _boot.py" (observed 2026-08-08/09: watcher_0_boot.py / watcher_3_boot.py - Bug A, task #1116).
+# So only what is provably dead goes: a pair whose session id is not alive. A running watcher's
+# pair stays on disk (a few KB) and is pruned once its session closes; a hard-killed watcher's
+# pair is pruned once its session is gone too. Names that do not match the generated patterns
+# are left alone.
+#
+# The decision is only as safe as the order its inputs were read in: `names` must be listed
+# BEFORE `alive` (see `spawn.run`), because a generated file is written only after its session
+# exists, so every file in `names` belongs to a session that the later listing contains while
+# it lives.
+def stale_names(names: Iterable[str], alive: Collection[int]) -> tuple[str, ...]:
+    stale: list[str] = []
+    for name in names:
+        match = _GENERATED_NAME.match(name)
+        if match is not None and int(match.group(1)) not in alive:
+            stale.append(name)
+    return tuple(stale)
+
+
 # meiva:note
 # The line the launch file carries: the command teed to the output log, followed by the
 # completion notice, sent from the shell level so a crashed or hard-killed child cannot skip it.
@@ -96,7 +129,7 @@ def launch_line(
     name: str,
     output_path: Path,
     cli: Path,
-    notify: str | None,
+    notify: NotifyPolicy | None,
 ) -> str:
     notice = Notice(
         agent_id=agent_id,
@@ -146,7 +179,7 @@ def launch_line(
 # reason (into the log) and hard-exits with code 124 (the ``timeout(1)`` convention), so a script
 # stuck in a Python-level loop still dies on time - the one thing it cannot preempt is native
 # code that never releases the GIL; a killed watcher skips the finally and leaves its pair
-# behind, which the next launch prunes (files.prune_stale).
+# behind, which the next launch prunes (`stale_names`).
 #
 # Every bootstrap also arms the ORPHAN GUARD (task #1726): a daemon thread that compares
 # ``os.getppid()`` against the parent the process booted under every few seconds and hard-exits

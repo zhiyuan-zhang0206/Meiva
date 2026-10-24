@@ -37,10 +37,12 @@ def _look(shell: ShellSessions, sid: int, failure_marker: Path | None, *, resume
 
 
 def _raise_if_failed(verdict: Verdict, sid: int, *, settled: bool) -> None:
-    if verdict in ("missing", "logged_out", "exited"):
-        if verdict == "missing":
-            print(f"error: {CLAUDE_NOT_FOUND}")
-        raise RuntimeError(failure_text(verdict, sid, settled=settled))
+    text = failure_text(verdict, sid, settled=settled)
+    if text is None:
+        return
+    if verdict == "missing":
+        print(f"error: {CLAUDE_NOT_FOUND}")
+    raise RuntimeError(text)
 
 
 # meiva:note

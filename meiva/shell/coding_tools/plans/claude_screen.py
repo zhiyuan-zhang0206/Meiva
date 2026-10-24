@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import Literal
+from typing import Literal, assert_never
 
 # meiva:note
 # One Claude composer chunk is ~1022 chars: a longer raw burst folds into collapsed paste fragments, and a submission made while such a fragment sits next to a raw tail drops the fragment's content (#4364).
@@ -83,18 +83,24 @@ def screen_verdict(
 
 
 # meiva:note
-# The error a failed verdict raises. `settled` is whether the screen had already looked ready once, which changes how an ended session is described.
-def failure_text(verdict: Verdict, session_id: int, *, settled: bool) -> str:
-    if verdict == "missing":
-        return f"Claude did not start: {CLAUDE_NOT_FOUND}"
-    if verdict == "logged_out":
-        return (
-            "Claude Code is not logged in on this host; run `claude auth login` as the host "
-            "user, then launch again. No text was delivered"
-        )
-    if settled:
-        return f"Claude session {session_id} exited before it became ready"
-    return (
-        f"Claude session {session_id} exited before its UI appeared; check the executable "
-        "in PATH or $HOME/.local/bin/claude"
-    )
+# The error a failed verdict raises, or None for a verdict that is not a failure (`ready`, `waiting`). `settled` is whether the screen had already looked ready once, which changes how an ended session is described.
+def failure_text(verdict: Verdict, session_id: int, *, settled: bool) -> str | None:
+    match verdict:
+        case "missing":
+            return f"Claude did not start: {CLAUDE_NOT_FOUND}"
+        case "logged_out":
+            return (
+                "Claude Code is not logged in on this host; run `claude auth login` as the host "
+                "user, then launch again. No text was delivered"
+            )
+        case "exited":
+            if settled:
+                return f"Claude session {session_id} exited before it became ready"
+            return (
+                f"Claude session {session_id} exited before its UI appeared; check the executable "
+                "in PATH or $HOME/.local/bin/claude"
+            )
+        case "ready" | "waiting":
+            return None
+        case _:
+            assert_never(verdict)

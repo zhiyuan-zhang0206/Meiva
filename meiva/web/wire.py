@@ -7,10 +7,12 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any, cast
 
 from base.lm.effort import ReasoningEffort
+from meiva.sdk_surface.pure.media.finding_plan import Findings, findings_of
 from meiva.web.configs import BraveConfig, JinaConfig
 from meiva.web.errors import FetchError, SearchError
 
@@ -21,6 +23,7 @@ __all__ = [
     "Page",
     "brave_hits",
     "brave_request",
+    "hit_findings",
     "jina_page",
     "jina_request",
     "plan_answer",
@@ -147,6 +150,18 @@ def brave_hits(data: dict[str, object]) -> list[Hit]:
                 )
             )
     return hits
+
+
+# meiva:note
+# The findings of the titles and snippets of `hits`, each hit's title before its snippet, in hit
+# order.
+def hit_findings(hits: Sequence[Hit]) -> Findings:
+    return tuple(
+        finding
+        for hit in hits
+        for text in (hit.title, hit.snippet)
+        for finding in findings_of(text, "web.search")
+    )
 
 
 # meiva:note

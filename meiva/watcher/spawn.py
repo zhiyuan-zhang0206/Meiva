@@ -4,18 +4,19 @@
 # `wiring.py`) and calls `run`. Everything `run` touches that is not its request arrives in the
 # deps as values or as the agent's real shell sessions: the agent id, the directory for generated
 # files, the machine facts a session starts from, the CLI that delivers the completion notice,
-# the live session ids, the runner env and the interpreter. What the files and the line
-# contain is decided in `launch_plan.py`.
+# the runner env and the interpreter. What the files and the line contain is decided in
+# `launch_plan.py`.
 # meiva:link meiva/watcher/docs/watcher.meiva.okf.md
 
 from __future__ import annotations
 
 import contextlib
 import logging
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
-from meiva.shell import SessionHandle, background_plan, log_ring
+from meiva.shell import SessionHandle, log_ring
 from meiva.shell.background import allocate_output_path, write_launch_file
 from meiva.shell.session_env import SessionHost
 from meiva.shell.sessions import ShellSessions
@@ -28,9 +29,9 @@ logger = logging.getLogger(__name__)
 
 
 # meiva:note
-# The dependencies of `run`, nothing else. `live_session_ids` is read before the session is
-# created; `workspace` is the agent's workspace, the session's starting directory and the parent
-# of the output logs.
+# The dependencies of `run`, nothing else. `workspace` is the agent's workspace, the session's
+# starting directory and the parent of the output logs. The live sessions are not carried here:
+# `run` lists them itself, after it has created its own session.
 @dataclass(frozen=True)
 class SpawnDeps:
     agent_id: int
@@ -39,8 +40,7 @@ class SpawnDeps:
     host: SessionHost
     workspace: Path
     cli: Path
-    live_session_ids: frozenset[int]
-    runner_env: dict[str, str]
+    runner_env: Mapping[str, str]
     python: str
 
 
@@ -71,33 +71,39 @@ class SpawnDeps:
 # session's TTL - but only the session's reclamation, never the generated script's own end, and a
 # renewal call is itself capped at 24h.
 #
-# Stale files of earlier watchers are pruned before the session is created: a watcher reads its
-# script + bootstrap exactly once at launch, so only a pair whose session id is not live is dead
-# weight (see files.prune_stale). Everything after the session exists is undone if it fails: the
-# generated files are removed and the session is killed, so a session whose launch never sent is
-# not left as an idle login shell under the watcher's name until its TTL.
+# Stale files of earlier watchers are pruned once the session exists: a watcher reads its script +
+# bootstrap exactly once at launch, so only a pair whose session id is not live is dead weight
+# (see launch_plan.stale_names). The order is the Bug A (#1116) fix and is not interchangeable:
+# create the session, list the directory, list the live sessions, then remove. A sibling that
+# started concurrently has created its session before it writes a file, so every file the
+# directory listing shows belongs to a session the later listing contains; reading the live
+# sessions before creating the session (or before the directory listing) can miss that sibling
+# and delete the files its child has not read yet. Everything after the session exists is undone
+# if it fails: the generated files are removed and the session is killed, so a session whose
+# launch never sent is not left as an idle login shell under the watcher's name until its TTL.
 def run(request: SpawnRequest, deps: SpawnDeps) -> SessionHandle:
-    notify = background_plan.validate_notify(request.notify)
-    files.prune_stale(deps.watchers_dir, deps.live_session_ids)
     session_id, _session_name = deps.shell.create(
         request.name,
         cwd=deps.workspace,
         ttl=request.ttl_seconds,
         system=True,
-        env_overrides=deps.runner_env,
+        env_overrides=dict(deps.runner_env),
         host=deps.host,
     )
     plan = launch_plan.plan_files(
         deps.watchers_dir, session_id, request, deps.agent_id, deps.python
     )
     try:
+        present = files.scan(deps.watchers_dir)
+        alive = frozenset(deps.shell.list())
+        files.remove(deps.watchers_dir, launch_plan.stale_names(present, alive))
         plan.script_path.write_text(plan.script_text)
         plan.boot_path.write_text(plan.boot_text)
         output_path = allocate_output_path(
             session_id,
             request.name,
             log_dir=log_ring.output_dir(deps.workspace),
-            live=deps.live_session_ids | {session_id},
+            live=alive | {session_id},
         )
         line = launch_plan.launch_line(
             plan,
@@ -105,7 +111,7 @@ def run(request: SpawnRequest, deps: SpawnDeps) -> SessionHandle:
             name=request.name,
             output_path=output_path,
             cli=deps.cli,
-            notify=notify,
+            notify=request.notify,
         )
         deps.shell.send(session_id, write_launch_file(line, plan.launch_path))
     except Exception:

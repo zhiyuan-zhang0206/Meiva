@@ -29,6 +29,7 @@ from base.packages.plugin_providers import build_model_catalog
 from base.packages.plugins.extensions import ExtensionRegistry
 from base.paths.home import resolve_meiva_home
 from meiva.sdk_surface import install
+from meiva.sdk_surface.tests.installation_holder import inert_sampling
 from meiva_builtins.plugins.meiva_sdk_reminder.agent_runtime import (
     AGENT_REPLY_CATEGORY,
     CATEGORIES,
@@ -202,6 +203,7 @@ def load_meiva_code_plugin() -> Iterator[None]:
     install.install(
         ExtensionRegistry((("meiva_code", plugin.contribute()),)),
         config_images=DiskPluginConfigImages(resolve_meiva_home()),
+        sampling=inert_sampling(),
     )
 
     yield

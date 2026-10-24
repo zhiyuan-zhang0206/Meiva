@@ -9,8 +9,10 @@
 # attached members carry through - control flow: short-circuit (skip inner) + retry (call inner
 # twice) - plugin attribution: the layer is recorded under the plugin that declared it -
 # activation telemetry: a plugin layer that does not call inner exactly once records one
-# `plugin_activation`; a transparent layer does not - reversing the record restores the original
-# callable and empties the registry - target errors: malformed dotted path, non-callable target
+# `plugin_activation`; a transparent layer does not - reversing the record (`Build.revert`, the
+# installer's own reversal) restores the original callable and empties the registry, and leaves a
+# target alone that something else replaced or removed since - target errors: malformed dotted
+# path, non-callable target
 #
 # A fake `meiva.probe` namespace holds the wrap targets so the real SDK is never patched; the
 # fixtures reverse every installed wrap then remove the namespace.
@@ -24,8 +26,8 @@ from typing import Any
 import pytest
 
 from base.agents.sdk import call_policy
-from meiva.sdk_surface import wraps
-from meiva.sdk_surface.installation import WrapAdded, WrapLayer
+from meiva.sdk_surface import install, wraps
+from meiva.sdk_surface.installation import WrapAdded
 
 
 @pytest.fixture
@@ -50,16 +52,17 @@ def probe() -> Iterator[tuple[Any, Any, Any]]:
 
 
 # meiva:note
-# The fixture's wrap layer ledger and the installs it holds.
+# The fixture's build ledger and the installs it holds.
 #
-# `probe(...)` installs one layer (into the fixture's own ledger — the install passes its ledger
-# explicitly) and returns its record; `undo(record)` reverses it once; `stack` / `wrappers` read
-# the ledger back with the same projection `wraps.stack` applies to an installation's map, so a
-# test can assert the registry view without an installation in the process.
+# `probe(...)` installs one layer into the installer's own build ledger (`install.Build`) and
+# returns its record; `undo(record)` reverses it once through the installer's reversal
+# (`Build.revert`), the code `uninstall` and a plugin rollback run; `stack` / `wrappers` read the
+# ledger back with the same projection `wraps.stack` applies to an installation's map, so a test can
+# assert the registry view without an installation in the process.
 class Probe:
     def __init__(self, root: Any) -> None:
         self.root = root
-        self.layers: dict[str, list[WrapLayer]] = {}
+        self.build = install.Build()
         self._applied: list[WrapAdded] = []
 
     def __call__(
@@ -71,27 +74,23 @@ class Probe:
         plugin: str = "myplugin",
         target: str = "probe.fn",
     ) -> WrapAdded:
-        added = wraps.apply_wrap(target, wrapper, plugin, layers=self.layers, root=self.root)
+        added = wraps.apply_wrap(target, wrapper, plugin, layers=self.build.layers, root=self.root)
         self._applied.append(added)
         return added
 
     def undo(self, added: WrapAdded) -> None:
-        if added in self._applied:
-            self._applied.remove(added)
-            self.layers[added.layer.target].remove(added.layer)
-            if not self.layers[added.layer.target]:
-                del self.layers[added.layer.target]
-            setattr(added.parent, added.attr, added.original)
+        self._applied.remove(added)
+        self.build.revert(added)
 
     def stack(self, target: str) -> list[tuple[str, Callable[..., Any]]]:
-        return [(layer.plugin, layer.wrapper) for layer in self.layers.get(target, ())]
+        return [(layer.plugin, layer.wrapper) for layer in self.build.layers.get(target, ())]
 
     def wrappers(self) -> dict[str, list[tuple[str, Callable[..., Any]]]]:
-        return {target: self.stack(target) for target in self.layers}
+        return {target: self.stack(target) for target in self.build.layers}
 
     def tear_down(self) -> None:
-        for added in reversed(list(self._applied)):
-            self.undo(added)
+        while self._applied:
+            self.undo(self._applied[-1])
 
 
 @pytest.fixture
@@ -383,6 +382,53 @@ def test_wrap_captures_the_base_callable_below_a_metering_recorder(
     apply.undo(added)
     sampling.close()
     assert ns.fn is fn  # the base, not the recorder proxy
+
+
+# meiva:note
+# A reversal puts the original callable back only while the parent still holds the wrap's own
+# function. A target that something else replaced since keeps its replacement, and the layer still
+# leaves the ledger.
+def test_undo_leaves_a_target_replaced_since_alone(probe: tuple[Any, Any, Any], apply: Probe):
+    _root, ns, _fn = probe
+    added = apply(lambda inner, *a, **k: inner(*a, **k))
+
+    def replacement(x: Any) -> str:
+        return f"replaced({x})"
+
+    ns.fn = replacement
+    apply.undo(added)
+
+    assert ns.fn is replacement
+    assert apply.stack("probe.fn") == []
+    assert apply.wrappers() == {}
+
+
+def test_undo_does_not_recreate_a_target_removed_since(probe: tuple[Any, Any, Any], apply: Probe):
+    _root, ns, _fn = probe
+    added = apply(lambda inner, *a, **k: inner(*a, **k))
+
+    del ns.fn
+    apply.undo(added)
+
+    assert not hasattr(ns, "fn")
+    assert apply.wrappers() == {}
+
+
+# meiva:note
+# The parent holds the newer layer's function, not the older one's, so the older record's reversal
+# does not touch the target; the newer layer stays registered and live.
+def test_undoing_the_older_layer_first_leaves_the_newer_one_installed(
+    probe: tuple[Any, Any, Any], apply: Probe
+):
+    _root, ns, _fn = probe
+    added_a = apply(lambda inner, *a, **k: f"a({inner(*a, **k)})", "plugin_a")
+    added_b = apply(lambda inner, *a, **k: f"b({inner(*a, **k)})", "plugin_b")
+
+    apply.undo(added_a)
+
+    assert ns.fn is added_b.chained
+    assert [p for p, _ in apply.stack("probe.fn")] == ["plugin_b"]
+    assert ns.fn(0) == "b(a(fn(0,1,2)))"
 
 
 def _bare(inner: Callable[[], Any]) -> Any:

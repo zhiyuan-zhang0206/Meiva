@@ -6,7 +6,9 @@ from __future__ import annotations
 import re
 import shlex
 from dataclasses import dataclass
+from enum import StrEnum
 from pathlib import Path
+from typing import assert_never
 
 # meiva:note
 # How long a closing run (keep=False) waits for its log to catch up, and how often it looks. The shell exits the moment the command does, and the session close then kills the process group; a `tee` still draining the pipe dies with the command's last lines in it, leaving a log that exists (`allocate_output_path` touches it) and stays empty. The wait is bounded so a grandchild that inherited stdout cannot postpone the notice, and it costs one `tail` in the normal case.
@@ -20,15 +22,24 @@ EXIT_TAIL_BYTES = 128
 # meiva:note
 # Characters that stay shell-active inside a double-quoted string.
 _DQUOTE_UNSAFE = re.compile(r'[$`"\\]')
-_NOTIFY_POLICIES = ("always",)
+
+
+# meiva:note
+# The per-run completion-notice policies a caller may name. A run that names none delegates to the agent's own policy.
+class NotifyPolicy(StrEnum):
+    ALWAYS = "always"
 
 
 # meiva:note
 # An explicit per-run policy must be one of the known ones; None delegates to the agent's policy.
-def validate_notify(notify: str | None) -> str | None:
-    if notify is not None and notify not in _NOTIFY_POLICIES:
-        raise ValueError(f"notify must be one of {list(_NOTIFY_POLICIES)}, got {notify!r}")
-    return notify
+def notify_policy(notify: str | None) -> NotifyPolicy | None:
+    if notify is None:
+        return None
+    try:
+        return NotifyPolicy(notify)
+    except ValueError:
+        known = [policy.value for policy in NotifyPolicy]
+        raise ValueError(f"notify must be one of {known}, got {notify!r}") from None
 
 
 # meiva:note
@@ -59,9 +70,8 @@ def notified_line(
     *,
     output_path: Path,
     keep: bool,
-    notify: str | None = None,
+    notify: NotifyPolicy | None = None,
 ) -> str:
-    notify = validate_notify(notify)
     if "\n" in cmd or "\r" in cmd:
         raise ValueError(
             "cmd must be a single line — join steps with ';' or '&&', or write a "
@@ -88,7 +98,13 @@ def notified_line(
             f'*"[exit $_ec]") break;; esac; '
             f"sleep {LOG_FLUSH_POLL_S}; _polls=$((_polls + 1)); done; "
         )
-    line += send_notice if notify == "always" else f"{send_notice} --completion"
+    match notify:
+        case NotifyPolicy.ALWAYS:
+            line += send_notice
+        case None:
+            line += f"{send_notice} --completion"
+        case _:
+            assert_never(notify)
     if not keep:
         line += "; exit $_ec"
     return line

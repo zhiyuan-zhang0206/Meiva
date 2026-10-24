@@ -45,11 +45,12 @@ def search(
     plan = plans.plan_search(queries, count, max_concurrent)
     # Imported here: `import meiva` loads this module, and the web stack is not needed until a
     # call is made.
+    from meiva import security
     from meiva.web import runner, wiring
 
     return [
         [SearchResult(title=h.title, url=h.url, snippet=h.snippet, kind=h.kind) for h in hits]
-        for hits in runner.run_search(plan, wiring.search_deps())
+        for hits in runner.run_search(plan, wiring.search_deps(), security.current_delivery())
     ]
 
 
@@ -76,6 +77,8 @@ def fetch(
         One answer per pair, in input order.
     """
     plan = plans.plan_fetch(targets, max_chars, effort, max_concurrent)
+    from meiva import security
     from meiva.web import runner, wiring
 
-    return runner.run_fetch(plan, wiring.fetch_deps())
+    delivery = security.current_delivery()
+    return runner.run_fetch(plan, wiring.fetch_deps(delivery), delivery)

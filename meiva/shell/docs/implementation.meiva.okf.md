@@ -40,7 +40,9 @@ and a real resource.
   delivers the notice, the log directory, the machine facts). A run that fails after its
   session exists removes the launch file and kills the session, whatever step failed.
 - `meiva/shell/background_plan.py` (strict) — the single line a background session runs
-  (`notified_line`), the launch file that carries it and the notify policy.
+  (`notified_line`), the launch file that carries it and the notify policy (`NotifyPolicy`:
+  `notify_policy` turns the caller's text into a member or refuses it with a `ValueError`,
+  and `notified_line` takes only members).
 - `meiva/shell/log_ring.py` (strict) — where the logs live and which ones the per-workspace
   ring evicts; a log whose session is still live is never evicted.
 

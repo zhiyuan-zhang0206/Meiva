@@ -19,16 +19,15 @@ from agent.execution.protocol import (
 from base.agents.context import MeivaContext
 from base.agents.context.identity import AgentIdentity
 from base.agents.sdk.tally import SdkCallTally
-from base.config.tests.configuration import snapshot_process_config
 from base.packages.plugin_providers import build_model_catalog
-from meiva.boot import process_clients
+from meiva.tests.fixtures.pin_agent import snapshot_clients
 
 
 def _start(tmp_path: Path, agent_id: int, code: str) -> tuple[subprocess.Popen[str], Path]:
     context = MeivaContext(
         identity=AgentIdentity(agent_id, True),
         catalog=build_model_catalog(),
-        clients=process_clients(config=snapshot_process_config()),
+        clients=snapshot_clients(),
     )
     request = make_request_path(tmp_path / "exec", agent_id=agent_id)
     result = make_result_path(tmp_path / "exec", agent_id=agent_id)
@@ -141,7 +140,7 @@ def test_execution_tally_stays_with_its_context_and_out_of_description() -> None
     tally = SdkCallTally()
     context = MeivaContext(
         identity=AgentIdentity(41, True),
-        clients=process_clients(config=snapshot_process_config()),
+        clients=snapshot_clients(),
         sdk_calls=tally,
     )
     tally.add("files.read")

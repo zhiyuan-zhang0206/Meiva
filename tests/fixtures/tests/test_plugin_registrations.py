@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 import meiva
+from meiva.sdk_surface.tests.installation_holder import inert_sampling
 
 _GATE_CHILD = Path(__file__).with_name("child_gate_without_agent_layer.py")
 
@@ -45,7 +46,7 @@ def test_a_plugin_load_leaves_no_namespace_behind(
     assert "_restore_plugin_registrations" in request.fixturenames
     assert not plugin_registrations_present()
 
-    load_extensions(validate_state=plugin_state_schema)
+    load_extensions(validate_state=plugin_state_schema, sampling=inert_sampling())
     assert plugin_registrations_present()
     installation = installed()
     assert installation is not None

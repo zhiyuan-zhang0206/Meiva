@@ -12,6 +12,7 @@
 # refusals.
 
 import os
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
@@ -263,6 +264,47 @@ def test_write_gives_a_new_file_the_mode_of_any_new_file(tmp_path: Path) -> None
     reference.write_text("x")
     meiva.files.write(str(tmp_path / "new.txt"), "x")
     assert (tmp_path / "new.txt").stat().st_mode & 0o777 == reference.stat().st_mode & 0o777
+
+
+# meiva:note
+# Write a new file through `meiva.files.write` while this process runs under `umask`, which is put
+# back afterwards; the umask is the operating system's own setting, not a name the test replaces.
+def _mode_of_a_file_written_under(umask: int, target: Path) -> int:
+    previous = os.umask(umask)
+    try:
+        meiva.files.write(str(target), "x")
+    finally:
+        os.umask(previous)
+    return target.stat().st_mode & 0o777
+
+
+@pytest.mark.parametrize(
+    ("umask", "mode"),
+    [(0o000, 0o666), (0o002, 0o664), (0o022, 0o644), (0o027, 0o640), (0o077, 0o600)],
+)
+def test_write_gives_a_new_file_the_mode_its_umask_gives(
+    tmp_path: Path, umask: int, mode: int
+) -> None:
+    out = tmp_path / "out"
+    out.mkdir()
+
+    assert _mode_of_a_file_written_under(umask, out / "new.txt") == mode
+    assert _leftovers(out) == ["new.txt"]
+
+
+def test_concurrent_writers_of_new_files_in_one_directory_leave_only_their_files(
+    tmp_path: Path,
+) -> None:
+    names = [f"file-{index}.txt" for index in range(32)]
+
+    def write_one(name: str) -> None:
+        meiva.files.write(str(tmp_path / name), name)
+
+    with ThreadPoolExecutor(max_workers=16) as pool:
+        list(pool.map(write_one, names))
+
+    assert _leftovers(tmp_path) == sorted(names)
+    assert all((tmp_path / name).read_text() == name for name in names)
 
 
 @_skip_if_root

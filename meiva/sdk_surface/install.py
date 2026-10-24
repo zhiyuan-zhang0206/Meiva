@@ -48,6 +48,7 @@ import atexit
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field, replace
 from types import MappingProxyType
+from typing import assert_never
 
 from pydantic import BaseModel
 
@@ -121,12 +122,20 @@ def _is_bare_provider_mount(installation: Installation) -> bool:
     )
 
 
+# meiva:note
+# The installation of a process that mounts a skill root before any plugin load. It meters
+# nothing, so the sampling owner it carries is never read; a later `install` replaces the whole
+# value with its own root's owner.
+def _bare_provider_mount(provider: SkillProvider) -> Installation:
+    return replace(Installation.bare(sampling=SamplingPolicyOwner()), skill_providers=(provider,))
+
+
 def mount_skill_provider(provider: SkillProvider) -> Callable[[], None]:
     prior = slot()
     mounted = (
         replace(prior, skill_providers=(*prior.skill_providers, provider))
         if isinstance(prior, Installation)
-        else replace(Installation.bare(), skill_providers=(provider,))
+        else _bare_provider_mount(provider)
     )
     setattr(meiva_module(), SLOT, mounted)
 
@@ -163,7 +172,7 @@ def _check_expansion(path: str) -> None:
 def _apply(
     plugin: str,
     contributions: PluginContributions,
-    build: _Build,
+    build: Build,
     namespaces: dict[str, str],
     config_images: PluginConfigImages,
 ) -> list[str]:
@@ -191,31 +200,15 @@ def _apply(
     for key in contributions.flags:
         flags.validate_flag_key(key)
     if contributions.config is not None:
-        # meiva:note
-        # The undo `bind_plugin_config` returns only pops the plugin's entry from
-        # `build.configs`; the ledger records that as data (`ConfigBound`) and `_revert` does
-        # the pop.
-        config_registration.bind_plugin_config(
+        release = config_registration.bind_plugin_config(
             config_images.owner(plugin, contributions.config), build.configs
         )
-        build.undo.append(ConfigBound(plugin))
+        build.undo.append(ConfigBound(plugin, release))
     return promoted
 
 
-@dataclass(frozen=True)
-class _Build:
-    """The mutable ledger `install` fills while it applies plugins; frozen into the Installation."""
-
-    namespaces: dict[str, str] = field(default_factory=dict[str, str])
-    layers: dict[str, list[WrapLayer]] = field(default_factory=dict[str, list[WrapLayer]])
-    providers: list[SkillProvider] = field(default_factory=list[SkillProvider])
-    expansions: list[str] = field(default_factory=list[str])
-    undo: list[Reversal] = field(default_factory=list[Reversal])
-    configs: dict[str, BaseModel] = field(default_factory=dict[str, BaseModel])
-
-
 # meiva:note
-# Take a layer off an unfinished build's wrap ledger; an emptied target leaves the ledger.
+# Take a layer off a wrap ledger; an emptied target leaves the ledger.
 def _drop_layer(layers: dict[str, list[WrapLayer]], layer: WrapLayer) -> None:
     target_layers = layers[layer.target]
     target_layers.remove(layer)
@@ -224,37 +217,57 @@ def _drop_layer(layers: dict[str, list[WrapLayer]], layer: WrapLayer) -> None:
 
 
 # meiva:note
-# Reverse one ledger record. `build` is the ledger of an unfinished build: a record that also
-# sits in one of its lists (a wrap layer, a skill provider, a bound config) leaves it. An
-# installation's own reversal passes none, its lists are frozen snapshots and go with it. A wrap
-# puts the original callable back only when its parent still holds the wrap's own `chained`
-# function, so a target replaced since is left alone.
-def _revert(record: Reversal, build: _Build | None) -> None:
-    match record:
-        case NamespaceAdded() | MemberAdded():
-            _plugins.uninstall(record)
-        case WrapAdded():
-            if build is not None:
-                _drop_layer(build.layers, record.layer)
-            if getattr(record.parent, record.attr, None) is record.chained:
-                setattr(record.parent, record.attr, record.original)
-        case ProviderAdded():
-            if build is not None:
-                build.providers.remove(record.provider)
-        case ConfigBound():
-            if build is not None:
-                build.configs.pop(record.plugin, None)
+# The mutable ledger `install` fills while it applies plugins; frozen into the Installation.
+@dataclass(frozen=True)
+class Build:
+    namespaces: dict[str, str] = field(default_factory=dict[str, str])
+    layers: dict[str, list[WrapLayer]] = field(default_factory=dict[str, list[WrapLayer]])
+    providers: list[SkillProvider] = field(default_factory=list[SkillProvider])
+    expansions: list[str] = field(default_factory=list[str])
+    undo: list[Reversal] = field(default_factory=list[Reversal])
+    configs: dict[str, BaseModel] = field(default_factory=dict[str, BaseModel])
+
+    # meiva:note
+    # The ledger of an installed surface, rebuilt from the frozen snapshots the installation kept,
+    # so an installed surface is reversed through the same records and lists as an unfinished build.
+    @classmethod
+    def of(cls, installation: Installation) -> Build:
+        return cls(
+            layers={target: list(layers) for target, layers in installation.wrap_layers.items()},
+            providers=list(installation.skill_providers),
+            configs=dict(installation.configs),
+        )
+
+    # meiva:note
+    # Reverse one ledger record and take it out of this build's lists (a wrap layer, a skill
+    # provider). A wrap puts the original callable back only when its parent still holds the wrap's
+    # own `chained` function, so a target replaced since is left alone. A bound config is released
+    # by the function its binding returned.
+    def revert(self, record: Reversal) -> None:
+        match record:
+            case NamespaceAdded() | MemberAdded():
+                _plugins.uninstall(record)
+            case WrapAdded():
+                _drop_layer(self.layers, record.layer)
+                if getattr(record.parent, record.attr, None) is record.chained:
+                    setattr(record.parent, record.attr, record.original)
+            case ProviderAdded():
+                self.providers.remove(record.provider)
+            case ConfigBound():
+                record.release()
+            case _:
+                assert_never(record)
 
 
 # meiva:note
 # Attempt every reversal, newest first; preserve a primary failure or raise the first cleanup
 # failure.
-def _run(undo: list[Reversal], build: _Build | None, primary: BaseException | None = None) -> None:
+def _run(undo: list[Reversal], build: Build, primary: BaseException | None = None) -> None:
     failure = primary
     while undo:
         record = undo.pop()
         try:
-            _revert(record, build)
+            build.revert(record)
         except BaseException as exc:
             if failure is None:
                 failure = exc
@@ -272,7 +285,7 @@ def install(
     catalog: ModelCatalog | None = None,
     provider_keys: ProviderKeys | None = None,
     authority: ConfigAuthority | None = None,
-    sampling: SamplingPolicyOwner | None = None,
+    sampling: SamplingPolicyOwner,
     clock: Clock | None = None,
     clients: EventPipelines | None = None,
     disabled_entries: Sequence[str] = (),
@@ -293,9 +306,8 @@ def install(
     from . import metering, sdk_disable
 
     prior = slot()
-    sampling_owner = sampling if sampling is not None else SamplingPolicyOwner()
     setattr(meiva_module(), SLOT, LOADING)
-    build = _Build()
+    build = Build()
     admitted: list[tuple[str, PluginContributions]] = []
     disabled = list(disabled_entries)
     try:
@@ -325,7 +337,7 @@ def install(
             build.expansions.extend(paths)
             admitted.append((plugin, contributions))
         metered = metering.install(
-            sampling_owner, clients=clients, surface=metering.read_surface(meiva_module())
+            sampling, clients=clients, surface=metering.read_surface(meiva_module())
         )
     except BaseException as exc:
         _run(build.undo, build, exc)
@@ -340,7 +352,7 @@ def install(
         ),
         skill_providers=tuple(build.providers),
         metered=metered,
-        sampling=sampling_owner,
+        sampling=sampling,
         disabled=frozenset(disabled),
         faces=False,
         undo=tuple(build.undo),
@@ -352,10 +364,6 @@ def install(
         clients=clients,
     )
     setattr(meiva_module(), SLOT, installation)
-    if sampling is None:
-        # Bare SDK processes have no service lifespan. This is finite cleanup,
-        # not a guarantee of a nonzero exit or delivery after a hard exit.
-        atexit.register(sampling_owner.close)
     return installation.registry
 
 
@@ -384,5 +392,5 @@ def uninstall() -> Installation | None:
     # meiva:link meiva/docs/sdk-surface/install-lifetime.meiva.okf.md
     atexit.unregister(installation.sampling.close)
     setattr(meiva_module(), SLOT, None)
-    _run(list(installation.undo), None)
+    _run(list(installation.undo), Build.of(installation))
     return installation

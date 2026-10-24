@@ -23,6 +23,8 @@ from agent.execution.delivery_plan import (
     rewrites_result_after_delivery_failure,
 )
 from agent.execution.protocol import RequestPayload, ResultPayload
+from base.agents.context import MeivaContext
+from base.agents.context.clients import ClientSet
 from base.log import logger
 
 WATCHDOG_MARGIN_S = 5.0
@@ -37,29 +39,12 @@ _RESULT_KIND: dict[type[BaseException], Literal["cancelled", "timed_out"]] = {
 
 
 # meiva:note
-# The one thing the framework overlay needs from the boot configuration. `ConfigBoot` lives in a
-# heavy import the exec child defers until its boot, so the child names the capability instead.
+# The one thing the framework overlay needs from the boot configuration. Importing `base.config`
+# boots the lite configuration, and the entry reports a boot failure as a crash envelope, so the
+# module cannot name `ConfigBoot` at import time: `main` imports it inside its guard and the child
+# names the capability here.
 class _FieldSetter(Protocol):
     def set_field(self, name: str, value: object) -> None: ...
-
-
-# meiva:note
-# What the exec child asks of its process clients: the export posture of the event pipeline, a
-# bounded drain of it and the exporter finalization, then the close at exit. `ClientSet` lives
-# behind imports the child defers until its boot, so the child names the capabilities it calls.
-class _DrainReceipt(Protocol):
-    @property
-    def status(self) -> object: ...
-
-
-class _ChildClients(Protocol):
-    def exports_deferred(self) -> bool | None: ...
-
-    def sync_events(self, timeout: float = 5.0) -> _DrainReceipt: ...
-
-    def finalize_events(self) -> None: ...
-
-    def close(self) -> None: ...
 
 
 class _Sdk(Protocol):
@@ -200,7 +185,7 @@ def init_logger(
     producer().defer_exports()
 
 
-def emit_child_boot_timing(child: ChildContext, *, clients: _ChildClients, now: float) -> None:
+def emit_child_boot_timing(child: ChildContext, *, clients: ClientSet, now: float) -> None:
     duration_ms = (now - child.boot_started_at) * 1000
     extra: dict[str, object] = {}
     deferred = clients.exports_deferred()
@@ -353,18 +338,16 @@ def run_code(code: str, payload: ResultPayload) -> None:
         process_context.bind_context(execution_context)
 
 
-def finalize_telemetry(*, clients: _ChildClients | None) -> None:
+def finalize_telemetry(*, clients: ClientSet | None) -> None:
     if "base.telemetry" not in sys.modules:
         return
     from base import telemetry
 
-    owned_unfinished = (
-        None
-        if clients is None
-        else clients.sync_events().status is telemetry.DrainStatus.UNFINISHED
-    )
+    owned: telemetry.DrainResult | None = None if clients is None else clients.sync_events()
     plan = plan_finalize(
-        owned_unfinished=owned_unfinished,
+        owned_unfinished=None
+        if owned is None
+        else owned.status is telemetry.DrainStatus.UNFINISHED,
         ordinary_unfinished=telemetry.sync().status is telemetry.DrainStatus.UNFINISHED,
     )
     if plan.warn_owned_unfinished:
@@ -381,7 +364,7 @@ def finalize_telemetry(*, clients: _ChildClients | None) -> None:
         clients.finalize_events()
 
 
-def deliver_envelope_telemetry(*, clients: _ChildClients | None) -> None:
+def deliver_envelope_telemetry(*, clients: ClientSet | None) -> None:
     try:
         finalize_telemetry(clients=clients)
     except BaseException:
@@ -391,9 +374,7 @@ def deliver_envelope_telemetry(*, clients: _ChildClients | None) -> None:
         )
 
 
-def deliver_run_telemetry(
-    result_path: str, payload: ResultPayload, *, clients: _ChildClients
-) -> None:
+def deliver_run_telemetry(result_path: str, payload: ResultPayload, *, clients: ClientSet) -> None:
     if not delivers_telemetry(payload.kind):
         return
     try:
@@ -415,15 +396,14 @@ def run_child(
     boot_started_at: float,
     *,
     config: object,
-    context: object,
+    context: MeivaContext,
 ) -> None:
     child = import_runtime(boot_started_at)
     from agent.execution.protocol import read_request, write_result
-    from base.agents.context import MeivaContext
     from base.config import ConfigBoot
 
-    if not isinstance(config, ConfigBoot) or not isinstance(context, MeivaContext):
-        raise TypeError("run_child needs the child's booted ConfigBoot and MeivaContext")
+    if not isinstance(config, ConfigBoot):
+        raise TypeError("run_child needs the child's booted ConfigBoot")
     raw_agent_id = os.environ.get("MEIVA_AGENT_ID")
     init_logger(
         None if raw_agent_id is None else int(raw_agent_id),
@@ -518,20 +498,19 @@ def main() -> None:
             "in the environment — spawn it via agent.graph.exec._subprocess\n"
         )
         raise SystemExit(2)
-    clients: _ChildClients | None = None
+    clients: ClientSet | None = None
     apply_oom_preference(os.environ, OOM_SCORE_ADJ_PATH)
     try:
         line_buffered_output()
         _install_signal_handlers()
-        from base.agents.context import MeivaContext
         from base.cluster.machine.boot import machine_from_boot
         from base.config import ConfigBoot
-        from meiva.boot import process_clients
+        from meiva.boot import derived_clients
 
         config = ConfigBoot()
         config.boot()
         machine = machine_from_boot(config)
-        clients = process_clients(config=config, machine=machine)
+        clients = derived_clients(config, machine)
         context = MeivaContext(clients=clients, machine=machine)
         run_child(request_path, result_path, boot_started_at, config=config, context=context)
     except BaseException as exc:

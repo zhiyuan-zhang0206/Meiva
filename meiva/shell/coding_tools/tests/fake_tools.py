@@ -7,7 +7,7 @@ import contextlib
 import shutil
 import sys
 import tempfile
-from collections.abc import Callable, Generator, Iterator
+from collections.abc import Generator, Iterator
 from pathlib import Path
 
 import httpx
@@ -43,19 +43,19 @@ def site_for(shell: ShellSessions, home: Path, host: SessionHost) -> LaunchSite:
 
 
 # meiva:note
-# A gateway for the SDK's HTTP client: `handler` answers each request the way the cluster would (a status, a 404 with the wire reason, a note receipt) and the returned client set is what a bound context carries. Retries wait no time, so a refusal comes back at once.
+# The SDK's gateway client set for the gateway served at `url`, which is what a bound context
+# carries. One attempt per request and no waiting between attempts, so a refusal comes back at
+# once.
 @contextlib.contextmanager
-def gateway_double(handler: Callable[[httpx.Request], httpx.Response]) -> Generator[ClientSet]:
+def gateway_clients(url: str) -> Generator[ClientSet]:
     transport = GatewayTransportInputs(
         max_retries_reader=lambda: 1,
         retry_delay_reader=lambda: 0.0,
         memory_deadline_reader=lambda: 1.0,
     )
-    with httpx.Client(
-        base_url="http://gateway.test", transport=httpx.MockTransport(handler)
-    ) as client:
+    with httpx.Client(base_url=url) as client:
         yield ClientSet(
-            gateway_url="http://gateway.test",
+            gateway_url=url,
             gateway=lambda _url: client,
             factories={GatewayTransportInputs: lambda: transport},
         )
