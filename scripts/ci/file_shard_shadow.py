@@ -70,10 +70,12 @@ def _read_collection_identity(config: pytest.Config) -> CollectionIdentity:
             for plugin in config.pluginmanager.get_plugins()
             if isinstance(plugin, ModuleType)
         ),
-        population=[
-            Path(arg).relative_to(root).as_posix() if Path(arg).is_absolute() else arg
+        population=sorted(
+            Path(arg).relative_to(root).as_posix()
+            if Path(arg).is_absolute()
+            else Path(arg).as_posix()
             for arg in config.args
-        ],
+        ),
         environment={
             name: os.environ.get(name)
             for name in (
