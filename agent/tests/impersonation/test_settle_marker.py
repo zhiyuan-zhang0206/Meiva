@@ -1,7 +1,9 @@
 # meiva:note
-# The clear side of the crash marker (#5468): a settle retry that succeeds may only erase the
-# stamp that retry made. A NULL admission is the birth fact; a marker older than the admission
-# belongs to a real turn crash, and clearing it would let a silent agent escape the reaper.
+# The clear side of the crash marker (#5468): a settle that writes the row's receipt may only
+# erase the marker while nothing of that row's work is left owing. The condition is the fact, not
+# the marker's timestamp — a COALESCE stamp keeps the FIRST death, so an earlier wake's stamp is
+# always older than a later admission, and a timestamp test would strand it on a row this wake
+# settled (the reaper would then terminate a healthy agent fifteen minutes later).
 
 from uuid import uuid4
 
@@ -9,9 +11,7 @@ import psycopg
 from psycopg_pool import AsyncConnectionPool
 
 from agent.impersonation import clear_turn_fatal
-from agent.ownership.hosted import stamp_turn_fatal
 from agent.ownership.tests.ownership_support import admit_owner, agent_row
-from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 
@@ -38,35 +38,47 @@ def _set_marker(db_conn: psycopg.Connection, agent_id: int, *, minutes_ago: int 
     db_conn.commit()
 
 
-async def test_clear_turn_fatal_only_clears_the_stamp_this_admission_made(
+def _lease(db_conn: psycopg.Connection, agent_id: int, *, receipt: bool) -> None:
+    db_conn.execute(
+        "INSERT INTO agent_impersonations"
+        "(id,agent_id,session_id,source,machine,status,ttl_seconds,expires_at,ended_at,"
+        "handoff_applied_at) VALUES (gen_random_uuid(),%s,0,'external_agent:codex:test',"
+        "'claim-test','released',300,clock_timestamp(),clock_timestamp(),"
+        "CASE WHEN %s THEN clock_timestamp() END)",
+        (agent_id, receipt),
+    )
+    db_conn.commit()
+
+
+# meiva:note
+# A marker left behind is the dangerous direction here, so the refused cases are the ones this
+# asserts first: an ended lease that still owes its receipt keeps the marker (the wake has not
+# finished that row's work), and a marker written by another runtime is never ours to clear.
+async def test_clear_turn_fatal_requires_that_no_receipt_is_still_owed(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
-    database: Database,
     *,
     database_gate: ProcessDbGate,
 ) -> None:
     agent_id = agent_row(db_conn)
     incarnation = await admit_owner(aops_pool, agent_id, database_gate=database_gate)
 
-    db_conn.execute("UPDATE agents_meta SET last_admission_at = NULL WHERE id = %s", (agent_id,))
-    db_conn.commit()
-    _set_marker(db_conn, agent_id, minutes_ago=0)
+    _set_marker(db_conn, agent_id, minutes_ago=30)
+    _lease(db_conn, agent_id, receipt=False)
     assert not await clear_turn_fatal(aops_pool, incarnation)
     assert _marker(db_conn, agent_id) is not None
 
-    db_conn.execute(
-        "UPDATE agents_meta SET last_admission_at = now() - interval '1 second' WHERE id = %s",
-        (agent_id,),
-    )
-    db_conn.commit()
-    _set_marker(db_conn, agent_id, minutes_ago=30)
-    assert not await clear_turn_fatal(aops_pool, incarnation)
-    assert _marker(db_conn, agent_id) is not None
     assert not await clear_turn_fatal(
         aops_pool, RuntimeIncarnation(agent_id, uuid4(), incarnation.owner)
     )
+    assert _marker(db_conn, agent_id) is not None
 
-    _set_marker(db_conn, agent_id, minutes_ago=None)
-    assert (await stamp_turn_fatal(aops_pool, incarnation)).applied
+    db_conn.execute(
+        "UPDATE agent_impersonations SET handoff_applied_at = clock_timestamp() "
+        "WHERE agent_id = %s",
+        (agent_id,),
+    )
+    db_conn.commit()
     assert await clear_turn_fatal(aops_pool, incarnation)
     assert _marker(db_conn, agent_id) is None
+    assert not await clear_turn_fatal(aops_pool, incarnation)

@@ -113,7 +113,7 @@ async def test_a_reaped_handoff_receipt_lands_on_the_resurrected_agents_first_tu
     reaped = await reap_crash_corpses(aops_pool, _MACHINE)
     assert [corpse.agent_id for corpse in reaped] == [agent_id]
     assert db_conn.execute(
-        "SELECT attributes->>'unapplied_automatic_handoff' FROM audit_events "
+        "SELECT attributes->>'unapplied_handoff_receipt' FROM audit_events "
         "WHERE agent_id = %s AND attributes->>'reason' = 'corpse_reaper'",
         (agent_id,),
     ).fetchall() == [("true",)]
@@ -186,7 +186,7 @@ async def test_an_ordinary_corpse_is_reaped_without_the_handoff_flag(
         agent_id
     ]
     assert db_conn.execute(
-        "SELECT attributes->>'unapplied_automatic_handoff' FROM audit_events "
+        "SELECT attributes->>'unapplied_handoff_receipt' FROM audit_events "
         "WHERE agent_id = %s AND attributes->>'reason' = 'corpse_reaper'",
         (agent_id,),
     ).fetchall() == [("false",)]

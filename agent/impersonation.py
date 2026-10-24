@@ -277,13 +277,40 @@ async def apply_plugin_deltas(
 
 
 # meiva:note
-# The marker write the held path owns (#5468). A settle that failed inside the wake stamps
-# the crash marker so a hard kill mid-retry still leaves evidence; a later attempt that
-# writes the receipt must erase that stamp, or the row would look crash-dead forever. The
-# CAS keeps two facts apart: the stamp must belong to THIS wake
-# (`last_turn_fatal_at >= last_admission_at`, and a NULL admission clears nothing — that is
-# the birth fact, not something this wake wrote), so a marker left by an earlier real turn
-# crash survives until a completed turn clears it.
+# A read-only answer to "did the receipt land", for the wake whose budget ran out after the
+# write but before the settle returned (#5468). No lock and no expiry write: the caller wants a
+# yes/no about the one fact it may have just committed, and nothing is decided here. "Owed" is
+# the same fact `handoff_due(ENDED, receipt_written=False)` names — an ended lease with no
+# receipt — written out in SQL here because that helper reads a parsed row, not a table.
+# meiva:link docs/conventions/agents/agent-impersonation.md
+async def handoff_landed(pool: AsyncConnectionPool, agent_id: int) -> bool:
+    async with pool.connection() as conn:
+        cur = await conn.execute(
+            "SELECT EXISTS (SELECT 1 FROM agent_impersonations "
+            "WHERE agent_id = %s AND status IN ('released','rejected','expired') "
+            "AND handoff_applied_at IS NULL)",
+            (agent_id,),
+        )
+        row = await cur.fetchone()
+    if row is None:
+        raise RuntimeError("an EXISTS query always returns one row")
+    return not row[0]
+
+
+# meiva:note
+# The marker write the held path owns (#5468). A settle that failed inside the wake stamps the
+# crash marker; a settle that then writes the receipt must erase it, or the row would look
+# crash-dead forever — and the held path runs no model turn, so nothing would ever complete a
+# turn to clear it.
+#
+# The condition is the fact that settles the question, not the marker's timestamp: the row must
+# have no ended lease still owing a receipt. A timestamp test (`marker >= last_admission_at`)
+# reads well and strands the common sequence: a COALESCE stamp keeps the FIRST death, so a stamp
+# from an earlier wake is older than any later admission, and the marker it left would stay on a
+# row this wake settled — fifteen minutes later the reaper would terminate a healthy agent. The
+# cost of the fact-based rule, stated plainly: a marker left by a genuine turn crash is also
+# cleared once this row's receipt is settled, so that crash is retried on the next input instead
+# of being reaped. The incarnation CAS stays: another runtime's marker is not ours to clear.
 # meiva:link docs/conventions/agents/agent-impersonation.md
 async def clear_turn_fatal(pool: AsyncConnectionPool, incarnation: RuntimeIncarnation) -> bool:
     async with async_write_transaction(pool) as conn:
@@ -291,8 +318,10 @@ async def clear_turn_fatal(pool: AsyncConnectionPool, incarnation: RuntimeIncarn
             "UPDATE agents_meta SET last_turn_fatal_at = NULL "
             "WHERE id = %s AND runtime_generation = %s AND runtime_owner = %s "
             "AND last_turn_fatal_at IS NOT NULL "
-            "AND last_admission_at IS NOT NULL "
-            "AND last_turn_fatal_at >= last_admission_at RETURNING id",
+            "AND NOT EXISTS (SELECT 1 FROM agent_impersonations owed "
+            "  WHERE owed.agent_id = agents_meta.id "
+            "    AND owed.status IN ('released','rejected','expired') "
+            "    AND owed.handoff_applied_at IS NULL) RETURNING id",
             (incarnation.agent_id, incarnation.generation, incarnation.owner),
         )
         applied = await cur.fetchone() is not None

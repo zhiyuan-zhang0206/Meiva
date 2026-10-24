@@ -2,7 +2,9 @@
 # The held path's one owed checkpoint write (#5468): retried inside the wake, and failed
 # closed when the budget runs out.
 
+import asyncio
 from collections.abc import Iterator
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, cast
 
@@ -14,6 +16,8 @@ from langgraph.graph.state import CompiledStateGraph
 from psycopg_pool import AsyncConnectionPool
 
 from agent import state as states
+from agent.ownership.corpse_reap import reap_crash_corpses
+from agent.ownership.hosted import stamp_turn_fatal
 from agent.ownership.tests.ownership_support import admit_owner, agent_row
 from base import telemetry
 from base.agents.context import MeivaContext
@@ -25,6 +29,8 @@ from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
+from base.log.tests.log_records import LogRecords
+from base.log.tests.log_records import loguru_records as loguru_records
 from base.packages.composer_commands import CommandCatalog
 from base.paths import meiva_home
 from services.agent_runner.agent_host.held_settle import settle_owed_handoff
@@ -40,6 +46,21 @@ _MACHINE = "claim-test"
 # meiva:note
 # A real graph whose first `failures` state reads fail the way a checkpoint fault does, so the
 # settle under test fails for real instead of being replaced by a stub.
+# meiva:note
+# A real graph whose state reads take longer than the budget, so the wake times out.
+class SleepingGraph:
+    def __init__(self, inner: Any, seconds: float) -> None:
+        self._inner = inner
+        self.seconds = seconds
+
+    async def aget_state(self, config: Any) -> Any:
+        await asyncio.sleep(self.seconds)
+        return await self._inner.aget_state(config)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._inner, name)
+
+
 class FailingReads:
     def __init__(self, inner: Any, failures: int) -> None:
         self._inner = inner
@@ -222,3 +243,149 @@ async def test_an_exhausted_settle_budget_fails_closed_with_a_reapable_row(
     assert not _receipt_applied(db_conn, agent_id)
     assert host.stats.handoff_settle_retries == 2
     assert host.stats.handoff_settle_failures == 1
+
+
+async def _landed(_pool: AsyncConnectionPool[Any], _agent_id: int) -> bool:
+    return True
+
+
+# meiva:note
+# The timeout branch, both ways. A settle that cannot meet its budget ends in fail-closed with
+# the receipt still owed. When the receipt has already landed, the write commits in a thread
+# and the await after it is where a cancel lands, the wake must return instead: marking a
+# healthy row would spend a heartbeat turn it does not need. The double stands in for that
+# thread; the write itself is the retry test above.
+async def test_a_timeout_with_the_receipt_unwritten_fails_closed(
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool[Any],
+    database: Database,
+    event_bus: EventBus,
+    model_catalog: ModelCatalog,
+    *,
+    database_gate: ProcessDbGate,
+) -> None:
+    agent_id = agent_row(db_conn)
+    incarnation = await admit_owner(aops_pool, agent_id, database_gate=database_gate)
+    _owed_lease(db_conn, agent_id)
+    graph, saver = await _graph(aops_pool, agent_id)
+    host = _host(
+        pool=aops_pool,
+        saver=saver,
+        graph=SleepingGraph(graph, 5.0),
+        database=database,
+        event_bus=event_bus,
+        model_catalog=model_catalog,
+    )
+    try:
+        with pytest.raises(TimeoutError):
+            await settle_owed_handoff(
+                replace(host._held_settle, budget_s=0.2), agent_id, incarnation
+            )
+    finally:
+        await host.aclose()
+
+    status, marker, termination = _row(db_conn, agent_id)
+    assert status == "idling"
+    assert marker is not None
+    assert termination is None
+    assert not _receipt_applied(db_conn, agent_id)
+    assert host.stats.handoff_settle_failures == 1
+
+
+async def test_a_timeout_after_the_receipt_landed_returns_without_marking(
+    loguru_records: LogRecords,
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool[Any],
+    database: Database,
+    event_bus: EventBus,
+    model_catalog: ModelCatalog,
+    *,
+    database_gate: ProcessDbGate,
+) -> None:
+    agent_id = agent_row(db_conn)
+    incarnation = await admit_owner(aops_pool, agent_id, database_gate=database_gate)
+    _owed_lease(db_conn, agent_id)
+    graph, saver = await _graph(aops_pool, agent_id)
+    host = _host(
+        pool=aops_pool,
+        saver=saver,
+        graph=SleepingGraph(graph, 5.0),
+        database=database,
+        event_bus=event_bus,
+        model_catalog=model_catalog,
+    )
+    held = replace(
+        host._held_settle,
+        budget_s=0.2,
+        receipt_landed=_landed,
+    )
+    try:
+        await settle_owed_handoff(held, agent_id, incarnation)
+    finally:
+        await host.aclose()
+
+    status, marker, _ = _row(db_conn, agent_id)
+    assert status == "running"
+    assert marker is None
+    assert host.stats.handoff_settle_failures == 0
+    assert len(loguru_records.events("hosted_handoff_settle_raced")) == 1
+    assert loguru_records.events("hosted_handoff_settle_failed") == []
+
+
+# meiva:note
+# The sequence the reaper would have got wrong: wake A stamps T1 and fails closed, wake B admits
+# later (T2 > T1) and settles the receipt. A timestamp test keeps T1 (COALESCE preserves the
+# first death) and leaves the marker on a row that is now healthy, so fifteen minutes later the
+# reaper terminates an agent that owes nothing. Asserting the reap attempt as well keeps that
+# consequence visible, not just the row's columns.
+async def test_a_marker_from_an_earlier_wake_is_cleared_by_the_wake_that_settles(
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool[Any],
+    database: Database,
+    event_bus: EventBus,
+    model_catalog: ModelCatalog,
+    *,
+    database_gate: ProcessDbGate,
+) -> None:
+    agent_id = agent_row(db_conn)
+    incarnation = await admit_owner(aops_pool, agent_id, database_gate=database_gate)
+    _owed_lease(db_conn, agent_id)
+    assert (await stamp_turn_fatal(aops_pool, incarnation)).applied
+    db_conn.execute(
+        "UPDATE agents_meta SET last_turn_fatal_at = now() - interval '10 minutes' WHERE id = %s",
+        (agent_id,),
+    )
+    db_conn.commit()
+    assert _row(db_conn, agent_id)[1] is not None
+
+    graph, saver = await _graph(aops_pool, agent_id)
+    host = _host(
+        pool=aops_pool,
+        saver=saver,
+        graph=graph,
+        database=database,
+        event_bus=event_bus,
+        model_catalog=model_catalog,
+    )
+    try:
+        await settle_owed_handoff(host._held_settle, agent_id, incarnation)
+    finally:
+        await host.aclose()
+
+    assert _receipt_applied(db_conn, agent_id)
+    assert _row(db_conn, agent_id)[1] is None
+    db_conn.execute("UPDATE agents_meta SET status = 'idling' WHERE id = %s", (agent_id,))
+    db_conn.commit()
+    assert await reap_crash_corpses(aops_pool, _MACHINE) == []
+    # meiva:note
+    # The contrast that makes the assertion above load-bearing: put the stale marker back, past
+    # the grace, and the reaper takes the row — which is exactly what a timestamp-based clear
+    # would have left behind, one terminated healthy agent at a time.
+    db_conn.execute(
+        "UPDATE agents_meta SET last_turn_fatal_at = now() - interval '16 minutes' WHERE id = %s",
+        (agent_id,),
+    )
+    db_conn.commit()
+    assert [corpse.agent_id for corpse in await reap_crash_corpses(aops_pool, _MACHINE)] == [
+        agent_id
+    ]

@@ -393,7 +393,7 @@ def test_the_handoff_recheck_selects_only_the_crash_marked_row_that_owes_a_recei
     _set_marker(db_conn, owed_but_running, seconds_ago=60)
 
     reasons = selected_with_reason(pool)
-    assert reasons[owed] == "unapplied_automatic_handoff"
+    assert reasons[owed] == "unapplied_handoff_receipt"
     # meiva:note
     # Three negatives around that positive: a crash marker alone is the ordinary cadence, an
     # owed receipt alone stays excluded because nothing says the row is dead, and the
@@ -437,10 +437,10 @@ def test_the_handoff_recheck_ends_with_the_grace_and_respects_a_pause(
     fresh = _owed(marker_s_ago=60)
 
     assert stale not in selected_with_reason(pool)
-    assert selected_with_reason(pool)[fresh] == "unapplied_automatic_handoff"
+    assert selected_with_reason(pool)[fresh] == "unapplied_handoff_receipt"
     # meiva:note
     # The same row past the grace is the exception again only while the grace covers it.
-    assert selected_with_reason(pool, corpse_grace_s=1800.0)[stale] == "unapplied_automatic_handoff"
+    assert selected_with_reason(pool, corpse_grace_s=1800.0)[stale] == "unapplied_handoff_receipt"
 
     db_conn.execute(
         "UPDATE agents_meta SET heartbeat_paused_until = now() + interval '1 hour' WHERE id = %s",
@@ -453,4 +453,4 @@ def test_the_handoff_recheck_ends_with_the_grace_and_respects_a_pause(
         (fresh,),
     )
     db_conn.commit()
-    assert selected_with_reason(pool)[fresh] == "unapplied_automatic_handoff"
+    assert selected_with_reason(pool)[fresh] == "unapplied_handoff_receipt"

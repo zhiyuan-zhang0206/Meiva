@@ -51,7 +51,7 @@ async def reap_crash_corpses(
                 "RETURNING id, EXISTS ("
                 "  SELECT 1 FROM agent_impersonations owed "
                 "  WHERE owed.agent_id = agents_meta.id "
-                "    AND owed.status <> 'active' "
+                "    AND owed.status IN ('released','rejected','expired') "
                 "    AND owed.handoff_applied_at IS NULL) AS handoff_unapplied",
                 (machine, CORPSE_REAP_GRACE_S),
             )
@@ -60,10 +60,10 @@ async def reap_crash_corpses(
         recorded: list[telemetry.Event] = []
         for agent_id, handoff_unapplied in rows:
             # meiva:note
-            # A reaped row that still owed a handoff receipt is a different failure
-            # from an ordinary corpse: the held path settled nothing, so the reaper is
-            # the only thing that noticed (#5468). The flag is read at reap time, so an
-            # operator can tell the two apart without replaying lease history.
+            # A reaped row that still owed a handoff receipt is a different failure from an
+            # ordinary corpse: the held path settled nothing, so the reaper is the only thing
+            # that noticed (#5468). The flag is read at reap time, so an operator can tell the
+            # two apart without replaying lease history.
             # meiva:link docs/conventions/agents/agent-impersonation.md
             event = prepare_event_log(
                 event_type="status_change",
@@ -73,7 +73,7 @@ async def reap_crash_corpses(
                     "from": "idling",
                     "to": "terminated",
                     "reason": "corpse_reaper",
-                    "unapplied_automatic_handoff": handoff_unapplied,
+                    "unapplied_handoff_receipt": handoff_unapplied,
                 },
             )
             recorded.append(await record_audit_async(conn, event))
