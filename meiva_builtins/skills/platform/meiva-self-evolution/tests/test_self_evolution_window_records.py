@@ -51,7 +51,7 @@ def test_help_and_subprocess_counters_ride_on_the_record() -> None:
                 ("turn_end", {}),
             )
         ),
-        log_events=tuple(name for name, _ in ()),
+        log_events=(),
         inbounds=record_mod.inbound_facts(()),
         meta=record_mod.AgentMeta("user", "terminated", "done"),
         transcript=record_mod.transcript_facts(()),
