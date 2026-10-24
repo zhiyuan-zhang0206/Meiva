@@ -98,12 +98,6 @@ _BASELINE_GRANT = re.compile(
 )
 
 
-# meiva:note
-# The lease lifecycle wakes the agent through Redis. These tests own a database,
-# not a broker, and a broker is not what #5375 broke.
-def _no_wake(*_args: object, **_kwargs: object) -> None: ...
-
-
 def _assigned_columns(assignments: str) -> set[str]:
     columns: set[str] = set()
     depth = 0
@@ -243,44 +237,41 @@ def test_baseline_schema_grants_cover_the_lease_statements() -> None:
 # The caller vocabulary comes from the impersonation package because `base.deploy`
 # must not reach `base.api_contracts`.
 def test_runner_drives_the_lease_lifecycle(
-    authority_postgres: AuthorityCluster, config_authority: ConfigAuthority
+    authority_postgres: AuthorityCluster, config_authority: ConfigAuthority, event_bus: EventBus
 ) -> None:
     cluster = authority_postgres
     with cluster.admin() as conn:
         agent_id, incarnation = _seed_lease_agent(conn)
     database = _runner_database(cluster)
-    bus = EventBus.from_settings()
-    with pytest.MonkeyPatch.context() as silent_wake:
-        silent_wake.setattr(leases, "wake_agent", _no_wake)
-        lease = leases.request(
-            database,
-            bus,
-            agent_id,
-            caller=leases.CallerIdentity(kind="external_agent", subject="codex"),
-            ttl_seconds=300,
-            reason="runner grant matrix",
-            relay_provider="codex",
-            relay_thread_id=str(uuid4()),
-            authority=config_authority,
-            local_machine=_LOCAL_MACHINE,
-            name="Test name",
-            executor_name="Test executor_name",
-        )
-        leases.prepare(
-            database,
-            bus,
-            lease["id"],
-            agent_id,
-            incarnation,
-            "Grant-matrix handoff",
-            local_machine=_LOCAL_MACHINE,
-        )
-        leases.activate(database, bus, lease["id"], incarnation)
-        renewed = leases.renew(
-            database, bus, lease["id"], ttl_seconds=600, local_machine=_LOCAL_MACHINE
-        )
-        assert renewed["ttl_seconds"] == 600
-        released = leases.release(
-            database, bus, lease["id"], "Grant-matrix release", local_machine=_LOCAL_MACHINE
-        )
-        assert released["status"] == "released"
+    lease = leases.request(
+        database,
+        event_bus,
+        agent_id,
+        caller=leases.CallerIdentity(kind="external_agent", subject="codex"),
+        ttl_seconds=300,
+        reason="runner grant matrix",
+        relay_provider="codex",
+        relay_thread_id=str(uuid4()),
+        authority=config_authority,
+        local_machine=_LOCAL_MACHINE,
+        name="Test name",
+        executor_name="Test executor_name",
+    )
+    leases.prepare(
+        database,
+        event_bus,
+        lease["id"],
+        agent_id,
+        incarnation,
+        "Grant-matrix handoff",
+        local_machine=_LOCAL_MACHINE,
+    )
+    leases.activate(database, event_bus, lease["id"], incarnation)
+    renewed = leases.renew(
+        database, event_bus, lease["id"], ttl_seconds=600, local_machine=_LOCAL_MACHINE
+    )
+    assert renewed["ttl_seconds"] == 600
+    released = leases.release(
+        database, event_bus, lease["id"], "Grant-matrix release", local_machine=_LOCAL_MACHINE
+    )
+    assert released["status"] == "released"

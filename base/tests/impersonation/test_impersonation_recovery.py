@@ -15,8 +15,9 @@ from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
-from base.events.live.tests.fakes import patch_announcements
+from base.events.live.projection import AgentUpdated, ImpersonationChanged
 from base.native_process.runtime_incarnation import RuntimeIncarnation
+from base.tests.impersonation.publications import Published, tap_publications
 from base.tests.impersonation.support import (
     accept_controller,
     create_native_owner,
@@ -118,7 +119,6 @@ def test_renew_replaces_ttl(
 
 def test_reaper_expires_offline_lease_and_keeps_unconsumed_handoff(
     db_conn: psycopg.Connection,
-    monkeypatch: pytest.MonkeyPatch,
     database: Database,
     event_bus: EventBus,
     *,
@@ -129,10 +129,6 @@ def test_reaper_expires_offline_lease_and_keeps_unconsumed_handoff(
     local_machine = machine_identity.name()
     from base.agents.impersonation import maintenance as maintenance
     from base.db import pool
-
-    announced: list[int] = []
-    roster_announced: list[int] = []
-    patch_announcements(monkeypatch, maintenance, changed=announced, updated=roster_announced)
 
     owner = create_native_owner(db_conn, local_machine=local_machine)
     lease = accept_controller(
@@ -145,9 +141,15 @@ def test_reaper_expires_offline_lease_and_keeps_unconsumed_handoff(
     )
     db_conn.commit()
     with pool(max_size=2, gate=database_gate) as reaper_pool:
-        assert maintenance.reap_impersonations(reaper_pool, database, event_bus) == 1
-        assert announced == [owner.agent_id]
-        assert roster_announced == [owner.agent_id]
+        with tap_publications(event_bus, owner.agent_id) as tap:
+            assert maintenance.reap_impersonations(reaper_pool, database, event_bus) == 1
+            assert tap.drain() == Published(
+                wakes=((owner.agent_id, "impersonation-expired"),),
+                events=(
+                    ImpersonationChanged(agent_id=owner.agent_id),
+                    AgentUpdated(agent_id=owner.agent_id),
+                ),
+            )
         db_conn.execute(
             "UPDATE agent_impersonations SET ended_at=clock_timestamp()-interval '8 days' WHERE id=%s",
             (lease["id"],),
@@ -209,7 +211,6 @@ def _assert_expired_lifecycle_entry(db_conn: psycopg.Connection, lease: dict[str
 @pytest.mark.parametrize("lease_status", ["requested", "accepted", "active"])
 def test_operator_force_expire_closes_only_observed_session(
     db_conn: psycopg.Connection,
-    monkeypatch: pytest.MonkeyPatch,
     lease_status: str,
     database: Database,
     event_bus: EventBus,
@@ -244,17 +245,10 @@ def test_operator_force_expire_closes_only_observed_session(
             (owner.agent_id, str(lease["id"])),
         )
         db_conn.commit()
-    wakes: list[int] = []
-    announcements: list[int] = []
-    roster_announcements: list[int] = []
-
-    def record_wake(_db: Database, _bus: EventBus, agent_id: int, _reason: str) -> None:
-        wakes.append(agent_id)
-
-    patch_announcements(
-        monkeypatch, maintenance, changed=announcements, updated=roster_announcements
-    )
-    with pool(max_size=2, gate=database_gate) as gateway_pool:
+    with (
+        pool(max_size=2, gate=database_gate) as gateway_pool,
+        tap_publications(event_bus, owner.agent_id) as tap,
+    ):
         assert (
             maintenance.force_expire_impersonation(
                 gateway_pool,
@@ -263,7 +257,6 @@ def test_operator_force_expire_closes_only_observed_session(
                 owner.agent_id,
                 lease["session_id"] + 1,
                 "user_session:administrator",
-                publish_wake=record_wake,
             )
             == "not_open"
         )
@@ -275,7 +268,6 @@ def test_operator_force_expire_closes_only_observed_session(
                 owner.agent_id,
                 lease["session_id"],
                 "user_session:administrator",
-                publish_wake=record_wake,
             )
             == "expired"
         )
@@ -287,13 +279,16 @@ def test_operator_force_expire_closes_only_observed_session(
                 owner.agent_id,
                 lease["session_id"],
                 "user_session:administrator",
-                publish_wake=record_wake,
             )
             == "not_open"
         )
-    assert wakes == [owner.agent_id]
-    assert announcements == [owner.agent_id]
-    assert roster_announcements == [owner.agent_id]
+        assert tap.drain() == Published(
+            wakes=((owner.agent_id, "impersonation-expired"),),
+            events=(
+                ImpersonationChanged(agent_id=owner.agent_id),
+                AgentUpdated(agent_id=owner.agent_id),
+            ),
+        )
     _assert_force_expired_row(db_conn, owner, lease, lease_status)
     _assert_expired_lifecycle_entry(db_conn, lease)
 

@@ -4,8 +4,6 @@ It lives with the impersonation relay because every wake first runs the relay li
 impersonation publishes through it and so does the inbox.
 """
 
-from collections.abc import Callable
-
 from redis.exceptions import ConnectionError as RedisConnectionError
 from redis.exceptions import ResponseError
 from redis.exceptions import TimeoutError as RedisTimeoutError
@@ -113,9 +111,8 @@ def wake_agent(
     agent_id: int,
     *,
     roster_changed: bool = False,
-    publish_wake: Callable[[Database, EventBus, int, str], object] = publish_inbound_wake,
 ) -> None:
-    publish_wake(db, bus, agent_id, "impersonation")
+    publish_inbound_wake(db, bus, agent_id, "impersonation")
     publish_impersonation_changed_sync(bus, agent_id)
     if roster_changed:
         publish_agent_updated_sync(bus, agent_id)

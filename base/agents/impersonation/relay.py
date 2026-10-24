@@ -1,6 +1,5 @@
 """Relay binding and failure paths for cooperative impersonation leases."""
 
-from collections.abc import Callable
 from typing import Any
 
 from psycopg.rows import dict_row
@@ -310,7 +309,6 @@ def stamp_relay_failure(
     db: Database,
     session: dict[str, Any],
     agent_id: int,
-    record_relay_failure: Callable[[Database, str, RuntimeIncarnation], bool],
     *,
     incarnation: RuntimeIncarnation | None,
 ) -> None:
