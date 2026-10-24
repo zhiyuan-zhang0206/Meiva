@@ -12,6 +12,9 @@ exports = ["derive.py", "jobs.py", "reader.py", "source.py"]
 "source.py" = ["model.py"]
 "store.py" = ["model.py"]
 
+[debt.ambient-read]
+"backfill.py#settings base.config.ConfigBoot" = 1
+
 [debt.impure-call]
 "nodes.py#import psycopg" = 3
 "reader.py#import fastapi" = 1

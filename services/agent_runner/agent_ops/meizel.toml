@@ -10,3 +10,6 @@ exports = ["boot.py", "daemon.py", "dispatch_sync.py", "in_flight.py", "tests"]
 "__init__.py" = "strict"
 "idempotency_plan.py" = "strict"
 "ops_plan.py" = "strict"
+
+[debt.ambient-read]
+"daemon.py#settings base.config.ConfigBoot" = 1

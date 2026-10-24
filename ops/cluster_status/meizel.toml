@@ -13,3 +13,6 @@ exports = ["schema_mismatch.py"]
 "model.py" = "strict"
 "report.py" = "strict"
 "shell_plans.py" = "strict"
+
+[roots]
+"__init__.py" = ["endpoints"]

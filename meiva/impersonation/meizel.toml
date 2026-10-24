@@ -10,6 +10,9 @@ exports = ["admission.py", "attachment.py"]
 "__init__.py" = "strict"
 "admission.py" = "strict"
 
+[debt.ambient-read]
+"attachment.py#settings base.config.ConfigBoot" = 1
+
 [debt.impure-call]
 "attachment.py#uuid.uuid4" = 1
 

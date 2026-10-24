@@ -7,3 +7,12 @@ exports = ["daemon.py", "station_probe.py"]
 
 [purity]
 "__init__.py" = "strict"
+
+[roots]
+"daemon.py" = ["bus"]
+"station_probe.py" = ["db"]
+
+[debt.ambient-read]
+"daemon.py#settings base.config.ConfigBoot" = 1
+"daemon.py#settings base.config.settings" = 1
+"station_probe.py#settings base.config.ConfigBoot" = 1

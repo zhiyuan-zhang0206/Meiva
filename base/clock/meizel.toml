@@ -7,6 +7,9 @@ exports = ["configuration.py", "tests"]
 "configuration.py" = ["__init__.py"]
 "tests" = ["__init__.py", "configuration.py"]
 
+[debt.ambient-read]
+"__init__.py#settings base.config.settings" = 1
+
 [debt.impure-call]
 "__init__.py#async def asleep" = 3
 "__init__.py#datetime.now" = 1

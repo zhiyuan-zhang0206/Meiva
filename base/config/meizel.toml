@@ -22,5 +22,9 @@ exports = ["admin", "agent_pins.py", "base.py", "config_registry.py", "domains",
 [state]
 "__init__.py" = ["settings"]
 
+[roots]
+"_full.py" = { kinds = ["environ"], why = "the eager builder reads MEIVA_PROCESS_PROFILE at construction time, before the singleton exists — the same bootstrap-ordering class as base/config/domains/storage/data_plane.py" }
+"_lite.py" = { kinds = ["environ"], why = "the boot-lite resolution layer IS the Settings bootstrap: it reads raw env aliases and plants the placeholder data-plane URLs before any sub-model exists — the same \"cannot depend on Settings by construction\" class as base/config/__init__.py" }
+
 [debt.impure-edge]
 "base.py#base/paths/home.py" = 1

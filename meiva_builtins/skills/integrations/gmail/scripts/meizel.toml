@@ -6,3 +6,6 @@ exports = ["feed.py"]
 "gmail_headers.py" = "strict"
 "gmail_queries.py" = "strict"
 "gmail_wire.py" = "strict"
+
+[debt.ambient-read]
+"imap.py#environ os.environ" = 1

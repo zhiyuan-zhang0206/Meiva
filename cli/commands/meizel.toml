@@ -18,3 +18,6 @@ exports = ["agents", "cluster", "converge", "data_plane", "duration.py", "extens
 "__init__.py" = "strict"
 "duration.py" = "strict"
 "probe_report.py" = "strict"
+
+[debt.ambient-read]
+"_repo.py#endpoints base.daemon.endpoints.ServiceEndpoints.from_settings" = 1

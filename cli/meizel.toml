@@ -14,3 +14,11 @@ exports = ["__main__.py", "commands", "database", "fleet_update", "parsers", "st
 
 [purity]
 "__init__.py" = "strict"
+
+[roots]
+"main.py" = { kinds = ["environ"], why = "CLI bootstrap sets config/profile/log routing before importing Settings or command modules." }
+"start_intent.py" = { kinds = ["environ"], why = "Identity bootstrap precedes Settings: read the birth inputs and pin the resolved home before config imports." }
+
+[debt.ambient-read]
+"fleet_alert_silence.py#settings base.config.settings" = 1
+"python_install.py#environ os.environ" = 1

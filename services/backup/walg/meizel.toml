@@ -16,3 +16,6 @@ exports = ["archive.py", "check.py", "config.py", "probe.py", "restore.py", "sta
 
 [purity]
 "archive_plan.py" = "strict"
+
+[debt.ambient-read]
+"pg_target.py#settings base.config.settings" = 1

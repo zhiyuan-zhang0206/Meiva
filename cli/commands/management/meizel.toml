@@ -11,3 +11,9 @@ exports = ["config.py", "fleet_gateway.py", "fleet_leases.py", "schedules.py", "
 [purity]
 "__init__.py" = "strict"
 "schedule_verify_child.py" = "strict"
+
+[roots]
+"config.py" = { kinds = ["environ"], why = "the settings-free repair path (meiva config --local) reads MEIVA_GATEWAY_URL / MEIVA_CLUSTER_SECRET from the raw env/.env WITHOUT constructing Settings — a broken .env is exactly the scenario it repairs, and constructing Settings would fail first" }
+
+[debt.ambient-read]
+"fleet_gateway.py#settings base.config.ConfigBoot" = 1

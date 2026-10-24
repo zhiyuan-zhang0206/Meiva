@@ -4,3 +4,6 @@ exports = ["webscrape.py"]
 "scrape_ladder.py" = "strict"
 "scrape_post.py" = "strict"
 "scrape_wire.py" = "strict"
+
+[debt.ambient-read]
+"webscrape.py#environ os.environ" = 1

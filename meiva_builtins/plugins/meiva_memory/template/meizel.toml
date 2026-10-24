@@ -1,1 +1,4 @@
 exports = ["validate.py"]
+
+[debt.ambient-read]
+"validate.py#environ os.environ" = 1

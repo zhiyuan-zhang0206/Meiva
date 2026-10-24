@@ -4,3 +4,6 @@ exports = ["__init__.py", "__main__.py", "fleet_gate.py", "fleet_verify.py", "sc
 "__init__.py" = ["fleet_gate.py", "fleet_verify.py"]
 "__main__.py" = ["__init__.py"]
 "fleet_verify.py" = ["fleet_gate.py"]
+
+[debt.ambient-read]
+"__init__.py#environ os.environ" = 2

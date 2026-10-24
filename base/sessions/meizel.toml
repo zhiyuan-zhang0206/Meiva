@@ -14,3 +14,7 @@ exports = ["backend.py", "coding_session_owner.py", "coding_session_owner_record
 "__init__.py" = "strict"
 "log_prefix.py" = "strict"
 "provenance.py" = "strict"
+
+[debt.ambient-read]
+"backend.py#settings base.config.settings" = 1
+"helperproc.py#settings base.config.settings" = 1

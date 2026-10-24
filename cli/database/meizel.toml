@@ -2,3 +2,7 @@ exports = ["lifecycle_audit.py", "runtime.py", "tests"]
 
 [uses]
 "tests" = ["__init__.py", "lifecycle_audit.py", "runtime.py"]
+
+[debt.ambient-read]
+"runtime.py#environ os.environ" = 1
+"runtime.py#settings base.config.ConfigBoot" = 1

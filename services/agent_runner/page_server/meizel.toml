@@ -12,3 +12,7 @@ exports = ["daemon.py", "resources.py"]
 "config.py" = "strict"
 "occupant_plan.py" = "strict"
 "page_plan.py" = "strict"
+
+[roots]
+"daemon.py" = { kinds = ["settings", "bus", "environ"], why = "spawns the page-server child with a per-launch PAGE_SERVER_TOKEN overlaid on the inherited env — the token is a fresh secrets.token_hex(16) per spawn, a dynamic child-env handoff Settings (boot-time static) cannot model, same class as base/sessions/env_forwarding" }
+"server.py" = { kinds = ["environ"], why = "reads the per-launch PAGE_SERVER_TOKEN its daemon parent set in the child env — the token is minted per spawn by the daemon, Settings (boot-time static) cannot model it" }

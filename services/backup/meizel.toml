@@ -13,3 +13,7 @@ exports = ["artifact", "dump.py", "layout.py", "restore_drill.py", "scheduler", 
 "dump_plan.py" = "strict"
 "layout.py" = "strict"
 "schedule.py" = "strict"
+
+[debt.ambient-read]
+"dump.py#settings base.config.ConfigBoot" = 1
+"restore_drill.py#settings base.config.ConfigBoot" = 1

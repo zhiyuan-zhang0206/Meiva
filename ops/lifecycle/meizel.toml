@@ -10,3 +10,9 @@ exports = ["delivery.py", "events.py", "launch.py", "launch_reconcile.py", "term
 [purity]
 "launch_row.py" = "strict"
 "resurrect_plan.py" = "strict"
+
+[roots]
+"__init__.py" = ["endpoints"]
+
+[debt.ambient-read]
+"__init__.py#settings base.config.settings" = 1

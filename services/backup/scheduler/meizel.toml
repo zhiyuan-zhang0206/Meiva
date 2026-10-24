@@ -8,3 +8,7 @@ exports = ["daemon.py", "settings.py", "worker.py"]
 [purity]
 "__init__.py" = "strict"
 "commit_plan.py" = "strict"
+
+[debt.ambient-read]
+"daemon.py#settings base.config.ConfigBoot" = 1
+"worker.py#settings base.config.ConfigBoot" = 1
