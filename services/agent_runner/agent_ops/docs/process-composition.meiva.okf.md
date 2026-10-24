@@ -22,6 +22,9 @@ on, replayed or refused, and whether a lost connection is retried. `daemon` exec
 its tests run the real operations (`config_write` leaves one audit record per execution,
 and blocks on the `.env` lock, so a test counts executions and holds one in flight).
 
+Upload source HTTP 401/403/404/409 return `upload-source-unavailable-v1`;
+other HTTP failures propagate. Real Postgres and loopback HTTP tests cover both.
+
 `services/agent_runner/agent_ops/daemon.py:main` rejects unknown argv, captures
 one `LoadedCommit`, and retains a `CodeVersion` and non-exempt `ProcessDbGate`
 for the `ops` process. Its database factory reads `db_config_from_boot(config)` at each
