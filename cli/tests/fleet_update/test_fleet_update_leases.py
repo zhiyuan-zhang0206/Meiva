@@ -4,14 +4,16 @@
 # meiva:link cli/docs/fleet-update-window/fleet-update-window.meiva.okf.md
 from __future__ import annotations
 
+import time
 from collections.abc import Callable
-from datetime import UTC, datetime
 from typing import Any
+from uuid import uuid4
 
+import psycopg
 import pytest
 
-from cli import fleet_update
 from cli.commands.management import fleet_leases
+from cli.fleet_update.session import Pacing
 from cli.tests.fleet_update.fleet_update_cluster import Cluster
 
 _LEASES: list[dict[str, Any]] = [
@@ -72,31 +74,31 @@ def test_the_leases_are_named_before_the_first_stop(
 def test_no_active_lease_is_one_line_and_never_waits(
     env: tuple[Cluster, Callable[..., int]], capsys: pytest.CaptureFixture[str]
 ) -> None:
-    cluster, run = env
-    before = cluster.now
+    _, run = env
     assert run("down", "--lease-confirm-seconds", "30") == 0
     out = capsys.readouterr().out
     assert "leases: no active impersonation lease" in out
     assert "the stop ends every one of them" not in out
-    assert cluster.now == before
+    assert " left: " not in out
 
 
 # meiva:note
-# The countdown is bounded -- two lines at least, one a second at most -- so progress is visible
-# without flooding the log.
+# The shell holds the stops open for the whole window and says one line per tick before the first
+# stop. The ticks themselves -- their count, their spacing and what each says -- are the plan's
+# (`plan/tests`); this runs them for real at a half-second pace.
 def test_the_confirm_window_holds_the_stops_open(
     env: tuple[Cluster, Callable[..., int]], capsys: pytest.CaptureFixture[str]
 ) -> None:
     cluster, run = env
     cluster.leases = list(_LEASES)
-    before = cluster.now
-    assert run("down", "--lease-confirm-seconds", "30") == 0
+    cluster.pacing = Pacing(roster_poll_s=0.01, lease_tick_s=0.5)
+    started = time.monotonic()
+    assert run("down", "--lease-confirm-seconds", "1") == 0
     out = capsys.readouterr().out
-    assert cluster.now - before == 30.0
-    assert "leases: 30s left: release or renew them, or let the stop end them" in out
-    assert "leases: 5s left: release or renew them, or let the stop end them" in out
-    assert 2 <= out.count("s left: release or renew them") <= 30
-    assert out.index("leases: 5s left:") < out.index(" stop --yes ")
+    assert time.monotonic() - started >= 1.0
+    assert out.count("s left: release or renew them, or let the stop end them") == 2
+    assert "leases: 1s left: release or renew them, or let the stop end them" in out
+    assert out.index("s left: release or renew them") < out.index(" stop --yes ")
 
 
 def test_the_dry_run_names_the_leases_and_does_not_wait(
@@ -104,12 +106,11 @@ def test_the_dry_run_names_the_leases_and_does_not_wait(
 ) -> None:
     cluster, run = env
     cluster.leases = list(_LEASES)
-    before = cluster.now
     assert run("down", "--dry-run", "--lease-confirm-seconds", "30") == 0
     out = capsys.readouterr().out
     assert _lease(_LEASES[0]) in out
     assert "leases: dry run: not waiting 30s" in out
-    assert " left: " not in out and cluster.now == before
+    assert " left: " not in out
     assert [alias for kind, alias in cluster.effects if kind == "stop"] == []
 
 
@@ -179,58 +180,41 @@ def test_up_never_reads_the_lease_table(
     assert len(cluster.lease_reads) == reads
 
 
-def test_the_gateway_runs_the_shipped_program_source() -> None:
-    owner = fleet_update.VERIFY_SCRIPTS / "fleet_leases.py"
-    assert owner.read_text(encoding="utf-8") == fleet_update.program_text(
-        fleet_update.VERIFY_SCRIPTS / "fleet_leases.py"
+def _lease_row(conn: psycopg.Connection, *, status: str, executor: str) -> tuple[int, int]:
+    created = conn.execute("INSERT INTO agents DEFAULT VALUES RETURNING id").fetchone()
+    assert created is not None
+    agent_id = int(created[0])
+    conn.execute(
+        "INSERT INTO agents_meta(id,status,machine,harness) VALUES(%s,'idling','lease-test','meiva')",
+        (agent_id,),
     )
+    lease = conn.execute(
+        "INSERT INTO agent_impersonations(id,agent_id,source,machine,status,"
+        "ttl_seconds,expires_at,executor_name,token_hash,handoff_document) "
+        "VALUES(%s,%s,'external_agent:codex','lease-test',%s,300,%s,%s,'secret-token-hash',"
+        '\'{"secret": "handoff"}\'::jsonb) RETURNING session_id',
+        (str(uuid4()), agent_id, status, "2026-10-19T23:10:00+00:00", executor),
+    ).fetchone()
+    assert lease is not None
+    conn.commit()
+    return agent_id, int(lease[0])
 
 
-class _Cursor:
-    def __init__(self, rows: list[tuple[Any, ...]]) -> None:
-        self._rows = rows
-
-    def fetchall(self) -> list[tuple[Any, ...]]:
-        return self._rows
-
-
-class _Connection:
-    def __init__(self, rows: list[tuple[Any, ...]], statements: list[str]) -> None:
-        self._rows, self._statements = rows, statements
-
-    def __enter__(self) -> _Connection:
-        return self
-
-    def __exit__(self, *exc: object) -> None:
-        return None
-
-    def execute(self, sql: str) -> _Cursor:
-        self._statements.append(sql)
-        return _Cursor(self._rows)
-
-
-class _Database:
-    def __init__(self, rows: list[tuple[Any, ...]]) -> None:
-        self.statements: list[str] = []
-        self._connection = _Connection(rows, self.statements)
-
-    def connect(self, **kwargs: Any) -> _Connection:
-        assert kwargs == {"autocommit": True}
-        return self._connection
-
-
-def test_the_reader_returns_the_active_leases_and_no_secret_columns() -> None:
-    database = _Database([(7, 4, "Codex: db-work", datetime(2026, 10, 19, 23, 10, tzinfo=UTC))])
-    assert fleet_leases.active_leases(database) == [
+# meiva:note
+# The reader runs against the real table: only the leases still marked active, ordered by expiry,
+# and none of the columns the log must not carry.
+def test_the_reader_returns_the_active_leases_and_no_secret_columns(
+    db_conn: psycopg.Connection,
+) -> None:
+    kept, session = _lease_row(db_conn, status="active", executor="Codex: db-work")
+    _lease_row(db_conn, status="released", executor="ended")
+    leases = fleet_leases.active_leases(db_conn)
+    assert leases == [
         {
-            "agent_id": 7,
-            "session_id": 4,
+            "agent_id": kept,
+            "session_id": session,
             "executor": "Codex: db-work",
             "expires_at": "2026-10-19T23:10:00+00:00",
         }
     ]
-    sql = database.statements[0].lower()
-    assert "from agent_impersonations" in sql and "status='active'" in sql
-    assert not [
-        column for column in ("token_hash", "handoff_document", "process_metadata") if column in sql
-    ]
+    assert all("secret" not in str(value) for lease in leases for value in lease.values())

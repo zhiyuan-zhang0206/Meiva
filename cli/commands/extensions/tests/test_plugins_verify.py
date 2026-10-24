@@ -9,23 +9,26 @@ import pytest
 
 from base import paths
 from base.packages.plugins import load_report
-from base.packages.plugins.enable_config import write_local
+from base.packages.plugins.enable_config import (
+    discover_plugin_dirs,
+    local_config_path,
+    write_local,
+)
 from base.telemetry.tests.capture.event_capture import EmittedEvents
 from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
 from cli.commands.extensions.plugins_inspect import cmd_plugins_verify
-from meiva.sdk_surface import extensions
 
 _PLUGIN_MODULE_PREFIXES = ("meiva_builtins.plugins.", "plugins.")
 
 
+# meiva:note
+# The home is this test's own (`unit_home`), so the plugins it writes are the only external
+# ones. The repository's built-in plugins are discovered too, and each starts disabled here:
+# a disabled plugin is never imported, so the verdict is about the plugins a test wrote.
 @pytest.fixture(autouse=True)
-def _isolate_plugins(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
-    repo = tmp_path / "repo_plugins"
-    user = tmp_path / "user_plugins"
-    repo.mkdir()
-    user.mkdir()
-    monkeypatch.setattr(paths, "repo_plugins_dir", lambda: repo)
-    monkeypatch.setattr(paths, "plugins_dir", lambda: user)
+def _isolate_plugins(unit_home: Path) -> Iterator[None]:
+    (unit_home / "plugins").mkdir()
+    write_local({"plugins": {name: {"enabled": False} for name in _builtin_plugin_names()}})
     before = {k: v for k, v in sys.modules.items() if k.startswith(_PLUGIN_MODULE_PREFIXES)}
     yield
     for key in [
@@ -33,6 +36,12 @@ def _isolate_plugins(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterato
     ]:
         del sys.modules[key]
     sys.modules.update(before)
+
+
+def _builtin_plugin_names() -> list[str]:
+    return sorted(
+        discover_plugin_dirs(repo_dir=paths.repo_plugins_dir(), user_dir=Path("/nonexistent"))
+    )
 
 
 def _plugin(name: str, plugin_py: str, **siblings: str) -> None:
@@ -53,8 +62,20 @@ def _plugin(name: str, plugin_py: str, **siblings: str) -> None:
         (directory / filename).write_text(content)
 
 
+def _configure(*, enabled: tuple[str, ...] = (), disabled: tuple[str, ...] = ()) -> None:
+    write_local(
+        {
+            "plugins": {
+                **{name: {"enabled": False} for name in _builtin_plugin_names()},
+                **{name: {"enabled": False} for name in disabled},
+                **{name: {"enabled": True} for name in enabled},
+            }
+        }
+    )
+
+
 def _enable(*names: str) -> None:
-    write_local({"plugins": {name: {"enabled": True} for name in names}})
+    _configure(enabled=names)
 
 
 def test_loadable_plugins_are_green(capsys: pytest.CaptureFixture[str]) -> None:
@@ -119,7 +140,7 @@ def test_an_enabled_plugin_missing_from_disk_is_red(capsys: pytest.CaptureFixtur
 
 def test_a_disabled_broken_plugin_is_never_imported(capsys: pytest.CaptureFixture[str]) -> None:
     _plugin("old_hooks", "raise RuntimeError('boom')\n")
-    write_local({"plugins": {"old_hooks": {"enabled": False}}})
+    _configure(disabled=("old_hooks",))
 
     assert cmd_plugins_verify() == 0
 
@@ -139,13 +160,8 @@ def test_nothing_is_emitted_while_verifying_and_the_canonical_reporter_is_unchan
     assert emitted_events.names() == ["plugin_load_failed"]
 
 
-def test_a_loader_crash_is_a_tool_error_not_a_red(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    def boom(**_: object) -> None:
-        raise RuntimeError("loader exploded")
-
-    monkeypatch.setattr(extensions, "load_extensions", boom)
+def test_a_loader_crash_is_a_tool_error_not_a_red(capsys: pytest.CaptureFixture[str]) -> None:
+    local_config_path().write_text("{ this is not json")
 
     assert cmd_plugins_verify() == 2
 

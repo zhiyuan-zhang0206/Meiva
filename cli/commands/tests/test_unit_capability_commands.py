@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -29,8 +28,8 @@ born = _single_box.born
 
 def _serve_on_loopback(monkeypatch: pytest.MonkeyPatch, born: Born) -> ConfigAuthority:
     point_home(monkeypatch, born.home)
-    monkeypatch.setattr(config.settings.general, "machine_host", "localhost")
-    monkeypatch.setitem(os.environ, "MEIVA_MACHINE_SERVE_GATEWAY", "true")
+    with (born.home / ".env").open("a") as env_file:
+        env_file.write("MEIVA_MACHINE_HOST=localhost\nMEIVA_MACHINE_SERVE_GATEWAY=true\n")
     complete = config.settings if config.settings.profile is None else config.Settings(profile=None)
     return ConfigAuthority(config.settings, complete, born.home / ".env")
 

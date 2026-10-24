@@ -4,7 +4,7 @@ from collections.abc import Callable
 
 import pytest
 
-from cli import fleet_update
+from cli.fleet_update.plan.host_failures import PARTIAL_FAILURE_EXIT
 from cli.tests.fleet_update.fleet_update_cluster import Cluster
 
 
@@ -18,7 +18,7 @@ def test_one_red_smoke_still_verifies_and_reports_every_host(
     cluster, run = env
     assert run("down") == 0
     cluster.fail[("smoke", "mac")] = 1
-    assert run("up") == fleet_update.PARTIAL_FAILURE_EXIT
+    assert run("up") == PARTIAL_FAILURE_EXIT
     out = capsys.readouterr().out
     assert cluster.smoked == ["gw", "mac", "lin"]
     matrix = [line.partition("matrix: ")[2] for line in out.splitlines() if "matrix: " in line]
@@ -34,7 +34,7 @@ def test_a_host_that_never_started_is_reported_skipped_not_missing(
     cluster, run = env
     assert run("down") == 0
     cluster.fail[("start", "lin")] = 1
-    assert run("up") == fleet_update.PARTIAL_FAILURE_EXIT
+    assert run("up") == PARTIAL_FAILURE_EXIT
     out = capsys.readouterr().out
     matrix = [line.partition("matrix: ")[2] for line in out.splitlines() if "matrix: " in line]
     assert len(matrix) == 3

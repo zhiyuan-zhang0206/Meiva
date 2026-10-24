@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import json
 import os
-import shlex
 import subprocess
 import sys
 import threading
@@ -23,7 +22,8 @@ from typing import ClassVar
 import pytest
 
 from base.paths import repo_root
-from cli import fleet_update
+from cli.fleet_update.plan.gateway_commands import pre_verify_script
+from cli.fleet_update.programs import CHECK_ROWS_SCRIPT, VERIFY_SCRIPTS, program_text
 
 _OLD_ROWS = [(1, "digest", "import os\n"), (2, "empty", "")]
 
@@ -229,7 +229,7 @@ def test_an_unknown_required_factory_parameter_is_not_silently_replaced(tmp_path
 
 
 def test_the_read_script_imports_nothing_from_cli_database_unconditionally() -> None:
-    read = fleet_update.program_text(fleet_update.VERIFY_SCRIPTS / "schedules_verify_read_rows.py")
+    read = program_text(VERIFY_SCRIPTS / "schedules_verify_read_rows.py")
     assert read.index("inspect.signature") < read.index("cli.database")
     assert not [
         line
@@ -239,14 +239,11 @@ def test_the_read_script_imports_nothing_from_cli_database_unconditionally() -> 
 
 
 def _render(new: str = "deadbeef") -> str:
-    script = fleet_update.program_text(fleet_update.VERIFY_SCRIPTS / "fleet_pre_verify.sh")
-    return script.format(
-        home=fleet_update.HOME,
+    return pre_verify_script(
+        program_text(VERIFY_SCRIPTS / "fleet_pre_verify.sh"),
         new=new,
-        read_rows=shlex.quote(
-            fleet_update.program_text(fleet_update.VERIFY_SCRIPTS / "schedules_verify_read_rows.py")
-        ),
-        check_rows=shlex.quote(fleet_update.program_text(fleet_update.CHECK_ROWS_SCRIPT)),
+        read_rows=program_text(VERIFY_SCRIPTS / "schedules_verify_read_rows.py"),
+        check_rows=program_text(CHECK_ROWS_SCRIPT),
     )
 
 
@@ -260,7 +257,7 @@ def test_the_check_goes_through_the_cli_entry_with_a_throwaway_home() -> None:
     # the rows file holds every stored script
     assert '(umask 077; MEIVA_HOME="$H"' in script
     assert 'rm -f "$R"' in script and 'worktree remove --force "$W"' in script
-    check_py = fleet_update.program_text(fleet_update.CHECK_ROWS_SCRIPT)
+    check_py = program_text(CHECK_ROWS_SCRIPT)
     assert '"cli.main"' in check_py and '"schedules"' in check_py and '"verify"' in check_py
     assert '"--rows-file"' in check_py and '"--no-notify"' in check_py
 

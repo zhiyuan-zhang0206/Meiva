@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import stat
-import threading
 from collections.abc import Callable
 from pathlib import Path
 from types import SimpleNamespace
@@ -12,6 +11,7 @@ import pytest
 
 from base.cluster.machine import MachineIdentity
 from base.config import ConfigBoot
+from base.native_process.os_platform import file_lock
 from base.telemetry import EventPipeline
 from cli.commands.converge.tests.external_skills import (
     SKILL,
@@ -23,12 +23,23 @@ from cli.commands.converge.tests.external_skills import (
 )
 from cli.commands.extensions import external_skills as bridge
 from cli.commands.extensions.external_skill_host import filesystem as bridge_fs
+from cli.commands.extensions.tests.support import killed_converge as killed
+from cli.database import OperatorDatabaseFactory
 from cli.database.tests.cli_tests import operator_database as operator_database
 from cli.database.tests.cli_tests import operator_pipeline as operator_pipeline
 from cli.database.tests.command_inputs import command_config_machine as command_config_machine
 from cli.database.tests.command_inputs import command_runtime as command_runtime
 
 
+# meiva:note
+# Run one converge of the operator skill.
+#
+# The tests below that patch the bridge (`rename_no_replace`, `stage_copy`, `verify_marker`,
+# `materialize_source_snapshot`, `uuid4`) reproduce an intruder acting INSIDE one converge, between
+# a check and the effect it guards: a state built before the converge cannot, because the converge
+# re-checks everything at its start. The crash and cleanup scenarios that a built state can
+# reproduce use `killed_converge` instead. These patches go when the filesystem calls of the
+# transaction are an injected port in `base`.
 def _converge(ctx: Any, *, host_home: Path | None = None) -> None:
     bridge.converge_external_agent_skill(ctx, host_home=host_home, skill_names=(SKILL,))
 
@@ -36,7 +47,7 @@ def _converge(ctx: Any, *, host_home: Path | None = None) -> None:
 def test_source_change_after_snapshot_does_not_mix_generations(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    operator_database: Callable[[], Any],
+    operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
     command_config_machine: tuple[ConfigBoot, MachineIdentity],
@@ -77,7 +88,7 @@ def test_source_change_after_snapshot_does_not_mix_generations(
 def test_linked_target_is_preserved_without_following(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
-    operator_database: Callable[[], Any],
+    operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
     command_config_machine: tuple[ConfigBoot, MachineIdentity],
@@ -117,7 +128,7 @@ def test_late_edit_between_check_and_claim_is_restored_not_overwritten(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
-    operator_database: Callable[[], Any],
+    operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
     command_config_machine: tuple[ConfigBoot, MachineIdentity],
@@ -169,7 +180,7 @@ def test_target_appearing_after_claim_is_not_replaced(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
-    operator_database: Callable[[], Any],
+    operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
     command_config_machine: tuple[ConfigBoot, MachineIdentity],
@@ -208,7 +219,7 @@ def test_target_appearing_after_claim_is_not_replaced(
 def test_late_previous_destination_during_claim_is_not_replaced_or_owned(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    operator_database: Callable[[], Any],
+    operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
     command_config_machine: tuple[ConfigBoot, MachineIdentity],
@@ -253,7 +264,7 @@ def test_late_previous_destination_during_claim_is_not_replaced_or_owned(
 def test_late_target_during_verification_restore_is_not_replaced_or_disowned(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    operator_database: Callable[[], Any],
+    operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
     command_config_machine: tuple[ConfigBoot, MachineIdentity],
@@ -306,7 +317,7 @@ def test_late_target_during_verification_restore_is_not_replaced_or_disowned(
 def test_late_target_during_activation_restore_is_not_replaced_or_disowned(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    operator_database: Callable[[], Any],
+    operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
     command_config_machine: tuple[ConfigBoot, MachineIdentity],
@@ -352,7 +363,7 @@ def test_late_target_during_activation_restore_is_not_replaced_or_disowned(
 def test_preexisting_generation_sibling_is_preserved_without_false_ownership(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    operator_database: Callable[[], Any],
+    operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
     command_config_machine: tuple[ConfigBoot, MachineIdentity],
@@ -386,10 +397,13 @@ def test_preexisting_generation_sibling_is_preserved_without_false_ownership(
     assert ledger["garbage"] == []
 
 
-def test_concurrent_converges_serialize_transaction_owned_absence(
+# meiva:note
+# Converges of one client and skill serialize on the client's lock: while another converge holds
+# it, this one skips the client and says why, changes nothing, and succeeds once the lock is free.
+def test_concurrent_converges_serialize_on_the_clients_lock(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    operator_database: Callable[[], Any],
+    capsys: pytest.CaptureFixture[str],
+    operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
     command_config_machine: tuple[ConfigBoot, MachineIdentity],
@@ -407,47 +421,20 @@ def test_concurrent_converges_serialize_transaction_owned_absence(
     _converge(context, host_home=client.parent)
     target = target_path(client, tmp_path)
     (source / "SKILL.md").write_text("operator v2\n")
-    claimed = threading.Event()
-    release = threading.Event()
-    second_activated_during_claim = threading.Event()
-    original_rename = bridge.rename_no_replace
-    first_thread_id: int | None = None
+    ledger_before = read_ledger(context)
+    capsys.readouterr()
 
-    def pause_after_claim(path: Path, destination: Path) -> None:
-        original_rename(path, destination)
-        if path == target and not claimed.is_set():
-            claimed.set()
-            assert release.wait(5)
-        if (
-            Path(destination) == target
-            and path != target
-            and threading.get_ident() != first_thread_id
-        ):
-            second_activated_during_claim.set()
+    with file_lock(context.meiva_home / "configs" / "external-agent-skills" / "codex.lock"):
+        bridge.converge_external_agent_skill(
+            context, host_home=client.parent, skill_names=(SKILL,), lock_timeout_s=0.05
+        )
 
-    monkeypatch.setattr(bridge, "rename_no_replace", pause_after_claim)
-    errors: list[BaseException] = []
+    assert "LockTimeoutError" in capsys.readouterr().err
+    assert (target / "SKILL.md").read_text() == "operator v1\n"
+    assert read_ledger(context) == ledger_before
 
-    def run() -> None:
-        try:
-            _converge(context, host_home=client.parent)
-        except BaseException as exc:
-            errors.append(exc)
+    _converge(context, host_home=client.parent)
 
-    first = threading.Thread(target=run)
-    second = threading.Thread(target=run)
-    first.start()
-    first_thread_id = first.ident
-    assert claimed.wait(5)
-    second.start()
-    second_activated_during_claim.wait(1)
-    release.set()
-    first.join(5)
-    second.join(5)
-
-    assert not first.is_alive() and not second.is_alive()
-    assert errors == []
-    assert not second_activated_during_claim.is_set()
     assert (target / "SKILL.md").read_text() == "operator v2\n"
 
 
@@ -455,7 +442,7 @@ def test_marker_spoof_without_external_ledger_is_unmanaged(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
-    operator_database: Callable[[], Any],
+    operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
     command_config_machine: tuple[ConfigBoot, MachineIdentity],
@@ -498,7 +485,7 @@ def test_permission_only_modification_is_a_conflict(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
-    operator_database: Callable[[], Any],
+    operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
     command_config_machine: tuple[ConfigBoot, MachineIdentity],
@@ -528,7 +515,7 @@ def test_permission_only_modification_is_a_conflict(
 
 def test_source_modes_are_materialized_and_recorded(
     tmp_path: Path,
-    operator_database: Callable[[], Any],
+    operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
     command_config_machine: tuple[ConfigBoot, MachineIdentity],
@@ -559,11 +546,14 @@ def test_source_modes_are_materialized_and_recorded(
     assert list(target.parent.glob(f".{SKILL}.meiva-*")) == []
 
 
+# meiva:note
+# A client whose files the user cannot write is skipped with its label and the kind of error,
+# never a path, and the other clients are still published. The failure is a real one: Codex's
+# home is read-only, so its skills directory cannot be created.
 def test_external_filesystem_failure_is_label_only_and_fail_soft(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
-    operator_database: Callable[[], Any],
+    operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
     command_config_machine: tuple[ConfigBoot, MachineIdentity],
@@ -573,42 +563,20 @@ def test_external_filesystem_failure_is_label_only_and_fail_soft(
     codex = client_home(tmp_path)
     claude = codex.parent / ".claude"
     claude.mkdir()
-    original_stage = bridge.stage_copy
-
-    def inaccessible(
-        snapshot: Any,
-        source_manifest: list[dict[str, Any]],
-        skills_root: Path,
-        ledger_path: Path,
-        ledger: dict[str, Any],
-        source_digest: str,
-        *,
-        skill_name: str = SKILL,
-    ) -> Path:
-        if skills_root.parent.name == ".codex":
-            raise PermissionError("/secret/absolute/client/path")
-        return original_stage(
-            snapshot,
-            source_manifest,
-            skills_root,
-            ledger_path,
-            ledger,
-            source_digest,
-            skill_name=skill_name,
+    codex.chmod(0o500)
+    try:
+        _converge(
+            skill_ctx(
+                repo,
+                tmp_path,
+                operator_database=operator_database,
+                producer=operator_pipeline,
+                command_config_machine=command_config_machine,
+            ),
+            host_home=codex.parent,
         )
-
-    monkeypatch.setattr(bridge, "stage_copy", inaccessible)
-
-    _converge(
-        skill_ctx(
-            repo,
-            tmp_path,
-            operator_database=operator_database,
-            producer=operator_pipeline,
-            command_config_machine=command_config_machine,
-        ),
-        host_home=codex.parent,
-    )
+    finally:
+        codex.chmod(0o700)
 
     output = capsys.readouterr()
     assert "Codex" in output.err
@@ -621,7 +589,7 @@ def test_cleanup_failure_after_activation_is_retried_without_rollback(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
-    operator_database: Callable[[], Any],
+    operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
     command_config_machine: tuple[ConfigBoot, MachineIdentity],
@@ -659,11 +627,14 @@ def test_cleanup_failure_after_activation_is_retried_without_rollback(
     assert str(client.parent) not in output.err + output.out
 
 
+# meiva:note
+# A process killed after the staged copy went live, and before the transaction was committed,
+# leaves the new copy in place and the ledger holding the open transaction. The next converge
+# reports it as not resumed and rewrites nothing.
 def test_interrupted_post_activation_commit_is_reported_and_not_resumed(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
-    operator_database: Callable[[], Any],
+    operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
     command_config_machine: tuple[ConfigBoot, MachineIdentity],
@@ -681,39 +652,32 @@ def test_interrupted_post_activation_commit_is_reported_and_not_resumed(
     _converge(context, host_home=client.parent)
     target = target_path(client, tmp_path)
     (source / "SKILL.md").write_text("operator v2\n")
-    original_commit = bridge.commit_activation
-    interrupted = False
-
-    def interrupt_once(
-        ledger_path: Path,
-        ledger: dict[str, Any],
-        transaction: dict[str, Any],
-        previous: Path,
-    ) -> None:
-        nonlocal interrupted
-        if not interrupted:
-            interrupted = True
-            raise OSError("simulated process interruption")
-        return original_commit(ledger_path, ledger, transaction, previous)
-
-    monkeypatch.setattr(bridge, "commit_activation", interrupt_once)
-    _converge(context, host_home=client.parent)
+    site = killed.Site(
+        skills_root=client / "skills",
+        ledger_path=context.meiva_home / "configs" / "external-agent-skills" / "codex.json",
+        client_key="codex",
+        skill=SKILL,
+        source=source,
+    )
+    ledger = killed.stage(site)
+    killed.claim_target(site, ledger)
+    killed.record_claim(site, ledger)
+    killed.land_stage(site, ledger)
     assert (target / "SKILL.md").read_text() == "operator v2\n"
-    ledger_path = context.meiva_home / "configs" / "external-agent-skills" / "codex.json"
-    ledger_before = ledger_path.read_text()
+    ledger_before = site.ledger_path.read_text()
     capsys.readouterr()
-    monkeypatch.setattr(bridge, "commit_activation", original_commit)
+
     _converge(context, host_home=client.parent)
 
     assert "not resumed" in capsys.readouterr().err
-    assert ledger_path.read_text() == ledger_before
+    assert site.ledger_path.read_text() == ledger_before
     assert json.loads(ledger_before)["transaction"] is not None
 
 
 def test_partial_stage_copy_remains_tracked_until_cleanup_finishes(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    operator_database: Callable[[], Any],
+    operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
     command_config_machine: tuple[ConfigBoot, MachineIdentity],
@@ -750,10 +714,13 @@ def test_partial_stage_copy_remains_tracked_until_cleanup_finishes(
     assert list((client / "skills").glob(f".{SKILL}.meiva-*")) == []
 
 
+# meiva:note
+# When the activation is cut off after the claim and a user's link has taken the target's place,
+# the transaction keeps both of its copies, the claimed previous and the staged one, and the
+# ledger keeps saying `claimed`. A converge reports it and neither follows nor replaces the link.
 def test_late_target_keeps_stage_and_previous_in_transaction_state(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    operator_database: Callable[[], Any],
+    operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
     command_config_machine: tuple[ConfigBoot, MachineIdentity],
@@ -774,18 +741,20 @@ def test_late_target_keeps_stage_and_previous_in_transaction_state(
     outside = tmp_path / "late-owned-by-user"
     outside.mkdir()
     (outside / "SKILL.md").write_text("user target\n")
-    original_rename = bridge.rename_no_replace
+    site = killed.Site(
+        skills_root=client / "skills",
+        ledger_path=context.meiva_home / "configs" / "external-agent-skills" / "codex.json",
+        client_key="codex",
+        skill=SKILL,
+        source=source,
+    )
+    ledger = killed.stage(site)
+    killed.claim_target(site, ledger)
+    killed.record_claim(site, ledger)
+    target.symlink_to(outside, target_is_directory=True)
 
-    def insert_target(source_path: Path, destination: Path) -> None:
-        if ".meiva-stage-" in source_path.name and destination == target:
-            destination.symlink_to(outside, target_is_directory=True)
-        original_rename(source_path, destination)
-
-    monkeypatch.setattr(bridge, "rename_no_replace", insert_target)
     _converge(context, host_home=client.parent)
-    monkeypatch.setattr(bridge, "rename_no_replace", original_rename)
 
-    _converge(context, host_home=client.parent)
     assert target.is_symlink()
     assert (outside / "SKILL.md").read_text() == "user target\n"
     ledger = read_ledger(context)

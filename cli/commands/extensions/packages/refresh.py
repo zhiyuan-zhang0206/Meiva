@@ -29,9 +29,8 @@ import subprocess
 import tarfile
 import tempfile
 import time
-from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import datetime
 from pathlib import Path
 
 from loguru import logger
@@ -40,11 +39,12 @@ from base import paths
 from base.config import ConfigBoot
 from base.config.domains.packages import PackagesSettings
 from base.host.git.gitenv import git_env
-from base.host.proc import run_bounded
+from base.host.system.hostport import Host
 from base.native_process.os_platform import LockTimeoutError, file_lock
 from base.packages.extensions import install_registry
 from base.packages.skills.names import match_key
-from cli.commands.extensions._refresh_rules import (
+from cli.commands.extensions.packages.refresh_rules import (
+    core_fetch_needed,
     core_head_from_ls_remote,
     git_head_from_ls_remote,
     is_due,
@@ -106,15 +106,16 @@ class Pass:
         only: str | None,
         from_job: bool,
         now: datetime,
-        repo: Path | None,
+        repo: Path,
+        host: Host,
     ) -> None:
         self.config = config
-        self._read_defaults: Callable[[], PackagesSettings] = lambda: config.view.packages
         self.check_only = check_only
         self.only = only
         self.from_job = from_job
         self.now = now
-        self.repo = repo or paths.repo_root()
+        self.repo = repo
+        self.host = host
         self.skills_dir = paths.skills_dir(paths.meiva_home())
         self.registry: install_registry.Registry | None = None
         self.deltas: dict[str, _Delta] = {}
@@ -130,6 +131,13 @@ class Pass:
 
     # -- bookkeeping ---------------------------------------------------------
 
+    # meiva:note
+    # The packages settings as the supplied owner holds them now, handed to
+    # `install_registry.resolved_policy`, which reads the defaults only for a package that has
+    # a channel and leaves a field unset.
+    def _defaults(self) -> PackagesSettings:
+        return self.config.view.packages
+
     def _count(self, key: str, n: int = 1) -> None:
         self.counts[key] = self.counts.get(key, 0) + n
 
@@ -144,7 +152,7 @@ class Pass:
             delta.update["failures"] = 0
         else:
             delta.update["failures"] = pkg.update.failures + 1
-        policy = install_registry.resolved_policy(pkg, defaults_reader=self._read_defaults)
+        policy = install_registry.resolved_policy(pkg, defaults_reader=self._defaults)
         self.items.append(
             ItemOutcome(
                 name=pkg.name,
@@ -158,7 +166,7 @@ class Pass:
 
     def _keep_resolved(self, pkg: install_registry.InstalledPackage, delta: _Delta) -> None:
         """Freeze the resolved policy into the row at first sight (§5.2)."""
-        policy = install_registry.resolved_policy(pkg, defaults_reader=self._read_defaults)
+        policy = install_registry.resolved_policy(pkg, defaults_reader=self._defaults)
         if pkg.update.channel is None and policy.channel is not None:
             delta.update["channel"] = policy.channel
         if pkg.update.mode is None:
@@ -177,7 +185,7 @@ class Pass:
         for pkg in registry.packages:
             if self.only is not None and match_key(pkg.name) != match_key(self.only):
                 continue
-            policy = install_registry.resolved_policy(pkg, defaults_reader=self._read_defaults)
+            policy = install_registry.resolved_policy(pkg, defaults_reader=self._defaults)
             skip_why: str | None = None
             if policy.channel is None:
                 skip_why = "no channel (local / hand-registered package)"
@@ -265,7 +273,7 @@ class Pass:
     # -- core channel --------------------------------------------------------
 
     def _checkout_remote(self) -> str | None:
-        result = run_bounded(
+        result = self.host.run(
             ["git", "-C", str(self.repo), "config", "--get", "remote.origin.url"],
             capture_output=True,
             text=True,
@@ -280,7 +288,7 @@ class Pass:
     def _ls_remote(self, remote: str, ref: str) -> tuple[str | None, str | None]:
         """(`head sha`, `error`) for the core channel's ref on `remote`."""
         try:
-            result = run_bounded(
+            result = self.host.run(
                 ["git", "-C", str(self.repo), "ls-remote", remote, ref],
                 capture_output=True,
                 text=True,
@@ -299,7 +307,7 @@ class Pass:
     def _fetch_core(self, remote: str, ref: str) -> str | None:
         """Objects-only fetch (never the working tree); `error` or None."""
         try:
-            result = run_bounded(
+            result = self.host.run(
                 ["git", "-C", str(self.repo), "fetch", "--no-tags", remote, ref],
                 capture_output=True,
                 text=True,
@@ -368,7 +376,8 @@ class Pass:
             )
             return
         note = f"core@{ref} head {head[:7]}"
-        if head != last_seen or _needs_objects(core_pkgs, head):
+        applied = [(pkg.update.applied_rev, pkg.update.failures) for pkg in core_pkgs]
+        if core_fetch_needed(head, last_seen, applied):
             fetch_err = self._fetch_core(remote, ref)
             if fetch_err is not None:
                 self._fail_core(
@@ -427,7 +436,7 @@ class Pass:
     def _process_core(self, pkg: install_registry.InstalledPackage, head: str | None) -> None:
         if head is None:  # channel resolution failed; the package was recorded then
             return
-        policy = install_registry.resolved_policy(pkg, defaults_reader=self._read_defaults)
+        policy = install_registry.resolved_policy(pkg, defaults_reader=self._defaults)
         applied = pkg.update.applied_rev
         if applied == head and pkg.update.failures == 0:
             self._record(pkg, "up_to_date")
@@ -463,7 +472,7 @@ class Pass:
         self._record(pkg, result)
 
     def _git_local(self, *args: str) -> tuple[int, str]:
-        result = run_bounded(
+        result = self.host.run(
             ["git", "-C", str(self.repo), *args],
             capture_output=True,
             text=True,
@@ -488,7 +497,7 @@ class Pass:
         ) as tmp_str:
             tmp = Path(tmp_str)
             tarpath = tmp / "pkg.tar"
-            result = run_bounded(
+            result = self.host.run(
                 ["git", "-C", str(self.repo), "archive", "-o", str(tarpath), head, "--", src_rel],
                 capture_output=True,
                 text=True,
@@ -549,7 +558,7 @@ class Pass:
         """(`sha`, `pinned`, `error`) for one git-channel package."""
         args = ["git", "ls-remote", source, ref] if ref else ["git", "ls-remote", source, "HEAD"]
         try:
-            result = run_bounded(
+            result = self.host.run(
                 args,
                 capture_output=True,
                 text=True,
@@ -581,7 +590,7 @@ class Pass:
         """The remote sha worth acquiring, or None after recording why this package stops here."""
         from cli.commands.extensions._pkg_source import looks_like_local_path
 
-        policy = install_registry.resolved_policy(pkg, defaults_reader=self._read_defaults)
+        policy = install_registry.resolved_policy(pkg, defaults_reader=self._defaults)
         source = pkg.source
         if not source:
             self._record(pkg, "error: no recorded source to check")
@@ -673,14 +682,6 @@ class Pass:
                     setattr(row, field_name, value)
 
 
-def _needs_objects(core_pkgs: list[install_registry.InstalledPackage], head: str) -> bool:
-    """Whether any due package still lacks the objects of `head` (never applied, behind, failing)."""
-    return any(
-        p.update.applied_rev is None or p.update.applied_rev != head or p.update.failures > 0
-        for p in core_pkgs
-    )
-
-
 # Operator-facing error tails: the last line of a stream, capped — the full
 # output stays in the run log (task #3696 exception inventory).
 def _tail(text: str, limit: int = 200) -> str:
@@ -696,11 +697,12 @@ def _skip(reason: str) -> RefreshReport:
 def run_refresh(
     *,
     config: ConfigBoot,
+    host: Host,
+    repo: Path,
+    now: datetime,
     check_only: bool = False,
     only: str | None = None,
     from_job: bool = False,
-    now: datetime | None = None,
-    repo: Path | None = None,
 ) -> RefreshReport:
     """Run one refresh pass with the caller's prepared configuration owner.
 
@@ -713,7 +715,6 @@ def run_refresh(
     copy is replaced (reported as an info line)."""
     if not config.prepared:
         raise ValueError("package refresh requires a prepared configuration owner")
-    moment = now or datetime.now(UTC)
     if from_job and not config.view.general.os_jobs_enabled:
         return _skip("OS jobs disabled (MEIVA_OS_JOBS_ENABLED=false)")
     if from_job and not config.view.packages.refresh_enabled:
@@ -726,8 +727,9 @@ def run_refresh(
                 check_only=check_only,
                 only=only,
                 from_job=from_job,
-                now=moment,
+                now=now,
                 repo=repo,
+                host=host,
             )
             return pass_.run()
     except LockTimeoutError:

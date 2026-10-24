@@ -208,7 +208,9 @@ def test_restart_handler_forwards_the_parsed_config_overlay(
 
     calls: list[tuple[int, str | None, str | None]] = []
 
-    def restart(agent_id: int, config_json: str | None = None, source: str | None = None) -> int:
+    def restart(
+        _access: object, agent_id: int, config_json: str | None = None, source: str | None = None
+    ) -> int:
         calls.append((agent_id, config_json, source))
         return 0
 

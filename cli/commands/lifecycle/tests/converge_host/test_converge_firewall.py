@@ -474,7 +474,9 @@ def test_firewall_status_renders_manifest_details(
 
     machine, host = _verb_host(command_runtime, daemon)
 
-    rc = firewall_cmd.cmd_firewall_status(home=default_home / ".meiva", machine=machine, host=host)
+    rc = firewall_cmd.cmd_firewall_status(
+        home=default_home / ".meiva", user_home=default_home, machine=machine, host=host
+    )
 
     output = capsys.readouterr().out
     assert rc == 0
@@ -495,7 +497,9 @@ def test_firewall_status_without_the_grant_says_so(
 
     machine, host = _verb_host(command_runtime, daemon)
 
-    rc = firewall_cmd.cmd_firewall_status(home=default_home / ".meiva", machine=machine, host=host)
+    rc = firewall_cmd.cmd_firewall_status(
+        home=default_home / ".meiva", user_home=default_home, machine=machine, host=host
+    )
 
     assert rc == 0
     assert "sudo fallback grant: not installed" in capsys.readouterr().out
@@ -506,6 +510,7 @@ def test_firewall_status_off_macos_is_one_line(
 ) -> None:
     rc = firewall_cmd.cmd_firewall_status(
         home=default_home / ".meiva",
+        user_home=default_home,
         machine=command_runtime.machine,
         host=fake_host(platform=LINUX_X86),
     )
@@ -522,7 +527,10 @@ def test_firewall_status_fails_when_the_allow_list_cannot_be_read(
     daemon.readable = False
 
     rc = firewall_cmd.cmd_firewall_status(
-        home=default_home / ".meiva", machine=command_runtime.machine, host=_host_with(daemon)
+        home=default_home / ".meiva",
+        user_home=default_home,
+        machine=command_runtime.machine,
+        host=_host_with(daemon),
     )
 
     assert rc == 1
@@ -539,7 +547,9 @@ def test_firewall_sync_allows_what_is_missing(
 
     machine, host = _verb_host(command_runtime, daemon)
 
-    rc = firewall_cmd.cmd_firewall_sync(home=default_home / ".meiva", machine=machine, host=host)
+    rc = firewall_cmd.cmd_firewall_sync(
+        home=default_home / ".meiva", user_home=default_home, machine=machine, host=host
+    )
 
     assert rc == 0
     assert capsys.readouterr().out == f"  · allowed {_interpreter()}\n"
@@ -556,7 +566,9 @@ def test_firewall_sync_of_a_converged_host_changes_nothing(
 
     machine, host = _verb_host(command_runtime, daemon)
 
-    rc = firewall_cmd.cmd_firewall_sync(home=default_home / ".meiva", machine=machine, host=host)
+    rc = firewall_cmd.cmd_firewall_sync(
+        home=default_home / ".meiva", user_home=default_home, machine=machine, host=host
+    )
 
     assert rc == 0
     assert capsys.readouterr().out == "  already converged — nothing to do\n"
@@ -573,7 +585,9 @@ def test_firewall_sync_prints_the_manual_commands_and_fails_when_both_paths_fail
 
     machine, host = _verb_host(command_runtime, daemon)
 
-    rc = firewall_cmd.cmd_firewall_sync(home=default_home / ".meiva", machine=machine, host=host)
+    rc = firewall_cmd.cmd_firewall_sync(
+        home=default_home / ".meiva", user_home=default_home, machine=machine, host=host
+    )
 
     captured = capsys.readouterr()
     assert rc == 1
@@ -586,6 +600,7 @@ def test_firewall_sync_off_macos_has_nothing_to_do(
 ) -> None:
     rc = firewall_cmd.cmd_firewall_sync(
         home=default_home / ".meiva",
+        user_home=default_home,
         machine=command_runtime.machine,
         host=fake_host(platform=LINUX_X86),
     )

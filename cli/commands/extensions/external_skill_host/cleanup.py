@@ -29,7 +29,7 @@ def _prepared_path(ledger_path: Path, generation_id: str) -> Path:
     return ledger_path.parent / f".{ledger_path.stem}-stage-{generation_id}"
 
 
-def _quarantine_path(ledger_path: Path, kind: str, generation_id: str) -> Path:
+def quarantine_path(ledger_path: Path, kind: str, generation_id: str) -> Path:
     return ledger_path.parent / f".{ledger_path.stem}-retained-{kind}-{generation_id}"
 
 
@@ -246,7 +246,7 @@ def _cleanup_garbage_item(
     source = _source_path(
         ledger_path, skills_root, item["kind"], generation_id, skill_name=skill_name
     )
-    quarantine = _quarantine_path(ledger_path, item["kind"], generation_id)
+    quarantine = quarantine_path(ledger_path, item["kind"], generation_id)
     if item["location"] == "source" and _claim_from_source(
         ledger_path, ledger, item, source, quarantine, rename
     ):

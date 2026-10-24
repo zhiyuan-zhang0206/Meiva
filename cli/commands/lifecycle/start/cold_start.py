@@ -150,7 +150,7 @@ def _run_step(
             # invisible to the materializer until it has a row.
             materialize.adopt_local_extensions(
                 database_factory=cold.database_factory,
-                machine_name=command.machine.name,
+                machine=command.machine,
                 skills_root=skills_dir(command.home),
             )
             return 0

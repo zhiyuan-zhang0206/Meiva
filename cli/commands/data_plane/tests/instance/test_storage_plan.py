@@ -26,6 +26,7 @@ from cli.commands.data_plane.instance.storage_plan import (
     ProbeRedis,
     ProbeRemotePlane,
     ProveLogins,
+    RecordedPorts,
     Refuse,
     RefuseLegacy,
     ReportAdmitted,
@@ -37,6 +38,7 @@ from cli.commands.data_plane.instance.storage_plan import (
 )
 
 _HOME = Path("/home/meiva")
+_PORTS = RecordedPorts(postgres=23011, redis=23012)
 
 
 def _facts(
@@ -56,31 +58,31 @@ def _facts(
 
 
 def test_a_home_without_a_record_cannot_bring_up_a_data_plane() -> None:
-    admission = admit_gateway_storage(home=_HOME, has_record=False, remote=False, legacy_home=False)
+    admission = admit_gateway_storage(home=_HOME, ports=None, remote=False, legacy_home=False)
     assert isinstance(admission, Refuse)
     assert "no registry record for home /home/meiva" in admission.message
     assert "meiva init" in admission.message
 
 
 def test_the_missing_record_is_refused_before_a_remote_plane_is_considered() -> None:
-    admission = admit_gateway_storage(home=_HOME, has_record=False, remote=True, legacy_home=False)
+    admission = admit_gateway_storage(home=_HOME, ports=None, remote=True, legacy_home=False)
     assert isinstance(admission, Refuse)
 
 
 def test_a_remote_managed_plane_is_probed_not_started() -> None:
-    admission = admit_gateway_storage(home=_HOME, has_record=True, remote=True, legacy_home=False)
+    admission = admit_gateway_storage(home=_HOME, ports=_PORTS, remote=True, legacy_home=False)
     assert admission == ProbeRemotePlane()
 
 
 def test_a_legacy_home_is_refused_before_any_native_effect() -> None:
-    admission = admit_gateway_storage(home=_HOME, has_record=True, remote=False, legacy_home=True)
+    admission = admit_gateway_storage(home=_HOME, ports=_PORTS, remote=False, legacy_home=True)
     assert admission == Refuse(f"  ✗ {legacy_home_refusal(_HOME)}")
     assert "no conversion exists" in legacy_home_refusal(_HOME)
 
 
-def test_a_registered_local_home_starts_its_own_storage() -> None:
-    admission = admit_gateway_storage(home=_HOME, has_record=True, remote=False, legacy_home=False)
-    assert admission == StartLocalStorage()
+def test_a_registered_local_home_starts_its_own_storage_on_the_recorded_ports() -> None:
+    admission = admit_gateway_storage(home=_HOME, ports=_PORTS, remote=False, legacy_home=False)
+    assert admission == StartLocalStorage(_PORTS)
 
 
 @pytest.mark.parametrize(("admin", "runtime"), [("", ""), ("", "runtime"), ("admin", "")])

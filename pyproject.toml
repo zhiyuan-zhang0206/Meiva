@@ -1090,6 +1090,11 @@ reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 
 [[tool.pyright.executionEnvironments]]
+root = "cli/commands/extensions/plans/tests"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
 root = "cli/commands/extensions/tests"
 reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"

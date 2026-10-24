@@ -13,13 +13,13 @@ import json
 import subprocess
 import sys
 import time
+from collections.abc import Mapping
 from pathlib import Path
 from typing import NamedTuple
 
 from base.cluster.machine import MachineIdentity, MachineRoles
 from base.db import Database
 from base.deploy.progress_timeout import GATEWAY_PREFLIGHT_BUDGET_S
-from base.host.env.registry import process_environment
 from base.sessions.env_forwarding import frontend_toolchain_env
 from cli.commands._setup import SetupValues
 from cli.database.runtime import CommandRuntime
@@ -82,7 +82,12 @@ def _node_modules_drift(fe: Path, node_modules: Path) -> str | None:
     return None
 
 
-def ensure_frontend_deps(repo: Path) -> None:
+# meiva:note
+# `install_argv` is the install command (`npm ci`) and `environ` the environment it inherits,
+# with the Node search path injected; both come from the caller.
+def ensure_frontend_deps(
+    repo: Path, *, environ: Mapping[str, str], install_argv: tuple[str, ...]
+) -> None:
     """Install frontend deps when node_modules is missing OR when
     package-lock.json changed since the last install — `npm run build` without
     the exact locked deps dies immediately and the session exits (hit by
@@ -117,10 +122,10 @@ def ensure_frontend_deps(repo: Path) -> None:
         reason = "missing" if not node_modules.is_dir() else "package-lock.json changed"
         print(f"  · frontend deps {reason}, running npm ci (~30-60s)")
     subprocess.run(
-        ["npm", "ci"],
+        list(install_argv),
         cwd=str(fe),
         check=True,
-        env=frontend_toolchain_env(process_environment()),
+        env=frontend_toolchain_env(environ),
     )
     stamp.write_text(want)
 
@@ -215,7 +220,12 @@ def probe_gateway_once(gateway_url: str, *, timeout_s: float = 10.0) -> GatewayP
 _PREFLIGHT_RETRY_INTERVAL_S = 5.0
 
 
-def probe_gateway_or_die(gateway_url: str, *, budget_s: float = GATEWAY_PREFLIGHT_BUDGET_S) -> int:
+def probe_gateway_or_die(
+    gateway_url: str,
+    *,
+    budget_s: float = GATEWAY_PREFLIGHT_BUDGET_S,
+    retry_interval_s: float = _PREFLIGHT_RETRY_INTERVAL_S,
+) -> int:
     """Probe the gateway from an agent-runner over the private network.
 
     The agent-runner's ops server is dialed *by* the gateway, but the host
@@ -268,7 +278,7 @@ def probe_gateway_or_die(gateway_url: str, *, budget_s: float = GATEWAY_PREFLIGH
                     file=sys.stderr,
                 )
             return 1
-        wait_s = min(_PREFLIGHT_RETRY_INTERVAL_S, remaining)
+        wait_s = min(retry_interval_s, remaining)
         shape = "unreachable" if probe.status is None else f"returned {probe.status}"
         print(
             f"  ⚠ gateway {shape} (attempt {attempt}, {remaining:.0f}s of budget left); "

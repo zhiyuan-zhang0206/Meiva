@@ -1,0 +1,13 @@
+exports = ["destination.py", "inbox.py", "push_text.py", "request_plan.py", "steps.py"]
+
+[uses]
+"push_text.py" = ["inbox.py"]
+"steps.py" = ["inbox.py", "push_text.py"]
+
+[purity]
+"__init__.py" = "strict"
+"destination.py" = "strict"
+"inbox.py" = "strict"
+"push_text.py" = "strict"
+"request_plan.py" = "strict"
+"steps.py" = "strict"

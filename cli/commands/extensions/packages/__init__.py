@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any, cast
 
 from base.config import ConfigBoot
+from base.host.system.hostport import Host
 from base.packages.extensions import install_registry
 from base.packages.extensions.install_registry import InstalledPackage, UpdateMode
 
@@ -284,6 +285,9 @@ def cmd_packages_status(*, config: ConfigBoot, json_output: bool = False) -> int
 def cmd_packages_refresh(
     *,
     config: ConfigBoot,
+    host: Host,
+    repo: Path,
+    now: datetime,
     check_only: bool = False,
     only: str | None = None,
     json_output: bool = False,
@@ -299,7 +303,15 @@ def cmd_packages_refresh(
 
     from cli.commands.extensions.packages.refresh import run_refresh
 
-    report = run_refresh(config=config, check_only=check_only, only=only, from_job=from_job)
+    report = run_refresh(
+        config=config,
+        host=host,
+        repo=repo,
+        now=now,
+        check_only=check_only,
+        only=only,
+        from_job=from_job,
+    )
     if json_output:
         payload = {
             "ran": report.ran,

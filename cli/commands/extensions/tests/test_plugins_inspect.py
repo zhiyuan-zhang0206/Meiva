@@ -40,10 +40,8 @@ def _view(
     )
 
 
-def _install(monkeypatch: pytest.MonkeyPatch, *views: PluginView) -> None:
-    monkeypatch.setattr(
-        plugins_inspect, "build_catalog", lambda: Catalog(surfaces=SURFACES, plugins=views)
-    )
+def _catalog(*views: PluginView) -> Catalog:
+    return Catalog(surfaces=SURFACES, plugins=views)
 
 
 _HOOK = Contribution(
@@ -57,12 +55,10 @@ _STATE = Contribution(
 )
 
 
-def test_no_argument_lists_every_surface_and_every_plugin(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-):
-    _install(monkeypatch, _view(contributions=(_HOOK, _WRAP)), _view("quiet", enabled=False))
+def test_no_argument_lists_every_surface_and_every_plugin(capsys: pytest.CaptureFixture[str]):
+    catalog = _catalog(_view(contributions=(_HOOK, _WRAP)), _view("quiet", enabled=False))
 
-    assert plugins_inspect.cmd_plugins_inspect(None) == 0
+    assert plugins_inspect.cmd_plugins_inspect(None, catalog=catalog) == 0
 
     out = capsys.readouterr().out
     for surface in SURFACES:
@@ -73,24 +69,20 @@ def test_no_argument_lists_every_surface_and_every_plugin(
     assert "plugin quiet  disabled  builtin  (not loaded)" in out
 
 
-def test_a_surface_nobody_uses_says_so(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-):
-    _install(monkeypatch, _view(contributions=(_HOOK,)))
+def test_a_surface_nobody_uses_says_so(capsys: pytest.CaptureFixture[str]):
+    catalog = _catalog(_view(contributions=(_HOOK,)))
 
-    plugins_inspect.cmd_plugins_inspect(None)
+    plugins_inspect.cmd_plugins_inspect(None, catalog=catalog)
 
     out = capsys.readouterr().out
     assert "registered   1 — demo 1" in out
     assert "registered   nothing registered here" in out
 
 
-def test_detail_lists_every_registered_fact(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-):
-    _install(monkeypatch, _view(contributions=(_HOOK, _STATE)))
+def test_detail_lists_every_registered_fact(capsys: pytest.CaptureFixture[str]):
+    catalog = _catalog(_view(contributions=(_HOOK, _STATE)))
 
-    assert plugins_inspect.cmd_plugins_inspect("demo") == 0
+    assert plugins_inspect.cmd_plugins_inspect("demo", catalog=catalog) == 0
 
     out = capsys.readouterr().out
     assert "registered contributions (2)" in out
@@ -101,18 +93,15 @@ def test_detail_lists_every_registered_fact(
     assert "plugin_activation" in out
 
 
-def test_detail_renders_the_diff_and_what_is_not_drift(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-):
-    _install(
-        monkeypatch,
+def test_detail_renders_the_diff_and_what_is_not_drift(capsys: pytest.CaptureFixture[str]):
+    catalog = _catalog(
         _view(
             contributions=(_HOOK, _WRAP, _STATE),
             manifest=_manifest(hooks=["before_llm", "after_exec"], skills=["a-skill"]),
         ),
     )
 
-    plugins_inspect.cmd_plugins_inspect("demo")
+    plugins_inspect.cmd_plugins_inspect("demo", catalog=catalog)
 
     out = capsys.readouterr().out
     assert "  ok                       hooks/before_llm" in out
@@ -122,23 +111,19 @@ def test_detail_renders_the_diff_and_what_is_not_drift(
     assert "install-time skills —" in out.replace("\n", " ")
 
 
-def test_detail_of_a_disabled_plugin_explains_the_empty_list(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-):
-    _install(monkeypatch, _view("quiet", enabled=False))
+def test_detail_of_a_disabled_plugin_explains_the_empty_list(capsys: pytest.CaptureFixture[str]):
+    catalog = _catalog(_view("quiet", enabled=False))
 
-    assert plugins_inspect.cmd_plugins_inspect("quiet") == 0
+    assert plugins_inspect.cmd_plugins_inspect("quiet", catalog=catalog) == 0
 
     out = capsys.readouterr().out
     assert "disabled and never imported" in out
 
 
-def test_an_unknown_plugin_exits_nonzero(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-):
-    _install(monkeypatch, _view())
+def test_an_unknown_plugin_exits_nonzero(capsys: pytest.CaptureFixture[str]):
+    catalog = _catalog(_view())
 
-    assert plugins_inspect.cmd_plugins_inspect("nope") == 1
+    assert plugins_inspect.cmd_plugins_inspect("nope", catalog=catalog) == 1
 
     captured = capsys.readouterr()
     assert "no plugin named 'nope'" in captured.err

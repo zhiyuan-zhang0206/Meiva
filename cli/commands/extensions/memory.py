@@ -1,9 +1,6 @@
 from __future__ import annotations
 
-import json
 import sys
-from collections.abc import Callable
-from typing import Any, TypedDict, cast
 
 import httpx
 
@@ -13,7 +10,6 @@ from base.cluster.machine import (
     gateway_api_base,
     gateway_auth_headers,
 )
-from base.cluster.machine.ambient import gateway_access_from_settings
 from base.deploy.git.memory_repo import MemoryBranchMismatch
 from base.host.net.http_dial import post as dial_post
 from cli.commands.extensions._plugin_scaffold import (
@@ -22,25 +18,17 @@ from cli.commands.extensions._plugin_scaffold import (
 from cli.commands.extensions._plugin_scaffold import (
     run_plugin_scaffolds as run_plugin_scaffolds,
 )
+from cli.commands.extensions.plans.memory_search import render_results, search_body
 
 _TIMEOUT_S = 30.0
 
 
-class _MemorySearchResult(TypedDict):
-    """Gateway result fields the human renderer reads; raw JSON stays untouched."""
-
-    path: str
-    tags: list[str] | None
-    description: str | None
-    score: float
-
-
+# meiva:note
+# Explicitly initialize enabled plugin-owned memory resources.
+#
+# Memory repository branch validation belongs to this operator-requested provisioning path,
+# never to converge or service startup.
 def cmd_memory_init(*, machine: MachineIdentity) -> int:
-    """Explicitly initialize enabled plugin-owned memory resources.
-
-    Memory repository branch validation belongs to this operator-requested
-    provisioning path, never to converge or service startup.
-    """
     print("initializing memory resources...")
     try:
         result = run_plugin_scaffolds(machine=machine)
@@ -54,8 +42,7 @@ def cmd_memory_init(*, machine: MachineIdentity) -> int:
     return 0
 
 
-def _refresh_index() -> None:
-    access = gateway_access_from_settings()  # ambient: C
+def _refresh_index(access: GatewayAccess) -> None:
     url = f"{gateway_api_base(access.gateway_url)}/api/memory/refresh"
     try:
         resp = dial_post(url, timeout=_TIMEOUT_S, headers=gateway_auth_headers(access))
@@ -67,69 +54,28 @@ def _refresh_index() -> None:
         raise SystemExit(1) from exc
 
 
-def cmd_memory_refresh() -> int:
+def cmd_memory_refresh(*, access: GatewayAccess) -> int:
     print("refreshing memory index...")
-    _refresh_index()
+    _refresh_index(access)
     return 0
 
 
-def _human_search_rows(results: list[_MemorySearchResult]) -> list[tuple[str, str, str, str]]:
-    """Normalize nullable display metadata without changing the JSON response."""
-    rows: list[tuple[str, str, str, str]] = []
-    for result in results:
-        if not isinstance(result, dict):
-            raise TypeError("memory search results must contain objects")
-        path = result["path"]
-        raw_tags = result.get("tags")
-        tags = ", ".join(str(tag) for tag in raw_tags) if raw_tags else ""
-        raw_description = result.get("description")
-        description = "" if raw_description is None else str(raw_description)
-        rows.append((f"{result['score']:.2f}", path, tags, description))
-    return rows
-
-
-def _print_search_table(results: list[_MemorySearchResult]) -> None:
-    rows = _human_search_rows(results)
-    path_width = max(len("path"), *(len(path) for _, path, _, _ in rows))
-    tags_width = max(len("tags"), *(len(tags) for _, _, tags, _ in rows))
-    print(f"score  {'path'.ljust(path_width)}  {'tags'.ljust(tags_width)}  description")
-    for score, path, tags, description in rows:
-        print(
-            f"{score.ljust(5)}  {path.ljust(path_width)}  {tags.ljust(tags_width)}  {description}"
-        )
-
-
-def cmd_memory_search(
-    query: str,
-    *,
-    limit: int,
-    json_output: bool,
-    api_base_fn: Callable[[str], str] = gateway_api_base,
-    auth_headers_fn: Callable[[GatewayAccess], dict[str, str]] = gateway_auth_headers,
-    post_fn: Callable[..., Any] = dial_post,
-) -> int:
-    """Search gateway memory while keeping paths relative to its memory root."""
-    access = gateway_access_from_settings()  # ambient: C
-    url = f"{api_base_fn(access.gateway_url)}/api/memory/search"
-    resp = post_fn(
+# meiva:note
+# Search gateway memory while keeping paths relative to its memory root.
+#
+# The request body and the rendering of the answer are `plans.memory_search`; this shell
+# dials the gateway with the caller's `access`, echoes the gateway's error text on a refusal
+# and prints the rendering. A refusal still raises `httpx.HTTPStatusError` after its text.
+def cmd_memory_search(query: str, *, limit: int, json_output: bool, access: GatewayAccess) -> int:
+    url = f"{gateway_api_base(access.gateway_url)}/api/memory/search"
+    resp = dial_post(
         url,
-        json={"query": query, "k": limit, "purpose": "search"},
+        json=search_body(query, limit),
         timeout=_TIMEOUT_S,
-        headers=auth_headers_fn(access),
+        headers=gateway_auth_headers(access),
     )
     if resp.status_code >= 400:
         print(resp.text, file=sys.stderr)
     resp.raise_for_status()
-    raw_payload: object = resp.json()
-    if not isinstance(raw_payload, dict):
-        raise TypeError("memory search response must be an object")
-    payload = cast(dict[str, object], raw_payload)
-    raw_results: object = payload["results"]
-    if not isinstance(raw_results, list):
-        raise TypeError("memory search response results must be a list")
-    results = cast(list[_MemorySearchResult], raw_results)
-    if json_output:
-        print(json.dumps(results))
-    else:
-        _print_search_table(results)
+    print(render_results(resp.json(), json_output=json_output))
     return 0

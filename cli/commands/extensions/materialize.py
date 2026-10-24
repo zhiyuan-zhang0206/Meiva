@@ -13,10 +13,10 @@ is a roster of host-state steps, not a place for a subsystem's reader.
 from __future__ import annotations
 
 import sys
-from collections.abc import Callable
 from pathlib import Path
 
 from base.agents.context.clients import DatabaseFactory
+from base.cluster.machine import MachineIdentity
 
 
 def materialize_cluster_extensions(*, database_factory: DatabaseFactory, skills_root: Path) -> None:
@@ -72,7 +72,7 @@ def materialize_cluster_extensions(*, database_factory: DatabaseFactory, skills_
 
 
 def adopt_local_extensions(
-    *, database_factory: DatabaseFactory, machine_name: Callable[[], str], skills_root: Path
+    *, database_factory: DatabaseFactory, machine: MachineIdentity, skills_root: Path
 ) -> None:
     """Upload this machine's pre-registry skill installs into the cluster.
 
@@ -92,7 +92,7 @@ def adopt_local_extensions(
     try:
         with database_factory().pool() as pool:
             result = adopt.adopt_local_installs(
-                pool, skills_root=skills_root, machine_name=machine_name()
+                pool, skills_root=skills_root, machine_name=machine.name()
             )
     except Exception as exc:  # see the docstring: report, never block converge
         print(f"  ! extensions: could not adopt local installs ({exc}); skipping", file=sys.stderr)

@@ -5,7 +5,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any, cast
 
-from base.clock.tests.manual_timers import ManualTimers
+from base.clock import SYSTEM_TIMERS
 from base.cluster.machine import MachineIdentity
 from base.config import ConfigBoot
 from base.host.system.tests.fake_commands import fake_host
@@ -48,7 +48,7 @@ def skill_ctx(
         host=fake_host(),
         session=UserSession(user_home=meiva_home, login_shell="/bin/zsh", interactive=False),
         services=frozenset(),
-        timers=ManualTimers(),
+        timers=SYSTEM_TIMERS,
     )
 
 

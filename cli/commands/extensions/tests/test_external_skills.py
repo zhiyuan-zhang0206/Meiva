@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable
+from dataclasses import replace
 from pathlib import Path
-from typing import Any
 
 import pytest
 
-from base.clock.tests.manual_timers import ManualTimers
+from base.clock import SYSTEM_TIMERS
 from base.cluster.machine import MachineIdentity
 from base.config import ConfigBoot
 from base.host.system.tests.fake_commands import fake_host
@@ -16,6 +16,9 @@ from base.telemetry import EventPipeline
 from cli.commands.converge import spec as converge_host
 from cli.commands.extensions import external_skills as external_skills_module
 from cli.commands.extensions.external_skill_host import filesystem as filesystem_module
+from cli.commands.extensions.tests.support import killed_converge as killed
+from cli.commands.extensions.tests.support.source_bindings import PROD_ELSEWHERE
+from cli.database import OperatorDatabaseFactory
 from cli.database.runtime import UserSession
 from cli.database.tests.cli_tests import operator_database as operator_database
 from cli.database.tests.cli_tests import operator_pipeline as operator_pipeline
@@ -54,7 +57,7 @@ def _ctx(
     repo: Path,
     home: Path,
     *,
-    operator_database: Callable[[], Any],
+    operator_database: OperatorDatabaseFactory,
     producer: Callable[[], EventPipeline],
     command_config_machine: tuple[ConfigBoot, MachineIdentity],
 ) -> converge_host.ConvergeCtx:
@@ -73,7 +76,7 @@ def _ctx(
         host=fake_host(),
         session=UserSession(user_home=meiva_home, login_shell="/bin/zsh", interactive=False),
         services=frozenset(),
-        timers=ManualTimers(),
+        timers=SYSTEM_TIMERS,
     )
 
 
@@ -100,7 +103,7 @@ def _run(
     repo: Path,
     home: Path,
     *,
-    operator_database: Callable[[], Any],
+    operator_database: OperatorDatabaseFactory,
     producer: Callable[[], EventPipeline],
     command_config_machine: tuple[ConfigBoot, MachineIdentity],
     skill_names: tuple[str, ...] = (SKILL_NAME,),
@@ -136,7 +139,7 @@ def _temp_entries(skills_root: Path) -> list[Path]:
 def test_absent_client_homes_are_not_created(
     home: Path,
     tmp_path: Path,
-    operator_database: Callable[[], Any],
+    operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
     command_config_machine: tuple[ConfigBoot, MachineIdentity],
@@ -158,7 +161,7 @@ def test_absent_client_homes_are_not_created(
 def test_present_codex_and_claude_homes_receive_complete_managed_copy(
     home: Path,
     tmp_path: Path,
-    operator_database: Callable[[], Any],
+    operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
     command_config_machine: tuple[ConfigBoot, MachineIdentity],
@@ -198,7 +201,7 @@ def test_present_codex_and_claude_homes_receive_complete_managed_copy(
 def test_second_converge_is_byte_and_timestamp_idempotent(
     home: Path,
     tmp_path: Path,
-    operator_database: Callable[[], Any],
+    operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
     command_config_machine: tuple[ConfigBoot, MachineIdentity],
@@ -243,7 +246,7 @@ def test_second_converge_is_byte_and_timestamp_idempotent(
 def test_unmodified_managed_copy_updates_and_removes_only_stale_target_content(
     home: Path,
     tmp_path: Path,
-    operator_database: Callable[[], Any],
+    operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
     command_config_machine: tuple[ConfigBoot, MachineIdentity],
@@ -292,7 +295,7 @@ def test_unmanaged_preexisting_target_is_preserved_and_reported(
     home: Path,
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
-    operator_database: Callable[[], Any],
+    operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
     command_config_machine: tuple[ConfigBoot, MachineIdentity],
@@ -322,7 +325,7 @@ def test_user_modified_managed_copy_is_preserved_and_reported(
     home: Path,
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
-    operator_database: Callable[[], Any],
+    operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
     command_config_machine: tuple[ConfigBoot, MachineIdentity],
@@ -367,7 +370,7 @@ def test_failed_update_restores_previous_copy_and_cleans_only_its_staging_dir(
     home: Path,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    operator_database: Callable[[], Any],
+    operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
     command_config_machine: tuple[ConfigBoot, MachineIdentity],
@@ -448,7 +451,7 @@ def test_both_operator_skills_install_and_update_independently(
     home: Path,
     tmp_path: Path,
     client: str,
-    operator_database: Callable[[], Any],
+    operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
     command_config_machine: tuple[ConfigBoot, MachineIdentity],
@@ -502,7 +505,7 @@ def test_both_operator_skills_install_and_update_independently(
 def test_operator_conflict_does_not_block_deployment_update(
     home: Path,
     tmp_path: Path,
-    operator_database: Callable[[], Any],
+    operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
     command_config_machine: tuple[ConfigBoot, MachineIdentity],
@@ -534,20 +537,22 @@ def test_operator_conflict_does_not_block_deployment_update(
     assert (target.parent / "deploy-meiva-cluster" / "SKILL.md").read_text() == "deployment v2\n"
 
 
+# meiva:note
+# A process killed while it published the deployment skill's staged copy leaves that skill's
+# ledger at `publishing`. The next converge reports it as not resumed, leaves the deployment
+# skill uninstalled and the operator skill, which has its own ledger, exactly as it was.
 def test_deployment_publication_crash_is_reported_without_changing_operator(
     home: Path,
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
-    operator_database: Callable[[], Any],
+    operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
     command_config_machine: tuple[ConfigBoot, MachineIdentity],
 ) -> None:
-    bridge = _bridge_module()
     repo = tmp_path / "repo"
     _write_source(repo)
-    _write_deploy_source(repo)
+    deploy = _write_deploy_source(repo)
     (home / ".codex").mkdir()
     _run(
         repo,
@@ -557,25 +562,20 @@ def test_deployment_publication_crash_is_reported_without_changing_operator(
         command_config_machine=command_config_machine,
     )
     operator_before = _tree_snapshot(_target(home / ".codex"))
-    original_rename = bridge.rename_no_replace
-
-    def interrupt_publication(source: Path, destination: Path) -> None:
-        original_rename(source, destination)
-        if destination.name.startswith(".deploy-meiva-cluster.meiva-stage-"):
-            raise SystemExit("interrupted deployment publication")
-
-    monkeypatch.setattr(bridge, "rename_no_replace", interrupt_publication)
-    with pytest.raises(SystemExit, match="deployment publication"):
-        _run(
-            repo,
-            home,
-            operator_database=operator_database,
-            producer=operator_pipeline,
-            command_config_machine=command_config_machine,
-            skill_names=_DISTRIBUTED_SKILLS,
-        )
-    monkeypatch.setattr(bridge, "rename_no_replace", original_rename)
+    site = killed.Site(
+        skills_root=home / ".codex" / "skills",
+        ledger_path=home
+        / ".meiva"
+        / "configs"
+        / "external-agent-skills"
+        / "codex-deploy-meiva-cluster.json",
+        client_key="codex",
+        skill="deploy-meiva-cluster",
+        source=deploy,
+    )
+    killed.forget_publication(site, killed.stage(site))
     capsys.readouterr()
+
     _run(
         repo,
         home,
@@ -584,6 +584,7 @@ def test_deployment_publication_crash_is_reported_without_changing_operator(
         command_config_machine=command_config_machine,
         skill_names=_DISTRIBUTED_SKILLS,
     )
+
     assert "not resumed" in capsys.readouterr().err
     assert _tree_snapshot(_target(home / ".codex")) == operator_before
     assert not (home / ".codex" / "skills" / "deploy-meiva-cluster").exists()
@@ -622,7 +623,7 @@ def test_builtin_guide_installs_with_the_core_update_channel(
         shutil.copytree(
             product_repo / "meiva_builtins" / "skills" / "platform" / name, sources / name
         )
-    converge_skills(repo, unit_home)
+    converge_skills(repo, unit_home, binding=PROD_ELSEWHERE)
     installed_names = {skill["name"] for skill in meiva.skills.names()}
     for name in ("meiva-guide", "impersonator-guide"):
         assert name in installed_names
@@ -632,7 +633,7 @@ def test_builtin_guide_installs_with_the_core_update_channel(
         original = installed.read_bytes()
         source = sources / name / "SKILL.md"
         source.write_bytes(original + b"\nUpdated product guidance.\n")
-        converge_skills(repo, unit_home)
+        converge_skills(repo, unit_home, binding=PROD_ELSEWHERE)
         assert installed.read_bytes() == original
         policy = install_registry.resolved_policy(
             entry, defaults_reader=lambda: process_config.view.packages
@@ -641,32 +642,29 @@ def test_builtin_guide_installs_with_the_core_update_channel(
         assert entry.origin_path == str(sources / name)
 
 
-def test_explicit_home_seam_never_calls_platform_home(
+# meiva:note
+# Without an explicit host home, the client homes are found under the invoking user's home as
+# the converge context carries it: the session's, never one the bridge looks up itself.
+def test_client_homes_are_found_under_the_sessions_user_home(
     home: Path,
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    operator_database: Callable[[], Any],
+    operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
     command_config_machine: tuple[ConfigBoot, MachineIdentity],
 ) -> None:
-    bridge = _bridge_module()
     repo = tmp_path / "repo"
     _write_source(repo)
     (home / ".codex").mkdir()
-
-    def real_home_forbidden() -> Path:
-        raise AssertionError("tests must not resolve the real platform home")
-
-    monkeypatch.setattr(bridge.Path, "home", real_home_forbidden)
-    _converge(
-        _ctx(
-            repo,
-            home,
-            operator_database=operator_database,
-            producer=operator_pipeline,
-            command_config_machine=command_config_machine,
-        ),
-        host_home=home,
+    ctx = _ctx(
+        repo,
+        home,
+        operator_database=operator_database,
+        producer=operator_pipeline,
+        command_config_machine=command_config_machine,
     )
+    session = UserSession(user_home=home, login_shell="/bin/zsh", interactive=False)
+
+    _converge(replace(ctx, session=session))
+
     assert _target(home / ".codex").is_dir()

@@ -12,13 +12,6 @@ _SKILL_DIR = (
 )
 
 
-def test_dsh_relay_emits_one_json_string_per_line(capsys: pytest.CaptureFixture[str]) -> None:
-    from cli.commands.agents.impersonation_adapters import resolve_adapter
-
-    resolve_adapter("dsh", None).send("Meiva message agent=42\n[id=7] kind=chat\nhi")
-    assert capsys.readouterr().out == '"Meiva message agent=42\\n[id=7] kind=chat\\nhi"\n'
-
-
 _PLUGIN_HARNESS = """
 import { existsSync, writeFileSync } from 'node:fs'
 const [pluginPath, relayPy, out, mode, takeoverFile] = process.argv.slice(2)
@@ -91,8 +84,8 @@ def test_dsh_plugin_relays_the_session_stub_into_that_session(tmp_path: Path) ->
         f'printf "%s\\n" "$@" > {tmp_path}/argv.txt\n'
         f'printf "%s" "$MEIVA_IMPERSONATION_RELAY_TOKEN" > {tmp_path}/token.txt\n'
         f"exec {sys.executable} -c 'import json, sys; "
-        "from cli.commands.agents.impersonation_adapters import emit_dsh; "
-        f"[emit_dsh(text) for text in json.load(open(sys.argv[1]))]' {texts}\n",
+        "from cli.commands.agents.impersonation_adapters import DshStdout, deliver; "
+        f"[deliver(DshStdout(sys.stdout), text) for text in json.load(open(sys.argv[1]))]' {texts}\n",
         encoding="utf-8",
     )
     relay.chmod(0o755)

@@ -8,14 +8,13 @@ from __future__ import annotations
 import json
 import sys
 from collections import Counter
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from datetime import datetime, tzinfo
 from typing import Any, cast
 from zoneinfo import ZoneInfo
 
-import httpx
-
-from base.cluster.machine import GatewayAccess
+from base.cluster.machine import GatewayAccess, gateway_api_base, gateway_auth_headers
+from base.host.net import http_dial
 
 _TIMEOUT_S = 60.0
 
@@ -177,18 +176,12 @@ def _on_off(*, value: bool) -> str:
     return "on" if value else "off"
 
 
-_Get = Callable[..., httpx.Response]
-
-
 # meiva:note
 # The gateway's audit report, or (None, why) when the gateway rejected the request.
 def _audit_report(
-    params: dict[str, Any], access: GatewayAccess, get: _Get | None
+    params: dict[str, Any], access: GatewayAccess
 ) -> tuple[dict[str, Any] | None, str | None]:
-    from base.cluster.machine import gateway_api_base, gateway_auth_headers
-    from base.host.net.http_dial import get as dial_get
-
-    resp = (get or dial_get)(
+    resp = http_dial.get(
         f"{gateway_api_base(access.gateway_url)}/api/notifications/audit",
         timeout=_TIMEOUT_S,
         headers=gateway_auth_headers(access),
@@ -211,7 +204,6 @@ def cmd_notices_audit(
     simulate: Sequence[str],
     out: str = "text",
     explain: bool = False,
-    get: _Get | None = None,
 ) -> int:
     params: dict[str, Any] = {"days": days, "explain": explain, "simulate": list(simulate)}
     if category is not None:
@@ -220,7 +212,7 @@ def cmd_notices_audit(
         params["tz"] = tz_name
     if now is not None:
         params["now"] = now.isoformat()
-    report, rejected = _audit_report(params, access, get)
+    report, rejected = _audit_report(params, access)
     if report is None:
         print(f"meiva: {rejected}", file=sys.stderr)
         return 2

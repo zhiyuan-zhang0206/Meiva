@@ -102,10 +102,11 @@ def _signature(current: os.stat_result) -> tuple[int, int, int, int, int, int, i
     )
 
 
-def _same_identity(left: os.stat_result, right: os.stat_result) -> bool:
-    """Compare only the identity fields shared by pathname and handle stats."""
-    # Compare the pathname and handle stat families only on identity; each
-    # family gets its own full before/after stability check in read_regular.
+# meiva:note
+# Compare only the identity fields shared by pathname and handle stats: the two stat families
+# are compared on identity alone, and each gets its own full before/after stability check in
+# `read_regular`.
+def same_identity(left: os.stat_result, right: os.stat_result) -> bool:
     left_identity = (left.st_dev, left.st_ino)
     right_identity = (right.st_dev, right.st_ino)
     return left_identity != (0, 0) and left_identity == right_identity
@@ -124,7 +125,7 @@ def read_regular(path: Path, *, source: bool) -> tuple[bytes, int]:
         fd = os.open(path, flags)
         with os.fdopen(fd, "rb") as stream:
             opened_before = os.fstat(stream.fileno())
-            if not _same_identity(opened_before, before):
+            if not same_identity(opened_before, before):
                 raise error("operator skill tree changed while being read")
             if opened_before.st_nlink not in {0, 1}:
                 raise error("operator skill tree contains a multi-link file")
@@ -135,7 +136,7 @@ def read_regular(path: Path, *, source: bool) -> tuple[bytes, int]:
     except OSError as exc:
         raise error("operator skill tree cannot be read safely") from exc
     after = inspect(path)
-    if _signature(after) != _signature(before) or not _same_identity(after, opened_after):
+    if _signature(after) != _signature(before) or not same_identity(after, opened_after):
         raise error("operator skill tree changed while being read")
     return data, stat.S_IMODE(before.st_mode)
 

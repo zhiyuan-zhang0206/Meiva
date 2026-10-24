@@ -2,11 +2,7 @@ exports = ["cli_tests.py", "command_fakes.py", "command_inputs.py", "lifecycle_r
 
 [uses]
 "cli_tests.py" = ["command_inputs.py"]
-"command_fakes.py" = ["command_inputs.py"]
 "test_lifecycle_audit.py" = ["child_audit_without_cwd.py", "cli_tests.py", "command_inputs.py", "lifecycle_rows.py"]
 
 [debt.first-party-patch]
 "cli_tests.py#monkeypatch.setattr base.telemetry.process_logging.init_cli_process" = 1
-"command_fakes.py#monkeypatch.setattr base.cluster.machine.gateway_api_base" = 2
-"command_fakes.py#monkeypatch.setattr base.sessions.backend.get_backend" = 1
-"command_fakes.py#monkeypatch.setattr base.sessions.backend.get_shell_backend" = 1

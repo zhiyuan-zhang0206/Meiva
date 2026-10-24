@@ -1,11 +1,11 @@
-"""Cluster-local client for trusted named impersonation sessions.
-
-Only request hands out the scoped relay credential (claude prints it; dsh
-writes it to a private stub). Controller commands
-run under the session id with caller-presence attestation: no controller
-credential is minted, delivered, or stored. Session history is retained by the
-shared service.
-"""
+# meiva:note
+# Cluster-local client for trusted named impersonation sessions.
+#
+# Only request hands out the scoped relay credential (claude prints it; dsh writes it to a
+# private stub). Controller commands run under the session id with the lease's same-machine
+# placement: no controller credential is minted, delivered, or stored. Session history is
+# retained by the shared service.
+# meiva:link docs/conventions/agents/agent-impersonation-hosts.md
 
 from __future__ import annotations
 
@@ -15,40 +15,71 @@ import json
 import math
 import os
 import sys
-import time
+from collections.abc import Mapping
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, TextIO, assert_never
 from uuid import UUID
 
 from base.agents.context.clients import DatabaseFactory
 from base.db import Database
 from base.events.live.bus import EventBus
-from base.log import logger
+from base.events.live.redis_listener import RedisInboundListener
+from cli.commands.agents.cleanup_after import run_then_clean_up
+from cli.commands.agents.impersonation_adapters import codex_endpoint
+from cli.commands.agents.relay.request_plan import (
+    Handoff,
+    RequestPlan,
+    handoff_hint,
+    plan_request,
+    relay_stub_text,
+)
 
 
-def relay_token_from_env() -> str:
-    """Read the scoped relay credential the controller received at request time."""
-    # env-ok: external relay credential handoff, not cluster configuration
-    token = os.environ.get("MEIVA_IMPERSONATION_RELAY_TOKEN")
-    if not token:
+# meiva:note
+# The variables an impersonation command takes from the shell it runs in, read once by the
+# handler: the relay credential a controller session exports, the credential stub path a dsh
+# session's plugin exports, the conversation id the Antigravity CLI injects into the commands
+# it runs, and the home `codex` resolves its daemon socket from. None of them is cluster
+# configuration.
+@dataclass(frozen=True)
+class ImpersonationEnv:
+    relay_token: str | None
+    dsh_relay_stub: str | None
+    antigravity_conversation: str | None
+    codex_home: str | None
+
+    # meiva:note
+    # An empty variable is an absent one, as the shells that export these set them to "".
+    @classmethod
+    def from_environ(cls, environ: Mapping[str, str]) -> ImpersonationEnv:
+        return cls(
+            relay_token=environ.get("MEIVA_IMPERSONATION_RELAY_TOKEN") or None,
+            dsh_relay_stub=environ.get("DSH_MEIVA_RELAY_STUB") or None,
+            antigravity_conversation=(environ.get("ANTIGRAVITY_CONVERSATION_ID") or "").strip()
+            or None,
+            codex_home=environ.get("CODEX_HOME") or None,
+        )
+
+
+# meiva:note
+# The scoped relay credential the controller received at request time, from the channel the
+# operator chose: the first stdin line when the accepting runtime pipes it (the native spawn
+# handoff keeps the credential out of argv, the environment and any file), else the
+# environment.
+def relay_token(*, token_stdin: bool, stdin: TextIO, env: ImpersonationEnv) -> str:
+    if token_stdin:
+        line = stdin.readline()
+        if not line:
+            raise ValueError("no relay token on stdin (use --token-stdin with a piped credential)")
+        return line.rstrip("\r\n")
+    if env.relay_token is None:
         raise ValueError(
             "set MEIVA_IMPERSONATION_RELAY_TOKEN to the request's relay token "
             "(printed once in the request response)"
         )
-    return token
-
-
-def relay_token_from_stdin() -> str:
-    """Read the scoped relay credential the accepting runtime piped over stdin.
-
-    The native spawn handoff keeps the credential out of argv, the environment
-    and any file.
-    """
-    line = sys.stdin.readline()
-    if not line:
-        raise ValueError("no relay token on stdin (use --token-stdin with a piped credential)")
-    return line.rstrip("\r\n")
+    return env.relay_token
 
 
 def _json_value(value: object) -> str:
@@ -63,28 +94,24 @@ def _emit(value: object) -> None:
     print(json.dumps(value, ensure_ascii=False, default=_json_value))
 
 
+# meiva:note
+# Write the resident-relay credential stub the session plugin consumes once.
+#
+# The file is created 0600 and `fchmod` defeats the umask, so the credential is never briefly
+# world-readable between create and write. A failed write removes the partial file.
 def write_relay_stub(
-    path: Path, *, agent_id: int, session_id: int, token: str, interpreter: str | None = None
+    path: Path, *, agent_id: int, session_id: int, token: str, interpreter: str | None
 ) -> None:
-    """Write the resident-relay credential stub the session plugin consumes once.
-
-    A dsh request uses the per-session path its dsh plugin exports
-    (``DSH_MEIVA_RELAY_STUB``) and names the relay interpreter. The plugin deletes
-    the file immediately after loading it into the relay's environment. The file
-    is created 0600 (``fchmod`` defeats the umask): the credential is never
-    briefly world-readable between create and write.
-    """
     path.parent.mkdir(parents=True, exist_ok=True)
+    text = relay_stub_text(
+        agent_id=agent_id, session_id=session_id, token=token, interpreter=interpreter
+    )
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     try:
-        os.fchmod(fd, 0o600)  # apply the exact mode even under a permissive umask
+        os.fchmod(fd, 0o600)
         with os.fdopen(fd, "w", encoding="utf-8") as stream:
             fd = -1
-            stream.write(
-                f"SID={session_id}\nAGENT={agent_id}\nMEIVA_IMPERSONATION_RELAY_TOKEN={token}\n"
-            )
-            if interpreter is not None:
-                stream.write(f"MEIVA_IMPERSONATION_RELAY_PY={interpreter}\n")
+            stream.write(text)
     except BaseException:
         if fd != -1:
             os.close(fd)
@@ -96,37 +123,6 @@ def write_relay_stub(
             os.close(fd)
 
 
-def _print_claude_relay_instructions() -> None:
-    """Name the claude relay start-up path."""
-    print(
-        "Start the claude relay (meiva impersonate relay) inside the controller "
-        "session immediately, with MEIVA_IMPERSONATION_RELAY_TOKEN set to the "
-        "relay token printed above; arm it as a Monitor watch with timeout_ms "
-        "1800000 and re-arm on each expiry notice (see the host conventions). "
-        "Preparation fails without its heartbeat.",
-        file=sys.stderr,
-    )
-
-
-def _dsh_relay_stub() -> Path:
-    """The stub path the dsh session's meiva-relay plugin exports to its shell commands.
-
-    Checked before the request creates a lease: without the plugin nothing
-    would start the relay. DeepSeek Harness uploads session logs with its
-    model requests by default, so the credential goes into this private
-    per-session stub instead of the printed response.
-    """
-    # env-ok: per-session relay stub handoff from the dsh plugin, not cluster configuration
-    stub = os.environ.get("DSH_MEIVA_RELAY_STUB")
-    if not stub:
-        raise ValueError(
-            "the dsh relay needs the Meiva relay plugin (meiva-relay.mjs) loaded into this "
-            "DeepSeek Harness session and the request run from that session's shell tool "
-            "(DSH_MEIVA_RELAY_STUB is unset; see the host conventions)"
-        )
-    return Path(stub)
-
-
 async def _wait_inbox(
     db: Database,
     lease_id: str,
@@ -134,45 +130,41 @@ async def _wait_inbox(
     wait: float,
     *,
     local_machine: str,
+    redis_url: str,
 ) -> list[dict[str, Any]]:
     from base.agents import impersonation as control
-    from base.config import settings
-    from base.events.live.redis_listener import RedisInboundListener
 
     if not math.isfinite(wait) or wait < 0:
         raise ValueError("--wait must be finite and nonnegative")
     lease = await asyncio.to_thread(
         control.require_active, db, lease_id, local_machine=local_machine
     )
-    listener = RedisInboundListener(settings.data_plane.redis_url, lease["agent_id"])
-    try:
+    listener = RedisInboundListener(redis_url, lease["agent_id"])
+    loop = asyncio.get_running_loop()
+
+    async def read_until_a_message_or_the_deadline() -> list[dict[str, Any]]:
         if wait:
             await listener.ensure_listening()
-        deadline = time.monotonic() + wait
+        deadline = loop.time() + wait
         while True:
             messages = await asyncio.to_thread(
                 control.inbox, db, lease_id, limit=limit, local_machine=local_machine
             )
-            remaining = deadline - time.monotonic()
+            remaining = deadline - loop.time()
             if messages or remaining <= 0:
                 return messages
             await listener.wait_one(min(remaining, 30.0))
-    finally:
-        primary = sys.exception()
-        try:
-            await listener.stop()
-        except Exception as cleanup_error:
-            if primary is None:
-                raise
-            primary.add_note(f"Redis listener stop also failed: {cleanup_error!r}")
-            logger.opt(exception=True).warning("Redis listener stop failed during inbox failure")
+
+    return await run_then_clean_up(
+        read_until_a_message_or_the_deadline(), listener.stop(), what="Redis listener stop"
+    )
 
 
 def _run_local(args: argparse.Namespace) -> int:
     import meiva
 
     code = (
-        sys.stdin.read()
+        args.runtime.terminal.stdin.read()
         if args.file is None or args.file == "-"
         else Path(args.file).read_text(encoding="utf-8")
     )
@@ -186,68 +178,90 @@ def _run_local(args: argparse.Namespace) -> int:
     return 0
 
 
+# meiva:note
+# `impersonate send`: one message to another agent as the leased identity.
 def _send(args: argparse.Namespace, *, database_factory: DatabaseFactory) -> int:
-    """`impersonate send` — one message to another agent as the leased identity."""
     from base.agents import impersonation as control
     from base.agents.impersonation import sessions
+    from base.cluster.machine.boot import gateway_access_from_boot
     from cli.commands.agents.control import send_agent_message
 
-    content = sys.stdin.read() if args.content == "-" else args.content
+    content = args.runtime.terminal.stdin.read() if args.content == "-" else args.content
     db = database_factory()
     lease_id = sessions.private_id(
         db, args.agent_id, args.session_id, local_machine=args.runtime.machine.name()
     )
     lease = control.require_active(db, lease_id, local_machine=args.runtime.machine.name())
     source = f"agent:{lease['agent_id']}"
-    status = send_agent_message(args.target_agent_id, content, source=source)
+    status = send_agent_message(
+        gateway_access_from_boot(args.runtime.config),
+        args.target_agent_id,
+        content,
+        source=source,
+    )
     _emit({"status": status, "to": args.target_agent_id, "source": source})
     return 0
 
 
-def _request(args: argparse.Namespace, *, database_factory: DatabaseFactory) -> int:
-    """`impersonate request` — create the lease, then hand its relay the credential."""
-    from base.agents.impersonation import sessions
+# meiva:note
+# Recorded before the lease exists: the accepting runtime and the ended-lease notice both
+# run outside this process's environment, and the Antigravity CLI injects its endpoint only
+# into the commands it runs, so this request is the one place that can learn it. The record
+# is owner-only; its CSRF token never reaches argv, the environment, the database or a log
+# line.
+# meiva:link docs/conventions/agents/agent-impersonation-hosts.md
+def _record_antigravity_endpoint(plan: RequestPlan, home: Path) -> None:
     from base.agents.impersonation.host_transport import (
-        require_control_endpoint,
         resolve_antigravity_endpoint,
         write_antigravity_endpoint,
     )
-    from base.config import Settings, settings
+
+    if plan.thread_id is None:
+        raise ValueError("the antigravity relay needs a conversation id")
+    write_antigravity_endpoint(
+        resolve_antigravity_endpoint(plan.thread_id, home=home),
+        thread_id=plan.thread_id,
+        home=home,
+    )
+
+
+# meiva:note
+# `impersonate request`: create the lease, then hand its relay the credential.
+def _request(
+    args: argparse.Namespace, *, database_factory: DatabaseFactory, env: ImpersonationEnv
+) -> int:
+    from base.agents.impersonation import sessions
     from base.config.service_read import ConfigAuthority
     from base.native_process.ownership import process_metadata
-    from base.paths import meiva_home
 
-    dsh_stub = _dsh_relay_stub() if args.relay_provider == "dsh" else None
-    endpoint = args.relay_codex_remote
-    thread_id = args.relay_thread_id
-    if args.relay_provider == "codex":
-        endpoint = require_control_endpoint(endpoint)
-    elif args.relay_provider == "antigravity":
-        # env-ok: Antigravity conversation ID injected by the host into run_command subprocesses
-        thread_id = (
-            thread_id or (os.environ.get("ANTIGRAVITY_CONVERSATION_ID") or "").strip() or None
-        )
-        if not thread_id:
-            raise ValueError(
-                "the antigravity relay needs --thread-id or ANTIGRAVITY_CONVERSATION_ID in the environment"
-            )
-        thread_id = str(UUID(thread_id))
-        # meiva:note
-        # Recorded before the lease exists: the accepting runtime and the ended-lease
-        # notice both run outside this process's environment, and the Antigravity CLI
-        # injects its endpoint only into the commands it runs, so this request is the
-        # one place that can learn it. The record is owner-only; its CSRF token never
-        # reaches argv, the environment, the database or a log line.
-        # meiva:link docs/conventions/agents/agent-impersonation-hosts.md
-        write_antigravity_endpoint(resolve_antigravity_endpoint(thread_id), thread_id=thread_id)
+    plan = plan_request(
+        args.relay_provider,
+        args.relay_thread_id,
+        args.relay_codex_remote,
+        conversation_env=env.antigravity_conversation,
+        dsh_stub_env=env.dsh_relay_stub,
+    )
+    home: Path = args.runtime.home
+    endpoint = plan.codex_remote
+    match plan.handoff:
+        case Handoff.CODEX:
+            endpoint = codex_endpoint(endpoint, codex_home=env.codex_home)
+        case Handoff.ANTIGRAVITY:
+            _record_antigravity_endpoint(plan, home)
+        case Handoff.CLAUDE | Handoff.DSH:
+            pass
+        case _:
+            assert_never(plan.handoff)
+    config = args.runtime.config
+    runtime = config.ensure_eager()
     response = sessions.request(
         database_factory(),
         EventBus.from_settings(),
         args.agent_id,
         authority=ConfigAuthority(
-            runtime=settings,
-            all_domains=settings if settings.profile is None else Settings(profile=None),
-            env_path=meiva_home() / ".env",
+            runtime=runtime,
+            all_domains=runtime if runtime.profile is None else config.complete_read_model(),
+            env_path=home / ".env",
         ),
         name=args.name,
         executor_name=args.caller,
@@ -255,62 +269,36 @@ def _request(args: argparse.Namespace, *, database_factory: DatabaseFactory) -> 
         ttl_seconds=args.ttl,
         reason=args.reason,
         provider=args.relay_provider,
-        thread_id=thread_id,
+        thread_id=plan.thread_id,
         codex_remote=endpoint,
         batch_window_seconds=args.relay_batch_window_seconds,
         local_machine=args.runtime.machine.name(),
     )
-    if dsh_stub is not None:
+    if plan.dsh_stub is not None:
         write_relay_stub(
-            dsh_stub,
+            Path(plan.dsh_stub),
             agent_id=args.agent_id,
             session_id=int(response["session_id"]),
             token=str(response.pop("relay_token")),
             interpreter=sys.executable,
         )
     _emit(response)
-    if dsh_stub is not None:
-        print(
-            "The Meiva relay plugin in this DeepSeek Harness session starts the dsh "
-            f"relay automatically from its credential stub ({dsh_stub}) and pushes "
-            "each inbound batch into this session as steering input. If no relay "
-            "heartbeat starts, preparation fails and the takeover is rejected.",
-            file=sys.stderr,
-        )
-    elif args.relay_provider == "antigravity":
-        print(
-            "The runtime starts the antigravity relay automatically at activation; "
-            "no relay process starts here. The relay pushes each inbound batch into "
-            "this conversation via SendAgentMessage. Wait for the start message "
-            "before acting as the agent.",
-            file=sys.stderr,
-        )
-    elif args.relay_provider == "codex":
-        print(
-            "The runtime starts the codex relay automatically at activation; "
-            "no relay process starts here. When your session runs an explicit app "
-            "server, pass --codex-remote with its endpoint so the relay reaches the "
-            "same server the session uses (Steer delivery, no Pending fallback; "
-            "see the host conventions). A relay "
-            "that cannot start rolls the takeover back loudly (status becomes "
-            "rejected with the reason).",
-            file=sys.stderr,
-        )
-    else:
-        _print_claude_relay_instructions()
+    print(handoff_hint(plan), file=sys.stderr)
     return 0
 
 
-def _dispatch(args: argparse.Namespace, *, database_factory: DatabaseFactory) -> int:
+def _dispatch(
+    args: argparse.Namespace, *, database_factory: DatabaseFactory, env: ImpersonationEnv
+) -> int:
     from base.agents import impersonation as control
     from base.agents.impersonation import sessions
     from base.agents.impersonation.history import public_session, say
 
     command = args.impersonation_cmd
+    if command == "request":
+        return _request(args, database_factory=database_factory, env=env)
     db = database_factory()
     bus = EventBus.from_settings()
-    if command == "request":
-        return _request(args, database_factory=database_factory)
     if command == "list":
         _emit(sessions.list_sessions(db, args.agent_id, before=args.before, limit=args.limit))
         return 0
@@ -338,7 +326,7 @@ def _dispatch(args: argparse.Namespace, *, database_factory: DatabaseFactory) ->
             )
         )
     elif command == "release":
-        summary = sys.stdin.read() if args.summary == "-" else args.summary
+        summary = args.runtime.terminal.stdin.read() if args.summary == "-" else args.summary
         _emit(
             public_session(
                 control.release(
@@ -359,6 +347,7 @@ def _dispatch(args: argparse.Namespace, *, database_factory: DatabaseFactory) ->
                     args.limit,
                     args.wait,
                     local_machine=args.runtime.machine.name(),
+                    redis_url=args.runtime.config.view.data_plane.redis_url,
                 )
             )
         )
@@ -372,7 +361,7 @@ def _dispatch(args: argparse.Namespace, *, database_factory: DatabaseFactory) ->
         )
         _emit({"acknowledged": args.message_ids})
     elif command == "say":
-        content = sys.stdin.read() if args.content == "-" else args.content
+        content = args.runtime.terminal.stdin.read() if args.content == "-" else args.content
         _emit(
             {
                 "seq": say(
@@ -393,10 +382,13 @@ def _dispatch(args: argparse.Namespace, *, database_factory: DatabaseFactory) ->
     return 0
 
 
-def cmd_impersonate(args: argparse.Namespace, *, database_factory: DatabaseFactory) -> int:
-    """Run one command, with operational errors confined to stderr."""
+# meiva:note
+# Run one command, with operational errors confined to stderr.
+def cmd_impersonate(
+    args: argparse.Namespace, *, database_factory: DatabaseFactory, env: ImpersonationEnv
+) -> int:
     try:
-        return _dispatch(args, database_factory=database_factory)
+        return _dispatch(args, database_factory=database_factory, env=env)
     except (RuntimeError, ValueError, OSError) as exc:
         print(f"impersonation: {exc}", file=sys.stderr)
         return 1

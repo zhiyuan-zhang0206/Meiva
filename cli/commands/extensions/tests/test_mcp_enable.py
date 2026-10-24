@@ -1,13 +1,12 @@
-"""`meiva mcp enable/disable` write the per-machine MCP-enable overlay, and
-`meiva mcp list` still shows defined-but-disabled servers with a marker.
-`unit_home` isolates ~/.meiva per test."""
+# meiva:note
+# `meiva mcp enable/disable` write the per-machine MCP-enable overlay, and `meiva mcp list` still
+# shows defined-but-disabled servers with a marker. `unit_home` isolates ~/.meiva per test.
 
 import json
 from pathlib import Path
 
 import pytest
 
-from base.host.system.hostport import Host
 from cli.commands.extensions.mcp import cmd_mcp_add, cmd_mcp_disable, cmd_mcp_enable, cmd_mcp_list
 
 
@@ -28,25 +27,26 @@ def test_disable_filters_from_default_load(unit_home: Path) -> None:
     assert "foo" in load_mcp_config()
 
     assert cmd_mcp_disable("foo") == 0
-    # default (filtering) load no longer returns it; include_disabled still does
+    # meiva:note
+    # The default (filtering) load no longer returns the server; `include_disabled` still does.
     assert "foo" not in load_mcp_config()
     assert "foo" in load_mcp_config(include_disabled=True)
 
 
-def test_list_marks_disabled_server(unit_home: Path, capsys: pytest.CaptureFixture) -> None:
+def test_list_marks_disabled_server(unit_home: Path, capsys: pytest.CaptureFixture[str]) -> None:
     cmd_mcp_add("foo", None, "npx", ["-y", "server-foo"], [])
     cmd_mcp_disable("foo")
-    capsys.readouterr()  # drop add/disable output
+    capsys.readouterr()
 
     assert cmd_mcp_list() == 0
-    out = capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
+    out = capsys.readouterr().out
     assert "foo" in out
     assert "[disabled]" in out
 
 
-def test_disable_hints_when_undefined(unit_home: Path, capsys: pytest.CaptureFixture) -> None:
+def test_disable_hints_when_undefined(unit_home: Path, capsys: pytest.CaptureFixture[str]) -> None:
     assert cmd_mcp_disable("nope") == 0
-    out = capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
+    out = capsys.readouterr().out
     assert "no server named 'nope' is currently defined" in out
 
 
@@ -87,17 +87,13 @@ def test_disable_preserves_invalid_requirements_as_a_close_operation(unit_home: 
     assert json.loads((unit_home / "mcp.json").read_text())["mcpServers"]["foo"] == spec
 
 
+# meiva:note
+# Enable and list read a declaration through `validate_requirements`, which takes no `Host`: a
+# `display` requirement is checked for its shape here and probed only where a server is started.
 @pytest.mark.parametrize("requires", [None, {}, {"display": True}])
-def test_enable_and_list_validate_declarations_without_host_probes(
-    unit_home: Path, requires: object, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    import base.packages.mcp_config as cfg_mod
+def test_enable_and_list_accept_valid_declarations(unit_home: Path, requires: object) -> None:
     from base.packages.plugins.mcp_enabled import read_enabled
 
-    def unexpected_probe(*, host: Host) -> bool:
-        pytest.fail("CLI declaration validation must not probe host capabilities")
-
-    monkeypatch.setattr(cfg_mod, "display_available", unexpected_probe)
     spec = json.dumps({"command": "server-foo", "requires": requires})
     assert cmd_mcp_add("foo", spec, None, [], []) == 0
     assert cmd_mcp_enable("foo") == 0

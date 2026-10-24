@@ -50,6 +50,10 @@ from cli.commands.extensions.external_skill_host.ledger import (
 
 SKILL_NAMES: tuple[str, ...] = ("meiva-guide", "impersonator-guide")
 _MARKER_NAME = ".meiva-managed.json"
+# meiva:note
+# How long a converge waits for another converge of the same client and skill before it
+# skips that client and says so.
+_LOCK_TIMEOUT_S = 2.0
 
 
 # meiva:note
@@ -461,15 +465,26 @@ def _converge_locked(
 # The two marks are independent on purpose: a tool that has been used has a home, a
 # tool installed but never started has only its program, and with neither mark the
 # user does not have the tool and Meiva leaves no directory behind. Whether a
-# program is installed is a host fact, so the caller's `Host` answers it.
+# program is installed is a host fact, so the caller reads it once into
+# `installed_programs` (see `_installed_programs`).
 # meiva:link meiva_builtins/skills/platform/meiva-guide/external-agents/references/supported-clients.md
-def _present_clients(home: Path, host: Host) -> list[_Client]:
+def _present_clients(home: Path, installed_programs: frozenset[str]) -> list[_Client]:
     return [
         client
         for client in _CLIENTS
         if exists(home / client.home_dir)
-        or (client.binary is not None and host.which(client.binary) is not None)
+        or (client.binary is not None and client.binary in installed_programs)
     ]
+
+
+# meiva:note
+# The programs of `_CLIENTS` this host has installed, by the name a client lists them under.
+def _installed_programs(host: Host) -> frozenset[str]:
+    return frozenset(
+        client.binary
+        for client in _CLIENTS
+        if client.binary is not None and host.which(client.binary) is not None
+    )
 
 
 # meiva:note
@@ -484,15 +499,16 @@ def converge_external_agent_skill(
     *,
     host_home: Path | None = None,
     skill_names: tuple[str, ...] = SKILL_NAMES,
+    lock_timeout_s: float = _LOCK_TIMEOUT_S,
 ) -> None:
-    home = Path.home() if host_home is None else host_home
+    home = ctx.session.user_home if host_home is None else host_home
     try:
         _validate_directory(home, "host home is not a regular directory")
     except (OSError, ClientConflictError) as exc:
         for client in _CLIENTS:
             _warn(client.label, f"host home unavailable ({type(exc).__name__})")
         return
-    present = _present_clients(home, ctx.host)
+    present = _present_clients(home, _installed_programs(ctx.host))
     if not present:
         return
     try:
@@ -513,7 +529,7 @@ def converge_external_agent_skill(
             lock_path = ledger_root / f"{ledger_name}.lock"
             try:
                 _validate_lock(lock_path)
-                with file_lock(lock_path, timeout_s=2):
+                with file_lock(lock_path, timeout_s=lock_timeout_s):
                     _converge_locked(
                         snapshot,
                         source_manifest,

@@ -276,7 +276,7 @@ def run_command(
     _opt_into_lite_config(args_in)
 
     children = [] if retained_children is None else retained_children
-    args = parsers.parse_args(argv, retained_children=children)
+    args = parsers.parse_args(args_in, retained_children=children)
     # meiva:note
     # The home this command acts on is read here, once, behind the gate above. `declared` is the
     # path as the environment spells it (a symlinked home is refused when it is created); `home`

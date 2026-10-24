@@ -10,6 +10,19 @@ from pathlib import Path
 import httpx
 import pytest
 
+from base.cluster.machine import GatewayAccess
+from cli.database.runtime import CommandRuntime
+
+
+def _runtime() -> CommandRuntime:
+    return CommandRuntime.create(Path(os.environ["MEIVA_HOME"]))
+
+
+def _access() -> GatewayAccess:
+    from base.cluster.machine.boot import gateway_access_from_boot
+
+    return gateway_access_from_boot(_runtime().config)
+
 
 def direct(mode: str) -> int:
     from cli.commands.agents import control, parsers
@@ -22,9 +35,9 @@ def direct(mode: str) -> int:
     if mode == "schedules-update-empty":
         return schedules.cmd_schedules_update("7", None, None, None, None, None, enabled=None)
     if mode == "restart-invalid-config":
-        return control.cmd_agents_restart(9, '["not", "an", "object"]')
+        return control.cmd_agents_restart(_access(), 9, '["not", "an", "object"]')
     if mode == "send-missing-source":
-        return control.cmd_agents_send(42, "hello", None)
+        return control.cmd_agents_send(_access(), 42, "hello", None)
     if mode in {"send-handler-missing", "send-handler-invalid"}:
         return parsers.h_agents_send(
             argparse.Namespace(
@@ -33,6 +46,7 @@ def direct(mode: str) -> int:
                 source=None if mode.endswith("missing") else "bogus",
                 tail_file=None,
                 completion=False,
+                runtime=_runtime(),
             )
         )
     if mode == "kill-handler-invalid":
@@ -41,6 +55,7 @@ def direct(mode: str) -> int:
                 agent_id=42,
                 source="bogus",
                 kill_all_shell_sessions=False,
+                runtime=_runtime(),
             )
         )
     raise AssertionError(f"unknown direct contract: {mode}")
@@ -55,6 +70,7 @@ def invoke(mode: str, argv: list[str]) -> int:
     from cli.parsers import build_parser
 
     args = build_parser().parse_args(argv)
+    args.runtime = _runtime()
     return args.func(args)
 
 

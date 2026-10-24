@@ -28,8 +28,10 @@ from services.backup.walg.tests.support import (
     SECRETS,
     PgInstance,
     Sandbox,
+    archive_current_segment,
     archiving_postgres,
     make_sandbox,
+    take_basebackup,
 )
 
 
@@ -41,15 +43,7 @@ def plane_off(data_plane_config: DataPlaneConfig) -> DataPlaneConfig:
 
 @pytest.fixture
 def sandbox(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Sandbox:
-    sandbox = make_sandbox(tmp_path, monkeypatch)
-
-    @contextmanager
-    def no_postgres() -> Generator[psycopg.Connection[Any]]:
-        raise psycopg.OperationalError("connection refused")
-        yield
-
-    monkeypatch.setattr(probe, "admin_connection", no_postgres)
-    return sandbox
+    return make_sandbox(tmp_path, monkeypatch)
 
 
 @pytest.fixture
@@ -311,60 +305,65 @@ def test_nothing_is_dialed_while_wal_g_is_off(
 ) -> None:
     make_sandbox(tmp_path, monkeypatch, enabled=False)
 
-    def explode() -> object:
-        raise AssertionError("dialed Postgres while WAL-G is off")
-
-    monkeypatch.setattr(probe, "admin_connection", explode)
-
     walg_cmd.warn_archive_inactive(None)
 
     assert capsys.readouterr().err == ""
 
 
+# meiva:note
+# The sandbox home has no registry record, so there is no Postgres to dial: the command says why
+# it could not read the archiver and carries on.
 def test_an_unreadable_postgres_is_a_warning_not_a_failure(
     sandbox: Sandbox, capsys: pytest.CaptureFixture[str]
 ) -> None:
     walg_cmd.warn_archive_inactive(sandbox.config_file)
 
-    assert "WAL archiving state not read (OperationalError" in capsys.readouterr().err
+    err = capsys.readouterr().err
+    assert "WAL archiving state not read (RuntimeError: no registry record for home" in err
+    assert "cannot dial its Postgres" in err
 
 
-@contextmanager
-def _fake_restore(calls: list[dict[str, Any]], **kwargs: Any) -> Generator[None]:
-    calls.append(kwargs)
-    yield
-
-
-def test_restore_passes_the_target_and_keeps_the_data_directory(
+# meiva:note
+# The command restores for real: a Postgres archiving into the sandbox's WAL-G stand-in, a base
+# backup the stand-in serves back, WAL up to a point after the target, and the command's own
+# arguments -- the backup, the target LSN, the restored cluster's superuser -- steering a scratch
+# recovery. The directory is left as a promoted database whose new timeline forked at the target.
+def test_restore_recovers_to_the_target_and_keeps_the_data_directory(
+    sandbox: Sandbox,
     plane: DataPlaneConfig,
-    monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     tmp_path: Path,
+    postgres_access: None,
 ) -> None:
-    calls: list[dict[str, Any]] = []
+    with archiving_postgres(sandbox=sandbox) as pg:
+        conn = pg.connect()
+        conn.execute("CREATE TABLE t (k text)")
+        conn.execute("INSERT INTO t VALUES ('A')")
+        backup = take_basebackup(sandbox, pg, "base_000000010000000000000001")
+        archive_current_segment(conn, sandbox)
+        conn.execute("INSERT INTO t VALUES ('B1')")
+        archive_current_segment(conn, sandbox)
+        target_row = conn.execute("SELECT pg_current_wal_insert_lsn()").fetchone()
+        assert target_row is not None
+        target = str(target_row[0])
+        conn.execute("INSERT INTO t VALUES ('B2')")
+        archive_current_segment(conn, sandbox)
+        conn.close()
+        destination = tmp_path / "out"
 
-    def fake(directory: Path, **kwargs: Any) -> Any:
-        return _fake_restore(calls, directory=directory, **kwargs)
-
-    monkeypatch.setattr(walg_cmd, "restored_instance", fake)
-
-    code = walg_cmd.cmd_walg_restore(
-        plane,
-        directory=str(tmp_path / "out"),
-        backup="base_0001",
-        time=None,
-        lsn="0/3000060",
-        user="zyonzhang",
-    )
+        code = walg_cmd.cmd_walg_restore(
+            plane, directory=str(destination), backup=backup, time=None, lsn=target, user="meiva"
+        )
 
     assert code == 0
-    (call,) = calls
-    assert call["directory"] == (tmp_path / "out").resolve()
-    assert call["backup"] == "base_0001"
-    assert call["target"].lsn == "0/3000060"
-    assert call["keep_data"] is True
-    assert call["user"] == "zyonzhang"
-    assert "Postgres is not running on it" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "Postgres is not running on it" in out
+    assert (destination / "PG_VERSION").is_file()
+    assert not (destination / "postmaster.pid").exists()
+    assert not (destination / "recovery.signal").exists()
+    assert f"backup-fetch {destination.resolve()} {backup}" in sandbox.calls()
+    history = (destination / "pg_wal" / "00000002.history").read_text()
+    assert f"after LSN {target}" in history
 
 
 @pytest.mark.parametrize(
@@ -391,26 +390,36 @@ def test_restore_rejects_a_bad_target_before_fetching(
     assert not sandbox.calls()
 
 
-def test_restore_reports_a_failed_recovery_and_exits_non_zero(
-    plane: DataPlaneConfig, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+def test_restore_reports_a_failed_fetch_and_exits_non_zero(
+    sandbox: Sandbox, plane: DataPlaneConfig, capsys: pytest.CaptureFixture[str], tmp_path: Path
 ) -> None:
-    from services.backup.walg.restore import RestoreError
-
-    @contextmanager
-    def failing(*_args: Any, **_kwargs: Any) -> Generator[None]:
-        raise RestoreError("recovery failed, postgres exited 1: FATAL: no segment")
-        yield
-
-    monkeypatch.setattr(walg_cmd, "restored_instance", failing)
+    sandbox.fail("backup-fetch")
 
     code = walg_cmd.cmd_walg_restore(
-        plane, directory="/srv/restored", backup="LATEST", time=None, lsn=None
+        plane, directory=str(tmp_path / "out"), backup="LATEST", time=None, lsn=None
     )
 
     assert code == 1
     err = capsys.readouterr().err
-    assert "restore failed: recovery failed" in err
+    assert "restore failed: backup-fetch failed" in err
     assert "remove any partly restored content" in err
+
+
+def test_restore_refuses_a_directory_that_holds_something(
+    sandbox: Sandbox, plane: DataPlaneConfig, capsys: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
+    occupied = tmp_path / "out"
+    occupied.mkdir()
+    (occupied / "keep.txt").write_text("mine")
+
+    code = walg_cmd.cmd_walg_restore(
+        plane, directory=str(occupied), backup="LATEST", time=None, lsn=None
+    )
+
+    assert code == 1
+    assert "exists and is not an empty directory" in capsys.readouterr().err
+    assert (occupied / "keep.txt").read_text() == "mine"
+    assert not sandbox.calls()
 
 
 def test_restore_while_wal_g_is_off_says_so(

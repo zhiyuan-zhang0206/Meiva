@@ -7,27 +7,19 @@ from pathlib import Path
 
 import pytest
 
-from base import paths
 from base.packages.plugins.config_registration import disk_image_path
+from base.paths.tests.homes import point_home
 
 
 @pytest.fixture(autouse=True)
-def _isolate_paths(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
-    """All tests use a temporary directory for plugin scanning and meiva_home —
-    avoids polluting the real repo / user plugins or ~/.meiva."""
-    repo = tmp_path / "repo_plugins"
-    user = tmp_path / "user_plugins"
-    repo.mkdir()
-    user.mkdir()
-    monkeypatch.setattr(paths, "repo_plugins_dir", lambda: repo)
-    monkeypatch.setattr(paths, "plugins_dir", lambda: user)
-    monkeypatch.setattr(paths, "meiva_home", lambda: tmp_path)
-    monkeypatch.setenv("MEIVA_HOME", str(tmp_path))
+def _isolate_home(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
+    """The command resolves its home from the process environment, so every test works in a
+    temporary home; its external plugins live under `<home>/plugins`."""
+    return point_home(monkeypatch, tmp_path)
 
 
-def _make_plugin_dir(name: str, tmp_path: Path) -> Path:
-    root = paths.repo_plugins_dir()
-    plugin_dir = root / name
+def _make_plugin_dir(name: str, home: Path) -> Path:
+    plugin_dir = home / "plugins" / name
     plugin_dir.mkdir(parents=True, exist_ok=True)
     (plugin_dir / "plugin.py").write_text(f'__description__ = "{name} plugin"\n')
     return plugin_dir
@@ -44,7 +36,7 @@ def test_plugins_update_reconciles_retired_only_image(
     class SampleConfig(BaseModel):
         execution_mode: str = "image"
 
-    plugin_dir = _make_plugin_dir("meiva_fleet", tmp_path)
+    plugin_dir = _make_plugin_dir("retired_demo", tmp_path)
     (plugin_dir / "plugin.py").write_text('raise RuntimeError("runtime must not load")\n')
     (plugin_dir / "default_config.py").write_text(
         "from pydantic import BaseModel\n"
@@ -54,7 +46,7 @@ def test_plugins_update_reconciles_retired_only_image(
         "def contribute() -> PluginContributions:\n"
         "    return PluginContributions(config=SampleConfig)\n"
     )
-    image = disk_image_path("meiva_fleet")
+    image = disk_image_path("retired_demo")
     image.parent.mkdir(parents=True)
     image.write_text('{"agent_standing_directives": []}\n')
 
@@ -63,5 +55,5 @@ def test_plugins_update_reconciles_retired_only_image(
     saved = image.read_bytes()
     capsys.readouterr()
     assert cmd_plugins_update() == 0
-    assert "meiva_fleet: no schema diff" in capsys.readouterr().out
+    assert "retired_demo: no schema diff" in capsys.readouterr().out
     assert image.read_bytes() == saved

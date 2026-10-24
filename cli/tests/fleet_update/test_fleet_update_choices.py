@@ -8,7 +8,6 @@ from pathlib import Path
 
 import pytest
 
-from cli import fleet_update
 from cli.tests.fleet_update.fleet_update_cluster import Cluster
 
 _STOP_CHOICES = [
@@ -103,6 +102,24 @@ def test_a_value_a_host_would_refuse_is_refused_before_any_host(
 
 
 # meiva:note
+# A named service is checked against the services this checkout lists. When the listing itself
+# cannot run -- here the interpreter cannot start -- the refusal says that, instead of calling every
+# named service unknown.
+def test_a_service_listing_that_cannot_run_is_named_not_mistaken_for_unknown_services(
+    env: tuple[Cluster, Callable[..., int]], capsys: pytest.CaptureFixture[str]
+) -> None:
+    cluster, run = env
+    cluster.environ["PYTHONHOME"] = "/nonexistent-python-home"
+    with pytest.raises(SystemExit) as exc:
+        run("run", "--only-service", "gateway")
+    assert exc.value.code == 2
+    err = capsys.readouterr().err
+    assert "cannot list this checkout's services (exit " in err
+    assert "unknown service(s)" not in err
+    assert cluster.commands == []
+
+
+# meiva:note
 # One answer per required choice of `run`, each paired with the text the refusal names it by; the
 # test drops exactly one and expects only that one to be named.
 _ONE_EACH = [
@@ -137,7 +154,7 @@ def test_each_single_missing_choice_is_refused_before_any_host(
     given = [arg for i, (tokens, _form) in enumerate(_ONE_EACH) if i != dropped for arg in tokens]
     argv = ["run", "--gateway", "gw", "--log-dir", str(tmp_path / "logs"), "--new", "HEAD"]
     with pytest.raises(SystemExit) as exc:
-        fleet_update.main([*argv, *given])
+        cluster.invoke([*argv, *given])
     assert exc.value.code == 2
     err = capsys.readouterr().err
     listed = [line.strip() for line in err.splitlines()[1:] if line.strip()]
@@ -162,7 +179,7 @@ def test_missing_choices_are_all_listed_at_once_and_no_host_is_touched(
     cluster, _ = env
     argv = [half, "--gateway", "gw", "--log-dir", str(tmp_path / "logs"), *_EVERY_CHOICE[half]]
     with pytest.raises(SystemExit) as exc:
-        fleet_update.main(argv)
+        cluster.invoke(argv)
     assert exc.value.code == 2
     err = capsys.readouterr().err
     expected = [
