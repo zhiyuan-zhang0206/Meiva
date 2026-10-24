@@ -250,7 +250,7 @@ async def lifespan(
             try:
                 await asyncio.to_thread(
                     register_os_cron,
-                    enabled_reader=lambda: config.view.general.os_jobs_enabled,
+                    enabled=config.view.general.os_jobs_enabled,
                     host=process.host,
                 )
             except Exception:

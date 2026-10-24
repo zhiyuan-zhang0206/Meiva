@@ -63,7 +63,7 @@ def _configure_job(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
 
 
 def test_the_tick_runs_three_hours_after_the_logical_dump_becomes_due() -> None:
-    assert (job.hour(backup_hour_reader=lambda: 3), job.MINUTE) == (
+    assert (job.hour(backup_hour=3), job.MINUTE) == (
         6,
         25,
     )
@@ -73,12 +73,12 @@ def test_the_tick_runs_three_hours_after_the_logical_dump_becomes_due() -> None:
 def test_the_tick_hour_follows_the_logical_dump_hour_and_wraps(
     dump_hour: int, tick_hour: int
 ) -> None:
-    assert job.hour(backup_hour_reader=lambda: dump_hour) == tick_hour
+    assert job.hour(backup_hour=dump_hour) == tick_hour
 
 
 def test_launchd_plist_runs_the_tick_command_daily_and_logs_to_walg_log(tmp_path: Path) -> None:
     content = job.launchd_plist_content(
-        backup_hour_reader=lambda: 3,
+        backup_hour=3,
         host=fake_host(platform=DARWIN_ARM64),
     )
     root = ET.fromstring(content)  # noqa: S314 — self-generated plist
@@ -99,10 +99,10 @@ def test_launchd_plist_runs_the_tick_command_daily_and_logs_to_walg_log(tmp_path
 def test_macos_reregistration_rewrites_and_reloads_idempotently() -> None:
     commands, host = _launchctl()
 
-    assert job.register_macos(backup_hour_reader=lambda: 3, host=host) == 0
+    assert job.register_macos(backup_hour=3, host=host) == 0
     plist = job.launchd_plist_path()
     first = plist.read_text(encoding="utf-8")
-    assert job.register_macos(backup_hour_reader=lambda: 3, host=host) == 0
+    assert job.register_macos(backup_hour=3, host=host) == 0
 
     assert plist.read_text(encoding="utf-8") == first
     assert [argv[1] for argv in commands.argvs if argv[1] != "print"] == [
@@ -115,7 +115,7 @@ def test_macos_reregistration_rewrites_and_reloads_idempotently() -> None:
 
 def test_macos_unregister_removes_the_plist_and_is_repeatable() -> None:
     commands, host = _launchctl()
-    assert job.register_macos(backup_hour_reader=lambda: 3, host=host) == 0
+    assert job.register_macos(backup_hour=3, host=host) == 0
     plist = job.launchd_plist_path()
     assert plist.exists()
 
@@ -130,7 +130,7 @@ def test_linux_registration_replaces_only_its_own_line(tmp_path: Path) -> None:
     old = "25 1 * * * /old/meiva backup walg run  # meiva-walg"
     crontab = FakeCrontab(f"{other}\n\n{old}\n{old}\n")
 
-    assert job.register_linux(backup_hour_reader=lambda: 3, host=_linux(crontab)) == 0
+    assert job.register_linux(backup_hour=3, host=_linux(crontab)) == 0
 
     body = crontab.writes[-1]
     assert f"{other}\n\n" in body
@@ -150,7 +150,7 @@ def test_linux_without_crontab_reports_and_registers_nothing(
 ) -> None:
     assert (
         job.register_linux(
-            backup_hour_reader=lambda: 3,
+            backup_hour=3,
             host=fake_host(platform=LINUX_X86),
         )
         == 1
@@ -179,8 +179,8 @@ def test_register_skips_when_os_jobs_are_disabled(monkeypatch: pytest.MonkeyPatc
     monkeypatch.setattr(cron, "register_platform_job", no_platform)
 
     job.register_walg_job(
-        enabled_reader=lambda: False,
-        backup_hour_reader=lambda: 3,
+        enabled=False,
+        backup_hour=3,
         host=fake_host(),
     )
 
@@ -196,8 +196,8 @@ def test_register_and_unregister_delegate_in_the_default_home(
     monkeypatch.setattr(cron, "unregister_platform_job", _recorder(calls, "unregister"))
 
     job.register_walg_job(
-        enabled_reader=lambda: True,
-        backup_hour_reader=lambda: 3,
+        enabled=True,
+        backup_hour=3,
         host=fake_host(),
     )
     job.unregister_walg_job(host=fake_host())

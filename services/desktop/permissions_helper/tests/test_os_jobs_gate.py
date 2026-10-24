@@ -78,49 +78,47 @@ def test_suite_default_is_off() -> None:
     """The whole suite runs with registration disabled — this is the invariant the
     e2e leak violated (nine launchd health probes on a dev box), so assert it
     directly rather than trusting the conftest comment."""
-    assert cron.os_jobs_enabled(enabled_reader=lambda: settings.general.os_jobs_enabled) is False
+    assert settings.general.os_jobs_enabled is False
 
 
 _REGISTERS = [
     pytest.param(
-        partial(cron.register_os_cron, enabled_reader=lambda: settings.general.os_jobs_enabled),
+        partial(cron.register_os_cron, enabled=settings.general.os_jobs_enabled),
         id="health-probe",
     ),
     pytest.param(
         partial(
             autostart.register_autostart,
             services=frozenset({"gateway"}),
-            enabled_reader=lambda: settings.general.os_jobs_enabled,
+            enabled=settings.general.os_jobs_enabled,
         ),
         id="autostart",
     ),
     pytest.param(
-        partial(
-            logs_job.register_logs_job, enabled_reader=lambda: settings.general.os_jobs_enabled
-        ),
+        partial(logs_job.register_logs_job, enabled=settings.general.os_jobs_enabled),
         id="logs-maintenance",
     ),
     pytest.param(
         partial(
             packages_job.register_packages_job,
-            enabled_reader=lambda: settings.general.os_jobs_enabled,
-            refresh_enabled_reader=lambda: settings.packages.refresh_enabled,
-            tick_reader=lambda: settings.packages.refresh_tick_seconds,
+            enabled=settings.general.os_jobs_enabled,
+            refresh_enabled=settings.packages.refresh_enabled,
+            tick_seconds=settings.packages.refresh_tick_seconds,
         ),
         id="packages-refresh",
     ),
     pytest.param(
         partial(
             pr_flow_job.register_pr_flow_job,
-            enabled_reader=lambda: settings.general.os_jobs_enabled,
+            enabled=settings.general.os_jobs_enabled,
         ),
         id="pr-flow",
     ),
     pytest.param(
         partial(
             walg_job.register_walg_job,
-            enabled_reader=lambda: settings.general.os_jobs_enabled,
-            backup_hour_reader=lambda: settings.services.backup_hour,
+            enabled=settings.general.os_jobs_enabled,
+            backup_hour=settings.services.backup_hour,
         ),
         id="walg",
     ),
@@ -157,27 +155,25 @@ def test_registration_dispatches_when_enabled(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(pr_flow_job, "credential_blocker", _allow_pr_flow)
-    cron.register_os_cron(enabled_reader=lambda: settings.general.os_jobs_enabled, host=fake_host())
+    cron.register_os_cron(enabled=settings.general.os_jobs_enabled, host=fake_host())
     autostart.register_autostart(
         services=frozenset({"gateway"}),
-        enabled_reader=lambda: settings.general.os_jobs_enabled,
+        enabled=settings.general.os_jobs_enabled,
         host=fake_host(),
     )
-    logs_job.register_logs_job(
-        enabled_reader=lambda: settings.general.os_jobs_enabled, host=fake_host()
-    )
+    logs_job.register_logs_job(enabled=settings.general.os_jobs_enabled, host=fake_host())
     packages_job.register_packages_job(
-        enabled_reader=lambda: settings.general.os_jobs_enabled,
-        refresh_enabled_reader=lambda: settings.packages.refresh_enabled,
-        tick_reader=lambda: settings.packages.refresh_tick_seconds,
+        enabled=settings.general.os_jobs_enabled,
+        refresh_enabled=settings.packages.refresh_enabled,
+        tick_seconds=settings.packages.refresh_tick_seconds,
         host=fake_host(),
     )
     pr_flow_job.register_pr_flow_job(
-        enabled_reader=lambda: settings.general.os_jobs_enabled, production=True, host=fake_host()
+        enabled=settings.general.os_jobs_enabled, production=True, host=fake_host()
     )
     walg_job.register_walg_job(
-        enabled_reader=lambda: settings.general.os_jobs_enabled,
-        backup_hour_reader=lambda: settings.services.backup_hour,
+        enabled=settings.general.os_jobs_enabled,
+        backup_hour=settings.services.backup_hour,
         host=fake_host(),
     )
     assert backend.calls == [

@@ -340,7 +340,7 @@ def test_register_refused_for_worktree_checkout_against_prod_home(
     monkeypatch.setattr(paths, "repo_root", lambda: default_home / "Meiva" / ".worktrees" / "r4")
     calls = _fake_backend(monkeypatch)
 
-    cron.register_os_cron(enabled_reader=lambda: True, host=fake_host(platform=DARWIN_ARM64))
+    cron.register_os_cron(enabled=True, host=fake_host(platform=DARWIN_ARM64))
 
     assert calls == []
 
@@ -353,7 +353,7 @@ def test_register_allowed_from_the_homes_own_source_checkout(
     monkeypatch.setattr(paths, "repo_root", lambda: prod_home / "source")
     calls = _fake_backend(monkeypatch)
 
-    cron.register_os_cron(enabled_reader=lambda: True, host=fake_host(platform=DARWIN_ARM64))
+    cron.register_os_cron(enabled=True, host=fake_host(platform=DARWIN_ARM64))
 
     assert calls == ["300"]
 
@@ -364,7 +364,7 @@ def test_register_allowed_for_a_default_home_without_source(
     monkeypatch.setattr(paths, "repo_root", lambda: default_home / "dev-src")
     calls = _fake_backend(monkeypatch)
 
-    cron.register_os_cron(enabled_reader=lambda: True, host=fake_host(platform=DARWIN_ARM64))
+    cron.register_os_cron(enabled=True, host=fake_host(platform=DARWIN_ARM64))
 
     assert calls == ["300"]
 

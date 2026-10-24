@@ -20,7 +20,6 @@ from __future__ import annotations
 
 import shlex
 import sys
-from collections.abc import Callable
 from pathlib import Path
 from xml.sax.saxutils import escape
 
@@ -36,8 +35,8 @@ MINUTE = 25
 _LABEL = f"{base.host.system.cron.LAUNCHD_LABEL_PREFIX}.walg"
 
 
-def hour(*, backup_hour_reader: Callable[[], int]) -> int:
-    return (backup_hour_reader() + _HOURS_AFTER_LOGICAL_BACKUP) % 24
+def hour(*, backup_hour: int) -> int:
+    return (backup_hour + _HOURS_AFTER_LOGICAL_BACKUP) % 24
 
 
 def launchd_plist_path() -> Path:
@@ -53,7 +52,7 @@ def _shell_command(*, host: Host) -> str:
     return f"{meiva} backup walg run"
 
 
-def launchd_plist_content(*, backup_hour_reader: Callable[[], int], host: Host) -> str:
+def launchd_plist_content(*, backup_hour: int, host: Host) -> str:
     log_file = _log_file()
     return f"""<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
@@ -72,7 +71,7 @@ def launchd_plist_content(*, backup_hour_reader: Callable[[], int], host: Host) 
     <key>StartCalendarInterval</key>
     <dict>
             <key>Hour</key>
-            <integer>{hour(backup_hour_reader=backup_hour_reader)}</integer>
+            <integer>{hour(backup_hour=backup_hour)}</integer>
             <key>Minute</key>
             <integer>{MINUTE}</integer>
     </dict>
@@ -87,13 +86,13 @@ def launchd_plist_content(*, backup_hour_reader: Callable[[], int], host: Host) 
 """
 
 
-def register_macos(*, backup_hour_reader: Callable[[], int], host: Host) -> int:
+def register_macos(*, backup_hour: int, host: Host) -> int:
     """Rewrite and reload the daily LaunchAgent."""
     plist_path = launchd_plist_path()
     plist_path.parent.mkdir(parents=True, exist_ok=True)
     _log_file().parent.mkdir(parents=True, exist_ok=True)
     plist_path.write_text(
-        launchd_plist_content(backup_hour_reader=backup_hour_reader, host=host), encoding="utf-8"
+        launchd_plist_content(backup_hour=backup_hour, host=host), encoding="utf-8"
     )
 
     if base.host.system.cron.reload_launchd_job(_LABEL, plist_path, host=host) != 0:
@@ -101,7 +100,7 @@ def register_macos(*, backup_hour_reader: Callable[[], int], host: Host) -> int:
     logger.info(
         "launchd job '{}' loaded (daily at {:02d}:{:02d})",
         _LABEL,
-        hour(backup_hour_reader=backup_hour_reader),
+        hour(backup_hour=backup_hour),
         MINUTE,
     )
     return 0
@@ -112,7 +111,7 @@ def unregister_macos(*, host: Host) -> int:
     return 0 if retired else 1
 
 
-def register_linux(*, backup_hour_reader: Callable[[], int], host: Host) -> int:
+def register_linux(*, backup_hour: int, host: Host) -> int:
     """Replace the WAL-G tick line in the user crontab.
 
     Lines are matched by the marker as a substring, so a line with a suffix after
@@ -130,7 +129,7 @@ def register_linux(*, backup_hour_reader: Callable[[], int], host: Host) -> int:
     log_file = _log_file()
     log_file.parent.mkdir(parents=True, exist_ok=True)
     entry = (
-        f"{MINUTE} {hour(backup_hour_reader=backup_hour_reader)} * * * {base.host.system.cron.cron_env_prefix()}"
+        f"{MINUTE} {hour(backup_hour=backup_hour)} * * * {base.host.system.cron.cron_env_prefix()}"
         f"/bin/sh -c {shlex.quote(_shell_command(host=host))} "
         f">> {shlex.quote(str(log_file))} 2>&1  {_CRON_MARKER}"
     )
@@ -152,9 +151,7 @@ def unregister_linux(*, host: Host) -> int:
     )
 
 
-def register_walg_job(
-    *, enabled_reader: Callable[[], bool], backup_hour_reader: Callable[[], int], host: Host
-) -> None:
+def register_walg_job(*, enabled: bool, backup_hour: int, host: Host) -> None:
     """Register the daily WAL-G tick (idempotent).
 
     The composition root supplies live readers. The backup hour reaches the
@@ -165,15 +162,15 @@ def register_walg_job(
     default home (`owns_os_jobs`). Whether WAL-G is switched on is the converge
     step's decision (`ensure_walg_job`), not this registrar's.
     """
-    if not base.host.system.cron.os_jobs_enabled(enabled_reader=enabled_reader):
+    if not enabled:
         base.host.system.cron.skip_os_job("WAL-G tick")
         return
     if not base.host.system.cron.owns_os_jobs("WAL-G tick"):
         return
     base.host.system.cron.register_platform_job(
         "WAL-G tick",
-        macos=lambda: register_macos(backup_hour_reader=backup_hour_reader, host=host),
-        linux=lambda: register_linux(backup_hour_reader=backup_hour_reader, host=host),
+        macos=lambda: register_macos(backup_hour=backup_hour, host=host),
+        linux=lambda: register_linux(backup_hour=backup_hour, host=host),
         host=host,
     )
 

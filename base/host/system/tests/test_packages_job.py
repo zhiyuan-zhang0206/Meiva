@@ -71,9 +71,7 @@ def _configure_job(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
 
 
 def test_launchd_plist_runs_the_refresh_pass_on_the_tick(tmp_path: Path) -> None:
-    content = job.launchd_plist_content(
-        tick_reader=lambda: 900, host=fake_host(platform=DARWIN_ARM64)
-    )
+    content = job.launchd_plist_content(tick_seconds=900, host=fake_host(platform=DARWIN_ARM64))
     root = ET.fromstring(content)  # noqa: S314 — self-generated plist
     values = [element.text for element in root.findall("./dict/array/string")]
     command = values[2]
@@ -90,10 +88,10 @@ def test_launchd_plist_runs_the_refresh_pass_on_the_tick(tmp_path: Path) -> None
 def test_macos_reregistration_rewrites_and_reloads_idempotently() -> None:
     commands, host = _launchctl()
 
-    assert job.register_macos(tick_reader=lambda: 900, host=host) == 0
+    assert job.register_macos(tick_seconds=900, host=host) == 0
     plist = job.launchd_plist_path()
     first = plist.read_text(encoding="utf-8")
-    assert job.register_macos(tick_reader=lambda: 900, host=host) == 0
+    assert job.register_macos(tick_seconds=900, host=host) == 0
 
     assert plist.read_text(encoding="utf-8") == first
     assert [argv[1] for argv in commands.argvs if argv[1] != "print"] == [
@@ -109,7 +107,7 @@ def test_linux_registration_replaces_only_its_own_lines(tmp_path: Path) -> None:
     old = "*/15 * * * * /old/meiva packages refresh --from-job  # meiva-packages-refresh"
     crontab = FakeCrontab(f"{other}\n\n{old}\n{old}\n")
 
-    assert job.register_linux(tick_reader=lambda: 900, host=_linux(crontab)) == 0
+    assert job.register_linux(tick_seconds=900, host=_linux(crontab)) == 0
     body = crontab.writes[-1]
     assert other in body
     assert f"{other}\n\n" in body
@@ -121,7 +119,7 @@ def test_linux_registration_replaces_only_its_own_lines(tmp_path: Path) -> None:
 
 
 def test_linux_crontab_failures_and_empty_table(capsys: pytest.CaptureFixture[str]) -> None:
-    assert job.register_linux(tick_reader=lambda: 900, host=fake_host(platform=LINUX_X86)) == 1
+    assert job.register_linux(tick_seconds=900, host=fake_host(platform=LINUX_X86)) == 1
     assert capsys.readouterr().err == (
         "  * packages refresh: crontab not installed; the recurring refresh "
         "pass cannot be registered\n"
@@ -131,7 +129,7 @@ def test_linux_crontab_failures_and_empty_table(capsys: pytest.CaptureFixture[st
     crontab.read_returncode = 1
     crontab.read_stderr = "permission denied"
     host = _linux(crontab)
-    assert job.register_linux(tick_reader=lambda: 900, host=host) == 1
+    assert job.register_linux(tick_seconds=900, host=host) == 1
     assert crontab.writes == []
     assert capsys.readouterr().err == (
         "  * crontab -l failed (permission denied); "
@@ -139,7 +137,7 @@ def test_linux_crontab_failures_and_empty_table(capsys: pytest.CaptureFixture[st
     )
 
     crontab.read_stderr = "no crontab for user"
-    assert job.register_linux(tick_reader=lambda: 900, host=host) == 0
+    assert job.register_linux(tick_seconds=900, host=host) == 0
     assert (
         len(crontab.writes),
         crontab.writes[0].startswith("*/15 * * * * "),
@@ -157,7 +155,7 @@ def test_linux_crontab_failures_and_empty_table(capsys: pytest.CaptureFixture[st
 
     crontab.table = crontab.writes[0]
     crontab.write_failure = "write denied"
-    assert job.register_linux(tick_reader=lambda: 900, host=host) == 1
+    assert job.register_linux(tick_seconds=900, host=host) == 1
     assert capsys.readouterr().err == "  * crontab update failed: write denied\n"
     assert job.unregister_linux(host=host) == 1
     assert len(crontab.writes) == 2
@@ -173,7 +171,7 @@ def test_macos_bootstrap_failure_and_repeated_unregister(
 
     commands, host = _launchctl(bootstrap=Reply(stderr="denied", returncode=1))
     monkeypatch.setattr(job.logger, "error", record_error)
-    assert job.register_macos(tick_reader=lambda: 900, host=host) == 1
+    assert job.register_macos(tick_seconds=900, host=host) == 1
     assert [argv[1] for argv in commands.argvs if argv[1] != "print"] == ["bootout", "bootstrap"]
     assert errors == [
         ("launchctl bootstrap failed for {}: {}", "com.meiva.packages-refresh", "denied")
@@ -202,9 +200,9 @@ def test_register_is_gated_by_os_jobs(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
     job.register_packages_job(
-        enabled_reader=lambda: False,
-        refresh_enabled_reader=lambda: False,
-        tick_reader=lambda: 900,
+        enabled=False,
+        refresh_enabled=False,
+        tick_seconds=900,
         host=fake_host(),
     )
     assert skipped == ["packages refresh"]
@@ -220,9 +218,9 @@ def test_register_is_skipped_when_refresh_disabled(
     )
 
     job.register_packages_job(
-        enabled_reader=lambda: True,
-        refresh_enabled_reader=lambda: False,
-        tick_reader=lambda: 900,
+        enabled=True,
+        refresh_enabled=False,
+        tick_seconds=900,
         host=fake_host(),
     )
 
@@ -238,9 +236,9 @@ def test_register_dispatches_to_the_platform(
     monkeypatch.setattr(cron, "register_platform_job", register)
 
     job.register_packages_job(
-        enabled_reader=lambda: True,
-        refresh_enabled_reader=lambda: True,
-        tick_reader=lambda: 900,
+        enabled=True,
+        refresh_enabled=True,
+        tick_seconds=900,
         host=fake_host(),
     )
     assert calls == ["register packages-refresh"]
