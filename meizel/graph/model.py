@@ -62,6 +62,8 @@ class Code(StrEnum):
     ENV_PATCH = "env-patch"
     UNRESOLVED_PATCH = "unresolved-patch"
     MISSING_PATCH_TARGET = "missing-patch-target"
+    PATCH_RAISING_FALSE = "patch-raising-false"
+    TEST_SUBCLASS_OVERRIDE = "test-subclass-override"
     IMPURE_EDGE = "impure-edge"
     IMPURE_CALL = "impure-call"
     UNFROZEN_VALUE = "unfrozen-value"

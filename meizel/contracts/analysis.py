@@ -22,7 +22,7 @@ from meizel.contracts.rule import (
     purity_diagnostics,
     stale_exports,
 )
-from meizel.graph.model import Code, DebtKey, Diagnostic, Fact, FactKind
+from meizel.graph.model import Code, DebtKey, Diagnostic, Fact, FactKind, Patch
 from meizel.graph.universe import Universe, load_universe
 from meizel.language.fixtures import FixtureIndex, fixture_facts
 from meizel.language.scan import EXTERNAL_FORMS, FileScan, mount_facts, scan_file
@@ -208,6 +208,37 @@ _PATCH_HINT = {
         "patching it"
     ),
 }
+# meiva:note
+# The two codes below carry their principle, recipe and rule as three lines; the target is zero,
+# not a long-term debt.
+_PATCH_REASONING = {
+    Code.PATCH_RAISING_FALSE: (
+        "why: `raising=False` turns a patch of a name that no longer exists into a silent no-op, so "
+        "the test keeps passing while it stops testing what it claims",
+        "instead: inject the dependency as a parameter; a name that is optional by design is "
+        "asserted to exist before it is patched, or the test builds the object that lacks it. "
+        "`missing-patch-target` is the same defect on a first-party module and cannot be recorded",
+        "see: docs/conventions/python-conventions.md#test-seams-in-another-shape",
+    ),
+    Code.TEST_SUBCLASS_OVERRIDE: (
+        "why: a test class that overrides one method of production code replaces behavior by "
+        "name, a patch in another spelling; later changes of the base silently stop being tested",
+        "instead: give the production class the value it reads as a constructor field and build "
+        "the real class with it; lift the overridden decision into a pure function; make the "
+        "fault with a real resource; only a fault no real resource can make takes a narrow "
+        "Protocol in base/ with its fake in base's tests/",
+        "see: docs/conventions/python-conventions.md#test-seams-in-another-shape",
+    ),
+}
+
+
+def _patch_message(patch: Patch) -> str:
+    if patch.code is Code.PATCH_RAISING_FALSE:
+        return f"{patch.form}(..., raising=False) on {patch.target}"
+    if patch.code is Code.TEST_SUBCLASS_OVERRIDE:
+        return f"a test subclass overrides {patch.target}"
+    suffix = " (imported binding)" if patch.imported else ""
+    return f"{patch.form} on {_PATCH_WHAT[patch.code]} {patch.target}{suffix}"
 
 
 def _patch_diagnostics(scans: Iterable[FileScan]) -> list[Diagnostic]:
@@ -216,8 +247,7 @@ def _patch_diagnostics(scans: Iterable[FileScan]) -> list[Diagnostic]:
     for scan in scans:
         owner = scan.path.rpartition("/")[0]
         for patch in scan.patches:
-            suffix = " (imported binding)" if patch.imported else ""
-            hints = [_PATCH_HINT[patch.code]]
+            hints = list(_PATCH_REASONING.get(patch.code) or (_PATCH_HINT[patch.code],))
             if patch.imported:
                 hints.append(
                     "target is an imported binding on this module rather than defined here; "
@@ -228,7 +258,7 @@ def _patch_diagnostics(scans: Iterable[FileScan]) -> list[Diagnostic]:
                     scan.path,
                     patch.line,
                     patch.code,
-                    f"{patch.form} on {_PATCH_WHAT[patch.code]} {patch.target}{suffix}",
+                    _patch_message(patch),
                     tuple(hints),
                     DebtKey(owner, file_key(owner, scan.path, f"{patch.form} {patch.target}")),
                 )
