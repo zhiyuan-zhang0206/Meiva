@@ -3,7 +3,7 @@
 # before the caller sleeps, so a caller that oversleeps by epsilon starts late and the caller
 # behind it keeps the slot it had already reserved: the observed gap shrinks by epsilon while
 # the slot never moves. Overshooting can therefore only make a request later than planned,
-# never earlier, which is the direction that matters for the account-level 5 QPS limit.
+# never earlier. This proves reserved slots, not minimum gaps between actual network receipts.
 
 from __future__ import annotations
 

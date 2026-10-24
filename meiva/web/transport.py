@@ -30,8 +30,8 @@ _DETAIL_MAX = 200
 
 
 # meiva:note
-# Spaces request starts `1/qps` seconds apart across the threads of one batch; a qps of zero or
-# below does not pace.
+# Reserves request slots `1/qps` seconds apart across the threads of one batch; late wake-ups
+# and network scheduling can compress actual request gaps. A qps of zero or below does not pace.
 class RateLimiter:
     def __init__(self, qps: float) -> None:
         self._interval = 1.0 / qps if qps > 0 else 0.0
