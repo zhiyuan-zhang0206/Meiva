@@ -14,8 +14,6 @@
 
 from __future__ import annotations
 
-from types import SimpleNamespace
-
 from base.deploy.lifecycle import service_selection
 from cli.commands.lifecycle.stop.choices import (
     BROWSER_SESSION,
@@ -52,13 +50,13 @@ def require_consistent(choices: StopChoices, *, pty_unit: str) -> None:
     # meiva:note
     # The rule and its words live in `service_selection.extras_keep_refusal`, which the fleet's
     # parser also uses, so an operator cannot be told two different things about one stop.
-    typed = SimpleNamespace(
-        extras="--stop-extras" if choices.teardown_extras else None,
-        shell="--keep-shell-sessions" if choices.keep_shell_sessions else None,
-        browser="--keep-browser" if choices.keep_browser else None,
-        kept="--keep-service" if choices.preserve_sessions else None,
+    refusal = service_selection.extras_keep_refusal(
+        stop_extras=choices.teardown_extras,
+        keep_shell_sessions=choices.keep_shell_sessions,
+        keep_browser=choices.keep_browser,
+        keep_service=bool(choices.preserve_sessions),
     )
-    if refusal := service_selection.extras_keep_refusal(typed):
+    if refusal:
         raise ValueError(refusal)
     # meiva:note
     # Shell sessions and the browser have their own choices, never `--keep-service`.

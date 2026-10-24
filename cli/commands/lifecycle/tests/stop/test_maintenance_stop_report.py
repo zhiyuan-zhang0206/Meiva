@@ -15,6 +15,7 @@ import pytest
 from base.deploy.lifecycle import status_journal
 from base.native_process.ownership import OwnedProcess
 from base.sessions.pty import closure
+from base.sessions.pty.survivor_role import SurvivorRole
 from base.sessions.record import SessionRecord
 from cli.commands.data_plane import maintenance_stop_report as report
 from cli.commands.lifecycle.stop import report as stop_report
@@ -67,7 +68,7 @@ def test_shell_survivor_names_itself_and_persists_exact_inventory(
     )
     identity = identity_of(process)
     survivor_outcome = closure.Outcome(
-        survivors=(closure.Survivor("private-shell-session", identity, "shell"),)
+        survivors=(closure.Survivor("private-shell-session", identity, SurvivorRole.SHELL),)
     )
     assert status_journal.begin(home, "stop")
     with pytest.raises(report.StopIncompleteError) as caught:
@@ -119,7 +120,7 @@ def test_report_keeps_known_job_diagnostic_of_a_closed_session(
     child = OwnedProcess.capture(children[0])
     outcome = closure.Outcome(
         closed=(closed_session("private-shell-session", ((child.pid, "python"),)),),
-        survivors=(closure.Survivor("private-shell-session", child, "job"),),
+        survivors=(closure.Survivor("private-shell-session", child, SurvivorRole.JOB),),
     )
     settle(outcome, stop_runtime, operator_database, window_s=0.35)
     assert child.live()

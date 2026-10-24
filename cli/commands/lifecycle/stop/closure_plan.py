@@ -10,7 +10,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from enum import Enum
+
+from base.sessions.pty.survivor_role import SurvivorRole
 
 __all__ = [
     "AwaitNoSessions",
@@ -18,25 +19,12 @@ __all__ = [
     "FailShells",
     "ReportJobLeftover",
     "SurvivorFact",
-    "SurvivorRole",
     "WriteNotices",
     "forced_failure_message",
     "job_leftover_line",
     "plan_after_closure",
     "shells_alive_header",
 ]
-
-
-# meiva:note
-# What a known process the closure reported is to its session: the shell itself or any other
-# recorded member.
-#
-# These are the two strings `base/sessions/pty/closure.Survivor.role` carries on the wire. Any
-# other string is a contract break between the service and this stop, so `SurvivorRole(raw)`
-# refuses it with a `ValueError` where the shell reads the outcome; it is never taken for a job.
-class SurvivorRole(Enum):
-    SHELL = "shell"
-    JOB = "job"
 
 
 # meiva:note
