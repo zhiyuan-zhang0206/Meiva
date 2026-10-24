@@ -25,7 +25,7 @@ real trough sits elsewhere retunes the hours below, not the timezone.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -62,14 +62,12 @@ def _mb(b: int) -> float:
     return round(b / 1024 / 1024, 1)
 
 
-def in_low_traffic_window(timezone: str, now: datetime | None = None) -> bool:
-    """True inside 05:00-08:00 cluster time (agent-lowest hours).
-
-    `timezone` is the cluster timezone the daemon's slice carries, so a config
-    write plus a daemon restart is enough to move the window.
-    """
-    if now is None:
-        now = datetime.now(UTC)
+# meiva:note
+# True inside 05:00-08:00 cluster time (agent-lowest hours) at the instant `now`.
+#
+# `timezone` is the cluster timezone the daemon's slice carries, so a config
+# write plus a daemon restart is enough to move the window.
+def in_low_traffic_window(timezone: str, now: datetime) -> bool:
     local = now.astimezone(ZoneInfo(timezone))
     return _WINDOW_START_HOUR <= local.hour < _WINDOW_END_HOUR
 
@@ -201,16 +199,18 @@ def vacuum_checkpoint_tables(conn: Any) -> VacuumResult:
     return result
 
 
-def run_blob_vacuum(db: Database, *, timezone: str, force: bool = False) -> VacuumResult:
-    """Daemon entry point: skip outside the low-traffic window (unless
-    `force`), then dial a direct autocommit connection and vacuum.
-
-    A fresh cluster before the PostgresSaver has created its tables reads as a
-    no-op (logged, not raised): a missing table here must not crash the
-    maintenance daemon (its ProgrammingError handler exits the daemon), which
-    would turn the daily window into a crash loop on greenfield clusters.
-    """
-    if not force and not in_low_traffic_window(timezone):
+# meiva:note
+# Daemon entry point: skip outside the low-traffic window at `now` (unless
+# `force`), then dial a direct autocommit connection and vacuum.
+#
+# A fresh cluster before the PostgresSaver has created its tables reads as a
+# no-op (logged, not raised): a missing table here must not crash the
+# maintenance daemon (its ProgrammingError handler exits the daemon), which
+# would turn the daily window into a crash loop on greenfield clusters.
+def run_blob_vacuum(
+    db: Database, *, timezone: str, now: datetime, force: bool = False
+) -> VacuumResult:
+    if not force and not in_low_traffic_window(timezone, now):
         return VacuumResult(ran=False, total_bytes=0, dead_tuples=0)
     try:
         with db.connect(direct=True, autocommit=True) as conn:

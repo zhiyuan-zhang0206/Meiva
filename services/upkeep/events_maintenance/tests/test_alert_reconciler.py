@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import json
+from collections.abc import Callable, Generator
+from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any, cast
 
 import httpx
 import psycopg
@@ -14,6 +17,8 @@ from base.clock import SYSTEM_TIMERS
 from base.config import ConfigBoot
 from base.daemon.loop_health import LoopProgress
 from base.db.code_version_gate import ProcessDbGate
+from base.events.live.bus import EventBus
+from ops.alerts import ALERTS_CHANNEL
 from services.upkeep.events_maintenance.alert_reconciler import (
     GrafanaSnapshotError,
     grafana_active_alert_keys,
@@ -22,6 +27,7 @@ from services.upkeep.events_maintenance.alert_reconciler import (
     reconciliation_round,
 )
 from services.upkeep.events_maintenance.config import EventsMaintenanceConfig
+from services.upkeep.events_maintenance.tests.db_faults import write_fails
 from services.upkeep.events_maintenance.tests.slices import events_maintenance_config
 
 
@@ -31,6 +37,32 @@ def _config(
     return events_maintenance_config(
         process_config, grafana_admin_password=SecretStr("grafana-test-password")
     )
+
+
+# meiva:note
+# The alert rows published on the SSE channel, read from a real Redis subscription. `drain()` returns
+# the frames that arrived since the last call, waiting briefly for late ones. redis-py types
+# `pubsub(**kwargs)` with Unknown keyword values, so that member read is partially unknown under
+# strict checking while the call and its result are typed.
+@contextmanager
+def _alerts_published(bus: EventBus) -> Generator[Callable[[], list[dict[str, Any]]]]:
+    with bus.sync_redis(decode_responses=True) as client:
+        pubsub = client.pubsub()  # pyright: ignore[reportUnknownMemberType]
+        pubsub.subscribe(ALERTS_CHANNEL)
+        assert pubsub.get_message(timeout=5.0) is not None, "the subscription was not confirmed"
+
+        def drain() -> list[dict[str, Any]]:
+            frames: list[dict[str, Any]] = []
+            while (
+                message := cast("dict[str, Any] | None", pubsub.get_message(timeout=0.5))
+            ) is not None:
+                frames.append(json.loads(message["data"]))
+            return frames
+
+        try:
+            yield drain
+        finally:
+            pubsub.close()
 
 
 def _insert_alert(
@@ -185,7 +217,7 @@ def test_reconcile_open_grafana_alerts_resolves_only_snapshot_misses(
 async def test_reconcile_once_fetches_truth_and_publishes_resolved_rows(
     process_config: ConfigBoot,
     db_conn: psycopg.Connection,
-    monkeypatch: pytest.MonkeyPatch,
+    event_bus: EventBus,
     *,
     database_gate: ProcessDbGate,
 ) -> None:
@@ -204,11 +236,12 @@ async def test_reconcile_once_fetches_truth_and_publishes_resolved_rows(
         assert request.headers["Authorization"].startswith("Basic ")
         return httpx.Response(200, json=[])
 
-    published: list[dict[str, Any]] = []
     db_pool = base.db.pool(gate=database_gate)
     try:
-        async with httpx.AsyncClient(transport=httpx.MockTransport(_grafana)) as client:
-            resolved = await reconcile_once(db_pool, client, published.extend, config)
+        with _alerts_published(event_bus) as drain:
+            async with httpx.AsyncClient(transport=httpx.MockTransport(_grafana)) as client:
+                resolved = await reconcile_once(db_pool, client, event_bus, config)
+            published = drain()
     finally:
         db_pool.close()
 
@@ -240,20 +273,23 @@ def _seed_stale_alert(conn: psycopg.Connection) -> int:
 async def test_a_grafana_that_cannot_give_a_snapshot_leaves_every_row_and_the_round_goes_on(
     process_config: ConfigBoot,
     db_conn: psycopg.Connection,
-    monkeypatch: pytest.MonkeyPatch,
+    event_bus: EventBus,
     answer: httpx.Response,
     *,
     database_gate: ProcessDbGate,
 ) -> None:
     alert_id = _seed_stale_alert(db_conn)
     progress = LoopProgress("alert-reconciliation", 180.0, timers=SYSTEM_TIMERS)
-    published: list[dict[str, Any]] = []
     db_pool = base.db.pool(gate=database_gate)
     try:
-        async with httpx.AsyncClient(transport=httpx.MockTransport(lambda _r: answer)) as client:
-            await reconciliation_round(
-                db_pool, client, published.extend, progress, _config(process_config)
-            )
+        with _alerts_published(event_bus) as drain:
+            async with httpx.AsyncClient(
+                transport=httpx.MockTransport(lambda _r: answer)
+            ) as client:
+                await reconciliation_round(
+                    db_pool, client, event_bus, progress, _config(process_config)
+                )
+            published = drain()
     finally:
         db_pool.close()
 
@@ -268,28 +304,31 @@ async def test_a_grafana_that_cannot_give_a_snapshot_leaves_every_row_and_the_ro
 async def test_an_unexpected_error_in_a_round_is_not_swallowed(
     process_config: ConfigBoot,
     db_conn: psycopg.Connection,
-    monkeypatch: pytest.MonkeyPatch,
+    event_bus: EventBus,
     *,
     database_gate: ProcessDbGate,
 ) -> None:
     old = datetime.now(UTC) - timedelta(hours=1)
-    _insert_alert(db_conn, fingerprint="gone", starts_at=old, updated_at=old)
+    alert_id = _insert_alert(db_conn, fingerprint="gone", starts_at=old, updated_at=old)
     db_conn.commit()
-
-    def publish(_rows: list[dict[str, Any]]) -> None:
-        raise RuntimeError("publisher bug")
 
     db_pool = base.db.pool(gate=database_gate)
     try:
         transport = httpx.MockTransport(lambda _r: httpx.Response(200, json=[]))
         async with httpx.AsyncClient(transport=transport) as client:
-            with pytest.raises(RuntimeError, match="publisher bug"):
+            with (
+                write_fails(db_conn, "alerts", on="UPDATE"),
+                pytest.raises(psycopg.errors.RaiseException),
+            ):
                 await reconciliation_round(
                     db_pool,
                     client,
-                    publish,
+                    event_bus,
                     LoopProgress("alert-reconciliation", 180.0, timers=SYSTEM_TIMERS),
                     _config(process_config),
                 )
     finally:
         db_pool.close()
+
+    row = db_conn.execute("SELECT status FROM alerts WHERE id = %s", (alert_id,)).fetchone()
+    assert row == ("unresolved",)
