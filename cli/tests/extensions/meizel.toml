@@ -1,0 +1,2 @@
+[uses]
+"test_plugins_inspect_root.py" = ["child_plugins_inspect_root.py"]
