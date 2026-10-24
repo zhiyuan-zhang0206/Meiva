@@ -166,7 +166,7 @@ def test_closed_postgres_with_unknown_scan_refuses_restart(
     pg.write(pg_data, _pg_receipt(pg_data))
     monkeypatch.setattr(pg.OwnedProcess, "live", Mock(return_value=False))
 
-    def unknown(_data: Path, _receipt: pg.Receipt | None) -> None:
+    def unknown(_data: Path, _receipt: pg.Receipt | None, **_kw: object) -> None:
         raise PermissionError("native metadata unavailable")
 
     monkeypatch.setattr(pg, "require_closed", unknown)
@@ -278,7 +278,7 @@ def test_stop_reaps_only_the_matching_home_child_after_native_closure(
     monkeypatch.setattr(pg, "capture_tree", Mock(return_value=[]))
     monkeypatch.setattr(pg.OwnedProcess, "send_signal", Mock(return_value=True))
 
-    def closed(_data: Path, _receipt: pg.Receipt) -> None:
+    def closed(_data: Path, _receipt: pg.Receipt, **_kw: object) -> None:
         order.append("closed")
 
     monkeypatch.setattr(pg, "require_closed", closed)

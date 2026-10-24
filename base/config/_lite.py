@@ -251,14 +251,17 @@ def _log_upgrade(reason: str) -> None:
     logger.debug("config boot-lite upgraded to the eager config chain (reason={!r})", reason)
 
 
+# meiva:note
+# One composition owner's lazy configuration, overlays and build gate.
+#
+# Construction performs no environment delivery or full-model build. Call boot() at the existing
+# process entry, the composition root. The root reads `view` once and builds each component's
+# frozen `XxxConfig` value from it; `view` itself, and closures over it, stay in the root module
+# and are never handed to a component. A component that must see a later change is handed the
+# `ConfigBoot` as a real resource and builds a fresh value at its unit of work. A view always
+# resolves this instance, including after upgrade.
+# meiva:link base/config/docs/config-roots.meiva.okf.md
 class ConfigBoot:
-    """One composition owner's lazy configuration, overlays and build gate.
-
-    Construction performs no environment delivery or full-model build. Call
-    boot() at the existing process entry; pass view or narrow reader closures
-    to consumers. A view always resolves this instance, including after upgrade.
-    """
-
     __slots__ = (
         "_lock",
         "env_boot",
