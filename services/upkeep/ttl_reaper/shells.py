@@ -39,8 +39,6 @@ from __future__ import annotations
 import asyncio
 import functools
 import logging
-from collections import defaultdict
-from collections.abc import Callable, Coroutine
 from datetime import datetime
 from typing import Any
 
@@ -49,20 +47,21 @@ from psycopg.rows import dict_row
 from psycopg_pool import ConnectionPool
 
 from base import telemetry
-from base.api_contracts.agent_contract import ShellKillMode
 from base.daemon import round_loop
 from base.daemon.loop_health import LoopProgress
 from base.db import Database
 from base.db.transaction import write_transaction
 from base.events.live.bus import EventBus
 from ops.cluster import rpc as cluster_rpc
+from services.upkeep.ttl_reaper import shell_plan
+from services.upkeep.ttl_reaper.config import TtlReaperConfig
 from services.upkeep.ttl_reaper.owner_notice import (
     PASS_BATCH,
     OwnerMessage,
     notify_owner,
     wake_owners,
-    wall_clock,
 )
+from services.upkeep.ttl_reaper.shell_plan import ExpiredShell, Settlement
 
 _log = logging.getLogger(__name__)
 
@@ -73,24 +72,22 @@ _SHELL_KILL_TIMEOUT_S = 5.0
 _MACHINE_CONCURRENCY = 8
 
 
+# meiva:note
+# Overall deadline for one shell_kill dispatch: the RPC client's worst case at the per-attempt
+# budget, so it only cuts a dispatch the client's own timeout and retry budgets did not. The
+# daemon reads it once into `TtlReaperConfig.shell_kill_deadline_s`.
 def dispatch_deadline_s() -> float:
-    """Overall deadline for one shell_kill dispatch: the RPC client's worst case
-    at the per-attempt budget, so it only cuts a dispatch the client's own
-    timeout and retry budgets did not."""
     return cluster_rpc.worst_case_dispatch_seconds(_SHELL_KILL_TIMEOUT_S)
 
 
-def expired_shell_rows_blocking(pool: ConnectionPool) -> list[dict[str, Any]]:
-    """TTL-expired shell tracking rows with their owner's home machine, oldest
-    deadline first.
-
-    Schedule sessions never carry rows at all (they have no agent id; the
-    ScheduleManager reaps them — see ``services/wake/schedule_manager/manager.py``
-    ``_launch``).
-
-    Each row carries ``expires_at`` and ``created_at`` so the interruption
-    notice can state when the TTL expired and how long it was (the duration
-    is ``expires_at - created_at``; no extra column needed)."""
+# meiva:note
+# TTL-expired shell tracking rows with their owner's home machine, oldest deadline first.
+#
+# Schedule sessions never carry rows at all (they have no agent id; the ScheduleManager reaps
+# them, see ``services/wake/schedule_manager/manager.py`` ``_launch``). Each row carries
+# ``expires_at`` and ``created_at`` so the interruption notice can state when the TTL expired
+# and how long it was.
+def expired_shell_rows_blocking(pool: ConnectionPool) -> list[ExpiredShell]:
     with pool.connection() as conn, conn.cursor(row_factory=dict_row) as cur:
         cur.execute(
             "SELECT t.agent_id, t.session_id, t.expires_at, t.created_at, m.machine "
@@ -99,7 +96,7 @@ def expired_shell_rows_blocking(pool: ConnectionPool) -> list[dict[str, Any]]:
             "ORDER BY t.agent_id, t.session_id LIMIT %s",
             (PASS_BATCH,),
         )
-        return [dict(row) for row in cur.fetchall()]
+        return [ExpiredShell(**row) for row in cur.fetchall()]
 
 
 def claim_still_expired(cur: psycopg.Cursor[Any], agent_id: int, session_id: int) -> bool:
@@ -137,16 +134,12 @@ def claim_shell_row_still_expired(pool: ConnectionPool, agent_id: int, session_i
         return claim_still_expired(cur, agent_id, session_id)
 
 
-def human_ttl(seconds: float) -> str:
-    """A TTL duration as a compact human string: 1h, 30m, 90s."""
-    seconds = max(0, int(seconds))
-    if seconds >= 3600 and seconds % 3600 == 0:
-        return f"{seconds // 3600}h"
-    if seconds >= 60 and seconds % 60 == 0:
-        return f"{seconds // 60}m"
-    return f"{seconds}s"
-
-
+# meiva:note
+# Drop a reclaimed shell's tracking row and queue `notice` for its owner when there is one.
+#
+# The caller decides the text (`shell_plan.reclaim_notice`): an empty shell's reaping is silent,
+# a reaped watcher session reads like any other interrupted job. The owner is woken only after
+# the row is deleted and the transaction committed.
 def delete_shell_row(
     pool: ConnectionPool,
     db: Database,
@@ -154,19 +147,8 @@ def delete_shell_row(
     agent_id: int,
     session_id: int,
     *,
-    interrupted: bool,
-    name: str | None = None,
-    expires_at: datetime | None = None,
-    created_at: datetime | None = None,
+    notice: str | None,
 ) -> None:
-    """Drop a reclaimed shell's tracking row; notify its live owner only when
-    the reclamation interrupted a running job (an empty shell's reaping is
-    silent — user ruling 2026-08-27). The notice states when the TTL expired
-    and how long it was (``expires_at`` / ``created_at`` from the row).
-
-    A watcher session (just a shell session running a generated script) gets
-    this exact same notice — it always carries a running job, so the reclaim
-    always interrupts one."""
     queued: list[OwnerMessage] = []
     with write_transaction(pool) as conn:
         with conn.cursor() as cur:
@@ -174,58 +156,27 @@ def delete_shell_row(
                 "DELETE FROM agent_shell_ttls WHERE agent_id = %s AND session_id = %s",
                 (agent_id, session_id),
             )
-        if interrupted:
-            label = (
-                f"Shell session {name!r} (id {session_id}, agent {agent_id})"
-                if name
-                else f"Shell session {session_id} (agent {agent_id})"
-            )
-            detail = ""
-            if expires_at is not None:
-                ttl = (
-                    f", TTL {human_ttl((expires_at - created_at).total_seconds())}"
-                    if created_at is not None
-                    else ""
-                )
-                detail = f" at {wall_clock(expires_at)}{ttl}"
-            message = notify_owner(
-                conn,
-                agent_id,
-                f"{label} was reclaimed after its TTL expired{detail}, interrupting a running task.",
-            )
+        if notice is not None:
+            message = notify_owner(conn, agent_id, notice)
             if message is not None:
                 queued.append(message)
     wake_owners(db, bus, queued)
 
 
-class _MachineAbsent:
-    """Local registry evidence, never a verdict accepted from a runner payload."""
-
-
-ShellKillDispatcher = Callable[..., Coroutine[Any, Any, dict[str, Any]]]
-
-
+# meiva:note
+# One ``shell_kill`` dispatch settled into a verdict, or None for "defer to the next round".
+#
+# A machine absent from the machines registry (task #4143) cannot be dialed: the row
+# terminalizes with the distinct ``machine_absent`` verdict, because the live-host ``absent``
+# means the host answered that the session already ended, while no host exists here to answer
+# at all. Deferring would retry the row forever. An unreachable machine, a failed op, a
+# malformed answer or a dispatch that outlives `deadline_s` defers: the session may still live.
 async def dispatch_shell_kill(
-    db: Database,
-    machine: str,
-    agent_id: int,
-    session_id: int,
-    *,
-    dispatch_fn: ShellKillDispatcher = cluster_rpc.dispatch_to_machine,
-    deadline_s: float | None = None,
-) -> dict[str, Any] | _MachineAbsent | None:
-    """One ``shell_kill`` dispatch; None means "defer to the next round".
-
-    A machine absent from the machines registry (task #4143) cannot be dialed:
-    the row terminalizes with the distinct ``machine_absent`` verdict — the
-    live-host ``absent`` means the host answered that the session already
-    ended, while no host exists here to answer at all. Deferring would retry
-    the row forever. An unreachable machine, a failed op or a dispatch that
-    outlives its deadline defers: the session may still live.
-    """
+    db: Database, machine: str, agent_id: int, session_id: int, *, deadline_s: float
+) -> Settlement | None:
     try:
-        async with asyncio.timeout(dispatch_deadline_s() if deadline_s is None else deadline_s):
-            return await dispatch_fn(
+        async with asyncio.timeout(deadline_s):
+            answer = await cluster_rpc.dispatch_to_machine(
                 db,
                 machine,
                 "shell_kill",
@@ -240,7 +191,7 @@ async def dispatch_shell_kill(
             agent_id,
             machine,
         )
-        return _MachineAbsent()
+        return shell_plan.machine_absent_settlement()
     except (cluster_rpc.ClusterOpUnreachable, cluster_rpc.ClusterOpFailed, TimeoutError) as exc:
         _log.warning(
             "[ttl-reaper] shell_kill for agent %s session %s deferred: %r",
@@ -249,60 +200,44 @@ async def dispatch_shell_kill(
             exc,
         )
         return None
+    settlement = shell_plan.settle(answer)
+    if settlement is None:
+        _log.warning(
+            "[ttl-reaper] shell_kill for agent %s session %s returned %r",
+            agent_id,
+            session_id,
+            answer,
+        )
+    return settlement
 
 
+# meiva:note
+# Reclaim one expired shell on `machine`: the (agent, session) when its row was settled, None
+# when the row is left for the next round.
 async def reclaim_row(
     pool: ConnectionPool,
     db: Database,
     bus: EventBus,
     machine: str,
-    row: dict[str, Any],
-    *,
-    dispatch_fn: ShellKillDispatcher = cluster_rpc.dispatch_to_machine,
+    shell: ExpiredShell,
+    config: TtlReaperConfig,
 ) -> tuple[int, int] | None:
-    """Reclaim one expired shell on `machine`; the (agent, session) when its row
-    was settled, None when the row is left for the next round."""
-    agent_id = row["agent_id"]
-    session_id = row["session_id"]
+    agent_id = shell.agent_id
+    session_id = shell.session_id
     if not await asyncio.to_thread(claim_shell_row_still_expired, pool, agent_id, session_id):
         # Renewed between the select and this dispatch — the deadline moved
         # forward, so the session is no longer reaper business.
         _log.info("[ttl-reaper] shell %s of agent %s was renewed — skipping", session_id, agent_id)
         return None
-    result = await dispatch_shell_kill(db, machine, agent_id, session_id, dispatch_fn=dispatch_fn)
-    if result is None:
-        return None
-    if isinstance(result, _MachineAbsent):
-        mode = None
-        interrupted = False
-    else:
-        try:
-            mode = ShellKillMode(result["mode"])
-            # Notify only when the reap cut short a running job. Absent
-            # sessions never notify (nothing was interrupted).
-            interrupted = mode is ShellKillMode.KILLED and bool(result["interrupted"])
-        except (KeyError, ValueError):
-            _log.warning(
-                "[ttl-reaper] shell_kill for agent %s session %s returned %r",
-                agent_id,
-                session_id,
-                result,
-            )
-            return None
-    await asyncio.to_thread(
-        functools.partial(
-            delete_shell_row,
-            pool,
-            db,
-            bus,
-            agent_id,
-            session_id,
-            interrupted=interrupted,
-            name=result.get("name") if isinstance(result, dict) else None,
-            expires_at=row["expires_at"],
-            created_at=row["created_at"],
-        )
+    settlement = await dispatch_shell_kill(
+        db, machine, agent_id, session_id, deadline_s=config.shell_kill_deadline_s
     )
+    if settlement is None:
+        return None
+    notice = shell_plan.reclaim_notice(
+        shell, settlement, zone=config.zone, today=datetime.now(config.zone).date()
+    )
+    await asyncio.to_thread(delete_shell_row, pool, db, bus, agent_id, session_id, notice=notice)
     telemetry.emit(
         "log",
         "shell_ttl_expired",
@@ -311,8 +246,8 @@ async def reclaim_row(
         attributes={
             "agent_id": agent_id,
             "session_id": session_id,
-            "mode": mode.value if mode is not None else "machine_absent",
-            "interrupted": interrupted,
+            "mode": settlement.verdict,
+            "interrupted": settlement.interrupted,
         },
     )
     return agent_id, session_id
@@ -323,9 +258,7 @@ async def reap_expired_shells(
     db: Database,
     bus: EventBus,
     progress: LoopProgress,
-    *,
-    expired_rows_fn: Callable[[ConnectionPool], list[dict[str, Any]]] = expired_shell_rows_blocking,
-    dispatch_fn: ShellKillDispatcher = cluster_rpc.dispatch_to_machine,
+    config: TtlReaperConfig,
 ) -> list[tuple[int, int]]:
     """Kill every TTL-expired shell session on its home machine; return the
     (agent, session) pairs whose rows were settled.
@@ -334,29 +267,24 @@ async def reap_expired_shells(
     owner has no usable home machine is left for the next round. All DB work
     runs via to_thread: the event loop never blocks on psycopg.
     """
-    rows = await asyncio.to_thread(expired_rows_fn, pool)
-    by_machine: dict[str, list[dict[str, Any]]] = defaultdict(list)
-    for row in rows:
-        machine = row["machine"]
-        if not machine or machine == "unknown":
-            _log.warning(
-                "[ttl-reaper] shell %s of agent %s has unknown machine — deferring",
-                row["session_id"],
-                row["agent_id"],
-            )
-            continue
-        by_machine[machine].append(row)
+    plan = shell_plan.plan_round(await asyncio.to_thread(expired_shell_rows_blocking, pool))
+    for shell in plan.unplaced:
+        _log.warning(
+            "[ttl-reaper] shell %s of agent %s has unknown machine — deferring",
+            shell.session_id,
+            shell.agent_id,
+        )
     reaped: list[tuple[int, int]] = []
 
-    async def reclaim_machine(machine: str, machine_rows: list[dict[str, Any]]) -> None:
-        for row in machine_rows:
-            settled = await reclaim_row(pool, db, bus, machine, row, dispatch_fn=dispatch_fn)
+    async def reclaim_machine(batch: shell_plan.MachineBatch) -> None:
+        for shell in batch.shells:
+            settled = await reclaim_row(pool, db, bus, batch.machine, shell, config)
             if settled is not None:
                 reaped.append(settled)
             progress.beat()
 
     await round_loop.fan_out(
-        [functools.partial(reclaim_machine, machine, rs) for machine, rs in by_machine.items()],
+        [functools.partial(reclaim_machine, batch) for batch in plan.batches],
         concurrency=_MACHINE_CONCURRENCY,
         progress=progress,
     )

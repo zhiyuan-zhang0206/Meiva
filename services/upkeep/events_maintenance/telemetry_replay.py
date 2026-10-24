@@ -20,7 +20,6 @@ from typing import Any
 
 from psycopg import Connection
 
-from base.paths import logs_dir
 from base.telemetry.event_store import ensure_partitions, insert_rows, jsonl_rows
 
 _BATCH_LINES = 500
@@ -65,11 +64,12 @@ def replay_file(conn: Connection[Any], path: Path, *, deadline: float) -> int:
     return inserted
 
 
-def recover_telemetry_events(conn: Connection[Any]) -> int:
-    """One bounded pass over this machine's full mirror files, newest first."""
+# meiva:note
+# One bounded pass over this machine's full mirror files in `logs`, newest first.
+def recover_telemetry_events(conn: Connection[Any], *, logs: Path) -> int:
     deadline = time.monotonic() + _PASS_SECONDS
     inserted = 0
-    for path in sorted(logs_dir().glob("events-????????.jsonl"), reverse=True):
+    for path in sorted(logs.glob("events-????????.jsonl"), reverse=True):
         if time.monotonic() >= deadline:
             break
         try:

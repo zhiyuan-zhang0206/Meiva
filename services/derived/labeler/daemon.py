@@ -22,14 +22,13 @@ import signal
 import sys
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
 
 import psycopg
 from psycopg_pool import ConnectionPool
 
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.machine.boot import machine_from_boot
-from base.config import ConfigBoot, settings
+from base.config import ConfigBoot
 from base.config.domains.lm import LmSettings
 from base.config.profiles import PROCESS_PROFILES, profile_unknown_error
 from base.daemon.endpoints import ServiceEndpoint, ServiceEndpoints
@@ -38,18 +37,19 @@ from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.db.config import db_config_from_boot
-from base.events.live.bus import EventBus
+from base.events.live.bus import EventBus, event_bus_config_from_config
 from base.host.env.agent_slices import ModelOverrides
 from base.host.exit_codes import hard_exit as _hard_exit
 from base.lm.catalog import ModelCatalog
 from base.lm.catalog.provider_keys import ProviderKeys
-from base.lm.factory import build_chat_model, process_provider_keys
+from base.lm.factory import process_provider_keys
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
 from base.packages.plugin_providers import build_model_catalog
 from base.paths import meiva_home
 from base.telemetry import build_pipeline
 from base.telemetry.process_logging import init_gateway_process
+from services.derived.labeler import label_rules
 from services.derived.labeler.config import LabelerConfig
 from services.derived.labeler.labeler import generate_label_async
 from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
@@ -63,11 +63,13 @@ POLL_INTERVAL_S = 1.0
 LIVENESS_TIMEOUT_S = 120.0
 
 
-def labeler_config() -> LabelerConfig:
-    """The composition root: the one place this package reads `settings`."""
+# meiva:note
+# The composition root's read of the labeler's configuration, from the process's `ConfigBoot`.
+def labeler_config(config: ConfigBoot) -> LabelerConfig:
     return LabelerConfig(
-        labeler_model=settings.lm.labeler_model,
-        labeler_max_chars=settings.services.labeler_max_chars,
+        labeler_model=config.view.lm.labeler_model,
+        labeler_max_chars=config.view.services.labeler_max_chars,
+        poll_interval_s=POLL_INTERVAL_S,
     )
 
 
@@ -180,7 +182,6 @@ async def dispatch_loop(
     liveness: Liveness,
     config: LabelerConfig,
     *,
-    build_chat_model: Callable[..., Any],
     catalog: ModelCatalog,
     keys: ProviderKeys,
     llm_override: str,
@@ -202,13 +203,13 @@ async def dispatch_loop(
     attempted: set[int] = set()
     while True:
         liveness.beat()
-        await asyncio.sleep(POLL_INTERVAL_S)
+        await asyncio.sleep(config.poll_interval_s)
         with pool.connection() as conn, conn.cursor() as cur:
             rows = select_unlabeled(cur, list(attempted))
-        for tid, prompt in rows:
-            liveness.beat()  # per-item: a slow LLM call must not look like a wedge
-            if not prompt:
-                continue
+        for tid, prompt in label_rules.prompts_to_attempt(rows):
+            # meiva:note
+            # per-item: a slow LLM call must not look like a wedge
+            liveness.beat()
             attempted.add(tid)
             result = await generate_label_async(
                 tid,
@@ -216,7 +217,6 @@ async def dispatch_loop(
                 config,
                 db,
                 bus,
-                build_chat_model=build_chat_model,
                 catalog=catalog,
                 keys=keys,
                 llm_override=llm_override,
@@ -257,18 +257,20 @@ async def run(
     db = database()
     pool = db.pool()
     catalog = build_model_catalog()
+    bus = EventBus(event_bus_config_from_config(process_config))
     try:
         await dispatch_loop(
             pool,
             db,
-            EventBus.from_settings(),
+            bus,
             liveness,
-            labeler_config(),
-            build_chat_model=build_chat_model,
+            labeler_config(process_config),
             catalog=catalog,
             keys=process_provider_keys(catalog),
-            llm_override=settings.lm.llm_override,
-            overrides=labeler_model_overrides(profile=settings.profile, lm=settings.lm),
+            llm_override=process_config.view.lm.llm_override,
+            overrides=labeler_model_overrides(
+                profile=process_config.view.profile, lm=process_config.view.lm
+            ),
         )
     finally:
         pool.close()
@@ -277,7 +279,7 @@ async def run(
         _log.info("[labeler] daemon stopped")
 
 
-def main(*, exit_process: Callable[[int], None] | None = None) -> None:
+def main() -> None:
     """Entry point: init logger + run asyncio loop.
 
     SIGTERM (the graceful stop the fleet update sends) and Ctrl-C converge on
@@ -343,7 +345,7 @@ def main(*, exit_process: Callable[[int], None] | None = None) -> None:
         code = 1
     finally:
         _remove_pidfile(machine_config, runtime=process_home / "run")
-    (exit_process or _hard_exit)(code)
+    _hard_exit(code)
 
 
 if __name__ == "__main__":
