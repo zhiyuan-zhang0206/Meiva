@@ -15,9 +15,10 @@ from services.entrypoints.im_bridge.tests.adapters.test_weixin_adapter import en
 
 
 def set_account(
-    *, account_id: str = "bot-id", base_url: str = "https://ilinkai.weixin.qq.com"
+    state_dir: Path, *, account_id: str = "bot-id", base_url: str = "https://ilinkai.weixin.qq.com"
 ) -> None:
     save_account(
+        state_dir,
         account_id=account_id,
         base_url=base_url,
         user_id="bot-user-id",
@@ -25,8 +26,8 @@ def set_account(
     )
 
 
-async def inbound_key(provider_id: object, text: str = "same") -> str | None:
-    account = load_account()
+async def inbound_key(state_dir: Path, provider_id: object, text: str = "same") -> str | None:
+    account = load_account(state_dir)
     assert account is not None
     return ordinary_chat_key(
         base_url=account["base_url"],
@@ -37,13 +38,15 @@ async def inbound_key(provider_id: object, text: str = "same") -> str | None:
     )
 
 
-async def test_uint64_identity_is_lossless_and_canonical_across_restart(env: Path) -> None:
+async def test_uint64_identity_is_lossless_and_canonical_across_restart(
+    env: Path, state_dir: Path
+) -> None:
     numeric = 18_446_744_073_709_551_615
-    keys = [await inbound_key(value) for value in (numeric, str(numeric))]
+    keys = [await inbound_key(state_dir, value) for value in (numeric, str(numeric))]
     assert keys[0] == keys[1]
     assert keys[0] is not None and keys[0].startswith("weixin-chat-v1:")
-    assert await inbound_key("00000000000000000123") == await inbound_key(123)
-    assert await inbound_key(numeric - 1) != keys[0]
+    assert await inbound_key(state_dir, "00000000000000000123") == await inbound_key(state_dir, 123)
+    assert await inbound_key(state_dir, numeric - 1) != keys[0]
 
 
 @pytest.mark.parametrize(
@@ -70,16 +73,16 @@ async def test_uint64_identity_is_lossless_and_canonical_across_restart(env: Pat
     ],
 )
 async def test_unqualified_provider_ids_do_not_claim_stable_chat_identity(
-    env: Path, provider_id: object
+    env: Path, provider_id: object, state_dir: Path
 ) -> None:
-    assert await inbound_key(provider_id) is None
+    assert await inbound_key(state_dir, provider_id) is None
 
 
 @pytest.mark.parametrize("text", ["/help", "/unknown", "spawn:model:test", "notice:read:1:2"])
 async def test_commands_and_notice_paths_do_not_receive_ordinary_chat_keys(
-    env: Path, text: str
+    env: Path, text: str, state_dir: Path
 ) -> None:
-    assert await inbound_key("123", text) is None
+    assert await inbound_key(state_dir, "123", text) is None
 
 
 async def test_spawn_source_identity_is_account_qualified_not_legacy_peer_hash(env: Path) -> None:
@@ -107,19 +110,23 @@ async def test_spawn_source_identity_is_account_qualified_not_legacy_peer_hash(e
         "https:///missing",
     ],
 )
-async def test_unqualified_endpoint_has_no_strong_key(env: Path, endpoint: str) -> None:
-    set_account(base_url=endpoint)
-    assert await inbound_key("123") is None
+async def test_unqualified_endpoint_has_no_strong_key(
+    env: Path, endpoint: str, state_dir: Path
+) -> None:
+    set_account(state_dir, base_url=endpoint)
+    assert await inbound_key(state_dir, "123") is None
 
 
-async def test_account_sender_and_endpoint_scope_separate_same_provider_id(env: Path) -> None:
-    first = await inbound_key("123")
-    set_account(account_id="other-bot")
-    assert await inbound_key("123") != first
-    set_account(base_url="https://other-provider.example")
-    assert await inbound_key("123") != first
-    set_account(base_url="https://ILINKAI.WEIXIN.QQ.COM:443/")
-    assert await inbound_key("123") == first
+async def test_account_sender_and_endpoint_scope_separate_same_provider_id(
+    env: Path, state_dir: Path
+) -> None:
+    first = await inbound_key(state_dir, "123")
+    set_account(state_dir, account_id="other-bot")
+    assert await inbound_key(state_dir, "123") != first
+    set_account(state_dir, base_url="https://other-provider.example")
+    assert await inbound_key(state_dir, "123") != first
+    set_account(state_dir, base_url="https://ILINKAI.WEIXIN.QQ.COM:443/")
+    assert await inbound_key(state_dir, "123") == first
     assert (
         ordinary_chat_key(
             base_url="https://ilinkai.weixin.qq.com",
@@ -130,13 +137,15 @@ async def test_account_sender_and_endpoint_scope_separate_same_provider_id(env: 
         )
         != first
     )
-    set_account(account_id=" ")
-    assert await inbound_key("123") is None
+    set_account(state_dir, account_id=" ")
+    assert await inbound_key(state_dir, "123") is None
 
 
-async def test_voice_transcript_is_ordinary_chat_with_event_identity(env: Path) -> None:
+async def test_voice_transcript_is_ordinary_chat_with_event_identity(
+    env: Path, state_dir: Path
+) -> None:
     from services.entrypoints.im_bridge.adapters.weixin import extract_text
 
     text = extract_text([{"type": 3, "voice_item": {"text": "transcript"}}])
     assert text == "[voice transcript] transcript"
-    assert await inbound_key("123", text) == await inbound_key("123")
+    assert await inbound_key(state_dir, "123", text) == await inbound_key(state_dir, "123")

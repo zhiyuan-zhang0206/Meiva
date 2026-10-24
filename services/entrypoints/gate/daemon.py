@@ -42,17 +42,21 @@ import urllib.error
 import urllib.request
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from functools import partial
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from typing import cast
 from urllib.parse import urlsplit
 
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
+from base.cluster.machine import MachineIdentity
 from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot, settings
-from base.host.net.ports import SYSTEM_URL_OPENER, UrlOpener
+from base.db import Database
 from base.log import logger
+from base.native_process.loaded_commit import LoadedCommit
 from base.paths import meiva_home
+from base.telemetry.delivery.pipeline import EventPipeline
+from services.entrypoints.gate.launch_plan import GateFacts, GateLaunch, app_port_of, plan_launch
 
 _log = logging.getLogger("services.entrypoints.gate")
 
@@ -110,6 +114,10 @@ def _valid_forwarded_header(name: str, value: str) -> bool:
 
 PROBE_TIMEOUT_S = 3.0
 
+# meiva:note
+# How long the process waits for its event writer to drain when it stops.
+PIPELINE_STOP_TIMEOUT_S = 2.0
+
 # Auth-probe failure categories (audit #1736). The gate's verdict is
 # fail-closed ("down") for every one of them — the category exists so an
 # incident can be reconstructed from the event stream instead of a wall of
@@ -157,13 +165,11 @@ class Gate:
         gateway_base: str,
         app_base: str,
         static_dir: Path,
-        open_url: UrlOpener,
         config: GateConfig,
         browser_origin: str = "",
     ) -> None:
         self.gateway_base = gateway_base.rstrip("/")
         self.app_base = app_base.rstrip("/")
-        self._open_url = open_url
         self._config = config
         # Every request is answered with one whole page, so a browser never gets
         # a chance to fetch a stylesheet — the shared look and the theme
@@ -200,7 +206,9 @@ class Gate:
         )
         started = time.monotonic()
         try:
-            with self._open_url(req, self._config.probe_timeout_s) as resp:
+            # meiva:note
+            # the URL is the operator-declared gateway base, never request input.
+            with urllib.request.urlopen(req, timeout=self._config.probe_timeout_s) as resp:  # noqa: S310
                 body = json.loads(resp.read())
                 return "up" if body.get("authenticated") else "login"
         except Exception as exc:  # any probe failure means "not serving"; never crash a request
@@ -250,7 +258,9 @@ class Gate:
                 length = int(handler.headers.get("Content-Length") or 0)
                 req.data = handler.rfile.read(length) if length else b""
             try:
-                with self._open_url(req, self._config.probe_timeout_s) as resp:
+                # meiva:note
+                # the target is the loopback app base plus the request path, a fixed internal URL.
+                with urllib.request.urlopen(req, timeout=self._config.probe_timeout_s) as resp:  # noqa: S310
                     status, headers, body = resp.status, resp.headers, resp.read()
             except urllib.error.HTTPError as e:  # app up, answered with an error status
                 status, headers, body = e.code, e.headers, e.read()
@@ -289,7 +299,7 @@ class Handler(BaseHTTPRequestHandler):
 
     @property
     def gate(self) -> Gate:
-        return self.server.gate  # type: ignore[attr-defined,no-any-return]  # set in main()/tests
+        return cast("GateServer", self.server).gate
 
     def do_GET(self) -> None:
         self._handle()
@@ -339,57 +349,43 @@ class Handler(BaseHTTPRequestHandler):
         _log.debug(format, *args)
 
 
+# meiva:note
+# The HTTP server of one gate: it carries the `Gate` its handlers read.
+class GateServer(ThreadingHTTPServer):
+    gate: Gate
+
+    def __init__(self, address: tuple[str, int], gate: Gate) -> None:
+        super().__init__(address, Handler)
+        self.gate = gate
+
+
+def _entry_port_of(frontend_healthcheck_url: str) -> int:
+    return urlsplit(frontend_healthcheck_url).port or 3000
+
+
 def entry_port() -> int:
     """The public fleet UI port, shared by Gate and its roster readiness probe."""
-    return urlsplit(settings.services.frontend_healthcheck_url).port or 3000
+    return _entry_port_of(settings.services.frontend_healthcheck_url)
 
 
 def app_port() -> int:
     """The Next.js app port the gate proxies to — `app` = entry + 1."""
-    return settings.services.app_port or (entry_port() + 1)
+    return app_port_of(settings.services.app_port, entry_port=entry_port())
 
 
-def _app_base() -> str:
-    """The Next.js app base the gate proxies to."""
-    return f"http://127.0.0.1:{app_port()}"
-
-
-def gateway_base(*, local_host: Callable[[], str], port: int) -> str:
-    """The gateway API base the gate probes and the login page posts to.
-
-    The host must be one the user's browser can dial: the login page posts the
-    cluster secret to this origin, and a remote browser resolving `127.0.0.1`
-    would hit itself. The supplied owner host (`MEIVA_MACHINE_HOST`, else `localhost`) is the
-    same operator-declared address `meiva.ui.show` hands the user for direct page URLs
-    and the bootstrap rewrites loopback data-plane URLs to; a single box falls back to
-    `localhost` unchanged. The server-side auth probe follows the same base —
-    on a gateway host the gateway binds all interfaces, so dialing the host's
-    own reachable address is equivalent to loopback and keeps one origin
-    everywhere, mirroring how remote agent-runners dial the gateway.
-    """
-    host = local_host()
-    if ":" in host and not host.startswith("["):
-        host = f"[{host}]"  # IPv6 literal — netloc needs brackets
-    return f"http://{host}:{port}"
-
-
-def _serve_http(args: argparse.Namespace, *, local_host: Callable[[], str]) -> None:
-    static_dir = args.static_dir or (Path(__file__).parent / "static")
-    port = args.port or entry_port()
-    gate = Gate(
-        gateway_base=gateway_base(local_host=local_host, port=settings.gateway.gateway_port),
-        browser_origin=settings.gateway.browser_origin,
-        app_base=_app_base(),
-        static_dir=static_dir,
-        open_url=SYSTEM_URL_OPENER,
-        config=GateConfig(),
-    )
-    server = ThreadingHTTPServer(("0.0.0.0", port), Handler)  # noqa: S104 — the entry must be reachable off-box
-    server.gate = gate  # type: ignore[attr-defined]  # handler reads it off the instance
+# meiva:note
+# Serve until interrupted, then close the listener.
+#
+# An interrupt (the root's stop signal) is a normal end. A failure to close is raised alone,
+# or attached as a note to the error already propagating.
+def serve(server: GateServer) -> None:
     primary: BaseException | None = None
     try:
         _log.info(
-            "gate serving on :%d (app %s, gateway %s)", port, gate.app_base, gate.gateway_base
+            "gate serving on :%d (app %s, gateway %s)",
+            server.server_port,
+            server.gate.app_base,
+            server.gate.gateway_base,
         )
         with contextlib.suppress(KeyboardInterrupt):
             server.serve_forever()
@@ -400,37 +396,114 @@ def _serve_http(args: argparse.Namespace, *, local_host: Callable[[], str]) -> N
         try:
             server.server_close()
         except BaseException as cleanup:
-            if primary is None:
-                raise
-            primary.add_note(f"Gate HTTP close also failed: {cleanup!r}")
+            _attach_cleanup_failure(primary, cleanup, "Gate HTTP close")
 
 
-def main(argv: Sequence[str], *, process_config: ConfigBoot) -> None:
+# meiva:note
+# A cleanup failure with no error in flight is raised; with one in flight it becomes a note on
+# it, so the first failure stays the one the process reports.
+def _attach_cleanup_failure(
+    primary: BaseException | None, cleanup: BaseException, what: str
+) -> None:
+    if primary is None:
+        raise cleanup
+    primary.add_note(f"{what} also failed: {cleanup!r}")
+
+
+# meiva:note
+# Stop the process's event writer within `timeout_s`. An unfinished drain is reported once and
+# never retried; a failure to stop follows the same rule as the listener's close.
+def stop_pipeline(
+    pipeline: EventPipeline,
+    primary: BaseException | None,
+    *,
+    timeout_s: float = PIPELINE_STOP_TIMEOUT_S,
+) -> None:
+    from base.telemetry.delivery.receipts import DrainStatus
+    from base.telemetry.delivery.reporting import report_no_pipeline
+
+    try:
+        drain = pipeline.stop(timeout=timeout_s)
+        if drain.status is DrainStatus.UNFINISHED:
+            report_no_pipeline("[gate] event pipeline stop unfinished: {drain}", drain=drain)
+    except BaseException as cleanup:
+        _attach_cleanup_failure(primary, cleanup, "Gate event pipeline stop")
+
+
+# meiva:note
+# The database factory of the gate's event writer: every open shares one admission gate, whose
+# application name carries this process's code version, and reads its connection settings from
+# the process's own configuration.
+def gate_database(
+    *, image: LoadedCommit, machine: MachineIdentity, config: ConfigBoot
+) -> Callable[[], Database]:
+    from base.db.code_version_gate import ProcessDbGate
+    from base.db.config import db_config_from_boot
+    from base.native_process.code_version import CodeVersion
+
+    gate = ProcessDbGate(process="gate", version=CodeVersion(image).get)
+
+    def database() -> Database:
+        return Database(
+            db_config_from_boot(config), gate=gate, direct_url=ClusterDirectUrl(machine.host)
+        )
+
+    return database
+
+
+# meiva:note
+# Read the facts the launch plan needs from the process's configuration. This is the only place
+# the gate reads its settings.
+def read_facts(config: ConfigBoot, machine: MachineIdentity) -> GateFacts:
+    services = config.view.services
+    entry = _entry_port_of(services.frontend_healthcheck_url)
+    return GateFacts(
+        entry_port=entry,
+        app_port=app_port_of(services.app_port, entry_port=entry),
+        gateway_port=config.view.gateway.gateway_port,
+        gateway_host=machine.host(),
+        browser_origin=config.view.gateway.browser_origin,
+        default_static_dir=Path(__file__).parent / "static",
+    )
+
+
+# meiva:note
+# Build the gate for one launch plan.
+def build_gate(launch: GateLaunch) -> GateServer:
+    gate = Gate(
+        gateway_base=launch.gateway_base,
+        browser_origin=launch.browser_origin,
+        app_base=launch.app_base,
+        static_dir=launch.static_dir,
+        config=GateConfig(),
+    )
+    # meiva:note
+    # the entry must be reachable off-box, so it binds every interface.
+    return GateServer(("0.0.0.0", launch.port), gate)  # noqa: S104
+
+
+def _parse_args(argv: Sequence[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Fleet UI entry service")
     parser.add_argument("--port", type=int, default=None, help="bind port (default: entry port)")
     parser.add_argument("--static-dir", type=Path, default=None, help="static pages directory")
-    args = parser.parse_args(argv)
+    return parser.parse_args(argv)
+
+
+def main(argv: Sequence[str], *, process_config: ConfigBoot) -> None:
+    args = _parse_args(argv)
 
     from base.daemon.shutdown import install_graceful_shutdown
-    from base.db import Database
-    from base.db.code_version_gate import ProcessDbGate
-    from base.native_process.code_version import CodeVersion
-    from base.native_process.loaded_commit import LoadedCommit
-    from base.telemetry.delivery.receipts import DrainStatus
-    from base.telemetry.delivery.reporting import report_no_pipeline
     from base.telemetry.pipeline_build import build_pipeline
     from base.telemetry.process_logging import init_gateway_process
 
     image = LoadedCommit.capture()
     process_config.boot()
     machine = machine_from_boot(process_config)
-    gate = ProcessDbGate(process="gate", version=CodeVersion(image).get)
-    database = partial(
-        Database.from_settings,
-        gate=gate,
-        direct_url=ClusterDirectUrl(machine.host),
+    pipeline = build_pipeline(
+        database=gate_database(image=image, machine=machine, config=process_config),
+        machine=machine,
+        home=meiva_home().resolve(),
     )
-    pipeline = build_pipeline(database=database, machine=machine, home=meiva_home().resolve())
     primary: BaseException | None = None
     try:
         init_gateway_process(
@@ -438,19 +511,15 @@ def main(argv: Sequence[str], *, process_config: ConfigBoot) -> None:
         )
         # Root's signal interrupts serving, then closes HTTP before the writer.
         install_graceful_shutdown("gate")
-        _serve_http(args, local_host=machine.host)
+        launch = plan_launch(
+            port=args.port, static_dir=args.static_dir, facts=read_facts(process_config, machine)
+        )
+        serve(build_gate(launch))
     except BaseException as exc:
         primary = exc
         raise
     finally:
-        try:
-            drain = pipeline.stop(timeout=2)
-            if drain.status is DrainStatus.UNFINISHED:
-                report_no_pipeline("[gate] event pipeline stop unfinished: {drain}", drain=drain)
-        except BaseException as cleanup:
-            if primary is None:
-                raise
-            primary.add_note(f"Gate event pipeline stop also failed: {cleanup!r}")
+        stop_pipeline(pipeline, primary)
 
 
 if __name__ == "__main__":

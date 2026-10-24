@@ -23,7 +23,6 @@ CALLERS: dict[str, tuple[str, int]] = {
     "scripts/entrypoints/agent.py": ("O", 1),
     "services/agent_runner/agent_ops/boot.py": ("S", 1),
     "services/desktop/browser/gateway_session.py": ("S", 1),
-    "services/entrypoints/im_bridge/daemon.py": ("S", 2),
 }
 _BATCHES = {"B2", "C", "S", "O"}
 

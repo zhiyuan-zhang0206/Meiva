@@ -2,6 +2,7 @@
 
 import json
 from dataclasses import replace
+from pathlib import Path
 
 import httpx
 import pytest
@@ -15,7 +16,9 @@ from services.entrypoints.im_bridge.tests.adapters.test_telegram_adapter import 
 from services.entrypoints.im_bridge.types import SendNotStartedError
 
 
-async def test_telegram_getme_is_cached_and_frozen_html_uses_plain_rejection_fallback() -> None:
+async def test_telegram_getme_is_cached_and_frozen_html_uses_plain_rejection_fallback(
+    state_dir: Path,
+) -> None:
     calls: list[httpx.Request] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -27,7 +30,7 @@ async def test_telegram_getme_is_cached_and_frozen_html_uses_plain_rejection_fal
         return httpx.Response(200, json={"ok": True, "result": {"message_id": 7}})
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-        adapter = TelegramAdapter(FakeCore(), make_config(), client=client)
+        adapter = TelegramAdapter(FakeCore(), make_config(), client=client, state_dir=state_dir)
         prepared = await adapter.prepare_timeline("**hello** <user>")
         assert await adapter.outbound_account_id() == "123"
         assert prepared.chunks[0].text == "<b>hello</b> &lt;user&gt;"
@@ -37,7 +40,9 @@ async def test_telegram_getme_is_cached_and_frozen_html_uses_plain_rejection_fal
     assert json.loads(calls[-1].content) == {"chat_id": "42", "text": "**hello** <user>"}
 
 
-async def test_telegram_second_chunk_connect_failure_is_uncertain_not_unstarted() -> None:
+async def test_telegram_second_chunk_connect_failure_is_uncertain_not_unstarted(
+    state_dir: Path,
+) -> None:
     chunks = 0
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -50,7 +55,7 @@ async def test_telegram_second_chunk_connect_failure_is_uncertain_not_unstarted(
         return httpx.Response(200, json={"ok": True, "result": {"message_id": chunks}})
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-        adapter = TelegramAdapter(FakeCore(), make_config(), client=client)
+        adapter = TelegramAdapter(FakeCore(), make_config(), client=client, state_dir=state_dir)
         prepared = await adapter.prepare_timeline("x" * 4097)
         with pytest.raises(RuntimeError, match="acknowledged") as error:
             await adapter.send_prepared_outbound("42", prepared)
@@ -59,25 +64,27 @@ async def test_telegram_second_chunk_connect_failure_is_uncertain_not_unstarted(
     assert chunks == 2
 
 
-async def test_getme_failure_has_no_send_and_no_token_in_error() -> None:
+async def test_getme_failure_has_no_send_and_no_token_in_error(state_dir: Path) -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         raise httpx.ReadError("https://api.telegram.org/bot123:TEST-TOKEN/getMe", request=request)
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-        adapter = TelegramAdapter(FakeCore(), make_config(), client=client)
+        adapter = TelegramAdapter(FakeCore(), make_config(), client=client, state_dir=state_dir)
         with pytest.raises(RuntimeError) as error:
             await adapter.prepare_timeline("hello")
         assert "TEST-TOKEN" not in str(error.value)
 
 
-async def test_callback_invocation_uses_click_identity_not_shared_bot_message() -> None:
+async def test_callback_invocation_uses_click_identity_not_shared_bot_message(
+    state_dir: Path,
+) -> None:
     core = FakeCore()
 
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, json={"ok": True})
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-        adapter = TelegramAdapter(core, make_config(), client=client)
+        adapter = TelegramAdapter(core, make_config(), client=client, state_dir=state_dir)
         for click in ("first", "second"):
             await adapter._handle_callback(
                 {
@@ -94,21 +101,20 @@ async def test_callback_invocation_uses_click_identity_not_shared_bot_message() 
 
 
 async def test_weixin_preparation_uses_existing_login_identity_not_context_or_token(
-    monkeypatch: pytest.MonkeyPatch,
+    state_dir: Path,
 ) -> None:
     from services.entrypoints.im_bridge.adapters import weixin
 
-    monkeypatch.setattr(
-        weixin,
-        "load_account",
-        lambda: {
-            "account_id": "bot-id",
-            "user_id": "user",
-            "bot_token": "PRIVATE",
-            "base_url": "https://ilink.example",
-        },
+    # meiva:note
+    # A test credential for a fake account; the S106 suppression is the harness's.
+    weixin.save_account(
+        state_dir,
+        account_id="bot-id",
+        user_id="user",
+        bot_token="PRIVATE",  # noqa: S106
+        base_url="https://ilink.example",
     )
-    adapter = WeixinAdapter(FakeCore())
+    adapter = WeixinAdapter(FakeCore(), state_dir=state_dir)
     adapter._tokens.set("chat", "CONTEXT")
     prepared = await adapter.prepare_timeline("hello")
     assert "bot-id" in prepared.account_id
@@ -120,7 +126,9 @@ async def test_weixin_preparation_uses_existing_login_identity_not_context_or_to
         await adapter.prepare_timeline("hello")
 
 
-async def test_notice_freezes_owner_plain_rendering_and_buttons_before_send() -> None:
+async def test_notice_freezes_owner_plain_rendering_and_buttons_before_send(
+    state_dir: Path,
+) -> None:
     from services.entrypoints.im_bridge.types import PreparedOutboundSend
 
     sent: list[dict[str, object]] = []
@@ -132,7 +140,7 @@ async def test_notice_freezes_owner_plain_rendering_and_buttons_before_send() ->
         return httpx.Response(200, json={"ok": True, "result": {"message_id": 7}})
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-        adapter = TelegramAdapter(FakeCore(), make_config(), client=client)
+        adapter = TelegramAdapter(FakeCore(), make_config(), client=client, state_dir=state_dir)
         buttons = (("Reply", "notice:reply:7:42"), ("Queue", "notice:list"))
         recipient, prepared = await adapter.prepare_notice_owner("**plain** <notice>", buttons)
         adapter._config = replace(adapter._config, telegram_owner_id=999)
@@ -155,7 +163,7 @@ async def test_notice_freezes_owner_plain_rendering_and_buttons_before_send() ->
     assert "TEST-TOKEN" not in prepared.model_dump_json()
 
 
-async def test_legacy_manifest_json_without_new_fields_still_dispatches() -> None:
+async def test_legacy_manifest_json_without_new_fields_still_dispatches(state_dir: Path) -> None:
     from services.entrypoints.im_bridge.outbound.types import OutboundIntent
 
     bodies: list[dict[str, object]] = []
@@ -184,18 +192,18 @@ async def test_legacy_manifest_json_without_new_fields_still_dispatches() -> Non
     )
     intent = OutboundIntent.model_validate_json(legacy)
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-        adapter = TelegramAdapter(FakeCore(), make_config(), client=client)
+        adapter = TelegramAdapter(FakeCore(), make_config(), client=client, state_dir=state_dir)
         await adapter.send_prepared_outbound(intent.chat_id, intent.prepared)
     assert bodies == [{"chat_id": "42", "text": "frozen"}]
 
 
-async def test_native_telegram_owner_freezes_plain_alert_without_buttons() -> None:
+async def test_native_telegram_owner_freezes_plain_alert_without_buttons(state_dir: Path) -> None:
     def handle(request: httpx.Request) -> httpx.Response:
         assert request.url.path.endswith("getMe"), "preparation cannot externally send"
         return httpx.Response(200, json={"ok": True, "result": {"id": 123}})
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as client:
-        adapter = TelegramAdapter(FakeCore(), make_config(), client=client)
+        adapter = TelegramAdapter(FakeCore(), make_config(), client=client, state_dir=state_dir)
         target, prepared = await adapter.prepare_alert_owner("**alert** <user>")
         assert target == "42" and prepared.account_id == "123"
         assert prepared.chunks[0].text == "**alert** &lt;user&gt;"
@@ -204,27 +212,38 @@ async def test_native_telegram_owner_freezes_plain_alert_without_buttons() -> No
 
 
 async def test_native_weixin_owner_uses_login_user_and_holds_missing_owner(
-    monkeypatch: pytest.MonkeyPatch,
+    state_dir: Path,
 ) -> None:
     from services.entrypoints.im_bridge.adapters import weixin
 
-    account = {
-        "account_id": "bot",
-        "user_id": "owner",
-        "bot_token": "PRIVATE",
-        "base_url": "https://ilink.example",
-    }
-    monkeypatch.setattr(weixin, "load_account", lambda: account)
-    adapter = WeixinAdapter(FakeCore())
+    # meiva:note
+    # A test credential for a fake account; the S106 suppression is the harness's.
+    weixin.save_account(
+        state_dir,
+        account_id="bot",
+        user_id="owner",
+        bot_token="PRIVATE",  # noqa: S106
+        base_url="https://ilink.example",
+    )
+    adapter = WeixinAdapter(FakeCore(), state_dir=state_dir)
     target, prepared = await adapter.prepare_alert_owner("plain")
     assert target == "owner" and prepared.chunks[0].text == "plain"
     assert "PRIVATE" not in prepared.model_dump_json()
-    account["user_id"] = ""
+    # meiva:note
+    # A test credential for a fake account; the S106 suppression is the harness's.
+    weixin.save_account(
+        state_dir,
+        account_id="bot",
+        user_id="",
+        bot_token="PRIVATE",  # noqa: S106
+        base_url="https://ilink.example",
+    )
+    ownerless = WeixinAdapter(FakeCore(), state_dir=state_dir)
     with pytest.raises(SendNotStartedError, match="owner"):
-        await adapter.prepare_alert_owner("plain")
+        await ownerless.prepare_alert_owner("plain")
 
 
-async def test_native_feishu_owner_uses_last_open_id_and_holds_unknown() -> None:
+async def test_native_feishu_owner_uses_last_open_id_and_holds_unknown(state_dir: Path) -> None:
     from services.entrypoints.im_bridge.adapters.feishu import FeishuAdapter
     from services.entrypoints.im_bridge.tests.slices import feishu_config
 
@@ -234,6 +253,8 @@ async def test_native_feishu_owner_uses_last_open_id_and_holds_unknown() -> None
             feishu_app_id="app",
             feishu_app_secret="PRIVATE",  # noqa: S106 — mock credential
         ),
+        state_dir=state_dir,
+        proxy_configured=False,
     )
     with pytest.raises(SendNotStartedError, match="owner"):
         await adapter.prepare_alert_owner("plain")

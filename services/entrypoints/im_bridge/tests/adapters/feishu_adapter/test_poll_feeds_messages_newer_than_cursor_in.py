@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 from collections import deque
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -25,7 +26,7 @@ from services.entrypoints.im_bridge.tests.adapters.test_feishu_adapter import (
     adapter as adapter,
 )
 from services.entrypoints.im_bridge.tests.slices import feishu_config
-from services.entrypoints.im_bridge.tests.task_scope import owned_tasks
+from services.entrypoints.im_bridge.tests.support import owned_tasks
 from services.entrypoints.im_bridge.types import (
     HTTPFailure,
     InboundMessage,
@@ -170,9 +171,14 @@ async def test_send_does_not_override_existing_owner_open_id(adapter: FeishuAdap
     assert adapter._last_open_id == "ou_first"
 
 
-def test_start_poller_honors_zero_interval() -> None:
+def test_start_poller_honors_zero_interval(state_dir: Path) -> None:
     """MEIVA_FEISHU_POLL_INTERVAL_SECONDS=0 disables the poller (WS-only)."""
-    adapter = FeishuAdapter(FakeCore(), feishu_config(feishu_poll_interval_seconds=0))
+    adapter = FeishuAdapter(
+        FakeCore(),
+        feishu_config(feishu_poll_interval_seconds=0),
+        state_dir=state_dir,
+        proxy_configured=False,
+    )
     adapter._start_poller(asyncio.TaskGroup())
     assert adapter._poll_task is None
 
@@ -338,7 +344,9 @@ async def test_poll_seed_anchors_newest_id_carrying_item(adapter: FeishuAdapter)
     assert adapter._poll_cursor == {"oc_p2p_1": "om_3"}
 
 
-async def test_poll_program_error_preserves_message_and_cursor(adapter: FeishuAdapter) -> None:
+async def test_poll_program_error_preserves_message_and_cursor(
+    adapter: FeishuAdapter, state_dir: Path
+) -> None:
     """An unexpected handler error never acknowledges or skips the message."""
 
     class AlwaysFailingCore(FakeCore):
@@ -347,7 +355,7 @@ async def test_poll_program_error_preserves_message_and_cursor(adapter: FeishuAd
 
     core = AlwaysFailingCore()
     rest = FakeRestClient()
-    adapter = FeishuAdapter(core, feishu_config())
+    adapter = FeishuAdapter(core, feishu_config(), state_dir=state_dir, proxy_configured=False)
     adapter._rest_client = rest
     adapter._poll_chats.add("oc_p2p_1")
     window = make_list_response(
@@ -439,7 +447,9 @@ async def test_poll_idless_items_never_delivered_or_cursored(adapter: FeishuAdap
     assert adapter._poll_cursor == {"oc_p2p_1": "om_2"}
 
 
-async def test_poll_inbound_failure_retried_next_round(adapter: FeishuAdapter) -> None:
+async def test_poll_inbound_failure_retried_next_round(
+    adapter: FeishuAdapter, state_dir: Path
+) -> None:
     """P2: the cursor only advances past delivered messages — a failed
     handle_inbound is retried on the next round instead of being skipped."""
 
@@ -456,7 +466,7 @@ async def test_poll_inbound_failure_retried_next_round(adapter: FeishuAdapter) -
 
     core = FlakyCore()
     rest = FakeRestClient()
-    adapter = FeishuAdapter(core, feishu_config())
+    adapter = FeishuAdapter(core, feishu_config(), state_dir=state_dir, proxy_configured=False)
     adapter._rest_client = rest
     adapter._poll_chats.add("oc_p2p_1")
     failing_window = make_list_response(
@@ -479,7 +489,9 @@ async def test_poll_inbound_failure_retried_next_round(adapter: FeishuAdapter) -
     assert [m.text for m in core.received] == ["flaky"]
 
 
-async def test_poll_never_marks_seen_before_delivery(adapter: FeishuAdapter) -> None:
+async def test_poll_never_marks_seen_before_delivery(
+    adapter: FeishuAdapter, state_dir: Path
+) -> None:
     """The seen-set is only written after handle_inbound succeeds, so a
     WS-path redelivery of a failed poll item is not deduped away."""
 
@@ -489,7 +501,7 @@ async def test_poll_never_marks_seen_before_delivery(adapter: FeishuAdapter) -> 
 
     core = FailingCore()
     rest = FakeRestClient()
-    adapter = FeishuAdapter(core, feishu_config())
+    adapter = FeishuAdapter(core, feishu_config(), state_dir=state_dir, proxy_configured=False)
     adapter._rest_client = rest
     adapter._poll_chats.add("oc_p2p_1")
     rest.list_responses = [

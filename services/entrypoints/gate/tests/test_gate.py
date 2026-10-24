@@ -20,10 +20,8 @@ from typing import Any, ClassVar, TypedDict
 import pytest
 
 import services.entrypoints.gate.daemon as gate_daemon
-from base.host.net.ports import SYSTEM_URL_OPENER
-from base.host.net.tests.fake_url_opener import FakeUrlOpener
 from base.paths.tests.homes import unit_home as unit_home
-from services.entrypoints.gate.daemon import Gate, GateConfig, Handler
+from services.entrypoints.gate.daemon import Gate, GateConfig, GateServer
 
 STATIC = (
     Path(__file__).parent.parent.parent.parent.parent
@@ -39,7 +37,6 @@ def test_login_template_carries_explicit_browser_entry() -> None:
         gateway_base="http://192.0.2.2:20016",
         app_base="http://127.0.0.1:20031",
         static_dir=STATIC,
-        open_url=FakeUrlOpener(),
         config=GateConfig(),
         browser_origin="https://console.example",
     )
@@ -174,7 +171,7 @@ class Servers(TypedDict):
     gate: str
     gw: ThreadingHTTPServer
     app: ThreadingHTTPServer
-    gate_server: ThreadingHTTPServer
+    gate_server: GateServer
     flag: Path
 
 
@@ -196,17 +193,15 @@ def servers(unit_home: Path, probe_timeout_s: float) -> Iterator[Servers]:
     FakeApp.received_stray_headers = []
     gw = ThreadingHTTPServer(("127.0.0.1", 0), FakeGateway)
     app = ThreadingHTTPServer(("127.0.0.1", 0), FakeApp)
-    gate_server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
     # Where the retired updater wrote its UI marker; Gate never reads it.
     marker = unit_home / "deploy-state.json"
     gate = Gate(
         gateway_base=f"http://127.0.0.1:{gw.server_port}",
         app_base=f"http://127.0.0.1:{app.server_port}",
         static_dir=STATIC,
-        open_url=SYSTEM_URL_OPENER,
         config=GateConfig(probe_timeout_s=probe_timeout_s),
     )
-    gate_server.gate = gate  # type: ignore[attr-defined]
+    gate_server = GateServer(("127.0.0.1", 0), gate)
     for s in (gw, app, gate_server):
         threading.Thread(target=s.serve_forever, daemon=True).start()
     yield {
@@ -671,24 +666,6 @@ def test_pages_ship_self_contained(servers, page: str) -> None:
         assert external not in body, f"page reaches outside itself: {external}"
 
 
-def test_gateway_base_uses_reachable_host() -> None:
-    """The login page posts to the gateway origin, so the host must be one a
-    remote browser can dial — the operator-declared reachable address, not
-    loopback (a remote browser resolving 127.0.0.1 hits itself; regression for
-    the gate login failure on remote machines). The server-side probe shares
-    the same base. Port comes from settings.gateway.gateway_port.
-    """
-    from services.entrypoints.gate import daemon
-
-    assert daemon.gateway_base(local_host=lambda: "10.0.0.2", port=8123) == "http://10.0.0.2:8123"
-
-    # Single box: the localhost fallback keeps local browsers working verbatim.
-    assert daemon.gateway_base(local_host=lambda: "localhost", port=8123) == "http://localhost:8123"
-
-    # IPv6 literals need brackets in a netloc.
-    assert daemon.gateway_base(local_host=lambda: "fd00::1", port=8123) == "http://[fd00::1]:8123"
-
-
 # ── one-time login link on the static login page ─────────────────────────
 
 _LOGIN_PAGE_HARNESS = r"""
@@ -744,7 +721,6 @@ def _ticket_gate() -> Gate:
         gateway_base="http://localhost:8000",
         app_base="http://127.0.0.1:20031",
         static_dir=STATIC,
-        open_url=FakeUrlOpener(),
         config=GateConfig(),
     )
 

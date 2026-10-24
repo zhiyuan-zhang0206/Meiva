@@ -1,20 +1,21 @@
 from __future__ import annotations
 
 from services.entrypoints.im_bridge.cursor_store import PushWatermark
-from services.entrypoints.im_bridge.tests.task_scope import owned_tasks
+from services.entrypoints.im_bridge.tests.support import owned_tasks
 from services.entrypoints.im_bridge.tests.test_im_bridge_core import (
+    CoreFactory,
     FakeGateway,
     FakePlainAdapter,
     FakeTypingAdapter,
-    create_test_core,
 )
+from services.entrypoints.im_bridge.tests.test_im_bridge_core import make_core as make_core
 from services.entrypoints.im_bridge.types import ChatState
 
 
-async def test_push_snapshot_watermark_is_per_chat() -> None:
+async def test_push_snapshot_watermark_is_per_chat(make_core: CoreFactory) -> None:
     async with owned_tasks() as _owned_tasks:
         gateway = FakeGateway()
-        core = create_test_core(gateway, tasks=_owned_tasks)
+        core = make_core(gateway, tasks=_owned_tasks)
         adapter = FakeTypingAdapter()
         plain = FakePlainAdapter()
         core.register(adapter)

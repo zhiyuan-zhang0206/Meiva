@@ -1,18 +1,12 @@
 from __future__ import annotations
 
-import json
 import select
-import shutil
 import socket
 import subprocess
 from pathlib import Path
 
-from services.redis_bridge import relay
-
 
 def test_installed_source_forwards_and_sigterm_reclaims_idle_connection(tmp_path: Path) -> None:
-    installed = tmp_path / "relay.py"
-    shutil.copyfile(relay.__file__, installed)
     with socket.socket() as reservation, socket.socket() as backend_listener:
         reservation.bind(("127.0.0.1", 0))
         listen_port = reservation.getsockname()[1]
@@ -21,7 +15,6 @@ def test_installed_source_forwards_and_sigterm_reclaims_idle_connection(tmp_path
         backend_listener.listen()
         backend_listener.settimeout(3.0)
         argv = [
-            "relay.py",
             "--listen-host",
             "127.0.0.1",
             "--listen-port",
@@ -29,19 +22,16 @@ def test_installed_source_forwards_and_sigterm_reclaims_idle_connection(tmp_path
             "--backend-port",
             str(backend_listener.getsockname()[1]),
         ]
-        process = subprocess.Popen(
-            [
-                "/usr/bin/python3",
-                "-c",
-                "import json, os, runpy, sys; "
-                "sys.argv = json.loads(os.environ['RELAY_TEST_ARGV']); "
-                "runpy.run_path('relay.py', run_name='__main__')",
-            ],
+        # meiva:note
+        # fixed system interpreter and the relay file alone, no shell. Its own directory is the
+        # only import path it gets, so a first-party import would fail here.
+        process = subprocess.Popen(  # noqa: S603
+            ["/usr/bin/python3", str(Path(__file__).resolve().parents[1] / "relay.py"), *argv],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
             cwd=tmp_path,
-            env={"PATH": "/usr/bin:/bin", "RELAY_TEST_ARGV": json.dumps(argv)},
+            env={"PATH": "/usr/bin:/bin"},
         )
         try:
             assert process.stdout is not None

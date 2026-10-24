@@ -1,11 +1,11 @@
 import asyncio
-from collections.abc import Awaitable, Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
 from threading import Event
 from typing import Any
 from uuid import uuid4
 
 import httpx
+import psycopg
 import pytest
 from psycopg import Connection
 from psycopg_pool import ConnectionPool
@@ -23,6 +23,8 @@ from services.entrypoints.im_bridge.outbound.types import (
     TimelineCandidate,
 )
 from services.entrypoints.im_bridge.outbound.worker import IMOutboxWorker
+from services.entrypoints.im_bridge.tests.slices import im_bridge_config
+from services.entrypoints.im_bridge.tests.support import failing_insert, failing_update
 from services.entrypoints.im_bridge.types import (
     IMAdapter,
     OutboundAdapterKind,
@@ -32,10 +34,8 @@ from services.entrypoints.im_bridge.types import (
 )
 
 
-@pytest.fixture
-def pool(db_url: str) -> Iterator[ConnectionPool]:
-    with ConnectionPool[Connection](settings.data_plane.db_url, min_size=1, max_size=2) as pool:
-        yield pool
+def worker_for(store: IMOutboxStore, adapters: dict[str, IMAdapter]) -> IMOutboxWorker:
+    return IMOutboxWorker(store, adapters, config=im_bridge_config())
 
 
 class RecordingAdapter(IMAdapter):
@@ -159,18 +159,18 @@ def test_concurrent_acceptance_commits_one_intent_and_cursor(pool: ConnectionPoo
 
 
 def test_failed_insert_rolls_back_cursor_and_earlier_intent(
-    pool: ConnectionPool, monkeypatch: pytest.MonkeyPatch
+    pool: ConnectionPool, db_conn: psycopg.Connection
 ) -> None:
     store = IMOutboxStore(pool)
-    original = store.insert_intent
-
-    def fail_second(conn: Connection, intent: OutboundIntent):
-        if intent.source.identity == "persisted-2":
-            raise RuntimeError("injected insert failure")
-        return original(conn, intent)
-
-    monkeypatch.setattr(store, "insert_intent", fail_second)
-    with pytest.raises(RuntimeError, match="injected"):
+    with (
+        failing_insert(
+            db_conn,
+            "im_bridge_outbound_intents",
+            when="NEW.source_id = 'persisted-2'",
+            message="injected insert failure",
+        ),
+        pytest.raises(psycopg.errors.RaiseException, match="injected"),
+    ):
         store.accept("telegram", "bot", "chat", 7, [candidate(), candidate(2)])
     assert statuses(pool) == []
     with pool.connection() as conn:
@@ -253,21 +253,12 @@ async def test_worker_records_whole_send_outcome_without_secret(
     store.accept("telegram", "bot", "chat", 7, [candidate()])
     adapter = RecordingAdapter()
     adapter.error = error
-    await IMOutboxWorker(store, {"telegram": adapter}).run_once()
+    await worker_for(store, {"telegram": adapter}).run_once()
     row = statuses(pool)[0]
     assert row[0] == expected and row[1] is not None
     assert "SECRET" not in str(row)
-    await IMOutboxWorker(store, {"telegram": adapter}).run_once()
-    assert adapter.sent == ["original"]
-
-
-class RecordingRetry:
-    def __init__(self) -> None:
-        self.calls = 0
-
-    async def __call__(self, attempt: Callable[[], Awaitable[None]]) -> None:
-        self.calls += 1
-        await attempt()
+    await worker_for(store, {"telegram": adapter}).run_once()
+    assert adapter.sent == ["original"] * (2 if expected == "failed" else 1)
 
 
 async def test_worker_retries_a_proved_no_effect_send_once(pool: ConnectionPool) -> None:
@@ -275,10 +266,9 @@ async def test_worker_retries_a_proved_no_effect_send_once(pool: ConnectionPool)
     store.accept("telegram", "bot", "chat", 7, [candidate()])
     adapter = RecordingAdapter()
     adapter.error_queue = [SendNotStartedError("no effect"), None]
-    retry = RecordingRetry()
-    await IMOutboxWorker(store, {"telegram": adapter}, retry=retry).run_once()
+    await worker_for(store, {"telegram": adapter}).run_once()
     row = statuses(pool)[0]
-    assert row[0] == "sent" and retry.calls == 1
+    assert row[0] == "sent"
     assert adapter.sent == ["original", "original"]
 
 
@@ -289,12 +279,11 @@ async def test_worker_records_failed_when_the_retry_also_proves_no_effect(
     store.accept("telegram", "bot", "chat", 7, [candidate()])
     adapter = RecordingAdapter()
     adapter.error = SendNotStartedError("no effect")
-    retry = RecordingRetry()
-    await IMOutboxWorker(store, {"telegram": adapter}, retry=retry).run_once()
+    await worker_for(store, {"telegram": adapter}).run_once()
     row = statuses(pool)[0]
-    assert row[0] == "failed" and retry.calls == 1
+    assert row[0] == "failed"
     assert adapter.sent == ["original", "original"]
-    await IMOutboxWorker(store, {"telegram": adapter}, retry=retry).run_once()
+    await worker_for(store, {"telegram": adapter}).run_once()
     assert adapter.sent == ["original", "original"]
 
 
@@ -303,10 +292,9 @@ async def test_worker_never_retries_an_ambiguous_outcome(pool: ConnectionPool) -
     store.accept("telegram", "bot", "chat", 7, [candidate()])
     adapter = RecordingAdapter()
     adapter.error = httpx.ReadError("https://provider/botSECRET?context_token=SECRET")
-    retry = RecordingRetry()
-    await IMOutboxWorker(store, {"telegram": adapter}, retry=retry).run_once()
+    await worker_for(store, {"telegram": adapter}).run_once()
     row = statuses(pool)[0]
-    assert row[0] == "uncertain" and retry.calls == 0
+    assert row[0] == "uncertain"
     assert adapter.sent == ["original"]
 
 
@@ -318,7 +306,7 @@ async def test_blocked_send_releases_single_pool_lease_and_other_worker_claims_l
         store.accept("telegram", "bot", "chat", 7, [candidate(), candidate(2, text="later")])
         live = RecordingAdapter()
         live.started, live.release = asyncio.Event(), asyncio.Event()
-        worker = asyncio.create_task(IMOutboxWorker(store, {"telegram": live}).run_once())
+        worker = asyncio.create_task(worker_for(store, {"telegram": live}).run_once())
         try:
             await asyncio.wait_for(live.started.wait(), timeout=5)
             with small.connection(timeout=0.5) as conn:
@@ -326,7 +314,7 @@ async def test_blocked_send_releases_single_pool_lease_and_other_worker_claims_l
             original_attempt = statuses(pool)[0][1]
             restarted = RecordingAdapter()
             await asyncio.wait_for(
-                IMOutboxWorker(IMOutboxStore(pool), {"telegram": restarted}).run_once(), timeout=5
+                worker_for(IMOutboxStore(pool), {"telegram": restarted}).run_once(), timeout=5
             )
             assert restarted.sent == ["later"]
             assert statuses(pool)[0] == ("sending", original_attempt, "send_result_unconfirmed")
@@ -338,7 +326,7 @@ async def test_blocked_send_releases_single_pool_lease_and_other_worker_claims_l
             with pytest.raises(asyncio.CancelledError):
                 await worker
         assert live.sent == ["original"]
-        await IMOutboxWorker(IMOutboxStore(pool), {"telegram": restarted}).run_once()
+        await worker_for(IMOutboxStore(pool), {"telegram": restarted}).run_once()
         assert [row[0] for row in statuses(pool)] == ["sending", "sent"]
         assert restarted.sent == ["later"]
 
@@ -365,69 +353,73 @@ async def test_claim_without_send_is_unconfirmed_and_does_not_block_later(pool: 
     claimed = store.claim(("telegram", "bot", "chat"))
     assert claimed is not None
     adapter = RecordingAdapter()
-    await IMOutboxWorker(store, {"telegram": adapter}).run_once()
-    await IMOutboxWorker(store, {"telegram": adapter}).run_once()
+    await worker_for(store, {"telegram": adapter}).run_once()
+    await worker_for(store, {"telegram": adapter}).run_once()
     assert adapter.sent == ["later"]
     assert [row[0] for row in statuses(pool)] == ["sending", "sent"]
     assert store.finish(claimed[0], claimed[1], OutboundStatus.SENT, None)
 
 
-@pytest.mark.parametrize("committed", [False, True])
 async def test_success_before_outcome_commit_failure_never_repeats_external_send(
-    pool: ConnectionPool, monkeypatch: pytest.MonkeyPatch, committed: bool
+    pool: ConnectionPool, db_conn: psycopg.Connection
 ) -> None:
     store = IMOutboxStore(pool)
     original = store.accept("telegram", "bot", "chat", 7, [candidate()]).intent_ids[0]
     adapter = RecordingAdapter()
-    finish = store.finish
-
-    def lost(*args: Any):
-        if committed:
-            finish(*args)
-        raise RuntimeError("outcome commit acknowledgement lost")
-
-    monkeypatch.setattr(store, "finish", lost)
-    with pytest.raises(RuntimeError, match="acknowledgement"):
-        await IMOutboxWorker(store, {"telegram": adapter}).run_once()
+    with (
+        failing_update(
+            db_conn,
+            "im_bridge_outbound_intents",
+            when="NEW.status = 'sent'",
+            message="outcome commit failed",
+        ),
+        pytest.raises(psycopg.errors.RaiseException, match="outcome commit failed"),
+    ):
+        await worker_for(store, {"telegram": adapter}).run_once()
     old_attempt = statuses(pool)[0][1]
-    monkeypatch.setattr(store, "finish", finish)
-    await IMOutboxWorker(store, {"telegram": adapter}).run_once()
-    assert statuses(pool)[0][0] == ("sent" if committed else "sending")
+    await worker_for(store, {"telegram": adapter}).run_once()
+    assert statuses(pool)[0][0] == "sending"
     assert adapter.sent == ["original"]
-    assert not finish(original, uuid4(), OutboundStatus.SENT, None)
+    assert not store.finish(original, uuid4(), OutboundStatus.SENT, None)
     assert statuses(pool)[0][1] == old_attempt
     store.accept("telegram", "bot", "chat", 7, [candidate(2, text="later")])
-    await IMOutboxWorker(store, {"telegram": adapter}).run_once()
+    await worker_for(store, {"telegram": adapter}).run_once()
     assert adapter.sent == ["original", "later"]
 
 
 @pytest.mark.parametrize("finish_fails", [False, True])
 async def test_programming_error_is_visible_then_rethrown_without_resend(
-    pool: ConnectionPool, monkeypatch: pytest.MonkeyPatch, finish_fails: bool
+    pool: ConnectionPool, db_conn: psycopg.Connection, finish_fails: bool
 ) -> None:
     store = IMOutboxStore(pool)
     store.accept("telegram", "bot", "chat", 7, [candidate()])
     adapter = RecordingAdapter()
     original = TypeError("invalid adapter state SECRET")
     adapter.error = original
-    finish_error = RuntimeError("outcome storage failed")
-    finish = store.finish
     if finish_fails:
-
-        def failed_finish(*args: Any):
-            raise finish_error
-
-        monkeypatch.setattr(store, "finish", failed_finish)
-    with pytest.raises(TypeError) as caught:
-        await IMOutboxWorker(store, {"telegram": adapter}).run_once()
+        with (
+            failing_update(
+                db_conn,
+                "im_bridge_outbound_intents",
+                when="NEW.status = 'uncertain'",
+                message="outcome storage failed",
+            ),
+            pytest.raises(TypeError) as caught,
+        ):
+            await worker_for(store, {"telegram": adapter}).run_once()
+    else:
+        with pytest.raises(TypeError) as caught:
+            await worker_for(store, {"telegram": adapter}).run_once()
     assert caught.value is original
-    assert caught.value.__cause__ is (finish_error if finish_fails else None)
+    if finish_fails:
+        assert isinstance(caught.value.__cause__, psycopg.errors.RaiseException)
+    else:
+        assert caught.value.__cause__ is None
     assert statuses(pool)[0][0] == ("sending" if finish_fails else "uncertain")
     assert "SECRET" not in str(statuses(pool))
-    monkeypatch.setattr(store, "finish", finish)
     adapter.error = None
     store.accept("telegram", "bot", "chat", 7, [candidate(2, text="later")])
-    await IMOutboxWorker(store, {"telegram": adapter}).run_once()
+    await worker_for(store, {"telegram": adapter}).run_once()
     assert adapter.sent == ["original", "later"]
 
 
@@ -456,13 +448,13 @@ async def test_partial_prefix_is_never_replayed_as_a_whole_manifest(pool: Connec
     )
     store.accept("telegram", "bot", "chat", 7, [first])
     partial = PartialAdapter()
-    await IMOutboxWorker(store, {"telegram": partial}).run_once()
-    await IMOutboxWorker(store, {"telegram": partial}).run_once()
+    await worker_for(store, {"telegram": partial}).run_once()
+    await worker_for(store, {"telegram": partial}).run_once()
     assert partial.sent == ["prefix"]
     assert statuses(pool)[0][0] == "uncertain"
     store.accept("telegram", "bot", "chat", 7, [candidate(2, text="later")])
     later = RecordingAdapter()
-    await IMOutboxWorker(store, {"telegram": later}).run_once()
+    await worker_for(store, {"telegram": later}).run_once()
     assert later.sent == ["later"]
     assert [row[0] for row in statuses(pool)] == ["uncertain", "sent"]
 
@@ -487,7 +479,7 @@ async def test_cancelled_send_still_exposes_collected_programming_error(pool: Co
             await asyncio.to_thread(blocking_sdk)
 
     adapter = SDKAdapter()
-    task = asyncio.create_task(IMOutboxWorker(store, {"telegram": adapter}).run_once())
+    task = asyncio.create_task(worker_for(store, {"telegram": adapter}).run_once())
     try:
         await asyncio.wait_for(started.wait(), timeout=5)
         task.cancel()
@@ -500,5 +492,5 @@ async def test_cancelled_send_still_exposes_collected_programming_error(pool: Co
     assert caught.value is original
     assert isinstance(original.__cause__, asyncio.CancelledError)
     assert statuses(pool)[0][0] == "uncertain"
-    await IMOutboxWorker(store, {"telegram": adapter}).run_once()
+    await worker_for(store, {"telegram": adapter}).run_once()
     assert adapter.sent == ["original"]

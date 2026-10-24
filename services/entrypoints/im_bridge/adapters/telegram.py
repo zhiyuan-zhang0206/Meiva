@@ -26,7 +26,6 @@ from typing import Any, cast
 import httpx
 
 from base.log import logger
-from base.paths import meiva_home
 from services.entrypoints.im_bridge.config import TelegramCredentialsConfig
 from services.entrypoints.im_bridge.types import (
     NETWORK_ERRORS,
@@ -120,10 +119,12 @@ class TelegramAdapter(IMAdapter):
         core: Any,
         config: TelegramCredentialsConfig,
         *,
+        state_dir: Path,
         client: httpx.AsyncClient | None = None,
     ) -> None:
         super().__init__(core)
         self._config = config
+        self._state_dir = state_dir
         self._client = client  # injected in tests; else created lazily
         self._owns_client = client is None
         self._poll_task: asyncio.Task[None] | None = None
@@ -152,7 +153,7 @@ class TelegramAdapter(IMAdapter):
         return self._client
 
     def _offset_path(self) -> Path:
-        return meiva_home() / "state" / "im_bridge" / "telegram_offset"
+        return self._state_dir / "telegram_offset"
 
     # -- lifecycle -------------------------------------------------------
 

@@ -2,6 +2,7 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
+from psycopg import Connection
 from psycopg_pool import ConnectionPool
 
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
@@ -15,40 +16,15 @@ from base.paths.tests.homes import unit_home as unit_home
 from meiva.tests.fixtures.sdk import sdk_environment as sdk_environment
 from meiva.tests.fixtures.sdk import sdk_identity as sdk_identity
 from meiva.tests.fixtures.sdk import sdk_metering as sdk_metering
-from services.entrypoints.im_bridge.types import (
-    IMAdapter,
-    OutboundAdapterKind,
-    OutboundChunk,
-    PreparedOutboundSend,
-)
+from services.entrypoints.im_bridge.config import state_dir_of
 
 
-@pytest.fixture(autouse=True)
-def _core_durable_seams(
-    db_url: str, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> Iterator[None]:
-    from services.entrypoints.im_bridge.tests import test_im_bridge_core
+@pytest.fixture
+def pool(db_url: str) -> Iterator[ConnectionPool]:
+    with ConnectionPool[Connection](settings.data_plane.db_url, min_size=1, max_size=2) as pool:
+        yield pool
 
-    monkeypatch.setenv("MEIVA_HOME", str(tmp_path))
 
-    async def account(self: IMAdapter) -> str:
-        return "test-account"
-
-    async def prepare(self: IMAdapter, text: str) -> PreparedOutboundSend:
-        return PreparedOutboundSend(
-            adapter_kind=OutboundAdapterKind(self.channel + "-v1"),
-            account_id="test-account",
-            chunks=(OutboundChunk(text=text),),
-            markdown=True,
-        )
-
-    async def send_prepared(self: IMAdapter, chat_id: str, prepared: PreparedOutboundSend) -> None:
-        for chunk in prepared.chunks:
-            await self.send(chat_id, chunk.text, markdown=prepared.markdown)
-
-    monkeypatch.setattr(IMAdapter, "outbound_account_id", account)
-    monkeypatch.setattr(IMAdapter, "prepare_timeline", prepare)
-    monkeypatch.setattr(IMAdapter, "send_prepared_outbound", send_prepared)
-    with ConnectionPool(settings.data_plane.db_url, min_size=1, max_size=2) as pool:
-        monkeypatch.setattr(test_im_bridge_core, "TEST_POOL", pool)
-        yield
+@pytest.fixture
+def state_dir(tmp_path: Path) -> Path:
+    return state_dir_of(tmp_path)

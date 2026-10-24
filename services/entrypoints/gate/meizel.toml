@@ -1,4 +1,8 @@
 exports = ["daemon.py", "tests"]
 
 [uses]
-"tests" = ["daemon.py"]
+"daemon.py" = ["launch_plan.py"]
+"tests" = ["daemon.py", "launch_plan.py"]
+
+[purity]
+"launch_plan.py" = "strict"

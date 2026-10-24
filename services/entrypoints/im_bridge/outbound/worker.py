@@ -1,7 +1,9 @@
 import asyncio
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable
 
 from base.log import logger
+from services.entrypoints.im_bridge.config import ImBridgeConfig
+from services.entrypoints.im_bridge.outbound.retry import retry_once_after_backoff
 from services.entrypoints.im_bridge.outbound.store import IMOutboxStore
 from services.entrypoints.im_bridge.outbound.types import OutboundIntent, OutboundStatus
 from services.entrypoints.im_bridge.types import (
@@ -55,11 +57,11 @@ class IMOutboxWorker:
         store: IMOutboxStore,
         adapters: dict[str, IMAdapter],
         *,
-        retry: Callable[[Callable[[], Awaitable[None]]], Awaitable[None]] | None = None,
+        config: ImBridgeConfig,
     ) -> None:
         self.store = store
         self.adapters = adapters
-        self._retry = retry
+        self._config = config
         self._serial = asyncio.Lock()
 
     async def run_once(self) -> None:
@@ -111,11 +113,9 @@ class IMOutboxWorker:
         try:
             await send_once()
         except SendNotStartedError:
-            if self._retry is None:
-                return OutboundStatus.FAILED, "adapter_proved_no_effect", None
             logger.warning("IM outbound send proved no effect intent={}; retrying once", intent_id)
             try:
-                await self._retry(send_once)
+                await retry_once_after_backoff(send_once, self._config)
             except SendNotStartedError:
                 logger.warning("IM outbound send proved no effect after retry intent={}", intent_id)
                 return OutboundStatus.FAILED, "adapter_proved_no_effect", None

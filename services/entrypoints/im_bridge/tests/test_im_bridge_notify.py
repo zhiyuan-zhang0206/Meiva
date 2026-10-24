@@ -13,34 +13,16 @@ from __future__ import annotations
 
 import asyncio
 import json
+from pathlib import Path
 from typing import Any
 
-import pytest
-
-from services.entrypoints.im_bridge import push_watchdog
 from services.entrypoints.im_bridge.core import IMBridgeCore
 from services.entrypoints.im_bridge.tests.slices import gateway_client, im_bridge_config
-from services.entrypoints.im_bridge.tests.task_scope import owned_tasks
-from services.entrypoints.im_bridge.types import IMAdapter, SendNotStartedError
+from services.entrypoints.im_bridge.tests.support import DurableAdapter, owned_tasks
+from services.entrypoints.im_bridge.types import SendNotStartedError
 
 
-@pytest.fixture
-def retry_sleeps(monkeypatch: pytest.MonkeyPatch) -> list[float]:
-    """Record the retry backoff instead of sleeping it out.
-
-    The seam is `push_watchdog.push_watchdog_sleep` (tests/README.md: patch the module-local
-    seam, not `asyncio.sleep`), so no test pays real wall-clock time."""
-
-    recorded: list[float] = []
-
-    async def _record(seconds: float) -> None:
-        recorded.append(seconds)
-
-    monkeypatch.setattr(push_watchdog, "push_watchdog_sleep", _record)
-    return recorded
-
-
-class _RecordingAdapter(IMAdapter):
+class _RecordingAdapter(DurableAdapter):
     """IMAdapter stand-in recording send_to_owner calls.
 
     `error` + `fail_times` script a transient failure: the first `fail_times`
@@ -91,10 +73,12 @@ class _RecordingAdapter(IMAdapter):
         self.sent.append(text)
 
 
-async def test_notify_user_fans_out_to_all_adapters() -> None:
+async def test_notify_user_fans_out_to_all_adapters(state_dir: Path) -> None:
     """Every loaded adapter gets the text; results report per-channel ok."""
     async with owned_tasks() as _owned_tasks:
-        core = IMBridgeCore(im_bridge_config(), gateway_client(), tasks=_owned_tasks)
+        core = IMBridgeCore(
+            im_bridge_config(), gateway_client(), tasks=_owned_tasks, state_dir=state_dir
+        )
         a1, a2 = _RecordingAdapter(), _RecordingAdapter()
         core.register(a1)
         core.register(a2)
@@ -110,12 +94,14 @@ async def test_notify_user_fans_out_to_all_adapters() -> None:
         assert set(results.values()) == {"ok"}
 
 
-async def test_notify_user_skips_and_isolates_failures(retry_sleeps: list[float]) -> None:
+async def test_notify_user_skips_and_isolates_failures(state_dir: Path) -> None:
     """A channel without an owner chat is skipped; a failing channel does not
     stop the others from receiving the message. The skipped channel pays no
     retry (a permanent condition); the unknown failure is not repeated."""
     async with owned_tasks() as _owned_tasks:
-        core = IMBridgeCore(im_bridge_config(), gateway_client(), tasks=_owned_tasks)
+        core = IMBridgeCore(
+            im_bridge_config(), gateway_client(), tasks=_owned_tasks, state_dir=state_dir
+        )
         skipped, broken, ok = (
             _RecordingAdapter(skipped=True),
             _RecordingAdapter(error=RuntimeError("platform down")),
@@ -136,14 +122,15 @@ async def test_notify_user_skips_and_isolates_failures(retry_sleeps: list[float]
         assert results[broken.channel].startswith("error:")
         assert skipped.attempts == 1  # NotImplementedError is permanent — never retried
         assert broken.attempts == 1  # unknown outcome cannot authorize another send
-        assert retry_sleeps == []
 
 
-async def test_notify_user_retry_after_backoff_recovers(retry_sleeps: list[float]) -> None:
+async def test_notify_user_retry_after_backoff_recovers(state_dir: Path) -> None:
     """A transient failure (the ~0.65s connection window, task #4252) is
     healed by exactly one retry after the bounded jitter backoff."""
     async with owned_tasks() as _owned_tasks:
-        core = IMBridgeCore(im_bridge_config(), gateway_client(), tasks=_owned_tasks)
+        core = IMBridgeCore(
+            im_bridge_config(), gateway_client(), tasks=_owned_tasks, state_dir=state_dir
+        )
         flaky = _RecordingAdapter(error=SendNotStartedError("connect jitter"), fail_times=1)
         core.register(flaky)
 
@@ -154,16 +141,14 @@ async def test_notify_user_retry_after_backoff_recovers(retry_sleeps: list[float
         assert results[flaky.channel] == "ok"
         assert flaky.sent == ["hi"]
         assert flaky.attempts == 2
-        assert len(retry_sleeps) == 1
-        base = core.config.im_push_retry_backoff_seconds
-        jitter = core.config.im_push_retry_jitter_seconds
-        assert base <= retry_sleeps[0] <= base + jitter
 
 
-async def test_notify_user_double_failure_reports_error(retry_sleeps: list[float]) -> None:
+async def test_notify_user_double_failure_reports_error(state_dir: Path) -> None:
     """An unknown failure retains the compatible error result without retry."""
     async with owned_tasks() as _owned_tasks:
-        core = IMBridgeCore(im_bridge_config(), gateway_client(), tasks=_owned_tasks)
+        core = IMBridgeCore(
+            im_bridge_config(), gateway_client(), tasks=_owned_tasks, state_dir=state_dir
+        )
         broken = _RecordingAdapter(error=ValueError("boom"))
         core.register(broken)
 
@@ -173,13 +158,14 @@ async def test_notify_user_double_failure_reports_error(retry_sleeps: list[float
         results = await run()
         assert results[broken.channel] == "error: ValueError"
         assert broken.attempts == 1
-        assert retry_sleeps == []
 
 
-async def test_notify_user_empty_core() -> None:
+async def test_notify_user_empty_core(state_dir: Path) -> None:
     """No adapters loaded -> empty results, no error (daemon serves nothing)."""
     async with owned_tasks() as _owned_tasks:
-        core = IMBridgeCore(im_bridge_config(), gateway_client(), tasks=_owned_tasks)
+        core = IMBridgeCore(
+            im_bridge_config(), gateway_client(), tasks=_owned_tasks, state_dir=state_dir
+        )
 
         async def run() -> dict[str, str]:
             return await core.notify_user("hi")

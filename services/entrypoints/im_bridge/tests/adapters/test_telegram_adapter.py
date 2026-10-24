@@ -12,6 +12,7 @@ import asyncio
 import json
 import ssl
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -22,7 +23,7 @@ from base.log.tests.log_records import loguru_records as loguru_records
 from services.entrypoints.im_bridge.adapters.telegram import InboundMessage, TelegramAdapter
 from services.entrypoints.im_bridge.config import TelegramCredentialsConfig
 from services.entrypoints.im_bridge.tests.slices import telegram_config
-from services.entrypoints.im_bridge.tests.task_scope import owned_tasks
+from services.entrypoints.im_bridge.tests.support import owned_tasks
 from services.entrypoints.im_bridge.types import (
     RetryableTransportError,
     SendNotStartedError,
@@ -84,12 +85,6 @@ def _transport(
     return httpx.MockTransport(handler), captured
 
 
-@pytest.fixture
-def env(monkeypatch: pytest.MonkeyPatch, tmp_path: Any) -> None:
-    """A tmp MEIVA_HOME for the adapter's offset file."""
-    monkeypatch.setenv("MEIVA_HOME", str(tmp_path))
-
-
 def _config(**overrides: Any) -> TelegramCredentialsConfig:
     """The adapter's slice with a test token and owner."""
     return telegram_config(
@@ -114,7 +109,7 @@ def _offset_file(tmp_path: Any) -> Any:
     return tmp_path / "state" / "im_bridge" / "telegram_offset"
 
 
-async def test_poll_loop_forwards_owner_text(env: None, tmp_path: Any) -> None:
+async def test_poll_loop_forwards_owner_text(tmp_path: Any, state_dir: Path) -> None:
     """Owner text message -> InboundMessage reaches core; offset advances."""
     async with owned_tasks() as _owned_tasks:
         core = FakeCore()
@@ -128,7 +123,7 @@ async def test_poll_loop_forwards_owner_text(env: None, tmp_path: Any) -> None:
             ]
         )
         async with httpx.AsyncClient(transport=transport) as client:
-            adapter = TelegramAdapter(core, _config(), client=client)
+            adapter = TelegramAdapter(core, _config(), client=client, state_dir=state_dir)
             try:
                 await adapter.start(_owned_tasks)
                 await asyncio.wait_for(core.received.wait(), timeout=2)
@@ -144,7 +139,7 @@ async def test_poll_loop_forwards_owner_text(env: None, tmp_path: Any) -> None:
         assert _offset_file(tmp_path).read_text() == "6"
 
 
-async def test_non_owner_ignored_but_offset_advances(env: None, tmp_path: Any) -> None:
+async def test_non_owner_ignored_but_offset_advances(tmp_path: Any, state_dir: Path) -> None:
     """A stranger's message is consumed (offset moves) but never forwarded."""
     async with owned_tasks() as _owned_tasks:
         core = FakeCore()
@@ -158,7 +153,7 @@ async def test_non_owner_ignored_but_offset_advances(env: None, tmp_path: Any) -
             ]
         )
         async with httpx.AsyncClient(transport=transport) as client:
-            adapter = TelegramAdapter(core, _config(), client=client)
+            adapter = TelegramAdapter(core, _config(), client=client, state_dir=state_dir)
             try:
                 await adapter.start(_owned_tasks)
                 # poll loop consumes the update; the ack lands after handling
@@ -170,7 +165,7 @@ async def test_non_owner_ignored_but_offset_advances(env: None, tmp_path: Any) -
         assert _offset_file(tmp_path).read_text() == "8"
 
 
-async def test_offset_persisted_and_reused(env: None, tmp_path: Any) -> None:
+async def test_offset_persisted_and_reused(tmp_path: Any, state_dir: Path) -> None:
     """The next long poll sends the persisted offset, not 0."""
     async with owned_tasks() as _owned_tasks:
         core = FakeCore()
@@ -185,7 +180,7 @@ async def test_offset_persisted_and_reused(env: None, tmp_path: Any) -> None:
             ]
         )
         async with httpx.AsyncClient(transport=transport) as client:
-            adapter = TelegramAdapter(core, _config(), client=client)
+            adapter = TelegramAdapter(core, _config(), client=client, state_dir=state_dir)
             try:
                 await adapter.start(_owned_tasks)
                 await asyncio.wait_for(core.received.wait(), timeout=2)
@@ -198,7 +193,7 @@ async def test_offset_persisted_and_reused(env: None, tmp_path: Any) -> None:
         assert _offset_file(tmp_path).read_text() == "8"
 
 
-async def test_send_splits_long_text(env: None) -> None:
+async def test_send_splits_long_text(state_dir: Path) -> None:
     """Text longer than 4096 chars is sent in consecutive 4096-char chunks."""
     transport, captured = _transport(
         [
@@ -208,7 +203,7 @@ async def test_send_splits_long_text(env: None) -> None:
         ]
     )
     async with httpx.AsyncClient(transport=transport) as client:
-        adapter = TelegramAdapter(FakeCore(), _config(), client=client)
+        adapter = TelegramAdapter(FakeCore(), _config(), client=client, state_dir=state_dir)
         await adapter.send("42", "x" * 9000)
 
     bodies = [json.loads(r.content) for r in captured]
@@ -217,7 +212,9 @@ async def test_send_splits_long_text(env: None) -> None:
     assert all("sendMessage" in str(r.url) for r in captured)
 
 
-async def test_send_logs_one_delivery_line_per_chunk(env: Any, loguru_records: LogRecords) -> None:
+async def test_send_logs_one_delivery_line_per_chunk(
+    loguru_records: LogRecords, state_dir: Path
+) -> None:
     """Each API-confirmed chunk appends one 'telegram send ok' line — the
     delivery-count surface (task #4250)."""
     transport, _captured = _transport(
@@ -227,7 +224,7 @@ async def test_send_logs_one_delivery_line_per_chunk(env: Any, loguru_records: L
         ]
     )
     async with httpx.AsyncClient(transport=transport) as client:
-        adapter = TelegramAdapter(FakeCore(), _config(), client=client)
+        adapter = TelegramAdapter(FakeCore(), _config(), client=client, state_dir=state_dir)
         await adapter.send("42", "x" * 5000)
 
     assert loguru_records.messages("INFO") == [
@@ -236,7 +233,9 @@ async def test_send_logs_one_delivery_line_per_chunk(env: Any, loguru_records: L
     ]
 
 
-async def test_failed_chunk_logs_no_delivery_line(env: Any, loguru_records: LogRecords) -> None:
+async def test_failed_chunk_logs_no_delivery_line(
+    loguru_records: LogRecords, state_dir: Path
+) -> None:
     """A chunk that fails is never counted: the send raises and only the
     confirmed first chunk left a line."""
     transport, _captured = _transport(
@@ -246,7 +245,7 @@ async def test_failed_chunk_logs_no_delivery_line(env: Any, loguru_records: LogR
         ]
     )
     async with httpx.AsyncClient(transport=transport) as client:
-        adapter = TelegramAdapter(FakeCore(), _config(), client=client)
+        adapter = TelegramAdapter(FakeCore(), _config(), client=client, state_dir=state_dir)
         with pytest.raises(RuntimeError, match="HTTP 500"):
             await adapter.send("42", "x" * 5000)
 
@@ -254,25 +253,25 @@ async def test_failed_chunk_logs_no_delivery_line(env: Any, loguru_records: LogR
 
 
 async def test_delivery_line_survives_malformed_response_body(
-    env: Any, loguru_records: LogRecords
+    loguru_records: LogRecords, state_dir: Path
 ) -> None:
     """A 200 with an unparseable body still lands (no raise) and logs the
     line with an empty message_id — the counting code never fails a send."""
     transport, _captured = _transport([httpx.Response(200, text="not json")])
     async with httpx.AsyncClient(transport=transport) as client:
-        adapter = TelegramAdapter(FakeCore(), _config(), client=client)
+        adapter = TelegramAdapter(FakeCore(), _config(), client=client, state_dir=state_dir)
         await adapter.send("42", "hi")
 
     assert loguru_records.messages("INFO") == ["telegram send ok chat_id=42 message_id="]
 
 
-async def test_send_sanitizes_http_error(env: None) -> None:
+async def test_send_sanitizes_http_error(state_dir: Path) -> None:
     """A non-200 send raises a RuntimeError without the token or the URL."""
     transport, _captured = _transport(
         [httpx.Response(401, json={"ok": False, "description": "Unauthorized"})]
     )
     async with httpx.AsyncClient(transport=transport) as client:
-        adapter = TelegramAdapter(FakeCore(), _config(), client=client)
+        adapter = TelegramAdapter(FakeCore(), _config(), client=client, state_dir=state_dir)
         with pytest.raises(RuntimeError, match="HTTP 401") as exc_info:
             await adapter.send("42", "hello")
 
@@ -281,30 +280,30 @@ async def test_send_sanitizes_http_error(env: None) -> None:
     assert "api.telegram.org" not in str(exc_info.value)
 
 
-async def test_getupdates_non_200_sanitized(env: None) -> None:
+async def test_getupdates_non_200_sanitized(state_dir: Path) -> None:
     """A non-200 getUpdates raises a sanitized RuntimeError (no token)."""
     transport, _captured = _transport([httpx.Response(401, json={"ok": False})])
     async with httpx.AsyncClient(transport=transport) as client:
-        adapter = TelegramAdapter(FakeCore(), _config(), client=client)
+        adapter = TelegramAdapter(FakeCore(), _config(), client=client, state_dir=state_dir)
         with pytest.raises(RuntimeError, match="HTTP 401"):
             await adapter._get_updates()
 
 
-async def test_getupdates_transport_error_sanitized(env: None) -> None:
+async def test_getupdates_transport_error_sanitized(state_dir: Path) -> None:
     """httpx transport errors surface as the exception type, never the URL."""
 
     def boom(_request: httpx.Request) -> httpx.Response:
         raise httpx.ConnectError("https://api.telegram.org/bot123456:TEST-TOKEN/getUpdates")
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(boom)) as client:
-        adapter = TelegramAdapter(FakeCore(), _config(), client=client)
+        adapter = TelegramAdapter(FakeCore(), _config(), client=client, state_dir=state_dir)
         with pytest.raises(RuntimeError, match="ConnectError") as exc_info:
             await adapter._get_updates()
     assert "TEST-TOKEN" not in str(exc_info.value)
     assert "api.telegram.org" not in str(exc_info.value)
 
 
-async def test_getupdates_ssl_record_layer_error_sanitized(env: None) -> None:
+async def test_getupdates_ssl_record_layer_error_sanitized(state_dir: Path) -> None:
     """#5052: a raw ssl.SSLError from the TLS read is classified retryable
     with the exception type only — no URL and no token in the message."""
 
@@ -312,7 +311,7 @@ async def test_getupdates_ssl_record_layer_error_sanitized(env: None) -> None:
         raise ssl.SSLError("[SSL] record layer failure (_ssl.c:2580)")
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(boom)) as client:
-        adapter = TelegramAdapter(FakeCore(), _config(), client=client)
+        adapter = TelegramAdapter(FakeCore(), _config(), client=client, state_dir=state_dir)
         with pytest.raises(RetryableTransportError, match="SSLError") as exc_info:
             await adapter._get_updates()
     assert "TEST-TOKEN" not in str(exc_info.value)
@@ -320,7 +319,7 @@ async def test_getupdates_ssl_record_layer_error_sanitized(env: None) -> None:
 
 
 async def test_poll_loop_survives_a_record_layer_ssl_failure(
-    env: None, loguru_records: LogRecords
+    loguru_records: LogRecords, state_dir: Path
 ) -> None:
     """#5052: a TLS read that fails mid-stream (record-layer ssl.SSLError) is
     retried like any transport error — the poll task must survive instead of
@@ -339,7 +338,10 @@ async def test_poll_loop_survives_a_record_layer_ssl_failure(
 
         async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
             adapter = TelegramAdapter(
-                core, _config(telegram_reconnect_base_delay_seconds=0.01), client=client
+                core,
+                _config(telegram_reconnect_base_delay_seconds=0.01),
+                client=client,
+                state_dir=state_dir,
             )
             try:
                 await adapter.start(_owned_tasks)
@@ -354,7 +356,7 @@ async def test_poll_loop_survives_a_record_layer_ssl_failure(
 
 
 async def test_poll_loop_survives_a_hard_http_rejection(
-    env: None, loguru_records: LogRecords
+    loguru_records: LogRecords, state_dir: Path
 ) -> None:
     """#5052: a non-retryable getUpdates status (401) enters the reconnect
     backoff, logged at error level — it must not end the poll task."""
@@ -372,7 +374,10 @@ async def test_poll_loop_survives_a_hard_http_rejection(
 
         async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
             adapter = TelegramAdapter(
-                core, _config(telegram_reconnect_base_delay_seconds=0.01), client=client
+                core,
+                _config(telegram_reconnect_base_delay_seconds=0.01),
+                client=client,
+                state_dir=state_dir,
             )
             try:
                 await adapter.start(_owned_tasks)
@@ -386,12 +391,12 @@ async def test_poll_loop_survives_a_hard_http_rejection(
                 await adapter.stop()
 
 
-async def test_media_caption_forwarded_textless_ignored(env: None) -> None:
+async def test_media_caption_forwarded_textless_ignored(state_dir: Path) -> None:
     """Media with a caption forwards the caption; textless media is ignored."""
     core = FakeCore()
     transport, _captured = _transport([])
     async with httpx.AsyncClient(transport=transport) as client:
-        adapter = TelegramAdapter(core, _config(), client=client)
+        adapter = TelegramAdapter(core, _config(), client=client, state_dir=state_dir)
         await adapter._handle_update(_update(1, 42, caption="see this"))
         await adapter._handle_update(_update(2, 42, message_id=3))  # photo, no caption
         await adapter._handle_update({"update_id": 3, "edited_message": {"chat": {"id": 42}}})
@@ -401,13 +406,15 @@ async def test_media_caption_forwarded_textless_ignored(env: None) -> None:
     ]
 
 
-async def test_start_skips_when_not_configured() -> None:
+async def test_start_skips_when_not_configured(state_dir: Path) -> None:
     """No token / no owner id -> start() logs and returns (the daemon stays
     up either way, like the weixin/feishu adapters) — a fresh install with no
     bot token must not kill the im-bridge session."""
     async with owned_tasks() as _owned_tasks:
         adapter = TelegramAdapter(
-            FakeCore(), telegram_config(telegram_bot_token="", telegram_owner_id=0)
+            FakeCore(),
+            telegram_config(telegram_bot_token="", telegram_owner_id=0),
+            state_dir=state_dir,
         )
         await adapter.start(_owned_tasks)
         assert adapter._poll_task is None
@@ -420,12 +427,12 @@ def _send_response() -> httpx.Response:
     return httpx.Response(200, json={"ok": True, "result": {"message_id": 1}})
 
 
-async def test_send_escapes_html_and_marks_up_agent_content(env: Any) -> None:
+async def test_send_escapes_html_and_marks_up_agent_content(state_dir: Path) -> None:
     """markdown=True renders a light markdown subset to HTML; every outgoing
     text is HTML-escaped first so user data cannot inject tags."""
     transport, captured = _transport([_send_response()])
     async with httpx.AsyncClient(transport=transport) as client:
-        adapter = TelegramAdapter(FakeCore(), _config(), client=client)
+        adapter = TelegramAdapter(FakeCore(), _config(), client=client, state_dir=state_dir)
         await adapter.send(
             "42",
             "hello <b>world</b> & **bold** `code` [link](https://x.com/a)",
@@ -441,22 +448,22 @@ async def test_send_escapes_html_and_marks_up_agent_content(env: Any) -> None:
     assert "reply_markup" not in body
 
 
-async def test_send_plain_text_is_escaped(env: Any) -> None:
+async def test_send_plain_text_is_escaped(state_dir: Path) -> None:
     """Command replies (markdown=False) are escaped so stray < > & are safe."""
     transport, captured = _transport([_send_response()])
     async with httpx.AsyncClient(transport=transport) as client:
-        adapter = TelegramAdapter(FakeCore(), _config(), client=client)
+        adapter = TelegramAdapter(FakeCore(), _config(), client=client, state_dir=state_dir)
         await adapter.send("42", "a < b & c > d")
     (request,) = captured
     assert json.loads(request.content)["text"] == "a &lt; b &amp; c &gt; d"
 
 
-async def test_send_attaches_inline_keyboard_buttons(env: Any) -> None:
+async def test_send_attaches_inline_keyboard_buttons(state_dir: Path) -> None:
     """buttons render as an inline keyboard whose callback_data carries the
     command — one button per row."""
     transport, captured = _transport([_send_response()])
     async with httpx.AsyncClient(transport=transport) as client:
-        adapter = TelegramAdapter(FakeCore(), _config(), client=client)
+        adapter = TelegramAdapter(FakeCore(), _config(), client=client, state_dir=state_dir)
         await adapter.send(
             "42",
             "\u9009\u62e9 agent",
@@ -472,7 +479,7 @@ async def test_send_attaches_inline_keyboard_buttons(env: Any) -> None:
     }
 
 
-async def test_send_falls_back_to_plain_text_when_html_rejected(env: Any) -> None:
+async def test_send_falls_back_to_plain_text_when_html_rejected(state_dir: Path) -> None:
     """A 400 on the HTML attempt resends the same text without parse_mode —
     formatting is lost, content is not."""
     transport, captured = _transport(
@@ -482,7 +489,7 @@ async def test_send_falls_back_to_plain_text_when_html_rejected(env: Any) -> Non
         ]
     )
     async with httpx.AsyncClient(transport=transport) as client:
-        adapter = TelegramAdapter(FakeCore(), _config(), client=client)
+        adapter = TelegramAdapter(FakeCore(), _config(), client=client, state_dir=state_dir)
         await adapter.send("42", "**bold**", markdown=True)
     assert len(captured) == 2
     first, second = (json.loads(r.content) for r in captured)
@@ -509,13 +516,13 @@ def _callback_update(
     }
 
 
-async def test_callback_tap_runs_command_and_answers(env: Any) -> None:
+async def test_callback_tap_runs_command_and_answers(state_dir: Path) -> None:
     """Tapping a switch button delivers the command like a typed message and
     acknowledges the tap so Telegram clears the button spinner."""
     core = FakeCore()
     transport, captured = _transport([httpx.Response(200, json={"ok": True, "result": []})])
     async with httpx.AsyncClient(transport=transport) as client:
-        adapter = TelegramAdapter(core, _config(), client=client)
+        adapter = TelegramAdapter(core, _config(), client=client, state_dir=state_dir)
         await adapter._handle_callback(
             _callback_update(1, "cb-1", 42, "/switch 405")["callback_query"]
         )
@@ -533,13 +540,13 @@ async def test_callback_tap_runs_command_and_answers(env: Any) -> None:
     assert json.loads(request.content)["callback_query_id"] == "cb-1"
 
 
-async def test_start_installs_command_menu(env: Any) -> None:
+async def test_start_installs_command_menu(state_dir: Path) -> None:
     """start() sets the persistent command menu (setMyCommands); failure is
     tolerated (the poll loop still runs)."""
     async with owned_tasks() as _owned_tasks:
         transport, captured = _transport([httpx.Response(200, json={"ok": True, "result": True})])
         async with httpx.AsyncClient(transport=transport) as client:
-            adapter = TelegramAdapter(FakeCore(), _config(), client=client)
+            adapter = TelegramAdapter(FakeCore(), _config(), client=client, state_dir=state_dir)
             await adapter.start(_owned_tasks)
             try:
                 (request,) = captured
@@ -573,7 +580,7 @@ class FailingCore:
         self.inbound.append(msg)
 
 
-async def test_unacked_update_is_refetched_after_failure(env: Any, tmp_path: Any) -> None:
+async def test_unacked_update_is_refetched_after_failure(tmp_path: Any, state_dir: Path) -> None:
     """A message whose delivery fails keeps the offset put — the next poll
     re-fetches it, so nothing is dropped in a rollout window."""
     async with owned_tasks() as _owned_tasks:
@@ -590,7 +597,7 @@ async def test_unacked_update_is_refetched_after_failure(env: Any, tmp_path: Any
             ]
         )
         async with httpx.AsyncClient(transport=transport) as client:
-            adapter = TelegramAdapter(core, _config(), client=client)
+            adapter = TelegramAdapter(core, _config(), client=client, state_dir=state_dir)
             try:
                 await adapter.start(_owned_tasks)
                 await _wait_until(lambda: len(core.inbound) == 1, timeout=3)
@@ -606,7 +613,7 @@ async def test_unacked_update_is_refetched_after_failure(env: Any, tmp_path: Any
         assert offsets[1] == 0  # unacked — re-fetched from the same offset
 
 
-async def test_refetched_update_not_delivered_twice(env: Any, tmp_path: Any) -> None:
+async def test_refetched_update_not_delivered_twice(tmp_path: Any, state_dir: Path) -> None:
     """After a successful delivery the offset advances; if the same update
     were re-fetched anyway, the in-process dedup prevents a duplicate."""
     async with owned_tasks() as _owned_tasks:
@@ -620,7 +627,7 @@ async def test_refetched_update_not_delivered_twice(env: Any, tmp_path: Any) -> 
             ]
         )
         async with httpx.AsyncClient(transport=transport) as client:
-            adapter = TelegramAdapter(core, _config(), client=client)
+            adapter = TelegramAdapter(core, _config(), client=client, state_dir=state_dir)
             try:
                 await adapter.start(_owned_tasks)
                 await asyncio.wait_for(core.received.wait(), timeout=2)
@@ -632,11 +639,11 @@ async def test_refetched_update_not_delivered_twice(env: Any, tmp_path: Any) -> 
         assert len(core.inbound) == 1  # dedup: not delivered again
 
 
-async def test_spawn_taps_use_event_identity_not_shared_menu_message(env: Any) -> None:
+async def test_spawn_taps_use_event_identity_not_shared_menu_message(state_dir: Path) -> None:
     core = FakeCore()
     transport, _ = _transport([])
     async with httpx.AsyncClient(transport=transport) as client:
-        adapter = TelegramAdapter(core, _config(), client=client)
+        adapter = TelegramAdapter(core, _config(), client=client, state_dir=state_dir)
         for callback_id in ("first", "first", "second"):
             await adapter._handle_callback(
                 _callback_update(1, callback_id, 42, "spawn:go")["callback_query"]
@@ -657,11 +664,13 @@ def _ssl_boom(_request: httpx.Request) -> httpx.Response:
     raise ssl.SSLError("[SSL] record layer failure (_ssl.c:2580)")
 
 
-async def test_command_menu_ssl_failure_tolerated(env: None, loguru_records: LogRecords) -> None:
+async def test_command_menu_ssl_failure_tolerated(
+    loguru_records: LogRecords, state_dir: Path
+) -> None:
     """A raw ssl.SSLError while installing the command menu is tolerated like
     the transport errors — the bot still works via typed commands."""
     async with httpx.AsyncClient(transport=httpx.MockTransport(_ssl_boom)) as client:
-        adapter = TelegramAdapter(FakeCore(), _config(), client=client)
+        adapter = TelegramAdapter(FakeCore(), _config(), client=client, state_dir=state_dir)
         await adapter._install_command_menu()
     assert any(
         "setMyCommands failed" in message and "SSLError" in message
@@ -669,11 +678,13 @@ async def test_command_menu_ssl_failure_tolerated(env: None, loguru_records: Log
     )
 
 
-async def test_answer_callback_ssl_failure_tolerated(env: None, loguru_records: LogRecords) -> None:
+async def test_answer_callback_ssl_failure_tolerated(
+    loguru_records: LogRecords, state_dir: Path
+) -> None:
     """A raw ssl.SSLError while acknowledging a tap is tolerated like the
     transport errors — the command already ran; only the spinner is left."""
     async with httpx.AsyncClient(transport=httpx.MockTransport(_ssl_boom)) as client:
-        adapter = TelegramAdapter(FakeCore(), _config(), client=client)
+        adapter = TelegramAdapter(FakeCore(), _config(), client=client, state_dir=state_dir)
         await adapter._answer_callback("cb-1")
     assert any(
         "answerCallbackQuery failed" in message and "SSLError" in message
@@ -681,33 +692,33 @@ async def test_answer_callback_ssl_failure_tolerated(env: None, loguru_records: 
     )
 
 
-async def test_send_ssl_failure_is_uncertain_not_retryable(env: None) -> None:
+async def test_send_ssl_failure_is_uncertain_not_retryable(state_dir: Path) -> None:
     """A raw ssl.SSLError during sendMessage is outcome-uncertain: the request
     may have been accepted before the TLS read failed, so it must never be
     classified as not started — and the message stays token-free."""
     async with httpx.AsyncClient(transport=httpx.MockTransport(_ssl_boom)) as client:
-        adapter = TelegramAdapter(FakeCore(), _config(), client=client)
+        adapter = TelegramAdapter(FakeCore(), _config(), client=client, state_dir=state_dir)
         with pytest.raises(SendOutcomeUncertainError, match="SSLError") as exc_info:
             await adapter.send("42", "hi")
     assert not isinstance(exc_info.value, SendNotStartedError)
     assert "TEST-TOKEN" not in str(exc_info.value)
 
 
-async def test_typing_ssl_failure_classified_retryable(env: None) -> None:
+async def test_typing_ssl_failure_classified_retryable(state_dir: Path) -> None:
     """A raw ssl.SSLError from the typing indicator is retryable — the next
     refresh re-sends it (same class as the getUpdates failures, #5052)."""
     async with httpx.AsyncClient(transport=httpx.MockTransport(_ssl_boom)) as client:
-        adapter = TelegramAdapter(FakeCore(), _config(), client=client)
+        adapter = TelegramAdapter(FakeCore(), _config(), client=client, state_dir=state_dir)
         with pytest.raises(RetryableTransportError, match="SSLError") as exc_info:
             await adapter.typing("42")
     assert "TEST-TOKEN" not in str(exc_info.value)
 
 
-async def test_identity_request_ssl_failure_classified_retryable(env: None) -> None:
+async def test_identity_request_ssl_failure_classified_retryable(state_dir: Path) -> None:
     """A raw ssl.SSLError from the getMe identity lookup is retryable — the
     next outbound call re-requests it, and the message stays token-free."""
     async with httpx.AsyncClient(transport=httpx.MockTransport(_ssl_boom)) as client:
-        adapter = TelegramAdapter(FakeCore(), _config(), client=client)
+        adapter = TelegramAdapter(FakeCore(), _config(), client=client, state_dir=state_dir)
         with pytest.raises(RetryableTransportError, match="SSLError") as exc_info:
             await adapter.outbound_account_id()
     assert "TEST-TOKEN" not in str(exc_info.value)

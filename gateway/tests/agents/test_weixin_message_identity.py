@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 from services.entrypoints.im_bridge.gateway_client import GatewayClient
 from services.entrypoints.im_bridge.tests.adapters.test_weixin_adapter import env as env
 from services.entrypoints.im_bridge.tests.adapters.test_weixin_chat_identity import inbound_key
+from services.entrypoints.im_bridge.tests.conftest import state_dir as state_dir
 from services.entrypoints.im_bridge.tests.slices import im_bridge_config
 
 
@@ -22,7 +23,7 @@ def create_agent(conn: psycopg.Connection) -> int:
 
 
 async def test_same_event_changed_body_or_selection_does_not_claim_recovery(
-    env: Path, gateway_unit: TestClient, db_conn: psycopg.Connection
+    env: Path, state_dir: Path, gateway_unit: TestClient, db_conn: psycopg.Connection
 ) -> None:
     first_agent, later_agent = create_agent(db_conn), create_agent(db_conn)
     statuses: list[int] = []
@@ -37,7 +38,7 @@ async def test_same_event_changed_body_or_selection_does_not_claim_recovery(
         statuses.append(response.status_code)
         return httpx.Response(response.status_code, json=response.json())
 
-    key = await inbound_key("123")
+    key = await inbound_key(state_dir, "123")
     async with httpx.AsyncClient(
         base_url="http://test-gateway", transport=httpx.MockTransport(handler)
     ) as transport:

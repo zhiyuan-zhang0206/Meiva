@@ -1,6 +1,6 @@
 """IM intents share atomic acceptance with their timeline or notice producer."""
 
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
 from datetime import datetime
 from typing import Any
 from uuid import UUID, uuid4
@@ -16,6 +16,14 @@ from services.entrypoints.im_bridge.cursor_store import (
     is_after_watermark,
     watermark_of,
 )
+from services.entrypoints.im_bridge.outbound.claim_fence import (
+    ATTEMPT_SQL,
+    BINDING_SQL,
+    ClaimFence,
+    StalePollBindingError,
+    attempt_parameters,
+    binding_is_current,
+)
 from services.entrypoints.im_bridge.outbound.types import (
     OutboundAccountMismatchError,
     OutboundIdentityConflictError,
@@ -24,6 +32,21 @@ from services.entrypoints.im_bridge.outbound.types import (
     TimelineAcceptance,
     TimelineCandidate,
 )
+
+
+# meiva:note
+# Take the ingress store's locks on the fence's binding and attempt inside this transaction, and
+# refuse a superseded generation or attempt.
+def _enforce_claim_fence(conn: Connection, fence: ClaimFence) -> None:
+    if not binding_is_current(
+        conn.execute(BINDING_SQL).fetchone(),
+        namespace=fence.namespace,
+        account_id=fence.account_id,
+        epoch=fence.epoch,
+    ):
+        raise StalePollBindingError("Weixin poll account generation is superseded")
+    if conn.execute(ATTEMPT_SQL, attempt_parameters(fence)).fetchone() is None:
+        raise StalePollBindingError("Weixin command source attempt is superseded")
 
 
 class IMOutboxStore:
@@ -45,12 +68,12 @@ class IMOutboxStore:
         *,
         replay_id: str = "",
         switch_arg: str = "",
-        guard: Callable[[Connection], None] | None = None,
+        fence: ClaimFence | None = None,
     ) -> TimelineAcceptance:
         self._validate_candidates(channel, account_id, chat_id, agent_id, candidates, replay_id)
         with write_transaction(self._pool()) as conn:
-            if guard is not None:
-                guard(conn)
+            if fence is not None:
+                _enforce_claim_fence(conn, fence)
             saved_account, saved_agent, watermark, initialized = self._lock_cursor(
                 conn,
                 channel,
@@ -457,11 +480,11 @@ class IMOutboxStore:
         chat: str,
         expected: int,
         *,
-        guard: Callable[[Connection], None] | None = None,
+        fence: ClaimFence | None = None,
     ) -> bool:
         with write_transaction(self._pool()) as conn:
-            if guard is not None:
-                guard(conn)
+            if fence is not None:
+                _enforce_claim_fence(conn, fence)
             return (
                 conn.execute(
                     "UPDATE im_bridge_cursors SET push_agent_id=NULL, push_item_id=NULL, push_created_at=NULL, "

@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 from datetime import UTC, datetime, timedelta
 from typing import cast
 from uuid import uuid4
 
-import pytest
 from psycopg_pool import ConnectionPool
 
 from base.log.tests.log_records import LogRecords
@@ -17,7 +17,6 @@ from services.entrypoints.im_bridge.outbound.health import (
 )
 from services.entrypoints.im_bridge.outbound.store import IMOutboxStore
 from services.entrypoints.im_bridge.tests.slices import im_bridge_config
-from services.entrypoints.im_bridge.tests.test_timeline_outbox import pool as pool
 
 
 class _Store:
@@ -67,23 +66,26 @@ async def test_emit_once_reports_never_sent_sentinel(loguru_records: LogRecords)
     assert event["extra"]["pending"] == 2
 
 
-async def test_loop_samples_once_per_interval(loguru_records: LogRecords) -> None:
-    intervals: list[float] = []
-
-    async def _stop(seconds: float) -> None:
-        intervals.append(seconds)
-        raise asyncio.CancelledError
-
-    store = _fake_store({"feishu": (1, datetime.now(UTC))})
+async def test_loop_samples_once_per_interval(
+    loguru_records: LogRecords, pool: ConnectionPool
+) -> None:
+    store = IMOutboxStore(pool)
     config = im_bridge_config(
-        im_push_health_channels=("feishu",), im_push_health_interval_seconds=45.0
+        im_push_health_channels=("feishu",), im_push_health_interval_seconds=0.02
     )
-
-    with pytest.raises(asyncio.CancelledError):
-        await push_health_loop(store, config, sleep=_stop)
-
-    assert intervals == [45.0]
-    assert len(loguru_records.events("im_push_health")) == 1
+    sampling = asyncio.create_task(push_health_loop(store, config))
+    try:
+        for _ in range(200):
+            if len(loguru_records.events("im_push_health")) >= 3:
+                break
+            await asyncio.sleep(0.01)
+    finally:
+        sampling.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await sampling
+    events = loguru_records.events("im_push_health")
+    assert len(events) >= 3
+    assert {event["extra"]["channel"] for event in events} == {"feishu"}
 
 
 def test_snapshot_counts_waiting_and_last_sent(pool: ConnectionPool) -> None:

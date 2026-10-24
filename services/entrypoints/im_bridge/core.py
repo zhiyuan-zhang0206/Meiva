@@ -6,7 +6,9 @@ import asyncio
 import logging
 import time
 import uuid
+from dataclasses import dataclass
 from functools import partial
+from pathlib import Path
 from typing import Any, Literal
 
 from services.entrypoints.im_bridge import copy, notice_bridge, push_watchdog
@@ -16,6 +18,7 @@ from services.entrypoints.im_bridge.cursor_store import (
     item_key as _item_key,
 )
 from services.entrypoints.im_bridge.gateway_client import GatewayClient
+from services.entrypoints.im_bridge.outbound.retry import retry_once_after_backoff
 from services.entrypoints.im_bridge.outbound.store import IMOutboxStore
 from services.entrypoints.im_bridge.outbound.types import TimelineAcceptance
 from services.entrypoints.im_bridge.outbound.worker import IMOutboxWorker
@@ -75,9 +78,16 @@ def is_dialog_item(it: dict[str, Any]) -> bool:
     return True
 
 
-# Refresh Telegram's ~5-second typing indicator every 4s, for at most 5 minutes.
-TYPING_INTERVAL_S = 4.0
-TYPING_MAX_S = 300.0
+# meiva:note
+# How the platform's native typing indicator is kept alive: Telegram shows it for about five
+# seconds, so it is refreshed every 4s, for at most 5 minutes.
+@dataclass(frozen=True)
+class TypingCadence:
+    interval_s: float = 4.0
+    max_s: float = 300.0
+
+
+DEFAULT_TYPING = TypingCadence()
 
 
 class IMBridgeCore(SpawnMenuMixin):
@@ -90,19 +100,21 @@ class IMBridgeCore(SpawnMenuMixin):
         db_pool: Any = None,
         *,
         tasks: asyncio.TaskGroup,
+        state_dir: Path,
+        typing: TypingCadence = DEFAULT_TYPING,
     ) -> None:
         self._tasks = tasks
         self.config = config
         self.gateway = gateway
+        self._state_dir = state_dir
+        self._typing = typing
         self.cursor_store = CursorStore(db_pool)
         self.outbound_store = IMOutboxStore(db_pool)
-        self.notice_bridge = notice_bridge.NoticeBridge(self, config, db_pool=db_pool)
-        self.adapters: dict[str, IMAdapter] = {}
-        self.outbound_worker = IMOutboxWorker(
-            self.outbound_store,
-            self.adapters,
-            retry=partial(push_watchdog.retry_once_after_backoff, config=config),
+        self.notice_bridge = notice_bridge.NoticeBridge(
+            self, config, db_pool=db_pool, state_dir=state_dir
         )
+        self.adapters: dict[str, IMAdapter] = {}
+        self.outbound_worker = IMOutboxWorker(self.outbound_store, self.adapters, config=config)
         self.chats: dict[tuple[str, str], ChatState] = {}
         self._selection_locks: dict[tuple[str, str], asyncio.Lock] = {}
         self._subscriptions: dict[tuple[str, str], asyncio.Task[Any]] = {}
@@ -110,7 +122,7 @@ class IMBridgeCore(SpawnMenuMixin):
         self._last_pushed: dict[tuple[str, str, int], PushWatermark] = {}
         # Post-commit memory cache; the cursor row owns acceptance and selection.
 
-        self._switch_state = load_switch_state()
+        self._switch_state = load_switch_state(state_dir)
         self._disabled_channels: set[str] = set(config.im_disabled_adapters)
 
     async def stop(self) -> None:
@@ -144,7 +156,7 @@ class IMBridgeCore(SpawnMenuMixin):
                 try:
                     # partial, not a lambda: this iteration's adapter is bound
                     # now, so the retry call can never read a loop variable late.
-                    await push_watchdog.retry_once_after_backoff(
+                    await retry_once_after_backoff(
                         partial(adapter.send_to_owner, text), self.config
                     )
                     results[channel] = "ok"
@@ -180,7 +192,7 @@ class IMBridgeCore(SpawnMenuMixin):
             self._switch_state.pop(key, None)
         else:
             self._switch_state[key] = state.current_agent_id
-        save_switch_state(self._switch_state)
+        save_switch_state(self._state_dir, self._switch_state)
 
     async def handle_inbound(self, msg: InboundMessage) -> None:
         """Normalize entry point from adapters. Replies via the originating
@@ -447,7 +459,7 @@ class IMBridgeCore(SpawnMenuMixin):
                 account,
                 state.chat_id,
                 state.current_agent_id,
-                guard=selection_admission.guard if selection_admission is not None else None,
+                fence=selection_admission.fence if selection_admission is not None else None,
             )
             if selection_admission is None:
                 await self._sync_selection(state)
@@ -536,7 +548,7 @@ class IMBridgeCore(SpawnMenuMixin):
     async def _typing_loop(
         self, key: tuple[str, str], state: ChatState, adapter: IMAdapter
     ) -> None:
-        deadline = time.monotonic() + TYPING_MAX_S
+        deadline = time.monotonic() + self._typing.max_s
         try:
             while time.monotonic() < deadline:
                 try:
@@ -545,7 +557,7 @@ class IMBridgeCore(SpawnMenuMixin):
                     # cosmetic feature — a failing indicator gives up quietly
                     _log.warning("typing failed channel=%s chat=%s", state.channel, state.chat_id)
                     return
-                await asyncio.sleep(TYPING_INTERVAL_S)
+                await asyncio.sleep(self._typing.interval_s)
         finally:
             self._typing_tasks.pop(key, None)
 

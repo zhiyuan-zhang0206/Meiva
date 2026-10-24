@@ -32,7 +32,6 @@ import httpx
 
 from base.host.private_storage import write_private_bytes
 from base.log import logger
-from base.paths import meiva_home
 from services.entrypoints.im_bridge.ingress.identity import (
     poll_result_codes,
     poll_update_fields,
@@ -52,8 +51,8 @@ from services.entrypoints.im_bridge.ingress.types import (
     IngressReceipt,
     PollBinding,
     ProviderSource,
-    StalePollBindingError,
 )
+from services.entrypoints.im_bridge.outbound.claim_fence import StalePollBindingError
 from services.entrypoints.im_bridge.types import (
     NETWORK_ERRORS,
     IMAdapter,
@@ -110,21 +109,16 @@ class _SessionExpiredError(Exception):
     """iLink session is stale (errcode -14, or -2 with "unknown error")."""
 
 
-def _state_dir() -> Path:
-    """``$MEIVA_HOME/state/im_bridge`` — shared state root for every adapter."""
-    path = meiva_home() / "state" / "im_bridge"
-    path.mkdir(parents=True, exist_ok=True)
-    return path
-
-
 def atomic_write_json(path: Path, payload: Any) -> None:
     """Write all credential-bearing JSON through the private atomic writer."""
+    path.parent.mkdir(parents=True, exist_ok=True)
     write_private_bytes(path, json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8"))
 
 
-def load_account() -> dict[str, Any] | None:
-    """Read the saved iLink account; None when unconfigured or corrupt."""
-    path = _state_dir() / "weixin_account.json"
+# meiva:note
+# Read the saved iLink account under `state_dir`; None when unconfigured or corrupt.
+def load_account(state_dir: Path) -> dict[str, Any] | None:
+    path = state_dir / "weixin_account.json"
     if not path.exists():
         return None
     try:
@@ -137,11 +131,14 @@ def load_account() -> dict[str, Any] | None:
     return data
 
 
-def save_account(*, account_id: str, bot_token: str, user_id: str, base_url: str) -> None:
-    """Persist QR-login credentials atomically, owner-only (0600 — via
-    `atomic_write_json`, which every credential-bearing write shares)."""
+# meiva:note
+# Persist QR-login credentials under `state_dir` atomically and owner-only (0600, via
+# `atomic_write_json`, which every credential-bearing write shares).
+def save_account(
+    state_dir: Path, *, account_id: str, bot_token: str, user_id: str, base_url: str
+) -> None:
     atomic_write_json(
-        _state_dir() / "weixin_account.json",
+        state_dir / "weixin_account.json",
         {
             "account_id": account_id,
             "bot_token": bot_token,
@@ -152,17 +149,18 @@ def save_account(*, account_id: str, bot_token: str, user_id: str, base_url: str
     )
 
 
-def _account_cache_path(name: str, namespace: str, account_id: str) -> Path:
-    """Account-qualified caches never import or overwrite unbound legacy cache evidence."""
+# meiva:note
+# Account-qualified caches never import or overwrite unbound legacy cache evidence.
+def _account_cache_path(state_dir: Path, name: str, namespace: str, account_id: str) -> Path:
     scope = hashlib.sha256(json.dumps([namespace, account_id]).encode()).hexdigest()
-    return _state_dir() / f"weixin_{name}_{scope}.json"
+    return state_dir / f"weixin_{name}_{scope}.json"
 
 
 class ContextTokenStore:
     """Disk-backed account-qualified per-peer iLink session cache."""
 
-    def __init__(self, *, namespace: str, account_id: str) -> None:
-        self._path = _account_cache_path("context_tokens", namespace, account_id)
+    def __init__(self, *, state_dir: Path, namespace: str, account_id: str) -> None:
+        self._path = _account_cache_path(state_dir, "context_tokens", namespace, account_id)
         self._cache: dict[str, str] = {}
 
     def restore(self) -> None:
@@ -343,8 +341,11 @@ class WeixinAdapter(IMAdapter):
     selection_requires_account_proof = True
     MAX_MESSAGE_LENGTH = _MAX_MESSAGE_LENGTH
 
-    def __init__(self, core: Any, *, client: httpx.AsyncClient | None = None) -> None:
+    def __init__(
+        self, core: Any, *, state_dir: Path, client: httpx.AsyncClient | None = None
+    ) -> None:
         super().__init__(core)
+        self._state_dir = state_dir
         self._client = client  # injected in tests; else created lazily
         self._owns_client = client is None
         self._poll_task: asyncio.Task[None] | None = None
@@ -362,7 +363,7 @@ class WeixinAdapter(IMAdapter):
         self.push_failed_at: float | None = None
         self.push_recovered_at: float | None = None
         self._chunk_delay_seconds = _SEND_CHUNK_DELAY_SECONDS
-        account = load_account()
+        account = load_account(state_dir)
         self._account = account
         self._configured = account is not None
         self._account_id = str((account or {}).get("account_id") or "")
@@ -374,7 +375,7 @@ class WeixinAdapter(IMAdapter):
             raise ValueError("Weixin account requires a qualified HTTPS namespace and account id")
         self._cache_namespace = namespace or "unconfigured"
         self._tokens = ContextTokenStore(
-            namespace=self._cache_namespace, account_id=self._account_id
+            state_dir=state_dir, namespace=self._cache_namespace, account_id=self._account_id
         )
 
     @property
@@ -451,7 +452,9 @@ class WeixinAdapter(IMAdapter):
     def _restore_activity(self) -> None:
         """Load persisted per-peer last-inbound timestamps (daemon restarts
         keep the peer map)."""
-        path = _account_cache_path("activity", self._cache_namespace, self._account_id)
+        path = _account_cache_path(
+            self._state_dir, "activity", self._cache_namespace, self._account_id
+        )
         if not path.exists():
             return
         try:
@@ -468,7 +471,9 @@ class WeixinAdapter(IMAdapter):
         """Persist per-peer activity (daemon restarts keep the window)."""
         try:
             atomic_write_json(
-                _account_cache_path("activity", self._cache_namespace, self._account_id),
+                _account_cache_path(
+                    self._state_dir, "activity", self._cache_namespace, self._account_id
+                ),
                 {"last_inbound": self._last_inbound},
             )
         except OSError as exc:

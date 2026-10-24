@@ -1,223 +1,261 @@
 from __future__ import annotations
 
-from collections.abc import Callable
-from dataclasses import dataclass, field
+import json
+import os
+import signal
+import socket
+import subprocess
+import sys
+import threading
+import time
+import urllib.request
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
-from unittest.mock import Mock
 
 import pytest
 
-from base.cluster.dataplane.direct_url import ClusterDirectUrl
+from base import telemetry
 from base.cluster.machine import MachineIdentity
-from base.config import ConfigBoot
-from base.config.tests.configuration import snapshot_process_config
-from base.daemon import shutdown
-from base.db import Database
-from base.db.code_version_gate import ProcessDbGate
-from base.native_process import code_version
+from base.log.tests.log_records import LogRecords, loguru_records
 from base.native_process.loaded_commit import LoadedCommit
-from base.telemetry import pipeline_build, process_logging
-from base.telemetry.delivery import reporting
 from base.telemetry.delivery.pipeline import EventPipeline
-from base.telemetry.delivery.receipts import DrainPhase, DrainResult, DrainStatus
 from services.entrypoints.gate import daemon
+from services.entrypoints.gate.daemon import Gate, GateConfig, GateServer
+
+__all__ = ["loguru_records"]
+
+_STATIC = Path(daemon.__file__).parent / "static"
+_REPO_ROOT = Path(__file__).resolve().parents[4]
 
 
-@dataclass
-class _Entry:
-    image: LoadedCommit
-    process_config: ConfigBoot
-    machine: MachineIdentity | None = None
-    calls: list[str] = field(default_factory=list[str])
-    database: Callable[[], Any] | None = None
-    logging: Mock = field(default_factory=Mock)
-    server: Mock = field(default_factory=Mock)
-    pipeline: Mock = field(default_factory=Mock)
-    capture: Mock = field(default_factory=Mock)
-    failures: dict[str, BaseException] = field(default_factory=dict[str, BaseException])
-    argv: list[str] = field(default_factory=lambda: ["--port", "32001"])
-
-    def step(self, name: str) -> None:
-        self.calls.append(name)
-        if failure := self.failures.get(name):
-            raise failure
-
-
-@pytest.fixture
-def entry(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> _Entry:
-    setup = _Entry(LoadedCommit(tmp_path, "captured-image"), snapshot_process_config())
-    setup.capture.return_value = setup.image
-    monkeypatch.setattr(LoadedCommit, "capture", setup.capture)
-
-    def build_pipeline(*, database: Callable[[], Any], machine: MachineIdentity, home: Path) -> Any:
-        setup.database = database
-        setup.machine = machine
-        setup.step("build")
-        return setup.pipeline
-
-    def logging(*args: Any, **kwargs: Any) -> None:
-        setup.logging(*args, **kwargs)
-        setup.step("logging")
-
-    original_gate = daemon.Gate
-
-    def gate(**kwargs: Any) -> daemon.Gate:
-        setup.step("gate")
-        return original_gate(**kwargs)
-
-    def server(*args: Any, **kwargs: Any) -> Mock:
-        setup.step("server")
-        return setup.server
-
-    setup.server.serve_forever.side_effect = lambda: setup.step("serve")
-    setup.server.server_close.side_effect = lambda: setup.step("http-close")
-
-    def stop(*, timeout: float) -> DrainResult:
-        assert timeout == 2
-        setup.step("pipeline-stop")
-        return DrainResult(DrainStatus.COMPLETED, DrainPhase.STOP)
-
-    def install_shutdown(name: str) -> None:
-        assert name == "gate"
-        setup.step("shutdown")
-
-    setup.pipeline.stop.side_effect = stop
-    monkeypatch.setattr(pipeline_build, "build_pipeline", build_pipeline)
-    monkeypatch.setattr(process_logging, "init_gateway_process", logging)
-    monkeypatch.setattr(shutdown, "install_graceful_shutdown", install_shutdown)
-    monkeypatch.setattr(daemon, "Gate", gate)
-    monkeypatch.setattr(daemon, "ThreadingHTTPServer", server)
-    return setup
-
-
-def test_entry_keeps_one_image_gate_factory_and_producer(
-    entry: _Entry, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    version = Mock(return_value=17)
-    monkeypatch.setattr(code_version, "first_parent_count", version)
-    opened: list[ProcessDbGate] = []
-
-    def database(*, gate: ProcessDbGate, direct_url: ClusterDirectUrl) -> object:
-        assert entry.machine is not None
-        assert direct_url.local_host == entry.machine.host
-        opened.append(gate)
-        return object()
-
-    monkeypatch.setattr(Database, "from_settings", database)
-    daemon.main(entry.argv, process_config=entry.process_config)
-    entry.capture.assert_called_once_with()
-    assert opened == []
-    assert entry.database is not None
-    assert entry.database() is not entry.database()
-    assert len(opened) == 2 and opened[0] is opened[1]
-    assert opened[0].min_read_due()
-    assert opened[0].application_name() == "meiva:gate:v17"
-    version.assert_called_once_with(entry.image.source_root, entry.image.sha)
-    args, kwargs = entry.logging.call_args
-    assert args == ("gate",)
-    assert kwargs["image"] is entry.image
-    assert entry.machine is not None
-    assert kwargs["machine_reader"] == entry.machine.name
-    assert kwargs["producer"]() is entry.pipeline
-    entry.pipeline.stop.assert_called_once_with(timeout=2)
-    assert entry.calls == [
-        "build",
-        "logging",
-        "shutdown",
-        "gate",
-        "server",
-        "serve",
-        "http-close",
-        "pipeline-stop",
-    ]
-
-
-@pytest.mark.parametrize("stage", ["logging", "gate", "server", "serve"])
-def test_startup_and_serve_failures_stop_the_writer_without_replacing_error(
-    entry: _Entry, stage: str
-) -> None:
-    primary = RuntimeError(stage)
-    entry.failures[stage] = primary
-    with pytest.raises(RuntimeError) as caught:
-        daemon.main(entry.argv, process_config=entry.process_config)
-    assert caught.value is primary
-    entry.pipeline.stop.assert_called_once_with(timeout=2)
-    assert entry.calls[-1] == "pipeline-stop"
-    assert ("http-close" in entry.calls) is (stage == "serve")
-
-
-def test_http_and_pipeline_cleanup_faults_remain_notes_on_serve_failure(entry: _Entry) -> None:
-    primary = SystemExit("serve failed")
-    entry.failures.update(
-        {
-            "serve": primary,
-            "http-close": OSError("close failed"),
-            "pipeline-stop": RuntimeError("writer failed"),
-        }
+def _idle_server(server_class: type[GateServer] = GateServer) -> GateServer:
+    gate = Gate(
+        gateway_base="http://127.0.0.1:1",
+        app_base="http://127.0.0.1:2",
+        static_dir=_STATIC,
+        config=GateConfig(),
     )
+    return server_class(("127.0.0.1", 0), gate)
+
+
+class _InterruptedServer(GateServer):
+    def serve_forever(self, poll_interval: float = 0.5) -> None:
+        raise KeyboardInterrupt
+
+
+class _FailingServer(GateServer):
+    serve_failure: BaseException | None = None
+    close_failure: BaseException | None = None
+
+    def serve_forever(self, poll_interval: float = 0.5) -> None:
+        if self.serve_failure is not None:
+            raise self.serve_failure
+
+    def server_close(self) -> None:
+        super().server_close()
+        if self.close_failure is not None:
+            raise self.close_failure
+
+
+def _failing(
+    serve_failure: BaseException | None, close_failure: BaseException | None
+) -> _FailingServer:
+    server = _idle_server(_FailingServer)
+    assert isinstance(server, _FailingServer)
+    server.serve_failure = serve_failure
+    server.close_failure = close_failure
+    return server
+
+
+def test_an_interrupt_ends_serving_and_closes_the_listener() -> None:
+    server = _idle_server(_InterruptedServer)
+    daemon.serve(server)
+    assert server.socket.fileno() == -1
+
+
+def test_a_serve_failure_keeps_its_error_and_notes_a_close_failure() -> None:
+    primary = SystemExit("serve failed")
+    server = _failing(primary, OSError("close failed"))
     with pytest.raises(SystemExit) as caught:
-        daemon.main(entry.argv, process_config=entry.process_config)
+        daemon.serve(server)
     assert caught.value is primary
     assert any("close failed" in note for note in primary.__notes__)
-    assert any("writer failed" in note for note in primary.__notes__)
-    assert entry.calls[-2:] == ["http-close", "pipeline-stop"]
+    assert server.socket.fileno() == -1
 
 
-@pytest.mark.parametrize("stage", ["http-close", "pipeline-stop"])
-def test_cleanup_fault_without_primary_is_raised(entry: _Entry, stage: str) -> None:
-    failure = RuntimeError(stage)
-    entry.failures[stage] = failure
-    with pytest.raises(RuntimeError) as caught:
-        daemon.main(entry.argv, process_config=entry.process_config)
+def test_a_close_failure_without_a_serve_failure_is_raised() -> None:
+    failure = OSError("close failed")
+    with pytest.raises(OSError) as caught:
+        daemon.serve(_failing(None, failure))
     assert caught.value is failure
-    entry.pipeline.stop.assert_called_once_with(timeout=2)
 
 
-def test_interrupt_closes_http_before_stopping_writer(entry: _Entry) -> None:
-    entry.failures["serve"] = KeyboardInterrupt()
-    daemon.main(entry.argv, process_config=entry.process_config)
-    assert entry.calls[-2:] == ["http-close", "pipeline-stop"]
+def _event() -> telemetry.Event:
+    return telemetry.Event(
+        ts=datetime.now(UTC),
+        trace_id=None,
+        span_id=None,
+        agent_id=None,
+        machine="test",
+        cluster="test",
+        process="test",
+        category="log",
+        event_name="log",
+        level="info",
+        source="test",
+        target_agent_id=None,
+        attributes={},
+    )
 
 
-def test_unfinished_stop_is_reported_without_reentering_pipeline(
-    entry: _Entry, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    drain = DrainResult(DrainStatus.UNFINISHED, DrainPhase.STOP)
-    entry.pipeline.stop.side_effect = None
-    entry.pipeline.stop.return_value = drain
-    report = Mock()
-    monkeypatch.setattr(reporting, "report_no_pipeline", report)
-    daemon.main(entry.argv, process_config=entry.process_config)
-    entry.pipeline.stop.assert_called_once_with(timeout=2)
-    assert "unfinished" in report.call_args.args[0]
-    assert report.call_args.kwargs["drain"] is drain
+def _pipeline_whose_writer_fails(failure: BaseException) -> EventPipeline:
+    failed = threading.Event()
+
+    def writer(_events: list[telemetry.Event]) -> None:
+        failed.set()
+        raise failure
+
+    pipeline = EventPipeline(writer=writer, flush_interval_s=0.01)
+    pipeline.enqueue(_event())
+    assert failed.wait(2.0)
+    return pipeline
 
 
-def test_real_owned_pipeline_is_joined_on_http_exit(
-    entry: _Entry, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    pipeline = EventPipeline(writer=lambda _events: None)
+def test_a_writer_failure_at_stop_is_raised_without_an_error_in_flight() -> None:
+    failure = RuntimeError("writer failed")
+    pipeline = _pipeline_whose_writer_fails(failure)
+    with pytest.raises(RuntimeError) as caught:
+        daemon.stop_pipeline(pipeline, None)
+    assert caught.value is failure
 
-    def build_pipeline(
-        *, database: Callable[[], Any], machine: MachineIdentity, home: Path
-    ) -> EventPipeline:
-        del database
-        return pipeline
 
-    monkeypatch.setattr(pipeline_build, "build_pipeline", build_pipeline)
+def test_a_writer_failure_at_stop_is_a_note_on_the_error_in_flight() -> None:
+    primary = SystemExit("serve failed")
+    pipeline = _pipeline_whose_writer_fails(RuntimeError("writer failed"))
+    daemon.stop_pipeline(pipeline, primary)
+    assert any("writer failed" in note for note in primary.__notes__)
+
+
+def test_an_unfinished_stop_is_reported_once_and_not_retried(loguru_records: LogRecords) -> None:
+    entered = threading.Event()
+    release = threading.Event()
+
+    def writer(_events: list[telemetry.Event]) -> None:
+        entered.set()
+        release.wait(5.0)
+
+    pipeline = EventPipeline(writer=writer, flush_interval_s=0.01)
+    pipeline.enqueue(_event())
+    assert entered.wait(2.0)
     try:
-        daemon.main(entry.argv, process_config=entry.process_config)
-        assert entry.logging.call_args.kwargs["producer"]() is pipeline
-        assert pipeline.stopped
+        daemon.stop_pipeline(pipeline, None, timeout_s=0.05)
+        reports = [m for m in loguru_records.messages() if "event pipeline stop unfinished" in m]
+        assert len(reports) == 1
+        assert not pipeline.stopped
     finally:
+        release.set()
         pipeline.stop(timeout=2)
 
 
-def test_invalid_arguments_do_not_capture_or_construct_resources(entry: _Entry) -> None:
-    entry.argv.append("--unknown-option")
-    with pytest.raises(SystemExit) as caught:
-        daemon.main(entry.argv, process_config=entry.process_config)
-    assert caught.value.code == 2
-    entry.capture.assert_not_called()
-    assert entry.calls == []
+def test_a_clean_writer_stop_reports_nothing(loguru_records: LogRecords) -> None:
+    pipeline = EventPipeline(writer=lambda _events: None, flush_interval_s=0.01)
+    daemon.stop_pipeline(pipeline, None)
+    assert pipeline.stopped
+    assert not [m for m in loguru_records.messages() if "unfinished" in m]
+
+
+def test_the_database_factory_shares_one_gate_between_opens() -> None:
+    from base.cluster.machine.boot import machine_from_boot
+    from base.config import ConfigBoot
+
+    config = ConfigBoot()
+    machine: MachineIdentity = machine_from_boot(config)
+    factory = daemon.gate_database(image=LoadedCommit.capture(), machine=machine, config=config)
+    first, second = factory(), factory()
+    assert first is not second
+    assert first._gate is second._gate
+    assert first._gate.application_name().startswith("meiva:gate:v")
+
+
+def _child_env(home: Path) -> dict[str, str]:
+    (home / ".env").write_text(
+        "MEIVA_MACHINE_NAME=gate-test\nMEIVA_TIMEZONE=UTC\nMEIVA_TELEMETRY_OTLP_ENABLED=false\n",
+        encoding="utf-8",
+    )
+    return {**os.environ, "MEIVA_HOME": str(home)}
+
+
+def _start_entry(home: Path, *args: str) -> subprocess.Popen[str]:
+    # meiva:note
+    # the interpreter running the tests and the module under test, no shell.
+    return subprocess.Popen(  # noqa: S603
+        [sys.executable, "-m", "services.entrypoints.gate.daemon", *args],
+        cwd=_REPO_ROOT,
+        env=_child_env(home),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+    )
+
+
+def _free_port() -> int:
+    with socket.socket() as reservation:
+        reservation.bind(("127.0.0.1", 0))
+        return reservation.getsockname()[1]
+
+
+def _health(port: int) -> dict[str, object] | None:
+    try:
+        # meiva:note
+        # a loopback URL built from the child's own port.
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/__meiva/healthz", timeout=1) as r:
+            return json.loads(r.read())
+    except OSError:
+        return None
+
+
+def test_invalid_arguments_start_nothing(tmp_path: Path) -> None:
+    child = _start_entry(tmp_path, "--unknown-option")
+    output, _ = child.communicate(timeout=60)
+    assert child.returncode == 2
+    assert "unrecognized arguments" in output
+    assert not (tmp_path / "logs").exists()
+
+
+def test_the_entry_serves_until_stopped_and_then_exits_cleanly(tmp_path: Path) -> None:
+    port = _free_port()
+    child = _start_entry(tmp_path, "--port", str(port))
+    try:
+        deadline = time.monotonic() + 60
+        served = None
+        while served is None and time.monotonic() < deadline:
+            assert child.poll() is None, "the entry exited before serving"
+            served = _health(port)
+            time.sleep(0.05)
+        assert served is not None, "the entry never served"
+        assert served["name"] == "gate"
+        assert served["pid"] == child.pid
+        child.send_signal(signal.SIGTERM)
+        output, _ = child.communicate(timeout=30)
+    finally:
+        if child.poll() is None:
+            child.kill()
+            child.communicate()
+    assert child.returncode == 0, output
+    assert _health(port) is None
+    log = (tmp_path / "logs" / "gate.log").read_text(encoding="utf-8")
+    assert f"gate serving on :{port}" in log
+    assert "received SIGTERM" in log
+    assert list((tmp_path / "logs").glob("events-*.jsonl"))
+
+
+def test_a_taken_port_fails_the_entry_with_the_bind_error(tmp_path: Path) -> None:
+    with socket.socket() as taken:
+        # meiva:note
+        # the entry binds every interface, so the port is only taken when its holder does too.
+        taken.bind(("0.0.0.0", 0))  # noqa: S104
+        taken.listen()
+        child = _start_entry(tmp_path, "--port", str(taken.getsockname()[1]))
+        output, _ = child.communicate(timeout=60)
+    assert child.returncode != 0
+    assert "Address already in use" in output
