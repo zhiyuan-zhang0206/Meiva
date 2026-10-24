@@ -303,3 +303,92 @@ def test_watcher_plans_refuse_an_unknown_notify_before_anything_starts() -> None
             now=now,
             default_timezone="UTC",
         )
+
+
+# meiva:note
+# A historical snapshot makes a second real-clock read observable in both encoded deadlines
+# and the session TTL. No wall-clock patch or timing tolerance can hide that read.
+def test_relative_at_and_cron_use_the_same_snapshot_as_their_ttl() -> None:
+    from base.daemon.schedules.watcher import AT_SESSION_TTL_GRACE_SECONDS
+
+    interval = datetime.timedelta(hours=1, microseconds=123)
+    due = _FIXED_NOW + interval
+    at = plans.plan_at(
+        interval,
+        "snapshot at",
+        name="snapshot-at",
+        notify=None,
+        now=_FIXED_NOW,
+        announce_timezone="UTC",
+    )
+    cron = plans.plan_cron(
+        "0 * * * *",
+        "snapshot cron",
+        timezone="UTC",
+        end_time=interval,
+        name="snapshot-cron",
+        notify=None,
+        now=_FIXED_NOW,
+        default_timezone="UTC",
+    )
+    assert repr(due.isoformat()) in at.code
+    assert repr(due.isoformat()) in cron.code
+    assert at.ttl_seconds == interval.total_seconds() + AT_SESSION_TTL_GRACE_SECONDS
+    assert cron.ttl_seconds == interval.total_seconds()
+
+
+@pytest.mark.parametrize("operation", ["at", "cron"])
+def test_negative_relative_deadline_is_rejected_against_the_supplied_snapshot(
+    operation: str,
+) -> None:
+    interval = datetime.timedelta(microseconds=-1)
+    with pytest.raises(ValueError, match="in the past"):
+        if operation == "at":
+            plans.plan_at(
+                interval,
+                "past at",
+                name="past-at",
+                notify=None,
+                now=_FIXED_NOW,
+                announce_timezone="UTC",
+            )
+        else:
+            plans.plan_cron(
+                "0 * * * *",
+                "past cron",
+                timezone="UTC",
+                end_time=interval,
+                name="past-cron",
+                notify=None,
+                now=_FIXED_NOW,
+                default_timezone="UTC",
+            )
+
+
+# meiva:note
+# The existing comparisons allow an immediate one-shot, whose delivery grace still gives
+# it a future session deadline. A zero-length cron has no future lifetime and is refused.
+def test_zero_relative_at_is_immediate_and_zero_relative_cron_has_no_lifetime() -> None:
+    from base.daemon.schedules.watcher import AT_SESSION_TTL_GRACE_SECONDS
+
+    at = plans.plan_at(
+        datetime.timedelta(0),
+        "immediate",
+        name="immediate-at",
+        notify=None,
+        now=_FIXED_NOW,
+        announce_timezone="UTC",
+    )
+    assert repr(_FIXED_NOW.isoformat()) in at.code
+    assert at.ttl_seconds == AT_SESSION_TTL_GRACE_SECONDS
+    with pytest.raises(ValueError, match="deadline is not in the future"):
+        plans.plan_cron(
+            "0 * * * *",
+            "no lifetime",
+            timezone="UTC",
+            end_time=datetime.timedelta(0),
+            name="zero-cron",
+            notify=None,
+            now=_FIXED_NOW,
+            default_timezone="UTC",
+        )

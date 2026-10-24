@@ -25,7 +25,7 @@ assuming they may be cut off at any moment and will not be re-run for you.
 ## Core API
 
 - `at(when, message, *, name, notify=None) → int` — One-time scheduled wake-up. `when` supports TZ-aware datetime / timedelta / ISO-8601 strings. Returns session ID (can be cancelled with kill).
-- `cron(expr, message, *, timezone=None, end_time=None, name, notify=None) → int` — Periodic wake-up via 5-field cron expression. `end_time` sets expiry; it **defaults to now + 7 days** (standing cap, task #2617) — a longer schedule passes an explicit `end_time`. Calling `cron()` again with the same expression + timezone does **not** replace or renew anything — it starts another, independent session; kill the old one yourself (`meiva.shell.sessions.kill`) if you don't want both running. Returns session ID.
+- `cron(expr, message, *, timezone=None, end_time=None, name, notify=None) → int` — Periodic wake-up via 5-field cron expression; returns session ID. Expiry and repeat-call behavior: [[meiva/watcher/docs/timing.meiva.okf.md]].
 - `launch(code, timeout, *, name, notify=None) → int` — Run custom Python code as watcher. Inside the code, call `meiva.agents.send_message(meiva.self.AGENT_ID, content)` to wake you. Force-stop after `timeout` (exit code 124).
 
 Omitted `notify` marks the shell-level send as a plain platform completion (`meiva/shell/background_plan.py:notified_line`); the gateway resolves it against the target agent's `completion_notice_policy` (`all` default, or `hourly`) at delivery time, not at spawn — `hourly` retains every completion in its digest. Explicit `notify="always"` is baked into the shell command at spawn and overrides the policy for that one run.
@@ -66,3 +66,5 @@ may not have read them yet; only dead-session files are eligible for pruning.
 These tests establish file retention, not successful watcher execution.
 
 `launch`, `at` and `cron` return the same `SessionHandle(session_id, output_path)` as `run_background`; `sessions` accepts the handle or its id.
+
+Relative deadlines and session TTL share one captured snapshot; see [[meiva/watcher/docs/timing.meiva.okf.md]].
