@@ -75,7 +75,7 @@ def test_any_application_evidence_refuses_partial_shortcut(
 ) -> None:
     fd = None
     if evidence == "serving":
-        start_serving.begin_start()
+        start_serving.begin_start(partial_home)
     elif evidence == "manifest":
         path = paths.root_manifests_path(partial_home)
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -142,7 +142,7 @@ def test_contradicting_evidence_fails_the_stop_before_it_confirms_or_stops_anyth
     stop_runtime: CommandRuntime,
 ) -> None:
     stop_runtime.machine.set(role="gateway")
-    start_serving.begin_start()
+    start_serving.begin_start(partial_home)
     rc = do_stop(
         stop_request(keep_infra=True, timeout=3),
         stop_environment(stop_runtime, operator_database, operator_pipeline),

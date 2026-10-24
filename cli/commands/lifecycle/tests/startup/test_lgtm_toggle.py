@@ -66,7 +66,7 @@ def test_on_declares_the_station_before_the_start_sees_the_operators_selection(
         _toggle(run, "on", only=(*STATION, "typo"))
 
     assert marker.exists()
-    assert not start_serving.is_serving()
+    assert not start_serving.is_serving(run.home)
 
 
 def test_off_retracts_the_station_and_keeps_its_data(start_run: StartRun) -> None:
@@ -118,7 +118,7 @@ def test_a_selection_that_contradicts_the_toggle_is_refused_before_any_change(
         _toggle(run, which, **selection)
 
     assert marker.exists() is (which == "off")
-    assert not start_serving.is_serving()
+    assert not start_serving.is_serving(run.home)
 
 
 # meiva:note

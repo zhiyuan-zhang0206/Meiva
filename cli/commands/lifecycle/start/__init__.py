@@ -416,7 +416,9 @@ def _launch(
     # unconditionally so a clean start clears a previous run's list; the rollout's local leg
     # is the consumer (`update._run_gateway_local_update`), because its `meiva start` is a
     # child and an exit code cannot carry names.
-    launch_failures.record(list(critical_launch_failures(launch.failed, _critical_names())))
+    launch_failures.record(
+        start.command.home, list(critical_launch_failures(launch.failed, _critical_names()))
+    )
     return launch
 
 
@@ -517,7 +519,7 @@ def cmd_start_body(
     # meiva:note
     # Failed start attempts must leave recovery actions gated.
     with start_trace.phase("serving generation"):
-        serving_generation = start_serving.begin_start()
+        serving_generation = start_serving.begin_start(command.home)
         record_running_sha(runtime.code_root)
     launch = _launch(start, roster, retained_children=retained_children, boot_attempt=boot_attempt)
     wait = _wait_ready(start, launch, ready_timeout=ready_timeout)

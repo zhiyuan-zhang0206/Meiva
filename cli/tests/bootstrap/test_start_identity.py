@@ -653,7 +653,9 @@ def test_failed_boot_publication_clears_serving_and_refuses_success(
         assert start_serving.state_path().exists()
         with pytest.raises(RuntimeError, match="refused native custody"):
             start_intent.finish_start(0, helper=None, host=command_runtime.host, home=inputs.home)
-        assert not start_serving.state_path().exists(), "the start no longer reads as serving"
+        assert not start_serving.state_path(inputs.home).exists(), (
+            "the start no longer reads as serving"
+        )
 
 
 def _initialized_gateway_home(inputs: identity.IdentityInput) -> Path:

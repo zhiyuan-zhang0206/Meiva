@@ -137,10 +137,11 @@ def _restart(run: _Invocation, retained_children: list[subprocess.Popen[bytes]])
     # meiva:note
     # When an outer operation's journal is still running, this restart records phases into it
     # and leaves the finish to that caller (`conclude`).
-    owns_journal = status_journal.begin("restart")
+    home = run.command.home
+    owns_journal = status_journal.begin(home, "restart")
     print(
         budget_line(
-            run.request.timeout, run.request.start_timeout, str(status_journal.status_path())
+            run.request.timeout, run.request.start_timeout, str(status_journal.status_path(home))
         ),
         flush=True,
     )
@@ -151,7 +152,7 @@ def _restart(run: _Invocation, retained_children: list[subprocess.Popen[bytes]])
             rc = _run_leg(leg, run, retained_children)
         outcome = settle_leg(leg, rc)
         if isinstance(outcome, Finish):
-            return conclude(outcome, owns_journal=owns_journal)
+            return conclude(home, outcome, owns_journal=owns_journal)
     raise AssertionError("the start leg always ends a restart")
 
 
@@ -160,11 +161,11 @@ def _restart(run: _Invocation, retained_children: list[subprocess.Popen[bytes]])
 #
 # Only the journal's opener closes it. An outer operation's still-running journal (the updater
 # wrapping this restart) is left to that caller, so its diagnosis is not clobbered (task #2898).
-def conclude(outcome: Finish, *, owns_journal: bool) -> int:
+def conclude(home: Path, outcome: Finish, *, owns_journal: bool) -> int:
     if outcome.notice is not None:
         print(outcome.notice, file=sys.stderr)
     if owns_journal:
-        status_journal.finish(outcome.rc, error=outcome.error)
+        status_journal.finish(home, outcome.rc, error=outcome.error)
     return outcome.rc
 
 

@@ -37,6 +37,7 @@ from base.sessions.pty.paths import ledger_path
 from base.sessions.pty.tests import pty_jobs as jobs
 from base.sessions.pty.tests import pty_shells as support
 from base.sessions.pty.tests.pty_reaper import PtyReaper
+from base.sessions.pty.tests.pty_service import service_run, service_socket
 from base.sessions.pty.tests.pty_shells import new, wait_for
 from base.telemetry import EventPipeline
 from cli.commands.data_plane.maintenance_stop_report import StopIncompleteError
@@ -122,7 +123,7 @@ def test_stop_closes_busy_shell_session_job_with_real_signals(
         retained_children=[],
     )
     assert rc == 0
-    assert not client.has_session(name)
+    assert not client.has_session(name, socket_path=service_socket())
     assert jobs.wait_exit(running[0].pid), "the job must be closed by the normal stop"
     assert names(db_conn) == [name]
 
@@ -157,7 +158,7 @@ def test_stop_kills_a_job_that_ignores_termination_after_its_grace(
     assert rc == 0
     assert time.monotonic() - started < 8, "the grace bounds the wait, not the stop deadline"
     assert jobs.wait_exit(running[0].pid, timeout=5), "the job outlived the stop"
-    assert not client.has_session(name)
+    assert not client.has_session(name, socket_path=service_socket())
     assert len(written_notices(db_conn)) == 1, "a killed busy session still leaves its notice"
 
 
@@ -193,7 +194,7 @@ def test_stop_records_nothing_for_idle_shell(
         retained_children=[],
     )
     assert rc == 0
-    assert not client.has_session(name)
+    assert not client.has_session(name, socket_path=service_socket())
     assert written_notices(db_conn) == []
 
 
@@ -212,7 +213,9 @@ def test_stop_tolerates_naturally_exited_session(
     name = "meiva-agent-987-shell-2045-already-dead"
     shell, _ = busy_session(home, name, jobs.TERM_OK, pty_reaper)
     os.kill(shell.pid, signal.SIGKILL)
-    assert wait_for(lambda: not client.has_session(name)), "the service kept the dead session"
+    assert wait_for(lambda: not client.has_session(name, socket_path=service_socket())), (
+        "the service kept the dead session"
+    )
     rc = do_stop(
         stop_request(timeout=10),
         stop_environment(stop_runtime, operator_database, operator_pipeline),
@@ -320,10 +323,10 @@ def test_a_shell_session_left_after_the_closure_fails_the_stop_in_its_own_words(
 ) -> None:
     name = "meiva-agent-987-shell-2053-lingering"
     proc = launch(name, term="ignore", ignore_hangup=True)
-    ledger.write(ledger_path(), [closure.Target(name, identity_of(proc))])
+    ledger.write(ledger_path(service_run()), [closure.Target(name, identity_of(proc))])
 
     with pytest.raises(StopIncompleteError) as excinfo:
-        shells.await_no_shell_sessions(time.monotonic(), "shell-sessions")
+        shells.await_no_shell_sessions(home, time.monotonic(), "shell-sessions")
     message = str(excinfo.value)
     assert name in message
     assert "will not kill" not in message
@@ -339,15 +342,15 @@ def test_a_shell_session_that_clears_within_the_stop_deadline_does_not_fail_the_
 ) -> None:
     name = "meiva-agent-987-shell-2053-tearing-down"
     tearing_down = subprocess.Popen([sys.executable, str(CHILD), "sleep", "0.6"])
-    ledger.write(ledger_path(), [closure.Target(name, identity_of(tearing_down))])
-    assert shells.live_shell_sessions() == [name]
+    ledger.write(ledger_path(service_run()), [closure.Target(name, identity_of(tearing_down))])
+    assert shells.live_shell_sessions(home) == [name]
     started = time.monotonic()
     try:
-        shells.await_no_shell_sessions(started + 10, "shell-sessions")
+        shells.await_no_shell_sessions(home, started + 10, "shell-sessions")
     finally:
         tearing_down.wait(timeout=10)
     assert 0.4 <= time.monotonic() - started < 5, "it waited for the session to leave the table"
-    assert shells.live_shell_sessions() == []
+    assert shells.live_shell_sessions(home) == []
 
 
 # meiva:note
@@ -356,14 +359,14 @@ def test_a_shell_session_that_clears_within_the_stop_deadline_does_not_fail_the_
 def test_live_shell_sessions_reads_the_service_while_it_listens(
     home: Path, pty_service: PtyServiceProcess
 ) -> None:
-    assert shells.live_shell_sessions() == []
-    shells.require_no_shell_sessions()
+    assert shells.live_shell_sessions(home) == []
+    shells.require_no_shell_sessions(home)
     name = "meiva-agent-987-shell-2053-listed"
     assert new(name, home, {"HOME": str(home)})
 
-    assert shells.live_shell_sessions() == [name]
+    assert shells.live_shell_sessions(home) == [name]
     with pytest.raises(RuntimeError, match=name):
-        shells.require_no_shell_sessions()
+        shells.require_no_shell_sessions(home)
 
 
 # meiva:note
@@ -372,14 +375,14 @@ def test_live_shell_sessions_reads_the_service_while_it_listens(
 def test_live_shell_sessions_without_the_service_is_what_its_ledger_still_runs(
     home: Path, launch: Launcher
 ) -> None:
-    assert shells.live_shell_sessions() == []
+    assert shells.live_shell_sessions(home) == []
     name = "meiva-agent-987-shell-2053-leftover"
     proc = launch(name, term="ignore", ignore_hangup=True)
-    ledger.write(ledger_path(), [closure.Target(name, identity_of(proc))])
-    assert shells.live_shell_sessions() == [name]
+    ledger.write(ledger_path(service_run()), [closure.Target(name, identity_of(proc))])
+    assert shells.live_shell_sessions(home) == [name]
     proc.kill()
     proc.wait(timeout=5)
-    assert shells.live_shell_sessions() == []
+    assert shells.live_shell_sessions(home) == []
 
 
 # meiva:note
@@ -399,8 +402,8 @@ def test_a_stop_without_the_service_closes_the_leftovers_its_ledger_names(
     proc = launch(
         name, term="ignore" if ignores_hangup else "default", ignore_hangup=ignores_hangup
     )
-    ledger.write(ledger_path(), [closure.Target(name, identity_of(proc))])
-    assert shells.live_shell_sessions() == [name]
+    ledger.write(ledger_path(service_run()), [closure.Target(name, identity_of(proc))])
+    assert shells.live_shell_sessions(home) == [name]
 
     shells.close_shell_sessions(
         time.monotonic() + 10,
@@ -410,8 +413,8 @@ def test_a_stop_without_the_service_closes_the_leftovers_its_ledger_names(
         cleanup_wait_s=shells.SHELL_SESSION_STOP_WAIT_S,
     )
     assert proc.wait(timeout=10) == (-signal.SIGKILL if ignores_hangup else -signal.SIGHUP)
-    assert shells.live_shell_sessions() == []
-    assert ledger.read(ledger_path()) == []
+    assert shells.live_shell_sessions(home) == []
+    assert ledger.read(ledger_path(service_run())) == []
 
 
 def test_a_stop_without_the_service_tells_owners_the_service_crashed_not_that_it_stopped(
@@ -426,7 +429,8 @@ def test_a_stop_without_the_service_tells_owners_the_service_crashed_not_that_it
     child.wait(timeout=10)
     name = "meiva-agent-987-shell-2044-crashed"
     ledger.write(
-        ledger_path(), [closure.Target(name, gone, (gone, OwnedProcess(gone.pid, 0.0, None)))]
+        ledger_path(service_run()),
+        [closure.Target(name, gone, (gone, OwnedProcess(gone.pid, 0.0, None)))],
     )
 
     shells.close_shell_sessions(
@@ -440,7 +444,7 @@ def test_a_stop_without_the_service_tells_owners_the_service_crashed_not_that_it
     assert [(notice["name"], notice["reason"]) for notice in written_notices(db_conn)] == [
         (name, pty_close_notices.CRASH_REASON)
     ]
-    assert ledger.read(ledger_path()) == []
+    assert ledger.read(ledger_path(service_run())) == []
 
 
 # meiva:note
@@ -459,9 +463,9 @@ def test_force_close_closes_every_session_at_once_without_notices(
     assert running, "the stubborn job never started"
 
     started = time.monotonic()
-    shells.force_close_shell_sessions()
+    shells.force_close_shell_sessions(home)
     assert time.monotonic() - started < 8
-    assert not client.has_session(name)
+    assert not client.has_session(name, socket_path=service_socket())
     assert jobs.wait_exit(running[0].pid, timeout=5), "the job outlived the forced close"
     assert written_notices(db_conn) == []
 
@@ -522,7 +526,7 @@ def test_operational_shell_session_close_failure_is_not_best_effort_success(
 ) -> None:
     with pytest.raises(client.ServiceError, match="known group signal denied"):
         if force:
-            shells.force_close_shell_sessions()
+            shells.force_close_shell_sessions(stop_runtime.home)
         else:
             shells.close_shell_sessions(
                 time.monotonic() + 1,

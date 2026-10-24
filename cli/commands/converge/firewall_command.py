@@ -81,9 +81,7 @@ def cmd_firewall_sync(*, home: Path, machine: MachineIdentity, host: Host) -> in
             f"  ! firewall: could not read the allow list from {fw.SOCKETFILTERFW}", file=sys.stderr
         )
         return 1
-    outcome = sync_allowlist(
-        audit, rules, machine=machine, host=host, user_home=Path.home()
-    )
+    outcome = sync_allowlist(audit, rules, machine=machine, host=host, user_home=Path.home())
     for line in sync_summary_lines(
         tuple(str(path) for path in outcome.pruned),
         tuple(str(path) for path in outcome.repair.allowed),

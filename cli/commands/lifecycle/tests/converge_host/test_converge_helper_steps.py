@@ -157,7 +157,7 @@ def test_screen_capture_step_records_the_helpers_answer(
 
     converge_host.ensure_screen_capture(mac)
 
-    written = read_status()
+    written = read_status(unit_home)
     assert written is not None
     assert written.state is ScreenCaptureState.HELPER_UNREACHABLE
     assert "socket did not answer" in capsys.readouterr().err
@@ -168,11 +168,13 @@ def test_screen_capture_step_clears_a_stale_file_when_the_grant_is_back(
 ) -> None:
     available = ScreenCaptureStatus(state=ScreenCaptureState.AVAILABLE)
     mac = _mac(ctx, unit_home, serve(ScriptedHelper(check_screen_capture=available)))
-    write_status(ScreenCaptureStatus(state=ScreenCaptureState.NO_GRANT, diagnostic="stale"))
+    write_status(
+        unit_home, ScreenCaptureStatus(state=ScreenCaptureState.NO_GRANT, diagnostic="stale")
+    )
 
     converge_host.ensure_screen_capture(mac)
 
-    assert read_status() is None
+    assert read_status(unit_home) is None
 
 
 # meiva:note
@@ -188,13 +190,15 @@ def test_screen_capture_step_skips_hosts_with_no_helper(
     host_ctx.config.set_field("permissions_helper_enabled", why != "disabled")
     if why == "disabled":
         host_ctx = replace(host_ctx, host=capable_mac())
-    write_status(ScreenCaptureStatus(state=ScreenCaptureState.NO_GRANT, diagnostic="stale"))
+    write_status(
+        unit_home, ScreenCaptureStatus(state=ScreenCaptureState.NO_GRANT, diagnostic="stale")
+    )
 
     # meiva:note
     # the refusing helper is never asked
     converge_host.ensure_screen_capture(host_ctx)
 
-    assert read_status() is None
+    assert read_status(unit_home) is None
 
 
 # meiva:note
@@ -211,7 +215,7 @@ def test_accessibility_step_records_the_helpers_answer(
 
     converge_host.ensure_accessibility(mac)
 
-    written = read_accessibility_status()
+    written = read_accessibility_status(unit_home)
     assert written is not None
     assert written.state is AccessibilityState.HELPER_UNREACHABLE
     assert "socket did not answer" in capsys.readouterr().err
@@ -223,12 +227,12 @@ def test_accessibility_step_clears_a_stale_file_when_the_grant_is_back(
     granted = AccessibilityStatus(state=AccessibilityState.GRANTED)
     mac = _mac(ctx, unit_home, serve(ScriptedHelper(check_accessibility=granted)))
     write_accessibility_status(
-        AccessibilityStatus(state=AccessibilityState.NOT_GRANTED, diagnostic="stale")
+        unit_home, AccessibilityStatus(state=AccessibilityState.NOT_GRANTED, diagnostic="stale")
     )
 
     converge_host.ensure_accessibility(mac)
 
-    assert read_accessibility_status() is None
+    assert read_accessibility_status(unit_home) is None
 
 
 @pytest.mark.parametrize("why", ["disabled", "incapable_host"])
@@ -240,12 +244,12 @@ def test_accessibility_step_skips_hosts_with_no_helper(
     if why == "disabled":
         host_ctx = replace(host_ctx, host=capable_mac())
     write_accessibility_status(
-        AccessibilityStatus(state=AccessibilityState.NOT_GRANTED, diagnostic="stale")
+        unit_home, AccessibilityStatus(state=AccessibilityState.NOT_GRANTED, diagnostic="stale")
     )
 
     converge_host.ensure_accessibility(host_ctx)
 
-    assert read_accessibility_status() is None
+    assert read_accessibility_status(unit_home) is None
 
 
 def test_accessibility_step_follows_the_screen_capture_step() -> None:

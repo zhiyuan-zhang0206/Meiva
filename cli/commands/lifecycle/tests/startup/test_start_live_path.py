@@ -62,7 +62,7 @@ def test_an_identical_live_generation_is_reused_and_the_start_serves(
         with scripted_root(run.home, [row], launch_digest=generation.launch_digest) as root:
             assert run.start(only=("pty-sessions",)) == 0
 
-    assert start_serving.is_serving()
+    assert start_serving.is_serving(run.home)
     assert gateway.requests, "a pure runner probes its gateway before launching"
     assert ("up", "pty-sessions") not in root.calls, "a running unit is not launched again"
     assert sorted(path.name for path in run.home.iterdir()) == ["run"], "nothing converged"
@@ -102,7 +102,7 @@ def test_an_unready_core_service_fails_the_start_and_it_never_serves(
     with scripted_root(run.home, [row], launch_digest=generation.launch_digest):
         assert run.start(only=("gate",)) == SERVICES_NOT_READY_EXIT_CODE
 
-    assert not start_serving.is_serving()
+    assert not start_serving.is_serving(run.home)
     assert "meiva-gate" in capsys.readouterr().err
 
 
@@ -120,8 +120,8 @@ def test_a_core_service_the_root_cannot_launch_fails_the_start_and_is_handed_to_
     with scripted_root(run.home, [row], launch_digest=generation.launch_digest):
         assert run.start(only=("gate",)) == SERVICES_NOT_READY_EXIT_CODE
 
-    assert not start_serving.is_serving()
-    assert launch_failures.take() == ["meiva-gate"]
+    assert not start_serving.is_serving(run.home)
+    assert launch_failures.take(run.home) == ["meiva-gate"]
     assert "1 service(s) could not be launched" in capsys.readouterr().err
 
 
@@ -137,8 +137,8 @@ def test_an_optional_service_the_root_cannot_launch_is_reported_and_the_start_se
         with scripted_root(run.home, [row], launch_digest=generation.launch_digest):
             assert run.start(only=("pty-sessions",)) == 0
 
-    assert start_serving.is_serving()
-    assert launch_failures.take() == []
+    assert start_serving.is_serving(run.home)
+    assert launch_failures.take(run.home) == []
     assert "pty-sessions" in capsys.readouterr().err
 
 
@@ -178,7 +178,7 @@ def test_a_start_that_lost_its_serving_generation_never_reports_serving(
         with scripted_root(run.home, [row], launch_digest=generation.launch_digest):
             assert run.start(only=("pty-sessions",)) == 1
 
-    assert not start_serving.is_serving()
+    assert not start_serving.is_serving(run.home)
     assert "lost its serving generation" in capsys.readouterr().err
 
 
@@ -200,7 +200,7 @@ def test_a_changed_live_generation_is_refused_before_anything_is_prepared(
     assert [call for call in root.calls if call[0] != "status"] == []
     assert sorted(path.name for path in run.home.iterdir()) == ["run"], "nothing converged"
     assert gateway.requests == [], "refused before the gateway probe"
-    assert not start_serving.is_serving()
+    assert not start_serving.is_serving(run.home)
 
 
 def test_a_selection_naming_no_such_service_launches_nothing(start_run: StartRun) -> None:
@@ -216,7 +216,7 @@ def test_a_selection_naming_no_such_service_launches_nothing(start_run: StartRun
             run.start(only=("typo",))
 
     assert [call for call in root.calls if call[0] != "status"] == []
-    assert not start_serving.is_serving()
+    assert not start_serving.is_serving(run.home)
 
 
 # meiva:note
@@ -242,7 +242,7 @@ def test_a_live_schema_that_does_not_match_the_code_refuses_without_applying_mig
                 assert run.start(only=("pty-sessions",)) == 1
 
         assert "DB is behind the code" in capsys.readouterr().err
-        assert gateway.requests == [] and not start_serving.is_serving()
+        assert gateway.requests == [] and not start_serving.is_serving(run.home)
         assert [call for call in root.calls if call[0] != "status"] == []
         assert (
             db_conn.execute("SELECT 1 FROM schema_migrations WHERE name = %s", newest).fetchone()
