@@ -9,10 +9,14 @@ tags:
 
 # Harness Dependency Reach
 
-The PR test selector reads the repo-root `conftest.py` and every `pytest_plugins` module as
-a dependency of every test, and it counts a function-local or `TYPE_CHECKING` import like a
-top-level one. A root plugin therefore imports a production package only when every test needs
-it. A fixture that needs a package for a few consumers lives in the owner's `tests/` and reaches
+Every pytest process loads the repo-root `conftest.py` and its `pytest_plugins` modules.
+The PR selector treats this harness as global instead of charging its production closure
+to every test; the pinned `scripts/ci/tests/test_harness_imports.py` contract checks that its
+production imports remain valid. A root plugin still imports a production package only when
+every test needs it. Imports in consumer-local fixtures remain dependency edges, including
+function-local and `TYPE_CHECKING` imports.
+
+A fixture that needs a package for a few consumers lives in the owner's `tests/` and reaches
 them through the consumer's conftest import or its directory's `path_scopes.toml`: the CLI
 readiness guard (`cli/tests/guards/service_readiness_guard.py`), the helper's native-command guard
 (`services/desktop/permissions_helper/tests/permissions_helper/native_io_guard.py`) and the inbound helpers
