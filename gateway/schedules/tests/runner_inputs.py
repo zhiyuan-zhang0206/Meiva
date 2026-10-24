@@ -40,7 +40,9 @@ def run_schedule(
         gate=gate,
         direct_url=ClusterDirectUrl(machine.host),
     )
-    with closing(process_clients(database=database, machine=machine)) as clients:
+    with closing(
+        process_clients(config=snapshot_process_config(), database=database, machine=machine)
+    ) as clients:
         process_context.bind_context(
             MeivaContext(
                 identity=AgentIdentity(

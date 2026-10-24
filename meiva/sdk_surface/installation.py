@@ -133,14 +133,13 @@ class Installation:
         clock: Clock | None = None,
         clients: EventPipelines | None = None,
         configs: Mapping[str, BaseModel] | None = None,
-        skill_providers: tuple[SkillProvider, ...] = (),
     ) -> Installation:
         return cls(
             registry=EMPTY,
             config_images=UnboundPluginConfigImages(),
             expansions=(),
             wrap_layers=MappingProxyType({}),
-            skill_providers=skill_providers,
+            skill_providers=(),
             metered=(),
             disabled=frozenset(),
             faces=False,

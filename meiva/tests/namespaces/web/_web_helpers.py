@@ -20,6 +20,7 @@ from pydantic import SecretStr
 from base.config.service_read import ConfigAuthority
 from base.lm.catalog import ModelCatalog
 from base.lm.effort import ReasoningEffort
+from base.packages.tests.model_catalog import inert_keys
 from meiva.sdk_surface.batch import DEFAULT_BATCH_MAX_CONCURRENT
 from meiva.sdk_surface.injection_check import injection_check_inputs
 from meiva.security import FindingDelivery
@@ -176,7 +177,7 @@ class WebHarness:
             self.fetch_deps,
             delivery=delivery,
             injection=injection_check_inputs(
-                authority, catalog, agent_id=None, delivery_active=True
+                authority, catalog, keys=inert_keys(catalog), agent_id=None, delivery_active=True
             ),
         )
 
@@ -226,6 +227,7 @@ def web_harness(
     fetch = wiring.fetch_deps_for(
         config_authority,
         catalog=model_catalog,
+        keys=inert_keys(model_catalog),
         overrides=model_overrides(),
         delivery=outside,
         agent_id=None,

@@ -19,6 +19,7 @@ from base.config.service_read import ConfigAuthority
 from base.config.tests.configuration import model_overrides
 from base.lm.catalog import ModelCatalog
 from base.lm.effort import ReasoningEffort
+from base.packages.tests.model_catalog import inert_keys
 from meiva.sdk_surface.batch import DEFAULT_BATCH_MAX_CONCURRENT
 from meiva.security import FindingDelivery
 from meiva.tests.fixtures.scripted_chat_model import OVERRIDE, Script, ScriptedModels
@@ -121,6 +122,7 @@ def understand_harness(
     deps = wiring.understand_deps_for(
         config_authority,
         catalog=model_catalog,
+        keys=inert_keys(model_catalog),
         overrides=model_overrides(),
         base_dir=tmp_path,
         output=None,

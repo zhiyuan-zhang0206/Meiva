@@ -126,7 +126,7 @@ def mount_skill_provider(provider: SkillProvider) -> Callable[[], None]:
     mounted = (
         replace(prior, skill_providers=(*prior.skill_providers, provider))
         if isinstance(prior, Installation)
-        else Installation.bare(skill_providers=(provider,))
+        else replace(Installation.bare(), skill_providers=(provider,))
     )
     setattr(meiva_module(), SLOT, mounted)
 

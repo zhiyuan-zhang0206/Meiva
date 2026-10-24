@@ -30,6 +30,7 @@ from base.lm.catalog.decide.types import (
     estimate_tokens,
     question_text,
 )
+from base.lm.catalog.provider_keys import ProviderKeys
 from base.lm.decision.tests.support import catalog_with
 from base.lm.provider_api import DecisionResult
 from base.packages.tests.model_catalog import inert_keys
@@ -88,6 +89,7 @@ def _inputs(catalog: ModelCatalog, **changes: Any) -> InjectionCheckInputs:
         model=_MODEL,
         threshold=0.4,
         catalog=catalog,
+        keys=inert_keys(catalog),
         agent_id=None,
         delivery_active=True,
     )
@@ -148,7 +150,11 @@ def test_a_long_page_is_split_so_every_request_is_inside_the_model_limits() -> N
     page = "\n".join(f"paragraph {i}: " + "word " * 60 for i in range(200))
     assert estimate_tokens(page) > 10 * 1_500
 
-    asyncio.run(page_probability(_MODEL, page, catalog=catalog, keys=inert_keys(catalog), url=_URL, for_agent_id=None))
+    asyncio.run(
+        page_probability(
+            _MODEL, page, catalog=catalog, keys=inert_keys(catalog), url=_URL, for_agent_id=None
+        )
+    )
 
     assert len(binding.states) > 10
     assert all(estimate_tokens(state) + question_tokens <= 1_500 for state in binding.states)
@@ -241,28 +247,24 @@ def test_a_decision_failure_neither_raises_nor_warns_the_agent_but_is_logged(
     assert _URL in record["message"]
 
 
-# meiva:note
-# The suppressed diagnostics are deliberate here: the code under test is handed the argument
-# shapes the type checker rejects.
 def test_a_missing_provider_key_is_a_logged_decision_failure(
     loguru_records: list[dict[str, Any]],
 ) -> None:
     binding = ScriptedBinding(0.5)
-
-    def refuse(_context: object) -> object:
-        raise RuntimeError("FAKE_API_KEY not set")
-
     catalog = catalog_with(
         binding,
         prefix="jev-",
         models={_MODEL: DecisionModelSpec(context_window=100_000)},
-        build=refuse,
     )
 
-    assert begin_check(_URL, "", "body", inputs=_inputs(catalog)).finish() is None
+    assert (
+        begin_check(_URL, "", "body", inputs=_inputs(catalog, keys=ProviderKeys({}))).finish()
+        is None
+    )
 
     [record] = [r for r in loguru_records if r["level"].name == "WARNING"]
     assert record["extra"]["error_type"] == "DecisionKeyMissingError"
+    assert binding.states == []
 
 
 def test_a_failed_chunk_does_not_hide_a_verdict_another_chunk_reached(
@@ -352,7 +354,11 @@ def test_the_shipped_defaults_name_a_catalog_decision_model(
     config_authority: ConfigAuthority, model_catalog: ModelCatalog
 ) -> None:
     inputs = injection_check_inputs(
-        config_authority, model_catalog, agent_id=7, delivery_active=True
+        config_authority,
+        model_catalog,
+        keys=inert_keys(model_catalog),
+        agent_id=7,
+        delivery_active=True,
     )
 
     assert inputs.enabled is True
@@ -369,6 +375,12 @@ def test_the_inputs_follow_the_configured_fields(
     owner.set_field("web_fetch_injection_threshold", 0.9)
     authority = ConfigAuthority(owner.view, owner.view, unit_home / ".env")
 
-    inputs = injection_check_inputs(authority, model_catalog, agent_id=None, delivery_active=False)
+    inputs = injection_check_inputs(
+        authority,
+        model_catalog,
+        keys=inert_keys(model_catalog),
+        agent_id=None,
+        delivery_active=False,
+    )
 
     assert (inputs.enabled, inputs.threshold, inputs.delivery_active) == (False, 0.9, False)
