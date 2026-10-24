@@ -66,8 +66,3 @@ exports = ["capture"]
 "test_tracing.py#monkeypatch.setattr httpx.post" = 1
 "test_tracing.py#monkeypatch.setattr traceloop.sdk.Traceloop.init" = 11
 "test_tracing_lifecycle.py#monkeypatch.setattr traceloop.sdk.Traceloop.init" = 1
-
-[debt.unresolved-patch]
-"test_telemetry_otlp_gate.py#monkeypatch.setattr machine.name" = 1
-"test_telemetry_otlp_gate.py#monkeypatch.setattr machine.role" = 1
-"test_tracing_lifecycle.py#monkeypatch.setattr machine.name" = 1

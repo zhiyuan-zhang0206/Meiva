@@ -73,7 +73,7 @@ from opentelemetry.sdk.trace import ReadableSpan
 from opentelemetry.sdk.trace import Span as SdkSpan
 from opentelemetry.sdk.trace.export import SpanExporter, SpanExportResult
 
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.log import logger
 from base.paths import traces_dir
 from base.telemetry.delivery.reporting import report_no_pipeline
@@ -377,7 +377,7 @@ class OtlpJsonHttpSpanExporter(SpanExporter):
         return None
 
 
-def start_collector_retry(machine: MachineIdentity, home: Path, config: TraceConfig) -> None:
+def start_collector_retry(machine: MachineIdentityReader, home: Path, config: TraceConfig) -> None:
     with _lifecycle_lock:
         if state.get("closed") or state.get("retry_owner") is not None:
             return
@@ -489,7 +489,7 @@ def arm_tracing(
         state["init_resolved"].set()
 
 
-def start_arm_thread(config: TraceConfig, machine: MachineIdentity, home: Path) -> None:
+def start_arm_thread(config: TraceConfig, machine: MachineIdentityReader, home: Path) -> None:
     """Admit one arm; stop never acquires the slow SDK init lock."""
     with _lifecycle_lock:
         if state.get("closed") or state.get("arm_owner") is not None:
@@ -624,7 +624,7 @@ def _serialized_initialize[**P](function: Callable[P, None]) -> Callable[P, None
 # - content stripping (`trace_strip_content`): TRACELOOP_TRACE_CONTENT=false
 #   + exporter-side re-strip, so the mirror holds metadata only.
 @_serialized_initialize
-def initialize_tracing(*, machine: MachineIdentity, home: Path, config: TraceConfig) -> None:
+def initialize_tracing(*, machine: MachineIdentityReader, home: Path, config: TraceConfig) -> None:
     if state.get("closed") or state["initialized"] or state["arm_failed"]:
         return
     if not config.enabled or not observability_export_allowed(

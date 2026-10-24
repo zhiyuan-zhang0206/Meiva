@@ -13,7 +13,7 @@ from pathlib import Path
 
 from base.cluster import port_preflight
 from base.cluster.dataplane.pg_tools import is_macos
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.host.brew_pin import brew_prefix
 from base.host.db_authority.delivery import POOLER_ADMIN
 from base.paths import meiva_home
@@ -71,7 +71,7 @@ def admin_reachable(listen_port: int, admin_password: str, host: str = "127.0.0.
 
 
 def pgbouncer_public_listener_reachable(
-    listen_port: int, role: str, *, machine: MachineIdentity
+    listen_port: int, role: str, *, machine: MachineIdentityReader
 ) -> bool:
     """True when the pooler listens on the address remote consumers actually dial.
 

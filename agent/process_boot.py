@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 import meiva
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.config import ConfigBoot
 from base.db import Database
 from base.host.env.agent_env import AGENT_ID_ENV
@@ -83,7 +83,7 @@ def process_trace_config(config: ConfigBoot) -> TraceConfig:
     )
 
 
-def init_process_scope(*, machine: MachineIdentity, home: Path, trace: TraceConfig) -> None:
+def init_process_scope(*, machine: MachineIdentityReader, home: Path, trace: TraceConfig) -> None:
     from base.telemetry.tracing import initialize_tracing
 
     initialize_tracing(machine=machine, home=home, config=trace)

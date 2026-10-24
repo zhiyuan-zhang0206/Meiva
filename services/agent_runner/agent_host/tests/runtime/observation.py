@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 
 
 # meiva:note
@@ -26,4 +26,4 @@ class HostTurnObservation:
     served_model: str
     publisher_running: bool
     ops_pool: object
-    machine: MachineIdentity
+    machine: MachineIdentityReader

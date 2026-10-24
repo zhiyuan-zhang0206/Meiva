@@ -13,7 +13,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.telemetry.delivery.mirror import append_jsonl
 from base.telemetry.delivery.pipeline import EventPipeline
 from base.telemetry.delivery.receipts import DrainStatus, Event
@@ -50,7 +50,7 @@ def write_batch(
 def build_pipeline(
     *,
     database: Callable[[], Any],
-    machine: MachineIdentity,
+    machine: MachineIdentityReader,
     home: Path,
     flush_interval_s: float = 0.5,
 ) -> EventPipeline:

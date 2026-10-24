@@ -43,8 +43,10 @@ def client_config(machine_identity: MachineIdentity) -> Iterator[ConfigBoot]:
         context.clients.close()
 
 
-def test_gateway_client_base_url_is_gateway_url(client_config: ConfigBoot) -> None:
-    meiva.context.require_machine().set(role="agent-runner")
+def test_gateway_client_base_url_is_gateway_url(
+    client_config: ConfigBoot, machine_identity: MachineIdentity
+) -> None:
+    machine_identity.set(role="agent-runner")
     client_config.set_field("gateway_url", "https://cp.example.com")
 
     import base.agents.context.gateway_client.transport as gc

@@ -35,7 +35,7 @@ from base.agents.context import MeivaContext
 from base.agents.context.external_attachment import ExternalAttachment
 from base.agents.context.identity import AgentIdentity, ExternalLease
 from base.clock import Clock
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.config import ConfigBoot
 from base.config.agent_pins import resolve_agent_config_pins
 from base.host.env.agent_slices import PluginConfigView
@@ -133,7 +133,7 @@ class HarnessAttachment(ExternalAttachment):
         self.agent_id = inputs.registration.agent_id
         self.config: tuple[Any, PluginConfigView] | None = None
         self._boot: ExternalBoot = inputs.boot
-        self._machine: MachineIdentity = inputs.boot.machine
+        self._machine: MachineIdentityReader = inputs.boot.machine
         self._database: Any = inputs.boot.database
         self._pid = inputs.pid
         self._clock = inputs.clock
