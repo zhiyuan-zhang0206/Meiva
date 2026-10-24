@@ -24,7 +24,7 @@ import socket
 import subprocess
 import sys
 import tempfile
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 from contextlib import closing, contextmanager
 from pathlib import Path
 from typing import NamedTuple, TypedDict, cast
@@ -173,6 +173,23 @@ def pg_tool(name: str) -> Path:
         f"Cannot locate pg tool {name!r} on {sys.platform} — "
         "install PostgreSQL 17 or set MEIVA_PG_* (MEIVA_PG_BIN etc.) for a custom pg install"
     )
+
+
+# meiva:note
+# `pg_tool` raises when the box has no installation, which is right for a caller about to run
+# the tool and wrong for a `skipif`: a module-level decorator is evaluated at import, so
+# "this box has no PostgreSQL" became a collection error that stopped the whole tree - on a
+# macOS runner the lane that runs the darwin declarations could not collect anything, and a
+# `pytest --collect-only` on a dev Mac without the host install failed the same way. The
+# predicate a skip wants is "can I find it", never "find it or die". `locate` is a parameter so
+# a test can hand in the answer it wants instead of patching this module: the predicate's whole
+# job is "did the lookup succeed".
+def has_pg_tool(name: str, *, locate: Callable[[str], Path] = pg_tool) -> bool:
+    try:
+        locate(name)
+    except RuntimeError:
+        return False
+    return True
 
 
 def free_port() -> int:

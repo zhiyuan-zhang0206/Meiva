@@ -54,17 +54,12 @@ _PREDICATE_SYSTEM = {"is_macos": "darwin", "is_linux": "linux"}
 # Every entry is a name a reader can open, and the tuple is what makes a lane's arrival
 # visible - the run that covers them says the record lists what the tree no longer leaves
 # unrun. Adding a line is a decision review can see.
-UNRUN_ALLOWED: tuple[str, ...] = (
-    "base/native_process/tests/test_os_platform.py::TestPtyMax::test_macos_reads_positive_ceiling",
-    "base/native_process/tests/test_proc_tree.py::test_capture_and_verify_span_clock_epochs",
-    "base/native_process/tests/test_proc_tree.py::test_stable_create_time_ignores_a_simulated_clock_step",
-    "base/native_process/tests/test_pytest_env_locale.py::<module>",
-    "base/sessions/tests/test_posixproc.py::test_session_record_spans_import_epochs",
-    "services/desktop/permissions_helper/tests/permissions_helper/test_grant_prompt_once.py::test_a_consumed_prompt_is_not_reissued_after_the_grant_arrives",
-    "services/desktop/permissions_helper/tests/permissions_helper/test_grant_prompt_once.py::test_a_granted_helper_never_asks",
-    "services/desktop/permissions_helper/tests/permissions_helper/test_grant_prompt_once.py::test_an_untrusted_helper_asks_exactly_once_per_process",
-    "services/desktop/permissions_helper/tests/permissions_helper/test_grant_prompt_once.py::test_screen_recording_follows_the_same_rule",
-)
+#
+# Empty since the darwin lane arrived (task #5531): the nine macOS declarations the first run
+# of this gate found now run in `host-marks`. The tuple stays because it is the one place a
+# reviewer sees a gap being declared, and the gate judges it in both directions - an entry a
+# lane now covers fails the same way a gap with no entry does.
+UNRUN_ALLOWED: tuple[str, ...] = ()
 
 
 # meiva:note
@@ -98,13 +93,16 @@ class Lane:
 # The workflow job a lane names: the runner it lands on (`runs-on`) is the host it actually
 # tests on, and `continue-on-error` decides whether its verdict blocks. A lane whose job is
 # informational runs the tests and judges none of them, which is the decoration this gate
-# refuses to count as coverage.
+# refuses to count as coverage. `selects_marker` is the other half of the same question: a
+# `marked` lane promises `-m requires_host`, and a job that ran the whole suite instead would
+# satisfy every other check here while testing a set the registry does not describe.
 @dataclass(frozen=True)
 class Job:
     id: str
     runs_on: str
     system: str | None
     blocking: bool
+    selects_marker: bool
 
 
 # meiva:note
@@ -263,6 +261,27 @@ def lanes(root: Path = _REPO_ROOT) -> list[Lane]:
     return out
 
 
+# meiva:note
+# `-m requires_host`, however the step spells its quotes: pytest reads the marker name either
+# way, and the gate should not fail on punctuation. Read from `run` steps only - a `uses`
+# action could run anything, so a lane that keeps its pytest call inside one moves it into a
+# step this gate can read.
+MARKER_SELECTION = "-m requires_host"
+
+
+def job_runs_marker(body: dict[str, object]) -> bool:
+    steps = body.get("steps")
+    if not isinstance(steps, list):
+        return False
+    for step in steps:
+        if not isinstance(step, dict):
+            continue
+        run = step.get("run")
+        if isinstance(run, str) and MARKER_SELECTION in run.replace('"', "").replace("'", ""):
+            return True
+    return False
+
+
 def _runner_system(runs_on: object) -> str | None:
     if not isinstance(runs_on, str):
         return None
@@ -288,6 +307,7 @@ def jobs(root: Path = _REPO_ROOT) -> dict[str, Job]:
             runs_on=runs_on if isinstance(runs_on, str) else repr(runs_on),
             system=_runner_system(runs_on),
             blocking=not body.get("continue-on-error"),
+            selects_marker=job_runs_marker(body),
         )
     return out
 
@@ -374,6 +394,11 @@ def _lane_faults(lane: Lane, job_table: dict[str, Job]) -> list[str]:
         return [
             f"  lane {lane.id}: job {lane.job!r} carries continue-on-error, so it runs these "
             "tests without judging them"
+        ]
+    if lane.selects == "marked" and not job.selects_marker:
+        return [
+            f"  lane {lane.id} selects the marker but job {lane.job!r} never runs "
+            f"`{MARKER_SELECTION}`: it would test a set the registry does not describe"
         ]
     return []
 

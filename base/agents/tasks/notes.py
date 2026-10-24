@@ -18,11 +18,12 @@ about once by its standing context note.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import datetime
 
 from base.clock import Clock
 
 
-def task_note_line(note: str) -> str:
-    """`note` as one stamped, newline-terminated line for `agent_tasks.results`."""
-    return f"{Clock.from_settings().format_timestamp(datetime.now(UTC))} {note}\n"
+# meiva:note
+# `note` as one stamped, newline-terminated line for `agent_tasks.results`, stamped `now`.
+def task_note_line(note: str, *, clock: Clock, now: datetime) -> str:
+    return f"{clock.format_timestamp(now)} {note}\n"

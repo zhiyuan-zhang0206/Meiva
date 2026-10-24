@@ -514,7 +514,7 @@ def test_run_backup_failure_leaves_no_plaintext(
     assert not list(bdir.glob("*.dump.enc"))
 
 
-@pytest.mark.skipif(not backup.pg_tool("pg_dump").exists(), reason="needs a native pg_dump binary")
+@pytest.mark.skipif(not backup.has_pg_tool("pg_dump"), reason="needs a native pg_dump binary")
 def test_run_backup_real_dump_and_prune(
     bdir: Path, monkeypatch: pytest.MonkeyPatch, database: Database
 ) -> None:

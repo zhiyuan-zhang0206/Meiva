@@ -104,7 +104,9 @@ def test_startup_failure_reaps_the_native_postmaster(
         scoped.setattr(pg_foreground.psycopg, "connect", no_connection)
         log = tmp_path / "pg.log"
         process = pg_foreground.start_foreground_postgres(
-            [str(pg_tools.pg_tool("postgres")), "--meiva-invalid-start-option"], log=log
+            [str(pg_tools.pg_tool("postgres")), "--meiva-invalid-start-option"],
+            log=log,
+            env=pg_tools.pg_start_env(),
         )
         try:
             with pytest.raises(RuntimeError, match="foreground Postgres exited"):

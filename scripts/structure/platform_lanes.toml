@@ -16,3 +16,13 @@
 host = "linux"
 ci_job = "backend-shard"
 selects = "suite"
+
+# The macOS half of the same promise (task #5531): every declaration that names darwin runs
+# in this job, and nothing else does - the Linux shards skip those tests, so without this
+# lane a darwin declaration is a test that skips everywhere. `marked` rather than `suite`
+# because the hosted runner has no data plane: the job selects the declarations and runs no
+# Postgres at all.
+[lanes.host-marks]
+host = "darwin"
+ci_job = "host-marks"
+selects = "marked"

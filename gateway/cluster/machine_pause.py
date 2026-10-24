@@ -13,12 +13,14 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, HTTPException, Request
 from psycopg_pool import ConnectionPool
 
 from base.agents.tasks.notes import task_note_line
+from base.clock import SYSTEM_TIMERS, Clock
+from base.clock.configuration import clock_config_from_boot
 from base.cluster import machines
 from base.db import Database
 from base.db.transaction import write_transaction
@@ -50,7 +52,7 @@ def _read_machine_row(pool: ConnectionPool, name: str) -> tuple[bool, datetime |
     return True, row[0], row[1]
 
 
-def _drain_tasks_blocking(pool: ConnectionPool, name: str) -> int:
+def _drain_tasks_blocking(pool: ConnectionPool, name: str, clock: Clock) -> int:
     """Reassign every active task owned by a LIVE agent on `name`
     to the drain owner (#405), appending a note on each so the new owner knows
     why it landed on their board.
@@ -76,7 +78,9 @@ def _drain_tasks_blocking(pool: ConnectionPool, name: str) -> int:
             note = task_note_line(
                 f"machine {name} paused \u2014 owner agent #{owner_id} "
                 f"terminated; task reassigned to drain owner #{_MACHINE_PAUSE_DRAIN_OWNER} "
-                f"(see `meiva cluster resume {name}`)"
+                f"(see `meiva cluster resume {name}`)",
+                clock=clock,
+                now=datetime.now(UTC),
             )
             with conn.cursor() as cur:
                 cur.execute(
@@ -179,7 +183,10 @@ async def pause_cluster_machine(
         machines.pause(request.app.state.db, name, reason=req.reason)
         exists, paused_at, pause_reason = await asyncio.to_thread(_read_machine_row, pool, name)
 
-    reassigned = await asyncio.to_thread(_drain_tasks_blocking, pool, name)
+    clock = Clock(
+        clock_config_from_boot(request.app.state.gateway_process.config), timers=SYSTEM_TIMERS
+    )
+    reassigned = await asyncio.to_thread(_drain_tasks_blocking, pool, name, clock)
 
     agent_rows = await asyncio.to_thread(_list_agent_rows_for_pause_blocking, pool, name)
 

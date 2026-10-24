@@ -62,22 +62,46 @@ database binary), the test states that with `# host-ok: <lane>`.
 
 ## Exemption
 
-`host-ok: <reason>` on a line inside a function's body, or on a module-level
-line, exempts that function or line from both rules. In a new or rewritten file
-the reason travels inside a `meiva:note` block — the structured-comment rule
+`host-ok: <reason>` on a comment inside a function's body, or at module level,
+exempts that function or module from both rules. In a new or rewritten file the
+reason travels inside a `meiva:note` block — the structured-comment rule
 (`docs/conventions/engineering/structured-code-comments.md`) rejects free prose
-there — so the exemption reads as a note that begins `host-ok:`. The reason is
-for the next reader, and a reviewer decides whether it holds;
-`tests/fixtures/host_platform.py` and the test that locks it use it because
-asking the current host *is* their subject.
+there — so the exemption reads as a note that begins `host-ok:`.
+
+A comment alone is a free pass: nobody reviews a line they do not expect. So the
+exemption is also a record entry,
+`scripts/lint/baseline/host_platform_exemptions.json`:
+
+```json
+{
+  "allowed": 2,
+  "exemptions": {
+    "tests/fixtures/host_platform.py::_current_system": "this module IS the translation …"
+  }
+}
+```
+
+The key is `<path>::<function>` (`<module>` at module level); the value is the
+reason exactly as the comment writes it, so a reviewer reads the justification in
+the diff. Three things are checked, and each failure names the site: an exemption
+that is not in the record, a recorded reason that no longer matches the comment,
+and a reason that names neither a path in this repository nor a CI job (the job
+ids come from `.github/workflows/ci.yml`). A record entry whose site is gone is
+an error too — `allowed` is a frozen count, and it only falls when someone spends
+the line to lower it. `--write-baseline` rewrites both records.
+
+The marker is read through the tokenizer, so a fixture that writes
+`# host-ok:` into a string literal is data, not a claim.
 
 ## Baseline
 
 `scripts/lint/baseline/host_platform_marks.json` freezes what the rule already
 finds as `read -> count` (`sys.platform`, `is_macos()`, `shutil.which(...)`, …).
 The count follows the read, not the file: renaming or moving a test changes no
-count, while every new read of a counted kind raises one and fails. A kind may
-shrink below its count (a note says so) but never grow past it; `--write-baseline`
+count, while every new read of a counted kind raises one and fails. A kind that
+shrinks below its count fails too: the change that removes a read lowers the
+record in the same diff, so a count never outlives the reads it was frozen from
+(and no later branch inherits the debt of re-recording it). `--write-baseline`
 regenerates the file after a deliberate repair. A `--only` run still compares
 against the whole tree — otherwise a new read in the file under review would
 pass locally and fail in CI. It then lists every site of the kind that grew, one

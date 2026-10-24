@@ -117,7 +117,7 @@ def _grant_prod_roles(db_conn: psycopg.Connection) -> None:
     db_conn.commit()
 
 
-@pytest.mark.skipif(not restore_drill.pg_tool("pg_dump").exists(), reason="needs native pg_dump")
+@pytest.mark.skipif(not restore_drill.has_pg_tool("pg_dump"), reason="needs native pg_dump")
 def test_run_drill_restores_an_encrypted_artifact_into_throwaway_postgres(
     db_conn: psycopg.Connection,
     tmp_path: Path,
