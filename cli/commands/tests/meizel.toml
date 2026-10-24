@@ -13,6 +13,7 @@ exports = ["health_port_guard.py", "test_single_box.py"]
 
 [debt.first-party-patch]
 "health_port_guard.py#monkeypatch.setattr cli.commands.probe.occupied_health_ports" = 1
+
 [debt.test-subclass-override]
 "test_permissions_cmd.py#subclass services.desktop.permissions_helper.onboarding.GateService.check" = 1
 "test_permissions_cmd.py#subclass services.desktop.permissions_helper.onboarding.GateService.defer" = 1
