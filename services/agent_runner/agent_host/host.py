@@ -28,6 +28,7 @@ from agent.graph.llm_errors import FatalLLMStreamError, FatalProviderError
 from agent.graph.node_log import flush_node_exit_aggregate
 from agent.impersonation import (
     active_lease,
+    handoff_landed,
     handoff_owed,
     native_status,
     supervise_relay,
@@ -194,6 +195,7 @@ class AgentHost:
             timestamps=handoff_stamping,
             machine=self._machine,
             stats=self.stats,
+            receipt_landed=handoff_landed,
         )
         self._resource_service = HostedServiceResources()
 

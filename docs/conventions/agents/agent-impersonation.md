@@ -236,16 +236,21 @@ previous one's fallback:
 2. **The heartbeat's narrow exception** — once the wake has failed closed (`idling`,
    crash-marked), the heartbeat scan also selects a row that still owes a handoff receipt,
    inside the reap grace only. This rung spends one model turn, which is why it is narrow: it
-   logs `impersonation_handoff_checkin` with `reason=unapplied_automatic_handoff` instead of
+   logs `impersonation_handoff_checkin` with `reason=unapplied_handoff_receipt` instead of
    `heartbeat_nudged`. Paused heartbeats, a permanent reject streak and recent pending input
    still leave the row alone.
 3. **The reaper** — after the grace, unchanged, except that the `status_change` audit payload
-   now carries `unapplied_automatic_handoff`, separating "reaped while a receipt was still
+   now carries `unapplied_handoff_receipt`, separating "reaped while a receipt was still
    owed" from an ordinary crash.
 
-A settle that succeeds clears only the stamp its own wake made: `clear_turn_fatal` requires
-`last_turn_fatal_at >= last_admission_at` (a NULL admission clears nothing), so a marker left
-by an earlier real turn crash survives until a completed turn clears it.
+A settle that succeeds clears the row's crash marker, but only while nothing of that row's
+work is still owing: `clear_turn_fatal` requires an ended lease with no receipt left
+unapplied. The condition is that fact rather than the marker's timestamp, because a stamp
+keeps the first death (`COALESCE`) and is therefore older than any later admission — a
+timestamp test would strand a stale marker on a row this wake had already settled, and the
+reaper would terminate a healthy agent once the grace passed. A failure that lands after the
+receipt is written is treated as the success it is: the wake logs
+`hosted_handoff_settle_raced`, clears the marker and does not mark the row.
 
 Operator check — leases that ended and still owe their receipt:
 

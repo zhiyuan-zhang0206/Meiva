@@ -26,7 +26,7 @@ def select_idle_agents_needing_heartbeat(
     # meiva:note
     # Cluster-wide idle agents due for a heartbeat check-in, each as
     #     `(agent_id, idle_minutes, reason)`, oldest-idle first; `reason` is
-    #     `unapplied_automatic_handoff` when the #5468 narrow exception selected the row
+    #     `unapplied_handoff_receipt` when the #5468 narrow exception selected the row
     #     and `None` for the ordinary cadence. That exception is the third rung of the
     #     held-path settle ladder (#5468): a wake retries the owed checkpoint inside its
     #     own budget, a failure stamps the crash marker and idles the row, and this
@@ -85,12 +85,12 @@ def select_idle_agents_needing_heartbeat(
     # the recovery. It is scoped to the reap grace (after that the reaper owns the row),
     # keeps every other exclusion, and a genuine silent agent matches neither the marker
     # nor the lease. The owed lease is identified by `status <> 'active' AND
-    # handoff_applied_at IS NULL`, not by `automatic`: that column is legacy history since
-    # the automatic-only upgrade (a trigger rejects `false` outright), so filtering on it
-    # would suggest a mode switch that no longer exists.
+    # handoff_applied_at IS NULL`, not by `automatic`: that column is kept as an external
+    # contract and history audit, never as a mode switch — a trigger rejects `false` outright
+    # since the automatic-only upgrade, and the predicate deliberately does not reference it.
     sql = (
         "SELECT id, idle_minutes, "
-        " CASE WHEN handoff_recheck THEN 'unapplied_automatic_handoff' END AS reason "
+        " CASE WHEN handoff_recheck THEN 'unapplied_handoff_receipt' END AS reason "
         "FROM ("
         " SELECT agents_meta.id AS id, "
         "  (EXTRACT(EPOCH FROM (now() - "
@@ -102,7 +102,7 @@ def select_idle_agents_needing_heartbeat(
         "   AND agents_meta.last_turn_fatal_at > now() - make_interval(secs => %s) "
         "   AND EXISTS (SELECT 1 FROM agent_impersonations owed "
         "               WHERE owed.agent_id = agents_meta.id "
-        "                 AND owed.status <> 'active' "
+        "                 AND owed.status IN ('released','rejected','expired') "
         "                 AND owed.handoff_applied_at IS NULL) "
         "   AND NOT EXISTS (SELECT 1 FROM agent_impersonations other "
         "                   WHERE other.agent_id = agents_meta.id "
