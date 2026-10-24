@@ -2,6 +2,7 @@ exports = ["fake_process_control.py", "host_pipe.py"]
 
 [uses]
 "test_evidence.py" = ["_evidence_import_child.py"]
+"test_identity_boundaries.py" = ["_identity_import_child.py"]
 "test_os_platform.py" = ["_os_platform_child.py"]
 "test_process_control.py" = ["fake_process_control.py"]
 

@@ -18,7 +18,7 @@ import pytest
 
 from base.deploy.lifecycle import status_journal
 from base.host.exit_codes import RESTART_DECLINED_EXIT_CODE
-from base.native_process import pid_starttime_ticks
+from base.native_process.kernel_identity import pid_starttime_ticks
 from base.sessions.record import SessionRecord
 from base.telemetry import EventPipeline
 from cli.commands.lifecycle.stop.restart import cmd_restart, cmd_restart_agent_host, conclude
