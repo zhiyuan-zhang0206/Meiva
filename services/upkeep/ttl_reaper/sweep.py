@@ -39,9 +39,10 @@
 from __future__ import annotations
 
 import asyncio
+import functools
 import logging
-from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
+from zoneinfo import ZoneInfo
 
 from psycopg_pool import ConnectionPool
 
@@ -51,7 +52,6 @@ from base.agents.impersonation.maintenance import (
     remind_expiring_impersonations,
     signal_incomplete_event_logs,
 )
-from base.config import settings
 from base.daemon import round_loop
 from base.daemon.loop_health import LoopProgress
 from base.db import Database
@@ -60,13 +60,13 @@ from base.events.live.announce import publish_agent_updated_sync
 from base.events.live.bus import EventBus
 from base.events.live.projection import PageClosed
 from ops import lifecycle
-from services.upkeep.ttl_reaper import cadence
+from services.upkeep.ttl_reaper import cadence, owner_text
+from services.upkeep.ttl_reaper.config import TtlReaperConfig
 from services.upkeep.ttl_reaper.owner_notice import (
     PASS_BATCH,
     OwnerMessage,
     notify_owner,
     wake_owners,
-    wall_clock,
 )
 
 _log = logging.getLogger(__name__)
@@ -77,22 +77,8 @@ _log = logging.getLogger(__name__)
 FIRE_LOG_PASS_BATCH = 50_000
 
 
-# meiva:note
-# What the owner reads when its notice expired: which notice, when it lapsed,
-# that nothing is pending any more, and how to ask again. Deliberately not
-# shaped like a reply ("Re: ..."), because the user did not answer and the agent
-# must not mistake a lapse for one.
-def expired_notice_message(local_id: int, title: str, expire_at: datetime) -> str:
-    return (
-        f'Notice #{local_id} "{title}" reached its expiry at {wall_clock(expire_at)} '
-        "without a response from the user, so it is resolved as expired. It no longer "
-        "waits for an answer and no longer occupies your one open notice; post a new "
-        "one with meiva.ui.notify(title, ..., idempotency_key=...) if it still matters."
-    )
-
-
 def reap_expired_notices_blocking(
-    pool: ConnectionPool, db: Database, bus: EventBus
+    pool: ConnectionPool, db: Database, bus: EventBus, *, zone: ZoneInfo | None
 ) -> list[tuple[int, int, lifecycle.NoticeResolutionFacts]]:
     with write_transaction(pool) as conn:
         with conn.cursor() as cur:
@@ -134,7 +120,11 @@ def reap_expired_notices_blocking(
             message = notify_owner(
                 conn,
                 agent_id,
-                expired_notice_message(local_id, title, expire_at),
+                owner_text.notice_expired_message(
+                    local_id,
+                    title,
+                    owner_text.wall_clock(expire_at, zone=zone, today=datetime.now(zone).date()),
+                ),
                 source="system:notice-expire",
                 queue_when_terminated=True,
             )
@@ -189,24 +179,11 @@ def reap_expired_pages_blocking(
                 if cur.rowcount == 0:
                     continue
             reaped.append((agent_id, name, page_id))
-            if serve_dir is None:
-                # show() page: the gateway only expires the registration — the
-                # server lives in the agent's own process, so the notice tells
-                # the owner to stop it and release the port.
-                message = notify_owner(
-                    conn,
-                    agent_id,
-                    f"Page {name!r} (agent {agent_id}) was reclaimed after its TTL "
-                    "expired. Stop the page's HTTP server to release its port; "
-                    "re-show with meiva.ui.show() to republish.",
-                )
-            else:
-                message = notify_owner(
-                    conn,
-                    agent_id,
-                    f"Page {name!r} (agent {agent_id}) was reclaimed after its TTL "
-                    "expired. Serve it again with meiva.ui.serve() to republish.",
-                )
+            message = notify_owner(
+                conn,
+                agent_id,
+                owner_text.page_expired_message(name, agent_id, shown_by_agent=serve_dir is None),
+            )
             if message is not None:
                 queued.append(message)
             telemetry.emit(
@@ -241,7 +218,7 @@ def reap_expired_web_sessions_blocking(
 
 
 def prune_schedule_fire_log_blocking(
-    pool: ConnectionPool, *, batch_size: int = FIRE_LOG_PASS_BATCH
+    pool: ConnectionPool, *, retention_days: int, batch_size: int = FIRE_LOG_PASS_BATCH
 ) -> int:
     """Delete ``schedule_fire_log`` claims older than the retention window.
 
@@ -251,7 +228,7 @@ def prune_schedule_fire_log_blocking(
     a backlog (long gateway outage, many schedules) drains over successive passes
     instead of one long transaction.
     """
-    cutoff = datetime.now(UTC) - timedelta(days=settings.daemon.schedule_fire_log_retention_days)
+    cutoff = datetime.now(UTC) - timedelta(days=retention_days)
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute(
             """
@@ -271,26 +248,14 @@ def prune_schedule_fire_log_blocking(
 
 # meiva:note
 # The cadence-gated phases that came due: the number of pruned fire-log rows.
-async def _slow_phases(
-    pool: ConnectionPool,
-    *,
-    cleanup_interval_s: float | None = None,
-    prune_fire_log_fn: Callable[[ConnectionPool], int] = prune_schedule_fire_log_blocking,
-) -> int:
-    pruned = 0
-    interval = (
-        settings.daemon.schedule_fire_log_cleanup_interval_seconds
-        if cleanup_interval_s is None
-        else cleanup_interval_s
-    )
-    if await asyncio.to_thread(
-        cadence.claim_due,
-        pool,
-        cadence.FIRE_LOG_PRUNE,
-        interval,
+async def _slow_phases(pool: ConnectionPool, config: TtlReaperConfig) -> int:
+    if not await asyncio.to_thread(
+        cadence.claim_due, pool, cadence.FIRE_LOG_PRUNE, config.fire_log_cleanup_interval_s
     ):
-        pruned = await asyncio.to_thread(prune_fire_log_fn, pool)
-    return pruned
+        return 0
+    return await asyncio.to_thread(
+        prune_schedule_fire_log_blocking, pool, retention_days=config.fire_log_retention_days
+    )
 
 
 async def sweep_round(
@@ -298,9 +263,7 @@ async def sweep_round(
     db: Database,
     bus: EventBus,
     progress: LoopProgress,
-    *,
-    cleanup_interval_s: float | None = None,
-    prune_fire_log_fn: Callable[[ConnectionPool], int] = prune_schedule_fire_log_blocking,
+    config: TtlReaperConfig,
 ) -> None:
     """One pass over every database-only phase, beating `progress` between them."""
     reminded = await asyncio.to_thread(remind_expiring_impersonations, pool, db, bus)
@@ -312,15 +275,13 @@ async def sweep_round(
     progress.beat()
     sessions = await asyncio.to_thread(reap_expired_web_sessions_blocking, pool)
     progress.beat()
-    notices = await asyncio.to_thread(reap_expired_notices_blocking, pool, db, bus)
+    notices = await asyncio.to_thread(
+        functools.partial(reap_expired_notices_blocking, pool, db, bus, zone=config.zone)
+    )
     for agent_id, nid, details in notices:
         await lifecycle.publish_notice_resolved(bus, agent_id, nid, facts=details)
     progress.beat()
-    pruned_fire_log = await _slow_phases(
-        pool,
-        cleanup_interval_s=cleanup_interval_s,
-        prune_fire_log_fn=prune_fire_log_fn,
-    )
+    pruned_fire_log = await _slow_phases(pool, config)
     if pages or sessions or impersonations or notices or reminded or pruned_fire_log:
         _log.info(
             "[ttl-reaper] reclaimed %d page(s), %d web session(s), %d impersonation(s), "
@@ -336,13 +297,15 @@ async def sweep_round(
 
 
 async def sweep_loop(
-    pool: ConnectionPool, db: Database, bus: EventBus, progress: LoopProgress
+    pool: ConnectionPool,
+    db: Database,
+    bus: EventBus,
+    progress: LoopProgress,
+    config: TtlReaperConfig,
 ) -> None:
     """The database-only sweep as a resident sequential loop."""
 
     async def one_round() -> None:
-        await sweep_round(pool, db, bus, progress)
+        await sweep_round(pool, db, bus, progress, config)
 
-    await round_loop.run_rounds(
-        "sweep", progress, settings.daemon.ttl_reaper_poll_interval_seconds, one_round
-    )
+    await round_loop.run_rounds("sweep", progress, config.poll_interval_s, one_round)

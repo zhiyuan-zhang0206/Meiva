@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import Path
 
 from pydantic import SecretStr
 
@@ -43,6 +44,9 @@ class EventsMaintenanceConfig:
     grafana_host: str
     grafana_port: int
     grafana_admin_password: SecretStr | None
+    # meiva:note
+    # The directory holding the telemetry JSONL mirror files the hourly pass replays.
+    mirror_dir: Path
 
 
 def events_maintenance_db(

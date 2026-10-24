@@ -53,17 +53,15 @@ deadline makes `/healthz` return 503 for watchdog recovery.
 """
 
 import asyncio
-import logging
 import os
 import signal
 import sys
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import cast
 
-import psycopg
 from psycopg_pool import ConnectionPool
 
 from base.clock import SYSTEM_TIMERS
@@ -77,13 +75,12 @@ from base.daemon.health import (
     start_health_server,
     stop_health_server,
 )
-from base.daemon.health_schema import DEGRADED, OK, component
-from base.daemon.round_loop import RoundFailureBudget
+from base.daemon.health_schema import component
 from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.db.config import db_config_from_boot
-from base.events.live.bus import EventBus, EventBusConfig
+from base.events.live.bus import EventBus, event_bus_config_from_config
 from base.host.exit_codes import hard_exit as _hard_exit
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
@@ -91,22 +88,30 @@ from base.paths import meiva_home
 from base.telemetry.pipeline_build import build_pipeline
 from base.telemetry.process_logging import init_gateway_process
 from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
-from services.upkeep.events_maintenance import alert_reconciler, registry_gauge
+from services.upkeep.events_maintenance import (
+    alert_reconciler,
+    health_components,
+    loop_roster,
+    passes,
+    registry_gauge,
+)
 from services.upkeep.events_maintenance.blob_vacuum import (
     emit_checkpoint_table_sizes,
     run_blob_vacuum,
 )
 from services.upkeep.events_maintenance.config import EventsMaintenanceConfig
+from services.upkeep.events_maintenance.health_components import LoopFacts
+from services.upkeep.events_maintenance.passes import events_maintenance_log
 from services.upkeep.events_maintenance.resolution import AutoDismissCadence, run_resolution_slice
 from services.upkeep.events_maintenance.rollup import compute_rollup
 from services.upkeep.events_maintenance.telemetry_replay import recover_telemetry_events
 from services.upkeep.events_maintenance.token_totals import fold_totals
 
-events_maintenance_log = logging.getLogger("services.upkeep.events_maintenance.daemon")
 
-
-def events_maintenance_config(config: ConfigBoot) -> EventsMaintenanceConfig:
-    """Read the service slice from its entry owner at the original call point."""
+# meiva:note
+# The service's configuration, read once from the process's `ConfigBoot`. `mirror_dir` is where the
+# telemetry JSONL mirror lives; the entry knows its home, so the replay does not look it up.
+def events_maintenance_config(config: ConfigBoot, *, mirror_dir: Path) -> EventsMaintenanceConfig:
     return EventsMaintenanceConfig(
         events_maintenance_interval_seconds=config.view.daemon.events_maintenance_interval_seconds,
         events_maintenance_pass_deadline_s=config.view.daemon.events_maintenance_pass_deadline_s,
@@ -119,6 +124,7 @@ def events_maintenance_config(config: ConfigBoot) -> EventsMaintenanceConfig:
         grafana_host=config.view.gateway.grafana_host,
         grafana_port=config.view.gateway.grafana_port,
         grafana_admin_password=config.view.alerts.grafana_admin_password,
+        mirror_dir=mirror_dir,
     )
 
 
@@ -131,60 +137,26 @@ def _pidfile(config: ConfigBoot, *, runtime: Path) -> Path:
     return events_maintenance_endpoint(config, runtime=runtime).pidfile
 
 
-_LIVENESS_BEAT_STEP_S = 30.0
-# One registry-gauge round is a single-row read; a loop that completed nothing for this
-# long (three sample intervals) is wedged.
-_REGISTRY_GAUGE_LIVENESS_TIMEOUT_S = 180.0
-# One reconciliation is a Grafana read (10 s timeout) and one bounded statement.
-_ALERT_RECONCILIATION_LIVENESS_TIMEOUT_S = 180.0
-
-
-class WedgedPassError(RuntimeError):
-    """A blocking pass exceeded its deadline and left a worker thread orphaned."""
-
-
-class _MaintenancePass:
-    """One service-owned worker's terminal result, including a late failure."""
-
-    def __init__(
-        self, pool: ConnectionPool, name: str, work: Callable[[ConnectionPool], None]
-    ) -> None:
-        self.pool = pool
-        self.name = name
-        self.work = work
-        self.expired = False
-
-    async def run(self) -> Exception | None:
-        """Return the original failure to the caller, or report an expired pass."""
-        try:
-            await asyncio.to_thread(self.work, self.pool)
-        except Exception as exc:
-            # A completed pass's caller owns retry/schema-drift policy. Once its
-            # deadline expires that caller parks, so this terminal boundary owns
-            # the late traceback. The loop remains permanently unhealthy.
-            if self.expired:
-                events_maintenance_log.exception(
-                    "[events-maintenance] %s pass failed after its hard deadline", self.name
-                )
-            return exc
-        return None
-
-
+# meiva:note
+# One hourly pass: the telemetry mirror replay, the cost-ledger rollup of the last closed days
+# (`telemetry_events` to `agent_model_tokens_daily` and `agent_metrics_daily`) and the fold of its
+# settled days into `agent_model_tokens_total`, the hourly checkpoint size/row-count telemetry
+# sample, and the blob VACUUM. One `now` drives the time-based steps. Logs what each step did; a
+# no-op pass logs nothing.
 def run_maintenance(
-    pool: ConnectionPool, progress: LoopProgress, config: EventsMaintenanceConfig, db: Database
+    pool: ConnectionPool,
+    progress: LoopProgress,
+    config: EventsMaintenanceConfig,
+    db: Database,
+    *,
+    now: datetime,
 ) -> None:
-    """One hourly pass: the telemetry mirror replay, the
-    cost-ledger rollup of the last closed days (`telemetry_events` → `agent_model_tokens_daily`
-    and `agent_metrics_daily`) and the fold of its settled days into `agent_model_tokens_total`, the hourly checkpoint size/row-count telemetry sample, and the
-    blob VACUUM. One `now` drives the time-based steps.
-    Logs what each step did; a no-op pass logs nothing."""
-    now = datetime.now(tz=UTC)
     # The telemetry_events record is independent of the rollup: its writer reports its own
     # failures and the mirror holds what it missed, so a failing replay must not prevent the
     # remaining maintenance work from making progress.
     try:
         with pool.connection() as conn:
-            replayed = recover_telemetry_events(conn)
+            replayed = recover_telemetry_events(conn, logs=config.mirror_dir)
         if replayed:
             events_maintenance_log.info(
                 "[events-maintenance] replayed %d telemetry events from the mirror", replayed
@@ -218,7 +190,7 @@ def run_maintenance(
     # Incremental physical reclamation: a plain VACUUM (no lock) over the
     # checkpoint tables, only inside the measured agent-lowest window
     # (05:00-08:00 CLUSTER time). Logs size + dead tuples each run.
-    vacuum_result = run_blob_vacuum(db, timezone=config.timezone)
+    vacuum_result = run_blob_vacuum(db, timezone=config.timezone, now=now)
     progress.beat()
     if vacuum_result.ran:
         events_maintenance_log.info("[events-maintenance] blob vacuum: %s", vacuum_result.summary())
@@ -233,7 +205,7 @@ def _run_resolution(
 ) -> None:
     """Run the resolution slice while discarding its test-facing summary."""
 
-    run_resolution_slice(pool, config, cadence=cadence)
+    run_resolution_slice(pool, config, cadence=cadence, now=datetime.now(UTC))
     progress.beat()
     progress.mark_success()
 
@@ -263,79 +235,43 @@ def _is_running(config: ConfigBoot, *, runtime: Path) -> bool:
     )
 
 
-def loop_components(liveness: LivenessGroup) -> list[dict[str, object]]:
-    """Project each registered loop tracker into the shared health envelope."""
-    now = time.time()
+# meiva:note
+# Project each registered loop tracker into the shared health envelope. `timeouts` is the deadline
+# each loop was registered with, which the tracker's snapshot does not carry.
+def loop_components(
+    liveness: LivenessGroup, timeouts: Mapping[str, float], *, now: float
+) -> list[dict[str, object]]:
     records: list[dict[str, object]] = []
-    for progress in liveness._loops.values():
-        snapshot = progress.snapshot()
-        stale_for = cast(float, snapshot["stale_for"])
-        wedged = cast(bool, snapshot["wedged"])
-        last_success_at = cast(str | None, snapshot["last_success_at"])
-        last_success = (
-            datetime.fromisoformat(last_success_at).timestamp()
-            if last_success_at is not None
-            else None
-        )
+    for name, snapshot in liveness.snapshot().items():
         error = cast(dict[str, str] | None, snapshot["last_error"])
-        last_error = error["message"] if error is not None else None
-        stale = stale_for > progress.timeout_s
-        if wedged:
-            detail = f"wedged: {last_error or 'pass exceeded its deadline'}"
-        elif stale:
-            detail = f"no progress for {stale_for:.0f}s"
-        else:
-            detail = None
+        facts = health_components.component_facts(
+            LoopFacts(
+                name=name,
+                timeout_s=timeouts[name],
+                stale_for_s=cast(float, snapshot["stale_for"]),
+                wedged=cast(bool, snapshot["wedged"]),
+                last_success_at=cast(str | None, snapshot["last_success_at"]),
+                last_error=error["message"] if error is not None else None,
+            )
+        )
         records.append(
             component(
-                progress.name,
-                DEGRADED if wedged or stale else OK,
-                last_success=last_success,
-                last_error=last_error,
-                progress="wedged" if wedged else "idle",
-                detail=detail,
+                facts.name,
+                facts.status,
+                last_success=facts.last_success,
+                last_error=facts.last_error,
+                progress=facts.progress,
+                detail=facts.detail,
                 now=now,
             )
         )
     return records
 
 
-async def sleep_with_liveness(progress: LoopProgress, total_s: float) -> None:
-    """Sleep `total_s`, beating progress every `_LIVENESS_BEAT_STEP_S` so the long
-    inter-poll wait keeps /healthz fresh instead of reading as a wedged loop."""
-    remaining = total_s
-    while remaining > 0:
-        progress.beat()
-        step = min(_LIVENESS_BEAT_STEP_S, remaining)
-        await asyncio.sleep(step)
-        remaining -= step
-
-
-async def maintenance_with_liveness(
-    pool: ConnectionPool,
-    progress: LoopProgress,
-    run: Callable[[ConnectionPool], None],
-    *,
-    tasks: asyncio.TaskGroup,
-) -> None:
-    """Run one pass (`run`, handed the pool) within its deadline; unresolved work is
-    not progress. Completion beats before propagating its result; timeout
-    permanently fails the loop.
-    """
-    worker = _MaintenancePass(pool, progress.name, run)
-    fut = tasks.create_task(worker.run())
-    done, _pending = await asyncio.wait({fut}, timeout=progress.timeout_s)
-    if fut not in done:
-        worker.expired = True
-        message = f"{progress.name} pass exceeded hard deadline of {progress.timeout_s:.1f}s"
-        progress.fail(message)
-        raise WedgedPassError(message)
-    progress.beat()
-    failure = fut.result()
-    if failure is not None:
-        raise failure
-
-
+# meiva:note
+# Main loop: roll immediately on start (fresh after a restart), then every
+# interval. The rollup DB work is synchronous psycopg run in a thread so it does
+# not block the healthz event loop.
 async def dispatch_loop(
     pool: ConnectionPool,
     progress: LoopProgress,
@@ -344,53 +280,19 @@ async def dispatch_loop(
     *,
     tasks: asyncio.TaskGroup,
 ) -> None:
-    """Main loop: roll immediately on start (fresh after a restart), then every
-    interval. The rollup DB work is synchronous psycopg run in a thread so it does
-    not block the healthz event loop. The inter-run sleep is OUTSIDE the try, so a
-    transient failure waits a full interval before retrying instead of hot-looping
-    against Postgres (the rollup is idempotent and self-catching-up — the next run
-    re-probes dirty days — so there is no value in an immediate retry)."""
     interval = config.events_maintenance_interval_seconds
     events_maintenance_log.info(
         "[events-maintenance] daemon started, pid=%s, interval=%.0fs",
         os.getpid(),
         interval,
     )
-    failures = RoundFailureBudget("events-maintenance rollup")
-    while True:
-        try:
-            await maintenance_with_liveness(
-                pool,
-                progress,
-                lambda target_pool: run_maintenance(target_pool, progress, config, db),
-                tasks=tasks,
-            )
-            failures.succeeded()
-        except asyncio.CancelledError:
-            raise
-        except WedgedPassError:
-            events_maintenance_log.critical(
-                "[events-maintenance] rollup pass wedged — parking for watchdog respawn",
-                exc_info=True,
-            )
-            break
-        except psycopg.ProgrammingError:
-            events_maintenance_log.critical(
-                "[events-maintenance] schema / syntax error — code<->DB drift; "
-                "retry will not self-heal, daemon exiting, restart after fix",
-                exc_info=True,
-            )
-            raise
-        except psycopg.OperationalError as exc:
-            progress.mark_error(str(exc))
-            events_maintenance_log.warning(
-                "[events-maintenance] rollup skipped: database unavailable", exc_info=True
-            )
-        except Exception as exc:
-            progress.mark_error(str(exc))
-            events_maintenance_log.exception("[events-maintenance] rollup iteration failed")
-            failures.failed(exc)
-        await sleep_with_liveness(progress, interval)
+    await passes.pass_loop(
+        progress,
+        label="rollup",
+        interval_s=interval,
+        work=lambda: run_maintenance(pool, progress, config, db, now=datetime.now(UTC)),
+        tasks=tasks,
+    )
 
 
 async def resolution_loop(
@@ -414,41 +316,13 @@ async def resolution_loop(
         os.getpid(),
         interval,
     )
-    failures = RoundFailureBudget("events-maintenance resolution")
-    while True:
-        try:
-            await maintenance_with_liveness(
-                pool,
-                progress,
-                lambda target_pool: _run_resolution(target_pool, progress, config, cadence),
-                tasks=tasks,
-            )
-            failures.succeeded()
-        except asyncio.CancelledError:
-            raise
-        except WedgedPassError:
-            events_maintenance_log.critical(
-                "[events-maintenance] resolution pass wedged — parking for watchdog respawn",
-                exc_info=True,
-            )
-            break
-        except psycopg.ProgrammingError:
-            events_maintenance_log.critical(
-                "[events-maintenance] resolution schema / syntax error — "
-                "code<->DB drift; retry will not self-heal, restart after fix",
-                exc_info=True,
-            )
-            raise
-        except psycopg.OperationalError as exc:
-            progress.mark_error(str(exc))
-            events_maintenance_log.warning(
-                "[events-maintenance] resolution skipped: database unavailable", exc_info=True
-            )
-        except Exception as exc:
-            progress.mark_error(str(exc))
-            events_maintenance_log.exception("[events-maintenance] resolution iteration failed")
-            failures.failed(exc)
-        await sleep_with_liveness(progress, interval)
+    await passes.pass_loop(
+        progress,
+        label="resolution",
+        interval_s=interval,
+        work=lambda: _run_resolution(pool, progress, config, cadence),
+        tasks=tasks,
+    )
 
 
 async def run(
@@ -472,27 +346,25 @@ async def run(
         "[events-maintenance] pidfile written: %s", _pidfile(process_config, runtime=runtime)
     )
 
-    config = events_maintenance_config(process_config)
-    liveness = LivenessGroup(timers=SYSTEM_TIMERS)
-    dispatch_progress = liveness.register("dispatch", config.events_maintenance_pass_deadline_s)
-    resolution_progress = liveness.register(
-        "resolution", config.events_maintenance_resolution_deadline_s
-    )
-    gauge_progress = liveness.register("registry_gauge", _REGISTRY_GAUGE_LIVENESS_TIMEOUT_S)
-    endpoint = events_maintenance_endpoint(process_config, runtime=runtime)
+    # meiva:note
+    # The telemetry mirror lives in the home's logs directory, beside the runtime directory.
+    config = events_maintenance_config(process_config, mirror_dir=runtime.parent / "logs")
     # Only a unit holding the Grafana credential reconciles alerts; one without it
     # carries no such loop (and no tracker to read as idle).
-    reconcile_alerts = alert_reconciler.grafana_reconciliation_configured(config)
-    alert_progress = (
-        liveness.register("alert_reconciliation", _ALERT_RECONCILIATION_LIVENESS_TIMEOUT_S)
-        if reconcile_alerts
-        else None
+    loops = loop_roster.roster(
+        dispatch_deadline_s=config.events_maintenance_pass_deadline_s,
+        resolution_deadline_s=config.events_maintenance_resolution_deadline_s,
+        reconcile_alerts=alert_reconciler.grafana_reconciliation_configured(config),
     )
+    liveness = LivenessGroup(timers=SYSTEM_TIMERS)
+    progress = {spec.name: liveness.register(spec.name, spec.deadline_s) for spec in loops}
+    timeouts = {spec.name: spec.deadline_s for spec in loops}
+    endpoint = events_maintenance_endpoint(process_config, runtime=runtime)
     health = await start_health_server(
         "events_maintenance",
         endpoint.health_port,
         liveness=liveness,
-        components=lambda: loop_components(liveness),
+        components=lambda: loop_components(liveness, timeouts, now=time.time()),
         image=image,
     )
     events_maintenance_log.info(
@@ -506,19 +378,16 @@ async def run(
         # An expired pass remains owned while healthz asks the watchdog to replace
         # the process. Stop cancels its async proxy; main's hard exit never joins
         # the blocking executor thread.
-        async with asyncio.TaskGroup() as loops:
-            loops.create_task(dispatch_loop(pool, dispatch_progress, config, db, tasks=loops))
-            loops.create_task(resolution_loop(pool, resolution_progress, config, tasks=loops))
-            loops.create_task(registry_gauge.registry_gauge_loop(pool, gauge_progress))
-            if alert_progress is not None:
-                bus = EventBus(
-                    EventBusConfig(
-                        redis_url=process_config.view.data_plane.redis_url,
-                        events_channel=process_config.view.data_plane.events_channel,
+        async with asyncio.TaskGroup() as group:
+            group.create_task(dispatch_loop(pool, progress["dispatch"], config, db, tasks=group))
+            group.create_task(resolution_loop(pool, progress["resolution"], config, tasks=group))
+            group.create_task(registry_gauge.registry_gauge_loop(pool, progress["registry_gauge"]))
+            if "alert_reconciliation" in progress:
+                bus = EventBus(event_bus_config_from_config(process_config))
+                group.create_task(
+                    alert_reconciler.reconciliation_loop(
+                        pool, bus, progress["alert_reconciliation"], config
                     )
-                )
-                loops.create_task(
-                    alert_reconciler.reconciliation_loop(pool, bus, alert_progress, config)
                 )
     finally:
         pool.close()

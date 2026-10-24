@@ -1,44 +1,34 @@
 from __future__ import annotations
 
-import asyncio
+from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
-from typing import Any, LiteralString, cast
+from typing import Any
 
 import psycopg
 import pytest
 from psycopg_pool import ConnectionPool
 
-from base.clock import SYSTEM_TIMERS
+import base.db
 from base.config import ConfigBoot
-from base.daemon.loop_health import LoopProgress
+from base.db.code_version_gate import ProcessDbGate
 from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
-from services.upkeep.events_maintenance import daemon, resolution
+from services.upkeep.events_maintenance import resolution
+from services.upkeep.events_maintenance.config import EventsMaintenanceConfig
+from services.upkeep.events_maintenance.tests.db_faults import table_missing, write_fails
 from services.upkeep.events_maintenance.tests.slices import events_maintenance_config
 from services.upkeep.events_maintenance.tests.test_events_maintenance_resolution import (
-    Pool,
     event_class,
     record_maintenance_event,
 )
 
 
-class _ScanConnection:
-    def __init__(self, connection: psycopg.Connection[Any]) -> None:
-        self.connection = connection
-        self.scans = 0
-        self.fail_fetch = False
-
-    def execute(self, query: LiteralString, *args: Any) -> Any:
-        if "HAVING count(DISTINCT" in query:
-            self.scans += 1
-            if self.fail_fetch:
-                raise RuntimeError("history fetch unavailable")
-        return self.connection.execute(query, *args)
-
-    def cursor(self, **kwargs: Any) -> Any:
-        return cast(Any, self.connection).cursor(**kwargs)
-
-    def commit(self) -> None:
-        self.connection.commit()
+@pytest.fixture
+def pool(db_url: str, *, database_gate: ProcessDbGate) -> Iterator[ConnectionPool]:
+    p = base.db.pool(max_size=2, gate=database_gate)
+    try:
+        yield p
+    finally:
+        p.close()
 
 
 def _history(connection: psycopg.Connection[Any]) -> datetime:
@@ -49,89 +39,98 @@ def _history(connection: psycopg.Connection[Any]) -> datetime:
     return datetime.now(UTC)
 
 
+def _dismissals(connection: psycopg.Connection[Any]) -> int:
+    connection.rollback()
+    row = connection.execute("SELECT count(*) FROM event_dismissals").fetchone()
+    assert row is not None
+    return int(row[0])
+
+
+def _enabled(process_config: ConfigBoot) -> EventsMaintenanceConfig:
+    return events_maintenance_config(
+        process_config, events_auto_dismiss_enabled=True, events_auto_dismiss_days=1
+    )
+
+
 @pytest.mark.usefixtures("emitted_events")
-def test_fetch_failure_retries_but_write_failure_consumes_the_day(
-    process_config: ConfigBoot, db_conn: psycopg.Connection[Any], monkeypatch: pytest.MonkeyPatch
+def test_a_failed_read_leaves_the_day_to_be_retried(
+    process_config: ConfigBoot, db_conn: psycopg.Connection[Any], pool: ConnectionPool
 ) -> None:
     now = _history(db_conn)
-    config = events_maintenance_config(
-        process_config, events_auto_dismiss_enabled=True, events_auto_dismiss_days=1
-    )
     cadence = resolution.AutoDismissCadence()
-    connection = _ScanConnection(db_conn)
-    pool = cast(ConnectionPool, Pool(cast(Any, connection)))
-    connection.fail_fetch = True
-    assert resolution.run_resolution_slice(pool, config, cadence=cadence, now=now) is None
+
+    with table_missing(db_conn, "telemetry_events"):
+        assert (
+            resolution.run_resolution_slice(
+                pool, _enabled(process_config), cadence=cadence, now=now
+            )
+            is None
+        )
     assert cadence.due(now)
-    connection.fail_fetch = False
 
-    def write_failure(*_args: object) -> bool:
-        raise RuntimeError("dismissal write unavailable")
-
-    with monkeypatch.context() as patch:
-        patch.setattr(resolution, "_insert_auto_dismissal", write_failure)
-        with pytest.raises(RuntimeError, match="dismissal write unavailable"):
-            resolution.run_resolution_slice(pool, config, cadence=cadence, now=now)
+    result = resolution.run_resolution_slice(
+        pool, _enabled(process_config), cadence=cadence, now=now
+    )
+    assert result is not None and result.auto_dismissed == 1
     assert not cadence.due(now)
-    assert resolution.run_resolution_slice(pool, config, cadence=cadence, now=now) is not None
-    assert connection.scans == 2
-    assert db_conn.execute("SELECT count(*) FROM event_dismissals").fetchone() == (0,)
-    tomorrow = now + timedelta(days=1)
-    resolution.stable_auto_classes(tomorrow, connection, {}, config, cadence)
-    assert connection.scans == 3
-    assert not cadence.due(tomorrow)
+    assert _dismissals(db_conn) == 1
 
 
 @pytest.mark.usefixtures("emitted_events")
-async def test_each_resolution_loop_owns_a_fresh_daily_scan(
-    process_config: ConfigBoot, db_conn: psycopg.Connection[Any], monkeypatch: pytest.MonkeyPatch
+def test_a_failed_write_consumes_the_day(
+    process_config: ConfigBoot, db_conn: psycopg.Connection[Any], pool: ConnectionPool
 ) -> None:
-    _history(db_conn)
-    connection = _ScanConnection(db_conn)
-    pool = cast(ConnectionPool, Pool(cast(Any, connection)))
-    config = events_maintenance_config(
-        process_config, events_auto_dismiss_enabled=True, events_auto_dismiss_days=1
+    now = _history(db_conn)
+    cadence = resolution.AutoDismissCadence()
+
+    with (
+        write_fails(db_conn, "event_dismissals", on="INSERT"),
+        pytest.raises(psycopg.errors.RaiseException),
+    ):
+        resolution.run_resolution_slice(pool, _enabled(process_config), cadence=cadence, now=now)
+    assert not cadence.due(now)
+
+    result = resolution.run_resolution_slice(
+        pool, _enabled(process_config), cadence=cadence, now=now
     )
-    passes = 0
+    assert result is not None and result.auto_dismissed == 0
+    assert _dismissals(db_conn) == 0
 
-    async def execute_pass(
-        target_pool: ConnectionPool, _progress: LoopProgress, run: Any, *, tasks: asyncio.TaskGroup
-    ) -> None:
-        nonlocal passes
-        run(target_pool)
-        passes += 1
 
-    async def stop_after_two(_progress: LoopProgress, _seconds: float) -> None:
-        if passes % 2 == 0:
-            raise asyncio.CancelledError
+@pytest.mark.usefixtures("emitted_events")
+def test_each_cadence_scans_once_a_day_and_a_new_one_scans_again(
+    process_config: ConfigBoot, db_conn: psycopg.Connection[Any], pool: ConnectionPool
+) -> None:
+    now = _history(db_conn)
+    config = _enabled(process_config)
+    cadence = resolution.AutoDismissCadence()
 
-    monkeypatch.setattr(daemon, "maintenance_with_liveness", execute_pass)
-    monkeypatch.setattr(daemon, "sleep_with_liveness", stop_after_two)
-    for expected_scans in (1, 2):
-        async with asyncio.TaskGroup() as tasks:
-            with pytest.raises(asyncio.CancelledError):
-                await daemon.resolution_loop(
-                    pool,
-                    LoopProgress("test", timeout_s=5, timers=SYSTEM_TIMERS),
-                    config,
-                    tasks=tasks,
-                )
-        assert connection.scans == expected_scans
-    assert passes == 4
-    assert db_conn.execute("SELECT count(*) FROM event_dismissals").fetchone() == (1,)
+    resolution.run_resolution_slice(pool, config, cadence=cadence, now=now)
+    assert _dismissals(db_conn) == 1
+
+    db_conn.execute("TRUNCATE event_dismissals")
+    db_conn.commit()
+    resolution.run_resolution_slice(pool, config, cadence=cadence, now=now)
+    assert _dismissals(db_conn) == 0, "the same loop must not scan the same day twice"
+
+    resolution.run_resolution_slice(pool, config, cadence=resolution.AutoDismissCadence(), now=now)
+    assert _dismissals(db_conn) == 1, "another loop owns a fresh daily scan"
+
+    tomorrow = now + timedelta(days=1)
+    assert cadence.due(tomorrow)
+    resolution.stable_auto_classes(tomorrow, db_conn, {}, config, cadence)
+    assert not cadence.due(tomorrow)
 
 
 def test_disabled_scan_does_not_consume_cadence(
     process_config: ConfigBoot, db_conn: psycopg.Connection[Any]
 ) -> None:
     now = _history(db_conn)
-    connection = _ScanConnection(db_conn)
     cadence = resolution.AutoDismissCadence()
-    assert (
-        resolution.stable_auto_classes(
-            now, connection, {event_class(): 1}, events_maintenance_config(process_config), cadence
-        )
-        == set()
+
+    stable = resolution.stable_auto_classes(
+        now, db_conn, {event_class(): 1}, events_maintenance_config(process_config), cadence
     )
-    assert connection.scans == 0
+
+    assert stable == set()
     assert cadence.due(now)

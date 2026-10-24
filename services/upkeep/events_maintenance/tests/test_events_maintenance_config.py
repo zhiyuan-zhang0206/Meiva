@@ -1,73 +1,73 @@
 from __future__ import annotations
 
 import dataclasses
+from pathlib import Path
 from typing import Any
 
-import pytest
-
-from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.config import ConfigBoot
-from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
-from base.db.config import DbConfig
 from services.upkeep.events_maintenance import config as maintenance_config
 from services.upkeep.events_maintenance import daemon
 
 
-def test_the_slice_carries_the_live_value_of_every_field(
-    process_config: ConfigBoot, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setattr(process_config.view.daemon, "events_resolution_burst_threshold", 17)
-    monkeypatch.setattr(process_config.view.general, "timezone", "Asia/Shanghai")
-    config = daemon.events_maintenance_config(process_config)
+def _owner() -> ConfigBoot:
+    owner = ConfigBoot()
+    owner.read_process_environment()
+    return owner
+
+
+def test_the_slice_carries_the_value_each_field_holds(tmp_path: Path) -> None:
+    owner = _owner()
+    owner.set_field("events_resolution_burst_threshold", 17)
+    owner.set_field("timezone", "Asia/Shanghai")
+
+    config = daemon.events_maintenance_config(owner, mirror_dir=tmp_path)
+
     for field in dataclasses.fields(config):
-        flat: Any = process_config.get_field(field.name)
+        if field.name == "mirror_dir":
+            continue
+        flat: Any = owner.get_field(field.name)
         assert getattr(config, field.name) == flat, field.name
     assert config.events_resolution_burst_threshold == 17
     assert config.timezone == "Asia/Shanghai"
+    assert config.mirror_dir == tmp_path
 
 
-def test_two_entry_slices_remain_independent_at_each_lookup() -> None:
-    first = ConfigBoot()
-    first.read_process_environment()
-    second = ConfigBoot()
-    second.read_process_environment()
+def test_two_entry_slices_remain_independent_at_each_lookup(tmp_path: Path) -> None:
+    first = _owner()
+    second = _owner()
     first.set_field("events_resolution_burst_threshold", 17)
     second.set_field("events_resolution_burst_threshold", 23)
-    assert daemon.events_maintenance_config(first).events_resolution_burst_threshold == 17
-    assert daemon.events_maintenance_config(second).events_resolution_burst_threshold == 23
+
+    def threshold(owner: ConfigBoot) -> int:
+        return daemon.events_maintenance_config(
+            owner, mirror_dir=tmp_path
+        ).events_resolution_burst_threshold
+
+    assert threshold(first) == 17
+    assert threshold(second) == 23
     first.set_field("events_resolution_burst_threshold", 31)
-    assert daemon.events_maintenance_config(first).events_resolution_burst_threshold == 31
-    assert daemon.events_maintenance_config(second).events_resolution_burst_threshold == 23
+    assert threshold(first) == 31
+    assert threshold(second) == 23
 
 
 def test_database_slice_uses_the_supplied_owner_at_each_factory_call(
-    monkeypatch: pytest.MonkeyPatch, database_gate: ProcessDbGate
+    database_gate: ProcessDbGate,
 ) -> None:
-    first = ConfigBoot()
-    first.read_process_environment()
-    second = ConfigBoot()
-    second.read_process_environment()
+    first = _owner()
+    second = _owner()
     first.set_field("db_pool_max_size", 13)
     second.set_field("db_pool_max_size", 19)
-    captured: list[DbConfig] = []
-    resolvers: list[ClusterDirectUrl] = []
 
-    def host_reader() -> str:
-        return "127.0.0.1"
+    def pool_size(owner: ConfigBoot) -> int:
+        database = maintenance_config.events_maintenance_db(
+            owner, gate=database_gate, local_host=lambda: "127.0.0.1"
+        )
+        with database.pool() as pool:
+            return pool.max_size
 
-    def database(
-        inputs: DbConfig, *, gate: ProcessDbGate, direct_url: ClusterDirectUrl
-    ) -> Database:
-        assert gate is database_gate
-        captured.append(inputs)
-        resolvers.append(direct_url)
-        return Database(inputs, gate=gate, direct_url=direct_url)
-
-    monkeypatch.setattr(maintenance_config, "Database", database)
-    maintenance_config.events_maintenance_db(first, gate=database_gate, local_host=host_reader)
-    maintenance_config.events_maintenance_db(second, gate=database_gate, local_host=host_reader)
+    sizes = [pool_size(first), pool_size(second)]
     first.set_field("db_pool_max_size", 23)
-    maintenance_config.events_maintenance_db(first, gate=database_gate, local_host=host_reader)
-    assert [inputs.db_pool_max_size for inputs in captured] == [13, 19, 23]
-    assert [resolver.local_host for resolver in resolvers] == [host_reader] * 3
+    sizes.append(pool_size(first))
+
+    assert sizes == [13, 19, 23]

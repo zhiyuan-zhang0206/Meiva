@@ -1,103 +1,159 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable, Callable
-from typing import Any
+import threading
+import time
 
 import psycopg
 import pytest
 
 from base.clock import SYSTEM_TIMERS
-from base.cluster.machine import MachineIdentity
-from base.cluster.machine.tests.identity import machine_identity as machine_identity
-from base.config import ConfigBoot
 from base.daemon.health import LoopProgress
 from base.daemon.round_loop import CONSECUTIVE_ROUND_FAILURE_LIMIT, RoundFailureLimitError
-from services.upkeep.events_maintenance import daemon
-from services.upkeep.events_maintenance.tests.slices import (
-    events_maintenance_config,
-    events_maintenance_db,
-)
-
-_FAKE_POOL: Any = object()
+from services.upkeep.events_maintenance import passes
 
 
-def _drive(
-    loop: str,
-    tasks: asyncio.TaskGroup,
-    process_config: ConfigBoot,
-    machine_identity: MachineIdentity,
-) -> Awaitable[None]:
-    progress = LoopProgress(loop, timeout_s=5.0, timers=SYSTEM_TIMERS)
-    config = events_maintenance_config(process_config)
-    if loop == "dispatch":
-        return daemon.dispatch_loop(
-            _FAKE_POOL,
-            progress,
-            config,
-            events_maintenance_db(process_config, local_machine=machine_identity),
-            tasks=tasks,
-        )
-    return daemon.resolution_loop(_FAKE_POOL, progress, config, tasks=tasks)
+# meiva:note
+# A pass that follows `outcomes` in order (None completes, an exception is raised), then waits for
+# the test to stop the loop. `calls` holds the instant each pass started.
+class _Script:
+    def __init__(self, outcomes: list[BaseException | None]) -> None:
+        self.outcomes = outcomes
+        self.calls: list[float] = []
+        self.stop = threading.Event()
 
-
-def _script(
-    monkeypatch: pytest.MonkeyPatch, outcomes: list[BaseException | None]
-) -> Callable[[], int]:
-    passes = 0
-
-    async def fake_pass(*_args: object, **_kwargs: object) -> None:
-        nonlocal passes
-        if passes == len(outcomes):
-            raise asyncio.CancelledError
-        outcome = outcomes[passes]
-        passes += 1
+    def __call__(self) -> None:
+        self.calls.append(time.monotonic())
+        index = len(self.calls) - 1
+        if index >= len(self.outcomes):
+            self.stop.wait(10.0)
+            return
+        outcome = self.outcomes[index]
         if outcome is not None:
             raise outcome
 
-    async def no_sleep(_progress: LoopProgress, _total_s: float) -> None:
-        return None
 
-    monkeypatch.setattr(daemon, "maintenance_with_liveness", fake_pass)
-    monkeypatch.setattr(daemon, "sleep_with_liveness", no_sleep)
-    return lambda: passes
+def _progress(timeout_s: float = 5.0) -> LoopProgress:
+    return LoopProgress("dispatch", timeout_s=timeout_s, timers=SYSTEM_TIMERS)
 
 
-@pytest.mark.parametrize("loop", ["dispatch", "resolution"])
-async def test_consecutive_failed_passes_end_the_loop(
-    monkeypatch: pytest.MonkeyPatch,
-    loop: str,
-    process_config: ConfigBoot,
-    machine_identity: MachineIdentity,
-) -> None:
+async def test_consecutive_failed_passes_end_the_loop() -> None:
     limit = CONSECUTIVE_ROUND_FAILURE_LIMIT
-    passes = _script(monkeypatch, [RuntimeError("boom")] * (limit + 3))
+    script = _Script([RuntimeError("boom")] * (limit + 3))
+    calls = script.calls
 
     with pytest.raises(ExceptionGroup) as raised:
         async with asyncio.TaskGroup() as tasks:
-            await _drive(loop, tasks, process_config, machine_identity)
+            await passes.pass_loop(
+                _progress(), label="rollup", interval_s=0.001, work=script, tasks=tasks
+            )
 
     assert raised.group_contains(RoundFailureLimitError)
-    assert passes() == limit, "the loop must stop at the limit, not keep retrying"
+    assert len(calls) == limit, "the loop must stop at the limit, not keep retrying"
 
 
-@pytest.mark.parametrize("loop", ["dispatch", "resolution"])
-async def test_a_completed_pass_and_a_db_outage_do_not_exhaust_the_budget(
-    monkeypatch: pytest.MonkeyPatch,
-    loop: str,
-    process_config: ConfigBoot,
-    machine_identity: MachineIdentity,
-) -> None:
+async def test_a_completed_pass_and_a_db_outage_do_not_exhaust_the_budget() -> None:
     limit = CONSECUTIVE_ROUND_FAILURE_LIMIT
     boom = RuntimeError("boom")
     outcomes: list[BaseException | None] = [boom] * (limit - 1)
     outcomes += [None]
     outcomes += [psycopg.OperationalError("db down")] * limit
     outcomes += [boom] * (limit - 1)
-    passes = _script(monkeypatch, outcomes)
+    script = _Script(outcomes)
+    calls = script.calls
 
-    with pytest.raises(asyncio.CancelledError):
+    async with asyncio.TaskGroup() as tasks:
+        loop = tasks.create_task(
+            passes.pass_loop(
+                _progress(), label="rollup", interval_s=0.001, work=script, tasks=tasks
+            )
+        )
+        deadline = time.monotonic() + 20.0
+        while len(calls) <= len(outcomes) and time.monotonic() < deadline:
+            await asyncio.sleep(0.01)
+        loop.cancel()
+        script.stop.set()
+
+    assert len(calls) == len(outcomes) + 1, "every scripted pass ran and the loop was still going"
+
+
+# meiva:note
+# A transient failure is recorded and then waits out the interval, so a database blip does not
+# become a tight hot-loop against Postgres.
+async def test_a_failed_pass_waits_a_full_interval_before_retrying() -> None:
+    progress = _progress()
+    script = _Script([RuntimeError("transient db blip")])
+    calls = script.calls
+
+    async with asyncio.TaskGroup() as tasks:
+        loop = tasks.create_task(
+            passes.pass_loop(progress, label="rollup", interval_s=0.4, work=script, tasks=tasks)
+        )
+        deadline = time.monotonic() + 20.0
+        while len(calls) < 2 and time.monotonic() < deadline:
+            await asyncio.sleep(0.01)
+        loop.cancel()
+        script.stop.set()
+
+    assert calls[1] - calls[0] >= 0.4
+    last_error = progress.snapshot()["last_error"]
+    assert isinstance(last_error, dict) and last_error["message"] == "transient db blip"
+
+
+async def test_an_unreachable_database_is_recorded_and_retried_after_the_interval() -> None:
+    progress = _progress()
+    script = _Script([psycopg.OperationalError("db down")])
+    calls = script.calls
+
+    async with asyncio.TaskGroup() as tasks:
+        loop = tasks.create_task(
+            passes.pass_loop(progress, label="rollup", interval_s=0.2, work=script, tasks=tasks)
+        )
+        deadline = time.monotonic() + 20.0
+        while len(calls) < 2 and time.monotonic() < deadline:
+            await asyncio.sleep(0.01)
+        loop.cancel()
+        script.stop.set()
+
+    assert calls[1] - calls[0] >= 0.2
+    last_error = progress.snapshot()["last_error"]
+    assert isinstance(last_error, dict) and last_error["message"] == "db down"
+
+
+async def test_schema_drift_ends_the_loop_with_the_original_error() -> None:
+    drift = psycopg.ProgrammingError("drift")
+    script = _Script([drift])
+    calls = script.calls
+
+    with pytest.raises(ExceptionGroup) as raised:
         async with asyncio.TaskGroup() as tasks:
-            await _drive(loop, tasks, process_config, machine_identity)
+            await passes.pass_loop(
+                _progress(), label="resolution", interval_s=0.001, work=script, tasks=tasks
+            )
 
-    assert passes() == len(outcomes)
+    assert raised.value.exceptions == (drift,)
+    assert len(calls) == 1
+
+
+async def test_a_wedged_pass_parks_the_loop_without_waiting_out_the_interval() -> None:
+    release = threading.Event()
+
+    def overrun() -> None:
+        release.wait(10.0)
+
+    progress = _progress(timeout_s=0.1)
+    started = time.monotonic()
+    try:
+        async with asyncio.TaskGroup() as tasks:
+            await asyncio.wait_for(
+                passes.pass_loop(
+                    progress, label="rollup", interval_s=60.0, work=overrun, tasks=tasks
+                ),
+                timeout=5.0,
+            )
+            release.set()
+    finally:
+        release.set()
+
+    assert time.monotonic() - started < 5.0
+    assert progress.snapshot()["wedged"] is True
