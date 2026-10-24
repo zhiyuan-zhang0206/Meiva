@@ -45,29 +45,11 @@ Where each platform anchors the tree, the platform lifetime rules, and how a roo
 whose permissions helper was replaced retires itself:
 [[services/supervision/meiva_root/docs/ancestry.meiva.okf.md]].
 
-## Unit intent and recorded failures
+## Unit intent, failures and unattended stops
 
-Each unit carries one policy fact: its `intent` (`running` | `stopped`) and the
-source that last set it (`operator` | `self` | `selection`), persisted per unit
-under the run directory (`intent/<unit>.json`, atomic writes). Classification of
-an expected stop reads only this intent — a mechanical transition residue never
-reads back as an operator action (task #4872). An interrupted replacement is
-recorded explicitly as `restart_failed` (the half it failed in, `down` or `up`,
-and since when) and clears only once a fresh active generation proves it gone;
-the health monitor may retry within its finite process-local budget. A root restart
-merges each stored record conservatively: an explicit operator or selection stop
-holds its unit down, a stop root recorded for itself during shutdown is
-superseded by the admitted start, and a recorded failure is carried until a
-generation proves it gone. A unit with no stored record — one adopted from a
-generation that predates this store — or with an unreadable one (the store logs
-it) takes the same default at its admitted start: `running`, source `selection`.
-Residue from an older scheme is discarded, never consulted; a fleet update's
-full stop/start leaves no mixed state.
-
-## Launch rewriting
-
-The assembly may rewrite a unit's launch argv; one that starts and then dies is
-retired: [[services/supervision/meiva_root/docs/restart-policy.meiva.okf.md]].
+Each unit's policy fact, who set it, how a stored stop survives a root restart,
+and when an unattended operator stop is reported:
+[[services/supervision/meiva_root/docs/intent.meiva.okf.md]].
 
 ## Left-behind generations
 
@@ -114,6 +96,9 @@ historical `restarts_exhausted` value. A terminal probe
 verdict (unknown identity, inspection error, foreign listener) emits
 `root_unit_not_revivable` on every round it is observed, at WARNING.
 `root_restart_failed` records a replacement error.
+
+An explicit operator stop rests at DEBUG; when that silence itself becomes the
+finding is owned by [[services/supervision/meiva_root/docs/intent.meiva.okf.md]].
 
 ## Control contract
 

@@ -160,7 +160,7 @@ def test_record_round_trip_and_corruption(tmp_path: Path) -> None:
         RestartFailure(RestartStage.DOWN, 99.5, "stop refused"),
     )
     intent_store.write(tmp_path, "svc", record)
-    assert intent_store.read(tmp_path, "svc") == record
+    _assert_same_record(intent_store.read(tmp_path, "svc"), record)
     (tmp_path / "intent" / "svc.json").write_text("{not json")
     assert intent_store.read(tmp_path, "svc") is None
     (tmp_path / "intent" / "svc.json").write_text(
@@ -222,8 +222,9 @@ async def test_boot_supersedes_a_stored_root_stop(tmp_path: Path) -> None:
     try:
         entry = await _entry(second)
         assert (entry["intent"], entry["state"]) == ("running", "running")
-        assert intent_store.read(tmp_path, "svc") == IntentRecord(
-            UnitIntent.RUNNING, IntentSource.SELECTION, None
+        _assert_same_record(
+            intent_store.read(tmp_path, "svc"),
+            IntentRecord(UnitIntent.RUNNING, IntentSource.SELECTION, None),
         )
     finally:
         await second.shutdown()
@@ -281,8 +282,9 @@ async def test_restart_up_half_failure_retry_replaces_and_clears(
         assert replacement is not None and replacement is not original
         assert replacement.identity is not None and replacement.identity.live()
         assert owner._units["svc"].restart_count == 1
-        assert intent_store.read(tmp_path, "svc") == IntentRecord(
-            UnitIntent.RUNNING, IntentSource.SELECTION, None
+        _assert_same_record(
+            intent_store.read(tmp_path, "svc"),
+            IntentRecord(UnitIntent.RUNNING, IntentSource.SELECTION, None),
         )
         live_stop.assert_not_called()
         assert len(recorder.events("root_restart_failed")) == 1
@@ -365,8 +367,9 @@ async def test_boot_carries_recorded_failure_until_a_generation_proves_it_gone(
         entry = await _entry(second)
         assert entry["restart_failed"] is None and entry["state"] == "running"
         assert len(recorder.events("root_restart_cleared")) == 1
-        assert intent_store.read(tmp_path, "svc") == IntentRecord(
-            UnitIntent.RUNNING, IntentSource.SELECTION, None
+        _assert_same_record(
+            intent_store.read(tmp_path, "svc"),
+            IntentRecord(UnitIntent.RUNNING, IntentSource.SELECTION, None),
         )
     finally:
         await second.shutdown()
@@ -386,10 +389,23 @@ def _caller() -> CallerFacts:
     )
 
 
+# meiva:note
+# Compare everything a record says except its wall-clock write time.
+def _assert_same_record(actual: IntentRecord | None, expected: IntentRecord) -> None:
+    assert actual is not None
+    assert (actual.intent, actual.source, actual.restart_failed, actual.caller) == (
+        expected.intent,
+        expected.source,
+        expected.restart_failed,
+        expected.caller,
+    )
+    assert actual.updated_at > 0
+
+
 def test_a_caller_round_trips_and_a_legacy_record_still_reads(tmp_path: Path) -> None:
     record = IntentRecord(UnitIntent.STOPPED, IntentSource.OPERATOR, None, _caller())
     intent_store.write(tmp_path, "svc", record)
-    assert intent_store.read(tmp_path, "svc") == record
+    _assert_same_record(intent_store.read(tmp_path, "svc"), record)
 
     path = tmp_path / "intent" / "svc.json"
     path.write_text(

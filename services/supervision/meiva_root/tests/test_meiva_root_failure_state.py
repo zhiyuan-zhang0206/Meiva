@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from collections.abc import Callable
 from typing import Any
 
@@ -18,7 +19,7 @@ from services.supervision.meiva_root.failure_state import (
     describe,
 )
 from services.supervision.meiva_root.health import HealthConfig, HealthMonitor
-from services.supervision.meiva_root.intent_store import RestartFailure, RestartStage
+from services.supervision.meiva_root.intent_store import IntentSource, RestartFailure, RestartStage
 from services.supervision.meiva_root.probes import ProbeRegistry
 
 
@@ -482,3 +483,47 @@ async def test_zero_disables_the_courtesy(recorder: _Recorder) -> None:
     await monitor.run_round()
     assert supervisor.restart_calls == ["svc"]
     assert recorder.events(LEASE_EVENT) == []
+
+
+async def test_held_down_without_an_operator_record_stays_quiet(
+    clock: _Clock, recorder: _Recorder
+) -> None:
+    supervisor = _Supervisor()
+    monitor = _monitor(supervisor, _Cell(DaemonProbe.down("no")))
+    supervisor.deferrals["svc"] = "held down"
+    supervisor.facts = UnitFailureFacts(intent_running=False, restart_failed=None)
+    for _ in range(3):
+        await monitor.run_round()
+    assert not recorder.events("root_unit_operator_stop_unattended")
+
+
+async def test_unattended_operator_stop_reports_once_then_again_for_a_new_stop(
+    clock: _Clock, recorder: _Recorder
+) -> None:
+    now = time.time()
+    supervisor = _Supervisor()
+    monitor = _monitor(supervisor, _Cell(DaemonProbe.down("no")))
+    supervisor.deferrals["svc"] = "held down"
+
+    supervisor.facts = UnitFailureFacts(
+        intent_running=False,
+        restart_failed=None,
+        intent_source=IntentSource.OPERATOR,
+        intent_since=now - 3600.0,
+    )
+    for _ in range(3):
+        await monitor.run_round()
+    assert not recorder.events("root_unit_operator_stop_unattended")
+
+    supervisor.facts = UnitFailureFacts(
+        intent_running=False,
+        restart_failed=None,
+        intent_source=IntentSource.OPERATOR,
+        intent_since=now - 7 * 3600.0,
+    )
+    for _ in range(3):
+        await monitor.run_round()
+    reports = recorder.events("root_unit_operator_stop_unattended")
+    assert len(reports) == 1
+    assert reports[0]["unit"] == "svc"
+    assert supervisor.restart_calls == []

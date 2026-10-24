@@ -30,6 +30,7 @@ from base.deploy.progress_timeout import (
 )
 from base.native_process.ownership import OwnedProcess
 from services.supervision.meiva_root.failure_state import (
+    DEFAULT_OPERATOR_STOP_ALARM_S,
     LeaseGraceState,
     LeaseProbe,
     UnitFailureFacts,
@@ -37,6 +38,7 @@ from services.supervision.meiva_root.failure_state import (
     consider_lease,
     derive_kind,
     describe,
+    note_operator_stop,
     report_lease_recovered,
 )
 from services.supervision.meiva_root.manifest import UnknownUnitError
@@ -123,6 +125,8 @@ class HealthConfig:
     # default here is the deploy family's own constant, never a restated literal.
     lease_grace_s: float = HEALTH_RESTART_LEASE_GRACE_S
 
+    operator_stop_alarm_s: float = DEFAULT_OPERATOR_STOP_ALARM_S
+
     def __post_init__(self) -> None:
         if not math.isfinite(self.startup_grace_s) or self.startup_grace_s < 0:
             raise ValueError("startup_grace_s must be nonnegative")
@@ -132,6 +136,8 @@ class HealthConfig:
             raise ValueError("interval_s must be positive")
         if self.max_restart_attempts < 1:
             raise ValueError("max_restart_attempts must be at least 1")
+        if not math.isfinite(self.operator_stop_alarm_s) or self.operator_stop_alarm_s <= 0:
+            raise ValueError("operator_stop_alarm_s must be positive")
         if not self.restart_backoff_s:
             raise ValueError("restart_backoff_s must hold at least one delay")
         if any(not math.isfinite(value) or value < 0 for value in self.restart_backoff_s):
@@ -177,6 +183,8 @@ class UnitHealth:
     # meiva:note
     # Whether the last report was "answers its probe, owned by no generation here".
     unowned_alive: bool = False
+
+    alarmed_stop_since: float | None = None
 
 
 # Explicit stop is expected; every other deferral remains visible as a warning.
@@ -532,22 +540,14 @@ class HealthMonitor:
             )
             self._note_alive_ownership(unit_id, state)
             self._reset(state)
+            state.alarmed_stop_since = None
             _log.debug("[health] unit %s: alive (%s)", unit_id, result.detail)
             return
 
         deferral = self._deferral(unit_id)
         if deferral == _HELD_DOWN:
-            # Operator stop: expected state, not a failure — no action, no
-            # counting, no failure signal (the operator's own stop must not become noise).
-            # The verdict still lands in `last_verdict`/`last_detail` for the
-            # status and event surfaces.
             self._reset(state)
-            _log.debug(
-                "[health] unit %s: %s (%s) — expected (operator stop); no action",
-                unit_id,
-                result.verdict.value,
-                result.detail,
-            )
+            self._note_operator_stop(unit_id, state, result)
             return
 
         if result.terminal:
@@ -632,6 +632,21 @@ class HealthMonitor:
             # This attempt remains spent; other errors still reach root's owner.
             _log.warning("[health] unit %s: replacement stop refused", unit_id, exc_info=exc)
         # Spawn acceptance is not readiness. The next ordinary round observes it.
+
+    def _note_operator_stop(self, unit_id: str, state: UnitHealth, result: DaemonProbe) -> None:
+        try:
+            facts = self._supervisor.unit_failure_facts(unit_id)
+        except UnknownUnitError:
+            return
+        state.alarmed_stop_since = note_operator_stop(
+            unit_id,
+            facts,
+            time.time(),
+            self._config.operator_stop_alarm_s,
+            result.verdict.value,
+            result.detail,
+            state.alarmed_stop_since,
+        )
 
     # meiva:note
     # Only two things restart a unit behind an open breaker: the ladder's capped
