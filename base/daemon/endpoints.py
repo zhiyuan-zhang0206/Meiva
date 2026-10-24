@@ -1,16 +1,16 @@
-"""`ServiceEndpoints`: where each health daemon of a unit listens and records its pid.
-
-A daemon's endpoint is a fact of the unit: the healthz port (the fixed port table, or the unit's
-`MEIVA_<NAME>_HEALTH_PORT` override) and the pidfile under `$MEIVA_HOME/run`. A composition root
-builds the table from its config owner and runtime directory (`ServiceEndpoints.from_boot`)
-and hands a daemon its own row
-(`endpoints.of("labeler")`) and a supervisor, probe or command the table; nothing below the root
-reads the settings or `MEIVA_HOME` for a port or pidfile; the `ambient-endpoint` rule bans building
-the table outside the roots a package names.
-
-Legacy roots still use `from_settings` until their config inputs are explicit. Both factories
-use the same registered port resolver; a table remains the values at its construction time.
-"""
+# meiva:note
+# `ServiceEndpoints`: where each health daemon of a unit listens and records its pid.
+#
+# A daemon's endpoint is a fact of the unit: the healthz port (the fixed port table, or the unit's
+# `MEIVA_<NAME>_HEALTH_PORT` override) and the pidfile under `$MEIVA_HOME/run`. A composition root
+# builds the table from its config owner and runtime directory (`ServiceEndpoints.from_boot`)
+# and hands a daemon its own row
+# (`endpoints.of("labeler")`) and a supervisor, probe or command the table; nothing below the root
+# reads the settings or `MEIVA_HOME` for a port or pidfile; the `ambient-read` rule bans building
+# the table outside the roots a package names.
+#
+# Legacy roots still use `from_settings` until their config inputs are explicit. Both factories
+# use the same registered port resolver; a table remains the values at its construction time.
 
 from __future__ import annotations
 

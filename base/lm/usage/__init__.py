@@ -3,10 +3,11 @@
 
 from __future__ import annotations
 
+import sys
 import time
 from collections.abc import Mapping
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Protocol, cast
 
 from langchain_core.messages import AIMessage
 
@@ -340,6 +341,27 @@ def _utc_timestamp() -> str:
     return datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
+class _TraceArming(Protocol):
+    def ensure_init_resolved(self) -> None: ...
+
+    def is_initialized(self) -> bool: ...
+
+
+# meiva:note
+# Whether span recording is armed in this process. Only `base.telemetry.tracing` arms it, so a
+# process that never imported that module has nothing armed and no pending arm to wait for; the
+# billing emitter asks the module once it is loaded. Importing it here instead would put the OTLP
+# exporter, the arm thread and the collector retry in the import closure of every package that
+# logs model usage.
+def _recording_armed() -> bool:
+    module = sys.modules.get("base.telemetry.tracing")
+    if module is None:
+        return False
+    tracing = cast(_TraceArming, module)
+    tracing.ensure_init_resolved()
+    return tracing.is_initialized()
+
+
 def emit_billing_event(
     *,
     vendor: str,
@@ -361,10 +383,7 @@ def emit_billing_event(
     # Billing must never affect the call it observes, including while tracing is initializing or an
     # exporter is unavailable.
     try:
-        from base.telemetry import tracing
-
-        tracing.ensure_init_resolved()
-        if not tracing.is_initialized():
+        if not _recording_armed():
             return
 
         from opentelemetry import trace as otel_trace
