@@ -412,7 +412,7 @@ os.environ["MEIVA_TELEGRAM_OWNER_ID"] = "0"
 # meiva:note
 # Shell-session and execution transport tests have no inherited desktop-helper route.
 # This switch does not disable mandatory macOS application-root ancestry:
-# _guard_permissions_helper_native_io forbids those native effects separately.
+# The root permissions-helper guard forbids those native effects separately.
 # A shell-session transport test can deliberately patch its own helper capability.
 os.environ["MEIVA_PERMISSIONS_HELPER_SPAWN"] = "false"
 # The spawn-attribution marker rides a second channel the pin above cannot

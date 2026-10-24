@@ -24,11 +24,16 @@ them through the consumer's conftest import or its directory's `path_scopes.toml
   `services/desktop/permissions_helper/tests/permissions_helper/native_io_guard.py`
 - the inbound helpers, `base/agents/inbox/tests/inbound_helpers.py`
 
-A global autouse fixture that must guard a package it may not import names the package by
+A global guard that must protect a package it may not import names the package by
 string. The permissions-helper door is guarded that way. `tests/fixtures/guards.py` puts a
-finder on `sys.meta_path` that wraps the door's loader, so `converge` is refused the moment
-any test or phase first imports the door; the autouse `_guard_permissions_helper_native_io`
-refuses a door that is already loaded. `tests/fixtures/tests/test_helper_door_guard.py` pins
-both. `_telemetry_event_store_off` and `_clean_db` quiesce only the telemetry already loaded.
+finder on `sys.meta_path` that wraps the door's loader. A session wrapper refuses `converge`
+from collection onward, including aliases bound by `from ... import converge`; a door loaded
+before configuration is wrapped immediately too. Only an explicit `native_permissions_helper`
+test's complete setup/call/teardown protocol admits the real callable. A `finally` block
+revokes that permission after errors or skips, and session cleanup removes the finder and
+restores patched names. `tests/fixtures/tests/test_helper_door_guard.py` checks
+the real door's wrapper identity and proves refusal/admission with a pure Python fixture door,
+without native effects even when the guard regresses.
+`_telemetry_event_store_off` and `_clean_db` quiesce only the telemetry already loaded.
 
 Roster and load order of the root plugins: [[test-fixtures.meiva.okf.md]].
