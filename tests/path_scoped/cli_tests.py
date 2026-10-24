@@ -23,6 +23,12 @@ from cli.database.tests.cli_tests import (
     operator_pipeline as operator_pipeline,
 )
 from cli.database.tests.command_inputs import command_runtime as command_runtime
+from cli.tests.guards.service_readiness_guard import (
+    guard_service_readiness as guard_service_readiness,
+)
+from services.desktop.permissions_helper.tests.permissions_helper.native_io_guard import (
+    permissions_helper_native_io as permissions_helper_native_io,
+)
 
 
 @pytest.fixture(autouse=True)

@@ -175,10 +175,19 @@ def _guard_permissions_helper_native_io(
     explicitly mock helper converge; helper unit tests may exercise real logic
     with their native command seam mocked. Only an intentional native proof may
     opt out, and remains responsible for its exact-home artifact/job cleanup.
+
+    The refusal binds only to a helper door the run has already loaded: this module never
+    imports it, because an import here would put the helper package into every test's
+    dependency set. `cli/conftest.py` and `tests/path_scoped/cli_tests.py` load the door
+    when they collect (they import the helper's native-command guard), and the CLI's
+    converge step is the door's only production caller, so every test that can reach a real
+    `converge` runs with it refused.
     """
     if request.node.get_closest_marker("native_permissions_helper") is not None:
         return
-    from services.desktop import permissions_helper
+    permissions_helper = sys.modules.get("services.desktop.permissions_helper")
+    if permissions_helper is None:
+        return
 
     def forbidden(*_args: object, **_kwargs: object) -> Any:
         pytest.fail(
@@ -188,49 +197,6 @@ def _guard_permissions_helper_native_io(
         )
 
     stub_everywhere(monkeypatch, permissions_helper, "converge", forbidden)
-
-
-@pytest.fixture
-def permissions_helper_native_io(
-    request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Protect direct owner-private native calls beside helper and CLI consumers."""
-    if request.node.get_closest_marker("native_permissions_helper") is not None:
-        return
-    from services.desktop.permissions_helper import launchd_job, lifecycle
-
-    def forbidden(*_args: object, **_kwargs: object) -> Any:
-        pytest.fail("permissions helper native effect forbidden: mock its native command boundary")
-
-    monkeypatch.setattr(lifecycle, "run_bounded", forbidden)
-    monkeypatch.setattr(launchd_job, "run_bounded", forbidden)
-
-
-@pytest.fixture
-def guard_service_readiness(
-    request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """The CLI owner's guard: `cli.commands.lifecycle.root_readiness.wait_for_service_tree` reports every
-    service ready without polling anything.
-
-    The start path's readiness wait is bounded by `SERVICE_READY_TIMEOUT_S` (180 s),
-    and a test that reaches it with real probes would sit there for the full bound —
-    long enough under `-n auto` for the worker to be declared down, which reports as
-    an infrastructure failure rather than as the stubbing gap it is. Reporting no
-    unready specs also keeps such a test's `meiva start` at rc 0 instead of the
-    readiness code.
-
-    Opt out with `@pytest.mark.real_service_readiness_gate` when the wait or the exit
-    code it produces is the subject (cli/commands/lifecycle/tests/startup/test_start_live_path.py)."""
-    if request.node.get_closest_marker("real_service_readiness_gate"):
-        return
-    from cli.commands.probe import ReadinessWait
-
-    ready = ReadinessWait((), 0.0, sessions_gone=False)
-    monkeypatch.setattr(
-        "cli.commands.lifecycle.root_readiness.wait_for_service_tree",
-        lambda *_a, **_kw: ready,
-    )
 
 
 @pytest.fixture

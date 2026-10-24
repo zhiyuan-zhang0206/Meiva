@@ -1,4 +1,7 @@
+exports = ["permissions_helper"]
+
 [uses]
+"conftest.py" = ["permissions_helper"]
 "permissions_helper" = ["test_permissions_helper.py"]
 "test_helper_retirement.py" = ["support.py", "test_permissions_helper.py"]
 "test_native_drag.py" = ["support.py"]
