@@ -1,0 +1,9 @@
+exports = ["daemon.py", "service.py", "shutdown_budget.py"]
+
+[uses]
+"daemon.py" = ["memory_guard.py", "service.py", "shutdown_budget.py"]
+"tests" = ["daemon.py", "memory_guard.py", "service.py"]
+
+[purity]
+"__init__.py" = "strict"
+"shutdown_budget.py" = "strict"

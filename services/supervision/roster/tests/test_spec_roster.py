@@ -53,6 +53,7 @@ _AGENT_RUNNER_SESSIONS = {
     "page-server",
     "ops",
     "agent-host",
+    "exec-host",
     "browser",
     "browser-mcp",
     "mcp-daemon",

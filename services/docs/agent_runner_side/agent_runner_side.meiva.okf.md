@@ -22,6 +22,7 @@ Source of truth = services in `services/supervision/roster/spec.py` `build_servi
 | permissions-helper | macOS permission ancestor and desktop automation | [[permissions-helper/permissions-helper.meiva.okf.md]] |
 | computer-mcp | computer-use executor: desktop actions through the signed permissions helper, screen-coordinated (lease + FIFO) + audited (task #1101) | [[computer-mcp.meiva.okf.md]] |
 | agent-host | Executes local agents as isolated asyncio turns in one daemon; its background loops include the understanding-chunk consumer ([[base/agents/history/hierarchy/docs/chunks.meiva.okf.md]]) | `services/agent_runner/agent_host/` |
+| exec-host | Spawns and supervises disposable `agent.execution.child` process groups over `exec-host.sock` and runs the host memory-pressure guard | `services/agent_runner/exec_host/` |
 
 ## Also Under agent-runner Capability
 - **browser-mcp** — shared chrome-devtools-mcp upstream. Gate = browser's; see [[services/docs/agent_runner_side/browser/browser/browser.meiva.okf.md]]

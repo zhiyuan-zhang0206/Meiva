@@ -103,6 +103,7 @@ def browser_probe() -> DaemonProbe:
 # meiva_memory plugin declares memory-indexer because it owns the indexed pool.
 def build_services() -> tuple[ServiceSpec, ...]:
     # Share the public entry/app port definition with the serving process.
+    from services.agent_runner.exec_host import shutdown_budget as exec_host_budget
     from services.agent_runner.pty_sessions import shutdown_budget as pty_sessions_budget
     from services.desktop.browser import shutdown_budget as browser_mcp_budget
     from services.entrypoints.gate.daemon import app_port, entry_port
@@ -322,6 +323,16 @@ def build_services() -> tuple[ServiceSpec, ...]:
             profile="agent",  # the host runs the agent kernel in-process; the runner-derived marker crashes it at import
             requires_db=True,  # assert_schema_current at boot; every turn reads/writes agents_meta
             stop_ceiling_s=HOST_STOP_CEILING_S,
+        ),
+        ServiceSpec(
+            session="exec-host",
+            cmd=".venv/bin/python -m services.agent_runner.exec_host.daemon",
+            capabilities=AGENT_RUNNER,
+            profile="agent",
+            requires_db=False,
+            db_access="runner",
+            identity_probe=partial(probe_protocol_service, "exec-host"),
+            stop_ceiling_s=exec_host_budget.SHUTDOWN_CEILING_S,
         ),
         # ops: inbound server. Binds 0.0.0.0:<ops_port>, serves POST /ops; the
         # gateway dials it directly (HTTP-uniform, even on a co-located single box).

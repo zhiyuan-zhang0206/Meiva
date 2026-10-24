@@ -1,0 +1,7 @@
+exports = ["paths.py", "protocol.py", "tests"]
+
+[uses]
+"tests" = ["paths.py", "protocol.py"]
+
+[purity]
+"__init__.py" = "strict"
