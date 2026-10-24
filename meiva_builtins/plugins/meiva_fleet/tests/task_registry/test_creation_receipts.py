@@ -22,6 +22,7 @@ from base.agents.context.identity import AgentIdentity
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
+from base.events.live.tests.live_capture import recorded_events
 from base.host.proc import run_bounded
 from base.telemetry.delivery.serialization import event_line
 from base.telemetry.tests.capture.event_capture import EmittedEvents
@@ -312,14 +313,9 @@ def test_sdk_result_and_materialized_events_cannot_rewrite_publication(
         == retained_lines
     )
 
-    with event_bus.sync_redis(decode_responses=True) as redis, redis.pubsub() as incoming:
-        incoming.subscribe(event_bus.channel)
-        confirmation = incoming.get_message(timeout=2.0)
-        assert confirmation is not None and confirmation["type"] == "subscribe"
+    with recorded_events(event_bus) as messages:
         task_registry.publish_creation(publication)
-        message = incoming.get_message(ignore_subscribe_messages=True, timeout=2.0)
-    assert message is not None
-    assert json.loads(message["data"])["task_id"] == task_id
+    assert [message["task_id"] for message in messages] == [task_id]
     assert tuple(event_line(event) for event in emitted_events) == retained_lines
 
 

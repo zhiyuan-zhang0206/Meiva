@@ -175,10 +175,14 @@ def test_task_patch_rejects_invalid_caller_key_before_network(
     retry_gateway: GatewayStub, key: object
 ) -> None:
     retry_gateway.reply("PATCH", "/api/tasks/1", {})
+    # meiva:note
+    # Raw invalid keys deliberately cross the typed API to exercise rejection before HTTP.
     with pytest.raises((TypeError, ValueError), match="idempotency key"):
         transport.patch(
-            "/api/tasks/1", idempotency_key=key, context=process_context.current_context()
-        )  # type: ignore[arg-type]
+            "/api/tasks/1",
+            idempotency_key=key,  # pyright: ignore[reportArgumentType]
+            context=process_context.current_context(),
+        )
     assert retry_gateway.received == []
 
 
