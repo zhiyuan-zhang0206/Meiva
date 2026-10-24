@@ -14,5 +14,5 @@ exports = ["__init__.py", "__main__.py", "choices.py", "fleet_gate.py", "fleet_v
 [purity]
 "oneshot.py" = "strict"
 
-[debt.ambient-read]
-"__init__.py#environ os.environ" = 2
+[roots]
+"__main__.py" = { kinds = ["environ"], why = "The executable composition root reads the caller environment once and passes it explicitly to main and the command shells" }

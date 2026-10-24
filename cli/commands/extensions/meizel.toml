@@ -17,7 +17,3 @@ exports = ["external_skills.py", "materialize.py", "memory.py", "parsers", "plug
 
 [purity]
 "__init__.py" = "strict"
-
-[debt.ambient-read]
-"mcp.py#environ os.environ" = 1
-"skills_sync.py#environ os.environ" = 1
