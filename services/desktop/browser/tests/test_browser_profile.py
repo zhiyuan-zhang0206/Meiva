@@ -2,11 +2,9 @@
 # services.desktop.browser.profile: the first-start choice between a fresh dedicated Chrome
 # profile and one seeded from the operator's daily Chrome.
 #
-# The interactive orchestration (`ensure_browser_profile`) talks over a `Console` whose streams
-# are `io.StringIO` here, and is wired through its module-bound seams (`profile_dir`,
-# `default_chrome_user_data_dir`, `running_chrome_pid`, `copy_default_profile`). The pure
-# machinery (exclusions, size accounting, running-Chrome detection, the copy itself) is tested
-# against a real on-disk mini profile.
+# The interactive orchestration consumes explicit daily-profile paths and real mini profiles
+# inside the isolated unit home. Console input is finite StringIO; an unexpected prompt fails.
+# The process-exit retry is exercised separately with real children and stdin pipes.
 
 import io
 import os
@@ -15,8 +13,6 @@ from pathlib import Path
 import pytest
 
 import services.desktop.browser.profile as bp
-from base.host.system.hostport import Host
-from base.host.system.tests.fake_commands import fake_host
 
 
 # meiva:note
@@ -26,6 +22,11 @@ def _console(*answers: str) -> bp.Console:
     return bp.Console(
         stdin=io.StringIO("".join(f"{answer}\n" for answer in answers)), stdout=io.StringIO()
     )
+
+
+def _output(console: bp.Console) -> str:
+    assert isinstance(console.stdout, io.StringIO)
+    return console.stdout.getvalue()
 
 
 def _make_profile(root: Path) -> Path:
@@ -178,89 +179,81 @@ def test_human_size() -> None:
     assert bp.human_size(512 * 1024**2) == "512 MB"
 
 
-# --- ensure_browser_profile orchestration ----------------------------------
+# meiva:note
+# Provisioning consumes actual daily profiles and the existing isolated-home fixture.
+# Empty input makes every unexpected prompt fail as EOF rather than silently continuing.
 
 
-def test_skips_when_profile_path_already_exists(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    existing = tmp_path / "prof"
-    existing.mkdir()  # An empty profile from a prior launch is also immutable.
-    monkeypatch.setattr(bp, "profile_dir", lambda: existing)
+def _daily_profile(tmp_path: Path) -> Path:
+    src = _make_profile(tmp_path / "daily-chrome")
+    (src / "SingletonLock").unlink()
+    return src
+
+
+def test_skips_when_profile_path_already_exists(unit_home: Path) -> None:
+    destination = bp.profile_dir()
+    destination.mkdir()
+    console = _console()
     bp.ensure_browser_profile(
-        interactive=True, host=fake_host(), console=_console()
-    )  # returns without prompting
+        interactive=True, daily_profile=unit_home / ("x" * 256), console=console
+    )
+    assert list(destination.iterdir()) == []
+    assert _output(console) == ""
 
 
-def test_skips_when_not_interactive(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(bp, "profile_dir", lambda: tmp_path / "absent")
-    bp.ensure_browser_profile(interactive=False, host=fake_host(), console=_console())
+def test_skips_when_not_interactive(unit_home: Path) -> None:
+    console = _console()
+    bp.ensure_browser_profile(
+        interactive=False, daily_profile=unit_home / ("x" * 256), console=console
+    )
+    assert not bp.profile_dir().exists()
+    assert _output(console) == ""
 
 
-def test_skips_when_no_daily_chrome(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(bp, "profile_dir", lambda: tmp_path / "absent")
-
-    def fake_default_chrome_user_data_dir(*, host: Host) -> Path | None:
-        return None
-
-    monkeypatch.setattr(bp, "default_chrome_user_data_dir", fake_default_chrome_user_data_dir)
-    bp.ensure_browser_profile(interactive=True, host=fake_host(), console=_console())
-
-
-def _wire_copy(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> list[tuple[Path, Path]]:
-    """Route a fresh dst + a discoverable daily Chrome, and record copy calls."""
-    dst = tmp_path / "agent-profile"
-    src = tmp_path / "daily-chrome"
-    src.mkdir()
-    monkeypatch.setattr(bp, "profile_dir", lambda: dst)
-
-    def fake_default_chrome_user_data_dir(*, host: Host) -> Path | None:
-        return src
-
-    monkeypatch.setattr(bp, "default_chrome_user_data_dir", fake_default_chrome_user_data_dir)
-    monkeypatch.setattr(bp, "running_chrome_pid", lambda _s: None)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(bp, "dir_size_bytes", lambda _s: 1234)  # pyright: ignore[reportUnknownArgumentType]
-    calls: list[tuple[Path, Path]] = []
-    monkeypatch.setattr(bp, "copy_default_profile", lambda s, d: calls.append((s, d)))  # pyright: ignore[reportUnknownArgumentType]
-    return calls
+@pytest.mark.parametrize("ordinary_file", [False, True])
+def test_skips_when_no_daily_chrome(unit_home: Path, ordinary_file: bool) -> None:
+    source = unit_home / "no-daily-profile"
+    if ordinary_file:
+        source.write_text("not a directory")
+    console = _console()
+    bp.ensure_browser_profile(interactive=True, daily_profile=source, console=console)
+    assert not bp.profile_dir().exists()
+    assert _output(console) == ""
 
 
-def test_choice_new_does_not_copy(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    calls = _wire_copy(tmp_path, monkeypatch)
-    bp.ensure_browser_profile(interactive=True, host=fake_host(), console=_console("new"))
-    assert calls == []
+def test_choice_new_does_not_copy(unit_home: Path) -> None:
+    source = _daily_profile(unit_home)
+    bp.ensure_browser_profile(interactive=True, daily_profile=source, console=_console("new"))
+    assert not bp.profile_dir().exists()
+    assert (source / "Default" / "Cookies").read_bytes() == b"cookie-jar"
 
 
-def test_choice_copy_confirmed_copies(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    calls = _wire_copy(tmp_path, monkeypatch)
-    answers = ["copy", "yes"]
-    bp.ensure_browser_profile(interactive=True, host=fake_host(), console=_console(*answers))
-    assert len(calls) == 1
+def test_choice_copy_confirmed_copies(unit_home: Path) -> None:
+    source = _daily_profile(unit_home)
+    console = _console("copy", "yes")
+    bp.ensure_browser_profile(interactive=True, daily_profile=source, console=console)
+    destination = bp.profile_dir()
+    assert (destination / "Default" / "Cookies").read_bytes() == b"cookie-jar"
+    assert (destination / "Local State").read_text() == "{}"
+    assert not (destination / "Default" / "Cache").exists()
+    assert not (destination / "SingletonLock").exists()
+    assert "SECURITY" in _output(console)
+    assert "Type 'yes'" in _output(console)
+    assert "Done" in _output(console)
 
 
-def test_choice_copy_declined_at_confirm(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    calls = _wire_copy(tmp_path, monkeypatch)
-    answers = ["copy", "no"]
-    bp.ensure_browser_profile(interactive=True, host=fake_host(), console=_console(*answers))
-    assert calls == []
+def test_choice_copy_declined_at_confirm(unit_home: Path) -> None:
+    source = _daily_profile(unit_home)
+    bp.ensure_browser_profile(
+        interactive=True, daily_profile=source, console=_console("copy", "no")
+    )
+    assert not bp.profile_dir().exists()
 
 
-def test_copy_aborts_when_chrome_running(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    calls = _wire_copy(tmp_path, monkeypatch)
-    monkeypatch.setattr(
-        bp,
-        "running_chrome_pid",
-        lambda _s: 4242,  # pyright: ignore[reportUnknownArgumentType]
-    )  # never quits
-    answers = ["copy", "new"]  # choose copy, then bail out of the retry loop
-    bp.ensure_browser_profile(interactive=True, host=fake_host(), console=_console(*answers))
-    assert calls == []
-
-
-def test_copy_proceeds_after_chrome_quits(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    calls = _wire_copy(tmp_path, monkeypatch)
-    pids = iter([4242, None])  # running on first probe, quit by the second
-    monkeypatch.setattr(bp, "running_chrome_pid", lambda _s: next(pids))  # pyright: ignore[reportUnknownArgumentType]
-    answers = ["copy", "", "yes"]  # copy; Enter to retry; confirm
-    bp.ensure_browser_profile(interactive=True, host=fake_host(), console=_console(*answers))
-    assert len(calls) == 1
+def test_copy_aborts_when_chrome_running(unit_home: Path) -> None:
+    source = _daily_profile(unit_home)
+    (source / "SingletonLock").symlink_to(f"test-host-{os.getpid()}")
+    console = _console("copy", "new")
+    bp.ensure_browser_profile(interactive=True, daily_profile=source, console=console)
+    assert not bp.profile_dir().exists()
+    assert "Chrome is still running" in _output(console)

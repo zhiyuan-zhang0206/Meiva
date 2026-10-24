@@ -27,5 +27,4 @@ exports = ["autostart.py", "backend.py", "boot_policy.py", "boot_unit.py", "cron
 "macos_firewall.py#platform socket.gethostname" = 1
 "packages_job.py#home pathlib.Path.home" = 1
 "pr_flow_job.py#home pathlib.Path.home" = 2
-"probes.py#home pathlib.Path.home" = 2
 "walg_job.py#home pathlib.Path.home" = 1

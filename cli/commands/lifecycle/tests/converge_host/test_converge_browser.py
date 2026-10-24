@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from pathlib import Path
 
 import pytest
 
@@ -78,6 +79,25 @@ def test_a_capable_host_runs_the_preflight_quietly(
     cv.ensure_browser(_browser_ctx(ctx, npx=True))
 
     assert capsys.readouterr().err == ""
+
+
+# meiva:note
+# Pytest's real captured stdin refuses reads. Reaching the prompt proves the production
+# root used this session's daily profile, rather than the process HOME or an inert spy.
+def test_profile_offer_uses_the_captured_session_home(
+    ctx: ConvergeCtx, capsys: pytest.CaptureFixture[str], tmp_path: Path, default_home: Path
+) -> None:
+    source = tmp_path / "captured-session" / "Library/Application Support/Google/Chrome"
+    source.mkdir(parents=True)
+    ready = _browser_ctx(ctx, npx=True)
+    session = replace(ready.session, user_home=tmp_path / "captured-session", interactive=True)
+    ready = replace(ready, session=session)
+    assert session.user_home != default_home
+
+    with pytest.raises(OSError, match="reading from stdin"):
+        cv.ensure_browser(ready)
+
+    assert str(source) in capsys.readouterr().out
 
 
 # meiva:note

@@ -1,6 +1,7 @@
 [uses]
 "browser_mcp_daemon" = ["test_browser_mcp_daemon.py"]
 "test_browser_mcp_daemon_tab_groups.py" = ["test_browser_mcp_daemon.py"]
+"test_profile_seed_exit.py" = ["_profile_seed_child.py"]
 
 [debt.env-patch]
 "test_browser_macos_readiness.py#monkeypatch.setenv os.environ.MEIVA_HOME" = 1
@@ -46,11 +47,6 @@
 "test_browser_probe.py#monkeypatch.setattr services.desktop.browser.probe.process_facts" = 1
 "test_browser_probe.py#monkeypatch.setattr services.desktop.browser.probe.psutil.Process" = 1
 "test_browser_probe.py#monkeypatch.setattr services.desktop.browser.probe.urllib.request.urlopen" = 3
-"test_browser_profile.py#monkeypatch.setattr services.desktop.browser.profile.copy_default_profile" = 1
-"test_browser_profile.py#monkeypatch.setattr services.desktop.browser.profile.default_chrome_user_data_dir" = 2
-"test_browser_profile.py#monkeypatch.setattr services.desktop.browser.profile.dir_size_bytes" = 1
-"test_browser_profile.py#monkeypatch.setattr services.desktop.browser.profile.profile_dir" = 4
-"test_browser_profile.py#monkeypatch.setattr services.desktop.browser.profile.running_chrome_pid" = 3
 "test_browser_profile.py#monkeypatch.setattr services.desktop.browser.profile.shutil.copytree" = 1
 "test_browser_profile.py#monkeypatch.setattr services.desktop.browser.profile.time.time" = 1
 "test_browser_session.py#monkeypatch.setattr services.desktop.browser.gateway_session.await_stop_or_timeout" = 1
