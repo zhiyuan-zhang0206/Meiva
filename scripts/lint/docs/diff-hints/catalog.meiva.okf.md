@@ -45,13 +45,18 @@ syntax cannot tell a closed vocabulary from a wire value; a required callable ty
 `Callable` type alias (`DecideCall = Callable[..., Awaitable[...]]`); and an if-chain over
 enum members without a final `else` (only `match` is looked at).
 
-Found in review and left for a later change, because each widens a detector: `raising=` set by a
-variable, `**{...}` or a position; a `raise` anywhere in a `case _:` body (including in a nested
-branch or def) counts as failing; `none-fallback` does not see `x or default_name`, `x if x else
-Foo()`, an annotated assignment or `self.x = Foo()`; `mutable-in-frozen` and `callable-default`
-need the field or parameter line to be added (a class turned `frozen=True` over an existing
-`list` field is missed, as is `from typing import Callable as Cb`); and `deleted-test` does not
-report a test whose name another file of the same diff adds, whatever it tests.
+Found in review and since closed: `raising=` set by a variable, `**{...}` or a fourth positional
+argument is a tolerated miss too; a `case _:` body fails only when it ends in a `raise` or
+`assert_never`; a selector is guarded only by a `raise` in its own body, not a nested def;
+`none-fallback` also sees `x or default_name` (an imported or module-level implementation,
+not a constant), `x if x else Foo()`, an annotated assignment and `self.x = Foo()`;
+`mutable-in-frozen` asks when the `@dataclass(frozen=True)` line is the added one;
+`callable-default` judges any added line of a parameter's name, annotation and default and sees
+`Callable as Cb`; and `deleted-test` treats a name as moved only when a file of the same base
+name adds it. Still open: a `frozen=FLAG` that is not a literal, a `frozen` set through
+`dataclasses.dataclass(...)` applied as a function, and the pre-push stage judging `HEAD` rather
+than the pushed ref (the ref arrives in an environment variable that the lint on `os.environ`
+keeps tooling from reading).
 
 ## Adding or changing a hint
 
