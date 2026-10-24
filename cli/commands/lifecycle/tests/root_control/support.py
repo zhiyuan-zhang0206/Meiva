@@ -49,7 +49,12 @@ def service(
 
 
 def launch_inputs(home: Path) -> RootLaunchInputs:
-    return RootLaunchInputs(home=home, service_path=str(home / "tools"), remote_data_plane=False)
+    return RootLaunchInputs(
+        home=home,
+        service_path=str(home / "tools"),
+        remote_data_plane=False,
+        environment={"HOME": str(home)},
+    )
 
 
 # meiva:note

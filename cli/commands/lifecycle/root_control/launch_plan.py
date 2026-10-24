@@ -33,6 +33,10 @@ class RootLaunchInputs:
     home: Path
     service_path: str
     remote_data_plane: bool
+    # meiva:note
+    # The process environment the managed service environment is built from, copied once by the
+    # start entry; nothing below it reads `os.environ`.
+    environment: Mapping[str, str]
 
 
 # meiva:note

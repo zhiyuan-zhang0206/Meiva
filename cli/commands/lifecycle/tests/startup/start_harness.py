@@ -24,6 +24,7 @@ import pytest
 
 from base.cluster.machine import MachineRoles
 from base.deploy.lifecycle.start_serving import RootBirth
+from base.host.env.registry import process_environment
 from base.host.runtime_interpreter import LoadedRuntimeIdentity
 from base.sessions.env_forwarding import managed_service_env
 from base.telemetry import EventPipeline
@@ -131,12 +132,13 @@ class StartRun:
             home=self.home,
             service_path=config.service_path,
             remote_data_plane=config.data_plane.is_remote,
+            environment=dict(process_environment()),
         )
         manifest = root_driver.launch_manifest(
             roster,
             self.runtime.code_root,
             roles=roles,
-            env=managed_service_env(inputs.service_path),
+            env=managed_service_env(inputs.service_path, environ=inputs.environment),
             inputs=inputs,
         )
         return Generation(str(manifest["launch_digest"]), root_driver.unit_digests(manifest))

@@ -237,7 +237,7 @@ def requested_launch(
         roster,
         repo,
         roles=ROLES,
-        env=managed_service_env(inputs.service_path),
+        env=managed_service_env(inputs.service_path, environ=inputs.environment),
         inputs=inputs,
     )
     return roster, manifest, driver.unit_digests(manifest)

@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+import psutil
 import pytest
 
 from base.host.system import boot_policy
@@ -16,11 +17,16 @@ from cli.database.tests.command_inputs import command_runtime as command_runtime
 from cli.parsers import build_parser
 from cli.start_runtime import HomeSite
 
+# meiva:note
+# The boot time every attempt of these tests runs in: the real one, which the start entry reads too.
+_BOOT_TIME = psutil.boot_time()
+
 
 # meiva:note
 # One boot-job attempt whose start exited with `code`.
 def _boot(home: Path, code: int) -> int:
-    return start_intent.settle_boot_attempt(home, boot_policy.begin_attempt(home), code)
+    attempt = boot_policy.begin_attempt(home, boot_time=_BOOT_TIME)
+    return start_intent.settle_boot_attempt(home, attempt, code, macos=False)
 
 
 def test_the_parser_marks_a_boot_start_only_when_asked() -> None:
@@ -45,7 +51,7 @@ def test_the_attempt_that_spends_the_budget_alerts_and_takes_the_policys_exit_co
     # meiva:note
     # launchd retries every nonzero exit, so the spending attempt exits 0 there; systemd
     # keeps the real code. The policy owns which, and tests it.
-    assert _boot(tmp_path, 75) == boot_policy.exit_code_after_budget(75)
+    assert _boot(tmp_path, 75) == boot_policy.exit_code_after_budget(75, macos=False)
     (event,) = emitted_events
     assert (event.category, event.event_name) == ("telemetry", "boot_retries_exhausted")
     assert event.level == "error"
@@ -61,7 +67,7 @@ def test_a_start_after_the_budget_still_runs_and_success_clears_the_count(
     # meiva:note
     # The count never refuses a start: this attempt is attempt number budget + 1, and it succeeds.
     assert _boot(tmp_path, 0) == 0
-    assert boot_policy.begin_attempt(tmp_path) == 1
+    assert boot_policy.begin_attempt(tmp_path, boot_time=_BOOT_TIME) == 1
 
 
 def _start_args(command_runtime: CommandRuntime, *flags: str) -> argparse.Namespace:
@@ -105,8 +111,12 @@ def test_a_boot_start_counts_its_attempt_and_a_plain_start_does_not(
     assert _run_start(HomeSite(boot, tmp_path), command_runtime, operator_database, "--boot") == 1
 
     assert "not initialized" in capsys.readouterr().err
-    assert boot_policy.begin_attempt(plain) == 1, "a plain start recorded no attempt"
-    assert boot_policy.begin_attempt(boot) == 2, "a boot start recorded its attempt"
+    assert boot_policy.begin_attempt(plain, boot_time=_BOOT_TIME) == 1, (
+        "a plain start recorded no attempt"
+    )
+    assert boot_policy.begin_attempt(boot, boot_time=_BOOT_TIME) == 2, (
+        "a boot start recorded its attempt"
+    )
 
 
 def test_a_boot_start_after_the_budget_still_runs(

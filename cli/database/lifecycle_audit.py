@@ -142,9 +142,10 @@ def _agent_id(raw: str | None) -> int | None:
 
 
 def _caller_identity() -> CallerPayload:
+    from base.host.env.registry import process_environment
     from base.native_process.root_control.client import caller_identity
 
-    return caller_identity()
+    return caller_identity(process_environment())
 
 
 def _head_sha() -> str | None:

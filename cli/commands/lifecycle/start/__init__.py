@@ -26,6 +26,7 @@ from base.deploy import start_trace
 from base.deploy.lifecycle import launch_failures, pause_markers, start_serving
 from base.deploy.lifecycle.service_selection import resolve_selection
 from base.deploy.progress_timeout import CRITICAL_SERVICE_SESSIONS, SERVICE_READY_TIMEOUT_S
+from base.host.env.registry import process_environment
 from base.host.system.hostport import Host
 from base.native_process.os_platform import raise_fd_limit
 from base.paths import skills_dir
@@ -592,6 +593,7 @@ def cmd_start_body(
             home=command.home,
             service_path=config.service_path,
             remote_data_plane=config.data_plane.is_remote,
+            environment=dict(process_environment()),
         ),
     )
     for phase in (_admit, _register_and_probe):
