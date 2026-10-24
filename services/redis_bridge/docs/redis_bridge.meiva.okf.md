@@ -91,7 +91,7 @@ failure is infrastructure state.
   finite stop, and original worker error collection
 - `services/redis_bridge/relay.py:RelayService.serve_forever()` — listener lifecycle and
   per-connection forwarding; `run_service()` stops and collects the connections on every exit
-- `services/supervision/roster/__init__.py` (`redis-bridge` unit) and `base/cluster/dataplane/redis_bridge.py` —
+- `services/supervision/roster/composition.py` (`redis-bridge` unit) and `base/cluster/dataplane/redis_bridge.py` —
   rostered command and listen address
 - `cli/commands/converge/redis_bridge.py:retire_launchd_redis_bridge()` — removes the
   standalone launchd job and installed copy

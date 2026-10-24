@@ -23,26 +23,19 @@ _REPO = Path("/checkout/repo")
 
 
 @pytest.fixture(autouse=True)
-def _declared_configuration(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, unit_home: Path
-) -> None:
+def _declared_configuration(unit_home: Path) -> None:
     """Give the real roster private configuration, without a native backend install."""
-    from base import paths
     from base.packages.plugin_config_admin import update_all_disk_images
     from base.packages.plugins.enable_config import discover_plugins
     from base.telemetry.lgtm_local import BACKENDS, service_input_paths
-    from services.supervision import roster
 
-    tmp_path = tmp_path.resolve()
-    monkeypatch.setattr(paths, "meiva_home", lambda: tmp_path)
-    monkeypatch.setattr(roster, "meiva_home", lambda: tmp_path)
     # A launch manifest follows converge's plugin configuration initialization.
     update_all_disk_images(plugin_dirs=discover_plugins(), home=unit_home)
-    collector = otel_collector_config(tmp_path)
+    collector = otel_collector_config(unit_home)
     collector.parent.mkdir(parents=True)
     collector.write_text("receivers: {}")
     for name in BACKENDS:
-        for path in service_input_paths(tmp_path, name):
+        for path in service_input_paths(unit_home, name):
             if path.name == "config":
                 path.mkdir(parents=True, exist_ok=True)
             else:
@@ -194,7 +187,7 @@ def test_declared_shutdown_ceiling_becomes_root_window_and_undeclared_keeps_the_
 
 def test_every_roster_unit_gets_a_window_strictly_above_its_declared_ceiling() -> None:
     """Root never waits for a unit less long than the unit's own cleanup may take."""
-    from services.supervision.roster import build_services
+    from services.supervision.roster.composition import build_services
 
     default_window = SupervisorConfig().stop_timeout_s
     units = _real_units()

@@ -132,7 +132,7 @@ def check_source(_home: Path, source: Path) -> Detail:
 
 
 def check_services(_home: Path, _source: Path) -> Detail:
-    from services.supervision.roster import build_services
+    from services.supervision.roster.composition import build_services
 
     specs = [spec for spec in build_services() if spec.session in SERVICES]
     if frozenset(spec.session for spec in specs) != SERVICES:

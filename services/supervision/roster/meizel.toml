@@ -1,12 +1,13 @@
-exports = ["__main__.py", "healthz.py", "plugin_services.py", "service_spec.py", "spec.py"]
+exports = ["__main__.py", "composition.py", "healthz.py", "plugin_services.py", "service_spec.py", "spec.py"]
 
 [uses]
-"__init__.py" = ["healthz.py", "plugin_services.py", "service_spec.py"]
-"__main__.py" = ["__init__.py"]
+"__init__.py" = ["healthz.py", "service_spec.py"]
+"composition.py" = ["healthz.py", "plugin_services.py", "service_spec.py"]
+"__main__.py" = ["composition.py"]
 "healthz.py" = ["service_spec.py"]
 "plugin_services.py" = ["service_spec.py"]
-"spec.py" = ["__init__.py", "gate_plan.py", "plugin_services.py", "service_spec.py"]
-"tests" = ["__init__.py", "gate_plan.py", "healthz.py", "service_spec.py", "spec.py"]
+"spec.py" = ["composition.py", "gate_plan.py", "plugin_services.py", "service_spec.py"]
+"tests" = ["__init__.py", "composition.py", "gate_plan.py", "healthz.py", "service_spec.py", "spec.py"]
 
 [external]
 "plugin_services.py" = "loads discovered plugins, built-in or user-installed; core does not depend on them"
@@ -18,5 +19,5 @@ exports = ["__main__.py", "healthz.py", "plugin_services.py", "service_spec.py",
 "healthz.py" = ["endpoints"]
 
 [debt.ambient-read]
-"__init__.py#settings base.config.settings" = 1
+"composition.py#settings base.config.settings" = 1
 "spec.py#settings base.config.settings" = 1

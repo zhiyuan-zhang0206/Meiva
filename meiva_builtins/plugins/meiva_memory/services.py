@@ -1,22 +1,22 @@
-"""meiva_memory — ops service declarations (the plugin's `build_services()` hook).
-
-The memory indexer is the pool's search side: it watches the gateway's
-consolidated checkout and keeps the memory search index current, which is what makes
-`meiva.memory.search` — and therefore passive recall — return anything. It is
-declared here rather than hardcoded into `services/supervision/roster/__init__.py` because the pool is this
-plugin's. Its host-scoped `indexer_enabled` config controls the daemon separately
-from whether agents inject the standing memory index into their prompts.
-
-Discovery keys on this plugin's code being PRESENT on the machine (see
-`services.supervision.roster.plugin_services.plugin_services`), so the cluster-level on/off is the explicit gate
-below rather than the presence check.
-
-Deliberately light, like `meiva_fleet/services.py`: it imports the ops service
-contract and roster probe helper plus `base` — never `plugin.py` or the memory
-domain code — so the ops/CLI/watchdog process that discovers it does not pull in
-the agent kernel. `services()` is a function so probe ports derived from settings
-are read at use-time.
-"""
+# meiva:note
+# meiva_memory — ops service declarations (the plugin's `build_services()` hook).
+#
+# The memory indexer is the pool's search side: it watches the gateway's
+# consolidated checkout and keeps the memory search index current, which is what makes
+# `meiva.memory.search` — and therefore passive recall — return anything. It is
+# declared here rather than hardcoded into `services/supervision/roster/composition.py` because the pool is this
+# plugin's. Its host-scoped `indexer_enabled` config controls the daemon separately
+# from whether agents inject the standing memory index into their prompts.
+#
+# Discovery keys on this plugin's code being PRESENT on the machine (see
+# `services.supervision.roster.plugin_services.plugin_services`), so the cluster-level on/off is the explicit gate
+# below rather than the presence check.
+#
+# Deliberately light, like `meiva_fleet/services.py`: it imports the ops service
+# contract and roster probe helper plus `base` — never `plugin.py` or the memory
+# domain code — so the ops/CLI/watchdog process that discovers it does not pull in
+# the agent kernel. `services()` is a function so probe ports derived from settings
+# are read at use-time.
 
 from __future__ import annotations
 

@@ -4,6 +4,6 @@
 # names with it before touching any host.
 import sys
 
-from services.supervision.roster import build_services
+from services.supervision.roster.composition import build_services
 
 sys.stdout.write(" ".join(spec.session for spec in build_services()) + "\n")

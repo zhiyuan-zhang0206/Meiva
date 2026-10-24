@@ -49,6 +49,8 @@ def test_relocated_conventions_trigger_procedural_hooks() -> None:
     assert re.search(
         hooks["lint-doc-roster"]["files"], "services/supervision/roster/docs/service-roster.md"
     )
-    assert re.search(hooks["lint-doc-roster"]["files"], "services/supervision/roster/__init__.py")
+    assert re.search(
+        hooks["lint-doc-roster"]["files"], "services/supervision/roster/composition.py"
+    )
     for hook_id in ("lint-doc-symbols", "lint-doc-anchors"):
         assert re.search(hooks[hook_id]["files"], "docs/conventions/runbook.md")

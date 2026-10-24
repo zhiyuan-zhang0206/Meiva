@@ -17,6 +17,7 @@ roster stays single-source. These lock the load-bearing invariants:
 
 from __future__ import annotations
 
+import ast
 from pathlib import Path
 
 import pytest
@@ -25,15 +26,14 @@ import base.packages.plugins.enable_config as pc
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.host.system.tests.fake_commands import fake_host
-from services.supervision import roster
+from services.supervision.roster import composition, service_spec, spec
 from services.supervision.roster import plugin_services as roster_plugins
-from services.supervision.roster import service_spec, spec
 
 
 def test_fleet_plugin_registers_task_maintenance() -> None:
     """task-maintenance is contributed by the meiva_fleet plugin, not hardcoded in
     ops — its entry module lives under the plugin namespace."""
-    by_session = {s.session: s for s in roster.build_services()}
+    by_session = {s.session: s for s in composition.build_services()}
     tm = by_session["task-maintenance"]
     # venv-direct launch (no `uv run` wrapper), relative to the source checkout.
     assert (
@@ -48,17 +48,20 @@ def test_fleet_plugin_registers_task_maintenance() -> None:
 def test_ops_spec_has_no_task_maintenance_hardcoded() -> None:
     """The core roster groups must not name task-maintenance — it only reaches the
     roster via plugin discovery."""
-    source = Path(roster.__file__).read_text()
-    # The only mentions allowed are the doc/comment references to the plugin; the
-    # session string literal must not appear in a core ServiceSpec.
-    assert 'session="task-maintenance"' not in source
+    source = Path(composition.__file__).read_text()
+    literals = {
+        node.value
+        for node in ast.walk(ast.parse(source))
+        if isinstance(node, ast.Constant) and isinstance(node.value, str)
+    }
+    assert "task-maintenance" not in literals
 
 
 def test_no_installed_plugins_contributes_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
     """When no plugin is present, `plugin_services()` contributes nothing and
     task-maintenance is absent from the roster."""
     monkeypatch.setattr(pc, "installed_plugin_dirs", dict)
-    names = {s.session for s in roster.build_services()}
+    names = {s.session for s in composition.build_services()}
     assert "task-maintenance" not in names
 
 
@@ -76,7 +79,7 @@ def test_discovery_ignores_agent_enable_state(monkeypatch: pytest.MonkeyPatch) -
         "load",
         lambda known: PluginsConfig(plugins={n: PluginEntry(enabled=False) for n in known}),  # pyright: ignore[reportUnknownArgumentType]
     )
-    names = {s.session for s in roster.build_services()}
+    names = {s.session for s in composition.build_services()}
     assert "task-maintenance" in names
 
 
@@ -91,7 +94,7 @@ def test_session_collision_fails_fast(monkeypatch: pytest.MonkeyPatch) -> None:
     )
     monkeypatch.setattr(roster_plugins, "plugin_services", lambda: (collider,))
     with pytest.raises(roster_plugins.PluginServiceError, match="collides"):
-        roster.build_services()
+        composition.build_services()
 
 
 def test_services_py_without_declare_reports_and_raises(
@@ -229,7 +232,7 @@ def test_invalid_service_face_propagates_to_roster_operation(
     (plugin_dir / "services.py").write_text(body)
     monkeypatch.setattr(pc, "installed_plugin_dirs", lambda: {"brokenplugin": plugin_dir})
     with pytest.raises(error, match=match):
-        roster.build_services()
+        composition.build_services()
     assert any(
         "brokenplugin" in r["message"] and "failed to load" in r["message"] for r in loguru_records
     )

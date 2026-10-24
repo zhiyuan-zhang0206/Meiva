@@ -4,12 +4,11 @@ from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.host.system.tests.fake_commands import fake_host
 from services.agent_runner.pty_sessions import shutdown_budget
-from services.supervision import roster
-from services.supervision.roster import service_spec, spec
+from services.supervision.roster import composition, service_spec, spec
 
 
 def _spec() -> service_spec.ServiceSpec:
-    return next(s for s in roster.build_services() if s.session == "pty-sessions")
+    return next(s for s in composition.build_services() if s.session == "pty-sessions")
 
 
 def test_both_a_gateway_host_and_a_runner_host_run_the_service(

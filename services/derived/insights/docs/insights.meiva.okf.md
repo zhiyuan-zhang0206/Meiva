@@ -31,7 +31,7 @@ waiting for `shutdown_default_executor` to finish a cold-read thread. Repeated
 SIGTERM is ignored after interruption so it cannot abort that bounded drain.
 
 - `services/derived/insights/daemon.py` — `.venv/bin/python -m services.derived.insights.daemon`
-- Supervised through the roster's socket identity probe (`services/supervision/roster/__init__.py`).
+- Supervised through the roster's socket identity probe (`services/supervision/roster/composition.py`).
 
 Run context model fallback is `InsightsConfig.default_model`, read once at start with the rest
 of the configuration; it never reads another process settings facade.

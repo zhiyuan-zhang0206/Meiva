@@ -7,7 +7,6 @@ from typing import cast
 import pytest
 
 import cli.commands.probe as _probe_commands
-import services.supervision.roster as _roster
 import services.supervision.roster.service_spec as _service_spec
 from base.daemon.endpoints import ServiceEndpoints
 from base.db import Database
@@ -15,10 +14,11 @@ from cli.commands._repo import register_machine_or_die
 from cli.commands._setup import SetupValues
 from cli.database.runtime import CommandRuntime
 from cli.database.tests.command_inputs import command_runtime as command_runtime
+from services.supervision.roster.composition import build_services
 
 
 def _spec_by_service(service: str) -> _service_spec.ServiceSpec:
-    for spec in _roster.build_services():
+    for spec in build_services():
         if spec.session == service:
             return spec
     raise AssertionError(f"no ServiceSpec service={service!r}")

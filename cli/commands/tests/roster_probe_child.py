@@ -8,7 +8,7 @@ from __future__ import annotations
 import json
 import sys
 
-from services.supervision.roster import build_services
+from services.supervision.roster.composition import build_services
 
 
 def main() -> None:

@@ -24,7 +24,7 @@ from services.supervision.healthchecks import gate
 from services.supervision.meiva_root.manifest import RestartPolicy, UnitManifest, UnitRegistry
 from services.supervision.meiva_root.server import ControlServer
 from services.supervision.meiva_root.supervisor import Supervisor, SupervisorConfig
-from services.supervision.roster import build_services
+from services.supervision.roster.composition import build_services
 
 
 def _gate_process(home: Path) -> OwnedProcess:
