@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 HINTS = Path(__file__).resolve().parents[1] / "hints.py"
-CLOCK_READ = "import time\n\n\ndef now() -> float:\n    return time.monotonic()\n"
+CLOCK_READ = "import time\n\n\ndef now() -> float:\n    return time.time()\n"
 
 
 # meiva:note

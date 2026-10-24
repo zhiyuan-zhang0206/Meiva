@@ -17,7 +17,7 @@ Each hint prints the site, then once per id: `why` (the principle in a sentence)
 
 | Id | Fires on (added lines) | Instead, first choice |
 |---|---|---|
-| `ambient-read` | production file, not a root: `time.*` clocks, `datetime.now/utcnow/today`, `os.environ`, `os.getenv`, `os.getcwd`, `Path.home/cwd`, `platform.*`, `sys.platform`, `socket.gethostname`, `random.*`, a read of `settings`; not a clock handed to a call as `now=`/`*_at`/`*_ts` | take the value; lift a loop's decision into a pure function of `now` and keep the sleep in the shell |
+| `ambient-read` | production file, not a root: the wall clock `time.time`, an interval clock (`time.monotonic`, `time.perf_counter`) only in a function that also sleeps, `datetime.now/utcnow/today`, `os.environ`, `os.getenv`, `os.getcwd`, `Path.home/cwd`, `platform.*`, `sys.platform`, `socket.gethostname`, `random.*`, a read of `settings`; not a clock handed to a call as `now=`/`*_at`/`*_ts` | take the value; lift a loop's decision into a pure function of `now` and keep the sleep in the shell |
 | `callable-default` | a parameter annotated `Callable`, `Coroutine` or `Awaitable`, or named `*_fn`, `*_hook`, `*_cb`, `*_reader`, `*_factory`, `*_fetch`, with a default | required parameter; a value if it only fetches one; a plan if it is an effect |
 | `callable-bag` | a dataclass, `NamedTuple`, `TypedDict`, `Protocol` or `BaseModel` with two or more `Callable` fields | values in, a plan out; one narrow port in `base/` for a real effect |
 | `none-fallback` | production file: a `None` default and `x or Call()`, `if x is None: x = Call()` or `Call() if x is None else x` | required parameter; split a borrowed and an owned mode into two types |
