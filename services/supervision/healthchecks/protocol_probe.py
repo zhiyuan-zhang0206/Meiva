@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import socket
-from collections.abc import Callable
 from pathlib import Path
 
 from base.daemon.health import DaemonProbe
@@ -27,14 +26,6 @@ def ping(path: Path | str) -> DaemonProbe:
         if payload["id"] != 0 or payload["ok"] is not True:
             return DaemonProbe.down("Unix endpoint rejected ping")
         return DaemonProbe.up("Unix endpoint answered ping")
-
-
-def probe_protocol(protocol: Callable[[], bool | DaemonProbe]) -> DaemonProbe:
-    """Report the protocol result without native process or listener inspection."""
-    result = protocol()
-    if isinstance(result, DaemonProbe):
-        return result
-    return DaemonProbe.up("protocol answered") if result else DaemonProbe.down("protocol failed")
 
 
 def _observe(service: str, home: Path) -> DaemonProbe:
@@ -60,7 +51,7 @@ def _observe(service: str, home: Path) -> DaemonProbe:
     if service == "insights":
         from services.supervision.healthchecks.insights import insights_probe
 
-        return probe_protocol(lambda: insights_probe(home))
+        return insights_probe(home)
     raise ValueError(f"unsupported protocol probe: {service}")
 
 

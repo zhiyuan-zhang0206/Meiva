@@ -112,15 +112,12 @@ def readiness_at(name: str, url: str) -> DaemonProbe:
 
 def probe_backend(name: str) -> DaemonProbe:
     """Observe the configured backend readiness protocol."""
-    from functools import partial
-
     from base.telemetry.lgtm_local import backend_urls
-    from services.supervision.healthchecks.protocol_probe import probe_protocol
 
     port = urllib.parse.urlsplit(backend_urls()[name]).port
     if port is None:
         return DaemonProbe.unavailable("backend has no explicit local port")
-    return probe_protocol(partial(protocol_readiness, name))
+    return protocol_readiness(name)
 
 
 # meiva:note

@@ -113,6 +113,18 @@ async def test_probe_bug_is_unknown_evidence() -> None:
     assert result.verdict.value == "unavailable"
 
 
+@pytest.mark.parametrize("verdict", list(ProbeVerdict))
+async def test_probe_runner_preserves_the_protocol_result(verdict: ProbeVerdict) -> None:
+    result = DaemonProbe(verdict, "application unready")
+    runner = ProbeRunner()
+    try:
+        observed = await runner.observe(lambda: result, 1.0)
+        assert observed is result
+        assert observed.detail == "application unready"
+    finally:
+        assert runner.stop()
+
+
 async def test_slow_diagnostic_cannot_block_peer_or_duplicate_itself(
     events: _Events,
 ) -> None:

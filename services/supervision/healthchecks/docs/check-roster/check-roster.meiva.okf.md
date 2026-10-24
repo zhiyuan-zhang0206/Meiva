@@ -34,12 +34,12 @@ file to this directory and no row to this table.
 | `memory_search.py` | Service protocol probe | Real exact-search POST |
 | `otel_collector.py` | Service protocol probe | Valid OTLP request accepted |
 | `redis_bridge.py` | Service protocol probe | RESP command through the relay gets a Redis reply |
-| `protocol_probe.py` | Read-only diagnostic helper | Protocol result adapter and bounded Unix ping |
+| `protocol_probe.py` | Read-only diagnostic helper | Endpoint routing and bounded Unix ping |
 | `permissions_helper.py` | Read-only diagnostic helper | Parent helper ping and launchd failure classification |
 | `prod_venv.py` | Read-only diagnostic helper | Bounded dependency check and isolated import smoke |
 | `redis_acl.py` | Read-only diagnostic helper | Runtime-credential Redis PING |
 
-`protocol_probe.py` observes application responses without a process/socket census.
+`protocol_probe.py` routes service endpoints and observes their application responses without a process/socket census. Endpoint-specific probes return their canonical `DaemonProbe` directly; LGTM and root diagnostics do not import the Unix endpoint router to invoke a probe. Each call remains at the original observation point, with its prerequisite gates, error classification and result detail intact.
 Destructive lifecycle ownership remains separate from these read-only probes.
 
 The roster binds `memory_search_probe` to required URI and embedding-provider
