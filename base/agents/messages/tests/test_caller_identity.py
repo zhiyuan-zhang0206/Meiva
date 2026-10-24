@@ -6,7 +6,7 @@ from base.agents.messages.timestamp_policy import TimestampPolicy
 from base.api_contracts.caller_identity import CallerIdentity, caller_payload
 from base.clock import Clock
 
-_ENVELOPE_INPUTS = TimestampPolicy(clock=Clock.from_settings(), timestamps_enabled=False)
+_ENVELOPE_INPUTS = TimestampPolicy.from_clock(Clock.from_settings(), timestamps_enabled=False)
 
 
 @pytest.mark.parametrize("subject", ["codex", "claude_code", "mcp"])

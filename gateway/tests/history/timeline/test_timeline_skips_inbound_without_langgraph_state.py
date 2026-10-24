@@ -19,8 +19,8 @@ from gateway.tests.auth.gateway_config import GatewayTestClient, reconfigure
 from gateway.tests.history.test_timeline import test_client as test_client
 from gateway.tests.history.test_timeline import timeline_items
 
-_TIMELINE_INPUTS = TimestampPolicy(
-    clock=Clock.from_settings(), timestamps_enabled=settings.general.message_timestamps
+_TIMELINE_INPUTS = TimestampPolicy.from_clock(
+    Clock.from_settings(), timestamps_enabled=settings.general.message_timestamps
 )
 
 

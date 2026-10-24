@@ -14,8 +14,8 @@ def test_each_renderer_follows_its_own_policy() -> None:
     message = HumanMessage(
         content="summary", additional_kwargs={"meiva_msg_type": "compact_summary"}
     )
-    stamped = TimestampPolicy(clock=_CLOCK, timestamps_enabled=True)
-    bare = TimestampPolicy(clock=_CLOCK, timestamps_enabled=False)
+    stamped = TimestampPolicy.from_clock(_CLOCK, timestamps_enabled=True)
+    bare = TimestampPolicy.from_clock(_CLOCK, timestamps_enabled=False)
 
     rendered, _ = build_timeline_items([message], inputs=stamped)
     assert rendered[0].payload == "Compact summary [2026-10-04 12:00:00]:\n\nsummary"
@@ -26,7 +26,7 @@ def test_each_renderer_follows_its_own_policy() -> None:
 def test_plain_messages_carry_no_timestamp_and_limit_is_live() -> None:
     items, count = build_timeline_items(
         [HumanMessage(content="plain")],
-        inputs=TimestampPolicy(clock=_CLOCK, timestamps_enabled=True),
+        inputs=TimestampPolicy.from_clock(_CLOCK, timestamps_enabled=True),
     )
     assert count == 1 and items[0].payload == "plain"
     limit = 7

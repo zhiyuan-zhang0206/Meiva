@@ -13,15 +13,16 @@ as the first new system note.
 The introduction, takeover, and closing notes include their creation time in
 the agent-visible text when message timestamps are enabled, using the same
 instant as their timeline metadata. Existing receipts retain their original
-notes and timestamps across retries. The process owner supplies a `TimestampPolicy`
-from `base.agents.messages.timestamp_policy`, the shared input contract for controllers
-and native graph execution, holding the clock and the timestamp switch as values built
-for the operation. The shell turns it once per note-writing operation into a `NoteStamp` (the
-creation instant and the display prefix) and `agent/takeover/notes.py` builds the
-note drafts as values, which the shell renders into messages. Constructing the inputs
-reads neither input; a write that finds its receipt already in the checkpoint reads
-neither. Native graph notes read the clock and flag from their explicit agent context;
-invocation settlement carries the same narrow inputs from the host owner.
+notes and timestamps across retries. The process owner supplies a required `TimestampSource`
+from `base.agents.messages.timestamp_policy`, separately from host configuration values.
+Settlement carries that resource without observing time. An admitted activation mints one
+pure `TimestampPolicy` for its start marker; an end-of-session handoff first reads its
+checkpoint receipt and mints a policy only when a new note is needed. The shell turns the
+policy (display switch, timezone, weekday and instant) into a `NoteStamp`, and
+`agent/takeover/notes.py` builds the note draft as a value. A receipt replay preserves the
+original note and creation instant, flushes the checkpoint and retries the database receipt
+without reading the clock. Native graph notes read the clock and flag from their explicit
+agent context.
 The stable note id and `impersonation_handoff_id` channel survive retries.
 Checkpoint flush is unconditional before setting `handoff_applied_at`; only
 that receipt consumes captured pending input and opens the normal claim gate.

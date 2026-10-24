@@ -28,7 +28,11 @@ from base.paths import meiva_home
 from meiva.sdk_surface.installation import Installation
 from services.agent_runner.agent_host import daemon
 from services.agent_runner.agent_host.host import AgentHost
-from services.agent_runner.agent_host.tests.host_policy import configured_machine, configured_policy
+from services.agent_runner.agent_host.tests.host_policy import (
+    configured_machine,
+    configured_policy,
+    handoff_timestamps,
+)
 
 
 async def test_sampling_failure_is_collected_before_pools_and_pidfile_cleanup(
@@ -71,6 +75,7 @@ async def test_original_error_joins_before_clients_and_pools_close(
     monkeypatch: pytest.MonkeyPatch, model_catalog: ModelCatalog, *, database_gate: ProcessDbGate
 ) -> None:
     host = AgentHost(
+        handoff_stamping=handoff_timestamps(),
         home=meiva_home(),
         policy=configured_policy(),
         pool=cast(Any, MagicMock()),
@@ -121,6 +126,7 @@ def exercise_unfinished_main() -> None:
         assert home == Path(os.environ["MEIVA_HOME"])
         on_clients_owned()
         host = AgentHost(
+            handoff_stamping=handoff_timestamps(),
             home=meiva_home(),
             policy=configured_policy(),
             pool=cast(Any, MagicMock()),

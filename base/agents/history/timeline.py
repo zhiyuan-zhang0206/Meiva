@@ -316,7 +316,7 @@ def _compact_item(
     *,
     inputs: TimestampPolicy,
 ) -> TimelineItem:
-    ts = f" {inputs.clock.now_timestamp()}" if inputs.timestamps_enabled else ""
+    ts = f" {inputs.now_stamp()}" if inputs.timestamps_enabled else ""
     label = "Compact summary" if kind == "inbound_compact_summary" else "Compact request"
     return TimelineItem(
         item_id=f"{msg_idx}.0",

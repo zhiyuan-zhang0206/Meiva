@@ -15,7 +15,7 @@ from agent.state import BaseAgentState
 from agent.turn.runloop import PendingTurnFailure, publish_turn_failure, settle_turn_failure
 from agent.turn.trace_checkpoint import attach_trace_checkpoint_ref
 from base.agents.context import MeivaContext
-from base.agents.messages.timestamp_policy import TimestampPolicy
+from base.agents.messages.timestamp_policy import TimestampSource
 from base.agents.observation.relay_supervision import RelaySupervision
 from base.db import Database
 from base.events.live.bus import EventBus
@@ -46,7 +46,7 @@ class HandoffSettlement:
     db: Database
     bus: EventBus
     relays: RelaySupervision
-    notes: TimestampPolicy
+    timestamps: TimestampSource
     local_machine: str
     home: Path
 
@@ -77,7 +77,7 @@ async def settle_handoff_before_invocation(
             settlement.relays,
             activate_accepted=False,
             incarnation=ctx.original_incarnation,
-            notes=settlement.notes,
+            timestamps=settlement.timestamps,
             host=process_host(settlement.local_machine),
         )
         if not fresh_input or ctx.original_incarnation is None:
@@ -167,7 +167,7 @@ async def finish_completed_invocation(
                 agent_id,
                 hooks.settlement.relays,
                 incarnation=ctx.original_incarnation,
-                notes=hooks.settlement.notes,
+                timestamps=hooks.settlement.timestamps,
                 host=process_host(hooks.settlement.local_machine),
             )
         return TurnOutcome(exited=False, crashed=False)

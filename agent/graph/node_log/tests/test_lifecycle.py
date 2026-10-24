@@ -15,7 +15,7 @@ from base.clock.tests.fakes import clock_with_unknown_timezone
 from base.events.live.tests.live_capture import LiveEvents
 from base.log.tests.log_records import LogRecords
 
-_TIMELINE_INPUTS = TimestampPolicy(clock=Clock.from_settings(), timestamps_enabled=False)
+_TIMELINE_INPUTS = TimestampPolicy.from_clock(Clock.from_settings(), timestamps_enabled=False)
 _TIMELINE_LIMIT = 100
 
 
@@ -243,8 +243,8 @@ async def test_a_render_failure_leaves_the_cursor_so_the_next_enter_renders_the_
         async with _enter(
             live_events,
             messages,
-            timeline_inputs=TimestampPolicy(
-                clock=clock_with_unknown_timezone(), timestamps_enabled=True
+            timeline_inputs=TimestampPolicy.from_clock(
+                clock_with_unknown_timezone(), timestamps_enabled=True
             ),
         ):
             pass

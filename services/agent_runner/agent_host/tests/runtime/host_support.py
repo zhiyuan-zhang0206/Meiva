@@ -34,7 +34,7 @@ from base.packages.composer_commands import CommandCatalog
 from base.paths import meiva_home
 from services.agent_runner.agent_host.host import AgentHost
 from services.agent_runner.agent_host.runtime import HostPolicy
-from services.agent_runner.agent_host.tests.host_policy import configured_policy
+from services.agent_runner.agent_host.tests.host_policy import configured_policy, handoff_timestamps
 from services.agent_runner.agent_host.tests.runtime.observation import (
     HostTurnObservation,
     served_model,
@@ -46,6 +46,7 @@ def build_agent_host(
 ) -> AgentHost:
     """An `AgentHost` on this box with the handles the tests share."""
     return AgentHost(
+        handoff_stamping=handoff_timestamps(),
         home=meiva_home(),
         policy=kwargs.pop("policy", configured_policy()),
         machine=machine,

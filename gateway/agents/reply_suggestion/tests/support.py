@@ -14,7 +14,7 @@ from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, System
 from langgraph.checkpoint.base import CheckpointMetadata, empty_checkpoint
 from langgraph.checkpoint.postgres import PostgresSaver
 
-from base.agents.messages.timestamp_policy import TimestampPolicy
+from base.agents.messages.timestamp_policy import TimestampSource
 from base.api_contracts.agent_contract import AgentStatus
 from base.clock import Clock
 from base.config import settings
@@ -144,7 +144,7 @@ class Harness:
         self.policy = default_policy()
         self.wire = wire
         self.service = ReplySuggestionService(llm_override="", transport=None)
-        self.rendering = TimestampPolicy(clock=Clock.from_settings(), timestamps_enabled=False)
+        self.timestamps = TimestampSource(clock=Clock.from_settings(), timestamps_enabled=False)
         self.agent_id = self._create_idle_agent()
         self._versions = 0
         self.store(conversation())
@@ -183,7 +183,7 @@ class Harness:
             self.agent_id if agent_id is None else agent_id,
             db=self.database,
             policy=self.policy,
-            rendering=self.rendering,
+            rendering=self.timestamps.policy(),
             catalog=self.catalog,
             keys=None if isinstance(self.catalog, CatalogLoadFailure) else self.keys,
         )

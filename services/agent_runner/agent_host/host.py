@@ -47,6 +47,7 @@ from base.agents.context import MeivaContext
 from base.agents.context.clients import ClientSet
 from base.agents.context.identity import AgentIdentity
 from base.agents.history.delta_read_compat import recovery_reconstruction_scope
+from base.agents.messages.timestamp_policy import TimestampSource
 from base.agents.observation.relay_supervision import RelaySupervision
 from base.agents.observation.turn_progress import TurnProgress
 from base.api_contracts.agent_contract import Harness
@@ -133,6 +134,7 @@ class AgentHost:
         db: Database,
         catalog: ModelCatalog,
         policy: HostPolicy,
+        handoff_stamping: TimestampSource,
         clients: ClientSet | None = None,
         extensions: ExtensionRegistry = EMPTY,
         commands: CommandCatalog | None = None,
@@ -144,6 +146,7 @@ class AgentHost:
         self._db = db
         self._catalog = catalog
         self._policy = policy
+        self._handoff_stamping = handoff_stamping
         # Shared clients are passed through each turn's explicit `MeivaContext`.
         self._clients = clients if clients is not None else ClientSet(database=lambda: db)
         self._extensions = extensions
@@ -395,7 +398,7 @@ class AgentHost:
                 self.relays,
                 activate_accepted=False,
                 incarnation=incarnation,
-                notes=self._policy.handoff_notes,
+                timestamps=self._handoff_stamping,
                 host=process_host(self._machine),
             )
         batch = await claim_inbound_batch(
@@ -647,7 +650,7 @@ class AgentHost:
                                 self._db,
                                 self._bus,
                                 self.relays,
-                                self._policy.handoff_notes,
+                                self._handoff_stamping,
                                 self._machine,
                                 self._home,
                             ),
@@ -692,7 +695,7 @@ class AgentHost:
                 self._db,
                 self._bus,
                 self.relays,
-                self._policy.handoff_notes,
+                self._handoff_stamping,
                 self._machine,
                 self._home,
             ),

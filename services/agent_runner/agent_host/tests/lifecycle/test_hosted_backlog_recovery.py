@@ -22,7 +22,11 @@ from base.paths import meiva_home
 from base.sessions.tests.poll_until import poll_until_async
 from services.agent_runner.agent_host.dispatcher import InboundWakeDispatcher, TurnScheduler
 from services.agent_runner.agent_host.host import AgentHost
-from services.agent_runner.agent_host.tests.host_policy import configured_machine, configured_policy
+from services.agent_runner.agent_host.tests.host_policy import (
+    configured_machine,
+    configured_policy,
+    handoff_timestamps,
+)
 from services.agent_runner.agent_host.tests.lifecycle.recovery_admission import admit as _admit
 from services.agent_runner.agent_host.tests.lifecycle.recovery_admission import (
     checkpoint_graph as _graph,
@@ -51,6 +55,7 @@ async def test_pending_scan_classifies_lifecycle_work_and_impersonation(
     lifecycle = insert_inbound(db_conn, agent, "", "system:test", kind="restart")
     db_conn.commit()
     host = AgentHost(
+        handoff_stamping=handoff_timestamps(),
         home=meiva_home(),
         policy=configured_policy(),
         pool=aops_pool,
@@ -122,6 +127,7 @@ async def test_old_pending_scan_never_cancels_a_running_turn(
 
     graph, saver = await _graph(aops_pool, agent, work)
     host = AgentHost(
+        handoff_stamping=handoff_timestamps(),
         home=meiva_home(),
         policy=configured_policy(),
         pool=aops_pool,
@@ -182,6 +188,7 @@ async def test_owner_recovery_scan_excludes_unrelated_rows(
     )
     agent = incarnation.agent_id
     host = AgentHost(
+        handoff_stamping=handoff_timestamps(),
         home=meiva_home(),
         policy=configured_policy(),
         pool=aops_pool,

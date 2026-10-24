@@ -28,8 +28,8 @@ Message formats exchanged between agent, LLM, users, and other agents. `agent/me
 
 ### Inbound timestamp ownership
 
-`base.agents.messages.timestamp_policy.TimestampPolicy` carries the producer's clock
-and timestamp switch as values. `inbound_head` and `wrap_inbound` require it. User
+`base.agents.messages.timestamp_policy.TimestampPolicy` carries the producer's timestamp
+switch, timezone, weekday flag and the instant of the unit of work as one frozen value. `inbound_head` and `wrap_inbound` require it. User
 and agent headers follow the switch; system and asserted-caller headers carry no
 stamp. Arrival-time formatting and source validation keep their existing order.
 

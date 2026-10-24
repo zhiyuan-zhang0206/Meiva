@@ -16,7 +16,7 @@ from pathlib import Path
 
 import uvicorn
 
-from base.agents.messages.timestamp_policy import TimestampPolicy
+from base.agents.messages.timestamp_policy import TimestampSource
 from base.clock import SYSTEM_TIMERS, Clock
 from base.clock.configuration import clock_config_from_boot
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
@@ -47,16 +47,12 @@ _POOL_MAX_SIZE = 4
 
 
 # meiva:note
-# The one place the insights service reads the process configuration: the clock and the timestamp
-# switch become one `TimestampPolicy`, the rest are plain values.
+# The process root reads these scalar service settings once. It constructs the timestamp
+# source separately, alongside the database and catalog resources.
 def config_from_boot(config: ConfigBoot) -> InsightsConfig:
     return InsightsConfig(
         run_timeline_message_text_max=config.view.display.run_timeline_message_text_max,
         default_model=config.view.lm.llm_model,
-        timeline_inputs=TimestampPolicy(
-            clock=Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS),
-            timestamps_enabled=config.view.general.message_timestamps,
-        ),
     )
 
 
@@ -81,6 +77,7 @@ async def run(
     config: InsightsConfig,
     catalog: ModelCatalog,
     database: Callable[[], Database],
+    timestamps: TimestampSource,
 ) -> None:
     pidfile = insights_pidfile(home)
     if pidfile_holds_daemon(pidfile, _MODULE) or not acquire_pidfile(pidfile, _MODULE):
@@ -92,7 +89,7 @@ async def run(
     try:
         server = uvicorn.Server(
             uvicorn.Config(
-                build_app(db, pool, config, home=home, catalog=catalog),
+                build_app(db, pool, config, home=home, catalog=catalog, timestamps=timestamps),
                 log_level="warning",
                 access_log=False,
                 log_config=None,
@@ -146,6 +143,10 @@ def main() -> None:
                 config=config_from_boot(config),
                 catalog=build_model_catalog(),
                 database=database,
+                timestamps=TimestampSource(
+                    clock=Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS),
+                    timestamps_enabled=config.view.general.message_timestamps,
+                ),
             )
         )
     except KeyboardInterrupt:
