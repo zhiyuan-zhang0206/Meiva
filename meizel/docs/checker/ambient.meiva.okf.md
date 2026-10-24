@@ -23,7 +23,8 @@ file is allowed to.
 ## Kinds
 
 A closed vocabulary (`AmbientKind` in `meizel/graph/model.py`); an unknown kind in a manifest is
-`manifest-syntax`.
+`manifest-syntax`. The graph model also owns the standard-library spellings shared by the
+scanner and diff hints, so root exemptions use the same kind classification.
 
 | kind | acquired by |
 |---|---|

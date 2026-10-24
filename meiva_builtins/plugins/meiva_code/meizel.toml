@@ -9,6 +9,3 @@ exports = ["agent_runtime.py", "plugin.py"]
 
 [purity]
 "__init__.py" = "strict"
-
-[debt.ambient-read]
-"plugin.py#settings base.config.settings" = 1

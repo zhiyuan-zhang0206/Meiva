@@ -11,5 +11,5 @@ exports = ["boot.py", "daemon.py", "dispatch_sync.py", "in_flight.py", "tests"]
 "idempotency_plan.py" = "strict"
 "ops_plan.py" = "strict"
 
-[debt.ambient-read]
-"daemon.py#settings base.config.ConfigBoot" = 1
+[roots]
+"daemon.py" = { kinds = ["settings"], why = "Service or operator process entry boots configuration before composing its resources" }

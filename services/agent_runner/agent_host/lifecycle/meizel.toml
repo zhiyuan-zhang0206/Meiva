@@ -8,5 +8,5 @@ exports = ["cleanup_failures.py", "configuration.py", "graceful_exit.py", "insta
 "cleanup_failures.py" = "strict"
 "lease_controls.py" = "strict"
 
-[debt.ambient-read]
-"configuration.py#settings base.config.ConfigBoot" = 1
+[roots]
+"configuration.py" = { kinds = ["settings"], why = "Agent host process bootstrap constructs configuration and process home" }

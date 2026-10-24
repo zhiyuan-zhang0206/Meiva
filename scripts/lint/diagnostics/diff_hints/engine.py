@@ -6,6 +6,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 
+from meizel.graph.model import AmbientKind
 from scripts.lint.diagnostics.diff_hints.ambient import ambient_read, service_locator
 from scripts.lint.diagnostics.diff_hints.branches import wildcard_case
 from scripts.lint.diagnostics.diff_hints.model import FileChange, Roles, Site, Unit
@@ -47,11 +48,16 @@ def analyze(
     changes: tuple[FileChange, ...],
     texts: Mapping[str, str],
     roles: Roles,
+    roots: Mapping[str, frozenset[AmbientKind]],
 ) -> list[Site]:
     sites: list[Site] = []
     for change in changes:
         text = texts.get(change.path)
-        unit = parse_unit(change.path, text, change.added, roles) if text is not None else None
+        unit = (
+            parse_unit(change.path, text, change.added, roles, roots.get(change.path, frozenset()))
+            if text is not None
+            else None
+        )
         if unit is not None:
             for detector in _DETECTORS:
                 sites.extend(detector(unit))

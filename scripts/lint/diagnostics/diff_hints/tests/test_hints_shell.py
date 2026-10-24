@@ -214,3 +214,51 @@ def test_a_narrative_line_that_starts_with_the_key_does_not_wedge_the_push(repo:
     done = run(repo, "branch")
     assert done.returncode == 0
     assert "outside the trailer block" in done.stderr
+
+
+@pytest.mark.parametrize(
+    "table",
+    [
+        '[roots]\n"x.py" = ["environ"]\n',
+        '[roots]\n"x.py" = { kinds = ["environ"], why = "process entry" }\n',
+    ],
+)
+def test_the_commit_hint_reads_roots_from_the_index(repo: Path, table: str) -> None:
+    (repo / "cli" / "x.py").write_text("import os\nx = os.environ['A']\n", encoding="utf-8")
+    manifest = repo / "cli" / "meizel.toml"
+    manifest.write_text(table, encoding="utf-8")
+    git(repo, "add", "cli/x.py", "cli/meizel.toml")
+    manifest.write_text("", encoding="utf-8")
+    done = run(repo, "commit-msg", message_file(repo, "Declare the process entry\n"))
+    assert done.returncode == 0, done.stderr
+
+
+def test_an_unstaged_root_does_not_answer_a_staged_read(repo: Path) -> None:
+    (repo / "cli" / "x.py").write_text("import os\nx = os.environ['A']\n", encoding="utf-8")
+    manifest = repo / "cli" / "meizel.toml"
+    manifest.write_text("", encoding="utf-8")
+    git(repo, "add", "cli/x.py", "cli/meizel.toml")
+    manifest.write_text('[roots]\n"x.py" = ["environ"]\n', encoding="utf-8")
+    done = run(repo, "commit-msg", message_file(repo, "Read the environment\n"))
+    assert done.returncode == 1
+    assert "hint ambient-read" in done.stderr
+
+
+def test_the_branch_hint_uses_roots_at_the_head_revision(repo: Path) -> None:
+    (repo / "cli" / "x.py").write_text("import os\nx = os.environ['A']\n", encoding="utf-8")
+    manifest = repo / "cli" / "meizel.toml"
+    manifest.write_text('[roots]\n"x.py" = ["environ"]\n', encoding="utf-8")
+    commit(repo, "Declare the process entry")
+    manifest.write_text("", encoding="utf-8")
+    done = run(repo, "branch")
+    assert done.returncode == 0, done.stderr
+
+
+def test_an_unknown_root_kind_fails_the_hint_explicitly(repo: Path) -> None:
+    stage_clock_read(repo)
+    manifest = repo / "cli" / "meizel.toml"
+    manifest.write_text('[roots]\n"x.py" = ["typo"]\n', encoding="utf-8")
+    git(repo, "add", "cli/meizel.toml")
+    done = run(repo, "commit-msg", message_file(repo, "Invalid root\n"))
+    assert done.returncode == 2
+    assert "typo" in done.stderr

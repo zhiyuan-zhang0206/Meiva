@@ -23,9 +23,9 @@ exports = ["blocked_streak.py", "daemon.py", "engine.py", "host_restart.py", "la
 "script_outcome.py" = "strict"
 "stall_policy.py" = "strict"
 
-[debt.ambient-read]
-"daemon.py#settings base.config.ConfigBoot" = 1
-"runner.py#settings base.config.ConfigBoot" = 1
+[roots]
+"daemon.py" = { kinds = ["settings"], why = "Service or operator process entry boots configuration before composing its resources" }
+"runner.py" = { kinds = ["settings"], why = "Service or operator process entry boots configuration before composing its resources" }
 
 [debt.stdlib-patch]
 "engine.py#assignment sys.argv" = 2

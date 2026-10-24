@@ -8,6 +8,8 @@ exports = ["scripted_reply.py", "understanding_replay.py"]
 "tart_vm.py" = ["boundary.py"]
 "tests" = ["boundary.py", "container.py", "observe.py", "tart_golden.py", "tart_run.py", "tart_vm.py"]
 
+[roots]
+"understanding_replay.py" = { kinds = ["settings"], why = "Tool entry composes its process resources from the launch configuration" }
+
 [debt.ambient-read]
 "understanding_replay.py#db base.db.Database.from_settings" = 1
-"understanding_replay.py#settings base.config.ConfigBoot" = 1

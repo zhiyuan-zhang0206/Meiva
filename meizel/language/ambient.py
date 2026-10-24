@@ -9,8 +9,8 @@
 # analysis has no types, so `settings.x.y` after a `from ... import settings` is a plain attribute
 # read of a name that was already acquired.
 #
-# The standard-library names are fixed here. The names of the state a repository keeps are the
-# repository's own: a file declares under `[state]` in its `meizel.toml` that it holds state of a
+# The standard-library names come from the shared graph model. The names of the state a repository keeps
+# are the repository's own: a file declares under `[state]` in its `meizel.toml` that it holds state of a
 # kind, and the policy lists, per kind, the names through which that state is reached.
 
 from __future__ import annotations
@@ -18,74 +18,12 @@ from __future__ import annotations
 import ast
 from collections.abc import Iterator
 
-from meizel.graph.model import Acquisition, AmbientKind, Sources
+from meizel.graph.model import INTERVAL_CLOCKS, Acquisition, AmbientKind, Sources, stdlib_kind
 from meizel.graph.universe import Universe
 from meizel.language.patching import PatchForms
 from meizel.lint_common import is_test_path
 
-__all__ = ["AmbientAccess", "AmbientRecorder", "stdlib_kind"]
-
-# meiva:note
-# The interval clocks. Reading one for a deadline, a duration or a TTL is the plain use of `time`
-# that the conventions allow in code no test needs to steer; the read is a decision worth a root
-# only where the same function also sleeps, because then how long to wait next is decided in
-# a loop. The wall clock is always a window onto the world.
-_INTERVAL_CLOCKS = frozenset(
-    {"time.monotonic", "time.monotonic_ns", "time.perf_counter", "time.perf_counter_ns"}
-)
-
-_STDLIB: dict[str, AmbientKind] = {
-    **dict.fromkeys(_INTERVAL_CLOCKS, AmbientKind.CLOCK),
-    **dict.fromkeys(
-        (f"os.{name}" for name in ("environ", "getenv", "putenv")), AmbientKind.ENVIRON
-    ),
-    **dict.fromkeys(
-        (
-            "time.time",
-            "time.time_ns",
-            "datetime.datetime.now",
-            "datetime.datetime.utcnow",
-            "datetime.datetime.today",
-            "datetime.date.today",
-        ),
-        AmbientKind.CLOCK,
-    ),
-    **dict.fromkeys(("pathlib.Path.home", "os.path.expanduser"), AmbientKind.HOME),
-    **dict.fromkeys(("os.getcwd", "os.getcwdb", "pathlib.Path.cwd"), AmbientKind.CWD),
-    **dict.fromkeys(
-        ("sys.platform", "os.name", "os.uname", "socket.gethostname", "socket.getfqdn"),
-        AmbientKind.PLATFORM,
-    ),
-    **dict.fromkeys(
-        ("os.getpid", "os.getppid", "os.getuid", "os.geteuid", "os.getgid", "os.getegid"),
-        AmbientKind.PID,
-    ),
-    **dict.fromkeys(("uuid.uuid1", "uuid.uuid4"), AmbientKind.RANDOM),
-}
-# meiva:note
-# Modules every public name of which reaches the machine or draws randomness.
-_WHOLE_MODULES = {
-    "platform": AmbientKind.PLATFORM,
-    "random": AmbientKind.RANDOM,
-    "secrets": AmbientKind.RANDOM,
-}
-# meiva:note
-# A generator built from an explicit seed is a value, not a window onto the process.
-_SEEDED = frozenset({"random.Random"})
-
-
-# meiva:note
-# The kind and the acquired name of a dotted standard-library name, or None.
-def stdlib_kind(dotted: str) -> tuple[AmbientKind, str] | None:
-    parts = dotted.split(".")
-    for end in range(1, len(parts) + 1):
-        prefix = ".".join(parts[:end])
-        if prefix in _STDLIB:
-            return _STDLIB[prefix], prefix
-    whole = _WHOLE_MODULES.get(parts[0])
-    if whole is not None and len(parts) > 1 and ".".join(parts[:2]) not in _SEEDED:
-        return whole, ".".join(parts[:2])
-    return None
+__all__ = ["AmbientAccess", "AmbientRecorder"]
 
 
 def _own_nodes(function: ast.FunctionDef | ast.AsyncFunctionDef) -> Iterator[ast.AST]:
@@ -138,7 +76,7 @@ class AmbientRecorder:
         found = stdlib_kind(dotted)
         if found is not None:
             kind, target = found
-            if target not in _INTERVAL_CLOCKS or (self._waiting and self._waiting[-1]):
+            if target not in INTERVAL_CLOCKS or (self._waiting and self._waiting[-1]):
                 self._add(line, kind, target)
             return
         parts = dotted.split(".")
