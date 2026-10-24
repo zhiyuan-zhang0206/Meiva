@@ -252,6 +252,13 @@ reaper would terminate a healthy agent once the grace passed. A failure that lan
 receipt is written is treated as the success it is: the wake logs
 `hosted_handoff_settle_raced`, clears the marker and does not mark the row.
 
+After a clear, the row's recovery depends on the ordinary heartbeat. A row with
+`permanent_reject_streak > 0` or a heartbeat paused past now takes no heartbeat,
+so it has no recovery path here — unlike before the clear condition changed, when
+the leftover marker still let the reaper take it. The clear logs that combination
+(`hosted_handoff_marker_cleared_while_ineligible`) instead of leaving it to the
+reader.
+
 Operator check — leases that ended and still owe their receipt:
 
 ```sql

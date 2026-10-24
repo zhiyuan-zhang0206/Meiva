@@ -59,7 +59,10 @@ class HeldSettle:
     # meiva:note
     # Whether the receipt this wake owed has landed; the failure path asks it, and the host
     # hands over the database read (`agent.impersonation.handoff_landed`) rather than this
-    # module reaching for one.
+    # module reaching for one. It is the only injected collaborator here: `settle_checkpoint`,
+    # `clear_turn_fatal` and `process_host` stay direct imports, because only this one has to
+    # answer differently in a test of the window that lands after the write — the test supplies
+    # the answer the committed thread would have given, and nothing else is replaced.
     receipt_landed: Callable[[AsyncConnectionPool, int], Awaitable[bool]]
     budget_s: float = HANDOFF_SETTLE_RETRY_BUDGET_S
 
