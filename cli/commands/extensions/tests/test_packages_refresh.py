@@ -12,8 +12,10 @@ import json
 import os
 import shutil
 import subprocess
+from collections.abc import MutableMapping
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import cast
 
 import pytest
 from loguru import logger
@@ -753,6 +755,13 @@ def test_network_command_plans_hold_the_supplied_timeout(tmp_path: Path, timeout
         ("git", "ls-remote", "https://example.invalid/skill", "HEAD"),
     ]
     assert all(command.env == env for command in commands)
+    env["GIT_TERMINAL_PROMPT"] = "changed after planning"
+    for command in commands:
+        assert command.env == {"GIT_TERMINAL_PROMPT": "0"}
+        # meiva:note
+        # Even a caller that bypasses Mapping's static door cannot mutate the planned value.
+        with pytest.raises(TypeError):
+            cast("MutableMapping[str, str]", command.env)["GIT_TERMINAL_PROMPT"] = "changed"
     assert package_listing("remote", "branch", env=env, timeout=timeout).argv[-1] == "branch"
 
 
