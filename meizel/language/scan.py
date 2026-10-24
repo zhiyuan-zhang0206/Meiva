@@ -43,6 +43,7 @@ from meizel.language.restricted import EXTERNAL_FORMS, const_str
 __all__ = [
     "EXTERNAL_FORMS",
     "FileScan",
+    "invalidate_policy_caches",
     "is_imported_binding",
     "module_bindings",
     "mount_facts",
@@ -441,3 +442,12 @@ def scan_file(universe: Universe, path: str, sources: Sources) -> FileScan:
     except (OSError, ValueError) as error:
         raise MeizelError(f"{path}: cannot read: {error}") from error
     return scan_source(universe, path, source, sources)
+
+
+# meiva:note
+# This is the scanner boundary for a disposable snapshot whose policy has changed. Each cache
+# owner invalidates its own entries; callers neither reach into private caches nor skip the
+# original snapshot validation to avoid them.
+def invalidate_policy_caches() -> None:
+    allowances.invalidate_cache()
+    purity.invalidate_policy_cache()

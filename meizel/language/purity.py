@@ -21,6 +21,7 @@ __all__ = [
     "DEFAULT_IMPURE_CALLS",
     "DEFAULT_IMPURE_IMPORTS",
     "PurityState",
+    "invalidate_policy_cache",
     "make_state",
     "record_assign",
     "record_attr_write",
@@ -206,6 +207,13 @@ def _rules_for_root(root: Path) -> tuple[frozenset[str], frozenset[str], int, in
         _policy_int(policy, "max-params", 6),
         _policy_int(policy, "max-attr-hops", 3),
     )
+
+
+# meiva:note
+# A comparison validates the old snapshot before installing the current rule policy. Discard
+# root-keyed settings after that mutation so the second scan sees the replacement policy.
+def invalidate_policy_cache() -> None:
+    _rules_for_root.cache_clear()
 
 
 def make_state(root: Path) -> PurityState:

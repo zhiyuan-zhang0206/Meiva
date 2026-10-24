@@ -13,12 +13,20 @@ import subprocess
 from pathlib import Path
 from typing import cast
 
-from meizel.allowances import POLICY, Policy, parse
+from meizel.allowances import POLICY, Policy, parse, parse_snapshot
 from meizel.contracts.manifest import Manifest
 from meizel.graph.model import Code, Diagnostic, MeizelError
 from meizel.graph.universe import Universe
 
-__all__ = ["POLICY", "Policy", "changes", "check", "load_policy", "policy_at", "render_policy"]
+__all__ = [
+    "POLICY",
+    "Policy",
+    "changes",
+    "check",
+    "load_policy",
+    "policy_at",
+    "render_policy",
+]
 
 
 def parse_policy(text: str) -> tuple[Policy, list[Diagnostic]]:
@@ -97,9 +105,9 @@ def policy_at(root: Path, ref: str) -> Policy:
     )
     if result.returncode != 0:
         return Policy()
-    policy, problems = parse_policy(result.stdout)
+    policy, problems = parse_snapshot(result.stdout)
     if problems:
-        raise MeizelError(f"{ref}:{POLICY}: {problems[0].message}")
+        raise MeizelError(f"{ref}:{POLICY}: {problems[0]}")
     return policy
 
 

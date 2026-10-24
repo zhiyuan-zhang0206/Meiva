@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+from meizel.allowances import POLICY, RETIRED_AMBIENT_SECTIONS, Policy, load_snapshot, parse
 from meizel.contracts.analysis import Analysis, analyze
 from meizel.contracts.debt_edit import prune as prune_debt
 from meizel.contracts.declare import declare
@@ -12,7 +13,7 @@ from meizel.contracts.manifest import manifest_path
 from meizel.contracts.manifest_text import ENTRY, HEADER, entry_end, items, unquote
 from meizel.graph.model import MeizelError
 
-__all__ = ["prune", "remove_entries", "sync_manifests"]
+__all__ = ["prepare_policy_snapshot", "prune", "remove_entries", "sync_manifests"]
 
 
 def _rewrite_entry(lines: list[str], start: int, end: int, drop: set[str]) -> list[str]:
@@ -116,8 +117,8 @@ def _collect(analysis: Analysis) -> tuple[Removals, list[str]]:
 
 
 def _apply(root: Path, removals: Removals) -> None:
-    for directory, sections in removals.items():
-        path = root / manifest_path(directory)
+    for relative, sections in removals.items():
+        path = root / relative
         before = path.read_text(encoding="utf-8")
         updated = remove_entries(before, sections)
         if updated == before:
@@ -138,7 +139,7 @@ def prune(root: Path, jobs: int | None = None) -> list[str]:
         if not removals:
             return changes
         changes.extend(found)
-        _apply(root, removals)
+        _apply(root, {manifest_path(d): sections for d, sections in removals.items()})
 
 
 def sync_manifests(
@@ -151,3 +152,23 @@ def sync_manifests(
     declared, left = declare(root, targets, jobs)
     lines.extend(declared)
     return lines, left
+
+
+# meiva:note
+# Normalize only a disposable historical checkout. Decode first, so malformed or unknown input
+# fails before any write. Retired metadata remains in the returned Policy for migration and diff;
+# every surviving policy entry and its reason keeps its original text for the current scanner.
+def prepare_policy_snapshot(root: Path) -> Policy:
+    try:
+        policy = load_snapshot(root)
+    except ValueError as error:
+        raise MeizelError(f"cannot read the manifests of snapshot: {error}") from error
+    text = "\n".join(policy.lines) + ("\n" if policy.lines else "")
+    removals = {"ambient-state": {key: {"*"} for key in RETIRED_AMBIENT_SECTIONS}}
+    current = remove_entries(text, removals)
+    _, remaining = parse(current)
+    if remaining:
+        raise MeizelError(f"cannot normalize {POLICY} snapshot: {remaining[0]}")
+    if current != text:
+        _apply(root, {POLICY: removals})
+    return policy
