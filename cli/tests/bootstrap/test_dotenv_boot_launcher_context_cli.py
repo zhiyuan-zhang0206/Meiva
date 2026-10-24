@@ -76,6 +76,7 @@ def test_cli_entry_records_launcher_profile_and_keeps_undeclared_projections(
     assert json.loads(lines[0]) == {
         "profile": None,
         "recorded": expected_record,
+        "nested_profile": None,
         "nested_recorded": expected_record,
     }
     if refused:

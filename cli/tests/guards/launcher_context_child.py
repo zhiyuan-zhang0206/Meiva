@@ -13,13 +13,15 @@ def main() -> None:
     db_url = os.environ["MEIVA_DB_URL"]
     redis_url = os.environ["MEIVA_REDIS_URL"]
     normalize_process_profile()
+    profile = os.environ.get("MEIVA_PROCESS_PROFILE")
     recorded = os.environ.get(dotenv_boot.LAUNCHER_PROFILE_ENV_KEY)
     normalize_process_profile()
     print(
         json.dumps(
             {
-                "profile": os.environ.get("MEIVA_PROCESS_PROFILE"),
+                "profile": profile,
                 "recorded": recorded,
+                "nested_profile": os.environ.get("MEIVA_PROCESS_PROFILE"),
                 "nested_recorded": os.environ.get(dotenv_boot.LAUNCHER_PROFILE_ENV_KEY),
             }
         ),
