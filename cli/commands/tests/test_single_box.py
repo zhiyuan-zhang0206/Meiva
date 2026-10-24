@@ -34,6 +34,7 @@ from base.cluster.dataplane import pooler as base_pooler
 from base.config import settings
 from base.host.db_authority import delivery, ledger, model
 from base.host.db_authority.api import API_TOKEN_ENV
+from base.host.env.registry import process_environment
 from base.host.net.url_secret import url_with_userinfo
 from cli.commands.data_plane import bringup
 from cli.commands.data_plane import cluster_instance as ci
@@ -546,7 +547,7 @@ def test_launched_services_receive_their_class_login_only(
     assert service_extra_env(gateway, remote_data_plane=False)[API_TOKEN_ENV] == tokens.gateway
     assert service_extra_env(runner, remote_data_plane=False)[API_TOKEN_ENV] == tokens.runner
     assert service_extra_env(frontend, remote_data_plane=False)[API_TOKEN_ENV] == tokens.gateway
-    root = managed_service_env(settings.general.service_path)
+    root = managed_service_env(settings.general.service_path, environ=process_environment())
     assert "MEIVA_DB_URL" not in root and delivery.GENERATION_ENV not in root
     assert API_TOKEN_ENV not in root
 

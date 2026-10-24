@@ -15,6 +15,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 
@@ -23,12 +24,14 @@ import httpx
 from base.agents.context.clients import DatabaseFactory
 from base.cluster import session_name
 from base.cluster.machine import (
+    GatewayAccess,
     GatewayApiBaseMissing,
     MachineRoleInvalid,
     MachineRoleMissing,
     MachineRoles,
     format_capabilities,
 )
+from base.cluster.machine.boot import gateway_access_from_boot
 from base.deploy.git import cluster_drift
 from base.host.resource_sample import resource_sample
 from base.paths import root_manifests_path
@@ -141,7 +144,9 @@ def _execute(
         case ReadRelease(repo):
             _emit((release_line(repo, cluster_drift.checkout_head_sha(Path(repo))),))
         case ReadGateway():
-            _emit(gateway_status_lines(read_gateway_outcome()))
+            _emit(
+                gateway_status_lines(read_gateway_outcome(gateway_access_from_boot(command.config)))
+            )
 
 
 def _emit(lines: tuple[str, ...]) -> None:
@@ -203,11 +208,16 @@ def _read_host_resources() -> HostReading | HostReadingFailed:
 # A gateway that is down or unreachable is itself a status signal here, so the failure
 # is a value that prints inline instead of aborting `meiva status` — the local probes
 # above already ran and are the bootstrap-exemption supplement.
-def read_gateway_outcome() -> GatewayOutcome:
+def read_gateway_outcome(access: GatewayAccess) -> GatewayOutcome:
     try:
-        body = fetch_gateway_cluster_status()
+        body = fetch_gateway_cluster_status(access)
     except httpx.HTTPError as exc:
         return GatewayUnreachable(str(exc))
+    except json.JSONDecodeError as exc:
+        # meiva:note
+        # Something answered the status request with a body that is not JSON (a proxy's page, a
+        # gateway of another version): the gateway did not answer with a status body.
+        return GatewayUnreachable(f"the answer is not JSON ({exc})")
     except (GatewayApiBaseMissing, MachineRoleMissing, MachineRoleInvalid) as exc:
         # meiva:note
         # Can't even form the gateway URL (unset gateway URL / role): status is a diagnostic

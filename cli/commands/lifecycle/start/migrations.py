@@ -45,7 +45,9 @@ def cmd_migrations_apply(
     home: Path,
 ) -> list[str]:
     from base import cluster
+    from base.cluster.checkpoint_schema import PostgresCheckpointSchema
     from base.cluster.dataplane import pg_admin
+    from base.cluster.provision import CHECKPOINT_SCHEMA_MEIVA_MIGRATIONS
     from base.deploy.schema.migration_layout import required_migration_set
 
     # meiva:note
@@ -53,7 +55,9 @@ def cmd_migrations_apply(
     # must first be mirrored in an Meiva migration. Failing before
     # Meiva SQL runs keeps update recovery on the old code + old schema.
     cluster.assert_checkpoint_dependency_pinned(
-        required_migration_set(migrations_dir=MIGRATIONS_DIR)
+        required_migration_set(migrations_dir=MIGRATIONS_DIR),
+        manifest=CHECKPOINT_SCHEMA_MEIVA_MIGRATIONS,
+        upstream_migrations=PostgresCheckpointSchema().migrations,
     )
 
     if migration_authority(remote_plane=config.is_remote) is MigrationAuthority.ACCESS_URL:

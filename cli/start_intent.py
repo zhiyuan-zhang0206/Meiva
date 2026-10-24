@@ -21,6 +21,7 @@ from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
 
+import psutil
 from pydantic import ValidationError
 
 from base import telemetry
@@ -30,7 +31,7 @@ from base.host.env.registry import derived_env_keys, env_identity_keys
 from base.host.permissions_helper.client import HelperFactory
 from base.host.system import boot_policy
 from base.host.system.hostport import Host
-from base.native_process.os_platform import file_lock
+from base.native_process.os_platform import file_lock, is_macos
 from base.paths.private_dir import ensure_private_dir
 from cli.database import OperatorDatabaseFactory, OperatorEventPipeline
 from cli.start_identity import require_initialized
@@ -142,7 +143,7 @@ def start_once(
 #
 # The count never refuses a start (see `base.host.system.boot_policy`); it only decides
 # what a *failed* attempt tells its scheduler. Returns the job's exit code.
-def settle_boot_attempt(home: Path, attempt: int, code: int) -> int:
+def settle_boot_attempt(home: Path, attempt: int, code: int, *, macos: bool) -> int:
     plan = plan_boot_settlement(
         code,
         attempt=attempt,
@@ -164,7 +165,7 @@ def settle_boot_attempt(home: Path, attempt: int, code: int) -> int:
                 source="start",
                 attributes={"attempts": attempts, "exit_code": failed},
             )
-            return boot_policy.exit_code_after_budget(failed)
+            return boot_policy.exit_code_after_budget(failed, macos=macos)
 
 
 # meiva:note
@@ -186,7 +187,7 @@ def run_start(
             producer=producer,
             boot=False,
         )
-    attempt = boot_policy.begin_attempt(site.home)
+    attempt = boot_policy.begin_attempt(site.home, boot_time=psutil.boot_time())
     code = start_once(
         args,
         site,
@@ -195,4 +196,4 @@ def run_start(
         producer=producer,
         boot=True,
     )
-    return settle_boot_attempt(site.home, attempt, code)
+    return settle_boot_attempt(site.home, attempt, code, macos=is_macos())

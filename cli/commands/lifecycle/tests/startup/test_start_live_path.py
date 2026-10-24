@@ -65,7 +65,9 @@ def test_an_identical_live_generation_is_reused_and_the_start_serves(
     assert "probe gateway" in out
 
 
-def test_a_gateway_host_does_not_probe_a_gateway_it_is(start_run: StartRun) -> None:
+def test_a_gateway_host_does_not_probe_a_gateway_it_is(
+    start_run: StartRun, capsys: pytest.CaptureFixture[str]
+) -> None:
     run = start_run
     with gateway_listener() as gateway:
         run.declare(gateway=True, agent_runner=False, gateway_url=gateway.url)
@@ -75,7 +77,11 @@ def test_a_gateway_host_does_not_probe_a_gateway_it_is(start_run: StartRun) -> N
         with scripted_root(run.home, [row], launch_digest=generation.launch_digest):
             assert run.start(only=("pty-sessions",)) == 0
 
-    assert gateway.requests == []
+    # meiva:note
+    # The only request is the status block's own view of the gateway; the runner's liveness probe
+    # (`probe gateway`) never ran.
+    assert gateway.requests == ["/api/cluster/status"]
+    assert "probe gateway" not in capsys.readouterr().out
     assert start_serving.is_serving()
 
 

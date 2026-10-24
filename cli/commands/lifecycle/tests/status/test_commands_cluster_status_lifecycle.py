@@ -50,7 +50,7 @@ def test_fetch_gateway_cluster_status_sends_bearer(monkeypatch: pytest.MonkeyPat
         return _Resp()
 
     monkeypatch.setattr(httpx, "get", _fake_get)
-    assert fetch_gateway_cluster_status() == {"ok": True}
+    assert fetch_gateway_cluster_status(gateway_access_from_settings()) == {"ok": True}
     assert captured["url"] == "http://gw:8000/api/cluster/status"
     assert captured["headers"] == gateway_auth_headers(gateway_access_from_settings())
 
@@ -65,6 +65,7 @@ def test_fetch_gateway_cluster_status_without_a_credential_raises_instead_of_dia
     import httpx
 
     from base.cluster.machine import GatewayApiTokenMissing
+    from base.cluster.machine.ambient import gateway_access_from_settings
     from cli.commands.cluster.control import fetch_gateway_cluster_status
 
     monkeypatch.delenv("MEIVA_API_TOKEN", raising=False)
@@ -75,4 +76,4 @@ def test_fetch_gateway_cluster_status_without_a_credential_raises_instead_of_dia
 
     monkeypatch.setattr(httpx, "get", _no_dial)
     with pytest.raises(GatewayApiTokenMissing):
-        fetch_gateway_cluster_status()
+        fetch_gateway_cluster_status(gateway_access_from_settings())

@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -23,7 +24,7 @@ _AMBIENT = HOST_PASSTHROUGH_KEYS | NETWORK_PROXY_KEYS | _TEMP_DIR_KEYS | {"PYTHO
 
 def main() -> int:
     mode, service_path = sys.argv[1], sys.argv[2]
-    env = managed_service_env(service_path)
+    env = managed_service_env(service_path, environ=dict(os.environ))
     if mode == "env":
         print(json.dumps(env, sort_keys=True))
     elif mode == "digest":

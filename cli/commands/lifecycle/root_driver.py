@@ -25,11 +25,17 @@ from base.cluster.machine import MachineIdentity, MachineRoles
 from base.deploy import start_trace
 from base.deploy.progress_timeout import CRITICAL_SERVICE_SESSIONS
 from base.host.atomic_io import write_text_atomic
+from base.host.env.registry import process_environment
 from base.host.permissions_helper.client import HelperFactory, PermissionsHelperError
 from base.host.system.hostport import Host
 from base.native_process.ownership import OwnedProcess
 from base.native_process.root_control import instance_lock
-from base.native_process.root_control.client import RootClient, RootClientError, native_identity
+from base.native_process.root_control.client import (
+    RootClient,
+    RootClientError,
+    caller_identity,
+    native_identity,
+)
 from base.native_process.root_control.ipc import ResponsePayload
 from base.paths import root_manifests_path, root_run_dir
 from base.sessions.env_forwarding import managed_service_env
@@ -139,8 +145,17 @@ def start_roster(
 
 # meiva:note
 # A blocking client bound to `home`'s root control socket.
+#
+# The client carries the caller block of this process, which the root records beside every
+# state verb it serves (`base/native_process/root_control/docs/lifecycle-caller.meiva.okf.md`):
+# pid, working directory and argv are facts of the process, so this door reads them once per
+# client from the process environment.
 def root_client(home: Path, *, timeout: float = 5.0) -> RootClient:
-    return RootClient(root_run_dir(home) / _ROOT_SOCKET_NAME, timeout=timeout)
+    return RootClient(
+        root_run_dir(home) / _ROOT_SOCKET_NAME,
+        caller=caller_identity(process_environment()),
+        timeout=timeout,
+    )
 
 
 # meiva:note
@@ -482,7 +497,7 @@ def admit_live_start(
         require_root_absent(inputs.home)
         return False
     require_root_owner(snapshot, helper=helper, home=inputs.home)
-    env = managed_service_env(inputs.service_path)
+    env = managed_service_env(inputs.service_path, environ=inputs.environment)
     manifest = launch_manifest(roster, repo, roles=roles, env=env, inputs=inputs)
     require_same_generation(manifest, snapshot, reconcile=reconcile)
     return True
@@ -530,7 +545,7 @@ def launch_service_tree(
 ) -> LaunchOutcome:
     home = inputs.home
     runtime.validate()
-    env = managed_service_env(inputs.service_path)
+    env = managed_service_env(inputs.service_path, environ=inputs.environment)
     with start_trace.phase("launch manifest"):
         manifest = launch_manifest(roster, repo, roles=roles, env=env, inputs=inputs)
     launch = plan_root_launch(
