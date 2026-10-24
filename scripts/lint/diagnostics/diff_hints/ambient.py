@@ -109,7 +109,11 @@ def ambient_read(unit: Unit) -> list[Site]:
     handed = _handed_over(unit)
     waiting = _in_waiting_function(unit)
     for node in unit.touched:
-        if id(node) in handed or (_is_interval_read(node, unit) and id(node) not in waiting):
+        if (
+            not isinstance(node, ast.Attribute | ast.Name)
+            or id(node) in handed
+            or (_is_interval_read(node, unit) and id(node) not in waiting)
+        ):
             continue
         read = _read_name(node, unit)
         target = dotted(node, unit.names)
