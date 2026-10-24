@@ -78,4 +78,11 @@ and CI prints that list in the log and in the check summary whenever the file
 changed. It informs; it does not block. When a rename or a move touches a listed
 path or name, the same PR updates the entry (a renamed file leaves a stale one).
 
+Historical Git comparisons use an explicit snapshot decoder for the five retired
+`ambient-state` lists: `db-modules`, `db-primitives`, `db-handles`, `bus-handles` and
+`endpoint-handles`. Each still requires a list of non-empty strings; every other unknown or
+malformed entry is rejected. `policy diff` retains those entries so their retirement is
+reported. Selector and debt comparison normalize only disposable base snapshots through this
+owner; the working-tree parser continues to reject the retired vocabulary.
+
 Parent: [[meizel/docs/checker/checker.meiva.okf.md|the checker]].

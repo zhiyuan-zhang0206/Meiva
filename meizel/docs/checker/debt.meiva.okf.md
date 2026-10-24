@@ -124,6 +124,9 @@ errors cannot be recorded.
   greater count, so a declaration cannot hide a new violation and a violation cannot ride along.
   A file moved in the same change fails; move files separately. A manifest the checker cannot
   read in the ref stops the comparison. Other changes are judged by totals, with no waiver.
+  Historical snapshots keep the unreadable gate and use only the ref's ambient facts. Head
+  permissions are never copied. Caches refresh after policy replacement. See
+  [[meizel/docs/checker/policy.meiva.okf.md|historical policy comparisons]].
 
 ## Depths of `check`
 

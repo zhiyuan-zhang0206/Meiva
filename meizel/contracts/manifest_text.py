@@ -4,6 +4,10 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Mapping
+from typing import Literal
+
+from meizel.graph.model import AmbientKind
 
 __all__ = [
     "ENTRY",
@@ -12,7 +16,7 @@ __all__ = [
     "add_uses",
     "entry_end",
     "items",
-    "set_purity",
+    "set_scope",
     "unquote",
 ]
 
@@ -29,7 +33,7 @@ def entry_end(lines: list[str], start: int) -> int:
     """Index of the line holding the `]` that closes the list opened on `start`."""
     depth = 0
     for index in range(start, len(lines)):
-        text = re.sub(r"""("[^"]*"|'[^']*')""", "", lines[index].split("#", 1)[0])
+        text = re.sub(r"""("[^"]*"|'[^']*')""", "", lines[index]).split("#", 1)[0]
         depth += text.count("[") - text.count("]")
         if depth <= 0:
             return index
@@ -141,20 +145,32 @@ def add_exports(text: str, names: set[str]) -> str:
     return "\n".join([row, "", *lines] if lines else [row]) + "\n"
 
 
-def set_purity(text: str, default: str | None, children: dict[str, str]) -> str:
+# meiva:note
+# Snapshot preparation replaces one finite declaration table while preserving every other table.
+# Purity levels and ambient kinds share this text-edit operation, not their semantic vocabulary;
+# callers supply the already validated base/head facts appropriate to that scope.
+def set_scope(
+    text: str,
+    table: Literal["purity", "state", "roots"],
+    declarations: Mapping[str, str | tuple[AmbientKind, ...]],
+    reasons: Mapping[str, str],
+) -> str:
     lines = text.splitlines()
-    top = next((i for i, x in enumerate(lines) if HEADER.match(x)), len(lines))
-    for index in range(top - 1, -1, -1):
-        if re.match(r"^\s*purity\s*=", lines[index]):
-            del lines[index]
-    bounds = _section_bounds(lines, "purity")
+    if table == "purity":
+        top = next((i for i, x in enumerate(lines) if HEADER.match(x)), len(lines))
+        for index in range(top - 1, -1, -1):
+            if re.match(r"^\s*purity\s*=", lines[index]):
+                del lines[index]
+    bounds = _section_bounds(lines, table)
     if bounds is not None:
         del lines[bounds[0] - 1 : bounds[1]]
-    block = ["[purity]"]
-    if default is not None:
-        block.append(f'"." = {json.dumps(default)}')
-    for child, level in sorted(children.items()):
-        block.append(f"{json.dumps(child)} = {json.dumps(level)}")
-    if len(block) == 1:
-        return ("\n".join(lines).rstrip() + "\n") if lines else ""
-    return _append_table(lines, block)
+    block = [f"[{table}]"]
+    for name, declared in sorted(declarations.items()):
+        values = json.dumps(declared if isinstance(declared, str) else [k.value for k in declared])
+        why = reasons.get(name, "")
+        if table == "roots" and why:
+            values = f"{{ kinds = {values}, why = {json.dumps(why)} }}"
+        block.append(f"{json.dumps(name)} = {values}")
+    if declarations:
+        return _append_table(lines, block)
+    return "\n".join(lines).rstrip() + "\n" if lines else ""
