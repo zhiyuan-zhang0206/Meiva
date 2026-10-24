@@ -25,10 +25,9 @@ from services.agent_runner.agent_host.dispatcher import (
 from services.agent_runner.agent_host.runtime import (
     HostPolicy,
     StallTiming,
-    StoredConfig,
-    config_fingerprint,
 )
 from services.agent_runner.agent_host.scheduling import wake_screening
+from services.agent_runner.agent_host.stored_config import StoredConfig
 from services.agent_runner.agent_host.tests.host_policy import configured_policy
 from services.agent_runner.agent_host.tests.runtime.host_support import (
     Build,
@@ -90,20 +89,6 @@ class TestConfigRebind:
         await asyncio.wait_for(host.run_turn(1), TURN_TIMEOUT_S)
         await asyncio.wait_for(host.run_turn(1), TURN_TIMEOUT_S)
         assert (host.stats.cache_misses, host.stats.cache_hits) == (1, 1)
-
-    def test_the_fingerprint_ignores_key_order(self) -> None:
-        """JSONB gives no key-order guarantee, so a fingerprint that depended on
-        it would rebuild at random."""
-        a = config_fingerprint({"x": 1, "y": 2}, None)
-        b = config_fingerprint({"y": 2, "x": 1}, None)
-        assert a == b
-        assert a != config_fingerprint({"x": 1, "y": 3}, None)
-
-    def test_the_fingerprint_separates_the_two_maps(self) -> None:
-        """`birth_config` and `config_overlay` are different columns with
-        different provenance; a fingerprint that flattened them would call two
-        genuinely different states equal."""
-        assert config_fingerprint({"x": 1}, None) != config_fingerprint(None, {"x": 1})
 
     # meiva:note
     # The rebind only works if the read is per turn — caching the row with

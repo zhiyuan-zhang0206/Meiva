@@ -16,7 +16,7 @@ from psycopg_pool import AsyncConnectionPool
 from base.agents.birth.harness import LAUNCHABLE_HARNESSES
 from base.api_contracts.agent_contract import Harness
 from base.log import logger
-from services.agent_runner.agent_host.runtime import StoredConfig
+from services.agent_runner.agent_host.stored_config import StoredConfig
 
 __all__ = ["is_runnable", "read_stored_config"]
 
