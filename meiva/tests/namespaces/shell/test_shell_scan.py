@@ -17,7 +17,7 @@ from base.config.service_read import ConfigAuthority
 from base.lm.catalog import ModelCatalog
 from meiva.sdk_surface import process_context
 from meiva.sdk_surface.installation import Installation
-from meiva.sdk_surface.tests.installation_holder import held_installation
+from meiva.sdk_surface.tests.installation_holder import held_installation, inert_sampling
 from meiva.shell import sessions
 
 pytestmark = pytest.mark.usefixtures("sdk_model_owner", "pty_service", "_isolated_agent")
@@ -131,7 +131,9 @@ def test_capture_default_lines_follow_display_config(
         sessions.send(sid, f"seq 1 400; touch {done}")
         _wait_for(done.exists)
 
-        with held_installation(Installation.bare(catalog=model_catalog, authority=authority)):
+        with held_installation(
+            Installation.bare(catalog=model_catalog, authority=authority, sampling=inert_sampling())
+        ):
             default_window = sessions.capture(sid).splitlines()
         explicit_window = sessions.capture(sid, lines=150).splitlines()
 

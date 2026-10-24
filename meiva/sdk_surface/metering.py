@@ -45,7 +45,7 @@ from base.agents.sdk.capture import SdkCaptureOwner
 from base.agents.sdk.tally import SdkCallTally
 from meiva.sdk_surface import process_context
 from meiva.sdk_surface.discovery import agent_visible_names
-from meiva.sdk_surface.installation import EventPipelines
+from meiva.sdk_surface.installation import EventPipelines, installed
 from meiva.sdk_surface.pure.caller.identity_plan import caller_facts
 from meiva.sdk_surface.pure.caller.usage_plan import usage_identity
 
@@ -83,12 +83,11 @@ def _caller(
     Callable[[], str] | None,
 ]:
     """Snapshot this call's provenance; invalid identity rejects admission."""
-    from base.agents.messages.external_caller import external_caller
-
     bound = process_context.ambient_context()
     own = None if bound is None else bound.identity
     borrowed = own.lease.agent_id if own is not None and own.lease is not None else None
-    external = external_caller()
+    installation = installed()
+    external = None if installation is None else installation.external_caller
     identity = usage_identity(
         borrowed, caller_facts(own), None if external is None else external.source()
     )

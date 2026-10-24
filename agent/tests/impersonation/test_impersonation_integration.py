@@ -23,6 +23,7 @@ from agent.tests.impersonation.handoff_inputs import (
     takeover_host,
 )
 from agent.tests.impersonation.handoff_inputs import handoff_clients as handoff_clients
+from agent.tests.impersonation.lease_support import checkpoint_inserts_failing
 from base.agents import impersonation as leases
 from base.agents.context.clients import ClientSet
 from base.agents.context.external_attachment.plugin_state_codec import encode_plugin_delta
@@ -473,8 +474,8 @@ async def test_handoff_checkpoint_failure_keeps_gate_and_retry_flushes_receipt(
     lease = history.resolve(database, owner.agent_id, 0, local_machine=machine_identity.name())
     workspace = host.workspace(owner.agent_id)
     with (
-        saver.failing_writes(OSError("checkpoint temporarily unavailable")),
-        pytest.raises(OSError, match="checkpoint temporarily"),
+        checkpoint_inserts_failing(db_conn),
+        pytest.raises(psycopg.errors.RaiseException, match="checkpoint inserts refused"),
     ):
         await deliver_handoff(
             graph,

@@ -16,7 +16,7 @@ from __future__ import annotations
 import asyncio
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import assert_never
 
 from base.lm.catalog import ModelCatalog
 from base.lm.catalog.decide.types import DecisionError, YesNo, estimate_tokens, question_text
@@ -135,32 +135,6 @@ class InjectionCheckInputs:
 
 
 # meiva:note
-# The service-field read the check needs of a configuration authority; a
-# `base.config.service_read.ConfigAuthority` satisfies it.
-class ServiceFields(Protocol):
-    def service_field_value(self, name: str, /) -> Any: ...
-
-
-def injection_check_inputs(
-    authority: ServiceFields,
-    catalog: ModelCatalog,
-    *,
-    keys: ProviderKeys,
-    agent_id: int | None,
-    delivery_active: bool,
-) -> InjectionCheckInputs:
-    return InjectionCheckInputs(
-        enabled=bool(authority.service_field_value("web_fetch_injection_check_enabled")),
-        model=authority.service_field_value("web_fetch_injection_model"),
-        threshold=authority.service_field_value("web_fetch_injection_threshold"),
-        catalog=catalog,
-        keys=keys,
-        agent_id=agent_id,
-        delivery_active=delivery_active,
-    )
-
-
-# meiva:note
 # A page check in flight. `finish` joins the worker and returns the highest chunk probability
 # (None when no chunk produced an answer, or when no check was started); it never records
 # anything, so the caller decides what a verdict means for its own result.
@@ -197,23 +171,27 @@ def begin_check(
         model=inputs.model,
         decision_models=inputs.catalog.decision_models,
     )
-    if step is CheckStep.SKIP:
-        return PendingCheck(None, None)
-    if step is CheckStep.UNKNOWN_MODEL:
-        raise ValueError(
-            f"web_fetch_injection_model {inputs.model!r} is not a decision model; available: "
-            + ", ".join(sorted(inputs.catalog.decision_models))
-        )
-    worker = ThreadPoolExecutor(max_workers=1, thread_name_prefix="injection-check")
-    judged = worker.submit(
-        asyncio.run,
-        page_probability(
-            inputs.model,
-            text,
-            catalog=inputs.catalog,
-            keys=inputs.keys,
-            url=url,
-            for_agent_id=inputs.agent_id,
-        ),
-    )
-    return PendingCheck(judged, worker)
+    match step:
+        case CheckStep.SKIP:
+            return PendingCheck(None, None)
+        case CheckStep.UNKNOWN_MODEL:
+            raise ValueError(
+                f"web_fetch_injection_model {inputs.model!r} is not a decision model; available: "
+                + ", ".join(sorted(inputs.catalog.decision_models))
+            )
+        case CheckStep.RUN:
+            worker = ThreadPoolExecutor(max_workers=1, thread_name_prefix="injection-check")
+            judged = worker.submit(
+                asyncio.run,
+                page_probability(
+                    inputs.model,
+                    text,
+                    catalog=inputs.catalog,
+                    keys=inputs.keys,
+                    url=url,
+                    for_agent_id=inputs.agent_id,
+                ),
+            )
+            return PendingCheck(judged, worker)
+        case _:
+            assert_never(step)

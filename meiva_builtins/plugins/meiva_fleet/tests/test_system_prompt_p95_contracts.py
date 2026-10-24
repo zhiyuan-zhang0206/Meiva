@@ -22,6 +22,7 @@ from base.packages.tests.model_catalog import set_prices as set_prices
 from base.paths.home import resolve_meiva_home
 from meiva.sdk_surface import install
 from meiva.sdk_surface.installation import installed
+from meiva.sdk_surface.tests.installation_holder import inert_sampling
 
 
 @pytest.fixture(autouse=True)
@@ -37,6 +38,7 @@ def _no_plugin_expansions() -> Iterator[None]:
             provider_keys=prior.provider_keys,
             authority=prior.authority,
             config_images=prior.config_images,
+            sampling=inert_sampling(),
         )
 
 

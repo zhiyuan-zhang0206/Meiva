@@ -19,7 +19,7 @@ from base.agents.messages.kwargs import ExecStatus, read_meiva_kwargs
 from base.clock import Clock
 from base.config import settings
 from base.config.agent_pins import resolve_agent_config_pins
-from base.config.tests.configuration import defaults, snapshot_process_config
+from base.config.tests.configuration import defaults
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.events.live.tests.live_capture import idle_publisher
@@ -28,7 +28,7 @@ from base.host.env.registry import AGENT_BIRTH_CONFIG_ENV, AGENT_CONFIG_OVERLAY_
 from base.lm.catalog import ModelCatalog
 from base.packages.plugin_providers import build_model_catalog
 from base.paths import workspace_dir_readonly
-from meiva.boot import process_clients
+from meiva.tests.fixtures.pin_agent import snapshot_clients_over
 
 
 def _plugin(unit_home: Path) -> None:
@@ -94,9 +94,7 @@ async def test_concurrent_turn_configs_reach_real_children_without_cross_talk(
                 agent=slices or AgentSlices.resolve(default_reader=defaults()),
                 db=database,
                 bus=EventBus.from_settings(),
-                clients=process_clients(
-                    config=snapshot_process_config(), database=lambda: database
-                ),
+                clients=snapshot_clients_over(lambda: database),
                 identity=AgentIdentity(agent_id=agent_id, owns_loop=True),
                 catalog=build_model_catalog(),
                 clock_factory=Clock.from_settings,
@@ -149,7 +147,7 @@ def _execution_context(
         agent=agent,
         db=database,
         bus=event_bus,
-        clients=process_clients(config=snapshot_process_config(), database=lambda: database),
+        clients=snapshot_clients_over(lambda: database),
         identity=AgentIdentity(agent_id=agent_id, owns_loop=True),
         event_publisher=idle_publisher(),
         catalog=model_catalog,

@@ -3,6 +3,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
+import psycopg
 import pytest
 from langchain_core.messages import HumanMessage
 from langgraph.checkpoint.memory import MemorySaver
@@ -18,9 +19,10 @@ from agent.impersonation_handoff import (
 )
 from agent.tests.impersonation.lease_support import (
     Cluster,
+    checkpoint_inserts_failing,
     fixed_clock,
-    flush_fault_saver,
     idle_graph,
+    throttled_saver,
 )
 from agent.tests.impersonation.lease_support import cluster as cluster
 from base.agents.messages.timestamp_policy import TimestampPolicy
@@ -70,13 +72,13 @@ async def test_first_takeover_explains_borrowed_identity_and_later_leases_do_not
 
 
 async def test_a_failed_flush_leaves_nothing_durable_and_the_retry_explains_once(
-    aops_pool: AsyncConnectionPool[Any],
+    db_conn: psycopg.Connection[Any], aops_pool: AsyncConnectionPool[Any]
 ) -> None:
-    saver = await flush_fault_saver(aops_pool)
+    saver = await throttled_saver(aops_pool)
     graph, config = await idle_graph(42, saver)
     with (
-        saver.failing_writes(OSError("Interrupted flush")),
-        pytest.raises(OSError, match="Interrupted flush"),
+        checkpoint_inserts_failing(db_conn),
+        pytest.raises(psycopg.errors.RaiseException, match="checkpoint inserts refused"),
     ):
         await ensure_start_marker(graph, _session(), notes=_notes())
     assert "impersonation_introduced" not in (await graph.aget_state(config)).values

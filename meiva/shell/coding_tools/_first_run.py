@@ -10,6 +10,7 @@ import os
 import stat
 import tempfile
 from pathlib import Path
+from typing import assert_never
 
 from base.host.atomic_io import write_text_atomic
 from meiva.shell.coding_tools.plans.first_run import (
@@ -53,16 +54,19 @@ def _read(path: Path) -> str | None:
 def _apply(
     plan: FilePlan, path: Path, stamp: str, *, backup: bool, kept: str, written: str
 ) -> None:
-    if plan.action == "refuse":
-        _backup_before_write(path, stamp)
-        raise RuntimeError(plan.problem)
-    if plan.action == "keep":
-        print(kept)
-        return
-    if backup and path.exists():
-        _backup_before_write(path, stamp)
-    _write_json_atomic(path, plan.data)
-    print(written)
+    match plan.action:
+        case "refuse":
+            _backup_before_write(path, stamp)
+            raise RuntimeError(plan.problem)
+        case "keep":
+            print(kept)
+        case "write":
+            if backup and path.exists():
+                _backup_before_write(path, stamp)
+            _write_json_atomic(path, plan.data)
+            print(written)
+        case _:
+            assert_never(plan.action)
 
 
 # meiva:note

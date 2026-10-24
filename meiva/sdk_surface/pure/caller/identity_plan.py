@@ -2,30 +2,15 @@
 # Who is acting, decided over facts the caller read: which agent id a call is attributed to,
 # which actor string a durable write is stamped with, which refusal an agent-only action earns,
 # and the identity an SDK usage event carries. The facade (`agent_identity.py`, the metering
-# recorder) reads the bound context, a borrowed lease and the external-caller profile once and
-# builds the facts; nothing here reads or writes the process.
+# recorder) reads the bound context, a borrowed lease and the external-caller profile the
+# installation carries (parsed once from the process environment by the load) and builds the facts; nothing here reads or writes the process.
 # meiva:link meiva/docs/sdk-surface/sdk-surface.meiva.okf.md
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Protocol
 
-
-# meiva:note
-# The read-only shape of an `AgentIdentity` this module needs; any identity value satisfies it.
-class IdentityLike(Protocol):
-    @property
-    def agent_id(self) -> int | None: ...
-
-    @property
-    def actor(self) -> str | None: ...
-
-    @property
-    def owns_loop(self) -> bool: ...
-
-    @property
-    def lease(self) -> object | None: ...
+from base.agents.context.identity import AgentIdentity
 
 
 @dataclass(frozen=True, slots=True)
@@ -49,7 +34,7 @@ class ActorDecision:
     recheck_load_failure: bool = False
 
 
-def caller_facts(identity: IdentityLike | None) -> CallerFacts | None:
+def caller_facts(identity: AgentIdentity | None) -> CallerFacts | None:
     if identity is None:
         return None
     return CallerFacts(

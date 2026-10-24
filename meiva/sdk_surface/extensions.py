@@ -14,6 +14,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import replace
 
+from base.api_contracts.caller_identity import CallerIdentity
 from base.clock import Clock
 from base.config.service_read import ConfigAuthority
 from base.lm.catalog import ModelCatalog
@@ -23,7 +24,7 @@ from base.packages.plugins.loading import StateGate
 from base.packages.plugins.loading.faces import LoadedExtensions, import_faces
 
 from . import install as sdk_install
-from .installation import EventPipelines
+from .installation import EventPipelines, SamplingPolicyOwner
 
 
 # meiva:note
@@ -43,6 +44,11 @@ from .installation import EventPipelines
 # Contained plugin failures go to ``report`` (see `import_faces`). Model and configuration consumers
 # receive their composition root's explicit ``catalog``, ``provider_keys`` and ``authority``.
 # Inventory-only loads supply none of them; accessing those SDK capabilities still requires a bound owner.
+# The root names the ``sampling`` owner the installation retains and closes. A full load that
+# replaces an installation carries that installation's owner, clients and clock over unless the
+# caller names its own; a first load has nothing to carry, so it refuses to run without an owner.
+# ``external_caller`` is the opt-in external tool profile its root read from the process once;
+# none means the process declared no external caller.
 def load_extensions(
     *,
     surface: bool = False,
@@ -50,19 +56,23 @@ def load_extensions(
     catalog: ModelCatalog | None = None,
     provider_keys: ProviderKeys | None = None,
     authority: ConfigAuthority | None = None,
+    sampling: SamplingPolicyOwner | None = None,
     clock: Clock | None = None,
     clients: EventPipelines | None = None,
+    external_caller: CallerIdentity | None = None,
     disabled_entries: Sequence[str] = (),
     validate_state: StateGate | None = None,
 ) -> LoadedExtensions:
     previous = sdk_install.uninstall() if not surface else None
-    sampling = None
     if previous is not None:
-        sampling = previous.sampling
+        if sampling is None:
+            sampling = previous.sampling
         if clients is None:
             clients = previous.clients
         if clock is None:
             clock = previous.clock
+    if sampling is None:
+        raise ValueError("the first plugin load needs the sampling owner its root retains")
 
     loaded = import_faces(surface=surface, report=report, validate_state=validate_state)
     admitted = sdk_install.install(
@@ -75,6 +85,7 @@ def load_extensions(
         clients=clients,
         sampling=sampling,
         clock=clock,
+        external_caller=external_caller,
         disabled_entries=disabled_entries,
     )
     return replace(loaded, registry=admitted)

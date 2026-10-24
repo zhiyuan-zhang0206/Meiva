@@ -19,7 +19,7 @@ from base.native_process.loaded_commit import LoadedCommit
 from base.native_process.stop_timing import CANCEL_UNWIND_TIMEOUT_S
 from base.paths.home import resolve_meiva_home
 from base.telemetry.process_logging import init_gateway_process
-from meiva.boot import process_disable_entries
+from meiva.boot import process_disable_entries, process_sampling_owner
 from meiva.sdk_surface.installation import Installation
 from services.agent_runner.agent_host.pools import PoolBounds
 from services.agent_runner.agent_host.runtime import HostCachePolicy, HostPolicy, StallTiming
@@ -121,6 +121,7 @@ def load_installation(
         provider_keys=process_provider_keys(catalog),
         authority=authority,
         clients=clients,
+        sampling=process_sampling_owner(),
         clock=Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS),
         disabled_entries=process_disable_entries(),
     )

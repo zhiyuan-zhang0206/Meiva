@@ -15,17 +15,17 @@ import types
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Protocol, cast
+from typing import Any, cast
 
 from base.agents.context.identity import AgentIdentity
+from meiva.mcps._clients import McpClients
 from meiva.mcps.config import MCPCallError, MCPConnectError, ToolInfo
+from meiva.sdk_surface.pure.caller.identity_plan import attributed_agent_id, caller_facts
 from meiva.security import scan_content
 
 __all__ = [
     "DiskCache",
-    "RemoteClient",
     "ServerProxy",
-    "ToolCache",
     "ToolSource",
     "cached_tools",
     "call_raw",
@@ -38,38 +38,12 @@ __all__ = [
 
 
 # meiva:note
-# The two daemon calls the tools make; `agent_id` is the calling agent the daemon forwards to gated servers (None for a process with no agent).
-class RemoteClient(Protocol):
-    def list_tools(
-        self, server: str, *, timeout_seconds: float, agent_id: int | None
-    ) -> list[ToolInfo]: ...
-
-    def call_tool(
-        self,
-        server: str,
-        tool: str,
-        args: dict[str, Any],
-        *,
-        timeout_seconds: float,
-        agent_id: int | None,
-    ) -> dict[str, Any]: ...
-
-
-class ToolCache(Protocol):
-    """Where a server's tool metadata is kept between calls."""
-
-    def read(self, server: str) -> list[ToolInfo] | None: ...
-
-    def write(self, server: str, tools: list[ToolInfo]) -> None: ...
-
-
-# meiva:note
-# What a server proxy and its tools run against; values only. `remote` dials the daemon on its first request (the SDK never starts servers), `timeout_seconds` bounds each request, `cache` keeps tool metadata, and `identity` is the context's agent identity: its agent id rides on every request, and a borrowed lease is revalidated at each use.
+# What a server proxy and its tools run against. `remote` dials the daemon on its first request (the SDK never starts servers), `timeout_seconds` bounds each request, `cache` keeps tool metadata on disk, and `identity` is the context's agent identity: its agent id rides on every request, and a borrowed lease is revalidated at each use. A test builds the clients over the socket of a daemon it runs and the cache over a directory under `tmp_path`.
 @dataclass(frozen=True)
 class ToolSource:
-    remote: RemoteClient
+    remote: McpClients
     timeout_seconds: float
-    cache: ToolCache
+    cache: DiskCache
     identity: AgentIdentity | None
 
 
@@ -140,13 +114,10 @@ class DiskCache:
 
 
 # meiva:note
-# The agent id the process's work is attributed to: a borrowed lease is revalidated on each use and, while valid, takes precedence; an invalid lease raises instead of falling back to the identity's own id. None when the process has no identity or no agent.
+# The agent id the process's work is attributed to: a borrowed lease is revalidated on each use and, while valid, takes precedence; an invalid lease raises instead of falling back to the identity's own id. None when the process has no identity or no agent. The precedence is the attribution plan's (`identity_plan.attributed_agent_id`), the same one `meiva.sdk_surface.agent_identity.agent_id` applies to a context's identity.
 def resolve_agent_id(identity: AgentIdentity | None) -> int | None:
-    if identity is None:
-        return None
-    if identity.lease is not None:
-        return identity.lease.validate()
-    return identity.agent_id
+    borrowed = None if identity is None or identity.lease is None else identity.lease.validate()
+    return attributed_agent_id(borrowed, caller_facts(identity))
 
 
 def list_tools(source: ToolSource, server: str) -> list[ToolInfo]:

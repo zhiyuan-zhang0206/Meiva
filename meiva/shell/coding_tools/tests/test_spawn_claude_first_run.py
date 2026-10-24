@@ -8,6 +8,7 @@ import subprocess
 import threading
 from dataclasses import replace
 from pathlib import Path
+from typing import cast
 
 import pytest
 
@@ -18,6 +19,7 @@ from meiva.shell.coding_tools.plans.claude_launch import (
     plan_claude_launch,
 )
 from meiva.shell.coding_tools.plans.claude_screen import (
+    Verdict,
     claude_ui_ready,
     failure_text,
     login_marker,
@@ -223,11 +225,30 @@ def test_a_long_shell_prompt_and_the_setup_screen_are_not_ready() -> None:
     )
 
 
+def _failure(verdict: Verdict, *, settled: bool) -> str:
+    text = failure_text(verdict, 7, settled=settled)
+    assert text is not None
+    return text
+
+
 def test_each_failure_says_what_happened() -> None:
-    assert "claude executable not found in PATH" in failure_text("missing", 7, settled=False)
-    assert "not logged in on this host" in failure_text("logged_out", 7, settled=False)
-    assert "exited before its UI appeared" in failure_text("exited", 7, settled=False)
-    assert "exited before it became ready" in failure_text("exited", 7, settled=True)
+    assert "claude executable not found in PATH" in _failure("missing", settled=False)
+    assert "not logged in on this host" in _failure("logged_out", settled=False)
+    assert "exited before its UI appeared" in _failure("exited", settled=False)
+    assert "exited before it became ready" in _failure("exited", settled=True)
+
+
+@pytest.mark.parametrize("verdict", ["ready", "waiting"])
+@pytest.mark.parametrize("settled", [False, True])
+def test_a_verdict_that_is_not_a_failure_has_no_failure_text(
+    verdict: Verdict, settled: bool
+) -> None:
+    assert failure_text(verdict, 7, settled=settled) is None
+
+
+def test_an_unknown_verdict_is_refused() -> None:
+    with pytest.raises(AssertionError, match="unreachable"):
+        failure_text(cast(Verdict, "lost"), 7, settled=False)
 
 
 def _session_running(site_shell: ShellSessions, host: SessionHost, home: Path, line: str) -> int:

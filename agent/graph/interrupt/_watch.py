@@ -184,6 +184,9 @@ class _OwnedWatch:
 # and raised by that service at stop/join, without cancelling sibling agents. `poll_s` and
 # `exit_timeout_s` are tuning constants: production keeps their defaults, a test passes small
 # values.
+# Pending a base port: the watcher reaches its pool only through `connection()`. The pool stays
+# typed as the concrete psycopg pool until base/ hosts a narrow `InterruptPool` protocol, which
+# `tests/parked_pool.py` then replaces.
 # meiva:link agent/graph/docs/turn-interrupts.meiva.okf.md
 @asynccontextmanager
 async def subscribe_interrupt(

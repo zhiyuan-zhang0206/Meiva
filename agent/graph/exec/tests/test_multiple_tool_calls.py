@@ -20,7 +20,7 @@ from base.agents.context import MeivaContext
 from base.agents.context.identity import AgentIdentity
 from base.agents.messages.kwargs import read_meiva_kwargs
 from base.clock import Clock
-from base.config.tests.configuration import defaults, snapshot_process_config
+from base.config.tests.configuration import defaults
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
@@ -29,7 +29,7 @@ from base.events.live.tests.live_capture import LiveEvents, idle_publisher
 from base.host.env.agent_slices import AgentSlices
 from base.packages.plugin_providers import build_model_catalog
 from base.packages.plugins.extensions import ExtensionRegistry, PluginContributions
-from meiva.boot import process_clients
+from meiva.tests.fixtures.pin_agent import snapshot_clients
 
 
 def _graph(state_cls: type[AgentState], *, process: ExecProcess, **compile_options: Any) -> Any:
@@ -126,7 +126,7 @@ def _runtime(
             agent=agent or AgentSlices.resolve(default_reader=defaults()),
             db=Database.from_settings(gate=database_gate),
             bus=EventBus.from_settings(),
-            clients=process_clients(config=snapshot_process_config()),
+            clients=snapshot_clients(),
             identity=AgentIdentity(agent_id=7, owns_loop=True),
             catalog=build_model_catalog(),
             clock_factory=Clock.from_settings,

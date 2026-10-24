@@ -7,6 +7,7 @@ import pytest
 
 from base.daemon.schedules.watcher import parse_timeout
 from meiva import watcher
+from meiva.shell.background_plan import NotifyPolicy
 from meiva.watcher import plans
 
 
@@ -272,4 +273,33 @@ def test_watcher_plans_forward_failure_notify() -> None:
             default_timezone="UTC",
         ),
     ]
-    assert [r.notify for r in requests] == ["always", "always", "always"]
+    assert [r.notify for r in requests] == [NotifyPolicy.ALWAYS] * 3
+
+
+def test_watcher_plans_refuse_an_unknown_notify_before_anything_starts() -> None:
+    now = datetime.datetime.now(datetime.UTC)
+    when = (now + datetime.timedelta(days=365)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    refused = "notify must be one of"
+
+    with pytest.raises(ValueError, match=refused):
+        plans.plan_launch("pass", "1h", "test-launch-notify", "success", now)
+    with pytest.raises(ValueError, match=refused):
+        plans.plan_at(
+            when,
+            "ping later",
+            name="test-at-notify",
+            notify="success",
+            now=now,
+            announce_timezone=None,
+        )
+    with pytest.raises(ValueError, match=refused):
+        plans.plan_cron(
+            "0 3 * * *",
+            "daily",
+            timezone=None,
+            end_time=None,
+            name="test-cron-notify",
+            notify="success",
+            now=now,
+            default_timezone="UTC",
+        )

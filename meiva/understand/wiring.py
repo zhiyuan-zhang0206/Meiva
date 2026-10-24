@@ -1,8 +1,8 @@
 # meiva:note
 # Build the `UnderstandDeps` of this process: its configured models and knobs, the model catalog,
-# the bound agent's workspace and output site, and the exec turn that carries findings.
-# `understand_deps_for` takes the configuration and the process facts as values; `understand_deps`
-# reads them once from this process's SDK installation.
+# the bound agent's workspace and output site. `understand_deps_for` takes the configuration and
+# the process facts as values; `understand_deps` reads them once from this process's SDK
+# installation.
 
 from __future__ import annotations
 
@@ -16,7 +16,6 @@ from base.paths import workspace_dir
 from meiva import files
 from meiva.sdk_surface import agent_identity
 from meiva.sdk_surface import settings as sdk_settings
-from meiva.security import FindingDelivery, current_delivery
 from meiva.understand.answer import OVERFLOW_DIRNAME, OutputSite, RetryPolicy, UnderstandDeps
 
 __all__ = ["understand_deps", "understand_deps_for"]
@@ -44,7 +43,6 @@ def understand_deps() -> UnderstandDeps:
         overrides=sdk_settings.model_overrides(),
         base_dir=files.workspace_base(),
         output=_output_site(),
-        delivery=current_delivery(),
     )
 
 
@@ -56,7 +54,6 @@ def understand_deps_for(
     overrides: ModelOverrides,
     base_dir: Path,
     output: OutputSite | None,
-    delivery: FindingDelivery,
 ) -> UnderstandDeps:
     return UnderstandDeps(
         catalog=catalog,
@@ -76,5 +73,4 @@ def understand_deps_for(
         ),
         base_dir=base_dir,
         output=output,
-        delivery=delivery,
     )

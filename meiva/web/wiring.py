@@ -2,31 +2,29 @@
 
 from __future__ import annotations
 
-from typing import cast
-
 from base.config.service_read import ConfigAuthority
 from base.host.env.agent_slices import ModelOverrides
 from base.lm.catalog import ModelCatalog
 from base.lm.catalog.provider_keys import ProviderKeys
 from meiva.sdk_surface import agent_identity
 from meiva.sdk_surface import settings as sdk_settings
-from meiva.sdk_surface.injection_check import injection_check_inputs
-from meiva.security import FindingDelivery, current_delivery
+from meiva.sdk_surface.injection_check import InjectionCheckInputs
+from meiva.sdk_surface.pure.media.finding_plan import FindingDelivery
 from meiva.web.configs import BraveConfig, DeepSeekFetchConfig, DeepSeekSearchConfig, JinaConfig
-from meiva.web.deps import FetchDeps, FetchModel, ReaderProvider, SearchDeps, SearchProvider
+from meiva.web.deps import FetchDeps, FetchModel, SearchDeps, reader_provider, search_provider
 from meiva.web.errors import FetchError
 
-__all__ = ["fetch_deps", "fetch_deps_for", "search_deps", "search_deps_for"]
+__all__ = ["fetch_deps", "fetch_deps_for", "injection_inputs", "search_deps", "search_deps_for"]
 
 
 def search_deps() -> SearchDeps:
-    return search_deps_for(sdk_settings.config_authority(), delivery=current_delivery())
+    return search_deps_for(sdk_settings.config_authority())
 
 
-def search_deps_for(authority: ConfigAuthority, *, delivery: FindingDelivery) -> SearchDeps:
+def search_deps_for(authority: ConfigAuthority) -> SearchDeps:
     timeout_s = authority.service_field_value("web_search_timeout_seconds")
     return SearchDeps(
-        provider=cast(SearchProvider, authority.service_field_value("web_search_provider")),
+        provider=search_provider(authority.service_field_value("web_search_provider")),
         brave=BraveConfig(
             api_key=authority.service_field_value("brave_api_key"),
             endpoint=authority.service_field_value("web_brave_search_endpoint"),
@@ -40,11 +38,10 @@ def search_deps_for(authority: ConfigAuthority, *, delivery: FindingDelivery) ->
             max_count=authority.service_field_value("web_deepseek_max_results"),
             qps=authority.service_field_value("web_deepseek_qps"),
         ),
-        delivery=delivery,
     )
 
 
-def fetch_deps() -> FetchDeps:
+def fetch_deps(delivery: FindingDelivery) -> FetchDeps:
     authority = sdk_settings.config_authority()
     try:
         catalog = sdk_settings.model_catalog()
@@ -60,7 +57,7 @@ def fetch_deps() -> FetchDeps:
         catalog=catalog,
         keys=keys,
         overrides=overrides,
-        delivery=current_delivery(),
+        delivery_active=delivery.active,
         agent_id=agent_identity.agent_id(),
     )
 
@@ -71,12 +68,12 @@ def fetch_deps_for(
     catalog: ModelCatalog,
     keys: ProviderKeys,
     overrides: ModelOverrides,
-    delivery: FindingDelivery,
+    delivery_active: bool,
     agent_id: int | None,
 ) -> FetchDeps:
     fetch_timeout_s = authority.service_field_value("web_fetch_timeout_seconds")
     return FetchDeps(
-        reader=cast(ReaderProvider, authority.service_field_value("web_fetch_reader")),
+        reader=reader_provider(authority.service_field_value("web_fetch_reader")),
         jina=JinaConfig(
             api_key=authority.service_field_value("jina_api_key"),
             reader_base=authority.service_field_value("web_jina_reader_base"),
@@ -102,8 +99,29 @@ def fetch_deps_for(
             keys=keys,
             overrides=overrides,
         ),
-        delivery=delivery,
-        injection=injection_check_inputs(
-            authority, catalog, keys=keys, agent_id=agent_id, delivery_active=delivery.active
+        injection=injection_inputs(
+            authority, catalog, keys=keys, agent_id=agent_id, delivery_active=delivery_active
         ),
+    )
+
+
+# meiva:note
+# The inputs of one page check: the three service fields of `authority`, the catalog the model is
+# looked up in, the agent the usage rows are billed to and whether a finding has anywhere to go.
+def injection_inputs(
+    authority: ConfigAuthority,
+    catalog: ModelCatalog,
+    *,
+    keys: ProviderKeys,
+    agent_id: int | None,
+    delivery_active: bool,
+) -> InjectionCheckInputs:
+    return InjectionCheckInputs(
+        enabled=bool(authority.service_field_value("web_fetch_injection_check_enabled")),
+        model=authority.service_field_value("web_fetch_injection_model"),
+        threshold=authority.service_field_value("web_fetch_injection_threshold"),
+        catalog=catalog,
+        keys=keys,
+        agent_id=agent_id,
+        delivery_active=delivery_active,
     )

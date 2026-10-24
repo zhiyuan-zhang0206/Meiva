@@ -17,6 +17,7 @@ from base.packages.plugin_providers import build_model_catalog
 from base.packages.plugins.extensions import PluginContributions, SdkNamespace, SdkWrap
 from base.paths.home import resolve_meiva_home
 from meiva.sdk_surface import install, process_context
+from meiva.sdk_surface.tests.installation_holder import inert_sampling
 from meiva_builtins.plugins.meiva_code.tests.surface_support import code_registry
 from meiva_builtins.plugins.meiva_code.tests.test_meiva_code_plugin import (
     get_injected_context_notes,
@@ -120,6 +121,7 @@ def test_duplicate_namespace_refuses_the_second_plugin_whole():
     admitted = install.install(
         code_registry(("other_plugin", other)),
         config_images=DiskPluginConfigImages(resolve_meiva_home()),
+        sampling=inert_sampling(),
     )
 
     assert [name for name, _ in admitted.plugins] == ["meiva_code"]
@@ -149,6 +151,7 @@ def test_second_wrap_stacks_instead_of_asserting():
             )
         ),
         config_images=DiskPluginConfigImages(resolve_meiva_home()),
+        sampling=inert_sampling(),
     )
 
     after = meiva.extend.stack("files.read")

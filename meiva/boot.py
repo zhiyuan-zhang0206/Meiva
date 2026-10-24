@@ -23,15 +23,18 @@ from __future__ import annotations
 
 import atexit
 import os
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Any
+from typing import Any, assert_never
 
 from base.agents.context import MeivaContext
 from base.agents.context.clients import ClientSet, DatabaseFactory
 from base.agents.context.gateway_client.transport import GatewayTransportInputs
 from base.agents.context.identity import AgentIdentity
+from base.agents.messages.external_caller import external_caller
+from base.agents.sdk.call_policy import SamplingPolicyOwner
+from base.api_contracts.caller_identity import CallerIdentity
 from base.clock import SYSTEM_TIMERS, Clock
 from base.clock.configuration import clock_config_from_boot
 from base.cluster.machine import MachineIdentity
@@ -74,10 +77,16 @@ def _redis(url: str) -> object:
     )
 
 
-def _gateway_url(config: ConfigBoot) -> str:
-    from base.cluster.machine import gateway_api_base
+# meiva:note
+# The gateway endpoint of `config`, resolved when the first client asks for it: a root builds its
+# clients before the configuration has to be readable.
+def gateway_endpoint(config: ConfigBoot) -> Callable[[], str]:
+    def endpoint() -> str:
+        from base.cluster.machine import gateway_api_base
 
-    return gateway_api_base(config.view.gateway.gateway_url)
+        return gateway_api_base(config.view.gateway.gateway_url)
+
+    return endpoint
 
 
 def _gateway(url: str, *, config: ConfigBoot) -> Any:
@@ -95,6 +104,17 @@ def _gateway(url: str, *, config: ConfigBoot) -> Any:
         headers=bearer_header(bearer),
         transport=transport_for_url(url),
     )
+
+
+# meiva:note
+# The sampling owner of a process with no service lifespan to schedule its cleanup (a launched
+# child, a script, a command-line inventory). It closes at interpreter exit: finite cleanup, not a
+# guarantee of a nonzero exit or of delivery after a hard exit. `uninstall` unregisters the close of
+# the installation that retains the owner, so a removed surface leaves no callback behind.
+def process_sampling_owner() -> SamplingPolicyOwner:
+    owner = SamplingPolicyOwner()
+    atexit.register(owner.close)
+    return owner
 
 
 def database_factory(*, config: ConfigBoot, machine: MachineIdentity) -> DatabaseFactory:
@@ -133,39 +153,37 @@ def database_factory(*, config: ConfigBoot, machine: MachineIdentity) -> Databas
 # meiva:note
 # The clients one SDK process owner builds from its prepared configuration. Nothing connects at
 # construction: every connection, the event pipeline and the MCP client set build on first use,
-# reading `config` then. `machine` defaults to the identity derived from the same `config`; a
-# root that already shares an identity with its logger and event pipeline passes it. `database`
-# and `gateway_url` override the derived defaults for a root that holds its own.
+# reading `config` then. The root names every owner the clients share: the `machine` identity it
+# also gives its logger and event pipeline, the `database` factory it holds and the `gateway_url`
+# (a string or a resolver called on first use). `clients_over` derives the endpoint and
+# `derived_clients` also the database, from the configuration and the identity.
 def process_clients(
     *,
     config: ConfigBoot,
-    machine: MachineIdentity | None = None,
-    gateway_url: str | None = None,
-    database: DatabaseFactory | None = None,
+    machine: MachineIdentity,
+    database: DatabaseFactory,
+    gateway_url: str | Callable[[], str],
 ) -> ClientSet:
-    identity = machine if machine is not None else machine_from_boot(config)
-    make_database = (
-        database if database is not None else database_factory(config=config, machine=identity)
-    )
-
     def pipeline() -> Any:
         from base.paths.home import resolve_meiva_home
         from base.telemetry import build_pipeline
 
-        return build_pipeline(database=make_database, machine=identity, home=resolve_meiva_home())
+        return build_pipeline(database=database, machine=machine, home=resolve_meiva_home())
 
+    # meiva:note
+    # The MCP client set reads its request timeout once, when the first MCP call builds it.
     def mcp_clients() -> McpClients:
         from base.paths import mcp_daemon_shared_socket
         from base.paths.home import resolve_meiva_home
 
         return McpClients(
             Path(mcp_daemon_shared_socket(resolve_meiva_home())),
-            lambda: config.view.sandbox.mcp_connect_timeout_seconds,
+            config.view.sandbox.mcp_connect_timeout_seconds,
         )
 
     return ClientSet(
-        gateway_url=gateway_url if gateway_url is not None else lambda: _gateway_url(config),
-        database=make_database,
+        gateway_url=gateway_url,
+        database=database,
         pipeline_factory=pipeline,
         redis=lambda: _redis(config.view.data_plane.redis_url),
         gateway=lambda url: _gateway(url, config=config),
@@ -180,6 +198,24 @@ def process_clients(
     )
 
 
+# meiva:note
+# The clients of a root that holds its own database factory: the gateway endpoint derives from the
+# configuration.
+def clients_over(
+    config: ConfigBoot, machine: MachineIdentity, database: DatabaseFactory
+) -> ClientSet:
+    return process_clients(
+        config=config, machine=machine, database=database, gateway_url=gateway_endpoint(config)
+    )
+
+
+# meiva:note
+# The clients of a root that owns nothing but its configuration and its machine identity: the
+# database factory and the gateway endpoint derive from them.
+def derived_clients(config: ConfigBoot, machine: MachineIdentity) -> ClientSet:
+    return clients_over(config, machine, database_factory(config=config, machine=machine))
+
+
 def context_from_description(
     description: dict[str, Any],
     *,
@@ -190,7 +226,10 @@ def context_from_description(
     return MeivaContext.from_description(
         description,
         clients=process_clients(
-            gateway_url=description["gateway_url"], config=config, machine=machine
+            config=config,
+            machine=machine,
+            database=database_factory(config=config, machine=machine),
+            gateway_url=description["gateway_url"],
         ),
         machine=machine,
         original_incarnation=original_incarnation,
@@ -211,7 +250,7 @@ def launched_context(*, env: Mapping[str, str], config: ConfigBoot) -> MeivaCont
     machine = machine_from_boot(config)
     return MeivaContext(
         identity=AgentIdentity(agent_id=agent_id, owns_loop=False),
-        clients=process_clients(config=config, machine=machine),
+        clients=derived_clients(config, machine),
         machine=machine,
         clock_factory=lambda: Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS),
     )
@@ -263,9 +302,10 @@ def _slot_facts() -> _SlotFacts:
 # meiva:note
 # Idempotently load the plugin surface of this process; the facade `meiva.ensure_plugins_loaded`
 # forwards here. This is the place that reads the process: the installation slot, the bound
-# context and the launch environment become `LoadFacts`, `plan_load` chooses the step, and the
-# shell below resolves the owners a surface load needs (`LoadInputs`) only when the plan is a
-# load. A `clients` set the caller supplies is the one the installation meters through; none
+# context and the launch environment become `LoadFacts`, `plan_load` chooses the step, and only a
+# plan that loads a surface resolves the owners it needs (`LoadInputs`) before `load_surface`
+# installs them. Every other step is settled by `settle_installed` from the step and the context
+# alone. A `clients` set the caller supplies is the one the installation meters through; none
 # supplied means the installation builds its own cold set and closes it at interpreter exit,
 # so an attachment's shorter-lived clients are never borrowed.
 def ensure_plugins_loaded(
@@ -297,35 +337,54 @@ def ensure_plugins_loaded(
             launched=launched_process(_launch_facts(context, env)),
         )
     )
-    if plan.step is LoadStep.RAISE_FAILURE:
-        _sdk_install.raise_load_failure()
-    elif plan.step is LoadStep.BIND_CATALOG:
-        _bind_installed_catalog(context)
-    elif plan.step is LoadStep.UPGRADE_FACES:
-        _sdk_install.mark_load_attempt()
-        upgrade_faces()
-        _bind_installed_catalog(context)
-    elif plan.step is LoadStep.LOAD_SURFACE:
-        if plan.prepare_launched:
-            context, config = _prepare_launched_context(env)
-        disabled = process_disable_entries()
-        _apply_disable(disabled)
-        _sdk_install.mark_load_attempt()
-        try:
-            inputs = _load_inputs(
-                surface=surface,
-                disabled=disabled,
-                config=config,
-                machine=machine,
-                context=context,
-                clients=clients,
-                validate_state=validate_state,
-            )
-        except BaseException as exc:
-            _sdk_install.mark_load_failed(exc)
-            raise
-        load_surface(inputs)
-        _bind_installed_catalog(inputs.context)
+    if plan.step is not LoadStep.LOAD_SURFACE:
+        settle_installed(plan.step, context)
+        return
+    if plan.prepare_launched:
+        context, config = _prepare_launched_context(env)
+    disabled = process_disable_entries()
+    _apply_disable(disabled)
+    _sdk_install.mark_load_attempt()
+    try:
+        inputs = _load_inputs(
+            surface=surface,
+            disabled=disabled,
+            config=config,
+            machine=machine,
+            context=context,
+            clients=clients,
+            caller=external_caller(env=env),
+            validate_state=validate_state,
+        )
+    except BaseException as exc:
+        _sdk_install.mark_load_failed(exc)
+        raise
+    load_surface(inputs)
+    _bind_installed_catalog(inputs.context)
+
+
+# meiva:note
+# The steps of a load plan that need no new owner: they act on the installation already in the
+# slot and on the context the caller holds. `LOAD_SURFACE` is not one of them: it needs the owners
+# `LoadInputs` carries and goes through `load_surface`, so asking for it here is a caller bug.
+def settle_installed(step: LoadStep, context: MeivaContext | None) -> None:
+    from meiva.sdk_surface import install as _sdk_install
+
+    match step:
+        case LoadStep.RAISE_FAILURE:
+            _sdk_install.raise_load_failure()
+        case LoadStep.BIND_CATALOG:
+            _bind_installed_catalog(context)
+        case LoadStep.UPGRADE_FACES:
+            _sdk_install.mark_load_attempt()
+            upgrade_faces()
+            _bind_installed_catalog(context)
+        case LoadStep.NOTHING:
+            return
+        case LoadStep.LOAD_SURFACE:
+            raise ValueError("a surface load needs its owners: resolve LoadInputs and load_surface")
+        case _:
+            assert_never(step)
 
 
 # meiva:note
@@ -343,7 +402,8 @@ def process_disable_entries() -> tuple[str, ...]:
 # entries applied before any plugin. `config`, `machine` and `clients` are the owners the
 # installation retains, `clock` is the root clock it serves timestamped operations with, `home`
 # the MEIVA_HOME its authority reads `.env` from and `catalog` the model facts it hands to
-# model consumers.
+# model consumers. `sampling` is the owner of SDK-call sampling the installation retains and
+# `caller` the external tool profile the process opted into, parsed once by the facade.
 @dataclass(frozen=True, slots=True)
 class LoadInputs:
     surface: bool
@@ -351,6 +411,8 @@ class LoadInputs:
     config: ConfigBoot
     machine: MachineIdentity
     clients: ClientSet
+    sampling: SamplingPolicyOwner
+    caller: CallerIdentity | None
     clock: Clock
     home: Path
     catalog: ModelCatalog
@@ -367,6 +429,7 @@ def _load_inputs(
     machine: MachineIdentity | None,
     context: MeivaContext | None,
     clients: ClientSet | None,
+    caller: CallerIdentity | None,
     validate_state: StateGate | None,
 ) -> LoadInputs:
     from base import paths
@@ -379,7 +442,7 @@ def _load_inputs(
     if machine is None:
         machine = _context_machine(context) or machine_from_boot(config)
     if clients is None:
-        clients = process_clients(config=config, machine=machine)
+        clients = derived_clients(config, machine)
         atexit.register(clients.close)
     if context is not None and context.clock_factory is not None:
         clock = context.require_clock()
@@ -392,6 +455,8 @@ def _load_inputs(
         config=config,
         machine=machine,
         clients=clients,
+        sampling=process_sampling_owner(),
+        caller=caller,
         clock=clock,
         home=paths.meiva_home(),
         catalog=catalog,
@@ -440,7 +505,9 @@ def load_surface(inputs: LoadInputs) -> None:
             provider_keys=inputs.provider_keys,
             authority=authority,
             clients=inputs.clients,
+            sampling=inputs.sampling,
             clock=inputs.clock,
+            external_caller=inputs.caller,
             disabled_entries=inputs.disabled,
             validate_state=inputs.validate_state,
         )
@@ -512,14 +579,23 @@ def maybe_load_plugins_for_missing(name: str) -> bool:
         )
 
     step = plan_missing_name(facts(launched_child=None))
-    if step is MissingNameStep.RAISE_FAILURE:
-        _sdk_install.raise_load_failure()
     if step is MissingNameStep.ASK_LAUNCHED:
         step = plan_missing_name(facts(launched_child=agent_identity.is_launched_child()))
-    if step is MissingNameStep.LOAD:
-        ensure_plugins_loaded()
-        return _slot_facts().installed
-    return step is MissingNameStep.LOADED
+    match step:
+        case MissingNameStep.RAISE_FAILURE:
+            _sdk_install.raise_load_failure()
+            return False
+        case MissingNameStep.LOAD:
+            ensure_plugins_loaded()
+            return _slot_facts().installed
+        case MissingNameStep.LOADED:
+            return True
+        case MissingNameStep.IGNORE:
+            return False
+        case MissingNameStep.ASK_LAUNCHED:
+            raise RuntimeError("the missing-name plan asked whether the process was launched twice")
+        case _:
+            assert_never(step)
 
 
 def bind_launched_context() -> MeivaContext | None:
@@ -591,40 +667,81 @@ def record_harness_failure(exc: BaseException) -> None:
 
 
 # meiva:note
-# What an external process needs before it can act as an agent: the machine, a database factory,
-# and, only when the process owns its roots, the configuration, the clients and a clock. A
-# process that borrows a bound context holds none of those three; the context supplies its own.
+# What an external process needs before it can act as an agent, when it borrows a bound context:
+# the machine and the database factory of that context. The configuration, the clients and the
+# clock stay the context's own, so this boot holds none of them.
 @dataclass(frozen=True, slots=True)
-class ExternalBoot:
-    config: ConfigBoot | None
+class BorrowedBoot:
     machine: MachineIdentity
     database: DatabaseFactory
-    clients: ClientSet | None
-    clock: Clock | None
 
 
-def borrow_external_process(bound: MeivaContext) -> ExternalBoot:
-    return ExternalBoot(
-        config=None,
-        machine=bound.require_machine(),
-        database=bound.clients.database,
-        clients=None,
-        clock=None,
-    )
+# meiva:note
+# What an external process needs before it can act as an agent, when nothing is bound yet and it
+# owns its roots: the prepared configuration, the machine, the database factory the clients share,
+# the clients themselves and the clock an independent attachment has no process clock to inherit.
+@dataclass(frozen=True, slots=True)
+class OwnedBoot:
+    config: ConfigBoot
+    machine: MachineIdentity
+    database: DatabaseFactory
+    clients: ClientSet
+    clock: Clock
+
+    # meiva:note
+    # The context an independent attachment binds before it has any: the owned clients, the clock
+    # and the machine of this boot.
+    def new_context(self) -> MeivaContext:
+        clock = self.clock
+        return MeivaContext(clients=self.clients, clock_factory=lambda: clock, machine=self.machine)
 
 
-def own_external_process(config: ConfigBoot) -> ExternalBoot:
+type ExternalBoot = BorrowedBoot | OwnedBoot
+
+
+def borrow_external_process(bound: MeivaContext) -> BorrowedBoot:
+    return BorrowedBoot(machine=bound.require_machine(), database=bound.clients.database)
+
+
+def own_external_process(config: ConfigBoot) -> OwnedBoot:
     if not config.prepared:
         config.read_process_environment()
     machine = machine_from_boot(config)
     database = database_factory(config=config, machine=machine)
-    return ExternalBoot(
+    return OwnedBoot(
         config=config,
         machine=machine,
         database=database,
-        clients=process_clients(config=config, machine=machine, database=database),
+        clients=clients_over(config, machine, database),
         clock=Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS),
     )
+
+
+# meiva:note
+# Bring up the plugin surface of an external process around its attachment: an owned boot hands
+# the load its configuration and clients, a borrowed one leaves both to the context it borrows.
+def initialize_external(
+    context: MeivaContext, boot: ExternalBoot, *, validate_state: StateGate | None
+) -> None:
+    match boot:
+        case OwnedBoot():
+            initialize_context(
+                context,
+                surface=False,
+                config=boot.config,
+                clients=boot.clients,
+                validate_state=validate_state,
+            )
+        case BorrowedBoot():
+            initialize_context(
+                context,
+                surface=False,
+                config=None,
+                clients=None,
+                validate_state=validate_state,
+            )
+        case _:
+            assert_never(boot)
 
 
 def plugin_state_codec() -> Any:

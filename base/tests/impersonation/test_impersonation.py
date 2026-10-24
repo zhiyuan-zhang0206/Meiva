@@ -16,9 +16,11 @@ from base.cluster.machine.tests.identity import machine_identity as machine_iden
 from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
-from base.events.live.bus import EventBus, EventBusConfig
-from base.events.live.projection import Cancelled
+from base.events.live.bus import EventBus
+from base.events.live.projection import AgentUpdated, Cancelled, ImpersonationChanged
+from base.events.live.tests.live_capture import snapshots_at_events
 from base.native_process.runtime_incarnation import RuntimeIncarnation
+from base.tests.impersonation.publications import NOTHING, Published, tap_publications
 from base.tests.impersonation.support import (
     accept_controller,
     create_native_owner,
@@ -47,27 +49,23 @@ def test_controller_read_that_expires_lease_refreshes_roster(
         (lease["id"],),
     )
     db_conn.commit()
-    notices: list[tuple[int, bool]] = []
-
-    def record_wake(
-        _db: Database, _bus: EventBus, agent_id: int, *, roster_changed: bool = False
-    ) -> None:
-        notices.append((agent_id, roster_changed))
-
-    assert (
-        leases.get(database, event_bus, lease["id"], local_machine=local_machine, wake=record_wake)[
-            "status"
-        ]
-        == "expired"
-    )
-    assert notices == [(owner.agent_id, True)]
-    assert (
-        leases.get(database, event_bus, lease["id"], local_machine=local_machine, wake=record_wake)[
-            "status"
-        ]
-        == "expired"
-    )
-    assert notices == [(owner.agent_id, True)]
+    with tap_publications(event_bus, owner.agent_id) as tap:
+        assert (
+            leases.get(database, event_bus, lease["id"], local_machine=local_machine)["status"]
+            == "expired"
+        )
+        assert tap.drain() == Published(
+            wakes=((owner.agent_id, "impersonation"),),
+            events=(
+                ImpersonationChanged(agent_id=owner.agent_id),
+                AgentUpdated(agent_id=owner.agent_id),
+            ),
+        )
+        assert (
+            leases.get(database, event_bus, lease["id"], local_machine=local_machine)["status"]
+            == "expired"
+        )
+        assert tap.drain() == NOTHING
 
 
 class _ShortLockDatabase:
@@ -417,6 +415,7 @@ def test_external_inbox_preserves_cancel_until_explicit_processing_ack(
 
 def test_cancel_ack_publishes_committed_completion_once(
     db_conn: psycopg.Connection,
+    db_url: str,
     database: Database,
     event_bus: EventBus,
     *,
@@ -439,80 +438,65 @@ def test_cancel_ack_publishes_committed_completion_once(
     unread = insert_inbound_message(
         db_conn, owner.agent_id, "Unread", "user", kind="cancel", bus=event_bus, database=database
     )
-    published: list[Cancelled] = []
-    wakes: list[int] = []
 
-    class _RecordingEventBus(EventBus):
-        def publish_best_effort_sync(
-            self,
-            payload: str,
-            *,
-            channel: str | None = None,
-            decode_responses: bool = True,
-            context: str = "",
-        ) -> int | None:
-            _ = channel, decode_responses, context
-            assert db_conn.execute(
+    def cancel_ack_seen_by_a_separate_connection() -> tuple[object, ...] | None:
+        with psycopg.connect(db_url) as probe:
+            return probe.execute(
                 "SELECT i.status,m.acknowledged_at IS NOT NULL FROM inbound_messages i "
                 "JOIN agent_impersonation_messages m ON m.inbound_id=i.id "
                 "WHERE i.id=%s AND m.lease_id=%s",
                 (cancel, lease["id"]),
-            ).fetchone() == ("done", True)
-            db_conn.commit()
-            published.append(Cancelled.model_validate_json(payload))
-            return 1
+            ).fetchone()
 
-    recording_bus = _RecordingEventBus(
-        EventBusConfig(redis_url="redis://unused", events_channel=event_bus.channel)
-    )
-
-    def record_wake(
-        _db: Database, _bus: EventBus, agent_id: int, *, roster_changed: bool = False
-    ) -> None:
-        _ = roster_changed
-        wakes.append(agent_id)
-
-    with pytest.raises(leases.ImpersonationError, match="not read"):
+    woke_owner = (owner.agent_id, "impersonation")
+    with (
+        tap_publications(event_bus, owner.agent_id) as tap,
+        snapshots_at_events(event_bus, cancel_ack_seen_by_a_separate_connection) as at_arrival,
+    ):
+        with pytest.raises(leases.ImpersonationError, match="not read"):
+            leases.ack(
+                database,
+                event_bus,
+                lease["id"],
+                [cancel, unread],
+                local_machine=local_machine,
+            )
+        assert tap.drain() == NOTHING
         leases.ack(
             database,
-            recording_bus,
+            event_bus,
             lease["id"],
-            [cancel, unread],
+            [peer],
             local_machine=local_machine,
-            wake=record_wake,
         )
-    assert published == []
-    assert wakes == []
-    leases.ack(
-        database,
-        recording_bus,
-        lease["id"],
-        [peer],
-        local_machine=local_machine,
-        wake=record_wake,
-    )
-    assert published == []
-    assert wakes == [owner.agent_id]
-    leases.ack(
-        database,
-        recording_bus,
-        lease["id"],
-        [cancel],
-        local_machine=local_machine,
-        wake=record_wake,
-    )
-    assert published == [Cancelled(agent_id=owner.agent_id)]
-    assert wakes == [owner.agent_id, owner.agent_id]
-    leases.ack(
-        database,
-        recording_bus,
-        lease["id"],
-        [cancel, peer],
-        local_machine=local_machine,
-        wake=record_wake,
-    )
-    assert len(published) == 1
-    assert wakes == [owner.agent_id, owner.agent_id]
+        assert tap.drain() == Published(
+            wakes=(woke_owner,), events=(ImpersonationChanged(agent_id=owner.agent_id),)
+        )
+        leases.ack(
+            database,
+            event_bus,
+            lease["id"],
+            [cancel],
+            local_machine=local_machine,
+        )
+        assert tap.drain() == Published(
+            wakes=(woke_owner,),
+            events=(
+                Cancelled(agent_id=owner.agent_id),
+                ImpersonationChanged(agent_id=owner.agent_id),
+            ),
+        )
+        leases.ack(
+            database,
+            event_bus,
+            lease["id"],
+            [cancel, peer],
+            local_machine=local_machine,
+        )
+        assert tap.drain() == NOTHING
+    assert [state for event, state in at_arrival if event["role"] == "cancelled"] == [
+        ("done", True)
+    ]
 
 
 def test_ttl_revokes_all_borrower_operations_and_preserves_pending(

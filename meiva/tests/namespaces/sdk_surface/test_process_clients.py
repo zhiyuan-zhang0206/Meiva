@@ -4,12 +4,13 @@ from pathlib import Path
 import pytest
 import redis
 
+from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot
 from base.config.tests.configuration import snapshot_process_config
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.host.proc import run_bounded
-from meiva.boot import process_clients
+from meiva.boot import clients_over, derived_clients
 
 _CHILD = Path(__file__).with_name("child_gateway_credentials.py")
 
@@ -24,7 +25,7 @@ def config_boot() -> ConfigBoot:
 # can be dialled: the failure is the SDK's RuntimeError, not libpq's connection error that an
 # empty DSN would produce if it reached the driver.
 def test_default_sql_refuses_a_missing_resource_before_dial(config_boot: ConfigBoot) -> None:
-    clients = process_clients(config=config_boot)
+    clients = derived_clients(config_boot, machine_from_boot(config_boot))
     config_boot.set_field("db_url", "")
     try:
         with pytest.raises(RuntimeError, match="MEIVA_DB_URL not set"):
@@ -39,8 +40,9 @@ def test_process_custom_database_is_independent_of_the_default(
     database_gate: ProcessDbGate,
 ) -> None:
     database = Database.from_settings(gate=database_gate)
-    custom = process_clients(database=lambda: database, config=config_boot)
-    default = process_clients(config=config_boot)
+    machine = machine_from_boot(config_boot)
+    custom = clients_over(config_boot, machine, lambda: database)
+    default = derived_clients(config_boot, machine)
     config_boot.set_field("db_url", "")
     try:
         assert custom.sql.execute("SELECT 44").fetchone() == (44,)
@@ -58,7 +60,7 @@ def test_process_resources_resolve_after_overlay_and_again_after_close(
 ) -> None:
     config_boot.set_field("db_url", "")
     config_boot.set_field("redis_url", "")
-    clients = process_clients(config=config_boot)
+    clients = derived_clients(config_boot, machine_from_boot(config_boot))
     config_boot.set_field("db_url", db_url)
     config_boot.set_field("redis_url", redis_url)
     try:
@@ -103,11 +105,12 @@ def test_process_boot_builds_no_connection_stack(pytester: pytest.Pytester) -> N
         "importlib.reload(meiva)\n"
         "assert meiva._LOADED_IMAGE is image\n"
         "assert 'base.db' not in sys.modules\n"
-        "from meiva.boot import process_clients, context_from_description\n"
+        "from meiva.boot import derived_clients, context_from_description\n"
         "before = set(sys.modules)\n"
+        "from base.cluster.machine.boot import machine_from_boot\n"
         "from base.config import ConfigBoot\n"
         "owner = ConfigBoot()\n"
-        "process_clients(config=owner)\n"
+        "derived_clients(owner, machine_from_boot(owner))\n"
         "context_from_description({'identity': {'agent_id': 17, 'owns_loop': True, "
         "'actor': None}, 'gateway_url': 'http://gateway.test'}, config=owner)\n"
         "print(sorted(m for m in ('psycopg', 'psycopg_pool', 'redis', 'httpx', 'langchain_core') "
@@ -128,12 +131,13 @@ def test_clients_over_an_unprepared_owner_capture_only_on_first_read(
     code = """
 import os
 from base.agents.context.gateway_client.transport import GatewayTransportInputs
-from meiva.boot import process_clients
+from meiva.boot import derived_clients
+from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot
 
 owner = ConfigBoot()
 before = dict(os.environ)
-clients = process_clients(config=owner)
+clients = derived_clients(owner, machine_from_boot(owner))
 inputs = clients.get(GatewayTransportInputs)
 assert not owner.prepared
 assert inputs.max_retries_reader() > 0
@@ -161,8 +165,8 @@ def test_gateway_clients_keep_independent_live_config_and_rebuild_credentials(
     second.set_field("gateway_url", "http://second.test/")
     config_boot.set_field("cluster_secret", "first-secret")
     second.set_field("cluster_secret", "second-secret")
-    first_clients = process_clients(config=config_boot)
-    second_clients = process_clients(config=second)
+    first_clients = derived_clients(config_boot, machine_from_boot(config_boot))
+    second_clients = derived_clients(second, machine_from_boot(second))
     try:
         first_gateway = first_clients.gateway
         second_gateway = second_clients.gateway

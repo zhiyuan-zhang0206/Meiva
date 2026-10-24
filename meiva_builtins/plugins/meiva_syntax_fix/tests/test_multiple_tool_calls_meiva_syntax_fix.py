@@ -19,13 +19,12 @@ from base.agents.context import MeivaContext
 from base.agents.context.identity import AgentIdentity
 from base.agents.messages.kwargs import read_meiva_kwargs
 from base.clock import Clock
-from base.config.tests.configuration import snapshot_process_config
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.packages.plugin_providers import build_model_catalog
 from base.packages.tests.model_catalog import inert_keys
-from meiva.boot import process_clients
+from meiva.tests.fixtures.pin_agent import snapshot_clients
 from meiva_builtins.plugins.meiva_syntax_fix.agent_runtime import syntax_fix_before_exec
 from meiva_builtins.plugins.meiva_syntax_fix.tests.hook_support import (
     UNAVAILABLE,
@@ -57,7 +56,7 @@ async def _run_calls(
 
 @pytest.fixture
 def runtime_for(database_gate: ProcessDbGate) -> Iterator[Callable[..., Runtime[MeivaContext]]]:
-    clients = process_clients(config=snapshot_process_config())
+    clients = snapshot_clients()
 
     def build(*, llm_override: str | None = None, **pins: Any) -> Runtime[MeivaContext]:
         return Runtime(

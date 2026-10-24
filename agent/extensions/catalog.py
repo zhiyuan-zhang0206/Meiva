@@ -277,9 +277,12 @@ class UnknownPluginError(Exception):
 def build_catalog() -> Catalog:
     from agent.state import plugin_state_schema
     from base.packages.plugins.loading.registry import declarations
+    from meiva.boot import process_sampling_owner
     from meiva.sdk_surface.extensions import load_extensions
 
-    config = load_extensions(validate_state=plugin_state_schema).config
+    config = load_extensions(
+        sampling=process_sampling_owner(), validate_state=plugin_state_schema
+    ).config
     declared = {name: contributions for name, _dir, contributions in declarations()}
     data_records = _data_records()
     discovered = enable_config.installed_plugin_dirs()

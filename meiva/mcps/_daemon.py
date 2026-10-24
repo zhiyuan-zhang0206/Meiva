@@ -173,19 +173,6 @@ class SerialSession:
             return await self._session.call_tool(name, args)
 
 
-def is_mcp_transport_error(exc: BaseException) -> bool:
-    """Return True when *exc* indicates the MCP server process or stdio pipe
-    died and a reconnect + retry is appropriate.
-
-    Shared with the in-process SDK (`meiva.mcps.config.is_transport_error`) so
-    both sides agree on the retry seam. Notably treats the SDK-synthesized
-    `MCPError(CONNECTION_CLOSED)` — raised `from None` when the stdio peer's
-    read loop hits EOF, so the __cause__ probe alone missed it (2026-08-13
-    #1229) — as a transport error, not a tool-level error.
-    """
-    return is_transport_error(exc)
-
-
 async def invalidate_session(
     server: str,
     scope: Scope,
@@ -327,7 +314,7 @@ async def _handle_call_tool(
     try:
         result = await session.call_tool(tool, args)
     except Exception as e:
-        if not is_mcp_transport_error(e):
+        if not is_transport_error(e):
             raise
         await invalidate_session(server, scope)
         raise MCPCallError(
@@ -369,7 +356,7 @@ async def dispatch_with_retry(req: dict[str, Any], scope: Scope) -> dict[str, ob
                 return await _dispatch_request(req, req_id, method, params, server, scope)
             except Exception as e:
                 delay = retry_delay(
-                    scope.config.retry, attempt, transport_error=is_mcp_transport_error(e)
+                    scope.config.retry, attempt, transport_error=is_transport_error(e)
                 )
                 if delay is None:
                     raise

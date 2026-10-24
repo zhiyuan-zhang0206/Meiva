@@ -8,5 +8,5 @@
 "test_event_owner_shutdown.py#monkeypatch.setattr services.agent_runner.agent_host.daemon.close_host_pools" = 2
 "test_event_owner_shutdown.py#monkeypatch.setattr services.agent_runner.agent_host.daemon.load_installation" = 1
 "test_event_owner_shutdown.py#monkeypatch.setattr services.agent_runner.agent_host.daemon.open_host_pools" = 1
-"test_event_owner_shutdown.py#monkeypatch.setattr services.agent_runner.agent_host.daemon.process_clients" = 1
+"test_event_owner_shutdown.py#monkeypatch.setattr services.agent_runner.agent_host.daemon.clients_over" = 1
 "test_event_owner_shutdown.py#monkeypatch.setattr services.agent_runner.agent_host.daemon.remove_pidfile" = 2

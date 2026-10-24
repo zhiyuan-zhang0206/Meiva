@@ -53,7 +53,7 @@ from base.agents.context import MeivaContext
 from base.agents.context.identity import AgentIdentity
 from base.clock import Clock
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
-from base.config.tests.configuration import defaults, snapshot_process_config
+from base.config.tests.configuration import defaults
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
@@ -61,8 +61,8 @@ from base.host.env.agent_slices import AgentSlices
 from base.native_process.turn_identity import HostedTurnResources
 from base.packages.plugin_providers import build_model_catalog
 from base.packages.plugins.extensions import ExtensionRegistry, PluginContributions
-from meiva.boot import process_clients
 from meiva.sdk_surface import process_context
+from meiva.tests.fixtures.pin_agent import snapshot_clients
 
 assert (
     asyncio
@@ -472,7 +472,7 @@ def make_runtime_and_config(
         agent=AgentSlices.resolve(pins, default_reader=defaults()),
         db=Database.from_settings(gate=database_gate),
         bus=EventBus.from_settings(),
-        clients=process_clients(config=snapshot_process_config()),
+        clients=snapshot_clients(),
         identity=AgentIdentity(agent_id=agent_id, owns_loop=True),
         catalog=build_model_catalog(),
         clock_factory=Clock.from_settings,

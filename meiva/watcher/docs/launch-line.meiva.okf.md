@@ -36,4 +36,14 @@ stale-identity case supplies the wrong identity through the runner environment (
 shipped bootstrap must overwrite it before SDK import), and the failed-launch cases make
 one generated path a directory.
 
+Stale generated files are cleaned inside `run`, after the session exists, in a fixed
+order: create the session, list the watchers directory, list the live sessions, remove
+what `launch_plan.stale_names` names. The order is the Bug A (#1116) fix. A sibling that
+starts at the same moment creates its session before it writes a file, so every file the
+directory listing shows belongs to a session the later listing contains, and its child's
+unread files are never taken for dead ones; a live-session snapshot taken earlier (while
+the deps were built) misses such a sibling. The decision is a strict function over the two
+listings; `files.scan` and `files.remove` are the only disk steps, and a failure in any of
+them kills the session like every later step.
+
 Parent: [[meiva/watcher/docs/watcher.meiva.okf.md]].

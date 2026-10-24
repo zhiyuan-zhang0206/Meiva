@@ -26,7 +26,7 @@ from base.db.config import db_config_from_boot
 from base.native_process.code_version import CodeVersion
 from base.paths import meiva_home, prod_service_checkout_error
 from base.telemetry import process_name
-from meiva.boot import process_clients
+from meiva.boot import clients_over
 from meiva.sdk_surface import process_context
 from services.wake.schedule_manager import engine
 from services.wake.schedule_manager.stall_policy import StallPolicy
@@ -67,7 +67,7 @@ def run(schedule_id: int, revision: int | None = None) -> int:
     def clock_factory() -> Clock:
         return Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS)
 
-    clients = process_clients(config=config, database=database, machine=machine)
+    clients = clients_over(config, machine, database)
     primary: BaseException | None = None
     try:
         # meiva:note

@@ -5,9 +5,10 @@ from pathlib import Path
 
 import meiva.mcps as mcps_mod
 from base.agents.context import MeivaContext
+from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot
 from base.config.tests.configuration import snapshot_process_config
-from meiva.boot import process_clients
+from meiva.boot import derived_clients
 from meiva.mcps import McpClients
 from meiva.sdk_surface import process_context
 
@@ -17,7 +18,7 @@ from meiva.sdk_surface import process_context
 def context_with_timeout(timeout: float) -> tuple[MeivaContext, ConfigBoot]:
     config = snapshot_process_config()
     config.set_field("mcp_connect_timeout_seconds", timeout)
-    return MeivaContext(clients=process_clients(config=config)), config
+    return MeivaContext(clients=derived_clients(config, machine_from_boot(config))), config
 
 
 def sdk_timeout(context: MeivaContext) -> float:
@@ -32,8 +33,8 @@ def sdk_timeout(context: MeivaContext) -> float:
 
 
 # meiva:note
-# Each context owns its own MCP clients and reads the live setting of its own configuration owner. The facade reads that setting when it builds the source of a proxy, so a changed timeout reaches the next proxy of that context only, and a closed context rebuilds its clients on the next use.
-def test_sdk_clients_use_separate_live_timeout_readers_and_rebuild_after_close(
+# Each context owns its own MCP clients, which read the timeout of their own configuration owner once, when the first MCP call builds them. The facade hands that value to the source of every proxy, so a timeout changed afterwards reaches only the clients built after it: a closed context rebuilds its clients on the next use and reads the setting again.
+def test_sdk_clients_read_their_own_timeout_once_and_rebuild_after_close(
     unit_home: Path,
 ) -> None:
     (unit_home / "mcp.json").write_text(json.dumps({"mcpServers": {"fs": {"command": "x"}}}))
@@ -47,27 +48,29 @@ def test_sdk_clients_use_separate_live_timeout_readers_and_rebuild_after_close(
         assert (sdk_timeout(first), sdk_timeout(second)) == (7.5, 11.0)
 
         first_config.set_field("mcp_connect_timeout_seconds", 2.0)
-        assert (sdk_timeout(first), sdk_timeout(second)) == (2.0, 11.0)
+        assert (sdk_timeout(first), sdk_timeout(second)) == (7.5, 11.0)
 
         first.clients.close()
         rebuilt = first.clients.get(McpClients)
         assert rebuilt is not first_client
-        assert rebuilt.timeout_seconds() == 2.0
-        assert second_client.timeout_seconds() == 11.0
+        assert rebuilt.timeout_seconds == 2.0
+        assert second_client.timeout_seconds == 11.0
         assert rebuilt._remote is None
     finally:
         first.clients.close()
         second.clients.close()
 
 
-def test_mcp_client_construction_does_not_read_configuration() -> None:
-    def premature_read() -> float:
-        raise AssertionError("configuration belongs to an operation or session creation")
-
-    assert McpClients(Path("unused.sock"), premature_read)._remote is None
-
-    clients = process_clients(config=snapshot_process_config())
+# meiva:note
+# Building the client set builds no MCP client and reads no setting: the timeout is read when the first MCP call asks for the clients, so a value set between the two is the one the clients hold.
+def test_mcp_client_construction_waits_for_the_first_call_to_read_configuration() -> None:
+    config = snapshot_process_config()
+    clients = derived_clients(config, machine_from_boot(config))
     assert not clients._made
+
+    config.set_field("mcp_connect_timeout_seconds", 3.5)
     mcp = clients.get(McpClients)
+
+    assert mcp.timeout_seconds == 3.5
     assert mcp._remote is None
     clients.close()

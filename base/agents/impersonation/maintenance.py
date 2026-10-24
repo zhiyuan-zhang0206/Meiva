@@ -1,7 +1,6 @@
 """Lease expiration without deleting permanent history on the existing TTL reaper."""
 
 import shlex
-from collections.abc import Callable
 from typing import Literal
 
 from psycopg.types.json import Jsonb
@@ -77,8 +76,6 @@ def force_expire_impersonation(
     agent_id: int,
     session_id: int,
     actor: str,
-    *,
-    publish_wake: Callable[[Database, EventBus, int, str], object] = publish_inbound_wake,
 ) -> Literal["expired", "not_open"]:
     """Close only the open session the caller saw; return expired or not_open.
 
@@ -126,7 +123,7 @@ def force_expire_impersonation(
         session_id=session_id,
         actor=actor,
     )
-    publish_wake(db, bus, agent_id, "impersonation-expired")
+    publish_inbound_wake(db, bus, agent_id, "impersonation-expired")
     publish_impersonation_changed_sync(bus, agent_id)
     publish_agent_updated_sync(bus, agent_id)
     return "expired"

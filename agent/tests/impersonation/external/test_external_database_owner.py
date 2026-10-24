@@ -26,7 +26,7 @@ from base.host.proc import run_bounded
 from base.telemetry.delivery.pipeline import EventPipeline
 from base.telemetry.delivery.receipts import Event
 from meiva import impersonation
-from meiva.boot import ExternalBoot
+from meiva.boot import OwnedBoot
 from meiva.impersonation.admission import lease_target
 from meiva.impersonation.attachment import AttachInputs, Attachment
 from meiva.sdk_surface import install, process_context
@@ -41,7 +41,7 @@ def discard(batch: list[Event]) -> None:
 
 # meiva:note
 # A boot whose client set owns an observable event pipeline, built before the attachment.
-def owned_boot() -> tuple[ExternalBoot, EventPipeline]:
+def owned_boot() -> tuple[OwnedBoot, EventPipeline]:
     boot = independent_boot()
     pipeline = EventPipeline(writer=discard, flush_interval_s=0.01)
     clients = ClientSet(database=boot.database, pipeline_factory=lambda: pipeline)

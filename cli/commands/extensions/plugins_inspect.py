@@ -185,12 +185,14 @@ def _where(exc: BaseException) -> str:
 # meiva:link cli/commands/extensions/docs/plugin-inspection.meiva.okf.md
 def cmd_plugins_verify() -> int:
     from agent.state import plugin_state_schema
+    from meiva.boot import process_sampling_owner
     from meiva.sdk_surface.extensions import load_extensions
 
     failures: list[tuple[str, BaseException]] = []
     try:
         loaded = load_extensions(
             report=lambda name, exc: failures.append((name, exc)),
+            sampling=process_sampling_owner(),
             validate_state=plugin_state_schema,
         )
     except Exception as exc:

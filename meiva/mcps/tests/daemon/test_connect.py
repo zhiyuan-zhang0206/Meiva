@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import socket
 import sys
 import time
@@ -11,12 +12,14 @@ from typing import Any
 
 import psutil
 import pytest
+from mcp.shared.auth import OAuthToken
 from mcp.types import TextContent
 
 import meiva.mcps._browser as browser_mod
 import meiva.mcps._computer as computer_mod
 import meiva.mcps._daemon as daemon_mod
 from base.paths import chrome_mcp_socket, computer_mcp_socket
+from meiva.mcps._oauth import FileTokenStorage
 from meiva.mcps._policy import DaemonConfig
 from meiva.mcps.config import MCPError
 from meiva.mcps.tests.daemon.daemon_support import (
@@ -30,6 +33,9 @@ from meiva.mcps.tests.daemon.daemon_support import (
 )
 from meiva.mcps.tests.daemon.http_server import http_mcp_server
 from meiva.mcps.tests.line_streams import short_dir as short_dir
+
+OAUTH_CHILD = Path(__file__).with_name("oauth_connect_child.py")
+REPO_ROOT = Path(__file__).resolve().parents[4]
 
 
 async def test_an_unmet_requirement_is_reported_before_anything_starts(
@@ -152,6 +158,86 @@ async def test_a_url_server_without_headers_sends_none(
         _, stack = await daemon_mod.connect_server("remote", config, {})
         await stack.aclose()
     assert all("authorization" not in headers for headers in remote.seen_headers)
+
+
+# meiva:note
+# Start `oauth_connect_child.py` connecting to the server `server` of the home, which is where the
+# child reads the server entries and tokens from.
+async def _start_connect_child(
+    home: Path, server: str, timeout_seconds: float
+) -> asyncio.subprocess.Process:
+    env = {key: value for key, value in os.environ.items() if not key.startswith("MEIVA_")}
+    env["MEIVA_HOME"] = str(home)
+    return await asyncio.create_subprocess_exec(
+        sys.executable,
+        "-I",
+        "-X",
+        "utf8",
+        str(OAUTH_CHILD),
+        str(REPO_ROOT),
+        server,
+        str(timeout_seconds),
+        env=env,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+
+
+# meiva:note
+# What the connect child printed once it finished.
+async def _connect_outcome(child: asyncio.subprocess.Process) -> dict[str, Any]:
+    stdout, stderr = await child.communicate()
+    assert child.returncode == 0, stderr.decode()[-700:]
+    return json.loads(stdout.decode().strip().splitlines()[-1])
+
+
+# meiva:note
+# An `oauth` URL entry takes its credentials from the OAuth provider, not from static headers: with
+# a token already stored for the server (no authorization flow, no browser) every request to the
+# real HTTP server carries it, and the per-server flow lock is created for the connect.
+async def test_an_oauth_url_server_connects_with_the_token_stored_for_it(unit_home: Path) -> None:
+    await FileTokenStorage("remote").set_tokens(
+        OAuthToken(access_token="at-stored", token_type="Bearer", expires_in=3600)  # noqa: S106
+    )
+    async with http_mcp_server() as remote:
+        write_servers(unit_home, {"remote": {"url": remote.url, "oauth": True}})
+        outcome = await _connect_outcome(await _start_connect_child(unit_home, "remote", 15.0))
+    assert outcome == {"outcome": "connected", "tools": ["echo"], "locks": ["remote"]}
+    assert remote.seen_headers
+    assert all(
+        headers.get("authorization") == "Bearer at-stored" for headers in remote.seen_headers
+    )
+
+
+# meiva:note
+# An OAuth connect may take as long as a user needs to click through a browser, so the generic
+# connect timeout does not bound it. Both entries point at a listener that accepts and never
+# answers: the plain entry gives up at the 0.5 s limit, while the OAuth entry is still waiting well
+# after it.
+async def test_an_oauth_connect_is_not_bounded_by_the_connect_timeout(unit_home: Path) -> None:
+    async def never_answers(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        await reader.read()
+        writer.close()
+
+    listener = await asyncio.start_server(never_answers, "127.0.0.1", 0)
+    url = f"http://127.0.0.1:{listener.sockets[0].getsockname()[1]}/mcp"
+    write_servers(unit_home, {"plain": {"url": url}, "authorized": {"url": url, "oauth": True}})
+    await FileTokenStorage("authorized").set_tokens(
+        OAuthToken(access_token="at-stored", token_type="Bearer", expires_in=3600)  # noqa: S106
+    )
+    authorized = await _start_connect_child(unit_home, "authorized", 0.5)
+    try:
+        plain = await _connect_outcome(await _start_connect_child(unit_home, "plain", 0.5))
+        await asyncio.sleep(2.0)
+        still_waiting = authorized.returncode is None
+    finally:
+        if authorized.returncode is None:
+            authorized.kill()
+        await authorized.wait()
+        listener.close()
+        await listener.wait_closed()
+    assert plain["outcome"] == "failed"
+    assert still_waiting
 
 
 # meiva:note

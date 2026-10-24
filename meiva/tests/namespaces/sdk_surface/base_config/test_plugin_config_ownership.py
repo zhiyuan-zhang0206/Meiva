@@ -1,12 +1,14 @@
 import json
 from pathlib import Path
 
-import pytest
 from pydantic import BaseModel
 
 from base.lm.catalog import ModelCatalog
-from base.packages.plugin_config_images import DiskPluginConfigImages, PluginConfigOwner
-from base.packages.plugins import load_report
+from base.packages.plugin_config_images import (
+    DiskPluginConfigImages,
+    PluginConfigOwner,
+    config_image_path,
+)
 from base.packages.plugins.config_registration import (
     bind_plugin_config,
     disk_image_path,
@@ -22,6 +24,7 @@ from base.packages.tests.plugin_config.test_plugin_config import (
     isolated_registry as isolated_registry,
 )
 from base.paths.home import resolve_meiva_home
+from meiva.sdk_surface.tests.installation_holder import inert_sampling
 
 
 def test_syntax_fix_ruff_format_overlay_is_accepted(model_catalog: ModelCatalog) -> None:
@@ -47,7 +50,7 @@ def test_bind_undo_drops_the_binding(isolated_registry: dict[str, BaseModel], un
 
 
 def test_install_refuses_a_plugin_whose_config_does_not_bind_and_installs_the_rest(
-    isolated_registry: dict[str, BaseModel], unit_home, monkeypatch: pytest.MonkeyPatch
+    isolated_registry: dict[str, BaseModel], unit_home
 ):
     from types import SimpleNamespace
 
@@ -69,7 +72,6 @@ def test_install_refuses_a_plugin_whose_config_does_not_bind_and_installs_the_re
     def _capture(name: str, exc: BaseException) -> None:
         reported.append((name, exc))
 
-    monkeypatch.setattr(load_report, "report_plugin_load_failure", _capture)
     registry = ExtensionRegistry(
         (
             (
@@ -89,7 +91,12 @@ def test_install_refuses_a_plugin_whose_config_does_not_bind_and_installs_the_re
         )
     )
 
-    admitted = install.install(registry, config_images=DiskPluginConfigImages(resolve_meiva_home()))
+    admitted = install.install(
+        registry,
+        _capture,
+        config_images=DiskPluginConfigImages(resolve_meiva_home()),
+        sampling=inert_sampling(),
+    )
     try:
         assert [name for name, _ in admitted.plugins] == ["healthy"]
         assert [name for name, _ in reported if name == "drifted"] == ["drifted"]
@@ -108,14 +115,11 @@ def test_install_refuses_a_plugin_whose_config_does_not_bind_and_installs_the_re
     assert installed() is None
 
 
-def test_authority_path_canonicalizes_a_symlink_home_without_creating_it(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_authority_path_canonicalizes_a_symlink_home_without_creating_it(tmp_path: Path) -> None:
     missing_home = tmp_path / "uncreated-target"
     alias = tmp_path / "home-link"
     alias.symlink_to(missing_home, target_is_directory=True)
-    monkeypatch.setenv("MEIVA_HOME", str(alias))
-    path = disk_image_path("canonical-probe")
+    path = config_image_path("canonical-probe", home=alias)
     assert path == missing_home.resolve() / "configs" / "canonical-probe" / "config.json"
     assert read_config_image(FixtureConfig, path) == FixtureConfig()
     assert not missing_home.exists()

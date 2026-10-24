@@ -17,11 +17,8 @@ import asyncio
 import contextlib
 import inspect
 import io
-import json
-import sys
 from collections.abc import Callable, Generator, Iterator
 from dataclasses import replace
-from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from typing import cast
 
@@ -33,8 +30,8 @@ from base.agents.context.clients import ClientSet
 from base.agents.context.identity import ExternalLease
 from base.agents.sdk import call_policy
 from base.agents.sdk.tally import SdkCallTally
+from base.api_contracts.caller_identity import CallerIdentity
 from base.cluster.machine import MachineIdentity
-from base.host.proc import run_bounded
 from base.packages.plugin_config_images import DiskPluginConfigImages
 from base.packages.plugins.extensions import (
     ExtensionRegistry,
@@ -46,9 +43,9 @@ from base.paths.home import resolve_meiva_home
 from base.telemetry.tests.capture.event_capture import EmittedEvents
 from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
 from meiva.sdk_surface import install, meiva_module, metering, process_context
+from meiva.sdk_surface.installation import Installation
+from meiva.sdk_surface.tests.installation_holder import held_installation
 from meiva.tests.fixtures.pin_agent import pin_agent
-
-_CHILD = Path(__file__).with_name("child_metering_identity.py")
 
 
 @pytest.fixture
@@ -512,28 +509,23 @@ async def test_plugin_wrap_preserves_awaited_single_event(
 
 
 # meiva:note
-# A caller-profile environment the SDK cannot parse is a fault in who is calling, so the
-# recorder rejects the call at admission and the body never runs. The profile is read from
-# the environment of the process the call runs in, so the scenario runs in a real child whose
-# environment the parent sets.
-@pytest.mark.parametrize("wrapper", ["sync", "async", "mcp"])
-def test_invalid_identity_snapshot_prevents_sdk_body(wrapper: str) -> None:
-    import os
-
-    env = {key: value for key, value in os.environ.items() if key != "MEIVA_AGENT_ID"}
-    env["MEIVA_CALLER_IDENTITY"] = "{not json"
-    proc = run_bounded(
-        [sys.executable, "-I", str(_CHILD), wrapper],
-        env=env,
-        capture_output=True,
-        text=True,
-        timeout=120,
-    )
-    assert proc.returncode == 0, proc.stderr
-    assert json.loads(proc.stdout.strip().splitlines()[-1]) == {
-        "rejected": True,
-        "executed": [],
-    }
+# The external tool profile the installation was built with names who is calling when no
+# context does; the recorder stamps it as the event's source. A profile the SDK cannot parse
+# never gets this far: the plugin load that reads it fails (see test_external_caller_meiva.py).
+def test_the_installations_external_profile_is_stamped_on_sdk_events(
+    sampling_owner: call_policy.SamplingPolicyOwner,
+    emitted_events: EmittedEvents,
+) -> None:
+    pin_agent(42, clients=ClientSet(pipeline_factory=emitted_events.producer))
+    profile = CallerIdentity(kind="external_agent", subject="codex")
+    installation = replace(Installation.bare(sampling=sampling_owner), external_caller=profile)
+    wrapped = metering.make_recorder(lambda: "ok", "files.read", sampling_owner, None)
+    assert wrapped() == "ok"
+    with held_installation(installation):
+        assert wrapped() == "ok"
+    [without, with_profile] = emitted_events
+    assert (without.agent_id, without.source) == (42, "agent:42")
+    assert (with_profile.agent_id, with_profile.source) == (42, "external_agent:codex")
 
 
 async def test_awaited_calls_retain_their_entry_identity(

@@ -666,3 +666,33 @@ def test_rollback_attempts_all_undos_and_cleanup_failure_is_never_success(
     _assert_surface_unchanged(before)
     assert not hasattr(meiva, "failed_ns") and not hasattr(meiva, "prior_ns")
     assert not hasattr(meiva, "later_ns")
+
+
+# meiva:note
+# The installer's own reversal of the records a failed build leaves behind: a provider leaves the
+# build's provider list, and a bound plugin config is released by the function its binding
+# returned, with a real config image on disk.
+def test_a_build_rollback_removes_providers_and_releases_bound_configs(unit_home: Path) -> None:
+    from pydantic import BaseModel
+
+    from base.packages.plugins import config_registration
+    from meiva.sdk_surface.installation import ConfigBound, ProviderAdded
+
+    class Config(BaseModel):
+        knob: int = 7
+
+    def provider() -> list[Path]:
+        return [unit_home]
+
+    build = install.Build()
+    build.providers.append(provider)
+    release = config_registration.bind_plugin_config(
+        DiskPluginConfigImages(unit_home).owner("owned", Config), build.configs
+    )
+    assert list(build.configs) == ["owned"]
+
+    build.revert(ConfigBound("owned", release))
+    build.revert(ProviderAdded(provider))
+
+    assert build.configs == {}
+    assert build.providers == []

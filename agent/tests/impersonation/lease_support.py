@@ -13,12 +13,7 @@ import psycopg
 import pytest
 from langchain_core.messages import HumanMessage
 from langchain_core.runnables import RunnableConfig
-from langgraph.checkpoint.base import (
-    BaseCheckpointSaver,
-    ChannelVersions,
-    Checkpoint,
-    CheckpointMetadata,
-)
+from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph import END, START, StateGraph
 from psycopg_pool import AsyncConnectionPool
 
@@ -47,16 +42,16 @@ from base.packages.plugin_providers import build_model_catalog
 __all__ = [
     "QUICK_WAIT",
     "Cluster",
-    "FlushFaultSaver",
+    "checkpoint_inserts_failing",
     "cluster",
     "exited_child",
     "fixed_clock",
-    "flush_fault_saver",
     "idle_graph",
     "native_context",
     "relay_program",
     "sleeper",
     "stub_host",
+    "throttled_saver",
 ]
 
 RELAY_STUB = Path(__file__).with_name("relay_stub.py")
@@ -191,36 +186,34 @@ def native_context(
 
 
 # meiva:note
-# The production history saver with one injected fault: while armed, every database write
-# fails. The throttled saver reaches that write when it flushes a buffered state update, so a
-# failure here is a real failed flush that leaves the buffered tail retryable.
-class FlushFaultSaver(HistoryAsyncPostgresSaver):
-    def __init__(self, pool: AsyncConnectionPool[Any]) -> None:
-        super().__init__(pool)
-        self._write_fault: OSError | None = None
-
-    async def aput(
-        self,
-        config: RunnableConfig,
-        checkpoint: Checkpoint,
-        metadata: CheckpointMetadata,
-        new_versions: ChannelVersions,
-    ) -> RunnableConfig:
-        if self._write_fault is not None:
-            raise self._write_fault
-        return await super().aput(config, checkpoint, metadata, new_versions)
-
-    @contextmanager
-    def failing_writes(self, error: OSError) -> Generator[None]:
-        self._write_fault = error
-        try:
-            yield
-        finally:
-            self._write_fault = None
+# Every INSERT into the checkpoint table fails inside the database while the block runs, so the
+# throttled saver's flush meets a real failed write: the buffered tail stays retryable and the
+# retry succeeds once the trigger is gone.
+@contextmanager
+def checkpoint_inserts_failing(db: psycopg.Connection[Any]) -> Generator[None]:
+    db.execute(
+        "CREATE FUNCTION refuse_checkpoint_inserts() RETURNS trigger LANGUAGE plpgsql AS "
+        "$$ BEGIN RAISE EXCEPTION 'checkpoint inserts refused'; END $$"
+    )
+    db.execute(
+        "CREATE TRIGGER refuse_checkpoint_inserts BEFORE INSERT ON checkpoints "
+        "FOR EACH ROW EXECUTE FUNCTION refuse_checkpoint_inserts()"
+    )
+    db.commit()
+    try:
+        yield
+    finally:
+        db.rollback()
+        db.execute("DROP TRIGGER refuse_checkpoint_inserts ON checkpoints")
+        db.execute("DROP FUNCTION refuse_checkpoint_inserts()")
+        db.commit()
 
 
-async def flush_fault_saver(pool: AsyncConnectionPool[Any]) -> FlushFaultSaver:
-    saver = FlushFaultSaver(pool)
+# meiva:note
+# The production history saver on the pool the test hands in, wrapped with the write throttle
+# and the delta-reconstructing reads that the hosted runner installs.
+async def throttled_saver(pool: AsyncConnectionPool[Any]) -> HistoryAsyncPostgresSaver:
+    saver = HistoryAsyncPostgresSaver(pool)
     await saver.setup()
     wrap_saver_writes_with_nstep_interval(saver, 100)
     wrap_saver_reads_with_delta_reconstruction(saver)

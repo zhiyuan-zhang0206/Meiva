@@ -90,7 +90,7 @@ from base.native_process.stop_timing import CANCEL_UNWIND_TIMEOUT_S
 from base.packages.composer_commands import CommandCatalog
 from base.sessions.helper_chain_guard import helper_marker_pid, parent_chain_intact
 from meiva import skills as meiva_skills
-from meiva.boot import process_clients
+from meiva.boot import clients_over
 from meiva.sdk_surface import process_context
 from meiva.sdk_surface.installation import Installation
 
@@ -599,7 +599,7 @@ async def run(
         local_machine = machine.name()
         await open_host_pools(workload_pool, control_pool)
         if clients is None:
-            clients = process_clients(database=lambda: db, config=config, machine=machine)
+            clients = clients_over(config, machine, lambda: db)
         installation = load_installation(
             config, clients=clients, load_extensions=_state_gated_loader()
         )
@@ -745,7 +745,7 @@ def main() -> None:
             direct_url=ClusterDirectUrl(machine.host),
         )
 
-    clients = process_clients(database=database, config=config, machine=machine)
+    clients = clients_over(config, machine, database)
     clients_handed_off = False
 
     def hand_off_clients() -> None:

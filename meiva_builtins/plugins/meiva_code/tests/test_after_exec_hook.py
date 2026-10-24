@@ -17,12 +17,17 @@ from base.packages.plugin_config_images import DiskPluginConfigImages
 from base.packages.plugins.extensions import ExtensionRegistry
 from base.paths.home import resolve_meiva_home
 from meiva.sdk_surface import install, process_context
+from meiva.sdk_surface.tests.installation_holder import inert_sampling
 from meiva_builtins.plugins.meiva_code.tests.surface_support import code_registry
 
 
 @pytest.fixture(autouse=True)
 def _installed_surface():
-    install.install(code_registry(), config_images=DiskPluginConfigImages(resolve_meiva_home()))
+    install.install(
+        code_registry(),
+        config_images=DiskPluginConfigImages(resolve_meiva_home()),
+        sampling=inert_sampling(),
+    )
     yield
     install.uninstall()
     process_context.unbind_exec_turn()

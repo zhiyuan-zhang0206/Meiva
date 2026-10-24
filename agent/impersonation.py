@@ -73,7 +73,6 @@ from base.agents.impersonation import (
 from base.agents.impersonation import native_status as read_status
 from base.agents.impersonation.relay import (
     record_degradation,
-    record_relay_failure,
     stamp_relay_failure,
 )
 from base.agents.impersonation.status import ImpersonationStatus
@@ -642,7 +641,6 @@ async def _record_stale_relay(
         db,
         session,
         agent_id,
-        record_relay_failure,
         incarnation=incarnation,
     )
 

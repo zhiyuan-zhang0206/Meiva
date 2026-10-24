@@ -6,17 +6,21 @@ import json
 import shlex
 import sys
 import time
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from pathlib import Path
 from types import ModuleType
 from typing import Any
 from uuid import UUID
 
-import httpx
 import pytest
+from starlette.applications import Starlette
+from starlette.requests import Request
+from starlette.responses import JSONResponse
+from starlette.routing import Route
 
 from base.api_contracts.agent_contract import AgentStatus, ErrorReason
 from base.host.atomic_io import SYSTEM_FS, AtomicWriter
+from base.host.net.tests.local_http import serve_asgi
 from base.lm.harness.codex.auth import SECRET_ENV_NAMES
 from base.sessions import coding_session_owner
 from base.sessions.coding_session_owner_record import CodingSessionStatus
@@ -27,7 +31,7 @@ from meiva.shell.coding_tools.plans.launch_request import LaunchRequest, worker_
 from meiva.shell.coding_tools.plans.pacing import CodexWaits, Pacing
 from meiva.shell.coding_tools.tests.fake_tools import (
     CODEX_SESSION,
-    gateway_double,
+    gateway_clients,
     install_codex,
     site_for,
 )
@@ -492,25 +496,64 @@ def test_terminal_reason_covers_every_supervised_lifecycle(
 
 
 # meiva:note
-# The gateway double's state: what the owner's status is and which notes were posted.
+# One request the cluster's gateway received, as values.
+@dataclass(frozen=True)
+class _Received:
+    method: str
+    path: str
+    headers: dict[str, str]
+    body: Any
+
+
+# meiva:note
+# The cluster's gateway as a real application on a loopback port (`app()` is served by
+# `serve_asgi`): what the owner's status is (a 404 with the wire reason when there is no such
+# agent), a receipt for each system note and an empty answer to a peer message. `requests` is what
+# reached it, in order; a route it does not have answers 404.
 class _Cluster:
     def __init__(self, owner_status: AgentStatus | None) -> None:
         self.owner_status = owner_status
-        self.notes: list[dict[str, object]] = []
-        self.requests: list[httpx.Request] = []
+        self.requests: list[_Received] = []
 
-    def __call__(self, request: httpx.Request) -> httpx.Response:
-        self.requests.append(request)
-        if request.method == "GET" and request.url.path == f"/api/agents/{_OWNER}":
-            if self.owner_status is None:
-                return httpx.Response(
-                    404, json={"reason": ErrorReason.AGENT_NOT_FOUND.value, "detail": "no agent"}
-                )
-            return httpx.Response(200, json={"status": self.owner_status.value})
-        if request.method == "POST" and request.url.path.endswith("/system-note"):
-            self.notes.append(json.loads(request.content))
-            return httpx.Response(200, json={"inbound_id": 1})
-        raise AssertionError(f"unexpected gateway request {request.method} {request.url.path}")
+    @property
+    def notes(self) -> list[Any]:
+        return [r.body for r in self.requests if r.path.endswith("/system-note")]
+
+    async def _record(self, request: Request) -> None:
+        raw = await request.body()
+        self.requests.append(
+            _Received(
+                request.method,
+                request.url.path,
+                dict(request.headers),
+                json.loads(raw) if raw else None,
+            )
+        )
+
+    async def _owner(self, request: Request) -> JSONResponse:
+        await self._record(request)
+        if self.owner_status is None:
+            return JSONResponse(
+                {"reason": ErrorReason.AGENT_NOT_FOUND.value, "detail": "no agent"}, status_code=404
+            )
+        return JSONResponse({"status": self.owner_status.value})
+
+    async def _note(self, request: Request) -> JSONResponse:
+        await self._record(request)
+        return JSONResponse({"inbound_id": 1})
+
+    async def _message(self, request: Request) -> JSONResponse:
+        await self._record(request)
+        return JSONResponse({})
+
+    def app(self) -> Starlette:
+        return Starlette(
+            routes=[
+                Route("/api/agents/{agent_id:int}", self._owner, methods=["GET"]),
+                Route("/api/agents/{agent_id:int}/system-note", self._note, methods=["POST"]),
+                Route("/api/agents/{agent_id:int}/messages", self._message, methods=["POST"]),
+            ]
+        )
 
 
 def _launched(
@@ -573,7 +616,7 @@ def test_canonical_watch_terminalizes_before_exit(
     time.sleep(0.05)
     cluster = _Cluster(owner_status)
 
-    with gateway_double(cluster) as clients:
+    with serve_asgi(cluster.app()) as url, gateway_clients(url) as clients:
         bound_agent(_OWNER, clients=clients)
         watch_work.watch(
             str(work_file),
@@ -598,13 +641,13 @@ def test_canonical_watch_terminalizes_before_exit(
 def test_canonical_notifications_never_resurrect_owner(bound_agent: BindAgent) -> None:
     cluster = _Cluster(AgentStatus.RUNNING)
 
-    with gateway_double(cluster) as clients:
+    with serve_asgi(cluster.app()) as url, gateway_clients(url) as clients:
         bound_agent(_OWNER, clients=clients)
         assert watch_work._notify(_OWNER, "terminal", canonical=True)
 
     (request,) = cluster.requests
-    assert request.url.path == f"/api/agents/{_OWNER}/system-note"
-    body = json.loads(request.content)
+    assert request.path == f"/api/agents/{_OWNER}/system-note"
+    body = request.body
     assert (body["content"], body["note_tag"], body["resurrect"]) == ("terminal", "task", False)
     keys = [value for value in request.headers.values() if _is_uuid(value)]
     assert len(keys) == 1
@@ -613,16 +656,12 @@ def test_canonical_notifications_never_resurrect_owner(bound_agent: BindAgent) -
 def test_a_generic_wake_is_a_peer_message(bound_agent: BindAgent) -> None:
     cluster = _Cluster(AgentStatus.RUNNING)
 
-    def answer(request: httpx.Request) -> httpx.Response:
-        cluster.requests.append(request)
-        return httpx.Response(200, json={})
-
-    with gateway_double(answer) as clients:
+    with serve_asgi(cluster.app()) as url, gateway_clients(url) as clients:
         bound_agent(_OWNER, clients=clients)
         assert watch_work._notify(_OWNER, "woken", canonical=False)
 
     (request,) = cluster.requests
-    assert request.url.path == f"/api/agents/{_OWNER}/messages"
+    assert request.path == f"/api/agents/{_OWNER}/messages"
 
 
 def _is_uuid(value: str) -> bool:
