@@ -14,6 +14,8 @@ from base.host.system.tests.fake_commands import (
     fake_host,
 )
 from base.host.system.tests.fake_crontab import FakeCrontab
+from base.log.tests.log_records import LogRecords
+from base.log.tests.log_records import loguru_records as loguru_records
 
 
 def _isolated_meiva(*, host: Host) -> str:
@@ -43,7 +45,9 @@ def test_packages_gates_stop_at_the_switch_then_the_home(
 
     monkeypatch.setattr(cron, "owns_os_jobs", owns)
     packages_job.register_packages_job(
-        enabled=enabled, refresh_enabled=True, tick_seconds=900, host=fake_host()
+        enabled=enabled,
+        schedule=packages_job.RefreshSchedule(refresh_enabled=True, tick_seconds=900),
+        host=fake_host(),
     )
     assert asked == (["home"] if enabled else [])
 
@@ -57,8 +61,29 @@ def test_packages_refresh_gate_follows_home_and_precedes_platform(
     monkeypatch.setattr(cron, "owns_os_jobs", owns)
     monkeypatch.setattr(cron, "register_platform_job", _refuse("platform registrar reached"))
     packages_job.register_packages_job(
-        enabled=True, refresh_enabled=False, tick_seconds=900, host=fake_host()
+        enabled=True,
+        schedule=packages_job.RefreshSchedule(refresh_enabled=False, tick_seconds=900),
+        host=fake_host(),
     )
+
+
+def test_a_non_default_home_stops_before_the_refresh_switch_is_consulted(
+    loguru_records: LogRecords,
+) -> None:
+    packages_job.register_packages_job(
+        enabled=True,
+        schedule=packages_job.RefreshSchedule(refresh_enabled=False, tick_seconds=900),
+        host=fake_host(),
+    )
+
+    assert [r for r in loguru_records if "refresh disabled" in r["message"]] == []
+
+
+def test_a_registration_with_jobs_on_needs_the_policy_the_root_read() -> None:
+    with pytest.raises(ValueError, match="needs its schedule"):
+        packages_job.register_packages_job(enabled=True, schedule=None, host=fake_host())
+    with pytest.raises(ValueError, match="needs the backup hour"):
+        walg_job.register_walg_job(enabled=True, backup_hour=None, host=fake_host())
 
 
 def _isolate_jobs(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -114,7 +139,11 @@ def test_real_platform_job_definition_follows_the_value_given(
     def register(owner: str) -> str:
         if kind == "packages":
             packages_job.register_packages_job(
-                enabled=True, refresh_enabled=True, tick_seconds=values[owner], host=host
+                enabled=True,
+                schedule=packages_job.RefreshSchedule(
+                    refresh_enabled=True, tick_seconds=values[owner]
+                ),
+                host=host,
             )
         else:
             walg_job.register_walg_job(enabled=True, backup_hour=values[owner], host=host)

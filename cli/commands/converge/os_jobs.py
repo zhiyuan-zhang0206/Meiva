@@ -51,12 +51,18 @@ def ensure_packages_refresh_job(ctx: ConvergeCtx) -> None:
     `MEIVA_OS_JOBS_ENABLED` is off and skips registration when the refresh channel
     itself is disabled (`MEIVA_PACKAGES_REFRESH_ENABLED`); the registered command
     re-checks both at run time. Idempotent."""
-    from base.host.system.packages_job import register_packages_job
+    from base.host.system.packages_job import RefreshSchedule, register_packages_job
 
+    view = ctx.read_config().view
+    jobs_enabled = view.general.os_jobs_enabled
     register_packages_job(
-        enabled=ctx.read_config().view.general.os_jobs_enabled,
-        refresh_enabled=ctx.read_config().view.packages.refresh_enabled,
-        tick_seconds=ctx.read_config().view.packages.refresh_tick_seconds,
+        enabled=jobs_enabled,
+        schedule=RefreshSchedule(
+            refresh_enabled=view.packages.refresh_enabled,
+            tick_seconds=view.packages.refresh_tick_seconds,
+        )
+        if jobs_enabled
+        else None,
         host=ctx.host,
     )
     # A registration failure propagates so converge fails fast.
@@ -92,9 +98,11 @@ def ensure_walg_job(ctx: ConvergeCtx) -> None:
     from services.backup.walg.config import enabled
 
     if enabled(path_reader=lambda: ctx.read_config().view.walg.walg_config_file):
+        view = ctx.read_config().view
+        jobs_enabled = view.general.os_jobs_enabled
         register_walg_job(
-            enabled=ctx.read_config().view.general.os_jobs_enabled,
-            backup_hour=ctx.read_config().view.services.backup_hour,
+            enabled=jobs_enabled,
+            backup_hour=view.services.backup_hour if jobs_enabled else None,
             host=ctx.host,
         )
     else:

@@ -97,14 +97,9 @@ def _gate_fact(
                 ),
             )
         case "station":
-            from base.cluster.machine import MachineRoleMissing
-            from services.supervision.healthchecks.lgtm import is_lgtm_host
+            from services.supervision.healthchecks.lgtm import is_lgtm_host, lgtm_roles
 
-            try:
-                roles = machine.role()
-            except MachineRoleMissing:
-                roles = None
-            return StationFact(is_station=is_lgtm_host(meiva_home(), roles=roles))
+            return StationFact(is_station=is_lgtm_host(meiva_home(), roles=lgtm_roles(machine)))
         case "collector":
             return CollectorFact(allowed=_collector_allowed(machine))
         case "bridge":

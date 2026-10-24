@@ -28,6 +28,7 @@ from typing import Any, cast
 
 from pydantic import ValidationError
 
+from base.cluster.machine import MachineRoleInvalid
 from base.host.env.bootstrap import BootstrapFetchError
 from base.host.env.dotenv_boot import LAUNCHER_PROFILE_ENV_KEY
 from base.native_process.os_platform import (
@@ -292,9 +293,7 @@ def run_command(
         return _report_refusal(exc)
     except ValidationError as exc:
         return print_settings_load_failure(exc)
-    except BootstrapFetchError as exc:
-        # A pure agent-runner whose gateway is unreachable (or which was never
-        # enrolled) fails fast with an actionable message.
+    except (BootstrapFetchError, MachineRoleInvalid) as exc:
         print(f"✗ meiva: {exc}", file=sys.stderr)
         return 1
     finally:

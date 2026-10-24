@@ -180,7 +180,7 @@ def test_register_skips_when_os_jobs_are_disabled(monkeypatch: pytest.MonkeyPatc
 
     job.register_walg_job(
         enabled=False,
-        backup_hour=3,
+        backup_hour=None,
         host=fake_host(),
     )
 

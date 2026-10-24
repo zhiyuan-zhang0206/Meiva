@@ -201,8 +201,7 @@ def test_register_is_gated_by_os_jobs(monkeypatch: pytest.MonkeyPatch) -> None:
 
     job.register_packages_job(
         enabled=False,
-        refresh_enabled=False,
-        tick_seconds=900,
+        schedule=None,
         host=fake_host(),
     )
     assert skipped == ["packages refresh"]
@@ -219,8 +218,7 @@ def test_register_is_skipped_when_refresh_disabled(
 
     job.register_packages_job(
         enabled=True,
-        refresh_enabled=False,
-        tick_seconds=900,
+        schedule=job.RefreshSchedule(refresh_enabled=False, tick_seconds=900),
         host=fake_host(),
     )
 
@@ -237,8 +235,7 @@ def test_register_dispatches_to_the_platform(
 
     job.register_packages_job(
         enabled=True,
-        refresh_enabled=True,
-        tick_seconds=900,
+        schedule=job.RefreshSchedule(refresh_enabled=True, tick_seconds=900),
         host=fake_host(),
     )
     assert calls == ["register packages-refresh"]

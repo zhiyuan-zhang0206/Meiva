@@ -101,8 +101,10 @@ _REGISTERS = [
         partial(
             packages_job.register_packages_job,
             enabled=settings.general.os_jobs_enabled,
-            refresh_enabled=settings.packages.refresh_enabled,
-            tick_seconds=settings.packages.refresh_tick_seconds,
+            schedule=packages_job.RefreshSchedule(
+                refresh_enabled=settings.packages.refresh_enabled,
+                tick_seconds=settings.packages.refresh_tick_seconds,
+            ),
         ),
         id="packages-refresh",
     ),
@@ -163,8 +165,10 @@ def test_registration_dispatches_when_enabled(
     logs_job.register_logs_job(enabled=settings.general.os_jobs_enabled, host=fake_host())
     packages_job.register_packages_job(
         enabled=settings.general.os_jobs_enabled,
-        refresh_enabled=settings.packages.refresh_enabled,
-        tick_seconds=settings.packages.refresh_tick_seconds,
+        schedule=packages_job.RefreshSchedule(
+            refresh_enabled=settings.packages.refresh_enabled,
+            tick_seconds=settings.packages.refresh_tick_seconds,
+        ),
         host=fake_host(),
     )
     pr_flow_job.register_pr_flow_job(

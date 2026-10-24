@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import shlex
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 from xml.sax.saxutils import escape
 
@@ -134,33 +135,38 @@ def unregister_linux(*, host: Host) -> int:
     )
 
 
-def register_packages_job(
-    *,
-    enabled: bool,
-    refresh_enabled: bool,
-    tick_seconds: int,
-    host: Host,
-) -> None:
-    """Register the recurring refresh pass (idempotent).
+# meiva:note
+# The refresh policy a registration needs: whether the channel is switched on and the tick it runs.
+#
+# The converge step builds it only when OS jobs are on (`register_packages_job` takes `None`
+# otherwise), so a switched-off host never reads the policy fields.
+@dataclass(frozen=True)
+class RefreshSchedule:
+    refresh_enabled: bool
+    tick_seconds: int
 
-    Readers remain live through platform dispatch. The refresh switch is read
-    after home ownership; the tick is read only while generating the job spec
-    (and the existing macOS success log). No policy snapshot is retained.
 
-    Skipped when OS jobs are off (`MEIVA_OS_JOBS_ENABLED`), when this home is not
-    the default home (`owns_os_jobs`) or the refresh channel itself is off — the converge step is the only caller, so a disabled switch
-    simply leaves no job behind on machines that never registered one.
-    """
+# meiva:note
+# Register the recurring refresh pass (idempotent).
+#
+# `schedule` is required exactly when `enabled`; it is the policy as the root read it.
+# Skipped when OS jobs are off (`MEIVA_OS_JOBS_ENABLED`), when this home is not
+# the default home (`owns_os_jobs`) or the refresh channel itself is off — the converge step is the only caller, so a disabled switch
+# simply leaves no job behind on machines that never registered one.
+def register_packages_job(*, enabled: bool, schedule: RefreshSchedule | None, host: Host) -> None:
     if not enabled:
         base.host.system.cron.skip_os_job("packages refresh")
         return
+    if schedule is None:
+        raise ValueError("registering the packages refresh job needs its schedule")
     if not base.host.system.cron.owns_os_jobs("packages refresh"):
         return
-    if not refresh_enabled:
+    if not schedule.refresh_enabled:
         logger.info(
             "packages refresh disabled (MEIVA_PACKAGES_REFRESH_ENABLED=false) — not registering"
         )
         return
+    tick_seconds = schedule.tick_seconds
     base.host.system.cron.register_platform_job(
         "packages-refresh",
         macos=lambda: register_macos(tick_seconds=tick_seconds, host=host),

@@ -8,7 +8,7 @@ exports = ["agents", "cluster", "converge", "data_plane", "duration.py", "extens
 "data_plane" = ["converge"]
 "extensions" = ["_repo.py", "converge", "duration.py"]
 "lifecycle" = ["_repo.py", "_setup.py", "cluster", "converge", "data_plane", "extensions", "observability", "probe.py"]
-"observability" = ["_repo.py", "converge"]
+"observability" = ["converge"]
 "tests" = ["_repo.py", "_setup.py", "converge", "data_plane", "extensions", "lifecycle", "observability", "permissions.py", "probe.py", "probe_report.py"]
 
 [external]

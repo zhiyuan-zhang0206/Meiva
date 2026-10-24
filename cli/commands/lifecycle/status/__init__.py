@@ -78,7 +78,7 @@ from cli.commands.lifecycle.status.render import (
     source_drift_lines,
 )
 from cli.commands.lifecycle.status.roster import RosterEntry, ServiceTable
-from cli.commands.observability.lgtm import is_lgtm_host, print_lgtm_status
+from cli.commands.observability.lgtm import is_lgtm_host, lgtm_roles, print_lgtm_status
 from cli.commands.probe import print_service_row
 from cli.database.runtime import CommandRuntime
 from ops.cluster_status import ClusterStatus
@@ -99,7 +99,7 @@ def cmd_status(*, database_factory: DatabaseFactory, command: CommandRuntime) ->
             RosterEntry(spec.session, session_name(spec.session), reason) for spec, reason in roster
         ),
         launched=launched_services(root_manifests_path(command.home)),
-        lgtm_host=is_lgtm_host(command.home, roles=roles),
+        lgtm_host=is_lgtm_host(command.home, roles=lgtm_roles(command.machine)),
     )
     specs = tuple(spec for spec, _reason in roster)
     for step in plan_status(facts):

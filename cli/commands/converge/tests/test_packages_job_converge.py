@@ -29,10 +29,10 @@ def test_converge_registers_the_refresh_job(
 ) -> None:
     from cli.commands.converge.os_jobs import ensure_packages_refresh_job
 
-    calls: list[str] = []
+    calls: list[tuple[bool, bool]] = []
 
-    def register(*, enabled: bool, refresh_enabled: bool, tick_seconds: int, host: Host) -> None:
-        calls.append("register")
+    def register(*, enabled: bool, schedule: job.RefreshSchedule | None, host: Host) -> None:
+        calls.append((enabled, schedule is not None))
 
     monkeypatch.setattr(job, "register_packages_job", register)
 
@@ -51,4 +51,5 @@ def test_converge_registers_the_refresh_job(
         timers=ManualTimers(),
     )
     ensure_packages_refresh_job(ctx)
-    assert calls == ["register"]
+    jobs_enabled = command_runtime.config.view.general.os_jobs_enabled
+    assert calls == [(jobs_enabled, jobs_enabled)]
