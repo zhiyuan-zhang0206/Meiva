@@ -11,6 +11,7 @@ from pathlib import Path
 
 from meizel.contracts.ambient_read import ambient_diagnostics, sources_from, stale_roots
 from meizel.contracts.debt import file_key, set_debt
+from meizel.contracts.enumerations import check as check_roles
 from meizel.contracts.ledger import debts_in, reconcile
 from meizel.contracts.manifest import Manifest, load_manifests, manifest_path
 from meizel.contracts.policy import POLICY, Policy, load_policy, render_policy
@@ -399,20 +400,24 @@ def diagnose(scan: FileScan, manifests: dict[str, Manifest]) -> list[Diagnostic]
     return _distinct(found)
 
 
+# meiva:note
+# Analyse the repository, or with `changed` only the facts those files contribute.
+#
+# A partial run still reads every manifest, so the declared graphs are checked in full. It
+# judges the changed files' fact edges, restricted forms and recorded debt, and every `[loads]`
+# declaration, but not stale graph declarations: those need the whole repository's facts.
+# Generated role lists and copies are checked globally in both modes, using this universe
+# and the parsed root roles; they do not widen the fact scan.
 def analyze(
     root: Path, *, jobs: int | None = None, changed: Collection[str] | None = None
 ) -> Analysis:
-    """Analyse the repository, or with `changed` only the facts those files contribute.
-
-    A partial run still reads every manifest, so the declared graphs are checked in full. It
-    judges the changed files' fact edges, restricted forms and recorded debt, and every `[loads]`
-    declaration, but not what is stale: that needs the whole repository.
-    """
     universe = load_universe(root)
     manifests, diagnostics = load_manifests(universe)
     policy, policy_problems = load_policy(universe)
     diagnostics.extend(policy_problems)
     diagnostics.extend(check_policy(manifests, policy))
+    root_manifest = manifests.get("")
+    diagnostics.extend(check_roles(universe, root_manifest.roles if root_manifest else {}))
     scope = None if changed is None else frozenset(changed)
     sources = sources_from(manifests, policy)
     scans = (
