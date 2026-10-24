@@ -52,6 +52,15 @@ class HarnessSession(Protocol):
     @property
     def handoff_ticket(self) -> Any | None: ...
 
+    # meiva:note
+    # The three states are the whole contract: None while the CLI child is still
+    # running or was never observable, 0 when it exited normally, non-zero when it
+    # exited abnormally. A session that has no child of its own (none today, but the
+    # built-in loop is not a session) must answer None rather than invent a 0 — a
+    # faked 0 is indistinguishable from a clean exit forever after.
+    @property
+    def exit_code(self) -> int | None: ...
+
 
 # meiva:note
 # What a graph run needs from a live external session: run one turn, interrupt the
@@ -71,3 +80,11 @@ class TurnEngine(Protocol):
     ) -> HarnessTurn: ...
     async def interrupt(self) -> Any: ...
     async def close(self, *, reason: str = "closed") -> None: ...
+
+    # meiva:note
+    # The same three states as the adapter's `exit_code`, asked of the engine the
+    # graph holds: it is what a retiring host records on the agent row. Read it
+    # AFTER `close()` — before that the child may still be running, and the answer
+    # would be a stale None rather than the truth.
+    @property
+    def exit_code(self) -> int | None: ...

@@ -8161,6 +8161,29 @@
               }
             ],
             "title": "Open Impersonation Status"
+          },
+          "harness_exit_code": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Harness Exit Code"
+          },
+          "harness_exit_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Harness Exit At"
           }
         },
         "type": "object",
@@ -9035,6 +9058,29 @@
               }
             ],
             "title": "Heartbeat Paused Until"
+          },
+          "harness_exit_code": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Harness Exit Code"
+          },
+          "harness_exit_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Harness Exit At"
           }
         },
         "type": "object",

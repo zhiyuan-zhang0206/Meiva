@@ -6,8 +6,6 @@ from base.lm.harness.codex.session import (
     CodexSession,
     InboundQueueFullError,
     SessionClosedError,
-    SessionTotals,
-    TurnOutcome,
     TurnTicket,
 )
 from base.lm.harness.codex.transport import (
@@ -16,6 +14,7 @@ from base.lm.harness.codex.transport import (
     StdioAppServer,
     TransportClosedError,
 )
+from base.lm.harness.codex.types import SessionTotals, TurnOutcome
 
 __all__ = [
     "DEFAULT_BINARY",

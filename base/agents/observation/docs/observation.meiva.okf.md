@@ -61,6 +61,16 @@ availability inference, and does not depend on catalog access. Missing or unknow
 wire values fail validation. The frontend uses it to name the running harness
 and keep native-only prompt display out of external transcripts.
 
+## How the harness session ended
+
+Cards and snapshots also carry `harness_exit_code` / `harness_exit_at` from
+`agents_meta`. The code is three-state and the column comment is its only owner:
+`NULL` = still running or never recorded, which includes every agent on the built-in
+loop (no CLI child, so never a fake `0`); `0` = the child exited normally; non-zero =
+it exited abnormally. `harness_exit_at` is when the host read it, after the child was
+reaped. Nothing here changes lifecycle state — a crashed CLI and a finished turn still
+look the same in `status` (task #5616).
+
 ## Agent capability projection
 
 Model projections take an explicit `default_model` value from their caller.
