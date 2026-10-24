@@ -14,6 +14,7 @@ from base.lm.harness.bridge import HarnessBridge, HarnessSession, ScopedSessionR
 from base.lm.harness.claude import BridgeConfig, ClaudeSession
 from base.lm.harness.codex import CodexConfig, CodexSession
 from base.lm.harness.handoff import ClusterFact, Handoff, HarnessContribution
+from base.lm.harness.kimi import KimiConfig, KimiSession
 from base.lm.harness.registration import HANDLE_ENV, RegistrationStore
 from base.lm.harness.registry import SessionRegistry
 
@@ -75,6 +76,13 @@ def open_session(
     if harness is Harness.ANTIGRAVITY:
         return AgySession(
             AntigravityConfig(cwd=cwd, skip_permissions=skip_permissions),
+            environ=environ,
+            agent_id=agent_id,
+            registry=registry,
+        )
+    if harness is Harness.KIMI_CODE:
+        return KimiSession(
+            KimiConfig(cwd=cwd, skip_permissions=skip_permissions),
             environ=environ,
             agent_id=agent_id,
             registry=registry,

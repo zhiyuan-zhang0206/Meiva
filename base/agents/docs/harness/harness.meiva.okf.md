@@ -15,8 +15,8 @@ what a birth gets, `probe_local_harnesses` reports what this machine can run.
 ## The value set and where it lives
 
 `Harness` (`base/api_contracts/agent_contract.py`) is the source of truth for the
-four legal values: `meiva` (the built-in runtime), `claude_code`, `codex` and
-`antigravity`. It is locked to the `agents_meta.harness` CHECK by
+five legal values: `meiva` (the built-in runtime), `claude_code`, `codex`,
+`antigravity` and `kimi_code`. It is locked to the `agents_meta.harness` CHECK by
 `tests/contracts/test_db_check_enum_sync.py`; adding a harness means editing the
 enum, the column and its CHECK together.
 

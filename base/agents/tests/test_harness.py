@@ -69,6 +69,17 @@ def _antigravity_token(home: Path, *, relative: str, expiry: timedelta) -> None:
     path.write_text(json.dumps({"token": token}), encoding="utf-8")
 
 
+def _kimi_credentials(home: Path, *, expiry: timedelta) -> None:
+    path = home / ".kimi-code" / "credentials" / "kimi-code.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload: dict[str, object] = {
+        "access_token": "access",
+        "refresh_token": "renewable",
+        "expires_at": (datetime.now(UTC) + expiry).timestamp(),
+    }
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+
 # meiva:note
 # The stub CLIs these tests install print nothing and exit 1, which is "the CLI could not
 # tell us" — the row then falls back to the stored credential, which is what the older
@@ -176,6 +187,34 @@ def test_an_ide_session_is_not_a_cli_login(tmp_path: Path) -> None:
     row = _probe(tmp_path)[Harness.ANTIGRAVITY]
     assert row.status == "unknown"
     assert "antigravity-cli/antigravity-oauth-token" in row.reason
+
+
+def test_a_kimi_code_session_reports_its_renewable_access_token(tmp_path: Path) -> None:
+    _external_cli(tmp_path, ".local/bin", "kimi")
+    _kimi_credentials(tmp_path, expiry=timedelta(minutes=-5))
+    row = _probe(tmp_path)[Harness.KIMI_CODE]
+    assert row.status == "available"
+    assert "renewed on use" in row.reason
+
+
+def test_a_kimi_code_config_toml_api_key_is_available(tmp_path: Path) -> None:
+    _external_cli(tmp_path, ".local/bin", "kimi")
+    config = tmp_path / ".kimi-code" / "config.toml"
+    config.parent.mkdir(parents=True, exist_ok=True)
+    config.write_text('[providers.moonshot]\napi_key = "sk-kimi-123"\n', encoding="utf-8")
+    row = _probe(tmp_path)[Harness.KIMI_CODE]
+    assert row.status == "available"
+    assert "API key is stored" in row.reason
+
+
+def test_an_empty_kimi_code_credentials_file_is_unavailable(tmp_path: Path) -> None:
+    _external_cli(tmp_path, ".local/bin", "kimi")
+    path = tmp_path / ".kimi-code" / "credentials" / "kimi-code.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("{}", encoding="utf-8")
+    row = _probe(tmp_path)[Harness.KIMI_CODE]
+    assert row.status == "unavailable"
+    assert "holds no credentials" in row.reason
 
 
 def test_a_path_install_is_reported_as_on_path(tmp_path: Path) -> None:

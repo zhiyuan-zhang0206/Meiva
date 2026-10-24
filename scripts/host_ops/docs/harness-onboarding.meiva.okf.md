@@ -1,13 +1,13 @@
 ---
 type: doc
 title: Harness onboarding
-description: Install, verify and sync the external coding CLIs (claude, codex, agy, dsh) across machines, and the credential-copy verdicts behind the sync gate.
+description: Install, verify and sync the external coding CLIs (claude, codex, agy, dsh, kimi) across machines, and the credential-copy verdicts behind the sync gate.
 tags: [scripts, deploy, harnesses]
 ---
 
 # Harness onboarding
 
-`harness_onboarding.py` puts the four external coding CLIs on a machine, and
+`harness_onboarding.py` puts the five external coding CLIs on a machine, and
 copies the state of a machine that is already set up to the ones that are not.
 It exists because a second machine needs three different things that do not
 travel the same way: the **binary** comes from its vendor, the

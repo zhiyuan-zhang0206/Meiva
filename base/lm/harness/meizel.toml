@@ -1,4 +1,4 @@
-exports = ["acp", "antigravity", "bridge.py", "claude", "codex", "deepseek", "engine.py", "handoff.py", "process.py", "registration.py", "registry.py", "wiring.py"]
+exports = ["acp", "antigravity", "bridge.py", "claude", "codex", "deepseek", "engine.py", "handoff.py", "kimi", "process.py", "registration.py", "registry.py", "wiring.py"]
 
 [uses]
 "__init__.py" = ["bridge.py", "engine.py", "events.py", "handoff.py", "registration.py", "registry.py"]
@@ -10,11 +10,12 @@ exports = ["acp", "antigravity", "bridge.py", "claude", "codex", "deepseek", "en
 "engine.py" = ["events.py", "handoff.py"]
 "events.py" = []
 "handoff.py" = []
+"kimi" = ["__init__.py", "acp", "events.py", "handoff.py", "process.py", "registry.py"]
 "process.py" = []
 "registration.py" = []
 "registry.py" = []
-"wiring.py" = ["antigravity", "bridge.py", "claude", "codex", "handoff.py", "registration.py", "registry.py"]
-"tests" = ["__init__.py", "antigravity", "claude", "codex", "handoff.py", "registry.py", "wiring.py"]
+"wiring.py" = ["antigravity", "bridge.py", "claude", "codex", "handoff.py", "kimi", "registration.py", "registry.py"]
+"tests" = ["__init__.py", "antigravity", "claude", "codex", "handoff.py", "kimi", "registry.py", "wiring.py"]
 
 [purity]
 "events.py" = "strict"
