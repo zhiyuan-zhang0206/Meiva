@@ -208,6 +208,7 @@ def test_kimi_k3_1_pro_family_and_display_successor(*, model_catalog: ModelCatal
     assert highspeed.tuning == pro.tuning
     assert model_catalog.models["kimi-k3"].superseded_by == "kimi-k3.1-pro"
     assert model_catalog.models["kimi-k3"].spawnable
+    assert model_catalog.models["kimi-k3"].thinking_always_on
 
 
 def test_kimi_models_expose_kimi_code_external_harness(*, model_catalog: ModelCatalog) -> None:
