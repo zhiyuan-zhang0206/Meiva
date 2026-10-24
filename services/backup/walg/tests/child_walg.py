@@ -10,7 +10,6 @@ from pathlib import Path
 
 from base.config import ConfigBoot
 from services.backup.walg import runner
-from services.backup.walg.config import configured_path
 
 
 def _has_walg(boot: ConfigBoot) -> bool:
@@ -31,9 +30,7 @@ def _profile(path: Path) -> dict[str, object]:
         boot.set_field("walg_config_file", path)
         other = ConfigBoot()
         other.ensure_eager()
-        facts["owner_reader"] = str(
-            configured_path(path_reader=lambda: boot.view.walg.walg_config_file)
-        )
+        facts["owner_path"] = str(boot.view.walg.walg_config_file)
         facts["other_declared"] = other.view.has_domain("walg")
     else:
         boot.ensure_eager()

@@ -53,7 +53,7 @@ def test_an_exit_code_of_zero_with_a_failure_status_is_a_failed_chain(sandbox: S
     sandbox.put("wal-verify.json", _report(integrity="FAILURE"))
     sandbox.put("wal-verify.rc", "0")
 
-    verdict = verify.verify_chain(ADMIN_URL, path_reader=sandbox.path_reader)
+    verdict = verify.verify_chain(ADMIN_URL, path=sandbox.path)
 
     assert verdict.failed is True
     assert sandbox.calls() == ["wal-verify integrity timeline --json"]
@@ -64,7 +64,7 @@ def test_a_non_zero_exit_is_an_error_even_with_an_ok_report(sandbox: Sandbox) ->
     sandbox.put("wal-verify.rc", "1")
 
     with pytest.raises(WalgCommandError):
-        verify.verify_chain(ADMIN_URL, path_reader=sandbox.path_reader)
+        verify.verify_chain(ADMIN_URL, path=sandbox.path)
 
 
 @pytest.mark.parametrize("status", ["PASSED", "ok", "", None])
@@ -85,7 +85,7 @@ def test_output_without_both_checks_is_an_error(text: str) -> None:
 def test_wal_verify_is_handed_the_owner_only_socket(sandbox: Sandbox) -> None:
     sandbox.put("wal-verify.json", _report(integrity="OK"))
 
-    verify.verify_chain(ADMIN_URL, path_reader=sandbox.path_reader)
+    verify.verify_chain(ADMIN_URL, path=sandbox.path)
 
     assert sandbox.verify_env_log() == ["PGHOST=/sockets/meiva-pg-home PGPORT=5433 PGUSER=tester"]
 

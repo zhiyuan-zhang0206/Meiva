@@ -145,16 +145,14 @@ def _now() -> datetime:
     return datetime.now(UTC)
 
 
-def _preflight(
-    *, path_reader: Callable[[], Path | None], binary_problem: str | None
-) -> list[Backup]:
+def _preflight(*, path: Path | None, binary_problem: str | None) -> list[Backup]:
     if binary_problem is not None:
         raise StepFailedError(STEP_PREFLIGHT, f"{binary_problem} (meiva converge installs it)")
     try:
-        walg_config.load_walg_config(path_reader=path_reader)
+        walg_config.load_walg_config(path=path)
     except walg_config.WalgConfigError as exc:
         raise StepFailedError(STEP_PREFLIGHT, str(exc)) from None
-    return list_backups(path_reader=path_reader)
+    return list_backups(path=path)
 
 
 def _backup(
@@ -162,16 +160,16 @@ def _backup(
     before: list[Backup],
     report: Report,
     *,
-    path_reader: Callable[[], Path | None],
+    path: Path | None,
 ) -> list[Backup]:
     run_walg(
         ["backup-push", str(target.data_dir)],
         timeout_s=BACKUP_TIMEOUT_S,
         pg_admin_url=target.admin_url,
         extra_env={"WALG_DELTA_MAX_STEPS": DELTA_MAX_STEPS},
-        path_reader=path_reader,
+        path=path,
     )
-    after = list_backups(path_reader=path_reader)
+    after = list_backups(path=path)
     if not after or (before and after[-1].name == before[-1].name):
         raise StepFailedError(STEP_BACKUP, "backup-push finished but no new backup is listed")
     newest = after[-1]
@@ -196,7 +194,7 @@ def _drill(
     *,
     throwaway: ThrowawayConfig,
     database_for_url: Callable[[str], Database],
-    path_reader: Callable[[], Path | None],
+    path: Path | None,
 ) -> bool:
     """Drill the newest backup now; records the outcome. Returns whether it succeeded."""
     previous = state.read_state().drill
@@ -206,7 +204,7 @@ def _drill(
         previous,
         report,
         throwaway=throwaway,
-        path_reader=path_reader,
+        path=path,
         database_for_url=database_for_url,
     )
     state.update_state(drill=record)
@@ -224,7 +222,7 @@ def _weekly_drill(
     *,
     throwaway: ThrowawayConfig,
     database_for_url: Callable[[str], Database],
-    path_reader: Callable[[], Path | None],
+    path: Path | None,
 ) -> None:
     """The drill when one is due. Its failure is recorded and reported, never raised."""
     if drill.drill_due(state.read_state().drill, backups, _now()):
@@ -232,14 +230,14 @@ def _weekly_drill(
             target,
             backups,
             report,
-            path_reader=path_reader,
+            path=path,
             database_for_url=database_for_url,
             throwaway=throwaway,
         )
 
 
-def _verify(target: PgTarget, report: Report, *, path_reader: Callable[[], Path | None]) -> str:
-    verdict = verify_chain(target.admin_url, path_reader=path_reader)
+def _verify(target: PgTarget, report: Report, *, path: Path | None) -> str:
+    verdict = verify_chain(target.admin_url, path=path)
     state.update_state(
         verify=VerifyRecord(at=_now(), integrity=verdict.integrity, timeline=verdict.timeline)
     )
@@ -250,10 +248,8 @@ def _verify(target: PgTarget, report: Report, *, path_reader: Callable[[], Path 
     return summary
 
 
-def _retention(
-    backups: list[Backup], report: Report, *, path_reader: Callable[[], Path | None]
-) -> int:
-    outcome = apply_retention(backups, report, path_reader=path_reader)
+def _retention(backups: list[Backup], report: Report, *, path: Path | None) -> int:
+    outcome = apply_retention(backups, report, path=path)
     state.update_state(
         retention=RetentionRecord(at=_now(), marked=outcome.marked, deleted=outcome.deleted)
     )
@@ -267,27 +263,27 @@ def _run_steps(
     *,
     throwaway: ThrowawayConfig,
     database_for_url: Callable[[str], Database],
-    path_reader: Callable[[], Path | None],
+    path: Path | None,
 ) -> str:
     """The steps in order; returns the one-line summary of a successful run."""
     current = STEP_PREFLIGHT
     try:
-        before = _preflight(path_reader=path_reader, binary_problem=binary_problem)
+        before = _preflight(path=path, binary_problem=binary_problem)
         report(f"preflight: ok, {len(before)} backups listed")
         _weekly_drill(
             target,
             before,
             report,
-            path_reader=path_reader,
+            path=path,
             database_for_url=database_for_url,
             throwaway=throwaway,
         )
         current = STEP_BACKUP
-        after = _backup(target, before, report, path_reader=path_reader)
+        after = _backup(target, before, report, path=path)
         current = STEP_VERIFY
-        chain = _verify(target, report, path_reader=path_reader)
+        chain = _verify(target, report, path=path)
         current = STEP_RETENTION
-        deleted = _retention(after, report, path_reader=path_reader)
+        deleted = _retention(after, report, path=path)
     except StepFailedError:
         raise
     except _EXPECTED_FAILURES as exc:
@@ -318,7 +314,7 @@ def _locked_tick(
     *,
     throwaway: ThrowawayConfig,
     database_for_url: Callable[[str], Database],
-    path_reader: Callable[[], Path | None],
+    path: Path | None,
 ) -> int:
     started = _now()
     try:
@@ -343,7 +339,7 @@ def _locked_tick(
             target,
             platform.binary_problem,
             report,
-            path_reader=path_reader,
+            path=path,
             database_for_url=database_for_url,
             throwaway=throwaway,
         )
@@ -366,9 +362,9 @@ def run_tick_on(
     platform: Platform,
     throwaway: ThrowawayConfig,
     database_for_url: Callable[[str], Database],
-    path_reader: Callable[[], Path | None],
+    path: Path | None,
 ) -> int:
-    if not walg_config.enabled(path_reader=path_reader):
+    if path is None:
         report("WAL-G is off (MEIVA_WALG_CONFIG_FILE is not set); nothing to do")
         return 0
     ensure_private_dir(state.walg_dir())
@@ -377,7 +373,7 @@ def run_tick_on(
             return _locked_tick(
                 report,
                 platform,
-                path_reader=path_reader,
+                path=path,
                 database_for_url=database_for_url,
                 throwaway=throwaway,
             )
@@ -393,9 +389,9 @@ def run_tick(
     *,
     throwaway: ThrowawayConfig,
     database_for_url: Callable[[str], Database],
-    path_reader: Callable[[], Path | None],
+    path: Path | None,
 ) -> int:
-    if not walg_config.enabled(path_reader=path_reader):
+    if path is None:
         report("WAL-G is off (MEIVA_WALG_CONFIG_FILE is not set); nothing to do")
         return 0
     return run_tick_on(
@@ -403,7 +399,7 @@ def run_tick(
         platform=ambient_platform(),
         throwaway=throwaway,
         database_for_url=database_for_url,
-        path_reader=path_reader,
+        path=path,
     )
 
 
@@ -413,7 +409,7 @@ def _locked_drill(
     *,
     throwaway: ThrowawayConfig,
     database_for_url: Callable[[str], Database],
-    path_reader: Callable[[], Path | None],
+    path: Path | None,
 ) -> int:
     target = platform.target
     try:
@@ -424,7 +420,7 @@ def _locked_drill(
         if not platform.accepting:
             report("failed: postgres is not accepting connections")
             return 1
-        backups = _preflight(path_reader=path_reader, binary_problem=platform.binary_problem)
+        backups = _preflight(path=path, binary_problem=platform.binary_problem)
     except (state.StateError, RuntimeError, StepFailedError, *_EXPECTED_FAILURES) as exc:
         report(f"failed: {exc}")
         return 1
@@ -437,7 +433,7 @@ def _locked_drill(
             target,
             backups,
             report,
-            path_reader=path_reader,
+            path=path,
             database_for_url=database_for_url,
             throwaway=throwaway,
         )
@@ -455,9 +451,9 @@ def run_drill_now_on(
     platform: Platform,
     throwaway: ThrowawayConfig,
     database_for_url: Callable[[str], Database],
-    path_reader: Callable[[], Path | None],
+    path: Path | None,
 ) -> int:
-    if not walg_config.enabled(path_reader=path_reader):
+    if path is None:
         report("WAL-G is off (MEIVA_WALG_CONFIG_FILE is not set); nothing to drill")
         return 1
     ensure_private_dir(state.walg_dir())
@@ -466,7 +462,7 @@ def run_drill_now_on(
             return _locked_drill(
                 report,
                 platform,
-                path_reader=path_reader,
+                path=path,
                 database_for_url=database_for_url,
                 throwaway=throwaway,
             )
@@ -484,9 +480,9 @@ def run_drill_now(
     *,
     throwaway: ThrowawayConfig,
     database_for_url: Callable[[str], Database],
-    path_reader: Callable[[], Path | None],
+    path: Path | None,
 ) -> int:
-    if not walg_config.enabled(path_reader=path_reader):
+    if path is None:
         report("WAL-G is off (MEIVA_WALG_CONFIG_FILE is not set); nothing to drill")
         return 1
     return run_drill_now_on(
@@ -494,5 +490,5 @@ def run_drill_now(
         platform=ambient_platform(),
         throwaway=throwaway,
         database_for_url=database_for_url,
-        path_reader=path_reader,
+        path=path,
     )

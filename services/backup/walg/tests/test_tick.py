@@ -112,7 +112,7 @@ def _run(sandbox: Sandbox, platform: tick.Platform | None = None) -> tuple[int, 
     code = tick.run_tick_on(
         lines.append,
         platform=_platform() if platform is None else platform,
-        path_reader=sandbox.path_reader,
+        path=sandbox.path,
         database_for_url=_database_factory(),
         throwaway=ThrowawayConfig(None),
     )
@@ -262,7 +262,7 @@ def test_a_key_that_is_not_the_pinned_one_fails_preflight(sandbox: Sandbox) -> N
 
     # meiva:note
     # pins the key
-    walg_config.load_walg_config(path_reader=sandbox.path_reader)
+    walg_config.load_walg_config(path=sandbox.path)
     sandbox.key_file.write_text("cd" * 32 + "\n")
 
     code, _ = _run(sandbox)
@@ -530,7 +530,7 @@ def _drill_now(sandbox: Sandbox, lines: list[str], platform: tick.Platform | Non
     return tick.run_drill_now_on(
         lines.append,
         platform=_platform() if platform is None else platform,
-        path_reader=sandbox.path_reader,
+        path=sandbox.path,
         database_for_url=_database_factory(),
         throwaway=ThrowawayConfig(None),
     )

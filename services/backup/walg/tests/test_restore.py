@@ -120,7 +120,7 @@ def test_recovers_to_the_target_lsn_and_never_touches_the_source(
             report=reports.append,
             user="meiva",
             keep_data=True,
-            path_reader=sandbox.path_reader,
+            path=sandbox.path,
             socket_root=socket_root,
         ) as instance:
             assert _restored_rows(instance) == ["A", "B1", "B1b"]
@@ -146,7 +146,7 @@ def test_recovers_to_a_target_time(
             report=lambda _line: None,
             user="meiva",
             keep_data=False,
-            path_reader=sandbox.path_reader,
+            path=sandbox.path,
         ) as instance:
             assert _restored_rows(instance) == ["A", "B1", "B1b"]
 
@@ -164,7 +164,7 @@ def test_without_a_target_recovery_replays_all_archived_wal(
             report=lambda _line: None,
             user="meiva",
             keep_data=False,
-            path_reader=sandbox.path_reader,
+            path=sandbox.path,
         ) as instance:
             assert _restored_rows(instance) == ["A", "B1", "B1b", "B2"]
 
@@ -190,7 +190,7 @@ def test_a_backup_that_carries_archive_settings_still_cannot_archive(
                 report=lambda _line: None,
                 user="meiva",
                 keep_data=False,
-                path_reader=sandbox.path_reader,
+                path=sandbox.path,
             ) as instance,
             psycopg.connect(
                 host=str(instance.socket_dir), port=instance.port, user="meiva", dbname="postgres"
@@ -219,7 +219,7 @@ def test_a_missing_segment_between_backup_and_target_fails_recovery(
                 report=lambda _line: None,
                 user="meiva",
                 keep_data=False,
-                path_reader=sandbox.path_reader,
+                path=sandbox.path,
             ),
         ):
             pytest.fail("recovery must not reach a target behind a gap")
@@ -241,7 +241,7 @@ def test_refuses_a_directory_that_is_not_empty(
             target=RecoveryTarget(),
             report=lambda _line: None,
             keep_data=True,
-            path_reader=sandbox.path_reader,
+            path=sandbox.path,
         ),
     ):
         pytest.fail("must not fetch into an occupied directory")
@@ -259,7 +259,7 @@ def test_refuses_the_live_data_directory(tmp_path: Path, monkeypatch: pytest.Mon
                 target=RecoveryTarget(),
                 report=lambda _line: None,
                 keep_data=True,
-                path_reader=sandbox.path_reader,
+                path=sandbox.path,
             ),
         ):
             pytest.fail("must refuse")
@@ -278,7 +278,7 @@ def test_a_failed_fetch_is_a_restore_error(tmp_path: Path, monkeypatch: pytest.M
             target=RecoveryTarget(),
             report=lambda _line: None,
             keep_data=True,
-            path_reader=sandbox.path_reader,
+            path=sandbox.path,
         ),
     ):
         pytest.fail("must not start Postgres after a failed fetch")
@@ -308,7 +308,7 @@ def test_the_postmaster_command_line_holds_every_safety_setting_and_no_secret(
         socket_dir=tmp_path / "sock",
         port=54329,
         target=RecoveryTarget(lsn="0/3000060"),
-        path_reader=sandbox.path_reader,
+        path=sandbox.path,
         capacity={"max_connections": "500", "max_worker_processes": "8"},
     )
     pg_settings = [argv[i + 1] for i, arg in enumerate(argv) if arg == "-c"]
@@ -380,7 +380,7 @@ def test_a_role_the_restored_cluster_does_not_have_fails_at_once(
                 report=lambda _line: None,
                 user="not_the_superuser",
                 keep_data=False,
-                path_reader=sandbox.path_reader,
+                path=sandbox.path,
                 socket_root=socket_root,
             ),
         ):

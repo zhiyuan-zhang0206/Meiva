@@ -89,9 +89,8 @@ def ensure_walg_job(ctx: ConvergeCtx) -> None:
     home (`owns_os_jobs`), and registration is a no-op where
     `MEIVA_OS_JOBS_ENABLED` is off. Delegates to `base.host.system.walg_job`."""
     from base.host.system.walg_job import register_walg_job, unregister_walg_job
-    from services.backup.walg.config import enabled
 
-    if enabled(path_reader=lambda: ctx.read_config().view.walg.walg_config_file):
+    if ctx.read_config().view.walg.walg_config_file is not None:
         register_walg_job(
             enabled=ctx.read_config().view.general.os_jobs_enabled,
             backup_hour=ctx.read_config().view.services.backup_hour,

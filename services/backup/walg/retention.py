@@ -137,7 +137,7 @@ def _sentinel(backup_name: str) -> str:
 
 
 def apply_retention(
-    backups: list[Backup], report: Callable[[str], None], *, path_reader: Callable[[], Path | None]
+    backups: list[Backup], report: Callable[[str], None], *, path: Path | None
 ) -> RetentionOutcome:
     """Delete what `retain FULL 3` expires, after auditing the dry run.
 
@@ -153,7 +153,7 @@ def apply_retention(
         return RetentionOutcome(marked=0, deleted=0)
     command = ["delete", "retain", "FULL", str(RETAIN_FULL_BACKUPS), "--use-sentinel-time"]
     planned = parse_marked(
-        run_walg_logged(command, timeout_s=DELETE_TIMEOUT_S, path_reader=path_reader),
+        run_walg_logged(command, timeout_s=DELETE_TIMEOUT_S, path=path),
         DRY_RUN_COUNT,
     )
     if not planned:
@@ -164,9 +164,7 @@ def apply_retention(
         report(f"  {key}")
     assert_invariants(planned, backups)
     deleted = parse_marked(
-        run_walg_logged(
-            [*command, "--confirm"], timeout_s=DELETE_TIMEOUT_S, path_reader=path_reader
-        ),
+        run_walg_logged([*command, "--confirm"], timeout_s=DELETE_TIMEOUT_S, path=path),
         _DELETED_COUNT,
     )
     if sorted(deleted) != sorted(planned):

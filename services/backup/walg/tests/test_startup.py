@@ -54,7 +54,7 @@ def test_a_postgres_launched_with_the_configured_settings_is_silent(
     with archiving_postgres(sandbox=sandbox) as pg:
         message = startup.assert_configured_archive(
             machine="macmini",
-            path=sandbox.path_reader(),
+            path=sandbox.path,
             admin=probe.admin_connection_to(pg.target),
         )
 
@@ -71,11 +71,11 @@ def test_a_postgres_launched_with_other_settings_names_the_machine_and_both_valu
     with archiving_postgres("-c", "archive_mode=off", sandbox=sandbox) as pg:
         message = startup.assert_configured_archive(
             machine="macmini",
-            path=sandbox.path_reader(),
+            path=sandbox.path,
             admin=probe.admin_connection_to(pg.target),
         )
 
-    expected = expected_for(sandbox.path_reader())
+    expected = expected_for(sandbox.path)
     assert expected is not None
     assert message is not None
     assert "macmini" in message
@@ -89,7 +89,7 @@ def test_a_server_that_cannot_be_read_warns_and_never_raises(
 ) -> None:
     message = startup.assert_configured_archive(
         machine="macmini",
-        path=sandbox.path_reader(),
+        path=sandbox.path,
         admin=probe.admin_connection_to(_refused()),
     )
 

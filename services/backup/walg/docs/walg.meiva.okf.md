@@ -49,7 +49,7 @@ proves it are [[walg-restore.meiva.okf.md|WAL-G restore and recovery drill]].
   leaves nothing behind. `archive_mode` is read only at Postgres launch: a retained
   postmaster keeps its previous arguments, so enabling or disabling needs
   `meiva stop` + `meiva start`; start warns when the running Postgres differs.
-- **Configuration ownership**: each operation requires a `path_reader` bound by its root to that root's `ConfigBoot`. Configuration, runner, archive/restore commands, check, probe, tick, drill and retention forward the reader and consume it at the original read points; no constructor caches the configured path.
+- **Configuration ownership**: each root (a CLI command, a tick, a health reading, a converge step) reads the configured WAL-G path once from its own `ConfigBoot` and passes the value (`path: Path | None`, None while WAL-G is off) down; no module below the root consults a reader, and no constructor caches the path.
 - **One runner** (`runner.py`): `wal-g --config <file> ...` with the daemon
   environment subset (no `MEIVA_*` value, no storage credential) and bounded time;
   `run_walg_logged` also returns stderr, where `delete` prints what it would remove.

@@ -33,7 +33,7 @@ def _run_check(
     admin: AbstractContextManager[psycopg.Connection[Any]] | None = None,
 ) -> list[check.Step]:
     return check.run_check_on(
-        path_reader=sandbox.path_reader,
+        path=sandbox.path,
         binary_problem=binary_problem,
         admin=probe.admin_connection_to(_REFUSED) if admin is None else admin,
     )
@@ -99,7 +99,7 @@ def test_an_unusable_configuration_stops_before_any_storage_call(sandbox: Sandbo
 
 
 def test_a_key_that_differs_from_the_pinned_one_fails(sandbox: Sandbox) -> None:
-    walg_config.load_walg_config(path_reader=sandbox.path_reader)
+    walg_config.load_walg_config(path=sandbox.path)
     sandbox.key_file.write_text("cd" * 32 + "\n")
 
     steps = _run_check(sandbox)
