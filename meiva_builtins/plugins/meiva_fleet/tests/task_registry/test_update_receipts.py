@@ -97,14 +97,16 @@ def test_publication_emits_the_committed_events_once_and_in_order(
         meiva.context, tid, note="published", operation_key=str(uuid4())
     )
     assert emitted_events.names() == []
-    assert not committed.replayed
-    assert committed.events[0].event_name == "task_update"
+    assert committed is not None
+    assert task_registry.publication_events(committed)[0].event_name == "task_update"
 
     task_registry.publish_update(committed)
 
-    assert emitted_events.names() == [event.event_name for event in committed.events]
+    assert emitted_events.names() == [
+        event.event_name for event in task_registry.publication_events(committed)
+    ]
     assert [event.attributes for event in emitted_events] == [
-        event.attributes for event in committed.events
+        event.attributes for event in task_registry.publication_events(committed)
     ]
 
 

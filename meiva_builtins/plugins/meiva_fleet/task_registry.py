@@ -5,6 +5,7 @@ task; owners are reminded periodically, and a task may nest under a parent.
 from __future__ import annotations
 
 import builtins
+from collections.abc import Iterable
 from dataclasses import asdict, dataclass
 from typing import TYPE_CHECKING, Any, cast
 
@@ -26,6 +27,7 @@ if TYPE_CHECKING:
     from base.telemetry import Event
 
 from ._task_assignment import TaskAssignment, create_and_assign_guarded
+from ._task_publication import TaskPublication
 from ._task_requests import creation_request, effective_owner, update_request
 from ._task_update import (
     DEFAULT_PRIORITY,
@@ -92,15 +94,34 @@ def create(
 
 
 # meiva:note
-# What one task creation leaves after its transaction: the snapshot the caller gets, the events the
-# transaction recorded (emitted only once it has committed, in this order), and whether the
-# operation key replayed an earlier acceptance, which has nothing left to publish.
-@dataclass(frozen=True)
-class CreationCommit:
+# The mutable SDK return value is separate from the immutable committed publication facts.
+# Changing the Task cannot retarget a board refresh or alter the recorded audit events.
+@dataclass
+class CreationResult:
     task: Task
-    actor: int
-    events: tuple[Event, ...]
-    replayed: bool
+    publication: TaskPublication | None
+
+
+# meiva:note
+# Retain the canonical facts already written as JSONB, without keeping mutable Events.
+# Serialization stays deferred so importing the plugin does not import the telemetry stack.
+def _recorded_publication(
+    actor: int, task_id: int, events: Iterable[Event], *, closed_title: str | None = None
+) -> TaskPublication:
+    from base.telemetry.delivery.serialization import event_line
+
+    return TaskPublication(
+        actor, task_id, tuple(event_line(event) for event in events), closed_title
+    )
+
+
+def publication_events(publication: TaskPublication) -> tuple[Event, ...]:
+    from pydantic import TypeAdapter
+
+    from base.telemetry.delivery.receipts import Event
+
+    adapter = TypeAdapter(Event)
+    return tuple(adapter.validate_json(line) for line in publication.event_lines)
 
 
 def create_in_context(
@@ -115,17 +136,27 @@ def create_in_context(
     operation_key: str,
 ) -> Task:
     """Apply create with one explicit context, including admission revalidation."""
+    from base.agents.tasks.priority import (
+        DEFAULT_REMIND_INTERVAL_SECONDS,
+        Priority,
+        validate_priority,
+    )
+
+    priority = coerce_str(priority, "priority")
+    validate_priority(priority)
+    default_interval = DEFAULT_REMIND_INTERVAL_SECONDS[Priority(priority)]
     committed = commit_creation(
         context,
         title,
         description,
+        default_remind_interval_seconds=default_interval,
         parent=parent,
         remind_interval_seconds=remind_interval_seconds,
         owner=owner,
         priority=priority,
         operation_key=operation_key,
     )
-    publish_creation(committed)
+    publish_creation(committed.publication)
     return committed.task
 
 
@@ -144,7 +175,8 @@ def commit_creation(
     owner: int | None = None,
     priority: str = DEFAULT_PRIORITY,
     operation_key: str,
-) -> CreationCommit:
+    default_remind_interval_seconds: int,
+) -> CreationResult:
     from base.agents.tasks.creation import create_task_in_transaction
     from base.api_contracts.idempotency import validate_idempotency_key
 
@@ -172,7 +204,7 @@ def commit_creation(
     with context.sql.transaction(), context.sql.cursor() as cur:
         snapshot = replay_creation(cur, actor, operation_key, request, context=context)
         if snapshot is not None:
-            return CreationCommit(Task(**snapshot), actor, (), replayed=True)
+            return CreationResult(Task(**snapshot), None)
         task, created_event, note_events = create_task_in_transaction(
             cur,
             title,
@@ -181,27 +213,33 @@ def commit_creation(
             owner=task_owner,
             actor=actor,
             priority=priority,
-            remind_interval_seconds=remind_interval_seconds,
+            remind_interval_seconds=(
+                default_remind_interval_seconds
+                if remind_interval_seconds is None
+                else remind_interval_seconds
+            ),
         )
         record_creation(cur, actor, operation_key, request, asdict(task))
-    return CreationCommit(task, actor, (created_event, *note_events), replayed=False)
+    return CreationResult(
+        task, _recorded_publication(actor, task.id, (created_event, *note_events))
+    )
 
 
 # meiva:note
 # The emission half of a creation: the recorded events, then a live refresh of every open task
 # board. A replayed acceptance publishes nothing.
-def publish_creation(committed: CreationCommit) -> None:
-    if committed.replayed:
+def publish_creation(committed: TaskPublication | None) -> None:
+    if committed is None:
         return
     # meiva:note
     # Deferred imports keep the psycopg stack off plugin autoload (task #3816).
     from base import telemetry
     from base.events.live import announce, bus
 
-    for event in committed.events:
+    for event in publication_events(committed):
         telemetry.emit_prepared(event)
     announce.publish_task_created_sync(
-        bus.EventBus.from_settings(), committed.actor, committed.task.id
+        bus.EventBus.from_settings(), committed.actor, committed.task_id
     )
 
 
@@ -305,19 +343,6 @@ def _update_value(value: int | Unset | None) -> int | None:
     return None if isinstance(value, Unset) else value
 
 
-# meiva:note
-# What one task update leaves after its transaction: the events the transaction recorded (emitted
-# only once it has committed, in this order), the title of the task when this update closed it, and
-# whether the operation key replayed an earlier commit, which has nothing left to publish.
-@dataclass(frozen=True)
-class UpdateCommit:
-    task_id: int
-    actor: int
-    events: tuple[Event, ...]
-    closed_title: str | None
-    replayed: bool
-
-
 def update_in_context(
     context: MeivaContext,
     task_id: int,
@@ -371,7 +396,7 @@ def commit_update(
     parent_id: int | Unset | None = UNSET_FIELD,
     note: str | None = None,
     operation_key: str,
-) -> UpdateCommit:
+) -> TaskPublication | None:
     task_id = coerce_typed(task_id, "task_id", int)
     status = coerce_str(status, "status", allow_none=True)
     title = coerce_str(title, "title", allow_none=True)
@@ -438,7 +463,7 @@ def commit_update(
     )
     with context.sql.transaction(), context.sql.cursor() as cur:
         if replay_update(cur, actor, task_id, operation_key, request_body, context=context):
-            return UpdateCommit(task_id, actor, (), None, replayed=True)
+            return None
         if parent_id is not UNSET_FIELD:
             sets.append("parent_id = %s")
             params.append(resolve_reparent(cur, task_id, cast(int | None, parent_id)))
@@ -471,27 +496,26 @@ def commit_update(
             parent_only=parent_only,
         )
         record_update(cur, actor, task_id, operation_key, request_body)
-    return UpdateCommit(
-        task_id,
+    return _recorded_publication(
         actor,
+        task_id,
         (updated_event, *note_events),
-        task_title if status == "done" else None,
-        replayed=False,
+        closed_title=task_title if status == "done" else None,
     )
 
 
 # meiva:note
 # The emission half of an update: the recorded events, a live refresh of every open task board and,
 # when the update closed the task, one log line. A replayed commit publishes nothing.
-def publish_update(committed: UpdateCommit) -> None:
-    if committed.replayed:
+def publish_update(committed: TaskPublication | None) -> None:
+    if committed is None:
         return
     # meiva:note
     # Deferred imports keep the psycopg stack off plugin autoload (task #3816).
     from base import telemetry
     from base.events.live import announce, bus
 
-    for event in committed.events:
+    for event in publication_events(committed):
         telemetry.emit_prepared(event)
     announce.publish_task_updated_sync(
         bus.EventBus.from_settings(), committed.actor, committed.task_id
