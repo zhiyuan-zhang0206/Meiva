@@ -78,30 +78,6 @@ def test_resolve_linux_none_when_not_on_path() -> None:
     assert pp.resolve_chrome_binary(None, host=_linux()) is None
 
 
-# ─── default_chrome_user_data_dir ────────────────────────────────────────
-
-
-def test_default_user_data_dir_macos(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    monkeypatch.setattr(pp.Path, "home", classmethod(lambda _cls: tmp_path))  # pyright: ignore[reportUnknownArgumentType]
-    expected = tmp_path / "Library" / "Application Support" / "Google" / "Chrome"
-    expected.mkdir(parents=True)
-    assert pp.default_chrome_user_data_dir(host=fake_host(platform=DARWIN_ARM64)) == expected
-
-
-def test_default_user_data_dir_linux(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    monkeypatch.setattr(pp.Path, "home", classmethod(lambda _cls: tmp_path))  # pyright: ignore[reportUnknownArgumentType]
-    expected = tmp_path / ".config" / "google-chrome"
-    expected.mkdir(parents=True)
-    assert pp.default_chrome_user_data_dir(host=_linux()) == expected
-
-
-def test_default_user_data_dir_none_when_absent(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    monkeypatch.setattr(pp.Path, "home", classmethod(lambda _cls: tmp_path))  # pyright: ignore[reportUnknownArgumentType]
-    assert pp.default_chrome_user_data_dir(host=fake_host(platform=DARWIN_ARM64)) is None
-
-
 # ─── display_available ───────────────────────────────────────────────────
 
 

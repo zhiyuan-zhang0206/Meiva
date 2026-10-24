@@ -30,8 +30,6 @@ from pathlib import Path
 from typing import TextIO
 
 from base.host.proc import process_alive
-from base.host.system.hostport import Host
-from base.host.system.probes import default_chrome_user_data_dir
 from base.paths import meiva_home
 
 # Names never worth copying out of a Chrome user-data dir. `Singleton*` are the
@@ -212,7 +210,10 @@ def _confirm_copy(src: Path, dst: Path, size_bytes: int, console: Console) -> bo
     return console.ask("  Type 'yes' to confirm the copy: ").strip().lower() in ("yes", "y")
 
 
-def ensure_browser_profile(*, interactive: bool, host: Host, console: Console) -> None:
+# meiva:note
+# Converge passes the daily profile candidate selected from its captured session home and
+# platform. Probe it only after preserving existing destinations and noninteractive starts.
+def ensure_browser_profile(*, interactive: bool, daily_profile: Path, console: Console) -> None:
     """Offer, once, to seed the agent's dedicated Chrome profile from the daily one.
 
     No-ops (leaving the daemon to create a fresh empty profile) when the profile
@@ -225,8 +226,8 @@ def ensure_browser_profile(*, interactive: bool, host: Host, console: Console) -
         return  # never clobber an existing profile
     if not interactive:
         return  # non-interactive default = fresh empty profile
-    src = default_chrome_user_data_dir(host=host)
-    if src is None:
+    src = daily_profile
+    if not src.is_dir():
         return  # no daily Chrome to copy from -> fresh profile, no prompt
 
     if _prompt_profile_choice(src, console) != "copy":
