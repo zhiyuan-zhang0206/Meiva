@@ -92,23 +92,22 @@ def browser_probe() -> DaemonProbe:
     return probe_browser()
 
 
+# meiva:note
+# The canonical service roster captures probe ports/URLs and memory-search inputs
+# from process configuration at use-time, including per-cluster port overrides.
+# Root builds its roster once at startup; persisted config changes take effect on
+# process restart.
+#
+# The gateway, agent-runner and both-capability groups are concatenated in that
+# order; within each group the order is load-bearing where noted. The
+# meiva_memory plugin declares memory-indexer because it owns the indexed pool.
 def build_services() -> tuple[ServiceSpec, ...]:
-    """Return the canonical service roster with probe ports/URLs derived from settings.
-
-    Called at use-time (not import time) so env-backed settings and monkeypatched
-    endpoint values are picked up by tests and per-cluster port overrides.
-
-    Authored in three capability groups so which machine runs a service is visible
-    at a glance. The concatenation order is gateway-group, then agent-runner-group,
-    then both-group; within each group the order is load-bearing where noted.
-    (memory-indexer is not here: it is declared by the meiva_memory plugin, which
-    owns the pool it indexes — `plugins/meiva_memory/services.py`.)
-    """
     # Share the public entry/app port definition with the serving process.
     from services.agent_runner.pty_sessions import shutdown_budget as pty_sessions_budget
     from services.desktop.browser import shutdown_budget as browser_mcp_budget
     from services.entrypoints.gate.daemon import app_port, entry_port
     from services.supervision.healthchecks.gate import probe as probe_gate
+    from services.supervision.healthchecks.memory_search import memory_search_probe
     from services.supervision.healthchecks.otel_collector import probe_collector
     from services.supervision.healthchecks.protocol_probe import probe as probe_protocol
     from services.supervision.healthchecks.redis_bridge import probe_relay
@@ -251,7 +250,11 @@ def build_services() -> tuple[ServiceSpec, ...]:
             # a pg outage is not its business.
             requires_db=False,
             tcp_port=settings.services.memory_search_port,
-            identity_probe=partial(probe_protocol_service, "memory-search"),
+            identity_probe=partial(
+                memory_search_probe,
+                uri=settings.services.memory_search_uri,
+                embedding_name=settings.services.embedding_backend,
+            ),
             healthcheck_module="services.supervision.healthchecks.memory_search",
         ),
         ServiceSpec(

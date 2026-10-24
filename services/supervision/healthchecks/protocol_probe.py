@@ -59,10 +59,6 @@ def _observe(service: str, home: Path) -> DaemonProbe:
         from services.supervision.healthchecks.insights import insights_probe
 
         return probe_protocol(lambda: insights_probe(home))
-    if service == "memory-search":
-        from services.supervision.healthchecks.memory_search import memory_search_probe
-
-        return probe_protocol(memory_search_probe)
     raise ValueError(f"unsupported protocol probe: {service}")
 
 

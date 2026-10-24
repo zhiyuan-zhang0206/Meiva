@@ -11,6 +11,15 @@ and readiness belong to [Meiva Root](../../../../services/supervision/meiva_root
 [host lifecycle](../../../../cli/commands/lifecycle/docs/lifecycle.meiva.okf.md) and
 [the service domain](../../../../services/docs/services.meiva.okf.md).
 
+Meiva Root builds and registers this roster once at startup. The memory-search
+probe captures its URI and embedding provider with the roster's ports and URLs;
+an existing roster keeps those values, and rebuilding it reads the current
+process configuration. Configuration writes persist to `.env` and are adopted
+when the consuming process restarts, as defined by
+[runtime configuration](../../../../base/config/runtime_config.py). There is no
+probe-specific hot-reload contract: mutating the supervisor's environment between
+probe rounds no longer changes its memory-search target or provider.
+
 <!-- lint:roster-table -->
 | Service (suffix)         | Runs                                     | Healthcheck |
 |--------------------------|------------------------------------------|-------------|
