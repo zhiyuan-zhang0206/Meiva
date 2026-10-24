@@ -2,6 +2,8 @@ exports = ["job_wait.py", "process_groups.py", "pty_jobs.py", "pty_reaper.py", "
 
 [uses]
 "pty_jobs.py" = ["pty_shells.py"]
+"pty_reaper.py" = ["pty_service.py"]
+"pty_shells.py" = ["pty_service.py"]
 "test_closure.py" = ["closure_group_child.py"]
 "test_service_epoch.py" = ["pty_service.py"]
 "secret_argv.py" = ["pty_service.py"]

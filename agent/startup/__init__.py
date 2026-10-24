@@ -389,7 +389,7 @@ async def consume_claimed_inbounds(
         )
 
 
-async def notify_desktop_permissions_at_startup() -> None:
+async def notify_desktop_permissions_at_startup(home: Path) -> None:
     """Surface broken helper desktop permissions via meiva.ui.notify, once.
 
     The converge preflight writes independent Screen Recording and
@@ -411,8 +411,8 @@ async def notify_desktop_permissions_at_startup() -> None:
 
     claimed: list[tuple[Path, Path, ScreenCaptureStatus | AccessibilityStatus]] = []
     for status_path, status_type in (
-        (screen_capture_status_file_path(), ScreenCaptureStatus),
-        (accessibility_status_file_path(), AccessibilityStatus),
+        (screen_capture_status_file_path(home), ScreenCaptureStatus),
+        (accessibility_status_file_path(home), AccessibilityStatus),
     ):
         processing_path = status_path.with_suffix(".processing")
         # Atomic claim: each concurrent starter can win only this status file.

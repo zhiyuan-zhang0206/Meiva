@@ -32,9 +32,8 @@ from base.sessions.env_forwarding import forward_env_dict
 from base.sessions.protocol import SessionBackend
 from base.sessions.pty import allocation_freeze, client
 from base.sessions.pty.client import PtyClientConfig
-from base.sessions.pty.paths import service_socket_path
 from base.sessions.pty.tests.job_wait import wait_for_job
-from base.sessions.pty.tests.pty_service import PtyServiceProcess
+from base.sessions.pty.tests.pty_service import PtyServiceProcess, service_socket
 from base.sessions.pty.tests.pty_service import pty_service as pty_service
 from base.sessions.pty.tests.pty_shells import (
     gone,
@@ -49,7 +48,7 @@ _NAME = "meiva-agent-1-shell-2"
 
 
 def _backend() -> PtySessionBackend:
-    return PtySessionBackend(config=PtyClientConfig())
+    return PtySessionBackend(config=PtyClientConfig(socket_path=service_socket()))
 
 
 def _new(name: str, cwd: Path, *, cmd: str = "", env: dict[str, str] | None = None) -> None:
@@ -60,7 +59,7 @@ def _new(name: str, cwd: Path, *, cmd: str = "", env: dict[str, str] | None = No
 def _wedged_service() -> Generator[None]:
     """An endpoint at the service socket that accepts a connection and closes it
     unanswered: a service that was dialed and did not respond."""
-    path = service_socket_path()
+    path = service_socket()
     path.parent.mkdir(parents=True, exist_ok=True)
     path.unlink(missing_ok=True)
     listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -104,7 +103,7 @@ def test_new_session_starts_a_login_shell_in_the_cwd(unit_home: Path) -> None:
     cwd = unit_home / "work"
     cwd.mkdir()
     _new(_NAME, cwd)
-    (info,) = client.list_sessions()
+    (info,) = client.list_sessions(socket_path=service_socket())
     assert (info.name, info.cwd, info.cmd) == (_NAME, str(cwd), "/bin/bash -l -i")
     assert shell_process(_NAME).cwd() == str(cwd.resolve())
 
@@ -119,9 +118,9 @@ def test_new_session_submits_the_command_once_the_shell_is_ready(unit_home: Path
 def test_new_session_is_idempotent_for_a_live_session(unit_home: Path) -> None:
     """A second create of a live name succeeds and leaves the shell untouched."""
     _new(_NAME, unit_home)
-    (first,) = client.list_sessions()
+    (first,) = client.list_sessions(socket_path=service_socket())
     assert _backend().new_session(_NAME, "", unit_home, env={}) is True
-    (second,) = client.list_sessions()
+    (second,) = client.list_sessions(socket_path=service_socket())
     assert second == first
 
 
@@ -299,7 +298,7 @@ def test_list_sessions_is_sorted_and_filtered_by_prefix(unit_home: Path) -> None
 def test_started_ats_answers_every_name_from_the_service_epochs(unit_home: Path) -> None:
     """A live session maps to the epoch the service recorded, an absent one to None."""
     _new("meiva-agent-1-shell-1", unit_home)
-    (info,) = client.list_sessions()
+    (info,) = client.list_sessions(socket_path=service_socket())
     epochs = _backend().session_started_ats(["meiva-agent-1-shell-1", "meiva-agent-1-shell-9"])
     assert epochs == {"meiva-agent-1-shell-1": info.started_at, "meiva-agent-1-shell-9": None}
     assert info.started_at > 0
@@ -348,7 +347,7 @@ def test_session_log_path_is_the_transcript_the_service_writes(unit_home: Path) 
 def test_new_session_login_shell_false_raises() -> None:
     with pytest.raises(NotImplementedError):
         _backend().new_session("s", "cmd", Path("/"), env={}, login_shell=False)
-    assert client.list_sessions() == [], "nothing reached the service"
+    assert client.list_sessions(socket_path=service_socket()) == [], "nothing reached the service"
 
 
 @pytest.mark.usefixtures("pty_service")
@@ -360,7 +359,7 @@ def test_new_session_refused_by_the_service_returns_false_and_warns(
     assert ok is False
     assert "pty session allocation failed for s" in caplog.text
     assert "cannot be forwarded" in caplog.text
-    assert client.list_sessions() == []
+    assert client.list_sessions(socket_path=service_socket()) == []
 
 
 @pytest.mark.usefixtures("pty_service")
@@ -384,7 +383,9 @@ def test_a_home_without_a_service_holds_no_sessions(
 ) -> None:
     """Nothing is alive in a service that is not there: queries read as empty and `kill`
     as a noop; `new` fails as False with a warning, and `send`/`capture` raise."""
-    backend = PtySessionBackend(config=PtyClientConfig(connect_wait_s=0.0))
+    backend = PtySessionBackend(
+        config=PtyClientConfig(connect_wait_s=0.0, socket_path=service_socket())
+    )
     assert backend.has_session(_NAME) is False
     assert backend.list_sessions() == []
     assert backend.list_sessions(prefix="meiva-agent-1") == []

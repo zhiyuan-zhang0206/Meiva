@@ -492,8 +492,9 @@ def read_resource_sample(
 def serving_gate_reason(*, is_serving_fn: Callable[[], bool] | None = None) -> PausedReason | None:
     if is_serving_fn is None:
         from base.deploy.lifecycle import start_serving
+        from base.paths import meiva_home
 
-        serving = start_serving.is_serving()
+        serving = start_serving.is_serving(meiva_home())
     else:
         serving = is_serving_fn()
     return None if serving else "startup"
@@ -559,8 +560,10 @@ def status_snapshot(
     active = hooks or StatusSnapshotHooks()
     if active.head_sha_reader is None:
         from base.deploy.git.cluster_drift import prod_source_head_sha
+        from base.host.env.registry import process_environment
+        from base.paths import meiva_home
 
-        head_sha = prod_source_head_sha()
+        head_sha = prod_source_head_sha(meiva_home(), environ=process_environment())
     else:
         head_sha = active.head_sha_reader()
 

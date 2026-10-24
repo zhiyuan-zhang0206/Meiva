@@ -95,8 +95,8 @@ def test_a_restart_stops_the_tree_but_the_browser_and_brings_the_selection_back(
         "the gateway was dialled by the preflight probe before anything stopped, by the start "
         "leg's own probe and by the start leg's status block"
     )
-    assert start_serving.is_serving(), "the start leg published serving again"
-    journal = _journal(run.process_home)
+    assert start_serving.is_serving(run.home), "the start leg published serving again"
+    journal = _journal(run.home)
     assert journal["complete"] and journal["result"] == {"rc": 0, "error": None}
     assert [phase["name"] for phase in journal["phases"]] == [
         "preflight",
@@ -146,12 +146,12 @@ def test_the_start_leg_waits_only_as_long_as_the_operators_start_timeout(
     assert elapsed < 30, "the start leg did not wait out the start's own default budget"
     served = _served(root.calls)
     assert served[-1] == ("up", "gate") and set(served[:-1]) == {("down", "gate")}
-    journal = _journal(run.process_home)
+    journal = _journal(run.home)
     assert journal["complete"] and journal["result"] == {
         "rc": rc,
         "error": f"start leg failed with rc={rc}",
     }
-    assert not start_serving.is_serving()
+    assert not start_serving.is_serving(run.home)
     err = capsys.readouterr().err
     assert "1 service(s) not ready" in err and "meiva-gate" in err
     assert "the 0s readiness bound" in err, "the wait was bounded by the operator's start timeout"
@@ -199,7 +199,7 @@ def test_a_restart_that_the_probes_decline_stops_nothing_and_leaves_the_root_alo
         "outside-the-selection": "running",
         "browser": "running",
     }
-    journal = _journal(run.process_home)
+    journal = _journal(run.home)
     assert journal["complete"] and journal["result"] == {
         "rc": rc,
         "error": "preflight probes failed",

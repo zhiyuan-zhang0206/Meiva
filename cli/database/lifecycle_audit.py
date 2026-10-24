@@ -164,8 +164,10 @@ def _caller_identity() -> CallerPayload:
 
 def _head_sha() -> str | None:
     from base.deploy.git.cluster_drift import prod_source_head_sha
+    from base.host.env.registry import process_environment
+    from base.paths import meiva_home
 
-    return prod_source_head_sha()
+    return prod_source_head_sha(meiva_home(), environ=process_environment())
 
 
 # meiva:note

@@ -12,7 +12,7 @@ import pytest
 from base.sessions.pty import client
 from base.sessions.pty.tests import pty_shells as support
 from base.sessions.pty.tests.job_wait import wait_for_foreground, wait_for_job
-from base.sessions.pty.tests.pty_service import PtyServiceProcess
+from base.sessions.pty.tests.pty_service import PtyServiceProcess, service_socket
 from base.sessions.pty.tests.pty_service import pty_service as pty_service
 from base.sessions.pty.tests.pty_shells import (
     new,
@@ -31,7 +31,7 @@ pytestmark = [
 
 def test_new_send_capture_loop(unit_home: Path) -> None:
     assert new("meiva-test-loop-1", unit_home) is True
-    assert client.has_session("meiva-test-loop-1")
+    assert client.has_session("meiva-test-loop-1", socket_path=service_socket())
     type_line("meiva-test-loop-1", "echo hello-pty")
     assert "hello-pty" in output_until("meiva-test-loop-1", "hello-pty")
 
@@ -39,9 +39,9 @@ def test_new_send_capture_loop(unit_home: Path) -> None:
 def test_new_is_idempotent_for_a_live_session(unit_home: Path) -> None:
     name = "meiva-test-ido-1"
     assert new(name, unit_home) is True
-    (first,) = client.list_sessions()
+    (first,) = client.list_sessions(socket_path=service_socket())
     assert new(name, unit_home) is False, "a second new accepts the live session"
-    (second,) = client.list_sessions()
+    (second,) = client.list_sessions(socket_path=service_socket())
     assert second == first, "idempotent new must not relaunch"
     type_line(name, "echo still-one-shell")
     output_until(name, "still-one-shell")
@@ -66,7 +66,7 @@ def test_the_session_record_carries_identity_and_launch_facts(unit_home: Path) -
     cwd = unit_home / "work"
     cwd.mkdir()
     new(name, cwd)
-    (info,) = client.list_sessions()
+    (info,) = client.list_sessions(socket_path=service_socket())
     assert info.name == name
     assert info.cwd == str(cwd)
     assert info.cmd == "/bin/bash -l -i"
@@ -78,13 +78,19 @@ def test_the_session_record_carries_identity_and_launch_facts(unit_home: Path) -
 def test_list_filters_by_prefix_and_has_reflects_liveness(unit_home: Path) -> None:
     for name in ("meiva-test-a-1", "meiva-test-a-2", "meiva-test-b-1"):
         new(name, unit_home)
-    assert [s.name for s in client.list_sessions("meiva-test-a-")] == [
+    assert [
+        s.name for s in client.list_sessions("meiva-test-a-", socket_path=service_socket())
+    ] == [
         "meiva-test-a-1",
         "meiva-test-a-2",
     ]
-    assert sorted(client.live_sessions()) == ["meiva-test-a-1", "meiva-test-a-2", "meiva-test-b-1"]
-    assert client.has_session("meiva-test-b-1")
-    assert not client.has_session("meiva-test-c-1")
+    assert sorted(client.live_sessions(socket_path=service_socket())) == [
+        "meiva-test-a-1",
+        "meiva-test-a-2",
+        "meiva-test-b-1",
+    ]
+    assert client.has_session("meiva-test-b-1", socket_path=service_socket())
+    assert not client.has_session("meiva-test-c-1", socket_path=service_socket())
 
 
 def test_send_transports_tricky_text(unit_home: Path) -> None:
@@ -101,7 +107,7 @@ def test_send_without_enter_does_not_submit(unit_home: Path) -> None:
     new(name, unit_home)
     type_line(name, "echo ready-check")
     output_until(name, "ready-check")
-    client.send(name, b"echo not-submitted-yet")
+    client.send(name, b"echo not-submitted-yet", socket_path=service_socket())
 
     assert wait_for(lambda: "echonot-submitted-yet" in "".join(screen(name).split()))
     assert "not-submitted-yet" not in [line.strip() for line in screen(name).split("\n")]
@@ -120,7 +126,7 @@ def test_send_keys_ctrl_c_interrupts_the_foreground(unit_home: Path) -> None:
     wait_for_foreground(shell)
     type_line(name, "echo after-interrupt")
     output_until(name, "after-interrupt")
-    assert client.has_session(name)
+    assert client.has_session(name, socket_path=service_socket())
 
 
 def test_shell_foreground_wait_does_not_accept_an_interrupted_live_job(
@@ -179,7 +185,7 @@ def test_resize_is_seen_by_stty(unit_home: Path) -> None:
     new(name, unit_home)
     type_line(name, "echo stty-ready")
     output_until(name, "stty-ready")
-    client.resize(name, 100, 25)
+    client.resize(name, 100, 25, socket_path=service_socket())
     type_line(name, "stty size")
     output_until(name, "25 100")
 
@@ -212,18 +218,20 @@ def test_capture_lines_caps_the_render(unit_home: Path) -> None:
     output_until(name, "bulk-line-0")
     type_line(name, "seq 1 45")
     output_until(name, "45")
-    tail = client.capture(name, 5, scrollback=True)
+    tail = client.capture(name, 5, scrollback=True, socket_path=service_socket())
     assert len(tail.splitlines()) <= 5
     assert "45" in tail and "bulk-line-0" not in tail
-    assert "bulk-line-0" in client.capture(name, 200, scrollback=True)
+    assert "bulk-line-0" in client.capture(name, 200, scrollback=True, socket_path=service_socket())
 
 
 def test_capture_rejects_a_window_outside_the_protective_bounds(unit_home: Path) -> None:
     new("meiva-test-bounds-1", unit_home)
     with pytest.raises(ValueError, match="out of range"):
-        client.capture("meiva-test-bounds-1", 0, scrollback=True)
+        client.capture("meiva-test-bounds-1", 0, scrollback=True, socket_path=service_socket())
     with pytest.raises(client.ServiceError) as refused:
-        client.request("capture", name="meiva-test-bounds-1", lines=10**9)
+        client.request(
+            "capture", name="meiva-test-bounds-1", lines=10**9, socket_path=service_socket()
+        )
     assert refused.value.code == 2
 
 
@@ -263,7 +271,7 @@ def test_the_service_profile_marker_and_virtualenv_do_not_leak_into_a_shell(
         type_line(overlaid, "echo marker=$MEIVA_PROCESS_PROFILE")
         output_until(overlaid, "marker=gateway")
     finally:
-        client.close_all(grace_s=0.5, kill_s=2.0)
+        client.close_all(grace_s=0.5, kill_s=2.0, socket_path=service_socket())
         marked.stop()
 
 
@@ -281,8 +289,10 @@ def test_a_session_ends_with_its_shell(unit_home: Path) -> None:
     name = "meiva-test-exit-1"
     new(name, unit_home)
     type_line(name, "exit")
-    assert wait_for(lambda: not client.has_session(name)), "session must die with its shell"
-    assert name not in client.live_sessions()
+    assert wait_for(lambda: not client.has_session(name, socket_path=service_socket())), (
+        "session must die with its shell"
+    )
+    assert name not in client.live_sessions(socket_path=service_socket())
     assert not (unit_home / "run" / "pty").exists(), "no per-session record directory"
 
 
@@ -290,11 +300,11 @@ def test_ops_after_death_report_no_such_session(unit_home: Path) -> None:
     name = "meiva-test-dead-1"
     new(name, unit_home)
     type_line(name, "exit")
-    assert wait_for(lambda: not client.has_session(name))
+    assert wait_for(lambda: not client.has_session(name, socket_path=service_socket()))
     for call in (
-        lambda: client.send(name, b"x"),
-        lambda: client.capture(name, 10, scrollback=True),
-        lambda: client.resize(name, 80, 24),
+        lambda: client.send(name, b"x", socket_path=service_socket()),
+        lambda: client.capture(name, 10, scrollback=True, socket_path=service_socket()),
+        lambda: client.resize(name, 80, 24, socket_path=service_socket()),
     ):
         with pytest.raises(client.ServiceError) as refused:
             call()
@@ -316,33 +326,33 @@ def test_kill_reaps_the_process_tree_without_orphans(unit_home: Path) -> None:
     shell = shell_process(name)
     type_line(name, "sleep 300")
     sleeper = wait_for_job(shell, ["sleep", "300"])
-    verdict = client.kill(name, graceful=False)
+    verdict = client.kill(name, graceful=False, socket_path=service_socket())
     assert verdict.interrupted is True
     assert wait_for(lambda: support.gone(shell)), "shell survived the kill"
     assert wait_for(lambda: support.gone(sleeper)), "sleep orphaned by the kill"
-    assert not client.has_session(name)
+    assert not client.has_session(name, socket_path=service_socket())
 
 
 def test_kill_graceful_then_force(unit_home: Path) -> None:
     name = "meiva-test-killg-1"
     new(name, unit_home)
-    verdict = client.kill(name, graceful=True)
+    verdict = client.kill(name, graceful=True, socket_path=service_socket())
     assert verdict.mode in ("graceful", "forced")
-    assert wait_for(lambda: not client.has_session(name))
+    assert wait_for(lambda: not client.has_session(name, socket_path=service_socket()))
 
 
 def test_kill_is_an_idempotent_noop_on_an_absent_session() -> None:
-    verdict = client.kill("meiva-test-absent-1", graceful=False)
+    verdict = client.kill("meiva-test-absent-1", graceful=False, socket_path=service_socket())
     assert verdict == client.KillVerdict("noop", False)
 
 
 def test_kill_then_an_immediate_same_name_new_is_a_real_session(unit_home: Path) -> None:
     name = "meiva-test-rebirth-1"
     new(name, unit_home)
-    (first,) = client.list_sessions()
-    client.kill(name, graceful=False)
+    (first,) = client.list_sessions(socket_path=service_socket())
+    client.kill(name, graceful=False, socket_path=service_socket())
     assert new(name, unit_home) is True
-    (second,) = client.list_sessions()
+    (second,) = client.list_sessions(socket_path=service_socket())
     assert second.pid != first.pid, "must be a fresh shell, not the dying one"
     type_line(name, "echo reborn-ok")
     output_until(name, "reborn-ok")
@@ -353,8 +363,8 @@ def test_kill_idle_reports_not_interrupted(unit_home: Path) -> None:
     new(name, unit_home)
     type_line(name, "echo verdict-idle-ready")
     output_until(name, "verdict-idle-ready")
-    assert client.kill(name, graceful=False).interrupted is False
-    assert not client.has_session(name)
+    assert client.kill(name, graceful=False, socket_path=service_socket()).interrupted is False
+    assert not client.has_session(name, socket_path=service_socket())
 
 
 @pytest.mark.parametrize(("job", "interrupted"), [("sleep 300", True), ("sleep 300 &", False)])
@@ -369,8 +379,10 @@ def test_kill_verdict_reports_foreground_work(unit_home: Path, job: str, interru
         wait_for_foreground(process)
     else:
         assert wait_for(lambda: screen(name).rstrip().endswith(("$", "#")))
-    assert client.kill(name, graceful=False).interrupted is interrupted
-    assert not client.has_session(name)
+    assert (
+        client.kill(name, graceful=False, socket_path=service_socket()).interrupted is interrupted
+    )
+    assert not client.has_session(name, socket_path=service_socket())
 
 
 def test_a_zombie_shell_is_not_a_live_session(unit_home: Path) -> None:
@@ -379,8 +391,8 @@ def test_a_zombie_shell_is_not_a_live_session(unit_home: Path) -> None:
     shell = shell_process(name)
     os.kill(shell.pid, signal.SIGSTOP)
     os.kill(shell.pid, signal.SIGKILL)
-    assert wait_for(lambda: not client.has_session(name))
-    assert name not in client.live_sessions()
+    assert wait_for(lambda: not client.has_session(name, socket_path=service_socket()))
+    assert name not in client.live_sessions(socket_path=service_socket())
 
 
 def test_a_process_inside_a_session_is_told_it_is_hosted_there(unit_home: Path) -> None:
@@ -391,8 +403,9 @@ def test_a_process_inside_a_session_is_told_it_is_hosted_there(unit_home: Path) 
     name = "meiva-test-hosting-1"
     new(name, REPO, {"MEIVA_HOME": str(unit_home), "MEIVA_CONFIG_FETCH": "skip"})
     probe = (
+        "import os; from pathlib import Path; "
         "from base.sessions.hosting import hosting_supervised_session as hosting; "
-        "print('hosted-in=' + str(hosting()))"
+        "print('hosted-in=' + str(hosting(Path(os.environ['MEIVA_HOME']))))"
     )
     type_line(name, f'{sys.executable} -c "{probe}"')
     output_until(name, f"hosted-in={name}")
@@ -400,9 +413,10 @@ def test_a_process_inside_a_session_is_told_it_is_hosted_there(unit_home: Path) 
 
 
 def hosting_from_outside() -> str | None:
+    from base.paths import meiva_home
     from base.sessions.hosting import hosting_supervised_session
 
-    return hosting_supervised_session()
+    return hosting_supervised_session(meiva_home())
 
 
 def test_initial_command_provenance_is_opt_in_and_keeps_original_allocation(
@@ -411,17 +425,21 @@ def test_initial_command_provenance_is_opt_in_and_keeps_original_allocation(
     name = "meiva-test-command-provenance"
     cmd = "echo first-allocation"
     assert new(name, unit_home, cmd=cmd)
-    default = client.request("list", prefix=name)["sessions"]
+    default = client.request("list", prefix=name, socket_path=service_socket())["sessions"]
     assert "initial_command" not in default[0]
-    assert client.list_sessions(name)[0].initial_command is None
-    first = client.list_sessions(name, include_initial_command=True)[0]
+    assert client.list_sessions(name, socket_path=service_socket())[0].initial_command is None
+    first = client.list_sessions(name, include_initial_command=True, socket_path=service_socket())[
+        0
+    ]
     assert first.initial_command == cmd
     assert not new(name, unit_home, cmd="echo replacement")
-    second = client.list_sessions(name, include_initial_command=True)[0]
+    second = client.list_sessions(name, include_initial_command=True, socket_path=service_socket())[
+        0
+    ]
     assert second.initial_command == cmd
     assert second.started_at == first.started_at
 
 
 def test_list_rejects_invalid_initial_command_metadata_flag() -> None:
     with pytest.raises(client.ServiceError, match="include_initial_command must be a boolean"):
-        client.request("list", include_initial_command="yes")
+        client.request("list", include_initial_command="yes", socket_path=service_socket())

@@ -17,12 +17,14 @@ from __future__ import annotations
 
 import sys
 import time
+from pathlib import Path
 
 from base.agents.context.clients import DatabaseFactory
 from base.events.live.bus import EventBus, event_bus_config_from_config
 from base.native_process.process_control import SYSTEM_PROCESS_CONTROL
+from base.paths import run_dir
 from base.sessions.pty import client, closure
-from base.sessions.pty.paths import ledger_path
+from base.sessions.pty.paths import ledger_path, service_socket_path
 from cli.commands.data_plane.maintenance.survivors import SurvivorInventory
 from cli.commands.data_plane.maintenance_stop_report import (
     StopIncompleteError,
@@ -64,8 +66,8 @@ _SETTLE_POLL_S = 0.05
 
 # meiva:note
 # Refuse maintenance while any shell session is present (`live_shell_sessions`).
-def require_no_shell_sessions() -> None:
-    shell_sessions = live_shell_sessions()
+def require_no_shell_sessions(home: Path) -> None:
+    shell_sessions = live_shell_sessions(home)
     if shell_sessions:
         raise RuntimeError(
             "persistent shell sessions/schedules require their own completed-work boundary; "
@@ -78,11 +80,15 @@ def require_no_shell_sessions() -> None:
 #
 # With the service listening its listing is the truth. Without it, what its ledger
 # names and still runs is a crash's leftover: a process that outlived the hangup.
-def live_shell_sessions() -> list[str]:
+def live_shell_sessions(home: Path) -> list[str]:
+    run = run_dir(home)
     try:
-        return [row["name"] for row in client.request("list")["sessions"]]
+        return [
+            row["name"]
+            for row in client.request("list", socket_path=service_socket_path(run))["sessions"]
+        ]
     except client.ServiceDownError:
-        return ledger.leftovers(ledger_path())
+        return ledger.leftovers(ledger_path(run))
 
 
 # meiva:note
@@ -91,12 +97,15 @@ def live_shell_sessions() -> list[str]:
 # A service that is down died uncleanly before this stop (the stop never
 # leaves one behind): what its ledger still names was lost to that, not to
 # this stop, and its notices say so (`pty_close_notices.CRASH_REASON`).
-def run_closure(grace_s: float, kill_s: float) -> tuple[closure.Outcome, str]:
+def run_closure(home: Path, grace_s: float, kill_s: float) -> tuple[closure.Outcome, str]:
+    run = run_dir(home)
     try:
-        return client.close_all(grace_s=grace_s, kill_s=kill_s), pty_close_notices.STOP_REASON
+        return client.close_all(
+            grace_s=grace_s, kill_s=kill_s, socket_path=service_socket_path(run)
+        ), pty_close_notices.STOP_REASON
     except client.ServiceDownError:
         return ledger.sweep(
-            ledger_path(), process_control=SYSTEM_PROCESS_CONTROL
+            ledger_path(run), process_control=SYSTEM_PROCESS_CONTROL
         ), pty_close_notices.CRASH_REASON
 
 
@@ -144,9 +153,9 @@ def _shell_sessions_incomplete(
 #
 # The service drops a session from its table the moment its teardown is claimed, so this only
 # waits out one still tearing down; a shell session born during the closure fails it.
-def await_no_shell_sessions(until: float, stage: str) -> None:
+def await_no_shell_sessions(home: Path, until: float, stage: str) -> None:
     while True:
-        left = live_shell_sessions()
+        left = live_shell_sessions(home)
         if not left:
             return
         delay = poll_delay(time_left(until, time.monotonic()), _SETTLE_POLL_S)
@@ -229,7 +238,7 @@ def settle_closure(
                 raise _shell_sessions_incomplete(outcome, step, "shell-sessions")
             case AwaitNoSessions():
                 until = settle_until(deadline, time.monotonic(), SHELL_SESSION_KILL_WAIT_S)
-                await_no_shell_sessions(until, "shell-sessions")
+                await_no_shell_sessions(command.home, until, "shell-sessions")
 
 
 # meiva:note
@@ -251,7 +260,7 @@ def close_shell_sessions(
     cleanup_wait_s: float,
 ) -> None:
     grace_s = closure_grace_s(deadline - time.monotonic(), cleanup_wait_s)
-    outcome, reason = run_closure(grace_s, SHELL_SESSION_KILL_WAIT_S)
+    outcome, reason = run_closure(command.home, grace_s, SHELL_SESSION_KILL_WAIT_S)
     settle_closure(
         outcome,
         reason,
@@ -280,6 +289,6 @@ def settle_forced_closure(outcome: closure.Outcome) -> None:
 #
 # Force skips owner notices and drain guarantees. A surviving shell still fails it; known job
 # leftovers remain diagnostics.
-def force_close_shell_sessions() -> None:
-    outcome, _reason = run_closure(0.0, SHELL_SESSION_KILL_WAIT_S)
+def force_close_shell_sessions(home: Path) -> None:
+    outcome, _reason = run_closure(home, 0.0, SHELL_SESSION_KILL_WAIT_S)
     settle_forced_closure(outcome)

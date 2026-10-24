@@ -22,7 +22,7 @@ from typing import Any, cast
 
 from base.sessions.pty import protocol
 from base.sessions.pty.closure import Outcome
-from base.sessions.pty.paths import CAPTURE_MAX_LINES, service_socket_path
+from base.sessions.pty.paths import CAPTURE_MAX_LINES
 from base.sessions.record import SessionRecord
 
 # Long enough to cover the service's longest single-session op (a graceful kill
@@ -30,12 +30,15 @@ from base.sessions.record import SessionRecord
 REQUEST_TIMEOUT_S = 30.0
 
 
+# meiva:note
+# Where the client dials and how patiently; the wait default is the production value.
+#
+# `socket_path` is the service's unix socket (`base.sessions.pty.paths.service_socket_path`);
+# `connect_wait_s` is how long a mutating request waits for a service that is not accepting yet.
 @dataclass(frozen=True)
 class PtyClientConfig:
-    """How patiently the client dials; the default is the production value."""
-
+    socket_path: Path
     connect_wait_s: float = 5.0
-    """How long a mutating request waits for a service that is not accepting yet."""
 
 
 _CONNECT_RETRY_S = 0.1
@@ -96,8 +99,8 @@ class KillVerdict:
     survivors: tuple[int, ...] = ()
 
 
-def _connect(wait_s: float, socket_path: Path | None) -> socket.socket:
-    path = str(service_socket_path() if socket_path is None else socket_path)
+def _connect(wait_s: float, socket_path: Path) -> socket.socket:
+    path = str(socket_path)
     deadline = time.monotonic() + wait_s
     while True:
         conn = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -115,25 +118,25 @@ def _connect(wait_s: float, socket_path: Path | None) -> socket.socket:
             return conn
 
 
+# meiva:note
+# Send one request and return the response's data.
+#
+# `socket_path` names the service's socket (a read-only scan that must not create
+# the home passes one it computed from an explicit run directory).
+#
+# Raises:
+#     ServiceDownError: no service listens (after waiting up to `wait` seconds for
+#         one to accept).
+#     ServiceUnavailableError: a service was dialed and did not answer.
+#     ServiceError: the service refused or failed the request.
 def request(
     method: str,
     *,
+    socket_path: Path,
     timeout: float = REQUEST_TIMEOUT_S,
     wait: float = 0.0,
-    socket_path: Path | None = None,
     **fields: Any,
 ) -> dict[str, Any]:
-    """Send one request and return the response's data.
-
-    `socket_path` names the service's socket explicitly (a read-only scan that must
-    not create the home); the default is this process's own.
-
-    Raises:
-        ServiceDownError: no service listens (after waiting up to `wait` seconds for
-            one to accept).
-        ServiceUnavailableError: a service was dialed and did not answer.
-        ServiceError: the service refused or failed the request.
-    """
     req_id = uuid.uuid4().hex
     conn = _connect(wait, socket_path)
     with conn:
@@ -161,9 +164,9 @@ def request(
     return cast("dict[str, Any]", data) if isinstance(data, dict) else {}
 
 
-def has_session(name: str) -> bool:
+def has_session(name: str, *, socket_path: Path) -> bool:
     try:
-        return bool(request("has", name=name)["alive"])
+        return bool(request("has", socket_path=socket_path, name=name)["alive"])
     except ServiceDownError:
         return False
 
@@ -171,7 +174,7 @@ def has_session(name: str) -> bool:
 # meiva:note
 # The service mints one generation id per process and reports it on ping; a restarted service always answers a different one. An absent service still answers queries as 'no sessions', so a consumer that acts on absence reads the generation first and treats None as unknown.
 # meiva:link base/sessions/pty/docs/pty_sessions/host-generation.meiva.okf.md
-def host_generation(*, socket_path: Path | None = None) -> str | None:
+def host_generation(*, socket_path: Path) -> str | None:
     try:
         return cast("str | None", request("ping", socket_path=socket_path).get("host_generation"))
     except ServiceDownError:
@@ -179,7 +182,7 @@ def host_generation(*, socket_path: Path | None = None) -> str | None:
 
 
 def list_sessions(
-    prefix: str = "", *, socket_path: Path | None = None, include_initial_command: bool = False
+    prefix: str = "", *, socket_path: Path, include_initial_command: bool = False
 ) -> list[SessionInfo]:
     """Every live session whose name starts with `prefix`, sorted by name."""
     try:
@@ -192,9 +195,9 @@ def list_sessions(
     return [SessionInfo(**row) for row in rows]
 
 
-def live_sessions(prefix: str = "") -> dict[str, SessionRecord]:
+def live_sessions(prefix: str = "", *, socket_path: Path) -> dict[str, SessionRecord]:
     """Every live session's record by name: the shape the page server reconciles over."""
-    return {info.name: info.record() for info in list_sessions(prefix)}
+    return {info.name: info.record() for info in list_sessions(prefix, socket_path=socket_path)}
 
 
 def create_session(
@@ -209,30 +212,38 @@ def create_session(
     fields: dict[str, Any] = {"name": name, "cwd": cwd, "env": env}
     if cmd:
         fields["cmd"] = cmd
-    return bool(request("new", wait=config.connect_wait_s, **fields)["created"])
+    return bool(
+        request("new", socket_path=config.socket_path, wait=config.connect_wait_s, **fields)[
+            "created"
+        ]
+    )
 
 
-def send(name: str, data: bytes) -> None:
-    request("send", name=name, data=base64.b64encode(data).decode("ascii"))
+def send(name: str, data: bytes, *, socket_path: Path) -> None:
+    request("send", socket_path=socket_path, name=name, data=base64.b64encode(data).decode("ascii"))
 
 
-def capture(name: str, lines: int, *, scrollback: bool) -> str:
+def capture(name: str, lines: int, *, scrollback: bool, socket_path: Path) -> str:
     if not 1 <= lines <= CAPTURE_MAX_LINES:
         raise ValueError(f"capture lines out of range: {lines}")
-    return str(request("capture", name=name, lines=lines, scrollback=scrollback)["text"])
+    return str(
+        request("capture", socket_path=socket_path, name=name, lines=lines, scrollback=scrollback)[
+            "text"
+        ]
+    )
 
 
-def resize(name: str, cols: int, rows: int) -> None:
-    request("resize", name=name, cols=cols, rows=rows)
+def resize(name: str, cols: int, rows: int, *, socket_path: Path) -> None:
+    request("resize", socket_path=socket_path, name=name, cols=cols, rows=rows)
 
 
-def kill(name: str, *, graceful: bool) -> KillVerdict:
+def kill(name: str, *, graceful: bool, socket_path: Path) -> KillVerdict:
     """End the session and report whether it cut running work short (idempotent).
 
     Without a service there is no session to end: a noop, like killing an absent one.
     """
     try:
-        data = request("kill", name=name, graceful=graceful)
+        data = request("kill", socket_path=socket_path, name=name, graceful=graceful)
     except ServiceDownError:
         return KillVerdict("noop", interrupted=False)
     return KillVerdict(
@@ -242,9 +253,10 @@ def kill(name: str, *, graceful: bool) -> KillVerdict:
 
 # meiva:note
 # Close known shell sessions best effort; no descendant-absence proof.
-def close_all(*, grace_s: float, kill_s: float) -> Outcome:
+def close_all(*, grace_s: float, kill_s: float, socket_path: Path) -> Outcome:
     data = request(
         "close_all",
+        socket_path=socket_path,
         timeout=grace_s + 4 * kill_s + REQUEST_TIMEOUT_S,
         grace_s=grace_s,
         kill_s=kill_s,

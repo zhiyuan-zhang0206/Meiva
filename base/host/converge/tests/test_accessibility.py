@@ -69,17 +69,19 @@ class TestAccessibilityStatus:
 
 class TestStatusFile:
     def test_write_read_clear_cycle(self, unit_home: Path):
-        assert status_file_path().parent == unit_home
-        assert not status_file_path().exists()
-        assert read_status() is None
-        write_status(AccessibilityStatus(state=AccessibilityState.NOT_GRANTED, diagnostic="test"))
+        assert status_file_path(unit_home).parent == unit_home
+        assert not status_file_path(unit_home).exists()
+        assert read_status(unit_home) is None
+        write_status(
+            unit_home, AccessibilityStatus(state=AccessibilityState.NOT_GRANTED, diagnostic="test")
+        )
 
-        assert status_file_path().exists()
-        status = read_status()
+        assert status_file_path(unit_home).exists()
+        status = read_status(unit_home)
         assert status is not None
         assert status.state is AccessibilityState.NOT_GRANTED
         assert status.diagnostic == "test"
 
-        clear_status()
-        assert not status_file_path().exists()
-        assert read_status() is None
+        clear_status(unit_home)
+        assert not status_file_path(unit_home).exists()
+        assert read_status(unit_home) is None

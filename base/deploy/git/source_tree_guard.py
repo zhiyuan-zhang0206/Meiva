@@ -21,7 +21,6 @@ import fnmatch
 import subprocess
 from pathlib import Path
 
-from base.deploy.git.cluster_drift import prod_source_dir
 from base.host.git.gitenv import git_env
 from base.host.proc import run_bounded
 
@@ -107,7 +106,7 @@ def validate_whitelist(patterns: tuple[str, ...]) -> None:
                 )
 
 
-def source_tree_violations(repo: Path | None = None) -> tuple[str, ...]:
+def source_tree_violations(repo: Path) -> tuple[str, ...]:
     """Human-readable tamper findings for the prod source checkout.
 
     Returns ``()`` only when the guard SAW the tree and found nothing wrong.
@@ -123,9 +122,7 @@ def source_tree_violations(repo: Path | None = None) -> tuple[str, ...]:
     - tracked files changed vs HEAD (any non-untracked ``git status`` entry)
     - untracked files outside the whitelist
     """
-    source = Path(repo) if repo is not None else prod_source_dir()
-    if source is None:
-        return ()
+    source = Path(repo)
     if not (source / ".git").exists():
         return (f"{GUARD_SKIPPED_PREFIX}not a git checkout",)
     status = git(source, "status", "--porcelain")

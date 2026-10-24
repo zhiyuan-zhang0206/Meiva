@@ -69,7 +69,7 @@ def test_shell_survivor_names_itself_and_persists_exact_inventory(
     survivor_outcome = closure.Outcome(
         survivors=(closure.Survivor("private-shell-session", identity, "shell"),)
     )
-    assert status_journal.begin("stop")
+    assert status_journal.begin(home, "stop")
     with pytest.raises(report.StopIncompleteError) as caught:
         settle(survivor_outcome, stop_runtime, operator_database, window_s=0.25)
     failure = caught.value
@@ -88,7 +88,11 @@ def test_shell_survivor_names_itself_and_persists_exact_inventory(
     )
     assert survivor["role"] == "shell" and survivor["service"] == "private-shell-session"
     stop_report.report_incomplete(
-        failure, [("shell-sessions", 0.25)], owns_journal=True, journal_opened=True
+        failure,
+        [("shell-sessions", 0.25)],
+        home=home,
+        owns_journal=True,
+        journal_opened=True,
     )
     journal = json.loads((home / "run/lifecycle-op.json").read_text())
     assert journal["complete"] and journal["result"]["rc"] == 1

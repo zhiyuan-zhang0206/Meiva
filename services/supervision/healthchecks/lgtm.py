@@ -17,7 +17,7 @@ from http.client import HTTPException
 from pathlib import Path
 from typing import Any
 
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineRoles
 from base.daemon.health import DaemonProbe
 from base.paths import meiva_home
 
@@ -53,13 +53,14 @@ def lgtm_host_marker() -> Path:
     return meiva_home() / "lgtm-host"
 
 
-def is_lgtm_host(*, machine: MachineIdentity) -> bool:
-    """Whether this host is the observability station: the `lgtm-host` marker
-    OR the declarative `observability-station` unit capability."""
-    from base.telemetry.observability import home_is_observability_station
-
-    home = meiva_home()
-    return home_is_observability_station(home, machine=machine, unit_home=home)
+# meiva:note
+# Whether the unit at `home` is the observability station: the `lgtm-host` marker
+# OR the declarative `observability-station` capability in its `roles`.
+#
+# `roles` is the unit's capability set, or None while it has no resolvable role
+# (an unconfigured unit, a bootstrap process): then the marker alone decides.
+def is_lgtm_host(home: Path, *, roles: MachineRoles | None) -> bool:
+    return (home / "lgtm-host").exists() or (roles is not None and "observability-station" in roles)
 
 
 def protocol_readiness(name: str) -> DaemonProbe:

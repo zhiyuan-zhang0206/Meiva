@@ -25,6 +25,7 @@ from base.native_process import pid_starttime_ticks
 from base.sessions.pty import client
 from base.sessions.pty.tests import pty_jobs as jobs
 from base.sessions.pty.tests.pty_reaper import PtyReaper
+from base.sessions.pty.tests.pty_service import service_socket
 from base.sessions.pty.tests.pty_shells import new
 from base.sessions.record import SessionRecord
 from base.telemetry import EventPipeline
@@ -90,7 +91,7 @@ def test_keeping_shell_sessions_preserves_unselected_process_and_real_pty(
     )
     assert rc == 0
     assert orchestration.poll() is None
-    assert client.has_session(name) and identity.live()
+    assert client.has_session(name, socket_path=service_socket()) and identity.live()
     assert pty_service.process is not None and pty_service.process.poll() is None
 
 
@@ -118,7 +119,9 @@ def test_the_restart_stop_leg_closes_the_shells_and_tells_a_busy_sessions_owner(
         retained_children=[],
     )
     assert rc == 0
-    assert not client.has_session(name), "a restart closes the persistent shells"
+    assert not client.has_session(name, socket_path=service_socket()), (
+        "a restart closes the persistent shells"
+    )
     assert [notice["name"] for notice in written_notices(db_conn)] == [name], (
         "the busy session's owner is told"
     )
@@ -142,8 +145,8 @@ def test_a_full_stop_closes_a_real_idle_shell_session(
         retained_children=[],
     )
     assert rc == 0
-    assert not client.has_session(name)
-    assert client.list_sessions() == []
+    assert not client.has_session(name, socket_path=service_socket())
+    assert client.list_sessions(socket_path=service_socket()) == []
 
 
 # meiva:note
@@ -237,7 +240,7 @@ def test_explicit_force_stops_host_and_closes_shell_sessions_unless_kept(
         retained_children=[],
     )
     assert rc == 0
-    assert client.has_session(name) is kept
+    assert client.has_session(name, socket_path=service_socket()) is kept
     assert written_notices(db_conn) == [], "force writes no owner notices"
 
 
@@ -296,7 +299,7 @@ def test_a_stop_run_from_inside_a_supervised_session_is_refused_before_it_stops_
     ).write(home / "run/sessions/hosting-the-test.json")
 
     with pytest.raises(RuntimeError, match="login shell"):
-        refuse_hosted_stop()
+        refuse_hosted_stop(home)
     with pytest.raises(RuntimeError, match="login shell"):
         do_stop(
             stop_request(timeout=1),
@@ -346,17 +349,17 @@ def test_a_stop_revokes_the_serving_authority_of_the_prior_start(
     operator_pipeline: Callable[[], EventPipeline],
     stop_runtime: CommandRuntime,
 ) -> None:
-    start_serving.begin_start()
-    assert start_serving.state_path().exists()
+    start_serving.begin_start(home)
+    assert start_serving.state_path(home).exists()
     for force in (False, True):
-        start_serving.begin_start()
+        start_serving.begin_start(home)
         rc = do_stop(
             stop_request(force=force, timeout=5),
             stop_environment(stop_runtime, operator_database, operator_pipeline),
             retained_children=[],
         )
         assert rc == 0
-        assert not start_serving.state_path().exists(), f"force={force}"
+        assert not start_serving.state_path(home).exists(), f"force={force}"
 
 
 # meiva:note

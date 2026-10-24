@@ -114,26 +114,30 @@ def test_restarting_agent_host_inside_a_supervised_session_is_incomplete_not_a_t
 # An outer operation's still-running journal is never closed by the nested restart: the
 # journal's opener closes it (task #2898).
 def test_the_restart_finishes_the_journal_only_when_it_owns_it(home: Path) -> None:
-    assert status_journal.begin("update"), "the outer operation opens the journal"
-    assert not status_journal.begin("restart"), "the nested restart is not its owner"
+    assert status_journal.begin(home, "update"), "the outer operation opens the journal"
+    assert not status_journal.begin(home, "restart"), "the nested restart is not its owner"
 
-    assert conclude(Finish(rc=0, error=None, notice=None), owns_journal=False) == 0
+    assert conclude(home, Finish(rc=0, error=None, notice=None), owns_journal=False) == 0
     journal = json.loads((home / "run/lifecycle-op.json").read_text())
     assert not journal["complete"], "the outer operation still owns the journal"
 
-    status_journal.finish(0)
-    assert status_journal.begin("restart"), "with no outer operation the restart opens its own"
-    assert conclude(Finish(rc=1, error="stop leg failed", notice=None), owns_journal=True) == 1
+    status_journal.finish(home, 0)
+    assert status_journal.begin(home, "restart"), (
+        "with no outer operation the restart opens its own"
+    )
+    assert (
+        conclude(home, Finish(rc=1, error="stop leg failed", notice=None), owns_journal=True) == 1
+    )
     journal = json.loads((home / "run/lifecycle-op.json").read_text())
     assert journal["complete"] and journal["result"]["rc"] == 1
     assert journal["result"]["error"] == "stop leg failed"
 
 
 def test_a_leg_refusal_is_said_on_stderr_once_and_returns_its_code(
-    capsys: pytest.CaptureFixture[str],
+    home: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     outcome = Finish(rc=RESTART_DECLINED_EXIT_CODE, error="preflight probes failed", notice="no")
-    assert conclude(outcome, owns_journal=False) == RESTART_DECLINED_EXIT_CODE
+    assert conclude(home, outcome, owns_journal=False) == RESTART_DECLINED_EXIT_CODE
     assert capsys.readouterr().err == "no\n"
 
 

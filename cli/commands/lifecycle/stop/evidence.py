@@ -26,12 +26,8 @@ def require_unstarted_initialization(home: Path) -> bool:
         # meiva:note
         # A joined runner may refer to already-existing external work.
         return False
-    # meiva:note
-    # `start_serving.state_path()` takes no home: it resolves the process environment's home,
-    # while the manifests path below is `home`'s. They name one home because a stop acts on the
-    # home it runs in; the serving state taking `home` is a base change (`start_serving.*(home)`).
-    if start_serving.state_path().exists() or root_manifests_path(home).exists():
+    if start_serving.state_path(home).exists() or root_manifests_path(home).exists():
         raise RuntimeError("initialization journal conflicts with application launch evidence")
     require_root_absent(home)
-    require_no_shell_sessions()
+    require_no_shell_sessions(home)
     return True

@@ -23,6 +23,7 @@ import pytest
 import meiva
 import meiva.sdk_surface.agent_identity
 from base.sessions.pty.tests.job_wait import wait_for_foreground, wait_for_job
+from base.sessions.pty.tests.pty_service import service_socket
 from meiva import shell
 from meiva.sdk_surface import process_context
 
@@ -505,7 +506,7 @@ def test_kill_reaps_session_and_foreground_child(_agent_row: int) -> None:
     try:
         _ready(sid)
         full = _sessions.shell_sessions_handle().resolve(sid)
-        (info,) = [s for s in client.list_sessions() if s.name == full]
+        (info,) = [s for s in client.list_sessions(socket_path=service_socket()) if s.name == full]
         shell_pid = info.pid
         assert psutil.pid_exists(shell_pid)
         # a foreground child blocks the shell; it gets its own pgrp (job

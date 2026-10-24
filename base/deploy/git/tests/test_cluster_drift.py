@@ -5,10 +5,6 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
-import pytest
-
-from base import paths
-from base.deploy.git import cluster_drift
 from base.deploy.git.cluster_drift import (
     checkout_head_sha,
     prod_source_branch_drift,
@@ -50,62 +46,56 @@ def _commit(source: Path, content: str, msg: str) -> str:
     return _git(source, "rev-parse", "HEAD")
 
 
-def test_head_sha_absent(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_head_sha_absent(tmp_path: Path) -> None:
     """No source repo → None (nothing to read)."""
-    monkeypatch.setenv("MEIVA_HOME", str(tmp_path))
-    assert prod_source_head_sha() is None
+    assert prod_source_head_sha(tmp_path, environ={}) is None
 
 
-def test_head_sha_returns_head(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_head_sha_returns_head(tmp_path: Path) -> None:
     sha = _init_prod_source(tmp_path / "source")
-    monkeypatch.setenv("MEIVA_HOME", str(tmp_path))
-    assert prod_source_head_sha() == sha
+    assert prod_source_head_sha(tmp_path, environ={}) == sha
 
 
-def test_branch_drift_absent(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    monkeypatch.setenv("MEIVA_HOME", str(tmp_path))
-    assert prod_source_branch_drift() is None
+def test_branch_drift_absent(tmp_path: Path) -> None:
+    assert prod_source_branch_drift(tmp_path, environ={}) is None
 
 
-def test_branch_drift_on_main(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_branch_drift_on_main(tmp_path: Path) -> None:
     _init_prod_source(tmp_path / "source")
-    monkeypatch.setenv("MEIVA_HOME", str(tmp_path))
-    assert prod_source_branch_drift() is None
+    assert prod_source_branch_drift(tmp_path, environ={}) is None
 
 
-def test_branch_drift_feature_branch(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_branch_drift_feature_branch(tmp_path: Path) -> None:
     _init_prod_source(tmp_path / "source", branch="meiva-7/fix")
-    monkeypatch.setenv("MEIVA_HOME", str(tmp_path))
-    assert prod_source_branch_drift() == "meiva-7/fix"
+    assert prod_source_branch_drift(tmp_path, environ={}) == "meiva-7/fix"
 
 
-def test_prod_source_dir_is_the_homes_own_source(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    """The home names its checkout: `$MEIVA_HOME/source`. A link at `$MEIVA_HOME/meiva`
-    or the host's bare `meiva` names no other."""
+# meiva:note
+# The home names its checkout: `<home>/source`. A link at `<home>/meiva`
+# or the host's bare `meiva` names no other.
+def test_prod_source_dir_is_the_homes_own_source(tmp_path: Path) -> None:
     home = tmp_path / "meivahome"
     home.mkdir()
     elsewhere = tmp_path / "opt" / "meiva" / "source" / ".venv" / "bin" / "meiva"
     elsewhere.parent.mkdir(parents=True)
     elsewhere.write_text("#!/bin/sh\n")
     (home / "meiva").symlink_to(elsewhere)
-    monkeypatch.setattr(paths, "meiva_home", lambda: home)
-    assert prod_source_dir() == home / "source"
+    assert prod_source_dir(home) == home / "source"
 
 
 def test_checkout_head_sha_reads_an_explicit_checkout(tmp_path: Path) -> None:
     sha = _init_prod_source(tmp_path / "wt")
-    assert checkout_head_sha(tmp_path / "wt") == sha
-    assert checkout_head_sha(tmp_path / "absent") is None
+    assert checkout_head_sha(tmp_path / "wt", environ={}) == sha
+    assert checkout_head_sha(tmp_path / "absent", environ={}) is None
 
 
-def test_running_from_prod_source_recognizes_the_loaded_checkout(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_running_from_prod_source_recognizes_the_loaded_checkout(tmp_path: Path) -> None:
     """The module anchors on the checkout it was imported from, not on its package depth."""
     checkout = Path(__file__).resolve().parents[4]
-    monkeypatch.setattr(cluster_drift, "prod_source_dir", lambda: checkout)
-    assert running_from_prod_source() is True
-    monkeypatch.setattr(cluster_drift, "prod_source_dir", lambda: tmp_path)
-    assert running_from_prod_source() is False
+    loaded_home = tmp_path / "loaded"
+    loaded_home.mkdir()
+    (loaded_home / "source").symlink_to(checkout)
+    assert running_from_prod_source(loaded_home) is True
+    other = tmp_path / "other"
+    (other / "source").mkdir(parents=True)
+    assert running_from_prod_source(other) is False

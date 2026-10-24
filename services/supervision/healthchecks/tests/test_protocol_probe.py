@@ -11,8 +11,7 @@ import pytest
 
 from base.daemon.health import DaemonProbe, ProbeVerdict
 from base.native_process.root_control import client
-from base.sessions.pty.paths import service_socket_path
-from base.sessions.pty.tests.pty_service import PtyServiceProcess
+from base.sessions.pty.tests.pty_service import PtyServiceProcess, service_socket
 from base.sessions.pty.tests.pty_service import pty_service as pty_service
 from services.supervision.healthchecks import protocol_probe as probe
 
@@ -86,5 +85,5 @@ def test_missing_unix_endpoint_is_down(tmp_path: Path) -> None:
 
 def test_protocol_ping_reads_the_pty_service_as_up(pty_service: PtyServiceProcess) -> None:
     del pty_service
-    result = probe.ping(service_socket_path())
+    result = probe.ping(service_socket())
     assert result.verdict is ProbeVerdict.ALIVE, result.detail

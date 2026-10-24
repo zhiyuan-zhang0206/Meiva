@@ -10,7 +10,6 @@
 [debt.first-party-patch]
 "test_meiva_root_failure_state.py#monkeypatch.setattr services.supervision.meiva_root.health.monotonic" = 1
 "test_meiva_root_health.py#monkeypatch.setattr services.supervision.meiva_root.health.monotonic" = 1
-"test_meiva_root_ipc.py#monkeypatch.setattr base.deploy.lifecycle.start_serving.meiva_home" = 1
 "test_meiva_root_ipc.py#monkeypatch.setattr base.native_process.ownership.OwnedProcess.live" = 2
 "test_meiva_root_ipc.py#monkeypatch.setattr base.native_process.ownership.sys" = 1
 "test_meiva_root_ipc.py#monkeypatch.setattr base.native_process.root_control.client.sys" = 2

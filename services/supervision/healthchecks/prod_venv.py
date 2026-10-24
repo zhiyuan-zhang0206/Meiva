@@ -13,6 +13,7 @@ from base.deploy.git import cluster_drift
 from base.deploy.release import editable_install
 from base.host import proc
 from base.native_process import child_env
+from base.paths import meiva_home
 
 _log = logging.getLogger("services.supervision.healthchecks.prod_venv")
 
@@ -61,9 +62,7 @@ def _probe(label: str, argv: list[str], env: dict[str, str]) -> str | None:
 
 def venv_violations(*, source_root: Path | None = None) -> tuple[str, ...]:
     if source_root is None:
-        source_root = cluster_drift.prod_source_dir()
-    if source_root is None:
-        return ()
+        source_root = cluster_drift.prod_source_dir(meiva_home())
     interpreter = editable_install.venv_python(source_root)
     if interpreter is None:
         return (f"{source_root}: venv python missing",)

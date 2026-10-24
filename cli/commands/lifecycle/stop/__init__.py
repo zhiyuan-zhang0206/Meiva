@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import subprocess
 from dataclasses import replace
+from pathlib import Path
 from typing import TextIO
 
 from base.cluster import session_name
@@ -57,8 +58,8 @@ _STOP_FAILURES = (RuntimeError, TimeoutError, OSError, subprocess.TimeoutExpired
 
 # meiva:note
 # A stop run from inside the work it drains strands itself mid-drain: refuse.
-def refuse_hosted_stop() -> None:
-    refusal = hosted_stop_refusal(hosting_exec_domain(), hosting_supervised_session())
+def refuse_hosted_stop(home: Path) -> None:
+    refusal = hosted_stop_refusal(hosting_exec_domain(), hosting_supervised_session(home))
     if refusal is not None:
         raise RuntimeError(refusal)
 
@@ -104,7 +105,7 @@ def do_stop(
     require_consistent(choices, pty_unit=SERVICE_UNIT)
     require_valid_timeout(request.timeout)
     if not choices.force:
-        refuse_hosted_stop()
+        refuse_hosted_stop(env.command.home)
     host = _host(env, force=choices.force)
     plan = plan_stop(choices, host, request.window)
     if not choices.force:
@@ -114,7 +115,9 @@ def do_stop(
         try:
             unstarted = require_unstarted_initialization(env.command.home)
         except _STOP_FAILURES as exc:
-            report_incomplete(exc, [], owns_journal=False, journal_opened=False)
+            report_incomplete(
+                exc, [], home=env.command.home, owns_journal=False, journal_opened=False
+            )
             return 1
         if unstarted:
             plan = plan_stop(choices, replace(host, unstarted=True), request.window)
@@ -162,7 +165,8 @@ def _run_normal(
     retained_children: list[subprocess.Popen[bytes]] | None,
 ) -> int:
     deadline = deadline_after(request.timeout)
-    owns_journal = begin("stop", deadline=deadline)
+    home = env.command.home
+    owns_journal = begin(home, "stop", deadline=deadline)
     # meiva:note
     # Per-phase accounting: a failed stop names each phase and how much of the shared budget it
     # consumed, so the operator sees WHERE the budget went, never a bare timeout (#2045).
@@ -170,9 +174,13 @@ def _run_normal(
     try:
         outcome = execute_plan(plan, env, run, retained_children, timed=True)
     except _STOP_FAILURES as exc:
-        report_incomplete(exc, run.phases, owns_journal=owns_journal, journal_opened=True)
+        report_incomplete(
+            exc, run.phases, home=home, owns_journal=owns_journal, journal_opened=True
+        )
         return 1
-    return finish_stop(owns_journal=owns_journal, notes=outcome.notes, clients=outcome.clients)
+    return finish_stop(
+        home, owns_journal=owns_journal, notes=outcome.notes, clients=outcome.clients
+    )
 
 
 def cmd_stop(

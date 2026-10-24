@@ -137,21 +137,22 @@ def _restart(run: _Invocation, retained_children: list[subprocess.Popen[bytes]])
     # meiva:note
     # When an outer operation's journal is still running, this restart records phases into it
     # and leaves the finish to that caller (`conclude`).
-    owns_journal = status_journal.begin("restart")
+    home = run.command.home
+    owns_journal = status_journal.begin(home, "restart")
     print(
         budget_line(
-            run.request.timeout, run.request.start_timeout, str(status_journal.status_path())
+            run.request.timeout, run.request.start_timeout, str(status_journal.status_path(home))
         ),
         flush=True,
     )
     for leg in Leg:
         if leg.heading:
             print(leg.heading)
-        with status_journal.phase(leg.phase):
+        with status_journal.phase(home, leg.phase):
             rc = _run_leg(leg, run, retained_children)
         outcome = settle_leg(leg, rc)
         if isinstance(outcome, Finish):
-            return conclude(outcome, owns_journal=owns_journal)
+            return conclude(home, outcome, owns_journal=owns_journal)
     raise AssertionError("the start leg always ends a restart")
 
 
@@ -160,11 +161,11 @@ def _restart(run: _Invocation, retained_children: list[subprocess.Popen[bytes]])
 #
 # Only the journal's opener closes it. An outer operation's still-running journal (the updater
 # wrapping this restart) is left to that caller, so its diagnosis is not clobbered (task #2898).
-def conclude(outcome: Finish, *, owns_journal: bool) -> int:
+def conclude(home: Path, outcome: Finish, *, owns_journal: bool) -> int:
     if outcome.notice is not None:
         print(outcome.notice, file=sys.stderr)
     if owns_journal:
-        status_journal.finish(outcome.rc, error=outcome.error)
+        status_journal.finish(home, outcome.rc, error=outcome.error)
     return outcome.rc
 
 
@@ -177,7 +178,7 @@ def _cmd_restart_body(
     command: CommandRuntime,
     retained_children: list[subprocess.Popen[bytes]],
 ) -> int:
-    refusal = restart_refusal(hosting_exec_domain(), hosting_supervised_session())
+    refusal = restart_refusal(hosting_exec_domain(), hosting_supervised_session(command.home))
     if refusal is not None:
         print(refusal.message, file=sys.stderr)
         return RESTART_DECLINED_EXIT_CODE
@@ -312,7 +313,7 @@ def cmd_restart_agent_host(
     # wait up to `start_timeout` for its readiness.
     with operator_lifecycle_audit(database_factory=database_factory) as audit:
         try:
-            refuse_hosted_stop()
+            refuse_hosted_stop(command.home)
             client = admit_agent_host_restart(command, timeout=timeout)
             if client is None:
                 code = 1

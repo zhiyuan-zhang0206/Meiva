@@ -157,7 +157,7 @@ class ScheduleManager:
             and wanted.enabled
             and schedule_id in self._live_ids(now, owned_id=schedule_id)
         )
-        observed = revisions.launched_revision(schedule_id) if live else None
+        observed = revisions.launched_revision(self._home, schedule_id) if live else None
         action = plan_sync(wanted, live=live, observed=observed)
         if action is SyncAction.REAP_UNWANTED:
             return self._reap_unwanted(schedule_id, wanted, now)
@@ -206,7 +206,7 @@ class ScheduleManager:
     def _launch_revision(self, schedule_id: int, now: float) -> bool:
         from base.deploy.lifecycle import start_serving
 
-        with start_serving.recovery_permitted() as permitted:
+        with start_serving.recovery_permitted(self._home) as permitted:
             if not permitted:
                 self._refuse_launch(
                     schedule_id, "the serving receipt does not name this root; run meiva start"
@@ -277,7 +277,7 @@ class ScheduleManager:
 
         step = observe_gate(
             self._gate,
-            permitted=start_serving.is_serving(),
+            permitted=start_serving.is_serving(self._home),
             now=now,
             alert_after_s=self._policy.recovery_gate_alert_seconds,
         )
@@ -599,7 +599,7 @@ class ScheduleManager:
         current = present and backend.session_generation(name) == current_generation(
             home=self._home
         )
-        observed = revisions.launched_revision(schedule_id) if current else None
+        observed = revisions.launched_revision(self._home, schedule_id) if current else None
         match prepare_verdict(
             wanted, present=present, current_generation=current, observed=observed
         ):
@@ -692,7 +692,7 @@ class ScheduleManager:
             if not owned:
                 return False
             wanted = revisions.desired(self._pool, schedule_id)
-            observed = revisions.launched_revision(schedule_id)
+            observed = revisions.launched_revision(self._home, schedule_id)
             if wanted is not None and observed == wanted.revision == wanted.applied:
                 self._reap_retries.discard(schedule_id)
                 return False  # a different owner already installed this revision

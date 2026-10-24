@@ -20,7 +20,7 @@ from base.lm.harness.codex.auth import SECRET_ENV_NAMES
 from base.sessions import coding_session_owner
 from base.sessions.coding_session_owner_record import CodingSessionStatus
 from base.sessions.pty.client import PtyClientConfig
-from base.sessions.pty.tests.pty_service import PtyServiceProcess
+from base.sessions.pty.tests.pty_service import PtyServiceProcess, service_socket
 from base.sessions.pty.tests.pty_service import pty_service as pty_service
 from meiva.sdk_surface import agent_identity, settings
 from meiva.sdk_surface.tests.agent_binding import BindAgent
@@ -179,7 +179,7 @@ def test_codex_supervisor_uses_projected_session_environment(
 
     owner = _owner(unit_home)
     workspace = Path(owner.key.workspace)
-    backend = PtySessionBackend(config=PtyClientConfig())
+    backend = PtySessionBackend(config=PtyClientConfig(socket_path=service_socket()))
     report = unit_home / "codex-child-env.json"
     pty_service.stop()
     service = PtyServiceProcess(unit_home, {"VIRTUAL_ENV": str(unit_home / "foreign" / ".venv")})

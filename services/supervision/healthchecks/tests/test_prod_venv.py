@@ -12,7 +12,6 @@ from services.supervision.healthchecks import prod_venv as hc
 
 @pytest.fixture(autouse=True)
 def isolated(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    monkeypatch.setattr(hc.cluster_drift, "prod_source_dir", lambda: tmp_path)
     interpreter = tmp_path / ".venv/bin/python"
     interpreter.parent.mkdir(parents=True)
     interpreter.touch()
@@ -39,7 +38,9 @@ def test_explicit_checkout_and_isolated_environment(
         assert call.kwargs["timeout"] == 5
 
 
-def test_dependency_timeout_does_not_skip_import_check(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_dependency_timeout_does_not_skip_import_check(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     run = Mock(
         side_effect=[
             subprocess.TimeoutExpired("uv", 5),
@@ -47,20 +48,22 @@ def test_dependency_timeout_does_not_skip_import_check(monkeypatch: pytest.Monke
         ]
     )
     monkeypatch.setattr(hc.proc, "run_bounded", run)
-    violations = hc.venv_violations()
+    violations = hc.venv_violations(source_root=tmp_path)
     assert len(violations) == 1
     assert "timed out" in violations[0]
     assert run.call_count == 2
 
 
-def test_missing_python_does_not_spawn_a_diagnostic(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_missing_python_does_not_spawn_a_diagnostic(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     def _no_python(_source_root: Path) -> Path | None:
         return None
 
     monkeypatch.setattr(hc.editable_install, "venv_python", _no_python)
     run = Mock(side_effect=AssertionError("must not spawn"))
     monkeypatch.setattr(hc.proc, "run_bounded", run)
-    assert "venv python missing" in hc.venv_violations()[0]
+    assert "venv python missing" in hc.venv_violations(source_root=tmp_path)[0]
     run.assert_not_called()
 
 
@@ -87,7 +90,7 @@ def test_real_isolated_import_detects_damage_without_writes(
     monkeypatch.setattr(hc.shutil, "which", Mock(return_value=None))
     before = _package_files(site)
 
-    violations = hc.venv_violations()
+    violations = hc.venv_violations(source_root=tmp_path)
 
     assert before == _package_files(site)
     if damage == "healthy":

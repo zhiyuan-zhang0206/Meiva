@@ -17,6 +17,7 @@ import base.db
 from base.cluster import session_name
 from base.db.code_version_gate import ProcessDbGate
 from base.deploy.lifecycle import start_serving
+from base.paths import run_dir
 from base.paths.tests.homes import unit_home as unit_home
 from base.sessions.pty.paths import service_socket_path
 from base.sessions.pty.tests.pty_service import FakePtyService
@@ -33,7 +34,7 @@ from services.wake.schedule_manager.tests.session_fakes import Backend
 def provenance(unit_home: Path) -> Generator[list[dict[str, Any]]]:
     """The pty-sessions service of the home, answering with the sessions the test's backend holds."""
     sessions: list[dict[str, Any]] = []
-    socket_path = service_socket_path()
+    socket_path = service_socket_path(run_dir(unit_home))
     socket_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     service = FakePtyService(socket_path, sessions)
     try:
@@ -46,8 +47,8 @@ def provenance(unit_home: Path) -> Generator[list[dict[str, Any]]]:
 def backend(
     provenance: list[dict[str, Any]], serving_root: start_serving.RootBirth, unit_home: Path
 ) -> Backend:
-    generation = start_serving.begin_start()
-    assert start_serving.mark_serving(generation, runtime=serving_root.runtime)
+    generation = start_serving.begin_start(unit_home)
+    assert start_serving.mark_serving(unit_home, generation, runtime=serving_root.runtime)
     return Backend(provenance)
 
 

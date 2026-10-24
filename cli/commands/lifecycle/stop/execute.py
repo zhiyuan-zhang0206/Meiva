@@ -14,6 +14,7 @@ from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import TextIO
 
 from base.agents.context.clients import DatabaseFactory
@@ -87,13 +88,13 @@ class StopOutcome:
 # The phase name is printed BEFORE the step runs, and the lifecycle journal carries the same
 # timeline durably. An untimed step (`label` None) just runs.
 @contextmanager
-def timed_phase(phases: list[tuple[str, float]], label: str | None) -> Generator[None]:
+def timed_phase(home: Path, phases: list[tuple[str, float]], label: str | None) -> Generator[None]:
     if label is None:
         yield
         return
     started = time.monotonic()
     print(f"  · stop phase: {label}", flush=True)
-    with journal_phase(label):
+    with journal_phase(home, label):
         try:
             yield
         finally:
@@ -112,7 +113,7 @@ def execute_plan(
 ) -> StopOutcome:
     outcome = StopOutcome((), ())
     for step in plan.steps:
-        with timed_phase(run.phases, phase_label(step) if timed else None):
+        with timed_phase(env.command.home, run.phases, phase_label(step) if timed else None):
             reported = _perform(step, env, run, retained_children)
         if reported is not None:
             outcome = reported
@@ -130,7 +131,7 @@ def _perform(
     command = env.command
     match step:
         case ClearServing():
-            start_serving.clear_serving()
+            start_serving.clear_serving(command.home)
         case Announce(window):
             announce_stopping(command, window, now=datetime.now(UTC))
         case RecordBrowserSession():
@@ -149,7 +150,7 @@ def _perform(
             browser.reap_cluster_chrome()
         case CloseShellSessions(direct_db, force):
             if force:
-                shell_sessions.force_close_shell_sessions()
+                shell_sessions.force_close_shell_sessions(command.home)
             else:
                 shell_sessions.close_shell_sessions(
                     run.deadline,

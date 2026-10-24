@@ -101,10 +101,9 @@ def pool(db_url: str) -> Iterator[ConnectionPool[psycopg.Connection]]:
 def fake_session(
     serving_root: start_serving.RootBirth, unit_home: Path
 ) -> tuple[_FakeBackend, list[int]]:
-    del unit_home
     backend = _FakeBackend()
-    generation = start_serving.begin_start()
-    assert start_serving.mark_serving(generation, runtime=serving_root.runtime) is True
+    generation = start_serving.begin_start(unit_home)
+    assert start_serving.mark_serving(unit_home, generation, runtime=serving_root.runtime) is True
     return backend, backend.launched
 
 
@@ -228,9 +227,10 @@ def test_reconcile_defers_enabled_launch_until_the_host_is_serving(
     db_conn: psycopg.Connection,
     pool: ConnectionPool,
     fake_session: tuple[_FakeBackend, list[int]],
+    unit_home: Path,
 ) -> None:
     backend, launched = fake_session
-    start_serving.clear_serving()
+    start_serving.clear_serving(unit_home)
     sid = _insert(db_conn, "await-serving")
     manager = schedule_manager(pool, backend)
 
@@ -239,8 +239,8 @@ def test_reconcile_defers_enabled_launch_until_the_host_is_serving(
     assert launched == []
     assert _status(db_conn, sid) == "stopped"
 
-    generation = start_serving.begin_start()
-    assert start_serving.mark_serving(generation, runtime=serving_root.runtime) is True
+    generation = start_serving.begin_start(unit_home)
+    assert start_serving.mark_serving(unit_home, generation, runtime=serving_root.runtime) is True
     manager.reconcile(now=NOW)
 
     assert launched == [sid]

@@ -18,7 +18,7 @@ from base.log import logger
 from base.log.sinks import add_sink
 from base.native_process.os_platform import LockTimeoutError, file_lock
 from base.native_process.process_control import SYSTEM_PROCESS_CONTROL
-from base.paths import meiva_home
+from base.paths import meiva_home, run_dir
 from base.sessions.pty.paths import fallback_dir, ledger_path, lock_path, service_socket_path
 from services.agent_runner.pty_sessions import ledger, shutdown_budget
 from services.agent_runner.pty_sessions.service import PtyService
@@ -54,20 +54,21 @@ def main() -> int:
         colorize=False,
     )
     _raise_nofile_limit()
+    run = run_dir(meiva_home())
     try:
         # One service per home, for as long as this process lives: a second start must
         # neither sweep the live service's sessions nor take over its socket.
-        with file_lock(lock_path(), timeout_s=0):
-            return _run()
+        with file_lock(lock_path(run), timeout_s=0):
+            return _run(run)
     except LockTimeoutError:
-        logger.error("another pty-sessions service holds {lock}", lock=lock_path())
+        logger.error("another pty-sessions service holds {lock}", lock=lock_path(run))
         return 1
 
 
-def _run() -> int:
+def _run(run: Path) -> int:
     service = PtyService(home=meiva_home(), process_control=SYSTEM_PROCESS_CONTROL)
-    ledger.sweep(ledger_path(), process_control=SYSTEM_PROCESS_CONTROL)
-    path = service_socket_path()
+    ledger.sweep(ledger_path(run), process_control=SYSTEM_PROCESS_CONTROL)
+    path = service_socket_path(run)
     if path.parent == fallback_dir() and not _own_fallback_dir(path.parent):
         return 1
     asyncio.run(

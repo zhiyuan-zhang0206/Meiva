@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import sys
 from collections.abc import Sequence
+from pathlib import Path
 
 from base.deploy.lifecycle.status_journal import finish, status_path
 from cli.commands.lifecycle.stop.force_outcome import force_incomplete_report
@@ -23,10 +24,11 @@ def report_incomplete(
     exc: BaseException,
     phases: list[tuple[str, float]],
     *,
+    home: Path,
     owns_journal: bool,
     journal_opened: bool,
 ) -> None:
-    journal_path = str(status_path()) if journal_opened else None
+    journal_path = str(status_path(home)) if journal_opened else None
     print(incomplete_report(str(exc), phases, journal_path), file=sys.stderr)
     if owns_journal:
         extra: dict[str, object] = {"phases": phase_timing(phases)}
@@ -36,7 +38,7 @@ def report_incomplete(
             extra["stage"] = stage
         if survivors:
             extra["survivors"] = survivors
-        finish(1, error=f"{type(exc).__name__}: {exc}", extra=extra)
+        finish(home, 1, error=f"{type(exc).__name__}: {exc}", extra=extra)
 
 
 # meiva:note
@@ -48,7 +50,9 @@ def report_force_incomplete(exc: BaseException) -> None:
 # meiva:note
 # The stop is done; `notes` (an escalated Postgres shutdown) and `clients` (the pooler's
 # clients still connected at its stop) go into the journal.
-def finish_stop(*, owns_journal: bool, notes: Sequence[str], clients: Sequence[str]) -> int:
+def finish_stop(
+    home: Path, *, owns_journal: bool, notes: Sequence[str], clients: Sequence[str]
+) -> int:
     for line in completion_notes(notes):
         print(line, file=sys.stderr)
     if owns_journal:
@@ -57,5 +61,5 @@ def finish_stop(*, owns_journal: bool, notes: Sequence[str], clients: Sequence[s
             extra["escalations"] = list(notes)
         if clients:
             extra["pooler_clients"] = list(clients)
-        finish(0, extra=extra or None)
+        finish(home, 0, extra=extra or None)
     return 0

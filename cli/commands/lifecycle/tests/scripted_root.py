@@ -78,6 +78,7 @@ class UnitRow:
 # The scripted tree: its units, the launch digest it reports and every verb it served.
 @dataclass
 class ScriptedRoot:
+    home: Path
     units: dict[str, UnitRow] = field(default_factory=dict[str, UnitRow])
     launch_digest: str | None = None
     calls: list[tuple[str, str | None]] = field(default_factory=list[tuple[str, str | None]])
@@ -125,7 +126,7 @@ class ScriptedRoot:
         self.events.append((f"{verb} {row.unit_id}", time.monotonic()))
         if verb == "up":
             if row.begins_rival_start:
-                start_serving.begin_start()
+                start_serving.begin_start(self.home)
             if row.refuse_up:
                 return dict(error_response(ErrorCode.INTERNAL, f"refused to bring up {name!r}"))
             row.intent = "running"
@@ -165,6 +166,7 @@ def scripted_root(
     home: Path, units: Iterable[UnitRow] = (), *, launch_digest: str | None = None
 ) -> Generator[ScriptedRoot]:
     tree = ScriptedRoot(
+        home=home,
         units={row.unit_id: row for row in units},
         launch_digest=launch_digest,
     )

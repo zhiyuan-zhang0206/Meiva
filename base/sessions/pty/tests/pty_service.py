@@ -25,6 +25,7 @@ from typing import Any
 
 import pytest
 
+from base.paths import meiva_home, run_dir
 from base.sessions.pty import client, protocol
 from base.sessions.pty.paths import fallback_dir, service_socket_path
 
@@ -32,6 +33,17 @@ REPO = Path(__file__).resolve().parents[4]
 
 _READY_TIMEOUT_S = 20.0
 _STOP_TIMEOUT_S = 30.0
+
+
+# meiva:note
+# The run directory and service socket of the test process's own home: what a test that
+# dials the service its fixture started under `MEIVA_HOME` hands the client.
+def service_run() -> Path:
+    return run_dir(meiva_home())
+
+
+def service_socket() -> Path:
+    return service_socket_path(service_run())
 
 
 class PtyServiceProcess:
@@ -64,7 +76,7 @@ class PtyServiceProcess:
             if self.process.poll() is not None:
                 raise AssertionError(f"pty-sessions exited at startup:\n{self.output()}")
             with contextlib.suppress(client.ServiceUnavailableError):
-                client.request("ping")
+                client.request("ping", socket_path=service_socket_path(run_dir(self.home)))
                 return
             time.sleep(0.02)
         raise AssertionError(f"pty-sessions never answered a ping:\n{self.output()}")
@@ -141,6 +153,6 @@ def pty_service(unit_home: Path) -> Iterator[PtyServiceProcess]:
     service.start()
     yield service
     with contextlib.suppress(client.ServiceUnavailableError, client.ServiceError):
-        client.close_all(grace_s=0.5, kill_s=2.0)
+        client.close_all(grace_s=0.5, kill_s=2.0, socket_path=service_socket())
     service.stop()
-    service_socket_path().unlink(missing_ok=True)
+    service_socket().unlink(missing_ok=True)

@@ -22,10 +22,11 @@ from psycopg_pool import ConnectionPool
 from base.cluster import session_name
 from base.deploy.lifecycle.start_serving import RootBirth
 from base.host.env.registry import process_environment
+from base.paths import meiva_home
 from base.sessions.backend import get_shell_backend
 from base.sessions.env_forwarding import forward_env_dict
 from base.sessions.pty import client
-from base.sessions.pty.tests.pty_service import PtyServiceProcess
+from base.sessions.pty.tests.pty_service import PtyServiceProcess, service_socket
 from base.sessions.pty.tests.pty_service import pty_service as pty_service
 from base.sessions.pty.tests.pty_shells import wait_for
 from gateway.schedules import session_control
@@ -92,13 +93,15 @@ def _insert_schedule(
 def _host_is_serving(serving_root: RootBirth, _pty_home: str) -> Iterator[None]:
     """PTY schedule cases model a gateway that completed its start gate."""
     from base.deploy.lifecycle import start_serving
+    from base.paths import meiva_home
 
-    generation = start_serving.begin_start()
-    assert start_serving.mark_serving(generation, runtime=serving_root.runtime) is True
+    home = meiva_home()
+    generation = start_serving.begin_start(home)
+    assert start_serving.mark_serving(home, generation, runtime=serving_root.runtime) is True
     try:
         yield
     finally:
-        start_serving.clear_serving()
+        start_serving.clear_serving(home)
 
 
 # meiva:note
@@ -159,7 +162,9 @@ def test_pty_launch_live_capture(
     name = session_name(f"schedule-{sid}")
     backend = get_shell_backend()
     assert backend.has_session(name)
-    assert name in [info.name for info in client.list_sessions()], "service does not list it"
+    assert name in [info.name for info in client.list_sessions(socket_path=service_socket())], (
+        "service does not list it"
+    )
     assert sid in mgr._live_ids(NOW)
     # Poll for the runner's output instead of one immediate capture: under a
     # slow CI login shell the launch-to-output window is variable, and a
@@ -256,7 +261,9 @@ def test_real_pty_revision_is_adopted_after_lost_acknowledgement(
             pytest.raises(psycopg.errors.RaiseException, match="injected fault"),
         ):
             mgr.sync_one(sid, now=NOW)
-        assert revisions.launched_revision(sid) == 1, repr(client.live_sessions(name))
+        assert revisions.launched_revision(meiva_home(), sid) == 1, repr(
+            client.live_sessions(name, socket_path=service_socket())
+        )
         before = get_shell_backend().session_started_at(name)
         assert before is not None
         assert wait_for(marker.exists)

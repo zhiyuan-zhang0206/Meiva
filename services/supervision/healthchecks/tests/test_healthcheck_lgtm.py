@@ -13,8 +13,6 @@ from typing import Any, cast
 
 import pytest
 
-from base import paths
-from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import settings
 from base.daemon.health import DaemonProbe
@@ -222,35 +220,24 @@ def test_write_path_probe_reports_query_request_error(monkeypatch: pytest.Monkey
     assert hc.write_path_probe() == (False, "query_error")
 
 
-def test_is_lgtm_host_accepts_station_capability(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, machine_identity: MachineIdentity
-) -> None:
+def test_is_lgtm_host_accepts_station_capability(tmp_path: Path) -> None:
     """The declarative observability-station capability designates the host
     exactly like the marker — the watchdog keepalive and `meiva status` gate on
     either form."""
     home = tmp_path / "station"
     home.mkdir()
-    # is_lgtm_host() dials the home twice: the name bound in this module
-    # (from base.paths import meiva_home) AND the fresh lookup inside
-    # home_is_observability_station — patch both.
-    monkeypatch.setattr(hc, "meiva_home", lambda: home)
-    monkeypatch.setattr(paths, "meiva_home", lambda: home)
 
     # No marker, no capability -> not the station.
-    assert hc.is_lgtm_host(machine=machine_identity) is False
+    assert hc.is_lgtm_host(home, roles=frozenset({"gateway"})) is False
+    assert hc.is_lgtm_host(home, roles=None) is False
 
     # Capability form.
-    prior_role = machine_identity.role()
-    machine_identity.set(role="observability-station")
-    try:
-        assert hc.is_lgtm_host(machine=machine_identity) is True
-    finally:
-        machine_identity.set(role=prior_role)
-    assert hc.is_lgtm_host(machine=machine_identity) is False
+    assert hc.is_lgtm_host(home, roles=frozenset({"observability-station"})) is True
 
     # Marker form.
     (home / "lgtm-host").touch()
-    assert hc.is_lgtm_host(machine=machine_identity) is True
+    assert hc.is_lgtm_host(home, roles=None) is True
+    assert hc.is_lgtm_host(home, roles=frozenset({"gateway"})) is True
 
 
 @pytest.mark.parametrize("status", [301, 401, 500, 503])

@@ -170,10 +170,17 @@ def _core_gate_reason(session: str, *, machine: MachineIdentity, host: Host) -> 
     if session == "computer-mcp":
         return _computer_mcp_gate_reason(host=host)
     if session in {"loki", "prometheus", "grafana"}:
+        from base.cluster.machine import MachineRoleMissing
         from services.supervision.healthchecks.lgtm import is_lgtm_host
 
+        try:
+            roles = machine.role()
+        except MachineRoleMissing:
+            roles = None
         return (
-            None if is_lgtm_host(machine=machine) else "this home is not an observability station"
+            None
+            if is_lgtm_host(meiva_home(), roles=roles)
+            else "this home is not an observability station"
         )
     if session == "otel-collector":
         return _otel_collector_gate_reason(machine=machine)
