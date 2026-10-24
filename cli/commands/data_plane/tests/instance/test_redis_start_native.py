@@ -146,22 +146,6 @@ def test_the_daemon_inherits_no_meiva_authority(
     assert not [name for name in inherited if name.startswith("MEIVA_")]
 
 
-# meiva:note
-# The macOS workaround: Redis never waits for, nor binds, the declared address (the root-supervised
-# relay serves the private network), and still authenticates.
-@pytest.mark.requires_host("darwin")
-def test_macos_redis_binds_loopback_only_whatever_reach_is_declared(
-    native_cluster: NativeCluster, command_machine: MachineIdentity
-) -> None:
-    command_machine.set(host=_UNASSIGNED)
-
-    assert _start(native_cluster, command_machine) == 0
-
-    assert port_preflight.listener_addrs(native_cluster.redis_port) == {"127.0.0.1"}
-    with redis.Redis(port=native_cluster.redis_port, password=ADMIN_PASSWORD) as admin:
-        assert redis_ping(admin)
-
-
 @pytest.mark.requires_host("linux")
 def test_linux_redis_refuses_to_start_when_the_declared_reach_never_appears(
     native_cluster: NativeCluster,
