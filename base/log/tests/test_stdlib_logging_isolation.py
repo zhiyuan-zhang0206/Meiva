@@ -49,10 +49,14 @@ def test_a_first_party_logger_is_back_at_its_original_level_after_the_block() ->
 
 def test_the_block_restores_on_an_exception() -> None:
     before = _all_levels()
+    root = logging.getLogger()
+    handlers_before = root.handlers[:]
     with pytest.raises(RuntimeError, match="boom"), stdlib_logging_isolated():
         install_stdlib_intercept()
+        root.handlers = []
         raise RuntimeError("boom")
     assert {n: lv for n, lv in _all_levels().items() if n in before} == before
+    assert root.handlers == handlers_before
 
 
 def test_the_bridge_handler_is_off_the_root_inside_the_block() -> None:
@@ -65,3 +69,47 @@ def test_the_bridge_handler_is_off_the_root_inside_the_block() -> None:
         assert bridge in root.handlers
     finally:
         root.removeHandler(bridge)
+
+
+@pytest.mark.parametrize("ancestor", ["", "stdlib_isolation.level_parent"])
+def test_restoring_an_ancestor_invalidates_cached_child_levels(ancestor: str) -> None:
+    parent = logging.getLogger(ancestor)
+    child = parent.getChild("cached_child")
+    parent.setLevel(logging.ERROR)
+    child.setLevel(logging.NOTSET)
+    assert not child.isEnabledFor(logging.DEBUG)
+
+    with stdlib_logging_isolated():
+        parent.setLevel(logging.DEBUG)
+        assert child.isEnabledFor(logging.DEBUG)
+
+    assert child.getEffectiveLevel() == logging.ERROR
+    assert not child.isEnabledFor(logging.DEBUG)
+
+
+def test_a_new_logger_returns_to_inherited_levels_and_invalidates_its_children() -> None:
+    root = logging.getLogger()
+    root.setLevel(logging.ERROR)
+    with stdlib_logging_isolated():
+        parent = logging.getLogger("stdlib_isolation.new_parent")
+        child = parent.getChild("child")
+        parent.setLevel(logging.DEBUG)
+        assert child.isEnabledFor(logging.DEBUG)
+
+    assert parent.level == logging.NOTSET
+    assert child.level == logging.NOTSET
+    assert child.getEffectiveLevel() == logging.ERROR
+    assert not child.isEnabledFor(logging.DEBUG)
+
+
+def test_nested_blocks_restore_each_outer_level() -> None:
+    probe = logging.getLogger("stdlib_isolation.nested")
+    probe.setLevel(logging.ERROR)
+    with stdlib_logging_isolated():
+        probe.setLevel(logging.INFO)
+        with stdlib_logging_isolated():
+            probe.setLevel(logging.DEBUG)
+            assert probe.isEnabledFor(logging.DEBUG)
+        assert probe.level == logging.INFO
+        assert not probe.isEnabledFor(logging.DEBUG)
+    assert probe.level == logging.ERROR

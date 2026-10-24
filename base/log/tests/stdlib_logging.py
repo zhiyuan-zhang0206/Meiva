@@ -28,7 +28,10 @@ def stdlib_logging_isolated() -> Generator[None]:
         yield
     finally:
         root.handlers = saved_handlers
-        root.setLevel(root_level)
+        if root.level != root_level:
+            root.setLevel(root_level)
         for name, logger in logging.Logger.manager.loggerDict.items():
             if isinstance(logger, logging.Logger):
-                logger.setLevel(saved_levels.get(name, logging.NOTSET))
+                saved_level = saved_levels.get(name, logging.NOTSET)
+                if logger.level != saved_level:
+                    logger.setLevel(saved_level)
