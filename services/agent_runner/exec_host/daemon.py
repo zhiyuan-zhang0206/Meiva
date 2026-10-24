@@ -2,8 +2,9 @@
 # exec-host daemon entry: `python -m services.agent_runner.exec_host.daemon`.
 #
 # Materializes the unit environment (`ConfigBoot().boot()`), takes the home's
-# instance lock (`run/exec-host.lock`), sweeps stale request/result files left in
-# `<home>/run/exec`, and serves `exec-host.sock` alongside the host memory guard.
+# instance lock (`run/exec-host.lock`), and serves `exec-host.sock` alongside the
+# host memory guard. Clients own their envelopes, including direct fallback runs
+# that can remain active while this daemon starts.
 
 from __future__ import annotations
 
@@ -11,7 +12,6 @@ import asyncio
 import contextlib
 import os
 import resource
-import shutil
 import sys
 from pathlib import Path
 
@@ -21,7 +21,7 @@ from base.log import logger
 from base.log.sinks import add_sink
 from base.native_process import child_env
 from base.native_process.os_platform import LockTimeoutError, file_lock
-from base.paths import exec_run_dir, meiva_home, run_dir
+from base.paths import meiva_home, run_dir
 from base.sessions.exec_host.paths import fallback_dir, lock_path, service_socket_path
 from services.agent_runner.exec_host import shutdown_budget
 from services.agent_runner.exec_host.memory_guard import run_memory_guard_forever
@@ -45,17 +45,6 @@ def _own_fallback_dir(directory: Path) -> bool:
         logger.error("{directory} is not an owner-only directory of this user", directory=directory)
         return False
     return True
-
-
-def _sweep_exec_run_dir(directory: Path) -> None:
-    if not directory.exists():
-        return
-    for entry in directory.iterdir():
-        with contextlib.suppress(OSError):
-            if entry.is_dir() and not entry.is_symlink():
-                shutil.rmtree(entry, ignore_errors=True)
-            else:
-                entry.unlink(missing_ok=True)
 
 
 def run_with_home(home: Path, *, default_cwd: Path) -> int:
@@ -87,7 +76,6 @@ async def _serve_with_guard(service: ExecHostService, path: Path, drain_s: float
 
 
 def _run(home: Path, run: Path, *, default_cwd: Path) -> int:
-    _sweep_exec_run_dir(exec_run_dir(home))
     service = ExecHostService(
         home=home,
         base_environ=child_env.inherited_process_env(),
