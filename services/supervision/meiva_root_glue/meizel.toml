@@ -9,7 +9,8 @@ exports = ["diagnostic_probes.py", "manifests.py"]
 [purity]
 "__init__.py" = "strict"
 
+[roots]
+"glue.py" = { kinds = ["settings"], why = "Root supervisor startup composes process-owned handles and configuration" }
+
 [debt.ambient-read]
 "diagnostic_probes.py#settings base.config.settings" = 1
-"glue.py#settings base.config.ConfigBoot" = 1
-"glue.py#settings base.config.settings" = 1

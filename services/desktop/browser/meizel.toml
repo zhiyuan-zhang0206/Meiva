@@ -19,10 +19,12 @@ exports = ["mcp_daemon.py", "mcp_socket_bridge.py", "mcp_wrapper.py", "orphan.py
 "protocol.py" = "strict"
 "shutdown_budget.py" = "strict"
 
+[roots]
+"mcp_daemon.py" = { kinds = ["settings"], why = "Service or operator process entry boots configuration before composing its resources" }
+"mcp_wrapper.py" = { kinds = ["settings"], why = "Service or operator process entry boots configuration before composing its resources" }
+
 [debt.ambient-read]
 "daemon.py#settings base.config.settings" = 1
 "gateway_session.py#settings base.config.settings" = 1
-"mcp_daemon.py#settings base.config.ConfigBoot" = 1
-"mcp_wrapper.py#settings base.config.ConfigBoot" = 1
 "page_lifecycle.py#settings base.config.settings" = 1
 "probe.py#settings base.config.settings" = 1

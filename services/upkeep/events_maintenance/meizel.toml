@@ -15,6 +15,6 @@ exports = ["daemon.py", "resolution.py", "rollup.py", "token_totals.py"]
 "loop_roster.py" = "strict"
 "pass_policy.py" = "strict"
 
-[debt.ambient-read]
-"daemon.py#settings base.config.ConfigBoot" = 1
-"rollup.py#settings base.config.ConfigBoot" = 1
+[roots]
+"daemon.py" = { kinds = ["settings"], why = "Service or operator process entry boots configuration before composing its resources" }
+"rollup.py" = { kinds = ["settings"], why = "Service or operator process entry boots configuration before composing its resources" }

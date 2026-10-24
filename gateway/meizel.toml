@@ -19,5 +19,5 @@ exports = ["agents", "alerts", "app.py", "cluster", "events", "http", "mcp_serve
 [purity]
 "__init__.py" = "strict"
 
-[debt.ambient-read]
-"app.py#settings base.config.ConfigBoot" = 3
+[roots]
+"app.py" = { kinds = ["settings"], why = "Gateway process and cold schema entry compose their configuration here" }

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from meizel.graph.model import AmbientKind
 from scripts.lint.diagnostics.diff_hints.engine import analyze
 from scripts.lint.diagnostics.diff_hints.model import FileChange, HintId, Roles, Site
 from scripts.lint.diagnostics.diff_hints.scope import parse_unit
@@ -14,12 +15,16 @@ ROLES = Roles(
 # meiva:note
 # Every line of the source is an added line unless the test names the added lines.
 def sites(
-    source: str, path: str = "cli/x.py", *, added: frozenset[int] | None = None
+    source: str,
+    path: str = "cli/x.py",
+    *,
+    added: frozenset[int] | None = None,
+    roots: frozenset[AmbientKind] = frozenset(),
 ) -> list[Site]:
     text = source.lstrip("\n")
     lines = added if added is not None else frozenset(range(1, len(text.splitlines()) + 1))
     change = FileChange(path, lines, (), (), deleted=False)
-    return analyze((change,), {path: text}, ROLES)
+    return analyze((change,), {path: text}, ROLES, {path: roots})
 
 
 def hints(source: str, path: str = "cli/x.py") -> list[HintId]:
@@ -28,4 +33,6 @@ def hints(source: str, path: str = "cli/x.py") -> list[HintId]:
 
 def unit_of(source: str, path: str = "cli/x.py") -> object:
     text = source.lstrip("\n")
-    return parse_unit(path, text, frozenset(range(1, len(text.splitlines()) + 1)), ROLES)
+    return parse_unit(
+        path, text, frozenset(range(1, len(text.splitlines()) + 1)), ROLES, frozenset()
+    )

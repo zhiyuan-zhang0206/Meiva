@@ -7,6 +7,5 @@ exports = ["daemon.py", "dead_letter.py"]
 [purity]
 "__init__.py" = "strict"
 
-[debt.ambient-read]
-"daemon.py#settings base.config.ConfigBoot" = 1
-"daemon.py#settings base.config.settings" = 1
+[roots]
+"daemon.py" = { kinds = ["settings"], why = "Service or operator process entry boots configuration before composing its resources" }

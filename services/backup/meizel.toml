@@ -14,6 +14,6 @@ exports = ["artifact", "dump.py", "layout.py", "restore_drill.py", "scheduler", 
 "layout.py" = "strict"
 "schedule.py" = "strict"
 
-[debt.ambient-read]
-"dump.py#settings base.config.ConfigBoot" = 1
-"restore_drill.py#settings base.config.ConfigBoot" = 1
+[roots]
+"dump.py" = { kinds = ["settings"], why = "Service or operator process entry boots configuration before composing its resources" }
+"restore_drill.py" = { kinds = ["settings"], why = "Service or operator process entry boots configuration before composing its resources" }

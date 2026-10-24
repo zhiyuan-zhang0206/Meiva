@@ -18,6 +18,7 @@ import argparse
 import json
 import subprocess
 import sys
+import tomllib
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -27,6 +28,7 @@ from pathlib import Path
 _REPO_ROOT = Path(__file__).resolve().parents[4]
 sys.path.insert(0, str(_REPO_ROOT))
 
+from meizel.graph.model import AmbientKind  # noqa: E402
 from meizel.roles import all_packages, packages  # noqa: E402
 from scripts.lint.diagnostics.diff_hints.acks import (  # noqa: E402
     answers,
@@ -118,6 +120,38 @@ def _read_blobs(rev: str, paths: Sequence[str]) -> dict[str, str]:
     return texts
 
 
+# meiva:note
+# Read roots from the same Git revision as the Python, including the index at commit-msg.
+# The manifest checker validates the full declaration; the hint rejects malformed kind lists.
+def _root_kinds(rev: str, paths: Sequence[str]) -> dict[str, frozenset[AmbientKind]]:
+    manifests = {path: str(Path(path).parent / "meizel.toml") for path in paths}
+    texts = _read_blobs(rev, sorted(set(manifests.values())))
+    found: dict[str, frozenset[AmbientKind]] = {}
+    for path, manifest in manifests.items():
+        text = texts.get(manifest)
+        if text is None:
+            continue
+        raw: object = tomllib.loads(text).get("roots", {})
+        if not isinstance(raw, dict):
+            raise GitError(f"{manifest}: [roots] must be a table")
+        table: dict[str, object] = raw
+        name = Path(path).name
+        value = table.get(name, [])
+        if isinstance(value, dict):
+            fields: dict[str, object] = value
+            value = fields.get("kinds")
+        if not isinstance(value, list):
+            raise GitError(f"{manifest}: [roots] {name!r} must declare kinds")
+        items: list[object] = value
+        kinds: set[AmbientKind] = set()
+        for item in items:
+            if not isinstance(item, str):
+                raise GitError(f"{manifest}: root kinds must be strings")
+            kinds.add(AmbientKind(item))
+        found[path] = frozenset(kinds)
+    return found
+
+
 def _diff(
     spec: Sequence[str], rev: str, roles: Roles
 ) -> tuple[tuple[FileChange, ...], dict[str, str]]:
@@ -134,7 +168,7 @@ def _diff(
 def _sites(spec: Sequence[str], rev: str) -> list[Site]:
     roles = _roles()
     changes, texts = _diff(spec, rev, roles)
-    return analyze(changes, texts, roles)
+    return analyze(changes, texts, roles, _root_kinds(rev, tuple(texts)))
 
 
 # meiva:note
@@ -237,7 +271,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.command == "branch":
             return _branch(args.head, args.base, args.summary)
         return _report(args.base, args.head, as_json=args.json)
-    except GitError as error:
+    except (GitError, ValueError) as error:
         sys.stderr.write(f"diff hints: {error}\n")
         return 2
 

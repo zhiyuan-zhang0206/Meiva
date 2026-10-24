@@ -9,8 +9,6 @@ exports = ["cli.py", "pull_requests", "refresh_test_durations.py", "shard_counts
 
 [roots]
 "coverage_gates.py" = { kinds = ["environ"], why = "BACKEND_COVERAGE_THRESHOLD is a ci.yml workflow knob for the pre-merge gate, not runtime config — Settings models the deployed runtime, and importing base.config would drag the settings singleton into a pure CI report parser" }
-"migration_smoke.py" = { kinds = ["environ"], why = "builds a psql subprocess env (PGHOST/PGPORT/... from a throwaway native Postgres); PG* are libpq plumbing, not Meiva runtime config" }
+"migration_smoke.py" = { kinds = ["environ", "settings"], why = "builds a psql subprocess env (PGHOST/PGPORT/... from a throwaway native Postgres); PG* are libpq plumbing, not Meiva runtime config; Tool entry composes its process resources from the launch configuration" }
 
-[debt.ambient-read]
-"migration_smoke.py#settings base.config.ConfigBoot" = 1
-"pgvector_runtime_smoke.py#settings base.config.ConfigBoot" = 1
+"pgvector_runtime_smoke.py" = { kinds = ["settings"], why = "Tool entry composes its process resources from the launch configuration" }

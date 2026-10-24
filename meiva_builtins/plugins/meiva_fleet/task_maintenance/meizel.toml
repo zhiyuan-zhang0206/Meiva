@@ -8,7 +8,4 @@ exports = ["daemon.py", "tests"]
 "__init__.py" = "strict"
 
 [roots]
-"daemon.py" = ["endpoints", "bus"]
-
-[debt.ambient-read]
-"daemon.py#settings base.config.ConfigBoot" = 1
+"daemon.py" = { kinds = ["endpoints", "bus", "settings"], why = "Service or operator process entry boots configuration before composing its resources" }

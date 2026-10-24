@@ -9,6 +9,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 
+from meizel.graph.model import AmbientKind
+
 
 # meiva:note
 # The closed set of hint ids. A trailer names one of these; an unknown id in a
@@ -81,8 +83,8 @@ class Roles:
 
 
 # meiva:note
-# One parsed Python file with the lines the change added. `names` maps each name an
-# import binds to the dotted name it came from (`from time import monotonic` binds
+# One parsed Python file with its declared root kinds and the lines the change added.
+# `names` maps each imported name to its dotted origin (`from time import monotonic` binds
 # `monotonic` to `time.monotonic`). The index is built by one walk of the tree so that
 # a detector looks only at what the change touched: `touched` holds the nodes that
 # start on an added line; `functions`, `classes` and `calls` hold those whose span
@@ -94,6 +96,7 @@ class Unit:
     added: frozenset[int]
     kind: FileKind
     roles: Roles
+    roots: frozenset[AmbientKind]
     names: Mapping[str, str]
     touched: tuple[ast.AST, ...]
     functions: tuple[FunctionNode, ...]

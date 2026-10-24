@@ -14,6 +14,7 @@ exports = ["accounting.py", "classify_paths.py", "commands.py", "export_process.
 [roots]
 "commands.py" = { kinds = ["environ"], why = "TRUNK_API_TOKEN optionally adds read-only queue evidence to diagnosis; it is not deployment configuration" }
 
+"export_process.py" = { kinds = ["settings"], why = "Tool entry composes its process resources from the launch configuration" }
+
 [debt.ambient-read]
 "export_process.py#db base.db.Database.from_settings" = 1
-"export_process.py#settings base.config.ConfigBoot" = 1
