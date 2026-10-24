@@ -24,7 +24,7 @@ async def test_a_lost_connection_is_retried_and_the_pass_then_succeeds(
         assert attempts() == 3
 
     assert status is OpStatus.COMPLETED
-    assert executions("retried") == 1
+    assert executions("retried", env_path=ops.authority.env_path) == 1
     assert [r.getMessage() for r in caplog.records if "retrying" in r.getMessage()] == [
         "dispatch idempotent pass died with OperationalError (attempt 1/3); retrying",
         "dispatch idempotent pass died with OperationalError (attempt 2/3); retrying",
@@ -40,7 +40,7 @@ async def test_a_connection_that_stays_lost_gives_up_after_the_attempt_limit(
 
         assert attempts() == daemon.DISPATCH_RETRY_ATTEMPTS
 
-    assert executions("gives-up") == 0
+    assert executions("gives-up", env_path=ops.authority.env_path) == 0
 
 
 async def test_a_failure_that_is_not_a_lost_connection_is_not_retried(
@@ -52,4 +52,4 @@ async def test_a_failure_that_is_not_a_lost_connection_is_not_retried(
 
         assert attempts() == 1
 
-    assert executions("not-retried") == 0
+    assert executions("not-retried", env_path=ops.authority.env_path) == 0

@@ -18,7 +18,7 @@
 #    a runtime would create (`exec`/`eval`, `globals()` writes) are not modeled: a read of one is
 #    reported, never guessed around.
 # 3. **Call sites** — every call whose callee resolves through those imports to repo code
-#    (`catch_up(...)`, `schedules.catchup.fire_slot_once(...)`, `Database.from_settings()`) must
+#    (`catch_up(...)`, `schedules.jobs.catchup.fire_slot_once(...)`, `Database.from_settings()`) must
 #    `inspect.signature(...).bind` the arguments the script passes. A signature that moved on
 #    (2026-10-03: `catch_up()` and `fire_slot_once()` gained a required `db`) fails here, where the
 #    import check stays green. Only the argument SHAPE is bound (count and keyword names; values are

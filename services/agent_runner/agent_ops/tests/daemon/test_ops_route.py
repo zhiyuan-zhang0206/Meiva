@@ -104,7 +104,7 @@ async def test_an_envelope_with_a_key_is_deduplicated(
 
     assert first == second
     assert first[1]["status"] == "completed"
-    assert executions("route-key") == 1
+    assert executions("route-key", env_path=ops.authority.env_path) == 1
 
 
 async def test_an_envelope_without_a_key_is_not_deduplicated(
@@ -115,7 +115,7 @@ async def test_an_envelope_without_a_key_is_not_deduplicated(
     await ops.route(envelope)
     await ops.route(envelope)
 
-    assert executions("no-key") == 2
+    assert executions("no-key", env_path=ops.authority.env_path) == 2
     assert db_conn.execute(
         "SELECT count(*) FROM api_idempotency WHERE method = 'ops'"
     ).fetchone() == (0,)
@@ -133,7 +133,7 @@ async def test_requests_stay_counted_until_their_operation_finishes(ops: Ops) ->
 
     await asyncio.gather(*tasks)
     assert ops.requests == set()
-    assert executions("counted") == 2
+    assert executions("counted", env_path=ops.authority.env_path) == 2
 
 
 @pytest.mark.parametrize(("cap", "unrelated_runs"), [(1, False), (2, True)])

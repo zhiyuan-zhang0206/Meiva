@@ -22,7 +22,7 @@ _OLD_HIERARCHY = """\
 import time
 from datetime import UTC, datetime
 
-from schedules.catchup import cluster_timezone, fire_slot_once
+from schedules.jobs.catchup import cluster_timezone, fire_slot_once
 from base.daemon.schedules.watcher import next_fire
 
 CRON = "* * * * *"
@@ -39,7 +39,10 @@ def main():
 
 _NEW_HIERARCHY = (
     _OLD_HIERARCHY.replace("def _fire(_trigger):", "def _fire(_slot, _trigger):")
-    .replace("fire_slot_once(nxt", "fire_slot_once(db, nxt")
+    .replace(
+        "fire_slot_once(nxt, None, fire=_fire)",
+        "fire_slot_once(db, nxt, None, fire=_fire, schedule_id=1)",
+    )
     .replace("def main():\n", "def main():\n    db = None\n")
 )
 
@@ -60,33 +63,33 @@ def test_the_current_signature_is_green() -> None:
 
 def test_the_attribute_form_and_an_alias_are_resolved() -> None:
     script = (
-        "import schedules.catchup as c\nimport schedules.catchup\n"
+        "import schedules.jobs.catchup as c\nimport schedules.jobs.catchup\n"
         "c.fire_slot_once(1, fire=print)\n"
-        "schedules.catchup.fire_slot_once(1, 2, fire=print)\n"
+        "schedules.jobs.catchup.fire_slot_once(1, 2, fire=print)\n"
     )
     red = _check(script)
     assert red is not None
-    assert "L3 c.fire_slot_once()" in red and "L4 schedules.catchup.fire_slot_once()" in red
+    assert "L3 c.fire_slot_once()" in red and "L4 schedules.jobs.catchup.fire_slot_once()" in red
 
 
 def test_an_unknown_keyword_is_red() -> None:
     red = _check(
-        "from schedules.catchup import fire_slot_once\nfire_slot_once(1, 2, 3, fire=print, nope=1)\n"
+        "from schedules.jobs.catchup import fire_slot_once\nfire_slot_once(1, 2, 3, fire=print, schedule_id=1, nope=1)\n"
     )
     assert red is not None and "unexpected keyword argument 'nope'" in red
 
 
 def test_a_removed_module_attribute_is_red() -> None:
-    red = _check("import schedules.catchup\nschedules.catchup.gone_function(1)\n")
-    assert red is not None and "schedules.catchup has no `gone_function`" in red
+    red = _check("import schedules.jobs.catchup\nschedules.jobs.catchup.gone_function(1)\n")
+    assert red is not None and "schedules.jobs.catchup has no `gone_function`" in red
 
 
 @pytest.mark.parametrize(
     "script",
     [
-        "from schedules.catchup import fire_slot_once\n\na, k = (), {}\nfire_slot_once(*a, **k)\n",
-        "from schedules.catchup import fire_slot_once\n\ndef fire_slot_once(): ...\n\nfire_slot_once()\n",
-        "from schedules.catchup import fire_slot_once\n\ndef f(fire_slot_once):\n    fire_slot_once()\n",
+        "from schedules.jobs.catchup import fire_slot_once\n\na, k = (), {}\nfire_slot_once(*a, **k)\n",
+        "from schedules.jobs.catchup import fire_slot_once\n\ndef fire_slot_once(): ...\n\nfire_slot_once()\n",
+        "from schedules.jobs.catchup import fire_slot_once\n\ndef f(fire_slot_once):\n    fire_slot_once()\n",
         "from base.db import Database\nfrom base.db.code_version_gate import ProcessDbGate\n"
         "def connect(gate: ProcessDbGate):\n"
         "    Database.from_settings(gate=gate).connect()\n",
