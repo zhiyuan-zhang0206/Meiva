@@ -19,3 +19,21 @@ tags: []
   - In-band `{"id": req_id, "method": "cancel"}` or client socket EOF triggers `SIGINT` to the process group followed by a bounded grace window (`KILL_GRACE_S`) and `domain.kill_and_reap()`.
   - Exceeding `timeout_s` triggers `SIGTERM` to the process group followed by the same grace window and `domain.kill_and_reap()`.
 - **Memory guard**: Runs `run_memory_guard_forever` to monitor OS memory pressure and terminate the largest `execute_code` domain when system memory reaches `critical`, writing a notice next to the child's result file.
+
+## Child environment authority
+
+`base/sessions/exec_host/child_environment.py` owns the environment contract for
+both direct children and socket-delegated children. The service merges its booted
+environment with caller `env_overlay`, restores the daemon's
+`MEIVA_PERMISSIONS_HELPER_PID`, then applies that contract. Ambient per-agent
+config carriers are removed; only explicit, non-empty `config_overlay` and
+`birth_config` maps become JSON carriers. Missing, null and empty maps leave the
+child unbound to those carriers.
+
+The child runs the daemon's interpreter. The daemon composition root therefore
+supplies that interpreter's source checkout, independently of the caller's
+checkout. A child whose cwd is outside that source checkout, or inside its
+`.worktrees` or `.claude/worktrees`, drops `VIRTUAL_ENV` after the environment
+merge so a bare `uv` command cannot select another checkout's editable install.
+A system interpreter with no source checkout preserves its environment's venv
+identity. Socket delegation does not change this policy.

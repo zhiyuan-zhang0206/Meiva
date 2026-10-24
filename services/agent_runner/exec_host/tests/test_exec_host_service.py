@@ -11,6 +11,9 @@ from typing import Any
 
 import pytest
 
+from base.config.tests.configuration import defaults
+from base.deploy.release import editable_install
+from base.host.env.agent_env import AGENT_BIRTH_CONFIG_ENV, AGENT_CONFIG_OVERLAY_ENV
 from base.native_process import child_env
 from base.native_process.exec_kill_notice import read_notice, write_notice
 from base.native_process.os_platform import file_lock
@@ -19,6 +22,75 @@ from base.sessions.exec_host import protocol
 from base.sessions.exec_host.paths import lock_path, service_socket_path
 from services.agent_runner.exec_host import daemon, memory_guard
 from services.agent_runner.exec_host.service import ExecHostService
+
+
+@pytest.mark.parametrize(
+    ("birth_config", "config_overlay"),
+    [
+        (None, None),
+        ({}, {}),
+        ({"to_user_soft_limit_words": 30}, None),
+        (None, {"to_user_soft_limit_words": 30}),
+    ],
+)
+async def test_run_consumes_only_explicit_config_maps(
+    tmp_path: Path,
+    birth_config: dict[str, object] | None,
+    config_overlay: dict[str, object] | None,
+) -> None:
+    default_word_limit = defaults()("agent", "to_user_soft_limit_words")
+    request_path = exec_run_dir(tmp_path) / "1" / "req-config.json"
+    result_path = request_path.with_name("res-config.json")
+    _write_request_envelope(
+        request_path,
+        "import json, os\n"
+        "from meiva.sdk_surface.settings import agent_setting\n"
+        "print('CHILD_CONFIG=' + json.dumps({\n"
+        "    'overlay': os.environ.get('MEIVA_AGENT_CONFIG_OVERLAY'),\n"
+        "    'birth': os.environ.get('MEIVA_AGENT_BIRTH_CONFIG'),\n"
+        "    'word_limit': agent_setting('to_user_soft_limit_words'),\n"
+        "}))\n",
+    )
+    async with _running_service(tmp_path) as sock_path:
+        reader, writer = await asyncio.open_unix_connection(str(sock_path))
+        try:
+            writer.write(
+                protocol.encode(
+                    {
+                        "id": 1,
+                        "method": "run",
+                        "agent_id": 1,
+                        "request_path": str(request_path),
+                        "result_path": str(result_path),
+                        "timeout_s": 15.0,
+                        "env_overlay": {
+                            AGENT_CONFIG_OVERLAY_ENV: json.dumps(
+                                {"to_user_soft_limit_words": default_word_limit + 1}
+                            ),
+                            AGENT_BIRTH_CONFIG_ENV: json.dumps(
+                                {"to_user_soft_limit_words": default_word_limit + 2}
+                            ),
+                        },
+                        "config_overlay": config_overlay,
+                        "birth_config": birth_config,
+                    }
+                )
+            )
+            await writer.drain()
+            frames = await _read_frames(reader)
+        finally:
+            writer.close()
+            await writer.wait_closed()
+
+    assert frames[-1]["ok"] is True
+    assert frames[-1]["data"]["returncode"] == 0
+    output = "".join(frame["data"] for frame in frames if frame.get("type") == "output")
+    observed = json.loads(output.split("CHILD_CONFIG=", 1)[1].splitlines()[0])
+    assert observed == {
+        "overlay": None,
+        "birth": None,
+        "word_limit": 30 if birth_config or config_overlay else default_word_limit,
+    }
 
 
 def _write_request_envelope(
@@ -46,7 +118,12 @@ async def _running_service(home: Path) -> AsyncGenerator[Path]:
         "MEIVA_HOME": str(home),
         "MEIVA_CONFIG_FETCH": "skip",
     }
-    service = ExecHostService(home=home, base_environ=base_env, default_cwd=home)
+    service = ExecHostService(
+        home=home,
+        base_environ=base_env,
+        default_cwd=home,
+        source_root=editable_install.current_interpreter_source_root(),
+    )
     async with asyncio.TaskGroup() as tg:
         tg.create_task(service.serve(sock_path, install_signals=False))
         deadline = time.monotonic() + 5.0

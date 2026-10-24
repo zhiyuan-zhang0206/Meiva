@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from agent.execution.protocol import ResultPayload
-from base.host.env.agent_env import AGENT_BIRTH_CONFIG_ENV, AGENT_CONFIG_OVERLAY_ENV
+from base.sessions.exec_host.child_environment import ChildExecution, build_child_environment
 
 from ._result import (
     ExecChildError,
@@ -46,14 +46,6 @@ class ChildLaunch:
     cwd: Path
 
 
-def _cwd_is_inside_checkout(cwd: Path, checkout_root: Path) -> bool:
-    return (
-        cwd.is_relative_to(checkout_root)
-        and not cwd.is_relative_to(checkout_root / ".worktrees")
-        and not cwd.is_relative_to(checkout_root / ".claude" / "worktrees")
-    )
-
-
 # meiva:note
 # The child's launch: the parent's own environment (settings already materialized by
 # dotenv_boot), plus the identity the session env allowlist deliberately drops (Task #856) and
@@ -72,22 +64,14 @@ def plan_child_launch(
     config_overlay: dict[str, object] | None,
     birth_config: dict[str, object] | None,
 ) -> ChildLaunch:
-    env = dict(parent.environ)
-    env.pop(AGENT_CONFIG_OVERLAY_ENV, None)
-    env.pop(AGENT_BIRTH_CONFIG_ENV, None)
-    if parent.source_root is not None and not _cwd_is_inside_checkout(
-        parent.cwd, parent.source_root
-    ):
-        env.pop("VIRTUAL_ENV", None)
-    if agent_id is not None:
-        env["MEIVA_AGENT_ID"] = str(agent_id)
-    env["MEIVA_PROCESS_PROFILE"] = "agent"
-    env["MEIVA_EXEC_REQUEST_FILE"] = str(request_path)
-    env["MEIVA_EXEC_RESULT_FILE"] = str(result_path)
-    if config_overlay:
-        env[AGENT_CONFIG_OVERLAY_ENV] = json.dumps(config_overlay, sort_keys=True)
-    if birth_config:
-        env[AGENT_BIRTH_CONFIG_ENV] = json.dumps(birth_config, sort_keys=True)
+    env = build_child_environment(
+        parent.environ,
+        cwd=parent.cwd,
+        source_root=parent.source_root,
+        execution=ChildExecution(agent_id, request_path, result_path),
+        config_overlay_json=json.dumps(config_overlay, sort_keys=True) if config_overlay else None,
+        birth_config_json=json.dumps(birth_config, sort_keys=True) if birth_config else None,
+    )
     argv = (parent.executable, "-I", "-B", "-X", "utf8", "-m", "agent.execution.child")
     return ChildLaunch(argv=argv, env=env, cwd=parent.cwd)
 
