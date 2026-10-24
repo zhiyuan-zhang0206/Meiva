@@ -153,7 +153,7 @@ def _threshold(
         agent_id,
         fallback="",
         catalog=catalog,
-        default_model_reader=lambda: config.view.lm.llm_model,
+        default_model=config.view.lm.llm_model,
     )
     soft = resolve_context_budget(model, overrides, catalog=catalog).soft_compact_tokens
     if explicit is not None:

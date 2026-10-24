@@ -35,7 +35,7 @@ def _awaiting_titles(db_url: str, model_catalog: ModelCatalog):
                 conn,
                 event["agent_id"],
                 catalog=model_catalog,
-                default_model_reader=lambda: settings.lm.llm_model,
+                default_model=settings.lm.llm_model,
             )
         assert snapshot is not None
         return [notice.title for notice in snapshot.notices_awaiting_response]

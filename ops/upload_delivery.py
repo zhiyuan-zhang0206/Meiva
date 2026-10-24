@@ -4,7 +4,6 @@ import time
 from pathlib import Path
 
 from psycopg.types.json import Jsonb
-from psycopg_pool import ConnectionPool
 
 from base.agents.upload_delivery import storage
 from base.agents.upload_delivery.models import (
@@ -21,11 +20,11 @@ from base.agents.upload_delivery.paths import (
 )
 from base.cluster.machine import gateway_api_base, gateway_auth_headers
 from base.cluster.machine.ambient import gateway_access_from_settings
-from base.db.transaction import write_transaction
+from base.db.transaction import ConnectionSource, write_transaction
 from base.host.net.http_dial import get as http_get
 
 
-def receive(pool: ConnectionPool, request: ReceiveRequest, *, local_machine: str) -> CopyProof:
+def receive(pool: ConnectionSource, request: ReceiveRequest, *, local_machine: str) -> CopyProof:
     """Reserve native quota, pull immutable bytes, verify actual files, then acknowledge."""
     unit = current_unit(local_machine=local_machine)
     if request.target != unit:

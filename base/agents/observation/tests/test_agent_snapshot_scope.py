@@ -39,17 +39,13 @@ def test_live_roster_preserves_ancestor_closure_without_history_growth(
             (4, "agent:2", "idling"),
         ],
     )
-    before = select_roster(
-        db_conn, catalog=model_catalog, default_model_reader=lambda: settings.lm.llm_model
-    )
+    before = select_roster(db_conn, catalog=model_catalog, default_model=settings.lm.llm_model)
     assert [a.agent_id for a in before.agents] == [1, 3, 4]
     assert [a.model_dump() for a in before.ancestors] == [
         {"agent_id": 2, "spawner": "agent:1", "fork_source_agent_id": None}
     ]
     seed(db_conn, [(i, "user", "terminated") for i in range(100, 10_100)])
-    after = select_roster(
-        db_conn, catalog=model_catalog, default_model_reader=lambda: settings.lm.llm_model
-    )
+    after = select_roster(db_conn, catalog=model_catalog, default_model=settings.lm.llm_model)
     before_payload = before.model_dump(mode="json")
     after_payload = after.model_dump(mode="json")
     for payload in (before_payload, after_payload):
@@ -75,9 +71,7 @@ def test_ancestor_closure_follows_fork_source_and_deduplicates_cycles(
         cur.execute(
             "UPDATE agents_meta SET fork_source_agent_id=1, fork_source_checkpoint_id='ckpt' WHERE id IN (3,4)"
         )
-    roster = select_roster(
-        db_conn, catalog=model_catalog, default_model_reader=lambda: settings.lm.llm_model
-    )
+    roster = select_roster(db_conn, catalog=model_catalog, default_model=settings.lm.llm_model)
     assert [a.agent_id for a in roster.ancestors] == [1, 2]
     assert all(a.fork_source_agent_id == 1 for a in roster.agents)
 
@@ -91,7 +85,7 @@ def test_directory_is_bounded_searchable_and_cursor_ordered(
         scope="terminated",
         limit=3,
         catalog=model_catalog,
-        default_model_reader=lambda: settings.lm.llm_model,
+        default_model=settings.lm.llm_model,
     )
     second = list_directory(
         db_conn,
@@ -99,7 +93,7 @@ def test_directory_is_bounded_searchable_and_cursor_ordered(
         before_id=first.next_cursor,
         limit=3,
         catalog=model_catalog,
-        default_model_reader=lambda: settings.lm.llm_model,
+        default_model=settings.lm.llm_model,
     )
     third = list_directory(
         db_conn,
@@ -107,7 +101,7 @@ def test_directory_is_bounded_searchable_and_cursor_ordered(
         before_id=second.next_cursor,
         limit=3,
         catalog=model_catalog,
-        default_model_reader=lambda: settings.lm.llm_model,
+        default_model=settings.lm.llm_model,
     )
     assert [a.agent_id for a in first.agents] == [7, 6, 5]
     assert [a.agent_id for a in second.agents] == [4, 3, 2]
@@ -120,7 +114,7 @@ def test_directory_is_bounded_searchable_and_cursor_ordered(
             scope="all",
             query="#3",
             catalog=model_catalog,
-            default_model_reader=lambda: settings.lm.llm_model,
+            default_model=settings.lm.llm_model,
         ).agents
     ] == [3]
     assert [
@@ -130,13 +124,11 @@ def test_directory_is_bounded_searchable_and_cursor_ordered(
             scope="all",
             query="Agent 2",
             catalog=model_catalog,
-            default_model_reader=lambda: settings.lm.llm_model,
+            default_model=settings.lm.llm_model,
         ).agents
     ] == [2]
     assert (
-        list_directory(
-            db_conn, catalog=model_catalog, default_model_reader=lambda: settings.lm.llm_model
-        ).agents
+        list_directory(db_conn, catalog=model_catalog, default_model=settings.lm.llm_model).agents
         == []
     )
 
@@ -151,7 +143,7 @@ def test_notice_body_cannot_expand_roster_card(
             ("x" * 1_000_000,),
         )
     card = select_roster(
-        db_conn, catalog=model_catalog, default_model_reader=lambda: settings.lm.llm_model
+        db_conn, catalog=model_catalog, default_model=settings.lm.llm_model
     ).agents[0]
     assert card.awaiting_response_count == 1
     assert card.highest_notice_priority == "P0"
@@ -175,7 +167,7 @@ def test_open_impersonation_status_reflects_lease_phase(
     db_conn.commit()
 
     requested_card = select_roster(
-        db_conn, catalog=model_catalog, default_model_reader=lambda: settings.lm.llm_model
+        db_conn, catalog=model_catalog, default_model=settings.lm.llm_model
     ).agents[0]
     assert requested_card.open_impersonation_session_id is not None
     assert requested_card.open_impersonation_status == "requested"
@@ -189,7 +181,7 @@ def test_open_impersonation_status_reflects_lease_phase(
     db_conn.commit()
 
     active_card = select_roster(
-        db_conn, catalog=model_catalog, default_model_reader=lambda: settings.lm.llm_model
+        db_conn, catalog=model_catalog, default_model=settings.lm.llm_model
     ).agents[0]
     assert active_card.open_impersonation_session_id == requested_card.open_impersonation_session_id
     assert active_card.open_impersonation_status == "active"
@@ -204,7 +196,7 @@ def test_invalid_directory_limit_fails(
             db_conn,
             limit=limit,
             catalog=model_catalog,
-            default_model_reader=lambda: settings.lm.llm_model,
+            default_model=settings.lm.llm_model,
         )
 
 
@@ -218,7 +210,7 @@ def test_arbitrary_search_text_cannot_overflow_an_id(
             db_conn,
             query=query,
             catalog=model_catalog,
-            default_model_reader=lambda: settings.lm.llm_model,
+            default_model=settings.lm.llm_model,
         ).agents
         == []
     )
@@ -231,9 +223,7 @@ def test_arbitrary_external_spawner_does_not_break_the_roster(
     model_catalog: ModelCatalog, db_conn: psycopg.Connection, spawner: str
 ) -> None:
     seed(db_conn, [(1, spawner, "idling")])
-    roster = select_roster(
-        db_conn, catalog=model_catalog, default_model_reader=lambda: settings.lm.llm_model
-    )
+    roster = select_roster(db_conn, catalog=model_catalog, default_model=settings.lm.llm_model)
     assert roster.agents[0].spawner == spawner
     assert roster.ancestors == []
 
@@ -247,7 +237,7 @@ def test_directory_rejects_invalid_cursor(
             db_conn,
             before_id=before_id,
             catalog=model_catalog,
-            default_model_reader=lambda: settings.lm.llm_model,
+            default_model=settings.lm.llm_model,
         )
 
 
@@ -328,7 +318,7 @@ def test_effective_model_overlay_wins(model_catalog: ModelCatalog) -> None:
             42,
             fallback="fallback-x",
             catalog=model_catalog,
-            default_model_reader=lambda: settings.lm.llm_model,
+            default_model=settings.lm.llm_model,
         )[0]
         == "deepseek-v4-pro"
     )
@@ -346,7 +336,7 @@ def test_effective_model_is_the_birth_stamp_when_there_is_no_overlay(
             42,
             fallback="fallback-x",
             catalog=model_catalog,
-            default_model_reader=lambda: settings.lm.llm_model,
+            default_model=settings.lm.llm_model,
         )[0]
         == "deepseek-v4-pro"
     )
@@ -362,7 +352,7 @@ def test_effective_model_defaults_to_the_fleet_model_without_an_overlay(
             42,
             fallback="fallback-x",
             catalog=model_catalog,
-            default_model_reader=lambda: settings.lm.llm_model,
+            default_model=settings.lm.llm_model,
         )[0]
         == settings.lm.llm_model
     )
@@ -378,7 +368,7 @@ def test_effective_model_defaults_to_the_fleet_model_when_the_row_vanished(
             42,
             fallback="fallback-x",
             catalog=model_catalog,
-            default_model_reader=lambda: settings.lm.llm_model,
+            default_model=settings.lm.llm_model,
         )[0]
         == settings.lm.llm_model
     )
@@ -395,7 +385,7 @@ def test_effective_model_read_failure_returns_the_callers_fallback(
         42,
         fallback="fallback-x",
         catalog=model_catalog,
-        default_model_reader=lambda: settings.lm.llm_model,
+        default_model=settings.lm.llm_model,
     )
     assert model == "fallback-x"
     assert overrides == ModelOverrides.from_pins(None)
@@ -410,7 +400,7 @@ def test_model_target_carries_the_agents_tuning_pins(model_catalog: ModelCatalog
         42,
         fallback="fallback-x",
         catalog=model_catalog,
-        default_model_reader=lambda: settings.lm.llm_model,
+        default_model=settings.lm.llm_model,
     )
     assert model == "deepseek-v4-pro"
     assert overrides.reasoning_effort == "max"
@@ -426,7 +416,7 @@ def test_model_target_without_pins_leaves_every_tuning_field_to_the_cluster_defa
         42,
         fallback="fallback-x",
         catalog=model_catalog,
-        default_model_reader=lambda: settings.lm.llm_model,
+        default_model=settings.lm.llm_model,
     )
     assert overrides == ModelOverrides.from_pins(None)
 
@@ -438,16 +428,17 @@ def test_model_target_without_pins_leaves_every_tuning_field_to_the_cluster_defa
         ({}, {"llm_model": "deepseek-v4-pro"}),
     ],
 )
-def test_model_pins_do_not_read_the_cluster_default(
+def test_model_pins_beat_the_cluster_default(
     model_catalog: ModelCatalog, overlay: dict[str, str], birth: dict[str, str]
 ) -> None:
-    def forbidden() -> str:
-        raise AssertionError("A pinned model must not read the cluster default")
-
     db, _ = _install_conn((overlay, birth))
     assert (
         snapshot.agent_model_target(
-            db, 42, fallback="fallback-x", catalog=model_catalog, default_model_reader=forbidden
+            db,
+            42,
+            fallback="fallback-x",
+            catalog=model_catalog,
+            default_model="deepseek-v4-flash",
         )[0]
         == "deepseek-v4-pro"
     )
@@ -465,7 +456,7 @@ def test_model_defaults_follow_independent_live_config_owners(model_catalog: Mod
             42,
             fallback="fallback-x",
             catalog=model_catalog,
-            default_model_reader=lambda: owner.view.lm.llm_model,
+            default_model=owner.view.lm.llm_model,
         )[0]
 
     assert read(first) == "deepseek-v4-pro"
@@ -477,32 +468,24 @@ def test_model_defaults_follow_independent_live_config_owners(model_catalog: Mod
 
 
 @pytest.mark.parametrize("directory", [False, True])
-def test_roster_reads_default_for_each_unpinned_row(
+def test_roster_applies_the_given_default_to_each_unpinned_row(
     model_catalog: ModelCatalog, db_conn: psycopg.Connection, directory: bool
 ) -> None:
     seed(db_conn, [(1, "user", "idling"), (2, "user", "idling"), (3, "user", "idling")])
     db_conn.execute(
-        "UPDATE agents_meta SET config_overlay = jsonb_build_object('llm_model', 'deepseek-v4-pro') WHERE id=2"
+        "UPDATE agents_meta SET config_overlay = jsonb_build_object('llm_model', 'unknown-model') WHERE id=2"
     )
-    reads: list[str] = []
-    values = iter(("deepseek-v4-pro", "deepseek-v4-flash"))
-
-    def reader() -> str:
-        value = next(values)
-        reads.append(value)
-        return value
-
+    default = "claude-future-fixture"
     if directory:
         cards = list_directory(
-            db_conn, scope="all", catalog=model_catalog, default_model_reader=reader
+            db_conn, scope="all", catalog=model_catalog, default_model=default
         ).agents
     else:
-        cards = select_roster(db_conn, catalog=model_catalog, default_model_reader=reader).agents
-    assert {card.agent_id for card in cards} == {1, 2, 3}
-    assert reads == ["deepseek-v4-pro", "deepseek-v4-flash"]
+        cards = select_roster(db_conn, catalog=model_catalog, default_model=default).agents
+    assert {card.agent_id: card.supports_vision for card in cards} == {1: True, 2: False, 3: True}
 
 
-def test_snapshot_birth_pin_and_missing_row_do_not_read_default(
+def test_snapshot_birth_pin_beats_the_default_and_a_missing_row_is_none(
     model_catalog: ModelCatalog, db_conn: psycopg.Connection
 ) -> None:
     seed(db_conn, [(1, "user", "idling")])
@@ -510,14 +493,7 @@ def test_snapshot_birth_pin_and_missing_row_do_not_read_default(
         "UPDATE agents_meta SET birth_config = jsonb_build_object('llm_model', 'deepseek-v4-pro') WHERE id=1"
     )
 
-    def forbidden() -> str:
-        raise AssertionError("A birth pin or missing snapshot must not read the default")
-
-    assert (
-        snapshot.select_one(db_conn, 1, catalog=model_catalog, default_model_reader=forbidden)
-        is not None
-    )
-    assert (
-        snapshot.select_one(db_conn, 2, catalog=model_catalog, default_model_reader=forbidden)
-        is None
-    )
+    default = "deepseek-v4-flash"
+    pinned = snapshot.select_one(db_conn, 1, catalog=model_catalog, default_model=default)
+    assert pinned is not None
+    assert snapshot.select_one(db_conn, 2, catalog=model_catalog, default_model=default) is None
