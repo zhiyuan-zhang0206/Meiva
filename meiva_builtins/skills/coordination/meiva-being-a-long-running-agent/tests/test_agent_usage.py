@@ -1,9 +1,9 @@
 """Real SQL coverage for selectable usage scopes and notification-only budgets."""
 
 import importlib
-from collections.abc import Sequence
+import json
+import threading
 from datetime import UTC, datetime, timedelta
-from pathlib import Path
 from typing import Any
 
 import psycopg
@@ -11,80 +11,28 @@ import pytest
 from psycopg.types.json import Jsonb
 
 from base.db import Database
-from base.db.code_version_gate import ProcessDbGate
-from base.native_process.code_version import CodeVersion
-from base.native_process.loaded_commit import LoadedCommit
 from base.telemetry.metrics import usage as reader
+from meiva.tests.fixtures.gateway_wire import GatewayWire
+from meiva.tests.fixtures.gateway_wire import gateway_stub as gateway_stub
+from meiva.tests.fixtures.gateway_wire import wire as wire
+from meiva.tests.fixtures.pin_agent import pin_agent
 
-usage = importlib.import_module(
-    "meiva_builtins.skills.coordination.meiva-being-a-long-running-agent.scripts.agent_usage"
-)
+_SCRIPTS = "meiva_builtins.skills.coordination.meiva-being-a-long-running-agent.scripts"
+usage = importlib.import_module(f"{_SCRIPTS}.agent_usage")
+budget = importlib.import_module(f"{_SCRIPTS}.usage_budget")
+_CALLER = 42
 
 
-def test_polling_keeps_one_captured_entry_gate(
-    database: Database, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    image = LoadedCommit(Path("installed-source"), "loaded-image")
-    captures: list[LoadedCommit] = []
-    gates: list[ProcessDbGate] = []
-    reports = iter([0.0, 1.0])
-    notified: list[tuple[int, ...]] = []
+# meiva:note
+# Pin the calling agent on the wire and let each peer accept a message.
+def _peer(wire: GatewayWire, *peers: int) -> None:
+    pin_agent(_CALLER, clients=wire.context.clients)
+    for peer in peers:
+        wire.stub.reply("POST", f"/api/agents/{peer}/messages", {"status": "enqueued"}, status=201)
 
-    def capture() -> LoadedCommit:
-        captures.append(image)
-        return image
 
-    def version(owner: CodeVersion) -> int:
-        assert owner.loaded is image
-        return 18
-
-    def build(*, gate: ProcessDbGate) -> Database:
-        gates.append(gate)
-        return database
-
-    def report(_conn: psycopg.Connection, **_kwargs: object) -> dict[str, Any]:
-        return {
-            "totals": {"recorded_cost_usd": next(reports), "unpriced_calls": 0},
-            "agents": [{"agent_id": 1}],
-            "lineage": "self",
-            "start": "start",
-            "end": "end",
-        }
-
-    args = usage.parse_args(
-        [
-            "--agent-id",
-            "1",
-            "--lifetime",
-            "--usd-limit",
-            "1",
-            "--notify-agent",
-            "2",
-            "--poll-seconds",
-            "1",
-        ]
-    )
-    monkeypatch.setattr(usage, "parse_args", lambda: args)
-    monkeypatch.setattr(LoadedCommit, "capture", capture)
-    monkeypatch.setattr(CodeVersion, "get", version)
-    monkeypatch.setattr(Database, "from_settings", build)
-    monkeypatch.setattr(usage, "usage_report", report)
-
-    def sleep(_seconds: float) -> None:
-        pass
-
-    def notify(peers: Sequence[int], _message: str) -> None:
-        notified.append(tuple(peers))
-
-    monkeypatch.setattr(usage.time, "sleep", sleep)
-    monkeypatch.setattr(usage, "notify_agents", notify)
-    usage.main()
-    assert captures == [image]
-    assert len(gates) == 1
-    assert gates[0].application_name().endswith(":v18")
-    assert gates[0].min_read_due()
-    assert notified == [(2,)]
-    assert len(capsys.readouterr().out.splitlines()) == 2
+def _messages(wire: GatewayWire) -> list[tuple[str, str, Any]]:
+    return [(sent.method, sent.path, sent.body) for sent in wire.sent]
 
 
 def seed_agent(conn: psycopg.Connection, parent: int | None = None, *, fork: bool = False) -> int:
@@ -165,43 +113,68 @@ def test_window_prices_zero_usage_and_unpriced_events(db_conn: psycopg.Connectio
         reader.usage_report(db_conn, roots=[root], lineage="self", start=end, end=start)
 
 
-def test_budget_reminds_named_peers_without_lifecycle_actions(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    import meiva.agents
+_FACTS = budget.BudgetFacts(
+    recorded_cost_usd=0.25, unpriced_calls=1, agent_ids=[1], lineage="self", start="s", end="e"
+)
 
-    sent: list[tuple[int, str]] = []
 
-    def record(agent_id: int, message: str) -> None:
-        sent.append((agent_id, message))
+def test_budget_reminder_states_the_cost_against_the_limit_and_terminates_nobody() -> None:
+    assert budget.budget_message(_FACTS, usd_limit=1.0) is None
+    assert budget.budget_message(_FACTS, usd_limit=None) is None
+    message = budget.budget_message(_FACTS, usd_limit=0.25)
+    assert "handoff" in message and "Unpriced calls: 1" in message
+    assert "recorded USD 0.250000 >= 0.25" in message
+    assert "has not terminated any agent" in message
+    for limit in (float("nan"), float("inf"), -1, 0, True):
+        with pytest.raises(ValueError, match="positive and finite"):
+            budget.budget_message(_FACTS, usd_limit=limit)
+    with pytest.raises(ValueError, match="timezone"):
+        budget.parse_time("2026-10-06T12:00:00")
+    with pytest.raises(ValueError, match="positive integers"):
+        budget.positive_id("0")
 
-    def refuse_termination(*_args: object, **_kwargs: object) -> None:
-        pytest.fail("budget reminder must not terminate")
 
-    monkeypatch.setattr(meiva.agents, "send_message", record)
-    monkeypatch.setattr(meiva.agents, "terminate", refuse_termination)
+# meiva:note
+# The reminder is a function of recorded cost only: a billion tokens at a quarter dollar stays quiet.
+def test_token_counts_are_never_a_budget_threshold() -> None:
     report: dict[str, Any] = {
-        "totals": {"total_tokens": 100, "recorded_cost_usd": 0.25, "unpriced_calls": 1},
+        "totals": {"total_tokens": 1_000_000_000, "recorded_cost_usd": 0.25, "unpriced_calls": 0},
         "agents": [{"agent_id": 1}],
         "lineage": "self",
         "start": "start",
         "end": "end",
     }
-    assert usage.budget_message(report, usd_limit=1.0) is None
-    assert usage.budget_message(report, usd_limit=None) is None
-    report["totals"]["total_tokens"] = 1_000_000_000
-    assert usage.budget_message(report, usd_limit=1.0) is None
-    report["totals"]["total_tokens"] = 0
-    message = usage.budget_message(report, usd_limit=0.25)
-    assert "handoff" in message and "Unpriced calls: 1" in message
-    usage.notify_agents([20, 10, 20], message)
-    assert [row[0] for row in sent] == [10, 20]
-    assert "recorded USD 0.250000 >= 0.25" in message
-    for limit in (float("nan"), float("inf"), -1, 0, True):
-        with pytest.raises(ValueError, match="positive and finite"):
-            usage.budget_message(report, usd_limit=limit)
-    with pytest.raises(ValueError, match="timezone"):
-        usage.parse_time("2026-10-06T12:00:00")
+
+    facts = usage.facts_of(report)
+
+    assert facts.agent_ids == [1]
+    assert budget.budget_message(facts, usd_limit=1.0) is None
+
+
+def test_next_step_reminds_once_then_polls_or_finishes() -> None:
+    assert budget.next_step("over budget", 30.0) == budget.Notify("over budget")
+    assert budget.next_step("over budget", None) == budget.Notify("over budget")
+    assert budget.next_step(None, 30.0) == budget.Sleep(30.0)
+    assert budget.next_step(None, None) == budget.Finish()
+
+
+def test_budget_reminds_named_peers_without_lifecycle_actions(wire: GatewayWire) -> None:
+    _peer(wire, 10, 20)
+
+    usage.notify_agents([20, 10, 20], "over budget")
+
+    assert _messages(wire) == [
+        (
+            "POST",
+            "/api/agents/10/messages",
+            {"content": "over budget", "source": f"agent:{_CALLER}"},
+        ),
+        (
+            "POST",
+            "/api/agents/20/messages",
+            {"content": "over budget", "source": f"agent:{_CALLER}"},
+        ),
+    ]
 
 
 @pytest.mark.parametrize(
@@ -222,11 +195,11 @@ def test_cli_rejects_invalid_observation_modes(options: list[str]) -> None:
 
 
 def test_cli_reads_a_real_window_and_sends_one_reminder(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    db_conn: psycopg.Connection,
+    database: Database,
+    wire: GatewayWire,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
-    import json
-    import sys
-
     root = seed_agent(db_conn)
     start = datetime.now(UTC) - timedelta(minutes=1)
     event(
@@ -236,17 +209,10 @@ def test_cli_reads_a_real_window_and_sends_one_reminder(
         {"in_total": 100, "out_total": 20, "cost_usd": 0.1},
     )
     db_conn.commit()
-    messages: list[tuple[list[int], str]] = []
+    _peer(wire, root)
 
-    def record(recipients: list[int], message: str) -> None:
-        messages.append((recipients, message))
-
-    monkeypatch.setattr(usage, "notify_agents", record)
-    monkeypatch.setattr(
-        sys,
-        "argv",
+    usage.main(
         [
-            "agent_usage.py",
             "--agent-id",
             str(root),
             "--start",
@@ -256,13 +222,92 @@ def test_cli_reads_a_real_window_and_sends_one_reminder(
             "--notify-agent",
             str(root),
         ],
+        database=database,
     )
-    usage.main()
+
     result = json.loads(capsys.readouterr().out)
     assert result["totals"]["total_tokens"] == 120
-    assert len(messages) == 1
-    assert messages[0][0] == [root]
-    assert "handoff" in messages[0][1]
+    [(method, path, body)] = _messages(wire)
+    assert (method, path) == ("POST", f"/api/agents/{root}/messages")
+    assert "handoff" in body["content"]
+
+
+def test_a_single_read_below_the_limit_prints_the_report_and_notifies_nobody(
+    db_conn: psycopg.Connection,
+    database: Database,
+    wire: GatewayWire,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    root = seed_agent(db_conn)
+    start = datetime.now(UTC) - timedelta(minutes=1)
+    event(db_conn, root, start + timedelta(seconds=1), {"in_total": 1, "cost_usd": 0.01})
+    db_conn.commit()
+    _peer(wire, root)
+
+    usage.main(
+        ["--agent-id", str(root), "--start", start.isoformat(), "--usd-limit", "1"],
+        database=database,
+    )
+
+    assert len(capsys.readouterr().out.splitlines()) == 1
+    assert wire.sent == []
+
+
+def test_polling_reads_each_round_until_the_budget_is_breached(
+    db_conn: psycopg.Connection,
+    db_url: str,
+    database: Database,
+    wire: GatewayWire,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    root = seed_agent(db_conn)
+    start = datetime.now(UTC) - timedelta(minutes=1)
+    event(db_conn, root, start + timedelta(seconds=1), {"in_total": 1, "cost_usd": 0.05})
+    db_conn.commit()
+    _peer(wire, 2)
+
+    def breach() -> None:
+        with psycopg.connect(db_url) as conn:
+            event(conn, root, datetime.now(UTC), {"in_total": 1, "cost_usd": 0.1})
+
+    timer = threading.Timer(0.3, breach)
+    timer.start()
+    try:
+        usage.main(
+            [
+                "--agent-id",
+                str(root),
+                "--start",
+                start.isoformat(),
+                "--usd-limit",
+                "0.1",
+                "--notify-agent",
+                "2",
+                "--poll-seconds",
+                "0.02",
+            ],
+            database=database,
+        )
+    finally:
+        timer.cancel()
+        timer.join()
+
+    costs = [
+        json.loads(line)["totals"]["recorded_cost_usd"]
+        for line in capsys.readouterr().out.splitlines()
+    ]
+    assert costs[0] == 0.05
+    assert len(costs) > 1
+    assert costs[-1] == pytest.approx(0.15)
+    [(method, path, _body)] = _messages(wire)
+    assert (method, path) == ("POST", "/api/agents/2/messages")
+
+
+def test_the_process_root_builds_one_database_handle_for_every_poll(db_url: str) -> None:
+    database = usage.process_database()
+
+    with database.connect() as conn:
+        assert conn.execute("SELECT 1").fetchone() == (1,)
 
 
 def test_lifetime_report_combines_ledger_and_tail(db_conn: psycopg.Connection) -> None:

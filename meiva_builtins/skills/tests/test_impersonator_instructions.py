@@ -1,7 +1,10 @@
-import sys
+from __future__ import annotations
+
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 
 from meiva_builtins.skills.tests.skill_script import load_skill_script
 
@@ -17,11 +20,32 @@ def instruction_reader() -> Any:
     )
 
 
+# meiva:note
+# A hand-written attachment for the one fault a real lease cannot produce here: leaving the
+# `with` block raises (the lease expired before detach). A real attachment needs a leased
+# agent behind a gateway and a database; `read_instructions` only needs its native snapshot
+# and its context-manager exit.
+class _Attachment:
+    def __init__(self, messages: list[BaseMessage], *, exit_error: Exception | None = None) -> None:
+        self._messages = messages
+        self._exit_error = exit_error
+        self.closed = False
+
+    def native_snapshot(self) -> Any:
+        return SimpleNamespace(messages=self._messages)
+
+    def __enter__(self) -> _Attachment:
+        return self
+
+    def __exit__(self, *_exc_info: object) -> None:
+        self.closed = True
+        if self._exit_error is not None:
+            raise self._exit_error
+
+
 def test_instruction_script_selects_native_prompt_and_preloaded_skills(
     instruction_reader: Any,
 ) -> None:
-    from langchain_core.messages import HumanMessage, SystemMessage
-
     from agent.messages import NoteTag, system_note_message
 
     messages = [
@@ -42,33 +66,50 @@ def test_instruction_script_selects_native_prompt_and_preloaded_skills(
 def test_instruction_script_refuses_missing_or_nontext_prompt(
     instruction_reader: Any, content: Any
 ) -> None:
-    from langchain_core.messages import SystemMessage
-
     messages = [] if content is None else [SystemMessage(content=content)]
     with pytest.raises((RuntimeError, ValueError), match=r"system prompt|nonempty text"):
         instruction_reader.instruction_text(messages)
 
 
-def test_instruction_script_prints_only_after_successful_detach(
-    instruction_reader: Any, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+def test_instruction_script_returns_the_text_once_the_attachment_is_closed(
+    instruction_reader: Any,
 ) -> None:
-    from contextlib import contextmanager
-    from types import SimpleNamespace
+    attachment = _Attachment([SystemMessage(content="Native rules")])
+    assert instruction_reader.read_instructions(attachment) == "Native rules"
+    assert attachment.closed
 
-    from langchain_core.messages import SystemMessage
 
-    @contextmanager
-    def attach(session_id: int, *, agent_id: int) -> Any:
-        assert (session_id, agent_id) == (0, 405)
-        yield SimpleNamespace(
-            native_snapshot=lambda: SimpleNamespace(
-                messages=[SystemMessage(content="Native rules")]
-            )
-        )
-        raise RuntimeError("lease expired before detach")
-
-    monkeypatch.setattr(instruction_reader.impersonation, "attach", attach)
-    monkeypatch.setattr(sys, "argv", ["read_instructions.py", "0", "--agent", "405"])
+def test_instruction_script_returns_nothing_when_detach_fails(instruction_reader: Any) -> None:
+    attachment = _Attachment(
+        [SystemMessage(content="Native rules")], exit_error=RuntimeError("lease expired")
+    )
     with pytest.raises(RuntimeError, match="lease expired"):
-        instruction_reader.main()
+        instruction_reader.read_instructions(attachment)
+    assert attachment.closed
+
+
+def test_instruction_script_reads_the_target_from_the_command_line(
+    instruction_reader: Any,
+) -> None:
+    target = instruction_reader.parse_target(["0", "--agent", "405"])
+    assert (target.session_id, target.agent_id) == (0, 405)
+
+
+def test_instruction_script_requires_the_agent(
+    instruction_reader: Any, capsys: pytest.CaptureFixture[str]
+) -> None:
+    with pytest.raises(SystemExit) as exit_info:
+        instruction_reader.parse_target(["0"])
+    assert exit_info.value.code == 2
+    assert "--agent" in capsys.readouterr().err
+
+
+# meiva:note
+# Against a real throwaway database no agent holds a lease, so the real attach refuses before
+# anything is read; nothing may reach stdout.
+def test_instruction_script_prints_nothing_when_the_attachment_is_refused(
+    instruction_reader: Any, db_url: str, capsys: pytest.CaptureFixture[str]
+) -> None:
+    with pytest.raises(ValueError, match="no impersonation session 0"):
+        instruction_reader.main(["0", "--agent", "405"])
     assert capsys.readouterr().out == ""

@@ -1,3 +1,7 @@
 [purity]
 "audit.py" = "strict"
+"events_window.py" = "strict"
 "label.py" = "strict"
+"record.py" = "strict"
+"scan_report.py" = "strict"
+"window_records.py" = "strict"

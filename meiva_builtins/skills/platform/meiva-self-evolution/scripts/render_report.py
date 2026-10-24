@@ -17,21 +17,18 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import sys
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 # ── Template ────────────────────────────────────────────────────────
 
-_template_cache: str | None = None
-
 
 def _load_template() -> str:
-    global _template_cache
-    if _template_cache is None:
-        tpl_path = Path(__file__).resolve().parent.parent / "assets" / "report_template.html"
-        _template_cache = tpl_path.read_text(encoding="utf-8")
-    return _template_cache
+    tpl_path = Path(__file__).resolve().parent.parent / "assets" / "report_template.html"
+    return tpl_path.read_text(encoding="utf-8")
 
 
 # ── Section renderers ───────────────────────────────────────────────
@@ -283,6 +280,7 @@ def build_report_data(
     changes: list[dict[str, str]],
     score_skills: list[dict[str, Any]],
     failure_clusters: list[dict[str, Any]],
+    now: datetime,
     eval_results: dict[str, Any] | None = None,
     total_runs: int = 0,
 ) -> dict[str, Any]:
@@ -305,7 +303,7 @@ def build_report_data(
 
     return {
         "week": week,
-        "generated_at": datetime.now(UTC).strftime("%Y-%m-%d %H:%M UTC"),
+        "generated_at": now.astimezone(UTC).strftime("%Y-%m-%d %H:%M UTC"),
         "skill_count": len(score_skills),
         "total_runs": total_runs,
         "changes_count": len(changes),
@@ -325,7 +323,7 @@ def build_report_data(
 # ── CLI ──────────────────────────────────────────────────────────────
 
 
-def main() -> None:
+def main(argv: Sequence[str]) -> None:
     p = argparse.ArgumentParser(description="Render a self_evolution report JSON to HTML.")
     p.add_argument("report_json", help="path to the aggregated report JSON")
     p.add_argument(
@@ -334,7 +332,7 @@ def main() -> None:
         default=None,
         help="output HTML path (default: <report>.html)",
     )
-    args = p.parse_args()
+    args = p.parse_args(list(argv))
 
     in_path = Path(args.report_json)
     data = json.loads(in_path.read_text(encoding="utf-8"))
@@ -346,4 +344,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    main(sys.argv[1:])

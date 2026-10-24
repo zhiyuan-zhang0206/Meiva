@@ -1,0 +1,5 @@
+exports = ["feed.py"]
+
+[purity]
+"rss_plan.py" = "strict"
+"rss_post.py" = "strict"

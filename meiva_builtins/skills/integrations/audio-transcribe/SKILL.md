@@ -17,23 +17,32 @@ import os
 import sys
 sys.path.insert(0, os.path.join(os.environ["MEIVA_HOME"], "skills", "audio-transcribe", "scripts"))
 import transcribe
+from base.config import settings
+from openai import OpenAI
+
+client = OpenAI(api_key=settings.lm.openai_api_key.get_secret_value())
+tools = transcribe.SYSTEM_TOOLS  # ffmpeg / ffprobe / yt-dlp on PATH
 
 # Local audio/video file → plain text
-r = transcribe.transcribe("/path/to/talk.mp3")
+r = transcribe.transcribe("/path/to/talk.mp3", client=client, tools=tools)
 print(r["text"], r["chunks"], r["audio_seconds"])
 
 # YouTube video id / any media URL (internally uses yt-dlp to extract audio)
-r = transcribe.transcribe("dRsjO-88nBs")
-r = transcribe.transcribe("https://example.com/podcast.mp3", language="en")
+r = transcribe.transcribe("dRsjO-88nBs", client=client, tools=tools)
+r = transcribe.transcribe("https://example.com/podcast.mp3", client=client, tools=tools, language="en")
 ```
 
 A caller in another skill instead runs it as a subprocess CLI —
 `$MEIVA_HOME/source/.venv/bin/python $MEIVA_HOME/skills/audio-transcribe/scripts/transcribe.py <source> --json`
-— and reads the JSON from stdout (see `web-sources:youtube`'s whisper fallback).
+— and reads the JSON from stdout (see `web-sources:youtube`'s whisper fallback). The CLI reads the
+key and the program names once, in its entry point; the CLI flags are unchanged.
 
-`transcribe(source, *, model="gpt-4o-transcribe", language=None, prompt=None,
-max_bytes=24MB)` returns `{text, model, chunks, audio_seconds, source}`. `language`
-is an optional ISO-639-1 hint; `prompt` is optional, used to bias proper noun spellings.
+`transcribe(source, *, client, tools, model="gpt-4o-transcribe", language=None, prompt=None,
+limits=Limits())` returns `{text, model, chunks, audio_seconds, source}`. `client` and `tools` are
+required: the caller builds the OpenAI client and names the programs. `language` is an optional
+ISO-639-1 hint; `prompt` is optional, used to bias proper noun spellings. `limits` bundles the size
+ceilings (`Limits(max_bytes=24MB, max_segment_s=900, max_duration_s=4h)`); a `max_bytes` above the
+25 MB API cap is refused when the `Limits` is built.
 
 ## How to handle the 25MB limit
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # meiva:note
-# Every scan prints one headline: `batch <total> runs · judgeable <n> (<share>) · unknown <n> (<reason counts>) · scored <n>`. A run is judgeable when its label is `ok`, `fumbled` or `failed`; the share is judgeable over total, and `n/a` when the window is empty; `scored` counts runs whose `rubric.scores(record)["overall"]` is not `None`, so it tracks what the rubric could actually judge. `daily_scan.alert_verdict` decides the exit code in one order: an empty window is a data-quality failure of the source (`empty-window`, unless the TEST- filter explains it), a judgeable share below the floor is `data-quality: low-coverage` naming the largest unknown reason, a `failed` or `fumbled` run is `regression`, and anything else exits 0. `alert_exit` returns that verdict's code, and the render prints the low-coverage alert line but never lists an unknown run as worth mining.
+# `daily_scan.py` is the shell of the daily scan: it collects the window through `collect.py`, writes the dataset and the full report, and prints the compact view. `scan_report.py` holds every decision about what the report says and whether the scan alerts, over values only; the coverage floor and the clock reading are read once by `process_env` and travel in `ScanEnv`. `main` returns the exit code, which `__main__` raises: `scan_report.alert_verdict` decides it in one order (empty window, low coverage, regression), and `1` is a hard failure of the arguments.
 # meiva:link meiva_builtins/skills/platform/meiva-self-evolution/docs/coverage-sentinel.meiva.okf.md
 """Daily incremental self-evolution scan.
 
@@ -36,10 +36,9 @@ Run it like its sibling collect.py:
 from __future__ import annotations
 
 import argparse
-import json
 import sys
-from collections import Counter
-from datetime import UTC, datetime
+from collections.abc import Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, NamedTuple
 
@@ -51,76 +50,10 @@ from typing import Any, NamedTuple
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import collect
-import label
-import rubric
-from record import task_prompt_of
+import scan_report
+from events_window import resolve_window, week_label
 
-from base.config import settings
-from base.db import Database
-from base.paths import meiva_home
-
-ORCHESTRATION_SKILLS = ("meiva-workflow", "meiva-dynamic-workflow", "meiva-goal")
-
-# The runner delivers only the output tail (last 2000 chars); the fixed
-# report scaffold around the bad list costs ~450-600 chars, so the rich list
-# is capped here and a longer one compacts to counter lines once the full
-# report is persisted and pointed to. At the 2026-09-12 scale (48 bad runs)
-# the compact view measures ~1500 chars; past ~55 runs the head lines leave
-# the tail, while the summary + pointer always land.
-BAD_LIST_MAX_CHARS = 1400
-
-
-def _why(rec: dict[str, Any]) -> list[str]:
-    """Human-readable signals explaining a non-ok label. Display-only; the
-    label itself remains label.py's contract."""
-    why: list[str] = []
-    if rec.get("corrections"):
-        why.append(f"{len(rec['corrections'])} user correction(s)")
-    if rec.get("peer_feedback"):
-        why.append(f"{len(rec['peer_feedback'])} corrective peer message(s)")
-    if rec.get("followup_prompts"):
-        why.append(f"{len(rec['followup_prompts'])} follow-up re-prompt(s)")
-    if rec.get("exec_failed"):
-        why.append(f"{rec['exec_failed']} failed exec(s)")
-    if rec.get("compactions"):
-        why.append(f"{rec['compactions']} compaction(s)")
-    if rec.get("last_exec_failed"):
-        why.append("last exec failed")
-    if (
-        rec.get("terminated")
-        and not rec.get("final_output", "").strip()
-        and rec.get("turns", 0) > 0
-    ):
-        why.append("terminated without output")
-    return why or ["no explicit signal"]
-
-
-def _compact_bad_line(rec: dict[str, Any]) -> str:
-    """One bad run as counter tokens — the compact fallback for a bad list
-    over BAD_LIST_MAX_CHARS (task text stays in the persisted full report).
-    Tokens mirror _why(): rep=re-prompts, c=corrections, pf=peer feedback,
-    ef=exec failures, last=last exec failed, cp=compactions,
-    term=terminated without output."""
-    parts: list[str] = []
-    if rec.get("followup_prompts"):
-        parts.append(f"rep{len(rec['followup_prompts'])}")
-    if rec.get("corrections"):
-        parts.append(f"c{len(rec['corrections'])}")
-    if rec.get("peer_feedback"):
-        parts.append(f"pf{len(rec['peer_feedback'])}")
-    if rec.get("exec_failed"):
-        parts.append(f"ef{rec['exec_failed']}")
-    if rec.get("last_exec_failed"):
-        parts.append("last")
-    if rec.get("compactions"):
-        parts.append(f"cp{rec['compactions']}")
-    if (
-        rec.get("terminated")
-        and not rec.get("final_output", "").strip()
-        and rec.get("turns", 0) > 0
-    ):
-        parts.append("term")
-    return f"  #{rec['agent_id']} {rec['label']} " + (" ".join(parts) if parts else "-")
+from base.host.atomic_io import write_text_atomic
 
 
 class ScanResult(NamedTuple):
@@ -132,7 +65,7 @@ class ScanResult(NamedTuple):
 
 
 def scan(
-    days: int, week: str | None = None, *, database: Database, include_test: bool = False
+    days: int, week: str | None = None, *, env: collect.CollectEnv, include_test: bool = False
 ) -> ScanResult:
     """Collect the window's runs and write them under
     `$MEIVA_HOME/self_evolution/daily/<date>.jsonl`. The weekly `dataset/`
@@ -145,259 +78,29 @@ def scan(
     it to tell a TEST-only window from a broken data source.
 
     Source: the gateway's /api/events; a failed read fails the scan."""
-    week = week or datetime.now(UTC).date().isoformat()
+    week = week or week_label(env.now)
     records, counts = collect.collect_with_counts(
-        days, week, database=database, include_test=include_test
+        resolve_window(env.now, days, None, None),
+        week,
+        database=env.database,
+        gateway=env.gateway,
+        include_test=include_test,
     )
-    out_dir = meiva_home() / "self_evolution" / "daily"
+    out_dir = env.home / "self_evolution" / "daily"
     out_dir.mkdir(parents=True, exist_ok=True)
-    path = out_dir / f"{week}.jsonl"
-    with path.open("w", encoding="utf-8") as f:
-        for rec in records:
-            f.write(json.dumps(rec, ensure_ascii=False, default=str) + "\n")
+    path = collect.write_records(records, out_dir / f"{week}.jsonl")
     return ScanResult(records, path, counts)
 
 
-def _is_test_only_window(records: list[dict[str, Any]], counts: dict[str, int] | None) -> bool:
-    """True when the window is empty only because the TEST- filter removed
-    every run the source produced — a quiet day, not an outage."""
-    if records:
-        return False
-    return bool(counts and counts["seen"] > 0 and counts["excluded_test"] == counts["seen"])
+# meiva:note
+# What the daily scan reads once at its start: the collection env, and the judgeable share below which the scan alerts.
+@dataclass(frozen=True)
+class ScanEnv:
+    collection: collect.CollectEnv
+    coverage_floor: float
 
 
-class Alert(NamedTuple):
-    code: int
-    reason: str | None
-
-
-def alert_verdict(
-    records: list[dict[str, Any]],
-    counts: dict[str, int] | None = None,
-) -> Alert:
-    if not records:
-        if _is_test_only_window(records, counts):
-            return Alert(0, None)
-        return Alert(2, "empty-window")
-    totals = _Totals.of(records)
-    coverage = _coverage(totals)
-    if coverage is not None and coverage < settings.general.self_evolution_coverage_alert_floor:
-        return Alert(2, "data-quality: low-coverage")
-    if any(r["label"] in label.REGRESSION_LABELS for r in records):
-        return Alert(2, "regression")
-    return Alert(0, None)
-
-
-def alert_exit(
-    records: list[dict[str, Any]],
-    counts: dict[str, int] | None = None,
-) -> int:
-    return alert_verdict(records, counts).code
-
-
-class _Totals(NamedTuple):
-    """The headline counters of one scan window."""
-
-    by_label: Counter[str]
-    corrections: int
-    peer: int
-    execfail: int
-    unknown_reasons: Counter[str]
-    total: int
-    scored: int
-
-    @classmethod
-    def of(cls, records: list[dict[str, Any]]) -> _Totals:
-        return cls(
-            Counter(r["label"] for r in records),
-            sum(len(r["corrections"]) for r in records),
-            sum(len(r["peer_feedback"]) for r in records),
-            sum(1 for r in records if r["exec_failed"]),
-            Counter(
-                r.get("unknown_reason") or "unspecified" for r in records if r["label"] == "unknown"
-            ),
-            len(records),
-            sum(1 for r in records if rubric.scores(r).get("overall") is not None),
-        )
-
-
-def _coverage(totals: _Totals) -> float | None:
-    if not totals.total:
-        return None
-    return (totals.total - totals.by_label["unknown"]) / totals.total
-
-
-def _coverage_line(totals: _Totals) -> str:
-    coverage = _coverage(totals)
-    share = "n/a" if coverage is None else f"{coverage:.1%}"
-    unknown = totals.by_label["unknown"]
-    reasons = ", ".join(f"{name} {count}" for name, count in sorted(totals.unknown_reasons.items()))
-    return (
-        f"batch {totals.total} runs · judgeable {totals.total - unknown} ({share})"
-        f" · unknown {unknown}{f' ({reasons})' if reasons else ''}"
-        f" · scored {totals.scored}"
-    )
-
-
-def _coverage_alert_line(totals: _Totals) -> str | None:
-    coverage = _coverage(totals)
-    floor = settings.general.self_evolution_coverage_alert_floor
-    if coverage is None or coverage >= floor:
-        return None
-    if totals.unknown_reasons:
-        reason, count = totals.unknown_reasons.most_common(1)[0]
-    else:
-        reason, count = "unspecified", 0
-    return (
-        f"ALERT — data-quality: low-coverage: judgeable {coverage:.1%} < floor {floor:.0%};"
-        f" largest unknown gap {reason} ({count} run(s))"
-    )
-
-
-def _label_counts(totals: _Totals) -> str:
-    unknown = totals.by_label["unknown"]
-    detail = ""
-    if unknown:
-        detail = (
-            " ("
-            + ", ".join(
-                f"{reason} {count}" for reason, count in sorted(totals.unknown_reasons.items())
-            )
-            + ")"
-        )
-    return (
-        f"ok {totals.by_label['ok']} / fumbled {totals.by_label['fumbled']} / "
-        f"failed {totals.by_label['failed']} / unknown {unknown}{detail}"
-    )
-
-
-def _builtin_help_line(records: list[dict[str, Any]]) -> str:
-    calls = sum(r.get("builtin_help_calls", 0) for r in records)
-    agents = sum(bool(r.get("builtin_help_calls", 0)) for r in records)
-    on_meiva = sum(r.get("builtin_help_on_meiva", 0) for r in records)
-    return f"builtin help(): {calls} calls across {agents} agents ({on_meiva} on meiva.* targets)"
-
-
-def _subprocess_line(records: list[dict[str, Any]]) -> str:
-    calls = sum(r.get("subprocess_calls", 0) for r in records)
-    line = f"subprocess calls: {calls}"
-    if any("tools_called" in r for r in records):
-        shell_run_calls = sum(
-            r["tools_called"].get("meiva.shell.run", 0) for r in records if "tools_called" in r
-        )
-        line += f" (shell.run {shell_run_calls})"
-    return line
-
-
-def _header_lines(
-    records: list[dict[str, Any]], path: Path, days: int, totals: _Totals
-) -> list[str]:
-    skill_counts = Counter(
-        skill for r in records if "skills_touched" in r for skill in r["skills_touched"]
-    )
-    top_skills = (
-        ", ".join(f"{skill} {count}" for skill, count in skill_counts.most_common(5)) or "none"
-    )
-    orchestration_counts = ", ".join(
-        f"{skill} {skill_counts[skill]}" for skill in ORCHESTRATION_SKILLS
-    )
-    return [
-        f"self-evolution daily scan — {datetime.now(UTC).strftime('%Y-%m-%dT%H:%M:%SZ')}",
-        f"window: {days} day(s) | runs: {len(records)} ({_label_counts(totals)})",
-        _coverage_line(totals),
-        f" | corrections {totals.corrections} | peer feedback {totals.peer} | exec-fail runs {totals.execfail}",
-        _builtin_help_line(records),
-        _subprocess_line(records),
-        f"dataset: {path}",
-        "skills loaded:",
-        f"  top 5: {top_skills}",
-        f"  orchestration: {orchestration_counts}",
-    ]
-
-
-def _no_runs_line(records: list[dict[str, Any]], counts: dict[str, int] | None) -> str:
-    if _is_test_only_window(records, counts):
-        # _is_test_only_window only returns True when `counts` is truthy —
-        # pyright cannot see that cross-function invariant.
-        return (
-            "0 production runs — all "
-            f"{counts['excluded_test']} window agent(s) were TEST- spawns "  # pyright: ignore[reportOptionalSubscript]
-            "(excluded by design); nothing to act on"
-        )
-    return "ALERT — 0 runs collected: data source outage or collector failure"
-
-
-def _bad_run_lines(
-    records: list[dict[str, Any]], *, report_path: Path | None, compact_bad: bool
-) -> list[str]:
-    bad = [r for r in records if r["label"] in label.REGRESSION_LABELS]
-    if not bad:
-        return []
-    sorted_bad = sorted(bad, key=lambda r: r["agent_id"])
-    rich_lines: list[str] = []
-    for rec in sorted_bad:
-        task = task_prompt_of(rec).strip().replace("\n", " ")
-        if len(task) > 120:
-            task = task[:117] + "..."
-        line = f"  #{rec['agent_id']} {rec['label']} — {', '.join(_why(rec))}"
-        if task:
-            line += f" | task: {task}"
-        rich_lines.append(line)
-    head = f"ALERT — {len(bad)} run(s) worth mining:"
-    # Compaction needs a stored report: the closing pointer keeps the
-    # dropped task text one hop away and survives tail truncation.
-    if (
-        compact_bad
-        and report_path is not None
-        and sum(len(line) for line in rich_lines) > BAD_LIST_MAX_CHARS
-    ):
-        return [
-            f"{head} (compact; details in report)",
-            *(_compact_bad_line(rec) for rec in sorted_bad),
-        ]
-    return [head, *rich_lines]
-
-
-def render(
-    records: list[dict[str, Any]],
-    path: Path,
-    days: int,
-    counts: dict[str, int] | None = None,
-    *,
-    report_path: Path | None = None,
-    compact_bad: bool = False,
-) -> str:
-    """Render the scan report. With `report_path` set the output closes with
-    a summary line and a pointer to the persisted full report. `compact_bad`
-    may replace an oversized bad list (> BAD_LIST_MAX_CHARS chars) with one
-    counter line per run, but only when `report_path` is set: without a
-    stored report the rich lines are the only copy of the details."""
-    totals = _Totals.of(records)
-    lines = _header_lines(records, path, days, totals)
-    if not records:
-        lines.append(_no_runs_line(records, counts))
-    else:
-        coverage_alert = _coverage_alert_line(totals)
-        if coverage_alert is not None:
-            lines.append(coverage_alert)
-    lines.extend(_bad_run_lines(records, report_path=report_path, compact_bad=compact_bad))
-    if report_path is not None:
-        lines.append(
-            f"summary: {len(records)} runs ({_label_counts(totals)})"
-            f" | corrections {totals.corrections} | peer {totals.peer} "
-            f"| exec-fail runs {totals.execfail}"
-        )
-        lines.append(f"full report: {report_path}")
-    return "\n".join(lines)
-
-
-def main() -> None:
-    from base.db.code_version_gate import ProcessDbGate
-    from base.native_process.code_version import CodeVersion
-    from base.native_process.loaded_commit import LoadedCommit
-
-    version = CodeVersion(LoadedCommit.capture())
-    gate = ProcessDbGate(version=version.get, process="unknown")
+def _parse_args(argv: Sequence[str]) -> argparse.Namespace:
     p = argparse.ArgumentParser(
         description="Daily incremental self-evolution scan — collect the past day's runs, "
         "report, alert (exit 2) on bad runs.",
@@ -409,34 +112,45 @@ def main() -> None:
         action="store_true",
         help="include TEST- prefixed benchmark/probe spawns (measurement only; default excludes)",
     )
-    args = p.parse_args()
+    return p.parse_args(list(argv))
+
+
+# meiva:note
+# Run the scan and return its exit code. The full report is published atomically (a unique temporary file, then a rename), so a reader never sees a partial report and a failed rerun leaves the previous file in place; when it cannot be written the compact view is not used, because the rich lines are then the only copy of the details.
+def main(argv: Sequence[str], env: ScanEnv) -> int:
+    args = _parse_args(argv)
     if args.days < 1:
         print("error: --days must be >= 1", file=sys.stderr)
-        raise SystemExit(1)
-    database = Database.from_settings(gate=gate)
-    result = scan(args.days, database=database, include_test=args.include_test)
-    full = render(result.records, result.path, args.days, result.counts)
-    report_path = result.path.with_suffix(".report.txt")
+        return 1
+    result = scan(args.days, env=env.collection, include_test=args.include_test)
+    view = scan_report.ScanView(
+        result.path, args.days, result.counts, env.collection.now, env.coverage_floor
+    )
+    report_path: Path | None = result.path.with_suffix(".report.txt")
     try:
-        # Publish atomically (tmp + rename): a reader never sees a partial
-        # report, and a failed rerun leaves the previous file in place.
-        tmp_path = report_path.with_name(report_path.name + ".tmp")
-        tmp_path.write_text(full, encoding="utf-8")
-        tmp_path.replace(report_path)
+        write_text_atomic(
+            result.path.with_suffix(".report.txt"),
+            scan_report.render(result.records, view),
+            encoding="utf-8",
+        )
     except OSError as exc:
         print(f"warning: could not write full report {report_path}: {exc}", file=sys.stderr)
         report_path = None
-    out = render(
-        result.records,
-        result.path,
-        args.days,
-        result.counts,
-        report_path=report_path,
-        compact_bad=True,
+    print(scan_report.render(result.records, view, report_path=report_path, compact_bad=True))
+    return scan_report.alert_verdict(result.records, result.counts, env.coverage_floor).code
+
+
+# meiva:note
+# The composition root of the standalone scan: the collection env and the configured coverage floor.
+def process_env() -> ScanEnv:
+    from base.config import settings
+
+    return ScanEnv(
+        collection=collect.process_env(),
+        coverage_floor=settings.general.self_evolution_coverage_alert_floor,
     )
-    print(out)
-    raise SystemExit(alert_exit(result.records, result.counts))
 
 
 if __name__ == "__main__":
-    main()
+    _parse_args(sys.argv[1:])
+    raise SystemExit(main(sys.argv[1:], process_env()))

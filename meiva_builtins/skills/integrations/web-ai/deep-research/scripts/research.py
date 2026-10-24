@@ -108,7 +108,7 @@ def _slug(text: str, *, max_len: int = 40) -> str:
 def _wait_for_conversation_url(site: str, *, timeout: float) -> str:
     """Poll until the page URL becomes a per-conversation URL (it changes once the
     first message is sent), so `check` has a stable handle to come back to."""
-    base = webchat.site(site)["new_chat_url"].rstrip("/")
+    base = webchat.site(site).new_chat_url.rstrip("/")
     deadline = time.monotonic() + timeout
     while True:
         url = webchat.current_url()
@@ -152,9 +152,10 @@ def _read_report(site: str) -> str:
     return webchat.evaluate(js)
 
 
-def _save(site: str, url: str, report: str) -> Path:
+def _save(site: str, url: str, report: str, places: webchat.Places) -> Path:
     outdir = (
-        webchat.downloads_root("deep-research") / f"{webchat.now_stamp()}-{site}-{_slug(report)}"
+        webchat.downloads_root("deep-research", places=places)
+        / f"{webchat.now_stamp()}-{site}-{_slug(report)}"
     )
     outdir.mkdir(parents=True, exist_ok=True)
     (outdir / "report.md").write_text(report, encoding="utf-8")
@@ -180,7 +181,7 @@ def cmd_start(args: argparse.Namespace) -> dict[str, Any]:
                 if not hit:
                     raise RuntimeError(
                         f"could not find {step!r} while enabling Deep Research for "
-                        f"{webchat.site(args.site)['label']} — enable it in the browser and "
+                        f"{webchat.site(args.site).label} — enable it in the browser and "
                         f"re-run with --assume-mode (or update enable_path in research.py)"
                     )
                 # A menu/mode click re-renders the composer area; let it settle.
@@ -201,7 +202,7 @@ def cmd_start(args: argparse.Namespace) -> dict[str, Any]:
         webchat.close_tab(page_id)
 
 
-def _check_via_export(args: argparse.Namespace) -> dict[str, Any]:
+def _check_via_export(args: argparse.Namespace, places: webchat.Places) -> dict[str, Any]:
     """check for a site whose report lives in a sandboxed frame: judge state
     from the rendered accessibility tree (which crosses frames) and fetch the
     finished report through the widget's own Export-to-Markdown control."""
@@ -238,13 +239,17 @@ def _check_via_export(args: argparse.Namespace) -> dict[str, Any]:
                 "last_message": webchat.read_answer(args.site)[:1000],
             }
         outdir = (
-            webchat.downloads_root("deep-research") / f"{webchat.now_stamp()}-{args.site}-report"
+            webchat.downloads_root("deep-research", places=places)
+            / f"{webchat.now_stamp()}-{args.site}-report"
         )
         if not webchat.click_by_text(["Export"]):
             raise RuntimeError("finished report detected but the Export control would not open")
         time.sleep(1.0)
         dest = webchat.download_by_click(
-            ["Export to Markdown"], dest=outdir / "report.md", suffixes=(".md",)
+            ["Export to Markdown"],
+            dest=outdir / "report.md",
+            suffixes=(".md",),
+            downloads=places.downloads,
         )
         if dest is None:
             raise RuntimeError(
@@ -271,11 +276,11 @@ def _check_via_export(args: argparse.Namespace) -> dict[str, Any]:
         webchat.close_tab(page_id)
 
 
-def cmd_check(args: argparse.Namespace) -> dict[str, Any]:
+def cmd_check(args: argparse.Namespace, places: webchat.Places) -> dict[str, Any]:
     cfg = _cfg(args.site)
     webchat.assert_same_site(args.url, args.site)
     if cfg.get("report_export"):
-        return _check_via_export(args)
+        return _check_via_export(args, places)
     # check reopens the conversation in its own tab and closes it on the way out;
     # the research keeps running server-side, polled again via `url`.
     page_id = webchat.navigate(args.url)
@@ -325,7 +330,7 @@ def cmd_check(args: argparse.Namespace) -> dict[str, Any]:
                 break
             report2 = cur
         if stable and not webchat.is_streaming(args.site):
-            outdir = _save(args.site, args.url, report2)
+            outdir = _save(args.site, args.url, report2, places)
             return {
                 "state": "done",
                 "url": args.url,
@@ -378,12 +383,10 @@ def main() -> None:
         default=60.0,
         help="seconds to wait for a research-plan button to auto-approve (default 60)",
     )
-    p_start.set_defaults(fn=cmd_start)
 
     p_check = sub.add_parser("check", help="poll a started research; save the report when done")
     p_check.add_argument("--site", required=True, choices=sorted(DR))
     p_check.add_argument("--url", required=True, help="the conversation URL returned by start")
-    p_check.set_defaults(fn=cmd_check)
 
     p_reply = sub.add_parser(
         "reply",
@@ -392,10 +395,17 @@ def main() -> None:
     p_reply.add_argument("--site", required=True, choices=sorted(DR))
     p_reply.add_argument("--url", required=True, help="the conversation URL from start")
     p_reply.add_argument("--prompt", required=True, help="the answer to send")
-    p_reply.set_defaults(fn=cmd_reply)
 
     args = parser.parse_args()
-    result = args.fn(args)
+    match args.cmd:
+        case "start":
+            result = cmd_start(args)
+        case "check":
+            result = cmd_check(args, webchat.system_places())
+        case "reply":
+            result = cmd_reply(args)
+        case _:
+            raise ValueError(f"unknown command {args.cmd!r}")
     print(json.dumps(result, ensure_ascii=False, indent=2))
 
 

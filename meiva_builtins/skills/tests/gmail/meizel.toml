@@ -1,0 +1,5 @@
+exports = ["gmail_modules.py"]
+
+[uses]
+"test_gmail_shell.py" = ["gmail_modules.py"]
+"test_gmail_values.py" = ["gmail_modules.py"]

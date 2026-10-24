@@ -1,0 +1,5 @@
+exports = ["chrome_stand_in.py", "driver_modules.py"]
+
+[uses]
+"test_web_ai_children.py" = ["chrome_stand_in.py", "driver_modules.py"]
+"test_web_ai_decisions.py" = ["driver_modules.py"]

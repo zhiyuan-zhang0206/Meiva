@@ -1,22 +1,20 @@
-"""
-Gmail write half: compose + send over SMTP, reply / forward, and drafts
-(IMAP APPEND). Side-effectful - `send` / `reply` / `forward` put real
-mail on the wire; `--dry-run` composes without sending. Split out of
-feed.py (2026-08-07, Task #1011) so the CLI entry stays under the
-800-line hard ceiling.
-
-A sibling of `imap.py` and `feed.py` in this skill's `scripts/` dir, not an
-importable package — module-only (no `__main__`/shebang), so it is always
-reached through `feed.py`, whose own `__file__` guard has already put this
-directory on `sys.path` by the time this module's `from imap import ...` runs.
-"""
+# meiva:note
+# The write half of the gmail skill, the effects: compose + send over SMTP, reply / forward,
+# and drafts (IMAP APPEND). Side-effectful - `send` / `reply` / `forward` put real mail on
+# the wire; `--dry-run` composes without sending. Split out of feed.py (2026-08-07, Task
+# #1011) so the CLI entry stays under the 800-line hard ceiling.
+#
+# A sibling of `imap.py` and `feed.py` in this skill's `scripts/` dir, not an importable
+# package -- module-only (no `__main__`/shebang), so it is always reached through `feed.py`,
+# whose own `__file__` guard has already put this directory on `sys.path` by the time this
+# module's `from imap import ...` runs. What a reply, a forward or a summary says is decided
+# by values in gmail_compose.py.
 
 from __future__ import annotations
 
 import email.utils
 import imaplib
 import mimetypes
-import re
 import smtplib
 import time
 from email.message import EmailMessage
@@ -24,38 +22,26 @@ from functools import cache as _cache
 from pathlib import Path
 from typing import Any
 
-from imap import (
-    ALL_MAIL,
-    GmailError,
-    _account,
-    _app_password,
-    _body_text,
-    _conn,
-    _full,
-    _search,
-)
+from gmail_auth import AuthSources, GmailError
+from gmail_compose import msg_summary, plan_forward, plan_reply, recipient_list, sent_summary
+from gmail_queries import message_query
+from gmail_wire import ALL_MAIL, parse_drafts_folder
+from imap import account, app_password, connection, fetch_full, search_ids
 
 SMTP_HOST = "smtp.gmail.com"
-SMTP_PORT = 587  # STARTTLS; the App Password authenticates SMTP as well as IMAP
-# --------------------------------------------------------------------------- #
-# Write lens (SMTP) -- send / reply. Side-effectful.
-# --------------------------------------------------------------------------- #
+
+# meiva:note
+# STARTTLS; the App Password authenticates SMTP as well as IMAP.
+SMTP_PORT = 587
 
 
-def addr_list(raw: str | None) -> list[str]:
-    """Parse a comma-separated address header into bare addresses (RFC 5322 uses
-    commas; `getaddresses` does not split on `;`)."""
-    if not raw:
-        return []
-    return [addr for _, addr in email.utils.getaddresses([raw]) if addr]
-
-
+# meiva:note
+# Attach each file path to a composed message (turns it multipart/mixed).
+#
+# maintype/subtype is guessed from the filename, falling back to application/octet-stream. A
+# path that is not a readable file raises rather than sending a message with a
+# silently-missing attachment.
 def _attach_files(msg: EmailMessage, paths: list[str]) -> None:
-    """Attach each file path to a composed message (turns it multipart/mixed).
-
-    maintype/subtype is guessed from the filename, falling back to
-    application/octet-stream. A path that is not a readable file raises rather
-    than sending a message with a silently-missing attachment."""
     for p in paths:
         path = Path(p).expanduser()
         if not path.is_file():
@@ -67,7 +53,11 @@ def _attach_files(msg: EmailMessage, paths: list[str]) -> None:
         )
 
 
+# meiva:note
+# Build an EmailMessage (plain text, plus any file attachments) from the authenticated
+# account.
 def _compose(
+    auth: AuthSources,
     *,
     to: list[str],
     subject: str,
@@ -77,9 +67,7 @@ def _compose(
     references: str | None = None,
     attachments: list[str] | None = None,
 ) -> EmailMessage:
-    """Build an EmailMessage (plain text, plus any file attachments) from the
-    authenticated account."""
-    acct = _account()
+    acct = account(auth)
     msg = EmailMessage()
     msg["From"] = acct
     msg["To"] = ", ".join(to)
@@ -98,13 +86,15 @@ def _compose(
     return msg
 
 
-def _smtp_send(msg: EmailMessage) -> None:
-    """Send a composed message via Gmail SMTP (STARTTLS + App Password)."""
-    acct = _account()
+# meiva:note
+# Send a composed message via Gmail SMTP (STARTTLS + App Password).
+def _smtp_send(auth: AuthSources, msg: EmailMessage) -> None:
+    acct = account(auth)
+    password = app_password(auth)
     with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=30) as s:
         s.starttls()
         try:
-            s.login(acct, _app_password())
+            s.login(acct, password)
         except smtplib.SMTPAuthenticationError as e:
             raise GmailError(
                 f"SMTP login failed for {acct}: {e}. The App Password authenticates SMTP too; "
@@ -113,27 +103,15 @@ def _smtp_send(msg: EmailMessage) -> None:
         s.send_message(msg)
 
 
-def msg_summary(msg: EmailMessage) -> dict[str, Any]:
-    # get_content() raises on a multipart (attachment) message, so read the body
-    # via get_body, which returns the message itself when it is single-part.
-    body_part = msg.get_body(preferencelist=("plain",))
-    return {
-        "message_id": (msg["Message-Id"] or "").strip().strip("<>") or None,
-        "from": msg["From"],
-        "to": msg["To"],
-        "cc": msg["Cc"],
-        "subject": msg["Subject"],
-        "in_reply_to": (msg["In-Reply-To"] or "").strip().strip("<>") or None,
-        "attachments": [a.get_filename() for a in msg.iter_attachments()],
-        "body": (body_part.get_content() if body_part else "").strip(),
-    }
-
-
-def sent_summary(msg: EmailMessage, *, sent: bool) -> dict[str, Any]:
-    return {"sent": sent, **msg_summary(msg)}
-
-
+# meiva:note
+# Compose and (unless `dry_run`) send a new email from the account.
+#
+# SIDE-EFFECTFUL: a real email leaves the mailbox. `attach` is a list of file paths to attach.
+# `dry_run=True` builds and returns the composed message (headers + body + attachment names)
+# WITHOUT touching SMTP, so the caller can inspect it before committing to a real send. `sent`
+# is False under dry_run.
 def send(
+    auth: AuthSources,
     to: str | list[str],
     subject: str,
     body: str,
@@ -142,60 +120,37 @@ def send(
     attach: list[str] | None = None,
     dry_run: bool = False,
 ) -> dict[str, Any]:
-    """Compose and (unless `dry_run`) send a new email from the account.
-
-    SIDE-EFFECTFUL: a real email leaves the mailbox. `attach` is a list of file
-    paths to attach. `dry_run=True` builds and returns the composed message
-    (headers + body + attachment names) WITHOUT touching SMTP, so the caller can
-    inspect it before committing to a real send. `sent` is False under dry_run."""
-    to_list = addr_list(to) if isinstance(to, str) else list(to)
+    to_list = recipient_list(to)
     if not to_list:
         raise ValueError("send needs at least one recipient")
-    cc_list = addr_list(cc) if isinstance(cc, str) else list(cc or [])
-    msg = _compose(to=to_list, subject=subject, body=body, cc=cc_list or None, attachments=attach)
+    cc_list = recipient_list(cc)
+    msg = _compose(
+        auth, to=to_list, subject=subject, body=body, cc=cc_list or None, attachments=attach
+    )
     if not dry_run:
-        _smtp_send(msg)
+        _smtp_send(auth, msg)
     return sent_summary(msg, sent=not dry_run)
 
 
-def _original(message_id: str) -> EmailMessage:
-    """The message with this RFC822 Message-Id (the newest match)."""
-    mid = message_id.strip().strip("<>")
-    ids = _search(f"rfc822msgid:{mid}")
+# meiva:note
+# The message with this RFC822 Message-Id (the newest match).
+def _original(auth: AuthSources, message_id: str) -> EmailMessage:
+    ids = search_ids(auth, message_query(message_id))
     if not ids:
         raise GmailError(f"no message with Message-Id {message_id!r}")
-    _, orig = _full(ids[-1])
+    _, orig = fetch_full(auth, ids[-1])
     return orig
 
 
-def _reply_all_cc(orig: EmailMessage, to: list[str], acct: str) -> list[str]:
-    """The original To+Cc minus the reply's recipients and our own address."""
-    cc: list[str] = []
-    seen = {a.lower() for a in to} | {acct}
-    for addr in addr_list(orig["To"]) + addr_list(orig["Cc"]):
-        if addr.lower() not in seen:
-            cc.append(addr)
-            seen.add(addr.lower())
-    return cc
-
-
-def _forward_body(orig: EmailMessage, body: str) -> str:
-    """The optional `body` note above a Gmail-style quote of the original."""
-    quoted = "\n".join(
-        [
-            "---------- Forwarded message ----------",
-            f"From: {(orig['From'] or '').strip()}",
-            f"Date: {(orig['Date'] or '').strip()}",
-            f"Subject: {(orig['Subject'] or '').strip()}",
-            f"To: {(orig['To'] or '').strip()}",
-            "",
-            _body_text(orig),
-        ]
-    )
-    return (body.strip() + "\n\n" + quoted) if body.strip() else quoted
-
-
+# meiva:note
+# Reply to an existing message (looked up by RFC822 Message-Id).
+#
+# Threads correctly (`In-Reply-To` + `References`), `Re:`-prefixes the subject, and addresses
+# the original sender (`Reply-To` if set, else `From`); `reply_all` adds the original To+Cc
+# minus our own address. `attach` is a list of file paths to attach. SIDE-EFFECTFUL unless
+# `dry_run` (which composes from the fetched original without sending).
 def reply(
+    auth: AuthSources,
     message_id: str,
     body: str,
     *,
@@ -203,44 +158,27 @@ def reply(
     attach: list[str] | None = None,
     dry_run: bool = False,
 ) -> dict[str, Any]:
-    """Reply to an existing message (looked up by RFC822 Message-Id).
-
-    Threads correctly (`In-Reply-To` + `References`), `Re:`-prefixes the subject,
-    and addresses the original sender (`Reply-To` if set, else `From`);
-    `reply_all` adds the original To+Cc minus our own address. `attach` is a list
-    of file paths to attach. SIDE-EFFECTFUL unless `dry_run` (which composes from
-    the fetched original without sending)."""
-    orig = _original(message_id)
-    acct = _account().lower()
-
-    to = addr_list(orig["Reply-To"]) or addr_list(orig["From"])
-    if not to:
-        raise GmailError(f"cannot reply to {message_id!r}: original has no Reply-To/From address")
-    cc = _reply_all_cc(orig, to, acct) if reply_all else []
-
-    subject = (orig["Subject"] or "").strip()
-    if not subject.lower().startswith("re:"):
-        subject = f"Re: {subject}"
-    orig_mid = (orig["Message-Id"] or "").strip()
-    references = " ".join(p for p in [(orig["References"] or "").strip(), orig_mid] if p) or None
-
+    orig = _original(auth, message_id)
+    plan = plan_reply(orig, message_id, account(auth), reply_all)
     msg = _compose(
-        to=to,
-        subject=subject,
+        auth,
+        to=list(plan.to),
+        subject=plan.subject,
         body=body,
-        cc=cc or None,
-        in_reply_to=orig_mid or None,
-        references=references,
+        cc=list(plan.cc) or None,
+        in_reply_to=plan.in_reply_to,
+        references=plan.references,
         attachments=attach,
     )
     if not dry_run:
-        _smtp_send(msg)
+        _smtp_send(auth, msg)
     return sent_summary(msg, sent=not dry_run)
 
 
+# meiva:note
+# Re-attach the original message's attachment parts onto a forward (real attachments and
+# inline parts alike, as Gmail's own forward does).
 def _carry_attachments(msg: EmailMessage, orig: EmailMessage) -> None:
-    """Re-attach the original message's attachment parts onto a forward (real
-    attachments and inline parts alike, as Gmail's own forward does)."""
     for i, part in enumerate(orig.iter_attachments()):
         payload = part.get_content()
         data = payload if isinstance(payload, (bytes, bytearray)) else str(payload).encode()
@@ -250,7 +188,14 @@ def _carry_attachments(msg: EmailMessage, orig: EmailMessage) -> None:
         )
 
 
+# meiva:note
+# Forward an existing message (looked up by RFC822 Message-Id) to `to`.
+#
+# `Fwd:`-prefixes the subject and quotes the original (a Gmail-style header block + the
+# extracted body text) below the optional `body` note; the original's attachments are carried
+# along, and `attach` adds new ones. SIDE-EFFECTFUL unless `dry_run`.
 def forward(
+    auth: AuthSources,
     message_id: str,
     to: str | list[str],
     *,
@@ -259,59 +204,49 @@ def forward(
     attach: list[str] | None = None,
     dry_run: bool = False,
 ) -> dict[str, Any]:
-    """Forward an existing message (looked up by RFC822 Message-Id) to `to`.
+    orig = _original(auth, message_id)
 
-    `Fwd:`-prefixes the subject and quotes the original (a Gmail-style header
-    block + the extracted body text) below the optional `body` note; the
-    original's attachments are carried along, and `attach` adds new ones.
-    SIDE-EFFECTFUL unless `dry_run`."""
-    orig = _original(message_id)
-
-    to_list = addr_list(to) if isinstance(to, str) else list(to)
+    to_list = recipient_list(to)
     if not to_list:
         raise ValueError("forward needs at least one recipient")
-    cc_list = addr_list(cc) if isinstance(cc, str) else list(cc or [])
+    cc_list = recipient_list(cc)
 
-    subject = (orig["Subject"] or "").strip()
-    if not subject.lower().startswith("fwd:"):
-        subject = f"Fwd: {subject}"
-    full_body = _forward_body(orig, body)
-
+    plan = plan_forward(orig, body)
     msg = _compose(
-        to=to_list, subject=subject, body=full_body, cc=cc_list or None, attachments=attach
+        auth,
+        to=to_list,
+        subject=plan.subject,
+        body=plan.body,
+        cc=cc_list or None,
+        attachments=attach,
     )
     _carry_attachments(msg, orig)
     if not dry_run:
-        _smtp_send(msg)
+        _smtp_send(auth, msg)
     return sent_summary(msg, sent=not dry_run)
 
 
-# --------------------------------------------------------------------------- #
-# Draft lens (IMAP APPEND) -- draft / draft-delete. Nothing is ever sent.
-# --------------------------------------------------------------------------- #
-
-
+# meiva:note
+# The mailbox's drafts folder name, discovered via its RFC 6154 `\Drafts` special-use
+# attribute (the display name is localized per account; the attribute is not). Raises when
+# the server advertises no such folder.
 @_cache
-def _drafts_folder() -> str:
-    """The mailbox's drafts folder name, discovered via its RFC 6154 `\\Drafts`
-    special-use attribute (the display name is localized per account; the
-    attribute is not). Raises when the server advertises no such folder."""
-    typ, data = _conn().list()
+def _drafts_folder(auth: AuthSources) -> str:
+    typ, data = connection(auth).list()
     if typ != "OK":
         raise GmailError(f"LIST failed (typ={typ})")
-    for line in data:
-        s = line.decode() if isinstance(line, bytes) else str(line)
-        m = re.match(r'\(([^)]*)\)\s+(?:"[^"]*"|NIL)\s+(.+)$', s)
-        if not m:
-            raise GmailError(f"unparseable LIST line: {s!r}")
-        attrs, name = m.groups()
-        if "\\drafts" in attrs.lower():
-            name = name.strip()
-            return name[1:-1] if name.startswith('"') and name.endswith('"') else name
-    raise GmailError("the server advertises no \\Drafts special-use folder")
+    return parse_drafts_folder(data)
 
 
+# meiva:note
+# Compose a message into the Drafts folder -- nothing is sent.
+#
+# The draft lands via IMAP APPEND with the `\Draft` flag, so it shows up in the Drafts folder
+# of every Gmail client, editable and sendable from there (the agent-drafts / human-sends
+# flow). The returned `message_id` is the handle for `draft_delete`. `dry_run=True` composes
+# without writing.
 def draft(
+    auth: AuthSources,
     to: str | list[str],
     subject: str,
     body: str,
@@ -320,20 +255,16 @@ def draft(
     attach: list[str] | None = None,
     dry_run: bool = False,
 ) -> dict[str, Any]:
-    """Compose a message into the Drafts folder -- nothing is sent.
-
-    The draft lands via IMAP APPEND with the `\\Draft` flag, so it shows up in
-    the Drafts folder of every Gmail client, editable and sendable from there
-    (the agent-drafts / human-sends flow). The returned `message_id` is the
-    handle for `draft_delete`. `dry_run=True` composes without writing."""
-    to_list = addr_list(to) if isinstance(to, str) else list(to)
+    to_list = recipient_list(to)
     if not to_list:
         raise ValueError("draft needs at least one recipient")
-    cc_list = addr_list(cc) if isinstance(cc, str) else list(cc or [])
-    msg = _compose(to=to_list, subject=subject, body=body, cc=cc_list or None, attachments=attach)
+    cc_list = recipient_list(cc)
+    msg = _compose(
+        auth, to=to_list, subject=subject, body=body, cc=cc_list or None, attachments=attach
+    )
     if not dry_run:
-        folder = _drafts_folder()
-        typ, data = _conn().append(
+        folder = _drafts_folder(auth)
+        typ, data = connection(auth).append(
             f'"{folder}"', r"(\Draft)", imaplib.Time2Internaldate(time.time()), msg.as_bytes()
         )
         if typ != "OK":
@@ -341,21 +272,21 @@ def draft(
     return {"drafted": not dry_run, **msg_summary(msg)}
 
 
-def draft_delete(message_id: str) -> dict[str, Any]:
-    """Delete a draft from the Drafts folder by its RFC822 Message-Id.
-
-    Selects the Drafts folder read-write (the only write-mode select in this
-    module), flags every copy `\\Deleted`, expunges, then re-selects All Mail
-    read-only to restore the connection's usual state. Raises when no draft
-    carries that Message-Id."""
+# meiva:note
+# Delete a draft from the Drafts folder by its RFC822 Message-Id.
+#
+# Selects the Drafts folder read-write (the only write-mode select in this module), flags
+# every copy `\Deleted`, expunges, then re-selects All Mail read-only to restore the
+# connection's usual state. Raises when no draft carries that Message-Id.
+def draft_delete(auth: AuthSources, message_id: str) -> dict[str, Any]:
     mid = message_id.strip().strip("<>")
-    folder = _drafts_folder()
-    conn = _conn()
+    folder = _drafts_folder(auth)
+    conn = connection(auth)
     typ, _ = conn.select(f'"{folder}"', readonly=False)
     if typ != "OK":
         raise GmailError(f"cannot select {folder!r} read-write (typ={typ})")
     try:
-        ids = _search(f"rfc822msgid:{mid}")
+        ids = search_ids(auth, message_query(mid))
         if not ids:
             raise GmailError(f"no draft with Message-Id {message_id!r} in {folder!r}")
         for uid in ids:

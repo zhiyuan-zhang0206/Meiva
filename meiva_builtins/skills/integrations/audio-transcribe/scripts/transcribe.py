@@ -28,212 +28,170 @@ Usage:
 
 from __future__ import annotations
 
-import re
+import argparse
+import json
 import subprocess
+import sys
 import tempfile
-from functools import cache as _cache
+from collections.abc import Sequence
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import assert_never
 
-# OpenAI caps an upload at 25 MB; stay under it with a safety margin.
-_OPENAI_MAX_BYTES = 25 * 1024 * 1024
-_SAFE_MAX_BYTES = 24 * 1024 * 1024
+from openai import OpenAI, omit
 
-# A per-request *duration* ceiling, independent of bytes: at 32 kbps a 24 MB
-# chunk is ~100 min, which can exceed the transcription model's per-call
-# processing budget even while under the size cap. Segment on whichever binds
-# first (bytes or seconds). 15 min is comfortably safe.
-_MAX_SEGMENT_SECONDS = 900
-# A sanity ceiling on total audio so a mis-passed huge file can't run up an
-# unbounded transcription bill; callers raise it explicitly to override.
-_MAX_TOTAL_SECONDS = 4 * 3600
+from base.config import settings
 
-# A bare 11-char YouTube id or any http(s) URL is fetched via yt-dlp; anything
-# else is treated as a local media path.
-_RE_VIDEO_ID = re.compile(r"^[0-9A-Za-z_-]{11}$")
+# meiva:note
+# `transcribe_plan` is a sibling in this skill's own scripts/ dir, not an importable
+# package (PYTHONSAFEPATH=1 keeps a script's own directory off sys.path). Structure Rule 6
+# recognizes this exact __file__-derived, within-skill shape as the endorsed guard.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+from transcribe_plan import (
+    DEFAULT_MODEL,
+    MAX_SEGMENT_SECONDS,
+    MAX_TOTAL_SECONDS,
+    SAFE_MAX_BYTES,
+    Download,
+    Limits,
+    LocalFile,
+    Tools,
+    Transcript,
+    check_duration,
+    check_parts,
+    parse_duration,
+    plan_source,
+    segment_seconds,
+)
 
-@_cache
-def _client() -> Any:
-    """OpenAI client keyed from `~/.meiva/.env` (via settings). Imported lazily so
-    the module loads without the SDK/key for callers that only need helpers."""
-    from openai import OpenAI
-
-    from base.config import settings
-
-    key = settings.lm.openai_api_key
-    if key is None:
-        raise RuntimeError("OPENAI_API_KEY not set (expected in ~/.meiva/.env) — cannot transcribe")
-    return OpenAI(api_key=key.get_secret_value())
-
-
-def _run(cmd: list[str]) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(cmd, capture_output=True, text=True, check=True)
+SYSTEM_TOOLS = Tools(ffmpeg="ffmpeg", ffprobe="ffprobe", yt_dlp="yt-dlp")
+DEFAULT_LIMITS = Limits()
 
 
-def _resolve_to_audio(source: str, workdir: Path) -> Path:
-    """A local media file is returned as-is; a YouTube id / URL is downloaded to
-    an mp3 via yt-dlp. (Video files are handled by the transcode step.)"""
-    p = Path(source).expanduser()
-    if p.exists():
-        return p
-    if not (_RE_VIDEO_ID.match(source) or source.startswith(("http://", "https://"))):
-        raise FileNotFoundError(f"source is neither a local file nor a URL/video id: {source!r}")
-    url = f"https://www.youtube.com/watch?v={source}" if _RE_VIDEO_ID.match(source) else source
-    out = workdir / "src.%(ext)s"
-    # --no-config: ignore user yt-dlp config that could write sidecars (info
-    # json / thumbnail) which a glob might then mis-pick. We forced
-    # --audio-format mp3, so the audio is exactly src.mp3.
-    _run(["yt-dlp", "--no-config", "-x", "--audio-format", "mp3", "-o", str(out), url])
-    got = workdir / "src.mp3"
-    if not got.exists():
-        raise RuntimeError(f"yt-dlp produced no mp3 audio for {source!r}")
-    return got
+# meiva:note
+# The OpenAI credentials of this process; `base_url` None means the SDK's default endpoint.
+@dataclass(frozen=True)
+class OpenAIAccess:
+    api_key: str
+    base_url: str | None
 
 
-def _audio_seconds(media: Path) -> float:
-    r = _run(
-        [
-            "ffprobe",
-            "-v",
-            "error",
-            "-show_entries",
-            "format=duration",
-            "-of",
-            "default=nokey=1:noprint_wrappers=1",
-            str(media),
-        ]
-    )
-    return float(r.stdout.strip())
+# meiva:note
+# Run one program to completion and return it. A non-zero exit raises with the tail of
+# its stderr, so the cause (a codec error, a missing input) reaches the caller.
+def run_command(cmd: list[str]) -> subprocess.CompletedProcess[str]:
+    proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    if proc.returncode != 0:
+        raise RuntimeError(
+            f"{cmd[0]} exited with status {proc.returncode}: {proc.stderr.strip()[-500:]}"
+        )
+    return proc
 
 
-def _prepare_chunks(media: Path, workdir: Path, max_bytes: int, max_segment_s: int) -> list[Path]:
-    """Transcode to a compact mono 16 kHz mp3, then split into segments under
-    *both* the byte cap and `max_segment_s` if either binds. Returns the ordered
-    chunk paths to transcribe."""
+# meiva:note
+# A local media file is returned as-is; a YouTube id / URL is downloaded to an mp3 via
+# yt-dlp. (Video files are handled by the transcode step.)
+def resolve_to_audio(source: str, workdir: Path, tools: Tools) -> Path:
+    expanded = Path(source).expanduser()
+    plan = plan_source(source, expanded, expanded.exists())
+    match plan:
+        case LocalFile(path=path):
+            return path
+        case Download(url=url):
+            run_command(tools.download(url, str(workdir / "src.%(ext)s")))
+            got = workdir / "src.mp3"
+            if not got.exists():
+                raise RuntimeError(f"yt-dlp produced no mp3 audio for {source!r}")
+            return got
+        case _:
+            assert_never(plan)
+
+
+def audio_seconds(media: Path, tools: Tools) -> float:
+    return parse_duration(run_command(tools.probe(str(media))).stdout)
+
+
+# meiva:note
+# Transcode to a compact mono 16 kHz mp3, then split into segments under *both* the byte
+# cap and the segment duration if either binds. Returns the ordered chunk paths to
+# transcribe.
+def prepare_chunks(media: Path, workdir: Path, tools: Tools, limits: Limits) -> list[Path]:
     compact = workdir / "compact.mp3"
-    _run(
-        [
-            "ffmpeg",
-            "-nostdin",
-            "-y",
-            "-i",
-            str(media),
-            "-ac",
-            "1",
-            "-ar",
-            "16000",
-            "-c:a",
-            "libmp3lame",
-            "-b:a",
-            "32k",
-            str(compact),
-        ]
-    )
-    size = compact.stat().st_size
-    duration = _audio_seconds(compact)
-    if size <= max_bytes and duration <= max_segment_s:
+    run_command(tools.transcode(str(media), str(compact)))
+    seconds = segment_seconds(compact.stat().st_size, audio_seconds(compact, tools), limits)
+    if seconds is None:
         return [compact]
-
-    # Fixed-bitrate, so bytes scale with time: a segment length whose byte-share
-    # stays under the cap (0.9 margin), then clamped by the duration ceiling and
-    # a sane floor.
-    byte_seg = int(duration * max_bytes / size * 0.9) if size else max_segment_s
-    seg_time = max(60, min(byte_seg, max_segment_s))
-    parts_tmpl = str(workdir / "part_%03d.mp3")
-    _run(
-        [
-            "ffmpeg",
-            "-nostdin",
-            "-y",
-            "-i",
-            str(compact),
-            "-f",
-            "segment",
-            "-segment_time",
-            str(seg_time),
-            "-c",
-            "copy",
-            parts_tmpl,
-        ]
-    )
+    run_command(tools.segment(str(compact), seconds, str(workdir / "part_%03d.mp3")))
     parts = sorted(workdir.glob("part_*.mp3"))
     if not parts:
         raise RuntimeError(f"ffmpeg segmentation produced no parts for {media}")
-    oversize = [p.name for p in parts if p.stat().st_size > _OPENAI_MAX_BYTES]
-    if oversize:
-        raise RuntimeError(f"segment(s) still over the 25 MB API cap after split: {oversize}")
+    check_parts([(p.name, p.stat().st_size) for p in parts], limits)
     return parts
 
 
-def _transcribe_file(path: Path, *, model: str, language: str | None, prompt: str | None) -> str:
-    kwargs: dict[str, Any] = {"model": model, "response_format": "text"}
-    if language:
-        kwargs["language"] = language
-    if prompt:
-        kwargs["prompt"] = prompt
+def transcribe_file(
+    client: OpenAI, path: Path, *, model: str, language: str | None, prompt: str | None
+) -> str:
     with path.open("rb") as f:
-        return str(_client().audio.transcriptions.create(file=f, **kwargs)).strip()
+        return str(
+            client.audio.transcriptions.create(
+                file=f,
+                model=model,
+                response_format="text",
+                language=language or omit,
+                prompt=prompt or omit,
+            )
+        ).strip()
 
 
+# meiva:note
+# Transcribe `source` to plain text via OpenAI.
+#
+# `source` is a local audio/video file, a YouTube video id, or any media URL (downloaded
+# via yt-dlp). Long audio is segmented under both the 25 MB API limit and
+# `limits.max_segment_s`, and the per-segment texts are concatenated.
+#
+# `limits.max_duration_s` is a sanity ceiling on total audio (one API call per segment
+# costs money): raise it or pass `Limits(max_duration_s=None)` to override for a long job.
+#
+# Returns `{text, model, chunks, audio_seconds, source}`. `language` is an optional
+# ISO-639-1 hint; `prompt` is optional context to bias spelling.
 def transcribe(
     source: str,
     *,
-    model: str = "gpt-4o-transcribe",
+    client: OpenAI,
+    tools: Tools,
+    model: str = DEFAULT_MODEL,
     language: str | None = None,
     prompt: str | None = None,
-    max_bytes: int = _SAFE_MAX_BYTES,
-    max_segment_s: int = _MAX_SEGMENT_SECONDS,
-    max_duration_s: float | None = _MAX_TOTAL_SECONDS,
-) -> dict[str, Any]:
-    """Transcribe `source` to plain text via OpenAI.
-
-    `source` is a local audio/video file, a YouTube video id, or any media URL
-    (downloaded via yt-dlp). Long audio is segmented under both the 25 MB API
-    limit and `max_segment_s`, and the per-segment texts are concatenated.
-
-    `max_duration_s` is a sanity ceiling on total audio (one API call per
-    segment costs money) — raise it or pass `None` to override for a long job.
-
-    Returns `{text, model, chunks, audio_seconds, source}`. `language` is an
-    optional ISO-639-1 hint; `prompt` is optional context to bias spelling.
-    """
-    if max_bytes > _OPENAI_MAX_BYTES:
-        raise ValueError(f"max_bytes {max_bytes} exceeds the OpenAI 25 MB limit")
+    limits: Limits = DEFAULT_LIMITS,
+) -> dict[str, object]:
     with tempfile.TemporaryDirectory() as tmp:
         workdir = Path(tmp)
-        media = _resolve_to_audio(source, workdir)
-        seconds = _audio_seconds(media)
-        if max_duration_s is not None and seconds > max_duration_s:
-            raise ValueError(
-                f"audio is {seconds:.0f}s, over max_duration_s={max_duration_s:.0f}; "
-                f"pass a larger max_duration_s to override"
-            )
-        chunks = _prepare_chunks(media, workdir, max_bytes, max_segment_s)
-        texts = [_transcribe_file(c, model=model, language=language, prompt=prompt) for c in chunks]
-        return {
-            "text": "\n".join(t for t in texts if t),
-            "model": model,
-            "chunks": len(chunks),
-            "audio_seconds": round(seconds, 1),
-            "source": source,
-        }
+        media = resolve_to_audio(source, workdir, tools)
+        seconds = audio_seconds(media, tools)
+        check_duration(seconds, limits)
+        chunks = prepare_chunks(media, workdir, tools, limits)
+        texts = tuple(
+            transcribe_file(client, c, model=model, language=language, prompt=prompt)
+            for c in chunks
+        )
+        return Transcript(texts=texts, model=model, seconds=seconds, source=source).as_json()
 
 
-# ---------------------------------------------------------------------------
-# CLI entry point: the thin wrapper at skills/audio-transcribe/transcribe.py
-# ---------------------------------------------------------------------------
-def main() -> None:
-    import argparse
-    import json
-
+# meiva:note
+# The CLI: parse `argv`, transcribe, print the text (or the full result with --json).
+# `access` is None when no OpenAI key is configured, which is refused after the arguments
+# are validated.
+def main(argv: Sequence[str], *, access: OpenAIAccess | None, tools: Tools) -> None:
     p = argparse.ArgumentParser(
         description="Transcribe audio/video to text via OpenAI speech-to-text."
     )
     p.add_argument("source", help="Local media file, YouTube video ID, or media URL")
     p.add_argument(
         "--model",
-        default="gpt-4o-transcribe",
+        default=DEFAULT_MODEL,
         help="Transcription model (default: gpt-4o-transcribe)",
     )
     p.add_argument("--language", default=None, help="Optional ISO-639-1 language hint")
@@ -241,33 +199,40 @@ def main() -> None:
         "--prompt", default=None, help="Optional context to bias spelling of proper nouns"
     )
     p.add_argument(
-        "--max-bytes", type=int, default=_SAFE_MAX_BYTES, help="Max segment bytes, under 25 MB"
+        "--max-bytes", type=int, default=SAFE_MAX_BYTES, help="Max segment bytes, under 25 MB"
     )
     p.add_argument(
         "--max-segment-s",
         type=int,
-        default=_MAX_SEGMENT_SECONDS,
+        default=MAX_SEGMENT_SECONDS,
         help="Max segment duration in seconds",
     )
     p.add_argument(
         "--max-duration-s",
         type=float,
-        default=_MAX_TOTAL_SECONDS,
+        default=MAX_TOTAL_SECONDS,
         help="Max total audio duration (safety ceiling)",
     )
     p.add_argument(
         "--json", action="store_true", help="Output full result as JSON instead of plain text"
     )
-    args = p.parse_args()
+    args = p.parse_args(argv)
 
-    result = transcribe(
-        args.source,
-        model=args.model,
-        language=args.language,
-        prompt=args.prompt,
+    limits = Limits(
         max_bytes=args.max_bytes,
         max_segment_s=args.max_segment_s,
         max_duration_s=args.max_duration_s,
+    )
+    if access is None:
+        raise RuntimeError("OPENAI_API_KEY not set (expected in ~/.meiva/.env) — cannot transcribe")
+    result = transcribe(
+        args.source,
+        client=OpenAI(api_key=access.api_key, base_url=access.base_url),
+        tools=tools,
+        model=args.model,
+        language=args.language,
+        prompt=args.prompt,
+        limits=limits,
     )
     if args.json:
         print(json.dumps(result, ensure_ascii=False, indent=2))
@@ -276,4 +241,9 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    api_key = settings.lm.openai_api_key
+    main(
+        sys.argv[1:],
+        access=None if api_key is None else OpenAIAccess(api_key.get_secret_value(), None),
+        tools=SYSTEM_TOOLS,
+    )

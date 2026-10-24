@@ -1,0 +1,6 @@
+exports = ["webscrape.py"]
+
+[purity]
+"scrape_ladder.py" = "strict"
+"scrape_post.py" = "strict"
+"scrape_wire.py" = "strict"

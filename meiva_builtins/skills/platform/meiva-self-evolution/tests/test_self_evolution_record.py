@@ -4,7 +4,6 @@ from typing import Any, cast
 
 import pytest
 
-from base.db import Database
 from meiva_builtins.skills.tests.skill_script import load_skill_script
 
 record_module = load_skill_script("platform", "meiva-self-evolution", "scripts", "record.py")
@@ -67,27 +66,40 @@ def _label_record(*, turns: int, exec_failed: int) -> dict[str, Any]:
     }
 
 
-def _empty_transcript(_agent_id: int, *, database: Database) -> list[dict[str, str]]:
-    return []
+def _inbound(source: str, content: str, *, broadcast: bool = False) -> dict[str, Any]:
+    return {"source": source, "content": content, "is_broadcast": broadcast, "claimed": False}
+
+
+# meiva:note
+# The inputs of a record built from the empty case of everything, overridden by `fields`.
+def _run(**fields: Any) -> Any:
+    values: dict[str, Any] = {
+        "agent_id": 7,
+        "week": "2026-08-30",
+        "events": [],
+        "log_events": [],
+        "inbounds": [],
+        "meta": record_module.AgentMeta("user", "terminated", ""),
+        "transcript": [],
+        "skills_touched": [],
+    }
+    values.update(fields)
+    return record_module.RunInputs(**values)
 
 
 def _build(
     record: Any,
-    database: Database,
     *,
     inbounds: list[dict[str, Any]] | None = None,
     transcript: list[dict[str, str]] | None = None,
     spawner: str = "user",
 ) -> dict[str, Any]:
     return record.build_record(
-        database=database,
-        agent_id=7,
-        week="2026-08-30",
-        events=[],
-        log_events=[],
-        inbounds=inbounds or [],
-        transcript=transcript if transcript is not None else [],
-        meta=(spawner, "terminated", ""),
+        _run(
+            inbounds=inbounds or [],
+            transcript=transcript if transcript is not None else [],
+            meta=record_module.AgentMeta(spawner, "terminated", ""),
+        )
     )
 
 
@@ -104,26 +116,16 @@ def test_exec_failure_fumble_threshold_scales_with_turns(
     assert record.label(_label_record(turns=turns, exec_failed=exec_failed)) == expected
 
 
-def test_broadcast_instruction_is_excluded_from_per_agent_corrections(
-    record: Any, monkeypatch: pytest.MonkeyPatch, database: Database
-) -> None:
-    monkeypatch.setattr(record, "_transcript", _empty_transcript)
-
+def test_broadcast_instruction_is_excluded_from_per_agent_corrections(record: Any) -> None:
     rec = record.build_record(
-        database=database,
-        agent_id=7,
-        week="2026-08-30",
-        events=[("llm_usage", {"model": "deepseek", "in_total": 900, "out_total": 200})],
-        log_events=[],
-        inbounds=[
-            {"source": "user", "content": "task prompt", "is_broadcast": False},
-            {
-                "source": "user",
-                "content": "wrong: pause all work until resumed",
-                "is_broadcast": True,
-            },
-        ],
-        meta=("user", "terminated", "delivered"),
+        _run(
+            events=[("llm_usage", {"model": "deepseek", "in_total": 900, "out_total": 200})],
+            inbounds=[
+                _inbound("user", "task prompt"),
+                _inbound("user", "wrong: pause all work until resumed", broadcast=True),
+            ],
+            meta=record_module.AgentMeta("user", "terminated", "delivered"),
+        )
     )
 
     assert rec["corrections"] == []
@@ -131,22 +133,16 @@ def test_broadcast_instruction_is_excluded_from_per_agent_corrections(
     assert rec["label"] == "ok"
 
 
-def test_targeted_correction_remains_a_per_agent_correction(
-    record: Any, monkeypatch: pytest.MonkeyPatch, database: Database
-) -> None:
-    monkeypatch.setattr(record, "_transcript", _empty_transcript)
-
+def test_targeted_correction_remains_a_per_agent_correction(record: Any) -> None:
     rec = record.build_record(
-        database=database,
-        agent_id=7,
-        week="2026-08-30",
-        events=[("llm_usage", {"model": "deepseek", "in_total": 900, "out_total": 200})],
-        log_events=[],
-        inbounds=[
-            {"source": "user", "content": "task prompt", "is_broadcast": False},
-            {"source": "user", "content": "wrong: use the requested path", "is_broadcast": False},
-        ],
-        meta=("user", "terminated", "delivered"),
+        _run(
+            events=[("llm_usage", {"model": "deepseek", "in_total": 900, "out_total": 200})],
+            inbounds=[
+                _inbound("user", "task prompt"),
+                _inbound("user", "wrong: use the requested path"),
+            ],
+            meta=record_module.AgentMeta("user", "terminated", "delivered"),
+        )
     )
 
     assert rec["corrections"] == ["wrong: use the requested path"]
@@ -158,7 +154,7 @@ def test_targeted_correction_remains_a_per_agent_correction(
     [
         pytest.param(
             "agent:1",
-            [{"source": "user", "content": "human brief", "is_broadcast": False}],
+            [_inbound("user", "human brief")],
             [],
             "human brief",
             "human",
@@ -166,7 +162,7 @@ def test_targeted_correction_remains_a_per_agent_correction(
         ),
         pytest.param(
             "agent:1",
-            [{"source": "ui:web", "content": "web console brief", "is_broadcast": False}],
+            [_inbound("ui:web", "web console brief")],
             [],
             "web console brief",
             "human",
@@ -174,7 +170,7 @@ def test_targeted_correction_remains_a_per_agent_correction(
         ),
         pytest.param(
             "agent:1",
-            [{"source": "agent:1", "content": "spawn brief", "is_broadcast": False}],
+            [_inbound("agent:1", "spawn brief")],
             [],
             "spawn brief",
             "spawner",
@@ -182,7 +178,7 @@ def test_targeted_correction_remains_a_per_agent_correction(
         ),
         pytest.param(
             "agent:9",
-            [{"source": "schedule:7", "content": "scheduled brief", "is_broadcast": False}],
+            [_inbound("schedule:7", "scheduled brief")],
             [],
             "scheduled brief",
             "schedule",
@@ -219,29 +215,26 @@ def test_targeted_correction_remains_a_per_agent_correction(
 )
 def test_task_prompt_origin(
     record: Any,
-    database: Database,
     spawner: str,
     inbounds: list[dict[str, Any]],
     transcript: list[dict[str, str]],
     expected: str,
     source: str,
 ) -> None:
-    rec = _build(record, database, inbounds=inbounds, transcript=transcript, spawner=spawner)
+    rec = _build(record, inbounds=inbounds, transcript=transcript, spawner=spawner)
 
     assert rec["task_prompt"] == expected
     assert rec["task_prompt_source"] == source
 
 
-def test_the_human_message_that_carried_the_task_is_not_a_followup(
-    record: Any, database: Database
-) -> None:
+def test_the_human_message_that_carried_the_task_is_not_a_followup(record: Any) -> None:
     inbounds = [
-        {"source": "agent:1", "content": "spawn brief", "is_broadcast": False},
-        {"source": "user", "content": "also check the logs", "is_broadcast": False},
-        {"source": "user", "content": "and then the metrics", "is_broadcast": False},
+        _inbound("agent:1", "spawn brief"),
+        _inbound("user", "also check the logs"),
+        _inbound("user", "and then the metrics"),
     ]
 
-    rec = _build(record, database, inbounds=inbounds, spawner="agent:1")
+    rec = _build(record, inbounds=inbounds, spawner="agent:1")
 
     assert rec["task_prompt"] == "also check the logs"
     assert rec["task_prompt_source"] == "human"
@@ -310,19 +303,11 @@ def _usage_events() -> list[tuple[str, dict[str, Any]]]:
 
 
 def _user_inbound(content: str = "ship the evidence block") -> dict[str, Any]:
-    return {
-        "source": "user",
-        "content": content,
-        "is_broadcast": False,
-        "is_first_ever": True,
-        "is_in_collection_window": True,
-        "claimed": True,
-    }
+    return {"source": "user", "content": content, "is_broadcast": False, "claimed": True}
 
 
 def _evidence_record(
     record: Any,
-    database: Database,
     *,
     events: list[tuple[str, dict[str, Any]]],
     inbounds: list[dict[str, Any]],
@@ -330,19 +315,18 @@ def _evidence_record(
     task_receipts: dict[str, int] | None = None,
 ) -> dict[str, Any]:
     return record.build_record(
-        database=database,
-        agent_id=7,
-        week="2026-10-17",
-        events=events,
-        log_events=[],
-        inbounds=inbounds,
-        meta=("user", status, "delivered"),
-        task_receipts=task_receipts,
+        _run(
+            week="2026-10-17",
+            events=events,
+            inbounds=inbounds,
+            meta=record_module.AgentMeta("user", status, "delivered"),
+            task_receipts=task_receipts,
+        )
     )
 
 
-def test_evidence_grade_none_without_telemetry(record: Any, database: Database) -> None:
-    rec = _evidence_record(record, database, events=[], inbounds=[], status="terminated")
+def test_evidence_grade_none_without_telemetry(record: Any) -> None:
+    rec = _evidence_record(record, events=[], inbounds=[], status="terminated")
 
     assert rec["evidence"]["telemetry_events"] == 0
     assert rec["evidence_grade"] == "none"
@@ -350,10 +334,9 @@ def test_evidence_grade_none_without_telemetry(record: Any, database: Database) 
     assert rec["schema_version"] == 2
 
 
-def test_evidence_grade_partial_without_terminal_status(record: Any, database: Database) -> None:
+def test_evidence_grade_partial_without_terminal_status(record: Any) -> None:
     rec = _evidence_record(
         record,
-        database,
         events=_usage_events(),
         inbounds=[_user_inbound()],
         status=None,
@@ -364,10 +347,9 @@ def test_evidence_grade_partial_without_terminal_status(record: Any, database: D
     assert rec["unknown_reason"] == "no_terminal"
 
 
-def test_evidence_grade_partial_for_live_status(record: Any, database: Database) -> None:
+def test_evidence_grade_partial_for_live_status(record: Any) -> None:
     rec = _evidence_record(
         record,
-        database,
         events=_usage_events(),
         inbounds=[_user_inbound()],
         status="idling",
@@ -378,10 +360,9 @@ def test_evidence_grade_partial_for_live_status(record: Any, database: Database)
     assert rec["unknown_reason"] == "no_terminal"
 
 
-def test_evidence_grade_complete_when_all_evidence_present(record: Any, database: Database) -> None:
+def test_evidence_grade_complete_when_all_evidence_present(record: Any) -> None:
     rec = _evidence_record(
         record,
-        database,
         events=_usage_events(),
         inbounds=[_user_inbound()],
         status="terminated",
@@ -391,10 +372,9 @@ def test_evidence_grade_complete_when_all_evidence_present(record: Any, database
     assert rec["unknown_reason"] is None
 
 
-def test_evidence_grade_partial_without_task_prompt(record: Any, database: Database) -> None:
+def test_evidence_grade_partial_without_task_prompt(record: Any) -> None:
     rec = _evidence_record(
         record,
-        database,
         events=_usage_events(),
         inbounds=[],
         status="terminated",
@@ -406,12 +386,9 @@ def test_evidence_grade_partial_without_task_prompt(record: Any, database: Datab
     assert rec["unknown_reason"] == "no_task"
 
 
-def test_legacy_record_without_evidence_keeps_downstream_reads(
-    record: Any, database: Database
-) -> None:
+def test_legacy_record_without_evidence_keeps_downstream_reads(record: Any) -> None:
     rec = _evidence_record(
         record,
-        database,
         events=_usage_events(),
         inbounds=[_user_inbound()],
         status="terminated",
@@ -429,26 +406,14 @@ def test_legacy_record_without_evidence_keeps_downstream_reads(
     assert rubric_module.scores(legacy) == rubric_module.scores(rec)
 
 
-def test_evidence_block_reports_prompt_source_and_task_receipts(
-    record: Any, database: Database
-) -> None:
-    spawner_inbound = {
-        "source": "agent:12",
-        "content": "peer brief",
-        "is_broadcast": False,
-        "is_first_ever": True,
-        "is_in_collection_window": True,
-        "claimed": False,
-    }
+def test_evidence_block_reports_prompt_source_and_task_receipts(record: Any) -> None:
     rec = record.build_record(
-        database=database,
-        agent_id=7,
-        week="2026-10-17",
-        events=[],
-        log_events=[],
-        inbounds=[spawner_inbound],
-        meta=("agent:12", "idling", "delivered"),
-        task_receipts={"note": 3, "status": 1, "results": 2, "state_changes": 1},
+        _run(
+            week="2026-10-17",
+            inbounds=[_inbound("agent:12", "peer brief")],
+            meta=record_module.AgentMeta("agent:12", "idling", "delivered"),
+            task_receipts={"note": 3, "status": 1, "results": 2, "state_changes": 1},
+        )
     )
 
     evidence = rec["evidence"]
@@ -460,13 +425,7 @@ def test_evidence_block_reports_prompt_source_and_task_receipts(
     assert set(evidence) == _EVIDENCE_FIELDS
 
     no_receipts = record.build_record(
-        database=database,
-        agent_id=7,
-        week="2026-10-17",
-        events=[],
-        log_events=[],
-        inbounds=[],
-        meta=("user", "terminated", "delivered"),
+        _run(week="2026-10-17", meta=record_module.AgentMeta("user", "terminated", "delivered"))
     )["evidence"]
     assert no_receipts["task_updates"] == {"note": 0, "status": 0, "results": 0}
     assert no_receipts["task_state_changes"] == 0

@@ -1,44 +1,30 @@
-"""Hermetic wake-delivery tests for the skill reference watchers, plus the
-meiva-dynamic-workflow orchestrator scripts' handoff-dir resolution.
-
-Five reference watchers wake the launching agent with a single send at their
-trigger point: ``watch_idle.py`` (long-running-agent, meiva-goal, and meiva-fleet), ``watch_work.py``
-(meiva-guide.external-agents), and ``gather_files.py``
-(meiva-dynamic-workflow). The send is made once; the SDK's own bounded same-key
-retries are the only retry. A send that still fails is not silent: the one-shot
-watchers log it and exit 2 (the exit notice reaches the launcher), and the
-``watch_work.py`` supervision loop reports False and tries again at its next
-trigger. These tests pin the single send, the channel routing, and the
-exit-2 contract hermetically: real imports, a fake ``meiva`` that records sends
-and can refuse the first N of them.
-
-The handoff-dir tests below (2026-09-28 fix, PR #3550 follow-up P2-1) lock
-`codebase_sweep_lite.py`, `deep_research_lite.py` (`meiva-dynamic-workflow/scripts/`),
-`codebase_sweep_orchestrator.py`, `deep_research_orchestrator.py`, and
-`orchestrator_template.py` (`meiva-dynamic-workflow/references/`, alongside
-`gather_files.py` above) to `base.paths.workspace_dir` instead of a hardcoded
-`Path.home() / ".meiva/workspaces"` that never read `MEIVA_HOME` at all. On a non-default home
-cluster (a worktree cluster, home `~/.meiva-<dir>`) that silently wrote
-scratch/handoff state into the WRONG cluster's workspace tree.
-"""
+# meiva:note
+# Wake-delivery tests for the skill reference watchers, plus the meiva-dynamic-workflow orchestrator scripts' handoff-dir resolution.
+#
+# Five reference watchers wake the launching agent with a single send at their trigger point: ``watch_idle.py`` (long-running-agent, meiva-goal, and meiva-fleet), ``watch_work.py`` (meiva-guide.external-agents), and ``gather_files.py`` (meiva-dynamic-workflow). The send is made once; the SDK's own bounded same-key retries are the only retry. A send that still fails is not silent: the one-shot watchers log it and exit 2 (the exit notice reaches the launcher), and the ``watch_work.py`` supervision loop reports False and tries again at its next trigger. These tests pin the single send, the channel routing, and the exit-2 contract against a real gateway listener on port 0: the SDK client dials it through its real transport, the stub answers (or refuses) the sends, and every assertion reads what reached it.
+#
+# The handoff-dir tests below (2026-09-28 fix, PR #3550 follow-up P2-1) lock `codebase_sweep_lite.py`, `deep_research_lite.py` (`meiva-dynamic-workflow/scripts/`), `codebase_sweep_orchestrator.py`, `deep_research_orchestrator.py`, and `orchestrator_template.py` (`meiva-dynamic-workflow/references/`, alongside `gather_files.py` above) to `base.paths.workspace_dir` instead of a hardcoded `Path.home() / ".meiva/workspaces"` that never read `MEIVA_HOME` at all. On a non-default home cluster (a worktree cluster, home `~/.meiva-<dir>`) that silently wrote scratch/handoff state into the WRONG cluster's workspace tree.
 
 from __future__ import annotations
 
 import ast
-import datetime as dt
 import importlib.util
 import os
 import sys
+import threading
+import time
+from collections.abc import Iterator
 from pathlib import Path
-from types import ModuleType, SimpleNamespace
+from types import ModuleType
 from typing import Any
 
 import pytest
 
 import meiva
 from base.paths import workspace_dir
-from base.sessions.coding_session_owner import CodingSessionKey, CodingSessionOwner
-from base.sessions.coding_session_owner_record import CodingSessionStatus
+from meiva.tests.fixtures.gateway_wire import GatewayStub, GatewayWire
+from meiva.tests.fixtures.gateway_wire import gateway_stub as gateway_stub
+from meiva.tests.fixtures.pin_agent import pin_agent
 
 _REPO = Path(__file__).parents[2]
 _DYNAMIC_WORKFLOW_SCRIPTS = (
@@ -47,6 +33,9 @@ _DYNAMIC_WORKFLOW_SCRIPTS = (
 _DYNAMIC_WORKFLOW_REFERENCES = (
     _REPO / "meiva_builtins" / "skills" / "coordination" / "meiva-dynamic-workflow" / "references"
 )
+_LAUNCHER = 42
+_LAUNCHER_MESSAGES = f"/api/agents/{_LAUNCHER}/messages"
+_SDK_ATTEMPTS = 2
 
 
 def _load(name: str, path: Path) -> ModuleType:
@@ -79,62 +68,29 @@ gather_files = _load(
 )
 
 
-class _FakeMeiva:
-    """Records sends; the first `send_failures` attempts raise (a restart window)."""
-
-    def __init__(self, send_failures: int = 0) -> None:
-        self.calls = 0
-        self.send_failures = send_failures
-        self.sent: list[tuple[str, tuple[Any, ...], dict[str, Any]]] = []
-        self.note_keys: list[str] = []
-        fake = self
-
-        class _Agents:
-            @staticmethod
-            def send_message(agent_id: int, content: str) -> None:
-                fake._attempt("send_message", (agent_id, content), {})
-
-            @staticmethod
-            def send_system_note(
-                agent_id: int, content: str, *, tag: str, resurrect: bool, idempotency_key: str
-            ) -> None:
-                fake._attempt(
-                    "send_system_note",
-                    (agent_id, content),
-                    {"tag": tag, "resurrect": resurrect, "idempotency_key": idempotency_key},
-                )
-
-        class _Self:
-            AGENT_ID = 42
-
-        self.agents = _Agents()
-        self.self = _Self()
-
-    def _attempt(self, channel: str, args: tuple[Any, ...], kwargs: dict[str, Any]) -> None:
-        if channel == "send_system_note":
-            self.note_keys.append(kwargs["idempotency_key"])
-        self.calls += 1
-        if self.calls <= self.send_failures:
-            raise RuntimeError("gateway refused the connection")
-        self.sent.append((channel, args, kwargs))
+@pytest.fixture
+def launcher(sdk_environment: object, gateway_stub: GatewayStub) -> Iterator[GatewayWire]:
+    """The gateway as the launching agent sees it: a listener on port 0 and the SDK client that
+    dials it, with the process pinned to agent 42 (the launcher the watchers wake). The SDK
+    makes its bounded same-key attempts without waiting between them."""
+    with GatewayWire.open(gateway_stub, retries=_SDK_ATTEMPTS) as wire:
+        pin_agent(_LAUNCHER, clients=wire.context.clients)
+        yield wire
 
 
-def _wire(
-    monkeypatch: pytest.MonkeyPatch, module: ModuleType, send_failures: int = 0
-) -> _FakeMeiva:
-    """Swap in the fake `meiva`."""
-    fake = _FakeMeiva(send_failures)
-    monkeypatch.setattr(module, "meiva", fake)
-    return fake
+def _accept_messages(wire: GatewayWire, agent_id: int = _LAUNCHER) -> None:
+    wire.stub.reply("POST", f"/api/agents/{agent_id}/messages", {"status": "enqueued"}, status=201)
 
 
-def _forbid_sleep(monkeypatch: pytest.MonkeyPatch, module: ModuleType) -> None:
-    """A failed wake must not wait out a retry window."""
+def _refuse_messages(wire: GatewayWire, agent_id: int = _LAUNCHER) -> None:
+    wire.stub.reply("POST", f"/api/agents/{agent_id}/messages", {}, status=503)
 
-    def _sleep(seconds: float) -> None:
-        raise AssertionError(f"slept {seconds}s after a failed wake")
 
-    monkeypatch.setattr(module.time, "sleep", _sleep)
+# meiva:note
+# The watcher added no retry of its own: every request the gateway saw carries the one key of the SDK's single bounded send (its configured attempts, no more).
+def _assert_one_logical_send_that_was_refused(wire: GatewayWire) -> None:
+    assert len(wire.sent) == _SDK_ATTEMPTS
+    assert len({sent.headers["idempotency-key"] for sent in wire.sent}) == 1
 
 
 def test_watch_idle_bodies_match_after_module_docstring() -> None:
@@ -156,267 +112,261 @@ def test_watch_idle_bodies_match_after_module_docstring() -> None:
         assert body == reference, f"{label} watch_idle body differs from long-running-agent"
 
 
-def _rewrite_as_done_after_first_sleep(
-    monkeypatch: pytest.MonkeyPatch, work: Path, fake: _FakeMeiva
-) -> None:
-    """Advance one generic poll, then make an actionable update observable."""
-    slept = False
+# meiva:note
+# Rewrite the work file after `delay` seconds with a modification time that cannot equal the old one.
+def _rewrite_after(work: Path, delay: float, text: str) -> threading.Timer:
 
-    def _sleep(_seconds: float) -> None:
-        nonlocal slept
-        if slept:
-            return
-        slept = True
-        assert fake.calls == 0
-        work.write_text("STATUS: DONE\n")
+    def rewrite() -> None:
+        work.write_text(text)
         mtime = work.stat().st_mtime + 1
         os.utime(work, (mtime, mtime))
 
-    monkeypatch.setattr(watch_work.time, "sleep", _sleep)
+    timer = threading.Timer(delay, rewrite)
+    timer.start()
+    return timer
+
+
+# meiva:note
+# A supervision pace that polls every few milliseconds and never stalls unless told to.
+def _quick(**changes: float) -> Any:
+    values = {
+        "poll_seconds": 0.01,
+        "stall_seconds": 3600.0,
+        "heartbeat_seconds": 3600.0,
+        "hard_limit_seconds": 3600.0,
+    }
+    values.update(changes)
+    return watch_work.Cadence(**values)
 
 
 @pytest.mark.parametrize("module", watch_idle_modules, ids=list(_WATCH_IDLE_PATHS))
-def test_watch_idle_sends_the_reminder_once(
-    monkeypatch: pytest.MonkeyPatch, module: ModuleType
-) -> None:
+def test_watch_idle_sends_the_reminder_once(launcher: GatewayWire, module: ModuleType) -> None:
     """The idle reminder reaches the launching agent with one send."""
-    fake = _wire(monkeypatch, module)
+    _accept_messages(launcher)
+
     module._notify(7)
 
-    assert fake.calls == 1
-    channel, args, _ = fake.sent[0]
-    assert channel == "send_message"
-    assert args[0] == 42  # meiva.self.AGENT_ID — the launching agent
-    assert "target agent 7 idled" in args[1]
+    [sent] = launcher.sent
+    assert sent.path == _LAUNCHER_MESSAGES  # meiva.self.AGENT_ID — the launching agent
+    assert "target agent 7 idled" in sent.body["content"]
 
 
+# meiva:note
+# A refused send is not a silent nothing and not a ten-minute retry loop: the watcher logs it and exits 2 after the single send.
 @pytest.mark.parametrize("module", watch_idle_modules, ids=list(_WATCH_IDLE_PATHS))
 def test_watch_idle_failed_send_exits_2_without_a_retry_window(
-    monkeypatch: pytest.MonkeyPatch, module: ModuleType, capsys: pytest.CaptureFixture[str]
+    launcher: GatewayWire, module: ModuleType, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """A refused send is not a silent nothing and not a ten-minute retry loop:
-    the watcher logs it and exits 2 after the single attempt."""
-    fake = _wire(monkeypatch, module, send_failures=100)
-    _forbid_sleep(monkeypatch, module)
+    _refuse_messages(launcher)
+
     with pytest.raises(SystemExit) as excinfo:
         module._notify(7)
 
     assert excinfo.value.code == 2
-    assert fake.calls == 1
+    _assert_one_logical_send_that_was_refused(launcher)
     out = capsys.readouterr().out
     assert "wake delivery failed" in out
-    assert "gateway refused the connection" in out
+    assert "503 Service Unavailable" in out
 
 
-def _arm_gather(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, send_failures: int) -> _FakeMeiva:
-    """Point the checkpoint watcher at a tmp handoff dir with both files landed."""
-    fake = _wire(monkeypatch, gather_files, send_failures=send_failures)
-    monkeypatch.setattr(gather_files, "_dir", tmp_path)
-    monkeypatch.setattr(gather_files, "HANDOFF_DIR", str(tmp_path))
-    monkeypatch.setattr(gather_files, "EXPECTED_FILES", ["a.json", "b.json"])
-    monkeypatch.setattr(gather_files, "ORCHESTRATOR_ID", 42)
+# meiva:note
+# A checkpoint over a tmp handoff dir with both files landed.
+def _checkpoint(tmp_path: Path) -> Any:
     (tmp_path / "a.json").write_text("{}")
     (tmp_path / "b.json").write_text("{}")
-    return fake
+    return gather_files.Checkpoint(str(tmp_path), ("a.json", "b.json"), "", 0, _LAUNCHER)
 
 
-def test_gather_files_sends_the_checkpoint_once(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    fake = _arm_gather(monkeypatch, tmp_path, send_failures=0)
-    gather_files.watch(0)
+def test_gather_files_sends_the_checkpoint_once(launcher: GatewayWire, tmp_path: Path) -> None:
+    _accept_messages(launcher)
 
-    assert fake.calls == 1
-    channel, args, _ = fake.sent[0]
-    assert channel == "send_message"
-    assert args[0] == 42
-    assert "checkpoint reached" in args[1] and "(2/2)" in args[1]
+    gather_files.watch(_checkpoint(tmp_path), 0)
+
+    [sent] = launcher.sent
+    assert sent.path == _LAUNCHER_MESSAGES
+    assert "checkpoint reached" in sent.body["content"] and "(2/2)" in sent.body["content"]
 
 
 def test_gather_files_failed_send_exits_2_without_a_retry_window(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    launcher: GatewayWire, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    fake = _arm_gather(monkeypatch, tmp_path, send_failures=100)
-    _forbid_sleep(monkeypatch, gather_files)
+    _refuse_messages(launcher)
+
     with pytest.raises(SystemExit) as excinfo:
-        gather_files.watch(0)
+        gather_files.watch(_checkpoint(tmp_path), 0)
 
     assert excinfo.value.code == 2
-    assert fake.calls == 1
+    _assert_one_logical_send_that_was_refused(launcher)
     out = capsys.readouterr().out
     assert "wake delivery failed" in out
-    assert "gateway refused the connection" in out
+    assert "503 Service Unavailable" in out
 
 
-def test_watch_work_notify_sends_the_generic_wake_once(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_watch_work_notify_sends_the_generic_wake_once(launcher: GatewayWire) -> None:
     """The generic channel sends once; True means the message landed."""
-    fake = _wire(monkeypatch, watch_work)
+    _accept_messages(launcher, 41)
+
     assert watch_work._notify(41, "hello", canonical=False) is True
 
-    assert fake.calls == 1
-    channel, args, _ = fake.sent[0]
-    assert channel == "send_message"
-    assert args == (41, "hello")
+    [sent] = launcher.sent
+    assert sent.path == "/api/agents/41/messages"
+    assert sent.body["content"] == "hello"
 
 
-def test_watch_work_notify_routes_canonical_through_system_note(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_watch_work_notify_routes_canonical_through_system_note(launcher: GatewayWire) -> None:
     """Canonical supervision speaks through the system-note channel."""
-    fake = _wire(monkeypatch, watch_work)
+    launcher.stub.reply("POST", "/api/agents/41/system-note", {"inbound_id": 9}, status=201)
+
     assert watch_work._notify(41, "cleanup done", canonical=True) is True
 
-    assert fake.calls == 1
-    assert len(fake.note_keys) == 1
-    channel, args, kwargs = fake.sent[0]
-    assert channel == "send_system_note"
-    assert args == (41, "cleanup done")
-    assert kwargs["tag"] == "task"
-    assert kwargs["resurrect"] is False
-    assert isinstance(kwargs["idempotency_key"], str)
+    [sent] = launcher.sent
+    assert sent.path == "/api/agents/41/system-note"
+    assert sent.body["content"] == "cleanup done"
+    assert sent.body["note_tag"] == "task"
+    assert sent.body["resurrect"] is False
+    assert sent.headers["idempotency-key"]
 
 
+# meiva:note
+# False (not an exception) after the single send: the in-loop call sites keep supervising and send again at their next trigger, while the one-shot sites opt in to exiting.
 def test_watch_work_failed_send_reports_false_without_a_retry_window(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    launcher: GatewayWire, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """False (not an exception) after the single attempt: the in-loop call
-    sites keep supervising and send again at their next trigger, while the
-    one-shot sites opt in to exiting."""
-    fake = _wire(monkeypatch, watch_work, send_failures=100)
-    _forbid_sleep(monkeypatch, watch_work)
+    _refuse_messages(launcher, 41)
+
     assert watch_work._notify(41, "hello", canonical=False) is False
 
-    assert fake.calls == 1
+    _assert_one_logical_send_that_was_refused(launcher)
     assert "wake delivery failed" in capsys.readouterr().out
 
 
-def test_watch_work_terminal_wake_delivers_once(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_watch_work_terminal_wake_delivers_once(launcher: GatewayWire, tmp_path: Path) -> None:
     """A new actionable status wakes with a single send."""
-    fake = _wire(monkeypatch, watch_work)
+    _accept_messages(launcher)
     work = tmp_path / "work.md"
     work.write_text("STATUS: WORKING\n")
-    _rewrite_as_done_after_first_sleep(monkeypatch, work, fake)
 
-    watch_work.watch(str(work))
+    timer = _rewrite_after(work, 0.1, "STATUS: DONE\n")
+    try:
+        watch_work.watch(str(work), cadence=_quick())
+    finally:
+        timer.cancel()
+        timer.join()
 
-    assert fake.calls == 1
-    channel, args, _ = fake.sent[0]
-    assert channel == "send_message"
-    assert "STATUS: DONE" in args[1]
+    [sent] = launcher.sent
+    assert sent.path == _LAUNCHER_MESSAGES
+    assert "STATUS: DONE" in sent.body["content"]
 
 
 def test_watch_work_baselines_actionable_status_until_its_mtime_changes(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    launcher: GatewayWire, tmp_path: Path
 ) -> None:
     """A re-armed stale DONE waits for a subsequent file rewrite to wake."""
-    fake = _wire(monkeypatch, watch_work)
+    _accept_messages(launcher)
     work = tmp_path / "work.md"
     work.write_text("STATUS: DONE\n")
-    _rewrite_as_done_after_first_sleep(monkeypatch, work, fake)
+    delay = 0.15
 
-    watch_work.watch(str(work))
+    started = time.monotonic()
+    timer = _rewrite_after(work, delay, "STATUS: DONE\n")
+    try:
+        watch_work.watch(str(work), cadence=_quick())
+    finally:
+        timer.cancel()
+        timer.join()
 
-    assert fake.calls == 1
-    assert "STATUS: DONE" in fake.sent[0][1][1]
+    assert time.monotonic() - started >= delay
+    [sent] = launcher.sent
+    assert "STATUS: DONE" in sent.body["content"]
 
 
 def test_watch_work_heartbeats_an_unchanged_baselined_actionable_status(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    launcher: GatewayWire, tmp_path: Path
 ) -> None:
     """A stale actionable status wakes once through the heartbeat branch."""
-    fake = _wire(monkeypatch, watch_work)
-    monkeypatch.setattr(watch_work, "HEARTBEAT_SECONDS", 0)
-    times = iter((0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0))
-    monkeypatch.setattr(
-        watch_work,
-        "time",
-        SimpleNamespace(monotonic=lambda: next(times), sleep=watch_work.time.sleep),
-    )
+    _accept_messages(launcher)
     work = tmp_path / "work.md"
     work.write_text("STATUS: DONE\n")
 
-    watch_work.watch(str(work))
+    watch_work.watch(str(work), cadence=_quick(heartbeat_seconds=0.05))
 
-    assert fake.calls == 1
-    assert "unchanged since arming" in fake.sent[0][1][1]
+    [sent] = launcher.sent
+    assert "unchanged since arming" in sent.body["content"]
 
 
 def test_watch_work_canonical_need_input_wakes_on_its_first_eligible_poll(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    launcher: GatewayWire, tmp_path: Path
 ) -> None:
     """Canonical supervision must not baseline an already-current NEED_INPUT."""
-    work = tmp_path / "work.md"
-    work.write_text("STATUS: NEED_INPUT\n")
-    key = watch_work.coding_session_owner.canonical_key(tmp_path, tool="codex", cluster=tmp_path)
-    owner = CodingSessionOwner(
-        key=key,
-        generation="generation",
-        status=CodingSessionStatus.ACTIVE,
-        created_at=dt.datetime.fromtimestamp(work.stat().st_mtime - 1, dt.UTC),
-        expires_at=dt.datetime.now(dt.UTC) + dt.timedelta(hours=1),
+    key = watch_work.coding_session_owner.canonical_key(
+        tmp_path / "workspace", tool="codex", cluster=tmp_path / "cluster"
     )
+    work = tmp_path / "work.md"
+    owner = watch_work.coding_session_owner.launch_generation(
+        key,
+        owner_agent_id=41,
+        tasks_file=tmp_path / "tasks.md",
+        work_file=work,
+        ttl_seconds=3600,
+        writer=watch_work.AtomicWriter(watch_work.SYSTEM_FS),
+    )
+    generation = owner.generation
+    assert generation is not None
+    work.write_text("STATUS: NEED_INPUT\n")
+    current = work.stat().st_mtime + 1
+    os.utime(work, (current, current))
+    launcher.stub.reply("POST", "/api/agents/41/system-note", {"inbound_id": 9}, status=201)
+    launcher.stub.reply("GET", "/api/agents/41", {"status": "idling"})
 
-    def _read(_key: CodingSessionKey, generation: str) -> CodingSessionOwner:
-        assert _key == key
-        assert generation == owner.generation
-        return owner
-
-    def _owner_terminated(_agent_id: int) -> bool:
-        return False
-
-    def _session_crashed(_owner: CodingSessionOwner) -> bool:
-        return False
-
-    monkeypatch.setattr(watch_work.coding_session_owner, "read", _read)
-    monkeypatch.setattr(watch_work, "_owner_terminated", _owner_terminated)
-    monkeypatch.setattr(watch_work, "_session_crashed", _session_crashed)
-    messages: list[str] = []
-
-    class CanonicalWakeError(RuntimeError):
-        pass
-
-    def _notify(_agent_id: int, message: str, *, canonical: bool) -> bool:
-        assert canonical
-        messages.append(message)
-        raise CanonicalWakeError
-
-    def _unexpected_sleep(_seconds: float) -> None:
-        raise AssertionError("canonical NEED_INPUT did not wake on its first eligible poll")
-
-    monkeypatch.setattr(watch_work, "_notify", _notify)
-    monkeypatch.setattr(watch_work.time, "sleep", _unexpected_sleep)
-
-    with pytest.raises(CanonicalWakeError):
-        watch_work.watch(
-            str(work),
-            cluster=tmp_path,
-            workspace=tmp_path,
-            generation="generation",
-            owner_agent_id=41,
+    def end_supervision() -> None:
+        watch_work.coding_session_owner.terminate_generation(
+            key,
+            generation,
+            reason="test-over",
+            writer=watch_work.AtomicWriter(watch_work.SYSTEM_FS),
         )
 
-    assert messages == [
+    timer = threading.Timer(0.3, end_supervision)
+    timer.start()
+    try:
+        watch_work.watch(
+            str(work),
+            cluster=str(tmp_path / "cluster"),
+            workspace=str(tmp_path / "workspace"),
+            generation=generation,
+            owner_agent_id=41,
+            cadence=_quick(),
+        )
+    finally:
+        timer.cancel()
+        timer.join()
+
+    notes = [sent for sent in launcher.sent if sent.path == "/api/agents/41/system-note"]
+    [note] = notes
+    assert note.body["content"] == (
         f"coding agent reported STATUS: NEED_INPUT in {work} -- read the file and reply"
-    ]
+    )
 
 
 def test_watch_work_terminal_wake_exits_2_on_exhaustion(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    launcher: GatewayWire, tmp_path: Path
 ) -> None:
     """The generic one-shot path: a wake that fails exits 2 instead of ending
     as if it had been delivered."""
-    fake = _wire(monkeypatch, watch_work, send_failures=100)
+    _refuse_messages(launcher)
     work = tmp_path / "work.md"
     work.write_text("STATUS: WORKING\n")
-    _rewrite_as_done_after_first_sleep(monkeypatch, work, fake)
 
-    with pytest.raises(SystemExit) as excinfo:
-        watch_work.watch(str(work))
+    timer = _rewrite_after(work, 0.1, "STATUS: DONE\n")
+    try:
+        with pytest.raises(SystemExit) as excinfo:
+            watch_work.watch(str(work), cadence=_quick())
+    finally:
+        timer.cancel()
+        timer.join()
 
     assert excinfo.value.code == 2
-    assert fake.calls == 1
+    _assert_one_logical_send_that_was_refused(launcher)
 
 
 # --------------------------------------------------------------------------- #
@@ -455,12 +405,10 @@ def _exec_prefix_through(path: Path, target: str, namespace: dict[str, Any]) -> 
 
 
 @pytest.fixture
-def _fake_meiva_module(monkeypatch: pytest.MonkeyPatch) -> _FakeMeiva:
-    """The real `meiva` module with `meiva.self` answering as `_FakeMeiva().self` (agent 42): the
-    reference scripts do a top-level `import meiva` and read only `meiva.self.AGENT_ID`."""
-    fake = _FakeMeiva()
-    monkeypatch.setattr(meiva, "self", fake.self, raising=False)
-    return fake
+def agent_home(sdk_environment: object, unit_home: Path) -> int:
+    """The SDK root of a test home, with this process pinned as agent 1: the reference scripts
+    do a top-level `import meiva` and read only `meiva.self.AGENT_ID`."""
+    return meiva.self.AGENT_ID
 
 
 @pytest.mark.parametrize(
@@ -471,7 +419,7 @@ def _fake_meiva_module(monkeypatch: pytest.MonkeyPatch) -> _FakeMeiva:
     ],
 )
 def test_lite_script_handoff_dir_uses_workspace_dir(
-    _fake_meiva_module: _FakeMeiva, filename: str, target: str, suffix: str
+    agent_home: int, filename: str, target: str, suffix: str
 ) -> None:
     """Importing a lite script only defines functions at module top level
     (unlike the full orchestrators below), so a full exec is safe here."""
@@ -482,7 +430,7 @@ def test_lite_script_handoff_dir_uses_workspace_dir(
         ),
         namespace,
     )
-    assert namespace[target] == workspace_dir(_fake_meiva_module.self.AGENT_ID) / suffix
+    assert namespace[target] == workspace_dir(agent_home) / suffix
 
 
 @pytest.mark.parametrize(
@@ -493,20 +441,16 @@ def test_lite_script_handoff_dir_uses_workspace_dir(
     ],
 )
 def test_full_orchestrator_handoff_dir_uses_workspace_dir(
-    _fake_meiva_module: _FakeMeiva, filename: str, target: str, task_var: str
+    agent_home: int, filename: str, target: str, task_var: str
 ) -> None:
     namespace: dict[str, Any] = {"__name__": f"{filename}_under_test"}
     _exec_prefix_through(_DYNAMIC_WORKFLOW_REFERENCES / filename, target, namespace)
-    assert (
-        namespace[target] == workspace_dir(_fake_meiva_module.self.AGENT_ID) / namespace[task_var]
-    )
+    assert namespace[target] == workspace_dir(agent_home) / namespace[task_var]
 
 
-def test_orchestrator_template_handoff_dir_uses_workspace_dir(
-    _fake_meiva_module: _FakeMeiva,
-) -> None:
+def test_orchestrator_template_handoff_dir_uses_workspace_dir(agent_home: int) -> None:
     namespace: dict[str, Any] = {"__name__": "orchestrator_template_under_test"}
     _exec_prefix_through(
         _DYNAMIC_WORKFLOW_REFERENCES / "orchestrator_template.py", "handoff", namespace
     )
-    assert namespace["handoff"] == workspace_dir(_fake_meiva_module.self.AGENT_ID) / "task_handoff"
+    assert namespace["handoff"] == workspace_dir(agent_home) / "task_handoff"

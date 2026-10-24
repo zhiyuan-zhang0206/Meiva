@@ -1,0 +1,8 @@
+[purity]
+"_idle.py" = "strict"
+"_js.py" = "strict"
+"_landing.py" = "strict"
+"_pacing.py" = "strict"
+"_pages.py" = "strict"
+"_rows.py" = "strict"
+"_sites.py" = "strict"
