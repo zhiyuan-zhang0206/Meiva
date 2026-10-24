@@ -18,7 +18,6 @@ from pathlib import Path
 
 import pytest
 
-from base.config import settings
 from base.host.net.tests.local_http import closed_port_url
 from meiva_builtins.skills.tests.local_post_server import (
     RecordedPost,
@@ -186,15 +185,20 @@ def test_unconfigured_credentials_name_the_missing_alias() -> None:
     CREDENTIALS.require()
 
 
-def test_read_credentials_prefers_env_over_settings() -> None:
+def test_credentials_with_a_token_leave_no_room_for_the_settings_domain() -> None:
     env = {"MEIVA_TELEGRAM_BOT_TOKEN": "env:TOKEN", "MEIVA_TELEGRAM_OWNER_ID": "777"}
-    assert send_file.read_credentials(env) == delivery.Credentials("env:TOKEN", 777)
+    assert not delivery.credentials_from_env(env).lacks_token()
 
 
-def test_read_credentials_falls_back_to_the_settings_domain_when_env_is_empty() -> None:
-    assert send_file.read_credentials({"MEIVA_TELEGRAM_BOT_TOKEN": ""}) == delivery.Credentials(
-        token=settings.telegram.telegram_bot_token, chat_id=settings.telegram.telegram_owner_id
-    )
+@pytest.mark.parametrize(
+    "env",
+    [{}, {"MEIVA_TELEGRAM_BOT_TOKEN": ""}, {"MEIVA_TELEGRAM_OWNER_ID": "777"}],
+    ids=["unset", "empty token", "owner only"],
+)
+def test_credentials_without_a_token_leave_room_for_the_settings_domain(
+    env: dict[str, str],
+) -> None:
+    assert delivery.credentials_from_env(env).lacks_token()
 
 
 def _run_script(home: Path, file: Path) -> subprocess.CompletedProcess[str]:

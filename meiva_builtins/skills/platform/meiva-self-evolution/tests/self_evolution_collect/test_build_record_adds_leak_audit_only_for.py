@@ -27,11 +27,11 @@ def test_build_record_adds_leak_audit_only_for_eval_collection(tmp_path: Path) -
     values: dict[str, Any] = {
         "agent_id": 1,
         "week": "2026-W99",
-        "events": [("code", {"body": f"open('{paths.self_evolution}/reports/result.md')"})],
-        "log_events": [],
-        "inbounds": [],
+        "events": (("code", {"body": f"open('{paths.self_evolution}/reports/result.md')"}),),
+        "log_events": (),
+        "inbounds": (),
         "meta": record_mod.AgentMeta("user", "completed", "done"),
-        "transcript": [],
+        "transcript": (),
         "skills_touched": [],
     }
     weekly = record_mod.build_record(record_mod.RunInputs(**values))

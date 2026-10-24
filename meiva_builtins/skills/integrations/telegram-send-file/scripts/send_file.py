@@ -66,23 +66,6 @@ def validate_file(path: str | Path) -> Path:
 
 
 # meiva:note
-# Bot token + owner chat id for this process. Agent processes may NOT construct the
-# ``telegram`` settings domain (per-process config, Task #856: the agent profile excludes
-# it, and the consumption-matrix guard keeps it that way), so the canonical env aliases in
-# `env` (``load_meiva_env`` populates them from $MEIVA_HOME/.env, the same source
-# im_bridge's settings read) win. When the token alias is empty (a bare CLI context), the
-# settings domain supplies both values if this process may construct it. Called once, by
-# the entry point.
-def read_credentials(env: Mapping[str, str]) -> Credentials:
-    from_env = credentials_from_env(env)
-    if from_env.token or not settings.has_domain("telegram"):
-        return from_env
-    return Credentials(
-        token=settings.telegram.telegram_bot_token, chat_id=settings.telegram.telegram_owner_id
-    )
-
-
-# meiva:note
 # POST one file to Telegram's sendDocument at `api_base`; return the result object. Errors
 # are sanitized: httpx exceptions can embed the request URL, which contains the bot token,
 # so only the exception class name is surfaced.
@@ -137,7 +120,23 @@ def main(argv: Sequence[str], *, api_base: str, credentials: Credentials) -> int
         return 1
 
 
+# meiva:note
+# The process entry reads the world once. Bot token + owner chat id come from the canonical env
+# aliases (`load_meiva_env` populates them from $MEIVA_HOME/.env, the same source im_bridge's
+# settings read), because agent processes may NOT construct the ``telegram`` settings domain
+# (per-process config, Task #856: the agent profile excludes it, and the consumption-matrix
+# guard keeps it that way; the guard recognizes a settings read only inside an
+# ``if settings.has_domain("telegram")`` body). When the token alias is empty (a bare CLI
+# context), the settings domain supplies both values if this process may construct it.
 if __name__ == "__main__":
-    raise SystemExit(
-        main(sys.argv[1:], api_base=TELEGRAM_API_BASE, credentials=read_credentials(os.environ))
-    )
+    credentials = credentials_from_env(os.environ)
+    if settings.has_domain("telegram"):
+        credentials = (
+            Credentials(
+                token=settings.telegram.telegram_bot_token,
+                chat_id=settings.telegram.telegram_owner_id,
+            )
+            if credentials.lacks_token()
+            else credentials
+        )
+    raise SystemExit(main(sys.argv[1:], api_base=TELEGRAM_API_BASE, credentials=credentials))

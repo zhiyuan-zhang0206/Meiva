@@ -64,21 +64,19 @@ class ScanResult(NamedTuple):
     counts: dict[str, int]
 
 
+# meiva:note
+# Collect the window's runs and write them under `$MEIVA_HOME/self_evolution/daily/<week>.jsonl`;
+# `week` is the label the caller names the dataset by. The weekly `dataset/` files are never
+# touched, so a daily run can never clobber a weekly file that shares the same date stamp.
+#
+# `counts` reports how many window agents the source produced and how many the TEST- filter
+# dropped (`{"seen", "excluded_test", "skipped_meta"}` from collect.collect_with_counts): the
+# empty-dataset sentinel keys on it to tell a TEST-only window from a broken data source.
+#
+# Source: the gateway's /api/events; a failed read fails the scan.
 def scan(
-    days: int, week: str | None = None, *, env: collect.CollectEnv, include_test: bool = False
+    days: int, week: str, *, env: collect.CollectEnv, include_test: bool = False
 ) -> ScanResult:
-    """Collect the window's runs and write them under
-    `$MEIVA_HOME/self_evolution/daily/<date>.jsonl`. The weekly `dataset/`
-    files are never touched, so a daily run can never clobber a weekly
-    file that shares the same date stamp.
-
-    `counts` reports how many window agents the source produced and how many
-    the TEST- filter dropped (`{"seen", "excluded_test", "skipped_meta"}`
-    from collect.collect_with_counts) — the empty-dataset sentinel keys on
-    it to tell a TEST-only window from a broken data source.
-
-    Source: the gateway's /api/events; a failed read fails the scan."""
-    week = week or week_label(env.now)
     records, counts = collect.collect_with_counts(
         resolve_window(env.now, days, None, None),
         week,
@@ -122,7 +120,12 @@ def main(argv: Sequence[str], env: ScanEnv) -> int:
     if args.days < 1:
         print("error: --days must be >= 1", file=sys.stderr)
         return 1
-    result = scan(args.days, env=env.collection, include_test=args.include_test)
+    result = scan(
+        args.days,
+        week_label(env.collection.now),
+        env=env.collection,
+        include_test=args.include_test,
+    )
     view = scan_report.ScanView(
         result.path, args.days, result.counts, env.collection.now, env.coverage_floor
     )

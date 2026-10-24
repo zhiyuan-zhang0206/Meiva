@@ -38,7 +38,7 @@ def check_usd_limit(usd_limit: float | None) -> None:
 class BudgetFacts:
     recorded_cost_usd: float
     unpriced_calls: int
-    agent_ids: list[int]
+    agent_ids: tuple[int, ...]
     lineage: str
     start: str
     end: str
@@ -52,7 +52,7 @@ def budget_message(facts: BudgetFacts, *, usd_limit: float | None) -> str | None
         return None
     return (
         f"Usage budget reminder: recorded USD {facts.recorded_cost_usd:.6f} "
-        f">= {usd_limit}. Agents: {facts.agent_ids}; "
+        f">= {usd_limit}. Agents: {list(facts.agent_ids)}; "
         f"lineage: {facts.lineage}; window: [{facts.start}, {facts.end}). "
         f"Unpriced calls: {facts.unpriced_calls}. Reassess before adding work. "
         "Preserve useful results and recovery notes; finish a safe in-flight unit, "

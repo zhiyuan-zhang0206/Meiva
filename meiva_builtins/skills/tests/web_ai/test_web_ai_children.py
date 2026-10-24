@@ -14,6 +14,7 @@ from meiva_builtins.skills.tests.web_ai.chrome_stand_in import (
     PageScript,
     ServeChrome,
     StandInChrome,
+    known_sites,
 )
 from meiva_builtins.skills.tests.web_ai.chrome_stand_in import serve_chrome as serve_chrome
 from meiva_builtins.skills.tests.web_ai.driver_modules import load_driver_modules
@@ -57,7 +58,9 @@ def test_research_reply_types_the_answer_into_the_conversation_and_keeps_the_tab
 ) -> None:
     chrome = serve_chrome(
         StandInChrome(
-            js=M.js, profiles=M.sites.SITES, pages={CONVERSATION: PageScript(after_submit_url=None)}
+            js=M.js,
+            profiles=known_sites(M.sites, M.js),
+            pages={CONVERSATION: PageScript(after_submit_url=None)},
         )
     )
     args = argparse.Namespace(site="chatgpt", prompt="focus on 2025", url=CONVERSATION)

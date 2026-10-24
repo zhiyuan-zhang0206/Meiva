@@ -35,8 +35,15 @@ class Credentials:
     token: str
     chat_id: int
 
+    # meiva:note
+    # No bot token is named. For credentials read from the environment aliases this is the one
+    # case where the settings domain may supply them instead: a token in the environment always
+    # wins, so a process that cannot construct the settings domain never needs it.
+    def lacks_token(self) -> bool:
+        return not self.token
+
     def require(self) -> None:
-        if not self.token:
+        if self.lacks_token():
             raise RuntimeError("Telegram bot token not configured (MEIVA_TELEGRAM_BOT_TOKEN)")
         if not self.chat_id:
             raise RuntimeError("Telegram owner chat not configured (MEIVA_TELEGRAM_OWNER_ID)")

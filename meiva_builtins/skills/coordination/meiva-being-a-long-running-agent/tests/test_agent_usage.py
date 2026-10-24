@@ -11,6 +11,9 @@ import pytest
 from psycopg.types.json import Jsonb
 
 from base.db import Database
+from base.native_process.code_version import CodeVersion
+from base.native_process.loaded_commit import LoadedCommit
+from base.telemetry import process_name
 from base.telemetry.metrics import usage as reader
 from meiva.tests.fixtures.gateway_wire import GatewayWire
 from meiva.tests.fixtures.gateway_wire import gateway_stub as gateway_stub
@@ -114,7 +117,7 @@ def test_window_prices_zero_usage_and_unpriced_events(db_conn: psycopg.Connectio
 
 
 _FACTS = budget.BudgetFacts(
-    recorded_cost_usd=0.25, unpriced_calls=1, agent_ids=[1], lineage="self", start="s", end="e"
+    recorded_cost_usd=0.25, unpriced_calls=1, agent_ids=(1,), lineage="self", start="s", end="e"
 )
 
 
@@ -147,7 +150,7 @@ def test_token_counts_are_never_a_budget_threshold() -> None:
 
     facts = usage.facts_of(report)
 
-    assert facts.agent_ids == [1]
+    assert facts.agent_ids == (1,)
     assert budget.budget_message(facts, usd_limit=1.0) is None
 
 
@@ -303,11 +306,17 @@ def test_polling_reads_each_round_until_the_budget_is_breached(
     assert (method, path) == ("POST", "/api/agents/2/messages")
 
 
-def test_the_process_root_builds_one_database_handle_for_every_poll(db_url: str) -> None:
+# meiva:note
+# The process root hands the poll one database whose entry gate carries the version of the code
+# this process loaded: the session is named after that version, which a gate that exempted the
+# process (named `meiva:cli`) would not do.
+def test_the_process_database_is_named_after_the_captured_code_version(db_url: str) -> None:
     database = usage.process_database()
+    version = CodeVersion(LoadedCommit.capture()).get()
 
     with database.connect() as conn:
-        assert conn.execute("SELECT 1").fetchone() == (1,)
+        row = conn.execute("SHOW application_name").fetchone()
+    assert row == (f"meiva:{process_name()}:v{version}",)
 
 
 def test_lifetime_report_combines_ledger_and_tail(db_conn: psycopg.Connection) -> None:

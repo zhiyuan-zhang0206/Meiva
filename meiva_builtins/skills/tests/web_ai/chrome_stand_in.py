@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Callable, Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from types import ModuleType
-from typing import Any, Protocol, cast
+from typing import Any, cast
 
 import pytest
 
@@ -19,22 +19,29 @@ _SENTINEL = "SENTINEL-TEXT"
 
 
 # meiva:note
-# What the stand-in reads from a site profile of the driver: the host that selects it and the selector lists its scripts are built from.
-class Profile(Protocol):
-    @property
-    def host(self) -> str: ...
+# What the stand-in reads from one site profile of the driver: the host that selects it, the selector lists its scripts are built from and the script that reads its answer. The profile classes live in the driver's loaded modules, which no test module can name, so the stand-in holds this value, read once by `known_sites`.
+@dataclass(frozen=True)
+class KnownSite:
+    host: str
+    composer: tuple[str, ...]
+    send: tuple[str, ...]
+    stop: tuple[str, ...]
+    read_answer: str
 
-    @property
-    def composer(self) -> Sequence[str]: ...
 
-    @property
-    def send(self) -> Sequence[str]: ...
-
-    @property
-    def stop(self) -> Sequence[str]: ...
-
-    @property
-    def answer(self) -> object: ...
+# meiva:note
+# The sites a page can be on, read from the driver's loaded `_sites` module; the answer script is the one the driver's `_js` module builds for the profile.
+def known_sites(sites: ModuleType, js: ModuleType) -> dict[str, KnownSite]:
+    return {
+        name: KnownSite(
+            host=profile.host,
+            composer=tuple(profile.composer),
+            send=tuple(profile.send),
+            stop=tuple(profile.stop),
+            read_answer=js.read_answer_js(profile.answer),
+        )
+        for name, profile in sites.SITES.items()
+    }
 
 
 # meiva:note
@@ -61,7 +68,7 @@ class OpenTab:
     id: int
     location: str
     script: PageScript
-    profile: Profile | None
+    profile: KnownSite | None
     composer: bool
     typed: str = ""
     submitted: bool = False
@@ -83,7 +90,7 @@ class StandInChrome:
         self,
         *,
         js: ModuleType,
-        profiles: Mapping[str, Profile],
+        profiles: Mapping[str, KnownSite],
         pages: Mapping[str, PageScript] | None = None,
         marks_selected: bool = True,
     ) -> None:
@@ -111,7 +118,7 @@ class StandInChrome:
         known = [prefix for prefix in self._pages if url.startswith(prefix)]
         return self._pages[max(known, key=len)] if known else PageScript()
 
-    def _profile_for(self, url: str) -> Profile | None:
+    def _profile_for(self, url: str) -> KnownSite | None:
         return next((p for p in self._profiles.values() if f"//{p.host}" in url), None)
 
     def _open(self, url: str, script: PageScript) -> OpenTab:
@@ -204,7 +211,7 @@ class StandInChrome:
             return "composer", tab.composer
         if script == js.any_present_js(profile.stop):
             return "stop", self._next_stop(tab)
-        if script == js.read_answer_js(profile.answer):
+        if script == profile.read_answer:
             return "answer", self._next_answer(tab)
         if script == js.submit_js(profile.send, profile.composer):
             return "submit", self._submit(tab)

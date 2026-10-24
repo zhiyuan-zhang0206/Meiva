@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Any, cast
 
 import pytest
@@ -76,11 +77,11 @@ def _run(**fields: Any) -> Any:
     values: dict[str, Any] = {
         "agent_id": 7,
         "week": "2026-08-30",
-        "events": [],
-        "log_events": [],
-        "inbounds": [],
+        "events": (),
+        "log_events": (),
+        "inbounds": (),
         "meta": record_module.AgentMeta("user", "terminated", ""),
-        "transcript": [],
+        "transcript": (),
         "skills_touched": [],
     }
     values.update(fields)
@@ -96,8 +97,8 @@ def _build(
 ) -> dict[str, Any]:
     return record.build_record(
         _run(
-            inbounds=inbounds or [],
-            transcript=transcript if transcript is not None else [],
+            inbounds=tuple(inbounds or ()),
+            transcript=tuple(transcript if transcript is not None else ()),
             meta=record_module.AgentMeta(spawner, "terminated", ""),
         )
     )
@@ -119,11 +120,11 @@ def test_exec_failure_fumble_threshold_scales_with_turns(
 def test_broadcast_instruction_is_excluded_from_per_agent_corrections(record: Any) -> None:
     rec = record.build_record(
         _run(
-            events=[("llm_usage", {"model": "deepseek", "in_total": 900, "out_total": 200})],
-            inbounds=[
+            events=(("llm_usage", {"model": "deepseek", "in_total": 900, "out_total": 200}),),
+            inbounds=(
                 _inbound("user", "task prompt"),
                 _inbound("user", "wrong: pause all work until resumed", broadcast=True),
-            ],
+            ),
             meta=record_module.AgentMeta("user", "terminated", "delivered"),
         )
     )
@@ -136,11 +137,11 @@ def test_broadcast_instruction_is_excluded_from_per_agent_corrections(record: An
 def test_targeted_correction_remains_a_per_agent_correction(record: Any) -> None:
     rec = record.build_record(
         _run(
-            events=[("llm_usage", {"model": "deepseek", "in_total": 900, "out_total": 200})],
-            inbounds=[
+            events=(("llm_usage", {"model": "deepseek", "in_total": 900, "out_total": 200}),),
+            inbounds=(
                 _inbound("user", "task prompt"),
                 _inbound("user", "wrong: use the requested path"),
-            ],
+            ),
             meta=record_module.AgentMeta("user", "terminated", "delivered"),
         )
     )
@@ -309,16 +310,16 @@ def _user_inbound(content: str = "ship the evidence block") -> dict[str, Any]:
 def _evidence_record(
     record: Any,
     *,
-    events: list[tuple[str, dict[str, Any]]],
-    inbounds: list[dict[str, Any]],
+    events: Sequence[tuple[str, dict[str, Any]]],
+    inbounds: Sequence[dict[str, Any]],
     status: str | None,
     task_receipts: dict[str, int] | None = None,
 ) -> dict[str, Any]:
     return record.build_record(
         _run(
             week="2026-10-17",
-            events=events,
-            inbounds=inbounds,
+            events=tuple(events),
+            inbounds=tuple(inbounds),
             meta=record_module.AgentMeta("user", status, "delivered"),
             task_receipts=task_receipts,
         )
@@ -326,7 +327,7 @@ def _evidence_record(
 
 
 def test_evidence_grade_none_without_telemetry(record: Any) -> None:
-    rec = _evidence_record(record, events=[], inbounds=[], status="terminated")
+    rec = _evidence_record(record, events=(), inbounds=(), status="terminated")
 
     assert rec["evidence"]["telemetry_events"] == 0
     assert rec["evidence_grade"] == "none"
@@ -338,7 +339,7 @@ def test_evidence_grade_partial_without_terminal_status(record: Any) -> None:
     rec = _evidence_record(
         record,
         events=_usage_events(),
-        inbounds=[_user_inbound()],
+        inbounds=(_user_inbound(),),
         status=None,
     )
 
@@ -351,7 +352,7 @@ def test_evidence_grade_partial_for_live_status(record: Any) -> None:
     rec = _evidence_record(
         record,
         events=_usage_events(),
-        inbounds=[_user_inbound()],
+        inbounds=(_user_inbound(),),
         status="idling",
     )
 
@@ -364,7 +365,7 @@ def test_evidence_grade_complete_when_all_evidence_present(record: Any) -> None:
     rec = _evidence_record(
         record,
         events=_usage_events(),
-        inbounds=[_user_inbound()],
+        inbounds=(_user_inbound(),),
         status="terminated",
     )
 
@@ -376,7 +377,7 @@ def test_evidence_grade_partial_without_task_prompt(record: Any) -> None:
     rec = _evidence_record(
         record,
         events=_usage_events(),
-        inbounds=[],
+        inbounds=(),
         status="terminated",
     )
 
@@ -390,7 +391,7 @@ def test_legacy_record_without_evidence_keeps_downstream_reads(record: Any) -> N
     rec = _evidence_record(
         record,
         events=_usage_events(),
-        inbounds=[_user_inbound()],
+        inbounds=(_user_inbound(),),
         status="terminated",
     )
     legacy = {
@@ -410,7 +411,7 @@ def test_evidence_block_reports_prompt_source_and_task_receipts(record: Any) -> 
     rec = record.build_record(
         _run(
             week="2026-10-17",
-            inbounds=[_inbound("agent:12", "peer brief")],
+            inbounds=(_inbound("agent:12", "peer brief"),),
             meta=record_module.AgentMeta("agent:12", "idling", "delivered"),
             task_receipts={"note": 3, "status": 1, "results": 2, "state_changes": 1},
         )

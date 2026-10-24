@@ -109,11 +109,11 @@ def window_records(selected: Sequence[int], week: str, rows: WindowRows) -> list
             RunInputs(
                 agent_id=agent_id,
                 week=week,
-                events=rows.events.get(agent_id, []),
-                log_events=rows.logs.get(agent_id, []),
-                inbounds=rows.inbounds.get(agent_id, []),
+                events=tuple(rows.events.get(agent_id, [])),
+                log_events=tuple(rows.logs.get(agent_id, [])),
+                inbounds=tuple(rows.inbounds.get(agent_id, [])),
                 meta=rows.meta[agent_id],
-                transcript=rows.transcripts[agent_id],
+                transcript=tuple(rows.transcripts[agent_id]),
                 skills_touched=rows.skills[agent_id],
                 task_receipts=rows.receipts.get(agent_id),
             )

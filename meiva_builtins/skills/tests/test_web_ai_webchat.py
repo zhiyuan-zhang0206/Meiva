@@ -14,6 +14,7 @@ from meiva_builtins.skills.tests.web_ai.chrome_stand_in import (
     PageScript,
     ServeChrome,
     StandInChrome,
+    known_sites,
 )
 from meiva_builtins.skills.tests.web_ai.chrome_stand_in import serve_chrome as serve_chrome
 from meiva_builtins.skills.tests.web_ai.driver_modules import load_driver_modules
@@ -56,7 +57,9 @@ def browser(
     serve: ServeChrome, pages: dict[str, PageScript] | None = None, *, marks_selected: bool = True
 ) -> StandInChrome:
     return serve(
-        StandInChrome(js=M.js, profiles=M.sites.SITES, pages=pages, marks_selected=marks_selected)
+        StandInChrome(
+            js=M.js, profiles=known_sites(M.sites, M.js), pages=pages, marks_selected=marks_selected
+        )
     )
 
 

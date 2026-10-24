@@ -45,14 +45,14 @@ def test_help_and_subprocess_counters_ride_on_the_record() -> None:
     run = record_mod.RunInputs(
         agent_id=1,
         week="w",
-        events=[
+        events=(
             ("code", {"body": "help(meiva.files)\nhelp(len)\nsubprocess.run(['x'])"}),
             ("turn_end", {}),
-        ],
-        log_events=[],
-        inbounds=[],
+        ),
+        log_events=(),
+        inbounds=(),
         meta=record_mod.AgentMeta("user", "terminated", "done"),
-        transcript=[],
+        transcript=(),
         skills_touched=[],
     )
 

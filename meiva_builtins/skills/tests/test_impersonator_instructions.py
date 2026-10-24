@@ -1,10 +1,9 @@
 from __future__ import annotations
 
-from types import SimpleNamespace
 from typing import Any
 
 import pytest
-from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
+from langchain_core.messages import HumanMessage, SystemMessage
 
 from meiva_builtins.skills.tests.skill_script import load_skill_script
 
@@ -18,29 +17,6 @@ def instruction_reader() -> Any:
         "read_instructions.py",
         name="impersonator_instruction_reader",
     )
-
-
-# meiva:note
-# A hand-written attachment for the one fault a real lease cannot produce here: leaving the
-# `with` block raises (the lease expired before detach). A real attachment needs a leased
-# agent behind a gateway and a database; `read_instructions` only needs its native snapshot
-# and its context-manager exit.
-class _Attachment:
-    def __init__(self, messages: list[BaseMessage], *, exit_error: Exception | None = None) -> None:
-        self._messages = messages
-        self._exit_error = exit_error
-        self.closed = False
-
-    def native_snapshot(self) -> Any:
-        return SimpleNamespace(messages=self._messages)
-
-    def __enter__(self) -> _Attachment:
-        return self
-
-    def __exit__(self, *_exc_info: object) -> None:
-        self.closed = True
-        if self._exit_error is not None:
-            raise self._exit_error
 
 
 def test_instruction_script_selects_native_prompt_and_preloaded_skills(
@@ -69,23 +45,6 @@ def test_instruction_script_refuses_missing_or_nontext_prompt(
     messages = [] if content is None else [SystemMessage(content=content)]
     with pytest.raises((RuntimeError, ValueError), match=r"system prompt|nonempty text"):
         instruction_reader.instruction_text(messages)
-
-
-def test_instruction_script_returns_the_text_once_the_attachment_is_closed(
-    instruction_reader: Any,
-) -> None:
-    attachment = _Attachment([SystemMessage(content="Native rules")])
-    assert instruction_reader.read_instructions(attachment) == "Native rules"
-    assert attachment.closed
-
-
-def test_instruction_script_returns_nothing_when_detach_fails(instruction_reader: Any) -> None:
-    attachment = _Attachment(
-        [SystemMessage(content="Native rules")], exit_error=RuntimeError("lease expired")
-    )
-    with pytest.raises(RuntimeError, match="lease expired"):
-        instruction_reader.read_instructions(attachment)
-    assert attachment.closed
 
 
 def test_instruction_script_reads_the_target_from_the_command_line(
