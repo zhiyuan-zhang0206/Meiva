@@ -326,9 +326,9 @@ class TestSpawn:
 
 
 # meiva:note
-# A runner whose answer is not an ops envelope at all (a proxy's HTML page under a 200) is
-# a failure nothing classified: the committed agent is named and the reason is `launch_unknown`.
-def test_post_commit_unknown_launch_failure_carries_id_and_cors_headers(
+# A proxy's HTML page under a 200 is a malformed ops response: the committed agent
+# is named and the classified launch-unreachable response retains its CORS headers.
+def test_post_commit_malformed_launch_reply_carries_id_and_cors_headers(
     db_conn: psycopg.Connection, gateway_local_runner: RunnerOps
 ) -> None:
     proxy_page = OpsReply(200, "<html>502 Bad Gateway</html>")
@@ -341,7 +341,7 @@ def test_post_commit_unknown_launch_failure_carries_id_and_cors_headers(
     assert resp.status_code == 502
     assert resp.json()["reason"] == "agent_launch_failed"
     assert resp.json()["agent_id"] > 0
-    assert resp.json()["state"]["availability"]["reason"] == "launch_unknown"
+    assert resp.json()["state"]["availability"]["reason"] == "launch_unreachable"
     assert resp.headers["access-control-allow-origin"] == allowed_origin
     assert resp.headers["access-control-allow-credentials"] == "true"
 

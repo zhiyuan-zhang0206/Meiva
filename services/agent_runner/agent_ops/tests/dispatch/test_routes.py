@@ -32,7 +32,9 @@ async def test_config_write_applies_the_overrides_and_audits_actor_and_trace(ops
     assert result["applied"] is True
     assert result["results"] == {"ops_concurrency": {"ok": True, "reason": None}}
     assert result["restart_required"] == ["ops"]
-    (record,) = [r for r in read_env_write_records(10) if r["trace_id"] == "trace-9"]
+    (record,) = [
+        r for r in read_env_write_records(10, ops.authority.env_path) if r["trace_id"] == "trace-9"
+    ]
     assert record["actor"] == "user_session:administrator"
     assert record["keys_written"] == ["MEIVA_OPS_CONCURRENCY"]
 
@@ -48,7 +50,11 @@ async def test_config_write_reports_a_refused_field_without_writing(ops: Ops) ->
     assert isinstance(results, dict)
     assert results["no_such_field"]["ok"] is False
     assert "no_such_field" in results["no_such_field"]["reason"]
-    assert [r for r in read_env_write_records(10) if r["trace_id"] == "trace-refused"] == []
+    assert [
+        r
+        for r in read_env_write_records(10, ops.authority.env_path)
+        if r["trace_id"] == "trace-refused"
+    ] == []
 
 
 async def test_config_write_without_overrides_fails_on_validation(ops: Ops) -> None:
@@ -127,3 +133,8 @@ async def test_an_unknown_kind_fails(ops: Ops) -> None:
 
     assert status == "failed"
     assert "unknown kind" in str(result["error"])
+
+
+async def test_agent_skill_view_requires_the_native_pool(ops: Ops) -> None:
+    with pytest.raises(RuntimeError, match="agent skill view requires the native DB pool"):
+        await replace(ops, pool=None).dispatch("agent_skill_view", {"agent_id": 1})
