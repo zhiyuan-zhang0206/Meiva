@@ -74,13 +74,13 @@ def test_a_session_in_the_service_refuses_before_any_signal(
     proc = launch("meiva-agent-host")
     assert new_session("meiva-agent-123-shell-1", home)
     with pytest.raises(RuntimeError, match="will not kill or replay"):
-        stop.require_no_shell_sessions()
+        stop.require_no_shell_sessions(home)
     assert proc.poll() is None
 
 
 def test_no_shell_session_is_no_refusal(home: Path, pty_service: PtyServiceProcess) -> None:
-    del home, pty_service
-    stop.require_no_shell_sessions()
+    del pty_service
+    stop.require_no_shell_sessions(home)
 
 
 @pytest.mark.parametrize("timeout", [0, -1, float("nan"), float("inf")])
@@ -295,8 +295,8 @@ def test_a_dead_service_with_only_a_known_job_does_not_block_shell_session_closu
     )
     with pytest.raises(client.ServiceDownError):
         client.request("list", socket_path=service_socket())
-    stop.require_no_shell_sessions()
-    stop.await_no_shell_sessions(time.monotonic(), "shell-sessions")
+    stop.require_no_shell_sessions(home)
+    stop.await_no_shell_sessions(home, time.monotonic(), "shell-sessions")
     assert job.poll() is None, "fixture teardown, not shell-session-presence probing, owns this job"
     assert not journal.exists()
 
@@ -304,11 +304,10 @@ def test_a_dead_service_with_only_a_known_job_does_not_block_shell_session_closu
 def test_a_dead_service_whose_ledger_names_only_dead_processes_does_not_refuse(
     home: Path, launch: Launcher
 ) -> None:
-    del home
     ledger.write(
         ledger_path(service_run()), [closure.Target("meiva-agent-123-shell-1", _dead_shell(launch))]
     )
-    stop.require_no_shell_sessions()
+    stop.require_no_shell_sessions(home)
 
 
 def test_redis_admin_credential_is_independent_of_runtime_url(

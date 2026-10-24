@@ -18,6 +18,7 @@ from base.sessions.pty.tests import pty_jobs as jobs
 from base.sessions.pty.tests import pty_shells
 from base.sessions.pty.tests.pty_reaper import PtyReaper
 from base.sessions.pty.tests.pty_reaper import pty_reaper as pty_reaper
+from base.sessions.pty.tests.pty_service import service_socket
 from base.telemetry import EventPipeline
 from cli.commands.lifecycle.stop import do_stop
 from cli.commands.lifecycle.tests.stop.stop_support import (
@@ -58,7 +59,9 @@ def test_busy_fixture_waits_for_the_job_after_a_login_helper(
         # meiva:note
         # The login helper holds the shell until it is released, as soon as it has said it runs.
         while not done.wait(0.02):
-            listed = name in {info.name for info in pty_shells.client.list_sessions()}
+            listed = name in {
+                info.name for info in pty_shells.client.list_sessions(socket_path=service_socket())
+            }
             if listed and "login-helper-ready" in pty_shells.screen(name).splitlines():
                 release.touch()
                 return

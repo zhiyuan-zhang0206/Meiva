@@ -131,7 +131,9 @@ def _host_with(daemon: AlfDaemon) -> Host:
 # meiva:note
 # Every manifest binary this machine happens to have installed.
 def _installed_here() -> tuple[Path, ...]:
-    return fw.manifest_paths(machine_name=None, host=_host_with(AlfDaemon({})))
+    return fw.manifest_paths(
+        machine_name=None, host=_host_with(AlfDaemon({})), user_home=Path.home()
+    )
 
 
 # meiva:note

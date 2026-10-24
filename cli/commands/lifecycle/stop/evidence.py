@@ -33,5 +33,5 @@ def require_unstarted_initialization(home: Path) -> bool:
     if start_serving.state_path().exists() or root_manifests_path(home).exists():
         raise RuntimeError("initialization journal conflicts with application launch evidence")
     require_root_absent(home)
-    require_no_shell_sessions()
+    require_no_shell_sessions(home)
     return True

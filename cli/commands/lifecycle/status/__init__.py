@@ -35,6 +35,7 @@ from base.cluster.machine import (
 from base.cluster.machine.boot import gateway_access_from_boot
 from base.config import ConfigBoot
 from base.deploy.git import cluster_drift
+from base.host.env.registry import process_environment
 from base.host.resource_sample import resource_sample
 from base.paths import root_manifests_path
 from cli.commands._repo import repo_root, roles_or_none
@@ -98,7 +99,7 @@ def cmd_status(*, database_factory: DatabaseFactory, command: CommandRuntime) ->
             RosterEntry(spec.session, session_name(spec.session), reason) for spec, reason in roster
         ),
         launched=launched_services(root_manifests_path(command.home)),
-        lgtm_host=is_lgtm_host(machine=command.machine),
+        lgtm_host=is_lgtm_host(command.home, roles=roles),
     )
     specs = tuple(spec for spec, _reason in roster)
     for step in plan_status(facts):
@@ -145,9 +146,22 @@ def _execute(
         case ProbeRedisBridge():
             print_redis_bridge_status(machine=command.machine, config=command.config)
         case ReadSourceDrift():
-            _emit(source_drift_lines(cluster_drift.prod_source_branch_drift()))
+            _emit(
+                source_drift_lines(
+                    cluster_drift.prod_source_branch_drift(
+                        command.home, environ=process_environment()
+                    )
+                )
+            )
         case ReadRelease(repo):
-            _emit((release_line(repo, cluster_drift.checkout_head_sha(Path(repo))),))
+            _emit(
+                (
+                    release_line(
+                        repo,
+                        cluster_drift.checkout_head_sha(Path(repo), environ=process_environment()),
+                    ),
+                )
+            )
         case ReadGateway():
             _emit(gateway_status_lines(read_gateway_outcome(command.config)))
 

@@ -40,6 +40,7 @@ from base.sessions.pty.tests.process_groups import kill_group_if_alive
 from base.sessions.pty.tests.pty_reaper import PtyReaper
 from base.sessions.pty.tests.pty_service import PtyServiceProcess as PtyServiceProcess
 from base.sessions.pty.tests.pty_service import pty_service as pty_service
+from base.sessions.pty.tests.pty_service import service_run
 from base.sessions.pty.tests.pty_shells import output_until
 from base.sessions.record import SessionRecord
 from base.telemetry import EventPipeline
@@ -344,7 +345,7 @@ class RefusingPtyService:
     def __init__(self, message: str) -> None:
         from base.sessions.pty.paths import fallback_dir, service_socket_path
 
-        path = service_socket_path()
+        path = service_socket_path(service_run())
         if path.parent == fallback_dir():
             path.parent.mkdir(mode=0o700, exist_ok=True)
         path.parent.mkdir(parents=True, exist_ok=True)

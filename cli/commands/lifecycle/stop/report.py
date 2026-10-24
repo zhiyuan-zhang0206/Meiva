@@ -23,6 +23,7 @@ def report_incomplete(
     exc: BaseException,
     phases: list[tuple[str, float]],
     *,
+    home: Path,
     owns_journal: bool,
     journal_opened: bool,
 ) -> None:
@@ -36,7 +37,7 @@ def report_incomplete(
             extra["stage"] = stage
         if survivors:
             extra["survivors"] = survivors
-        finish(1, error=f"{type(exc).__name__}: {exc}", extra=extra)
+        finish(home, 1, error=f"{type(exc).__name__}: {exc}", extra=extra)
 
 
 # meiva:note
