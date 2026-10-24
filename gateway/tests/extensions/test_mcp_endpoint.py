@@ -121,6 +121,7 @@ def _trusted_network_client(base: GatewayTestClient) -> Generator[GatewayTestCli
         yield client
 
 
+@pytest.mark.usefixtures("gateway_local_runner")
 def test_trusted_network_serves_an_anonymous_call(db_conn: psycopg.Connection) -> None:
     with mcp_client() as base, _trusted_network_client(base) as client:
         agent_id = _spawn(client)
@@ -135,6 +136,7 @@ def test_trusted_network_still_refuses_an_unknown_host() -> None:
     assert resp.status_code == 403
 
 
+@pytest.mark.usefixtures("gateway_local_runner")
 def test_tool_results_equal_the_direct_api_responses() -> None:
     with mcp_client() as client:
         agent_id = _spawn(client)
@@ -148,6 +150,7 @@ def test_tool_results_equal_the_direct_api_responses() -> None:
         assert messages == client.get(f"/api/agents/{agent_id}/messages").json()
 
 
+@pytest.mark.usefixtures("gateway_local_runner")
 def test_list_agents_passes_its_arguments_as_query_parameters() -> None:
     with mcp_client() as client:
         _spawn(client)
@@ -165,6 +168,7 @@ def test_cluster_status_reports_this_host() -> None:
     assert payload["machine_name"]
 
 
+@pytest.mark.usefixtures("gateway_local_runner")
 def test_spawn_message_terminate_round_trip(db_conn: psycopg.Connection) -> None:
     with mcp_client() as client:
         agent_id = _spawn(client)
@@ -191,6 +195,7 @@ def test_spawn_message_terminate_round_trip(db_conn: psycopg.Connection) -> None
     ]
 
 
+@pytest.mark.usefixtures("gateway_local_runner")
 def test_send_message_passes_the_declared_source_to_the_api(
     db_conn: psycopg.Connection,
 ) -> None:
@@ -217,6 +222,7 @@ def test_send_message_passes_the_declared_source_to_the_api(
     assert "x" not in rows
 
 
+@pytest.mark.usefixtures("gateway_local_runner")
 def test_spawn_passes_prompt_source_and_spawner_to_the_api(db_conn: psycopg.Connection) -> None:
     with mcp_client() as client:
         spawned = tool_result(
@@ -242,6 +248,7 @@ def test_spawn_passes_prompt_source_and_spawner_to_the_api(db_conn: psycopg.Conn
     ).fetchall() == [("external_agent:codex",)]
 
 
+@pytest.mark.usefixtures("gateway_local_runner")
 def test_idempotency_keys_reach_the_api() -> None:
     with mcp_client() as client:
         first = _spawn(client)

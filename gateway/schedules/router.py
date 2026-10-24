@@ -16,7 +16,7 @@ from base.cluster import session_name
 from base.db.transaction import write_transaction
 from base.sessions.protocol import SessionBackend
 from gateway.agents.creation import create_and_launch_agent, guarded_draft_key
-from gateway.http.config import GatewayConfig, runtime_view
+from gateway.http.config import GatewayConfig, gateway_config
 from gateway.http.model_catalog import require_model_catalog
 from gateway.routers.receipts import creation as creation_receipts
 from gateway.schedules import plans, receipts, session_control
@@ -426,7 +426,7 @@ async def get_schedule_runs(
 ) -> list[ScheduleRunView]:
 
     if limit is None:
-        limit = runtime_view(request).display.schedules_runs_default_limit
+        limit = gateway_config(request).display.schedules_runs_default_limit
     pool = request.app.state.db_pool
     await asyncio.to_thread(fetch_full_blocking, pool, schedule_id)
     return await asyncio.to_thread(_runs_blocking, pool, schedule_id, limit)
@@ -481,7 +481,7 @@ def fetch_full_blocking(pool: ConnectionPool[Any], schedule_id: int) -> tuple[An
 
 # meiva:link gateway/schedules/docs/router-contracts.meiva.okf.md
 def control_blocking(
-    pool: ConnectionPool[Any], schedule_id: int, action: str, key: str | None
+    pool: ConnectionPool[Any], schedule_id: int, action: plans.ControlAction, key: str | None
 ) -> tuple[tuple[Any, ...], bool]:
     with write_transaction(pool) as conn, conn.cursor() as cur:
         replay = receipts.begin(conn, key, {"schedule_id": schedule_id, "action": action})
@@ -507,7 +507,9 @@ def control_blocking(
     return row, plan.needs_sync
 
 
-async def _control_and_sync(request: Request, schedule_id: int, *, action: str) -> ScheduleView:
+async def _control_and_sync(
+    request: Request, schedule_id: int, *, action: plans.ControlAction
+) -> ScheduleView:
     pool = request.app.state.db_pool
     row, needs_sync = await asyncio.to_thread(
         control_blocking, pool, schedule_id, action, receipts.operation_key(request)

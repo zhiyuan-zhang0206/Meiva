@@ -18,6 +18,8 @@ from gateway.tests.auth.gateway_config import (
     spawn_via_http,
 )
 
+pytestmark = pytest.mark.usefixtures("gateway_local_runner")
+
 
 def _upload(
     client: TestClient,

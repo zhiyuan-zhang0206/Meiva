@@ -43,18 +43,23 @@ def test_both_gateway_entries_use_the_same_first_load_fact() -> None:
 
 
 # meiva:note
-# A configuration owner that refuses every field read.
-class _UnreadConfig(ConfigBoot):
-    def get_field(self, name: str) -> object:
-        raise AssertionError(
-            f"entry owner read configuration field {name!r} during cold construction"
-        )
+# The boot state of a configuration owner nothing has read a value from. A read of any field
+# prepares the owner (a lite field) or upgrades it to the eager chain (every other field), so an
+# owner still unprepared, at its initial mode and without a pending overlay was never asked.
+_NEVER_READ = {
+    "mode": "lite",
+    "reason": None,
+    "upgrades": 0,
+    "pending_count": 0,
+    "prepared": False,
+}
 
 
 def test_gateway_owner_construction_is_cold(*, machine_identity: MachineIdentity) -> None:
+    config = ConfigBoot()
     process = GatewayProcess(
         home=meiva_home(),
-        config=_UnreadConfig(),
+        config=config,
         image=LoadedCommit(Path("unknown-source"), None),
         machine=machine_identity,
         host=fake_host(),
@@ -62,6 +67,7 @@ def test_gateway_owner_construction_is_cold(*, machine_identity: MachineIdentity
     with process.lifetime():
         assert process.gate.min_read_due()
         assert process.clients.sync_events().status is DrainStatus.COMPLETED
+    assert config.boot_state() == _NEVER_READ
 
 
 # meiva:note
@@ -215,9 +221,11 @@ def test_asgi_health_keeps_its_explicit_entry_image(
 
 
 def test_openapi_schema_is_cold() -> None:
-    schema = gateway_app.openapi_schema_of(_UnreadConfig(), home=meiva_home())
+    config = ConfigBoot()
+    schema = gateway_app.openapi_schema_of(config, home=meiva_home())
     assert isinstance(schema, dict)
     assert "/api/health" in schema["paths"]
+    assert config.boot_state() == _NEVER_READ
 
 
 # meiva:note

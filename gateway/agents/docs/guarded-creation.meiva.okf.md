@@ -66,8 +66,8 @@ function in a strict module, tested by value in `gateway/agents/tests/`:
 
 A test serves the target runner's `/ops` answer from a real listener and registers the machine
 (`gateway/tests/support/runner_ops`), so the registry reads, the dispatch and the result handling run;
-the gateway's own machine is registered by the `gateway_local_runner` fixture, whose route
-executes the real op code. Races between requests for one key are produced by holding the
+the gateway's own machine is registered by the `gateway_local_runner` fixture a test requests,
+whose daemon stack executes the real op code. Races between requests for one key are produced by holding the
 key's birth lock (`gateway/tests/support/db_faults/held_lock.py`); a failed write is a trigger in the
 test's Postgres, never a replaced function.
 

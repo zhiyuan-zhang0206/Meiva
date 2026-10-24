@@ -8,46 +8,36 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Protocol
 
-__all__ = ["CoverageNote", "Evidence", "Metadata", "coverage_notes", "window_is_historical"]
-
-_FAMILIES = ("cost", "turns", "activity", "lifecycle")
+__all__ = [
+    "CoverageFacts",
+    "CoverageNote",
+    "FamilyEvidence",
+    "coverage_notes",
+    "window_is_historical",
+]
 
 
 # meiva:note
 # The part of a family's evidence the verdicts read.
-class Evidence(Protocol):
-    @property
-    def availability(self) -> str: ...
-
-    @property
-    def reason(self) -> str | None: ...
-
-    @property
-    def retained_unapplied_sources(self) -> list[str]: ...
+@dataclass(frozen=True)
+class FamilyEvidence:
+    availability: str
+    reason: str | None
+    retained_unapplied_sources: tuple[str, ...]
 
 
 # meiva:note
-# The part of the read model's metadata the verdicts read.
-class Metadata(Protocol):
-    @property
-    def window_start(self) -> datetime | None: ...
-
-    @property
-    def collection_started_at(self) -> datetime: ...
-
-    @property
-    def cost(self) -> Evidence: ...
-
-    @property
-    def turns(self) -> Evidence: ...
-
-    @property
-    def activity(self) -> Evidence: ...
-
-    @property
-    def lifecycle(self) -> Evidence: ...
+# The part of the read model's metadata the verdicts read: the pinned window and one evidence per
+# family, copied by the shell (`_metrics_health.coverage_facts`).
+@dataclass(frozen=True)
+class CoverageFacts:
+    window_start: datetime | None
+    collection_started_at: datetime
+    cost: FamilyEvidence
+    turns: FamilyEvidence
+    activity: FamilyEvidence
+    lifecycle: FamilyEvidence
 
 
 # meiva:note
@@ -64,13 +54,13 @@ class CoverageNote:
 # Mirror of the read model's ``historical`` flag (window reaches before
 # the observation collection started). A missing window start reads
 # historical — the quiet side.
-def window_is_historical(metadata: Metadata, *, spawned_at: datetime) -> bool:
-    if metadata.window_start is None:
+def window_is_historical(facts: CoverageFacts, *, spawned_at: datetime) -> bool:
+    if facts.window_start is None:
         return True
-    return max(metadata.window_start, spawned_at) < metadata.collection_started_at
+    return max(facts.window_start, spawned_at) < facts.collection_started_at
 
 
-def _condition(evidence: Evidence) -> str:
+def _condition(evidence: FamilyEvidence) -> str:
     if evidence.reason == "missing_turn_durations":
         return "missing_turn_durations"
     if evidence.reason == "archive_precision_unattributed" or evidence.retained_unapplied_sources:
@@ -86,11 +76,16 @@ def _condition(evidence: Evidence) -> str:
 # sources) are chronic noise. An UNEXPECTED limit is ``missing_turn_durations`` on a window
 # inside the collection era: turns recorded without their durations is a live recorder gap,
 # not history.
-def coverage_notes(metadata: Metadata, *, spawned_at: datetime) -> list[CoverageNote]:
-    historical = window_is_historical(metadata, spawned_at=spawned_at)
+def coverage_notes(facts: CoverageFacts, *, spawned_at: datetime) -> list[CoverageNote]:
+    historical = window_is_historical(facts, spawned_at=spawned_at)
     notes: list[CoverageNote] = []
-    for family in _FAMILIES:
-        evidence: Evidence = getattr(metadata, family)
+    families = (
+        ("cost", facts.cost),
+        ("turns", facts.turns),
+        ("activity", facts.activity),
+        ("lifecycle", facts.lifecycle),
+    )
+    for family, evidence in families:
         if evidence.availability == "observed" and not evidence.retained_unapplied_sources:
             continue
         condition = _condition(evidence)

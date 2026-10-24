@@ -5,9 +5,10 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from base.api_contracts.status import SchemaMismatchStatus
+from base.api_contracts.status import PausedReason, SchemaMismatchStatus
 from gateway.cluster.roster.roster_rows import (
     LocalFacts,
+    ProbedFacts,
     RosterRowSpec,
     identity_mismatch_status,
     local_status,
@@ -16,7 +17,6 @@ from gateway.cluster.roster.roster_rows import (
     reported_status,
     service_item,
 )
-from ops.cluster_status import ClusterStatus
 
 _UP = datetime(2026, 10, 2, 12, 0, tzinfo=UTC)
 
@@ -35,18 +35,27 @@ def _row(
     )
 
 
-def _status(name: str = "runner-a", **extra: object) -> ClusterStatus:
-    return ClusterStatus.model_validate(
-        {
-            "machine_name": name,
-            "serve_gateway": False,
-            "serve_agent_runner": True,
-            "paused": False,
-            "head_sha": "abc123",
-            "running_sha": "def456",
-            "shell_count": 3,
-            **extra,
-        }
+def _status(
+    name: str = "runner-a",
+    *,
+    paused: bool = False,
+    paused_reason: PausedReason | None = None,
+    agent_host_online: bool | None = None,
+) -> ProbedFacts:
+    return ProbedFacts(
+        machine_name=name,
+        paused=paused,
+        paused_reason=paused_reason,
+        head_sha="abc123",
+        running_sha="def456",
+        schema_mismatch=None,
+        shell_count=3,
+        agent_host_online=agent_host_online,
+        supervisor_online=None,
+        agent_count=0,
+        session_count=0,
+        agent_groups=[],
+        resource=None,
     )
 
 

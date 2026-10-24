@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 from base.cluster.machine import MachineIdentity
 from base.config.tests.configuration import snapshot_process_config
 from base.host.system.tests.fake_commands import fake_host
-from gateway.tests.auth.gateway_config import gateway_test_app
+from gateway.tests.auth.gateway_config import GatewayTestClient, gateway_test_app
 
 __all__ = ["gateway_unit", "sdk_via_gateway"]
 
@@ -41,7 +41,7 @@ def gateway_unit(
     _ = db_conn
     with (
         process.lifetime(),
-        TestClient(app, base_url="http://test-gateway") as client,
+        GatewayTestClient(app, base_url="http://test-gateway") as client,
     ):
         yield client
 

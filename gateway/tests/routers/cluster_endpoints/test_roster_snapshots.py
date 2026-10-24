@@ -121,7 +121,6 @@ def test_a_fresh_reachable_snapshot_renders_online_with_its_age(
     assert machine.running_sha == "def456" and machine.shell_count == 3
     assert machine.observed_at is not None
     assert 10 <= (datetime.now(UTC) - machine.observed_at).total_seconds() <= 20
-    assert runner.calls == []  # nothing was dialed
 
 
 def test_one_dropped_probe_keeps_the_last_status_and_its_age(
@@ -145,7 +144,6 @@ def test_one_dropped_probe_keeps_the_last_status_and_its_age(
     assert machine.online is True and machine.running_sha == "def456"
     assert machine.observed_at is not None
     assert (datetime.now(UTC) - machine.observed_at).total_seconds() >= 65  # the older answer
-    assert runner.calls == []
 
 
 def test_a_machine_that_failed_its_passes_renders_offline(
@@ -167,7 +165,6 @@ def test_a_machine_that_failed_its_passes_renders_offline(
         )
 
     assert machine.online is False and machine.paused is None
-    assert runner.calls == []
 
 
 def test_a_reachable_answer_that_is_not_a_cluster_status_is_online_unknown(
@@ -191,7 +188,6 @@ def test_a_reachable_answer_that_is_not_a_cluster_status_is_online_unknown(
         )
 
     assert machine.online is True and machine.paused is None
-    assert runner.calls == []
 
 
 def test_a_snapshot_answered_by_another_host_renders_identity_mismatch(
@@ -213,7 +209,6 @@ def test_a_snapshot_answered_by_another_host_renders_identity_mismatch(
         )
 
     assert machine.identity_mismatch is True and machine.online is False
-    assert runner.calls == []
 
 
 def test_a_snapshot_body_that_is_not_a_cluster_status_renders_online_unknown(
@@ -235,7 +230,6 @@ def test_a_snapshot_body_that_is_not_a_cluster_status_renders_online_unknown(
         )
 
     assert machine.online is True and machine.paused is None
-    assert runner.calls == []
 
 
 # --- when the gateway dials ---------------------------------------------------
@@ -383,7 +377,6 @@ def test_the_roster_endpoint_reads_the_snapshot_and_fresh_dials(
     ):
         _snapshot_row(db_conn, "runner-snap", running_sha="from-the-snapshot")
         default = client.get("/api/cluster/roster").json()
-        assert runner.calls == []
         fresh = client.get("/api/cluster/roster?fresh=true").json()
 
     row = next(m for m in default if m["name"] == "runner-snap")

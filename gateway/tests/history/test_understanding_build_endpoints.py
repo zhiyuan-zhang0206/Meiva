@@ -33,7 +33,11 @@ from base.lm.pricing import PriceBook, plugin_model_price
 from base.packages.plugin_providers import build_model_catalog
 from gateway.agents.history import understanding as module
 from gateway.agents.history.configuration import timeline_read, understanding_read
-from gateway.tests.auth.gateway_config import GatewayTestClient, gateway_test_client
+from gateway.tests.auth.gateway_config import (
+    GatewayTestClient,
+    gateway_test_client,
+    gateway_test_config,
+)
 from gateway.tests.support.checkpoints.stored import put_checkpoint
 from gateway.tests.support.checkpoints.unreadable import put_unreadable_head
 
@@ -484,18 +488,28 @@ def test_an_agent_without_history_has_no_sessions(db_conn: psycopg.Connection) -
 
 
 # meiva:note
-# A history read takes its values from the owner of the gateway that serves it: two owners
-# stay independent, and a later overlay shows in the next read.
-def test_each_gateway_reads_its_own_config_owner_and_follows_its_overlays() -> None:
-    first, second = snapshot_process_config(), snapshot_process_config()
-    first.set_field("timeline_default_limit", 11)
-    second.set_field("timeline_default_limit", 29)
-    first.set_field("message_timestamps", False)
-    second.set_field("message_timestamps", True)
-    first.set_field("llm_model", "first-model")
-    second.set_field("llm_model", "second-model")
-    first_authority = ConfigAuthority(first.view, first.view, Path("/nonexistent/first.env"))
-    second_authority = ConfigAuthority(second.view, second.view, Path("/nonexistent/second.env"))
+# A history read takes its values from the config of the gateway that serves it: two gateways
+# stay independent.
+def test_each_gateway_reads_its_own_config() -> None:
+    first = gateway_test_config(
+        {
+            "timeline_default_limit": 11,
+            "message_timestamps": False,
+            "llm_model": "first-model",
+        }
+    )
+    second = gateway_test_config(
+        {
+            "timeline_default_limit": 29,
+            "message_timestamps": True,
+            "llm_model": "second-model",
+        }
+    )
+    authority = ConfigAuthority(
+        snapshot_process_config().view,
+        snapshot_process_config().view,
+        Path("/nonexistent/gateway.env"),
+    )
 
     assert (timeline_read(first).default_limit, timeline_read(second).default_limit) == (11, 29)
     assert (
@@ -503,13 +517,6 @@ def test_each_gateway_reads_its_own_config_owner_and_follows_its_overlays() -> N
         timeline_read(second).rendering.timestamps_enabled(),
     ) == (False, True)
     assert (
-        understanding_read(first, first_authority).default_model,
-        understanding_read(second, second_authority).default_model,
+        understanding_read(first, authority).default_model,
+        understanding_read(second, authority).default_model,
     ) == ("first-model", "second-model")
-    first.set_field("timeline_default_limit", 17)
-    first.set_field("llm_model", "first-updated")
-    assert (timeline_read(first).default_limit, timeline_read(second).default_limit) == (17, 29)
-    assert (
-        understanding_read(first, first_authority).default_model,
-        understanding_read(second, second_authority).default_model,
-    ) == ("first-updated", "second-model")

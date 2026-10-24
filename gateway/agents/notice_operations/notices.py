@@ -42,7 +42,7 @@ from gateway.agents.schemas import (
     ResolveNoticeIn,
 )
 from gateway.http.auth.request_principal import PrincipalScopeError, request_key
-from gateway.http.config import runtime_view
+from gateway.http.config import gateway_config
 from ops import lifecycle as _ops
 from ops.agents import get_agent_status
 
@@ -140,7 +140,7 @@ async def get_open_notices(
 ) -> list[NoticeItem]:
     # meiva:link gateway/routers/docs/frontend-ui-data.meiva.okf.md
     if limit is None:
-        limit = runtime_view(request).display.notices_open_default_limit
+        limit = gateway_config(request).display.notices_open_default_limit
     rows = await asyncio.to_thread(
         _open_notices_blocking,
         request.app.state.db_pool,
@@ -170,7 +170,7 @@ async def get_notices_live(
 ) -> list[NoticeItem]:
     # meiva:link gateway/routers/docs/frontend-ui-data.meiva.okf.md
     if limit is None:
-        limit = runtime_view(request).display.notices_open_default_limit
+        limit = gateway_config(request).display.notices_open_default_limit
     rows = await asyncio.to_thread(_notices_after_blocking, request.app.state.db_pool, after, limit)
     return [_row_to_item(r) for r in rows]
 
@@ -190,9 +190,9 @@ async def get_notices_feed(
         )
     pool = request.app.state.db_pool
     if limit is None:
-        limit = runtime_view(request).display.notices_open_default_limit
+        limit = gateway_config(request).display.notices_open_default_limit
     if resolved_limit is None:
-        resolved_limit = runtime_view(request).display.notices_resolved_default_page
+        resolved_limit = gateway_config(request).display.notices_resolved_default_page
     resolved_where = "WHERE n.require_response AND n.resolved_at IS NOT NULL "
     resolved_params: list[object] = []
     if before_at is not None:
@@ -439,7 +439,7 @@ async def post_notice_create(
             final_expire_at = notice_expiry(
                 body.expire_at,
                 now=datetime.now(UTC),
-                ttl_limit_seconds=runtime_view(request).daemon.notice_ttl_limit_seconds,
+                ttl_limit_seconds=gateway_config(request).notice_ttl_limit_seconds,
             )
 
             # meiva:note

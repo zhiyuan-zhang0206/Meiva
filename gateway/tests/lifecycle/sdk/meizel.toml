@@ -3,4 +3,3 @@
 
 [debt.first-party-patch]
 "test_external_integration_agent.py#monkeypatch.setattr base.packages.plugins.loading.registry.build_registry" = 1
-"test_external_integration_agent.py#monkeypatch.setattr meiva.__plugin_installation__" = 1

@@ -99,6 +99,7 @@ def test_failed_launch_state_write_outage_keeps_committed_id_retriable(
     assert inbound_rows(db_conn, body["agent_id"]) == [("Keep me", "chat", "user")]
 
 
+@pytest.mark.usefixtures("gateway_local_runner")
 def test_failed_fork_launch_keeps_marker_and_prompt_in_one_birth(
     db_conn: psycopg.Connection, machine_identity: MachineIdentity
 ) -> None:
@@ -164,6 +165,7 @@ def test_admission_winning_dispatch_failure_returns_accepted_receipt(
     assert inbound_rows(db_conn, agent_id) == [("Stay", "chat", "user")]
 
 
+@pytest.mark.usefixtures("gateway_local_runner")
 def test_first_prompt_insert_failure_rolls_back_agent_row(db_conn: psycopg.Connection) -> None:
     before = db_conn.execute("SELECT count(*) FROM agents_meta").fetchone()
     with (

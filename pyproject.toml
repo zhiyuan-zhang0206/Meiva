@@ -1860,11 +1860,6 @@ reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 
 [[tool.pyright.executionEnvironments]]
-root = "tests/components/gateway"
-reportUnknownMemberType = "error"
-reportUnknownArgumentType = "error"
-
-[[tool.pyright.executionEnvironments]]
 root = "tests/components/base"
 reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"

@@ -23,7 +23,7 @@ import math
 import threading
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Any
+from typing import Any, assert_never
 
 from psycopg_pool import ConnectionPool
 
@@ -195,8 +195,12 @@ class ScheduleManager:
                 if not self._reclaim_after_host_replacement(schedule_id, wanted, now):
                     self._mark_lost(schedule_id, wanted.revision)
                     return True
-            case _:
+            case SyncAction.LAUNCH:
                 pass
+            case SyncAction.REAP_UNWANTED:
+                raise ValueError("a reap is applied before an enabled launch is planned")
+            case _:
+                assert_never(action)
         return self._launch_revision(schedule_id, now)
 
     def _launch_revision(self, schedule_id: int, now: float) -> bool:

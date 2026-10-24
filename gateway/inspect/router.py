@@ -16,7 +16,7 @@ from psycopg_pool import ConnectionPool, PoolTimeout
 
 from base.api_contracts.agent_contract import AgentNotFound
 from base.db import Database
-from gateway.http.config import runtime_view
+from gateway.http.config import gateway_config
 from gateway.inspect import _metrics, _plugin_metrics, _plugin_widgets, neighbors
 from gateway.inspect._cache import InspectCacheFullError, InspectQueryCache
 from gateway.inspect._heartbeat import HeartbeatCadence, HeartbeatState
@@ -176,7 +176,7 @@ async def get_agent_inspect_live(agent_id: int, request: Request) -> AgentInspec
     shells_available=False. No part of this response is cached.
     """
     pool = request.app.state.db_pool
-    daemon = runtime_view(request).daemon
+    heartbeat = gateway_config(request).heartbeat
     db = await asyncio.to_thread(db_rows_blocking, pool, agent_id)
     notice, shells, last_pause = await asyncio.gather(
         asyncio.to_thread(notice_blocking, pool, agent_id),
@@ -205,8 +205,8 @@ async def get_agent_inspect_live(agent_id: int, request: Request) -> AgentInspec
                 pending_inbound=db.pending_inbound,
             ),
             HeartbeatCadence(
-                idle_threshold_s=int(daemon.heartbeat_idle_threshold_seconds),
-                interval_s=int(daemon.heartbeat_interval_seconds),
+                idle_threshold_s=int(heartbeat.idle_threshold_seconds),
+                interval_s=int(heartbeat.interval_seconds),
                 jitter_span_s=JITTER_SPAN_S,
             ),
             last_pause,
@@ -308,7 +308,7 @@ def get_agent_neighbors(
         cur.execute("SELECT 1 FROM agents_meta WHERE id = %s", (agent_id,))
         if cur.fetchone() is None:
             raise AgentNotFound(f"agent {agent_id} does not exist")
-    display = runtime_view(request).display
+    display = gateway_config(request).display
     if depth is None:
         depth = display.neighbors_default_depth
     if limit is None:

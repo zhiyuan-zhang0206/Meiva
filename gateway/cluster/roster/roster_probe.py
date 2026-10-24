@@ -12,7 +12,9 @@ import asyncio
 import logging
 from typing import Any
 
+from gateway.cluster.roster.roster_rows import ProbedFacts
 from ops.cluster import rpc as cluster_rpc
+from ops.cluster_status import ClusterStatus
 
 _log = logging.getLogger(__name__)
 
@@ -39,6 +41,26 @@ async def dispatch_status_probe(name: str, ops_url: str, *, timeout_s: float) ->
         raise cluster_rpc.ClusterOpUnreachable(
             f"status_probe for machine={name!r} exceeded its {timeout_s:.1f}s total budget"
         ) from exc
+
+
+# meiva:note
+# The fields of a validated `status_probe` answer that a roster row shows.
+def probed_facts(status: ClusterStatus) -> ProbedFacts:
+    return ProbedFacts(
+        machine_name=status.machine_name,
+        paused=status.paused,
+        paused_reason=status.paused_reason,
+        head_sha=status.head_sha,
+        running_sha=status.running_sha,
+        schema_mismatch=status.schema_mismatch,
+        shell_count=status.shell_count,
+        agent_host_online=status.agent_host_online,
+        supervisor_online=status.supervisor_online,
+        agent_count=status.agent_count,
+        session_count=status.session_count,
+        agent_groups=status.agent_groups,
+        resource=status.resource,
+    )
 
 
 # meiva:note

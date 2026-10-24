@@ -105,6 +105,7 @@ async def test_notice_error_or_unproven_response_is_not_chat_fallback_or_success
     assert db_conn.execute("SELECT count(*) FROM inbound_messages").fetchone() == (0,)
 
 
+@pytest.mark.usefixtures("gateway_local_runner")
 @pytest.mark.parametrize("lost_response", [False, True])
 async def test_spawn_actual_birth_response_or_loss_is_never_repeated(
     native_weixin: NativeWeixin,

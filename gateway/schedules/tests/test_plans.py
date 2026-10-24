@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+from typing import cast
+
 import pytest
 
 from gateway.schedules.plans import (
+    ControlAction,
     capture_window,
     changed_fields,
     control_plan,
@@ -91,6 +94,11 @@ def test_restart_of_a_disabled_schedule_is_refused() -> None:
 
     assert plan.refusal is not None and "start it instead" in plan.refusal
     assert not plan.needs_sync
+
+
+def test_an_action_outside_the_three_is_not_read_as_a_start() -> None:
+    with pytest.raises(AssertionError):
+        control_plan(cast(ControlAction, "pause"), enabled=False, status="stopped")
 
 
 def test_a_logs_request_always_captures_at_least_a_screenful() -> None:

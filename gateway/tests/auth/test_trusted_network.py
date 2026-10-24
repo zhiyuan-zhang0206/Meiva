@@ -21,7 +21,6 @@ from gateway.http.auth.request_principal import (
 )
 from gateway.http.config import gateway_config_from_boot
 from gateway.http.middleware.cors import request_host, trusted_request_hosts
-from gateway.tests.auth.gateway_auth import disable_default_gateway_credentials
 from gateway.tests.auth.gateway_config import gateway_test_app, gateway_test_process
 
 CLUSTER_KEY = "trusted-network-test-secret"
@@ -30,11 +29,6 @@ HOSTS = trusted_request_hosts(
     allowed_origins=(ALLOWED_ORIGIN,), machine_host="10.0.0.5", gateway_url="http://10.0.0.5:8000"
 )
 DECLARED = {"Host": "10.0.0.5:8000"}
-
-
-@pytest.fixture(autouse=True)
-def anonymous_clients(monkeypatch: pytest.MonkeyPatch) -> None:
-    disable_default_gateway_credentials(monkeypatch)
 
 
 def probe(request: Request) -> dict[str, str | None]:

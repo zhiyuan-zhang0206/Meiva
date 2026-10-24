@@ -38,7 +38,7 @@ from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.responses import RedirectResponse, StreamingResponse
 from starlette.background import BackgroundTask
 
-from gateway.http.config import runtime_view
+from gateway.http.config import gateway_config
 
 router = APIRouter()
 
@@ -156,11 +156,11 @@ async def grafana_root() -> RedirectResponse:
 # force an unbounded gateway allocation.
 async def _proxy(rest: str, request: Request) -> Response:
     _validate_proxy_rest(rest)
-    gateway_cfg = runtime_view(request).gateway
-    if not gateway_cfg.grafana_proxy_enabled:
+    grafana = gateway_config(request).grafana
+    if not grafana.enabled:
         raise HTTPException(status_code=404, detail="grafana proxy is disabled")
-    host = gateway_cfg.grafana_host
-    port = gateway_cfg.grafana_port
+    host = grafana.host
+    port = grafana.port
     # meiva:note
     # Keep the /grafana prefix on the forwarded path: Grafana runs with
     # serve_from_sub_path=true (root_url = <gateway>/grafana), so it serves

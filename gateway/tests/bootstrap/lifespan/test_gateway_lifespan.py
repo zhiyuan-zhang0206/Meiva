@@ -5,9 +5,14 @@
 # the runtime monitor and the flushers are the production objects. The flushers are found by the
 # names the lifespan gives their tasks. The release policy (last acquired first, a failing release
 # never skips the rest, the start-up error survives) is the component
-# `gateway.app.startup_releases`, asserted in `test_startup_releases.py`.
+# `gateway.app.startup_releases`, asserted in `test_startup_releases.py`; the tests here pin that the
+# lifespan registers what it acquires with it, through the failures a real gateway meets: an
+# unusable setting after the pools opened, a failure while serving, and a stop that arrives while a
+# physical query is still running.
 
 import asyncio
+import threading
+import time
 from pathlib import Path
 from typing import Any
 
@@ -177,4 +182,95 @@ async def test_background_tasks_finish_before_the_pools_close_on_a_normal_exit(
                     lambda _done: pools_open_when_done.append(not app.state.db_pool.closed)
                 )
     assert pools_open_when_done == [True] * len(_BACKGROUND)
+    assert app.state.db_pool.closed
+
+
+# meiva:note
+# A setting that cannot start the gateway, met after the data and control pools opened and the
+# inspection cache was registered: the memory-search gate is built from a limit no semaphore
+# accepts. The error is the one the caller sees, and every resource acquired before it is closed.
+async def test_a_start_up_failure_after_the_pools_opened_closes_everything_acquired(
+    db_conn: psycopg.Connection[Any], *, machine_identity: MachineIdentity
+) -> None:
+    del db_conn
+    with gateway_test_process(
+        machine=machine_identity, fields={"memory_search_max_concurrency": -1}
+    ) as process:
+        app = gateway_test_app(process=process)
+        with pytest.raises(ValueError, match="Semaphore initial value must be >= 0"):
+            async with asyncio.timeout(5), app.router.lifespan_context(app):
+                pytest.fail("the lifespan served with an unusable memory-search limit")
+
+        assert app.state.db_pool.closed
+        assert app.state.control_db_pool.closed
+        assert not _running(*_BACKGROUND)
+        with pytest.raises(RuntimeError, match="inspection query owner is closed"):
+            await app.state.inspect_query_cache.get_or_load_async(
+                ("closed", None), lambda: 0, ttl_s=0, now=time.monotonic()
+            )
+
+
+# meiva:note
+# A failure raised while the gateway is serving, with every resource acquired and every
+# background task running: the tasks end first, while both pools are still open, then the pools
+# and clients close, and the failure is the error the caller sees.
+async def test_a_failure_while_serving_ends_the_tasks_before_closing_the_pools(
+    db_conn: psycopg.Connection[Any], *, machine_identity: MachineIdentity
+) -> None:
+    del db_conn
+    failure = RuntimeError("serving failed")
+    with gateway_test_process(machine=machine_identity) as process:
+        app = gateway_test_app(process=process)
+        pools_open_when_done: list[bool] = []
+        with pytest.raises(ExceptionGroup) as raised:
+            async with asyncio.timeout(5), app.router.lifespan_context(app):
+                for task in _running(*_BACKGROUND):
+                    task.add_done_callback(
+                        lambda _done: pools_open_when_done.append(
+                            not app.state.db_pool.closed and not app.state.control_db_pool.closed
+                        )
+                    )
+                raise failure
+
+    assert raised.value.exceptions == (failure,)
+    assert pools_open_when_done == [True] * len(_BACKGROUND)
+    assert app.state.db_pool.closed
+    assert app.state.control_db_pool.closed
+    assert app.state.grafana_client.is_closed
+    assert app.state.insights_client.is_closed
+    assert app.state.mcp_manager is None
+
+
+# meiva:note
+# An inspection query still running when the gateway stops finishes against an open pool: the
+# lifespan registers the inspection cache after the data pool, so it is drained first. The query
+# borrows a connection, signals, runs for a while, then borrows another one; that second borrow
+# fails if the pool closed while the query was away.
+async def test_an_inspection_query_in_flight_finishes_before_the_data_pool_closes(
+    db_conn: psycopg.Connection[Any], *, machine_identity: MachineIdentity
+) -> None:
+    del db_conn
+    running = threading.Event()
+
+    with gateway_test_process(machine=machine_identity) as process:
+        app = gateway_test_app(process=process)
+
+        def query() -> int:
+            with app.state.db_pool.connection() as conn:
+                running.set()
+                conn.execute("SELECT pg_sleep(0.5)")
+            with app.state.db_pool.connection() as conn:
+                row = conn.execute("SELECT 1").fetchone()
+            assert row is not None
+            return int(row[0])
+
+        async with asyncio.timeout(10):
+            async with app.router.lifespan_context(app):
+                load = asyncio.create_task(
+                    app.state.inspect_query_cache.get_or_load_async(
+                        ("in-flight", None), query, ttl_s=0, now=time.monotonic()
+                    )
+                )
+                assert await asyncio.to_thread(running.wait, 5)
+            assert await load == 1
     assert app.state.db_pool.closed

@@ -39,7 +39,10 @@ from gateway.agents.history import understanding as agents_understanding_router
 from gateway.agents.notice_operations import notices as notices_router
 from gateway.agents.notice_operations import router as guarded_notices_router
 from gateway.agents.reply_suggestion import router as reply_suggestion_router
-from gateway.agents.reply_suggestion.configuration import reply_suggestion_service
+from gateway.agents.reply_suggestion.configuration import (
+    reply_suggestion_policy,
+    reply_suggestion_service,
+)
 from gateway.agents.task_assignment import router as task_assignments_router
 from gateway.agents.to_user import document as to_user_router
 from gateway.alerts import router as alerts_router
@@ -72,7 +75,7 @@ from gateway.http.auth import rejection_log
 from gateway.http.auth import router as auth_router
 from gateway.http.auth.request_principal import TRUSTED_NETWORK_FACT, SessionKeys
 from gateway.http.auth.session_store import SessionStore, SessionTouchThrottle, touch_session
-from gateway.http.config import GatewayConfig, gateway_config_from_boot
+from gateway.http.config import GatewayConfig, gateway_config_from_boot, placeholder_config
 from gateway.http.middleware import latency, runtime_metrics
 from gateway.http.middleware.cors import request_host
 from gateway.http.middleware.error_envelope import error_response, request_trace_middleware
@@ -168,7 +171,9 @@ def _build_request_resources(
     inspect_queries = inspect_router.build_query_cache()
     app.state.inspect_query_cache = inspect_queries
     releases.push_async_callback(inspect_queries.aclose)
-    app.state.reply_suggestions = reply_suggestion_service(config)
+    gateway: GatewayConfig = app.state.gateway_config
+    app.state.reply_suggestions = reply_suggestion_service(gateway.models.llm_override)
+    app.state.reply_suggestion_policy = reply_suggestion_policy(config)
     app.state.memory_search_gate = memory_router.build_search_gate(
         config.view.services.memory_search_max_concurrency
     )
@@ -264,18 +269,26 @@ async def lifespan(
             )
             app.state.upload_recovery = upload_recovery
 
-            async with _background_lifetime(app, upload_recovery):
+            async with _background_lifetime(
+                app,
+                upload_recovery,
+                outbox_interval_seconds=config.view.gateway.notification_outbox_interval_seconds,
+                outbox_batch=config.view.gateway.notification_outbox_batch,
+            ):
                 yield
 
 
 @asynccontextmanager
 async def _background_lifetime(
-    app: FastAPI, upload_recovery: UploadRecovery
+    app: FastAPI,
+    upload_recovery: UploadRecovery,
+    *,
+    outbox_interval_seconds: float,
+    outbox_batch: int,
 ) -> AsyncGenerator[None]:
 
     mcp_manager = None
     config: GatewayConfig = app.state.gateway_config
-    view = app.state.gateway_process.config.view
     if config.mcp_endpoint_enabled:
         mcp_manager = mcp_server_endpoint.build_manager(app)
         app.state.mcp_manager = mcp_manager
@@ -293,8 +306,8 @@ async def _background_lifetime(
                 notification_outbox.run(
                     app.state.db_pool,
                     app.state.bus,
-                    interval_seconds=view.gateway.notification_outbox_interval_seconds,
-                    batch=view.gateway.notification_outbox_batch,
+                    interval_seconds=outbox_interval_seconds,
+                    batch=outbox_batch,
                 ),
                 name="gateway-notification-outbox",
             )
@@ -469,6 +482,8 @@ def create_app(
     )
     app.state.gateway_config = config
     app.state.catalog = catalog
+    if isinstance(catalog, ModelCatalog):
+        app.state.memory_embedder = memory_router.build_embedder(config.memory_search, catalog)
     app.state.command_catalog = CommandCatalog.system(skills=load_skill_names)
     app.state.memory_unreadable_reports = memory_router.unreadable_reports()
     app.state.gateway_process = process
@@ -590,20 +605,9 @@ def openapi_schema_of(config: ConfigBoot, *, home: Path) -> dict[str, Any]:
         machine=machine_from_boot(config),
         host=Host.system(),
     )
-    schema_config = GatewayConfig(
-        cluster_secret="",
-        session_ttl_seconds=3600,
-        mcp_endpoint_enabled=False,
-        allowed_origins=(),
-        browser_origin="",
-        session_cookie_secure=False,
-        human_auth="required",
-        memory_root=Path("/nonexistent/memory"),
-        upload_home=Path("/nonexistent/home"),
-    )
     with process.lifetime():
         app = create_app(
-            schema_config,
+            placeholder_config(),
             process=process,
             process_ownership="borrowed",
             catalog=CatalogLoadFailure(RuntimeError("the schema app serves no model operation")),
