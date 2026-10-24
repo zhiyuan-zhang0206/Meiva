@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 import meiva
+from base.agents.sdk.tests.sampling_owners import fixed_sampling_owner
 from base.config.tests.configuration import defaults
 from base.host.env.agent_slices import AgentSlices
 from base.lm import factory
@@ -120,6 +121,7 @@ def test_duplicate_namespace_refuses_the_second_plugin_whole():
     admitted = install.install(
         code_registry(("other_plugin", other)),
         config_images=DiskPluginConfigImages(resolve_meiva_home()),
+        sampling=fixed_sampling_owner(),
     )
 
     assert [name for name, _ in admitted.plugins] == ["meiva_code"]
@@ -149,6 +151,7 @@ def test_second_wrap_stacks_instead_of_asserting():
             )
         ),
         config_images=DiskPluginConfigImages(resolve_meiva_home()),
+        sampling=fixed_sampling_owner(),
     )
 
     after = meiva.extend.stack("files.read")

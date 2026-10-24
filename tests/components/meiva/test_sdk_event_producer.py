@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
+from pathlib import Path
 from typing import cast
 
 import pytest
@@ -10,7 +11,7 @@ from base.agents.context import MeivaContext
 from base.agents.context.clients import ClientSet
 from base.agents.context.identity import AgentIdentity
 from base.agents.sdk import call_policy
-from base.agents.sdk.tests.sampling_owners import fixed_sampling_owner
+from base.agents.sdk.tests.sampling_owners import fixed_sampling_owner, sampling_owner_serving
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot
@@ -72,17 +73,11 @@ def test_bare_python_recorder_uses_its_captured_cold_producer(
             assert pipe.stop(timeout=1).status is DrainStatus.COMPLETED
 
 
-def test_sampled_out_call_does_not_construct_a_producer(bare_context: None) -> None:
-    def sampled_policy() -> call_policy.SamplingPolicy:
-        return call_policy.SamplingPolicy(sampling_enabled=True, sample_every=1_000_000_000)
-
-    owner = call_policy.SamplingPolicyOwner(
-        initial=call_policy.SamplingPolicy(), fetch=sampled_policy
+def test_sampled_out_call_does_not_construct_a_producer(bare_context: None, tmp_path: Path) -> None:
+    owner = sampling_owner_serving(
+        call_policy.SamplingPolicy(sampling_enabled=True, sample_every=1_000_000_000),
+        tmp_path / ".env",
     )
-    # meiva:note
-    # the first read starts the refresh that installs the sampled-out policy
-    owner.read()
-    assert owner.worker is not None and owner.worker.completed.wait(5)
 
     def forbidden() -> EventPipeline:
         pytest.fail("sampled-out SDK call built a writer")
@@ -199,7 +194,7 @@ def test_first_bound_plugin_load_does_not_lend_attachment_writer_to_bare_calls(
                 prior.registry,
                 catalog=prior.catalog,
                 authority=prior.authority,
-                sampling=prior.sampling,
+                sampling=prior.require_sampling(),
                 clock=prior.clock,
                 clients=prior.clients,
                 config_images=prior.config_images,

@@ -34,17 +34,23 @@ and attribute, a member's parent module), so reversing one needs nothing from th
 applied it. A wrap puts the original back only while its parent still holds that wrap's own
 function; namespaces and members reverse through `meiva/sdk_surface/plugins.py:uninstall`.
 
-## The atexit owner follows the installation
+## The sampling owner is named by the root
 
-`install()` registers the sampling owner's `close` with `atexit` when the caller
-supplied no sampling owner — the bare-SDK process, which has no service lifespan
-to schedule that cleanup. The registration belongs to that installation rather
-than to the process at large: `uninstall()` unregisters the same `close` before
-it drops the slot, so a removed surface leaves nothing behind that could
-re-raise a refresh failure the surface no longer owns, while an installation
-left in place still reports that failure at interpreter exit. This is finite
-cleanup, not a promise of a nonzero exit code or of delivery after a hard exit.
+`install()` takes the sampling owner as a required argument; nothing below a composition root builds
+one. A root that owns a whole process with no service lifespan (the bare-SDK process, a CLI verb)
+builds it with `process_sampling_owner()` and registers its `close` with `atexit` itself; a service
+root (the agent host) closes the owner it built in its own shutdown. `uninstall()` unregisters the
+installation's owner `close` from `atexit` before it drops the slot, so a removed surface leaves
+nothing behind that could re-raise a refresh failure the surface no longer owns, while an
+installation left in place still reports that failure at interpreter exit. This is finite cleanup,
+not a promise of a nonzero exit code or of delivery after a hard exit.
 
-The process-lifetime sampling close is registered with, and removed by, the installation that owns it: uninstalling the SDK surface unregisters that owner's close, so a removed surface cannot re-raise its refresh failure at interpreter exit, while an installation left in place (the bare-SDK process) still reports one.
+`load_extensions(sampling=...)` names the owner of a first load; a reload that names none keeps the
+previous installation's owner and refuses when there is none.
+
+The owner reads the live process environment (`process_environment()`), so a gateway URL, machine
+token or flag that appears after install is seen at the next refresh. The snapshot it serves until
+its first refresh is the policy that environment already carries, and the first refresh is due one
+refresh interval after the owner is built.
 
 Parent: [[sdk-surface.meiva.okf.md]].

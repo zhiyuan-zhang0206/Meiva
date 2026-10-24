@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import atexit
 import sys
 import textwrap
 import traceback
@@ -15,6 +16,17 @@ from agent.extensions.catalog import (
     declared_vs_registered,
     entry_point_signature,
 )
+from base.agents.sdk.call_policy import SamplingPolicyOwner, process_sampling_owner
+
+
+# meiva:note
+# The sampling owner of one CLI verb: it is the process root, so it builds the owner from the process
+# environment and closes it at interpreter exit.
+def _verb_sampling() -> SamplingPolicyOwner:
+    sampling = process_sampling_owner()
+    atexit.register(sampling.close)
+    return sampling
+
 
 _WRAP = 96
 _LABEL = 13
@@ -23,7 +35,7 @@ _INDENT = " " * (2 + _LABEL)
 
 # meiva:link cli/commands/extensions/docs/plugin-inspection.meiva.okf.md
 def cmd_plugins_inspect(name: str | None) -> int:
-    catalog = build_catalog()
+    catalog = build_catalog(sampling=_verb_sampling())
     if name is None:
         _print_surfaces(catalog)
         _print_plugin_directory(catalog)
@@ -191,6 +203,7 @@ def cmd_plugins_verify() -> int:
     try:
         loaded = load_extensions(
             report=lambda name, exc: failures.append((name, exc)),
+            sampling=_verb_sampling(),
             validate_state=plugin_state_schema,
         )
     except Exception as exc:

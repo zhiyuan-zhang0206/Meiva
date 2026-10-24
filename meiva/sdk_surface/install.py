@@ -51,7 +51,7 @@ from types import MappingProxyType
 
 from pydantic import BaseModel
 
-from base.agents.sdk.call_policy import SamplingPolicyOwner, process_sampling_owner
+from base.agents.sdk.call_policy import SamplingPolicyOwner
 from base.clock import Clock
 from base.config.service_read import ConfigAuthority
 from base.lm.catalog import ModelCatalog
@@ -272,7 +272,7 @@ def install(
     catalog: ModelCatalog | None = None,
     provider_keys: ProviderKeys | None = None,
     authority: ConfigAuthority | None = None,
-    sampling: SamplingPolicyOwner | None = None,
+    sampling: SamplingPolicyOwner,
     clock: Clock | None = None,
     clients: EventPipelines | None = None,
     disabled_entries: Sequence[str] = (),
@@ -293,7 +293,6 @@ def install(
     from . import metering, sdk_disable
 
     prior = slot()
-    sampling_owner = sampling if sampling is not None else process_sampling_owner()
     setattr(meiva_module(), SLOT, LOADING)
     build = _Build()
     admitted: list[tuple[str, PluginContributions]] = []
@@ -325,7 +324,7 @@ def install(
             build.expansions.extend(paths)
             admitted.append((plugin, contributions))
         metered = metering.install(
-            sampling_owner, clients=clients, surface=metering.read_surface(meiva_module())
+            sampling, clients=clients, surface=metering.read_surface(meiva_module())
         )
     except BaseException as exc:
         _run(build.undo, build, exc)
@@ -340,7 +339,7 @@ def install(
         ),
         skill_providers=tuple(build.providers),
         metered=metered,
-        sampling=sampling_owner,
+        sampling=sampling,
         disabled=frozenset(disabled),
         faces=False,
         undo=tuple(build.undo),
@@ -352,10 +351,6 @@ def install(
         clients=clients,
     )
     setattr(meiva_module(), SLOT, installation)
-    if sampling is None:
-        # Bare SDK processes have no service lifespan. This is finite cleanup,
-        # not a guarantee of a nonzero exit or delivery after a hard exit.
-        atexit.register(sampling_owner.close)
     return installation.registry
 
 

@@ -11,6 +11,7 @@ import meiva
 from agent.process_boot import apply_per_agent_eval_isolation
 from base.agents.context import MeivaContext
 from base.agents.context.identity import AgentIdentity
+from base.agents.sdk.tests.sampling_owners import fixed_sampling_owner
 from base.config.tests.configuration import defaults
 from base.packages.plugin_config_images import DiskPluginConfigImages
 from base.packages.plugins.extensions import ExtensionRegistry, PluginContributions, SdkNamespace
@@ -33,6 +34,7 @@ def _install() -> None:
             )
         ),
         config_images=DiskPluginConfigImages(resolve_meiva_home()),
+        sampling=fixed_sampling_owner(),
     )
 
 

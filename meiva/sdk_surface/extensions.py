@@ -23,7 +23,7 @@ from base.packages.plugins.loading import StateGate
 from base.packages.plugins.loading.faces import LoadedExtensions, import_faces
 
 from . import install as sdk_install
-from .installation import EventPipelines
+from .installation import EventPipelines, SamplingPolicyOwner
 
 
 # meiva:note
@@ -50,19 +50,25 @@ def load_extensions(
     catalog: ModelCatalog | None = None,
     provider_keys: ProviderKeys | None = None,
     authority: ConfigAuthority | None = None,
+    sampling: SamplingPolicyOwner | None = None,
     clock: Clock | None = None,
     clients: EventPipelines | None = None,
     disabled_entries: Sequence[str] = (),
     validate_state: StateGate | None = None,
 ) -> LoadedExtensions:
     previous = sdk_install.uninstall() if not surface else None
-    sampling = None
     if previous is not None:
-        sampling = previous.sampling
+        if sampling is None:
+            sampling = previous.sampling
         if clients is None:
             clients = previous.clients
         if clock is None:
             clock = previous.clock
+    if sampling is None:
+        raise ValueError(
+            "load_extensions needs the sampling owner of its composition root "
+            "(`process_sampling_owner()` for a bare process); a reload keeps the previous one"
+        )
 
     loaded = import_faces(surface=surface, report=report, validate_state=validate_state)
     admitted = sdk_install.install(

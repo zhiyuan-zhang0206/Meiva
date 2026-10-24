@@ -4,6 +4,7 @@ from pathlib import Path
 import pytest
 from pydantic import BaseModel
 
+from base.agents.sdk.tests.sampling_owners import fixed_sampling_owner
 from base.lm.catalog import ModelCatalog
 from base.packages.plugin_config_images import DiskPluginConfigImages, PluginConfigOwner
 from base.packages.plugins import load_report
@@ -89,7 +90,11 @@ def test_install_refuses_a_plugin_whose_config_does_not_bind_and_installs_the_re
         )
     )
 
-    admitted = install.install(registry, config_images=DiskPluginConfigImages(resolve_meiva_home()))
+    admitted = install.install(
+        registry,
+        config_images=DiskPluginConfigImages(resolve_meiva_home()),
+        sampling=fixed_sampling_owner(),
+    )
     try:
         assert [name for name, _ in admitted.plugins] == ["healthy"]
         assert [name for name, _ in reported if name == "drifted"] == ["drifted"]

@@ -1,80 +1,83 @@
+import contextlib
 import threading
 import time
+from collections.abc import Iterator, Mapping
+from pathlib import Path
 
+import httpx
 import pytest
 
-from base.agents.sdk import call_policy
+from base.agents.sdk.call_policy import SamplingPolicy, SamplingPolicyOwner, SamplingSource
+from base.agents.sdk.tests.sampling_owners import gateway_sampling_owner
+from base.host.net.tests.local_http import serve_json
 
 
-def test_stop_retains_late_failure_and_actual_worker() -> None:
-    entered, release = threading.Event(), threading.Event()
-    original = RuntimeError("late policy bug")
+# meiva:note
+# An environment that cannot be read: any lookup is the operator interrupting the process.
+class _InterruptedEnv(Mapping[str, str]):
+    def __getitem__(self, key: str) -> str:
+        raise KeyboardInterrupt("refresh interrupted")
 
-    def read() -> call_policy.SamplingPolicy:
-        entered.set()
-        assert release.wait(5)
-        raise original
+    def __iter__(self) -> Iterator[str]:
+        return iter(())
 
-    owner = call_policy.SamplingPolicyOwner(initial=call_policy.SamplingPolicy(), fetch=read)
-    owner.read()
-    assert entered.wait(2)
-    worker = owner.worker
-    assert worker is not None
-    started = time.monotonic()
-    assert owner.stop(0.02) is False
-    assert time.monotonic() - started < 1
-    assert owner.worker is worker and worker.thread.is_alive()
-    with pytest.raises(RuntimeError, match="has stopped"):
+    def __len__(self) -> int:
+        return 0
+
+
+def test_stop_retains_late_failure_and_actual_worker(tmp_path: Path) -> None:
+    gate = threading.Event()
+    with serve_json({}, status=500, gate=gate) as gateway:
+        owner = gateway_sampling_owner(gateway.url, tmp_path / ".env")
         owner.read()
-    release.set()
-    assert worker.completed.wait(2)
-    with pytest.raises(RuntimeError) as caught:
+        assert gateway.arrived.wait(2)
+        worker = owner.worker
+        assert worker is not None
+        started = time.monotonic()
+        assert owner.stop(0.02) is False
+        assert time.monotonic() - started < 1
+        assert owner.worker is worker and worker.thread.is_alive()
+        with pytest.raises(RuntimeError, match="has stopped"):
+            owner.read()
+        gate.set()
+        assert worker.completed.wait(5)
+    with pytest.raises(httpx.HTTPStatusError) as caught:
         owner.stop()
-    assert caught.value is original
+    assert owner.error is not None and caught.value is owner.error[0]
     assert not worker.thread.is_alive()
 
 
-def test_stop_precedes_success_receipt() -> None:
-    entered, release = threading.Event(), threading.Event()
-    original = ValueError("invalid refresh")
-
-    def read() -> call_policy.SamplingPolicy:
-        entered.set()
-        assert release.wait(5)
-        raise original
-
-    owner = call_policy.SamplingPolicyOwner(initial=call_policy.SamplingPolicy(), fetch=read)
-    owner.read()
-    assert entered.wait(2)
-    worker = owner.worker
-    assert worker is not None
-    release.set()
-    assert worker.completed.wait(2)
+def test_stop_precedes_success_receipt(tmp_path: Path) -> None:
+    gate = threading.Event()
+    with serve_json({}, status=500, gate=gate) as gateway:
+        owner = gateway_sampling_owner(gateway.url, tmp_path / ".env")
+        owner.read()
+        assert gateway.arrived.wait(2)
+        worker = owner.worker
+        assert worker is not None
+        gate.set()
+        assert worker.completed.wait(5)
     receipts: list[str] = []
-    with pytest.raises(ValueError) as caught:
+    with pytest.raises(httpx.HTTPStatusError) as caught:
         owner.stop()
         receipts.append("done")
-    assert caught.value is original
+    assert owner.error is not None and caught.value is owner.error[0]
     assert receipts == []
 
 
-def test_stop_collects_refresh_boundary_failure(monkeypatch: pytest.MonkeyPatch) -> None:
-    owner = call_policy.SamplingPolicyOwner(
-        initial=call_policy.SamplingPolicy(), fetch=call_policy.SamplingPolicy
+def test_stop_collects_refresh_boundary_failure(tmp_path: Path) -> None:
+    owner = SamplingPolicyOwner(
+        initial=SamplingPolicy(),
+        source=SamplingSource(
+            env=_InterruptedEnv(), env_path=tmp_path / ".env", refresh_seconds=0.0
+        ),
     )
-    original = KeyboardInterrupt("refresh interrupted")
-
-    def refresh() -> None:
-        raise original
-
-    monkeypatch.setattr(owner, "refresh", refresh)
-    try:
+    with contextlib.suppress(KeyboardInterrupt):
         owner.read()
-    except KeyboardInterrupt as exc:
-        assert exc is original
     worker = owner.worker
     assert worker is not None and worker.completed.wait(2)
-    owner.next_refresh = 0
+    original = worker.error
+    assert isinstance(original, KeyboardInterrupt)
     with pytest.raises(KeyboardInterrupt) as read_failure:
         owner.read()
     assert read_failure.value is original and owner.worker is worker

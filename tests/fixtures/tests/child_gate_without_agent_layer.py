@@ -1,6 +1,7 @@
 import sys
 from types import SimpleNamespace
 
+from base.agents.sdk.tests.sampling_owners import fixed_sampling_owner
 from base.packages.plugin_config_images import DiskPluginConfigImages
 from base.packages.plugins.extensions import (
     ExtensionRegistry,
@@ -25,6 +26,7 @@ install.install(
         )
     ),
     config_images=DiskPluginConfigImages(resolve_meiva_home()),
+    sampling=fixed_sampling_owner(),
 )
 assert plugin_registrations_present()
 assert "agent.state" not in sys.modules, "asking must not load the agent layer"

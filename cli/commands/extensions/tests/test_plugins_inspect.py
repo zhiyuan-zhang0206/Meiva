@@ -42,7 +42,9 @@ def _view(
 
 def _install(monkeypatch: pytest.MonkeyPatch, *views: PluginView) -> None:
     monkeypatch.setattr(
-        plugins_inspect, "build_catalog", lambda: Catalog(surfaces=SURFACES, plugins=views)
+        plugins_inspect,
+        "build_catalog",
+        lambda **_kwargs: Catalog(surfaces=SURFACES, plugins=views),
     )
 
 

@@ -32,6 +32,7 @@ from base.agents.context import MeivaContext
 from base.agents.context.clients import ClientSet, DatabaseFactory
 from base.agents.context.gateway_client.transport import GatewayTransportInputs
 from base.agents.context.identity import AgentIdentity
+from base.agents.sdk.call_policy import SamplingPolicyOwner
 from base.clock import SYSTEM_TIMERS, Clock
 from base.clock.configuration import clock_config_from_boot
 from base.cluster.machine import MachineIdentity
@@ -356,6 +357,7 @@ class LoadInputs:
     home: Path
     catalog: ModelCatalog
     provider_keys: ProviderKeys
+    sampling: SamplingPolicyOwner
     context: MeivaContext | None
     validate_state: StateGate | None
 
@@ -371,6 +373,7 @@ def _load_inputs(
     validate_state: StateGate | None,
 ) -> LoadInputs:
     from base import paths
+    from base.agents.sdk.call_policy import process_sampling_owner
     from base.lm.factory import process_provider_keys
     from base.packages.plugin_providers import build_model_catalog
 
@@ -387,6 +390,8 @@ def _load_inputs(
     else:
         clock = Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS)
     catalog = build_model_catalog()
+    sampling = process_sampling_owner()
+    atexit.register(sampling.close)
     return LoadInputs(
         surface=surface,
         disabled=disabled,
@@ -397,6 +402,7 @@ def _load_inputs(
         home=paths.meiva_home(),
         catalog=catalog,
         provider_keys=process_provider_keys(catalog),
+        sampling=sampling,
         context=context,
         validate_state=validate_state,
     )
@@ -440,6 +446,7 @@ def load_surface(inputs: LoadInputs) -> None:
             catalog=inputs.catalog,
             provider_keys=inputs.provider_keys,
             authority=authority,
+            sampling=inputs.sampling,
             clients=inputs.clients,
             clock=inputs.clock,
             disabled_entries=inputs.disabled,

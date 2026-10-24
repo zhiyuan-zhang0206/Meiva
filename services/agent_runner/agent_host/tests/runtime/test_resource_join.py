@@ -4,7 +4,6 @@ import asyncio
 import os
 import subprocess
 import sys
-import threading
 import time
 from collections.abc import Callable
 from dataclasses import replace
@@ -12,15 +11,17 @@ from pathlib import Path
 from typing import Any, cast
 from unittest.mock import MagicMock
 
+import httpx
 import pytest
 
 from base.agents.context.clients import ClientSet
-from base.agents.sdk import call_policy
+from base.agents.sdk.tests.sampling_owners import gateway_sampling_owner
 from base.cluster.machine import MachineIdentity
 from base.config import ConfigBoot
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
+from base.host.net.tests.local_http import serve_json
 from base.lm.catalog import ModelCatalog
 from base.packages.composer_commands import CommandCatalog
 from base.paths import meiva_home
@@ -31,22 +32,14 @@ from services.agent_runner.agent_host.tests.host_policy import configured_machin
 
 
 async def test_sampling_failure_is_collected_before_pools_and_pidfile_cleanup(
-    monkeypatch: pytest.MonkeyPatch, model_installation: Installation
+    monkeypatch: pytest.MonkeyPatch, model_installation: Installation, tmp_path: Path
 ) -> None:
-    entered, release = threading.Event(), threading.Event()
-    original = TypeError("sampling reader defect")
-
-    def read() -> call_policy.SamplingPolicy:
-        entered.set()
-        assert release.wait(5)
-        raise original
-
-    sampling = call_policy.SamplingPolicyOwner(initial=call_policy.SamplingPolicy(), fetch=read)
-    sampling.read()
-    assert entered.wait(2)
-    release.set()
-    worker = sampling.worker
-    assert worker is not None and worker.completed.wait(2)
+    with serve_json({}, status=500) as gateway:
+        sampling = gateway_sampling_owner(gateway.url, tmp_path / ".env")
+        sampling.read()
+        assert gateway.arrived.wait(2)
+        worker = sampling.worker
+        assert worker is not None and worker.completed.wait(5)
     events: list[str] = []
 
     async def close_pools(*_args: object) -> None:
@@ -59,7 +52,7 @@ async def test_sampling_failure_is_collected_before_pools_and_pidfile_cleanup(
         events.append("pidfile")
 
     monkeypatch.setattr(daemon, "remove_pidfile", remove_pidfile)
-    with pytest.raises(TypeError) as caught:
+    with pytest.raises(httpx.HTTPStatusError) as caught:
         await daemon.close_process_owners(
             None,
             cast(Any, object()),
@@ -69,8 +62,8 @@ async def test_sampling_failure_is_collected_before_pools_and_pidfile_cleanup(
             None,
             None,
         )
-    assert caught.value is original and sampling.error is not None
-    assert sampling.error[0] is original
+    assert sampling.error is not None
+    assert isinstance(caught.value, httpx.HTTPStatusError) and caught.value is sampling.error[0]
     assert events == ["pools", "pidfile"]
 
 

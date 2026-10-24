@@ -12,6 +12,7 @@ import pytest
 
 import meiva
 from agent.state import BaseAgentState, CompactState, build_agent_state
+from base.agents.sdk.tests.sampling_owners import fixed_sampling_owner
 from base.config.service_read import ConfigAuthority
 from base.lm import factory
 from base.lm.catalog import ModelCatalog
@@ -39,6 +40,7 @@ def load_meiva_code_plugin(
         provider_keys=inert_keys(model_catalog),
         authority=config_authority,
         config_images=DiskPluginConfigImages(resolve_meiva_home()),
+        sampling=fixed_sampling_owner(),
     )
 
     yield

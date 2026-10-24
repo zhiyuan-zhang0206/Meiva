@@ -37,8 +37,9 @@ def load_installed_runtime(home: Path, source: Path) -> None:
         raise RuntimeError("run this tool with the source checkout's own .venv interpreter")
     # A copied operator script must not import its containing development tree.
     sys.path.insert(0, str(source))
-    from base.host.env.bootstrap import launcher_context, process_environment
+    from base.host.env.bootstrap import launcher_context
     from base.host.env.dotenv_boot import skip_config_fetch
+    from base.host.env.registry import process_environment
     from base.paths.home import resolve_meiva_home
 
     if resolve_meiva_home().expanduser().resolve() != home:

@@ -9,16 +9,18 @@ _CHILD = Path(__file__).with_name("child_sampling_atexit.py")
 _UNINSTALLED_CHILD = Path(__file__).with_name("child_sampling_atexit_uninstalled.py")
 
 
-def test_installation_atexit_reports_failure_without_promising_a_nonzero_exit() -> None:
+def test_installation_atexit_reports_failure_without_promising_a_nonzero_exit(
+    tmp_path: Path,
+) -> None:
     result = run_bounded(
-        [sys.executable, str(_CHILD)],
+        [sys.executable, str(_CHILD), str(tmp_path / ".env")],
         capture_output=True,
         text=True,
         timeout=8,
     )
     assert result.returncode == 0, result.stderr
     assert "Exception ignored in atexit callback" in result.stderr
-    assert "ValueError: ordinary SDK refresh defect" in result.stderr
+    assert "UnicodeDecodeError" in result.stderr
 
 
 def test_uninstalled_surface_leaves_no_atexit_callback() -> None:

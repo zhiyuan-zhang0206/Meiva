@@ -104,6 +104,7 @@ def load_installation(
     clients: ClientSet,
     load_extensions: Callable[..., object],
 ) -> Installation:
+    from base.agents.sdk.call_policy import process_sampling_owner
     from base.config import Settings
     from base.config.service_read import ConfigAuthority
     from base.lm.factory import process_provider_keys
@@ -122,6 +123,7 @@ def load_installation(
         catalog=catalog,
         provider_keys=process_provider_keys(catalog),
         authority=authority,
+        sampling=process_sampling_owner(),
         clients=clients,
         clock=Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS),
         disabled_entries=process_disable_entries(),

@@ -449,7 +449,7 @@ def test_agent_host_launches_under_the_agent_profile(unit_home: Path) -> None:
 
 def test_profile_domains_match_consumption_matrix() -> None:
     from base.config import PROCESS_PROFILES
-    from base.config.profiles import ProcessProfile
+    from base.host.env.process_profile import ProcessProfile
 
     for kind, roots in _KIND_ROOTS.items():
         closure = _kind_closure(roots)

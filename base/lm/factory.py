@@ -160,8 +160,8 @@ def provider_key_of_model(model: str, *, catalog: ModelCatalog) -> str | None:
 # split runner's keys arrive in its environment through the bootstrap before its first build. The
 # `.env` is read only when some declared key is absent from the environment.
 def process_provider_keys(catalog: ModelCatalog) -> ProviderKeys:
-    from base.host.env.bootstrap import process_environment
     from base.host.env.dotenv_file import process_env_file, read_env_aliases
+    from base.host.env.registry import process_environment
 
     environ = process_environment()
     absent = [name for name in catalog.key_envs if not environ.get(name)]

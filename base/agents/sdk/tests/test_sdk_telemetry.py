@@ -23,7 +23,13 @@ from base.agents.sdk import call_policy
 from base.agents.sdk import telemetry as sdk_usage_telemetry
 from base.agents.sdk.call_policy import SamplingPolicy
 from base.agents.sdk.tally import SdkCallTally
-from base.agents.sdk.tests.sampling_owners import fixed_sampling_owner
+from base.agents.sdk.tests.sampling_owners import (
+    fixed_sampling_owner,
+    gateway_sampling_owner,
+    sampling_owner_failing_to_read,
+    sampling_owner_serving,
+)
+from base.host.net.tests.local_http import serve_json
 from base.telemetry.tests.capture.event_capture import EmittedEvents
 from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
 
@@ -286,6 +292,7 @@ def test_explicit_owner_collects_full_tally_per_fn(
 def test_live_sampling_keeps_tally_complete(
     monkeypatch: pytest.MonkeyPatch,
     emitted_events: EmittedEvents,
+    tmp_path: Path,
 ) -> None:
     selected = iter(range(10))
 
@@ -293,7 +300,9 @@ def test_live_sampling_keeps_tally_complete(
         return next(selected)
 
     monkeypatch.setattr(random, "randrange", sample)
-    sampling_owner = fixed_sampling_owner(SamplingPolicy(sampling_enabled=True, sample_every=10))
+    sampling_owner = sampling_owner_serving(
+        SamplingPolicy(sampling_enabled=True, sample_every=10), tmp_path / "sampled.env"
+    )
     tally = SdkCallTally()
     for _ in range(10):
         sdk_usage_telemetry.run_metered(
@@ -312,32 +321,37 @@ def test_live_sampling_keeps_tally_complete(
         {},
         identity={},
         tally=tally,
-        sampling_owner=fixed_sampling_owner(
-            SamplingPolicy(sampling_enabled=False, sample_every=10)
+        sampling_owner=sampling_owner_serving(
+            SamplingPolicy(sampling_enabled=False, sample_every=10), tmp_path / "unsampled.env"
         ),
     )
     assert [event.attributes["sample_rate"] for event in emitted_events] == [10, 1]
     assert tally.snapshot() == {"files.read": 11}
 
 
+def _invalid_policy_owner(
+    failure: str, directory: Path, gateway_url: str
+) -> call_policy.SamplingPolicyOwner:
+    env_path = directory / ".env"
+    if failure == "auth":
+        return gateway_sampling_owner(gateway_url, env_path)
+    if failure == "schema":
+        owner = sampling_owner_serving(SamplingPolicy(), env_path)
+        env_path.write_text("MEIVA_SDK_CALL_SAMPLE_EVERY=0\n")
+        return owner
+    return sampling_owner_failing_to_read(env_path)
+
+
 @pytest.mark.parametrize("async_call", [False, True])
-@pytest.mark.parametrize("failure", ["auth", "schema", "code"])
+@pytest.mark.parametrize("failure", ["auth", "schema", "unreadable"])
 async def test_invalid_policy_blocks_sdk_side_effects(
-    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
     async_call: bool,
     failure: str,
 ) -> None:
-    def invalid() -> SamplingPolicy:
-        if failure == "auth":
-            httpx.Response(
-                401, request=httpx.Request("GET", "https://gateway/bootstrap")
-            ).raise_for_status()
-        if failure == "schema":
-            return SamplingPolicy(sample_every=0)
-        raise TypeError("policy reader bug")
-
-    sampling_owner = call_policy.SamplingPolicyOwner(initial=SamplingPolicy(), fetch=invalid)
-    sampling_owner.refresh()
+    with serve_json({}, status=401) as gateway:
+        sampling_owner = _invalid_policy_owner(failure, tmp_path, gateway.url)
+        sampling_owner.refresh()
     calls: list[str] = []
 
     def body() -> None:
@@ -346,7 +360,11 @@ async def test_invalid_policy_blocks_sdk_side_effects(
     async def async_body() -> None:
         body()
 
-    error = {"auth": httpx.HTTPStatusError, "schema": ValidationError, "code": TypeError}[failure]
+    error = {
+        "auth": httpx.HTTPStatusError,
+        "schema": ValidationError,
+        "unreadable": UnicodeDecodeError,
+    }[failure]
     tally = SdkCallTally()
     for _ in range(2):
         with pytest.raises(error):
@@ -377,30 +395,19 @@ async def test_invalid_policy_blocks_sdk_side_effects(
 @pytest.mark.parametrize("async_call", [False, True])
 @pytest.mark.parametrize("original", [ValueError("SDK failed"), asyncio.CancelledError()])
 async def test_started_call_uses_its_snapshot_and_preserves_its_exception(
-    monkeypatch: pytest.MonkeyPatch,
     emitted_events: EmittedEvents,
+    tmp_path: Path,
     async_call: bool,
     original: BaseException,
 ) -> None:
-    reads: list[str] = []
-
-    def invalid() -> SamplingPolicy:
-        raise TypeError("new invalid policy")
-
-    # meiva:note
-    # The owner under test, counting how many SDK entries asked it for the policy.
-    class CountingOwner(call_policy.SamplingPolicyOwner):
-        def read(self) -> SamplingPolicy:
-            reads.append("read")
-            return super().read()
-
-    sampling_owner = CountingOwner(initial=SamplingPolicy(), fetch=invalid)
-    sampling_owner.next_refresh = float("inf")
+    env_path = tmp_path / ".env"
+    sampling_owner = sampling_owner_serving(SamplingPolicy(), env_path, refresh_seconds=3600.0)
     nested: list[str] = []
 
     def body() -> None:
+        env_path.write_text("MEIVA_SDK_CALL_SAMPLE_EVERY=0\n")
         sampling_owner.refresh()
-        with pytest.raises(TypeError, match="new invalid policy"):
+        with pytest.raises(ValidationError):
             sdk_usage_telemetry.run_metered(
                 "inner.call",
                 lambda: nested.append("must not run"),
@@ -434,10 +441,9 @@ async def test_started_call_uses_its_snapshot_and_preserves_its_exception(
                 sampling_owner=sampling_owner,
             )
     assert caught.value is original
-    assert reads == ["read", "read"]
     assert nested == []
     assert next(iter(emitted_events)).attributes["fn"] == "outer.call"
-    with pytest.raises(TypeError, match="new invalid policy"):
+    with pytest.raises(ValidationError):
         sdk_usage_telemetry.run_metered(
             "next.call",
             lambda: nested.append("must not run"),
@@ -450,14 +456,11 @@ async def test_started_call_uses_its_snapshot_and_preserves_its_exception(
 
 
 def test_direct_emit_propagates_policy_errors_without_creating_events(
-    emitted_events: EmittedEvents,
+    emitted_events: EmittedEvents, tmp_path: Path
 ) -> None:
-    def invalid() -> SamplingPolicy:
-        raise TypeError("invalid policy")
-
-    sampling_owner = call_policy.SamplingPolicyOwner(initial=SamplingPolicy(), fetch=invalid)
+    sampling_owner = sampling_owner_failing_to_read(tmp_path / ".env")
     sampling_owner.refresh()
-    with pytest.raises(TypeError, match="invalid policy"):
+    with pytest.raises(UnicodeDecodeError):
         sdk_usage_telemetry.emit("files.write", identity={}, sampling_owner=sampling_owner)
     assert len(emitted_events) == 0
 

@@ -37,6 +37,7 @@ def _no_plugin_expansions() -> Iterator[None]:
             provider_keys=prior.provider_keys,
             authority=prior.authority,
             config_images=prior.config_images,
+            sampling=fixed_sampling_owner(),
         )
 
 

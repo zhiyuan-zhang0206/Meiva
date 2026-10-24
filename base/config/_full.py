@@ -42,11 +42,10 @@ from base.config.domains.web import WebSettings
 from base.config.profiles import (
     PROCESS_PROFILES,
     PROFILE_UNSET,
-    ProcessProfile,
     profile_domain_error,
-    profile_unknown_error,
 )
 from base.host.env.dotenv_boot import EnvBootResult
+from base.host.env.process_profile import ProcessProfile, profile_unknown_error
 
 
 class Settings(BaseModel):

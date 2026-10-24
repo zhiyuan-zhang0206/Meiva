@@ -22,7 +22,17 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import uvicorn
 from starlette.types import ASGIApp
 
-__all__ = ["RecordedRequest", "ServedJson", "closed_port_url", "serve_asgi", "serve_json"]
+__all__ = [
+    "RecordedRequest",
+    "ServedJson",
+    "closed_port_url",
+    "serve_asgi",
+    "serve_hangup",
+    "serve_json",
+]
+
+
+_GATE_LIMIT_S = 30.0
 
 
 @dataclass(frozen=True)
@@ -33,17 +43,27 @@ class RecordedRequest:
 
 
 # meiva:note
-# The running server: its base URL and the requests it has answered so far.
+# The running server: its base URL, the requests it has received so far, and `arrived`, set when the
+# first request reaches it (a test waits on it instead of sleeping).
 @dataclass
 class ServedJson:
     url: str
     requests: list[RecordedRequest] = field(default_factory=list[RecordedRequest])
+    arrived: threading.Event = field(default_factory=threading.Event)
 
 
 # meiva:note
-# Serve `body` as JSON with `status` to every GET, after waiting `delay_s`.
+# Serve `body` as JSON with `status` to every GET, after waiting `delay_s` and, when `gate` is
+# given, until the test sets it: the request is held open the way a gateway that has stopped
+# answering holds it, and the client under test is blocked in a real read until the test lets go.
 @contextmanager
-def serve_json(body: object, *, status: int = 200, delay_s: float = 0.0) -> Generator[ServedJson]:
+def serve_json(
+    body: object,
+    *,
+    status: int = 200,
+    delay_s: float = 0.0,
+    gate: threading.Event | None = None,
+) -> Generator[ServedJson]:
     payload = json.dumps(body).encode()
     served = ServedJson(url="")
 
@@ -55,6 +75,9 @@ def serve_json(body: object, *, status: int = 200, delay_s: float = 0.0) -> Gene
             served.requests.append(
                 RecordedRequest("GET", self.path, {k.lower(): v for k, v in self.headers.items()})
             )
+            served.arrived.set()
+            if gate is not None:
+                gate.wait(_GATE_LIMIT_S)
             if delay_s:
                 time.sleep(delay_s)
             with suppress(BrokenPipeError, ConnectionResetError):
@@ -74,6 +97,36 @@ def serve_json(body: object, *, status: int = 200, delay_s: float = 0.0) -> Gene
         server.shutdown()
         server.server_close()
         thread.join()
+
+
+# meiva:note
+# A loopback listener that accepts every connection and closes it without answering: a client's
+# request is read and then the peer vanishes mid-exchange (`httpx.RemoteProtocolError`).
+@contextmanager
+def serve_hangup() -> Generator[str]:
+    listener = socket.socket()
+    listener.bind(("127.0.0.1", 0))
+    listener.listen()
+    listener.settimeout(0.05)
+    stopping = threading.Event()
+
+    def accept_and_close() -> None:
+        while not stopping.is_set():
+            try:
+                connection, _ = listener.accept()
+            except TimeoutError:
+                continue
+            connection.recv(65536)
+            connection.close()
+
+    thread = threading.Thread(target=accept_and_close)
+    thread.start()
+    try:
+        yield f"http://127.0.0.1:{listener.getsockname()[1]}"
+    finally:
+        stopping.set()
+        thread.join()
+        listener.close()
 
 
 # meiva:note

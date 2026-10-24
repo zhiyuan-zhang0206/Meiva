@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
 
+from base.agents.sdk.call_policy import SamplingPolicyOwner
 from base.lm.provider_api import DecisionProviderContribution, ProviderContribution
 from base.packages.plugins import enable_config
 from base.packages.plugins.contributions import Contribution
@@ -274,12 +275,12 @@ class UnknownPluginError(Exception):
 
 
 # meiva:link agent/extensions/docs/catalog.meiva.okf.md
-def build_catalog() -> Catalog:
+def build_catalog(*, sampling: SamplingPolicyOwner) -> Catalog:
     from agent.state import plugin_state_schema
     from base.packages.plugins.loading.registry import declarations
     from meiva.sdk_surface.extensions import load_extensions
 
-    config = load_extensions(validate_state=plugin_state_schema).config
+    config = load_extensions(validate_state=plugin_state_schema, sampling=sampling).config
     declared = {name: contributions for name, _dir, contributions in declarations()}
     data_records = _data_records()
     discovered = enable_config.installed_plugin_dirs()
