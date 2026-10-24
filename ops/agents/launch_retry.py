@@ -1,6 +1,6 @@
 """Transactional retry-launch intent: one operation, one immutable attempt."""
 
-from uuid import uuid4
+from uuid import UUID
 
 from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
@@ -14,10 +14,14 @@ class RetryLaunchConflictError(ValueError):
     """The operation changed or its observed attempt is no longer retryable."""
 
 
+# meiva:note
+# Replay before mutable existence; commit the receipt and pointer together.
+#
+# `new_attempt_id` becomes the agent's launch attempt only when this call commits the intent; a
+# replay returns the stored acceptance and drops it.
 def accept_retry_launch(
-    pool: ConnectionPool, key: str, agent_id: int, body: RetryLaunchRequest
+    pool: ConnectionPool, key: str, agent_id: int, body: RetryLaunchRequest, *, new_attempt_id: UUID
 ) -> tuple[str, RetryLaunchAccepted]:
-    """Replay before mutable existence; commit the receipt and pointer together."""
     with write_transaction(pool) as conn, conn.cursor() as cur:
         cur.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))", (key,))
         cur.execute(
@@ -47,7 +51,6 @@ def accept_retry_launch(
             or admitted_at is not None
         ):
             raise RetryLaunchConflictError("observed launch attempt is stale or already admitted")
-        new_attempt = uuid4()
         cur.execute("SELECT clock_timestamp()")
         clock_row = cur.fetchone()
         # SELECT without a filter always returns one row.
@@ -56,7 +59,7 @@ def accept_retry_launch(
         accepted = RetryLaunchAccepted(
             agent_id=agent_id,
             prior_attempt_id=attempt,
-            launch_attempt_id=new_attempt,
+            launch_attempt_id=new_attempt_id,
             accepted_at=accepted_at,
         )
         cur.execute(
@@ -67,7 +70,7 @@ def accept_retry_launch(
                 key,
                 agent_id,
                 attempt,
-                new_attempt,
+                new_attempt_id,
                 machine,
                 Jsonb(config),
                 Jsonb(birth),
@@ -75,6 +78,7 @@ def accept_retry_launch(
             ),
         )
         cur.execute(
-            "UPDATE agents_meta SET last_launch_attempt_id=%s WHERE id=%s", (new_attempt, agent_id)
+            "UPDATE agents_meta SET last_launch_attempt_id=%s WHERE id=%s",
+            (new_attempt_id, agent_id),
         )
         return machine, accepted

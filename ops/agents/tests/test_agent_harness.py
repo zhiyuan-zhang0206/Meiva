@@ -35,7 +35,6 @@ def _harness(db: psycopg.Connection, agent_id: int) -> str:
 def test_plain_spawn_defaults_to_the_builtin_runtime(
     redis_url: str,
     db_conn: psycopg.Connection,
-    monkeypatch: pytest.MonkeyPatch,
     *,
     config_authority: ConfigAuthority,
     model_catalog: ModelCatalog,
@@ -54,7 +53,6 @@ def test_plain_spawn_defaults_to_the_builtin_runtime(
 def test_plain_spawn_records_the_requested_harness(
     redis_url: str,
     db_conn: psycopg.Connection,
-    monkeypatch: pytest.MonkeyPatch,
     *,
     config_authority: ConfigAuthority,
     model_catalog: ModelCatalog,
@@ -74,7 +72,6 @@ def test_plain_spawn_records_the_requested_harness(
 def test_fork_inherits_the_source_harness(
     redis_url: str,
     db_conn: psycopg.Connection,
-    monkeypatch: pytest.MonkeyPatch,
     *,
     config_authority: ConfigAuthority,
     model_catalog: ModelCatalog,
@@ -104,7 +101,6 @@ def test_fork_inherits_the_source_harness(
 def test_fork_naming_the_same_harness_is_accepted(
     redis_url: str,
     db_conn: psycopg.Connection,
-    monkeypatch: pytest.MonkeyPatch,
     *,
     config_authority: ConfigAuthority,
     model_catalog: ModelCatalog,
@@ -135,7 +131,6 @@ def test_fork_naming_the_same_harness_is_accepted(
 def test_fork_naming_another_harness_is_refused(
     redis_url: str,
     db_conn: psycopg.Connection,
-    monkeypatch: pytest.MonkeyPatch,
     *,
     config_authority: ConfigAuthority,
     model_catalog: ModelCatalog,

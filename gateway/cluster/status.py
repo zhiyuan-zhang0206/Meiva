@@ -34,6 +34,7 @@ from base.cluster.machine import (
 from base.daemon.endpoints import ServiceEndpoints
 from base.db import Database
 from base.deploy.git.cluster_drift import checkout_head_sha
+from base.deploy.lifecycle import start_serving
 from base.host.env.registry import process_environment
 from base.host.resource_sample import ResourceSample
 from base.native_process.loaded_commit import LoadedCommit
@@ -335,7 +336,7 @@ def _local_resource_sample() -> ResourceSample | None:
 # the psutil resource snapshot must not run on the event loop.
 def read_local_facts(env: RosterEnv, *, with_resource: bool) -> LocalFacts:
     return LocalFacts(
-        paused_reason=serving_gate_reason(),
+        paused_reason=serving_gate_reason(serving=start_serving.is_serving(env.home)),
         head_sha=checkout_head_sha(env.home / "source", environ=process_environment()),
         # meiva:note
         # This gateway process's own frozen commit — not a disk bookmark, so a
@@ -411,7 +412,7 @@ def get_cluster_status(env: RosterEnv, cur: Cursor) -> ClusterPanel:
         current_serve_gateway=("gateway" in role),
         current_serve_agent_runner=("agent-runner" in role),
         current_serve_observability_station=("observability-station" in role),
-        current_paused=serving_gate_reason() is not None,
+        current_paused=serving_gate_reason(serving=start_serving.is_serving(env.home)) is not None,
         machines=machines,
     )
 
@@ -456,7 +457,10 @@ def _compute_system_status(request: Request) -> SystemStatus:
                 current_serve_observability_station=(
                     "observability-station" in request.app.state.machine.role()
                 ),
-                current_paused=serving_gate_reason() is not None,
+                current_paused=serving_gate_reason(
+                    serving=start_serving.is_serving(request.app.state.gateway_process.home)
+                )
+                is not None,
                 machines=[],
             )
         except Exception:

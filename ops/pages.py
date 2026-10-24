@@ -25,12 +25,11 @@ against a registration that races the check.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 from typing import Any
 
 import psycopg
 
-from base.config import settings
 from base.db import fetch_one
 from ops.rpc_schemas import PageRow
 
@@ -147,6 +146,18 @@ def lock_page_agent(db: psycopg.Connection, agent_id: int) -> None:
     )
 
 
+# meiva:note
+# Register or update an open page in the caller-owned transaction.
+#
+# If an open row with the same name exists -> UPDATE host + port + title + serve_dir (agent
+# restarted server on different port). None -> INSERT. Returns the final row snapshot without
+# committing. The caller owns commit and publishing the PageOpened event.
+#
+# `serve_dir` is the directory the page server serves, recorded by meiva.ui.serve() so the
+# page-server service can admit its initial serving session; NULL for meiva.ui.show() pages (the
+# agent manages those servers itself). The page lives for `ttl_seconds` from `now`, which the
+# caller reads once per registration. The statements concatenate only this module's fixed column
+# list (`_SELECT_COLUMNS`), never a caller value, which is why they carry `noqa: S608`.
 def register_page_in_transaction(
     db: psycopg.Connection,
     agent_id: int,
@@ -154,23 +165,13 @@ def register_page_in_transaction(
     port: int,
     host: str,
     title: str | None,
-    serve_dir: str | None = None,
-    ttl_seconds: int | None = None,
+    serve_dir: str | None,
+    *,
+    ttl_seconds: int,
+    now: datetime,
 ) -> PageRow:
-    """Register or update an open page in the caller-owned transaction.
-
-    If an open row with the same name exists -> UPDATE host + port + title +
-    serve_dir (agent restarted server on different port). None -> INSERT.
-    Returns the final row snapshot without committing. The caller owns commit
-    and publishing the PageOpened event.
-
-    `serve_dir` is the directory the page server serves, recorded by
-    meiva.ui.serve() so the page-server service can admit its initial serving session; NULL for meiva.ui.show() pages (the agent
-    manages those servers itself).
-    """
     lock_page_agent(db, agent_id)
-    ttl = ttl_seconds if ttl_seconds is not None else settings.daemon.page_default_ttl_seconds
-    expires_at = datetime.now(UTC) + timedelta(seconds=ttl)
+    expires_at = now + timedelta(seconds=ttl_seconds)
     try:
         with db.transaction(), db.cursor() as cur:
             cur.execute(
@@ -209,11 +210,11 @@ def register_page_in_transaction(
                 )
                 row = fetch_one(cur, f"insert page agent={agent_id} name={name!r}")
     except psycopg.errors.UniqueViolation as exc:
-        # The live-port index is the authority; the router's pre-check can be
-        # raced by a concurrent registration. Discard the failed write, then
-        # name the occupant when a fresh read still sees it (its transaction
-        # committed). Other unique violations (the (agent_id, name) index)
-        # are not this function's rule — re-raise.
+        # meiva:note
+        # The live-port index is the authority; the router's pre-check can be raced by a
+        # concurrent registration. Discard the failed write, then name the occupant when a fresh
+        # read still sees it (its transaction committed). Other unique violations (the
+        # (agent_id, name) index) are not this function's rule: re-raise.
         if exc.diag.constraint_name != _LIVE_PORT_INDEX:
             raise
         raise PagePortConflictError(

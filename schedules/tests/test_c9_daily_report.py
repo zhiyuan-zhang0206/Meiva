@@ -1,162 +1,91 @@
+# meiva:note
+# The daily CI-minute reconciliation.
+#
+# What it reports is decided from values (the slot's window and day, the summary of the ledger
+# rows). The reading half runs against `gh` answers of the real shape through the host's command
+# runner and a real ledger file; the failure path wakes the P0 lead through a gateway on a
+# loopback port and leaves the slot claimed.
+
 from __future__ import annotations
 
-import importlib.util
 import json
-import shutil
-import sys
+import subprocess
 from datetime import UTC, datetime
 from functools import partial
 from pathlib import Path
-from types import ModuleType, SimpleNamespace
-from unittest.mock import Mock
 
 import psycopg
 import pytest
 
+from base.agents.context import MeivaContext
 from base.cluster.machine import MachineIdentity
+from base.daemon.schedules.inputs import ScheduleInputs
 from base.db import Database
-from base.host.system.hostport import Host
-from base.host.system.tests.fake_commands import fake_host
+from base.host.system.tests.fake_commands import FakeCommands, Reply, fake_host
 from base.native_process.loaded_commit import LoadedCommit
 from base.telemetry.tests.capture.event_capture import EmittedEvents
 from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
-from schedules.catchup import fire_slot_once
+from meiva.gateway_client import use_client
+from schedules.jobs.c9_report import C9Report, reconcile_window, report_day
+from schedules.jobs.catchup import Fired, fire_slot_once
+from schedules.plans.c9_window import (
+    CiRun,
+    MinuteRates,
+    failure_message,
+    summarize,
+    window_bounds,
+)
+from schedules.plans.directory_plan import ReportRecipient
+from schedules.tests.gateway_directory import AgentRowSpec, DirectoryPage, serve_gateway
+from schedules.tests.schedule_support import claimed_slots, insert_schedule
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
-SCHEDULE_PATH = REPO_ROOT / "schedules" / "c9-daily-report-schedule.py"
-
-
-def _load_schedule_module() -> ModuleType:
-    spec = importlib.util.spec_from_file_location("c9_daily_report", SCHEDULE_PATH)
-    assert spec is not None
-    assert spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = module
-    try:
-        spec.loader.exec_module(module)
-    finally:
-        sys.modules.pop(spec.name, None)
-    return module
-
-
-def _insert_schedule(conn: psycopg.Connection, *, created_at: datetime) -> int:
-    with conn.cursor() as cur:
-        cur.execute(
-            "INSERT INTO schedules (name, script, command, enabled, status, created_at) "
-            "VALUES (%s, 'x', 'python schedule.py', true, 'stopped', %s) RETURNING id",
-            (f"c9-test-{created_at.isoformat()}", created_at),
-        )
-        row = cur.fetchone()
-    conn.commit()
-    assert row is not None
-    return int(row[0])
-
-
-def _entry(agent_id: int | None, *, linux: int, macos: int) -> dict[str, int | None]:
-    return {
-        "run_id": 1 if agent_id is None else agent_id,
-        "agent_id": agent_id,
-        "linux_minutes": linux,
-        "macos_minutes": macos,
-    }
-
-
-class _FakeAccounting(SimpleNamespace):
-    def __init__(self, module: ModuleType, *, error: Exception | None = None) -> None:
-        super().__init__()
-        self.module = module
-        self.error = error
-        self.windows: list[tuple[str, str]] = []
-        self.hosts: list[Host] = []
-        self.DEFAULT_REPO = "zhiyuan-zhang0206/Meiva"
-        self.DEFAULT_LEDGER = Path("ledger.jsonl")
-        self.entries = [_entry(5811, linux=10, macos=0)]
-
-    def collect(
-        self, repo: str, since: str, until: str, *, host: Host
-    ) -> list[dict[str, int | None]]:
-        del repo
-        if self.error is not None:
-            raise self.error
-        self.hosts.append(host)
-        self.windows.append((since, until))
-        return self.entries
-
-    def append_ledger(self, path: Path, fresh: list[dict[str, int | None]]) -> int:
-        del path, fresh
-        return 1
-
-
-# meiva:note
-# A materialized template runs from outside the checkout, so the loader must resolve the
-# accounting module through the installed package rather than the current directory.
-def test_repo_root_survives_runtime_materialization(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    mat_dir = tmp_path / "schedules" / "11"
-    mat_dir.mkdir(parents=True)
-    mat_path = mat_dir / SCHEDULE_PATH.name
-    shutil.copy(SCHEDULE_PATH, mat_path)
-    monkeypatch.chdir(mat_dir)
-
-    spec = importlib.util.spec_from_file_location("c9_daily_materialized", mat_path)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = module
-    try:
-        spec.loader.exec_module(module)
-    finally:
-        sys.modules.pop(spec.name, None)
-
-    saved_path = list(sys.path)
-    loaded = module._load_accounting()
-    assert Path(loaded.__file__).resolve() == REPO_ROOT / "scripts/ci/pull_requests/accounting.py"
-    assert sys.path == saved_path
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+_SLOT = datetime(2026, 9, 6, 21, 0, tzinfo=UTC)
+_RATES = MinuteRates(linux_usd=0.006, macos_usd=0.062)
+_LEAD = ReportRecipient("c9-daily-report", "MEIVA_CI_USAGE_REPORT_AGENT", "lead", None)
 
 
 def test_manifest_declares_c9_daily_report_schedule() -> None:
-    manifest = json.loads((REPO_ROOT / "schedules" / "manifest.json").read_text())
+    manifest = json.loads((_REPO_ROOT / "schedules" / "manifest.json").read_text())
     entry = next(
         item for item in manifest["builtin_schedules"] if item["name"] == "c9-daily-report"
     )
 
-    assert SCHEDULE_PATH.is_file()
-    assert entry["script"] == SCHEDULE_PATH.name
+    assert (_REPO_ROOT / "schedules" / entry["script"]).is_file()
+    assert entry["script"] == "c9-daily-report-schedule.py"
     assert entry["command"] == "python c9-daily-report-schedule.py"
     assert entry["class"] == "product"
     assert entry["default_enabled"] is True
     assert "05:00 cluster time" in entry["description"]
 
 
+# meiva:note
+# The day label must follow the cluster wall clock, not the test environment's zone (CI runs
+# UTC): 05:00 Asia/Shanghai on 2026-09-07 is 21:00 UTC on 2026-09-06, so the UTC date and the
+# cluster day differ.
 def test_window_bounds_covers_the_slot_day_in_cluster_timezone() -> None:
-    module = _load_schedule_module()
-    # meiva:note
-    # The day label must follow the cluster wall clock, not the test environment's zone (CI
-    # runs UTC): 05:00 Asia/Shanghai on 2026-09-07 is 21:00 UTC on 2026-09-06, so the UTC
-    # date and the cluster day differ.
-    slot_end = datetime(2026, 9, 6, 21, 0, tzinfo=UTC)
-
-    since, until, day = module.window_bounds(slot_end, cluster_timezone=lambda: "Asia/Shanghai")
+    since, until, day = window_bounds(_SLOT, "Asia/Shanghai")
 
     assert since == "2026-09-05T21:00:00Z"
     assert until == "2026-09-06T21:00:00Z"
     assert day == "2026-09-07"
 
 
-def test_summarize_splits_attribution_and_meters_minutes() -> None:
-    module = _load_schedule_module()
-    entries = [
-        _entry(5811, linux=10, macos=20),
-        _entry(405, linux=5, macos=0),
-        _entry(None, linux=7, macos=3),
-    ]
+def test_a_naive_slot_has_no_window() -> None:
+    with pytest.raises(ValueError, match="slot_end must carry tzinfo"):
+        window_bounds(_SLOT.replace(tzinfo=None), "UTC")
 
-    payload = module.summarize(
-        entries,
+
+def test_summarize_splits_attribution_and_meters_minutes() -> None:
+    runs = [CiRun(5811, 10, 20), CiRun(405, 5, 0), CiRun(None, 7, 3)]
+
+    payload = summarize(
+        runs,
         day="2026-09-07",  # time-bomb-ok: explicit fixture window input
         window_start="2026-09-05T21:00:00Z",  # time-bomb-ok: explicit fixture window input
         window_end="2026-09-06T21:00:00Z",  # time-bomb-ok: explicit fixture window input
         appended_runs=2,
+        rates=_RATES,
     )
 
     assert payload == {
@@ -175,153 +104,154 @@ def test_summarize_splits_attribution_and_meters_minutes() -> None:
     }
 
 
-def test_fire_reconciles_the_claimed_slot_window_and_emits(
+def test_the_failure_message_names_the_manual_backfill() -> None:
+    assert failure_message("collector failed") == (
+        "C9 daily reconciliation failed:\ncollector failed\n"
+        "Check the schedule log; backfill the missed window manually with "
+        "`scripts/ci/pull_requests/accounting.py --since ... --until ... --append-ledger`."
+    )
+
+
+_CI_RUN: dict[str, object] = {
+    "id": 7001,
+    "name": "CI",
+    "created_at": "2026-09-06T10:00:00Z",
+    "status": "completed",
+    "conclusion": "success",
+    "head_branch": "feature",
+    "head_sha": "abc123",
+    "pull_requests": [],
+    "head_commit": {"message": "Count the minutes (task #42)"},
+}
+_JOBS = {
+    "total_count": 2,
+    "jobs": [
+        {
+            "id": 1,
+            "name": "linux unit",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-09-06T10:00:00Z",
+            "completed_at": "2026-09-06T10:10:00Z",
+        },
+        {
+            "id": 2,
+            "name": "macOS app",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-09-06T10:00:00Z",
+            "completed_at": "2026-09-06T10:20:00Z",
+        },
+    ],
+}
+
+
+def _github(commands: FakeCommands) -> None:
+    commands.on(
+        lambda argv: argv[:2] == ("gh", "api") and "/actions/runs?" in argv[2],
+        Reply(stdout=json.dumps({"total_count": 1, "workflow_runs": [_CI_RUN]})),
+        repeat=True,
+    )
+    commands.on(
+        lambda argv: argv[:2] == ("gh", "api") and "/actions/runs/7001/jobs" in argv[2],
+        Reply(stdout=json.dumps(_JOBS)),
+        repeat=True,
+    )
+
+
+def _job(tmp_path: Path, commands: FakeCommands, recipient: ReportRecipient = _LEAD) -> C9Report:
+    return C9Report(
+        tz="Asia/Shanghai",
+        recipient=recipient,
+        repo="owner/repo",
+        ledger=tmp_path / "ledger.jsonl",
+        host=fake_host(commands),
+    )
+
+
+def test_the_slots_window_is_reconciled_into_the_ledger(tmp_path: Path) -> None:
+    commands = FakeCommands()
+    _github(commands)
+    job = _job(tmp_path, commands)
+
+    first = reconcile_window(_SLOT, job)
+    again = reconcile_window(_SLOT, job)
+
+    assert first.day == "2026-09-07"
+    assert (first.runs, first.appended) == (1, 1)
+    assert first.attributes["window_start"] == "2026-09-05T21:00:00Z"
+    assert first.attributes["window_end"] == "2026-09-06T21:00:00Z"
+    assert first.attributes["linux_minutes"] == 10
+    assert first.attributes["macos_minutes"] == 20
+    assert first.attributes["est_usd"] == 1.3
+    assert (again.runs, again.appended) == (1, 0)
+    [row] = (tmp_path / "ledger.jsonl").read_text().splitlines()
+    assert json.loads(row)["run_id"] == 7001
+    assert json.loads(row)["task_id"] == 42
+
+
+def test_a_failed_reconciliation_wakes_the_p0_lead_and_the_claim_stays(
     db_conn: psycopg.Connection,
     database: Database,
     machine_identity: MachineIdentity,
     emitted_events: EmittedEvents,
+    sdk_environment: MeivaContext,
+    tmp_path: Path,
 ) -> None:
-    # meiva:note
-    # `_fire` derives its window from the claimed slot — the `fire_slot_once` callback
-    # argument — and not from the wall clock, which is the layer QA's simulation flagged.
-    module = _load_schedule_module()
-
-    def fake_init_gateway(
-        name: str, *, producer: object, machine_reader: object, image: LoadedCommit
-    ) -> None:
-        assert name == module._PROCESS_NAME
-        assert callable(producer) and callable(machine_reader)
-        assert image.sha is None
-
-    command_host = fake_host()
-    accounting = _FakeAccounting(module)
-    slot = datetime(2026, 9, 6, 21, 0, tzinfo=UTC)
-    schedule_id = _insert_schedule(db_conn, created_at=datetime(2026, 9, 6, 20, 0, tzinfo=UTC))
-
-    assert fire_slot_once(
-        database,
-        slot,
-        None,
-        schedule_id=schedule_id,
-        fire=partial(
-            module._fire,
-            producer=lambda: None,
-            image=LoadedCommit(REPO_ROOT, None),
-            machine_reader=machine_identity.name,
-            host=command_host,
-            hooks=module.C9FireHooks(
-                tz_fn=lambda: "Asia/Shanghai",
-                accounting_loader=lambda: accounting,
-                gateway_init=fake_init_gateway,
-            ),
-        ),
+    commands = FakeCommands()
+    commands.on(("gh", "api"), Reply(stderr="gh api down", returncode=1), repeat=True)
+    job = _job(tmp_path, commands)
+    inputs = ScheduleInputs(
+        lambda: database,
+        emitted_events.producer,
+        LoadedCommit(_REPO_ROOT, None),
+        machine=machine_identity,
     )
+    schedule_id = insert_schedule(db_conn, name="c9-failure", created_at=_SLOT)
+    pages = (DirectoryPage("lead", None, (AgentRowSpec(17, "lead", "idling"),), None),)
 
-    assert accounting.windows == [("2026-09-05T21:00:00Z", "2026-09-06T21:00:00Z")]
-    assert accounting.hosts == [command_host]
-    [event] = emitted_events
-    assert event.category == "telemetry"
-    assert event.event_name == "ci_usage_daily"
-    attributes = event.attributes
-    assert attributes["day"] == "2026-09-07"
-    assert attributes["window_start"] == "2026-09-05T21:00:00Z"
-    assert attributes["window_end"] == "2026-09-06T21:00:00Z"
+    with serve_gateway(pages) as gateway, gateway.client() as client, use_client(client):
+        fired = fire_slot_once(
+            database,
+            _SLOT,
+            None,
+            schedule_id=schedule_id,
+            fire=partial(report_day, job=job, inputs=inputs),
+        )
+        retried = fire_slot_once(
+            database,
+            _SLOT,
+            None,
+            schedule_id=schedule_id,
+            fire=partial(report_day, job=job, inputs=inputs),
+        )
 
-
-def test_fire_reports_failure_without_raising(
-    db_conn: psycopg.Connection,
-    database: Database,
-    machine_identity: MachineIdentity,
-) -> None:
-    module = _load_schedule_module()
-    accounting = _FakeAccounting(module, error=RuntimeError("gh api down"))
-    failures: list[str] = []
-    slot = datetime(2026, 9, 6, 21, 0, tzinfo=UTC)
-    schedule_id = _insert_schedule(db_conn, created_at=datetime(2026, 9, 6, 20, 0, tzinfo=UTC))
-
-    assert fire_slot_once(
-        database,
-        slot,
-        None,
-        schedule_id=schedule_id,
-        fire=partial(
-            module._fire,
-            producer=lambda: None,
-            image=LoadedCommit(REPO_ROOT, None),
-            machine_reader=machine_identity.name,
-            host=fake_host(),
-            hooks=module.C9FireHooks(
-                accounting_loader=lambda: accounting,
-                failure_reporter=failures.append,
-            ),
-        ),
-    )
-
-    assert len(failures) == 1
-    assert "RuntimeError" in failures[0]
-    assert "gh api down" in failures[0]
-    assert not fire_slot_once(
-        database,
-        slot,
-        None,
-        schedule_id=schedule_id,
-        fire=lambda _slot, _payload: pytest.fail("unexpected retry"),
-    )
-    assert len(failures) == 1
+    assert fired == Fired(_SLOT, None)
+    assert retried is None
+    assert claimed_slots(db_conn, schedule_id) == [_SLOT]
+    [message] = [request for request in gateway.requests if request.path.endswith("/messages")]
+    assert message.path == "/api/agents/17/messages"
+    content = str(message.body["content"])
+    assert content.startswith("C9 daily reconciliation failed:\nCiUsageReadError:")
+    assert "GitHub query failed (exit 1)" in content
+    assert "backfill the missed window manually" in content
+    assert len(emitted_events) == 0
 
 
-def test_fire_requires_an_explicit_slot() -> None:
-    module = _load_schedule_module()
-    with pytest.raises(TypeError, match="slot_end"):
-        module._fire(_payload=None)
+def test_the_failure_is_attributed_to_the_commands_that_ran(tmp_path: Path) -> None:
+    commands = FakeCommands()
+    commands.on(("gh", "api"), Reply(stderr="gh api down", returncode=1), repeat=True)
+
+    with pytest.raises(Exception, match="GitHub query failed"):
+        reconcile_window(_SLOT, _job(tmp_path, commands))
+
+    assert all(argv[:2] == ("gh", "api") for argv in commands.argvs)
+    assert not (tmp_path / "ledger.jsonl").exists()
 
 
-def test_report_agent_override_rejects_nonnumeric_value() -> None:
-    module = _load_schedule_module()
+def test_a_command_that_cannot_run_is_the_same_failure(tmp_path: Path) -> None:
+    commands = FakeCommands()
+    commands.on(("gh", "api"), subprocess.TimeoutExpired("gh", 60), repeat=True)
 
-    with pytest.raises(
-        RuntimeError, match="MEIVA_CI_USAGE_REPORT_AGENT must be a numeric agent id"
-    ):
-        module._report_agent(env={module._REPORT_AGENT_ENV: "not-an-id"})
-
-
-def test_report_failure_uses_exact_label_and_existing_message() -> None:
-    module = _load_schedule_module()
-    unrelated = SimpleNamespace(agent_id=31, label="another", status=module.S.RUNNING)
-    target = SimpleNamespace(agent_id=17, label=module._REPORT_LABEL, status=module.S.TERMINATED)
-    find = Mock(
-        side_effect=[
-            SimpleNamespace(agents=[unrelated], next_cursor=31),
-            SimpleNamespace(agents=[target], next_cursor=None),
-        ]
-    )
-    send = Mock()
-
-    module._report_failure(
-        "collector failed",
-        env={},
-        list_agents_fn=find,
-        send_message_fn=send,
-    )
-
-    assert [call.kwargs for call in find.call_args_list] == [
-        {"scope": "all", "query": module._REPORT_LABEL, "before_id": None},
-        {"scope": "all", "query": module._REPORT_LABEL, "before_id": 31},
-    ]
-    send.assert_called_once_with(
-        17,
-        "C9 daily reconciliation failed:\ncollector failed\n"
-        "Check the schedule log; backfill the missed window manually with "
-        "`scripts/ci/pull_requests/accounting.py --since ... --until ... --append-ledger`.",
-    )
-
-
-def test_load_accounting_resolves_under_scripts_ci() -> None:
-    module = _load_schedule_module()
-    saved_path = list(sys.path)
-    loaded = module._load_accounting()
-    assert (
-        Path(loaded.__file__).resolve()
-        == REPO_ROOT / "scripts" / "ci" / "pull_requests" / "accounting.py"
-    )
-    assert sys.path == saved_path
+    with pytest.raises(Exception, match="GitHub query timed out"):
+        reconcile_window(_SLOT, _job(tmp_path, commands))

@@ -1,5 +1,0 @@
-[loads]
-"test_self_evolution_schedules.py" = ["schedules"]
-
-[debt.third-party-patch]
-"test_self_evolution_schedules.py#monkeypatch.setattr httpx.get" = 2

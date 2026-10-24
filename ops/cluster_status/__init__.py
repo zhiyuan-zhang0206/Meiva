@@ -1,155 +1,108 @@
 # meiva:note
 # This host's snapshot in the multi-machine view.
 #
-# Assembles `ClusterStatus` from local probes — pidfiles for the daemons, the
-# session backends' records for the services and the agents' persistent shells,
-# the database's local agent identities — and
-# answers the cluster's observability endpoint.
+# Reads the facts of this host once — pidfiles for the daemons, the session backends' records
+# for the services and the agents' persistent shells, the database's local agent identities, the
+# serving gate, the resource sample — and hands them to `report.assemble_status`, which decides
+# what the snapshot says. It answers the cluster's observability endpoint.
 #
-#   Observability: GET /api/cluster/status — always returns this host's state
-#     directly.
+#   Observability: GET /api/cluster/status — always returns this host's state directly.
 #
-# The `schema_mismatch` submodule supplies the snapshot's read-only migration
-# diagnosis.
+# This is the package's composition root for the ambient reads a snapshot needs (the daemon
+# endpoint table, `MEIVA_HOME`, the serving gate, the checkout HEAD, the cluster clock): each is
+# read once here and travels down as a value. The `schema_mismatch` submodule supplies the
+# snapshot's read-only migration diagnosis; `sessions` holds the session listing and the
+# operations on an agent's persistent shells.
 
 from __future__ import annotations
 
 import logging
-import re
-from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass, field
-from datetime import datetime
 from pathlib import Path
-from typing import Any
 
-from pydantic import BaseModel
+import psycopg
+from psycopg_pool import ConnectionPool
 
-import base.cluster
-from base.api_contracts.agent_contract import ShellKillMode
-from base.api_contracts.status import PausedReason, SchemaMismatchStatus
-from base.clock import Clock
 from base.cluster.machine import MachineIdentity
 from base.daemon.endpoints import ServiceEndpoints
 from base.db import Database
+from base.deploy.git.cluster_drift import checkout_head_sha
+from base.deploy.lifecycle import start_serving
+from base.host.env.registry import process_environment
 from base.host.proc import process_alive
-from base.host.resource_sample import ResourceSample
+from base.host.resource_sample import ResourceSample, resource_sample
 from base.native_process.loaded_commit import LoadedCommit
-from base.sessions.page_session import is_page_label
+from base.paths import resolve_meiva_home
+from base.sessions.backend import get_backend, get_shell_backend
 from ops.cluster_status.model import (
     AGENT_SHELL_RE as AGENT_SHELL_RE,
 )
-from ops.cluster_status.model import (
-    count_agent_shells as count_agent_shells,
+from ops.cluster_status.report import (
+    ClusterStatus as ClusterStatus,
 )
-from ops.cluster_status.model import (
-    group_agent_sessions as _group_agent_sessions,
+from ops.cluster_status.report import (
+    DbSnapshot,
+    StatusFacts,
+    assemble_status,
+    unavailable_db_snapshot,
 )
-from ops.cluster_status.model import (
-    trim_captured_lines,
+from ops.cluster_status.report import (
+    serving_gate_reason as serving_gate_reason,
 )
 from ops.cluster_status.schema_mismatch import status as schema_mismatch_status
-from ops.rpc_schemas import SessionInfo, ShellInfo
+from ops.cluster_status.sessions import (
+    ShellNotFoundError as ShellNotFoundError,
+)
+from ops.cluster_status.sessions import (
+    agent_shell_sessions as agent_shell_sessions,
+)
+from ops.cluster_status.sessions import (
+    capture_shell as capture_shell,
+)
+from ops.cluster_status.sessions import (
+    cluster_now as cluster_now,
+)
+from ops.cluster_status.sessions import (
+    collect_sessions,
+)
+from ops.cluster_status.sessions import (
+    kill_agent_shells as kill_agent_shells,
+)
+from ops.cluster_status.sessions import (
+    kill_shell as kill_shell,
+)
 
 _log = logging.getLogger(__name__)
 
-# `connection(timeout=...)` overrides the pool's long-lived default for this
-# probe. Status must degrade before the gateway's probe deadline when the
-# central DB is down instead of queueing behind the pool for its full timeout.
+# meiva:note
+# `connection(timeout=...)` overrides the pool's long-lived default for this probe. Status must
+# degrade before the gateway's probe deadline when the central DB is down instead of queueing
+# behind the pool for its full timeout.
 #
-# The bound covers the pool QUEUE only: once a connection is handed out, a
-# query hung on a blackholed flow waits out the connection's own keepalive +
-# statement ceiling (~60s, PG_KEEPALIVE_KWARGS / statement_timeout) before
-# failing — same failure class as the pre-change fresh connects (connect
-# timeout 5s, then the same ~60s query ceiling), so a blackhole slows the
-# probe but never hangs it.
+# The bound covers the pool QUEUE only: once a connection is handed out, a query hung on a
+# blackholed flow waits out the connection's own keepalive + statement ceiling (~60s,
+# PG_KEEPALIVE_KWARGS / statement_timeout) before failing — same failure class as the
+# pre-change fresh connects (connect timeout 5s, then the same ~60s query ceiling), so a
+# blackhole slows the probe but never hangs it.
 _POOL_BORROW_TIMEOUT_S = 2.0
 
 
-class ClusterStatus(BaseModel):
-    """`GET /api/cluster/status` response body — this host's snapshot in the
-    multi-machine view.
-
-    `meiva cluster status` CLI and the future monitoring page consume the
-    same payload.
-    """
-
-    machine_name: str
-    # Three orthogonal capability flags (any combination on a single host) —
-    # never a single categorical "role". See base/cluster/machine.py.
-    # serve_observability_station defaults False so a client on pre-station
-    # code still parses a station host's snapshot.
-    serve_gateway: bool
-    serve_agent_runner: bool
-    serve_observability_station: bool = False
-    # meiva:note
-    # Status only: an unreadable database snapshot or a serving gate that has
-    # not reached `serving` — the compound reads true whenever this host cannot
-    # claim readiness, whichever clause fired.
-    paused: bool
-    # meiva:note
-    # Which clause of the `paused` verdict fired — the first true one, in the
-    # verdict's own order: no_state / startup. None when not paused. Splitting it
-    # apart keeps a failed start's parked serving gate (`startup`) legible from a
-    # failed database read, instead of one opaque bool that a consumer can only
-    # guess at.
-    paused_reason: PausedReason | None = None
-    # This host's prod-source HEAD commit (`$MEIVA_HOME/source`), or None when it
-    # cannot be read (no prod source / git unavailable); threaded to the roster so
-    # the multi-machine view shows each node's checkout.
-    head_sha: str | None = None
-    # The commit the process answering this probe actually loaded, frozen at its
-    # own boot (`base.native_process.loaded_commit`), or None when it never froze one. Distinct
-    # from head_sha: head_sha is the checkout, running_sha is code the live
-    # process holds. They differ when the checkout advanced (`git pull`) but the
-    # process was not restarted — the roster marks that node's code as stale.
-    #
-    # This speaks only for the answering process (the ops daemon on an
-    # agent-runner, the gateway on a pure gateway). A sibling daemon respawned at
-    # a different commit is not covered here; its own commit is on its
-    # `/healthz`, and `probe_daemon` surfaces it per daemon.
-    running_sha: str | None = None
-    schema_mismatch: SchemaMismatchStatus | None = None
-    # This host's live agent shell-session count, surfaced per-machine in
-    # the status panel. 0 on a host with no agents (e.g. a pure gateway).
-    shell_count: int = 0
-    # Per-host daemon liveness (pidfile + signal). None = could not probe. Shown
-    # per-machine in the roster; central-only daemons (labeler/memory-indexer) are not
-    # here — they live in the gateway services panel.
-    agent_host_online: bool | None = None
-    supervisor_online: bool | None = None
-    # meiva:note
-    # Agent-runner detail surfaced on the Status Page. `agent_count` is this
-    # host's non-terminated agent identities, including idle and paused agents.
-    # `session_count` counts live service and persistent shell sessions.
-    agent_count: int = 0
-    session_count: int = 0
-    # The agents' shell/watcher sessions grouped by agent for hierarchical
-    # display (the agent process itself is not a session, so it is not a group entry).
-    agent_groups: list[dict[str, object]] = []
-    # This machine's live CPU / memory / disk reading — one sample, no history
-    # (Prometheus holds the series). None when psutil is unavailable.
-    resource: ResourceSample | None = None
-
-
-def check_pidfile(
-    pidfile_path: str, *, alive_probe: Callable[[int], bool] | None = None
-) -> tuple[bool, int | None]:
-    """Read a pidfile + `process_alive(pid)` to test liveness. Returns (alive, pid).
-
-    Missing/empty/non-int file -> (False, None). Pidfile present but the process
-    is gone -> (False, pid)."""
-    pf = Path(pidfile_path)
+# meiva:note
+# Read a pidfile and test the pid it names for liveness. Returns (alive, pid).
+#
+# Missing/empty/non-int file -> (False, None). Pidfile present but the process is gone ->
+# (False, pid).
+def check_pidfile(pidfile_path: str) -> tuple[bool, int | None]:
     try:
-        pid = int(pf.read_text().strip())
+        pid = int(Path(pidfile_path).read_text().strip())
     except (FileNotFoundError, ValueError):
         return False, None
-    probe = alive_probe or process_alive
-    return probe(pid), pid
+    return process_alive(pid), pid
 
 
-def count_local_agents(conn: Any, *, local_machine: str) -> int:
-    """Count this machine's retained agent identities through the snapshot connection."""
+# meiva:note
+# Count this machine's retained agent identities through the snapshot connection.
+def count_local_agents(conn: psycopg.Connection, *, local_machine: str) -> int:
     row = conn.execute(
         "SELECT count(*) FROM agents_meta WHERE machine=%s AND status<>'terminated'",
         (local_machine,),
@@ -159,285 +112,16 @@ def count_local_agents(conn: Any, *, local_machine: str) -> int:
     return int(row[0])
 
 
-# Session name prefix — sessions are named `meiva-<service>` (see
-# base/cluster.py:session_name; the per-home session-record namespace already
-# scopes them to this cluster). The prefix filter drops non-meiva sessions.
-_CLUSTER_SESSION_PREFIX = f"{base.cluster.session_name('')}"  # "meiva-"
-
-# A bare agent main-process session (`meiva-agent-<id>`). Agent processes are
-# pid records, not sessions — `collect_sessions` filters them out so the
-# session count / agent groups stay session-shaped (a P1 regression in #2330
-# put them back in and ghosted 26 of 38 agent_groups).
-_AGENT_PROCESS_RE = re.compile(
-    r"^meiva-(?:[a-z0-9]+-)*(?:agent-\d+|boot-\d+-(?:\d+-\d+|[a-f0-9]{32}))$"
-)
-
-
-def agent_shell_sessions(
-    agent_id: int,
-    *,
-    session_collector: Callable[[], tuple[list[SessionInfo], int, int]] | None = None,
-) -> list[ShellInfo]:
-    """This host's live persistent-shell sessions for one agent, newest id last.
-
-    Reuses the same session enumeration as the cluster status snapshot
-    (`collect_sessions`, already filtered to this cluster's prefix), keeping
-    only `…-agent-<agent_id>-shell-<sid>[-<name>]` sessions — the agent's
-    explicitly created shells and its watchers. The agent's own process session
-    has no `-shell-` segment and is excluded.
-
-    **Host scope: this machine's session backends only.** The gateway's inspector
-    and shell-monitor endpoints call this for agents that run on THIS host and
-    dispatch `shell_probe` / `shell_capture` ops to the agent's own machine
-    otherwise — a remote runner's shells never appear in a local probe.
-    """
-    collector = session_collector or collect_sessions
-    sessions, *_ = collector()
-    shells: list[ShellInfo] = []
-    for s in sessions:
-        m = AGENT_SHELL_RE.search(s.name)
-        if m is None or int(m.group(1)) != agent_id:
-            continue
-        shells.append(
-            ShellInfo(
-                id=int(m.group(2)),
-                name=m.group(3),
-                created_at=s.created_at,
-                uptime_seconds=s.uptime_seconds,
-            )
-        )
-    shells.sort(key=lambda sh: sh.id)
-    return shells
-
-
-class ShellNotFoundError(LookupError):
-    """No live shell with this session id exists on this host."""
-
-
-def capture_shell(
-    agent_id: int,
-    session_id: int,
-    lines: int = 200,
-    *,
-    shell_sessions_fn: Callable[[int], list[ShellInfo]] | None = None,
-    shell_backend: Any | None = None,
-) -> tuple[str, list[str], datetime | None, int]:
-    """Capture the terminal tail of one of an agent's persistent shells.
-
-    Resolves `session_id` against this host's live shell sessions for the agent
-    (`agent_shell_sessions`), reconstructs the full session name (carrying the
-    optional `-<name>` suffix), and captures the last `lines` lines through the
-    shell session backend (the pty-sessions service — its exact-match capture
-    pins it to that one session, never a prefix neighbour `shell-3` vs
-    `shell-30`, or its `-watcher`). Returns (full_name, captured_lines, created_at, uptime_seconds) — lines newline-split
-    with the trailing newline stripped; created_at / uptime_seconds come from the
-    resolved session record (the launch epoch + probe-time uptime).
-
-    Host scope matches `agent_shell_sessions`: this host's session backend only.
-    The gateway's shell-monitor endpoint runs this locally for agents on this
-    host and dispatches the `shell_capture` op to the agent's own machine
-    otherwise.
-
-    Raises:
-        ShellNotFoundError: no live shell with `session_id` on this host.
-        RuntimeError: the capture failed (the session died between the
-            probe and the capture).
-    """
-    list_shells = shell_sessions_fn or agent_shell_sessions
-    shell = next((s for s in list_shells(agent_id) if s.id == session_id), None)
-    if shell is None:
-        raise ShellNotFoundError(f"agent {agent_id} has no live shell {session_id} on this host")
-
-    full_name = _shell_session_name(agent_id, shell)
-    if shell_backend is None:
-        from base.sessions.backend import get_shell_backend
-
-        backend = get_shell_backend()
-    else:
-        backend = shell_backend
-
-    try:
-        captured = backend.capture_pane(full_name, lines)
-    except Exception as exc:
-        raise RuntimeError(f"session capture on {full_name!r} failed: {exc}") from exc
-    captured_lines = trim_captured_lines(captured)
-    return full_name, captured_lines, shell.created_at, shell.uptime_seconds
-
-
-def kill_shell(
-    agent_id: int,
-    session_id: int,
-    *,
-    shell_sessions_fn: Callable[[int], list[ShellInfo]] | None = None,
-    shell_backend: Any | None = None,
-) -> tuple[ShellKillMode, bool, str | None]:
-    """Kill one host-local persistent shell, or report that it is already absent.
-
-    Returns ``(mode, interrupted, name)``: ``mode`` is ``"killed"`` or
-    ``"absent"``; ``interrupted`` is True when the killed session carried live
-    processes (a running foreground or background job) at kill time — the TTL
-    reaper uses it to decide whether the reclamation deserves a notice to the
-    owner (an empty shell's reaping is silent); ``name`` is the shell's
-    optional display name. The verdict comes from the same backend call that
-    kills (``kill_session_with_verdict``), so a job starting between a
-    separate idle probe and the kill cannot be missed; a backend without
-    verdict support reports interrupted=True (fail-open: a session that
-    cannot be proven idle may well be running work)."""
-    list_shells = shell_sessions_fn or agent_shell_sessions
-    shell = next((s for s in list_shells(agent_id) if s.id == session_id), None)
-    if shell is None:
-        return ShellKillMode.ABSENT, False, None
-    full_name = _shell_session_name(agent_id, shell)
-    if shell_backend is None:
-        from base.sessions.backend import get_shell_backend
-
-        backend = get_shell_backend()
-    else:
-        backend = shell_backend
-    try:
-        ok, _mode, interrupted = backend.kill_session_with_verdict(full_name)
-    except NotImplementedError:
-        interrupted = True  # cannot inspect — assume the worst
-        ok, _mode = backend.kill_session(full_name)
-    if not ok:
-        raise RuntimeError(f"failed to kill session {full_name!r}")
-    return ShellKillMode.KILLED, interrupted, shell.name
-
-
-# Parallel kills bound one kill-all to roughly one PTY CLI round trip: the
-# synchronous terminate path answers inside the gateway's lifecycle deadline.
-_KILL_ALL_WORKERS = 8
-
-
-def kill_agent_shells(
-    agent_id: int,
-    *,
-    before_session_index: int,
-    shell_sessions_fn: Callable[[int], list[ShellInfo]] | None = None,
-    shell_backend: Any | None = None,
-) -> list[int]:
-    """Kill listed host-local shells below the owner's cutoff; return their ids.
-
-    The `kill_all_shell_sessions` primitive
-    (docs/decisions/agents/lifecycle/2026-09-27-terminate-has-no-closed-state.md). The enumeration is
-    `agent_shell_sessions` — the one `…-agent-<id>-shell-<sid>[-<name>]` rule —
-    so the agent's explicit shells and its watchers go, while another agent's
-    sessions and the agent's own process session are never touched. Page-server
-    sessions (`meiva.ui.serve`, the `page-` label owned by
-    `base.sessions.page_session`) are spared: a page keeps its own lifecycle.
-    The backend's kill is idempotent, so a session that ended between the
-    listing and its kill still counts as killed — it is gone either way. No
-    notice is produced here (an owner-level kill is silent) and nothing is
-    written to the database: removing `agent_shell_ttls` rows is the gateway's
-    part. IDs at or above the exclusive cutoff are never targeted. Enumeration
-    happens once; late creation and crash leftovers require operator cleanup.
-    Every selected session is attempted; a kill the backend could not
-    confirm raises one RuntimeError naming those ids after the others ran.
-    """
-    list_shells = shell_sessions_fn or agent_shell_sessions
-    shells = [
-        shell
-        for shell in list_shells(agent_id)
-        if shell.id < before_session_index and not is_page_label(shell.name)
-    ]
-    if not shells:
-        return []
-    if shell_backend is None:
-        from base.sessions.backend import get_shell_backend
-
-        backend = get_shell_backend()
-    else:
-        backend = shell_backend
-
-    def _kill(shell: ShellInfo) -> bool:
-        ok, _mode = backend.kill_session(_shell_session_name(agent_id, shell), graceful=False)
-        return ok
-
-    with ThreadPoolExecutor(max_workers=min(len(shells), _KILL_ALL_WORKERS)) as pool:
-        confirmed = list(pool.map(_kill, shells))
-    failed = [shell.id for shell, ok in zip(shells, confirmed, strict=True) if not ok]
-    if failed:
-        raise RuntimeError(f"failed to kill shell session(s) {failed} of agent {agent_id}")
-    return [shell.id for shell in shells]
-
-
-def _shell_session_name(agent_id: int, shell: ShellInfo) -> str:
-    """The full backend session name of one listed shell (its `-<name>` kept)."""
-    return base.cluster.session_name(f"agent-{agent_id}-shell-{shell.id}") + (
-        f"-{shell.name}" if shell.name else ""
-    )
-
-
-def collect_sessions(
-    *,
-    service_backend: Any | None = None,
-    shell_backend: Any | None = None,
-    clock: Clock | None = None,
-) -> tuple[list[SessionInfo], int, int]:
-    """Enumerate this host's live sessions from the session backends, and return
-    (sessions, shell_count, total).
-
-    The service/daemon sessions come from `get_backend()` (native supervisor)
-    and the agents' persistent shells / watchers from
-    `get_shell_backend()` (the pty-sessions service) — the same two namespaces
-    `meiva start` / the healthchecks write into. Only sessions matching the
-    current cluster prefix (`meiva-*`) are kept — dev-worktree clusters and bare
-    non-meiva sessions are excluded. Agent processes are not sessions (they are
-    pid records, tracked separately), so bare `meiva-agent-<id>` sessions are
-    filtered out here — this covers the daemons + the agents' persistent
-    shells. A backend that is down degrades to empty data.
-    """
-    from base.sessions.backend import get_backend, get_shell_backend
-
-    rows: dict[str, SessionInfo] = {}
-    zone = (clock or Clock.from_settings()).zone()
-    now = datetime.now().astimezone(zone)
-    svc = get_backend() if service_backend is None else service_backend
-    sh = get_shell_backend() if shell_backend is None else shell_backend
-    for backend in (svc, sh):
-        try:
-            names = backend.list_sessions(_CLUSTER_SESSION_PREFIX)
-        except Exception:
-            # A down backend means no sessions to show, and the
-            # status snapshot must stay readable while it is down.
-            _log.warning("session enumeration failed on %s", type(backend).__name__, exc_info=True)
-            continue
-        # Batch timestamp read: the PTY backend's per-session path costs one
-        # CLI process per session (~150 ms each) and a snapshot fans out over
-        # ALL of them serially — 28 sessions measured ~4.5 s, blowing past the
-        # roster's 3 s probe timeout (2026-08-12, misreported machine-1 offline).
-        epochs = backend.session_started_ats(names)
-        for name in names:
-            if _AGENT_PROCESS_RE.match(name):
-                continue  # agent processes are pid records, not sessions
-            created: datetime | None = None
-            epoch = epochs.get(name)
-            if epoch is not None:
-                try:
-                    created = datetime.fromtimestamp(epoch).astimezone(zone)
-                except (OSError, OverflowError, ValueError):
-                    created = None
-            uptime = int((now - created).total_seconds()) if created else 0
-            rows[name] = SessionInfo(name=name, created_at=created, uptime_seconds=uptime)
-    sessions = sorted(rows.values(), key=lambda s: s.name)
-    return sessions, count_agent_shells(sessions), len(sessions)
-
-
 # meiva:note
 # Read the agent count and schema diagnosis through one snapshot-local connection.
 #
-# The first element says whether the read succeeded: a host whose database
-# snapshot failed cannot claim readiness.
+# `ok` on the result says whether the read succeeded: a host whose database snapshot failed
+# cannot claim readiness. During a data-plane outage the snapshot stays readable with no
+# readiness claim and the zero-count default: the agent count and schema diagnosis share one
+# bounded connection, and any failure of it degrades both together.
 def read_db_snapshot(
-    db: Database,
-    pool: Any | None,
-    *,
-    local_machine: MachineIdentity,
-    agent_counter: Callable[..., int] | None = None,
-    schema_status_fn: Callable[..., SchemaMismatchStatus | None] | None = None,
-) -> tuple[bool, int, SchemaMismatchStatus | None]:
-    counter = agent_counter or count_local_agents
-    status_fn = schema_status_fn or schema_mismatch_status
+    db: Database, pool: ConnectionPool | None, *, machine_name: str, count_agents: bool
+) -> DbSnapshot:
     try:
         connection = (
             db.connect(autocommit=True)
@@ -446,38 +130,19 @@ def read_db_snapshot(
         )
         with connection as conn:
             agent_count = (
-                counter(conn, local_machine=local_machine.name())
-                if ("agent-runner" in local_machine.role())
-                else 0
+                count_local_agents(conn, local_machine=machine_name) if count_agents else 0
             )
-            schema_status = status_fn(db, conn=conn, local_machine=local_machine.name())
-        return True, agent_count, schema_status
+            schema_status = schema_mismatch_status(db, conn=conn, local_machine=machine_name)
+        return DbSnapshot(ok=True, agent_count=agent_count, schema_mismatch=schema_status)
     except Exception as exc:
-        # meiva:note
-        # Status degrades when the central DB is unavailable. The agent count and schema
-        # diagnosis share one bounded connection. During a data-plane outage the snapshot
-        # remains readable with no readiness claim and the existing zero-count default.
         _log.warning("database snapshot read failed; using degraded status", exc_info=True)
-        return (
-            False,
-            0,
-            SchemaMismatchStatus(
-                kind="unavailable",
-                machine=local_machine.name(),
-                detail=f"schema comparison unavailable: status database snapshot failed ({type(exc).__name__})",
-            ),
-        )
+        return unavailable_db_snapshot(machine_name, type(exc).__name__)
 
 
-def read_resource_sample(
-    *, sampler: Callable[[], ResourceSample] | None = None
-) -> ResourceSample | None:
-    """One live resource sample, degraded to None on any psutil failure."""
+# meiva:note
+# One live resource sample, degraded to None on any psutil failure.
+def read_resource_sample() -> ResourceSample | None:
     try:
-        if sampler is not None:
-            return sampler()
-        from base.host.resource_sample import resource_sample
-
         return resource_sample()
     except Exception:  # psutil may not be installed; degrade gracefully
         _log.warning("resource_sample failed (psutil missing?)", exc_info=True)
@@ -485,133 +150,62 @@ def read_resource_sample(
 
 
 # meiva:note
-# `startup` while this host's serving gate has not reached `serving`, else None.
-#
-# A start is in flight, a stop has begun, or a failed start parked the gate and
-# recovery stays gated. A local fact: no database read.
-def serving_gate_reason(*, is_serving_fn: Callable[[], bool] | None = None) -> PausedReason | None:
-    if is_serving_fn is None:
-        from base.deploy.lifecycle import start_serving
-        from base.paths import meiva_home
-
-        serving = start_serving.is_serving(meiva_home())
-    else:
-        serving = is_serving_fn()
-    return None if serving else "startup"
-
-
-# meiva:note
-# The first true clause of the `paused` verdict, in its own clause order.
-#
-# `no_state` (the database snapshot read failed), then `startup` (see
-# `serving_gate_reason`). None when neither fired.
-def _paused_reason(
-    *, db_ok: bool, is_serving_fn: Callable[[], bool] | None = None
-) -> PausedReason | None:
-    if not db_ok:
-        return "no_state"
-    return serving_gate_reason(is_serving_fn=is_serving_fn)
-
-
-def _supervisor_online() -> bool | None:
-    """An observed native root is online; unavailable inspection stays unknown."""
+# An observed native root is online; unavailable inspection stays unknown.
+def _supervisor_online(home: Path) -> bool | None:
     from base.native_process.root_control.client import RootClientError, root_process
-    from base.paths import meiva_home
 
     try:
-        return root_process(home=meiva_home()) is not None
+        return root_process(home=home) is not None
     except (RootClientError, RuntimeError):
         return None
 
 
-@dataclass(frozen=True)
-class StatusSnapshotHooks:
-    pidfile_checker: Callable[[str], tuple[bool, int | None]] = field(
-        default_factory=lambda: check_pidfile
-    )
-    session_collector: Callable[[], tuple[list[SessionInfo], int, int]] = field(
-        default_factory=lambda: collect_sessions
-    )
-    agent_counter: Callable[..., int] = field(default_factory=lambda: count_local_agents)
-    schema_status_fn: Callable[..., SchemaMismatchStatus | None] = field(
-        default_factory=lambda: schema_mismatch_status
-    )
-    resource_sampler: Callable[[], ResourceSample] | None = None
-    resource_reader: Callable[[], ResourceSample | None] | None = None
-    is_serving_fn: Callable[[], bool] | None = None
-    head_sha_reader: Callable[[], str | None] | None = None
-
-
+# meiva:note
+# Assemble this host's cluster state — used by `/api/cluster/status`.
+#
+# When setup is missing, the supplied machine owner's independent name and role readers raise
+# specific exceptions; this function passes them through and FastAPI surfaces as default 500
+# (admin endpoint, not consumed by SDK).
 def status_snapshot(
     db: Database,
-    pool: Any | None = None,
+    pool: ConnectionPool | None = None,
     *,
     image: LoadedCommit,
     local_machine: MachineIdentity,
-    hooks: StatusSnapshotHooks | None = None,
 ) -> ClusterStatus:
-    """Assemble this host's cluster state — used by `/api/cluster/status`.
-
-    When setup is missing, the supplied machine owner's independent name and
-    role readers raise specific exceptions; this function passes them
-    through and FastAPI surfaces as default 500 (admin endpoint, not
-    consumed by SDK).
-    """
-    active = hooks or StatusSnapshotHooks()
-    if active.head_sha_reader is None:
-        from base.deploy.git.cluster_drift import prod_source_head_sha
-        from base.host.env.registry import process_environment
-        from base.paths import meiva_home
-
-        head_sha = prod_source_head_sha(meiva_home(), environ=process_environment())
-    else:
-        head_sha = active.head_sha_reader()
-
-    agent_host_alive = (
-        active.pidfile_checker(str(ServiceEndpoints.from_settings().of("agent_host").pidfile))[0]
-        if ("agent-runner" in local_machine.role())
+    machine_name = local_machine.name()
+    roles = local_machine.role()
+    runner = "agent-runner" in roles
+    home = resolve_meiva_home()
+    head_sha = checkout_head_sha(home / "source", environ=process_environment())
+    agent_host_online = (
+        check_pidfile(str(ServiceEndpoints.from_settings().of("agent_host").pidfile))[0]
+        if runner
         else None
     )
-    supervisor_alive = _supervisor_online()
-    sessions, shell_count, session_total = active.session_collector()
-    # The producer is typed (AgentSessionGroup); ClusterStatus.agent_groups stays
-    # an open dict list so the frontend-facing status schema (and its generated TS
-    # types) is unchanged — serialize the models to JSON dicts at the boundary.
-    agent_groups = [g.model_dump(mode="json") for g in _group_agent_sessions(sessions)]
-    sample_fn = active.resource_reader or (
-        lambda: read_resource_sample(sampler=active.resource_sampler)
+    supervisor_online = _supervisor_online(home)
+    sessions = collect_sessions(
+        service_backend=get_backend(), shell_backend=get_shell_backend(), now=cluster_now()
     )
-    # The live one-shot resource sample blocks for its CPU interval. Run it in
-    # parallel with the central-DB reads so snapshot latency pays the slower
-    # of those independent operations, not their sum.
+    # meiva:note
+    # The live one-shot resource sample blocks for its CPU interval. Run it in parallel with
+    # the central-DB reads so snapshot latency pays the slower of those independent
+    # operations, not their sum.
     with ThreadPoolExecutor(max_workers=1) as executor:
-        resource_future = executor.submit(sample_fn)
-        db_ok, agent_count, schema_status = read_db_snapshot(
-            db,
-            pool,
-            local_machine=local_machine,
-            agent_counter=active.agent_counter,
-            schema_status_fn=active.schema_status_fn,
-        )
+        resource_future = executor.submit(read_resource_sample)
+        db_snapshot = read_db_snapshot(db, pool, machine_name=machine_name, count_agents=runner)
         resource = resource_future.result()
-    # One source of truth for the pair: `paused` is exactly "a clause fired",
-    # so the bool can never drift from its reason.
-    paused_reason = _paused_reason(db_ok=db_ok, is_serving_fn=active.is_serving_fn)
-    return ClusterStatus(
-        machine_name=local_machine.name(),
-        serve_gateway=("gateway" in local_machine.role()),
-        serve_agent_runner=("agent-runner" in local_machine.role()),
-        serve_observability_station=("observability-station" in local_machine.role()),
-        paused=paused_reason is not None,
-        paused_reason=paused_reason,
-        head_sha=head_sha,
-        running_sha=image.sha,
-        schema_mismatch=schema_status,
-        shell_count=shell_count,
-        agent_host_online=agent_host_alive,
-        supervisor_online=supervisor_alive,
-        agent_count=agent_count,
-        session_count=session_total,
-        agent_groups=agent_groups,
-        resource=resource,
+    return assemble_status(
+        StatusFacts(
+            machine_name=machine_name,
+            roles=roles,
+            head_sha=head_sha,
+            running_sha=image.sha,
+            sessions=sessions,
+            agent_host_online=agent_host_online,
+            supervisor_online=supervisor_online,
+            db=db_snapshot,
+            resource=resource,
+            serving=start_serving.is_serving(home),
+        )
     )

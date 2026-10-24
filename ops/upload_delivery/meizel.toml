@@ -1,0 +1,6 @@
+[uses]
+"__init__.py" = ["copy_plan.py"]
+"tests" = ["__init__.py", "copy_plan.py"]
+
+[purity]
+"copy_plan.py" = "strict"

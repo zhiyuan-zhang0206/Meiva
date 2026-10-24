@@ -73,6 +73,7 @@ async def test_launch_reconcile_repeats_its_wake_through_its_own_handler(
         "reconcile-key",
         launch.agent_id,
         RetryLaunchRequest(expected_prior_attempt_id=launch.launch_attempt_id),
+        new_attempt_id=uuid4(),
     )
     payload = {"launch_attempt_id": str(accepted.launch_attempt_id)}
 

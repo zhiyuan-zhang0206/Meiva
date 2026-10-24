@@ -1,0 +1,13 @@
+exports = ["adversarial_batch.py", "adversarial_scenario.py", "adversarial_workers.py", "agent_directory.py", "c9_report.py", "catchup.py", "ci_metrics.py", "debt_sweep.py", "entry.py", "loop.py", "memory_maintenance.py", "model_tracker.py", "self_evolution_scan.py", "self_evolution_weekly.py", "stall_watch.py", "telemetry_event.py"]
+
+[uses]
+"adversarial_batch.py" = ["adversarial_scenario.py", "adversarial_workers.py", "agent_directory.py"]
+"adversarial_workers.py" = ["agent_directory.py"]
+"c9_report.py" = ["agent_directory.py", "telemetry_event.py"]
+"ci_metrics.py" = ["agent_directory.py"]
+"debt_sweep.py" = ["agent_directory.py", "telemetry_event.py"]
+"loop.py" = ["catchup.py"]
+"memory_maintenance.py" = ["agent_directory.py"]
+"model_tracker.py" = ["agent_directory.py"]
+"self_evolution_scan.py" = ["agent_directory.py"]
+"self_evolution_weekly.py" = ["agent_directory.py", "loop.py"]

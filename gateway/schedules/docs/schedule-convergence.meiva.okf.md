@@ -69,7 +69,7 @@ state rather than replaying an old request's enabled/config payload. Maintenance
 holds defer execution; stops/deletes retain exact PTY cleanup and close the
 in-progress run rows of the process they reaped (as does a launch), with no
 periodic orphan-run sweep. Deletion enqueues cleanup in the deletion transaction. The existing
-`schedules/catchup.py` at-most-once cron slot claims and accepted callback-loss
+`schedules/jobs/catchup.py` at-most-once cron slot claims and accepted callback-loss
 window are unchanged.
 
 The initial-command metadata survives schedule-manager restarts while its PTY

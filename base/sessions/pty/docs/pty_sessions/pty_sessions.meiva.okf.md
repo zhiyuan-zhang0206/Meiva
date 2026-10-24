@@ -96,7 +96,7 @@ Creation, death, kill, signals and the operator freeze are in
 `close_all` runs the one closure inside the service; a ledger lets the
 next start sweep what a crashed service left running. Both are described in
 [[closure-and-ledger.meiva.okf.md|closure and ledger]]. `meiva stop` turns the
-closure's answer into owner notices (`ops/pty_close_notices.py`) and fails on a
+closure's answer into owner notices (`ops/pty_close_notices/`) and fails on a
 surviving shell; known job leftovers are diagnostic; new allocations are refused meanwhile.
 A crash sweep records its result in local logs. It neither sends owner notices
 nor stages or replays a batch across restarts. Existing notice files remain

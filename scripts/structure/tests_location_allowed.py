@@ -43,10 +43,6 @@ ALLOWED: dict[str, tuple[Category, str]] = {
         "contract",
         "asserts the baseline schema and trigger contracts of db/schema.sql and migrations/",
     ),
-    "tests/components/meiva/test_self_evolution_schedules.py": (
-        "contract",
-        "loads schedules/*.py and locks the weekly schedule's /api/events contract",
-    ),
     "tests/components/base/test_agents_meta_spawner.py": (
         "contract",
         "asserts the agents_meta spawner-lineage constraints the schema enforces",

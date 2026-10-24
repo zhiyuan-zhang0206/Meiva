@@ -40,7 +40,7 @@ async def test_the_first_run_executes_once_and_stores_its_identity_and_result(
     status, result = await ops.idempotent("config_write", payload, "key-1")
 
     assert status is OpStatus.COMPLETED
-    assert executions("first-run") == 1
+    assert executions("first-run", env_path=ops.authority.env_path) == 1
     assert _stored(db_conn, "key-1") == (
         "ops",
         "config_write",
@@ -57,7 +57,7 @@ async def test_a_replay_answers_the_stored_result_without_executing_again(ops: O
     second = await ops.idempotent("config_write", payload, "key-2")
 
     assert first == second
-    assert executions("replayed") == 1
+    assert executions("replayed", env_path=ops.authority.env_path) == 1
 
 
 async def test_the_same_request_in_another_key_order_is_a_replay(ops: Ops) -> None:
@@ -67,7 +67,7 @@ async def test_the_same_request_in_another_key_order_is_a_replay(ops: Ops) -> No
     second = await ops.idempotent("config_write", reordered, "key-3")
 
     assert second == first
-    assert executions("reordered") == 1
+    assert executions("reordered", env_path=ops.authority.env_path) == 1
 
 
 async def test_distinct_keys_execute_twice(ops: Ops) -> None:
@@ -76,7 +76,7 @@ async def test_distinct_keys_execute_twice(ops: Ops) -> None:
     await ops.idempotent("config_write", payload, "key-a")
     await ops.idempotent("config_write", payload, "key-b")
 
-    assert executions("two-keys") == 2
+    assert executions("two-keys", env_path=ops.authority.env_path) == 2
 
 
 @pytest.mark.parametrize(
@@ -95,7 +95,7 @@ async def test_a_key_reused_for_another_request_fails_without_executing(
 
     assert status is OpStatus.FAILED
     assert "identity conflict" in str(result["error"])
-    assert executions("conflict") == 1
+    assert executions("conflict", env_path=ops.authority.env_path) == 1
     assert _stored(db_conn, "intent")[:3] == ("ops", "config_write", "completed")
 
 
@@ -139,7 +139,7 @@ async def test_a_waiter_gets_the_result_of_a_slow_running_owner(ops: Ops) -> Non
         assert not waiter.done(), "the waiter returned while the owner was still running"
 
     assert await waiter == await owner
-    assert executions("slow-owner") == 1
+    assert executions("slow-owner", env_path=ops.authority.env_path) == 1
 
 
 async def test_a_waiter_fails_after_its_bounded_wait_and_never_executes(ops: Ops) -> None:
@@ -156,7 +156,7 @@ async def test_a_waiter_fails_after_its_bounded_wait_and_never_executes(ops: Ops
         assert status is OpStatus.FAILED
         assert "outcome uncertain" in str(result["error"])
     await owner
-    assert executions("bounded-wait") == 1
+    assert executions("bounded-wait", env_path=ops.authority.env_path) == 1
 
 
 async def test_cancelling_the_owner_never_frees_its_key(
@@ -170,13 +170,13 @@ async def test_cancelling_the_owner_never_frees_its_key(
         owner.cancel()
         with pytest.raises(asyncio.CancelledError):
             await owner
-    await _until(lambda: executions("cancelled-owner") == 1)
+    await _until(lambda: executions("cancelled-owner", env_path=ops.authority.env_path) == 1)
 
     status, result = await ops.idempotent("config_write", payload, "key-cancel")
 
     assert status is OpStatus.FAILED
     assert "outcome uncertain" in str(result["error"])
-    assert executions("cancelled-owner") == 1
+    assert executions("cancelled-owner", env_path=ops.authority.env_path) == 1
     assert _stored(db_conn, "key-cancel")[2] is None
 
 
@@ -200,7 +200,7 @@ async def test_a_failed_result_write_keeps_the_claim_without_re_executing(
 
     assert status is OpStatus.FAILED
     assert "outcome uncertain" in str(result["error"])
-    assert executions("result-write-fails") == 1
+    assert executions("result-write-fails", env_path=ops.authority.env_path) == 1
     assert _stored(db_conn, "intent")[2] is None
 
 
@@ -215,7 +215,7 @@ async def test_an_old_receipt_does_not_expire_into_a_fresh_execution(
     second = await ops.idempotent("config_write", payload, "intent")
 
     assert second == first
-    assert executions("old-receipt") == 1
+    assert executions("old-receipt", env_path=ops.authority.env_path) == 1
 
 
 async def test_a_row_without_a_recorded_identity_fails_closed(
@@ -231,7 +231,7 @@ async def test_a_row_without_a_recorded_identity_fails_closed(
 
     assert status is OpStatus.FAILED
     assert "legacy identity unavailable" in str(result["error"])
-    assert executions("legacy") == 0
+    assert executions("legacy", env_path=ops.authority.env_path) == 0
 
 
 def _record(conn: psycopg.Connection, status: str | None) -> None:

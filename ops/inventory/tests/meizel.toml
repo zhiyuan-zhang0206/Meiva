@@ -1,0 +1,2 @@
+[uses]
+"test_inventory_ops.py" = ["_capability_child.py"]

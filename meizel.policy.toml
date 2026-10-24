@@ -3,7 +3,6 @@
 "agent/graph/tests/test_agent_traceback.py" = "executes agent-style code to check how its traceback is rendered"
 "agent/tests/plugins/test_register_namespace.py" = "imports SDK namespaces that plugins install at run time; they have no module file"
 "gateway/tests/lifecycle/sdk/test_external_integration_agent.py" = "loads a built-in skill script by path to test it; skill content is discovered, core does not depend on it"
-"meiva/agents/tests/test_adversarial_eval_schedule.py" = "imports a built-in schedule template from schedules/ to test it; schedule scripts are run content, core does not depend on them"
 "meiva/shell/coding_tools/tests/test_claude_canonical_owner.py" = "loads a built-in skill script by path to test it; skill content is discovered, core does not depend on it"
 "meiva/shell/coding_tools/tests/test_codex_canonical_owner.py" = "loads a built-in skill script by path to test it; skill content is discovered, core does not depend on it"
 "meiva/tests/namespaces/sdk_surface/test_help_renderer.py" = "executes generated module source to render help for it"
@@ -59,18 +58,12 @@
 "base/events/loader.py" = ["base/events/declarations"]
 "base/events/tests/test_declarations_layout.py" = ["base/events/declarations"]
 "cli/tests/bootstrap/_logging_entry_child.py" = ["services/agent_runner/agent_ops"]
-"schedules/tests/test_adversarial_eval_weekly.py" = ["schedules"]
-"schedules/tests/test_agent_directory_consumers.py" = ["schedules"]
-"schedules/tests/test_c9_daily_report.py" = ["schedules"]
-"schedules/tests/test_catchup.py" = ["schedules"]
-"schedules/tests/test_debt_sweep_daily.py" = ["schedules"]
-"schedules/tests/test_dev_ci_metrics.py" = ["schedules"]
+"schedules/tests/children/run_scripts.py" = ["schedules"]
 "scripts/host_ops/tcc/tests/test_tcc_onboard_helper_grants.py" = ["scripts/host_ops/tcc"]
 "services/agent_runner/agent_host/tests/agent_host/child_sdk_host_posture.py" = ["services/agent_runner/agent_host"]
 "services/backup/scheduler/operation/worker_bootstrap.py" = ["services/backup/scheduler"]
 "services/supervision/meiva_root/probes.py" = ["services/supervision/healthchecks"]
 "tests/ci/test_path_scopes.py" = ["tests/path_scoped"]
-"tests/components/meiva/test_self_evolution_schedules.py" = ["schedules"]
 "tests/components/schedules/test_goal_watch_filter.py" = ["meiva_builtins/plugins", "meiva_builtins/skills"]
 "tests/e2e/process_support.py" = ["services/agent_runner"]
 "tests/fixtures/path_scopes.py" = ["tests/path_scoped"]

@@ -1,4 +1,9 @@
-"""Read-only verification for registered private production files."""
+# meiva:note
+# Read-only verification for registered private production files.
+#
+# The shell reads the manifest, the checked tree and the durable git sources, and hands what it
+# found to `verdicts` and `report`. `main` is the one place that resolves the process home, and
+# only when the operator named no root.
 
 from __future__ import annotations
 
@@ -13,29 +18,17 @@ from typing import cast
 
 from base.paths.home import resolve_meiva_home
 from ops.private_files.model import (
-    CliArgs as CliArgs,
-)
-from ops.private_files.model import (
-    GitSource as GitSource,
-)
-from ops.private_files.model import (
-    ManifestEntry as ManifestEntry,
-)
-from ops.private_files.model import (
-    Outcome as Outcome,
-)
-from ops.private_files.model import (
-    OutcomeJson as OutcomeJson,
-)
-from ops.private_files.model import (
-    RegistryManifest as RegistryManifest,
-)
-from ops.private_files.model import (
-    relative_path as _relative_path,
-)
-from ops.private_files.model import (
+    CliArgs,
+    GitSource,
+    Outcome,
+    RegistryManifest,
+    relative_path,
     validate_manifest,
 )
+from ops.private_files.report import exit_code, render
+from ops.private_files.verdicts import GitProbe, disk_errors, requires_disk_file, source_errors
+
+__all__ = ["main", "verify"]
 
 _DEFAULT_MANIFEST = Path(__file__).with_name("manifest.json")
 _HASH_CHUNK_SIZE = 1024 * 1024
@@ -54,72 +47,75 @@ def _file_sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _git_source_errors(
-    source: GitSource, relative_path: PurePosixPath, expected_sha256: str
-) -> list[str]:
-    if source["kind"] != "git":
-        raise ValueError(f"unsupported private-files source kind: {source['kind']!r}")
-    repo = Path(source["repo"]).expanduser()
-    if not repo.is_dir():
-        return [f"source git repository is missing: {repo}"]
-
-    object_name = f"{source['treeish']}:{relative_path.as_posix()}"
-    exists = subprocess.run(  # noqa: S603 — fixed git plumbing with list-form arguments.
-        ["git", "-C", str(repo), "cat-file", "-e", object_name],
-        stdout=subprocess.DEVNULL,
+# meiva:note
+# Run one fixed git plumbing command against `repo`; the arguments are list-form, never a shell
+# string.
+def _git(repo: Path, *args: str, capture: bool) -> subprocess.CompletedProcess[bytes]:
+    return subprocess.run(  # noqa: S603
+        ["git", "-C", str(repo), *args],
+        stdout=subprocess.PIPE if capture else subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
         check=False,
     )
-    if exists.returncode != 0:
-        return [f"source git object is missing: {repo}@{object_name}"]
 
-    blob = subprocess.run(  # noqa: S603 — fixed git plumbing with list-form arguments.
-        ["git", "-C", str(repo), "cat-file", "blob", object_name],
-        capture_output=True,
-        check=False,
-    )
+
+# meiva:note
+# Look at the durable git source of one entry, stopping at the first step that fails: the
+# repository directory, then the object's existence, then its bytes.
+def _probe_git_source(source: GitSource, relative: PurePosixPath) -> GitProbe:
+    if source["kind"] != "git":
+        raise ValueError(f"unsupported private-files source kind: {source['kind']!r}")
+    repo = Path(source["repo"]).expanduser()
+    object_name = f"{source['treeish']}:{relative.as_posix()}"
+    if not repo.is_dir():
+        return GitProbe(str(repo), object_name, repo_exists=False)
+    if _git(repo, "cat-file", "-e", object_name, capture=False).returncode != 0:
+        return GitProbe(str(repo), object_name, repo_exists=True, object_exists=False)
+    blob = _git(repo, "cat-file", "blob", object_name, capture=True)
     if blob.returncode != 0:
-        return [f"source git object cannot be read: {repo}@{object_name}"]
-    source_sha256 = hashlib.sha256(blob.stdout).hexdigest()
-    if source_sha256 != expected_sha256:
-        return [f"source sha256 mismatch: expected {expected_sha256}, got {source_sha256}"]
-    return []
+        return GitProbe(
+            str(repo), object_name, repo_exists=True, object_exists=True, blob_readable=False
+        )
+    return GitProbe(
+        str(repo),
+        object_name,
+        repo_exists=True,
+        object_exists=True,
+        blob_readable=True,
+        blob_sha256=hashlib.sha256(blob.stdout).hexdigest(),
+    )
 
 
+# meiva:note
+# Verify checked files and their durable git sources without writing either.
+#
+# Lifecycle semantics: an ``active`` entry must exist on disk AND match its durable git source,
+# the missing-file guard. An ``archived`` entry's disk copy may be gone (the residue was removed
+# after its source was archived); only the durable source must exist and match. This keeps an
+# archived entry verifiable forever, instead of failing the moment the residue is deleted.
 def verify(root: Path, manifest: Path) -> list[Outcome]:
-    """Verify checked files and their durable git sources without writing either.
-
-    Lifecycle semantics: an ``active`` entry must exist on disk AND match its
-    durable git source — the missing-file guard. An ``archived`` entry's disk
-    copy may be gone (the residue was removed after its source was archived);
-    only the durable source must exist and match. This keeps an archived entry
-    verifiable forever, instead of failing the moment the residue is deleted.
-    """
     registry = _load_manifest(manifest)
     checked_root = root.expanduser()
     outcomes: list[Outcome] = []
     for entry in registry["entries"]:
-        status = entry.get("status", "active")
-        if status not in ("active", "archived"):
-            raise ValueError(f"unsupported private-files entry status: {status!r}")
-        relative_path = _relative_path(entry["path"])
+        relative = relative_path(entry["path"])
         expected_sha256 = entry["sha256"]
         errors: list[str] = []
-        if status == "active":
-            checked_file = checked_root.joinpath(*relative_path.parts)
-            if not checked_file.is_file():
-                errors.append("file is missing")
-            else:
-                actual_sha256 = _file_sha256(checked_file)
-                if actual_sha256 != expected_sha256:
-                    errors.append(
-                        f"file sha256 mismatch: expected {expected_sha256}, got {actual_sha256}"
-                    )
-        errors.extend(_git_source_errors(entry["source"], relative_path, expected_sha256))
+        if requires_disk_file(entry.get("status", "active")):
+            checked_file = checked_root.joinpath(*relative.parts)
+            is_file = checked_file.is_file()
+            errors.extend(
+                disk_errors(
+                    is_file=is_file,
+                    actual_sha256=_file_sha256(checked_file) if is_file else None,
+                    expected_sha256=expected_sha256,
+                )
+            )
+        errors.extend(source_errors(_probe_git_source(entry["source"], relative), expected_sha256))
         outcomes.append(
             Outcome(
                 entry_id=entry["id"],
-                path=relative_path.as_posix(),
+                path=relative.as_posix(),
                 ok=not errors,
                 errors=tuple(errors),
             )
@@ -127,12 +123,10 @@ def verify(root: Path, manifest: Path) -> list[Outcome]:
     return outcomes
 
 
-def _default_root() -> Path:
-    return resolve_meiva_home() / "source"
-
-
 def _parse_args(argv: Sequence[str] | None) -> CliArgs:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(
+        description="Read-only verification for registered private production files."
+    )
     subparsers = parser.add_subparsers(dest="command", required=True)
     verify_parser = subparsers.add_parser("verify", help="verify every registered file")
     verify_parser.add_argument(
@@ -153,25 +147,19 @@ def _parse_args(argv: Sequence[str] | None) -> CliArgs:
     parsed = parser.parse_args(argv)
     if cast(str, parsed.command) != "verify":
         raise AssertionError(f"unknown private-files command: {parsed.command!r}")
-    root = cast(Path | None, parsed.root)
     return CliArgs(
-        root=_default_root() if root is None else root,
+        root=cast(Path | None, parsed.root),
         manifest=cast(Path, parsed.manifest),
         json_output=cast(bool, parsed.json_output),
     )
 
 
+# meiva:note
+# The operator entry (`python -m ops.private_files verify`): the one place that resolves the home,
+# and only when no `--root` was given.
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parse_args(argv)
-    outcomes = verify(args.root, args.manifest)
-    if args.json_output:
-        sys.stdout.write(json.dumps([outcome.as_json() for outcome in outcomes]) + "\n")
-    else:
-        for outcome in outcomes:
-            if outcome.ok:
-                sys.stdout.write(f"OK {outcome.entry_id} {outcome.path}\n")
-            else:
-                sys.stdout.write(
-                    f"FAIL {outcome.entry_id} {outcome.path}: {'; '.join(outcome.errors)}\n"
-                )
-    return 0 if all(outcome.ok for outcome in outcomes) else 1
+    root = args.root if args.root is not None else resolve_meiva_home() / "source"
+    outcomes = verify(root, args.manifest)
+    sys.stdout.write(render(outcomes, json_output=args.json_output))
+    return exit_code(outcomes)

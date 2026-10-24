@@ -1,9 +1,15 @@
 exports = ["schema_mismatch.py"]
 
 [uses]
-"__init__.py" = ["model.py", "schema_mismatch.py"]
+"__init__.py" = ["model.py", "report.py", "schema_mismatch.py", "sessions.py"]
+"report.py" = ["model.py"]
 "schema_mismatch.py" = ["model.py"]
-"tests" = ["__init__.py", "schema_mismatch.py"]
+"sessions.py" = ["listing.py", "model.py", "shell_plans.py"]
+"shell_plans.py" = ["model.py"]
+"tests" = ["__init__.py", "listing.py", "model.py", "report.py", "sessions.py", "shell_plans.py"]
 
 [purity]
+"listing.py" = "strict"
 "model.py" = "strict"
+"report.py" = "strict"
+"shell_plans.py" = "strict"

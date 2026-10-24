@@ -1,22 +1,18 @@
-import json
+# meiva:link schedules/README.md
+
 import os
-import subprocess
 import sys
-import time
-from collections.abc import Callable, Mapping
-from datetime import UTC, datetime, timedelta
-from pathlib import Path
-from typing import Any
+from datetime import UTC, datetime
+from functools import partial
 
-import meiva
-from meiva.agents import AgentStatus as S
-from schedules.agent_status_guard import ensure_agent_status_members
-from schedules.catchup import cluster_timezone, fire_slot_once
-from base.paths import meiva_home, repo_root
-from base.daemon.schedules.watcher import next_fire
-from base.daemon.schedules.inputs import ScheduleInputs
-from schedules.entry import fresh_schedule_entry, schedule_entry
-
+from base.paths import repo_root
+from base.paths.home import resolve_meiva_home
+from schedules.jobs.catchup import cluster_timezone
+from schedules.jobs.entry import open_schedule_entry
+from schedules.jobs.loop import CronSchedule, Trigger, run_loop
+from schedules.jobs.model_tracker import ModelTracker, run_tracker
+from schedules.plans.directory_plan import report_recipient
+from schedules.plans.schedule_identity import parse_schedule_id
 
 CRON = "0 6 * * *"
 _REPORT_LABEL = "Meiva \u8d1f\u8d23\u4eba"
@@ -24,162 +20,32 @@ _REPORT_AGENT_ENV = "MEIVA_MODEL_UPDATE_REPORT_AGENT"
 _TIMEOUT_SECONDS = 120
 
 
-def _report_agent(
-    *,
-    env: Mapping[str, str] | None = None,
-    list_agents_fn: Callable[..., Any] | None = None,
-) -> int:
-    source_env = os.environ if env is None else env
-    list_agents = list_agents_fn or meiva.agents.list_agents
-    configured = source_env.get(_REPORT_AGENT_ENV)
-    if configured is not None and configured.strip():
-        try:
-            agent_id = int(configured)
-        except ValueError as exc:
-            raise RuntimeError(f"{_REPORT_AGENT_ENV} must be a numeric agent id") from exc
-        if agent_id <= 0:
-            raise RuntimeError(f"{_REPORT_AGENT_ENV} must be a positive agent id")
-        return agent_id
-    before_id = None
-    while True:
-        page = list_agents(scope="all", query=_REPORT_LABEL, before_id=before_id)
-        for agent in page.agents:
-            if agent.label == _REPORT_LABEL and agent.status in (S.RUNNING, S.IDLING, S.TERMINATED):
-                return agent.agent_id
-        if page.next_cursor is None:
-            raise RuntimeError(f"no report agent labelled {_REPORT_LABEL!r} is available")
-        before_id = page.next_cursor
-
-
-def _send_report(message: str) -> None:
-    try:
-        meiva.agents.send_message(_report_agent(), message)
-    except Exception as exc:
-        print(f"model update tracker could not notify the P0 lead: {exc}")
-        raise
-
-
-def _failure_message(detail: str) -> str:
-    return f"Model update tracker failed:\n{detail[-1000:]}\nCheck the schedule log and report directory."
-
-
-def _candidate_message(payload: dict[str, Any], report_dir: Path) -> str:
-    actionable = payload["actionable_candidates"]
-    if not isinstance(actionable, dict):
-        raise TypeError("report actionable_candidates must be an object")
-    providers = payload["providers"]
-    if not isinstance(providers, dict):
-        raise TypeError("report providers must be an object")
-    lines = ["New upstream model candidates:"]
-    for provider, model_ids in actionable.items():
-        if not isinstance(provider, str) or not isinstance(model_ids, list):
-            raise TypeError("report actionable candidate has an invalid shape")
-        provider_report = providers[provider]
-        if not isinstance(provider_report, dict):
-            raise TypeError("report provider result must be an object")
-        series_models = provider_report["series_models"]
-        if not isinstance(series_models, dict):
-            raise TypeError("report series_models must be an object")
-        for model_id in model_ids:
-            if not isinstance(model_id, str):
-                raise TypeError("report candidate id must be a string")
-            line = f"- {provider}: {model_id}"
-            known = series_models[model_id]
-            if not isinstance(known, list) or not all(isinstance(value, str) for value in known):
-                raise ValueError("report same-series ids must be strings")
-            if known:
-                line += f" (registry already binds {', '.join(known)} in this series; review supersession)"
-            lines.append(line)
-    status_changes = payload["status_changes"]
-    if not isinstance(status_changes, list) or not all(
-        isinstance(value, str) for value in status_changes
-    ):
-        raise ValueError("report status_changes must be a list of strings")
-    if status_changes:
-        lines.append(f"Provider status changed: {', '.join(status_changes)}")
-    lines.append(f"Full report: {report_dir / 'last-report.md'}")
-    return "\n".join(lines)
-
-
-def _report_from_result(result: subprocess.CompletedProcess[str], report_dir: Path) -> None:
-    if result.returncode == 0:
-        print(f"[{datetime.now(UTC).isoformat()}] model update tracker: no new candidates")
-        return
-    if result.returncode == 2:
-        payload = json.loads((report_dir / "last-report.json").read_text())
-        if not isinstance(payload, dict):
-            raise ValueError("model update tracker JSON report must be an object")
-        _send_report(_candidate_message(payload, report_dir))
-        return
-    detail = (result.stdout + result.stderr)[-1000:]
-    _send_report(_failure_message(f"exit code {result.returncode}\n{detail}"))
-
-
-def run_tracker() -> None:
-    root = repo_root()
-    report_dir = meiva_home() / "model-tracker"
-    child_env = os.environ.copy()
-    child_env["PYTHONPATH"] = str(root)
-    try:
-        result = subprocess.run(
-            [
+if __name__ == "__main__":
+    with open_schedule_entry(globals().get("MEIVA_SCHEDULE_INPUTS")) as inputs:
+        root = repo_root()
+        report_dir = resolve_meiva_home() / "model-tracker"
+        tracker = ModelTracker(
+            command=(
                 sys.executable,
                 str(root / "scripts" / "model_registry" / "check_model_updates.py"),
                 "--write-report",
                 str(report_dir),
-            ],
+            ),
             cwd=root,
-            env=child_env,
-            capture_output=True,
-            text=True,
+            env={**os.environ, "PYTHONPATH": str(root)},
+            report_dir=report_dir,
             timeout=_TIMEOUT_SECONDS,
-            check=False,
+            recipient=report_recipient(
+                "model-update-tracker",
+                _REPORT_AGENT_ENV,
+                _REPORT_LABEL,
+                os.environ.get(_REPORT_AGENT_ENV),
+            ),
         )
-        _report_from_result(result, report_dir)
-    except Exception as exc:
-        _send_report(_failure_message(f"subprocess exception: {exc}"))
-
-
-def _fire_tracker(_slot: datetime, _trigger: None) -> None:
-    run_tracker()
-
-
-def _main_loop(
-    *,
-    inputs: ScheduleInputs,
-    next_fire_fn: Callable[..., datetime] | None = None,
-    claim_fn: Callable[..., bool] | None = None,
-) -> None:
-    compute_next_fire = next_fire_fn or next_fire
-    claim_slot = claim_fn or fire_slot_once
-    db = inputs.database()
-    last_run_at = datetime.now(UTC)
-    while True:
-        now = datetime.now(UTC)
-        next_run = compute_next_fire(
-            CRON, after=now - timedelta(minutes=2), timezone=cluster_timezone()
+        run_loop(
+            inputs.database(),
+            CronSchedule((Trigger(CRON),), timezone=cluster_timezone()),
+            partial(run_tracker, tracker=tracker),
+            schedule_id=parse_schedule_id(os.environ.get("MEIVA_SCHEDULE_ID")),
+            started_at=datetime.now(UTC),
         )
-        if next_run <= last_run_at:
-            next_run = compute_next_fire(CRON, after=last_run_at, timezone=cluster_timezone())
-        wait_seconds = (next_run - now).total_seconds()
-        if wait_seconds > 0:
-            time.sleep(min(wait_seconds, 3600))
-            continue
-        claim_slot(db, next_run, None, fire=_fire_tracker)
-        last_run_at = datetime.now(UTC)
-        time.sleep(120)
-
-
-if __name__ == "__main__":
-    ensure_agent_status_members(
-        S,
-        {"IDLING", "RUNNING", "TERMINATED"},
-        schedule_name="model-update-tracker",
-    )
-    entry_inputs = globals().get("MEIVA_SCHEDULE_INPUTS")
-    if entry_inputs is None:
-        from base.log import prepare_process_logging
-
-        prepare_process_logging()
-    with fresh_schedule_entry() if entry_inputs is None else schedule_entry(entry_inputs) as inputs:
-        _main_loop(inputs=inputs)

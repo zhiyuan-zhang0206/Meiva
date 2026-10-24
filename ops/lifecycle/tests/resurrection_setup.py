@@ -14,10 +14,6 @@ from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 
 
-def noop(_db: object, _bus: object, *_args: object, **_kwargs: object) -> None:
-    return None
-
-
 def agents_row(db: psycopg.Connection, agent_id: int) -> tuple[int, str, str] | None:
     with db.cursor() as cur:
         cur.execute(
@@ -107,6 +103,5 @@ __all__ = [
     "hosted_agent",
     "inbound_count",
     "inbound_rows",
-    "noop",
     "spawn_agent",
 ]

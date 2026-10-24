@@ -7,11 +7,16 @@ coordination. Its design rationale is recorded in
 | Responsibility | Current implementation |
 |---|---|
 | Service specification | not in `ops`: the service roster, its `ServiceSpec` contract and gating live in `services/supervision/roster/` (the supervised services own their own declarations) |
-| Observation and status | `ops/cluster_status/` (host snapshot, `pause.py` posture, `schema_mismatch` diagnosis) |
+| Observation and status | `ops/cluster_status/` (host snapshot and the persistent-shell operations, `schema_mismatch` diagnosis) |
 | Alerts | `ops/alerts.py` (the alert row and its SSE publish, shared by the gateway alert endpoints and the events-maintenance reconciler) |
+| `.env` write audit | `ops/env_audit/` ([audit and integrity guard](env-audit.meiva.okf.md)); the shell reads files and the registry, strict modules decide redaction, the record and the integrity plan |
+| Upload delivery receiver | `ops/upload_delivery/` (`copy_batch` takes a `ReceiverConfig` of values and executes the plan `copy_plan` returns; `receive` is the daemon's entry that reads the process home, gateway access and quota constants once per call) |
+| Shell close notices | `ops/pty_close_notices/` (`notice` and `delivery_plan` decide which closed sessions notify which live owners; the shell writes the batch in one transaction) |
+| Plugin and MCP inventory | `ops/inventory/` (`toggles` judges the all-or-nothing toggle request; the shell reads the host and writes the toggles) |
+| Private production files | `ops/private_files/` (read-only verifier of the registered files; `verdicts` and `report` judge and render what the shell found) |
 | Agent lifecycle | `ops/agents/` (birth and wake); `ops/lifecycle/` (lifecycle RPC ops) |
-| RPC | `ops/rpc_schemas/` (wire vocabulary); `ops/cluster/rpc.py` (gateway client) |
-| Op clusters the ops server dispatches | `ops/lifecycle/`, `ops/cluster/operations.py`, `ops/host_config.py`, `ops/inventory.py` |
+| RPC | `ops/rpc_schemas/` (wire vocabulary); `ops/cluster/rpc.py` (gateway client) and `ops/cluster/rpc_plans.py` (its decisions) |
+| Op clusters the ops server dispatches | `ops/lifecycle/`, `ops/cluster/operations.py`, `ops/host_config.py`, `ops/inventory/` |
 | Stop and restart | CLI stop orchestration; the agent host settles its own running turns on SIGTERM |
 | Fleet update | `cli/fleet_update.py` (down and up scripts per unit, gated by the code version) |
 
@@ -56,11 +61,11 @@ The native OS unit supervises the application root, which owns its service
 subprocesses. Agent shells are held by the `pty-sessions` service. Stop verifies captured
 process identity before signalling.
 
-The `ops.pty_close_notices` one-shot child reads its staged batch before
-constructing any database handle or capturing its source image. A nonempty batch
-uses one captured image and a nonexempt process database gate; an unknown image
-stays unknown rather than using the checkout's current HEAD. The child retains
-failed notices for the next start and clears only a successfully written batch.
+`meiva stop` writes its shell-close notices itself over one short database connection opened
+and closed inside its `shell-sessions` phase (`ops.pty_close_notices.write_notices`): the whole
+batch commits in one transaction or not at all, a notice for a terminated owner is dropped, and
+a batch that cannot be written is returned to the caller to report. Nothing is staged on disk
+for the next start.
 
 The import boundary is `base < ops < {gateway, cli}`. The supported RPC
 vocabulary lives in the `ops/rpc_schemas/` door; focused agent contracts live in
@@ -92,6 +97,32 @@ report `invalid-migration-layout`; query and connection failures report
 `unavailable`. Only a successful comparison of equal sets returns no diagnosis.
 The batched host snapshot also reports an unavailable comparison when its shared
 database read fails, without retrying through another connection.
+
+### Host snapshot shape
+
+`ops/cluster_status/__init__.py` is the snapshot's shell and the package's composition
+root for the ambient reads it needs: it reads this host's facts once (the daemon pidfile, the
+session listing, the central-database snapshot, the resource sample, the serving gate, the
+checkout HEAD, the root supervisor, the cluster clock) and hands them as a frozen `StatusFacts`
+to `report.assemble_status`, which decides what the snapshot says: the three capability flags,
+the session counts and agent groups, and the `paused` verdict with its reason. `listing`
+turns what the session backends listed into session rows at one given instant;
+`shell_plans` picks an agent's shells out of a listing, picks what an owner-level kill-all
+targets (below the cutoff, page-server sessions spared) and judges a kill's outcome;
+`model` compares the two migration sets and words a failure to read them. These four
+modules are strict: values in, values out. `sessions` holds the effects over them: it asks
+the service backend (the native supervisor) and the shell backend (the pty-sessions service)
+for their sessions and calls the backend to capture or kill. The status snapshot degrades past
+a backend that is down; an operation keyed on "is this shell there" (probe, capture, kill,
+kill-all) fails instead, because a failed listing read as "no shells" would make the TTL
+reaper take a live shell for already gone.
+
+The snapshot tests run against real resources: the throwaway Postgres (agent rows, a real
+`ConnectionPool` that is closed or held for the degraded reads, rolled-back edits to
+`schema_migrations`), pidfiles under the test home, and the shells of a real pty-sessions
+service. Two properties have no test: that the resource sample overlaps the database read (a
+timing property no real resource can force), and that a failed psutil read degrades to no
+sample (psutil cannot be made to fail).
 
 ## Birth transaction ownership
 
@@ -131,8 +162,8 @@ asserting machine-specific names and default-on behavior.
 
 ## Cluster RPC client
 
-`cluster/rpc.py` keeps machine lookup and its error translation in the
-`dispatch_to_machine` composition root. A missing registered machine raises
+`cluster/rpc.py` keeps machine lookup and its error translation in
+`RpcClient.dispatch_to_machine`. A missing registered machine raises
 `ClusterOpTargetAbsent`, a definitive absence that terminal-state consumers can
 handle separately. It remains a `ClusterOpUnreachable` subtype for existing
 transport handlers. A registered machine without an ops URL is unreachable;
@@ -142,14 +173,27 @@ fail before lookup, credential access or idempotency-key construction.
 fleet-update compensation and machine probes can use it during a database
 outage.
 
-`RpcClient` owns one dispatch's timeout and retry policy with required HTTP,
-credential, timer and jitter ports. The system constructor supplies the existing
-httpx client, `SYSTEM_TIMERS` and current settings. Its credential factory reads
-current gateway access on every attempt, including retries; authentication
-therefore retains its existing refresh lifetime. Each HTTP attempt ignores
-system proxy configuration (`trust_env=False`) because cluster peers are
-private-network addresses. Its connect timeout is `min(10, timeout_s)`, so a
-three-second probe cannot spend ten seconds connecting.
+`RpcClient` owns one dispatch's transport: a timeout and retry `RpcConfig`, the
+retry loop's `Timers` and a credential read. `RpcClient.system()` is the one
+composition entry that reads the process settings (the RPC timeout and retry count,
+and the gateway access); the module-level `dispatch_to_machine` and `dispatch_to_url`
+are its one-shot shorthand for callers that hold no client of their own. Both
+shorthand entries reject an unknown operation kind before constructing the system
+client or reading configuration. A caller that builds a client passes it to
+`RpcClient.dispatch_to_machine` instead.
+The credential read is a required lazy factory, called on every attempt including
+retries, so a credential refreshed between attempts is the one presented;
+authentication therefore retains its existing refresh lifetime. The HTTP client is
+the real `httpx.AsyncClient`, built per attempt, and ignores system proxy
+configuration (`trust_env=False`) because cluster peers are private-network
+addresses. Its connect timeout is `min(10, timeout_s)`, so a three-second probe
+cannot spend ten seconds connecting.
+
+`cluster/rpc_plans.py` decides from values what the client does: the dispatch
+budget (a caller's deadline and retry count over the configured ones), the wait
+before a retry, the connect deadline, what an HTTP status means and the business
+idempotency key. The jitter factor is drawn once per retry by the loop and passed
+in, so the wait is a pure function of the attempt and the factor.
 
 Transient HTTP transport errors and 5xx responses retry with bounded exponential
 backoff: `min(0.5 * 2**attempt, 4)` seconds, jittered by 0.5–1.5. The configured
@@ -172,9 +216,14 @@ replay a previous failed result. Operations without transport dedupe omit the
 key from the wire envelope. The agent-ops server owns deduplication and outcome
 replay; the client does not reimplement it.
 
-The focused RPC tests drive the actual retry/error classifier through httpx's
-transport port and `ManualTimers`. Root coverage reads real machine rows and
-reaches a scoped local HTTP server; credential rotation verifies the order of
-credential reads and HTTP attempts while preserving the key. A child process
-uses the real gateway configuration profile and temporary unit `.env` to verify
-system timeout/retry defaults without replacing settings attributes.
+The focused RPC tests drive the client against a scripted HTTP listener on loopback
+with the real `httpx` client, so a refused connection, a response lost after the op
+ran, a 5xx and a malformed body are the ones the wire produces; the retry loop runs
+on `ManualTimers`, which records each wait instead of sleeping, and the waits are
+asserted to lie within the jittered backoff. The decisions are asserted on values in
+`test_cluster_rpc_plans.py`. Root coverage reads real machine rows and reaches the
+listener; credential rotation checks that each attempt presents the credential read
+for it while the key is preserved. A child process uses the real gateway
+configuration profile and temporary unit `.env` to verify that `RpcClient.system()`
+reads the configured timeout, retry count and credential, and that the client ignores
+a dead system proxy, without replacing settings attributes.

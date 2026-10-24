@@ -1,6 +1,7 @@
 # meiva:note
 # Force cancellation follows commit; failed launch validation preserves birth state.
 
+from pathlib import Path
 from uuid import uuid4
 
 import psycopg
@@ -8,32 +9,67 @@ import pytest
 from psycopg_pool import ConnectionPool
 
 from base.cluster.machine import MachineIdentity
+from base.config import settings
 from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 from ops import lifecycle
+from ops.lifecycle.hosted_turn import LocalAgentHost
+from ops.lifecycle.tests.loopback.agent_host import serve_agent_host
+from ops.lifecycle.tests.loopback.scripted_post import closed_port
 from ops.rpc_schemas import LaunchAgentRequest, TerminateAgentRequest
 
 
+# meiva:note
+# The agent host is asked to cancel the turn only after the termination is committed: its cancel
+# route reads the agent row over its own connection, the way the host's turn would see it.
 async def test_force_terminate_hosted_commits_before_cancelling_turn(
     lifecycle_agent_id: int,
     db_conn: psycopg.Connection,
     db_pool: ConnectionPool,
     database: Database,
     event_bus: EventBus,
+    unit_home: Path,
 ) -> None:
-    cancelled: list[int] = []
+    statuses_seen_by_the_host: list[tuple[object, ...] | None] = []
 
-    async def cancel(agent_id: int) -> None:
-        assert db_conn.execute(
-            "SELECT status FROM agents_meta WHERE id=%s", (agent_id,)
-        ).fetchone() == ("terminated",)
-        db_conn.commit()
-        cancelled.append(agent_id)
+    def host_reads_the_row(agent_id: int) -> None:
+        with psycopg.connect(settings.data_plane.db_url) as probe:
+            statuses_seen_by_the_host.append(
+                probe.execute("SELECT status FROM agents_meta WHERE id=%s", (agent_id,)).fetchone()
+            )
 
-    def no_shell_kill(agent_id: int, *, before_session_index: int) -> list[int]:
-        raise AssertionError("force without the shell option must not kill shell sessions")
+    with serve_agent_host(unit_home, on_cancel=host_reads_the_row) as served:
+        resp = await lifecycle.terminate_agent_op(
+            database,
+            event_bus,
+            lifecycle_agent_id,
+            TerminateAgentRequest(force=True),
+            db_pool,
+            host=served.host,
+        )
+    assert resp.status == "enqueued"
+    assert resp.shell_sessions is None
+    assert served.cancel_requests == [lifecycle_agent_id]
+    assert statuses_seen_by_the_host == [("terminated",)]
+    assert db_conn.execute(
+        "SELECT kind, status FROM inbound_messages WHERE agent_id=%s", (lifecycle_agent_id,)
+    ).fetchall() == [("terminate", "done")]
+
+
+# meiva:note
+# The cancel call is a best-effort accelerator: a host that cannot be reached leaves the committed
+# force termination and its response unchanged.
+async def test_force_terminate_survives_an_unreachable_agent_host(
+    lifecycle_agent_id: int,
+    db_conn: psycopg.Connection,
+    db_pool: ConnectionPool,
+    database: Database,
+    event_bus: EventBus,
+    unit_home: Path,
+) -> None:
+    host = LocalAgentHost(home=unit_home, health_port=closed_port())
 
     resp = await lifecycle.terminate_agent_op(
         database,
@@ -41,15 +77,13 @@ async def test_force_terminate_hosted_commits_before_cancelling_turn(
         lifecycle_agent_id,
         TerminateAgentRequest(force=True),
         db_pool,
-        cancel_turn=cancel,
-        kill_shells=no_shell_kill,
+        host=host,
     )
+
     assert resp.status == "enqueued"
-    assert resp.shell_sessions is None
-    assert cancelled == [lifecycle_agent_id]
     assert db_conn.execute(
-        "SELECT kind, status FROM inbound_messages WHERE agent_id=%s", (lifecycle_agent_id,)
-    ).fetchall() == [("terminate", "done")]
+        "SELECT status FROM agents_meta WHERE id=%s", (lifecycle_agent_id,)
+    ).fetchone() == ("terminated",)
 
 
 @pytest.mark.asyncio

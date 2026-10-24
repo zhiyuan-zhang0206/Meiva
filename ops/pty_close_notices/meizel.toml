@@ -1,0 +1,8 @@
+[uses]
+"__init__.py" = ["delivery_plan.py", "notice.py"]
+"delivery_plan.py" = ["notice.py"]
+"tests" = ["__init__.py", "delivery_plan.py", "notice.py"]
+
+[purity]
+"delivery_plan.py" = "strict"
+"notice.py" = "strict"

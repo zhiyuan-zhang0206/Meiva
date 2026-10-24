@@ -9519,8 +9519,7 @@
           "created_at",
           "updated_at"
         ],
-        "title": "AlertRow",
-        "description": "One alerts row as the UI sees it (list + SSE frames)."
+        "title": "AlertRow"
       },
       "AlertWebhookAlert": {
         "properties": {
@@ -10637,8 +10636,7 @@
           "serve_agent_runner",
           "paused"
         ],
-        "title": "ClusterStatus",
-        "description": "`GET /api/cluster/status` response body — this host's snapshot in the\nmulti-machine view.\n\n`meiva cluster status` CLI and the future monitoring page consume the\nsame payload."
+        "title": "ClusterStatus"
       },
       "CommandItem": {
         "properties": {

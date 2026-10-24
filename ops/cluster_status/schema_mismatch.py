@@ -1,9 +1,15 @@
-"""Read-only diagnosis of the running image's required and applied migration sets."""
+# meiva:note
+# Read-only diagnosis of the running image's required and applied migration sets.
+#
+# The applied names come from the database (one query on the connection it is given, or on one
+# it borrows), the required names from the running image's migration directory. Reading is this
+# module's job; comparing the two sets and wording a failure to read them are decided in
+# `ops.cluster_status.model`.
 
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
+from pathlib import Path
 
 import psycopg
 
@@ -13,59 +19,48 @@ from base.deploy.schema.migration_errors import MigrationLayoutError
 from base.deploy.schema.migration_layout import MIGRATIONS_DIR, required_migration_set
 from base.deploy.schema.migrations import applied_migration_names
 from ops.cluster_status.model import Mismatch as Mismatch
+from ops.cluster_status.model import SchemaReadFailure, read_failure_mismatch
 from ops.cluster_status.model import classify as classify
 
 _log = logging.getLogger(__name__)
 
 
-def detect(
-    db: Database,
-    *,
-    conn: psycopg.Connection | None = None,
-    applied_reader: Callable[[psycopg.Connection], set[str]] | None = None,
-    required_reader: Callable[[], set[str]] | None = None,
+def _diagnose(
+    db: Database, conn: psycopg.Connection | None, migrations_dir: Path
 ) -> Mismatch | None:
-    """Read applied names once; required names come from the running image's SQL."""
-    read_applied = applied_reader or applied_migration_names
     try:
         if conn is None:
             with db.connect(autocommit=True) as borrowed:
-                applied = read_applied(borrowed)
+                applied = applied_migration_names(borrowed)
         else:
-            applied = read_applied(conn)
+            applied = applied_migration_names(conn)
     except MigrationLayoutError as exc:
-        return Mismatch("invalid-migration-layout", f"DB migration catalog is invalid: {exc}")
+        return read_failure_mismatch(SchemaReadFailure.DB_CATALOG_INVALID, str(exc))
     except psycopg.Error as exc:
         _log.warning("[schema-mismatch] DB facts unavailable: %r", exc)
-        return Mismatch("unavailable", f"applied migration set unavailable ({type(exc).__name__})")
+        return read_failure_mismatch(SchemaReadFailure.DB_UNAVAILABLE, type(exc).__name__)
     try:
-        required = (
-            required_reader()
-            if required_reader is not None
-            else required_migration_set(migrations_dir=MIGRATIONS_DIR)
-        )
+        required = required_migration_set(migrations_dir=migrations_dir)
     except MigrationLayoutError as exc:
-        return Mismatch("invalid-migration-layout", f"image migration layout is invalid: {exc}")
+        return read_failure_mismatch(SchemaReadFailure.IMAGE_LAYOUT_INVALID, str(exc))
     return classify(applied, required)
 
 
+# meiva:note
+# The current diagnosis, or None only after both migration sets were read and match.
+#
+# `migrations_dir` is the running image's migration directory; every production caller reads
+# the checkout it runs from, so the default is that directory and only a test of a broken image
+# layout names another. Anything that is neither a malformed layout nor a database error is a
+# defect in the reader and propagates.
 def status(
     db: Database,
     *,
     conn: psycopg.Connection | None = None,
     local_machine: str,
-    applied_reader: Callable[[psycopg.Connection], set[str]] | None = None,
-    required_reader: Callable[[], set[str]] | None = None,
+    migrations_dir: Path = MIGRATIONS_DIR,
 ) -> SchemaMismatchStatus | None:
-    """Current diagnosis; return None only after both migration sets were read and match."""
-    if applied_reader is None and required_reader is None:
-        mismatch = detect(db) if conn is None else detect(db, conn=conn)
-    elif conn is None:
-        mismatch = detect(db, applied_reader=applied_reader, required_reader=required_reader)
-    else:
-        mismatch = detect(
-            db, conn=conn, applied_reader=applied_reader, required_reader=required_reader
-        )
+    mismatch = _diagnose(db, conn, migrations_dir)
     if mismatch is None:
         return None
     return SchemaMismatchStatus(kind=mismatch.kind, machine=local_machine, detail=mismatch.detail)

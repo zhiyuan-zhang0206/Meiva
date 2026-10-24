@@ -1,204 +1,43 @@
 # meiva:link schedules/docs/c9-daily-report.meiva.okf.md
 
-from __future__ import annotations
-
-from datetime import UTC, datetime, timedelta
-from collections.abc import Callable, Mapping
-from dataclasses import dataclass, field
+import os
+from datetime import UTC, datetime
 from functools import partial
-from typing import Any
-from zoneinfo import ZoneInfo
 
-import meiva
-from meiva.agents import AgentStatus as S
-from schedules.agent_status_guard import ensure_agent_status_members
 from base.host.system.hostport import Host
-from base.native_process.loaded_commit import LoadedCommit
-from schedules.catchup import cluster_timezone
-from schedules.daily_host import DailyLoopHooks, report_agent, run_daily_loop
-from base.daemon.schedules.inputs import ScheduleInputs
-from schedules.entry import fresh_schedule_entry, schedule_entry
-from base.telemetry.process_logging import init_gateway_process
-
+from schedules.jobs.c9_report import C9Report, report_day
+from schedules.jobs.catchup import cluster_timezone
+from schedules.jobs.entry import open_schedule_entry
+from schedules.jobs.loop import CronSchedule, Trigger, run_loop
+from schedules.plans.directory_plan import report_recipient
+from schedules.plans.schedule_identity import parse_schedule_id
 
 CRON = "0 5 * * *"
 _REPORT_AGENT_ENV = "MEIVA_CI_USAGE_REPORT_AGENT"
 _REPORT_LABEL = "Meiva \u8d1f\u8d23\u4eba"
-_PROCESS_NAME = "schedule-c9-daily"
-
-# meiva:note
-# GitHub-hosted overage rates, private-repo equivalent; `scripts/ci/pull_requests/accounting.py`
-# owns the same numbers.
-_LINUX_MINUTE_USD = 0.006
-_MACOS_MINUTE_USD = 0.062
-
-
-def _report_agent(
-    *,
-    env: Mapping[str, str] | None = None,
-    list_agents_fn: Callable[..., Any] | None = None,
-) -> int:
-    return report_agent(_REPORT_AGENT_ENV, _REPORT_LABEL, env=env, list_agents_fn=list_agents_fn)
-
-
-def _report_failure(
-    detail: str,
-    *,
-    env: Mapping[str, str] | None = None,
-    list_agents_fn: Callable[..., Any] | None = None,
-    send_message_fn: Callable[[int, str], Any] | None = None,
-) -> None:
-    send = send_message_fn or meiva.agents.send_message
-    message = (
-        f"C9 daily reconciliation failed:\n{detail[-1000:]}\n"
-        "Check the schedule log; backfill the missed window manually with "
-        "`scripts/ci/pull_requests/accounting.py --since ... --until ... --append-ledger`."
-    )
-    try:
-        send(_report_agent(env=env, list_agents_fn=list_agents_fn), message)
-    except Exception as exc:
-        print(f"c9-daily-report could not notify the P0 lead: {exc}")
-        raise
-
-
-# meiva:note
-# Slot-based, not trailing-now: a late catch-up fire still covers its own 05:00-05:00 day,
-# and the day label is the slot's cluster-tz date, which can differ from its UTC date.
-def window_bounds(
-    slot_end: datetime,
-    *,
-    cluster_timezone: Callable[[], str] = cluster_timezone,
-) -> tuple[str, str, str]:
-    since = slot_end - timedelta(hours=24)
-    day = slot_end.astimezone(ZoneInfo(cluster_timezone()))
-    return (
-        since.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
-        slot_end.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
-        day.strftime("%Y-%m-%d"),
-    )
-
-
-def _load_accounting() -> Any:
-    from scripts.ci.pull_requests import accounting
-
-    return accounting
-
-
-def summarize(
-    entries: list[dict],
-    *,
-    day: str,
-    window_start: str,
-    window_end: str,
-    appended_runs: int,
-) -> dict:
-    attributed = [e for e in entries if isinstance(e.get("agent_id"), int)]
-    linux_minutes = sum(int(e.get("linux_minutes") or 0) for e in entries)
-    macos_minutes = sum(int(e.get("macos_minutes") or 0) for e in entries)
-    attributed_minutes = sum(
-        int(e.get("linux_minutes") or 0) + int(e.get("macos_minutes") or 0) for e in attributed
-    )
-    return {
-        "day": day,
-        "window_start": window_start,
-        "window_end": window_end,
-        "runs": len(entries),
-        "attributed_runs": len(attributed),
-        "unattributed_runs": len(entries) - len(attributed),
-        "total_minutes": linux_minutes + macos_minutes,
-        "attributed_minutes": attributed_minutes,
-        "linux_minutes": linux_minutes,
-        "macos_minutes": macos_minutes,
-        "appended_runs": appended_runs,
-        "est_usd": round(
-            linux_minutes * _LINUX_MINUTE_USD + macos_minutes * _MACOS_MINUTE_USD,
-            2,
-        ),
-    }
-
-
-@dataclass(frozen=True)
-class C9FireHooks:
-    tz_fn: Callable[[], str] = field(default_factory=lambda: cluster_timezone)
-    accounting_loader: Callable[[], Any] = field(default_factory=lambda: _load_accounting)
-    gateway_init: Callable[..., None] = field(default_factory=lambda: init_gateway_process)
-    failure_reporter: Callable[[str], None] = field(default_factory=lambda: _report_failure)
-
-
-def _fire(
-    slot_end: datetime,
-    _payload: None,
-    *,
-    producer: Callable[[], Any],
-    image: LoadedCommit,
-    machine_reader: Callable[[], str],
-    host: Host,
-    hooks: C9FireHooks | None = None,
-) -> None:
-    active = hooks or C9FireHooks()
-    try:
-        accounting = active.accounting_loader()
-        since, until, day = window_bounds(slot_end, cluster_timezone=active.tz_fn)
-        entries = accounting.collect(accounting.DEFAULT_REPO, since, until, host=host)
-        appended = accounting.append_ledger(accounting.DEFAULT_LEDGER, entries)
-        active.gateway_init(
-            name=_PROCESS_NAME, producer=producer, machine_reader=machine_reader, image=image
-        )
-        from base import telemetry
-
-        telemetry.emit(
-            "telemetry",
-            "ci_usage_daily",
-            source="system",
-            attributes=summarize(
-                entries,
-                day=day,
-                window_start=since,
-                window_end=until,
-                appended_runs=appended,
-            ),
-        )
-        print(
-            f"[{datetime.now(UTC).isoformat()}] c9-daily-report: {day} — "
-            f"{len(entries)} runs, {appended} appended"
-        )
-    except Exception as exc:
-        print(f"c9-daily-report failed: {exc}")
-        active.failure_reporter(f"{type(exc).__name__}: {exc}")
-
-
-def _main_loop(
-    *,
-    inputs: ScheduleInputs,
-    host: Host,
-    loop_fn: Callable[..., None] | None = None,
-    loop_hooks: DailyLoopHooks | None = None,
-) -> None:
-    db = inputs.database()
-    fire = partial(
-        _fire,
-        producer=inputs.producer,
-        image=inputs.image,
-        machine_reader=inputs.machine.name,
-        host=host,
-    )
-    runner = loop_fn or run_daily_loop
-    if loop_hooks is not None:
-        runner(db, CRON, cluster_timezone(), fire, hooks=loop_hooks)
-    else:
-        runner(db, CRON, cluster_timezone(), fire)
 
 
 if __name__ == "__main__":
-    ensure_agent_status_members(
-        S,
-        {"IDLING", "RUNNING", "TERMINATED"},
-        schedule_name="c9-daily-report",
-    )
-    entry_inputs = globals().get("MEIVA_SCHEDULE_INPUTS")
-    if entry_inputs is None:
-        from base.log import prepare_process_logging
+    with open_schedule_entry(globals().get("MEIVA_SCHEDULE_INPUTS")) as inputs:
+        from scripts.ci.pull_requests import accounting
 
-        prepare_process_logging()
-    with fresh_schedule_entry() if entry_inputs is None else schedule_entry(entry_inputs) as inputs:
-        _main_loop(inputs=inputs, host=Host.system())
+        schedule = CronSchedule((Trigger(CRON),), timezone=cluster_timezone())
+        job = C9Report(
+            tz=schedule.timezone,
+            recipient=report_recipient(
+                "c9-daily-report",
+                _REPORT_AGENT_ENV,
+                _REPORT_LABEL,
+                os.environ.get(_REPORT_AGENT_ENV),
+            ),
+            repo=accounting.DEFAULT_REPO,
+            ledger=accounting.DEFAULT_LEDGER,
+            host=Host.system(),
+        )
+        run_loop(
+            inputs.database(),
+            schedule,
+            partial(report_day, job=job, inputs=inputs),
+            schedule_id=parse_schedule_id(os.environ.get("MEIVA_SCHEDULE_ID")),
+            started_at=datetime.now(UTC),
+        )

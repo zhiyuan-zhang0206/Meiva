@@ -138,6 +138,7 @@ def reap_expired_notices_blocking(
                         "expired",
                         require_response=bool(require_response),
                         created_at=created_at,
+                        now=datetime.now(UTC),
                         replied=reply is not None or answer is not None,
                     ),
                 )
@@ -217,17 +218,16 @@ def reap_expired_web_sessions_blocking(
         return cur.rowcount
 
 
+# meiva:note
+# Delete `schedule_fire_log` claims older than the retention window.
+#
+# The table is the at-most-once claim ledger of `fire_slot_once` (`schedules/jobs/catchup.py`);
+# a claim only matters while its slot can still be fired, so every row past the window is
+# deleted. One bounded DELETE per pass: a backlog (long gateway outage, many schedules) drains
+# over successive passes instead of one long transaction.
 def prune_schedule_fire_log_blocking(
     pool: ConnectionPool, *, retention_days: int, batch_size: int = FIRE_LOG_PASS_BATCH
 ) -> int:
-    """Delete ``schedule_fire_log`` claims older than the retention window.
-
-    The table is the at-most-once claim ledger of ``fire_slot_once``
-    (``schedules/catchup.py``); a claim only matters while its slot can still be
-    fired, so every row past the window is deleted. One bounded DELETE per pass:
-    a backlog (long gateway outage, many schedules) drains over successive passes
-    instead of one long transaction.
-    """
     cutoff = datetime.now(UTC) - timedelta(days=retention_days)
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute(

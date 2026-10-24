@@ -156,7 +156,6 @@ class TestResurrectAgent:
     def test_guarded_resurrect_rejects_chat_from_prior_termination(
         self,
         db_conn: psycopg.Connection,
-        monkeypatch: pytest.MonkeyPatch,
         database: Database,
         event_bus: EventBus,
         *,
@@ -219,7 +218,6 @@ class TestResurrectAgent:
     def test_guarded_resurrect_rejects_chat_that_is_no_longer_pending(
         self,
         db_conn: psycopg.Connection,
-        monkeypatch: pytest.MonkeyPatch,
         database: Database,
         event_bus: EventBus,
         *,
@@ -267,7 +265,6 @@ class TestResurrectAgent:
     def test_guarded_resurrect_accepts_pending_chat_after_current_termination(
         self,
         db_conn: psycopg.Connection,
-        monkeypatch: pytest.MonkeyPatch,
         database: Database,
         event_bus: EventBus,
         *,
@@ -316,7 +313,6 @@ class TestResurrectAgent:
     def test_guarded_resurrect_accepts_exact_pending_compact_after_termination(
         self,
         db_conn: psycopg.Connection,
-        monkeypatch: pytest.MonkeyPatch,
         database: Database,
         event_bus: EventBus,
         *,
@@ -365,7 +361,6 @@ class TestResurrectAgent:
     def test_guarded_compact_rejects_kind_mismatch_and_claimed_trigger(
         self,
         db_conn: psycopg.Connection,
-        monkeypatch: pytest.MonkeyPatch,
         database: Database,
         event_bus: EventBus,
         *,

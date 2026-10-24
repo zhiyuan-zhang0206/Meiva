@@ -1,0 +1,4 @@
+exports = ["agent_host.py", "scripted_post.py"]
+
+[uses]
+"agent_host.py" = ["scripted_post.py"]

@@ -114,6 +114,8 @@ def _agent_arm(
             return cluster.shell_kill_op(sk.agent_id, sk.session_id).model_dump(mode="json")
         case "agent_skill_view":
             asv = AgentSkillViewPayload.model_validate(payload)
+            if pool is None:
+                raise RuntimeError("agent skill view requires the native DB pool")
             return cluster.agent_skill_view_op(asv.agent_id, pool).model_dump(mode="json")
         case "shell_capture":
             sc = ShellCapturePayload.model_validate(payload)

@@ -16,6 +16,7 @@ from collections.abc import Callable, Generator, Mapping
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, cast
 
 from psycopg_pool import ConnectionPool
@@ -48,8 +49,8 @@ def config_write(trace_id: str, *, value: int = 3) -> dict[str, Any]:
 
 # meiva:note
 # How many times a `config_write` stamped `trace_id` executed: one audit record each.
-def executions(trace_id: str) -> int:
-    records = read_env_write_records(_AUDIT_WINDOW)
+def executions(trace_id: str, *, env_path: Path) -> int:
+    records = read_env_write_records(_AUDIT_WINDOW, env_path)
     return sum(1 for record in records if record.get("trace_id") == trace_id)
 
 

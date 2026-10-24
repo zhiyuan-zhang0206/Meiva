@@ -1,125 +1,18 @@
-from __future__ import annotations
+# meiva:note
+# The guard that stops a stored schedule script before any work when the installed SDK's
+# `AgentStatus` lacks a member the script reads. Built-in schedules read statuses through
+# `schedules/jobs/agent_directory.py`, which ships with the SDK it runs against; a script that
+# reads a member itself declares it here.
 
-import ast
-from pathlib import Path
+from __future__ import annotations
 
 import pytest
 
-SCHEDULES_DIR = Path(__file__).resolve().parents[2] / "schedules"
-_DAILY_HOST_SCRIPTS = {"c9-daily-report-schedule.py", "dev-ci-metrics-schedule.py"}
-
-EXPECTED_STATUS_MEMBERS: dict[str, set[str]] = {
-    "c9-daily-report-schedule.py": {
-        "IDLING",
-        "RUNNING",
-        "TERMINATED",
-    },
-    "debt-sweep-daily-schedule.py": {
-        "IDLING",
-        "RUNNING",
-        "TERMINATED",
-    },
-    "dev-ci-metrics-schedule.py": {
-        "IDLING",
-        "RUNNING",
-        "TERMINATED",
-    },
-    "adversarial-eval-weekly-schedule.py": {
-        "IDLING",
-        "TERMINATED",
-    },
-    "memory-steward-schedule.py": {"TERMINATED"},
-    "model-update-tracker-schedule.py": {
-        "IDLING",
-        "RUNNING",
-        "TERMINATED",
-    },
-    "self-evolution-daily-schedule.py": {"TERMINATED"},
-    "self-evolution-weekly-schedule.py": {"TERMINATED"},
-}
-
-SCHEDULE_NAMES = {
-    "c9-daily-report-schedule.py": "c9-daily-report",
-    "debt-sweep-daily-schedule.py": "debt-sweep-daily",
-    "dev-ci-metrics-schedule.py": "dev-ci-metrics",
-    "adversarial-eval-weekly-schedule.py": "adversarial-eval-weekly",
-    "memory-steward-schedule.py": "memory-arbiter",
-    "model-update-tracker-schedule.py": "model-update-tracker",
-    "self-evolution-daily-schedule.py": "self-evolution-daily",
-    "self-evolution-weekly-schedule.py": "self-evolution-weekly",
-}
-
-
-def _status_references(tree: ast.AST) -> set[str]:
-    return {
-        node.attr
-        for node in ast.walk(tree)
-        if isinstance(node, ast.Attribute)
-        and isinstance(node.value, ast.Name)
-        and node.value.id == "S"
-    }
-
-
-def _imports_daily_host_report_agent(tree: ast.AST) -> bool:
-    return any(
-        isinstance(node, ast.ImportFrom)
-        and node.module == "schedules.daily_host"
-        and any(alias.name == "report_agent" for alias in node.names)
-        for node in ast.walk(tree)
-    )
-
-
-def _status_members_read_by(tree: ast.AST) -> set[str]:
-    referenced = _status_references(tree)
-    if _imports_daily_host_report_agent(tree):
-        helper = ast.parse((SCHEDULES_DIR / "daily_host.py").read_text())
-        referenced |= _status_references(helper)
-    return referenced
-
-
-def _guard_calls(tree: ast.AST) -> list[ast.Call]:
-    return [
-        node
-        for node in ast.walk(tree)
-        if isinstance(node, ast.Call)
-        and isinstance(node.func, ast.Name)
-        and node.func.id == "ensure_agent_status_members"
-    ]
-
-
-@pytest.mark.parametrize(("filename", "expected"), EXPECTED_STATUS_MEMBERS.items())
-def test_builtin_schedule_guards_every_referenced_status_member(
-    filename: str, expected: set[str]
-) -> None:
-    tree = ast.parse((SCHEDULES_DIR / filename).read_text())
-    if filename in _DAILY_HOST_SCRIPTS:
-        assert _imports_daily_host_report_agent(tree)
-    assert _status_members_read_by(tree) == expected
-
-    calls = _guard_calls(tree)
-    if not expected:
-        assert calls == []
-        return
-
-    assert len(calls) == 1
-    call = calls[0]
-    assert isinstance(call.args[0], ast.Name) and call.args[0].id == "S"
-    assert ast.literal_eval(call.args[1]) == expected
-    keywords = {keyword.arg: keyword.value for keyword in call.keywords}
-    assert ast.literal_eval(keywords["schedule_name"]) == SCHEDULE_NAMES[filename]
-
-
-def test_every_template_reading_a_status_member_declares_its_guard() -> None:
-    assert {
-        path.name
-        for path in sorted(SCHEDULES_DIR.glob("*-schedule.py"))
-        if _status_members_read_by(ast.parse(path.read_text()))
-    } == set(EXPECTED_STATUS_MEMBERS)
+from meiva.agents import AgentStatus
+from schedules.agent_status_guard import ensure_agent_status_members
 
 
 def test_missing_member_exits_with_schedule_and_member_names() -> None:
-    from schedules.agent_status_guard import ensure_agent_status_members
-
     class DriftedAgentStatus:
         RUNNING = "running"
 
@@ -132,4 +25,10 @@ def test_missing_member_exits_with_schedule_and_member_names() -> None:
 
     assert raised.value.code == (
         "schedule 'drift-probe' is missing AgentStatus members: IDLING, TERMINATED"
+    )
+
+
+def test_the_installed_status_enum_carries_every_member_the_schedules_read() -> None:
+    ensure_agent_status_members(
+        AgentStatus, {"IDLING", "RUNNING", "TERMINATED"}, schedule_name="installed-sdk"
     )

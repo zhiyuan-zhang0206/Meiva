@@ -76,12 +76,11 @@ def spawn_agent(
     model_catalog: ModelCatalog,
     database_gate: ProcessDbGate,
     local_machine: MachineIdentity,
-    bus: EventBus | None = None,
 ) -> int:
-    active_bus = bus if bus is not None else EventBus.from_settings()
+    bus = EventBus.from_settings()
     agent_id, _birth_config, _prompt_id, _attempt_id = create_agent_row(
         Database.from_settings(gate=database_gate),
-        active_bus,
+        bus,
         spawner=spawner,
         fork_from=fork_from,
         fork_checkpoint=fork_checkpoint,
@@ -94,7 +93,7 @@ def spawn_agent(
         catalog=model_catalog,
         authority=config_authority,
     )
-    publish_inbound_wake(Database.from_settings(gate=database_gate), active_bus, agent_id, "0")
+    publish_inbound_wake(Database.from_settings(gate=database_gate), bus, agent_id, "0")
     return agent_id
 
 
@@ -113,7 +112,6 @@ class TestSpawnAgent:
         self,
         redis_url: str,
         db_conn: psycopg.Connection,
-        monkeypatch: pytest.MonkeyPatch,
         *,
         config_authority: ConfigAuthority,
         model_catalog: ModelCatalog,
@@ -134,7 +132,6 @@ class TestSpawnAgent:
         self,
         redis_url: str,
         db_conn: psycopg.Connection,
-        monkeypatch: pytest.MonkeyPatch,
         *,
         config_authority: ConfigAuthority,
         model_catalog: ModelCatalog,
@@ -165,7 +162,6 @@ class TestSpawnAgent:
         self,
         redis_url: str,
         db_conn: psycopg.Connection,
-        monkeypatch: pytest.MonkeyPatch,
         *,
         config_authority: ConfigAuthority,
         model_catalog: ModelCatalog,
@@ -198,7 +194,6 @@ class TestSpawnAgent:
         self,
         redis_url: str,
         db_conn: psycopg.Connection,
-        monkeypatch: pytest.MonkeyPatch,
         *,
         config_authority: ConfigAuthority,
         model_catalog: ModelCatalog,
@@ -402,7 +397,6 @@ def blob_rows(db: psycopg.Connection, agent_id: int) -> list[tuple[str, str, byt
 class TestSpawnerValidation:
     def test_agent_none_rejected(
         self,
-        monkeypatch: pytest.MonkeyPatch,
         *,
         config_authority: ConfigAuthority,
         model_catalog: ModelCatalog,
@@ -420,7 +414,6 @@ class TestSpawnerValidation:
 
     def test_agent_empty_id_rejected(
         self,
-        monkeypatch: pytest.MonkeyPatch,
         *,
         config_authority: ConfigAuthority,
         model_catalog: ModelCatalog,
@@ -438,7 +431,6 @@ class TestSpawnerValidation:
 
     def test_agent_alphabetic_id_rejected(
         self,
-        monkeypatch: pytest.MonkeyPatch,
         *,
         config_authority: ConfigAuthority,
         model_catalog: ModelCatalog,
@@ -456,7 +448,6 @@ class TestSpawnerValidation:
 
     def test_agent_zero_rejected(
         self,
-        monkeypatch: pytest.MonkeyPatch,
         *,
         config_authority: ConfigAuthority,
         model_catalog: ModelCatalog,
@@ -476,7 +467,6 @@ class TestSpawnerValidation:
         self,
         redis_url: str,
         db_conn: psycopg.Connection,
-        monkeypatch: pytest.MonkeyPatch,
         *,
         config_authority: ConfigAuthority,
         model_catalog: ModelCatalog,
@@ -498,7 +488,6 @@ class TestSpawnerValidation:
         self,
         redis_url: str,
         db_conn: psycopg.Connection,
-        monkeypatch: pytest.MonkeyPatch,
         *,
         config_authority: ConfigAuthority,
         model_catalog: ModelCatalog,
@@ -520,7 +509,6 @@ class TestSpawnerValidation:
         self,
         redis_url: str,
         db_conn: psycopg.Connection,
-        monkeypatch: pytest.MonkeyPatch,
         *,
         config_authority: ConfigAuthority,
         model_catalog: ModelCatalog,
@@ -540,7 +528,6 @@ class TestSpawnerValidation:
 
     def test_agent_negative_id_rejected(
         self,
-        monkeypatch: pytest.MonkeyPatch,
         *,
         config_authority: ConfigAuthority,
         model_catalog: ModelCatalog,

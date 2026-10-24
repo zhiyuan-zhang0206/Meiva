@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
-from typing import Any
 
 import psycopg
 import pytest
@@ -10,6 +9,7 @@ from base.db import create_agent
 from ops.pages import PageRow, register_page_in_transaction
 
 _HOST = "127.0.0.1"
+_NOW = datetime(2026, 10, 24, 12, 0, tzinfo=UTC)
 
 
 def _register(
@@ -19,14 +19,19 @@ def _register(
     port: int,
     host: str,
     title: str | None,
-    **kwargs: Any,
+    *,
+    serve_dir: str | None = None,
+    ttl_seconds: int = 300,
+    now: datetime = _NOW,
 ) -> PageRow:
-    row = register_page_in_transaction(conn, agent_id, name, port, host, title, **kwargs)
+    row = register_page_in_transaction(
+        conn, agent_id, name, port, host, title, serve_dir, ttl_seconds=ttl_seconds, now=now
+    )
     conn.commit()
     return row
 
 
-def _page_rows(conn: psycopg.Connection, agent_id: int) -> list[tuple]:
+def _page_rows(conn: psycopg.Connection, agent_id: int) -> list[tuple[object, ...]]:
     with conn.cursor() as cur:
         cur.execute(
             "SELECT name, port, host, title, serve_dir, closed_at FROM agent_pages "
@@ -49,10 +54,25 @@ def _page_deadline(
     return row[0], row[1]
 
 
+# meiva:note
+# A fresh page expires `ttl_seconds` after the `now` the caller read, not after any clock the
+# registration reads for itself.
+def test_register_page_expires_ttl_seconds_after_the_callers_now(
+    db_conn: psycopg.Connection,
+) -> None:
+    aid = create_agent(db_conn)
+
+    _register(db_conn, aid, "fresh", 8000, _HOST, None, ttl_seconds=90)
+
+    assert _page_deadline(db_conn, aid, "fresh") == (_NOW + timedelta(seconds=90), None)
+
+
+# meiva:note
+# Re-registering an expired page revives the same row with a new port, title and a deadline
+# measured from the new `now`.
 def test_register_page_revives_expired_row_and_resets_deadline(
     db_conn: psycopg.Connection,
 ) -> None:
-
     aid = create_agent(db_conn)
     original = _register(db_conn, aid, "revive", 8001, _HOST, None, ttl_seconds=30)
     with db_conn.cursor() as cur:
@@ -62,17 +82,12 @@ def test_register_page_revives_expired_row_and_resets_deadline(
         )
     db_conn.commit()
 
-    before = datetime.now(UTC)
-    revived = _register(db_conn, aid, "revive", 8002, _HOST, "Again", ttl_seconds=240)
+    later = _NOW + timedelta(hours=1)
+    revived = _register(db_conn, aid, "revive", 8002, _HOST, "Again", ttl_seconds=240, now=later)
 
     assert revived.id == original.id
     assert revived.port == 8002
-    expires_at, expired_at = _page_deadline(db_conn, aid, "revive")
-    assert expires_at is not None
-    assert (
-        before + timedelta(seconds=239) <= expires_at <= datetime.now(UTC) + timedelta(seconds=241)
-    )
-    assert expired_at is None
+    assert _page_deadline(db_conn, aid, "revive") == (later + timedelta(seconds=240), None)
 
 
 def test_register_page_upsert_updates_serve_dir(db_conn: psycopg.Connection) -> None:
