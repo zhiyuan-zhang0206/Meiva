@@ -10,8 +10,7 @@ import pytest
 
 from base.agents.context.identity import AgentIdentity
 from meiva.mcps._clients import McpClients
-from meiva.mcps._remote import RemoteMCPClient
-from meiva.mcps._tools import RemoteClient, ToolCache, ToolSource
+from meiva.mcps._tools import DiskCache, ToolSource
 from meiva.mcps.config import ToolInfo
 from meiva.mcps.tests.stub_daemon import Respond, StubDaemon, ok_line
 
@@ -19,47 +18,32 @@ from meiva.mcps.tests.stub_daemon import Respond, StubDaemon, ok_line
 # meiva:note
 # This test's own MCP clients (a daemon client per test) for the daemon socket at `socket_path`.
 def local_mcp_clients(socket_path: Path, timeout_seconds: float = 15.0) -> McpClients:
-    return McpClients(socket_path, lambda: timeout_seconds)
-
-
-class NoCache:
-    """A tool cache that keeps nothing: every read misses, every write is dropped."""
-
-    def read(self, server: str) -> list[ToolInfo] | None:
-        return None
-
-    def write(self, server: str, tools: list[ToolInfo]) -> None:
-        return None
-
-
-class StoredTools:
-    """A tool cache that always holds `tools` and counts its reads."""
-
-    def __init__(self, tools: list[ToolInfo]) -> None:
-        self.tools = tools
-        self.reads = 0
-
-    def read(self, server: str) -> list[ToolInfo] | None:
-        self.reads += 1
-        return self.tools
-
-    def write(self, server: str, tools: list[ToolInfo]) -> None:
-        return None
+    return McpClients(socket_path, timeout_seconds)
 
 
 # meiva:note
-# A source over the given daemon client: no cache unless one is passed, no identity unless `identity` is.
+# A tool cache already holding `tools` for server "fs" (and any other server a test names with
+# `server`), in a real cache directory.
+def stored_tools(directory: Path, tools: list[ToolInfo], server: str = "fs") -> DiskCache:
+    cache = DiskCache(directory)
+    cache.write(server, tools)
+    return cache
+
+
+# meiva:note
+# A source over the given daemon clients: its cache is a real directory next to the socket the
+# clients dial (empty unless a test passes a stored one), no identity unless `identity` is.
 def tool_source(
-    remote: RemoteClient,
+    remote: McpClients,
     *,
     timeout_seconds: float = 5.0,
-    cache: ToolCache | None = None,
+    cache: DiskCache | None = None,
     identity: AgentIdentity | None = None,
 ) -> ToolSource:
     return ToolSource(
         remote=remote,
         timeout_seconds=timeout_seconds,
-        cache=cache if cache is not None else NoCache(),
+        cache=cache if cache is not None else DiskCache(remote.socket_path.parent / "mcp_cache"),
         identity=identity,
     )
 
@@ -98,13 +82,13 @@ def image_result(b64: str, *texts: str, structured: dict[str, Any] | None = None
 
 
 # meiva:note
-# A stub daemon listing `tools` and answering each `call_tool` with `results[tool]`, with the production client dialing it.
+# A stub daemon listing `tools` and answering each `call_tool` with `results[tool]`, with the production clients dialing it.
 def canned_daemon(
     start: Callable[[Respond], StubDaemon],
     *,
     tools: list[ToolInfo] | None = None,
     results: dict[str, dict[str, Any]] | None = None,
-) -> tuple[StubDaemon, RemoteMCPClient]:
+) -> tuple[StubDaemon, McpClients]:
     listed = tools or []
     answers = results or {}
 
@@ -114,4 +98,4 @@ def canned_daemon(
         return [ok_line(request, answers[request["params"]["tool"]])]
 
     daemon = start(respond)
-    return daemon, RemoteMCPClient(daemon.path)
+    return daemon, local_mcp_clients(Path(daemon.path))

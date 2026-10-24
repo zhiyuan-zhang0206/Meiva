@@ -5,14 +5,22 @@
 
 from __future__ import annotations
 
+from typing import assert_never
+
 from base.lm import factory
 from base.lm.call import answer_text
 from base.lm.effort import ReasoningEffort
-from meiva import security
 from meiva.sdk_surface.injection_check import begin_check
+from meiva.sdk_surface.pure.media.finding_plan import (
+    CarriedFindingsError,
+    Findings,
+    Scanned,
+    findings_of,
+    model_finding,
+)
 from meiva.sdk_surface.pure.media.injection_plan import finding_source
 from meiva.web import deepseek, transport, wire
-from meiva.web.deps import FetchDeps
+from meiva.web.deps import FetchDeps, ReaderProvider
 from meiva.web.errors import FetchError
 
 __all__ = ["fetch_one"]
@@ -21,17 +29,21 @@ __all__ = ["fetch_one"]
 # meiva:note
 # Read the page at `url` as the configured reader returns it, cut to `max_chars`.
 def read_page(url: str, max_chars: int, deps: FetchDeps, pacer: transport.RateLimiter) -> wire.Page:
-    if deps.reader == "deepseek":
-        return deepseek.read_page(url, max_chars, deps, pacer)
-    data = transport.send_json(
-        wire.jina_request(deps.jina, url),
-        timeout_s=deps.jina.timeout_s,
-        label="Jina Reader",
-        error_type=FetchError,
-        provider_json=False,
-        pacer=None,
-    )
-    return wire.jina_page(data, url, max_chars)
+    match deps.reader:
+        case ReaderProvider.DEEPSEEK:
+            return deepseek.read_page(url, max_chars, deps, pacer)
+        case ReaderProvider.JINA:
+            data = transport.send_json(
+                wire.jina_request(deps.jina, url),
+                timeout_s=deps.jina.timeout_s,
+                label="Jina Reader",
+                error_type=FetchError,
+                provider_json=False,
+                pacer=None,
+            )
+            return wire.jina_page(data, url, max_chars)
+        case _:
+            assert_never(deps.reader)
 
 
 # meiva:note
@@ -68,18 +80,20 @@ def _answer(
 
 
 # meiva:note
-# Record the finding of the injection check, if its verdict reaches the threshold.
-def _record_verdict(url: str, probability: float | None, deps: FetchDeps) -> None:
+# The finding of the injection check, if its verdict reaches the threshold.
+def _verdict_findings(url: str, probability: float | None, deps: FetchDeps) -> Findings:
     source = finding_source(url, probability, deps.injection.threshold)
-    if source is not None and probability is not None:
-        security.deliver_model_finding(deps.delivery, source, probability)
+    if source is None or probability is None:
+        return ()
+    return (model_finding(source, probability),)
 
 
 # meiva:note
 # Read one page and answer one prompt, the synchronous unit of work the batch schedules in a
 # thread. The injection check judges the page text itself, which the scan of the summary never
 # sees; it needs only the page, so it runs beside `_answer`, and its finding is kept even when
-# the answer fails.
+# the answer fails: the failure then travels as `CarriedFindingsError`, which the facade unwraps
+# after delivering the finding.
 def fetch_one(
     url: str,
     prompt: str,
@@ -87,11 +101,15 @@ def fetch_one(
     effort: str | ReasoningEffort | None,
     deps: FetchDeps,
     pacer: transport.RateLimiter,
-) -> str:
+) -> Scanned[str]:
     page = read_page(url, max_chars, deps, pacer)
     check = begin_check(url, page.title, page.content, inputs=deps.injection)
     try:
         answer = _answer(prompt, page, effort, deps)
-    finally:
-        _record_verdict(url, check.finish(), deps)
-    return security.scan_to(deps.delivery, answer, "web.fetch")
+    except Exception as error:
+        raise CarriedFindingsError(error, _verdict_findings(url, check.finish(), deps)) from error
+    except BaseException:
+        check.finish()
+        raise
+    verdict = _verdict_findings(url, check.finish(), deps)
+    return Scanned(answer, (*verdict, *findings_of(answer, "web.fetch")))

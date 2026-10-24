@@ -34,7 +34,7 @@ from base.agents.tests.units import spawn_agent
 from base.clock import Clock
 from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
-from base.config.tests.configuration import defaults, snapshot_process_config
+from base.config.tests.configuration import defaults
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
@@ -44,8 +44,8 @@ from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
 from base.native_process.turn_identity import HostedTurnResources
 from base.packages.plugin_providers import build_model_catalog
-from meiva.boot import process_clients
 from meiva.tests.fixtures.pin_agent import hosted_resources as hosted_resources
+from meiva.tests.fixtures.pin_agent import snapshot_clients
 
 
 # meiva:note
@@ -76,7 +76,7 @@ def _make_runtime(
         agent=AgentSlices.resolve(default_reader=defaults(**(config_defaults or {}))),
         db=Database.from_settings(gate=database_gate),
         bus=EventBus.from_settings(),
-        clients=process_clients(config=snapshot_process_config()),
+        clients=snapshot_clients(),
         identity=AgentIdentity(agent_id=agent_id, owns_loop=True),
         catalog=build_model_catalog(),
         clock_factory=Clock.from_settings,

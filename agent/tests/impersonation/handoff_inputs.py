@@ -26,15 +26,12 @@ from agent.impersonation import protect_native_hooks, settle_checkpoint
 from agent.impersonation_handoff import flush_checkpoint
 from agent.ownership.hosted import admit_hosted_runtime
 from agent.takeover.relay import RelayWait, TakeoverHost
-from agent.tests.impersonation.lease_support import (
-    FlushFaultSaver,
-    flush_fault_saver,
-    relay_program,
-)
+from agent.tests.impersonation.lease_support import relay_program, throttled_saver
 from base.agents import impersonation as leases
 from base.agents.context import MeivaContext
 from base.agents.context.clients import ClientSet
 from base.agents.context.identity import AgentIdentity
+from base.agents.history.checkpoint_postgres_walks import HistoryAsyncPostgresSaver
 from base.agents.impersonation.tests.impersonation_support import recorded_tree
 from base.agents.inbox.insert import insert_inbound_message
 from base.agents.messages.timestamp_policy import TimestampPolicy
@@ -53,7 +50,7 @@ from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.packages.composer_commands import CommandCatalog
 from base.packages.plugin_providers import build_model_catalog
 from base.packages.plugins.extensions import ExtensionRegistry, PluginContributions
-from meiva.boot import process_clients
+from meiva.boot import derived_clients
 from meiva.tests.fixtures.pin_agent import hosted_resources as hosted_resources
 
 __all__ = [
@@ -85,7 +82,7 @@ __all__ = [
 
 @pytest.fixture
 def handoff_clients(machine_identity: MachineIdentity) -> Iterator[ClientSet]:
-    clients = process_clients(config=snapshot_process_config(), machine=machine_identity)
+    clients = derived_clients(snapshot_process_config(), machine_identity)
     try:
         yield clients
     finally:
@@ -171,7 +168,7 @@ async def prepare_graph(
     machine_identity: MachineIdentity,
 ) -> tuple[
     Any,
-    FlushFaultSaver,
+    HistoryAsyncPostgresSaver,
     MeivaContext,
     RunnableConfig,
     dict[str, Any],
@@ -217,7 +214,7 @@ async def prepare_graph(
     async def before_llm(*_args: Any) -> Command[Any]:
         return Command(goto="llm")
 
-    saver = await flush_fault_saver(aops_pool)
+    saver = await throttled_saver(aops_pool)
     builder: Any = StateGraph(state_cls, context_schema=MeivaContext)
     builder.add_node("claim", claim_node, destinations=("before_llm", "__end__", "claim"))
     builder.add_node(

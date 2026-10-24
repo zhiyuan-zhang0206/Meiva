@@ -3,13 +3,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal
+from enum import StrEnum
 
 from base.host.env.agent_slices import ModelOverrides
 from base.lm.catalog import ModelCatalog
 from base.lm.catalog.provider_keys import ProviderKeys
 from meiva.sdk_surface.injection_check import InjectionCheckInputs
-from meiva.security import FindingDelivery
 from meiva.web.configs import BraveConfig, DeepSeekFetchConfig, DeepSeekSearchConfig, JinaConfig
 
 __all__ = [
@@ -18,10 +17,39 @@ __all__ = [
     "ReaderProvider",
     "SearchDeps",
     "SearchProvider",
+    "reader_provider",
+    "search_provider",
 ]
 
-SearchProvider = Literal["brave", "deepseek"]
-ReaderProvider = Literal["jina", "deepseek"]
+
+# meiva:note
+# The engine behind `search()`. `search_provider` turns the configured `web_search_provider` text into a member.
+class SearchProvider(StrEnum):
+    BRAVE = "brave"
+    DEEPSEEK = "deepseek"
+
+
+# meiva:note
+# The reader behind `fetch()`. `reader_provider` turns the configured `web_fetch_reader` text into a member.
+class ReaderProvider(StrEnum):
+    JINA = "jina"
+    DEEPSEEK = "deepseek"
+
+
+def _member[Choice: StrEnum](kind: type[Choice], setting: str, value: object) -> Choice:
+    try:
+        return kind(value)
+    except ValueError:
+        choices = ", ".join(member.value for member in kind)
+        raise ValueError(f"{setting} must be one of {choices}, got {value!r}") from None
+
+
+def search_provider(value: object) -> SearchProvider:
+    return _member(SearchProvider, "web_search_provider", value)
+
+
+def reader_provider(value: object) -> ReaderProvider:
+    return _member(ReaderProvider, "web_fetch_reader", value)
 
 
 @dataclass(frozen=True)
@@ -43,7 +71,6 @@ class SearchDeps:
     provider: SearchProvider
     brave: BraveConfig
     deepseek: DeepSeekSearchConfig
-    delivery: FindingDelivery
 
 
 @dataclass(frozen=True)
@@ -52,5 +79,4 @@ class FetchDeps:
     jina: JinaConfig
     deepseek: DeepSeekFetchConfig
     fetch_model: FetchModel
-    delivery: FindingDelivery
     injection: InjectionCheckInputs

@@ -58,7 +58,7 @@ class BackgroundRun:
     cwd: Path
     keep: bool
     ttl: float
-    notify: str | None
+    notify: background_plan.NotifyPolicy | None
 
 
 # meiva:note

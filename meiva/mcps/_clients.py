@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import threading
-from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -13,9 +12,9 @@ from ._remote import RemoteMCPClient, connect_remote
 
 
 # meiva:note
-# The context owns the daemon connection and its live timeout reader. `socket_path` is where the machine's MCP daemon listens (`base.paths.mcp_daemon_shared_socket` of the home), given by the composition root; the socket is looked for when the first request dials, since the daemon may start after the context.
+# The context owns the daemon connection and the request timeout its composition root read. `socket_path` is where the machine's MCP daemon listens (`base.paths.mcp_daemon_shared_socket` of the home), given by the composition root; the socket is looked for when the first request dials, since the daemon may start after the context.
 class McpClients:
-    def __init__(self, socket_path: Path, timeout_seconds: Callable[[], float]) -> None:
+    def __init__(self, socket_path: Path, timeout_seconds: float) -> None:
         self.socket_path = socket_path
         self.timeout_seconds = timeout_seconds
         self._lock = threading.Lock()
@@ -31,7 +30,7 @@ class McpClients:
             return self._remote
 
     # meiva:note
-    # The daemon calls the tools make (the `RemoteClient` shape): each dials the daemon on its first request, so a context that never calls an MCP tool holds no socket.
+    # The daemon calls the tools make (`meiva.mcps._tools.ToolSource.remote`): each dials the daemon on its first request, so a context that never calls an MCP tool holds no socket.
     def list_tools(
         self, server: str, *, timeout_seconds: float, agent_id: int | None
     ) -> list[ToolInfo]:

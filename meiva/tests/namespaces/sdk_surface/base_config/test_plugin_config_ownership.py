@@ -22,6 +22,7 @@ from base.packages.tests.plugin_config.test_plugin_config import (
     isolated_registry as isolated_registry,
 )
 from base.paths.home import resolve_meiva_home
+from meiva.sdk_surface.tests.installation_holder import inert_sampling
 
 
 def test_syntax_fix_ruff_format_overlay_is_accepted(model_catalog: ModelCatalog) -> None:
@@ -89,7 +90,11 @@ def test_install_refuses_a_plugin_whose_config_does_not_bind_and_installs_the_re
         )
     )
 
-    admitted = install.install(registry, config_images=DiskPluginConfigImages(resolve_meiva_home()))
+    admitted = install.install(
+        registry,
+        config_images=DiskPluginConfigImages(resolve_meiva_home()),
+        sampling=inert_sampling(),
+    )
     try:
         assert [name for name, _ in admitted.plugins] == ["healthy"]
         assert [name for name, _ in reported if name == "drifted"] == ["drifted"]

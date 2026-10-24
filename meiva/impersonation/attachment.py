@@ -17,7 +17,7 @@ from __future__ import annotations
 import dataclasses
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any, cast
+from typing import Any, assert_never, cast
 from uuid import uuid4
 
 from base.agents import impersonation as control
@@ -33,9 +33,11 @@ from base.host.env.agent_slices import PluginConfigView
 from base.native_process.ownership import process_metadata
 from base.packages.plugins.config_view import resolve_agent_plugin_pins
 from meiva.boot import (
+    BorrowedBoot,
     ExternalBoot,
+    OwnedBoot,
     borrow_external_process,
-    initialize_context,
+    initialize_external,
     own_external_process,
     plugin_state_codec,
 )
@@ -136,7 +138,14 @@ class Attachment(ExternalAttachment):
         self._boot: ExternalBoot = inputs.boot
         self._machine: MachineIdentity = self._boot.machine
         self._database: DatabaseFactory = self._boot.database
-        self._own_clients = self._boot.clients
+        boot = self._boot
+        match boot:
+            case OwnedBoot():
+                self._own_clients = boot.clients
+            case BorrowedBoot():
+                self._own_clients = None
+            case _:
+                assert_never(boot)
         self.open(inputs.bound)
 
     def _prepare(self) -> None:
@@ -156,14 +165,18 @@ class Attachment(ExternalAttachment):
         self.session_id = int(lease["session_id"])
         self._version = int(lease["delta_version"])
         self._bind_borrowed_context()
-        initialize_context(
+        initialize_external(
             process_context.current_context(),
-            surface=False,
-            config=boot.config,
-            clients=boot.clients,
+            boot,
             validate_state=plugin_state_codec().plugin_state_schema,
         )
-        self._seal_authority = config_authority() if boot.config is None else None
+        match boot:
+            case OwnedBoot():
+                self._seal_authority = None
+            case BorrowedBoot():
+                self._seal_authority = config_authority()
+            case _:
+                assert_never(boot)
 
     def _applied_version(self, state: Any, lease: Mapping[str, Any]) -> int:
         receipt = state.impersonation_applied
@@ -217,12 +230,14 @@ class Attachment(ExternalAttachment):
         self._bound = True
 
     def _new_context(self) -> MeivaContext:
-        clock = self._boot.clock
-        if self._own_clients is None or clock is None:
-            raise RuntimeError("an unbound attachment has no owned clients")
-        return MeivaContext(
-            clients=self._own_clients, clock_factory=lambda: clock, machine=self._machine
-        )
+        boot = self._boot
+        match boot:
+            case OwnedBoot():
+                return boot.new_context()
+            case BorrowedBoot():
+                raise RuntimeError("a borrowed attachment has no owned clients to build a context")
+            case _:
+                assert_never(boot)
 
     def capture_local_event(self, event: Any) -> Any:
         from base.agents.impersonation.manifest import capture_local_event
@@ -272,15 +287,24 @@ class Attachment(ExternalAttachment):
             self._event_gate = LocalCaptureGate(participant)
 
     def _seal_wait_seconds(self) -> float:
-        config = self._boot.config
-        if config is not None:
-            return config.view.general.impersonation_event_seal_wait_seconds
-        if self._seal_authority is None:
-            raise RuntimeError("the attachment holds no configuration owner for its seal wait")
-        return cast(
-            float,
-            self._seal_authority.service_field_value("impersonation_event_seal_wait_seconds"),
-        )
+        boot = self._boot
+        match boot:
+            case OwnedBoot():
+                config = boot.config
+                return config.view.general.impersonation_event_seal_wait_seconds
+            case BorrowedBoot():
+                if self._seal_authority is None:
+                    raise RuntimeError(
+                        "the attachment holds no configuration owner for its seal wait"
+                    )
+                return cast(
+                    float,
+                    self._seal_authority.service_field_value(
+                        "impersonation_event_seal_wait_seconds"
+                    ),
+                )
+            case _:
+                assert_never(boot)
 
     def _seal_event_participant(self) -> None:
         if self._event_gate is None:
@@ -346,6 +370,6 @@ def attach(session_id: int | str, *, agent_id: int | None = None) -> Attachment:
     try:
         return Attachment(AttachInputs(target, bound, boot))
     except BaseException:
-        if boot.clients is not None:
+        if isinstance(boot, OwnedBoot):
             boot.clients.close()
         raise

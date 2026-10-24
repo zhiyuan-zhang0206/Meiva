@@ -38,6 +38,10 @@ and a real `HostedServiceResources`: a pool whose single connection the test hol
 poll while `stop` is set, and a pool that was never opened fails the poll in flight. The faults
 a real pool cannot produce, because psycopg unwinds a cancelled acquire or query at once (a
 watcher that raises while unwinding, stays wedged past the bound or swallows the cancel), come
-from `tests/parked_pool.py`, a pool whose acquisition parks until cancelled and then does what
-the test says. The fault enters where the watcher meets its resource, never as a coroutine
-handed to the owner. The verdicts are asserted directly.
+from `agent/graph/interrupt/tests/parked_pool.py`, a stand-in for the one pool member the
+watcher calls (`connection()`): its acquisition parks until cancelled and then does what its
+constructor said. It is not a subclass of the psycopg pool and carries no switch. The fault
+enters where the watcher meets its resource, never as a coroutine handed to the owner. The
+verdicts are asserted directly. The stand-in is a stopgap for a narrow `InterruptPool`
+protocol that `base/` is to host with its own fake; until then `subscribe_interrupt` keeps the
+concrete pool type and the stand-in is presented as one through `as_pool`.

@@ -21,6 +21,7 @@ from base.daemon.schedules.watcher import (
     validate_timezone,
 )
 from meiva.sdk_surface.validation import coerce_str
+from meiva.shell.background_plan import notify_policy
 from meiva.watcher.launch_plan import SpawnRequest
 
 __all__ = ["plan_at", "plan_cron", "plan_launch"]
@@ -56,7 +57,7 @@ def plan_launch(
     code = coerce_str(code, "code")
     timeout = coerce_str(timeout, "timeout", allow_types=(int, float, datetime.timedelta))
     name = coerce_str(name, "name")
-    notify = coerce_str(notify, "notify", allow_none=True)
+    policy = notify_policy(coerce_str(notify, "notify", allow_none=True))
     seconds = parse_timeout(timeout)
     return SpawnRequest(
         code=code,
@@ -65,7 +66,7 @@ def plan_launch(
         ttl_seconds=_ttl_seconds(
             "launch", session_deadline("launch", created_at=now, timeout_secs=seconds), now
         ),
-        notify=notify,
+        notify=policy,
     )
 
 
@@ -95,7 +96,7 @@ def plan_cron(
         end_time, "end_time", allow_none=True, allow_types=(datetime.datetime, datetime.timedelta)
     )
     name = coerce_str(name, "name")
-    notify = coerce_str(notify, "notify", allow_none=True)
+    policy = notify_policy(coerce_str(notify, "notify", allow_none=True))
     validate_message(message)
     validate_cron(expr)
     tz = timezone if timezone is not None else default_timezone
@@ -131,7 +132,7 @@ def plan_cron(
         watchdog_secs=None,
         name=name,
         ttl_seconds=_ttl_seconds("cron", session_deadline("cron", cron_end_at=et), now),
-        notify=notify,
+        notify=policy,
     )
 
 
@@ -156,7 +157,7 @@ def plan_at(
     when = coerce_str(when, "when", allow_types=(datetime.datetime, datetime.timedelta))
     message = coerce_str(message, "message")
     name = coerce_str(name, "name")
-    notify = coerce_str(notify, "notify", allow_none=True)
+    policy = notify_policy(coerce_str(notify, "notify", allow_none=True))
     validate_message(message)
     due_at = normalize_when(when)
     if due_at < now:
@@ -176,5 +177,5 @@ def plan_at(
         watchdog_secs=None,
         name=name,
         ttl_seconds=_ttl_seconds("at", session_deadline("at", fires_at=due_at), now),
-        notify=notify,
+        notify=policy,
     )

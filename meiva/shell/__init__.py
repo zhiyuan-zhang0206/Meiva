@@ -139,7 +139,7 @@ def run_background(
     cwd = coerce_str(cwd, "cwd", allow_none=True, allow_types=(os.PathLike,))
     keep = coerce_typed(keep, "keep", bool)
     ttl = coerce_typed(ttl, "ttl", (int, float))
-    notify = background_plan.validate_notify(coerce_str(notify, "notify", allow_none=True))
+    policy = background_plan.notify_policy(coerce_str(notify, "notify", allow_none=True))
     if not cmd.strip():
         raise ValueError("cmd cannot be empty")
     aid = agent_identity.require_agent_id()
@@ -152,7 +152,7 @@ def run_background(
             cwd=workspace if cwd is None else Path(cwd),
             keep=keep,
             ttl=ttl,
-            notify=notify,
+            notify=policy,
         ),
         background.BackgroundSite(
             agent_id=aid,

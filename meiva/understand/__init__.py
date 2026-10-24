@@ -53,9 +53,10 @@ def understand[TargetValue: str | list[str]](
     plan = plans.normalize(targets, effort, max_concurrent)
     # Imported here: `import meiva` loads this module, and the provider stack is not needed until
     # a call is made.
+    from meiva import security
     from meiva.understand import answer, wiring
 
-    return answer.run(plan, wiring.understand_deps())
+    return answer.run(plan, wiring.understand_deps(), security.current_delivery())
 
 
 # Hang the exception class off the function so agents can catch it as

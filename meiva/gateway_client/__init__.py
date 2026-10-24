@@ -10,7 +10,7 @@ import uuid
 from collections.abc import Generator
 from contextlib import contextmanager
 from dataclasses import replace
-from typing import Any, Literal
+from typing import Any, Literal, assert_never
 from uuid import UUID
 
 import meiva.sdk_surface.agent_identity
@@ -38,25 +38,28 @@ def _run(plan: Request, context: MeivaContext) -> _transport.TransportResponse:
         import httpx
 
         timeout = httpx.Timeout(plan.timeout_seconds)
-    if plan.method == "GET":
-        response = _transport.get(
-            plan.path,
-            params=plan.params,
-            timeout=timeout,
-            max_retries=plan.max_retries,
-            context=context,
-        )
-    elif plan.method == "PATCH":
-        response = _transport.patch(plan.path, json=plan.body, context=context)
-    else:
-        response = _transport.post(
-            plan.path,
-            plan.body,
-            timeout=timeout,
-            idempotency_key=plan.idempotency_key,
-            max_retries=plan.max_retries,
-            context=context,
-        )
+    match plan.method:
+        case "GET":
+            response = _transport.get(
+                plan.path,
+                params=plan.params,
+                timeout=timeout,
+                max_retries=plan.max_retries,
+                context=context,
+            )
+        case "PATCH":
+            response = _transport.patch(plan.path, json=plan.body, context=context)
+        case "POST":
+            response = _transport.post(
+                plan.path,
+                plan.body,
+                timeout=timeout,
+                idempotency_key=plan.idempotency_key,
+                max_retries=plan.max_retries,
+                context=context,
+            )
+        case _:
+            assert_never(plan.method)
     _transport.raise_from_response(response)
     return response
 

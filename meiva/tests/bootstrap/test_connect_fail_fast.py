@@ -34,9 +34,10 @@ import pytest
 import redis
 
 from base.agents.context.clients import ClientSet
+from base.cluster.machine.boot import machine_from_boot
 from base.config.tests.configuration import snapshot_process_config
 from base.db import PG_KEEPALIVE_KWARGS
-from meiva.boot import process_clients
+from meiva.boot import derived_clients
 
 # The control test waits this long and asserts a bare connect is STILL pending;
 # the fail-fast tests assert they finished inside it. Comfortably above
@@ -155,7 +156,7 @@ def test_assert_schema_current_fails_fast(silent_peer_url: str) -> None:
 def _clients_for(db_url: str) -> ClientSet:
     config = snapshot_process_config()
     config.set_field("db_url", db_url)
-    return process_clients(config=config)
+    return derived_clients(config, machine_from_boot(config))
 
 
 def test_meiva_db_connect_fails_fast(silent_peer_url: str) -> None:
@@ -183,7 +184,7 @@ def test_meiva_db_connect_never_prepares(db_url: str) -> None:
 def test_connect_redis_applies_resilience_kwargs() -> None:
     config = snapshot_process_config()
     config.set_field("redis_url", "redis://127.0.0.1:1/0")
-    clients = process_clients(config=config)
+    clients = derived_clients(config, machine_from_boot(config))
     try:
         kw = cast(redis.Redis, clients.redis._get()).connection_pool.connection_kwargs
     finally:

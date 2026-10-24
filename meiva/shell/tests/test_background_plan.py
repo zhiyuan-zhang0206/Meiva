@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from meiva.shell import background_plan, log_ring
-from meiva.shell.background_plan import Notice, notified_line
+from meiva.shell.background_plan import Notice, NotifyPolicy, notified_line, notify_policy
 
 
 def _notice(
@@ -52,10 +52,10 @@ def test_a_retained_session_is_not_closed_and_does_not_wait_for_the_log(tmp_path
 
 @pytest.mark.parametrize(
     ("notify", "expected_fragment"),
-    [(None, "--completion"), ("always", "agents send 5")],
+    [(None, "--completion"), (NotifyPolicy.ALWAYS, "agents send 5")],
 )
 def test_the_notice_follows_the_notify_policy(
-    tmp_path: Path, notify: str | None, expected_fragment: str
+    tmp_path: Path, notify: NotifyPolicy | None, expected_fragment: str
 ) -> None:
     line = notified_line(
         "make build", _notice(), output_path=tmp_path / "x.log", keep=False, notify=notify
@@ -72,18 +72,16 @@ def test_the_cli_path_is_quoted_into_the_line(tmp_path: Path) -> None:
     assert "'/opt/my tools/meiva' agents send 5" in line
 
 
-def test_notify_policies_are_validated() -> None:
-    assert background_plan.validate_notify(None) is None
-    assert background_plan.validate_notify("always") == "always"
-    with pytest.raises(ValueError, match="notify must be one of"):
-        background_plan.validate_notify("failure")
+def test_each_known_notify_text_maps_to_its_policy() -> None:
+    assert notify_policy(None) is None
+    assert notify_policy("always") is NotifyPolicy.ALWAYS
+    assert [policy.value for policy in NotifyPolicy] == ["always"]
 
 
-def test_a_line_refuses_an_unknown_policy(tmp_path: Path) -> None:
-    with pytest.raises(ValueError, match="notify must be one of"):
-        notified_line(
-            "make build", _notice(), output_path=tmp_path / "x.log", keep=False, notify="success"
-        )
+@pytest.mark.parametrize("text", ["failure", "success", "Always", "", " always"])
+def test_an_unknown_notify_text_is_refused(text: str) -> None:
+    with pytest.raises(ValueError, match=r"notify must be one of \['always'\], got "):
+        notify_policy(text)
 
 
 def test_a_line_refuses_a_multiline_command(tmp_path: Path) -> None:

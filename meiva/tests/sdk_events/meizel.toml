@@ -1,0 +1,2 @@
+[uses]
+"test_sdk_event_producer.py" = ["sdk_exit_child.py"]

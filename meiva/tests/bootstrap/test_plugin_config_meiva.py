@@ -12,7 +12,7 @@ from base.packages.plugins.config_registration import (
     bind_plugin_config,
 )
 from meiva.sdk_surface.installation import Installation
-from meiva.sdk_surface.tests.installation_holder import held_installation
+from meiva.sdk_surface.tests.installation_holder import held_installation, inert_sampling
 
 
 class _FixtureConfig(BaseModel):
@@ -25,7 +25,7 @@ class _FixtureConfig(BaseModel):
 def isolated_registry() -> Iterator[dict[str, BaseModel]]:
     """The SDK reads its current installation's own config bindings."""
     configs: dict[str, BaseModel] = {}
-    with held_installation(Installation.bare(configs=configs)):
+    with held_installation(Installation.bare(configs=configs, sampling=inert_sampling())):
         yield configs
 
 

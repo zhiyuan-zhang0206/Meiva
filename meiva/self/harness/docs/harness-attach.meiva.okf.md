@@ -20,24 +20,24 @@ handoff document alone: `import meiva` in a bare interpreter fails, because ever
 |---|---|
 | refuse | `meiva/sdk_surface/pure/caller/attachability.py`: a host runtime, an already-attached process and an exec turn are refused, the same rule a takeover attach follows |
 | look up | the handle resolves to one registration row; the plain value never touches disk |
-| boot | config, machine, database, client set and clock come from `meiva/boot.py` |
+| boot | `open_attachment` reads the process once; config, machine, database, clients and clock come from `meiva/boot.py` |
 | prove | `require_live_registration`: the row is attached and unexpired at `now`, the machine matches, the caller's lineage holds the controller pid |
 | bind | a borrowed `ExternalLease` on the ambient context, pipeline and SDK state initialized |
 | close | flush the plugin delta, seal events, deliver telemetry, detach |
 
-The decisions are strict functions of values in `admission.py` (with the row's value shape
-in `registration.py`); `attachment.py` and `store.py` are the shells. Each SDK call re-reads
-the lineage (`process_lineage(pid)`) and the instant and hands them over as values.
-`open_attachment(handle)` takes its row from `default_store()`; `resolve_registration`
+The decisions are strict functions of values in `admission.py` (the row's shape is in
+`registration.py`); `attachment.py` and `store.py` are the shells. `open_attachment` reads
+the process (context, boot, pid, clock) into `HarnessInputs`; the shell reads no environment and
+asks the lineage and clock again at each SDK call, as expiry and ancestry are rechecked then. `open_attachment(handle)` takes its row from `default_store()`; `resolve_registration`
 requires its store.
 
 `meiva.attach()` is the public entry: with no argument it reads
 `MEIVA_HARNESS_HANDLE`, attaches once and returns the attachment. Every session's
-first identity read does the same thing, so the call is optional.
+first identity read does the same, so the call is optional.
 
 `meiva harness exec --file script.py` is the CLI around the same seam: it reads the
-script (or stdin as `-`) and runs it inside the attachment, so a bridge needs no
-bootstrap file in the child's workspace.
+script (or stdin as `-`) and runs it inside the attachment, with no bootstrap file in
+the child's workspace.
 
 ## The registration row
 
@@ -134,6 +134,6 @@ process when its role is complete.
 
 ## Why not MCP, and why not a sidecar
 
-MCP would add a process and a second interaction model for what the SDK already gives
-a harness; a sidecar adds a service, an auth scheme and its own version surface. The kernel
-offers the calls a native agent makes, with the same telemetry, from one implementation.
+MCP would add a process and a second interaction model, a sidecar a service, an auth scheme
+and a version surface; the kernel gives a harness a native agent's calls, with the same
+telemetry, from one implementation.

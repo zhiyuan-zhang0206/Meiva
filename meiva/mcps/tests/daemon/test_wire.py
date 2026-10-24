@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
 
 import pytest
 from mcp.types import CallToolResult, ImageContent, TextContent, Tool
@@ -13,15 +12,6 @@ from meiva.mcps._wire import (
     ping_response,
     tools_response,
 )
-
-
-# meiva:note
-# An SDK-shaped result built by hand, for the shapes a real `CallToolResult` cannot take (no content at all, a block that is no pydantic model).
-@dataclass(frozen=True)
-class RawResult:
-    content: list[object] | None
-    is_error: bool | None = False
-    structured_content: dict[str, object] | None = None
 
 
 def test_ping_is_answered_with_pong() -> None:
@@ -90,8 +80,8 @@ def test_a_tool_error_is_carried_as_data() -> None:
     }
 
 
-def test_a_result_without_content_serializes_an_empty_list() -> None:
-    response = call_response(6, RawResult(content=None, is_error=None))
+def test_a_result_with_an_empty_content_list_serializes_an_empty_list() -> None:
+    response = call_response(6, CallToolResult(content=[]))
     assert response["result"] == {"content": [], "isError": False, "structuredContent": None}
 
 
@@ -102,7 +92,10 @@ def test_a_content_block_that_is_not_a_pydantic_model_fails_fast() -> None:
     class BadBlock:
         pass
 
-    result = RawResult(content=[BadBlock()])
+    # meiva:note
+    # `model_construct` skips the validation a real SDK result went through, which is how a block
+    # of a type the SDK did not declare could reach the daemon.
+    result = CallToolResult.model_construct(content=[BadBlock()])
     with pytest.raises(TypeError, match="Unrecognized MCP content block type 'BadBlock'"):
         call_response(2, result)
 

@@ -26,8 +26,8 @@ from __future__ import annotations
 
 import dataclasses
 import os
-from datetime import UTC, datetime
-from typing import Any, Self, cast
+from dataclasses import dataclass
+from typing import Any, Self, assert_never, cast
 
 import psutil
 
@@ -41,9 +41,12 @@ from base.config.agent_pins import resolve_agent_config_pins
 from base.host.env.agent_slices import PluginConfigView
 from base.packages.plugins.config_view import resolve_agent_plugin_pins
 from meiva.boot import (
+    BorrowedBoot,
+    ExternalBoot,
+    OwnedBoot,
     bind_launched_context,
     borrow_external_process,
-    initialize_context,
+    initialize_external,
     own_external_process,
     plugin_state_codec,
 )
@@ -107,43 +110,50 @@ def process_lineage(pid: int) -> ProcessLineage:
     return ProcessLineage(pid=pid, ancestors=ancestors)
 
 
+# meiva:note
+# Everything one harness attachment needs from the process, resolved by `open_attachment`: the
+# registration the handle names, the context it borrows (None for an independent attachment), the
+# boot of the process around it, this process's pid and the clock that dates each admission. The
+# pid does not change; the instant and the lineage are asked again at every SDK call.
+@dataclass(frozen=True, slots=True)
+class HarnessInputs:
+    handle: str
+    registration: HarnessRegistration
+    bound: MeivaContext | None
+    boot: ExternalBoot
+    pid: int
+    clock: Clock
+
+
 class HarnessAttachment(ExternalAttachment):
-    def __init__(
-        self,
-        handle: str,
-        *,
-        agent_id: int,
-        session_id: str,
-        registration: HarnessRegistration,
-    ) -> None:
-        self.handle = handle
-        self.session_id = session_id
-        self._registration = registration
-        self.agent_id = agent_id
+    def __init__(self, inputs: HarnessInputs) -> None:
+        self.handle = inputs.handle
+        self.session_id = inputs.registration.external_session_id
+        self._registration = inputs.registration
+        self.agent_id = inputs.registration.agent_id
         self.config: tuple[Any, PluginConfigView] | None = None
-        self._machine: MachineIdentity
-        self._database: Any = None
-        self._clock: Clock | None = None
-        bound = attachable_context()
+        self._boot: ExternalBoot = inputs.boot
+        self._machine: MachineIdentity = inputs.boot.machine
+        self._database: Any = inputs.boot.database
+        self._pid = inputs.pid
+        self._clock = inputs.clock
         super().__init__(identity=_RegistrationIdentity(self), codec=_RegistrationCodec(self))
-        self.open(bound)
+        boot = self._boot
+        match boot:
+            case OwnedBoot():
+                self._own_clients = boot.clients
+            case BorrowedBoot():
+                self._own_clients = None
+            case _:
+                assert_never(boot)
+        self.open(inputs.bound)
 
     def _prepare(self) -> None:
-        bound = self._prior_context
-        boot = (
-            own_external_process(ConfigBoot()) if bound is None else borrow_external_process(bound)
-        )
-        self._clock = boot.clock
-        self._machine = boot.machine
-        self._database = boot.database
-        self._own_clients = boot.clients
         self._require_registration()
         self._bind_borrowed_context()
-        initialize_context(
+        initialize_external(
             process_context.current_context(),
-            surface=False,
-            config=boot.config,
-            clients=boot.clients,
+            self._boot,
             validate_state=_codec_module().plugin_state_schema,
         )
 
@@ -151,8 +161,8 @@ class HarnessAttachment(ExternalAttachment):
         return require_live_registration(
             self._registration,
             machine=self._machine.name(),
-            lineage=process_lineage(os.getpid()),
-            now=datetime.now(UTC),
+            lineage=process_lineage(self._pid),
+            now=self._clock.now(),
         )
 
     def _validate(self) -> int:
@@ -179,12 +189,14 @@ class HarnessAttachment(ExternalAttachment):
         self._bound = True
 
     def _new_context(self) -> MeivaContext:
-        clock = self._clock
-        if self._own_clients is None or clock is None:
-            raise RuntimeError("an unbound attachment has no owned clients")
-        return MeivaContext(
-            clients=self._own_clients, clock_factory=lambda: clock, machine=self._machine
-        )
+        boot = self._boot
+        match boot:
+            case OwnedBoot():
+                return boot.new_context()
+            case BorrowedBoot():
+                raise RuntimeError("a borrowed attachment has no owned clients to build a context")
+            case _:
+                assert_never(boot)
 
     def _resolve_config(self, overlay: Any, birth: Any) -> None:
         from meiva.sdk_surface.installation import installed
@@ -287,6 +299,22 @@ def resolve_registration(
     return require_claimed(store.find_by_handle(handle), agent_id=agent_id, session_id=session_id)
 
 
+# meiva:note
+# The clock that dates every admission of an attachment: the owned boot's own clock, or the clock
+# of the context a borrowing attachment shares. A borrowed context with no clock factory fails here,
+# before any attachment is built.
+def attachment_clock(bound: MeivaContext | None, boot: ExternalBoot) -> Clock:
+    match boot:
+        case OwnedBoot():
+            return boot.clock
+        case BorrowedBoot():
+            if bound is None:
+                raise RuntimeError("a borrowed boot needs the context it borrows")
+            return bound.require_clock()
+        case _:
+            assert_never(boot)
+
+
 def open_attachment(
     handle: str,
     *,
@@ -297,9 +325,20 @@ def open_attachment(
     registration = resolve_registration(
         handle, agent_id=agent_id, session_id=session_id, store=default_store()
     )
-    return HarnessAttachment(
-        handle,
-        agent_id=registration.agent_id,
-        session_id=registration.external_session_id,
-        registration=registration,
-    )
+    bound = attachable_context()
+    boot = own_external_process(ConfigBoot()) if bound is None else borrow_external_process(bound)
+    try:
+        return HarnessAttachment(
+            HarnessInputs(
+                handle=handle,
+                registration=registration,
+                bound=bound,
+                boot=boot,
+                pid=os.getpid(),
+                clock=attachment_clock(bound, boot),
+            )
+        )
+    except BaseException:
+        if isinstance(boot, OwnedBoot):
+            boot.clients.close()
+        raise

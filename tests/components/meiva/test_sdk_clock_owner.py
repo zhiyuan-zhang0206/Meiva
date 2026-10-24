@@ -11,6 +11,7 @@ from base.packages.plugin_config_images import DiskPluginConfigImages
 from base.packages.plugins.extensions import ExtensionRegistry
 from base.paths.home import resolve_meiva_home
 from meiva.sdk_surface import install, process_context, settings
+from meiva.sdk_surface.tests.installation_holder import inert_sampling
 
 
 @pytest.fixture
@@ -52,6 +53,7 @@ def test_bare_sdk_clock_is_the_installation_clock(clock_scope: None) -> None:
         ExtensionRegistry(()),
         clock=clock,
         config_images=DiskPluginConfigImages(resolve_meiva_home()),
+        sampling=inert_sampling(),
     )
 
     assert settings.clock() is clock
@@ -63,6 +65,7 @@ def test_bound_sdk_clock_uses_context_without_borrowing_installation(clock_scope
         ExtensionRegistry(()),
         clock=_clock("Asia/Shanghai"),
         config_images=DiskPluginConfigImages(resolve_meiva_home()),
+        sampling=inert_sampling(),
     )
     context_clock = _clock("UTC")
     process_context.bind_context(
@@ -79,6 +82,7 @@ def test_partial_context_refuses_clock_instead_of_falling_back(clock_scope: None
         ExtensionRegistry(()),
         clock=_clock("UTC"),
         config_images=DiskPluginConfigImages(resolve_meiva_home()),
+        sampling=inert_sampling(),
     )
     process_context.bind_context(MeivaContext(clients=ClientSet()))
     try:
@@ -90,7 +94,9 @@ def test_partial_context_refuses_clock_instead_of_falling_back(clock_scope: None
 
 def test_inventory_installation_remains_cold_and_refuses_clock(clock_scope: None) -> None:
     install.install(
-        ExtensionRegistry(()), config_images=DiskPluginConfigImages(resolve_meiva_home())
+        ExtensionRegistry(()),
+        config_images=DiskPluginConfigImages(resolve_meiva_home()),
+        sampling=inert_sampling(),
     )
     with pytest.raises(RuntimeError, match="carries no Clock"):
         settings.clock()

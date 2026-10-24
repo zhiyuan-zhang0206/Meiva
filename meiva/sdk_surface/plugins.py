@@ -11,7 +11,7 @@ SDK reference reads `meiva.sdk_surface.install.expansions()`.
 import sys as _sys
 from collections.abc import Mapping
 from types import ModuleType, SimpleNamespace
-from typing import Any
+from typing import Any, assert_never
 
 from . import CONTEXT_KEY, SdkProcessPurpose, meiva_module
 from .installation import MemberAdded, NamespaceAdded
@@ -276,6 +276,8 @@ def uninstall(added: NamespaceAdded | MemberAdded) -> None:
             if getattr(pkg, added.namespace, None) is added.parent:
                 _remove_attr(added.parent, added.name)
                 _remove_from_surface(getattr(added.parent, "__all_for_meiva__", None), added.name)
+        case _:
+            assert_never(added)
 
 
 def _remove_attr(obj: Any, name: str) -> None:

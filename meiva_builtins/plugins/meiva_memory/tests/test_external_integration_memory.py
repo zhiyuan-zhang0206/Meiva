@@ -29,7 +29,7 @@ from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.packages.plugins.extensions import ExtensionRegistry
 from base.paths import workspace_dir_readonly
 from meiva import impersonation
-from meiva.boot import process_clients
+from meiva.boot import derived_clients
 from meiva.sdk_surface import install, process_context
 from meiva.sdk_surface.installation import Installation
 from meiva.tests.fixtures.pin_agent import pin_agent, pin_no_identity
@@ -89,7 +89,7 @@ def native_checkpoint(
             versions,
         )
     config = snapshot_process_config()
-    with closing(process_clients(config=config, machine=machine_identity)) as clients:
+    with closing(derived_clients(config, machine_identity)) as clients:
         pin_agent(
             None,
             owns_loop=False,

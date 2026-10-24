@@ -11,6 +11,7 @@ from base.packages.plugins.gate import ContributionMismatch
 from base.packages.plugins.loading.registry import declarations
 from base.packages.plugins.manifest import ManifestError
 from meiva.sdk_surface.extensions import load_extensions
+from meiva.sdk_surface.tests.installation_holder import inert_sampling
 
 
 @pytest.fixture(autouse=True)
@@ -329,7 +330,9 @@ def load_failures() -> LoadFailures:
 
 
 def _registered(load_failures: LoadFailures) -> dict[str, tuple[str, ...]]:
-    registry = load_extensions(validate_state=plugin_state_schema, report=load_failures).registry
+    registry = load_extensions(
+        validate_state=plugin_state_schema, report=load_failures, sampling=inert_sampling()
+    ).registry
     return {
         name: tuple(point for point in _HOOK_POINTS if contributions.hooks(point))
         for name, contributions in registry.plugins
@@ -487,7 +490,9 @@ def test_a_valid_state_declaration_is_admitted(load_failures: LoadFailures):
     )
     _enable(gate_state=True)
 
-    registry = load_extensions(validate_state=plugin_state_schema, report=load_failures).registry
+    registry = load_extensions(
+        validate_state=plugin_state_schema, report=load_failures, sampling=inert_sampling()
+    ).registry
 
     assert [(plugin, cls.__name__) for plugin, cls in registry.state_classes()] == [
         ("gate_state", "GateState")

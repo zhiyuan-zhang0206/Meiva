@@ -9,23 +9,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Protocol
 
-
-# meiva:note
-# The read-only shape of an `AgentIdentity` this module needs; any identity value satisfies it.
-class IdentityLike(Protocol):
-    @property
-    def agent_id(self) -> int | None: ...
-
-    @property
-    def actor(self) -> str | None: ...
-
-    @property
-    def owns_loop(self) -> bool: ...
-
-    @property
-    def lease(self) -> object | None: ...
+from base.agents.context.identity import AgentIdentity
 
 
 @dataclass(frozen=True, slots=True)
@@ -49,7 +34,7 @@ class ActorDecision:
     recheck_load_failure: bool = False
 
 
-def caller_facts(identity: IdentityLike | None) -> CallerFacts | None:
+def caller_facts(identity: AgentIdentity | None) -> CallerFacts | None:
     if identity is None:
         return None
     return CallerFacts(

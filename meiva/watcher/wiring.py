@@ -1,11 +1,12 @@
 # meiva:note
-# Build the `SpawnDeps` of this process: its agent, directories, sessions and live session ids.
+# Build the `SpawnDeps` of this process: its agent, directories, sessions, CLI, runner env and interpreter.
 
 from __future__ import annotations
 
 import sys
 import tempfile
 from pathlib import Path
+from types import MappingProxyType
 
 from base.host.env.dotenv_boot import watcher_runner_env
 from base.paths import meiva_home, workspace_dir
@@ -28,7 +29,6 @@ def spawn_deps() -> SpawnDeps:
         host=session_host(),
         workspace=workspace_dir(agent_id),
         cli=cli_path(),
-        live_session_ids=frozenset(shell.list()),
-        runner_env=watcher_runner_env(),
+        runner_env=MappingProxyType(watcher_runner_env()),
         python=sys.executable,
     )

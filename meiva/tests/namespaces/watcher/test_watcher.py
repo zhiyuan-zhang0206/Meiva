@@ -283,12 +283,13 @@ def test_spawn_kills_session_when_the_launch_fails(
 ) -> None:
     probe = meiva.shell.sessions.new("probe", ttl=300)
     next_id = probe + 1
-    deps = dataclasses.replace(spawn_deps, live_session_ids=spawn_deps.live_session_ids | {next_id})
     blocked = spawn_deps.watchers_dir / generated.format(f"watcher_{next_id}")
     blocked.mkdir()
     try:
         with pytest.raises(IsADirectoryError):
-            spawn.run(plans.plan_launch("import meiva\n", "1h", "test-fail", None, _now()), deps)
+            spawn.run(
+                plans.plan_launch("import meiva\n", "1h", "test-fail", None, _now()), spawn_deps
+            )
 
         assert next_id not in meiva.shell.sessions.list()
     finally:

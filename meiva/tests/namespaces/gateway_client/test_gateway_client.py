@@ -13,6 +13,7 @@ from base.agents.context import MeivaContext
 from base.agents.context.gateway_client import memory_search as memory_client
 from base.agents.context.identity import AgentIdentity
 from base.api_contracts.agent_contract import GatewayUnavailable
+from meiva import gateway_client
 from meiva.tests.fixtures.gateway_wire import (
     CLIENT_TIMEOUT_SECONDS,
     GatewayStub,
@@ -342,6 +343,38 @@ class TestLifecycle:
         status = restart(42, source="agent:1")
         assert status == "idling"
         assert bound_wire.sent[0].body == {"source": "agent:1"}
+
+
+# meiva:note
+# The verb of a request plan reaches the wire as that verb, for each verb the client sends.
+class TestRequestMethods:
+    def test_a_get_plan_is_sent_as_a_get(self, bound_wire: GatewayWire):
+        bound_wire.stub.reply("GET", "/api/agents/42", {"id": 42})
+
+        assert gateway_client.get_agent(42) == {"id": 42}
+
+        [sent] = bound_wire.sent
+        assert (sent.method, sent.path, sent.body) == ("GET", "/api/agents/42", None)
+
+    def test_a_patch_plan_is_sent_as_a_patch(self, bound_wire: GatewayWire):
+        bound_wire.stub.reply("PATCH", "/api/agents/42", None, status=204)
+
+        gateway_client.patch_label(42, "lead")
+
+        [sent] = bound_wire.sent
+        assert (sent.method, sent.path, sent.body) == (
+            "PATCH",
+            "/api/agents/42",
+            {"label": "lead", "source": "self"},
+        )
+
+    def test_a_post_plan_is_sent_as_a_post(self, bound_wire: GatewayWire):
+        bound_wire.stub.reply("POST", "/api/agents/42/cancel", {"status": "cancelled"})
+
+        assert gateway_client.cancel(42) == "cancelled"
+
+        [sent] = bound_wire.sent
+        assert (sent.method, sent.path, sent.body) == ("POST", "/api/agents/42/cancel", {})
 
 
 # --- transient HTTP 429/5xx retry (task #960) ---

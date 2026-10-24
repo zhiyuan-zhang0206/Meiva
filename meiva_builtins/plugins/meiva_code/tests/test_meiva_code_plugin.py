@@ -22,6 +22,7 @@ from base.packages.plugins.extensions import (
 from base.packages.tests.model_catalog import inert_keys
 from base.paths.home import resolve_meiva_home
 from meiva.sdk_surface import install, process_context
+from meiva.sdk_surface.tests.installation_holder import inert_sampling
 from meiva.tests.fixtures.pin_agent import pin_agent, pin_no_identity
 from meiva_builtins.plugins.meiva_code.tests.surface_support import code_registry
 
@@ -44,6 +45,7 @@ def load_meiva_code_plugin(
         provider_keys=inert_keys(model_catalog),
         authority=config_authority,
         config_images=DiskPluginConfigImages(resolve_meiva_home()),
+        sampling=inert_sampling(),
     )
 
     yield

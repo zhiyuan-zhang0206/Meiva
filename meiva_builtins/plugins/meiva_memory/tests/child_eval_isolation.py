@@ -16,6 +16,7 @@ from base.packages.plugin_config_images import DiskPluginConfigImages
 from base.packages.plugins.extensions import ExtensionRegistry, PluginContributions, SdkNamespace
 from base.paths.home import resolve_meiva_home
 from meiva.sdk_surface import install, process_context
+from meiva.sdk_surface.tests.installation_holder import inert_sampling
 from meiva_builtins.plugins.meiva_memory import plugin
 
 
@@ -33,6 +34,7 @@ def _install() -> None:
             )
         ),
         config_images=DiskPluginConfigImages(resolve_meiva_home()),
+        sampling=inert_sampling(),
     )
 
 

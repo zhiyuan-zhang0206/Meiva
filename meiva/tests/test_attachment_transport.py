@@ -22,7 +22,7 @@ from base.packages.tests.model_catalog import AddModels
 from meiva.sdk_surface import process_context
 from meiva.sdk_surface.attachment_transport import plan_media, record_media, register
 from meiva.sdk_surface.installation import Installation
-from meiva.sdk_surface.tests.installation_holder import held_installation
+from meiva.sdk_surface.tests.installation_holder import held_installation, inert_sampling
 
 _MEDIA_MODEL = "gpt-5.6-sol"
 
@@ -185,7 +185,9 @@ def test_register_reads_the_process_and_records_into_the_turn(
     image = tmp_path / "result.png"
     image.write_bytes(b"png")
 
-    with held_installation(Installation.bare(catalog=model_catalog, authority=authority)):
+    with held_installation(
+        Installation.bare(catalog=model_catalog, authority=authority, sampling=inert_sampling())
+    ):
         register(image, label="render result", base=tmp_path)
 
     assert exec_turn["attach"] == [{"path": str(image.resolve()), "label": "render result"}]

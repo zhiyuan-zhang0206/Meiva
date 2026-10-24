@@ -13,7 +13,7 @@ from base.db.code_version_gate import ProcessDbGate
 from base.native_process.code_version import CodeVersion
 from base.paths import meiva_home
 from base.telemetry import process_name
-from meiva.boot import process_clients
+from meiva.boot import clients_over
 from meiva.sdk_surface import process_context
 from services.wake.schedule_manager import engine
 from services.wake.schedule_manager.stall_policy import StallPolicy
@@ -40,9 +40,7 @@ def run_schedule(
         gate=gate,
         direct_url=ClusterDirectUrl(machine.host),
     )
-    with closing(
-        process_clients(config=snapshot_process_config(), database=database, machine=machine)
-    ) as clients:
+    with closing(clients_over(snapshot_process_config(), machine, database)) as clients:
         process_context.bind_context(
             MeivaContext(
                 identity=AgentIdentity(

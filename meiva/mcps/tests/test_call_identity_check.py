@@ -6,9 +6,8 @@ from pathlib import Path
 import pytest
 
 from base.agents.context.identity import AgentIdentity, ExternalLease
-from meiva.mcps._remote import RemoteMCPClient
 from meiva.mcps._tools import call_raw, list_tools, resolve_agent_id
-from meiva.mcps.tests._mcps_helpers import tool_source
+from meiva.mcps.tests._mcps_helpers import local_mcp_clients, tool_source
 from meiva.mcps.tests.stub_daemon import Respond, StubDaemon, ok_line
 from meiva.mcps.tests.stub_daemon import stub_daemon as stub_daemon
 
@@ -50,7 +49,7 @@ def test_a_failed_identity_check_stops_the_call_before_the_daemon(tmp_path: Path
     # meiva:note
     # No daemon listens here: a call that got past the identity check would fail to connect instead
     # of raising the lease error.
-    unreachable = RemoteMCPClient(str(tmp_path / "absent.sock"))
+    unreachable = local_mcp_clients(tmp_path / "absent.sock")
     source = tool_source(unreachable, identity=borrowed(expired))
 
     with pytest.raises(RuntimeError, match="expired"):
@@ -68,7 +67,9 @@ def test_every_request_carries_the_agent_id_the_lease_permits_now(stub_daemon: S
             else ok_line(request, [])
         ]
     )
-    source = tool_source(RemoteMCPClient(daemon.path), identity=borrowed(lambda: next(permitted)))
+    source = tool_source(
+        local_mcp_clients(Path(daemon.path)), identity=borrowed(lambda: next(permitted))
+    )
 
     call_raw(source, "example", "side_effect", a=1)
     list_tools(source, "example")
@@ -79,5 +80,5 @@ def test_every_request_carries_the_agent_id_the_lease_permits_now(stub_daemon: S
 
 def test_a_process_without_an_identity_sends_no_agent_id(stub_daemon: Start) -> None:
     daemon = stub_daemon(lambda request: [ok_line(request, {"content": [], "isError": False})])
-    call_raw(tool_source(RemoteMCPClient(daemon.path)), "example", "side_effect")
+    call_raw(tool_source(local_mcp_clients(Path(daemon.path))), "example", "side_effect")
     assert daemon.requests[0]["agent_id"] is None

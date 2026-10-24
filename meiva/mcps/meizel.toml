@@ -6,7 +6,7 @@ exports = ["config.py"]
 "_daemon.py" = ["_browser.py", "_computer.py", "_guards.py", "_oauth.py", "_plan.py", "_policy.py", "_startup.py", "_wire.py", "config.py"]
 "_guards.py" = ["_startup.py"]
 "_remote.py" = ["config.py"]
-"_tools.py" = ["config.py"]
+"_tools.py" = ["_clients.py", "config.py"]
 "tests" = ["__init__.py", "_browser.py", "_clients.py", "_computer.py", "_daemon.py", "_guards.py", "_oauth.py", "_plan.py", "_policy.py", "_remote.py", "_startup.py", "_tools.py", "_wire.py", "config.py"]
 
 [purity]

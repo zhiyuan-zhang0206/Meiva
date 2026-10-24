@@ -14,7 +14,7 @@ import pytest
 
 from meiva.shell import background, log_ring
 from meiva.shell.background import BackgroundRun, BackgroundSite
-from meiva.shell.background_plan import EXIT_TAIL_BYTES, Notice, notified_line
+from meiva.shell.background_plan import EXIT_TAIL_BYTES, Notice, NotifyPolicy, notified_line
 from meiva.shell.handle import SessionHandle
 from meiva.shell.session_env import SessionHost
 from meiva.shell.sessions import ShellSessions
@@ -44,7 +44,7 @@ def _start(
     log_dir: Path | None = None,
     name: str = "test-bg",
     keep: bool = False,
-    notify: str | None = None,
+    notify: NotifyPolicy | None = None,
 ) -> SessionHandle:
     site = BackgroundSite(
         agent_id=shell.agent_id,
@@ -120,7 +120,7 @@ def test_a_grandchild_holding_stdout_does_not_postpone_the_notice(
         cwd=tmp_path,
         cli=cli,
         name="test-bg-grandchild",
-        notify="always",
+        notify=NotifyPolicy.ALWAYS,
     )
     try:
         _poll_until(argv_file.exists, 10)
@@ -146,7 +146,7 @@ def test_a_killed_command_still_sends_a_notice_without_a_status(
         cwd=tmp_path,
         cli=cli,
         name="test-bg-sigkill",
-        notify="always",
+        notify=NotifyPolicy.ALWAYS,
     )
 
     _poll_until(argv_file.exists, 15)

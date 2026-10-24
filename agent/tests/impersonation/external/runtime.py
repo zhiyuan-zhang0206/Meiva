@@ -43,7 +43,7 @@ from base.packages.plugin_config_contracts import UnboundPluginConfigImages
 from base.packages.plugins.extensions import ExtensionRegistry
 from base.packages.plugins.loading import registry as plugin_registry
 from meiva import impersonation
-from meiva.boot import ExternalBoot, own_external_process, process_clients
+from meiva.boot import OwnedBoot, derived_clients, own_external_process
 from meiva.sdk_surface import install, process_context
 from meiva.sdk_surface import settings as _settings
 from meiva.tests.fixtures.pin_agent import pin_agent
@@ -75,7 +75,7 @@ def assert_detached() -> None:
     assert _settings.attached_agent_view() is None
 
 
-def independent_boot() -> ExternalBoot:
+def independent_boot() -> OwnedBoot:
     config = ConfigBoot()
     config.read_process_environment()
     return own_external_process(config)
@@ -237,7 +237,7 @@ def native_agent_with_checkpoint(
 @pytest.fixture
 def prior_context(cluster: Cluster, request: pytest.FixtureRequest) -> Iterator[None]:
     config = snapshot_process_config()
-    clients = process_clients(config=config, machine=cluster.machine)
+    clients = derived_clients(config, cluster.machine)
     pin_agent(
         None,
         owns_loop=True,

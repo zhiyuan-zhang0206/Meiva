@@ -13,7 +13,7 @@ from base.clock.configuration import clock_config_from_boot
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import ConfigBoot
-from meiva.boot import process_clients
+from meiva.boot import derived_clients
 from meiva.sdk_surface import metering, process_context
 from meiva.sdk_surface.installation import installed
 
@@ -35,7 +35,7 @@ def sdk_environment(
         previous = None
     context = MeivaContext(
         identity=AgentIdentity(agent_id=1, owns_loop=True),
-        clients=process_clients(config=process_config, machine=machine_identity),
+        clients=derived_clients(process_config, machine_identity),
         machine=machine_identity,
         clock_factory=lambda: Clock(clock_config_from_boot(process_config), timers=SYSTEM_TIMERS),
     )

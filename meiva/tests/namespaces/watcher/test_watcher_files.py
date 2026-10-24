@@ -1,12 +1,16 @@
 from __future__ import annotations
 
+import datetime
 import pathlib
+from concurrent.futures import ThreadPoolExecutor
+from threading import Barrier
 
 import pytest
 
 import meiva
 from meiva import watcher
-from meiva.watcher import wiring
+from meiva.shell import SessionHandle
+from meiva.watcher import plans, spawn, wiring
 
 pytestmark = [
     pytest.mark.usefixtures("pty_service", "_isolated_agent"),
@@ -106,3 +110,54 @@ def test_spawn_back_to_back_keeps_all_files(_agent_row: int) -> None:
     finally:
         for h in handles:
             meiva.shell.sessions.kill(h.session_id)
+
+
+# meiva:note
+# Bug A (#1116), the interleaving that the order of `spawn.run` exists for: the deps of one launch
+# were built before a sibling watcher existed, then the sibling got its session and wrote its
+# files, then the launch ran. The sibling's child has not read its files yet, so they must stay.
+# A live-session snapshot carried in the deps would not contain the sibling and the launch would
+# delete its files; `run` lists the sessions itself, after it created its own.
+def test_a_sibling_that_starts_after_the_deps_were_built_keeps_its_unread_files(
+    _agent_row: int,
+) -> None:
+    deps = wiring.spawn_deps()
+    sibling = meiva.shell.sessions.new("late-sibling", ttl=300)
+    unread = _write_pair(deps.watchers_dir, sibling, "not read by the sibling's child yet")
+    request = plans.plan_launch(
+        _SLEEPER, "1h", "test-late-sibling", None, datetime.datetime.now(datetime.UTC)
+    )
+
+    handle = spawn.run(request, deps)
+    try:
+        assert all(path.exists() for path in unread)
+    finally:
+        meiva.shell.sessions.kill(handle.session_id)
+        meiva.shell.sessions.kill(sibling)
+
+
+# meiva:note
+# Watchers launched at the same moment on real threads: each one creates its session, lists the
+# directory, lists the sessions and removes what is dead, while the others do the same. None may
+# delete a file whose watcher was created by a sibling in the meantime.
+def test_watchers_launched_at_the_same_moment_keep_each_others_files(_agent_row: int) -> None:
+    directory = wiring.spawn_deps().watchers_dir
+    names = ("sib-a", "sib-b", "sib-c")
+    launched: list[SessionHandle] = []
+    try:
+        for _round in range(3):
+            gate = Barrier(len(names))
+
+            def start(name: str, gate: Barrier = gate) -> SessionHandle:
+                gate.wait()
+                return watcher.launch(_SLEEPER, timeout="1h", name=name)
+
+            with ThreadPoolExecutor(max_workers=len(names)) as pool:
+                handles = list(pool.map(start, names))
+            launched.extend(handles)
+            for handle in handles:
+                assert (directory / f"watcher_{handle.session_id}.py").exists()
+                assert (directory / f"watcher_{handle.session_id}_boot.py").exists()
+    finally:
+        for handle in launched:
+            meiva.shell.sessions.kill(handle.session_id)

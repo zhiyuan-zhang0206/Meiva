@@ -17,7 +17,7 @@ from base.cluster.machine import (
 )
 from base.config import ConfigBoot
 from base.config.tests.configuration import snapshot_process_config
-from meiva.boot import process_clients
+from meiva.boot import derived_clients
 from meiva.gateway_client import use_client
 from meiva.sdk_surface import process_context
 
@@ -28,7 +28,7 @@ def client_config(machine_identity: MachineIdentity) -> Iterator[ConfigBoot]:
     config = snapshot_process_config()
     context = MeivaContext(
         machine=machine_identity,
-        clients=process_clients(config=config, machine=machine_identity),
+        clients=derived_clients(config, machine_identity),
     )
     previous = process_context.bound_context()
     process_context.bind_context(context)
