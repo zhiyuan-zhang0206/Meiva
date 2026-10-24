@@ -10,7 +10,7 @@ import pytest
 from base.db import Database
 from base.sessions.backend import PtySessionBackend
 from base.sessions.pty.client import PtyClientConfig
-from base.sessions.pty.tests.pty_service import PtyServiceProcess
+from base.sessions.pty.tests.pty_service import PtyServiceProcess, service_socket
 from meiva.shell.session_env import SessionHost
 from meiva.shell.sessions import ShellSessions, session_host
 
@@ -36,7 +36,9 @@ def live_shell(pty_service: PtyServiceProcess, database: Database) -> ShellSessi
     del pty_service
     seed_agent(database, LIVE_AGENT_ID)
     return ShellSessions(
-        backend=PtySessionBackend(PtyClientConfig()), database=database, agent_id=LIVE_AGENT_ID
+        backend=PtySessionBackend(PtyClientConfig(socket_path=service_socket())),
+        database=database,
+        agent_id=LIVE_AGENT_ID,
     )
 
 

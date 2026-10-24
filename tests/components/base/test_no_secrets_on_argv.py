@@ -32,7 +32,7 @@ import pytest
 
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.db import Database
-from base.sessions.pty.tests.pty_service import PtyServiceProcess
+from base.sessions.pty.tests.pty_service import PtyServiceProcess, service_socket
 from base.sessions.pty.tests.pty_service import pty_service as pty_service
 from base.sessions.pty.tests.pty_shells import output_until, type_line
 from base.sessions.pty.tests.secret_argv import (
@@ -181,7 +181,9 @@ def test_agent_shell_session(
 
     seed_agent(database, 1, next_index=3)
     ShellSessions(
-        backend=PtySessionBackend(PtyClientConfig()), database=database, agent_id=1
+        backend=PtySessionBackend(PtyClientConfig(socket_path=service_socket())),
+        database=database,
+        agent_id=1,
     ).create("probe", cwd=workspace_dir(1), ttl=120, host=session_host())
     name = "meiva-agent-1-shell-3-probe"
     assert get_shell_backend().has_session(name)
