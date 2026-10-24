@@ -18,6 +18,12 @@ that agent's pending idle reading. A daemon restart starts these four maps
 empty, so it probes agents at normal cadence. The persisted B7 backoff level
 remains in PostgreSQL.
 
+Selection has two eligibilities under one cadence: the ordinary idle agent, and the
+held-path exception — an idling row that is crash-marked, still owes a handoff receipt and
+sits inside the reap grace (`selection.py`, #5468). That second one costs a model turn, so
+it is logged as `impersonation_handoff_checkin` with its reason and keeps every other
+exclusion, including a paused heartbeat.
+
 The dispatch cadence and idle threshold are captured once, matching the old
 loop startup reads. The no-op-nudge threshold stays a live read in each call to
 `reconcile_checkin_outcomes`; it is not frozen with startup configuration.

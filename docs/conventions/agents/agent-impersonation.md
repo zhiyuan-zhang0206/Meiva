@@ -221,6 +221,48 @@ admission after a restart, and a relay-death abort under supervision. That wake
 records the handoff before it goes idle, so a fresh request never waits for an
 unrelated message to wake a silent agent.
 
+## A receipt the held path could not write
+
+That wake's write is a graph write, and a graph write can fail. A failure there used to leave
+a `running` row with nobody left to push it: no turn runs on the held path, so the symptom is
+a silent agent that refuses its next takeover. The write now has three rungs, each the
+previous one's fallback:
+
+1. **Inside the wake** — up to three attempts over a five-second budget
+   (`HANDOFF_SETTLE_RETRY_BUDGET_S`), deliberately synchronous: the wake already holds the
+   incarnation and single-flight, and anything outliving it would race the next dispatch on
+   the same row. Lost ownership (`ImpersonationError`) is never retried. Each failed attempt
+   stamps `last_turn_fatal_at`, so a hard kill mid-retry still leaves evidence.
+2. **The heartbeat's narrow exception** — once the wake has failed closed (`idling`,
+   crash-marked), the heartbeat scan also selects a row that still owes a handoff receipt,
+   inside the reap grace only. This rung spends one model turn, which is why it is narrow: it
+   logs `impersonation_handoff_checkin` with `reason=unapplied_automatic_handoff` instead of
+   `heartbeat_nudged`. Paused heartbeats, a permanent reject streak and recent pending input
+   still leave the row alone.
+3. **The reaper** — after the grace, unchanged, except that the `status_change` audit payload
+   now carries `unapplied_automatic_handoff`, separating "reaped while a receipt was still
+   owed" from an ordinary crash.
+
+A settle that succeeds clears only the stamp its own wake made: `clear_turn_fatal` requires
+`last_turn_fatal_at >= last_admission_at` (a NULL admission clears nothing), so a marker left
+by an earlier real turn crash survives until a completed turn clears it.
+
+Operator check — leases that ended and still owe their receipt:
+
+```sql
+SELECT m.id, m.status, m.termination_source, m.last_turn_fatal_at, l.status, l.ended_at
+FROM agents_meta m JOIN agent_impersonations l ON l.agent_id = m.id
+WHERE l.status <> 'active' AND l.handoff_applied_at IS NULL
+  AND l.ended_at < now() - interval '5 minutes';
+```
+
+A hit inside the grace is a row the heartbeat will re-check; `status = 'terminated'` with
+`termination_source = 'reaper'` is a row the reaper already took, and its audit event says
+whether the receipt was still owed. Known limits: a database that refuses every write loses
+the stamp too (the next host start still idles the row, but only an external nudge revives
+it), rung 2 leaves a paused agent asleep, and the grace window holds roughly three chances
+before the reaper takes the row.
+
 ## Return control
 
 Stop external work and close attachments before releasing:

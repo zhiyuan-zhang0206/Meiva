@@ -148,6 +148,8 @@ class HostStats:
     wakes_skipped: int = 0
     config_rejected: int = 0
     config_normalized: int = 0
+    handoff_settle_retries: int = 0
+    handoff_settle_failures: int = 0
 
     def as_payload(self) -> dict[str, int]:
         return {
@@ -157,6 +159,8 @@ class HostStats:
             "wakes_skipped": self.wakes_skipped,
             "config_rejected": self.config_rejected,
             "config_normalized": self.config_normalized,
+            "handoff_settle_retries": self.handoff_settle_retries,
+            "handoff_settle_failures": self.handoff_settle_failures,
         }
 
 

@@ -1,10 +1,13 @@
 import time
+from collections.abc import Iterator
+from pathlib import Path
 from typing import Any
 
 import psycopg
 import pytest
 from psycopg_pool import ConnectionPool
 
+from base import telemetry
 from base.agents import impersonation as leases
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
@@ -13,13 +16,16 @@ from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
+from base.lm.catalog import ModelCatalog
 from base.tests.impersonation.support import accept_controller, create_native_owner
 from meiva.sdk_surface.installation import Installation
 from services.wake.heartbeat.daemon import (
     reconcile_checkin_outcomes,
-    select_idle_agents_needing_heartbeat,
     send_heartbeat_checkin,
 )
+from services.wake.heartbeat.selection import select_idle_agents_needing_heartbeat
+from services.wake.heartbeat.tests.heartbeat_support import lease as lease_row
+from services.wake.heartbeat.tests.heartbeat_support import make_idle
 
 
 @pytest.fixture
@@ -50,10 +56,43 @@ def active_lease(
     return lease
 
 
-def selected(pool: ConnectionPool) -> dict[int, float]:
-    return dict(
-        select_idle_agents_needing_heartbeat(pool, 300, heartbeat_interval_s=300, now=time.time())
+@pytest.fixture
+def event_pipeline(
+    database: Database, machine_identity: MachineIdentity, unit_home: Path
+) -> Iterator[telemetry.EventPipeline]:
+    """Own the process writer used by the service operation and mirror barrier."""
+    pipeline = telemetry.build_pipeline(
+        database=lambda: database, machine=machine_identity, home=unit_home
     )
+    try:
+        telemetry.init_telemetry(
+            process="test-wake-service", pipeline=pipeline, machine_reader=machine_identity.name
+        )
+        yield pipeline
+    finally:
+        pipeline.stop(timeout=2)
+
+
+def selected(pool: ConnectionPool) -> dict[int, float]:
+    return {
+        agent_id: idle_minutes
+        for agent_id, idle_minutes, _reason in select_idle_agents_needing_heartbeat(
+            pool, 300, heartbeat_interval_s=300, now=time.time()
+        )
+    }
+
+
+# meiva:note
+# agent_id -> why the scan picked it (`None` for the ordinary cadence).
+def selected_with_reason(
+    pool: ConnectionPool, *, corpse_grace_s: float = 900.0
+) -> dict[int, str | None]:
+    return {
+        agent_id: reason
+        for agent_id, _idle_minutes, reason in select_idle_agents_needing_heartbeat(
+            pool, 300, heartbeat_interval_s=300, now=time.time(), corpse_grace_s=corpse_grace_s
+        )
+    }
 
 
 @pytest.mark.parametrize("status", ["idling", "running"])
@@ -284,3 +323,134 @@ def test_heartbeat_history_survives_ack_including_activation_backlog(
         (lease["id"],),
     ).fetchall()
     assert [r[0] for r in records] == ids
+
+
+# meiva:note
+# Make the durable check-in interval due; the idle clock is already aged.
+def _age_heartbeat(db_conn: psycopg.Connection, agent_id: int) -> None:
+    db_conn.execute(
+        "UPDATE agents_meta SET last_heartbeat_at = now() - interval '400 seconds' WHERE id = %s",
+        (agent_id,),
+    )
+    db_conn.commit()
+
+
+def _set_marker(db_conn: psycopg.Connection, agent_id: int, *, seconds_ago: float | None) -> None:
+    if seconds_ago is None:
+        db_conn.execute(
+            "UPDATE agents_meta SET last_turn_fatal_at = NULL WHERE id = %s", (agent_id,)
+        )
+    else:
+        db_conn.execute(
+            "UPDATE agents_meta SET last_turn_fatal_at = now() - make_interval(secs => %s) "
+            "WHERE id = %s",
+            (seconds_ago, agent_id),
+        )
+    db_conn.commit()
+
+
+# meiva:note
+# The narrow exception is a conjunction: idling, crash-marked, still owing a receipt, and
+# inside the reap grace. Every partner of that conjunction is a separate row here, so a
+# future widening shows up as a failure instead of a silent extra wake.
+@pytest.mark.usefixtures("event_pipeline")
+def test_the_handoff_recheck_selects_only_the_crash_marked_row_that_owes_a_receipt(
+    redis_url: str,
+    pool: ConnectionPool,
+    db_conn: psycopg.Connection,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
+    *,
+    database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
+) -> None:
+    def _idle(*, status: str = "idling") -> int:
+        agent_id = make_idle(
+            db_conn,
+            status_changed_s_ago=900,
+            last_active_s_ago=900,
+            status=status,
+            model_catalog=model_catalog,
+            config_authority=config_authority,
+            database_gate=database_gate,
+            local_machine=machine_identity,
+        )
+        _age_heartbeat(db_conn, agent_id)
+        return agent_id
+
+    owed = _idle()
+    lease_row(db_conn, owed, status="released", local_machine=machine_identity)
+    _set_marker(db_conn, owed, seconds_ago=60)
+
+    marker_only = _idle()
+    _set_marker(db_conn, marker_only, seconds_ago=60)
+
+    owed_without_marker = _idle()
+    lease_row(db_conn, owed_without_marker, status="released", local_machine=machine_identity)
+
+    owed_but_running = _idle(status="running")
+    lease_row(db_conn, owed_but_running, status="released", local_machine=machine_identity)
+    _set_marker(db_conn, owed_but_running, seconds_ago=60)
+
+    reasons = selected_with_reason(pool)
+    assert reasons[owed] == "unapplied_automatic_handoff"
+    # meiva:note
+    # Three negatives around that positive: a crash marker alone is the ordinary cadence, an
+    # owed receipt alone stays excluded because nothing says the row is dead, and the
+    # exception is idling-only because a running row has a live invocation.
+    assert reasons[marker_only] is None
+    assert owed_without_marker not in reasons
+    assert owed_but_running not in reasons
+
+
+# meiva:note
+# The two boundaries of the narrow exception: the reap grace it is scoped to, and the pause
+# window it still respects. Past the grace the reaper owns the row, and a paused agent asked
+# not to be woken stays silent even when it owes a receipt.
+@pytest.mark.usefixtures("event_pipeline")
+def test_the_handoff_recheck_ends_with_the_grace_and_respects_a_pause(
+    redis_url: str,
+    pool: ConnectionPool,
+    db_conn: psycopg.Connection,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
+    *,
+    database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
+) -> None:
+    def _owed(*, marker_s_ago: float) -> int:
+        agent_id = make_idle(
+            db_conn,
+            status_changed_s_ago=900,
+            last_active_s_ago=900,
+            model_catalog=model_catalog,
+            config_authority=config_authority,
+            database_gate=database_gate,
+            local_machine=machine_identity,
+        )
+        lease_row(db_conn, agent_id, status="released", local_machine=machine_identity)
+        _set_marker(db_conn, agent_id, seconds_ago=marker_s_ago)
+        _age_heartbeat(db_conn, agent_id)
+        return agent_id
+
+    stale = _owed(marker_s_ago=1200)
+    fresh = _owed(marker_s_ago=60)
+
+    assert stale not in selected_with_reason(pool)
+    assert selected_with_reason(pool)[fresh] == "unapplied_automatic_handoff"
+    # meiva:note
+    # The same row past the grace is the exception again only while the grace covers it.
+    assert selected_with_reason(pool, corpse_grace_s=1800.0)[stale] == "unapplied_automatic_handoff"
+
+    db_conn.execute(
+        "UPDATE agents_meta SET heartbeat_paused_until = now() + interval '1 hour' WHERE id = %s",
+        (fresh,),
+    )
+    db_conn.commit()
+    assert fresh not in selected_with_reason(pool)
+    db_conn.execute(
+        "UPDATE agents_meta SET heartbeat_paused_until = now() - interval '1 second' WHERE id = %s",
+        (fresh,),
+    )
+    db_conn.commit()
+    assert selected_with_reason(pool)[fresh] == "unapplied_automatic_handoff"

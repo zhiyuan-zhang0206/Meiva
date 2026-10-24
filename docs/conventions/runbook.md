@@ -225,7 +225,10 @@ while per-agent model/runtime caches remain bounded.
 - **Heartbeat owns the idle nudge, hibernation is gone** — the heartbeat's own
   idle threshold (`MEIVA_HEARTBEAT_IDLE_THRESHOLD_SECONDS`, default 300s) nudges
   idling agents; agents that paused their own heartbeat
-  (`meiva.self.pause_heartbeat`) simply stop being nudged.
+  (`meiva.self.pause_heartbeat`) simply stop being nudged. One check-in is not a
+  routine nudge: a takeover whose handoff receipt never landed is re-checked here,
+  counted as `impersonation_handoff_checkin`, and bounded by the reap grace — see
+  [the held path's settle ladder](agents/agent-impersonation.md#a-receipt-the-held-path-could-not-write).
   [`docs/decisions/runtime/processes/health/2026-06-22-heartbeat-opt-out-over-escalation.md`](../decisions/runtime/processes/health/2026-06-22-heartbeat-opt-out-over-escalation.md).
 - **Per-cluster data plane is sized to be noise, not a multiplier** — every
   cluster (including each dev worktree) runs its own Postgres + Redis instance

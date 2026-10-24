@@ -112,3 +112,22 @@ def test_snapshot_rejects_missing_or_unknown_clock_names(missing: bool) -> None:
         values["UNKNOWN_CLOCK"] = 1.0
     with pytest.raises(ValueError, match="exactly the registered clock names"):
         validate_clock_lattice(values)
+
+
+# meiva:note
+# The held path's retry budget (#5468) must stay under both neighbours: a wake spending it
+# can never look stalled, and it finishes long before the reaper's grace, so the retry and
+# the reaper never race for the same row. The declared backoff sequence must also fit the
+# budget it declares, or the third attempt would only ever be cut short.
+def test_the_handoff_settle_budget_is_bounded_by_the_stall_and_reap_clocks() -> None:
+    declared = {c.rhs: c for c in CONSTRAINTS if c.lhs == "HANDOFF_SETTLE_RETRY_BUDGET_S"}
+    assert set(declared) == {"NO_PROGRESS_TIMEOUT_S", "CORPSE_REAP_GRACE_S"}
+    assert all(c.kind == "<" for c in declared.values())
+    assert CLOCKS["HANDOFF_SETTLE_RETRY_BUDGET_S"].get() == deploy.HANDOFF_SETTLE_RETRY_BUDGET_S
+    assert CLOCKS["HANDOFF_SETTLE_RETRY_INTERVAL_S"].get() == deploy.HANDOFF_SETTLE_RETRY_INTERVAL_S
+    assert deploy.HANDOFF_SETTLE_RETRY_BUDGET_S < deploy.NO_PROGRESS_TIMEOUT_S
+    assert deploy.HANDOFF_SETTLE_RETRY_BUDGET_S < deploy.CORPSE_REAP_GRACE_S
+    assert (
+        deploy.HANDOFF_SETTLE_RETRY_INTERVAL_S + 3 * deploy.HANDOFF_SETTLE_RETRY_INTERVAL_S
+        < deploy.HANDOFF_SETTLE_RETRY_BUDGET_S
+    )

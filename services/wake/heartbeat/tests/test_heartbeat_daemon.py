@@ -11,9 +11,7 @@ from base.cluster.machine.tests.identity import machine_identity as machine_iden
 from base.config.service_read import ConfigAuthority
 from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
-from services.wake.heartbeat.daemon import (
-    select_idle_agents_needing_heartbeat,
-)
+from services.wake.heartbeat.selection import select_idle_agents_needing_heartbeat
 from services.wake.heartbeat.tests.heartbeat_support import (
     THRESHOLD_S,
     lease,
@@ -22,8 +20,14 @@ from services.wake.heartbeat.tests.heartbeat_support import (
 from services.wake.heartbeat.tests.heartbeat_support import pool as pool
 
 
+# meiva:note
+# agent_id -> idle_minutes, dropping the reason these assertions do not read.
+def _by_agent(rows: list[tuple[int, float, str | None]]) -> dict[int, float]:
+    return {agent_id: idle for agent_id, idle, _reason in rows}
+
+
 def _selected(pool: ConnectionPool) -> dict[int, float]:
-    return dict(select_idle_agents_needing_heartbeat(pool, THRESHOLD_S, now=time.time()))
+    return _by_agent(select_idle_agents_needing_heartbeat(pool, THRESHOLD_S, now=time.time()))
 
 
 class TestSelectIdleAgents:
@@ -475,7 +479,7 @@ class TestWakeupStormFlattening:
         offset = aid % int(span)
 
         self._backdate(db_conn, aid, threshold + offset - 5)
-        got = dict(
+        got = _by_agent(
             select_idle_agents_needing_heartbeat(
                 pool, threshold, jitter_span_s=span, now=time.time()
             )
@@ -483,7 +487,7 @@ class TestWakeupStormFlattening:
         assert aid not in got, "idle just short of the jittered due-time must be excluded"
 
         self._backdate(db_conn, aid, threshold + offset + 5)
-        got = dict(
+        got = _by_agent(
             select_idle_agents_needing_heartbeat(
                 pool, threshold, jitter_span_s=span, now=time.time()
             )
@@ -509,7 +513,7 @@ class TestWakeupStormFlattening:
             database_gate=database_gate,
             local_machine=machine_identity,
         )
-        got = dict(
+        got = _by_agent(
             select_idle_agents_needing_heartbeat(pool, 300.0, jitter_span_s=0.0, now=time.time())
         )
         assert aid in got

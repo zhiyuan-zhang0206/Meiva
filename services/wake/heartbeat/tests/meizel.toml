@@ -3,6 +3,7 @@
 "test_heartbeat_checkin_retry.py" = ["machine_probe_setup.py"]
 "test_heartbeat_daemon.py" = ["heartbeat_support.py"]
 "test_heartbeat_liveness.py" = ["machine_probe_setup.py"]
+"test_impersonation_heartbeat.py" = ["heartbeat_support.py"]
 "test_machine_probe_failure_signal.py" = ["machine_probe_setup.py"]
 "test_machine_stopped_too_long_signal.py" = ["machine_probe_setup.py"]
 

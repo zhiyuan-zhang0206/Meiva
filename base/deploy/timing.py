@@ -136,6 +136,16 @@ CLOCKS: dict[str, Clock] = {
         lambda: deploy.AGENT_HOST_BEAT_INTERVAL_S,
         "the agent host's ownership beat: how often it reports liveness and reaps corpses",
     ),
+    "HANDOFF_SETTLE_RETRY_INTERVAL_S": Clock(
+        "agent-host-beat",
+        lambda: deploy.HANDOFF_SETTLE_RETRY_INTERVAL_S,
+        "the first backoff of the held path's checkpoint-settle retry (geometric, x3)",
+    ),
+    "HANDOFF_SETTLE_RETRY_BUDGET_S": Clock(
+        "agent-host-beat",
+        lambda: deploy.HANDOFF_SETTLE_RETRY_BUDGET_S,
+        "the whole retry budget the held path may spend settling a takeover's handoff",
+    ),
     "CORPSE_REAP_GRACE_S": Clock(
         "agent-host-beat",
         lambda: deploy.CORPSE_REAP_GRACE_S,
@@ -216,6 +226,18 @@ CLOCKS: dict[str, Clock] = {
 CONSTRAINTS: list[Constraint] = [
     # meiva:note
     # --- deploy family ---
+    Constraint(
+        "<",
+        "HANDOFF_SETTLE_RETRY_BUDGET_S",
+        "NO_PROGRESS_TIMEOUT_S",
+        "a settle retry budget can never be what makes a host look stalled",
+    ),
+    Constraint(
+        "<",
+        "HANDOFF_SETTLE_RETRY_BUDGET_S",
+        "CORPSE_REAP_GRACE_S",
+        "the retry finishes long before the reaper's grace, so the two never race for the same row",
+    ),
     Constraint(
         "<",
         "GATEWAY_PREFLIGHT_BUDGET_S",
