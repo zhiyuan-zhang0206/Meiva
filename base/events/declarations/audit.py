@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TypedDict
+from typing import NotRequired, TypedDict
 
 from base.events.vocabulary import EventSpec, audit_event, telemetry_audit_event
 
@@ -12,7 +12,19 @@ from base.events.vocabulary import EventSpec, audit_event, telemetry_audit_event
 # — a key that never exists — while the producer wrote ``"from"`` (audit
 # 2026-08-08 P2: the registry itself drifting). This form declares the real
 # wire key so `_sql_keys`/`payload_keys` derive ``attributes->>'from'``.
-StatusChange = TypedDict("StatusChange", {"from": str, "to": str})
+StatusChange = TypedDict(
+    "StatusChange",
+    {
+        "from": str,
+        "to": str,
+        # meiva:note
+        # The corpse reaper's own verdict about the row it took (#5468): whether an ended lease
+        # of that row still owed its handoff receipt, which separates a lost settle from an
+        # ordinary crash. Absent on the transitions that do not ask the question. (This form is
+        # functional because `from` is a keyword; the note still belongs here.)
+        "unapplied_handoff_receipt": NotRequired[bool],
+    },
+)
 
 
 class ComputerAction(TypedDict):

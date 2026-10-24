@@ -236,6 +236,61 @@ EVENTS: dict[str, EventSpec] = {
         "reaper cannot see this death",
         tier="anomaly",
     ),
+    # meiva:note
+    # Held-path settle ladder (#5468): the wake that ends a takeover owes one checkpoint write,
+    # retried inside its own budget before the row is marked crash-dead.
+    "hosted_handoff_settle_retry": telemetry_event(
+        "hosted_handoff_settle_retry",
+        "a held-path handoff settle failed inside the wake and is being retried there; "
+        "carries attempt, delay_s and error_class",
+        tier="noise",
+    ),
+    "hosted_handoff_settle_failed": telemetry_event(
+        "hosted_handoff_settle_failed",
+        "the held-path handoff settle exhausted its retry budget: the row is marked "
+        "crash-dead and settled to idling so the heartbeat's narrow exception or the "
+        "reaper can reach it; carries budget_s and error_class",
+        tier="anomaly",
+    ),
+    "hosted_handoff_settle_raced": telemetry_event(
+        "hosted_handoff_settle_raced",
+        "a held-path settle failed after its receipt had already landed (the write "
+        "commits in a thread, the failure lands on a later await); the row is NOT "
+        "marked and the wake reports success",
+        tier="anomaly",
+    ),
+    "hosted_handoff_settle_read_failed": telemetry_event(
+        "hosted_handoff_settle_read_failed",
+        "the read that decides whether a landed receipt survived a failed settle could "
+        "not answer; the wake fails closed because a read failure is not evidence "
+        "either way",
+        tier="anomaly",
+    ),
+    "hosted_settle_failed": telemetry_event(
+        "hosted_settle_failed",
+        "settling a crash-marked row to idling failed after a failed held-path settle — "
+        "the row stays running and the reaper cannot see it",
+        tier="anomaly",
+    ),
+    "hosted_turn_corpse_marker_cleared": telemetry_event(
+        "hosted_turn_corpse_marker_cleared",
+        "a crash marker was cleared by the wake that settled the row's receipt (no "
+        "ended lease of the row owes one any more)",
+        tier="noise",
+    ),
+    "hosted_turn_corpse_clear_failed": telemetry_event(
+        "hosted_turn_corpse_clear_failed",
+        "clearing the crash marker after a landed receipt failed — the marker stays "
+        "until a completed turn clears it",
+        tier="anomaly",
+    ),
+    "hosted_handoff_marker_cleared_while_ineligible": telemetry_event(
+        "hosted_handoff_marker_cleared_while_ineligible",
+        "a marker was cleared on a row the heartbeat will not pick up (a permanent "
+        "reject streak or a heartbeat paused past now), so no automatic path re-checks "
+        "it; carries permanent_reject_streak and heartbeat_paused",
+        tier="anomaly",
+    ),
     "corpse_reaper_terminated": telemetry_event(
         "corpse_reaper_terminated",
         "the corpse reaper terminated crash-marked idling rows past the grace "
