@@ -42,12 +42,11 @@ class ProbeResult:
     fatal: bool = False
 
 
-def _probe_numpy(database: Database, uri_reader: Callable[[], str]) -> ProbeResult:
+def _probe_numpy(database: Database, uri: str) -> ProbeResult:
     """The memory_search service must answer a real GET /meta at the
     configured URI. Not reachable = transient (the session may still be
     booting) — same retry semantics as the Postgres probe."""
     del database  # the uniform probe signature; this backend has no database
-    uri = uri_reader()
     try:
         resp = httpx.get(f"{uri}/meta", timeout=_PROBE_TIMEOUT_S)
         resp.raise_for_status()
@@ -64,7 +63,7 @@ def _probe_numpy(database: Database, uri_reader: Callable[[], str]) -> ProbeResu
         )
 
 
-def _probe_pgvector(database: Database, uri_reader: Callable[[], str]) -> ProbeResult:
+def _probe_pgvector(database: Database, uri: str) -> ProbeResult:
     """The cluster Postgres must carry the pgvector extension binaries.
 
     Missing extension = permanent (fatal): no amount of retrying installs
@@ -83,7 +82,7 @@ def _probe_pgvector(database: Database, uri_reader: Callable[[], str]) -> ProbeR
     while the pgvector probe's bound comes from the DB layer by design, and a
     probe-specific `connect_timeout` knob on `connect()` was deliberately not
     added for a 2s difference in a one-shot boot check."""
-    del uri_reader  # This backend has no HTTP endpoint.
+    del uri  # This backend has no HTTP endpoint.
     import psycopg
 
     try:
@@ -126,13 +125,13 @@ def _probe_pgvector(database: Database, uri_reader: Callable[[], str]) -> ProbeR
         )
 
 
-PROBES: dict[str, Callable[[Database, Callable[[], str]], ProbeResult]] = {
+PROBES: dict[str, Callable[[Database, str], ProbeResult]] = {
     "numpy": _probe_numpy,
     "pgvector": _probe_pgvector,
 }
 
 
-def probe_backend(name: str, database: Database, *, uri_reader: Callable[[], str]) -> ProbeResult:
+def probe_backend(name: str, database: Database, *, uri: str) -> ProbeResult:
     """The preflight verdict for backend `name`.
 
     Unknown names are a fatal verdict too (with the fix): an unrecognized
@@ -147,4 +146,4 @@ def probe_backend(name: str, database: Database, *, uri_reader: Callable[[], str
             ),
             fatal=True,
         )
-    return probe(database, uri_reader)
+    return probe(database, uri)

@@ -1,13 +1,15 @@
-exports = ["backends", "chunking.py", "config.py", "daemon.py", "embeddings", "patrol_status.py", "recall_regression.py", "rerank.py", "tests"]
+exports = ["backends", "chunking.py", "config.py", "daemon.py", "embeddings", "memory_search_reconcile.py", "patrol_status.py", "recall_regression.py", "rerank.py", "tests"]
 
 [uses]
 "chunking.py" = ["backends"]
-"config.py" = ["embeddings"]
-"daemon.py" = ["backends", "chunking.py", "config.py", "embeddings", "patrol_status.py"]
-"memory_search_reconcile.py" = ["backends", "embeddings"]
-"patrol_status.py" = ["config.py"]
-"rerank.py" = ["backends", "chunking.py"]
-"tests" = ["backends", "chunking.py", "config.py", "daemon.py", "memory_search_reconcile.py", "recall_regression.py", "rerank.py"]
+"config.py" = ["embeddings", "patrol_plan.py"]
+"daemon.py" = ["backends", "chunking.py", "config.py", "embeddings", "patrol_plan.py", "patrol_status.py"]
+"memory_search_reconcile.py" = ["backends", "config.py", "embeddings", "reconcile_plan.py"]
+"rerank.py" = ["backends", "chunking.py", "rerank_plan.py"]
+"tests" = ["backends", "chunking.py", "config.py", "daemon.py", "patrol_plan.py", "recall_regression.py", "reconcile_plan.py", "rerank.py", "rerank_plan.py"]
 
 [purity]
 "__init__.py" = "strict"
+"patrol_plan.py" = "strict"
+"reconcile_plan.py" = "strict"
+"rerank_plan.py" = "strict"

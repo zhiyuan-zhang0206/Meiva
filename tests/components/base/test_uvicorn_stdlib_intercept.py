@@ -194,12 +194,7 @@ def _assert_uvicorn_config_passes_log_config_none(path: Path) -> None:
 def test_numpy_backend_uvicorn_config_passes_log_config_none() -> None:
     """The session test server must not reconfigure shared Uvicorn logging."""
     _assert_uvicorn_config_passes_log_config_none(
-        _REPO_ROOT
-        / "services"
-        / "derived"
-        / "memory_search"
-        / "tests"
-        / "test_numpy_backend_memory_search.py"
+        _REPO_ROOT / "services" / "derived" / "memory_search" / "tests" / "search_service.py"
     )
 
 

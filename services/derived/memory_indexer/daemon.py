@@ -5,15 +5,17 @@ import logging
 import signal
 import sys
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import assert_never
 
 import httpx
 import numpy as np
 
+from base.clock import SYSTEM_TIMERS, Timers
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
-from base.cluster.machine import MachineIdentity, MachineRoles
+from base.cluster.machine import MachineRoles
 from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot
 from base.daemon.endpoints import ServiceEndpoint, ServiceEndpoints
@@ -39,11 +41,8 @@ from services.derived.memory_indexer.chunking import chunk_rows
 from services.derived.memory_indexer.config import MemoryIndexerConfig, MemoryIndexerInputs
 from services.derived.memory_indexer.embeddings.base import EmbeddingAPIError, EmbeddingProvider
 from services.derived.memory_indexer.embeddings.factory import get_provider
-from services.derived.memory_indexer.patrol_status import (
-    PatrolStatus,
-    emit_patrol_event,
-    retry_delay_s,
-)
+from services.derived.memory_indexer.patrol_plan import next_patrol
+from services.derived.memory_indexer.patrol_status import PatrolStatus, emit_patrol_event
 from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
 
 _log = logging.getLogger("services.derived.memory_indexer.daemon")
@@ -200,11 +199,10 @@ def process_paths(
     provider: EmbeddingProvider,
     liveness: Liveness,
     *,
-    machine: MachineIdentity,
+    root: Path,
     config: MemoryIndexerConfig,
 ) -> None:
     liveness.beat()
-    root = memory_root(roles=machine.role()).resolve()
     to_delete, to_embed = _classify_dirty(backend, paths, provider, root, config=config)
 
     for p in to_delete:
@@ -288,7 +286,6 @@ def reconcile(
     provider: EmbeddingProvider,
     liveness: Liveness,
     *,
-    machine: MachineIdentity,
     config: MemoryIndexerConfig,
     status: PatrolStatus,
     root: Path,
@@ -321,7 +318,7 @@ def reconcile(
             for i in range(0, len(ordered), config.reconcile_chunk_paths):
                 chunk = set(ordered[i : i + config.reconcile_chunk_paths])
                 liveness.beat()  # per chunk: a rebuild outlives the liveness ceiling
-                process_paths(backend, chunk, provider, liveness, machine=machine, config=config)
+                process_paths(backend, chunk, provider, liveness, root=root, config=config)
                 status.settled(len(chunk))
                 liveness.beat()  # chunk committed -> the rebuild is progressing
         except EmbeddingAPIError as exc:
@@ -357,7 +354,6 @@ async def _patrol_once(
     provider: EmbeddingProvider,
     liveness: Liveness,
     *,
-    machine: MachineIdentity,
     config: MemoryIndexerConfig,
     status: PatrolStatus,
     root: Path,
@@ -368,7 +364,6 @@ async def _patrol_once(
             backend,
             provider,
             liveness,
-            machine=machine,
             config=config,
             status=status,
             root=root,
@@ -383,11 +378,9 @@ async def patrol_loop(
     provider: EmbeddingProvider,
     liveness: Liveness,
     *,
-    machine: MachineIdentity,
     config: MemoryIndexerConfig,
     status: PatrolStatus,
-    clock: Callable[[], float],
-    wait: Callable[[float], Awaitable[None]],
+    timers: Timers,
     root: Path,
 ) -> None:
     _log.info(
@@ -396,48 +389,52 @@ async def patrol_loop(
         config.retry_backoff_s,
         config.retry_limit,
     )
-    next_patrol = clock()
+    next_patrol_at = timers.monotonic()
     while True:
         liveness.beat()
-        await wait(config.loop_interval_s)
-        if clock() < next_patrol:
+        await timers.asleep(config.loop_interval_s)
+        if timers.monotonic() < next_patrol_at:
             continue
         complete = await _patrol_once(
-            backend,
-            provider,
-            liveness,
-            machine=machine,
-            config=config,
-            status=status,
-            root=root,
+            backend, provider, liveness, config=config, status=status, root=root
         )
         liveness.beat()
         if complete:
             status.succeeded()
-            next_patrol = clock() + config.patrol_interval_s
         else:
             status.failed()
-            if status.over_limit:
+        verdict = next_patrol(
+            complete=complete,
+            failures=status.consecutive_failures,
+            over_limit=status.over_limit,
+            retry_backoff_s=config.retry_backoff_s,
+            patrol_interval_s=config.patrol_interval_s,
+        )
+        match verdict.outcome:
+            case "complete":
+                pass
+            case "over_limit":
                 _log.error(
                     "[indexer] patrol over its retry limit (%d consecutive failures); "
                     "retrying at the normal cadence",
                     status.consecutive_failures,
                 )
-                next_patrol = clock() + config.patrol_interval_s
-            else:
-                delay = retry_delay_s(config, status.consecutive_failures)
-                _log.warning("[indexer] patrol incomplete; retry in %.0fs", delay)
-                next_patrol = clock() + delay
+            case "retry":
+                _log.warning("[indexer] patrol incomplete; retry in %.0fs", verdict.delay_s)
+            case _:
+                assert_never(verdict.outcome)
+        next_patrol_at = timers.monotonic() + verdict.delay_s
         emit_patrol_event(status)
 
 
 async def connect_backend_with_retry(
     database: Database,
     provider: EmbeddingProvider,
-    deadline_s: float = 30.0,
     *,
     name: str,
-    uri_reader: Callable[[], str],
+    uri: str,
+    timers: Timers,
+    deadline_s: float = 30.0,
     probe_message: str | None = None,
 ) -> MemorySearchBackend:
     """Connect to the configured backend at daemon startup — `meiva start`
@@ -455,15 +452,15 @@ async def connect_backend_with_retry(
     this retry).
     """
     backend = get_backend(
-        database,
+        name,
+        database=database,
         dim=provider.dim,
         fingerprint=provider.fingerprint,
-        name=name,
-        uri_reader=uri_reader,
+        uri=uri,
     )
-    start = time.monotonic()
+    start = timers.monotonic()
     last_exc: Exception | None = None
-    while time.monotonic() - start < deadline_s:
+    while timers.monotonic() - start < deadline_s:
         try:
             await asyncio.to_thread(backend.connect)
             return backend
@@ -475,7 +472,7 @@ async def connect_backend_with_retry(
                 type(exc).__name__,
                 exc,
             )
-            await asyncio.sleep(2.0)
+            await timers.asleep(2.0)
     suffix = f" — {probe_message}" if probe_message else ""
     raise RuntimeError(
         f"{backend.name} backend unreachable after {deadline_s}s: {last_exc}{suffix}"
@@ -496,7 +493,7 @@ async def run(
     runtime: Path,
     database: Callable[[], Database],
     image: LoadedCommit,
-    machine: MachineIdentity,
+    root: Path,
     tuning: MemoryIndexerConfig,
 ) -> None:
     inputs = MemoryIndexerInputs.from_boot(config)
@@ -515,10 +512,10 @@ async def run(
     try:
         catalog = build_model_catalog()
         provider = get_provider(
-            inputs.embedding_name(),
+            inputs.embedding_name,
             catalog=catalog,
-            timeout_reader=inputs.embed_timeout,
-            api_key_reader=inputs.api_key,
+            timeout_s=inputs.embed_timeout_s,
+            api_key=inputs.api_key,
         )
     except ValueError as exc:
         _log.critical("[indexer] embedding provider config invalid: %s", exc)
@@ -527,7 +524,7 @@ async def run(
 
     liveness = Liveness(
         indexer_config.liveness_timeout_seconds(
-            inputs.embedding_name(), timeout_seconds=inputs.embed_timeout()
+            inputs.embedding_name, timeout_seconds=inputs.embed_timeout_s
         )
     )
     status = PatrolStatus(retry_limit=tuning.retry_limit)
@@ -541,18 +538,18 @@ async def run(
     )
     _log.info("[indexer] healthz listening on :%s", endpoint.health_port)
 
-    root = memory_root(roles=machine.role())
     root.mkdir(parents=True, exist_ok=True)
+    root = root.resolve()
     # Preflight the selected backend BEFORE the retry loop: a backend that can
     # never work (fatal) fails fast with the actionable fix instead of a 30s
     # retry storm; a merely-unreachable one rides into the retry loop with its
     # message attached to the terminal error (CTO ruling 2026-08-30 direction ②).
     db = database()
-    preflight = probe_backend(inputs.backend_name(), db, uri_reader=inputs.search_uri)
+    preflight = probe_backend(inputs.backend_name, db, uri=inputs.search_uri)
     if preflight.fatal:
         _log.critical(
             "[indexer] %s backend preflight FAILED: %s",
-            inputs.backend_name(),
+            inputs.backend_name,
             preflight.message,
         )
         sys.stderr.write(f"[memory_indexer] FATAL: {preflight.message}\n")
@@ -560,14 +557,15 @@ async def run(
     if preflight.message:
         _log.warning(
             "[indexer] %s backend preflight: %s",
-            inputs.backend_name(),
+            inputs.backend_name,
             preflight.message,
         )
     backend = await connect_backend_with_retry(
         db,
         provider,
-        name=inputs.backend_name(),
-        uri_reader=inputs.search_uri,
+        name=inputs.backend_name,
+        uri=inputs.search_uri,
+        timers=SYSTEM_TIMERS,
         probe_message=preflight.message,
     )
     _log.info("[indexer] connected to %s backend", backend.name)
@@ -577,11 +575,9 @@ async def run(
             backend,
             provider,
             liveness,
-            machine=machine,
             config=tuning,
             status=status,
-            clock=time.monotonic,
-            wait=asyncio.sleep,
+            timers=SYSTEM_TIMERS,
             root=root,
         )
     finally:
@@ -633,7 +629,7 @@ def main() -> None:
                     runtime=process_home / "run",
                     database=database,
                     image=image,
-                    machine=machine,
+                    root=memory_root(roles=machine.role()),
                     tuning=MemoryIndexerConfig(),
                 )
             )

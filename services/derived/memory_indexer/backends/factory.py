@@ -30,12 +30,7 @@ from services.derived.memory_indexer.backends.base import MemorySearchBackend
 
 
 def _numpy_backend(
-    database: Database,
-    dim: int,
-    fingerprint: str,
-    *,
-    uri_reader: Callable[[], str],
-    readonly: bool = False,
+    database: Database, dim: int, fingerprint: str, *, uri: str, readonly: bool
 ) -> MemorySearchBackend:
     """NumPyBackend is a thin HTTP client — the vector space lives in the
     memory_search service process, so database/dim/fingerprint are accepted for the
@@ -43,67 +38,47 @@ def _numpy_backend(
     from services.derived.memory_indexer.backends.numpy import NumPyBackend
 
     del database, dim, fingerprint
-    return NumPyBackend(uri_reader=uri_reader, readonly=readonly)
+    return NumPyBackend(uri=uri, readonly=readonly)
 
 
 def _pgvector_backend(
-    database: Database,
-    dim: int,
-    fingerprint: str,
-    *,
-    uri_reader: Callable[[], str],
-    readonly: bool = False,
+    database: Database, dim: int, fingerprint: str, *, uri: str, readonly: bool
 ) -> MemorySearchBackend:
-    del uri_reader  # This backend has no HTTP endpoint.
+    del uri  # This backend has no HTTP endpoint.
     from services.derived.memory_indexer.backends.pgvector import PGVectorBackend
 
     return PGVectorBackend(database, dim=dim, fingerprint=fingerprint, readonly=readonly)
 
 
-# Uniform constructor shape `(database, dim, fingerprint, readonly, uri_reader)`.
-BACKENDS: dict[
-    str, Callable[[Database, int, str, bool, Callable[[], str]], MemorySearchBackend]
-] = {
-    "numpy": lambda database, dim, fingerprint, readonly, uri_reader: _numpy_backend(
-        database, dim, fingerprint, readonly=readonly, uri_reader=uri_reader
+# meiva:note
+# Uniform constructor shape `(database, dim, fingerprint, uri, readonly)`.
+BACKENDS: dict[str, Callable[[Database, int, str, str, bool], MemorySearchBackend]] = {
+    "numpy": lambda database, dim, fingerprint, uri, readonly: _numpy_backend(
+        database, dim, fingerprint, uri=uri, readonly=readonly
     ),
-    "pgvector": lambda database, dim, fingerprint, readonly, uri_reader: _pgvector_backend(
-        database, dim, fingerprint, readonly=readonly, uri_reader=uri_reader
+    "pgvector": lambda database, dim, fingerprint, uri, readonly: _pgvector_backend(
+        database, dim, fingerprint, uri=uri, readonly=readonly
     ),
 }
 
 
-def get_backend_named(
+# meiva:note
+# Construct the backend `name` selects (the root read it from
+# `MEIVA_MEMORY_SEARCH_BACKEND`) for the given embedding vector space; unknown names
+# fail fast (an unrecognized value must not silently fall back to numpy: a typo would
+# otherwise keep the old storage while the operator believes the switch happened).
+def get_backend(
     name: str,
     *,
     database: Database,
     dim: int,
     fingerprint: str,
-    uri_reader: Callable[[], str],
+    uri: str,
     readonly: bool = False,
 ) -> MemorySearchBackend:
-    """Construct a backend by name — the one dispatch path; unknown names
-    fail fast (an unrecognized value must not silently fall back to numpy:
-    a typo would otherwise keep the old storage while the operator believes
-    the switch happened)."""
     try:
         ctor = BACKENDS[name]
     except KeyError:
         known = ", ".join(sorted(BACKENDS))
         raise ValueError(f"unknown memory search backend {name!r} (known: {known})") from None
-    return ctor(database, dim, fingerprint, readonly, uri_reader)
-
-
-def get_backend(
-    database: Database, dim: int, fingerprint: str, *, name: str, uri_reader: Callable[[], str]
-) -> MemorySearchBackend:
-    """Construct the configured backend
-    (`settings.services.memory_search_backend`, env
-    `MEIVA_MEMORY_SEARCH_BACKEND`) for the given embedding vector space."""
-    return get_backend_named(
-        name,
-        database=database,
-        dim=dim,
-        fingerprint=fingerprint,
-        uri_reader=uri_reader,
-    )
+    return ctor(database, dim, fingerprint, uri, readonly)

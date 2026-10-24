@@ -127,34 +127,18 @@ def test_upsert_many_empty_is_noop(tmp_path: Path) -> None:
     assert (store.all_meta(), len(store), store.search_topk(_vec(0), 10)) == before
 
 
-def test_upsert_many_grows_matrix_once_for_new_rows(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    import services.derived.memory_search.store as store_module
-
+def test_upsert_many_grows_the_matrix_only_for_new_rows(tmp_path: Path) -> None:
     new_rows = [_row(f"/{idx}.md", 1.0, str(idx), idx) for idx in range(5)]
     update_rows = [_row(f"/{idx}.md", 2.0, f"new-{idx}", idx + 10) for idx in range(5)]
-    calls: list[str] = []
-    original_vstack = store_module.np.vstack
-    original_concatenate = store_module.np.concatenate
-
-    def _vstack(*args: object, **kwargs: object) -> np.ndarray:
-        calls.append("vstack")
-        return original_vstack(*args, **kwargs)  # type: ignore[arg-type]
-
-    def _concatenate(*args: object, **kwargs: object) -> np.ndarray:
-        calls.append("concatenate")
-        return original_concatenate(*args, **kwargs)  # type: ignore[arg-type]
-
-    monkeypatch.setattr(store_module.np, "vstack", _vstack)
-    monkeypatch.setattr(store_module.np, "concatenate", _concatenate)
     store = _store(tmp_path)
     store.upsert_many(new_rows)
-    assert calls == ["concatenate"]
+    grown = store._matrix
+    assert grown.shape == (5, _DIM)
 
-    calls.clear()
     store.upsert_many(update_rows)
-    assert calls == []
+    assert store._matrix is grown
+    assert store.all_meta()["/0.md"] == (2.0, "new-0", _FP)
+    assert [hit.path for hit in store.search_topk(_vec(10), 1)] == ["/0.md"]
 
 
 def test_delete_removes_all_chunks_of_path(tmp_path: Path) -> None:
@@ -284,29 +268,20 @@ def test_last_save_seconds_none_until_first_save(tmp_path: Path) -> None:
     assert store.last_save_seconds >= 0.0
 
 
-def test_last_save_seconds_is_the_latest_save(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Every successful save refreshes the recorded duration — the stats
-    surface always reads the most recent persistence cost, never the first
-    one (write-once would silently hide a growing npz cost)."""
-    import services.derived.memory_search.store as store_module
-
-    ticks = iter([0.0, 1.0, 2.0, 5.0])
-
-    class _FakeTime:
-        @staticmethod
-        def perf_counter() -> float:
-            return next(ticks)
-
-    monkeypatch.setattr(store_module, "time", _FakeTime)
+# meiva:note
+# Every successful save refreshes the recorded duration — the stats
+# surface always reads the most recent persistence cost, never the first
+# one (write-once would silently hide a growing npz cost). A sentinel the
+# real clock can never produce stands in for the previous duration.
+def test_last_save_seconds_is_the_latest_save(tmp_path: Path) -> None:
     store = _store(tmp_path)
     store.upsert("/a.md", 1.0, "ha", _vec(0), kind="body", chunk_idx=0)
     store.save()
-    assert store.last_save_seconds == 1.0
+    store._last_save_seconds = -1.0
     store.upsert("/b.md", 2.0, "hb", _vec(1), kind="body", chunk_idx=0)
     store.save()
-    assert store.last_save_seconds == 3.0
+    assert store.last_save_seconds is not None
+    assert store.last_save_seconds >= 0.0
 
 
 def test_save_load_roundtrip(tmp_path: Path) -> None:
