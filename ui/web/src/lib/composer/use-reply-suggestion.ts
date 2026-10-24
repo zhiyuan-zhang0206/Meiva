@@ -21,7 +21,7 @@ import { useEffect, useRef, useState } from "react";
 import type { BackendTimelineItem, PublicAgentStatus } from "../contracts/types";
 import { errMsg } from "../contracts/errors";
 import { useDocumentVisible } from "../layout/use-document-visible";
-import { api } from "../transport/api";
+import { useApi } from "../transport/transport-context";
 
 /** Quiet period after the agent goes idle before a suggestion is requested. */
 export const REPLY_SUGGESTION_DELAY_MS = 1000;
@@ -45,6 +45,7 @@ function lastConversationItem(items: readonly BackendTimelineItem[]): BackendTim
 }
 
 export function useReplySuggestion({ agentId, status, busy, items, enabled }: Params): readonly string[] | null {
+  const api = useApi();
   const visible = useDocumentVisible();
   const requested = useRef(new Set<string>());
   const [answer, setAnswer] = useState<{ turnKey: string; texts: readonly string[] } | null>(null);
@@ -84,7 +85,7 @@ export function useReplySuggestion({ agentId, status, busy, items, enabled }: Pa
       controller.abort();
       if (!settled) seen.delete(turnKey);
     };
-  }, [eligible, agentId, turnKey]);
+  }, [api, eligible, agentId, turnKey]);
 
   return eligible && answer !== null && answer.turnKey === turnKey ? answer.texts : null;
 }

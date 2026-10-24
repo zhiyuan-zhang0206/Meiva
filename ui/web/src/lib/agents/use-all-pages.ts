@@ -11,13 +11,14 @@
 import { useQuery } from "@tanstack/react-query";
 import { useEffect } from "react";
 
-import { api } from "../transport/api";
+import { useApi } from "../transport/transport-context";
 import { errMsg } from "../contracts/errors";
 import type { PageRow } from "../contracts/types";
 
 const ALL_PAGES_QUERY_KEY = ["all-pages"] as const;
 
 export function useAllPages(): PageRow[] {
+  const api = useApi();
   const { data: pages = [], error } = useQuery({
     queryKey: ALL_PAGES_QUERY_KEY,
     queryFn: () => api.listAllPages(),

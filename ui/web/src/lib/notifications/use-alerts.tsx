@@ -30,10 +30,9 @@ import {
 
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { API_BASE, api } from "../transport/api";
-import { notifySessionInvalid, useAuth } from "../auth/auth-context";
-import { createSseLifecycle } from "@/lib/transport/sse-lifecycle";
-import { sseTransport } from "../transport/sse-share";
+import { useApi, useStreamHub } from "../transport/transport-context";
+import { useAuth } from "../auth/auth-context";
+import { createSseTimers, reopenIfClosed } from "../transport/sse-lifecycle";
 import { useMergedSseChannels } from "../state/sse-merge";
 import type { Alert, AlertsResponse } from "../contracts/types";
 import { useDocumentVisible } from "../layout/use-document-visible";
@@ -73,6 +72,8 @@ function isAlertRow(raw: unknown): raw is Alert {
 }
 
 export function AlertsProvider({ children }: { children: ReactNode }) {
+  const api = useApi();
+  const hub = useStreamHub();
   const queryClient = useQueryClient();
   const { status: authStatus } = useAuth();
   // The badge count stays warm for the whole app via this always-on
@@ -93,7 +94,7 @@ export function AlertsProvider({ children }: { children: ReactNode }) {
   // Stable reconnect callback (mirrors useEventStream's bumpReconnect).
   const bumpReconnect = useCallback(() => setReconnectNonce((n) => n + 1), []);
   const isVisible = useDocumentVisible();
-  const transport = sseTransport(useMergedSseChannels());
+  const transport = hub.transportFor(useMergedSseChannels());
 
   useEffect(() => {
     if (authStatus !== "authenticated" || !isVisible) {
@@ -106,20 +107,16 @@ export function AlertsProvider({ children }: { children: ReactNode }) {
     }
 
     let parseFailures = 0;
-    const lifecycle = createSseLifecycle({
+    const timers = createSseTimers({
       failCount: failCountRef,
       watchdogMs: WATCHDOG_MS,
       reconnectBaseMs: RECONNECT_BASE_MS,
       reconnectMaxMs: RECONNECT_MAX_MS,
-      onWatchdog: () => {
-        if (transport) transport.restart("alerts");
-        else bumpReconnect();
-      },
-      onRetry: () => setRetryNonce((n) => n + 1),
-      onClosed: () => undefined,
-      onConnecting: () => undefined,
-      checkAuth: () => api.checkAuth(),
-      onInvalidSession: notifySessionInvalid,
+    });
+    const reopenLegacy = () => setRetryNonce((n) => n + 1);
+    const armWatchdog = () => timers.armWatchdog(() => {
+      if (transport) transport.restart("alerts");
+      else bumpReconnect();
     });
 
     const reconcileFrame = (raw: string) => {
@@ -132,7 +129,7 @@ export function AlertsProvider({ children }: { children: ReactNode }) {
           parseFailures = 0;
           if (transport) {
             if (transport.isLeader()) transport.restart("alerts", true);
-          } else lifecycle.scheduleReopen();
+          } else timers.scheduleReopen(reopenLegacy);
         }
         return;
       }
@@ -141,17 +138,17 @@ export function AlertsProvider({ children }: { children: ReactNode }) {
     };
 
     const handleOpen = () => {
-      if (lifecycle.isDisposed()) return;
-      lifecycle.resetBackoff();
+      if (timers.isDisposed()) return;
+      timers.resetBackoff();
       // Alerts have their own stream and staleTime: Infinity, so this provider
       // owns the precise reconnect repair for frames missed while disconnected.
       // Only active readers refetch; inactive history caches are marked stale.
       void queryClient.invalidateQueries({ queryKey: ALERTS_QUERY_KEY });
-      lifecycle.armWatchdog();
+      armWatchdog();
     };
     const handleFrame = (raw: string) => {
-      if (lifecycle.isDisposed()) return;
-      lifecycle.armWatchdog();
+      if (timers.isDisposed()) return;
+      armWatchdog();
       if (!raw) return;
       reconcileFrame(raw);
     };
@@ -160,40 +157,44 @@ export function AlertsProvider({ children }: { children: ReactNode }) {
         onFrame: handleFrame,
         onGap: () => handleOpen(),
         onState: (state) => {
-          if (lifecycle.isDisposed()) return;
+          if (timers.isDisposed()) return;
           if (state === "open") handleOpen();
           else if (state === "closed") {
-            lifecycle.clearWatchdog();
+            timers.clearWatchdog();
           }
         },
       });
       if (lastReconnectNonce.current !== reconnectNonce) transport.restart("alerts");
       lastReconnectNonce.current = reconnectNonce;
       return () => {
-        lifecycle.dispose();
+        timers.dispose();
         unsubscribe();
       };
     }
 
-    const es = new EventSource(`${API_BASE}/api/alerts/stream`, { withCredentials: true });
+    const es = hub.openLegacy("/api/alerts/stream");
     es.onopen = handleOpen;
     es.onmessage = (event) => handleFrame(typeof event.data === "string" ? event.data : "");
-    es.onerror = () => lifecycle.handleLegacyError(es);
+    es.onerror = () => {
+      if (timers.isDisposed()) return;
+      reopenIfClosed(es, hub.session, timers, reopenLegacy);
+    };
 
     return () => {
-      lifecycle.dispose();
+      timers.dispose();
       es.close();
     };
     // reconnectNonce + retryNonce are the reopen levers; isVisible gates the
     // stream on tab visibility; the cache folders are stable identities
     // included only to satisfy the lint.
-  }, [queryClient, reconnectNonce, retryNonce, bumpReconnect, authStatus, isVisible, transport]);
+  }, [queryClient, reconnectNonce, retryNonce, bumpReconnect, authStatus, isVisible, transport, hub]);
 
   return children;
 }
 
 /** The badge count + rows (default params, warmed by the provider). */
 export function useAlerts() {
+  const api = useApi();
   return useQuery<AlertsResponse>({
     queryKey: ALERTS_QUERY_KEY,
     queryFn: () => api.getAlerts({}),
@@ -203,6 +204,7 @@ export function useAlerts() {
 
 /** The alert section's history. */
 export function useAlertsSection() {
+  const api = useApi();
   return useQuery({
     queryKey: ALERTS_SECTION_QUERY_KEY,
     // Pinned at 200 pending the task #3696 user-flag item (backend alerts

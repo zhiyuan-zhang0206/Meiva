@@ -4,15 +4,11 @@ import { createElement, useEffect } from "react";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { api } from "../transport/api";
+import { apiWrapper, fakeApi } from "../transport/tests/api/fake-api";
 import { usePendingMessages } from "../agents/use-pending-messages";
 import { useTokenUsage } from "./use-token-usage";
 import type { ConversationSnapshotResponse, SystemEvent, TokenUsageResponse } from "../contracts/types";
 import type { ConnectionEvent } from "../transport/useEventStream";
-
-vi.mock("../transport/api", () => ({
-  api: { getPendingMessages: vi.fn(), getTokenUsage: vi.fn(), getConversationSnapshot: vi.fn() },
-}));
 
 const connectionHandlers = new Set<(event: ConnectionEvent) => void>();
 const systemHandlers = new Set<(event: SystemEvent) => void>();
@@ -44,7 +40,28 @@ interface Read {
 }
 let reads: Read[];
 let queryClient: QueryClient;
+let visibility: DocumentVisibilityState;
 const showError = vi.fn();
+
+const Gateway = apiWrapper(fakeApi({
+  getTokenUsage: (id, signal) => new Promise((resolve) => {
+    reads.push({ id, signal, domain: "token-usage", finish: (value) => resolve(tokenSnapshot(value)) });
+  }),
+  getPendingMessages: (id, signal) => new Promise((resolve) => {
+    reads.push({ id, signal, domain: "pending", finish: (value) => resolve([
+      { id: value, content: String(value), source: "user", sender: "user", images: null,
+        created_at: "2026-09-16T00:00:00Z" },
+    ]) });
+  }),
+  getConversationSnapshot: (id, signal) => new Promise((resolve) => {
+    reads.push({ id, signal, domain: "snapshot", finish: (value) => resolve(composedSnapshot(value)) });
+  }),
+}));
+
+function setVisibility(value: DocumentVisibilityState): void {
+  visibility = value;
+  act(() => { document.dispatchEvent(new Event("visibilitychange")); });
+}
 
 function tokenSnapshot(input: number): TokenUsageResponse {
   return { input_tokens: input, output_tokens: 0, reasoning_tokens: 0,
@@ -67,32 +84,22 @@ function useRead(domain: Domain, id: number | null) {
 }
 
 function wrapper({ children }: { children: ReactNode }) {
-  return createElement(QueryClientProvider, { client: queryClient }, children);
+  return createElement(QueryClientProvider, { client: queryClient }, createElement(Gateway, null, children));
 }
 
 beforeEach(() => {
-  vi.clearAllMocks();
+  showError.mockClear();
   reads = [];
+  visibility = "visible";
+  Object.defineProperty(document, "visibilityState", { configurable: true, get: () => visibility });
   queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  vi.mocked(api.getTokenUsage).mockImplementation((id, signal) => new Promise((resolve) => {
-    reads.push({ id, signal, domain: "token-usage", finish: (value) => resolve(tokenSnapshot(value)) });
-  }));
-  vi.mocked(api.getPendingMessages).mockImplementation((id, signal) => new Promise((resolve) => {
-    reads.push({ id, signal, domain: "pending", finish: (value) => resolve([
-      { id: value, content: String(value), source: "user", sender: "user", images: null,
-        created_at: "2026-09-16T00:00:00Z" },
-    ]) });
-  }));
-  vi.mocked(api.getConversationSnapshot).mockImplementation((id, signal) => new Promise((resolve) => {
-    reads.push({ id, signal, domain: "snapshot", finish: (value) => resolve(composedSnapshot(value)) });
-  }));
 });
 
 afterEach(() => {
   cleanup();
   queryClient.clear();
   vi.useRealTimers();
-  vi.restoreAllMocks();
+  Reflect.deleteProperty(document, "visibilityState");
 });
 
 describe.each<Domain>(["token-usage", "pending"])("%s selected read ownership", (domain) => {
@@ -150,8 +157,7 @@ describe.each<Domain>(["token-usage", "pending"])("%s selected read ownership", 
     pushOpen();
     vi.useFakeTimers();
     if (cause === "hidden") {
-      vi.spyOn(document, "visibilityState", "get").mockReturnValue("hidden");
-      act(() => { document.dispatchEvent(new Event("visibilitychange")); });
+      setVisibility("hidden");
     } else if (cause === "unmount") {
       view.unmount();
     } else {
@@ -172,8 +178,7 @@ describe.each<Domain>(["token-usage", "pending"])("%s selected read ownership", 
     });
     pushOpen();
     expect(reads).toHaveLength(0);
-    vi.spyOn(document, "visibilityState", "get").mockReturnValue("hidden");
-    act(() => { document.dispatchEvent(new Event("visibilitychange")); });
+    setVisibility("hidden");
     view.rerender({ id: 1 });
     pushOpen();
     expect(reads).toHaveLength(0);

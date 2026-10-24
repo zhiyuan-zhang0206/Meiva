@@ -19,12 +19,12 @@ Ordinary file delivery submits one batch/key to
 `POST /api/keyed/v1/agents/{id}/uploads` with `principal-v1`. The upload ends after
 the matching 202 source receipt, before remote copy or agent execution; the
 Gateway recovery owner continues delivery. Byte progress is transport progress.
-`transport/upload-delivery.ts` rejects old/malformed receipts without resending
+`transport/gateway/upload-delivery.ts` rejects old/malformed receipts without resending
 or falling back. No client Outbox or retry UI is added. Silent native-image
 attachments use `api.uploadFiles`, which sends a fresh `Idempotency-Key` with
 `principal-v1` per call to the keyed silent-save route and returns the saved URLs.
 
-## Stream ownership (`lib/sse-share.ts`)
+## Stream ownership (`lib/transport/stream/sse-share.ts`)
 
 **HTTPS shares SSE when Web Locks and BroadcastChannel are available.** Each
 visible, authenticated page requests the exclusive `meiva-ui-sse` Web Lock. The lock holder
@@ -36,6 +36,11 @@ The selected-agent feed is filtered back to that page's active ID before its
 subscribers see it. Followers mirror state but leave auth probing, retry, and
 EventSource construction to the leader. A new leader's open state triggers each
 page's existing reconciliation.
+
+A page's shared-stream objects live in one `StreamHub` (`transport/stream/stream-hub.ts`)
+built over the `StreamTransport` port and provided with `StreamHubProvider`, so no
+stream state is module-level; the port layout is in
+[[ui/web/src/docs/frontend-state/api-requests.meiva.okf.md|Browser API requests]].
 
 Visible pages announce their selected agent; the leader sorts and unions IDs,
 debouncing URL changes by 250ms. A 15s ping asks pages to renew interest; the
@@ -54,7 +59,7 @@ One `/api/stream` connection can carry every projection behind a default-off
 switch, which matters most on plain HTTP where a browser allows six connections
 per origin: [[ui/web/src/docs/frontend-data-flow/merged-stream.meiva.okf.md|Merged realtime stream]].
 
-## Two SSE Providers (`lib/useEventStream.tsx`)
+## Two SSE Providers (`lib/transport/useEventStream.tsx`)
 
 | Provider / hook | Endpoint | Content | Subscribers |
 |---|---|---|---|

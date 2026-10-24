@@ -24,7 +24,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useLayoutEffect, useRef } from "react";
 
-import { api } from "../transport/api";
+import { useApi } from "../transport/transport-context";
 import { useAgentReconcile } from "../agents/agent-reconcile";
 import { useAgentReadRepair } from "../agents/use-agent-read-repair";
 import { CONVERSATION_RETENTION_MS } from "../layout/switch-budget";
@@ -50,6 +50,7 @@ export function useTokenUsage(
   agentId: number | null,
   showError: (msg: string) => void,
 ): TokenUsageState {
+  const api = useApi();
   const queryClient = useQueryClient();
   const { isVisible } = useAgentReadRepair("token-usage", agentId);
   const { requestReconcile } = useAgentReconcile(agentId);

@@ -11,8 +11,11 @@ import { ThemeColorSync } from "@/components/shell/theme-color-sync";
 import { ToastHost } from "@/components/notifications/toast";
 import { LanguageProvider } from "@/i18n/language-provider";
 import { AuthProvider, notifySessionInvalid } from "@/lib/auth/auth-context";
-import { ApiError } from "@/lib/transport/api";
+import { API_BASE, ApiError, api } from "@/lib/transport/api";
 import { NonceProvider } from "@/lib/auth/nonce-context";
+import { StreamHub } from "@/lib/transport/stream/stream-hub";
+import { systemStreamTransport } from "@/lib/transport/system-transport";
+import { ApiProvider, StreamHubProvider } from "@/lib/transport/transport-context";
 import { EventStreamProvider } from "@/lib/transport/useEventStream";
 import { setNavFallbackMs, useNavTimingReport } from "@/lib/telemetry/nav-timing";
 import { useUserSettings } from "@/lib/state/use-user-settings";
@@ -92,10 +95,27 @@ export function createQueryClient(): QueryClient {
   });
 }
 
+function RootContexts({ children, nonce }: { children: React.ReactNode; nonce?: string }) {
+  const [hub] = useState(
+    () => new StreamHub(
+      systemStreamTransport(),
+      { checkAuth: () => api.checkAuth(), sessionInvalid: notifySessionInvalid },
+      API_BASE,
+    ),
+  );
+  return (
+    <ApiProvider api={api}>
+      <StreamHubProvider hub={hub}>
+        <NonceProvider value={nonce}>{children}</NonceProvider>
+      </StreamHubProvider>
+    </ApiProvider>
+  );
+}
+
 export function Providers({ children, nonce }: { children: React.ReactNode; nonce?: string }) {
   const [queryClient] = useState(() => createQueryClient());
   return (
-    <NonceProvider value={nonce}>
+    <RootContexts nonce={nonce}>
       <QueryClientProvider client={queryClient}>
         <AuthProvider>
           <EventStreamProvider>
@@ -128,7 +148,7 @@ export function Providers({ children, nonce }: { children: React.ReactNode; nonc
           </EventStreamProvider>
         </AuthProvider>
       </QueryClientProvider>
-    </NonceProvider>
+    </RootContexts>
   );
 }
 
