@@ -7,7 +7,7 @@ from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from base.agents.history.timeline_inputs import TimelineReadInputs
+from base.agents.messages.timestamp_policy import TimestampPolicy
 from base.api_contracts.agent_contract import AgentStatus
 from base.db import Database
 from base.lm.call import extract_text
@@ -79,7 +79,7 @@ class ReplySuggestionService:
         *,
         db: Database,
         policy: ReplySuggestionPolicy,
-        rendering: TimelineReadInputs,
+        rendering: TimestampPolicy,
         catalog: ModelCatalog | CatalogLoadFailure,
         keys: ProviderKeys | None,
     ) -> ReplySuggestionResponse:

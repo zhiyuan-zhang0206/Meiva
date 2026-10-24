@@ -27,7 +27,7 @@ from base.agents.history.checkpoint import FullHistory
 from base.agents.history.hierarchy.chunk_plan import segment_requests
 from base.agents.history.hierarchy.chunks import segment_head_len, sendable_len, uncovered
 from base.agents.history.hierarchy.units import divide_units
-from base.agents.history.timeline_inputs import TimelineReadInputs
+from base.agents.messages.timestamp_policy import TimestampPolicy
 
 CoverageStatus = Literal["none", "partial", "full"]
 
@@ -121,7 +121,7 @@ def _peak_input_tokens(messages: Sequence[BaseMessage]) -> int:
     )
 
 
-def has_matter(messages: Sequence[BaseMessage], *, timeline_inputs: TimelineReadInputs) -> bool:
+def has_matter(messages: Sequence[BaseMessage], *, timeline_inputs: TimestampPolicy) -> bool:
     """Whether a run holds anything to describe: something besides framework-injected notes."""
     return any(
         unit.kind != "note"
@@ -134,7 +134,7 @@ def missing_runs(
     material: tuple[int, int],
     covered: Sequence[tuple[int, int]],
     *,
-    timeline_inputs: TimelineReadInputs,
+    timeline_inputs: TimestampPolicy,
 ) -> list[tuple[int, int]]:
     """The inclusive runs of `material` no level-1 node covers and that have something to describe."""
     return [
@@ -149,7 +149,7 @@ def coverage_of(
     session: Session,
     covered: Sequence[tuple[int, int]],
     *,
-    timeline_inputs: TimelineReadInputs,
+    timeline_inputs: TimestampPolicy,
 ) -> Coverage:
     """The session's coverage by the sorted level-1 spans `covered`.
 

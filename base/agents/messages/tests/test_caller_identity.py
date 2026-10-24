@@ -1,11 +1,12 @@
 import pytest
 from pydantic import ValidationError
 
-from base.agents.messages.envelope import EnvelopeReadInputs, validate_source, wrap_inbound
+from base.agents.messages.envelope import validate_source, wrap_inbound
+from base.agents.messages.timestamp_policy import TimestampPolicy
 from base.api_contracts.caller_identity import CallerIdentity, caller_payload
 from base.clock import Clock
 
-_ENVELOPE_INPUTS = EnvelopeReadInputs(Clock.from_settings, lambda: False)
+_ENVELOPE_INPUTS = TimestampPolicy(clock=Clock.from_settings(), timestamps_enabled=False)
 
 
 @pytest.mark.parametrize("subject", ["codex", "claude_code", "mcp"])

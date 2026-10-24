@@ -20,7 +20,6 @@ from agent.graph.node_log import StallConfig, node_lifecycle
 from agent.hooks import HookName, make_hook_runner
 from agent.nodes import NodeName
 from base.agents.context import MeivaContext, agent_id_from_config
-from base.agents.history.timeline_inputs import TimelineReadInputs
 from base.packages.plugins.extensions import GraphHook
 
 
@@ -52,10 +51,7 @@ def hook_node(
             stall=StallConfig(
                 runtime.context.require_agent().read("agent", "node_stall_dump_seconds")
             ),
-            timeline_inputs=TimelineReadInputs(
-                runtime.context.require_clock,
-                lambda: runtime.context.require_agent().read("general", "message_timestamps"),
-            ),
+            timeline_inputs=runtime.context.timestamp_policy(),
             timeline_limit=runtime.context.require_agent().read(
                 "display", "timeline_default_limit"
             ),

@@ -35,7 +35,7 @@ from base.agents.history.hierarchy.tests.consumer_history import (
     notes_history,
 )
 from base.agents.history.hierarchy.units import divide_units
-from base.agents.history.timeline_inputs import TimelineReadInputs
+from base.agents.messages.timestamp_policy import TimestampPolicy
 from base.config import settings
 from base.host.env.agent_slices import ModelOverrides
 from base.lm.catalog import ModelCatalog
@@ -50,7 +50,9 @@ def _result(
     inputs = read_inputs()
     units = divide_units(
         list(located.messages),
-        timeline_inputs=TimelineReadInputs(inputs.clock_factory, inputs.timestamps_enabled),
+        timeline_inputs=TimestampPolicy(
+            clock=inputs.clock_factory(), timestamps_enabled=inputs.timestamps_enabled()
+        ),
     )
     return ChunkResult(units, list(groups) or [UnitGroup(0, len(units) - 1, summary)])
 

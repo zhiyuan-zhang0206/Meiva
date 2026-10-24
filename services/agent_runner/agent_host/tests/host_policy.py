@@ -1,6 +1,6 @@
 from typing import Any
 
-from base.agents.impersonation.notes import HandoffNotes
+from base.agents.messages.timestamp_policy import TimestampPolicy
 from base.clock import Clock
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.boot import machine_from_boot
@@ -23,9 +23,8 @@ def configured_policy(**changes: Any) -> HostPolicy:
         llm_override=lambda: settings.lm.llm_override,
         default_reader=defaults(**changes),
         clock_factory=Clock.from_settings,
-        handoff_notes=HandoffNotes(
-            clock_factory=Clock.from_settings,
-            timestamps_enabled=lambda: settings.general.message_timestamps,
+        handoff_notes=TimestampPolicy(
+            clock=Clock.from_settings(), timestamps_enabled=settings.general.message_timestamps
         ),
         harness_registration_ttl_seconds=lambda: settings.daemon.harness_registration_ttl_seconds,
     )

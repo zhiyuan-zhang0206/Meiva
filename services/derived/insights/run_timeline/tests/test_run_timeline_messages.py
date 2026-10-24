@@ -12,7 +12,7 @@ from base.agents.history.checkpoint import single_segment_history
 from base.agents.history.hierarchy.units import display_blocks, divide_units, read_times
 from base.agents.history.hierarchy.usage import MessageUsage
 from base.agents.history.message_tokens import MessageTokens
-from base.agents.history.timeline_inputs import TimelineReadInputs
+from base.agents.messages.timestamp_policy import TimestampPolicy
 from base.clock import Clock
 from base.config import settings
 from base.db import Database
@@ -20,8 +20,8 @@ from services.derived.insights.config import InsightsConfig
 from services.derived.insights.run_timeline import messages as route
 from services.derived.insights.run_timeline.history import HistoryView
 
-_TIMELINE_INPUTS = TimelineReadInputs(
-    Clock.from_settings, lambda: settings.general.message_timestamps
+_TIMELINE_INPUTS = TimestampPolicy(
+    clock=Clock.from_settings(), timestamps_enabled=settings.general.message_timestamps
 )
 
 STAMP = "2026-10-04T12:00:00+00:00"

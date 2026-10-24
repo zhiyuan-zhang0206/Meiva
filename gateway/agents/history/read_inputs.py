@@ -4,7 +4,7 @@
 from collections.abc import Mapping
 from dataclasses import dataclass
 
-from base.agents.history.timeline_inputs import TimelineReadInputs
+from base.agents.messages.timestamp_policy import TimestampPolicy
 
 __all__ = [
     "TimelineRead",
@@ -18,7 +18,7 @@ __all__ = [
 # The window size, the compact-history depth and the renderer inputs of one timeline read.
 @dataclass(frozen=True)
 class TimelineRead:
-    rendering: TimelineReadInputs
+    rendering: TimestampPolicy
     default_limit: int
     compact_history: int
 
@@ -27,7 +27,7 @@ class TimelineRead:
 # The models, chunk ratio and feature switch of one understanding read.
 @dataclass(frozen=True)
 class UnderstandingRead:
-    rendering: TimelineReadInputs
+    rendering: TimestampPolicy
     hierarchy_model: str
     default_model: str
     chunk_ratio: float

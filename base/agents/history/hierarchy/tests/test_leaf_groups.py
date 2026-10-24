@@ -11,12 +11,12 @@ from base.agents.history.hierarchy.leaf_groups import (
     resolve_groups,
 )
 from base.agents.history.hierarchy.units import MessageUnit, divide_units
-from base.agents.history.timeline_inputs import TimelineReadInputs
+from base.agents.messages.timestamp_policy import TimestampPolicy
 from base.clock import Clock
 from base.config import settings
 
-_TIMELINE_INPUTS = TimelineReadInputs(
-    Clock.from_settings, lambda: settings.general.message_timestamps
+_TIMELINE_INPUTS = TimestampPolicy(
+    clock=Clock.from_settings(), timestamps_enabled=settings.general.message_timestamps
 )
 
 

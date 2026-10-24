@@ -10,21 +10,21 @@ from agent.impersonation_handoff import (
     deliver_handoff,
     ensure_start_marker,
     note_stamp,
-    read_note_stamp,
+    note_stamp_of,
     resume_note_pending,
     start_update,
 )
 from agent.tests.impersonation.lease_support import Cluster, fixed_clock, idle_graph
 from agent.tests.impersonation.lease_support import cluster as cluster
-from base.agents.impersonation.notes import HandoffNotes
+from base.agents.messages.timestamp_policy import TimestampPolicy
 from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
 
 MOMENT = datetime(2026, 10, 6, 13, 39, 25, tzinfo=UTC)
 
 
-def _notes(*, timestamps: bool = False) -> HandoffNotes:
+def _notes(*, timestamps: bool = False) -> TimestampPolicy:
     clock = fixed_clock()
-    return HandoffNotes(lambda: clock, lambda: timestamps)
+    return TimestampPolicy(clock=clock, timestamps_enabled=timestamps)
 
 
 def _session(number: int = 0) -> dict[str, Any]:
@@ -91,7 +91,7 @@ async def test_old_checkpoint_with_start_marker_gets_explanation_without_rewriti
     None
 ):
     graph, config = await idle_graph(42)
-    stamp = read_note_stamp(_notes())
+    stamp = note_stamp_of(_notes())
     [marker] = start_update(_session(), introduced=True, stamp=stamp)["messages"]
     await graph.aupdate_state(
         config, {"messages": [marker, HumanMessage(id="saved-work", content="Saved work")]}
@@ -113,7 +113,7 @@ async def test_all_takeover_notes_stamp_their_real_creation_time(
         now=lambda: MOMENT,
         timers=SYSTEM_TIMERS,
     )
-    notes = HandoffNotes(lambda: clock, lambda: timestamps)
+    notes = TimestampPolicy(clock=clock, timestamps_enabled=timestamps)
     owner = cluster.native_agent()
     cluster.lease(owner, provider="claude", phase="released")
     lease = cluster.status(owner)
@@ -163,14 +163,13 @@ async def test_an_existing_handoff_receipt_keeps_its_original_note(
     ]
 
 
-def test_a_note_stamp_reads_the_live_clock_and_timestamp_policy_each_time() -> None:
-    policy = {"stamped": True}
+def test_a_note_stamp_follows_the_policy_it_is_given() -> None:
     clock = Clock(ClockConfig("UTC", "UTC", False), now=lambda: MOMENT, timers=SYSTEM_TIMERS)
-    notes = HandoffNotes(lambda: clock, lambda: policy["stamped"])
-    assert read_note_stamp(notes).prefix == "[2026-10-06 13:39:25] "
-    policy["stamped"] = False
-    assert read_note_stamp(notes).prefix == ""
-    assert read_note_stamp(notes).created_at == MOMENT
+    stamped = TimestampPolicy(clock=clock, timestamps_enabled=True)
+    bare = TimestampPolicy(clock=clock, timestamps_enabled=False)
+    assert note_stamp_of(stamped).prefix == "[2026-10-06 13:39:25] "
+    assert note_stamp_of(bare).prefix == ""
+    assert note_stamp_of(bare).created_at == MOMENT
     assert note_stamp(clock, timestamps=True).prefix == "[2026-10-06 13:39:25] "
 
 

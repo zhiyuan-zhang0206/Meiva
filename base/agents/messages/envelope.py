@@ -39,17 +39,14 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from dataclasses import dataclass
 from datetime import datetime
 from typing import Literal
 
+from base.agents.messages.timestamp_policy import TimestampPolicy
 from base.api_contracts.caller_identity import CallerIdentity, is_caller_source
-from base.clock import Clock
 from base.lm.system_note import SYSTEM_NOTE_LEAD, SYSTEM_NOTE_TRAIL
 
 __all__ = [
-    "EnvelopeReadInputs",
     "InboundSender",
     "inbound_body",
     "inbound_head",
@@ -139,23 +136,15 @@ _ID_SOURCE_LABELS = (
 )
 
 
-@dataclass(frozen=True)
-class EnvelopeReadInputs:
-    """Live timestamp policy supplied by the inbound producer, without constructor reads."""
-
-    clock_factory: Callable[[], Clock]
-    timestamps_enabled: Callable[[], bool]
-
-
-def _timestamp(created_at: datetime | None, inputs: EnvelopeReadInputs) -> tuple[str, str]:
+def _timestamp(created_at: datetime | None, inputs: TimestampPolicy) -> tuple[str, str]:
     """`(bare timestamp, header form with its leading space)`; both empty when timestamps are off.
 
     The header form carries its own leading space so the off-state leaves no
     stray space before the colon (gated by the supplied timestamp policy).
     """
-    if not inputs.timestamps_enabled():
+    if not inputs.timestamps_enabled:
         return "", ""
-    clock = inputs.clock_factory()
+    clock = inputs.clock
     formatted = (
         clock.format_timestamp(created_at) if created_at is not None else clock.now_timestamp()
     )
@@ -163,7 +152,7 @@ def _timestamp(created_at: datetime | None, inputs: EnvelopeReadInputs) -> tuple
 
 
 def inbound_head(
-    source: str, *, inputs: EnvelopeReadInputs, created_at: datetime | None = None
+    source: str, *, inputs: TimestampPolicy, created_at: datetime | None = None
 ) -> str:
     """The envelope header the agent reads before an inbound's content, naming the sender
     and time as `source` and the timestamp setting dictate; empty when there is none.
@@ -212,7 +201,7 @@ def inbound_tail(source: str) -> str:
 # begins at `len(inbound_head(...))`, which callers record as `meiva_inbound_body_start`.
 # meiva:link agent/messages/docs/message-format.meiva.okf.md
 def wrap_inbound(
-    content: str, source: str, *, inputs: EnvelopeReadInputs, created_at: datetime | None = None
+    content: str, source: str, *, inputs: TimestampPolicy, created_at: datetime | None = None
 ) -> str:
     return (
         inbound_head(source, inputs=inputs, created_at=created_at) + content + inbound_tail(source)

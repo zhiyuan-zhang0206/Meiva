@@ -15,7 +15,6 @@ from agent.impersonation_handoff import introduction_note, note_stamp
 from agent.nodes import INIT_CONTEXT, NodeName
 from agent.state import CapabilitiesState, ContextReset
 from base.agents.context import MeivaContext, agent_id_from_config
-from base.agents.history.timeline_inputs import TimelineReadInputs
 from base.api_contracts.agent_contract import Harness
 from base.lm.harness.handoff import ClusterFact, Handoff
 from base.lm.harness.wiring import HANDOFF_INSTRUCTION, handoff_for
@@ -123,10 +122,7 @@ async def init_context_node(
         agent_id=agent_id_from_config(config),
         turn_progress=runtime.context.turn_progress,
         stall=StallConfig(runtime.context.require_agent().read("agent", "node_stall_dump_seconds")),
-        timeline_inputs=TimelineReadInputs(
-            runtime.context.require_clock,
-            lambda: runtime.context.require_agent().read("general", "message_timestamps"),
-        ),
+        timeline_inputs=runtime.context.timestamp_policy(),
         timeline_limit=runtime.context.require_agent().read("display", "timeline_default_limit"),
     ):
         reset = state.context_reset

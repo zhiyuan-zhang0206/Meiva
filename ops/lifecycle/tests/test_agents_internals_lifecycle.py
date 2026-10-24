@@ -3,7 +3,8 @@ from __future__ import annotations
 import psycopg
 import pytest
 
-from base.agents.messages.envelope import EnvelopeReadInputs, wrap_inbound
+from base.agents.messages.envelope import wrap_inbound
+from base.agents.messages.timestamp_policy import TimestampPolicy
 from base.api_contracts.agent_contract import AgentNotFound, ResurrectAlreadyAlive, ResurrectError
 from base.clock import Clock
 from base.cluster.machine import MachineIdentity
@@ -23,8 +24,8 @@ from ops.lifecycle.tests.resurrection_setup import (
     inbound_rows,
 )
 
-_ENVELOPE_INPUTS = EnvelopeReadInputs(
-    Clock.from_settings, lambda: settings.general.message_timestamps
+_ENVELOPE_INPUTS = TimestampPolicy(
+    clock=Clock.from_settings(), timestamps_enabled=settings.general.message_timestamps
 )
 
 

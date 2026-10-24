@@ -23,13 +23,13 @@ from langchain_core.messages import HumanMessage
 
 from agent.db import ClaimedInbound
 from agent.graph.claim._chat_inbound import build_chat_inbound
-from base.agents.messages.envelope import EnvelopeReadInputs
+from base.agents.messages.timestamp_policy import TimestampPolicy
 from base.clock import Clock
 from base.config import settings
 from base.packages.composer_commands import CommandCatalog
 
-_ENVELOPE_INPUTS = EnvelopeReadInputs(
-    Clock.from_settings, lambda: settings.general.message_timestamps
+_ENVELOPE_INPUTS = TimestampPolicy(
+    clock=Clock.from_settings(), timestamps_enabled=settings.general.message_timestamps
 )
 
 

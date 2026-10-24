@@ -15,7 +15,7 @@ from psycopg import Connection
 from psycopg_pool import ConnectionPool
 
 from base.agents.history.checkpoint import FullHistory
-from base.agents.history.timeline_inputs import TimelineReadInputs
+from base.agents.messages.timestamp_policy import TimestampPolicy
 from base.db import Database
 from services.derived.insights.run_timeline.history import HistoryView
 from services.derived.insights.run_timeline.projection.derive import project_segment, segment_view
@@ -66,7 +66,7 @@ class TimelineReader:
         db: Database,
         pool: ConnectionPool[Any],
         *,
-        inputs: TimelineReadInputs,
+        inputs: TimestampPolicy,
         jobs: IndexJobs,
         read_segment: Callable[[Database, int, str], FullHistory],
         timer: Callable[[], float] = time.monotonic,
