@@ -42,7 +42,7 @@ vi.mock("@/lib/transport/api", async (importOriginal) => {
 });
 
 import { ApiError, api } from "@/lib/transport/api";
-import { ProfileSseTransport } from "@/lib/transport/sse-share";
+import { ProfileSseTransport } from "@/lib/transport/stream/sse-share";
 import { setSessionInvalidHandler, useAuth } from "@/lib/auth/auth-context";
 import { useNonce } from "@/lib/auth/nonce-context";
 

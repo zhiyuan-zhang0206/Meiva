@@ -15,11 +15,12 @@
 import { useQuery } from "@tanstack/react-query";
 import { useEffect } from "react";
 
-import { api } from "../transport/api";
+import { useApi } from "../transport/transport-context";
 import { errMsg } from "../contracts/errors";
 import type { PageRow } from "../contracts/types";
 
 export function useAgentPages(agentId: number): PageRow[] {
+  const api = useApi();
   const { data: pages = [], error } = useQuery({
     queryKey: ["agent-pages", agentId] as const,
     queryFn: () => api.listPages(agentId),

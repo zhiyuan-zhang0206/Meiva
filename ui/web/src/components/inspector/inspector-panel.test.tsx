@@ -1,4 +1,3 @@
-import { QueryClientProvider } from "@tanstack/react-query";
 import {
   fireEvent,
   render as rtlRender,
@@ -27,6 +26,7 @@ import {
   listPages,
   liveFixture,
   putSetting,
+  QueryClientProvider,
   render,
   renderWithGlobalRetries,
   resolveNotice,

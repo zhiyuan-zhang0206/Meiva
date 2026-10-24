@@ -1,134 +1,30 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import {
-  registerTransportTelemetry,
-  type TransportTelemetryElement,
-  type TransportTrackOptions,
-} from "./api-base";
-import { ProfileSseTransport, reportSseTransportMode, sharedSseSupported, type SseChannel, type SseListener } from "./sse-share";
+import { ProfileSseTransport } from "./sse-share";
+import type { SseChannel, SseListener } from "./sse-plan";
+import { FakeNetwork, FakeTab, READY } from "./tests/fake-stream";
+import { ScriptedAuth } from "./tests/scripted-auth";
 
-const track = vi.fn<(element: TransportTelemetryElement, opts?: TransportTrackOptions) => void>();
+const UNION_DEBOUNCE_MS_FOR_TEST = 250;
 
-class FakeChannel {
-  static channels = new Set<FakeChannel>();
-  onmessage: ((event: MessageEvent<unknown>) => void) | null = null;
-
-  constructor() { FakeChannel.channels.add(this); }
-  postMessage(data: unknown): void {
-    for (const peer of FakeChannel.channels) {
-      if (peer !== this) peer.onmessage?.({ data } as MessageEvent<unknown>);
-    }
-  }
-  close(): void { FakeChannel.channels.delete(this); }
-}
-
-class FakeDocument extends EventTarget {
-  visibilityState: DocumentVisibilityState = "visible";
-  show(visible: boolean): void {
-    this.visibilityState = visible ? "visible" : "hidden";
-    this.dispatchEvent(new Event("visibilitychange"));
-  }
-}
-
-interface QueuedLock {
-  callback: (lock: Lock) => Promise<void>;
-  signal: AbortSignal;
-  resolve: () => void;
-  reject: (error: unknown) => void;
-}
-
-class FakeLocks {
-  private held = false;
-  private queue: QueuedLock[] = [];
-  failure: Error | null = null;
-
-  request(
-    name: string,
-    options: LockOptions,
-    callback: (lock: Lock) => Promise<void>,
-  ): Promise<void> {
-    if (this.failure !== null) return Promise.reject(this.failure);
-    expect(name).toBe("meiva-ui-sse");
-    expect(options.mode).toBe("exclusive");
-    const signal = options.signal;
-    if (!signal) throw new Error("missing lock abort signal");
-    return new Promise<void>((resolve, reject) => {
-      const item = { callback, signal, resolve, reject };
-      this.queue.push(item);
-      signal.addEventListener("abort", () => {
-        if (!this.queue.includes(item)) return;
-        this.queue = this.queue.filter((queued) => queued !== item);
-        reject(new DOMException("aborted", "AbortError"));
-      });
-      this.pump();
-    });
-  }
-
-  private pump(): void {
-    if (this.held) return;
-    const item = this.queue.shift();
-    if (!item) return;
-    this.held = true;
-    void item.callback({ name: "meiva-ui-sse", mode: "exclusive" })
-      .then(item.resolve, item.reject)
-      .finally(() => {
-        this.held = false;
-        this.pump();
-      });
-  }
-}
-
-class FakeSource {
-  static readonly CONNECTING = 0;
-  static readonly OPEN = 1;
-  static readonly CLOSED = 2;
-  static failOnPath: string | null = null;
-  readyState = FakeSource.CONNECTING;
-  onopen: (() => void) | null = null;
-  onmessage: ((event: MessageEvent<string>) => void) | null = null;
-  onerror: (() => void) | null = null;
-
-  constructor(readonly url: string) {
-    if (FakeSource.failOnPath !== null && url.endsWith(FakeSource.failOnPath)) {
-      FakeSource.failOnPath = null;
-      throw new Error("source construction failed");
-    }
-  }
-  close(): void { this.readyState = FakeSource.CLOSED; }
-  open(): void {
-    this.readyState = FakeSource.OPEN;
-    this.onopen?.();
-  }
-  frame(data: string): void { this.onmessage?.({ data } as MessageEvent<string>); }
-  error(state: number): void {
-    this.readyState = state;
-    this.onerror?.();
-  }
-}
-
-function tab(locks: FakeLocks, options: { merged?: SseChannel[]; solo?: boolean } = {}) {
-  const document = new FakeDocument();
-  const channel = new FakeChannel();
-  const sources: FakeSource[] = [];
-  const checkAuth = vi.fn(() => Promise.resolve({ authenticated: true }));
-  const sessionInvalid = vi.fn();
-  const solo = options.solo ?? false;
+function tab(network: FakeNetwork, options: { merged?: SseChannel[]; solo?: boolean } = {}) {
+  const fake = new FakeTab({
+    network,
+    capability: options.solo ? "legacy" : "shared",
+    wallNow: () => Date.now(),
+    secureContext: true,
+  });
+  const auth = new ScriptedAuth();
+  const invalidations = { count: 0 };
   const transport = new ProfileSseTransport(
+    fake.transport,
     {
-      channel: solo ? null : (channel as unknown as BroadcastChannel),
-      locks: solo ? null : (locks as unknown as LockManager),
-      document: document as unknown as Document,
-      source: (url: string) => {
-        const source = new FakeSource(url);
-        sources.push(source);
-        return source as unknown as EventSource;
+      checkAuth: auth.checkAuth,
+      sessionInvalid: () => {
+        invalidations.count += 1;
       },
-      checkAuth,
-      sessionInvalid,
-      now: Date.now,
     },
-    new Set(options.merged ?? []),
-    solo,
+    { base: "http://gateway.test", merged: new Set(options.merged ?? []), solo: options.solo ?? false },
   );
   const listen = (ch: "system" | "alerts" | "systemAll", activeId: number | null = null) => {
     const onFrame = vi.fn<(raw: string) => void>();
@@ -137,7 +33,7 @@ function tab(locks: FakeLocks, options: { merged?: SseChannel[]; solo?: boolean 
     const unsubscribe = transport.subscribe(ch, { onFrame, onState, onGap } satisfies SseListener, activeId);
     return { onFrame, onState, onGap, unsubscribe };
   };
-  return { transport, document, channel, sources, checkAuth, sessionInvalid, listen };
+  return { transport, fake, auth, invalidations, sources: fake.sources, document: fake.page, listen };
 }
 
 async function settle(): Promise<void> {
@@ -147,26 +43,18 @@ async function settle(): Promise<void> {
 }
 
 beforeEach(() => {
-  track.mockReset();
-  registerTransportTelemetry(track);
   vi.useFakeTimers();
-  vi.stubGlobal("EventSource", FakeSource);
-  FakeChannel.channels.clear();
-  FakeSource.failOnPath = null;
 });
 
 afterEach(() => {
-  registerTransportTelemetry(null);
   vi.useRealTimers();
-  vi.unstubAllGlobals();
-  FakeChannel.channels.clear();
 });
 
 describe("profile SSE transport", () => {
   it("only the leader constructs sources and relays open state, heartbeat, and frames", async () => {
-    const locks = new FakeLocks();
-    const leader = tab(locks);
-    const follower = tab(locks);
+    const network = new FakeNetwork();
+    const leader = tab(network);
+    const follower = tab(network);
     leader.listen("system");
     const received = follower.listen("system");
     await settle();
@@ -190,9 +78,9 @@ describe("profile SSE transport", () => {
   });
 
   it("promotes a waiting visible tab after leader close", async () => {
-    const locks = new FakeLocks();
-    const leader = tab(locks);
-    const follower = tab(locks);
+    const network = new FakeNetwork();
+    const leader = tab(network);
+    const follower = tab(network);
     leader.listen("system");
     const received = follower.listen("system");
     await settle();
@@ -200,7 +88,7 @@ describe("profile SSE transport", () => {
 
     leader.transport.dispose();
     await settle();
-    expect(leader.sources.every((source) => source.readyState === FakeSource.CLOSED)).toBe(true);
+    expect(leader.sources.every((source) => source.readyState === READY.CLOSED)).toBe(true);
     expect(follower.transport.isLeader()).toBe(true);
     expect(follower.sources).toHaveLength(2);
     expect(received.onState).toHaveBeenLastCalledWith("reconnecting");
@@ -211,16 +99,16 @@ describe("profile SSE transport", () => {
   });
 
   it("hide aborts a pending lock, closes a held lock, and show requests again", async () => {
-    const locks = new FakeLocks();
-    const leader = tab(locks);
-    const follower = tab(locks);
+    const network = new FakeNetwork();
+    const leader = tab(network);
+    const follower = tab(network);
     leader.listen("system");
     follower.listen("system");
     await settle();
     follower.document.show(false);
     leader.document.show(false);
     await settle();
-    expect(leader.sources.every((source) => source.readyState === FakeSource.CLOSED)).toBe(true);
+    expect(leader.sources.every((source) => source.readyState === READY.CLOSED)).toBe(true);
     expect(follower.sources).toHaveLength(0);
 
     follower.document.show(true);
@@ -233,9 +121,9 @@ describe("profile SSE transport", () => {
   });
 
   it("opens a sorted detail union and removes changed or stale interests", async () => {
-    const locks = new FakeLocks();
-    const leader = tab(locks);
-    const follower = tab(locks);
+    const network = new FakeNetwork();
+    const leader = tab(network);
+    const follower = tab(network);
     leader.listen("systemAll", 7);
     const detail = follower.listen("systemAll", 3);
     await settle();
@@ -246,15 +134,16 @@ describe("profile SSE transport", () => {
 
     detail.unsubscribe();
     await vi.advanceTimersByTimeAsync(UNION_DEBOUNCE_MS_FOR_TEST);
-    expect(firstDetail?.readyState).toBe(FakeSource.CLOSED);
+    expect(firstDetail?.readyState).toBe(READY.CLOSED);
     expect(leader.sources.at(-1)?.url).toContain("/api/system/all?agents=7");
-    expect(leader.sources.at(-1)?.readyState).toBe(FakeSource.CONNECTING);
+    expect(leader.sources.at(-1)?.readyState).toBe(READY.CONNECTING);
 
     follower.listen("systemAll", 3);
     await vi.advanceTimersByTimeAsync(UNION_DEBOUNCE_MS_FOR_TEST);
     expect(leader.sources.at(-1)?.url).toContain("/api/system/all?agents=3,7");
+    // meiva:note
     // Simulate a crashed tab: it cannot send leave or answer pings.
-    follower.channel.close();
+    follower.fake.channels[0].close();
     await vi.advanceTimersByTimeAsync(50_250);
     expect(leader.sources.at(-1)?.url).toContain("/api/system/all?agents=7");
     leader.transport.dispose();
@@ -263,19 +152,19 @@ describe("profile SSE transport", () => {
   });
 
   it("mirrors errors without a follower auth probe or follower source", async () => {
-    const locks = new FakeLocks();
-    const leader = tab(locks);
-    const follower = tab(locks);
+    const network = new FakeNetwork();
+    const leader = tab(network);
+    const follower = tab(network);
     leader.listen("alerts");
     const received = follower.listen("alerts");
     await settle();
-    leader.sources[1].error(FakeSource.CONNECTING);
+    leader.sources[1].error(READY.CONNECTING);
     expect(received.onState).toHaveBeenCalledWith("reconnecting");
-    leader.sources[1].error(FakeSource.CLOSED);
+    leader.sources[1].error(READY.CLOSED);
     await settle();
     expect(received.onState).toHaveBeenCalledWith("closed");
-    expect(leader.checkAuth).toHaveBeenCalledTimes(1);
-    expect(follower.checkAuth).not.toHaveBeenCalled();
+    expect(leader.auth.probes).toBe(1);
+    expect(follower.auth.probes).toBe(0);
     await vi.advanceTimersByTimeAsync(1_000);
     expect(leader.sources).toHaveLength(3);
     expect(follower.sources).toHaveLength(0);
@@ -285,7 +174,7 @@ describe("profile SSE transport", () => {
   });
 
   it("does not replay a stale open after a restart changes the state", async () => {
-    const leader = tab(new FakeLocks());
+    const leader = tab(new FakeNetwork());
     leader.listen("system");
     await settle();
     leader.sources[0].open();
@@ -300,46 +189,35 @@ describe("profile SSE transport", () => {
     await settle();
   });
 
-  it("detects missing platform APIs so Providers retain their local fallback", () => {
-    vi.stubGlobal("BroadcastChannel", undefined);
-    expect(sharedSseSupported()).toBe(false);
-    vi.unstubAllGlobals();
-    const original = navigator.locks;
-    Object.defineProperty(navigator, "locks", { configurable: true, value: undefined });
-    expect(sharedSseSupported()).toBe(false);
-    Object.defineProperty(navigator, "locks", { configurable: true, value: original });
-  });
-
   it("handles a non-abort Web Lock rejection without an unhandled promise", async () => {
-    const locks = new FakeLocks();
-    locks.failure = new Error("lock manager failed");
-    const failed = tab(locks);
-    const report = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const network = new FakeNetwork();
+    const failure = new Error("lock manager failed");
+    network.locks.failure = failure;
+    const failed = tab(network);
     failed.listen("system");
     await settle();
     expect(failed.transport.isLeader()).toBe(false);
     expect(failed.sources).toHaveLength(0);
-    expect(report).toHaveBeenCalledWith("[sse-share] Web Lock failed", locks.failure);
+    expect(failed.fake.errors).toEqual([{ message: "[sse-share] Web Lock failed", cause: failure }]);
     failed.transport.dispose();
-    report.mockRestore();
   });
 
   it("clears leadership and closes partial sources when the lock callback throws", async () => {
-    const failed = tab(new FakeLocks());
-    FakeSource.failOnPath = "/api/alerts/stream";
-    const report = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const failed = tab(new FakeNetwork());
+    failed.fake.failNextSourceOnPath("/api/alerts/stream");
     failed.listen("system");
     await settle();
     expect(failed.transport.isLeader()).toBe(false);
     expect(failed.sources).toHaveLength(1);
-    expect(failed.sources[0].readyState).toBe(FakeSource.CLOSED);
-    expect(report).toHaveBeenCalledWith("[sse-share] Web Lock failed", expect.any(Error));
+    expect(failed.sources[0].readyState).toBe(READY.CLOSED);
+    expect(failed.fake.errors).toEqual([
+      { message: "[sse-share] Web Lock failed", cause: expect.any(Error) as unknown },
+    ]);
     failed.transport.dispose();
-    report.mockRestore();
   });
 
   it("carries every merged channel on one source, without the per-channel slots", async () => {
-    const leader = tab(new FakeLocks(), { merged: ["system", "systemAll", "alerts"] });
+    const leader = tab(new FakeNetwork(), { merged: ["system", "systemAll", "alerts"] });
     leader.listen("system");
     await settle();
     expect(leader.sources).toHaveLength(1);
@@ -352,7 +230,7 @@ describe("profile SSE transport", () => {
   });
 
   it("reopens the merged source with the union when the selection changes", async () => {
-    const leader = tab(new FakeLocks(), { merged: ["system", "systemAll", "alerts"] });
+    const leader = tab(new FakeNetwork(), { merged: ["system", "systemAll", "alerts"] });
     leader.listen("system");
     leader.listen("systemAll", 7);
     await settle();
@@ -364,7 +242,7 @@ describe("profile SSE transport", () => {
   });
 
   it("hands each wire channel to its subscribers in the shape they already parse", async () => {
-    const leader = tab(new FakeLocks(), { merged: ["system", "systemAll", "alerts"] });
+    const leader = tab(new FakeNetwork(), { merged: ["system", "systemAll", "alerts"] });
     const system = leader.listen("system");
     const detail = leader.listen("systemAll", 3);
     const alerts = leader.listen("alerts");
@@ -389,24 +267,25 @@ describe("profile SSE transport", () => {
   });
 
   it("degrades only the channel an error frame names", async () => {
-    const leader = tab(new FakeLocks(), { merged: ["system", "systemAll", "alerts"] });
+    const leader = tab(new FakeNetwork(), { merged: ["system", "systemAll", "alerts"] });
     const system = leader.listen("system");
     const detail = leader.listen("systemAll", 3);
     await settle();
     const source = leader.sources[0];
     source.open();
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     source.frame('{"ch":"all","error":"event stream interrupted: ConnectionError"}');
     expect(detail.onState).toHaveBeenLastCalledWith("reconnecting");
     expect(system.onState).toHaveBeenLastCalledWith("open");
-    expect(leader.sources[0].readyState).toBe(FakeSource.OPEN);
-    warn.mockRestore();
+    expect(leader.sources[0].readyState).toBe(READY.OPEN);
+    expect(leader.fake.warnings).toEqual([
+      "[sse-share] channel systemAll degraded: event stream interrupted: ConnectionError",
+    ]);
     leader.transport.dispose();
     await settle();
   });
 
   it("reports a shed count as a gap without inventing frames", async () => {
-    const leader = tab(new FakeLocks(), { merged: ["system", "systemAll", "alerts"] });
+    const leader = tab(new FakeNetwork(), { merged: ["system", "systemAll", "alerts"] });
     const detail = leader.listen("systemAll", 3);
     await settle();
     leader.sources[0].frame('{"ch":"all","events":[],"dropped":4}');
@@ -417,7 +296,7 @@ describe("profile SSE transport", () => {
   });
 
   it("owns the merged source alone when the page has no lock manager", async () => {
-    const solo = tab(new FakeLocks(), { merged: ["system", "systemAll", "alerts"], solo: true });
+    const solo = tab(new FakeNetwork(), { merged: ["system", "systemAll", "alerts"], solo: true });
     const received = solo.listen("system");
     await settle();
     expect(solo.transport.isLeader()).toBe(true);
@@ -428,27 +307,12 @@ describe("profile SSE transport", () => {
     expect(received.onFrame.mock.calls.map(([raw]) => raw)).toEqual(['{"role":"agent_spawned"}']);
     solo.document.show(false);
     await settle();
-    expect(solo.sources[0].readyState).toBe(FakeSource.CLOSED);
+    expect(solo.sources[0].readyState).toBe(READY.CLOSED);
     solo.document.show(true);
     await settle();
     expect(solo.sources).toHaveLength(2);
-    expect(solo.sources[1].readyState).toBe(FakeSource.CONNECTING);
+    expect(solo.sources[1].readyState).toBe(READY.CONNECTING);
     solo.transport.dispose();
     await settle();
   });
-
-  it("reports the fallback mode and capability flags once per tab session", () => {
-    vi.stubGlobal("BroadcastChannel", undefined);
-    const original = navigator.locks;
-    Object.defineProperty(navigator, "locks", { configurable: true, value: undefined });
-    reportSseTransportMode();
-    reportSseTransportMode();
-    expect(track).toHaveBeenCalledTimes(1);
-    expect(track).toHaveBeenCalledWith("sse-transport", {
-      key: "fallback", value: expect.stringContaining("locks=0,bc=0") as string,
-    });
-    Object.defineProperty(navigator, "locks", { configurable: true, value: original });
-  });
 });
-
-const UNION_DEBOUNCE_MS_FOR_TEST = 250;

@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import AlertsSection from "@/components/ops/alerts-section";
 import { API_BASE, api } from "@/lib/transport/api";
+import { apiWrapper, fakeApi } from "@/lib/transport/tests/api/fake-api";
 import type { AlertsResponse } from "@/lib/contracts/types";
 
 afterEach(cleanup);
@@ -45,16 +46,19 @@ const ROW = {
   updated_at: "2026-08-12T20:00:00Z",
 };
 
-function wrap(ui: React.ReactElement) {
+function wrap(ui: React.ReactElement, snapshot: AlertsResponse) {
   const qc = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
-  return render(<QueryClientProvider client={qc}>{ui}</QueryClientProvider>);
+  return render(<QueryClientProvider client={qc}>{ui}</QueryClientProvider>, {
+    wrapper: apiWrapper(fakeApi({ getAlerts: () => Promise.resolve(snapshot) })),
+  });
 }
 
 describe("AlertsSection", () => {
   it("renders rows with severity, alert name, summary, status and source", async () => {
-    vi.spyOn(api, "getAlerts").mockResolvedValue(
+    wrap(
+      <AlertsSection />,
       response({
         alerts: [
           ROW,
@@ -74,7 +78,6 @@ describe("AlertsSection", () => {
         },
       }),
     );
-    wrap(<AlertsSection />);
     await waitFor(() => screen.getByTestId("alert-row-7"));
     expect(screen.getByText("cluster health")).toBeTruthy();
     expect(screen.getByRole("link", { name: "Alert rules" }).getAttribute("href")).toBe(`${API_BASE}/grafana/alerting/list`);
@@ -94,13 +97,13 @@ describe("AlertsSection", () => {
   });
 
   it("shows the empty state when there are no alerts", async () => {
-    vi.spyOn(api, "getAlerts").mockResolvedValue(response());
-    wrap(<AlertsSection />);
+    wrap(<AlertsSection />, response());
     await waitFor(() => screen.getByText(/No active alerts or recoveries in the last 24h/));
   });
 
   it("renders a no-horizontal-scroll layout: fixed table, wrapping detail cell, responsive columns (task #1960)", async () => {
-    vi.spyOn(api, "getAlerts").mockResolvedValue(
+    wrap(
+      <AlertsSection />,
       response({
         alerts: [
           {
@@ -115,7 +118,6 @@ describe("AlertsSection", () => {
         meta: { window: "24h", total: 1, unresolved_count: 1 },
       }),
     );
-    wrap(<AlertsSection />);
     await waitFor(() => screen.getByTestId("alert-row-7"));
 
     // Fixed layout: the declared column widths hold and content wraps within

@@ -1,5 +1,11 @@
-import { notifyManager, QueryClient, QueryClientProvider, type DefaultOptions } from "@tanstack/react-query";
+import {
+  notifyManager,
+  QueryClient,
+  QueryClientProvider as TanstackQueryClientProvider,
+  type DefaultOptions,
+} from "@tanstack/react-query";
 import { cleanup, render as rtlRender } from "@testing-library/react";
+import type { ReactNode } from "react";
 import { vi } from "vitest";
 
 import { projectAgentStatus, USER_SETTING_DEFAULTS } from "@/lib/contracts/types";
@@ -13,6 +19,8 @@ import type {
   WireAgentCard,
 } from "@/lib/contracts/types";
 import { useStore } from "@/lib/state/store";
+import { fakeApi } from "@/lib/transport/tests/api/fake-api";
+import { ApiProvider } from "@/lib/transport/transport-context";
 
 const SETTINGS_QUERY_KEY = ["user-settings"] as const;
 
@@ -53,6 +61,23 @@ export const getSettings = vi.fn(() =>
     ],
   }),
 );
+
+// meiva:note
+// The panel's open-pages list reads the gateway through ApiProvider. The same
+// listPages function the tests script is handed to every tree rendered with the
+// QueryClientProvider below.
+const gateway = fakeApi({ listPages });
+
+// meiva:note
+// Stands in for the library's QueryClientProvider in the inspector tests: the same
+// query client, plus the gateway client the panel's migrated readers require.
+export function QueryClientProvider({ client, children }: { client: QueryClient; children: ReactNode }) {
+  return (
+    <TanstackQueryClientProvider client={client}>
+      <ApiProvider api={gateway}>{children}</ApiProvider>
+    </TanstackQueryClientProvider>
+  );
+}
 
 export const streamHandlers = {
   system: undefined as ((event: unknown) => void) | undefined,

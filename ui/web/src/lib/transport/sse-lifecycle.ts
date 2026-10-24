@@ -1,5 +1,5 @@
-// Timers and legacy EventSource error handling shared by the system and alert
-// streams. Each provider owns its frame parsing, state changes, and transport.
+import { probeVerdict, readyStateKind, reconnectDelay } from "./stream/sse-plan";
+import type { EventSourceHandle, SessionPort } from "./transport";
 
 export type SseAuthStatus = "loading" | "authenticated" | "unauthenticated";
 
@@ -43,20 +43,30 @@ export function registerSseRuntime(hooks: Partial<SseRuntimeHooks>): void {
   Object.assign(sseRuntime, hooks);
 }
 
-interface SseLifecycleOptions {
+export interface SseTimerPolicy {
   failCount: { current: number };
   watchdogMs: number;
   reconnectBaseMs: number;
   reconnectMaxMs: number;
-  onWatchdog: () => void;
-  onRetry: () => void;
-  onClosed: () => void;
-  onConnecting: () => void;
-  checkAuth: () => Promise<{ authenticated: boolean }>;
-  onInvalidSession: () => void;
 }
 
-export function createSseLifecycle(options: SseLifecycleOptions) {
+export interface SseTimers {
+  armWatchdog(onFire: () => void): void;
+  clearWatchdog(): void;
+  scheduleReopen(onReopen: () => void): void;
+  resetBackoff(): void;
+  dispose(): void;
+  isDisposed(): boolean;
+}
+
+// meiva:note
+// The two timers one SSE connection owns. The watchdog is re-armed by any frame
+// and fires after a silent window; a reopen is single-flight (a second request
+// while one is pending is dropped) and waits a capped exponential delay that grows
+// with each consecutive failure and resets on a successful open. Disposal cancels
+// both and makes every later request a no-op.
+// meiva:link ui/web/src/docs/frontend-data-flow/frontend-data-flow.meiva.okf.md
+export function createSseTimers(policy: SseTimerPolicy): SseTimers {
   let disposed = false;
   let watchdog: ReturnType<typeof setTimeout> | null = null;
   let retryTimer: ReturnType<typeof setTimeout> | null = null;
@@ -66,71 +76,57 @@ export function createSseLifecycle(options: SseLifecycleOptions) {
     watchdog = null;
   };
 
-  const armWatchdog = () => {
-    clearWatchdog();
-    watchdog = setTimeout(options.onWatchdog, options.watchdogMs);
-  };
-
-  const scheduleReopen = () => {
-    if (retryTimer !== null) return;
-    const delay = Math.min(
-      options.reconnectBaseMs * 2 ** options.failCount.current,
-      options.reconnectMaxMs,
-    );
-    options.failCount.current += 1;
-    retryTimer = setTimeout(() => {
-      retryTimer = null;
-      options.onRetry();
-    }, delay);
-  };
-
-  const probeAndReopen = () => {
-    void options.checkAuth()
-      .then((res) => {
-        if (disposed) return;
-        if (!res.authenticated) {
-          options.onInvalidSession();
-          return;
-        }
-        scheduleReopen();
-      })
-      .catch(() => {
-        if (disposed) return;
-        // An unreachable gateway is transient; a failed probe still retries.
-        scheduleReopen();
-      });
-  };
-
-  const handleLegacyError = (es: EventSource) => {
-    if (disposed) return;
-    switch (es.readyState) {
-      case EventSource.CLOSED:
-        options.onClosed();
-        probeAndReopen();
-        return;
-      case EventSource.CONNECTING:
-        options.onConnecting();
-        return;
-      case EventSource.OPEN:
-        return;
-      default:
-        throw new Error(`unknown EventSource readyState: ${es.readyState}`);
-    }
-  };
-
-  const dispose = () => {
-    disposed = true;
-    clearWatchdog();
-    if (retryTimer !== null) clearTimeout(retryTimer);
-  };
-
   return {
-    armWatchdog,
+    armWatchdog: (onFire) => {
+      clearWatchdog();
+      watchdog = setTimeout(onFire, policy.watchdogMs);
+    },
     clearWatchdog,
-    scheduleReopen,
-    resetBackoff: () => { options.failCount.current = 0; },
-    handleLegacyError,
-    dispose,
+    scheduleReopen: (onReopen) => {
+      if (retryTimer !== null) return;
+      const delay = reconnectDelay(policy.failCount.current, policy.reconnectBaseMs, policy.reconnectMaxMs);
+      policy.failCount.current += 1;
+      retryTimer = setTimeout(() => {
+        retryTimer = null;
+        onReopen();
+      }, delay);
+    },
+    resetBackoff: () => { policy.failCount.current = 0; },
+    dispose: () => {
+      disposed = true;
+      clearWatchdog();
+      if (retryTimer !== null) clearTimeout(retryTimer);
+    },
     isDisposed: () => disposed,
   };
+}
+
+// meiva:note
+// After a legacy source the server closed, ask the session once: an invalid
+// session stops here (the app returns to login), anything else - including an
+// unreachable gateway, which is transient - schedules the capped-backoff reopen.
+// meiva:link ui/web/src/docs/frontend-data-flow/frontend-data-flow.meiva.okf.md
+function probeThenReopen(session: SessionPort, timers: SseTimers, reopen: () => void): void {
+  session.checkAuth()
+    .then((result) => {
+      if (timers.isDisposed()) return;
+      if (probeVerdict(result) === "invalid-session") {
+        session.sessionInvalid();
+        return;
+      }
+      timers.scheduleReopen(reopen);
+    })
+    .catch(() => {
+      if (timers.isDisposed()) return;
+      timers.scheduleReopen(reopen);
+    });
+}
+
+export function reopenIfClosed(
+  source: EventSourceHandle,
+  session: SessionPort,
+  timers: SseTimers,
+  reopen: () => void,
+): void {
+  if (readyStateKind(source.readyState) === "closed") probeThenReopen(session, timers, reopen);
 }

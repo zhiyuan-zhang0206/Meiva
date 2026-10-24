@@ -1,0 +1,26 @@
+exports = ["api-factory.ts", "http.ts", "plans"]
+
+[uses]
+"api-control.ts" = ["http.ts", "plans", "routes"]
+"api-drafts.test.ts" = ["api-factory.ts", "tests"]
+"api-factory.ts" = ["api-control.ts", "http.ts", "message-delivery.ts", "plans", "routes", "upload-delivery.ts"]
+"api-guarded-lifecycle.test.ts" = ["tests"]
+"api.test.ts" = ["plans", "tests"]
+"http.test.ts" = ["tests"]
+"http.ts" = ["plans"]
+"message-delivery.test.ts" = ["plans", "tests"]
+"message-delivery.ts" = ["http.ts", "plans"]
+"notice-resolution.test.ts" = ["tests"]
+"tests" = ["api-factory.ts", "http.ts", "plans"]
+"upload-delivery.test.ts" = ["tests"]
+"upload-delivery.ts" = ["http.ts", "plans"]
+
+[purity]
+"api-control.ts" = "strict"
+"api-factory.ts" = "strict"
+"upload-delivery.ts" = "strict"
+
+[debt.impure-call]
+"http.ts#createHttp#clearTimeout" = 1
+"http.ts#createHttp#setTimeout" = 1
+"message-delivery.ts#<module>#setTimeout" = 1

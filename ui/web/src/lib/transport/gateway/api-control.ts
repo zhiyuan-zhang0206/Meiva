@@ -1,4 +1,4 @@
-import type { HarnessAvailability } from "../contracts/models";
+import type { HarnessAvailability } from "../../contracts/models";
 import type {
   AgentMachineRow,
   AlertClassRow,
@@ -48,29 +48,23 @@ import type {
   UserSettingListResponse,
   UserSettingRow,
   WireFleetGraph,
-} from "../contracts/types";
-import { keyedHeaders, newOperationKey } from "./operation-key";
+} from "../../contracts/types";
+import { toUserPath } from "./routes/agent-routes";
+import { configPath, harnessAvailabilityPath, inventoryPath, resolvedConfigPath, settingPath } from "./routes/config-routes";
+import { alertClassSamplesPath, alertsPath, fleetGraphPath, memoryNotePath } from "./routes/control-routes";
+import type { Http } from "./http";
+import { keyedJson, keyedPost, patchJson, postInit, postJson, putJson } from "./plans";
+import { confirmDraftReceipt } from "./plans";
+import { STATS_REQUEST_TIMEOUT_MS } from "./plans";
 
-export interface ControlApiDeps {
-  f: (path: string, init?: RequestInit) => Promise<Response>;
-  ok: <T>(res: Response) => Promise<T>;
-  jsonWithTimeout: <T>(
-    path: string,
-    init: RequestInit,
-    timeoutMs: number,
-    callerSignal?: AbortSignal,
-    timeoutLabel?: string,
-  ) => Promise<T>;
-  draftAgent: (path: string, body: unknown, operationKey: string) => Promise<GuideDraftResponse>;
-  postInit: RequestInit;
-  postJson: (body: unknown) => RequestInit;
-  patchJson: (body: unknown) => RequestInit;
-  putJson: (body: unknown) => RequestInit;
-  keyedJson: (body: unknown, operationKey: string) => RequestInit;
-}
+export function createControlApi(http: Http) {
+  const { send: f, ok, jsonTimed: jsonWithTimeout, newOperationKey } = http;
 
-export function createControlApi(deps: ControlApiDeps) {
-  const { f, ok, jsonWithTimeout, draftAgent, postInit, postJson, patchJson, putJson, keyedJson } = deps;
+  const draftAgent = async (path: string, body: unknown, operationKey: string): Promise<GuideDraftResponse> => {
+    const response = await f(path, keyedJson(body, operationKey));
+    return confirmDraftReceipt(response.status, await ok<unknown>(response));
+  };
+
   return {
     terminateAgent: (agentId: number, force = false): Promise<TerminateAgentResponse> => {
       return f(
@@ -110,8 +104,7 @@ export function createControlApi(deps: ControlApiDeps) {
     },
 
     getToUser: (agentId: number, signal?: AbortSignal, references: string[] = []): Promise<ToUserDocument> => {
-      const query = new URLSearchParams(references.map((reference) => ["reference", reference]));
-      return f(`/api/agents/${agentId}/to-user${query.size ? `?${query}` : ""}`, { signal }).then(ok<ToUserDocument>);
+      return f(toUserPath(agentId, references), { signal }).then(ok<ToUserDocument>);
     },
 
     listPages: (agentId: number): Promise<PageRow[]> => {
@@ -123,23 +116,18 @@ export function createControlApi(deps: ControlApiDeps) {
     },
 
     getFleetGraph: (opts?: { hours?: number; decayLambda?: number }): Promise<WireFleetGraph> => {
-      const params = new URLSearchParams();
-      if (opts?.hours != null) params.set("hours", String(opts.hours));
-      if (opts?.decayLambda != null) params.set("decay_lambda", String(opts.decayLambda));
-      const qs = params.toString();
-      return f(`/api/fleet/graph${qs ? `?${qs}` : ""}`).then(ok<WireFleetGraph>);
+      return f(fleetGraphPath(opts)).then(ok<WireFleetGraph>);
     },
 
     getMemoryNote: (path: string): Promise<MemoryNoteResponse> => {
-      const q = new URLSearchParams({ path });
-      return f(`/api/memory/note?${q.toString()}`).then(ok<MemoryNoteResponse>);
+      return f(memoryNotePath(path)).then(ok<MemoryNoteResponse>);
     },
 
     getStatsDashboard: (hours: number, signal?: AbortSignal): Promise<StatsDashboard> => {
       return jsonWithTimeout<StatsDashboard>(
         `/api/stats/dashboard?hours=${hours}`,
         {},
-        40_000,
+        STATS_REQUEST_TIMEOUT_MS,
         signal,
         "stats dashboard",
       );
@@ -149,7 +137,7 @@ export function createControlApi(deps: ControlApiDeps) {
       return jsonWithTimeout<AlertClassesResponse>(
         `/api/stats/alert-classes?hours=${hours}`,
         {},
-        40_000,
+        STATS_REQUEST_TIMEOUT_MS,
         signal,
         "alert classes",
       );
@@ -160,14 +148,7 @@ export function createControlApi(deps: ControlApiDeps) {
       hours: number,
       signal?: AbortSignal,
     ): Promise<AlertClassSample[]> => {
-      const q = new URLSearchParams({
-        level: cls.level,
-        event_name: cls.event_name,
-        source: cls.source,
-        process: cls.process,
-        hours: String(hours),
-      });
-      return f(`/api/stats/alert-classes/samples?${q.toString()}`, { signal })
+      return f(alertClassSamplesPath(cls, hours), { signal })
         .then(ok<{ samples: AlertClassSample[] }>)
         .then((body) => body.samples);
     },
@@ -186,23 +167,15 @@ export function createControlApi(deps: ControlApiDeps) {
       severity?: string;
       limit?: number;
     } = {}): Promise<AlertsResponse> => {
-      const q = new URLSearchParams();
-      if (params.window) q.set("window", params.window);
-      if (params.status) q.set("status", params.status);
-      if (params.severity) q.set("severity", params.severity);
-      if (params.limit) q.set("limit", String(params.limit));
-      const qs = q.toString();
-      return f(`/api/alerts${qs ? `?${qs}` : ""}`).then(ok<AlertsResponse>);
+      return f(alertsPath(params)).then(ok<AlertsResponse>);
     },
 
     getConfig: (machine?: string): Promise<ConfigView> => {
-      const qs = machine != null ? `?machine=${encodeURIComponent(machine)}` : "";
-      return f(`/api/config${qs}`).then(ok<ConfigView>);
+      return f(configPath(machine)).then(ok<ConfigView>);
     },
 
     getResolvedConfig: (model?: string): Promise<ResolvedConfigView> => {
-      const qs = model != null ? `?model=${encodeURIComponent(model)}` : "";
-      return f(`/api/config/resolved${qs}`).then(ok<ResolvedConfigView>);
+      return f(resolvedConfigPath(model)).then(ok<ResolvedConfigView>);
     },
 
     getMachines: (): Promise<AgentMachineRow[]> => {
@@ -233,12 +206,7 @@ export function createControlApi(deps: ControlApiDeps) {
       body: Record<string, unknown>,
       machine?: string,
     ): Promise<ConfigWriteResult> {
-      const qs = machine != null ? `?machine=${encodeURIComponent(machine)}` : "";
-      const res = await f(`/api/config${qs}`, {
-        method: "PUT",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(body),
-      });
+      const res = await f(configPath(machine), putJson(body));
       if (!res.ok) {
         const text = await res.text().catch(() => "");
         throw new Error(`HTTP ${res.status}: ${text || res.statusText}`);
@@ -254,11 +222,7 @@ export function createControlApi(deps: ControlApiDeps) {
       body: { plugins?: Record<string, boolean>; mcp_servers?: Record<string, boolean> },
       machine: string,
     ): Promise<InventoryWriteResult> {
-      const res = await f(`/api/inventory?machine=${encodeURIComponent(machine)}`, {
-        method: "PUT",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(body),
-      });
+      const res = await f(inventoryPath(machine), putJson(body));
       if (!res.ok) {
         const text = await res.text().catch(() => "");
         throw new Error(`HTTP ${res.status}: ${text || res.statusText}`);
@@ -275,17 +239,11 @@ export function createControlApi(deps: ControlApiDeps) {
     },
 
     login: (username: string, password: string): Promise<{ ok: boolean }> => {
-      return f("/api/auth/login", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ username, password }),
-      }).then(ok<{ ok: boolean }>);
+      return f("/api/auth/login", postJson({ username, password })).then(ok<{ ok: boolean }>);
     },
 
     logout: (): Promise<{ ok: boolean }> => {
-      return f("/api/auth/logout", { method: "POST" }).then(
-        ok<{ ok: boolean }>,
-      );
+      return f("/api/auth/logout", postInit).then(ok<{ ok: boolean }>);
     },
 
     checkAuth: (): Promise<{ authenticated: boolean }> => {
@@ -305,11 +263,7 @@ export function createControlApi(deps: ControlApiDeps) {
     },
 
     updateSchedule: (id: number, body: ScheduleUpdate, operationKey: string = newOperationKey()): Promise<ScheduleView> => {
-      return f(`/api/schedules/${id}`, {
-        method: "PUT",
-        headers: { "content-type": "application/json", ...keyedHeaders(operationKey) },
-        body: JSON.stringify(body),
-      }).then(ok<ScheduleView>);
+      return f(`/api/schedules/${id}`, keyedJson(body, operationKey, "PUT")).then(ok<ScheduleView>);
     },
 
     deleteSchedule: (id: number): Promise<{ status: string }> => {
@@ -317,15 +271,15 @@ export function createControlApi(deps: ControlApiDeps) {
     },
 
     startSchedule: (id: number, operationKey: string = newOperationKey()): Promise<ScheduleView> => {
-      return f(`/api/schedules/${id}/start`, { ...postInit, headers: keyedHeaders(operationKey) }).then(ok<ScheduleView>);
+      return f(`/api/schedules/${id}/start`, keyedPost(operationKey)).then(ok<ScheduleView>);
     },
 
     stopSchedule: (id: number, operationKey: string = newOperationKey()): Promise<ScheduleView> => {
-      return f(`/api/schedules/${id}/stop`, { ...postInit, headers: keyedHeaders(operationKey) }).then(ok<ScheduleView>);
+      return f(`/api/schedules/${id}/stop`, keyedPost(operationKey)).then(ok<ScheduleView>);
     },
 
     restartSchedule: (id: number, operationKey: string = newOperationKey()): Promise<ScheduleView> => {
-      return f(`/api/schedules/${id}/restart`, { ...postInit, headers: keyedHeaders(operationKey) }).then(ok<ScheduleView>);
+      return f(`/api/schedules/${id}/restart`, keyedPost(operationKey)).then(ok<ScheduleView>);
     },
 
     scheduleLogs: (id: number, lines = 200): Promise<ScheduleLogsView> => {
@@ -357,9 +311,7 @@ export function createControlApi(deps: ControlApiDeps) {
     },
 
     putSetting: (key: string, value: unknown): Promise<UserSettingRow> => {
-      return f(`/api/settings/${encodeURIComponent(key)}`, putJson({ value })).then(
-        ok<UserSettingRow>,
-      );
+      return f(settingPath(key), putJson({ value })).then(ok<UserSettingRow>);
     },
 
     getUiContributions: (): Promise<UiContributionsResponse> => {
@@ -400,7 +352,7 @@ export function createControlApi(deps: ControlApiDeps) {
       f("/api/keyed/v1/agents", keyedJson(req, operationKey)).then(ok<SpawnedAgent>),
 
     getHarnessAvailability: (machine: string, signal?: AbortSignal): Promise<HarnessAvailability[]> =>
-      f(`/api/cluster/machines/${encodeURIComponent(machine)}/harnesses`, { signal })
+      f(harnessAvailabilityPath(machine), { signal })
         .then((res) => (res.status === 404 ? [] : ok<HarnessAvailability[]>(res))),
 
     retryAgentLaunch: (agentId: number, priorAttempt: string, operationKey: string): Promise<RetryLaunchAccepted> =>
