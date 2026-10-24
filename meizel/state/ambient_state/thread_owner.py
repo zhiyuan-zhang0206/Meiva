@@ -19,6 +19,7 @@ from meizel.state.ambient_state.owner_method import (
     instance_field,
     join_has_timeout,
 )
+from meizel.state.ambient_state.thread_admission import admitted
 
 
 def _aliases(root: ast.AST) -> dict[str, str]:
@@ -221,8 +222,6 @@ def owned_calls(module: Module) -> set[int]:
         events = _event_fields(methods, module)
         handles = _constructor_handles(methods, module)
         for method in methods.values():
-            if method.name != "__init__":
-                continue
             for call in call_nodes(method):
                 if module.full_name(call.func) != "threading.Thread":
                     continue
@@ -250,6 +249,8 @@ def _owned(
         return False
     receipt, _ = outcome
     signals = _worker_signals(_closure(worker, methods), events)
+    if method.name != "__init__" and not admitted(call, method, methods, handle, signals, module):
+        return False
     started = any(
         receiver == handle and name == "start" for receiver, name, _ in _method_calls(method)
     )

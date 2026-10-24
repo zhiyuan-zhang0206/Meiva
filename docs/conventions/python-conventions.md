@@ -207,8 +207,15 @@ joins that same handle with an explicit non-None timeout, checks its liveness,
 and raises the original error retained by the worker. The worker entry captures
 BaseException into an owner field and immediately passes it to an error observer.
 Its else block contains no unprotected work, and any finally block only sets
-owner-created completion Events. Repeatable start methods remain findings;
-a stop-only fence does not prevent overwriting an active thread's handle.
+owner-created completion Events. A deferred constructor is also recognized when
+the initializer creates the real Lock and Event and retains a None handle, and
+the unique construction is preceded under that same Lock by terminating stop
+and already-created-handle guards. Stop sets the signal under the same Lock;
+native start immediately follows outside it on the retained handle or its
+unrebound local alias. Rewritten handles, locks or signals, exposed locks,
+cleared signals and unrecognized control flow remain findings. This does not
+relax the target/error/teardown evidence above. Repeatable start methods remain
+findings; a stop-only fence does not prevent overwriting a live handle.
 Void completion is observed through join and liveness; value-producing work also
 needs its actual result receipt. Method and field names carry no exemption.
 Other ownership shapes remain findings until their structural evidence is
