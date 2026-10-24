@@ -1,10 +1,13 @@
-"""Wire and direct-call contracts for agent lifecycle vocabularies."""
+# meiva:note
+# Wire and direct-call contracts for agent lifecycle vocabularies.
+
+from typing import cast
 
 import pytest
 
-from base.agents.messages.inbound import InboundKind
-from base.cluster.machine import MachineIdentity
-from base.cluster.machine.tests.identity import machine_identity as machine_identity
+from base.agents.messages.inbound import InboundKind, WakeTriggerKind
+from base.db import Database
+from base.events.live.bus import EventBus
 
 
 @pytest.mark.parametrize("kind", list(InboundKind))
@@ -33,25 +36,23 @@ def test_wake_trigger_wire_accepts_exact_pending_work_subset(kind: InboundKind) 
             validate_wake_trigger_kind(kind.value)
 
 
+# meiva:note
+# The raw boundary refuses a control kind before the database is read: agent 1 does not exist, so
+# a read made first would raise `AgentNotFound` instead of this `ValueError`.
 def test_direct_wake_rejects_control_kind_before_db_access(
-    *, machine_identity: MachineIdentity
+    database: Database, event_bus: EventBus
 ) -> None:
-    from unittest.mock import MagicMock
-
     from ops.agents.wake import resurrect_agent
 
-    db, bus = MagicMock(), MagicMock()
     with pytest.raises(ValueError, match="cannot trigger resurrection"):
         resurrect_agent(
-            db,
-            bus,
-            1,
+            database,
+            event_bus,
+            10**9,
             resurrected_by="system",
             trigger_inbound_id=1,
-            trigger_inbound_kind=InboundKind.RESTART,  # type: ignore[arg-type] -- exercise raw boundary
+            trigger_inbound_kind=cast(WakeTriggerKind, InboundKind.RESTART),
         )
-    assert db.mock_calls == []
-    assert bus.mock_calls == []
 
 
 @pytest.mark.parametrize(

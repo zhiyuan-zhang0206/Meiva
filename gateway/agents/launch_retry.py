@@ -1,6 +1,7 @@
 """Guarded HTTP admission for an explicitly observed launch attempt."""
 
 import asyncio
+from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException, Request
 
@@ -47,7 +48,12 @@ async def retry_launch(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     try:
         target, accepted = await asyncio.to_thread(
-            accept_retry_launch, request.app.state.db_pool, scoped, agent_id, body
+            accept_retry_launch,
+            request.app.state.db_pool,
+            scoped,
+            agent_id,
+            body,
+            new_attempt_id=uuid4(),
         )
     except RetryLaunchConflictError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc

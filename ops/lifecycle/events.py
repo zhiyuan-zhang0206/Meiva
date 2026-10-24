@@ -7,7 +7,7 @@ UI update, never the durable op that triggered it.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import TypedDict
 
 from base.events.live.bus import EventBus
@@ -52,12 +52,13 @@ def notice_resolution_facts(
     *,
     require_response: bool,
     created_at: datetime,
+    now: datetime,
     replied: bool,
 ) -> NoticeResolutionFacts:
     return NoticeResolutionFacts(
         resolution=resolution,
         require_response=require_response,
-        age_seconds=max(0, int((datetime.now(UTC) - created_at).total_seconds())),
+        age_seconds=max(0, int((now - created_at).total_seconds())),
         had_reply=replied,
     )
 

@@ -6,10 +6,9 @@ with the agent row or neither does.
 
 from __future__ import annotations
 
-import contextlib
 from collections.abc import Generator
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 import psycopg
 import pytest
@@ -25,6 +24,7 @@ from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 from base.packages.plugin_providers import build_model_catalog
+from ops.agents.tests.birth_faults import reject_audit_event
 from ops.agents.tests.test_agents_internals import insert_checkpoint, spawn_agent
 
 
@@ -144,47 +144,12 @@ def test_a_spawn_whose_audit_fact_cannot_be_recorded_creates_no_agent(
     before = db_conn.execute("SELECT count(*) FROM agents").fetchone()
     db_conn.commit()
 
-    class _RefuseAuditCursor:
-        def __init__(self, cur: psycopg.Cursor[Any], conn: _RefuseAuditConn) -> None:
-            self._cur = cur
-            self.connection = conn
-
-        def __getattr__(self, name: str) -> Any:
-            return getattr(self._cur, name)
-
-    class _RefuseAuditConn:
-        def __init__(self, conn: psycopg.Connection) -> None:
-            self._conn = conn
-
-        def __enter__(self) -> _RefuseAuditConn:
-            self._conn.__enter__()
-            return self
-
-        def __exit__(self, *args: Any) -> bool | None:
-            return self._conn.__exit__(*args)
-
-        @contextlib.contextmanager
-        def cursor(self, *args: Any, **kwargs: Any) -> Generator[_RefuseAuditCursor, None, None]:
-            with self._conn.cursor(*args, **kwargs) as cur:
-                yield _RefuseAuditCursor(cur, self)
-
-        def execute(self, query: Any, *args: Any, **kwargs: Any) -> Any:
-            if "INSERT INTO audit_events" in str(query):
-                raise RuntimeError("audit write failed")
-            return self._conn.execute(query, *args, **kwargs)
-
-        def commit(self) -> None:
-            self._conn.commit()
-
-    class _RefuseAuditDb:
-        @contextlib.contextmanager
-        def connect(self, *args: Any, **kwargs: Any) -> Generator[_RefuseAuditConn, None, None]:
-            with database.connect(*args, **kwargs) as conn:
-                yield _RefuseAuditConn(conn)
-
-    with pytest.raises(RuntimeError, match="audit write failed"):
+    with (
+        reject_audit_event(db_conn, "spawn"),
+        pytest.raises(psycopg.errors.CheckViolation, match="reject_birth_audit"),
+    ):
         create_agent_row(
-            cast(Database, _RefuseAuditDb()),
+            database,
             event_bus,
             spawner="user",
             machine=machine_identity.name(),
@@ -221,7 +186,6 @@ class TestSpawnFork:
         self,
         redis_url: str,
         db_conn: psycopg.Connection,
-        monkeypatch: pytest.MonkeyPatch,
         *,
         config_authority: ConfigAuthority,
         model_catalog: ModelCatalog,
@@ -291,7 +255,6 @@ class TestSpawnFork:
         self,
         redis_url: str,
         db_conn: psycopg.Connection,
-        monkeypatch: pytest.MonkeyPatch,
         *,
         config_authority: ConfigAuthority,
         model_catalog: ModelCatalog,
@@ -347,7 +310,6 @@ class TestSpawnFork:
     def test_fork_inbound_via_unified_path_emits_fork_source_target(
         self,
         db_conn: psycopg.Connection,
-        monkeypatch: pytest.MonkeyPatch,
         database: Database,
         event_bus: EventBus,
         *,

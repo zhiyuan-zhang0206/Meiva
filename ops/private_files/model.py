@@ -48,9 +48,12 @@ class Outcome:
         }
 
 
+# meiva:note
+# The parsed command line. `root` is None when the operator named none, which means the home's
+# source checkout.
 @dataclass(frozen=True)
 class CliArgs:
-    root: Path
+    root: Path | None
     manifest: Path
     json_output: bool
 

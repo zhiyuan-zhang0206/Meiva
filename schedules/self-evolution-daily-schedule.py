@@ -1,46 +1,21 @@
 # meiva:link schedules/docs/self-evolution.meiva.okf.md
 
-from collections.abc import Callable
-from dataclasses import dataclass, field
-from typing import Any
-from uuid import uuid4
-
 import os
-import subprocess
 import sys
-import time
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
+from functools import partial
 
-import meiva
-from meiva.agents import AgentStatus as S
-from schedules.agent_status_guard import ensure_agent_status_members
-from schedules.catchup import cluster_timezone, fire_slot_once
-from base.daemon.schedules.watcher import next_fire
-from base.daemon.schedules.inputs import ScheduleInputs
-from schedules.entry import fresh_schedule_entry, schedule_entry
-
-
-# meiva:note
-# `daily_scan.py` ships with the meiva-self-evolution skill, and this reads the skill's
-# load-directory copy: converge-managed but bootstrap-only (R5), refreshed to the landed
-# revision by the rollout's update legs, with `meiva skill update` as the manual.
-# meiva:link schedules/docs/self-evolution.meiva.okf.md
-def _daily_scan_path() -> str:
-    return os.path.join(
-        os.environ.get("MEIVA_HOME", os.path.expanduser("~/.meiva")),
-        "skills",
-        "meiva-self-evolution",
-        "reference",
-        "daily_scan.py",
-    )
-
+from base.paths.home import resolve_meiva_home
+from schedules.jobs.catchup import cluster_timezone
+from schedules.jobs.entry import open_schedule_entry
+from schedules.jobs.loop import CronSchedule, Trigger, run_loop
+from schedules.jobs.self_evolution_scan import DailyScan, run_daily_scan
+from schedules.plans.loop_plan import LoopTiming
+from schedules.plans.scan_outcome import parse_daily_report_agent
+from schedules.plans.schedule_identity import parse_schedule_id
 
 CRON = "0 0 * * *"
-
-
-def _report_agent() -> str:
-    return os.environ.get("MEIVA_SELF_EVOLUTION_DAILY_REPORT_AGENT", "228")
-
+_REPORT_AGENT_ENV = "MEIVA_SELF_EVOLUTION_DAILY_REPORT_AGENT"
 
 # meiva:note
 # The measured full day is about 113 minutes with two collect streams running
@@ -50,145 +25,23 @@ def _report_agent() -> str:
 _SCAN_TIMEOUT_SECONDS = 10800
 
 
-@dataclass(frozen=True)
-class EnsureAgentHooks:
-    list_agents_fn: Callable[..., Any] = field(default_factory=lambda: meiva.agents.list_agents)
-    resurrect_fn: Callable[..., Any] = field(default_factory=lambda: meiva.agents.resurrect)
-    send_message_fn: Callable[..., Any] = field(default_factory=lambda: meiva.agents.send_message)
-    spawn_fn: Callable[..., int] = field(default_factory=lambda: meiva.agents.spawn)
-    uuid_fn: Callable[[], Any] = field(default_factory=lambda: uuid4)
-
-
-def ensure_agent(label: str, prompt: str, *, hooks: EnsureAgentHooks | None = None) -> int:
-    active = hooks or EnsureAgentHooks()
-    before_id = None
-    while True:
-        page = active.list_agents_fn(scope="all", query=label, before_id=before_id)
-        for agent in page.agents:
-            if agent.label != label:
-                continue
-            if agent.status == S.TERMINATED:
-                active.resurrect_fn(agent.agent_id, prompt)
-            else:
-                active.send_message_fn(agent.agent_id, prompt)
-            return agent.agent_id
-        if page.next_cursor is None:
-            break
-        before_id = page.next_cursor
-    return active.spawn_fn(prompt=prompt, label=label, idempotency_key=str(active.uuid_fn()))
-
-
-def run_scan() -> None:
-    daily = _daily_scan_path()
-    if not os.path.isfile(daily):
-        # meiva:note
-        # A missing script must not masquerade as an ALERT: python exits 2 when it cannot
-        # open the file, which the rc==2 branch would read as "bad runs found".
-        msg = (
-            f"daily_scan.py missing at {daily} — run `meiva skill update meiva-self-evolution` "
-            f"(or `meiva skill update` for all repo-native skills) to refresh the load-dir copy"
-        )
-        print(f"[{datetime.now(UTC).isoformat()}] {msg}")
-        ensure_agent("self-evolution", f"Daily scan cannot run: {msg}")
-        return
-    try:
-        r = subprocess.run(
-            [sys.executable, daily, "--days", "1"],
-            timeout=_SCAN_TIMEOUT_SECONDS,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        tail = (r.stdout or "")[-2000:]
-        err = (r.stderr or "")[-500:]
-        print(f"[{datetime.now(UTC).isoformat()}] scan rc={r.returncode}")
-        print(tail)
-        if r.returncode == 2:
-            ensure_agent(
-                "self-evolution",
-                f"Daily scan ALERT ({datetime.now(UTC).isoformat()}):\n{tail}\n{err}\nReview the daily report and act.",
-            )
-        elif r.returncode != 0:
-            print(f"scan failed rc={r.returncode}: {err}")
-            ensure_agent(
-                "self-evolution",
-                f"Daily scan failed rc={r.returncode}:\n{err}\nCheck the schedule log and daily_scan.py.",
-            )
-    except subprocess.TimeoutExpired:
-        print(f"scan timed out after {_SCAN_TIMEOUT_SECONDS}s")
-        ensure_agent(
-            "self-evolution",
-            f"Daily scan timed out after {_SCAN_TIMEOUT_SECONDS}s — check whether daily_scan.py is stuck.",
-        )
-        return
-    report_agent = _report_agent()
-    if report_agent:
-        try:
-            meiva.agents.send_message(
-                int(report_agent),
-                f"[self-evolution daily {datetime.now(UTC).strftime('%m-%d')}]\n{tail}",
-            )
-        except Exception as e:
-            print(f"daily report to {report_agent} failed: {e}")
-
-
-def _fire_scan(_slot: datetime, _trigger: None) -> None:
-    run_scan()
-
-
-@dataclass(frozen=True)
-class LoopHooks:
-    now_fn: Callable[[], datetime] = field(default_factory=lambda: lambda: datetime.now(UTC))
-    tz_fn: Callable[[], str] = field(default_factory=lambda: cluster_timezone)
-    next_fire_fn: Callable[..., datetime] = field(default_factory=lambda: next_fire)
-    claim_fn: Callable[..., bool] = field(default_factory=lambda: fire_slot_once)
-    sleep_fn: Callable[[float], None] = field(default_factory=lambda: time.sleep)
-    cron: str = CRON
-
-
-def main(
-    *,
-    inputs: ScheduleInputs,
-    hooks: LoopHooks | None = None,
-    next_fire_fn: Callable[..., datetime] | None = None,
-    claim_fn: Callable[..., bool] | None = None,
-) -> None:
-    active = hooks or LoopHooks(
-        next_fire_fn=next_fire_fn or next_fire,
-        claim_fn=claim_fn or fire_slot_once,
-    )
-    cluster_timezone = active.tz_fn
-    db = inputs.database()
-    started_at = active.now_fn()
-    while True:
-        # meiva:note
-        # `after=now-2min` is the trigger tolerance: croniter's get_next is strictly
-        # greater than its base, so a `now` a fraction of a second past the hour would jump
-        # to the next day (deterministic miss, observed 2026-08-06). Window: [-120s, +60s].
-        now = active.now_fn()
-        nxt = active.next_fire_fn(
-            active.cron,
-            after=max(started_at, now - timedelta(minutes=2)),
-            timezone=cluster_timezone(),
-        )
-        wait = (nxt - now).total_seconds()
-        if wait > 60:
-            active.sleep_fn(min(wait, 3600))
-            continue
-        active.claim_fn(db, nxt, None, fire=_fire_scan)
-        active.sleep_fn(120)
-
-
 if __name__ == "__main__":
-    ensure_agent_status_members(
-        S,
-        {"TERMINATED"},
-        schedule_name="self-evolution-daily",
-    )
-    entry_inputs = globals().get("MEIVA_SCHEDULE_INPUTS")
-    if entry_inputs is None:
-        from base.log import prepare_process_logging
-
-        prepare_process_logging()
-    with fresh_schedule_entry() if entry_inputs is None else schedule_entry(entry_inputs) as inputs:
-        main(inputs=inputs)
+    with open_schedule_entry(globals().get("MEIVA_SCHEDULE_INPUTS")) as inputs:
+        daily_scan = (
+            resolve_meiva_home() / "skills" / "meiva-self-evolution" / "reference" / "daily_scan.py"
+        )
+        scan = DailyScan(
+            command=(sys.executable, str(daily_scan), "--days", "1"),
+            script=daily_scan,
+            timeout=_SCAN_TIMEOUT_SECONDS,
+            report_agent=parse_daily_report_agent(os.environ.get(_REPORT_AGENT_ENV)),
+        )
+        run_loop(
+            inputs.database(),
+            CronSchedule(
+                (Trigger(CRON),), timezone=cluster_timezone(), timing=LoopTiming(fire_ahead=60.0)
+            ),
+            partial(run_daily_scan, scan=scan),
+            schedule_id=parse_schedule_id(os.environ.get("MEIVA_SCHEDULE_ID")),
+            started_at=datetime.now(UTC),
+        )

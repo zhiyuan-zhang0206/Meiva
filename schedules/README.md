@@ -45,10 +45,14 @@ Built-in slots sit in the off-peak trough: the cluster workday peaks at
 outside it.
 
 The adversarial weekly batch owns its counted loopback HTTP server in a lexical
-scope. One batch-local executor serves requests while the batch updates the
-partner document and collects counts. Leaving the batch, including by an error,
-shuts down the server, joins the worker and closes the socket. Server-loop
-failures propagate to the schedule's existing batch-error reporting.
+scope (`schedules/jobs/adversarial_scenario.py`). One batch-local executor serves
+requests while the batch updates the partner document and collects counts. Leaving
+the batch, including by an error, shuts down the server, joins the worker and
+closes the socket. Server-loop failures propagate to the schedule's existing
+batch-error reporting. [The batch](docs/adversarial-eval.meiva.okf.md) and
+[the debt sweep](docs/debt-sweep.meiva.okf.md) each keep their decisions in
+strict modules under `schedules/plans/` and their effects in shells under
+`schedules/jobs/`.
 
 ### How built-ins get created
 
@@ -90,12 +94,15 @@ rather than a review:
 1. **The template.** `tests/components/base/test_schedule_timezone.py` sweeps
    every `*-schedule.py`: at least one timezone argument must be present and
    every one of them must be `cluster_timezone()` (a `timezone=` keyword, a
-   `ZoneInfo(...)` argument, or `run_daily_loop`'s third argument). A resident
-   sentinel with no cron slot is no exception — stamp its own output with
-   `ZoneInfo(cluster_timezone())`. A hard-coded IANA name, or a template reading
-   `settings.general.timezone` itself, fails the same test.
-2. **`meizel.toml`'s `[uses]`.** An import of a sibling module (typically
-   `schedules.catchup` for `cluster_timezone`) needs its declared edge, or
+   `ZoneInfo(...)` argument). A resident sentinel with no cron slot is no
+   exception — stamp its own output with `ZoneInfo(cluster_timezone())`. A
+   hard-coded IANA name, or a template reading `settings.general.timezone`
+   itself, fails the same test. A cron slot passes it as the loop's
+   `CronSchedule(..., timezone=cluster_timezone())`; the cron literal stays in the
+   template, where the same test reads it.
+2. **`meizel.toml`'s `[uses]`.** An import of a sibling directory (a template
+   imports `schedules/jobs` for the loop, the entry and the agent calls, and
+   `schedules/plans` for the decisions) needs its declared edge, or
    `meizel check` fails the locality gate.
 3. **The manifest entry and this table** — name, class, `default_enabled`,
    description.
@@ -104,10 +111,15 @@ rather than a review:
    start by default. A new entry cannot pass by carrying the right class and the
    wrong default.
 
-The C9 template imports its accounting dependency through
-`scripts.ci.pull_requests.accounting`. Materialization changes the script
-directory, not the installed module roots. Template tests live in
-`schedules/tests/`.
+A template is thin: its `__main__` block reads the schedule id, the timezone, the
+operator's report-recipient variable and the start time once, builds the values its
+job needs and calls `run_loop`. What a schedule decides lives in a strict pure module
+under `schedules/plans/`, and what it does lives in a shell under `schedules/jobs/`;
+[the loop and the agent directory](docs/loop-and-directory.meiva.okf.md) say how. The
+C9 job imports its accounting dependency through `scripts.ci.pull_requests.accounting`
+where it runs. Materialization changes the script directory, not the installed module
+roots (`schedules/tests/test_scripts_entry.py` runs every template from a copy). Tests
+live in `schedules/tests/`.
 
 A `.py` template is executed in-process by the runner, which hands it a clean
 `sys.argv` — just its own path, exactly what `python <script>` would give it; the
@@ -128,21 +140,24 @@ template into a running cluster without a restart of the manager, run
   schedule through `meiva schedules update` / the API, never by editing the
   materialized file.
 - **Cron expressions are cluster wall clock.** The built-in scripts read
-  `settings.general.timezone` (`MEIVA_TIMEZONE`, scope `cluster-pinned`) and pass
-  it to `next_fire`, so `0 4 * * *` means 04:00 cluster time on every host in
-  the fleet — the host's OS timezone never enters. `MEIVA_TIMEZONE` is read once
+  `settings.general.timezone` once, through `cluster_timezone()` (`MEIVA_TIMEZONE`, scope
+  `cluster-pinned`), and hand it to the loop that computes each slot with `next_fire`,
+  so `0 4 * * *` means 04:00 cluster time on every host in the fleet — the host's OS
+  timezone never enters. `MEIVA_TIMEZONE` is read once
   at process start, so a changed value needs `meiva schedules restart <id>`.
   A one-off schedule you write yourself should do the same rather than
   hard-coding an IANA name; `next_fire(expr, timezone=None)` computes in UTC.
 - **Report recipients are operator knobs.** A daily report resolves its
   recipient from its own `MEIVA_*_REPORT_AGENT` variable when set — a numeric
-  agent id, and a malformed value fails the run instead of falling back — and
-  otherwise from the fixed report label the script declares (`_REPORT_LABEL`).
+  agent id, and a malformed value stops the schedule at its start instead of falling
+  back — and otherwise from the fixed report label the script declares
+  (`_REPORT_LABEL`). The variable is read once, when the script starts.
   `MEIVA_SELF_EVOLUTION_DAILY_REPORT_AGENT` defaults to agent 228, and an
   explicit empty value skips that report. The debt-clearing worker label comes
   from `MEIVA_DEBT_SWEEP_AGENT_LABEL`.
-- **Built-in cron slots are durably claimed.** Templates use
-  `schedules.catchup.fire_slot_once()` for online fires. Startup skips missed
+- **Built-in cron slots are durably claimed.** Templates run
+  `schedules.jobs.loop.run_loop()`, which claims each due slot through
+  `schedules.jobs.catchup.fire_slot_once()` for online fires. Startup skips missed
   slots; there is no catch-up helper. The `(schedule_id, slot_fire_at)` claim
   commits before the callback, so concurrent runners cannot execute a slot
   twice. A crash after claiming may lose that slot. Callbacks receive the
@@ -163,7 +178,7 @@ template into a running cluster without a restart of the manager, run
   rename leftover the imports alone cannot see; conservative: any binding
   counts, annotations are not read, `from x import *` disables it), and an
   `inspect.signature().bind` of every call the script makes into repo code
-  (`schedules.catchup.fire_slot_once(...)`, `inputs.database()`;
+  (`schedules.jobs.loop.run_loop(...)`, `inputs.database()`;
   the argument shape only, so a call it cannot bind statically — `*args`, an
   instance method, a rebound name, the plugin-wrapped `meiva.*` SDK — is skipped,
   never guessed). Nothing is started, stopped, or written. The drift classes that
@@ -241,10 +256,11 @@ whole-cluster update to the approved target before the cluster starts again.
 
 Runner-hosted templates receive immutable `ScheduleInputs` through `runpy.init_globals`:
 one loaded image, the entry's database/pipeline builders and its `MachineIdentity`.
-Templates use `schedule_entry(inputs)` to borrow these resources without closing
-them or changing the shared SDK context. A fresh executable shell explicitly uses
-`fresh_schedule_entry()` to own its lazy machine, SDK context, gate and cold writer.
-Exit restores the prior SDK context and closes constructed clients within two
-seconds while preserving an original loop failure. Callable entry helpers require
-explicit inputs or an explicitly supplied fresh-entry factory. C9/debt callbacks
-initialize logging at the original reporting point; debt dry runs assemble no root.
+A template's `__main__` hands the injected inputs (or `None` when run by hand) to
+`open_schedule_entry`: injected inputs are borrowed without closing them or changing
+the shared SDK context, and a hand run owns a fresh entry built by
+`fresh_schedule_entry(image=..., process=...)` for the commit it loaded, with its lazy
+machine, SDK context, gate and cold writer. Exit restores the prior SDK context and
+closes constructed clients within two seconds while preserving an original loop failure.
+C9 and the debt sweep open process logging and the event writer only when they report
+(`schedules/jobs/telemetry_event.py`); debt dry runs assemble no root.

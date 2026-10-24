@@ -1,552 +1,509 @@
-# pyright: reportUnknownArgumentType=warning, reportUnknownLambdaType=warning
-"""Operations cases: resurrect if terminated placement."""
+# meiva:note
+# `resurrect_if_terminated` runs the wake on the agent's home machine (`agents_meta.machine`).
+#
+# A remote home is asked through its ops server, a home that is this machine falls back to
+# the in-process resurrection when that server is unreachable, and an unreachable remote home
+# is skipped with the input still queued: launching locally for a remote-homed agent trips the
+# boot placement gate and crash-loops (the agent-1513 incident). The decisions are
+# `resurrect_plan`'s own tests; these run the shell over a real agent row, real gate reads, a
+# real machine registry and a loopback ops server that runs `lifecycle_op` for the home.
 
 from __future__ import annotations
 
-from typing import Any
+import asyncio
+import logging
+from dataclasses import dataclass
+from typing import cast
 
 import psycopg
 import pytest
+from psycopg_pool import ConnectionPool
 
-from base.agents.messages.inbound import InboundKind
-from base.api_contracts.agent_contract import ResurrectResult
+from base.agents.inbox.insert import insert_inbound_message
+from base.agents.messages.inbound import InboundKind, WakeTriggerKind
+from base.api_contracts.agent_contract import AgentNotFound, AgentStatus
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
+from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
+from base.lm.catalog import ModelCatalog
+from base.log.tests.log_records import LogRecords
+from base.log.tests.log_records import loguru_records as loguru_records
 from ops import lifecycle
-from ops.lifecycle import ResurrectPlacementHooks
-from ops.lifecycle.tests.test_operations import db_from_gate
-from ops.lifecycle.tests.test_operations import (
-    stub_pool as stub_pool,
-)
-from ops.rpc_schemas import ResurrectAgentRequest, ResurrectAgentResponse
+from ops.cluster.rpc import ClusterOpFailed
+from ops.lifecycle.tests.loopback.scripted_post import Reply, Route, serve_post
+from ops.lifecycle.tests.resurrection_setup import spawn_agent
+from ops.rpc_schemas import LifecyclePayload
+
+_RESURRECT_PATH = "/api/agents/{agent_id}/resurrect-if-pending-work"
 
 
-def _placement_hooks(**overrides: Any) -> ResurrectPlacementHooks:
-    defaults: dict[str, Any] = {
-        "recovery_halted_fn": lambda _db, _aid: False,
-        "clear_suppression_fn": lambda _db, _aid: None,
-        "notice_source_fn": lambda _db, _aid, _iid: None,
-    }
-    defaults.update(overrides)
-    return ResurrectPlacementHooks(**defaults)
+# meiva:note
+# A terminated agent placed on its home machine, and the input that wants it awake.
+@dataclass(frozen=True)
+class Waiting:
+    agent_id: int
+    trigger_id: int
 
 
-class TestResurrectIfTerminatedPlacement:
-    """`resurrect_if_terminated` must run the resurrect on the agent's home
-    machine (`agents_meta.machine`): local in-process, remote via a 'lifecycle'
-    op to that host's ops server. Launching locally for a remote-homed agent
-    trips the boot placement gate and crash-loops (the agent-1513 incident);
-    an unreachable home machine skips the resurrect — the inbound is already
-    queued, so the next delivery or a manual resurrect picks it up."""
-
-    @pytest.mark.asyncio
-    async def test_tripped_recovery_breaker_skips_forward_and_launch(
+# meiva:note
+# Builds terminated agents, each with a pending input, in the test database.
+class Waitings:
+    def __init__(
         self,
-        event_bus: EventBus,
+        conn: psycopg.Connection,
+        database: Database,
+        bus: EventBus,
         *,
+        config_authority: ConfigAuthority,
+        model_catalog: ModelCatalog,
         database_gate: ProcessDbGate,
         machine_identity: MachineIdentity,
     ) -> None:
-        """A tripped recovery breaker (consecutive permanent provider
-        rejections) refuses the automatic resurrect before any home contact,
-        exactly like an active wake suppression (task #3617)."""
-        from base.api_contracts.agent_contract import AgentStatus
+        self._conn = conn
+        self._database = database
+        self._bus = bus
+        self._config_authority = config_authority
+        self._model_catalog = model_catalog
+        self._database_gate = database_gate
+        self._machine_identity = machine_identity
 
-        def _no_machine_read(_db: Database, _aid: int) -> str:
-            raise AssertionError("halted auto-resurrect must not read or contact the home")
-
-        status = await lifecycle.resurrect_if_terminated(
-            db_from_gate(database_gate=database_gate),
-            event_bus,
-            5,
-            trigger_inbound_id=88,
-            trigger_inbound_kind=InboundKind.HEARTBEAT,
-            local_machine=machine_identity.name(),
-            hooks=_placement_hooks(
-                status_fn=lambda _db, _aid: AgentStatus.TERMINATED,
-                recovery_halted_fn=lambda _db, _aid: True,
-                machine_fn=_no_machine_read,
-            ),
+    def make(
+        self, *, home: str, kind: str = "chat", source: str = "user", status: str = "terminated"
+    ) -> Waiting:
+        agent_id = spawn_agent(
+            config_authority=self._config_authority,
+            model_catalog=self._model_catalog,
+            database_gate=self._database_gate,
+            local_machine=self._machine_identity,
         )
-        assert status is AgentStatus.TERMINATED
-
-    @pytest.mark.asyncio
-    async def test_local_home_resurrects_in_process(
-        self,
-        event_bus: EventBus,
-        *,
-        database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
-    ) -> None:
-        """Local-homed resurrect dispatches to ops server first; falls back
-        to in-process when the ops server is unreachable."""
-        from base.api_contracts.agent_contract import AgentStatus
-
-        statuses = iter([AgentStatus.TERMINATED, AgentStatus.IDLING])
-        machine_identity.set(name="home-a")
-        called: dict[str, object] = {}
-        dispatch_called: list[dict[str, object]] = []
-
-        async def _fake_resurrect_op(
-            _db: object,
-            _bus: object,
-            agent_id: int,
-            body: ResurrectAgentRequest,
-            *,
-            trigger_inbound_id: int | None = None,
-            trigger_inbound_kind: str | None = None,
-        ) -> ResurrectAgentResponse:
-            called["agent_id"] = agent_id
-            called["resurrected_by"] = body.resurrected_by
-            called["trigger_inbound_id"] = trigger_inbound_id
-            called["trigger_inbound_kind"] = trigger_inbound_kind
-            return ResurrectAgentResponse(status=ResurrectResult.SPAWNED)
-
-        cleared: list[int] = []
-
-        def _record_clear(_db: object, agent_id: int) -> None:
-            cleared.append(agent_id)
-
-        async def _fake_dispatch(*_args: object, **kwargs: object) -> dict:
-            dispatch_called.append(kwargs)
-            raise lifecycle.cluster_rpc.ClusterOpUnreachable("ops server not reachable")
-
-        status = await lifecycle.resurrect_if_terminated(
-            db_from_gate(database_gate=database_gate),
-            event_bus,
-            5,
-            trigger_inbound_id=88,
-            trigger_inbound_kind=InboundKind.CHAT,
-            local_machine=machine_identity.name(),
-            hooks=_placement_hooks(
-                status_fn=lambda _db, _aid: next(statuses),
-                machine_fn=lambda _db, _aid: "home-a",
-                resurrect_op_fn=_fake_resurrect_op,
-                clear_suppression_fn=_record_clear,
-                dispatch_fn=_fake_dispatch,
-            ),
+        self._conn.execute(
+            "UPDATE agents_meta SET status=%s, termination_source='user', machine=%s WHERE id=%s",
+            (status, home, agent_id),
         )
-        assert status is AgentStatus.IDLING
-        # Dispatch was attempted (HTTP-uniform path)
-        assert len(dispatch_called) == 1
-        assert dispatch_called[0]["target_machine"] == "home-a"
-        assert dispatch_called[0]["payload"] == {
-            "path": "/api/agents/5/resurrect-if-pending-work",
-            "body": {"resurrected_by": "system", "prompt": None},
-            "trigger_inbound_id": 88,
-            "trigger_inbound_kind": "chat",
-        }
-        # Fallback: in-process resurrect happened
-        assert called == {
-            "agent_id": 5,
-            "resurrected_by": "system",
-            "trigger_inbound_id": 88,
-            "trigger_inbound_kind": "chat",
-        }
-        assert cleared == [5]
-
-    @pytest.mark.asyncio
-    async def test_remote_home_forwards_lifecycle_op(
-        self,
-        event_bus: EventBus,
-        *,
-        database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
-    ) -> None:
-        captured: dict[str, object] = {}
-        from base.api_contracts.agent_contract import AgentStatus
-
-        statuses = iter([AgentStatus.TERMINATED, AgentStatus.IDLING])
-        machine_identity.set(name="gateway-host")
-
-        async def _no_local(
-            _db: object, _bus: object, *_a: object, **_kw: object
-        ) -> ResurrectAgentResponse:
-            raise AssertionError("remote-homed resurrect must not launch locally")
-
-        async def _fake_dispatch(
-            _db: object, target_machine: str, kind: str, payload: dict, **_kw: object
-        ) -> dict:
-            captured.update(target=target_machine, kind=kind, payload=payload)
-            return {"status": "spawned"}
-
-        status = await lifecycle.resurrect_if_terminated(
-            db_from_gate(database_gate=database_gate),
-            event_bus,
-            7,
-            trigger_inbound_id=99,
-            trigger_inbound_kind=InboundKind.CHAT,
-            local_machine=machine_identity.name(),
-            hooks=_placement_hooks(
-                status_fn=lambda _db, _aid: next(statuses),
-                machine_fn=lambda _db, _aid: "runner-a",
-                resurrect_op_fn=_no_local,
-                dispatch_fn=_fake_dispatch,
-            ),
+        self._conn.commit()
+        trigger_id = insert_inbound_message(
+            self._conn,
+            agent_id,
+            "wake me",
+            source,
+            kind,
+            bus=self._bus,
+            database=self._database,
         )
-        assert status is AgentStatus.IDLING
-        assert captured["target"] == "runner-a"
-        assert captured["kind"] == "lifecycle"
-        assert captured["payload"] == {
-            "path": "/api/agents/7/resurrect-if-pending-work",
-            "body": {"resurrected_by": "system", "prompt": None},
-            "trigger_inbound_id": 99,
-            "trigger_inbound_kind": "chat",
-        }
+        return Waiting(agent_id, trigger_id)
 
-    @pytest.mark.asyncio
-    async def test_remote_home_unreachable_skips(
-        self,
-        caplog: pytest.LogCaptureFixture,
-        event_bus: EventBus,
-        *,
-        database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
-    ) -> None:
-        from base.api_contracts.agent_contract import AgentStatus
-        from ops.cluster.rpc import ClusterOpUnreachable
 
-        machine_identity.set(name="gateway-host")
+@pytest.fixture
+def waitings(
+    db_conn: psycopg.Connection,
+    database: Database,
+    event_bus: EventBus,
+    config_authority: ConfigAuthority,
+    model_catalog: ModelCatalog,
+    database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
+) -> Waitings:
+    return Waitings(
+        db_conn,
+        database,
+        event_bus,
+        config_authority=config_authority,
+        model_catalog=model_catalog,
+        database_gate=database_gate,
+        machine_identity=machine_identity,
+    )
 
-        async def _unreachable(*_a: object, **_kw: object) -> dict:
-            raise ClusterOpUnreachable("ops server for machine='runner-a' unreachable")
 
-        with caplog.at_level("INFO"):
-            status = await lifecycle.resurrect_if_terminated(
-                db_from_gate(database_gate=database_gate),
-                event_bus,
-                7,
-                trigger_inbound_id=99,
-                trigger_inbound_kind=InboundKind.CHAT,
-                local_machine=machine_identity.name(),
-                hooks=_placement_hooks(
-                    status_fn=lambda _db, _aid: AgentStatus.TERMINATED,
-                    machine_fn=lambda _db, _aid: "runner-a",
-                    dispatch_fn=_unreachable,
-                ),
+def _register(
+    conn: psycopg.Connection, name: str, url: str | None, *, paused: bool = False
+) -> None:
+    conn.execute(
+        "INSERT INTO machines (name, role, gateway_url, paused_at) "
+        "VALUES (%s, %s, %s, CASE WHEN %s THEN now() END)",
+        (name, ["agent-runner"], url, paused),
+    )
+    conn.commit()
+
+
+# meiva:note
+# The home machine's ops server: it runs the lifecycle op it is sent, for real.
+def _home_ops_server(
+    db: Database, bus: EventBus, pool: ConnectionPool, catalog: ModelCatalog
+) -> Route:
+    def route(envelope: dict[str, object]) -> Reply:
+        payload = LifecyclePayload.model_validate(envelope["payload"])
+        response = asyncio.run(
+            lifecycle.lifecycle_op(
+                db,
+                bus,
+                payload.path,
+                payload.body,
+                pool,
+                trigger_inbound_id=payload.trigger_inbound_id,
+                trigger_inbound_kind=payload.trigger_inbound_kind,
+                catalog=catalog,
             )
-        assert status is AgentStatus.TERMINATED
-        assert "home machine unreachable" in caplog.text
-
-    @pytest.mark.asyncio
-    async def test_unknown_remote_op_failure_propagates(
-        self,
-        event_bus: EventBus,
-        *,
-        database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
-    ) -> None:
-        from base.api_contracts.agent_contract import AgentStatus
-        from ops.cluster.rpc import ClusterOpFailed
-
-        machine_identity.set(name="gateway-host")
-
-        async def _failed(*_a: object, **_kw: object) -> dict:
-            raise ClusterOpFailed({"error": "launch failed on the home machine"})
-
-        with pytest.raises(ClusterOpFailed):
-            await lifecycle.resurrect_if_terminated(
-                db_from_gate(database_gate=database_gate),
-                event_bus,
-                7,
-                trigger_inbound_id=99,
-                trigger_inbound_kind=InboundKind.CHAT,
-                local_machine=machine_identity.name(),
-                hooks=_placement_hooks(
-                    status_fn=lambda _db, _aid: AgentStatus.TERMINATED,
-                    machine_fn=lambda _db, _aid: "runner-a",
-                    dispatch_fn=_failed,
-                ),
-            )
-
-    @pytest.mark.asyncio
-    async def test_not_terminated_short_circuits(
-        self,
-        event_bus: EventBus,
-        *,
-        database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
-    ) -> None:
-        from base.api_contracts.agent_contract import AgentStatus
-
-        def _no_machine_read(_db: Database, _aid: int) -> str:
-            raise AssertionError("a live agent must not trigger a machine lookup")
-
-        status = await lifecycle.resurrect_if_terminated(
-            db_from_gate(database_gate=database_gate),
-            event_bus,
-            5,
-            trigger_inbound_id=99,
-            trigger_inbound_kind=InboundKind.CHAT,
-            local_machine=machine_identity.name(),
-            hooks=_placement_hooks(
-                status_fn=lambda _db, _aid: AgentStatus.RUNNING,
-                machine_fn=_no_machine_read,
-            ),
         )
-        assert status is AgentStatus.RUNNING
+        return Reply({"status": "completed", "result": response.model_dump(mode="json")})
+
+    return route
 
 
-class TestResurrectIfTerminatedNotificationGuard:
-    """A system-family chat trigger never resurrects its owner (user ruling
-    2026-08-27; task #3687): the watcher-reap notice that woke 6260 twice is a
-    queued notification, not a wake-up call. The guard reads the trigger row
-    itself; a missing row falls through to the normal path (the home runner's
-    final CAS still adjudicates stale work), and a DB read failure propagates
-    instead of silently becoming a skip."""
+def _status(conn: psycopg.Connection, agent_id: int) -> str:
+    row = conn.execute("SELECT status FROM agents_meta WHERE id=%s", (agent_id,)).fetchone()
+    conn.commit()
+    assert row is not None
+    return row[0]
 
-    @pytest.mark.asyncio
-    async def test_system_notice_trigger_skips_forward_and_launch(
+
+def _lifecycle_rows(conn: psycopg.Connection, agent_id: int) -> list[tuple[str, str]]:
+    rows = conn.execute(
+        "SELECT kind, source FROM inbound_messages WHERE agent_id=%s AND kind='resurrect'",
+        (agent_id,),
+    ).fetchall()
+    conn.commit()
+    return rows
+
+
+def _suppress_wakes(conn: psycopg.Connection, agent_id: int) -> None:
+    conn.execute(
+        "UPDATE agents_meta SET wake_suppressed_until=now()-interval '1 second', "
+        "wake_suppress_reason='resurrect_failed' WHERE id=%s",
+        (agent_id,),
+    )
+    conn.commit()
+
+
+def _suppression(conn: psycopg.Connection, agent_id: int) -> tuple[object, object]:
+    row = conn.execute(
+        "SELECT wake_suppressed_until, wake_suppress_reason FROM agents_meta WHERE id=%s",
+        (agent_id,),
+    ).fetchone()
+    conn.commit()
+    assert row is not None
+    return row
+
+
+class TestPlacement:
+    async def test_a_remote_home_is_asked_through_its_ops_server(
         self,
-        event_bus: EventBus,
-        *,
-        database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
-    ) -> None:
-        from base.api_contracts.agent_contract import AgentStatus
-
-        def _no_machine_read(_db: Database, _aid: int) -> str:
-            raise AssertionError("a system notice must not read or contact the home")
-
-        status = await lifecycle.resurrect_if_terminated(
-            db_from_gate(database_gate=database_gate),
-            event_bus,
-            5,
-            trigger_inbound_id=207124,
-            trigger_inbound_kind=InboundKind.CHAT,
-            local_machine=machine_identity.name(),
-            hooks=ResurrectPlacementHooks(
-                recovery_halted_fn=lambda _db, _aid: False,
-                clear_suppression_fn=lambda _db, _aid: None,
-                status_fn=lambda _db, _aid: AgentStatus.TERMINATED,
-                notice_source_fn=lambda _db, _aid, _iid: "system",
-                machine_fn=_no_machine_read,
-            ),
-        )
-        assert status is AgentStatus.TERMINATED
-
-    @pytest.mark.asyncio
-    async def test_missing_trigger_row_falls_through(
-        self,
+        db_conn: psycopg.Connection,
         database: Database,
         event_bus: EventBus,
-        *,
+        db_pool: ConnectionPool,
+        model_catalog: ModelCatalog,
+        waitings: Waitings,
         machine_identity: MachineIdentity,
     ) -> None:
-        """No row -> None -> the normal path runs; stale-work adjudication stays
-        with the home runner's final CAS. This drives the real read (the id
-        does not exist), not a stubbed one."""
-        from base.api_contracts.agent_contract import AgentStatus
+        machine_identity.set(name="gateway-host")
+        waiting = waitings.make(home="runner-a")
+        _suppress_wakes(db_conn, waiting.agent_id)
+        routes = {"/ops": _home_ops_server(database, event_bus, db_pool, model_catalog)}
+        with serve_post(routes) as home:
+            _register(db_conn, "runner-a", home.url)
 
-        statuses = iter([AgentStatus.TERMINATED, AgentStatus.IDLING])
+            status = await lifecycle.resurrect_if_terminated(
+                database,
+                event_bus,
+                waiting.agent_id,
+                trigger_inbound_id=waiting.trigger_id,
+                trigger_inbound_kind=InboundKind.CHAT,
+                local_machine=machine_identity.name(),
+            )
+
+        assert status is AgentStatus.IDLING
+        [posted] = home.posted
+        assert posted.path == "/ops"
+        assert posted.body["kind"] == "lifecycle"
+        assert str(posted.body["idempotency_key"]).startswith("lifecycle:")
+        assert posted.body["payload"] == {
+            "path": _RESURRECT_PATH.format(agent_id=waiting.agent_id),
+            "body": {"resurrected_by": "system", "prompt": None},
+            "trigger_inbound_id": waiting.trigger_id,
+            "trigger_inbound_kind": "chat",
+        }
+        assert _lifecycle_rows(db_conn, waiting.agent_id) == [("resurrect", "system")]
+        assert _suppression(db_conn, waiting.agent_id) == (None, None)
+
+    async def test_a_local_home_without_an_ops_server_resurrects_in_process(
+        self,
+        db_conn: psycopg.Connection,
+        database: Database,
+        event_bus: EventBus,
+        waitings: Waitings,
+        machine_identity: MachineIdentity,
+    ) -> None:
         machine_identity.set(name="home-a")
-        calls: list[int] = []
-
-        async def _fake_op(
-            _db: object,
-            _bus: object,
-            agent_id: int,
-            body: ResurrectAgentRequest,
-            *,
-            trigger_inbound_id: int | None = None,
-            trigger_inbound_kind: str | None = None,
-        ) -> ResurrectAgentResponse:
-            calls.append(agent_id)
-            return ResurrectAgentResponse(status=ResurrectResult.SPAWNED)
-
-        async def _unreachable(*_a: object, **_kw: object) -> dict:
-            raise lifecycle.cluster_rpc.ClusterOpUnreachable("no ops server")
+        waiting = waitings.make(home="home-a")
+        _suppress_wakes(db_conn, waiting.agent_id)
 
         status = await lifecycle.resurrect_if_terminated(
             database,
             event_bus,
-            5,
-            trigger_inbound_id=10**12,
+            waiting.agent_id,
+            trigger_inbound_id=waiting.trigger_id,
             trigger_inbound_kind=InboundKind.CHAT,
             local_machine=machine_identity.name(),
-            hooks=ResurrectPlacementHooks(
-                recovery_halted_fn=lambda _db, _aid: False,
-                clear_suppression_fn=lambda _db, _aid: None,
-                status_fn=lambda _db, _aid: next(statuses),
-                machine_fn=lambda _db, _aid: "home-a",
-                resurrect_op_fn=_fake_op,
-                dispatch_fn=_unreachable,
-            ),
         )
-        assert status is AgentStatus.IDLING
-        assert calls == [5]
 
-    @pytest.mark.asyncio
-    async def test_read_failure_propagates(
+        assert status is AgentStatus.IDLING
+        assert _status(db_conn, waiting.agent_id) == "idling"
+        assert _lifecycle_rows(db_conn, waiting.agent_id) == [("resurrect", "system")]
+        assert _suppression(db_conn, waiting.agent_id) == (None, None)
+
+    @pytest.mark.parametrize("registered_without_url", [False, True])
+    async def test_an_unreachable_remote_home_is_skipped_with_the_input_queued(
         self,
+        registered_without_url: bool,
+        caplog: pytest.LogCaptureFixture,
+        db_conn: psycopg.Connection,
+        database: Database,
         event_bus: EventBus,
-        *,
-        database_gate: ProcessDbGate,
+        waitings: Waitings,
         machine_identity: MachineIdentity,
     ) -> None:
-        """A failed trigger read must not be swallowed into a skip (review
-        note A): the error surfaces to the caller, mirroring how a failed
-        suppression / breaker read above fails loudly."""
-        from base.api_contracts.agent_contract import AgentStatus
+        machine_identity.set(name="gateway-host")
+        waiting = waitings.make(home="runner-a")
+        if registered_without_url:
+            _register(db_conn, "runner-a", None)
 
-        def _boom(_db: object, _aid: int, _iid: int) -> str | None:
-            raise RuntimeError("trigger read failed")
-
-        with pytest.raises(RuntimeError, match="trigger read failed"):
-            await lifecycle.resurrect_if_terminated(
-                db_from_gate(database_gate=database_gate),
+        with caplog.at_level(logging.INFO):
+            status = await lifecycle.resurrect_if_terminated(
+                database,
                 event_bus,
-                5,
-                trigger_inbound_id=207124,
+                waiting.agent_id,
+                trigger_inbound_id=waiting.trigger_id,
                 trigger_inbound_kind=InboundKind.CHAT,
                 local_machine=machine_identity.name(),
-                hooks=ResurrectPlacementHooks(
-                    recovery_halted_fn=lambda _db, _aid: False,
-                    clear_suppression_fn=lambda _db, _aid: None,
-                    status_fn=lambda _db, _aid: AgentStatus.TERMINATED,
-                    notice_source_fn=_boom,
-                ),
             )
 
-    def test_trigger_guard_reads_row_kind_source_and_payload(
-        self, db_conn: psycopg.Connection, database: Database, event_bus: EventBus
+        assert status is AgentStatus.TERMINATED
+        assert "home machine unreachable" in caplog.text
+        assert _lifecycle_rows(db_conn, waiting.agent_id) == []
+        assert db_conn.execute(
+            "SELECT status FROM inbound_messages WHERE id=%s", (waiting.trigger_id,)
+        ).fetchone() == ("pending",)
+
+    async def test_a_failed_op_on_the_home_machine_reaches_the_sender(
+        self,
+        db_conn: psycopg.Connection,
+        database: Database,
+        event_bus: EventBus,
+        waitings: Waitings,
+        machine_identity: MachineIdentity,
+        loguru_records: LogRecords,
     ) -> None:
-        """The guard reads the row itself: system-family chats are notices
-        (plain and variant), a user chat and a system_note are not, and a
-        missing row / foreign agent falls through to None. The payload marker
-        is a fail-closed carve-out: only the exact JSON boolean `true` lets a
-        system-family chat through — a missing key, null, or any other value
-        (even the string "true") stays a notice (task #3687 review, Meiva #3242)."""
-        from base.agents.inbox.insert import insert_inbound_message
-        from base.db import create_agent
+        machine_identity.set(name="gateway-host")
+        waiting = waitings.make(home="runner-a")
+        failed = Reply(
+            {"status": "failed", "result": {"error": "launch failed on the home machine"}}
+        )
+        with serve_post({"/ops": lambda _envelope: failed}) as home:
+            _register(db_conn, "runner-a", home.url)
 
-        aid = create_agent(db_conn)
-        db_conn.commit()
-        sys_iid = insert_inbound_message(
-            db_conn, aid, "notice", source="system", bus=event_bus, database=database
-        )
-        var_iid = insert_inbound_message(
-            db_conn, aid, "variant", source="system:notice-reply", bus=event_bus, database=database
-        )
-        user_iid = insert_inbound_message(
-            db_conn, aid, "hi", source="user", bus=event_bus, database=database
-        )
-        note_iid = insert_inbound_message(
-            db_conn,
-            aid,
-            "note",
-            source="system",
-            kind="system_note",
-            bus=event_bus,
-            database=database,
-        )
-        # A watcher's wake is source="watcher:<id>" — neither "system" nor a
-        # "system:" variant, so it is NOT a notice: a terminated owner with a
-        # live watcher is auto-resurrected at its next fire, same as any user
-        # chat (docs/decisions/runtime/updates/recovery/2026-09-27-watchers-are-never-restarted.md).
-        watcher_iid = insert_inbound_message(
-            db_conn, aid, "wake", source="watcher:7", bus=event_bus, database=database
+            with pytest.raises(ClusterOpFailed):
+                await lifecycle.resurrect_if_terminated(
+                    database,
+                    event_bus,
+                    waiting.agent_id,
+                    trigger_inbound_id=waiting.trigger_id,
+                    trigger_inbound_kind=InboundKind.CHAT,
+                    local_machine=machine_identity.name(),
+                )
+
+        assert loguru_records.events("auto_resurrect_failed") == []
+        assert _status(db_conn, waiting.agent_id) == "terminated"
+
+    async def test_a_paused_home_is_reported_and_the_input_stays_queued(
+        self,
+        db_conn: psycopg.Connection,
+        database: Database,
+        event_bus: EventBus,
+        waitings: Waitings,
+        machine_identity: MachineIdentity,
+        loguru_records: LogRecords,
+    ) -> None:
+        machine_identity.set(name="home-a")
+        waiting = waitings.make(home="home-a")
+        _register(db_conn, "home-a", None, paused=True)
+
+        status = await lifecycle.resurrect_if_terminated(
+            database,
+            event_bus,
+            waiting.agent_id,
+            trigger_inbound_id=waiting.trigger_id,
+            trigger_inbound_kind=InboundKind.CHAT,
+            local_machine=machine_identity.name(),
         )
 
-        assert lifecycle.system_notice_source_of_trigger(database, aid, sys_iid) == "system"
-        assert (
-            lifecycle.system_notice_source_of_trigger(database, aid, var_iid)
-            == "system:notice-reply"
-        )
-        assert lifecycle.system_notice_source_of_trigger(database, aid, user_iid) is None
-        assert lifecycle.system_notice_source_of_trigger(database, aid, note_iid) is None
-        assert lifecycle.system_notice_source_of_trigger(database, aid, watcher_iid) is None
-        assert lifecycle.system_notice_source_of_trigger(database, aid, 10**12) is None
-        assert lifecycle.system_notice_source_of_trigger(database, aid + 999, sys_iid) is None
+        assert status is AgentStatus.TERMINATED
+        assert [r["extra"]["agent_id"] for r in loguru_records.events("auto_resurrect_failed")] == [
+            waiting.agent_id
+        ]
+        assert _lifecycle_rows(db_conn, waiting.agent_id) == []
 
-        recovery_iid = insert_inbound_message(
-            db_conn,
-            aid,
-            "continue",
-            source="system",
-            payload={"hosted_turn_recovery": True},
-            bus=event_bus,
-            database=database,
-        )
-        assert lifecycle.system_notice_source_of_trigger(database, aid, recovery_iid) == "system"
-        user_marker_iid = insert_inbound_message(
-            db_conn,
-            aid,
-            "hi",
-            source="user",
-            payload={"hosted_turn_recovery": True},
-            bus=event_bus,
-            database=database,
-        )
-        assert lifecycle.system_notice_source_of_trigger(database, aid, user_marker_iid) is None
 
-        fail_closed: tuple[tuple[str, dict[str, object] | None], ...] = (
-            ("payload-absent", None),
-            ("key-absent", {"content_blocks": []}),
-            ("json-null", {"hosted_turn_recovery": None}),
-            ("boolean-false", {"hosted_turn_recovery": False}),
-            ("string-true", {"hosted_turn_recovery": "true"}),
-            ("number-1", {"hosted_turn_recovery": 1}),
-        )
-        for label, payload in fail_closed:
-            iid = insert_inbound_message(
-                db_conn,
-                aid,
-                "noticed",
-                source="system",
-                payload=payload,
-                bus=event_bus,
-                database=database,
+class TestGates:
+    async def test_a_live_agent_ends_the_call_after_its_status_read(
+        self,
+        db_conn: psycopg.Connection,
+        database: Database,
+        event_bus: EventBus,
+        waitings: Waitings,
+        machine_identity: MachineIdentity,
+    ) -> None:
+        machine_identity.set(name="gateway-host")
+        waiting = waitings.make(home="runner-a", status="running")
+        with serve_post({"/ops": lambda _envelope: Reply({})}) as home:
+            _register(db_conn, "runner-a", home.url)
+
+            status = await lifecycle.resurrect_if_terminated(
+                database,
+                event_bus,
+                waiting.agent_id,
+                trigger_inbound_id=waiting.trigger_id,
+                trigger_inbound_kind=InboundKind.CHAT,
+                local_machine=machine_identity.name(),
             )
-            assert lifecycle.system_notice_source_of_trigger(database, aid, iid) == "system", label
 
+        assert status is AgentStatus.RUNNING
+        assert home.posted == []
 
-@pytest.mark.asyncio
-async def test_spawned_auto_resurrect_clears_suppression_in_database(
-    db_conn: psycopg.Connection,
-    database: Database,
-    event_bus: EventBus,
-    *,
-    database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
-) -> None:
-    """A successful spawn is a durable recovery, not only an in-memory result."""
-    from base.agents.inbox.insert import insert_inbound_message
-    from base.api_contracts.agent_contract import AgentStatus
-    from base.db import create_agent
-
-    agent_id = create_agent(db_conn)
-    db_conn.execute(
-        "INSERT INTO agents_meta "
-        "(id,status,machine,wake_suppressed_until,wake_suppress_reason) "
-        "VALUES(%s,'terminated','remote-home',now()-interval '1 second','resurrect_failed')",
-        (agent_id,),
-    )
-    db_conn.commit()
-    trigger_id = insert_inbound_message(
-        db_conn, agent_id, "recover", source="user", bus=event_bus, database=database
-    )
-
-    async def _spawn_on_home(*_args: object, **_kwargs: object) -> dict[str, str]:
-        db_conn.execute("UPDATE agents_meta SET status='idling' WHERE id=%s", (agent_id,))
+    async def test_a_tripped_breaker_stops_a_background_trigger_before_any_home_contact(
+        self,
+        db_conn: psycopg.Connection,
+        database: Database,
+        event_bus: EventBus,
+        waitings: Waitings,
+        machine_identity: MachineIdentity,
+    ) -> None:
+        machine_identity.set(name="gateway-host")
+        waiting = waitings.make(home="runner-a", kind="heartbeat", source="system")
+        db_conn.execute(
+            "UPDATE agents_meta SET permanent_reject_streak=1,last_permanent_reject_reason='billing' "
+            "WHERE id=%s",
+            (waiting.agent_id,),
+        )
         db_conn.commit()
-        return {"status": "spawned"}
+        with serve_post({"/ops": lambda _envelope: Reply({})}) as home:
+            _register(db_conn, "runner-a", home.url)
 
-    status = await lifecycle.resurrect_if_terminated(
-        db_from_gate(database_gate=database_gate),
-        event_bus,
-        agent_id,
-        trigger_inbound_id=trigger_id,
-        trigger_inbound_kind=InboundKind.CHAT,
-        local_machine=machine_identity.name(),
-        hooks=ResurrectPlacementHooks(dispatch_fn=_spawn_on_home),
-    )
+            status = await lifecycle.resurrect_if_terminated(
+                database,
+                event_bus,
+                waiting.agent_id,
+                trigger_inbound_id=waiting.trigger_id,
+                trigger_inbound_kind=InboundKind.HEARTBEAT,
+                local_machine=machine_identity.name(),
+            )
 
-    assert status is AgentStatus.IDLING
-    assert db_conn.execute(
-        "SELECT wake_suppressed_until,wake_suppress_reason FROM agents_meta WHERE id=%s",
-        (agent_id,),
-    ).fetchone() == (None, None)
+        assert status is AgentStatus.TERMINATED
+        assert home.posted == []
+
+    async def test_a_system_notice_never_wakes_its_owner(
+        self,
+        db_conn: psycopg.Connection,
+        database: Database,
+        event_bus: EventBus,
+        waitings: Waitings,
+        machine_identity: MachineIdentity,
+    ) -> None:
+        machine_identity.set(name="gateway-host")
+        waiting = waitings.make(home="runner-a", source="system")
+        with serve_post({"/ops": lambda _envelope: Reply({})}) as home:
+            _register(db_conn, "runner-a", home.url)
+
+            status = await lifecycle.resurrect_if_terminated(
+                database,
+                event_bus,
+                waiting.agent_id,
+                trigger_inbound_id=waiting.trigger_id,
+                trigger_inbound_kind=InboundKind.CHAT,
+                local_machine=machine_identity.name(),
+            )
+
+        assert status is AgentStatus.TERMINATED
+        assert home.posted == []
+
+    # meiva:note
+    # No row reads as no notice, so the wake is forwarded and the home runner's final CAS
+    # adjudicates the stale input.
+    async def test_a_missing_trigger_row_is_not_a_notice_and_goes_to_the_home_cas(
+        self,
+        db_conn: psycopg.Connection,
+        database: Database,
+        event_bus: EventBus,
+        db_pool: ConnectionPool,
+        model_catalog: ModelCatalog,
+        waitings: Waitings,
+        machine_identity: MachineIdentity,
+    ) -> None:
+        machine_identity.set(name="gateway-host")
+        waiting = waitings.make(home="runner-a")
+        routes = {"/ops": _home_ops_server(database, event_bus, db_pool, model_catalog)}
+        with serve_post(routes) as home:
+            _register(db_conn, "runner-a", home.url)
+
+            status = await lifecycle.resurrect_if_terminated(
+                database,
+                event_bus,
+                waiting.agent_id,
+                trigger_inbound_id=10**9,
+                trigger_inbound_kind=InboundKind.CHAT,
+                local_machine=machine_identity.name(),
+            )
+
+        assert status is AgentStatus.TERMINATED
+        assert [posted.body["payload"] for posted in home.posted] == [
+            {
+                "path": _RESURRECT_PATH.format(agent_id=waiting.agent_id),
+                "body": {"resurrected_by": "system", "prompt": None},
+                "trigger_inbound_id": 10**9,
+                "trigger_inbound_kind": "chat",
+            }
+        ]
+        assert _lifecycle_rows(db_conn, waiting.agent_id) == []
+
+    async def test_a_read_failure_reaches_the_caller_instead_of_becoming_a_skip(
+        self,
+        database: Database,
+        event_bus: EventBus,
+        machine_identity: MachineIdentity,
+    ) -> None:
+        with pytest.raises(AgentNotFound):
+            await lifecycle.resurrect_if_terminated(
+                database,
+                event_bus,
+                10**9,
+                trigger_inbound_id=1,
+                trigger_inbound_kind=InboundKind.CHAT,
+                local_machine=machine_identity.name(),
+            )
+
+    async def test_a_kind_that_cannot_wake_an_agent_is_refused_before_any_contact(
+        self,
+        db_conn: psycopg.Connection,
+        database: Database,
+        event_bus: EventBus,
+        waitings: Waitings,
+        machine_identity: MachineIdentity,
+    ) -> None:
+        machine_identity.set(name="gateway-host")
+        waiting = waitings.make(home="runner-a", kind="restart", source="user")
+        with serve_post({"/ops": lambda _envelope: Reply({})}) as home:
+            _register(db_conn, "runner-a", home.url)
+
+            with pytest.raises(ValueError, match="cannot trigger resurrection"):
+                await lifecycle.resurrect_if_terminated(
+                    database,
+                    event_bus,
+                    waiting.agent_id,
+                    trigger_inbound_id=waiting.trigger_id,
+                    trigger_inbound_kind=cast(WakeTriggerKind, InboundKind.RESTART),
+                    local_machine=machine_identity.name(),
+                )
+
+        assert home.posted == []

@@ -13,7 +13,6 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 from typing import cast
-from unittest.mock import MagicMock
 
 import psycopg
 import pytest
@@ -24,6 +23,7 @@ from redis.client import PubSub
 from base.agents.messages.inbound import InboundKind
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
+from base.config import settings
 from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
@@ -34,16 +34,13 @@ from base.packages.plugin_providers import build_model_catalog
 from base.packages.tests.model_catalog import inert_keys
 from ops import lifecycle
 from ops.lifecycle import launch
+from ops.lifecycle.tests.loopback.agent_host import ServedAgentHost
 from ops.rpc_schemas import (
     RestartAgentRequest,
     ResurrectAgentRequest,
     SpawnAgentRequest,
     TerminateAgentRequest,
 )
-
-
-def db_from_gate(*, database_gate: ProcessDbGate) -> Database:
-    return Database.from_settings(gate=database_gate)
 
 
 class TestSpawnAgentRequestSourceValidation:
@@ -112,12 +109,6 @@ class TestRestartAgentRequestConfigOverlay:
     ) -> None:
         body = RestartAgentRequest(config_overlay=config_overlay)
         assert body.config_overlay == config_overlay
-
-
-@pytest.fixture
-def stub_pool() -> MagicMock:
-    """A pool test double: mocked operation helpers never access it."""
-    return MagicMock()
 
 
 class TestSpawnPrechecksBlocking:
@@ -214,6 +205,7 @@ async def test_restart_agent_op_terminated_short_circuits(
             RestartAgentRequest(source="user"),
             pool,
             catalog=build_model_catalog(),
+            default_model=settings.lm.llm_model,
         )
         assert received.get_message(timeout=0.1) is None
     assert resp.status == "already_terminated"
@@ -222,24 +214,29 @@ async def test_restart_agent_op_terminated_short_circuits(
     ).fetchone() == (0,)
 
 
+# meiva:note
+# The runner reparses forwarded restart bodies before any DB write.
 @pytest.mark.asyncio
 async def test_restart_lifecycle_op_validates_overlay_on_the_runner(
-    stub_pool: MagicMock,
+    lifecycle_agent_id: int,
+    db_conn: psycopg.Connection,
+    db_pool: ConnectionPool,
     database: Database,
     event_bus: EventBus,
-    *,
-    machine_identity: MachineIdentity,
+    model_catalog: ModelCatalog,
 ) -> None:
-    """The runner reparses forwarded restart bodies before any DB write."""
     with pytest.raises(ValidationError):
         await lifecycle.lifecycle_op(
             database,
             event_bus,
-            "/api/agents/9/restart",
+            f"/api/agents/{lifecycle_agent_id}/restart",
             {"config_overlay": {"definitely_not_a_config_field": "x"}},
-            stub_pool,
-            catalog=build_model_catalog(),
+            db_pool,
+            catalog=model_catalog,
         )
+    assert db_conn.execute(
+        "SELECT count(*) FROM inbound_messages WHERE agent_id=%s", (lifecycle_agent_id,)
+    ).fetchone() == (0,)
 
 
 @pytest.mark.asyncio
@@ -291,15 +288,10 @@ async def test_terminate_agent_op_terminated_short_circuits(
     event_bus: EventBus,
     db_conn: psycopg.Connection,
     db_pool: ConnectionPool,
+    agent_host: ServedAgentHost,
 ) -> None:
     db_conn.execute("UPDATE agents_meta SET status='terminated' WHERE id=%s", (lifecycle_agent_id,))
     db_conn.commit()
-
-    def no_kill(agent_id: int, *, before_session_index: int) -> list[int]:
-        raise AssertionError("a terminate without the option never kills shell sessions")
-
-    async def no_cancel(agent_id: int) -> None:
-        raise AssertionError("an already terminated agent has no turn to cancel")
 
     resp = await lifecycle.terminate_agent_op(
         database,
@@ -307,11 +299,11 @@ async def test_terminate_agent_op_terminated_short_circuits(
         lifecycle_agent_id,
         TerminateAgentRequest(),
         db_pool,
-        cancel_turn=no_cancel,
-        kill_shells=no_kill,
+        host=agent_host.host,
     )
     assert resp.status == "already_terminated"
     assert resp.shell_sessions is None
+    assert agent_host.cancel_requests == []
     assert db_conn.execute(
         "SELECT count(*) FROM inbound_messages WHERE agent_id=%s", (lifecycle_agent_id,)
     ).fetchone() == (0,)
@@ -346,11 +338,10 @@ async def test_lifecycle_op_parses_path_to_terminate(
 
 @pytest.mark.asyncio
 async def test_lifecycle_op_unparseable_path_raises(
-    stub_pool: MagicMock,
     database: Database,
     event_bus: EventBus,
-    *,
-    machine_identity: MachineIdentity,
+    db_pool: ConnectionPool,
+    model_catalog: ModelCatalog,
 ) -> None:
     with pytest.raises(ValueError, match="lifecycle path not recognized"):
         await lifecycle.lifecycle_op(
@@ -358,51 +349,51 @@ async def test_lifecycle_op_unparseable_path_raises(
             event_bus,
             "/api/agents/bogus",
             {},
-            stub_pool,
-            catalog=build_model_catalog(),  # type: ignore[arg-type]
+            db_pool,
+            catalog=model_catalog,
         )
 
 
+# meiva:note
+# The internal path fails closed when its CAS evidence is missing. Agent 42 does not exist, so a
+# refusal that came after a database read would be an `AgentNotFound`, not this `ValueError`.
 @pytest.mark.asyncio
 async def test_guarded_resurrect_path_requires_trigger(
-    stub_pool: MagicMock,
     database: Database,
     event_bus: EventBus,
-    *,
-    machine_identity: MachineIdentity,
+    db_pool: ConnectionPool,
+    model_catalog: ModelCatalog,
 ) -> None:
-    """The new internal path fails closed when its CAS evidence is missing."""
     with pytest.raises(ValueError, match="requires trigger inbound"):
         await lifecycle.lifecycle_op(
             database,
             event_bus,
             "/api/agents/42/resurrect-if-pending-work",
             {"resurrected_by": "system"},
-            stub_pool,
-            catalog=build_model_catalog(),  # type: ignore[arg-type]
+            db_pool,
+            catalog=model_catalog,
         )
 
 
+# meiva:note
+# A mismatched path/guard pair cannot silently fall back to an unconditional manual resurrect.
 @pytest.mark.asyncio
 async def test_manual_lifecycle_path_rejects_auto_resurrect_trigger(
-    stub_pool: MagicMock,
     database: Database,
     event_bus: EventBus,
-    *,
-    machine_identity: MachineIdentity,
+    db_pool: ConnectionPool,
+    model_catalog: ModelCatalog,
 ) -> None:
-    """A mismatched path/guard pair cannot silently fall back to an
-    unconditional manual resurrect."""
     with pytest.raises(ValueError, match="only valid for resurrect-if-pending-work"):
         await lifecycle.lifecycle_op(
             database,
             event_bus,
             "/api/agents/42/resurrect-explicit",
             {"resurrected_by": "system"},
-            stub_pool,  # type: ignore[arg-type]
+            db_pool,
             trigger_inbound_id=99,
             trigger_inbound_kind=InboundKind.CHAT,
-            catalog=build_model_catalog(),
+            catalog=model_catalog,
         )
 
 

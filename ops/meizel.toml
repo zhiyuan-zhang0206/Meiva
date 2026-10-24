@@ -1,15 +1,16 @@
-exports = ["agents", "alerts.py", "cluster", "cluster_status", "env_audit.py", "host_config.py", "inventory.py", "lifecycle", "pages.py", "pty_close_notices.py", "rpc_schemas", "to_user.py", "upload_delivery.py"]
+exports = ["agents", "alerts.py", "cluster", "cluster_status", "env_audit", "host_config.py", "inventory", "lifecycle", "pages.py", "pty_close_notices", "rpc_schemas", "to_user.py", "upload_delivery"]
 
 [uses]
 "agents" = ["rpc_schemas"]
 "cluster" = ["cluster_status", "rpc_schemas"]
 "cluster_status" = ["rpc_schemas"]
-"host_config.py" = ["env_audit.py", "rpc_schemas"]
-"inventory.py" = ["rpc_schemas"]
+"host_config.py" = ["env_audit", "rpc_schemas"]
+"inventory" = ["rpc_schemas"]
 "lifecycle" = ["agents", "cluster", "cluster_status", "pages.py", "rpc_schemas", "tests"]
 "pages.py" = ["rpc_schemas"]
-"pty_close_notices.py" = ["cluster_status", "rpc_schemas"]
-"tests" = ["cluster", "cluster_status", "env_audit.py", "host_config.py", "inventory.py", "pages.py", "pty_close_notices.py", "rpc_schemas"]
+"pty_close_notices" = ["cluster_status", "rpc_schemas", "tests"]
+"tests" = ["alerts.py", "cluster", "cluster_status", "env_audit", "host_config.py", "pages.py", "rpc_schemas", "to_user.py"]
+"upload_delivery" = ["tests"]
 
 [purity]
 "__init__.py" = "strict"

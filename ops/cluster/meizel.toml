@@ -1,4 +1,8 @@
-exports = ["operations.py", "rpc.py"]
+exports = ["operations.py", "rpc.py", "rpc_plans.py"]
+
+[uses]
+"rpc.py" = ["rpc_plans.py"]
 
 [purity]
 "__init__.py" = "strict"
+"rpc_plans.py" = "strict"

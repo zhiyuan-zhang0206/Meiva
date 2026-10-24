@@ -37,7 +37,7 @@ started have finished (`agent_ops/in_flight.py`: `serve_until_sigterm`, `drain`)
 what is left is named at ERROR and cancelled. The roster declares
 `OPS_STOP_CEILING_S` as the unit's `stop_ceiling_s`, so root waits for that window.
 The dispatch pool runs `min_size=0`. Shell-closure notices are not an ops task: `meiva stop` writes
-them itself (`ops/pty_close_notices.py`). A cluster update stops and starts each unit through
+them itself (`ops/pty_close_notices/`). A cluster update stops and starts each unit through
 `cli.fleet_update`, not through ops kinds. See [[services/agent_runner/agent_host/lifecycle/docs/graceful-exit.meiva.okf.md|Agent-host graceful exit]].
 
 ## Strongly-Typed Wire Layer (`ops/rpc_schemas/__init__.py`)

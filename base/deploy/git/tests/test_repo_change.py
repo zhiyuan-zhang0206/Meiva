@@ -73,7 +73,7 @@ def test_a_test_under_a_doc_root_is_code(path: str) -> None:
     "path",
     [
         "schedules/db-write-stall-watch-schedule.py",
-        "schedules/catchup.py",
+        "schedules/jobs/catchup.py",
         "schedules/docs/entry-composition.meiva.okf.md",
     ],
 )

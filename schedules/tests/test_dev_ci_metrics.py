@@ -1,266 +1,255 @@
+# meiva:note
+# The daily Dev/CI metrics run.
+#
+# Which timed workflows are broken and what the P0 lead is told are decisions over values. The
+# shell is run against a program standing in for `gh` (`fake_gh.py`, a real child process), the
+# real CI exporter writing its cache and snapshot under `tmp_path`, and a gateway on a loopback
+# port that records the messages sent to the P0 lead.
+
 from __future__ import annotations
 
-import importlib.util
-import sys
+import json
+import os
 import subprocess
-from collections.abc import Callable, Sequence
+import sys
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
-from types import ModuleType, SimpleNamespace
-from typing import Any
-from unittest.mock import Mock
+from typing import Literal
 
 import pytest
 
-from base.clock.tests.manual_timers import ManualTimers
+from base.agents.context import MeivaContext
+from base.clock import SYSTEM_TIMERS
+from base.cluster.machine import MachineIdentity
+from base.db import Database
+from base.telemetry.tests.capture.event_capture import EmittedEvents
+from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
+from meiva.gateway_client import use_client
+from schedules.jobs.catchup import cluster_timezone
+from schedules.jobs.ci_metrics import CiMetrics, alert_broken_workflows, collect_ci_metrics
+from schedules.plans.ci_workflows import (
+    Alert,
+    WatchedWorkflow,
+    WorkflowRun,
+    consecutive_failures,
+    day_counts,
+    failure_message,
+    parse_workflow_runs,
+    plan_alert,
+    previous_day,
+)
+from schedules.plans.directory_plan import ReportRecipient
+from scripts.ci.pull_requests.export_process import GhProcess
+from schedules.tests.gateway_directory import (
+    AgentRowSpec,
+    DirectoryPage,
+    GatewayRequest,
+    serve_gateway,
+)
+from schedules.tests.schedule_support import borrowed_inputs
 
 _ROOT = Path(__file__).resolve().parents[2]
-_SCHEDULE = _ROOT / "schedules" / "dev-ci-metrics-schedule.py"
+_FAKE_GH = Path(__file__).parent / "children" / "fake_gh.py"
+_LEAD = ReportRecipient("dev-ci-metrics", "MEIVA_CI_METRICS_REPORT_AGENT", "lead", None)
+_DURATIONS = WatchedWorkflow("refresh-test-durations.yml", "CI keeps splitting shards badly")
+_PRICING = WatchedWorkflow("update-model-pricing.yml", "the price catalog drifts")
 
 
-class WorkflowReplies:
-    def __init__(self, payload: str) -> None:
-        self.payload = payload
-        self.commands: list[list[str]] = []
-
-    def __call__(
-        self, argv: Sequence[str], *, timeout: float, capture_output: bool, text: bool
-    ) -> subprocess.CompletedProcess[str]:
-        assert timeout == 60 and capture_output and text
-        assert list(argv[:4]) == ["gh", "api", "--method", "GET"]
-        assert "/actions/workflows/" in argv[4]
-        self.commands.append(list(argv))
-        return subprocess.CompletedProcess(argv, 0, self.payload, "")
-
-
-def _load() -> ModuleType:
-    spec = importlib.util.spec_from_file_location("dev_ci_metrics", _SCHEDULE)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = module
-    try:
-        spec.loader.exec_module(module)
-    finally:
-        sys.modules.pop(spec.name, None)
-    return module
-
-
-def test_fire_runs_default_repo_and_logs_previous_complete_day(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    module = _load()
-    calls: list[list[str]] = []
-    gh = WorkflowReplies('{"workflow_runs": [{"conclusion": "success"}]}')
-    supplied_timers = ManualTimers()
-
-    def run_exporter(
-        args: list[str], *, producer: Callable[[], Any], run_process: object, timers: object
-    ) -> int:
-        assert run_process is gh
-        assert timers is supplied_timers
-        assert producer == module.meiva.context.clients.event_pipeline
-        calls.append(args)
-        return 0
-
-    def snapshot(exporter: object) -> dict[str, object]:
-        return {
-            "repositories": {"owner/repo": {"days": {"2026-09-03": {"runs": 7, "failed_runs": 2}}}}
-        }
-
-    exporter = SimpleNamespace(DEFAULT_REPO="owner/repo", main=run_exporter)
-    failures: list[str] = []
-
-    module._fire(
-        datetime(2026, 9, 3, 22, 20, tzinfo=UTC),
-        None,
-        run_process=gh,
-        timers=supplied_timers,
-        cluster_timezone=lambda: "Asia/Shanghai",
-        exporter_loader=lambda: exporter,
-        snapshot_loader=snapshot,
-        failure_reporter=failures.append,
+def _runs(*conclusions: str | None) -> tuple[WorkflowRun, ...]:
+    return tuple(
+        WorkflowRun(conclusion, f"https://example.test/{index}", f"2026-09-0{index + 1}")
+        for index, conclusion in enumerate(conclusions)
     )
-
-    assert calls == [["--repo", "owner/repo"]]
-    assert "2026-09-03 — 7 runs, 2 failed" in capsys.readouterr().out
-    assert failures == []
-    assert len(gh.commands) == len(module._SCHEDULED_WORKFLOWS)
-    assert supplied_timers.sleeps == []
-
-
-def test_fire_reports_failed_collector() -> None:
-    module = _load()
-
-    def failed_exporter(
-        args: list[str], *, producer: Callable[[], Any], run_process: object, timers: object
-    ) -> int:
-        assert producer == module.meiva.context.clients.event_pipeline
-        return 1
-
-    failures: list[str] = []
-
-    module._fire(
-        datetime(2026, 9, 3, 22, 20, tzinfo=UTC),
-        None,
-        run_process=WorkflowReplies('{"workflow_runs": []}'),
-        timers=ManualTimers(),
-        exporter_loader=lambda: SimpleNamespace(DEFAULT_REPO="owner/repo", main=failed_exporter),
-        failure_reporter=failures.append,
-    )
-
-    assert len(failures) == 1
-    assert "exited non-zero" in failures[0]
-    assert module.CRON == "20 6 * * *"
-
-
-def test_report_agent_override_rejects_nonnumeric_value() -> None:
-    module = _load()
-
-    with pytest.raises(
-        RuntimeError, match="MEIVA_CI_METRICS_REPORT_AGENT must be a numeric agent id"
-    ):
-        module._report_agent(env={module._REPORT_AGENT_ENV: "not-an-id"})
-
-
-def test_report_failure_uses_exact_label_and_existing_message() -> None:
-    module = _load()
-    unrelated = SimpleNamespace(agent_id=31, label="another", status=module.S.RUNNING)
-    target = SimpleNamespace(agent_id=17, label=module._REPORT_LABEL, status=module.S.IDLING)
-    find = Mock(
-        side_effect=[
-            SimpleNamespace(agents=[unrelated], next_cursor=31),
-            SimpleNamespace(agents=[target], next_cursor=None),
-        ]
-    )
-    send = Mock()
-
-    module._report_failure(
-        "exporter failed",
-        env={},
-        list_agents_fn=find,
-        send_message_fn=send,
-    )
-
-    assert [call.kwargs for call in find.call_args_list] == [
-        {"scope": "all", "query": module._REPORT_LABEL, "before_id": None},
-        {"scope": "all", "query": module._REPORT_LABEL, "before_id": 31},
-    ]
-    send.assert_called_once_with(
-        17,
-        "Dev/CI metrics collection failed:\nexporter failed\n"
-        "Check the schedule log; backfill with `scripts/ci/pull_requests/runs_export.py --repo "
-        "zhiyuan-zhang0206/Meiva --print-snapshot`.",
-    )
-
-
-def test_load_exporter_resolves_under_scripts_ci() -> None:
-    module = _load()
-    saved_path = list(sys.path)
-    try:
-        loaded = module._load_exporter()
-        assert (
-            Path(loaded.__file__).resolve()
-            == _ROOT / "scripts" / "ci" / "pull_requests" / "runs_export.py"
-        )
-    finally:
-        sys.path[:] = saved_path
 
 
 # meiva:note
-# Newest first: a streak ends at the first run that did not fail. A run still in
-# progress (conclusion None) is not a failure and must not inflate the streak.
+# Newest first: a streak ends at the first run that did not fail. A run still in progress
+# (conclusion None) is not a failure and must not inflate the streak.
 def test_consecutive_failures_counts_only_the_leading_failures() -> None:
-    module = _load()
-    runs = [
-        {"conclusion": "failure"},
-        {"conclusion": "failure"},
-        {"conclusion": "success"},
-        {"conclusion": "failure"},
-    ]
-    assert module.consecutive_failures(runs) == 2
-    assert module.consecutive_failures([{"conclusion": "success"}]) == 0
-    assert module.consecutive_failures([{"conclusion": None}, {"conclusion": "failure"}]) == 0
-    assert module.consecutive_failures([]) == 0
+    assert consecutive_failures(_runs("failure", "failure", "success", "failure")) == 2
+    assert consecutive_failures(_runs("success")) == 0
+    assert consecutive_failures(_runs(None, "failure")) == 0
+    assert consecutive_failures(()) == 0
 
 
-def test_every_timed_pipeline_that_updates_shared_state_is_watched() -> None:
-    module = _load()
-    assert set(module._SCHEDULED_WORKFLOWS) == {
-        "refresh-test-durations.yml",
-        "update-model-pricing.yml",
-    }
-    assert module._CONSECUTIVE_FAILURES_ALERT == 2
+def test_two_failures_in_a_row_make_an_alert_that_names_the_cost_and_the_newest_run() -> None:
+    alert = plan_alert(_DURATIONS, _runs("failure", "failure", "success"))
 
-
-def test_each_watched_workflow_names_what_its_failure_costs() -> None:
-    module = _load()
-    gh = WorkflowReplies(
-        '{"workflow_runs": [{"conclusion": "failure"}, {"conclusion": "failure"}]}'
-    )
-    sent: list[str] = []
-
-    module._alert_broken_scheduled_workflows(
-        "owner/repo",
-        run_process=gh,
-        timers=ManualTimers(),
-        notify=sent.append,
+    assert alert == Alert(
+        2,
+        "Scheduled workflow refresh-test-durations.yml failed 2 runs in a row. It does not "
+        "block a pull request, so a red run is silent by default: while it keeps failing, "
+        "CI keeps splitting shards badly.\n"
+        "Newest run: https://example.test/0 (2026-09-01)\n"
+        "Find the failing step; the fix is accepted only after two consecutive successful nights.",
     )
 
-    assert len(sent) == len(module._SCHEDULED_WORKFLOWS)
-    assert "test-duration model" in next(m for m in sent if "refresh-test-durations.yml" in m)
-    assert "cost figure" in next(m for m in sent if "update-model-pricing.yml" in m)
+
+def test_one_failure_is_not_yet_an_alert() -> None:
+    assert plan_alert(_DURATIONS, _runs("failure", "success")) is None
+    assert plan_alert(_DURATIONS, ()) is None
 
 
-def test_a_broken_timed_workflow_messages_the_p0_lead() -> None:
-    module = _load()
-    gh = WorkflowReplies(
-        '{"workflow_runs": [{"conclusion": "failure", "html_url": "u2", "created_at": "t2"}, {"conclusion": "failure", "html_url": "u1", "created_at": "t1"}]}'
+def test_a_runs_listing_is_read_into_runs() -> None:
+    payload = json.dumps(
+        {"workflow_runs": [{"conclusion": "failure", "html_url": "u", "created_at": "t"}, {}]}
     )
-    sent: list[str] = []
-    module._alert_broken_scheduled_workflows(
-        "owner/repo",
-        run_process=gh,
-        timers=ManualTimers(),
-        notify=sent.append,
+
+    assert parse_workflow_runs(payload, "w.yml") == (
+        WorkflowRun("failure", "u", "t"),
+        WorkflowRun(None, None, None),
     )
-    assert len(sent) == len(module._SCHEDULED_WORKFLOWS)
-    assert "failed 2 runs in a row" in sent[0]
-    assert "u2" in sent[0]
 
 
-def test_a_single_failure_does_not_message() -> None:
-    module = _load()
-    gh = WorkflowReplies(
-        '{"workflow_runs": [{"conclusion": "failure"}, {"conclusion": "success"}]}'
+@pytest.mark.parametrize("payload", ['{"other": 1}', "[]", '{"workflow_runs": "x"}'])
+def test_a_listing_without_runs_is_refused(payload: str) -> None:
+    with pytest.raises(TypeError, match=r"w\.yml: the runs listing carried no workflow_runs"):
+        parse_workflow_runs(payload, "w.yml")
+
+
+def test_the_reported_day_is_the_cluster_day_before_the_slot() -> None:
+    slot = datetime(2026, 9, 3, 22, 20, tzinfo=UTC)
+
+    assert previous_day(slot, "Asia/Shanghai") == "2026-09-03"
+    assert previous_day(slot, "UTC") == "2026-09-02"
+
+
+def test_a_days_counts_come_from_the_snapshot() -> None:
+    snapshot = {"repositories": {"o/r": {"days": {"2026-09-03": {"runs": 7, "failed_runs": 2}}}}}
+
+    assert day_counts(snapshot, "2026-09-03", "o/r") == (7, 2)
+    with pytest.raises(KeyError):
+        day_counts(snapshot, "2026-09-04", "o/r")
+    with pytest.raises(TypeError, match="expected an object"):
+        day_counts([], "2026-09-03", "o/r")
+
+
+def test_the_failure_message_names_the_backfill() -> None:
+    assert failure_message("exporter failed") == (
+        "Dev/CI metrics collection failed:\nexporter failed\n"
+        "Check the schedule log; backfill with `scripts/ci/pull_requests/runs_export.py --repo "
+        "zhiyuan-zhang0206/Meiva --print-snapshot`."
     )
-    sent: list[str] = []
-    module._alert_broken_scheduled_workflows(
-        "owner/repo",
-        run_process=gh,
-        timers=ManualTimers(),
-        notify=sent.append,
-    )
-    assert sent == []
 
 
-def test_workflow_query_runs_real_exporter_transport() -> None:
-    module = _load()
-    calls: list[list[str]] = []
-    timers = ManualTimers()
+def test_manifest_cron_is_the_collection_slot() -> None:
+    manifest = json.loads((_ROOT / "schedules" / "manifest.json").read_text())
+    entry = next(i for i in manifest["builtin_schedules"] if i["name"] == "dev-ci-metrics")
+    assert entry["script"] == "dev-ci-metrics-schedule.py"
+    assert "06:20 cluster time" in entry["description"]
 
-    def run_process(
-        argv: Sequence[str], *, timeout: float, capture_output: bool, text: bool
+
+def _gh(workflows: dict[str, Sequence[str | None] | Literal["invalid"]], *, fail: bool = False):
+    env = {**os.environ, "FAKE_GH_WORKFLOWS": json.dumps(workflows)}
+    if fail:
+        env["FAKE_GH_FAIL"] = "1"
+
+    def run(
+        argv: Sequence[str],
+        /,
+        *,
+        timeout: float,
+        capture_output: Literal[True],
+        text: Literal[True],
     ) -> subprocess.CompletedProcess[str]:
-        assert timeout == 60 and capture_output and text
-        assert list(argv[:4]) == ["gh", "api", "--method", "GET"]
-        calls.append(list(argv))
-        return subprocess.CompletedProcess(
-            argv, 0, '{"workflow_runs": [{"conclusion": "failure"}]}', ""
+        return subprocess.run(
+            [sys.executable, str(_FAKE_GH), *argv[1:]],
+            env=env,
+            timeout=timeout,
+            capture_output=capture_output,
+            text=text,
+            check=False,
         )
 
-    runs = module._workflow_runs(
-        "owner/repo", "refresh-test-durations.yml", run_process=run_process, timers=timers
+    return run
+
+
+def _job(state_dir: Path, run_process: GhProcess) -> CiMetrics:
+    return CiMetrics(
+        tz=cluster_timezone(),
+        recipient=_LEAD,
+        watched=(_DURATIONS, _PRICING),
+        state_dir=state_dir,
+        run_process=run_process,
+        timers=SYSTEM_TIMERS,
     )
-    assert runs == [{"conclusion": "failure"}]
-    assert len(calls) == 1 and calls[0][4].endswith("refresh-test-durations.yml/runs?per_page=10")
-    assert timers.sleeps == []
+
+
+def _messages(requests: list[GatewayRequest]) -> list[str]:
+    return [str(r.body["content"]) for r in requests if r.path.endswith("/messages")]
+
+
+_PAGES = (DirectoryPage("lead", None, (AgentRowSpec(17, "lead", "idling"),), None),)
+
+
+def test_a_broken_timed_workflow_messages_the_p0__lead_once(
+    sdk_environment: MeivaContext, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    run_process = _gh(
+        {_DURATIONS.file: ["failure", "failure"], _PRICING.file: ["failure", "success"]}
+    )
+
+    with serve_gateway(_PAGES) as gateway, gateway.client() as client, use_client(client):
+        alert_broken_workflows("owner/repo", _job(tmp_path, run_process))
+
+    [message] = _messages(gateway.requests)
+    assert message.startswith("Scheduled workflow refresh-test-durations.yml failed 2 runs")
+    assert (
+        "dev-ci-metrics: refresh-test-durations.yml failed 2 runs in a row"
+        in capsys.readouterr().out
+    )
+
+
+def test_an_unreadable_listing_is_logged_and_the_next_workflow_is_still_checked(
+    sdk_environment: MeivaContext, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    run_process = _gh({_DURATIONS.file: "invalid", _PRICING.file: ["failure", "failure"]})
+
+    with serve_gateway(_PAGES) as gateway, gateway.client() as client, use_client(client):
+        alert_broken_workflows("owner/repo", _job(tmp_path, run_process))
+
+    [message] = _messages(gateway.requests)
+    assert message.startswith("Scheduled workflow update-model-pricing.yml failed 2 runs")
+    assert "refresh-test-durations.yml runs unreadable: JSONDecodeError" in capsys.readouterr().out
+
+
+def test_a_quiet_collection_reports_the_previous_day_and_emits_the_snapshot(
+    database: Database,
+    machine_identity: MachineIdentity,
+    emitted_events: EmittedEvents,
+    sdk_environment: MeivaContext,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    run_process = _gh({_DURATIONS.file: ["success"], _PRICING.file: ["success"]})
+    inputs = borrowed_inputs(database, emitted_events.producer, machine_identity, _ROOT)
+
+    with serve_gateway(_PAGES) as gateway, gateway.client() as client, use_client(client):
+        collect_ci_metrics(datetime.now(UTC), None, job=_job(tmp_path, run_process), inputs=inputs)
+
+    assert _messages(gateway.requests) == []
+    assert "runs, 0 failed" in capsys.readouterr().out
+    assert (tmp_path / "snapshot.json").is_file()
+    assert "ci_runs_daily" in emitted_events.names()
+
+
+def test_a_failing_exporter_wakes_the_p0_lead_with_the_failure(
+    database: Database,
+    machine_identity: MachineIdentity,
+    emitted_events: EmittedEvents,
+    sdk_environment: MeivaContext,
+    tmp_path: Path,
+) -> None:
+    inputs = borrowed_inputs(database, emitted_events.producer, machine_identity, _ROOT)
+
+    with serve_gateway(_PAGES) as gateway, gateway.client() as client, use_client(client):
+        collect_ci_metrics(
+            datetime.now(UTC), None, job=_job(tmp_path, _gh({}, fail=True)), inputs=inputs
+        )
+
+    [message] = _messages(gateway.requests)
+    assert message.startswith(
+        "Dev/CI metrics collection failed:\nRuntimeError: ci-runs-export exited non-zero"
+    )
+    assert not (tmp_path / "snapshot.json").exists()

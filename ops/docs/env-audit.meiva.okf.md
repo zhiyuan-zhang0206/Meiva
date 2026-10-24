@@ -1,13 +1,13 @@
 ---
 type: doc
 title: Base — .env write audit & integrity guard
-description: ops/env_audit.py — owner-only JSONL history of official .env writes (ts, site, pid, process, redacted command line, actor, trace id, key names, digest; old/new values for non-sensitive fields only) and a read-boundary guard that surfaces out-of-band modifications as an env_unauthorized_write anomaly.
+description: ops/env_audit/ — owner-only JSONL history of official .env writes (ts, site, pid, process, redacted command line, actor, trace id, key names, digest; old/new values for non-sensitive fields only) and a read-boundary guard that surfaces out-of-band modifications as an env_unauthorized_write anomaly.
 tags: []
 ---
 
 # Base — .env write audit & integrity guard
 
-- **`.env` write audit** (`ops/env_audit.py`): every post-bootstrap official `.env` write records
+- **`.env` write audit** (`ops/env_audit/`): every post-bootstrap official `.env` write records
   an owner-only (0600) JSONL history entry. Record v2 (2026-09-16, task #3588; additive — older
   records simply lack the new fields) carries: timestamp, site, pid, process, redacted command line
   (executable only); the initiating credential fact — `actor` (`user_session:<subject>` /
@@ -44,12 +44,23 @@ tags: []
   `.env.audit.armed` marker (a no-op upsert neither records nor arms — with the byte-level skip it
   is not a write), so deletion, emptiness, corruption, or a missing digest in an armed
   history is reported and rebuilt rather than silently returning to the fresh-home state.
-  `check_env_integrity(machine_reader=...)` borrows the actual read-boundary
-  owner's name reader; it resolves identity only when recording a violation.
+  `check_env_integrity(env_path=..., machine_name=...)` takes the `.env` it audits and the machine
+  label of the read-boundary owner as values; the label only names the emitted event.
   Ordinary writes and audit preparation do not resolve identity. The guard: a freshly born or joined home has neither marker nor history
   and remains unarmed by design; otherwise the guard takes the same `.env` lock as the writers,
   compares the current digest, and on mismatch appends one self-rate-limited `unauthorized` record,
   emits `env_unauthorized_write` (audit/anomaly), and logs an error. The guard runs at the gateway
   config read boundary (`GET /api/config`).
+
+- **Layout**: `ops/env_audit/__init__.py` is the shell: it reads the config registry, the process,
+  the clock and the files, and writes the history, the marker and the events. The decisions are
+  strict modules over values: `redaction.py` (which aliases keep values, the executable-only
+  command line), `write_record.py` (the JSONL record and the value-free `env_write` payload) and
+  `integrity_plan.py` (armed or not, intact or tampered, whether to rebuild the history, the
+  anomaly record and event). Every function takes the `.env` path it audits; none resolves the
+  process home. Writers in `base` (`runtime_config.write_fields`, `dotenv_file.upsert_env`,
+  `dotenv_file.remove_env`) call `EnvWriteAudit.prepare` and `.record`; the order they call them
+  in is pinned by tests against an `EnvAudit` double, and the real audit is tested against real
+  files.
 
 Parent: [[base/docs/base.meiva.okf.md|base library]].

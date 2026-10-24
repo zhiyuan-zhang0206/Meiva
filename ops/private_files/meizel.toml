@@ -1,18 +1,10 @@
 [uses]
-"__init__.py" = ["model.py"]
+"__init__.py" = ["model.py", "report.py", "verdicts.py"]
 "__main__.py" = ["__init__.py"]
-"tests" = ["__init__.py", "__main__.py"]
+"report.py" = ["model.py"]
+"tests" = ["__init__.py", "__main__.py", "model.py", "report.py", "verdicts.py"]
 
 [purity]
-"." = "strict-to-be"
 "model.py" = "strict"
-
-[debt.impure-call]
-"__init__.py#Path.is_dir" = 1
-"__init__.py#Path.is_file" = 1
-"__init__.py#Path.open" = 1
-"__init__.py#Path.read_text" = 1
-"__init__.py#import subprocess" = 1
-
-[debt.impure-edge]
-"__init__.py#base/paths/home.py" = 1
+"report.py" = "strict"
+"verdicts.py" = "strict"
