@@ -83,7 +83,7 @@ def test_the_saved_cache_is_read_back_through_the_actions_ci_uses() -> None:
     assert check["env"]["SAVED_KEY"] == "${{ needs.publish.outputs.key }}"
 
 
-def test_ci_resolves_once_in_classify_and_every_shard_restores_that_key() -> None:
+def test_ci_resolves_one_duration_key_in_classify_before_selection() -> None:
     jobs = _yaml(_CI)["jobs"]
     classify = jobs["classify"]
     assert classify["permissions"] == {"contents": "read", "actions": "read"}
@@ -92,16 +92,50 @@ def test_ci_resolves_once_in_classify_and_every_shard_restores_that_key() -> Non
     assert resolve["id"] == "durations"
     assert resolve["uses"] == "./.github/actions/resolve-test-durations"
     names = [step.get("name") for step in classify["steps"]]
+    # meiva:note
     # The selector reads the restored file, so the restore comes first.
     assert names.index("Restore the test durations") < names.index(
         "Select runtime-impact test subset"
     )
-    for name in ("backend-shard", "e2e-shard"):
-        job = jobs[name]
-        restore = _step(job["steps"], "Restore the test durations")
-        assert restore["uses"] == "./.github/actions/restore-test-durations"
-        assert restore["with"]["key"] == "${{ needs.classify.outputs.durations_key }}"
-        assert "classify" in job["needs"]
+    resolvers = [
+        name
+        for name, job in jobs.items()
+        if any(
+            step.get("uses") == "./.github/actions/resolve-test-durations" for step in job["steps"]
+        )
+    ]
+    assert resolvers == ["classify"]
+
+
+@pytest.mark.parametrize(
+    ("name", "restore_name"),
+    [
+        ("backend-plan", "Restore the full population's test durations"),
+        ("backend-selected", "Restore the test durations"),
+        ("e2e-shard", "Restore the test durations"),
+    ],
+)
+def test_ci_planner_and_direct_consumers_restore_the_classified_key(
+    name: str, restore_name: str
+) -> None:
+    job = _yaml(_CI)["jobs"][name]
+    restore = _step(job["steps"], restore_name)
+    assert restore["uses"] == "./.github/actions/restore-test-durations"
+    assert restore["with"]["key"] == "${{ needs.classify.outputs.durations_key }}"
+    assert "classify" in job["needs"]
+
+
+def test_full_shards_use_the_duration_input_paired_with_the_exact_plan() -> None:
+    jobs = _yaml(_CI)["jobs"]
+    steps = jobs["backend-shard"]["steps"]
+    assert all(step.get("uses") != "./.github/actions/restore-test-durations" for step in steps)
+    published = _step(jobs["backend-plan"]["steps"], "Publish the required plan")
+    assert "tmp/file-shards/durations.json" in published["with"]["path"].splitlines()
+    download = _step(steps, "Download this run's shared plan")
+    assert download["with"]["artifact-ids"] == "${{ steps.shared-plan.outputs.artifact_id }}"
+    restore = _step(steps, "Restore the plan's paired duration input")
+    assert "cp tmp/file-shards/durations.json .test_durations" in restore["run"]
+    assert "rm -f .test_durations" in restore["run"]
 
 
 def test_a_key_that_stops_restoring_fails_instead_of_splitting_differently() -> None:
