@@ -1,15 +1,16 @@
 from __future__ import annotations
 
 import asyncio
-import socket
+
+from base.host.env import port_lease
 
 
+# meiva:note
+# One port this session holds, from the host-wide lease: the number is refused to
+# every other live holder on the host, so two workers — or two runs of one shard on
+# one machine — cannot be given it.
 def find_free_port() -> int:
-    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    s.bind(("127.0.0.1", 0))
-    port = s.getsockname()[1]
-    s.close()
-    return port
+    return port_lease.lease_ports(1)[0]
 
 
 async def http_get(port: int, path: str) -> tuple[int, bytes]:

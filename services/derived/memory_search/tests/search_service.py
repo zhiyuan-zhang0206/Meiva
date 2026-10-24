@@ -6,7 +6,6 @@
 
 from __future__ import annotations
 
-import socket
 import threading
 import time
 from collections.abc import Generator
@@ -15,14 +14,17 @@ from pathlib import Path
 
 import uvicorn
 
+from base.host.env import port_lease
 from services.derived.memory_search.app import build_app
 from services.derived.memory_search.store import MemoryStore
 
 
+# meiva:note
+# One port this session holds, from the host-wide lease: the number is refused to
+# every other live holder on the host, so two workers — or two runs of one shard on
+# one machine — cannot be given it.
 def free_port() -> int:
-    with socket.socket() as probe:
-        probe.bind(("127.0.0.1", 0))
-        return probe.getsockname()[1]
+    return port_lease.lease_ports(1)[0]
 
 
 # meiva:note

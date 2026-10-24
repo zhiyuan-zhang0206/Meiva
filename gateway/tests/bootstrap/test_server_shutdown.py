@@ -32,7 +32,6 @@ from __future__ import annotations
 import http.client
 import os
 import signal
-import socket
 import subprocess
 import sys
 import time
@@ -43,6 +42,7 @@ from typing import IO
 
 import pytest
 
+from base.host.env import port_lease
 from gateway.tests.bootstrap.child_gateway_scenarios import (
     MARKERS_ENV as _MARKERS_ENV,
 )
@@ -140,10 +140,12 @@ class _Child:
         self.log_file.close()
 
 
+# meiva:note
+# One port this session holds, from the host-wide lease: the number is refused to
+# every other live holder on the host, so two workers — or two runs of one shard on
+# one machine — cannot be given it.
 def _free_port() -> int:
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-        sock.bind(("127.0.0.1", 0))
-        return int(sock.getsockname()[1])
+    return port_lease.lease_ports(1)[0]
 
 
 def _connect_with_retry(port: int, *, timeout_s: float = 15.0) -> http.client.HTTPConnection:

@@ -1,16 +1,17 @@
 from __future__ import annotations
 
-import socket
-
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
+from base.host.env import port_lease
 from services.derived.memory_indexer.backends import probe
 
 
+# meiva:note
+# One port this session holds, from the host-wide lease: the number is refused to every
+# other live holder on the host, so two workers — or two runs of one shard on one machine —
+# cannot be given it.
 def _free_port() -> int:
-    with socket.socket() as probe_socket:
-        probe_socket.bind(("127.0.0.1", 0))
-        return probe_socket.getsockname()[1]
+    return port_lease.lease_ports(1)[0]
 
 
 def test_probe_numpy_unreachable_is_actionable(*, database_gate: ProcessDbGate) -> None:

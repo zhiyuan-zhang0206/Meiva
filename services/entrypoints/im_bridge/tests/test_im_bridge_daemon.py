@@ -25,6 +25,7 @@ from base.cluster.machine import GatewayAccess, GatewayApiTokenMissing, gateway_
 from base.config import ConfigBoot
 from base.daemon.health import Liveness, start_health_server
 from base.db import Database
+from base.host.env import port_lease
 from base.native_process.loaded_commit import LoadedCommit
 from services.entrypoints.im_bridge import daemon
 from services.entrypoints.im_bridge.adapters.feishu import FeishuAdapter
@@ -48,10 +49,12 @@ _REPO_ROOT = Path(__file__).resolve().parents[4]
 _TIMINGS = daemon.DaemonTimings(liveness_beat_s=0.02, notice_poll_s=0.05, outbound_round_s=0.05)
 
 
+# meiva:note
+# One port this session holds, from the host-wide lease: the number is refused to
+# every other live holder on the host, so two workers — or two runs of one shard on
+# one machine — cannot be given it.
 def _free_port() -> int:
-    with socket.socket() as reservation:
-        reservation.bind(("127.0.0.1", 0))
-        return reservation.getsockname()[1]
+    return port_lease.lease_ports(1)[0]
 
 
 def _get(port: int, path: str = "/healthz") -> tuple[int, dict[str, Any]] | None:
