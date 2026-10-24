@@ -4,7 +4,9 @@ import { createElement, useEffect } from "react";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { apiWrapper, fakeApi } from "../transport/tests/api/fake-api";
+import { ApiProvider } from "../transport/transport-context";
+import { startGateway, type GatewayReply, type TestGateway } from "../transport/tests/api/api-provider";
+import { gatewayRig, type HttpRig } from "../transport/tests/api/api-provider";
 import { usePendingMessages } from "../agents/use-pending-messages";
 import { useTokenUsage } from "./use-token-usage";
 import type { ConversationSnapshotResponse, SystemEvent, TokenUsageResponse } from "../contracts/types";
@@ -43,20 +45,12 @@ let queryClient: QueryClient;
 let visibility: DocumentVisibilityState;
 const showError = vi.fn();
 
-const Gateway = apiWrapper(fakeApi({
-  getTokenUsage: (id, signal) => new Promise((resolve) => {
-    reads.push({ id, signal, domain: "token-usage", finish: (value) => resolve(tokenSnapshot(value)) });
-  }),
-  getPendingMessages: (id, signal) => new Promise((resolve) => {
-    reads.push({ id, signal, domain: "pending", finish: (value) => resolve([
-      { id: value, content: String(value), source: "user", sender: "user", images: null,
-        created_at: "2026-09-16T00:00:00Z" },
-    ]) });
-  }),
-  getConversationSnapshot: (id, signal) => new Promise((resolve) => {
-    reads.push({ id, signal, domain: "snapshot", finish: (value) => resolve(composedSnapshot(value)) });
-  }),
-}));
+let gateway: TestGateway;
+let rig: HttpRig;
+
+function Gateway({ children }: { children: ReactNode }) {
+  return createElement(ApiProvider, { api: rig.api, children });
+}
 
 function setVisibility(value: DocumentVisibilityState): void {
   visibility = value;
@@ -87,19 +81,39 @@ function wrapper({ children }: { children: ReactNode }) {
   return createElement(QueryClientProvider, { client: queryClient }, createElement(Gateway, null, children));
 }
 
-beforeEach(() => {
+beforeEach(async () => {
   showError.mockClear();
   reads = [];
+  gateway = await startGateway((request) => {
+    const match = /^\/api\/agents\/(\d+)\/(token-usage|pending|conversation-snapshot)$/.exec(request.path);
+    if (match === null) return { kind: "text", status: 404, body: "unexpected route" };
+    const signal = rig.sent.findLast((sent) => sent.url === `${gateway.origin}${request.path}`)?.init.signal;
+    if (signal == null) throw new Error("the native request has no observed abort signal");
+    const domain = match[2] === "conversation-snapshot" ? "snapshot" : match[2];
+    if (domain !== "snapshot" && domain !== "pending" && domain !== "token-usage") {
+      throw new Error("unexpected detail route");
+    }
+    return new Promise<GatewayReply>((resolve) => {
+      reads.push({ id: Number(match[1]), signal, domain, finish: (value) => {
+        const body = domain === "snapshot" ? composedSnapshot(value)
+          : domain === "token-usage" ? tokenSnapshot(value) : composedSnapshot(value).pending;
+        resolve({ kind: "json", body });
+      } });
+    });
+  });
+  rig = gatewayRig(gateway);
   visibility = "visible";
   Object.defineProperty(document, "visibilityState", { configurable: true, get: () => visibility });
   queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 });
 
-afterEach(() => {
+afterEach(async () => {
   cleanup();
   queryClient.clear();
+  for (const read of reads) read.finish(0);
   vi.useRealTimers();
   Reflect.deleteProperty(document, "visibilityState");
+  await gateway.close();
 });
 
 describe.each<Domain>(["token-usage", "pending"])("%s selected read ownership", (domain) => {
@@ -123,6 +137,7 @@ describe.each<Domain>(["token-usage", "pending"])("%s selected read ownership", 
     const { result } = renderHook(() => useRead(domain, 42), { wrapper });
     await waitFor(() => expect(reads).toHaveLength(1));
     await act(async () => { reads[0].finish(1); await Promise.resolve(); });
+    await waitFor(() => expect(result.current).toBe(1));
     pushOpen();
     await waitFor(() => expect(reads).toHaveLength(2));
     expect(reads[1].domain).toBe("snapshot");
@@ -155,7 +170,7 @@ describe.each<Domain>(["token-usage", "pending"])("%s selected read ownership", 
     });
     await waitFor(() => expect(reads).toHaveLength(1));
     pushOpen();
-    vi.useFakeTimers();
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     if (cause === "hidden") {
       setVisibility("hidden");
     } else if (cause === "unmount") {
@@ -191,7 +206,7 @@ it("pending turn-start bursts cannot postpone repair and leave a trailing read",
   await waitFor(() => expect(reads).toHaveLength(1));
   await act(async () => { reads[0].finish(1); await Promise.resolve(); });
   await waitFor(() => expect(queryClient.isFetching()).toBe(0));
-  vi.useFakeTimers();
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
   const start = () => {
     act(() => {
       for (const handler of systemHandlers) handler({ role: "chat_start", agent_id: 42, item_id: "1.0" });
@@ -201,11 +216,11 @@ it("pending turn-start bursts cannot postpone repair and leave a trailing read",
   await act(async () => { await vi.advanceTimersByTimeAsync(150); });
   start();
   await act(async () => { await vi.advanceTimersByTimeAsync(50); });
-  expect(reads).toHaveLength(2);
+  await vi.waitFor(() => expect(reads).toHaveLength(2));
   start();
   await act(async () => {
     reads[1].finish(2);
     await vi.advanceTimersByTimeAsync(200);
   });
-  expect(reads).toHaveLength(3);
+  await vi.waitFor(() => expect(reads).toHaveLength(3));
 });

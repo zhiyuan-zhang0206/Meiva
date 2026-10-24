@@ -209,7 +209,7 @@ describe("useTimeline mount + pagination", () => {
     const failure = new ApiError(503, "Checkpoint history unavailable for agent 42");
     timeline.queue(rejects(failure));
     const { result } = renderHook(() => useTimeline(42, vi.fn()), { wrapper });
-    await waitFor(() => expect(result.current.error).toBe(failure));
+    await waitFor(() => expect(result.current.error).toMatchObject({ status: failure.status, message: failure.message }));
     expect(result.current.isLoading).toBe(false);
     expect(ctx.getQueryClient().getQueryData(["timeline", 42])).toBeUndefined();
     expect(result.current.items).toEqual([]);
@@ -231,10 +231,10 @@ describe("useTimeline mount + pagination", () => {
     const failure = new ApiError(503, "Checkpoint history unavailable for agent 42");
     timeline.queue(rejects(failure));
     act(() => result.current.retryTimeline());
-    await waitFor(() => expect(result.current.error).toBe(failure));
+    await waitFor(() => expect(result.current.error).toMatchObject({ status: failure.status, message: failure.message }));
     expect(result.current.items[0]?.payload).toBe("retained history");
     let complete: ((page: TimelineResponse) => void) | undefined;
-    timeline.queue(() => new Promise((resolve) => { complete = resolve; }));
+    timeline.queue(new Promise<TimelineResponse>((resolve) => { complete = resolve; }).then(resolves));
     act(() => result.current.retryTimeline());
     await waitFor(() => expect(result.current.isFetching).toBe(true));
     expect(result.current.items[0]?.payload).toBe("retained history");

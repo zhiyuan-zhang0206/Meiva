@@ -12,6 +12,7 @@ import type { UseTimelineTestContext } from "./use-timeline-context";
 export function registerUseTimelineOwnershipTests(ctx: UseTimelineTestContext): void {
   const {
     timeline,
+    wireReplies,
     snapshot,
     timelineReads,
     snapshotReads,
@@ -42,29 +43,28 @@ describe("selected timeline ownership", () => {
   });
 
   it("rapid A to B to A aborts obsolete reads and cannot accept the first A response", async () => {
-    const reads: { id: number; signal: AbortSignal; resolve: (data: TimelineResponse) => void }[] = [];
-    timeline.always((id, opts) => new Promise((resolve) => {
-      if (!opts?.signal) throw new Error("missing AbortSignal");
-      reads.push({ id, signal: opts.signal, resolve });
-    }));
+    const reads = timelineReads;
+    const finishes: ((data: TimelineResponse) => void)[] = [];
+    timeline.queue(...Array.from({ length: 3 }, () =>
+      new Promise<TimelineResponse>((resolve) => { finishes.push(resolve); }).then(resolves)));
     const { result, rerender } = renderHook(({ id }: { id: number }) => useTimeline(id, vi.fn()), {
       initialProps: { id: 1 }, wrapper,
     });
     await waitFor(() => expect(reads).toHaveLength(1));
     rerender({ id: 2 });
     await waitFor(() => expect(reads).toHaveLength(2));
-    expect(reads[0].signal.aborted).toBe(true);
+    expect(reads[0].signal?.aborted).toBe(true);
     rerender({ id: 1 });
     await waitFor(() => expect(reads).toHaveLength(3));
-    expect(reads[1].signal.aborted).toBe(true);
+    expect(reads[1].signal?.aborted).toBe(true);
     await act(async () => {
-      reads[2].resolve(tlResp([snapshotItem({ item_id: "1.0", payload: "current A" })]));
+      finishes[2](tlResp([snapshotItem({ item_id: "1.0", payload: "current A" })]));
       await Promise.resolve();
     });
     await waitFor(() => expect(result.current.items[0]?.payload).toBe("current A"));
     await act(async () => {
-      reads[0].resolve(tlResp([snapshotItem({ item_id: "1.0", payload: "obsolete A" })]));
-      reads[1].resolve(tlResp([snapshotItem({ item_id: "1.0", payload: "obsolete B" })]));
+      finishes[0](tlResp([snapshotItem({ item_id: "1.0", payload: "obsolete A" })]));
+      finishes[1](tlResp([snapshotItem({ item_id: "1.0", payload: "obsolete B" })]));
       await Promise.resolve();
     });
     expect(result.current.items.map((item) => item.payload)).toEqual(["current A"]);
@@ -72,20 +72,18 @@ describe("selected timeline ownership", () => {
 
   it("aborts old history pages even after switching back to the same agent", async () => {
     let finishPage!: (data: TimelineResponse) => void;
-    let pageSignal: AbortSignal | undefined;
     const showError = vi.fn();
-    timeline.always((_id, opts) => {
-      if (opts?.before) {
-        pageSignal = opts.signal;
-        return new Promise((resolve) => { finishPage = resolve; });
-      }
-      return Promise.resolve(tlResp([snapshotItem({ item_id: "5.0", payload: "current" })], true));
-    });
+    timeline.always(resolves(tlResp([snapshotItem({ item_id: "5.0", payload: "current" })], true)));
+    wireReplies.set("/api/agents/1/timeline?before=5.0", [
+      new Promise<TimelineResponse>((resolve) => { finishPage = resolve; }).then(resolves),
+    ]);
     const { result, rerender } = renderHook(({ id }: { id: number }) => useTimeline(id, showError), {
       initialProps: { id: 1 }, wrapper,
     });
     await waitFor(() => expect(result.current.hasMoreOlder).toBe(true));
     act(() => result.current.loadOlder());
+    await waitFor(() => expect(timelineReads.some((read) => read.before === "5.0")).toBe(true));
+    const pageSignal = timelineReads.find((read) => read.before === "5.0")?.signal;
     rerender({ id: 2 });
     expect(pageSignal?.aborted).toBe(true);
     rerender({ id: 1 });
@@ -99,19 +97,17 @@ describe("selected timeline ownership", () => {
 
   it.each(["hidden", "compact"])("%s abandons a history request without accepting its late response", async (cause) => {
     let finishPage!: (data: TimelineResponse) => void;
-    let pageSignal: AbortSignal | undefined;
     const showError = vi.fn();
-    timeline.always((_id, opts) => {
-      if (opts?.before) {
-        pageSignal = opts.signal;
-        return new Promise((resolve) => { finishPage = resolve; });
-      }
-      return Promise.resolve(tlResp([snapshotItem({ item_id: "5.0", payload: "current" })], true));
-    });
+    timeline.always(resolves(tlResp([snapshotItem({ item_id: "5.0", payload: "current" })], true)));
+    wireReplies.set("/api/agents/1/timeline?before=5.0", [
+      new Promise<TimelineResponse>((resolve) => { finishPage = resolve; }).then(resolves),
+    ]);
     const { result } = renderHook(() => useTimeline(1, showError), { wrapper });
     await waitFor(() => expect(result.current.hasMoreOlder).toBe(true));
     act(() => result.current.loadOlder());
     expect(result.current.loadingOlder).toBe(true);
+    await waitFor(() => expect(timelineReads.some((read) => read.before === "5.0")).toBe(true));
+    const pageSignal = timelineReads.find((read) => read.before === "5.0")?.signal;
     if (cause === "hidden") {
       setVisibility("hidden");
     } else {
@@ -128,21 +124,20 @@ describe("selected timeline ownership", () => {
   });
 
   it("returning after an inactive compact refreshes to the authoritative tail on reattach", async () => {
-    let compacted = false;
-    timeline.always((id) => Promise.resolve(
-      tlResp([snapshotItem({ item_id: "1.0", payload: id === 1 && compacted ? "compacted A" : `agent ${id}` })]),
-    ));
-    snapshot.always(() =>
-      Promise.resolve(composedSnapshot(tlResp([
-        snapshotItem({ item_id: "1.0", payload: "compacted A" }),
-      ]))));
+    for (const id of [1, 2]) {
+      wireReplies.set(`/api/agents/${id}/timeline`, [resolves(tlResp([
+        snapshotItem({ item_id: "1.0", payload: `agent ${id}` }),
+      ]))]);
+    }
+    snapshot.always(resolves(composedSnapshot(tlResp([
+      snapshotItem({ item_id: "1.0", payload: "compacted A" }),
+    ]))));
     const { result, rerender } = renderHook(({ id }: { id: number }) => useTimeline(id, vi.fn()), {
       initialProps: { id: 1 }, wrapper,
     });
     await waitFor(() => expect(result.current.items[0]?.payload).toBe("agent 1"));
     rerender({ id: 2 });
     await waitFor(() => expect(result.current.items[0]?.payload).toBe("agent 2"));
-    compacted = true;
     pushEvent({ role: "chat_delta", agent_id: 1, item_id: "8.0", content: "late old A" });
     rerender({ id: 1 });
 
@@ -160,7 +155,7 @@ describe("selected timeline ownership", () => {
 describe("selected opening-gap reconcile", () => {
   it("reads again after a pre-open initial read settles", async () => {
     let finish!: (value: TimelineResponse) => void;
-    timeline.queue(() => new Promise((resolve) => { finish = resolve; }));
+    timeline.queue(new Promise<TimelineResponse>((resolve) => { finish = resolve; }).then(resolves));
     timeline.always(resolves(tlResp([snapshotItem({ item_id: "1.0", payload: "unexpected per-domain read" })])));
     snapshot.always(resolves(
       composedSnapshot(tlResp([snapshotItem({ item_id: "1.0", payload: "committed before stream opened" })])),
@@ -184,7 +179,7 @@ describe("selected opening-gap reconcile", () => {
     ));
     let finishSnapshot!: (value: ConversationSnapshotResponse) => void;
     snapshot.always(
-      () => new Promise((resolve) => { finishSnapshot = resolve; }),
+      new Promise<ConversationSnapshotResponse>((resolve) => { finishSnapshot = resolve; }).then(resolves),
     );
     const { result } = renderHook(() => useTimeline(42, vi.fn()), { wrapper });
     await waitFor(() => expect(result.current.items[0]?.payload).toBe("stable"));
@@ -208,21 +203,15 @@ describe("selected opening-gap reconcile", () => {
 
 describe("compact retention request ownership", () => {
   it("a reconnect-only compact replacement reattaches the previous session once", async () => {
-    let compacted = false;
-    const tailWindow = () => tlResp(compacted ? postWindow() : [
+    timeline.always(resolves(tlResp([
       snapshotItem({ item_id: "90.0", payload: "before gap" }),
-    ], true);
-    timeline.always((_id, opts) => {
-      if (opts?.before) return Promise.resolve(tlResp([
-        snapshotItem({ item_id: "s1.gap.1.0", payload: "retained across reconnect" }),
-      ], false));
-      return Promise.resolve(tailWindow());
-    });
-    snapshot.always(() =>
-      Promise.resolve(composedSnapshot(tailWindow())));
+    ], true)));
+    wireReplies.set("/api/agents/1/timeline?before=2.0", [resolves(tlResp([
+      snapshotItem({ item_id: "s1.gap.1.0", payload: "retained across reconnect" }),
+    ], false))]);
     const { result } = renderHook(() => useTimeline(1, vi.fn()), { wrapper });
     await waitFor(() => expect(result.current.items[0]?.payload).toBe("before gap"));
-    compacted = true;
+    snapshot.always(resolves(composedSnapshot(tlResp(postWindow(), true))));
     pushConnectionEvent({ type: "open" });
     await waitFor(() => expect(result.current.items.map((item) => item.payload)).toContain("retained across reconnect"));
     expect(useTimelineStore.getState().compactReplaceSeq).toBe(1);
@@ -235,15 +224,15 @@ describe("compact retention request ownership", () => {
   });
 
   it.each(["switch", "hidden", "unmount", "clear"].flatMap((cause) => [2, -1].map((retention) => ({ cause, retention }))))("$cause cancels retention $retention and rejects its late completion", async ({ cause, retention }) => {
-    const pages: { signal: AbortSignal; resolve: (page: TimelineResponse) => void }[] = [];
+    const pages = () => timelineReads.filter((read) => read.before !== undefined);
+    const finishes: ((page: TimelineResponse) => void)[] = [];
+    const held = Array.from({ length: 3 }, () =>
+      new Promise<TimelineResponse>((resolve) => { finishes.push(resolve); }).then(resolves));
     const showError = vi.fn();
     seedSettings({ "display.compact_history_sessions": retention });
-    timeline.always((_id, opts) => {
-      if (!opts?.before) return Promise.resolve(tlResp(postWindow(), true));
-      if (!opts.signal) throw new Error("History requires cancellation");
-      const signal = opts.signal;
-      return new Promise((resolve) => { pages.push({ signal, resolve }); });
-    });
+    timeline.always(resolves(tlResp(postWindow(), true)));
+    wireReplies.set("/api/agents/1/timeline?before=2.0", [held[0], held[1]]);
+    wireReplies.set("/api/agents/1/timeline?before=s1.new.1.0", [held[2]]);
     const view = renderHook<ReturnType<typeof useTimeline>, { id: number | null }>(
       ({ id }) => useTimeline(id, showError), { initialProps: { id: 1 }, wrapper },
     );
@@ -253,14 +242,14 @@ describe("compact retention request ownership", () => {
       pushEvent({ role: "timeline_snapshot", agent_id: 1, msg_count: 3, items: postWindow() });
     };
     compact();
-    await waitFor(() => expect(pages).toHaveLength(1));
+    await waitFor(() => expect(pages()).toHaveLength(1));
     if (cause === "switch") {
       view.rerender({ id: 2 });
       view.rerender({ id: 1 });
       await waitFor(() => expect(view.result.current.items).toHaveLength(3));
       compact();
 
-      await waitFor(() => expect(pages).toHaveLength(2));
+      await waitFor(() => expect(pages()).toHaveLength(2));
     } else if (cause === "hidden") {
       setVisibility("hidden");
     } else if (cause === "clear") {
@@ -268,30 +257,30 @@ describe("compact retention request ownership", () => {
     } else {
       view.unmount();
     }
-    expect(pages[0].signal.aborted).toBe(true);
+    expect(pages()[0].signal?.aborted).toBe(true);
     await act(async () => {
-      pages[0].resolve(tlResp([snapshotItem({ item_id: "s1.old.1.0", payload: "obsolete retained page" })], true));
+      finishes[0](tlResp([snapshotItem({ item_id: "s1.old.1.0", payload: "obsolete retained page" })], true));
       await Promise.resolve();
     });
     expect(useTimelineStore.getState().items.some((item) => item.payload === "obsolete retained page")).toBe(false);
-    expect(pages).toHaveLength(cause === "switch" ? 2 : 1);
+    expect(pages()).toHaveLength(cause === "switch" ? 2 : 1);
     if (cause === "hidden") {
       setVisibility("visible");
 
-      await waitFor(() => expect(pages).toHaveLength(2));
+      await waitFor(() => expect(pages()).toHaveLength(2));
     }
     if (cause === "switch" || cause === "hidden") {
-      expect(pages[1].signal.aborted).toBe(false);
+      expect(pages()[1].signal?.aborted).toBe(false);
       await act(async () => {
-        pages[1].resolve(tlResp([snapshotItem({ item_id: "s1.new.1.0", payload: "current retained page" })], true));
+        finishes[1](tlResp([snapshotItem({ item_id: "s1.new.1.0", payload: "current retained page" })], true));
         await Promise.resolve();
       });
-      await waitFor(() => expect(pages).toHaveLength(3));
+      await waitFor(() => expect(pages()).toHaveLength(3));
       await act(async () => {
-        pages[2].resolve(tlResp([snapshotItem({ item_id: "s2.new.1.0", payload: "older retained page" })], false));
+        finishes[2](tlResp([snapshotItem({ item_id: "s2.new.1.0", payload: "older retained page" })], false));
         await Promise.resolve();
       });
-      expect(view.result.current.items.map((item) => item.payload)).toContain("older retained page");
+      await waitFor(() => expect(view.result.current.items.map((item) => item.payload)).toContain("older retained page"));
     }
     expect(showError).not.toHaveBeenCalled();
   });
@@ -301,7 +290,7 @@ describe("latest-message refresh lifecycle", () => {
   it("exposes the shared reconcile request as fetching until the new tail lands", async () => {
     ctx.getQueryClient().setQueryData(["timeline", 7], tlResp([snapshotItem({ item_id: "1.0", payload: "Cached reply" })]));
     let finish!: (snapshot: ReturnType<typeof composedSnapshot>) => void;
-    snapshot.always(() => new Promise((resolve) => { finish = resolve; }));
+    snapshot.always(new Promise<ConversationSnapshotResponse>((resolve) => { finish = resolve; }).then(resolves));
     const { result } = renderHook(() => useTimeline(7, vi.fn()), { wrapper });
     expect(result.current.isFetching).toBe(false);
     pushConnectionEvent({ type: "open" });

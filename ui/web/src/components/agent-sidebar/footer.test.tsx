@@ -11,8 +11,7 @@ import { cleanup, render as rtlRender, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ALERTS_QUERY_KEY } from "@/lib/notifications/use-alerts";
-import { api } from "@/lib/transport/api";
-import { apiWrapper, fakeApi } from "@/lib/transport/tests/api/fake-api";
+import { apiWrapper, cacheOnlyApi } from "@/lib/transport/tests/api/api-provider";
 
 import { SidebarFooter } from "./footer";
 
@@ -35,7 +34,7 @@ function render(ui: React.ReactElement) {
   clients.add(qc);
   qc.setQueryData(ALERTS_QUERY_KEY, { alerts: [], meta: { window: "24h", total: 0, unresolved_count: 3 } });
   return rtlRender(<QueryClientProvider client={qc}>{ui}</QueryClientProvider>, {
-    wrapper: apiWrapper(fakeApi({ getAlerts: api.getAlerts })),
+    wrapper: apiWrapper(cacheOnlyApi()),
   });
 }
 
@@ -58,6 +57,5 @@ describe("SidebarFooter icon row", () => {
     const row = screen.getByTestId("alerts-badge").parentElement!;
     const labels = [...row.querySelectorAll("[aria-label]")].map((node) => node.getAttribute("aria-label"));
     expect(labels.slice(0, 4)).toEqual(["3 unresolved alerts", "Fleet", "Insights", "Control"]);
-    expect(api.getAlerts).not.toHaveBeenCalled();
   });
 });

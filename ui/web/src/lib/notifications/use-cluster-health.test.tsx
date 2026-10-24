@@ -8,7 +8,9 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { useStore } from "../state/store";
 import { AGENTS_QUERY_KEY } from "../agents/use-agents";
 import type { ClusterStatus } from "../contracts/types";
-import { apiWrapper, fakeApi } from "../transport/tests/api/fake-api";
+import { apiWrapper } from "../transport/tests/api/api-provider";
+import { startGateway, type TestGateway } from "../transport/tests/api/api-provider";
+import { gatewayRig } from "../transport/tests/api/api-provider";
 import {
   CLUSTER_STATUS_QUERY_KEY,
   useClusterHealth,
@@ -28,30 +30,11 @@ function clusterStatus(paused: boolean): ClusterStatus {
   };
 }
 
-// meiva:note
-// The host's two status endpoints as one in-memory service. `paused` is the host
-// state the next cluster-status read reports; the system-status endpoint is the
-// heavier one the hook must not read, so it counts any read and fails it.
-class Host {
-  paused = false;
-  clusterReads = 0;
-  systemReads = 0;
-  readonly api = fakeApi({
-    getClusterStatus: () => {
-      this.clusterReads += 1;
-      return Promise.resolve(clusterStatus(this.paused));
-    },
-    getSystemStatus: () => {
-      this.systemReads += 1;
-      return Promise.reject(new Error("the system status endpoint must not be read"));
-    },
-  });
-}
-
-let host: Host;
+let paused: boolean;
+let gateway: TestGateway;
 
 function renderHealth(client: QueryClient) {
-  const ApiWrapper = apiWrapper(host.api);
+  const ApiWrapper = apiWrapper(gatewayRig(gateway).api);
   const wrapper = ({ children }: { children: ReactNode }) => (
     <ApiWrapper>
       <QueryClientProvider client={client}>{children}</QueryClientProvider>
@@ -64,12 +47,18 @@ function freshClient(): QueryClient {
   return new QueryClient({ defaultOptions: { queries: { retry: false } } });
 }
 
-beforeEach(() => {
-  host = new Host();
+beforeEach(async () => {
+  paused = false;
+  gateway = await startGateway((request) => request.path === "/api/cluster/status"
+    ? { kind: "json", body: clusterStatus(paused) }
+    : { kind: "text", status: 500, body: "the heavier status endpoint must not be read" });
   act(() => useStore.setState({ reconnectNonce: 0 }));
 });
 
-afterEach(cleanup);
+afterEach(async () => {
+  cleanup();
+  await gateway.close();
+});
 
 describe("useClusterHealth", () => {
   it("paused true to false reconnects SSE and refetches agents", async () => {
@@ -82,7 +71,7 @@ describe("useClusterHealth", () => {
         return Promise.resolve([]);
       },
     });
-    host.paused = true;
+    paused = true;
     renderHealth(client);
 
     await waitFor(() =>
@@ -90,7 +79,7 @@ describe("useClusterHealth", () => {
     );
     const nonce = useStore.getState().reconnectNonce;
     expect(agentReads).toBe(1);
-    host.paused = false;
+    paused = false;
     await act(async () => {
       await client.refetchQueries({ queryKey: CLUSTER_STATUS_QUERY_KEY });
     });
@@ -103,7 +92,7 @@ describe("useClusterHealth", () => {
   it("never touches the heavier system status endpoint", async () => {
     renderHealth(freshClient());
 
-    await waitFor(() => expect(host.clusterReads).toBeGreaterThan(0));
-    expect(host.systemReads).toBe(0);
+    await waitFor(() => expect(gateway.requests).toHaveLength(1));
+    expect(gateway.requests.map((request) => request.path)).toEqual(["/api/cluster/status"]);
   });
 });

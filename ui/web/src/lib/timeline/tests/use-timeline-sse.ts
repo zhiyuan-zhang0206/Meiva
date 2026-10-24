@@ -66,7 +66,8 @@ describe("useTimeline SSE LLM streaming flow", () => {
     timeline.queue(resolves(tlResp([])));
 
     const { result } = renderHook(() => useTimeline(42, showError), { wrapper });
-    await waitFor(() => expect(result.current.items).toHaveLength(0));
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(result.current.items).toHaveLength(0);
 
     pushEvent({ role: "reasoning_start", item_id: "2.0", agent_id: 42 });
     pushEvent({ role: "reasoning_delta", item_id: "2.0", agent_id: 42, content: "thinking..." });
@@ -157,10 +158,9 @@ describe("useTimeline error & cancellation paths", () => {
 
     let resolveStaleA: (v: TimelineResponse) => void = () => undefined;
     timeline.queue(
-      () =>
-        new Promise((r) => {
-          resolveStaleA = r;
-        }),
+      new Promise<TimelineResponse>((r) => {
+        resolveStaleA = r;
+      }).then(resolves),
       resolves(tlResp([
         snapshotItem({ payload: "thread B fresh" }),
       ])),
@@ -171,6 +171,7 @@ describe("useTimeline error & cancellation paths", () => {
       { initialProps: { tid: 1 }, wrapper },
     );
 
+    await waitFor(() => expect(timelineReads).toHaveLength(1));
     rerender({ tid: 2 });
     await waitFor(() => expect(result.current.items[0]?.payload).toBe("thread B fresh"));
 
@@ -188,6 +189,7 @@ describe("useTimeline connectionState", () => {
     const showError = vi.fn();
     const { result } = renderHook(() => useTimeline(42, showError), { wrapper });
     await waitFor(() => expect(timelineReads.length).toBeGreaterThan(0));
+    await waitFor(() => expect(ctx.getQueryClient().isFetching()).toBe(0));
     expect(result.current.connectionState).toBe("open");
   });
 
@@ -195,6 +197,7 @@ describe("useTimeline connectionState", () => {
     const showError = vi.fn();
     const { result } = renderHook(() => useTimeline(42, showError), { wrapper });
     await waitFor(() => expect(timelineReads.length).toBeGreaterThan(0));
+    await waitFor(() => expect(ctx.getQueryClient().isFetching()).toBe(0));
 
     pushConnectionEvent({ type: "reconnecting" });
     expect(result.current.connectionState).toBe("reconnecting");
@@ -208,6 +211,7 @@ describe("useTimeline connectionState", () => {
     const showError = vi.fn();
     const { result } = renderHook(() => useTimeline(42, showError), { wrapper });
     await waitFor(() => expect(timelineReads.length).toBeGreaterThan(0));
+    await waitFor(() => expect(ctx.getQueryClient().isFetching()).toBe(0));
 
     pushConnectionEvent({ type: "closed" });
     expect(result.current.connectionState).toBe("closed");
@@ -218,7 +222,8 @@ describe("useTimeline connectionState", () => {
     const showError = vi.fn();
     timeline.queue(resolves(tlResp([])));
     const { result } = renderHook(() => useTimeline(42, showError), { wrapper });
-    await waitFor(() => expect(result.current.items).toEqual([]));
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(result.current.items).toEqual([]);
 
     pushEvent({ role: "code_start", item_id: "5.1", agent_id: 42 });
     pushEvent({ role: "code_delta", item_id: "5.1", agent_id: 42, content: "x = 1" });
@@ -251,6 +256,7 @@ describe("useTimeline connectionState", () => {
       { initialProps: { tid: 1 }, wrapper },
     );
     await waitFor(() => expect(timelineReads.length).toBeGreaterThan(0));
+    await waitFor(() => expect(ctx.getQueryClient().isFetching()).toBe(0));
 
     pushConnectionEvent({ type: "closed" });
     expect(result.current.connectionState).toBe("closed");
@@ -303,6 +309,7 @@ describe("useTimeline connectionState", () => {
     const showError = vi.fn();
     renderHook(() => useTimeline(42, showError), { wrapper });
     await waitFor(() => expect(timelineReads.length).toBeGreaterThan(0));
+    await waitFor(() => expect(ctx.getQueryClient().isFetching()).toBe(0));
 
     const sameError = new SyntaxError("Unexpected token");
     pushConnectionEvent({ type: "parse-failed", raw: "x", error: sameError });
@@ -319,6 +326,7 @@ describe("useTimeline connectionState", () => {
     const showError = vi.fn();
     renderHook(() => useTimeline(42, showError), { wrapper });
     await waitFor(() => expect(timelineReads.length).toBeGreaterThan(0));
+    await waitFor(() => expect(ctx.getQueryClient().isFetching()).toBe(0));
 
     pushConnectionEvent({
       type: "parse-failed",
@@ -341,6 +349,7 @@ describe("useTimeline connectionState", () => {
     const showError = vi.fn();
     renderHook(() => useTimeline(42, showError), { wrapper });
     await waitFor(() => expect(timelineReads.length).toBeGreaterThan(0));
+    await waitFor(() => expect(ctx.getQueryClient().isFetching()).toBe(0));
 
     const err = new SyntaxError("dup");
     pushConnectionEvent({ type: "parse-failed", raw: "x", error: err });
@@ -362,6 +371,7 @@ describe("useTimeline connectionState", () => {
       { initialProps: { se: firstShowError }, wrapper },
     );
     await waitFor(() => expect(timelineReads.length).toBeGreaterThan(0));
+    await waitFor(() => expect(ctx.getQueryClient().isFetching()).toBe(0));
 
     rerender({ se: secondShowError });
 

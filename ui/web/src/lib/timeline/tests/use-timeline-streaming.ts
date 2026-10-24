@@ -28,6 +28,7 @@ describe("useTimeline streamingCode flag", () => {
 
     const { result } = renderHook(() => useTimeline(42, showError), { wrapper });
     await waitFor(() => expect(timelineReads.length).toBeGreaterThan(0));
+    await waitFor(() => expect(ctx.getQueryClient().isFetching()).toBe(0));
 
     expect(result.current.streamingCode).toBe(false);
     pushEvent({ role: "code_start", item_id: "test", agent_id: 42 });
@@ -43,6 +44,7 @@ describe("useTimeline token_usage (single subscription — R10)", () => {
 
     renderHook(() => useTimeline(42, showError), { wrapper });
     await waitFor(() => expect(timelineReads.length).toBeGreaterThan(0));
+    await waitFor(() => expect(ctx.getQueryClient().isFetching()).toBe(0));
 
     expect(useTimelineStore.getState().activeThreadId).toBe(42);
     useTimelineStore.setState({ tokenUsage: 0, reasoningTokens: 0 });
@@ -66,7 +68,8 @@ describe("useTimeline full two-turn conversation overall order (e2e)", () => {
     timeline.queue(resolves(tlResp([])));
 
     const { result } = renderHook(() => useTimeline(42, showError), { wrapper });
-    await waitFor(() => expect(result.current.items).toHaveLength(0));
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(result.current.items).toHaveLength(0);
 
     pushEvent({ role: "inbound_arrived", agent_id: 42, inbound_id: 100, kind: "chat", source: "user", content: "turn 1" });
 
@@ -178,6 +181,7 @@ describe("useTimeline startTransition split (isStreamingDelta cluster)", () => {
       const showError = vi.fn();
       renderHook(() => useTimeline(42, showError), { wrapper });
       await waitFor(() => expect(timelineReads.length).toBeGreaterThan(0));
+    await waitFor(() => expect(ctx.getQueryClient().isFetching()).toBe(0));
 
       startTransitionSpy.mockClear();
       pushEvent(ev);
@@ -209,6 +213,7 @@ describe("useTimeline startTransition split (isStreamingDelta cluster)", () => {
       const showError = vi.fn();
       renderHook(() => useTimeline(42, showError), { wrapper });
       await waitFor(() => expect(timelineReads.length).toBeGreaterThan(0));
+    await waitFor(() => expect(ctx.getQueryClient().isFetching()).toBe(0));
 
       startTransitionSpy.mockClear();
       pushEvent(ev);
@@ -222,6 +227,7 @@ describe("useTimeline startTransition split (isStreamingDelta cluster)", () => {
     const showError = vi.fn();
     renderHook(() => useTimeline(42, showError), { wrapper });
     await waitFor(() => expect(timelineReads.length).toBeGreaterThan(0));
+    await waitFor(() => expect(ctx.getQueryClient().isFetching()).toBe(0));
 
     startTransitionSpy.mockClear();
     pushEvent({ role: "exec_start", item_id: "5.0", agent_id: 42 });
@@ -233,6 +239,7 @@ describe("useTimeline startTransition split (isStreamingDelta cluster)", () => {
     const showError = vi.fn();
     renderHook(() => useTimeline(42, showError), { wrapper });
     await waitFor(() => expect(timelineReads.length).toBeGreaterThan(0));
+    await waitFor(() => expect(ctx.getQueryClient().isFetching()).toBe(0));
 
     startTransitionSpy.mockClear();
     pushEvent({ role: "code_delta", item_id: "1", agent_id: 42, content: "x" });
@@ -265,6 +272,7 @@ describe("useTimeline SSE batch path", () => {
     const showError = vi.fn();
     const { result } = renderHook(() => useTimeline(42, showError), { wrapper });
     await waitFor(() => expect(timelineReads.length).toBeGreaterThan(0));
+    await waitFor(() => expect(ctx.getQueryClient().isFetching()).toBe(0));
 
     await act(async () => {
       await Promise.resolve();

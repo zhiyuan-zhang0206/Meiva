@@ -14,9 +14,9 @@ import {
   useAlertsSection,
 } from "@/lib/notifications/use-alerts";
 import type { Alert, AlertsResponse } from "@/lib/contracts/types";
-import type { Api } from "@/lib/transport/api";
 import { StreamHub } from "@/lib/transport/stream/stream-hub";
-import { fakeApi } from "@/lib/transport/tests/api/fake-api";
+import { startGateway, type TestGateway } from "@/lib/transport/tests/api/api-provider";
+import { gatewayRig, type HttpRig } from "@/lib/transport/tests/api/api-provider";
 import { FakeNetwork, FakeTab, READY, type FakeEventSource } from "@/lib/transport/stream/tests/fake-stream";
 import { ScriptedAuth } from "@/lib/transport/stream/tests/scripted-auth";
 import { ApiProvider, StreamHubProvider } from "@/lib/transport/transport-context";
@@ -25,7 +25,7 @@ import { ApiProvider, StreamHubProvider } from "@/lib/transport/transport-contex
 // AuthProvider and the user-settings read behind the merged-channel switch still
 // import the module-level gateway client, so those two calls are the only ones
 // answered here: the session probe is the test's ScriptedAuth, the settings are
-// the defaults. Every alerts read goes through the injected fake client.
+// the defaults. Every alerts read goes through the real factory and loopback gateway.
 const unmigrated = vi.hoisted(() => ({
   checkAuth: (): Promise<{ authenticated: boolean }> =>
     Promise.reject(new Error("the test did not install a session probe")),
@@ -37,8 +37,6 @@ vi.mock("@/lib/transport/api", () => ({
     getSettings: () => Promise.resolve({ settings: [] }),
   },
 }));
-
-type AlertsQuery = Parameters<Api["getAlerts"]>[0];
 
 function row(overrides: Partial<Alert> = {}): Alert {
   return {
@@ -67,28 +65,11 @@ function resp(alerts: Alert[], unresolved: number): AlertsResponse {
   };
 }
 
-interface AlertsGateway {
-  snapshot: AlertsResponse;
-  readonly reads: AlertsQuery[];
-  readonly api: Api;
-}
-
-function alertsGateway(snapshot: AlertsResponse): AlertsGateway {
-  const gateway: AlertsGateway = {
-    snapshot,
-    reads: [],
-    api: fakeApi({
-      getAlerts: (query) => {
-        gateway.reads.push(query);
-        return Promise.resolve(gateway.snapshot);
-      },
-    }),
-  };
-  return gateway;
-}
-
 let auth: ScriptedAuth;
-let gateway: AlertsGateway;
+let gateway: TestGateway;
+let rig: HttpRig;
+let snapshot: AlertsResponse;
+
 let tab: FakeTab;
 let hub: StreamHub;
 let queryClients: QueryClient[] = [];
@@ -129,7 +110,7 @@ function readerWrapper() {
   return function Wrapper({ children }: { children: ReactNode }) {
     return (
       <QueryClientProvider client={queryClient}>
-        <ApiProvider api={gateway.api}>{children}</ApiProvider>
+        <ApiProvider api={rig.api}>{children}</ApiProvider>
       </QueryClientProvider>
     );
   };
@@ -140,7 +121,7 @@ function alertsWrapper() {
   return function Wrapper({ children }: { children: ReactNode }) {
     return (
       <QueryClientProvider client={queryClient}>
-        <ApiProvider api={gateway.api}>
+        <ApiProvider api={rig.api}>
           <StreamHubProvider hub={hub}>
             <AuthProvider>
               <AlertsProvider>{children}</AlertsProvider>
@@ -168,21 +149,26 @@ function lastQueryClient(): QueryClient {
   return queryClient;
 }
 
-beforeEach(() => {
+beforeEach(async () => {
   queryClients = [];
   auth = new ScriptedAuth();
-  gateway = alertsGateway(resp([], 0));
+  snapshot = resp([], 0);
+  gateway = await startGateway((request) => request.path.split("?", 1)[0] === "/api/alerts"
+    ? { kind: "json", body: snapshot }
+    : { kind: "text", status: 404, body: "unexpected route" });
+  rig = gatewayRig(gateway);
   unmigrated.checkAuth = auth.checkAuth;
   installTab("legacy");
   defineVisibility("visible");
 });
 
-afterEach(() => {
+afterEach(async () => {
   cleanup();
   hub.dispose();
   for (const queryClient of queryClients) queryClient.clear();
   vi.useRealTimers();
   defineVisibility("visible");
+  await gateway.close();
 });
 
 describe("useAlertsSection", () => {
@@ -190,7 +176,7 @@ describe("useAlertsSection", () => {
     const { result } = renderHook(() => useAlertsSection(), { wrapper: readerWrapper() });
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
-    expect(gateway.reads).toEqual([{ window: "24h", limit: 200 }]);
+    expect(gateway.requests.map((request) => request.path)).toEqual(["/api/alerts?window=24h&limit=200"]);
   });
 });
 
@@ -199,7 +185,7 @@ describe("useAlerts", () => {
     const { result } = renderHook(() => useAlerts(), { wrapper: readerWrapper() });
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
-    expect(gateway.reads).toEqual([{}]);
+    expect(gateway.requests.map((request) => request.path)).toEqual(["/api/alerts"]);
   });
 });
 
@@ -222,44 +208,44 @@ describe("AlertsProvider connection auth gating", () => {
     queryClient.setQueryData(ALERTS_SECTION_QUERY_KEY, resp([], 0));
     await waitFor(() => expect(queryClient.getQueryState(ALERTS_QUERY_KEY)?.fetchStatus).toBe("idle"));
     expect(queryClient.getQueryState(ALERTS_SECTION_QUERY_KEY)?.isInvalidated).toBe(false);
-    const reads = gateway.reads.length;
+    const reads = gateway.requests.length;
 
     act(() => {
       currentSource().open();
     });
 
-    await waitFor(() => expect(gateway.reads).toHaveLength(reads + 1));
+    await waitFor(() => expect(gateway.requests.map((request) => request.path)).toHaveLength(reads + 1));
     await waitFor(() => expect(queryClient.getQueryState(ALERTS_QUERY_KEY)?.fetchStatus).toBe("idle"));
-    expect(gateway.reads.at(-1)).toEqual({});
+    expect(gateway.requests.at(-1)?.path).toBe("/api/alerts");
     expect(queryClient.getQueryState(ALERTS_SECTION_QUERY_KEY)?.isInvalidated).toBe(true);
     expect(queryClient.getQueryState(ALERTS_SECTION_QUERY_KEY)?.fetchStatus).toBe("idle");
   });
 
   it("repeated frames outside the page cannot inflate the uncapped count", async () => {
-    gateway.snapshot = resp([row({ id: 2 })], 13);
+    snapshot = resp([row({ id: 2 })], 13);
     const { result } = renderHook(() => useAlerts(), { wrapper: alertsWrapper() });
     await waitForSource();
     await waitFor(() => expect(result.current.data?.meta.unresolved_count).toBe(13));
-    const reads = gateway.reads.length;
+    const reads = gateway.requests.length;
     act(() => currentSource().frame(JSON.stringify(row({ id: 999 }))));
-    await waitFor(() => expect(gateway.reads.length).toBeGreaterThan(reads));
+    await waitFor(() => expect(gateway.requests.length).toBeGreaterThan(reads));
     await waitFor(() => expect(result.current.isFetching).toBe(false));
     expect(result.current.data?.meta.unresolved_count).toBe(13);
     expect(result.current.data?.alerts.map((a) => a.id)).toEqual([2]);
 
-    const nextReads = gateway.reads.length;
+    const nextReads = gateway.requests.length;
     act(() => currentSource().frame(JSON.stringify(row({ id: 999 }))));
-    await waitFor(() => expect(gateway.reads.length).toBeGreaterThan(nextReads));
+    await waitFor(() => expect(gateway.requests.length).toBeGreaterThan(nextReads));
     await waitFor(() => expect(result.current.isFetching).toBe(false));
     expect(result.current.data?.meta.unresolved_count).toBe(13);
   });
 
   it("a resolution outside the page updates counts and preserves server ordering", async () => {
-    gateway.snapshot = resp([row({ id: 2 })], 13);
+    snapshot = resp([row({ id: 2 })], 13);
     const { result } = renderHook(() => useAlerts(), { wrapper: alertsWrapper() });
     await waitForSource();
     await waitFor(() => expect(result.current.data?.meta.unresolved_count).toBe(13));
-    gateway.snapshot = resp([row({ id: 2 }), row({ id: 3, status: "resolved" })], 12);
+    snapshot = resp([row({ id: 2 }), row({ id: 3, status: "resolved" })], 12);
     act(() => currentSource().frame(JSON.stringify(row({ id: 999, status: "resolved" }))));
     await waitFor(() => expect(result.current.data?.meta.unresolved_count).toBe(12));
     expect(result.current.data?.alerts.map((a) => a.id)).toEqual([2, 3]);
@@ -269,13 +255,13 @@ describe("AlertsProvider connection auth gating", () => {
     const { result } = renderHook(() => useAlerts(), { wrapper: alertsWrapper() });
     await waitForSource();
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
-    const reads = gateway.reads.length;
+    const reads = gateway.requests.length;
     act(() => {
       currentSource().frame(JSON.stringify({ role: "heartbeat" }));
       currentSource().frame("bad-json");
       currentSource().frame(JSON.stringify({ id: "invalid" }));
     });
-    expect(gateway.reads).toHaveLength(reads);
+    expect(gateway.requests.map((request) => request.path)).toHaveLength(reads);
   });
 
   it("CLOSED with an invalid session → auth becomes unauthenticated and never reopens", async () => {
@@ -464,7 +450,7 @@ describe("AlertsProvider hidden-tab gating", () => {
     const first = currentSource();
     const queryClient = lastQueryClient();
     await waitFor(() => expect(queryClient.getQueryState(ALERTS_QUERY_KEY)?.fetchStatus).toBe("idle"));
-    const reads = gateway.reads.length;
+    const reads = gateway.requests.length;
 
     try {
       vi.useFakeTimers();
@@ -477,7 +463,7 @@ describe("AlertsProvider hidden-tab gating", () => {
         vi.advanceTimersByTime(7_000);
       });
       // Hidden views do no periodic reads.
-      expect(gateway.reads).toHaveLength(reads);
+      expect(gateway.requests.map((request) => request.path)).toHaveLength(reads);
       expect(queryClient.getQueryState(ALERTS_QUERY_KEY)?.isInvalidated).toBe(false);
 
       act(() => setVisibility("visible"));
@@ -488,7 +474,7 @@ describe("AlertsProvider hidden-tab gating", () => {
       act(() => {
         vi.advanceTimersByTime(7_000);
       });
-      expect(gateway.reads).toHaveLength(reads);
+      expect(gateway.requests.map((request) => request.path)).toHaveLength(reads);
       expect(queryClient.getQueryState(ALERTS_QUERY_KEY)?.isInvalidated).toBe(false);
     } finally {
       vi.useRealTimers();
@@ -499,7 +485,7 @@ describe("AlertsProvider hidden-tab gating", () => {
 describe("AlertsProvider on the shared profile stream", () => {
   it("the leader's alerts source feeds a frame into the cache", async () => {
     installTab("shared");
-    gateway.snapshot = resp([row({ id: 2 })], 13);
+    snapshot = resp([row({ id: 2 })], 13);
     const { result } = renderHook(() => useAlerts(), { wrapper: alertsWrapper() });
     await waitFor(() => expect(tab.sources.some((source) => source.url.endsWith("/api/alerts/stream"))).toBe(true));
     const alertsSource = tab.sources.find((source) => source.url.endsWith("/api/alerts/stream"));
@@ -508,11 +494,11 @@ describe("AlertsProvider on the shared profile stream", () => {
 
     act(() => alertsSource.open());
     await waitFor(() => expect(result.current.isFetching).toBe(false));
-    const reads = gateway.reads.length;
-    gateway.snapshot = resp([row({ id: 2 }), row({ id: 3, status: "resolved" })], 12);
+    const reads = gateway.requests.length;
+    snapshot = resp([row({ id: 2 }), row({ id: 3, status: "resolved" })], 12);
     act(() => alertsSource.frame(JSON.stringify(row({ id: 999, status: "resolved" }))));
 
     await waitFor(() => expect(result.current.data?.meta.unresolved_count).toBe(12));
-    expect(gateway.reads.length).toBeGreaterThan(reads);
+    expect(gateway.requests.length).toBeGreaterThan(reads);
   });
 });

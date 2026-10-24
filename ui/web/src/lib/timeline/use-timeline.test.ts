@@ -24,14 +24,18 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ApiError } from "../transport/api";
-import { apiWrapper, fakeApi } from "../transport/tests/api/fake-api";
+import { ApiProvider } from "../transport/transport-context";
+import { startGateway, type GatewayReply, type TestGateway } from "../transport/tests/api/api-provider";
+import { gatewayRig, httpRig, noUpload, type HttpRig } from "../transport/tests/api/api-provider";
+import { realNetwork } from "../transport/tests/api/api-provider";
+import { UncancellableFetch } from "../transport/tests/api/api-provider";
+import { systemKeySource } from "../transport/system-transport";
 import { interactionTimingResetForTest } from "../format/interaction-timing";
 import { SETTINGS_QUERY_KEY } from "../state/use-user-settings";
 import type {
   Answer,
   SnapshotRead,
   TimelineRead,
-  TimelineReadOptions,
   UseTimelineTestContext,
 } from "./tests/use-timeline-context";
 import { registerUseTimelinePaginationTests } from "./tests/use-timeline-pagination";
@@ -160,49 +164,58 @@ function composedSnapshot(timeline: TimelineResponse): ConversationSnapshotRespo
   };
 }
 
-function resolves<T>(value: T): () => Promise<T> {
-  return () => Promise.resolve(value);
+function resolves(value: unknown): GatewayReply {
+  return { kind: "json", body: value };
 }
 
-function rejects(error: Error): () => Promise<never> {
-  return () => Promise.reject(error);
+function rejects(error: Error): GatewayReply {
+  return { kind: "json", status: error instanceof ApiError ? error.status : 503, body: { detail: error.message } };
 }
 
 // meiva:note
-// The test gateway: every timeline and snapshot read is logged, then answered by
-// the next queued answer or, once those are used, by the standing one. The user
-// settings and the display config the hook reads through its own query keys are
-// seeded into the cache instead (seedSettings below), so no read reaches a network.
+// These are HTTP response values, including held responses. Endpoint paths and
+// cursors are observed at the real server; only AbortSignal lives on the client.
 const timelineReads: TimelineRead[] = [];
 const snapshotReads: SnapshotRead[] = [];
 const turnStarts: number[] = [];
-type TimelineAnswer = Answer<[agentId: number, options: TimelineReadOptions | undefined], TimelineResponse>;
-type SnapshotAnswer = Answer<[agentId: number, signal: AbortSignal | undefined], ConversationSnapshotResponse>;
-let queuedTimelineAnswers: TimelineAnswer[] = [];
-let standingTimelineAnswer: TimelineAnswer = resolves(tlResp([]));
-let queuedSnapshotAnswers: SnapshotAnswer[] = [];
-let standingSnapshotAnswer: SnapshotAnswer = resolves(composedSnapshot(tlResp([])));
+const wireReplies = new Map<string, Answer[]>();
+let queuedTimelineAnswers: Answer[] = [];
+let standingTimelineAnswer: Answer = resolves(tlResp([]));
+let queuedSnapshotAnswers: Answer[] = [];
+let standingSnapshotAnswer: Answer = resolves(composedSnapshot(tlResp([])));
+let gateway: TestGateway;
+let rig: HttpRig;
 
-const Gateway = apiWrapper(fakeApi({
-  getTimeline: (agentId, options) => {
-    timelineReads.push({
-      agentId,
-      before: options?.before,
-      limit: options?.limit,
-      signal: options?.signal,
-    });
-    return (queuedTimelineAnswers.shift() ?? standingTimelineAnswer)(agentId, options);
-  },
-  getConversationSnapshot: (agentId, signal) => {
-    snapshotReads.push({ agentId, signal });
-    return (queuedSnapshotAnswers.shift() ?? standingSnapshotAnswer)(agentId, signal);
-  },
-}));
+function Gateway({ children }: { children: React.ReactNode }) {
+  return React.createElement(ApiProvider, { api: rig.api, children });
+}
 
 let queryClient: QueryClient;
 let visibility: DocumentVisibilityState = "visible";
 
-beforeEach(() => {
+beforeEach(async () => {
+  wireReplies.clear();
+  gateway = await startGateway((request) => {
+    const url = new URL(request.path, gateway.origin);
+    const match = /^\/api\/agents\/(\d+)\/(timeline|conversation-snapshot)$/.exec(url.pathname);
+    if (match === null) return { kind: "text", status: 404, body: "unexpected route" };
+    const signal = rig.sent.findLast((sent) => sent.url === `${gateway.origin}${request.path}`)?.init.signal;
+    if (signal == null) throw new Error("the native request has no observed abort signal");
+    // meiva:note
+    // Limit remains observable below; canned pages are selected by their wire cursor.
+    const route = new URL(url);
+    route.searchParams.delete("limit");
+    const scripted = wireReplies.get(`${route.pathname}${route.search}`)?.shift();
+    if (match[2] === "timeline") {
+      const limit = url.searchParams.get("limit");
+      timelineReads.push({ agentId: Number(match[1]), before: url.searchParams.get("before") ?? undefined,
+        limit: limit === null ? undefined : Number(limit), signal });
+      return scripted ?? queuedTimelineAnswers.shift() ?? standingTimelineAnswer;
+    }
+    snapshotReads.push({ agentId: Number(match[1]), signal });
+    return scripted ?? queuedSnapshotAnswers.shift() ?? standingSnapshotAnswer;
+  });
+  rig = gatewayRig(gateway);
   startTransitionSpy.mockClear();
   timelineReads.length = 0;
   snapshotReads.length = 0;
@@ -229,9 +242,11 @@ beforeEach(() => {
   seedSettings({});
 });
 
-afterEach(() => {
+afterEach(async () => {
   cleanup();
   interactionTimingResetForTest();
+  queryClient.clear();
+  await gateway.close();
   Reflect.deleteProperty(document, "visibilityState");
   currentEventHandler = null;
   currentConnectionHandler = null;
@@ -392,6 +407,83 @@ describe("useTimeline mount + initial fetch", () => {
 
 });
 
+// meiva:note
+// Native abort tests above cannot deliver their old payload after cancellation.
+// These faults exercise the hook's independent ownership checks while preserving
+// the real API factory/HTTP decoder and using only its existing fetch seam.
+describe("timeline ownership when a transport ignores abort", () => {
+  it("rejects the first A payload after A-to-B-to-A has selected the newer A", async () => {
+    const faults = Array.from({ length: 3 }, () => new UncancellableFetch());
+    let next = 0;
+    rig = httpRig({ base: gateway.origin, fetch: (url, init) => faults[next++].fetch(url, init),
+      now: () => performance.now(), keys: systemKeySource(), openUpload: noUpload });
+    try {
+      const view = renderHook(({ id }: { id: number }) => useTimeline(id, vi.fn()), {
+        initialProps: { id: 1 }, wrapper,
+      });
+      await waitFor(() => expect(rig.sent).toHaveLength(1));
+      view.rerender({ id: 2 });
+      await waitFor(() => expect(rig.sent).toHaveLength(2));
+      expect(rig.sent[0].init.signal?.aborted).toBe(true);
+      view.rerender({ id: 1 });
+      await waitFor(() => expect(rig.sent).toHaveLength(3));
+      expect(rig.sent[1].init.signal?.aborted).toBe(true);
+      await act(async () => { faults[2].respond(tlResp([snapshotItem({ item_id: "3.0", payload: "current A" })])); await Promise.resolve(); });
+      await waitFor(() => expect(view.result.current.items[0]?.payload).toBe("current A"));
+      await act(async () => {
+        faults[0].respond(tlResp([snapshotItem({ item_id: "1.0", payload: "obsolete A" })]));
+        faults[1].respond(tlResp([snapshotItem({ item_id: "2.0", payload: "obsolete B" })]));
+        await Promise.resolve();
+      });
+      expect(rig.responses).toHaveLength(3);
+      expect(view.result.current.items.map((item) => item.payload)).toEqual(["current A"]);
+    } finally {
+      for (const fault of faults) fault.respond(tlResp([]));
+    }
+  });
+
+  it.each(["selection", "hidden", "compact", "unmount"])("%s rejects history decoded after its cancellation", async (cause) => {
+    const fault = new UncancellableFetch();
+    standingTimelineAnswer = resolves(tlResp([snapshotItem({ item_id: "5.0", payload: "current" })], true));
+    seedSettings({ "display.compact_history_sessions": 0 });
+    rig = httpRig({ base: gateway.origin,
+      fetch: (url, init) => {
+        if (typeof url !== "string") throw new Error("the gateway factory must send a URL string");
+        return new URL(url).searchParams.has("before") ? fault.fetch(url, init) : realNetwork.fetch(url, init);
+      },
+      now: () => performance.now(), keys: systemKeySource(), openUpload: noUpload });
+    const showError = vi.fn();
+    try {
+      const view = renderHook(({ id }: { id: number }) => useTimeline(id, showError), {
+        initialProps: { id: 1 }, wrapper,
+      });
+      await waitFor(() => expect(view.result.current.hasMoreOlder).toBe(true));
+      act(() => view.result.current.loadOlder());
+      await waitFor(() => expect(rig.sent.filter((sent) => new URL(sent.url).searchParams.has("before"))).toHaveLength(1));
+      const history = rig.sent.find((sent) => new URL(sent.url).searchParams.has("before"));
+      if (cause === "selection") {
+        view.rerender({ id: 2 });
+        await waitFor(() => expect(gateway.requests.some((request) => request.path === "/api/agents/2/timeline")).toBe(true));
+        view.rerender({ id: 1 });
+        await waitFor(() => expect(useTimelineStore.getState().activeThreadId).toBe(1));
+      } else if (cause === "hidden") {
+        setVisibility("hidden");
+      } else if (cause === "unmount") {
+        view.unmount();
+      } else {
+        pushEvent({ role: "compact_done", agent_id: 1 });
+      }
+      expect(history?.init.signal?.aborted).toBe(true);
+      await act(async () => { fault.respond(tlResp([snapshotItem({ item_id: "1.0", payload: "obsolete history" })])); await Promise.resolve(); });
+      expect(rig.responses.length).toBeGreaterThanOrEqual(2);
+      expect(useTimelineStore.getState().items.some((item) => item.payload === "obsolete history")).toBe(false);
+      expect(showError).not.toHaveBeenCalled();
+    } finally {
+      fault.respond(tlResp([]));
+    }
+  });
+});
+
 const testContext: UseTimelineTestContext = {
   ApiError,
   timeline: {
@@ -402,6 +494,7 @@ const testContext: UseTimelineTestContext = {
     queue: (...answers) => { queuedSnapshotAnswers.push(...answers); },
     always: (answer) => { standingSnapshotAnswer = answer; },
   },
+  wireReplies,
   timelineReads,
   snapshotReads,
   turnStarts,

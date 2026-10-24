@@ -1,12 +1,13 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render } from "@testing-library/react";
+import { cleanup, render } from "@testing-library/react";
 import { useState } from "react";
 import { vi } from "vitest";
 
-import type { AgentRow } from "@/lib/contracts/types";
+import type { AgentRow, ReplySuggestionResponse } from "@/lib/contracts/types";
 import type { ConnectionState } from "@/lib/timeline/use-timeline";
-import { api } from "@/lib/transport/api";
-import { apiWrapper, fakeApi } from "@/lib/transport/tests/api/fake-api";
+import { startGateway, type TestGateway } from "@/lib/transport/tests/api/api-provider";
+import { gatewayRig, type HttpRig } from "@/lib/transport/tests/api/api-provider";
+import { ApiProvider } from "@/lib/transport/transport-context";
 
 export const hooksState = {
   isLarge: true,
@@ -117,7 +118,22 @@ export function makeAgent(overrides: Partial<AgentRow>): AgentRow {
   };
 }
 
-export const gatewayWrapper = apiWrapper(fakeApi({ getReplySuggestion: api.getReplySuggestion }));
+export let homePageGateway: TestGateway;
+export let homePageRig: HttpRig;
+export let replySuggestions: ReplySuggestionResponse;
+
+export function setReplySuggestions(value: ReplySuggestionResponse): void {
+  replySuggestions = value;
+}
+
+export function gatewayWrapper({ children }: { children: React.ReactNode }) {
+  return <ApiProvider api={homePageRig.api}>{children}</ApiProvider>;
+}
+
+export async function cleanupHomePageTest(): Promise<void> {
+  cleanup();
+  await homePageGateway.close();
+}
 
 export function wrap(ui: React.ReactElement) {
   const qc = new QueryClient({
@@ -128,7 +144,16 @@ export function wrap(ui: React.ReactElement) {
   });
 }
 
-export function resetHomePageTestState() {
+export async function resetHomePageTestState() {
+  replySuggestions = { suggestions: [], reason: null };
+  homePageGateway = await startGateway((request) => {
+    if (/^\/api\/agents\/\d+\/reply-suggestion$/.test(request.path)) return { kind: "json", body: replySuggestions };
+    if (/^\/api\/agents\/\d+\/pending$/.test(request.path)) return { kind: "json", body: [] };
+    if (request.path === "/api/notices") return { kind: "json", body: { open: [], awaiting: [], resolved_page: [], next_cursor: null } };
+    if (request.path === "/api/alerts") return { kind: "json", body: { alerts: [], meta: { window: "24h", total: 0, unresolved_count: 0 } } };
+    return { kind: "text", status: 404, body: "unexpected route" };
+  });
+  homePageRig = gatewayRig(homePageGateway);
   vi.clearAllMocks();
   inspectorMockState.shouldThrow = false;
   inspectorMockState.mounts = 0;

@@ -10,6 +10,7 @@ import type { UseTimelineTestContext } from "./use-timeline-context";
 export function registerUseTimelineSwitchTests(ctx: UseTimelineTestContext): void {
   const {
     timeline,
+    wireReplies,
     snapshot,
     timelineReads,
     snapshotReads,
@@ -200,13 +201,16 @@ describe("useTimeline agentId switch", () => {
       }
       return tlResp(postWindow(), true);
     };
-    timeline.always((_id, opts) => Promise.resolve(pageFor(opts)));
+    timeline.always(resolves(pageFor()));
+    const cursor = "2.0";
+    wireReplies.set(`/api/agents/42/timeline?before=${cursor}`, [resolves(pageFor({ before: cursor }))]);
 
     const { result } = renderHook(() => useTimeline(42, showError), { wrapper });
     await waitFor(() => expect(result.current.items).toHaveLength(1));
     expect(result.current.hasMoreOlder).toBe(true);
 
     phase = "post";
+    timeline.always(resolves(pageFor()));
     pushEvent({ role: "compact_done", agent_id: 42 });
     pushEvent({
       role: "timeline_snapshot",
@@ -262,12 +266,15 @@ describe("useTimeline agentId switch", () => {
         true,
       );
     };
-    timeline.always((_id, opts) => Promise.resolve(pageFor(opts)));
+    timeline.always(resolves(pageFor()));
+    const cursor = "1.0";
+    wireReplies.set(`/api/agents/42/timeline?before=${cursor}`, [resolves(pageFor({ before: cursor }))]);
 
     const { result } = renderHook(() => useTimeline(42, showError), { wrapper });
     await waitFor(() => expect(result.current.items).toHaveLength(1));
 
     phase = "post";
+    timeline.always(resolves(pageFor()));
     pushEvent({ role: "compact_done", agent_id: 42 });
     pushEvent({
       role: "timeline_snapshot",

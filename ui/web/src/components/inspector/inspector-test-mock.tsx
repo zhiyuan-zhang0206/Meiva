@@ -19,7 +19,8 @@ import type {
   WireAgentCard,
 } from "@/lib/contracts/types";
 import { useStore } from "@/lib/state/store";
-import { fakeApi } from "@/lib/transport/tests/api/fake-api";
+import { startGateway, type TestGateway } from "@/lib/transport/tests/api/api-provider";
+import { gatewayRig, type HttpRig } from "@/lib/transport/tests/api/api-provider";
 import { ApiProvider } from "@/lib/transport/transport-context";
 
 const SETTINGS_QUERY_KEY = ["user-settings"] as const;
@@ -43,9 +44,6 @@ export const getAgent = vi.fn<(id: number, signal?: AbortSignal) => Promise<Agen
 export const getAgentInspectWidgets = vi.fn<
   (agentId: number, signal?: AbortSignal) => Promise<InspectWidget[]>
 >(() => Promise.resolve([]));
-export const listPages = vi.fn<(agentId: number) => Promise<PageRow[]>>(() =>
-  Promise.resolve([]),
-);
 export const resolveNotice = vi.fn(() => Promise.resolve({ status: "ok" }));
 export const putSetting = vi.fn((key: string, value: unknown) =>
   Promise.resolve({ key, value, updated_at: "2026-06-14T12:00:00Z" }),
@@ -62,11 +60,17 @@ export const getSettings = vi.fn(() =>
   }),
 );
 
-// meiva:note
-// The panel's open-pages list reads the gateway through ApiProvider. The same
-// listPages function the tests script is handed to every tree rendered with the
-// QueryClientProvider below.
-const gateway = fakeApi({ listPages });
+let pageGateway: TestGateway;
+let pageRig: HttpRig;
+let pageRows: readonly PageRow[];
+
+export function setInspectorPages(rows: readonly PageRow[]): void {
+  pageRows = [...rows];
+}
+
+export function inspectorPageReads() {
+  return pageGateway.requests;
+}
 
 // meiva:note
 // Stands in for the library's QueryClientProvider in the inspector tests: the same
@@ -74,7 +78,7 @@ const gateway = fakeApi({ listPages });
 export function QueryClientProvider({ client, children }: { client: QueryClient; children: ReactNode }) {
   return (
     <TanstackQueryClientProvider client={client}>
-      <ApiProvider api={gateway}>{children}</ApiProvider>
+      <ApiProvider api={pageRig.api}>{children}</ApiProvider>
     </TanstackQueryClientProvider>
   );
 }
@@ -111,7 +115,15 @@ export function createInspectorQueryClient(
   return qc;
 }
 
-export function setupInspectorTest() {
+export async function setupInspectorTest() {
+  pageRows = [];
+  pageGateway = await startGateway((request) => {
+    const match = /^\/api\/agents\/(\d+)\/pages$/.exec(request.path);
+    return match === null
+      ? { kind: "text", status: 404, body: "unexpected route" }
+      : { kind: "json", body: pageRows.filter((row) => row.agent_id === Number(match[1])) };
+  });
+  pageRig = gatewayRig(pageGateway);
   window.innerWidth = 1024;
   setInspectorOpen(true);
   setInspectorHours(24);
@@ -121,7 +133,7 @@ export function setupInspectorTest() {
   getAgentRoster.mockResolvedValue({ agents: [], ancestors: [] });
 }
 
-export function cleanupInspectorTest() {
+export async function cleanupInspectorTest() {
   vi.useRealTimers();
   cleanup();
   getAgentInspectStatistics.mockReset();
@@ -137,6 +149,7 @@ export function cleanupInspectorTest() {
   setInspectorHours(24);
   streamHandlers.system = undefined;
   streamHandlers.connection = undefined;
+  await pageGateway.close();
 }
 
 export function render(

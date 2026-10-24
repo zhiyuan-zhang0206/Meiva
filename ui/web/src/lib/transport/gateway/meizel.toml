@@ -1,4 +1,4 @@
-exports = ["api-factory.ts", "http.ts", "plans"]
+exports = ["api-factory.ts", "http.ts", "plans", "tests"]
 
 [uses]
 "api-control.ts" = ["http.ts", "plans", "routes"]
