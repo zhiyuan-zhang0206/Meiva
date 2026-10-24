@@ -586,6 +586,7 @@ class KimiSession:
             usage.input_tokens,
             usage.output_tokens,
             usage.cache_read_input_tokens,
+            cache_write_5m=usage.cache_creation_input_tokens,
             prices=self._prices,
         )
         return None if quoted is None else quoted.cost_usd

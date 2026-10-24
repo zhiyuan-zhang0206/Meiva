@@ -171,3 +171,37 @@ def test_usage_snapshot_prices_cache_writes_at_actual_served_speed(
     assert snapshot["price_write_5m"] == 5 * multiplier
     assert snapshot["price_write_1h"] == 8 * multiplier
     assert snapshot["cost_usd"] == pytest.approx(expected)
+
+
+@pytest.mark.parametrize(
+    "model,miss,hit,out,write_5m,write_1h",
+    [
+        ("kimi-k3", 3.0, 0.30, 15.0, 3.0, 6.0),
+        ("kimi-k3.1-pro", 2.0, 0.20, 10.0, 2.0, 4.0),
+        ("kimi-k3.1-pro-highspeed", 4.0, 0.20, 20.0, 4.0, 8.0),
+    ],
+)
+def test_moonshot_k3_series_cache_write_tokens_are_priced(
+    prices: pricing.PriceBook,
+    model: str,
+    miss: float,
+    hit: float,
+    out: float,
+    write_5m: float,
+    write_1h: float,
+) -> None:
+    priced = quote(
+        model,
+        40_206,
+        356,
+        38_400,
+        cache_write_5m=1_536,
+        cache_write_1h=100,
+        prices=prices,
+    )
+    assert priced is not None
+    expected_miss = 40_206 - 38_400 - 1_536 - 100
+    assert priced.cost_usd == pytest.approx(
+        (expected_miss * miss + 38_400 * hit + 1_536 * write_5m + 100 * write_1h + 356 * out)
+        / 1_000_000
+    )
