@@ -54,13 +54,14 @@ class Link(SocketLink):
         writer: asyncio.StreamWriter,
         *,
         timeout_reader: Callable[[], float],
+        agent_id: int | None,
     ) -> None:
         super().__init__(
             reader,
             writer,
             service_label="computer MCP daemon",
             timeout_reader=timeout_reader,
-            extra_fields=lambda: {"agent_id": _agent_id()},
+            extra_fields={"agent_id": agent_id},
         )
 
 
@@ -71,10 +72,12 @@ async def _connect() -> tuple[asyncio.StreamReader, asyncio.StreamWriter]:
 
 
 class ReconnectingSocketLink(ReconnectingLink):
-    def __init__(self, *, timeout_reader: Callable[[], float]) -> None:
+    def __init__(self, *, timeout_reader: Callable[[], float], agent_id: int | None) -> None:
         super().__init__(
             _connect,
-            lambda reader, writer: Link(reader, writer, timeout_reader=timeout_reader),
+            lambda reader, writer: Link(
+                reader, writer, timeout_reader=timeout_reader, agent_id=agent_id
+            ),
             max_attempts=6,
             base_delay=0.5,
             close_on_error=lambda _exc: True,
@@ -82,7 +85,7 @@ class ReconnectingSocketLink(ReconnectingLink):
 
 
 async def _serve(*, timeout_reader: Callable[[], float]) -> None:
-    link = ReconnectingSocketLink(timeout_reader=timeout_reader)
+    link = ReconnectingSocketLink(timeout_reader=timeout_reader, agent_id=_agent_id())
 
     async def _list_tools(_ctx: Any, _params: Any) -> types.ListToolsResult:
         tools = await link.request({"method": "list_tools"})

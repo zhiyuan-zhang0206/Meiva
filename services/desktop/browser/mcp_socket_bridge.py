@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from contextlib import suppress
 from typing import Any
 
@@ -78,7 +78,7 @@ class SocketLink:
         *,
         service_label: str,
         timeout_reader: Callable[[], float],
-        extra_fields: Callable[[], dict[str, Any]] | None = None,
+        extra_fields: Mapping[str, Any],
     ) -> None:
         self._reader = reader
         self._writer = writer
@@ -91,9 +91,7 @@ class SocketLink:
     async def request(self, payload: dict[str, Any]) -> Any:
         async with self._lock:
             self._id += 1
-            request = {"id": self._id, **payload}
-            if self._extra_fields is not None:
-                request.update(self._extra_fields())
+            request = {"id": self._id, **payload, **self._extra_fields}
 
             async def roundtrip() -> Any:
                 if self._writer.is_closing():
@@ -130,14 +128,14 @@ class ReconnectingLink:
         *,
         max_attempts: int,
         base_delay: float,
-        retryable_rejection: Callable[[Exception], bool] | None = None,
+        rejection_message: str | None = None,
         close_on_error: Callable[[Exception], bool],
     ) -> None:
         self._connect = connect
         self._link_factory = link_factory
         self._max_attempts = max_attempts
         self._base_delay = base_delay
-        self._retryable_rejection = retryable_rejection
+        self._rejection_message = rejection_message
         self._close_on_error = close_on_error
         self._link: SocketLink | None = None
         self._lock = asyncio.Lock()
@@ -145,6 +143,16 @@ class ReconnectingLink:
     async def _connect_once(self) -> SocketLink:
         reader, writer = await self._connect()
         return self._link_factory(reader, writer)
+
+    # meiva:note
+    # A daemon that rejected the request up front, before forwarding it anywhere, names the
+    # reason in a `RuntimeError`: that message is the one a wrapper declares retryable.
+    def _is_retryable_rejection(self, exc: Exception) -> bool:
+        return (
+            self._rejection_message is not None
+            and isinstance(exc, RuntimeError)
+            and self._rejection_message in str(exc)
+        )
 
     def _drop_link(self) -> None:
         if self._link is None:
@@ -163,7 +171,7 @@ class ReconnectingLink:
                 classify=lambda exc: (
                     phase == "connect"
                     or isinstance(exc, NotDeliveredError)
-                    or (self._retryable_rejection is not None and self._retryable_rejection(exc))
+                    or self._is_retryable_rejection(exc)
                 ),
                 idempotent=True,
                 respect_retry_after=False,
@@ -182,9 +190,7 @@ class ReconnectingLink:
                     self._drop_link()
                     raise
                 except Exception as exc:
-                    if (
-                        self._retryable_rejection is not None and self._retryable_rejection(exc)
-                    ) or self._close_on_error(exc):
+                    if self._is_retryable_rejection(exc) or self._close_on_error(exc):
                         self._drop_link()
                     raise
 

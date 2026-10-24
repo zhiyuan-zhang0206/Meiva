@@ -5,7 +5,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-from base.clock import SYSTEM_TIMERS
 from base.sessions.helperproc import helper_client
 from services.desktop.permissions_helper import lifecycle
 
@@ -55,7 +54,7 @@ def load_and_ping(app: Path) -> None:
     A bootstrap failure intentionally fails the lane: the hosted runner's user launchd chain is
     part of the production contract being tested.
     """
-    lifecycle.install_and_load(app, rebuilt=True, helper=helper_client, timers=SYSTEM_TIMERS)
+    lifecycle.install_and_load(app, rebuilt=True, helper=helper_client)
     if helper_client().ping()["pong"] is not True:
         raise SystemExit("the helper did not answer the ping")
 

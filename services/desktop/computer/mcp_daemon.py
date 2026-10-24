@@ -60,7 +60,6 @@ import threading
 import time
 from collections.abc import Callable
 from contextlib import suppress
-from functools import partial
 from pathlib import Path
 from typing import Any
 
@@ -79,7 +78,7 @@ from base.telemetry import audit_events, build_pipeline
 from base.telemetry.process_logging import init_gateway_process
 
 from .ax_ids import AxSession
-from .config import ComputerUseConfig
+from .config import ComputerUseConfig, beat_interval_s, effective_stall_s, loop_is_silent
 from .execute import TOOLS, execute_tool, mcp_result, priority
 from .protocol import Request, Response
 from .session import ScreenSession
@@ -211,41 +210,29 @@ def computer_use_config() -> ComputerUseConfig:
 # bounded by `bounded_cleanup` below. Either serving, or gone.
 _WATCHDOG_BEAT_S = 15.0  # loop-side re-beat interval (watchdog sampling detail)
 _WATCHDOG_CHECK_S = 5.0  # watchdog-thread check interval (watchdog sampling detail)
-_WATCHDOG_MIN_STALL_S = 1.0  # below this a misconfigured window would restart a healthy daemon
 
 
+# meiva:note
+# Dump every stack and exit once the event loop has not beaten for `stall_s`.
+#
+# The only beat source is the loop's own tick callback, so a blocked loop stops beating
+# while a live loop keeps the watchdog silent no matter how long a *caller* waits. The exit
+# is `dump_and_exit`, which ends the process, so a stall never returns to the caller.
 class LoopWatchdog(threading.Thread):
-    """Run `on_stall` once the event loop has not beaten for `stall_s`.
-
-    `on_stall` executes on this thread and must end the process (production:
-    `dump_and_exit`); when it returns, the watchdog ends. The only beat source
-    is the loop's own tick callback, so a blocked loop stops beating — while
-    a live loop keeps the watchdog silent no matter how long a *caller* waits.
-    """
-
-    def __init__(
-        self,
-        stall_s: float,
-        *,
-        check_s: float,
-        on_stall: Callable[[], None],
-        clock: Callable[[], float] = time.monotonic,
-    ) -> None:
+    def __init__(self, stall_s: float, *, check_s: float) -> None:
         super().__init__(name="computer-mcp-loop-watchdog", daemon=True)
         self._stall_s = stall_s
         self._check_s = check_s
-        self._on_stall = on_stall
-        self._clock = clock
-        self._beat = clock()
+        self._beat = time.monotonic()
         self._stopped = threading.Event()
 
     def beat(self) -> None:
         """Prove the loop is alive (called from the loop's tick callback)."""
-        self._beat = self._clock()
+        self._beat = time.monotonic()
 
     def stale_for(self) -> float:
         """Seconds since the last beat."""
-        return self._clock() - self._beat
+        return time.monotonic() - self._beat
 
     @property
     def stopped(self) -> bool:
@@ -256,8 +243,8 @@ class LoopWatchdog(threading.Thread):
 
     def run(self) -> None:
         while not self._stopped.wait(self._check_s):
-            if self.stale_for() > self._stall_s:
-                self._on_stall()
+            if loop_is_silent(now=time.monotonic(), last_beat=self._beat, stall_s=self._stall_s):
+                dump_and_exit(f"run loop silent for over {self._stall_s}s")
                 return
 
 
@@ -283,31 +270,24 @@ def dump_and_exit(reason: str) -> None:
         os._exit(1)
 
 
+# meiva:note
+# Start the loop-liveness watchdog and keep it beating from `loop`.
+#
+# Returns the watchdog so the shutdown path can stop it. The re-beat cadence stays well
+# inside the window (`beat_s` shrunk to a third of it when the configured window is small),
+# so an operator tuning the window down cannot trip a healthy loop; a tiny window is floored
+# so a misconfiguration cannot restart-loop the daemon.
 def guard_loop_liveness(
     loop: asyncio.AbstractEventLoop,
     stall_s: float,
     *,
     beat_s: float = _WATCHDOG_BEAT_S,
     check_s: float = _WATCHDOG_CHECK_S,
-    on_stall: Callable[[], None] | None = None,
 ) -> LoopWatchdog:
-    """Start the loop-liveness watchdog and keep it beating from `loop`.
-
-    Returns the watchdog so the shutdown path can stop it. `on_stall`
-    defaults to `dump_and_exit`; tests inject a recorder instead of the exit.
-    The re-beat cadence stays well inside the window (`beat_s` shrunk to a
-    third of it when the configured window is small), so an operator tuning
-    the window down cannot trip a healthy loop; a tiny window is floored so
-    a misconfiguration cannot restart-loop the daemon.
-    """
-    stall_s = max(stall_s, _WATCHDOG_MIN_STALL_S)
-    watchdog = LoopWatchdog(
-        stall_s,
-        check_s=check_s,
-        on_stall=on_stall or partial(dump_and_exit, f"run loop silent for over {stall_s}s"),
-    )
+    stall_s = effective_stall_s(stall_s)
+    watchdog = LoopWatchdog(stall_s, check_s=check_s)
     watchdog.start()
-    beat_interval = min(beat_s, stall_s / 3)
+    beat_interval = beat_interval_s(beat_s, stall_s)
 
     def tick() -> None:
         if watchdog.stopped:

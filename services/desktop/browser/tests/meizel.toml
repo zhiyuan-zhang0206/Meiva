@@ -77,7 +77,6 @@
 "test_mcp_upstream_timeout.py#monkeypatch.setattr services.desktop.browser.mcp_upstream.stdio_client" = 1
 
 [debt.stdlib-patch]
-"test_browser_profile.py#monkeypatch.setattr builtins.input" = 8
 "test_browser_session.py#monkeypatch.setattr time.time" = 1
 
 [debt.unresolved-patch]

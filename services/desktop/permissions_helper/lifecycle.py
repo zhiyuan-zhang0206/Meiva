@@ -7,15 +7,15 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import base.paths
-from base.clock import Timers
 from base.config import settings
 from base.host.permissions_helper.client import HelperFactory
 from base.host.proc import run_bounded
 from base.paths import logs_dir, meiva_home, permissions_helper_socket
-from services.desktop.permissions_helper import hardened_runtime, signing_identity
+from services.desktop.permissions_helper import activation_plan, hardened_runtime, signing_identity
 from services.desktop.permissions_helper.build_state import (
     BUILD_STATE_NAME,
     BuildState,
@@ -42,8 +42,6 @@ INFO_PLIST = _SERVICE_DIR / "helper" / "Info.plist"
 # -1712/-609 before any prompt can appear.
 ENTITLEMENTS = _SERVICE_DIR / "helper" / "helper.entitlements"
 LOCALES = _SERVICE_DIR / "helper" / "locales"
-_HELPER_PING_ATTEMPTS = 10
-_HELPER_PING_SETTLE_S = 0.5
 _DESIGNATED_REQUIREMENT_RE = re.compile(r"^(?:# )?designated => (.+)$", re.MULTILINE)
 
 # meiva:note
@@ -304,16 +302,14 @@ def foreign_label_plists() -> list[Path]:
     a client reaches then depends on the last bind. Other
     clusters' jobs are left alone -- they pin their own sockets."""
     sock = str(helper_socket())
+    current = label()
     foreign: list[Path] = []
     for plist in agents_dir().glob(f"{HELPER_BUNDLE_ID}.*.plist"):
         try:
             data = plistlib.loads(plist.read_bytes())
         except (plistlib.InvalidFileException, OSError):
             continue
-        if data.get("Label") == label():
-            continue
-        env: dict[str, object] = data.get("EnvironmentVariables") or {}
-        if env.get("MEIVA_PERMISSIONS_HELPER_SOCKET") == sock:
+        if activation_plan.is_foreign_label_job(data, label=current, socket=sock):
             foreign.append(plist)
     return foreign
 
@@ -327,50 +323,46 @@ def refuse_foreign_label_jobs() -> None:
         )
 
 
-def install_and_load(app: Path, *, rebuilt: bool, helper: HelperFactory, timers: Timers) -> None:
+def install_and_load(
+    app: Path,
+    *,
+    rebuilt: bool,
+    helper: HelperFactory,
+    settle_seconds: float = activation_plan.HELPER_PING_SETTLE_S,
+) -> None:
     """Write the LaunchAgent plist and ensure launchd is running this binary.
 
     A loaded helper is only observed. Replacement requires an external stop
     and exact-home unregister first, so a descendant cannot unload its parent."""
     refuse_foreign_label_jobs()
-    exe = app / "Contents" / "MacOS" / "MeivaPermissionsHelper"
     log = logs_dir() / "permissions-helper.log"
-    plist = {
-        "Label": label(),
-        "ProgramArguments": [str(exe)],
-        "EnvironmentVariables": {
-            "MEIVA_PERMISSIONS_HELPER_SOCKET": str(helper_socket()),
-            "MEIVA_PERMISSIONS_HELPER_ROOT_SEED": str(
-                base.paths.root_run_dir(base.paths.meiva_home()) / "seed.json"
-            ),
-        },
-        "RunAtLoad": True,
-        "KeepAlive": {"SuccessfulExit": False},
-        "StandardOutPath": str(log),
-        "StandardErrorPath": str(log),
-    }
+    plist = activation_plan.helper_plist(
+        label=label(),
+        executable=str(app_executable(app)),
+        log=str(log),
+        socket=str(helper_socket()),
+        root_seed=str(base.paths.root_run_dir(base.paths.meiva_home()) / "seed.json"),
+    )
     path = plist_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     new_bytes = plistlib.dumps(plist)
-    plist_changed = not path.exists() or path.read_bytes() != new_bytes
     loaded = is_loaded()
-    if loaded and helper_stop_intent(base.paths.meiva_home()):
-        raise PermissionsHelperBuildError(
-            "helper retirement is incomplete; finish meiva stop externally before starting"
-        )
-    if loaded and (plist_changed or rebuilt):
-        raise PermissionsHelperBuildError(
-            "loaded helper differs from the requested artifact or job; stop and unregister "
-            "this home's helper from outside its process tree before activating the replacement"
-        )
-    if not loaded:
+    plan = activation_plan.activation_plan(
+        loaded=loaded,
+        stop_intent=loaded and helper_stop_intent(base.paths.meiva_home()),
+        plist_changed=not path.exists() or path.read_bytes() != new_bytes,
+        rebuilt=rebuilt,
+    )
+    if plan.refusal is not None:
+        raise PermissionsHelperBuildError(plan.refusal)
+    if plan.bootstrap:
         base.paths.root_run_dir(base.paths.meiva_home()).mkdir(
             mode=0o700, parents=True, exist_ok=True
         )
         clear_helper_stop_intent(base.paths.meiva_home())
         path.write_bytes(new_bytes)
         run_tool(["launchctl", "bootstrap", launchd_domain(), str(path)])
-    if not helper_answers_ping(helper, timers):
+    if not helper_answers_ping(helper, settle_seconds=settle_seconds):
         raise PermissionsHelperBuildError(
             "permissions helper is unresponsive; custody is unknown. Diagnose the native job "
             "externally; start will not bootout or kickstart its possible ancestor"
@@ -382,26 +374,33 @@ def helper_socket() -> Path:
     return permissions_helper_socket(meiva_home(), settings.services.permissions_helper_port)
 
 
-def helper_answers_ping(helper: HelperFactory, timers: Timers) -> bool:
+# meiva:note
+# Ping the helper until it answers, up to `attempts` times with `settle_seconds` between them: a
+# freshly bootstrapped helper needs a moment before its socket answers. A helper that answers
+# without the durable stop/shutdown protocol is an error, not a retry.
+def helper_answers_ping(
+    helper: HelperFactory,
+    *,
+    attempts: int = activation_plan.HELPER_PING_ATTEMPTS,
+    settle_seconds: float = activation_plan.HELPER_PING_SETTLE_S,
+) -> bool:
     from base.host.permissions_helper import client
 
-    for attempt in range(_HELPER_PING_ATTEMPTS):
+    for attempt in range(attempts):
         try:
             reply = helper().ping()
         except (client.PermissionsHelperError, OSError, ValueError):
             reply = None
-        if reply is not None and reply.get("pong") is True:
-            if (
-                reply.get("root_stop_intent_v1") is not True
-                or reply.get("helper_shutdown_v1") is not True
-            ):
-                raise PermissionsHelperBuildError(
-                    "helper lacks the durable stop/shutdown protocol; upgrade its signed artifact "
-                    "after external exact-home retirement before starting"
-                )
+        verdict = activation_plan.ping_verdict(reply)
+        if verdict == "needs_upgrade":
+            raise PermissionsHelperBuildError(
+                "helper lacks the durable stop/shutdown protocol; upgrade its signed artifact "
+                "after external exact-home retirement before starting"
+            )
+        if verdict == "answered":
             return True
-        if attempt < _HELPER_PING_ATTEMPTS - 1:
-            timers.sleep(_HELPER_PING_SETTLE_S)
+        if attempt < attempts - 1:
+            time.sleep(settle_seconds)
     return False
 
 
@@ -409,8 +408,7 @@ def _require_usable_socket_paths() -> None:
     """Refuse impossible macOS IPC names before signing or registering jobs."""
     paths = (helper_socket(), base.paths.root_run_dir(base.paths.meiva_home()) / "meiva-root.sock")
     for path in paths:
-        # Darwin sockaddr_un.sun_path has 104 bytes, including the terminating NUL.
-        if len(os.fsencode(path)) >= 104:
+        if activation_plan.socket_path_too_long(os.fsencode(path)):
             raise PermissionsHelperBuildError(
                 f"macOS IPC path exceeds 103 bytes: {path}; choose a shorter cluster home"
             )
@@ -418,7 +416,7 @@ def _require_usable_socket_paths() -> None:
 
 # meiva:note
 # Idempotent full bring-up: build+sign, load. Raises on any failure.
-def converge(*, helper: HelperFactory, timers: Timers) -> None:
+def converge(*, helper: HelperFactory) -> None:
     _require_usable_socket_paths()
     app, rebuilt = build_and_sign(destination=settings.services.permissions_helper_artifact_dir)
-    install_and_load(app, rebuilt=rebuilt, helper=helper, timers=timers)
+    install_and_load(app, rebuilt=rebuilt, helper=helper)

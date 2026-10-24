@@ -6,7 +6,7 @@ import asyncio
 import json
 from contextlib import suppress
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
@@ -16,9 +16,9 @@ from base.db.code_version_gate import ProcessDbGate
 from base.host.permissions_helper.client import PermissionsHelperError
 from base.log.tests.log_records import LogRecords
 from base.log.tests.log_records import loguru_records as loguru_records
+from base.paths import logs_dir
 
 from ... import mcp_daemon as daemon_mod
-from ... import screen as screen_mod
 from ...protocol import Response
 from ..slices import computer_use_config, short_sock_dir
 from ..test_computer_mcp_daemon import (
@@ -54,11 +54,6 @@ async def test_click_text_measures_scale_and_tracks_pointer(
     fh = fake_helper
     fh.screen = {"x": 0.0, "y": 0.0, "w": 1920.0, "h": 1080.0, "scale": 2.0}  # stale claim
     fh.png_size = (1920, 1080)  # the truth: 1x
-    monkeypatch.setattr(
-        screen_mod,
-        "snapshot_path",
-        lambda _agent_id: "/tmp/click-text.png",  # noqa: S108  # pyright: ignore[reportUnknownArgumentType]
-    )
     d = computer_daemon(database_gate=database_gate, helper=fake_helper)
     result = await ok_result(d, "click_text", {"text": "search"})
     assert result["scale"] == 1.0
@@ -224,7 +219,6 @@ async def test_audit_emitted_on_success(
     *,
     database_gate: ProcessDbGate,
 ) -> None:
-    monkeypatch.setattr(screen_mod, "snapshot_path", lambda _agent_id: "/tmp/x.png")  # noqa: S108  # pyright: ignore[reportUnknownArgumentType]
     d = computer_daemon(database_gate=database_gate, helper=fake_helper)
     await call(d, "click", {"x": 100, "y": 200, "task_id": 42})
     assert len(audit_log) == 2  # pyright: ignore[reportUnknownArgumentType]
@@ -270,7 +264,6 @@ async def test_concurrent_calls_are_safe(
     both audited. Execution is synchronous and wrapped in the machine-wide
     action lock — the lock is the guard for future async points inside a call
     (e.g. Phase 2's queue), and the sync body already prevents interleaving."""
-    monkeypatch.setattr(screen_mod, "snapshot_path", lambda _a: "/tmp/x.png")  # noqa: S108  # pyright: ignore[reportUnknownArgumentType]
     d = computer_daemon(database_gate=database_gate, helper=fake_helper)
     t1 = asyncio.create_task(call(d, "click", {"x": 1, "y": 2}))
     t2 = asyncio.create_task(call(d, "snapshot"))
@@ -524,13 +517,10 @@ async def test_snapshot_audit_carries_png_path(
 ) -> None:
     """A snapshot's computer_action row carries the PNG path — the trace
     replay needs it (Phase 3, task #1101)."""
-    monkeypatch.setattr(
-        screen_mod,
-        "snapshot_path",
-        lambda _agent_id: "/tmp/snap-trace.png",  # noqa: S108  # pyright: ignore[reportUnknownArgumentType]
-    )
     d = computer_daemon(database_gate=database_gate, helper=fake_helper)
     await call(d, "snapshot", {"task_id": 42})
     actions = [ev for ev in audit_log if ev["event_type"] == "computer_action"]
     assert actions[0]["payload"]["action"] == "snapshot"
-    assert actions[0]["payload"]["path"] == "/tmp/snap-trace.png"  # noqa: S108
+    traced = Path(cast("str", cast("dict[str, object]", actions[0]["payload"])["path"]))
+    assert traced.parent == logs_dir() / "computer" / "snapshots"
+    assert traced.name.startswith("agent-")

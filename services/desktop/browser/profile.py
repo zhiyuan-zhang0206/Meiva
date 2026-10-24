@@ -23,8 +23,11 @@ from __future__ import annotations
 
 import os
 import shutil
+import sys
 import time
+from dataclasses import dataclass
 from pathlib import Path
+from typing import TextIO
 
 from base.host.proc import process_alive
 from base.host.system.hostport import Host
@@ -156,34 +159,60 @@ def human_size(n_bytes: int) -> str:
     return f"{gb:.1f} GB" if gb >= 1 else f"{n_bytes / 1024**2:.0f} MB"
 
 
-def _prompt_profile_choice(src: Path) -> str:
+# meiva:note
+# The two streams a prompt talks over: `say` writes a line to `stdout`, `ask` writes the prompt
+# and reads one line from `stdin` (end of input is an `EOFError`, as with `input()`). The process
+# entry builds the real one (`Console.of_process()`); a test hands in `io.StringIO` streams.
+@dataclass(frozen=True)
+class Console:
+    stdin: TextIO
+    stdout: TextIO
+
+    @classmethod
+    def of_process(cls) -> Console:
+        return cls(stdin=sys.stdin, stdout=sys.stdout)
+
+    def say(self, text: str = "") -> None:
+        self.stdout.write(text + "\n")
+        self.stdout.flush()
+
+    def ask(self, prompt: str) -> str:
+        self.stdout.write(prompt)
+        self.stdout.flush()
+        line = self.stdin.readline()
+        if not line:
+            raise EOFError("no answer: the input stream ended")
+        return line.rstrip("\n")
+
+
+def _prompt_profile_choice(src: Path, console: Console) -> str:
     """Explain the choice and return 'copy' or 'new' (default 'new')."""
-    print("\n  The agent's browser uses a DEDICATED Chrome profile, separate from your")  # noqa: T201
-    print("  daily Chrome. Fresh, it is empty — the agent signs in to every site itself.")  # noqa: T201
-    print("")  # noqa: T201
-    print(f"  You can instead COPY your daily Chrome profile ({src}) into it. The agent")  # noqa: T201
-    print("  then inherits every logged-in session and acts on any site you are signed")  # noqa: T201
-    print("  into — using your cookies, saved passwords, and accounts — without a re-login.")  # noqa: T201
-    print("")  # noqa: T201
-    print("  SECURITY: a copied profile gives the agent your full logged-in identity;")  # noqa: T201
-    print("  anything it does in the browser is done as you.")  # noqa: T201
-    answer = input(
+    console.say("\n  The agent's browser uses a DEDICATED Chrome profile, separate from your")
+    console.say("  daily Chrome. Fresh, it is empty — the agent signs in to every site itself.")
+    console.say("")
+    console.say(f"  You can instead COPY your daily Chrome profile ({src}) into it. The agent")
+    console.say("  then inherits every logged-in session and acts on any site you are signed")
+    console.say("  into — using your cookies, saved passwords, and accounts — without a re-login.")
+    console.say("")
+    console.say("  SECURITY: a copied profile gives the agent your full logged-in identity;")
+    console.say("  anything it does in the browser is done as you.")
+    answer = console.ask(
         "  Seed the browser profile from your daily Chrome? [copy / new] (default new): "
     )
     return "copy" if answer.strip().lower() in ("copy", "c") else "new"
 
 
-def _confirm_copy(src: Path, dst: Path, size_bytes: int) -> bool:
+def _confirm_copy(src: Path, dst: Path, size_bytes: int, console: Console) -> bool:
     """Final size-aware confirmation for the copy. Returns True only on explicit yes."""
-    print(f"\n  This copies {human_size(size_bytes)} from")  # noqa: T201
-    print(f"    {src}")  # noqa: T201
-    print("  into the agent's profile at")  # noqa: T201
-    print(f"    {dst}")  # noqa: T201
-    print("  The agent will then be logged into everything you are logged into.")  # noqa: T201
-    return input("  Type 'yes' to confirm the copy: ").strip().lower() in ("yes", "y")
+    console.say(f"\n  This copies {human_size(size_bytes)} from")
+    console.say(f"    {src}")
+    console.say("  into the agent's profile at")
+    console.say(f"    {dst}")
+    console.say("  The agent will then be logged into everything you are logged into.")
+    return console.ask("  Type 'yes' to confirm the copy: ").strip().lower() in ("yes", "y")
 
 
-def ensure_browser_profile(*, interactive: bool, host: Host) -> None:
+def ensure_browser_profile(*, interactive: bool, host: Host, console: Console) -> None:
     """Offer, once, to seed the agent's dedicated Chrome profile from the daily one.
 
     No-ops (leaving the daemon to create a fresh empty profile) when the profile
@@ -200,23 +229,23 @@ def ensure_browser_profile(*, interactive: bool, host: Host) -> None:
     if src is None:
         return  # no daily Chrome to copy from -> fresh profile, no prompt
 
-    if _prompt_profile_choice(src) != "copy":
+    if _prompt_profile_choice(src, console) != "copy":
         return
 
     # Copying a live profile risks importing half-written SQLite. Require Chrome
     # closed; loop so the operator can quit it and continue without restarting.
     while running_chrome_pid(src) is not None:
-        print("\n  Chrome is still running — copying now could corrupt the imported data.")  # noqa: T201
+        console.say("\n  Chrome is still running — copying now could corrupt the imported data.")
         if (
-            input("  Quit Chrome fully, then press Enter to retry (or type 'new'): ")
+            console.ask("  Quit Chrome fully, then press Enter to retry (or type 'new'): ")
             .strip()
             .lower()
             == "new"
         ):
             return
 
-    if not _confirm_copy(src, dst, dir_size_bytes(src)):
+    if not _confirm_copy(src, dst, dir_size_bytes(src), console):
         return
-    print(f"  Copying your Chrome profile into {dst} … (this may take a while)")  # noqa: T201
+    console.say(f"  Copying your Chrome profile into {dst} … (this may take a while)")
     copy_default_profile(src, dst)
-    print("  Done — the agent's browser now shares your logged-in Chrome state.")  # noqa: T201
+    console.say("  Done — the agent's browser now shares your logged-in Chrome state.")

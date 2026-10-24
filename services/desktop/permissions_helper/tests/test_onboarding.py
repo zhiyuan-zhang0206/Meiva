@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import io
 import json
+import subprocess
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -11,8 +13,8 @@ from base.host.permissions_helper.client import (
     SpawnResult,
 )
 from base.host.permissions_helper.grants import gate
-from base.host.permissions_helper.grants.catalog import PREFLIGHT_SERVICES, Grant, PermissionItem
-from base.host.permissions_helper.grants.probe import HelperChannel
+from base.host.permissions_helper.grants.catalog import PREFLIGHT_SERVICES, Grant
+from base.host.permissions_helper.grants.triggers import FOLDER_PATHS
 from services.desktop.permissions_helper import onboarding
 
 NOW = datetime(2026, 10, 17, 8, 0, tzinfo=UTC)
@@ -35,6 +37,7 @@ class FakeHelper(PermissionsHelperClient):
         self.request_capable = request_capable
         self.request_fails = request_fails
         self.spawns: list[list[str]] = []
+        self.children: list[list[str]] = []
         self.requests = 0
 
     def ping(self) -> Any:
@@ -60,6 +63,21 @@ class FakeHelper(PermissionsHelperClient):
         stdout: str,
         stderr: str,
     ) -> SpawnResult:
+        child = Path(argv[1]).name
+        if child == "folder_touch.py":
+            # meiva:note
+            # The trigger child of a folder item runs for real against the test home: it lists
+            # the folder and writes what happened where the gate reads it.
+            self.children.append(list(argv))
+            subprocess.run(argv, check=True)  # noqa: S603
+            return {"pid": 1, "reused": False}
+        if child == "apple_event.py":
+            # meiva:note
+            # An Automation child needs osascript and a person at a macOS dialog, which a test
+            # host has neither of: the helper reports the dialog as accepted.
+            self.children.append(list(argv))
+            Path(argv[3]).write_text("granted")
+            return {"pid": 1, "reused": False}
         self.spawns.append(list(argv))
         services = json.loads(argv[2])
         Path(argv[3]).write_text(
@@ -76,10 +94,6 @@ class DeadHelper(PermissionsHelperClient):
         raise PermissionsHelperError("no socket")
 
 
-def _granted(_client: HelperChannel, _item: PermissionItem, **_options: object) -> str:
-    return "granted"
-
-
 def _codes(value: int) -> dict[str, int]:
     return dict.fromkeys(PREFLIGHT_SERVICES, value)
 
@@ -87,6 +101,8 @@ def _codes(value: int) -> dict[str, int]:
 def host(
     tmp_path: Path, *, client: FakeHelper | DeadHelper | None = None, platform: str = "darwin"
 ) -> onboarding.GateHost:
+    for subpath in FOLDER_PATHS.values():
+        (tmp_path / subpath).mkdir(parents=True, exist_ok=True)
     return onboarding.GateHost(
         client=client if client is not None else FakeHelper(_codes(0)),
         env={},
@@ -141,18 +157,27 @@ def test_the_first_pass_sees_both_desktop_grants_and_each_folder(tmp_path: Path)
 def test_the_first_pass_asks_both_desktop_grants_and_each_folder(tmp_path: Path) -> None:
     helper = FakeHelper(_codes(2), screen=False, ax=False)
     seat = host(tmp_path, client=helper)
-    asked: list[str] = []
 
-    def request_item(_client: HelperChannel, item: PermissionItem, **_options: object) -> str:
-        asked.append(item.id)
-        return "granted"
+    onboarding.onboard(host=seat, now=NOW)
 
-    onboarding.onboard(host=seat, now=NOW, sleep=lambda _: None, request_item=request_item)
+    asked = {argv[2] for argv in helper.children}
     assert helper.requests == 1
-    assert "desktop-folder" in asked
-    assert "screen-recording" not in asked
-    assert "automation-finder" not in asked
+    assert {str(tmp_path / FOLDER_PATHS[item]) for item in FOLDER_PATHS} == asked
     assert len(helper.spawns) == 2
+
+
+def test_each_request_is_narrated_on_the_stream_it_is_given(tmp_path: Path) -> None:
+    seat = host(tmp_path, client=FakeHelper(_codes(2), screen=False, ax=False))
+    progress = io.StringIO()
+
+    onboarding.onboard(host=seat, now=NOW, progress=progress)
+
+    lines = progress.getvalue().splitlines()
+    assert lines[0] == "Asking the system for: screen-recording, accessibility"
+    assert [line for line in lines if line.startswith("Asking for: ")]
+    assert lines.count("  -> granted") == len(
+        [line for line in lines if line.startswith("Asking for")]
+    )
 
 
 def test_the_request_outcome_is_not_its_own_evidence(tmp_path: Path) -> None:
@@ -160,8 +185,6 @@ def test_the_request_outcome_is_not_its_own_evidence(tmp_path: Path) -> None:
     report = onboarding.onboard(
         host=seat,
         now=NOW,
-        sleep=lambda _: None,
-        request_item=_granted,
     )
     assert report.state is gate.GateState.ACTION_REQUIRED
     assert report.grant_for("desktop-folder") is Grant.NOT_DETERMINED
@@ -172,12 +195,12 @@ def test_a_denied_grant_is_not_asked_again_until_a_person_asks(tmp_path: Path) -
     codes = _codes(2)
     helper = FakeHelper(codes, screen=False, ax=False)
     seat = host(tmp_path, client=helper)
-    first = onboarding.onboard(host=seat, now=NOW, sleep=lambda _: None, request_item=_granted)
+    first = onboarding.onboard(host=seat, now=NOW)
     assert helper.requests == 1
     assert first.grant_for("screen-recording") is Grant.NOT_DETERMINED
 
     codes.update(_codes(1))
-    second = onboarding.onboard(host=seat, now=NOW, sleep=lambda _: None, request_item=_granted)
+    second = onboarding.onboard(host=seat, now=NOW)
     assert helper.requests == 1
     assert second.grant_for("screen-recording") is Grant.DENIED
     assert [item.id for item in second.manual()] == [
@@ -189,9 +212,7 @@ def test_a_denied_grant_is_not_asked_again_until_a_person_asks(tmp_path: Path) -
         "downloads-folder",
     ]
 
-    onboarding.onboard(
-        host=seat, now=NOW, automatic=False, sleep=lambda _: None, request_item=_granted
-    )
+    onboarding.onboard(host=seat, now=NOW, automatic=False)
     assert helper.requests == 2
 
 
@@ -206,7 +227,7 @@ def test_a_grant_the_record_holds_and_the_helper_has_not_read_is_stale(tmp_path:
 def test_a_helper_without_the_request_method_keeps_the_manual_path(tmp_path: Path) -> None:
     helper = FakeHelper(_codes(2), screen=False, ax=False, request_capable=False)
     seat = host(tmp_path, client=helper)
-    report = onboarding.onboard(host=seat, now=NOW, sleep=lambda _: None, request_item=_granted)
+    report = onboarding.onboard(host=seat, now=NOW)
     assert helper.requests == 0
     assert "request_grants_v1" in report.diagnostic
     assert report.grant_for("screen-recording") is Grant.NOT_DETERMINED
@@ -228,8 +249,6 @@ def test_app_management_is_never_asked_even_as_the_only_missing_desktop_row(
         host=host(tmp_path, client=helper),
         now=NOW,
         automatic=False,
-        sleep=lambda _: None,
-        request_item=_granted,
     )
     assert helper.requests == 0
     assert "app-management" not in {item.id for item in report.requestable()}
@@ -249,9 +268,7 @@ def test_the_summary_names_what_is_missing(tmp_path: Path) -> None:
 def test_a_stale_helper_is_never_asked_even_by_the_manual_pass(tmp_path: Path) -> None:
     helper = FakeHelper(_codes(0), screen=False, ax=False)
     seat = host(tmp_path, client=helper)
-    report = onboarding.onboard(
-        host=seat, now=NOW, automatic=False, sleep=lambda _: None, request_item=_granted
-    )
+    report = onboarding.onboard(host=seat, now=NOW, automatic=False)
     assert helper.requests == 0
     assert report.grant_for("screen-recording") is Grant.STALE
 
@@ -259,7 +276,7 @@ def test_a_stale_helper_is_never_asked_even_by_the_manual_pass(tmp_path: Path) -
 def test_a_failed_request_is_reported_rather_than_crashing_the_start(tmp_path: Path) -> None:
     helper = FakeHelper(_codes(2), screen=False, ax=False, request_fails=True)
     seat = host(tmp_path, client=helper)
-    report = onboarding.onboard(host=seat, now=NOW, sleep=lambda _: None, request_item=_granted)
+    report = onboarding.onboard(host=seat, now=NOW)
     assert helper.requests == 1
     assert "socket went away mid-call" in report.diagnostic
     assert report.state is gate.GateState.ACTION_REQUIRED
