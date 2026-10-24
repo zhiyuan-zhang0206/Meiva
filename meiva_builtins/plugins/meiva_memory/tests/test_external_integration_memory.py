@@ -1,3 +1,4 @@
+import stat
 from collections.abc import Iterator
 from contextlib import closing
 from dataclasses import replace
@@ -144,6 +145,20 @@ def test_external_personal_path_uses_borrowed_identity(
     assert not workspace_dir_readonly(stale_id).exists()
 
 
+# meiva:note
+# Every entry under `root` with what a filesystem effect leaves behind: its path, kind, size and
+# modification time. A directory's modification time moves when an entry is added or removed in
+# it, and a file's moves when it is rewritten, so recreating a directory or overwriting a file
+# that was already there changes the snapshot too.
+def _tree(root: Path) -> list[tuple[str, str, int, int]]:
+    entries: list[tuple[str, str, int, int]] = []
+    for path in sorted(root.rglob("*")):
+        status = path.lstat()
+        kind = "link" if stat.S_ISLNK(status.st_mode) else "dir" if path.is_dir() else "file"
+        entries.append((str(path.relative_to(root)), kind, status.st_size, status.st_mtime_ns))
+    return entries
+
+
 @pytest.mark.parametrize("operation", ["personal_path", "note"])
 def test_external_memory_rechecks_lease_before_filesystem_effects(
     native_checkpoint: RuntimeIncarnation,
@@ -159,7 +174,8 @@ def test_external_memory_rechecks_lease_before_filesystem_effects(
     from meiva_builtins.plugins.meiva_memory import notes, sdk
 
     owner = native_checkpoint
-    pin_agent(owner.agent_id + 1000, owns_loop=False)
+    stale_process_id = owner.agent_id + 1000
+    pin_agent(stale_process_id, owns_loop=False)
     lease = leases.request(
         database,
         event_bus,
@@ -192,7 +208,7 @@ def test_external_memory_rechecks_lease_before_filesystem_effects(
         )
         db_conn.commit()
         workspaces = unit_home / "workspaces"
-        before = sorted(workspaces.rglob("*"))
+        before = _tree(workspaces)
         with pytest.raises(leases.ImpersonationError, match="expired"):
             if operation == "personal_path":
                 _ = sdk.PERSONAL_PATH
@@ -207,7 +223,8 @@ def test_external_memory_rechecks_lease_before_filesystem_effects(
                     ),
                 )
                 notes.per_agent_memory_note(context)
-        assert sorted(workspaces.rglob("*")) == before
+        assert _tree(workspaces) == before
+        assert not (workspaces / str(stale_process_id)).exists()
     finally:
         with pytest.raises(leases.ImpersonationError, match="expired"):
             attachment.close()

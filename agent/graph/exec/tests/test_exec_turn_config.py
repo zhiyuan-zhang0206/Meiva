@@ -8,11 +8,10 @@ import pytest
 from langchain_core.messages import AIMessage, ToolMessage
 from langgraph.runtime import Runtime
 
-from agent.graph.exec._child_boundary import ParentFacts
 from agent.graph.exec._result import ExecDone
 from agent.graph.exec._stream import ExecOutputChunkPublisher
 from agent.graph.exec.node import exec_node, run_agent_code
-from agent.graph.exec.process import SubprocessExecProcess
+from agent.graph.exec.process import SubprocessExecProcess, read_parent_facts
 from agent.state import AgentState
 from base.agents.context import MeivaContext
 from base.agents.context.identity import AgentIdentity
@@ -20,7 +19,7 @@ from base.agents.messages.kwargs import ExecStatus, read_meiva_kwargs
 from base.clock import Clock
 from base.config import settings
 from base.config.agent_pins import resolve_agent_config_pins
-from base.config.tests.configuration import defaults
+from base.config.tests.configuration import defaults, snapshot_process_config
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.events.live.tests.live_capture import idle_publisher
@@ -63,16 +62,15 @@ def _plugin(unit_home: Path) -> None:
 # meiva:note
 # The parent's environment carries another agent's pins, as an ambient process would: a child
 # may only see the explicit maps of the turn it was launched for.
-class _AmbientPinsProcess(SubprocessExecProcess):
-    def parent_facts(self) -> ParentFacts:
-        facts = super().parent_facts()
-        ambient = {
-            AGENT_CONFIG_OVERLAY_ENV: json.dumps({"llm_model": "deepseek-v4-pro"}),
-            AGENT_BIRTH_CONFIG_ENV: json.dumps(
-                {"llm_stream_ttft_timeout_seconds": 99.0, "exec_probe_marker": "ambient-parent"}
-            ),
-        }
-        return replace(facts, environ={**facts.environ, **ambient})
+def _ambient_pins_process() -> SubprocessExecProcess:
+    facts = read_parent_facts()
+    ambient = {
+        AGENT_CONFIG_OVERLAY_ENV: json.dumps({"llm_model": "deepseek-v4-pro"}),
+        AGENT_BIRTH_CONFIG_ENV: json.dumps(
+            {"llm_stream_ttft_timeout_seconds": 99.0, "exec_probe_marker": "ambient-parent"}
+        ),
+    }
+    return SubprocessExecProcess(replace(facts, environ={**facts.environ, **ambient}))
 
 
 async def test_concurrent_turn_configs_reach_real_children_without_cross_talk(
@@ -97,7 +95,7 @@ async def test_concurrent_turn_configs_reach_real_children_without_cross_talk(
                 db=database,
                 bus=EventBus.from_settings(),
                 clients=process_clients(
-                    database=lambda: database,
+                    config=snapshot_process_config(), database=lambda: database
                 ),
                 identity=AgentIdentity(agent_id=agent_id, owns_loop=True),
                 catalog=build_model_catalog(),
@@ -106,7 +104,7 @@ async def test_concurrent_turn_configs_reach_real_children_without_cross_talk(
             agent_id,
             code,
             ExecOutputChunkPublisher(idle_publisher(), agent_id, str(agent_id)),
-            process=_AmbientPinsProcess(),
+            process=_ambient_pins_process(),
         )
         assert isinstance(result, ExecDone), result
         line = next(line for line in result.output.splitlines() if line.startswith("CONFIG="))
@@ -151,7 +149,7 @@ def _execution_context(
         agent=agent,
         db=database,
         bus=event_bus,
-        clients=process_clients(database=lambda: database),
+        clients=process_clients(config=snapshot_process_config(), database=lambda: database),
         identity=AgentIdentity(agent_id=agent_id, owns_loop=True),
         event_publisher=idle_publisher(),
         catalog=model_catalog,
@@ -182,7 +180,7 @@ async def _execution_message(context: MeivaContext, code: str) -> ToolMessage:
         state,
         Runtime(context=context),
         {"configurable": {"thread_id": str(agent_id)}},
-        process=SubprocessExecProcess(),
+        process=SubprocessExecProcess(read_parent_facts()),
     )
     update = cast(dict[str, Any], command.update)
     assert update["halted"] is False

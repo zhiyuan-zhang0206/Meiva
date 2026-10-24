@@ -21,10 +21,11 @@ from uuid import UUID
 
 from base.agents.impersonation.host_transport import antigravity_rpc
 
-from ._common import init_file, worker_bootstrap, write_task_file_header
+from ._common import init_file, write_task_file_header
 from ._common import resolve_dir as resolve_dir
 from ._common import resolve_file as resolve_file
-from ._common import session_uuid as session_uuid
+from .plans.launch_request import checked_prompt, contract_file, worker_bootstrap
+from .plans.launch_request import session_uuid as session_uuid
 
 
 def launch(
@@ -42,12 +43,9 @@ def launch(
     task/work files. Otherwise initializes ``tasks_file`` and ``work_file`` and
     starts the conversation with the supervised collaboration contract.
     """
-    if prompt is not None:
-        if not prompt.strip():
-            raise ValueError("a prompt launch needs a non-empty prompt")
-        if tasks_file is not None or work_file is not None:
-            raise ValueError("a prompt launch does not use task or work files")
-        initial_prompt = prompt
+    checked = checked_prompt(prompt, tasks_file, work_file)
+    if checked is not None:
+        initial_prompt = checked
     else:
         if tasks_file is None or work_file is None:
             raise ValueError("a supervised launch needs its task and work files")
@@ -55,7 +53,7 @@ def launch(
         init_file(work_file, "STATUS: WORKING\n\n## Log\n\n")
         write_task_file_header(tasks_file, provenance or "")
         initial_prompt = worker_bootstrap(
-            skill_dir / "references" / "collaboration_protocol.md",
+            contract_file(skill_dir),
             workspace,
             tasks_file,
             work_file,

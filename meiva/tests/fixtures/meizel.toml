@@ -1,8 +1,5 @@
-exports = ["meiva_tests.py", "model_owner.py", "pin_agent.py", "sdk.py", "workspace.py"]
+exports = ["gateway_wire.py", "meiva_tests.py", "model_owner.py", "pin_agent.py", "scripted_chat_model.py", "sdk.py", "workspace.py"]
 
 [uses]
 "meiva_tests.py" = ["pin_agent.py"]
 "workspace.py" = ["pin_agent.py"]
-
-[debt.first-party-patch]
-"model_owner.py#monkeypatch.setattr meiva.__plugin_installation__" = 1

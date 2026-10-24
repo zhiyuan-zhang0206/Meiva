@@ -2,15 +2,20 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
-from collections.abc import Callable
 from pathlib import Path
 from typing import Any, cast
 
 import pytest
 
 from base.sessions import provenance
-from meiva import agents
+from meiva.sdk_surface.tests.agent_binding import BindAgent
 from meiva.shell.coding_tools import _common, add_lineage_arguments, require_lineage
+from meiva.shell.coding_tools.plans.launch_request import worker_bootstrap
+from meiva.shell.coding_tools.plans.lineage import (
+    DispatchFacts,
+    dispatch_provenance,
+    lineage_error,
+)
 
 NOW = dt.datetime(2026, 10, 18, 15, 41, tzinfo=dt.UTC)
 
@@ -30,82 +35,68 @@ def _prov(**overrides: object) -> provenance.DispatchProvenance:
     return provenance.DispatchProvenance(**cast("dict[str, Any]", fields))
 
 
-def _ancestors(*ids: int) -> list[agents.Neighbor]:
-    return [
-        agents.Neighbor(
-            agent_id=agent_id,
-            label=None,
-            status=agents.AgentStatus.RUNNING,
-            depth=1,
-            score=1.0,
-        )
-        for agent_id in ids
-    ]
+def _block(facts: DispatchFacts, **overrides: object) -> provenance.DispatchProvenance:
+    fields: dict[str, Any] = {
+        "for_task": None,
+        "why": "because",
+        "task_label": None,
+        "priority": None,
+        "now": NOW,
+    }
+    fields.update(overrides)
+    return dispatch_provenance(facts, **fields)
 
 
-def _row(agent_id: int, label: str | None) -> agents.AgentRow:
-    return agents.AgentRow(
-        agent_id=agent_id,
-        label=label,
-        status=agents.AgentStatus.RUNNING,
-        spawner="user",
-        fork_source_agent_id=None,
-        machine="ubuntu",
-        spawned_at=NOW,
-        last_active_at=NOW,
-        last_inbound_at=NOW,
-        heartbeat_paused_until=None,
+def test_the_block_collects_the_parent_chain_and_label() -> None:
+    facts = DispatchFacts(
+        parent_agent_id=41, ancestor_ids=(7, 1), directory=((40, "other"), (41, "worker"))
     )
 
-
-def _directory(*rows: agents.AgentRow) -> Callable[..., agents.AgentDirectoryPage]:
-    page = agents.AgentDirectoryPage(agents=list(rows), next_cursor=None)
-
-    def _read(*_args: object, **_kwargs: object) -> agents.AgentDirectoryPage:
-        return page
-
-    return _read
-
-
-def test_build_collects_the_parent_chain_and_label() -> None:
-    prov = _common.build_dispatch_provenance(
-        for_task=9,
-        why="because",
-        task_label="lineage",
-        priority="P1",
-        now=NOW,
-        agent_id=lambda: 41,
-        ancestors=lambda _agent_id: _ancestors(7, 1),
-        directory=_directory(_row(41, "worker")),
-    )
+    prov = _block(facts, for_task=9, task_label="lineage", priority="P1")
 
     assert prov.spawn_chain == ("1", "7", "41")
     assert prov.parent_label == "worker"
-    assert prov.task_id == 9
+    assert prov.parent_agent_id == 41
+    assert (prov.task_id, prov.task_label, prov.priority) == (9, "lineage", "P1")
+    assert prov.dispatched_at == NOW
 
 
-def test_build_degrades_instead_of_failing() -> None:
-    def _explode(_agent_id: int) -> list[agents.Neighbor]:
-        raise RuntimeError("gateway down")
+def test_the_chain_keeps_the_last_five_agents() -> None:
+    facts = DispatchFacts(parent_agent_id=9, ancestor_ids=(8, 7, 6, 5, 4, 3, 2), directory=())
 
-    prov = _common.build_dispatch_provenance(
-        for_task=None,
-        why="because",
-        agent_id=lambda: 41,
-        ancestors=_explode,
-        directory=_directory(),
-    )
+    assert _block(facts).spawn_chain == ("5", "6", "7", "8", "9")
+
+
+def test_a_failed_lookup_degrades_the_block_instead_of_failing() -> None:
+    facts = DispatchFacts(parent_agent_id=41, ancestor_ids=None, directory=None)
+
+    prov = _block(facts)
     text = provenance.render(prov)
 
     assert prov.spawn_chain == ()
+    assert prov.parent_label is None
     assert "dispatched_by: agent 41" in text
     assert "for_task: none (ad-hoc)" in text
+
+
+def test_a_directory_that_does_not_know_the_agent_leaves_the_label_empty() -> None:
+    facts = DispatchFacts(parent_agent_id=41, ancestor_ids=(), directory=((40, "other"),))
+
+    assert _block(facts).parent_label is None
+
+
+def test_without_an_agent_identity_the_block_names_no_dispatcher() -> None:
+    prov = _block(DispatchFacts(parent_agent_id=None, ancestor_ids=None, directory=None))
+
+    assert prov.parent_agent_id is None
+    assert prov.spawn_chain == ()
+    assert "dispatched_by: unknown" in provenance.render(prov)
 
 
 def test_bootstrap_puts_the_block_first(tmp_path: Path) -> None:
     block = provenance.render(_prov())
 
-    message = _common.worker_bootstrap(
+    message = worker_bootstrap(
         tmp_path / "contract.md",
         tmp_path,
         tmp_path / "tasks.md",
@@ -158,6 +149,9 @@ def _parser() -> argparse.ArgumentParser:
 
 
 def test_a_missing_reason_is_a_usage_error() -> None:
+    assert lineage_error("", 9, None, None) == (
+        "--why is required: one line saying why this work is delegated"
+    )
     parser = _parser()
     args = parser.parse_args(["--for-task", "9"])
 
@@ -166,6 +160,11 @@ def test_a_missing_reason_is_a_usage_error() -> None:
 
 
 def test_task_metadata_without_a_task_is_a_usage_error() -> None:
+    assert (
+        lineage_error("because", None, None, "P1") == "--task-label/--priority require --for-task"
+    )
+    assert lineage_error("because", None, "label", None) is not None
+    assert lineage_error("because", 9, "label", "P1") is None
     parser = _parser()
     args = parser.parse_args(["--why", "because", "--priority", "P1"])
 
@@ -173,43 +172,50 @@ def test_task_metadata_without_a_task_is_a_usage_error() -> None:
         require_lineage(parser, args)
 
 
+@pytest.mark.usefixtures("no_agent")
 def test_the_block_is_generated_from_validated_flags() -> None:
     parser = _parser()
     args = parser.parse_args(
         ["--why", "because", "--for-task", "9", "--task-label", "lineage", "--priority", "P1"]
     )
-    seen: dict[str, object] = {}
 
-    def _build(**kwargs: object) -> provenance.DispatchProvenance:
-        seen.update(kwargs)
-        return _prov()
+    text = require_lineage(parser, args)
 
-    text = require_lineage(parser, args, build=_build)
-
-    assert seen == {
-        "for_task": 9,
-        "why": "because",
-        "task_label": "lineage",
-        "priority": "P1",
-    }
     assert text.startswith(provenance.MARKER)
+    assert 'for_task: 9 "lineage" (P1)' in text.splitlines()
+    assert "why_you: because" in text.splitlines()
+    assert "dispatched_by: unknown (no agent identity in the launching process)" in text
 
 
+@pytest.mark.usefixtures("no_agent")
 def test_a_takeover_gets_the_three_line_form() -> None:
     parser = _parser()
     args = parser.parse_args(["--why", "because"])
 
-    def _build(**_kwargs: object) -> provenance.DispatchProvenance:
-        return _prov()
+    text = require_lineage(parser, args, takeover=True)
 
-    text = require_lineage(parser, args, takeover=True, build=_build)
+    lines = text.splitlines()
+    assert len(lines) == 3
+    assert lines[1] == "why: because"
+    assert lines[0].startswith("requested_by:")
+    assert lines[2].startswith("return_to:")
 
-    assert text.splitlines() == [
-        'requested_by: agent 41 "worker"',
-        "why: the reviewer's context is full",
-        "return_to: agent 41",
-    ]
-    assert len(text.splitlines()) == 3
+
+@pytest.mark.usefixtures("no_agent")
+def test_facts_without_an_agent_identity_name_nobody() -> None:
+    assert _common.read_dispatch_facts() == DispatchFacts(
+        parent_agent_id=None, ancestor_ids=None, directory=None
+    )
+
+
+def test_facts_degrade_when_the_cluster_cannot_be_asked(bound_agent: BindAgent) -> None:
+    # meiva:note
+    # The agent is known but the bound context carries no reachable gateway, so both lookups fail for real and the facts keep only the id.
+    bound_agent(41)
+
+    assert _common.read_dispatch_facts() == DispatchFacts(
+        parent_agent_id=41, ancestor_ids=None, directory=None
+    )
 
 
 def test_a_long_label_cannot_push_the_tail_out_of_the_block() -> None:

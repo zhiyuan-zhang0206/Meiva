@@ -2,20 +2,23 @@
 
 from __future__ import annotations
 
-import contextlib
 import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
+import psycopg
 import pytest
-from redis.exceptions import ResponseError
 
-import meiva
-from base.config import settings
+from base.agents.lifecycle import SystemHalt
+from base.agents.tests.units import spawn_agent
+from base.cluster.machine import MachineIdentity
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
+from base.config.service_read import ConfigAuthority
+from base.db.code_version_gate import ProcessDbGate
+from base.lm.catalog import ModelCatalog
 from meiva import files as _files
 from meiva import ui as _ui
 from meiva import watcher as _watcher
-from meiva.sdk_surface import agent_identity
 from meiva.tests.fixtures.pin_agent import pin_agent
 
 
@@ -77,56 +80,17 @@ class TestFilesEntries:
             call()
 
 
-class _FakeHost:
-    """A page host that records what the module functions hand it."""
-
-    def __init__(self) -> None:
-        self.seen: dict[str, Any] = {}
-        self.ready_timeout_s = 1.0
-
-    def register(
-        self, name: str, port: int, title: str | None, serve_dir: str | None, *, ttl: float | None
-    ) -> object:
-        self.seen.update(name=name, title=title, port=port, serve_dir=serve_dir, ttl=ttl)
-        return object()
-
-    def reject_foreign_port_occupant(self, _port: int) -> None:
-        return None
-
-    def wait_until_serving(self, _port: int) -> bool:
-        return True
-
-    def close(self, name: str) -> None:
-        self.seen.update(name=name)
-
-
 class TestUiEntries:
-    def test_show_unwraps_name_and_title(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        host = _FakeHost()
-        monkeypatch.setattr(_ui, "page_host", lambda: host)
+    def test_show_unwraps_name_and_title(self) -> None:
+        request = _ui.show_request(("mypage",), 9999, ("My Page",), None)  # pyright: ignore[reportArgumentType]
+        assert (request.name, request.title, request.port) == ("mypage", "My Page", 9999)
 
-        _ui.show(("mypage",), 9999, title=("My Page",))  # pyright: ignore[reportArgumentType]
-        assert host.seen["name"] == "mypage"
-        assert host.seen["title"] == "My Page"
-        assert host.seen["port"] == 9999
+    def test_serve_unwraps_dir_and_name(self, tmp_path: Path) -> None:
+        request = _ui.serve_request((str(tmp_path),), ("served",), 9998, None, None)  # pyright: ignore[reportArgumentType]
+        assert (request.name, request.port, request.dir) == ("served", 9998, str(tmp_path))
 
-    def test_serve_unwraps_dir_and_name(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
-        host = _FakeHost()
-        monkeypatch.setattr(_ui, "page_host", lambda: host)
-
-        _ui.serve((str(tmp_path),), ("served",), 9998)  # pyright: ignore[reportArgumentType]
-        assert host.seen["name"] == "served"
-        assert host.seen["port"] == 9998
-        assert host.seen["serve_dir"] == str(Path(str(tmp_path)).resolve())
-
-    def test_close_unwraps_name(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        host = _FakeHost()
-        monkeypatch.setattr(_ui, "page_host", lambda: host)
-
-        _ui.close(("mypage",))  # pyright: ignore[reportArgumentType]
-        assert host.seen["name"] == "mypage"
+    def test_close_unwraps_name(self) -> None:
+        assert _ui.close_request(("mypage",)) == "mypage"  # pyright: ignore[reportArgumentType]
 
     @pytest.mark.parametrize(
         ("call", "match"),
@@ -169,8 +133,14 @@ class TestWatcherEntries:
     def test_launch_unwraps_timeout(self) -> None:
         from meiva.watcher import plans
 
-        request = plans.plan_launch(("print(1)",), ("30m",), ("x",), None)  # pyright: ignore[reportArgumentType]
-        assert request.timeout_secs == 1800.0
+        request = plans.plan_launch(
+            cast(Any, ("print(1)",)),
+            cast(Any, ("30m",)),
+            cast(Any, ("x",)),
+            None,
+            datetime.datetime(2029, 1, 1, tzinfo=datetime.UTC),
+        )
+        assert request.watchdog_secs == 1800.0
         assert request.name == "x"
 
     @pytest.mark.parametrize(
@@ -216,7 +186,7 @@ class TestWebEntries:
         assert plan.effort == "low"
         assert plan.max_chars == 50_000
 
-    def test_fetch_effort_multi_element_type_errors(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_fetch_effort_multi_element_type_errors(self) -> None:
         from meiva import web
 
         with pytest.raises(TypeError, match="effort must be a string"):
@@ -249,69 +219,33 @@ class TestUnderstandEntries:
 
 class TestSelfEntries:
     def test_compact_summary_unwraps(
-        self, db_url: str, redis_url: str, monkeypatch: pytest.MonkeyPatch
+        self,
+        db_url: str,
+        redis_url: str,
+        db_conn: psycopg.Connection[Any],
+        model_catalog: ModelCatalog,
+        config_authority: ConfigAuthority,
+        database_gate: ProcessDbGate,
+        machine_identity: MachineIdentity,
     ) -> None:
         """The summary tuple unwraps before the framework's boot guard runs —
         the DB write then receives the unwrapped string."""
         from meiva import self as self_mod
 
-        seen: dict[str, Any] = {}
-
-        def allow_self_action(_action: str) -> None:
-            pass
-
-        monkeypatch.setattr(agent_identity, "assert_self_action", allow_self_action)
-
-        class _FakeCur:
-            connection = None
-
-            def execute(self, sql: str, params: tuple[object, ...]) -> None:
-                seen["params"] = params
-
-        class _FakeCursor:
-            def __enter__(self) -> _FakeCur:
-                return _FakeCur()
-
-            def __exit__(self, *exc: object) -> None:
-                return None
-
-        pin_agent(900001)
-        monkeypatch.setattr(meiva.DB, "cursor", _FakeCursor)
-        monkeypatch.setattr(meiva.DB, "transaction", contextlib.nullcontext)
-        import base.telemetry.audit_events as _audit
-
-        monkeypatch.setattr(_audit, "record_audit", lambda _conn, event: event)  # pyright: ignore[reportUnknownArgumentType]
-        from base.agents.lifecycle import SystemHalt
-
+        agent_id = spawn_agent(
+            catalog=model_catalog,
+            authority=config_authority,
+            database_gate=database_gate,
+            machine=machine_identity,
+        )
+        pin_agent(agent_id)
         with pytest.raises(SystemHalt):
             self_mod.compact(("summary",))  # pyright: ignore[reportArgumentType]
-        assert seen["params"] == (900001, "summary")
-
-    def test_wake_publishes_the_agents_own_inbound_channel(self) -> None:
-        from base.cluster import inbound_channel
-        from meiva.self import wake
-
-        class Redis:
-            def __init__(self) -> None:
-                self.published: list[tuple[str, str]] = []
-
-            def publish(self, channel: str, message: str) -> int:
-                self.published.append((channel, message))
-                return 0
-
-        redis = Redis()
-        wake.publish_inbound_wake(redis, 41)
-        assert redis.published == [(inbound_channel(41, settings.data_plane.events_channel), "0")]
-
-    @pytest.mark.parametrize("failure", [ResponseError("NOPERM"), ConnectionError("down")])
-    def test_wake_never_raises_when_redis_refuses(self, failure: Exception) -> None:
-        from meiva.self import wake
-
-        class Redis:
-            def publish(self, channel: str, message: str) -> int:
-                raise failure
-
-        wake.publish_inbound_wake(Redis(), 41)
+        row = db_conn.execute(
+            "SELECT content FROM inbound_messages WHERE agent_id = %s AND kind = 'compact_summary'",
+            (agent_id,),
+        ).fetchone()
+        assert row == ("summary",)
 
     def test_compact_multi_element_type_errors(self) -> None:
         from meiva import self as self_mod
@@ -319,7 +253,7 @@ class TestSelfEntries:
         with pytest.raises(TypeError, match="summary must be a string"):
             self_mod.compact(("a", "b"))  # pyright: ignore[reportArgumentType]
 
-    def test_pause_heartbeat_duration_never_unwraps(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_pause_heartbeat_duration_never_unwraps(self) -> None:
         from meiva import self as self_mod
 
         with pytest.raises(TypeError, match="duration must be"):

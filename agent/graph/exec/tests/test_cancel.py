@@ -20,7 +20,7 @@ from langgraph.types import Command
 from psycopg_pool import AsyncConnectionPool
 
 from agent.execution.protocol import ResultPayload
-from agent.graph.exec._result import LifecycleKind
+from agent.graph.exec._result import ExecLifecycleKind
 from agent.graph.exec._stream import ExecOutputChunkPublisher
 from agent.graph.exec.node import (
     ExecCancelled,
@@ -244,7 +244,7 @@ async def test_exec_node_compaction_writes_nothing_back(
     database_gate: ProcessDbGate, live_events: LiveEvents
 ) -> None:
     process = ScriptedExecProcess(
-        [(ExecLifecycle(output="user prep work\n", kind=LifecycleKind.SYSTEM_HALT), None)]
+        [(ExecLifecycle(output="user prep work\n", kind=ExecLifecycleKind.SYSTEM_HALT), None)]
     )
     state = AgentState(messages=[ai_with_code('meiva.self.compact("s")')], halted=False)
     runtime = exec_runtime(event_publisher=live_events.publisher, database_gate=database_gate)
@@ -259,9 +259,9 @@ async def test_exec_node_compaction_writes_nothing_back(
     assert "exec_output" not in roles
 
 
-@pytest.mark.parametrize("kind", [LifecycleKind.TERMINATION, LifecycleKind.RESTART])
+@pytest.mark.parametrize("kind", [ExecLifecycleKind.TERMINATION, ExecLifecycleKind.RESTART])
 async def test_exec_node_terminate_and_restart_halt_without_a_marker(
-    kind: LifecycleKind, database_gate: ProcessDbGate
+    kind: ExecLifecycleKind, database_gate: ProcessDbGate
 ) -> None:
     process = ScriptedExecProcess([(ExecLifecycle(output="", kind=kind), None)])
     state = AgentState(messages=[ai_with_code("meiva.self.terminate()")], halted=False)

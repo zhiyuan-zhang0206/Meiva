@@ -18,9 +18,11 @@ import stat
 import uuid
 from pathlib import Path
 
+from base.host.atomic_io import write_text_atomic
 from base.log import logger
 from base.paths import workspace_dir
 from meiva.sdk_surface import agent_identity
+from meiva.sdk_surface.pure.media.attach_plan import resolve_in
 from meiva.sdk_surface.validation import coerce_str, coerce_typed
 from meiva.security import scan_content
 
@@ -38,24 +40,25 @@ def _home() -> Path:
     return home
 
 
+# meiva:note
+# The base a relative path resolves against: the agent's workspace, or `$HOME` before a process
+# identity is bound. The workspace is a framework concept, so it lives here in the SDK core -
+# plugins may layer cwd tracking on top, but the no-plugin baseline must not silently fall back
+# to `$HOME` (issue #1008). Before a context carrying an identity is bound (test / dev REPL
+# without a bootstrap) there is no workspace; `Path.home()` is the documented pre-bootstrap base,
+# read per call so a changed `$HOME` takes effect immediately. The one owner of this rule: a
+# caller that resolves many paths reads the base once and passes it down. The agent id is typed
+# int but is None until a bootstrap establishes it.
+def workspace_base() -> Path:
+    aid = agent_identity.agent_id()
+    return workspace_dir(aid) if aid is not None else _home()  # pyright: ignore[reportUnnecessaryComparison]
+
+
 def resolve(path: str | Path) -> Path:
     """Resolve a path: expand `~`, then prepend the agent's workspace
     (`$HOME` before a process identity is bound) if still relative."""
-    # `expanduser` translates `~` / `~user`; if still a relative path,
-    # prepend the per-agent workspace. The workspace is a framework
-    # concept, so it lives here in the SDK core — plugins may layer cwd
-    # *tracking* on top, but the no-plugin baseline must not silently
-    # fall back to `$HOME` (issue #1008). Before a context
-    # carrying an identity is bound (test / dev REPL without a bootstrap) there is
-    # no workspace; `Path.home()` is the documented pre-bootstrap base
-    # (per-call live, so test fixture mock env takes effect immediately).
-    p = Path(path).expanduser()
-    if not p.is_absolute():
-        aid = agent_identity.agent_id()
-        # agent id is typed int but is None until a bootstrap establishes it.
-        base = workspace_dir(aid) if aid is not None else _home()  # pyright: ignore[reportUnnecessaryComparison]
-        p = base / p
-    return p
+    expanded = Path(path).expanduser()
+    return expanded if expanded.is_absolute() else resolve_in(workspace_base(), expanded)
 
 
 def _record_skill_read(path: Path) -> None:
@@ -144,33 +147,36 @@ def read(
     return scan_content("".join(selected), source=source)
 
 
-def _replace_atomically(target: Path, content: str) -> None:
-    """Replace `target` with `content` so a reader sees the old file or the new one, never half.
+# meiva:note
+# The mode a new file gets: whatever the umask gives any new file. The umask itself cannot be
+# read without changing it for the whole process, so a probe file is created beside the target
+# (`os.open` honors the umask) and removed again.
+def _new_file_mode(directory: Path) -> int:
+    probe = directory / f".{uuid.uuid4().hex}.mode"
+    fd = os.open(probe, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o666)
+    try:
+        return stat.S_IMODE(os.fstat(fd).st_mode)
+    finally:
+        os.close(fd)
+        probe.unlink()
 
-    The content goes to a temporary file in the same directory (same filesystem, so the rename is
-    atomic), which then replaces the target. A symlink target is written through, as an in-place
-    write would. An existing target keeps its permission bits and must be writable; a new file gets
-    the mode the umask gives any new file. A failure at any point removes the temporary file and
-    leaves the target as it was."""
+
+# meiva:note
+# Replace `target` with `content` so a reader sees the old file or the new one, never half. The
+# commit and its cleanup are `base.host.atomic_io`'s contract: the content goes to a temporary
+# file in the same directory, which then replaces the target. A symlink target is written
+# through, as an in-place write would. An existing target keeps its permission bits and must be
+# writable; a new file gets the mode the umask gives any new file.
+def _replace_atomically(target: Path, content: str) -> None:
     if target.is_symlink():
         target = target.resolve()
-    existing_mode: int | None = None
     if target.exists():
         if not os.access(target, os.W_OK):
             raise PermissionError(errno.EACCES, os.strerror(errno.EACCES), str(target))
-        existing_mode = stat.S_IMODE(target.stat().st_mode)
-    temporary = target.with_name(f".{target.name}.{uuid.uuid4().hex}.tmp")
-    try:
-        # os.open honors the umask for a new file's mode, as open() does.
-        fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o666)
-        with os.fdopen(fd, "w", encoding="utf-8") as file:
-            file.write(content)
-        if existing_mode is not None:
-            temporary.chmod(existing_mode)
-        temporary.replace(target)
-    except BaseException:
-        temporary.unlink(missing_ok=True)
-        raise
+        mode = stat.S_IMODE(target.stat().st_mode)
+    else:
+        mode = _new_file_mode(target.parent)
+    write_text_atomic(target, content, encoding="utf-8", mode=mode, sync_file=False)
 
 
 def write(path: str | Path, content: str) -> None:

@@ -19,6 +19,7 @@ from agent.execution.protocol import (
 from base.agents.context import MeivaContext
 from base.agents.context.identity import AgentIdentity
 from base.agents.sdk.tally import SdkCallTally
+from base.config.tests.configuration import snapshot_process_config
 from base.packages.plugin_providers import build_model_catalog
 from meiva.boot import process_clients
 
@@ -27,7 +28,7 @@ def _start(tmp_path: Path, agent_id: int, code: str) -> tuple[subprocess.Popen[s
     context = MeivaContext(
         identity=AgentIdentity(agent_id, True),
         catalog=build_model_catalog(),
-        clients=process_clients(),
+        clients=process_clients(config=snapshot_process_config()),
     )
     request = make_request_path(tmp_path / "exec", agent_id=agent_id)
     result = make_result_path(tmp_path / "exec", agent_id=agent_id)
@@ -139,7 +140,9 @@ def test_failure_preserves_legal_delta_and_original_traceback(tmp_path: Path, fa
 def test_execution_tally_stays_with_its_context_and_out_of_description() -> None:
     tally = SdkCallTally()
     context = MeivaContext(
-        identity=AgentIdentity(41, True), clients=process_clients(), sdk_calls=tally
+        identity=AgentIdentity(41, True),
+        clients=process_clients(config=snapshot_process_config()),
+        sdk_calls=tally,
     )
     tally.add("files.read")
     assert set(context.describe()) == {"identity", "gateway_url"}
@@ -173,12 +176,12 @@ import meiva
 from meiva.sdk_surface.installation import installed
 context_writer = meiva.context.clients.event_pipeline()
 surface = installed()
-assert surface is not None and surface.producer is not None
-assert surface.producer() is context_writer
+assert surface is not None and surface.clients is not None
+assert surface.clients.event_pipeline() is context_writer
 meiva.ensure_plugins_loaded(surface=False)
 faces = installed()
-assert faces is not None and faces.faces and faces.producer is not None
-assert faces.producer() is context_writer
+assert faces is not None and faces.faces and faces.clients is not None
+assert faces.clients.event_pipeline() is context_writer
 print("owned writer preserved")
 """
     process, result = _start(tmp_path, 515, code)

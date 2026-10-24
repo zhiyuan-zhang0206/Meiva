@@ -31,16 +31,17 @@ from .installation import (
 )
 
 
+# meiva:note
+# An operation's clock: the bound context's, or the installed SDK root's when no context is
+# bound. A partial context missing a clock fails explicitly rather than borrowing the root.
 def clock() -> Clock:
-    """Build an operation's clock from its context or installed SDK root."""
-
     context = process_context.ambient_context()
     if context is not None:
         return context.require_clock()
     installation = installed()
-    if installation is None or installation.clock_factory is None:
-        raise RuntimeError("the SDK installation carries no Clock factory")
-    return installation.clock_factory()
+    if installation is None or installation.clock is None:
+        raise RuntimeError("the SDK installation carries no Clock")
+    return installation.clock
 
 
 def model_overrides() -> ModelOverrides:

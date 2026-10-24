@@ -1,20 +1,16 @@
+import time
 from dataclasses import replace
 
 import httpx
 import pytest
 
-import meiva
 from base.agents.context import MeivaContext
 from base.agents.context.clients import ClientSet
 from base.agents.context.gateway_client.memory_search import memory_search
 from base.agents.context.gateway_client.transport import GatewayTransportInputs, post
 
 
-def test_contexts_keep_live_deadlines_and_rebuild_inputs_without_an_sdk_installation(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.delattr(meiva, "context", raising=False)
-    monkeypatch.delattr(meiva, "__plugin_installation__", raising=False)
+def test_contexts_keep_live_deadlines_and_rebuild_inputs_without_an_sdk_installation() -> None:
     first_values = {"attempts": 2.0, "delay": 0.0, "deadline": 8.0}
     second_values = {"attempts": 3.0, "delay": 0.0, "deadline": 21.0}
     reads: list[str] = []
@@ -83,11 +79,10 @@ def test_input_construction_retains_readers_without_evaluating_them() -> None:
     assert replace(inputs) == inputs
 
 
-def test_attempt_count_is_read_once_and_each_backoff_reads_the_current_delay(
-    retry_waits: list[float],
-) -> None:
-    values: dict[str, float] = {"attempts": 3, "delay": 1.0}
+def test_attempt_count_is_read_once_and_each_backoff_reads_the_current_delay() -> None:
+    values: dict[str, float] = {"attempts": 3, "delay": 0.01}
     trace: list[str] = []
+    arrivals: list[float] = []
 
     def attempts() -> int:
         trace.append("attempts")
@@ -114,10 +109,11 @@ def test_attempt_count_is_read_once_and_each_backoff_reads_the_current_delay(
     def answer(request: httpx.Request) -> httpx.Response:
         nonlocal sends
         sends += 1
+        arrivals.append(time.monotonic())
         trace.append("send")
         values["attempts"] = 1
         if sends < 3:
-            values["delay"] = float(sends * 2)
+            values["delay"] = sends * 0.02
             raise httpx.ConnectError("retry this attempt", request=request)
         return httpx.Response(200)
 
@@ -126,6 +122,7 @@ def test_attempt_count_is_read_once_and_each_backoff_reads_the_current_delay(
     finally:
         context.clients.close()
     assert sends == 3
-    assert retry_waits == [2.0, 8.0]
+    first_wait, second_wait = arrivals[1] - arrivals[0], arrivals[2] - arrivals[1]
+    assert first_wait >= 0.02 - 0.005
+    assert second_wait >= 0.04 * 2 - 0.005
     assert trace == ["attempts", "send", "delay", "send", "delay", "send"]
-    context.clients.close()

@@ -7,9 +7,9 @@ from __future__ import annotations
 import asyncio
 import time
 from dataclasses import dataclass
-from typing import Any
 
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from langchain_core.language_models.chat_models import BaseChatModel
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 from loguru import logger
 
 from base.host.env.agent_slices import ModelOverrides
@@ -41,7 +41,9 @@ class RepairInputs:
 # meiva:note
 # One LLM repair attempt: invoke with a timeout, then flatten and strip the reply. The candidate
 # source, or None when the model is unavailable (missing key, timeout, empty output).
-async def repair_once(llm: Any, messages: list[Any], *, catalog: ModelCatalog) -> str | None:
+async def repair_once(
+    llm: BaseChatModel, messages: list[BaseMessage], *, catalog: ModelCatalog
+) -> str | None:
     started = time.monotonic()
     try:
         resp = await asyncio.wait_for(llm.ainvoke(messages), timeout=_REPAIR_TIMEOUT)
@@ -93,7 +95,7 @@ async def llm_repair_syntax(code: str, rendered_error: str, repair: RepairInputs
         )
         return None
 
-    messages: list[Any] = [
+    messages: list[BaseMessage] = [
         SystemMessage(content=REPAIR_SYSTEM),
         HumanMessage(content=repair_request(code, rendered_error)),
     ]

@@ -6,6 +6,7 @@ from uuid import uuid4
 import psycopg
 import pytest
 from langchain_core.messages import HumanMessage
+from langgraph.checkpoint.memory import MemorySaver
 from langgraph.runtime import Runtime
 from langgraph.types import Command
 from psycopg_pool import AsyncConnectionPool
@@ -48,7 +49,16 @@ def test_every_persisted_status_reads_as_one_lease_phase(
     status: ImpersonationStatus, phase: LeasePhase
 ) -> None:
     assert impersonation.lease_phase({"status": status}) is phase
+    assert impersonation.lease_phase({"status": status.value}) is phase
     assert impersonation.lease_phase(None) is None
+
+
+@pytest.mark.parametrize("status", ["ended", "Released", "", None])
+def test_an_unknown_persisted_status_is_refused_instead_of_read_as_ended(
+    status: str | None,
+) -> None:
+    with pytest.raises(ValueError, match="unknown impersonation lease status"):
+        impersonation.lease_phase({"status": status})
 
 
 def test_only_an_ended_lease_without_its_receipt_is_owed_a_handoff() -> None:
@@ -158,7 +168,7 @@ async def test_settlement_rolls_the_lease_back_when_the_controller_relay_is_not_
 ) -> None:
     owner = cluster.native_agent()
     accepted = cluster.lease(owner, provider="claude")
-    graph, config = await idle_graph(owner.agent_id)
+    graph, config = await idle_graph(owner.agent_id, MemorySaver())
     quick = replace(takeover_host(tmp_path, cluster.machine), wait=RelayWait(0.0, 0.01))
     assert not await impersonation.settle_checkpoint(
         graph,
@@ -183,7 +193,7 @@ async def test_settlement_activates_only_after_the_relay_is_ready(
     owner = cluster.native_agent()
     accepted = cluster.lease(owner, provider="claude")
     cluster.heartbeat(accepted["id"], seconds_ago=0.0)
-    graph, config = await idle_graph(owner.agent_id)
+    graph, config = await idle_graph(owner.agent_id, MemorySaver())
     assert await impersonation.settle_checkpoint(
         graph,
         cluster.database,
@@ -208,7 +218,7 @@ async def test_settlement_without_activation_leaves_an_accepted_lease_alone(
     owner = cluster.native_agent()
     accepted = cluster.lease(owner, provider="claude")
     cluster.heartbeat(accepted["id"], seconds_ago=0.0)
-    graph, config = await idle_graph(owner.agent_id)
+    graph, config = await idle_graph(owner.agent_id, MemorySaver())
     assert not await impersonation.settle_checkpoint(
         graph,
         cluster.database,
@@ -230,7 +240,7 @@ async def test_settlement_does_nothing_for_an_agent_without_a_lease_or_with_only
     cluster: Cluster, tmp_path: Path
 ) -> None:
     owner = cluster.native_agent()
-    graph, _config = await idle_graph(owner.agent_id)
+    graph, _config = await idle_graph(owner.agent_id, MemorySaver())
 
     async def settle() -> bool:
         return await impersonation.settle_checkpoint(

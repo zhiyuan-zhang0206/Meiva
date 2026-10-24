@@ -335,18 +335,21 @@ async def run(
     _log.info("[task-maintenance] pidfile written: %s", endpoint.pidfile)
 
     liveness = Liveness(_LIVENESS_TIMEOUT_S)
-    health = await start_health_server(
-        "task_maintenance", endpoint.health_port, liveness=liveness, image=image
-    )
-    _log.info("[task-maintenance] healthz listening on :%s", endpoint.health_port)
-
-    db = database()
-    pool = db.pool()
     try:
-        await dispatch_loop(pool, db, bus, liveness, config=config)
+        health = await start_health_server(
+            "task_maintenance", endpoint.health_port, liveness=liveness, image=image
+        )
+        _log.info("[task-maintenance] healthz listening on :%s", endpoint.health_port)
+        try:
+            db = database()
+            pool = db.pool()
+            try:
+                await dispatch_loop(pool, db, bus, liveness, config=config)
+            finally:
+                pool.close()
+        finally:
+            await stop_health_server(health)
     finally:
-        pool.close()
-        await stop_health_server(health)
         remove_pidfile(endpoint.pidfile)
         _log.info("[task-maintenance] daemon stopped")
 
@@ -396,8 +399,6 @@ def main() -> None:
     except Exception:
         _log.exception("[task-maintenance] daemon crashed — uncaught exception escaped run()")
         raise
-    finally:
-        remove_pidfile(endpoint.pidfile)
 
 
 if __name__ == "__main__":

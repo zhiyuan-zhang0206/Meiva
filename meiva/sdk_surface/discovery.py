@@ -14,16 +14,16 @@ from dataclasses import dataclass
 from types import ModuleType, SimpleNamespace
 from typing import Any, ForwardRef, cast
 
-from .const import (
+from .pure.const import (
     is_container as is_container,
 )
-from .const import (
+from .pure.const import (
     is_documented_const,
 )
-from .const import (
+from .pure.const import (
     is_namespace as is_namespace,
 )
-from .const import (
+from .pure.const import (
     is_skill_object as is_skill_object,
 )
 

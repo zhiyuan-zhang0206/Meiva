@@ -16,11 +16,12 @@ from base.daemon.schedules.watcher import (
     build_cron_script,
     normalize_when,
     parse_timeout,
+    session_deadline,
     validate_cron,
     validate_timezone,
 )
 from meiva.sdk_surface.validation import coerce_str
-from meiva.watcher.spawn import SpawnRequest
+from meiva.watcher.launch_plan import SpawnRequest
 
 __all__ = ["plan_at", "plan_cron", "plan_launch"]
 
@@ -30,8 +31,26 @@ def validate_message(message: str) -> None:
         raise ValueError("message cannot be empty")
 
 
+# meiva:note
+# The session lifetime of a watcher in seconds: its target deadline minus `now`. The deadline
+# is derived once, by `base.daemon.schedules.watcher.session_deadline` (launch = created +
+# timeout, cron = its end, at = its fire moment + grace). A missing or already-passed deadline is
+# a call-site bug, never a reason to mount a stillborn session.
+def _ttl_seconds(kind: str, deadline: datetime.datetime | None, now: datetime.datetime) -> float:
+    if deadline is None or deadline <= now:
+        raise ValueError(
+            f"watcher {kind!r} target deadline is not in the future ({deadline!r}) - "
+            "refusing to spawn its session"
+        )
+    return (deadline - now).total_seconds()
+
+
 def plan_launch(
-    code: str, timeout: float | datetime.timedelta | str, name: str, notify: str | None
+    code: str,
+    timeout: float | datetime.timedelta | str,
+    name: str,
+    notify: str | None,
+    now: datetime.datetime,
 ) -> SpawnRequest:
     """A background program bounded by `timeout`; exits with code 124 when it runs out."""
     code = coerce_str(code, "code")
@@ -43,8 +62,9 @@ def plan_launch(
         code=code,
         watchdog_secs=seconds,
         name=name,
-        kind="launch",
-        timeout_secs=seconds,
+        ttl_seconds=_ttl_seconds(
+            "launch", session_deadline("launch", created_at=now, timeout_secs=seconds), now
+        ),
         notify=notify,
     )
 
@@ -107,7 +127,11 @@ def plan_cron(
     # which every registration now carries, the default being now + 7 days),
     # so no watchdog.
     return SpawnRequest(
-        code=code, watchdog_secs=None, name=name, kind="cron", cron_end_at=et, notify=notify
+        code=code,
+        watchdog_secs=None,
+        name=name,
+        ttl_seconds=_ttl_seconds("cron", session_deadline("cron", cron_end_at=et), now),
+        notify=notify,
     )
 
 
@@ -148,5 +172,9 @@ def plan_at(
     # The one-shot script sleeps until `when`, wakes you once, and exits - it
     # ends itself, so no watchdog.
     return SpawnRequest(
-        code=code, watchdog_secs=None, name=name, kind="at", fires_at=due_at, notify=notify
+        code=code,
+        watchdog_secs=None,
+        name=name,
+        ttl_seconds=_ttl_seconds("at", session_deadline("at", fires_at=due_at), now),
+        notify=notify,
     )

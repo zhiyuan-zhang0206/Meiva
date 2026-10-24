@@ -1,4 +1,5 @@
 exports = ["queued_commands.py"]
 
 [uses]
+"test_owner.py" = ["parked_pool.py", "queued_commands.py"]
 "test_watch.py" = ["queued_commands.py"]

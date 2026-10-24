@@ -31,11 +31,13 @@ module of values-in, verdicts-out: whether a poll result fires the event
 watcher's fate reads (`watcher_fate`), and how a bounded exit ends (`exit_verdict`: retain or
 unwound, which exception is raised, the primary failure kept with the watcher error as a note
 and a grouped cause). `_watch.py` runs the poll loop (`watch_for_interrupt`), owns the task
-(`owned_watch`) and composes them in `subscribe_interrupt`.
+(`_OwnedWatch`) and composes them in `subscribe_interrupt`, the only entry that starts a watcher.
 
-`owned_watch` takes the watcher body as a coroutine the caller builds from the same event and
-stop flag, so a watcher that fails, wedges or swallows its cancellation differently from the
-database poll is a coroutine a test supplies, not a patched name. The package's tests drive the
-ownership rules that way against a real `HostedServiceResources`, the poll loop against the
-throwaway Postgres (a pool whose single connection the test holds parks the poll while `stop`
-is set), and the verdicts directly.
+The package's tests drive the poll loop and the ownership rules against the throwaway Postgres
+and a real `HostedServiceResources`: a pool whose single connection the test holds parks the
+poll while `stop` is set, and a pool that was never opened fails the poll in flight. The faults
+a real pool cannot produce, because psycopg unwinds a cancelled acquire or query at once (a
+watcher that raises while unwinding, stays wedged past the bound or swallows the cancel), come
+from `tests/parked_pool.py`, a pool whose acquisition parks until cancelled and then does what
+the test says. The fault enters where the watcher meets its resource, never as a coroutine
+handed to the owner. The verdicts are asserted directly.

@@ -1,4 +1,5 @@
-exports = ["support.py"]
+exports = ["live_shell.py"]
 
 [uses]
-"test_shell_sessions_identity.py" = ["child_sessions_probe.py", "support.py"]
+"conftest.py" = ["live_shell.py"]
+"test_shell_sessions_identity.py" = ["child_sessions_probe.py"]

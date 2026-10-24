@@ -1,0 +1,4 @@
+exports = ["attach_plan.py", "injection_plan.py"]
+
+[purity]
+"." = "strict"

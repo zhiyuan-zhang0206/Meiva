@@ -1,3 +1,8 @@
-
 [uses]
-"tests" = ["__init__.py"]
+"__init__.py" = ["agent_plans.py", "plans.py"]
+"agent_plans.py" = ["plans.py"]
+"tests" = ["__init__.py", "agent_plans.py", "plans.py"]
+
+[purity]
+"agent_plans.py" = "strict"
+"plans.py" = "strict"

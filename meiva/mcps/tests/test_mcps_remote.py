@@ -1,421 +1,274 @@
-"""meiva.mcps remote client and _connect branches: the Unix-socket remote client, remote/cache routing,
-and the _connect config branches; split from meiva/mcps/tests/test_mcps.py (task #4922)."""
-
+# meiva:note
+# meiva.mcps remote client and proxy detail: the Unix-socket client against a real stub daemon (`stub_daemon.py`), the display-only tool signatures, and the guarantee that a missing daemon never starts a local server. Split from meiva/mcps/tests/test_mcps.py (task #4922).
 import inspect
 import json
-import socket
+import sys
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
-from unittest.mock import MagicMock
 
 import pytest
 
 import meiva.mcps as mcps_mod
 import meiva.mcps._remote as remote_mod
-from meiva.mcps._tools import ServerProxy, call_raw, list_tools, schema_to_signature
-from meiva.mcps.tests._mcps_helpers import StoredTools, local_mcp_clients, make_tool, tool_source
-from meiva.mcps.tests._mcps_helpers import fake_config as fake_config
-from meiva.mcps.tests._mcps_helpers import mock_session as mock_session
+from meiva.mcps._tools import ServerProxy, call_raw, schema_to_signature
+from meiva.mcps.tests._mcps_helpers import (
+    StoredTools,
+    canned_daemon,
+    local_mcp_clients,
+    tool_source,
+    tool_wire,
+)
+from meiva.mcps.tests._mcps_helpers import machine_config as machine_config
+from meiva.mcps.tests.stub_daemon import (
+    CLOSE,
+    Respond,
+    StubDaemon,
+    error_line,
+    line,
+    ok_line,
+)
+from meiva.mcps.tests.stub_daemon import stub_daemon as stub_daemon
 
-# ─── RemoteMCPClient (mock Unix socket) ───────────────────────────────────
-
-
-class _FakeSocket:
-    """Simulate Unix socket — feeds data from the recv_queue injected per test."""
-
-    def __init__(self) -> None:
-        self.timeout: float | None = None
-        self.timeouts: list[float] = []
-        self.connected_to: str | None = None
-        self.sent: list[bytes] = []
-        self.recv_queue: list[bytes | BaseException] = []
-        self.closed = False
-
-    def settimeout(self, s: float) -> None:
-        self.timeout = s
-        self.timeouts.append(s)
-
-    def connect(self, path: str) -> None:
-        self.connected_to = path
-
-    def sendall(self, data: bytes) -> None:
-        self.sent.append(data)
-
-    def recv(self, n: int) -> bytes:
-        if not self.recv_queue:
-            raise OSError("test queue exhausted")
-        item = self.recv_queue.pop(0)
-        if isinstance(item, BaseException):
-            raise item
-        return item
-
-    def close(self) -> None:
-        self.closed = True
+Start = Callable[[Respond], StubDaemon]
 
 
-def _patch_socket(monkeypatch: pytest.MonkeyPatch, sock: _FakeSocket) -> None:
-    """Replace socket.socket(...) to return our fake."""
-    monkeypatch.setattr(socket, "socket", lambda *_a, **_kw: sock)  # pyright: ignore[reportUnknownArgumentType]
+def answering(result: object) -> Respond:
+    return lambda request: [ok_line(request, result)]
 
 
-@pytest.mark.parametrize("method", ["list_tools", "call_tool"])
-def test_remote_client_uses_request_timeout_for_dial_and_response(
-    monkeypatch: pytest.MonkeyPatch, method: str
-) -> None:
-    result: list[dict[str, Any]] | dict[str, Any] = (
-        [] if method == "list_tools" else {"content": [], "isError": False}
-    )
-    sock = _FakeSocket()
-    sock.recv_queue = [json.dumps({"id": 1, "ok": True, "result": result}).encode() + b"\n"]
-    _patch_socket(monkeypatch, sock)
-    monkeypatch.setattr(remote_mod.time, "time", lambda: 100.0)
-    client = remote_mod.connect_remote("fake-socket-path")
-
-    if method == "list_tools":
-        assert client.list_tools("srv", timeout_seconds=7.5) == result
-    else:
-        assert client.call_tool("srv", "t", {}, timeout_seconds=7.5) == result
-
-    assert sock.timeouts == [7.5, 7.5]
-
-
-def test_remote_client_reuses_socket_with_each_requests_timeout(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    sock = _FakeSocket()
-    sock.recv_queue = [
-        json.dumps({"id": 1, "ok": True, "result": []}).encode() + b"\n",
-        json.dumps({"id": 2, "ok": True, "result": []}).encode() + b"\n",
-    ]
-    _patch_socket(monkeypatch, sock)
-    monkeypatch.setattr(remote_mod.time, "time", lambda: 100.0)
-    client = remote_mod.connect_remote("fake-socket-path")
-
-    assert client.list_tools("srv", timeout_seconds=7.5) == []
-    assert client.list_tools("srv", timeout_seconds=2.0) == []
-
-    assert sock.timeouts == [7.5, 7.5, 2.0]
-    assert sock.closed is False
-
-
-def test_remote_client_foreign_responses_do_not_reset_request_deadline(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    sock = _FakeSocket()
-    sock.recv_queue = [json.dumps({"id": 9, "ok": True, "result": []}).encode() + b"\n"]
-    _patch_socket(monkeypatch, sock)
-    clock = iter([100.0, 100.0, 102.0])
-    monkeypatch.setattr(remote_mod.time, "time", lambda: next(clock))
-    client = remote_mod.connect_remote("fake-socket-path")
+# meiva:note
+# The client keeps no timeout of its own: a request whose budget is shorter than the reply delay
+# fails, and the next request with a longer budget succeeds on the same client.
+def test_each_request_waits_with_its_own_timeout(stub_daemon: Start) -> None:
+    daemon = stub_daemon(lambda request: [0.5, ok_line(request, [])])
+    client = remote_mod.RemoteMCPClient(daemon.path)
 
     with pytest.raises(mcps_mod.MCPConnectError, match="timeout"):
-        client.list_tools("srv", timeout_seconds=2.0)
-
-    assert sock.timeouts == [2.0, 2.0]
-    assert sock.closed is True
+        client.list_tools("srv", timeout_seconds=0.1, agent_id=None)
+    assert client.list_tools("srv", timeout_seconds=5.0, agent_id=None) == []
 
 
-def test_remote_client_list_tools_roundtrip(monkeypatch: pytest.MonkeyPatch) -> None:
-    sock = _FakeSocket()
-    sock.recv_queue = [
-        json.dumps(
-            {
-                "id": 1,
-                "ok": True,
-                "result": [{"name": "t1", "description": "d1", "input_schema": {"type": "object"}}],
-            }
-        ).encode()
-        + b"\n"
-    ]
-    _patch_socket(monkeypatch, sock)
+# meiva:note
+# A stream of foreign-id lines never extends the budget: the matching line never arrives, and the
+# request ends with the timeout rather than with the stream's end.
+def test_foreign_responses_do_not_reset_the_request_deadline(stub_daemon: Start) -> None:
+    def foreign_stream(request: dict[str, Any]) -> list[bytes | float]:
+        steps: list[bytes | float] = []
+        for i in range(60):
+            steps += [line({"id": 9000 + i, "ok": True, "result": []}), 0.05]
+        return steps
 
-    client = remote_mod.RemoteMCPClient("fake-socket-path")
-    tools = client.list_tools("srv", timeout_seconds=5.0)
+    client = remote_mod.RemoteMCPClient(stub_daemon(foreign_stream).path)
+    with pytest.raises(mcps_mod.MCPConnectError, match="timeout"):
+        client.list_tools("srv", timeout_seconds=0.3, agent_id=None)
+
+
+def test_list_tools_roundtrip(stub_daemon: Start) -> None:
+    daemon = stub_daemon(
+        answering([{"name": "t1", "description": "d1", "input_schema": {"type": "object"}}])
+    )
+    client = remote_mod.RemoteMCPClient(daemon.path)
+
+    tools = client.list_tools("srv", timeout_seconds=5.0, agent_id=7)
 
     assert tools == [{"name": "t1", "description": "d1", "input_schema": {"type": "object"}}]
-    assert sock.connected_to == "fake-socket-path"
-    sent_req = json.loads(sock.sent[0].decode().rstrip())
-    assert sent_req["method"] == "list_tools"
-    assert sent_req["params"] == {"server": "srv"}
-    assert sent_req["id"] == 1
+    [request] = daemon.requests
+    assert request == {"id": 1, "method": "list_tools", "params": {"server": "srv"}, "agent_id": 7}
 
 
-def test_remote_client_call_tool_roundtrip(monkeypatch: pytest.MonkeyPatch) -> None:
-    sock = _FakeSocket()
-    sock.recv_queue = [
-        json.dumps(
-            {
-                "id": 1,
-                "ok": True,
-                "result": {"content": [], "isError": False, "structuredContent": None},
-            }
-        ).encode()
-        + b"\n"
-    ]
-    _patch_socket(monkeypatch, sock)
+def test_call_tool_roundtrip(stub_daemon: Start) -> None:
+    result: dict[str, Any] = {"content": [], "isError": False, "structuredContent": None}
+    daemon = stub_daemon(answering(result))
+    client = remote_mod.RemoteMCPClient(daemon.path)
 
-    client = remote_mod.RemoteMCPClient("fake-socket-path")
-    out = client.call_tool("srv", "tool_x", {"k": "v"}, timeout_seconds=5.0)
+    out = client.call_tool("srv", "tool_x", {"k": "v"}, timeout_seconds=5.0, agent_id=None)
 
-    assert out == {"content": [], "isError": False, "structuredContent": None}
-    sent_req = json.loads(sock.sent[0].decode().rstrip())
-    assert sent_req["method"] == "call_tool"
-    assert sent_req["params"] == {"server": "srv", "tool": "tool_x", "args": {"k": "v"}}
+    assert out == result
+    [request] = daemon.requests
+    assert request["method"] == "call_tool"
+    assert request["params"] == {"server": "srv", "tool": "tool_x", "args": {"k": "v"}}
+    assert request["agent_id"] is None
 
 
-def test_remote_client_raises_on_error_response(monkeypatch: pytest.MonkeyPatch) -> None:
-    """daemon returns `ok: False` → MCPCallError, error field as message."""
-    sock = _FakeSocket()
-    sock.recv_queue = [
-        json.dumps({"id": 1, "ok": False, "error": "permission denied"}).encode() + b"\n"
-    ]
-    _patch_socket(monkeypatch, sock)
+# meiva:note
+# `ok: False` is a cleanly-consumed response: MCPCallError with the error text, and the stream stays
+# aligned, so the next request reuses the connection.
+def test_error_response_raises_and_keeps_the_connection(stub_daemon: Start) -> None:
+    replies = iter([False, True])
 
-    client = remote_mod.RemoteMCPClient("fake-socket-path")
+    def respond(request: dict[str, Any]) -> list[bytes]:
+        if next(replies):
+            return [ok_line(request, [])]
+        return [error_line(request, "permission denied")]
+
+    daemon = stub_daemon(respond)
+    client = remote_mod.RemoteMCPClient(daemon.path)
     with pytest.raises(mcps_mod.MCPCallError, match="permission denied"):
-        client.list_tools("srv", timeout_seconds=5.0)
+        client.list_tools("srv", timeout_seconds=5.0, agent_id=None)
+    assert client.list_tools("srv", timeout_seconds=5.0, agent_id=None) == []
+    assert daemon.connections == 1
 
 
-def test_remote_client_raises_when_connection_closed(monkeypatch: pytest.MonkeyPatch) -> None:
-    """recv returns empty chunk → peer closed connection → MCPConnectError."""
-    sock = _FakeSocket()
-    sock.recv_queue = [b""]
-    _patch_socket(monkeypatch, sock)
+# meiva:note
+# EOF mid-request leaves the stream ambiguous: the socket is dropped, so the next request dials a
+# fresh connection.
+def test_connection_closed_raises_and_the_next_request_reconnects(stub_daemon: Start) -> None:
+    closes = iter([True, False])
 
-    client = remote_mod.RemoteMCPClient("fake-socket-path")
+    def respond(request: dict[str, Any]) -> list[object]:
+        return [CLOSE] if next(closes) else [ok_line(request, [])]
+
+    daemon = stub_daemon(respond)
+    client = remote_mod.RemoteMCPClient(daemon.path)
     with pytest.raises(mcps_mod.MCPConnectError, match="connection closed"):
-        client.list_tools("srv", timeout_seconds=5.0)
+        client.list_tools("srv", timeout_seconds=5.0, agent_id=None)
+    assert client.list_tools("srv", timeout_seconds=5.0, agent_id=None) == []
+    assert daemon.connections == 2
 
 
-def test_remote_client_raises_on_recv_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
-    """sock.recv raises TimeoutError → translates to MCPConnectError for the upper layer."""
-    sock = _FakeSocket()
-    sock.recv_queue = [TimeoutError()]
-    _patch_socket(monkeypatch, sock)
+# meiva:note
+# A request-timeout leaves the stream ambiguous: the daemon may still be processing and its response
+# may arrive later. Closing the socket means the next request reconnects fresh, and a late response
+# can never be consumed by it (the cross-talk enabler).
+def test_timeout_drops_the_socket_so_a_late_reply_cannot_reach_the_next_request(
+    stub_daemon: Start,
+) -> None:
+    delays = iter([0.4, 0.0])
 
-    client = remote_mod.RemoteMCPClient("fake-socket-path")
+    def respond(request: dict[str, Any]) -> list[bytes | float]:
+        return [next(delays), ok_line(request, [{"name": f"late-{request['id']}"}])]
+
+    daemon = stub_daemon(respond)
+    client = remote_mod.RemoteMCPClient(daemon.path)
     with pytest.raises(mcps_mod.MCPConnectError, match="timeout"):
-        client.list_tools("srv", timeout_seconds=5.0)
+        client.list_tools("srv", timeout_seconds=0.1, agent_id=None)
+    tools = client.list_tools("srv", timeout_seconds=5.0, agent_id=None)
+    assert [t["name"] for t in tools] == ["late-2"]
+    assert daemon.connections == 2
 
 
-def test_remote_client_accumulates_chunked_response(monkeypatch: pytest.MonkeyPatch) -> None:
-    """response arrives in two parts (TCP-style) → concatenated until \n then parsed."""
-    payload = json.dumps({"id": 1, "ok": True, "result": []}).encode() + b"\n"
-    sock = _FakeSocket()
-    sock.recv_queue = [payload[:10], payload[10:]]  # split in half
-    _patch_socket(monkeypatch, sock)
-
-    client = remote_mod.RemoteMCPClient("fake-socket-path")
-    assert client.list_tools("srv", timeout_seconds=5.0) == []
+# meiva:note
+# The response arrives in two parts (TCP-style): concatenated until the newline, then parsed.
+def test_chunked_response_is_accumulated_until_the_newline(stub_daemon: Start) -> None:
+    payload = line({"id": 1, "ok": True, "result": []})
+    daemon = stub_daemon(lambda _request: [payload[:10], 0.05, payload[10:]])
+    client = remote_mod.RemoteMCPClient(daemon.path)
+    assert client.list_tools("srv", timeout_seconds=5.0, agent_id=None) == []
 
 
-def test_remote_client_request_ids_increment(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Two consecutive _request calls → id increments (used by daemon side to match request/response)."""
-    sock = _FakeSocket()
-    sock.recv_queue = [
-        json.dumps({"id": 1, "ok": True, "result": []}).encode() + b"\n",
-        json.dumps({"id": 2, "ok": True, "result": []}).encode() + b"\n",
-    ]
-    _patch_socket(monkeypatch, sock)
-
-    client = remote_mod.RemoteMCPClient("fake-socket-path")
-    client.list_tools("srv", timeout_seconds=5.0)
-    client.list_tools("srv", timeout_seconds=5.0)
-    id1 = json.loads(sock.sent[0].decode().rstrip())["id"]
-    id2 = json.loads(sock.sent[-1].decode().rstrip())["id"]
-    assert (id1, id2) == (1, 2)
+def test_request_ids_increment(stub_daemon: Start) -> None:
+    daemon = stub_daemon(answering([]))
+    client = remote_mod.RemoteMCPClient(daemon.path)
+    client.list_tools("srv", timeout_seconds=5.0, agent_id=None)
+    client.list_tools("srv", timeout_seconds=5.0, agent_id=None)
+    assert [request["id"] for request in daemon.requests] == [1, 2]
 
 
-# --- response-id matching + close-on-failure (MCP cross-talk, Task #1147) ---
+# meiva:note
+# Only the line whose id equals this request's id is its response: consuming a foreign line would
+# shift every later response by one (response cross-talk).
+@pytest.mark.parametrize(
+    "foreign",
+    [
+        # meiva:note
+        # A stale answer to a request whose client-side deadline already fired.
+        line({"id": 0, "ok": True, "result": "stale"}),
+        # meiva:note
+        # An unsolicited notification carries no id.
+        line({"method": "notifications/message", "params": {}}),
+    ],
+    ids=["stale-response", "notification"],
+)
+def test_foreign_lines_before_the_response_are_skipped(stub_daemon: Start, foreign: bytes) -> None:
+    daemon = stub_daemon(lambda request: [foreign, ok_line(request, "fresh")])
+    client = remote_mod.RemoteMCPClient(daemon.path)
+    assert client.call_tool("srv", "t", {}, timeout_seconds=5.0, agent_id=None) == "fresh"
 
 
-def test_remote_client_skips_stale_response_with_foreign_id(
-    monkeypatch: pytest.MonkeyPatch,
+# meiva:note
+# Both foreign-line classes in one burst before the matching response.
+def test_stale_response_and_notification_together_are_skipped(stub_daemon: Start) -> None:
+    daemon = stub_daemon(
+        lambda request: [
+            line({"id": 7, "ok": True, "result": "very stale"})
+            + line({"method": "notifications/progress", "params": {}})
+            + ok_line(request, "mine")
+        ]
+    )
+    client = remote_mod.RemoteMCPClient(daemon.path)
+    assert client.call_tool("srv", "t", {}, timeout_seconds=5.0, agent_id=None) == "mine"
+
+
+# meiva:note
+# A truncated / garbage line is a stream-integrity failure: MCPConnectError (discovery may use
+# cached metadata) and the socket is closed for a fresh reconnect.
+def test_malformed_response_line_raises_and_the_next_request_reconnects(
+    stub_daemon: Start,
 ) -> None:
-    """A stale line — the daemon's late answer to a request whose client-side
-    deadline already fired — carries the OLD request's id. The next request
-    must skip it and wait for its own id, or every later response shifts by
-    one (response stream permanently misaligned: request N+1 reads request
-    N's result). The buffer models the state after a timed-out request 1:
-    its response (id=1) arrived late, before request 2's own response."""
-    sock = _FakeSocket()
-    sock.recv_queue = [
-        json.dumps({"id": 1, "ok": True, "result": "stale"}).encode() + b"\n",
-        json.dumps({"id": 2, "ok": True, "result": "fresh"}).encode() + b"\n",
-    ]
-    _patch_socket(monkeypatch, sock)
+    garbage = iter([True, False])
 
-    client = remote_mod.RemoteMCPClient("fake-socket-path")
-    # Model request 1 as already sent and timed out client-side: its id slot is
-    # consumed and its late response is what sits at the head of the buffer.
-    client._req_id = 1
-    # this call sends id=2; it must NOT consume the id=1 stale line
-    assert client.call_tool("srv", "t", {}, timeout_seconds=5.0) == "fresh"
-    # the stale line was consumed and discarded, stream stays aligned
-    assert sock.closed is False
+    def respond(request: dict[str, Any]) -> list[bytes]:
+        return [b"not json at all\n"] if next(garbage) else [ok_line(request, [])]
 
-
-def test_remote_client_skips_notification_line(monkeypatch: pytest.MonkeyPatch) -> None:
-    """An unsolicited notification (no id) interleaved before the response must
-    not be consumed as the response — the id match is the discriminator."""
-    sock = _FakeSocket()
-    sock.recv_queue = [
-        json.dumps({"method": "notifications/message", "params": {}}).encode() + b"\n",
-        json.dumps({"id": 1, "ok": True, "result": "ok"}).encode() + b"\n",
-    ]
-    _patch_socket(monkeypatch, sock)
-
-    client = remote_mod.RemoteMCPClient("fake-socket-path")
-    assert client.call_tool("srv", "t", {}, timeout_seconds=5.0) == "ok"
-
-
-def test_remote_client_skips_stale_and_notification_then_matches(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Both foreign-line classes together, in one buffer, before the matching
-    response: the client scans until id matches (request id here is 1)."""
-    sock = _FakeSocket()
-    sock.recv_queue = [
-        json.dumps({"id": 7, "ok": True, "result": "very stale"}).encode() + b"\n",
-        json.dumps({"method": "notifications/progress", "params": {}}).encode() + b"\n",
-        json.dumps({"id": 1, "ok": True, "result": "mine"}).encode() + b"\n",
-    ]
-    _patch_socket(monkeypatch, sock)
-
-    client = remote_mod.RemoteMCPClient("fake-socket-path")
-    assert client.call_tool("srv", "t", {}, timeout_seconds=5.0) == "mine"
-
-
-def test_remote_client_closes_socket_on_recv_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A request-timeout leaves the stream ambiguous: the daemon may still be
-    processing and its response may arrive later. Closing the socket (and
-    forgetting it) means the next request reconnects fresh — a late response
-    can never be consumed by the next request (the \u4e32\u8bdd enabler)."""
-    sock = _FakeSocket()
-    sock.recv_queue = [TimeoutError()]
-    _patch_socket(monkeypatch, sock)
-
-    client = remote_mod.RemoteMCPClient("fake-socket-path")
-    with pytest.raises(mcps_mod.MCPConnectError, match="timeout"):
-        client.list_tools("srv", timeout_seconds=5.0)
-    assert sock.closed is True
-    assert client._sock is None, "next request must reconnect fresh"
-
-
-def test_remote_client_closes_socket_when_connection_closed(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """EOF mid-request: same ambiguous-stream argument — close and forget."""
-    sock = _FakeSocket()
-    sock.recv_queue = [b""]
-    _patch_socket(monkeypatch, sock)
-
-    client = remote_mod.RemoteMCPClient("fake-socket-path")
-    with pytest.raises(mcps_mod.MCPConnectError, match="connection closed"):
-        client.list_tools("srv", timeout_seconds=5.0)
-    assert sock.closed is True
-    assert client._sock is None
-
-
-def test_remote_client_raises_on_malformed_response_line(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A truncated / garbage line is a stream-integrity failure: MCPConnectError
-    (discovery may use cached metadata) and the socket is
-    closed for a fresh reconnect."""
-    sock = _FakeSocket()
-    sock.recv_queue = [b"not json at all\n"]
-    _patch_socket(monkeypatch, sock)
-
-    client = remote_mod.RemoteMCPClient("fake-socket-path")
+    daemon = stub_daemon(respond)
+    client = remote_mod.RemoteMCPClient(daemon.path)
     with pytest.raises(mcps_mod.MCPConnectError, match="malformed"):
-        client.list_tools("srv", timeout_seconds=5.0)
-    assert sock.closed is True
-    assert client._sock is None
+        client.list_tools("srv", timeout_seconds=5.0, agent_id=None)
+    assert client.list_tools("srv", timeout_seconds=5.0, agent_id=None) == []
+    assert daemon.connections == 2
 
 
-def test_remote_client_error_response_keeps_socket_open(monkeypatch: pytest.MonkeyPatch) -> None:
-    """An `ok: False` response is a cleanly-consumed response — the stream stays
-    aligned, so the connection is kept (no need to pay a reconnect)."""
-    sock = _FakeSocket()
-    sock.recv_queue = [json.dumps({"id": 1, "ok": False, "error": "nope"}).encode() + b"\n"]
-    _patch_socket(monkeypatch, sock)
-
-    client = remote_mod.RemoteMCPClient("fake-socket-path")
-    with pytest.raises(mcps_mod.MCPCallError, match="nope"):
-        client.list_tools("srv", timeout_seconds=5.0)
-    assert sock.closed is False
-    assert client._sock is sock
+# meiva:note
+# After a call is sent, a lost reply is UNKNOWN: it is never replayed.
+def test_a_failed_tool_call_reports_an_unknown_result(stub_daemon: Start) -> None:
+    daemon = stub_daemon(lambda _request: [CLOSE])
+    client = remote_mod.RemoteMCPClient(daemon.path)
+    with pytest.raises(mcps_mod.MCPCallError, match="result unknown"):
+        client.call_tool("srv", "charge", {}, timeout_seconds=5.0, agent_id=None)
+    assert len(daemon.requests) == 1
 
 
-# ─── _list_tools / _call_raw remote daemon path + cache fallback ─────────────
-
-
-def test_list_tools_falls_back_to_cache_when_remote_fails() -> None:
-    """daemon throws -> falls back to disk cache."""
-    fake_remote = MagicMock()
-    fake_remote.list_tools.side_effect = OSError("daemon down")
-    cached: list[mcps_mod.ToolInfo] = [
-        {"name": "cached_tool", "description": "", "input_schema": {}}
-    ]
-    source = tool_source(lambda: fake_remote, cache=StoredTools(cached))
-
-    tools = list_tools(source, "srv")
-    assert tools == cached
-
-
-# ─── _ServerProxy detail paths ────────────────────────────────────────────
-
-
-def test_proxy_getattr_rejects_underscore_names(mock_session: MagicMock) -> None:
+def test_proxy_getattr_rejects_underscore_names(stub_daemon: Start) -> None:
     """`proxy._anything` (dunder / private) goes through AttributeError — not treated as tool call."""
-    proxy = ServerProxy("fs", mock_session.source)
+    _, remote = canned_daemon(stub_daemon)
+    proxy = ServerProxy("fs", tool_source(remote))
     with pytest.raises(AttributeError):
         proxy._not_a_tool  # noqa: B018 — intentionally trigger __getattr__
 
 
-def test_proxy_tool_docstring_includes_schema(mock_session: MagicMock) -> None:
+def test_proxy_tool_docstring_includes_schema(stub_daemon: Start) -> None:
     """tool has input_schema → docstring includes JSON schema (for agent to see)."""
-    mock_session.list_tools.return_value = MagicMock(
-        tools=[
-            make_tool(
-                "read_file",
-                "Read a file",
-                schema={"type": "object", "properties": {"path": {"type": "string"}}},
-            )
-        ]
-    )
-    proxy = ServerProxy("fs", mock_session.source)
-    fn = proxy.read_file
-    doc = fn.__doc__ or ""
+    schema = {"type": "object", "properties": {"path": {"type": "string"}}}
+    _, remote = canned_daemon(stub_daemon, tools=[tool_wire("read_file", "Read a file", schema)])
+    doc = ServerProxy("fs", tool_source(remote)).read_file.__doc__ or ""
     assert "Input schema" in doc
     assert "path" in doc
     assert "string" in doc
 
 
-def test_proxy_all_prefers_disk_cache() -> None:
+def test_proxy_all_prefers_disk_cache(tmp_path: Path) -> None:
     """`__all_for_meiva__` hits the cache then stops - it must not ask the daemon (server startup is
     expensive)."""
     cached: list[mcps_mod.ToolInfo] = [
         {"name": "alpha", "description": "", "input_schema": {}},
         {"name": "beta", "description": "", "input_schema": {}},
     ]
-
-    def fail_remote() -> object:
-        raise AssertionError("the daemon should not be asked when the cache hits")
-
-    proxy = ServerProxy("fs", tool_source(fail_remote, cache=StoredTools(cached)))  # pyright: ignore[reportArgumentType]
+    # meiva:note
+    # No daemon listens here: asking it would fail instead of answering from the cache.
+    unreachable = remote_mod.RemoteMCPClient(str(tmp_path / "absent.sock"))
+    proxy = ServerProxy("fs", tool_source(unreachable, cache=StoredTools(cached)))
     assert proxy.__all_for_meiva__ == ["alpha", "beta"]
 
 
-def test_proxy_load_tool_names_uses_in_memory_cache_on_second_call() -> None:
+def test_proxy_load_tool_names_uses_in_memory_cache_on_second_call(tmp_path: Path) -> None:
     """Second call to _load_tool_names -> reads the proxy's own tool table without the cache again."""
     cache = StoredTools([{"name": "t1", "description": "", "input_schema": {}}])
-    proxy = ServerProxy("fs", tool_source(lambda: None, cache=cache))  # pyright: ignore[reportArgumentType]
+    unreachable = remote_mod.RemoteMCPClient(str(tmp_path / "absent.sock"))
+    proxy = ServerProxy("fs", tool_source(unreachable, cache=cache))
     proxy._load_tool_names()  # first: the cache fills the proxy's table
     proxy._load_tool_names()  # second: uses the in-memory table
     assert cache.reads == 1  # cache read only once
-
-
-# ─── _schema_to_signature (display-only, no validation) ───────────────────
 
 
 def test_schema_to_signature_renders_required_and_optional() -> None:
@@ -466,63 +319,39 @@ def test_schema_to_signature_unknown_type_falls_back_to_any() -> None:
     assert all(p.annotation is Any for p in sig.parameters.values())
 
 
-def test_make_tool_callable_attaches_signature(mock_session: MagicMock) -> None:
+def test_make_tool_callable_attaches_signature(stub_daemon: Start) -> None:
     """proxy.<tool> callable carries signature synthesized from schema → inspect.signature sees real names."""
-    mock_session.list_tools.return_value = MagicMock(
-        tools=[
-            make_tool(
-                "navigate",
-                "Go to a URL",
-                schema={
-                    "type": "object",
-                    "properties": {"url": {"type": "string"}},
-                    "required": ["url"],
-                },
-            )
-        ]
-    )
-    proxy = ServerProxy("chrome", mock_session.source)
-    sig = inspect.signature(proxy.navigate)
+    schema = {"type": "object", "properties": {"url": {"type": "string"}}, "required": ["url"]}
+    _, remote = canned_daemon(stub_daemon, tools=[tool_wire("navigate", "Go to a URL", schema)])
+    sig = inspect.signature(ServerProxy("chrome", tool_source(remote)).navigate)
     assert list(sig.parameters) == ["url"]
     assert sig.parameters["url"].annotation is str
 
 
-def test_unknown_tool_keeps_kwargs_signature(mock_session: MagicMock) -> None:
+def test_unknown_tool_keeps_kwargs_signature(stub_daemon: Start) -> None:
     """No schema (info=None) → no signature attached, retains (**kwargs)."""
-    mock_session.list_tools.return_value = MagicMock(tools=[])
-    proxy = ServerProxy("chrome", mock_session.source)
-    params = inspect.signature(proxy.whatever).parameters
+    _, remote = canned_daemon(stub_daemon)
+    params = inspect.signature(ServerProxy("chrome", tool_source(remote)).whatever).parameters
     assert list(params) == ["kwargs"]
     assert params["kwargs"].kind is inspect.Parameter.VAR_KEYWORD
 
 
-def test_tool_signature_shows_real_params_for_mcp_tool(mock_session: MagicMock) -> None:
+def test_tool_signature_shows_real_params_for_mcp_tool(stub_daemon: Start) -> None:
     """An MCP tool callable carries its real parameter names, not (**kwargs: Any)."""
-    mock_session.list_tools.return_value = MagicMock(
-        tools=[
-            make_tool(
-                "navigate",
-                schema={
-                    "properties": {"url": {"type": "string"}, "timeout": {"type": "integer"}},
-                    "required": ["url"],
-                },
-            )
-        ]
-    )
-    proxy = ServerProxy("chrome", mock_session.source)
-    rendered = str(inspect.signature(proxy.navigate))
+    schema = {
+        "properties": {"url": {"type": "string"}, "timeout": {"type": "integer"}},
+        "required": ["url"],
+    }
+    _, remote = canned_daemon(stub_daemon, tools=[tool_wire("navigate", schema=schema)])
+    rendered = str(inspect.signature(ServerProxy("chrome", tool_source(remote)).navigate))
     assert "url: str" in rendered
     assert "timeout: int" in rendered
     assert "**kwargs" not in rendered
 
 
-def test_missing_daemon_never_starts_a_local_server(
-    fake_config: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    import sys
-
+def test_missing_daemon_never_starts_a_local_server(machine_config: Path, tmp_path: Path) -> None:
     marker = tmp_path / "local-server-started"
-    fake_config.write_text(
+    machine_config.write_text(
         json.dumps(
             {
                 "mcpServers": {
@@ -534,15 +363,10 @@ def test_missing_daemon_never_starts_a_local_server(
             }
         )
     )
-    clients = local_mcp_clients(lambda: 0.1)
-    monkeypatch.setattr(remote_mod, "daemon_socket_path", lambda: None)
+    clients = local_mcp_clients(tmp_path / "absent.sock", 0.1)
     try:
         with pytest.raises(mcps_mod.MCPConnectError, match="MCP daemon unavailable"):
-            call_raw(
-                tool_source(clients.remote, timeout_seconds=clients.timeout_seconds),
-                "effect",
-                "run",
-            )
+            call_raw(tool_source(clients, timeout_seconds=0.1), "effect", "run")
         assert not marker.exists()
     finally:
         clients.close()

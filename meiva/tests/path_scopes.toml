@@ -11,10 +11,12 @@
 "base.packages.tests.model_catalog" = [
     "test_attachment_transport.py",
     "test_security.py",
+    "test_validation_meiva.py",
 ]
 "base.config.tests.config_authority" = [
     "test_attachment_transport.py",
     "test_security.py",
+    "test_validation_meiva.py",
 ]
 "meiva.tests.fixtures.model_owner" = [
     "test_attachment_transport.py",

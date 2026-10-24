@@ -36,14 +36,18 @@ from __future__ import annotations
 import functools
 import inspect
 from collections.abc import Callable
+from dataclasses import dataclass
 from types import ModuleType, SimpleNamespace
 from typing import Any, cast
 
 from base.agents.sdk.call_policy import SamplingPolicyOwner
 from base.agents.sdk.capture import SdkCaptureOwner
 from base.agents.sdk.tally import SdkCallTally
-from meiva.sdk_surface import meiva_module, process_context
+from meiva.sdk_surface import process_context
 from meiva.sdk_surface.discovery import agent_visible_names
+from meiva.sdk_surface.installation import EventPipelines
+from meiva.sdk_surface.pure.caller.identity_plan import caller_facts
+from meiva.sdk_surface.pure.caller.usage_plan import usage_identity
 
 # A recorder marks itself with a reference to itself. `is_recorder` tests that identity, so
 # `install()` skips a target only when the current top callable *is* a recorder — robust to
@@ -70,7 +74,7 @@ def _check_sampling(fn: object, sampling: SamplingPolicyOwner) -> None:
 
 
 def _caller(
-    producer: Callable[[], Any] | None,
+    clients: EventPipelines | None,
 ) -> tuple[
     dict[str, Any],
     SdkCallTally | None,
@@ -84,17 +88,12 @@ def _caller(
     bound = process_context.ambient_context()
     own = None if bound is None else bound.identity
     borrowed = own.lease.agent_id if own is not None and own.lease is not None else None
-    agent_id = borrowed
-    if agent_id is None and own is not None:
-        agent_id = own.agent_id
     external = external_caller()
-    actor = own.actor if own is not None else None
-    source = f"agent:{agent_id}" if agent_id else (actor or "system")
-    if external and borrowed is None:
-        source = external.source()
-    identity = {"agent_id": agent_id, "source": source}
+    identity = usage_identity(
+        borrowed, caller_facts(own), None if external is None else external.source()
+    )
     if bound is None:
-        return identity, None, None, producer, None
+        return identity, None, None, None if clients is None else clients.event_pipeline, None
     return (
         identity,
         bound.sdk_calls,
@@ -108,7 +107,7 @@ def make_recorder[F: Callable[..., object]](
     original: F,
     fq: str,
     sampling: SamplingPolicyOwner,
-    producer: Callable[[], object] | None = None,
+    clients: EventPipelines | None,
 ) -> F:
     """Transparent proxy around ``original`` that meters the call as ``fq`` (the call /
     tally / emit logic lives in ``base.agents.sdk.telemetry.run_metered``)."""
@@ -117,7 +116,7 @@ def make_recorder[F: Callable[..., object]](
     def recorder(*args: Any, **kwargs: Any) -> Any:
         from base.agents.sdk.telemetry import run_metered
 
-        identity, tally, capture_owner, call_producer, machine_reader = _caller(producer)
+        identity, tally, capture_owner, call_producer, machine_reader = _caller(clients)
         return run_metered(
             fq,
             original,
@@ -137,7 +136,7 @@ def make_recorder[F: Callable[..., object]](
         async def async_recorder(*args: Any, **kwargs: Any) -> Any:
             from base.agents.sdk import telemetry as sdk_usage_telemetry
 
-            identity, tally, capture_owner, call_producer, machine_reader = _caller(producer)
+            identity, tally, capture_owner, call_producer, machine_reader = _caller(clients)
             return await sdk_usage_telemetry.run_metered_async(
                 fq,
                 original,
@@ -167,7 +166,7 @@ _MCP_CALL_FUNNEL = "call_raw"
 def make_mcp_recorder[F: Callable[..., object]](
     original: F,
     sampling: SamplingPolicyOwner,
-    producer: Callable[[], object] | None = None,
+    clients: EventPipelines | None,
 ) -> F:
     """Recorder for the MCP call funnel — derives the fq from the runtime args."""
 
@@ -175,7 +174,7 @@ def make_mcp_recorder[F: Callable[..., object]](
     def recorder(source: Any, server: str, tool: str, *args: Any, **kwargs: Any) -> Any:
         from base.agents.sdk.telemetry import run_metered
 
-        identity, tally, capture_owner, call_producer, machine_reader = _caller(producer)
+        identity, tally, capture_owner, call_producer, machine_reader = _caller(clients)
         return run_metered(
             f"mcps.{server}.{tool}",
             original,
@@ -192,14 +191,14 @@ def make_mcp_recorder[F: Callable[..., object]](
     return cast("F", _recorder(recorder, sampling))
 
 
-def instrument_targets() -> list[tuple[object, str, str]]:
-    """Walk the ``meiva`` namespace tree → ``(parent, attr, fq)`` for every public callable.
-
-    ``fq`` is the dotted path under ``meiva`` (``files.read``, ``shell.sessions.new``,
-    ``understand``) — the key space the metric reports. Recurses into sub-namespaces
-    (modules / SimpleNamespace); targets routines; skips classes, constants, and
-    dynamic namespaces served by ``__getattr__``.
-    """
+# meiva:note
+# Walk the namespace tree under `root` → ``(parent, attr, fq)`` for every public callable.
+#
+# ``fq`` is the dotted path under ``meiva`` (``files.read``, ``shell.sessions.new``,
+# ``understand``) — the key space the metric reports. Recurses into sub-namespaces (modules /
+# SimpleNamespace); targets routines; skips classes, constants, and dynamic namespaces served by
+# ``__getattr__``.
+def _instrument_targets(root: object) -> list[tuple[object, str, str]]:
     targets: list[tuple[object, str, str]] = []
     seen: set[int] = set()
 
@@ -207,16 +206,17 @@ def instrument_targets() -> list[tuple[object, str, str]]:
         if id(container) in seen:
             return
         seen.add(id(container))
-        # agent_visible_names is the single source of truth for the agent
-        # surface (help / SDK-expand / doc-lint share it). It reads
-        # __all_for_meiva__ statically so a dynamic proxy surface is never
-        # force-evaluated, and raises for a container that declares none.
+        # meiva:note
+        # agent_visible_names is the single source of truth for the agent surface (help / SDK-
+        # expand / doc-lint share it). It reads __all_for_meiva__ statically so a dynamic proxy
+        # surface is never force-evaluated, and raises for a container that declares none.
         for name in agent_visible_names(container):
+            # meiva:note
             # getattr_static, never getattr: a dynamically-served member (e.g.
-            # meiva.self.MACHINE_SPEC, computed via module __getattr__) must not be
-            # force-evaluated — it can raise (MachineNameMissing when unset) and crash
-            # install() -> load_extensions. Statically-resolvable functions and
-            # submodules (the only things we wrap / recurse) are all real attributes.
+            # meiva.self.MACHINE_SPEC, computed via module __getattr__) must not be force-
+            # evaluated — it can raise (MachineNameMissing when unset) and crash install() ->
+            # load_extensions. Statically-resolvable functions and submodules (the only things
+            # we wrap / recurse) are all real attributes.
             attr = inspect.getattr_static(container, name, None)
             if attr is None:
                 continue
@@ -226,40 +226,55 @@ def instrument_targets() -> list[tuple[object, str, str]]:
             elif isinstance(attr, (ModuleType, SimpleNamespace)):
                 walk(attr, f"{fq}.")
 
-    walk(meiva_module(), "")
+    walk(root, "")
     return targets
 
 
+# meiva:note
+# What an installation meters: every public routine under the `meiva` module (the walk) and the
+# module that holds the MCP call funnel, whose dynamic tool calls the walk cannot reach. Read once
+# from the module the installer writes; `install` takes the value, so a test meters a namespace
+# it builds.
+@dataclass(frozen=True)
+class MeterSurface:
+    routines: tuple[tuple[object, str, str], ...]
+    funnel_module: object | None
+
+
+def read_surface(root: ModuleType) -> MeterSurface:
+    funnel_module = getattr(getattr(root, "mcps", None), "call_funnel", None)
+    return MeterSurface(routines=tuple(_instrument_targets(root)), funnel_module=funnel_module)
+
+
+# meiva:note
+# Wrap every public ``meiva.*`` callable of `surface` with the recording proxy. Idempotent.
+#
+# Called by ``meiva.sdk_surface.install`` after plugins load, so plugin namespaces / members /
+# declared wrap layers are all present and get metered too (the recorder sits outermost of any
+# plugin wrap). Re-running only wraps targets whose current top callable is not already a
+# recorder, so it is safe to call on every plugin reload — a newly plugin-wrapped target gets a
+# fresh outermost recorder.
+#
+# Returns the restore ledger: the ``(parent, attr)`` pairs this call actually wrapped, in wrap
+# order. The installation carries it; ``uninstall(ledger)`` restores from it.
 def install(
-    sampling: SamplingPolicyOwner, *, producer: Callable[[], object] | None = None
+    sampling: SamplingPolicyOwner, *, clients: EventPipelines | None, surface: MeterSurface
 ) -> tuple[tuple[object, str], ...]:
-    """Wrap every public ``meiva.*`` callable with the recording proxy. Idempotent.
-
-    Called by ``meiva.sdk_surface.install`` after plugins load, so plugin namespaces /
-    members / declared wrap layers are all present and get metered too (the
-    recorder sits outermost of any plugin wrap). Re-running only wraps targets whose
-    current top callable is not already a recorder, so it is safe to call on every
-    plugin reload — a newly plugin-wrapped target gets a fresh outermost recorder.
-
-    Returns the restore ledger: the ``(parent, attr)`` pairs this call actually wrapped,
-    in wrap order. The installation carries it; ``uninstall(ledger)`` restores from it.
-    """
-    targets = instrument_targets()
-    funnel_mod = getattr(getattr(meiva_module(), "mcps", None), "call_funnel", None)
+    funnel_mod = surface.funnel_module
     funnel = None if funnel_mod is None else getattr(funnel_mod, _MCP_CALL_FUNNEL, None)
-    for parent, attr, _fq in targets:
+    for parent, attr, _fq in surface.routines:
         _check_sampling(getattr(parent, attr, None), sampling)
     _check_sampling(funnel, sampling)
     wrapped: list[tuple[object, str]] = []
-    for parent, attr, fq in targets:
+    for parent, attr, fq in surface.routines:
         current = getattr(parent, attr, None)
         if current is None or is_recorder(current):
             continue
-        setattr(parent, attr, make_recorder(current, fq, sampling, producer))
+        setattr(parent, attr, make_recorder(current, fq, sampling, clients))
         wrapped.append((parent, attr))
 
     if funnel_mod is not None and callable(funnel) and not is_recorder(funnel):
-        setattr(funnel_mod, _MCP_CALL_FUNNEL, make_mcp_recorder(funnel, sampling, producer))
+        setattr(funnel_mod, _MCP_CALL_FUNNEL, make_mcp_recorder(funnel, sampling, clients))
         wrapped.append((funnel_mod, _MCP_CALL_FUNNEL))
     return tuple(wrapped)
 

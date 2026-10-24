@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import replace
 from pathlib import Path
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 from typing import Any
 
 import psycopg
@@ -30,9 +30,8 @@ from base.cluster.machine.tests.identity import machine_identity as machine_iden
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.native_process.runtime_incarnation import RuntimeIncarnation
-from base.packages.skills.tree import Skill
 from base.telemetry import Event
-from meiva.sdk_surface import metering, process_context
+from meiva.sdk_surface import metering, process_context, skill_sources
 
 
 class _CaptureOwner:
@@ -53,7 +52,6 @@ async def test_concurrent_calls_capture_the_original_gate_after_context_rebind(
     db_conn: psycopg.Connection[Any],
     owner: RuntimeIncarnation,
     lease: dict[str, Any],
-    monkeypatch: pytest.MonkeyPatch,
     database_gate: ProcessDbGate,
 ) -> None:
     previous = open_capture(
@@ -77,15 +75,8 @@ async def test_concurrent_calls_capture_the_original_gate_after_context_rebind(
         await release.wait()
 
     namespace = SimpleNamespace(held=held, __all_for_meiva__=["held"])
-    monkeypatch.setattr(meiva, "receipt_probe", namespace, raising=False)
-    monkeypatch.setattr(meiva, "__all_for_meiva__", [*meiva.__all_for_meiva__, "receipt_probe"])
-
-    def _policy_for_test(
-        create_capture_owner: call_policy.SamplingPolicyOwner,
-    ) -> call_policy.SamplingPolicy:
-        return call_policy.SamplingPolicy()
-
-    monkeypatch.setattr(call_policy, "policy", _policy_for_test)
+    root = ModuleType("receipt_root")
+    root.__dict__.update(receipt_probe=namespace, __all_for_meiva__=["receipt_probe"])
     prior = getattr(meiva, "context", None)
     tally = SdkCallTally()
     context = MeivaContext(
@@ -94,7 +85,8 @@ async def test_concurrent_calls_capture_the_original_gate_after_context_rebind(
         sdk_capture=_CaptureOwner(previous_gate),
     )
     process_context.bind_context(context)
-    ledger = metering.install(call_policy.SamplingPolicyOwner())
+    sampling = call_policy.SamplingPolicyOwner(reader=call_policy.SamplingPolicy)
+    ledger = metering.install(sampling, clients=None, surface=metering.read_surface(root))
     calls = [asyncio.create_task(namespace.held()) for _ in range(2)]
     try:
         await asyncio.wait_for(entered.wait(), timeout=2)
@@ -113,6 +105,7 @@ async def test_concurrent_calls_capture_the_original_gate_after_context_rebind(
         release.set()
         await asyncio.gather(*calls, return_exceptions=True)
         metering.uninstall(ledger)
+        sampling.close()
         if prior is None:
             process_context.unbind_context()
         else:
@@ -125,7 +118,6 @@ def test_sdk_skill_read_captures_borrowed_audit_source_explicitly(
     db_conn: psycopg.Connection[Any],
     owner: RuntimeIncarnation,
     lease: dict[str, Any],
-    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     database: Database,
     database_gate: ProcessDbGate,
@@ -136,14 +128,11 @@ def test_sdk_skill_read_captures_borrowed_audit_source_explicitly(
         lease, owner.agent_id, "explicit-skill-audit", database_gate=database_gate
     )
     gate = capture.LocalCaptureGate(participant)
-    (tmp_path / "SKILL.md").write_text("# Capture test\n")
-    skill = Skill(
-        name="capture_test",
-        description="test",
-        path=str(tmp_path),
-        namespace=(),
+    skill_dir = tmp_path / "capture_test"
+    skill_dir.mkdir()
+    (skill_dir / "SKILL.md").write_text(
+        "---\nname: capture_test\ndescription: test\n---\n\n# Capture test\n"
     )
-    monkeypatch.setattr(meiva.skills, "names", lambda: [skill])
     prior = getattr(meiva, "context", None)
     borrowed = ExternalLease(
         agent_id=owner.agent_id,
@@ -159,7 +148,8 @@ def test_sdk_skill_read_captures_borrowed_audit_source_explicitly(
         )
     )
     try:
-        assert "# Capture test" in meiva.files.read(str(tmp_path / "SKILL.md"))
+        with skill_sources.scoped(lambda: [tmp_path]):
+            assert "# Capture test" in meiva.files.read(str(skill_dir / "SKILL.md"))
         rows = history.entries(participant.lease_id, db_conn)
         audits = [row for row in rows if row["kind"] == "api_event"]
         assert capture_rows(db_conn, lease["id"], participant.source_key) == 1

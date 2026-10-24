@@ -29,6 +29,10 @@ __all_for_meiva__ = [
 type WatcherTimeout = float | datetime.timedelta | str
 
 
+def _now() -> datetime.datetime:
+    return datetime.datetime.now(datetime.UTC)
+
+
 def launch(
     code: str, timeout: WatcherTimeout, *, name: str, notify: str | None = None
 ) -> SessionHandle:
@@ -47,7 +51,7 @@ def launch(
         shell sessions while running) and `output_path` (the log its output
         streams to). Kill or capture it through `sessions`.
     """
-    request = plans.plan_launch(code, timeout, name, notify)
+    request = plans.plan_launch(code, timeout, name, notify, _now())
     return spawn.run(request, wiring.spawn_deps())
 
 
@@ -92,7 +96,7 @@ def cron(
         end_time=end_time,
         name=name,
         notify=notify,
-        now=datetime.datetime.now(datetime.UTC),
+        now=_now(),
         default_timezone=Clock.from_settings().authoritative_timezone or host_tz_name(),
     )
     return spawn.run(request, wiring.spawn_deps())
@@ -124,7 +128,7 @@ def at(
         message,
         name=name,
         notify=notify,
-        now=datetime.datetime.now(datetime.UTC),
+        now=_now(),
         announce_timezone=Clock.from_settings().authoritative_timezone,
     )
     return spawn.run(request, wiring.spawn_deps())

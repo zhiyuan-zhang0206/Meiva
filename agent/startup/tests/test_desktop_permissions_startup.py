@@ -69,16 +69,16 @@ class _FailingUI:
 @pytest.fixture
 def fake_ui() -> Iterator[_FakeUI]:
     ui = _FakeUI()
-    undo = plugins.install_member("startup-test", "ui", "notify", ui.notify)
+    added = plugins.install_member("startup-test", "ui", "notify", ui.notify)
     yield ui
-    undo()
+    plugins.uninstall(added)
 
 
 @pytest.fixture
 def failing_ui() -> Iterator[None]:
-    undo = plugins.install_member("startup-test", "ui", "notify", _FailingUI().notify)
+    added = plugins.install_member("startup-test", "ui", "notify", _FailingUI().notify)
     yield
-    undo()
+    plugins.uninstall(added)
 
 
 class TestNotifyDesktopPermissionsAtStartup:

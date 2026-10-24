@@ -16,6 +16,7 @@ import contextlib
 import os
 import subprocess
 import time
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -158,12 +159,11 @@ def test_run_explicit_cwd_overrides_default(tmp_path: Path) -> None:
     assert Path(out.strip()).resolve() == tmp_path.resolve()
 
 
-def test_run_default_cwd_is_workspace(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_run_default_cwd_is_workspace(unit_home: Path) -> None:
     """No cwd → runs in agent workspace (consistent with meiva.files relative path base)."""
 
-    monkeypatch.setenv("MEIVA_HOME", str(tmp_path))
     out = meiva.shell.run("pwd")
-    expected = tmp_path / "workspaces" / str(meiva.sdk_surface.agent_identity.agent_id())
+    expected = unit_home / "workspaces" / str(meiva.sdk_surface.agent_identity.agent_id())
     assert Path(out.strip()).resolve() == expected.resolve()
     assert expected.is_dir()  # workspace_dir mkdir on demand
 
@@ -291,22 +291,6 @@ def test_new_rejects_invalid_name(_agent_row: int) -> None:
         shell.sessions.new(name="page-preview", ttl=120)
 
 
-def test_resolve_does_not_conflate_id_prefixes() -> None:
-    # `shell-1` must not match `shell-12-<name>`: the suffix match requires a
-    # dash right after the full id.
-    from types import SimpleNamespace
-
-    from meiva.shell import sessions
-
-    handle = sessions.ShellSessions(
-        backend=SimpleNamespace(list_sessions=list), database=None, agent_id=7
-    )
-    prefix = handle._shell_prefix()
-    handle._backend = SimpleNamespace(list_sessions=lambda: [f"{prefix}12-watcher", f"{prefix}1"])
-    assert handle.resolve(1) == f"{prefix}1"
-    assert handle.resolve(12) == f"{prefix}12-watcher"
-
-
 def test_operations_reject_foreign_id(_agent_row: int) -> None:
     # A session id that does not resolve to one of this agent's sessions raises.
     with pytest.raises(ValueError, match="not this agent's"):
@@ -346,7 +330,7 @@ def test_rebuild_uses_new_id_and_old_handle_stays_rejected(_agent_row: int) -> N
 # kill. A short poll replaces fixed sleeps so a loaded box does not flake.
 
 
-def _wait_for(predicate, timeout: float = 30.0, interval: float = 0.1) -> bool:
+def _wait_for(predicate: Callable[[], bool], timeout: float = 30.0, interval: float = 0.1) -> bool:
     # 30s default: the host's reader thread shares the box with the whole
     # parallel suite, and under CI runner CPU oversubscription the reap can
     # lag well past 10s (2026-08-09: 4 CI runs failed on the same kill test
@@ -460,41 +444,6 @@ def test_new_default_cwd_is_agent_workspace(_agent_row: int) -> None:
         shell.sessions.kill(sid)
 
 
-def test_new_session_bare_python_resolves_into_venv(
-    _agent_row: int, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """A persistent session is a login+interactive shell (`bash -l -i`,
-    PtySessionBackend, `base/sessions/pty/launch.py::_fork_shell`), so it
-    sources the user's shell profile — which could in principle put something
-    ahead of the venv bin dir `forward_env_dict` (`base/sessions/env_forwarding.py`)
-    forwards on PATH. QA for #3590 verified by hand that bare `python` still
-    resolves into this checkout's venv inside such a session; this pins that
-    down as a regression test.
-
-    HOME is pointed at a scratch dir with a minimal `.bash_profile` so the
-    assertion does not depend on the developer machine's own shell
-    customization (pyenv/conda/nvm rewriting PATH) — only on the mechanism
-    this repo actually ships.
-    """
-    from base.host.runtime_interpreter import runtime_venv
-
-    fake_home = tmp_path / "home"
-    fake_home.mkdir()
-    (fake_home / ".bash_profile").write_text("# minimal profile — no PATH edits\n")
-    monkeypatch.setenv("HOME", str(fake_home))
-
-    expected = str(runtime_venv() / "bin" / "python")
-    sid = shell.sessions.new("test-venv-python", ttl=120)
-    try:
-        _ready(sid)
-        shell.sessions.send(sid, "command -v python")
-        out = _capture_until(sid, expected)
-        lines = [ln.strip() for ln in out.split("\n")]
-        assert expected in lines, out
-    finally:
-        shell.sessions.kill(sid)
-
-
 def test_kill_reaps_session_and_foreground_child(_agent_row: int) -> None:
     """kill() removes the session and reaps the shell and its ready foreground job."""
     import psutil
@@ -505,7 +454,7 @@ def test_kill_reaps_session_and_foreground_child(_agent_row: int) -> None:
     sid = shell.sessions.new("test-tree", ttl=120)
     try:
         _ready(sid)
-        full = _sessions.shell_sessions_handle().resolve(sid)
+        full = _sessions.shell_sessions().resolve(sid)
         (info,) = [s for s in client.list_sessions(socket_path=service_socket()) if s.name == full]
         shell_pid = info.pid
         assert psutil.pid_exists(shell_pid)

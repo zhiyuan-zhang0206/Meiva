@@ -127,7 +127,7 @@ def test_cron_past_end_time_raises() -> None:
 def test_cron_future_end_time_ok() -> None:
     end = _NOW + datetime.timedelta(days=2)
     request = _cron(end_time=end)
-    assert request.cron_end_at == end
+    assert request.ttl_seconds == datetime.timedelta(days=2).total_seconds()
     assert "daily" in request.code
 
     with pytest.raises(ValueError):
@@ -162,3 +162,114 @@ def test_at_future_time_ok() -> None:
         announce_timezone=None,
     )
     assert "one hour" in soon.code
+
+
+_FIXED_NOW = datetime.datetime(2026, 10, 24, 5, 6, 7, 500000, tzinfo=datetime.UTC)
+
+
+def test_at_and_cron_plan_without_watchdog() -> None:
+    # meiva:note
+    # at/cron scripts self-terminate, so they plan with no watchdog (None).
+    now = _FIXED_NOW
+    when = (now + datetime.timedelta(days=365)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    at = plans.plan_at(
+        when, "ping later", name="test-at", notify=None, now=now, announce_timezone=None
+    )
+    assert at.watchdog_secs is None
+    assert "_wake(_MESSAGE)" in at.code
+    assert "ping later" in at.code
+    cron = plans.plan_cron(
+        "0 3 * * *",
+        "daily",
+        timezone=None,
+        end_time=None,
+        name="test-cron",
+        notify=None,
+        now=now,
+        default_timezone="UTC",
+    )
+    assert cron.watchdog_secs is None
+
+
+def test_the_session_lifetime_is_each_watchers_target_deadline() -> None:
+    # meiva:note
+    # Task #3411: launch = created + timeout, cron = its end (default: the current minute + 7
+    # days), at = its fire moment + the grace that lets the wake delivery finish.
+    from base.daemon.schedules.watcher import AT_SESSION_TTL_GRACE_SECONDS
+
+    now = _FIXED_NOW
+    launch = plans.plan_launch("pass", "30m", "test-launch-ttl", None, now)
+    cron = plans.plan_cron(
+        "0 3 * * *",
+        "daily",
+        timezone=None,
+        end_time=None,
+        name="test-cron-ttl",
+        notify=None,
+        now=now,
+        default_timezone="UTC",
+    )
+    explicit = plans.plan_cron(
+        "0 3 * * *",
+        "daily",
+        timezone=None,
+        end_time=now + datetime.timedelta(hours=30),
+        name="test-cron-ttl-explicit",
+        notify=None,
+        now=now,
+        default_timezone="UTC",
+    )
+    at = plans.plan_at(
+        now + datetime.timedelta(hours=2),
+        "ping later",
+        name="test-at-ttl",
+        notify=None,
+        now=now,
+        announce_timezone=None,
+    )
+
+    assert launch.ttl_seconds == 1800.0
+    assert launch.watchdog_secs == 1800.0
+    assert cron.ttl_seconds == datetime.timedelta(days=7).total_seconds() - 7.5
+    assert explicit.ttl_seconds == datetime.timedelta(hours=30).total_seconds()
+    assert at.ttl_seconds == 7200.0 + AT_SESSION_TTL_GRACE_SECONDS
+
+
+def test_a_watcher_whose_deadline_has_passed_is_refused() -> None:
+    now = _FIXED_NOW
+    with pytest.raises(ValueError, match="in the past"):
+        plans.plan_at(
+            now - datetime.timedelta(seconds=1),
+            "late",
+            name="test-late",
+            notify=None,
+            now=now,
+            announce_timezone=None,
+        )
+
+
+def test_watcher_plans_forward_failure_notify() -> None:
+    now = datetime.datetime.now(datetime.UTC)
+    when = (now + datetime.timedelta(days=365)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    requests = [
+        plans.plan_launch("pass", "1h", "test-launch-notify", "always", now),
+        plans.plan_at(
+            when,
+            "ping later",
+            name="test-at-notify",
+            notify="always",
+            now=now,
+            announce_timezone=None,
+        ),
+        plans.plan_cron(
+            "0 3 * * *",
+            "daily",
+            timezone=None,
+            end_time=None,
+            name="test-cron-notify",
+            notify="always",
+            now=now,
+            default_timezone="UTC",
+        ),
+    ]
+    assert [r.notify for r in requests] == ["always", "always", "always"]

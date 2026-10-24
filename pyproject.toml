@@ -321,7 +321,6 @@ check-typed-exception = true
 # The typed S110 findings in scripts/tests were outside the retired lint's
 # production scan; preserve that boundary.
 "scripts/codegen/gen_config_lite_table.py" = ["S110"]
-"meiva/mcps/tests/test_daemon.py" = ["S110"]
 "agent/graph/claim/tests/test_core.py" = ["S110"]
 "base/deploy/schema/tests/test_migration_reset.py" = ["S110"]
 "tests/integration/test_grafana_native_runtime.py" = ["S110"]
@@ -1222,6 +1221,11 @@ reportUnknownArgumentType = "error"
 
 [[tool.pyright.executionEnvironments]]
 root = "meiva/gateway_client/tests"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "meiva/impersonation/tests"
 reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 

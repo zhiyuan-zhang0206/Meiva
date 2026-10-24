@@ -1,0 +1,12 @@
+exports = ["runtime.py"]
+
+[uses]
+"conftest.py" = ["runtime.py"]
+"runtime.py" = ["sample_plugin.py"]
+"test_external_close.py" = ["runtime.py"]
+"test_external_database_owner.py" = ["child_undelivered_login.py", "runtime.py"]
+"test_external_identity.py" = ["runtime.py", "sample_plugin.py"]
+"test_external_journal.py" = ["runtime.py", "sample_plugin.py"]
+"test_external_machine_owner.py" = ["runtime.py"]
+"test_external_mcp_lease.py" = ["runtime.py"]
+"test_sdk_entry_without_declaration.py" = ["runtime.py"]

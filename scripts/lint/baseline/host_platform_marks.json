@@ -2,6 +2,6 @@
   "Host.system()": 7,
   "is_linux()": 1,
   "pytest.importorskip(...)": 1,
-  "shutil.which(...)": 35,
-  "sys.platform": 31
+  "shutil.which(...)": 34,
+  "sys.platform": 30
 }

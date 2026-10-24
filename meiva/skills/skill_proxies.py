@@ -14,7 +14,7 @@ from typing import Any
 
 from base.packages.skills.tree import NS, Leaf, Skill
 
-__all__ = ["Consume", "LazySkillDoc", "Namespace", "SkillProxy", "node_to_obj"]
+__all__ = ["Consume", "LazySkillDoc", "Namespace", "SkillProxy", "consumed_text", "node_to_obj"]
 
 type Consume = Callable[[Skill], str]
 
@@ -158,3 +158,11 @@ def node_to_obj(path: str, node: Leaf | NS, consume: Consume) -> SkillProxy | Na
     if isinstance(node, Leaf):
         return SkillProxy(path, node.skill, consume)
     return Namespace(path, node, consume)
+
+
+# meiva:note
+# The text a consumed skill body hands over: the skill's directory with the home directory
+# shortened to `~`, a blank line, then the raw SKILL.md body.
+def consumed_text(skill_path: str, home: str, content: str) -> str:
+    short = f"~{skill_path[len(home) :]}" if skill_path.startswith(home + "/") else skill_path
+    return f"{short}\n\n{content}"

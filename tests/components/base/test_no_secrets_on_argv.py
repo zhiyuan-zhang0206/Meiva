@@ -31,7 +31,8 @@ import psutil
 import pytest
 
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
-from base.sessions.pty.tests.pty_service import PtyServiceProcess
+from base.db import Database
+from base.sessions.pty.tests.pty_service import PtyServiceProcess, service_socket
 from base.sessions.pty.tests.pty_service import pty_service as pty_service
 from base.sessions.pty.tests.pty_shells import output_until, type_line
 from base.sessions.pty.tests.secret_argv import (
@@ -163,6 +164,7 @@ def _shell_env_report(name: str) -> str:
 
 def test_agent_shell_session(
     pty_service: PtyServiceProcess,
+    database: Database,
     secrets_in_creator_env: None,
 ) -> None:
     """An agent's own persistent shell. The create is a `new` request to the
@@ -171,13 +173,18 @@ def test_agent_shell_session(
     children re-source them at their own boot), so the secret values appear
     NOWHERE in this launch path: not on an argv of the service or the shell, not in
     the shell's environment."""
-    from base.sessions.backend import get_shell_backend
-    from meiva.shell.sessions import ShellSessions
-    from meiva.shell.tests.support import FakeDatabase
+    from base.paths import workspace_dir
+    from base.sessions.backend import PtySessionBackend, get_shell_backend
+    from base.sessions.pty.client import PtyClientConfig
+    from meiva.shell.sessions import ShellSessions, session_host
+    from meiva.shell.tests.live_shell import seed_agent
 
+    seed_agent(database, 1, next_index=3)
     ShellSessions(
-        backend=get_shell_backend(), database=FakeDatabase(next_index=3), agent_id=1
-    ).create("probe", ttl=120)
+        backend=PtySessionBackend(PtyClientConfig(socket_path=service_socket())),
+        database=database,
+        agent_id=1,
+    ).create("probe", cwd=workspace_dir(1), ttl=120, host=session_host())
     name = "meiva-agent-1-shell-3-probe"
     assert get_shell_backend().has_session(name)
 

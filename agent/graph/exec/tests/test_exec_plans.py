@@ -16,8 +16,8 @@ from agent.graph.exec._result import (
     ExecCrashed,
     ExecDone,
     ExecLifecycle,
+    ExecLifecycleKind,
     ExecTimedOut,
-    LifecycleKind,
 )
 from base.agents.messages.inbound import InterruptReason
 from base.agents.messages.kwargs import ExecStatus
@@ -60,8 +60,8 @@ def test_a_cancel_halts_and_names_what_ended_the_run(reason: InterruptReason) ->
     assert plan.cancel_reason is reason
 
 
-@pytest.mark.parametrize("kind", [LifecycleKind.TERMINATION, LifecycleKind.RESTART])
-def test_terminate_and_restart_halt_without_a_note(kind: LifecycleKind) -> None:
+@pytest.mark.parametrize("kind", [ExecLifecycleKind.TERMINATION, ExecLifecycleKind.RESTART])
+def test_terminate_and_restart_halt_without_a_note(kind: ExecLifecycleKind) -> None:
     plan = plan_dispatch(ExecLifecycle(output="before\n", kind=kind))
 
     assert (plan.kind, plan.halted, plan.status) == (
@@ -76,7 +76,7 @@ def test_terminate_and_restart_halt_without_a_note(kind: LifecycleKind) -> None:
 
 @pytest.mark.parametrize(("output", "joined"), [("", ""), ("work\n", "work\n"), ("work", "work\n")])
 def test_compaction_appends_its_note_and_writes_nothing_back(output: str, joined: str) -> None:
-    plan = plan_dispatch(ExecLifecycle(output=output, kind=LifecycleKind.SYSTEM_HALT))
+    plan = plan_dispatch(ExecLifecycle(output=output, kind=ExecLifecycleKind.SYSTEM_HALT))
 
     assert (plan.kind, plan.halted, plan.status) == (
         DispatchKind.COMPACT,

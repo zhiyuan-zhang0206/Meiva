@@ -8,21 +8,18 @@
 from __future__ import annotations
 
 import json
-import os
-import sys
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
-from agent.execution.protocol import ResultPayload, read_result
-from base.deploy.release import editable_install
+from agent.execution.protocol import ResultPayload
 from base.host.env.agent_env import AGENT_BIRTH_CONFIG_ENV, AGENT_CONFIG_OVERLAY_ENV
 
 from ._result import (
     ExecChildError,
     ExecCrashed,
+    ExecLifecycleKind,
     ExecResult,
-    LifecycleKind,
     StreamCap,
     construct_exec_result,
     lifecycle_kind_from_name,
@@ -30,8 +27,8 @@ from ._result import (
 
 
 # meiva:note
-# What the parent process looks like at the moment it spawns a child. The spawning shell reads
-# these once (`read_parent_facts`); the launch plan and the editable-install guard
+# What the parent process looks like at the moment it spawns a child. The composition root
+# reads these once (`process.read_parent_facts`); the launch plan and the editable-install guard
 # decide from the values.
 @dataclass(frozen=True)
 class ParentFacts:
@@ -40,20 +37,6 @@ class ParentFacts:
     executable: str
     source_root: Path | None
     editable_roots: tuple[Path, ...]
-
-
-# meiva:note
-# What this process looks like at the moment it spawns a child: the environment the child
-# inherits, its working directory, the interpreter it re-executes, the checkout that
-# interpreter belongs to and the one extra checkout its editable install may name.
-def read_parent_facts() -> ParentFacts:
-    return ParentFacts(
-        environ=dict(os.environ),
-        cwd=Path.cwd().resolve(),
-        executable=sys.executable,
-        source_root=editable_install.current_interpreter_source_root(),
-        editable_roots=(Path.home() / "Meiva",),
-    )
 
 
 @dataclass(frozen=True)
@@ -109,34 +92,20 @@ def plan_child_launch(
     return ChildLaunch(argv=argv, env=env, cwd=parent.cwd)
 
 
-def read_result_envelope(
-    result_path: Path, returncode: int | None
-) -> tuple[ResultPayload | None, str | None]:
-    """Read the child's result envelope; returns (payload, error).
-
-    `payload` None + `error` None when the envelope is missing (SIGKILL /
-    watchdog / the agent's own os._exit — the caller classifies from its own
-    flags). A malformed envelope (version drift / unknown kind / oversized) is
-    a protocol violation; it comes back as an `error` string so the caller
-    surfaces it as a crash outcome instead of guessing "done"."""
-    if not result_path.exists():
-        if returncode == 124:
-            # Watchdog hard-exit (timeout(1) convention) — the parent sent no
-            # signal (it was unreachable). Surface as a crash unless the
-            # parent's own timeout flag confirms the deadline outcome.
-            return (
-                ResultPayload(
-                    kind="timed_out",
-                    exc_type="TimeoutError",
-                    exc_msg="exec child watchdog fired — the parent never signalled it",
-                ),
-                None,
-            )
-        return None, None
-    try:
-        return read_result(result_path), None
-    except BaseException as exc:
-        return None, f"exec result envelope could not be decoded: {exc}"
+# meiva:note
+# The payload that stands for a result envelope that was never written, when the exit code alone
+# explains it, else None: the caller then classifies from its own flags (SIGKILL, watchdog, the
+# agent's own os._exit). Exit code 124 is the watchdog hard-exit (timeout(1) convention): the
+# parent sent no signal because the child was unreachable, so it surfaces as a crash unless the
+# parent's own timeout flag confirms the deadline outcome.
+def payload_without_envelope(returncode: int | None) -> ResultPayload | None:
+    if returncode == 124:
+        return ResultPayload(
+            kind="timed_out",
+            exc_type="TimeoutError",
+            exc_msg="exec child watchdog fired — the parent never signalled it",
+        )
+    return None
 
 
 # meiva:note
@@ -146,7 +115,7 @@ def read_result_envelope(
 # `construct_exec_result` still lets cancel and timeout outrank it.
 def _child_outcome(
     payload: ResultPayload | None, envelope_error: str | None
-) -> LifecycleKind | BaseException | None:
+) -> ExecLifecycleKind | BaseException | None:
     if envelope_error is not None:
         return ExecChildError("exec_result_envelope_invalid", envelope_error, None)
     if payload is not None and payload.kind == "lifecycle" and payload.lifecycle_type:
@@ -192,7 +161,7 @@ def result_from_payload(
     """
     if memory_guard_notice is not None and payload is None:
         output = f"{output}\n{memory_guard_notice}\n" if output else f"{memory_guard_notice}\n"
-        outcome: LifecycleKind | BaseException | None = ExecChildError(
+        outcome: ExecLifecycleKind | BaseException | None = ExecChildError(
             "exec_memory_guard_killed", memory_guard_notice, None
         )
     else:

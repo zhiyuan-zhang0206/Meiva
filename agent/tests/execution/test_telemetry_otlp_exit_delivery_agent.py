@@ -17,6 +17,9 @@ from typing import Any
 
 import pytest
 
+from agent.tests.impersonation.external.runtime import native_agent_with_checkpoint
+from agent.tests.impersonation.lease_support import Cluster
+from agent.tests.impersonation.lease_support import cluster as cluster
 from base.telemetry import Event, event_row
 
 _POSTS: list[tuple[str, bytes]] = []
@@ -108,7 +111,7 @@ def _mirror_events(home: Path) -> list[dict[str, Any]]:
 
 
 def _assert_external_sdk_call(
-    delivered: list[dict[str, Any]], mirror: list[dict[str, Any]]
+    delivered: list[dict[str, Any]], mirror: list[dict[str, Any]], agent_id: int
 ) -> None:
     """Check every public entry preserves its borrower and exact mirror identity."""
     # meiva_code's files.read wrapper enters the public cwd.get helper as well.
@@ -118,33 +121,36 @@ def _assert_external_sdk_call(
     assert Counter(event["attributes"]["fn"] for event in mirrored) == expected, mirrored
     mirror_ids = {row["attributes"]["fn"]: row["id"] for row in mirrored}
     for event in delivered:
-        assert event["agent_id"] == 424242
-        assert event["source"] == "agent:424242"
+        assert event["agent_id"] == agent_id
+        assert event["source"] == f"agent:{agent_id}"
         event_for_id: dict[str, Any] = dict(event)
         event_for_id["ts"] = datetime.fromisoformat(event["ts"])
         assert mirror_ids[event["attributes"]["fn"]] == event_row(Event(**event_for_id))["id"]
 
 
 def test_external_cli_tail_sdk_call_reaches_receiver_once_before_exit(
-    tmp_path: Path, otlp_receiver: Any
+    tmp_path: Path, otlp_receiver: Any, cluster: Cluster, db_url: str
 ) -> None:
     """An attachment's final SDK call is exported while the CLI is still alive."""
     sample = tmp_path / "sample.txt"
     sample.write_text("tail event", encoding="utf-8")
     home = tmp_path / "home"
+    takeover = native_agent_with_checkpoint(cluster, db_url)
+    takeover.write_channels({"messages": [], "meiva_code__cwd": str(tmp_path)})
     env = os.environ.copy()
     env.update(
         {
             "MEIVA_HOME": str(home),
             "MEIVA_PROCESS_PROFILE": "agent",
             "MEIVA_CONFIG_FETCH": "skip",
+            "MEIVA_MACHINE_NAME": takeover.machine,
             "MEIVA_TELEMETRY_OTLP_ENDPOINT": f"http://127.0.0.1:{otlp_receiver.server_address[1]}",
             "MEIVA_TELEMETRY_OTLP_ENABLED": "true",
         }
     )
     env.pop("MEIVA_LOG_DIR", None)
     proc = subprocess.run(  # noqa: S603 — fixed argv: our own interpreter and this test's child
-        [sys.executable, "-I", "-X", "utf8", str(_CHILD), str(sample)],
+        [sys.executable, "-I", "-X", "utf8", str(_CHILD), str(sample), takeover.lease_id],
         capture_output=True,
         text=True,
         env=env,
@@ -163,4 +169,4 @@ def test_external_cli_tail_sdk_call_reaches_receiver_once_before_exit(
             break
         time.sleep(0.05)
 
-    _assert_external_sdk_call(delivered, _mirror_events(home))
+    _assert_external_sdk_call(delivered, _mirror_events(home), takeover.agent_id)
