@@ -45,7 +45,7 @@ persistence.
 ## Notes
 - Port: `MEIVA_MEMORY_SEARCH_PORT` (default 19531), URI: `MEIVA_MEMORY_SEARCH_URI`
 - Data dir: `MEIVA_MEMORY_SEARCH_DATA_DIR` (default `$MEIVA_HOME/memory-search/`)
-- The daemon entry owns one `ConfigBoot`, builds its `MemorySearchConfig` slice from that owner and passes a live embedding-name reader to storage startup. The no-argument supervision probe is an operation root: it owns a cold `ConfigBoot` and supplies its URI and embedding-name reader to the HTTP helper.
+- The daemon entry owns one `ConfigBoot`, builds its `MemorySearchConfig` slice (port, data dir, batch bound, embedding name) from that owner once; the values are restart-bound. `daemon.build_server(config)` loads the store and returns the server, `run(config)` serves it. The no-argument supervision probe is an operation root: it owns a cold `ConfigBoot` and supplies its URI and embedding name to the HTTP helper.
 - The store width/fingerprint and supervision search probe use `embeddings.factory.get_descriptor(name)` with the root's configured name; these metadata-only paths do not construct an embedding provider or load a model catalog. The root passes the descriptor width to `build_app(store, max_batch_rows, embedding_dim=...)`; each app owns its vector schema bounds, with no configuration read during module import.
 - Selected via `MEIVA_MEMORY_SEARCH_BACKEND=numpy` (`services/derived/memory_indexer/backends/factory.py`)
 - **Probe limitation (tracked)**: the healthcheck's POST /search probe carries

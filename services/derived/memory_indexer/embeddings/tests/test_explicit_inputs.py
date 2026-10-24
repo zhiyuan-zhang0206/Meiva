@@ -1,13 +1,8 @@
 from __future__ import annotations
 
-import os
-from unittest.mock import patch
-
 import numpy as np
 import pytest
-from pydantic import SecretStr
 
-from base.config import ConfigBoot
 from base.lm.catalog import ModelCatalog
 from services.derived.memory_indexer.embeddings.gemini import DIM, GeminiEmbeddingProvider
 from services.derived.memory_indexer.embeddings.tests.test_embeddings import (
@@ -16,47 +11,20 @@ from services.derived.memory_indexer.embeddings.tests.test_embeddings import (
 )
 
 
-async def test_two_owner_providers_read_only_at_operations_and_observe_updates(
-    monkeypatch: pytest.MonkeyPatch,
-    model_catalog: ModelCatalog,
+async def test_two_providers_use_their_own_key_and_timeout(
+    monkeypatch: pytest.MonkeyPatch, model_catalog: ModelCatalog
 ) -> None:
     fake = AsyncClient(vectors=[[1.0] * DIM])
     patch_client(monkeypatch, fake)
-    with patch.dict(os.environ):
-        first, second = ConfigBoot(), ConfigBoot()
-        for owner, key, timeout in ((first, "first-key", 1.25), (second, "second-key", 2.5)):
-            owner.set_field("gemini_api_key", SecretStr(key))
-            owner.set_field("memory_embed_timeout_seconds", timeout)
-        reads: list[tuple[str, str]] = []
-
-        def provider(owner: ConfigBoot, name: str) -> GeminiEmbeddingProvider:
-            def api_key() -> str | None:
-                reads.append((name, "key"))
-                value = owner.view.lm.gemini_api_key
-                return None if value is None else value.get_secret_value()
-
-            def timeout() -> float:
-                reads.append((name, "timeout"))
-                return owner.view.services.memory_embed_timeout_seconds
-
-            return GeminiEmbeddingProvider(
-                model_catalog, timeout_reader=timeout, api_key_reader=api_key
-            )
-
-        one, two = provider(first, "one"), provider(second, "two")
-        assert reads == []
-        np.testing.assert_equal(one.embed_batch([]).shape, (0, DIM))
-        assert reads == [] and fake.call_count == 0
-        await one.embed_query_async("first")
-        await two.embed_query_async("second")
-        first.set_field("gemini_api_key", SecretStr("updated-key"))
-        first.set_field("memory_embed_timeout_seconds", 3.75)
-        await one.embed_query_async("updated")
-        assert [(call["headers"]["x-goog-api-key"], call["timeout"]) for call in fake.calls] == [
-            ("first-key", 1.25),
-            ("second-key", 2.5),
-            ("updated-key", 3.75),
-        ]
-        assert reads == [
-            (name, kind) for name in ("one", "two", "one") for kind in ("key", "timeout")
-        ]
+    one = GeminiEmbeddingProvider(model_catalog, timeout_s=1.25, api_key="first-key")
+    two = GeminiEmbeddingProvider(model_catalog, timeout_s=2.5, api_key="second-key")
+    np.testing.assert_equal(one.embed_batch([]).shape, (0, DIM))
+    assert fake.call_count == 0
+    await one.embed_query_async("first")
+    await two.embed_query_async("second")
+    await one.embed_query_async("again")
+    assert [(call["headers"]["x-goog-api-key"], call["timeout"]) for call in fake.calls] == [
+        ("first-key", 1.25),
+        ("second-key", 2.5),
+        ("first-key", 1.25),
+    ]

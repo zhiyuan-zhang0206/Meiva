@@ -1,45 +1,45 @@
-"""Gemini Embedding 2 adapter — direct REST over httpx.
-
-The one implementation of the `EmbeddingProvider` contract today (the
-abstraction deliberately ships no second vendor; a new provider is a new
-class behind `embeddings.factory`). This is a thin wrapper over the
-Gemini Developer API `batchEmbedContents` endpoint, moved verbatim from
-the pre-abstraction `services/derived/memory_indexer/embedder.py` — the wire
-contract (endpoint, payload, auth header, retry policies, dim, shape
-validation) is unchanged, pinned by `services/derived/memory_indexer/embeddings/tests/test_embeddings.py`.
-
-Deliberately does NOT use the `google-genai` SDK: importing it eagerly
-pulls an MCP + ASGI (starlette / uvicorn) + aiohttp stack into the
-process (~50 MB resident) for what is a single HTTPS POST. This module
-runs inside the always-on memory-indexer daemon, and the same import is
-lazily pulled into the gateway on the first `meiva.memory.search`, so that
-weight is paid for the life of both processes. `httpx` is already a core
-dependency. `google-genai` stays installed for `meiva._understand` (media)
-and `langchain-google-genai` (LLM factory), but nothing on the
-indexer / gateway path imports it now.
-
-Billing imports are also lazy: they pull LangChain and OpenTelemetry into the
-always-on indexer only after a successful provider call, never at module load.
-
-API key is read from `GEMINI_API_KEY` env — prod injects it via
-`~/.meiva/.env`.
-
-No module-level httpx client: AsyncClient belongs to its event loop, and this
-module runs in the daemon, gateway and per-test loops. The sync path runs its
-own loop per attempt via asyncio.run with a fresh AsyncClient; it requires a
-thread without a running event loop. Async callers use embed_query_async where
-available, or a worker thread for the sync batch API. Both paths share the
-same cancellation deadline for each attempt, including headers and compressed
-body/framing reads. Sync loop shutdown leaves stalled DNS threads to finish in
-the background. Error statuses are classified at headers, before reading the
-body, preserving permanent failures and Retry-After.
-"""
+# meiva:note
+# Gemini Embedding 2 adapter — direct REST over httpx.
+#
+# The one implementation of the `EmbeddingProvider` contract today (the
+# abstraction deliberately ships no second vendor; a new provider is a new
+# class behind `embeddings.factory`). This is a thin wrapper over the
+# Gemini Developer API `batchEmbedContents` endpoint, moved verbatim from
+# the pre-abstraction `services/derived/memory_indexer/embedder.py` — the wire
+# contract (endpoint, payload, auth header, retry policies, dim, shape
+# validation) is unchanged, pinned by `services/derived/memory_indexer/embeddings/tests/test_embeddings.py`.
+#
+# Deliberately does NOT use the `google-genai` SDK: importing it eagerly
+# pulls an MCP + ASGI (starlette / uvicorn) + aiohttp stack into the
+# process (~50 MB resident) for what is a single HTTPS POST. This module
+# runs inside the always-on memory-indexer daemon, and the same import is
+# lazily pulled into the gateway on the first `meiva.memory.search`, so that
+# weight is paid for the life of both processes. `httpx` is already a core
+# dependency. `google-genai` stays installed for `meiva._understand` (media)
+# and `langchain-google-genai` (LLM factory), but nothing on the
+# indexer / gateway path imports it now.
+#
+# Billing imports are also lazy: they pull LangChain and OpenTelemetry into the
+# always-on indexer only after a successful provider call, never at module load.
+#
+# The API key, the per-attempt timeout and the endpoint are values the caller passes in: the
+# service root reads `GEMINI_API_KEY` (prod injects it via `~/.meiva/.env`) and
+# `MEIVA_EMBED_TIMEOUT_SECONDS` once, and nothing in this module reads configuration.
+#
+# No module-level httpx client: AsyncClient belongs to its event loop, and this
+# module runs in the daemon, gateway and per-test loops. The sync path runs its
+# own loop per attempt via asyncio.run with a fresh AsyncClient; it requires a
+# thread without a running event loop. Async callers use embed_query_async where
+# available, or a worker thread for the sync batch API. Both paths share the
+# same cancellation deadline for each attempt, including headers and compressed
+# body/framing reads. Sync loop shutdown leaves stalled DNS threads to finish in
+# the background. Error statuses are classified at headers, before reading the
+# body, preserving permanent failures and Retry-After.
 
 from __future__ import annotations
 
 import asyncio
 import json
-from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, override
 
@@ -101,32 +101,31 @@ QUERY_EMBED_POLICY = Policy(
 )
 
 
-def worst_case_batch_seconds(timeout_seconds: float) -> float:
-    """Budget for one embed_batch call under EMBED_POLICY.
-
-    Each sync or async attempt runs under an asyncio cancellation deadline equal
-    to the configured timeout. Inter-attempt sleeps allow the greater of the
-    last backoff and the shared Retry-After cap, plus both jitter terms (phase
-    and random span).
-    """
-    attempts = EMBED_POLICY.max_attempts
+# meiva:note
+# Budget for one embed_batch call under `policy` (the document schedule by default).
+#
+# Each sync or async attempt runs under an asyncio cancellation deadline equal
+# to the configured timeout. Inter-attempt sleeps allow the greater of the
+# last backoff and the shared Retry-After cap, plus both jitter terms (phase
+# and random span).
+def worst_case_batch_seconds(timeout_seconds: float, policy: Policy = EMBED_POLICY) -> float:
+    attempts = policy.max_attempts
     request_seconds = attempts * timeout_seconds
     if attempts < 2:
         return request_seconds
-    last_backoff = EMBED_POLICY.backoff(attempts - 2)
-    per_sleep = max(MAX_RETRY_AFTER_RESPECT_S, last_backoff) + 2 * EMBED_POLICY.jitter_span
+    last_backoff = policy.backoff(attempts - 2)
+    per_sleep = max(MAX_RETRY_AFTER_RESPECT_S, last_backoff) + 2 * policy.jitter_span
     return request_seconds + (attempts - 1) * per_sleep
 
 
-def _api_key(api_key_reader: Callable[[], str | None]) -> str:
-    value = api_key_reader()
-    if value is None:
+def _api_key(api_key: str | None) -> str:
+    if api_key is None:
         raise EmbeddingAPIError(
             "GEMINI_API_KEY not set — add GEMINI_API_KEY=<key> to "
             "`~/.meiva/.env`; takes effect after restarting the service "
             "session to reload env."
         )
-    return value
+    return api_key
 
 
 def _payload(texts: list[str], task_type: str) -> dict[str, Any]:
@@ -178,6 +177,7 @@ def _emit_billing(body: dict[str, Any], *, catalog: ModelCatalog) -> None:
 
 async def post_attempt_once(
     client: httpx.AsyncClient,
+    endpoint: str,
     timeout_s: float,
     headers: dict[str, str],
     payload: dict[str, Any],
@@ -185,7 +185,7 @@ async def post_attempt_once(
     """Run one HTTP attempt under the shared cancellation deadline."""
     try:
         async with asyncio.timeout(timeout_s):
-            async with client.stream("POST", ENDPOINT, json=payload, headers=headers) as response:
+            async with client.stream("POST", endpoint, json=payload, headers=headers) as response:
                 # Classify at headers: a slow error body must not hide the status
                 # or Retry-After behind a retryable timeout.
                 if not response.is_success:
@@ -220,8 +220,9 @@ def embed(
     task_type: str,
     *,
     catalog: ModelCatalog,
-    timeout_reader: Callable[[], float],
-    api_key_reader: Callable[[], str | None],
+    timeout_s: float,
+    api_key: str | None,
+    endpoint: str = ENDPOINT,
     policy: Policy = EMBED_POLICY,
 ) -> np.ndarray:
     """Single batched `batchEmbedContents` call with retry; returns
@@ -243,13 +244,12 @@ def embed(
     """
     if not texts:
         return np.empty((0, DIM), dtype=np.float32)
-    headers = {"x-goog-api-key": _api_key(api_key_reader)}
+    headers = {"x-goog-api-key": _api_key(api_key)}
     payload = _payload(texts, task_type)
-    timeout_s = timeout_reader()
 
     async def _attempt() -> dict[str, Any]:
         async with httpx.AsyncClient(timeout=timeout_s) as client:
-            return await post_attempt_once(client, timeout_s, headers, payload)
+            return await post_attempt_once(client, endpoint, timeout_s, headers, payload)
 
     def _call() -> dict[str, Any]:
         try:
@@ -280,8 +280,9 @@ async def embed_async(
     task_type: str,
     *,
     catalog: ModelCatalog,
-    timeout_reader: Callable[[], float],
-    api_key_reader: Callable[[], str | None],
+    timeout_s: float,
+    api_key: str | None,
+    endpoint: str = ENDPOINT,
     policy: Policy = EMBED_POLICY,
 ) -> np.ndarray:
     """Async twin of ``embed`` — native non-blocking I/O over
@@ -293,9 +294,8 @@ async def embed_async(
     as ``embed``: query embeds pass ``QUERY_EMBED_POLICY``."""
     if not texts:
         return np.empty((0, DIM), dtype=np.float32)
-    headers = {"x-goog-api-key": _api_key(api_key_reader)}
+    headers = {"x-goog-api-key": _api_key(api_key)}
     payload = _payload(texts, task_type)
-    timeout_s = timeout_reader()
     try:
         client = httpx.AsyncClient(timeout=timeout_s)
     except httpx.HTTPError as exc:
@@ -306,7 +306,7 @@ async def embed_async(
         async with client:
 
             async def _call() -> dict[str, Any]:
-                return await post_attempt_once(client, timeout_s, headers, payload)
+                return await post_attempt_once(client, endpoint, timeout_s, headers, payload)
 
             body = await aretry(policy)(_call)
     except EmbeddingAPIError:
@@ -340,12 +340,14 @@ class GeminiEmbeddingProvider:
         self,
         catalog: ModelCatalog,
         *,
-        timeout_reader: Callable[[], float],
-        api_key_reader: Callable[[], str | None],
+        timeout_s: float,
+        api_key: str | None,
+        endpoint: str = ENDPOINT,
     ) -> None:
         self._catalog = catalog
-        self._timeout_reader = timeout_reader
-        self._api_key_reader = api_key_reader
+        self._timeout_s = timeout_s
+        self._api_key = api_key
+        self._endpoint = endpoint
 
     def embed_batch(self, texts: list[str]) -> np.ndarray:
         """Batch embed markdown file contents for indexing. (N, DIM) float32."""
@@ -353,8 +355,9 @@ class GeminiEmbeddingProvider:
             texts,
             task_type="RETRIEVAL_DOCUMENT",
             catalog=self._catalog,
-            timeout_reader=self._timeout_reader,
-            api_key_reader=self._api_key_reader,
+            timeout_s=self._timeout_s,
+            api_key=self._api_key,
+            endpoint=self._endpoint,
         )
 
     def embed_query(self, text: str) -> np.ndarray:
@@ -363,8 +366,9 @@ class GeminiEmbeddingProvider:
             [text],
             task_type="RETRIEVAL_QUERY",
             catalog=self._catalog,
-            timeout_reader=self._timeout_reader,
-            api_key_reader=self._api_key_reader,
+            timeout_s=self._timeout_s,
+            api_key=self._api_key,
+            endpoint=self._endpoint,
             policy=QUERY_EMBED_POLICY,
         )[0]
 
@@ -375,8 +379,9 @@ class GeminiEmbeddingProvider:
                 [text],
                 task_type="RETRIEVAL_QUERY",
                 catalog=self._catalog,
-                timeout_reader=self._timeout_reader,
-                api_key_reader=self._api_key_reader,
+                timeout_s=self._timeout_s,
+                api_key=self._api_key,
+                endpoint=self._endpoint,
                 policy=QUERY_EMBED_POLICY,
             )
         )[0]

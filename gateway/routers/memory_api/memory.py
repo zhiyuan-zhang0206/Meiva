@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import subprocess
-from collections.abc import AsyncGenerator, Callable
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
@@ -41,13 +41,6 @@ def unreadable_reports() -> rerank.UnreadableReports:
     return rerank.UnreadableReports()
 
 
-# meiva:note
-# A reader that always answers `value`: the services providers take readers because the
-# indexer daemon rereads live configuration, while one search runs on a fixed snapshot.
-def _constant[T](value: T) -> Callable[[], T]:
-    return lambda: value
-
-
 def build_search_gate(max_concurrency: int) -> asyncio.Semaphore:
     # meiva:link gateway/routers/docs/memory.meiva.okf.md
     return asyncio.Semaphore(max_concurrency)
@@ -64,8 +57,8 @@ def build_embedder(settings: MemorySearchSettings, catalog: ModelCatalog) -> Emb
     return factory.get_provider(
         settings.embedding_backend,
         catalog=catalog,
-        timeout_reader=_constant(settings.embedding_timeout),
-        api_key_reader=_constant(settings.api_key),
+        timeout_s=settings.embedding_timeout,
+        api_key=settings.api_key,
     )
 
 
@@ -95,11 +88,11 @@ async def _backend_topk(
     from services.derived.memory_indexer.backends import factory
 
     return await factory.get_backend(
-        database,
+        inputs.backend,
+        database=database,
         dim=dim,
         fingerprint=fingerprint,
-        name=inputs.backend,
-        uri_reader=_constant(inputs.uri),
+        uri=inputs.uri,
     ).search_topk_async(query_vector, k, timeout=deadline)
 
 
