@@ -21,6 +21,7 @@ import sys
 import tomllib
 from collections.abc import Sequence
 from pathlib import Path
+from typing import cast
 
 # meiva:note
 # A standalone script: the repository root goes on the path before the first import of
@@ -134,15 +135,15 @@ def _root_kinds(rev: str, paths: Sequence[str]) -> dict[str, frozenset[AmbientKi
         raw: object = tomllib.loads(text).get("roots", {})
         if not isinstance(raw, dict):
             raise GitError(f"{manifest}: [roots] must be a table")
-        table: dict[str, object] = raw
+        table = cast("dict[str, object]", raw)
         name = Path(path).name
         value = table.get(name, [])
         if isinstance(value, dict):
-            fields: dict[str, object] = value
+            fields = cast("dict[str, object]", value)
             value = fields.get("kinds")
         if not isinstance(value, list):
             raise GitError(f"{manifest}: [roots] {name!r} must declare kinds")
-        items: list[object] = value
+        items = cast("list[object]", value)
         kinds: set[AmbientKind] = set()
         for item in items:
             if not isinstance(item, str):
