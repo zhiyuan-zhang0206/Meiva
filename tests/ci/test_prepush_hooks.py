@@ -24,7 +24,7 @@ GUARD = ROOT / "scripts/hooks/prepush-guard.sh"
 CHECK = ROOT / "scripts/provision/check_git_hooks.py"
 BRANCH_LINT = ROOT / "scripts/hooks/prepush-branch-lint.sh"
 PYRIGHT_FILES = ROOT / "scripts/hooks/prepush-pyright-files.sh"
-INSTALL = ".venv/bin/pre-commit install --hook-type pre-commit --hook-type pre-push"
+INSTALL = ".venv/bin/pre-commit install --hook-type pre-commit --hook-type pre-push --hook-type commit-msg"
 
 
 @pytest.fixture
@@ -72,7 +72,7 @@ def install_fixture(repo: Path, interpreter: Path | None = None) -> Path:
     if interpreter is None:
         interpreter = repo / ".venv/bin/python"
         interpreter.symlink_to(sys.executable)
-    for hook_type in ("pre-commit", "pre-push"):
+    for hook_type in ("pre-commit", "pre-push", "commit-msg"):
         hook = repo / ".git/hooks" / hook_type
         hook.write_text(
             "#!/usr/bin/env bash\n"
@@ -87,7 +87,7 @@ def install_fixture(repo: Path, interpreter: Path | None = None) -> Path:
 
 def test_stage_contract() -> None:
     config = yaml.safe_load((ROOT / ".pre-commit-config.yaml").read_text())
-    assert config["default_install_hook_types"] == ["pre-commit", "pre-push"]
+    assert config["default_install_hook_types"] == ["pre-commit", "pre-push", "commit-msg"]
     hooks = {hook["id"]: hook for repo in config["repos"] for hook in repo["hooks"]}
     for name in ("frontend-tsc", "frontend-eslint-full", "frontend-vitest"):
         hook = hooks[name]
@@ -707,7 +707,7 @@ def test_machine_scan_reports_drifted_checkout(tmp_path: Path) -> None:
     result = _scan(home)
     assert result.returncode == 1
     assert "points into a disposable worktree" in result.stdout
-    assert "hook check: 2 problem(s) across 2 clone(s)" in result.stdout
+    assert "hook check: 3 problem(s) across 2 clone(s)" in result.stdout
 
 
 def test_machine_scan_reports_missing_hooks(tmp_path: Path) -> None:
@@ -715,8 +715,8 @@ def test_machine_scan_reports_missing_hooks(tmp_path: Path) -> None:
     _init_checkout(home / "Meiva")  # hooks dir holds only the samples
     result = _scan(home)
     assert result.returncode == 1
-    assert result.stdout.count("missing or non-executable") == 2
-    assert "hook check: 2 problem(s) across 1 clone(s)" in result.stdout
+    assert result.stdout.count("missing or non-executable") == 3
+    assert "hook check: 3 problem(s) across 1 clone(s)" in result.stdout
 
 
 def test_machine_scan_dedupes_linked_worktrees(tmp_path: Path) -> None:
