@@ -224,6 +224,8 @@ async def test_a_priced_session_reports_turn_and_cumulative_cost(tmp_path: Path)
                 cache_miss=0.60,
                 cache_hit=0.15,
                 output=2.50,
+                cache_write_5m=0.60,
+                cache_write_1h=1.20,
                 source_url="https://platform.moonshot.ai/docs/pricing/chat",
                 source_checked_at="2026-09-20",
                 vendor="moonshot",
@@ -233,13 +235,13 @@ async def test_a_priced_session_reports_turn_and_cumulative_cost(tmp_path: Path)
     )
     harness = await start(tmp_path, prices=prices)
     try:
-        usage_log(tmp_path, "session-1", turn=1, other=800, out=500, read=200)
+        usage_log(tmp_path, "session-1", turn=1, other=800, out=500, read=200, write=100)
         first = await harness.session.submit("hello").outcome()
         assert first.cost_usd is not None and first.cost_usd > 0
         [completed] = harness.of(TurnCompleted)
         assert completed.cost_usd == first.cost_usd
         assert completed.cumulative_cost_usd == first.cost_usd
-        usage_log(tmp_path, "session-1", turn=2, other=1600, out=1000, read=400)
+        usage_log(tmp_path, "session-1", turn=2, other=1600, out=1000, read=400, write=200)
         second = await harness.session.submit("again").outcome()
         assert second.cost_usd is not None and second.cost_usd > first.cost_usd
         assert harness.session.totals.cost_usd == pytest.approx(first.cost_usd + second.cost_usd)
