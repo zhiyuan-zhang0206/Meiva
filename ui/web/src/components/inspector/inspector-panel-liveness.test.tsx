@@ -1,4 +1,4 @@
-import { QueryClientProvider, useQuery } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import {
   act,
   fireEvent,
@@ -25,6 +25,7 @@ import {
   listPages,
   liveFixture,
   putSetting,
+  QueryClientProvider,
   render,
   resolveNotice,
   rosterFixture,

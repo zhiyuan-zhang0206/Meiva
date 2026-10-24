@@ -9,7 +9,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { startTransition, useCallback, useEffect, useLayoutEffect, useRef } from "react";
 
-import { api } from "../transport/api";
+import { useApi } from "../transport/transport-context";
 import { useAgentReconcile } from "../agents/agent-reconcile";
 import { useDisplayLimit } from "../format/display-limits";
 import { useAgentReadRepair } from "../agents/use-agent-read-repair";
@@ -114,6 +114,7 @@ export function useTimeline(
   showError: (msg: string) => void,
   agentStatus?: string,
 ): UseTimelineResult {
+  const api = useApi();
   const queryClient = useQueryClient();
 
   const { isVisible } = useAgentReadRepair("timeline", agentId);
@@ -443,7 +444,7 @@ export function useTimeline(
       showError(`Failed to load older messages: ${errMsg(e)}`);
       return "failed";
     }
-  }, [agentId, isVisible, beginLoadOlder, prependOlder, showError, olderBaseLimit]);
+  }, [api, agentId, isVisible, beginLoadOlder, prependOlder, showError, olderBaseLimit]);
   const loadOlder = useCallback(() => {
     void loadOlderSegment();
   }, [loadOlderSegment]);

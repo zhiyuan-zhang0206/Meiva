@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { api } from "@/lib/transport/api";
-import { ComposerMock, hooksState, inspectorMockState, makeAgent, resetHomePageTestState, wrap } from "./page-test-mock";
+import { ComposerMock, gatewayWrapper, hooksState, inspectorMockState, makeAgent, resetHomePageTestState, wrap } from "./page-test-mock";
 vi.mock("@/lib/agents/use-agents", () => ({
   useAgents: () => ({
     agents: hooksState.agents,
@@ -182,6 +182,7 @@ describe("sidebar app-entry reset", () => {
       <QueryClientProvider client={queryClient}>
         <HomePage />
       </QueryClientProvider>,
+      { wrapper: gatewayWrapper },
     );
     expect(hooksState.setSetting).not.toHaveBeenCalled();
     hooksState.settings = {

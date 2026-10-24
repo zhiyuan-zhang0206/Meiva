@@ -10,84 +10,34 @@
 // EventSource, exactly like use-agents.test.ts.
 
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
-import React from "react";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClient } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { api } from "../transport/api";
-import { AuthProvider } from "../auth/auth-context";
-import type { NoticesFeed } from "../contracts/types";
+import type { NoticeItem, NoticesFeed } from "../contracts/types";
+import { fakeApi } from "../transport/tests/api/fake-api";
+import { eventStreamHarness, type EventStreamHarness } from "../transport/tests/stream/event-stream-harness";
 import {
   NOTICES_QUERY_KEY,
-  NOTICES_RESOLVED_QUERY_KEY,
   dropTombstonesResetForTest,
   dropOpenNotices,
   useNotices,
   type NoticesFeedWire,
 } from "./use-notices";
-import { EventStreamProvider } from "../transport/useEventStream";
 
-vi.mock("../transport/api", () => ({
-  API_BASE: "http://api.test",
-  api: { getNotices: vi.fn(), checkAuth: vi.fn() },
-}));
-
-// EventSource is unavailable in happy-dom; stub a minimal one so the real
-// <EventStreamProvider> (which hosts the R4 fold) can construct. Tests drive
-// the fold by pushing frames through the stub, like use-agents.test.ts.
-let lastEventSource: StubEventSource | null = null;
-class StubEventSource {
-  static readonly CONNECTING = 0;
-  static readonly OPEN = 1;
-  static readonly CLOSED = 2;
-  readyState = StubEventSource.CONNECTING;
-  onopen: ((this: EventSource, ev: Event) => unknown) | null = null;
-  onmessage: ((this: EventSource, ev: MessageEvent) => unknown) | null = null;
-  onerror: ((this: EventSource, ev: Event) => unknown) | null = null;
-  constructor(public url: string, _init?: EventSourceInit) {
-    // eslint-disable-next-line @typescript-eslint/no-this-alias -- record latest instance
-    lastEventSource = this;
-  }
-  close(): void {
-    this.readyState = StubEventSource.CLOSED;
-  }
-  /* eslint-disable @typescript-eslint/no-empty-function -- EventSource interface conformance */
-  addEventListener(): void {}
-  removeEventListener(): void {}
-  /* eslint-enable @typescript-eslint/no-empty-function */
-  dispatchEvent(): boolean {
-    return true;
-  }
+function notice(id: number, title: string): NoticeItem {
+  return {
+    id,
+    agent_id: 1,
+    agent_label: null,
+    title,
+    content: null,
+    priority: "P2",
+    require_response: false,
+    blocking: false,
+    created_at: "2026-06-14T00:00:00Z",
+    expire_at: "2026-06-15T00:00:00Z",
+  };
 }
-
-/** Drive the most recently constructed StubEventSource as if the server
- * pushed a frame — the fold inside the Provider reconciles it. */
-function deliverSseMessage(payload: unknown): void {
-  if (!lastEventSource) throw new Error("no EventSource constructed yet");
-  const handler = lastEventSource.onmessage;
-  if (!handler) throw new Error("EventSource.onmessage not yet wired");
-  act(() => {
-    handler.call(
-      lastEventSource as unknown as EventSource,
-      { data: JSON.stringify(payload) } as MessageEvent,
-    );
-  });
-}
-
-/** Drive the stub as if the server (re)opened the connection — the fold
- * owner's central reconcile (invalidate-all) fires. */
-function fireOpen(): void {
-  if (!lastEventSource) throw new Error("no EventSource constructed yet");
-  act(() => {
-    lastEventSource?.onopen?.call(
-      lastEventSource as unknown as EventSource,
-      new Event("open"),
-    );
-  });
-}
-
-const OPEN_KEY = JSON.stringify(NOTICES_QUERY_KEY);
-const RESOLVED_KEY = JSON.stringify(NOTICES_RESOLVED_QUERY_KEY);
 
 function feed(over: Partial<NoticesFeed> = {}): NoticesFeed {
   return {
@@ -99,158 +49,158 @@ function feed(over: Partial<NoticesFeed> = {}): NoticesFeed {
   };
 }
 
+interface CursorRead {
+  beforeAt?: string;
+  beforeId?: number;
+}
+
+// meiva:note
+// The gateway's notice store as one in-memory service. Every read answers from the
+// store as it is when the read starts, so a test changes the lists between reads
+// the way the server's state changes. The open queue reads without parameters and
+// the resolved history always reads with a parameter object, which is how a
+// failure is aimed at one of the two. A read that carries a cursor gets the older
+// page, and `cursorReads` keeps those cursors.
+class NoticeDesk {
+  open: NoticeItem[] = [];
+  awaiting: NoticeItem[] = [];
+  resolved: NoticeItem[] = [];
+  nextCursor: NoticesFeed["next_cursor"] = null;
+  older: NoticeItem[] = [];
+  feedFails = false;
+  historyFails = false;
+  readonly cursorReads: CursorRead[] = [];
+  readonly api = fakeApi({ getNotices: (params) => this.read(params) });
+
+  private read(params?: CursorRead): Promise<NoticesFeed> {
+    if (params === undefined) {
+      if (this.feedFails) return Promise.reject(new Error("boom"));
+    } else if (this.historyFails) {
+      return Promise.reject(new Error("boom"));
+    }
+    if (params?.beforeAt != null) {
+      this.cursorReads.push({ ...params });
+      return Promise.resolve(feed({ resolved_page: this.older }));
+    }
+    return Promise.resolve(feed({
+      open: this.open,
+      awaiting: this.awaiting,
+      resolved_page: this.resolved,
+      next_cursor: this.nextCursor,
+    }));
+  }
+}
+
 let queryClient: QueryClient;
+let desk: NoticeDesk;
+let stream: EventStreamHarness;
+
 beforeEach(() => {
-  vi.clearAllMocks();
   dropTombstonesResetForTest();
-  lastEventSource = null;
-  vi.mocked(api.getNotices).mockResolvedValue(feed());
-  vi.mocked(api.checkAuth).mockResolvedValue({ authenticated: true });
+  desk = new NoticeDesk();
   queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  stream = eventStreamHarness({ api: desk.api, queryClient, wallNow: () => Date.now() });
 });
 afterEach(() => {
   cleanup();
-  lastEventSource = null;
+  vi.useRealTimers();
 });
 
-vi.stubGlobal("EventSource", StubEventSource);
-
-function wrapper({ children }: { children: React.ReactNode }) {
-  // The R4 fold lives inside the real EventStreamProvider — the wrapper
-  // mirrors the app root (AuthProvider ⊃ QueryClientProvider ⊃ EventStreamProvider).
-  return React.createElement(
-    AuthProvider,
-    null,
-    React.createElement(
-      QueryClientProvider,
-      { client: queryClient },
-      React.createElement(EventStreamProvider, null, children),
-    ),
-  );
+async function settle(): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, 250));
 }
 
-async function waitForEventSource(): Promise<void> {
-  await waitFor(() => expect(lastEventSource).not.toBeNull());
+function ids(items: readonly NoticeItem[]): number[] {
+  return items.map((n) => n.id);
+}
+
+function openIds(): number[] | undefined {
+  return queryClient.getQueryData<NoticesFeedWire>(NOTICES_QUERY_KEY)?.open.map((n) => n.id);
 }
 
 describe("useNotices", () => {
   it("fetches the unified feed on mount and splits open/awaiting/resolved", async () => {
-    vi.mocked(api.getNotices).mockResolvedValue(
-      feed({
-        open: [{ id: 1, title: "fyi" } as never],
-        awaiting: [{ id: 2, title: "decision" } as never],
-        resolved_page: [{ id: 3, title: "done" } as never],
-      }),
-    );
-    const { result } = renderHook(() => useNotices(), { wrapper });
-    await waitFor(() => expect(result.current.open.map((n) => n.id)).toEqual([1]));
-    expect(result.current.awaiting.map((n) => n.id)).toEqual([2]);
-    expect(result.current.resolved.map((n) => n.id)).toEqual([3]);
+    desk.open = [notice(1, "fyi")];
+    desk.awaiting = [notice(2, "decision")];
+    desk.resolved = [notice(3, "done")];
+    const { result } = renderHook(() => useNotices(), { wrapper: stream.wrapper });
+    await waitFor(() => expect(ids(result.current.open)).toEqual([1]));
+    expect(ids(result.current.awaiting)).toEqual([2]);
+    expect(ids(result.current.resolved)).toEqual([3]);
   });
 
   it("notice_resolved invalidates BOTH the open queue and the resolved history", async () => {
-    renderHook(() => useNotices(), { wrapper });
-    await waitFor(() => expect(api.getNotices).toHaveBeenCalled());
-    await waitForEventSource();
-    const spy = vi.spyOn(queryClient, "invalidateQueries");
+    desk.open = [notice(7, "fyi")];
+    const { result } = renderHook(() => useNotices(), { wrapper: stream.wrapper });
+    await waitFor(() => expect(ids(result.current.open)).toEqual([7]));
+    await stream.whenSourceExists();
 
-    // The fold owner debounces invalidations by key family (2s) — advance
-    // the timer so the invalidate calls land.
-    vi.useFakeTimers();
-    try {
-      deliverSseMessage({ role: "notice_resolved", agent_id: 1, notice_id: 7 });
-      act(() => {
-        vi.advanceTimersByTime(2_000);
-      });
-    } finally {
-      vi.useRealTimers();
-    }
+    desk.open = [];
+    desk.resolved = [notice(7, "fyi")];
+    stream.deliver({ role: "notice_resolved", agent_id: 1, notice_id: 7 });
 
-    const keys = spy.mock.calls.map((c) => JSON.stringify(c[0]?.queryKey));
-    expect(keys).toContain(OPEN_KEY);
-    expect(keys).toContain(RESOLVED_KEY);
+    await waitFor(() => expect(ids(result.current.open)).toEqual([]));
+    await waitFor(() => expect(ids(result.current.resolved)).toEqual([7]));
   });
 
   it("notice_posted invalidates only the open queue, not the resolved history", async () => {
-    renderHook(() => useNotices(), { wrapper });
-    await waitFor(() => expect(api.getNotices).toHaveBeenCalled());
-    await waitForEventSource();
-    const spy = vi.spyOn(queryClient, "invalidateQueries");
+    desk.resolved = [notice(5, "done")];
+    const { result } = renderHook(() => useNotices(), { wrapper: stream.wrapper });
+    await waitFor(() => expect(ids(result.current.resolved)).toEqual([5]));
+    await stream.whenSourceExists();
 
-    vi.useFakeTimers();
-    try {
-      deliverSseMessage({ role: "notice_posted", agent_id: 1, notice_id: 8, priority: "P2", title: "fyi", task_id: null });
-      act(() => {
-        vi.advanceTimersByTime(2_000);
-      });
-    } finally {
-      vi.useRealTimers();
-    }
+    desk.open = [notice(8, "fyi")];
+    desk.resolved = [notice(5, "done"), notice(9, "unrequested")];
+    stream.deliver({ role: "notice_posted", agent_id: 1, notice_id: 8, priority: "P2", title: "fyi", task_id: null });
 
-    const keys = spy.mock.calls.map((c) => JSON.stringify(c[0]?.queryKey));
-    expect(keys).toContain(OPEN_KEY);
-    expect(keys).not.toContain(RESOLVED_KEY);
+    await waitFor(() => expect(ids(result.current.open)).toEqual([8]));
+    await settle();
+    expect(ids(result.current.resolved)).toEqual([5]);
   });
 
   it("reconnect (open) refetches both the open queue and the resolved history", async () => {
-    const { result } = renderHook(() => useNotices(), { wrapper });
+    const { result } = renderHook(() => useNotices(), { wrapper: stream.wrapper });
     await waitFor(() => expect(result.current.isLoading).toBe(false));
-    await waitForEventSource();
-    const before = [...vi.mocked(api.getNotices).mock.calls];
+    await stream.whenSourceExists();
 
-    fireOpen();
+    desk.open = [notice(1, "missed fyi")];
+    desk.resolved = [notice(2, "missed history")];
+    stream.open();
 
-    // Both readers issue their real requests again. The contract concerns
-    // repaired read models, not the scheduler's invalidateQueries arguments.
-    await waitFor(() => {
-      const after = vi.mocked(api.getNotices).mock.calls.slice(before.length);
-      for (const request of before) expect(after).toContainEqual(request);
-      expect(after.length).toBeGreaterThanOrEqual(2);
-    });
+    await waitFor(() => expect(ids(result.current.open)).toEqual([1]));
+    await waitFor(() => expect(ids(result.current.resolved)).toEqual([2]));
   });
 
   // Audit C3: failures must surface (stale-while-error), not silently degrade
   // to an empty list — the queue cannot distinguish "empty" from "broken".
   it("a failed open-queue fetch surfaces error=true with an empty list", async () => {
-    vi.mocked(api.getNotices).mockRejectedValue(new Error("boom"));
-    const { result } = renderHook(() => useNotices(), { wrapper });
+    desk.feedFails = true;
+    const { result } = renderHook(() => useNotices(), { wrapper: stream.wrapper });
     await waitFor(() => expect(result.current.error).toBe(true));
     expect(result.current.open).toEqual([]);
     expect(result.current.awaiting).toEqual([]);
   });
 
   it("a failed resolved-history fetch surfaces resolvedError=true with an empty list", async () => {
-    vi.mocked(api.getNotices).mockRejectedValueOnce(feed({ resolved_page: [] as never }));
-    const { result } = renderHook(() => useNotices(), { wrapper });
-    await waitFor(() => expect(result.current.resolvedError).toBe(false));
+    desk.open = [notice(1, "fyi")];
+    desk.historyFails = true;
+    const { result } = renderHook(() => useNotices(), { wrapper: stream.wrapper });
+    await waitFor(() => expect(result.current.resolvedError).toBe(true));
+    expect(result.current.resolved).toEqual([]);
+    expect(result.current.error).toBe(false);
+    expect(ids(result.current.open)).toEqual([1]);
   });
 
   it("resolved history pages append via next_cursor", async () => {
-    // The client pins no page sizes any more (server defaults, task #3696):
-    // every non-cursor call (the feed query and the resolved first page) gets
-    // the first page; the cursor call is the one carrying beforeAt/beforeId.
-    const firstPage = feed({
-      resolved_page: [{ id: 5, title: "newest" } as never],
-      next_cursor: { before_at: "2026-06-14T02:00:00Z", before_id: 5 },
-    });
-    const secondPage = feed({
-      resolved_page: [{ id: 4, title: "older" } as never],
-      next_cursor: null,
-    });
-    vi.mocked(api.getNotices).mockImplementation((params) => {
-      if (params?.beforeAt != null) return Promise.resolve(secondPage);
-      return Promise.resolve(firstPage);
-    });
-    const { result } = renderHook(() => useNotices(), { wrapper });
-    await waitFor(() => expect(result.current.resolved.map((n) => n.id)).toEqual([5]));
+    desk.resolved = [notice(5, "newest")];
+    desk.nextCursor = { before_at: "2026-06-14T02:00:00Z", before_id: 5 };
+    desk.older = [notice(4, "older")];
+    const { result } = renderHook(() => useNotices(), { wrapper: stream.wrapper });
+    await waitFor(() => expect(ids(result.current.resolved)).toEqual([5]));
     act(() => result.current.fetchNextPage());
-    await waitFor(() => expect(result.current.resolved.map((n) => n.id)).toEqual([5, 4]));
-    // cursor passed back to the api layer for the next page
-    const cursorCalls = vi
-      .mocked(api.getNotices)
-      .mock.calls.filter((c) => c[0]?.beforeAt != null);
-    expect(cursorCalls).toHaveLength(1);
-    expect(cursorCalls[0][0]).toMatchObject({
+    await waitFor(() => expect(ids(result.current.resolved)).toEqual([5, 4]));
+    expect(desk.cursorReads).toHaveLength(1);
+    expect(desk.cursorReads[0]).toMatchObject({
       beforeAt: "2026-06-14T02:00:00Z",
       beforeId: 5,
     });
@@ -308,15 +258,7 @@ describe("dropOpenNotices (Task #1814)", () => {
     let release!: () => void;
     const inFlight = new Promise<NoticesFeed>((resolve) => {
       release = () =>
-        resolve({
-          open: [
-            { id: 1, title: "resolved" },
-            { id: 2, title: "next" },
-          ],
-          awaiting: [],
-          resolved_page: [],
-          next_cursor: null,
-        } as unknown as NoticesFeed);
+        resolve(feed({ open: [notice(1, "resolved"), notice(2, "next")] }));
     });
     let fetches = 0;
     const fetchPromise = queryClient.query({
@@ -333,63 +275,53 @@ describe("dropOpenNotices (Task #1814)", () => {
 
     // The user resolves notice 1 while that refetch is in flight.
     dropOpenNotices(queryClient, [1]);
-    expect(
-      queryClient.getQueryData<NoticesFeedWire>(NOTICES_QUERY_KEY)?.open.map((n) => n.id),
-    ).toEqual([2]);
+    expect(openIds()).toEqual([2]);
 
     release();
     // Wait for the fetch to SETTLE before asserting — checking too early would
     // pass before a late stale snapshot lands.
     await vi.waitFor(() => expect(queryClient.isFetching({ queryKey: NOTICES_QUERY_KEY })).toBe(0));
     expect(fetches).toBe(1);
-    expect(
-      queryClient.getQueryData<NoticesFeedWire>(NOTICES_QUERY_KEY)?.open.map((n) => n.id),
-    ).toEqual([2]);
+    expect(openIds()).toEqual([2]);
   });
 
   it("hides a snapshot initiated after the drop until the server stops listing the row (task #3272)", async () => {
-    const preResolve = feed({
-      open: [{ id: 1, title: "a" } as never, { id: 2, title: "b" } as never],
-    });
-    vi.mocked(api.getNotices).mockResolvedValue(preResolve);
-    queryClient.setQueryData(NOTICES_QUERY_KEY, preResolve);
-    const { result } = renderHook(() => useNotices(), { wrapper });
-    await waitFor(() => expect(result.current.open.map((n) => n.id)).toEqual([1, 2]));
+    desk.open = [notice(1, "a"), notice(2, "b")];
+    queryClient.setQueryData(NOTICES_QUERY_KEY, feed({ open: desk.open }));
+    const { result } = renderHook(() => useNotices(), { wrapper: stream.wrapper });
+    await waitFor(() => expect(ids(result.current.open)).toEqual([1, 2]));
 
     // The user resolves notice 1 (optimistic drop + tombstone).
     dropOpenNotices(queryClient, [1]);
-    expect(queryClient.getQueryData<NoticesFeedWire>(NOTICES_QUERY_KEY)?.open.map((n) => n.id)).toEqual([2]);
+    expect(openIds()).toEqual([2]);
 
     // A refetch STARTING after the drop still returns the pre-resolve
     // snapshot (the server has not processed the resolve yet) — the row must
     // stay hidden.
     await queryClient.refetchQueries({ queryKey: NOTICES_QUERY_KEY });
-    expect(queryClient.getQueryData<NoticesFeedWire>(NOTICES_QUERY_KEY)?.open.map((n) => n.id)).toEqual([2]);
+    expect(openIds()).toEqual([2]);
 
     // The post-resolve snapshot no longer lists the row: the tombstone
     // retires, so a later snapshot is trusted again.
-    vi.mocked(api.getNotices).mockResolvedValue(feed({ open: [{ id: 2, title: "b" } as never] }));
+    desk.open = [notice(2, "b")];
     await queryClient.refetchQueries({ queryKey: NOTICES_QUERY_KEY });
-    vi.mocked(api.getNotices).mockResolvedValue(preResolve);
+    desk.open = [notice(1, "a"), notice(2, "b")];
     await queryClient.refetchQueries({ queryKey: NOTICES_QUERY_KEY });
-    expect(queryClient.getQueryData<NoticesFeedWire>(NOTICES_QUERY_KEY)?.open.map((n) => n.id)).toEqual([1, 2]);
+    expect(openIds()).toEqual([1, 2]);
   });
 
   it("an expired tombstone stops hiding a row the server keeps listing (task #3272)", async () => {
-    const stillOpen = feed({ open: [{ id: 7, title: "a" } as never] });
-    vi.mocked(api.getNotices).mockResolvedValue(stillOpen);
-    queryClient.setQueryData(NOTICES_QUERY_KEY, stillOpen);
-    renderHook(() => useNotices(), { wrapper });
-    await waitFor(() =>
-      expect(queryClient.getQueryData<NoticesFeedWire>(NOTICES_QUERY_KEY)?.open.map((n) => n.id)).toEqual([7]),
-    );
+    desk.open = [notice(7, "a")];
+    queryClient.setQueryData(NOTICES_QUERY_KEY, feed({ open: desk.open }));
+    renderHook(() => useNotices(), { wrapper: stream.wrapper });
+    await waitFor(() => expect(openIds()).toEqual([7]));
 
     dropOpenNotices(queryClient, [7]);
-    const nowSpy = vi.spyOn(Date, "now").mockReturnValue(Date.now() + 20_000);
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(Date.now() + 20_000);
     await queryClient.refetchQueries({ queryKey: NOTICES_QUERY_KEY });
-    nowSpy.mockRestore();
     // Past the 15s bound the guard releases: a resolve that never landed
     // server-side cannot hide an open row forever.
-    expect(queryClient.getQueryData<NoticesFeedWire>(NOTICES_QUERY_KEY)?.open.map((n) => n.id)).toEqual([7]);
+    expect(openIds()).toEqual([7]);
   });
 });

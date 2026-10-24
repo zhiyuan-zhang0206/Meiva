@@ -17,7 +17,8 @@ before, on means the browser holds one socket per tab instead of three.
   empty or a single channel returns the browser to the per-channel endpoints)
   and reads the setting. Switch on with an empty set is a half state; it is
   warned about once and treated as "do not merge".
-- `lib/transport/sse-share.ts` opens that one source wherever the lock holder
+- `lib/transport/stream/sse-share.ts` (URL and frame decisions in
+  `stream/share-plan.ts`) opens that one source wherever the lock holder
   would have opened three, maps each wire channel to the logical channel its
   subscribers already use, and keeps the payload shape they parse (an object for
   `system`/`alerts`, the batch array for `systemAll`). With no

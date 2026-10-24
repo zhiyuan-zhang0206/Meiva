@@ -1,14 +1,13 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { ConnectionEvent } from "../useEventStream";
-import { useEventStream } from "../useEventStream";
+import type { ConnectionEvent } from "../../useEventStream";
+import { useEventStream } from "../../useEventStream";
 import type { EventStreamTestContext } from "./use-event-stream-context";
 
 export function registerEventStreamProviderTests(ctx: EventStreamTestContext): void {
   const {
-    MockEventSource,
-    deferredAuthResult,
+    READY,
     expectInstance,
     waitForInstance,
     withProvider,
@@ -21,7 +20,7 @@ describe("EventStreamProvider onerror three-way readyState dispatch", () => {
 
     renderHook(() => useEventStream(vi.fn(), onConn), { wrapper: withProvider() });
     await waitForInstance();
-    act(() => expectInstance().fireErrorWithReadyState(MockEventSource.CLOSED));
+    act(() => expectInstance().error(READY.CLOSED));
     await act(async () => {
       await Promise.resolve();
     });
@@ -34,7 +33,7 @@ describe("EventStreamProvider onerror three-way readyState dispatch", () => {
 
     renderHook(() => useEventStream(vi.fn(), onConn), { wrapper: withProvider() });
     await waitForInstance();
-    act(() => expectInstance().fireErrorWithReadyState(MockEventSource.CONNECTING));
+    act(() => expectInstance().error(READY.CONNECTING));
 
     expect(onConn).toHaveBeenCalledWith({ type: "reconnecting" });
   });
@@ -45,9 +44,9 @@ describe("EventStreamProvider onerror three-way readyState dispatch", () => {
     renderHook(() => useEventStream(vi.fn(), onConn), { wrapper: withProvider() });
     await waitForInstance();
     act(() => {
-      expectInstance().fireOpen();
+      expectInstance().open();
       onConn.mockClear();
-      expectInstance().fireErrorWithReadyState(MockEventSource.OPEN);
+      expectInstance().error(READY.OPEN);
     });
 
     expect(onConn).not.toHaveBeenCalled();
@@ -59,14 +58,14 @@ describe("EventStreamProvider onerror three-way readyState dispatch", () => {
     renderHook(() => useEventStream(vi.fn(), onConn), { wrapper: withProvider() });
     await waitForInstance();
     expect(() => {
-      act(() => expectInstance().fireErrorWithReadyState(99));
+      act(() => expectInstance().error(99));
     }).toThrow(/unknown EventSource readyState: 99/);
   });
 });
 
 describe("EventStreamProvider auth-gated connection", () => {
   it("unauthenticated → no EventSource is constructed", async () => {
-    ctx.checkAuthMock.mockResolvedValue({ authenticated: false });
+    ctx.auth.always({ authenticated: false });
 
     const { result } = renderHook(() => useAuth().status, { wrapper: withProvider() });
 
@@ -88,8 +87,8 @@ describe("EventStreamProvider auth-gated connection", () => {
       await waitFor(() => expect(result.current).toBe("authenticated"));
 
       vi.useFakeTimers();
-      ctx.checkAuthMock.mockResolvedValue({ authenticated: false });
-      act(() => first.fireErrorWithReadyState(MockEventSource.CLOSED));
+      ctx.auth.always({ authenticated: false });
+      act(() => first.error(READY.CLOSED));
       await act(async () => {
         await Promise.resolve();
       });
@@ -107,11 +106,9 @@ describe("EventStreamProvider auth-gated connection", () => {
   });
 
   it("a late invalid CLOSED probe cannot invalidate a replacement provider", async () => {
-    const staleProbe = deferredAuthResult();
-    ctx.checkAuthMock
-      .mockResolvedValueOnce({ authenticated: true })
-      .mockReturnValueOnce(staleProbe.promise)
-      .mockResolvedValueOnce({ authenticated: true });
+    ctx.auth.once({ authenticated: true });
+    const staleProbe = ctx.auth.onceDeferred();
+    ctx.auth.once({ authenticated: true });
 
     const firstMount = renderHook(
       () => {
@@ -122,7 +119,7 @@ describe("EventStreamProvider auth-gated connection", () => {
     );
     await waitFor(() => expect(firstMount.result.current).toBe("authenticated"));
     await waitForInstance();
-    act(() => expectInstance().fireErrorWithReadyState(MockEventSource.CLOSED));
+    act(() => expectInstance().error(READY.CLOSED));
     firstMount.unmount();
 
     ctx.resetInstances();
@@ -138,13 +135,13 @@ describe("EventStreamProvider auth-gated connection", () => {
     const replacementSource = expectInstance();
 
     await act(async () => {
-      staleProbe.resolve({ authenticated: false });
-      await staleProbe.promise;
+      staleProbe.release({ authenticated: false });
+      await Promise.resolve();
     });
 
     expect(replacement.result.current).toBe("authenticated");
     expect(expectInstance()).toBe(replacementSource);
-    expect(replacementSource.readyState).not.toBe(MockEventSource.CLOSED);
+    expect(replacementSource.readyState).not.toBe(READY.CLOSED);
   });
 });
 
@@ -160,12 +157,12 @@ describe("EventStreamProvider connect-failure backoff retry", () => {
 
     vi.useFakeTimers();
     act(() => {
-      first.fireOpen();
-      first.fireMessage("{");
-      first.fireMessage("{");
-      first.fireMessage("{");
+      first.open();
+      first.frame("{");
+      first.frame("{");
+      first.frame("{");
     });
-    expect(first.readyState).toBe(MockEventSource.CLOSED);
+    expect(first.readyState).toBe(READY.CLOSED);
     act(() => { vi.advanceTimersByTime(999); });
     expect(expectInstance()).toBe(first);
     act(() => { vi.advanceTimersByTime(1); });
@@ -180,7 +177,7 @@ describe("EventStreamProvider connect-failure backoff retry", () => {
     vi.useFakeTimers();
     const first = expectInstance();
 
-    act(() => first.fireErrorWithReadyState(MockEventSource.CLOSED));
+    act(() => first.error(READY.CLOSED));
     await act(async () => {
       await Promise.resolve();
     });
@@ -200,7 +197,7 @@ describe("EventStreamProvider connect-failure backoff retry", () => {
     vi.useFakeTimers();
     const first = expectInstance();
 
-    act(() => first.fireErrorWithReadyState(MockEventSource.CONNECTING));
+    act(() => first.error(READY.CONNECTING));
     act(() => {
       vi.advanceTimersByTime(60_000);
     });
@@ -213,7 +210,7 @@ describe("EventStreamProvider connect-failure backoff retry", () => {
     vi.useFakeTimers();
     const first = expectInstance();
 
-    act(() => first.fireErrorWithReadyState(MockEventSource.CLOSED));
+    act(() => first.error(READY.CLOSED));
     await act(async () => {
       await Promise.resolve();
     });
@@ -223,7 +220,7 @@ describe("EventStreamProvider connect-failure backoff retry", () => {
     const second = expectInstance();
     expect(second).not.toBe(first);
 
-    act(() => second.fireErrorWithReadyState(MockEventSource.CLOSED));
+    act(() => second.error(READY.CLOSED));
     await act(async () => {
       await Promise.resolve();
     });
@@ -243,7 +240,7 @@ describe("EventStreamProvider connect-failure backoff retry", () => {
     vi.useFakeTimers();
     const first = expectInstance();
 
-    act(() => first.fireErrorWithReadyState(MockEventSource.CLOSED));
+    act(() => first.error(READY.CLOSED));
     await act(async () => {
       await Promise.resolve();
     });
@@ -252,9 +249,9 @@ describe("EventStreamProvider connect-failure backoff retry", () => {
     });
     const second = expectInstance();
 
-    act(() => second.fireOpen());
+    act(() => second.open());
 
-    act(() => second.fireErrorWithReadyState(MockEventSource.CLOSED));
+    act(() => second.error(READY.CLOSED));
     await act(async () => {
       await Promise.resolve();
     });
@@ -274,10 +271,10 @@ describe("EventStreamProvider cleanup + thread switch", () => {
     await waitForInstance();
     const first = expectInstance();
     expect(first.url).toContain("/api/system");
-    expect(first.readyState).toBe(MockEventSource.CONNECTING);
+    expect(first.readyState).toBe(READY.CONNECTING);
 
     unmount();
-    expect(first.readyState).toBe(MockEventSource.CLOSED);
+    expect(first.readyState).toBe(READY.CLOSED);
 
     renderHook(() => useEventStream(vi.fn(), vi.fn()), { wrapper: withProvider() });
     await waitForInstance();
@@ -299,8 +296,8 @@ describe("EventStreamProvider cleanup + thread switch", () => {
 
     const inst = expectInstance();
     act(() => {
-      inst.fireOpen();
-      inst.fireMessage(JSON.stringify({ role: "llm_done", agent_id: 42 }));
+      inst.open();
+      inst.frame(JSON.stringify({ role: "llm_done", agent_id: 42 }));
     });
 
     expect(onSystem1).toHaveBeenCalledWith({ role: "llm_done", agent_id: 42 });
@@ -316,8 +313,8 @@ describe("EventStreamProvider heartbeat frame", () => {
     renderHook(() => useEventStream(onSystem, onConn), { wrapper: withProvider() });
     await waitForInstance();
     act(() => {
-      expectInstance().fireOpen();
-      expectInstance().fireMessage(JSON.stringify({ role: "heartbeat" }));
+      expectInstance().open();
+      expectInstance().frame(JSON.stringify({ role: "heartbeat" }));
     });
 
     expect(onSystem).not.toHaveBeenCalled();
@@ -332,9 +329,9 @@ describe("EventStreamProvider heartbeat frame", () => {
     renderHook(() => useEventStream(onSystem, vi.fn()), { wrapper: withProvider() });
     await waitForInstance();
     act(() => {
-      expectInstance().fireOpen();
-      expectInstance().fireMessage(JSON.stringify({ role: "heartbeat" }));
-      expectInstance().fireMessage(JSON.stringify({ role: "llm_done", agent_id: 7 }));
+      expectInstance().open();
+      expectInstance().frame(JSON.stringify({ role: "heartbeat" }));
+      expectInstance().frame(JSON.stringify({ role: "llm_done", agent_id: 7 }));
     });
 
     expect(onSystem).toHaveBeenCalledTimes(1);

@@ -8,7 +8,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useMemo } from "react";
 
-import { api } from "../transport/api";
+import { useApi } from "../transport/transport-context";
 import { projectAgentStatusValue } from "../contracts/types";
 import type { FleetGraph, GraphEventType, WireFleetGraph } from "../contracts/types";
 
@@ -52,6 +52,7 @@ function normalizeGraph(raw: WireFleetGraph): FleetGraph {
 }
 
 export function useFleetGraph(opts?: { hours?: number; decayLambda?: number }): FleetGraphResult {
+  const api = useApi();
   const hours = opts?.hours;
   const decayLambda = opts?.decayLambda;
   const { data, isError, isLoading } = useQuery({

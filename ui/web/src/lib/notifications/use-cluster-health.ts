@@ -3,7 +3,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef } from "react";
 
-import { api } from "../transport/api";
+import { useApi } from "../transport/transport-context";
 import { useStore } from "../state/store";
 import { AGENTS_QUERY_KEY } from "../agents/use-agents";
 
@@ -27,12 +27,13 @@ const PAUSED_POLL_MS = 5_000;
  * Poll authenticated cluster status and drive reconnect state.
  */
 export function useClusterHealth(): void {
+  const api = useApi();
   const queryClient = useQueryClient();
   const bumpReconnect = useStore((s) => s.bumpReconnect);
 
   const { data } = useQuery({
     queryKey: CLUSTER_STATUS_QUERY_KEY,
-    queryFn: api.getClusterStatus,
+    queryFn: () => api.getClusterStatus(),
     // Function form: tighten while this host reads paused (a pause,
     // maintenance hold or unfinished startup) so the resume edge lands within
     // seconds; idle at 15s otherwise. Failed fetches during a gateway restart

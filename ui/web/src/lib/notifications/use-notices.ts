@@ -4,7 +4,7 @@
 
 import { useInfiniteQuery, useQuery, type QueryClient } from "@tanstack/react-query";
 
-import { api } from "../transport/api";
+import { useApi } from "../transport/transport-context";
 import type { NoticeItem } from "../contracts/types";
 
 /** The open-queue query (open + awaiting in one response). */
@@ -79,6 +79,7 @@ function withoutDroppedRows(wire: NoticesFeedWire): NoticesFeedWire {
 }
 
 export function useNotices(): NoticesFeed {
+  const api = useApi();
   const feedQuery = useQuery({
     queryKey: NOTICES_QUERY_KEY,
     // Page sizes come from the server defaults

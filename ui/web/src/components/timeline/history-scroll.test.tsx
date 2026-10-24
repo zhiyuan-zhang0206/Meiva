@@ -6,9 +6,11 @@ import { USER_SETTING_DEFAULTS, type BackendTimelineItem, type TimelineResponse 
 import { readScrollMemory, saveScrollMemory } from "@/lib/layout/scroll-memory";
 import { useTimeline } from "@/lib/timeline/use-timeline";
 import { useTimelineStore } from "@/lib/timeline/timeline-store";
+import { fakeApi } from "@/lib/transport/tests/api/fake-api";
+import { ApiProvider } from "@/lib/transport/transport-context";
 import { TimelineView } from ".";
 vi.mock("@/lib/transport/api", () => ({ api: {
-  getTimeline: vi.fn(), getConfig: vi.fn().mockResolvedValue({ fields: [] }),
+  getConfig: vi.fn().mockResolvedValue({ fields: [] }),
 } }));
 vi.mock("@/lib/transport/useEventStream", () => ({ useAgentEventStream: vi.fn() }));
 vi.mock("../content/markdown", () => ({ ChatMarkdown: ({ content }: { content: string }) => <div>{content}</div> }));
@@ -27,13 +29,18 @@ let height = 5000;
 let aboveSettle = 0;
 let client: QueryClient;
 let resizeCallbacks: Set<() => void>;
+const gateway = fakeApi({ getTimeline: () => Promise.resolve(response) });
 
 function Conversation({ agentId, entry }: { agentId: number | null; entry: string }) {
   const timeline = useTimeline(agentId, () => undefined);
   return <TimelineView items={timeline.items} threadKey={agentId === null ? undefined : String(agentId)} scrollMemoryKey={entry} />;
 }
 function conversation(agentId: number | null, entry: string) {
-  return <QueryClientProvider client={client}><Conversation agentId={agentId} entry={entry} key={entry} /></QueryClientProvider>;
+  return (
+    <QueryClientProvider client={client}>
+      <ApiProvider api={gateway}><Conversation agentId={agentId} entry={entry} key={entry} /></ApiProvider>
+    </QueryClientProvider>
+  );
 }
 function viewport() { return screen.getByTestId("history-viewport"); }
 function readingOffset(id: string) {
@@ -263,7 +270,11 @@ function AgentTabs({ agentId, entry }: { agentId: number; entry: string }) {
     scrollMemoryKey={`${entry}:agent:${agentId}`} loadingNew={timeline.isFetching} />;
 }
 function tabs(agentId: number, entry: string) {
-  return <QueryClientProvider client={client}><AgentTabs agentId={agentId} entry={entry} /></QueryClientProvider>;
+  return (
+    <QueryClientProvider client={client}>
+      <ApiProvider api={gateway}><AgentTabs agentId={agentId} entry={entry} /></ApiProvider>
+    </QueryClientProvider>
+  );
 }
 
 describe("agent switch reading positions", () => {

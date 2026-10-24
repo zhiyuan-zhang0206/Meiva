@@ -1,0 +1,3 @@
+exports = ["fake-upload.ts", "gateway-server.ts", "http-rig.ts", "real-network.ts"]
+
+purity = "strict"
