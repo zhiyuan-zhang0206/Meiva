@@ -1,11 +1,11 @@
-"""The top-level packages of the repository and the role of each, declared once.
-
-The root `meizel.toml` holds a `[roles]` table that maps a role to the top-level
-directories playing it. This module reads that table; every other place that needs
-to know which top-level packages exist (a scan scope, a test host list, a packaging
-list) calls `packages()` instead of keeping a copy, or is generated from the table by
-`python -m meizel roles` and kept fresh by `--check`.
-"""
+# meiva:note
+# The top-level packages of the repository and the role of each, declared once.
+#
+# The root `meizel.toml` holds a `[roles]` table that maps a role to the top-level
+# directories playing it. This module reads that table; every other place that needs
+# to know which top-level packages exist (a scan scope, a test host list, a packaging
+# list) calls `packages()` instead of keeping a copy, or is generated from the table by
+# `python -m meizel roles write` and kept fresh by `python -m meizel check`.
 
 from __future__ import annotations
 
@@ -25,6 +25,7 @@ __all__ = [
     "packages",
     "pytest_test_hosts",
     "roles",
+    "select_packages",
 ]
 
 # The closed set of roles; an unknown role is an error, never a new category.
@@ -78,7 +79,12 @@ def roles(root: Path | None = None) -> Mapping[str, tuple[str, ...]]:
 
 def packages(*role_names: str, root: Path | None = None) -> tuple[str, ...]:
     """The top-level directories of the given roles, in the order given, each once."""
-    declared = roles(root)
+    return select_packages(roles(root), *role_names)
+
+
+# meiva:note
+# Select known roles from validated declarations without rereading their source.
+def select_packages(declared: Mapping[str, tuple[str, ...]], *role_names: str) -> tuple[str, ...]:
     unknown = [name for name in role_names if name not in ROLE_NAMES]
     if unknown:
         raise MeizelError(f"unknown role(s) {unknown}; the roles are {', '.join(ROLE_NAMES)}")

@@ -11,7 +11,6 @@ throwaway repository; `test_prepush_hooks.py` holds the guard, install and stage
 import json
 import os
 import re
-import shlex
 import shutil
 import subprocess
 import sys
@@ -24,7 +23,6 @@ import yaml
 ROOT = Path(__file__).resolve().parents[2]
 BRANCH_LINT = ROOT / "scripts/hooks/prepush-branch-lint.sh"
 FRESHNESS = ROOT / "scripts/provision/prepush_freshness.py"
-IF_CHANGED = ROOT / "scripts/hooks/prepush-if-changed.sh"
 PRECOMMIT_ESLINT = ROOT / "scripts/hooks/precommit-eslint.sh"
 SELECTOR = ROOT / "scripts/provision/prepush_frontend.py"
 MODULE = ROOT / "scripts/provision/prepush_branch_diff.py"
@@ -389,86 +387,6 @@ def test_a_failing_artifact_hook_fails_the_push(freshness_repo: tuple[Path, Path
     subprocess.run(["git", "-C", str(repo), "rm", "-q", "gateway/removed.py"], check=True)
     _commit_all(repo, "delete codegen input")
     assert _run_freshness(repo).returncode == 1
-
-
-# ── prepush-if-changed.sh: a whole-repo check that only runs when its inputs moved ──────────
-
-
-def _run_if_changed(repo: Path, pattern: str, marker: Path) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        ["bash", str(IF_CHANGED), pattern, "--", "sh", "-c", f"echo RAN >> {marker}"],
-        cwd=repo,
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=10,
-    )
-
-
-def test_if_changed_skips_a_branch_with_no_matching_path(tmp_path: Path) -> None:
-    repo = tmp_path / "repo"
-    repo.mkdir()
-    _init_repo_with_origin_main(repo)
-    (repo / "notes.md").write_text("changed\n")
-    _commit_all(repo, "docs only")
-    marker = tmp_path / "ran"
-    result = _run_if_changed(repo, r"\.py$", marker)
-    assert result.returncode == 0
-    assert not marker.exists()
-    assert "skipping" in result.stdout
-
-
-def test_if_changed_runs_for_an_added_changed_or_deleted_match(tmp_path: Path) -> None:
-    repo = tmp_path / "repo"
-    repo.mkdir()
-    _init_repo_with_origin_main(repo)
-    (repo / "keep.py").write_text("x = 1\n")
-    _commit_all(repo, "add a py file")
-    sha = subprocess.run(
-        ["git", "-C", str(repo), "rev-parse", "HEAD"], capture_output=True, text=True, check=True
-    ).stdout.strip()
-    subprocess.run(
-        ["git", "-C", str(repo), "update-ref", "refs/remotes/origin/main", sha], check=True
-    )
-    subprocess.run(["git", "-C", str(repo), "rm", "-q", "keep.py"], check=True)
-    _commit_all(repo, "delete it")  # a deleted path must count: pre-commit never passes it
-    marker = tmp_path / "ran"
-    assert _run_if_changed(repo, r"\.py$", marker).returncode == 0
-    assert marker.read_text() == "RAN\n"
-
-
-def test_if_changed_rejects_unknown_scope(tmp_path: Path) -> None:
-    repo = tmp_path / "repo"
-    repo.mkdir()
-    _init_probe_repo(repo)  # no commit, no origin/main
-    marker = tmp_path / "ran"
-    result = _run_if_changed(repo, r"\.py$", marker)
-    assert result.returncode != 0
-    assert "requires local origin/main" in result.stderr
-    assert not marker.exists()
-
-
-def test_if_changed_rejects_invalid_pattern(tmp_path: Path) -> None:
-    repo = tmp_path / "repo"
-    repo.mkdir()
-    _init_repo_with_origin_main(repo)
-    marker = tmp_path / "ran"
-    result = _run_if_changed(repo, "[", marker)
-    assert result.returncode != 0
-    assert not marker.exists()
-    assert "skipping" not in result.stdout
-
-
-def test_the_whole_meizel_check_is_gated_on_python_and_manifest_changes() -> None:
-    config = yaml.safe_load((ROOT / ".pre-commit-config.yaml").read_text())
-    hook = {h["id"]: h for r in config["repos"] for h in r["hooks"]}["meizel-check-full"]
-    assert hook["stages"] == ["pre-push"]
-    assert hook["always_run"] is True  # the gate lives in the entry, which sees deletions
-    assert hook["verbose"] is True
-    assert shlex.split(hook["entry"]) == [
-        "bash", "scripts/hooks/prepush-if-changed.sh", r"(\.py|(^|/)meizel\.toml)$", "--",
-        ".venv/bin/python", "-m", "meizel", "check",
-    ]  # fmt: skip
 
 
 # Frontend contribution scope across real rebase and pre-commit push ranges.

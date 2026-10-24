@@ -18,7 +18,7 @@
 #     ...
 #     # meizel:roles END
 #
-# `write` regenerates every region from the root manifest and `stale` reports a region that is
+# `write` regenerates every region from the root manifest and `check` reports a region that is
 # out of date. A file with a region is a generated output, and the only file outside `meizel/`
 # that may list the packages of a role.
 
@@ -29,16 +29,16 @@ import re
 import subprocess
 import sys
 import tomllib
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
 
 from meizel import roles as role_api
-from meizel.graph.model import MeizelError
-from meizel.graph.universe import load_universe
+from meizel.graph.model import Code, Diagnostic, MeizelError
+from meizel.graph.universe import Universe, load_universe
 
-__all__ = ["regions", "run_roles", "stale", "violations", "write"]
+__all__ = ["check", "regions", "run_roles", "write"]
 
 MARKER = "meizel:roles"
 _BEGIN = re.compile(rf"^(?P<indent>\s*)#\s*{MARKER}\s+BEGIN\s+(?P<format>\S+)\s+(?P<roles>.+?)\s*$")
@@ -57,13 +57,14 @@ class Region:
     format: str
     roles: tuple[str, ...]
 
-    def render(self, root: Path) -> list[str]:
-        names = role_api.packages(*self.roles, root=root)
+    def render(self, declared: Mapping[str, tuple[str, ...]]) -> list[str]:
+        names = role_api.select_packages(declared, *self.roles)
         if self.format == "names":
             return [f'{self.indent}"{name}",' for name in names]
         if self.format == "testpaths":
             hosts = [
-                n if n in role_api.packages("tests", root=root) else f"{n}/**/tests" for n in names
+                n if n in role_api.select_packages(declared, "tests") else f"{n}/**/tests"
+                for n in names
             ]
             return [f'{self.indent}"{host}",' for host in hosts]
         if self.format == "dirs":
@@ -127,14 +128,21 @@ def regions(root: Path) -> list[Region]:
 
 # meiva:note
 # One message per region whose content differs from what the roles generate.
-def stale(root: Path) -> list[str]:
-    messages: list[str] = []
-    for region in regions(root):
+def _stale(
+    root: Path, items: list[Region], declared: Mapping[str, tuple[str, ...]]
+) -> list[Diagnostic]:
+    messages: list[Diagnostic] = []
+    for region in items:
         lines = (root / region.path).read_text(encoding="utf-8").splitlines()
-        if lines[region.begin : region.end - 1] != region.render(root):
+        if lines[region.begin : region.end - 1] != region.render(declared):
             messages.append(
-                f"{region.path}:{region.begin}: generated {region.format} region is stale; "
-                "run `python -m meizel roles write`"
+                Diagnostic(
+                    region.path,
+                    region.begin,
+                    Code.MANIFEST_ROLES,
+                    f"generated {region.format} region is stale; "
+                    "run `python -m meizel roles write`",
+                )
             )
     return messages
 
@@ -142,6 +150,7 @@ def stale(root: Path) -> list[str]:
 # meiva:note
 # Regenerate every region; returns one line per file rewritten.
 def write(root: Path) -> list[str]:
+    declared = role_api.roles(root)
     changed: list[str] = []
     by_path: dict[str, list[Region]] = {}
     for region in regions(root):
@@ -151,7 +160,7 @@ def write(root: Path) -> list[str]:
         text = full.read_text(encoding="utf-8")
         lines = text.splitlines()
         for region in sorted(items, key=lambda r: r.begin, reverse=True):
-            lines[region.begin : region.end - 1] = region.render(root)
+            lines[region.begin : region.end - 1] = region.render(declared)
         updated = "\n".join(lines) + ("\n" if text.endswith("\n") else "")
         if updated != text:
             full.write_text(updated, encoding="utf-8")
@@ -176,7 +185,7 @@ def _listed(strings: Iterable[str]) -> set[str]:
     return {_FIRST.split(text, 1)[0] for text in strings if text}
 
 
-def _covered(strings: Iterable[str], declared: dict[str, tuple[str, ...]]) -> list[str]:
+def _covered(strings: Iterable[str], declared: Mapping[str, tuple[str, ...]]) -> list[str]:
     names = _listed(strings)
     return [
         role
@@ -193,13 +202,13 @@ def _message(role: str) -> str:
 
 
 def _python(
-    path: str, text: str, declared: dict[str, tuple[str, ...]], spans: list[tuple[int, int]]
-) -> list[str]:
+    path: str, text: str, declared: Mapping[str, tuple[str, ...]], spans: list[tuple[int, int]]
+) -> list[Diagnostic]:
     try:
         tree = ast.parse(text, filename=path)
     except SyntaxError:
         return []
-    found: list[str] = []
+    found: list[Diagnostic] = []
     for node in ast.walk(tree):
         if not isinstance(node, ast.Tuple | ast.List | ast.Set):
             continue
@@ -212,7 +221,8 @@ def _python(
         if any(node.lineno <= begin and finish <= end for begin, finish in spans):
             continue
         found.extend(
-            f"{path}:{node.lineno}: {_message(role)}" for role in _covered(strings, declared)
+            Diagnostic(path, node.lineno, Code.MANIFEST_ROLES, _message(role))
+            for role in _covered(strings, declared)
         )
     return found
 
@@ -231,8 +241,8 @@ def _arrays(value: object, trail: str) -> Iterable[tuple[str, list[str]]]:
 
 
 def _toml(
-    path: str, text: str, declared: dict[str, tuple[str, ...]], spans: list[tuple[int, int]]
-) -> list[str]:
+    path: str, text: str, declared: Mapping[str, tuple[str, ...]], spans: list[tuple[int, int]]
+) -> list[Diagnostic]:
     lines = text.splitlines()
     for begin, end in spans:
         for index in range(begin, end - 1):
@@ -241,34 +251,49 @@ def _toml(
         document = tomllib.loads("\n".join(lines))
     except tomllib.TOMLDecodeError:
         return []
-    found: list[str] = []
+    found: list[Diagnostic] = []
     for trail, strings in _arrays(document, ""):
         key = trail.rsplit(".", 1)[-1]
         pattern = re.compile(rf"""^\s*["']?{re.escape(key)}["']?\s*=""")
         line = next((n for n, x in enumerate(lines, 1) if pattern.match(x)), 1)
-        found.extend(f"{path}:{line}: {_message(role)}" for role in _covered(strings, declared))
+        found.extend(
+            Diagnostic(path, line, Code.MANIFEST_ROLES, _message(role))
+            for role in _covered(strings, declared)
+        )
     return found
 
 
-def violations(root: Path) -> list[str]:
-    """`path:line: message` for every copy of a role's package list."""
-    declared = dict(role_api.roles(root))
+# meiva:note
+# Global generated freshness and package-list copies, using validated declarations.
+def check(universe: Universe, declared: Mapping[str, tuple[str, ...]]) -> list[Diagnostic]:
+    items = regions(universe.root)
+    if not declared and not items:
+        return []
     spans: dict[str, list[tuple[int, int]]] = {}
-    for region in regions(root):
+    for region in items:
         spans.setdefault(region.path, []).append((region.begin, region.end))
-    found: list[str] = []
-    for path in load_universe(root).python_files + tuple(
-        p for p in sorted(load_universe(root).files) if p.endswith(".toml")
+    found = _stale(universe.root, items, declared)
+    if items and not declared:
+        found.append(
+            Diagnostic(
+                "meizel.toml",
+                1,
+                Code.MANIFEST_ROLES,
+                "generated role regions require a root [roles] declaration",
+            )
+        )
+    for path in universe.python_files + tuple(
+        p for p in sorted(universe.files) if p.endswith(".toml")
     ):
         if _outside_rule(path) or path == "meizel.toml":
             continue
         try:
-            text = (root / path).read_text(encoding="utf-8")
+            text = (universe.root / path).read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError):
             continue
         scan = _python if path.endswith(".py") else _toml
         found.extend(scan(path, text, declared, spans.get(path, [])))
-    return sorted(found)
+    return sorted(found, key=lambda d: (d.path, d.line, d.message))
 
 
 def run_roles(root: Path, mode: str, role_names: tuple[str, ...] = ()) -> int:
@@ -280,9 +305,9 @@ def run_roles(root: Path, mode: str, role_names: tuple[str, ...] = ()) -> int:
         for path in write(root):
             print(f"meizel: regenerated {path}")
         return 0
-    problems = [*stale(root), *violations(root)]
+    problems = check(load_universe(root), role_api.roles(root))
     for problem in problems:
-        print(problem)
+        print(problem.render())
     if problems:
         print(f"meizel: {len(problems)} role problems", file=sys.stderr)
         return 1

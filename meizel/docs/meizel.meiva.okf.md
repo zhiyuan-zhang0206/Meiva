@@ -27,9 +27,11 @@ only. Python code reads the declaration through `meizel.roles` (`packages(*roles
 `roles()`, `all_packages()`); the lists that other files must keep as text (the pytest
 `testpaths`, the pyright `include`, the wheel packages, the coverage source and the
 package alternations of the pre-commit `files` patterns) sit in marked regions that
-`python -m meizel roles write` regenerates and `roles check` verifies. `roles check`
-also fails on any other Python or TOML literal that lists every package of a role of
-three or more, so a new package is declared in one place or the check says where.
+`python -m meizel roles write` regenerates. `meizel check`, including `check --changed`,
+checks all those regions and other Python or TOML literals that list every package of
+a role of three or more. These global `manifest-roles` diagnostics cannot be recorded
+as debt. `roles check` remains a focused command using the same rule owner; it has no
+separate hook. A new package is declared in one place or the check says where.
 
 ## Contents
 

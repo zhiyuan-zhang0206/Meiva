@@ -341,17 +341,6 @@ repos:
         types: []
         require_serial: true
 
-      # The top-level packages are declared once, in the root meizel.toml `[roles]`. The lists
-      # other files keep are generated from it (`python -m meizel roles write`); this check
-      # fails on a stale generated list and on any other re-listing of a role's packages.
-      - id: lint-meizel-roles
-        name: lint top-level package roles (generated lists fresh, no copy of a role)
-        entry: .venv/bin/python -m meizel roles check
-        language: system
-        files: ^(meizel\.toml|pyproject\.toml|\.pre-commit-config\.yaml|.*\.(py|sh|toml|yaml|yml))$
-        pass_filenames: false
-        require_serial: true
-
       # AGENTS.md line-count ceiling (constants in the script; hard + a
       # transitional note zone below it). Prevents progressive bloat —
       # specialized rules go in docs/conventions/.
@@ -550,20 +539,19 @@ repos:
         always_run: true
         pass_filenames: false
 
-      # The locality gate (meizel). A commit judges the staged Python files and every
-      # manifest (`check --changed`, a few seconds); a push runs the whole check, which also
-      # finds stale declarations and the effect of a manifest edit on files that did not change.
-      # CI runs the whole check as its own step, so the per-file hook is skipped there. Recorded
-      # debt may only shrink: docs/contributing.md "Locality gate (meizel)".
+      # A commit judges staged facts, every manifest and global role-list freshness/copies.
+      # Python or manifest changes need the full graph at push; metadata-only changes keep
+      # their partial fact scope and the global roles check. CI runs the whole check itself.
+      # Recorded debt may only shrink: docs/contributing.md "Locality gate (meizel)".
       - id: meizel-check-changed
-        name: meizel check --changed (locality of the staged files, every manifest)
+        name: meizel check --changed (staged facts, manifests and global role lists)
         entry: .venv/bin/python -m meizel check --changed
         language: system
-        files: ^(.*\.py|(.*/)?meizel\.toml)$
+        files: ^.*\.(py|sh|toml|yaml|yml)$
 
       - id: meizel-check-full
-        name: meizel check, full (locality of the whole repository)
-        entry: bash scripts/hooks/prepush-if-changed.sh '(\.py|(^|/)meizel\.toml)$' -- .venv/bin/python -m meizel check
+        name: meizel check at push (full graph for Python or manifests, global role lists)
+        entry: bash scripts/hooks/prepush-meizel.sh
         language: system
         stages: [pre-push]
         verbose: true  # A skip must stay visible.

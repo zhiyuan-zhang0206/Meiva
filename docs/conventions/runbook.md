@@ -1009,9 +1009,13 @@ create), and one that a per-file verdict cannot see:
   range fails explicitly. `types-codegen-fresh` alone skips when
   `ui/web/node_modules` is missing, same as the frontend pre-push hooks.
 - `meizel-check-full` runs the whole `python -m meizel check` when the branch touches any `.py` or
-  `meizel.toml` path, deleted ones included (`scripts/hooks/prepush-if-changed.sh`). The commit-time
-  `meizel-check-changed` judges only the staged files and every manifest, so the effect of a manifest
-  edit on files that did not change, and what is stale, are found here; CI runs the whole check too.
+  `meizel.toml` path, deleted ones included (`scripts/hooks/prepush-meizel.sh`). Other `.sh`, `.toml`,
+  `.yaml` and `.yml` changes run `check --changed` with the actual branch paths, including deleted
+  paths and both sides of renames. This keeps global role-list freshness and copy checks without
+  scanning the whole Python fact graph for metadata-only changes. The commit-time
+  `meizel-check-changed` judges staged facts, every manifest and global role lists. A full push
+  also finds the effect of a manifest edit on unchanged facts and stale graph declarations;
+  CI runs the whole check too. An unknown contribution range fails before either mode runs.
 - `lint-tests-location-full` runs the tests-location check over every tracked
   top-level test at every push, unwrapped (paths only, under 0.1 s, so there is nothing
   to skip). A deleted or renamed test is never passed to the commit-time

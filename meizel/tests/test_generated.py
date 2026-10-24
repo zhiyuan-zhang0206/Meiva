@@ -4,11 +4,12 @@ from pathlib import Path
 
 import pytest
 
-from meizel.contracts import enumerations
 from meizel.contracts import enumerations as generated
 from meizel.contracts.cli import main
-from meizel.graph.model import MeizelError
-from meizel.tests.synthetic import RepoFactory
+from meizel.graph.model import Code, Diagnostic, MeizelError
+from meizel.graph.universe import load_universe
+from meizel.roles import roles
+from meizel.tests.synthetic import RepoFactory, run
 
 ROOT_MANIFEST = '[roles]\napplication = ["a", "b", "c"]\ntooling = ["tool"]\ntests = ["t"]\n'
 BASE = {
@@ -21,6 +22,10 @@ BASE = {
 }
 
 
+def findings(root: Path) -> list[Diagnostic]:
+    return generated.check(load_universe(root), roles(root))
+
+
 def repo(make_repo: RepoFactory, extra: dict[str, str]) -> Path:
     return make_repo({**BASE, **extra})
 
@@ -31,13 +36,18 @@ def toml_with(body: str) -> str:
 
 def test_a_region_is_generated_and_then_fresh(make_repo: RepoFactory) -> None:
     root = repo(make_repo, {"conf.toml": toml_with("names application tooling")})
-    assert generated.stale(root) == [
-        "conf.toml:3: generated names region is stale; run `python -m meizel roles write`"
+    assert findings(root) == [
+        Diagnostic(
+            "conf.toml",
+            3,
+            Code.MANIFEST_ROLES,
+            "generated names region is stale; run `python -m meizel roles write`",
+        )
     ]
     assert generated.write(root) == ["conf.toml"]
     text = (root / "conf.toml").read_text(encoding="utf-8")
     assert '    "a",\n    "b",\n    "c",\n    "tool",\n    # meizel:roles END' in text
-    assert generated.stale(root) == []
+    assert findings(root) == []
     assert generated.write(root) == []
 
 
@@ -90,13 +100,13 @@ def test_unbalanced_markers_fail_fast(make_repo: RepoFactory, text: str, fragmen
 
 def test_an_unknown_format_or_role_fails_fast(make_repo: RepoFactory) -> None:
     with pytest.raises(MeizelError, match="unknown generated format"):
-        generated.stale(repo(make_repo, {"conf.toml": toml_with("mystery application")}))
+        findings(repo(make_repo, {"conf.toml": toml_with("mystery application")}))
 
 
 def test_an_unknown_role_in_a_region_fails_fast(tmp_path: Path, make_repo: RepoFactory) -> None:
     root = repo(make_repo, {"conf.toml": toml_with("names mystery")})
     with pytest.raises(MeizelError, match="unknown role"):
-        generated.stale(root)
+        findings(root)
 
 
 @pytest.mark.parametrize(
@@ -107,16 +117,20 @@ def test_a_literal_that_lists_a_whole_role_is_reported(
     make_repo: RepoFactory, literal: str
 ) -> None:
     root = repo(make_repo, {"tool/scan.py": f"DIRS = {literal}\n"})
-    found = enumerations.violations(root)
+    found = findings(root)
     assert len(found) == 1
-    assert found[0].startswith(
-        "tool/scan.py:1: lists every top-level package of role 'application'"
+    assert (found[0].path, found[0].line, found[0].code, found[0].debt) == (
+        "tool/scan.py",
+        1,
+        Code.MANIFEST_ROLES,
+        None,
     )
+    assert found[0].message.startswith("lists every top-level package of role 'application'")
 
 
 @pytest.mark.parametrize("literal", ['("a", "b")', '("a", "b", "tool")', '("a", "x", "y", "z")'])
 def test_a_partial_list_is_not_a_copy(make_repo: RepoFactory, literal: str) -> None:
-    assert enumerations.violations(repo(make_repo, {"tool/scan.py": f"DIRS = {literal}\n"})) == []
+    assert findings(repo(make_repo, {"tool/scan.py": f"DIRS = {literal}\n"})) == []
 
 
 def test_tests_docs_and_meizel_are_outside_the_rule(make_repo: RepoFactory) -> None:
@@ -130,7 +144,7 @@ def test_tests_docs_and_meizel_are_outside_the_rule(make_repo: RepoFactory) -> N
             "conftest.py": listing,
         },
     )
-    assert enumerations.violations(root) == []
+    assert findings(root) == []
 
 
 def test_a_toml_array_is_reported_unless_generated(
@@ -144,8 +158,8 @@ def test_a_toml_array_is_reported_unless_generated(
         },
     )
     generated.write(root)
-    found = enumerations.violations(root)
-    assert [line.split(":")[0] for line in found] == ["copy.toml"]
+    found = findings(root)
+    assert [diagnostic.path for diagnostic in found] == ["copy.toml"]
 
 
 def test_the_roles_command_lists_checks_and_writes(
@@ -156,6 +170,9 @@ def test_the_roles_command_lists_checks_and_writes(
     assert capsys.readouterr().out.split() == ["a", "b", "c", "tool"]
     assert main(["--repo", str(root), "roles", "check"]) == 1
     assert "stale" in capsys.readouterr().out
+    assert run(root, "check", "--changed", "conf.toml") == 1
+    assert "[manifest-roles]" in capsys.readouterr().out
     assert main(["--repo", str(root), "roles", "write"]) == 0
     assert main(["--repo", str(root), "roles", "check"]) == 0
+    assert run(root, "check") == 0
     assert main(["--repo", str(root), "roles", "list", "mystery"]) == 2
