@@ -1,8 +1,9 @@
-exports = ["fakes.py", "lost_ack.py"]
+exports = ["fakes.py", "lost_ack.py", "parked_pool.py"]
 
 [uses]
 "test_boot_authority.py" = ["_boot_authority_child.py"]
 "test_connect_helpers.py" = ["_stale_worker_child.py"]
+"test_parked_pool.py" = ["parked_pool.py"]
 
 [debt.env-patch]
 "test_db_guard.py#monkeypatch.delenv os.environ.MEIVA_TEST_DB" = 5

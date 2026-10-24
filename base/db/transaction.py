@@ -1,13 +1,29 @@
 """Explicit database transaction postures."""
 
 from collections.abc import AsyncGenerator, Generator
-from contextlib import AbstractContextManager, asynccontextmanager, contextmanager
+from contextlib import (
+    AbstractAsyncContextManager,
+    AbstractContextManager,
+    asynccontextmanager,
+    contextmanager,
+)
 from typing import Any, Protocol, TypeVar
 
 import psycopg
 from psycopg_pool import AsyncConnectionPool
 
 _CT = TypeVar("_CT", bound=psycopg.AsyncConnection[Any])
+
+
+# meiva:note
+# What an async reader needs of a pool: one connection lent for the length of an `async with`
+# block. `psycopg_pool.AsyncConnectionPool` is one; a test pool that parks or swallows the
+# cancellation of the borrow (`base/db/tests/parked_pool.py`) is the other, a fault no real
+# Postgres produces on demand.
+class AsyncConnectionSource(Protocol):
+    def connection(
+        self, timeout: float | None = None
+    ) -> AbstractAsyncContextManager[psycopg.AsyncConnection[Any]]: ...
 
 
 # meiva:note
