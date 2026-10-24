@@ -3,19 +3,16 @@
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 
 import AlertsSection from "@/components/ops/alerts-section";
-import { API_BASE, api } from "@/lib/transport/api";
-import { apiWrapper, fakeApi } from "@/lib/transport/tests/api/fake-api";
-import type { AlertsResponse } from "@/lib/contracts/types";
+import { API_BASE } from "@/lib/transport/api";
+import { apiWrapper, cacheOnlyApi } from "@/lib/transport/tests/api/api-provider";
+import { USER_SETTING_DEFAULTS, type AlertsResponse } from "@/lib/contracts/types";
+import { ALERTS_SECTION_QUERY_KEY } from "@/lib/notifications/use-alerts";
+import { SETTINGS_QUERY_KEY } from "@/lib/state/use-user-settings";
 
 afterEach(cleanup);
-
-beforeEach(() => {
-  vi.restoreAllMocks();
-  vi.spyOn(api, "getSettings").mockResolvedValue({ settings: [] });
-});
 
 function response(overrides: Partial<AlertsResponse> = {}): AlertsResponse {
   return {
@@ -48,10 +45,12 @@ const ROW = {
 
 function wrap(ui: React.ReactElement, snapshot: AlertsResponse) {
   const qc = new QueryClient({
-    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    defaultOptions: { queries: { retry: false, staleTime: Infinity }, mutations: { retry: false } },
   });
+  qc.setQueryData(ALERTS_SECTION_QUERY_KEY, snapshot);
+  qc.setQueryData(SETTINGS_QUERY_KEY, USER_SETTING_DEFAULTS);
   return render(<QueryClientProvider client={qc}>{ui}</QueryClientProvider>, {
-    wrapper: apiWrapper(fakeApi({ getAlerts: () => Promise.resolve(snapshot) })),
+    wrapper: apiWrapper(cacheOnlyApi()),
   });
 }
 

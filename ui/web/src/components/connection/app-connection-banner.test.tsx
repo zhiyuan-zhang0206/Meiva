@@ -6,24 +6,24 @@
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, render as rtlRender } from "@testing-library/react";
-import { useEffect, type ReactElement } from "react";
+import { useEffect, type ReactElement, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { ClusterStatus, ConnectionState } from "@/lib/contracts/types";
+import type { ConnectionState } from "@/lib/contracts/types";
 import { useStore } from "@/lib/state/store";
-import { apiWrapper, fakeApi } from "@/lib/transport/tests/api/fake-api";
+import { startGateway, type TestGateway } from "@/lib/transport/tests/api/api-provider";
+import { gatewayRig, type HttpRig } from "@/lib/transport/tests/api/api-provider";
+import { ApiProvider } from "@/lib/transport/transport-context";
 
 const clients = new Set<QueryClient>();
 const states: string[] = [];
 let emit: ((ev: { type: string }) => void) | null = null;
-let clusterStatusReads = 0;
+let gateway: TestGateway;
+let rig: HttpRig;
 const origSetConnState = useStore.getState().setConnState;
-const ApiWrapper = apiWrapper(fakeApi({
-  getClusterStatus: () => {
-    clusterStatusReads += 1;
-    return new Promise<ClusterStatus>(() => undefined);
-  },
-}));
+function ApiWrapper({ children }: { children: ReactNode }) {
+  return <ApiProvider api={rig.api}>{children}</ApiProvider>;
+}
 
 vi.mock("@/lib/auth/auth-context", () => ({
   useAuth: () => ({ status: "authenticated" }),
@@ -47,10 +47,11 @@ function render(ui: ReactElement) {
   return rtlRender(<ApiWrapper><QueryClientProvider client={qc}>{ui}</QueryClientProvider></ApiWrapper>);
 }
 
-beforeEach(() => {
+beforeEach(async () => {
   states.length = 0;
   emit = null;
-  clusterStatusReads = 0;
+  gateway = await startGateway(() => ({ kind: "hang" }));
+  rig = gatewayRig(gateway);
   useStore.setState({
     connState: "open",
     setConnState: (v: ConnectionState) => {
@@ -58,20 +59,22 @@ beforeEach(() => {
       origSetConnState(v);
     },
   });
-  vi.useFakeTimers();
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
 });
 
-afterEach(() => {
+afterEach(async () => {
   cleanup();
   for (const client of clients) client.clear();
   clients.clear();
   useStore.setState({ connState: "open", setConnState: origSetConnState });
   vi.useRealTimers();
+  await gateway.close();
 });
 
 describe("AppConnectionBanner connection state", () => {
-  it("does not announce a reconnect that finishes inside the delay", () => {
+  it("does not announce a reconnect that finishes inside the delay", async () => {
     const view = render(<AppConnectionBanner />);
+    await vi.waitFor(() => expect(gateway.requests).toHaveLength(1));
     act(() => emit?.({ type: "reconnecting" }));
     act(() => {
       vi.advanceTimersByTime(NOTICE_DELAY_MS - 50);
@@ -81,7 +84,7 @@ describe("AppConnectionBanner connection state", () => {
       vi.advanceTimersByTime(NOTICE_DELAY_MS * 2);
     });
     expect(states).toEqual(["open"]);
-    expect(clusterStatusReads).toBe(1);
+    expect(gateway.requests.map((request) => request.path)).toEqual(["/api/cluster/status"]);
     act(() => emit?.({ type: "reconnecting" }));
     view.unmount();
     expect(emit).toBeNull();

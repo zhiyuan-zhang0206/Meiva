@@ -9,7 +9,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { AlertsBadge } from "@/components/notifications/alerts-badge";
 import type { AlertsResponse } from "@/lib/contracts/types";
-import { apiWrapper, fakeApi } from "@/lib/transport/tests/api/fake-api";
+import { apiWrapper, cacheOnlyApi } from "@/lib/transport/tests/api/api-provider";
 
 afterEach(cleanup);
 
@@ -20,13 +20,13 @@ function response(unresolved: number): AlertsResponse {
   };
 }
 
-function wrap(ui: React.ReactElement, seed: AlertsResponse | null) {
+function wrap(ui: React.ReactElement, seed: AlertsResponse) {
   const qc = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
-  if (seed) qc.setQueryData(["alerts"], seed);
+  qc.setQueryData(["alerts"], seed);
   return render(<QueryClientProvider client={qc}>{ui}</QueryClientProvider>, {
-    wrapper: apiWrapper(fakeApi({})),
+    wrapper: apiWrapper(cacheOnlyApi()),
   });
 }
 

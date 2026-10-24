@@ -2,10 +2,12 @@
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, renderHook, waitFor } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ReactNode } from "react";
 
-import { apiWrapper, fakeApi } from "../transport/tests/api/fake-api";
+import { apiWrapper } from "../transport/tests/api/api-provider";
+import { startGateway, type GatewayReply, type TestGateway } from "../transport/tests/api/api-provider";
+import { gatewayRig, type HttpRig } from "../transport/tests/api/api-provider";
 import { useTokenUsage } from "./use-token-usage";
 import type { TokenUsageResponse } from "../contracts/types";
 
@@ -25,18 +27,12 @@ function tokenFixture(agentId: number): TokenUsageResponse {
   };
 }
 
-interface TokenRead {
-  agentId: number;
-  signal: AbortSignal | undefined;
-}
+let gateway: TestGateway;
+let rig: HttpRig;
+let held: Promise<GatewayReply> | null;
 
-function wrapperFor(client: QueryClient, reads: TokenRead[], answer: (agentId: number) => Promise<TokenUsageResponse>) {
-  const Gateway = apiWrapper(fakeApi({
-    getTokenUsage: (agentId, signal) => {
-      reads.push({ agentId, signal });
-      return answer(agentId);
-    },
-  }));
+function wrapperFor(client: QueryClient) {
+  const Gateway = apiWrapper(rig.api);
   return ({ children }: { children: ReactNode }) => (
     <QueryClientProvider client={client}>
       <Gateway>{children}</Gateway>
@@ -44,54 +40,58 @@ function wrapperFor(client: QueryClient, reads: TokenRead[], answer: (agentId: n
   );
 }
 
-afterEach(() => {
+beforeEach(async () => {
+  held = null;
+  gateway = await startGateway((request) => {
+    if (held !== null) return held;
+    const match = /^\/api\/agents\/(\d+)\/token-usage$/.exec(request.path);
+    if (match === null) return { kind: "text", status: 404, body: "unexpected route" };
+    return { kind: "json", body: tokenFixture(Number(match[1])) };
+  });
+  rig = gatewayRig(gateway);
+});
+
+afterEach(async () => {
   cleanup();
+  await gateway.close();
 });
 
 describe("useTokenUsage agent switch", () => {
   it("serves a returned-to agent from cache and fires no read of its own", async () => {
-    const reads: TokenRead[] = [];
     // Cold keys fetch regardless of a global staleTime default.
     const qc = new QueryClient({
       defaultOptions: { queries: { retry: false, staleTime: 5 * 60_000 } },
     });
-    const wrapper = wrapperFor(qc, reads, (id) => Promise.resolve(tokenFixture(id)));
+    const wrapper = wrapperFor(qc);
     const { result, rerender } = renderHook(
       ({ id }: { id: number | null }) => useTokenUsage(id, () => undefined),
       { initialProps: { id: 1 }, wrapper },
     );
 
     // Cold first visit: the observer fetches on its own.
-    await waitFor(() => expect(reads).toHaveLength(1));
-    expect(reads[0].agentId).toBe(1);
-    expect(reads[0].signal).toBeInstanceOf(AbortSignal);
+    await waitFor(() => expect(result.current.contextTokens).toBe(1000));
+    expect(gateway.requests.map((request) => request.path)).toEqual(["/api/agents/1/token-usage"]);
+    expect(rig.sent[0].init.signal).toBeInstanceOf(AbortSignal);
 
     // Switch to another agent (cold): fetches on its own.
     rerender({ id: 2 });
-    await waitFor(() => expect(reads).toHaveLength(2));
-    expect(reads[1].agentId).toBe(2);
-    expect(reads[1].signal).toBeInstanceOf(AbortSignal);
+    await waitFor(() => expect(result.current.contextTokens).toBe(2000));
+    expect(gateway.requests[1].path).toBe("/api/agents/2/token-usage");
+    expect(rig.sent[1].init.signal).toBeInstanceOf(AbortSignal);
 
     // Returning inside the retention window seeds from cache and fires no
     // read of its own (task #3900 batch 2) — the re-attach reconcile
     // (agent-reconcile.ts) is the one refresh.
     rerender({ id: 1 });
     await waitFor(() => expect(result.current.contextTokens).toBe(1000));
-    expect(reads).toHaveLength(2);
+    expect(gateway.requests).toHaveLength(2);
   });
 
   it("reports contextPending until the cold key's first snapshot lands", async () => {
-    const reads: TokenRead[] = [];
-    let resolveUsage: (v: TokenUsageResponse) => void = () => undefined;
+    let finish!: (reply: GatewayReply) => void;
+    held = new Promise((resolve) => { finish = resolve; });
     const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    const wrapper = wrapperFor(
-      qc,
-      reads,
-      () =>
-        new Promise<TokenUsageResponse>((resolve) => {
-          resolveUsage = resolve;
-        }),
-    );
+    const wrapper = wrapperFor(qc);
     const initialProps: { id: number | null } = { id: 7 };
     const { result, rerender } = renderHook(
       ({ id }: { id: number | null }) => useTokenUsage(id, () => undefined),
@@ -101,8 +101,8 @@ describe("useTokenUsage agent switch", () => {
     // Cold key: pending until the first snapshot lands.
     expect(result.current.contextPending).toBe(true);
 
-    await waitFor(() => expect(reads).toHaveLength(1));
-    resolveUsage(tokenFixture(7));
+    await waitFor(() => expect(gateway.requests).toHaveLength(1));
+    finish({ kind: "json", body: tokenFixture(7) });
     await waitFor(() => expect(result.current.contextPending).toBe(false));
     expect(result.current.contextTokens).toBe(7000);
 

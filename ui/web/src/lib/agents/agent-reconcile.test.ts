@@ -7,7 +7,10 @@
 import { QueryClient } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { fakeApi } from "../transport/tests/api/fake-api";
+import { startGateway, type GatewayReply, type TestGateway } from "../transport/tests/api/api-provider";
+import { gatewayRig, httpRig, noUpload, type HttpRig } from "../transport/tests/api/api-provider";
+import { UncancellableFetch } from "../transport/tests/api/api-provider";
+import { systemKeySource } from "../transport/system-transport";
 import { createAgentReconcile } from "./agent-reconcile";
 import type { ConversationSnapshotResponse, PendingInbound } from "../contracts/types";
 
@@ -44,7 +47,9 @@ interface SnapshotRead {
   signal: AbortSignal | undefined;
 }
 
-type SnapshotAnswer = () => Promise<ConversationSnapshotResponse>;
+type SnapshotAnswer = GatewayReply | Promise<GatewayReply>;
+let gateway: TestGateway;
+let rig: HttpRig;
 
 let client: QueryClient;
 let reconcile: ReturnType<typeof createAgentReconcile>;
@@ -52,28 +57,33 @@ let reads: SnapshotRead[];
 let queuedAnswers: SnapshotAnswer[];
 let defaultAnswer: SnapshotAnswer;
 
-function resolves(value: ConversationSnapshotResponse): SnapshotAnswer {
-  return () => Promise.resolve(value);
+function resolves(value: ConversationSnapshotResponse): GatewayReply {
+  return { kind: "json", body: value };
 }
 
-beforeEach(() => {
-  vi.useFakeTimers();
+beforeEach(async () => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
   reads = [];
   queuedAnswers = [];
-  defaultAnswer = () => Promise.reject(new Error("this test scripted no snapshot answer"));
+  defaultAnswer = { kind: "text", status: 500, body: "this test scripted no snapshot answer" };
   client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  const gateway = fakeApi({
-    getConversationSnapshot: (agentId, signal) => {
-      reads.push({ agentId, signal });
-      return (queuedAnswers.shift() ?? defaultAnswer)();
-    },
+  gateway = await startGateway((request) => {
+    const match = /^\/api\/agents\/(\d+)\/conversation-snapshot$/.exec(request.path);
+    if (match === null) return { kind: "text", status: 404, body: "unexpected route" };
+    const signal = rig.sent.findLast((sent) => sent.url === `${gateway.origin}${request.path}`)?.init.signal;
+    if (signal == null) throw new Error("the native request has no observed abort signal");
+    reads.push({ agentId: Number(match[1]), signal });
+    return queuedAnswers.shift() ?? defaultAnswer;
   });
-  reconcile = createAgentReconcile(client, gateway);
+  rig = gatewayRig(gateway);
+  reconcile = createAgentReconcile(client, rig.api);
 });
 
-afterEach(() => {
-  vi.useRealTimers();
+afterEach(async () => {
+  reconcile.abort(42);
   client.clear();
+  vi.useRealTimers();
+  await gateway.close();
 });
 
 describe("composed conversation reconcile", () => {
@@ -86,10 +96,10 @@ describe("composed conversation reconcile", () => {
     reconcile.request(42);
     await vi.advanceTimersByTimeAsync(0);
 
-    expect(reads).toHaveLength(1);
+    await vi.waitFor(() => expect(reads).toHaveLength(1));
     expect(reads[0].agentId).toBe(42);
     expect(reads[0].signal).toBeInstanceOf(AbortSignal);
-    expect(client.getQueryData<PendingInbound[]>(["pending", 42])![0].content).toBe("fresh");
+    await vi.waitFor(() => expect(client.getQueryData<PendingInbound[]>(["pending", 42])?.[0].content).toBe("fresh"));
     expect(client.getQueryData(["token-usage", 42])).toMatchObject({ input_tokens: 1 });
     expect(client.getQueryData(["timeline", 42])).toMatchObject({ msg_count: 0 });
 
@@ -108,48 +118,50 @@ describe("composed conversation reconcile", () => {
 
     inFlight.resolve("old");
     await vi.advanceTimersByTimeAsync(400);
-    expect(reads).toHaveLength(1);
+    await vi.waitFor(() => expect(reads).toHaveLength(1));
   });
 
   it("a second gap during the composed read owes one trailing read", async () => {
-    const first = deferred<ConversationSnapshotResponse>();
-    queuedAnswers = [() => first.promise, resolves(snapshot("new"))];
+    const first = deferred<GatewayReply>();
+    queuedAnswers = [first.promise, resolves(snapshot("new"))];
     reconcile.subscribe(42);
 
     reconcile.request(42);
     await vi.advanceTimersByTimeAsync(0);
-    expect(reads).toHaveLength(1);
+    await vi.waitFor(() => expect(reads).toHaveLength(1));
 
     reconcile.request(42); // second open while the read is in flight
-    first.resolve(snapshot("fresh"));
+    first.resolve(resolves(snapshot("fresh")));
     await vi.advanceTimersByTimeAsync(400);
 
-    expect(reads).toHaveLength(2);
-    expect(client.getQueryData<PendingInbound[]>(["pending", 42])![0].content).toBe("new");
+    await vi.waitFor(() => expect(reads).toHaveLength(2));
+    await vi.waitFor(() => expect(client.getQueryData<PendingInbound[]>(["pending", 42])?.[0].content).toBe("new"));
   });
 
   it("drops a snapshot superseded by a newer write and re-reads once", async () => {
-    const first = deferred<ConversationSnapshotResponse>();
-    queuedAnswers = [() => first.promise, resolves(snapshot("new"))];
+    const first = deferred<GatewayReply>();
+    queuedAnswers = [first.promise, resolves(snapshot("new"))];
     reconcile.subscribe(42);
     client.setQueryData(["pending", 42], [pendingRow(1)]);
 
     reconcile.request(42);
     await vi.advanceTimersByTimeAsync(0);
+    await vi.waitFor(() => expect(reads).toHaveLength(1));
     // A newer snapshot lands while the composed read is in flight.
     client.setQueryData(["pending", 42], [pendingRow(1), pendingRow(2)]);
-    first.resolve(snapshot("fresh"));
+    first.resolve(resolves(snapshot("fresh")));
     await vi.advanceTimersByTimeAsync(400);
 
     // The stale composed payload never replaced the newer write; the trailing
     // read then delivered the newest server state.
-    expect(reads).toHaveLength(2);
+    await vi.waitFor(() => expect(reads).toHaveLength(2));
+    await vi.waitFor(() => expect(client.getQueryData<PendingInbound[]>(["pending", 42])?.[0].id).toBe(2));
     const pending = client.getQueryData<PendingInbound[]>(["pending", 42])!;
     expect(pending.map((row) => row.id)).toEqual([2]);
   });
 
   it("falls back to invalidating the three keys when the composed read fails", async () => {
-    defaultAnswer = () => Promise.reject(new Error("gateway down"));
+    defaultAnswer = { kind: "text", status: 503, body: "gateway down" };
     const domains = ["timeline", "token-usage", "pending"];
     for (const domain of domains) client.setQueryData([domain, 42], null);
     for (const domain of domains) expect(client.getQueryState([domain, 42])?.isInvalidated).toBe(false);
@@ -159,20 +171,21 @@ describe("composed conversation reconcile", () => {
     await vi.advanceTimersByTimeAsync(0);
 
     for (const domain of domains) {
-      expect(client.getQueryState([domain, 42])?.isInvalidated).toBe(true);
+      await vi.waitFor(() => expect(client.getQueryState([domain, 42])?.isInvalidated).toBe(true));
     }
   });
 
   it("detaching the last reader aborts the read and blocks a late write", async () => {
-    const first = deferred<ConversationSnapshotResponse>();
-    defaultAnswer = () => first.promise;
+    const first = deferred<GatewayReply>();
+    defaultAnswer = first.promise;
     const unsubscribe = reconcile.subscribe(42);
     reconcile.request(42);
     await vi.advanceTimersByTimeAsync(0);
 
+    await vi.waitFor(() => expect(reads).toHaveLength(1));
     unsubscribe();
     expect(reads[0].signal?.aborted).toBe(true);
-    first.resolve(snapshot("fresh"));
+    first.resolve(resolves(snapshot("fresh")));
     await vi.advanceTimersByTimeAsync(400);
     expect(client.getQueryData(["timeline", 42])).toBeUndefined();
     expect(client.getQueryData(["pending", 42])).toBeUndefined();
@@ -188,9 +201,9 @@ describe("composed conversation reconcile", () => {
 
 describe("reconcile activity for the latest-messages indicator", () => {
   it("stays active across a queued, running and trailing read, then settles", async () => {
-    const first = deferred<ConversationSnapshotResponse>();
-    const second = deferred<ConversationSnapshotResponse>();
-    queuedAnswers = [() => first.promise, () => second.promise];
+    const first = deferred<GatewayReply>();
+    const second = deferred<GatewayReply>();
+    queuedAnswers = [first.promise, second.promise];
     const activity: boolean[] = [];
     const unwatch = reconcile.watch(() => activity.push(reconcile.isRefreshing(42)));
     const detach = reconcile.subscribe(42);
@@ -199,27 +212,31 @@ describe("reconcile activity for the latest-messages indicator", () => {
     expect(reconcile.isRefreshing(42)).toBe(true);
     expect(reconcile.isRefreshing(43)).toBe(false);
     await vi.advanceTimersByTimeAsync(0);
+    await vi.waitFor(() => expect(reads).toHaveLength(1));
     reconcile.request(42);
-    first.resolve(snapshot("fresh"));
+    first.resolve(resolves(snapshot("fresh")));
     await vi.advanceTimersByTimeAsync(0);
     expect(reconcile.isRefreshing(42)).toBe(true);
     expect(activity.every(Boolean)).toBe(true);
     await vi.advanceTimersByTimeAsync(200);
-    second.resolve(snapshot("new"));
+    await vi.waitFor(() => expect(reads).toHaveLength(2));
+    second.resolve(resolves(snapshot("new")));
     await vi.advanceTimersByTimeAsync(0);
-    expect(reconcile.isRefreshing(42)).toBe(false);
+    await vi.waitFor(() => expect(reconcile.isRefreshing(42)).toBe(false));
     detach(); unwatch();
   });
   it.each(["abort", "detach"])("clears immediately on %s even if the transport ignores cancellation", async (mode) => {
-    const pending = deferred<ConversationSnapshotResponse>();
-    defaultAnswer = () => pending.promise;
+    const fault = new UncancellableFetch();
+    rig = httpRig({ base: gateway.origin, fetch: fault.fetch, now: () => performance.now(),
+      keys: systemKeySource(), openUpload: noUpload });
+    reconcile = createAgentReconcile(client, rig.api);
     const detach = reconcile.subscribe(42);
     reconcile.request(42);
     await vi.advanceTimersByTimeAsync(0);
     expect(reconcile.isRefreshing(42)).toBe(true);
     if (mode === "abort") reconcile.abort(42); else detach();
     expect(reconcile.isRefreshing(42)).toBe(false);
-    pending.resolve(snapshot("old"));
+    fault.respond(snapshot("old"));
     await vi.advanceTimersByTimeAsync(0);
     expect(reconcile.isRefreshing(42)).toBe(false);
     if (mode === "abort") detach();

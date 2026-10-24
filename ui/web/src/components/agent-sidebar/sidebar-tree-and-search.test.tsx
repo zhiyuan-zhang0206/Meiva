@@ -5,7 +5,7 @@ import { SIDEBAR_SORT_DEFAULT } from "@/lib/agents/sidebar";
 import type * as SidebarModule from "@/lib/agents/sidebar";
 import type { OpenNotice, PluginStat } from "@/lib/contracts/types";
 import type * as PluginStatsModule from "@/lib/plugins/plugin-stats";
-import { bpMock, gatewayWrapper, handlers, makeAgent, pushSpy, resetSidebarTestState, sortStore, state, StubAgentRow, StubButton, StubScrollArea, StubSpawnForm, wrap } from "./sidebar-test-mock";
+import { NO_ALERTS, bpMock, gatewayWrapper, handlers, makeAgent, pushSpy, resetSidebarTestState, sortStore, state, StubAgentRow, StubButton, StubScrollArea, StubSpawnForm, wrap } from "./sidebar-test-mock";
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: pushSpy }),
 }));
@@ -465,6 +465,7 @@ describe("stable ID ordering (RCS: no resort on status / activity change)", () =
     const qc = new QueryClient({
       defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
     });
+    qc.setQueryData(["alerts"], NO_ALERTS);
     const view = render(
       <QueryClientProvider client={qc}>
         <AgentSidebar {...handlers} />

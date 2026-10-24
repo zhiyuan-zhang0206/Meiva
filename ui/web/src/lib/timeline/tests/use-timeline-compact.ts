@@ -13,6 +13,7 @@ import type { UseTimelineTestContext } from "./use-timeline-context";
 export function registerUseTimelineCompactTests(ctx: UseTimelineTestContext): void {
   const {
     timeline,
+    wireReplies,
     timelineReads,
     turnStarts,
     resolves,
@@ -29,9 +30,7 @@ describe("useTimeline compact history sessions", () => {
 
     const showError = vi.fn();
     seedSettings({ "display.compact_history_sessions": 2 });
-    const fetches: (string | undefined)[] = [];
     const pageFor = (opts?: { before?: string; limit?: number }): TimelineResponse => {
-      fetches.push(opts?.before);
       if (opts?.before === "2.0") {
         return tlResp(
           [
@@ -54,7 +53,10 @@ describe("useTimeline compact history sessions", () => {
       if (opts?.before !== undefined) return tlResp([], false);
       return tlResp(postWindow(), true);
     };
-    timeline.always((_id, opts) => Promise.resolve(pageFor(opts)));
+    timeline.always(resolves(pageFor()));
+    for (const before of ["2.0", "s1.seg.0.0"]) {
+      wireReplies.set(`/api/agents/42/timeline?before=${before}`, [resolves(pageFor({ before }))]);
+    }
 
     const { result } = renderHook(() => useTimeline(42, showError), { wrapper });
     await waitFor(() => expect(result.current.items).toHaveLength(3));
@@ -82,7 +84,7 @@ describe("useTimeline compact history sessions", () => {
       ]);
     });
 
-    expect(fetches.filter((b) => b !== undefined)).toEqual(["2.0", "s1.seg.0.0"]);
+    expect(timelineReads.map((read) => read.before).filter((before) => before !== undefined)).toEqual(["2.0", "s1.seg.0.0"]);
     expect(showError).not.toHaveBeenCalled();
   });
 
@@ -95,7 +97,10 @@ describe("useTimeline compact history sessions", () => {
       "s2.b.0.0": tlResp([snapshotItem({ item_id: "s3.c.0.0", kind: "inbound_compact_summary", payload: "third" })], true),
       "s3.c.0.0": tlResp([snapshotItem({ item_id: "s4.d.0.0", kind: "inbound_compact_summary", payload: "fourth" })], false),
     };
-    timeline.always((_id, opts) => Promise.resolve(opts?.before ? pages[opts.before] ?? tlResp([], false) : tlResp(postWindow(), true)));
+    timeline.always(resolves(tlResp(postWindow(), true)));
+    for (const [before, page] of Object.entries(pages)) {
+      wireReplies.set(`/api/agents/42/timeline?before=${before}`, [resolves(page)]);
+    }
     const { result } = renderHook(() => useTimeline(42, vi.fn()), { wrapper });
     await waitFor(() => expect(result.current.items).toHaveLength(3));
 
@@ -112,22 +117,18 @@ describe("useTimeline compact history sessions", () => {
   it("All waits for the post-compact tail read before deciding whether older history exists", async () => {
     seedSettings({ "display.compact_history_sessions": -1 });
     let postTailResolve: ((value: TimelineResponse) => void) | null = null;
-    let postCompact = false;
-    timeline.always((_id, opts) => {
-      if (opts?.before) return Promise.resolve(tlResp([
-        snapshotItem({ item_id: "s1.a.1.0", payload: "retained" }),
-      ], false));
-      if (!postCompact) return Promise.resolve(tlResp([
-        snapshotItem({ item_id: "90.0", payload: "before compact" }),
-      ], false));
-      return new Promise<TimelineResponse>((resolve) => { postTailResolve = resolve; });
-    });
+    timeline.always(resolves(tlResp([
+      snapshotItem({ item_id: "90.0", payload: "before compact" }),
+    ], false)));
+    wireReplies.set("/api/agents/42/timeline?before=2.0", [resolves(tlResp([
+      snapshotItem({ item_id: "s1.a.1.0", payload: "retained" }),
+    ], false))]);
     const { result } = renderHook(() => useTimeline(42, vi.fn()), { wrapper });
     await waitFor(() => expect(result.current.items[0]?.payload).toBe("before compact"));
-    postCompact = true;
+    timeline.always(new Promise<TimelineResponse>((resolve) => { postTailResolve = resolve; }).then(resolves));
     pushEvent({ role: "compact_done", agent_id: 42 });
     pushEvent({ role: "timeline_snapshot", agent_id: 42, msg_count: 3, items: postWindow() });
-    await waitFor(() => expect(postTailResolve).not.toBeNull());
+    await waitFor(() => expect(timelineReads.filter((read) => read.before === undefined)).toHaveLength(2));
     expect(timelineReads.filter((read) => read.before)).toHaveLength(0);
     act(() => { postTailResolve?.(tlResp(postWindow(), true)); });
     await waitFor(() => expect(result.current.items.some((item) => item.payload === "retained")).toBe(true));
@@ -136,22 +137,21 @@ describe("useTimeline compact history sessions", () => {
 
   it("All retries a failed history page and stops after the successful terminal page", async () => {
     seedSettings({ "display.compact_history_sessions": -1 });
-    let olderAttempts = 0;
-    timeline.always((_id, opts) => {
-      if (!opts?.before) return Promise.resolve(tlResp(postWindow(), true));
-      olderAttempts += 1;
-      if (olderAttempts === 1) return Promise.reject(new Error("transient"));
-      return Promise.resolve(tlResp([snapshotItem({ item_id: "s1.a.1.0", payload: "recovered" })], false));
-    });
+    timeline.always(resolves(tlResp(postWindow(), true)));
+    wireReplies.set("/api/agents/42/timeline?before=2.0", [
+      { kind: "json", status: 503, body: { detail: "transient" } },
+      resolves(tlResp([snapshotItem({ item_id: "s1.a.1.0", payload: "recovered" })], false)),
+    ]);
+    const olderAttempts = () => timelineReads.filter((read) => read.before !== undefined).length;
     const showError = vi.fn();
     const { result } = renderHook(() => useTimeline(42, showError), { wrapper });
     await waitFor(() => expect(result.current.items).toHaveLength(3));
     pushEvent({ role: "compact_done", agent_id: 42 });
     pushEvent({ role: "timeline_snapshot", agent_id: 42, msg_count: 3, items: postWindow() });
-    await waitFor(() => expect(olderAttempts).toBe(1));
+    await waitFor(() => expect(olderAttempts()).toBe(1));
     act(() => useTimelineStore.setState((state) => ({ items: [...state.items, snapshotItem({ item_id: "3.0" })] })));
     await waitFor(() => expect(result.current.items.some((item) => item.payload === "recovered")).toBe(true));
-    expect(olderAttempts).toBe(2);
+    expect(olderAttempts()).toBe(2);
     expect(showError).toHaveBeenCalledWith("Failed to load older messages: transient");
   });
 
@@ -245,7 +245,7 @@ describe("useTimeline SSE inbound flow", () => {
 
     expect(result.current.turnActive).toBe(true);
 
-    expect(timelineReads).toHaveLength(2);
+    await waitFor(() => expect(timelineReads).toHaveLength(2));
   });
 
   it("timeline_snapshot push delivers envelope-wrap inbound_chat into the timeline", async () => {

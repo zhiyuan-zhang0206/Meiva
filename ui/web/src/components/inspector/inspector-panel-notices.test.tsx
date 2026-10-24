@@ -21,7 +21,6 @@ import {
   getAgentInspectWidgets,
   getAgentRoster,
   getSettings,
-  listPages,
   liveFixture,
   panelState,
   putSetting,
@@ -29,6 +28,7 @@ import {
   render,
   resolveNotice,
   setupInspectorTest,
+  setInspectorPages,
   streamHandlers,
   widgetFixture,
   widgetNotice,
@@ -41,7 +41,6 @@ vi.mock("@/lib/transport/api", () => ({
     getAgentInspectWidgets,
     getAgentRoster,
     getAgent,
-    listPages,
     resolveNotice,
     putSetting,
     getSettings,
@@ -164,7 +163,7 @@ describe("InspectorPanel", () => {
       created_at: "2026-08-24T12:00:00Z",
       closed_at: null,
     } satisfies PageRow;
-    listPages.mockResolvedValueOnce([page]);
+    setInspectorPages([page]);
     getAgentInspectLive.mockResolvedValue(
       liveFixture({
         notice: {
@@ -403,7 +402,7 @@ describe("InspectorPanel plugin widgets", () => {
       created_at: "2026-08-24T12:00:00Z",
       closed_at: null,
     } satisfies PageRow;
-    listPages.mockResolvedValue([page]);
+    setInspectorPages([page]);
     getAgentInspectWidgets.mockResolvedValue([widgetFixture()]);
     render(<InspectorPanel agentId={1} />);
 
@@ -414,7 +413,7 @@ describe("InspectorPanel plugin widgets", () => {
       first.compareDocumentPosition(second) & Node.DOCUMENT_POSITION_FOLLOWING;
     expect(before(pageSection, tasks)).toBeTruthy();
     expect(before(tasks, shells)).toBeTruthy();
-    listPages.mockResolvedValue([]);
+    setInspectorPages([]);
   });
 
   it("slots a widget into the section order (750: between the configuration overlay and the notice)", async () => {

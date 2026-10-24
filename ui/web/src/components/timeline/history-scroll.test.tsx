@@ -6,7 +6,7 @@ import { USER_SETTING_DEFAULTS, type BackendTimelineItem, type TimelineResponse 
 import { readScrollMemory, saveScrollMemory } from "@/lib/layout/scroll-memory";
 import { useTimeline } from "@/lib/timeline/use-timeline";
 import { useTimelineStore } from "@/lib/timeline/timeline-store";
-import { fakeApi } from "@/lib/transport/tests/api/fake-api";
+import { cacheOnlyApi } from "@/lib/transport/tests/api/api-provider";
 import { ApiProvider } from "@/lib/transport/transport-context";
 import { TimelineView } from ".";
 vi.mock("@/lib/transport/api", () => ({ api: {
@@ -29,7 +29,7 @@ let height = 5000;
 let aboveSettle = 0;
 let client: QueryClient;
 let resizeCallbacks: Set<() => void>;
-const gateway = fakeApi({ getTimeline: () => Promise.resolve(response) });
+const gateway = cacheOnlyApi();
 
 function Conversation({ agentId, entry }: { agentId: number | null; entry: string }) {
   const timeline = useTimeline(agentId, () => undefined);

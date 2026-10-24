@@ -11,10 +11,12 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { createElement, type ReactNode } from "react";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import type { WireFleetGraph } from "../contracts/types";
-import { apiWrapper, fakeApi } from "../transport/tests/api/fake-api";
+import { apiWrapper } from "../transport/tests/api/api-provider";
+import { startGateway, type GatewayReply, type TestGateway } from "../transport/tests/api/api-provider";
+import { gatewayRig } from "../transport/tests/api/api-provider";
 import { useFleetGraph } from "./use-fleet-graph";
 
 const API_GRAPH: WireFleetGraph = {
@@ -44,12 +46,11 @@ const API_GRAPH: WireFleetGraph = {
   snapshot_at: null,
 };
 
-// meiva:note
-// The renderer for these tests: the hook runs against a scripted gateway whose
-// graph read is `read`, inside a real QueryClient with retries off so the success
-// and error edges run end to end.
-function renderGraph(read: () => Promise<WireFleetGraph>, client: QueryClient = freshClient()) {
-  const ApiWrapper = apiWrapper(fakeApi({ getFleetGraph: read }));
+let gateway: TestGateway;
+let answer: GatewayReply;
+
+function renderGraph(client: QueryClient = freshClient()) {
+  const ApiWrapper = apiWrapper(gatewayRig(gateway).api);
   const wrapper = ({ children }: { children: ReactNode }) =>
     createElement(ApiWrapper, {
       children: createElement(QueryClientProvider, { client, children }),
@@ -61,11 +62,22 @@ function freshClient(): QueryClient {
   return new QueryClient({ defaultOptions: { queries: { retry: false } } });
 }
 
-afterEach(cleanup);
+beforeEach(async () => {
+  answer = { kind: "json", body: API_GRAPH };
+  gateway = await startGateway((request) => request.path === "/api/fleet/graph"
+    ? answer : { kind: "text", status: 404, body: "unexpected route" });
+});
+
+afterEach(async () => {
+  cleanup();
+  await gateway.close();
+});
 
 describe("useFleetGraph", () => {
-  it("while pending: empty graph, loading=true, error=false", () => {
-    const { result } = renderGraph(() => new Promise<WireFleetGraph>(() => undefined));
+  it("while pending: empty graph, loading=true, error=false", async () => {
+    answer = { kind: "hang" };
+    const { result } = renderGraph();
+    await waitFor(() => expect(gateway.requests).toHaveLength(1));
 
     expect(result.current.graph).toEqual({
       nodes: [],
@@ -78,7 +90,7 @@ describe("useFleetGraph", () => {
   });
 
   it("on success: returns the API graph, loading=false, error=false", async () => {
-    const { result } = renderGraph(() => Promise.resolve(API_GRAPH));
+    const { result } = renderGraph();
 
     await waitFor(() => expect(result.current.loading).toBe(false));
     expect(result.current.graph).toEqual(API_GRAPH);
@@ -95,7 +107,8 @@ describe("useFleetGraph", () => {
       telemetry_stale: false,
     };
 
-    const { result } = renderGraph(() => Promise.resolve(raw));
+    answer = { kind: "json", body: raw };
+    const { result } = renderGraph();
 
     await waitFor(() => expect(result.current.loading).toBe(false));
     expect(result.current.graph.edges).toEqual([
@@ -115,7 +128,8 @@ describe("useFleetGraph", () => {
       telemetry_stale: false,
     };
 
-    const { result } = renderGraph(() => Promise.resolve(raw));
+    answer = { kind: "json", body: raw };
+    const { result } = renderGraph();
 
     await waitFor(() => expect(result.current.loading).toBe(false));
     expect(result.current.graph.nodes.map((node) => node.status)).toEqual([
@@ -139,7 +153,8 @@ describe("useFleetGraph", () => {
       snapshot_at: null,
     };
 
-    const { result } = renderGraph(() => Promise.resolve(raw));
+    answer = { kind: "json", body: raw };
+    const { result } = renderGraph();
 
     await waitFor(() => expect(result.current.loading).toBe(false));
     expect(result.current.graph.nodes[0]).toMatchObject({
@@ -149,7 +164,8 @@ describe("useFleetGraph", () => {
   });
 
   it("on error: empty graph, loading=false, error=true (no retry)", async () => {
-    const { result } = renderGraph(() => Promise.reject(new Error("HTTP 404: no such endpoint")));
+    answer = { kind: "text", status: 404, body: "no such endpoint" };
+    const { result } = renderGraph();
 
     await waitFor(() => expect(result.current.error).toBe(true));
     expect(result.current.loading).toBe(false);
@@ -162,19 +178,14 @@ describe("useFleetGraph", () => {
   });
 
   it("stale-while-error: a failed poll after data keeps the last good graph (error flagged, not blanked)", async () => {
-    let gatewayDown = false;
     const client = freshClient();
-
-    const { result } = renderGraph(
-      () => (gatewayDown ? Promise.reject(new Error("gateway down")) : Promise.resolve(API_GRAPH)),
-      client,
-    );
+    const { result } = renderGraph(client);
 
     await waitFor(() => expect(result.current.loading).toBe(false));
     expect(result.current.graph).toEqual(API_GRAPH);
     expect(result.current.error).toBe(false);
 
-    gatewayDown = true;
+    answer = { kind: "drop" };
     await act(async () => {
       await client.refetchQueries({ queryKey: ["fleet-graph"] });
     });

@@ -50,9 +50,15 @@ without a body, or a dropped connection) through the platform's own `fetch`,
 which the test setup file captures before it installs its guards
 (`gateway/tests/real-network.ts`). Only what a network cannot produce is a double
 in `tests/`: upload progress events (`gateway/tests/fake-upload.ts`) and the EventSource state
-machine, tab channels and Web Locks (`stream/tests/fake-stream.ts`). Hook and component tests
-supply a gateway through `fakeApi` and `apiWrapper` (`tests/api/fake-api.tsx`),
-where a method the test did not script fails when read.
+machine, tab channels and Web Locks (`stream/tests/fake-stream.ts`). Hook tests use
+`gatewayRig` and `apiWrapper` through the public test door
+`tests/api/api-provider.tsx` with that same real
+server and `createApi` factory. Held HTTP responses expose pending and cancellation
+behavior; response data and HTTP failures travel through the production decoder.
+Only deliberately completing a fetch after abort needs the narrow
+`tests/api/uncancellable-fetch.ts` fault. Presentation tests with complete,
+fresh query-cache state use `cacheOnlyApi`: the real factory over the test setup's
+network guard, so an unexpected cold read fails instead of receiving invented data.
 
 Endpoint-shape cases assert the gateway path, method and payload rather than a
 particular test host. These cases do not establish runtime response-schema

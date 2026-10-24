@@ -8,14 +8,9 @@ import type {
   SystemEvent,
   TimelineResponse,
 } from "../../contracts/types";
+import type { GatewayReply } from "../../transport/tests/api/api-provider";
 import type { ApiError } from "../../transport/api";
 import type { ConnectionEvent } from "../../transport/useEventStream";
-
-export interface TimelineReadOptions {
-  limit?: number;
-  before?: string;
-  signal?: AbortSignal;
-}
 
 export interface TimelineRead {
   agentId: number;
@@ -29,22 +24,23 @@ export interface SnapshotRead {
   signal: AbortSignal | undefined;
 }
 
-export type Answer<Args extends unknown[], Reply> = (...args: Args) => Promise<Reply>;
+export type Answer = GatewayReply | Promise<GatewayReply>;
 
-export interface AnswerScript<Args extends unknown[], Reply> {
-  queue: (...answers: Answer<Args, Reply>[]) => void;
-  always: (answer: Answer<Args, Reply>) => void;
+export interface AnswerScript {
+  queue: (...answers: Answer[]) => void;
+  always: (answer: Answer) => void;
 }
 
 export interface UseTimelineTestContext {
   ApiError: typeof ApiError;
-  timeline: AnswerScript<[agentId: number, options: TimelineReadOptions | undefined], TimelineResponse>;
-  snapshot: AnswerScript<[agentId: number, signal: AbortSignal | undefined], ConversationSnapshotResponse>;
+  timeline: AnswerScript;
+  snapshot: AnswerScript;
+  wireReplies: Map<string, Answer[]>;
   timelineReads: TimelineRead[];
   snapshotReads: SnapshotRead[];
   turnStarts: number[];
-  resolves: <T>(value: T) => () => Promise<T>;
-  rejects: (error: Error) => () => Promise<never>;
+  resolves: (value: unknown) => GatewayReply;
+  rejects: (error: Error) => GatewayReply;
   startTransitionSpy: Mock<(cb: () => void) => void>;
   pushEvent: (ev: SystemEvent) => void;
   pushBatch: (evs: SystemEvent[]) => void;
