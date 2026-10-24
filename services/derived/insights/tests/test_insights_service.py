@@ -28,6 +28,7 @@ from base.agents.messages.timestamp_policy import TimestampPolicy
 from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
 from base.config import ConfigBoot
 from base.db import Database
+from base.host.env import port_lease
 from base.lm.catalog import ModelCatalog
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
@@ -237,10 +238,12 @@ def test_the_root_builds_one_config_from_the_process_configuration() -> None:
     ) == ("[2026-10-10 21:00:00]")
 
 
+# meiva:note
+# One port this session holds, from the host-wide lease: the number is refused to
+# every other live holder on the host, so two workers — or two runs of one shard on
+# one machine — cannot be given it.
 def _free_port() -> int:
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-        sock.bind(("127.0.0.1", 0))
-        return int(sock.getsockname()[1])
+    return port_lease.lease_ports(1)[0]
 
 
 def _backend_names(db_conn: psycopg.Connection) -> set[str]:

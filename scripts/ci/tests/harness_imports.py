@@ -15,6 +15,7 @@ from base.deploy.tests.containers import postgres, redis_server
 from base.events.live.bus import EventBus
 from base.events.live.redis_listener import RedisInboundListener
 from base.host import proc
+from base.host.env import port_lease
 from base.host.env.port_table import FIXED_PORTS
 from base.host.env.registry import health_port_env_aliases
 from base.host.proc import run_bounded
@@ -51,6 +52,7 @@ __all__ = [
     "health_port_env_aliases",
     "machine_from_boot",
     "modules_by_path",
+    "port_lease",
     "postgres",
     "proc",
     "raise_fd_limit",

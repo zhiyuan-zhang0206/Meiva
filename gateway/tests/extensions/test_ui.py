@@ -30,6 +30,7 @@ from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
 from base.db.code_version_gate import ProcessDbGate
+from base.host.env import port_lease
 from base.lm.catalog import ModelCatalog
 from gateway.tests.auth.gateway_config import gateway_test_client
 from meiva import ui
@@ -156,11 +157,10 @@ class _SilentServer:
         self._socket.close()
 
 
+# meiva:note
+# A loopback port number this session holds and nothing listens on.
 def _free_port() -> int:
-    """A loopback port number with nothing listening on it (bind + release)."""
-    with socket.socket() as probe:
-        probe.bind(("127.0.0.1", 0))
-        return int(probe.getsockname()[1])
+    return port_lease.lease_ports(1)[0]
 
 
 class TestShow:

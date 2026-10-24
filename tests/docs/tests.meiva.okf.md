@@ -65,7 +65,8 @@ Validation ownership across hooks and CI: [[test-ci.meiva.okf.md]].
 
 - **Test strategy**: commit fast + CI full. Locally only run relevant tests, CI is the merge gate
 - **Isolation**: each test gets isolated DB/Redis, avoiding parallel conflicts
-- **Do not** run the full suite locally — Mac mini resources are limited (the `provisioning` and `env_bootstrap` plugins are designed for concurrency isolation: per-session database names + random free ports + Redis channel suffixes, **concurrent sessions will not conflict**, just resource-intensive)
+- **Do not** run the full suite locally — Mac mini resources are limited (the `provisioning` and `env_bootstrap` plugins are designed for concurrency isolation: per-session database names + leased ports + Redis channel suffixes, **concurrent sessions will not conflict**, just resource-intensive)
+- **Ports**: every port a test asks this session for is a lease from `base.host.env.port_lease` — a private band (`21000`-`32767`) above the fixed table and below every platform's ephemeral range, allocated under one host-wide `flock` and held for the holder's life. Two xdist workers, or two runs of one shard on one machine, are never given the same number; `bind(':0')` can never be handed one either. `tests/harness/test_port_lease.py` proves both across processes.
 - `gateway/http/middleware/tests/test_agent_error_wire_equivalence.py` parametrized verification of agent ↔ gateway error wire protocol consistency
 
 ### Browser frame sample scope

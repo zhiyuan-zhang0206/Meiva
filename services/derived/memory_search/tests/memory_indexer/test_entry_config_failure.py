@@ -5,6 +5,7 @@ import pytest
 
 from base.config import ConfigBoot
 from base.db import Database
+from base.host.env import port_lease
 from base.native_process.loaded_commit import LoadedCommit
 from services.derived.memory_indexer import daemon
 from services.derived.memory_indexer.config import MemoryIndexerConfig
@@ -13,10 +14,12 @@ from services.derived.memory_search.tests.memory_indexer.test_reconcile_embed_er
 )
 
 
+# meiva:note
+# One port this session holds, from the host-wide lease: the number is refused to
+# every other live holder on the host, so two workers — or two runs of one shard on
+# one machine — cannot be given it.
 def _free_port() -> int:
-    with socket.socket() as probe:
-        probe.bind(("127.0.0.1", 0))
-        return probe.getsockname()[1]
+    return port_lease.lease_ports(1)[0]
 
 
 @pytest.mark.usefixtures("owned_config_environment")

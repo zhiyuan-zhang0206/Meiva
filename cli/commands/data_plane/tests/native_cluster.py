@@ -13,7 +13,6 @@ from __future__ import annotations
 import contextlib
 import dataclasses
 import json
-import socket
 import subprocess
 from collections.abc import Iterator
 from dataclasses import asdict, dataclass
@@ -27,6 +26,7 @@ from redis.exceptions import RedisError
 
 from base import cluster
 from base.cluster.dataplane.pg_tools import pg_tool
+from base.host.env import port_lease
 from cli.commands.data_plane.config import DataPlaneConfig
 
 __all__ = [
@@ -58,10 +58,15 @@ _IDENTITY = "meiva_tinst"
 NATIVE_TEST_MACOS = False
 
 
+# meiva:note
+# One more port this session holds, from the host-wide lease.
+#
+# It used to probe `:0` and close: the kernel then owed the number to nobody, so a
+# sibling worker — or this very process's own session table, drawn from the same
+# ephemeral pool at import — could hold it when a record was written, and the record
+# validated as `duplicate start port reservation`.
 def free_port() -> int:
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
+    return port_lease.lease_ports(1)[0]
 
 
 # meiva:note

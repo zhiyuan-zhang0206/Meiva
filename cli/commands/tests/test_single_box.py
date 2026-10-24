@@ -18,7 +18,6 @@ import getpass
 import json
 import os
 import shutil
-import socket
 import subprocess
 from collections.abc import Callable, Iterator
 from dataclasses import asdict, dataclass, field, replace
@@ -41,6 +40,7 @@ from base.db.code_version_gate import ProcessDbGate
 from base.db.config import DbConfig
 from base.host.db_authority import delivery, ledger, model
 from base.host.db_authority.api import API_TOKEN_ENV
+from base.host.env import port_lease
 from base.host.env.registry import process_environment
 from base.host.net.url_secret import url_with_userinfo
 from base.native_process.child_env import daemon_process_env
@@ -157,8 +157,10 @@ def _configure(
     home = (tmp_path / "home").resolve()
     home.mkdir(mode=0o700)
     monkeypatch.setenv("MEIVA_HOME", str(home))
-    # Allocate the entire roster while every socket stays held: replacing only
-    # storage slots with independent closed probes can duplicate another slot.
+    # meiva:note
+    # Allocate the entire roster at once. The lease hands out a number it never repeats
+    # while this session lives, so the slots cannot collide with each other, with another
+    # holder on the host, or with a later fixture that asks for one more port.
     ports = dict(
         zip(cluster.FIXED_PORTS, distinct_free_ports(len(cluster.FIXED_PORTS)), strict=True)
     )
@@ -204,7 +206,15 @@ def _configure(
     return Born(home=home, record=record, values=values, plane=plane)
 
 
-def test_configured_roster_survives_kernel_reuse_of_closed_ports(
+# meiva:note
+# Birth records this session's leased roster, not whatever a kernel probe would hand out.
+#
+# This test used to fake `socket.socket` with a kernel that releases a port for reuse:
+# that is how two closed probes could be handed one number and duplicate a slot. A leased
+# number belongs to the session for its whole life (`base/host/env/tests/test_port_lease.py`
+# proves that across processes), so the roster is distinct by construction — and the birth
+# still holds no socket of its own.
+def test_configured_roster_is_this_sessions_leased_table(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     distinct_free_ports: Callable[[int], list[int]],
@@ -212,33 +222,12 @@ def test_configured_roster_survives_kernel_reuse_of_closed_ports(
 ) -> None:
     from cli.start_identity import read_intent
 
-    held: set[int] = set()
-
-    class ReusingSocket:
-        """The kernel may reuse a released port but cannot reuse a held one."""
-
-        def __init__(self, *_args: Any) -> None:
-            self.port: int | None = None
-
-        def bind(self, _address: tuple[str, int]) -> None:
-            self.port = next(port for port in range(35000, 65536) if port not in held)
-            held.add(self.port)
-
-        def getsockname(self) -> tuple[str, int]:
-            assert self.port is not None
-            return "127.0.0.1", self.port
-
-        def close(self) -> None:
-            assert self.port is not None
-            held.remove(self.port)
-
-    monkeypatch.setattr(socket, "socket", ReusingSocket)
     configured = _configure(monkeypatch, tmp_path, distinct_free_ports, data_plane_config)
     intent = read_intent(configured.home)
     assert intent is not None
     assert set(configured.record.ports) == set(cluster.FIXED_PORTS)
     assert len(set(configured.record.ports.values())) == len(cluster.FIXED_PORTS)
-    assert not held
+    assert set(configured.record.ports.values()) <= set(port_lease.leased_ports())
 
 
 def _prepare_schema(

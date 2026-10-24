@@ -9,7 +9,7 @@ import pytest
 from base import cluster
 from base.cluster import ports as cluster_ports
 from base.config import FIELD_INFOS, get_field
-from base.host.env import registry
+from base.host.env import port_lease, registry
 from base.host.env.port_table import FIXED_PORTS
 
 _PRIVATE_TEST_PORTS_START = 21000
@@ -45,6 +45,30 @@ def test_fixed_ports_are_unique() -> None:
 
 def test_fixed_ports_sit_below_every_source_of_test_ports() -> None:
     assert max(FIXED_PORTS.values()) < _PRIVATE_TEST_PORTS_START
+
+
+# meiva:note
+# The lease band is a population of numbers no other owner may claim: the fixed table
+# is below it, and no declared port default may land inside it. A default in the band
+# would turn "a leased number is refused to every other holder" into "the lease fights
+# a service this repository configures".
+def test_no_declared_port_default_lands_in_the_lease_band() -> None:
+    band = range(port_lease.BAND_FIRST, port_lease.BAND_LAST + 1)
+    landed = {
+        name: info.default
+        for name, info in FIELD_INFOS.items()
+        if name.endswith(("_port", "_url", "_uri")) and _declared_port(info.default) in band
+    }
+    assert not landed, f"settings defaults inside the lease band: {landed}"
+
+
+def _declared_port(value: object) -> int | None:
+    if isinstance(value, int) and not isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        match = re.search(r"://[^/\s:@]*:(\d{2,5})", value)
+        return int(match.group(1)) if match else None
+    return None
 
 
 def test_the_recorded_ports_type_names_exactly_the_table() -> None:
