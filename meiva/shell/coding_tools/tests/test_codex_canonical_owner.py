@@ -194,7 +194,9 @@ def test_codex_supervisor_uses_projected_session_environment(
     service.start()
     seed_agent(database, 41, next_index=7)
     shell = ShellSessions(
-        backend=PtySessionBackend(PtyClientConfig(socket_path=service_socket())), database=database, agent_id=41
+        backend=PtySessionBackend(PtyClientConfig(socket_path=service_socket())),
+        database=database,
+        agent_id=41,
     )
     probe = (
         "import json, os; from pathlib import Path; "
