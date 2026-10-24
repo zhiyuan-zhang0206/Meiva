@@ -5,7 +5,7 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
-import httpx2 as httpx
+import httpx
 import psycopg
 import pytest
 from fastapi.testclient import TestClient
