@@ -43,6 +43,7 @@ from services.supervision.meiva_root_glue.diagnostic_probes import (
 from services.supervision.meiva_root_glue.diagnostics import (
     DiagnosticMonitor,
     RootHealthRounds,
+    RoundsInputs,
 )
 from services.supervision.roster import build_services
 
@@ -220,13 +221,13 @@ def build_wiring(context: WiringContext) -> list[WiringParticipant]:
         health_config=HealthConfig(lease_grace_s=settings.daemon.health_restart_lease_grace_s),
         db_recovery_probe=database_recovery_probe(database),
         lease_probe=live_lease_probe(database, machine.name()),
-        rounds_factory=lambda monitor: RootHealthRounds(
-            monitor,
-            DiagnosticMonitor(build_diagnostics(requested, database=database, machine=machine)),
+        rounds=RoundsInputs(
+            diagnostics=DiagnosticMonitor(
+                build_diagnostics(requested, database=database, machine=machine)
+            ),
             clients=clients,
-            machine=machine,
             image=image,
-            tasks=context.participant_tasks,
+            machine=machine,
         ),
         startup_graces=startup_graces,
     )
@@ -238,7 +239,7 @@ def assemble(
     *,
     health_config: HealthConfig | None = None,
     selfcheck_config: SelfCheckConfig | None = None,
-    rounds_factory: Callable[[HealthMonitor], RootHealthRounds] | None = None,
+    rounds: RoundsInputs | None = None,
     startup_graces: Mapping[str, float] | None = None,
     db_recovery_probe: Probe | None = None,
     lease_probe: LeaseProbe | None = None,
@@ -256,11 +257,18 @@ def assemble(
     check = TreeSelfCheck(
         context.supervisor, config=selfcheck_config, tasks=context.participant_tasks
     )
-    if rounds_factory is not None:
-        rounds = rounds_factory(monitor)
-        context.supervisor.attach_health(rounds)
+    if rounds is not None:
+        health_rounds = RootHealthRounds(
+            monitor,
+            rounds.diagnostics,
+            clients=rounds.clients,
+            machine=rounds.machine,
+            image=rounds.image,
+            tasks=context.participant_tasks,
+        )
+        context.supervisor.attach_health(health_rounds)
         context.supervisor.attach_metrics(check)
-        return [rounds, check]
+        return [health_rounds, check]
     context.supervisor.attach_health(monitor)
     context.supervisor.attach_metrics(check)
     return [monitor, check]

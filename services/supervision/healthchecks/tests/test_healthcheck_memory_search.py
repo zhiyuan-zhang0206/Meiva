@@ -1,101 +1,57 @@
-"""`services.supervision.healthchecks.memory_search` unit tests — probe seam + restart shape.
-
-The healthcheck probes with a real POST /search (the store path the
-gateway/indexer dial), not /healthz — a port-open probe stays green while
-the service behind it is unusable. These tests pin that the probe wraps
-the search answer into a DaemonProbe verdict (alive/down) and that the
-restart path reports the probe's verdict rather than the spawn's — the
-healthcheck runs the shared keepalive body (`run_keepalive`), which is
-covered by `services/supervision/healthchecks/tests/test_healthcheck_gateway.py`-style tests of
-`base.service_respawn`.
-"""
-
 from __future__ import annotations
 
-import os
-import time
-from collections.abc import Iterator
-from unittest.mock import Mock, patch
+import json
 
 import pytest
 
 from base.daemon.health import DaemonProbe
 from services.supervision.healthchecks import memory_search as hc
+from services.supervision.healthchecks.tests.http_stub import HttpStub
 
 
-@pytest.fixture
-def owned_config_environment() -> Iterator[None]:
-    """Restore environment delivery and the process timezone after a real ConfigBoot."""
-    try:
-        with patch.dict(os.environ):
-            yield
-    finally:
-        time.tzset()
+def test_probe_up_when_search_answers_with_hits() -> None:
+    result = hc.search_verdict({"hits": []})
 
-
-@pytest.mark.usefixtures("owned_config_environment")
-def test_probe_up_when_search_answers_with_hits(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(hc, "post_search", Mock(return_value={"hits": []}))
-    result = hc.memory_search_probe()
     assert result.alive is True
     assert result.terminal is False
 
 
-@pytest.mark.usefixtures("owned_config_environment")
-def test_probe_down_when_search_fails(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(
-        hc,
-        "post_search",
-        Mock(return_value=DaemonProbe.down("connection refused")),
-    )
-    result = hc.memory_search_probe()
+def test_probe_down_when_search_fails() -> None:
+    result = hc.search_verdict(DaemonProbe.down("connection refused"))
+
     assert result.alive is False
     assert "connection refused" in result.detail
 
 
-@pytest.mark.usefixtures("owned_config_environment")
-def test_probe_down_when_payload_lacks_hits(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_probe_down_when_payload_lacks_hits() -> None:
     """A foreign process answering 200 on the port is not the search service."""
-    monkeypatch.setattr(hc, "post_search", Mock(return_value={"nope": 1}))
-    assert hc.memory_search_probe().alive is False
+    assert hc.search_verdict({"nope": 1}).alive is False
 
 
-def test_search_probe_uses_metadata_without_constructing_provider(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    import httpx
-
+def test_search_probe_sends_a_zero_vector_sized_by_the_provider_descriptor() -> None:
     from services.derived.memory_indexer.embeddings import factory
 
     descriptor = factory.get_descriptor("gemini")
-    constructor = Mock(side_effect=AssertionError("health probes must not construct a provider"))
-    monkeypatch.setattr(factory, "get_provider", constructor)
-    response = Mock()
-    response.json.return_value = {"hits": []}
-    post = Mock(return_value=response)
-    monkeypatch.setattr(httpx, "post", post)
-    assert hc.post_search("http://memory-search", embedding_name_reader=lambda: "gemini") == {
-        "hits": []
-    }
-    assert post.call_args.kwargs["json"] == {"vector": [0.0] * descriptor.dim, "k": 1}
-    response.raise_for_status.assert_called_once_with()
-    constructor.assert_not_called()
+    with HttpStub(body=b'{"hits": []}') as service:
+        assert hc.post_search(service.url, embedding_name="gemini") == {"hits": []}
+
+        ((method, path, body),) = service.requests
+        assert (method, path) == ("POST", "/search")
+        assert json.loads(body) == {"vector": [0.0] * descriptor.dim, "k": 1}
 
 
-def test_unknown_provider_fails_before_search_request(monkeypatch: pytest.MonkeyPatch) -> None:
-    import httpx
+def test_a_failing_search_is_a_not_alive_verdict() -> None:
+    with HttpStub(status=500) as service:
+        answer = hc.post_search(service.url, embedding_name="gemini")
 
-    post = Mock()
-    monkeypatch.setattr(httpx, "post", post)
-    with pytest.raises(ValueError, match="unknown embedding provider"):
-        hc.post_search("http://memory-search", embedding_name_reader=lambda: "unknown-provider")
-    post.assert_not_called()
+    assert isinstance(answer, DaemonProbe)
+    assert answer.alive is False
+    assert "POST /search failed" in answer.detail
 
 
-def test_probe_reads_startup_configuration_without_redelivering_environment(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    before = dict(os.environ)
-    monkeypatch.setattr(hc, "post_search", Mock(return_value={"hits": []}))
-    assert hc.memory_search_probe().alive
-    assert dict(os.environ) == before
+def test_unknown_provider_fails_before_search_request() -> None:
+    with HttpStub() as service:
+        with pytest.raises(ValueError, match="unknown embedding provider"):
+            hc.post_search(service.url, embedding_name="unknown-provider")
+
+        assert service.requests == []

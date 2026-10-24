@@ -11,9 +11,11 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
+import os
 import signal
 import sys
 from collections.abc import Callable, Sequence
+from contextlib import suppress
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -32,7 +34,12 @@ from base.native_process.root_control.ipc import (
     error_response,
     ok_response,
 )
-from services.supervision.meiva_root.helper_chain import HelperChainConfig, HelperChainWatch
+from base.sessions.helper_chain_guard import helper_marker_pid, parent_chain_intact
+from services.supervision.meiva_root.helper_chain_plan import (
+    HelperChainConfig,
+    evidence_line,
+    observe_round,
+)
 from services.supervision.meiva_root.manifest import ManifestError, load_manifests
 from services.supervision.meiva_root.server import ControlServer
 from services.supervision.meiva_root.supervisor import Supervisor
@@ -46,6 +53,47 @@ from services.supervision.meiva_root.wiring import (
 )
 
 _log = logging.getLogger("meiva_root")
+
+
+# meiva:note
+# The root's helper-chain watch: every `interval_s` it reads whether this process is still
+# anchored to the process that spawned it (`base.sessions.helper_chain_guard`) and, once enough
+# consecutive readings are broken, retires the root. The decisions are
+# `helper_chain_plan`.
+# meiva:link services/supervision/meiva_root/docs/ancestry.meiva.okf.md
+class HelperChainWatch:
+    def __init__(
+        self,
+        *,
+        retire: Callable[[str], None],
+        stop: asyncio.Event,
+        config: HelperChainConfig,
+    ) -> None:
+        self._retire = retire
+        self._stop = stop
+        self._config = config
+
+    async def run(self) -> None:
+        broken_rounds = 0
+        while not self._stop.is_set():
+            reading = observe_round(
+                broken_rounds=broken_rounds,
+                intact=parent_chain_intact(),
+                confirm_rounds=self._config.confirm_rounds,
+            )
+            broken_rounds = reading.broken_rounds
+            if reading.retire:
+                self._retire(
+                    evidence_line(
+                        root_pid=os.getpid(),
+                        marker=helper_marker_pid(),
+                        broken_rounds=broken_rounds,
+                    )
+                )
+                return
+            with suppress(TimeoutError):
+                await asyncio.wait_for(self._stop.wait(), timeout=self._config.interval_s)
+
 
 _SOCKET_NAME = "meiva-root.sock"
 

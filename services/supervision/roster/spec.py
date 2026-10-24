@@ -32,7 +32,7 @@ callers import them from there.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from typing import assert_never
 
 from base.cluster.dataplane.redis_bridge import RedisBridgeUnconfiguredError, redis_bridge_endpoint
 from base.cluster.machine import MachineIdentity, MachineRoles
@@ -51,33 +51,108 @@ from base.telemetry.observability import (
     gateway_observability_home,
 )
 from services.supervision.roster import build_services
+from services.supervision.roster.gate_plan import (
+    BridgeFact,
+    BrowserFact,
+    CollectorFact,
+    ComputerFact,
+    FlagFact,
+    GateFact,
+    GateKind,
+    StationFact,
+    gate_kind,
+)
+from services.supervision.roster.gate_plan import gate_reason as gate_reason_of
 from services.supervision.roster.plugin_services import PluginServiceError
 from services.supervision.roster.service_spec import (
     ServiceSpec as ServiceSpec,  # re-export: generated plugin fixtures
 )
 
 
-def _computer_mcp_gate_reason(*, host: Host) -> str | None:
-    """Why the computer-mcp service is gated out, or None when it should run.
+# meiva:note
+# The one fact the gate of a core session reads, collected from the world: the settings
+# flag, the platform probe or the marker file the session's kind names. `gate_plan` judges it.
+def _gate_fact(
+    kind: GateKind, session: str, *, machine: MachineIdentity, host: Host
+) -> GateFact | None:
+    match kind:
+        case "flag":
+            return FlagFact(enabled=_flag_enabled(session))
+        case "browser":
+            enabled = settings.services.browser_enabled
+            return BrowserFact(
+                enabled=enabled,
+                incapability=(
+                    browser_incapability(settings.services.chrome_binary, host=host)
+                    if enabled
+                    else None
+                ),
+            )
+        case "computer-mcp":
+            helper_enabled = settings.services.permissions_helper_enabled
+            return ComputerFact(
+                helper_enabled=helper_enabled,
+                incapability=(
+                    permissions_helper_incapability(host=host) if helper_enabled else None
+                ),
+            )
+        case "station":
+            from base.cluster.machine import MachineRoleMissing
+            from services.supervision.healthchecks.lgtm import is_lgtm_host
 
-    Platform gate only: the daemon needs the permissions helper (the single
-    TCC grant-holder it executes through). There is no governance gate —
-    per-agent permission division is a prompt-level peer convention, not
-    code-enforced (user ruling 2026-08-10).
-    """
-    if not settings.services.permissions_helper_enabled:
-        return "disabled (MEIVA_PERMISSIONS_HELPER_ENABLED off)"
-    if permissions_helper_incapability(host=host) is not None:
-        return permissions_helper_incapability(host=host)
-    return None
+            try:
+                roles = machine.role()
+            except MachineRoleMissing:
+                roles = None
+            return StationFact(is_station=is_lgtm_host(meiva_home(), roles=roles))
+        case "collector":
+            return CollectorFact(allowed=_collector_allowed(machine))
+        case "bridge":
+            return _bridge_fact(machine)
+        case "none":
+            return None
+        case _:
+            assert_never(kind)
 
 
-def _redis_bridge_gate_reason(*, machine: MachineIdentity) -> str | None:
-    """Why redis-bridge is gated out, or None when this host needs the relay.
+# meiva:note
+# The settings flag of a session whose only gate is one flag.
+def _flag_enabled(session: str) -> bool:
+    match session:
+        case "heartbeat":
+            return settings.daemon.heartbeat_enabled
+        case "delivery-watchdog":
+            return settings.daemon.delivery_watchdog_enabled
+        case "im-bridge":
+            return settings.services.im_bridge_enabled
+        case _:
+            raise ValueError(f"session {session!r} has no settings-flag gate")
 
-    The relay exists only on a macOS gateway with a local data plane and a declared
-    non-loopback address; the same answer drives `meiva status` and the cluster health probe.
-    """
+
+# meiva:note
+# This is the roster sibling of `ensure_otel_collector_step` in
+# `cli/commands/observability/otel_collector.py` and `_collector_serves_this_home` in
+# `services/supervision/healthchecks/otel_collector.py`. All three share
+# `collector_allowed_for_home` (marker OR station capability OR explicit
+# `MEIVA_TELEMETRY_OTLP_ENDPOINT` override) so the roster, `meiva start`, `meiva status`, the
+# root, rollout readiness and the cluster health probe agree about which gateway owns the
+# collector. Pure agent-runners retain their relay collector.
+def _collector_allowed(machine: MachineIdentity) -> bool:
+    home = meiva_home()
+    return collector_allowed_for_home(
+        gateway_observability_home(machine, home=home),
+        machine=machine,
+        unit_home=home,
+        endpoint_explicit=endpoint_override_is_explicit(
+            "MEIVA_TELEMETRY_OTLP_ENDPOINT", process_environment()
+        ),
+    )
+
+
+# meiva:note
+# The relay exists only on a macOS gateway with a local data plane and a declared non-loopback
+# address; the same answer drives `meiva status` and the cluster health probe.
+def _bridge_fact(machine: MachineIdentity) -> BridgeFact:
     try:
         endpoint = redis_bridge_endpoint(
             meiva_home(),
@@ -85,108 +160,8 @@ def _redis_bridge_gate_reason(*, machine: MachineIdentity) -> str | None:
             remote_data_plane=lambda: settings.data_plane.is_remote,
         )
     except RedisBridgeUnconfiguredError as exc:
-        return str(exc)
-    return None if endpoint is not None else "no off-box Redis ingress on this host"
-
-
-def _otel_collector_gate_reason(*, machine: MachineIdentity) -> str | None:
-    """Why otel-collector is gated out, or None when it should run.
-
-    This is the roster sibling of ``ensure_otel_collector_step`` in
-    ``cli/commands/observability/otel_collector.py`` and ``_collector_serves_this_home`` in
-    ``services/supervision/healthchecks/otel_collector.py``. All three share
-    ``collector_allowed_for_home`` (marker OR station capability OR explicit
-    ``MEIVA_TELEMETRY_OTLP_ENDPOINT`` override) so the roster, ``meiva start``,
-    ``meiva status``, the root, rollout readiness, and cluster health probe agree
-    about which gateway owns the collector. Pure agent-runners retain their
-    relay collector.
-    """
-    home = meiva_home()
-    if not collector_allowed_for_home(
-        gateway_observability_home(machine, home=home),
-        machine=machine,
-        unit_home=home,
-        endpoint_explicit=endpoint_override_is_explicit(
-            "MEIVA_TELEMETRY_OTLP_ENDPOINT", process_environment()
-        ),
-    ):
-        return (
-            "this gateway home is not the observability station (lgtm-host "
-            "marker absent, no observability-station capability); telemetry "
-            "export is unavailable; set MEIVA_TELEMETRY_OTLP_ENDPOINT to use an "
-            "explicit collector"
-        )
-    return None
-
-
-# Uniform "session X is gated out when its single settings flag is off" rows —
-# each entry's predicate is checked in one small loop by `_flag_gate_reason`
-# instead of a repeated `if session == NAME and not settings...: return ...`
-# chain, which is what previously drove `gate_reason`'s complexity above the
-# hard ceiling. Every row here has exactly this shape; a session whose gate
-# needs more than one flag or a non-boolean comparison (browser, mcp-daemon,
-# computer-mcp, the lgtm trio, otel-collector) stays a dedicated branch
-# in `_core_gate_reason` below.
-_FLAG_GATES: tuple[tuple[str, Callable[[], bool], str], ...] = (
-    (
-        "heartbeat",
-        lambda: settings.daemon.heartbeat_enabled,
-        "disabled (MEIVA_HEARTBEAT_ENABLED off)",
-    ),
-    (
-        "delivery-watchdog",
-        lambda: settings.daemon.delivery_watchdog_enabled,
-        "disabled (MEIVA_DELIVERY_WATCHDOG_ENABLED off)",
-    ),
-    (
-        "im-bridge",
-        lambda: settings.services.im_bridge_enabled,
-        "disabled (MEIVA_IM_BRIDGE_ENABLED off)",
-    ),
-)
-
-
-def _flag_gate_reason(session: str) -> str | None:
-    """The reason for a session in `_FLAG_GATES`, or None (enabled / not one of these)."""
-    for name, enabled, reason in _FLAG_GATES:
-        if session == name and not enabled():
-            return reason
-    return None
-
-
-def _browser_family_gate_reason(*, host: Host) -> str | None:
-    if not settings.services.browser_enabled:
-        return "disabled (MEIVA_BROWSER_ENABLED off)"
-    return browser_incapability(
-        settings.services.chrome_binary, host=host
-    )  # display / Chrome / npx, or None when capable
-
-
-def _core_gate_reason(session: str, *, machine: MachineIdentity, host: Host) -> str | None:
-    """The session-name-keyed half of `gate_reason` — every core service
-    without its own plugin-registered ``gate``."""
-    if session in ("browser", "browser-mcp"):
-        return _browser_family_gate_reason(host=host)
-    if session == "computer-mcp":
-        return _computer_mcp_gate_reason(host=host)
-    if session in {"loki", "prometheus", "grafana"}:
-        from base.cluster.machine import MachineRoleMissing
-        from services.supervision.healthchecks.lgtm import is_lgtm_host
-
-        try:
-            roles = machine.role()
-        except MachineRoleMissing:
-            roles = None
-        return (
-            None
-            if is_lgtm_host(meiva_home(), roles=roles)
-            else "this home is not an observability station"
-        )
-    if session == "otel-collector":
-        return _otel_collector_gate_reason(machine=machine)
-    if session == "redis-bridge":
-        return _redis_bridge_gate_reason(machine=machine)
-    return _flag_gate_reason(session)
+        return BridgeFact(unconfigured=str(exc), has_endpoint=False)
+    return BridgeFact(unconfigured=None, has_endpoint=endpoint is not None)
 
 
 def _plugin_gate_reason(spec: ServiceSpec) -> str | None:
@@ -217,7 +192,8 @@ def gate_reason(spec: ServiceSpec, *, machine: MachineIdentity, host: Host) -> s
                 "gate for {} failed; roster evaluation aborted", spec.session
             )
             raise
-    return _core_gate_reason(spec.session, machine=machine, host=host)
+    kind = gate_kind(spec.session)
+    return gate_reason_of(spec.session, _gate_fact(kind, spec.session, machine=machine, host=host))
 
 
 def services_for_capabilities_annotated(

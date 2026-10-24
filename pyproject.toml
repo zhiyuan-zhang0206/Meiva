@@ -1656,6 +1656,11 @@ reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 
 [[tool.pyright.executionEnvironments]]
+root = "services/supervision/healthchecks/plans/tests"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
 root = "services/supervision/healthchecks/tests"
 reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
