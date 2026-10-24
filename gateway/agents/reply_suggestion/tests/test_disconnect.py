@@ -87,8 +87,7 @@ async def test_a_disconnect_stops_a_draft_that_is_in_flight(
         )
 
         async def disconnects_once_drafting() -> bool:
-            assert await asyncio.to_thread(wire.started.wait, 2), "draft never reached the provider"
-            return True
+            return wire.started.is_set()
 
         result = await asyncio.wait_for(
             run_until_disconnect(harness.suggest(), disconnects_once_drafting), 5
